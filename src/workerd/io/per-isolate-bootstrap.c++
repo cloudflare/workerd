@@ -144,91 +144,93 @@ kj::StringPtr normalizeSpecifier(kj::StringPtr specifier) {
 
 // The V8 callback backing the require() function injected into bootstrap scripts.
 void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  auto& js = jsg::Lock::from(info.GetIsolate());
-  auto& state = getBootstrapState(js);
+  jsg::liftKj(info.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(info.GetIsolate());
+    auto& state = getBootstrapState(js);
 
-  js.withinHandleScope([&] {
-    KJ_REQUIRE(info.Length() >= 1 && info[0]->IsString(), "require() expects a string argument");
+    js.withinHandleScope([&] {
+      KJ_REQUIRE(info.Length() >= 1 && info[0]->IsString(), "require() expects a string argument");
 
-    auto specifierUtf8 = jsg::JsValue(info[0]).toString(js);
-    auto normalized = normalizeSpecifier(specifierUtf8);
+      auto specifierUtf8 = jsg::JsValue(info[0]).toString(js);
+      auto normalized = normalizeSpecifier(specifierUtf8);
 
-    // Check cache.
-    KJ_IF_SOME(cached, state.cache.find(normalized)) {
-      info.GetReturnValue().Set(v8::Local<v8::Value>(cached.getHandle(js)));
-      return;
-    }
-
-    // Cycle detection.
-    KJ_REQUIRE(!state.loading.contains(normalized), "circular dependency in per-isolate bootstrap",
-        normalized);
-
-    // Look up script in bundle.
-    auto& script = KJ_REQUIRE_NONNULL(
-        state.scripts.find(normalized), "per-isolate bootstrap: unknown script", normalized);
-
-    // Mark as loading.
-    state.loading.insert(kj::str(normalized));
-    KJ_DEFER(state.loading.eraseMatch(normalized));
-
-    // Create the module and exports objects for this script.
-    auto moduleObj = js.obj();
-    auto exportsObj = js.obj();
-    moduleObj.set(js, "exports"_kj, exportsObj);
-
-    // Build the context extension object containing all pseudo-globals:
-    //   require, compatFlags, primordials, module, exports
-    auto extObj =
-        createContextExtension(js, state, moduleObj, exportsObj, normalized != "primordials");
-
-    // Compile the script as a function with the context extension.
-    // CompileFunction with context_extensions makes the extension object's
-    // properties available as variables in the function scope without
-    // putting them on globalThis.
-    auto source = script.getSrc();
-    // Use strExtern to avoid copying — the source data lives in the static
-    // capnp bundle for the lifetime of the process.
-    auto sourceStr = js.strExtern(source.asChars());
-    v8::ScriptOrigin origin(js.strIntern(normalized));
-
-    // Use the compile cache from the bundle if available and compatible.
-    v8::ScriptCompiler::CachedData* cachedData = nullptr;
-    auto options = v8::ScriptCompiler::kNoCompileOptions;
-    auto compileCache = script.getCompileCache();
-    if (compileCache.size() > 0 && compileCache.begin() != nullptr) {
-      // V8 takes ownership of the CachedData instance but not the underlying
-      // buffer (which lives in the static capnp bundle data).
-      cachedData = new v8::ScriptCompiler::CachedData(compileCache.begin(), compileCache.size(),
-          v8::ScriptCompiler::CachedData::BufferNotOwned);
-      if (cachedData->CompatibilityCheck(js.v8Isolate) !=
-          v8::ScriptCompiler::CachedData::kSuccess) {
-        delete cachedData;
-        cachedData = nullptr;
+      // Check cache.
+      KJ_IF_SOME(cached, state.cache.find(normalized)) {
+        info.GetReturnValue().Set(v8::Local<v8::Value>(cached.getHandle(js)));
+        return;
       }
-    }
 
-    // Source takes ownership of cachedData. Do not use cachedData after this.
-    v8::ScriptCompiler::Source compilerSource(sourceStr, origin, cachedData);
+      // Cycle detection.
+      KJ_REQUIRE(!state.loading.contains(normalized),
+          "circular dependency in per-isolate bootstrap", normalized);
 
-    auto maybeCached = compilerSource.GetCachedData();
-    if (maybeCached != nullptr && !maybeCached->rejected) {
-      options = v8::ScriptCompiler::kConsumeCodeCache;
-    }
+      // Look up script in bundle.
+      auto& script = KJ_REQUIRE_NONNULL(
+          state.scripts.find(normalized), "per-isolate bootstrap: unknown script", normalized);
 
-    v8::Local<v8::Object> ext = extObj;
-    auto fn = jsg::JsFunction(jsg::check(v8::ScriptCompiler::CompileFunction(
-        js.v8Context(), &compilerSource, 0, nullptr, 1, &ext, options)));
+      // Mark as loading.
+      state.loading.insert(kj::str(normalized));
+      KJ_DEFER(state.loading.eraseMatch(normalized));
 
-    // Execute the script.
-    fn.call(js, js.undefined());
+      // Create the module and exports objects for this script.
+      auto moduleObj = js.obj();
+      auto exportsObj = js.obj();
+      moduleObj.set(js, "exports"_kj, exportsObj);
 
-    // Read back module.exports (script may have reassigned it).
-    auto result = moduleObj.get(js, "exports"_kj);
+      // Build the context extension object containing all pseudo-globals:
+      //   require, compatFlags, primordials, module, exports
+      auto extObj =
+          createContextExtension(js, state, moduleObj, exportsObj, normalized != "primordials");
 
-    // Cache the result.
-    state.cache.insert(kj::str(normalized), result.addRef(js));
+      // Compile the script as a function with the context extension.
+      // CompileFunction with context_extensions makes the extension object's
+      // properties available as variables in the function scope without
+      // putting them on globalThis.
+      auto source = script.getSrc();
+      // Use strExtern to avoid copying — the source data lives in the static
+      // capnp bundle for the lifetime of the process.
+      auto sourceStr = js.strExtern(source.asChars());
+      v8::ScriptOrigin origin(js.strIntern(normalized));
 
-    info.GetReturnValue().Set(v8::Local<v8::Value>(result));
+      // Use the compile cache from the bundle if available and compatible.
+      v8::ScriptCompiler::CachedData* cachedData = nullptr;
+      auto options = v8::ScriptCompiler::kNoCompileOptions;
+      auto compileCache = script.getCompileCache();
+      if (compileCache.size() > 0 && compileCache.begin() != nullptr) {
+        // V8 takes ownership of the CachedData instance but not the underlying
+        // buffer (which lives in the static capnp bundle data).
+        cachedData = new v8::ScriptCompiler::CachedData(compileCache.begin(), compileCache.size(),
+            v8::ScriptCompiler::CachedData::BufferNotOwned);
+        if (cachedData->CompatibilityCheck(js.v8Isolate) !=
+            v8::ScriptCompiler::CachedData::kSuccess) {
+          delete cachedData;
+          cachedData = nullptr;
+        }
+      }
+
+      // Source takes ownership of cachedData. Do not use cachedData after this.
+      v8::ScriptCompiler::Source compilerSource(sourceStr, origin, cachedData);
+
+      auto maybeCached = compilerSource.GetCachedData();
+      if (maybeCached != nullptr && !maybeCached->rejected) {
+        options = v8::ScriptCompiler::kConsumeCodeCache;
+      }
+
+      v8::Local<v8::Object> ext = extObj;
+      auto fn = jsg::JsFunction(jsg::check(v8::ScriptCompiler::CompileFunction(
+          js.v8Context(), &compilerSource, 0, nullptr, 1, &ext, options)));
+
+      // Execute the script.
+      fn.call(js, js.undefined());
+
+      // Read back module.exports (script may have reassigned it).
+      auto result = moduleObj.get(js, "exports"_kj);
+
+      // Cache the result.
+      state.cache.insert(kj::str(normalized), result.addRef(js));
+
+      info.GetReturnValue().Set(v8::Local<v8::Value>(result));
+    });
   });
 }
 
