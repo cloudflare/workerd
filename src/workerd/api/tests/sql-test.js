@@ -1728,6 +1728,16 @@ export class DurableObjectExample extends DurableObject {
       message: /built-in/,
     });
 
+    // Reject names whose C-string representation would differ from the validated name.
+    assert.throws(() => sql.function('abs\0suffix', () => 1), {
+      message: /cannot contain null bytes/,
+    });
+
+    // SQLite limits function names to 255 UTF-8 bytes.
+    assert.throws(() => sql.function('x'.repeat(256), () => 1), {
+      message: /at most 255 UTF-8 bytes/,
+    });
+
     // Reserved names are rejected.
     assert.throws(() => sql.function('_cf_evil', () => 1), {
       message: /not authorized/,

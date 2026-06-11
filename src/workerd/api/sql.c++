@@ -188,9 +188,8 @@ SqliteDatabase::Value SqlStorage::unwrapFunctionResult(jsg::Lock& js, const jsg:
     return kj::Array<const byte>(jsg::asBytes(handle.As<v8::ArrayBufferView>()));
   } else if (handle->IsPromise()) {
     JSG_FAIL_REQUIRE(TypeError,
-        "SQL functions must be synchronous: the function returned a Promise. Functions cannot "
-        "perform any asynchronous work, including I/O, while the SQL query that invoked them is "
-        "executing.");
+        "SQL functions must return synchronously: the function returned a Promise. A function may "
+        "schedule asynchronous work, but cannot return or await its result.");
   } else {
     JSG_FAIL_REQUIRE(TypeError,
         "SQL functions must return a number, BigInt, string, ArrayBuffer (or view), null, or "

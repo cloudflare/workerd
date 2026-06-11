@@ -65,15 +65,17 @@ class SqlStorage final: public jsg::Object {
   // callback, which queries on this database may then invoke by name. Exposed to JavaScript as
   // `function(name[, options], callback)`.
   //
-  // Registrations only last for the lifetime of the SQLite connection (in particular, they do
-  // NOT persist in the database), so applications are expected to register their functions in
-  // the Durable Object's constructor. Registering a name twice, or registering a name that
-  // matches a built-in SQL function, throws.
+  // Registrations last for the lifetime of the Durable Object's in-memory database wrapper. They
+  // are not persisted in the database, but survive deleteAll(), which replaces the underlying
+  // SQLite connection. Applications should register their functions in the Durable Object's
+  // constructor. Registering a name twice, or registering a name that matches a built-in SQL
+  // function, throws.
   //
-  // The callback must be synchronous, must not access storage (including executing further SQL
-  // queries), and may be invoked from trigger bodies, views, and CHECK constraints -- but never
-  // from index expressions or generated columns, since those persist computed values whose
-  // meaning would change if the function's behavior ever changed.
+  // The callback must return synchronously and must not synchronously re-enter storage (including
+  // executing further SQL queries). It may schedule asynchronous work, but cannot return or await
+  // its result. The callback may be invoked from trigger bodies, views, and CHECK constraints --
+  // but never from index expressions or generated columns, since those persist computed values
+  // whose meaning would change if the function's behavior ever changed.
   void registerFunction(jsg::Lock& js,
       kj::String name,
       kj::OneOf<FunctionCallback, FunctionOptions> optionsOrCallback,
@@ -105,9 +107,9 @@ class SqlStorage final: public jsg::Object {
 
     JSG_STRUCT_TS_OVERRIDE({
       start?: any;
-      step: (accumulator: any, ...args: SqlStorageValue[]) => any;
-      result?: (accumulator: any) => SqlStorageValue | ArrayBufferView | undefined;
-      inverse?: (accumulator: any, ...args: SqlStorageValue[]) => any;
+      step: (accumulator: any, ...args: (ArrayBuffer | string | number | bigint | null)[]) => any;
+      result?: (accumulator: any) => ArrayBuffer | ArrayBufferView | string | number | bigint | null | undefined;
+      inverse?: (accumulator: any, ...args: (ArrayBuffer | string | number | bigint | null)[]) => any;
       useBigIntArguments?: boolean;
       varargs?: boolean;
     });

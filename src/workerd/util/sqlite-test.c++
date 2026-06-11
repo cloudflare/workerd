@@ -635,6 +635,22 @@ KJ_TEST("SQLite application-defined functions") {
     return nullptr;
   }));
 
+  // Names are passed to SQLite as C strings, so reject embedded null bytes before validation.
+  // Otherwise "abs\0suffix" would pass the built-in-name check but register as "abs".
+  KJ_EXPECT_THROW_MESSAGE("cannot contain null bytes",
+      db.registerFunction(USER, kj::StringPtr("abs\0suffix", 10), kj::none,
+          [](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    return nullptr;
+  }));
+
+  auto tooLongName = kj::heapString(256);
+  memset(tooLongName.begin(), 'x', tooLongName.size());
+  KJ_EXPECT_THROW_MESSAGE("at most 255 UTF-8 bytes",
+      db.registerFunction(USER, tooLongName, kj::none,
+          [](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    return nullptr;
+  }));
+
   // The regulator's name restrictions apply to function names.
   KJ_EXPECT_THROW_MESSAGE("not authorized to register SQL function",
       db.registerFunction(USER, "_cf_evil", kj::none,

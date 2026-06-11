@@ -1504,6 +1504,11 @@ void SqliteDatabase::registerFunctionImpl(StaticRegulator regulator,
   sqlite3* db = *this;
 
   SQLITE_REQUIRE(name.size() > 0, kj::none, "SQL function name cannot be empty.");
+  SQLITE_REQUIRE(
+      name.findFirst('\0') == kj::none, kj::none, "SQL function names cannot contain null bytes.");
+  SQLITE_REQUIRE(name.size() <= 255, kj::none,
+      kj::str("SQL function names can be at most 255 UTF-8 bytes, but this name is ", name.size(),
+          " bytes."));
   KJ_IF_SOME(count, argCount) {
     // SQLite itself refuses (as misuse) registrations beyond SQLITE_MAX_FUNCTION_ARG; report
     // a friendly error instead.

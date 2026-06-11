@@ -3896,9 +3896,24 @@ interface SqlStorageFunctionOptions {
 }
 interface SqlStorageAggregateOptions {
   start?: any;
-  step: (accumulator: any, ...args: SqlStorageValue[]) => any;
-  result?: (accumulator: any) => SqlStorageValue | ArrayBufferView | undefined;
-  inverse?: (accumulator: any, ...args: SqlStorageValue[]) => any;
+  step: (
+    accumulator: any,
+    ...args: (ArrayBuffer | string | number | bigint | null)[]
+  ) => any;
+  result?: (
+    accumulator: any,
+  ) =>
+    | ArrayBuffer
+    | ArrayBufferView
+    | string
+    | number
+    | bigint
+    | null
+    | undefined;
+  inverse?: (
+    accumulator: any,
+    ...args: (ArrayBuffer | string | number | bigint | null)[]
+  ) => any;
   useBigIntArguments?: boolean;
   varargs?: boolean;
 }
