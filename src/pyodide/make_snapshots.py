@@ -73,11 +73,8 @@ def make_config(
     return TEMPLATE.format(compat_flags=compat_flags)
 
 
-def make_worker(imports: list[str]) -> str:
-    contents = ""
-    for i in imports:
-        contents += f"import {i}\n"
-    contents += dedent("""\
+def make_worker() -> str:
+    contents = dedent("""\
     from workers import WorkerEntrypoint
     class Default(WorkerEntrypoint):
         def test(self):
@@ -91,16 +88,12 @@ def make_snapshot(
     outdir: Path,
     outprefix: str,
     compat_flags: list[str],
-    imports: list[str],
 ) -> str:
     config_path = d / "config.capnp"
     config_path.write_text(make_config(compat_flags))
     worker_path = d / "worker.py"
-    worker_path.write_text(make_worker(imports))
-    if imports:
-        snapshot_flag = "--python-save-snapshot"
-    else:
-        snapshot_flag = "--python-save-baseline-snapshot"
+    worker_path.write_text(make_worker())
+    snapshot_flag = "--python-save-baseline-snapshot"
 
     if "WORKERD_BINARY" in environ:
         workerd = [environ["WORKERD_BINARY"]]
@@ -137,7 +130,7 @@ def make_snapshot(
 def make_baseline_snapshot(
     cache: Path, outdir: Path, compat_flags: list[str]
 ) -> list[tuple[str, str]]:
-    name, digest = make_snapshot(cache, outdir, "baseline", compat_flags, [])
+    name, digest = make_snapshot(cache, outdir, "baseline", compat_flags)
     return [
         ("baseline_snapshot", name),
         ("baseline_snapshot_hash", digest),
@@ -201,10 +194,7 @@ def upload_snapshots(outdir: Path):
     )
 
     for file in outdir.glob("*.bin"):
-        if file.name.startswith("baseline-"):
-            key = "baseline-snapshot/" + hexdigest(file)
-        else:
-            key = "test-snapshot/" + file.name
+        key = "baseline-snapshot/" + hexdigest(file)
         s3.upload_file(str(file), "pyodide-capnp-bin", key)
 
 
