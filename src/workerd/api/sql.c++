@@ -227,23 +227,6 @@ T SqlStorage::runFunctionCallback(jsg::Lock& js, Body&& body) {
   }
 }
 
-namespace {
-
-// Returns the declared parameter count (the `length` property) of the JavaScript function
-// underlying `callback`, used as the SQL function's required argument count when the `varargs`
-// option is false.
-uint getFunctionLength(jsg::Lock& js, SqlStorage::FunctionCallback& callback) {
-  auto handle = KJ_ASSERT_NONNULL(callback.tryGetHandle(js.v8Isolate));
-  auto lengthValue = jsg::check(handle->Get(js.v8Context(), js.strIntern("length"_kj)));
-  double length = jsg::check(lengthValue->NumberValue(js.v8Context()));
-  if (!(length > 0)) return 0;  // negative or NaN
-  // Out-of-range counts are rejected with a friendly error by the SQLite layer; just avoid
-  // overflowing the conversion here.
-  return static_cast<uint>(kj::min(length, 1000.0));
-}
-
-}  // namespace
-
 void SqlStorage::registerFunction(jsg::Lock& js,
     kj::String name,
     kj::OneOf<FunctionCallback, FunctionOptions> optionsOrCallback,
@@ -266,13 +249,11 @@ void SqlStorage::registerFunction(jsg::Lock& js,
   auto callback = KJ_ASSERT_NONNULL(kj::mv(callbackFromArgs));
 
   bool useBigIntArguments = options.useBigIntArguments.orDefault(false);
-  kj::Maybe<uint> argCount;
-  if (!options.varargs.orDefault(false)) {
-    argCount = getFunctionLength(js, callback);
-  }
 
   auto& db = getDb(js);
-  db.registerFunction(regulator, name, argCount,
+  // Argument counts intentionally follow plain JavaScript semantics (see sql.h), so the
+  // function is registered as accepting any number of arguments.
+  db.registerFunction(regulator, name, kj::none,
       [callback = kj::mv(callback), useBigIntArguments, isolate = js.v8Isolate](
           kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) mutable -> SqliteDatabase::Value {
     // We can only get here while a query is executing, and queries on this database are only
@@ -337,13 +318,6 @@ void SqlStorage::registerAggregate(jsg::Lock& js, kj::String name, AggregateOpti
 
   bool isWindow = options.inverse != kj::none;
   bool useBigIntArguments = options.useBigIntArguments.orDefault(false);
-
-  kj::Maybe<uint> argCount;
-  if (!options.varargs.orDefault(false)) {
-    // The step callback's first parameter is the accumulator, not a SQL argument.
-    uint stepLength = getFunctionLength(js, options.step);
-    argCount = stepLength > 0 ? stepLength - 1 : 0;
-  }
 
   // The step and result wrappers (and, for window functions, the value wrapper) each need
   // their own reference to the `start` option, and the value wrapper shares the result
@@ -462,7 +436,8 @@ void SqlStorage::registerAggregate(jsg::Lock& js, kj::String name, AggregateOpti
     });
   }
 
-  db.registerAggregateFunction(regulator, name, argCount, kj::mv(callbacks));
+  // As with scalar functions, argument counts follow plain JavaScript semantics.
+  db.registerAggregateFunction(regulator, name, kj::none, kj::mv(callbacks));
 }
 
 SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) {

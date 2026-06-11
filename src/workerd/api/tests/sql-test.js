@@ -1487,18 +1487,22 @@ export class DurableObjectExample extends DurableObject {
     // Function names are case-insensitive, both at registration and invocation.
     assert.equal([...sql.exec('SELECT DOUBLE_IT(21) AS v')][0].v, 42);
 
-    // By default, the callback's declared parameter count is enforced by SQLite at parse time.
-    assert.throws(() => sql.exec('SELECT double_it(1, 2)'), {
-      message: /wrong number of arguments to function double_it/,
-    });
-    assert.throws(() => sql.exec('SELECT double_it()'), {
-      message: /wrong number of arguments to function double_it/,
-    });
+    // Argument counts follow plain JavaScript semantics: extra arguments are ignored, missing
+    // parameters are undefined, and default parameters work -- exactly as if the function were
+    // called directly from JS. (There is no fn.length-based arity enforcement.)
+    assert.equal([...sql.exec('SELECT double_it(21, 99) AS v')][0].v, 42);
+    assert.equal(
+      [...sql.exec('SELECT typeof(double_it()) AS t')][0].t,
+      'null' // x is undefined => NaN => SQL NULL
+    );
+    sql.function('add_or_ten', (a, b = 10) => a + b);
+    assert.equal([...sql.exec('SELECT add_or_ten(1, 2) AS v')][0].v, 3);
+    assert.equal([...sql.exec('SELECT add_or_ten(1) AS v')][0].v, 11);
 
-    // With the varargs option, a function accepts any number of arguments. Argument types
-    // mirror cursor value conventions: integers and floats arrive as numbers, text as strings,
-    // blobs as ArrayBuffers, and NULL as null.
-    sql.function('describe_args', { varargs: true }, (...args) => {
+    // Functions accept any number of arguments via rest parameters. Argument types mirror
+    // cursor value conventions: integers and floats arrive as numbers, text as strings, blobs
+    // as ArrayBuffers, and NULL as null.
+    sql.function('describe_args', (...args) => {
       return args
         .map((arg) => {
           if (arg === null) return 'null';
@@ -1711,9 +1715,12 @@ export class DurableObjectExample extends DurableObject {
     assert.equal([...sql.exec('SELECT double_it(2) AS v')][0].v, 4);
 
     // Calling function() with bad argument shapes throws.
-    assert.throws(() => sql.function('no_callback', { varargs: true }), {
-      message: /requires a callback/,
-    });
+    assert.throws(
+      () => sql.function('no_callback', { useBigIntArguments: true }),
+      {
+        message: /requires a callback/,
+      }
+    );
 
     // Registering the same name twice throws (case-insensitively).
     sql.function('dupe', () => 1);
@@ -1796,10 +1803,12 @@ export class DurableObjectExample extends DurableObject {
       20
     );
 
-    // Aggregate arity comes from step's declared parameters, minus the accumulator.
-    assert.throws(() => sql.exec('SELECT sum_doubled(n, n) FROM udf_nums'), {
-      message: /wrong number of arguments to function sum_doubled/,
-    });
+    // Like scalar functions, aggregates accept any argument count; step just sees the extras
+    // (or undefined for missing ones), per ordinary JavaScript semantics.
+    assert.equal(
+      [...sql.exec('SELECT sum_doubled(n, n) AS v FROM udf_nums')][0].v,
+      20 // step's (acc, n) ignores the extra argument
+    );
 
     // A function-valued `start` produces a fresh accumulator per aggregation group, so the
     // accumulator may be mutated in place. The accumulator can be any JS value.

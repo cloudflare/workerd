@@ -54,11 +54,7 @@ class SqlStorage final: public jsg::Object {
     // range causes an error.
     jsg::Optional<bool> useBigIntArguments;
 
-    // If true, the function may be invoked with any number of arguments. If false (the
-    // default), the function must be invoked with exactly `callback.length` arguments.
-    jsg::Optional<bool> varargs;
-
-    JSG_STRUCT(useBigIntArguments, varargs);
+    JSG_STRUCT(useBigIntArguments);
   };
 
   // Registers an application-defined SQL function, implemented by the given JavaScript
@@ -76,6 +72,12 @@ class SqlStorage final: public jsg::Object {
   // its result. The callback may be invoked from trigger bodies, views, and CHECK constraints --
   // but never from index expressions or generated columns, since those persist computed values
   // whose meaning would change if the function's behavior ever changed.
+  //
+  // Argument counts follow ordinary JavaScript semantics: the function may be invoked from SQL
+  // with any number of arguments, with missing parameters seen as undefined and extra arguments
+  // available via rest parameters. (Unlike node:sqlite, the callback's declared `length` is
+  // never consulted: JavaScript's `Function.length` rules -- e.g. default and rest parameters
+  // not counting -- make it too surprising a source of truth.)
   void registerFunction(jsg::Lock& js,
       kj::String name,
       kj::OneOf<FunctionCallback, FunctionOptions> optionsOrCallback,
@@ -101,9 +103,8 @@ class SqlStorage final: public jsg::Object {
     jsg::Optional<jsg::Function<jsg::Value(jsg::Value)>> result;
     jsg::Optional<FunctionCallback> inverse;
     jsg::Optional<bool> useBigIntArguments;
-    jsg::Optional<bool> varargs;
 
-    JSG_STRUCT(start, step, result, inverse, useBigIntArguments, varargs);
+    JSG_STRUCT(start, step, result, inverse, useBigIntArguments);
 
     JSG_STRUCT_TS_OVERRIDE({
       start?: any;
@@ -111,14 +112,12 @@ class SqlStorage final: public jsg::Object {
       result?: (accumulator: any) => ArrayBuffer | ArrayBufferView | string | number | bigint | null | undefined;
       inverse?: (accumulator: any, ...args: (ArrayBuffer | string | number | bigint | null)[]) => any;
       useBigIntArguments?: boolean;
-      varargs?: boolean;
     });
   };
 
   // Like registerFunction(), but registers an aggregate function -- or, if `inverse` is
-  // provided, a window function. Exposed to JavaScript as `aggregate(name, options)`. When
-  // `varargs` is false, the required argument count is `step.length - 1` (the first parameter
-  // being the accumulator).
+  // provided, a window function. Exposed to JavaScript as `aggregate(name, options)`. As with
+  // function(), SQL may invoke the aggregate with any number of arguments.
   void registerAggregate(jsg::Lock& js, kj::String name, AggregateOptions options);
 
   void setMaxPageCountForTest(jsg::Lock& js, int count);

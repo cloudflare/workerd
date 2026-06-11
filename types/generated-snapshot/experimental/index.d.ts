@@ -3892,7 +3892,6 @@ interface SqlStorageIngestResult {
 }
 interface SqlStorageFunctionOptions {
   useBigIntArguments?: boolean;
-  varargs?: boolean;
 }
 interface SqlStorageAggregateOptions {
   start?: any;
@@ -3915,7 +3914,6 @@ interface SqlStorageAggregateOptions {
     ...args: (ArrayBuffer | string | number | bigint | null)[]
   ) => any;
   useBigIntArguments?: boolean;
-  varargs?: boolean;
 }
 interface Socket {
   get readable(): ReadableStream;
