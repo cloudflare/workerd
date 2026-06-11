@@ -40,7 +40,7 @@ KJ_TEST("kill_switch worker") {
   });
 
   auto& e = KJ_ASSERT_NONNULL(exception);
-  KJ_ASSERT(e.getType() == kj::Exception::Type::OVERLOADED);
+  KJ_ASSERT(e.getType() == kj::Exception::Type::FAILED);
   KJ_ASSERT(e.getDescription() == "jsg.Error: This script has been killed.");
   KJ_ASSERT(e.getDetail(SCRIPT_KILLED_DETAIL_ID) != kj::none);
 }
@@ -73,7 +73,7 @@ KJ_TEST("kill_switch worker connect") {
   });
 
   auto& e = KJ_ASSERT_NONNULL(exception);
-  KJ_ASSERT(e.getType() == kj::Exception::Type::OVERLOADED);
+  KJ_ASSERT(e.getType() == kj::Exception::Type::FAILED);
   KJ_ASSERT(e.getDescription() == "jsg.Error: This script has been killed.");
   KJ_ASSERT(e.getDetail(SCRIPT_KILLED_DETAIL_ID) != kj::none);
 }
