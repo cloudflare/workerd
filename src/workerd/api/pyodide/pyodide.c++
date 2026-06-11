@@ -276,6 +276,13 @@ kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapsho
     }
   }
 
+  // From Pyodide 314 on, we don't use packages inside the lockfile.
+  // All packages used by the worker should come from PyPI and be bundled inside the worker.
+  // To avoid breaking existing workers, we return an empty lockfile if no packages are found.
+  if (pythonSnapshotRelease.getPackages().size() == 0) {
+    return kj::str("{\"packages\":{}}");
+  }
+
   return kj::none;
 }
 
