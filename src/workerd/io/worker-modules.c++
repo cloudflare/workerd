@@ -13,7 +13,6 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
   auto mainModule = kj::str(source.mainModule);
   auto modules = source.modules.asPtr();
   int numFiles = 0;
-  int numRequirements = 0;
   for (auto& module: modules) {
     KJ_SWITCH_ONEOF(module.content) {
       KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
@@ -38,7 +37,7 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
         numFiles++;
       }
       KJ_CASE_ONEOF(content, Worker::Script::ObsoletePythonRequirement) {
-        numRequirements++;
+        // No longer supported; ignored.
       }
       KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
         // Not exposed to Python.
@@ -48,7 +47,6 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
 
   auto names = kj::heapArrayBuilder<kj::String>(numFiles);
   auto contents = kj::heapArrayBuilder<kj::Array<kj::byte>>(numFiles);
-  auto requirements = kj::heapArrayBuilder<kj::String>(numRequirements);
   for (auto& module: modules) {
     KJ_SWITCH_ONEOF(module.content) {
       KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
@@ -78,7 +76,7 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
         contents.add(kj::heapArray(content.body.asBytes()));
       }
       KJ_CASE_ONEOF(content, Worker::Script::ObsoletePythonRequirement) {
-        requirements.add(kj::str(module.name));
+        // No longer supported; ignored.
       }
       KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
         // Not exposeud to Python.
@@ -94,7 +92,6 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
       kj::mv(mainModule),
       names.finish(),
       contents.finish(),
-      requirements.finish(),
       kj::str(pythonRelease.getPyodide()),
       kj::str(pythonRelease.getPackages()),
       kj::mv(lock),

@@ -110,7 +110,6 @@ class PyodideMetadataReader: public jsg::Object {
   struct State {
     kj::String mainModule;
     PythonModuleInfo moduleInfo;
-    kj::Array<kj::String> requirements;
     kj::String pyodideVersion;
     kj::String packagesVersion;
     kj::String packagesLock;
@@ -123,7 +122,6 @@ class PyodideMetadataReader: public jsg::Object {
     State(kj::String mainModule,
         kj::Array<kj::String> names,
         kj::Array<kj::Array<kj::byte>> contents,
-        kj::Array<kj::String> requirements,
         kj::String pyodideVersion,
         kj::String packagesVersion,
         kj::String packagesLock,
@@ -134,7 +132,6 @@ class PyodideMetadataReader: public jsg::Object {
         kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
         : mainModule(kj::mv(mainModule)),
           moduleInfo(kj::mv(names), kj::mv(contents)),
-          requirements(kj::mv(requirements)),
           pyodideVersion(kj::mv(pyodideVersion)),
           packagesVersion(kj::mv(packagesVersion)),
           packagesLock(kj::mv(packagesLock)),
@@ -210,8 +207,6 @@ class PyodideMetadataReader: public jsg::Object {
     return state->packagesLock;
   }
 
-  kj::HashSet<kj::String> getTransitiveRequirements();
-
   static kj::Array<kj::StringPtr> getBaselineSnapshotImports();
 
   // We call this during Python setup with the wasm memory and the addresses of the signal clock and
@@ -243,7 +238,6 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getPackagesVersion);
     JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);
-    JSG_METHOD(getTransitiveRequirements);
     JSG_METHOD(getCompatibilityFlags);
     JSG_STATIC_METHOD(getBaselineSnapshotImports);
     JSG_METHOD(setCpuLimitNearlyExceededCallback);
@@ -256,9 +250,6 @@ class PyodideMetadataReader: public jsg::Object {
     }
     for (const auto& content: state->moduleInfo.contents) {
       tracker.trackField("content", content);
-    }
-    for (const auto& requirement: state->requirements) {
-      tracker.trackField("requirement", requirement);
     }
   }
 
@@ -498,12 +489,9 @@ class SimplePythonLimiter: public jsg::Object {
 
 kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease);
 
-// Returns a list of filenames we need to fetch according to the pyodide-lock.json file
-// in addition to the requirements argument, we also must include all "stdlib" packages
-// as well as any transitive dependencies needed
-kj::Array<kj::String> getPythonPackageFiles(kj::StringPtr lockFileContents,
-    kj::ArrayPtr<kj::String> requirements,
-    kj::StringPtr packagesVersion);
+// Returns the list of filenames we need to fetch according to the pyodide-lock.json file. The lock
+// file is pre-filtered to contain exactly the packages we want to load, so we fetch all of them.
+kj::Array<kj::String> getPythonPackageFiles(kj::StringPtr lockFileContents);
 
 // Constructs the path to a Python package in the package repository
 kj::String getPyodidePackagePath(kj::StringPtr packagesVersion, kj::StringPtr filename);

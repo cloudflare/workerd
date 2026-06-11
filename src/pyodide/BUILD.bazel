@@ -10,6 +10,10 @@ python_bundles()
 
 pyodide_static()
 
+# The checked-in package lock files. Exported so the `pyodide` module extension
+# (build/deps/dep_pyodide.bzl) can read them to download the stdlib wheels.
+exports_files(glob(["python-lock/*.json"]))
+
 DEV_VERSION = BUNDLE_VERSION_INFO["development"]["real_pyodide_version"]
 
 alias(

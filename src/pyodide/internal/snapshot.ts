@@ -7,7 +7,6 @@ import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
 import { default as UnsafeEval } from 'internal:unsafe-eval';
 import { default as DiskCache } from 'pyodide-internal:disk_cache';
 import { type FilePath, VIRTUALIZED_DIR } from 'pyodide-internal:setupPackages';
-import { default as EmbeddedPackagesTarReader } from 'pyodide-internal:packages_tar_reader';
 import {
   SHOULD_SNAPSHOT_TO_DISK,
   IS_CREATING_BASELINE_SNAPSHOT,
@@ -302,15 +301,15 @@ function loadDynlibFromTarFs(
   if (!node?.contentsOffset) {
     throw Error(`fs node could not be found for ${soFile.join('/')}`);
   }
-  const { contentsOffset, size } = node;
+  const { contentsOffset, size, reader } = node;
   if (contentsOffset === undefined) {
     throw Error(`contentsOffset not defined for ${soFile.join('/')}`);
   }
+  if (!reader) {
+    throw Error(`reader not defined for ${soFile.join('/')}`);
+  }
   const wasmModuleData = new Uint8Array(size);
-  (node.reader ?? EmbeddedPackagesTarReader).read(
-    contentsOffset,
-    wasmModuleData
-  );
+  reader.read(contentsOffset, wasmModuleData);
   const path = base + soFile.join('/');
   loadDynlib(Module, path, wasmModuleData);
 }
