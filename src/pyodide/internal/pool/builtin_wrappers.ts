@@ -255,7 +255,7 @@ function prepareStackTrace(
 }
 
 /**
- * This is a fix for a problem with package snapshots in 0.26.0a2. 0.26.0a2 tests if
+ * This is a fix for a problem with snapshots in 0.26.0a2. 0.26.0a2 tests if
  * wasm-type-reflection is supported by the runtime and if so uses it to avoid function pointer
  * casting instead of a JS trampoline. We cannot stack switch through the JS trampoline so we need
  * to make sure that when stack switching is available, we don't use JS trampolines. When 0.26.0a2
