@@ -1678,7 +1678,7 @@ export class DurableObjectExample extends DurableObject {
     sql.function('async_fn', async () => 42);
     assert.throws(
       () => sql.exec('SELECT async_fn()'),
-      (e) => e instanceof TypeError && /must be synchronous/.test(e.message)
+      (e) => e instanceof TypeError && /must return synchronously/.test(e.message)
     );
 
     // Booleans (and other types with no unambiguous SQL representation) are rejected,
