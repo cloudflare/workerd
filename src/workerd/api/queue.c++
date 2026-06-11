@@ -734,7 +734,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
     })
                        .exclusiveJoin(timeoutPromise.then([] {
       // Join everything against a timeout to ensure queue handlers can't run forever.
-      return EventOutcome::EXCEEDED_CPU;
+      return EventOutcome::EXCEEDED_WALL_TIME;
     })).exclusiveJoin(context.onAbort().then([] {
       // Also handle anything that might cause the worker to get aborted.
       // This is a change from the outcome we returned on abort before the compat flag, but better

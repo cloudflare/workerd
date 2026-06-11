@@ -648,9 +648,7 @@ kj::Promise<WorkerInterface::ScheduledResult> IoContext::IncomingRequest::finish
   context->incomingRequests.front().waitedForWaitUntil = true;
 
   auto timeoutPromise = context->limitEnforcer->limitScheduled().then([] {
-    // TODO(soon): The limit being hit here is a wall time limit. Can we report an
-    // "exceededWallTime" outcome instead?
-    return EventOutcome::EXCEEDED_CPU;
+    return EventOutcome::EXCEEDED_WALL_TIME;
   });
   auto outcome = context->waitUntilTasks.onEmpty()
                      .then([this]() { return context->waitUntilStatus(); })
