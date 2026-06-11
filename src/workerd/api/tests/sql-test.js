@@ -1678,7 +1678,8 @@ export class DurableObjectExample extends DurableObject {
     sql.function('async_fn', async () => 42);
     assert.throws(
       () => sql.exec('SELECT async_fn()'),
-      (e) => e instanceof TypeError && /must return synchronously/.test(e.message)
+      (e) =>
+        e instanceof TypeError && /must return synchronously/.test(e.message)
     );
 
     // Booleans (and other types with no unambiguous SQL representation) are rejected,
@@ -1909,6 +1910,36 @@ export class DurableObjectExample extends DurableObject {
     assert.equal(
       [...sql.exec('SELECT sum_doubled(n) AS v FROM udf_nums')][0].v,
       20
+    );
+
+    // Multiple invocations of the same aggregate in one query maintain fully independent
+    // accumulator state (exercising several simultaneously-live aggregation contexts).
+    assert.deepEqual(
+      [
+        ...sql.exec(
+          'SELECT sum_doubled(n) AS a, sum_doubled(n * 10) AS b FROM udf_nums'
+        ),
+      ][0],
+      { a: 20, b: 200 }
+    );
+
+    // ... including a correlated aggregate subquery, which creates and destroys an aggregation
+    // context per outer row.
+    assert.deepEqual(
+      [
+        ...sql.exec(
+          'SELECT (SELECT sum_doubled(m.n) FROM udf_nums m WHERE m.n <= udf_nums.n) AS run ' +
+            'FROM udf_nums ORDER BY n'
+        ),
+      ].map((r) => r.run),
+      [2, 6, 12, 20]
+    );
+
+    // Zero-length blob arguments arrive as empty ArrayBuffers (SQLite represents them with a
+    // null pointer internally).
+    assert.equal(
+      [...sql.exec("SELECT describe_args(x'') AS v")][0].v,
+      'blob()'
     );
 
     // Registrations survive deleteAll(), which resets the underlying database connection.

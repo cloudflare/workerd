@@ -208,6 +208,25 @@ void SqlStorage::stashAndTunnelFunctionError(jsg::Lock& js, jsg::Value exception
   kj::throwFatalException(kj::mv(tunneled));
 }
 
+template <typename T, typename Body>
+T SqlStorage::runFunctionCallback(jsg::Lock& js, Body&& body) {
+  try {
+    return js.tryCatch([&]() -> T { return body(); },
+        [&](jsg::Value exception) -> T { stashAndTunnelFunctionError(js, kj::mv(exception)); });
+  } catch (jsg::JsExceptionThrown&) {
+    // js.tryCatch() deliberately refuses to catch exceptions thrown while JavaScript execution
+    // cannot continue -- in particular, the uncatchable exception V8 uses to terminate the
+    // isolate when a request exhausts its CPU limit -- so that application code can never
+    // swallow a termination. But we are being called from inside sqlite3_step(), and letting a
+    // C++ exception unwind through SQLite's C stack frames would abandon the statement
+    // mid-execution: undefined behavior. Convert it to a kj::Exception for the unwind instead;
+    // V8 will re-deliver the termination the next time JavaScript runs.
+    kj::throwFatalException(JSG_KJ_EXCEPTION(FAILED, Error,
+        "JavaScript execution was terminated while running an application-defined SQL "
+        "function."));
+  }
+}
+
 namespace {
 
 // Returns the declared parameter count (the `length` property) of the JavaScript function
@@ -260,7 +279,7 @@ void SqlStorage::registerFunction(jsg::Lock& js,
     // executed from the JavaScript API, so the current thread must hold the isolate lock.
     auto& js = jsg::Lock::from(isolate);
 
-    return js.tryCatch([&]() -> SqliteDatabase::Value {
+    return runFunctionCallback<SqliteDatabase::Value>(js, [&]() -> SqliteDatabase::Value {
       return js.withinHandleScope([&]() -> SqliteDatabase::Value {
         auto jsArgs = kj::heapArrayBuilder<jsg::Value>(args.size());
         for (auto& arg: args) {
@@ -270,8 +289,6 @@ void SqlStorage::registerFunction(jsg::Lock& js,
         auto result = callback(js, jsg::Arguments<jsg::Value>(jsArgs.finish()));
         return unwrapFunctionResult(js, result);
       });
-    }, [&](jsg::Value exception) -> SqliteDatabase::Value {
-      stashAndTunnelFunctionError(js, kj::mv(exception));
     });
   });
 }
@@ -350,7 +367,8 @@ void SqlStorage::registerAggregate(jsg::Lock& js, kj::String name, AggregateOpti
                 kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) mutable
     -> kj::Own<SqliteDatabase::AggregateState> {
     auto& js = jsg::Lock::from(isolate);
-    return js.tryCatch([&]() -> kj::Own<SqliteDatabase::AggregateState> {
+    return runFunctionCallback<kj::Own<SqliteDatabase::AggregateState>>(
+        js, [&]() -> kj::Own<SqliteDatabase::AggregateState> {
       return js.withinHandleScope([&]() -> kj::Own<SqliteDatabase::AggregateState> {
         auto jsArgs = kj::heapArrayBuilder<jsg::Value>(args.size() + 1);
         jsArgs.add(
@@ -365,8 +383,6 @@ void SqlStorage::registerAggregate(jsg::Lock& js, kj::String name, AggregateOpti
         auto result = stepFn(js, jsg::Arguments<jsg::Value>(jsArgs.finish()));
         return kj::heap<JsAggregateState>(kj::mv(result));
       });
-    }, [&](jsg::Value exception) -> kj::Own<SqliteDatabase::AggregateState> {
-      stashAndTunnelFunctionError(js, kj::mv(exception));
     });
   },
     .finalize = [resultFn = kj::mv(options.result), start = kj::mv(startForFinal), isolate](
@@ -380,7 +396,7 @@ void SqlStorage::registerAggregate(jsg::Lock& js, kj::String name, AggregateOpti
       return nullptr;
     }
     auto& js = jsg::Lock::from(isolate);
-    return js.tryCatch([&]() -> SqliteDatabase::Value {
+    return runFunctionCallback<SqliteDatabase::Value>(js, [&]() -> SqliteDatabase::Value {
       return js.withinHandleScope([&]() -> SqliteDatabase::Value {
         auto acc =
             aggregateAccumulator(js, state.map([](kj::Own<SqliteDatabase::AggregateState>& s) {
@@ -396,8 +412,6 @@ void SqlStorage::registerAggregate(jsg::Lock& js, kj::String name, AggregateOpti
           return unwrapFunctionResult(js, acc);
         }
       });
-    }, [&](jsg::Value exception) -> SqliteDatabase::Value {
-      stashAndTunnelFunctionError(js, kj::mv(exception));
     });
   },
   };
@@ -407,7 +421,7 @@ void SqlStorage::registerAggregate(jsg::Lock& js, kj::String name, AggregateOpti
         [resultFn = kj::mv(resultForValue), start = kj::mv(startForValue), isolate](
             kj::Maybe<SqliteDatabase::AggregateState&> state) mutable -> SqliteDatabase::Value {
       auto& js = jsg::Lock::from(isolate);
-      return js.tryCatch([&]() -> SqliteDatabase::Value {
+      return runFunctionCallback<SqliteDatabase::Value>(js, [&]() -> SqliteDatabase::Value {
         return js.withinHandleScope([&]() -> SqliteDatabase::Value {
           // Unlike the final result, this must not consume the state, since SQLite will keep
           // updating the same window.
@@ -423,8 +437,6 @@ void SqlStorage::registerAggregate(jsg::Lock& js, kj::String name, AggregateOpti
             return unwrapFunctionResult(js, acc);
           }
         });
-      }, [&](jsg::Value exception) -> SqliteDatabase::Value {
-        stashAndTunnelFunctionError(js, kj::mv(exception));
       });
     });
 
@@ -434,7 +446,8 @@ void SqlStorage::registerAggregate(jsg::Lock& js, kj::String name, AggregateOpti
             kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) mutable
         -> kj::Own<SqliteDatabase::AggregateState> {
       auto& js = jsg::Lock::from(isolate);
-      return js.tryCatch([&]() -> kj::Own<SqliteDatabase::AggregateState> {
+      return runFunctionCallback<kj::Own<SqliteDatabase::AggregateState>>(
+          js, [&]() -> kj::Own<SqliteDatabase::AggregateState> {
         return js.withinHandleScope([&]() -> kj::Own<SqliteDatabase::AggregateState> {
           auto jsArgs = kj::heapArrayBuilder<jsg::Value>(args.size() + 1);
           jsArgs.add(kj::mv(kj::downcast<JsAggregateState>(*state).value));
@@ -445,8 +458,6 @@ void SqlStorage::registerAggregate(jsg::Lock& js, kj::String name, AggregateOpti
           auto result = inverseFn(js, jsg::Arguments<jsg::Value>(jsArgs.finish()));
           return kj::heap<JsAggregateState>(kj::mv(result));
         });
-      }, [&](jsg::Value exception) -> kj::Own<SqliteDatabase::AggregateState> {
-        stashAndTunnelFunctionError(js, kj::mv(exception));
       });
     });
   }

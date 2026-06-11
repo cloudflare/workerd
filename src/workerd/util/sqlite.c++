@@ -1600,14 +1600,21 @@ kj::Array<SqliteDatabase::ValuePtr> convertFunctionArgs(int argc, sqlite3_value*
         args.add(sqlite3_value_double(value));
         break;
       case SQLITE_TEXT: {
-        // Note that sqlite3_value_text() must be called before sqlite3_value_bytes().
+        // Note that sqlite3_value_text() must be called before sqlite3_value_bytes(), and
+        // returns null on OOM (in which case constructing a StringPtr from it would be UB).
         const char* ptr = reinterpret_cast<const char*>(sqlite3_value_text(value));
+        KJ_REQUIRE(ptr != nullptr, "out of memory reading SQL function argument");
         args.add(kj::StringPtr(ptr, sqlite3_value_bytes(value)));
         break;
       }
       case SQLITE_BLOB: {
+        // sqlite3_value_blob() returns null for zero-length blobs (and on OOM).
         const byte* ptr = reinterpret_cast<const byte*>(sqlite3_value_blob(value));
-        args.add(kj::arrayPtr(ptr, sqlite3_value_bytes(value)));
+        if (ptr == nullptr) {
+          args.add(kj::ArrayPtr<const byte>());
+        } else {
+          args.add(kj::arrayPtr(ptr, sqlite3_value_bytes(value)));
+        }
         break;
       }
       case SQLITE_NULL:

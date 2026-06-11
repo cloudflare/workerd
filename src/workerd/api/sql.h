@@ -280,6 +280,14 @@ class SqlStorage final: public jsg::Object {
       jsg::Lock& js, const SqliteDatabase::ValuePtr& arg, bool useBigIntArguments);
   static SqliteDatabase::Value unwrapFunctionResult(jsg::Lock& js, const jsg::Value& result);
   [[noreturn]] static void stashAndTunnelFunctionError(jsg::Lock& js, jsg::Value exception);
+
+  // Runs the body of an application-defined function callback, converting ANY exception --
+  // including the otherwise-uncatchable one V8 uses to terminate the isolate (e.g. on CPU limit
+  // exhaustion) -- into a kj::Exception. This is the callbacks' total exception barrier: a
+  // C++ exception must never unwind through SQLite's C stack frames (which would abandon a
+  // sqlite3_step() mid-execution -- undefined behavior).
+  template <typename T, typename Body>
+  static T runFunctionCallback(jsg::Lock& js, Body&& body);
 };
 
 class SqlStorage::Cursor final: public jsg::Object {
