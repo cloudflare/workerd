@@ -488,6 +488,7 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
 
   kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       capnp::ByteStreamFactory& byteStreamFactory,
+      FrankenvalueHandler& frankenvalueHandler,
       rpc::EventDispatcher::Client dispatcher) override;
 
   // Same as `EventDispatcher::Server::JsRpcSessionContext` -- but that typedef is `protected`.

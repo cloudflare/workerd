@@ -16,6 +16,7 @@
 namespace workerd {
 
 class Frankenvalue;
+class FrankenvalueHandler;
 class IoContext_IncomingRequest;
 struct Worker_VersionInfo;
 
@@ -147,8 +148,13 @@ class WorkerInterface: public kj::HttpService {
         bool isDynamicDispatch = false) = 0;
 
     // Forward the event over RPC.
+    //
+    // `frankenvalueHandler` is used to serialize any Frankenvalue (including its cap table) that
+    // the event needs to send over RPC -- currently only the restore events use it (for their
+    // params); all other events ignore it. See `FrankenvalueHandler`.
     virtual kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
         capnp::ByteStreamFactory& byteStreamFactory,
+        FrankenvalueHandler& frankenvalueHandler,
         rpc::EventDispatcher::Client dispatcher) = 0;
 
     // The event is not supported by the target, raise an appropriate error.
@@ -317,6 +323,7 @@ class RpcWorkerInterface final: public WorkerInterface {
  public:
   RpcWorkerInterface(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       capnp::ByteStreamFactory& byteStreamFactory,
+      FrankenvalueHandler& frankenvalueHandler,
       rpc::EventDispatcher::Client dispatcher);
 
   kj::Promise<void> request(kj::HttpMethod method,
@@ -340,6 +347,11 @@ class RpcWorkerInterface final: public WorkerInterface {
  private:
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
   capnp::ByteStreamFactory& byteStreamFactory;
+
+  // Supplied to events' `sendRpc()` to serialize any Frankenvalue (e.g. restore params) including
+  // its cap table. See `FrankenvalueHandler`. Must outlive this `RpcWorkerInterface`.
+  FrankenvalueHandler& frankenvalueHandler;
+
   rpc::EventDispatcher::Client dispatcher;
 };
 

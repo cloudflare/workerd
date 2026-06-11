@@ -102,9 +102,11 @@ class RestoredRpcSubrequestChannel final: public IoChannelFactory::SubrequestCha
  public:
   RestoredRpcSubrequestChannel(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       capnp::ByteStreamFactory& byteStreamFactory,
+      FrankenvalueHandler& frankenvalueHandler,
       rpc::WorkerdBootstrap::Client rpcClient)
       : httpOverCapnpFactory(httpOverCapnpFactory),
         byteStreamFactory(byteStreamFactory),
+        frankenvalueHandler(frankenvalueHandler),
         rpcClient(kj::mv(rpcClient)) {}
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
@@ -120,7 +122,7 @@ class RestoredRpcSubrequestChannel final: public IoChannelFactory::SubrequestCha
     auto dispatcher = req.sendForPipeline().getDispatcher();
 
     return kj::heap<RpcWorkerInterface>(
-        httpOverCapnpFactory, byteStreamFactory, kj::mv(dispatcher));
+        httpOverCapnpFactory, byteStreamFactory, frankenvalueHandler, kj::mv(dispatcher));
   }
 
   void requireAllowsTransfer() override {
@@ -137,6 +139,7 @@ class RestoredRpcSubrequestChannel final: public IoChannelFactory::SubrequestCha
  private:
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
   capnp::ByteStreamFactory& byteStreamFactory;
+  FrankenvalueHandler& frankenvalueHandler;
   rpc::WorkerdBootstrap::Client rpcClient;
 };
 
@@ -214,13 +217,14 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::run
 kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
+    FrankenvalueHandler& frankenvalueHandler,
     rpc::EventDispatcher::Client dispatcher) {
   auto req = dispatcher.restoreServiceRequest();
   restoreParams.toCapnp(req.initParams());
   auto sent = req.send();
 
   channelFulfiller->fulfill(kj::refcounted<RestoredRpcSubrequestChannel>(
-      httpOverCapnpFactory, byteStreamFactory, sent.getService()));
+      httpOverCapnpFactory, byteStreamFactory, frankenvalueHandler, sent.getService()));
 
   co_await sent.ignoreResult();
 
@@ -312,6 +316,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreRpcStubCustomEvent::run
 kj::Promise<WorkerInterface::CustomEvent::Result> RestoreRpcStubCustomEvent::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
+    FrankenvalueHandler& frankenvalueHandler,
     rpc::EventDispatcher::Client dispatcher) {
   // This contains a lot of similar code to JsRpcSessionCustomEvent::sendRpc() for setting
   // up membranes, handling the returned JsRpcSession, etc.

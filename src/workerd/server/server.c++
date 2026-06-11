@@ -1995,8 +1995,11 @@ class Server::ExternalHttpService final: public Service {
       auto bootstrap = parent->getOutgoingCapnp(*parent->inner);
       auto dispatcher =
           bootstrap.startEventRequest(capnp::MessageSize{4, 0}).send().getDispatcher();
+      // NOTE: We don't support restore() over workerd-to-workerd RPC so we can use
+      // getUnsupportedFrankenvalueHandler() here for now.
       return event
-          ->sendRpc(parent->httpOverCapnpFactory, parent->byteStreamFactory, kj::mv(dispatcher))
+          ->sendRpc(parent->httpOverCapnpFactory, parent->byteStreamFactory,
+              getUnsupportedFrankenvalueHandler(), kj::mv(dispatcher))
           .attach(kj::mv(event));
     }
 

@@ -787,6 +787,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
 kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
+    FrankenvalueHandler& frankenvalueHandler,
     rpc::EventDispatcher::Client dispatcher) {
   auto req = dispatcher.castAs<rpc::EventDispatcher>().queueRequest();
   KJ_SWITCH_ONEOF(params) {

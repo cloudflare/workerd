@@ -379,9 +379,11 @@ kj::Own<WorkerInterface> WorkerInterface::fromException(kj::Exception&& e) {
 
 RpcWorkerInterface::RpcWorkerInterface(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
+    FrankenvalueHandler& frankenvalueHandler,
     rpc::EventDispatcher::Client dispatcher)
     : httpOverCapnpFactory(httpOverCapnpFactory),
       byteStreamFactory(byteStreamFactory),
+      frankenvalueHandler(frankenvalueHandler),
       dispatcher(kj::mv(dispatcher)) {}
 
 kj::Promise<void> RpcWorkerInterface::request(kj::HttpMethod method,
@@ -453,7 +455,8 @@ kj::Promise<kj::Maybe<kj::Date>> RpcWorkerInterface::abandonAlarm(kj::Date sched
 
 kj::Promise<WorkerInterface::CustomEvent::Result> RpcWorkerInterface::customEvent(
     kj::Own<CustomEvent> event) {
-  return event->sendRpc(httpOverCapnpFactory, byteStreamFactory, dispatcher).attach(kj::mv(event));
+  return event->sendRpc(httpOverCapnpFactory, byteStreamFactory, frankenvalueHandler, dispatcher)
+      .attach(kj::mv(event));
 }
 
 // ======================================================================================
