@@ -146,7 +146,7 @@ test('Inspector correctly receives exceptions with Unicode characters', async ()
   // Wait to receive the exception events
   let iters = 0;
   while (exceptions.length < 2) {
-    await scheduler.wait(50);
+    await new Promise((resolve) => setTimeout(resolve, 50));
     iters += 1;
     if (iters > 50) {
       assert.fail('timed out waiting for exceptions');
