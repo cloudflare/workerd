@@ -6,7 +6,7 @@ Subject: Port concurrent mksnapshot support
 Change-Id: I57c8158ff5d624e5379e6b072f27ac7a40419522
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 3cd1323be830f8ff174fca64b03bf816030559d1..60c6d5f762e9e325ccb8dbe9518b47a251a7e8e3 100644
+index c1eb923ec676d0a982a53d884bb7102fc1cc2c16..caae1031551408325b65df9d0e19d994d5fb7eef 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -120,6 +120,11 @@ v8_flag(name = "v8_enable_hugepage")
@@ -21,7 +21,7 @@ index 3cd1323be830f8ff174fca64b03bf816030559d1..60c6d5f762e9e325ccb8dbe9518b47a2
  v8_flag(name = "v8_enable_future")
  
  # NOTE: Transitions are not recommended in library targets:
-@@ -4556,6 +4561,13 @@ v8_mksnapshot(
+@@ -4542,6 +4547,13 @@ v8_mksnapshot(
              "--no-turbo-verify-allocation",
          ],
          "//conditions:default": [],

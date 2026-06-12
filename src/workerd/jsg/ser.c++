@@ -336,27 +336,8 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
 Serializer::Released Serializer::release() {
   KJ_ASSERT(!released, "The data has already been released.");
   released = true;
-
-  // Now that serialization is complete, detach the ArrayBuffers that were transferred. We
-  // intentionally defer this until after write() -- see transfer() for details.
-  if (!arrayBuffersToDetach.empty()) {
-    auto& js = jsg::Lock::current();
-    for (auto& arrayBuffer: arrayBuffersToDetach) {
-      auto handle = arrayBuffer.getHandle(js);
-      // JS run during write() (e.g. an accessor getter performing a nested structuredClone that
-      // transfers the same buffer, or calling ArrayBuffer.prototype.transfer()) may have already
-      // detached this buffer. Skip those: v8::ArrayBuffer::Detach() fatally checks IsDetachable(),
-      // and while a plain double-detach happens to be a no-op today, we don't want to depend on
-      // that V8 internal.
-      if (handle->IsDetachable() && !handle->WasDetached()) {
-        check(handle->Detach(v8::Local<v8::Value>()));
-      }
-    }
-  }
-
   sharedArrayBuffers.clear();
   arrayBuffers.clear();
-  arrayBuffersToDetach.clear();
   auto pair = ser.Release();
   return Released{
     .data = kj::Array(pair.first, pair.second, jsg::SERIALIZED_BUFFER_DISPOSER),
@@ -394,31 +375,8 @@ void Serializer::transfer(Lock& js, const JsValue& value) {
   arrayBuffers.add(jsg::JsRef(js, value));
 
   backingStores.add(arrayBuffer->GetBackingStore());
+  check(arrayBuffer->Detach(v8::Local<v8::Value>()));
   ser.TransferArrayBuffer(n, arrayBuffer);
-
-  // Defer detaching the ArrayBuffer until release(), after write() has run. We only register the
-  // transfer with V8 here; TransferArrayBuffer() records the buffer in the serializer's transfer
-  // map, and WriteValue() emits a transfer marker for it from that map regardless of whether the
-  // buffer is currently detached. So detaching is not required for serialization to be correct,
-  // and deferring it has two benefits:
-  //
-  // 1. It avoids a crash under V8's array buffer view tracking (--track-array-buffer-views, on by
-  //    default in V8 >= 15.0): detaching a buffer updates any TypedArray/DataView over it in place,
-  //    redirecting the view to a different (empty) backing buffer. If we detached here, a view
-  //    serialized later by WriteValue() would no longer reference the buffer we registered for
-  //    transfer, so V8 would try to clone a detached buffer and fail with "An ArrayBuffer is
-  //    detached and could not be cloned."
-  //
-  // 2. It matches the HTML structured-clone-with-transfer algorithm, which serializes the value
-  //    first and only detaches the transfer list afterwards. This matters because serialization is
-  //    NOT free of JS execution -- WriteValue() invokes user accessor getters (see
-  //    ValueSerializer::WriteJSObject -> Object::GetProperty), so a getter can observe a buffer
-  //    that is in the transfer list while serialization is still running. Detaching up front (as we
-  //    used to) would show such a getter a prematurely-detached buffer; deferring matches the spec
-  //    (the buffer is still detached by the time structuredClone() returns, in release()).
-  //
-  // A vector is required because the transfer list may contain multiple ArrayBuffers.
-  arrayBuffersToDetach.add(js.v8Ref(arrayBuffer));
 }
 
 void Serializer::write(Lock& js, const JsValue& value) {

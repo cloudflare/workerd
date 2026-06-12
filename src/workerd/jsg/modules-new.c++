@@ -44,7 +44,7 @@ kj::String specifierToString(jsg::Lock& js, v8::Local<v8::String> spec) {
   // so we can detect that case and handle those correctly here.
   if (spec->ContainsOnlyOneByte()) {
     auto buf = kj::heapArray<char>(spec->Length() + 1);
-    spec->WriteOneByte(js.v8Isolate, 0, spec->Length(), buf.asBytes().begin(),
+    spec->WriteOneByteV2(js.v8Isolate, 0, spec->Length(), buf.asBytes().begin(),
         v8::String::WriteFlags::kNullTerminate);
     KJ_ASSERT(buf[buf.size() - 1] == '\0');
     return kj::String(kj::mv(buf));
