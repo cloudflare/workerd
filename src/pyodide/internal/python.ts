@@ -8,7 +8,7 @@ import {
   mountWorkerFiles,
 } from 'pyodide-internal:setupPackages';
 import {
-  maybeCollectSnapshot,
+  maybeCollectBaselineSnapshot,
   maybeRestoreSnapshot,
   finalizeBootstrap,
   isRestoringSnapshot,
@@ -263,7 +263,7 @@ export async function loadPyodide(
       prepareWasmLinearMemory(Module, customSerializedObjects);
     });
 
-    maybeCollectSnapshot(Module, customSerializedObjects);
+    maybeCollectBaselineSnapshot(Module, customSerializedObjects);
     // Mount worker files after doing snapshot upload so we ensure that data from the files is never
     // present in snapshot memory.
     mountWorkerFiles(Module);
