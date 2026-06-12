@@ -11,6 +11,8 @@ import {
   type WorkflowCronSchedule,
   type WorkflowEvent,
   type WorkflowStep,
+  type WorkflowStepConfig,
+  type WorkflowStepContext,
 } from 'cloudflare:workers';
 import { expectTypeOf } from 'expect-type';
 
@@ -803,9 +805,13 @@ declare const workflowStep: WorkflowStep;
 expectTypeOf(
   workflowStep.do('step with rollback', async (): Promise<string> => 'ok', {
     rollback: async (ctx) => {
+      expectTypeOf(ctx.ctx).toEqualTypeOf<WorkflowStepContext>();
+      expectTypeOf(ctx.ctx.step.name).toEqualTypeOf<string>();
+      expectTypeOf(ctx.ctx.step.count).toEqualTypeOf<number>();
+      expectTypeOf(ctx.ctx.attempt).toEqualTypeOf<number>();
+      expectTypeOf(ctx.ctx.config).toEqualTypeOf<WorkflowStepConfig>();
       expectTypeOf(ctx.error).toEqualTypeOf<Error>();
       expectTypeOf(ctx.output).toEqualTypeOf<string | undefined>();
-      expectTypeOf(ctx.stepName).toEqualTypeOf<string>();
     },
   })
 ).toMatchTypeOf<Promise<string>>();
@@ -816,6 +822,7 @@ workflowStep.do(
   async (): Promise<string> => 'ok',
   {
     rollback: async (ctx) => {
+      expectTypeOf(ctx.ctx).toEqualTypeOf<WorkflowStepContext>();
       expectTypeOf(ctx.output).toEqualTypeOf<string | undefined>();
     },
     rollbackConfig: {retries: {limit: 0, delay: 0}},

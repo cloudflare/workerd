@@ -340,9 +340,9 @@ declare namespace CloudflareWorkersModule {
   };
 
   export type WorkflowRollbackContext<T = unknown> = {
+    ctx: WorkflowStepContext;
     error: Error;
     output: T | undefined;
-    stepName: string;
   };
 
   export type WorkflowRollbackHandler<T = unknown> = (
