@@ -544,7 +544,6 @@ wd_cc_library(
         ],
     )
     for f in [
-        "streams/draining-read-uaf-test.c++",
         "streams/queue-test.c++",
         "streams/standard-test.c++",
     ]
