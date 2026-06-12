@@ -1548,4 +1548,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # When enabled, passing unsupported TLS options (e.g. checkServerIdentity)
   # to tls.connect() or new TLSSocket() throws ERR_OPTION_NOT_IMPLEMENTED
   # instead of silently ignoring them
+
+  autoGrpcConvert @178 :Bool
+      $compatEnableFlag("auto_grpc_convert")
+      $neededByFl
+      $experimental;
+  # When enabled, a Worker's outbound gRPC-web subrequest is converted to gRPC at
+  # the edge.
 }
