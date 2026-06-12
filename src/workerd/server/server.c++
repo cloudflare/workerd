@@ -286,7 +286,9 @@ Server::~Server() noexcept {
   // have a hard time avoiding a segfault later... and we're shutting down the server anyway so
   // whatever, better to crash.
 
-  // It's important to cancel all tasks before we start tearing down.
+  // It's important to cancel all tasks before we start tearing down. Actors may have background
+  // work, which we can cancel by aborting them.
+  abortAllActors(KJ_EXCEPTION(DISCONNECTED, "Server shutting down."));
   tasks.clear();
 
   // Unlink all the services, which should remove all refcount cycles.
