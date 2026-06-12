@@ -492,10 +492,6 @@ void registerPythonCommonModules(jsg::Lock& lock,
           kj::mv(maybeSnapshot), featureFlags)),
       jsg::ModuleRegistry::Type::INTERNAL);
 
-  // Inject packages tar file
-  modules.addBuiltinModule("pyodide-internal:packages_tar_reader", "export default { }"_kj,
-      workerd::jsg::ModuleRegistry::Type::INTERNAL, {});
-
   // Inject artifact bundler.
   modules.addBuiltinModule("pyodide-internal:artifacts",
       lock.alloc<api::pyodide::ArtifactBundler>(kj::mv(artifacts).orDefault(

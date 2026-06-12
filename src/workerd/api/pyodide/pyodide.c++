@@ -23,8 +23,6 @@
 #include <kj/encoding.h>
 #include <kj/string.h>
 
-#include <algorithm>  // for std::sort
-
 namespace workerd::api::pyodide {
 
 // singleton that owns bundle
@@ -164,13 +162,6 @@ int PyodideMetadataReader::readMemorySnapshot(int offset, kj::Array<kj::byte> bu
   return readToTarget(KJ_REQUIRE_NONNULL(state->memorySnapshot), offset, buf);
 }
 
-kj::HashSet<kj::String> PyodideMetadataReader::getTransitiveRequirements() {
-  auto packages = parseLockFile(state->packagesLock);
-  auto depMap = getDepMapFromPackagesLock(*packages);
-
-  return getPythonPackageNames(*packages, depMap, state->requirements, state->packagesVersion);
-}
-
 int ArtifactBundler::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
   if (inner->existingSnapshot == kj::none) {
     return 0;
@@ -229,7 +220,6 @@ jsg::JsObject PyodideMetadataReader::getCompatibilityFlags(jsg::Lock& js) {
 PyodideMetadataReader::State::State(const State& other)
     : mainModule(kj::str(other.mainModule)),
       moduleInfo(other.moduleInfo.clone()),
-      requirements(KJ_MAP(req, other.requirements) { return kj::str(req); }),
       pyodideVersion(kj::str(other.pyodideVersion)),
       packagesVersion(kj::str(other.packagesVersion)),
       packagesLock(kj::str(other.packagesLock)),
@@ -274,6 +264,13 @@ kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapsho
     if (pkgLock.getPackageDate() == pythonSnapshotRelease.getPackages()) {
       return kj::str(pkgLock.getLock());
     }
+  }
+
+  // From Pyodide 314 on, we don't use packages inside the lockfile.
+  // All packages used by the worker should come from PyPI and be bundled inside the worker.
+  // To avoid breaking existing workers, we return an empty lockfile if no packages are found.
+  if (pythonSnapshotRelease.getPackages().size() == 0) {
+    return kj::str("{\"packages\":{}}");
   }
 
   return kj::none;
@@ -428,54 +425,15 @@ kj::String getPythonBundleName(PythonSnapshotRelease::Reader pyodideRelease) {
 
 namespace api::pyodide {
 
-// Returns a string containing the contents of the hashset, delimited by ", "
-kj::String hashsetToString(const kj::HashSet<kj::String>& set) {
-  if (set.size() == 0) {
-    return kj::String();
-  }
-
-  kj::Vector<kj::StringPtr> elems;
-  for (const auto& e: set) {
-    elems.add(e);
-  }
-
-  // Sort the elements for consistent output
-  auto array = elems.releaseAsArray();
-  std::sort(array.begin(), array.end());
-
-  return kj::str(kj::delimited(array, ", "_kjc));
-}
-
-kj::Array<kj::String> getPythonPackageFiles(kj::StringPtr lockFileContents,
-    kj::ArrayPtr<kj::String> requirements,
-    kj::StringPtr packagesVersion) {
+kj::Array<kj::String> getPythonPackageFiles(kj::StringPtr lockFileContents) {
   auto packages = parseLockFile(lockFileContents);
-  auto depMap = getDepMapFromPackagesLock(*packages);
 
-  auto allRequirements = getPythonPackageNames(*packages, depMap, requirements, packagesVersion);
-
-  // Add the file names of all the requirements to our result array.
+  // The lock file is pre-filtered to contain exactly the packages we want to load, so we fetch the
+  // file for every package in it.
   kj::Vector<kj::String> res;
   for (const auto& ent: *packages) {
-    auto name = ent.getName();
     auto obj = ent.getValue().getObject();
-    auto fileName = kj::str(getField(obj, "file_name").getString());
-
-    auto maybeRow = allRequirements.find(name);
-    KJ_IF_SOME(row, maybeRow) {
-      allRequirements.erase(row);
-      res.add(kj::mv(fileName));
-    } else if (packagesVersion == "20240829.4") {
-      auto packageType = getField(obj, "package_type").getString();
-      if (packageType == "cpython_module") {
-        res.add(kj::mv(fileName));
-      }
-    }
-  }
-
-  if (allRequirements.size() != 0) {
-    JSG_FAIL_REQUIRE(Error,
-        "Requested Python package(s) that are not supported: ", hashsetToString(allRequirements));
+    res.add(kj::str(getField(obj, "file_name").getString()));
   }
 
   return res.releaseAsArray();

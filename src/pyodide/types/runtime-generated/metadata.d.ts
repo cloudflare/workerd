@@ -32,7 +32,6 @@ declare namespace MetadataReader {
   const getPyodideVersion: () => string;
   const getPackagesVersion: () => string;
   const getPackagesLock: () => string;
-  const getTransitiveRequirements: () => Set<string>;
   const read: (index: number, position: number, buffer: Uint8Array) => number;
   const getCompatibilityFlags: () => CompatibilityFlags;
   const setCpuLimitNearlyExceededCallback: (

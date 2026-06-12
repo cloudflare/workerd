@@ -7,7 +7,6 @@ import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
 import { default as UnsafeEval } from 'internal:unsafe-eval';
 import { default as DiskCache } from 'pyodide-internal:disk_cache';
 import { type FilePath, VIRTUALIZED_DIR } from 'pyodide-internal:setupPackages';
-import { default as EmbeddedPackagesTarReader } from 'pyodide-internal:packages_tar_reader';
 import {
   SHOULD_SNAPSHOT_TO_DISK,
   IS_CREATING_BASELINE_SNAPSHOT,
@@ -193,9 +192,9 @@ function loadDynlib(
  * This function is used to ensure the order in which we load SO_FILES stays the same. It is only
  * used for 0.26.0a2, later we look at SNAPSHOT_META.loadOrder to decide what order to load libs.
  *
- * The sort always puts _lzma.so and _ssl.so first, because these SO_FILES are loaded in the
- * baseline snapshot, and if we want to generate a package snapshot while a baseline snapshot is
- * loaded we need them to be first. The rest of the files are sorted alphabetically.
+ * The sort always puts _lzma.so and _ssl.so first, because these SO_FILES are loaded first when
+ * creating the baseline snapshot, so we keep them first here to preserve the load order. The rest
+ * of the files are sorted alphabetically.
  *
  * The `filePaths` list is of the form [["folder", "file.so"], ["file.so"]], so each element in it
  * is effectively a file path.
@@ -302,15 +301,15 @@ function loadDynlibFromTarFs(
   if (!node?.contentsOffset) {
     throw Error(`fs node could not be found for ${soFile.join('/')}`);
   }
-  const { contentsOffset, size } = node;
+  const { contentsOffset, size, reader } = node;
   if (contentsOffset === undefined) {
     throw Error(`contentsOffset not defined for ${soFile.join('/')}`);
   }
+  if (!reader) {
+    throw Error(`reader not defined for ${soFile.join('/')}`);
+  }
   const wasmModuleData = new Uint8Array(size);
-  (node.reader ?? EmbeddedPackagesTarReader).read(
-    contentsOffset,
-    wasmModuleData
-  );
+  reader.read(contentsOffset, wasmModuleData);
   const path = base + soFile.join('/');
   loadDynlib(Module, path, wasmModuleData);
 }
@@ -445,17 +444,11 @@ function recordDsoHandles(Module: Module): DsoHandles {
  * can't snapshot the JS runtime state so we have no ffi. Thus some imports from
  * user code will fail.
  *
- * If we are doing a baseline snapshot, just import everything from
- * baselineSnapshotImports. These will all succeed.
- *
- * If doing a more dedicated "package" snap shot, also try to import each
- * user import that is importing non-vendored modules.
+ * We import everything from baselineSnapshotImports. These will all succeed.
  *
  * All of this is being done in the __main__ global scope, so be careful not to
  * pollute it with extra included-by-default names (user code is executed in its
  * own separate module scope though so it's not _that_ important).
- *
- * This function returns a list of modules that have been imported.
  */
 function memorySnapshotDoImports(Module: Module): void {
   const baselineSnapshotImports =
@@ -637,7 +630,7 @@ function makeLinearMemorySnapshot(
     );
   }
   const settings: SnapshotSettings = {
-    baselineSnapshot: IS_CREATING_BASELINE_SNAPSHOT,
+    baselineSnapshot: snapshotType === 'baseline',
     snapshotType,
     compatFlags: COMPATIBILITY_FLAGS,
   };
@@ -718,7 +711,7 @@ function decodeSnapshot(
       loadOrder: [],
       soMemoryBases: {},
       settings: {
-        snapshotType: meta.settings?.baselineSnapshot ? 'baseline' : 'package',
+        snapshotType: 'baseline',
         compatFlags: {},
         ...meta.settings,
       },
@@ -731,9 +724,7 @@ function decodeSnapshot(
     ...extras,
     settings: {
       ...meta.settings,
-      snapshotType:
-        meta.settings.snapshotType ??
-        (meta.settings.baselineSnapshot ? 'baseline' : 'package'),
+      snapshotType: meta.settings.snapshotType ?? 'baseline',
       compatFlags: meta.settings.compatFlags ?? {},
     },
   };
@@ -850,11 +841,7 @@ export function maybeCollectDedicatedSnapshot(
   Module: Module,
   customSerializedObjects: CustomSerializedObjects | null
 ): void {
-  if (!IS_CREATING_SNAPSHOT) {
-    return;
-  }
-
-  if (!IS_DEDICATED_SNAPSHOT_ENABLED) {
+  if (!IS_CREATING_SNAPSHOT || !IS_DEDICATED_SNAPSHOT_ENABLED) {
     return;
   }
 
@@ -875,33 +862,22 @@ export function maybeCollectDedicatedSnapshot(
 }
 
 /**
- * Collects either a baseline or package snapshot. This is called prior to running the top-level
- * of the worker and crucially before the worker files are mounted.
+ * Collects a baseline snapshot if appropriate. This is called prior to running
+ * the top-level of the worker and crucially before the worker files are
+ * mounted.
  *
  * Dedicated snapshots are collected in `maybeCollectDedicatedSnapshot`.
  */
-export function maybeCollectSnapshot(
+export function maybeCollectBaselineSnapshot(
   Module: Module,
   customSerializedObjects: CustomSerializedObjects
 ): void {
   // In order to surface any problems that occur in `memorySnapshotDoImports` to
   // users in local development, always call it even if we aren't actually
   memorySnapshotDoImports(Module);
-  if (!IS_CREATING_SNAPSHOT) {
-    return;
+  if (IS_CREATING_SNAPSHOT && !IS_DEDICATED_SNAPSHOT_ENABLED) {
+    collectSnapshot(Module, customSerializedObjects, 'baseline');
   }
-
-  if (IS_DEDICATED_SNAPSHOT_ENABLED) {
-    // We are not interested in collecting a baseline/package snapshot here if this feature flag
-    // is enabled.
-    return;
-  }
-
-  collectSnapshot(
-    Module,
-    customSerializedObjects,
-    IS_CREATING_BASELINE_SNAPSHOT ? 'baseline' : 'package'
-  );
 }
 
 export function finalizeBootstrap(

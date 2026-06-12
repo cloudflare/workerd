@@ -1,0 +1,46 @@
+{
+  "info": {
+    "abi_version": "2025_0",
+    "arch": "wasm32",
+    "platform": "emscripten_4_0_9",
+    "python": "3.13.2",
+    "version": "0.28.1"
+  },
+  "packages": {
+    "hashlib": {
+      "file_name": "hashlib-1.0.0-cp313-cp313-pyodide_2025_0_wasm32.tar.gz",
+      "install_dir": "site",
+      "sha256": "3d48f7b026f94f2df4b35e60dcd53862c1451e5570bab60446bb5ca8c1a476de"
+    },
+    "libopenssl": {
+      "file_name": "libopenssl-1.1.1w.tar.gz",
+      "install_dir": "dynlib",
+      "sha256": "45617501d5e4a22e4a99d97da37f8547649c34a6f80ab63dc799058a83f8aee8"
+    },
+    "lzma": {
+      "file_name": "lzma-1.0.0-cp313-cp313-pyodide_2025_0_wasm32.tar.gz",
+      "install_dir": "site",
+      "sha256": "356f6f412ce9643137c2c4a3ad7d4e33bfaa90fb4db2dfe7f9ebf22b1c937c67"
+    },
+    "pydecimal": {
+      "file_name": "pydecimal-1.0.0-cp313-cp313-pyodide_2025_0_wasm32.tar.gz",
+      "install_dir": "site",
+      "sha256": "60609b9765a140b7ab55b92859d5737ee3e9b6e9e8060b68cf20edf11e1b9ca0"
+    },
+    "pydoc-data": {
+      "file_name": "pydoc_data-1.0.0-cp313-cp313-pyodide_2025_0_wasm32.tar.gz",
+      "install_dir": "site",
+      "sha256": "ee3ae17d6923b8f0c9979fad3fc5fa92d3277191b402d9a1b025ca2d5954ee05"
+    },
+    "sqlite3": {
+      "file_name": "sqlite3-1.0.0-cp313-cp313-pyodide_2025_0_wasm32.tar.gz",
+      "install_dir": "site",
+      "sha256": "12b24e6c9e0bbe66f4f35703641f60801dba3c94a81c24ac2046f9d418960cd5"
+    },
+    "ssl": {
+      "file_name": "ssl-1.0.0-cp313-cp313-pyodide_2025_0_wasm32.tar.gz",
+      "install_dir": "site",
+      "sha256": "efb2f31bd3db13118d3ed1bf4e6579f86dc95f55f4df69f5d8b4c2469efaaa8b"
+    }
+  }
+}

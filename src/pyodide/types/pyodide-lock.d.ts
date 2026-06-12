@@ -3,17 +3,13 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 type InstallDir = 'site' | 'stdlib' | 'dynlib';
+// The checked-in lock files are filtered down to just the fields that are still
+// consumed: file_name + install_dir for the runtime loader, and sha256 for the
+// build-time wheel download.
 interface PackageDeclaration {
-  depends: string[];
   file_name: string;
-  imports: string[];
   install_dir: InstallDir;
-  name: string;
-  package_type: string;
   sha256: string;
-  shared_library: boolean;
-  unvendored_tests: boolean;
-  version: string;
 }
 
 interface PackageLock {
