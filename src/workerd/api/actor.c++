@@ -288,9 +288,9 @@ void DurableObjectClass::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
               rpc::JsValue::ExternalPusher::DelayedChannelToken::Client>();
 
           // Arrange to send the token when it's ready.
-          ioctx.addTask(
-              promise.then([pusher = rpcHandler.getExternalPusher(),
-                               fulfiller = kj::mv(paf.fulfiller)](kj::Array<byte> token) mutable {
+          ioctx.addTask(promise.then(
+              [pusher = rpcHandler.getExternalPusher(), fulfiller = kj::mv(paf.fulfiller),
+                  attachedChannel = kj::mv(channel)](kj::Array<byte> token) mutable {
             auto req = pusher.pushDelayedChannelTokenRequest(
                 capnp::MessageSize{4 + token.size() / sizeof(capnp::word), 0});
             req.setToken(token);
