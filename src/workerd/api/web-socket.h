@@ -668,4 +668,127 @@ class WebSocket: public EventTarget {
       api::WebSocketPair::PairIterator::                                                           \
           Next  // The list of websocket.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
+// Abstract base for the operational implementation of an `api::WebSocket`.
+//
+// The eventual plan: `api::WebSocket` becomes a thin JSG-facing shell that owns a
+// `kj::Own<WebSocketAdapter> impl` and forwards every method to it. The current
+// `WebSocket` body — state machine, outgoing-message queue, pump, auto-response, read
+// loop, couple(), peer-tracking, identity — will move into a `LegacyWebSocketAdapter`
+// implementation in a follow-up commit. A future `HibernatableWebSocketAdapter` will
+// live as a sibling implementation, swapped into the shell's impl slot at
+// `acceptAsHibernatable()` (and on revival from hibernation).
+//
+// This commit just adds the abstract base; no behavior changes.
+class WebSocketAdapter {
+ public:
+  WebSocketAdapter() = default;
+  WebSocketAdapter(const WebSocketAdapter&) = delete;
+  WebSocketAdapter(WebSocketAdapter&&) = delete;
+  WebSocketAdapter& operator=(const WebSocketAdapter&) = delete;
+  WebSocketAdapter& operator=(WebSocketAdapter&&) = delete;
+
+  // Result of an outbound `new WebSocket(url)` connection attempt: a freshly-opened
+  // `kj::WebSocket` plus the negotiated subprotocol / extension strings extracted from
+  // the upgrade response headers. The JSG factory `WebSocket::constructor` kicks off an
+  // HTTP upgrade asynchronously, then passes a `kj::Promise<PackedWebSocket>` to
+  // `initConnection()` below, which on resolution transitions the adapter from
+  // AwaitingConnection to AwaitingAcceptanceOrCoupling and fires the `open` event.
+  struct PackedWebSocket {
+    kj::Own<kj::WebSocket> ws;
+    kj::Maybe<kj::String> proto;
+    kj::Maybe<kj::String> extensions;
+  };
+
+  // -------------------------------------------------------------------------
+  // JSG-exposed surface (what JS code calls). The shell will forward verbatim.
+  // -------------------------------------------------------------------------
+
+  virtual void accept(jsg::Lock& js, jsg::Optional<WebSocket::AcceptOptions> options) = 0;
+  virtual void send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> message) = 0;
+  virtual void close(
+      jsg::Lock& js, jsg::Optional<int> code, jsg::Optional<jsg::USVString> reason) = 0;
+  virtual void serializeAttachment(jsg::Lock& js, jsg::JsValue attachment) = 0;
+  virtual kj::Maybe<jsg::JsValue> deserializeAttachment(jsg::Lock& js) = 0;
+  virtual int getReadyState() = 0;
+  virtual kj::Maybe<kj::StringPtr> getUrl() = 0;
+  virtual kj::Maybe<kj::StringPtr> getProtocol() = 0;
+  virtual kj::Maybe<kj::StringPtr> getExtensions() = 0;
+  virtual kj::StringPtr getBinaryType() = 0;
+  virtual void setBinaryType(kj::String value) = 0;
+
+  // -------------------------------------------------------------------------
+  // Internal-but-forwarded surface (called from C++ across the codebase).
+  // -------------------------------------------------------------------------
+
+  // Initiates the `new WebSocket(url)` outbound connection. Called once during shell
+  // construction for the URL ctor.
+  virtual void initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket> packedWsPromise) = 0;
+
+  // Pumps messages between this WebSocket and `other`. Only valid in the post-connect /
+  // pre-accept state.
+  virtual kj::Promise<DeferredProxy<void>> couple(
+      jsg::Lock& js, kj::Own<kj::WebSocket> other, RequestObserver& request) = 0;
+
+  // Like `accept()` but called by C++ rather than JS — used by the URL-ctor success
+  // continuation.
+  virtual void internalAccept(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) = 0;
+
+  // State predicates.
+  virtual bool isAccepted() = 0;
+  virtual bool isReleased() = 0;
+
+  // True iff the adapter is in its post-connect / pre-accept state. Used by
+  // `peerIsAwaitingCoupling()` on the other end of a WebSocketPair.
+  virtual bool isAwaitingCoupling() = 0;
+
+  // True iff the adapter is in the Accepted-Hibernatable sub-state. Used by `couple()`
+  // to detect when one end of a pair is owned by the HibernationManager.
+  virtual bool isHibernatable() = 0;
+
+  // Attaches an observer that records websocket traffic. Called from `couple()` on the
+  // peer end when the local end is terminating in this worker.
+  virtual void setObserver(kj::Own<WebSocketObserver> observer) = 0;
+
+  // Hibernation transitions: extracts the kj::WebSocket so the HibernationManager can
+  // assume ownership; the adapter retains a bare reference for sends.
+  virtual kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::StringPtr> tags) = 0;
+
+  // HibernationManager coordination: signals that the underlying connection is winding
+  // down and the adapter should arrange to deliver its terminal close/error event.
+  virtual void initiateHibernatableRelease(jsg::Lock& js,
+      kj::Own<kj::WebSocket> ws,
+      kj::Array<kj::String> tags,
+      WebSocket::HibernatableReleaseState releaseState) = 0;
+  virtual bool awaitingHibernatableError() = 0;
+  virtual bool awaitingHibernatableRelease() = 0;
+
+  // Builds a package containing the per-WebSocket state that survives hibernation.
+  virtual WebSocket::HibernationPackage buildPackageForHibernation() = 0;
+
+  virtual kj::Array<kj::StringPtr> getHibernatableTags() = 0;
+  virtual kj::Maybe<kj::String> getPreferredExtensions(kj::WebSocket::ExtensionsContext ctx) = 0;
+
+  // Auto-response coordination (called by the HibernationManager's readLoop, possibly
+  // without an enclosing IoContext on the thread).
+  virtual void setAutoResponseStatus(
+      kj::Maybe<kj::Date> time, kj::Promise<void> autoResponsePromise) = 0;
+  virtual kj::Maybe<kj::Date> getAutoResponseTimestamp() = 0;
+  virtual kj::Promise<void> sendAutoResponse(kj::String message, kj::WebSocket& ws) = 0;
+
+  // -------------------------------------------------------------------------
+  // Peer tracking (the other end of a WebSocketPair).
+  // -------------------------------------------------------------------------
+
+  virtual void setPeer(jsg::WeakRef<WebSocket> peer) = 0;
+  virtual bool peerIsAwaitingCoupling(jsg::Lock& js) = 0;
+
+  // -------------------------------------------------------------------------
+  // GC + memory tracking. The shell's JSG-driven `visitForGc` and `visitForMemoryInfo`
+  // will forward to these.
+  // -------------------------------------------------------------------------
+
+  virtual void visitForGc(jsg::GcVisitor& visitor) = 0;
+  virtual void visitForMemoryInfo(jsg::MemoryTracker& tracker) const = 0;
+};
+
 }  // namespace workerd::api
