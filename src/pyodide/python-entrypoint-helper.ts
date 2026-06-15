@@ -14,7 +14,6 @@ import {
   IS_WORKERD,
   LEGACY_GLOBAL_HANDLERS,
   EXTERNAL_SDK,
-  LOCKFILE,
   MAIN_MODULE_NAME,
   SHOULD_SNAPSHOT_TO_DISK,
   WORKFLOWS_ENABLED,
@@ -163,7 +162,7 @@ async function getPyodide(): Promise<Pyodide> {
       return pyodidePromise;
     }
     pyodidePromise = (async function (): Promise<Pyodide> {
-      const pyodide = await loadPyodide(IS_WORKERD, LOCKFILE, {
+      const pyodide = await loadPyodide({
         pyodide_entrypoint_helper: get_pyodide_entrypoint_helper(),
         cloudflare_compat_flags: COMPATIBILITY_FLAGS,
       });

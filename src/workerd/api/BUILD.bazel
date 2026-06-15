@@ -377,6 +377,7 @@ wd_cc_library(
         "pyodide/requirements.h",
         "//src/pyodide:generated/pyodide_extra.capnp.h",
         "//src/pyodide:pyodide_static.capnp.h",
+        "//src/pyodide:python_packages.capnp.h",
     ],
     implementation_deps = [
         "//src/workerd/io",
@@ -386,6 +387,7 @@ wd_cc_library(
     deps = [
         "//src/pyodide:pyodide_extra_capnp",
         "//src/pyodide:pyodide_static",
+        "//src/pyodide:python_packages_capnp",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj:kj-async",

@@ -107,6 +107,17 @@ def pyodide_extra():
         }),
     )
 
+def _packages_tag_for_version(version):
+    # Maps a Pyodide version to the package lock tag whose stdlib wheels should be embedded into
+    # that version's bundle. Newer Pyodide versions bundle the stdlib directly and have no lock
+    # file / wheels to embed, in which case this returns None.
+    for name, info in BUNDLE_VERSION_INFO.items():
+        if name == "development":
+            continue
+        if info["pyodide_version"] == version and "packages" in info:
+            return info["packages"]
+    return None
+
 def python_bundles(overrides = {}):
     srcs = [_python_bundle_helper(info, overrides) for info in PYODIDE_VERSIONS]
     native.filegroup(
@@ -329,6 +340,41 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
             deps = ["pyodide.asm.js@rule_js@" + version],
         )
 
+    # The CPython stdlib modules and the shared libraries they depend on are embedded directly into
+    # the bundle so that the runtime no longer has to download or unpack them at request time. The
+    # wheels listed in the (pre-filtered) lock file are extracted at build time into a single
+    # PythonPackages capnp message (one entry per file, keyed by install_dir + path; see
+    # python_packages.capnp / pack_python_packages.py) which is embedded as the `python_packages`
+    # data module. Newer Pyodide versions bundle the stdlib directly and have no wheels to embed.
+    packages_tag = _packages_tag_for_version(version)
+    internal_data_modules = [
+        _out_path("python_stdlib.zip", version),
+    ]
+    extra_deps = []
+    has_packages = bool(packages_tag)
+    if has_packages:
+        lockfile = "python-lock/pyodide-lock_%s.json" % packages_tag
+        wheels = "@all_pyodide_wheels_%s//:whls" % packages_tag
+        native.genrule(
+            name = "python_packages.bin@rule@" + version,
+            srcs = [wheels, lockfile, "python_packages.capnp"],
+            outs = [_out_path("python_packages.bin", version)],
+            cmd = " ".join([
+                "$(execpath :pack_python_packages)",
+                "--capnp $(execpath @capnp-cpp//src/capnp:capnp_tool)",
+                "--schema $(location python_packages.capnp)",
+                "--lock $(location %s)" % lockfile,
+                "--out $@",
+                "$(locations %s)" % wheels,
+            ]),
+            tools = [
+                ":pack_python_packages",
+                "@capnp-cpp//src/capnp:capnp_tool",
+            ],
+        )
+        internal_data_modules.append(_out_path("python_packages.bin", version))
+        extra_deps.append("python_packages.bin@rule@" + version)
+
     import_name = "pyodideRuntime"
     wd_js_bundle(
         name = "pyodide@" + version,
@@ -341,27 +387,28 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
         internal_wasm_modules = [
             _out_path("pyodide.asm.wasm", version),
         ],
-        internal_data_modules = [
-            _out_path("python_stdlib.zip", version),
-        ],
+        internal_data_modules = internal_data_modules,
         deps = [
             "emscriptenSetup@" + version,
             "pyodide.asm.wasm@copy@" + version,
             "python_stdlib.zip@copy@" + version,
-        ],
+        ] + extra_deps,
         out_dir = _out_path("", version),
     )
 
     pyodide_cappn_bin_rule = "pyodide.capnp.bin@rule@" + version
+    bin_srcs = [
+        ":pyodide@%s.capnp" % version,
+        "//src/workerd/jsg:modules.capnp",
+        _ts_bundle_out(import_name + "-internal_", "emscriptenSetup", version),
+        _ts_bundle_out(import_name + "-internal_", "pyodide.asm.wasm", version),
+        _ts_bundle_out(import_name + "-internal_", "python_stdlib.zip", version),
+    ]
+    if has_packages:
+        bin_srcs.append(_ts_bundle_out(import_name + "-internal_", "python_packages.bin", version))
     native.genrule(
         name = pyodide_cappn_bin_rule,
-        srcs = [
-            ":pyodide@%s.capnp" % version,
-            "//src/workerd/jsg:modules.capnp",
-            _ts_bundle_out(import_name + "-internal_", "emscriptenSetup", version),
-            _ts_bundle_out(import_name + "-internal_", "pyodide.asm.wasm", version),
-            _ts_bundle_out(import_name + "-internal_", "python_stdlib.zip", version),
-        ],
+        srcs = bin_srcs,
         outs = [_out_path("pyodide.capnp.bin", version)],
         cmd = " ".join([
             # Annoying logic to deal with different paths in workerd vs downstream.

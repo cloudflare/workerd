@@ -4949,10 +4949,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     }
 
     using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
-    auto isPythonWorker = def.featureFlags.getPythonWorkers();
-    auto artifactBundler = isPythonWorker
-        ? ArtifactBundler::makePackagesOnlyBundler(pythonConfig.pyodidePackageManager)
-        : ArtifactBundler::makeDisabledBundler();
+    auto artifactBundler = ArtifactBundler::makeDisabledBundler();
 
     newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(*jsgobserver,
         def.source.variant.tryGet<Worker::Script::ModulesSource>(), def.featureFlags, pythonConfig,
@@ -5030,10 +5027,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   }
 
   using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
-  auto isPythonWorker = def.featureFlags.getPythonWorkers();
-  auto artifactBundler = isPythonWorker
-      ? ArtifactBundler::makePackagesOnlyBundler(pythonConfig.pyodidePackageManager)
-      : ArtifactBundler::makeDisabledBundler();
+  auto artifactBundler = ArtifactBundler::makeDisabledBundler();
 
   auto script = isolate->newScript(name, def.source, IsolateObserver::StartType::COLD,
       SpanParent(nullptr), workerFs.attach(kj::mv(def.maybeOwnedSourceCode)), false, errorReporter,
@@ -6144,22 +6138,10 @@ kj::Promise<void> Server::preloadPython(
     KJ_IF_SOME(release, pythonRelease) {
       auto version = getPythonBundleName(release);
 
-      // Fetch the Pyodide bundle, verifying its integrity against the expected checksum.
+      // Fetch the Pyodide bundle, verifying its integrity against the expected checksum. The
+      // bundle embeds the CPython stdlib packages directly, so there is nothing else to preload.
       co_await server::fetchPyodideBundle(
           pythonConfig, kj::mv(version), release.getIntegrity(), network, timer);
-
-      // Preload unvendored standard libraries for older Pyodide versions
-      // From Pyodide 314 on, we don't unvendor standard libraries.
-      if (release.getPackages().size() > 0) {
-        // Preload the Python stdlib packages.
-        KJ_IF_SOME(modulesSource, workerDef.source.variant.tryGet<Worker::Script::ModulesSource>()) {
-          if (modulesSource.isPython) {
-            // Store the packages in the package manager that is stored in the pythonConfig
-            co_await server::fetchPyodideStdlib(
-                pythonConfig, pythonConfig.pyodidePackageManager, release, network, timer);
-          }
-        }
-      }
     }
   }
 }

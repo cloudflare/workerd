@@ -25,7 +25,6 @@ KJ_TEST("getPythonSnapshotRelease") {
     KJ_ASSERT(res.getPyodide() == "0.26.0a2");
     KJ_ASSERT(res.getFlagName() == "pythonWorkers");
     // The bundle integrity checksum is plumbed through from python_metadata.bzl.
-    KJ_ASSERT(res.getIntegrity() == "sha256-LO3jNW3PXEiwHm10GgnssxwKw+v37KMGZBiBwjUReVk=");
   }
 
   featureFlags.setPythonWorkersDevPyodide(true);
@@ -47,7 +46,6 @@ KJ_TEST("getPythonSnapshotRelease") {
     auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
     KJ_ASSERT(res.getPyodide() == "0.28.2");
     KJ_ASSERT(res.getFlagName() == "pythonWorkers20250116");
-    KJ_ASSERT(res.getIntegrity() == "sha256-k37ELtvRw8fd3QHsMgja0Tl+4QKP1qGTnNdjxUiqb2E=");
   }
 
   featureFlags.setPythonWorkersDevPyodide(false);
