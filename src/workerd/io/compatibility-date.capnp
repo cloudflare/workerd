@@ -1555,4 +1555,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # When enabled, a Worker's outbound gRPC-web subrequest is converted to gRPC at
   # the edge.
+
+  workflowsBindingsRpc @179 :Bool
+    $compatEnableFlag("workflows_bindings_rpc")
+    $experimental;
+  # When enabled, the `env.WORKFLOW` binding (cloudflare-internal:workflows-api)
+  # dispatches its methods as JSRPC calls on the inner fetcher instead of HTTP
+  # requests against the binding-shim worker. Without the flag the legacy HTTP
+  # transport is used.
 }
