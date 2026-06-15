@@ -2127,6 +2127,41 @@ void Worker::processEntrypointClass(jsg::Lock& js,
   });
 }
 
+namespace {
+
+// Reads a string-valued property off a v8 Object. Returns kj::none if the property is missing,
+// not a string, or its accessor throws (some user code defines `stack` as a throwing getter).
+// Caller must already hold a v8::TryCatch in scope.
+kj::Maybe<kj::String> tryGetStringProperty(jsg::Lock& js,
+    v8::Local<v8::Object> obj,
+    kj::StringPtr propName) {
+  auto context = js.v8Context();
+  auto key = jsg::v8StrIntern(js.v8Isolate, propName);
+  v8::Local<v8::Value> val;
+  if (!obj->Get(context, key).ToLocal(&val)) {
+    return kj::none;
+  }
+  if (!val->IsString()) {
+    return kj::none;
+  }
+  return kj::str(val.As<v8::String>());
+}
+
+// Extracts {name, message, stack} from a v8 Error. Returns kj::none if name or message are
+// missing (defensive: a stripped-down Error-like is not useful enough to surface as ErrorInfo).
+// Caller must hold a v8::TryCatch covering this call.
+kj::Maybe<tracing::ErrorInfo> extractErrorInfo(jsg::Lock& js, v8::Local<v8::Object> errorObj) {
+  KJ_IF_SOME(name, tryGetStringProperty(js, errorObj, "name"_kj)) {
+    KJ_IF_SOME(message, tryGetStringProperty(js, errorObj, "message"_kj)) {
+      auto stack = tryGetStringProperty(js, errorObj, "stack"_kj);
+      return tracing::ErrorInfo(kj::mv(name), kj::mv(message), kj::mv(stack));
+    }
+  }
+  return kj::none;
+}
+
+}  // namespace
+
 void Worker::handleLog(jsg::Lock& js,
     const LoggingOptions& loggingOptions,
     LogLevel level,
@@ -2146,6 +2181,23 @@ void Worker::handleLog(jsg::Lock& js,
   // terminating, usually as a result of an infinite loop. We need to perform the initialization
   // here because `message` is called multiple times.
   v8::TryCatch tryCatch(js.v8Isolate);
+
+  // Scan arguments for the first native Error and capture its {name, message, stack} as
+  // structured ErrorInfo. We do this independently of the stringification below so that
+  // (a) calling `message()` multiple times doesn't re-extract, and (b) the existing
+  // stringification behavior is unchanged for backwards compatibility — the structured
+  // ErrorInfo is purely additive.
+  kj::Maybe<tracing::ErrorInfo> capturedError;
+  for (auto i: kj::zeroTo(length)) {
+    if (!tryCatch.CanContinue()) break;
+    auto arg = info[i];
+    if (!arg->IsNativeError()) continue;
+    js.withinHandleScope([&] {
+      capturedError = extractErrorInfo(js, arg.As<v8::Object>());
+    });
+    if (capturedError != kj::none) break;
+  }
+
   auto message = [&]() {
     int length = info.Length();
     kj::Vector<kj::String> stringified(length);
@@ -2221,7 +2273,8 @@ void Worker::handleLog(jsg::Lock& js,
   KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
       auto timestamp = ioContext.now();
-      tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, level, message());
+      tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, level, message(),
+          kj::mv(capturedError));
     }
   }
 

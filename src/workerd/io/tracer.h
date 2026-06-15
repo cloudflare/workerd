@@ -37,10 +37,15 @@ class BaseTracer: public kj::Refcounted {
   }
 
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
+  //
+  // `errorInfo` carries structured Error fields extracted from any Error argument passed to
+  // the originating console.* call (e.g. `console.error(new Error("x"))`). Pass `kj::none`
+  // for non-console internal warning paths, or when no argument was a native Error.
   virtual void addLog(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       LogLevel logLevel,
-      kj::String message) = 0;
+      kj::String message,
+      kj::Maybe<tracing::ErrorInfo> errorInfo = kj::none) = 0;
   // Add a span open event.
   virtual void addSpanOpen(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
@@ -146,7 +151,8 @@ class WorkerTracer final: public BaseTracer {
   void addLog(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       LogLevel logLevel,
-      kj::String message) override;
+      kj::String message,
+      kj::Maybe<tracing::ErrorInfo> errorInfo = kj::none) override;
   void addSpanOpen(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,

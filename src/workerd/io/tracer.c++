@@ -122,7 +122,8 @@ constexpr kj::LiteralStringConst logSizeExceeded =
 void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     LogLevel logLevel,
-    kj::String message) {
+    kj::String message,
+    kj::Maybe<tracing::ErrorInfo> errorInfo) {
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
@@ -133,9 +134,13 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     // If message is too big on its own, truncate it.
     size_t messageSize = kj::min(message.size(), MAX_TRACE_BYTES);
+    // Clone errorInfo for the STW path because the batched-tail path below also needs it.
+    auto streamErrorInfo = errorInfo.map(
+        [](const tracing::ErrorInfo& info) { return info.clone(); });
     writer->report(context,
-        {tracing::Log(timestamp, logLevel, kj::str(message.first(messageSize)))}, timestamp,
-        messageSize);
+        {tracing::Log(timestamp, logLevel, kj::str(message.first(messageSize)),
+            kj::mv(streamErrorInfo))},
+        timestamp, messageSize);
   }
 
   if (trace->exceededLogLimit) {
@@ -150,7 +155,7 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     trace->truncated = true;
   } else {
     trace->bytesUsed += messageSize;
-    trace->logs.add(timestamp, logLevel, kj::mv(message));
+    trace->logs.add(timestamp, logLevel, kj::mv(message), kj::mv(errorInfo));
   }
 }
 
