@@ -3309,7 +3309,7 @@ interface TraceLog {
   readonly timestamp: number;
   readonly level: string;
   readonly message: any;
-  readonly errorInfo?: TraceLogErrorInfo;
+  readonly errorInfo?: (TraceLogErrorInfo | null)[];
 }
 interface TraceLogErrorInfo {
   name: string;
@@ -14854,10 +14854,12 @@ declare namespace TailStream {
     readonly level: "debug" | "error" | "info" | "log" | "warn";
     readonly message: object;
     /**
-     * Structured Error fields surfaced when a `console.*` argument was a native Error.
-     * Absent for log entries whose arguments did not include any native Error.
+     * Per-argument structured Error fields for the originating `console.*` call.
+     * The array is positional: index `i` corresponds to the i-th argument. Indices
+     * whose argument was not a native Error are `null`. The whole property is
+     * absent (undefined) when none of the arguments was a native Error.
      */
-    readonly errorInfo?: TailStreamErrorInfo;
+    readonly errorInfo?: readonly (TailStreamErrorInfo | null)[];
   }
   interface TailStreamErrorInfo {
     readonly name: string;

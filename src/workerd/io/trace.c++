@@ -759,10 +759,22 @@ ErrorInfo ErrorInfo::clone() const {
       stack.map([](const kj::String& s) { return kj::str(s); }));
 }
 
-Log::Log(kj::Date timestamp,
-    LogLevel logLevel,
-    kj::String message,
-    kj::Maybe<ErrorInfo> errorInfo)
+LogErrorInfo cloneLogErrorInfo(const LogErrorInfo& src) {
+  KJ_IF_SOME(slots, src) {
+    // Each slot starts out kj::none (default-constructed by heapArray); we only
+    // populate slots that hold an Error in the source.
+    auto out = kj::heapArray<kj::Maybe<ErrorInfo>>(slots.size());
+    for (auto i: kj::zeroTo(slots.size())) {
+      KJ_IF_SOME(info, slots[i]) {
+        out[i] = info.clone();
+      }
+    }
+    return out;
+  }
+  return kj::none;
+}
+
+Log::Log(kj::Date timestamp, LogLevel logLevel, kj::String message, LogErrorInfo errorInfo)
     : timestamp(timestamp),
       logLevel(logLevel),
       message(kj::mv(message)),
@@ -772,14 +784,21 @@ void Log::copyTo(rpc::Trace::Log::Builder builder) const {
   builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setLogLevel(logLevel);
   builder.setMessage(message);
-  KJ_IF_SOME(info, errorInfo) {
-    info.copyTo(builder.initErrorInfo());
+  KJ_IF_SOME(slots, errorInfo) {
+    auto listBuilder = builder.initErrorInfo(slots.size());
+    for (auto i: kj::zeroTo(slots.size())) {
+      auto slotBuilder = listBuilder[i];
+      KJ_IF_SOME(info, slots[i]) {
+        info.copyTo(slotBuilder.initInfo());
+      } else {
+        slotBuilder.setNone();
+      }
+    }
   }
 }
 
 Log Log::clone() const {
-  return Log(timestamp, logLevel, kj::str(message),
-      errorInfo.map([](const ErrorInfo& info) { return info.clone(); }));
+  return Log(timestamp, logLevel, kj::str(message), cloneLogErrorInfo(errorInfo));
 }
 
 Exception::Exception(
@@ -794,7 +813,16 @@ Log::Log(rpc::Trace::Log::Reader reader)
       logLevel(reader.getLogLevel()),
       message(kj::str(reader.getMessage())) {
   if (reader.hasErrorInfo()) {
-    errorInfo = ErrorInfo(reader.getErrorInfo());
+    auto listReader = reader.getErrorInfo();
+    auto slots = kj::heapArray<kj::Maybe<ErrorInfo>>(listReader.size());
+    for (auto i: kj::zeroTo(listReader.size())) {
+      auto slotReader = listReader[i];
+      if (slotReader.which() == rpc::Trace::ErrorInfoSlot::INFO) {
+        slots[i] = ErrorInfo(slotReader.getInfo());
+      }
+      // else: stays kj::none
+    }
+    errorInfo = kj::mv(slots);
   }
 }
 

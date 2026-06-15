@@ -82,11 +82,15 @@ struct Trace @0x8e8d911203762d34 {
 
     message @2 :Text;
 
-    errorInfo @3 :ErrorInfo;
-    # Structured Error fields extracted from any Error argument passed to the console
-    # call that produced this log (e.g. `console.error(new Error("x"))`). Absent when
-    # none of the arguments was a native Error. The stringified form of the arguments
-    # remains in `message` unchanged for backwards compatibility.
+    errorInfo @3 :List(ErrorInfoSlot);
+    # Per-argument structured Error fields for the console call that produced this
+    # log. The list is positional: slot `i` corresponds to the i-th argument of the
+    # originating `console.*` call. Slots whose argument was not a native Error are
+    # encoded as `none`. The field is absent entirely (zero-length list on the wire)
+    # when none of the arguments was a native Error.
+    #
+    # The stringified form of the arguments remains in `message` unchanged for
+    # backwards compatibility.
   }
 
   struct ErrorInfo {
@@ -96,6 +100,15 @@ struct Trace @0x8e8d911203762d34 {
     name @0 :Text;
     message @1 :Text;
     stack @2 :Text;
+  }
+
+  struct ErrorInfoSlot {
+    # One slot in the per-argument errorInfo list. `info` is set when the
+    # corresponding console argument was a native Error; `none` otherwise.
+    union {
+      none @0 :Void;
+      info @1 :ErrorInfo;
+    }
   }
 
   obsolete26 @26 :List(UserSpanData);

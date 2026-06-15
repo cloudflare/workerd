@@ -123,7 +123,7 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     LogLevel logLevel,
     kj::String message,
-    kj::Maybe<tracing::ErrorInfo> errorInfo) {
+    tracing::LogErrorInfo errorInfo) {
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
@@ -135,8 +135,7 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     // If message is too big on its own, truncate it.
     size_t messageSize = kj::min(message.size(), MAX_TRACE_BYTES);
     // Clone errorInfo for the STW path because the batched-tail path below also needs it.
-    auto streamErrorInfo = errorInfo.map(
-        [](const tracing::ErrorInfo& info) { return info.clone(); });
+    auto streamErrorInfo = tracing::cloneLogErrorInfo(errorInfo);
     writer->report(context,
         {tracing::Log(timestamp, logLevel, kj::str(message.first(messageSize)),
             kj::mv(streamErrorInfo))},

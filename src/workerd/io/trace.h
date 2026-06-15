@@ -626,12 +626,23 @@ struct ErrorInfo final {
   ErrorInfo clone() const;
 };
 
+// Per-argument errorInfo for a Log. The outer kj::Maybe is `kj::none` when none
+// of the originating console call's arguments was a native Error (the dominant
+// case, kept cheap on the wire). When present, the inner array's length matches
+// the argument count; slot `i` is `kj::some(ErrorInfo)` if `info[i]` was a native
+// Error, `kj::none` otherwise.
+using LogErrorInfo = kj::Maybe<kj::Array<kj::Maybe<ErrorInfo>>>;
+
+// Helper: deep-copy a LogErrorInfo. Needed because kj::Array is move-only and
+// ErrorInfo contains non-copyable strings.
+LogErrorInfo cloneLogErrorInfo(const LogErrorInfo& src);
+
 // Describes a log event
 struct Log final {
   explicit Log(kj::Date timestamp,
       LogLevel logLevel,
       kj::String message,
-      kj::Maybe<ErrorInfo> errorInfo = kj::none);
+      LogErrorInfo errorInfo = kj::none);
   Log(rpc::Trace::Log::Reader reader);
   Log(Log&&) noexcept = default;
   KJ_DISALLOW_COPY(Log);
@@ -644,10 +655,8 @@ struct Log final {
   // TODO(soon): Just string for now.  Eventually, capture serialized JS objects.
   kj::String message;
 
-  // Populated when at least one argument to the originating console call was a
-  // native Error. Carries the structured {name, message, stack} fields so that tail
-  // workers can surface them without depending on lossy stringification of `message`.
-  kj::Maybe<ErrorInfo> errorInfo;
+  // Per-argument structured Error fields. See LogErrorInfo above for semantics.
+  LogErrorInfo errorInfo;
 
   void copyTo(rpc::Trace::Log::Builder builder) const;
   Log clone() const;

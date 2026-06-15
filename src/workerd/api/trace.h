@@ -649,7 +649,11 @@ class TraceLog final: public jsg::Object {
   double getTimestamp();
   kj::StringPtr getLevel();
   jsg::V8Ref<v8::Object> getMessage(jsg::Lock& js);
-  jsg::Optional<TraceLogErrorInfo> getErrorInfo();
+  // Returns the per-argument errorInfo list, or kj::none / undefined when none of
+  // the originating console call's arguments was a native Error. When present,
+  // the array length matches the argument count; slots whose argument was not an
+  // Error are JS `null`.
+  jsg::Optional<kj::Array<kj::Maybe<TraceLogErrorInfo>>> getErrorInfo();
 
   JSG_RESOURCE_TYPE(TraceLog) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(timestamp, getTimestamp);
@@ -660,14 +664,13 @@ class TraceLog final: public jsg::Object {
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("message", message);
-    tracker.trackField("errorInfo", errorInfo);
   }
 
  private:
   double timestamp;
   kj::LiteralStringConst level;
   jsg::V8Ref<v8::Object> message;
-  kj::Maybe<TraceLogErrorInfo> errorInfo;
+  kj::Maybe<kj::Array<kj::Maybe<TraceLogErrorInfo>>> errorInfo;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(message);

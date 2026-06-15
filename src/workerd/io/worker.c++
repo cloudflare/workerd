@@ -2182,20 +2182,32 @@ void Worker::handleLog(jsg::Lock& js,
   // here because `message` is called multiple times.
   v8::TryCatch tryCatch(js.v8Isolate);
 
-  // Scan arguments for the first native Error and capture its {name, message, stack} as
-  // structured ErrorInfo. We do this independently of the stringification below so that
-  // (a) calling `message()` multiple times doesn't re-extract, and (b) the existing
-  // stringification behavior is unchanged for backwards compatibility — the structured
-  // ErrorInfo is purely additive.
-  kj::Maybe<tracing::ErrorInfo> capturedError;
-  for (auto i: kj::zeroTo(length)) {
-    if (!tryCatch.CanContinue()) break;
-    auto arg = info[i];
-    if (!arg->IsNativeError()) continue;
-    js.withinHandleScope([&] {
-      capturedError = extractErrorInfo(js, arg.As<v8::Object>());
-    });
-    if (capturedError != kj::none) break;
+  // Scan all arguments for native Errors and build a positional ErrorInfo array:
+  // slot `i` holds the extracted {name, message, stack} for arg `i` if it was a native
+  // Error, otherwise kj::none. If no argument was a native Error, the whole array is
+  // left absent (kj::none) to keep the common case cheap on the wire.
+  //
+  // We do this independently of the stringification below so that calling `message()`
+  // multiple times doesn't re-extract, and so the existing stringification behavior is
+  // unchanged for backwards compatibility — the structured ErrorInfo is purely additive.
+  tracing::LogErrorInfo capturedErrors;
+  {
+    auto slots = kj::heapArray<kj::Maybe<tracing::ErrorInfo>>(length);
+    bool anyError = false;
+    for (auto i: kj::zeroTo(length)) {
+      if (!tryCatch.CanContinue()) break;
+      auto arg = info[i];
+      if (!arg->IsNativeError()) continue;
+      js.withinHandleScope([&] {
+        KJ_IF_SOME(extracted, extractErrorInfo(js, arg.As<v8::Object>())) {
+          slots[i] = kj::mv(extracted);
+          anyError = true;
+        }
+      });
+    }
+    if (anyError) {
+      capturedErrors = kj::mv(slots);
+    }
   }
 
   auto message = [&]() {
@@ -2274,7 +2286,7 @@ void Worker::handleLog(jsg::Lock& js,
     KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
       auto timestamp = ioContext.now();
       tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, level, message(),
-          kj::mv(capturedError));
+          kj::mv(capturedErrors));
     }
   }
 
