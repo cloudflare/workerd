@@ -212,7 +212,7 @@ export const unhandledRejectionHandler4 = {
 };
 
 export const structuredClone = {
-  test() {
+  async test() {
     {
       strictEqual(globalThis.structuredClone('hello'), 'hello');
     }
@@ -305,6 +305,25 @@ export const structuredClone = {
       ok(cloned instanceof Headers);
       strictEqual(cloned.get('foo'), '123');
       strictEqual(cloned.get('bar'), 'abc');
+    }
+
+    // Blob is a serializable platform object.
+    {
+      let orig = new Blob(['abc', 'def'], { type: 'text/plain' });
+      let cloned = globalThis.structuredClone(orig);
+      ok(cloned instanceof Blob);
+      notStrictEqual(cloned, orig);
+      strictEqual(cloned.type, 'text/plain');
+      strictEqual(cloned.size, orig.size);
+      strictEqual(await cloned.text(), 'abcdef');
+    }
+
+    // An empty Blob round-trips too.
+    {
+      let cloned = globalThis.structuredClone(new Blob([]));
+      ok(cloned instanceof Blob);
+      strictEqual(cloned.size, 0);
+      strictEqual(cloned.type, '');
     }
 
     // Verify that trying to serialize a non-serializable API type throws.
