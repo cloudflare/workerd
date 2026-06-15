@@ -651,6 +651,8 @@ type DurableObjectLocationHint =
   | "weur"
   | "eeur"
   | "apac"
+  | "apac-ne"
+  | "apac-se"
   | "oc"
   | "afr"
   | "me";
@@ -3307,6 +3309,12 @@ interface TraceLog {
   readonly timestamp: number;
   readonly level: string;
   readonly message: any;
+  readonly errorInfo?: TraceLogErrorInfo;
+}
+interface TraceLogErrorInfo {
+  name: string;
+  message: string;
+  stack?: string;
 }
 interface TraceException {
   readonly timestamp: number;
@@ -14845,6 +14853,16 @@ declare namespace TailStream {
     readonly type: "log";
     readonly level: "debug" | "error" | "info" | "log" | "warn";
     readonly message: object;
+    /**
+     * Structured Error fields surfaced when a `console.*` argument was a native Error.
+     * Absent for log entries whose arguments did not include any native Error.
+     */
+    readonly errorInfo?: TailStreamErrorInfo;
+  }
+  interface TailStreamErrorInfo {
+    readonly name: string;
+    readonly message: string;
+    readonly stack?: string;
   }
   interface DroppedEventsDiagnostic {
     readonly diagnosticsType: "droppedEvents";

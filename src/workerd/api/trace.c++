@@ -601,10 +601,22 @@ bool TraceItem::HibernatableWebSocketEventInfo::Close::getWasClean() {
   return eventInfo.wasClean;
 }
 
+TraceLogErrorInfo::TraceLogErrorInfo(const tracing::ErrorInfo& info)
+    : name(kj::str(info.name)),
+      message(kj::str(info.message)),
+      stack(mapCopyString(info.stack)) {}
+
+TraceLogErrorInfo::TraceLogErrorInfo(const TraceLogErrorInfo& other)
+    : name(kj::str(other.name)),
+      message(kj::str(other.message)),
+      stack(other.stack.map([](const kj::String& s) { return kj::str(s); })) {}
+
 TraceLog::TraceLog(jsg::Lock& js, const Trace& trace, const tracing::Log& log)
     : timestamp(getTraceLogTimestamp(log)),
       level(getTraceLogLevel(log)),
-      message(getTraceLogMessage(js, log)) {}
+      message(getTraceLogMessage(js, log)),
+      errorInfo(log.errorInfo.map(
+          [](const tracing::ErrorInfo& info) { return TraceLogErrorInfo(info); })) {}
 
 double TraceLog::getTimestamp() {
   return timestamp;
@@ -616,6 +628,13 @@ kj::StringPtr TraceLog::getLevel() {
 
 jsg::V8Ref<v8::Object> TraceLog::getMessage(jsg::Lock& js) {
   return message.addRef(js);
+}
+
+jsg::Optional<TraceLogErrorInfo> TraceLog::getErrorInfo() {
+  KJ_IF_SOME(info, errorInfo) {
+    return TraceLogErrorInfo(info);
+  }
+  return kj::none;
 }
 
 TraceException::TraceException(const Trace& trace, const tracing::Exception& exception)

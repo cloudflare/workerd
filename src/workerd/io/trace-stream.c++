@@ -39,6 +39,7 @@ namespace {
   V(EMAIL, "email")                                                                                \
   V(ENTRYPOINT, "entrypoint")                                                                      \
   V(ERROR, "error")                                                                                \
+  V(ERRORINFO, "errorInfo")                                                                        \
   V(EVENT, "event")                                                                                \
   V(EXCEEDEDCPU, "exceededCpu")                                                                    \
   V(EXCEEDEDMEMORY, "exceededMemory")                                                              \
@@ -518,6 +519,15 @@ jsg::JsValue ToJs(jsg::Lock& js, const Log& log, StringCache& cache) {
   obj.set(js, LEVEL_STR, ToJs(js, log.logLevel, cache));
   // TODO(o11y): Check that we are always returning an object here
   obj.set(js, MESSAGE_STR, jsg::JsValue(js.parseJson(log.message).getHandle(js)));
+  KJ_IF_SOME(info, log.errorInfo) {
+    auto errObj = js.obj();
+    errObj.set(js, NAME_STR, js.str(info.name));
+    errObj.set(js, MESSAGE_STR, js.str(info.message));
+    KJ_IF_SOME(stack, info.stack) {
+      errObj.set(js, STACK_STR, js.str(stack));
+    }
+    obj.set(js, ERRORINFO_STR, errObj);
+  }
   return obj;
 }
 
