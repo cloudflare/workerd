@@ -1901,6 +1901,7 @@ class ResourceWrapper {
     // "skip callback and just allow".)
     context->AllowCodeGenerationFromStrings(false);
 
+#if V8_MAJOR_VERSION >= 15
     // Register a placeholder for Temporal's high-resolution "now" source. We don't enable the
     // Temporal API yet, but V8 uses this callback to obtain the current time for Temporal once it
     // is enabled. Returning a constant rather than a real high-resolution clock is important for
@@ -1909,6 +1910,7 @@ class ResourceWrapper {
     // returned value (and its resolution) at that point.
     context->SetTemporalHostSystemUTCEpochNanosecondsCallback(
         [](v8::Local<v8::Context>) -> int64_t { return 0; });
+#endif
 
     if (!options.enableWeakRef) {
       check(global->Delete(context, v8StrIntern(isolate, "WeakRef"_kj)));

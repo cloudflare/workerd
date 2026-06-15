@@ -11,6 +11,13 @@
 
 #include <cmath>
 
+#if V8_MAJOR_VERSION >= 15
+#define Utf8LengthV2 Utf8Length
+#define WriteV2 Write
+#define WriteOneByteV2 WriteOneByte
+#define WriteUtf8V2 WriteUtf8
+#endif
+
 namespace workerd::jsg {
 
 JsValue::JsValue(v8::Local<v8::Value> inner): inner(inner) {
@@ -343,21 +350,21 @@ JsArray::operator JsObject() const {
 }
 
 kj::String JsString::toString(jsg::Lock& js) const {
-  auto buf = kj::heapArray<char>(inner->Utf8Length(js.v8Isolate) + 1);
-  inner->WriteUtf8(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
+  auto buf = kj::heapArray<char>(inner->Utf8LengthV2(js.v8Isolate) + 1);
+  inner->WriteUtf8V2(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
   return kj::String(kj::mv(buf));
 }
 
 jsg::USVString JsString::toUSVString(Lock& js) const {
-  auto buf = kj::heapArray<char>(inner->Utf8Length(js.v8Isolate) + 1);
-  inner->WriteUtf8(js.v8Isolate, buf.begin(), buf.size(),
+  auto buf = kj::heapArray<char>(inner->Utf8LengthV2(js.v8Isolate) + 1);
+  inner->WriteUtf8V2(js.v8Isolate, buf.begin(), buf.size(),
       v8::String::WriteFlags::kNullTerminate | v8::String::WriteFlags::kReplaceInvalidUtf8);
   return jsg::USVString(kj::mv(buf));
 }
 
 jsg::DOMString JsString::toDOMString(Lock& js) const {
-  auto buf = kj::heapArray<char>(inner->Utf8Length(js.v8Isolate) + 1);
-  inner->WriteUtf8(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
+  auto buf = kj::heapArray<char>(inner->Utf8LengthV2(js.v8Isolate) + 1);
+  inner->WriteUtf8V2(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
   return jsg::DOMString(kj::mv(buf));
 }
 
@@ -382,7 +389,7 @@ JsString::WriteIntoStatus JsString::writeInto(
   WriteIntoStatus result = {0, 0};
   if (buffer.size() > 0) {
     result.written =
-        inner->WriteUtf8(js.v8Isolate, buffer.begin(), buffer.size(), options, &result.read);
+        inner->WriteUtf8V2(js.v8Isolate, buffer.begin(), buffer.size(), options, &result.read);
   }
   return result;
 }
@@ -392,7 +399,7 @@ JsString::WriteIntoStatus JsString::writeInto(
   WriteIntoStatus result = {0, 0};
   if (buffer.size() > 0) {
     result.written = kj::min(buffer.size(), length(js));
-    inner->Write(js.v8Isolate, 0, result.written, buffer.begin(), options);
+    inner->WriteV2(js.v8Isolate, 0, result.written, buffer.begin(), options);
     result.read = length(js);
   }
   return result;
@@ -403,7 +410,7 @@ JsString::WriteIntoStatus JsString::writeInto(
   WriteIntoStatus result = {0, 0};
   if (buffer.size() > 0) {
     result.written = kj::min(buffer.size(), length(js));
-    inner->WriteOneByte(
+    inner->WriteOneByteV2(
         js.v8Isolate, 0, kj::min(length(js), buffer.size()), buffer.begin(), options);
     result.read = length(js);
   }
