@@ -2829,7 +2829,9 @@ kj::Promise<void> Worker::AsyncLock::whenThreadIdle() {
       continue;
     }
 
-    co_await kj::yieldUntilQueueEmpty();
+    // yieldUntilWouldSleep() waits for both the queue and event port signals,
+    // so cross-thread fulfiller wakeups are processed before we declare idle.
+    co_await kj::yieldUntilWouldSleep();
 
     if (currentWaiter == nullptr) {
       co_return;
