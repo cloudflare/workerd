@@ -28,8 +28,6 @@ enum class AutogateKey {
   STREAMING_TAIL_WORKER,
   // Enable refactor used to consolidate the different tail worker stream implementations.
   TAIL_STREAM_REFACTOR,
-  // Enable Rust-backed Node.js DNS implementation
-  RUST_BACKED_NODE_DNS,
   // Enable fast TextEncoder implementation using simdutf
   ENABLE_FAST_TEXTENCODER,
   // Increase the SQLite hard heap limit from 512 MiB to 8 GiB.

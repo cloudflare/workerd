@@ -15,7 +15,6 @@ C++ implementations of Node.js built-in modules. Each module = JSG-bound class r
 3. Add `V(ClassName, "node-internal:<name>")` to `NODEJS_MODULES(V)` in `node.h` (or `NODEJS_MODULES_EXPERIMENTAL(V)` for staging)
 4. Append to `EW_NODE_ISOLATE_TYPES` at bottom of `node.h`
 5. Per-module compat flags gated in `registerNodeJsCompatModules()` — add `isNode*Module()` + `featureFlags.getEnable*()` check
-6. DnsUtil special-cased: C++ fallback when `RUST_BACKED_NODE_DNS` autogate disabled
 
 ## TESTING
 

@@ -25,8 +25,6 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "streaming-tail-worker"_kj;
     case AutogateKey::TAIL_STREAM_REFACTOR:
       return "tail-stream-refactor"_kj;
-    case AutogateKey::RUST_BACKED_NODE_DNS:
-      return "rust-backed-node-dns"_kj;
     case AutogateKey::ENABLE_FAST_TEXTENCODER:
       return "enable-fast-textencoder"_kj;
     case AutogateKey::INCREASE_SQLITE_HARD_HEAP_LIMIT:
