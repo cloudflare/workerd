@@ -80,10 +80,15 @@ void Data::destroy() {
       // reachable via GC tracing), and a weak `Data` must only be destroyed under the isolate lock
       // (see the class comment). So `tracedHandle` is necessarily empty on this path.
       //
-      // This invariant matters for correctness: `tracedHandle` uses DelaysReuse, so V8 keeps its
-      // storage cell reserved until we Reset() it. Dropping a *non-empty* tracedHandle here (rather
-      // than Reset()ing it) would leak the cell permanently, so assert the invariant explicitly.
-      KJ_IASSERT(tracedHandle == kj::none);
+      // This invariant matters for correctness: a weak (traced) `Data` has a *weak* v8::Global
+      // `handle`. Deferring it would move the weak global off-lock and later Reset() it, racing
+      // with GC and risking a double-free of the handle node. (It would also leak the `tracedHandle`
+      // cell, which uses DelaysReuse.) If this fires, some code is destroying a GC-reachable `Data`
+      // outside the isolate lock, violating the contract documented on the class. Promoted to a
+      // release assert so we capture the offending stack in production rather than crashing later in
+      // applyDeferredActions with no context.
+      KJ_ASSERT(tracedHandle == kj::none,
+          "destroying a weak (GC-reachable) jsg::Data outside the isolate lock");
       deferGlobalDestruction(isolate, kj::mv(handle));
     }
     isolate = nullptr;
