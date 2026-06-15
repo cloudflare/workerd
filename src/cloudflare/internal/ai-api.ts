@@ -427,9 +427,9 @@ export class Ai {
     files?: MarkdownDocument | MarkdownDocument[],
     options?: ConversionRequestOptions
   ): ToMarkdownService | Promise<ConversionResponse | ConversionResponse[]> {
-    const service = aiBindingExperimental
-      ? this.#fetcher.toMarkdown()
-      : new ToMarkdownService(this.#fetcher);
+    // TODO(soon): Experimentally use RPC via `this.#fetcher.toMarkdown()`. Does not work correctly
+    //   because `Blob` is not serializable; we'll need to fix that in the runtime first.
+    const service = new ToMarkdownService(this.#fetcher);
 
     if (arguments.length < 1 || !files) return service;
 
