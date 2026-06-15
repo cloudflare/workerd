@@ -81,6 +81,21 @@ struct Trace @0x8e8d911203762d34 {
     }
 
     message @2 :Text;
+
+    errorInfo @3 :ErrorInfo;
+    # Structured Error fields extracted from any Error argument passed to the console
+    # call that produced this log (e.g. `console.error(new Error("x"))`). Absent when
+    # none of the arguments was a native Error. The stringified form of the arguments
+    # remains in `message` unchanged for backwards compatibility.
+  }
+
+  struct ErrorInfo {
+    # Mirrors the shape of `Exception` below, but is attached to a Log entry rather
+    # than being a standalone trace item. No timestamp: the containing Log already
+    # carries `timestampNs`.
+    name @0 :Text;
+    message @1 :Text;
+    stack @2 :Text;
   }
 
   obsolete26 @26 :List(UserSpanData);

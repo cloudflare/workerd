@@ -733,19 +733,53 @@ FetchResponseInfo FetchResponseInfo::clone() const {
   return FetchResponseInfo(statusCode);
 }
 
-Log::Log(kj::Date timestamp, LogLevel logLevel, kj::String message)
+ErrorInfo::ErrorInfo(kj::String name, kj::String message, kj::Maybe<kj::String> stack)
+    : name(kj::mv(name)),
+      message(kj::mv(message)),
+      stack(kj::mv(stack)) {}
+
+ErrorInfo::ErrorInfo(rpc::Trace::ErrorInfo::Reader reader)
+    : name(kj::str(reader.getName())),
+      message(kj::str(reader.getMessage())) {
+  if (reader.hasStack()) {
+    stack = kj::str(reader.getStack());
+  }
+}
+
+void ErrorInfo::copyTo(rpc::Trace::ErrorInfo::Builder builder) const {
+  builder.setName(name);
+  builder.setMessage(message);
+  KJ_IF_SOME(s, stack) {
+    builder.setStack(s);
+  }
+}
+
+ErrorInfo ErrorInfo::clone() const {
+  return ErrorInfo(kj::str(name), kj::str(message),
+      stack.map([](const kj::String& s) { return kj::str(s); }));
+}
+
+Log::Log(kj::Date timestamp,
+    LogLevel logLevel,
+    kj::String message,
+    kj::Maybe<ErrorInfo> errorInfo)
     : timestamp(timestamp),
       logLevel(logLevel),
-      message(kj::mv(message)) {}
+      message(kj::mv(message)),
+      errorInfo(kj::mv(errorInfo)) {}
 
 void Log::copyTo(rpc::Trace::Log::Builder builder) const {
   builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setLogLevel(logLevel);
   builder.setMessage(message);
+  KJ_IF_SOME(info, errorInfo) {
+    info.copyTo(builder.initErrorInfo());
+  }
 }
 
 Log Log::clone() const {
-  return Log(timestamp, logLevel, kj::str(message));
+  return Log(timestamp, logLevel, kj::str(message),
+      errorInfo.map([](const ErrorInfo& info) { return info.clone(); }));
 }
 
 Exception::Exception(
@@ -758,7 +792,11 @@ Exception::Exception(
 Log::Log(rpc::Trace::Log::Reader reader)
     : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
       logLevel(reader.getLogLevel()),
-      message(kj::str(reader.getMessage())) {}
+      message(kj::str(reader.getMessage())) {
+  if (reader.hasErrorInfo()) {
+    errorInfo = ErrorInfo(reader.getErrorInfo());
+  }
+}
 
 Exception::Exception(rpc::Trace::Exception::Reader reader)
     : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),

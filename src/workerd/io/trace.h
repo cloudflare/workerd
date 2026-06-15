@@ -607,9 +607,31 @@ struct StreamDiagnosticsEvent final {
   StreamDiagnosticsEvent clone() const;
 };
 
+// Describes structured Error fields extracted from an Error argument passed to a
+// console.* call. Attached to a Log entry via Log::errorInfo. Mirrors the shape of
+// tracing::Exception (which represents uncaught exceptions) but has no timestamp of
+// its own — the enclosing Log already carries one.
+struct ErrorInfo final {
+  explicit ErrorInfo(kj::String name, kj::String message, kj::Maybe<kj::String> stack);
+  ErrorInfo(rpc::Trace::ErrorInfo::Reader reader);
+  ErrorInfo(ErrorInfo&&) noexcept = default;
+  KJ_DISALLOW_COPY(ErrorInfo);
+  ~ErrorInfo() noexcept(false) = default;
+
+  kj::String name;
+  kj::String message;
+  kj::Maybe<kj::String> stack;
+
+  void copyTo(rpc::Trace::ErrorInfo::Builder builder) const;
+  ErrorInfo clone() const;
+};
+
 // Describes a log event
 struct Log final {
-  explicit Log(kj::Date timestamp, LogLevel logLevel, kj::String message);
+  explicit Log(kj::Date timestamp,
+      LogLevel logLevel,
+      kj::String message,
+      kj::Maybe<ErrorInfo> errorInfo = kj::none);
   Log(rpc::Trace::Log::Reader reader);
   Log(Log&&) noexcept = default;
   KJ_DISALLOW_COPY(Log);
@@ -621,6 +643,11 @@ struct Log final {
   LogLevel logLevel;
   // TODO(soon): Just string for now.  Eventually, capture serialized JS objects.
   kj::String message;
+
+  // Populated when at least one argument to the originating console call was a
+  // native Error. Carries the structured {name, message, stack} fields so that tail
+  // workers can surface them without depending on lossy stringification of `message`.
+  kj::Maybe<ErrorInfo> errorInfo;
 
   void copyTo(rpc::Trace::Log::Builder builder) const;
   Log clone() const;
