@@ -100,6 +100,14 @@ void throwOpensslError(const char* file, int line, kj::StringPtr code) {
           break;
       };
       break;
+    case ERR_LIB_CIPHER:
+      switch (ERR_GET_REASON(ERR_peek_last_error())) {
+        MAP_ERROR(CIPHER_R_BAD_DECRYPT,
+            "Decryption failed: Incorrect key/IV or corrupted ciphertext/authentication tag provided.");
+        default:
+          break;
+      }
+      break;
     case ERR_LIB_RSA:
       switch (ERR_GET_REASON(ERR_peek_last_error())) {
         MAP_ERROR(RSA_R_DATA_LEN_NOT_EQUAL_TO_MOD_LEN, "Invalid RSA signature.");
