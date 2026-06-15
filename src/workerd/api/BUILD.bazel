@@ -662,6 +662,15 @@ kj_test(
 )
 
 kj_test(
+    src = "fetch-body-rewindable-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/io:worker-interface",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "streams/writable-sink-test.c++",
     deps = [
         "//src/workerd/io",
