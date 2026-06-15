@@ -44,7 +44,7 @@ const char* JsExceptionThrown::what() const noexcept {
 
 void Data::deferGlobalDestruction(v8::Isolate* isolate, v8::Global<v8::Data> handle) {
   auto& jsgIsolate = IsolateBase::from(isolate);
-  jsgIsolate.deferDestruction(kj::mv(handle));
+  jsgIsolate.deferDestruction(v8::Global<v8::Data>(kj::mv(handle)));
 }
 
 void Data::destroy() {
