@@ -303,6 +303,7 @@ jsg::Promise<kj::Maybe<Container::Info>> Container::inspect(jsg::Lock& js) {
       };
     },
           },
+      .image = kj::str(info.getStarted().getImage()),
     };
   });
 }

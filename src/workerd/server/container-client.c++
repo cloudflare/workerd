@@ -1561,7 +1561,13 @@ kj::Promise<kj::Maybe<ContainerClient::InspectResponse>> ContainerClient::inspec
     }
   }
 
-  co_return InspectResponse{.isRunning = running, .labels = labels.releaseAsArray()};
+  kj::String image;
+  if (jsonRoot.hasConfig() && jsonRoot.getConfig().hasImage()) {
+    image = kj::str(jsonRoot.getConfig().getImage());
+  }
+
+  co_return InspectResponse{
+    .isRunning = running, .labels = labels.releaseAsArray(), .image = kj::mv(image)};
 }
 
 kj::Promise<kj::Maybe<ContainerClient::SidecarInspectResponse>> ContainerClient::inspectSidecar() {
@@ -2220,6 +2226,7 @@ kj::Promise<void> ContainerClient::inspect(InspectContext context) {
         list[i].setName(resp.labels[i].name);
         list[i].setValue(resp.labels[i].value);
       }
+      started.setImage(resp.image);
       co_return;
     }
   }

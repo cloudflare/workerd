@@ -570,6 +570,11 @@ export class DurableObjectExample extends DurableObject {
 
     const info = await container.inspect();
     assert.deepStrictEqual(info.labels, labels);
+    assert.strictEqual(typeof info.image, 'string');
+    assert.ok(
+      info.image.includes('cloudflare/workerd/container-client-test'),
+      `unexpected image reference: ${info.image}`
+    );
 
     await container.destroy();
     await monitor;

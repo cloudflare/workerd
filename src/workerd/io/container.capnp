@@ -259,6 +259,11 @@ interface Container @0x9aaceefc06523bca {
       started :group {
         labels @1 :List(Label);
         # Echo of StartParams.labels. Empty list means start() was called with no labels.
+
+        image @2 :Text;
+        # The container's image registry reference, e.g.
+        # "registry.example.com/namespace/image:latest". Empty when the image is
+        # unknown (e.g. an older launcher that does not report it).
       }
     }
   }

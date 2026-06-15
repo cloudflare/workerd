@@ -133,6 +133,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   struct InspectResponse {
     bool isRunning;
     kj::Array<Label> labels;
+    kj::String image;
   };
 
   struct IPAMConfigResult {
