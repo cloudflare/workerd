@@ -9,6 +9,18 @@ import { mock } from 'node:test';
 import url from 'node:url';
 import qs from 'node:querystring';
 
+// Module-scope port tracker for the default fetch handler.
+//
+// Each test starts its own http.Server on port 0 (kernel-assigned) and
+// writes the resulting port number here. The default fetch handler reads
+// this variable to route incoming requests back to the test's server via
+// handleAsNodeRequest. Hardcoding a single port (e.g. 8080) caused
+// EADDRINUSE in CI because the wd_test macro spawns three workerd
+// processes per test concurrently.
+//
+// Tests run sequentially, so a single shared variable is safe.
+let currentTestPort;
+
 export const checkPortsSetCorrectly = {
   test(_ctrl, env) {
     const keys = ['PONG_SERVER_PORT'];
@@ -27,7 +39,8 @@ export class GlobalService extends WorkerEntrypoint {
     await rejects(handleAsNodeRequest(1234, request), {
       message: /^Http server with port 1234 not found/,
     });
-    return await handleAsNodeRequest({ port: 9090 }, request);
+    await globalServerReady;
+    return await handleAsNodeRequest({ port: globalServerPort }, request);
   }
 }
 
@@ -48,12 +61,19 @@ const globalServer = http.createServer((req, res) => {
   res.end('Hello, World!');
 });
 
-globalServer.listen(9090);
+let globalServerPort;
+const { promise: globalServerReady, resolve: globalServerReadyResolve } =
+  Promise.withResolvers();
+globalServer.listen(0, () => {
+  globalServerPort = globalServer.address().port;
+  globalServerReadyResolve();
+});
 
 export const testGlobalHttpServe = {
   async test(_ctrl, env) {
+    await globalServerReady;
     strictEqual(globalServer.listening, true);
-    strictEqual(globalServer.address().port, 9090);
+    ok(globalServer.address().port > 0);
 
     const res = await env.GLOBAL_SERVICE.fetch('https://cloudflare.com');
     strictEqual(res.status, 200);
@@ -68,7 +88,7 @@ export const testHttpServerAsyncDispose = {
   async test() {
     const server = http.createServer();
 
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
     ok(server.listening);
     const closeFn = mock.fn();
     server.on('close', closeFn);
@@ -106,7 +126,8 @@ export const testHttpServerIncomingMessageDestroy = {
       }
     });
 
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
 
     {
       const res = await env.SERVICE.fetch(
@@ -134,7 +155,8 @@ export const testHttpServerMethodQuery = {
       strictEqual(req.method, 'QUERY');
       res.end('OK');
     });
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
 
     const res = await env.SERVICE.fetch('https://cloudflare.com', {
       method: 'QUERY',
@@ -147,7 +169,6 @@ export const testHttpServerMethodQuery = {
 // Tests is taken from test/parallel/test-http-server-multiheaders.js
 export const testHttpServerMultiHeaders = {
   async test(_ctrl, env) {
-    const { promise, resolve } = Promise.withResolvers();
     const server = http.createServer(function (req, res) {
       strictEqual(req.headers.accept, 'abc, def, ghijklmnopqrst');
       strictEqual(req.headers.host, 'foo');
@@ -168,43 +189,40 @@ export const testHttpServerMultiHeaders = {
       server.close();
     });
 
-    server.listen(8080, async function () {
-      const res = await env.SERVICE.fetch('https://cloudflare.com', {
-        headers: [
-          ['accept', 'abc'],
-          ['accept', 'def'],
-          ['Accept', 'ghijklmnopqrst'],
-          ['host', 'foo'],
-          ['Host', 'bar'],
-          ['hOst', 'baz'],
-          ['www-authenticate', 'foo'],
-          ['WWW-Authenticate', 'bar'],
-          ['WWW-AUTHENTICATE', 'baz'],
-          ['proxy-authenticate', 'foo'],
-          ['Proxy-Authenticate', 'bar'],
-          ['PROXY-AUTHENTICATE', 'baz'],
-          ['x-foo', 'bingo'],
-          ['x-bar', 'banjo'],
-          ['x-bar', 'bango'],
-          ['sec-websocket-protocol', 'chat'],
-          ['sec-websocket-protocol', 'share'],
-          ['sec-websocket-extensions', 'foo; 1'],
-          ['sec-websocket-extensions', 'bar; 2'],
-          ['sec-websocket-extensions', 'baz'],
-          ['constructor', 'foo'],
-          ['constructor', 'bar'],
-          ['constructor', 'baz'],
-        ],
-      });
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
 
-      strictEqual(res.status, 200);
-      strictEqual(res.headers.get('content-type'), 'text/plain');
-      strictEqual(await res.text(), 'EOF');
-
-      resolve();
+    const res = await env.SERVICE.fetch('https://cloudflare.com', {
+      headers: [
+        ['accept', 'abc'],
+        ['accept', 'def'],
+        ['Accept', 'ghijklmnopqrst'],
+        ['host', 'foo'],
+        ['Host', 'bar'],
+        ['hOst', 'baz'],
+        ['www-authenticate', 'foo'],
+        ['WWW-Authenticate', 'bar'],
+        ['WWW-AUTHENTICATE', 'baz'],
+        ['proxy-authenticate', 'foo'],
+        ['Proxy-Authenticate', 'bar'],
+        ['PROXY-AUTHENTICATE', 'baz'],
+        ['x-foo', 'bingo'],
+        ['x-bar', 'banjo'],
+        ['x-bar', 'bango'],
+        ['sec-websocket-protocol', 'chat'],
+        ['sec-websocket-protocol', 'share'],
+        ['sec-websocket-extensions', 'foo; 1'],
+        ['sec-websocket-extensions', 'bar; 2'],
+        ['sec-websocket-extensions', 'baz'],
+        ['constructor', 'foo'],
+        ['constructor', 'bar'],
+        ['constructor', 'baz'],
+      ],
     });
 
-    await promise;
+    strictEqual(res.status, 200);
+    strictEqual(res.headers.get('content-type'), 'text/plain');
+    strictEqual(await res.text(), 'EOF');
   },
 };
 
@@ -284,7 +302,8 @@ export const testHttpServerMultiHeaders2 = {
       .concat(multipleAllowed.map(makeHeader('bar')))
       .concat(multipleForbidden.map(makeHeader('bar')));
 
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
 
     const res = await env.SERVICE.fetch('https://cloudflare.com/', {
       headers,
@@ -315,7 +334,8 @@ export const testHttpServerQuotedStringHeaders = {
       res.end('ok');
     });
 
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
     const res = await env.SERVICE.fetch('https://cloudflare.com', {
       method: 'GET',
       headers: [
@@ -352,7 +372,8 @@ export const testHttpServerNonUtf8Header = {
         res.end('hello');
       });
 
-      server.listen(8080);
+      await new Promise((resolve) => server.listen(0, resolve));
+      currentTestPort = server.address().port;
       const res = await env.SERVICE.fetch('https://cloudflare.com', {
         method: 'GET',
       });
@@ -370,7 +391,8 @@ export const testHttpServerNonUtf8Header = {
         res.end('hello');
       });
 
-      server.listen(8080);
+      await new Promise((resolve) => server.listen(0, resolve));
+      currentTestPort = server.address().port;
       const res = await env.SERVICE.fetch('https://cloudflare.com');
       strictEqual(res.status, 200);
       strictEqual(res.headers.get('content-disposition'), nonUtf8ToLatin1);
@@ -387,7 +409,8 @@ export const testHttpServerNonUtf8Header = {
         res.end('hello');
       });
 
-      server.listen(8080);
+      await new Promise((resolve) => server.listen(0, resolve));
+      currentTestPort = server.address().port;
 
       const res = await env.SERVICE.fetch('https://cloudflare.com');
       strictEqual(res.status, 200);
@@ -417,7 +440,8 @@ export const testHttpServerOptionsIncomingMessage = {
         res.end();
       }
     );
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
 
     const res = await env.SERVICE.fetch('https://cloudflare.com', {
       headers: { 'User-Agent': 'node-test' },
@@ -444,7 +468,8 @@ export const testHttpServerOptionsServerResponse = {
         res.end();
       }
     );
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
 
     const res = await env.SERVICE.fetch('https://cloudflare.com');
     strictEqual(res.status, 200);
@@ -527,7 +552,8 @@ export const testHttpServerWriteAfterEnd = {
       });
     }
 
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
     await env.SERVICE.fetch('https://cloudflare.com');
     await promise;
   },
@@ -550,7 +576,8 @@ export const testHttpServerWriteEndAfterEnd = {
       });
     });
     const server = http.createServer(handle);
-    server.listen(8080);
+    await new Promise((listening) => server.listen(0, listening));
+    currentTestPort = server.address().port;
 
     await env.SERVICE.fetch('https://cloudflare.com');
     await promise;
@@ -652,7 +679,8 @@ export const consumeRequestPayloadData = {
       }
     });
 
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
 
     {
       const res = await env.SERVICE.fetch('https://cloudflare.com/small', {
@@ -731,7 +759,8 @@ export const testStreamingResponses = {
       }
     });
 
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
 
     // Test 1: Large payload
     const res1 = await env.SERVICE.fetch('https://cloudflare.com/large');
@@ -784,7 +813,8 @@ export const testContentLengthEnforcement = {
       }
     });
 
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
 
     // Test 1: Too few bytes
     {
@@ -829,7 +859,8 @@ export const testCorkUncorkBasic = {
       res.end('final');
     });
 
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
 
     const res = await env.SERVICE.fetch('https://cloudflare.com');
     strictEqual(res.status, 200);
@@ -880,7 +911,8 @@ export const testBackpressureSignaling = {
       continueWriting();
     });
 
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
 
     const res = await env.SERVICE.fetch('https://cloudflare.com');
     strictEqual(res.status, 200);
@@ -965,7 +997,8 @@ export const testHttpServer = {
         res.end();
       }, 1);
     });
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
 
     server.httpAllowHalfOpen = true;
 
@@ -1072,7 +1105,8 @@ export const testMultiplePipeDestinations = {
       }
     });
 
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
 
     // Send test data
     const testData =
@@ -1157,9 +1191,10 @@ export const testConfigurableHighWaterMark = {
 
 export const testIncomingMessageSocket = {
   async test(_ctrl, env) {
+    let serverPort;
     await using server = http.createServer((req, res) => {
       strictEqual(req.socket.encrypted, false);
-      strictEqual(req.socket.localPort, 8080);
+      strictEqual(req.socket.localPort, serverPort);
       strictEqual(req.socket.localAddress, '127.0.0.1');
       strictEqual(req.socket.remoteAddress, '127.0.0.1');
       strictEqual(typeof req.socket.remotePort, 'number');
@@ -1172,7 +1207,9 @@ export const testIncomingMessageSocket = {
       res.end('Hello, World!');
     });
 
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
+    serverPort = server.address().port;
+    currentTestPort = serverPort;
 
     const res = await env.SERVICE.fetch('https://cloudflare.com');
     strictEqual(res.status, 200);
@@ -1197,7 +1234,8 @@ export const testWebPushHeaderDuplication = {
       );
     });
 
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
 
     const res = await env.SERVICE.fetch('https://google.com', {
       headers: {
@@ -1221,7 +1259,8 @@ export const testHttpRequestFields = {
       strictEqual(req._paused, false, 'Paused should be false');
       res.end('OK');
     });
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
     await env.SERVICE.fetch('https://cloudflare.com');
   },
 };
@@ -1247,7 +1286,8 @@ export const testBufferedDataEventEmission = {
         res.end('OK');
       });
     });
-    server.listen(8080);
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
 
     await env.SERVICE.fetch('https://cloudflare.com', {
       method: 'POST',
@@ -1277,7 +1317,7 @@ let scheduledCallCount = 0;
 
 export default {
   fetch(request) {
-    return handleAsNodeRequest(8080, request);
+    return handleAsNodeRequest(currentTestPort, request);
   },
   async scheduled(event) {
     scheduledCallCount++;
