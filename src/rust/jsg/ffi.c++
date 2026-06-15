@@ -19,6 +19,13 @@
 
 #include <memory>
 
+#if V8_MAJOR_VERSION >= 15
+#define Utf8LengthV2 Utf8Length
+#define WriteV2 Write
+#define WriteOneByteV2 WriteOneByte
+#define WriteUtf8V2 WriteUtf8
+#endif
+
 using namespace kj_rs;
 
 namespace workerd::rust::jsg {

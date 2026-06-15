@@ -5,7 +5,7 @@ Subject: Add verify_write_barriers flag in V8's bazel config
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 98789ec4cd98d9b076c78f8f4e78ec2c7d7e7614..d285f32154b83e686b0f3805e601210ce5114eb1 100644
+index 3d7a0d12c7e980ede305470b2212d3d2cb08eef1..20f28d46fb9d9ce396455eca12409f2a8cf15c5b 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -552,6 +552,7 @@ v8_config(

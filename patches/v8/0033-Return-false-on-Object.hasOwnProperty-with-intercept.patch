@@ -5,7 +5,7 @@ Subject: Return false on Object.hasOwnProperty with interceptors
 
 
 diff --git a/src/objects/js-objects.cc b/src/objects/js-objects.cc
-index 15fce882065d99d1d01e5c138e651118727e9a28..76ceae5d9878df28cd4aa6780fc1ae449a9ea89b 100644
+index 7813b7777b39b2135acd74f8e98a74e6c2ec0c64..adea65e73e615a616c032bf188f476f4e1204177 100644
 --- a/src/objects/js-objects.cc
 +++ b/src/objects/js-objects.cc
 @@ -158,6 +158,9 @@ Maybe<bool> JSReceiver::HasOwnProperty(Isolate* isolate,

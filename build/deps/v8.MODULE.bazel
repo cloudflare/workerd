@@ -18,9 +18,9 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
-VERSION = "14.9.207.7"
+VERSION = "15.0.245.5"
 
-INTEGRITY = "sha256-VYxDt58kH84sbpuTa8tsfNzwqh2mcDSGP1Sg0Gh7u3M="
+INTEGRITY = "sha256-m+nQ1NBU3SNNrAX/voq7It1dPkcFMf/i33LU2Dra8Bo="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -59,6 +59,8 @@ PATCHES = [
     "0034-Remove-V8-MODULE.bazel-llvm-toolchain-and-libcxx-rep.patch",
     "0035-Remove-libcxx-dep-from-defs.bzl-not-resolvable-via-h.patch",
     "0036-Fix-non-portable-std-atomic_flag-construction-in-run.patch",
+    # TODO(cleanup): Need to address this properly by adding support for depending on llvm-libc.
+    "0037-Revert-Implement-Math.-atan-atan2-using-LLVM-s-libm.patch",
 ]
 
 http_archive(

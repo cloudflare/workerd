@@ -199,6 +199,9 @@ class Serializer final: v8::ValueSerializer::Delegate {
 
   kj::Vector<jsg::JsRef<JsValue>> sharedArrayBuffers;
   kj::Vector<jsg::JsRef<JsValue>> arrayBuffers;
+  // ArrayBuffers passed to transfer() that still need to be detached. We defer detaching until
+  // release() (i.e. after write()) -- see transfer() for why.
+  kj::Vector<jsg::V8Ref<v8::ArrayBuffer>> arrayBuffersToDetach;
   kj::Vector<std::shared_ptr<v8::BackingStore>> sharedBackingStores;
   kj::Vector<std::shared_ptr<v8::BackingStore>> backingStores;
   bool released = false;
