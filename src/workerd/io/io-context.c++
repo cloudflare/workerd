@@ -649,9 +649,8 @@ kj::Promise<WorkerInterface::ScheduledResult> IoContext::IncomingRequest::finish
   KJ_ASSERT(context->incomingRequests.size() == 1);
   context->incomingRequests.front().waitedForWaitUntil = true;
 
-  auto timeoutPromise = context->limitEnforcer->limitScheduled().then([] {
-    return EventOutcome::EXCEEDED_WALL_TIME;
-  });
+  auto timeoutPromise = context->limitEnforcer->limitScheduled().then(
+      [] { return EventOutcome::EXCEEDED_WALL_TIME; });
   auto outcome = context->waitUntilTasks.onEmpty()
                      .then([this]() { return context->waitUntilStatus(); })
                      .exclusiveJoin(kj::mv(timeoutPromise))

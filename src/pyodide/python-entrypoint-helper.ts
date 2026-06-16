@@ -247,9 +247,7 @@ async function injectWorkersApi(pyodide: Pyodide): Promise<void> {
 }
 
 function disabledLoadPackage(): never {
-  throw new PythonWorkersInternalError(
-    'pyodide.loadPackage is disabled'
-  );
+  throw new PythonWorkersInternalError('pyodide.loadPackage is disabled');
 }
 
 async function setupPatches(pyodide: Pyodide): Promise<void> {

@@ -6290,7 +6290,8 @@ kj::Promise<void> Server::preloadPython(
       // From Pyodide 314 on, we don't unvendor standard libraries.
       if (release.getPackages().size() > 0) {
         // Preload the Python stdlib packages.
-        KJ_IF_SOME(modulesSource, workerDef.source.variant.tryGet<Worker::Script::ModulesSource>()) {
+        KJ_IF_SOME(modulesSource,
+            workerDef.source.variant.tryGet<Worker::Script::ModulesSource>()) {
           if (modulesSource.isPython) {
             // Store the packages in the package manager that is stored in the pythonConfig
             co_await server::fetchPyodideStdlib(
