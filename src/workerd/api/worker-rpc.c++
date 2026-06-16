@@ -816,9 +816,14 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       : enterIsolateAndCall([this, &ctx](CallContext callContext) {
           // Note: No need to topUpActor() since this is the start of a top-level request, so the
           // actor will already have been topped up by IncomingRequest::delivered().
+          //
+          // If a pre-acquired InputGate lock is available (set by JsRpcSessionCustomEvent::run()
+          // to preserve ordering with other event types like fetch), consume it here so that
+          // ctx.run() skips InputGate::wait() and uses the already-reserved position.
+          auto inputLock = kj::mv(preAcquiredInputLock);
           return ctx.run([this, &ctx, callContext](Worker::Lock& lock) mutable {
             return callImpl(lock, ctx, callContext);
-          });
+          }, kj::mv(inputLock));
         }),
         externalPusher(ctx.getExternalPusher()) {}
 
@@ -875,6 +880,12 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   kj::Promise<void> pushDelayedChannelToken(PushDelayedChannelTokenContext context) override {
     return externalPusher->pushDelayedChannelToken(context);
   }
+
+  // Pre-acquired InputGate lock for the first RPC call in a session. When set by
+  // JsRpcSessionCustomEvent::run(), this ensures the RPC call's position in the InputGate
+  // FIFO matches its arrival order relative to other event types (fetch, connect, etc.).
+  // Consumed on first use by enterIsolateAndCall; subsequent calls acquire normally.
+  kj::Maybe<InputGate::Lock> preAcquiredInputLock;
 
   KJ_DISALLOW_COPY_AND_MOVE(JsRpcTargetBase);
 
@@ -1911,6 +1922,19 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
 
   incomingRequest->delivered();
 
+  // For actors, eagerly reserve our position in the InputGate FIFO. Without this, fetch calls
+  // reach the InputGate in ~1 async hop (via WorkerEntrypoint::request() -> context.run()) while
+  // RPC takes ~4+ hops (session setup, Cap'n Proto dispatch, kj::yield()). By acquiring the lock
+  // here — at the same level as request() — we ensure mixed RPC+fetch calls are ordered by
+  // arrival time, not by how many async hops each code path takes.
+  //
+  // The lock is passed to EntrypointJsRpcTarget and consumed by the first ctx.run() call,
+  // so it is NOT held for the session lifetime.
+  kj::Maybe<InputGate::Lock> inputLock;
+  KJ_IF_SOME(a, ioctx.getActor()) {
+    inputLock = co_await a.getInputGate().wait(ioctx.getCurrentTraceSpan());
+  }
+
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client
     // disconnects.
@@ -1919,6 +1943,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
 
   EntrypointJsRpcTarget target(ioctx, entrypointName, kj::mv(versionInfo), kj::mv(props),
       kj::mv(wrapperModule), mapAddRef(incomingRequest->getWorkerTracer()), isDynamicDispatch);
+  target.preAcquiredInputLock = kj::mv(inputLock);
   capnp::RevocableServer<rpc::JsRpcTarget> revcableTarget(target);
 
   try {

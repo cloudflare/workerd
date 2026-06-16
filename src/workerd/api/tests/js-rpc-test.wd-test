@@ -25,6 +25,7 @@ const unitTests :Workerd.Config = (
           (name = "MyServiceProxy", service = (name = "js-rpc-test", entrypoint = "MyServiceProxy")),
           (name = "MyActor", durableObjectNamespace = "MyActor"),
           (name = "ActorNoExtends", durableObjectNamespace = "ActorNoExtends"),
+          (name = "OrderingActor", durableObjectNamespace = "OrderingActor"),
           (name = "defaultExport", service = "js-rpc-test"),
           (name = "twelve", json = "12"),
           (name = "GreeterFactory", service = (name = "js-rpc-test", entrypoint = "GreeterFactory")),
@@ -33,6 +34,7 @@ const unitTests :Workerd.Config = (
         durableObjectNamespaces = [
           (className = "MyActor", uniqueKey = "foo"),
           (className = "ActorNoExtends", uniqueKey = "bar"),
+          (className = "OrderingActor", uniqueKey = "ordering"),
         ],
 
         durableObjectStorage = (inMemory = void),

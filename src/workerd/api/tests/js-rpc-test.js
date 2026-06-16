@@ -586,6 +586,25 @@ export class ActorNoExtends {
   }
 }
 
+// DO used to test that mixed RPC+fetch calls preserve send order.
+export class OrderingActor extends DurableObject {
+  #log = [];
+
+  record(input) {
+    this.#log.push(input);
+  }
+
+  async fetch(request) {
+    let url = new URL(request.url);
+    this.#log.push(url.pathname);
+    return new Response('ok');
+  }
+
+  getLog() {
+    return this.#log;
+  }
+}
+
 export default class DefaultService extends WorkerEntrypoint {
   async fetch(req) {
     // Test this.env here just to prove omitting the constructor entirely works.
@@ -2115,5 +2134,69 @@ export let eOrderTest = {
     let results = await Promise.all(promises);
 
     assert.deepEqual(results, [1, 2, 3, 4, 5, 6]);
+  },
+};
+
+// Verify that interleaved RPC and fetch calls on a DO stub are delivered in send order.
+export let mixedRpcFetchOrdering = {
+  async test(controller, env, ctx) {
+    let id = env.OrderingActor.idFromName('mixed');
+    let stub = env.OrderingActor.get(id);
+
+    let promises = [];
+    let expected = [];
+    for (let i = 0; i < 20; i++) {
+      if (i % 2 === 0) {
+        promises.push(stub.record(`rpc-${i}`));
+        expected.push(`rpc-${i}`);
+      } else {
+        promises.push(stub.fetch(`http://x/fetch-${i}`));
+        expected.push(`/fetch-${i}`);
+      }
+    }
+    await Promise.all(promises);
+
+    let log = await stub.getLog();
+    assert.deepEqual(log, expected);
+  },
+};
+
+// Verify that pure RPC calls on a DO stub preserve send order.
+export let pureRpcOrdering = {
+  async test(controller, env, ctx) {
+    let id = env.OrderingActor.idFromName('pure-rpc');
+    let stub = env.OrderingActor.get(id);
+
+    let promises = [];
+    for (let i = 0; i < 20; i++) {
+      promises.push(stub.record(`call-${i}`));
+    }
+    await Promise.all(promises);
+
+    let log = await stub.getLog();
+    assert.deepEqual(
+      log,
+      Array.from({ length: 20 }, (_, i) => `call-${i}`)
+    );
+  },
+};
+
+// Verify that pure fetch calls on a DO stub preserve send order.
+export let pureFetchOrdering = {
+  async test(controller, env, ctx) {
+    let id = env.OrderingActor.idFromName('pure-fetch');
+    let stub = env.OrderingActor.get(id);
+
+    let promises = [];
+    for (let i = 0; i < 20; i++) {
+      promises.push(stub.fetch(`http://x/${i}`));
+    }
+    await Promise.all(promises);
+
+    let log = await stub.getLog();
+    assert.deepEqual(
+      log,
+      Array.from({ length: 20 }, (_, i) => `/${i}`)
+    );
   },
 };
