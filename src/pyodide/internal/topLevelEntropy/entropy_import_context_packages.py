@@ -91,6 +91,10 @@ def numpy_random_mtrand_context(module):
 @register_exec_patch("pydantic_core")
 @contextmanager
 def pydantic_core_context(module):
+    if not hasattr(module, "validate_core_schema"):
+        # Newer versions of pydantic_core don't have this function
+        yield
+        return
     try:
         # Initial import needs one entropy call to initialize
         # std::collections::HashMap hash seed
