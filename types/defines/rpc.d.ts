@@ -308,6 +308,11 @@ declare namespace CloudflareWorkersModule {
     sensitive?: WorkflowStepSensitivity;
   };
 
+  export type WorkflowStepRollbackConfig = Pick<
+    WorkflowStepConfig,
+    'retries' | 'timeout'
+  >;
+
   export type WorkflowCronSchedule = {
     /** Cron expression that triggered this event. */
     cron: string;
@@ -343,6 +348,8 @@ declare namespace CloudflareWorkersModule {
     ctx: WorkflowStepContext;
     error: Error;
     output: T | undefined;
+    /** @deprecated Use `ctx.step.name` and `ctx.step.count` instead. */
+    stepName: string;
   };
 
   export type WorkflowRollbackHandler<T = unknown> = (
@@ -350,8 +357,8 @@ declare namespace CloudflareWorkersModule {
   ) => Promise<void>;
 
   export type WorkflowStepRollbackOptions<T = unknown> = {
-    rollback?: WorkflowRollbackHandler<T>;
-    rollbackConfig?: WorkflowStepConfig;
+    rollback: WorkflowRollbackHandler<T>;
+    rollbackConfig?: WorkflowStepRollbackConfig;
   };
 
   export abstract class WorkflowStep {
