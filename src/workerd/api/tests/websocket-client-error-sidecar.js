@@ -68,15 +68,6 @@ function sendMessage(socket, message) {
   socket.write(frame);
 }
 
-// Get the port and host from environment variables
-const port = process.env.BIG_MESSAGE_SERVER_PORT;
-const host = process.env.SIDECAR_HOSTNAME;
-
-function reportAddress(server) {
-  const address = server.address();
-  console.info(`Listening on ${address.address}:${address.port}`);
-}
-
 // Create HTTP server to handle the WebSocket handshake
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -88,7 +79,9 @@ server.on('error', (event) => {
   console.log(event.message);
 });
 // Start the server
-server.listen(port, host, () => reportAddress(server));
+server.listen({ port: 0, host: process.env.SIDECAR_HOSTNAME }, () => {
+  console.log(`BIG_MESSAGE_SERVER_PORT=${server.address().port}`);
+});
 
 // Function to handle WebSocket connections
 function handleWebSocketConnection(socket) {

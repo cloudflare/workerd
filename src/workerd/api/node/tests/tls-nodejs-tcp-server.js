@@ -5,9 +5,10 @@
 // This file is used as a sidecar for the tls-nodejs-test tests.
 const tls = require('node:tls');
 
-function reportPort(server) {
-  const address = server.address();
-  console.info(`Listening on ${address.address}:${address.port}`);
+function listenAndReport(server, name) {
+  server.listen({ port: 0, host: process.env.SIDECAR_HOSTNAME }, () => {
+    console.log(`${name}=${server.address().port}`);
+  });
 }
 
 // Taken from https://github.com/nodejs/node/blob/304743655d5236c2edc39094336ee2667600b684/test/fixtures/keys/agent1-key.pem
@@ -76,31 +77,19 @@ const echoServer = tls.createServer(options, (s) => {
   });
   s.pipe(s);
 });
-echoServer.listen(
-  process.env.ECHO_SERVER_PORT,
-  process.env.SIDECAR_HOSTNAME,
-  () => reportPort(echoServer)
-);
+listenAndReport(echoServer, 'ECHO_SERVER_PORT');
 
 // Taken from test-tls-connect-given-socket.js
 const helloServer = tls.createServer(options, (socket) => {
   socket.end('Hello');
 });
-helloServer.listen(
-  process.env.HELLO_SERVER_PORT,
-  process.env.SIDECAR_HOSTNAME,
-  () => reportPort(helloServer)
-);
+listenAndReport(helloServer, 'HELLO_SERVER_PORT');
 
 const jsStreamServer = tls.createServer(options, (socket) => {
   socket.resume();
   socket.end('ohai');
 });
-jsStreamServer.listen(
-  process.env.JS_STREAM_SERVER_PORT,
-  process.env.SIDECAR_HOSTNAME,
-  () => reportPort(jsStreamServer)
-);
+listenAndReport(jsStreamServer, 'JS_STREAM_SERVER_PORT');
 
 // Taken from test/parallel/test-tls-streamwrap-buffersize.js
 const streamWrapServer = tls.createServer(options, (socket) => {
@@ -118,8 +107,4 @@ const streamWrapServer = tls.createServer(options, (socket) => {
     })
   );
 });
-streamWrapServer.listen(
-  process.env.STREAM_WRAP_SERVER_PORT,
-  process.env.SIDECAR_HOSTNAME,
-  () => reportPort(streamWrapServer)
-);
+listenAndReport(streamWrapServer, 'STREAM_WRAP_SERVER_PORT');
