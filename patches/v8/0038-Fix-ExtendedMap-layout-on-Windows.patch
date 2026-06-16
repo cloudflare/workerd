@@ -1,0 +1,68 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mikhail Aizatsky <maizatskyi@cloudflare.com>
+Date: Tue, 16 Jun 2026 22:00:00 +0000
+Subject: Fix ExtendedMap layout on Windows
+
+MSVC's C++ object layout can place derived-class members into base-class
+tail padding. ExtendedMap intentionally leaves kTaggedSize - 1 bytes after
+bit_field_ex_ for subclasses, but Torque expects ExtendedMap itself to be
+rounded up before JSInterceptorMap fields start.
+
+Make the padding explicit in ExtendedMap's Torque and C++ layouts, and let
+JSInterceptorMap start directly with its tagged fields. This keeps the C++
+layout and generated Torque offsets consistent on Windows.
+
+diff --git a/src/objects/js-interceptor-map.h b/src/objects/js-interceptor-map.h
+index b22fd6af1a7fb10e7a97667555da85ab1505d779..cf367c9ff80ddcd19c6c94f2571238d72f58f641 100644
+--- a/src/objects/js-interceptor-map.h
++++ b/src/objects/js-interceptor-map.h
+@@ -31,7 +31,6 @@ V8_OBJECT class JSInterceptorMap : public ExtendedMap {
+   inline void clear_extended_padding();
+ 
+  public:
+-  uint8_t extended_padding_[kTaggedSize - 1];
+   TaggedMember<InterceptorInfo> named_interceptor_;
+   TaggedMember<InterceptorInfo> indexed_interceptor_;
+ } V8_OBJECT_END;
+diff --git a/src/objects/js-interceptor-map.tq b/src/objects/js-interceptor-map.tq
+index 9071ffd1259445459d3d26dbe190f541351d8fb8..3a97d2ac6c395185c7694f75d14e4093cf5f1dac 100644
+--- a/src/objects/js-interceptor-map.tq
++++ b/src/objects/js-interceptor-map.tq
+@@ -8,8 +8,6 @@
+ @hasSameInstanceTypeAsParent
+ @doNotGenerateCast
+ extern class JSInterceptorMap extends ExtendedMap {
+-  @ifnot(TAGGED_SIZE_8_BYTES) extended_padding[3]: uint8;
+-  @if(TAGGED_SIZE_8_BYTES) extended_padding[7]: uint8;
+   named_interceptor: InterceptorInfo;
+   indexed_interceptor: InterceptorInfo;
+ }
+diff --git a/src/objects/map.h b/src/objects/map.h
+index e9b4408738a0557deea719c1b6ac06ac335ef794..1dd7f3f096c514541489c3340487e527b5d1d2152 100644
+--- a/src/objects/map.h
++++ b/src/objects/map.h
+@@ -1284,6 +1284,7 @@ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
+   static const int kStartOfStrongExtendedFieldsOffset;
+ 
+   std::atomic<uint8_t> bit_field_ex_;
+-  // Leaves kTaggedSize-1 unused bytes, they will be used by subclasses.
++  // Pads ExtendedMap to kTaggedSize so subclasses start at tagged alignment.
++  uint8_t extended_padding_[kTaggedSize - 1];
+ } V8_OBJECT_END;
+ 
+ constexpr int ExtendedMapSizeForKind(ExtendedMapKind kind);
+diff --git a/src/objects/map.tq b/src/objects/map.tq
+index 687b469e01d312f5aeb4bc3254dfd83c907e1253..b07a605945878f09b4ac2496a165a6226e2f5f97 100644
+--- a/src/objects/map.tq
++++ b/src/objects/map.tq
+@@ -88,7 +88,9 @@ bitfield struct ExtendedMapBitFields extends uint8 {
+ @doNotGenerateCast
+ extern class ExtendedMap extends Map {
+   bit_field_ex: ExtendedMapBitFields;
+-  // Leaves kTaggedSize-1 unused bytes, they will be used by subclasses.
++  // Pads ExtendedMap to kTaggedSize so subclasses start at tagged alignment.
++  @ifnot(TAGGED_SIZE_8_BYTES) extended_padding[3]: uint8;
++  @if(TAGGED_SIZE_8_BYTES) extended_padding[7]: uint8;
+ }
+ 
+ @export

@@ -61,6 +61,8 @@ PATCHES = [
     "0036-Fix-non-portable-std-atomic_flag-construction-in-run.patch",
     # TODO(cleanup): Need to address this properly by adding support for depending on llvm-libc.
     "0037-Revert-Implement-Math.-atan-atan2-using-LLVM-s-libm.patch",
+    "0038-Fix-ExtendedMap-layout-on-Windows.patch",
+    "0039-Fix-CFunction-MemorySpan-on-Windows.patch",
 ]
 
 http_archive(
