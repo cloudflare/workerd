@@ -12354,6 +12354,9 @@ interface BasicImageTransformations {
    *  - scale-down: Similar to contain, but the image is never enlarged. If
    *    the image is larger than given width or height, it will be resized.
    *    Otherwise its original size will be kept.
+   *  - scale-up: Similar to contain, but the image is never shrunk. If the
+   *    image is smaller than the given width or height, it will be resized.
+   *    Otherwise its original size will be kept.
    *  - contain: Resizes to maximum size that fits within the given width and
    *    height. If only a single dimension is given (e.g. only width), the
    *    image will be shrunk or enlarged to exactly match that dimension.
@@ -12374,7 +12377,14 @@ interface BasicImageTransformations {
    *  - squeeze: Stretches and deforms to the width and height given, even if it
    *    breaks aspect ratio
    */
-  fit?: "scale-down" | "contain" | "cover" | "crop" | "pad" | "squeeze";
+  fit?:
+    | "scale-down"
+    | "scale-up"
+    | "contain"
+    | "cover"
+    | "crop"
+    | "pad"
+    | "squeeze";
   /**
    * Allows you to trim your image. Takes dpr into account and is performed before
    * resizing or rotation.
@@ -12486,6 +12496,17 @@ interface BasicImageTransformations {
    * background pixel as transparent.
    */
   segment?: "foreground";
+  /**
+   * Controls the algorithm used when an image needs to be enlarged. This
+   * parameter works with any fit mode that upscales, such as `contain`,
+   * `cover`, and `scale-up`. It has no effect when `fit=scale-down` or when
+   * the target dimensions are smaller than the source.
+   * - interpolate: Uses bicubic interpolation, which may reduce image quality.
+   *   This is the default behavior when `upscale` is not specified.
+   * - generate: Uses AI upscaling to produce sharper, more detailed results
+   *   when enlarging images.
+   */
+  upscale?: "interpolate" | "generate";
 }
 interface BasicImageTransformationsGravityCoordinates {
   x?: number;
