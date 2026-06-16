@@ -94,8 +94,12 @@ kj::String Hyperdrive::getConnectionString() {
   // MySQL: `?ssl-mode=disabled`
   // PostgreSQL: `?sslmode=disable`
   auto sslParameter = scheme == "mysql" ? "?ssl-mode=disabled" : "?sslmode=disable";
-  return kj::str(getScheme(), "://", getUser(), ":", getPassword(), "@", getHost(), ":", getPort(),
-      "/", getDatabase(), sslParameter);
+  // Components are stored decoded; percent-encode so a '/' or '%' in e.g. a
+  // base64 password can't corrupt the URI. encodeUriComponent (not
+  // encodeUriUserInfo, which leaves '%' unencoded).
+  return kj::str(getScheme(), "://", kj::encodeUriComponent(getUser()), ":",
+      kj::encodeUriComponent(getPassword()), "@", getHost(), ":", getPort(), "/",
+      kj::encodeUriComponent(getDatabase()), sslParameter);
 }
 
 kj::Promise<kj::Own<kj::AsyncIoStream>> Hyperdrive::connectToDb() {
