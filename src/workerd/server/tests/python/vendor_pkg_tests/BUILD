@@ -28,7 +28,10 @@ vendored_py_wd_test(
 vendored_py_wd_test(
     "numpy",
     make_snapshot = True,
-    python_flags = ["0.28.2"],
+    python_flags = [
+        "0.28.2",
+        "314.0.0",
+    ],
     use_snapshot = "baseline",
 )
 

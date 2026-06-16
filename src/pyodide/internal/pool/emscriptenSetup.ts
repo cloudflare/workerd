@@ -17,7 +17,7 @@ import {
   finishSetup,
 } from 'pyodide-internal:pool/builtin_wrappers';
 
-import { getSentinelImport } from 'pyodide-internal:pool/sentinel';
+import { getJsvErrorImport } from 'pyodide-internal:pool/sentinel';
 
 /**
  * A preRun hook. Make sure environment variables are visible at runtime.
@@ -110,7 +110,7 @@ function getPrepareFileSystem(pythonStdlib: ArrayBuffer): PreRunHook {
 function getInstantiateWasm(
   pyodideWasmModule: WebAssembly.Module
 ): EmscriptenSettings['instantiateWasm'] {
-  const sentinelImportPromise = getSentinelImport();
+  const jsvErrorImportPromise = getJsvErrorImport();
   return function instantiateWasm(
     wasmImports: WebAssembly.Imports,
     successCallback: (
@@ -119,7 +119,23 @@ function getInstantiateWasm(
     ) => void
   ): WebAssembly.Exports {
     (async function (): Promise<void> {
-      wasmImports.sentinel = await sentinelImportPromise;
+      const { Jsv_GetError_import, JsvError_Check } =
+        await jsvErrorImportPromise;
+
+      // Pyodide <= 0.28.2: The names were create_sentinel and is_sentinel
+      // Pyodide >= 314: These are renamed to Jsv_GetError_import and JsvError_Check and moved to env namespace
+      wasmImports.sentinel = {
+        create_sentinel: Jsv_GetError_import,
+        is_sentinel: JsvError_Check,
+      };
+      const env = wasmImports.env;
+      if (env) {
+        env.Jsv_GetError_import = Jsv_GetError_import;
+        env.JsvError_Check = JsvError_Check;
+      } else {
+        console.error('Should never happen: wasmImports.env is undefined');
+      }
+
       // Instantiate pyodideWasmModule with wasmImports
       const instance = await WebAssembly.instantiate(
         pyodideWasmModule,
@@ -164,7 +180,14 @@ function getEmscriptenSettings(
   // We mount the stdlib packages directly (see loadPackage.ts) rather than going through Pyodide's
   // package manager, so we deliberately leave `API.lockFilePromise` unset. Pyodide's bootstrap
   // guards on it (`API.lockFilePromise && ...`), so the package index is simply not initialised.
-  const API = { config };
+  const API = {
+    config,
+    runtimeEnv: {
+      IN_WORKERD: true,
+      IN_BROWSER: true,
+      IN_BROWSER_MAIN_THREAD: true,
+    },
+  };
   let resolveReadyPromise: (mod: Module) => void;
   let rejectReadyPromise: (e: any) => void = () => {};
   const readyPromise: Promise<Module> = new Promise((res, rej) => {
