@@ -1,5 +1,5 @@
-// This is https://github.com/pyodide/pyodide/blob/main/src/core/sentinel.ts.
-// It goes into `pyodide.js` not `pyodide.asm.js`. We don't use `pyodide.js` so we have to reproduce
+// This is https://github.com/pyodide/pyodide/blob/main/src/core/jsverror.ts.
+// It goes into `pyodide.js` not `pyodide.asm.mjs`. We don't use `pyodide.js` so we have to reproduce
 // it here.
 
 import { wasmInstantiate } from 'pyodide-internal:pool/builtin_wrappers';
@@ -39,14 +39,20 @@ function decodeBase64(input: string): Uint8Array {
   return output;
 }
 
-// This string is https://github.com/pyodide/pyodide/blob/main/src/core/sentinel.wat assembled and
-// hex encoded.
-const sentinelWasm = decodeBase64(
-  'AGFzbQEAAAABDANfAGAAAW9gAW8BfwMDAgECByECD2NyZWF0ZV9zZW50aW5lbAAAC2lzX3NlbnRpbmVsAAEKEwIHAPsBAPsbCwkAIAD7GvsUAAs'
+// See https://github.com/pyodide/pyodide/pull/6107
+const jsvErrorWasm = decodeBase64(
+  'AGFzbQEAAAABDANfAGAAAW9gAW8BfwMDAgECBygCE0pzdl9HZXRFcnJvcl9pbXBvcnQAAA5Kc3ZFcnJvcl9DaGVjawABChMCBwD7AQD7GwsJACAA+xr7FAAL'
 );
 
-export async function getSentinelImport() {
+export async function getJsvErrorImport(): Promise<{
+  Jsv_GetError_import: () => unknown;
+  JsvError_Check: (val: unknown) => number;
+}> {
   const imports = {};
-  const { instance } = await wasmInstantiate(sentinelWasm, imports);
-  return instance.exports;
+  const { instance } = await wasmInstantiate(jsvErrorWasm, imports);
+  return instance.exports as {
+    // codex-ignore: RFC-009
+    Jsv_GetError_import: () => unknown;
+    JsvError_Check: (val: unknown) => number;
+  };
 }
