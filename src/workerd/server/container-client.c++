@@ -55,6 +55,11 @@ constexpr kj::StringPtr SNAPSHOT_VOLUME_CREATED_AT_LABEL = "dev.workerd.snapshot
 constexpr kj::StringPtr WORKERD_LABEL_PREFIX = "workerd-"_kj;
 constexpr auto SNAPSHOT_STALE_AGE = 30 * kj::DAYS;
 
+kj::String encodeJsonString(kj::StringPtr text) {
+  capnp::JsonCodec codec;
+  return codec.encode(capnp::Text::Reader(text));
+}
+
 // Maximum size of a snapshot tar archive held in memory during snapshot create/restore.
 constexpr size_t MAX_SNAPSHOT_TAR_SIZE = 1ULL * 1024 * 1024 * 1024;  // 1 GiB
 static_assert(static_cast<double>(MAX_SNAPSHOT_TAR_SIZE) == MAX_SNAPSHOT_TAR_SIZE,
@@ -911,6 +916,18 @@ kj::Maybe<uint16_t> tryParsePublishedHostPort(capnp::json::Value::Reader portMap
 }
 
 }  // namespace
+
+kj::String makeSnapshotCloneContainerCreateRequest(
+    kj::StringPtr image, kj::StringPtr sourceVolume, kj::StringPtr cloneVolume) {
+  auto sourceBind = kj::str(sourceVolume, ":/src:ro");
+  auto cloneBind = kj::str(cloneVolume, ":/dst");
+
+  // ContainerCreateRequest models Entrypoint as Docker's string form, but Cloudchamber's
+  // Docker-compatible create path requires the array form.
+  return kj::str("{\"Image\":", encodeJsonString(image), ",\"Entrypoint\":[\"/bin/cp\"]",
+      ",\"Cmd\":[\"-a\",\"/src/.\",\"/dst/\"]", ",\"HostConfig\":{\"Binds\":[",
+      encodeJsonString(sourceBind), ",", encodeJsonString(cloneBind), "]}}");
+}
 
 // Represents a parsed egress mapping. IP/CIDR mappings match destination IPs,
 // while hostnameGlob mappings match either HTTP hostnames or TLS SNI depending on protocol.
@@ -2100,26 +2117,12 @@ kj::Promise<void> ContainerClient::cloneSnapshot(SnapshotRestoreMount& snapshot)
     }).attach(addRef()));
   });
 
-  capnp::JsonCodec codec;
-  codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
-  capnp::MallocMessageBuilder message;
-  auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
-  jsonRoot.setImage(containerEgressInterceptorImage);
-  jsonRoot.setEntrypoint("/bin/cp");
-
   // Run `/bin/cp -a /src/. /dst/` so the clone volume gets the snapshot contents directly.
-  auto cmd = jsonRoot.initCmd(3);
-  cmd.set(0, "-a");
-  cmd.set(1, "/src/.");
-  cmd.set(2, "/dst/");
-
-  auto hostConfig = jsonRoot.initHostConfig();
-  auto binds = hostConfig.initBinds(2);
-  binds.set(0, kj::str(snapshot.sourceVolume, ":/src:ro"));
-  binds.set(1, kj::str(snapshot.cloneVolume, ":/dst"));
+  auto createRequestBody = makeSnapshotCloneContainerCreateRequest(
+      containerEgressInterceptorImage, snapshot.sourceVolume, snapshot.cloneVolume);
 
   auto createResponse = co_await dockerApiRequest(network, kj::str(dockerPath),
-      kj::HttpMethod::POST, kj::str("/containers/create"), codec.encode(jsonRoot));
+      kj::HttpMethod::POST, kj::str("/containers/create"), kj::mv(createRequestBody));
   JSG_REQUIRE(createResponse.statusCode == 201, Error,
       "Failed to create snapshot clone helper container for volume '", snapshot.sourceVolume,
       "': ", createResponse.statusCode, " ", createResponse.body);

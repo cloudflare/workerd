@@ -167,6 +167,16 @@ KJ_TEST("ContainerCreateRequest encodes structured mounts with NoCopy") {
   KJ_EXPECT(decodedMounts[0].getVolumeOptions().getNoCopy());
 }
 
+KJ_TEST("snapshot clone helper uses array Entrypoint") {
+  auto jsonText = makeSnapshotCloneContainerCreateRequest(
+      "helper\"image"_kj, "source\"volume"_kj, "clone-volume"_kj);
+
+  KJ_EXPECT(jsonText ==
+      "{\"Image\":\"helper\\\"image\",\"Entrypoint\":[\"/bin/cp\"],"
+      "\"Cmd\":[\"-a\",\"/src/.\",\"/dst/\"],\"HostConfig\":{"
+      "\"Binds\":[\"source\\\"volume:/src:ro\",\"clone-volume:/dst\"]}}");
+}
+
 KJ_TEST("ContainerCreateRequest encodes HostConfig Dns") {
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();

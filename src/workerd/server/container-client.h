@@ -48,6 +48,9 @@ kj::Own<capnp::MallocMessageBuilder> decodeJsonResponse(kj::StringPtr response) 
   return message;
 }
 
+kj::String makeSnapshotCloneContainerCreateRequest(
+    kj::StringPtr image, kj::StringPtr sourceVolume, kj::StringPtr cloneVolume);
+
 // Docker-based implementation that implements the rpc::Container::Server interface
 // so it can be used as a rpc::Container::Client via kj::heap<ContainerClient>().
 // This allows the Container JSG class to use Docker directly without knowing
