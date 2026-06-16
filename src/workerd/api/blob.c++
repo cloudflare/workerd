@@ -367,8 +367,7 @@ jsg::Ref<Blob> Blob::deserialize(
   }
 
   auto bytes = deserializer.readRawBytes(size);
-  auto u8 = jsg::JsUint8Array::create(js, size);
-  u8.asArrayPtr().copyFrom(bytes);
+  auto u8 = jsg::JsUint8Array::create(js, bytes);
   return js.alloc<Blob>(js, jsg::JsBufferSource(u8), kj::mv(type));
 }
 
