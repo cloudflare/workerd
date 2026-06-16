@@ -6,6 +6,7 @@
 
 #include "actor.h"
 #include "export-loopback.h"
+#include "restore.h"
 #include "sql.h"
 #include "sync-kv.h"
 #include "util.h"
@@ -24,6 +25,13 @@
 #include <v8.h>
 
 namespace workerd::api {
+
+jsg::Promise<jsg::Value> DurableObjectState::restore(jsg::Lock& js,
+    jsg::JsObject params,
+    const jsg::TypeHandler<jsg::Ref<Fetcher>>& fetcherHandler,
+    const jsg::TypeHandler<jsg::Ref<JsRpcStub>>& rpcStubHandler) {
+  return restoreCurrentEntrypoint(js, params, fetcherHandler, rpcStubHandler);
+}
 
 namespace {
 
@@ -985,19 +993,17 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
         [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
       tracing.setTag("facet_name"_kjc, name.asPtr());
 
-      // Lazily initialize actorChannel
-      if (actorChannel == kj::none) {
-        actorChannel = facetManager.getFacet(name, kj::mv(getStartInfo));
-      }
-
-      return KJ_REQUIRE_NONNULL(actorChannel)
-          ->startRequest({.cfBlobJson = kj::mv(cfStr),
-            .parentSpan = tracing.getInternalSpanParent(),
-            .userSpanParent = tracing.getUserSpanParent()});
+      return getOrCreateActorChannel().startRequest({.cfBlobJson = kj::mv(cfStr),
+        .parentSpan = tracing.getInternalSpanParent(),
+        .userSpanParent = tracing.getUserSpanParent()});
     },
         {.inHouse = true,
           .wrapMetrics = true,
           .operationName = kj::ConstString("facet_subrequest"_kjc)}));
+  }
+
+  kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override {
+    return kj::addRef(getOrCreateActorChannel());
   }
 
  private:
@@ -1008,6 +1014,14 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
   kj::Function<kj::Promise<Worker::Actor::FacetManager::StartInfo>()> getStartInfo;
 
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
+
+  IoChannelFactory::ActorChannel& getOrCreateActorChannel() {
+    if (actorChannel == kj::none) {
+      actorChannel = facetManager.getFacet(name, kj::mv(getStartInfo));
+    }
+
+    return *KJ_REQUIRE_NONNULL(actorChannel);
+  }
 };
 
 jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js,

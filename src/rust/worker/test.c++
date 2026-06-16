@@ -144,6 +144,7 @@ KJ_TEST("kill_switch worker customEvent") {
 
     kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
         capnp::ByteStreamFactory& byteStreamFactory,
+        workerd::FrankenvalueHandler& frankenvalueHandler,
         workerd::rpc::EventDispatcher::Client dispatcher) override {
       KJ_UNIMPLEMENTED();
     }
@@ -280,6 +281,7 @@ KJ_TEST("error worker customEvent") {
     kj::Promise<workerd::WorkerInterface::CustomEvent::Result> sendRpc(
         capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
         capnp::ByteStreamFactory& byteStreamFactory,
+        workerd::FrankenvalueHandler& frankenvalueHandler,
         workerd::rpc::EventDispatcher::Client dispatcher) override {
       KJ_UNIMPLEMENTED();
     }

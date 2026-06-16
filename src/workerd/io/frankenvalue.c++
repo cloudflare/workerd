@@ -281,4 +281,15 @@ void Frankenvalue::setProperty(kj::String name, Frankenvalue value) {
   });
 }
 
+FrankenvalueHandler& getUnsupportedFrankenvalueHandler() {
+  class UnsupportedFrankenvalueHandler final: public FrankenvalueHandler {
+   public:
+    void toCapnp(Frankenvalue& value, rpc::Frankenvalue::Builder builder) override {
+      KJ_FAIL_REQUIRE("Frankenvalues unsupported here");
+    }
+  };
+  static UnsupportedFrankenvalueHandler instance;
+  return instance;
+}
+
 }  // namespace workerd

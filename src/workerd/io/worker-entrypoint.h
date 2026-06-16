@@ -51,6 +51,7 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     bool isDynamicDispatch = false,
     // Per-request Cloudflare Access info. Supplied by the embedding application; standalone
     // workerd passes kj::none, which causes `ctx.access` to be `undefined` in JS.
-    kj::Maybe<kj::Own<AccessInfo>> accessInfo = kj::none);
+    kj::Maybe<kj::Own<AccessInfo>> accessInfo = kj::none,
+    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory = kj::none);
 
 }  // namespace workerd

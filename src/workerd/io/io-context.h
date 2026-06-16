@@ -75,7 +75,8 @@ class IoContext_IncomingRequest final {
       kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::Own<BaseTracer>> workerTracer,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
-      kj::Maybe<kj::Own<AccessInfo>> accessInfo = kj::none);
+      kj::Maybe<kj::Own<AccessInfo>> accessInfo = kj::none,
+      kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory = kj::none);
   KJ_DISALLOW_COPY_AND_MOVE(IoContext_IncomingRequest);
   ~IoContext_IncomingRequest() noexcept(false);
 
@@ -165,6 +166,7 @@ class IoContext_IncomingRequest final {
   kj::Maybe<kj::Own<BaseTracer>> workerTracer;
   kj::Own<IoChannelFactory> ioChannelFactory;
   kj::Maybe<kj::Own<AccessInfo>> accessInfo;
+  kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory;
 
   // Root user trace span for this request. Populated during delivered() via
   // BaseTracer::makeUserRequestSpan(); otherwise a null SpanParent. The tracer it references
@@ -447,6 +449,15 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // True if this is the IoContext for the current thread (same as `hasCurrent() && tcx == current()`).
   bool isCurrent();
+
+  void setEntrypointHandler(jsg::Lock& js, jsg::JsObject handler);
+  jsg::JsObject getEntrypointHandler(jsg::Lock& js);
+
+  // Get the current context's self-token factory, used by ctx.restore() to create extended tokens.
+  // Returns null if this is a dynamic worker or facet that was not itself created by ctx.restore()
+  // in the parent worker and therefore cannot use ctx.restore() itself, because the runtime does
+  // not know how to recreate it.
+  kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> getSelfTokenFactory();
 
   // Check if a current request is available. Used to provide better diagnostics when this is
   // unexpectedly absent when reporting a user span.
@@ -1134,6 +1145,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   void checkFarGet(const DeleteQueue& expectedQueue, const std::type_info& type);
 
   kj::Maybe<jsg::JsRef<jsg::JsObject>> promiseContextTag;
+  kj::Maybe<jsg::JsRef<jsg::JsObject>> entrypointHandler;
 
   class Runnable {
    public:

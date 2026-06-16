@@ -1027,6 +1027,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::run(
 kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
+    FrankenvalueHandler& frankenvalueHandler,
     rpc::EventDispatcher::Client dispatcher) {
   auto revokePaf = kj::newPromiseAndFulfiller<void>();
 

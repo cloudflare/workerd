@@ -445,6 +445,7 @@ class QueueCustomEvent final: public WorkerInterface::CustomEvent, public kj::Re
 
   kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       capnp::ByteStreamFactory& byteStreamFactory,
+      FrankenvalueHandler& frankenvalueHandler,
       rpc::EventDispatcher::Client dispatcher) override;
 
   static const uint16_t EVENT_TYPE = 5;

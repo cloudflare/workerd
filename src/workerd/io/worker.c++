@@ -2347,6 +2347,7 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
   }
 
   kj::StringPtr n = name.orDefault("default"_kj);
+  auto& ioctx = IoContext::current();
 
   auto getHandlerFromEntrypointClass =
       [&](EntrypointClass& cls) -> kj::Maybe<kj::Own<api::ExportedHandler>> {
@@ -2363,6 +2364,8 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     handler->env = js.v8Ref(js.v8Undefined());
     handler->ctx = kj::none;
 
+    ioctx.setEntrypointHandler(js, jsg::JsObject(handler->self.getHandle(js)));
+
     return handler;
   };
 
@@ -2373,8 +2376,10 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
       constructedHandler.ctx = js.alloc<api::ExecutionContext>(js,
           jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js),
           kj::mv(versionInfo));
+      ioctx.setEntrypointHandler(js, jsg::JsObject(constructedHandler.self.getHandle(js)));
       return kj::heap(kj::mv(constructedHandler));
     }
+    ioctx.setEntrypointHandler(js, jsg::JsObject(h.self.getHandle(js)));
     return fakeOwn(h);
   } else KJ_IF_SOME(cls, worker.impl->statelessClasses.find(n)) {
     return getHandlerFromEntrypointClass(cls);
@@ -3944,7 +3949,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       containerRunning = status.getRunning();
     }
 
-    co_await context.run([this, &info, containerRunning](Worker::Lock& lock) {
+    co_await context.run([this, &context, &info, containerRunning](Worker::Lock& lock) {
       jsg::Lock& js = lock;
 
       kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
@@ -3974,6 +3979,8 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       handler.env = js.v8Ref(js.v8Undefined());
       handler.ctx = kj::none;
       handler.missingSuperclass = info.missingSuperclass;
+
+      context.setEntrypointHandler(js, jsg::JsObject(handler.self.getHandle(js)));
 
       impl->classInstance = kj::mv(handler);
     }, inputLock.addRef(context.getCurrentTraceSpan()));

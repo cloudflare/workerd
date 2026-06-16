@@ -132,6 +132,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
 kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEvent::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
+    FrankenvalueHandler& frankenvalueHandler,
     rpc::EventDispatcher::Client dispatcher) {
   auto req = dispatcher.castAs<rpc::HibernatableWebSocketEventDispatcher>()
                  .hibernatableWebSocketEventRequest();

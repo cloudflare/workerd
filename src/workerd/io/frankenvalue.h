@@ -201,4 +201,26 @@ struct Frankenvalue::Property {
   size_t capTableSize = 0;
 };
 
+// Abstract interface for serializing a `Frankenvalue` -- including the contents of its cap table --
+// to capnp.
+//
+// `Frankenvalue::toCapnp()` deliberately serializes only the *value* and the cap table *size*, not
+// the cap table *contents*, because the meaning of a capability is environment-specific (in the
+// edge runtime, caps are dehydrated channel tokens; in a process sandbox, they are live channel
+// caps; etc.). A `FrankenvalueHandler` knows how to encode the cap table for a particular
+// transport and fills it in. It is passed alongside `HttpOverCapnpFactory` / `ByteStreamFactory`
+// wherever a Frankenvalue may need to cross an RPC boundary.
+//
+// This is intentionally *not* optional at call sites: silently dropping a Frankenvalue's caps (as
+// a bare `Frankenvalue::toCapnp()` would) is always a bug.
+class FrankenvalueHandler {
+ public:
+  // Serialize `value` (including the contents of its cap table) into `builder`.
+  virtual void toCapnp(Frankenvalue& value, rpc::Frankenvalue::Builder builder) = 0;
+};
+
+// Returns a shared `FrankenvalueHandler` for contexts that don't support it. Throws an exception
+// if used.
+FrankenvalueHandler& getUnsupportedFrankenvalueHandler();
+
 }  // namespace workerd

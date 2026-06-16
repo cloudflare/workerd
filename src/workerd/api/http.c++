@@ -2181,7 +2181,8 @@ void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
           // Arrange to send the token when it's ready.
           ioctx.addTask(promise
-              .then([pusher = rpcHandler.getExternalPusher(), fulfiller = kj::mv(paf.fulfiller)]
+              .then([pusher = rpcHandler.getExternalPusher(), fulfiller = kj::mv(paf.fulfiller),
+                     attachedChannel = kj::mv(channel)]
                     (kj::Array<byte> token) mutable {
             auto req = pusher.pushDelayedChannelTokenRequest(
                 capnp::MessageSize { 4 + token.size() / sizeof(capnp::word), 0 });

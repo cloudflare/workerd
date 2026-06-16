@@ -14,6 +14,7 @@
 #include <workerd/api/fuzzilli.h>
 #endif
 #include <workerd/api/hibernatable-web-socket.h>
+#include <workerd/api/restore.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/system-streams.h>
@@ -66,6 +67,13 @@ void ExecutionContext::waitUntil(kj::Promise<void> promise) {
 
 void ExecutionContext::passThroughOnException() {
   IoContext::current().setFailOpen();
+}
+
+jsg::Promise<jsg::Value> ExecutionContext::restore(jsg::Lock& js,
+    jsg::JsObject params,
+    const jsg::TypeHandler<jsg::Ref<Fetcher>>& fetcherHandler,
+    const jsg::TypeHandler<jsg::Ref<JsRpcStub>>& rpcStubHandler) {
+  return restoreCurrentEntrypoint(js, params, fetcherHandler, rpcStubHandler);
 }
 
 jsg::Optional<jsg::Ref<CacheContext>> ExecutionContext::getCache(jsg::Lock& js) {

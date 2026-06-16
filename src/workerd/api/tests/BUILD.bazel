@@ -597,6 +597,12 @@ wd_test(
 )
 
 wd_test(
+    src = "persistent-stubs-test.wd-test",
+    args = ["--experimental"],
+    data = ["persistent-stubs-test.js"],
+)
+
+wd_test(
     src = "compression-streams-test.wd-test",
     args = ["--experimental"],
     data = ["compression-streams-test.js"],
