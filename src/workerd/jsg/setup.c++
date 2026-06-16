@@ -250,6 +250,12 @@ kj::Arc<const ExternalMemoryTarget> IsolateBase::getExternalMemoryTarget() {
   return externalMemoryTarget.addRef();
 }
 
+kj::Arc<const IsolateLiveness> IsolateBase::getIsolateLiveness() {
+  // ExternalMemoryTarget is an IsolateLiveness; reuse the isolate's singleton instance, which is
+  // already detached during isolate teardown (see ~IsolateBase).
+  return externalMemoryTarget.addRef();
+}
+
 void IsolateBase::terminateExecution() const {
   ptr->TerminateExecution();
 }
