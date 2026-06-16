@@ -1543,9 +1543,16 @@ class IsolateLiveness: public kj::AtomicRefcounted {
  public:
   IsolateLiveness(v8::Isolate* isolate): isolate(isolate) {}
 
+  // Returns the isolate if it is still alive, or nullptr if it has been torn down (detach()ed).
+  // The returned pointer is only safe to dereference while the isolate cannot be concurrently
+  // destroyed -- e.g. while holding (or about to take) the isolate lock.
+  v8::Isolate* tryGetIsolate() const {
+    return isolate.load(std::memory_order_relaxed);
+  }
+
   // Returns true if the isolate is still alive (detach() has not been called).
   bool isIsolateAlive() const {
-    return isolate.load(std::memory_order_relaxed) != nullptr;
+    return tryGetIsolate() != nullptr;
   }
 
   // Disconnects from the isolate (called just before destroying the isolate).
@@ -1591,9 +1598,9 @@ class WeakRef {
   WeakRef(WeakRef<U>&& other) noexcept {
     KJ_IF_SOME(o, kj::mv(other.impl)) {
       impl = Impl{
-        .isolate = o.isolate,
         .target = o.target,
         .anchor = kj::mv(o.anchor),
+        .isolateLiveness = kj::mv(o.isolateLiveness),
       };
     }
   }
@@ -1615,9 +1622,9 @@ class WeakRef {
     destroy();
     KJ_IF_SOME(o, otherImpl) {
       impl = Impl{
-        .isolate = o.isolate,
         .target = o.target,
         .anchor = kj::mv(o.anchor),
+        .isolateLiveness = kj::mv(o.isolateLiveness),
       };
     }
     return *this;
@@ -1670,18 +1677,22 @@ class WeakRef {
 
  private:
   struct Impl {
-    v8::Isolate* isolate;
     T& target;
     kj::Rc<WeakRefAnchor> anchor;
+    // Holds the isolate this WeakRef belongs to and, crucially, lets destroy() learn whether that
+    // isolate has already been torn down. A WeakRef may outlive its isolate (e.g. a hibernatable
+    // WebSocket held by a HibernationManager); after teardown this reports the isolate as gone so
+    // destroy() never dereferences a dangling isolate pointer. See destroy() in setup.h.
+    kj::Arc<const IsolateLiveness> isolateLiveness;
   };
 
   kj::Maybe<Impl> impl;
 
-  WeakRef(v8::Isolate* isolate, T& target, kj::Rc<WeakRefAnchor> anchor)
+  WeakRef(T& target, kj::Rc<WeakRefAnchor> anchor, kj::Arc<const IsolateLiveness> isolateLiveness)
       : impl(Impl{
-          .isolate = isolate,
           .target = target,
           .anchor = kj::mv(anchor),
+          .isolateLiveness = kj::mv(isolateLiveness),
         }) {}
 
   // Arranges to have the anchor always dropped under isolate lock
