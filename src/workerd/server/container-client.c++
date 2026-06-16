@@ -2105,9 +2105,11 @@ kj::Promise<void> ContainerClient::cloneSnapshot(SnapshotRestoreMount& snapshot)
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
   jsonRoot.setImage(containerEgressInterceptorImage);
-  jsonRoot.setEntrypoint("/bin/cp");
 
   // Run `/bin/cp -a /src/. /dst/` so the clone volume gets the snapshot contents directly.
+  auto entrypoint = jsonRoot.initEntrypoint(1);
+  entrypoint.set(0, "/bin/cp");
+
   auto cmd = jsonRoot.initCmd(3);
   cmd.set(0, "-a");
   cmd.set(1, "/src/.");
