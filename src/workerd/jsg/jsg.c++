@@ -440,10 +440,6 @@ void ExternalMemoryTarget::adjustNow(Lock& js, ssize_t amount) const {
   js.v8Isolate->AdjustAmountOfExternalAllocatedMemoryImpl(amount);
 }
 
-void ExternalMemoryTarget::detach() const {
-  isolate.store(nullptr, std::memory_order_relaxed);
-}
-
 ExternalMemoryAdjustment ExternalMemoryTarget::getAdjustment(size_t amount) const {
   return ExternalMemoryAdjustment(this->addRefToThis(), amount);
 }
@@ -453,10 +449,6 @@ void ExternalMemoryTarget::applyDeferredMemoryUpdate() const {
   if (amount != 0) {
     isolate.load(std::memory_order_relaxed)->AdjustAmountOfExternalAllocatedMemoryImpl(amount);
   }
-}
-
-bool ExternalMemoryTarget::isIsolateAliveForTest() const {
-  return isolate.load(std::memory_order_relaxed) != nullptr;
 }
 
 int64_t ExternalMemoryTarget::getPendingMemoryUpdateForTest() const {

@@ -488,7 +488,7 @@ KJ_TEST("External memory adjustment - defered") {
     }
 
     KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 1000);
-    KJ_ASSERT(target->isIsolateAliveForTest());
+    KJ_ASSERT(target->isIsolateAlive());
 
     isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
       // Once lock is taken, the amount is applied
@@ -498,7 +498,7 @@ KJ_TEST("External memory adjustment - defered") {
       adjuster1.adjust(-500);
       KJ_ASSERT(adjuster1.getAmount() == 500);
       KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 0);
-      KJ_ASSERT(target->isIsolateAliveForTest());
+      KJ_ASSERT(target->isIsolateAlive());
     });
 
     mem = isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
@@ -506,7 +506,7 @@ KJ_TEST("External memory adjustment - defered") {
     });
   }
 
-  KJ_ASSERT(!target->isIsolateAliveForTest());
+  KJ_ASSERT(!target->isIsolateAlive());
 
   // Delete the long-lived array, which will call the adjustment's destructor, to make sure it's safe.
   mem = nullptr;

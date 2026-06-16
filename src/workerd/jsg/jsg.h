@@ -1535,6 +1535,30 @@ Ref<T> _jsgThis(T* obj) {
 #define JSG_THIS (::workerd::jsg::_jsgThis(this))
 #define JSG_THIS_WEAK(js) (getWeakRefToThis<std::remove_pointer_t<decltype(this)>>(js))
 
+// Refcounted holder of a weak (non-owning) back-reference to a v8::Isolate. The reference is
+// nulled out via detach() just before the isolate is destroyed, so that objects which may outlive
+// the isolate can cheaply and safely observe whether it is still alive via isIsolateAlive(),
+// without dereferencing a dangling pointer.
+class IsolateLiveness: public kj::AtomicRefcounted {
+ public:
+  IsolateLiveness(v8::Isolate* isolate): isolate(isolate) {}
+
+  // Returns true if the isolate is still alive (detach() has not been called).
+  bool isIsolateAlive() const {
+    return isolate.load(std::memory_order_relaxed) != nullptr;
+  }
+
+  // Disconnects from the isolate (called just before destroying the isolate).
+  void detach() const {
+    isolate.store(nullptr, std::memory_order_relaxed);
+  }
+
+ protected:
+  // Mutable so that it can be set null when the isolate is destroyed.
+  mutable std::atomic<v8::Isolate*> isolate;
+  static_assert(std::atomic<v8::Isolate*>::is_always_lock_free);
+};
+
 // A non-owning weak reference to a resource type (a type with a JSG_RESOURCE_TYPE block).
 //
 // Unlike Ref<T>, a WeakRef<T> does NOT keep the referenced object alive and is NOT traced by
@@ -2499,32 +2523,23 @@ class ExternalMemoryAdjustment;
 // pointing to this isolate.
 //
 // Each isolate has a singleton `ExternalMemoryTarget`, which all `ExternalMemoryAdjustment`s
-// point to. The only purpose of this object is to hold a weak reference back to the isolate; the
-// reference is nulled out when the isolate is destroyed.
-class ExternalMemoryTarget: public kj::AtomicRefcounted {
+// point to. As an `IsolateLiveness`, it holds a weak reference back to the isolate that is nulled
+// out when the isolate is destroyed.
+class ExternalMemoryTarget: public IsolateLiveness {
  public:
-  ExternalMemoryTarget(v8::Isolate* isolate): isolate(isolate) {}
+  ExternalMemoryTarget(v8::Isolate* isolate): IsolateLiveness(isolate) {}
 
   ExternalMemoryAdjustment getAdjustment(size_t amount) const;
 
   // Apply any deferred external memory updates. Must be called with isolate locked.
   void applyDeferredMemoryUpdate() const;
 
-  // Disconnects the ExternalMemoryTarget from the isolate (called just before destroying the
-  // isolate).
-  void detach() const;
-
-  // These two methods are for tests only.
-  bool isIsolateAliveForTest() const;
+  // This method is for tests only.
   int64_t getPendingMemoryUpdateForTest() const;
 
  private:
   void maybeDeferAdjustment(ssize_t amount) const;
   void adjustNow(Lock& js, ssize_t amount) const;
-
-  // Mutable so that it can be set null when the isolate is destroyed.
-  mutable std::atomic<v8::Isolate*> isolate;
-  static_assert(std::atomic<v8::Isolate*>::is_always_lock_free);
 
   // Tracks changes to external memory that were applied from a thread that did not hold the
   // isolate lock. These will be applied the next time the lock is taken.
