@@ -2192,12 +2192,16 @@ void Worker::handleLog(jsg::Lock& js,
   // unchanged for backwards compatibility — the structured ErrorInfo is purely additive.
   tracing::LogErrorInfo capturedErrors;
   {
-    auto slots = kj::heapArray<kj::Maybe<tracing::ErrorInfo>>(length);
+    kj::Array<kj::Maybe<tracing::ErrorInfo>> slots;
     bool anyError = false;
     for (auto i: kj::zeroTo(length)) {
       if (!tryCatch.CanContinue()) break;
       auto arg = info[i];
       if (!arg->IsNativeError()) continue;
+      if (!anyError) {
+        slots = kj::heapArray<kj::Maybe<tracing::ErrorInfo>>(length);
+        anyError = true;
+      }
       js.withinHandleScope([&] {
         KJ_IF_SOME(extracted, extractErrorInfo(js, arg.As<v8::Object>())) {
           slots[i] = kj::mv(extracted);

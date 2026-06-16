@@ -128,6 +128,19 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     return;
   }
 
+  // Compute the heap size of errorInfo once for both the streaming and buffered paths.
+  size_t errorInfoSize = 0;
+  KJ_IF_SOME(infos, errorInfo) {
+    for (const auto& entry: infos) {
+      KJ_IF_SOME(info, entry) {
+        errorInfoSize += info.name.size() + info.message.size();
+        KJ_IF_SOME(s, info.stack) {
+          errorInfoSize += s.size();
+        }
+      }
+    }
+  }
+
   // TODO(streaming-tail): Here we add the log to the trace object and the tail stream writer, if
   // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
   // to the buffered trace object is not needed; this will be addressed in a future refactor.
@@ -139,14 +152,14 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     writer->report(context,
         {tracing::Log(timestamp, logLevel, kj::str(message.first(messageSize)),
             kj::mv(streamErrorInfo))},
-        timestamp, messageSize);
+        timestamp, messageSize + errorInfoSize);
   }
 
   if (trace->exceededLogLimit) {
     return;
   }
 
-  size_t messageSize = sizeof(tracing::Log) + message.size();
+  size_t messageSize = sizeof(tracing::Log) + message.size() + errorInfoSize;
   if (trace->bytesUsed + messageSize > MAX_TRACE_BYTES) {
     // We use a JSON encoded array/string to match other console.log() recordings:
     trace->logs.add(timestamp, LogLevel::WARN, kj::str(logSizeExceeded));
