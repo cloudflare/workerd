@@ -516,7 +516,9 @@ jsg::Ref<URLSearchParams> URLSearchParams::constructor(
         searchParams->url->kj::Url::operator=(usp->url->clone());
       }
       KJ_CASE_ONEOF(queryString, kj::String) {
-        parseQueryString(searchParams->url->query, kj::mv(queryString), true);
+        auto& adjustment =
+            searchParams->externalMemoryAdjustment.emplace(js.getExternalMemoryAdjustment());
+        parseQueryString(searchParams->url->query, kj::mv(queryString), adjustment, true);
       }
       KJ_CASE_ONEOF(dict, jsg::Dict<kj::String>) {
         searchParams->url->query = KJ_MAP(entry, dict.fields) {

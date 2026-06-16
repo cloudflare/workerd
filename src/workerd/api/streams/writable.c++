@@ -30,11 +30,11 @@ jsg::Ref<WritableStreamDefaultWriter> WritableStreamDefaultWriter::constructor(
 }
 
 jsg::Promise<void> WritableStreamDefaultWriter::abort(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) {
+    jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) {
   assertAttachedOrTerminal();
   if (state.is<Released>()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This WritableStream writer has been released."_kj));
+        js.typeError("This WritableStream writer has been released."_kj));
   }
   if (state.is<Closed>()) {
     return js.resolvedPromise();
@@ -62,10 +62,10 @@ jsg::Promise<void> WritableStreamDefaultWriter::close(jsg::Lock& js) {
   assertAttachedOrTerminal();
   if (state.is<Released>()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This WritableStream writer has been released."_kj));
+        js.typeError("This WritableStream writer has been released."_kj));
   }
   if (state.is<Closed>()) {
-    return js.rejectedPromise<void>(js.v8TypeError("This WritableStream has been closed."_kj));
+    return js.rejectedPromise<void>(js.typeError("This WritableStream has been closed."_kj));
   }
   auto& attached = state.requireActiveUnsafe();
   // In some edge cases, this writer is the last thing holding a strong
@@ -135,14 +135,14 @@ void WritableStreamDefaultWriter::replaceReadyPromise(
 }
 
 jsg::Promise<void> WritableStreamDefaultWriter::write(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> chunk) {
+    jsg::Lock& js, jsg::Optional<jsg::JsValue> chunk) {
   assertAttachedOrTerminal();
   if (state.is<Released>()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This WritableStream writer has been released."_kj));
+        js.typeError("This WritableStream writer has been released."_kj));
   }
   if (state.is<Closed>()) {
-    return js.rejectedPromise<void>(js.v8TypeError("This WritableStream has been closed."_kj));
+    return js.rejectedPromise<void>(js.typeError("This WritableStream has been closed."_kj));
   }
   auto& attached = state.requireActiveUnsafe();
   return attached.stream->getController().write(js, chunk);
@@ -215,11 +215,10 @@ void WritableStream::detach(jsg::Lock& js) {
   getController().detach(js);
 }
 
-jsg::Promise<void> WritableStream::abort(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) {
+jsg::Promise<void> WritableStream::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) {
   if (isLocked()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This WritableStream is currently locked to a writer."_kj));
+        js.typeError("This WritableStream is currently locked to a writer."_kj));
   }
   return getController().abort(js, reason);
 }
@@ -227,7 +226,7 @@ jsg::Promise<void> WritableStream::abort(
 jsg::Promise<void> WritableStream::close(jsg::Lock& js) {
   if (isLocked()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This WritableStream is currently locked to a writer."_kj));
+        js.typeError("This WritableStream is currently locked to a writer."_kj));
   }
   return getController().close(js);
 }
@@ -235,7 +234,7 @@ jsg::Promise<void> WritableStream::close(jsg::Lock& js) {
 jsg::Promise<void> WritableStream::flush(jsg::Lock& js) {
   if (isLocked()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This WritableStream is currently locked to a writer."_kj));
+        js.typeError("This WritableStream is currently locked to a writer."_kj));
   }
   return getController().flush(js);
 }
@@ -369,7 +368,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
         context.addTask(context.run([writer = kj::mv(writer), exception = cancellationException()](
                                         Worker::Lock& lock) mutable {
           jsg::Lock& js = lock;
-          auto ex = js.exceptionToJs(kj::mv(exception));
+          auto ex = js.exceptionToJsValue(kj::mv(exception));
           return IoContext::current().awaitJs(lock, writer->abort(lock, ex.getHandle(js)));
         }));
       }
@@ -394,7 +393,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
               obj.context.run([writer = kj::mv(writer), exception = cancellationException()](
                                   Worker::Lock& lock) mutable {
             jsg::Lock& js = lock;
-            auto ex = js.exceptionToJs(kj::mv(exception));
+            auto ex = js.exceptionToJsValue(kj::mv(exception));
             return IoContext::current().awaitJs(lock, writer->abort(lock, ex.getHandle(js)));
           }));
         }
@@ -409,9 +408,8 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
     if (buffer == nullptr) return kj::READY_NOW;
     return canceler.wrap(context.run([this, buffer](Worker::Lock& lock) mutable {
       auto& writer = getInner();
-      auto source = KJ_ASSERT_NONNULL(jsg::BufferSource::tryAlloc(lock, buffer.size()));
-      source.asArrayPtr().copyFrom(buffer);
-      return context.awaitJs(lock, writer.write(lock, source.getHandle(lock)));
+      auto ab = jsg::JsArrayBuffer::create(lock, buffer);
+      return context.awaitJs(lock, writer.write(lock, jsg::JsValue(ab)));
     }));
   }
 
@@ -430,17 +428,16 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
       // guaranteed to live until the returned promise is resolved, but the application code
       // may hold onto the ArrayBuffer for longer. We need to make sure that the backing store
       // for the ArrayBuffer remains valid.
-      auto source = KJ_ASSERT_NONNULL(jsg::BufferSource::tryAlloc(lock, amount));
-      auto ptr = source.asArrayPtr();
+      auto ab = jsg::JsArrayBuffer::create(lock, amount);
+      auto ptr = ab.asArrayPtr();
       for (auto& piece: pieces) {
         KJ_DASSERT(ptr.size() > 0);
         KJ_DASSERT(piece.size() <= ptr.size());
         if (piece.size() == 0) continue;
-        ptr.first(piece.size()).copyFrom(piece);
-        ptr = ptr.slice(piece.size());
+        ptr.write(piece);
       }
 
-      return context.awaitJs(lock, writer.write(lock, source.getHandle(lock)));
+      return context.awaitJs(lock, writer.write(lock, jsg::JsValue(ab)));
     }));
   }
 

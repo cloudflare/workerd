@@ -647,12 +647,13 @@ jsg::Ref<TraceMetrics> UnsafeTraceMetrics::fromTrace(jsg::Lock& js, jsg::Ref<Tra
 }
 
 namespace {
-kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest> incomingRequest,
+void sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointNamePtr,
     kj::Maybe<Worker::VersionInfo> versionInfo,
     Frankenvalue props,
     kj::ArrayPtr<kj::Own<Trace>> traces,
-    bool isDynamicDispatch) {
+    bool isDynamicDispatch,
+    kj::TaskSet& waitUntilTasks) {
   // Mark the request as delivered because we're about to run some JS.
   incomingRequest->delivered();
 
@@ -670,19 +671,18 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   // wait around for async resolution. We're relying on `drain()` below to persist `incomingRequest`
   // and its members until this task completes.
   auto entrypointName = mapCopyString(entrypointNamePtr);
-  try {
-    co_await context.run(
-        [&context, nonEmptyTraces = nonEmptyTraces.asPtr(), entrypointName = kj::mv(entrypointName),
-            versionInfo = kj::mv(versionInfo), props = kj::mv(props),
-            isDynamicDispatch](Worker::Lock& lock) mutable {
-      jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
-      jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
+  context.addWaitUntil(
+      context
+          .run([&context, nonEmptyTraces = kj::mv(nonEmptyTraces),
+                   entrypointName = kj::mv(entrypointName), versionInfo = kj::mv(versionInfo),
+                   props = kj::mv(props), isDynamicDispatch](Worker::Lock& lock) mutable {
+    jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+    jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
-      auto handler = lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
-          context.getActor(), isDynamicDispatch);
-      return lock.getGlobalScope().sendTraces(nonEmptyTraces, lock, handler);
-    });
-  } catch (kj::Exception& e) {
+    auto handler = lock.getExportedHandler(
+        entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor(), isDynamicDispatch);
+    return lock.getGlobalScope().sendTraces(nonEmptyTraces, lock, handler);
+  }).catch_([&metrics, &context](kj::Exception&& e) {
     // TODO(someday): We only report sendTraces() as failed for metrics/logging if the initial
     //   event handler throws an exception; we do not consider waitUntil(). But all async work done
     //   in a trace handler has to be done using waitUntil(). So, this seems wrong. Should we
@@ -695,9 +695,9 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
     // exceptions that occur asynchronously while waiting for the context to drain will be
     // logged elsewhere.)
     context.logUncaughtExceptionAsync(UncaughtExceptionSource::TRACE_HANDLER, kj::mv(e));
-  };
+  }));
 
-  co_await incomingRequest->drain();
+  incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
 }
 }  // namespace
 
@@ -712,8 +712,8 @@ auto TraceCustomEvent::run(kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::TaskSet& waitUntilTasks,
     bool isDynamicDispatch) -> kj::Promise<Result> {
   // Don't bother to wait around for the handler to run, just hand it off to the waitUntil tasks.
-  waitUntilTasks.add(sendTracesToExportedHandler(kj::mv(incomingRequest), entrypointNamePtr,
-      kj::mv(versionInfo), kj::mv(props), traces, isDynamicDispatch));
+  sendTracesToExportedHandler(kj::mv(incomingRequest), entrypointNamePtr, kj::mv(versionInfo),
+      kj::mv(props), traces, isDynamicDispatch, waitUntilTasks);
 
   // Reporting a proper outcome and return event here would be nice, but for that we'd need to await
   // running the tail handler...
@@ -724,6 +724,7 @@ auto TraceCustomEvent::run(kj::Own<IoContext::IncomingRequest> incomingRequest,
 
 auto TraceCustomEvent::sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
+    FrankenvalueHandler& frankenvalueHandler,
     workerd::rpc::EventDispatcher::Client dispatcher) -> kj::Promise<Result> {
   auto req = dispatcher.sendTracesRequest();
   auto out = req.initTraces(traces.size());

@@ -2,11 +2,24 @@
 
 #include "impl.h"
 
+#include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 
 #include <ncrypto.h>
 
+#include <climits>
+
 namespace workerd::api {
+namespace {
+
+bool checkLimitEnforcer(int, int) {
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+    return ioContext.getLimitEnforcer().getLimitsExceeded() == kj::none;
+  }
+  return true;
+}
+
+}  // namespace
 
 jsg::JsArrayBuffer randomPrime(jsg::Lock& js,
     uint32_t size,
@@ -14,6 +27,9 @@ jsg::JsArrayBuffer randomPrime(jsg::Lock& js,
     kj::Maybe<kj::ArrayPtr<kj::byte>> add_buf,
     kj::Maybe<kj::ArrayPtr<kj::byte>> rem_buf) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
+
+  JSG_REQUIRE(size <= kMaxPrimeBits, RangeError, "generatePrime size exceeds maximum (",
+      kMaxPrimeBits, " bits)");
 
   // Use mapping to have kj::Own work with optional buffer
   static const auto toBignum =
@@ -30,6 +46,7 @@ jsg::JsArrayBuffer randomPrime(jsg::Lock& js,
 
   auto add = toBignum(add_buf);
   auto rem = toBignum(rem_buf);
+
   // The JS interface already ensures that the (positive) size fits into an int.
   int bits = static_cast<int>(size);
 
@@ -72,12 +89,14 @@ jsg::JsArrayBuffer randomPrime(jsg::Lock& js,
   JSG_REQUIRE(
       workerd::api::CSPRNG(nullptr), Error, "Error while generating prime (bad random state)");
 
-  if (auto prime = ncrypto::BignumPointer::NewPrime({
-        .bits = bits,
-        .safe = safe,
-        .add = kj::mv(add),
-        .rem = kj::mv(rem),
-      })) {
+  if (auto prime = ncrypto::BignumPointer::NewPrime(
+          {
+            .bits = bits,
+            .safe = safe,
+            .add = kj::mv(add),
+            .rem = kj::mv(rem),
+          },
+          checkLimitEnforcer)) {
     auto buf = JSG_REQUIRE_NONNULL(
         bignumToArrayPadded(js, *prime.get()), Error, "Error while generating prime");
     return jsg::JsArrayBuffer::create(js, buf.asArrayPtr());
@@ -88,14 +107,15 @@ jsg::JsArrayBuffer randomPrime(jsg::Lock& js,
 
 bool checkPrime(kj::ArrayPtr<kj::byte> bufferView, uint32_t num_checks) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
-  static constexpr int32_t kMaxChecks = kj::maxValue;
-  // Strictly upper bound the number of checks. If this proves to be too expensive
-  // then we may need to consider lowering this limit further.
+  // Maximum BoringSSL recommends for any use case.
+  static constexpr uint32_t kMaxChecks = 64;
   JSG_REQUIRE(num_checks <= kMaxChecks, RangeError, "Invalid number of checks");
+  JSG_REQUIRE(bufferView.size() <= kMaxPrimeBits / CHAR_BIT, RangeError,
+      "checkPrime candidate exceeds maximum size");
 
   auto candidate = ncrypto::BignumPointer(bufferView.begin(), bufferView.size());
   JSG_REQUIRE(candidate, Error, "Error while checking prime");
-  return candidate.isPrime(num_checks);
+  return candidate.isPrime(num_checks, checkLimitEnforcer);
 }
 
 }  // namespace workerd::api

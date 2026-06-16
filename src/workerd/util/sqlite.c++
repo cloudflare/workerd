@@ -1056,7 +1056,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
   if (actionCode == SQLITE_ALTER_TABLE || actionCode == SQLITE_DETACH) {
     auto swap = param1;  // contains dbName
     param1 = param2;     // contains table name (for SQLITE_ALTER_TABLE, null otherwise)
-    param2 = dbName;     // should always be null
+    param2 = dbName;     // RENAME TO destination name (patched), null for other ALTER ops
     dbName = swap;
   }
 
@@ -1118,8 +1118,15 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       // See https://www.sqlite.org/fileformat2.html#stat1tab for more details.
       return true;
 
-    case SQLITE_ALTER_TABLE: /* Table Name      NULL (modified) */
-      return regulator->isAllowedName(KJ_ASSERT_NONNULL(param1));
+    case SQLITE_ALTER_TABLE: /* Table Name      New Name (for RENAME, patched) */
+      if (!regulator->isAllowedName(KJ_ASSERT_NONNULL(param1))) return false;
+      // For RENAME TO, our patched SQLite passes the destination name as the
+      // 5th authorizer arg (mapped to param2 after the swap above).  Block
+      // renames into reserved namespaces (e.g. _cf_KV).
+      KJ_IF_SOME(newName, param2) {
+        return regulator->isAllowedName(newName);
+      }
+      return true;
 
     case SQLITE_READ:   /* Table Name      Column Name     */
     case SQLITE_UPDATE: /* Table Name      Column Name     */
@@ -1287,14 +1294,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
         KJ_IF_SOME(moduleName, param2) {
           if (strcasecmp(moduleName.begin(), "fts5") == 0 ||
               strcasecmp(moduleName.begin(), "fts5vocab") == 0) {
-            if (util::Autogate::isEnabled(util::AutogateKey::SQL_RESTRICT_RESERVED_NAMES)) {
-              return regulator->isAllowedName(KJ_ASSERT_NONNULL(param1));
-            }
-            auto& tableName = KJ_ASSERT_NONNULL(param1);
-            if (tableName.size() >= 4 && strncasecmp(tableName.begin(), "_cf_", 4) == 0) {
-              LOG_WARNING_PERIODICALLY("FTS5 virtual table uses reserved _cf_ prefix");
-            }
-            return true;
+            return regulator->isAllowedName(KJ_ASSERT_NONNULL(param1));
           }
         }
         return false;

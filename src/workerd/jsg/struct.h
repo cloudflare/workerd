@@ -138,8 +138,23 @@ class FieldWrapper {
       v8::Local<v8::Context> context,
       v8::Local<v8::Object> in) {
     static_assert(NotV8Local<Type>);
-    v8::Local<v8::Value> jsValue = check(in->Get(context, nameHandle.Get(isolate)));
     auto& js = Lock::from(isolate);
+    auto fieldName = nameHandle.Get(isolate);
+    v8::Local<v8::Value> jsValue = v8::Undefined(isolate);
+    if (!js.isJavascriptExecutionDisallowed()) {
+      jsValue = check(in->Get(context, fieldName));
+    } else {
+      // Safe path to get a v8::Value under the `DisallowJavascriptExecution` scope without
+      // walking the prototype chain, hence skipping any Object.prototype getters
+      // NOTE: GetRealNamedProperty() can technically execute user-defined getters on the object
+      // itself, but this path only deals with plain objects produced by ValueDeserializer
+      // NOTE: We must check HasRealNamedProperty() first because GetRealNamedProperty()
+      // returns an empty v8::Maybe both in-case of an error and in-case the property
+      // does not exist
+      if (check(in->HasRealNamedProperty(context, fieldName))) {
+        jsValue = check(in->GetRealNamedProperty(context, fieldName));
+      }
+    }
     return wrapper.template unwrap<Type>(
         js, context, jsValue, TypeErrorContext::structField(typeid(Struct), exportedName), in);
   }

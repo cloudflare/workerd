@@ -19,32 +19,20 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
   switch (key) {
     case AutogateKey::TEST_WORKERD:
       return "test-workerd"_kj;
-    case AutogateKey::TCP_SOCKET_CONNECT_OUTPUT_GATE:
-      return "tcp-socket-connect-output-gate"_kj;
     case AutogateKey::V8_FAST_API:
       return "v8-fast-api"_kj;
     case AutogateKey::STREAMING_TAIL_WORKER:
       return "streaming-tail-worker"_kj;
     case AutogateKey::TAIL_STREAM_REFACTOR:
       return "tail-stream-refactor"_kj;
-    case AutogateKey::RUST_BACKED_NODE_DNS:
-      return "rust-backed-node-dns"_kj;
-    case AutogateKey::WASM_SHUTDOWN_SIGNAL_SHIM:
-      return "wasm-shutdown-signal-shim"_kj;
     case AutogateKey::ENABLE_FAST_TEXTENCODER:
       return "enable-fast-textencoder"_kj;
-    case AutogateKey::ENABLE_DRAINING_READ_ON_STANDARD_STREAMS:
-      return "enable-draining-read-on-standard-streams"_kj;
-    case AutogateKey::SQL_RESTRICT_RESERVED_NAMES:
-      return "sql-restrict-reserved-names"_kj;
     case AutogateKey::INCREASE_SQLITE_HARD_HEAP_LIMIT:
       return "increase-sqlite-hard-heap-limit"_kj;
-    case AutogateKey::USER_SPAN_CONTEXT_PROPAGATION:
-      return "user-span-context-propagation"_kj;
     case AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE:
       return "updated-auto-allocate-chunk-size"_kj;
-    case AutogateKey::PYTHON_ABORT_ISOLATE_ON_FATAL_ERROR:
-      return "python-abort-isolate-on-fatal-error"_kj;
+    case AutogateKey::STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME:
+      return "starttls-reject-expected-server-hostname"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

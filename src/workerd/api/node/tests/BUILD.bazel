@@ -138,6 +138,12 @@ wd_test(
 )
 
 wd_test(
+    src = "crypto_scrypt-limits-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto_scrypt-limits-test.js"],
+)
+
+wd_test(
     src = "crypto_spkac-test.wd-test",
     args = ["--experimental"],
     data = ["crypto_spkac-test.js"],
@@ -240,6 +246,36 @@ wd_test(
     src = "zlib-zstd-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["zlib-zstd-nodejs-test.js"],
+)
+
+wd_test(
+    src = "zlib-resizable-ab-test.wd-test",
+    args = ["--experimental"],
+    data = ["zlib-resizable-ab-test.js"],
+)
+
+wd_test(
+    src = "zlib-dictionary-resizable-test.wd-test",
+    args = ["--experimental"],
+    data = ["zlib-dictionary-resizable-test.js"],
+)
+
+wd_test(
+    src = "zlib-invalid-mode-test.wd-test",
+    args = ["--experimental"],
+    data = ["zlib-invalid-mode-test.js"],
+)
+
+wd_test(
+    src = "zlib-resizable-buffer-test.wd-test",
+    args = ["--experimental"],
+    data = ["zlib-resizable-buffer-test.js"],
+)
+
+wd_test(
+    src = "zlib-allocator-mismatch-test.wd-test",
+    args = ["--experimental"],
+    data = ["zlib-allocator-mismatch-test.js"],
 )
 
 wd_test(
@@ -465,6 +501,12 @@ wd_test(
 )
 
 wd_test(
+    src = "tls-check-server-identity-test.wd-test",
+    args = ["--experimental"],
+    data = ["tls-check-server-identity-test.js"],
+)
+
+wd_test(
     src = "streams-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["streams-nodejs-test.js"],
@@ -616,6 +658,12 @@ wd_test(
     src = "fs-misc-test.wd-test",
     args = ["--experimental"],
     data = ["fs-misc-test.js"],
+)
+
+wd_test(
+    src = "fs-readsync-byteoffset-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-readsync-byteoffset-test.js"],
 )
 
 wd_test(

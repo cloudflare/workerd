@@ -42,6 +42,7 @@ namespace {
   V(EVENT, "event")                                                                                \
   V(EXCEEDEDCPU, "exceededCpu")                                                                    \
   V(EXCEEDEDMEMORY, "exceededMemory")                                                              \
+  V(EXCEEDEDWALLTIME, "exceededWallTime")                                                          \
   V(EXCEPTION, "exception")                                                                        \
   V(EXECUTIONMODEL, "executionModel")                                                              \
   V(FETCH, "fetch")                                                                                \
@@ -337,6 +338,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const EventOutcome& outcome, StringCache& cache
       return cache.get(js, SCRIPTNOTFOUND_STR);
     case EventOutcome::INTERNAL_ERROR:
       return cache.get(js, INTERNALERROR_STR);
+    case EventOutcome::EXCEEDED_WALL_TIME:
+      return cache.get(js, EXCEEDEDWALLTIME_STR);
     case EventOutcome::UNKNOWN:
       return cache.get(js, UNKNOWN_STR);
   }
@@ -998,7 +1001,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::run(
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client
     // disconnects.
-    waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
+    incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
   });
 
   auto eventOutcome = co_await donePromise.exclusiveJoin(ioContext.onAbort()).then([&]() {
@@ -1024,6 +1027,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::run(
 kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
+    FrankenvalueHandler& frankenvalueHandler,
     rpc::EventDispatcher::Client dispatcher) {
   auto revokePaf = kj::newPromiseAndFulfiller<void>();
 

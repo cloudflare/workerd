@@ -39,6 +39,9 @@ struct PythonSnapshotRelease @0x89c66fb883cb6975 {
   # Name of the corresponding feature flag
   flagName @6 :Text;
   realPyodideVersion @7 :Text;
+  integrity @8 :Text;
+  # Subresource-integrity-style checksum ("sha256-<base64>") of the Pyodide capnp bundle that gets
+  # downloaded for this release. Used to verify the integrity of the bundle at runtime.
 }
 
 const releases :List(PythonSnapshotRelease) = [

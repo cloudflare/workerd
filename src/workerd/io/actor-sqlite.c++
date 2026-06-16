@@ -51,6 +51,7 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       kv(*db),
       metadata(*db),
       commitTasks(*this),
+      blockTasks(*this),
       debugAlarmSync(debugAlarmSyncParam) {
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
   db->onCriticalError(KJ_BIND_METHOD(*this, onCriticalError));
@@ -94,6 +95,9 @@ void ActorSqlite::ImplicitTxn::commit() {
 void ActorSqlite::ImplicitTxn::rollback() {
   // Ignore redundant commit()s.
   if (!committed) {
+    // Cancel any blocking async tasks that were scheduled as part of the transaction.
+    parent.blockTasks.clear();
+
     // As of this writing, rollback() is only called when the database is about to be reset.
     // Preparing a statement for it would be a waste since that statement would never be executed
     // more than once, since resetting requires repreparing all statements anyway. So we don't
@@ -111,15 +115,21 @@ bool ActorSqlite::ImplicitTxn::isSomeWriteConfirmed() const {
   return someWriteConfirmed;
 }
 
+kj::Promise<void> ActorSqlite::ImplicitTxn::waitForCompletion() {
+  KJ_IF_SOME(c, completionPaf) {
+    return c.promise.addBranch();
+  } else {
+    return completionPaf.emplace().promise.addBranch();
+  }
+}
+
 ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite): actorSqlite(actorSqlite) {
   KJ_SWITCH_ONEOF(actorSqlite.currentTxn) {
     KJ_CASE_ONEOF(_, NoTxn) {}
     KJ_CASE_ONEOF(implicit, ImplicitTxn*) {
-      // An implicit transaction is open, commit it now because it would be weird if writes
-      // performed before the explicit transaction started were postponed until the transaction
-      // completes. Note that this isn't violating any atomicity guarantees because the transaction
-      // API is async, and atomicity is only guaranteed over synchronous code.
-      implicit->commit();
+      // ActorSqlite::startTransaction() should have handled this case before constructing
+      // ExplicitTxn.
+      KJ_FAIL_REQUIRE("can't create ExplicitTxn while ImplicitTxn is open");
     }
     KJ_CASE_ONEOF(exp, ExplicitTxn*) {
       KJ_REQUIRE(!exp->hasChild,
@@ -181,6 +191,27 @@ bool ActorSqlite::ExplicitTxn::isSomeWriteConfirmed() const {
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
+  if (!actorSqlite.blockTasks.isEmpty()) {
+    // Although the promise returned here was originally intended for "backpressure", it turns out
+    // if we return a promise here, the one call site (DurableObjectStorage::asyncTransactionImpl())
+    // will actually keep the input gate locked until the commit finishes, which is what we need.
+    return actorSqlite.blockTasks.onEmpty().then([this]() {
+      commitImpl();
+    }).catch_([self = kj::addRef(*this)](kj::Exception&& e) mutable {
+      if (self->actorSqlite.broken == kj::none) {
+        self->rollbackImpl();
+      }
+      kj::throwFatalException(kj::mv(e));
+    });
+  } else {
+    commitImpl();
+
+    // No backpressure for SQLite.
+    return kj::none;
+  }
+}
+
+void ActorSqlite::ExplicitTxn::commitImpl() {
   actorSqlite.requireNotBroken();
   KJ_REQUIRE(!hasChild,
       "critical sections should have prevented committing transaction while "
@@ -233,9 +264,6 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
     actorSqlite.commitTasks.add(forkedPromise.addBranch());
     actorSqlite.lastCommit = kj::mv(forkedPromise);
   }
-
-  // No backpressure for SQLite.
-  return kj::none;
 }
 
 kj::Promise<void> ActorSqlite::ExplicitTxn::rollback() {
@@ -250,6 +278,9 @@ kj::Promise<void> ActorSqlite::ExplicitTxn::rollback() {
 }
 
 void ActorSqlite::ExplicitTxn::rollbackImpl() noexcept(false) {
+  // Cancel any blocking async tasks that were scheduled as part of the transaction.
+  actorSqlite.blockTasks.clear();
+
   actorSqlite.db->run(
       {.regulator = SqliteDatabase::TRUSTED}, kj::str("ROLLBACK TO _cf_savepoint_", depth));
   actorSqlite.db->run(
@@ -279,40 +310,31 @@ void ActorSqlite::onCriticalError(
   }
 }
 
+void ActorSqlite::blockTransaction(kj::Promise<void> promise) {
+  requireNotBroken();
+
+  // Start a transaction if one isn't already open. (You might argue that we should call onWrite(),
+  // but externalTransaction() itself isn't actually a write, though writes are expected to happen
+  // while we wait for the promise. We don't want to preempt those other writes from setting the
+  // `allowUnconfirmed` flag.)
+  if (currentTxn.is<NoTxn>()) {
+    startImplicitTxn();
+  }
+
+  blockTasks.add(promise.catch_([this](kj::Exception&& e) {
+    // We didn't wrap the whole promise in the outputGate because we want to leave it up to the
+    // app to specify allowUnconfirmed on the actual write that contained the externals that
+    // required asynchronous handling. But if the external promise failed, we should probably
+    // go ahead and break the output gate! (Also, `taskFailed()` expects us to have done this.)
+    return outputGate.lockWhile(kj::Promise<void>(kj::mv(e)), nullptr);
+  }));
+}
+
 void ActorSqlite::startImplicitTxn() {
   auto txn = kj::heap<ImplicitTxn>(*this);
 
-  // We implement the magic of accumulating all of the writes between JavaScript awaits in one
-  // transaction by evaluating by wrapping the commit function with kj::evalLater, which runs the
-  // function on the next turn of the event loop
   auto commitPromise =
-      kj::evalLater([this, txn = kj::mv(txn)]() mutable -> kj::Promise<void> {
-    // Don't commit if shutdown() has been called.
-    requireNotBroken();
-
-    // Start the schedule request before commit(), for correctness in workerd.
-    auto precommitAlarmState = startPrecommitAlarmScheduling();
-
-    try {
-      txn->commit();
-    } catch (...) {
-      // HACK: If we became broken during `COMMIT TRANSACTION` then throw the broken exception
-      // instead of whatever SQLite threw.
-      requireNotBroken();
-
-      // No, we're not broken, so propagate the exception as-is.
-      throw;
-    }
-
-    // The callback is only expected to commit writes up until this point. Any new writes that
-    // occur while the callback is in progress are NOT included, therefore require a new commit
-    // to be scheduled. So, we should drop `txn` to cause `currentTxn` to become NoTxn now,
-    // rather than after the callback.
-    { auto drop = kj::mv(txn); }
-
-    // Move the commit span out immediately so new writes can capture a fresh span.
-    return commitImpl(kj::mv(precommitAlarmState), kj::mv(currentCommitSpan));
-  })
+      startImplicitTxnImpl(kj::mv(txn))
           // Unconditionally break the output gate if commit threw an error, no matter whether the
           // commit was confirmed or unconfirmed.
           .catch_([this](kj::Exception&& e) {
@@ -325,6 +347,45 @@ void ActorSqlite::startImplicitTxn() {
 
   // Commits must be executed in order, so we only have to track the most recent commit promise.
   lastCommit = kj::mv(commitPromise);
+}
+
+kj::Promise<void> ActorSqlite::startImplicitTxnImpl(kj::Own<ImplicitTxn> txn) {
+  // We implement the magic of accumulating all of the writes between JavaScript awaits in one
+  // transaction by evaluating by awaiting kj::yield() first, which runs the function on the next
+  // turn of the event loop
+  co_await kj::yield();
+
+  // If there were tasks blocking the transaction, wait for them.
+  if (!blockTasks.isEmpty()) {
+    co_await blockTasks.onEmpty();
+  }
+
+  // Don't commit if shutdown() has been called, or if one of the blockTasks threw, or we broke
+  // for any other reason before the transaction could complete.
+  requireNotBroken();
+
+  // Start the schedule request before commit(), for correctness in workerd.
+  auto precommitAlarmState = startPrecommitAlarmScheduling();
+
+  try {
+    txn->commit();
+  } catch (...) {
+    // HACK: If we became broken during `COMMIT TRANSACTION` then throw the broken exception
+    // instead of whatever SQLite threw.
+    requireNotBroken();
+
+    // No, we're not broken, so propagate the exception as-is.
+    throw;
+  }
+
+  // The callback is only expected to commit writes up until this point. Any new writes that
+  // occur while the callback is in progress are NOT included, therefore require a new commit
+  // to be scheduled. So, we should drop `txn` to cause `currentTxn` to become NoTxn now,
+  // rather than after the callback.
+  { auto drop = kj::mv(txn); }
+
+  // Move the commit span out immediately so new writes can capture a fresh span.
+  co_await commitImpl(kj::mv(precommitAlarmState), kj::mv(currentCommitSpan));
 }
 
 void ActorSqlite::onWrite(bool allowUnconfirmed) {
@@ -578,6 +639,9 @@ kj::Promise<void> ActorSqlite::commitImpl(
 }
 
 void ActorSqlite::taskFailed(kj::Exception&& exception) {
+  // commitTasks and blockTasks both use this taskFailed callback. In either case, we just want
+  // to mark ourselves broken.
+
   // The output gate should already have been broken since it wraps all commit tasks that can
   // throw. So, we don't have to report anything here, the exception will already propagate
   // elsewhere. We should block further operations, though.
@@ -777,10 +841,21 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
   return kj::none;
 }
 
-kj::Own<ActorCacheInterface::Transaction> ActorSqlite::startTransaction() {
+kj::OneOf<kj::Own<ActorCacheInterface::Transaction>, kj::Promise<void>> ActorSqlite::
+    startTransaction() {
   requireNotBroken();
 
-  return kj::refcounted<ExplicitTxn>(*this);
+  KJ_IF_SOME(itxn, currentTxn.tryGet<ImplicitTxn*>()) {
+    return itxn->waitForCompletion();
+  } else if (!blockTasks.isEmpty()) {
+    // We may be starting a nested async transaction (nested within another async transaction).
+    // We should wait for any blocking tasks to finish first, otherwise they might accidentally
+    // deliver their writes inside the nested transaction, leading to inconsistency if it is rolled
+    // back.
+    return blockTasks.onEmpty();
+  } else {
+    return kj::Own<ActorCacheInterface::Transaction>(kj::refcounted<ExplicitTxn>(*this));
+  }
 }
 
 ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(

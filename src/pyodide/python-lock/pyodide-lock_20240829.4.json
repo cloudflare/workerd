@@ -1,0 +1,45 @@
+{
+  "info": {
+    "arch": "wasm32",
+    "platform": "emscripten_3_1_52",
+    "python": "3.12.3",
+    "version": "0.26.0a3"
+  },
+  "packages": {
+    "hashlib": {
+      "file_name": "hashlib-1.0.0.tar.gz",
+      "install_dir": "stdlib",
+      "sha256": "f70fb8ecf9a89401dfdb8af1327db61b5a668ac5ac43cc04cf69aeced1b4627b"
+    },
+    "lzma": {
+      "file_name": "lzma-1.0.0.tar.gz",
+      "install_dir": "stdlib",
+      "sha256": "8b6b4ce208fa4f3b47dd65b17633736effdfc7f61f658cb64fe21c9171f5626c"
+    },
+    "openssl": {
+      "file_name": "openssl-1.1.1n.tar.gz",
+      "install_dir": "dynlib",
+      "sha256": "00073d8e6d070ce4ff21edaf0e4458f2329f7146c2cbd3bebb8158b8c5088d02"
+    },
+    "pydecimal": {
+      "file_name": "pydecimal-1.0.0.tar.gz",
+      "install_dir": "stdlib",
+      "sha256": "8b767f6092c429008e4a6910ab61d88bdb4a58db0f79aeaf32d98732cd806ea3"
+    },
+    "pydoc-data": {
+      "file_name": "pydoc_data-1.0.0.tar.gz",
+      "install_dir": "stdlib",
+      "sha256": "ed0d79d3f2df7caf6c5a6d64ec526ad96ff1dd50e302e1296b80d31ddfdf08ee"
+    },
+    "sqlite3": {
+      "file_name": "sqlite3-1.0.0.tar.gz",
+      "install_dir": "stdlib",
+      "sha256": "784b6041b0021190b02cc21967419e48b0e554ded3a19d7048d40a8b7b308591"
+    },
+    "ssl": {
+      "file_name": "ssl-1.0.0.tar.gz",
+      "install_dir": "stdlib",
+      "sha256": "5a291867843055a2a86723c2595eed9db3ccf51e39cf7c43c5e5286dc2487f12"
+    }
+  }
+}

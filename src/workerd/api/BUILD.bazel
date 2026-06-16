@@ -27,6 +27,7 @@ filegroup(
         "messagechannel.c++",
         "performance.c++",
         "queue.c++",
+        "restore.c++",
         "scheduled.c++",
         "sockets.c++",
         "sql.c++",
@@ -75,6 +76,7 @@ filegroup(
         "messagechannel.h",
         "performance.h",
         "queue.h",
+        "restore.h",
         "scheduled.h",
         "sockets.h",
         "sql.h",
@@ -392,6 +394,7 @@ wd_cc_library(
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-http",
         "@capnp-cpp//src/kj/compat:kj-tls",
+        "@ssl",
     ],
 )
 
@@ -524,10 +527,12 @@ wd_cc_library(
         ],
     )
     for f in [
+        "streams/pendingabort-gc-uaf-test.c++",
         "actor-state-test.c++",
         "basics-test.c++",
         "crypto/aes-test.c++",
         "crypto/impl-test.c++",
+        "crypto/prime-test.c++",
     ]
 ]
 
@@ -541,6 +546,7 @@ wd_cc_library(
         ],
     )
     for f in [
+        "streams/draining-read-uaf-test.c++",
         "streams/queue-test.c++",
         "streams/standard-test.c++",
     ]
@@ -615,7 +621,6 @@ kj_test(
         "//src/workerd/io",
         "//src/workerd/io:worker-interface",
         "//src/workerd/tests:test-fixture",
-        "//src/workerd/util:autogate",
     ],
 )
 
@@ -656,6 +661,15 @@ kj_test(
 kj_test(
     src = "cf-property-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
+)
+
+kj_test(
+    src = "fetch-body-rewindable-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/io:worker-interface",
+        "//src/workerd/tests:test-fixture",
+    ],
 )
 
 kj_test(

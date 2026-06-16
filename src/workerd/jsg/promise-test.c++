@@ -98,6 +98,10 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
     return result;
   }
 
+  void prototypePolution(jsg::Lock& js) {
+    js.resolvedPromise(js.num(1));
+  }
+
   JSG_RESOURCE_TYPE(PromiseContext) {
     JSG_READONLY_PROTOTYPE_PROPERTY(promise, makePromise);
     JSG_METHOD(resolvePromise);
@@ -111,6 +115,7 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
     JSG_METHOD(whenResolved);
 
     JSG_METHOD(thenable);
+    JSG_METHOD(prototypePolution);
   }
 
   kj::Maybe<Promise<int>::Resolver> resolver;
@@ -190,6 +195,24 @@ KJ_TEST("thenable") {
   Evaluator<PromiseContext, PromiseIsolate, ThenableConfig> e(v8System);
 
   e.expectEval("thenable({ then(res) { res(123) } })", "number", "123");
+}
+
+KJ_TEST("prototype polution") {
+  Evaluator<PromiseContext, PromiseIsolate> e(v8System);
+
+  e.expectEval(R"A(
+    let m = false;
+    Object.defineProperty(Object.prototype, 'then', {
+      configurable: true,
+      get() {
+        m = true;
+        return undefined;
+      },
+    });
+    prototypePolution();
+    m;
+  )A",
+      "boolean", "false");
 }
 
 }  // namespace

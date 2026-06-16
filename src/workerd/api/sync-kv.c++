@@ -4,8 +4,7 @@
 
 #include "sync-kv.h"
 
-#include "actor-state.h"
-
+#include <workerd/io/stored-value.h>
 #include <workerd/util/sqlite-kv.h>
 
 namespace workerd::api {
@@ -110,12 +109,17 @@ void SyncKvStorage::put(jsg::Lock& js, kj::String key, jsg::JsValue value) {
   traceContext.setTag("cloudflare.durable_object.kv.query.keys"_kjc, key.asPtr());
   traceContext.setTag("cloudflare.durable_object.kv.query.keys.count"_kjc, static_cast<int64_t>(1));
 
-  sqliteKv.put(key, serializeV8Value(js, value));
+  sqliteKv.put(key, serializeV8Value(js, key, value));
 }
 
 kj::OneOf<bool, int> SyncKvStorage::delete_(jsg::Lock& js, kj::String key) {
-  TraceContext traceContext =
-      IoContext::current().makeUserTraceSpan("durable_object_storage_kv_delete"_kjc);
+  auto& ioctx = IoContext::current();
+
+  KJ_IF_SOME(handler, KJ_ASSERT_NONNULL(ioctx.getActor()).getStoredExternalHandler()) {
+    handler.cancelPutExternals(key);
+  }
+
+  TraceContext traceContext = ioctx.makeUserTraceSpan("durable_object_storage_kv_delete"_kjc);
   SqliteKv& sqliteKv = getSqliteKv(js);
 
   traceContext.setTag("db.system.name"_kjc, "cloudflare-durable-object-sql"_kjc);

@@ -4,6 +4,7 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/io/actor-id.h>
+#include <workerd/io/stored-value.h>
 #include <workerd/tests/test-fixture.h>
 
 #include <kj/encoding.h>

@@ -13,7 +13,6 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
   auto mainModule = kj::str(source.mainModule);
   auto modules = source.modules.asPtr();
   int numFiles = 0;
-  int numRequirements = 0;
   for (auto& module: modules) {
     KJ_SWITCH_ONEOF(module.content) {
       KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
@@ -37,8 +36,8 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
       KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
         numFiles++;
       }
-      KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
-        numRequirements++;
+      KJ_CASE_ONEOF(content, Worker::Script::ObsoletePythonRequirement) {
+        // No longer supported; ignored.
       }
       KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
         // Not exposed to Python.
@@ -48,7 +47,6 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
 
   auto names = kj::heapArrayBuilder<kj::String>(numFiles);
   auto contents = kj::heapArrayBuilder<kj::Array<kj::byte>>(numFiles);
-  auto requirements = kj::heapArrayBuilder<kj::String>(numRequirements);
   for (auto& module: modules) {
     KJ_SWITCH_ONEOF(module.content) {
       KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
@@ -77,8 +75,8 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
         names.add(kj::str(module.name));
         contents.add(kj::heapArray(content.body.asBytes()));
       }
-      KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
-        requirements.add(kj::str(module.name));
+      KJ_CASE_ONEOF(content, Worker::Script::ObsoletePythonRequirement) {
+        // No longer supported; ignored.
       }
       KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
         // Not exposeud to Python.
@@ -94,7 +92,6 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
       kj::mv(mainModule),
       names.finish(),
       contents.finish(),
-      requirements.finish(),
       kj::str(pythonRelease.getPyodide()),
       kj::str(pythonRelease.getPackages()),
       kj::mv(lock),

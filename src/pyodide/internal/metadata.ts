@@ -7,8 +7,6 @@ import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
 
 export const IS_WORKERD = MetadataReader.isWorkerd();
 export const IS_TRACING = MetadataReader.isTracing();
-export const SHOULD_ABORT_ISOLATE_ON_FATAL_ERROR =
-  MetadataReader.shouldAbortIsolateOnFatalError();
 
 // Snapshots
 export const SHOULD_SNAPSHOT_TO_DISK = MetadataReader.shouldSnapshotToDisk();
@@ -32,15 +30,10 @@ export const MEMORY_SNAPSHOT_READER = MetadataReader.hasMemorySnapshot()
 
 // Packages
 export const PACKAGES_VERSION = MetadataReader.getPackagesVersion();
-export const USING_OLDEST_PACKAGES_VERSION = PACKAGES_VERSION === '20240829.4';
 // The package lock is embedded in the binary. See `getPyodideLock` and `packageLocks`.
 export const LOCKFILE = JSON.parse(
   MetadataReader.getPackagesLock()
 ) as PackageLock;
-
-export const REQUIREMENTS = MetadataReader.getRequirements();
-export const TRANSITIVE_REQUIREMENTS =
-  MetadataReader.getTransitiveRequirements();
 
 // Entrypoints
 export const MAIN_MODULE_NAME = MetadataReader.getMainModule();

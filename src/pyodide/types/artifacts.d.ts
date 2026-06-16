@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 declare namespace ArtifactBundler {
-  type SnapshotType = 'baseline' | 'dedicated' | 'package';
+  type SnapshotType = 'baseline' | 'dedicated';
   type MemorySnapshotResult = {
     snapshot: Uint8Array;
     importedModulesList: string[];

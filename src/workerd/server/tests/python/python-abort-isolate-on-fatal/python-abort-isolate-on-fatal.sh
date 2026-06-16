@@ -1,6 +1,5 @@
 #!/bin/bash
-# Test that when the python-abort-isolate-on-fatal-error autogate is enabled,
-# triggering a Python fatal error causes the workerd process to abort.
+# Test that triggering a Python fatal error causes the workerd process to abort.
 
 set -uo pipefail
 

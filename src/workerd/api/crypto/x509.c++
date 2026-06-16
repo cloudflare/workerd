@@ -44,8 +44,9 @@ kj::String toString(BIO* bio) {
   BIO_get_mem_ptr(bio, &mem);
   auto result = kj::heapArray<char>(mem->length + 1);
   kj::ArrayPtr<char> data(mem->data, mem->length);
-  result.first(data.size()).copyFrom(data);
-  result[result.size() - 1] = '\0';  // NUL-terminate.
+  auto remaining = result.asPtr();
+  remaining.write(data);
+  remaining[0] = '\0';  // NUL-terminate.
   return kj::String(kj::mv(result));
 }
 

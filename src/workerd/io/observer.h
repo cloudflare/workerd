@@ -10,6 +10,7 @@
 #include <workerd/io/trace.h>
 #include <workerd/jsg/observer.h>
 #include <workerd/util/sqlite.h>
+#include <workerd/util/strong-bool.h>
 
 #include <kj/refcount.h>
 #include <kj/string.h>
@@ -18,6 +19,10 @@
 namespace workerd {
 
 class IoContext;
+
+// Whether an outgoing subrequest's request body can be rewound (e.g. a buffered or null body), and
+// so the request could be re-sent. See RequestObserver::setNextSubrequestBodyRewindable().
+WD_STRONG_BOOL(SubrequestBodyRewindable);
 class WorkerInterface;
 class LimitEnforcer;
 class TimerChannel;
@@ -125,6 +130,14 @@ class RequestObserver: public kj::Refcounted {
   virtual kj::Own<WorkerInterface> wrapActorSubrequestClient(kj::Own<WorkerInterface> client) {
     return kj::mv(client);
   }
+
+  // Record whether the next outgoing subrequest's request body can be rewound (e.g. a buffered or
+  // null fetch body). Consumed when the subrequest client for that call is constructed. The
+  // set->consume window is synchronous, so the value always corresponds to the next call. This is
+  // intentionally target-agnostic: the signal is a property of the request body, not of the callee,
+  // so it applies equally to actor and (potentially, in the future) non-actor subrequests. No-op in
+  // the base observer; edgeworker overrides it to feed retry classification.
+  virtual void setNextSubrequestBodyRewindable(SubrequestBodyRewindable bodyRewindable) {}
 
   // Used to record when a worker has used a dynamic dispatch binding.
   virtual void setHasDispatched() {};

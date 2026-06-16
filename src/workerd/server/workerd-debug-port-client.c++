@@ -40,7 +40,10 @@ class WorkerdBootstrapSubrequestChannel final: public IoChannelFactory::Subreque
     auto dispatcher = req.send().getDispatcher();
     // Attach connection ref for deferred proxying - the HTTP response body/WebSocket
     // will get this WorkerInterface attached, keeping the connection alive.
-    return kj::heap<RpcWorkerInterface>(httpOverCapnpFactory, byteStreamFactory, kj::mv(dispatcher))
+    // NOTE: We don't support restore() over the debug port so we can use
+    // getUnsupportedFrankenvalueHandler() here for now.
+    return kj::heap<RpcWorkerInterface>(httpOverCapnpFactory, byteStreamFactory,
+        getUnsupportedFrankenvalueHandler(), kj::mv(dispatcher))
         .attach(connectionState->addRef());
   }
 

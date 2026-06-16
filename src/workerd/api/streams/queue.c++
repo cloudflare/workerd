@@ -23,21 +23,27 @@ void ValueQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
   resolver.resolve(js, ReadResult{.done = true});
 }
 
-void ValueQueue::ReadRequest::resolve(jsg::Lock& js, jsg::Value value) {
-  resolver.resolve(js, ReadResult{.value = kj::mv(value), .done = false});
+void ValueQueue::ReadRequest::resolve(jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) {
+  resolver.resolve(js,
+      ReadResult{
+        .value = kj::mv(value),
+        .done = false,
+      });
 }
 
-void ValueQueue::ReadRequest::reject(jsg::Lock& js, jsg::Value& value) {
-  resolver.reject(js, value.getHandle(js));
+void ValueQueue::ReadRequest::reject(jsg::Lock& js, jsg::JsValue value) {
+  resolver.reject(js, value);
 }
 
 #pragma endregion ValueQueue::ReadRequest
 
 #pragma region ValueQueue::Entry
 
-ValueQueue::Entry::Entry(jsg::Value value, size_t size): value(kj::mv(value)), size(size) {}
+ValueQueue::Entry::Entry(jsg::JsRef<jsg::JsValue> value, size_t size)
+    : value(kj::mv(value)),
+      size(size) {}
 
-jsg::Value ValueQueue::Entry::getValue(jsg::Lock& js) {
+jsg::JsRef<jsg::JsValue> ValueQueue::Entry::getValue(jsg::Lock& js) {
   return value.addRef(js);
 }
 
@@ -76,7 +82,7 @@ ValueQueue::Consumer::Consumer(
 ValueQueue::Consumer::Consumer(kj::Maybe<ConsumerImpl::StateListener&> stateListener)
     : impl(stateListener) {}
 
-void ValueQueue::Consumer::cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+void ValueQueue::Consumer::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   impl.cancel(js, maybeReason);
 }
 
@@ -88,8 +94,8 @@ bool ValueQueue::Consumer::empty() {
   return impl.empty();
 }
 
-void ValueQueue::Consumer::error(jsg::Lock& js, jsg::Value reason) {
-  impl.error(js, kj::mv(reason));
+void ValueQueue::Consumer::error(jsg::Lock& js, jsg::JsValue reason) {
+  impl.error(js, reason);
 };
 
 void ValueQueue::Consumer::read(jsg::Lock& js, ReadRequest request) {
@@ -133,9 +139,8 @@ bool ValueQueue::Consumer::hasPendingDrainingRead() {
 
 namespace {
 // Helper to convert a JS value to bytes. Returns kj::none if the value cannot be converted.
-kj::Maybe<kj::Array<kj::byte>> valueToBytes(jsg::Lock& js, jsg::Value& value) {
-  auto jsval = jsg::JsValue(value.getHandle(js));
-
+kj::Maybe<kj::Array<kj::byte>> valueToBytes(jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) {
+  auto jsval = value.getHandle(js);
   // Try ArrayBuffer first.
   KJ_IF_SOME(ab, jsval.tryCast<jsg::JsArrayBuffer>()) {
     auto src = ab.asArrayPtr();
@@ -202,8 +207,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
           break;
         }
         KJ_CASE_ONEOF(entry, QueueEntry) {
-          auto value = entry.entry->getValue(js);
-          KJ_IF_SOME(bytes, valueToBytes(js, value)) {
+          KJ_IF_SOME(bytes, valueToBytes(js, entry.entry->getValue(js))) {
             totalRead += bytes.size();
             chunks.add(kj::mv(bytes));
             ready.queueTotalSize -= entry.entry->getSize();
@@ -211,7 +215,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
           } else {
             auto error = js.typeError(
                 "Draining read encountered a value that cannot be converted to bytes"_kj);
-            impl.error(js, jsg::Value(js.v8Isolate, error));
+            impl.error(js, error);
             return js.rejectedPromise<DrainingReadResult>(error);
           }
         }
@@ -328,7 +332,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
     // Convert the value to bytes.
     kj::Vector<kj::Array<kj::byte>> chunks;
     KJ_IF_SOME(val, result.value) {
-      KJ_IF_SOME(bytes, valueToBytes(js, val)) {
+      KJ_IF_SOME(bytes, valueToBytes(js, val.addRef(js))) {
         chunks.add(kj::mv(bytes));
       }
       // If valueToBytes returned kj::none, we just return empty chunks.
@@ -367,8 +371,8 @@ ssize_t ValueQueue::desiredSize() const {
   return impl.desiredSize();
 }
 
-void ValueQueue::error(jsg::Lock& js, jsg::Value reason) {
-  impl.error(js, kj::mv(reason));
+void ValueQueue::error(jsg::Lock& js, jsg::JsValue reason) {
+  impl.error(js, reason);
 }
 
 void ValueQueue::maybeUpdateBackpressure() {
@@ -515,25 +519,36 @@ void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
     // There's been at least some data written, we need to respond but not
     // set done to true since that's what the streams spec requires.
     pullInto.store.trim(js, pullInto.store.size() - pullInto.filled);
-    resolver.resolve(
-        js, ReadResult{.value = js.v8Ref(pullInto.store.getHandle(js)), .done = false});
+    resolver.resolve(js,
+        ReadResult{
+          .value = jsg::JsValue(pullInto.store.getHandle(js)).addRef(js),
+          .done = false,
+        });
   } else {
     // Otherwise, we set the length to zero
     pullInto.store.trim(js, pullInto.store.size());
     KJ_ASSERT(pullInto.store.size() == 0);
-    resolver.resolve(js, ReadResult{.value = js.v8Ref(pullInto.store.getHandle(js)), .done = true});
+    resolver.resolve(js,
+        ReadResult{
+          .value = jsg::JsValue(pullInto.store.getHandle(js)).addRef(js),
+          .done = true,
+        });
   }
   maybeInvalidateByobRequest(byobReadRequest);
 }
 
 void ByteQueue::ReadRequest::resolve(jsg::Lock& js) {
   pullInto.store.trim(js, pullInto.store.size() - pullInto.filled);
-  resolver.resolve(js, ReadResult{.value = js.v8Ref(pullInto.store.getHandle(js)), .done = false});
+  resolver.resolve(js,
+      ReadResult{
+        .value = jsg::JsValue(pullInto.store.getHandle(js)).addRef(js),
+        .done = false,
+      });
   maybeInvalidateByobRequest(byobReadRequest);
 }
 
-void ByteQueue::ReadRequest::reject(jsg::Lock& js, jsg::Value& value) {
-  resolver.reject(js, value.getHandle(js));
+void ByteQueue::ReadRequest::reject(jsg::Lock& js, jsg::JsValue value) {
+  resolver.reject(js, value);
   maybeInvalidateByobRequest(byobReadRequest);
 }
 
@@ -590,7 +605,7 @@ ByteQueue::Consumer::Consumer(
 ByteQueue::Consumer::Consumer(kj::Maybe<ConsumerImpl::StateListener&> stateListener)
     : impl(stateListener) {}
 
-void ByteQueue::Consumer::cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+void ByteQueue::Consumer::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   impl.cancel(js, maybeReason);
 }
 
@@ -602,8 +617,8 @@ bool ByteQueue::Consumer::empty() const {
   return impl.empty();
 }
 
-void ByteQueue::Consumer::error(jsg::Lock& js, jsg::Value reason) {
-  impl.error(js, kj::mv(reason));
+void ByteQueue::Consumer::error(jsg::Lock& js, jsg::JsValue reason) {
+  impl.error(js, reason);
 }
 
 void ByteQueue::Consumer::read(jsg::Lock& js, ReadRequest request) {
@@ -884,7 +899,7 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
       auto start = sourcePtr.slice(req.pullInto.filled);
 
       // Safely copy the data over into the entry.
-      entry->toArrayPtr().first(amount).copyFrom(start.first(amount));
+      entry->toArrayPtr().write(start.first(amount));
 
       // Push the entry into the other consumers.
       queue.push(js, kj::mv(entry), consumer);
@@ -932,7 +947,7 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
 
     KJ_IF_SOME(store, jsg::BufferSource::tryAllocUnsafe(js, unaligned)) {
       auto excess = kj::rc<Entry>(kj::mv(store));
-      excess->toArrayPtr().first(unaligned).copyFrom(start.first(unaligned));
+      excess->toArrayPtr().write(start.first(unaligned));
       consumer.push(js, kj::mv(excess));
     } else {
       js.throwException(js.error("Failed to allocate memory for the byob read response."_kj));
@@ -1021,8 +1036,8 @@ ssize_t ByteQueue::desiredSize() const {
   return impl.desiredSize();
 }
 
-void ByteQueue::error(jsg::Lock& js, jsg::Value reason) {
-  impl.error(js, kj::mv(reason));
+void ByteQueue::error(jsg::Lock& js, jsg::JsValue reason) {
+  impl.error(js, reason);
 }
 
 void ByteQueue::maybeUpdateBackpressure() {
@@ -1127,7 +1142,7 @@ void ByteQueue::handlePush(jsg::Lock& js,
           KJ_REQUIRE(sourceSize > 0 && sourceSize < destAmount);
 
           // Safely copy sourceSize bytes from sourcePtr to destPtr
-          destPtr.first(sourceSize).copyFrom(sourcePtr.slice(entry.offset));
+          destPtr.write(sourcePtr.slice(entry.offset));
 
           // We have completely consumed the data in this entry and can safely free
           // our reference to it now. Yay!
@@ -1176,7 +1191,7 @@ void ByteQueue::handlePush(jsg::Lock& js,
     // where we start copying.
     auto entryPtr = newEntry->toArrayPtr();
     auto destPtr = pending.pullInto.store.asArrayPtr().slice(pending.pullInto.filled);
-    destPtr.first(amountToCopy).copyFrom(entryPtr.slice(entryOffset).first(amountToCopy));
+    destPtr.write(entryPtr.slice(entryOffset).first(amountToCopy));
 
     // Yay! this pending read has been fulfilled. There might be more tho. Let's adjust
     // the amountAvailable and continue trying to consume data.
@@ -1273,7 +1288,7 @@ void ByteQueue::handleRead(jsg::Lock& js,
           auto sourcePtr = entry.entry->toArrayPtr().slice(entry.offset);
           auto destPtr = request.pullInto.store.asArrayPtr().slice(request.pullInto.filled);
 
-          destPtr.first(amountToCopy).copyFrom(sourcePtr.first(amountToCopy));
+          destPtr.write(sourcePtr.first(amountToCopy));
 
           request.pullInto.filled += amountToCopy;
 
@@ -1428,7 +1443,7 @@ bool ByteQueue::handleMaybeClose(jsg::Lock& js,
           KJ_ASSERT(amountToCopy <= sourceStart.size());
 
           // Safely copy amountToCopy bytes from the source into the destination.
-          destPtr.first(amountToCopy).copyFrom(sourceStart.first(amountToCopy));
+          destPtr.write(sourceStart.first(amountToCopy));
           pending.pullInto.filled += amountToCopy;
 
           // We do not need to adjust down the atLeast here because, no matter what,

@@ -4,6 +4,7 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/util.h>
+#include <workerd/io/stored-value.h>
 #include <workerd/jsg/jsg-test.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
@@ -33,7 +34,7 @@ KJ_TEST("v8 serialization version tag hasn't changed") {
   e.getIsolate().runInLockScope([&](ActorStateIsolate::Lock& isolateLock) {
     JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
         isolateLock.newContext<ActorStateContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
-      auto buf = serializeV8Value(isolateLock, isolateLock.boolean(true));
+      auto buf = serializeV8Value(isolateLock, "some-key"_kj, isolateLock.boolean(true));
 
       // Confirm that a version header is appropriately written and that it contains the expected
       // current version. When the version increases, we need to write a v8 patch that allows it
@@ -110,10 +111,10 @@ KJ_TEST("wire format version does not change deserialization behavior on real da
         KJ_EXPECT(!dataIn.hadErrors, kj::str(hexStr.c_str()));
 
         auto oldVal = oldDeserializeV8Value(isolateLock, dataIn);
-        auto oldOutput = serializeV8Value(isolateLock, oldVal);
+        auto oldOutput = serializeV8Value(isolateLock, key, oldVal);
 
         auto newVal = deserializeV8Value(isolateLock, key, dataIn);
-        auto newOutput = serializeV8Value(isolateLock, newVal);
+        auto newOutput = serializeV8Value(isolateLock, key, newVal);
         KJ_EXPECT(oldOutput == newOutput, kj::str(hexStr.c_str()));
       }
     });

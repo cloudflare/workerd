@@ -12,6 +12,7 @@
 #include <workerd/jsg/observer.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/batch-queue.h>
+#include <workerd/util/strong-bool.h>
 
 #include <v8-profiler.h>
 
@@ -25,6 +26,13 @@ namespace workerd::jsg {
 
 class Deserializer;
 class Serializer;
+
+// Whether to register a JIT code event handler on each isolate created through a V8System,
+// to build a mapping from compiled code addresses to JavaScript source locations. This
+// mapping is consumed by `jsg::getJsStackTrace()` to produce signal-handler-safe stack
+// traces during crash reporting. Adds overhead (V8 invokes a callback on every JIT code
+// event), so it is opt-in.
+WD_STRONG_BOOL(JitCodeEventTracking);
 
 // Construct a default V8 platform, with the given background thread pool size.
 //
@@ -51,18 +59,21 @@ class V8System {
   //   auto v8System = V8System(*v8Platform, flags);
   // (Optional) `flags` is a list of command-line flags to pass to V8, like "--expose-gc" or
   // "--single_threaded_gc". An exception will be thrown if any flags are not recognized.
-  explicit V8System(kj::ArrayPtr<const kj::StringPtr> flags = nullptr);
+  explicit V8System(kj::ArrayPtr<const kj::StringPtr> flags = nullptr,
+      JitCodeEventTracking jitCodeEventTracking = JitCodeEventTracking::NO);
 
   // Use a possibly-custom v8::Platform wrapper over default v8::Platform, and apply flags.
   explicit V8System(v8::Platform& platform,
       kj::ArrayPtr<const kj::StringPtr> flags,
-      v8::Platform* defaultPlatformPtr);
+      v8::Platform* defaultPlatformPtr,
+      JitCodeEventTracking jitCodeEventTracking = JitCodeEventTracking::NO);
 
   // Use a possibly-custom v8::Platform implementation with custom task queue, and apply flags.
   explicit V8System(v8::Platform& platform,
       kj::ArrayPtr<const kj::StringPtr> flags,
       PumpMsgLoopType,
-      ShutdownIsolateType);
+      ShutdownIsolateType,
+      JitCodeEventTracking jitCodeEventTracking = JitCodeEventTracking::NO);
 
   ~V8System() noexcept(false);
 
@@ -74,12 +85,14 @@ class V8System {
   kj::Own<V8PlatformWrapper> platformWrapper;
   PumpMsgLoopType pumpMsgLoop;
   ShutdownIsolateType shutdownIsolate;
+  JitCodeEventTracking jitCodeEventTracking = JitCodeEventTracking::NO;
   friend class IsolateBase;
 
   void init(kj::Own<v8::Platform>,
       kj::ArrayPtr<const kj::StringPtr>,
       PumpMsgLoopType,
-      ShutdownIsolateType);
+      ShutdownIsolateType,
+      JitCodeEventTracking);
 };
 
 // Base class of Isolate<T> containing parts that don't need to be templated, to avoid code
@@ -150,6 +163,19 @@ class IsolateBase {
   inline void setAllowEval(kj::Badge<Lock>, bool allow) {
     if (alwaysAllowEval) return;
     evalAllowed = allow;
+  }
+
+  inline void setDisallowJavascriptExecution(kj::Badge<Lock>, bool allow) {
+    if (allow) {
+      javascriptExecutionDisallowed++;
+    } else {
+      KJ_ASSERT(javascriptExecutionDisallowed > 0);
+      javascriptExecutionDisallowed--;
+    }
+  }
+
+  inline bool getDisallowJavascriptExecution() const {
+    return javascriptExecutionDisallowed != 0;
   }
 
   inline void setAllowsAllowEval() {
@@ -263,6 +289,11 @@ class IsolateBase {
   // Get an object referencing this isolate that can be used to adjust external memory usage later
   kj::Arc<const ExternalMemoryTarget> getExternalMemoryTarget();
 
+  // Get an object that can be used to observe whether this isolate is still alive. The returned
+  // reference stays valid (and reports the isolate as dead) even after the isolate is destroyed,
+  // so it is safe to hold from objects that may outlive the isolate (e.g. jsg::WeakRef).
+  kj::Arc<const IsolateLiveness> getIsolateLiveness();
+
   // Equivalent to getExternalMemoryTarget()->getAdjustment(amount), but saves an atomic refcount
   // increment and decrement.
   ExternalMemoryAdjustment getExternalMemoryAdjustment(int64_t amount) {
@@ -374,6 +405,12 @@ class IsolateBase {
   bool alwaysAllowEval = false;
   bool evalAllowed = false;
 
+  // When > 0, we take the "safe" path in unwrap() to avoid calling Get() which can invoke
+  // user-defined getters, triggering the `DisallowJavascriptExecution` scope constructed
+  // as part of `Deserializer::readValue`
+  // This is a counter instead of a boolean as `readValue` calls can be nested
+  uint javascriptExecutionDisallowed = 0;
+
   // The Web Platform API specifications require that any API that returns a JavaScript Promise
   // should never throw errors synchronously. Rather, they are supposed to capture any synchronous
   // throws and return a rejected Promise. Historically, Workers did not follow that guideline
@@ -452,6 +489,38 @@ class IsolateBase {
   };
 
   // Maps instructions to source code locations.
+  //
+  // WARNING: This map is read by `getJsStackTrace()` from a signal handler,
+  // so this field is deliberately NOT protected by a mutex. Two consequences:
+  //
+  // 1. If V8 is configured to compile JS on background threads, V8 may
+  //    invoke `jitCodeEvent()` (which mutates `codeMap`) concurrently with
+  //    a `getJsStackTrace()` read on another thread — a data race that can
+  //    crash the process during stack walking.
+  //
+  // 2. We can't fix (1) by adding a mutex here, because `getJsStackTrace()`
+  //    runs inside a signal handler and POSIX disallows acquiring a mutex
+  //    from a signal handler (it is not async-signal-safe and may deadlock
+  //    if the signal interrupted a thread already holding the same mutex).
+  //
+  // Callers who configure V8 with any of the following flags MUST account
+  // for this themselves:
+  //   --concurrent_recompilation
+  //   --concurrent_sparkplug
+  //   --maglev_build_code_on_background
+  //   --maglev_deopt_data_on_background
+  //   --lazy_compile_dispatcher
+  //   --parallel_compile_tasks_for_eager_toplevel
+  //   --parallel_compile_tasks_for_lazy
+  //   --stress_concurrent_inlining
+  //
+  // Our internal embedder disables all of the above, so `jitCodeEvent`
+  // only ever fires on the main thread and the race cannot occur in that
+  // configuration.
+  //
+  // Wasm tier-up compilation runs concurrently but emits its own
+  // JitCodeEvents and does not race with JS stack traces in practice
+  // because Wasm code does not appear in JS stack traces.
   kj::TreeMap<uintptr_t, CodeBlockInfo> codeMap;
 
   explicit IsolateBase(V8System& system,
@@ -950,5 +1019,47 @@ class Isolate: public IsolateBase {
   // GetAlignedPointerFromEmbedderData and just return wrappers[0].
   bool hasExtraWrappers = false;
 };
+
+template <typename T>
+WeakRef<T> Object::getWeakRefToThis(Lock& js) {
+  return WeakRef<T>(static_cast<T&>(*this), getOrCreateWeakRefAnchor(),
+      IsolateBase::from(js.v8Isolate).getIsolateLiveness());
+}
+
+template <typename T>
+WeakRef<T> Ref<T>::getWeakRef(Lock& js) & {
+  return WeakRef<T>(static_cast<T&>(*inner.get()), inner->getOrCreateWeakRefAnchor(),
+      IsolateBase::from(js.v8Isolate).getIsolateLiveness());
+}
+
+template <typename T>
+WeakRef<T> WeakRef<T>::addRef(jsg::Lock& js) & {
+  KJ_IF_SOME(i, impl) {
+    return WeakRef(i.target, i.anchor.addRef(), i.isolateLiveness.addRef());
+  }
+  return WeakRef(nullptr);
+}
+
+template <typename T>
+void WeakRef<T>::destroy() {
+  KJ_IF_SOME(i, impl) {
+    v8::Isolate* isolate = i.isolateLiveness->tryGetIsolate();
+    if (isolate == nullptr) {
+      // The isolate has already been torn down (e.g. a hibernatable WebSocket outlived its
+      // isolate). There is no isolate lock to take and no deferred-destruction queue to push onto;
+      // the anchor is a plain refcounted flag with no V8-owned resources, so just drop it. Reading
+      // the now-null isolate from `isolateLiveness` (rather than caching a raw pointer) means a
+      // misuse here would be a clean null deref rather than a use-after-free.
+      impl = kj::none;
+    } else if (v8::Locker::IsLocked(isolate)) {
+      impl = kj::none;
+    } else {
+      auto& base = IsolateBase::from(isolate);
+      kj::Own<void> dropIt = kj::mv(i.anchor).toOwn();
+      base.destroyUnderLock(kj::mv(dropIt));
+      impl = kj::none;
+    }
+  }
+}
 
 }  // namespace workerd::jsg

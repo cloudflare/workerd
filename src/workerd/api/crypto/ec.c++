@@ -501,16 +501,18 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(jsg:
   return CryptoKeyPair{.publicKey = kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
 }
 
-AsymmetricKeyData importEllipticRaw(SubtleCrypto::ImportKeyData keyData,
+AsymmetricKeyData importEllipticRaw(jsg::Lock& js,
+    SubtleCrypto::ImportKeyData keyData,
     int curveId,
     kj::StringPtr normalizedName,
     kj::ArrayPtr<const kj::String> keyUsages,
     CryptoKeyUsageSet allowedUsages) {
   // Import an elliptic key represented by raw data, only public keys are supported.
-  JSG_REQUIRE(keyData.is<kj::Array<kj::byte>>(), DOMDataError,
-      "Expected raw EC key but instead got a Json Web Key.");
 
-  const auto& raw = keyData.get<kj::Array<kj::byte>>();
+  auto& source = JSG_REQUIRE_NONNULL(keyData.tryGet<jsg::JsRef<jsg::JsBufferSource>>(),
+      DOMDataError, "Expected raw EC key but instead got a JSON Web Key.");
+  auto handle = source.getHandle(js);
+  auto raw = handle.asArrayPtr();
 
   auto usages = CryptoKeyUsageSet::validate(
       normalizedName, CryptoKeyUsageSet::Context::importPublic, keyUsages, allowedUsages);
@@ -714,7 +716,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdsa(jsg::Lock& js,
           CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
     } else {
       return importEllipticRaw(
-          kj::mv(keyData), curveId, normalizedName, keyUsages, CryptoKeyUsageSet::verify());
+          js, kj::mv(keyData), curveId, normalizedName, keyUsages, CryptoKeyUsageSet::verify());
     }
   }();
 
@@ -775,7 +777,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(jsg::Lock& js,
           CryptoKeyUsageSet::derivationKeyMask());
     } else {
       // The usage set is required to be empty for public ECDH keys, including raw keys.
-      return importEllipticRaw(kj::mv(keyData), curveId, normalizedName, keyUsages, usageSet);
+      return importEllipticRaw(js, kj::mv(keyData), curveId, normalizedName, keyUsages, usageSet);
     }
   }();
 
@@ -1179,7 +1181,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEddsa(jsg::Lock& js,
           normalizedName == "X25519" ? CryptoKeyUsageSet::derivationKeyMask()
                                      : CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
     } else {
-      return importEllipticRaw(kj::mv(keyData), nid, normalizedName, keyUsages,
+      return importEllipticRaw(js, kj::mv(keyData), nid, normalizedName, keyUsages,
           normalizedName == "X25519" ? CryptoKeyUsageSet() : CryptoKeyUsageSet::verify());
     }
   }();

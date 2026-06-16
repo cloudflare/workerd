@@ -11,6 +11,7 @@
 #include <ncrypto.h>
 #include <openssl/crypto.h>
 
+#include <climits>
 #include <map>
 
 // TODO(soon): This implements most of node:crypto key import, export, and
@@ -405,8 +406,9 @@ kj::OneOf<kj::String, jsg::JsArrayBuffer, SubtleCrypto::JsonWebKey> CryptoImpl::
   }
 
   kj::StringPtr type = JSG_REQUIRE_NONNULL(opts.type, TypeError, "Missing type option");
-  auto data =
-      key->impl->exportKeyExt(js, format, type, kj::mv(opts.cipher), kj::mv(opts.passphrase));
+  auto maybePass = opts.passphrase.map(
+      [&](auto& pass) mutable -> kj::Array<kj::byte> { return pass.getHandle(js).copy(); });
+  auto data = key->impl->exportKeyExt(js, format, type, kj::mv(opts.cipher), kj::mv(maybePass));
   if (format == "pem"_kj) {
     // TODO(perf): As a later performance optimization, change this so that it doesn't copy.
     return kj::str(data.asArrayPtr().asChars());
@@ -594,6 +596,11 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
 
 CryptoKeyPair CryptoImpl::generateRsaKeyPair(jsg::Lock& js, RsaKeyPairOptions options) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
+
+  // Matches the WebCrypto validateRsaParams bound. Consider lowering both to 8192.
+  static constexpr uint32_t kMaxRsaModulusLength = 16384;
+  JSG_REQUIRE(options.modulusLength <= kMaxRsaModulusLength, RangeError,
+      "RSA modulusLength exceeds maximum (", kMaxRsaModulusLength, ")");
 
   auto ctx = ncrypto::EVPKeyCtxPointer::NewFromID(
       options.type == "rsa-pss" ? EVP_PKEY_RSA_PSS : EVP_PKEY_RSA);
@@ -803,6 +810,8 @@ CryptoKeyPair CryptoImpl::generateDhKeyPair(jsg::Lock& js, DhKeyPairOptions opti
     }
     KJ_CASE_ONEOF(prime, jsg::JsRef<jsg::JsBufferSource>) {
       auto primePtr = prime.getHandle(js).asArrayPtr();
+      JSG_REQUIRE(
+          primePtr.size() <= kMaxPrimeBits / CHAR_BIT, RangeError, "DH prime exceeds maximum size");
       ncrypto::BignumPointer bn(primePtr.begin(), primePtr.size());
 
       auto bn_g = ncrypto::BignumPointer::New();

@@ -64,9 +64,12 @@ class Pbkdf2Key final: public CryptoKey::Impl {
     // check for v8::Isolate::IsExecutionTerminating() in the loop, but for now a hard cap seems
     // wisest.
     checkPbkdfLimits(js, iterations);
+    auto derivedLengthBytes = length / 8;
+    JSG_REQUIRE(ncrypto::checkHkdfLength(hashType, derivedLengthBytes), DOMOperationError,
+        "Pbkdf2 failed: derived key length exceeds maximum for this hash");
 
-    return JSG_REQUIRE_NONNULL(pbkdf2(js, length / 8, iterations, hashType, keyData, salt), Error,
-        "PBKDF2 deriveBits failed.");
+    return JSG_REQUIRE_NONNULL(pbkdf2(js, derivedLengthBytes, iterations, hashType, keyData, salt),
+        Error, "PBKDF2 deriveBits failed.");
   }
 
   // TODO(bug): Possibly by mistake, PBKDF2 was historically not on the allow list of
@@ -133,10 +136,11 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importPbkdf2(jsg::Lock& js,
       "PBKDF2 key must be imported in \"raw\" format (requested \"", format, "\").");
 
   // NOTE: Checked in SubtleCrypto::importKey().
-  auto keyDataArray = kj::mv(keyData.get<kj::Array<kj::byte>>());
+  auto& source = keyData.get<jsg::JsRef<jsg::JsBufferSource>>();
+  auto handle = source.getHandle(js);
 
   auto keyAlgorithm = CryptoKey::KeyAlgorithm{normalizedName};
-  return kj::heap<Pbkdf2Key>(kj::mv(keyDataArray), kj::mv(keyAlgorithm), extractable, usages);
+  return kj::heap<Pbkdf2Key>(handle.copy(), kj::mv(keyAlgorithm), extractable, usages);
 }
 
 }  // namespace workerd::api

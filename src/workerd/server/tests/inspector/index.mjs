@@ -26,6 +26,13 @@ async function pbkdf2Derive(password) {
 
 export default {
   async fetch(request, env, ctx) {
-    return new Response(await pbkdf2Derive('hello!'));
+    if (request.url.includes('/pbkdf2Derive')) {
+      return new Response(await pbkdf2Derive('hello!'));
+    }
+    if (request.url.includes('/throwException')) {
+      const url = new URL(request.url);
+      throw new Error(url.searchParams.get('message'));
+    }
+    return new Response('Not found', { status: 404 });
   },
 };

@@ -8,7 +8,7 @@ import {
   mountWorkerFiles,
 } from 'pyodide-internal:setupPackages';
 import {
-  maybeCollectSnapshot,
+  maybeCollectBaselineSnapshot,
   maybeRestoreSnapshot,
   finalizeBootstrap,
   isRestoringSnapshot,
@@ -24,7 +24,6 @@ import {
 import {
   LEGACY_VENDOR_PATH,
   PROCESS_PTH_FILES,
-  SHOULD_ABORT_ISOLATE_ON_FATAL_ERROR,
   setCpuLimitNearlyExceededCallback,
 } from 'pyodide-internal:metadata';
 import { default as FatalReporter } from 'pyodide-internal:fatal-reporter';
@@ -42,7 +41,7 @@ import {
 import { loadPackages } from 'pyodide-internal:loadPackage';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import { default as setupPythonSearchPathSource } from 'pyodide-internal:setup_python_search_path.py';
-import { TRANSITIVE_REQUIREMENTS, IS_WORKERD } from 'pyodide-internal:metadata';
+import { IS_WORKERD } from 'pyodide-internal:metadata';
 import { getTrustedReadFunc } from 'pyodide-internal:readOnlyFS';
 import { PyodideVersion } from 'pyodide-internal:const';
 import { default as pythonStdlibZip } from 'pyodideRuntime-internal:python_stdlib.zip';
@@ -257,14 +256,14 @@ export async function loadPyodide(
     enterJaegerSpan('load_packages', () => {
       // NB. loadPackages adds the packages to the `VIRTUALIZED_DIR` global which then gets used in
       // preloadDynamicLibs.
-      loadPackages(Module, TRANSITIVE_REQUIREMENTS);
+      loadPackages(Module);
     });
 
     enterJaegerSpan('prepare_wasm_linear_memory', () => {
       prepareWasmLinearMemory(Module, customSerializedObjects);
     });
 
-    maybeCollectSnapshot(Module, customSerializedObjects);
+    maybeCollectBaselineSnapshot(Module, customSerializedObjects);
     // Mount worker files after doing snapshot upload so we ensure that data from the files is never
     // present in snapshot memory.
     mountWorkerFiles(Module);
@@ -285,11 +284,9 @@ export async function loadPyodide(
       } catch (_e) {
         FatalReporter.reportFatal('Internal error reporting fatal error');
       }
-      if (SHOULD_ABORT_ISOLATE_ON_FATAL_ERROR) {
-        cloudflareWorkers.abortIsolate(
-          `Python worker fatal error: ${String(error)}`
-        );
-      }
+      cloudflareWorkers.abortIsolate(
+        `Python worker fatal error: ${String(error)}`
+      );
     };
     return pyodide;
   } catch (e) {

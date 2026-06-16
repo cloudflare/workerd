@@ -182,7 +182,9 @@ static int reprl_error(struct reprl_context* ctx, const char *format, ...)
     va_list args;
     va_start(args, format);
     free(ctx->last_error);
-    vasprintf(&ctx->last_error, format, args);
+    if (vasprintf(&ctx->last_error, format, args) < 0) {
+        ctx->last_error = nullptr;
+    }
     return -1;
 }
 
@@ -239,10 +241,12 @@ static void reprl_terminate_child(struct reprl_context* ctx)
 static int reprl_spawn_child(struct reprl_context* ctx)
 {
     // This is also a good time to ensure the data channel backing files don't grow too large.
-    ftruncate(ctx->data_in->fd, REPRL_MAX_DATA_SIZE);
-    ftruncate(ctx->data_out->fd, REPRL_MAX_DATA_SIZE);
-    if (ctx->child_stdout) ftruncate(ctx->child_stdout->fd, REPRL_MAX_DATA_SIZE);
-    if (ctx->child_stderr) ftruncate(ctx->child_stderr->fd, REPRL_MAX_DATA_SIZE);
+    if (ftruncate(ctx->data_in->fd, REPRL_MAX_DATA_SIZE) != 0 ||
+        ftruncate(ctx->data_out->fd, REPRL_MAX_DATA_SIZE) != 0 ||
+        (ctx->child_stdout && ftruncate(ctx->child_stdout->fd, REPRL_MAX_DATA_SIZE) != 0) ||
+        (ctx->child_stderr && ftruncate(ctx->child_stderr->fd, REPRL_MAX_DATA_SIZE) != 0)) {
+        return reprl_error(ctx, "Failed to truncate data channel file: %s", strerror(errno));
+    }
 
     int crpipe[2] = { 0, 0 };          // control pipe child -> reprl
     int cwpipe[2] = { 0, 0 };          // control pipe reprl -> child

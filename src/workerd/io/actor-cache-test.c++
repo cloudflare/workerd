@@ -7,6 +7,7 @@
 
 #include <workerd/util/capnp-mock.h>
 #include <workerd/util/test.h>
+#include <workerd/util/thread-scopes.h>
 
 #include <capnp/dynamic.h>
 #include <kj/debug.h>
@@ -1380,6 +1381,35 @@ KJ_TEST("ActorCache flush hard failure with output gate bypass") {
 
   // Further writes won't even try to start any new transactions because the failure killed them all.
   test.put("bar", "456");
+}
+
+KJ_TEST("ActorCache flush hard failure includes internal error reference id") {
+  // A flush failure that is neither DISCONNECTED nor a tunneled JSG error falls into the
+  // "internal error" branch of flushImpl(), which should embed a reference id in the
+  // user-visible exception so it can be correlated with internal logs.
+  setPredictableModeForTest();
+  ActorCacheTest test({.monitorOutputGate = false});
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  auto promise = test.gate.onBroken();
+
+  test.put("foo", "123");
+
+  KJ_ASSERT(!promise.poll(ws));
+
+  {
+    // FAILED + no "jsg." prefix => not tunneled and not retried, so we hit the wdErrId branch.
+    mockStorage->expectCall("put", ws)
+        .withParams(CAPNP(entries = [(key = "foo", value = "123")]))
+        .thenThrow(KJ_EXCEPTION(FAILED, "raw storage failure"));
+  }
+
+  KJ_EXPECT_LOG(ERROR, "raw storage failure");
+  KJ_EXPECT_THROW_MESSAGE("broken.outputGateBroken; jsg.Error: Internal error in Durable "
+                          "Object storage write caused object to be reset; "
+                          "reference = 0123456789abcdefghijklmn",
+      promise.wait(ws));
 }
 
 KJ_TEST("ActorCache read retry") {
@@ -5416,6 +5446,29 @@ KJ_TEST("ActorCache deleteAll() failure with deleteAlarm does not delete alarm")
 
   // No deleteAlarm RPC should have been sent since the deleteAll failed.
   mockStorage->expectNoActivity(ws);
+}
+
+KJ_TEST("ActorCache deleteAll() failure includes internal error reference id") {
+  // A deleteAll failure that is neither DISCONNECTED nor a tunneled JSG error falls into the
+  // "internal error" branch of flushImplDeleteAll(), which should embed a reference id in the
+  // user-visible exception so it can be correlated with internal logs.
+  setPredictableModeForTest();
+  ActorCacheTest test({.monitorOutputGate = false});
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  auto brokenPromise = test.gate.onBroken();
+
+  auto deleteAll = test.cache.deleteAll({}, nullptr);
+
+  // FAILED + no "jsg." prefix => not tunneled and not retried, so we hit the wdErrId branch.
+  mockStorage->expectCall("deleteAll", ws).thenThrow(KJ_EXCEPTION(FAILED, "raw storage failure"));
+
+  KJ_EXPECT_LOG(ERROR, "raw storage failure");
+  KJ_EXPECT_THROW_MESSAGE("broken.outputGateBroken; jsg.Error: Internal error in Durable "
+                          "Object storage deleteAll() caused object to be reset; "
+                          "reference = 0123456789abcdefghijklmn",
+      brokenPromise.wait(ws));
 }
 
 KJ_TEST("ActorCache can wait for flush") {

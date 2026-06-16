@@ -1,6 +1,42 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/wd_test.bzl", "wd_test")
+
+# Compile all ts test sources in one project. This is needed to work around https://github.com/aspect-build/rules_ts/issues/664 –
+# rules_ts transpiles all .ts files for each ts_project where the files are present based on the
+# tsconfig "include": ["**/*.ts"] directive, which is an issue on Windows where Bazel does not have
+# a proper sandbox, so it ends up trying to write to the same file path repeatedly.
+# This approach does not scale well if we end up adding many more TS-based wd_tests since we need to
+# transpile all TS sources before running TS-based wd-tests. At that point, we hopefully either have
+# a proper Windows sandbox and can properly define a separate ts_project for each test, or we may
+# have to put the files for a given test in a separate directory so that they are kept separate from
+# the other ts files without sandboxing.
+ts_config(
+    name = "ts_config",
+    src = "tsconfig.json",
+    deps = ["@workerd//tools:base-tsconfig"],
+)
+
+ts_project(
+    name = "ts_project",
+    srcs = glob(["*.ts"]),
+    composite = True,
+    tsconfig = ":ts_config",
+    deps = ["//src/node:node@tsproject"],
+)
+
+wd_test(
+    src = "stdio-writesync-reentry-uaf-test.wd-test",
+    args = ["--experimental"],
+    data = ["stdio-writesync-reentry-uaf-test.js"],
+)
+
+wd_test(
+    src = "urlpattern-regex-search-oob-test.wd-test",
+    args = ["--experimental"],
+    data = ["urlpattern-regex-search-oob-test.js"],
+)
 
 wd_test(
     src = "messageport-postmessage-uaf-test.wd-test",
@@ -21,6 +57,12 @@ wd_test(
 )
 
 wd_test(
+    src = "error-deser-prototype-setter-test.wd-test",
+    args = ["--experimental"],
+    data = ["error-deser-prototype-setter-test.js"],
+)
+
+wd_test(
     src = "structuredclone-error-serialize-test.wd-test",
     args = ["--experimental"],
     data = ["structuredclone-error-serialize-test.js"],
@@ -30,6 +72,12 @@ wd_test(
     src = "deserialize-hardening-test.wd-test",
     args = ["--experimental"],
     data = ["deserialize-hardening-test.js"],
+)
+
+wd_test(
+    src = "struct-prototype-pollution-test.wd-test",
+    args = ["--experimental"],
+    data = ["struct-prototype-pollution-test.js"],
 )
 
 wd_test(
@@ -70,6 +118,13 @@ wd_test(
     src = "connect-neuter-test.wd-test",
     args = ["--experimental"],
     data = ["connect-neuter-test.js"],
+)
+
+# Regression test for AUTOVULN-EW-EDGEWORKER-17: Socket::close() bare-this UAF.
+wd_test(
+    src = "socket-close-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["socket-close-gc-test.js"],
 )
 
 wd_test(
@@ -164,6 +219,11 @@ wd_test(
 )
 
 wd_test(
+    src = "ctx-access-test.wd-test",
+    data = ["ctx-access-test.js"],
+)
+
+wd_test(
     src = "cache-test.wd-test",
     args = ["--experimental"],
     data = [
@@ -191,6 +251,18 @@ wd_test(
         "queue-error-codes-test.js",
         "queue-test.js",
     ],
+)
+
+wd_test(
+    src = "queue-resizable-arraybuffer-test.wd-test",
+    args = ["--experimental"],
+    data = ["queue-resizable-arraybuffer-test.js"],
+)
+
+wd_test(
+    src = "queue-do-uaf-test.wd-test",
+    args = ["--experimental"],
+    data = ["queue-do-uaf-test.js"],
 )
 
 wd_test(
@@ -246,13 +318,22 @@ wd_test(
     ],
 )
 
-# Tests for SQL_RESTRICT_RESERVED_NAMES autogate - only runs in @all-autogates variant
+wd_test(
+    src = "sql-resizable-arraybuffer-test.wd-test",
+    args = ["--experimental"],
+    data = ["sql-resizable-arraybuffer-test.js"],
+)
+
+wd_test(
+    src = "kv-resizable-arraybuffer-test.wd-test",
+    args = ["--experimental"],
+    data = ["kv-resizable-arraybuffer-test.js"],
+)
+
 wd_test(
     src = "sql-restrict-names-test.wd-test",
     args = ["--experimental"],
     data = ["sql-restrict-names-test.js"],
-    generate_all_compat_flags_variant = False,
-    generate_default_variant = False,
 )
 
 wd_test(
@@ -332,6 +413,18 @@ wd_test(
 )
 
 wd_test(
+    src = "resizable-arraybuffer-toctou-test.wd-test",
+    args = ["--experimental"],
+    data = ["resizable-arraybuffer-toctou-test.js"],
+)
+
+wd_test(
+    src = "resizable-arraybuffer-aliasing-test.wd-test",
+    args = ["--experimental"],
+    data = ["resizable-arraybuffer-aliasing-test.js"],
+)
+
+wd_test(
     src = "crypto-impl-asymmetric-test.wd-test",
     args = ["--experimental"],
     data = ["crypto-impl-asymmetric-test.js"],
@@ -385,13 +478,11 @@ wd_test(
     data = ["form-data-test.js"],
 )
 
-# TODO(soon): Re-enable once it is determined why this test is failing
-# consistently in CI on Windows in all variant
-# wd_test(
-#     src = "form-data-test-ts.wd-test",
-#     args = ["--experimental"],
-#     data = ["form-data-test-ts.ts"],
-# )
+wd_test(
+    src = "form-data-test-ts.wd-test",
+    args = ["--experimental"],
+    data = ["form-data-test-ts.ts"],
+)
 
 wd_test(
     src = "warnings-test.wd-test",
@@ -503,6 +594,12 @@ wd_test(
     src = "stub-storage-test.wd-test",
     args = ["--experimental"],
     data = ["stub-storage-test.js"],
+)
+
+wd_test(
+    src = "persistent-stubs-test.wd-test",
+    args = ["--experimental"],
+    data = ["persistent-stubs-test.js"],
 )
 
 wd_test(
@@ -662,6 +759,18 @@ wd_test(
     src = "url-test.wd-test",
     args = ["--experimental"],
     data = ["url-test.js"],
+)
+
+wd_test(
+    src = "url-searchparams-iterator-uaf-test.wd-test",
+    args = ["--experimental"],
+    data = ["url-searchparams-iterator-uaf-test.js"],
+)
+
+wd_test(
+    src = "url_standard-searchparams-iterator-uaf-test.wd-test",
+    args = ["--experimental"],
+    data = ["url-searchparams-iterator-uaf-test.js"],
 )
 
 wd_test(
@@ -866,6 +975,13 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
+    src = "worker-loader-limits-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-limits-test.js"],
+)
+
+wd_test(
     src = "worker-loader-unnamed-gc-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-unnamed-gc-test.js"],
@@ -875,6 +991,12 @@ wd_test(
     src = "worker-loader-rab-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-rab-test.js"],
+)
+
+wd_test(
+    src = "worker-loader-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-gc-test.js"],
 )
 
 wd_test(
@@ -1001,7 +1123,7 @@ wd_test(
 
 sh_test(
     name = "abortIsolate",
-    size = "small",
+    size = "medium",
     srcs = ["abortIsolate.sh"],
     args = [
         "$(location //src/workerd/server:workerd_cross)",

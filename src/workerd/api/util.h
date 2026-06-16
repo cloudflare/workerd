@@ -30,8 +30,12 @@ struct CiLess {
 // Parse `rawText` as application/x-www-form-urlencoded name/value pairs and store in `query`. If
 // `skipLeadingQuestionMark` is true, any initial '?' will be ignored. Otherwise, it will be
 // interpreted as part of the first URL-encoded field.
+//
+// Native heap growth from parsed entries is reported to V8 via `externalMemoryAdjustment` so the
+// per-isolate memory limit can bound it.
 void parseQueryString(kj::Vector<kj::Url::QueryParam>& query,
     kj::ArrayPtr<const char> rawText,
+    jsg::ExternalMemoryAdjustment& externalMemoryAdjustment,
     bool skipLeadingQuestionMark = false);
 // TODO(cleanup): Would be really nice to move this to kj-url.
 

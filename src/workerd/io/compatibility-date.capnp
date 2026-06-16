@@ -1540,4 +1540,19 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # startup. This allows packages to extend `sys.path` declaratively (e.g. to
   # add subdirectories or register import hooks). Without this flag, `.pth`
   # files in `python_modules/` are ignored.
+
+  throwOnNotImplementedTlsOptions @177 :Bool
+      $compatEnableFlag("throw_on_not_implemented_tls_options")
+      $compatDisableFlag("no_throw_on_not_implemented_tls_options")
+      $compatEnableDate("2026-06-16");
+  # When enabled, passing unsupported TLS options (e.g. checkServerIdentity)
+  # to tls.connect() or new TLSSocket() throws ERR_OPTION_NOT_IMPLEMENTED
+  # instead of silently ignoring them
+
+  autoGrpcConvert @178 :Bool
+      $compatEnableFlag("auto_grpc_convert")
+      $neededByFl
+      $experimental;
+  # When enabled, a Worker's outbound gRPC-web subrequest is converted to gRPC at
+  # the edge.
 }

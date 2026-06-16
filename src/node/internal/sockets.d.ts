@@ -16,13 +16,17 @@ export interface Writer extends WritableStream {
   releaseLock(): void;
 }
 
+export interface TlsOptions {
+  expectedServerHostname?: string;
+}
+
 export interface Socket {
   opened: Promise<SocketInfo>;
   closed: Promise<void>;
   close(): Promise<void>;
   readable: Reader;
   writable: Writer;
-  startTls(): Socket;
+  startTls(options?: TlsOptions): Socket;
 
   readonly upgraded: boolean;
   readonly secureTransport: 'on' | 'off' | 'starttls';

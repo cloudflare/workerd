@@ -2,10 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Benchmark to compare stream piping implementations:
-// 1. Existing approach (ReadableStream::pumpTo via PumpToReader) - uses JS promise-based loop
-// 2. New approach (ReadableSourceKjAdapter::pumpTo) - uses DrainingReader to pull all
-//    synchronously available data at once, then writes with vectored I/O
+// Benchmark to compare stream piping entry points:
+// 1. ReadableStream::pumpTo() - standard stream controller path.
+// 2. ReadableSourceKjAdapter::pumpTo() - kj adapter path.
 //
 // Run with: bazel run --config=opt //src/workerd/tests:bench-stream-piping
 
@@ -393,7 +392,7 @@ jsg::Ref<ReadableStream> createConfiguredStream(
 }
 
 // =============================================================================
-// Benchmark: New approach using ReadableSourceKjAdapter::pumpTo
+// Benchmark: ReadableSourceKjAdapter::pumpTo
 // =============================================================================
 
 static void benchNewApproachPumpTo(
@@ -426,7 +425,7 @@ static void benchNewApproachPumpTo(
     });
 
     // Verify all expected bytes were written
-    KJ_ASSERT(sink.bytesWritten == expectedBytes, "New approach: expected", expectedBytes,
+    KJ_ASSERT(sink.bytesWritten == expectedBytes, "Adapter path: expected", expectedBytes,
         "bytes but got", sink.bytesWritten);
   }
 
@@ -437,7 +436,7 @@ static void benchNewApproachPumpTo(
 }
 
 // =============================================================================
-// Benchmark: Existing approach using ReadableStream::pumpTo (PumpToReader)
+// Benchmark: ReadableStream::pumpTo
 // =============================================================================
 
 static void benchExistingApproachPumpTo(
@@ -469,7 +468,7 @@ static void benchExistingApproachPumpTo(
     });
 
     // Verify all expected bytes were written
-    KJ_ASSERT(sink.bytesWritten == expectedBytes, "Existing approach: expected", expectedBytes,
+    KJ_ASSERT(sink.bytesWritten == expectedBytes, "ReadableStream path: expected", expectedBytes,
         "bytes but got", sink.bytesWritten);
   }
 

@@ -5,7 +5,6 @@
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
 #include <workerd/tests/test-fixture.h>
-#include <workerd/util/autogate.h>
 
 #include <kj/test.h>
 
@@ -114,20 +113,19 @@ KJ_TEST("socket writes are blocked by output gate") {
                              [&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& actor = env.context.getActorOrThrow();
 
-    // Step 1: Connect without gate lock so the pipe is established.
-    auto socket = connectImplNoOutputLock(env.js, kj::none, kj::str("localhost:1234"), kj::none);
+    // Step 1: Connect before locking the gate so the pipe is established.
+    auto socket = connectImpl(env.js, kj::none, kj::str("localhost:1234"), kj::none);
     env.js.runMicrotasks();
 
     // Prepare write data and lock gate BEFORE any co_await (Worker lock still held).
     auto paf = kj::newPromiseAndFulfiller<void>();
     auto blocker = actor.getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
     auto writable = socket->getWritable();
-    auto data = kj::heapArray<kj::byte>({'h', 'i'});
-    auto jsBuffer = env.js.bytes(kj::mv(data)).getHandle(env.js);
+    jsg::JsValue jsBuffer = jsg::JsUint8Array::create(env.js, "hi"_kjb);
     writable->getController().write(env.js, jsBuffer).markAsHandled(env.js);
 
-    // With autogate (@all-autogates), connect is deferred. Wait for it.
-    // After co_await, Worker lock is released — no V8 calls allowed.
+    // Connect can be deferred by other pending output locks. Wait for it.
+    // After co_await, Worker lock is released -- no V8 calls allowed.
     for (int i = 0; i < 10 && pipeEnd == kj::none; i++) {
       co_await kj::evalLater([]() {});
     }
@@ -153,8 +151,8 @@ KJ_TEST("socket writes are blocked by output gate") {
       errorsToIgnore);
 }
 
-// Connect deferral test runs last — its drain errors fire during process exit.
-KJ_TEST("connectImplNoOutputLock defers connect until output gate clears") {
+// Connect deferral test runs last -- its drain errors fire during process exit.
+KJ_TEST("connectImpl defers connect until output gate clears") {
   bool connectCalled = false;
   kj::HttpHeaderTable headerTable;
   kj::Maybe<kj::AsyncIoStream&> pipeEnd;
@@ -169,8 +167,6 @@ KJ_TEST("connectImplNoOutputLock defers connect until output gate clears") {
   }),
   });
 
-  bool autogateOn = util::Autogate::isEnabled(util::AutogateKey::TCP_SOCKET_CONNECT_OUTPUT_GATE);
-
   static constexpr kj::StringPtr errorsToIgnore[] = {
     "failed to invoke drain()"_kj,
     "no subrequests"_kj,
@@ -182,19 +178,13 @@ KJ_TEST("connectImplNoOutputLock defers connect until output gate clears") {
     auto paf = kj::newPromiseAndFulfiller<void>();
     auto blocker = actor.getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
 
-    auto socket = connectImplNoOutputLock(env.js, kj::none, kj::str("localhost:1234"), kj::none);
+    auto socket = connectImpl(env.js, kj::none, kj::str("localhost:1234"), kj::none);
 
-    if (autogateOn) {
-      co_await kj::evalLater([]() {});
-      KJ_EXPECT(!connectCalled, "connect must not happen while output gate is locked");
-      paf.fulfiller->fulfill();
-      co_await kj::evalLater([]() {});
-      KJ_EXPECT(connectCalled, "connect must happen after output gate releases");
-    } else {
-      KJ_EXPECT(connectCalled, "without autogate, connect must happen synchronously");
-      paf.fulfiller->fulfill();
-      co_await kj::evalLater([]() {});
-    }
+    co_await kj::evalLater([]() {});
+    KJ_EXPECT(!connectCalled, "connect must not happen while output gate is locked");
+    paf.fulfiller->fulfill();
+    co_await kj::evalLater([]() {});
+    KJ_EXPECT(connectCalled, "connect must happen after output gate releases");
   }),
       errorsToIgnore);
 }

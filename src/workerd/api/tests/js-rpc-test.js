@@ -177,6 +177,14 @@ export class MyService extends WorkerEntrypoint {
     return await counter.increment(i);
   }
 
+  async getMyActor(name) {
+    return this.env.MyActor.get(this.env.MyActor.idFromName(name));
+  }
+
+  async getMyActorInObject(name) {
+    return { actor: this.env.MyActor.get(this.env.MyActor.idFromName(name)) };
+  }
+
   async getAnObject(i) {
     return { foo: 123 + i, counter: new MyCounter(i) };
   }
@@ -507,6 +515,14 @@ export class MyService extends WorkerEntrypoint {
 export class MyServiceProxy extends WorkerEntrypoint {
   makeCounter(i) {
     return this.env.MyService.makeCounter(i);
+  }
+
+  getMyActor(name) {
+    return this.env.MyService.getMyActor(name);
+  }
+
+  getMyActorInObject(name) {
+    return this.env.MyService.getMyActorInObject(name);
   }
 
   getAnObject(i) {
@@ -996,6 +1012,12 @@ export let sendStubOverRpc = {
     });
 
     assert.strictEqual(await stubDup.increment(7), 16);
+
+    let actor = env.MyActor.get(
+      env.MyActor.idFromName('send-durable-object-stub')
+    );
+    assert.strictEqual(await env.MyService.incrementCounter(actor, 5), 5);
+    assert.strictEqual(await actor.increment(7), 12);
   },
 };
 
@@ -1013,17 +1035,33 @@ export let receiveStubOverRpc = {
       await Promise.all([promise1, promise2, promise3]),
       [15, 19, 22]
     );
+
+    let actor = await env.MyService.getMyActor('receive-durable-object-stub');
+    assert.strictEqual(await actor.increment(2), 2);
+    assert.strictEqual(await actor.increment(6), 8);
   },
 };
 
 export let promisePipelining = {
   async test(controller, env, ctx) {
     assert.strictEqual(await env.MyService.makeCounter(12).increment(3), 15);
+    assert.strictEqual(
+      await env.MyService.getMyActor(
+        'promise-pipeline-durable-object-stub'
+      ).increment(3),
+      3
+    );
 
     assert.strictEqual(await env.MyService.getAnObject(5).foo, 128);
     assert.strictEqual(
       await env.MyService.getAnObject(5).counter.increment(7),
       12
+    );
+    assert.strictEqual(
+      await env.MyService.getMyActorInObject(
+        'promise-pipeline-durable-object-stub-wrapped'
+      ).actor.increment(4),
+      4
     );
 
     assert.rejects(() => env.MyService.oneArgMethod(5).foo(), {
@@ -1059,6 +1097,16 @@ export let promisePipeliningProxy = {
       assert.strictEqual(await promise2, 20);
     }
 
+    {
+      let actor = env.MyServiceProxy.getMyActor(
+        'promise-pipeline-proxy-durable-object-stub'
+      );
+      let promise1 = actor.increment(3);
+      let promise2 = actor.increment(5);
+      assert.strictEqual(await promise1, 3);
+      assert.strictEqual(await promise2, 8);
+    }
+
     // Pipeline on a proxied call that returns an object containing an object that contains a
     // stub. (This ensures that pipelining can traverse JsRpcProperty values.)
     {
@@ -1067,6 +1115,16 @@ export let promisePipeliningProxy = {
       let promise2 = counter.increment(5);
       assert.strictEqual(await promise1, 15);
       assert.strictEqual(await promise2, 20);
+    }
+
+    {
+      let actor = env.MyServiceProxy.getMyActorInObject(
+        'promise-pipeline-proxy-durable-object-stub-wrapped'
+      ).actor;
+      let promise1 = actor.increment(2);
+      let promise2 = actor.increment(6);
+      assert.strictEqual(await promise1, 2);
+      assert.strictEqual(await promise2, 8);
     }
   },
 };
@@ -2115,5 +2173,59 @@ export let eOrderTest = {
     let results = await Promise.all(promises);
 
     assert.deepEqual(results, [1, 2, 3, 4, 5, 6]);
+  },
+};
+
+// Regression test for AUTOVULN-CLOUDFLARE-WORKERD-297:
+// Unbounded JsRpcProperty parent chain causes native stack overflow
+// (SIGSEGV) on destruction. Building a deep chain of pipelined
+// property accesses must be rejected once the depth exceeds
+// MAX_PROPERTY_DEPTH (5120).
+export let stubDepthLimitTest = {
+  async test() {
+    // Create a local RPC stub wrapping a plain object.
+    let stub = new RpcStub({});
+
+    // Build a chain of pipelined property accesses. Before the fix,
+    // this would create an unbounded linked list of native
+    // JsRpcProperty objects whose recursive destruction overflows
+    // the native stack. After the fix, getProperty() throws a
+    // TypeError once depth >= 5120.
+    let p = stub;
+    let threw = false;
+    let depthReached = 0;
+    try {
+      for (let i = 0; i < 10000; i++) {
+        p = p.x;
+        depthReached = i + 1;
+      }
+    } catch (e) {
+      threw = true;
+      assert.ok(
+        e instanceof TypeError,
+        `Expected TypeError, got ${e.constructor.name}: ${e.message}`
+      );
+      assert.ok(
+        e.message.includes('too deep'),
+        `Expected error message about "too deep", got: ${e.message}`
+      );
+    }
+
+    assert.ok(
+      threw,
+      'Expected TypeError to be thrown at depth limit, ' +
+        `but reached depth ${depthReached} without error`
+    );
+    // The depth limit is 5120, so we should have reached at least 5120
+    // before the throw.
+    assert.ok(
+      depthReached >= 5120,
+      `Expected to reach at least depth 5120, only reached ${depthReached}`
+    );
+    // And we should NOT have reached 10000 (the full loop).
+    assert.ok(
+      depthReached < 10000,
+      'Should not have reached depth 10000 without error'
+    );
   },
 };

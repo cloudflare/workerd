@@ -47,6 +47,7 @@ def _fmt_python_snapshot_release(
         baseline_snapshot_hash,
         flag,
         real_pyodide_version,
+        integrity,
         **_kwds):
     content = ", ".join(
         [
@@ -57,6 +58,7 @@ def _fmt_python_snapshot_release(
             "backport = %s" % backport,
             'baselineSnapshotHash = "%s"' % baseline_snapshot_hash,
             'flagName = "%s"' % flag,
+            'integrity = "%s"' % integrity,
         ],
     )
     return "(%s)" % content
@@ -88,7 +90,7 @@ def pyodide_extra():
     )
 
     for tag in package_tags:
-        _copy_and_capnp_embed("@pyodide-lock_" + tag + ".json//file")
+        _copy_and_capnp_embed("python-lock/pyodide-lock_" + tag + ".json")
 
     cc_capnp_library(
         name = "pyodide_extra_capnp",
@@ -122,7 +124,6 @@ def pyodide_static():
         "internal/*.py",
         "internal/workers-api/src/*.py",
         "internal/workers-api/src/workers/*.py",
-        "internal/patches/*.py",
         "internal/topLevelEntropy/*.py",
     ])
     internal_modules = native.glob(

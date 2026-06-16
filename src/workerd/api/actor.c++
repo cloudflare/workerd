@@ -5,6 +5,7 @@
 #include "actor.h"
 
 #include <workerd/io/features.h>
+#include <workerd/io/stored-value.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <capnp/compat/http-over-capnp.h>
@@ -24,6 +25,23 @@ constexpr size_t ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL = 32768;
 
 }  // namespace
 
+IoChannelFactory::ActorChannel& LocalActorOutgoingFactory::getOrCreateActorChannel(
+    IoContext& context, SpanParent parentSpan) {
+  if (actorChannel == kj::none) {
+    actorChannel = context.getColoLocalActorChannel(channelId, actorId, kj::mv(parentSpan));
+
+    // The ActorChannelImpl we just created holds a Cap'n Proto Pipeline::Client representing an
+    // open connection to the target DO's routing supervisor. Register external memory to pressure
+    // V8 into collecting this factory's owning stub promptly when it becomes unreachable,
+    // preventing connection/FD accumulation from stubs that are created and discarded in a loop.
+    jsg::Lock& js = context.getCurrentLock();
+    channelMemoryAdjustment =
+        js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL);
+  }
+
+  return *KJ_REQUIRE_NONNULL(actorChannel);
+}
+
 kj::Own<WorkerInterface> LocalActorOutgoingFactory::newSingleUseClient(
     kj::Maybe<kj::String> cfStr) {
   auto& context = IoContext::current();
@@ -32,25 +50,42 @@ kj::Own<WorkerInterface> LocalActorOutgoingFactory::newSingleUseClient(
       [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
     tracing.setTag("objectId"_kjc, actorId.asPtr());
 
-    // Lazily initialize actorChannel
-    if (actorChannel == kj::none) {
-      actorChannel =
-          context.getColoLocalActorChannel(channelId, actorId, tracing.getInternalSpanParent());
-
-      // As in GlobalActorOutgoingFactory, account for external memory used by the open connection.
-      jsg::Lock& js = context.getCurrentLock();
-      channelMemoryAdjustment =
-          js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL);
-    }
-
-    return KJ_REQUIRE_NONNULL(actorChannel)
-        ->startRequest({.cfBlobJson = kj::mv(cfStr),
+    return getOrCreateActorChannel(context, tracing.getInternalSpanParent())
+        .startRequest({.cfBlobJson = kj::mv(cfStr),
           .parentSpan = tracing.getInternalSpanParent(),
           .userSpanParent = tracing.getUserSpanParent()});
   },
       {.inHouse = true,
         .wrapMetrics = true,
         .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
+}
+
+kj::Own<IoChannelFactory::SubrequestChannel> LocalActorOutgoingFactory::getSubrequestChannel() {
+  auto& context = IoContext::current();
+  return kj::addRef(getOrCreateActorChannel(context, context.getCurrentTraceSpan()));
+}
+
+IoChannelFactory::ActorChannel& GlobalActorOutgoingFactory::getOrCreateActorChannel(
+    IoContext& context, SpanParent parentSpan) {
+  if (actorChannel == kj::none) {
+    KJ_SWITCH_ONEOF(channelIdOrFactory) {
+      KJ_CASE_ONEOF(channelId, uint) {
+        actorChannel =
+            context.getGlobalActorChannel(channelId, id->getInner(), kj::mv(locationHint), mode,
+                enableReplicaRouting, routingMode, kj::mv(parentSpan), kj::mv(version));
+      }
+      KJ_CASE_ONEOF(factory, kj::Own<DurableObjectNamespace::ActorChannelFactory>) {
+        actorChannel = factory->getGlobalActor(id->getInner(), kj::mv(locationHint), mode,
+            enableReplicaRouting, routingMode, kj::mv(parentSpan), kj::mv(version));
+      }
+    }
+
+    jsg::Lock& js = context.getCurrentLock();
+    channelMemoryAdjustment =
+        js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL);
+  }
+
+  return *KJ_REQUIRE_NONNULL(actorChannel);
 }
 
 kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClient(
@@ -61,37 +96,19 @@ kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClient(
       [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
     tracing.setTag("objectId"_kjc, id->toString());
 
-    // Lazily initialize actorChannel
-    if (actorChannel == kj::none) {
-      KJ_SWITCH_ONEOF(channelIdOrFactory) {
-        KJ_CASE_ONEOF(channelId, uint) {
-          actorChannel = context.getGlobalActorChannel(channelId, id->getInner(),
-              kj::mv(locationHint), mode, enableReplicaRouting, routingMode,
-              tracing.getInternalSpanParent(), kj::mv(version));
-        }
-        KJ_CASE_ONEOF(factory, kj::Own<DurableObjectNamespace::ActorChannelFactory>) {
-          actorChannel = factory->getGlobalActor(id->getInner(), kj::mv(locationHint), mode,
-              enableReplicaRouting, routingMode, tracing.getInternalSpanParent(), kj::mv(version));
-        }
-      }
-
-      // The ActorChannelImpl we just created holds a Cap'n Proto Pipeline::Client representing an
-      // open connection to the target DO's routing supervisor. Register external memory to pressure
-      // V8 into collecting this factory's owning stub promptly when it becomes unreachable,
-      // preventing connection/FD accumulation from stubs that are created and discarded in a loop.
-      jsg::Lock& js = context.getCurrentLock();
-      channelMemoryAdjustment =
-          js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL);
-    }
-
-    return KJ_REQUIRE_NONNULL(actorChannel)
-        ->startRequest({.cfBlobJson = kj::mv(cfStr),
+    return getOrCreateActorChannel(context, tracing.getInternalSpanParent())
+        .startRequest({.cfBlobJson = kj::mv(cfStr),
           .parentSpan = tracing.getInternalSpanParent(),
           .userSpanParent = tracing.getUserSpanParent()});
   },
       {.inHouse = true,
         .wrapMetrics = true,
         .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
+}
+
+kj::Own<IoChannelFactory::SubrequestChannel> GlobalActorOutgoingFactory::getSubrequestChannel() {
+  auto& context = IoContext::current();
+  return kj::addRef(getOrCreateActorChannel(context, context.getCurrentTraceSpan()));
 }
 
 kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClient(
@@ -111,6 +128,10 @@ kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClient(
       {.inHouse = true,
         .wrapMetrics = true,
         .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
+}
+
+kj::Own<IoChannelFactory::SubrequestChannel> ReplicaActorOutgoingFactory::getSubrequestChannel() {
+  return kj::addRef(*actorChannel);
 }
 
 jsg::Ref<Fetcher> ColoLocalActorNamespace::get(jsg::Lock& js, kj::String actorId) {
@@ -267,9 +288,9 @@ void DurableObjectClass::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
               rpc::JsValue::ExternalPusher::DelayedChannelToken::Client>();
 
           // Arrange to send the token when it's ready.
-          ioctx.addTask(
-              promise.then([pusher = rpcHandler.getExternalPusher(),
-                               fulfiller = kj::mv(paf.fulfiller)](kj::Array<byte> token) mutable {
+          ioctx.addTask(promise.then(
+              [pusher = rpcHandler.getExternalPusher(), fulfiller = kj::mv(paf.fulfiller),
+                  attachedChannel = kj::mv(channel)](kj::Array<byte> token) mutable {
             auto req = pusher.pushDelayedChannelTokenRequest(
                 capnp::MessageSize{4 + token.size() / sizeof(capnp::word), 0});
             req.setToken(token);
@@ -284,25 +305,35 @@ void DurableObjectClass::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
         }
       }
       return;
+    } else KJ_IF_SOME(storedHandler, kj::tryDowncast<StoredExternalHandler::Serializer>(handler)) {
+      // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This
+      // format is temporary, anyone using this will lose their data later.
+      JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
+          "DurableObjectClass cannot be serialized in this context.");
+      KJ_SWITCH_ONEOF(channel->getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::STORAGE)) {
+        KJ_CASE_ONEOF(token, kj::Array<byte>) {
+          // Token is available synchronously. For backwards compatibility, write it directly into
+          // the serialized value.
+          // TODO(cleanup): As soon as all of production is updated to understand externals, stop
+          //   writing inline tokens.
+          serializer.writeLengthDelimited(token);
+        }
+        KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+          storedHandler.writeChannel(kj::mv(channel), kj::mv(promise));
+
+          // Write an empty array to signal that we're using an external rather than an inline
+          // token.
+          serializer.writeLengthDelimited(kj::ArrayPtr<const byte>());
+        }
+      }
+      return;
     }
+
     // TODO(someday): structuredClone() should have special handling that just reproduces the same
     //   local object. At present we have no way to recognize structuredClone() here though.
   }
 
-  // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This format
-  // is temporary, anyone using this will lose their data later.
-  JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
-      "DurableObjectClass cannot be serialized in this context.");
-  KJ_SWITCH_ONEOF(channel->getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::STORAGE)) {
-    KJ_CASE_ONEOF(token, kj::Array<byte>) {
-      serializer.writeLengthDelimited(token);
-    }
-    KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
-      // TODO(stub-storage): Eventually we'll serialize by pointing to an external table.
-      KJ_UNIMPLEMENTED(
-          "tried to store ActorClassChannel whose token is not synchronously available");
-    }
-  }
+  JSG_FAIL_REQUIRE(DOMDataCloneError, "DurableObjectClass cannot be serialized in this context.");
 }
 
 jsg::Ref<DurableObjectClass> DurableObjectClass::deserialize(
@@ -345,17 +376,28 @@ jsg::Ref<DurableObjectClass> DurableObjectClass::deserialize(
       }
 
       return js.alloc<DurableObjectClass>(ioctx.addObject(kj::mv(channel)));
+    } else KJ_IF_SOME(storedHandler,
+        kj::tryDowncast<StoredExternalHandler::Deserializer>(handler)) {
+      // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This
+      // format is temporary, anyone using this will lose their data later.
+      JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
+          "DurableObjectClass cannot be deserialized in this context.");
+      auto& ioctx = IoContext::current();
+      auto token = deserializer.readLengthDelimitedBytes();
+      kj::Own<IoChannelFactory::ActorClassChannel> channel;
+      if (token.size() > 0) {
+        // Token embedded inline, just use it.
+        channel = ioctx.getIoChannelFactory().actorClassFromToken(
+            IoChannelFactory::ChannelTokenUsage::STORAGE, token);
+      } else {
+        // Token stored out-of-line as an external.
+        channel = storedHandler.readActorClassChannel(ioctx.getIoChannelFactory());
+      }
+      return js.alloc<DurableObjectClass>(ioctx.addObject(kj::mv(channel)));
     }
   }
 
-  // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This format
-  // is temporary, anyone using this will lose their data later.
-  JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
-      "DOMDataCloneError cannot be deserialized in this context.");
-  auto& ioctx = IoContext::current();
-  auto channel = ioctx.getIoChannelFactory().actorClassFromToken(
-      IoChannelFactory::ChannelTokenUsage::STORAGE, deserializer.readLengthDelimitedBytes());
-  return js.alloc<DurableObjectClass>(ioctx.addObject(kj::mv(channel)));
+  JSG_FAIL_REQUIRE(DOMDataCloneError, "DurableObjectClass cannot be deserialized in this context.");
 }
 
 }  // namespace workerd::api

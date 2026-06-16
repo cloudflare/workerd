@@ -63,6 +63,8 @@ class IoContext;
 class InputGate;
 class OutputGate;
 
+class StoredExternalHandler;
+
 // Type signature of an entrypoint implementation class (Durable Object or stateless service).
 using ExecutionContextOrState =
     kj::OneOf<jsg::Ref<api::ExecutionContext>, jsg::Ref<api::DurableObjectState>>;
@@ -289,7 +291,7 @@ class Worker::Script: public kj::AtomicRefcounted {
   using WasmModule = WorkerSource::WasmModule;
   using JsonModule = WorkerSource::JsonModule;
   using PythonModule = WorkerSource::PythonModule;
-  using PythonRequirement = WorkerSource::PythonRequirement;
+  using ObsoletePythonRequirement = WorkerSource::ObsoletePythonRequirement;
   using CapnpModule = WorkerSource::CapnpModule;
   using ModuleContent = WorkerSource::ModuleContent;
   using Module = WorkerSource::Module;
@@ -927,6 +929,7 @@ class Worker::Actor final: public kj::Refcounted {
         kj::StringPtr name, kj::Function<kj::Promise<StartInfo>()> getStartInfo) = 0;
     virtual void abortFacet(kj::StringPtr name, kj::Exception reason) = 0;
     virtual void deleteFacet(kj::StringPtr name) = 0;
+    virtual void cloneFacet(kj::StringPtr src, kj::StringPtr dst) = 0;
   };
 
   // Create a new Actor hosted by this Worker. Note that this Actor object may only be manipulated
@@ -969,6 +972,11 @@ class Worker::Actor final: public kj::Refcounted {
   // interactions between `onAbort` and `onShutdown` promises.
   void shutdownActorCache(kj::Maybe<const kj::Exception&> error);
 
+  // Immediately, synchronously abort all work going on in the actor. All requests throw the
+  // given exception. All background work stops. Any async task that holds a strong reference on
+  // the Actor is canceled, so that there should be no more references floating around.
+  void abort(const kj::Exception& error);
+
   // Get a promise that resolves when `shutdown()` has been called.
   kj::Promise<void> onShutdown();
 
@@ -979,12 +987,24 @@ class Worker::Actor final: public kj::Refcounted {
   // This method can only be called once.
   kj::Promise<void> onBroken();
 
+  // Get a canceler which will be canceled when `abort()` is called. All incoming requests to
+  // the actor and all background work should be wrapped in this canceler. (worker-entrypoint.c++
+  // takes care of this.)
+  kj::Canceler& getAbortCanceler();
+
   const Id& getId();
   Id cloneId();
   static Id cloneId(Id& id);
   kj::Maybe<jsg::JsRef<jsg::JsValue>> getTransient(Worker::Lock& lock);
   kj::Maybe<ActorCacheInterface&> getPersistent();
   kj::Own<Loopback> getLoopback();
+
+  // Get the StoredExternalHandler, creating it if it doesn't already exist. Returns none if the
+  // actor's storage is not SQLite-backed, in which case externals cannot be stored.
+  StoredExternalHandler& getOrCreateStoredExternalHandler();
+
+  // Get the StoredExternalHandler if it has been created previously.
+  kj::Maybe<StoredExternalHandler&> getStoredExternalHandler();
 
   // Make the storage object for use in Service Workers syntax. This should not be used for
   // modules-syntax workers. (Note that Service-Workers-syntax actors are not supported publicly.)

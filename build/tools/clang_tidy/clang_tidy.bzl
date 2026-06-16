@@ -101,6 +101,7 @@ def _clang_tidy_aspect_impl(target, ctx):
         ctx.attr._clang_tidy_plugin.files,
     ]
 
+    clang_tidy_config = ctx.attr._clang_tidy_config.files.to_list()[0]
     plugin_path = ctx.attr._clang_tidy_plugin.files.to_list()[0].path
 
     outs = []
@@ -120,7 +121,8 @@ def _clang_tidy_aspect_impl(target, ctx):
         # clang-tidy arguments
         # do not print statistics
         args.add("--quiet")
-        args.add("--config-file=" + ctx.attr._clang_tidy_config.files.to_list()[0].short_path)
+        args.add("--experimental-custom-checks")
+        args.add("--config-file=" + clang_tidy_config.path)
 
         if ctx.attr.clang_tidy_args:
             args.add_all(ctx.attr.clang_tidy_args.split(" "))
@@ -151,10 +153,18 @@ def _clang_tidy_aspect_impl(target, ctx):
         # TODO(cleanup): These paths provide required includes, but if the toolchain was working
         # properly we wouldn't need them in the first place...
         # Linux includes
-        args.add("-isystem/usr/lib/llvm-19/include/c++/v1")
-        args.add("-isystem/usr/lib/llvm-19/lib/clang/19/include")
+        # Prefer the newest installed LLVM headers, but keep older fallbacks for developers on
+        # older distro/toolchain packages. Clang's include_next searches this list in order.
+        # As of may '26 llvm head 23, so 24 will be ok for quite a while.
+        for llvm_version in range(24, 18, -1):
+            args.add("-isystem/usr/lib/llvm-{}/include/c++/v1".format(llvm_version))
         args.add("-isystem/usr/include")
         args.add("-isystem/usr/include/x86_64-linux-gnu")
+
+        # Keep clang resource headers after glibc headers so include_next from the newest resource
+        # directory cannot skip into an older resource directory with the same include guard.
+        for llvm_version in range(24, 18, -1):
+            args.add("-isystem/usr/lib/llvm-{}/lib/clang/{}/include".format(llvm_version, llvm_version))
 
         # macOS includes
         args.add("-isystem/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1")

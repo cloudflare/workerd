@@ -257,4 +257,8 @@ void ProcessModule::setCwd(jsg::Lock& js, kj::String path) {
   }
 }
 
+bool ProcessModule::shouldThrowOnNotImplementedTlsOption(jsg::Lock& js) {
+  return FeatureFlags::get(js).getThrowOnNotImplementedTlsOptions();
+}
+
 }  // namespace workerd::api::node

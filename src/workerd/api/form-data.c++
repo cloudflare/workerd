@@ -290,13 +290,14 @@ void FormData::parse(jsg::Lock& js,
       //
       // TODO(conform): Transcode to UTF-8, like the spec tells us to.
       assertUtf8(params);
+      auto& adjustment = externalMemoryAdjustment.emplace(js.getExternalMemoryAdjustment());
       kj::Vector<kj::Url::QueryParam> query;
-      parseQueryString(query, kj::mv(rawText));
+      parseQueryString(query, kj::mv(rawText), adjustment);
       data.reserve(query.size());
       for (auto& param: query) {
         data.add(Entry{
-          .name = kj::str(param.name),
-          .value = kj::str(param.value),
+          .name = kj::mv(param.name),
+          .value = kj::mv(param.value),
         });
       }
       return;

@@ -36,6 +36,7 @@ import {
 import {
   isAnyArrayBuffer,
   isArrayBufferView,
+  isDataView,
 } from 'node-internal:internal_types';
 
 import {
@@ -81,7 +82,9 @@ export function randomFillSync(
       buffer
     );
   }
-  const maxLength = (buffer as Uint8Array).length;
+  // Use byteLength, not length — DataView has no .length property and
+  // TypedArray .length is element count, not bytes.
+  const maxLength = (buffer as Uint8Array).byteLength;
   if (offset !== undefined) {
     validateInteger(offset, 'offset', 0, kMaxLength);
   } else offset = 0;
@@ -90,6 +93,12 @@ export function randomFillSync(
   } else size = maxLength - offset;
   if (isAnyArrayBuffer(buffer)) {
     buffer = Buffer.from(buffer);
+  } else if (isDataView(buffer)) {
+    buffer = new Uint8Array(
+      buffer.buffer,
+      buffer.byteOffset,
+      buffer.byteLength
+    );
   }
   buffer = (buffer as Buffer).subarray(offset, offset + size);
   return crypto.getRandomValues(buffer as Uint8Array<ArrayBuffer>);
@@ -130,7 +139,9 @@ export function randomFill(
 
   let offset = 0;
   let size = 0;
-  const maxLength = (buffer as Uint8Array).length;
+  // Use byteLength, not length — DataView has no .length property and
+  // TypedArray .length is element count, not bytes.
+  const maxLength = (buffer as Uint8Array).byteLength;
   if (typeof callback === 'function') {
     validateInteger(offsetOrCallback, 'offset', 0, maxLength);
     offset = offsetOrCallback;

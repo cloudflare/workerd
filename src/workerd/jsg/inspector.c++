@@ -35,29 +35,18 @@ kj::String KJ_STRINGIFY(const v8_inspector::StringView& view) {
 }  // namespace v8_inspector
 
 namespace workerd::jsg {
-namespace {
-class StringViewWithScratch: public v8_inspector::StringView {
- public:
-  StringViewWithScratch(v8_inspector::StringView text, kj::Array<char16_t>&& scratch)
-      : v8_inspector::StringView(text),
-        scratch(kj::mv(scratch)) {}
 
- private:
-  kj::Array<char16_t> scratch;
-};
-}  // namespace
-
-v8_inspector::StringView toInspectorStringView(kj::StringPtr text) {
+StringViewWithScratch toInspectorStringView(kj::StringPtr text) {
   bool isAscii = simdutf::validate_ascii(text.begin(), text.size());
 
   if (isAscii) {
     return StringViewWithScratch(
-        v8_inspector::StringView(text.asBytes().begin(), text.size()), nullptr);
+        nullptr, v8_inspector::StringView(text.asBytes().begin(), text.size()));
   } else {
     kj::Array<char16_t> scratch = kj::encodeUtf16(text);
-    return StringViewWithScratch(
-        v8_inspector::StringView(reinterpret_cast<uint16_t*>(scratch.begin()), scratch.size()),
-        kj::mv(scratch));
+    auto stringView =
+        v8_inspector::StringView(reinterpret_cast<uint16_t*>(scratch.begin()), scratch.size());
+    return StringViewWithScratch(kj::mv(scratch), kj::mv(stringView));
   }
 }
 
@@ -67,7 +56,8 @@ v8_inspector::StringView toInspectorStringView(kj::StringPtr text) {
 void sendExceptionToInspector(
     jsg::Lock& js, v8_inspector::V8Inspector& inspector, kj::StringPtr description) {
   inspector.exceptionThrown(js.v8Context(), v8_inspector::StringView(), v8::Local<v8::Value>(),
-      jsg::toInspectorStringView(description), v8_inspector::StringView(), 0, 0, nullptr, 0);
+      jsg::toInspectorStringView(description).stringView, v8_inspector::StringView(), 0, 0, nullptr,
+      0);
 }
 
 void sendExceptionToInspector(jsg::Lock& js,
@@ -101,9 +91,10 @@ void sendExceptionToInspector(jsg::Lock& js,
 
   // TODO(soon): EW-2636 Pass a real "script ID" as the last parameter instead of 0. I suspect this
   //   has something to do with the incorrect links in the console when it logs uncaught exceptions.
-  inspector.exceptionThrown(context, jsg::toInspectorStringView(source), exception,
-      jsg::toInspectorStringView(detailedMessage), jsg::toInspectorStringView(scriptResourceName),
-      lineNumber, startColumn, inspector.createStackTrace(stackTrace), 0);
+  inspector.exceptionThrown(context, jsg::toInspectorStringView(source).stringView, exception,
+      jsg::toInspectorStringView(detailedMessage).stringView,
+      jsg::toInspectorStringView(scriptResourceName).stringView, lineNumber, startColumn,
+      inspector.createStackTrace(stackTrace), 0);
 }
 
 }  // namespace workerd::jsg

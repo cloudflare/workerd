@@ -52,7 +52,7 @@ class SpanImpl final: public kj::Refcounted {
   bool getIsTraced();
 
   // Returns a SpanParent wrapping this span's observer, or a null SpanParent if the span has
-  // ended or has no observer. Used by Tracing::enterSpan() to push onto the AsyncContextFrame.
+  // ended or has no observer. Used by Tracing methods to push onto the AsyncContextFrame.
   workerd::SpanParent makeSpanParent();
 
   // Sets a single attribute on the span. If value is kj::none, the attribute is not set.
@@ -88,15 +88,14 @@ class Span: public jsg::Object {
   // optional fields.
   void setAttribute(jsg::Lock& js, kj::String key, jsg::Optional<TagValue> value);
 
-  // Ends the span and submits its content to the tracing system. Not exposed to JS - only
-  // called by Tracing::enterSpan when the user callback returns / throws / its promise
-  // settles. Callers outside this file should not need it.
+  // Ends the span and submits its content to the tracing system. Idempotent.
   void end();
 
   JSG_RESOURCE_TYPE(Span) {
     JSG_READONLY_PROTOTYPE_PROPERTY(isTraced, getIsTraced);
 
     JSG_METHOD(setAttribute);
+    JSG_METHOD(end);
   }
 
  private:
@@ -140,8 +139,19 @@ class Tracing: public jsg::Object {
       const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler,
       const jsg::TypeHandler<jsg::Promise<jsg::Value>>& valuePromiseHandler);
 
+  // Creates a new child span, pushes it onto the AsyncContextFrame while invoking
+  // callback(span, ...args), and returns the callback result without ending the span.
+  // The caller must call span.end() explicitly; forgotten spans are still ended by
+  // SpanImpl's destructor when the request-owned span object is destroyed.
+  v8::Local<v8::Value> startActiveSpan(jsg::Lock& js,
+      kj::String operationName,
+      v8::Local<v8::Function> callback,
+      jsg::Arguments<jsg::Value> args,
+      const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
+
   JSG_RESOURCE_TYPE(Tracing) {
     JSG_METHOD(enterSpan);
+    JSG_METHOD(startActiveSpan);
 
     // Use the _NAMED variant so the property ends up as `tracing.Span` rather than
     // `tracing["user_tracing::Span"]`.
@@ -153,6 +163,11 @@ class Tracing: public jsg::Object {
     // return value is preserved. Matches the shape documented in the user-tracing RFC.
     JSG_TS_OVERRIDE({
       enterSpan<T, A extends unknown[]>(
+        name: string,
+        callback: (span: Span, ...args: A) => T,
+        ...args: A
+      ): T;
+      startActiveSpan<T, A extends unknown[]>(
         name: string,
         callback: (span: Span, ...args: A) => T,
         ...args: A

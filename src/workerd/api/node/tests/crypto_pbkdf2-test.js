@@ -327,3 +327,21 @@ export const invalid_digest_tests = {
     }
   },
 };
+
+export const pbkdf2_keylen_cap = {
+  test() {
+    // SHA-1 digest = 20 bytes, max keylen = 255 * 20 = 5100
+    assert.throws(() => crypto.pbkdf2Sync('p', 's', 1000, 5101, 'sha1'), {
+      name: 'RangeError',
+    });
+    const r1 = crypto.pbkdf2Sync('p', 's', 1000, 5100, 'sha1');
+    assert.strictEqual(r1.length, 5100);
+
+    // SHA-256 digest = 32 bytes, max keylen = 255 * 32 = 8160
+    assert.throws(() => crypto.pbkdf2Sync('p', 's', 1000, 8161, 'sha256'), {
+      name: 'RangeError',
+    });
+    const r2 = crypto.pbkdf2Sync('p', 's', 1000, 8160, 'sha256');
+    assert.strictEqual(r2.length, 8160);
+  },
+};

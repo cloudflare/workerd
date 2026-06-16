@@ -30,11 +30,6 @@ class DurableObjectClass;
 class LoopbackDurableObjectNamespace;
 class LoopbackColoLocalActorNamespace;
 
-kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, const jsg::JsValue& value);
-
-jsg::JsValue deserializeV8Value(
-    jsg::Lock& js, kj::ArrayPtr<const char> key, kj::ArrayPtr<const kj::byte> buf);
-
 // Common implementation of DurableObjectStorage and DurableObjectTransaction. This class is
 // designed to be used as a mixin.
 class DurableObjectStorageOperations {
@@ -228,10 +223,11 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
     // Omit from definitions
   };
 
-  jsg::Promise<jsg::JsRef<jsg::JsValue>> transaction(jsg::Lock& js,
-      jsg::Function<jsg::Promise<jsg::JsRef<jsg::JsValue>>(jsg::Ref<DurableObjectTransaction>)>
-          closure,
-      jsg::Optional<TransactionOptions> options);
+  using AsyncTxnCallback =
+      jsg::Function<jsg::Promise<jsg::JsRef<jsg::JsValue>>(jsg::Ref<DurableObjectTransaction>)>;
+
+  jsg::Promise<jsg::JsRef<jsg::JsValue>> transaction(
+      jsg::Lock& js, AsyncTxnCallback closure, jsg::Optional<TransactionOptions> options);
 
   jsg::JsRef<jsg::JsValue> transactionSync(
       jsg::Lock& js, jsg::Function<jsg::JsRef<jsg::JsValue>()> callback);
@@ -361,6 +357,14 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(maybePrimary);
   }
+
+  struct AsyncTxnResult {
+    jsg::JsRef<jsg::JsValue> value;
+    bool isError;
+  };
+
+  static jsg::Promise<AsyncTxnResult> asyncTransactionImpl(
+      jsg::Lock& js, IoContext& context, ActorCacheInterface& cache, AsyncTxnCallback callback);
 };
 
 class DurableObjectTransaction final: public jsg::Object, public DurableObjectStorageOperations {
@@ -467,11 +471,13 @@ class DurableObjectFacets: public jsg::Object {
 
   void abort(jsg::Lock& js, kj::String name, jsg::JsValue reason);
   void delete_(jsg::Lock& js, kj::String name);
+  void clone(jsg::Lock& js, kj::String src, kj::String dst);
 
   JSG_RESOURCE_TYPE(DurableObjectFacets) {
     JSG_METHOD(get);
     JSG_METHOD(abort);
     JSG_METHOD_NAMED(delete, delete_);
+    JSG_METHOD(clone);
 
     JSG_TS_OVERRIDE({
       get<T extends Rpc.DurableObjectBranded | undefined = undefined>(
@@ -599,6 +605,12 @@ class DurableObjectState: public jsg::Object {
     return props.getHandle(js);
   }
 
+  // Same as ExecutionContext::restore() but calls `[restore]()` on the actor instance.
+  jsg::Promise<jsg::Value> restore(jsg::Lock& js,
+      jsg::JsObject params,
+      const jsg::TypeHandler<jsg::Ref<Fetcher>>& fetcherHandler,
+      const jsg::TypeHandler<jsg::Ref<JsRpcStub>>& rpcStubHandler);
+
   kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId(jsg::Lock& js);
 
   jsg::Optional<jsg::Ref<DurableObjectStorage>> getStorage() {
@@ -650,7 +662,8 @@ class DurableObjectState: public jsg::Object {
   //
   // `tags` are string tags which can be used to look up
   // the WebSocket with getWebSockets().
-  void acceptWebSocket(jsg::Ref<WebSocket> ws, jsg::Optional<kj::Array<kj::String>> tags);
+  void acceptWebSocket(
+      jsg::Lock& js, jsg::Ref<WebSocket> ws, jsg::Optional<kj::Array<kj::String>> tags);
 
   // Gets an array of accepted WebSockets matching the given tag.
   // If no tag is provided, an array of all accepted WebSockets is returned.
@@ -704,6 +717,9 @@ class DurableObjectState: public jsg::Object {
       JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     }
     JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
+    if (flags.getAllowIrrevocableStubStorage()) {
+      JSG_METHOD(restore);
+    }
     JSG_LAZY_INSTANCE_PROPERTY(id, getId);
     JSG_LAZY_INSTANCE_PROPERTY(storage, getStorage);
     JSG_LAZY_INSTANCE_PROPERTY(container, getContainer);

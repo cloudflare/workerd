@@ -10,5 +10,8 @@ pub const CPU_LIMIT_DETAIL_ID: u64 = 0xfdcb_787b_a424_0576;
 /// If an exception is thrown for exceeding memory limits, it will contain this detail.
 pub const MEMORY_LIMIT_DETAIL_ID: u64 = 0xbaf7_6dd7_ce5b_d8cf;
 
+/// If an exception is thrown for exceeding wall time limits, it will contain this detail.
+pub const WALL_TIME_LIMIT_DETAIL_ID: u64 = 0x6e8f_2b4a_1c9d_3e5b;
+
 /// If an exception is thrown for worker killed before start, it will contain this detail.
 pub const SCRIPT_KILLED_DETAIL_ID: u64 = 0xf893_5d57_9c20_da70;

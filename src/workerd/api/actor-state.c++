@@ -6,6 +6,7 @@
 
 #include "actor.h"
 #include "export-loopback.h"
+#include "restore.h"
 #include "sql.h"
 #include "sync-kv.h"
 #include "util.h"
@@ -16,6 +17,7 @@
 #include <workerd/io/actor-sqlite.h>
 #include <workerd/io/features.h>
 #include <workerd/io/hibernation-manager.h>
+#include <workerd/io/stored-value.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
@@ -23,6 +25,13 @@
 #include <v8.h>
 
 namespace workerd::api {
+
+jsg::Promise<jsg::Value> DurableObjectState::restore(jsg::Lock& js,
+    jsg::JsObject params,
+    const jsg::TypeHandler<jsg::Ref<Fetcher>>& fetcherHandler,
+    const jsg::TypeHandler<jsg::Ref<JsRpcStub>>& rpcStubHandler) {
+  return restoreCurrentEntrypoint(js, params, fetcherHandler, rpcStubHandler);
+}
 
 namespace {
 
@@ -38,7 +47,7 @@ uint32_t billingUnits(size_t bytes, BillAtLeastOne billAtLeastOne = BillAtLeastO
 }
 
 jsg::JsValue deserializeMaybeV8Value(
-    jsg::Lock& js, kj::ArrayPtr<const char> key, kj::Maybe<kj::ArrayPtr<const kj::byte>> buf) {
+    jsg::Lock& js, kj::StringPtr key, kj::Maybe<kj::ArrayPtr<const kj::byte>> buf) {
   KJ_IF_SOME(b, buf) {
     return deserializeV8Value(js, key, b);
   } else {
@@ -212,24 +221,6 @@ kj::Promise<void> updateStorageDeletes(
   if (deleted == 0) deleted = 1;
   metrics.addStorageDeletes(deleted);
 };
-
-// Return the id of the current actor (or the empty string if there is no current actor).
-kj::Maybe<kj::String> getCurrentActorId() {
-  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
-    KJ_IF_SOME(actor, ioContext.getActor()) {
-      KJ_SWITCH_ONEOF(actor.getId()) {
-        KJ_CASE_ONEOF(s, kj::String) {
-          return kj::heapString(s);
-        }
-        KJ_CASE_ONEOF(actorId, kj::Own<ActorIdFactory::ActorId>) {
-          return actorId->toString();
-        }
-      }
-      KJ_UNREACHABLE;
-    }
-  }
-  return kj::none;
-}
 
 }  // namespace
 
@@ -512,7 +503,7 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(
 jsg::Promise<void> DurableObjectStorageOperations::putOne(
     jsg::Lock& js, kj::String key, jsg::JsValue value, const PutOptions& options) {
 
-  kj::Array<byte> buffer = serializeV8Value(js, value);
+  kj::Array<byte> buffer = serializeV8Value(js, key, value);
 
   auto units = billingUnits(key.size() + buffer.size());
 
@@ -588,6 +579,10 @@ jsg::Promise<bool> DurableObjectStorageOperations::deleteOne(
     jsg::Lock& js, kj::String key, const PutOptions& options) {
   auto& context = IoContext::current();
 
+  KJ_IF_SOME(handler, KJ_ASSERT_NONNULL(context.getActor()).getStoredExternalHandler()) {
+    handler.cancelPutExternals(key);
+  }
+
   return transformCacheResult(js,
       getCache(OP_DELETE).delete_(kj::mv(key), options, context.getCurrentTraceSpan()), options,
       [](jsg::Lock&, bool value) {
@@ -615,7 +610,7 @@ jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
     // deleting an undefined field is confusing, throwing could break otherwise working code, and
     // a stray undefined here or there is probably closer to what the user desires.
 
-    kj::Array<byte> buffer = serializeV8Value(js, field.value);
+    kj::Array<byte> buffer = serializeV8Value(js, field.name, field.value);
 
     units += billingUnits(field.name.size() + buffer.size());
 
@@ -638,6 +633,12 @@ jsg::Promise<int> DurableObjectStorageOperations::deleteMultiple(
 
   auto& context = IoContext::current();
 
+  KJ_IF_SOME(handler, KJ_ASSERT_NONNULL(context.getActor()).getStoredExternalHandler()) {
+    for (auto& key: keys) {
+      handler.cancelPutExternals(key);
+    }
+  }
+
   return transformCacheResult(js,
       getCache(OP_DELETE).delete_(kj::mv(keys), options, context.getCurrentTraceSpan()), options,
       [numKeys](jsg::Lock&, uint count) -> int {
@@ -657,50 +658,15 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorage::transaction(jsg::Lo
   auto& context = IoContext::current();
   auto traceContext = context.makeUserTraceSpan("durable_object_storage_transaction"_kjc);
 
-  struct TxnResult {
-    jsg::JsRef<jsg::JsValue> value;
-    bool isError;
-  };
-
   return context.attachSpans(js,
       context
           .blockConcurrencyWhile(js,
-              [callback = kj::mv(callback), &context, &cache = *cache](
-                  jsg::Lock& js) mutable -> jsg::Promise<TxnResult> {
-    // Note that the call to `startTransaction()` is when the SQLite-backed implementation will
-    // actually invoke `BEGIN TRANSACTION`, so it's important that we're inside the
-    // blockConcurrencyWhile block before that point so we don't accidentally catch some other
-    // asynchronous event in our transaction.
-    //
-    // For the ActorCache-based implementation, it doesn't matter when we call `startTransaction()`
-    // as the method merely allocates an object and returns it with no side effects.
-    auto txn = js.alloc<DurableObjectTransaction>(context.addObject(cache.startTransaction()));
-
-    return js.resolvedPromise(txn.addRef())
-        .then(js, kj::mv(callback))
-        .then(js, [txn = txn.addRef()](jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) mutable {
-      // In correct usage, `context` should not have changed here, particularly because we're in
-      // a critical section so it should have been impossible for any other context to receive
-      // control. However, depending on all that is a bit precarious. jsg::Promise::then() itself
-      // does NOT guarantee it runs in the same context (the application could have returned a
-      // custom Promise and then resolved in from some other context). So let's be safe and grab
-      // IoContext::current() again here, rather than capture it in the lambda.
-      auto& context = IoContext::current();
-      return context.awaitIoWithInputLock(js, txn->maybeCommit(),
-          [value = kj::mv(value)](jsg::Lock&) mutable { return TxnResult{kj::mv(value), false}; });
-    }, [txn = txn.addRef()](jsg::Lock& js, jsg::Value exception) mutable {
-      // The transaction callback threw an exception. We don't actually want to reset the object,
-      // we only want to roll back the transaction and propagate the exception. So, we carefully
-      // pack the exception away into a value.
-      txn->maybeRollback();
-      return js.resolvedPromise(TxnResult{
-        // TODO(cleanup): Simplify this once exception is passed using jsg::JsRef instead
-        // of jsg::V8Ref
-        jsg::JsValue(exception.getHandle(js)).addRef(js), true});
-    });
+              [callback = kj::mv(callback), &cache = *cache](
+                  jsg::Lock& js, IoContext& context) mutable -> jsg::Promise<AsyncTxnResult> {
+    return asyncTransactionImpl(js, context, cache, kj::mv(callback));
   })
           .then(js,
-              [](jsg::Lock& js, TxnResult result) -> jsg::JsRef<jsg::JsValue> {
+              [](jsg::Lock& js, AsyncTxnResult result) -> jsg::JsRef<jsg::JsValue> {
     if (result.isError) {
       js.throwException(result.value.getHandle(js));
     } else {
@@ -710,9 +676,62 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorage::transaction(jsg::Lo
       kj::mv(traceContext));
 }
 
+jsg::Promise<DurableObjectStorage::AsyncTxnResult> DurableObjectStorage::asyncTransactionImpl(
+    jsg::Lock& js, IoContext& context, ActorCacheInterface& cache, AsyncTxnCallback callback) {
+  // Note that the call to `startTransaction()` is when the SQLite-backed implementation will
+  // actually invoke `BEGIN TRANSACTION`, so it's important that we're inside the
+  // blockConcurrencyWhile block before that point so we don't accidentally catch some other
+  // asynchronous event in our transaction.
+  //
+  // For the ActorCache-based implementation, it doesn't matter when we call `startTransaction()`
+  // as the method merely allocates an object and returns it with no side effects.
+  kj::Own<ActorCacheInterface::Transaction> rawTxn;
+  KJ_SWITCH_ONEOF(cache.startTransaction()) {
+    KJ_CASE_ONEOF(t, kj::Own<ActorCacheInterface::Transaction>) {
+      rawTxn = kj::mv(t);
+    }
+    KJ_CASE_ONEOF(promise, kj::Promise<void>) {
+      // Whoops, we can't start the transaction yet. Wait and try again.
+      return context.awaitIoWithInputLock(js, kj::mv(promise),
+          [&context, &cache, callback = kj::mv(callback)](jsg::Lock& js) mutable {
+        return asyncTransactionImpl(js, context, cache, kj::mv(callback));
+      });
+    }
+  }
+
+  auto txn = js.alloc<DurableObjectTransaction>(context.addObject(kj::mv(rawTxn)));
+
+  return js.resolvedPromise(txn.addRef())
+      .then(js, kj::mv(callback))
+      .then(js, [txn = txn.addRef()](jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) mutable {
+    // In correct usage, `context` should not have changed here, particularly because we're in
+    // a critical section so it should have been impossible for any other context to receive
+    // control. However, depending on all that is a bit precarious. jsg::Promise::then() itself
+    // does NOT guarantee it runs in the same context (the application could have returned a
+    // custom Promise and then resolved in from some other context). So let's be safe and grab
+    // IoContext::current() again here, rather than capture it in the lambda.
+    auto& context = IoContext::current();
+    return context.awaitIoWithInputLock(
+        js, txn->maybeCommit(), [value = kj::mv(value)](jsg::Lock&) mutable {
+      return AsyncTxnResult{kj::mv(value), false};
+    });
+  }, [txn = txn.addRef()](jsg::Lock& js, jsg::Value exception) mutable {
+    // The transaction callback threw an exception. We don't actually want to reset the object,
+    // we only want to roll back the transaction and propagate the exception. So, we carefully
+    // pack the exception away into a value.
+    txn->maybeRollback();
+    return js.resolvedPromise(AsyncTxnResult{
+      // TODO(cleanup): Simplify this once exception is passed using jsg::JsRef instead
+      // of jsg::V8Ref
+      jsg::JsValue(exception.getHandle(js)).addRef(js), true});
+  });
+}
+
 jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
     jsg::Lock& js, jsg::Function<jsg::JsRef<jsg::JsValue>()> callback) {
   KJ_IF_SOME(sqlite, cache->getSqliteDatabase()) {
+    auto& context = IoContext::current();
+
     // SAVEPOINT is a readonly statement, but we need to trigger an outer TRANSACTION
     sqlite.notifyWrite();
 
@@ -726,6 +745,10 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
 
     sqlite.run(
         {.regulator = SqliteDatabase::TRUSTED}, kj::str("SAVEPOINT _cf_sync_savepoint_", depth));
+
+    StoredExternalHandler::SyncNestedTransaction syncExternalTxn(
+        context.getActorOrThrow().getOrCreateStoredExternalHandler());
+
     return js.tryCatch([&]() {
       auto result = callback(js);
 
@@ -736,6 +759,7 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
 
       sqlite.run(
           {.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_sync_savepoint_", depth));
+      syncExternalTxn.commit();
       return kj::mv(result);
     }, [&](jsg::Value exception) -> jsg::JsRef<jsg::JsValue> {
       // If a critical error forced an automatic rollback, we skip the rollback and release
@@ -969,19 +993,17 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
         [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
       tracing.setTag("facet_name"_kjc, name.asPtr());
 
-      // Lazily initialize actorChannel
-      if (actorChannel == kj::none) {
-        actorChannel = facetManager.getFacet(name, kj::mv(getStartInfo));
-      }
-
-      return KJ_REQUIRE_NONNULL(actorChannel)
-          ->startRequest({.cfBlobJson = kj::mv(cfStr),
-            .parentSpan = tracing.getInternalSpanParent(),
-            .userSpanParent = tracing.getUserSpanParent()});
+      return getOrCreateActorChannel().startRequest({.cfBlobJson = kj::mv(cfStr),
+        .parentSpan = tracing.getInternalSpanParent(),
+        .userSpanParent = tracing.getUserSpanParent()});
     },
         {.inHouse = true,
           .wrapMetrics = true,
           .operationName = kj::ConstString("facet_subrequest"_kjc)}));
+  }
+
+  kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override {
+    return kj::addRef(getOrCreateActorChannel());
   }
 
  private:
@@ -992,6 +1014,14 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
   kj::Function<kj::Promise<Worker::Actor::FacetManager::StartInfo>()> getStartInfo;
 
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
+
+  IoChannelFactory::ActorChannel& getOrCreateActorChannel() {
+    if (actorChannel == kj::none) {
+      actorChannel = facetManager.getFacet(name, kj::mv(getStartInfo));
+    }
+
+    return *KJ_REQUIRE_NONNULL(actorChannel);
+  }
 };
 
 jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js,
@@ -1008,7 +1038,7 @@ jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js,
   auto& ioCtx = IoContext::current();
 
   kj::Function<kj::Promise<Worker::Actor::FacetManager::StartInfo>()> getStartInfo =
-      ioCtx.makeReentryCallback(
+      ioCtx.makeReentryCallbackWeak(
           [&ioCtx, getStartupOptions = kj::mv(getStartupOptions)](jsg::Lock& js) mutable {
     return getStartupOptions(js).then(js, [&ioCtx](jsg::Lock& js, StartupOptions options) {
       Worker::Actor::Id id;
@@ -1068,6 +1098,12 @@ void DurableObjectFacets::abort(jsg::Lock& js, kj::String name, jsg::JsValue rea
 void DurableObjectFacets::delete_(jsg::Lock& js, kj::String name) {
   requireValidFacetName(name);
   getFacetManager().deleteFacet(name);
+}
+
+void DurableObjectFacets::clone(jsg::Lock& js, kj::String src, kj::String dst) {
+  requireValidFacetName(src);
+  requireValidFacetName(dst);
+  getFacetManager().cloneFacet(src, dst);
 }
 
 ActorState::ActorState(Worker::Actor::Id actorId,
@@ -1164,10 +1200,10 @@ Worker::Actor::HibernationManager& DurableObjectState::maybeInitHibernationManag
 }
 
 void DurableObjectState::acceptWebSocket(
-    jsg::Ref<WebSocket> ws, jsg::Optional<kj::Array<kj::String>> tags) {
+    jsg::Lock& js, jsg::Ref<WebSocket> ws, jsg::Optional<kj::Array<kj::String>> tags) {
   JSG_ASSERT(!ws->isAccepted(), Error,
       "Cannot call `acceptWebSocket()` if the WebSocket was already accepted via `accept()`");
-  JSG_ASSERT(ws->peerIsAwaitingCoupling(), Error,
+  JSG_ASSERT(ws->peerIsAwaitingCoupling(js), Error,
       "Cannot call `acceptWebSocket()` on this WebSocket because its pair has already been "
       "accepted or used in a Response.");
 
@@ -1317,62 +1353,6 @@ jsg::Promise<void> DurableObjectState::configureReadReplication(
       s->getActorCacheInterface().configureReadReplication(ReadReplicationIsEnabled(enabled));
 
   return context.attachSpans(js, context.awaitIo(js, kj::mv(promise)), kj::mv(traceContext));
-}
-
-kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, const jsg::JsValue& value) {
-  jsg::Serializer serializer(js,
-      jsg::Serializer::Options{
-        .version = 15,
-        .omitHeader = false,
-      });
-  serializer.write(js, value);
-  auto released = serializer.release();
-  return kj::mv(released.data);
-}
-
-jsg::JsValue deserializeV8Value(
-    jsg::Lock& js, kj::ArrayPtr<const char> key, kj::ArrayPtr<const kj::byte> buf) {
-
-  KJ_ASSERT(buf.size() > 0, "unexpectedly empty value buffer", key);
-  try {
-    // The js.tryCatch will handle the normal exception path. We wrap this in an
-    // additional try/catch in case the js.tryCatch hits an exception that is
-    // terminal for the isolate, causing exception to be rethrown, in which case
-    // we throw a kj::Exception wrapping a jsg.Error.
-    return js.tryCatch([&]() -> jsg::JsValue {
-      jsg::Deserializer::Options options{};
-      if (buf[0] != 0xFF) {
-        // When Durable Objects was first released, it did not properly write headers when serializing
-        // to storage. If we find that the header is missing (as indicated by the first byte not being
-        // 0xFF), it's safe to assume that the data was written at the only serialization version we
-        // used during that early time period, so we explicitly set that version here.
-        options.version = 13;
-        options.readHeader = false;
-      }
-
-      jsg::Deserializer deserializer(js, buf, kj::none, kj::none, options);
-
-      return deserializer.readValue(js);
-    }, [&](jsg::Value&& exception) mutable -> jsg::JsValue {
-      // If we do hit a deserialization error, we log information that will be helpful in
-      // understanding the problem but that won't leak too much about the customer's data. We
-      // include the key (to help find the data in the database if it hasn't been deleted), the
-      // length of the value, and the first three bytes of the value (which is just the v8-internal
-      // version header and the tag that indicates the type of the value, but not its contents).
-      kj::String actorId = getCurrentActorId().orDefault([]() { return kj::String(); });
-      KJ_FAIL_ASSERT("actor storage deserialization failed", "failed to deserialize stored value",
-          actorId, exception.getHandle(js), key, buf.size(),
-          buf.first(std::min(static_cast<size_t>(3), buf.size())));
-    });
-  } catch (jsg::JsExceptionThrown&) {
-    // We can occasionally hit an isolate termination here -- we prefix the error with jsg to avoid
-    // counting it against our internal storage error metrics but also throw a KJ exception rather
-    // than a jsExceptionThrown error to avoid confusing the normal termination handling code.
-    // We don't expect users to ever actually see this error.
-    JSG_FAIL_REQUIRE(Error,
-        "isolate terminated while deserializing value from Durable Object "
-        "storage; contact us if you're wondering why you're seeing this");
-  }
 }
 
 }  // namespace workerd::api

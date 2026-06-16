@@ -103,6 +103,7 @@ wd_cc_library(
         "resource.h",
         "ser.h",
         "setup.h",
+        "unwrap-args.h",
         "util.h",
         "v8-platform-wrapper.h",
         "web-idl.h",
@@ -202,6 +203,7 @@ wd_cc_library(
         "url.h",
     ],
     implementation_deps = [
+        "//src/workerd/util:sentry",
         "//src/workerd/util:strings",
         "@ada-url",
     ],

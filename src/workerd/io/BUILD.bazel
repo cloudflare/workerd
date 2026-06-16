@@ -41,12 +41,14 @@ wd_cc_library(
         "io-context.c++",
         "io-own.c++",
         "io-util.c++",
+        "stored-value.c++",
         "trace-stream.c++",
         "tracer.c++",
         "worker.c++",
         "worker-fs.c++",
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
+        "access-info.h",
         "compatibility-date.h",
         "external-pusher.h",
         "hibernation-manager.h",
@@ -54,6 +56,7 @@ wd_cc_library(
         "io-context.h",
         "io-own.h",
         "io-util.h",
+        "stored-value.h",
         "trace-stream.h",
         "tracer.h",
         "worker.h",
@@ -401,6 +404,7 @@ wd_capnp_library(
     src = "container.capnp",
     deps = [
         ":compatibility-date_capnp",
+        ":worker-interface_capnp",
         "@capnp-cpp//src/capnp/compat:byte-stream_capnp",
     ],
 )
@@ -419,6 +423,7 @@ kj_test(
         ":io-gate",
         "//src/workerd/util:test",
         "//src/workerd/util:test-util",
+        "//src/workerd/util:thread-scopes",
     ],
 )
 
@@ -514,10 +519,6 @@ wd_test(
         "//src/workerd/io/wasm:signal-preinit.wasm",
         "//src/workerd/io/wasm:signal-terminated-only.wasm",
     ],
-    # The WebAssembly.instantiate shim is behind the WASM_SHUTDOWN_SIGNAL_SHIM autogate,
-    # so this test only works when all autogates are enabled.
-    generate_all_compat_flags_variant = False,
-    generate_default_variant = False,
 )
 
 kj_test(
@@ -531,6 +532,14 @@ kj_test(
 
 kj_test(
     src = "worker-getexportedhandler-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "hibernation-manager-test.c++",
     deps = [
         ":io",
         "//src/workerd/tests:test-fixture",

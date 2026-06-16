@@ -11,7 +11,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "tracing-hierarchy-test.js"),
         ],
-        compatibilityFlags = ["experimental", "nodejs_compat"],
+        compatibilityFlags = ["nodejs_compat"],
         streamingTails = ["tail"],
         bindings = [
           (
@@ -29,7 +29,7 @@ const unitTests :Workerd.Config = (
     ),
     ( name = "tracing-hierarchy-mock",
       worker = (
-        compatibilityFlags = ["experimental", "nodejs_compat"],
+        compatibilityFlags = ["nodejs_compat"],
         modules = [
           (name = "worker", esModule = embed "tracing-hierarchy-mock.js"),
         ],
@@ -44,5 +44,5 @@ const tailWorker :Workerd.Worker = (
     (name = "worker", esModule = embed "tracing-hierarchy-instrumentation-test.js"),
     (name = "instrumentation-test-helper", esModule = embed "../instrumentation-test-helper.js")
   ],
-  compatibilityFlags = ["experimental", "nodejs_compat"],
+  compatibilityFlags = ["nodejs_compat"],
 );
