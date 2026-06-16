@@ -11,13 +11,10 @@ export const basics = {
       throw new Error('bad things happened');
     }
 
-    try {
-      await import('bad-static-import');
-      throw new Error('bad-static-import should not resolve');
-    } catch (err) {
-      assert3.strictEqual(err.name, 'TypeError');
-      assert3.match(err.message, /Invalid module specifier "\.\.\/dep"/);
-      assert3.match(err.message, /imported from "bad-static-import"\./);
-    }
+    await assert3.rejects(import('bad-static-import'), {
+      name: 'TypeError',
+      message:
+        /Invalid module specifier "\.\.\/dep"[\s\S]*imported from "bad-static-import"\./,
+    });
   },
 };
