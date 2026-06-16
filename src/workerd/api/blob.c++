@@ -344,4 +344,29 @@ jsg::Ref<File> File::constructor(
   return js.alloc<File>(kj::mv(name), kj::mv(type), lastModified);
 }
 
+void Blob::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  serializer.writeLengthDelimited(type);
+  serializer.writeRawUint64(data.size());
+  serializer.writeRawBytes(data);
+}
+
+jsg::Ref<Blob> Blob::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto type = normalizeType(deserializer.readLengthDelimitedString());
+
+  // Guard against a bogus length triggering a huge allocation.
+  uint64_t size = deserializer.readRawUint64();
+  auto limit = Worker::Isolate::from(js).getLimitEnforcer().getBlobSizeLimit();
+  JSG_REQUIRE(size <= limit, DOMDataCloneError, "Deserialization failed: Blob size exceeds limit (",
+      size, ")");
+
+  if (size == 0) {
+    return js.alloc<Blob>(kj::mv(type));
+  }
+
+  auto bytes = deserializer.readRawBytes(size);
+  auto ab = jsg::JsArrayBuffer::create(js, bytes);
+  return js.alloc<Blob>(js, jsg::JsBufferSource(ab), kj::mv(type));
+}
+
 }  // namespace workerd::api
