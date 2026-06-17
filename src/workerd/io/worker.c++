@@ -166,25 +166,17 @@ void sendExceptionToInspector(jsg::Lock& js,
   jsg::sendExceptionToInspector(js, inspector, kj::str(source), exception, message);
 }
 
-void addExceptionToTrace(jsg::Lock& js,
-    IoContext& ioContext,
-    BaseTracer& tracer,
-    UncaughtExceptionSource source,
+// Extracts {name, message, stack} from a JS value into a tracing::ErrorInfo. This is the single
+// source of truth for how an error is represented in traces, shared by the uncaught-exception
+// path (addExceptionToTrace) and the console.* logging path (Worker::handleLog), so that an error
+// reported either way produces an identical representation.
+//
+// `name` defaults to "Error" when absent; `message` falls back to stringifying the whole value;
+// and the redundant leading "Name: message" prefix is stripped off `stack` (since name and message
+// are stored as separate fields).
+tracing::ErrorInfo getErrorInfoForTrace(jsg::Lock& js,
     const jsg::JsValue& exception,
     const jsg::TypeHandler<Worker::Api::ErrorInterface>& errorTypeHandler) {
-  if (source == UncaughtExceptionSource::INTERNAL ||
-      source == UncaughtExceptionSource::INTERNAL_ASYNC) {
-    // Skip redundant intermediate JS->C++ exception reporting.  See: IoContext::runImpl(),
-    // PromiseWrapper::tryUnwrap()
-    //
-    // TODO(someday): Arguably it could make sense to store these exceptions off to the side and
-    //   report them only if they don't end up being duplicates of a later exception that has a more
-    //   specific context. This would cover cases where the C++ code that eventually received the
-    //   exception never ended up reporting it.
-    return;
-  }
-
-  auto timestamp = ioContext.now();
   Worker::Api::ErrorInterface error;
 
   if (exception.isObject()) {
@@ -242,8 +234,32 @@ void addExceptionToTrace(jsg::Lock& js,
     }
   }
 
-  tracer.addException(ioContext.getInvocationSpanContext(), timestamp, kj::mv(name),
-      kj::mv(message), kj::mv(stack));
+  return tracing::ErrorInfo(kj::mv(name), kj::mv(message), kj::mv(stack));
+}
+
+void addExceptionToTrace(jsg::Lock& js,
+    IoContext& ioContext,
+    BaseTracer& tracer,
+    UncaughtExceptionSource source,
+    const jsg::JsValue& exception,
+    const jsg::TypeHandler<Worker::Api::ErrorInterface>& errorTypeHandler) {
+  if (source == UncaughtExceptionSource::INTERNAL ||
+      source == UncaughtExceptionSource::INTERNAL_ASYNC) {
+    // Skip redundant intermediate JS->C++ exception reporting.  See: IoContext::runImpl(),
+    // PromiseWrapper::tryUnwrap()
+    //
+    // TODO(someday): Arguably it could make sense to store these exceptions off to the side and
+    //   report them only if they don't end up being duplicates of a later exception that has a more
+    //   specific context. This would cover cases where the C++ code that eventually received the
+    //   exception never ended up reporting it.
+    return;
+  }
+
+  auto timestamp = ioContext.now();
+  auto errorInfo = getErrorInfoForTrace(js, exception, errorTypeHandler);
+
+  tracer.addException(ioContext.getInvocationSpanContext(), timestamp, kj::mv(errorInfo.name),
+      kj::mv(errorInfo.message), kj::mv(errorInfo.stack));
 }
 
 void reportStartupError(kj::StringPtr id,
@@ -2127,41 +2143,6 @@ void Worker::processEntrypointClass(jsg::Lock& js,
   });
 }
 
-namespace {
-
-// Reads a string-valued property off a v8 Object. Returns kj::none if the property is missing,
-// not a string, or its accessor throws (some user code defines `stack` as a throwing getter).
-// Caller must already hold a v8::TryCatch in scope.
-kj::Maybe<kj::String> tryGetStringProperty(jsg::Lock& js,
-    v8::Local<v8::Object> obj,
-    kj::StringPtr propName) {
-  auto context = js.v8Context();
-  auto key = jsg::v8StrIntern(js.v8Isolate, propName);
-  v8::Local<v8::Value> val;
-  if (!obj->Get(context, key).ToLocal(&val)) {
-    return kj::none;
-  }
-  if (!val->IsString()) {
-    return kj::none;
-  }
-  return kj::str(val.As<v8::String>());
-}
-
-// Extracts {name, message, stack} from a v8 Error. Returns kj::none if name or message are
-// missing (defensive: a stripped-down Error-like is not useful enough to surface as ErrorInfo).
-// Caller must hold a v8::TryCatch covering this call.
-kj::Maybe<tracing::ErrorInfo> extractErrorInfo(jsg::Lock& js, v8::Local<v8::Object> errorObj) {
-  KJ_IF_SOME(name, tryGetStringProperty(js, errorObj, "name"_kj)) {
-    KJ_IF_SOME(message, tryGetStringProperty(js, errorObj, "message"_kj)) {
-      auto stack = tryGetStringProperty(js, errorObj, "stack"_kj);
-      return tracing::ErrorInfo(kj::mv(name), kj::mv(message), kj::mv(stack));
-    }
-  }
-  return kj::none;
-}
-
-}  // namespace
-
 void Worker::handleLog(jsg::Lock& js,
     const LoggingOptions& loggingOptions,
     LogLevel level,
@@ -2181,38 +2162,6 @@ void Worker::handleLog(jsg::Lock& js,
   // terminating, usually as a result of an infinite loop. We need to perform the initialization
   // here because `message` is called multiple times.
   v8::TryCatch tryCatch(js.v8Isolate);
-
-  // Scan all arguments for native Errors and build a positional ErrorInfo array:
-  // slot `i` holds the extracted {name, message, stack} for arg `i` if it was a native
-  // Error, otherwise kj::none. If no argument was a native Error, the whole array is
-  // left absent (kj::none) to keep the common case cheap on the wire.
-  //
-  // We do this independently of the stringification below so that calling `message()`
-  // multiple times doesn't re-extract, and so the existing stringification behavior is
-  // unchanged for backwards compatibility — the structured ErrorInfo is purely additive.
-  tracing::LogErrorInfo capturedErrors;
-  {
-    kj::Array<kj::Maybe<tracing::ErrorInfo>> slots;
-    bool anyError = false;
-    for (auto i: kj::zeroTo(length)) {
-      if (!tryCatch.CanContinue()) break;
-      auto arg = info[i];
-      if (!arg->IsNativeError()) continue;
-      if (!anyError) {
-        slots = kj::heapArray<kj::Maybe<tracing::ErrorInfo>>(length);
-        anyError = true;
-      }
-      js.withinHandleScope([&] {
-        KJ_IF_SOME(extracted, extractErrorInfo(js, arg.As<v8::Object>())) {
-          slots[i] = kj::mv(extracted);
-          anyError = true;
-        }
-      });
-    }
-    if (anyError) {
-      capturedErrors = kj::mv(slots);
-    }
-  }
 
   auto message = [&]() {
     int length = info.Length();
@@ -2289,6 +2238,51 @@ void Worker::handleLog(jsg::Lock& js,
   KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
       auto timestamp = ioContext.now();
+
+      // Scan all arguments for native Errors and build a positional ErrorInfo array: slot `i`
+      // holds the extracted {name, message, stack} for arg `i` if it was a native Error, otherwise
+      // kj::none. If no argument was a native Error, the whole array is left absent (kj::none) to
+      // keep the common case cheap on the wire. We extract via the same helper used for uncaught
+      // exceptions (getErrorInfoForTrace) so that `console.error(err)` and a thrown `err` produce
+      // an identical representation in traces.
+      tracing::LogErrorInfo capturedErrors;
+      {
+        auto& errorTypeHandler =
+            ioContext.getWorker().getIsolate().getApi().getErrorInterfaceTypeHandler(js);
+        kj::Array<kj::Maybe<tracing::ErrorInfo>> slots;
+        bool anyError = false;
+        for (auto i: kj::zeroTo(length)) {
+          if (!tryCatch.CanContinue()) break;
+          auto arg = info[i];
+          if (!arg->IsNativeError()) continue;
+
+          // A property accessor on the error may throw (e.g. user code defines `stack` as a
+          // throwing getter). console.* must not throw, so catch that and skip this argument,
+          // rethrowing only if the isolate is terminating (not a recoverable error).
+          kj::Maybe<tracing::ErrorInfo> extracted;
+          v8::TryCatch argTryCatch(js.v8Isolate);
+          try {
+            js.withinHandleScope(
+                [&] { extracted = getErrorInfoForTrace(js, jsg::JsValue(arg), errorTypeHandler); });
+          } catch (jsg::JsExceptionThrown&) {
+            if (!argTryCatch.CanContinue()) {
+              throw;
+            }
+          }
+
+          KJ_IF_SOME(e, extracted) {
+            if (!anyError) {
+              slots = kj::heapArray<kj::Maybe<tracing::ErrorInfo>>(length);
+              anyError = true;
+            }
+            slots[i] = kj::mv(e);
+          }
+        }
+        if (anyError) {
+          capturedErrors = kj::mv(slots);
+        }
+      }
+
       tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, level, message(),
           kj::mv(capturedErrors));
     }

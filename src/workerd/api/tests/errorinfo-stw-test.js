@@ -58,8 +58,16 @@ export const test = {
     assert.strictEqual(typeErr.errorInfo[0].message, 'boom');
     assert.ok(
       typeof typeErr.errorInfo[0].stack === 'string' &&
-        typeErr.errorInfo[0].stack.includes('TypeError'),
-      `stack should be a string containing "TypeError", got: ${typeErr.errorInfo[0].stack}`
+        typeErr.errorInfo[0].stack.length > 0,
+      `stack should be a non-empty string, got: ${typeErr.errorInfo[0].stack}`
+    );
+    assert.ok(
+      typeErr.errorInfo[0].stack.includes('at '),
+      `stack should contain call frames, got: ${typeErr.errorInfo[0].stack}`
+    );
+    assert.ok(
+      !typeErr.errorInfo[0].stack.includes('TypeError'),
+      `stack should have the "Name: message" prefix stripped, got: ${typeErr.errorInfo[0].stack}`
     );
 
     assert.ok(Array.isArray(ctxRange.errorInfo));
