@@ -207,6 +207,23 @@ KJ_TEST("Frankenvalue fromCapnp rejects capability index out of range") {
       Frankenvalue::fromCapnp(builder.asReader(), kj::mv(capTable)));
 }
 
+KJ_TEST("Frankenvalue fromCapnp rejects capability node with no caps") {
+  // A `capability` value must own at least one base cap. capIndex is unsigned, so a node that
+  // claims a capability but provides zero caps (capIndex=0, capTableSize=0) could never have an
+  // in-range index; reject it explicitly so the invariant is obvious.
+  capnp::MallocMessageBuilder message;
+  auto builder = message.initRoot<rpc::Frankenvalue>();
+  auto cap = builder.initCapability();
+  cap.setCapIndex(0);
+  cap.setTag(0);
+  builder.setCapTableSize(0);  // No caps provided.
+
+  kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> capTable;
+
+  KJ_EXPECT_THROW_MESSAGE("Frankenvalue capability node has no caps",
+      Frankenvalue::fromCapnp(builder.asReader(), kj::mv(capTable)));
+}
+
 KJ_TEST("Frankenvalue fromCapnp rejects capTableSize uint32 overflow") {
   // Regression test for AUTOVULN-EW-EDGEWORKER-15: fromCapnpImpl() accumulated per-node
   // UInt32 capTableSize fields into a 32-bit uint capCount with no overflow check. An attacker

@@ -89,6 +89,10 @@ void Frankenvalue::toCapnpImpl(rpc::Frankenvalue::Builder builder, size_t capTab
       builder.setV8Serialized(v8Serialized.data);
     }
     KJ_CASE_ONEOF(capability, Capability) {
+      // Defense-in-depth: the cap index must reference one of this node's base caps. fromCapnp()
+      // enforces the same invariant on the decode side (see fromCapnpImpl()).
+      KJ_REQUIRE(capability.capIndex < capTableSize, "Frankenvalue capability index out of range",
+          capability.capIndex, capTableSize);
       auto capBuilder = builder.initCapability();
       capBuilder.setCapIndex(capability.capIndex);
       capBuilder.setTag(capability.tag);
@@ -140,6 +144,11 @@ size_t Frankenvalue::fromCapnpImpl(
       break;
     case rpc::Frankenvalue::CAPABILITY: {
       auto cap = reader.getCapability();
+      // The tag is untrusted, but we can't validate it here: resolving it to a deserializer
+      // requires the isolate's serialization registry (and a jsg::Lock), neither of which is
+      // available at fromCapnp() time. toJs() consults the registry and throws ("no deserializer
+      // registered for Frankenvalue capability tag") if the tag is unknown, so an invalid tag is
+      // rejected before any capability is materialized.
       this->value = Capability{.capIndex = cap.getCapIndex(), .tag = cap.getTag()};
       break;
     }
@@ -150,8 +159,11 @@ size_t Frankenvalue::fromCapnpImpl(
   KJ_REQUIRE(nodeCaps <= capTableTotal - capCount, "Frankenvalue capTableSize exceeds capTable");
 
   // A `capability` value references one of this node's base caps by index; make sure it's in
-  // range so that toJs() can't read out of bounds.
+  // range so that toJs() can't read out of bounds. A capability node must own at least one base
+  // cap: capIndex is unsigned, so `capIndex < nodeCaps` already rejects nodeCaps == 0, but we
+  // assert it explicitly to document the invariant.
   KJ_IF_SOME(capability, this->value.tryGet<Capability>()) {
+    KJ_REQUIRE(nodeCaps >= 1, "Frankenvalue capability node has no caps");
     KJ_REQUIRE(capability.capIndex < nodeCaps, "Frankenvalue capability index out of range");
   }
 
@@ -209,6 +221,11 @@ jsg::JsValue Frankenvalue::toJsImpl(jsg::Lock& js, kj::ArrayPtr<kj::Own<CapTable
           CapTableReader capTableReader(
               properties.empty() ? capTable : capTable.first(properties[0].capTableOffset));
 
+          // TODO(perf): This round-trips through a Serializer/Deserializer (one heap allocation)
+          //   solely to hand the registered deserializer a `Deserializer` from which it reads a
+          //   single uint32 cap index. It's a cold path (once per capability at binding setup), so
+          //   not worth optimizing now, but a direct API to invoke the deserializer with the index
+          //   would avoid the allocation.
           jsg::Serializer payloadSer(js);
           payloadSer.writeRawUint32(capability.capIndex);
           auto payload = payloadSer.release();

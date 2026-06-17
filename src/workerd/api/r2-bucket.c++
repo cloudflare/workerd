@@ -11,6 +11,8 @@
 #include <workerd/api/http.h>
 #include <workerd/api/r2-api.capnp.h>
 #include <workerd/api/streams/readable.h>
+#include <workerd/io/features.h>
+#include <workerd/io/io-channels.h>
 #include <workerd/util/http-util.h>
 
 #include <capnp/compat/json.h>
@@ -38,6 +40,31 @@ kj::Own<kj::HttpClient> r2GetClient(
   // TODO(o11y): Attach trace context to awaitIo call to match operation lifetime better?
   return context.getHttpClient(subrequestChannel, true, kj::none, traceContext)
       .attach(kj::mv(traceContext));
+}
+
+kj::Own<kj::HttpClient> R2Bucket::getHttpClient(IoContext& context, TraceContext& traceContext) {
+  KJ_SWITCH_ONEOF(clientChannel) {
+    KJ_CASE_ONEOF(channel, uint) {
+      return context.getHttpClient(channel, true, kj::none, traceContext);
+    }
+    KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
+      auto worker = context.getSubrequest(
+          [&](TraceContext& tracing, IoChannelFactory&) {
+        return channel->startRequest({
+          .cfBlobJson = kj::none,
+          .parentSpan = tracing.getInternalSpanParent(),
+          .userSpanParent = tracing.getUserSpanParent(),
+        });
+      },
+          {
+            .inHouse = true,
+            .wrapMetrics = false,
+            .existingTraceContext = traceContext,
+          });
+      return asHttpClient(kj::mv(worker));
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 static bool isWholeNumber(double x) {
@@ -466,7 +493,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
     auto requestJson = json.encode(requestBuilder);
     kj::StringPtr components[1];
     auto path = fillR2Path(components, adminBucket);
-    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
+    auto client = getHttpClient(context, traceContext);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
     return context.awaitIo(js, kj::mv(promise),
@@ -485,6 +512,34 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
 
 R2Bucket::FeatureFlags::FeatureFlags(CompatibilityFlags::Reader featureFlags)
     : listHonorsIncludes(featureFlags.getR2ListHonorIncludeFields()) {}
+
+void R2Bucket::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  JSG_FAIL_REQUIRE(DOMDataCloneError, "An R2 bucket binding cannot be serialized.");
+}
+
+jsg::Ref<R2Bucket> R2Bucket::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto& handler = KJ_REQUIRE_NONNULL(
+      deserializer.getExternalHandler(), "got R2Bucket on non-RPC serialized object?");
+  auto& frankenvalueHandler =
+      KJ_REQUIRE_NONNULL(kj::tryDowncast<Frankenvalue::CapTableReader>(handler),
+          "R2Bucket can only be deserialized from a Frankenvalue capability (e.g. ctx.props).");
+
+  auto& cap = KJ_REQUIRE_NONNULL(frankenvalueHandler.get(deserializer.readRawUint32()),
+      "serialized R2Bucket had invalid cap table index");
+
+  KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(cap)) {
+    // Decoding dynamic ctx.props: the cap is a live subrequest channel.
+    return js.alloc<R2Bucket>(FeatureFlags(workerd::FeatureFlags::get(js)),
+        IoContext::current().addObject(kj::addRef(channel)));
+  } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
+    // Decoding dynamic isolate env: the cap is a numbered I/O channel.
+    return js.alloc<R2Bucket>(workerd::FeatureFlags::get(js),
+        channel.getChannelNumber(IoChannelCapTableEntry::Type::SUBREQUEST));
+  } else {
+    KJ_FAIL_REQUIRE("R2Bucket capability in Frankenvalue is not a SubrequestChannel?");
+  }
+}
 
 jsg::Promise<kj::OneOf<kj::Maybe<jsg::Ref<R2Bucket::GetResult>>, jsg::Ref<R2Bucket::HeadResult>>>
 R2Bucket::get(jsg::Lock& js,
@@ -523,7 +578,7 @@ R2Bucket::get(jsg::Lock& js,
     auto requestJson = json.encode(requestBuilder);
     kj::StringPtr components[1];
     auto path = fillR2Path(components, adminBucket);
-    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
+    auto client = getHttpClient(context, traceContext);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
     return context.awaitIo(js, kj::mv(promise),
@@ -819,7 +874,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
     cancelReader.cancel();
     kj::StringPtr components[1];
     auto path = fillR2Path(components, adminBucket);
-    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
+    auto client = getHttpClient(context, traceContext);
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::mv(value), kj::none, kj::mv(requestJson), path, jwt);
 
@@ -940,7 +995,7 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
     auto requestJson = json.encode(requestBuilder);
     kj::StringPtr components[1];
     auto path = fillR2Path(components, adminBucket);
-    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
+    auto client = getHttpClient(context, traceContext);
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, jwt);
 
@@ -1013,7 +1068,7 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
 
     kj::StringPtr components[1];
     auto path = fillR2Path(components, adminBucket);
-    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
+    auto client = getHttpClient(context, traceContext);
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, jwt);
 
@@ -1141,7 +1196,7 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
 
     kj::StringPtr components[1];
     auto path = fillR2Path(components, adminBucket);
-    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
+    auto client = getHttpClient(context, traceContext);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
     return context.awaitIo(js, kj::mv(promise),
