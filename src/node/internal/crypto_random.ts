@@ -69,6 +69,10 @@ export function randomBytes(
   }
 }
 
+// Web Crypto getRandomValues() per-call quota, per the spec and enforced in
+// src/workerd/api/crypto/crypto.c++ (Crypto::getRandomValues).
+const kWebCryptoMaxRandomBytes = 65536;
+
 export function randomFillSync(
   buffer: NodeJS.ArrayBufferView,
   offset?: number,
@@ -92,7 +96,15 @@ export function randomFillSync(
     buffer = Buffer.from(buffer);
   }
   buffer = (buffer as Buffer).subarray(offset, offset + size);
-  return crypto.getRandomValues(buffer as Uint8Array<ArrayBuffer>);
+  // crypto.getRandomValues() enforces the Web Crypto 64 KiB-per-call quota,
+  // but Node's crypto.randomBytes/randomFill have no such limit. Fill in
+  // 64 KiB chunks to stay spec-compliant on both sides.
+  // Ref: https://github.com/cloudflare/workerd/issues/6749
+  const view = buffer as Uint8Array<ArrayBuffer>;
+  for (let i = 0; i < view.length; i += kWebCryptoMaxRandomBytes) {
+    crypto.getRandomValues(view.subarray(i, i + kWebCryptoMaxRandomBytes));
+  }
+  return view;
 }
 
 export type RandomFillCallback = (

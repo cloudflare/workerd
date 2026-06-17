@@ -438,6 +438,72 @@ export const randomFillSyncTest = {
   },
 };
 
+// Ref: https://github.com/cloudflare/workerd/issues/6749
+// Node's crypto.randomBytes / randomFill must accept sizes above the 64 KiB
+// Web-Crypto getRandomValues quota. The polyfill must chunk internally.
+export const randomBytesAboveWebCryptoQuotaTest = {
+  async test() {
+    const { randomBytes, randomFill, randomFillSync } =
+      await import('node:crypto');
+
+    // Exact 64 KiB boundary — single full chunk, off-by-one guard.
+    const bufBoundary = randomBytes(65536);
+    strictEqual(bufBoundary.length, 65536);
+
+    // Just past the 64 KiB boundary — the original bug repro.
+    const buf1 = randomBytes(65537);
+    strictEqual(buf1.length, 65537);
+    ok(
+      buf1.some((b) => b !== 0),
+      'buf1 should not be all-zero'
+    );
+
+    // Multi-chunk: 200000 = 3 chunks (65536 + 65536 + 68928).
+    const buf2 = randomBytes(200000);
+    strictEqual(buf2.length, 200000);
+    ok(
+      buf2.some((b) => b !== 0),
+      'buf2 should not be all-zero'
+    );
+
+    // randomFillSync with offset+size spanning a chunk boundary.
+    const buf3 = Buffer.alloc(70000, 0);
+    randomFillSync(buf3, 100, 65500);
+    strictEqual(buf3[0], 0, 'pre-offset byte untouched');
+    strictEqual(buf3[99], 0, 'last pre-offset byte untouched');
+    strictEqual(buf3[65600], 0, 'first post-range byte untouched');
+    strictEqual(buf3[69999], 0, 'tail byte untouched');
+    ok(
+      buf3.subarray(100, 65600).some((b) => b !== 0),
+      'filled range should not be all-zero'
+    );
+
+    // ArrayBuffer input — exercises the isAnyArrayBuffer branch in
+    // randomFillSync (the input is internally wrapped with Buffer.from()).
+    const ab = new ArrayBuffer(70000);
+    const filled = randomFillSync(ab);
+    strictEqual(filled.length, 70000);
+    ok(
+      filled.some((b) => b !== 0),
+      'ArrayBuffer should be filled with non-zero bytes'
+    );
+
+    // Async path.
+    await new Promise((resolve, reject) => {
+      randomFill(Buffer.alloc(80000, 0), (err, b) => {
+        if (err) return reject(err);
+        try {
+          strictEqual(b.length, 80000);
+          ok(b.some((x) => x !== 0));
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+  },
+};
+
 // Ref: https://github.com/cloudflare/workerd/issues/2716
 export const getRandomValuesIllegalInvocation = {
   async test() {
