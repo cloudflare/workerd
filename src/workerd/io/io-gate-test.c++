@@ -358,6 +358,158 @@ KJ_TEST("InputGate broken") {
   KJ_EXPECT_THROW_MESSAGE("foobar", gate.onBroken().wait(ws));
 }
 
+KJ_TEST("InputGate deeply nested critical sections tear down without overflowing the stack") {
+  // Regression test: a Worker can nest blockConcurrencyWhile() calls (and thus
+  // InputGate::CriticalSections) arbitrarily deeply. Each CriticalSection owns its parent, so a
+  // naive recursive teardown -- either via ~CriticalSection or via CriticalSection::failed() --
+  // recurses once per nesting level and exhausts the native stack, crashing the process. Both
+  // paths must be iterative.
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  InputGate gate;
+
+  // Deep enough to reliably overflow a default (~8MB) stack if teardown were recursive.
+  constexpr size_t DEPTH = 100'000;
+
+  // Build a chain of nested, RUNNING critical sections.
+  auto outerLock = gate.wait(nullptr).wait(ws);
+  auto cs = outerLock.startCriticalSection();
+  { auto drop = kj::mv(outerLock); }
+  kj::Maybe<InputGate::Lock> lock = cs->wait(nullptr).wait(ws);
+
+  for (size_t i = 0; i < DEPTH; i++) {
+    auto child = KJ_ASSERT_NONNULL(lock).startCriticalSection();
+    // Release the parent's lock so the child's initial wait() can proceed synchronously.
+    lock = kj::none;
+    lock = child->wait(nullptr).wait(ws);
+    // Drop our reference to the parent; it stays alive via the child's owned parent link.
+    cs = kj::mv(child);
+  }
+
+  // Drop the innermost lock and reference. This destroys the innermost critical section, which
+  // (being RUNNING) calls failed() -- exercising the iterative failure propagation -- and then
+  // tears down the owned parent chain -- exercising the iterative destruction. Either of these
+  // would overflow the stack if implemented recursively.
+  lock = kj::none;
+  cs = nullptr;
+
+  // Reaching here without crashing means teardown was iterative. The gate should now be broken,
+  // since the innermost RUNNING critical section failed as it was destroyed.
+  KJ_EXPECT_THROW_MESSAGE("deadlock", gate.wait(nullptr).wait(ws));
+}
+
+KJ_TEST("InputGate forwarding wait through deeply reparented critical sections") {
+  // Regression test: when wait() is called on a REPARENTED critical section, it forwards up the
+  // chain via `co_await c->wait()`. If every ancestor is also REPARENTED, this builds a chain of
+  // nested coroutines, one per nesting level. Destroying that chain (e.g. when the straggler task
+  // is canceled) must not recurse once per level, or it overflows the stack.
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  InputGate gate;
+
+  constexpr size_t DEPTH = 50'000;
+
+  // Build a chain of nested, RUNNING critical sections.
+  kj::Vector<kj::Own<InputGate::CriticalSection>> css;
+  {
+    auto outerLock = gate.wait(nullptr).wait(ws);
+    css.add(outerLock.startCriticalSection());
+  }
+  kj::Maybe<InputGate::Lock> lock = css[0]->wait(nullptr).wait(ws);
+  for (size_t i = 1; i < DEPTH; i++) {
+    auto child = KJ_ASSERT_NONNULL(lock).startCriticalSection();
+    lock = kj::none;
+    auto childLock = child->wait(nullptr).wait(ws);
+    css.add(kj::mv(child));
+    lock = kj::mv(childLock);
+  }
+  lock = kj::none;
+
+  // Mark every section succeeded, inner-to-outer, so they all become REPARENTED. We keep only the
+  // outermost returned lock (a lock on the root gate) to keep the gate locked; the inner returned
+  // locks are dropped immediately, which is O(1) because their target section is still RUNNING (it
+  // hasn't been reparented yet). Inner-to-outer also keeps each succeeded() O(1).
+  kj::Maybe<InputGate::Lock> gateLock;
+  for (size_t i = DEPTH; i > 0; i--) {
+    auto parentLock = css[i - 1]->succeeded();
+    if (i == 1) {
+      gateLock = kj::mv(parentLock);
+    }
+  }
+
+  // A straggler task takes a lock via the innermost (REPARENTED) section. This forwards up through
+  // every REPARENTED ancestor; if forwarding were recursive it would build a chain of DEPTH nested
+  // coroutines. It suspends because the root gate is locked.
+  auto forwardWait = css.back()->wait(nullptr);
+  KJ_EXPECT(!forwardWait.poll(ws));
+
+  // Cancelling it destroys the coroutine(s). If forwarding built (and thus destroyed) one coroutine
+  // per level, this -- or the setup above -- would overflow the stack.
+  { auto drop = kj::mv(forwardWait); }
+
+  gateLock = kj::none;
+  css.clear();
+}
+
+KJ_TEST("InputGate teardown does not corrupt critical sections that outlive their child") {
+  // Regression test: ~CriticalSection tears down its owned parent chain iteratively, walking up
+  // the chain and clearing each link. But an ancestor may still be referenced elsewhere -- in
+  // particular, while a chain of nested blockConcurrencyWhile() critical sections unwinds, each
+  // ancestor is still owned by its own in-flight task. The iterative teardown must stop as soon as
+  // it reaches an ancestor that has other references, rather than severing that (still-live)
+  // ancestor's parent link. Otherwise the survivor is left with `parent` set to kj::None, and a
+  // later parentAsInputGate() (e.g. from succeeded() or wait()) trips KJ_UNREACHABLE.
+  //
+  // Note this is distinct from the "tear down without overflowing the stack" test above, which
+  // exercises a chain that is *exclusively* owned via the parent links (no surviving references),
+  // and so never hits this case.
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  InputGate gate;
+
+  constexpr size_t DEPTH = 1000;
+
+  // Build a chain of nested, RUNNING critical sections, keeping a reference to every level (as an
+  // in-flight task would), so that every ancestor is shared.
+  kj::Vector<kj::Own<InputGate::CriticalSection>> css;
+  {
+    auto outerLock = gate.wait(nullptr).wait(ws);
+    css.add(outerLock.startCriticalSection());
+  }
+  kj::Maybe<InputGate::Lock> lock = css[0]->wait(nullptr).wait(ws);
+  for (size_t i = 1; i < DEPTH; i++) {
+    auto child = KJ_ASSERT_NONNULL(lock).startCriticalSection();
+    lock = kj::none;
+    auto childLock = child->wait(nullptr).wait(ws);
+    css.add(kj::mv(child));
+    lock = kj::mv(childLock);
+  }
+  lock = kj::none;
+
+  // The innermost section succeeds (its task resolved) and is then dropped (its task completed).
+  // Dropping it runs ~CriticalSection, which walks the owned parent chain. Because every ancestor
+  // is still held by `css`, the walk must stop at the first ancestor without severing parent links.
+  { auto drop = css.back()->succeeded(); }
+  css.removeLast();
+
+  // Unwind the rest of the chain, inner-to-outer, exactly as the surviving tasks' success
+  // continuations would. succeeded() calls parentAsInputGate() to walk to the parent gate; before
+  // the fix the deepest survivor's `parent` had been set to kj::None, tripping KJ_UNREACHABLE here.
+  kj::Maybe<InputGate::Lock> gateLock;
+  for (size_t i = css.size(); i > 0; i--) {
+    auto parentLock = css[i - 1]->succeeded();
+    if (i == 1) {
+      gateLock = kj::mv(parentLock);
+    }
+  }
+
+  gateLock = kj::none;
+  css.clear();
+}
+
 // =======================================================================================
 
 KJ_TEST("OutputGate basics") {

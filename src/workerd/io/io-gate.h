@@ -227,7 +227,7 @@ class InputGate::CriticalSection: private InputGate, public kj::Refcounted {
   State state = NOT_STARTED;
 
   // Points to the parent scope, which may be another CriticalSection in the case of nesting.
-  kj::OneOf<InputGate*, kj::Own<CriticalSection>> parent;
+  kj::OneOf<InputGate*, kj::Own<CriticalSection>, kj::None> parent;
 
   // A lock in the parent scope. `parentLock` becomes non-null after the first lock is obtained,
   // and becomes null again when succeeded() is called.
