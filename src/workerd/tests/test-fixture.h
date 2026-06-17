@@ -32,6 +32,12 @@ struct TestFixture {
     // If set, used instead of the default DummyIoChannelFactory when creating incoming requests.
     // The factory receives the TimerChannel reference.
     kj::Maybe<kj::Function<kj::Own<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
+    // If set, used as the actor's Loopback (only meaningful when actorId is set). Defaults to a
+    // MockActorLoopback that throws on getWorker(). Tests that need to intercept hibernation
+    // event dispatch can supply a custom Loopback here, then later retrieve it (or a fresh ref
+    // to it) via actor.getLoopback(). This way the actor and the HibernationManager share a
+    // single Loopback, mirroring production.
+    kj::Maybe<kj::Own<Worker::Actor::Loopback>> actorLoopback;
   };
 
   TestFixture(SetupParams&& params = {.useRealTimers = false});
@@ -60,10 +66,10 @@ struct TestFixture {
   // callback should accept const Environment& parameter and return Promise<T>|void.
   // For void callbacks run waits for their completion, for promises waits for their resolution
   // and returns the result.
-  template <typename CallBack>
-  auto runInIoContext(CallBack&& callback)
+  template <typename Callback>
+  auto runInIoContext(Callback&& callback)
       -> RunReturnType<decltype(callback(kj::instance<const Environment&>()))>::Type {
-    auto request = createIncomingRequest();
+    auto request = newIncomingRequest();
     kj::WaitScope* waitScope;
     KJ_IF_SOME(ws, this->waitScope) {
       waitScope = &ws;
@@ -94,6 +100,102 @@ struct TestFixture {
   // Performs HTTP request on the default module handler, and waits for full response.
   Response runRequest(kj::HttpMethod method, kj::StringPtr url, kj::StringPtr body);
 
+  // Create a new IoContext, owned by the caller. Use this when you need an IoContext that
+  // outlives a single IncomingRequest, e.g. to model an actor receiving multiple requests.
+  kj::Own<IoContext> newIoContext();
+
+  // Create a new IncomingRequest bound to a fresh IoContext. The caller owns the returned object;
+  // when it's destroyed the IoContext is also destroyed (assuming no other references). Use
+  // enterContext() to run code within this context.
+  kj::Own<IoContext::IncomingRequest> newIncomingRequest();
+
+  // Create a new IncomingRequest bound to an existing IoContext. Use this to model multiple
+  // IncomingRequests against the same actor (and hence the same IoContext). The IoContext must
+  // outlive the returned IncomingRequest.
+  kj::Own<IoContext::IncomingRequest> newIncomingRequest(IoContext& context);
+
+  // Enter an IoContext. Callback receives Environment& and must return void (NOT a
+  // Promise — the Worker::Lock is only valid for the synchronous duration of the
+  // callback). The context is NOT destroyed afterwards — the caller still owns the
+  // IncomingRequest.
+  template <typename Callback>
+  void enterContext(IoContext::IncomingRequest& request, Callback&& callback) {
+    auto& context = request.getContext();
+    context
+        .run([&](Worker::Lock& lock) {
+      auto& js = jsg::Lock::from(lock.getIsolate());
+      Environment env = {{.isolate = lock.getIsolate()}, context, lock, js};
+      callback(env);
+    }).wait(getWaitScope());
+  }
+
+  // Acquire a Worker::Lock without an IoContext. Useful for operations that need
+  // the V8 isolate lock but not a request context (e.g., hibernateWebSockets).
+  template <typename Callback>
+  void enterWorkerLock(Callback&& callback) {
+    auto asyncLock = worker->takeAsyncLockWithoutRequest(nullptr).wait(getWaitScope());
+    worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) { callback(lock); });
+  }
+
+  kj::WaitScope& getWaitScope() {
+    KJ_IF_SOME(ws, waitScope) {
+      return ws;
+    } else {
+      return KJ_REQUIRE_NONNULL(io).waitScope;
+    }
+  }
+
+  // Drive the event loop for a duration. Useful when test progress depends on a real timer
+  // firing. For tests that just need pending work to run, prefer pollEventLoop() — it's
+  // deterministic and faster.
+  void pumpEventLoop(kj::Duration duration) {
+    KJ_REQUIRE_NONNULL(io).provider->getTimer().afterDelay(duration).wait(getWaitScope());
+  }
+
+  // Run any work pending on the event loop until idle (no blocking). Returns the number of
+  // events processed. Use this to deterministically drive background tasks (e.g. HM's
+  // readLoop) to a stable point.
+  uint pollEventLoop() {
+    return getWaitScope().poll();
+  }
+
+  // Drain an IncomingRequest (waiting on its waitUntil tasks) and then destroy it. Tests should
+  // use this rather than letting the IncomingRequest's Own go out of scope, otherwise the
+  // IncomingRequest destructor logs a warning about un-drained waitUntil tasks. Production code
+  // paths always drain.
+  //
+  // For actor IncomingRequests, drain() returns when all waitUntil tasks are empty, the actor is
+  // shut down, or a new IncomingRequest takes over. In tests the second is unlikely so we mostly
+  // rely on the first.
+  void drainAndDestroy(kj::Own<IoContext::IncomingRequest> request) {
+    auto drained = request->drain();
+    drained.wait(getWaitScope());
+  }
+
+  // Accessors for tests that want to construct objects (e.g. HibernationManagerImpl) outside any
+  // IoContext, to keep their construction paths free of ambient state. Production usually
+  // constructs such objects lazily inside an IoContext just because the trigger (a JS handler)
+  // happens to run there, but the constructors themselves don't need one.
+  Worker::Actor& getActor() {
+    return *KJ_ASSERT_NONNULL(actor);
+  }
+  TimerChannel& getTimerChannel() {
+    return *timerChannel;
+  }
+
+  // Destroy the current Worker::Actor and construct a fresh one with the same id and Loopback.
+  // Useful for simulating actor eviction: after this call, getActor() returns a different Actor
+  // with a fresh InputGate / OutputGate, so a new IoContext can be constructed against it. The
+  // previous IoContext (and any IncomingRequests still tied to it) MUST be torn down via
+  // drainAndDestroy before calling this; otherwise the old IoContext's non-owning Actor reference
+  // becomes dangling.
+  //
+  // Production has the actor's owning namespace pull the HibernationManager off the dying actor
+  // and pass it to the new actor's constructor (see Server's actor namespace handling). Tests
+  // here typically hold the HM directly and don't need to plumb it through the actor — the HM
+  // outlives the actor by virtue of the test holding it.
+  void resetActor();
+
  private:
   kj::Maybe<kj::WaitScope&> waitScope;
   capnp::MallocMessageBuilder configArena;
@@ -104,6 +206,10 @@ struct TestFixture {
   kj::Own<TimerChannel> timerChannel;
   kj::Own<kj::EntropySource> entropySource;
   kj::Maybe<kj::Own<Worker::Actor>> actor;
+  // Saved so resetActor() can construct a new actor with the same Loopback (mirroring production,
+  // where the namespace's Loopback outlives any single actor instance). Held via addRef so we
+  // can hand fresh refs to actors as we reconstruct them.
+  kj::Maybe<kj::Own<Worker::Actor::Loopback>> savedActorLoopback;
   capnp::ByteStreamFactory byteStreamFactory;
   kj::HttpHeaderTable::Builder headerTableBuilder;
   ThreadContext::HeaderIdBundle threadContextHeaderBundle;
@@ -121,7 +227,8 @@ struct TestFixture {
   kj::Own<kj::HttpHeaderTable> headerTable;
   kj::Maybe<kj::Function<kj::Own<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
 
-  kj::Own<IoContext::IncomingRequest> createIncomingRequest();
+  // Construct a fresh Worker::Actor with the given id, using the saved Loopback.
+  kj::Own<Worker::Actor> makeActor(Worker::Actor::Id id);
 
  public:
   // Default IoChannelFactory used by tests. Exposed so tests can subclass it
