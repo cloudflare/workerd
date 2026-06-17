@@ -709,6 +709,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <typename T>
   IoPtr<T> addObject(T& obj);
 
+  // Wraps a reference in a wrapper which:
+  // 1. Will throw an exception if dereferenced while the IoContext is not current for the
+  //    thread.
+  // 2. Can be safely destroyed from any thread.
+  // 3. Invalidates itself when the request ends (such that dereferencing throws).
+  template <typename T>
+  IoOwn<T> addObject(kj::Rc<T> obj);
+
   // Like addObject() but takes a functor, returning a functor with the same signature but which
   // holds the original functor under a `IoOwn`, and so will stop working if the IoContext
   // is no longer valid. This is particularly useful for passing to `jsg::Promise::then()` when
@@ -1681,6 +1689,11 @@ template <typename T>
 inline IoPtr<T> IoContext::addObject(T& obj) {
   requireCurrent();
   return IoPtr<T>(deleteQueue.queue.addRef(), &obj);
+}
+
+template <typename T>
+inline IoOwn<T> IoContext::addObject(kj::Rc<T> obj) {
+  return addObject(obj.toOwn());
 }
 
 template <typename Func>

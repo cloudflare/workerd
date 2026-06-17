@@ -4017,7 +4017,7 @@ class Server::WorkerService final: public Service,
     co_await context.waitForOutputLocks();
 
     auto innerReq = client->request(kj::HttpMethod::POST, urlStr, headers, requestJson.size());
-    auto request = attachToRequest(kj::mv(innerReq), kj::refcountedWrapper(kj::mv(client)));
+    auto request = attachToRequest(kj::mv(innerReq), kj::Rc<kj::HttpClient>(kj::mv(client)));
 
     co_await request.body->write(requestJson.asBytes())
         .attach(kj::mv(requestJson), kj::mv(request.body));
