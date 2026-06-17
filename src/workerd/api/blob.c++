@@ -345,6 +345,9 @@ jsg::Ref<File> File::constructor(
 }
 
 void Blob::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  // TODO(perf): For JSRPC, copying the data is necessary. For
+  // structuredClone, we should find a way for the clones to
+  // just share the same backend data to avoid the copy.
   serializer.writeLengthDelimited(type);
   serializer.writeRawUint64(data.size());
   serializer.writeRawBytes(data);
