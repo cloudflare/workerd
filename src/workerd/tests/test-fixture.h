@@ -190,8 +190,8 @@ struct TestFixture {
     waitUntilTasks.onEmpty().wait(getWaitScope());
   }
 
-  // Accessors for tests that want to construct objects (e.g. HibernationManagerImpl) outside any
-  // IoContext, to keep their construction paths free of ambient state. Production usually
+  // Accessors for tests that want to construct objects (e.g. LegacyHibernationManagerImpl) outside
+  // any IoContext, to keep their construction paths free of ambient state. Production usually
   // constructs such objects lazily inside an IoContext just because the trigger (a JS handler)
   // happens to run there, but the constructors themselves don't need one.
   Worker::Actor& getActor() {

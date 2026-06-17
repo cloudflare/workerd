@@ -16,7 +16,7 @@
 #include <workerd/io/actor-id.h>
 #include <workerd/io/actor-sqlite.h>
 #include <workerd/io/features.h>
-#include <workerd/io/hibernation-manager.h>
+#include <workerd/io/legacy-hibernation-manager.h>
 #include <workerd/io/stored-value.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
@@ -1193,7 +1193,7 @@ Worker::Actor::HibernationManager& DurableObjectState::maybeInitHibernationManag
     Worker::Actor& actor) {
   if (actor.getHibernationManager() == kj::none) {
     // If there's no hibernation manager created yet, we should create one.
-    actor.setHibernationManager(kj::refcounted<HibernationManagerImpl>(
+    actor.setHibernationManager(kj::refcounted<LegacyHibernationManagerImpl>(
         actor.getLoopback(), KJ_REQUIRE_NONNULL(actor.getHibernationEventType())));
   }
   return KJ_REQUIRE_NONNULL(actor.getHibernationManager());

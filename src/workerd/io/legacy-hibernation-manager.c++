@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "hibernation-manager.h"
+#include "legacy-hibernation-manager.h"
 
 #include "io-channels.h"
 #include "io-context.h"
@@ -11,10 +11,10 @@
 
 namespace workerd {
 
-HibernationManagerImpl::HibernatableWebSocket::HibernatableWebSocket(
+LegacyHibernationManagerImpl::HibernatableWebSocket::HibernatableWebSocket(
     jsg::Ref<api::WebSocket> websocket,
     kj::ArrayPtr<kj::String> tags,
-    HibernationManagerImpl& manager)
+    LegacyHibernationManagerImpl& manager)
     : tagItems(kj::heapArray<TagListItem>(tags.size())),
       activeOrPackage(kj::mv(websocket)),
       // The `ws` starts off empty because we need to set up our tagging infrastructure before
@@ -23,7 +23,7 @@ HibernationManagerImpl::HibernatableWebSocket::HibernatableWebSocket(
       ws(kj::none),
       manager(manager) {}
 
-HibernationManagerImpl::HibernatableWebSocket::~HibernatableWebSocket() noexcept(false) {
+LegacyHibernationManagerImpl::HibernatableWebSocket::~HibernatableWebSocket() noexcept(false) {
   // We expect this dtor to be called when we're removing a HibernatableWebSocket
   // from our `allWs` collection in the HibernationManager.
 
@@ -44,7 +44,7 @@ HibernationManagerImpl::HibernatableWebSocket::~HibernatableWebSocket() noexcept
   }
 }
 
-kj::Array<kj::StringPtr> HibernationManagerImpl::HibernatableWebSocket::getTags() {
+kj::Array<kj::StringPtr> LegacyHibernationManagerImpl::HibernatableWebSocket::getTags() {
   auto tags = kj::heapArray<kj::StringPtr>(tagItems.size());
   for (auto i: kj::indices(tagItems)) {
     tags[i] = tagItems[i].tag;
@@ -52,7 +52,7 @@ kj::Array<kj::StringPtr> HibernationManagerImpl::HibernatableWebSocket::getTags(
   return tags;
 }
 
-kj::Array<kj::String> HibernationManagerImpl::HibernatableWebSocket::cloneTags() {
+kj::Array<kj::String> LegacyHibernationManagerImpl::HibernatableWebSocket::cloneTags() {
   auto tags = kj::heapArray<kj::String>(tagItems.size());
   for (auto i: kj::indices(tagItems)) {
     tags[i] = kj::str(tagItems[i].tag);
@@ -60,8 +60,8 @@ kj::Array<kj::String> HibernationManagerImpl::HibernatableWebSocket::cloneTags()
   return tags;
 }
 
-jsg::Ref<api::WebSocket> HibernationManagerImpl::HibernatableWebSocket::getActiveOrUnhibernate(
-    jsg::Lock& js) {
+jsg::Ref<api::WebSocket> LegacyHibernationManagerImpl::HibernatableWebSocket::
+    getActiveOrUnhibernate(jsg::Lock& js) {
   KJ_IF_SOME(package, activeOrPackage.tryGet<api::WebSocket::HibernationPackage>()) {
     // Recreate our tags array for the api::WebSocket.
     package.maybeTags = getTags();
@@ -78,14 +78,14 @@ jsg::Ref<api::WebSocket> HibernationManagerImpl::HibernatableWebSocket::getActiv
   return activeOrPackage.get<jsg::Ref<api::WebSocket>>().addRef();
 }
 
-HibernationManagerImpl::HibernationManagerImpl(
+LegacyHibernationManagerImpl::LegacyHibernationManagerImpl(
     kj::Own<Worker::Actor::Loopback> loopback, uint16_t hibernationEventType)
     : loopback(kj::mv(loopback)),
       hibernationEventType(hibernationEventType),
       onDisconnect(DisconnectHandler{}),
       readLoopTasks(onDisconnect) {}
 
-HibernationManagerImpl::~HibernationManagerImpl() noexcept(false) {
+LegacyHibernationManagerImpl::~LegacyHibernationManagerImpl() noexcept(false) {
   // Drop our outstanding tasks, the `readLoopTasks` have weak references to the
   // `HibernatableWebSockets` in `allWs`, and since we're about to drop all of those WebSockets,
   // we can't allow any more events to be delivered.
@@ -97,11 +97,11 @@ HibernationManagerImpl::~HibernationManagerImpl() noexcept(false) {
   KJ_ASSERT(tagToWs.size() == 0, "tagToWs hashmap wasn't cleared.");
 }
 
-kj::Own<Worker::Actor::HibernationManager> HibernationManagerImpl::addRef() {
+kj::Own<Worker::Actor::HibernationManager> LegacyHibernationManagerImpl::addRef() {
   return kj::addRef(*this);
 }
 
-void HibernationManagerImpl::acceptWebSocket(
+void LegacyHibernationManagerImpl::acceptWebSocket(
     jsg::Ref<api::WebSocket> ws, kj::ArrayPtr<kj::String> tags) {
   // First, we create the HibernatableWebSocket and add it to the collection where it'll stay
   // until it's destroyed.
@@ -160,12 +160,13 @@ void HibernationManagerImpl::acceptWebSocket(
   // give the task to the HibernationManager so it lives long.
   readLoopTasks.add(handleReadLoop(refToHibernatable).catch_([](kj::Exception&& e) {
     if (isInterestingException(e)) {
-      LOG_EXCEPTION_IF_INTERNAL("HibernationManagerImpl::handleReadLoop", e);
+      LOG_EXCEPTION_IF_INTERNAL("LegacyHibernationManagerImpl::handleReadLoop", e);
     }
   }));
 }
 
-kj::Promise<void> HibernationManagerImpl::handleReadLoop(HibernatableWebSocket& refToHibernatable) {
+kj::Promise<void> LegacyHibernationManagerImpl::handleReadLoop(
+    HibernatableWebSocket& refToHibernatable) {
   kj::Maybe<kj::Exception> maybeException;
   try {
     co_await readLoop(refToHibernatable);
@@ -175,7 +176,7 @@ kj::Promise<void> HibernationManagerImpl::handleReadLoop(HibernatableWebSocket& 
   co_await handleSocketTermination(refToHibernatable, maybeException);
 }
 
-kj::Vector<jsg::Ref<api::WebSocket>> HibernationManagerImpl::getWebSockets(
+kj::Vector<jsg::Ref<api::WebSocket>> LegacyHibernationManagerImpl::getWebSockets(
     jsg::Lock& js, kj::Maybe<kj::StringPtr> maybeTag) {
   kj::Vector<jsg::Ref<api::WebSocket>> matches;
   KJ_IF_SOME(tag, maybeTag) {
@@ -195,7 +196,7 @@ kj::Vector<jsg::Ref<api::WebSocket>> HibernationManagerImpl::getWebSockets(
   return kj::mv(matches);
 }
 
-void HibernationManagerImpl::setWebSocketAutoResponse(
+void LegacyHibernationManagerImpl::setWebSocketAutoResponse(
     kj::Maybe<kj::StringPtr> request, kj::Maybe<kj::StringPtr> response) {
   KJ_IF_SOME(req, request) {
     // If we have a request, we must also have a response. If response is kj::none, we'll throw.
@@ -208,7 +209,7 @@ void HibernationManagerImpl::setWebSocketAutoResponse(
   autoResponsePair->response = kj::none;
 }
 
-kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> HibernationManagerImpl::
+kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> LegacyHibernationManagerImpl::
     getWebSocketAutoResponse(jsg::Lock& js) {
   KJ_IF_SOME(req, autoResponsePair->request) {
     // When getting the currently set auto-response pair, if we have a request we must have a response
@@ -219,11 +220,11 @@ kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> HibernationManagerImpl::
   return kj::none;
 }
 
-void HibernationManagerImpl::setTimerChannel(TimerChannel& timerChannel) {
+void LegacyHibernationManagerImpl::setTimerChannel(TimerChannel& timerChannel) {
   timer = timerChannel;
 }
 
-void HibernationManagerImpl::hibernateWebSockets(Worker::Lock& lock) {
+void LegacyHibernationManagerImpl::hibernateWebSockets(Worker::Lock& lock) {
   JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
     for (auto& ws: allWs) {
       KJ_IF_SOME(active, ws->activeOrPackage.tryGet<jsg::Ref<api::WebSocket>>()) {
@@ -237,24 +238,24 @@ void HibernationManagerImpl::hibernateWebSockets(Worker::Lock& lock) {
   });
 }
 
-void HibernationManagerImpl::setEventTimeout(kj::Maybe<uint32_t> timeoutMs) {
+void LegacyHibernationManagerImpl::setEventTimeout(kj::Maybe<uint32_t> timeoutMs) {
   eventTimeoutMs = timeoutMs;
 }
 
-kj::Maybe<uint32_t> HibernationManagerImpl::getEventTimeout() {
+kj::Maybe<uint32_t> LegacyHibernationManagerImpl::getEventTimeout() {
   return eventTimeoutMs;
 }
 
-void HibernationManagerImpl::dropHibernatableWebSocket(HibernatableWebSocket& hib) {
+void LegacyHibernationManagerImpl::dropHibernatableWebSocket(HibernatableWebSocket& hib) {
   removeFromAllWs(hib);
 }
 
-inline void HibernationManagerImpl::removeFromAllWs(HibernatableWebSocket& hib) {
+inline void LegacyHibernationManagerImpl::removeFromAllWs(HibernatableWebSocket& hib) {
   auto& node = KJ_REQUIRE_NONNULL(hib.node);
   allWs.erase(node);
 }
 
-kj::Promise<void> HibernationManagerImpl::handleSocketTermination(
+kj::Promise<void> LegacyHibernationManagerImpl::handleSocketTermination(
     HibernatableWebSocket& hib, kj::Maybe<kj::Exception>& maybeError) {
   kj::Maybe<kj::Promise<void>> event;
   KJ_IF_SOME(error, maybeError) {
@@ -297,7 +298,7 @@ kj::Promise<void> HibernationManagerImpl::handleSocketTermination(
   dropHibernatableWebSocket(hib);
 }
 
-kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
+kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
   // Like the api::WebSocket readLoop(), but we dispatch different types of events.
   auto& ws = *KJ_REQUIRE_NONNULL(hib.ws);
   while (true) {

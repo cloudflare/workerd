@@ -20,8 +20,8 @@
 #include <workerd/io/bundle-fs.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/container.capnp.h>
-#include <workerd/io/hibernation-manager.h>
 #include <workerd/io/io-context.h>
+#include <workerd/io/legacy-hibernation-manager.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/trace-stream.h>

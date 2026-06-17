@@ -17,10 +17,11 @@
 namespace workerd {
 
 // Implements the HibernationManager class.
-class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
+class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManager {
  public:
-  HibernationManagerImpl(kj::Own<Worker::Actor::Loopback> loopback, uint16_t hibernationEventType);
-  ~HibernationManagerImpl() noexcept(false);
+  LegacyHibernationManagerImpl(
+      kj::Own<Worker::Actor::Loopback> loopback, uint16_t hibernationEventType);
+  ~LegacyHibernationManagerImpl() noexcept(false);
 
   // Tells the HibernationManager to create a new HibernatableWebSocket with the associated tags
   // and to initiate the `readLoop()` for this websocket. The `tags` array *must* contain only
@@ -80,7 +81,7 @@ class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
    public:
     HibernatableWebSocket(jsg::Ref<api::WebSocket> websocket,
         kj::ArrayPtr<kj::String> tags,
-        HibernationManagerImpl& manager);
+        LegacyHibernationManagerImpl& manager);
     ~HibernatableWebSocket() noexcept(false);
     KJ_DISALLOW_COPY_AND_MOVE(HibernatableWebSocket);
 
@@ -118,8 +119,8 @@ class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
     // HibernationManager drops the websocket before all queued messages have sent.
     kj::Maybe<kj::Own<kj::WebSocket>> ws;
 
-    HibernationManagerImpl& manager;
-    // TODO(someday): We (currently) only use the HibernationManagerImpl reference to refer to
+    LegacyHibernationManagerImpl& manager;
+    // TODO(someday): We (currently) only use the LegacyHibernationManagerImpl reference to refer to
     // `tagToWs` when running the dtor for `HibernatableWebSocket`. This feels a bit excessive,
     // I would rather have the HibernationManager deal with its collections than have the
     // HibernatableWebSocket do so. Maybe come back to this at some point?
@@ -142,7 +143,7 @@ class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
     // be moved to api::websocket if an hibernating websocket unhibernates.
     kj::Promise<void> autoResponsePromise = kj::READY_NOW;
 
-    friend HibernationManagerImpl;
+    friend LegacyHibernationManagerImpl;
   };
 
   // Removes a HibernatableWebSocket from the HibernationManager's various collections.
@@ -203,7 +204,7 @@ class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
   // will throw) before the first event is dispatched and manages to obtain its associated websocket.
   kj::HashMap<kj::String, HibernatableWebSocket*> webSocketsForEventHandler;
 
-  // The maximum number of Hibernatable WebSocket connections a single HibernationManagerImpl
+  // The maximum number of Hibernatable WebSocket connections a single LegacyHibernationManagerImpl
   // instance can manage.
   const size_t ACTIVE_CONNECTION_LIMIT = 1024 * 32;
 
