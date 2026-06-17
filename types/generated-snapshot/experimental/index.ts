@@ -14443,6 +14443,18 @@ export interface Hyperdrive {
    */
   readonly database: string;
 }
+/**
+ * Dynamic Hyperdrive binding handle
+ */
+export interface HyperdriveHandle {
+  connect(): Promise<Socket>;
+}
+/**
+ * Returns a dynamic Hyperdrive binding handle
+ */
+export interface HyperdriveApiBinding {
+  get(): HyperdriveHandle;
+}
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
