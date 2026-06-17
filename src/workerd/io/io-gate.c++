@@ -147,9 +147,12 @@ bool InputGate::Lock::isFor(const InputGate& otherGate) const {
 InputGate::CriticalSection::CriticalSection(InputGate& parent) {
   isCriticalSection = true;
   if (parent.isCriticalSection) {
-    this->parent = kj::addRef(static_cast<CriticalSection&>(parent));
+    auto& parentCs = static_cast<CriticalSection&>(parent);
+    this->parent = kj::addRef(parentCs);
+    depth = parentCs.depth + 1;
   } else {
     this->parent = &parent;
+    depth = 1;
   }
 }
 InputGate::CriticalSection::~CriticalSection() noexcept(false) {
