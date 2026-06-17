@@ -205,6 +205,11 @@ class MemoryTracker final {
   inline void trackField(
       kj::StringPtr edgeName, const T& value, kj::Maybe<kj::StringPtr> nodeName = kj::none);
 
+  template <MemoryRetainer T>
+  inline void trackField(kj::StringPtr edgeName,
+      const kj::Pin<T>& value,
+      kj::Maybe<kj::StringPtr> nodeName = kj::none);
+
   template <typename T>
   inline void trackField(kj::StringPtr edgeName,
       const kj::Maybe<T>& value,
@@ -503,6 +508,12 @@ template <MemoryRetainer T>
 void MemoryTracker::trackField(
     kj::StringPtr edgeName, const T& value, kj::Maybe<kj::StringPtr> nodeName) {
   trackField(edgeName, &value, nodeName);
+}
+
+template <MemoryRetainer T>
+void MemoryTracker::trackField(
+    kj::StringPtr edgeName, const kj::Pin<T>& value, kj::Maybe<kj::StringPtr> nodeName) {
+  trackField(edgeName, value.get(), nodeName);
 }
 
 template <MemoryRetainer T>
