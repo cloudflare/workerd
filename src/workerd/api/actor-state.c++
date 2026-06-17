@@ -1192,7 +1192,11 @@ void DurableObjectState::abort(jsg::Lock& js, jsg::Optional<kj::String> reason) 
 Worker::Actor::HibernationManager& DurableObjectState::maybeInitHibernationManager(
     Worker::Actor& actor) {
   if (actor.getHibernationManager() == kj::none) {
-    // If there's no hibernation manager created yet, we should create one.
+    // TODO(EW-10817): When the new HibernationManagerImpl path is functional, gate this
+    // construction on `util::Autogate::isEnabled(util::AutogateKey::HIBERNATABLE_WEBSOCKET_REFACTOR)`
+    // and dispatch to either LegacyHibernationManagerImpl (autogate off) or the new
+    // HibernationManagerImpl (autogate on). For now the autogate is unconsulted and only the
+    // legacy path is reachable.
     actor.setHibernationManager(kj::refcounted<LegacyHibernationManagerImpl>(
         actor.getLoopback(), KJ_REQUIRE_NONNULL(actor.getHibernationEventType())));
   }

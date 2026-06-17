@@ -626,6 +626,14 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   void visitForGc(jsg::GcVisitor& visitor) override;
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const override;
 
+  // TODO(EW-10817): Re-enable when WebSocket::acceptAsHibernatable consults the
+  // `hibernatable-websocket-refactor` autogate. This helper yields the kj::Own<kj::WebSocket>
+  // out of `AwaitingAcceptanceOrCoupling` without transitioning state, so the shell can hand
+  // it to the HibernationManager and replace this adapter with a
+  // `HibernatableWebSocketAdapter` atomically.
+  //
+  // kj::Own<kj::WebSocket> extractForHibernatableTransition();
+
  private:
   // ---------------------------------------------------------------------------
   // Internal state machine — represented inline as a `kj::OneOf`. This is the
