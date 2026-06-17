@@ -12,16 +12,16 @@ def _pyodide_core(*, version, sha256, **_kwds):
     )
     return [name]
 
-# Base URL that the runtime downloads Python packages from at request time. Keep in sync with
-# PYTHON_PACKAGES_URL in src/workerd/api/pyodide/pyodide.h.
+# Base URL the build downloads the stdlib wheels from.
 PYTHON_PACKAGES_URL = "https://pyodide-capnp-bin.edgeworker.net/"
 
 def _stdlib_wheels_repo_impl(rctx):
-    # Built-in Python package support has been removed, so workers can no longer request arbitrary
-    # packages. The checked-in lock files (src/pyodide/python-lock/) are pre-filtered to contain
-    # exactly the packages that are still loaded at runtime (the CPython stdlib modules and the
-    # shared libraries they depend on). We download just those wheels and expose them as the package
-    # disk cache used by the Python tests, rather than the full upstream all_wheels.zip archive.
+    # Built-in Python package support has been removed, so workers can no longer
+    # request arbitrary packages. The checked-in lock files
+    # (src/pyodide/python-lock/) are pre-filtered to contain exactly the
+    # packages that are still loaded at runtime (the CPython stdlib modules and
+    # the shared libraries they depend on). We download just those wheels. They
+    # are embedded directly into the Pyodide bundle.
     lock = json.decode(rctx.read(rctx.attr.lockfile))
     for pkg in lock["packages"].values():
         file_name = pkg["file_name"]
@@ -36,6 +36,9 @@ filegroup(
     srcs = glob(["*"], exclude = ["BUILD.bazel"]),
     visibility = ["//visibility:public"],
 )
+
+# Individual wheels, so they can be embedded into the Pyodide bundle one data module at a time.
+exports_files(glob(["*"], exclude = ["BUILD.bazel"]))
 """)
 
 _stdlib_wheels_repo = repository_rule(

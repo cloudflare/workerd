@@ -498,6 +498,11 @@ void registerPythonCommonModules(jsg::Lock& lock,
           []() { return api::pyodide::ArtifactBundler::makeDisabledBundler(); })),
       jsg::ModuleRegistry::Type::INTERNAL);
 
+  // Inject the Python stdlib packages that are extracted and embedded directly in the bundle.
+  modules.addBuiltinModule("pyodide-internal:packages",
+      api::pyodide::EmbeddedPackagesReader::fromBundle(lock, pyodideBundle),
+      jsg::ModuleRegistry::Type::INTERNAL);
+
   // Inject disk cache module
   modules.addBuiltinModule("pyodide-internal:disk_cache",
       kj::mv(diskCache).orDefault([&lock]() { return lock.alloc<DiskCache>(); }),
