@@ -21,6 +21,23 @@ constexpr auto ERROR_PREFIX_DELIM = "; "_kj;
 constexpr auto ERROR_REMOTE_PREFIX = "remote."_kj;
 constexpr auto ERROR_TUNNELED_PREFIX_JSG = "jsg."_kj;
 constexpr auto ERROR_INTERNAL_SOURCE_PREFIX_JSG = "jsg-internal."_kj;
+constexpr auto ERROR_SENTRY_PREFIX = "SENTRY_"_kj;
+constexpr auto ERROR_SENTRY_DO_PREFIX = "SENTRY_DO "_kj;
+constexpr auto ERROR_SENTRY_RT_PREFIX = "SENTRY_RT "_kj;
+
+kj::StringPtr stripSentryExceptionPrefix(kj::StringPtr internalMessage) {
+  if (!internalMessage.startsWith(ERROR_SENTRY_PREFIX)) {
+    return internalMessage;
+  }
+
+  if (internalMessage.startsWith(ERROR_SENTRY_DO_PREFIX)) {
+    return internalMessage.slice(ERROR_SENTRY_DO_PREFIX.size());
+  } else if (internalMessage.startsWith(ERROR_SENTRY_RT_PREFIX)) {
+    return internalMessage.slice(ERROR_SENTRY_RT_PREFIX.size());
+  }
+  return internalMessage;
+}
+
 }  // namespace
 
 TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
@@ -49,11 +66,22 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
 
   properties.isDoNotLogException = isDoNotLogException(internalMessage);
 
-  // Remove `remote.` (if present). Note that there are cases where we return a tunneled error
-  // through multiple workers, so let's be paranoid and allow for multiple "remote." prefixes.
-  while (internalMessage.startsWith(ERROR_REMOTE_PREFIX)) {
-    properties.isFromRemote = true;
-    internalMessage = internalMessage.slice(ERROR_REMOTE_PREFIX.size());
+  // Remove `remote.` and any Sentry prefixes in either order. We can see multiple `remote.`
+  // prefixes when an error crosses worker boundaries more than once.
+  while (true) {
+    auto strippedSentryPrefix = stripSentryExceptionPrefix(internalMessage);
+    if (strippedSentryPrefix != internalMessage) {
+      internalMessage = strippedSentryPrefix;
+      continue;
+    }
+
+    if (internalMessage.startsWith(ERROR_REMOTE_PREFIX)) {
+      properties.isFromRemote = true;
+      internalMessage = internalMessage.slice(ERROR_REMOTE_PREFIX.size());
+      continue;
+    }
+
+    break;
   }
 
   auto findDelim = [](kj::StringPtr msg) -> size_t {
