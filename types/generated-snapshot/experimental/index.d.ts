@@ -492,6 +492,7 @@ interface ExecutionContext<Props = unknown> {
   passThroughOnException(): void;
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
+  restore(params: any): Promise<any>;
   cache?: CacheContext;
   readonly version?: {
     readonly metadata?: {
@@ -678,6 +679,8 @@ type DurableObjectLocationHint =
   | "weur"
   | "eeur"
   | "apac"
+  | "apac-ne"
+  | "apac-se"
   | "oc"
   | "afr"
   | "me";
@@ -699,6 +702,7 @@ interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
+  restore(params: any): Promise<any>;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   container?: Container;
