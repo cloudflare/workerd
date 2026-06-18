@@ -617,6 +617,14 @@ kj_test(
 )
 
 kj_test(
+    src = "sql-toarray-oom-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "sockets-test.c++",
     deps = [
         "//src/workerd/io",
