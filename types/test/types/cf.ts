@@ -22,6 +22,64 @@ export const handler: ExportedHandler<{ SERVICE: Fetcher }> = {
       cf: { cacheEverything: true },
     });
 
+    await fetch("https://example.com", {
+      cf: {
+        vary: {
+          default: { action: "bypass" },
+          headers: {
+            accept: {
+              action: "normalize",
+              media_types: ["image/webp", "image/avif"],
+            },
+            "accept-language": {
+              action: "normalize",
+              languages: ["en", "fr"],
+            },
+            "x-custom-header": { action: "passthrough" },
+          },
+        },
+      },
+    });
+
+    await fetch("https://example.com", {
+      cf: {
+        // @ts-expect-error: default is required for vary
+        vary: {
+          headers: {
+            accept: { action: "normalize" },
+          },
+        },
+      },
+    });
+
+    await fetch("https://example.com", {
+      cf: {
+        vary: {
+          // @ts-expect-error: action must be normalize, passthrough, or bypass
+          default: { action: "invalid" },
+        },
+      },
+    });
+
+    // @ts-expect-error: media_types and languages values must be strings
+    await fetch("https://example.com", {
+      cf: {
+        vary: {
+          default: { action: "bypass" },
+          headers: {
+            accept: {
+              action: "normalize",
+              media_types: [123],
+            },
+            "accept-language": {
+              action: "normalize",
+              languages: [123],
+            },
+          },
+        },
+      },
+    });
+
     // Can fetch to service binding with incoming properties to simulate incoming request
     await env.SERVICE.fetch("https://example.com", {
       cf: { colo: "LHR" },

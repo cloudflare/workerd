@@ -12933,6 +12933,8 @@ export interface RequestInitCfProperties extends Record<string, unknown> {
    * (e.g. { '200-299': 86400, '404': 1, '500-599': 0 })
    */
   cacheTtlByStatus?: Record<string, number>;
+  /** Controls how responses with a `Vary` header are cached for this request. */
+  vary?: RequestInitCfPropertiesVary;
   /**
    * Explicit Cache-Control header value to set on the response stored in cache.
    * This gives full control over cache directives (e.g. 'public, max-age=3600, s-maxage=86400').
@@ -12989,6 +12991,42 @@ export interface RequestInitCfProperties extends Record<string, unknown> {
    * to point to that CNAME record.
    */
   resolveOverride?: string;
+}
+export type RequestInitCfPropertiesVaryAction =
+  | "normalize"
+  | "passthrough"
+  | "bypass";
+/** Configuration for Workers Standard Vary support. */
+export interface RequestInitCfPropertiesVary {
+  /** The fallback action for varied request headers not listed in `headers`. */
+  default: RequestInitCfPropertiesVaryHeader;
+  /**
+   * Lowercase request header names and their Vary configuration.
+   *
+   * The `accept` header can include `media_types`, the `accept-language`
+   * header can include `languages`, and other headers support only `action`.
+   */
+  headers?: RequestInitCfPropertiesVaryHeaders;
+}
+/** Common Vary behavior for a single request header. */
+export interface RequestInitCfPropertiesVaryHeader {
+  action: RequestInitCfPropertiesVaryAction;
+}
+/** Vary behavior for the `accept` request header. */
+export interface RequestInitCfPropertiesVaryAcceptHeader
+  extends RequestInitCfPropertiesVaryHeader {
+  media_types?: string[];
+}
+/** Vary behavior for the `accept-language` request header. */
+export interface RequestInitCfPropertiesVaryAcceptLanguageHeader
+  extends RequestInitCfPropertiesVaryHeader {
+  languages?: string[];
+}
+/** Lowercase request header names and their Vary behavior. */
+export interface RequestInitCfPropertiesVaryHeaders
+  extends Record<string, RequestInitCfPropertiesVaryHeader | undefined> {
+  accept?: RequestInitCfPropertiesVaryAcceptHeader;
+  "accept-language"?: RequestInitCfPropertiesVaryAcceptLanguageHeader;
 }
 export interface BasicImageTransformations {
   /**
