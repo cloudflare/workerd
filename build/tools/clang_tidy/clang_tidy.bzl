@@ -210,7 +210,7 @@ clang_tidy_aspect = aspect(
             allow_single_file = True,
         ),
         "_clang_tidy_plugin": attr.label(
-            default = Label("//tools/clang-tidy:jsg-lint"),
+            default = Label("//tools/clang-tidy:workerd-lint"),
             allow_single_file = True,
         ),
         "_clang_tidy_compiler_flags": attr.string_list(
