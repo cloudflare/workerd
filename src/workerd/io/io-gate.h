@@ -52,6 +52,10 @@ class InputGate {
     virtual void inputGateWaiterRemoved() {}
 
     static const Hooks DEFAULT;
+
+   protected:
+    kj::Maybe<SpanBuilder> inputGateWaitSpan;
+    kj::Maybe<SpanBuilder> inputGateHoldSpan;
   };
 
   // Hooks has no member variables, so const_cast is acceptable.
@@ -268,6 +272,10 @@ class OutputGate {
     virtual void outputGateWaiterRemoved() {}
 
     static const Hooks DEFAULT;
+
+   protected:
+    kj::Maybe<SpanBuilder> outputGateWaitSpan;
+    kj::Maybe<SpanBuilder> outputGateHoldSpan;
   };
 
   // Hooks has no member variables, so const_cast is acceptable.
