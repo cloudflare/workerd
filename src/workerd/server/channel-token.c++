@@ -8,6 +8,7 @@
 #include <workerd/util/entropy.h>
 
 #include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <openssl/sha.h>
 
 #include <capnp/serialize-packed.h>
@@ -21,9 +22,31 @@
 
 namespace workerd::server {
 
-ChannelTokenHandler::ChannelTokenHandler(Resolver& resolver): resolver(resolver) {
-  getEntropy(tokenKey);
+ChannelTokenHandler::ChannelTokenHandler(Resolver& resolver, kj::Maybe<kj::StringPtr> clusterKey)
+    : resolver(resolver) {
+  KJ_IF_SOME(key, clusterKey) {
+    // All nodes in the cluster must derive the same key, based on `clusterKey`. We HMAC the
+    // `clusterKey` with a randomly-chosen salt to derive the channel token key.
 
+    // clang-format off
+    static constexpr byte SALT[] = {
+      0x9a, 0x24, 0x71, 0x39, 0x1b, 0x85, 0xce, 0x97,
+      0x6c, 0xf9, 0x1c, 0xdf, 0x93, 0xc0, 0xc6, 0x36,
+      0xb9, 0xd2, 0x09, 0xfe, 0x01, 0xde, 0xb1, 0x9a,
+      0xda, 0xd3, 0x8e, 0x76, 0xbb, 0xae, 0xeb, 0x89,
+    };
+    // clang-format on
+
+    uint outLen = 0;
+    KJ_ASSERT(HMAC(EVP_sha256(), SALT, sizeof(SALT), key.asBytes().begin(), key.size(), tokenKey,
+                  &outLen) != nullptr);
+    KJ_ASSERT(outLen == sizeof(tokenKey));
+  } else {
+    // Single-instance, generate a new key for every run.
+    getEntropy(tokenKey);
+  }
+
+  // Construct key ID by hashing the key.
   SHA256_CTX ctx{};
   KJ_ASSERT(SHA256_Init(&ctx));
   KJ_ASSERT(SHA256_Update(&ctx, tokenKey, sizeof(tokenKey)));

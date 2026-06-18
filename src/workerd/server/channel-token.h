@@ -34,7 +34,7 @@ class ChannelTokenHandler {
         kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) = 0;
   };
 
-  explicit ChannelTokenHandler(Resolver& resolver);
+  explicit ChannelTokenHandler(Resolver& resolver, kj::Maybe<kj::StringPtr> clusterKey = kj::none);
 
   // Helpers to implement `IoChannelFactory::{SubrequestChannel,ActorClassChannel}::getToken()`.
   kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> encodeSubrequestChannelToken(

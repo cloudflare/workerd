@@ -9,8 +9,10 @@
 #include <workerd/api/memory-cache.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/worker.h>
+#include <workerd/server/cluster-registry.h>
 #include <workerd/server/workerd.capnp.h>
 
+#include <capnp/rpc.h>
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
 #include <kj/filesystem.h>
@@ -156,7 +158,10 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
 
   kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
 
-  ChannelTokenHandler channelTokenHandler;
+  kj::Maybe<ChannelTokenHandler> channelTokenHandler;
+
+  kj::Maybe<kj::Own<ClusterRegistry>> clusterRegistry;
+  kj::Maybe<capnp::RpcSystem<cluster::VatId>> clusterRpc;
 
   kj::HashMap<kj::String, kj::OneOf<kj::String, kj::Own<kj::ConnectionReceiver>>> socketOverrides;
   kj::HashMap<kj::String, kj::String> directoryOverrides;
@@ -338,6 +343,8 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   kj::Maybe<SocketTypeConfig> parseSocketType(config::Socket::Reader sock, kj::StringPtr name);
 
   void unlinkWorkerLoaders();
+
+  void setupChannelTokenHandler(config::Config::Reader config);
 
   kj::Promise<void> preloadPython(
       kj::StringPtr workerName, const WorkerDef& workerDef, ErrorReporter& errorReporter);

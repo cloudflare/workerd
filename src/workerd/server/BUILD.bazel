@@ -212,6 +212,7 @@ wd_cc_library(
         ":channel-token_capnp",
         "//src/workerd/io",
         "//src/workerd/util:entropy",
+        "@ssl",
     ],
 )
 
@@ -228,6 +229,9 @@ wd_cc_library(
         ":alarm-scheduler",
         ":channel-token",
         ":channel-token_capnp",
+        ":cluster-lock",
+        ":cluster-registry",
+        ":cluster_capnp",
         ":container-client",
         ":facet-tree-index",
         ":fallback-service",
@@ -244,8 +248,42 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",
         "//src/workerd/util:websocket-error-handler",
+        "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-tls",
+    ],
+)
+
+wd_capnp_library(src = "cluster.capnp")
+
+wd_cc_library(
+    name = "cluster-registry",
+    srcs = ["cluster-registry.c++"],
+    hdrs = ["cluster-registry.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":cluster_capnp",
+        "//src/workerd/util:ofd-lock",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
+        "@ssl",
+    ],
+)
+
+wd_cc_library(
+    name = "cluster-lock",
+    srcs = ["cluster-lock.c++"],
+    hdrs = ["cluster-lock.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":cluster-registry",
+        ":cluster_capnp",
+        "//src/workerd/io:worker-interface_capnp",
+        "//src/workerd/util:ofd-lock",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
     ],
 )
 
@@ -395,6 +433,28 @@ kj_test(
     deps = [
         ":facet-tree-index",
         "@capnp-cpp//src/kj",
+    ],
+)
+
+kj_test(
+    src = "cluster-registry-test.c++",
+    deps = [
+        ":cluster-registry",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
+    ],
+)
+
+kj_test(
+    src = "cluster-lock-test.c++",
+    deps = [
+        ":cluster-lock",
+        ":cluster-registry",
+        "//src/workerd/io:worker-interface_capnp",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
     ],
 )
 
