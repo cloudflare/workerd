@@ -3917,7 +3917,11 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       //   with starting the script, and also if we could save the status across hibernations. But
       //   that would require some refactoring, and this RPC should (eventally) be local, so it's
       //   not a huge deal.
-      auto status = co_await c.statusRequest(capnp::MessageSize{4, 0}).send();
+      auto statusRequest = c.statusRequest(capnp::MessageSize{4, 0});
+      KJ_IF_SOME(spanContext, context.getCurrentTraceSpan().toSpanContext()) {
+        spanContext.toCapnp(statusRequest.initSpanContext());
+      }
+      auto status = co_await statusRequest.send();
       containerRunning = status.getRunning();
     }
 
