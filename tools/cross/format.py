@@ -88,7 +88,9 @@ def matches_any_glob(globs: tuple[str, ...], file: Path) -> bool:
     return any(file.match(glob) for glob in globs)
 
 
-def _ensure_bazel_tool(tool_name: str, build_target: str | None = None) -> Path:
+def _ensure_bazel_tool(
+    tool_name: str, build_target: str | None = None, verify_version: bool = False
+) -> Path:
     """Ensure a bazel-built formatter tool exists and return its path."""
     tool_suffix = Path("build") / "deps" / "formatters" / tool_name
     internal_tool_path = (
@@ -96,12 +98,14 @@ def _ensure_bazel_tool(tool_name: str, build_target: str | None = None) -> Path:
     )
     workerd_tool_path = BAZEL_BIN / tool_suffix
 
-    if internal_tool_path.exists():
-        return internal_tool_path
-    if workerd_tool_path.exists():
-        return workerd_tool_path
+    if not verify_version:
+        if internal_tool_path.exists():
+            return internal_tool_path
+        if workerd_tool_path.exists():
+            return workerd_tool_path
 
-    # Tool not cached; build it once.
+    # Build the tool. When verify_version is set this ensures we pick up tool
+    # version changes instead of silently reusing a stale cached binary.
     if build_target is None:
         build_target = f"@workerd//build/deps/formatters:{tool_name}@rule"
     download_result = subprocess.run(["bazel", "build", build_target])
@@ -280,9 +284,28 @@ def main() -> None:
         )
         if matched:
             needed_formatters.add(config.formatter)
-    for name in needed_formatters:
-        if name in ("clang-format", "buildifier", "ruff", "rustfmt"):
-            _ensure_bazel_tool(name)
+    # When formatting the full repo (no git subcommand), always rebuild tools
+    # via bazel to pick up version changes.  For the git/--staged path (used by
+    # the pre-commit hook) skip the rebuild to avoid bazel startup latency on
+    # every commit.
+    verify_version = options.subcommand != "git"
+    if verify_version:
+        # Batch all targets into a single bazel build to avoid repeated JVM
+        # startup overhead.
+        targets = []
+        for name in needed_formatters:
+            if name in ("clang-format", "buildifier", "ruff", "rustfmt"):
+                targets.append(f"@workerd//build/deps/formatters:{name}@rule")
+            elif name == "prettier":
+                targets.append("//:node_modules/prettier")
+        if targets:
+            result = subprocess.run(["bazel", "build", *targets])
+            if result.returncode != 0:
+                raise RuntimeError("Failed to download formatter tools")
+    else:
+        for name in needed_formatters:
+            if name in ("clang-format", "buildifier", "ruff", "rustfmt"):
+                _ensure_bazel_tool(name)
 
     all_ok = True
 

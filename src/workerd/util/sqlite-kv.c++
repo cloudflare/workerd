@@ -40,6 +40,14 @@ SqliteKv::SqliteKv(SqliteDatabase& db): ResetListener(db) {
     tableCreated = true;
     state.init<Initialized>(db);
   }
+
+  // Independently check whether the _cf_EXTERNALS table has been created in a past session, so
+  // that we can prepare its statements without first re-creating the table.
+  if (!db.run("SELECT name FROM sqlite_master WHERE type='table' AND name='_cf_EXTERNALS'")
+           .isDone()) {
+    externalsTableCreated = true;
+    externalsState.init<ExternalsInitialized>(db);
+  }
 }
 
 SqliteKv::~SqliteKv() noexcept(false) {
@@ -145,6 +153,7 @@ void SqliteKv::put(KeyPtr key, ValuePtr value) {
 void SqliteKv::put(KeyPtr key, ValuePtr value, WriteOptions options) {
   ensureInitialized(options.allowUnconfirmed)
       .stmtPut.run({.allowUnconfirmed = options.allowUnconfirmed}, key, value);
+  clearExternalsIfPresent(key);
 }
 
 bool SqliteKv::delete_(KeyPtr key) {
@@ -154,7 +163,23 @@ bool SqliteKv::delete_(KeyPtr key) {
 bool SqliteKv::delete_(KeyPtr key, WriteOptions options) {
   auto query = ensureInitialized(options.allowUnconfirmed)
                    .stmtDelete.run({.allowUnconfirmed = options.allowUnconfirmed}, key);
+  clearExternalsIfPresent(key);
   return query.changeCount() > 0;
+}
+
+void SqliteKv::clearExternalsIfPresent(KeyPtr key) {
+  // If the externals table hasn't been created yet, there's nothing to clear. We deliberately
+  // avoid creating it here -- it should only be created when externals are actually being
+  // written.
+  if (!externalsTableCreated) return;
+
+  // The table exists, so the statements struct must already be initialized (either by the
+  // constructor or by a prior ensureExternalsInitialized()).
+  auto& stmts = KJ_ASSERT_NONNULL(externalsState.tryGet<ExternalsInitialized>());
+
+  // Externals writes are always paired with a regular KV write, and that paired write decides
+  // whether the operation is allowed to be unconfirmed. So we always pass allowUnconfirmed here.
+  stmts.stmtDeleteExternals.run({.allowUnconfirmed = true}, key);
 }
 
 uint SqliteKv::deleteAll() {
@@ -166,9 +191,72 @@ uint SqliteKv::deleteAll() {
   return count;
 }
 
+SqliteKv::ExternalsInitialized& SqliteKv::ensureExternalsInitialized() {
+  if (!externalsTableCreated) {
+    // Externals writes are always paired with a regular KV write, and that paired write decides
+    // whether the operation is allowed to be unconfirmed. So we always pass allowUnconfirmed here.
+    db.run(SqliteDatabase::QueryOptions{.regulator = SqliteDatabase::TRUSTED,
+             .allowUnconfirmed = true},
+        R"(
+      CREATE TABLE IF NOT EXISTS _cf_EXTERNALS (
+        key TEXT,
+        idx INTEGER,
+        token BLOB,
+        PRIMARY KEY (key, idx)
+      ) WITHOUT ROWID;
+    )");
+
+    externalsTableCreated = true;
+
+    // If we're in a transaction and it gets rolled back, we better mark that the table is actually
+    // not created anymore.
+    db.onRollback([this]() { externalsTableCreated = false; });
+  }
+
+  KJ_SWITCH_ONEOF(externalsState) {
+    KJ_CASE_ONEOF(uninitialized, Uninitialized) {
+      return externalsState.init<ExternalsInitialized>(db);
+    }
+    KJ_CASE_ONEOF(initialized, ExternalsInitialized) {
+      return initialized;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::Array<kj::Array<byte>> SqliteKv::getExternals(kj::StringPtr key) {
+  if (!externalsTableCreated) return nullptr;
+  auto& stmts = KJ_UNWRAP_OR(externalsState.tryGet<ExternalsInitialized>(), return nullptr);
+
+  auto query = stmts.stmtGetExternals.run(key);
+
+  kj::Vector<kj::Array<byte>> result;
+  while (!query.isDone()) {
+    result.add(kj::heapArray<byte>(query.getBlob(0)));
+    query.nextRow();
+  }
+  return result.releaseAsArray();
+}
+
+void SqliteKv::putExternals(kj::StringPtr key, kj::Array<kj::Array<byte>> tokens) {
+  auto& stmts = ensureExternalsInitialized();
+
+  // Externals writes are always paired with a regular KV write, and that paired write decides
+  // whether the operation is allowed to be unconfirmed. So we always pass allowUnconfirmed here.
+
+  // Replace any existing tokens for this key with the new set.
+  stmts.stmtDeleteExternals.run({.allowUnconfirmed = true}, key);
+
+  for (auto i: kj::indices(tokens)) {
+    stmts.stmtPutExternal.run(
+        {.allowUnconfirmed = true}, key, static_cast<int64_t>(i), tokens[i].asPtr());
+  }
+}
+
 void SqliteKv::beforeSqliteReset() {
-  // We'll need to recreate the table on the next operation.
+  // We'll need to recreate the tables on the next operation.
   tableCreated = false;
+  externalsTableCreated = false;
 }
 
 void SqliteKv::rollbackMultiPut(Initialized& stmts, WriteOptions options) {

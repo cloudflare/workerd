@@ -658,10 +658,10 @@ def process_config(deps_file):
 
 
 def run():
-    if TARGET_FILTER is None:
-        global GITHUB_ACCESS_TOKEN
-        GITHUB_ACCESS_TOKEN = read_access_token()
+    global GITHUB_ACCESS_TOKEN
+    GITHUB_ACCESS_TOKEN = read_access_token()
 
+    if TARGET_FILTER is None:
         # Clean all generated .bazel files
         for f in GEN_DIR.glob("*.bazel"):
             f.unlink()

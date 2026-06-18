@@ -14,6 +14,7 @@
 #include <workerd/api/fuzzilli.h>
 #endif
 #include <workerd/api/hibernatable-web-socket.h>
+#include <workerd/api/restore.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/system-streams.h>
@@ -21,6 +22,7 @@
 #include <workerd/api/tracing.h>
 #include <workerd/api/util.h>
 #include <workerd/api/worker-rpc.h>
+#include <workerd/io/access-info.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
@@ -67,6 +69,13 @@ void ExecutionContext::passThroughOnException() {
   IoContext::current().setFailOpen();
 }
 
+jsg::Promise<jsg::Value> ExecutionContext::restore(jsg::Lock& js,
+    jsg::JsObject params,
+    const jsg::TypeHandler<jsg::Ref<Fetcher>>& fetcherHandler,
+    const jsg::TypeHandler<jsg::Ref<JsRpcStub>>& rpcStubHandler) {
+  return restoreCurrentEntrypoint(js, params, fetcherHandler, rpcStubHandler);
+}
+
 jsg::Optional<jsg::Ref<CacheContext>> ExecutionContext::getCache(jsg::Lock& js) {
   // Hook for the embedding application to provide a CacheContext.
   // The default Worker::Api implementation returns kj::none.
@@ -84,10 +93,7 @@ jsg::Promise<CachePurgeResult> CacheContext::purge(jsg::Lock& js,
   JSG_FAIL_REQUIRE(Error, "Cache purge is not available in this context.");
 }
 
-jsg::Optional<jsg::Ref<Tracing>> ExecutionContext::getTracing(jsg::Lock& js) {
-  if (!FeatureFlags::get(js).getWorkerdExperimental()) {
-    return kj::none;
-  }
+jsg::Ref<Tracing> ExecutionContext::getTracing(jsg::Lock& js) {
   // A new Tracing handle is allocated on first access only - `JSG_LAZY_INSTANCE_PROPERTY`
   // uses V8's SetLazyDataProperty, which caches the getter result on the instance after the
   // first call. So `ctx.tracing === ctx.tracing` and only one allocation per
@@ -96,6 +102,31 @@ jsg::Optional<jsg::Ref<Tracing>> ExecutionContext::getTracing(jsg::Lock& js) {
   return js.alloc<Tracing>();
 }
 
+kj::StringPtr AccessContext::getAud() {
+  return info->getAudience();
+}
+
+jsg::Promise<jsg::Optional<jsg::JsValue>> AccessContext::getIdentity(jsg::Lock& js) {
+  auto& ioctx = IoContext::current();
+  return ioctx.awaitIo(js, info->getIdentity(),
+      [](jsg::Lock& js, kj::Maybe<kj::String> json) -> jsg::Optional<jsg::JsValue> {
+    KJ_IF_SOME(j, json) {
+      return jsg::JsValue(js.parseJson(j).getHandle(js));
+    }
+    return kj::none;
+  });
+}
+
+jsg::Optional<jsg::Ref<AccessContext>> ExecutionContext::getAccess(jsg::Lock& js) {
+  // Pull the per-request AccessInfo (if any) off the current IncomingRequest. Standalone workerd
+  // never supplies one; production embedders construct one before calling newWorkerEntrypoint().
+  if (!IoContext::hasCurrent()) return kj::none;
+  auto& ioctx = IoContext::current();
+  KJ_IF_SOME(info, ioctx.getAccessInfo()) {
+    return js.alloc<AccessContext>(ioctx.addObject(kj::addRef(info)));
+  }
+  return kj::none;
+}
 void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {
   KJ_IF_SOME(r, reason) {
     IoContext::current().abort(js.exceptionToKj(kj::mv(r)));
@@ -502,7 +533,7 @@ namespace {
 // Returns true if an alarm failure should count against the user's retry limit.
 // A failure is user-generated if any of:
 //   - The exception was explicitly tagged with EXCEPTION_IS_USER_ERROR at construction time
-//     (e.g. state.abort(), exceededCpu, exceededMemory, overload queue).
+//     (e.g. state.abort(), exceededCpu, exceededMemory, exceededWallTime, overload queue).
 //   - The exception originated from user code throwing inside blockConcurrencyWhile, which
 //     breaks the input gate as a secondary side-effect.
 //   - The exception is a plain jsg.* error without broken.* or jsg-internal.* prefixes,
@@ -572,7 +603,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           auto e = KJ_EXCEPTION(OVERLOADED,
               "broken.dropped; worker_do_not_log; jsg.Error: Alarm exceeded its allowed execution time");
           e.setDetail(jsg::EXCEPTION_IS_USER_ERROR, kj::heapArray<kj::byte>(0));
-          e.setDetail(CPU_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
+          e.setDetail(WALL_TIME_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
           context.getMetrics().reportFailure(e);
 
           // We don't want the handler to keep running after timeout.
@@ -581,8 +612,9 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           // retriable, and we'll count the retries against the alarm retries limit. This will ensure
           // that the handler will attempt to run for a number of times before giving up and deleting
           // the alarm.
-          return WorkerInterface::AlarmResult{
-            .retry = true, .retryCountsAgainstLimit = true, .outcome = EventOutcome::EXCEEDED_CPU};
+          return WorkerInterface::AlarmResult{.retry = true,
+            .retryCountsAgainstLimit = true,
+            .outcome = EventOutcome::EXCEEDED_WALL_TIME};
         });
 
         return alarm(lock, js.alloc<AlarmInvocationInfo>(scheduledTime, retryCount))

@@ -8,7 +8,6 @@
 #include "setup.h"
 
 #include <workerd/jsg/exception-metadata.capnp.h>
-#include <workerd/util/entropy.h>
 
 #include <capnp/message.h>
 #include <capnp/serialize.h>
@@ -100,36 +99,6 @@ kj::String typeName(const std::type_info& type) {
 }
 
 namespace {
-
-// For internal errors, we generate an ID to include when rendering user-facing "internal error"
-// exceptions and writing internal exception logs, to make it easier to search for logs
-// corresponding to "internal error" exceptions reported by users.
-//
-// We'll use an ID of 24 base-32 encoded characters, just because its relatively simple to
-// generate from random bytes.  This should give us a value with 120 bits of uniqueness, which is
-// about as good as a UUID.
-//
-// (We're not using base-64 encoding to avoid issues with case insensitive search, as well as
-// ensuring that the id is easy to select and copy via double-clicking.)
-using InternalErrorId = kj::FixedArray<char, 24>;
-
-constexpr char BASE32_DIGITS[] = "0123456789abcdefghijklmnopqrstuv";
-
-InternalErrorId makeInternalErrorId() {
-  InternalErrorId id;
-  if (isPredictableModeForTest()) {
-    // In testing mode, use content that generates a "0123456789abcdefghijklm" ID:
-    for (auto i: kj::indices(id)) {
-      id[i] = i;
-    }
-  } else {
-    getEntropy(kj::asBytes(id));
-  }
-  for (auto i: kj::indices(id)) {
-    id[i] = BASE32_DIGITS[static_cast<unsigned char>(id[i]) % 32];
-  }
-  return id;
-}
 
 kj::String renderInternalError(InternalErrorId& internalErrorId) {
   return kj::str("internal error; reference = ", internalErrorId);
@@ -657,26 +626,53 @@ static kj::Array<kj::byte> getEmptyArray() {
 }
 
 kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBuffer> arrayBuffer) {
+  if (arrayBuffer->IsResizableByUserJavaScript() || arrayBuffer->IsImmutable()) {
+    // For resizable ArrayBuffers, resize(0) decommits pages (PROT_NONE) even while the
+    // BackingStore shared_ptr is held. Deep-copy to prevent SIGSEGV if JS shrinks the
+    // buffer after we capture the pointer. We use arrayBuffer->ByteLength() (the live
+    // length) rather than backing->ByteLength() (which returns the max reservation size).
+    // Ref: AUTOVULN-CLOUDFLARE-WORKERD-73
+    //
+    // We also want to copy for immutable ArrayBuffers. Since the expectation might
+    // be that the memory buffer returned from asBytes() is mutable, we don't want
+    // to violate the expectation.
+    auto byteLength = arrayBuffer->ByteLength();
+    if (byteLength == 0) {
+      return getEmptyArray();
+    }
+    kj::ArrayPtr bytes(static_cast<kj::byte*>(arrayBuffer->Data()), byteLength);
+    return kj::heapArray<kj::byte>(bytes);
+  }
   auto backing = arrayBuffer->GetBackingStore();
   kj::ArrayPtr bytes(static_cast<kj::byte*>(backing->Data()), backing->ByteLength());
   if (bytes == nullptr) {
     return getEmptyArray();
-  } else {
-    return bytes.attach(kj::mv(backing));
   }
+  return bytes.attach(kj::mv(backing));
 }
 kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView) {
-  auto backing = arrayBufferView->Buffer()->GetBackingStore();
-  kj::ArrayPtr buffer(static_cast<kj::byte*>(backing->Data()), backing->ByteLength());
+  auto buffer = arrayBufferView->Buffer();
+  if (buffer->IsResizableByUserJavaScript() || buffer->IsImmutable()) {
+    // Deep-copy for resizable or immutable ArrayBuffers -- see comment above.
+    // CopyContents handles bounds checking internally for out-of-bounds views.
+    auto len = arrayBufferView->ByteLength();
+    if (len == 0) {
+      return getEmptyArray();
+    }
+    auto copy = kj::heapArray<kj::byte>(len);
+    arrayBufferView->CopyContents(copy.begin(), copy.size());
+    return copy;
+  }
+  auto backing = buffer->GetBackingStore();
+  kj::ArrayPtr bufferBytes(static_cast<kj::byte*>(backing->Data()), backing->ByteLength());
   auto sliceStart = arrayBufferView->ByteOffset();
   auto sliceEnd = sliceStart + arrayBufferView->ByteLength();
-  KJ_ASSERT(buffer.size() >= sliceEnd);
-  auto bytes = buffer.slice(sliceStart, sliceEnd);
+  KJ_ASSERT(bufferBytes.size() >= sliceEnd);
+  auto bytes = bufferBytes.slice(sliceStart, sliceEnd);
   if (bytes == nullptr) {
     return getEmptyArray();
-  } else {
-    return bytes.attach(kj::mv(backing));
   }
+  return bytes.attach(kj::mv(backing));
 }
 
 // TODO(soon): If the returned kj::Array<kj::byte> is used outside of the isolate lock,

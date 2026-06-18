@@ -100,6 +100,14 @@ void throwOpensslError(const char* file, int line, kj::StringPtr code) {
           break;
       };
       break;
+    case ERR_LIB_CIPHER:
+      switch (ERR_GET_REASON(ERR_peek_last_error())) {
+        MAP_ERROR(CIPHER_R_BAD_DECRYPT,
+            "Decryption failed: Incorrect key/IV or corrupted ciphertext/authentication tag provided.");
+        default:
+          break;
+      }
+      break;
     case ERR_LIB_RSA:
       switch (ERR_GET_REASON(ERR_peek_last_error())) {
         MAP_ERROR(RSA_R_DATA_LEN_NOT_EQUAL_TO_MOD_LEN, "Invalid RSA signature.");
@@ -251,6 +259,13 @@ void checkPbkdfLimits(jsg::Lock& js, size_t iterations) {
     JSG_FAIL_REQUIRE(DOMNotSupportedError,
         kj::str("Pbkdf2 failed: iteration counts above ", max, " are not supported (requested ",
             iterations, ")."));
+  }
+}
+
+void checkScryptLimits(jsg::Lock& js, uint32_t N, uint32_t r, uint32_t p) {
+  auto& limits = Worker::Isolate::from(js).getLimitEnforcer();
+  KJ_IF_SOME(max, limits.checkScryptCost(js, N, r, p)) {
+    JSG_FAIL_REQUIRE(RangeError, kj::str("Scrypt failed: cost exceeds maximum (", max, ")."));
   }
 }
 

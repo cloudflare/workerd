@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "tls-check-server-identity-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "tls-check-server-identity-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "experimental",
+                              "throw_on_not_implemented_tls_options"],
+      ),
+    ),
+  ],
+);

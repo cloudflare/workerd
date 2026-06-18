@@ -55,7 +55,6 @@ const config :Workerd.Config = (
 const mainWorker :Workerd.Worker = (
   modules = [
     (name = "worker.py", pythonModule = embed "./worker.py"),
-    {requirements}
   ],
   compatibilityDate = "2025-08-05",
   compatibilityFlags = ["python_no_global_handlers", {compat_flags}],
@@ -67,23 +66,15 @@ const mainWorker :Workerd.Worker = (
 
 def make_config(
     flags: list[str],
-    reqs: list[str],
 ) -> str:
-    requirements = ""
-    for name in reqs:
-        requirements += f'(name="{name}", pythonRequirement=""),'
-
     compat_flags = ""
     for flag in flags:
         compat_flags += f'"{flag}", '
-    return TEMPLATE.format(requirements=requirements, compat_flags=compat_flags)
+    return TEMPLATE.format(compat_flags=compat_flags)
 
 
-def make_worker(imports: list[str]) -> str:
-    contents = ""
-    for i in imports:
-        contents += f"import {i}\n"
-    contents += dedent("""\
+def make_worker() -> str:
+    contents = dedent("""\
     from workers import WorkerEntrypoint
     class Default(WorkerEntrypoint):
         def test(self):
@@ -92,22 +83,17 @@ def make_worker(imports: list[str]) -> str:
     return contents
 
 
-def make_snapshot(  # noqa: PLR0913
+def make_snapshot(
     d: Path,
     outdir: Path,
     outprefix: str,
     compat_flags: list[str],
-    requirements: list[str],
-    imports: list[str],
 ) -> str:
     config_path = d / "config.capnp"
-    config_path.write_text(make_config(compat_flags, requirements))
+    config_path.write_text(make_config(compat_flags))
     worker_path = d / "worker.py"
-    worker_path.write_text(make_worker(imports))
-    if imports:
-        snapshot_flag = "--python-save-snapshot"
-    else:
-        snapshot_flag = "--python-save-baseline-snapshot"
+    worker_path.write_text(make_worker())
+    snapshot_flag = "--python-save-baseline-snapshot"
 
     if "WORKERD_BINARY" in environ:
         workerd = [environ["WORKERD_BINARY"]]
@@ -144,39 +130,10 @@ def make_snapshot(  # noqa: PLR0913
 def make_baseline_snapshot(
     cache: Path, outdir: Path, compat_flags: list[str]
 ) -> list[tuple[str, str]]:
-    name, digest = make_snapshot(cache, outdir, "baseline", compat_flags, [], [])
+    name, digest = make_snapshot(cache, outdir, "baseline", compat_flags)
     return [
         ("baseline_snapshot", name),
         ("baseline_snapshot_hash", digest),
-    ]
-
-
-def make_numpy_snapshot(
-    cache: Path, outdir: Path, compat_flags: list[str]
-) -> list[tuple[str, str]]:
-    name, digest = make_snapshot(
-        cache, outdir, "package_snapshot_numpy", compat_flags, ["numpy"], ["numpy"]
-    )
-    return [
-        ("numpy_snapshot", name),
-        ("numpy_snapshot_hash", digest),
-    ]
-
-
-def make_fastapi_snapshot(
-    cache: Path, outdir: Path, compat_flags: list[str]
-) -> list[tuple[str, str]]:
-    name, digest = make_snapshot(
-        cache,
-        outdir,
-        "package_snapshot_fastapi",
-        compat_flags,
-        ["fastapi"],
-        ["fastapi", "pydantic"],
-    )
-    return [
-        ("fastapi_snapshot", name),
-        ("fastapi_snapshot_hash", digest),
     ]
 
 
@@ -195,10 +152,6 @@ def make_snapshots(
         with timing(f"version {ver} snapshots"):
             with timing("baseline snapshot"):
                 ver_info += make_baseline_snapshot(cache, outdir, compat_flags)
-            with timing("numpy snapshot"):
-                ver_info += make_numpy_snapshot(cache, outdir, compat_flags)
-            with timing("fastapi snapshot"):
-                ver_info += make_fastapi_snapshot(cache, outdir, compat_flags)
         res.append((ver, ver_info))
     return res
 
@@ -241,10 +194,7 @@ def upload_snapshots(outdir: Path):
     )
 
     for file in outdir.glob("*.bin"):
-        if file.name.startswith("baseline-"):
-            key = "baseline-snapshot/" + hexdigest(file)
-        else:
-            key = "test-snapshot/" + file.name
+        key = "baseline-snapshot/" + hexdigest(file)
         s3.upload_file(str(file), "pyodide-capnp-bin", key)
 
 

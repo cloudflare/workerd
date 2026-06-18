@@ -215,12 +215,20 @@ This project uses the KJ library instead of the C++ standard library for most ty
 | `std::vector`           | `kj::Array<T>` (fixed) / `kj::Vector<T>` (growable) |
 | `std::unique_ptr`       | `kj::Own<T>`                                        |
 | `std::shared_ptr`       | `kj::Rc<T>` / `kj::Arc<T>` (thread-safe)            |
+| `std::weak_ptr`         | `kj::Weak<T>`                                       |
 | `std::optional`         | `kj::Maybe<T>`                                      |
 | `std::function`         | `kj::Function<T>`                                   |
 | `std::variant`          | `kj::OneOf<T...>`                                   |
 | `std::span` / array ref | `kj::ArrayPtr<T>`                                   |
 | `std::exception`        | `kj::Exception`                                     |
 | `std::promise`/`future` | `kj::Promise<T>` / `kj::ForkedPromise<T>`           |
+
+### Safety
+
+KJ library provides several constructs that should be preferred to improve the safety of the program:
+
+- `kj::ArrayPtr<T>` should be used instead of `T*`
+- `kj::Ptr<T>` should be used instead of `T&` when it is bound by T's lifetime
 
 ### Error Handling
 

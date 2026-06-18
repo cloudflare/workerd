@@ -6,7 +6,6 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
-#include <workerd/io/features.h>
 
 namespace workerd::api {
 
@@ -77,8 +76,8 @@ void EntrypointsModule::abortIsolate(jsg::Lock& js, jsg::Optional<kj::String> re
   js.terminateExecutionNow();
 }
 
-bool EntrypointsModule::getIsExperimental(jsg::Lock& js) {
-  return FeatureFlags::get(js).getWorkerdExperimental();
+jsg::JsSymbol EntrypointsModule::getRestoreSymbol(jsg::Lock& js) {
+  return js.symbolInternal("cloudflare:workers:restore");
 }
 
 }  // namespace workerd::api

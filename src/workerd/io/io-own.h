@@ -362,13 +362,13 @@ IoPtr<T>& IoPtr<T>::operator=(decltype(nullptr)) {
 
 template <typename T>
 inline T* IoOwn<T>::operator->() {
-  DeleteQueue::checkFarGet(*deleteQueue.get(), typeid(T));
+  DeleteQueue::checkFarGet(*deleteQueue, typeid(T));
   return item->ptr;
 }
 
 template <typename T>
 inline IoOwn<T>::operator kj::Own<T>() && {
-  DeleteQueue::checkFarGet(*deleteQueue.get(), typeid(T));
+  DeleteQueue::checkFarGet(*deleteQueue, typeid(T));
   auto result = kj::mv(item->ptr);
   OwnedObjectList::unlink(*item);
   item = nullptr;
@@ -378,7 +378,7 @@ inline IoOwn<T>::operator kj::Own<T>() && {
 
 template <typename T>
 inline T* IoPtr<T>::operator->() {
-  DeleteQueue::checkFarGet(*deleteQueue.get(), typeid(T));
+  DeleteQueue::checkFarGet(*deleteQueue, typeid(T));
   return ptr;
 }
 

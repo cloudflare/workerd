@@ -42,9 +42,9 @@ struct Holder: public kj::Refcounted {
 jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
   auto state = kj::rc<Holder>();
 
-  auto transform = [holder = state.addRef()](jsg::Lock& js, v8::Local<v8::Value> chunk,
+  auto transform = [holder = state.addRef()](jsg::Lock& js, jsg::JsValue chunk,
                        jsg::Ref<TransformStreamDefaultController> controller) mutable {
-    auto str = jsg::check(chunk->ToString(js.v8Context()));
+    v8::Local<v8::String> str = chunk.toJsString(js);
     size_t length = str->Length();
     if (length == 0) return js.resolvedPromise();
 
@@ -52,7 +52,11 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
     size_t prefix = (holder->pending == kj::none) ? 0 : 1;
     size_t end = prefix + length;
     auto buf = kj::heapArray<char16_t>(end);
+#if V8_MAJOR_VERSION >= 15
+    str->Write(js.v8Isolate, 0, length, reinterpret_cast<uint16_t*>(buf.begin() + prefix));
+#else
     str->WriteV2(js.v8Isolate, 0, length, reinterpret_cast<uint16_t*>(buf.begin() + prefix));
+#endif
 
     KJ_IF_SOME(lead, holder->pending) {
       buf.begin()[0] = lead;
@@ -147,10 +151,10 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
       Transformer{.transform = jsg::Function<Transformer::TransformAlgorithm>( JSG_VISITABLE_LAMBDA(
                       (decoder = decoder.addRef()), (decoder),
                       (jsg::Lock& js, auto chunk, auto controller) {
-                        JSG_REQUIRE(chunk->IsArrayBuffer() || chunk->IsArrayBufferView(), TypeError,
+                        JSG_REQUIRE(chunk.isArrayBuffer() || chunk.isArrayBufferView(), TypeError,
                             "This TransformStream is being used as a byte stream, "
                             "but received a value that is not a BufferSource.");
-                        jsg::BufferSource source(js, chunk);
+                        jsg::JsBufferSource source(chunk);
                         auto decoded =
                             JSG_REQUIRE_NONNULL(decoder->decodePtr(js, source.asArrayPtr(), false),
                                 TypeError, "Failed to decode input.");

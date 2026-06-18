@@ -5,20 +5,7 @@
 
 namespace workerd {
 
-kj::Promise<kj::Array<byte>> IoChannelFactory::SubrequestChannel::getToken(
-    ChannelTokenUsage usage) {
-  KJ_SWITCH_ONEOF(getTokenMaybeSync(usage)) {
-    KJ_CASE_ONEOF(token, kj::Array<byte>) {
-      return kj::mv(token);
-    }
-    KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
-      return kj::mv(promise);
-    }
-  }
-  KJ_UNREACHABLE;
-}
-
-kj::Promise<kj::Array<byte>> IoChannelFactory::ActorClassChannel::getToken(
+kj::Promise<kj::Array<byte>> IoChannelFactory::TokenizableChannel::getToken(
     ChannelTokenUsage usage) {
   KJ_SWITCH_ONEOF(getTokenMaybeSync(usage)) {
     KJ_CASE_ONEOF(token, kj::Array<byte>) {
@@ -42,12 +29,94 @@ kj::Own<IoChannelFactory::ActorClassChannel> IoChannelFactory::actorClassFromTok
       DOMDataCloneError, "This Worker is not able to deserialize Durable Object class stubs.");
 }
 
+kj::Own<IoChannelFactory::RpcChannel> IoChannelFactory::rpcChannelFromToken(
+    ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) {
+  JSG_FAIL_REQUIRE(DOMDataCloneError, "This Worker is not able to deserialize RpcStubs.");
+}
+
+kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::
+    makeRestoredSubrequestChannelResolved(kj::Own<SelfTokenFactory> selfTokenFactory,
+        Frankenvalue restoreParams,
+        kj::Own<SubrequestChannel> inner) {
+  KJ_UNIMPLEMENTED("This runtime doesn't support persistent ServiceStubs.");
+}
+
+kj::Own<IoChannelFactory::RpcChannel> IoChannelFactory::makeRestoredRpcChannelResolved(
+    kj::Own<SelfTokenFactory> selfTokenFactory, Frankenvalue restoreParams) {
+  KJ_UNIMPLEMENTED("This runtime doesn't support persistent RpcStubs.");
+}
+
 namespace {
 
-class PromisedSubrequestChannel final: public IoChannelFactory::SubrequestChannel {
+template <typename ChannelType>
+class PromisedTokenizableChannel: public ChannelType {
  public:
-  PromisedSubrequestChannel(kj::Promise<kj::Own<SubrequestChannel>> promise)
+  PromisedTokenizableChannel(kj::Promise<kj::Own<ChannelType>> promise)
       : readyPromise(waitForResolution(kj::mv(promise)).fork()) {}
+
+  void requireAllowsTransfer() override {
+    // PromisedTokenizableChannel is used for channels initialized from a promised channel token.
+    // A channel created from a channel token should always support transfer, via channel tokens.
+  }
+
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
+    KJ_IF_SOME(channel, inner) {
+      return channel->getTokenMaybeSync(usage);
+    } else {
+      return readyPromise.addBranch().then([this, usage]() -> kj::Promise<kj::Array<byte>> {
+        KJ_SWITCH_ONEOF(KJ_ASSERT_NONNULL(inner)->getTokenMaybeSync(usage)) {
+          KJ_CASE_ONEOF(token, kj::Array<byte>) {
+            return kj::mv(token);
+          }
+          KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+            return kj::mv(promise);
+          }
+        }
+        KJ_UNREACHABLE;
+      });
+    }
+  }
+
+  kj::OneOf<kj::Own<IoChannelFactory::TokenizableChannel>,
+      kj::Promise<kj::Own<IoChannelFactory::TokenizableChannel>>>
+  getResolved() override {
+    KJ_IF_SOME(channel, inner) {
+      return kj::addRef<IoChannelFactory::TokenizableChannel>(*channel);
+    } else {
+      return readyPromise.addBranch().then([this]() mutable {
+        return kj::addRef<IoChannelFactory::TokenizableChannel>(*KJ_ASSERT_NONNULL(inner));
+      });
+    }
+  }
+
+ protected:
+  kj::Maybe<kj::Own<ChannelType>> inner;
+  kj::ForkedPromise<void> readyPromise;
+
+  kj::Promise<void> waitForResolution(kj::Promise<kj::Own<ChannelType>> promise) {
+    kj::Own<IoChannelFactory::TokenizableChannel> resolution = co_await promise;
+
+    KJ_SWITCH_ONEOF(resolution->getResolved()) {
+      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::TokenizableChannel>) {
+        inner = channel.template downcast<ChannelType>();
+        co_return;
+      }
+      KJ_CASE_ONEOF(deeperPromise, kj::Promise<kj::Own<IoChannelFactory::TokenizableChannel>>) {
+        // Promise resolved to another promise, wait for it too.
+        //
+        // Note that a promise returned by `getResolved()` will always itself resolve to a
+        // fully-resolved channel object, so we don't need to loop here.
+        inner = (co_await deeperPromise).template downcast<ChannelType>();
+      }
+    }
+  }
+};
+
+class PromisedSubrequestChannel final
+    : public PromisedTokenizableChannel<IoChannelFactory::SubrequestChannel> {
+ public:
+  using PromisedTokenizableChannel::PromisedTokenizableChannel;
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
     KJ_IF_SOME(channel, inner) {
@@ -59,144 +128,44 @@ class PromisedSubrequestChannel final: public IoChannelFactory::SubrequestChanne
       }));
     }
   }
-
-  void requireAllowsTransfer() override {
-    // PromisedSubrequestChannel is used for channels initialized from a promised channel token.
-    // A SubrequestChannel created from a channel token should always support transfer, via channel
-    // tokens.
-  }
-
-  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
-      IoChannelFactory::ChannelTokenUsage usage) override {
-    KJ_IF_SOME(channel, inner) {
-      return channel->getTokenMaybeSync(usage);
-    } else {
-      return readyPromise.addBranch().then([this, usage]() -> kj::Promise<kj::Array<byte>> {
-        KJ_SWITCH_ONEOF(KJ_ASSERT_NONNULL(inner)->getTokenMaybeSync(usage)) {
-          KJ_CASE_ONEOF(token, kj::Array<byte>) {
-            return kj::mv(token);
-          }
-          KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
-            return kj::mv(promise);
-          }
-        }
-        KJ_UNREACHABLE;
-      });
-    }
-  }
-
-  kj::OneOf<kj::Own<SubrequestChannel>, kj::Promise<kj::Own<SubrequestChannel>>> getResolved()
-      override {
-    KJ_IF_SOME(channel, inner) {
-      return kj::addRef(*channel);
-    } else {
-      return readyPromise.addBranch().then(
-          [this]() mutable { return kj::addRef(*KJ_ASSERT_NONNULL(inner)); });
-    }
-  }
-
- private:
-  kj::Maybe<kj::Own<SubrequestChannel>> inner;
-  kj::ForkedPromise<void> readyPromise;
-
-  kj::Promise<void> waitForResolution(kj::Promise<kj::Own<SubrequestChannel>> promise) {
-    for (;;) {
-      auto resolution = co_await promise;
-      KJ_SWITCH_ONEOF(resolution->getResolved()) {
-        KJ_CASE_ONEOF(channel, kj::Own<SubrequestChannel>) {
-          inner = kj::mv(channel);
-          co_return;
-        }
-        KJ_CASE_ONEOF(deeperPromise, kj::Promise<kj::Own<SubrequestChannel>>) {
-          // Promise resolved to another promise, wait for it too.
-          promise = kj::mv(deeperPromise);
-        }
-      }
-    }
-  }
 };
 
-class PromisedActorClassChannel final: public IoChannelFactory::ActorClassChannel {
+class PromisedActorClassChannel final
+    : public PromisedTokenizableChannel<IoChannelFactory::ActorClassChannel> {
  public:
-  PromisedActorClassChannel(kj::Promise<kj::Own<ActorClassChannel>> promise)
-      : readyPromise(waitForResolution(kj::mv(promise)).fork()) {}
+  using PromisedTokenizableChannel::PromisedTokenizableChannel;
+};
 
-  void requireAllowsTransfer() override {
-    // PromisedActorClassChannel is used for channels initialized from a promised channel token.
-    // A ActorClassChannel created from a channel token should always support transfer, via channel
-    // tokens.
-  }
+class PromisedRpcChannel final: public PromisedTokenizableChannel<IoChannelFactory::RpcChannel> {
+ public:
+  using PromisedTokenizableChannel::PromisedTokenizableChannel;
 
-  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
-      IoChannelFactory::ChannelTokenUsage usage) override {
+  Session restore() override {
     KJ_IF_SOME(channel, inner) {
-      return channel->getTokenMaybeSync(usage);
+      return channel->restore();
     } else {
-      return readyPromise.addBranch().then([this, usage]() -> kj::Promise<kj::Array<byte>> {
-        KJ_SWITCH_ONEOF(KJ_ASSERT_NONNULL(inner)->getTokenMaybeSync(usage)) {
-          KJ_CASE_ONEOF(token, kj::Array<byte>) {
-            return kj::mv(token);
-          }
-          KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
-            return kj::mv(promise);
-          }
-        }
-        KJ_UNREACHABLE;
-      });
-    }
-  }
-
-  kj::OneOf<kj::Own<ActorClassChannel>, kj::Promise<kj::Own<ActorClassChannel>>> getResolved()
-      override {
-    KJ_IF_SOME(channel, inner) {
-      return kj::addRef(*channel);
-    } else {
-      return readyPromise.addBranch().then(
-          [this]() mutable { return kj::addRef(*KJ_ASSERT_NONNULL(inner)); });
-    }
-  }
-
- private:
-  kj::Maybe<kj::Own<ActorClassChannel>> inner;
-  kj::ForkedPromise<void> readyPromise;
-
-  kj::Promise<void> waitForResolution(kj::Promise<kj::Own<ActorClassChannel>> promise) {
-    for (;;) {
-      auto resolution = co_await promise;
-      KJ_SWITCH_ONEOF(resolution->getResolved()) {
-        KJ_CASE_ONEOF(channel, kj::Own<ActorClassChannel>) {
-          inner = kj::mv(channel);
-          co_return;
-        }
-        KJ_CASE_ONEOF(deeperPromise, kj::Promise<kj::Own<ActorClassChannel>>) {
-          promise = kj::mv(deeperPromise);
-        }
-      }
+      auto splitPromise = readyPromise.addBranch()
+                              .then([this]() {
+        auto innerRestore = KJ_ASSERT_NONNULL(inner)->restore();
+        return kj::tuple(kj::mv(innerRestore.cap), kj::mv(innerRestore.task));
+      }).split();
+      return {
+        .cap = kj::mv(kj::get<0>(splitPromise)),
+        .task = kj::mv(kj::get<1>(splitPromise)),
+      };
     }
   }
 };
 
 kj::OneOf<kj::Own<Frankenvalue::CapTableEntry>, kj::Promise<kj::Own<Frankenvalue::CapTableEntry>>>
 resolveCap(kj::Own<Frankenvalue::CapTableEntry> cap) {
-  KJ_IF_SOME(typed, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(*cap)) {
+  KJ_IF_SOME(typed, kj::tryDowncast<IoChannelFactory::TokenizableChannel>(*cap)) {
     KJ_SWITCH_ONEOF(typed.getResolved()) {
-      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::SubrequestChannel>) {
+      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::TokenizableChannel>) {
         return kj::implicitCast<kj::Own<Frankenvalue::CapTableEntry>>(kj::mv(channel));
       }
-      KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::SubrequestChannel>>) {
-        return promise.then([](kj::Own<IoChannelFactory::SubrequestChannel> channel) {
-          return kj::implicitCast<kj::Own<Frankenvalue::CapTableEntry>>(kj::mv(channel));
-        });
-      }
-    }
-    KJ_UNREACHABLE;
-  } else KJ_IF_SOME(typed, kj::tryDowncast<IoChannelFactory::ActorClassChannel>(*cap)) {
-    KJ_SWITCH_ONEOF(typed.getResolved()) {
-      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::ActorClassChannel>) {
-        return kj::implicitCast<kj::Own<Frankenvalue::CapTableEntry>>(kj::mv(channel));
-      }
-      KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::ActorClassChannel>>) {
-        return promise.then([](kj::Own<IoChannelFactory::ActorClassChannel> channel) {
+      KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::TokenizableChannel>>) {
+        return promise.then([](kj::Own<IoChannelFactory::TokenizableChannel> channel) {
           return kj::implicitCast<kj::Own<Frankenvalue::CapTableEntry>>(kj::mv(channel));
         });
       }
@@ -235,6 +204,40 @@ kj::Own<IoChannelFactory::ActorClassChannel> IoChannelFactory::getActorClass(
     }
   }
   return getActorClassResolved(channel, kj::mv(props));
+}
+
+kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::makeRestoredSubrequestChannel(
+    kj::Own<SelfTokenFactory> selfTokenFactory,
+    Frankenvalue restoreParams,
+    kj::Own<SubrequestChannel> inner) {
+  // Note that `inner` doesn't need to be resolved since it's only used to forward requests.
+  // So, the only thing we might have to wait for is `restoreParams`. Which is good as otherwise
+  // this method would get a lot more complicated!
+
+  KJ_IF_SOME(promise, restoreParams.resolveCaps(resolveCap)) {
+    return kj::refcounted<PromisedSubrequestChannel>(
+        promise.then([this, self = addRef(), selfTokenFactory = kj::mv(selfTokenFactory),
+                         restoreParams = kj::mv(restoreParams), inner = kj::mv(inner)]() mutable {
+      return makeRestoredSubrequestChannelResolved(
+          kj::mv(selfTokenFactory), kj::mv(restoreParams), kj::mv(inner));
+    }));
+  }
+
+  return makeRestoredSubrequestChannelResolved(
+      kj::mv(selfTokenFactory), kj::mv(restoreParams), kj::mv(inner));
+}
+
+kj::Own<IoChannelFactory::RpcChannel> IoChannelFactory::makeRestoredRpcChannel(
+    kj::Own<SelfTokenFactory> selfTokenFactory, Frankenvalue restoreParams) {
+  KJ_IF_SOME(promise, restoreParams.resolveCaps(resolveCap)) {
+    return kj::refcounted<PromisedRpcChannel>(
+        promise.then([this, self = addRef(), selfTokenFactory = kj::mv(selfTokenFactory),
+                         restoreParams = kj::mv(restoreParams)]() mutable {
+      return makeRestoredRpcChannelResolved(kj::mv(selfTokenFactory), kj::mv(restoreParams));
+    }));
+  }
+
+  return makeRestoredRpcChannelResolved(kj::mv(selfTokenFactory), kj::mv(restoreParams));
 }
 
 kj::Own<IoChannelFactory::SubrequestChannel> WorkerStubChannel::getEntrypoint(
@@ -276,17 +279,10 @@ kj::Own<IoChannelFactory::ActorClassChannel> IoChannelFactory::actorClassFromTok
       [this, usage](kj::Array<byte> token) { return actorClassFromToken(usage, token.asPtr()); }));
 }
 
-void IoChannelFactory::ActorChannel::requireAllowsTransfer() {
-  JSG_FAIL_REQUIRE(DOMDataCloneError,
-      "Durable Object stubs cannot (yet) be transferred between Workers. This will change in "
-      "a future version.");
-}
-
-kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> IoChannelFactory::ActorChannel::
-    getTokenMaybeSync(ChannelTokenUsage usage) {
-  JSG_FAIL_REQUIRE(DOMDataCloneError,
-      "Durable Object stubs cannot (yet) be transferred between Workers. This will change in "
-      "a future version.");
+kj::Own<IoChannelFactory::RpcChannel> IoChannelFactory::rpcChannelFromToken(
+    ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token) {
+  return kj::refcounted<PromisedRpcChannel>(token.then(
+      [this, usage](kj::Array<byte> token) { return rpcChannelFromToken(usage, token.asPtr()); }));
 }
 
 kj::Promise<void> DynamicWorkerSource::ensureAllResolved() {
@@ -298,12 +294,12 @@ kj::Promise<void> DynamicWorkerSource::ensureAllResolved() {
 
   auto resolveChannelSlot = [&](kj::Own<IoChannelFactory::SubrequestChannel>& slot) {
     KJ_SWITCH_ONEOF(slot->getResolved()) {
-      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::SubrequestChannel>) {
-        slot = kj::mv(channel);
+      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::TokenizableChannel>) {
+        slot = channel.downcast<IoChannelFactory::SubrequestChannel>();
       }
-      KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::SubrequestChannel>>) {
-        promises.add(promise.then([&slot](kj::Own<IoChannelFactory::SubrequestChannel> channel) {
-          slot = kj::mv(channel);
+      KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::TokenizableChannel>>) {
+        promises.add(promise.then([&slot](kj::Own<IoChannelFactory::TokenizableChannel> channel) {
+          slot = channel.downcast<IoChannelFactory::SubrequestChannel>();
         }));
       }
     }
@@ -327,11 +323,11 @@ kj::Promise<void> DynamicWorkerSource::ensureAllResolved() {
 
 kj::Promise<void> Worker::Actor::FacetManager::StartInfo::ensureAllResolved() {
   KJ_SWITCH_ONEOF(actorClass->getResolved()) {
-    KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::ActorClassChannel>) {
-      actorClass = kj::mv(channel);
+    KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::TokenizableChannel>) {
+      actorClass = channel.downcast<IoChannelFactory::ActorClassChannel>();
     }
-    KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::ActorClassChannel>>) {
-      actorClass = co_await promise;
+    KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::TokenizableChannel>>) {
+      actorClass = (co_await promise).downcast<IoChannelFactory::ActorClassChannel>();
     }
   }
 }
@@ -351,6 +347,26 @@ kj::Own<Frankenvalue::CapTableEntry> IoChannelCapTableEntry::clone() {
 
 kj::Own<Frankenvalue::CapTableEntry> IoChannelCapTableEntry::threadSafeClone() const {
   return kj::heap<IoChannelCapTableEntry>(type, channel);
+}
+
+template <>
+kj::Own<IoChannelFactory::SubrequestChannel> newPromisedChannel<
+    IoChannelFactory::SubrequestChannel>(
+    kj::Promise<kj::Own<IoChannelFactory::SubrequestChannel>> promise) {
+  return kj::refcounted<PromisedSubrequestChannel>(kj::mv(promise));
+}
+
+template <>
+kj::Own<IoChannelFactory::ActorClassChannel> newPromisedChannel<
+    IoChannelFactory::ActorClassChannel>(
+    kj::Promise<kj::Own<IoChannelFactory::ActorClassChannel>> promise) {
+  return kj::refcounted<PromisedActorClassChannel>(kj::mv(promise));
+}
+
+template <>
+kj::Own<IoChannelFactory::RpcChannel> newPromisedChannel<IoChannelFactory::RpcChannel>(
+    kj::Promise<kj::Own<IoChannelFactory::RpcChannel>> promise) {
+  return kj::refcounted<PromisedRpcChannel>(kj::mv(promise));
 }
 
 }  // namespace workerd

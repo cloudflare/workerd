@@ -12,7 +12,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "tracing-log-attribution-test.js"),
         ],
-        compatibilityFlags = ["experimental", "nodejs_compat"],
+        compatibilityFlags = ["nodejs_compat"],
         streamingTails = ["tail"],
         bindings = [
           (
@@ -32,5 +32,5 @@ const tailWorker :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "tracing-log-attribution-instrumentation-test.js"),
   ],
-  compatibilityFlags = ["experimental", "nodejs_compat"],
+  compatibilityFlags = ["nodejs_compat"],
 );

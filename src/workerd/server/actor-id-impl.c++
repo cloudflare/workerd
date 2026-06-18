@@ -87,16 +87,22 @@ kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::idFromString(kj::String str
   JSG_REQUIRE(str.size() == SHA256_DIGEST_LENGTH * 2 && !decoded.hadErrors &&
           decoded.size() == SHA256_DIGEST_LENGTH,
       TypeError, "Invalid Durable Object ID: must be 64 hex digits");
+  return idFromRaw(decoded, kj::none);
+}
+
+kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::idFromRaw(
+    kj::ArrayPtr<const byte> bytes, kj::Maybe<kj::String> name) {
+  KJ_REQUIRE(bytes.size() == SHA256_DIGEST_LENGTH, "Invalid Durable Object ID: must be 32 bytes");
 
   kj::byte id[BASE_LENGTH + SHA256_DIGEST_LENGTH]{};
-  memcpy(id, decoded.begin(), BASE_LENGTH);
+  memcpy(id, bytes.begin(), BASE_LENGTH);
   computeMac(id);
 
   // Verify that the computed mac matches the input.
-  JSG_REQUIRE(kj::arrayPtr(id).slice(BASE_LENGTH).startsWith(decoded.asPtr().slice(BASE_LENGTH)),
-      TypeError, "Durable Object ID is not valid for this namespace.");
+  JSG_REQUIRE(kj::arrayPtr(id).slice(BASE_LENGTH).startsWith(bytes.slice(BASE_LENGTH)), TypeError,
+      "Durable Object ID is not valid for this namespace.");
 
-  return kj::heap<ActorIdImpl>(id, kj::none);
+  return kj::heap<ActorIdImpl>(id, kj::mv(name));
 }
 
 kj::Own<ActorIdFactory> ActorIdFactoryImpl::cloneWithJurisdiction(

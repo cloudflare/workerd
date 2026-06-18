@@ -12,7 +12,7 @@ const config :Workerd.Config = (
         modules = [
           (name = "worker.js", esModule = embed "http-socket-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "experimental"],
+        compatibilityFlags = ["nodejs_compat", "experimental", "unsafe_module"],
         bindings = [
           (name = "HTTP_SOCKET_SERVER_PORT", fromEnvironment = "HTTP_SOCKET_SERVER_PORT"),
           (name = "SOCKET_PARTIALLY_WRITTEN", fromEnvironment = "SOCKET_PARTIALLY_WRITTEN"),
@@ -21,15 +21,15 @@ const config :Workerd.Config = (
         ],
       )
     ),
-    ( name = "internet", 
-      network = ( 
+    ( name = "internet",
+      network = (
         allow = ["private"],
         tlsOptions = (
           trustedCertificates = [
             embed "starttls-server.pem",
           ],
         ),
-      ) 
+      )
     ),
   ],
 );

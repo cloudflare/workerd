@@ -7,14 +7,16 @@ type SpanValue = string | number | boolean;
 
 declare class Span {
   // Returns true if this span will be recorded to the tracing system. False when the
-  // current async context is not being traced, or when the span has already been submitted
-  // (which happens automatically when the enterSpan callback returns). Callers can gate
-  // expensive attribute-computation code on this.
+  // current async context is not being traced, or when the span has already been submitted.
+  // Callers can gate expensive attribute-computation code on this.
   readonly isTraced: boolean;
 
   // Sets a single attribute on the span. If `value` is undefined, the attribute is not set,
   // which is convenient for optional fields.
   setAttribute(key: string, value: SpanValue | undefined): void;
+
+  // Ends the span and submits its attributes to the tracing system. Idempotent.
+  end(): void;
 }
 
 // The default export is a singleton instance of the C++ `Tracing` class (see
@@ -29,6 +31,15 @@ declare const tracing: {
   // fulfilled or rejected). If no IO context is present the callback runs with a no-op
   // span.
   enterSpan<T, A extends unknown[]>(
+    name: string,
+    callback: (span: Span, ...args: A) => T,
+    ...args: A
+  ): T;
+
+  // Creates a span, makes it active while invoking `callback(span, ...args)`, and
+  // returns the callback result without automatically ending the span. Callers must
+  // invoke `span.end()` explicitly.
+  startActiveSpan<T, A extends unknown[]>(
     name: string,
     callback: (span: Span, ...args: A) => T,
     ...args: A

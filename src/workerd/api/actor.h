@@ -126,6 +126,29 @@ class DurableObject final: public Fetcher {
     // the interface implemented by users' Durable Object classes.
   }
 
+  // Even though it ought to be inherited, we have to declare this explicitly or the serialization
+  // JSG template magic gets mad.
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+    return Fetcher::serialize(js, serializer);
+  }
+
+  // DurableObject stubs serialize as ServiceStubs, aka Fetchers. We just forward to the
+  // implementation of serialize() from Fetcher, which is our parent class anyway. On the other
+  // end, it is deserialized as a Fetcher.
+  //
+  // Because DO stubs serialize as `Fetcher`, the `id` and `name` properties get dropped when
+  // serialized. Some arguments why this is the right thing:
+  // - Honestly, these properties shouldn't be there. They are blocking the ability for a DO to
+  //   implement RPC methods named `id` or `name`. The app can just as easily store the ID
+  //   alongside the stub. Arguably we should remove these properties (with a compat flag).
+  // - You may not WANT to send them over RPC. You may not want the recipient of the stub to know
+  //   the ID or name of the thing it is talking to. If you do want it to know, you should tell it
+  //   so explicitly.
+  // - `DurableObjectId` is not serializable, and it would actually be tricky to make it
+  //   serializable due to the fact that you need an `ActorIdFactory` to construct a valid ID for
+  //   a given namespace. This would take some work to solve.
+  JSG_ONEWAY_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
+
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("id", id);
   }
@@ -211,9 +234,9 @@ class DurableObjectNamespace: public jsg::Object {
 
     JSG_STRUCT(locationHint, routingMode, version);
 
-    // DurableObjectLocationHint values from https://developers.cloudflare.com/workers/runtime-apis/durable-objects/#providing-a-location-hint
+    // DurableObjectLocationHint values from https://developers.cloudflare.com/durable-objects/reference/data-location/#provide-a-location-hint
     JSG_STRUCT_TS_DEFINE(
-      type DurableObjectLocationHint = "wnam" | "enam" | "sam" | "weur" | "eeur" | "apac" | "oc" | "afr" | "me";
+      type DurableObjectLocationHint = "wnam" | "enam" | "sam" | "weur" | "eeur" | "apac" | "apac-ne" | "apac-se" | "oc" | "afr" | "me";
       type DurableObjectRoutingMode = "primary-only");
 
     JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
@@ -310,8 +333,12 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
         version(kj::mv(version)) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
+  kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
 
  private:
+  IoChannelFactory::ActorChannel& getOrCreateActorChannel(
+      IoContext& context, SpanParent parentSpan);
+
   ChannelIdOrFactory channelIdOrFactory;
   jsg::Ref<DurableObjectId> id;
   kj::Maybe<kj::String> locationHint;
@@ -335,8 +362,12 @@ class LocalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
         actorId(kj::mv(actorId)) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
+  kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
 
  private:
+  IoChannelFactory::ActorChannel& getOrCreateActorChannel(
+      IoContext& context, SpanParent parentSpan);
+
   uint channelId;
   kj::String actorId;
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
@@ -356,6 +387,7 @@ class ReplicaActorOutgoingFactory final: public Fetcher::OutgoingFactory {
         actorId(kj::mv(actorId)) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
+  kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
 
  private:
   kj::Own<IoChannelFactory::ActorChannel> actorChannel;

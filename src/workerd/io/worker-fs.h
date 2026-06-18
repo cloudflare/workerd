@@ -220,7 +220,8 @@ class File: public kj::Refcounted {
   kj::OneOf<FsError, jsg::JsString> readAllText(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
   // Reads all the contents of the file as a Uint8Array.
-  kj::OneOf<FsError, jsg::BufferSource> readAllBytes(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
+  kj::OneOf<FsError, jsg::JsRef<jsg::JsUint8Array>> readAllBytes(
+      jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
   // Reads data from the file at the given offset into the given buffer.
   virtual uint32_t read(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<kj::byte> buffer) const = 0;

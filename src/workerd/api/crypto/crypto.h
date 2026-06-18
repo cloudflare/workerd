@@ -519,31 +519,30 @@ class SubtleCrypto: public jsg::Object {
     JSG_STRUCT_TS_OVERRIDE(JsonWebKey);  // Rename from SubtleCryptoJsonWebKey
   };
 
-  using ImportKeyData = kj::OneOf<kj::Array<kj::byte>, JsonWebKey>;
+  using ImportKeyData = kj::OneOf<jsg::JsRef<jsg::JsBufferSource>, JsonWebKey>;
   using ExportKeyData = kj::OneOf<jsg::JsRef<jsg::JsArrayBuffer>, JsonWebKey>;
 
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> encrypt(jsg::Lock& js,
       kj::OneOf<kj::String, EncryptAlgorithm> algorithm,
       const CryptoKey& key,
-      kj::Array<const kj::byte> plainText);
+      jsg::JsBufferSource plainText);
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> decrypt(jsg::Lock& js,
       kj::OneOf<kj::String, EncryptAlgorithm> algorithm,
       const CryptoKey& key,
-      kj::Array<const kj::byte> cipherText);
+      jsg::JsBufferSource cipherText);
 
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> sign(jsg::Lock& js,
       kj::OneOf<kj::String, SignAlgorithm> algorithm,
       const CryptoKey& key,
-      kj::Array<const kj::byte> data);
+      jsg::JsBufferSource data);
   jsg::Promise<bool> verify(jsg::Lock& js,
       kj::OneOf<kj::String, SignAlgorithm> algorithm,
       const CryptoKey& key,
-      kj::Array<const kj::byte> signature,
-      kj::Array<const kj::byte> data);
+      jsg::JsBufferSource signature,
+      jsg::JsBufferSource data);
 
-  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> digest(jsg::Lock& js,
-      kj::OneOf<kj::String, HashAlgorithm> algorithm,
-      kj::Array<const kj::byte> data);
+  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> digest(
+      jsg::Lock& js, kj::OneOf<kj::String, HashAlgorithm> algorithm, jsg::JsBufferSource data);
 
   jsg::Promise<kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair>> generateKey(jsg::Lock& js,
       kj::OneOf<kj::String, GenerateKeyAlgorithm> algorithm,
@@ -591,7 +590,7 @@ class SubtleCrypto: public jsg::Object {
       const jsg::TypeHandler<JsonWebKey>& jwkHandler);
   jsg::Promise<jsg::Ref<CryptoKey>> unwrapKey(jsg::Lock& js,
       kj::String format,
-      kj::Array<const kj::byte> wrappedKey,
+      jsg::JsBufferSource wrappedKey,
       const CryptoKey& unwrappingKey,
       kj::OneOf<kj::String, EncryptAlgorithm> unwrapAlgorithm,
       kj::OneOf<kj::String, ImportKeyAlgorithm> unwrappedKeyAlgorithm,

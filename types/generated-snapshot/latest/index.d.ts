@@ -480,7 +480,8 @@ interface ExecutionContext<Props = unknown> {
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
   cache?: CacheContext;
-  tracing?: Tracing;
+  readonly access?: CloudflareAccessContext;
+  tracing: Tracing;
 }
 type ExportedHandlerFetchHandler<
   Env = unknown,
@@ -581,6 +582,10 @@ interface CachePurgeOptions {
 interface CacheContext {
   purge(options: CachePurgeOptions): Promise<CachePurgeResult>;
 }
+interface CloudflareAccessContext {
+  readonly aud: string;
+  getIdentity(): Promise<CloudflareAccessIdentity | undefined>;
+}
 declare abstract class ColoLocalActorNamespace {
   get(actorId: string): Fetcher;
 }
@@ -646,6 +651,8 @@ type DurableObjectLocationHint =
   | "weur"
   | "eeur"
   | "apac"
+  | "apac-ne"
+  | "apac-se"
   | "oc"
   | "afr"
   | "me";
@@ -788,6 +795,7 @@ interface DurableObjectFacets {
   ): Fetcher<T>;
   abort(name: string, reason: any): void;
   delete(name: string): void;
+  clone(src: string, dst: string): void;
 }
 interface FacetStartupOptions<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
@@ -3849,6 +3857,28 @@ interface EventSourceEventSourceInit {
   withCredentials?: boolean;
   fetcher?: Fetcher;
 }
+interface ExecOutput {
+  readonly stdout: ArrayBuffer;
+  readonly stderr: ArrayBuffer;
+  readonly exitCode: number;
+}
+interface ContainerExecOptions {
+  cwd?: string;
+  env?: Record<string, string>;
+  user?: string;
+  stdin?: ReadableStream | "pipe";
+  stdout?: "pipe" | "ignore";
+  stderr?: "pipe" | "ignore" | "combined";
+}
+interface ExecProcess {
+  readonly stdin: WritableStream | null;
+  readonly stdout: ReadableStream | null;
+  readonly stderr: ReadableStream | null;
+  readonly pid: number;
+  readonly exitCode: Promise<number>;
+  output(): Promise<ExecOutput>;
+  kill(signal?: number): void;
+}
 interface Container {
   get running(): boolean;
   start(options?: ContainerStartupOptions): void;
@@ -3866,6 +3896,7 @@ interface Container {
     options: ContainerSnapshotOptions,
   ): Promise<ContainerSnapshot>;
   interceptOutboundHttps(addr: string, binding: Fetcher): Promise<void>;
+  exec(cmd: string[], options?: ContainerExecOptions): Promise<ExecProcess>;
 }
 interface ContainerDirectorySnapshot {
   id: string;
@@ -4060,11 +4091,62 @@ interface Tracing {
     callback: (span: Span, ...args: A) => T,
     ...args: A
   ): T;
+  startActiveSpan<T, A extends unknown[]>(
+    name: string,
+    callback: (span: Span, ...args: A) => T,
+    ...args: A
+  ): T;
   Span: typeof Span;
 }
 declare abstract class Span {
   get isTraced(): boolean;
   setAttribute(key: string, value?: boolean | number | string): void;
+  end(): void;
+}
+/**
+ * Represents the identity of a user authenticated via Cloudflare Access.
+ * This matches the result of calling /cdn-cgi/access/get-identity.
+ *
+ * The exact structure of the returned object depends on the identity provider
+ * configuration for the Access application. The fields below represent commonly
+ * available properties, but additional provider-specific fields may be present.
+ */
+interface CloudflareAccessIdentity extends Record<string, unknown> {
+  /** The user's email address, if available from the identity provider. */
+  email?: string;
+  /** The user's display name. */
+  name?: string;
+  /** The user's unique identifier. */
+  user_uuid?: string;
+  /** The Cloudflare account ID. */
+  account_id?: string;
+  /** Login timestamp (Unix epoch seconds). */
+  iat?: number;
+  /** The user's IP address at authentication time. */
+  ip?: string;
+  /** Authentication methods used (e.g., "pwd"). */
+  amr?: string[];
+  /** Identity provider information. */
+  idp?: {
+    id: string;
+    type: string;
+  };
+  /** Geographic information about where the user authenticated. */
+  geo?: {
+    country: string;
+  };
+  /** Group memberships from the identity provider. */
+  groups?: Array<{
+    id: string;
+    name: string;
+    email?: string;
+  }>;
+  /** Device posture check results, keyed by check ID. */
+  devicePosture?: Record<string, unknown>;
+  /** True if the user connected via Cloudflare WARP. */
+  is_warp?: boolean;
+  /** True if the user is authenticated via Cloudflare Gateway. */
+  is_gateway?: boolean;
 }
 // ============================================================================
 // Agent Memory
@@ -12290,6 +12372,17 @@ interface RequestInitCfProperties extends Record<string, unknown> {
   cacheReserveMinimumFileSize?: number;
   scrapeShield?: boolean;
   apps?: boolean;
+  /**
+   * Controls whether an outbound gRPC-web subrequest from this Worker is
+   * converted to gRPC at the Cloudflare edge.
+   *
+   * - `"passthrough"`: forward the subrequest unchanged as gRPC-web (default).
+   * - `"convert"`: convert the gRPC-web subrequest to gRPC at the edge.
+   *
+   * Provides per-request control over the same edge conversion behavior
+   * gated by the `auto_grpc_convert` compatibility flag.
+   */
+  grpcWeb?: "passthrough" | "convert";
   image?: RequestInitCfPropertiesImage;
   minify?: RequestInitCfPropertiesImageMinify;
   mirage?: boolean;
@@ -15577,7 +15670,8 @@ declare namespace TailStream {
     | "loadShed"
     | "responseStreamDisconnected"
     | "scriptNotFound"
-    | "internalError";
+    | "internalError"
+    | "exceededWallTime";
   interface ScriptVersion {
     readonly id: string;
     readonly tag?: string;

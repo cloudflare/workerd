@@ -57,11 +57,10 @@ void getEntropy(kj::ArrayPtr<kj::byte> output) {
     }
 
     size_t toCopy = kj::min(state.data.size(), output.size());
-    output.first(toCopy).copyFrom(state.data.first(toCopy));
+    output.write(state.data.first(toCopy));
     // Zero out the source buffer after copying to prevent sensitive data from remaining in memory
     OPENSSL_cleanse(state.data.first(toCopy).begin(), toCopy);
     state.data = state.data.slice(toCopy);
-    output = output.slice(toCopy);
   }
 }
 

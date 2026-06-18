@@ -85,6 +85,31 @@ using kj::uint;
 
 class GcVisitor;
 class HeapTracer;
+class Wrappable;  // Forward declaration for WeakRefAnchor.
+
+// Shared alive/dead flag for weak references to Wrappable objects. Allocated lazily in
+// Wrappable when a weak reference is first requested via getOrCreateWeakRefAnchor().
+// Automatically invalidated in Wrappable's destructor, so derived types never need to
+// manage invalidation.
+//
+// The anchor itself does NOT store the target pointer — each jsg::WeakRef<T> stores its
+// own typed T* alongside a reference to this anchor. This avoids downcasting from the
+// privately-inherited Wrappable base class.
+class WeakRefAnchor final: public kj::Refcounted {
+ public:
+  bool isAlive() const {
+    return alive;
+  }
+
+ private:
+  bool alive = true;
+
+  void invalidate() {
+    alive = false;
+  }
+
+  friend class Wrappable;
+};
 
 // Base class for C++ objects which can be "wrapped" for JavaScript consumption. A JavaScript
 // "wrapper" object is created, and then the JS wrapper and C++ Wrappable are "attached" to each
@@ -108,6 +133,15 @@ class HeapTracer;
 // Wrappable and are not visible to GC tracing.
 class Wrappable: public kj::Refcounted {
  public:
+  ~Wrappable() noexcept(false) {
+    // Invalidate all outstanding jsg::WeakRef<T>s before any derived state is accessed again.
+    // This is safe in single-threaded JSG context because no other code can call tryGet() during
+    // the destructor call chain.
+    KJ_IF_SOME(a, weakRefAnchor) {
+      a->invalidate();
+    }
+  }
+
   enum InternalFields : int {
     // Field must contain a pointer to `WORKERD_WRAPPABLE_TAG`. This is a workerd-specific
     // tag that helps us to identify a v8 API object as one of our own.
@@ -246,9 +280,26 @@ class Wrappable: public kj::Refcounted {
   // When `wrapperRef` is non-empty, the Wrappable is a member of the list `HeapTracer::wrappers`.
   kj::ListLink<Wrappable> link;
 
+  // Lazy-allocated shared state for jsg::WeakRef<T>. Zero overhead for objects that never
+  // have weak references taken. Created on first call to getOrCreateWeakRefAnchor().
+  kj::Maybe<kj::Rc<WeakRefAnchor>> weakRefAnchor;
+
+  // Returns (or creates) the shared WeakRefAnchor for this object. Used by Ref<T>::getWeakRef().
+  kj::Rc<WeakRefAnchor> getOrCreateWeakRefAnchor() {
+    KJ_IF_SOME(a, weakRefAnchor) {
+      return a.addRef();
+    }
+    auto a = kj::rc<WeakRefAnchor>();
+    weakRefAnchor = a.addRef();
+    return a;
+  }
+
+  friend class Object;
   friend class GcVisitor;
   friend class HeapTracer;
   friend class MemoryTracker;
+  template <typename>
+  friend class Ref;
 };
 
 // For historical reasons, this is actually implemented in setup.c++.
@@ -339,9 +390,10 @@ T& extractInternalPointer(
         getAlignedPointerFromEmbedderData<T>(context, ContextPointerSlot::GLOBAL_WRAPPER));
   } else {
     KJ_ASSERT(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
-    return *reinterpret_cast<T*>(
-        object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
-            static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
+    auto* ptr = object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+        static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+    KJ_ASSERT(ptr != nullptr, "EPT type-tag mismatch: internal field returned nullptr");
+    return *reinterpret_cast<T*>(ptr);
   }
 }
 

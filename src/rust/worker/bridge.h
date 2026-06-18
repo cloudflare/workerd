@@ -36,6 +36,8 @@ inline workerd::EventOutcome fromImpl(kj_rs::Rust*, workerd::rust::worker::Event
       return workerd::EventOutcome::RESPONSE_STREAM_DISCONNECTED;
     case workerd::rust::worker::EventOutcome::InternalError:
       return workerd::EventOutcome::INTERNAL_ERROR;
+    case workerd::rust::worker::EventOutcome::ExceededWallTime:
+      return workerd::EventOutcome::EXCEEDED_WALL_TIME;
   }
 }
 

@@ -7,6 +7,7 @@
 //
 // Any files declaring an API to export to JavaScript will need to include this header.
 
+#include "kj/common.h"
 #include "util.h"
 #include "wrappable.h"
 
@@ -540,7 +541,7 @@ using HasGetTemplateOverload = decltype(kj::instance<T&>().getTemplate(
 
 // Declares the type serializable. See jsg::Serializer for usage.
 #define JSG_SERIALIZABLE(TAG, ...)                                                                 \
-  static_assert(static_cast<uint>(jsgSuper::jsgSerializeTag) != static_cast<uint>(TAG));           \
+  static constexpr auto jsgSerializeLevel = jsgSuper::jsgSerializeLevel + 1;                       \
   static constexpr auto jsgSerializeTag = TAG;                                                     \
   static constexpr decltype(jsgSerializeTag) jsgSerializeOldTags[] = {__VA_ARGS__};                \
   static constexpr auto jsgSerializeOneway = false
@@ -551,7 +552,7 @@ using HasGetTemplateOverload = decltype(kj::instance<T&>().getTemplate(
 //
 // Used e.g. for JsRpcTarget, which becomes JsRpcStub after serialization.
 #define JSG_ONEWAY_SERIALIZABLE(TAG)                                                               \
-  static_assert(static_cast<uint>(jsgSuper::jsgSerializeTag) != static_cast<uint>(TAG));           \
+  static constexpr auto jsgSerializeLevel = jsgSuper::jsgSerializeLevel + 1;                       \
   static constexpr auto jsgSerializeTag = TAG;                                                     \
   static constexpr decltype(jsgSerializeTag) jsgSerializeOldTags[] = {};                           \
   static constexpr auto jsgSerializeOneway = true
@@ -803,6 +804,9 @@ enum SetDataIndex {
 class Lock;
 WD_STRONG_BOOL(RequireEsm);
 
+template <typename T>
+class WeakV8Ref;
+
 // Arbitrary V8 data, wrapped for storage from C++. You can't do much with it, so instead you
 // should probably use V8Ref<T>, a version of this that's strongly typed.
 //
@@ -904,6 +908,13 @@ class Data {
   // garbage collection.
   void moveFromTraced(Data& other, v8::TracedReference<v8::Data>& otherTracedRef) noexcept;
 
+  // Defers destruction of a v8::Global handle to the next time the isolate is locked.
+  // Used by Data::destroy() and WeakV8Ref::destroy().
+  static void deferGlobalDestruction(v8::Isolate* isolate, v8::Global<v8::Data> handle);
+
+  template <typename>
+  friend class WeakV8Ref;
+
   friend class MemoryTracker;
 };
 
@@ -952,6 +963,13 @@ class V8Ref: private Data {
   template <typename U>
   V8Ref<U> cast(jsg::Lock& js);
 
+  // Create a weak reference to the held V8 value. The weak reference does not prevent the
+  // value from being garbage collected and is not traced by GC.
+  WeakV8Ref<T> getWeakRef(v8::Isolate* isolate) const {
+    return WeakV8Ref<T>(isolate, getHandle(isolate));
+  }
+  WeakV8Ref<T> getWeakRef(jsg::Lock& js) const;
+
  private:
   friend class GcVisitor;
   friend class MemoryTracker;
@@ -993,6 +1011,106 @@ class HashableV8Ref: public V8Ref<T> {
   HashableV8Ref(v8::Isolate* isolate, v8::Local<T> handle, int identityHash)
       : V8Ref<T>(isolate, handle),
         identityHash(identityHash) {}
+};
+
+// A weak reference to a V8 value (where T is a v8::Value subtype).
+//
+// Unlike V8Ref<T>, a WeakV8Ref<T> does NOT prevent the referenced value from being garbage
+// collected and is NOT traced by V8's GC. Internally it holds a v8::Global<T> with SetWeak()
+// applied, which V8 automatically clears when the target is collected.
+//
+// Use tryGetHandle() to safely access the value:
+//
+//     KJ_IF_SOME(local, weakRef.tryGetHandle(js)) {
+//       // value is still alive, use local
+//     }
+//
+// Use tryAddRef() to promote to a strong V8Ref<T>:
+//
+//     KJ_IF_SOME(strong, weakRef.tryAddRef(js.v8Isolate)) {
+//       // strong keeps the value alive
+//     }
+//
+// It is safe to destroy a WeakV8Ref outside the isolate lock (handles are deferred for later
+// cleanup, like V8Ref).
+template <typename T>
+class WeakV8Ref final {
+ public:
+  WeakV8Ref(decltype(nullptr)) {}
+
+  WeakV8Ref(v8::Isolate* isolate, v8::Local<T> handle): isolate(isolate), handle(isolate, handle) {
+    this->handle.SetWeak();
+  }
+
+  ~WeakV8Ref() noexcept(false) {
+    destroy();
+  }
+
+  WeakV8Ref(WeakV8Ref&& other) noexcept: isolate(other.isolate), handle(kj::mv(other.handle)) {
+    other.isolate = nullptr;
+  }
+
+  WeakV8Ref& operator=(WeakV8Ref&& other) {
+    if (this != &other) {
+      auto tmp = kj::mv(other.handle);
+      auto tmpIsolate = other.isolate;
+      other.handle = kj::mv(handle);
+      other.isolate = isolate;
+      handle = kj::mv(tmp);
+      isolate = tmpIsolate;
+      other.destroy();
+    }
+    return *this;
+  }
+  KJ_DISALLOW_COPY(WeakV8Ref);
+
+  // Check if the referenced value is still alive (not yet garbage collected).
+  bool isAlive() const {
+    return !handle.IsEmpty();
+  }
+
+  // Try to get the handle. Returns kj::none if the value has been garbage collected.
+  kj::Maybe<v8::Local<T>> tryGetHandle(v8::Isolate* isolate) const {
+    if (handle.IsEmpty()) return kj::none;
+    if constexpr (std::is_base_of_v<v8::Value, T>) {
+      auto local = handle.Get(isolate).template As<v8::Value>().template As<T>();
+      if (local.IsEmpty()) return kj::none;
+      return local;
+    } else {
+      auto local = handle.Get(isolate).template As<T>();
+      if (local.IsEmpty()) return kj::none;
+      return local;
+    }
+  }
+  kj::Maybe<v8::Local<T>> tryGetHandle(Lock& js) const;
+
+  // Get the handle, throwing kj::Exception if collected.
+  v8::Local<T> getHandle(v8::Isolate* isolate) const {
+    return KJ_ASSERT_NONNULL(
+        tryGetHandle(isolate), "attempt to access collected jsg::WeakV8Ref target");
+  }
+  v8::Local<T> getHandle(Lock& js) const;
+
+  // Try to promote to a strong V8Ref<T>. Returns kj::none if collected.
+  kj::Maybe<V8Ref<T>> tryAddRef(v8::Isolate* isolate) const {
+    return tryGetHandle(isolate).map([&](v8::Local<T> local) { return V8Ref<T>(isolate, local); });
+  }
+  kj::Maybe<V8Ref<T>> tryAddRef(Lock& js) const;
+
+ private:
+  v8::Isolate* isolate = nullptr;
+  v8::Global<v8::Data> handle;
+
+  void destroy() {
+    if (isolate != nullptr && !handle.IsEmpty()) {
+      if (v8::Locker::IsLocked(isolate)) {
+        handle.Reset();
+      } else {
+        Data::deferGlobalDestruction(isolate, kj::mv(handle));
+      }
+      isolate = nullptr;
+    }
+  }
 };
 
 template <V8Value T>
@@ -1167,6 +1285,10 @@ constexpr bool resourceNeedsGcTracing();
 template <typename T>
 void visitSubclassForGc(T* obj, GcVisitor& visitor);
 
+// Forward declaration for weak reference types.
+template <typename T>
+class WeakRef;
+
 // All resource types must inherit from this.
 class Object: private Wrappable {
  public:
@@ -1205,9 +1327,12 @@ class Object: private Wrappable {
   template <typename TypeWrapper>
   inline void jsgInitReflection(TypeWrapper& wrapper) {}
 
-  // Dummy invalid serialization tag. This is only used to detect when a subclass has defined their
-  // own tag.
-  static constexpr uint jsgSerializeTag = kj::maxValue;
+  // This is used to detect when a subclass has defined a custom serializer.
+  static constexpr uint jsgSerializeLevel = 0;
+
+ protected:
+  template <typename T>
+  WeakRef<T> getWeakRefToThis(Lock& js);
 
  private:
   inline void visitForMemoryInfo(MemoryTracker& tracker) const {}
@@ -1346,6 +1471,12 @@ class Ref {
     inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>());
   }
 
+  // Obtain a weak reference to the referenced object. The weak reference does not keep the
+  // object alive and does not participate in GC tracing. It becomes invalid when the underlying
+  // Wrappable is destroyed (all Ref<T>s dropped and JS wrapper collected).
+  WeakRef<T> getWeakRef(Lock& js) &;
+  WeakRef<T> getWeakRef(Lock& js) && = delete;  // Don't weaken an expiring ref
+
  private:
   kj::Own<T> inner;
 
@@ -1377,6 +1508,8 @@ class Ref {
   template <typename>
   friend class ObjectWrapper;
   friend class GcVisitor;
+  template <typename>
+  friend class WeakRef;
 };
 
 template <MemoryRetainer T>
@@ -1400,6 +1533,177 @@ Ref<T> _jsgThis(T* obj) {
 }
 
 #define JSG_THIS (::workerd::jsg::_jsgThis(this))
+#define JSG_THIS_WEAK(js) (getWeakRefToThis<std::remove_pointer_t<decltype(this)>>(js))
+
+// Refcounted holder of a weak (non-owning) back-reference to a v8::Isolate. The reference is
+// nulled out via detach() just before the isolate is destroyed, so that objects which may outlive
+// the isolate can cheaply and safely observe whether it is still alive via isIsolateAlive(),
+// without dereferencing a dangling pointer.
+class IsolateLiveness: public kj::AtomicRefcounted {
+ public:
+  IsolateLiveness(v8::Isolate* isolate): isolate(isolate) {}
+
+  // Returns the isolate if it is still alive, or nullptr if it has been torn down (detach()ed).
+  // The returned pointer is only safe to dereference while the isolate cannot be concurrently
+  // destroyed -- e.g. while holding (or about to take) the isolate lock.
+  v8::Isolate* tryGetIsolate() const {
+    return isolate.load(std::memory_order_relaxed);
+  }
+
+  // Returns true if the isolate is still alive (detach() has not been called).
+  bool isIsolateAlive() const {
+    return tryGetIsolate() != nullptr;
+  }
+
+  // Disconnects from the isolate (called just before destroying the isolate).
+  void detach() const {
+    isolate.store(nullptr, std::memory_order_relaxed);
+  }
+
+ protected:
+  // Mutable so that it can be set null when the isolate is destroyed.
+  mutable std::atomic<v8::Isolate*> isolate;
+  static_assert(std::atomic<v8::Isolate*>::is_always_lock_free);
+};
+
+// A non-owning weak reference to a resource type (a type with a JSG_RESOURCE_TYPE block).
+//
+// Unlike Ref<T>, a WeakRef<T> does NOT keep the referenced object alive and is NOT traced by
+// V8's GC. When the underlying Wrappable is destroyed (all Ref<T>s are dropped and the JS
+// wrapper is collected), the WeakRef automatically becomes invalid — no manual invalidation
+// is required.
+//
+// Use operator->() for convenient single-expression access that asserts liveness:
+//
+//     weakFoo->doSomething();  // throws kj::Exception if dead
+//
+// Use tryGet() or tryAddRef() when the target might legitimately be dead:
+//
+//     KJ_IF_SOME(strong, weakFoo.tryAddRef(js)) {
+//       strong->doSomething();
+//     }
+//
+// operator*() is deliberately omitted to discourage storing dangling references.
+//
+// Safe to drop outside of the isolate lock, but requires the isolate lock to
+// acquire more references.
+template <typename T>
+class WeakRef {
+ public:
+  WeakRef(decltype(nullptr)) {}
+
+  WeakRef(WeakRef&& other) noexcept: impl(kj::mv(other.impl)) {}
+  template <typename U>
+    requires(kj::canConvert<U&, T&>())
+  WeakRef(WeakRef<U>&& other) noexcept {
+    KJ_IF_SOME(o, kj::mv(other.impl)) {
+      impl = Impl{
+        .target = o.target,
+        .anchor = kj::mv(o.anchor),
+        .isolateLiveness = kj::mv(o.isolateLiveness),
+      };
+    }
+  }
+  KJ_DISALLOW_COPY(WeakRef);
+
+  WeakRef& operator=(WeakRef&& other) noexcept {
+    if (this != &other) {
+      auto otherImpl = kj::mv(other.impl);
+      destroy();
+      impl = kj::mv(otherImpl);
+    }
+    return *this;
+  }
+
+  template <typename U>
+    requires(kj::canConvert<U&, T&>())
+  WeakRef& operator=(WeakRef<U>&& other) noexcept {
+    auto otherImpl = kj::mv(other.impl);
+    destroy();
+    KJ_IF_SOME(o, otherImpl) {
+      impl = Impl{
+        .target = o.target,
+        .anchor = kj::mv(o.anchor),
+        .isolateLiveness = kj::mv(o.isolateLiveness),
+      };
+    }
+    return *this;
+  }
+
+  ~WeakRef() noexcept(false) {
+    destroy();
+  }
+
+  // Dereference. Asserts if the target has been destroyed.
+  // Safe for single-expression use: weakFoo->doSomething()
+  T* operator->() const KJ_LIFETIMEBOUND {
+    auto& i = KJ_ASSERT_NONNULL(impl, "attempt to access destroyed jsg::WeakRef target");
+    KJ_ASSERT(i.anchor->isAlive(), "attempt to access invalidated jsg::WeakRef target");
+    return &i.target;
+  }
+
+  // Deliberately omitted: operator*()
+  // This prevents: T& ref = *weakRef;  (dangling reference risk)
+
+  // Check if the referenced object is still alive.
+  bool isAlive() const {
+    KJ_IF_SOME(i, impl) {
+      return i.anchor->isAlive();
+    }
+    return false;
+  }
+
+  // Try to get a raw reference. Returns kj::none if the target has been destroyed.
+  // Use of tryGet is discouraged because it does return a raw reference that can
+  // dangle. Use it only for single-expression access, essentially as a non-asserting
+  // version of operator->().
+  kj::Maybe<T&> tryGet() const KJ_LIFETIMEBOUND {
+    KJ_IF_SOME(i, impl) {
+      if (i.anchor->isAlive()) {
+        return i.target;
+      }
+    }
+    return kj::none;
+  }
+
+  // Try to promote to a strong Ref<T>. Returns kj::none if the target has been destroyed.
+  kj::Maybe<Ref<T>> tryAddRef(Lock&) const {
+    return tryGet().map([](T& t) { return Ref<T>(kj::addRef(t)); });
+  }
+
+  // Create another weak ref to the same target.
+  WeakRef addRef(jsg::Lock& js) &;
+  WeakRef addRef(jsg::Lock& js) && = delete;  // Redundant, just move.
+
+ private:
+  struct Impl {
+    T& target;
+    kj::Rc<WeakRefAnchor> anchor;
+    // Holds the isolate this WeakRef belongs to and, crucially, lets destroy() learn whether that
+    // isolate has already been torn down. A WeakRef may outlive its isolate (e.g. a hibernatable
+    // WebSocket held by a HibernationManager); after teardown this reports the isolate as gone so
+    // destroy() never dereferences a dangling isolate pointer. See destroy() in setup.h.
+    kj::Arc<const IsolateLiveness> isolateLiveness;
+  };
+
+  kj::Maybe<Impl> impl;
+
+  WeakRef(T& target, kj::Rc<WeakRefAnchor> anchor, kj::Arc<const IsolateLiveness> isolateLiveness)
+      : impl(Impl{
+          .target = target,
+          .anchor = kj::mv(anchor),
+          .isolateLiveness = kj::mv(isolateLiveness),
+        }) {}
+
+  // Arranges to have the anchor always dropped under isolate lock
+  void destroy();
+
+  template <typename>
+  friend class WeakRef;
+  template <typename>
+  friend class Ref;
+  friend class Object;
+};
 
 // Holds a value of type `T` and allows it to be passed to JavaScript multiple times, resulting
 // in exactly the same JavaScript object each time (will compare equal using `===`). You may
@@ -1852,6 +2156,10 @@ class GcVisitor {
     }
   }
 
+  // No visit() overload for WeakRef<T>.
+  // WeakRef is intentionally NOT GC-visitable — attempting to visit one is a compile error,
+  // which is the correct signal that weak references should not be traced.
+
   void visit() {}
 
   template <typename T, typename U, typename... Args>
@@ -2200,7 +2508,8 @@ class JsMessage;
   V(Function)                                                                                      \
   V(Uint8Array)                                                                                    \
   V(ArrayBuffer)                                                                                   \
-  V(ArrayBufferView)
+  V(ArrayBufferView)                                                                               \
+  V(SharedArrayBuffer)
 
 #define V(Name) class Js##Name;
 JS_TYPE_CLASSES(V)
@@ -2225,32 +2534,23 @@ class ExternalMemoryAdjustment;
 // pointing to this isolate.
 //
 // Each isolate has a singleton `ExternalMemoryTarget`, which all `ExternalMemoryAdjustment`s
-// point to. The only purpose of this object is to hold a weak reference back to the isolate; the
-// reference is nulled out when the isolate is destroyed.
-class ExternalMemoryTarget: public kj::AtomicRefcounted {
+// point to. As an `IsolateLiveness`, it holds a weak reference back to the isolate that is nulled
+// out when the isolate is destroyed.
+class ExternalMemoryTarget: public IsolateLiveness {
  public:
-  ExternalMemoryTarget(v8::Isolate* isolate): isolate(isolate) {}
+  ExternalMemoryTarget(v8::Isolate* isolate): IsolateLiveness(isolate) {}
 
   ExternalMemoryAdjustment getAdjustment(size_t amount) const;
 
   // Apply any deferred external memory updates. Must be called with isolate locked.
   void applyDeferredMemoryUpdate() const;
 
-  // Disconnects the ExternalMemoryTarget from the isolate (called just before destroying the
-  // isolate).
-  void detach() const;
-
-  // These two methods are for tests only.
-  bool isIsolateAliveForTest() const;
+  // This method is for tests only.
   int64_t getPendingMemoryUpdateForTest() const;
 
  private:
   void maybeDeferAdjustment(ssize_t amount) const;
   void adjustNow(Lock& js, ssize_t amount) const;
-
-  // Mutable so that it can be set null when the isolate is destroyed.
-  mutable std::atomic<v8::Isolate*> isolate;
-  static_assert(std::atomic<v8::Isolate*>::is_always_lock_free);
 
   // Tracks changes to external memory that were applied from a thread that did not hold the
   // isolate lock. These will be applied the next time the lock is taken.
@@ -2665,6 +2965,11 @@ class Lock {
   // Use to enable/disable dynamic code evaluation (via eval(), new Function(), or WebAssembly).
   void setAllowEval(bool allow);
 
+  // Use to choose the safe path in unwrap() when under a `DisallowJavascriptExecution` scope
+  // TODO(cleanup): replace with scope guard if we need to use this in multiple places
+  void setDisallowJavascriptExecution(bool allow);
+  bool isJavascriptExecutionDisallowed() const;
+
   void setCaptureThrowsAsRejections(bool capture);
   void setUsingEnhancedErrorSerialization();
   void setUsingFastJsgStruct();
@@ -2772,14 +3077,6 @@ class Lock {
   // takes ownership over the inner.
   template <typename T>
   JsObject opaque(T&& inner) KJ_WARN_UNUSED_RESULT;
-
-  // Returns a jsg::BufferSource whose underlying JavaScript handle is a Uint8Array.
-  BufferSource bytes(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
-
-  // Returns a jsg::BufferSource whose underlying JavaScript handle is an ArrayBuffer
-  // as opposed to the default Uint8Array.  May copy and move the bytes if they are
-  // not in the right sandbox.
-  BufferSource arrayBuffer(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
 
   enum class AllocOption { ZERO_INITIALIZED, UNINITIALIZED };
 
@@ -2918,6 +3215,26 @@ class Lock {
   virtual kj::Maybe<Object&> getInstance(v8::Local<v8::Object> obj, const std::type_info& type) = 0;
   virtual v8::Local<v8::Object> getPrototypeFor(const std::type_info& type) = 0;
 };
+
+template <typename T>
+inline WeakV8Ref<T> V8Ref<T>::getWeakRef(jsg::Lock& js) const {
+  return getWeakRef(js.v8Isolate);
+}
+
+template <typename T>
+inline kj::Maybe<v8::Local<T>> WeakV8Ref<T>::tryGetHandle(Lock& js) const {
+  return tryGetHandle(js.v8Isolate);
+}
+
+template <typename T>
+inline v8::Local<T> WeakV8Ref<T>::getHandle(Lock& js) const {
+  return getHandle(js.v8Isolate);
+}
+
+template <typename T>
+inline kj::Maybe<V8Ref<T>> WeakV8Ref<T>::tryAddRef(Lock& js) const {
+  return tryAddRef(js.v8Isolate);
+}
 
 // Ensures that the given fn is run within both a handlescope and the context scope.
 // The lock must be assignable to a jsg::Lock, and the context must be or be assignable

@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "kv-resizable-arraybuffer-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "kv-resizable-arraybuffer-test.js")
+        ],
+        bindings = [ ( name = "KV", kvNamespace = "kv-resizable-arraybuffer-test" ), ],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers"],
+      )
+    ),
+  ],
+);

@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "crypto_scrypt-limits-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto_scrypt-limits-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat_v2", "experimental"]
+      )
+    ),
+  ],
+);

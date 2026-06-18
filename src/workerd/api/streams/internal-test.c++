@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "identity-transform-stream.h"
 #include "internal.h"
 #include "readable.h"
 #include "standard.h"
@@ -280,12 +281,12 @@ KJ_TEST("WritableStreamInternalController queue size assertion") {
           "is currently locked to a writer.");
     }
 
-    auto buffersource = env.js.bytes(kj::heapArray<kj::byte>(10));
+    jsg::JsValue buffersource = jsg::JsUint8Array::create(env.js, 10);
 
     bool writeFailed = false;
 
     auto write = sink->getController()
-                     .write(env.js, buffersource.getHandle(env.js))
+                     .write(env.js, buffersource)
                      .catch_(env.js, [&](jsg::Lock& js, jsg::Value value) {
       writeFailed = true;
       auto ex = js.exceptionToKj(kj::mv(value));
@@ -376,9 +377,9 @@ KJ_TEST("WritableStreamInternalController observability") {
     stream = env.js.alloc<WritableStream>(env.context, kj::heap<NoopSink>(), kj::mv(myObserver));
 
     auto write = [&](size_t size) {
-      auto buffersource = env.js.bytes(kj::heapArray<kj::byte>(size));
-      return env.context.awaitJs(env.js,
-          KJ_ASSERT_NONNULL(stream)->getController().write(env.js, buffersource.getHandle(env.js)));
+      jsg::JsValue buffersource = jsg::JsUint8Array::create(env.js, size);
+      return env.context.awaitJs(
+          env.js, KJ_ASSERT_NONNULL(stream)->getController().write(env.js, buffersource));
     };
 
     KJ_ASSERT(observer.queueSize == 0);
@@ -427,8 +428,8 @@ KJ_TEST("WritableStreamInternalController pipeLoop abort during pending read") {
       auto& c = KJ_ASSERT_NONNULL(controller.tryGet<jsg::Ref<ReadableStreamDefaultController>>());
       if (pullCount == 1) {
         // First pull: enqueue some data so the pipe loop can make progress
-        auto data = js.bytes(kj::heapArray<kj::byte>({1, 2, 3, 4}));
-        c->enqueue(js, data.getHandle(js));
+        jsg::JsValue data = jsg::JsUint8Array::create(js, {1, 2, 3, 4});
+        c->enqueue(js, data);
       }
       // Second pull onwards: don't enqueue anything, leaving the read pending.
       // This simulates an async data source that hasn't received data yet.
@@ -445,7 +446,7 @@ KJ_TEST("WritableStreamInternalController pipeLoop abort during pending read") {
     env.js.runMicrotasks();
 
     // Abort while pipeLoop is waiting for a pending read
-    auto abortPromise = sink->getController().abort(env.js, env.js.v8TypeError("Test abort"_kj));
+    auto abortPromise = sink->getController().abort(env.js, env.js.typeError("Test abort"_kj));
     abortPromise.markAsHandled(env.js);
     env.js.runMicrotasks();
 
@@ -943,6 +944,29 @@ KJ_TEST("ReadableStreamBYOBReader rejects read after releaseLock") {
     });
     env.js.runMicrotasks();
     KJ_ASSERT(rejected, "Expected read() to reject after releaseLock");
+  });
+}
+
+KJ_TEST("Writing strings works") {
+  auto fixture = makeStreamTestFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto sink = env.js.alloc<WritableStream>(env.context, kj::heap<NoopSink>(), kj::none);
+    auto writer = sink->getWriter(env.js);
+    // Previously this would throw synchronously when a string was passed.
+    auto writePromise = writer->write(env.js, env.js.str("works"_kj));
+    env.js.runMicrotasks();
+  });
+}
+
+KJ_TEST("Writing SharedArrayBuffer works") {
+  auto fixture = makeStreamTestFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto sink = env.js.alloc<WritableStream>(env.context, kj::heap<NoopSink>(), kj::none);
+    auto writer = sink->getWriter(env.js);
+    // Previously this would throw synchronously when a SAB was passed.
+    auto sab = v8::SharedArrayBuffer::New(env.js.v8Isolate, 5);
+    auto writePromise = writer->write(env.js, jsg::JsSharedArrayBuffer(sab));
+    env.js.runMicrotasks();
   });
 }
 

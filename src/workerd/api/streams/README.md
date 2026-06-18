@@ -319,14 +319,12 @@ for (auto consumer: consumers) {
 
 ### Pattern: WeakRef for User-Held Handles
 
-- **When**: Handles user code may hold longer than underlying object (`ByobRequest`,
-  `PumpToReader`)
+- **When**: Handles user code may hold longer than underlying object (`ByobRequest`)
 - **How**: Check liveness before use
 
 ```cpp
-KJ_IF_SOME(reader, pumpToReader->tryGet()) {
-    reader.pumpLoop(js, ...);  // Safe -- still alive
-}
+impl.controller->runIfAlive(
+    [](ReadableByteStreamController& controller) { controller.maybeByobRequest = kj::none; });
 ```
 
 ### Pattern: `Rc<Entry>` for Shared Queue Data
@@ -350,12 +348,12 @@ class Entry: public kj::Refcounted {
   re-acquire.
 
 ```cpp
-auto onSuccess = JSG_VISITABLE_LAMBDA((this, ref = addRef(), ...), ..., (...) {
+auto onSuccess = [this, ref = addRef(), ...](...) mutable {
     auto maybePipeLock = lock.tryGetPipe();
     if (maybePipeLock == kj::none) return js.resolvedPromise();
     auto& pipeLock = KJ_REQUIRE_NONNULL(maybePipeLock);
     // Now safe to use pipeLock
-});
+};
 ```
 
 ### Pattern: StateListener Self-Destruction Guard
@@ -373,21 +371,12 @@ void onConsumerClose(jsg::Lock& js) override {
 }
 ```
 
-### Pattern: Refcounted Pipe State
+### Pattern: Weak-ref'd Pipe State
 
 - **When**: Internal stream pipe operations with async continuations
-- **How**: `Pipe::State` is `kj::Refcounted`; lambdas capture `kj::addRef(*state)`;
-  `~Pipe()` sets `state->aborted = true`; continuations check before proceeding
-
-```cpp
-struct Pipe {
-    struct State: public kj::Refcounted {
-        bool aborted = false;
-    };
-    kj::Own<State> state;
-    ~Pipe() noexcept(false) { state->aborted = true; }
-};
-```
+- **How**: `Pipe::State` holds a weak ref to `Pipe`. Rather than holding bare
+  references to `Pipe` in the queue, ensures continuations remain safe if the
+  pipe is somehow destroyed while operations are pending.
 
 ### Pattern: Generation Counter
 

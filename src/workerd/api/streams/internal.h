@@ -28,7 +28,7 @@ namespace workerd::api {
 // The ReadableStreamInternalController is always in one of three states: Readable, Closed,
 // or Errored. When the state is Readable, the controller has an associated ReadableStreamSource.
 // When the state is Errored, the ReadableStreamSource has been released and the controller
-// stores a jsg::Value with whatever value was used to error. When Closed, the
+// stores a js Value with whatever value was used to error. When Closed, the
 // ReadableStreamSource has been released.
 
 // Likewise, the WritableStreamInternalController is always either Writable, Closed, or Errored.
@@ -71,7 +71,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
   jsg::Promise<void> pipeTo(
       jsg::Lock& js, WritableStreamController& destination, PipeToOptions options) override;
 
-  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) override;
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) override;
 
   Tee tee(jsg::Lock& js) override;
 
@@ -103,7 +103,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
 
   void visitForGc(jsg::GcVisitor& visitor) override;
 
-  jsg::Promise<jsg::BufferSource> readAllBytes(jsg::Lock& js, uint64_t limit) override;
+  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> readAllBytes(jsg::Lock& js, uint64_t limit) override;
   jsg::Promise<kj::String> readAllText(jsg::Lock& js, uint64_t limit) override;
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
@@ -124,9 +124,9 @@ class ReadableStreamInternalController: public ReadableStreamController {
   void jsgGetMemoryInfo(jsg::MemoryTracker& info) const override;
 
  private:
-  void doCancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
+  void doCancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
   void doClose(jsg::Lock& js);
-  void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
+  void doError(jsg::Lock& js, jsg::JsValue reason);
 
   class PipeLocked: public PipeController {
    public:
@@ -135,15 +135,15 @@ class ReadableStreamInternalController: public ReadableStreamController {
 
     bool isClosed() override;
 
-    kj::Maybe<v8::Local<v8::Value>> tryGetErrored(jsg::Lock& js) override;
+    kj::Maybe<jsg::JsValue> tryGetErrored(jsg::Lock& js) override;
 
-    void cancel(jsg::Lock& js, v8::Local<v8::Value> reason) override;
+    void cancel(jsg::Lock& js, jsg::JsValue reason) override;
 
     void close(jsg::Lock& js) override;
 
-    void error(jsg::Lock& js, v8::Local<v8::Value> reason) override;
+    void error(jsg::Lock& js, jsg::JsValue reason) override;
 
-    void release(jsg::Lock& js, kj::Maybe<v8::Local<v8::Value>> maybeError = kj::none) override;
+    void release(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) override;
 
     kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) override;
 
@@ -222,13 +222,13 @@ class WritableStreamInternalController: public WritableStreamController {
 
   jsg::Ref<WritableStream> addRef() override;
 
-  jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> value) override;
+  jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<jsg::JsValue> value) override;
 
   jsg::Promise<void> close(jsg::Lock& js, bool markAsHandled = false) override;
 
   jsg::Promise<void> flush(jsg::Lock& js, bool markAsHandled = false) override;
 
-  jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) override;
+  jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) override;
 
   kj::Maybe<jsg::Promise<void>> tryPipeFrom(
       jsg::Lock& js, jsg::Ref<ReadableStream> source, PipeToOptions options) override;
@@ -247,7 +247,7 @@ class WritableStreamInternalController: public WritableStreamController {
   void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) override;
   // See the comment for releaseWriter in common.h for details on the use of maybeJs
 
-  kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js) override {
+  kj::Maybe<jsg::JsValue> isErroring(jsg::Lock& js) override {
     // TODO(later): The internal controller has no concept of an "erroring"
     // state, so for now we just return kj::none here.
     return kj::none;
@@ -280,17 +280,17 @@ class WritableStreamInternalController: public WritableStreamController {
   };
 
   jsg::Promise<void> doAbort(jsg::Lock& js,
-      v8::Local<v8::Value> reason,
+      jsg::JsValue reason,
       AbortOptions options = {.reject = false, .handled = false});
   void doClose(jsg::Lock& js);
-  void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
+  void doError(jsg::Lock& js, jsg::JsValue reason);
   void ensureWriting(jsg::Lock& js);
   jsg::Promise<void> writeLoop(jsg::Lock& js, IoContext& ioContext);
   jsg::Promise<void> writeLoopAfterFrontOutputLock(jsg::Lock& js);
 
-  void drain(jsg::Lock& js, v8::Local<v8::Value> reason);
+  void drain(jsg::Lock& js, jsg::JsValue reason);
   void finishClose(jsg::Lock& js);
-  void finishError(jsg::Lock& js, v8::Local<v8::Value> reason);
+  void finishError(jsg::Lock& js, jsg::JsValue reason);
   jsg::Promise<void> closeImpl(jsg::Lock& js, bool markAsHandled);
 
   struct PipeLocked {
@@ -324,7 +324,7 @@ class WritableStreamInternalController: public WritableStreamController {
 
   kj::Maybe<kj::Own<ByteStreamObserver>> observer;
 
-  kj::Maybe<kj::Own<PendingAbort>> maybePendingAbort;
+  kj::Maybe<PendingAbort> maybePendingAbort;
 
   uint64_t currentWriteBufferSize = 0;
 
@@ -349,7 +349,7 @@ class WritableStreamInternalController: public WritableStreamController {
   struct Write {
     kj::Maybe<jsg::Promise<void>::Resolver> promise;
     size_t totalBytes;
-    kj::Array<kj::byte> ownBytes;
+    kj::Array<const kj::byte> ownBytes;
     kj::ArrayPtr<const kj::byte> bytes;
 
     JSG_MEMORY_INFO(Write) {
@@ -372,123 +372,138 @@ class WritableStreamInternalController: public WritableStreamController {
     }
   };
   struct Pipe {
-    // PipeState is ref-counted so that it can be safely captured by lambdas in pipeLoop().
-    // When drain() destroys the Pipe, the state survives as long as pending callbacks need it.
-    // The `aborted` flag is set when the Pipe is destroyed.
     struct State: public kj::Refcounted {
-      WritableStreamInternalController& parent;
-      ReadableStreamController::PipeController& source;
-      kj::Maybe<jsg::Promise<void>::Resolver> promise;
-      kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
+      jsg::Ref<WritableStream> owner;
+      kj::Rc<workerd::WeakRef<Pipe>> weakRef;
 
-      bool preventAbort;
-      bool preventClose;
-      bool preventCancel;
+      State(jsg::Ref<WritableStream> owner, kj::Rc<workerd::WeakRef<Pipe>> weakRef)
+          : owner(kj::mv(owner)),
+            weakRef(kj::mv(weakRef)) {}
 
-      // True when the Pipe is being destroyed
-      bool aborted = false;
-
-      State(WritableStreamInternalController& parent,
-          ReadableStreamController::PipeController& source,
-          kj::Maybe<jsg::Promise<void>::Resolver> promise,
-          bool preventAbort,
-          bool preventClose,
-          bool preventCancel,
-          kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal)
-          : parent(parent),
-            source(source),
-            promise(kj::mv(promise)),
-            maybeSignal(kj::mv(maybeSignal)),
-            preventAbort(preventAbort),
-            preventClose(preventClose),
-            preventCancel(preventCancel) {}
-
+      inline bool isAborted() const {
+        return !weakRef->isValid();
+      }
       bool checkSignal(jsg::Lock& js);
       jsg::Promise<void> pipeLoop(jsg::Lock& js);
-      jsg::Promise<void> write(v8::Local<v8::Value> value);
-
-      JSG_MEMORY_INFO(State) {
-        tracker.trackField("resolver", promise);
-        tracker.trackField("signal", maybeSignal);
-      }
+      jsg::Promise<void> write(jsg::Lock& js, jsg::JsValue value);
+      void releaseSource(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none);
+      bool isSourceReleased();
+      void tryErrorParent(jsg::Lock& js, jsg::JsValue reason);
+      void tryFinishCloseParent(jsg::Lock& js);
+      void tryFinishErrorParent(jsg::Lock& js, jsg::JsValue reason);
+      void tryNoBytesError(jsg::Lock& js);
     };
 
-    kj::Own<State> state;
+    WritableStreamInternalController& parent;
+    kj::Maybe<ReadableStreamController::PipeController&> source;
+    kj::Maybe<jsg::Promise<void>::Resolver> promise;
+    struct Flags {
+      uint8_t preventAbort : 1;
+      uint8_t preventClose : 1;
+      uint8_t preventCancel : 1;
+    };
+    Flags flags{};
+    kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
+    kj::Maybe<jsg::JsRef<jsg::JsValue>> capturedSourceError;
+    kj::Maybe<kj::Rc<workerd::WeakRef<Pipe>>> selfRef;
 
     Pipe(WritableStreamInternalController& parent,
         ReadableStreamController::PipeController& source,
-        kj::Maybe<jsg::Promise<void>::Resolver> promise,
+        jsg::Promise<void>::Resolver promise,
         bool preventAbort,
         bool preventClose,
         bool preventCancel,
         kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal)
-        : state(kj::refcounted<State>(parent,
-              source,
-              kj::mv(promise),
-              preventAbort,
-              preventClose,
-              preventCancel,
-              kj::mv(maybeSignal))) {}
+        : parent(parent),
+          source(source),
+          promise(kj::mv(promise)),
+          maybeSignal(kj::mv(maybeSignal)),
+          selfRef(kj::rc<workerd::WeakRef<Pipe>>(kj::Badge<Pipe>(), *this)) {
+      flags.preventAbort = preventAbort;
+      flags.preventClose = preventClose;
+      flags.preventCancel = preventCancel;
+    }
+
+    Pipe(Pipe&& other) noexcept(false)
+        : parent(other.parent),
+          source(kj::mv(other.source)),
+          promise(kj::mv(other.promise)),
+          flags(other.flags),
+          maybeSignal(kj::mv(other.maybeSignal)),
+          capturedSourceError(kj::mv(other.capturedSourceError)),
+          selfRef(kj::rc<workerd::WeakRef<Pipe>>(kj::Badge<Pipe>(), *this)) {
+      // Invalidate the old Pipe's weak ref — any State objects pointing to it
+      // will see isAborted() = true.
+      KJ_IF_SOME(ref, other.selfRef) {
+        ref->invalidate();
+        other.selfRef = kj::none;
+      }
+    }
 
     ~Pipe() noexcept(false) {
-      state->aborted = true;
+      KJ_IF_SOME(ref, selfRef) {
+        ref->invalidate();
+      }
     }
 
-    WritableStreamInternalController& parent() {
-      return state->parent;
-    }
-    ReadableStreamController::PipeController& source() {
-      return state->source;
-    }
-    kj::Maybe<jsg::Promise<void>::Resolver>& promise() {
-      return state->promise;
-    }
-    bool preventAbort() const {
-      return state->preventAbort;
-    }
-    bool preventClose() const {
-      return state->preventClose;
-    }
-    bool preventCancel() const {
-      return state->preventCancel;
-    }
-    kj::Maybe<jsg::Ref<AbortSignal>>& maybeSignal() {
-      return state->maybeSignal;
+    KJ_DISALLOW_COPY(Pipe);
+
+    kj::Rc<State> getState() {
+      return kj::rc<State>(parent.addRef(), KJ_ASSERT_NONNULL(selfRef).addRef());
     }
 
-    bool checkSignal(jsg::Lock& js) {
-      return state->checkSignal(js);
+    void visitForGc(jsg::GcVisitor& visitor) {
+      visitor.visit(promise, maybeSignal, capturedSourceError);
     }
-    jsg::Promise<void> pipeLoop(jsg::Lock& js) {
-      return state->pipeLoop(js);
+
+    void releaseSource(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none);
+    bool checkSignal(jsg::Lock& js);
+    jsg::Promise<void> pipeLoop(jsg::Lock& js);
+    jsg::Promise<void> write(jsg::Lock& js, jsg::JsValue value);
+    bool isSourceReleased() const {
+      return source == kj::none;
     }
-    jsg::Promise<void> write(v8::Local<v8::Value> value) {
-      return state->write(value);
+    void errorParent(jsg::Lock& js, jsg::JsValue reason);
+    void finishCloseParent(jsg::Lock& js);
+    void finishErrorParent(jsg::Lock& js, jsg::JsValue reason);
+    void noBytesError(jsg::Lock& js);
+    kj::Maybe<jsg::Promise<void>::Resolver> takePromise() {
+      return kj::mv(promise);
     }
 
     JSG_MEMORY_INFO(Pipe) {
-      tracker.trackField("state", state);
+      tracker.trackField("promise", promise);
+      tracker.trackField("signal", maybeSignal);
+      tracker.trackField("capturedSourceError", capturedSourceError);
     }
   };
   struct WriteEvent {
     kj::Maybe<IoOwn<kj::Promise<void>>> outputLock;  // must wait for this before actually writing
-    kj::OneOf<kj::Own<Write>, kj::Own<Pipe>, kj::Own<Close>, kj::Own<Flush>> event;
+    kj::OneOf<Write, Pipe, Close, Flush> event;
+
+    bool isCloseOrFlush() const {
+      return event.is<Close>() || event.is<Flush>();
+    }
+
+    bool isPipe() const {
+      return event.is<Pipe>();
+    }
 
     JSG_MEMORY_INFO(WriteEvent) {
       if (outputLock != kj::none) {
         tracker.trackFieldWithSize("outputLock", sizeof(IoOwn<kj::Promise<void>>));
       }
       KJ_SWITCH_ONEOF(event) {
-        KJ_CASE_ONEOF(w, kj::Own<Write>) {
+        KJ_CASE_ONEOF(w, Write) {
           tracker.trackField("inner", w);
         }
-        KJ_CASE_ONEOF(p, kj::Own<Pipe>) {
+        KJ_CASE_ONEOF(p, Pipe) {
           tracker.trackField("inner", p);
         }
-        KJ_CASE_ONEOF(c, kj::Own<Close>) {
+        KJ_CASE_ONEOF(c, Close) {
           tracker.trackField("inner", c);
         }
-        KJ_CASE_ONEOF(f, kj::Own<Flush>) {
+        KJ_CASE_ONEOF(f, Flush) {
           tracker.trackField("inner", f);
         }
       }

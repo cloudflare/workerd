@@ -2,34 +2,14 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { parseTarInfo } from 'pyodide-internal:tar';
 import { createMetadataFS } from 'pyodide-internal:metadatafs';
-import { LOCKFILE } from 'pyodide-internal:metadata';
 import {
   invalidateCaches,
   PythonWorkersInternalError,
-  PythonUserError,
   simpleRunPython,
 } from 'pyodide-internal:util';
-import { default as EmbeddedPackagesTarReader } from 'pyodide-internal:packages_tar_reader';
 
-const canonicalizeNameRegex = /[-_.]+/g;
 const DYNLIB_PATH = '/usr/lib';
-
-/**
- * Canonicalize a package name. Port of Python's packaging.utils.canonicalize_name.
- * @param name The package name to canonicalize.
- * @returns The canonicalize package name.
- * @private
- */
-function canonicalizePackageName(name: string): string {
-  return name.replace(canonicalizeNameRegex, '-').toLowerCase();
-}
-
-// The "name" field in the lockfile is not canonicalized
-export const STDLIB_PACKAGES: string[] = Object.values(LOCKFILE.packages)
-  .filter(({ package_type }) => package_type === 'cpython_module')
-  .map(({ name }) => canonicalizePackageName(name));
 
 // Each item in the list is an element of the file path, for example
 // `folder/file.txt` -> `["folder", "file.txt"]
@@ -64,14 +44,10 @@ class VirtualizedDir {
   // TODO(soon): Can we use the # syntax here?
   // eslint-disable-next-line no-restricted-syntax
   private soFiles: FilePath[];
-  // TODO(soon): Can we use the # syntax here?
-  // eslint-disable-next-line no-restricted-syntax
-  private loadedRequirements: Set<string>;
   constructor() {
     this.rootInfo = createTarFsInfo();
     this.dynlibTarFs = createTarFsInfo();
     this.soFiles = [];
-    this.loadedRequirements = new Set();
   }
 
   /**
@@ -99,53 +75,17 @@ class VirtualizedDir {
    *
    * @param {TarInfo} tarInfo The root tarInfo for the small bundle (See tar.js)
    * @param {List<String>} soFiles A list of .so files contained in the small bundle
-   * @param {String} requirement The canonicalized package name this small bundle corresponds to
    * @param {InstallDir} installDir The `install_dir` field from the metadata about the package taken from the lockfile
    */
   addSmallBundle(
     tarInfo: TarFSInfo,
     soFiles: string[],
-    requirement: string,
     installDir: InstallDir
   ): void {
     for (const soFile of soFiles) {
       this.soFiles.push(soFile.split('/'));
     }
     this.mountOverlay(tarInfo, installDir);
-    this.loadedRequirements.add(requirement);
-  }
-
-  /**
-   * A big bundle contains multiple packages, each package contained in a folder whose name is the canonicalized package name.
-   * This function overlays the requested packages onto the site-packages directory.
-   * @param {TarInfo} tarInfo The root tarInfo for the big bundle (See tar.js)
-   * @param {List<String>} soFiles A list of .so files contained in the big bundle
-   * @param {List<String>} requirements canonicalized list of packages to pick from the big bundle
-   */
-  addBigBundle(
-    tarInfo: TarFSInfo,
-    soFiles: string[],
-    requirements: Set<string>
-  ): void {
-    // add all the .so files we will need to preload from the big bundle
-    for (const soFile of soFiles) {
-      // If folder is in list of requirements include .so file in list to preload.
-      const [pkg, ...rest] = soFile.split('/');
-      if (requirements.has(pkg!)) {
-        this.soFiles.push(rest);
-      }
-    }
-
-    for (const req of requirements) {
-      const child = tarInfo.children!.get(req);
-      if (!child) {
-        throw new PythonUserError(
-          `Requirement ${req} not found in pyodide packages tar`
-        );
-      }
-      this.mountOverlay(child, 'site');
-      this.loadedRequirements.add(req);
-    }
   }
 
   getSitePackagesRoot(): TarFSInfo {
@@ -161,10 +101,6 @@ class VirtualizedDir {
     return this.soFiles;
   }
 
-  hasRequirementLoaded(req: string): boolean {
-    return this.loadedRequirements.has(req);
-  }
-
   mount(Module: Module, tarFS: EmscriptenFS<TarFSInfo>): void {
     Module.FS.mkdirTree(Module.FS.sessionSitePackages);
     Module.FS.mount(
@@ -175,51 +111,6 @@ class VirtualizedDir {
     Module.FS.mkdirTree(DYNLIB_PATH);
     Module.FS.mount(tarFS, { info: this.dynlibTarFs }, DYNLIB_PATH);
   }
-}
-
-/**
- * This stitches together the view of the site packages directory. Each
- * requirement corresponds to a folder in the original tar file. For each
- * requirement in the list we grab the corresponding folder and stitch them
- * together into a combined folder.
- *
- * This also returns the list of soFiles in the resulting site-packages
- * directory so we can preload them.
- *
- * TODO(later): This needs to be removed when external package loading is enabled.
- */
-export function buildVirtualizedDir(): VirtualizedDir {
-  if (EmbeddedPackagesTarReader.read === undefined) {
-    // Package retrieval is enabled, so the embedded tar reader isn't initialized.
-    // All packages, including STDLIB_PACKAGES, are loaded in `loadPackages`.
-    return new VirtualizedDir();
-  }
-
-  const [bigTarInfo, bigTarSoFiles] = parseTarInfo(EmbeddedPackagesTarReader);
-
-  const requirementsInBigBundle = new Set(STDLIB_PACKAGES);
-  const res = new VirtualizedDir();
-  res.addBigBundle(bigTarInfo, bigTarSoFiles, requirementsInBigBundle);
-
-  return res;
-}
-
-/**
- * Patch loadPackage:
- *  - in workerd, disable integrity checks
- *  - otherwise, disable it entirely
- *
- * TODO: stop using loadPackage in workerd.
- */
-export function patchLoadPackage(pyodide: Pyodide): void {
-  pyodide.loadPackage = disabledLoadPackage;
-  return;
-}
-
-function disabledLoadPackage(): never {
-  throw new PythonWorkersInternalError(
-    'pyodide.loadPackage is disabled because packages are encoded in the binary'
-  );
 }
 
 /**
@@ -244,4 +135,4 @@ export function adjustSysPath(Module: Module): void {
   );
 }
 
-export const VIRTUALIZED_DIR = buildVirtualizedDir();
+export const VIRTUALIZED_DIR = new VirtualizedDir();

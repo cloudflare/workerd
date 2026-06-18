@@ -2,14 +2,10 @@
 
 #include "events.h"
 
-#include <workerd/io/worker.h>
 #include <workerd/jsg/ser.h>
-#include <workerd/util/weak-refs.h>
 
 namespace workerd::api {
-MessagePort::MessagePort()
-    : weakThis(kj::refcounted<WeakRef<MessagePort>>(kj::Badge<MessagePort>{}, *this)),
-      state(Pending()) {
+MessagePort::MessagePort(): state(Pending()) {
   // We set a callback on the underlying EventTarget to be notified when
   // a listener for the message event is added or removed. When there
   // are no listeners, we move back to the Pending state, otherwise we
@@ -82,9 +78,10 @@ void MessagePort::deliver(jsg::Lock& js, const jsg::JsValue& value) {
 
 // Binds two ports to each other such that messages posted to one
 // are delivered on the other.
-void MessagePort::entangle(MessagePort& port1, MessagePort& port2) {
-  port1.other = port2.addWeakRef();
-  port2.other = port1.addWeakRef();
+void MessagePort::entangle(
+    jsg::Lock& js, jsg::Ref<MessagePort>& port1, jsg::Ref<MessagePort>& port2) {
+  port1->other = port2.getWeakRef(js);
+  port2->other = port1.getWeakRef(js);
 }
 
 // Post a message to the entangled port.
@@ -108,32 +105,27 @@ void MessagePort::postMessage(jsg::Lock& js,
   }
   JSG_REQUIRE(!hasTransfer, Error, "Transfer list is not supported");
 
-  // If the port is closed, other will be kj::none and we will just drop the message.
-  other->runIfAlive([&](MessagePort& o) {
-    // Take a strong reference to prevent GC from freeing the target port during
-    // serialization. Serialization can run arbitrary user code via custom getters
-    // on the message object. That code could close this port (which also closes
-    // the entangled port), and then force GC to free the target port — leaving
-    // the `o` reference dangling for the deliver() call below.
-    auto ref = o.addRef();
+  // If the port is closed or the peer has been collected, just drop the message.
+  KJ_IF_SOME(o, other) {
+    KJ_IF_SOME(ref, o.tryAddRef(js)) {
+      jsg::Serializer ser(js);
 
-    jsg::Serializer ser(js);
+      KJ_IF_SOME(d, data) {
+        ser.write(js, d.getHandle(js));
+      } else {
+        ser.write(js, js.undefined());
+      }
 
-    KJ_IF_SOME(d, data) {
-      ser.write(js, d.getHandle(js));
-    } else {
-      ser.write(js, js.undefined());
+      auto released = ser.release();
+      JSG_REQUIRE(released.sharedArrayBuffers.size() == 0, TypeError,
+          "SharedArrayBuffer is unsupported with MessagePort");
+
+      // Now, deserialize the message into a JsValue
+      jsg::Deserializer deserializer(js, released);
+      auto clonedData = deserializer.readValue(js);
+      ref->deliver(js, clonedData);
     }
-
-    auto released = ser.release();
-    JSG_REQUIRE(released.sharedArrayBuffers.size() == 0, TypeError,
-        "SharedArrayBuffer is unsupported with MessagePort");
-
-    // Now, deserialize the message into a JsValue
-    jsg::Deserializer deserializer(js, released);
-    auto clonedData = deserializer.readValue(js);
-    o.deliver(js, clonedData);
-  });
+  }
 }
 
 void MessagePort::closeImpl() {
@@ -141,15 +133,29 @@ void MessagePort::closeImpl() {
   // already scheduled for delivery in the `start()` or `deliver()` methods.
   if (state.is<Closed>()) return;
   state = Closed{};
-  weakThis->invalidate();
-  other->runIfAlive([&](MessagePort& o) { o.closeImpl(); });
+  KJ_IF_SOME(o, other) {
+    // Use of tryGet here rather than tryAddRef is intentional. closeImpl
+    // is called from the destructor, where we may or may not have the
+    // isolate lock. Materializing a strong reference to the other port
+    // requires the isolate lock. The other = kj::none line below will
+    // ensure that the jsg::WeakRef is cleaned up under lock either
+    // immediately or eventually.
+    KJ_IF_SOME(ref, o.tryGet()) {
+      ref.closeImpl();
+    }
+    other = kj::none;
+  }
 }
 
 void MessagePort::close(jsg::Lock& js) {
   if (state.is<Closed>()) return;
   state = Closed{};
-  weakThis->invalidate();
-  other->runIfAlive([&](MessagePort& o) { o.close(js); });
+  KJ_IF_SOME(o, other) {
+    KJ_IF_SOME(ref, o.tryAddRef(js)) {
+      ref->close(js);
+    }
+    other = kj::none;
+  }
   auto closeEvent = js.alloc<Event>(kj::str("close"), Event::Init{}, true);
   dispatchEventImpl(js, kj::mv(closeEvent));
 }
@@ -201,7 +207,7 @@ void MessagePort::setOnMessage(jsg::Lock& js, jsg::JsValue value) {
 jsg::Ref<MessageChannel> MessageChannel::constructor(jsg::Lock& js) {
   auto port1 = js.alloc<MessagePort>();
   auto port2 = js.alloc<MessagePort>();
-  MessagePort::entangle(*port1, *port2);
+  MessagePort::entangle(js, port1, port2);
   return js.alloc<MessageChannel>(kj::mv(port1), kj::mv(port2));
 }
 

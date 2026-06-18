@@ -11,7 +11,7 @@ Shared utility library: data structures, SQLite wrapper, feature gating, logging
 | `state-machine.h` | Type-safe `kj::OneOf` wrapper with transition locking    | Prevents UAF in callbacks; 7 consumers in `api/streams/`                               |
 | `sqlite.h/c++`    | Full SQLite wrapper with custom VFS over `kj::Directory` | `Regulator` controls allowed SQL; `Statement` for prepared queries                     |
 | `sqlite-kv.h`     | KV abstraction on SQLite                                 | Used by Durable Object storage                                                         |
-| `autogate.h/c++`  | Runtime feature gates                                    | `AutogateKey` enum; `isEnabled()` check; 8 active gates                                |
+| `autogate.h/c++`  | Runtime feature gates                                    | `AutogateKey` enum; `isEnabled()` check                                                |
 | `weak-refs.h`     | `WeakRef<T>` / `AtomicWeakRef<T>`                        | Non-owning refs; `tryAddStrongRef()` or `runIfAlive(fn)` pattern                       |
 | `ring-buffer.h`   | Amortized O(1) deque                                     | Replaces `std::list` in streams                                                        |
 | `small-set.h`     | `kj::OneOf`-based set                                    | O(1) for 0–2 items, fallback to `kj::HashSet`                                          |

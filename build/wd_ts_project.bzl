@@ -1,7 +1,7 @@
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@workerd//:build/lint_test.bzl", "lint_test")
 
-def wd_ts_project(name, srcs, deps, tsconfig_json, eslintrc_json = None, source_map = True, testonly = False, composite = False):
+def wd_ts_project(name, srcs, deps, tsconfig_json, eslintrc_json = None, source_map = True, testonly = False, composite = True):
     """Bazel rule for a workerd TypeScript project, setting common options"""
 
     ts_config(

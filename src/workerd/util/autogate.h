@@ -22,34 +22,21 @@ WD_STRONG_BOOL(IgnoreAllAutogatesEnv);
 // Workerd-specific list of autogate keys (can also be used in internal repo).
 enum class AutogateKey {
   TEST_WORKERD,
-  // Defers TCP socket connect() to wait for DO output gate, preventing
-  // network outputs while storage writes are pending.
-  TCP_SOCKET_CONNECT_OUTPUT_GATE,
   V8_FAST_API,
   // Enables support for the streaming tail worker. Note that this is currently also guarded behind
   // an experimental compat flag.
   STREAMING_TAIL_WORKER,
   // Enable refactor used to consolidate the different tail worker stream implementations.
   TAIL_STREAM_REFACTOR,
-  // Enable Rust-backed Node.js DNS implementation
-  RUST_BACKED_NODE_DNS,
-  // Enable the WebAssembly.instantiate shim that detects modules exporting __instance_signal /
-  // __instance_terminated and registers them for receiving the CPU-limit shutdown signal.
-  WASM_SHUTDOWN_SIGNAL_SHIM,
   // Enable fast TextEncoder implementation using simdutf
   ENABLE_FAST_TEXTENCODER,
-  // Enable draining read on standard streams
-  ENABLE_DRAINING_READ_ON_STANDARD_STREAMS,
-  // Make SqlStorage::isAllowedName case-insensitive and enforce it on virtual tables (FTS5).
-  SQL_RESTRICT_RESERVED_NAMES,
   // Increase the SQLite hard heap limit from 512 MiB to 8 GiB.
   INCREASE_SQLITE_HARD_HEAP_LIMIT,
-  // Enable user span context propagation across worker-to-worker subrequests.
-  USER_SPAN_CONTEXT_PROPAGATION,
   // Apply an updated default autoAllocateChunkSize for ReadableStreams
   UPDATED_AUTO_ALLOCATE_CHUNK_SIZE,
-  // Call abortIsolate() when a Python worker encounters a fatal error.
-  PYTHON_ABORT_ISOLATE_ON_FATAL_ERROR,
+  // When enabled, reject startTls calls that pass the expectedServerHostname option,
+  // which is not currently supported. When disabled, log the usage instead.
+  STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME,
   NumOfKeys  // Reserved for iteration.
 };
 

@@ -105,21 +105,8 @@ export default {
       'Piping from a closed readable stream to a closed writable stream',
     ],
   },
-  'piping/pipe-through.any.js': {
-    comment: 'Windows has different property access order',
-    expectedFailures:
-      process.platform === 'win32'
-        ? ['pipeThrough() should throw if readable/writable getters throw']
-        : [],
-  },
-  'piping/then-interception.any.js': {
-    comment:
-      'failed: expected Wrappable::tryUnwrapOpaque(isolate, handle) != nullptr',
-    expectedFailures: [
-      'piping should not be observable',
-      'tee should not be observable',
-    ],
-  },
+  'piping/pipe-through.any.js': {},
+  'piping/then-interception.any.js': {},
   'piping/throwing-options.any.js': {},
   'piping/transform-streams.any.js': {},
 
@@ -378,12 +365,9 @@ export default {
   },
   'readable-streams/constructor.any.js': {
     comment: 'They want us to validate the args and throw in a different order',
-    expectedFailures:
-      process.platform === 'win32'
-        ? []
-        : [
-            'underlyingSource argument should be converted after queuingStrategy argument',
-          ],
+    expectedFailures: [
+      'underlyingSource argument should be converted after queuingStrategy argument',
+    ],
   },
   'readable-streams/count-queuing-strategy-integration.any.js': {},
   'readable-streams/crashtests/empty.js': {},
@@ -696,15 +680,10 @@ export default {
   'writable-streams/close.any.js': {},
   'writable-streams/constructor.any.js': {
     comment: 'These are mostly about validation of params',
-    expectedFailures:
-      process.platform === 'win32'
-        ? [
-            'WritableStream should be writable and ready should fulfill immediately if the strategy does not apply backpressure',
-          ]
-        : [
-            'WritableStream should be writable and ready should fulfill immediately if the strategy does not apply backpressure',
-            'underlyingSink argument should be converted after queuingStrategy argument',
-          ],
+    expectedFailures: [
+      'WritableStream should be writable and ready should fulfill immediately if the strategy does not apply backpressure',
+      'underlyingSink argument should be converted after queuingStrategy argument',
+    ],
   },
   'writable-streams/count-queuing-strategy.any.js': {},
   'writable-streams/crashtests/garbage-collection.any.js': {},

@@ -80,7 +80,7 @@ kj::StringPtr validateContentType(kj::StringPtr contentType) {
 }
 
 struct Serialized {
-  kj::Maybe<kj::OneOf<kj::String, kj::Array<kj::byte>, jsg::BufferSource, jsg::BackingStore>> own;
+  kj::Maybe<kj::OneOf<kj::String, kj::Array<kj::byte>, jsg::JsRef<jsg::JsArrayBufferView>>> own;
   // Holds onto the owner of a given array of serialized data.
   kj::ArrayPtr<kj::byte> data;
   // A pointer into that data that can be directly written into an outgoing queue send, regardless
@@ -103,8 +103,17 @@ Serialized serializeV8(jsg::Lock& js, const jsg::JsValue& body) {
   return kj::mv(result);
 }
 
-// Control whether the serialize() method makes a deep copy of provided ArrayBuffer types or if it
-// just returns a shallow reference that is only valid until the given method returns.
+// Control whether serialize() detaches/copies the ArrayBuffer or holds a shallow reference.
+//
+// send() uses DEEP_COPY, which detaches the buffer when possible (transferring ownership
+// without copying).  sendBatch() uses SHALLOW_REFERENCE, which avoids detaching so the
+// caller can reuse the buffer after the call.  Do not change sendBatch() to DEEP_COPY
+// without a compat flag — users may depend on the buffer remaining usable.
+//
+// SHALLOW_REFERENCE holds a raw pointer into the BackingStore.  This is safe for
+// non-resizable buffers (the BackingStore shared_ptr prevents deallocation), but
+// resizable buffers can have pages decommitted by resize(0) while the pointer is held.
+// The SHALLOW_REFERENCE path deep-copies resizable buffers to prevent this.
 enum class SerializeArrayBufferBehavior {
   DEEP_COPY,
   SHALLOW_REFERENCE,
@@ -125,26 +134,34 @@ Serialized serialize(jsg::Lock& js,
     result.own = kj::mv(s);
     return kj::mv(result);
   } else if (contentType == IncomingQueueMessage::ContentType::BYTES) {
-    JSG_REQUIRE(body.isArrayBufferView(), TypeError,
+    auto source = JSG_REQUIRE_NONNULL(body.tryCast<jsg::JsArrayBufferView>(), TypeError,
         kj::str("Content Type \"", IncomingQueueMessage::ContentType::BYTES,
             "\" requires a value of type ArrayBufferView, but received: ", body.typeOf(js)));
 
-    jsg::BufferSource source(js, body);
     if (bufferBehavior == SerializeArrayBufferBehavior::SHALLOW_REFERENCE) {
-      // If we know the data will be consumed synchronously, we can avoid copying it.
+      if (source.isResizable()) {
+        // Resizable buffers can have pages decommitted by resize(0) while
+        // the shallow reference is held. Deep-copy to prevent OOB read.
+        kj::Array<kj::byte> bytes = jsg::JsBufferSource(source).copy();
+        Serialized result;
+        result.data = bytes;
+        result.own = kj::mv(bytes);
+        return kj::mv(result);
+      }
+      // Non-resizable: safe to hold a shallow reference.
       Serialized result;
       result.data = source.asArrayPtr();
-      result.own = kj::mv(source);
+      result.own = source.addRef(js);
       return kj::mv(result);
-    } else if (source.canDetach(js)) {
+    } else if (source.isDetachable()) {
       // Prefer detaching the input ArrayBuffer whenever possible to avoid needing to copy it.
-      auto backingSource = source.detach(js);
+      auto backingSource = source.detachAndTake(js);
       Serialized result;
       result.data = backingSource.asArrayPtr();
-      result.own = kj::mv(backingSource);
+      result.own = backingSource.addRef(js);
       return kj::mv(result);
     } else {
-      kj::Array<kj::byte> bytes = kj::heapArray(source.asArrayPtr());
+      kj::Array<kj::byte> bytes = jsg::JsBufferSource(source).copy();
       Serialized result;
       result.data = bytes;
       result.own = kj::mv(bytes);
@@ -176,7 +193,7 @@ jsg::JsValue deserialize(
   if (type == IncomingQueueMessage::ContentType::TEXT) {
     return js.str(body);
   } else if (type == IncomingQueueMessage::ContentType::BYTES) {
-    return jsg::JsValue(js.bytes(kj::mv(body)).getHandle(js));
+    return jsg::JsUint8Array::create(js, body);
   } else if (type == IncomingQueueMessage::ContentType::JSON) {
     return jsg::JsValue::fromJson(js, body.asChars());
   } else if (type == IncomingQueueMessage::ContentType::V8) {
@@ -196,8 +213,7 @@ jsg::JsValue deserialize(jsg::Lock& js, rpc::QueueMessage::Reader message) {
   if (type == IncomingQueueMessage::ContentType::TEXT) {
     return js.str(message.getData().asChars());
   } else if (type == IncomingQueueMessage::ContentType::BYTES) {
-    kj::Array<kj::byte> bytes = kj::heapArray(message.getData().asBytes());
-    return jsg::JsValue(js.bytes(kj::mv(bytes)).getHandle(js));
+    return jsg::JsUint8Array::create(js, message.getData().asBytes());
   } else if (type == IncomingQueueMessage::ContentType::JSON) {
     return jsg::JsValue::fromJson(js, message.getData().asChars());
   } else if (type == IncomingQueueMessage::ContentType::V8) {
@@ -412,22 +428,22 @@ jsg::Promise<WorkerQueue::SendBatchResponse> WorkerQueue::sendBatch(jsg::Lock& j
 }
 
 QueueMessage::QueueMessage(
-    jsg::Lock& js, rpc::QueueMessage::Reader message, IoPtr<QueueEventResult> result)
+    jsg::Lock& js, rpc::QueueMessage::Reader message, IoOwn<QueueEventResult> result)
     : id(kj::str(message.getId())),
       timestamp(message.getTimestampNs() * kj::NANOSECONDS + kj::UNIX_EPOCH),
       body(deserialize(js, message).addRef(js)),
       attempts(message.getAttempts()),
-      result(result) {}
+      result(kj::mv(result)) {}
 // Note that we must make deep copies of all data here since the incoming Reader may be
 // deallocated while JS's GC wrappers still exist.
 
 QueueMessage::QueueMessage(
-    jsg::Lock& js, IncomingQueueMessage message, IoPtr<QueueEventResult> result)
+    jsg::Lock& js, IncomingQueueMessage message, IoOwn<QueueEventResult> result)
     : id(kj::mv(message.id)),
       timestamp(message.timestamp),
       body(deserialize(js, kj::mv(message.body), message.contentType).addRef(js)),
       attempts(message.attempts),
-      result(result) {}
+      result(kj::mv(result)) {}
 
 jsg::JsValue QueueMessage::getBody(jsg::Lock& js) {
   return body.getHandle(js);
@@ -482,16 +498,20 @@ void QueueMessage::ack() {
 }
 
 QueueEvent::QueueEvent(
-    jsg::Lock& js, rpc::EventDispatcher::QueueParams::Reader params, IoPtr<QueueEventResult> result)
+    jsg::Lock& js, rpc::EventDispatcher::QueueParams::Reader params, IoOwn<QueueEventResult> result)
     : ExtendableEvent("queue"),
       queueName(kj::heapString(params.getQueueName())),
-      result(result) {
+      result(kj::mv(result)) {
   // Note that we must make deep copies of all data here since the incoming Reader may be
   // deallocated while JS's GC wrappers still exist.
   auto incoming = params.getMessages();
+  auto& context = IoContext::current();
   auto messagesBuilder = kj::heapArrayBuilder<jsg::Ref<QueueMessage>>(incoming.size());
   for (auto i: kj::indices(incoming)) {
-    messagesBuilder.add(js.alloc<QueueMessage>(js, incoming[i], result));
+    // Each QueueMessage gets its own owning IoOwn<QueueEventResult> via addRef so that
+    // QueueEventResult outlives all JS wrappers even if QueueCustomEvent is freed first.
+    auto msgResult = context.addObject(kj::addRef(*this->result));
+    messagesBuilder.add(js.alloc<QueueMessage>(js, incoming[i], kj::mv(msgResult)));
   }
   messages = messagesBuilder.finish();
 
@@ -512,16 +532,20 @@ QueueEvent::QueueEvent(
   };
 }
 
-QueueEvent::QueueEvent(jsg::Lock& js, Params params, IoPtr<QueueEventResult> result)
+QueueEvent::QueueEvent(jsg::Lock& js, Params params, IoOwn<QueueEventResult> result)
     : ExtendableEvent("queue"),
       queueName(kj::mv(params.queueName)),
       metadata(kj::mv(params.metadata)),
-      result(result) {
+      result(kj::mv(result)) {
   clearEpochSentinel(metadata.metrics.oldestMessageTimestamp);
 
+  auto& context = IoContext::current();
   auto messagesBuilder = kj::heapArrayBuilder<jsg::Ref<QueueMessage>>(params.messages.size());
   for (auto i: kj::indices(params.messages)) {
-    messagesBuilder.add(js.alloc<QueueMessage>(js, kj::mv(params.messages[i]), result));
+    // Each QueueMessage gets its own owning IoOwn<QueueEventResult> via addRef.
+    auto msgResult = context.addObject(kj::addRef(*this->result));
+    auto msg = kj::mv(params.messages[i]);
+    messagesBuilder.add(js.alloc<QueueMessage>(js, kj::mv(msg), kj::mv(msgResult)));
   }
   messages = messagesBuilder.finish();
 }
@@ -563,7 +587,7 @@ struct StartQueueEventResponse {
 StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
     IoContext& context,
     kj::OneOf<rpc::EventDispatcher::QueueParams::Reader, QueueEvent::Params> params,
-    IoPtr<QueueEventResult> result,
+    IoOwn<QueueEventResult> result,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler,
     const jsg::TypeHandler<QueueExportedHandler>& handlerHandler) {
@@ -571,10 +595,10 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
   jsg::Ref<QueueEvent> event(nullptr);
   KJ_SWITCH_ONEOF(params) {
     KJ_CASE_ONEOF(p, rpc::EventDispatcher::QueueParams::Reader) {
-      event = js.alloc<QueueEvent>(js, p, result);
+      event = js.alloc<QueueEvent>(js, p, kj::mv(result));
     }
     KJ_CASE_ONEOF(p, QueueEvent::Params) {
-      event = js.alloc<QueueEvent>(js, kj::mv(p), result);
+      event = js.alloc<QueueEvent>(js, kj::mv(p), kj::mv(result));
     }
   }
 
@@ -652,11 +676,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
   incomingRequest->delivered();
   auto& context = incomingRequest->getContext();
 
-  // Create a custom refcounted type for holding the queueEvent so that we can pass it to the
-  // waitUntil'ed callback safely without worrying about whether this coroutine gets canceled.
+  // This vestigial type used to hold more than just this bool.
+  // TODO(cleanup): There's probably a better way to pass this bool through.
   struct QueueEventHolder: public kj::Refcounted {
-    jsg::Ref<QueueEvent> event = nullptr;
-    kj::Maybe<kj::Promise<void>> exportedHandlerProm;
     bool isServiceWorkerHandler = false;
   };
   auto queueEventHolder = kj::refcounted<QueueEventHolder>();
@@ -665,19 +687,28 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
   auto runProm = context.run(
       [this, entrypointName = entrypointName, &context, queueEvent = kj::addRef(*queueEventHolder),
           &metrics = incomingRequest->getMetrics(), versionInfo = kj::mv(versionInfo),
-          props = kj::mv(props), isDynamicDispatch](Worker::Lock& lock) mutable {
+          props = kj::mv(props),
+          isDynamicDispatch](Worker::Lock& lock) mutable -> kj::Promise<void> {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
     auto& typeHandler = lock.getWorker().getIsolate().getApi().getQueueTypeHandler(lock);
+    // Pass an owning IoOwn<QueueEventResult> (via addRef) so that QueueEventResult stays
+    // alive as long as the JSG QueueEvent/QueueMessage wrappers exist, even after
+    // QueueCustomEvent is destroyed. This prevents a use-after-free under Durable Objects
+    // where the IoContext outlives individual queue dispatches.
     auto startResp = startQueueEvent(lock.getGlobalScope(), context, kj::mv(params),
-        context.addObject(result), lock,
+        context.addObject(kj::addRef(*result)), lock,
         lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
             context.getActor(), isDynamicDispatch),
         typeHandler);
-    queueEvent->event = kj::mv(startResp.event);
-    queueEvent->exportedHandlerProm = kj::mv(startResp.exportedHandlerProm);
     queueEvent->isServiceWorkerHandler = startResp.isServiceWorkerHandler;
+
+    KJ_IF_SOME(p, startResp.exportedHandlerProm) {
+      return kj::mv(p);
+    } else {
+      return kj::READY_NOW;
+    }
   });
 
   // 3. Now that we've (asynchronously) called into the event handler, wait on all necessary async
@@ -696,22 +727,14 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
     // finishScheduled, but only waiting on the promise returned by the event handler rather than on
     // all waitUntil'ed promises.
     auto outcome = co_await runProm
-                       .then([queueEvent = kj::addRef(
-                                  *queueEventHolder)]() mutable -> kj::Promise<EventOutcome> {
-      // If the queue handler returned a promise, wait on the promise.
-      KJ_IF_SOME(handlerProm, queueEvent->exportedHandlerProm) {
-        return handlerProm.then([]() { return EventOutcome::OK; });
-      }
-      // If not, we can consider the invocation complete.
-      return EventOutcome::OK;
-    })
+                       .then([]() mutable -> kj::Promise<EventOutcome> { return EventOutcome::OK; })
                        .catch_([](kj::Exception&& e) {
       // If any exceptions were thrown, mark the outcome accordingly.
       return EventOutcome::EXCEPTION;
     })
                        .exclusiveJoin(timeoutPromise.then([] {
       // Join everything against a timeout to ensure queue handlers can't run forever.
-      return EventOutcome::EXCEEDED_CPU;
+      return EventOutcome::EXCEEDED_WALL_TIME;
     })).exclusiveJoin(context.onAbort().then([] {
       // Also handle anything that might cause the worker to get aborted.
       // This is a change from the outcome we returned on abort before the compat flag, but better
@@ -726,22 +749,26 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
       // It'd be nicer if we could fall through to the code below for the non-compat-flag logic in
       // this case, but we don't even know if the worker uses service worker syntax until after
       // runProm resolves, so we just copy the bare essentials here.
-      auto scheduledResult = co_await incomingRequest->finishScheduled();
-      bool completed = scheduledResult == EventOutcome::OK;
-      outcome = completed ? context.waitUntilStatus() : scheduledResult;
+      auto scheduledResult = co_await incomingRequest->finishScheduled(kj::mv(incomingRequest));
+      outcome = scheduledResult.outcome;
     } else {
       // We're responsible for calling drain() on the incomingRequest to ensure that waitUntil tasks
       // can continue to run in the backgound for a while even after we return a result to the
       // caller of this event. But this is only needed in this code path because in all other code
       // paths we call incomingRequest->finishScheduled(), which already takes care of waiting on
       // waitUntil tasks.
-      waitUntilTasks.add(incomingRequest->drain().attach(
-          kj::mv(incomingRequest), kj::addRef(*queueEventHolder), kj::addRef(*this)));
+      incomingRequest = incomingRequest.attach(kj::addRef(*queueEventHolder), kj::addRef(*this));
+
+      // If we happen to already know that a limit was exceeded, set the outcome here. If it
+      // happens later during the drain, that's just too late to report. Oh well. (Note that the
+      // `finishScheduled()` route already handles limit-exceeded outcomes internally.)
+      KJ_IF_SOME(status, context.getLimitEnforcer().getLimitsExceeded()) {
+        outcome = status;
+      }
+
+      incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
     }
 
-    KJ_IF_SOME(status, context.getLimitEnforcer().getLimitsExceeded()) {
-      outcome = status;
-    }
     co_return WorkerInterface::CustomEvent::Result{.outcome = outcome};
   } else {
     // The user has not opted in to the new waitUntil behavior, so we need to add the queue()
@@ -750,11 +777,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
 
     // We reuse the finishScheduled() method for convenience, since queues use the same wall clock
     // timeout as scheduled workers.
-    auto scheduledResult = co_await incomingRequest->finishScheduled();
-    bool completed = scheduledResult == EventOutcome::OK;
-
+    auto scheduledResult = co_await incomingRequest->finishScheduled(kj::mv(incomingRequest));
     co_return WorkerInterface::CustomEvent::Result{
-      .outcome = completed ? context.waitUntilStatus() : scheduledResult,
+      .outcome = scheduledResult.outcome,
     };
   }
 }
@@ -762,6 +787,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
 kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
+    FrankenvalueHandler& frankenvalueHandler,
     rpc::EventDispatcher::Client dispatcher) {
   auto req = dispatcher.castAs<rpc::EventDispatcher>().queueRequest();
   KJ_SWITCH_ONEOF(params) {
@@ -796,20 +822,20 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::sendRpc(
 
   return req.send().then([this](auto resp) {
     auto respResult = resp.getResult();
-    this->result.ackAll = respResult.getAckAll();
+    this->result->ackAll = respResult.getAckAll();
     auto retryBatch = respResult.getRetryBatch();
-    this->result.retryBatch.retry = retryBatch.getRetry();
+    this->result->retryBatch.retry = retryBatch.getRetry();
     if (retryBatch.isDelaySeconds()) {
-      this->result.retryBatch.delaySeconds = retryBatch.getDelaySeconds();
+      this->result->retryBatch.delaySeconds = retryBatch.getDelaySeconds();
     }
 
-    this->result.explicitAcks.clear();
+    this->result->explicitAcks.clear();
     for (const auto& msgId: respResult.getExplicitAcks()) {
-      this->result.explicitAcks.insert(kj::heapString(msgId));
+      this->result->explicitAcks.insert(kj::heapString(msgId));
     }
-    this->result.retries.clear();
+    this->result->retries.clear();
     for (const auto& retry: respResult.getRetryMessages()) {
-      auto& entry = this->result.retries.upsert(kj::heapString(retry.getMsgId()), {});
+      auto& entry = this->result->retries.upsert(kj::heapString(retry.getMsgId()), {});
       if (retry.isDelaySeconds()) {
         entry.value.delaySeconds = retry.getDelaySeconds();
       }
@@ -822,8 +848,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::sendRpc(
 }
 
 kj::Array<QueueRetryMessage> QueueCustomEvent::getRetryMessages() const {
-  auto retryMsgs = kj::heapArrayBuilder<QueueRetryMessage>(result.retries.size());
-  for (const auto& entry: result.retries) {
+  auto retryMsgs = kj::heapArrayBuilder<QueueRetryMessage>(result->retries.size());
+  for (const auto& entry: result->retries) {
     retryMsgs.add(QueueRetryMessage{
       .msgId = kj::heapString(entry.key), .delaySeconds = entry.value.delaySeconds});
   }
@@ -831,8 +857,8 @@ kj::Array<QueueRetryMessage> QueueCustomEvent::getRetryMessages() const {
 }
 
 kj::Array<kj::String> QueueCustomEvent::getExplicitAcks() const {
-  auto ackArray = kj::heapArrayBuilder<kj::String>(result.explicitAcks.size());
-  for (const auto& msgId: result.explicitAcks) {
+  auto ackArray = kj::heapArrayBuilder<kj::String>(result->explicitAcks.size());
+  for (const auto& msgId: result->explicitAcks) {
     ackArray.add(kj::heapString(msgId));
   }
   return ackArray.finish();

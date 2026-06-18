@@ -2015,8 +2015,9 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::delete_(
       [waiter = kj::mv(waiter)]() { return waiter->getCountedDelete().countDeleted; });
 }
 
-kj::Own<ActorCacheInterface::Transaction> ActorCache::startTransaction() {
-  return kj::heap<Transaction>(*this);
+kj::OneOf<kj::Own<ActorCacheInterface::Transaction>, kj::Promise<void>> ActorCache::
+    startTransaction() {
+  return kj::Own<ActorCacheInterface::Transaction>(kj::heap<Transaction>(*this));
 }
 
 ActorCache::DeleteAllResults ActorCache::deleteAll(
@@ -2726,15 +2727,17 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
       }
       return kj::mv(e);
     } else {
+      auto wdErrId = makeInternalErrorId();
       if (isInterestingException(e)) {
-        LOG_EXCEPTION("actorCacheFlush", e);
+        LOG_EXCEPTION_WITH_ID("actorCacheFlush", e, wdErrId);
       } else {
-        LOG_NOSENTRY(ERROR, "actor cache flush failed", e);
+        LOG_NOSENTRY(ERROR, "actor cache flush failed", e, wdErrId);
       }
       // Pass through exception type to convey appropriate retry behavior.
       return kj::Exception(e.getType(), __FILE__, __LINE__,
           kj::str("broken.outputGateBroken; jsg.Error: Internal error in Durable "
-                  "Object storage write caused object to be reset."));
+                  "Object storage write caused object to be reset; reference = ",
+              wdErrId));
     }
   });
 }
@@ -3122,15 +3125,17 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
       e.setDescription(kj::str("broken.outputGateBroken; ", msg));
       return kj::mv(e);
     } else {
+      auto wdErrId = makeInternalErrorId();
       if (isInterestingException(e)) {
-        LOG_EXCEPTION("actorCacheDeleteAll", e);
+        LOG_EXCEPTION_WITH_ID("actorCacheDeleteAll", e, wdErrId);
       } else {
-        LOG_NOSENTRY(ERROR, "actorCacheDeleteAll failed", e);
+        LOG_NOSENTRY(ERROR, "actorCacheDeleteAll failed", e, wdErrId);
       }
       // Pass through exception type to convey appropriate retry behavior.
       return kj::Exception(e.getType(), __FILE__, __LINE__,
-          kj::str(
-              "broken.outputGateBroken; jsg.Error: Internal error in Durable Object storage deleteAll() caused object to be reset."));
+          kj::str("broken.outputGateBroken; jsg.Error: Internal error in Durable "
+                  "Object storage deleteAll() caused object to be reset; reference = ",
+              wdErrId));
     }
   });
 }

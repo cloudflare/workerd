@@ -25,7 +25,6 @@ export default {
     expectedFailures: [
       // Each of these *ought* to pass. They are included here because we
       // know they currently do not. Each needs to be investigated.
-      'Pattern: ["((?R)):"] Inputs: undefined',
       'Pattern: [{"pathname":"/foo/bar","baseURL":"https://example.com?query#hash"}] Inputs: [{"pathname":"/foo/bar"}]',
       'Pattern: [{"pathname":"/foo/bar","baseURL":"https://example.com?query#hash"}] Inputs: [{"hostname":"example.com","pathname":"/foo/bar"}]',
       'Pattern: [{"pathname":"/foo/bar","baseURL":"https://example.com?query#hash"}] Inputs: [{"protocol":"https","hostname":"example.com","pathname":"/foo/bar"}]',

@@ -4,16 +4,17 @@
 
 #include "io-context.h"
 
+#include <workerd/io/access-info.h>
 #include <workerd/io/io-gate.h>
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/own-util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/uncaught-exception-source.h>
+#include <workerd/util/use-perfetto-categories.h>
 
 #include <kj/debug.h>
 
@@ -218,11 +219,15 @@ IoContext::IncomingRequest::IoContext_IncomingRequest(kj::Own<IoContext> context
     kj::Own<IoChannelFactory> ioChannelFactoryParam,
     kj::Own<RequestObserver> metricsParam,
     kj::Maybe<kj::Own<BaseTracer>> workerTracer,
-    kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan)
+    kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
+    kj::Maybe<kj::Own<AccessInfo>> accessInfo,
+    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory)
     : context(kj::mv(contextParam)),
       metrics(kj::mv(metricsParam)),
       workerTracer(kj::mv(workerTracer)),
       ioChannelFactory(kj::mv(ioChannelFactoryParam)),
+      accessInfo(kj::mv(accessInfo)),
+      selfTokenFactory(kj::mv(selfTokenFactory)),
       maybeTriggerInvocationSpan(kj::mv(maybeTriggerInvocationSpan)) {}
 
 tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanContext() {
@@ -268,13 +273,9 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
   // IoContext's delete queue) are safe: user-tracing SpanSubmitters hold only a
   // BaseTracer::WeakRef, so they cannot extend tracer lifetime.
   KJ_IF_SOME(workerTracer, workerTracer) {
-    if (util::Autogate::isEnabled(util::AutogateKey::USER_SPAN_CONTEXT_PROPAGATION)) {
-      auto& invCtx = getInvocationSpanContext();
-      rootUserTraceSpan =
-          workerTracer->makeUserRequestSpan(invCtx.getTraceId(), invCtx.getTraceFlags());
-    } else {
-      rootUserTraceSpan = workerTracer->makeUserRequestSpan(tracing::TraceId(nullptr), kj::none);
-    }
+    auto& invCtx = getInvocationSpanContext();
+    rootUserTraceSpan =
+        workerTracer->makeUserRequestSpan(invCtx.getTraceId(), invCtx.getTraceFlags());
   }
 
   KJ_IF_SOME(a, context->actor) {
@@ -539,13 +540,55 @@ void IoContext::addWaitUntil(kj::Promise<void> promise) {
   waitUntilTasks.add(kj::mv(promise));
 }
 
+namespace {
+
+#ifdef KJ_DEBUG
+
+void requestGc(const Worker& worker) {
+  TRACE_EVENT("workerd", "Debug: requestGc()");
+  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    auto& isolate = worker.getIsolate();
+    auto lock = isolate.getApi().lock(stackScope);
+    lock->requestGcForTesting();
+  });
+}
+
+template <typename T>
+kj::Promise<T> addGcPassForTest(IoContext& context, kj::Promise<T> promise) {
+  TRACE_EVENT("workerd", "Debug: addGcPassForTest");
+  auto worker = kj::atomicAddRef(context.getWorker());
+  if constexpr (kj::isSameType<T, void>()) {
+    co_await promise;
+    requestGc(*worker);
+  } else {
+    auto ret = co_await promise;
+    requestGc(*worker);
+    co_return kj::mv(ret);
+  }
+}
+
+#endif  // KJ_DEBUG
+
+}  // namespace
+
+template <typename T>
+kj::Promise<T> IoContext::IncomingRequest::maybeAddGcPassForTest(kj::Promise<T> promise) {
+#ifdef KJ_DEBUG
+  if (isPredictableModeForTest()) {
+    return addGcPassForTest(*context, kj::mv(promise));
+  }
+#endif
+  return kj::mv(promise);
+}
+
 // Mark ourselves so we know that we made a best effort attempt to wait for waitUntilTasks.
-kj::Promise<void> IoContext::IncomingRequest::drain() {
+void IoContext::IncomingRequest::drain(
+    kj::TaskSet& waitUntilTasks, kj::Own<IoContext_IncomingRequest>&& self) {
   waitedForWaitUntil = true;
 
   if (&context->incomingRequests.front() != this) {
     // A newer request was received, so draining isn't our job.
-    return kj::READY_NOW;
+    return;
   }
 
   kj::Promise<void> timeoutPromise = nullptr;
@@ -571,12 +614,28 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
     };
     timeoutPromise = context->limitEnforcer->limitDrain().then(kj::mv(timeoutLogPromise));
   }
-  return context->waitUntilTasks.onEmpty()
-      .exclusiveJoin(kj::mv(timeoutPromise))
-      .exclusiveJoin(context->onAbort().catch_([](kj::Exception&&) {}));
+  auto result = context->waitUntilTasks.onEmpty()
+                    .exclusiveJoin(kj::mv(timeoutPromise))
+                    .exclusiveJoin(context->onAbort());
+
+  result = result.attach(kj::mv(self));
+
+  KJ_IF_SOME(a, context->actor) {
+    // Make sure the drain is canceled and the IncomingRequest dropped on actor abort.
+    result = a.getAbortCanceler().wrap(kj::mv(result));
+  }
+
+  // We actually don't want the promise we put in `waitUntilTasks` to report errors when aborted.
+  // Abort errors are already propagated to any connected clients and other places. Note that
+  // `waitUntilTasks.onEmpty()` never throws, and `timeoutPromise` as constructed above also never
+  // throws, so this is just squelching abort errors.
+  result = result.catch_([](kj::Exception&&) {});
+
+  waitUntilTasks.add(maybeAddGcPassForTest(kj::mv(result)));
 }
 
-kj::Promise<EventOutcome> IoContext::IncomingRequest::finishScheduled() {
+kj::Promise<WorkerInterface::ScheduledResult> IoContext::IncomingRequest::finishScheduled(
+    kj::Own<IoContext_IncomingRequest>&& self) {
   // TODO(someday): In principle we should be able to support delivering the "scheduled" event type
   //   to an actor, and this may be important if we open up the whole of WorkerInterface to be
   //   callable from any stub. However, the logic around async tasks would have to be different. We
@@ -590,19 +649,28 @@ kj::Promise<EventOutcome> IoContext::IncomingRequest::finishScheduled() {
   KJ_ASSERT(context->incomingRequests.size() == 1);
   context->incomingRequests.front().waitedForWaitUntil = true;
 
-  auto timeoutPromise = context->limitEnforcer->limitScheduled().then([] {
-    // TODO(soon): The limit being hit here is a wall time limit. Can we report an
-    // "exceededWallTime" outcome instead?
-    return EventOutcome::EXCEEDED_CPU;
-  });
-  return context->waitUntilTasks.onEmpty()
-      .then([]() { return EventOutcome::OK; })
-      .exclusiveJoin(kj::mv(timeoutPromise))
-      .exclusiveJoin(context->onAbort().then([] {
+  auto timeoutPromise = context->limitEnforcer->limitScheduled().then(
+      [] { return EventOutcome::EXCEEDED_WALL_TIME; });
+  auto outcome = context->waitUntilTasks.onEmpty()
+                     .then([this]() { return context->waitUntilStatus(); })
+                     .exclusiveJoin(kj::mv(timeoutPromise))
+                     .exclusiveJoin(context->onAbort().then([] {
     // abortFulfiller should only ever be rejected instead of being fulfilled, return an
     // internalError outcome if it does happen
     return EventOutcome::INTERNAL_ERROR;
-  }, [](kj::Exception&& e) { return RequestObserver::outcomeFromException(e); }));
+  }, [](kj::Exception&& e) {
+    KJ_LOG(INFO, "execution context aborted", e);  // for tests
+    return RequestObserver::outcomeFromException(e);
+  }));
+
+  auto result = outcome.then([this](EventOutcome outcome) {
+    return WorkerInterface::ScheduledResult{
+      .retry = context->shouldRetryScheduled(),
+      .outcome = outcome,
+    };
+  });
+
+  return maybeAddGcPassForTest(result.attach(kj::mv(self)));
 }
 
 class IoContext::PendingEvent: public kj::Refcounted {
@@ -1427,6 +1495,31 @@ bool IoContext::hasCurrent() {
 
 bool IoContext::isCurrent() {
   return this == threadLocalRequest;
+}
+
+void IoContext::setEntrypointHandler(jsg::Lock& js, jsg::JsObject handler) {
+  KJ_IF_SOME(_, entrypointHandler) {
+    KJ_FAIL_REQUIRE("entrypoint handler has already been set");
+  }
+  entrypointHandler = jsg::JsRef<jsg::JsObject>(js, handler);
+}
+
+jsg::JsObject IoContext::getEntrypointHandler(jsg::Lock& js) {
+  return KJ_REQUIRE_NONNULL(entrypointHandler, "entrypoint handler has not been set").getHandle(js);
+}
+
+kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> IoContext::getSelfTokenFactory() {
+  // Scan all IncomingRequests and return the first self-token factory we find. Scanning them all,
+  // rather that just using the "current" IncomingRequest, avoids unpredictable behavior in the
+  // presence of concurrent requests where some requests came in through a path that doesn't have a
+  // self-token factory available. In practice, though, applications ought to be consistent and
+  // either always use ctx.restore() or never use it for a particular dynamic worker or facet.
+  for (auto& req: incomingRequests) {
+    KJ_IF_SOME(s, req.selfTokenFactory) {
+      return kj::addRef(*s);
+    }
+  }
+  return kj::none;
 }
 
 auto IoContext::tryGetWeakRefForCurrent() -> kj::Maybe<kj::Own<WeakRef>> {

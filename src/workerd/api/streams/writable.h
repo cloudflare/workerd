@@ -26,7 +26,7 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
   jsg::MemoizedIdentity<jsg::Promise<void>>& getReady();
   kj::Maybe<int> getDesiredSize();
 
-  jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
+  jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
 
   // Closes the stream. All present write requests will complete, but future write requests will
   // be rejected with a TypeError to the effect of "This writable stream has been closed."
@@ -40,7 +40,7 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
   //   complete on this side if we don't care that they're actually read?
   jsg::Promise<void> close(jsg::Lock& js);
 
-  jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> chunk);
+  jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<jsg::JsValue> chunk);
   void releaseLock(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(WritableStreamDefaultWriter, CompatibilityFlags::Reader flags) {
@@ -172,7 +172,7 @@ class WritableStream: public jsg::Object {
   // effect of "This writable stream has been requested to abort." `reason` will be passed to the
   // underlying sink's abort algorithm -- if this writable stream is one side of a transform stream,
   // then its abort algorithm causes the transform's readable side to become errored with `reason`.
-  jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
+  jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
 
   jsg::Promise<void> close(jsg::Lock& js);
   jsg::Promise<void> flush(jsg::Lock& js);

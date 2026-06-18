@@ -17,6 +17,7 @@
 // JSG has very entrenched include cycles
 // NOLINTNEXTLINE(misc-header-include-cycle)
 #include <workerd/jsg/ser.h>
+#include <workerd/jsg/unwrap-args.h>
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/wrappable.h>
 
@@ -28,11 +29,6 @@
 
 #include <type_traits>
 #include <typeindex>
-
-// TODO(cleanup): Remove when unnecessary.
-#if V8_MAJOR_VERSION >= 15 || (V8_MAJOR_VERSION == 14 && V8_MINOR_VERSION >= 7)
-#define HolderV2 Holder
-#endif
 
 namespace std {
 inline auto KJ_HASHCODE(const std::type_index& idx) {
@@ -119,8 +115,10 @@ struct ConstructorCallback<TypeWrapper, T, Ref<T>(Args...), kj::_::Indexes<index
 
       auto& wrapper = TypeWrapper::from(isolate);
 
-      Ref<T> ptr = T::constructor(wrapper.template unwrap<Args>(js, context, args, indexes,
-          TypeErrorContext::constructorArgument(typeid(T), indexes))...);
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
+          []<size_t i>() { return TypeErrorContext::constructorArgument(typeid(T), i); });
+
+      Ref<T> ptr = T::constructor(kj::mv(unwrapped).template take<indexes>()...);
       if constexpr (T::jsgHasReflection) {
         ptr->jsgInitReflection(wrapper);
       }
@@ -145,9 +143,10 @@ struct ConstructorCallback<TypeWrapper, T, Ref<T>(Lock&, Args...), kj::_::Indexe
 
       auto& wrapper = TypeWrapper::from(isolate);
 
-      Ref<T> ptr = T::constructor(Lock::from(isolate),
-          wrapper.template unwrap<Args>(js, context, args, indexes,
-              TypeErrorContext::constructorArgument(typeid(T), indexes))...);
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
+          []<size_t i>() { return TypeErrorContext::constructorArgument(typeid(T), i); });
+
+      Ref<T> ptr = T::constructor(js, kj::mv(unwrapped).template take<indexes>()...);
       if constexpr (T::jsgHasReflection) {
         ptr->jsgInitReflection(wrapper);
       }
@@ -176,9 +175,10 @@ struct ConstructorCallback<TypeWrapper,
 
       auto& wrapper = TypeWrapper::from(isolate);
 
-      Ref<T> ptr = T::constructor(args,
-          wrapper.template unwrap<Args>(js, context, args, indexes,
-              TypeErrorContext::constructorArgument(typeid(T), indexes))...);
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
+          []<size_t i>() { return TypeErrorContext::constructorArgument(typeid(T), i); });
+
+      Ref<T> ptr = T::constructor(args, kj::mv(unwrapped).template take<indexes>()...);
       if constexpr (T::jsgHasReflection) {
         ptr->jsgInitReflection(wrapper);
       }
@@ -233,13 +233,13 @@ struct MethodCallback<TypeWrapper,
       auto& wrapper = TypeWrapper::from(isolate);
       auto& lock = Lock::from(isolate);
       auto& self = extractInternalPointer<T, isContext>(context, obj);
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
+          []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
       if constexpr (isVoid<Ret>()) {
-        (self.*method)(wrapper.template unwrap<Args>(lock, context, args, indexes,
-            TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+        (self.*method)(kj::mv(unwrapped).template take<indexes>()...);
       } else {
-        return wrapper.wrap(lock, context, obj,
-            (self.*method)(wrapper.template unwrap<Args>(lock, context, args, indexes,
-                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
+        return wrapper.wrap(
+            lock, context, obj, (self.*method)(kj::mv(unwrapped).template take<indexes>()...));
       }
     });
   }
@@ -259,6 +259,10 @@ struct MethodCallback<TypeWrapper,
     auto& wrapper = TypeWrapper::from(isolate);
 
     return liftKj<Ret>(isolate, [&]() {
+      // Pack expansion order is unspecified by [expr.call], but ordering
+      // is safe here: `unwrapFastApi` is invoked only with parameter types
+      // that pass `isFastApiCompatible` (FastApiPrimitive or v8::Local), and
+      // neither path fires JS-observable side effects.  See unwrap-args.h.
       return (self.*method)(wrapper.template unwrapFastApi<Args>(js, context, fastArgs,
           TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
     });
@@ -293,15 +297,13 @@ struct MethodCallback<TypeWrapper,
       auto& wrapper = TypeWrapper::from(isolate);
       auto& self = extractInternalPointer<T, isContext>(context, obj);
       auto& lock = Lock::from(isolate);
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
+          []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
       if constexpr (isVoid<Ret>()) {
-        (self.*method)(lock,
-            wrapper.template unwrap<Args>(lock, context, args, indexes,
-                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+        (self.*method)(lock, kj::mv(unwrapped).template take<indexes>()...);
       } else {
         return wrapper.wrap(lock, context, obj,
-            (self.*method)(lock,
-                wrapper.template unwrap<Args>(lock, context, args, indexes,
-                    TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
+            (self.*method)(lock, kj::mv(unwrapped).template take<indexes>()...));
       }
     });
   }
@@ -321,6 +323,7 @@ struct MethodCallback<TypeWrapper,
     auto& wrapper = TypeWrapper::from(isolate);
 
     return liftKj<Ret>(isolate, [&]() {
+      // See note on fast-API ordering in the plain-method specialization above.
       return (self.*method)(lock,
           wrapper.template unwrapFastApi<Args>(lock, context, fastArgs,
               TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
@@ -354,15 +357,13 @@ struct MethodCallback<TypeWrapper,
       auto& wrapper = TypeWrapper::from(isolate);
       auto& lock = Lock::from(isolate);
       auto& self = extractInternalPointer<T, isContext>(context, obj);
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
+          []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
       if constexpr (isVoid<Ret>()) {
-        (self.*method)(args,
-            wrapper.template unwrap<Args>(lock, context, args, indexes,
-                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+        (self.*method)(args, kj::mv(unwrapped).template take<indexes>()...);
       } else {
         return wrapper.wrap(lock, context, obj,
-            (self.*method)(args,
-                wrapper.template unwrap<Args>(lock, context, args, indexes,
-                    TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
+            (self.*method)(args, kj::mv(unwrapped).template take<indexes>()...));
       }
     });
   }
@@ -428,13 +429,13 @@ struct StaticMethodCallback<TypeWrapper,
       auto context = isolate->GetCurrentContext();
       auto& wrapper = TypeWrapper::from(isolate);
       auto& lock = Lock::from(isolate);
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
+          []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
       if constexpr (isVoid<Ret>()) {
-        (*method)(wrapper.template unwrap<Args>(lock, context, args, indexes,
-            TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+        (*method)(kj::mv(unwrapped).template take<indexes>()...);
       } else {
-        return wrapper.wrap(lock, context, kj::none,
-            (*method)(wrapper.template unwrap<Args>(lock, context, args, indexes,
-                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
+        return wrapper.wrap(
+            lock, context, kj::none, (*method)(kj::mv(unwrapped).template take<indexes>()...));
       }
     });
   }
@@ -453,6 +454,7 @@ struct StaticMethodCallback<TypeWrapper,
     auto& wrapper = TypeWrapper::from(isolate);
 
     return liftKj<Ret>(isolate, [&]() {
+      // See note on fast-API ordering in MethodCallback above.
       return (*method)(wrapper.template unwrapFastApi<Args>(lock, context, fastArgs,
           TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
     });
@@ -483,15 +485,13 @@ struct StaticMethodCallback<TypeWrapper,
       auto context = isolate->GetCurrentContext();
       auto& wrapper = TypeWrapper::from(isolate);
       auto& lock = Lock::from(isolate);
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
+          []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
       if constexpr (isVoid<Ret>()) {
-        (*method)(lock,
-            wrapper.template unwrap<Args>(lock, context, args, indexes,
-                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+        (*method)(lock, kj::mv(unwrapped).template take<indexes>()...);
       } else {
         return wrapper.wrap(lock, context, kj::none,
-            (*method)(lock,
-                wrapper.template unwrap<Args>(lock, context, args, indexes,
-                    TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
+            (*method)(lock, kj::mv(unwrapped).template take<indexes>()...));
       }
     });
   }
@@ -510,6 +510,7 @@ struct StaticMethodCallback<TypeWrapper,
     auto& wrapper = TypeWrapper::from(isolate);
 
     return liftKj<Ret>(isolate, [&]() {
+      // See note on fast-API ordering in MethodCallback above.
       return (*method)(lock,
           wrapper.template unwrapFastApi<Args>(lock, context, fastArgs,
               TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
@@ -539,15 +540,13 @@ struct StaticMethodCallback<TypeWrapper,
       auto context = isolate->GetCurrentContext();
       auto& lock = Lock::from(isolate);
       auto& wrapper = TypeWrapper::from(isolate);
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
+          []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
       if constexpr (isVoid<Ret>()) {
-        (*method)(args,
-            wrapper.template unwrap<Args>(lock, context, args, indexes,
-                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+        (*method)(args, kj::mv(unwrapped).template take<indexes>()...);
       } else {
         return wrapper.wrap(lock, context, kj::none,
-            (*method)(args,
-                wrapper.template unwrap<Args>(lock, context, args, indexes,
-                    TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
+            (*method)(args, kj::mv(unwrapped).template take<indexes>()...));
       }
     });
   }
@@ -643,7 +642,7 @@ struct GetterCallback;
       liftKj(info, [&]() {                                                                         \
         auto isolate = info.GetIsolate();                                                          \
         auto context = isolate->GetCurrentContext();                                               \
-        auto obj = info.HolderV2();                                                                \
+        auto obj = info.Holder();                                                                  \
         auto& js = Lock::from(isolate);                                                            \
         auto& wrapper = TypeWrapper::from(isolate);                                                \
         /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */   \
@@ -690,7 +689,7 @@ struct GetterCallback;
         auto isolate = info.GetIsolate();                                                          \
         auto context = isolate->GetCurrentContext();                                               \
         auto& js = Lock::from(isolate);                                                            \
-        auto obj = info.HolderV2();                                                                \
+        auto obj = info.Holder();                                                                  \
         auto& wrapper = TypeWrapper::from(isolate);                                                \
         /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */   \
         if (!isContext &&                                                                          \
@@ -882,13 +881,14 @@ template <typename TypeWrapper,
     void (T::*method)(Arg),
     bool isContext>
 struct SetterCallback<TypeWrapper, methodName, void (T::*)(Arg), method, isContext> {
-  static void callback(
-      v8::Local<v8::Name>, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<void>& info) {
+  static void callback(v8::Local<v8::Name>,
+      v8::Local<v8::Value> value,
+      const v8::PropertyCallbackInfo<v8::Boolean>& info) {
     liftKj(info, [&]() {
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
       auto& js = Lock::from(isolate);
-      auto obj = info.HolderV2();
+      auto obj = info.Holder();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
       if (!isContext && !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
@@ -909,12 +909,13 @@ template <typename TypeWrapper,
     void (T::*method)(Lock&, Arg),
     bool isContext>
 struct SetterCallback<TypeWrapper, methodName, void (T::*)(Lock&, Arg), method, isContext> {
-  static void callback(
-      v8::Local<v8::Name>, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<void>& info) {
+  static void callback(v8::Local<v8::Name>,
+      v8::Local<v8::Value> value,
+      const v8::PropertyCallbackInfo<v8::Boolean>& info) {
     liftKj(info, [&]() {
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
-      auto obj = info.HolderV2();
+      auto obj = info.Holder();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
       if (!isContext && !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
@@ -1203,7 +1204,7 @@ struct WildcardPropertyCallbacks<TypeWrapper,
     liftKj(info, [&]() -> v8::Local<v8::Integer> {
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
-      auto obj = info.HolderV2();
+      auto obj = info.Holder();
       auto& wrapper = TypeWrapper::from(isolate);
       if (!wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
@@ -1230,7 +1231,7 @@ struct WildcardPropertyCallbacks<TypeWrapper,
     liftKj(info, [&]() -> v8::Local<v8::Value> {
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
-      auto obj = info.HolderV2();
+      auto obj = info.Holder();
       auto& wrapper = TypeWrapper::from(isolate);
       if (!wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
@@ -1328,8 +1329,13 @@ struct ResourceTypeBuilder {
 
     if constexpr (isFastApiCompatible<decltype(method)>) {
       if (typeWrapper.isFastApiEnabled()) {
-        auto cFunction = v8::CFunction::Make(MethodCallback<TypeWrapper, name, isContext, Self,
-            decltype(method), method, ArgumentIndexes<decltype(method)>>::template fastCallback<>);
+        // V8's FunctionTemplate::SetCallHandler stores a pointer to this CFunction (not a copy),
+        // so it must outlive the FunctionTemplate. This register function is a unique template
+        // instantiation per method, so a function-local static gives us exactly one persistent
+        // CFunction per registered method.
+        static const auto cFunction =
+            v8::CFunction::Make(MethodCallback<TypeWrapper, name, isContext, Self, decltype(method),
+                method, ArgumentIndexes<decltype(method)>>::template fastCallback<>);
         auto functionTemplate = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate,
             &MethodCallback<TypeWrapper, name, isContext, Self, decltype(method), method,
                 ArgumentIndexes<decltype(method)>>::callback,
@@ -1356,8 +1362,9 @@ struct ResourceTypeBuilder {
 
     if constexpr (isFastApiCompatible<Method>) {
       if (typeWrapper.isFastApiEnabled()) {
-        auto cFunction = v8::CFunction::Make(StaticMethodCallback<TypeWrapper, name, Self, Method,
-            method, ArgumentIndexes<Method>>::template fastCallback<>);
+        // Must outlive the FunctionTemplate; see registerMethod for details.
+        static const auto cFunction = v8::CFunction::Make(StaticMethodCallback<TypeWrapper, name,
+            Self, Method, method, ArgumentIndexes<Method>>::template fastCallback<>);
 
         // Create a function template with both slow and fast paths
         // Notably, we specify an empty signature because a static method invocation will have no holder
@@ -1418,12 +1425,13 @@ struct ResourceTypeBuilder {
     bool useSlowApi = true;
     if constexpr (isFastApiCompatible<Getter> && isFastApiCompatible<Setter>) {
       if (typeWrapper.isFastApiEnabled()) {
-        auto getterCFunction = v8::CFunction::Make(Gcb::template fastCallback<>);
+        // These CFunctions must outlive the FunctionTemplates; see registerMethod for details.
+        static const auto getterCFunction = v8::CFunction::Make(Gcb::template fastCallback<>);
         getterFn = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate, &Gcb::callback,
             v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow,
             v8::SideEffectType::kHasSideEffect, {&getterCFunction, 1});
 
-        auto setterCFunction = v8::CFunction::Make(Scb::template fastCallback<>);
+        static const auto setterCFunction = v8::CFunction::Make(Scb::template fastCallback<>);
         setterFn = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate, &Scb::callback,
             v8::Local<v8::Value>(), signature, specCompliant ? 1 : 0,
             v8::ConstructorBehavior::kThrow, v8::SideEffectType::kHasSideEffect,
@@ -1777,8 +1785,8 @@ class ResourceWrapper {
       return {wrapper.getTemplate(isolate, static_cast<T*>(nullptr)), rinit};
     });
 
-    if constexpr (static_cast<uint>(T::jsgSerializeTag) !=
-        static_cast<uint>(T::jsgSuper::jsgSerializeTag)) {
+    if constexpr (static_cast<uint>(T::jsgSerializeLevel) !=
+        static_cast<uint>(T::jsgSuper::jsgSerializeLevel)) {
       // This type is declared JSG_SERIALIZABLE.
       // HACK: The type of `serializer` should be `Serializer&`, not `auto&`, but Clang complains
       //   about the `writeRawUint32()` call being made on an incomplete type if `ser.h` hasn't been
@@ -1892,6 +1900,17 @@ class ResourceWrapper {
     // means "call the callback registered on the isolate to check" -- setting it to `true` means
     // "skip callback and just allow".)
     context->AllowCodeGenerationFromStrings(false);
+
+#if V8_MAJOR_VERSION >= 15
+    // Register a placeholder for Temporal's high-resolution "now" source. We don't enable the
+    // Temporal API yet, but V8 uses this callback to obtain the current time for Temporal once it
+    // is enabled. Returning a constant rather than a real high-resolution clock is important for
+    // Spectre mitigation (high-resolution timers are a timing-attack vector). Install a dummy
+    // returning 0 now so we don't forget this requirement when Temporal is turned on; revisit the
+    // returned value (and its resolution) at that point.
+    context->SetTemporalHostSystemUTCEpochNanosecondsCallback(
+        [](v8::Local<v8::Context>) -> int64_t { return 0; });
+#endif
 
     if (!options.enableWeakRef) {
       check(global->Delete(context, v8StrIntern(isolate, "WeakRef"_kj)));

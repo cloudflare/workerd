@@ -6,6 +6,7 @@ $Cxx.allowCancellation;
 
 using import "/capnp/compat/byte-stream.capnp".ByteStream;
 using CompatibilityFlags = import "/workerd/io/compatibility-date.capnp".CompatibilityFlags;
+using SpanContext = import "/workerd/io/worker-interface.capnp".SpanContext;
 
 interface Container @0x9aaceefc06523bca {
   # RPC interface to talk to a container, for containers attached to Durable Objects.
@@ -13,7 +14,7 @@ interface Container @0x9aaceefc06523bca {
   # When the actor shuts down, workerd will drop the `Container` capability, at which point
   # the container engine should implicitly destroy the container.
 
-  status @0 () -> (running :Bool);
+  status @0 (spanContext :SpanContext) -> (running :Bool);
   # Returns the container's current status. The runtime will always call this at DO startup.
 
   start @1 StartParams -> ();
@@ -53,6 +54,8 @@ interface Container @0x9aaceefc06523bca {
 
     containerSnapshotId @7 :Text;
     # Id of the full container snapshot to restore before the container starts.
+
+    spanContext @8 :SpanContext;
   }
 
   struct Label {
@@ -122,6 +125,8 @@ interface Container @0x9aaceefc06523bca {
 
     combinedOutput @3 :Bool;
     # If true, stderr is combined into stdout. If stdout is not set, combined output is discarded.
+
+    spanContext @4 :SpanContext;
   }
 
   struct Process {
@@ -161,7 +166,7 @@ interface Container @0x9aaceefc06523bca {
   signal @4 (signo :UInt32);
   # Sends the given Linux signal number to the root process.
 
-  getTcpPort @5 (port :UInt16) -> (port :Port);
+  getTcpPort @5 (port :UInt16, spanContext :SpanContext) -> (port :Port);
   # Obtains an object which can be used to connect to the application inside the container on the
   # given TCP port (the application must be listening on this port).
 

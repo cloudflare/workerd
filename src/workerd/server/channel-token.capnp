@@ -57,17 +57,63 @@ struct ChannelToken {
   enum Type {
     subrequest @0;  # token for IoChannelFactory::SubrequestChannel
     actorClass @1;  # token for IoChannelFactory::ActorClassChannel
+    rpc @2;         # token for IoChannelFactory::RpcChannel (`restoreChain` must not be empty)
   }
 
-  name @1 :Text;
-  # Name of the service in the workerd config's services list.
+  union {
+    service :group {
+      # This points to an entrypoint exported by a service, with no associated storage.
 
-  entrypoint @2 :Text;
-  # Name of the entrypoint the channel points at. For subrequest channels this must be a
-  # WorkerEntrypoint derivative (or plain object implementing `ExportedHandlers`). For actor class
-  # channels this must be a `DurableObject` implementation.
+      name @1 :Text;
+      # Name of the service in the workerd config's services list.
 
-  props @3 :Frankenvalue;
+      entrypoint @2 :Text;
+      # Name of the entrypoint the channel points at. For subrequest channels this must be a
+      # WorkerEntrypoint derivative (or plain object implementing `ExportedHandlers`). For actor
+      # class channels this must be a `DurableObject` implementation.
+
+      props @3 :Frankenvalue;
+    }
+
+    actor :group {
+      # This points to a specific actor instance.
+      #
+      # Note that `type` must be `subrequest` in this case.
+
+      namespaceKey @4 :Text;
+      # The `uniqueKey` for the namespace, as defined in workerd.capnp.
+      #
+      # This identifies the specific namespace that the token points at.
+
+      id @5 :Data;
+      # Raw DO ID bytes (not hex).
+
+      name @6 :Text;
+      # Name, if known, otherwise null.
+    }
+
+    restored :group {
+      # If present, the capability represented by this token is constructed by loading some other
+      # token and then invoking its `[restore]()` method.
+      #
+      # At present, the final token must be either type `subrequest` or `rpc`. `actorClass` is not
+      # supported because when an actor class is used to create a Facet, it must be present on the
+      # *same machine* as the facet, but calling `[restore]()` inherently implies RPC to some other
+      # machine (especially when invoked on an actor). However, this limitation could perhaps be
+      # overcome in the future, especially if we could require that the vendor is not an actor.
+
+      vendor @7 :Data;
+      # Token for the service whose `[restore]()` method shall be called. This must be a token of
+      # type `subrequest`.
+      #
+      # This is embedded as an encoded token rather than a `ChannelToken` structure for the same
+      # reason as caps in `FrankenvalueCapTable` (see below).
+
+      restoreArg @8 :Frankenvalue;
+      # Argument object to pass to the `[restore]()` method call. Only one argument is supported,
+      # but it may be an arbitrary object.
+    }
+  }
 
   struct FrankenvalueCapTable {
     # CapTable representation for `ChannelToken.props`.
@@ -81,6 +127,7 @@ struct ChannelToken {
 
         subrequestChannel @1 :Data;
         actorClassChannel @2 :Data;
+        rpcChannel @3 :Data;
         # Nested capabilities are represented using fully encoded channel tokens themselves (rather
         # than ChannelToken capnp structs) for a couple reasons:
         # 1. This simplifies the abstractions needed when encoding a channel token -- just call

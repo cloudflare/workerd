@@ -25,6 +25,15 @@
 #include <typeinfo>
 
 namespace workerd::api {
+namespace {
+// BoringSSL does not tolerate null pointers even when the length is zero.
+// JsBufferSource::asArrayPtr() can return {nullptr, 0} for empty buffers,
+// so we ensure a non-null pointer before passing to OpenSSL.
+kj::ArrayPtr<const kj::byte> nonNullBytes(kj::ArrayPtr<kj::byte> ptr) {
+  static const kj::byte DUMMY = 0;
+  return ptr == nullptr ? kj::arrayPtr(&DUMMY, 0) : ptr;
+}
+}  // namespace
 
 kj::StringPtr CryptoKeyUsageSet::name() const {
   if (*this == encrypt()) return "encrypt";
@@ -328,63 +337,65 @@ void CryptoKey::visitForGc(jsg::GcVisitor& visitor) {
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::encrypt(jsg::Lock& js,
     kj::OneOf<kj::String, EncryptAlgorithm> algorithmParam,
     const CryptoKey& key,
-    kj::Array<const kj::byte> plainText) {
+    jsg::JsBufferSource plainText) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
   return js.evalNow([&] {
     validateOperation(key, algorithm.name, CryptoKeyUsageSet::encrypt());
-    return key.impl->encrypt(js, kj::mv(algorithm), plainText).addRef(js);
+    return key.impl->encrypt(js, kj::mv(algorithm), nonNullBytes(plainText.asArrayPtr()))
+        .addRef(js);
   });
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::decrypt(jsg::Lock& js,
     kj::OneOf<kj::String, EncryptAlgorithm> algorithmParam,
     const CryptoKey& key,
-    kj::Array<const kj::byte> cipherText) {
+    jsg::JsBufferSource cipherText) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
   return js.evalNow([&] {
     validateOperation(key, algorithm.name, CryptoKeyUsageSet::decrypt());
-    return key.impl->decrypt(js, kj::mv(algorithm), cipherText).addRef(js);
+    return key.impl->decrypt(js, kj::mv(algorithm), nonNullBytes(cipherText.asArrayPtr()))
+        .addRef(js);
   });
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::sign(jsg::Lock& js,
     kj::OneOf<kj::String, SignAlgorithm> algorithmParam,
     const CryptoKey& key,
-    kj::Array<const kj::byte> data) {
+    jsg::JsBufferSource data) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
   return js.evalNow([&] {
     validateOperation(key, algorithm.name, CryptoKeyUsageSet::sign());
-    return key.impl->sign(js, kj::mv(algorithm), data).addRef(js);
+    return key.impl->sign(js, kj::mv(algorithm), nonNullBytes(data.asArrayPtr())).addRef(js);
   });
 }
 
 jsg::Promise<bool> SubtleCrypto::verify(jsg::Lock& js,
     kj::OneOf<kj::String, SignAlgorithm> algorithmParam,
     const CryptoKey& key,
-    kj::Array<const kj::byte> signature,
-    kj::Array<const kj::byte> data) {
+    jsg::JsBufferSource signature,
+    jsg::JsBufferSource data) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
   return js.evalNow([&] {
     validateOperation(key, algorithm.name, CryptoKeyUsageSet::verify());
-    return key.impl->verify(js, kj::mv(algorithm), signature, data);
+    return key.impl->verify(js, kj::mv(algorithm), nonNullBytes(signature.asArrayPtr()),
+        nonNullBytes(data.asArrayPtr()));
   });
 }
 
-jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::digest(jsg::Lock& js,
-    kj::OneOf<kj::String, HashAlgorithm> algorithmParam,
-    kj::Array<const kj::byte> data) {
+jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::digest(
+    jsg::Lock& js, kj::OneOf<kj::String, HashAlgorithm> algorithmParam, jsg::JsBufferSource data) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
@@ -395,8 +406,9 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::digest(jsg::Lock& js,
     auto digestCtx = kj::disposeWith<EVP_MD_CTX_free>(EVP_MD_CTX_new());
     KJ_ASSERT(digestCtx.get() != nullptr);
 
+    auto ptr = nonNullBytes(data.asArrayPtr());
     OSSLCALL(EVP_DigestInit_ex(digestCtx.get(), type, nullptr));
-    OSSLCALL(EVP_DigestUpdate(digestCtx.get(), data.begin(), data.size()));
+    OSSLCALL(EVP_DigestUpdate(digestCtx.get(), ptr.begin(), ptr.size()));
 
     auto buf = jsg::JsArrayBuffer::create(js, EVP_MD_CTX_size(digestCtx.get()));
     uint messageDigestSize = 0;
@@ -456,13 +468,13 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::deriveKey(jsg::Lock& js,
 
     auto length = getKeyLength(derivedKeyAlgorithm);
 
-    auto secret = baseKey.impl->deriveBits(js, kj::mv(algorithm), length);
+    auto secret = jsg::JsBufferSource(baseKey.impl->deriveBits(js, kj::mv(algorithm), length));
 
     // TODO(perf): For conformance, importKey() makes a copy of `secret`. In this case we really
     //   don't need to, but rather we ought to call the appropriate CryptoKey::Impl::import*()
     //   function directly.
     return importKeySync(
-        js, "raw", secret.copy(), kj::mv(derivedKeyAlgorithm), extractable, kj::mv(keyUsages));
+        js, "raw", secret.addRef(js), kj::mv(derivedKeyAlgorithm), extractable, kj::mv(keyUsages));
   });
 }
 
@@ -531,7 +543,7 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::wrapKey(jsg::Lock& js
 
 jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::unwrapKey(jsg::Lock& js,
     kj::String format,
-    kj::Array<const kj::byte> wrappedKey,
+    jsg::JsBufferSource wrappedKey,
     const CryptoKey& unwrappingKey,
     kj::OneOf<kj::String, EncryptAlgorithm> unwrapAlgorithm,
     kj::OneOf<kj::String, ImportKeyAlgorithm> unwrappedKeyAlgorithm,
@@ -550,7 +562,8 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::unwrapKey(jsg::Lock& js,
 
     validateOperation(unwrappingKey, normalizedAlgorithm.name, CryptoKeyUsageSet::unwrapKey());
 
-    auto bytes = unwrappingKey.impl->unwrapKey(js, kj::mv(normalizedAlgorithm), wrappedKey);
+    auto bytes = unwrappingKey.impl->unwrapKey(
+        js, kj::mv(normalizedAlgorithm), nonNullBytes(wrappedKey.asArrayPtr()));
 
     ImportKeyData importData;
 
@@ -560,7 +573,7 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::unwrapKey(jsg::Lock& js,
       importData = JSG_REQUIRE_NONNULL(jwkHandler.tryUnwrap(js, jwkDict.getHandle(js)),
           DOMDataError, "Missing \"kty\" field or corrupt JSON unwrapping key?");
     } else {
-      importData = bytes.copy();
+      importData = jsg::JsBufferSource(bytes).addRef(js);
     }
 
     auto imported = importKeySync(js, format, kj::mv(importData), kj::mv(normalizedUnwrapAlgorithm),
@@ -597,12 +610,14 @@ jsg::Ref<CryptoKey> SubtleCrypto::importKeySync(jsg::Lock& js,
     bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
   if (format == "raw" || format == "pkcs8" || format == "spki") {
-    auto& key = JSG_REQUIRE_NONNULL(keyData.tryGet<kj::Array<kj::byte>>(), TypeError,
+    auto& key = JSG_REQUIRE_NONNULL(keyData.tryGet<jsg::JsRef<jsg::JsBufferSource>>(), TypeError,
         "Import data provided for \"raw\", \"pkcs8\", or \"spki\" import formats must be a buffer "
         "source.");
+    auto keyHandle = key.getHandle(js);
 
     // Make a copy of the key import data.
-    keyData = kj::heapArray(key.asPtr());
+    auto copy = jsg::JsUint8Array::create(js, keyHandle.asArrayPtr());
+    keyData = jsg::JsBufferSource(copy).addRef(js);
   } else if (format == "jwk") {
     JSG_REQUIRE(keyData.is<JsonWebKey>(), TypeError,
         "Import data provided for \"jwk\" import format must be a JsonWebKey.");
@@ -800,7 +815,7 @@ void DigestStream::dispose(jsg::Lock& js) {
     KJ_IF_SOME(ready, state.tryGet<Ready>()) {
       auto reason = js.typeError("The DigestStream was disposed.");
       ready.resolver.reject(js, reason);
-      state.init<StreamStates::Errored>(js.v8Ref<v8::Value>(reason));
+      state.init<StreamStates::Errored>(reason.addRef(js));
     }
   }
   JSG_CATCH(exception) {
@@ -859,7 +874,7 @@ void DigestStream::abort(jsg::Lock& js, jsg::JsValue reason) {
   // If the state is already closed or errored, then this is a non-op
   KJ_IF_SOME(ready, state.tryGet<Ready>()) {
     ready.resolver.reject(js, reason);
-    state.init<StreamStates::Errored>(js.v8Ref<v8::Value>(reason));
+    state.init<StreamStates::Errored>(reason.addRef(js));
   }
 }
 
