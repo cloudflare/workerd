@@ -673,6 +673,13 @@ struct Worker {
       imageName @0 :Text;
       # Image name to be used to create the container using supported provider.
       # By default, we pull the "latest" tag of this image.
+
+      allowPrivileged @1 :Bool = false;
+      # When true, workerd creates the container with the elevated permissions
+      # needed for FUSE in local dev: CAP_SYS_ADMIN, /dev/fuse passthrough, and
+      # AppArmor unconfined. Off by default — only set this from a dev-only
+      # config path. Has no effect on production Cloudflare Containers, which
+      # use a different runtime path.
     }
   }
 

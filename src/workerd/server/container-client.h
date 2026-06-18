@@ -48,6 +48,10 @@ kj::Own<capnp::MallocMessageBuilder> decodeJsonResponse(kj::StringPtr response) 
   return message;
 }
 
+void configurePrivilegedContainerHostConfig(
+    docker_api::Docker::ContainerCreateRequest::HostConfig::Builder hostConfig,
+    bool allowPrivileged);
+
 // Docker-based implementation that implements the rpc::Container::Server interface
 // so it can be used as a rpc::Container::Client via kj::heap<ContainerClient>().
 // This allows the Container JSG class to use Docker directly without knowing
@@ -68,7 +72,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       kj::TaskSet& waitUntilTasks,
       kj::Promise<void> pendingCleanup,
       kj::Function<void(kj::Promise<void>)> cleanupCallback,
-      ChannelTokenHandler& channelTokenHandler);
+      ChannelTokenHandler& channelTokenHandler,
+      bool allowPrivileged);
 
   ~ContainerClient() noexcept(false);
 
@@ -103,6 +108,11 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   // Container egress interceptor image name (sidecar for egress proxy)
   kj::String containerEgressInterceptorImage;
+
+  // When true, createContainer() injects the HostConfig fields needed for FUSE
+  // (CAP_SYS_ADMIN, /dev/fuse, AppArmor unconfined). See ContainerOptions in
+  // workerd.capnp.
+  bool allowPrivileged;
 
   kj::TaskSet& waitUntilTasks;
 

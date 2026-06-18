@@ -2936,6 +2936,7 @@ class Server::WorkerService final: public Service,
         KJ_IF_SOME(config, containerOptions) {
           KJ_ASSERT(config.hasImageName(), "Image name is required");
           auto imageName = config.getImageName();
+          bool allowPrivileged = config.getAllowPrivileged();
           kj::String containerId;
           KJ_SWITCH_ONEOF(id) {
             KJ_CASE_ONEOF(globalId, kj::Own<ActorIdFactory::ActorId>) {
@@ -2947,7 +2948,8 @@ class Server::WorkerService final: public Service,
           }
 
           container = ns.getContainerClient(
-              kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId), imageName);
+              kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId), imageName,
+              allowPrivileged);
         }
 
         auto actor = actorClass->newActor(getTracker(), Worker::Actor::cloneId(id),
@@ -2992,7 +2994,7 @@ class Server::WorkerService final: public Service,
     }
 
     kj::Own<ContainerClient> getContainerClient(
-        kj::StringPtr containerId, kj::StringPtr imageName) {
+        kj::StringPtr containerId, kj::StringPtr imageName, bool allowPrivileged) {
       KJ_IF_SOME(existingClient, containerClients.find(containerId)) {
         return existingClient->addRef();
       }
@@ -3050,7 +3052,8 @@ class Server::WorkerService final: public Service,
           kj::str(dockerPathRef), kj::str(containerId), kj::str(imageName),
           kj::str(KJ_ASSERT_NONNULL(containerEgressInterceptorImage,
               "containerEgressInterceptorImage must be configured for containers.")),
-          waitUntilTasks, kj::mv(previousCleanup), kj::mv(cleanupCallback), channelTokenHandler);
+          waitUntilTasks, kj::mv(previousCleanup), kj::mv(cleanupCallback), channelTokenHandler,
+          allowPrivileged);
 
       // Store raw pointer in map (does not own)
       containerClients.insert(kj::str(containerId), client.get());
