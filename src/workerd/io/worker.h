@@ -216,6 +216,8 @@ class Worker: public kj::AtomicRefcounted {
   static void setupContext(
       jsg::Lock& lock, v8::Local<v8::Context> context, const LoggingOptions& loggingOptions);
 
+  static void setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context> context);
+
  private:
   kj::Own<const Script> script;
 

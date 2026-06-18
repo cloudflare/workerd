@@ -653,6 +653,8 @@ struct Worker::Isolate::Impl {
     KJ_DISALLOW_COPY_AND_MOVE(Lock);
 
     void setupContext(v8::Local<v8::Context> context) {
+      Worker::setupContextInternalScripts(*lock, context);
+
       // The V8Inspector implements the `console` object.
       KJ_IF_SOME(i, impl.inspector) {
         i.get()->contextCreated(v8_inspector::V8ContextInfo(
@@ -1749,12 +1751,6 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
 
 void Worker::setupContext(
     jsg::Lock& lock, v8::Local<v8::Context> context, const LoggingOptions& loggingOptions) {
-  // Set WebAssembly.Module @@HasInstance
-  setWebAssemblyModuleHasInstance(lock, context);
-
-  // Shim WebAssembly.instantiate to detect modules exporting "__instance_signal".
-  shimWebAssemblyInstantiate(lock, context);
-
   // We replace the default V8 console.log(), etc. methods, to give the worker access to
   // logged content, and log formatted values to stdout/stderr locally.
   auto global = context->Global();
@@ -1779,6 +1775,14 @@ void Worker::setupContext(
   setHandler("info", LogLevel::INFO);
   setHandler("log", LogLevel::LOG);
   setHandler("warn", LogLevel::WARN);
+}
+
+void Worker::setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context> context) {
+  // Set WebAssembly.Module @@HasInstance
+  setWebAssemblyModuleHasInstance(lock, context);
+
+  // Shim WebAssembly.instantiate to detect modules exporting "__instance_signal".
+  shimWebAssemblyInstantiate(lock, context);
 }
 // =======================================================================================
 
