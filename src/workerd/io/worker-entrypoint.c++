@@ -7,6 +7,7 @@
 #include <workerd/api/basics.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/util.h>
+#include <workerd/io/access-info.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/limit-enforcer.h>
@@ -61,7 +62,8 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Maybe<kj::String> cfBlobJson,
       kj::Maybe<Worker::VersionInfo> versionInfo,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
-      bool isDynamicDispatch);
+      bool isDynamicDispatch,
+      kj::Maybe<kj::Own<AccessInfo>> accessInfo);
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
@@ -110,7 +112,8 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Own<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::Own<BaseTracer>> workerTracer,
-      kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan);
+      kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
+      kj::Maybe<kj::Own<AccessInfo>> accessInfo);
 
   template <typename T>
   kj::Promise<T> maybeAddGcPassForTest(IoContext& context, kj::Promise<T> promise);
@@ -184,7 +187,8 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
     kj::Maybe<kj::String> cfBlobJson,
     kj::Maybe<Worker::VersionInfo> versionInfo,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
-    bool isDynamicDispatch) {
+    bool isDynamicDispatch,
+    kj::Maybe<kj::Own<AccessInfo>> accessInfo) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::construct()");
 
   auto obj = kj::heap<WorkerEntrypoint>(kj::Badge<WorkerEntrypoint>(), threadContext,
@@ -192,7 +196,7 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
       kj::mv(cfBlobJson), kj::mv(versionInfo));
   obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer),
-      kj::mv(maybeTriggerInvocationSpan));
+      kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo));
   auto& wrapper = metrics->wrapWorkerInterface(*obj);
   return kj::attachRef(wrapper, kj::mv(obj), kj::mv(metrics));
 }
@@ -222,7 +226,8 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     kj::Own<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> metrics,
     kj::Maybe<kj::Own<BaseTracer>> workerTracer,
-    kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan) {
+    kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
+    kj::Maybe<kj::Own<AccessInfo>> accessInfo) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::init()");
   // We need to construct the IoContext -- unless this is an actor and it already has a
   // IoContext, in which case we reuse it.
@@ -252,7 +257,7 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
   }
 
   incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::mv(context), kj::mv(ioChannelFactory),
-      kj::mv(metrics), kj::mv(workerTracer), kj::mv(maybeTriggerInvocationSpan))
+      kj::mv(metrics), kj::mv(workerTracer), kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo))
                         .attach(kj::mv(actor));
 }
 
@@ -1008,12 +1013,13 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::Maybe<kj::String> cfBlobJson,
     kj::Maybe<Worker::VersionInfo> versionInfo,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
-    bool isDynamicDispatch) {
+    bool isDynamicDispatch,
+    kj::Maybe<kj::Own<AccessInfo>> accessInfo) {
   return WorkerEntrypoint::construct(threadContext, kj::mv(worker), kj::mv(entrypointName),
       kj::mv(props), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::mv(metrics), waitUntilTasks, tunnelExceptions,
       kj::mv(workerTracer), kj::mv(cfBlobJson), kj::mv(versionInfo),
-      kj::mv(maybeTriggerInvocationSpan), isDynamicDispatch);
+      kj::mv(maybeTriggerInvocationSpan), isDynamicDispatch, kj::mv(accessInfo));
 }
 
 }  // namespace workerd
