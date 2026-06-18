@@ -144,7 +144,6 @@ function getInstantiateWasm(
  * This isn't public API of Pyodide so it's a bit fiddly.
  */
 function getEmscriptenSettings(
-  isWorkerd: boolean,
   pythonStdlib: ArrayBuffer,
   pyodideWasmModule: WebAssembly.Module
 ): EmscriptenSettings {
@@ -162,13 +161,10 @@ function getEmscriptenSettings(
     lockFileURL: '',
     enableRunUntilComplete: true,
   };
-  let lockFilePromise;
-  if (isWorkerd) {
-    lockFilePromise = new Promise(
-      (res) => (config.resolveLockFilePromise = res)
-    );
-  }
-  const API = { config, lockFilePromise };
+  // We mount the stdlib packages directly (see loadPackage.ts) rather than going through Pyodide's
+  // package manager, so we deliberately leave `API.lockFilePromise` unset. Pyodide's bootstrap
+  // guards on it (`API.lockFilePromise && ...`), so the package index is simply not initialised.
+  const API = { config };
   let resolveReadyPromise: (mod: Module) => void;
   let rejectReadyPromise: (e: any) => void = () => {};
   const readyPromise: Promise<Module> = new Promise((res, rej) => {
@@ -227,15 +223,10 @@ function* featureDetectionMonkeyPatchesContextManager(): Generator<void> {
  * Returns the instantiated emscriptenModule object.
  */
 export async function instantiateEmscriptenModule(
-  isWorkerd: boolean,
   pythonStdlib: ArrayBuffer,
   wasmModule: WebAssembly.Module
 ): Promise<Module> {
-  const emscriptenSettings = getEmscriptenSettings(
-    isWorkerd,
-    pythonStdlib,
-    wasmModule
-  );
+  const emscriptenSettings = getEmscriptenSettings(pythonStdlib, wasmModule);
   for (const _ of featureDetectionMonkeyPatchesContextManager()) {
     // Ignore the returned promise, it won't resolve until we're done preloading dynamic
     // libraries.

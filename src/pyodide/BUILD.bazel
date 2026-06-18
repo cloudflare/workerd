@@ -1,8 +1,23 @@
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("@rules_python//python:defs.bzl", "py_test")
+load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
+load("@rules_python//python:defs.bzl", "py_binary", "py_test")
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load(":helpers.bzl", "pyodide_extra", "pyodide_static", "python_bundles")
+
+wd_cc_capnp_library(
+    name = "python_packages_capnp",
+    srcs = ["python_packages.capnp"],
+    visibility = ["//visibility:public"],
+)
+
+# Build-time tool that extracts the stdlib wheels into a PythonPackages capnp message embedded in
+# the Pyodide bundle. Used by python_bundles() in helpers.bzl.
+py_binary(
+    name = "pack_python_packages",
+    srcs = ["pack_python_packages.py"],
+    visibility = ["//visibility:public"],
+)
 
 pyodide_extra()
 
