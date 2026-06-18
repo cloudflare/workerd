@@ -53,6 +53,7 @@ import {
   validateOneOf,
   validateBoolean,
   validateString,
+  validateStringWithoutNullBytes,
   validateUint32,
 } from 'node-internal:validators';
 
@@ -1139,7 +1140,6 @@ function initializeConnection(
   options: TcpSocketConnectOpts
 ): void {
   const {
-    host = 'localhost',
     family,
     hints,
     autoSelectFamily,
@@ -1148,7 +1148,9 @@ function initializeConnection(
     localAddress,
     localPort,
   } = options;
+  const host = options.host || 'localhost';
   let { port } = options;
+  validateStringWithoutNullBytes(host, 'options.host');
   if (localAddress && !isIP(localAddress)) {
     throw new ERR_INVALID_IP_ADDRESS(localAddress);
   }

@@ -178,6 +178,20 @@ export function validateString(
   }
 }
 
+export function validateStringWithoutNullBytes(
+  value: unknown,
+  name: string
+): asserts value is string {
+  validateString(value, name);
+  if (value.includes('\u0000')) {
+    throw new ERR_INVALID_ARG_VALUE(
+      name,
+      value,
+      'must be a string without null bytes'
+    );
+  }
+}
+
 export function validateStringArray(
   value: unknown,
   name: string
