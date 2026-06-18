@@ -32,7 +32,10 @@ import {
   tryReadStart,
 } from 'node-internal:internal_net';
 import { JSStreamSocket } from 'node-internal:internal_tls_jsstream';
-import { checkServerIdentity } from 'node-internal:internal_tls';
+import {
+  checkServerIdentity,
+  convertALPNProtocols,
+} from 'node-internal:internal_tls';
 import type {
   ConnectionOptions,
   TlsOptions,
@@ -194,8 +197,12 @@ export function TLSSocket(
   }
 
   if (tlsOptions.ALPNProtocols !== undefined) {
-    // Does not apply to Cloudflare Workers.
-    throw new ERR_OPTION_NOT_IMPLEMENTED('options.ALPNProtocols');
+    // connect()/startTls() does not expose ALPN selection yet.
+    // Undici's buildConnector always passes ALPNProtocols for TLS connections,
+    // so rejecting it breaks clients like @elastic/elasticsearch. Accept the
+    // option and preserve Node.js input validation behavior.
+    const normalizedAlpn = { ALPNProtocols: Buffer.alloc(0) };
+    convertALPNProtocols(tlsOptions.ALPNProtocols, normalizedAlpn);
   }
 
   if (tlsOptions.SNICallback !== undefined) {
