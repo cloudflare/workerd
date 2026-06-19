@@ -7,6 +7,29 @@ load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES")
 load("@rules_cc//cc:find_cc_toolchain.bzl", "find_cc_toolchain")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load("//build/tools/clang_tidy:check_path_filters.bzl", "CHECK_PATH_FILTERS")
+
+def _get_disabled_checks_for_package(package):
+    """Returns checks that should be disabled for this package.
+
+    Checks listed in CHECK_PATH_FILTERS are only enabled in their allowed
+    packages. For packages not in the allowed list, the check is disabled.
+    """
+    disabled = []
+    for check, allowed_packages in CHECK_PATH_FILTERS.items():
+        enabled = False
+        for allowed in allowed_packages:
+            # Normalize: remove leading "//" for comparison
+            allowed_path = allowed
+            if allowed_path.startswith("//"):
+                allowed_path = allowed_path[2:]
+            # Prefix match: "src/foo" matches "src/foo" and "src/foo/bar"
+            if package == allowed_path or package.startswith(allowed_path + "/"):
+                enabled = True
+                break
+        if not enabled:
+            disabled.append(check)
+    return disabled
 
 def _clang_tidy_aspect_impl(target, ctx):
     # not a c++ target
@@ -124,8 +147,33 @@ def _clang_tidy_aspect_impl(target, ctx):
         args.add("--experimental-custom-checks")
         args.add("--config-file=" + clang_tidy_config.path)
 
+        # Disable checks that are path-filtered and not enabled for this package
+        disabled_checks = _get_disabled_checks_for_package(ctx.label.package)
+
+        # Parse clang_tidy_args to separate --checks from other args.
+        # We must combine all --checks into a single argument because multiple
+        # --checks flags don't accumulate - each one replaces the previous filter,
+        # which would undo the path-based disabling.
+        extra_checks = []
+        other_args = []
         if ctx.attr.clang_tidy_args:
-            args.add_all(ctx.attr.clang_tidy_args.split(" "))
+            for arg in ctx.attr.clang_tidy_args.split(" "):
+                if arg.startswith("--checks="):
+                    # Extract the checks value (after --checks=)
+                    extra_checks.append(arg[len("--checks="):])
+                elif arg:  # skip empty strings
+                    other_args.append(arg)
+
+        # Build a single combined --checks argument
+        checks_parts = []
+        if disabled_checks:
+            checks_parts.append("-" + ",-".join(disabled_checks))
+        checks_parts.extend(extra_checks)
+        if checks_parts:
+            args.add("--checks=" + ",".join(checks_parts))
+
+        # Add any non-checks arguments
+        args.add_all(other_args)
 
         args.add(src.path)
 

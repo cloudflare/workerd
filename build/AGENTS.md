@@ -63,6 +63,37 @@ Usage:
   for `ByteQueue::Entry::store` and `src/workerd/api/node/diagnostics-channel.h`
   for `Channel::name`).
 
+### Incremental check rollout
+
+Some checks produce many warnings on existing code and need incremental rollout.
+The `CHECK_PATH_FILTERS` dict in `build/tools/clang_tidy/check_path_filters.bzl`
+supports this:
+
+1. Add the check to `.clang-tidy` Checks list
+2. Add an entry to `CHECK_PATH_FILTERS` with an empty list (runs nowhere)
+3. Add packages as they are cleaned up
+4. Remove the entry once fully rolled out (runs everywhere)
+
+Example:
+
+```python
+CHECK_PATH_FILTERS = {
+    "workerd-unsafe-continuation-capture": [
+        "//src/workerd/io",
+        "//src/workerd/api",
+    ],
+}
+```
+
+Package prefixes match themselves and all subpackages (`//src/workerd/io`
+matches `//src/workerd/io:*` and `//src/workerd/io/subdir:*`).
+
+To run a filtered check everywhere during development:
+
+```bash
+bazel build --config=clang-tidy-unsafe-continuation-capture //src/...
+```
+
 ## DEPENDENCY MANAGEMENT
 
 Lives in `deps/`. Uses jsonc manifests + codegen:
