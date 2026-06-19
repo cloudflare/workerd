@@ -209,6 +209,10 @@ class InputGate::CriticalSection: private InputGate, public kj::Refcounted {
   // breaks the InputGate.
   void failed(const kj::Exception& e);
 
+  uint32_t getDepth() const {
+    return depth;
+  }
+
  private:
   enum State {
     // wait() hasn't been called.
@@ -225,6 +229,8 @@ class InputGate::CriticalSection: private InputGate, public kj::Refcounted {
   };
 
   State state = NOT_STARTED;
+
+  uint32_t depth = 0;
 
   // Points to the parent scope, which may be another CriticalSection in the case of nesting.
   kj::OneOf<InputGate*, kj::Own<CriticalSection>, kj::None> parent;

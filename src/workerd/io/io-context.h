@@ -1712,6 +1712,12 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhileImpl(
     jsg::Lock& js, Func&& callback) {
   auto lock = getInputLock();
   auto cs = lock.startCriticalSection();
+
+  // Report the nesting depth. We may want to set a limit for how many nested calls there can be,
+  // so we should capture what production looks like before setting such a limit.
+  KJ_IF_SOME(a, getActor()) {
+    a.getMetrics().blockConcurrencyWhileDepth(cs->getDepth());
+  }
   auto cs2 = kj::addRef(*cs);
 
   using T = jsg::RemovePromise<jsg::ReturnType<Func, void, true>>;

@@ -510,6 +510,34 @@ KJ_TEST("InputGate teardown does not corrupt critical sections that outlive thei
   css.clear();
 }
 
+KJ_TEST("InputGate CriticalSection tracks nesting depth") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  InputGate gate;
+
+  kj::Own<InputGate::CriticalSection> cs1;
+  {
+    auto lock = gate.wait(nullptr).wait(ws);
+    cs1 = lock.startCriticalSection();
+  }
+  KJ_EXPECT(cs1->getDepth() == 1);
+
+  kj::Own<InputGate::CriticalSection> cs2;
+  {
+    auto lock = cs1->wait(nullptr).wait(ws);
+    cs2 = lock.startCriticalSection();
+  }
+  KJ_EXPECT(cs2->getDepth() == 2);
+
+  kj::Own<InputGate::CriticalSection> cs3;
+  {
+    auto lock = cs2->wait(nullptr).wait(ws);
+    cs3 = lock.startCriticalSection();
+  }
+  KJ_EXPECT(cs3->getDepth() == 3);
+}
+
 // =======================================================================================
 
 KJ_TEST("OutputGate basics") {
