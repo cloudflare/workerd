@@ -139,6 +139,16 @@ export const additionalCacheSettings = {
           stripLastModified: false,
           cacheDeceptionArmor: true,
           cacheReserveMinimumFileSize: 1024,
+          vary: {
+            default: { action: 'bypass' },
+            headers: {
+              accept: {
+                action: 'normalize',
+                media_types: ['image/webp', 'image/avif'],
+              },
+              'x-custom-header': { action: 'passthrough' },
+            },
+          },
         },
       });
       assert.ok(req.cf);
@@ -148,6 +158,16 @@ export const additionalCacheSettings = {
       assert.strictEqual(req.cf.stripLastModified, false);
       assert.strictEqual(req.cf.cacheDeceptionArmor, true);
       assert.strictEqual(req.cf.cacheReserveMinimumFileSize, 1024);
+      assert.deepStrictEqual(req.cf.vary, {
+        default: { action: 'bypass' },
+        headers: {
+          accept: {
+            action: 'normalize',
+            media_types: ['image/webp', 'image/avif'],
+          },
+          'x-custom-header': { action: 'passthrough' },
+        },
+      });
     }
 
     // Additional cache settings should work alongside cacheControl
