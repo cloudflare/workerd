@@ -47,6 +47,9 @@ class HttpOverCapnpFactory;
 
 namespace workerd {
 
+// Maximum depth to which blockConcurrencyWhile() calls may be nested.
+constexpr uint MAX_BLOCK_CONCURRENCY_WHILE_DEPTH = 64;
+
 // This wishes it were IoContext::Runnable::Exceptional.
 WD_STRONG_BOOL(IoContext_Runnable_Exceptional);
 
@@ -1713,11 +1716,13 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhileImpl(
   auto lock = getInputLock();
   auto cs = lock.startCriticalSection();
 
-  // Report the nesting depth. We may want to set a limit for how many nested calls there can be,
-  // so we should capture what production looks like before setting such a limit.
+  // Report the nesting depth. Perhaps we will want to adjust the limit here in the future.
   KJ_IF_SOME(a, getActor()) {
     a.getMetrics().blockConcurrencyWhileDepth(cs->getDepth());
   }
+  JSG_REQUIRE(cs->getDepth() <= MAX_BLOCK_CONCURRENCY_WHILE_DEPTH, Error,
+      "blockConcurrencyWhile() calls are nested too deeply.");
+
   auto cs2 = kj::addRef(*cs);
 
   using T = jsg::RemovePromise<jsg::ReturnType<Func, void, true>>;
