@@ -640,7 +640,7 @@ declare abstract class DurableObjectNamespace<
     jurisdiction: DurableObjectJurisdiction,
   ): DurableObjectNamespace<T>;
 }
-type DurableObjectJurisdiction = "eu" | "fedramp" | "fedramp-high";
+type DurableObjectJurisdiction = "eu" | "fedramp" | "fedramp-high" | "us";
 interface DurableObjectNamespaceNewUniqueIdOptions {
   jurisdiction?: DurableObjectJurisdiction;
 }
@@ -651,6 +651,8 @@ type DurableObjectLocationHint =
   | "weur"
   | "eeur"
   | "apac"
+  | "apac-ne"
+  | "apac-se"
   | "oc"
   | "afr"
   | "me";

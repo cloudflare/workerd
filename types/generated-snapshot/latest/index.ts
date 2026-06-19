@@ -642,7 +642,11 @@ export declare abstract class DurableObjectNamespace<
     jurisdiction: DurableObjectJurisdiction,
   ): DurableObjectNamespace<T>;
 }
-export type DurableObjectJurisdiction = "eu" | "fedramp" | "fedramp-high";
+export type DurableObjectJurisdiction =
+  | "eu"
+  | "fedramp"
+  | "fedramp-high"
+  | "us";
 export interface DurableObjectNamespaceNewUniqueIdOptions {
   jurisdiction?: DurableObjectJurisdiction;
 }
@@ -653,6 +657,8 @@ export type DurableObjectLocationHint =
   | "weur"
   | "eeur"
   | "apac"
+  | "apac-ne"
+  | "apac-se"
   | "oc"
   | "afr"
   | "me";

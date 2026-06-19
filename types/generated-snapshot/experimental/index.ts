@@ -494,6 +494,7 @@ export interface ExecutionContext<Props = unknown> {
   passThroughOnException(): void;
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
+  restore(params: any): Promise<any>;
   cache?: CacheContext;
   readonly version?: {
     readonly metadata?: {
@@ -669,7 +670,11 @@ export declare abstract class DurableObjectNamespace<
     jurisdiction: DurableObjectJurisdiction,
   ): DurableObjectNamespace<T>;
 }
-export type DurableObjectJurisdiction = "eu" | "fedramp" | "fedramp-high";
+export type DurableObjectJurisdiction =
+  | "eu"
+  | "fedramp"
+  | "fedramp-high"
+  | "us";
 export interface DurableObjectNamespaceNewUniqueIdOptions {
   jurisdiction?: DurableObjectJurisdiction;
 }
@@ -680,6 +685,8 @@ export type DurableObjectLocationHint =
   | "weur"
   | "eeur"
   | "apac"
+  | "apac-ne"
+  | "apac-se"
   | "oc"
   | "afr"
   | "me";
@@ -701,6 +708,7 @@ export interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
+  restore(params: any): Promise<any>;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   container?: Container;
