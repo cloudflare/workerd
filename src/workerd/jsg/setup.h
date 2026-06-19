@@ -289,6 +289,11 @@ class IsolateBase {
   // Get an object referencing this isolate that can be used to adjust external memory usage later
   kj::Arc<const ExternalMemoryTarget> getExternalMemoryTarget();
 
+  // Get an object that can be used to observe whether this isolate is still alive. The returned
+  // reference stays valid (and reports the isolate as dead) even after the isolate is destroyed,
+  // so it is safe to hold from objects that may outlive the isolate (e.g. jsg::WeakRef).
+  kj::Arc<const IsolateLiveness> getIsolateLiveness();
+
   // Equivalent to getExternalMemoryTarget()->getAdjustment(amount), but saves an atomic refcount
   // increment and decrement.
   ExternalMemoryAdjustment getExternalMemoryAdjustment(int64_t amount) {
@@ -1017,18 +1022,20 @@ class Isolate: public IsolateBase {
 
 template <typename T>
 WeakRef<T> Object::getWeakRefToThis(Lock& js) {
-  return WeakRef<T>(js.v8Isolate, static_cast<T&>(*this), getOrCreateWeakRefAnchor());
+  return WeakRef<T>(static_cast<T&>(*this), getOrCreateWeakRefAnchor(),
+      IsolateBase::from(js.v8Isolate).getIsolateLiveness());
 }
 
 template <typename T>
 WeakRef<T> Ref<T>::getWeakRef(Lock& js) & {
-  return WeakRef<T>(js.v8Isolate, static_cast<T&>(*inner.get()), inner->getOrCreateWeakRefAnchor());
+  return WeakRef<T>(static_cast<T&>(*inner.get()), inner->getOrCreateWeakRefAnchor(),
+      IsolateBase::from(js.v8Isolate).getIsolateLiveness());
 }
 
 template <typename T>
 WeakRef<T> WeakRef<T>::addRef(jsg::Lock& js) & {
   KJ_IF_SOME(i, impl) {
-    return WeakRef(i.isolate, i.target, i.anchor.addRef());
+    return WeakRef(i.target, i.anchor.addRef(), i.isolateLiveness.addRef());
   }
   return WeakRef(nullptr);
 }
@@ -1036,10 +1043,18 @@ WeakRef<T> WeakRef<T>::addRef(jsg::Lock& js) & {
 template <typename T>
 void WeakRef<T>::destroy() {
   KJ_IF_SOME(i, impl) {
-    if (v8::Locker::IsLocked(i.isolate)) {
+    v8::Isolate* isolate = i.isolateLiveness->tryGetIsolate();
+    if (isolate == nullptr) {
+      // The isolate has already been torn down (e.g. a hibernatable WebSocket outlived its
+      // isolate). There is no isolate lock to take and no deferred-destruction queue to push onto;
+      // the anchor is a plain refcounted flag with no V8-owned resources, so just drop it. Reading
+      // the now-null isolate from `isolateLiveness` (rather than caching a raw pointer) means a
+      // misuse here would be a clean null deref rather than a use-after-free.
+      impl = kj::none;
+    } else if (v8::Locker::IsLocked(isolate)) {
       impl = kj::none;
     } else {
-      auto& base = IsolateBase::from(i.isolate);
+      auto& base = IsolateBase::from(isolate);
       kj::Own<void> dropIt = kj::mv(i.anchor).toOwn();
       base.destroyUnderLock(kj::mv(dropIt));
       impl = kj::none;

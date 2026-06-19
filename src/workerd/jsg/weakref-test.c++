@@ -247,6 +247,27 @@ KJ_TEST("Getting weakref from self") {
   });
 }
 
+KJ_TEST("WeakRef: safe to destroy after the isolate is gone") {
+  // Mirrors the hibernatable-WebSocket ordering: a WeakRef is created under a live isolate lock,
+  // the isolate is then torn down, and only afterwards is the WeakRef dropped. destroy() must not
+  // dereference the (now-freed) isolate. Under ASan this would catch a heap-use-after-free.
+  kj::Maybe<jsg::WeakRef<NumberBox>> weak;
+
+  {
+    WeakRefIsolate isolate(v8System, kj::heap<IsolateObserver>());
+    isolate.runInLockScope([&](WeakRefIsolate::Lock& lock) {
+      auto strong = lock.alloc<NumberBox>(42);
+      weak = strong.getWeakRef(lock);
+      KJ_ASSERT(KJ_ASSERT_NONNULL(weak).isAlive());
+    });
+    // `isolate` is destroyed here, which frees the underlying v8::Isolate.
+  }
+
+  // The WeakRef has outlived its isolate. Dropping it must observe that the isolate is gone and
+  // skip all isolate access rather than touching the dangling pointer.
+  weak = kj::none;
+}
+
 // ========================================================================================
 // jsg::WeakV8Ref<T> tests
 

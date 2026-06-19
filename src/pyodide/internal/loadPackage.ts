@@ -17,10 +17,7 @@ import { VIRTUALIZED_DIR } from 'pyodide-internal:setupPackages';
 import { parseTarInfo } from 'pyodide-internal:tar';
 import { createTarFS } from 'pyodide-internal:tarfs';
 import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
-import {
-  PythonWorkersInternalError,
-} from 'pyodide-internal:util';
-
+import { PythonWorkersInternalError } from 'pyodide-internal:util';
 
 function loadBundleFromArtifactBundler(meta: PackageDeclaration): Reader {
   const filename = meta.file_name;

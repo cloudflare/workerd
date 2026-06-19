@@ -8,6 +8,10 @@ import {
   RpcStub,
   RpcTarget,
   WorkerEntrypoint,
+  type WorkflowCronSchedule,
+  type WorkflowEvent,
+  type WorkflowStep,
+  type WorkflowStepContext,
 } from 'cloudflare:workers';
 import { expectTypeOf } from 'expect-type';
 
@@ -794,3 +798,85 @@ export default <ExportedHandler<Env>>{
     return new Response();
   },
 };
+
+declare const workflowStep: WorkflowStep;
+
+expectTypeOf(
+  workflowStep.do('step with rollback', async (): Promise<string> => 'ok', {
+    rollback: async (rollbackCtx) => {
+      expectTypeOf(rollbackCtx.ctx).toEqualTypeOf<WorkflowStepContext>();
+      expectTypeOf(rollbackCtx.error).toEqualTypeOf<Error>();
+      expectTypeOf(rollbackCtx.output).toEqualTypeOf<string | undefined>();
+      expectTypeOf(rollbackCtx.stepName).toEqualTypeOf<string>();
+    },
+  })
+).toMatchTypeOf<Promise<string>>();
+
+workflowStep.do(
+  'configured rollback',
+  {retries: {limit: 0, delay: 0}},
+  async (): Promise<string> => 'ok',
+  {
+    rollback: async (rollbackCtx) => {
+      expectTypeOf(rollbackCtx.ctx).toEqualTypeOf<WorkflowStepContext>();
+      expectTypeOf(rollbackCtx.output).toEqualTypeOf<string | undefined>();
+      expectTypeOf(rollbackCtx.stepName).toEqualTypeOf<string>();
+    },
+    rollbackConfig: {retries: {limit: 0, delay: 0}},
+  }
+);
+
+workflowStep.do('rollback with timeout only', async (): Promise<string> => 'ok', {
+  rollback: async () => {},
+  rollbackConfig: {timeout: '10 seconds'},
+});
+
+// @ts-expect-error rollbackConfig only accepts retries and timeout
+workflowStep.do('rollback config with sensitivity', async () => 'ok', {
+  rollback: async () => {},
+  rollbackConfig: {sensitive: 'output'},
+});
+
+// @ts-expect-error rollback options require a rollback handler
+workflowStep.do('empty rollback options', async () => 'ok', {});
+
+// @ts-expect-error rollbackConfig requires a rollback handler
+workflowStep.do('rollback config without handler', async () => 'ok', {
+  rollbackConfig: {retries: {limit: 0, delay: 0}},
+});
+
+expectTypeOf(
+  workflowStep.do('no rollback 2-arg', async (): Promise<string> => 'ok')
+).toMatchTypeOf<Promise<string>>();
+
+expectTypeOf(
+  workflowStep.do(
+    'no rollback 3-arg',
+    {retries: {limit: 1, delay: 0}},
+    async (): Promise<string> => 'ok'
+  )
+).toMatchTypeOf<Promise<string>>();
+
+declare const cronSchedule: WorkflowCronSchedule;
+expectTypeOf(cronSchedule.cron).toEqualTypeOf<string>();
+expectTypeOf(cronSchedule.scheduledTime).toEqualTypeOf<number>();
+
+type WorkflowPayload = {foo: string};
+declare const workflowEvent: WorkflowEvent<WorkflowPayload>;
+expectTypeOf(workflowEvent.payload).toEqualTypeOf<Readonly<WorkflowPayload>>();
+expectTypeOf(workflowEvent.timestamp).toEqualTypeOf<Date>();
+expectTypeOf(workflowEvent.instanceId).toEqualTypeOf<string>();
+expectTypeOf(workflowEvent.workflowName).toEqualTypeOf<string>();
+expectTypeOf(workflowEvent.schedule).toEqualTypeOf<
+  WorkflowCronSchedule | undefined
+>();
+
+const withoutSchedule: WorkflowEvent<WorkflowPayload> = {
+  payload: {foo: 'bar'},
+  timestamp: new Date(),
+  instanceId: 'abc',
+  workflowName: 'my-workflow',
+};
+expectTypeOf(withoutSchedule.schedule).toEqualTypeOf<
+  WorkflowCronSchedule | undefined
+>();
