@@ -3357,8 +3357,8 @@ class AllReader {
 // pumped synchronously as many times as possible.
 //
 // The pump loop is a kj coroutine. Dropping the returned kj::Promise drops the
-// coroutine frame, which destroys the DrainingReader (releasing the stream lock)
-// and the sink. No WeakRef/IoOwn dance is needed because ownership is clear.
+// coroutine frame, which destroys the DrainingReader (releasing the stream lock) and the
+// sink; on a mid-stream drop the KJ_DEFER below schedules the source's cancel() first.
 // The coroutine that implements the pump loop takes ownership of the DrainingReader
 // and sink. The jsg::Ref<ReadableStream> is not passed into the coroutine because
 // jsg::Ref is disallowed in coroutine parameters; instead, the DrainingReader holds
@@ -3369,6 +3369,30 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
     bool end) {
 
   bool writeFailed = false;
+
+  // If the pump is dropped mid-stream (e.g. client disconnect), cancel the source so its
+  // JS cancel() algorithm runs. The isolate lock is unavailable during teardown, so the
+  // cancel is scheduled as a waitUntil task, which IncomingRequest::drain() waits for.
+  // The drop may happen during ~IoContext itself (pumps can be owned by the context's
+  // task sets), hence the WeakRef guard. The exits below set pumpSettled once the stream has
+  // settled or its cancel has already run. The cancel is best-effort: it rejects if the stream
+  // errored before the drop, and a rejected waitUntil task would report disconnect cleanup as a
+  // request failure.
+  bool pumpSettled = false;
+  auto contextWeakRef = ioContext.getWeakRef();
+  KJ_DEFER({
+    if (!pumpSettled && reader->isAttached()) {
+      contextWeakRef->runIfAlive([&](IoContext& context) {
+        context.addWaitUntil(
+            context
+                .run([reader = kj::mv(reader)](jsg::Lock& js) mutable -> kj::Promise<void> {
+          auto& ioContext = IoContext::current();
+          auto promise = ioContext.awaitJs(js, reader->cancel(js, kj::none));
+          return promise.attach(kj::mv(reader));
+        }).catch_([](kj::Exception&&) {}));
+      });
+    }
+  });
 
   KJ_TRY {
     while (true) {
@@ -3396,6 +3420,7 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
         if (end) {
           co_await sink->end();
         }
+        pumpSettled = true;
         co_return;
       }
     }
@@ -3408,8 +3433,14 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
     co_await ioContext.run([&reader, ex = exception.clone()](jsg::Lock& js) mutable {
       auto& ioContext = IoContext::current();
       auto error = js.exceptionToJsValue(kj::mv(ex));
-      return ioContext.awaitJs(js, reader->cancel(js, error.getHandle(js)));
+      // Cancelling a stream the source already errored rejects with the stored error. Ignore it
+      // so `exception` propagates below and the teardown defer stays suppressed.
+      return ioContext.awaitJs(js, reader->cancel(js, error.getHandle(js)))
+          .catch_([](kj::Exception&&) {});
     });
+    // The cancel above ran, whether it resolved or rejected. A drop during the co_await instead
+    // leaves this unset, so the teardown defer performs the cancellation.
+    pumpSettled = true;
     kj::throwFatalException(kj::mv(exception));
   }
 }
