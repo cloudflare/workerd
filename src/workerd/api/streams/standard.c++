@@ -3356,8 +3356,9 @@ class AllReader {
 // pumped synchronously as many times as possible.
 //
 // The pump loop is a kj coroutine. Dropping the returned kj::Promise drops the
-// coroutine frame, which destroys the DrainingReader (releasing the stream lock)
-// and the sink. No WeakRef/IoOwn dance is needed because ownership is clear.
+// coroutine frame, which destroys the DrainingReader (releasing the stream lock) and the
+// sink -- except on a mid-stream drop, where the KJ_DEFER below keeps the reader alive to
+// cancel the source first. No WeakRef/IoOwn dance is needed because ownership is clear.
 // The coroutine that implements the pump loop takes ownership of the DrainingReader
 // and sink. The jsg::Ref<ReadableStream> is not passed into the coroutine because
 // jsg::Ref is disallowed in coroutine parameters; instead, the DrainingReader holds
@@ -3368,6 +3369,22 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
     bool end) {
 
   bool writeFailed = false;
+
+  // If the coroutine is dropped mid-pump (e.g. the client disconnected and the HTTP layer
+  // dropped the response-body pump), cancel the source so its JS cancel() runs. We can't take
+  // the isolate lock during teardown, so schedule it as a task, as ~WritableStreamJsRpcAdapter
+  // does. The clean exits below set pumpSettled so we don't cancel an already-settled stream.
+  bool pumpSettled = false;
+  KJ_DEFER({
+    if (!pumpSettled && reader->isAttached()) {
+      ioContext.addTask(ioContext.run(
+          [reader = kj::mv(reader)](jsg::Lock& js) mutable -> kj::Promise<void> {
+        auto& ioContext = IoContext::current();
+        auto promise = ioContext.awaitJs(js, reader->cancel(js, kj::none));
+        return promise.attach(kj::mv(reader));
+      }));
+    }
+  });
 
   KJ_TRY {
     while (true) {
@@ -3395,6 +3412,7 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
         if (end) {
           co_await sink->end();
         }
+        pumpSettled = true;
         co_return;
       }
     }
@@ -3409,6 +3427,8 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
       auto error = js.exceptionToJsValue(kj::mv(ex));
       return ioContext.awaitJs(js, reader->cancel(js, error.getHandle(js)));
     });
+    // Set only after the cancel above runs; if dropped mid-co_await, KJ_DEFER cancels instead.
+    pumpSettled = true;
     kj::throwFatalException(kj::mv(exception));
   }
 }

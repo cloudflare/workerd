@@ -198,5 +198,96 @@ KJ_TEST("ReadableStream pumpTo pending write cancellation regression") {
   KJ_ASSERT(events[2] == "sink was destroyed");
 }
 
+KJ_TEST("ReadableStream pumpTo cancels the JS source when dropped mid-stream") {
+  // Regression test for https://github.com/cloudflare/workerd/issues/6832.
+  //
+  // When the pump is dropped while the JS ReadableStream source is suspended awaiting more
+  // data (e.g. the client disconnected and the HTTP layer dropped the response-body pump),
+  // the underlying source's cancel() algorithm must still run. Before the fix, dropping the
+  // pump coroutine only released the reader lock and the JS source ran to natural completion.
+
+  struct TestSink final: public WritableStreamSink {
+    kj::Own<kj::PromiseFulfiller<void>> gotFirstWrite;
+    bool fired = false;
+    TestSink(kj::Own<kj::PromiseFulfiller<void>> gotFirstWrite)
+        : gotFirstWrite(kj::mv(gotFirstWrite)) {}
+
+    void signal() {
+      if (!fired) {
+        fired = true;
+        gotFirstWrite->fulfill();
+      }
+    }
+    kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
+      signal();
+      return kj::READY_NOW;
+    }
+    kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+      signal();
+      return kj::READY_NOW;
+    }
+    kj::Promise<void> end() override {
+      return kj::READY_NOW;
+    }
+    void abort(kj::Exception reason) override {}
+  };
+
+  capnp::MallocMessageBuilder flagsBuilder;
+  auto featureFlags = flagsBuilder.initRoot<CompatibilityFlags>();
+  featureFlags.setStreamsJavaScriptControllers(true);
+  TestFixture testFixture({.featureFlags = featureFlags.asReader()});
+
+  // Declared in the test scope (outliving the runInIoContext lambda frame) because the JS
+  // cancel() callback captures them by reference and runs asynchronously, after the pump is
+  // dropped.
+  bool cancelCalled = false;
+  auto cancelObserved = kj::newPromiseAndFulfiller<void>();
+
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = jsg::Lock::from(env.isolate);
+
+    auto firstWrite = kj::newPromiseAndFulfiller<void>();
+
+    auto stream = ReadableStream::constructor(js,
+        UnderlyingSource{
+          .start =
+              [](jsg::Lock& js, auto controller) {
+      auto& c = KJ_REQUIRE_NONNULL(
+          controller.template tryGet<jsg::Ref<ReadableStreamDefaultController>>());
+      // Enqueue one chunk so the pump makes progress, but don't close the stream.
+      c->enqueue(js, jsg::JsValue(v8::ArrayBuffer::New(js.v8Isolate, 10)));
+      return js.resolvedPromise();
+    },
+          .pull =
+              [](jsg::Lock& js, auto controller) {
+      // Never enqueue more, so once the first chunk is drained the pump's next read suspends.
+      return js.resolvedPromise();
+    },
+          .cancel =
+              [&cancelCalled, &cancelObserved](jsg::Lock& js, jsg::JsValue) -> jsg::Promise<void> {
+      cancelCalled = true;
+      if (cancelObserved.fulfiller->isWaiting()) {
+        cancelObserved.fulfiller->fulfill();
+      }
+      return js.resolvedPromise();
+    },
+        },
+        kj::none);
+
+    auto sink = kj::heap<TestSink>(kj::mv(firstWrite.fulfiller));
+    auto pump = stream->pumpTo(js, kj::mv(sink), true);
+
+    // Once the first chunk has been written the source is suspended on its next read. Drop the
+    // pump (simulating the disconnect), then wait for the source's cancel() to run.
+    return firstWrite.promise.then(
+        [pump = kj::mv(pump), cancelPromise = kj::mv(cancelObserved.promise)]() mutable {
+      { auto dropped = kj::mv(pump); }
+      return kj::mv(cancelPromise);
+    });
+  });
+
+  KJ_ASSERT(cancelCalled);
+}
+
 }  // namespace
 }  // namespace workerd::api
