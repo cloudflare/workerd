@@ -88,7 +88,10 @@ and a **queue of pending reads**. The controller uses four callback functions
 
 - **start** -- invoked immediately when the `ReadableStream` is created
 - **pull** -- invoked to request more data from the source
-- **cancel** -- invoked when the stream is explicitly canceled
+- **cancel** -- invoked when the stream is canceled, either explicitly via `cancel()` or
+  when the runtime discards its own consumer of the stream (e.g. workerd observes the client
+  disconnect and drops the response-body pump; a JS reader merely releasing its lock does not
+  cancel)
 - **size** -- determines the size of a chunk for backpressure calculations
 
 When the stream is created, the start algorithm runs immediately. Once it completes,
@@ -413,7 +416,10 @@ these APIs were built for Internal streams and use kj async I/O internally.
 To bridge this, Standard `ReadableStream`s can be consumed via the `ReadableStreamSource`
 API (the same API Internal streams use). When `pumpTo()` is called on the adapter, it
 acquires the isolate lock and runs a promise loop: read from the JS stream, write to the
-kj output, repeat until the data is exhausted or an error occurs.
+kj output, repeat until the data is exhausted or an error occurs. If the client disconnects
+before then and the response body is dropped, the JS-controller pump
+(`ReadableStreamJsController::pumpTo`) schedules the stream's cancel algorithm so the
+source stops producing data.
 
 ## The Complexity Budget
 
