@@ -18,6 +18,14 @@ const unitTests :Workerd.Config = (
         ],
         bindings = [
           (name = "LOADER", workerLoader = ()),
+          (name = "NO_FLAG", service = (name = "persistent-stubs-no-flag", entrypoint = "StubMinter")),
+          # A plain (static) service binding pointing at the DEFAULT entrypoint of a worker that DOES
+          # have allow_irrevocable_stub_storage. Even so, a stub obtained this way must NOT be
+          # storable: only ctx.exports loopback bindings are storable, not regular service bindings.
+          (name = "WITH_FLAG_DEFAULT", service = (name = "persistent-stubs-with-flag")),
+          # A plain (static) Durable Object namespace binding (not via ctx.exports). Stubs obtained
+          # via this binding must NOT be storable -- only ctx.exports self-bindings are.
+          (name = "STORE_NS", durableObjectNamespace = "Store"),
         ],
         durableObjectNamespaces = [
           (className = "FacetRoot", uniqueKey = "persistent-stubs-facet-root", enableSql = true),
@@ -25,6 +33,54 @@ const unitTests :Workerd.Config = (
           (className = "TopRedirectDo", uniqueKey = "persistent-stubs-top-redirect", enableSql = true),
         ],
         durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+      )
+    ),
+    # A worker that does NOT have allow_irrevocable_stub_storage enabled. It mints a ctx.exports
+    # loopback stub of itself, which therefore has its `persistent` bit unset and so cannot be
+    # stored by whoever receives it.
+    ( name = "persistent-stubs-no-flag",
+      worker = (
+        modules = [
+          ( name = "worker",
+            esModule =
+                "import { WorkerEntrypoint } from 'cloudflare:workers';\n"
+                "export class Target extends WorkerEntrypoint {\n"
+                "  ping(value) { return `noflag:${value}`; }\n"
+                "}\n"
+                "export class StubMinter extends WorkerEntrypoint {\n"
+                "  mint(id) { return this.ctx.exports.Target({ props: {} }); }\n"
+                "}\n"
+          )
+        ],
+        compatibilityFlags = [
+          "rpc",
+          "experimental",
+          "enable_ctx_exports",
+        ],
+      )
+    ),
+    # A worker that DOES have allow_irrevocable_stub_storage enabled. A plain (static) service
+    # binding pointing at this worker's default entrypoint must still not be storable, because it was
+    # not created via ctx.exports. (Note: the default-entrypoint case routes through the
+    # WorkerService itself rather than an EntrypointService, which is the spot that is easy to get
+    # wrong.)
+    ( name = "persistent-stubs-with-flag",
+      worker = (
+        modules = [
+          ( name = "worker",
+            esModule =
+                "import { WorkerEntrypoint } from 'cloudflare:workers';\n"
+                "export class Named extends WorkerEntrypoint {\n"
+                "  ping(value) { return `withflag:${value}`; }\n"
+                "}\n"
+          )
+        ],
+        compatibilityFlags = [
+          "rpc",
+          "experimental",
+          "enable_ctx_exports",
+          "allow_irrevocable_stub_storage",
+        ],
       )
     ),
   ],

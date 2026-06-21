@@ -72,9 +72,12 @@ IoChannelFactory::ActorChannel& GlobalActorOutgoingFactory::getOrCreateActorChan
       KJ_CASE_ONEOF(channelId, uint) {
         actorChannel =
             context.getGlobalActorChannel(channelId, id->getInner(), kj::mv(locationHint), mode,
-                enableReplicaRouting, routingMode, kj::mv(parentSpan), kj::mv(version));
+                enableReplicaRouting, routingMode, kj::mv(parentSpan), kj::mv(version), persistent);
       }
       KJ_CASE_ONEOF(factory, kj::Own<DurableObjectNamespace::ActorChannelFactory>) {
+        // Note: Dynamic actor namespaces (no relation to Dynamic Workers) never produce persistent
+        // stubs.
+        KJ_ASSERT(persistent == Persistent::NO);
         actorChannel = factory->getGlobalActor(id->getInner(), kj::mv(locationHint), mode,
             enableReplicaRouting, routingMode, kj::mv(parentSpan), kj::mv(version));
       }
@@ -216,13 +219,14 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
   kj::Own<Fetcher::OutgoingFactory> outgoingFactory;
   KJ_SWITCH_ONEOF(channel) {
     KJ_CASE_ONEOF(channelId, uint) {
-      outgoingFactory = kj::heap<GlobalActorOutgoingFactory>(channelId, id.addRef(),
-          kj::mv(locationHint), mode, enableReplicaRouting, routingMode, kj::mv(version));
+      outgoingFactory =
+          kj::heap<GlobalActorOutgoingFactory>(channelId, id.addRef(), kj::mv(locationHint), mode,
+              enableReplicaRouting, routingMode, kj::mv(version), persistent);
     }
     KJ_CASE_ONEOF(channelFactory, IoOwn<ActorChannelFactory>) {
-      outgoingFactory =
-          kj::heap<GlobalActorOutgoingFactory>(kj::addRef(*channelFactory), id.addRef(),
-              kj::mv(locationHint), mode, enableReplicaRouting, routingMode, kj::mv(version));
+      outgoingFactory = kj::heap<GlobalActorOutgoingFactory>(kj::addRef(*channelFactory),
+          id.addRef(), kj::mv(locationHint), mode, enableReplicaRouting, routingMode,
+          kj::mv(version), persistent);
     }
   }
 
@@ -237,13 +241,16 @@ jsg::Ref<DurableObjectNamespace> DurableObjectNamespace::jurisdiction(
     jsg::Lock& js, jsg::Optional<kj::Maybe<kj::String>> maybeJurisdiction) {
   auto newIdFactory = idFactory->cloneWithJurisdiction(maybeJurisdiction.orDefault(kj::none));
 
+  // A jurisdictional sub-namespace of a ctx.exports self-binding is still a self-binding, so it
+  // inherits the `persistent` bit.
   KJ_SWITCH_ONEOF(channel) {
     KJ_CASE_ONEOF(channelId, uint) {
-      return js.alloc<api::DurableObjectNamespace>(channelId, kj::mv(newIdFactory));
+      return js.alloc<api::DurableObjectNamespace>(channelId, kj::mv(newIdFactory), persistent);
     }
     KJ_CASE_ONEOF(channelFactory, IoOwn<ActorChannelFactory>) {
       return js.alloc<api::DurableObjectNamespace>(
-          IoContext::current().addObject(kj::addRef(*channelFactory)), kj::mv(newIdFactory));
+          IoContext::current().addObject(kj::addRef(*channelFactory)), kj::mv(newIdFactory),
+          persistent);
     }
   }
 

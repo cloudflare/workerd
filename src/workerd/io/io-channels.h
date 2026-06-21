@@ -11,6 +11,7 @@
 #include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-source.h>
+#include <workerd/util/strong-bool.h>
 
 #include <capnp/capability.h>  // for Capability
 #include <kj/debug.h>
@@ -24,6 +25,12 @@ class Network;
 namespace workerd {
 
 class WorkerInterface;
+
+// Indicates whether the target worker of a stub had the `allow_irrevocable_stub_storage` compat
+// flag enabled when the stub was minted. Only stubs minted from `ctx.exports` ("loopback")
+// bindings of a flag-enabled worker are `Persistent::YES`; everything else is `Persistent::NO`.
+// A `Persistent::YES` channel/token may be stored in long-term storage; `Persistent::NO` may not.
+WD_STRONG_BOOL(Persistent);
 
 // Interface for talking to the Cache API. Needs to be declared here so that IoContext can
 // contain it.
@@ -145,6 +152,12 @@ class IoChannelFactory {
     // appropriate to pass down to the IoContext as the `selfTokenFactory`, for use by the
     // implementation of `ctx.restore()`, so that it can determine its own base token.
     kj::Maybe<kj::Own<SelfTokenFactory>> restoredSelfTokenFactory;
+
+    // True if this request was started on a channel that was reconstructed from a stored
+    // ("persistent") stub. The target worker re-verifies that it still has the
+    // `allow_irrevocable_stub_storage` compat flag enabled; if not, it rejects the request. See
+    // `WorkerEntrypoint::construct()`.
+    Persistent fromPersistentStub = Persistent::NO;
   };
 
   // Parameters that can influence the version of a worker that is used to serve a subrequest.
@@ -286,6 +299,10 @@ class IoChannelFactory {
   // `props` and `versionRequest` can only be specified if this is a loopback channel (i.e. from
   // ctx.exports). For any other channel, they will throw.
   //
+  // `persistent` records whether the current (target) worker had `allow_irrevocable_stub_storage`
+  // enabled. For loopback channels this is the channel's persistent bit; non-loopback callers pass
+  // `Persistent::NO`.
+  //
   // The non-virtual method dispatches to getSubrequestChannelResolved(), but only after resolving
   // all channels embedded in `props` (that is, calling `getResolved()` on all of them, waiting
   // for the resolutions if necessary, and replacing the caps with the resolutions).
@@ -293,12 +310,15 @@ class IoChannelFactory {
   // TODO(cleanup): Consider getting rid of `startSubrequest()` in favor of this.
   kj::Own<SubrequestChannel> getSubrequestChannel(uint channel,
       kj::Maybe<Frankenvalue> props = kj::none,
-      kj::Maybe<VersionRequest> versionRequest = kj::none);
+      kj::Maybe<VersionRequest> versionRequest = kj::none,
+      Persistent persistent = Persistent::NO);
 
   // Underlying implementation of getSubrequestChannel(). The implementation can assume that `props`
   // contains strictly resolved channels.
-  virtual kj::Own<SubrequestChannel> getSubrequestChannelResolved(
-      uint channel, kj::Maybe<Frankenvalue> props, kj::Maybe<VersionRequest> versionRequest) = 0;
+  virtual kj::Own<SubrequestChannel> getSubrequestChannelResolved(uint channel,
+      kj::Maybe<Frankenvalue> props,
+      kj::Maybe<VersionRequest> versionRequest,
+      Persistent persistent) = 0;
 
   // ActorChannel used to be its own type, but no longer is.
   // TODO(cleanup): Update all references.
@@ -310,6 +330,11 @@ class IoChannelFactory {
   // one of the worker's bindings, however it doesn't necessarily have to be from the the correct
   // `ActorIdFactory` -- if it's from some other factory, the method will throw an appropriate
   // exception.
+  //
+  // `persistent` records whether stubs minted from this namespace may be stored in long-term
+  // storage. This is `Persistent::YES` only when the namespace is a `ctx.exports` self-binding of a
+  // worker that has `allow_irrevocable_stub_storage` enabled; regular env bindings pass
+  // `Persistent::NO`.
   virtual kj::Own<ActorChannel> getGlobalActor(uint channel,
       const ActorIdFactory::ActorId& id,
       kj::Maybe<kj::String> locationHint,
@@ -317,7 +342,8 @@ class IoChannelFactory {
       bool enableReplicaRouting,
       ActorRoutingMode routingMode,
       SpanParent parentSpan,
-      kj::Maybe<ActorVersion> version) = 0;
+      kj::Maybe<ActorVersion> version,
+      Persistent persistent = Persistent::NO) = 0;
 
   // Get an actor stub from the given namespace for the actor with the given name.
   virtual kj::Own<ActorChannel> getColoLocalActor(
@@ -337,15 +363,21 @@ class IoChannelFactory {
   // `props` can only be specified if this is a loopback channel (i.e. from ctx.exports). For any
   // other channel, it will throw.
   //
+  // `persistent` records whether the current (target) worker had `allow_irrevocable_stub_storage`
+  // enabled. For loopback channels this is the channel's persistent bit; non-loopback callers pass
+  // `Persistent::NO`.
+  //
   // The non-virtual method dispatches to getActorClassResolved(), but only after resolving
   // all channels embedded in `props` (that is, calling `getResolved()` on all of them, waiting
   // for the resolutions if necessary, and replacing the caps with the resolutions).
-  kj::Own<ActorClassChannel> getActorClass(uint channel, kj::Maybe<Frankenvalue> props = kj::none);
+  kj::Own<ActorClassChannel> getActorClass(uint channel,
+      kj::Maybe<Frankenvalue> props = kj::none,
+      Persistent persistent = Persistent::NO);
 
   // Underlying implementation of getActorClass(). The implementation can assume that `props`
   // contains strictly resolved channels.
   virtual kj::Own<ActorClassChannel> getActorClassResolved(
-      uint channel, kj::Maybe<Frankenvalue> props) = 0;
+      uint channel, kj::Maybe<Frankenvalue> props, Persistent persistent) = 0;
 
   // RpcChannel points at a persistent RpcTarget implemented by some other worker. "Persistent"
   // means it can be saved as a channel token and restored later, recreating the same object,
@@ -437,12 +469,17 @@ class IoChannelFactory {
   // For `makeRestoredRpcChannel()`, the returned channel is expected to be paired with an
   // already-live `JsRpcTarget::Client`. Each call to its restore() method will actually perform
   // the restoration process again.
+  // `persistent` is the `allow_irrevocable_stub_storage` flag of the worker invoking
+  // `ctx.restore()`. It is ANDed with the vendor (self-token) bit to determine whether the
+  // resulting restored stub may be stored.
   kj::Own<SubrequestChannel> makeRestoredSubrequestChannel(
       kj::Own<SelfTokenFactory> selfTokenFactory,
       Frankenvalue restoreParams,
-      kj::Own<SubrequestChannel> inner);
-  kj::Own<RpcChannel> makeRestoredRpcChannel(
-      kj::Own<SelfTokenFactory> selfTokenFactory, Frankenvalue restoreParams);
+      kj::Own<SubrequestChannel> inner,
+      Persistent persistent);
+  kj::Own<RpcChannel> makeRestoredRpcChannel(kj::Own<SelfTokenFactory> selfTokenFactory,
+      Frankenvalue restoreParams,
+      Persistent persistent);
 
   // Similar to how `getSubrequestChannel()` is implemented in terms of
   // `getSubrequestChannelResolved()`, these also have "resolved" versions. The non-virtual
@@ -450,9 +487,12 @@ class IoChannelFactory {
   virtual kj::Own<SubrequestChannel> makeRestoredSubrequestChannelResolved(
       kj::Own<SelfTokenFactory> selfTokenFactory,
       Frankenvalue restoreParams,
-      kj::Own<SubrequestChannel> inner);
+      kj::Own<SubrequestChannel> inner,
+      Persistent persistent);
   virtual kj::Own<RpcChannel> makeRestoredRpcChannelResolved(
-      kj::Own<SelfTokenFactory> selfTokenFactory, Frankenvalue restoreParams);
+      kj::Own<SelfTokenFactory> selfTokenFactory,
+      Frankenvalue restoreParams,
+      Persistent persistent);
 
   // Return a strong reference to this same factory. Used in the implementations of
   // getSubrequestChannel() and getActorClass() when delayed resolution is needed.

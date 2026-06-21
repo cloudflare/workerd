@@ -6,6 +6,7 @@
 
 #include <workerd/io/access-info.h>
 #include <workerd/io/frankenvalue.h>
+#include <workerd/io/io-channels.h>
 #include <workerd/io/worker.h>
 
 namespace workerd {
@@ -52,6 +53,10 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     // Per-request Cloudflare Access info. Supplied by the embedding application; standalone
     // workerd passes kj::none, which causes `ctx.access` to be `undefined` in JS.
     kj::Maybe<kj::Own<AccessInfo>> accessInfo = kj::none,
-    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory = kj::none);
+    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory = kj::none,
+    // `Persistent::YES` if this request was started on a channel reconstructed from a stored
+    // ("persistent") stub. The entrypoint re-verifies that the target worker still has the
+    // `allow_irrevocable_stub_storage` compat flag enabled and rejects the request otherwise.
+    Persistent fromPersistentStub = Persistent::NO);
 
 }  // namespace workerd

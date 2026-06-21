@@ -239,8 +239,9 @@ class Server::Service: public IoChannelFactory::SubrequestChannel {
   }
 
   // Implemented by EntrypointService for loopback ctx.exports entrypoints, to allow props to be
-  // specified.
-  virtual kj::Own<Service> forProps(Frankenvalue props) {
+  // specified. `persistent` is whether the (loopback) target worker has
+  // `allow_irrevocable_stub_storage` enabled, recorded on the resulting channel.
+  virtual kj::Own<Service> forProps(Frankenvalue props, Persistent persistent) {
     KJ_FAIL_REQUIRE("can't override props for this service");
   }
 
@@ -276,7 +277,7 @@ class Server::ActorClass: public IoChannelFactory::ActorClassChannel {
   virtual kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) = 0;
 
-  virtual kj::Own<ActorClass> forProps(Frankenvalue props) {
+  virtual kj::Own<ActorClass> forProps(Frankenvalue props, Persistent persistent) {
     KJ_FAIL_REQUIRE("can't override props for this actor class");
   }
 };
@@ -321,7 +322,8 @@ class Server::ActorNamespace final {
       kj::Network& dockerNetwork,
       kj::Maybe<kj::StringPtr> dockerPath,
       kj::Maybe<kj::StringPtr> containerEgressInterceptorImage,
-      kj::TaskSet& waitUntilTasks)
+      kj::TaskSet& waitUntilTasks,
+      Persistent selfTokensArePersistent)
       : actorClass(kj::mv(actorClass)),
         config(config),
         clock(clock),
@@ -331,7 +333,8 @@ class Server::ActorNamespace final {
         dockerNetwork(dockerNetwork),
         dockerPath(dockerPath),
         containerEgressInterceptorImage(containerEgressInterceptorImage),
-        waitUntilTasks(waitUntilTasks) {}
+        waitUntilTasks(waitUntilTasks),
+        selfTokensArePersistent(selfTokensArePersistent) {}
 
   void link(kj::Maybe<const kj::Directory&> serviceActorStorage) {
     KJ_IF_SOME(dir, serviceActorStorage) {
@@ -387,7 +390,8 @@ class Server::ActorNamespace final {
     return result;
   }
 
-  kj::Own<IoChannelFactory::ActorChannel> getActorChannel(Worker::Actor::Id id) {
+  kj::Own<IoChannelFactory::ActorChannel> getActorChannel(
+      Worker::Actor::Id id, Persistent persistent = Persistent::NO) {
     KJ_IF_SOME(doId, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
       KJ_IF_SOME(name, doId->getName()) {
         // To emulate production, we preserve the name on the id, but only if it's <= 1024 bytes.
@@ -399,7 +403,7 @@ class Server::ActorNamespace final {
       }
     }
 
-    return kj::refcounted<ActorChannelImpl>(getActorContainer(kj::mv(id)));
+    return kj::refcounted<ActorChannelImpl>(getActorContainer(kj::mv(id)), persistent);
   }
 
   class ActorContainer;
@@ -689,7 +693,7 @@ class Server::ActorNamespace final {
     kj::Own<IoChannelFactory::ActorChannel> getFacet(
         kj::StringPtr name, kj::Function<kj::Promise<StartInfo>()> getStartInfo) override {
       auto facet = getFacetContainer(kj::str(name), kj::mv(getStartInfo));
-      return kj::refcounted<ActorChannelImpl>(kj::mv(facet));
+      return kj::refcounted<ActorChannelImpl>(kj::mv(facet), Persistent::NO);
     }
 
     void abortFacet(kj::StringPtr name, kj::Exception reason) override {
@@ -751,19 +755,19 @@ class Server::ActorNamespace final {
     }
 
     kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getChannelToken(
-        IoChannelFactory::ChannelTokenUsage usage) {
+        IoChannelFactory::ChannelTokenUsage usage, Persistent persistent) {
       requireTransferrableStub();
 
       kj::StringPtr uniqueKey = ns.getConfig().get<Durable>().uniqueKey;
 
       KJ_SWITCH_ONEOF(classAndId) {
         KJ_CASE_ONEOF(c, ClassAndId) {
-          return getChannelTokenImpl(usage, c.id);
+          return getChannelTokenImpl(usage, c.id, persistent);
         }
         KJ_CASE_ONEOF(promise, kj::ForkedPromise<void>) {
-          return promise.addBranch().then([this, usage]() {
+          return promise.addBranch().then([this, usage, persistent]() {
             return getChannelTokenImpl(
-                usage, KJ_ASSERT_NONNULL(classAndId.tryGet<ClassAndId>()).id);
+                usage, KJ_ASSERT_NONNULL(classAndId.tryGet<ClassAndId>()).id, persistent);
           });
         }
       }
@@ -1285,14 +1289,15 @@ class Server::ActorNamespace final {
       co_return ClassAndId(info.actorClass.downcast<ActorClass>(), kj::mv(info.id));
     }
 
-    kj::Array<byte> getChannelTokenImpl(
-        IoChannelFactory::ChannelTokenUsage usage, const Worker::Actor::Id& id) {
+    kj::Array<byte> getChannelTokenImpl(IoChannelFactory::ChannelTokenUsage usage,
+        const Worker::Actor::Id& id,
+        Persistent persistent) {
       kj::StringPtr uniqueKey = KJ_ASSERT_NONNULL(ns.getConfig().tryGet<Durable>()).uniqueKey;
       auto& abstractId = *KJ_ASSERT_NONNULL(id.tryGet<kj::Own<ActorIdFactory::ActorId>>());
       auto& idImpl =
           KJ_ASSERT_NONNULL(kj::tryDowncast<const ActorIdFactoryImpl::ActorIdImpl>(abstractId));
       return ns.channelTokenHandler.encodeActorChannelToken(
-          usage, uniqueKey, idImpl.getRaw(), idImpl.getName());
+          usage, uniqueKey, idImpl.getRaw(), idImpl.getName(), persistent);
     }
   };
 
@@ -1487,6 +1492,11 @@ class Server::ActorNamespace final {
   kj::Maybe<kj::StringPtr> dockerPath;
   kj::Maybe<kj::StringPtr> containerEgressInterceptorImage;
   kj::TaskSet& waitUntilTasks;
+
+  // Whether the worker owning this actor namespace has `allow_irrevocable_stub_storage` enabled,
+  // and therefore self-tokens for root actors should be treated as persistent.
+  Persistent selfTokensArePersistent;
+
   kj::Maybe<AlarmScheduler&> alarmScheduler;
 
   // Removes actors from `actors` after 70 seconds of last access.
@@ -1527,13 +1537,17 @@ class Server::ActorNamespace final {
 
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
    public:
-    ActorChannelImpl(kj::Own<ActorNamespace::ActorContainer> actorContainer)
-        : actorContainer(kj::mv(actorContainer)) {}
+    ActorChannelImpl(kj::Own<ActorNamespace::ActorContainer> actorContainer, Persistent persistent)
+        : actorContainer(kj::mv(actorContainer)),
+          persistent(persistent) {}
     ~ActorChannelImpl() noexcept(false) {
       actorContainer->updateAccessTime();
     }
 
     kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+      // If this channel was reconstructed from a persistent (stored) stub, signal the target so it
+      // can re-verify that it still allows persistent stubs.
+      metadata.fromPersistentStub = metadata.fromPersistentStub || persistent;
       return newPromisedWorkerInterface(
           actorContainer->startRequest(kj::mv(metadata)).attach(actorContainer->addRef()));
     }
@@ -1548,11 +1562,12 @@ class Server::ActorNamespace final {
 
     kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
         IoChannelFactory::ChannelTokenUsage usage) override {
-      return actorContainer->getChannelToken(usage);
+      return actorContainer->getChannelToken(usage, persistent);
     }
 
    private:
     kj::Own<ActorNamespace::ActorContainer> actorContainer;
+    Persistent persistent;
   };
 
   // `SelfTokenFactory` for a root (non-facet) Durable Object instance. Note that unlike
@@ -1578,7 +1593,7 @@ class Server::ActorNamespace final {
       auto& idImpl =
           KJ_ASSERT_NONNULL(kj::tryDowncast<const ActorIdFactoryImpl::ActorIdImpl>(abstractId));
       return ns.channelTokenHandler.encodeActorChannelToken(
-          usage, uniqueKey, idImpl.getRaw(), idImpl.getName());
+          usage, uniqueKey, idImpl.getRaw(), idImpl.getName(), ns.selfTokensArePersistent);
     }
 
    private:
@@ -3333,7 +3348,7 @@ class Server::WorkerService final: public Service,
       auto ns = kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value,
           kj::systemPreciseCalendarClock(), threadContext.getUnsafeTimer(),
           threadContext.getByteStreamFactory(), channelTokenHandler, network, dockerPath,
-          containerEgressInterceptorImage, waitUntilTasks);
+          containerEgressInterceptorImage, waitUntilTasks, selfTokensArePersistent());
       KJ_IF_SOME(d, entry.value.tryGet<Durable>()) {
         actorNamespacesByUniqueKey.insert(d.uniqueKey, ns.get());
       }
@@ -3355,11 +3370,14 @@ class Server::WorkerService final: public Service,
     static Frankenvalue EMPTY_PROPS;
 
     // If requireAllowsTransfer() passed, then we are not dynamic so should have a service name.
+    // We use Persistent::NO here because simple service bindings are not persistent -- only
+    // ctx.exports loopback bindings are, and those are always implemetned by EntrypointService.
     return channelTokenHandler.encodeSubrequestChannelToken(
-        usage, KJ_ASSERT_NONNULL(serviceName), kj::none, EMPTY_PROPS);
+        usage, KJ_ASSERT_NONNULL(serviceName), kj::none, EMPTY_PROPS, Persistent::NO);
   }
 
-  kj::Maybe<kj::Own<Service>> getEntrypoint(kj::Maybe<kj::StringPtr> name, Frankenvalue props) {
+  kj::Maybe<kj::Own<Service>> getEntrypoint(
+      kj::Maybe<kj::StringPtr> name, Frankenvalue props, Persistent persistent = Persistent::NO) {
     const kj::HashSet<kj::String>* handlers;
     KJ_IF_SOME(n, name) {
       KJ_IF_SOME(entry, namedEntrypoints.findEntry(n)) {
@@ -3396,7 +3414,7 @@ class Server::WorkerService final: public Service,
         return kj::addRef(*this);
       }
     }
-    return kj::refcounted<EntrypointService>(*this, name, kj::mv(props), *handlers);
+    return kj::refcounted<EntrypointService>(*this, name, kj::mv(props), *handlers, persistent);
   }
 
   // Like getEntrypoint() but used specifically to get the entrypoint for use in ctx.exports,
@@ -3417,12 +3435,17 @@ class Server::WorkerService final: public Service,
         KJ_FAIL_REQUIRE("getLoopbackEntrypoint() called for entrypoint that doesn't exist");
       }
     }
+    // This is a ctx.exports loopback channel, but note that this represent the "template" for
+    // the channel, which is not in itself allowed to be sent over RPC, much less persisted.
+    // The application must specialize it by calling `ctx.exports.Whatever({props})` to get a
+    // transferrable and persistable stub (which will call the entrypoint's `forProps()` method).
     return kj::refcounted<EntrypointService>(*this, name, kj::none, *handlers);
   }
 
-  kj::Maybe<kj::Own<ActorClass>> getActorClass(kj::Maybe<kj::StringPtr> name, Frankenvalue props) {
+  kj::Maybe<kj::Own<ActorClass>> getActorClass(
+      kj::Maybe<kj::StringPtr> name, Frankenvalue props, Persistent persistent = Persistent::NO) {
     KJ_IF_SOME(className, actorClassEntrypoints.find(KJ_UNWRAP_OR(name, return kj::none))) {
-      return kj::refcounted<ActorClassImpl>(*this, className, kj::mv(props));
+      return kj::refcounted<ActorClassImpl>(*this, className, kj::mv(props), persistent);
     } else {
       return kj::none;
     }
@@ -3487,10 +3510,17 @@ class Server::WorkerService final: public Service,
     // Same logic as in EntrypointService::startRequest().
     if (!isDynamic) {
       metadata.restoredSelfTokenFactory =
-          kj::refcounted<StaticServiceSelfTokenFactory>(kj::addRef(*this));
+          kj::refcounted<StaticServiceSelfTokenFactory>(kj::addRef(*this), kj::none);
     }
 
     return startRequest(kj::mv(metadata), kj::none, {}, kj::none, false);
+  }
+
+  // Get whether self-tokens should be persistent, which is the case if the
+  // `allow_irrevocable_stub_storage` compat flag is set.
+  Persistent selfTokensArePersistent() {
+    return Persistent(
+        worker->getIsolate().getApi().getFeatureFlags().getAllowIrrevocableStubStorage());
   }
 
   bool hasHandler(kj::StringPtr handlerName) override {
@@ -3628,24 +3658,46 @@ class Server::WorkerService final: public Service,
         kj::mv(triggerContext),
         false,     // isDynamicDispatch
         kj::none,  // accessInfo
-        kj::mv(metadata.restoredSelfTokenFactory));
+        kj::mv(metadata.restoredSelfTokenFactory), metadata.fromPersistentStub);
   }
 
  private:
-  // `SelfTokenFactory` for a static (non-dynamic) worker entrypoint. It simply wraps the
-  // entrypoint's own `SubrequestChannel` and constructs the token via its `getTokenMaybeSync()`.
+  class EntrypointService;
+
+  // `SelfTokenFactory` for a static (non-dynamic) worker entrypoint. This is a little wonky
+  // because self-tokens need to be encoded as persistent as long as the worker itself has
+  // allow_irrevocable_stub_storage, regardless of whether the `EntrypointService` used to reach
+  // it was itself persistent. (The `EntrypointService` is only persistent if it was created by
+  // the worker itself using ctx.exports.)
   class StaticServiceSelfTokenFactory final: public ChannelTokenHandler::ServerSelfTokenFactory {
    public:
-    StaticServiceSelfTokenFactory(kj::Own<IoChannelFactory::SubrequestChannel> service)
-        : service(kj::mv(service)) {}
+    StaticServiceSelfTokenFactory(
+        kj::Own<WorkerService> worker, kj::Maybe<kj::Own<EntrypointService>> entrypoint)
+        : worker(kj::mv(worker)),
+          entrypoint(kj::mv(entrypoint)) {}
 
     kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getSelfToken(
         IoChannelFactory::ChannelTokenUsage usage) override {
-      return service->getTokenMaybeSync(usage);
+      kj::Maybe<kj::StringPtr> entrypointName;
+      Frankenvalue emptyProps;
+      auto& propsRef = [&]() -> Frankenvalue& {
+        KJ_IF_SOME(ep, entrypoint) {
+          entrypointName = ep->entrypoint;
+          KJ_IF_SOME(p, ep->props) {
+            return p;
+          }
+        }
+        return emptyProps;
+      }();
+
+      return worker->channelTokenHandler.encodeSubrequestChannelToken(usage,
+          KJ_ASSERT_NONNULL(worker->serviceName), entrypointName, propsRef,
+          worker->selfTokensArePersistent());
     }
 
    private:
-    kj::Own<IoChannelFactory::SubrequestChannel> service;
+    kj::Own<WorkerService> worker;
+    kj::Maybe<kj::Own<EntrypointService>> entrypoint;
   };
 
   class EntrypointService final: public Service {
@@ -3653,11 +3705,13 @@ class Server::WorkerService final: public Service,
     EntrypointService(WorkerService& worker,
         kj::Maybe<kj::StringPtr> entrypoint,
         kj::Maybe<Frankenvalue> props,
-        const kj::HashSet<kj::String>& handlers)
+        const kj::HashSet<kj::String>& handlers,
+        Persistent persistent = Persistent::NO)
         : worker(kj::addRef(worker)),
           entrypoint(entrypoint),
           handlers(handlers),
-          props(kj::mv(props)) {}
+          props(kj::mv(props)),
+          persistent(persistent) {}
 
     kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
       return startRequest(kj::mv(metadata), false);
@@ -3671,6 +3725,11 @@ class Server::WorkerService final: public Service,
       } else {
         // Calling ctx.exports loopback without specifying props. Use empty props.
       }
+
+      // If this channel was reconstructed from a persistent (stored) stub, signal the target so it
+      // can re-verify that it still allows persistent stubs. Preserve any incoming bit (e.g. set
+      // by an outer restored channel) so it propagates through loopback hops.
+      metadata.fromPersistentStub = metadata.fromPersistentStub || persistent;
 
       // Figure out the self-token factory, used for restore tokens.
       if (worker->isDynamic) {
@@ -3687,7 +3746,7 @@ class Server::WorkerService final: public Service,
         // would potentially allow a malicious caller to read and manipulate the parameters to our
         // own `[restore]()` method.
         metadata.restoredSelfTokenFactory =
-            kj::refcounted<StaticServiceSelfTokenFactory>(kj::addRef(*this));
+            kj::refcounted<StaticServiceSelfTokenFactory>(kj::addRef(*worker), kj::addRef(*this));
       }
 
       return worker->startRequest(kj::mv(metadata), entrypoint, kj::mv(props), kj::none, isTracer);
@@ -3702,14 +3761,15 @@ class Server::WorkerService final: public Service,
       return worker;
     }
 
-    kj::Own<Service> forProps(Frankenvalue props) override {
+    kj::Own<Service> forProps(Frankenvalue props, Persistent persistent) override {
       if (this->props != kj::none) {
         // This entrypoint is already specialized. Delegate to the default implementation (which
         // will throw an exception).
-        return Service::forProps(kj::mv(props));
+        return Service::forProps(kj::mv(props), persistent);
       }
 
-      return kj::refcounted<EntrypointService>(*worker, entrypoint, kj::mv(props), handlers);
+      return kj::refcounted<EntrypointService>(
+          *worker, entrypoint, kj::mv(props), handlers, persistent);
     }
 
     void requireAllowsTransfer() override {
@@ -3722,8 +3782,9 @@ class Server::WorkerService final: public Service,
 
       // If requireAllowsTransfer() passed, then we are not dynamic so should have a service name.
       Frankenvalue emptyProps;
-      return worker->channelTokenHandler.encodeSubrequestChannelToken(
-          usage, KJ_ASSERT_NONNULL(worker->serviceName), entrypoint, props.orDefault(emptyProps));
+      return worker->channelTokenHandler.encodeSubrequestChannelToken(usage,
+          KJ_ASSERT_NONNULL(worker->serviceName), entrypoint, props.orDefault(emptyProps),
+          persistent);
     }
 
    private:
@@ -3731,14 +3792,27 @@ class Server::WorkerService final: public Service,
     kj::Maybe<kj::StringPtr> entrypoint;
     const kj::HashSet<kj::String>& handlers;
     kj::Maybe<Frankenvalue> props;
+
+    // `persistent` is only `YES` when either:
+    // - This EntrypointService came from a ctx.exports loopback binding and the worker has the
+    //   allow_irrevocable_stub_storage flag.
+    // - This EntrypointService was constructed from a channel token that originated from
+    //   serializing a persistent EntrypointService.
+    Persistent persistent;
+
+    friend class StaticServiceSelfTokenFactory;
   };
 
   class ActorClassImpl final: public ActorClass {
    public:
-    ActorClassImpl(WorkerService& service, kj::StringPtr className, kj::Maybe<Frankenvalue> props)
+    ActorClassImpl(WorkerService& service,
+        kj::StringPtr className,
+        kj::Maybe<Frankenvalue> props,
+        Persistent persistent = Persistent::NO)
         : service(kj::addRef(service)),
           className(className),
-          props(kj::mv(props)) {}
+          props(kj::mv(props)),
+          persistent(persistent) {}
 
     void requireAllowsTransfer() override {
       service->requireAllowsTransfer();
@@ -3778,14 +3852,14 @@ class Server::WorkerService final: public Service,
       return service->startRequest(kj::mv(metadata), className, {}, kj::mv(actor));
     }
 
-    kj::Own<ActorClass> forProps(Frankenvalue props) override {
+    kj::Own<ActorClass> forProps(Frankenvalue props, Persistent persistent) override {
       if (this->props != kj::none) {
         // This entrypoint is already specialized. Delegate to the default implementation (which
         // will throw an exception).
-        return ActorClass::forProps(kj::mv(props));
+        return ActorClass::forProps(kj::mv(props), persistent);
       }
 
-      return kj::refcounted<ActorClassImpl>(*service, className, kj::mv(props));
+      return kj::refcounted<ActorClassImpl>(*service, className, kj::mv(props), persistent);
     }
 
     kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
@@ -3795,14 +3869,15 @@ class Server::WorkerService final: public Service,
       // If requireAllowsTransfer() passed, then we are not dynamic so should have a service name.
       // Unspecialized loopback entrypoints are not serializable, so if we get here we must have
       // props.
-      return service->channelTokenHandler.encodeActorClassChannelToken(
-          usage, KJ_ASSERT_NONNULL(service->serviceName), className, KJ_ASSERT_NONNULL(props));
+      return service->channelTokenHandler.encodeActorClassChannelToken(usage,
+          KJ_ASSERT_NONNULL(service->serviceName), className, KJ_ASSERT_NONNULL(props), persistent);
     }
 
    private:
     kj::Own<WorkerService> service;
     kj::StringPtr className;
     kj::Maybe<Frankenvalue> props;
+    Persistent persistent;
   };
 
   ChannelTokenHandler& channelTokenHandler;
@@ -3954,7 +4029,8 @@ class Server::WorkerService final: public Service,
 
   kj::Own<SubrequestChannel> getSubrequestChannelResolved(uint channel,
       kj::Maybe<Frankenvalue> props,
-      kj::Maybe<VersionRequest> versionRequest) override {
+      kj::Maybe<VersionRequest> versionRequest,
+      Persistent persistent) override {
     auto& channels =
         KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
 
@@ -3966,7 +4042,7 @@ class Server::WorkerService final: public Service,
       // Requesting specialization of loopback (ctx.exports) entrypoint with props.
       auto& service = KJ_REQUIRE_NONNULL(
           kj::tryDowncast<Service>(channelRef), "referenced channel is not a loopback channel");
-      return service.forProps(kj::mv(p));
+      return service.forProps(kj::mv(p), persistent);
     }
 
     return kj::addRef(channelRef);
@@ -3979,7 +4055,8 @@ class Server::WorkerService final: public Service,
       bool enableReplicaRouting,
       ActorRoutingMode routingMode,
       SpanParent parentSpan,
-      kj::Maybe<ActorVersion> version) override {
+      kj::Maybe<ActorVersion> version,
+      Persistent persistent) override {
     JSG_REQUIRE(mode == ActorGetMode::GET_OR_CREATE, Error,
         "workerd only supports GET_OR_CREATE mode for getting actor stubs");
     JSG_REQUIRE(!enableReplicaRouting, Error, "workerd does not support replica routing.");
@@ -4001,7 +4078,7 @@ class Server::WorkerService final: public Service,
     auto& ns = JSG_REQUIRE_NONNULL(
         channels.actor[channel], Error, "Actor namespace configuration was invalid.");
     KJ_REQUIRE(ns.getConfig().is<Durable>());  // should have been verified earlier
-    return ns.getActorChannel(id.clone());
+    return ns.getActorChannel(id.clone(), persistent);
   }
 
   kj::Own<ActorChannel> getColoLocalActor(
@@ -4017,7 +4094,7 @@ class Server::WorkerService final: public Service,
   }
 
   kj::Own<ActorClassChannel> getActorClassResolved(
-      uint channel, kj::Maybe<Frankenvalue> props) override {
+      uint channel, kj::Maybe<Frankenvalue> props, Persistent persistent) override {
     auto& channels =
         KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
 
@@ -4029,7 +4106,7 @@ class Server::WorkerService final: public Service,
       // Requesting specialization of loopback (ctx.exports) actor class with props.
       auto& typed = KJ_REQUIRE_NONNULL(
           kj::tryDowncast<ActorClass>(cls), "referenced channel is not a loopback channel");
-      return typed.forProps(kj::mv(p));
+      return typed.forProps(kj::mv(p), persistent);
     }
 
     return kj::addRef(cls);
@@ -4113,15 +4190,17 @@ class Server::WorkerService final: public Service,
   kj::Own<SubrequestChannel> makeRestoredSubrequestChannelResolved(
       kj::Own<SelfTokenFactory> selfTokenFactory,
       Frankenvalue restoreParams,
-      kj::Own<SubrequestChannel> inner) override {
+      kj::Own<SubrequestChannel> inner,
+      Persistent persistent) override {
     return channelTokenHandler.makeRestoredSubrequestChannel(
-        kj::mv(selfTokenFactory), kj::mv(restoreParams), kj::mv(inner));
+        kj::mv(selfTokenFactory), kj::mv(restoreParams), kj::mv(inner), persistent);
   }
 
-  kj::Own<RpcChannel> makeRestoredRpcChannelResolved(
-      kj::Own<SelfTokenFactory> selfTokenFactory, Frankenvalue restoreParams) override {
+  kj::Own<RpcChannel> makeRestoredRpcChannelResolved(kj::Own<SelfTokenFactory> selfTokenFactory,
+      Frankenvalue restoreParams,
+      Persistent persistent) override {
     return channelTokenHandler.makeRestoredRpcChannel(
-        kj::mv(selfTokenFactory), kj::mv(restoreParams));
+        kj::mv(selfTokenFactory), kj::mv(restoreParams), persistent);
   }
 
   kj::Own<void> addRef() override {
@@ -5758,41 +5837,47 @@ kj::Own<Server::ActorClass> Server::lookupActorClass(
   }
 }
 
-kj::Own<IoChannelFactory::SubrequestChannel> Server::resolveEntrypoint(
-    kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) {
+kj::Own<IoChannelFactory::SubrequestChannel> Server::resolveEntrypoint(kj::StringPtr serviceName,
+    kj::Maybe<kj::StringPtr> entrypoint,
+    Frankenvalue props,
+    Persistent persistent) {
   auto& service = *JSG_REQUIRE_NONNULL(services.find(serviceName), Error,
       "Stub refers to a service that doesn't exist: ", serviceName);
 
   auto& worker = JSG_REQUIRE_NONNULL(kj::tryDowncast<WorkerService>(service), Error,
       "Stub refers to a service that is not a Worker: ", serviceName);
 
-  return JSG_REQUIRE_NONNULL(worker.getEntrypoint(entrypoint, kj::mv(props)), Error,
+  return JSG_REQUIRE_NONNULL(worker.getEntrypoint(entrypoint, kj::mv(props), persistent), Error,
       "Stub refers to a an entrypoint of the target service that doesn't exist: ",
       entrypoint.orDefault("default"));
 }
 
-kj::Own<IoChannelFactory::ActorClassChannel> Server::resolveActorClass(
-    kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) {
+kj::Own<IoChannelFactory::ActorClassChannel> Server::resolveActorClass(kj::StringPtr serviceName,
+    kj::Maybe<kj::StringPtr> entrypoint,
+    Frankenvalue props,
+    Persistent persistent) {
   auto& service = *JSG_REQUIRE_NONNULL(services.find(serviceName), Error,
       "Stub refers to a service that doesn't exist: ", serviceName);
 
   auto& worker = JSG_REQUIRE_NONNULL(kj::tryDowncast<WorkerService>(service), Error,
       "Stub refers to a service that is not a Worker: ", serviceName);
 
-  return JSG_REQUIRE_NONNULL(worker.getActorClass(entrypoint, kj::mv(props)), Error,
+  return JSG_REQUIRE_NONNULL(worker.getActorClass(entrypoint, kj::mv(props), persistent), Error,
       "Stub refers to a an entrypoint of the target service that doesn't exist: ",
       entrypoint.orDefault("default"));
 }
 
-kj::Own<IoChannelFactory::ActorChannel> Server::resolveActor(
-    kj::StringPtr namespaceKey, kj::ArrayPtr<const byte> id, kj::Maybe<kj::StringPtr> name) {
+kj::Own<IoChannelFactory::ActorChannel> Server::resolveActor(kj::StringPtr namespaceKey,
+    kj::ArrayPtr<const byte> id,
+    kj::Maybe<kj::StringPtr> name,
+    Persistent persistent) {
   auto& ns = *KJ_REQUIRE_NONNULL(actorNamespacesByUniqueKey.find(namespaceKey),
       "couldn't deserialize actor stub pointing at unknown namespace", namespaceKey);
 
   auto idFactory = kj::heap<ActorIdFactoryImpl>(namespaceKey);
   auto idObj = idFactory->idFromRaw(id, name.clone());
 
-  return ns.getActorChannel(kj::mv(idObj));
+  return ns.getActorChannel(kj::mv(idObj), persistent);
 }
 
 // =======================================================================================
@@ -5814,8 +5899,8 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
       cfBlobJson = kj::str(params.getCfBlobJson());
     }
     context.initResults(capnp::MessageSize{4, 1})
-        .setDispatcher(kj::heap<EventDispatcherImpl>(
-            httpOverCapnpFactory, kj::addRef(*service), kj::mv(cfBlobJson)));
+        .setDispatcher(kj::heap<EventDispatcherImpl>(httpOverCapnpFactory, kj::addRef(*service),
+            kj::mv(cfBlobJson), Persistent(params.getFromPersistentStub())));
     return kj::READY_NOW;
   }
 
@@ -5827,10 +5912,12 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
    public:
     EventDispatcherImpl(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
         kj::Own<IoChannelFactory::SubrequestChannel> service,
-        kj::Maybe<kj::String> cfBlobJson)
+        kj::Maybe<kj::String> cfBlobJson,
+        Persistent fromPersistentStub)
         : httpOverCapnpFactory(httpOverCapnpFactory),
           service(kj::mv(service)),
-          cfBlobJson(kj::mv(cfBlobJson)) {}
+          cfBlobJson(kj::mv(cfBlobJson)),
+          fromPersistentStub(fromPersistentStub) {}
 
     kj::Promise<void> getHttpService(GetHttpServiceContext context) override {
       // Create WorkerInterface with cf blob metadata (if provided via startEvent).
@@ -5838,6 +5925,7 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
       KJ_IF_SOME(cf, cfBlobJson) {
         metadata.cfBlobJson = kj::str(cf);
       }
+      metadata.fromPersistentStub = fromPersistentStub;
       auto worker = getService()->startRequest(kj::mv(metadata));
       context.initResults(capnp::MessageSize{4, 1})
           .setHttp(httpOverCapnpFactory.kjToCapnp(kj::mv(worker)));
@@ -5892,6 +5980,7 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
     kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> service;
     kj::Maybe<kj::String> cfBlobJson;
+    Persistent fromPersistentStub;
 
     kj::Own<IoChannelFactory::SubrequestChannel> getService() {
       auto result =
@@ -6259,7 +6348,7 @@ class Server::DebugPortListener {
 
         // Try to apply props if the service supports it
         if (params.hasProps()) {
-          targetService = service->forProps(kj::mv(props));
+          targetService = service->forProps(kj::mv(props), Persistent::NO);
         } else {
           // No props, just use the service as-is
           targetService = kj::addRef(*service);
