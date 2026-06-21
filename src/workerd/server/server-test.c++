@@ -4875,6 +4875,66 @@ KJ_TEST("Server: encodeResponseBody: manual pass-through") {
     fake-gzipped-content)"_blockquote);
 }
 
+KJ_TEST("Server: encodeResponseBody: auto strips Content-Encoding header for zstd") {
+  // Regression test for https://github.com/cloudflare/workerd/issues/5112
+  // zstd was not recognized by getContentEncoding() at all, so responses with
+  // Content-Encoding: zstd passed through without decompression and without header stripping.
+  // This caused the Cache API to see an undecompressed body labeled as zstd-compressed.
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    let response = await fetch("http://subhost/foo");
+                `    let ce = response.headers.get("Content-Encoding");
+                `    return new Response("Content-Encoding: " + ce);
+                `  }
+                `}
+            )
+          ]
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  auto subreq = test.receiveInternetSubrequest("subhost");
+  subreq.recv(R"(
+    GET /foo HTTP/1.1
+    Host: subhost
+
+  )"_blockquote);
+
+  // Send a response with Content-Encoding: zstd. Body bytes aren't real zstd data, but the
+  // decompressor is lazy and won't run until the body is consumed — we only check headers here.
+  subreq.send(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 20
+    Content-Encoding: zstd
+
+    fake-zstd-content!
+  )"_blockquote);
+
+  // Content-Encoding should be null after auto-decoding strips the header.
+  conn.recvHttp200(R"(
+    Content-Encoding: null)"_blockquote);
+}
+
+
 KJ_TEST("Server: Catch websocket server errors") {
   TestServer test(R"((
     services = [

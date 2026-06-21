@@ -604,6 +604,7 @@ kj_test(
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
+        "@zstd",
     ],
 )
 

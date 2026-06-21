@@ -9,6 +9,7 @@
 #include <kj/compat/brotli.h>
 #include <kj/compat/gzip.h>
 #include <kj/one-of.h>
+#include <zstd.h>
 
 namespace workerd::api {
 
@@ -89,6 +90,9 @@ kj::Promise<size_t> EncodedAsyncInputStream::tryRead(
               {"brotli compression failed"_kj, "Brotli compression failed."},
               {"brotli compressed stream ended prematurely"_kj,
                 "Brotli compressed stream ended prematurely."},
+              {"zstd decompression error"_kj, "Zstd decompression failed."},
+              {"zstd-compressed stream ended prematurely"_kj,
+                "Zstd compressed stream ended prematurely."},
             })) {
       return kj::mv(e);
     }
@@ -129,6 +133,79 @@ void EncodedAsyncInputStream::cancel(kj::Exception reason) {
   canceler.cancel(kj::mv(reason));
 }
 
+// =======================================================================================
+// ZstdAsyncInputStream
+
+// Streaming zstd decompressor wrapping an AsyncInputStream. Modeled after
+// kj::GzipAsyncInputStream / kj::BrotliAsyncInputStream in capnp-cpp.
+class ZstdAsyncInputStream final: public kj::AsyncInputStream {
+ public:
+  explicit ZstdAsyncInputStream(kj::AsyncInputStream& inner)
+      : inner(inner),
+        dctx(ZSTD_createDCtx()) {
+    KJ_ASSERT(dctx != nullptr, "failed to allocate ZSTD_DCtx");
+  }
+  ~ZstdAsyncInputStream() noexcept(false) {
+    ZSTD_freeDCtx(dctx);
+  }
+  KJ_DISALLOW_COPY_AND_MOVE(ZstdAsyncInputStream);
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return readImpl(reinterpret_cast<kj::byte*>(buffer), minBytes, maxBytes, 0);
+  }
+
+ private:
+  kj::AsyncInputStream& inner;
+  ZSTD_DCtx* dctx;
+  bool atValidEndpoint = false;
+
+  static constexpr size_t IN_BUFFER_SIZE = 16384;
+  kj::byte inBuffer[IN_BUFFER_SIZE];
+  size_t inAvail = 0;
+  size_t inPos = 0;
+
+  kj::Promise<size_t> readImpl(
+      kj::byte* out, size_t minBytes, size_t maxBytes, size_t alreadyRead) {
+    // Drain any buffered compressed input.
+    while (inAvail > 0 && alreadyRead < maxBytes) {
+      ZSTD_inBuffer input = {inBuffer + inPos, inAvail, 0};
+      ZSTD_outBuffer output = {out, maxBytes, alreadyRead};
+
+      size_t result = ZSTD_decompressStream(dctx, &output, &input);
+      inPos += input.pos;
+      inAvail -= input.pos;
+      alreadyRead = output.pos;
+
+      KJ_REQUIRE(!ZSTD_isError(result), "zstd decompression error", ZSTD_getErrorName(result));
+
+      if (result == 0) {
+        // Frame complete. ZSTD_DCtx auto-resets for the next frame.
+        atValidEndpoint = true;
+        if (inAvail == 0) break;
+        atValidEndpoint = false;  // more compressed data follows; could be another frame
+      }
+
+      if (alreadyRead >= minBytes) return alreadyRead;
+    }
+
+    if (alreadyRead >= minBytes) return alreadyRead;
+
+    // Need more compressed input from the underlying stream.
+    inPos = 0;
+    inAvail = 0;
+    return inner.tryRead(inBuffer, 1, IN_BUFFER_SIZE)
+        .then([this, out, minBytes, maxBytes, alreadyRead](size_t n) -> kj::Promise<size_t> {
+      if (n == 0) {
+        KJ_REQUIRE(atValidEndpoint, "zstd-compressed stream ended prematurely");
+        return alreadyRead;
+      }
+      inAvail = n;
+      inPos = 0;
+      return readImpl(out, minBytes, maxBytes, alreadyRead);
+    });
+  }
+};
+
 void EncodedAsyncInputStream::ensureIdentityEncoding() {
   // Decompression gets added to the stream here if needed based on the content encoding.
   if (encoding == StreamEncoding::GZIP) {
@@ -137,8 +214,10 @@ void EncodedAsyncInputStream::ensureIdentityEncoding() {
   } else if (encoding == StreamEncoding::BROTLI) {
     inner = kj::heap<kj::BrotliAsyncInputStream>(*inner).attach(kj::mv(inner));
     encoding = StreamEncoding::IDENTITY;
+  } else if (encoding == StreamEncoding::ZSTD) {
+    inner = kj::heap<ZstdAsyncInputStream>(*inner).attach(kj::mv(inner));
+    encoding = StreamEncoding::IDENTITY;
   } else {
-    // We currently support gzip and brotli as non-identity content encodings.
     KJ_ASSERT(encoding == StreamEncoding::IDENTITY);
   }
 }
@@ -344,8 +423,12 @@ void EncodedAsyncOutputStream::ensureIdentityEncoding() {
 
     inner = kj::heap<kj::BrotliAsyncOutputStream>(*stream).attach(kj::mv(stream));
     encoding = StreamEncoding::IDENTITY;
+  } else if (encoding == StreamEncoding::ZSTD) {
+    // Zstd output compression is not yet implemented. This path is only reachable if a worker
+    // sends a response with Content-Encoding: zstd while using encodeResponseBody: "auto".
+    // Workers that need to write zstd-compressed bodies should use encodeResponseBody: "manual".
+    KJ_FAIL_REQUIRE("zstd output compression is not supported; use encodeResponseBody: manual");
   } else {
-    // We currently support gzip and brotli as non-identity content encodings.
     KJ_ASSERT(encoding == StreamEncoding::IDENTITY);
   }
 }
@@ -404,6 +487,8 @@ StreamEncoding getContentEncoding(IoContext& context,
       return StreamEncoding::GZIP;
     } else if (options.brotliEnabled && encodingStr == "br") {
       return StreamEncoding::BROTLI;
+    } else if (encodingStr == "zstd") {
+      return StreamEncoding::ZSTD;
     }
   }
   return StreamEncoding::IDENTITY;
