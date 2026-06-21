@@ -217,8 +217,8 @@ void EncodedAsyncInputStream::ensureIdentityEncoding() {
   } else if (encoding == StreamEncoding::ZSTD) {
     inner = kj::heap<ZstdAsyncInputStream>(*inner).attach(kj::mv(inner));
     encoding = StreamEncoding::IDENTITY;
-  } else {
-    KJ_ASSERT(encoding == StreamEncoding::IDENTITY);
+  } else if (encoding != StreamEncoding::IDENTITY) {
+    KJ_FAIL_REQUIRE("unsupported content encoding received over RPC", (uint)encoding);
   }
 }
 
@@ -428,8 +428,8 @@ void EncodedAsyncOutputStream::ensureIdentityEncoding() {
     // sends a response with Content-Encoding: zstd while using encodeResponseBody: "auto".
     // Workers that need to write zstd-compressed bodies should use encodeResponseBody: "manual".
     KJ_FAIL_REQUIRE("zstd output compression is not supported; use encodeResponseBody: manual");
-  } else {
-    KJ_ASSERT(encoding == StreamEncoding::IDENTITY);
+  } else if (encoding != StreamEncoding::IDENTITY) {
+    KJ_FAIL_REQUIRE("unsupported content encoding received over RPC", (uint)encoding);
   }
 }
 
@@ -473,7 +473,8 @@ SystemMultiStream newSystemMultiStream(
 }
 
 ContentEncodingOptions::ContentEncodingOptions(CompatibilityFlags::Reader flags)
-    : brotliEnabled(flags.getBrotliContentEncoding()) {}
+    : brotliEnabled(flags.getBrotliContentEncoding()),
+      zstdEnabled(flags.getZstdContentEncoding()) {}
 
 StreamEncoding getContentEncoding(IoContext& context,
     const kj::HttpHeaders& headers,
@@ -487,7 +488,7 @@ StreamEncoding getContentEncoding(IoContext& context,
       return StreamEncoding::GZIP;
     } else if (options.brotliEnabled && encodingStr == "br") {
       return StreamEncoding::BROTLI;
-    } else if (encodingStr == "zstd") {
+    } else if (options.zstdEnabled && encodingStr == "zstd") {
       return StreamEncoding::ZSTD;
     }
   }

@@ -4887,6 +4887,7 @@ KJ_TEST("Server: encodeResponseBody: zstd response body is decompressed") {
       ( name = "hello",
         worker = (
           compatibilityDate = "2022-08-17",
+          compatibilityFlags = ["zstd_content_encoding"],
           modules = [
             ( name = "main.js",
               esModule =

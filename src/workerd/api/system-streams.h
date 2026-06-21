@@ -44,6 +44,7 @@ SystemMultiStream newSystemMultiStream(kj::RefcountedWrapper<kj::Own<kj::AsyncIo
 
 struct ContentEncodingOptions {
   bool brotliEnabled = false;
+  bool zstdEnabled = false;
   ContentEncodingOptions() = default;
   ContentEncodingOptions(CompatibilityFlags::Reader flags);
 };
