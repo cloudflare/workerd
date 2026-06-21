@@ -566,6 +566,11 @@ class SqliteDatabase::Query final: private ResetListener {
 
   // For INSERT, UPDATE, or DELETE queries, returns the number of rows changed. For other query
   // types the result is undefined.
+  //
+  // WARNING: This method returns the change count from whatever query ran last, not necessarily
+  // *this* query.
+  // TODO(someday): We should find a way to fix changeCount() to return the count from the query
+  // that the method is being run on, otherwise this is quite a gotcha.
   uint changeCount();
 
   // Advance to the next row.
