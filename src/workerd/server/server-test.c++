@@ -104,6 +104,9 @@ class TestStream {
   void send(kj::StringPtr data, kj::SourceLocation loc = {}) {
     stream->write(data.asBytes()).wait(ws);
   }
+  void sendBytes(kj::ArrayPtr<const kj::byte> data) {
+    stream->write(data).wait(ws);
+  }
   void recv(kj::StringPtr expected, kj::SourceLocation loc = {}) {
     auto actual = readAllAvailable();
     if (actual == nullptr) {
@@ -4875,11 +4878,10 @@ KJ_TEST("Server: encodeResponseBody: manual pass-through") {
     fake-gzipped-content)"_blockquote);
 }
 
-KJ_TEST("Server: encodeResponseBody: auto strips Content-Encoding header for zstd") {
+KJ_TEST("Server: encodeResponseBody: zstd response body is decompressed") {
   // Regression test for https://github.com/cloudflare/workerd/issues/5112
-  // zstd was not recognized by getContentEncoding() at all, so responses with
-  // Content-Encoding: zstd passed through without decompression and without header stripping.
-  // This caused the Cache API to see an undecompressed body labeled as zstd-compressed.
+  // zstd was not recognized by getContentEncoding(), so responses with Content-Encoding: zstd
+  // passed through with raw compressed bytes instead of being decompressed.
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -4891,8 +4893,8 @@ KJ_TEST("Server: encodeResponseBody: auto strips Content-Encoding header for zst
                 `export default {
                 `  async fetch(request, env) {
                 `    let response = await fetch("http://subhost/foo");
-                `    let ce = response.headers.get("Content-Encoding");
-                `    return new Response("Content-Encoding: " + ce);
+                `    let text = await response.text();
+                `    return new Response(text);
                 `  }
                 `}
             )
@@ -4919,19 +4921,22 @@ KJ_TEST("Server: encodeResponseBody: auto strips Content-Encoding header for zst
 
   )"_blockquote);
 
-  // Send a response with Content-Encoding: zstd. Body bytes aren't real zstd data, but the
-  // decompressor is lazy and won't run until the body is consumed — we only check headers here.
-  subreq.send(R"(
-    HTTP/1.1 200 OK
-    Content-Length: 20
-    Content-Encoding: zstd
+  // zstd-compressed "zstd body ok"
+  static constexpr kj::byte zstdFrame[] = {
+    0x28, 0xb5, 0x2f, 0xfd, 0x24, 0x0c, 0x61, 0x00, 0x00, 0x7a,
+    0x73, 0x74, 0x64, 0x20, 0x62, 0x6f, 0x64, 0x79, 0x20, 0x6f,
+    0x6b, 0x88, 0x94, 0x46, 0x0e,
+  };
+  kj::String httpHeader = kj::str(
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Length: ", sizeof(zstdFrame), "\r\n"
+      "Content-Encoding: zstd\r\n"
+      "\r\n");
+  subreq.send(httpHeader);
+  subreq.sendBytes(zstdFrame);
 
-    fake-zstd-content!
-  )"_blockquote);
-
-  // Content-Encoding should be null after auto-decoding strips the header.
-  conn.recvHttp200(R"(
-    Content-Encoding: null)"_blockquote);
+  // The worker should receive the decompressed plaintext, not the raw compressed bytes.
+  conn.recvHttp200("zstd body ok"_blockquote);
 }
 
 
