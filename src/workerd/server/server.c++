@@ -4623,7 +4623,8 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted, private kj::TaskSet:
         kj::Maybe<kj::Function<void()>> onAborted,
         kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource)
         : onAborted(kj::mv(onAborted)),
-          startupTask(start(server, kj::mv(isolateName), kj::mv(fetchSource)).fork()) {}
+          startupTask(start(server, kj::mv(isolateName), kj::mv(fetchSource)).fork()),
+          cleanupTaskSet(server.tasks) {}
 
     // Returns a branch of the startup task promise. Used by the namespace to
     // hold an extra reference to unnamed stubs until startup completes.
@@ -4632,17 +4633,19 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted, private kj::TaskSet:
     }
 
     ~WorkerStubImpl() {
-      unlink();
-      // Defer destruction of `WorkerService` to the next turn of the event loop. This is needed
-      // for ephemeral dynamic workers as they are torn down synchronously under GC cycles of the
-      // parent isolate, and this nested isolate teardown breaks a few invariants:
-      //   - Failed `KJ_ASSERT(!inCppgcShimDestructor)` in `HeapTracer::clearWrappers()`, because
-      //     `inCppgcShimDestructor` is set to `true` by the parent isolate
-      //   - If we bypass the previous failure by shifting the flag to be per-isolate, we trigger
-      //     a V8 assertion `AllowGarbageCollection::IsAllowed()` during isolate teardown, as the
-      //     `no_gc_during_gc` was constructed as part of the parent isolate's GC cycle
-      KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
-        ioContext.addTask(kj::evalLater([service = kj::mv(service)]() {}));
+      // Defer unlink and destruction of `WorkerService` to the next turn of the event loop. This
+      // is needed because worker stubs are typically destroyed while some other isolate is
+      // current, and so we cannot enter the dynamic worker's isolate to tear it down. It's even
+      // possible that the stub is held by an IoContext that is inside the dynamic isolate itself
+      // (particularly happens when using ctx.restore()) in which case unlinking it synchronously
+      // would likely lead to promise self-cancellation.
+      //
+      // However, don't do this if we're already unlinked, as in this case we're likely in the
+      // midst of destroying the `Server` and `cleanupTaskSet` may already be destroyed.
+      if (!unlinked) {
+        KJ_IF_SOME(s, service) {
+          cleanupTaskSet.add(kj::evalLater([service = kj::mv(s)]() mutable { service->unlink(); }));
+        }
       }
     }
 
@@ -4650,6 +4653,7 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted, private kj::TaskSet:
       KJ_IF_SOME(s, service) {
         s->unlink();
       }
+      unlinked = true;
     }
 
     kj::Own<IoChannelFactory::SubrequestChannel> getEntrypointResolved(
@@ -4669,6 +4673,9 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted, private kj::TaskSet:
 
     kj::Maybe<kj::Own<WorkerService>> service;  // null if still starting up
     kj::ForkedPromise<void> startupTask;        // resolves when `service` is non-null
+
+    kj::TaskSet& cleanupTaskSet;
+    bool unlinked = false;
 
     void onAbortIsolate() {
       KJ_IF_SOME(cb, onAborted) {
