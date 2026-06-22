@@ -5,3 +5,9 @@ build:clang-tidy-only --aspects //build/tools/clang_tidy:clang_tidy.bzl%clang_ti
 
 # enable clang tidy check with all issues reported as warnings
 build:clang-tidy-warnings --config=clang-tidy --aspects_parameters=clang_tidy_args=--warnings-as-errors=-*
+
+# WIP/Experimental checks
+
+# Unsafe continuation captures: flags bare references, raw pointers, and
+# non-owning views captured into lambdas passed to async sinks.
+build:clang-tidy-unsafe-continuation-capture --config=clang-tidy --aspects_parameters=clang_tidy_args=--checks=workerd-unsafe-continuation-capture

@@ -1,8 +1,12 @@
-"""Workerd JSG clang-tidy plugin.
+"""Workerd clang-tidy plugin.
 
-`jsg-lint` is a clang-tidy module providing workerd-specific static checks
-(currently the `jsg-visit-for-gc` check that validates JSG resource types
-correctly visit their GC roots).
+`workerd-lint` is a clang-tidy module providing workerd-specific static checks:
+
+  - `jsg-visit-for-gc`: validates JSG resource types correctly visit their
+    GC roots.
+  - `workerd-unsafe-continuation-capture`: flags lambdas passed to async
+    sinks (e.g. kj::Promise::then) that capture bare references, raw
+    pointers, or non-owning views.
 
 The plugin is loaded into clang-tidy via `--load=<path>`. Symbols defined
 in the host clang-tidy binary (ClangTidyCheck vtable, ClangTidyModuleRegistry,
@@ -11,7 +15,7 @@ have been built with LLVM_ENABLE_PLUGINS=ON, CLANG_PLUGIN_SUPPORT=ON, and
 LLVM_ENABLE_RTTI=ON; the binary published by cloudflare/workerd-tools
 (version >= clang-tidy-22.1.5) meets all three.
 
-The source file is exported via `exports_files` so downstream projects can
+The source files are exported via `exports_files` so downstream projects can
 rebuild the plugin against their own clang/LLVM headers (e.g. linking
 against a system libclang rather than the workerd-tools dev archive).
 """
@@ -19,11 +23,25 @@ against a system libclang rather than the workerd-tools dev archive).
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 
-exports_files(["jsg-lint.c++"])
+exports_files([
+    "workerd-lint.c++",
+    "visit-for-gc.c++",
+    "visit-for-gc.h",
+    "unsafe-continuation-capture.c++",
+    "unsafe-continuation-capture.h",
+])
 
 cc_library(
-    name = "jsg-lint-static",
-    srcs = ["jsg-lint.c++"],
+    name = "workerd-lint-static",
+    srcs = [
+        "workerd-lint.c++",
+        "visit-for-gc.c++",
+        "unsafe-continuation-capture.c++",
+    ],
+    hdrs = [
+        "visit-for-gc.h",
+        "unsafe-continuation-capture.h",
+    ],
     copts = select({
         # workerd-tools clang-tidy links against libstdc++ on Linux; the
         # plugin must match. macOS uses libc++ (Apple default).
@@ -41,7 +59,7 @@ cc_library(
 )
 
 cc_shared_library(
-    name = "jsg-lint",
+    name = "workerd-lint",
     tags = ["manual"],
     target_compatible_with = select({
         "@platforms//os:linux": [],
@@ -61,5 +79,5 @@ cc_shared_library(
         ],
     }),
     visibility = ["//visibility:public"],
-    deps = [":jsg-lint-static"],
+    deps = [":workerd-lint-static"],
 )
