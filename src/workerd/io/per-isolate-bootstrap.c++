@@ -32,7 +32,7 @@ namespace {
 //     into the static capnp bundle data which lives for the process lifetime
 //   - C++ guarantees thread-safe initialization of function-local statics
 const kj::HashMap<kj::StringPtr, jsg::Module::Reader>& getScriptTable() {
-  static auto table = []() {
+  static const auto table = []() {
     jsg::Bundle::Reader bundle = PER_ISOLATE_BUNDLE;
     kj::HashMap<kj::StringPtr, jsg::Module::Reader> t;
     for (auto module: bundle.getModules()) {
