@@ -460,8 +460,18 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
     (TypeWrapperBase<Self, T>::initTypeWrapper(), ...);
   }
 
-  static TypeWrapper& from(v8::Isolate* isolate) {
-    return *reinterpret_cast<TypeWrapper*>(isolate->GetData(SET_DATA_TYPE_WRAPPER));
+  static Self& from(v8::Isolate* isolate) {
+    // Return a reference typed as the most-derived `Self` (e.g. `Foo_TypeWrapper`) rather than the
+    // `TypeWrapper<Self, ...>` base. Both refer to the same object -- the `TypeWrapper` base is at
+    // offset 0 within `Self` -- but the spelling matters enormously for debug info size.
+    //
+    // The type used for various wrapper mixins when calling unwrap is whatever the static type of
+    // the object expression is at the call site. If callers hold a `TypeWrapper<Self, ...>&`, then
+    // the fully-spelled base type -- which lists every API type registered with the isolate -- gets
+    // baked into the DWARF name (`DW_AT_name`/`DW_AT_linkage_name`) of every wrapper method
+    // instantiation. That string is ~20KB and is repeated across thousands of instantiations,
+    // adding tens of MB to `.debug_str`. Using the short-named `Self` keeps those names tiny.
+    return *reinterpret_cast<Self*>(isolate->GetData(SET_DATA_TYPE_WRAPPER));
   }
 
   bool isFastApiEnabled() const {
@@ -542,8 +552,12 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       v8::Local<v8::Value> handle,
       TypeErrorContext errorContext,
       kj::Maybe<v8::Local<v8::Object>> parentObject = kj::none) -> RemoveRvalueRef<U> {
+    // Dispatch through `Self&` (not the `TypeWrapper<Self, ...>` base) so that the `self` parameter
+    // of the wrapper methods will be the short-named final type. See the comment on `from()` for
+    // why this matters to debug info size.
+    auto& self = static_cast<Self&>(*this);
     auto maybe =
-        this->tryUnwrap(js, context, handle, static_cast<kj::Decay<U>*>(nullptr), parentObject);
+        self.tryUnwrap(js, context, handle, static_cast<kj::Decay<U>*>(nullptr), parentObject);
     KJ_IF_SOME(result, maybe) {
       return kj::fwd<RemoveMaybe<decltype(maybe)>>(result);
     } else {
@@ -668,6 +682,18 @@ class TypeWrapper<Self, Types...>::TypeHandlerImpl final: public TypeHandler<T> 
    public:                                                                                         \
     [[maybe_unused]] static constexpr bool trackCallCounts = false;                                \
     using Type##_TypeWrapperBase::TypeWrapper;                                                     \
+    /* Re-export the wrapper overload sets into the most-derived class. `TypeWrapper::from()` */   \
+    /* returns `Self&` (this class) so that the TypeWrapper type used in wrapper mixins maps to */ \
+    /* this short-named type rather than the full `TypeWrapper<Self, ...all types...>` base */     \
+    /* (which would bloat DWARF .debug_str). These using-declarations re-home the base's using- */ \
+    /* declared, non-deducing-this overloads onto this class, giving them an identity object- */   \
+    /* argument match. Without this, those overloads would lose to deducing-this overloads */      \
+    /* (which are not yet used in JSG yet but will be introduced soon and always deduce an */      \
+    /* identity `self`) and overload resolution would differ from calling through the base. */     \
+    using Type##_TypeWrapperBase::wrap;                                                            \
+    using Type##_TypeWrapperBase::tryUnwrap;                                                       \
+    using Type##_TypeWrapperBase::getName;                                                         \
+    using Type##_TypeWrapperBase::unwrap;                                                          \
   };                                                                                               \
   class Type final: public ::workerd::jsg::Isolate<Type##_TypeWrapper> {                           \
    public:                                                                                         \
@@ -682,6 +708,11 @@ class TypeWrapper<Self, Types...>::TypeHandlerImpl final: public TypeHandler<T> 
    public:                                                                                         \
     [[maybe_unused]] static constexpr bool trackCallCounts = true;                                 \
     using Type##_TypeWrapperBase::TypeWrapper;                                                     \
+    /* See the comment in JSG_DECLARE_ISOLATE_TYPE for why these are re-exported. */               \
+    using Type##_TypeWrapperBase::wrap;                                                            \
+    using Type##_TypeWrapperBase::tryUnwrap;                                                       \
+    using Type##_TypeWrapperBase::getName;                                                         \
+    using Type##_TypeWrapperBase::unwrap;                                                          \
   };                                                                                               \
   class Type final: public ::workerd::jsg::Isolate<Type##_TypeWrapper> {                           \
    public:                                                                                         \
