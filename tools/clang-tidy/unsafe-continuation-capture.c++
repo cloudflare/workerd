@@ -10,7 +10,6 @@
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/Basic/SourceManager.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -990,13 +989,15 @@ enum class Escape {
 
 // Forward decl.
 static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
-                              const std::vector<std::string> &extraSyncSinks);
+                              const std::vector<std::string> &extraSyncSinks,
+                              const std::vector<std::string> &extraAsyncSinks);
 
 // Forward decl.
 static Escape classifyVarDeclUses(const VarDecl *vd,
                                   const FunctionDecl *enclosingFn,
                                   ASTContext &Ctx, int depth,
-                                  const std::vector<std::string> &extraSyncSinks);
+                                  const std::vector<std::string> &extraSyncSinks,
+                                  const std::vector<std::string> &extraAsyncSinks);
 
 // Locate the FunctionDecl enclosing a given Decl by walking parents.
 static const FunctionDecl *enclosingFunctionOf(const Decl *d, ASTContext &Ctx) {
@@ -1058,7 +1059,8 @@ static bool classifyContainerReceiverMethod(llvm::StringRef name,
 static Escape classifyVarDeclUses(const VarDecl *vd,
                                   const FunctionDecl *enclosingFn,
                                   ASTContext &Ctx, int depth,
-                                  const std::vector<std::string> &extraSyncSinks) {
+                                  const std::vector<std::string> &extraSyncSinks,
+                                  const std::vector<std::string> &extraAsyncSinks) {
   static thread_local llvm::SmallPtrSet<const VarDecl *, 8> inProgress;
   if (!enclosingFn || !enclosingFn->getBody())
     return Escape::Escapes;
@@ -1085,7 +1087,7 @@ static Escape classifyVarDeclUses(const VarDecl *vd,
   }
   bool sawStored = false;
   for (const auto *use : it->second) {
-    Escape e = classifyExprUse(use, Ctx, depth + 1, extraSyncSinks);
+    Escape e = classifyExprUse(use, Ctx, depth + 1, extraSyncSinks, extraAsyncSinks);
     if (e == Escape::Escapes) {
       return Escape::Escapes;
     }
@@ -1100,7 +1102,8 @@ static Escape classifyVarDeclUses(const VarDecl *vd,
 // recursion (cycles aren't possible in well-formed ASTs, but
 // instantiation can produce deep parent chains).
 static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
-                              const std::vector<std::string> &extraSyncSinks) {
+                              const std::vector<std::string> &extraSyncSinks,
+                              const std::vector<std::string> &extraAsyncSinks) {
   if (depth > 32)
     return Escape::Escapes;
   if (!e)
@@ -1146,7 +1149,7 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
             }
             break;
           }
-          return classifyVarDeclUses(vd, enclosingFn, Ctx, depth + 1, extraSyncSinks);
+          return classifyVarDeclUses(vd, enclosingFn, Ctx, depth + 1, extraSyncSinks, extraAsyncSinks);
         }
         // Non-local VarDecl (e.g. static/global/member). Escapes.
         return Escape::Escapes;
@@ -1320,7 +1323,7 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
                 }
                 break;
               }
-              return classifyVarDeclUses(vd, enclosingFn, Ctx, depth + 1, extraSyncSinks);
+              return classifyVarDeclUses(vd, enclosingFn, Ctx, depth + 1, extraSyncSinks, extraAsyncSinks);
             }
           }
         }
@@ -1394,7 +1397,7 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
               if (const auto *vd = dyn_cast<VarDecl>(dre->getDecl())) {
                 if (vd->isLocalVarDecl()) {
                   return classifyVarDeclUses(
-                      vd, enclosingFunctionOf(vd, Ctx), Ctx, depth + 1, extraSyncSinks);
+                      vd, enclosingFunctionOf(vd, Ctx), Ctx, depth + 1, extraSyncSinks, extraAsyncSinks);
                 }
               }
             }
@@ -1433,7 +1436,7 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
         }
         if (qn.empty())
           qn = md->getQualifiedNameAsString();
-        if (isAsyncSink(qn, /*extras=*/{})) {
+        if (isAsyncSink(qn, extraAsyncSinks)) {
           current = mce;
           continue;
         }
@@ -1499,7 +1502,7 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
                 }
                 break;
               }
-              return classifyVarDeclUses(vd, enclosingFn, Ctx, depth + 1, extraSyncSinks);
+              return classifyVarDeclUses(vd, enclosingFn, Ctx, depth + 1, extraSyncSinks, extraAsyncSinks);
             }
             return Escape::Escapes;
           }
@@ -1545,7 +1548,7 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
                 }
                 break;
               }
-              return classifyVarDeclUses(vd, enclosingFn, Ctx, depth + 1, extraSyncSinks);
+              return classifyVarDeclUses(vd, enclosingFn, Ctx, depth + 1, extraSyncSinks, extraAsyncSinks);
             }
           }
         }
@@ -1593,8 +1596,9 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
 }
 
 static Escape promiseEscape(const CallExpr *Call, ASTContext &Ctx,
-                            const std::vector<std::string> &extraSyncSinks) {
-  return classifyExprUse(Call, Ctx, 0, extraSyncSinks);
+                            const std::vector<std::string> &extraSyncSinks,
+                            const std::vector<std::string> &extraAsyncSinks) {
+  return classifyExprUse(Call, Ctx, 0, extraSyncSinks, extraAsyncSinks);
 }
 
 } // namespace
@@ -1733,7 +1737,7 @@ void UnsafeContinuationCaptureCheck::check(
   // if the resulting promise is locally consumed (`.wait()`-ed,
   // `co_await`-ed, or used only by other locally-consumed promises), the
   // captures cannot outlive the current function activation. Suppress.
-  Escape escape = promiseEscape(Call, *Result.Context, ExtraSyncSinks);
+  Escape escape = promiseEscape(Call, *Result.Context, ExtraSyncSinks, ExtraSinks);
   if (escape == Escape::Local) {
     return;
   }
