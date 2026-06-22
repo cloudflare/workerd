@@ -202,7 +202,8 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
       // capnp bundle for the lifetime of the process.
       auto sourceStr = js.strExtern(source.asChars());
 #endif
-      v8::ScriptOrigin origin(js.strIntern(normalized));
+      auto originName = kj::str("workerd:per-isolate/", normalized);
+      v8::ScriptOrigin origin(js.strIntern(originName));
 
       // Use the compile cache from the bundle if available and compatible.
       v8::ScriptCompiler::CachedData* cachedData = nullptr;
