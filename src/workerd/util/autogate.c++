@@ -35,6 +35,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "hibernatable-websocket-refactor"_kj;
     case AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP:
       return "per-isolate-javascript-bootstrap"_kj;
+    case AutogateKey::DURABLE_OBJECT_RETRIES_FETCH:
+      return "durable-object-retries-fetch"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

@@ -41,6 +41,9 @@ enum class AutogateKey {
   HIBERNATABLE_WEBSOCKET_REFACTOR,
   // When enabled, turns on per-isolate TypeScript/JavaScript bootstrap
   PER_ISOLATE_JAVASCRIPT_BOOTSTRAP,
+  // Gate for the Durable Object fetch-retries feature, scoped to DO `fetch()`. Enables the
+  // retry-token claim machinery.
+  DURABLE_OBJECT_RETRIES_FETCH,
   NumOfKeys  // Reserved for iteration.
 };
 
