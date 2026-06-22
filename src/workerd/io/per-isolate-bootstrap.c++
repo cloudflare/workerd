@@ -12,7 +12,6 @@
 
 #include <per_isolate/per_isolate.capnp.h>
 
-// In per-isolate-bootstrap.c++, add at the top:
 #if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
 #include <sanitizer/lsan_interface.h>
 #endif
