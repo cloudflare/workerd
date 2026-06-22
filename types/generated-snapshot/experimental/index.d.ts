@@ -4044,6 +4044,7 @@ interface ContainerStartupOptions {
 }
 interface ContainerInfo {
   labels: Record<string, string>;
+  image: string;
 }
 /**
  * The **`FileSystemHandle`** interface of the File System API is an object which represents a file or directory entry.
