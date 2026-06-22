@@ -161,10 +161,15 @@ bool SqliteKv::delete_(KeyPtr key) {
 }
 
 bool SqliteKv::delete_(KeyPtr key, WriteOptions options) {
-  auto query = ensureInitialized(options.allowUnconfirmed)
-                   .stmtDelete.run({.allowUnconfirmed = options.allowUnconfirmed}, key);
+  bool result;
+  {
+    auto query = ensureInitialized(options.allowUnconfirmed)
+                     .stmtDelete.run({.allowUnconfirmed = options.allowUnconfirmed}, key);
+    result = query.changeCount() > 0;
+  }
+
   clearExternalsIfPresent(key);
-  return query.changeCount() > 0;
+  return result;
 }
 
 void SqliteKv::clearExternalsIfPresent(KeyPtr key) {
