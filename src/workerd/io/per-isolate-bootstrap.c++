@@ -51,7 +51,7 @@ struct CompatFlagField {
 };
 
 const kj::ArrayPtr<const CompatFlagField> getCompatFlagFields() {
-  static auto table = []() {
+  static const auto table = []() {
     auto schema = capnp::Schema::from<CompatibilityFlags>();
     kj::Vector<CompatFlagField> fields;
     for (auto field: schema.getFields()) {
