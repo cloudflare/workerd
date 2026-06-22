@@ -47,21 +47,18 @@ void PyodideBundleManager::setPyodideBundleData(
       kj::mv(version), {.messageReader = kj::mv(messageReader), .bundle = bundle});
 }
 
-static int readToTarget(
-    kj::ArrayPtr<const kj::byte> source, int offset, kj::ArrayPtr<kj::byte> buf) {
-  int size = source.size();
-  if (offset >= size || offset < 0) {
+static uint32_t readToTarget(
+    kj::ArrayPtr<const kj::byte> source, uint64_t offset, kj::ArrayPtr<kj::byte> buf) {
+  size_t size = source.size();
+  if (offset >= size) {
     return 0;
   }
-  int toCopy = buf.size();
-  if (size - offset < toCopy) {
-    toCopy = size - offset;
-  }
+  size_t toCopy = kj::min(buf.size(), size - offset);
   memcpy(buf.begin(), source.begin() + offset, toCopy);
   return toCopy;
 }
 
-int ReadOnlyBuffer::read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf) {
+uint32_t ReadOnlyBuffer::read(jsg::Lock& js, uint64_t offset, kj::Array<kj::byte> buf) {
   return readToTarget(source, offset, buf);
 }
 
@@ -129,30 +126,31 @@ kj::HashSet<kj::String> PythonModuleInfo::getWorkerModuleSet() {
   return result;
 }
 
-kj::Array<int> PyodideMetadataReader::getSizes(jsg::Lock& js) {
-  auto builder = kj::heapArrayBuilder<int>(state->moduleInfo.names.size());
+kj::Array<uint32_t> PyodideMetadataReader::getSizes(jsg::Lock& js) {
+  auto builder = kj::heapArrayBuilder<uint32_t>(state->moduleInfo.names.size());
   for (auto i: kj::zeroTo(builder.capacity())) {
     builder.add(state->moduleInfo.contents[i].size());
   }
   return builder.finish();
 }
 
-int PyodideMetadataReader::read(jsg::Lock& js, int index, int offset, kj::Array<kj::byte> buf) {
-  if (index >= state->moduleInfo.contents.size() || index < 0) {
+uint32_t PyodideMetadataReader::read(
+    jsg::Lock& js, uint64_t index, uint64_t offset, kj::Array<kj::byte> buf) {
+  if (index >= state->moduleInfo.contents.size()) {
     return 0;
   }
   auto& data = state->moduleInfo.contents[index];
   return readToTarget(data, offset, buf);
 }
 
-int PyodideMetadataReader::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
+uint32_t PyodideMetadataReader::readMemorySnapshot(uint64_t offset, kj::Array<kj::byte> buf) {
   if (state->memorySnapshot == kj::none) {
     return 0;
   }
   return readToTarget(KJ_REQUIRE_NONNULL(state->memorySnapshot), offset, buf);
 }
 
-int ArtifactBundler::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
+uint32_t ArtifactBundler::readMemorySnapshot(uint64_t offset, kj::Array<kj::byte> buf) {
   if (inner->existingSnapshot == kj::none) {
     return 0;
   }

@@ -61,7 +61,7 @@ class ReadOnlyBuffer: public jsg::Object {
  public:
   ReadOnlyBuffer(kj::ArrayPtr<const kj::byte> src): source(src) {};
 
-  int read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf);
+  uint32_t read(jsg::Lock& js, uint64_t offset, kj::Array<kj::byte> buf);
 
   JSG_RESOURCE_TYPE(ReadOnlyBuffer) {
     JSG_METHOD(read);
@@ -213,24 +213,26 @@ class PyodideMetadataReader: public jsg::Object {
   // file extension.
   // TODO: Remove this.
   kj::Array<kj::StringPtr> getNames(jsg::Lock& js, jsg::Optional<kj::String> maybeExtFilter);
-  kj::Array<int> getSizes(jsg::Lock& js);
+  kj::Array<uint32_t> getSizes(jsg::Lock& js);
 
-  int read(jsg::Lock& js, int index, int offset, kj::Array<kj::byte> buf);
+  uint32_t read(jsg::Lock& js, uint64_t index, uint64_t offset, kj::Array<kj::byte> buf);
 
   bool hasMemorySnapshot() {
     return state->memorySnapshot != kj::none;
   }
-  int getMemorySnapshotSize() {
+  uint32_t getMemorySnapshotSize() {
     if (state->memorySnapshot == kj::none) {
       return 0;
     }
-    return KJ_REQUIRE_NONNULL(state->memorySnapshot).size();
+    auto size = KJ_REQUIRE_NONNULL(state->memorySnapshot).size();
+    KJ_REQUIRE(size <= static_cast<uint32_t>(kj::maxValue), "memory snapshot too large");
+    return size;
   }
 
   void disposeMemorySnapshot() {
     state->memorySnapshot = kj::none;
   }
-  int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
+  uint32_t readMemorySnapshot(uint64_t offset, kj::Array<kj::byte> buf);
 
   kj::StringPtr getPyodideVersion() {
     return state->pyodideVersion;
@@ -352,14 +354,16 @@ class ArtifactBundler: public jsg::Object {
     return inner->existingSnapshot != kj::none;
   }
 
-  int getMemorySnapshotSize() {
+  uint32_t getMemorySnapshotSize() {
     if (inner->existingSnapshot == kj::none) {
       return 0;
     }
-    return KJ_REQUIRE_NONNULL(inner->existingSnapshot).size();
+    auto size = KJ_REQUIRE_NONNULL(inner->existingSnapshot).size();
+    KJ_REQUIRE(size <= static_cast<uint32_t>(kj::maxValue), "memory snapshot too large");
+    return size;
   }
 
-  int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
+  uint32_t readMemorySnapshot(uint64_t offset, kj::Array<kj::byte> buf);
   void disposeMemorySnapshot() {
     inner->existingSnapshot = kj::none;
   }
