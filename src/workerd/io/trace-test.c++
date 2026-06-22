@@ -441,7 +441,7 @@ KJ_TEST("Read/Write Log works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Log>();
 
-  Log info(kj::UNIX_EPOCH, LogLevel::INFO, kj::str("foo"));
+  Log info(kj::UNIX_EPOCH, LogLevel::INFO, kj::str("foo"), kj::none, LogTruncated::YES);
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
@@ -449,11 +449,13 @@ KJ_TEST("Read/Write Log works") {
   KJ_ASSERT(info.timestamp == info2.timestamp);
   KJ_ASSERT(info2.logLevel == LogLevel::INFO);
   KJ_ASSERT(info2.message == "foo"_kj);
+  KJ_ASSERT(info2.truncated);
 
   Log info3 = info.clone();
   KJ_ASSERT(info.timestamp == info3.timestamp);
   KJ_ASSERT(info3.logLevel == LogLevel::INFO);
   KJ_ASSERT(info3.message == "foo"_kj);
+  KJ_ASSERT(info3.truncated);
 }
 
 KJ_TEST("Read/Write Exception works") {

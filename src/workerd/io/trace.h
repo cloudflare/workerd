@@ -9,6 +9,7 @@
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/memory.h>
 #include <workerd/util/own-util.h>
+#include <workerd/util/strong-bool.h>
 
 #include <kj/map.h>
 #include <kj/one-of.h>
@@ -36,6 +37,8 @@ using ExecutionModel = rpc::Trace::ExecutionModel;
 class Trace;
 
 namespace tracing {
+WD_STRONG_BOOL(LogTruncated);
+
 // A 128-bit globally unique trace identifier. This will be used for both
 // external and internal tracing. Specifically, for internal tracing, this
 // is used to represent tracing IDs for jaeger traces. For external tracing,
@@ -647,8 +650,11 @@ LogErrorInfo cloneLogErrorInfo(const LogErrorInfo& src);
 
 // Describes a log event
 struct Log final {
-  explicit Log(
-      kj::Date timestamp, LogLevel logLevel, kj::String message, LogErrorInfo errorInfo = kj::none);
+  explicit Log(kj::Date timestamp,
+      LogLevel logLevel,
+      kj::String message,
+      LogErrorInfo errorInfo = kj::none,
+      LogTruncated truncated = LogTruncated::NO);
   Log(rpc::Trace::Log::Reader reader);
   Log(Log&&) noexcept = default;
   KJ_DISALLOW_COPY(Log);
@@ -660,6 +666,7 @@ struct Log final {
   LogLevel logLevel;
   // TODO(soon): Just string for now.  Eventually, capture serialized JS objects.
   kj::String message;
+  bool truncated;
 
   // Per-argument structured Error fields. See LogErrorInfo above for semantics.
   LogErrorInfo errorInfo;

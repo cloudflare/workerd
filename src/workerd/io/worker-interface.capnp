@@ -91,6 +91,11 @@ struct Trace @0x8e8d911203762d34 {
     #
     # The stringified form of the arguments remains in `message` unchanged for
     # backwards compatibility.
+
+    truncated @4 :Bool;
+    # True if `message` was truncated because it exceeded the maximum trace size. When set, the
+    # streaming tail worker receives `message` as a raw string rather than parsed JSON, since a
+    # truncated payload is no longer valid JSON.
   }
 
   struct ErrorInfo {

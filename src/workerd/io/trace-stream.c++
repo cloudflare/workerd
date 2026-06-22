@@ -95,6 +95,7 @@ namespace {
   V(TRACEID, "traceId")                                                                            \
   V(TRACE, "trace")                                                                                \
   V(TRACES, "traces")                                                                              \
+  V(TRUNCATED, "truncated")                                                                        \
   V(TYPE, "type")                                                                                  \
   V(UNKNOWN, "unknown")                                                                            \
   V(URL, "url")                                                                                    \
@@ -521,8 +522,15 @@ jsg::JsValue ToJs(jsg::Lock& js, const Log& log, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, LOG_STR));
   obj.set(js, LEVEL_STR, ToJs(js, log.logLevel, cache));
-  // TODO(o11y): Check that we are always returning an object here
-  obj.set(js, MESSAGE_STR, jsg::JsValue(js.parseJson(log.message).getHandle(js)));
+  if (log.truncated) {
+    // Expose truncated JSON to the receiver as a raw string. Emitted only when true; absence
+    // means not truncated.
+    obj.set(js, MESSAGE_STR, js.str(log.message));
+    obj.set(js, TRUNCATED_STR, js.boolean(true));
+  } else {
+    // TODO(o11y): Check that we are always returning an object here
+    obj.set(js, MESSAGE_STR, jsg::JsValue(js.parseJson(log.message).getHandle(js)));
+  }
   KJ_IF_SOME(slots, log.errorInfo) {
     // Emit as a positional JS array: each slot is either { name, message, stack? }
     // for arguments that were native Errors, or `null` for non-Error arguments.

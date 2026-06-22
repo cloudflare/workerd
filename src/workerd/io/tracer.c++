@@ -18,8 +18,6 @@ namespace {
 // want this number to be big enough to be useful for tracing, but small enough to make it hard to
 // DoS the C++ heap -- keeping in mind we can record a trace per handler run during a request. For
 // streaming tail worker, this is the maximum size per tail event.
-// TODO(streaming-tail): Add a clear indicator for events being truncated based on MAX_TRACE_BYTES
-// so that developers can understand why this happens.
 static constexpr size_t MAX_TRACE_BYTES = 256 * 1024;
 
 tracing::Attribute::Value cloneAttributeValue(const tracing::Attribute::Value& value) {
@@ -145,13 +143,16 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
   // to the buffered trace object is not needed; this will be addressed in a future refactor.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    // If message is too big on its own, truncate it.
+    // If message is too big on its own, truncate it. A truncated message is no longer valid JSON,
+    // so signal truncation to the receiver, which then exposes it as a raw string.
     size_t messageSize = kj::min(message.size(), MAX_TRACE_BYTES);
+    auto truncated =
+        message.size() > MAX_TRACE_BYTES ? tracing::LogTruncated::YES : tracing::LogTruncated::NO;
     // Clone errorInfo for the STW path because the batched-tail path below also needs it.
     auto streamErrorInfo = tracing::cloneLogErrorInfo(errorInfo);
     writer->report(context,
-        {tracing::Log(
-            timestamp, logLevel, kj::str(message.first(messageSize)), kj::mv(streamErrorInfo))},
+        {tracing::Log(timestamp, logLevel, kj::str(message.first(messageSize)),
+            kj::mv(streamErrorInfo), truncated)},
         timestamp, messageSize + errorInfoSize);
   }
 
