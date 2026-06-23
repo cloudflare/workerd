@@ -24,7 +24,7 @@ Macro-driven C++/V8 binding layer: declares C++ types as JS-visible resources/st
 | `rtti.capnp`     | Cap'n Proto schema for type introspection; consumed by `types/` for TS generation                                           |
 | `rtti.h`         | C++ RTTI builder: walks JSG type graph → `rtti.capnp` structures                                                            |
 | `jsvalue.h`      | `JsValue`, `JsObject`, `JsString`, etc. — typed wrappers over `v8::Value`                                                   |
-| `type-wrapper.h` | `TypeWrapper` template: compile-time dispatch for C++ ↔ V8 conversions                                                     |
+| `type-wrapper.h` | `TypeWrapper` template: compile-time dispatch for C++ ↔ V8 conversions; `SelfConvertible` concept for self-converting types |
 | `meta.h`         | Argument unwrapping, `ArgumentContext`, parameter pack metaprogramming                                                      |
 | `unwrap-args.h`  | `UnwrappedArgs` helper: deterministic left-to-right argument unwrapping in V8 callbacks                                     |
 | `fast-api.h`     | V8 Fast API call optimizations                                                                                              |
