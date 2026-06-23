@@ -612,6 +612,8 @@ export class DurableObjectExample extends DurableObject {
 
     assert.strictEqual(container.running, false);
 
+    const maxName = 'n'.repeat(16);
+    const maxValue = 'v'.repeat(64);
     const labels = {
       team: 'workers',
       environment: 'testing',
@@ -619,6 +621,8 @@ export class DurableObjectExample extends DurableObject {
       'workerd-foo': 'bar',
       kv: 'a=b=c',
       emoji: '🧪',
+      [maxName]: 'max-name',
+      maxvalue: maxValue,
     };
     container.start({ enableInternet: true, labels });
 
@@ -708,6 +712,28 @@ export class DurableObjectExample extends DurableObject {
     // Empty label name
     assert.throws(() => container.start({ labels: { '': 'value' } }), {
       message: /Label names cannot be empty/,
+    });
+
+    // Too many labels
+    assert.throws(
+      () =>
+        container.start({
+          labels: Object.fromEntries(
+            Array.from({ length: 11 }, (_, i) => [`l${i}`, 'v'])
+          ),
+        }),
+      { message: /Cannot specify more than 10 container labels/ }
+    );
+
+    // Label name over 16 bytes
+    assert.throws(
+      () => container.start({ labels: { ['n'.repeat(17)]: 'value' } }),
+      { message: /Label names cannot exceed 16 bytes \(index 0\)/ }
+    );
+
+    // Label value over 64 bytes
+    assert.throws(() => container.start({ labels: { name: 'v'.repeat(65) } }), {
+      message: /Label values cannot exceed 64 bytes \(index 0\)/,
     });
 
     // Label name with control character
@@ -872,6 +898,27 @@ export class DurableObjectExample extends DurableObject {
     // Empty label name
     assert.throws(() => container.setLabels({ '': 'value' }), {
       message: /Label names cannot be empty/,
+    });
+
+    // Too many labels
+    assert.throws(
+      () =>
+        container.setLabels(
+          Object.fromEntries(
+            Array.from({ length: 11 }, (_, i) => [`l${i}`, 'v'])
+          )
+        ),
+      { message: /Cannot specify more than 10 container labels/ }
+    );
+
+    // Label name over 16 bytes
+    assert.throws(() => container.setLabels({ ['n'.repeat(17)]: 'value' }), {
+      message: /Label names cannot exceed 16 bytes \(index 0\)/,
+    });
+
+    // Label value over 64 bytes
+    assert.throws(() => container.setLabels({ name: 'v'.repeat(65) }), {
+      message: /Label values cannot exceed 64 bytes \(index 0\)/,
     });
 
     // Label name with control character

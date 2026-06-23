@@ -64,10 +64,20 @@ kj::Array<kj::byte> emptyByteArray() {
   return kj::heapArray<kj::byte>(0);
 }
 
+constexpr size_t MAX_CONTAINER_LABELS = 10;
+constexpr size_t MAX_CONTAINER_LABEL_NAME_BYTES = 16;
+constexpr size_t MAX_CONTAINER_LABEL_VALUE_BYTES = 64;
+
 void requireValidLabels(const jsg::Dict<kj::String>& labels) {
+  JSG_REQUIRE(labels.fields.size() <= MAX_CONTAINER_LABELS, Error, "Cannot specify more than ",
+      MAX_CONTAINER_LABELS, " container labels");
   for (auto i: kj::indices(labels.fields)) {
     const auto& field = labels.fields[i];
     JSG_REQUIRE(field.name.size() > 0, Error, "Label names cannot be empty");
+    JSG_REQUIRE(field.name.size() <= MAX_CONTAINER_LABEL_NAME_BYTES, Error,
+        "Label names cannot exceed ", MAX_CONTAINER_LABEL_NAME_BYTES, " bytes (index ", i, ")");
+    JSG_REQUIRE(field.value.size() <= MAX_CONTAINER_LABEL_VALUE_BYTES, Error,
+        "Label values cannot exceed ", MAX_CONTAINER_LABEL_VALUE_BYTES, " bytes (index ", i, ")");
     for (auto c: field.name) {
       JSG_REQUIRE(static_cast<kj::byte>(c) >= 0x20, Error,
           "Label names cannot contain control characters (index ", i, ")");
