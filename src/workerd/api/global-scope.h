@@ -635,6 +635,25 @@ class Immediate final: public jsg::Object {
   TimeoutId timeoutId;
 };
 
+// The signals consumed by alarmRetryCountsAgainstLimit(), gathered in runAlarm().
+struct AlarmRetryFailureInfo {
+  // Output gate broke, i.e. a storage commit failed (IoContext::isOutputGateBroken()).
+  bool outputGateBroken;
+  // Failure is the worker's fault (isAlarmFailureUserError()).
+  bool isUserError;
+  // A CPU/memory/wall-time limit was exceeded (LimitEnforcer::getLimitsExceeded()).
+  bool resourceLimitExceeded;
+};
+
+// Whether a failed alarm's retry counts against the retry limit (true: abandon after a few tries;
+// false: retry forever). Only an unattributable broken gate retries forever; everything else counts.
+// resourceLimitExceeded matters because the CPU limiter can interrupt an in-flight SQLite query
+// (SQLITE_INTERRUPT), breaking the gate with a non-user error that's really the worker's fault, so
+// we count it instead of retrying forever (STOR-5337).
+constexpr bool alarmRetryCountsAgainstLimit(AlarmRetryFailureInfo info) {
+  return !info.outputGateBroken || info.isUserError || info.resourceLimitExceeded;
+}
+
 // Global object API exposed to JavaScript.
 class ServiceWorkerGlobalScope: public WorkerGlobalScope {
  public:
