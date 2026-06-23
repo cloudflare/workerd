@@ -708,15 +708,12 @@ jsg::Ref<AbortSignal> AbortSignal::any(jsg::Lock& js,
     // jsg::Identified<EventTarget::Handler>, which we can't create directly yet.
     // So we create a jsg::Function, wrap that in a v8::Function, then convert that into
     // the jsg::Identified<EventTarget::Handler>, and voila, we have what we need.
-    auto fn = js.wrapSimpleFunction(
-        js.v8Context(), [&signal = *signal, &self = *sig](jsg::Lock& js, auto&) {
-      // Note that we are not capturing any strong references here to either signal
-      // or sig. This is because we are capturing a strong reference to the signal
-      // when we add the event below. This ensures that we do not have an unbreakable
-      // circular reference. The returned signal will not have any strong references
-      // to any of the signals that are passed in, but each of the signals passed in
-      // will have a strong reference to the new signal.
-      signal.triggerAbort(js, self.getReason(js));
+    auto fn = js.wrapSimpleFunction(js.v8Context(),
+        [signal = signal.addRef(), self = sig.getWeakRef(js)](jsg::Lock& js, auto&) mutable {
+      // Keep the returned signal alive while this listener is running. EventTarget removes
+      // once-handlers before invocation, which otherwise drops `followingSignal` before nested
+      // JS/V8 work in triggerAbort() can run GC.
+      signal->triggerAbort(js, self->getReason(js));
     });
     jsg::Identified<EventTarget::Handler> identified = {.identity = {js.v8Isolate, fn},
       .unwrapped = JSG_REQUIRE_NONNULL(handler.tryUnwrap(js, fn.As<v8::Value>()), TypeError,
