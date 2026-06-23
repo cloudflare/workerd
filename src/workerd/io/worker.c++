@@ -2256,18 +2256,24 @@ void Worker::handleLog(jsg::Lock& js,
           auto arg = info[i];
           if (!arg->IsNativeError()) continue;
 
-          // A property accessor on the error may throw (e.g. user code defines `stack` as a
-          // throwing getter). console.* must not throw, so catch that and skip this argument,
-          // rethrowing only if the isolate is terminating (not a recoverable error).
+          // Reading the error's properties may throw an application-level JS exception (e.g. user
+          // code defines `stack`/`message` as a throwing getter). JSG_CATCH still rethrows
+          // automatically if the isolate is terminating, so only recoverable JS exceptions land in
+          // the handler below.
           kj::Maybe<tracing::ErrorInfo> extracted;
-          v8::TryCatch argTryCatch(js.v8Isolate);
-          try {
-            js.withinHandleScope(
-                [&] { extracted = getErrorInfoForTrace(js, jsg::JsValue(arg), errorTypeHandler); });
-          } catch (jsg::JsExceptionThrown&) {
-            if (!argTryCatch.CanContinue()) {
-              throw;
-            }
+          JSG_TRY(js) {
+            // Fresh handle scope so the temporary handles created while reading the error's
+            // properties are released each iteration rather than accumulating across the loop.
+            v8::HandleScope handleScope(js.v8Isolate);
+            extracted = getErrorInfoForTrace(js, jsg::JsValue(arg), errorTypeHandler);
+          }
+          JSG_CATCH(_) {
+            // Deliberately swallow the exception because:
+            //   - console.* must not throw
+            //   - errorInfo is purely additive/best-effort. If it fails to parse,
+            //     the argument is still stringified
+            //   - We don't log the failure to mirror the silent fallback
+            //     in getErrorInfoForTrace's stringify path.
           }
 
           KJ_IF_SOME(e, extracted) {

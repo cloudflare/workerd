@@ -39,6 +39,16 @@ export default {
       new TypeError('second')
     );
 
+    // 6. Native Error whose `stack` getter throws. Extraction must be skipped
+    //    for that arg while a normal Error in the same call is still captured.
+    const throwingStack = new Error('explode');
+    Object.defineProperty(throwingStack, 'stack', {
+      get() {
+        throw new Error('stack getter blew up');
+      },
+    });
+    console.error(throwingStack, new TypeError('survivor'));
+
     return new Response('ok');
   },
 
@@ -66,11 +76,11 @@ export const test = {
     assert.ok(capturedLogs, 'tail handler was never called');
     assert.strictEqual(
       capturedLogs.length,
-      5,
-      `expected 5 log entries, got ${capturedLogs.length}`
+      6,
+      `expected 6 log entries, got ${capturedLogs.length}`
     );
 
-    const [plain, typeErr, ctxRange, fakeErr, mixed] = capturedLogs;
+    const [plain, typeErr, ctxRange, fakeErr, mixed, throwy] = capturedLogs;
 
     // 1. No Errors anywhere: field absent entirely.
     assert.strictEqual(
@@ -126,6 +136,16 @@ export const test = {
     assert.ok(mixed.errorInfo[3]);
     assert.strictEqual(mixed.errorInfo[3].name, 'TypeError');
     assert.strictEqual(mixed.errorInfo[3].message, 'second');
+
+    // 6. Error with a throwing `stack` getter: extraction throws and is
+    //    swallowed, so slot 0 is null, but the request still completed and
+    //    the sibling Error in slot 1 is captured normally.
+    assert.ok(Array.isArray(throwy.errorInfo));
+    assert.strictEqual(throwy.errorInfo.length, 2);
+    assert.strictEqual(throwy.errorInfo[0], null);
+    assert.ok(throwy.errorInfo[1]);
+    assert.strictEqual(throwy.errorInfo[1].name, 'TypeError');
+    assert.strictEqual(throwy.errorInfo[1].message, 'survivor');
 
     // Backwards compat: existing message field still present and an object.
     assert.strictEqual(typeof typeErr.message, 'object');
