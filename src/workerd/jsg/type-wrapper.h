@@ -210,6 +210,68 @@ class UnimplementedWrapper {
   }
 };
 
+// A type T is SelfConvertible if it defines static wrap() and tryUnwrap() methods that handle
+// its own conversion to/from JavaScript values. This lets value types opt into JSG type
+// conversion without being registered in JSG_DECLARE_ISOLATE_TYPE or needing a dedicated
+// wrapper mixin.
+//
+// The static methods receive the TypeWrapper instance (as auto&) so they can recursively
+// convert inner types if needed.
+//
+// To opt in, define:
+//
+//     struct MyType {
+//       static v8::Local<v8::Value> jsgWrap(auto& typeWrapper, Lock& js,
+//           v8::Local<v8::Context> context,
+//           kj::Maybe<v8::Local<v8::Object>> creator, MyType value);
+//       static kj::Maybe<MyType> jsgTryUnwrap(auto& typeWrapper, Lock& js,
+//           v8::Local<v8::Context> context,
+//           v8::Local<v8::Value> handle,
+//           kj::Maybe<v8::Local<v8::Object>> parentObject);
+//     };
+template <typename T>
+concept SelfConvertible = requires(Lock& js,
+    v8::Local<v8::Context> ctx,
+    kj::Maybe<v8::Local<v8::Object>> creator,
+    T value,
+    v8::Local<v8::Value> handle,
+    kj::Maybe<v8::Local<v8::Object>> parent,
+    int& dummyWrapper) {
+  {
+    T::jsgWrap(dummyWrapper, js, ctx, creator, kj::mv(value))
+  } -> std::convertible_to<v8::Local<v8::Value>>;
+  { T::jsgTryUnwrap(dummyWrapper, js, ctx, handle, parent) } -> std::same_as<kj::Maybe<T>>;
+};
+
+// TypeWrapper mixin for SelfConvertible types.
+//
+// Detects types that define their own static jsgWrap()/jsgTryUnwrap() methods and delegates to
+// them. Uses CRTP to pass the full TypeWrapper as the first argument, giving the type access to
+// the complete overload set for recursive conversion of inner types.
+template <typename TypeWrapper>
+class SelfUnwrap {
+ public:
+  template <SelfConvertible T>
+  static constexpr const std::type_info& getName(T*) {
+    return typeid(T);
+  }
+
+  template <SelfConvertible T>
+  v8::Local<v8::Value> wrap(
+      Lock& js, v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, T value) {
+    return T::jsgWrap(static_cast<TypeWrapper&>(*this), js, context, creator, kj::mv(value));
+  }
+
+  template <SelfConvertible T>
+  kj::Maybe<T> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      T*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    return T::jsgTryUnwrap(static_cast<TypeWrapper&>(*this), js, context, handle, parentObject);
+  }
+};
+
 // The application can use this type to extend TypeWrapper with its own custom mixins. The
 // template `Extension` is a mixin which will be inherited by the TypeWrapper. It will be passed
 // the full TypeWrapper specialization as a type parameter. See TypeWrapper, below, for an
@@ -440,6 +502,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public SelfRefWrapper,
                    public ExceptionWrapper<Self>,
                    public ObjectWrapper<Self>,
+                   public SelfUnwrap<Self>,
                    public V8HandleWrapper,
                    public UnimplementedWrapper,
                    public JsValueWrapper {
@@ -511,6 +574,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   USING_WRAPPER(MemoizedIdentityWrapper<Self>);
   USING_WRAPPER(IdentifiedWrapper<Self>);
   USING_WRAPPER(SelfRefWrapper);
+  USING_WRAPPER(SelfUnwrap<Self>);
   USING_WRAPPER(ExceptionWrapper<Self>);
   USING_WRAPPER(ObjectWrapper<Self>);
   USING_WRAPPER(V8HandleWrapper);
