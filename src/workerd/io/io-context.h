@@ -974,6 +974,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     getIoChannelFactory().deleteAllActors(reason);
   }
 
+  // Test-only: gracefully evict all currently-running actors. See
+  // IoChannelFactory::evictAllActorsForTest().
+  kj::Promise<void> evictAllActorsForTest(IoChannelFactory::EvictWebSocketMode webSocketMode) {
+    return getIoChannelFactory().evictAllActorsForTest(webSocketMode);
+  }
+
   // Condemn and terminate JS isolate
   void abortIsolate(kj::StringPtr reason = nullptr);
 

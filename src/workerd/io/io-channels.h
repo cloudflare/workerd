@@ -99,6 +99,11 @@ struct DynamicWorkerSource;
 // anything in the world except for the client -- this is a useful property for sandboxing!
 class IoChannelFactory {
  public:
+  enum class EvictWebSocketMode {
+    HIBERNATE,
+    CLOSE,
+  };
+
   // Opaque, IoContext-independent handle that knows how to construct a channel token referring to
   // the current entrypoint ("self"). Used to implement `ctx.restore()`: the implementation of
   // `ctx.restore()` passes this back into `makeRestored*()` so that the resulting restored channel
@@ -258,6 +263,18 @@ class IoChannelFactory {
     // Note that the caller is expected to keep the SubrequestChannel alive until it is done with
     // the returned WorkerInterface.
     virtual kj::Own<WorkerInterface> startRequest(SubrequestMetadata metadata) = 0;
+
+    // Test-only: forcibly evict the target of this channel from its isolate, simulating the
+    // runtime tearing it down when it goes idle. For a Durable Object stub this destroys the actor
+    // instance while durable storage survives, so the next request rebuilds it. Depending on
+    // webSocketMode, hibernatable WebSockets are either hibernated first or closed. Only channels
+    // that point at an actor support this; others throw.
+    //
+    // Throws if the target Durable Object is not currently running (never instantiated, or
+    // already evicted/hibernated).
+    virtual kj::Promise<void> evictForTest(EvictWebSocketMode webSocketMode) {
+      JSG_FAIL_REQUIRE(Error, "evict() can only be used on a Durable Object stub.");
+    }
   };
 
   // Obtain an object representing a particular subrequest channel.
@@ -359,6 +376,15 @@ class IoChannelFactory {
   // Aborts all actors, cancels all alarms, and deletes all underlying storage for evictable
   // namespaces. After this, DOs can be recreated with clean state. Useful for test isolation.
   virtual void deleteAllActors(kj::Maybe<kj::Exception&> reason) {
+    KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");
+  }
+
+  // Test-only: gracefully evict every currently-running actor in the evictable namespaces this
+  // worker can address, simulating idle teardown. Unlike abortAllActors(), this leaves durable
+  // storage intact, so DOs rebuild on their next request. Depending on webSocketMode, hibernatable
+  // WebSockets are either hibernated first or closed. Actors that aren't currently running are
+  // skipped (no error).
+  virtual kj::Promise<void> evictAllActorsForTest(EvictWebSocketMode webSocketMode) {
     KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");
   }
 
