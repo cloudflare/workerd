@@ -326,6 +326,5 @@ jobs:
           WORKERD_VERSION: ${{ needs.version.outputs.types_version }}
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
       - run: cp -r bazel-bin/types/definitions/. npm/workers-types
-      - run: cp npm/workers-types/oldest/* npm/workers-types
       - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workers-types/.npmrc
       - run: cd npm/workers-types && npm publish --access public --tag ${{ startsWith(needs.version.outputs.version, '0') && 'beta' || 'latest'}}
