@@ -258,12 +258,16 @@ interface Container @0x9aaceefc06523bca {
   inspect @14 () -> (info :InspectInfo);
   # Returns information about the container, or `none` if the container has not been started.
 
+  setLabels @15 (labels :List(Label));
+  # Replaces the container's current label set with the provided list.
+
   struct InspectInfo {
     union {
       none @0 :Void;
       started :group {
         labels @1 :List(Label);
-        # Echo of StartParams.labels. Empty list means start() was called with no labels.
+        # Current in-memory label set. Initially populated from StartParams.labels and replaced by
+        # setLabels(). Empty list means the current set is empty.
       }
     }
   }

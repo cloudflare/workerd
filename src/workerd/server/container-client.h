@@ -88,6 +88,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> snapshotDirectory(SnapshotDirectoryContext context) override;
   kj::Promise<void> snapshotContainer(SnapshotContainerContext context) override;
   kj::Promise<void> inspect(InspectContext context) override;
+  kj::Promise<void> setLabels(SetLabelsContext context) override;
 
   kj::Own<ContainerClient> addRef();
 
@@ -245,6 +246,12 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   std::atomic_bool containerSidecarStarted = false;
   std::atomic_bool egressListenerStarted = false;
   std::atomic_bool caCertInjected = false;
+
+  // Volatile in-memory label set for this container. Populated from StartParams.labels when
+  // start() runs, replaced wholesale by setLabels(), and cleared when the container stops.
+  // Labels are not recovered when a fresh ContainerClient reconnects to an already-running
+  // local Docker container.
+  kj::HashMap<kj::String, kj::String> currentLabels;
 
   // Writable clone volumes currently owned by the app container, or by an in-flight start()
   // that still needs failure cleanup.

@@ -661,6 +661,200 @@ export class DurableObjectExample extends DurableObject {
     });
   }
 
+  async testSetLabels() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    container.start({ enableInternet: true });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    const newLabels = { customer: 'figma', tier: 'enterprise' };
+    await container.setLabels(newLabels);
+
+    const info = await container.inspect();
+    assert.deepStrictEqual(info.labels, newLabels);
+
+    await container.destroy();
+    await monitor;
+  }
+
+  async testSetLabelsReplaces() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    container.start({ enableInternet: true, labels: { a: '1', b: '2' } });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    await container.setLabels({ c: '3' });
+
+    const info = await container.inspect();
+    assert.deepStrictEqual(info.labels, { c: '3' });
+
+    await container.destroy();
+    await monitor;
+  }
+
+  async testSetLabelsClearsAll() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    container.start({ enableInternet: true, labels: { a: '1' } });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    await container.setLabels({});
+
+    const info = await container.inspect();
+    assert.deepStrictEqual(info.labels, {});
+
+    await container.destroy();
+    await monitor;
+  }
+
+  async testSetLabelsBeforeStart() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    assert.throws(() => container.setLabels({ k: 'v' }), {
+      message:
+        /setLabels\(\) cannot be called on a container that is not running/,
+    });
+  }
+
+  async testSetLabelsAfterDestroy() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    container.start({ enableInternet: true });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+    await container.destroy();
+    await monitor;
+
+    assert.strictEqual(container.running, false);
+    assert.throws(() => container.setLabels({ k: 'v' }), {
+      message:
+        /setLabels\(\) cannot be called on a container that is not running/,
+    });
+  }
+
+  async testSetLabelsAfterDestroyWithoutMonitor() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    container.start({ enableInternet: true, labels: { a: '1' } });
+    await this.waitUntilContainerIsHealthy();
+
+    await container.destroy();
+    await assert.rejects(() => container.setLabels({ k: 'v' }), {
+      message: /setLabels\(\) requires a running container/,
+    });
+
+    // Clear the JS wrapper's running state after intentionally skipping monitor()
+    // before the setLabels() assertion above.
+    await container.monitor().catch((_err) => {});
+    assert.strictEqual(container.running, false);
+  }
+
+  async testSetLabelsValidation() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    container.start({ enableInternet: true });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    // Empty label name
+    assert.throws(() => container.setLabels({ '': 'value' }), {
+      message: /Label names cannot be empty/,
+    });
+
+    // Label name with control character
+    assert.throws(() => container.setLabels({ 'bad\x01name': 'value' }), {
+      message: /Label names cannot contain control characters \(index 0\)/,
+    });
+
+    // Label value with control character
+    assert.throws(() => container.setLabels({ name: 'bad\x01value' }), {
+      message: /Label values cannot contain control characters \(index 0\)/,
+    });
+
+    await container.destroy();
+    await monitor;
+  }
+
+  async testSetLabelsSerialized() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    container.start({ enableInternet: true });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    // Issue two concurrent setLabels calls without awaiting between them. The server-side
+    // RpcTurn mechanism serializes them, so the final inspect() must equal whichever call
+    // was awaited last.
+    const first = container.setLabels({ a: '1' });
+    const second = container.setLabels({ b: '2' });
+    await Promise.all([first, second]);
+
+    const info = await container.inspect();
+    assert.deepStrictEqual(info.labels, { b: '2' });
+
+    await container.destroy();
+    await monitor;
+  }
+
   async testPidNamespace() {
     const container = this.ctx.container;
     if (container.running) {
@@ -2595,13 +2789,12 @@ export const testSetInactivityTimeout = {
   },
 };
 
-// Test that custom labels are passed through to the container
+// Test that custom labels round-trip through the JS API's in-memory label store.
 export const testLabels = {
   async test(_ctrl, env) {
-    const id = env.MY_CONTAINER.idFromName(
+    const stub = env.MY_CONTAINER.getByName(
       getRandomDurableObjectName('testLabels')
     );
-    const stub = env.MY_CONTAINER.get(id);
     await stub.testLabels();
   },
 };
@@ -2609,10 +2802,9 @@ export const testLabels = {
 // Test that invalid labels are rejected with clear error messages
 export const testLabelValidation = {
   async test(_ctrl, env) {
-    const id = env.MY_CONTAINER.idFromName(
+    const stub = env.MY_CONTAINER.getByName(
       getRandomDurableObjectName('testLabelValidation')
     );
-    const stub = env.MY_CONTAINER.get(id);
     await stub.testLabelValidation();
   },
 };
@@ -2629,21 +2821,100 @@ export const testInspectBeforeStart = {
 
 export const testInspectEmptyLabels = {
   async test(_ctrl, env) {
-    const id = env.MY_CONTAINER.idFromName(
+    const stub = env.MY_CONTAINER.getByName(
       getRandomDurableObjectName('testInspectEmptyLabels')
     );
-    const stub = env.MY_CONTAINER.get(id);
     await stub.testInspectEmptyLabels();
   },
 };
 
 export const testInspectAfterDestroy = {
   async test(_ctrl, env) {
-    const id = env.MY_CONTAINER.idFromName(
+    const stub = env.MY_CONTAINER.getByName(
       getRandomDurableObjectName('testInspectAfterDestroy')
     );
-    const stub = env.MY_CONTAINER.get(id);
     await stub.testInspectAfterDestroy();
+  },
+};
+
+// Test that setLabels() updates labels on a running container and that subsequent
+// inspect() calls see the new set.
+export const testSetLabels = {
+  async test(_ctrl, env) {
+    const stub = env.MY_CONTAINER.getByName(
+      getRandomDurableObjectName('testSetLabels')
+    );
+    await stub.testSetLabels();
+  },
+};
+
+// Test that setLabels() fully replaces (not merges) the label set.
+export const testSetLabelsReplaces = {
+  async test(_ctrl, env) {
+    const stub = env.MY_CONTAINER.getByName(
+      getRandomDurableObjectName('testSetLabelsReplaces')
+    );
+    await stub.testSetLabelsReplaces();
+  },
+};
+
+// Test that setLabels({}) clears all labels.
+export const testSetLabelsClearsAll = {
+  async test(_ctrl, env) {
+    const stub = env.MY_CONTAINER.getByName(
+      getRandomDurableObjectName('testSetLabelsClearsAll')
+    );
+    await stub.testSetLabelsClearsAll();
+  },
+};
+
+// Test that setLabels() throws when the container has not been started.
+export const testSetLabelsBeforeStart = {
+  async test(_ctrl, env) {
+    const stub = env.MY_CONTAINER.getByName(
+      getRandomDurableObjectName('testSetLabelsBeforeStart')
+    );
+    await stub.testSetLabelsBeforeStart();
+  },
+};
+
+// Test that setLabels() throws after the container has been destroyed.
+export const testSetLabelsAfterDestroy = {
+  async test(_ctrl, env) {
+    const stub = env.MY_CONTAINER.getByName(
+      getRandomDurableObjectName('testSetLabelsAfterDestroy')
+    );
+    await stub.testSetLabelsAfterDestroy();
+  },
+};
+
+// Test that destroy() immediately clears server-side running state even before monitor() resolves.
+export const testSetLabelsAfterDestroyWithoutMonitor = {
+  async test(_ctrl, env) {
+    const stub = env.MY_CONTAINER.getByName(
+      getRandomDurableObjectName('testSetLabelsAfterDestroyWithoutMonitor')
+    );
+    await stub.testSetLabelsAfterDestroyWithoutMonitor();
+  },
+};
+
+// Test that setLabels() rejects invalid label names and values with the same rules as start().
+export const testSetLabelsValidation = {
+  async test(_ctrl, env) {
+    const stub = env.MY_CONTAINER.getByName(
+      getRandomDurableObjectName('testSetLabelsValidation')
+    );
+    await stub.testSetLabelsValidation();
+  },
+};
+
+// Test that concurrent setLabels() calls are serialized and the last-completed call wins.
+export const testSetLabelsSerialized = {
+  async test(_ctrl, env) {
+    const stub = env.MY_CONTAINER.getByName(
+      getRandomDurableObjectName('testSetLabelsSerialized')
+    );
+    await stub.testSetLabelsSerialized();
   },
 };
 

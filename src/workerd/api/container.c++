@@ -54,6 +54,21 @@ kj::Array<kj::byte> emptyByteArray() {
   return kj::heapArray<kj::byte>(0);
 }
 
+void requireValidLabels(jsg::Dict<kj::String>& labels) {
+  for (auto i: kj::indices(labels.fields)) {
+    auto& field = labels.fields[i];
+    JSG_REQUIRE(field.name.size() > 0, Error, "Label names cannot be empty");
+    for (auto c: field.name) {
+      JSG_REQUIRE(static_cast<kj::byte>(c) >= 0x20, Error,
+          "Label names cannot contain control characters (index ", i, ")");
+    }
+    for (auto c: field.value) {
+      JSG_REQUIRE(static_cast<kj::byte>(c) >= 0x20, Error,
+          "Label values cannot contain control characters (index ", i, ")");
+    }
+  }
+}
+
 capnp::ByteStream::Client makeExecPipe(
     capnp::ByteStreamFactory& factory, kj::Own<kj::AsyncOutputStream> output) {
   return factory.kjToCapnp(capnp::ExplicitEndOutputStream::wrap(kj::mv(output), []() {}));
@@ -240,18 +255,10 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   }
 
   KJ_IF_SOME(labels, options.labels) {
+    requireValidLabels(labels);
     auto list = req.initLabels(labels.fields.size());
     for (auto i: kj::indices(labels.fields)) {
       auto& field = labels.fields[i];
-      JSG_REQUIRE(field.name.size() > 0, Error, "Label names cannot be empty");
-      for (auto c: field.name) {
-        JSG_REQUIRE(static_cast<kj::byte>(c) >= 0x20, Error,
-            "Label names cannot contain control characters (index ", i, ")");
-      }
-      for (auto c: field.value) {
-        JSG_REQUIRE(static_cast<kj::byte>(c) >= 0x20, Error,
-            "Label values cannot contain control characters (index ", i, ")");
-      }
       list[i].setName(field.name);
       list[i].setValue(field.value);
     }
@@ -285,6 +292,22 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   IoContext::current().addTask(req.sendIgnoringResult());
 
   running = true;
+}
+
+jsg::Promise<void> Container::setLabels(jsg::Lock& js, jsg::Dict<kj::String> labels) {
+  JSG_REQUIRE(running, Error, "setLabels() cannot be called on a container that is not running.");
+
+  requireValidLabels(labels);
+
+  auto req = rpcClient->setLabelsRequest();
+  auto list = req.initLabels(labels.fields.size());
+  for (auto i: kj::indices(labels.fields)) {
+    auto& field = labels.fields[i];
+    list[i].setName(field.name);
+    list[i].setValue(field.value);
+  }
+
+  return IoContext::current().awaitIo(js, req.sendIgnoringResult());
 }
 
 jsg::Promise<kj::Maybe<Container::Info>> Container::inspect(jsg::Lock& js) {
