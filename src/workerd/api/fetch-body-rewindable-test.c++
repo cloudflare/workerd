@@ -102,12 +102,12 @@ KJ_TEST("fetch reports each outgoing body's rewindability per-call without stale
       )SCRIPT"_kj,
     .ioChannelFactory = kj::Function<kj::Own<IoChannelFactory>(TimerChannel&)>(
         [&](TimerChannel& timer) -> kj::Own<IoChannelFactory> {
-      return kj::heap<FetchTargetIoChannelFactory>(timer);
-    }),
-    .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
-        [&]() -> kj::Own<RequestObserver> {
-      return kj::refcounted<RecordingRequestObserver>(bodyRewindableCalls);
-    }),
+    return kj::heap<FetchTargetIoChannelFactory>(timer);
+  }),
+    .requestObserverFactory =
+        kj::Function<kj::Own<RequestObserver>()>([&]() -> kj::Own<RequestObserver> {
+    return kj::refcounted<RecordingRequestObserver>(bodyRewindableCalls);
+  }),
   });
 
   auto result =
@@ -117,8 +117,8 @@ KJ_TEST("fetch reports each outgoing body's rewindability per-call without stale
   KJ_ASSERT(bodyRewindableCalls.size() == 2,
       "expected exactly one rewindability signal per outgoing fetch");
   KJ_EXPECT(bodyRewindableCalls[0] == true, "buffered request body should be rewindable");
-  KJ_EXPECT(
-      bodyRewindableCalls[1] == false, "streamed request body should not be rewindable (no carryover)");
+  KJ_EXPECT(bodyRewindableCalls[1] == false,
+      "streamed request body should not be rewindable (no carryover)");
 }
 
 }  // namespace

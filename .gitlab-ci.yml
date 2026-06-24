@@ -1,2 +1,0 @@
-include:
-  - local: ci/build.yml
