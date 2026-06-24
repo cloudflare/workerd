@@ -632,12 +632,11 @@ export type ChatCompletionChoice = {
   finish_reason: "stop" | "length" | "tool_calls" | "content_filter" | "function_call";
   logprobs: ChatCompletionLogprobs | null;
 };
-export type ChatCompletionsPromptInput = {
-  prompt: string;
-} & ChatCompletionsCommonOptions;
+
 export type ChatCompletionsMessagesInput = {
   messages: Array<ChatCompletionMessageParam>;
 } & ChatCompletionsCommonOptions;
+
 export type ChatCompletionsOutput = {
   id: string;
   object: string;
@@ -648,6 +647,7 @@ export type ChatCompletionsOutput = {
   system_fingerprint?: string | null;
   service_tier?: "auto" | "default" | "flex" | "scale" | "priority" | null;
 };
+
 /**
  * Workers AI support for OpenAI's Responses API
  * Reference: https://github.com/openai/openai-node/blob/master/src/resources/responses/responses.ts
@@ -4730,11 +4730,11 @@ export declare abstract class Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2 {
   postProcessedOutputs: Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Output;
 }
 export declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_120B {
-  inputs: XOR<ResponsesInput, ChatCompletionsInput>;
+  inputs: XOR<ResponsesInput, ChatCompletionsMessagesInput>;
   postProcessedOutputs: XOR<ResponsesOutput, ChatCompletionsOutput>;
 }
 export declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_20B {
-  inputs: XOR<ResponsesInput, ChatCompletionsInput>;
+  inputs: XOR<ResponsesInput, ChatCompletionsMessagesInput>;
   postProcessedOutputs: XOR<ResponsesOutput, ChatCompletionsOutput>;
 }
 export interface Ai_Cf_Leonardo_Phoenix_1_0_Input {
@@ -5823,6 +5823,10 @@ export declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_5 {
   inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
 }
+export declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_6 {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
 export declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
   inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
@@ -5831,6 +5835,7 @@ export declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT {
   inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
 }
+
 export interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
@@ -5920,7 +5925,9 @@ export interface AiModels {
   "@cf/black-forest-labs/flux-2-klein-9b": Base_Ai_Cf_Black_Forest_Labs_Flux_2_Klein_9B;
   "@cf/zai-org/glm-4.7-flash": Base_Ai_Cf_Zai_Org_Glm_4_7_Flash;
   "@cf/moonshotai/kimi-k2.5": Base_Ai_Cf_Moonshotai_Kimi_K2_5;
+  "@cf/moonshotai/kimi-k2.6": Base_Ai_Cf_Moonshotai_Kimi_K2_6;
   "@cf/nvidia/nemotron-3-120b-a12b": Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B;
+  "@cf/google/gemma-4-26b-a4b-it": Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT;
 }
 export type AiOptions = {
   /**
@@ -5973,13 +5980,10 @@ export type AiModelsSearchObject = {
     value: string;
   }[];
 };
-export type ChatCompletionsBase = XOR<ChatCompletionsPromptInput, ChatCompletionsMessagesInput>;
-export type ChatCompletionsInput = XOR<
-  ChatCompletionsBase,
-  {
-    requests: ChatCompletionsBase[];
-  }
->;
+
+export type ChatCompletionsBase = ChatCompletionsMessagesInput;
+export type ChatCompletionsInput = ChatCompletionsMessagesInput;
+
 export interface InferenceUpstreamError extends Error {}
 export interface AiInternalError extends Error {}
 export type AiModelListType = Record<string, any>;
@@ -6040,9 +6044,16 @@ export declare abstract class Ai<
     options?: AiOptions
   ): Promise<AiModelList[Name]['postProcessedOutputs']>;
 
-  // Unknown model (gateway fallback)
-  run(
-    model: string & {},
+  // Unknown model (fallback).
+  //
+  // The `Exclude<..., keyof AiModelList>` constraint forces TypeScript to
+  // route any model name that is a literal key of `AiModelList` to one of
+  // the known-model overloads above (so input/output mismatches surface as
+  // type errors rather than silently falling back to `Record<string, unknown>`).
+  // Names that aren't in `AiModelList` — e.g. third-party gateway models
+  // like `"google/nano-banana"` — still hit this overload.
+  run<Model extends string>(
+    model: Model extends keyof AiModelList ? never : Model,
     inputs: Record<string, unknown>,
     options?: AiOptions
   ): Promise<Record<string, unknown>>;

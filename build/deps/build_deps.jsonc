@@ -44,7 +44,8 @@
     },
     {
       "name": "aspect_rules_js",
-      "type": "bazel_dep"
+      "type": "bazel_dep",
+      "freeze_version": "3.1.1"
     },
     {
       "name": "aspect_rules_ts",

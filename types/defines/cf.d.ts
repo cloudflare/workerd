@@ -1,86 +1,3 @@
-interface BasicImageTransformations {
-  /**
-   * Maximum width in image pixels. The value must be an integer.
-   */
-  width?: number;
-  /**
-   * Maximum height in image pixels. The value must be an integer.
-   */
-  height?: number;
-  /**
-   * Resizing mode as a string. It affects interpretation of width and height
-   * options:
-   *  - scale-down: Similar to contain, but the image is never enlarged. If
-   *    the image is larger than given width or height, it will be resized.
-   *    Otherwise its original size will be kept.
-   *  - contain: Resizes to maximum size that fits within the given width and
-   *    height. If only a single dimension is given (e.g. only width), the
-   *    image will be shrunk or enlarged to exactly match that dimension.
-   *    Aspect ratio is always preserved.
-   *  - cover: Resizes (shrinks or enlarges) to fill the entire area of width
-   *    and height. If the image has an aspect ratio different from the ratio
-   *    of width and height, it will be cropped to fit.
-   *  - crop: The image will be shrunk and cropped to fit within the area
-   *    specified by width and height. The image will not be enlarged. For images
-   *    smaller than the given dimensions it's the same as scale-down. For
-   *    images larger than the given dimensions, it's the same as cover.
-   *    See also trim.
-   *  - pad: Resizes to the maximum size that fits within the given width and
-   *    height, and then fills the remaining area with a background color
-   *    (white by default). Use of this mode is not recommended, as the same
-   *    effect can be more efficiently achieved with the contain mode and the
-   *    CSS object-fit: contain property.
-   *  - squeeze: Stretches and deforms to the width and height given, even if it
-   *    breaks aspect ratio
-   */
-  fit?: "scale-down" | "contain" | "cover" | "crop" | "pad" | "squeeze";
-  /**
-   * Image segmentation using artificial intelligence models. Sets pixels not
-   * within selected segment area to transparent e.g "foreground" sets every
-   * background pixel as transparent.
-   */
-  segment?: "foreground";
-  /**
-   * When cropping with fit: "cover", this defines the side or point that should
-   * be left uncropped. The value is either a string
-   * "left", "right", "top", "bottom", "auto", or "center" (the default),
-   * or an object {x, y} containing focal point coordinates in the original
-   * image expressed as fractions ranging from 0.0 (top or left) to 1.0
-   * (bottom or right), 0.5 being the center. {fit: "cover", gravity: "top"} will
-   * crop bottom or left and right sides as necessary, but won’t crop anything
-   * from the top. {fit: "cover", gravity: {x:0.5, y:0.2}} will crop each side to
-   * preserve as much as possible around a point at 20% of the height of the
-   * source image.
-   */
-  gravity?:
-    | 'face'
-    | 'left'
-    | 'right'
-    | 'top'
-    | 'bottom'
-    | 'center'
-    | 'auto'
-    | 'entropy'
-    | BasicImageTransformationsGravityCoordinates;
-  /**
-   * Background color to add underneath the image. Applies only to images with
-   * transparency (such as PNG). Accepts any CSS color (#RRGGBB, rgba(…),
-   * hsl(…), etc.)
-   */
-  background?: string;
-  /**
-   * Number of degrees (90, 180, 270) to rotate the image by. width and height
-   * options refer to axes after rotation.
-   */
-  rotate?: 0 | 90 | 180 | 270 | 360;
-}
-
-interface BasicImageTransformationsGravityCoordinates {
-  x?: number;
-  y?: number;
-  mode?: 'remainder' | 'box-center';
-}
-
 /**
  * In addition to the properties you can set in the RequestInit dict
  * that you pass as an argument to the Request constructor, you can
@@ -262,50 +179,81 @@ interface RequestInitCfPropertiesVaryHeaders {
     | undefined;
 }
 
-interface RequestInitCfPropertiesImageDraw extends BasicImageTransformations {
+interface BasicImageTransformations {
   /**
-   * Absolute URL of the image file to use for the drawing. It can be any of
-   * the supported file formats. For drawing of watermarks or non-rectangular
-   * overlays we recommend using PNG or WebP images.
+   * Maximum width in image pixels. The value must be an integer.
    */
-  url: string;
+  width?: number;
   /**
-   * Floating-point number between 0 (transparent) and 1 (opaque).
-   * For example, opacity: 0.5 makes overlay semitransparent.
+   * Maximum height in image pixels. The value must be an integer.
    */
-  opacity?: number;
+  height?: number;
   /**
-   * - If set to true, the overlay image will be tiled to cover the entire
-   *   area. This is useful for stock-photo-like watermarks.
-   * - If set to "x", the overlay image will be tiled horizontally only
-   *   (form a line).
-   * - If set to "y", the overlay image will be tiled vertically only
-   *   (form a line).
+   * When cropping with fit: "cover", this defines the side or point that should
+   * be left uncropped. The value is either a string
+   * "left", "right", "top", "bottom", "auto", or "center" (the default),
+   * or an object {x, y} containing focal point coordinates in the original
+   * image expressed as fractions ranging from 0.0 (top or left) to 1.0
+   * (bottom or right), 0.5 being the center. {fit: "cover", gravity: "top"} will
+   * crop bottom or left and right sides as necessary, but won’t crop anything
+   * from the top. {fit: "cover", gravity: {x:0.5, y:0.2}} will crop each side to
+   * preserve as much as possible around a point at 20% of the height of the
+   * source image.
    */
-  repeat?: true | "x" | "y";
+  gravity?:
+    | 'face'
+    | 'left'
+    | 'right'
+    | 'top'
+    | 'bottom'
+    | 'center'
+    | 'auto'
+    | 'entropy'
+    | BasicImageTransformationsGravityCoordinates;
   /**
-   * Position of the overlay image relative to a given edge. Each property is
-   * an offset in pixels. 0 aligns exactly to the edge. For example, left: 10
-   * positions left side of the overlay 10 pixels from the left edge of the
-   * image it's drawn over. bottom: 0 aligns bottom of the overlay with bottom
-   * of the background image.
-   *
-   * Setting both left & right, or both top & bottom is an error.
-   *
-   * If no position is specified, the image will be centered.
+   * Specifies how closely the image is cropped toward detected faces when combined
+   * with the gravity=face option. Accepts a valid range between 0.0 (includes as much
+   * of the background as possible) and 1.0 (crops the image as closely to the face as
+   * possible). The default is 0.
    */
-  top?: number;
-  left?: number;
-  bottom?: number;
-  right?: number;
-}
-
-interface RequestInitCfPropertiesImage extends BasicImageTransformations {
+  zoom?: number;
   /**
-   * Device Pixel Ratio. Default 1. Multiplier for width/height that makes it
-   * easier to specify higher-DPI sizes in <img srcset>.
+   * Resizing mode as a string. It affects interpretation of width and height
+   * options:
+   *  - scale-down: Similar to contain, but the image is never enlarged. If
+   *    the image is larger than given width or height, it will be resized.
+   *    Otherwise its original size will be kept.
+   *  - scale-up: Similar to contain, but the image is never shrunk. If the
+   *    image is smaller than the given width or height, it will be resized.
+   *    Otherwise its original size will be kept.
+   *  - contain: Resizes to maximum size that fits within the given width and
+   *    height. If only a single dimension is given (e.g. only width), the
+   *    image will be shrunk or enlarged to exactly match that dimension.
+   *    Aspect ratio is always preserved.
+   *  - cover: Resizes (shrinks or enlarges) to fill the entire area of width
+   *    and height. If the image has an aspect ratio different from the ratio
+   *    of width and height, it will be cropped to fit.
+   *  - crop: The image will be shrunk and cropped to fit within the area
+   *    specified by width and height. The image will not be enlarged. For images
+   *    smaller than the given dimensions it's the same as scale-down. For
+   *    images larger than the given dimensions, it's the same as cover.
+   *    See also trim.
+   *  - pad: Resizes to the maximum size that fits within the given width and
+   *    height, and then fills the remaining area with a background color
+   *    (white by default). Use of this mode is not recommended, as the same
+   *    effect can be more efficiently achieved with the contain mode and the
+   *    CSS object-fit: contain property.
+   *  - squeeze: Stretches and deforms to the width and height given, even if it
+   *    breaks aspect ratio
    */
-  dpr?: number;
+  fit?:
+    | "scale-down"
+    | "scale-up"
+    | "contain"
+    | "cover"
+    | "crop"
+    | "pad"
+    | "squeeze";
   /**
    * Allows you to trim your image. Takes dpr into account and is performed before
    * resizing or rotation.
@@ -336,6 +284,160 @@ interface RequestInitCfPropertiesImage extends BasicImageTransformations {
           keep?: number;
         };
   };
+  /**
+   * Background color to add underneath the image. Applies only to images with
+   * transparency (such as PNG). Accepts any CSS color (#RRGGBB, rgba(…),
+   * hsl(…), etc.)
+   */
+  background?: string;
+  /**
+   * Flips the images horizontally, vertically, or both. Flipping is applied before
+   * rotation, so if you apply flip=h,rotate=90 then the image will be flipped
+   * horizontally, then rotated by 90 degrees.
+   */
+  flip?: 'h' | 'v' | 'hv';
+  /**
+   * Number of degrees (90, 180, 270) to rotate the image by. width and height
+   * options refer to axes after rotation.
+   */
+  rotate?: 0 | 90 | 180 | 270 | 360;
+  /**
+   * Strength of sharpening filter to apply to the image. Floating-point
+   * number between 0 (no sharpening, default) and 10 (maximum). 1.0 is a
+   * recommended value for downscaled images.
+   */
+  sharpen?: number;
+  /**
+   * Radius of a blur filter (approximate gaussian). Maximum supported radius
+   * is 250.
+   */
+  blur?: number;
+  /**
+   * Increase contrast by a factor. A value of 1.0 equals no change, a value of
+   * 0.5 equals low contrast, and a value of 2.0 equals high contrast. 0 is
+   * ignored.
+   */
+  contrast?: number;
+  /**
+   * Increase brightness by a factor. A value of 1.0 equals no change, a value
+   * of 0.5 equals half brightness, and a value of 2.0 equals twice as bright.
+   * 0 is ignored.
+   */
+  brightness?: number;
+  /**
+   * Increase exposure by a factor. A value of 1.0 equals no change, a value of
+   * 0.5 darkens the image, and a value of 2.0 lightens the image. 0 is ignored.
+   */
+  gamma?: number;
+  /**
+   * Increase contrast by a factor. A value of 1.0 equals no change, a value of
+   * 0.5 equals low contrast, and a value of 2.0 equals high contrast. 0 is
+   * ignored.
+   */
+  saturation?: number;
+  /**
+   * Device Pixel Ratio. Default 1. Multiplier for width/height that makes it
+   * easier to specify higher-DPI sizes in <img srcset>.
+   */
+  dpr?: number;
+  /**
+   * Adds a border around the image. The border is added after resizing. Border
+   * width takes dpr into account, and can be specified either using a single
+   * width property, or individually for each side.
+   */
+  border?:
+    | {
+        color: string;
+        width: number;
+      }
+    | {
+        color: string;
+        top: number;
+        right: number;
+        bottom: number;
+        left: number;
+      };
+  /**
+   * Image segmentation using artificial intelligence models. Sets pixels not
+   * within selected segment area to transparent e.g "foreground" sets every
+   * background pixel as transparent.
+   */
+  segment?: "foreground";
+  /**
+   * Controls the algorithm used when an image needs to be enlarged. This
+   * parameter works with any fit mode that upscales, such as `contain`,
+   * `cover`, and `scale-up`. It has no effect when `fit=scale-down` or when
+   * the target dimensions are smaller than the source.
+   * - interpolate: Uses bicubic interpolation, which may reduce image quality.
+   *   This is the default behavior when `upscale` is not specified.
+   * - generate: Uses AI upscaling to produce sharper, more detailed results
+   *   when enlarging images.
+   */
+  upscale?: "interpolate" | "generate";
+}
+
+interface BasicImageTransformationsGravityCoordinates {
+  x?: number;
+  y?: number;
+  mode?: 'remainder' | 'box-center';
+}
+
+interface RequestInitCfPropertiesImageDraw extends BasicImageTransformations {
+  /**
+   * Absolute URL of the image file to use for the drawing. It can be any of
+   * the supported file formats. For drawing of watermarks or non-rectangular
+   * overlays we recommend using PNG or WebP images.
+   */
+  url: string;
+  /**
+   * Floating-point number between 0 (transparent) and 1 (opaque).
+   * For example, opacity: 0.5 makes overlay semitransparent.
+   */
+  opacity?: number;
+  /**
+   * - If set to true, the overlay image will be tiled to cover the entire
+   *   area. This is useful for stock-photo-like watermarks.
+   * - If set to "x", the overlay image will be tiled horizontally only
+   *   (form a line).
+   * - If set to "y", the overlay image will be tiled vertically only
+   *   (form a line).
+   */
+  repeat?: true | "x" | "y";
+  /**
+   * How to combine the foreground and backdrop pixels to create the result
+   */
+  composite?:
+    /** Foreground drawn on top of backdrop (default) */
+    | 'over'
+    /** Foreground shown only where backdrop is opaque */
+    | 'in'
+    /** Foreground drawn on top, but clipped to the backdrop's shape */
+    | 'atop'
+    /** Foreground shown only where backdrop is transparent */
+    | 'out'
+    /** Foreground and backdrop visible only where the other is not */
+    | 'xor'
+    /** Foreground and backdrop channels added (brightening) */
+    | 'lighter';
+
+  /**
+   * Position of the overlay image relative to a given edge. Each property is
+   * an offset in pixels. 0 aligns exactly to the edge. For example, left: 10
+   * positions left side of the overlay 10 pixels from the left edge of the
+   * image it's drawn over. bottom: 0 aligns bottom of the overlay with bottom
+   * of the background image.
+   *
+   * Setting both left & right, or both top & bottom is an error.
+   *
+   * If no position is specified, the image will be centered.
+   */
+  top?: number;
+  left?: number;
+  bottom?: number;
+  right?: number;
+}
+
+interface RequestInitCfPropertiesImage extends BasicImageTransformations {
   /**
    * Quality setting from 1-100 (useful values are in 60-90 range). Lower values
    * make images look worse, but load faster. The default is 85. It applies only
@@ -378,17 +480,6 @@ interface RequestInitCfPropertiesImage extends BasicImageTransformations {
    */
   metadata?: "keep" | "copyright" | "none";
   /**
-   * Strength of sharpening filter to apply to the image. Floating-point
-   * number between 0 (no sharpening, default) and 10 (maximum). 1.0 is a
-   * recommended value for downscaled images.
-   */
-  sharpen?: number;
-  /**
-   * Radius of a blur filter (approximate gaussian). Maximum supported radius
-   * is 250.
-   */
-  blur?: number;
-  /**
    * Overlays are drawn in the order they appear in the array (last array
    * entry is the topmost layer).
    */
@@ -400,55 +491,6 @@ interface RequestInitCfPropertiesImage extends BasicImageTransformations {
    */
   "origin-auth"?: "share-publicly";
   /**
-   * Adds a border around the image. The border is added after resizing. Border
-   * width takes dpr into account, and can be specified either using a single
-   * width property, or individually for each side.
-   */
-  border?:
-    | {
-        color: string;
-        width: number;
-      }
-    | {
-        color: string;
-        top: number;
-        right: number;
-        bottom: number;
-        left: number;
-      };
-  /**
-   * Increase brightness by a factor. A value of 1.0 equals no change, a value
-   * of 0.5 equals half brightness, and a value of 2.0 equals twice as bright.
-   * 0 is ignored.
-   */
-  brightness?: number;
-  /**
-   * Increase contrast by a factor. A value of 1.0 equals no change, a value of
-   * 0.5 equals low contrast, and a value of 2.0 equals high contrast. 0 is
-   * ignored.
-   */
-  contrast?: number;
-  /**
-   * Increase exposure by a factor. A value of 1.0 equals no change, a value of
-   * 0.5 darkens the image, and a value of 2.0 lightens the image. 0 is ignored.
-   */
-  gamma?: number;
-
-  /**
-   * Increase contrast by a factor. A value of 1.0 equals no change, a value of
-   * 0.5 equals low contrast, and a value of 2.0 equals high contrast. 0 is
-   * ignored.
-   */
-  saturation?: number;
-
-  /**
-   * Flips the images horizontally, vertically, or both. Flipping is applied before
-   * rotation, so if you apply flip=h,rotate=90 then the image will be flipped
-   * horizontally, then rotated by 90 degrees.
-   */
-  flip?: 'h' | 'v' | 'hv',
-
-  /**
    * Slightly reduces latency on a cache miss by selecting a
    * quickest-to-compress file format, at a cost of increased file size and
    * lower image quality. It will usually override the format option and choose
@@ -457,6 +499,9 @@ interface RequestInitCfPropertiesImage extends BasicImageTransformations {
    * images.
    */
   compression?: "fast";
+
+  // You probably want to add new properties to BasicImageTransformations, unless
+  // you are absolutely sure they are only valid on the top level request
 }
 
 interface RequestInitCfPropertiesImageMinify {
