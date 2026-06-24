@@ -39,6 +39,7 @@ jsg::JsRef<jsg::JsValue> EnvModule::withEnv(
 
 jsg::Ref<PythonPatchedEnv> EnvModule::pythonPatchEnv(jsg::Lock& js, jsg::Value newEnv) {
   auto& key = jsg::IsolateBase::from(js.v8Isolate).getEnvAsyncContextKey();
+  LOG_WARNING_PERIODICALLY("NOSENTRY pythonPatchEnv being used");
   return jsg::alloc<PythonPatchedEnv>(js, key, kj::mv(newEnv));
 }
 
