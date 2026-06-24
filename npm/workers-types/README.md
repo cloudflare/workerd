@@ -34,7 +34,7 @@ The following is a minimal `tsconfig.json` for use alongside this package:
 
 ### Compatibility dates
 
-The Cloudflare Workers runtime manages backwards compatibility through the use of [Compatibility Dates](https://developers.cloudflare.com/workers/platform/compatibility-dates/). The `@cloudflare/workers-types` package provides a typing environment that corresponds to the latest version of the Cloudflare Workers runtime. Instead of using `@cloudflare/workers-types` directly, we recommend following the [Typescript language documentation](https://developers.cloudflare.com/workers/languages/typescript/) for Cloudflare Workers to generate a runtime typing environment that corresponds exactly to your compatibility date and flags.
+The Cloudflare Workers runtime manages backwards compatibility through the use of [Compatibility Dates](https://developers.cloudflare.com/workers/platform/compatibility-dates/). The `@cloudflare/workers-types` package provides a typing environment that corresponds to the latest version of the Cloudflare Workers runtime. The `@cloudflare/workers-types/experimental` entrypoint is also available for APIs guarded by experimental compatibility flags. Instead of using `@cloudflare/workers-types` directly, we recommend following the [Typescript language documentation](https://developers.cloudflare.com/workers/languages/typescript/) for Cloudflare Workers to generate a runtime typing environment that corresponds exactly to your compatibility date and flags.
 
 ### Importable Types
 
@@ -77,4 +77,3 @@ export {}
 ```
 
 Wrangler can also generate this for you automatically from your `wrangler.toml` configuration file, using the `wrangler types` command.
-
