@@ -413,6 +413,7 @@ wd_capnp_library(
 )
 
 kj_test(
+    size = "large",
     src = "io-gate-test.c++",
     deps = [
         ":io-gate",
