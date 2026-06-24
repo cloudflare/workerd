@@ -1767,6 +1767,26 @@ export let serializeHttpTypes = {
   },
 };
 
+export let serializeBlob = {
+  async test(controller, env, ctx) {
+    // Blob round-trips over RPC, both directly and nested in a plain object.
+    let blob = await env.MyService.roundTrip(
+      new Blob(['hello ', 'world'], { type: 'text/plain' })
+    );
+    assert.ok(blob instanceof Blob);
+    assert.strictEqual(blob.type, 'text/plain');
+    assert.strictEqual(await blob.text(), 'hello world');
+
+    let doc = await env.MyService.roundTrip({
+      name: 'doc.txt',
+      blob: new Blob(['contents']),
+    });
+    assert.strictEqual(doc.name, 'doc.txt');
+    assert.ok(doc.blob instanceof Blob);
+    assert.strictEqual(await doc.blob.text(), 'contents');
+  },
+};
+
 // Test that exceptions thrown from async native functions have a proper stack trace. (This is
 // not specific to RPC but RPC is a convenient place to test it since we can easily define the
 // callee to throw an exception.)

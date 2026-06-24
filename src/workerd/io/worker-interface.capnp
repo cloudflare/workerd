@@ -481,6 +481,9 @@ enum SerializationTag {
   #
   # Similar to serviceStub, this refers to the entrypoint of a Worker that can be instantiated
   # anywhere and any time, and thus can be persisted and used in `env` and `ctx.props`, etc.
+
+  blob @13;
+  # A Blob, serialized as its MIME type followed by its raw bytes.
 }
 
 enum StreamEncoding {
