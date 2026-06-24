@@ -68,7 +68,7 @@ kj::Rc<Directory> getBundleDirectory(const WorkerSource& conf) {
               .data = pythonModule.body.asBytes(),
             });
           }
-          KJ_CASE_ONEOF(pythonRequirement, WorkerSource::PythonRequirement) {
+          KJ_CASE_ONEOF(pythonRequirement, WorkerSource::ObsoletePythonRequirement) {
             // Just ignore it.
           }
           KJ_CASE_ONEOF(capnpModule, WorkerSource::CapnpModule) {
@@ -83,6 +83,10 @@ kj::Rc<Directory> getBundleDirectory(const WorkerSource& conf) {
   return getLazyDirectoryImpl([entries = entries.releaseAsArray()] {
     Directory::Builder builder;
     kj::Path kRoot{};
+    // Defense-in-depth: reject module names whose parsed path exceeds a sane
+    // segment count. Legitimate module paths are short (e.g. "src/util/helpers.js");
+    // pathologically deep names can never be addressed by node:fs anyway.
+    static constexpr size_t kMaxBundlePathDepth = 1024;
     for (auto& entry: entries) {
       auto url = KJ_ASSERT_NONNULL(jsg::Url::tryParse(entry.name, "file:///"_kj));
       // If the name is not a valid file URL path, ignore it.
@@ -91,6 +95,10 @@ kj::Rc<Directory> getBundleDirectory(const WorkerSource& conf) {
       }
       auto pathStr = kj::str(url.getPathname().slice(1));
       auto path = kRoot.eval(pathStr);
+      if (path.size() > kMaxBundlePathDepth) {
+        KJ_LOG(WARNING, "Skipping overly deep module path", path.size());
+        continue;
+      }
       builder.addPath(path, File::newReadable(entry.data));
     }
     return builder.finish();

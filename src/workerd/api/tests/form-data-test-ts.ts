@@ -6,7 +6,7 @@ import { strictEqual } from 'node:assert';
 
 // https://github.com/cloudflare/workerd/issues/5934
 export const formDataUnionTypeOverloads = {
-  test() {
+  test(): void {
     const formData = new FormData();
 
     formData.append('stringKey', 'stringValue' as string | Blob);

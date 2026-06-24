@@ -90,10 +90,7 @@ class EntrypointsModule: public jsg::Object {
   // process.
   void abortIsolate(jsg::Lock& js, jsg::Optional<kj::String> reason);
 
-  // Returns whether the workerd_experimental compat flag is enabled. Exposed on the internal
-  // module so user-facing wrappers in cloudflare:workers can gate experimental APIs without
-  // relying on Cloudflare.compatibilityFlags (which filters out experimental flags themselves).
-  bool getIsExperimental(jsg::Lock& js);
+  jsg::JsSymbol getRestoreSymbol(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(EntrypointsModule, CompatibilityFlags::Reader flags) {
     JSG_NESTED_TYPE(WorkerEntrypoint);
@@ -107,19 +104,8 @@ class EntrypointsModule: public jsg::Object {
 
     JSG_METHOD(waitUntil);
     JSG_METHOD(getCtxCache);
-
-    // abortIsolate:
-    //
-    // From user code only usable with experimental set for now.
-    // The Python runtime wants to use it directly.
-    //
-    // So we always expose it to internal JS for the Python runtime, but the
-    // version exposed to user code checks this isExperimental flag and throws
-    // if it returns false.
-    //
-    // TODO: Clean up when we remove the experimental gate on abortIsolate.
+    JSG_LAZY_INSTANCE_PROPERTY(restore, getRestoreSymbol);
     JSG_METHOD(abortIsolate);
-    JSG_READONLY_PROTOTYPE_PROPERTY(isExperimental, getIsExperimental);
   }
 };
 

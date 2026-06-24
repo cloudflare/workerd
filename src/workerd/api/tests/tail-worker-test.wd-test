@@ -167,7 +167,7 @@ const logWorker :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "tail-worker-test.js")
   ],
-  compatibilityFlags = ["experimental", "nodejs_compat", "unsafe_module"],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
   streamingTails = ["receiver"],
 );
 

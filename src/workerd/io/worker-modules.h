@@ -214,7 +214,7 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           // bundleBuilder.addEsmModule(def.name, entry);
           // break;
         }
-        KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
+        KJ_CASE_ONEOF(content, Worker::Script::ObsoletePythonRequirement) {
           // Handled separately
           break;
         }
@@ -362,7 +362,7 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
       // Nothing to do. Handled elsewhere.
       return kj::none;
     }
-    KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
+    KJ_CASE_ONEOF(content, Worker::Script::ObsoletePythonRequirement) {
       // Nothing to do. Handled elsewhere.
       return kj::none;
     }
@@ -416,7 +416,7 @@ kj::Array<Worker::Script::CompiledGlobal> compileServiceWorkerGlobals(jsg::Lock&
         KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
           KJ_FAIL_REQUIRE("modules not supported with mainScript");
         }
-        KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
+        KJ_CASE_ONEOF(content, Worker::Script::ObsoletePythonRequirement) {
           KJ_FAIL_REQUIRE("modules not supported with mainScript");
         }
         KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
@@ -491,10 +491,6 @@ void registerPythonCommonModules(jsg::Lock& lock,
           isWorkerd, isTracing, snapshotToDisk, createBaselineSnapshot, pythonRelease,
           kj::mv(maybeSnapshot), featureFlags)),
       jsg::ModuleRegistry::Type::INTERNAL);
-
-  // Inject packages tar file
-  modules.addBuiltinModule("pyodide-internal:packages_tar_reader", "export default { }"_kj,
-      workerd::jsg::ModuleRegistry::Type::INTERNAL, {});
 
   // Inject artifact bundler.
   modules.addBuiltinModule("pyodide-internal:artifacts",

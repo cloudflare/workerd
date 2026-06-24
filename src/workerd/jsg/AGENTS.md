@@ -26,6 +26,7 @@ Macro-driven C++/V8 binding layer: declares C++ types as JS-visible resources/st
 | `jsvalue.h`      | `JsValue`, `JsObject`, `JsString`, etc. — typed wrappers over `v8::Value`                                                   |
 | `type-wrapper.h` | `TypeWrapper` template: compile-time dispatch for C++ ↔ V8 conversions                                                     |
 | `meta.h`         | Argument unwrapping, `ArgumentContext`, parameter pack metaprogramming                                                      |
+| `unwrap-args.h`  | `UnwrappedArgs` helper: deterministic left-to-right argument unwrapping in V8 callbacks                                     |
 | `fast-api.h`     | V8 Fast API call optimizations                                                                                              |
 | `ser.h`          | Structured clone: `Serializer`/`Deserializer`                                                                               |
 | `web-idl.h`      | Web IDL types: `NonCoercible<T>`, `Sequence`, etc.                                                                          |

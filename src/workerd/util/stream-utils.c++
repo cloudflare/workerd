@@ -38,7 +38,7 @@ class MemoryInputStream final: public kj::AsyncInputStream {
     auto ptr = kj::arrayPtr<kj::byte>(static_cast<kj::byte*>(buffer), maxBytes);
     size_t toRead = kj::min(data.size(), ptr.size());
     if (toRead == 0) return toRead;
-    ptr.first(toRead).copyFrom(data.first(toRead));
+    ptr.write(data.first(toRead));
     data = data.slice(toRead);
     return toRead;
   }

@@ -85,6 +85,16 @@ class SqliteKv: private SqliteDatabase::ResetListener {
   //   extension might help here, though it can only support arrays of NUL-terminated strings, not
   //   byte blobs or strings containing NUL bytes.
 
+  // Get/put "externals", which are lists of tokens associated with keys. These are stored in a
+  // separate table (_cf_EXTERNALS) which is lazily created.
+  //
+  // Note that `put()` and `delete_()` automatically clear the externals for the key. If the data
+  // written by `put()` references externals, a call to `putExternals()` must be made later on,
+  // but must NOT be made if another `put()` to the same key happens first. This is all managed
+  // by `StoredExternalHandler`, which should be the only caller of these methods.
+  kj::Array<kj::Array<byte>> getExternals(kj::StringPtr key);
+  void putExternals(kj::StringPtr key, kj::Array<kj::Array<byte>> tokens);
+
  private:
   struct Uninitialized {};
 
@@ -162,11 +172,38 @@ class SqliteKv: private SqliteDatabase::ResetListener {
     Initialized(SqliteDatabase& db): db(db) {}
   };
 
+  // Prepared statements for the _cf_EXTERNALS table. Created lazily on first use, since the
+  // table must exist before its statements can be prepared.
+  struct ExternalsInitialized {
+    SqliteDatabase& db;
+
+    static constexpr SqliteKvRegulator regulator;
+
+    SqliteDatabase::Statement stmtGetExternals = db.prepare(regulator, R"(
+      SELECT token FROM _cf_EXTERNALS WHERE key = ? ORDER BY idx
+    )");
+    SqliteDatabase::Statement stmtPutExternal = db.prepare(regulator, R"(
+      INSERT INTO _cf_EXTERNALS VALUES(?, ?, ?)
+    )");
+    SqliteDatabase::Statement stmtDeleteExternals = db.prepare(regulator, R"(
+      DELETE FROM _cf_EXTERNALS WHERE key = ?
+    )");
+
+    ExternalsInitialized(SqliteDatabase& db): db(db) {}
+  };
+
   kj::OneOf<Uninitialized, Initialized> state;
+
+  // Lazily-initialized state for the _cf_EXTERNALS table. Distinct from `state` so that the
+  // externals table is only created if/when externals are actually used.
+  kj::OneOf<Uninitialized, ExternalsInitialized> externalsState = Uninitialized{};
 
   // Has the _cf_KV table been created? This is separate from Uninitialized/Initialized since it
   // has to be repeated after a reset, whereas the statements do not need to be recreated.
   bool tableCreated = false;
+
+  // Has the _cf_EXTERNALS table been created? Same caveat as `tableCreated`.
+  bool externalsTableCreated = false;
 
   kj::Maybe<ListCursor&> currentCursor;
 
@@ -175,6 +212,15 @@ class SqliteKv: private SqliteDatabase::ResetListener {
   Initialized& ensureInitialized(bool allowUnconfirmed);
   // Make sure the KV table is created and prepared statements are ready. Not called until the
   // first write.
+
+  // Make sure the _cf_EXTERNALS table is created and its prepared statements are ready. Not
+  // called until the first call to putExternals().
+  ExternalsInitialized& ensureExternalsInitialized();
+
+  // Delete all externals associated with `key`, if the _cf_EXTERNALS table exists. No-op if the
+  // table has never been created. Called automatically from put() and delete_(). Always runs
+  // with `allowUnconfirmed = true` since the paired KV write decides confirmation semantics.
+  void clearExternalsIfPresent(KeyPtr key);
 
   void beforeSqliteReset() override;
 

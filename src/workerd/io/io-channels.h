@@ -9,6 +9,7 @@
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-util.h>
 #include <workerd/io/trace.h>
+#include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-source.h>
 
 #include <capnp/capability.h>  // for Capability
@@ -98,6 +99,20 @@ struct DynamicWorkerSource;
 // anything in the world except for the client -- this is a useful property for sandboxing!
 class IoChannelFactory {
  public:
+  // Opaque, IoContext-independent handle that knows how to construct a channel token referring to
+  // the current entrypoint ("self"). Used to implement `ctx.restore()`: the implementation of
+  // `ctx.restore()` passes this back into `makeRestored*()` so that the resulting restored channel
+  // can build a token chaining back to the current entrypoint.
+  //
+  // This is intentionally an empty interface. It is only ever consumed by the `makeRestored*()`
+  // implementation belonging to the same runtime, which downcasts it to a runtime-specific
+  // subtype.
+  //
+  // Token construction is deferred until actually needed, so that we avoid wasted work when
+  // `ctx.restore()` is never used, and so that any exceptions thrown while constructing the token
+  // surface only when the token is genuinely required.
+  class SelfTokenFactory: public kj::Refcounted {};
+
   // Contains metadata attached to an outgoing subrequest from a worker, independent of the type
   // of request.
   struct SubrequestMetadata {
@@ -117,6 +132,14 @@ class IoChannelFactory {
 
     // Timestamp for when a subrequest is started. (ms since the Unix Epoch)
     double startTime = dateNow();
+
+    // If the subrequest was originally made on a channel that was itself created by calling a
+    // `[restore]()` method on some other service, `restoredSelfTokenFactory` is able to construct a
+    // token referring to that channel. In the case that the target is a dynamic worker or facet
+    // (contexts which aren't inherently tokenizeable), then `restoredSelfTokenFactory` is
+    // appropriate to pass down to the IoContext as the `selfTokenFactory`, for use by the
+    // implementation of `ctx.restore()`, so that it can determine its own base token.
+    kj::Maybe<kj::Own<SelfTokenFactory>> restoredSelfTokenFactory;
   };
 
   // Parameters that can influence the version of a worker that is used to serve a subrequest.
@@ -167,26 +190,15 @@ class IoChannelFactory {
     STORAGE,
   };
 
-  // Object representing somehere where generic workers subrequests can be sent. Multiple requests
-  // may be sent. This is an I/O type so it is only valid within the `IoContext` where it was
-  // created.
-  class SubrequestChannel: public kj::Refcounted, public Frankenvalue::CapTableEntry {
+  // Base class for all channel types that can be tokenized, e.g. SubrequestChannel,
+  // ActorClassChannel.
+  class TokenizableChannel: public kj::Refcounted, public Frankenvalue::CapTableEntry {
    public:
-    // Start a new request to this target.
-    //
-    // Note that not all `metadata` properties make sense here, but it didn't seem worth defining
-    // a new struct type. `cfBlobJson` and `parentSpan` make sense, but `featureFlagsForFl` and
-    // `dynamicDispatchTarget` do not.
-    //
-    // Note that the caller is expected to keep the SubrequestChannel alive until it is done with
-    // the returned WorkerInterface.
-    virtual kj::Own<WorkerInterface> startRequest(SubrequestMetadata metadata) = 0;
-
     kj::Own<CapTableEntry> clone() override final {
       return kj::addRef(*this);
     }
 
-    // Throws a JSG error if a Fetcher backed by this channel should not be serialized and passed
+    // Throws a JSG error if an object backed by this channel should not be serialized and passed
     // to other workers. The default implementation throws a generic error, but subclasses may
     // specialize with better errror messages -- or override to just return in order to permit the
     // serialization.
@@ -195,10 +207,13 @@ class IoChannelFactory {
     // in production, would be difficult or impossible to serialize. In particular,
     // dynamically-loaded workers cannot be serialized because the system does not know how to
     // reconstruct a dynamically-loaded worker from scratch.
+    //
+    // TODO(cleanup): Maybe we can remove this by having everyone call getToken() as a way to check
+    //   transferrability, even in cases where we don't necessarily use the token?
     virtual void requireAllowsTransfer() = 0;
 
-    // Get a token representing this SubrequestChannel which can be converted back into a
-    // SubrequestChannel using subrequestChannelFromToken(). This is a convenience wrapper around
+    // Get a token representing this TokenizableChannel which can be converted back into a
+    // channel object using `IoChannelFactory::*FromToken()`. This is a convenience wrapper around
     // getTokenMaybeSync() for callers that don't care about the synchronous optimization.
     kj::Promise<kj::Array<byte>> getToken(ChannelTokenUsage usage);
 
@@ -209,9 +224,12 @@ class IoChannelFactory {
     virtual kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
         ChannelTokenUsage usage) = 0;
 
-    // If this SubrequestChannel is just a wrapper around a promise for some later
-    // SubrequestChannel, return the inner channel -- synchronously if the promise has resolved
+    // If this TokenizableChannel is just a wrapper around a promise for some later
+    // TokenizableChannel, return the inner channel -- synchronously if the promise has resolved
     // already, otherwise asynchronously.
+    //
+    // The resolved channel is *always* the same kind (e.g. SubrequestChannel) as this one, so can
+    // be safely downcast without a runtime check.
     //
     // Note that the various `IoChannelFactory` methods that take `props` or `env` objects all
     // automatically resolve all channel objects *before* passing off to the underlying
@@ -220,10 +238,26 @@ class IoChannelFactory {
     // in every use case would be painful, so it is taken care of in this layer.
     //
     // Default implementation returns self.
-    virtual kj::OneOf<kj::Own<SubrequestChannel>, kj::Promise<kj::Own<SubrequestChannel>>>
+    virtual kj::OneOf<kj::Own<TokenizableChannel>, kj::Promise<kj::Own<TokenizableChannel>>>
     getResolved() {
       return kj::addRef(*this);
     }
+  };
+
+  // Object representing somehere where generic workers subrequests can be sent. Multiple requests
+  // may be sent. This is an I/O type so it is only valid within the `IoContext` where it was
+  // created.
+  class SubrequestChannel: public TokenizableChannel {
+   public:
+    // Start a new request to this target.
+    //
+    // Note that not all `metadata` properties make sense here, but it didn't seem worth defining
+    // a new struct type. `cfBlobJson` and `parentSpan` make sense, but `featureFlagsForFl` and
+    // `dynamicDispatchTarget` do not.
+    //
+    // Note that the caller is expected to keep the SubrequestChannel alive until it is done with
+    // the returned WorkerInterface.
+    virtual kj::Own<WorkerInterface> startRequest(SubrequestMetadata metadata) = 0;
   };
 
   // Obtain an object representing a particular subrequest channel.
@@ -249,18 +283,9 @@ class IoChannelFactory {
   virtual kj::Own<SubrequestChannel> getSubrequestChannelResolved(
       uint channel, kj::Maybe<Frankenvalue> props, kj::Maybe<VersionRequest> versionRequest) = 0;
 
-  // Stub for a remote actor. Allows sending requests to the actor.
-  class ActorChannel: public SubrequestChannel {
-   public:
-    // At present there are no methods beyond what `SubrequestChannel` defines. However, it's
-    // easy to imagine that actor stubs may have more functionality than just sending requests
-    // someday, so we keep this as a separate type.
-
-    // For now, actor stubs are not transferrable -- but we do intend to change that at some point.
-    void requireAllowsTransfer() override final;
-    kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
-        ChannelTokenUsage usage) override final;
-  };
+  // ActorChannel used to be its own type, but no longer is.
+  // TODO(cleanup): Update all references.
+  using ActorChannel = SubrequestChannel;
 
   // Get an actor stub from the given namespace for the actor with the given ID.
   //
@@ -284,22 +309,8 @@ class IoChannelFactory {
   // ActorClassChannel is a reference to an actor class in another worker. This class acts as a
   // token which can be passed into other interfaces that might use the actor class, particularly
   // Worker::Actor::FacetManager.
-  class ActorClassChannel: public kj::Refcounted, public Frankenvalue::CapTableEntry {
+  class ActorClassChannel: public TokenizableChannel {
    public:
-    kj::Own<CapTableEntry> clone() override final {
-      return kj::addRef(*this);
-    }
-
-    // Same as the corresponding methods on SubrequestChannel.
-    virtual void requireAllowsTransfer() = 0;
-    kj::Promise<kj::Array<byte>> getToken(ChannelTokenUsage usage);
-    virtual kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
-        ChannelTokenUsage usage) = 0;
-    virtual kj::OneOf<kj::Own<ActorClassChannel>, kj::Promise<kj::Own<ActorClassChannel>>>
-    getResolved() {
-      return kj::addRef(*this);
-    }
-
     // This class has no functional methods, since it serves as a token to be passed to other
     // interfaces (namely the facets API).
   };
@@ -318,6 +329,27 @@ class IoChannelFactory {
   // contains strictly resolved channels.
   virtual kj::Own<ActorClassChannel> getActorClassResolved(
       uint channel, kj::Maybe<Frankenvalue> props) = 0;
+
+  // RpcChannel points at a persistent RpcTarget implemented by some other worker. "Persistent"
+  // means it can be saved as a channel token and restored later, recreating the same object,
+  // possibly in an entirely new isolate.
+  class RpcChannel: public TokenizableChannel {
+   public:
+    struct Session {
+      rpc::JsRpcTarget::Client cap;
+
+      // Cancelling this terminates the session. Typically you should pass this to
+      // ioContext.addTask(), so that it is canceled naturally if the parent context is canceled.
+      kj::Promise<void> task;
+    };
+
+    // Restoring the channel opens a fresh JS RPC session to the persistent target.
+    virtual Session restore() = 0;
+  };
+
+  virtual kj::Own<RpcChannel> getRpcChannel(uint channel) {
+    KJ_UNIMPLEMENTED("This runtime doesn't support RPC channels.");
+  }
 
   // Aborts all actors except those in namespaces marked with `preventEviction`.
   virtual void abortAllActors(kj::Maybe<kj::Exception&> reason) {
@@ -354,6 +386,8 @@ class IoChannelFactory {
       ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
   virtual kj::Own<ActorClassChannel> actorClassFromToken(
       ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
+  virtual kj::Own<RpcChannel> rpcChannelFromToken(
+      ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
 
   // Overloads which accept a promise. Any attempts to use the channel will have to wait for the
   // token to arrive first, but this should be transparent.
@@ -361,6 +395,38 @@ class IoChannelFactory {
       ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token);
   kj::Own<ActorClassChannel> actorClassFromToken(
       ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token);
+  kj::Own<RpcChannel> rpcChannelFromToken(
+      ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token);
+
+  // Create a SubrequestChannel or RpcChannel representing the value returned by the
+  // `[restore]()` method of the current entrypoint. `selfTokenFactory` is able to construct a
+  // token referring to the current entrypoint (get this from `IoContext::getSelfTokenFactory()`).
+  // These are called in the implementation of `ctx.restore()`. The returned channel's getToken()
+  // will return a token of type `restored`.
+  //
+  // For `makeRestoredSubrequestChannel()`, the returned channel passes through all other calls
+  // to `inner`, which should be the channel constructed by the original call to `[restore]()`.
+  // The restoration process is only invoked when the token has been serialized and then restored.
+  //
+  // For `makeRestoredRpcChannel()`, the returned channel is expected to be paired with an
+  // already-live `JsRpcTarget::Client`. Each call to its restore() method will actually perform
+  // the restoration process again.
+  kj::Own<SubrequestChannel> makeRestoredSubrequestChannel(
+      kj::Own<SelfTokenFactory> selfTokenFactory,
+      Frankenvalue restoreParams,
+      kj::Own<SubrequestChannel> inner);
+  kj::Own<RpcChannel> makeRestoredRpcChannel(
+      kj::Own<SelfTokenFactory> selfTokenFactory, Frankenvalue restoreParams);
+
+  // Similar to how `getSubrequestChannel()` is implemented in terms of
+  // `getSubrequestChannelResolved()`, these also have "resolved" versions. The non-virtual
+  // version first resolves all capabilities in `restoreParams`, then forwards.
+  virtual kj::Own<SubrequestChannel> makeRestoredSubrequestChannelResolved(
+      kj::Own<SelfTokenFactory> selfTokenFactory,
+      Frankenvalue restoreParams,
+      kj::Own<SubrequestChannel> inner);
+  virtual kj::Own<RpcChannel> makeRestoredRpcChannelResolved(
+      kj::Own<SelfTokenFactory> selfTokenFactory, Frankenvalue restoreParams);
 
   // Return a strong reference to this same factory. Used in the implementations of
   // getSubrequestChannel() and getActorClass() when delayed resolution is needed.
@@ -469,7 +535,7 @@ class IoChannelCapTableEntry final: public Frankenvalue::CapTableEntry {
   enum Type {
     SUBREQUEST,
     ACTOR_CLASS,
-    // TODO(someday): Other channel types, maybe.
+    RPC,
   };
 
   IoChannelCapTableEntry(Type type, uint channel): type(type), channel(channel) {}
@@ -488,5 +554,25 @@ class IoChannelCapTableEntry final: public Frankenvalue::CapTableEntry {
   Type type;
   uint channel;
 };
+
+// Construct a channel based on a promise for a future channel. These channels' `getResolved()`
+// methods will resolve to the underlying channel. `BaseChannelType` must be either
+// `SubrequestChannel` or `ActorClassChannel`.
+template <typename BaseChannelType>
+kj::Own<BaseChannelType> newPromisedChannel(kj::Promise<kj::Own<BaseChannelType>> promise);
+
+template <>
+kj::Own<IoChannelFactory::SubrequestChannel> newPromisedChannel<
+    IoChannelFactory::SubrequestChannel>(
+    kj::Promise<kj::Own<IoChannelFactory::SubrequestChannel>> promise);
+
+template <>
+kj::Own<IoChannelFactory::ActorClassChannel> newPromisedChannel<
+    IoChannelFactory::ActorClassChannel>(
+    kj::Promise<kj::Own<IoChannelFactory::ActorClassChannel>> promise);
+
+template <>
+kj::Own<IoChannelFactory::RpcChannel> newPromisedChannel<IoChannelFactory::RpcChannel>(
+    kj::Promise<kj::Own<IoChannelFactory::RpcChannel>> promise);
 
 }  // namespace workerd

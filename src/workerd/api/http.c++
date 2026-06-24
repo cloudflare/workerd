@@ -16,6 +16,7 @@
 
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
+#include <workerd/io/stored-value.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/abortable.h>
@@ -242,7 +243,7 @@ bool Body::getBodyUsed() {
   }
   return false;
 }
-jsg::Promise<jsg::BufferSource> Body::arrayBuffer(jsg::Lock& js) {
+jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> Body::arrayBuffer(jsg::Lock& js) {
   KJ_IF_SOME(i, impl) {
     return js.evalNow([&] {
       JSG_REQUIRE(!i.stream->isDisturbed(), TypeError,
@@ -255,13 +256,15 @@ jsg::Promise<jsg::BufferSource> Body::arrayBuffer(jsg::Lock& js) {
 
   // If there's no body, we just return an empty array.
   // See https://fetch.spec.whatwg.org/#concept-body-consume-body
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
-  return js.resolvedPromise(jsg::BufferSource(js, kj::mv(backing)));
+  auto ab = jsg::JsArrayBuffer::create(js, 0);
+  return js.resolvedPromise(ab.addRef(js));
 }
 
-jsg::Promise<jsg::BufferSource> Body::bytes(jsg::Lock& js) {
-  return arrayBuffer(js).then(js,
-      [](jsg::Lock& js, jsg::BufferSource data) { return data.getTypedView<v8::Uint8Array>(js); });
+jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> Body::bytes(jsg::Lock& js) {
+  return arrayBuffer(js).then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> data) {
+    auto handle = data.getHandle(js);
+    return jsg::JsUint8Array::create(js, handle).addRef(js);
+  });
 }
 
 jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
@@ -331,7 +334,10 @@ jsg::Promise<jsg::Value> Body::json(jsg::Lock& js) {
 }
 
 jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
-  return arrayBuffer(js).then(js, [this](jsg::Lock& js, jsg::BufferSource buffer) {
+  // Note: `self` (jsg::Ref) is captured to prevent GC from collecting this object while
+  // the promise continuation is pending. Without it, the bare `this` pointer dangles.
+  return arrayBuffer(js).then(
+      js, [this, self = JSG_THIS](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) {
     kj::String contentType = headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)
                                  .map([](auto&& b) -> kj::String {
       return kj::mv(b);
@@ -344,7 +350,7 @@ jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
       }).orDefault(nullptr);
     }
 
-    return js.alloc<Blob>(js, buffer.getJsHandle(js), kj::mv(contentType));
+    return js.alloc<Blob>(js, jsg::JsBufferSource(buffer.getHandle(js)), kj::mv(contentType));
   });
 }
 
@@ -1333,7 +1339,7 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     }
 
     auto clientSocket = outer.acceptWebSocket(outHeaders);
-    auto wsPromise = ws->couple(kj::mv(clientSocket), context.getMetrics());
+    auto wsPromise = ws->couple(js, kj::mv(clientSocket), context.getMetrics());
 
     KJ_IF_SOME(a, context.getActor()) {
       KJ_IF_SOME(hib, a.getHibernationManager()) {
@@ -1546,6 +1552,14 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       return js.rejectedPromise<jsg::Ref<Response>>(s->getReason(js));
     }
   }
+
+  // Stash whether this request's body can be rewound (and so the request re-sent), before we lose
+  // access to the JS-level request. This is currently consumed only when the target is an actor
+  // (Durable Object), to classify retry eligibility for disconnected calls; for other fetches the
+  // value is simply overwritten by the next call and never read. The set->getClientWithTracing->
+  // wrap*SubrequestClient sequence is synchronous, so there is no stale-attribution risk.
+  ioContext.getMetrics().setNextSubrequestBodyRewindable(
+      SubrequestBodyRewindable(jsRequest->canRewindBody()));
 
   // Get client and trace context (if needed) in one clean call
   auto clientWithTracing = fetcher->getClientWithTracing(ioContext, jsRequest->serializeCfBlobJson(js), "fetch"_kjc);
@@ -2167,7 +2181,8 @@ void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
           // Arrange to send the token when it's ready.
           ioctx.addTask(promise
-              .then([pusher = rpcHandler.getExternalPusher(), fulfiller = kj::mv(paf.fulfiller)]
+              .then([pusher = rpcHandler.getExternalPusher(), fulfiller = kj::mv(paf.fulfiller),
+                     attachedChannel = kj::mv(channel)]
                     (kj::Array<byte> token) mutable {
             auto req = pusher.pushDelayedChannelTokenRequest(
                 capnp::MessageSize { 4 + token.size() / sizeof(capnp::word), 0 });
@@ -2183,25 +2198,35 @@ void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
         }
       }
       return;
+    } else KJ_IF_SOME(storedHandler, kj::tryDowncast<StoredExternalHandler::Serializer>(handler)) {
+      // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This
+      // format is temporary, anyone using this will lose their data later.
+      JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
+          "ServiceStub cannot be serialized in this context.");
+      KJ_SWITCH_ONEOF(channel->getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::STORAGE)) {
+        KJ_CASE_ONEOF(token, kj::Array<byte>) {
+          // Token is available synchronously. For backwards compatibility, write it directly into
+          // the serialized value.
+          // TODO(cleanup): As soon as all of production is updated to understand externals, stop
+          //   writing inline tokens.
+          serializer.writeLengthDelimited(token);
+        }
+        KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+          storedHandler.writeChannel(kj::mv(channel), kj::mv(promise));
+
+          // Write an empty array to signal that we're using an external rather than an inline
+          // token.
+          serializer.writeLengthDelimited(kj::ArrayPtr<const byte>());
+        }
+      }
+      return;
     }
+
     // TODO(someday): structuredClone() should have special handling that just reproduces the same
     //   local object. At present we have no way to recognize structuredClone() here though.
   }
 
-  // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This format
-  // is temporary, anyone using this will lose their data later.
-  JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
-      "ServiceStub cannot be serialized in this context.");
-  KJ_SWITCH_ONEOF(channel->getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::STORAGE)) {
-    KJ_CASE_ONEOF(token, kj::Array<byte>) {
-      serializer.writeLengthDelimited(token);
-    }
-    KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
-      // TODO(stub-storage): Eventually we'll serialize by pointing to an external table.
-      KJ_UNIMPLEMENTED(
-          "tried to store SubrequestChannel whose token is not synchronously available");
-    }
-  }
+  JSG_FAIL_REQUIRE(DOMDataCloneError, "ServiceStub cannot be serialized in this context.");
 }
 
 jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
@@ -2245,17 +2270,28 @@ jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
       }
 
       return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
+    } else KJ_IF_SOME(storedHandler,
+        kj::tryDowncast<StoredExternalHandler::Deserializer>(handler)) {
+      // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This
+      // format is temporary, anyone using this will lose their data later.
+      JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
+          "ServiceStub cannot be deserialized in this context.");
+      auto& ioctx = IoContext::current();
+      auto token = deserializer.readLengthDelimitedBytes();
+      kj::Own<IoChannelFactory::SubrequestChannel> channel;
+      if (token.size() > 0) {
+        // Token embedded inline, just use it.
+        channel = ioctx.getIoChannelFactory().subrequestChannelFromToken(
+            IoChannelFactory::ChannelTokenUsage::STORAGE, token);
+      } else {
+        // Token stored out-of-line as an external.
+        channel = storedHandler.readSubrequestChannel(ioctx.getIoChannelFactory());
+      }
+      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
     }
   }
 
-  // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This format
-  // is temporary, anyone using this will lose their data later.
-  JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
-      "ServiceStub cannot be deserialized in this context.");
-  auto& ioctx = IoContext::current();
-  auto channel = ioctx.getIoChannelFactory().subrequestChannelFromToken(
-      IoChannelFactory::ChannelTokenUsage::STORAGE, deserializer.readLengthDelimitedBytes());
-  return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
+  JSG_FAIL_REQUIRE(DOMDataCloneError, "ServiceStub cannot be deserialized in this context.");
 }
 
 static jsg::Promise<void> throwOnError(

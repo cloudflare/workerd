@@ -32,7 +32,6 @@ import {
   tryReadStart,
 } from 'node-internal:internal_net';
 import { JSStreamSocket } from 'node-internal:internal_tls_jsstream';
-import { checkServerIdentity } from 'node-internal:internal_tls';
 import type {
   ConnectionOptions,
   TlsOptions,
@@ -56,6 +55,7 @@ import {
   ERR_TLS_INVALID_CONTEXT,
 } from 'node-internal:internal_errors';
 import { SecureContext } from 'node-internal:internal_tls_common';
+import { default as processImpl } from 'node-internal:process';
 import { ok } from 'node-internal:internal_assert';
 
 const kConnectOptions = Symbol('connect-options');
@@ -220,13 +220,18 @@ export function TLSSocket(
     throw new ERR_OPTION_NOT_IMPLEMENTED('options.pskCallback');
   }
 
-  // TODO(soon): Call this on secureConnect once connect() api supports
-  // getting peer certificate.
+  // checkServerIdentity requires access to the peer certificate via
+  // getPeerCertificate(), which is not yet implemented. When the
+  // throw_on_not_implemented_tls_options compat flag is enabled we throw;
+  // otherwise we silently continue so that existing workers are not broken.
   if (tlsOptions.checkServerIdentity !== undefined) {
     validateFunction(
       tlsOptions.checkServerIdentity,
       'options.checkServerIdentity'
     );
+    if (processImpl.shouldThrowOnNotImplementedTlsOption()) {
+      throw new ERR_OPTION_NOT_IMPLEMENTED('options.checkServerIdentity');
+    }
   }
 
   this._tlsOptions = tlsOptions;
@@ -235,7 +240,7 @@ export function TLSSocket(
   this._newSessionPending = false;
   this._controlReleased = false;
   this.secureConnecting = true;
-  this.servername = null;
+  this.servername = tlsOptions.servername ?? null;
   this.authorized = false;
   this[kRes] = null;
   this[kIsVerified] = false;
@@ -495,7 +500,11 @@ TLSSocket.prototype._start = function _start(this: TLSSocket): void {
 
   try {
     const { host, port, addressType } = this._handle.options;
-    const socket = this._handle.socket.startTls();
+    const tlsOpts =
+      this.servername != null
+        ? { expectedServerHostname: this.servername }
+        : undefined;
+    const socket = this._handle.socket.startTls(tlsOpts);
 
     this._handle = {
       socket: socket,
@@ -537,9 +546,7 @@ TLSSocket.prototype.setServername = function setServername(
   name: string
 ): void {
   validateString(name, 'name');
-  // Pipefitter currently does not provide us a way on the internal
-  // system and possibly KJ's TLS implementation doesn't provides a way,
-  // but it is something we will need sooner than later.
+  this.servername = name;
 };
 
 TLSSocket.prototype.setSession = function (_session: string | Buffer): void {
@@ -700,6 +707,9 @@ export function connect(...args: unknown[]): TLSSocket {
       options.checkServerIdentity,
       'options.checkServerIdentity'
     );
+    if (processImpl.shouldThrowOnNotImplementedTlsOption()) {
+      throw new ERR_OPTION_NOT_IMPLEMENTED('options.checkServerIdentity');
+    }
   }
 
   // @ts-expect-error TS2345 Type incompatibility between Node.js Duplex and internal Duplex
@@ -710,7 +720,6 @@ export function connect(...args: unknown[]): TLSSocket {
     enableTrace: options.enableTrace,
     highWaterMark: options.highWaterMark,
     secureContext: options.secureContext,
-    checkServerIdentity: options.checkServerIdentity ?? checkServerIdentity,
     onread: options.onread,
     signal: options.signal,
     lookup: options.lookup,
@@ -721,6 +730,14 @@ export function connect(...args: unknown[]): TLSSocket {
   });
 
   tlssock[kConnectOptions] = options;
+
+  // In Node.js, servername defaults to options.host when not explicitly set.
+  // Store it on the TLSSocket so _start() can pass it as expectedServerHostname
+  // to the native Socket.startTls() call for correct TLS certificate identity
+  // validation.
+  if (options.servername !== undefined) {
+    tlssock.servername = options.servername;
+  }
 
   if (cb) {
     tlssock.once('secureConnect', cb);

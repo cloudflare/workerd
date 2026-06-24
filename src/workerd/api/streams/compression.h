@@ -18,7 +18,6 @@ namespace workerd::api {
 class CompressionAllocator final {
  public:
   CompressionAllocator(kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget);
-  void configure(z_stream* stream);
 
   static void* AllocForZlib(void* data, uInt items, uInt size);
   static void* AllocForBrotli(void* data, size_t size);

@@ -46,8 +46,9 @@ import %workspace%/build/tools/clang_tidy/clang_tidy.bazelrc
 build --incompatible_remote_local_fallback_for_remote_cache
 
 # Use -isystem for cc_library includes attribute – this prevents warnings for misbehaving external
-# code.
-build:linux --features=external_include_paths --host_features=external_include_paths
+# code. Applies to both Linux and macOS via the shared `:unix` config (see the
+# `build:linux --config=unix` / `build:macos --config=unix` lines below).
+build:unix --features=external_include_paths --host_features=external_include_paths
 
 # Forward compatibility with future Bazel versions:
 # Disable deprecated cfg = "host" Bazel rule setting. Blocked on perfetto.

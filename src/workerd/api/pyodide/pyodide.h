@@ -95,26 +95,8 @@ class PythonModuleInfo {
     return PythonModuleInfo(kj::mv(clonedNames), kj::mv(clonedContents));
   }
 
-  // Return the list of names to import into a package snapshot.
-  kj::Array<kj::String> getPackageSnapshotImports(kj::StringPtr version);
-  // Takes in a list of Python files (their contents). Parses these files to find the import
-  // statements, then returns a list of modules imported via those statements.
-  //
-  // For example:
-  // import a, b, c
-  // from z import x
-  // import t.y.u
-  // from . import k
-  //
-  // -> ["a", "b", "c", "z", "t.y.u"]
-  //
-  // Package relative imports are ignored.
-  static kj::Array<kj::String> parsePythonScriptImports(kj::Array<kj::String> files);
   kj::HashSet<kj::String> getWorkerModuleSet();
   kj::Array<kj::String> getPythonFileContents();
-  static kj::Array<kj::String> filterPythonScriptImports(kj::HashSet<kj::String> workerModules,
-      kj::ArrayPtr<kj::String> imports,
-      kj::StringPtr version);
 };
 
 // A class wrapping the information stored in a WorkerBundle, in particular the Python source files
@@ -128,7 +110,6 @@ class PyodideMetadataReader: public jsg::Object {
   struct State {
     kj::String mainModule;
     PythonModuleInfo moduleInfo;
-    kj::Array<kj::String> requirements;
     kj::String pyodideVersion;
     kj::String packagesVersion;
     kj::String packagesLock;
@@ -141,7 +122,6 @@ class PyodideMetadataReader: public jsg::Object {
     State(kj::String mainModule,
         kj::Array<kj::String> names,
         kj::Array<kj::Array<kj::byte>> contents,
-        kj::Array<kj::String> requirements,
         kj::String pyodideVersion,
         kj::String packagesVersion,
         kj::String packagesLock,
@@ -152,7 +132,6 @@ class PyodideMetadataReader: public jsg::Object {
         kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
         : mainModule(kj::mv(mainModule)),
           moduleInfo(kj::mv(names), kj::mv(contents)),
-          requirements(kj::mv(requirements)),
           pyodideVersion(kj::mv(pyodideVersion)),
           packagesVersion(kj::mv(packagesVersion)),
           packagesLock(kj::mv(packagesLock)),
@@ -189,10 +168,6 @@ class PyodideMetadataReader: public jsg::Object {
     return state->createBaselineSnapshot;
   }
 
-  // Returns whether the python-abort-isolate-on-fatal-error autogate is enabled. When true, the
-  // Python on_fatal handler should call abortIsolate() to terminate the isolate after reporting.
-  bool shouldAbortIsolateOnFatalError();
-
   kj::StringPtr getMainModule() {
     return state->mainModule;
   }
@@ -202,11 +177,6 @@ class PyodideMetadataReader: public jsg::Object {
   // TODO: Remove this.
   kj::Array<kj::StringPtr> getNames(jsg::Lock& js, jsg::Optional<kj::String> maybeExtFilter);
   kj::Array<int> getSizes(jsg::Lock& js);
-
-  // Return the list of names to import into a package snapshot.
-  kj::Array<kj::String> getPackageSnapshotImports(kj::String version);
-
-  kj::Array<jsg::JsRef<jsg::JsString>> getRequirements(jsg::Lock& js);
 
   int read(jsg::Lock& js, int index, int offset, kj::Array<kj::byte> buf);
 
@@ -237,8 +207,6 @@ class PyodideMetadataReader: public jsg::Object {
     return state->packagesLock;
   }
 
-  kj::HashSet<kj::String> getTransitiveRequirements();
-
   static kj::Array<kj::StringPtr> getBaselineSnapshotImports();
 
   // We call this during Python setup with the wasm memory and the addresses of the signal clock and
@@ -258,10 +226,8 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(isWorkerd);
     JSG_METHOD(isTracing);
     JSG_METHOD(getMainModule);
-    JSG_METHOD(getRequirements);
     JSG_METHOD(getNames);
     JSG_METHOD(getSizes);
-    JSG_METHOD(getPackageSnapshotImports);
     JSG_METHOD(read);
     JSG_METHOD(hasMemorySnapshot);
     JSG_METHOD(getMemorySnapshotSize);
@@ -272,8 +238,6 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getPackagesVersion);
     JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);
-    JSG_METHOD(shouldAbortIsolateOnFatalError);
-    JSG_METHOD(getTransitiveRequirements);
     JSG_METHOD(getCompatibilityFlags);
     JSG_STATIC_METHOD(getBaselineSnapshotImports);
     JSG_METHOD(setCpuLimitNearlyExceededCallback);
@@ -286,9 +250,6 @@ class PyodideMetadataReader: public jsg::Object {
     }
     for (const auto& content: state->moduleInfo.contents) {
       tracker.trackField("content", content);
-    }
-    for (const auto& requirement: state->requirements) {
-      tracker.trackField("requirement", requirement);
     }
   }
 
@@ -528,15 +489,22 @@ class SimplePythonLimiter: public jsg::Object {
 
 kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease);
 
-// Returns a list of filenames we need to fetch according to the pyodide-lock.json file
-// in addition to the requirements argument, we also must include all "stdlib" packages
-// as well as any transitive dependencies needed
-kj::Array<kj::String> getPythonPackageFiles(kj::StringPtr lockFileContents,
-    kj::ArrayPtr<kj::String> requirements,
-    kj::StringPtr packagesVersion);
+// Returns the list of filenames we need to fetch according to the pyodide-lock.json file. The lock
+// file is pre-filtered to contain exactly the packages we want to load, so we fetch all of them.
+kj::Array<kj::String> getPythonPackageFiles(kj::StringPtr lockFileContents);
 
 // Constructs the path to a Python package in the package repository
 kj::String getPyodidePackagePath(kj::StringPtr packagesVersion, kj::StringPtr filename);
+
+// Computes the subresource-integrity-style checksum ("sha256-<base64>") of the given bytes.
+kj::String computePyodideBundleIntegrity(kj::ArrayPtr<const kj::byte> bytes);
+
+// Verifies that a fetched/downloaded Pyodide bundle matches the expected subresource-integrity
+// checksum from the release metadata. Throws on mismatch. Verification is skipped only for the
+// "dev" bundle (built locally, no published checksum); for any other bundle a blank
+// `expectedIntegrity` is itself an error.
+void verifyPyodideBundleIntegrity(
+    kj::StringPtr version, kj::StringPtr expectedIntegrity, kj::ArrayPtr<const kj::byte> bytes);
 
 #define EW_PYODIDE_ISOLATE_TYPES                                                                   \
   api::pyodide::ReadOnlyBuffer, api::pyodide::PyodideMetadataReader,                               \

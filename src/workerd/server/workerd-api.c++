@@ -213,27 +213,6 @@ class EmptyReadOnlyActorStorageImpl final: public rpc::ActorStorage::Stage::Serv
 
 }  // namespace
 
-/**
- * This function matches the implementation of `getPythonRequirements` in the internal repo. But it
- * works on the workerd ModulesSource definition rather than the WorkerBundle.
- */
-kj::Array<kj::String> getPythonRequirements(const Worker::Script::ModulesSource& source) {
-  kj::Vector<kj::String> requirements;
-
-  for (auto& def: source.modules) {
-    KJ_SWITCH_ONEOF(def.content) {
-      KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
-        requirements.add(api::pyodide::canonicalizePythonPackageName(def.name));
-      }
-      KJ_CASE_ONEOF_DEFAULT {
-        break;
-      }
-    }
-  }
-
-  return requirements.releaseAsArray();
-}
-
 struct WorkerdApi::Impl final {
   kj::Own<CompatibilityFlags::Reader> features;
   capnp::List<config::Extension>::Reader extensions;
@@ -509,8 +488,9 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
       }
       case config::Worker::Module::PYTHON_MODULE:
         return Worker::Script::PythonModule{conf.getPythonModule()};
-      case config::Worker::Module::PYTHON_REQUIREMENT:
-        return Worker::Script::PythonRequirement{};
+      case config::Worker::Module::OBSOLETE_PYTHON_REQUIREMENT:
+        KJ_FAIL_REQUIRE(
+            "NOSENTRY Worker bundle specified Python requirement which is no longer supported");
       case config::Worker::Module::OBSOLETE: {
         // A non-supported or obsolete module type was configured
         KJ_FAIL_REQUIRE("Worker bundle specified an unsupported module type");
@@ -628,7 +608,8 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
       api::SubtleCrypto::ImportKeyData keyData;
       KJ_SWITCH_ONEOF(key.keyData) {
         KJ_CASE_ONEOF(data, kj::Array<byte>) {
-          keyData = kj::heapArray(data.asPtr());
+          auto u8 = jsg::JsBufferSource(jsg::JsUint8Array::create(lock, data));
+          keyData = u8.addRef(lock);
         }
         KJ_CASE_ONEOF(json, Global::Json) {
           v8::Local<v8::String> str = lock.wrap(context, kj::mv(json.text));
@@ -873,14 +854,11 @@ const WorkerdApi& WorkerdApi::from(const Worker::Api& api) {
 // TODO(soon): These are required for python workers but we don't support those yet
 // with the new module registry. Uncomment these when we do.
 // namespace {
-// static constexpr auto PYTHON_TAR_READER = "export default { }"_kj;
-
 // static const auto metadataSpecifier = "pyodide-internal:runtime-generated/metadata"_url;
 // static const auto artifactsSpecifier = "pyodide-internal:artifacts"_url;
 // static const auto internalJaegerSpecifier = "pyodide-internal:internalJaeger"_url;
 // static const auto diskCacheSpecifier = "pyodide-internal:disk_cache"_url;
 // static const auto limiterSpecifier = "pyodide-internal:limiter"_url;
-// static const auto tarReaderSpecifier = "pyodide-internal:packages_tar_reader"_url;
 // }  // namespace
 
 kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
@@ -936,8 +914,6 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
 
     //   jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(pyodideBundleBuilder, PYODIDE_BUNDLE);
     //   jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(pyodideBundleBuilder, bundle);
-
-    //   pyodideBundleBuilder.addEsm(tarReaderSpecifier, PYTHON_TAR_READER);
 
     //   api::pyodide::CreateBaselineSnapshot createBaselineSnapshot(
     //       pythonConfig.createBaselineSnapshot);
@@ -1125,7 +1101,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                     KJ_LOG(WARNING, "Fallback service returned a Python module");
                     return kj::none;
                   }
-                  KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
+                  KJ_CASE_ONEOF(content, Worker::Script::ObsoletePythonRequirement) {
                     // Python requirement modules are not supported.in fallback
                     KJ_LOG(WARNING, "Fallback service returned a Python requirement");
                     return kj::none;

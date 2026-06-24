@@ -16,6 +16,20 @@
 
 namespace workerd {
 
+// For internal errors, we generate an ID to include when rendering user-facing "internal error"
+// exceptions and writing internal exception logs, to make it easier to search for logs
+// corresponding to "internal error" exceptions reported by users.
+//
+// We'll use an ID of 24 base-32 encoded characters, just because its relatively simple to
+// generate from random bytes.  This should give us a value with 120 bits of uniqueness, which is
+// about as good as a UUID.
+//
+// (We're not using base-64 encoding to avoid issues with case insensitive search, as well as
+// ensuring that the id is easy to select and copy via double-clicking.)
+using InternalErrorId = kj::FixedArray<char, 24>;
+
+InternalErrorId makeInternalErrorId();
+
 // Log out an exception with context but without frills. This macro excludes any variadic arguments
 // from the macro so that we do not accidentally make a more granular fingerprint. It also will only
 // take a `context` argument that is known at compile time (via constexpr assignment).
@@ -23,6 +37,12 @@ namespace workerd {
   [&](const kj::Exception& e) {                                                                    \
     constexpr auto sentryErrorContext = context;                                                   \
     KJ_LOG(ERROR, e, sentryErrorContext);                                                          \
+  }(exception)
+
+#define LOG_EXCEPTION_WITH_ID(context, exception, id)                                              \
+  [&](const kj::Exception& e) {                                                                    \
+    constexpr auto sentryErrorContext = context;                                                   \
+    KJ_LOG(ERROR, e, sentryErrorContext, id);                                                      \
   }(exception)
 
 #define ACTOR_STORAGE_OP_PREFIX "; actorStorageOp = "

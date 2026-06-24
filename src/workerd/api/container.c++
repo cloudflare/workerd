@@ -154,8 +154,8 @@ jsg::Promise<jsg::Ref<ExecOutput>> ExecProcess::output(jsg::Lock& js) {
     stdoutPromise =
         stream->getController()
             .readAllBytes(js, IoContext::current().getLimitEnforcer().getBufferingLimit())
-            .then(js, [](jsg::Lock&, jsg::BufferSource bytes) {
-      return kj::heapArray(bytes.asArrayPtr());
+            .then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> bytes) {
+      return bytes.getHandle(js).copy();
     });
   }
 
@@ -165,8 +165,8 @@ jsg::Promise<jsg::Ref<ExecOutput>> ExecProcess::output(jsg::Lock& js) {
         "Cannot call output() after stderr has started being consumed.");
     stderrPromise = stream->getController()
                         .readAllBytes(js, kj::maxValue)
-                        .then(js, [](jsg::Lock&, jsg::BufferSource bytes) {
-      return kj::heapArray(bytes.asArrayPtr());
+                        .then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> bytes) {
+      return bytes.getHandle(js).copy();
     });
   }
 
@@ -211,6 +211,9 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   StartupOptions options = kj::mv(maybeOptions).orDefault({});
 
   auto req = rpcClient->startRequest();
+  KJ_IF_SOME(spanContext, IoContext::current().getCurrentTraceSpan().toSpanContext()) {
+    spanContext.toCapnp(req.initSpanContext());
+  }
   KJ_IF_SOME(entrypoint, options.entrypoint) {
     auto list = req.initEntrypoint(entrypoint.size());
     for (auto i: kj::indices(entrypoint)) {
@@ -481,6 +484,9 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
 
   auto params = req.initParams();
   params.setCombinedOutput(combinedOutput);
+  KJ_IF_SOME(spanContext, ioContext.getCurrentTraceSpan().toSpanContext()) {
+    spanContext.toCapnp(params.initSpanContext());
+  }
 
   // Some basic validation...
   KJ_IF_SOME(cwd, options.cwd) {
@@ -599,7 +605,11 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
 
   return IoContext::current()
       .awaitIo(js, rpcClient->monitorRequest(capnp::MessageSize{4, 0}).send())
-      .then(js, [this](jsg::Lock& js, capnp::Response<rpc::Container::MonitorResults> results) {
+      // Note: `self` (jsg::Ref) is captured to prevent GC from collecting this object while
+      // the promise continuation is pending. Without it, the bare `this` pointer dangles.
+      .then(js,
+          [this, self = JSG_THIS](
+              jsg::Lock& js, capnp::Response<rpc::Container::MonitorResults> results) {
     running = false;
     auto exitCode = results.getExitCode();
     KJ_IF_SOME(d, destroyReason) {
@@ -613,7 +623,8 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
       KJ_ASSERT_NONNULL(err.tryCast<jsg::JsObject>()).set(js, "exitCode", js.num(exitCode));
       js.throwException(err);
     }
-  }, [this](jsg::Lock& js, jsg::Value&& error) {
+  },
+          [this, self = JSG_THIS](jsg::Lock& js, jsg::Value&& error) {
     running = false;
     destroyReason = kj::none;
     js.throwException(kj::mv(error));
@@ -824,10 +835,14 @@ class Container::TcpPortOutgoingFactory final: public Fetcher::OutgoingFactory {
 jsg::Ref<Fetcher> Container::getTcpPort(jsg::Lock& js, int port) {
   JSG_REQUIRE(port > 0 && port < 65536, TypeError, "Invalid port number: ", port);
 
-  auto req = rpcClient->getTcpPortRequest(capnp::MessageSize{4, 0});
+  auto req = rpcClient->getTcpPortRequest(
+      capnp::MessageSize{4 + capnp::sizeInWords<rpc::SpanContext>(), 0});
   req.setPort(port);
 
   auto& ioctx = IoContext::current();
+  KJ_IF_SOME(spanContext, ioctx.getCurrentTraceSpan().toSpanContext()) {
+    spanContext.toCapnp(req.initSpanContext());
+  }
 
   kj::Own<Fetcher::OutgoingFactory> factory =
       kj::heap<TcpPortOutgoingFactory>(ioctx.getByteStreamFactory(), ioctx.getEntropySource(),

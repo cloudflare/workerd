@@ -11,6 +11,7 @@
 #include "wrappable.h"
 
 #include <workerd/jsg/meta.h>
+#include <workerd/jsg/unwrap-args.h>
 
 #include <v8-context.h>
 #include <v8-function.h>
@@ -87,15 +88,14 @@ struct FunctorCallback<TypeWrapper, Ret(Args...), kj::_::Indexes<indexes...>> {
       auto& func = extractInternalPointer<WrappableFunction<Ret(Args...)>, false>(
           context, args.Data().As<v8::Object>());
 
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
+          []<size_t i>() { return TypeErrorContext::callbackArgument(i); });
+
       if constexpr (isVoid<Ret>()) {
-        func(Lock::from(isolate),
-            wrapper.template unwrap<Args>(
-                js, context, args, indexes, TypeErrorContext::callbackArgument(indexes))...);
+        func(js, kj::mv(unwrapped).template take<indexes>()...);
       } else {
-        return wrapper.wrap(js, context, args.This(),
-            func(Lock::from(isolate),
-                wrapper.template unwrap<Args>(
-                    js, context, args, indexes, TypeErrorContext::callbackArgument(indexes))...));
+        return wrapper.wrap(
+            js, context, args.This(), func(js, kj::mv(unwrapped).template take<indexes>()...));
       }
     });
   }
@@ -117,15 +117,14 @@ struct FunctorCallback<TypeWrapper,
           WrappableFunction<Ret(const v8::FunctionCallbackInfo<v8::Value>&, Args...)>, false>(
           context, args.Data().As<v8::Object>());
 
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
+          []<size_t i>() { return TypeErrorContext::callbackArgument(i); });
+
       if constexpr (isVoid<Ret>()) {
-        func(js, args,
-            wrapper.template unwrap<Args>(
-                js, context, args, indexes, TypeErrorContext::callbackArgument(indexes))...);
+        func(js, args, kj::mv(unwrapped).template take<indexes>()...);
       } else {
         return wrapper.wrap(js, context, args.This(),
-            func(js, args,
-                wrapper.template unwrap<Args>(
-                    js, context, args, indexes, TypeErrorContext::callbackArgument(indexes))...));
+            func(js, args, kj::mv(unwrapped).template take<indexes>()...));
       }
     });
   }

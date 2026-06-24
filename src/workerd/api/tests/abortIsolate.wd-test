@@ -7,7 +7,6 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "abortIsolate.js"),
         ],
-        compatibilityFlags = ["experimental"],
         bindings = [
           (
             name = "topLevelAbort",

@@ -726,6 +726,7 @@ class TraceCustomEvent final: public WorkerInterface::CustomEvent {
 
   kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       capnp::ByteStreamFactory& byteStreamFactory,
+      FrankenvalueHandler& frankenvalueHandler,
       rpc::EventDispatcher::Client dispatcher) override;
 
   uint16_t getType() override {

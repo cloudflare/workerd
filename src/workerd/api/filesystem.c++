@@ -490,7 +490,7 @@ void FileSystemModule::close(jsg::Lock& js, int fd) {
 }
 
 uint32_t FileSystemModule::write(
-    jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> data, WriteOptions options) {
+    jsg::Lock& js, int fd, kj::Array<jsg::JsRef<jsg::JsBufferSource>> data, WriteOptions options) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
 
   KJ_IF_SOME(opened, vfs.tryGetFd(js, fd)) {
@@ -513,7 +513,8 @@ uint32_t FileSystemModule::write(
         auto pos = getPosition(js, opened.addRef(), file.addRef(), options);
         uint32_t total = 0;
         for (auto& buffer: data) {
-          KJ_SWITCH_ONEOF(file->write(js, pos, buffer)) {
+          auto handle = buffer.getHandle(js);
+          KJ_SWITCH_ONEOF(file->write(js, pos, handle.asArrayPtr())) {
             KJ_CASE_ONEOF(written, uint32_t) {
               pos += written;
               total += written;
@@ -546,7 +547,7 @@ uint32_t FileSystemModule::write(
 }
 
 uint32_t FileSystemModule::read(
-    jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> data, WriteOptions options) {
+    jsg::Lock& js, int fd, kj::Array<jsg::JsRef<jsg::JsBufferSource>> data, WriteOptions options) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
   KJ_IF_SOME(opened, vfs.tryGetFd(js, fd)) {
     if (!opened->read) {
@@ -561,11 +562,12 @@ uint32_t FileSystemModule::read(
         }
         uint32_t total = 0;
         for (auto& buffer: data) {
-          auto read = file->read(js, pos, buffer);
+          auto handle = buffer.getHandle(js);
+          auto read = file->read(js, pos, handle.asArrayPtr());
           // if read is less than the size of the buffer, we are at EOF.
           pos += read;
           total += read;
-          if (read < buffer.size()) break;
+          if (read < handle.size()) break;
         }
         // We only update the position if the options.position is not set.
         if (options.position == kj::none) {
@@ -588,7 +590,8 @@ uint32_t FileSystemModule::read(
   }
 }
 
-jsg::BufferSource FileSystemModule::readAll(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd) {
+jsg::JsRef<jsg::JsUint8Array> FileSystemModule::readAll(
+    jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
   KJ_SWITCH_ONEOF(pathOrFd) {
     KJ_CASE_ONEOF(path, FilePath) {
@@ -597,7 +600,7 @@ jsg::BufferSource FileSystemModule::readAll(jsg::Lock& js, kj::OneOf<int, FilePa
         KJ_SWITCH_ONEOF(node) {
           KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
             KJ_SWITCH_ONEOF(file->readAllBytes(js)) {
-              KJ_CASE_ONEOF(data, jsg::BufferSource) {
+              KJ_CASE_ONEOF(data, jsg::JsRef<jsg::JsUint8Array>) {
                 return kj::mv(data);
               }
               KJ_CASE_ONEOF(err, workerd::FsError) {
@@ -635,7 +638,7 @@ jsg::BufferSource FileSystemModule::readAll(jsg::Lock& js, kj::OneOf<int, FilePa
           });
 
           KJ_SWITCH_ONEOF(file->readAllBytes(js)) {
-            KJ_CASE_ONEOF(data, jsg::BufferSource) {
+            KJ_CASE_ONEOF(data, jsg::JsRef<jsg::JsUint8Array>) {
               return kj::mv(data);
             }
             KJ_CASE_ONEOF(err, workerd::FsError) {
@@ -656,7 +659,7 @@ jsg::BufferSource FileSystemModule::readAll(jsg::Lock& js, kj::OneOf<int, FilePa
 
 uint32_t FileSystemModule::writeAll(jsg::Lock& js,
     kj::OneOf<int, FilePath> pathOrFd,
-    jsg::BufferSource data,
+    jsg::JsBufferSource data,
     WriteAllOptions options) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
 
@@ -684,7 +687,7 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
             // If the append option is set, we will write to the end of the file
             // instead of overwriting it.
             if (options.append) {
-              KJ_SWITCH_ONEOF(file->write(js, stat.size, data)) {
+              KJ_SWITCH_ONEOF(file->write(js, stat.size, data.asArrayPtr())) {
                 KJ_CASE_ONEOF(written, uint32_t) {
                   return written;
                 }
@@ -696,7 +699,7 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
             }
 
             // Otherwise, we overwrite the entire file.
-            KJ_SWITCH_ONEOF(file->writeAll(js, data)) {
+            KJ_SWITCH_ONEOF(file->writeAll(js, data.asArrayPtr())) {
               KJ_CASE_ONEOF(written, uint32_t) {
                 return written;
               }
@@ -737,7 +740,7 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
               node::THROW_ERR_UV_EPERM(js, "writeAll"_kj);
             }
             auto file = workerd::File::newWritable(js, static_cast<uint32_t>(data.size()));
-            KJ_SWITCH_ONEOF(file->writeAll(js, data)) {
+            KJ_SWITCH_ONEOF(file->writeAll(js, data.asArrayPtr())) {
               KJ_CASE_ONEOF(written, uint32_t) {
                 KJ_IF_SOME(err, dir->add(js, relative.name, kj::mv(file))) {
                   throwFsError(js, err, "writeAll"_kj);
@@ -788,14 +791,14 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
           // If the file descriptor was opened in append mode, or if the append option
           // is set, then we'll use write instead to append to the end of the file.
           if (opened->append || options.append) {
-            return write(js, fd, kj::arr(kj::mv(data)),
+            return write(js, fd, kj::arr(data.addRef(js)),
                 {
                   .position = stat.size,
                 });
           }
 
           // Otherwise, we overwrite the entire file.
-          KJ_SWITCH_ONEOF(file->writeAll(js, data)) {
+          KJ_SWITCH_ONEOF(file->writeAll(js, data.asArrayPtr())) {
             KJ_CASE_ONEOF(written, uint32_t) {
               return written;
             }
@@ -1147,7 +1150,7 @@ void readdirImpl(jsg::Lock& js,
     const kj::Path& path,
     const FileSystemModule::ReadDirOptions& options,
     kj::Vector<FileSystemModule::DirEntHandle>& entries) {
-  for (auto& entry: *dir.get()) {
+  for (auto& entry: *dir) {
     auto name = options.recursive ? path.append(entry.key).toString(false) : kj::str(entry.key);
     KJ_SWITCH_ONEOF(entry.value) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
@@ -1421,7 +1424,7 @@ void handleCpDir(jsg::Lock& js,
 
   // Here, we iterate through each of the entries in the source directory,
   // recursively copying them to the destination directory.
-  for (auto& entry: *src.get()) {
+  for (auto& entry: *src) {
     kj::StringPtr name = entry.key;
     KJ_SWITCH_ONEOF(entry.value) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
@@ -1890,9 +1893,9 @@ jsg::Ref<Blob> FileSystemModule::openAsBlob(
       }
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         KJ_SWITCH_ONEOF(file->readAllBytes(js)) {
-          KJ_CASE_ONEOF(bytes, jsg::BufferSource) {
-            return js.alloc<Blob>(
-                js, bytes.getJsHandle(js), kj::mv(options.type).orDefault(kj::String()));
+          KJ_CASE_ONEOF(bytes, jsg::JsRef<jsg::JsUint8Array>) {
+            return js.alloc<Blob>(js, jsg::JsBufferSource(bytes.getHandle(js)),
+                kj::mv(options.type).orDefault(kj::String()));
           }
           KJ_CASE_ONEOF(err, workerd::FsError) {
             throwFsError(js, err, "open"_kj);
@@ -2125,7 +2128,7 @@ bool FileSystemHandle::canBeModifiedCurrently(jsg::Lock& js) const {
   auto pathname = getLocator().getPathname();
   if (pathname.endsWith("/"_kj)) {
     auto cloned = getLocator().clone();
-    cloned.setPathname(pathname.slice(0, pathname.size() - 1));
+    cloned.setPathname(pathname.first(pathname.size() - 1));
     return !getVfs().isLocked(js, cloned);
   }
   return !getVfs().isLocked(js, getLocator());
@@ -2357,7 +2360,7 @@ kj::Array<jsg::Ref<FileSystemHandle>> collectEntries(const workerd::VirtualFileS
     kj::Rc<workerd::Directory> inner,
     const jsg::Url& parentLocator) {
   kj::Vector<jsg::Ref<FileSystemHandle>> entries;
-  for (auto& entry: *inner.get()) {
+  for (auto& entry: *inner) {
     KJ_SWITCH_ONEOF(entry.value) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         auto locator = KJ_ASSERT_NONNULL(parentLocator.tryResolve(entry.key));
@@ -2557,10 +2560,10 @@ jsg::Promise<jsg::Ref<File>> FileSystemFileHandle::getFile(
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         auto stat = file->stat(js);
         KJ_SWITCH_ONEOF(file->readAllBytes(js)) {
-          KJ_CASE_ONEOF(bytes, jsg::BufferSource) {
-            return js.resolvedPromise(
-                js.alloc<File>(js, bytes.getJsHandle(js), jsg::USVString(kj::str(getName(js))),
-                    kj::String(), (stat.lastModified - kj::UNIX_EPOCH) / kj::MILLISECONDS));
+          KJ_CASE_ONEOF(bytes, jsg::JsRef<jsg::JsUint8Array>) {
+            return js.resolvedPromise(js.alloc<File>(js, jsg::JsBufferSource(bytes.getHandle(js)),
+                jsg::USVString(kj::str(getName(js))), kj::String(),
+                (stat.lastModified - kj::UNIX_EPOCH) / kj::MILLISECONDS));
           }
           KJ_CASE_ONEOF(err, workerd::FsError) {
             return js.rejectedPromise<jsg::Ref<File>>(
@@ -2659,8 +2662,7 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
                    jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) mutable {
     return js.tryCatch([&] {
       KJ_IF_SOME(unwrapped, dataHandler.tryUnwrap(js, chunk)) {
-        return FileSystemWritableFileStream::writeImpl(
-            js, kj::mv(unwrapped), *state.get(), deHandler);
+        return FileSystemWritableFileStream::writeImpl(js, kj::mv(unwrapped), *state, deHandler);
       }
       return js.rejectedPromise<void>(
           js.typeError("WritableStream received a value that is not writable"));
@@ -2724,13 +2726,13 @@ FileSystemWritableFileStream::FileSystemWritableFileStream(
       sharedState(kj::mv(sharedState)) {}
 
 jsg::Promise<void> FileSystemWritableFileStream::write(jsg::Lock& js,
-    kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String, WriteParams> data,
+    FileSystemWritableData data,
     const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
   JSG_REQUIRE(!getController().isLockedToWriter(), TypeError,
       "Cannot write to a stream that is locked to a reader");
   auto writer = getWriter(js);
   KJ_DEFER(writer->releaseLock(js));
-  return writeImpl(js, kj::mv(data), *sharedState.get(), deHandler);
+  return writeImpl(js, kj::mv(data), *sharedState, deHandler);
 }
 
 jsg::Promise<void> FileSystemWritableFileStream::writeImpl(jsg::Lock& js,
@@ -2750,8 +2752,9 @@ jsg::Promise<void> FileSystemWritableFileStream::writeImpl(jsg::Lock& js,
             }
           }
         }
-        KJ_CASE_ONEOF(buffer, jsg::BufferSource) {
-          KJ_SWITCH_ONEOF(inner->write(js, state.position, buffer)) {
+        KJ_CASE_ONEOF(buffer, jsg::JsRef<jsg::JsBufferSource>) {
+          auto handle = buffer.getHandle(js);
+          KJ_SWITCH_ONEOF(inner->write(js, state.position, handle.asArrayPtr())) {
             KJ_CASE_ONEOF(written, uint32_t) {
               state.position += written;
             }
@@ -2799,8 +2802,9 @@ jsg::Promise<void> FileSystemWritableFileStream::writeImpl(jsg::Lock& js,
                     }
                     KJ_UNREACHABLE;
                   }
-                  KJ_CASE_ONEOF(buffer, jsg::BufferSource) {
-                    KJ_SWITCH_ONEOF(inner->write(js, offset, buffer)) {
+                  KJ_CASE_ONEOF(buffer, jsg::JsRef<jsg::JsBufferSource>) {
+                    auto handle = buffer.getHandle(js);
+                    KJ_SWITCH_ONEOF(inner->write(js, offset, handle.asArrayPtr())) {
                       KJ_CASE_ONEOF(written, uint32_t) {
                         state.position = offset + written;
                         return js.resolvedPromise();

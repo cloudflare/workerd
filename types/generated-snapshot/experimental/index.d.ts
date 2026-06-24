@@ -492,6 +492,7 @@ interface ExecutionContext<Props = unknown> {
   passThroughOnException(): void;
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
+  restore(params: any): Promise<any>;
   cache?: CacheContext;
   readonly version?: {
     readonly metadata?: {
@@ -501,7 +502,8 @@ interface ExecutionContext<Props = unknown> {
     readonly key?: string;
     readonly override?: string;
   };
-  tracing?: Tracing;
+  readonly access?: CloudflareAccessContext;
+  tracing: Tracing;
   abort(reason?: any): void;
 }
 type ExportedHandlerFetchHandler<
@@ -604,6 +606,10 @@ interface CachePurgeOptions {
 interface CacheContext {
   purge(options: CachePurgeOptions): Promise<CachePurgeResult>;
 }
+interface CloudflareAccessContext {
+  readonly aud: string;
+  getIdentity(): Promise<CloudflareAccessIdentity | undefined>;
+}
 declare abstract class ColoLocalActorNamespace {
   get(actorId: string): Fetcher;
 }
@@ -673,6 +679,8 @@ type DurableObjectLocationHint =
   | "weur"
   | "eeur"
   | "apac"
+  | "apac-ne"
+  | "apac-se"
   | "oc"
   | "afr"
   | "me";
@@ -694,6 +702,7 @@ interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
+  restore(params: any): Promise<any>;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   container?: Container;
@@ -836,6 +845,7 @@ interface DurableObjectFacets {
   ): Fetcher<T>;
   abort(name: string, reason: any): void;
   delete(name: string): void;
+  clone(src: string, dst: string): void;
 }
 interface FacetStartupOptions<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
@@ -4728,11 +4738,62 @@ interface Tracing {
     callback: (span: Span, ...args: A) => T,
     ...args: A
   ): T;
+  startActiveSpan<T, A extends unknown[]>(
+    name: string,
+    callback: (span: Span, ...args: A) => T,
+    ...args: A
+  ): T;
   Span: typeof Span;
 }
 declare abstract class Span {
   get isTraced(): boolean;
   setAttribute(key: string, value?: boolean | number | string): void;
+  end(): void;
+}
+/**
+ * Represents the identity of a user authenticated via Cloudflare Access.
+ * This matches the result of calling /cdn-cgi/access/get-identity.
+ *
+ * The exact structure of the returned object depends on the identity provider
+ * configuration for the Access application. The fields below represent commonly
+ * available properties, but additional provider-specific fields may be present.
+ */
+interface CloudflareAccessIdentity extends Record<string, unknown> {
+  /** The user's email address, if available from the identity provider. */
+  email?: string;
+  /** The user's display name. */
+  name?: string;
+  /** The user's unique identifier. */
+  user_uuid?: string;
+  /** The Cloudflare account ID. */
+  account_id?: string;
+  /** Login timestamp (Unix epoch seconds). */
+  iat?: number;
+  /** The user's IP address at authentication time. */
+  ip?: string;
+  /** Authentication methods used (e.g., "pwd"). */
+  amr?: string[];
+  /** Identity provider information. */
+  idp?: {
+    id: string;
+    type: string;
+  };
+  /** Geographic information about where the user authenticated. */
+  geo?: {
+    country: string;
+  };
+  /** Group memberships from the identity provider. */
+  groups?: Array<{
+    id: string;
+    name: string;
+    email?: string;
+  }>;
+  /** Device posture check results, keyed by check ID. */
+  devicePosture?: Record<string, unknown>;
+  /** True if the user connected via Cloudflare WARP. */
+  is_warp?: boolean;
+  /** True if the user is authenticated via Cloudflare Gateway. */
+  is_gateway?: boolean;
 }
 // ============================================================================
 // Agent Memory
@@ -12883,87 +12944,6 @@ declare abstract class BrowserRun {
     options: BrowserRunMarkdownOptions,
   ): Promise<Response>;
 }
-interface BasicImageTransformations {
-  /**
-   * Maximum width in image pixels. The value must be an integer.
-   */
-  width?: number;
-  /**
-   * Maximum height in image pixels. The value must be an integer.
-   */
-  height?: number;
-  /**
-   * Resizing mode as a string. It affects interpretation of width and height
-   * options:
-   *  - scale-down: Similar to contain, but the image is never enlarged. If
-   *    the image is larger than given width or height, it will be resized.
-   *    Otherwise its original size will be kept.
-   *  - contain: Resizes to maximum size that fits within the given width and
-   *    height. If only a single dimension is given (e.g. only width), the
-   *    image will be shrunk or enlarged to exactly match that dimension.
-   *    Aspect ratio is always preserved.
-   *  - cover: Resizes (shrinks or enlarges) to fill the entire area of width
-   *    and height. If the image has an aspect ratio different from the ratio
-   *    of width and height, it will be cropped to fit.
-   *  - crop: The image will be shrunk and cropped to fit within the area
-   *    specified by width and height. The image will not be enlarged. For images
-   *    smaller than the given dimensions it's the same as scale-down. For
-   *    images larger than the given dimensions, it's the same as cover.
-   *    See also trim.
-   *  - pad: Resizes to the maximum size that fits within the given width and
-   *    height, and then fills the remaining area with a background color
-   *    (white by default). Use of this mode is not recommended, as the same
-   *    effect can be more efficiently achieved with the contain mode and the
-   *    CSS object-fit: contain property.
-   *  - squeeze: Stretches and deforms to the width and height given, even if it
-   *    breaks aspect ratio
-   */
-  fit?: "scale-down" | "contain" | "cover" | "crop" | "pad" | "squeeze";
-  /**
-   * Image segmentation using artificial intelligence models. Sets pixels not
-   * within selected segment area to transparent e.g "foreground" sets every
-   * background pixel as transparent.
-   */
-  segment?: "foreground";
-  /**
-   * When cropping with fit: "cover", this defines the side or point that should
-   * be left uncropped. The value is either a string
-   * "left", "right", "top", "bottom", "auto", or "center" (the default),
-   * or an object {x, y} containing focal point coordinates in the original
-   * image expressed as fractions ranging from 0.0 (top or left) to 1.0
-   * (bottom or right), 0.5 being the center. {fit: "cover", gravity: "top"} will
-   * crop bottom or left and right sides as necessary, but won’t crop anything
-   * from the top. {fit: "cover", gravity: {x:0.5, y:0.2}} will crop each side to
-   * preserve as much as possible around a point at 20% of the height of the
-   * source image.
-   */
-  gravity?:
-    | "face"
-    | "left"
-    | "right"
-    | "top"
-    | "bottom"
-    | "center"
-    | "auto"
-    | "entropy"
-    | BasicImageTransformationsGravityCoordinates;
-  /**
-   * Background color to add underneath the image. Applies only to images with
-   * transparency (such as PNG). Accepts any CSS color (#RRGGBB, rgba(…),
-   * hsl(…), etc.)
-   */
-  background?: string;
-  /**
-   * Number of degrees (90, 180, 270) to rotate the image by. width and height
-   * options refer to axes after rotation.
-   */
-  rotate?: 0 | 90 | 180 | 270 | 360;
-}
-interface BasicImageTransformationsGravityCoordinates {
-  x?: number;
-  y?: number;
-  mode?: "remainder" | "box-center";
-}
 /**
  * In addition to the properties you can set in the RequestInit dict
  * that you pass as an argument to the Request constructor, you can
@@ -13039,6 +13019,17 @@ interface RequestInitCfProperties extends Record<string, unknown> {
   cacheReserveMinimumFileSize?: number;
   scrapeShield?: boolean;
   apps?: boolean;
+  /**
+   * Controls whether an outbound gRPC-web subrequest from this Worker is
+   * converted to gRPC at the Cloudflare edge.
+   *
+   * - `"passthrough"`: forward the subrequest unchanged as gRPC-web (default).
+   * - `"convert"`: convert the gRPC-web subrequest to gRPC at the edge.
+   *
+   * Provides per-request control over the same edge conversion behavior
+   * gated by the `auto_grpc_convert` compatibility flag.
+   */
+  grpcWeb?: "passthrough" | "convert";
   image?: RequestInitCfPropertiesImage;
   minify?: RequestInitCfPropertiesImageMinify;
   mirage?: boolean;
@@ -13058,6 +13049,209 @@ interface RequestInitCfProperties extends Record<string, unknown> {
    * to point to that CNAME record.
    */
   resolveOverride?: string;
+}
+interface BasicImageTransformations {
+  /**
+   * Maximum width in image pixels. The value must be an integer.
+   */
+  width?: number;
+  /**
+   * Maximum height in image pixels. The value must be an integer.
+   */
+  height?: number;
+  /**
+   * When cropping with fit: "cover", this defines the side or point that should
+   * be left uncropped. The value is either a string
+   * "left", "right", "top", "bottom", "auto", or "center" (the default),
+   * or an object {x, y} containing focal point coordinates in the original
+   * image expressed as fractions ranging from 0.0 (top or left) to 1.0
+   * (bottom or right), 0.5 being the center. {fit: "cover", gravity: "top"} will
+   * crop bottom or left and right sides as necessary, but won’t crop anything
+   * from the top. {fit: "cover", gravity: {x:0.5, y:0.2}} will crop each side to
+   * preserve as much as possible around a point at 20% of the height of the
+   * source image.
+   */
+  gravity?:
+    | "face"
+    | "left"
+    | "right"
+    | "top"
+    | "bottom"
+    | "center"
+    | "auto"
+    | "entropy"
+    | BasicImageTransformationsGravityCoordinates;
+  /**
+   * Specifies how closely the image is cropped toward detected faces when combined
+   * with the gravity=face option. Accepts a valid range between 0.0 (includes as much
+   * of the background as possible) and 1.0 (crops the image as closely to the face as
+   * possible). The default is 0.
+   */
+  zoom?: number;
+  /**
+   * Resizing mode as a string. It affects interpretation of width and height
+   * options:
+   *  - scale-down: Similar to contain, but the image is never enlarged. If
+   *    the image is larger than given width or height, it will be resized.
+   *    Otherwise its original size will be kept.
+   *  - scale-up: Similar to contain, but the image is never shrunk. If the
+   *    image is smaller than the given width or height, it will be resized.
+   *    Otherwise its original size will be kept.
+   *  - contain: Resizes to maximum size that fits within the given width and
+   *    height. If only a single dimension is given (e.g. only width), the
+   *    image will be shrunk or enlarged to exactly match that dimension.
+   *    Aspect ratio is always preserved.
+   *  - cover: Resizes (shrinks or enlarges) to fill the entire area of width
+   *    and height. If the image has an aspect ratio different from the ratio
+   *    of width and height, it will be cropped to fit.
+   *  - crop: The image will be shrunk and cropped to fit within the area
+   *    specified by width and height. The image will not be enlarged. For images
+   *    smaller than the given dimensions it's the same as scale-down. For
+   *    images larger than the given dimensions, it's the same as cover.
+   *    See also trim.
+   *  - pad: Resizes to the maximum size that fits within the given width and
+   *    height, and then fills the remaining area with a background color
+   *    (white by default). Use of this mode is not recommended, as the same
+   *    effect can be more efficiently achieved with the contain mode and the
+   *    CSS object-fit: contain property.
+   *  - squeeze: Stretches and deforms to the width and height given, even if it
+   *    breaks aspect ratio
+   */
+  fit?:
+    | "scale-down"
+    | "scale-up"
+    | "contain"
+    | "cover"
+    | "crop"
+    | "pad"
+    | "squeeze";
+  /**
+   * Allows you to trim your image. Takes dpr into account and is performed before
+   * resizing or rotation.
+   *
+   * It can be used as:
+   * - left, top, right, bottom - it will specify the number of pixels to cut
+   *   off each side
+   * - width, height - the width/height you'd like to end up with - can be used
+   *   in combination with the properties above
+   * - border - this will automatically trim the surroundings of an image based on
+   *   it's color. It consists of three properties:
+   *    - color: rgb or hex representation of the color you wish to trim (todo: verify the rgba bit)
+   *    - tolerance: difference from color to treat as color
+   *    - keep: the number of pixels of border to keep
+   */
+  trim?:
+    | "border"
+    | {
+        top?: number;
+        bottom?: number;
+        left?: number;
+        right?: number;
+        width?: number;
+        height?: number;
+        border?:
+          | boolean
+          | {
+              color?: string;
+              tolerance?: number;
+              keep?: number;
+            };
+      };
+  /**
+   * Background color to add underneath the image. Applies only to images with
+   * transparency (such as PNG). Accepts any CSS color (#RRGGBB, rgba(…),
+   * hsl(…), etc.)
+   */
+  background?: string;
+  /**
+   * Flips the images horizontally, vertically, or both. Flipping is applied before
+   * rotation, so if you apply flip=h,rotate=90 then the image will be flipped
+   * horizontally, then rotated by 90 degrees.
+   */
+  flip?: "h" | "v" | "hv";
+  /**
+   * Number of degrees (90, 180, 270) to rotate the image by. width and height
+   * options refer to axes after rotation.
+   */
+  rotate?: 0 | 90 | 180 | 270 | 360;
+  /**
+   * Strength of sharpening filter to apply to the image. Floating-point
+   * number between 0 (no sharpening, default) and 10 (maximum). 1.0 is a
+   * recommended value for downscaled images.
+   */
+  sharpen?: number;
+  /**
+   * Radius of a blur filter (approximate gaussian). Maximum supported radius
+   * is 250.
+   */
+  blur?: number;
+  /**
+   * Increase contrast by a factor. A value of 1.0 equals no change, a value of
+   * 0.5 equals low contrast, and a value of 2.0 equals high contrast. 0 is
+   * ignored.
+   */
+  contrast?: number;
+  /**
+   * Increase brightness by a factor. A value of 1.0 equals no change, a value
+   * of 0.5 equals half brightness, and a value of 2.0 equals twice as bright.
+   * 0 is ignored.
+   */
+  brightness?: number;
+  /**
+   * Increase exposure by a factor. A value of 1.0 equals no change, a value of
+   * 0.5 darkens the image, and a value of 2.0 lightens the image. 0 is ignored.
+   */
+  gamma?: number;
+  /**
+   * Increase contrast by a factor. A value of 1.0 equals no change, a value of
+   * 0.5 equals low contrast, and a value of 2.0 equals high contrast. 0 is
+   * ignored.
+   */
+  saturation?: number;
+  /**
+   * Device Pixel Ratio. Default 1. Multiplier for width/height that makes it
+   * easier to specify higher-DPI sizes in <img srcset>.
+   */
+  dpr?: number;
+  /**
+   * Adds a border around the image. The border is added after resizing. Border
+   * width takes dpr into account, and can be specified either using a single
+   * width property, or individually for each side.
+   */
+  border?:
+    | {
+        color: string;
+        width: number;
+      }
+    | {
+        color: string;
+        top: number;
+        right: number;
+        bottom: number;
+        left: number;
+      };
+  /**
+   * Image segmentation using artificial intelligence models. Sets pixels not
+   * within selected segment area to transparent e.g "foreground" sets every
+   * background pixel as transparent.
+   */
+  segment?: "foreground";
+  /**
+   * Controls the algorithm used when an image needs to be enlarged. This
+   * parameter works with any fit mode that upscales, such as `contain`,
+   * `cover`, and `scale-up`. It has no effect when `fit=scale-down` or when
+   * the target dimensions are smaller than the source.
+   * - interpolate: Uses bicubic interpolation, which may reduce image quality.
+   *   This is the default behavior when `upscale` is not specified.
+   * - generate: Uses AI upscaling to produce sharper, more detailed results
+   *   when enlarging images.
+   */
+  upscale?: "interpolate" | "generate";
+}
+interface BasicImageTransformationsGravityCoordinates {
+  x?: number;
+  y?: number;
+  mode?: "remainder" | "box-center";
 }
 interface RequestInitCfPropertiesImageDraw extends BasicImageTransformations {
   /**
@@ -13113,43 +13307,6 @@ interface RequestInitCfPropertiesImageDraw extends BasicImageTransformations {
 }
 interface RequestInitCfPropertiesImage extends BasicImageTransformations {
   /**
-   * Device Pixel Ratio. Default 1. Multiplier for width/height that makes it
-   * easier to specify higher-DPI sizes in <img srcset>.
-   */
-  dpr?: number;
-  /**
-   * Allows you to trim your image. Takes dpr into account and is performed before
-   * resizing or rotation.
-   *
-   * It can be used as:
-   * - left, top, right, bottom - it will specify the number of pixels to cut
-   *   off each side
-   * - width, height - the width/height you'd like to end up with - can be used
-   *   in combination with the properties above
-   * - border - this will automatically trim the surroundings of an image based on
-   *   it's color. It consists of three properties:
-   *    - color: rgb or hex representation of the color you wish to trim (todo: verify the rgba bit)
-   *    - tolerance: difference from color to treat as color
-   *    - keep: the number of pixels of border to keep
-   */
-  trim?:
-    | "border"
-    | {
-        top?: number;
-        bottom?: number;
-        left?: number;
-        right?: number;
-        width?: number;
-        height?: number;
-        border?:
-          | boolean
-          | {
-              color?: string;
-              tolerance?: number;
-              keep?: number;
-            };
-      };
-  /**
    * Quality setting from 1-100 (useful values are in 60-90 range). Lower values
    * make images look worse, but load faster. The default is 85. It applies only
    * to JPEG and WebP images. It doesn’t have any effect on PNG.
@@ -13199,17 +13356,6 @@ interface RequestInitCfPropertiesImage extends BasicImageTransformations {
    */
   metadata?: "keep" | "copyright" | "none";
   /**
-   * Strength of sharpening filter to apply to the image. Floating-point
-   * number between 0 (no sharpening, default) and 10 (maximum). 1.0 is a
-   * recommended value for downscaled images.
-   */
-  sharpen?: number;
-  /**
-   * Radius of a blur filter (approximate gaussian). Maximum supported radius
-   * is 250.
-   */
-  blur?: number;
-  /**
    * Overlays are drawn in the order they appear in the array (last array
    * entry is the topmost layer).
    */
@@ -13220,52 +13366,6 @@ interface RequestInitCfPropertiesImage extends BasicImageTransformations {
    * the origin.
    */
   "origin-auth"?: "share-publicly";
-  /**
-   * Adds a border around the image. The border is added after resizing. Border
-   * width takes dpr into account, and can be specified either using a single
-   * width property, or individually for each side.
-   */
-  border?:
-    | {
-        color: string;
-        width: number;
-      }
-    | {
-        color: string;
-        top: number;
-        right: number;
-        bottom: number;
-        left: number;
-      };
-  /**
-   * Increase brightness by a factor. A value of 1.0 equals no change, a value
-   * of 0.5 equals half brightness, and a value of 2.0 equals twice as bright.
-   * 0 is ignored.
-   */
-  brightness?: number;
-  /**
-   * Increase contrast by a factor. A value of 1.0 equals no change, a value of
-   * 0.5 equals low contrast, and a value of 2.0 equals high contrast. 0 is
-   * ignored.
-   */
-  contrast?: number;
-  /**
-   * Increase exposure by a factor. A value of 1.0 equals no change, a value of
-   * 0.5 darkens the image, and a value of 2.0 lightens the image. 0 is ignored.
-   */
-  gamma?: number;
-  /**
-   * Increase contrast by a factor. A value of 1.0 equals no change, a value of
-   * 0.5 equals low contrast, and a value of 2.0 equals high contrast. 0 is
-   * ignored.
-   */
-  saturation?: number;
-  /**
-   * Flips the images horizontally, vertically, or both. Flipping is applied before
-   * rotation, so if you apply flip=h,rotate=90 then the image will be flipped
-   * horizontally, then rotated by 90 degrees.
-   */
-  flip?: "h" | "v" | "hv";
   /**
    * Slightly reduces latency on a cache miss by selecting a
    * quickest-to-compress file format, at a cost of increased file size and
@@ -15205,6 +15305,10 @@ declare namespace CloudflareWorkersModule {
     timeout?: WorkflowTimeoutDuration | number;
     sensitive?: WorkflowStepSensitivity;
   };
+  export type WorkflowStepRollbackConfig = Pick<
+    WorkflowStepConfig,
+    "retries" | "timeout"
+  >;
   export type WorkflowCronSchedule = {
     /** Cron expression that triggered this event. */
     cron: string;
@@ -15233,16 +15337,18 @@ declare namespace CloudflareWorkersModule {
     config: WorkflowStepConfig;
   };
   export type WorkflowRollbackContext<T = unknown> = {
+    ctx: WorkflowStepContext;
     error: Error;
     output: T | undefined;
+    /** @deprecated Use `ctx.step.name` and `ctx.step.count` instead. */
     stepName: string;
   };
   export type WorkflowRollbackHandler<T = unknown> = (
     ctx: WorkflowRollbackContext<T>,
   ) => Promise<void>;
   export type WorkflowStepRollbackOptions<T = unknown> = {
-    rollback?: WorkflowRollbackHandler<T>;
-    rollbackConfig?: WorkflowStepConfig;
+    rollback: WorkflowRollbackHandler<T>;
+    rollbackConfig?: WorkflowStepRollbackConfig;
   };
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
@@ -16211,7 +16317,8 @@ declare namespace TailStream {
     | "loadShed"
     | "responseStreamDisconnected"
     | "scriptNotFound"
-    | "internalError";
+    | "internalError"
+    | "exceededWallTime";
   interface ScriptVersion {
     readonly id: string;
     readonly tag?: string;

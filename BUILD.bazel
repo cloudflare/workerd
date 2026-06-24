@@ -34,6 +34,17 @@ npm_link_package(
     package = "@workerd/jsg",
 )
 
+genrule(
+    name = "merged_clang_tidy_config",
+    srcs = [
+        ":.clang-tidy",
+        "@capnp-cpp//:.clang-tidy",
+    ],
+    outs = ["merged.clang-tidy"],
+    cmd = "$(location //build/tools/clang_tidy:merge_clang_tidy_configs) $@ $(location :.clang-tidy) $(location @capnp-cpp//:.clang-tidy)",
+    tools = ["//build/tools/clang_tidy:merge_clang_tidy_configs"],
+)
+
 # Plugin to generate .js files
 capnp_es_bins.capnpc_js_binary(
     name = "capnpc_js_plugin",
@@ -142,6 +153,6 @@ selects.config_setting_group(
 # Clang-tidy config to use
 label_flag(
     name = "clang_tidy_config",
-    build_setting_default = ":.clang-tidy",
+    build_setting_default = ":merged_clang_tidy_config",
     visibility = ["//visibility:public"],
 )

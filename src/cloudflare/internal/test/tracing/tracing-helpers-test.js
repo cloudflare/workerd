@@ -197,6 +197,28 @@ export const publicImportTracing = {
   },
 };
 
+export const publicImportStartActiveSpan = {
+  async test(ctrl, env, ctx) {
+    let capturedSpan = null;
+    const result = publicTracing.startActiveSpan(
+      'public-start-active-op',
+      (span) => {
+        capturedSpan = span;
+        span.setAttribute('test', 'publicImportStartActiveSpan');
+        span.setAttribute('path', 'import-from-cloudflare-workers');
+        assert.strictEqual(span.isTraced, true);
+        return 'public-start-active-value';
+      }
+    );
+
+    assert.strictEqual(result, 'public-start-active-value');
+    assert.strictEqual(capturedSpan.isTraced, true);
+    capturedSpan.setAttribute('ended.explicitly', true);
+    capturedSpan.end();
+    assert.strictEqual(capturedSpan.isTraced, false);
+  },
+};
+
 // Verify ctx.tracing: same Tracing instance should be reachable off the execution context.
 export const ctxTracing = {
   async test(ctrl, env, ctx) {
@@ -214,5 +236,117 @@ export const ctxTracing = {
       return 'ctx-tracing-value';
     });
     assert.strictEqual(result, 'ctx-tracing-value');
+  },
+};
+
+export const detachedSpanEndsAfterStreamDrain = {
+  async test(ctrl, env, ctx) {
+    assert.ok(ctx.tracing, 'ctx.tracing should be defined');
+    assert.strictEqual(
+      typeof ctx.tracing.startActiveSpan,
+      'function',
+      'ctx.tracing.startActiveSpan should be a function'
+    );
+
+    let capturedSpan = null;
+    const stream = ctx.tracing.startActiveSpan('detached-stream-op', (span) => {
+      capturedSpan = span;
+      span.setAttribute('test', 'detachedSpanEndsAfterStreamDrain');
+      span.setAttribute('phase.created', true);
+
+      return new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('hello'));
+          controller.enqueue(new TextEncoder().encode(' world'));
+          controller.close();
+        },
+      }).pipeThrough(
+        new TransformStream({
+          transform(chunk, controller) {
+            controller.enqueue(chunk);
+          },
+          flush() {
+            span.setAttribute('phase.drained', true);
+            span.end();
+          },
+        })
+      );
+    });
+
+    assert.strictEqual(
+      capturedSpan.isTraced,
+      true,
+      'Detached span should stay open after callback returns'
+    );
+    assert.strictEqual(await new Response(stream).text(), 'hello world');
+    assert.strictEqual(
+      capturedSpan.isTraced,
+      false,
+      'Detached span should stop tracing after explicit end()'
+    );
+  },
+};
+
+export const helperStartActiveSpan = {
+  async test(ctrl, env, ctx) {
+    const { startActiveSpan } = env.tracingTest;
+    assert.strictEqual(
+      typeof startActiveSpan,
+      'function',
+      'tracing helpers should export startActiveSpan'
+    );
+
+    let capturedSpan = null;
+    const result = startActiveSpan('helper-detached-op', (span) => {
+      capturedSpan = span;
+      span.setAttribute('test', 'helperStartActiveSpan');
+      return 'helper-detached-value';
+    });
+
+    assert.strictEqual(result, 'helper-detached-value');
+    assert.strictEqual(
+      capturedSpan.isTraced,
+      true,
+      'Helper-created span should stay open after callback returns'
+    );
+    capturedSpan.setAttribute('ended.explicitly', true);
+    capturedSpan.end();
+    assert.strictEqual(
+      capturedSpan.isTraced,
+      false,
+      'Helper-created span should stop tracing after explicit end()'
+    );
+  },
+};
+
+export const startActiveSpanSyncThrow = {
+  async test(ctrl, env, ctx) {
+    let capturedSpan = null;
+    let caught = false;
+
+    try {
+      ctx.tracing.startActiveSpan('manual-throw-op', (span) => {
+        capturedSpan = span;
+        span.setAttribute('test', 'startActiveSpanSyncThrow');
+        throw new Error('manual lifecycle throw');
+      });
+    } catch (e) {
+      caught = true;
+      assert.strictEqual(e.message, 'manual lifecycle throw');
+    }
+
+    assert(caught, 'startActiveSpan callback error should be rethrown');
+    assert.strictEqual(
+      capturedSpan.isTraced,
+      true,
+      'Manual span should stay open after callback throws'
+    );
+    capturedSpan.setAttribute('after.throw', true);
+    capturedSpan.end();
+    assert.strictEqual(
+      capturedSpan.isTraced,
+      false,
+      'Manual span should stop tracing after explicit end()'
+    );
   },
 };

@@ -2,7 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 import * as assert from 'node:assert';
-import unsafe from 'workerd:unsafe';
 
 // Flat array of all invocations observed by the tail handler.
 // Each entry captures trace metadata and concatenated event JSON.
@@ -239,48 +238,10 @@ const E = {
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"trace","traces":[""]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
 };
 
-// Expected tree without propagation — every invocation is a root with no children.
-// This is the same set of events as the old flat expected array, just wrapped in tree nodes.
-const expectedFlat = [
-  n(E.alarm),
-  n(E.wsUpgrade),
-  n(E.wsHibernation),
-  n(E.doFetch),
-  n(E.wsClose),
-  n(E.wsMessage),
-  n(E.myActorJsrpc),
-  n(E.cacheMode),
-  n(E.connectHandler),
-  n(E.connectHandlerProxy),
-  n(E.localAddressViaServiceBinding),
-  n(E.jsrpcGetCounter),
-  n(E.jsrpcNonFunction),
-  n(E.connectTarget),
-  n(E.jsrpcDoSubrequest),
-  n(E.httpTest),
-  n(E.queueTest),
-  n(E.fetchEmptyUrl),
-  n(E.fetchNotFound),
-  n(E.fetchRayId),
-  n(E.fetchWebSocket),
-  n(E.fetchBodyLength),
-  n(E.fetchBodyLength),
-  n(E.fetchBatch),
-  n(E.fetchMsgText),
-  n(E.fetchMsgBytes),
-  n(E.fetchMsgJson),
-  n(E.fetchMsgV8),
-  n(E.queueConsumer),
-  n(E.scheduledEmpty),
-  n(E.scheduledCron),
-  n(E.trace),
-  n(E.trace),
-].sort((a, b) => a.events.localeCompare(b.events));
-
-// Expected tree with propagation — subrequest callees are children of their callers.
+// Subrequest callees are children of their callers.
 // DOs that are called via subrequests inherit the caller's traceId and become children.
 // DOs triggered by system events (alarms, hibernation wakeups) remain standalone roots.
-const expectedWithPropagation = [
+const expected = [
   // actor-alarms-test: DO fetch and alarm are independent roots (own traceId)
   n(E.alarm),
   n(E.doFetch),
@@ -345,19 +306,13 @@ function sortTreeChildren(nodes) {
     sortTreeChildren(node.children);
   }
 }
-sortTreeChildren(expectedFlat);
-sortTreeChildren(expectedWithPropagation);
+sortTreeChildren(expected);
 
 export const test = {
   async test() {
     // HACK: The prior tests terminates once the scheduled() invocation has returned a response, but
     // propagating the outcome of the invocation may take longer. Wait briefly so this can go ahead.
     await scheduler.wait(50);
-
-    // @all-autogates enables USER_SPAN_CONTEXT_PROPAGATION.
-    const expected = unsafe.isTestAutogateEnabled()
-      ? expectedWithPropagation
-      : expectedFlat;
 
     verifyTraceIds(allInvocations);
     assert.deepStrictEqual(buildTree(allInvocations), expected);

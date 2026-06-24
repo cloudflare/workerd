@@ -1514,5 +1514,43 @@ KJ_TEST("Normalize path for comparison and cloning") {
   KJ_ASSERT(url9.getHref() == "file:///foo%2F%2F/bar"_kj);
 }
 
+// Regression test for AUTOVULN-CLOUDFLARE-WORKERD-387: deeply nested non-capturing groups in a
+// URLPattern protocol component must not crash the process via stack exhaustion in libc++
+// std::regex. Pre-fix, protocolComponentMatchesSpecialScheme() passed the attacker-controlled
+// regex string to std::regex without any size bound, causing unbounded recursion in libc++'s
+// recursive-descent parser (__parse_ecma_exp → __parse_atom cycle) and a SIGSEGV.
+KJ_TEST("UrlPattern protocol regex stack exhaustion regression (AUTOVULN-CLOUDFLARE-WORKERD-387)") {
+  // Build a protocol pattern with deeply nested non-capturing groups.
+  // The URLPattern syntax `(...)` embeds a regex group; the inner text is passed verbatim
+  // into the generated component regex string by generateRegexAndNameList().
+  // A depth of 50000 produces a regex string of ~250 KB — well above the 256-byte safety
+  // limit added by the fix, and deep enough to overflow the thread stack pre-fix.
+  constexpr size_t depth = 50000;
+  kj::Vector<char> buf;
+  buf.add('(');
+  for (size_t i = 0; i < depth; ++i) {
+    buf.add('(');
+    buf.add('?');
+    buf.add(':');
+  }
+  buf.add('h');
+  for (size_t i = 0; i < depth; ++i) {
+    buf.add(')');
+  }
+  buf.add(')');
+  buf.add('\0');
+  kj::String protocol(buf.releaseAsArray());
+
+  UrlPattern::Init init;
+  init.protocol = kj::mv(protocol);
+
+  // This must complete without crashing. The result may be a successfully compiled pattern
+  // (with the protocol treated as non-special due to the length guard) or an error string —
+  // either is acceptable. A SIGSEGV here means the fix is missing.
+  auto result = UrlPattern::tryCompile(kj::mv(init));
+  // Silence unused-variable warning; we only care that we survived the call.
+  (void)result;
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test

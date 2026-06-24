@@ -443,7 +443,7 @@ const kj::FiberPool& getFiberPool() {
 kj::Promise<void> Rewriter::write(kj::ArrayPtr<const byte> buffer) {
   KJ_ASSERT(maybeWaitScope == kj::none);
   // Defer fiber creation until the event loop runs. If this promise is dropped synchronously
-  // (e.g. by Canceler::cancel() during PumpToReader destruction), no fiber is created, avoiding
+  // (e.g. by stream pump cancellation), no fiber is created, avoiding
   // a KJ assertion failure when destroying an unfired fiber. Once the event loop processes this,
   // the fiber is created and immediately fires (armDepthFirst), so cancellation works normally.
   return kj::evalLater([this, buffer]() {

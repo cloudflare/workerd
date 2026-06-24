@@ -1,0 +1,18 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
+  services = [
+    ( name = "socket-close-gc-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "socket-close-gc-test.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
+        bindings = [
+          (name = "SELF", service = "socket-close-gc-test"),
+        ],
+      )
+    ),
+  ],
+);

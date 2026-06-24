@@ -184,7 +184,7 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
   return result;
 }
 
-jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
+jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,
     AnySocketAddress address,
     jsg::Optional<SocketOptions> options) {
@@ -258,10 +258,7 @@ jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
   kj::Own<kj::TlsStarterCallback> tlsStarter = kj::heap<kj::TlsStarterCallback>();
   httpConnectSettings.tlsStarter = tlsStarter;
 
-  KJ_IF_SOME(promise,
-      util::Autogate::isEnabled(util::AutogateKey::TCP_SOCKET_CONNECT_OUTPUT_GATE)
-          ? ioContext.waitForOutputLocksIfNecessary()
-          : kj::none) {
+  KJ_IF_SOME(promise, ioContext.waitForOutputLocksIfNecessary()) {
     // Wrap the real WorkerInterface in a promised interface that defers connect
     // until the DO output gate clears.
     client = newPromisedWorkerInterface(
@@ -282,16 +279,6 @@ jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
   return result;
 }
 
-jsg::Ref<Socket> connectImpl(jsg::Lock& js,
-    kj::Maybe<jsg::Ref<Fetcher>> fetcher,
-    AnySocketAddress address,
-    jsg::Optional<SocketOptions> options) {
-  // When the TCP_SOCKET_CONNECT_OUTPUT_GATE autogate is enabled, the output gate wait is
-  // handled inside connectImplNoOutputLock via a deferred connect task, so no separate wait
-  // is needed here. TODO(cleanup): rename connectImplNoOutputLock once the autogate is removed.
-  return connectImplNoOutputLock(js, kj::mv(fetcher), kj::mv(address), kj::mv(options));
-}
-
 jsg::Promise<void> Socket::close(jsg::Lock& js) {
   if (isClosing) {
     return closedPromiseCopy.whenResolved(js);
@@ -302,9 +289,11 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   readable->getController().setPendingClosure();
 
   // Wait until the socket connects (successfully or otherwise)
+  // Note: `self` (jsg::Ref) is captured in each continuation to prevent GC from collecting
+  // this object while the promise chain is pending. Without it, the bare `this` pointer dangles.
   return openedPromiseCopy.whenResolved(js)
       .then(js,
-          [this](jsg::Lock& js) {
+          [this, self = JSG_THIS](jsg::Lock& js) {
     if (!writable->getController().isClosedOrClosing()) {
       return writable->getController().flush(js);
     } else {
@@ -312,7 +301,7 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
     }
   })
       .then(js,
-          [this](jsg::Lock& js) {
+          [this, self = JSG_THIS](jsg::Lock& js) {
     // Forcibly abort the readable/writable streams.
     auto cancelPromise = readable->getController().cancel(js, kj::none);
     auto abortPromise = writable->getController().abort(js, kj::none);
@@ -322,14 +311,16 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
       return kj::mv(abortPromise);
     });
   })
-      .then(js, [this](jsg::Lock& js) {
+      .then(js, [this, self = JSG_THIS](jsg::Lock& js) {
     // Destroy the connection stream to close the connection.
     { auto _ = kj::mv(connectionData); }
     connectionData = kj::none;
 
     resolveFulfiller(js, kj::none);
     return js.resolvedPromise();
-  }).catch_(js, [this](jsg::Lock& js, jsg::Value err) { errorHandler(js, kj::mv(err)); });
+  }).catch_(js, [this, self = JSG_THIS](jsg::Lock& js, jsg::Value err) {
+    errorHandler(js, kj::mv(err));
+  });
 }
 
 jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOptions) {
@@ -341,6 +332,18 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
       "The `secureTransport` socket option must be set to 'starttls' for startTls to be used.";
   JSG_REQUIRE(secureTransport == SecureTransportKind::STARTTLS, TypeError, invalidOptKindMsg);
   JSG_REQUIRE(domain != kj::none, TypeError, "startTls can only be called once.");
+
+  KJ_IF_SOME(opts, tlsOptions) {
+    if (opts.expectedServerHostname != kj::none) {
+      if (util::Autogate::isEnabled(util::AutogateKey::STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME)) {
+        JSG_FAIL_REQUIRE(
+            TypeError, "The expectedServerHostname option is not currently supported in startTls.");
+      } else {
+        LOG_ERROR_PERIODICALLY(
+            "NOSENTRY startTls called with unsupported expectedServerHostname option");
+      }
+    }
+  }
 
   // The current socket's writable buffers need to be flushed. The socket's WritableStream is backed
   // by an AsyncIoStream which doesn't implement any buffering, so we don't need to worry about

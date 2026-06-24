@@ -123,7 +123,7 @@ uint32_t writeInto(jsg::Lock& js,
       auto backing = decodeHexTruncated(js, buf, false);
       auto bytes = backing.asArrayPtr();
       auto amountToCopy = kj::min(bytes.size(), dest.size());
-      dest.first(amountToCopy).copyFrom(bytes.first(amountToCopy));
+      dest.write(bytes.first(amountToCopy));
       return amountToCopy;
     }
     default:
@@ -249,8 +249,7 @@ jsg::JsUint8Array BufferUtil::concat(
       // The amount to copy is the lesser of the remaining space in the destination or
       // the size of the chunk we're copying.
       auto amountToCopy = kj::min(ptr.size(), view.size());
-      view.first(amountToCopy).copyFrom(ptr.first(amountToCopy));
-      view = view.slice(amountToCopy);
+      view.write(ptr.first(amountToCopy));
       // If there's no more space in the destination, we're done.
       if (view == nullptr) {
         break;

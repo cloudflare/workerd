@@ -88,25 +88,22 @@ kj::Maybe<jsg::JsBufferSource> concat(jsg::Lock& js, jsg::Optional<Blob::Bits> m
         size_t toCopy = kj::min(bytes.size(), cachedSize);
         if (toCopy > 0) {
           KJ_ASSERT(view.size() >= toCopy);
-          view.first(toCopy).copyFrom(bytes.asArrayPtr().first(toCopy));
+          view.write(bytes.asArrayPtr().first(toCopy));
         }
-        view = view.slice(toCopy);
       }
       KJ_CASE_ONEOF(text, kj::String) {
         auto byteLength = text.asBytes().size();
         KJ_ASSERT(byteLength == cachedPartSizes[index++]);
         if (byteLength == 0) continue;
         KJ_ASSERT(view.size() >= byteLength);
-        view.first(byteLength).copyFrom(text.asBytes());
-        view = view.slice(byteLength);
+        view.write(text.asBytes());
       }
       KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
         auto data = blob->getData();
         KJ_ASSERT(data.size() == cachedPartSizes[index++]);
         if (data.size() == 0) continue;
         KJ_ASSERT(view.size() >= data.size());
-        view.first(data.size()).copyFrom(data);
-        view = view.slice(data.size());
+        view.write(data);
       }
     }
   }

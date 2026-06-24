@@ -11,6 +11,13 @@
 
 #include <cmath>
 
+#if V8_MAJOR_VERSION >= 15
+#define Utf8LengthV2 Utf8Length
+#define WriteV2 Write
+#define WriteOneByteV2 WriteOneByte
+#define WriteUtf8V2 WriteUtf8
+#endif
+
 namespace workerd::jsg {
 
 JsValue::JsValue(v8::Local<v8::Value> inner): inner(inner) {
@@ -155,7 +162,7 @@ JsValue JsObject::getPrototype(Lock& js) {
       continue;  // unwrap one layer iteratively, no native recursion
     }
     JSG_REQUIRE(trap.isFunction(), TypeError, "Proxy getPrototypeOf trap is not a function");
-    v8::Local<v8::Function> fn = ((v8::Local<v8::Value>)trap).As<v8::Function>();
+    v8::Local<v8::Function> fn = (v8::Local<v8::Value>(trap)).As<v8::Function>();
     v8::Local<v8::Value> args[] = {target};
     auto ret = JsValue(check(fn->Call(js.v8Context(), jsHandler.inner, 1, args)));
     JSG_REQUIRE(ret.isObject() || ret.isNull(), TypeError,
@@ -169,12 +176,7 @@ JsValue JsObject::getPrototype(Lock& js) {
     // given how we are currently using this function.
     return ret;
   }
-#if V8_MAJOR_VERSION >= 15 || (V8_MAJOR_VERSION == 14 && V8_MINOR_VERSION >= 7)
   return JsValue(current->GetPrototype());
-#else
-  // TODO(cleanup): Remove when unnecessary.
-  return JsValue(current->GetPrototypeV2());
-#endif
 }
 
 kj::String JsSymbol::description(Lock& js) const {
@@ -425,13 +427,17 @@ bool JsString::containsOnlyOneByte() const {
 
 kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, const JsString& input) const {
   auto result = check(inner->Exec(js.v8Context(), input));
-  if (result->IsNullOrUndefined()) return kj::none;
+  // v8::RegExp::Exec dispatches to the current RegExp.prototype.exec, which
+  // user code can override to return anything. Reject non-Array results so a
+  // monkey-patched exec cannot feed arbitrary objects into native code.
+  if (result->IsNullOrUndefined() || !result->IsArray()) return kj::none;
   return JsArray(result.As<v8::Array>());
 }
 
 kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, kj::StringPtr input) const {
   auto result = check(inner->Exec(js.v8Context(), js.str(input)));
-  if (result->IsNull()) return kj::none;
+  // Same hardening as above: reject non-null, non-Array results.
+  if (result->IsNullOrUndefined() || !result->IsArray()) return kj::none;
   return JsArray(result.As<v8::Array>());
 }
 
@@ -660,12 +666,17 @@ uint JsFunction::hashCode() const {
   return kj::hashCode(obj->GetIdentityHash());
 }
 
-BufferSource Lock::bytes(kj::Array<kj::byte> data) {
-  return BufferSource(*this, BackingStore::from(*this, kj::mv(data)));
-}
-
 // ======================================================================================
 // JsArrayBuffer
+
+kj::Maybe<JsArrayBuffer> JsArrayBuffer::tryCreate(Lock& js, size_t length) {
+  JSG_REQUIRE(length < v8::ArrayBuffer::kMaxByteLength, RangeError, "The length is too large");
+  auto backing = v8::ArrayBuffer::NewBackingStore(js.v8Isolate, length,
+      v8::BackingStoreInitializationMode::kZeroInitialized,
+      v8::BackingStoreOnFailureMode::kReturnNull);
+  if (backing == nullptr) return kj::none;
+  return create(js, kj::mv(backing));
+}
 
 JsArrayBuffer JsArrayBuffer::create(Lock& js, size_t length) {
   JSG_REQUIRE(length < v8::ArrayBuffer::kMaxByteLength, RangeError, "The length is too large");
@@ -686,7 +697,12 @@ JsArrayBuffer JsArrayBuffer::create(Lock& js, std::unique_ptr<v8::BackingStore> 
   return JsArrayBuffer(v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backingStore)));
 }
 
+JsArrayBuffer JsArrayBuffer::create(Lock& js, std::shared_ptr<v8::BackingStore> backingStore) {
+  return JsArrayBuffer(v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backingStore)));
+}
+
 kj::ArrayPtr<kj::byte> JsArrayBuffer::asArrayPtr() {
+  JSG_REQUIRE(!isImmutable(), TypeError, "ArrayBuffer is immutable");
   v8::Local<v8::ArrayBuffer> inner = *this;
   if (inner->WasDetached()) [[unlikely]] {
     return nullptr;
@@ -708,15 +724,9 @@ kj::ArrayPtr<const kj::byte> JsArrayBuffer::asArrayPtr() const {
 
 JsArrayBuffer JsArrayBuffer::slice(Lock& js, size_t newLength) const {
   JSG_REQUIRE(newLength <= size(), RangeError, "New length exceeds buffer length");
-  auto backing = v8::ArrayBuffer::NewBackingStore(js.v8Isolate, newLength,
-      v8::BackingStoreInitializationMode::kUninitialized,
-      v8::BackingStoreOnFailureMode::kReturnNull);
-  JSG_REQUIRE(backing != nullptr, RangeError, "Failed to allocate memory for ArrayBuffer");
-  auto dest = kj::ArrayPtr(static_cast<kj::byte*>(backing->Data()), newLength);
-  v8::Local<v8::ArrayBuffer> inner = *this;
-  dest.copyFrom(
-      kj::ArrayPtr(static_cast<const kj::byte*>(inner->GetBackingStore()->Data()), newLength));
-  return JsArrayBuffer(v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backing)));
+  auto dest = create(js, newLength);
+  dest.asArrayPtr().copyFrom(asArrayPtr().slice(0, newLength));
+  return dest;
 }
 
 size_t JsArrayBuffer::size() const {
@@ -729,12 +739,279 @@ kj::Array<kj::byte> JsArrayBuffer::copy() {
   return kj::heapArray(ptr);
 }
 
+JsArrayBuffer::operator JsBufferSource() const {
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return jsg::JsBufferSource(inner);
+}
+
+bool JsArrayBuffer::isDetachable() const {
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return inner->IsDetachable();
+}
+
+bool JsArrayBuffer::isDetached() const {
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return inner->WasDetached();
+}
+
+void JsArrayBuffer::detachInPlace(Lock& js) {
+  JSG_REQUIRE(!isImmutable(), TypeError, "ArrayBuffer is immutable");
+  JSG_REQUIRE(isDetachable(), TypeError, "ArrayBuffer is not detachable");
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  check(inner->Detach({}));
+}
+
+JsArrayBuffer JsArrayBuffer::detachAndTake(Lock& js) {
+  JSG_REQUIRE(!isImmutable(), TypeError, "ArrayBuffer is immutable");
+  JSG_REQUIRE(isDetachable(), TypeError, "ArrayBuffer is not detachable");
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  auto backing = inner->GetBackingStore();
+  check(inner->Detach({}));
+  return JsArrayBuffer(v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backing)));
+}
+
+namespace {
+template <size_t N>
+void checkViewBounds(size_t offset, size_t numElements, size_t bufferSize) {
+  JSG_REQUIRE(offset % N == 0, RangeError, "Byte offset is not a multiple of ", N);
+  JSG_REQUIRE(offset <= bufferSize && numElements <= (bufferSize - offset) / N, RangeError,
+      "Typed array view extends beyond the ArrayBuffer bounds");
+}
+}  // namespace
+
+JsUint8Array JsArrayBuffer::newUint8View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(uint8_t)>(offset, numElements, size());
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return JsUint8Array(v8::Uint8Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsArrayBuffer::newInt8View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(uint8_t)>(offset, numElements, size());
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::Int8Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsArrayBuffer::newUint8ClampedView(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(uint8_t)>(offset, numElements, size());
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::Uint8ClampedArray::New(inner, offset, numElements));
+}
+JsArrayBufferView JsArrayBuffer::newUint16View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(uint16_t)>(offset, numElements, size());
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::Uint16Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsArrayBuffer::newInt16View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(int16_t)>(offset, numElements, size());
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::Int16Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsArrayBuffer::newUint32View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(uint32_t)>(offset, numElements, size());
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::Uint32Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsArrayBuffer::newInt32View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(int32_t)>(offset, numElements, size());
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::Int32Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsArrayBuffer::newFloat16View(size_t offset, size_t numElements) const {
+  static constexpr size_t kFloat16Size = 2;
+  checkViewBounds<kFloat16Size>(offset, numElements, size());
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::Float16Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsArrayBuffer::newFloat32View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(float)>(offset, numElements, size());
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::Float32Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsArrayBuffer::newFloat64View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(double)>(offset, numElements, size());
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::Float64Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsArrayBuffer::newBigInt64View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(int64_t)>(offset, numElements, size());
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::BigInt64Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsArrayBuffer::newBigUint64View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(uint64_t)>(offset, numElements, size());
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::BigUint64Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsArrayBuffer::newDataView(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(uint8_t)>(offset, numElements, size());
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::DataView::New(inner, offset, numElements));
+}
+
+bool JsArrayBuffer::isResizable() const {
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return inner->IsResizableByUserJavaScript();
+}
+
+JsArrayBuffer::operator JsUint8Array() const {
+  return newUint8View(0, size());
+}
+
+// ======================================================================================
+// JsSharedArrayBuffer
+
+kj::Maybe<JsSharedArrayBuffer> JsSharedArrayBuffer::tryCreate(Lock& js, size_t length) {
+  JSG_REQUIRE(length < v8::ArrayBuffer::kMaxByteLength, RangeError, "The length is too large");
+  auto backing = v8::SharedArrayBuffer::NewBackingStore(js.v8Isolate, length,
+      v8::BackingStoreInitializationMode::kZeroInitialized,
+      v8::BackingStoreOnFailureMode::kReturnNull);
+  if (backing == nullptr) return kj::none;
+  return create(js, kj::mv(backing));
+}
+
+JsSharedArrayBuffer JsSharedArrayBuffer::create(Lock& js, size_t length) {
+  JSG_REQUIRE(length < v8::ArrayBuffer::kMaxByteLength, RangeError, "The length is too large");
+  auto backing = v8::SharedArrayBuffer::NewBackingStore(js.v8Isolate, length,
+      v8::BackingStoreInitializationMode::kZeroInitialized,
+      v8::BackingStoreOnFailureMode::kReturnNull);
+  JSG_REQUIRE(backing != nullptr, RangeError, "Failed to allocate memory for ArrayBuffer");
+  return create(js, kj::mv(backing));
+}
+
+JsSharedArrayBuffer JsSharedArrayBuffer::create(Lock& js, kj::ArrayPtr<const kj::byte> data) {
+  auto buf = create(js, data.size());
+  buf.asArrayPtr().copyFrom(data);
+  return buf;
+}
+
+JsSharedArrayBuffer JsSharedArrayBuffer::create(
+    Lock& js, std::unique_ptr<v8::BackingStore> backingStore) {
+  return JsSharedArrayBuffer(v8::SharedArrayBuffer::New(js.v8Isolate, kj::mv(backingStore)));
+}
+
+JsSharedArrayBuffer JsSharedArrayBuffer::create(
+    Lock& js, std::shared_ptr<v8::BackingStore> backingStore) {
+  return JsSharedArrayBuffer(v8::SharedArrayBuffer::New(js.v8Isolate, kj::mv(backingStore)));
+}
+
+kj::ArrayPtr<kj::byte> JsSharedArrayBuffer::asArrayPtr() {
+  // No immutability check here because SharedArrayBuffers are always mutable.
+  v8::Local<v8::SharedArrayBuffer> inner = *this;
+  auto data = static_cast<kj::byte*>(inner->Data());
+  size_t length = inner->ByteLength();
+  return kj::ArrayPtr(data, length);
+}
+
+kj::ArrayPtr<const kj::byte> JsSharedArrayBuffer::asArrayPtr() const {
+  v8::Local<v8::SharedArrayBuffer> inner = *this;
+  auto data = static_cast<const kj::byte*>(inner->Data());
+  size_t length = inner->ByteLength();
+  return kj::ArrayPtr(data, length);
+}
+
+JsSharedArrayBuffer JsSharedArrayBuffer::slice(Lock& js, size_t newLength) const {
+  JSG_REQUIRE(newLength <= size(), RangeError, "New length exceeds buffer length");
+  auto dest = create(js, newLength);
+  dest.asArrayPtr().copyFrom(asArrayPtr().slice(0, newLength));
+  return dest;
+}
+
+size_t JsSharedArrayBuffer::size() const {
+  v8::Local<v8::SharedArrayBuffer> inner = *this;
+  return inner->ByteLength();
+}
+
+kj::Array<kj::byte> JsSharedArrayBuffer::copy() {
+  auto ptr = asArrayPtr();
+  return kj::heapArray(ptr);
+}
+
+JsSharedArrayBuffer::operator JsBufferSource() const {
+  v8::Local<v8::SharedArrayBuffer> inner = *this;
+  return jsg::JsBufferSource(inner);
+}
+
+JsUint8Array JsSharedArrayBuffer::newUint8View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(uint8_t)>(offset, numElements, size());
+  v8::Local<v8::SharedArrayBuffer> inner = *this;
+  return JsUint8Array(v8::Uint8Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsSharedArrayBuffer::newInt8View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(uint8_t)>(offset, numElements, size());
+  v8::Local<v8::SharedArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::Int8Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsSharedArrayBuffer::newUint8ClampedView(
+    size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(uint8_t)>(offset, numElements, size());
+  v8::Local<v8::SharedArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::Uint8ClampedArray::New(inner, offset, numElements));
+}
+JsArrayBufferView JsSharedArrayBuffer::newUint16View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(uint16_t)>(offset, numElements, size());
+  v8::Local<v8::SharedArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::Uint16Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsSharedArrayBuffer::newInt16View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(int16_t)>(offset, numElements, size());
+  v8::Local<v8::SharedArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::Int16Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsSharedArrayBuffer::newUint32View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(uint32_t)>(offset, numElements, size());
+  v8::Local<v8::SharedArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::Uint32Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsSharedArrayBuffer::newInt32View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(int32_t)>(offset, numElements, size());
+  v8::Local<v8::SharedArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::Int32Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsSharedArrayBuffer::newFloat16View(size_t offset, size_t numElements) const {
+  static constexpr size_t kFloat16Size = 2;
+  checkViewBounds<kFloat16Size>(offset, numElements, size());
+  v8::Local<v8::SharedArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::Float16Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsSharedArrayBuffer::newFloat32View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(float)>(offset, numElements, size());
+  v8::Local<v8::SharedArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::Float32Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsSharedArrayBuffer::newFloat64View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(double)>(offset, numElements, size());
+  v8::Local<v8::SharedArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::Float64Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsSharedArrayBuffer::newBigInt64View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(int64_t)>(offset, numElements, size());
+  v8::Local<v8::SharedArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::BigInt64Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsSharedArrayBuffer::newBigUint64View(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(uint64_t)>(offset, numElements, size());
+  v8::Local<v8::SharedArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::BigUint64Array::New(inner, offset, numElements));
+}
+JsArrayBufferView JsSharedArrayBuffer::newDataView(size_t offset, size_t numElements) const {
+  checkViewBounds<sizeof(uint8_t)>(offset, numElements, size());
+  v8::Local<v8::SharedArrayBuffer> inner = *this;
+  return JsArrayBufferView(v8::DataView::New(inner, offset, numElements));
+}
+
+JsSharedArrayBuffer::operator JsUint8Array() const {
+  return newUint8View(0, size());
+}
+
 // ======================================================================================
 // JsArrayBufferView
 
 size_t JsArrayBufferView::size() const {
   v8::Local<v8::ArrayBufferView> inner = *this;
   return inner->ByteLength();
+}
+
+size_t JsArrayBufferView::getOffset() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return inner->ByteOffset();
 }
 
 bool JsArrayBufferView::isIntegerType() const {
@@ -744,10 +1021,257 @@ bool JsArrayBufferView::isIntegerType() const {
       inner->IsInt32Array() || inner->IsBigInt64Array() || inner->IsBigUint64Array();
 }
 
+bool JsArrayBufferView::isUint8Array() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return inner->IsUint8Array();
+}
+
+bool JsArrayBufferView::isInt8Array() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return inner->IsInt8Array();
+}
+
+bool JsArrayBufferView::isUint8ClampedArray() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return inner->IsUint8ClampedArray();
+}
+
+bool JsArrayBufferView::isUint16Array() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return inner->IsUint16Array();
+}
+
+bool JsArrayBufferView::isInt16Array() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return inner->IsInt16Array();
+}
+
+bool JsArrayBufferView::isUint32Array() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return inner->IsUint32Array();
+}
+
+bool JsArrayBufferView::isInt32Array() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return inner->IsInt32Array();
+}
+
+bool JsArrayBufferView::isFloat16Array() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return inner->IsFloat16Array();
+}
+
+bool JsArrayBufferView::isFloat32Array() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return inner->IsFloat32Array();
+}
+
+bool JsArrayBufferView::isFloat64Array() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return inner->IsFloat64Array();
+}
+
+bool JsArrayBufferView::isBigInt64Array() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return inner->IsBigInt64Array();
+}
+
+bool JsArrayBufferView::isBigUint64Array() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return inner->IsBigUint64Array();
+}
+
+bool JsArrayBufferView::isDataView() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return inner->IsDataView();
+}
+
+size_t JsArrayBufferView::getElementSize() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  if (inner->IsUint8Array() || inner->IsInt8Array() || inner->IsUint8ClampedArray()) {
+    return 1;
+  } else if (inner->IsUint16Array() || inner->IsInt16Array() || inner->IsFloat16Array()) {
+    return 2;
+  } else if (inner->IsUint32Array() || inner->IsInt32Array() || inner->IsFloat32Array()) {
+    return 4;
+  } else if (inner->IsFloat64Array() || inner->IsBigInt64Array() || inner->IsBigUint64Array()) {
+    return 8;
+  } else if (inner->IsDataView()) {
+    return 1;  // DataView is byte-addressable
+  }
+  KJ_UNREACHABLE;  // Not a valid ArrayBufferView type
+}
+
+JsArrayBuffer JsArrayBufferView::getBuffer() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return JsArrayBuffer(inner->Buffer());
+}
+
+bool JsArrayBufferView::isDetachable() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return inner->Buffer()->IsDetachable();
+}
+
+bool JsArrayBufferView::isDetached() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return inner->Buffer()->WasDetached();
+}
+
+void JsArrayBufferView::detachInPlace(Lock& js) {
+  JSG_REQUIRE(!isImmutable(), TypeError, "ArrayBufferView is immutable");
+  JSG_REQUIRE(isDetachable(), TypeError, "ArrayBuffer is not detachable");
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  check(inner->Buffer()->Detach({}));
+}
+
+JsArrayBufferView JsArrayBufferView::detachAndTake(Lock& js) {
+  JSG_REQUIRE(!isImmutable(), TypeError, "ArrayBufferView is immutable");
+  JSG_REQUIRE(isDetachable(), TypeError, "ArrayBuffer is not detachable");
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  auto length = inner->ByteLength();
+  auto offset = inner->ByteOffset();
+  auto ab = getBuffer().detachAndTake(js);
+
+  // We have to return the same type of view
+  size_t size = length / getElementSize();
+  if (inner->IsUint8Array()) {
+    return ab.newUint8View(offset, size);
+  } else if (inner->IsInt8Array()) {
+    return ab.newInt8View(offset, size);
+  } else if (inner->IsUint8ClampedArray()) {
+    return ab.newUint8ClampedView(offset, size);
+  } else if (inner->IsUint16Array()) {
+    return ab.newUint16View(offset, size);
+  } else if (inner->IsInt16Array()) {
+    return ab.newInt16View(offset, size);
+  } else if (inner->IsUint32Array()) {
+    return ab.newUint32View(offset, size);
+  } else if (inner->IsInt32Array()) {
+    return ab.newInt32View(offset, size);
+  } else if (inner->IsFloat16Array()) {
+    return ab.newFloat16View(offset, size);
+  } else if (inner->IsFloat32Array()) {
+    return ab.newFloat32View(offset, size);
+  } else if (inner->IsFloat64Array()) {
+    return ab.newFloat64View(offset, size);
+  } else if (inner->IsBigInt64Array()) {
+    return ab.newBigInt64View(offset, size);
+  } else if (inner->IsBigUint64Array()) {
+    return ab.newBigUint64View(offset, size);
+  } else if (inner->IsDataView()) {
+    return ab.newDataView(offset, size);
+  }
+
+  KJ_UNREACHABLE;
+}
+
+JsArrayBufferView JsArrayBufferView::slice(Lock& js, size_t offset, size_t length) const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  auto byteOffset = inner->ByteOffset();
+  JSG_REQUIRE(offset <= SIZE_MAX - byteOffset, RangeError, "offset overflow");
+  offset = byteOffset + offset;
+  auto buffer = inner->Buffer();
+  auto bufSize = buffer->ByteLength();
+  JSG_REQUIRE(offset <= bufSize && length <= bufSize - offset, RangeError,
+      "Typed array view extends beyond the ArrayBuffer bounds");
+
+  size_t size = length / getElementSize();
+
+  if (inner->IsUint8Array()) {
+    return JsArrayBufferView(v8::Uint8Array::New(buffer, offset, size));
+  } else if (inner->IsInt8Array()) {
+    return JsArrayBufferView(v8::Int8Array::New(buffer, offset, size));
+  } else if (inner->IsUint8ClampedArray()) {
+    return JsArrayBufferView(v8::Uint8ClampedArray::New(buffer, offset, size));
+  } else if (inner->IsUint16Array()) {
+    return JsArrayBufferView(v8::Uint16Array::New(buffer, offset, size));
+  } else if (inner->IsInt16Array()) {
+    return JsArrayBufferView(v8::Int16Array::New(buffer, offset, size));
+  } else if (inner->IsUint32Array()) {
+    return JsArrayBufferView(v8::Uint32Array::New(buffer, offset, size));
+  } else if (inner->IsInt32Array()) {
+    return JsArrayBufferView(v8::Int32Array::New(buffer, offset, size));
+  } else if (inner->IsFloat16Array()) {
+    return JsArrayBufferView(v8::Float16Array::New(buffer, offset, size));
+  } else if (inner->IsFloat32Array()) {
+    return JsArrayBufferView(v8::Float32Array::New(buffer, offset, size));
+  } else if (inner->IsFloat64Array()) {
+    return JsArrayBufferView(v8::Float64Array::New(buffer, offset, size));
+  } else if (inner->IsBigInt64Array()) {
+    return JsArrayBufferView(v8::BigInt64Array::New(buffer, offset, size));
+  } else if (inner->IsBigUint64Array()) {
+    return JsArrayBufferView(v8::BigUint64Array::New(buffer, offset, size));
+  } else if (inner->IsDataView()) {
+    return JsArrayBufferView(v8::DataView::New(buffer, offset, size));
+  }
+
+  KJ_UNREACHABLE;
+}
+
+bool JsArrayBufferView::isResizable() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return inner->Buffer()->IsResizableByUserJavaScript();
+}
+
+JsArrayBufferView::operator JsBufferSource() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  return jsg::JsBufferSource(inner);
+}
+
+JsArrayBufferView::operator JsUint8Array() const {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  if (inner->IsUint8Array()) {
+    return jsg::JsUint8Array(inner.As<v8::Uint8Array>());
+  }
+
+  auto buf = inner->Buffer();
+  return jsg::JsUint8Array(v8::Uint8Array::New(buf, inner->ByteOffset(), inner->ByteLength()));
+}
+
+JsArrayBufferView JsArrayBufferView::clone(jsg::Lock& js) {
+  v8::Local<v8::ArrayBufferView> inner = *this;
+  auto backing = inner->Buffer()->GetBackingStore();
+  auto ab = jsg::JsArrayBuffer::create(js, kj::mv(backing));
+
+  auto offset = getOffset();
+  auto length = size();
+  auto size = length / getElementSize();
+
+  if (inner->IsUint8Array()) {
+    return ab.newUint8View(offset, size);
+  } else if (inner->IsInt8Array()) {
+    return ab.newInt8View(offset, size);
+  } else if (inner->IsUint8ClampedArray()) {
+    return ab.newUint8ClampedView(offset, size);
+  } else if (inner->IsUint16Array()) {
+    return ab.newUint16View(offset, size);
+  } else if (inner->IsInt16Array()) {
+    return ab.newInt16View(offset, size);
+  } else if (inner->IsUint32Array()) {
+    return ab.newUint32View(offset, size);
+  } else if (inner->IsInt32Array()) {
+    return ab.newInt32View(offset, size);
+  } else if (inner->IsFloat16Array()) {
+    return ab.newFloat16View(offset, size);
+  } else if (inner->IsFloat32Array()) {
+    return ab.newFloat32View(offset, size);
+  } else if (inner->IsFloat64Array()) {
+    return ab.newFloat64View(offset, size);
+  } else if (inner->IsBigInt64Array()) {
+    return ab.newBigInt64View(offset, size);
+  } else if (inner->IsBigUint64Array()) {
+    return ab.newBigUint64View(offset, size);
+  } else if (inner->IsDataView()) {
+    return ab.newDataView(offset, size);
+  }
+  KJ_UNREACHABLE;
+}
+
 // ======================================================================================
 // JsBufferSource
 
 kj::ArrayPtr<kj::byte> JsBufferSource::asArrayPtr() {
+  JSG_REQUIRE(!isImmutable(), TypeError, "BufferSource is immutable");
   v8::Local<v8::Value> inner = *this;
   if (inner->IsArrayBuffer()) {
     auto buf = inner.As<v8::ArrayBuffer>();
@@ -765,8 +1289,45 @@ kj::ArrayPtr<kj::byte> JsBufferSource::asArrayPtr() {
     if (buf->WasDetached()) [[unlikely]] {
       return nullptr;
     }
-    kj::byte* data = static_cast<kj::byte*>(buf->Data()) + view->ByteOffset();
-    return kj::ArrayPtr(data, view->ByteLength());
+    auto byteOffset = view->ByteOffset();
+    auto byteLength = view->ByteLength();
+    // Sandbox hardening: validate view's byte range against trusted backing store size.
+    auto bufSize = buf->ByteLength();
+    if (byteOffset > bufSize || byteLength > bufSize - byteOffset) [[unlikely]] {
+      return nullptr;
+    }
+    kj::byte* data = static_cast<kj::byte*>(buf->Data()) + byteOffset;
+    return kj::ArrayPtr(data, byteLength);
+  }
+}
+
+kj::ArrayPtr<const kj::byte> JsBufferSource::asArrayPtr() const {
+  v8::Local<v8::Value> inner = *this;
+  if (inner->IsArrayBuffer()) {
+    auto buf = inner.As<v8::ArrayBuffer>();
+    if (buf->WasDetached()) [[unlikely]] {
+      return nullptr;
+    }
+    return kj::ArrayPtr(static_cast<const kj::byte*>(buf->Data()), buf->ByteLength());
+  } else if (inner->IsSharedArrayBuffer()) {
+    auto buf = inner.As<v8::SharedArrayBuffer>();
+    return kj::ArrayPtr(static_cast<const kj::byte*>(buf->Data()), buf->ByteLength());
+  } else {
+    KJ_DASSERT(inner->IsArrayBufferView());
+    auto view = inner.As<v8::ArrayBufferView>();
+    auto buf = view->Buffer();
+    if (buf->WasDetached()) [[unlikely]] {
+      return nullptr;
+    }
+    auto byteOffset = view->ByteOffset();
+    auto byteLength = view->ByteLength();
+    // Sandbox hardening: validate view's byte range against trusted backing store size.
+    auto bufSize = buf->ByteLength();
+    if (byteOffset > bufSize || byteLength > bufSize - byteOffset) [[unlikely]] {
+      return nullptr;
+    }
+    const kj::byte* data = static_cast<const kj::byte*>(buf->Data()) + byteOffset;
+    return kj::ArrayPtr(data, byteLength);
   }
 }
 
@@ -829,8 +1390,136 @@ bool JsBufferSource::isResizable() const {
   return false;
 }
 
+bool JsBufferSource::isDetachable() const {
+  v8::Local<v8::Value> inner = *this;
+  if (inner->IsArrayBuffer()) {
+    return inner.As<v8::ArrayBuffer>()->IsDetachable();
+  } else if (inner->IsSharedArrayBuffer()) {
+    return false;  // SharedArrayBuffers are never detachable
+  } else {
+    KJ_DASSERT(inner->IsArrayBufferView());
+    return inner.As<v8::ArrayBufferView>()->Buffer()->IsDetachable();
+  }
+}
+
+bool JsBufferSource::isDetached() const {
+  v8::Local<v8::Value> inner = *this;
+  if (inner->IsArrayBuffer()) {
+    return inner.As<v8::ArrayBuffer>()->WasDetached();
+  } else if (inner->IsSharedArrayBuffer()) {
+    return false;  // SharedArrayBuffers are never detachable
+  } else {
+    KJ_DASSERT(inner->IsArrayBufferView());
+    return inner.As<v8::ArrayBufferView>()->Buffer()->WasDetached();
+  }
+}
+
+void JsBufferSource::detachInPlace(Lock& js) {
+  JSG_REQUIRE(!isImmutable(), TypeError, "BufferSource is immutable");
+  JSG_REQUIRE(isDetachable(), TypeError, "BufferSource is not detachable");
+  v8::Local<v8::Value> inner = *this;
+  if (inner->IsArrayBuffer()) {
+    auto buf = inner.As<v8::ArrayBuffer>();
+    check(buf->Detach({}));
+  } else if (inner->IsSharedArrayBuffer()) {
+    KJ_UNREACHABLE;  // SharedArrayBuffers are never detachable
+  } else {
+    KJ_DASSERT(inner->IsArrayBufferView());
+    auto view = inner.As<v8::ArrayBufferView>();
+    check(view->Buffer()->Detach({}));
+  }
+}
+
+JsBufferSource JsBufferSource::detachAndTake(Lock& js) {
+  JSG_REQUIRE(!isImmutable(), TypeError, "BufferSource is immutable");
+  JSG_REQUIRE(isDetachable(), TypeError, "BufferSource is not detachable");
+  v8::Local<v8::Value> inner = *this;
+  if (inner->IsArrayBuffer()) {
+    JsArrayBuffer ab(inner.As<v8::ArrayBuffer>());
+    return JsBufferSource(ab.detachAndTake(js));
+  } else if (inner->IsSharedArrayBuffer()) {
+    KJ_UNREACHABLE;  // SharedArrayBuffers are never detachable
+  }
+
+  KJ_DASSERT(inner->IsArrayBufferView());
+  JsArrayBufferView view(inner.As<v8::ArrayBufferView>());
+  return JsBufferSource(view.detachAndTake(js));
+}
+
+JsBufferSource::operator JsUint8Array() const {
+  v8::Local<v8::Value> inner = *this;
+  if (inner->IsArrayBuffer()) {
+    JsArrayBuffer ab(inner.As<v8::ArrayBuffer>());
+    return ab;
+  }
+  if (inner->IsSharedArrayBuffer()) {
+    JsSharedArrayBuffer ab(inner.As<v8::SharedArrayBuffer>());
+    return ab;
+  }
+  if (inner->IsUint8Array()) {
+    return jsg::JsUint8Array(inner.As<v8::Uint8Array>());
+  }
+  JsArrayBufferView view(inner.As<v8::ArrayBufferView>());
+  return view;
+}
+
+size_t JsBufferSource::getOffset() const {
+  v8::Local<v8::Value> inner = *this;
+  if (inner->IsArrayBuffer() || inner->IsSharedArrayBuffer()) {
+    return 0;
+  }
+  KJ_DASSERT(inner->IsArrayBufferView());
+  auto view = inner.As<v8::ArrayBufferView>();
+  return view->ByteOffset();
+}
+
+size_t JsBufferSource::underlyingArrayBufferSize(Lock& js) const {
+  v8::Local<v8::Value> inner = *this;
+  if (inner->IsArrayBuffer()) {
+    auto buf = inner.As<v8::ArrayBuffer>();
+    if (buf->WasDetached()) [[unlikely]] {
+      return 0;
+    }
+    return buf->ByteLength();
+  } else if (inner->IsSharedArrayBuffer()) {
+    auto buf = inner.As<v8::SharedArrayBuffer>();
+    return buf->ByteLength();
+  } else {
+    KJ_DASSERT(inner->IsArrayBufferView());
+    auto view = inner.As<v8::ArrayBufferView>();
+    auto buf = view->Buffer();
+    if (buf->WasDetached()) [[unlikely]] {
+      return 0;
+    }
+    return buf->ByteLength();
+  }
+}
+
+bool JsBufferSource::isImmutable() const {
+  v8::Local<v8::Value> inner = *this;
+  if (inner->IsArrayBuffer()) {
+    v8::Local<v8::ArrayBuffer> buf = inner.As<v8::ArrayBuffer>();
+    return buf->IsImmutable();
+  } else if (inner->IsSharedArrayBuffer()) {
+    return false;  // SharedArrayBuffers are never immutable
+  } else if (inner->IsArrayBufferView()) {
+    v8::Local<v8::ArrayBufferView> view = inner.As<v8::ArrayBufferView>();
+    return view->Buffer()->IsImmutable();
+  }
+  KJ_UNREACHABLE;
+}
+
 // ======================================================================================
 // JsUint8Array
+
+kj::Maybe<JsUint8Array> JsUint8Array::tryCreate(Lock& js, size_t length) {
+  JSG_REQUIRE(length < v8::ArrayBuffer::kMaxByteLength, RangeError, "The length is too large");
+  auto backing = v8::ArrayBuffer::NewBackingStore(js.v8Isolate, length,
+      v8::BackingStoreInitializationMode::kZeroInitialized,
+      v8::BackingStoreOnFailureMode::kReturnNull);
+  if (backing == nullptr) return kj::none;
+  return create(js, kj::mv(backing), 0, length);
+}
 
 JsUint8Array JsUint8Array::create(Lock& js, size_t length) {
   JSG_REQUIRE(length < v8::ArrayBuffer::kMaxByteLength, RangeError, "The length is too large");
@@ -852,26 +1541,21 @@ JsUint8Array JsUint8Array::create(Lock& js, JsArrayBuffer& buffer) {
   return JsUint8Array(v8::Uint8Array::New(ab, 0, ab->ByteLength()));
 }
 
+JsUint8Array JsUint8Array::create(Lock& js, JsSharedArrayBuffer& buffer) {
+  v8::Local<v8::SharedArrayBuffer> ab = buffer;
+  return JsUint8Array(v8::Uint8Array::New(ab, 0, ab->ByteLength()));
+}
+
 JsUint8Array JsUint8Array::create(
     Lock& js, std::unique_ptr<v8::BackingStore> backingStore, size_t byteOffset, size_t length) {
+  checkViewBounds<sizeof(uint8_t)>(byteOffset, length, backingStore->ByteLength());
   return JsUint8Array(v8::Uint8Array::New(
       v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backingStore)), byteOffset, length));
 }
 
 JsUint8Array JsUint8Array::slice(Lock& js, size_t newLength) const {
   JSG_REQUIRE(newLength <= size(), RangeError, "New length exceeds array length");
-  auto u8 = v8::Uint8Array::New(inner->Buffer(), inner->ByteOffset(), newLength);
-  return JsUint8Array(u8);
-}
-
-kj::ArrayPtr<const kj::byte> JsUint8Array::asArrayPtr() const {
-  auto buf = inner->Buffer();
-  if (buf->WasDetached()) [[unlikely]] {
-    return nullptr;
-  }
-  const kj::byte* data = static_cast<const kj::byte*>(buf->Data()) + inner->ByteOffset();
-  size_t length = inner->ByteLength();
-  return kj::ArrayPtr(data, length);
+  return slice(js, 0, newLength);
 }
 
 size_t JsUint8Array::size() const {
@@ -881,6 +1565,71 @@ size_t JsUint8Array::size() const {
 kj::Array<kj::byte> JsUint8Array::copy() {
   auto ptr = asArrayPtr();
   return kj::heapArray(ptr);
+}
+
+JsArrayBuffer JsUint8Array::getBuffer() const {
+  auto buf = inner->Buffer();
+  return JsArrayBuffer(buf);
+}
+
+bool JsUint8Array::isDetachable() const {
+  auto buf = inner->Buffer();
+  return buf->IsDetachable();
+}
+
+bool JsUint8Array::isDetached() const {
+  auto buf = inner->Buffer();
+  return buf->WasDetached();
+}
+
+void JsUint8Array::detachInPlace(Lock& js) {
+  JSG_REQUIRE(!isImmutable(), TypeError, "Uint8Array is immutable");
+  JSG_REQUIRE(isDetachable(), TypeError, "Uint8Array is not detachable");
+  auto buf = inner->Buffer();
+  check(buf->Detach({}));
+}
+
+JsUint8Array JsUint8Array::detachAndTake(Lock& js) {
+  JSG_REQUIRE(!isImmutable(), TypeError, "Uint8Array is immutable");
+  JSG_REQUIRE(isDetachable(), TypeError, "Uint8Array is not detachable");
+  v8::Local<v8::Uint8Array> inner = *this;
+  auto length = inner->ByteLength();
+  auto offset = inner->ByteOffset();
+  auto ab = getBuffer().detachAndTake(js);
+  return JsUint8Array(v8::Uint8Array::New(ab, offset, length));
+}
+
+JsUint8Array JsUint8Array::slice(Lock& js, size_t offset, size_t length) const {
+  auto buf = inner->Buffer();
+  auto byteOffset = inner->ByteOffset();
+  JSG_REQUIRE(offset <= SIZE_MAX - byteOffset, RangeError, "offset overflow");
+  checkViewBounds<sizeof(uint8_t)>(byteOffset + offset, length, buf->ByteLength());
+  return JsUint8Array(v8::Uint8Array::New(buf, byteOffset + offset, length));
+}
+
+bool JsUint8Array::isResizable() const {
+  auto buf = inner->Buffer();
+  return buf->IsResizableByUserJavaScript();
+}
+
+JsUint8Array::operator JsArrayBufferView() const {
+  v8::Local<v8::Uint8Array> inner = *this;
+  return jsg::JsArrayBufferView(inner);
+}
+
+JsUint8Array::operator JsBufferSource() const {
+  v8::Local<v8::Uint8Array> inner = *this;
+  return jsg::JsBufferSource(inner);
+}
+
+JsUint8Array JsUint8Array::clone(jsg::Lock& js) {
+  // Creates a new Uint8Array view over the same underlying backing store. The ArrayBuffer
+  // instance is different but the backing store is shared. So "clone" here is really
+  // "shallow clone". Intentionally does not copy the data.
+  auto buf = inner->Buffer();
+  auto backing = buf->GetBackingStore();
+  auto ab = jsg::JsArrayBuffer::create(js, kj::mv(backing));
+  return JsUint8Array(v8::Uint8Array::New(ab, inner->ByteOffset(), inner->ByteLength()));
 }
 
 }  // namespace workerd::jsg

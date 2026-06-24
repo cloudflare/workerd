@@ -1,0 +1,31 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "TEST_TMPDIR", disk = (writable = true) ),
+    ( name = "persistent-stubs-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "persistent-stubs-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "allow_irrevocable_stub_storage",
+          "experimental",
+          "rpc",
+          "enable_ctx_exports",
+          "fetcher_no_get_put_delete",
+        ],
+        bindings = [
+          (name = "LOADER", workerLoader = ()),
+        ],
+        durableObjectNamespaces = [
+          (className = "FacetRoot", uniqueKey = "persistent-stubs-facet-root", enableSql = true),
+          (className = "Store", uniqueKey = "persistent-stubs-test", enableSql = true),
+          (className = "TopRedirectDo", uniqueKey = "persistent-stubs-top-redirect", enableSql = true),
+        ],
+        durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+      )
+    ),
+  ],
+);

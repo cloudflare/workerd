@@ -19,6 +19,13 @@
 
 #include <memory>
 
+#if V8_MAJOR_VERSION >= 15
+#define Utf8LengthV2 Utf8Length
+#define WriteV2 Write
+#define WriteOneByteV2 WriteOneByte
+#define WriteUtf8V2 WriteUtf8
+#endif
+
 using namespace kj_rs;
 
 namespace workerd::rust::jsg {
@@ -656,10 +663,10 @@ double unwrap_number(Isolate* isolate, Local value) {
       ->Value();
 }
 
-kj::Rc<Wrappable> unwrap_resource(Isolate* isolate, Local value) {
+kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value) {
   auto v8_val = local_from_ffi<v8::Value>(kj::mv(value));
   // Non-object values (numbers, strings, booleans, etc.) are never wrapped resources.
-  if (!v8_val->IsObject()) return nullptr;
+  if (!v8_val->IsObject()) return kj::none;
   auto v8_obj = v8_val.As<v8::Object>();
   // Plain JS objects have no internal fields; check before reading to avoid V8 fatal error.
   if (v8_obj->InternalFieldCount() < ::workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT ||
@@ -668,7 +675,7 @@ kj::Rc<Wrappable> unwrap_resource(Isolate* isolate, Local value) {
           static_cast<v8::EmbedderDataTypeTag>(
               ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX)) !=
           const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG)) {
-    return nullptr;
+    return kj::none;
   }
   auto* ptr = static_cast<Wrappable*>(
       reinterpret_cast<::workerd::jsg::Wrappable*>(v8_obj->GetAlignedPointerFromInternalField(

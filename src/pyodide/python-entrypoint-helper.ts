@@ -17,7 +17,6 @@ import {
   LOCKFILE,
   MAIN_MODULE_NAME,
   SHOULD_SNAPSHOT_TO_DISK,
-  TRANSITIVE_REQUIREMENTS,
   WORKFLOWS_ENABLED,
 } from 'pyodide-internal:metadata';
 import {
@@ -25,7 +24,6 @@ import {
   clearSignals,
   loadPyodide,
 } from 'pyodide-internal:python';
-import { patchLoadPackage } from 'pyodide-internal:setupPackages';
 import {
   fillSnapshotJsModules,
   LOADED_SNAPSHOT_TYPE,
@@ -193,21 +191,6 @@ async function injectSitePackagesModule(
   );
 }
 
-/**
- * Put the patch into site_packages and import it.
- *
- * TODO: Ideally we should only import the patch lazily when the package that it patches is
- * imported. Or just apply the patch directly or upstream a fix.
- */
-async function applyPatch(pyodide: Pyodide, patchName: string): Promise<void> {
-  await injectSitePackagesModule(
-    pyodide,
-    `patches/${patchName}`,
-    patchName + '_patch'
-  );
-  pyodide.pyimport(patchName + '_patch');
-}
-
 async function injectWorkersApi(pyodide: Pyodide): Promise<void> {
   if (EXTERNAL_SDK) {
     pyodide.FS.mkdir(`${pyodide.FS.sitePackages}/workers`);
@@ -263,9 +246,13 @@ async function injectWorkersApi(pyodide: Pyodide): Promise<void> {
   await injectSitePackagesModule(pyodide, 'workers-api/src/asgi', 'asgi');
 }
 
+function disabledLoadPackage(): never {
+  throw new PythonWorkersInternalError('pyodide.loadPackage is disabled');
+}
+
 async function setupPatches(pyodide: Pyodide): Promise<void> {
   await enterJaegerSpan('setup_patches', async () => {
-    patchLoadPackage(pyodide);
+    pyodide.loadPackage = disabledLoadPackage;
 
     // install any extra packages into the site-packages directory
     // Expose the doAnImport function and global modules to Python globals
@@ -278,18 +265,6 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
 
     // Inject modules that enable JS features to be used idiomatically from Python.
     await injectWorkersApi(pyodide);
-
-    // Install patches as needed
-    if (TRANSITIVE_REQUIREMENTS.has('aiohttp')) {
-      await applyPatch(pyodide, 'aiohttp');
-    }
-    // Other than the oldest version of httpx, we apply the patch at the build step.
-    if (
-      pyodide._module.API.version === PyodideVersion.V0_26_0a2 &&
-      TRANSITIVE_REQUIREMENTS.has('httpx')
-    ) {
-      await applyPatch(pyodide, 'httpx');
-    }
   });
 }
 

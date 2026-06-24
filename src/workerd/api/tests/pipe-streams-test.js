@@ -10,7 +10,7 @@ export const pipeThroughJsToInternal = {
   async test() {
     const enc = new TextEncoder();
     const dec = new TextDecoder();
-    const chunks = [enc.encode('hello'), enc.encode('there'), 'hello'];
+    const chunks = [enc.encode('hello'), enc.encode('there'), 'hello', 123];
     const rs = new ReadableStream({
       pull(c) {
         c.enqueue(chunks.shift());
@@ -31,7 +31,7 @@ export const pipeThroughJsToInternal = {
       message: 'This WritableStream only supports writing byte types.',
     });
 
-    deepStrictEqual(output, ['hello', 'there']);
+    deepStrictEqual(output, ['hello', 'there', 'hello']);
   },
 };
 

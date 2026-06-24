@@ -559,11 +559,11 @@ class DirectoryBase final: public Directory {
     for (auto& entry: entries) {
       KJ_SWITCH_ONEOF(entry.value) {
         KJ_CASE_ONEOF(file, kj::Rc<File>) {
-          tracker.trackField("file", *file.get());
+          tracker.trackField("file", *file);
           break;
         }
         KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
-          tracker.trackField("directory", *dir.get());
+          tracker.trackField("directory", *dir);
           break;
         }
         KJ_CASE_ONEOF(link, kj::Rc<SymbolicLink>) {
@@ -692,7 +692,7 @@ class FileImpl final: public File {
     auto src = data.slice(offset);
     KJ_DASSERT(src.size() > 0);
     if (buffer.size() > src.size()) {
-      buffer.first(src.size()).copyFrom(src);
+      buffer.write(src);
       return src.size();
     }
     buffer.copyFrom(src.first(buffer.size()));
@@ -741,8 +741,9 @@ class FileImpl final: public File {
     if (size > owned.data.size()) {
       // To grow the file, we need to allocate a new array, copy the old data over,
       // and replace the original.
-      newData.first(owned.data.size()).copyFrom(owned.data);
-      newData.slice(owned.data.size()).fill(0);
+      auto remaining = newData.asPtr();
+      remaining.write(owned.data);
+      remaining.fill(0);
     } else {
       newData.asPtr().copyFrom(owned.data.first(size));
     }
@@ -1153,14 +1154,14 @@ kj::OneOf<FsError, jsg::JsString> File::readAllText(jsg::Lock& js) {
   return js.str(data);
 }
 
-kj::OneOf<FsError, jsg::BufferSource> File::readAllBytes(jsg::Lock& js) {
+kj::OneOf<FsError, jsg::JsRef<jsg::JsUint8Array>> File::readAllBytes(jsg::Lock& js) {
   auto info = stat(js);
   KJ_DASSERT(info.type == FsType::FILE);
-  auto backing = jsg::BackingStore::alloc<v8::Uint8Array>(js, info.size);
+  auto u8 = jsg::JsUint8Array::create(js, info.size);
   if (info.size > 0) {
-    KJ_ASSERT(read(js, 0, backing) == info.size);
+    KJ_ASSERT(read(js, 0, u8.asArrayPtr()) == info.size);
   }
-  return jsg::BufferSource(js, kj::mv(backing));
+  return u8.addRef(js);
 }
 
 void Directory::Builder::add(
@@ -1758,10 +1759,19 @@ class DevRandomFile final: public File {
 // - inspector reporting
 // - structured logging
 // - stdio output otherwise
+//
+// SECURITY: The `bytes` parameter may alias mutable state (e.g. StdioFile::lineBuffer's
+// heap backing store). We MUST copy the bytes into an owned kj::String before any JS
+// property access, because property getters on globalThis.console / console.log can run
+// arbitrary user code that may re-enter StdioFile::write and invalidate the buffer.
 void writeStdio(jsg::Lock& js, VirtualFileSystem::Stdio type, kj::ArrayPtr<const kj::byte> bytes) {
   auto chars = bytes.asChars();
   size_t endPos = chars.size();
   if (endPos > 0 && chars[endPos - 1] == '\n') endPos--;
+
+  // Own the line text up-front so that `bytes`/`chars` are no longer used after this point.
+  // This prevents use-after-free if a JS getter re-enters and reallocates the caller's buffer.
+  kj::String line = kj::str(chars.first(endPos));
 
   KJ_IF_SOME(console, js.global().get(js, "console"_kj).tryCast<jsg::JsObject>()) {
     auto method = console.get(js, "log"_kj);
@@ -1769,16 +1779,15 @@ void writeStdio(jsg::Lock& js, VirtualFileSystem::Stdio type, kj::ArrayPtr<const
       v8::Local<v8::Value> methodVal(method);
       auto methodFunc = jsg::JsFunction(methodVal.As<v8::Function>());
 
-      kj::String outputStr;
       auto isolate = &Worker::Isolate::from(js);
       auto prefix = type == VirtualFileSystem::Stdio::OUT ? isolate->getStdoutPrefix()
                                                           : isolate->getStderrPrefix();
-      if (endPos == 0) {
+      if (line.size() == 0) {
         methodFunc.call(js, console, js.str(prefix));
       } else if (prefix.size() > 0) {
-        methodFunc.call(js, console, js.str(kj::str(prefix, " "_kj, chars.first(endPos))));
+        methodFunc.call(js, console, js.str(kj::str(prefix, " "_kj, line)));
       } else {
-        methodFunc.call(js, console, js.str(chars.first(endPos)));
+        methodFunc.call(js, console, js.str(line));
       }
       return;
     }
@@ -1864,10 +1873,14 @@ class StdioFile final: public File {
           auto lineData = buffer.slice(pos, newlinePos + 1);
 
           if (!lineBuffer.empty()) {
-            // We have buffered data - append the line data to it
+            // We have buffered data - append the line data to it.
+            // SECURITY: Move lineBuffer into a local before calling writeStdio so that
+            // re-entrant writes (via JS getters on console/console.log) operate on a
+            // fresh buffer and cannot free the backing store we pass to writeStdio.
             lineBuffer.addAll(lineData);
-            writeStdio(js, type, lineBuffer.asPtr());
-            lineBuffer.clear();
+            auto toFlush = kj::mv(lineBuffer);
+            lineBuffer = kj::Vector<kj::byte>();
+            writeStdio(js, type, toFlush.asPtr());
           } else {
             // No buffered data - log this line directly
             writeStdio(js, type, lineData);
@@ -1944,10 +1957,13 @@ class StdioFile final: public File {
         self.microtaskScheduled = false;
 
         if (!self.lineBuffer.empty()) {
+          // SECURITY: Move lineBuffer into a local before calling writeStdio so that
+          // re-entrant writes cannot free the backing store during the call.
+          auto toFlush = kj::mv(self.lineBuffer);
+          self.lineBuffer = kj::Vector<kj::byte>();
           if (IoContext::hasCurrent()) {
-            writeStdio(js, self.type, self.lineBuffer.asPtr());
+            writeStdio(js, self.type, toFlush.asPtr());
           }
-          self.lineBuffer.clear();
         }
       });
     });

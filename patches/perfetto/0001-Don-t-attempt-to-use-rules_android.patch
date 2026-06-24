@@ -1,14 +1,14 @@
-From 418089631def5cb0cb92b550f2500bcff1230980 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Sat, 15 Nov 2025 16:55:07 -0500
 Subject: Don't attempt to use rules_android
 
 
 diff --git a/MODULE.bazel b/MODULE.bazel
-index 47f7f25cfd..dc006ebba8 100644
+index f94686dcb5d94d0bc7c9e5113203450086e8fb36..87eb246bfe8502d5a6c667b395a26c218b81e6f5 100644
 --- a/MODULE.bazel
 +++ b/MODULE.bazel
-@@ -14,102 +14,10 @@
+@@ -14,10 +14,8 @@
  
  """Perfetto Bazel module configuration for bzlmod."""
  
@@ -19,6 +19,11 @@ index 47f7f25cfd..dc006ebba8 100644
 +module(name = "perfetto")
 +bazel_dep(name = "perfetto_cfg", version = "0.0.0")
  
+ bazel_dep(name = "abseil-cpp", version = "20250127.0", repo_name = "com_google_absl")
+ git_override(
+@@ -28,97 +26,6 @@ git_override(
+ 
+ bazel_dep(name = "re2", version = "2024-07-02.bcr.1")
  bazel_dep(name = "bazel_skylib", version = "1.7.1")
 -bazel_dep(name = "platforms", version = "0.0.10")
 -bazel_dep(name = "protobuf", version = "31.1", repo_name = "com_google_protobuf")
@@ -100,23 +105,24 @@ index 47f7f25cfd..dc006ebba8 100644
 -)
 -maven.install(
 -    name = "perfetto_maven",
+-    # Use rules_android's aar_import to avoid toolchain type mismatch.
+-    aar_import_bzl_label = "@rules_android//rules:rules.bzl",
 -    artifacts = [
 -        "androidx.test:runner:1.6.2",
 -        "androidx.test:monitor:1.7.2",
 -        "com.google.truth:truth:1.4.4",
 -        "junit:junit:4.13.2",
 -        "androidx.test.ext:junit:1.2.1",
+-        "com.google.errorprone:error_prone_annotations:2.36.0",
 -    ],
 -    repositories = [
 -        "https://maven.google.com",
 -        "https://repo1.maven.org/maven2",
 -    ],
--    # Use rules_android's aar_import to avoid toolchain type mismatch.
--    aar_import_bzl_label = "@rules_android//rules:rules.bzl",
 -)
 -use_repo(maven, "perfetto_maven")
 diff --git a/bazel/rules.bzl b/bazel/rules.bzl
-index 563382a18b..d7e77cf214 100644
+index 958e9bc0aabb47a4039f67e39e4868ea2676d36d..2e11ef26b27597679241b5577d4fff7a7e2331e3 100644
 --- a/bazel/rules.bzl
 +++ b/bazel/rules.bzl
 @@ -13,9 +13,7 @@

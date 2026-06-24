@@ -35,7 +35,17 @@ export const validateSpans = {
         expectedSpan: 'undefined-attr-op',
       },
       { test: 'publicImportTracing', expectedSpan: 'public-import-op' },
+      {
+        test: 'publicImportStartActiveSpan',
+        expectedSpan: 'public-start-active-op',
+      },
       { test: 'ctxTracing', expectedSpan: 'ctx-tracing-op' },
+      {
+        test: 'detachedSpanEndsAfterStreamDrain',
+        expectedSpan: 'detached-stream-op',
+      },
+      { test: 'helperStartActiveSpan', expectedSpan: 'helper-detached-op' },
+      { test: 'startActiveSpanSyncThrow', expectedSpan: 'manual-throw-op' },
     ];
 
     for (const { test, expectedSpan } of testValidations) {
@@ -56,6 +66,44 @@ export const validateSpans = {
         !('skipped' in span),
         'setAttribute(key, undefined) should not record the attribute'
       );
+    }
+
+    {
+      const span = (
+        spansByTest.get('detachedSpanEndsAfterStreamDrain') || []
+      ).find((s) => s.name === 'detached-stream-op');
+      assert(span, 'detachedSpanEndsAfterStreamDrain: span present');
+      assert.strictEqual(span['phase.created'], true);
+      assert.strictEqual(span['phase.drained'], true);
+      assert(span.closed, 'Detached stream span should be explicitly closed');
+    }
+
+    {
+      const span = (spansByTest.get('publicImportStartActiveSpan') || []).find(
+        (s) => s.name === 'public-start-active-op'
+      );
+      assert(span, 'publicImportStartActiveSpan: span present');
+      assert.strictEqual(span.path, 'import-from-cloudflare-workers');
+      assert.strictEqual(span['ended.explicitly'], true);
+      assert(span.closed, 'Public startActiveSpan span should be closed');
+    }
+
+    {
+      const span = (spansByTest.get('helperStartActiveSpan') || []).find(
+        (s) => s.name === 'helper-detached-op'
+      );
+      assert(span, 'helperStartActiveSpan: span present');
+      assert.strictEqual(span['ended.explicitly'], true);
+      assert(span.closed, 'Helper-created span should be explicitly closed');
+    }
+
+    {
+      const span = (spansByTest.get('startActiveSpanSyncThrow') || []).find(
+        (s) => s.name === 'manual-throw-op'
+      );
+      assert(span, 'startActiveSpanSyncThrow: span present');
+      assert.strictEqual(span['after.throw'], true);
+      assert(span.closed, 'Manual throw span should be explicitly closed');
     }
 
     // Nested spans: verify both outer and inner spans exist and both are closed.

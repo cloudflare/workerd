@@ -6,8 +6,12 @@
 
 output_path=$(bazel info output_path)
 workspace=$(bazel info workspace)
+# Note: -n (--no-dereference) is required so that an existing "external"
+# symlink pointing at a directory is replaced rather than dereferenced (which
+# would create the new link *inside* the target directory). Both GNU and BSD
+# ln support -n. The previously used -F flag is a no-op for this case on Linux.
 external="${workspace}/external"
-ln -sfF "${output_path}/../../../external" "${external}"
+ln -sfn "${output_path}/../../../external" "${external}"
 
 # Temporary warning that compile_commands.json exists and will
 # interfere with the intended clangd setup.

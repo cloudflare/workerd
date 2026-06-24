@@ -11,6 +11,7 @@ import {
   type WorkflowCronSchedule,
   type WorkflowEvent,
   type WorkflowStep,
+  type WorkflowStepContext,
 } from 'cloudflare:workers';
 import { expectTypeOf } from 'expect-type';
 
@@ -802,10 +803,11 @@ declare const workflowStep: WorkflowStep;
 
 expectTypeOf(
   workflowStep.do('step with rollback', async (): Promise<string> => 'ok', {
-    rollback: async (ctx) => {
-      expectTypeOf(ctx.error).toEqualTypeOf<Error>();
-      expectTypeOf(ctx.output).toEqualTypeOf<string | undefined>();
-      expectTypeOf(ctx.stepName).toEqualTypeOf<string>();
+    rollback: async (rollbackCtx) => {
+      expectTypeOf(rollbackCtx.ctx).toEqualTypeOf<WorkflowStepContext>();
+      expectTypeOf(rollbackCtx.error).toEqualTypeOf<Error>();
+      expectTypeOf(rollbackCtx.output).toEqualTypeOf<string | undefined>();
+      expectTypeOf(rollbackCtx.stepName).toEqualTypeOf<string>();
     },
   })
 ).toMatchTypeOf<Promise<string>>();
@@ -815,14 +817,33 @@ workflowStep.do(
   {retries: {limit: 0, delay: 0}},
   async (): Promise<string> => 'ok',
   {
-    rollback: async (ctx) => {
-      expectTypeOf(ctx.output).toEqualTypeOf<string | undefined>();
+    rollback: async (rollbackCtx) => {
+      expectTypeOf(rollbackCtx.ctx).toEqualTypeOf<WorkflowStepContext>();
+      expectTypeOf(rollbackCtx.output).toEqualTypeOf<string | undefined>();
+      expectTypeOf(rollbackCtx.stepName).toEqualTypeOf<string>();
     },
     rollbackConfig: {retries: {limit: 0, delay: 0}},
   }
 );
 
+workflowStep.do('rollback with timeout only', async (): Promise<string> => 'ok', {
+  rollback: async () => {},
+  rollbackConfig: {timeout: '10 seconds'},
+});
+
+// @ts-expect-error rollbackConfig only accepts retries and timeout
+workflowStep.do('rollback config with sensitivity', async () => 'ok', {
+  rollback: async () => {},
+  rollbackConfig: {sensitive: 'output'},
+});
+
+// @ts-expect-error rollback options require a rollback handler
 workflowStep.do('empty rollback options', async () => 'ok', {});
+
+// @ts-expect-error rollbackConfig requires a rollback handler
+workflowStep.do('rollback config without handler', async () => 'ok', {
+  rollbackConfig: {retries: {limit: 0, delay: 0}},
+});
 
 expectTypeOf(
   workflowStep.do('no rollback 2-arg', async (): Promise<string> => 'ok')

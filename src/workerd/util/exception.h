@@ -12,6 +12,8 @@ namespace workerd {
 
 // If an exception is thrown for exceeding CPU time limits, it will contain this detail.
 constexpr kj::Exception::DetailTypeId CPU_LIMIT_DETAIL_ID = 0xfdcb787ba4240576ull;
+// If an exception is thrown for exceeding wall time limits, it will contain this detail.
+constexpr kj::Exception::DetailTypeId WALL_TIME_LIMIT_DETAIL_ID = 0x6e8f2b4a1c9d3e5bull;
 // If an exception is thrown for exceeding memory limits, it will contain this detail.
 constexpr kj::Exception::DetailTypeId MEMORY_LIMIT_DETAIL_ID = 0xbaf76dd7ce5bd8cfull;
 // If an exception is thrown for worker killed before start, it will contain this detail.

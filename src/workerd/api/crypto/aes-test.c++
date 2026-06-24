@@ -42,21 +42,27 @@ KJ_TEST("AES-KW key wrap") {
       // AES-KW 256
     });
 
-    auto aesKeys = KJ_MAP(rawKey, kj::mv(rawWrappingKeys)) {
-      SubtleCrypto::ImportKeyAlgorithm algorithm = {
-        .name = kj::str("AES-KW"),
-      };
-      bool extractable = false;
-
-      return CryptoKey::Impl::importAes(isolateLock, "AES-KW", "raw", kj::mv(rawKey),
-          kj::mv(algorithm), extractable, {kj::str("wrapKey"), kj::str("unwrapKey")});
-    };
-
     auto keyMaterial = kj::heapArray<const kj::byte>(
         {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24});
 
+    auto getKeys = [&](jsg::Lock& js) {
+      return KJ_MAP(rawKey, kj::mv(rawWrappingKeys)) {
+        SubtleCrypto::ImportKeyAlgorithm algorithm = {
+          .name = kj::str("AES-KW"),
+        };
+        bool extractable = false;
+
+        auto u8 = jsg::JsBufferSource(jsg::JsUint8Array::create(isolateLock, rawKey));
+
+        return CryptoKey::Impl::importAes(isolateLock, "AES-KW", "raw", u8.addRef(isolateLock),
+            kj::mv(algorithm), extractable, {kj::str("wrapKey"), kj::str("unwrapKey")});
+      };
+    };
+
     JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
         isolateLock.newContext<CryptoContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      auto aesKeys = getKeys(js);
+
       for (const auto& aesKey: aesKeys) {
         SubtleCrypto::EncryptAlgorithm params;
         params.name = kj::str("AES-KW");
@@ -102,7 +108,8 @@ KJ_TEST("AES-CTR key wrap") {
   SubtleCrypto subtle;
 
   static constexpr auto getWrappingKey = [](jsg::Lock& js, SubtleCrypto& subtle) {
-    return subtle.importKeySync(js, "raw", kj::heapArray<kj::byte>(KEY_DATA),
+    auto keyData = jsg::JsBufferSource(jsg::JsUint8Array::create(js, KEY_DATA));
+    return subtle.importKeySync(js, "raw", keyData.addRef(js),
         SubtleCrypto::ImportKeyAlgorithm{.name = kj::str("AES-CTR")}, false /* extractable */,
         {kj::str("wrapKey"), kj::str("unwrapKey")});
   };
@@ -133,8 +140,9 @@ KJ_TEST("AES-CTR key wrap") {
     JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
         isolateLock.newContext<CryptoContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
       auto wrappingKey = getWrappingKey(js, subtle);
+      auto keyData = jsg::JsBufferSource(jsg::JsUint8Array::create(js, KEY_DATA));
       subtle
-          .importKey(js, kj::str("raw"), kj::heapArray(KEY_DATA), getImportKeyAlg(), true,
+          .importKey(js, kj::str("raw"), keyData.addRef(js), getImportKeyAlg(), true,
               kj::arr(kj::str("decrypt")))
           .then(js,
               [&](jsg::Lock&, jsg::Ref<CryptoKey> toWrap) {
@@ -142,8 +150,8 @@ KJ_TEST("AES-CTR key wrap") {
       })
           .then(js,
               [&](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> wrapped) {
-        auto data = wrapped.getHandle(js).copy();
-        return subtle.unwrapKey(js, kj::str("raw"), kj::mv(data), *wrappingKey, getEnc(js),
+        auto data = jsg::JsBufferSource(wrapped.getHandle(js));
+        return subtle.unwrapKey(js, kj::str("raw"), data, *wrappingKey, getEnc(js),
             getImportKeyAlg(), true, kj::arr(kj::str("encrypt")), *jwkHandler);
       })
           .then(js, [&](jsg::Lock& js, jsg::Ref<CryptoKey> unwrapped) {

@@ -519,6 +519,34 @@ export const modifiedAuthTagDecrypt = {
   },
 };
 
+export const invalidAuthTagDecrypt = {
+  test() {
+    // Decryption with an invalid auth tag results in a meaningful error message
+    const plainKey = Buffer.alloc(32, 0x01);
+    const plainIv = Buffer.alloc(12, 0x42);
+    const key = createSecretKey(plainKey);
+    const plaintext = Buffer.from('hello world');
+
+    const { ciphertext, tag } = chachaEncrypt(key, plainIv, plaintext);
+    // Modify first byte of tag
+    tag[0] ^= 1;
+
+    const decipher = createDecipheriv('chacha20-poly1305', key, plainIv);
+    decipher.setAuthTag(new Uint8Array(tag));
+
+    throws(
+      () => {
+        decipher.update(ciphertext);
+      },
+      {
+        name: 'OperationError',
+        message:
+          'Decryption failed: Incorrect key/IV or corrupted ciphertext/authentication tag provided.',
+      }
+    );
+  },
+};
+
 export const transferredIvChaCha20 = {
   test() {
     // Transferring IV buffer after cipher creation must not affect output.
@@ -608,6 +636,35 @@ export const transferredAuthTagDecrypt = {
     const pt = decipher.update(ciphertext);
     decipher.final();
     deepStrictEqual(pt, plaintext);
+  },
+};
+
+// Regression: AUTOVULN-CLOUDFLARE-WORKERD-76
+// publicEncrypt/privateDecrypt with non-OAEP padding + oaepLabel must
+// throw without leaking the label buffer.
+export const oaepLabelWithNonOaepPaddingThrows = {
+  test(_, env) {
+    const pub = createPublicKey(env['rsa_public.pem']);
+    pub.padding = 1; // RSA_PKCS1_PADDING (not OAEP=4)
+    pub.oaepLabel = Buffer.alloc(1024);
+    pub.encoding = 'utf8';
+
+    for (let i = 0; i < 5; i++) {
+      throws(() => publicEncrypt(pub, Buffer.from('test')), {
+        message: /Failed to set the OAEP label/,
+      });
+    }
+
+    const pvt = createPrivateKey(env['rsa_private.pem']);
+    pvt.padding = 1; // RSA_PKCS1_PADDING (not OAEP=4)
+    pvt.oaepLabel = Buffer.alloc(1024);
+    pvt.encoding = 'utf8';
+
+    for (let i = 0; i < 5; i++) {
+      throws(() => privateDecrypt(pvt, Buffer.from('test')), {
+        message: /Failed to set the OAEP label/,
+      });
+    }
   },
 };
 

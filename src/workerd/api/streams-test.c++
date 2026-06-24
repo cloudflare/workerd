@@ -58,12 +58,12 @@ KJ_TEST("Reading from default reader") {
       KJ_ASSERT(!readResult.done);
       auto& value = KJ_REQUIRE_NONNULL(readResult.value);
       auto handle = value.getHandle(js);
-      KJ_ASSERT(handle->IsUint8Array());
+      auto u8 = KJ_ASSERT_NONNULL(handle.tryCast<jsg::JsUint8Array>());
       if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE)) {
         // With 16KB buffer, the entire 10KB stream fits in one read.
-        KJ_ASSERT(streamLength == handle.As<v8::Uint8Array>()->ByteLength());
+        KJ_ASSERT(streamLength == u8.size());
       } else {
-        KJ_ASSERT(4 * 1024 == handle.As<v8::Uint8Array>()->ByteLength());
+        KJ_ASSERT(4 * 1024 == u8.size());
       }
     })));
   });
@@ -106,22 +106,22 @@ KJ_TEST("Reading from byob reader") {
 
         auto& value = KJ_REQUIRE_NONNULL(readResult.value);
         auto handle = value.getHandle(js);
-        KJ_ASSERT(handle->IsUint8Array());
-        auto view = handle.As<v8::Uint8Array>();
-        KJ_ASSERT(kj::min(test.streamLength, test.bufferSize) == view->ByteLength());
-        KJ_ASSERT(test.bufferSize == view->Buffer()->ByteLength());
+        KJ_ASSERT(handle.isUint8Array());
+        v8::Local<v8::Uint8Array> u8 = KJ_ASSERT_NONNULL(handle.tryCast<jsg::JsUint8Array>());
+        KJ_ASSERT(kj::min(test.streamLength, test.bufferSize) == u8->ByteLength());
+        KJ_ASSERT(test.bufferSize == u8->Buffer()->ByteLength());
       })));
       return kj::READY_NOW;
     });
   }
 }
 
-KJ_TEST("PumpToReader regression") {
-  // If the promise holding the PumpToReader is dropped while the inner
-  // write to the sink is pending, the PumpToReader can free the sink.
-  // In some cases, this means that the sink can error because shutdownWrite
-  // is called while there is still a pending write promise. This test verifies
-  // that PumpToReader cancels any pending write promise when it is destroyed.
+KJ_TEST("ReadableStream pumpTo pending write cancellation regression") {
+  // If the promise holding pumpTo's implementation is dropped while the inner
+  // write to the sink is pending, the sink can be freed. In some cases, this
+  // means that the sink can error because shutdownWrite is called while there
+  // is still a pending write promise. This test verifies that destruction of
+  // the pump operation cancels any pending write promise.
 
   struct TestSink final: public WritableStreamSink {
     kj::TwoWayPipe pipe;
@@ -179,7 +179,7 @@ KJ_TEST("PumpToReader regression") {
                              [](jsg::Lock& js, auto controller) {
       auto& c = KJ_REQUIRE_NONNULL(
           controller.template tryGet<jsg::Ref<ReadableStreamDefaultController>>());
-      c->enqueue(js, v8::ArrayBuffer::New(js.v8Isolate, 10));
+      c->enqueue(js, jsg::JsValue(v8::ArrayBuffer::New(js.v8Isolate, 10)));
       c->close(js);
       return js.resolvedPromise();
     }},

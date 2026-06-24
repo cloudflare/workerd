@@ -72,7 +72,9 @@ export const handlePushReentrantError = {
     strictEqual(result.done, false);
     strictEqual(result.value.byteLength, 4);
     strictEqual(result.value[0], 1);
-    strictEqual(thenCalled, true);
+
+    // The offending Object.prototype.then should not have been called.
+    strictEqual(thenCalled, false);
 
     // Allocate objects to pressure the allocator into reclaiming freed memory,
     // making the UAF more likely to manifest under ASAN.

@@ -121,7 +121,7 @@ class HmacKey final: public CryptoKey::Impl {
   CryptoKey::HmacKeyAlgorithm keyAlgorithm;
 };
 
-void zeroOutTrailingKeyBits(kj::Array<kj::byte>& keyDataArray, int keyBitLength) {
+void zeroOutTrailingKeyBits(kj::ArrayPtr<kj::byte> keyDataArray, int keyBitLength) {
   // We zero out the least-significant bits of the last byte, matching Chrome's
   // big-endian behavior when generating keys.
   int arrayBitLength = keyDataArray.size() * 8;
@@ -268,7 +268,9 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHmac(jsg::Lock& js,
 
   if (format == "raw") {
     // NOTE: Checked in SubtleCrypto::importKey().
-    keyDataArray = kj::mv(keyData.get<kj::Array<kj::byte>>());
+    auto& source = keyData.get<jsg::JsRef<jsg::JsBufferSource>>();
+    auto handle = source.getHandle(js);
+    keyDataArray = handle.copy();
   } else if (format == "jwk") {
     auto& keyDataJwk = keyData.get<SubtleCrypto::JsonWebKey>();
     JSG_REQUIRE(keyDataJwk.kty == "oct", DOMDataError,

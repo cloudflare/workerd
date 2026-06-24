@@ -217,7 +217,7 @@ kj::Own<kj::AsyncInputStream> wrapTeeBranch(kj::Own<kj::AsyncInputStream> branch
 
 // A ReadableStreamSource backed by in-memory data. Unlike newSystemStream() wrapping a
 // newMemoryInputStream(), this implementation does NOT support deferred proxying. This is
-// important when the backing memory has V8 heap provenance (e.g., jsg::BackingStore, Blob data,
+// important when the backing memory has V8 heap provenance (e.g., ArrayBuffer, Blob data,
 // kj::Array<kj::byte> with a v8::BackingStore attached, etc)
 // since the memory could be freed by GC after the IoContext completes.
 //

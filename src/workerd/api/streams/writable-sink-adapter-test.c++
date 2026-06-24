@@ -612,17 +612,12 @@ KJ_TEST("zero-length writes are a non-op (ArrayBuffer)") {
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(
         env.js, env.context, newWritableSink(kj::mv(recordingSink)));
 
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(env.js, 0);
-    jsg::BufferSource source(env.js, kj::mv(backing));
-    jsg::JsValue handle(source.getHandle(env.js));
-
+    auto handle = jsg::JsArrayBuffer::create(env.js, 0);
     auto writePromise = adapter->write(env.js, handle);
     KJ_ASSERT(state.writeCalled == 0, "Underlying sink's write() should not have been called");
 
-    return env.context
-        .awaitJs(env.js, writePromise.then(env.js, [&state](jsg::Lock& js) {
-      KJ_ASSERT(state.writeCalled == 0, "Underlying sink's write() should not have been called");
-    })).attach(kj::mv(adapter));
+    return env.context.awaitJs(
+        env.js, writePromise.then(env.js, [adapter = kj::mv(adapter)](jsg::Lock& js) {}));
   });
 }
 
@@ -638,21 +633,18 @@ KJ_TEST("writing small ArrayBuffer") {
           .highWaterMark = 10,
         });
 
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(env.js, 10);
-    jsg::BufferSource source(env.js, kj::mv(backing));
-    jsg::JsValue handle(source.getHandle(env.js));
+    auto handle = jsg::JsArrayBuffer::create(env.js, 10);
 
     auto writePromise = adapter->write(env.js, handle);
-    KJ_ASSERT(state.writeCalled == 1, "Underlying sink's write() should not have been called");
+    KJ_ASSERT(state.writeCalled == 1, "Underlying sink's write() should have been called");
     KJ_ASSERT(KJ_ASSERT_NONNULL(adapter->getDesiredSize()) == 0,
         "Adapter's desired size should be 0 after writing highWaterMark bytes");
 
-    return env.context
-        .awaitJs(env.js, writePromise.then(env.js, [&state, &adapter = *adapter](jsg::Lock& js) {
-      KJ_ASSERT(state.writeCalled == 1, "Underlying sink's write() should not have been called");
-      KJ_ASSERT(KJ_ASSERT_NONNULL(adapter.getDesiredSize()) == 10,
+    return env.context.awaitJs(
+        env.js, writePromise.then(env.js, [adapter = kj::mv(adapter)](jsg::Lock& js) mutable {
+      KJ_ASSERT(KJ_ASSERT_NONNULL(adapter->getDesiredSize()) == 10,
           "Back to initial desired size after write completes");
-    })).attach(kj::mv(adapter));
+    }));
   });
 }
 
@@ -668,21 +660,18 @@ KJ_TEST("writing medium ArrayBuffer") {
           .highWaterMark = 5 * 1024,
         });
 
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(env.js, 4 * 1024);
-    jsg::BufferSource source(env.js, kj::mv(backing));
-    jsg::JsValue handle(source.getHandle(env.js));
+    auto handle = jsg::JsArrayBuffer::create(env.js, 4 * 1024);
 
     auto writePromise = adapter->write(env.js, handle);
-    KJ_ASSERT(state.writeCalled == 1, "Underlying sink's write() should not have been called");
+    KJ_ASSERT(state.writeCalled == 1, "Underlying sink's write() should have been called");
     KJ_ASSERT(KJ_ASSERT_NONNULL(adapter->getDesiredSize()) == 1024,
         "Adapter's desired size should be 1024 after writing 4 * 1024 bytes");
 
-    return env.context
-        .awaitJs(env.js, writePromise.then(env.js, [&state, &adapter = *adapter](jsg::Lock& js) {
-      KJ_ASSERT(state.writeCalled == 1, "Underlying sink's write() should not have been called");
-      KJ_ASSERT(KJ_ASSERT_NONNULL(adapter.getDesiredSize()) == 5 * 1024,
+    return env.context.awaitJs(
+        env.js, writePromise.then(env.js, [adapter = kj::mv(adapter)](jsg::Lock& js) mutable {
+      KJ_ASSERT(KJ_ASSERT_NONNULL(adapter->getDesiredSize()) == 5 * 1024,
           "Back to initial desired size after write completes");
-    })).attach(kj::mv(adapter));
+    }));
   });
 }
 
@@ -698,21 +687,17 @@ KJ_TEST("writing large ArrayBuffer") {
           .highWaterMark = 8 * 1024,
         });
 
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(env.js, 16 * 1024);
-    jsg::BufferSource source(env.js, kj::mv(backing));
-    jsg::JsValue handle(source.getHandle(env.js));
-
+    auto handle = jsg::JsArrayBuffer::create(env.js, 16 * 1024);
     auto writePromise = adapter->write(env.js, handle);
-    KJ_ASSERT(state.writeCalled == 1, "Underlying sink's write() should not have been called");
+    KJ_ASSERT(state.writeCalled == 1, "Underlying sink's write() should have been called");
     KJ_ASSERT(KJ_ASSERT_NONNULL(adapter->getDesiredSize()) == -(8 * 1024),
         "Adapter's desired size should be negative after writing 16 * 1024 bytes");
 
-    return env.context
-        .awaitJs(env.js, writePromise.then(env.js, [&state, &adapter = *adapter](jsg::Lock& js) {
-      KJ_ASSERT(state.writeCalled == 1, "Underlying sink's write() should not have been called");
-      KJ_ASSERT(KJ_ASSERT_NONNULL(adapter.getDesiredSize()) == 8 * 1024,
+    return env.context.awaitJs(
+        env.js, writePromise.then(env.js, [adapter = kj::mv(adapter)](jsg::Lock& js) mutable {
+      KJ_ASSERT(KJ_ASSERT_NONNULL(adapter->getDesiredSize()) == 8 * 1024,
           "Back to initial desired size after write completes");
-    })).attach(kj::mv(adapter));
+    }));
   });
 }
 
@@ -756,19 +741,16 @@ KJ_TEST("large number of large writes") {
         kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, newWritableSink(kj::mv(fake)));
 
     for (int i = 0; i < 1000; i++) {
-      auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(env.js, 16 * 1024);
-      jsg::BufferSource source(env.js, kj::mv(backing));
-      jsg::JsValue handle(source.getHandle(env.js));
-
+      auto handle = jsg::JsArrayBuffer::create(env.js, 16 * 1024);
       adapter->write(env.js, handle);
     }
     auto endPromise = adapter->end(env.js);
 
-    return env.context
-        .awaitJs(env.js,
-            endPromise.then(env.js, [&state = sink.getState(), &adapter = *adapter](jsg::Lock& js) {
+    return env.context.awaitJs(env.js,
+        endPromise.then(
+            env.js, [&state = sink.getState(), adapter = kj::mv(adapter)](jsg::Lock& js) {
       KJ_ASSERT(state.writeCalled == 1000, "Underlying sink's write() should have been called");
-    })).attach(kj::mv(adapter));
+    }));
   });
 }
 
@@ -813,15 +795,14 @@ KJ_TEST("detachOnWrite option detaches ArrayBuffer before write") {
           .detachOnWrite = true,
         });
 
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(env.js, 10);
-    jsg::BufferSource source(env.js, kj::mv(backing));
-    KJ_ASSERT(!source.isDetached());
-    jsg::JsValue handle(source.getHandle(env.js));
+    auto handle = jsg::JsArrayBuffer::create(env.js, 10);
+    KJ_ASSERT(!handle.isDetached());
+    KJ_ASSERT(handle.size() == 10);
 
     auto writePromise = adapter->write(env.js, handle);
 
-    jsg::BufferSource source2(env.js, handle);
-    KJ_ASSERT(source2.size() == 0);
+    KJ_ASSERT(handle.isDetached());
+    KJ_ASSERT(handle.size() == 0);
 
     return env.context.awaitJs(env.js, kj::mv(writePromise)).attach(kj::mv(adapter));
   });
@@ -838,15 +819,14 @@ KJ_TEST("detachOnWrite option detaches Uint8Array before write") {
           .detachOnWrite = true,
         });
 
-    auto backing = jsg::BackingStore::alloc<v8::Uint8Array>(env.js, 10);
-    jsg::BufferSource source(env.js, kj::mv(backing));
-    KJ_ASSERT(!source.isDetached());
-    jsg::JsValue handle(source.getHandle(env.js));
+    auto handle = jsg::JsUint8Array::create(env.js, 10);
+    KJ_ASSERT(!handle.isDetached());
+    KJ_ASSERT(handle.size() == 10);
 
     auto writePromise = adapter->write(env.js, handle);
 
-    jsg::BufferSource source2(env.js, handle);
-    KJ_ASSERT(source2.size() == 0);
+    KJ_ASSERT(handle.isDetached());
+    KJ_ASSERT(handle.size() == 0);
 
     return env.context.awaitJs(env.js, kj::mv(writePromise)).attach(kj::mv(adapter));
   });
@@ -911,14 +891,12 @@ jsg::Ref<WritableStream> createSimpleWritableStream(jsg::Lock& js, WritableStrea
       UnderlyingSink{
         .write =
             [&context](jsg::Lock& js, auto chunk, auto) {
-    jsg::BufferSource source(js, chunk);
-    auto data = kj::heapArray<kj::byte>(source.asArrayPtr());
-    context.chunks.add(kj::mv(data));
+    context.chunks.add(jsg::JsBufferSource(chunk).copy());
     return js.resolvedPromise();
   },
         .abort =
             [&context](jsg::Lock& js, auto reason) {
-    context.maybeAbort = jsg::JsRef<jsg::JsValue>(js, jsg::JsValue(reason));
+    context.maybeAbort = reason.addRef(js);
     return js.resolvedPromise();
   },
         .close =

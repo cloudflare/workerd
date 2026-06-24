@@ -1,7 +1,6 @@
 using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
-  autogates = ["workerd-autogate-python-abort-isolate-on-fatal-error"],
   services = [
     ( name = "python-abort-isolate-on-fatal",
       worker = (

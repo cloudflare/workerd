@@ -24,6 +24,12 @@ class Frankenvalue {
     return value.is<EmptyObject>() && properties.empty();
   }
 
+  // Returns an estimate of the in-memory size of the value, in bytes. This sums the size of the
+  // serialized/JSON content of this value plus, recursively, the sizes of any stitched-in
+  // properties (including their names). Intended for enforcing size limits, not for exact
+  // accounting. The cap table is not included.
+  size_t estimateSize() const;
+
   Frankenvalue clone();
 
   // This method only works if the `CapTableEntry`s in this `Frankenvalue` all implement
@@ -178,8 +184,9 @@ class Frankenvalue {
   kj::Vector<kj::Own<CapTableEntry>> capTable;
 
   Frankenvalue cloneImpl() const;
-  void fromCapnpImpl(rpc::Frankenvalue::Reader reader, uint& capTablePos);
-  void toCapnpImpl(rpc::Frankenvalue::Builder builder, uint capTableSize);
+  // `capTableTotal` is the real cap table size; `capCount` must never advance past it.
+  size_t fromCapnpImpl(rpc::Frankenvalue::Reader reader, size_t capCount, size_t capTableTotal);
+  void toCapnpImpl(rpc::Frankenvalue::Builder builder, size_t capTableSize);
   jsg::JsValue toJsImpl(jsg::Lock& js, kj::ArrayPtr<kj::Own<CapTableEntry>> capTable);
 };
 
@@ -190,8 +197,30 @@ struct Frankenvalue::Property {
 
   // `value.capTable` is always empty. Instead, these two values specify the slice of the parent's
   // capTable which this Frankenvalue refers into.
-  uint capTableOffset = 0;
-  uint capTableSize = 0;
+  size_t capTableOffset = 0;
+  size_t capTableSize = 0;
 };
+
+// Abstract interface for serializing a `Frankenvalue` -- including the contents of its cap table --
+// to capnp.
+//
+// `Frankenvalue::toCapnp()` deliberately serializes only the *value* and the cap table *size*, not
+// the cap table *contents*, because the meaning of a capability is environment-specific (in the
+// edge runtime, caps are dehydrated channel tokens; in a process sandbox, they are live channel
+// caps; etc.). A `FrankenvalueHandler` knows how to encode the cap table for a particular
+// transport and fills it in. It is passed alongside `HttpOverCapnpFactory` / `ByteStreamFactory`
+// wherever a Frankenvalue may need to cross an RPC boundary.
+//
+// This is intentionally *not* optional at call sites: silently dropping a Frankenvalue's caps (as
+// a bare `Frankenvalue::toCapnp()` would) is always a bug.
+class FrankenvalueHandler {
+ public:
+  // Serialize `value` (including the contents of its cap table) into `builder`.
+  virtual void toCapnp(Frankenvalue& value, rpc::Frankenvalue::Builder builder) = 0;
+};
+
+// Returns a shared `FrankenvalueHandler` for contexts that don't support it. Throws an exception
+// if used.
+FrankenvalueHandler& getUnsupportedFrankenvalueHandler();
 
 }  // namespace workerd

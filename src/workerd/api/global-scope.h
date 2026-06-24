@@ -25,6 +25,10 @@ namespace workerd::jsg {
 class DOMException;
 }  // namespace workerd::jsg
 
+namespace workerd {
+class AccessInfo;
+}  // namespace workerd
+
 namespace workerd::api {
 
 class Tracing;
@@ -240,6 +244,48 @@ class CacheContext: public jsg::Object {
   }
 };
 
+// Concrete wrapper exposing per-request Cloudflare Access authentication info to JavaScript
+// as `ctx.access`. The actual auth data is supplied by the embedding application via
+// `workerd::AccessInfo`, which is plumbed through `newWorkerEntrypoint()` onto
+// `IoContext::IncomingRequest`.
+//
+// Standalone workerd never constructs one of these (no `AccessInfo` is supplied), so
+// `ctx.access` is `undefined`. Embedders construct a concrete `AccessInfo` subclass and pass it
+// through the entrypoint; `ExecutionContext::getAccess()` lazily wraps it in this class.
+class AccessContext: public jsg::Object {
+ public:
+  explicit AccessContext(IoOwn<AccessInfo> info): info(kj::mv(info)) {}
+
+  // Returns the audience claim from the Access JWT.
+  kj::StringPtr getAud();
+
+  // Fetches the full identity information for the authenticated user. Resolves to `undefined`
+  // if no identity is associated with the request (e.g. service-token authentication).
+  jsg::Promise<jsg::Optional<jsg::JsValue>> getIdentity(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(AccessContext) {
+    JSG_READONLY_INSTANCE_PROPERTY(aud, getAud);
+    JSG_METHOD(getIdentity);
+    JSG_TS_OVERRIDE(CloudflareAccessContext {
+      /**
+       * The audience tag (AUD) of the Access application protecting this Worker,
+       * taken from the validated Access JWT.
+       */
+      readonly aud: string;
+      /**
+       * Fetches the authenticated user's identity information from Cloudflare
+       * Access, equivalent to calling `/cdn-cgi/access/get-identity`.
+       * Resolves to `undefined` when no identity is associated with the request
+       * (e.g. service-token authentication).
+       */
+      getIdentity(): Promise<CloudflareAccessIdentity | undefined>;
+    });
+  }
+
+ private:
+  IoOwn<AccessInfo> info;
+};
+
 class ExecutionContext: public jsg::Object {
  public:
   ExecutionContext(jsg::Lock& js, jsg::JsValue exports)
@@ -277,6 +323,19 @@ class ExecutionContext: public jsg::Object {
     return props.getHandle(js);
   }
 
+  // Call the `[restore]()` method of the current entrypoint with the given params object and
+  // return its result, except that the returned value is able to be persisted in storage.
+  // Persistence works by replaying the restore call whenever the value is loaded from storage
+  // again. Hence, the contents of `params` must themselves be storable. The returned type must
+  // be a Fetcher or RpcStub; ActorClass is intentionally not supported. The value itself
+  // doesn't need to be inherently storable since the replay mechanism can restore it instead.
+  // For example, RpcStubs are never storable by default, nor are ServiceStubs coming from
+  // Dynamic Workers or Facets.
+  jsg::Promise<jsg::Value> restore(jsg::Lock& js,
+      jsg::JsObject params,
+      const jsg::TypeHandler<jsg::Ref<Fetcher>>& fetcherHandler,
+      const jsg::TypeHandler<jsg::Ref<JsRpcStub>>& rpcStubHandler);
+
   // Returns a CacheContext for cache-enabled workers, or empty jsg::Optional otherwise.
   // However, by default this always returns undefined unless the embedding application overrides
   // the IoContext.
@@ -293,7 +352,11 @@ class ExecutionContext: public jsg::Object {
     return js.undefined();
   }
 
-  jsg::Optional<jsg::Ref<Tracing>> getTracing(jsg::Lock& js);
+  jsg::Ref<Tracing> getTracing(jsg::Lock& js);
+
+  // Returns an AccessContext for the current request, or empty jsg::Optional otherwise.
+  // Called by the runtime to provide Cloudflare Access authentication context.
+  jsg::Optional<jsg::Ref<AccessContext>> getAccess(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(ExecutionContext, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
@@ -302,16 +365,17 @@ class ExecutionContext: public jsg::Object {
       JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     }
     JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
+    if (flags.getAllowIrrevocableStubStorage()) {
+      JSG_METHOD(restore);
+    }
     JSG_LAZY_INSTANCE_PROPERTY(cache, getCache);
     if (flags.getEnableVersionApi()) {
       JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
     }
+    JSG_LAZY_INSTANCE_PROPERTY(access, getAccess);
 
-    // ctx.tracing - user tracing API. The *type* is always visible (so the generated
-    // `Tracing` / `Span` types exist in every compat-date snapshot, not only the
-    // experimental one). The *value* is `undefined` outside the `workerdExperimental`
-    // compat flag - the gate lives in `getTracing()` in global-scope.c++.
-    // TODO: Remove this comment once the feature is stable.
+    // ctx.tracing - user tracing API. Always available; the Tracing object is stateless
+    // and enterSpan() is a no-op when called outside a traced request.
     JSG_LAZY_INSTANCE_PROPERTY(tracing, getTracing);
 
     if (flags.getWorkerdExperimental()) {
@@ -340,11 +404,13 @@ class ExecutionContext: public jsg::Object {
             readonly key?: string;
             readonly override?: string;
           };
+          readonly access?: CloudflareAccessContext;
         });
       } else {
         JSG_TS_OVERRIDE(<Props = unknown> {
           readonly props: Props;
           readonly exports: Cloudflare.Exports;
+          readonly access?: CloudflareAccessContext;
         });
       }
     } else {
@@ -357,10 +423,12 @@ class ExecutionContext: public jsg::Object {
             readonly key?: string;
             readonly override?: string;
           };
+          readonly access?: CloudflareAccessContext;
         });
       } else {
         JSG_TS_OVERRIDE(<Props = unknown> {
           readonly props: Props;
+          readonly access?: CloudflareAccessContext;
         });
       }
     }
@@ -1094,6 +1162,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       api::ExecutionContext, api::ExportedHandler,                                                 \
       api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
       api::AlarmInvocationInfo, api::Immediate, api::Cloudflare, api::CachePurgeError,             \
-      api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext
+      api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext, api::AccessContext
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

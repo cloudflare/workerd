@@ -75,6 +75,15 @@ class WorkerdPlatform final: public v8::Platform {
     return inner.GetTracingController();
   }
 
+  v8::ThreadIsolatedAllocator* GetThreadIsolatedAllocator() noexcept override {
+    // Forward to the inner platform so that V8's ThreadIsolation can use PKU
+    // (Memory Protection Keys) to enforce W^X on JIT code pages and
+    // write-protect the code pointer tables.  Without this, the
+    // DefaultPlatform's allocator (which calls pkey_alloc) was silently
+    // dropped and ThreadIsolation was disabled.
+    return inner.GetThreadIsolatedAllocator();
+  }
+
  private:
   v8::Platform& inner;
 };
