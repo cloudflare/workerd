@@ -134,6 +134,7 @@ jobs:
       - name: Check snapshot diff
         run: |
           diff -r types/generated-snapshot bazel-bin/types/definitions > types.diff
+          diff -r types/generated-snapshot/experimental bazel-bin/types/definitions/experimental >> types.diff
       - name: 'Put diff on the environment'
         if: failure()
         id: types_diff
