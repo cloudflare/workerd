@@ -374,6 +374,19 @@ class Server::ActorNamespace final {
     return config;
   }
 
+  bool isEvictable() const {
+    bool result = true;
+    KJ_SWITCH_ONEOF(config) {
+      KJ_CASE_ONEOF(c, Durable) {
+        result = c.isEvictable;
+      }
+      KJ_CASE_ONEOF(c, Ephemeral) {
+        result = c.isEvictable;
+      }
+    }
+    return result;
+  }
+
   kj::Own<IoChannelFactory::ActorChannel> getActorChannel(Worker::Actor::Id id) {
     KJ_IF_SOME(doId, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
       KJ_IF_SOME(name, doId->getName()) {
@@ -479,17 +492,12 @@ class Server::ActorNamespace final {
     }
 
     void inactive() override {
-      // Durable objects are evictable by default.
-      bool isEvictable = true;
-      KJ_SWITCH_ONEOF(ns.config) {
-        KJ_CASE_ONEOF(c, Durable) {
-          isEvictable = c.isEvictable;
-        }
-        KJ_CASE_ONEOF(c, Ephemeral) {
-          isEvictable = c.isEvictable;
-        }
+      for (auto& fulfiller: inactiveFulfillers) {
+        fulfiller->fulfill();
       }
-      if (isEvictable) {
+      inactiveFulfillers.clear();
+
+      if (ns.isEvictable()) {
         KJ_IF_SOME(a, actor) {
           KJ_IF_SOME(m, a->getHibernationManager()) {
             // The hibernation manager needs to survive actor eviction and be passed to the actor
@@ -778,6 +786,7 @@ class Server::ActorNamespace final {
     kj::Maybe<kj::Promise<void>> shutdownTask;
     kj::Maybe<kj::Promise<void>> onBrokenTask;
     kj::Maybe<kj::Exception> brokenReason;
+    kj::Vector<kj::Own<kj::PromiseFulfiller<void>>> inactiveFulfillers;
 
     // Reference to the ContainerClient (if container is enabled for this actor)
     kj::Maybe<kj::Own<ContainerClient>> containerClient;
@@ -1018,6 +1027,150 @@ class Server::ActorNamespace final {
       containerClient = kj::none;
     }
 
+    // Test-only eviction body, used by the evict hooks (evictWhenIdle). Destroys the Worker::Actor
+    // while keeping durable storage alive, so the DO is rebuilt on its next request. Depending on
+    // webSocketMode, hibernatable WebSockets are either hibernated first or closed. `reason` is
+    // recorded as the actor's disconnect reason.
+    //
+    // Returns false without evicting if the actor has acquired strong references by the time we
+    // hold the isolate lock (i.e. a new request raced in). Unlike the inactivity-timer path
+    // (handleShutdown), which is cancelled by active() when a request arrives, the test-only evict
+    // path is not cancellable, so it relies on this re-check to avoid tearing down a live actor.
+    // For the same reason, we only cancel onBrokenTask once we're committed to the shutdown --
+    // otherwise an early `false` return would leave the actor running with no broken-detection.
+    kj::Promise<bool> tryEvict(
+        kj::StringPtr reason, IoChannelFactory::EvictWebSocketMode webSocketMode) {
+      KJ_IF_SOME(a, actor) {
+        if (a->isShared()) {
+          co_return false;
+        }
+
+        if (manager != kj::none &&
+            webSocketMode == IoChannelFactory::EvictWebSocketMode::HIBERNATE) {
+          auto& worker = a->getWorker();
+          auto workerStrongRef = kj::atomicAddRef(worker);
+          // Take an async lock, we can't use `takeAsyncLock(RequestObserver&)` since we don't
+          // have an `IncomingRequest` at this point.
+          auto asyncLock = co_await worker.takeAsyncLockWithoutRequest(nullptr);
+
+          // Re-check the actor slot now that we've awaited the lock. `a` is the actor we observed
+          // before suspending, but while we waited another path may have replaced it, or a new
+          // request may have grabbed a strong reference.
+          KJ_IF_SOME(current, actor) {
+            if (&*current != &*a) {
+              co_return false;
+            }
+            if (current->isShared()) {
+              co_return false;
+            }
+
+            KJ_IF_SOME(m, manager) {
+              workerStrongRef->runInLockScope(
+                  asyncLock, [&](Worker::Lock& lock) { m->hibernateWebSockets(lock); });
+            }
+
+            // Note: wrap `reason` in kj::str() so KJ_EXCEPTION doesn't prefix the description with
+            // "reason = " (it only omits the label for string literals and kj::str(...) args).
+            current->shutdown(0, KJ_EXCEPTION(DISCONNECTED, kj::str(reason)));
+          } else {
+            co_return true;
+          }
+        } else {
+          // Note: wrap `reason` in kj::str() so KJ_EXCEPTION doesn't prefix the description with
+          // "reason = " (it only omits the label for string literals and kj::str(...) args).
+          a->shutdown(0, KJ_EXCEPTION(DISCONNECTED, kj::str(reason)));
+        }
+      }
+
+      // Cancel the onBroken promise, since we're committed to destroying the actor and don't want
+      // to trigger it.
+      onBrokenTask = kj::none;
+
+      // Destroy the last strong Worker::Actor reference.
+      actor = kj::none;
+
+      if (webSocketMode == IoChannelFactory::EvictWebSocketMode::CLOSE) {
+        manager = kj::none;
+      }
+
+      // Drop our reference to the ContainerClient. If setInactivityTimeout() was called, the timer
+      // still holds a reference so the container stays alive until the timeout expires.
+      containerClient = kj::none;
+      co_return true;
+    }
+
+   public:
+    // Test-only: evict this actor, bypassing the inactivity timer. Throws if the actor isn't
+    // currently running (never instantiated, or already evicted/hibernated). If the actor has
+    // in-flight requests, waits for them to drain before evicting.
+    kj::Promise<void> evictForTest(IoChannelFactory::EvictWebSocketMode webSocketMode) {
+      JSG_REQUIRE(ns.isEvictable(), Error,
+          "Cannot evict Durable Object: its namespace has preventEviction set.");
+      JSG_REQUIRE(
+          actor != kj::none, Error, "Cannot evict Durable Object: it is not currently running.");
+      return evictWhenIdle(webSocketMode);
+    }
+
+    // Test-only: evict this actor and all of its facets if they are running, otherwise do nothing.
+    // Used by the bulk evictAllDurableObjects() path, which must not error on actors that aren't
+    // running.
+    kj::Promise<void> evictTreeForTestIfRunning(
+        IoChannelFactory::EvictWebSocketMode webSocketMode) {
+      kj::Vector<kj::Promise<void>> promises(facets.size() + 1);
+      for (auto& facet: facets) {
+        // Pin the ActorContainer for the duration of its eviction. The map entry is normally
+        // retained, but the onBroken path can erase it mid-eviction; the addRef keeps the
+        // coroutine's `this` valid regardless.
+        promises.add(
+            facet.value->evictTreeForTestIfRunning(webSocketMode).attach(facet.value->addRef()));
+      }
+
+      if (actor != kj::none) {
+        // Pin ourselves just like facet/root map callers do. The join below can be canceled by its
+        // caller, but the coroutine may still be suspended on request inactivity.
+        promises.add(evictWhenIdle(webSocketMode).attach(addRef()));
+      }
+
+      return kj::joinPromises(promises.releaseAsArray());
+    }
+
+   private:
+    // Waits until the actor is idle, then evicts it. We never abort a live request, so while there
+    // are in-flight requests -- or a just-completed request still holding a transient strong
+    // reference during teardown (e.g. RPC/fetch teardown) -- we poll until the actor can be torn
+    // down. To avoid hanging a test forever (e.g. a request that never completes), we give up
+    // after a fixed deadline.
+    kj::Promise<void> evictWhenIdle(IoChannelFactory::EvictWebSocketMode webSocketMode) {
+      constexpr auto EVICT_TIMEOUT = 30 * kj::SECONDS;
+      auto deadline = timer.now() + EVICT_TIMEOUT;
+      for (;;) {
+        if (co_await tryEvict("broken.dropped; Actor evicted by test"_kj, webSocketMode)) {
+          shutdownTask = kj::none;
+          co_return;
+        }
+
+        auto now = timer.now();
+        JSG_REQUIRE(now < deadline, Error,
+            "Timed out waiting to evict Durable Object: it still has active references.");
+
+        if (tracker->isActive()) {
+          auto paf = kj::newPromiseAndFulfiller<void>();
+          auto promise = kj::mv(paf.promise);
+          inactiveFulfillers.add(kj::mv(paf.fulfiller));
+
+          co_await kj::mv(promise).exclusiveJoin(timer.afterDelay(deadline - now).then([]() {
+            JSG_FAIL_REQUIRE(Error,
+                "Timed out waiting to evict Durable Object: it still has active references.");
+          }));
+        } else {
+          // The actor can briefly have non-request strong refs during teardown, after the tracker
+          // has already reported inactivity. Yield before re-checking, but don't poll for the full
+          // request-drain duration.
+          co_await timer.afterDelay(1 * kj::MILLISECONDS);
+        }
+      }
+    }
+
     void start(kj::Own<ActorClass>& actorClass, Worker::Actor::Id& id) {
       KJ_REQUIRE(actor == nullptr);
 
@@ -1240,6 +1393,25 @@ class Server::ActorNamespace final {
     actors.clear();
   }
 
+  // Test-only: gracefully evict every currently-running actor in this namespace. Depending on
+  // webSocketMode, hibernatable WebSockets are either hibernated first or closed.
+  // Namespaces with preventEviction are skipped.
+  // Idle/non-running actors are skipped (not an error). The actor map entries are retained so the
+  // DO rebuilds on its next request. See IoChannelFactory::evictAllActorsForTest().
+  kj::Promise<void> evictAllForTest(IoChannelFactory::EvictWebSocketMode webSocketMode) {
+    if (!isEvictable()) return kj::READY_NOW;
+
+    kj::Vector<kj::Promise<void>> promises(actors.size());
+    for (auto& actor: actors) {
+      // Pin the ActorContainer for the duration of its eviction. The map entry is normally
+      // retained, but the onBroken path can erase it mid-eviction; the addRef keeps the coroutine's
+      // `this` valid regardless.
+      promises.add(
+          actor.value->evictTreeForTestIfRunning(webSocketMode).attach(actor.value->addRef()));
+    }
+    return kj::joinPromises(promises.releaseAsArray());
+  }
+
   // Resets all actor databases, aborts all actors, and cancels all alarms so DOs
   // can be recreated with clean state.
   void deleteAll(kj::Maybe<const kj::Exception&> reason) {
@@ -1364,6 +1536,10 @@ class Server::ActorNamespace final {
     kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
       return newPromisedWorkerInterface(
           actorContainer->startRequest(kj::mv(metadata)).attach(actorContainer->addRef()));
+    }
+
+    kj::Promise<void> evictForTest(IoChannelFactory::EvictWebSocketMode webSocketMode) override {
+      return actorContainer->evictForTest(webSocketMode).attach(actorContainer->addRef());
     }
 
     void requireAllowsTransfer() override {
@@ -3875,6 +4051,20 @@ class Server::WorkerService final: public Service,
     deleteActorsCallback(reason);
   }
 
+  kj::Promise<void> evictAllActorsForTest(
+      IoChannelFactory::EvictWebSocketMode webSocketMode) override {
+    auto& channels =
+        KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
+
+    kj::Vector<kj::Promise<void>> promises(channels.actor.size());
+    for (auto& maybeNs: channels.actor) {
+      KJ_IF_SOME(ns, maybeNs) {
+        promises.add(ns.evictAllForTest(webSocketMode));
+      }
+    }
+    return kj::joinPromises(promises.releaseAsArray());
+  }
+
   // For now, in workerd just abort the process for non-dynamic workers.
   void abortIsolate(kj::StringPtr reason) noexcept override {
     KJ_IF_SOME(cb, abortIsolateCallback) {
@@ -4436,16 +4626,7 @@ void Server::abortAllActors(kj::Maybe<const kj::Exception&> reason) {
   for (auto& service: services) {
     KJ_IF_SOME(worker, kj::tryDowncast<WorkerService>(*service.value)) {
       for (auto& [className, ns]: worker.getActorNamespaces()) {
-        bool isEvictable = true;
-        KJ_SWITCH_ONEOF(ns->getConfig()) {
-          KJ_CASE_ONEOF(c, Durable) {
-            isEvictable = c.isEvictable;
-          }
-          KJ_CASE_ONEOF(c, Ephemeral) {
-            isEvictable = c.isEvictable;
-          }
-        }
-        if (isEvictable) ns->abortAll(reason);
+        if (ns->isEvictable()) ns->abortAll(reason);
       }
     }
   }
@@ -4455,16 +4636,7 @@ void Server::deleteAllActors(kj::Maybe<const kj::Exception&> reason) {
   for (auto& service: services) {
     KJ_IF_SOME(worker, kj::tryDowncast<WorkerService>(*service.value)) {
       for (auto& [className, ns]: worker.getActorNamespaces()) {
-        bool isEvictable = true;
-        KJ_SWITCH_ONEOF(ns->getConfig()) {
-          KJ_CASE_ONEOF(c, Durable) {
-            isEvictable = c.isEvictable;
-          }
-          KJ_CASE_ONEOF(c, Ephemeral) {
-            isEvictable = c.isEvictable;
-          }
-        }
-        if (isEvictable) ns->deleteAll(reason);
+        if (ns->isEvictable()) ns->deleteAll(reason);
       }
     }
   }
