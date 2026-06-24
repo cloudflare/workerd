@@ -11,7 +11,6 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = [
           "nodejs_compat",
           "allow_irrevocable_stub_storage",
-          "experimental",
           "rpc",
           "enable_ctx_exports",
           "fetcher_no_get_put_delete",
@@ -54,7 +53,6 @@ const unitTests :Workerd.Config = (
         ],
         compatibilityFlags = [
           "rpc",
-          "experimental",
           "enable_ctx_exports",
         ],
       )
@@ -77,7 +75,6 @@ const unitTests :Workerd.Config = (
         ],
         compatibilityFlags = [
           "rpc",
-          "experimental",
           "enable_ctx_exports",
           "allow_irrevocable_stub_storage",
         ],

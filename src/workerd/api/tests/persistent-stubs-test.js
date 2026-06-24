@@ -229,10 +229,8 @@ export class Source extends WorkerEntrypoint {
         compatibilityDate: '2025-01-01',
         compatibilityFlags: [
           'allow_irrevocable_stub_storage',
-          'experimental',
           'enable_ctx_exports',
         ],
-        allowExperimental: true,
         mainModule: 'foo.js',
         modules: { 'foo.js': NESTED_DYNAMIC_WORKER_CODE },
       };
@@ -253,8 +251,7 @@ export class Source extends WorkerEntrypoint {
     let worker = this.env.LOADER.get(`dynamic-env-rpc-${id}`, () => {
       return {
         compatibilityDate: '2025-01-01',
-        compatibilityFlags: ['allow_irrevocable_stub_storage', 'experimental'],
-        allowExperimental: true,
+        compatibilityFlags: ['allow_irrevocable_stub_storage'],
         mainModule: 'foo.js',
         modules: {
           'foo.js': `
@@ -278,8 +275,7 @@ export class Source extends WorkerEntrypoint {
     let worker = this.env.LOADER.get(`dynamic-props-rpc-${id}`, () => {
       return {
         compatibilityDate: '2025-01-01',
-        compatibilityFlags: ['allow_irrevocable_stub_storage', 'experimental'],
-        allowExperimental: true,
+        compatibilityFlags: ['allow_irrevocable_stub_storage'],
         mainModule: 'foo.js',
         modules: {
           'foo.js': `
@@ -395,10 +391,8 @@ export class Source extends WorkerEntrypoint {
           compatibilityDate: '2025-01-01',
           compatibilityFlags: [
             'allow_irrevocable_stub_storage',
-            'experimental',
             'enable_ctx_exports',
           ],
-          allowExperimental: true,
           mainModule: 'foo.js',
           modules: { 'foo.js': NESTED_DYNAMIC_WORKER_CODE },
         };
@@ -417,11 +411,9 @@ export class Source extends WorkerEntrypoint {
         compatibilityFlags: this.allowStubStorage
           ? [
               'allow_irrevocable_stub_storage',
-              'experimental',
               'enable_ctx_exports',
             ]
           : ['enable_ctx_exports'],
-        allowExperimental: true,
         mainModule: 'foo.js',
         modules: { 'foo.js': NESTED_DYNAMIC_WORKER_CODE },
       });
