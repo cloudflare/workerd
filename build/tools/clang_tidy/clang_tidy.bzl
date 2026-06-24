@@ -23,6 +23,7 @@ def _get_disabled_checks_for_package(package):
             allowed_path = allowed
             if allowed_path.startswith("//"):
                 allowed_path = allowed_path[2:]
+
             # Prefix match: "src/foo" matches "src/foo" and "src/foo/bar"
             if package == allowed_path or package.startswith(allowed_path + "/"):
                 enabled = True

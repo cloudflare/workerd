@@ -34,13 +34,13 @@ exports_files([
 cc_library(
     name = "workerd-lint-static",
     srcs = [
-        "workerd-lint.c++",
-        "visit-for-gc.c++",
         "unsafe-continuation-capture.c++",
+        "visit-for-gc.c++",
+        "workerd-lint.c++",
     ],
     hdrs = [
-        "visit-for-gc.h",
         "unsafe-continuation-capture.h",
+        "visit-for-gc.h",
     ],
     copts = select({
         # workerd-tools clang-tidy links against libstdc++ on Linux; the
