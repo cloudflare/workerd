@@ -21,12 +21,15 @@ import tarfile
 import tempfile
 from pathlib import Path
 
+
 # capnp text "string" / embed-filename escaping (paths are POSIX, but be safe).
 def capnp_escape(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def extract(wheels: list[Path], lock: dict, work_dir: Path) -> list[tuple[str, str, Path]]:
+def extract(
+    wheels: list[Path], lock: dict, work_dir: Path
+) -> list[tuple[str, str, Path]]:
     """Extract every regular file from each wheel listed in the lock file.
 
     Returns (install_dir, path, on_disk) tuples. Inputs not referenced by the lock file (e.g. the
@@ -50,8 +53,7 @@ def extract(wheels: list[Path], lock: dict, work_dir: Path) -> list[tuple[str, s
                         f"Unsupported tar entry type in {wheel.name}: {member.name}"
                     )
                 path = member.name
-                if path.startswith("./"):
-                    path = path[2:]
+                path = path.removeprefix("./")
                 if not path:
                     continue
                 on_disk = files_dir / str(index) / path
@@ -93,8 +95,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--capnp", required=True, help="Path to the capnp tool")
     parser.add_argument("--schema", required=True, help="Path to python_packages.capnp")
-    parser.add_argument("--lock", required=True, help="Path to the pre-filtered lock file")
-    parser.add_argument("--out", required=True, help="Output path for the binary message")
+    parser.add_argument(
+        "--lock", required=True, help="Path to the pre-filtered lock file"
+    )
+    parser.add_argument(
+        "--out", required=True, help="Output path for the binary message"
+    )
     parser.add_argument("wheels", nargs="+", help="Wheel (.tar.gz) files to embed")
     args = parser.parse_args()
 

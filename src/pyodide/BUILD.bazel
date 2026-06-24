@@ -1,7 +1,7 @@
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 load("@rules_python//python:defs.bzl", "py_binary", "py_test")
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
+load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load(":helpers.bzl", "pyodide_extra", "pyodide_static", "python_bundles")
 
