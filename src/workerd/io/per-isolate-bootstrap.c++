@@ -82,12 +82,115 @@ struct BootstrapState {
   kj::HashSet<kj::String> loading;
   jsg::JsRef<jsg::JsObject> compatFlagsObj;
   jsg::JsRef<jsg::JsObject> autogatesObj;
+  jsg::JsRef<jsg::JsObject> utilsObj;
   jsg::JsRef<jsg::JsFunction> requireFn;
   // The primordials object, loaded before main and injected as a pseudo-global
   // into every script. Provides prototype-pollution-safe references to built-in
   // methods and constructors.
   kj::Maybe<jsg::JsRef<jsg::JsValue>> primordials;
 };
+
+#define VALUE_METHOD_MAP(V)                                                                        \
+  V(ArrayBuffer)                                                                                   \
+  V(ArrayBufferView)                                                                               \
+  V(Promise)                                                                                       \
+  V(SharedArrayBuffer)                                                                             \
+  V(Uint8Array)
+
+#define V(type)                                                                                    \
+  static void Is##type(const v8::FunctionCallbackInfo<v8::Value>& args) {                          \
+    args.GetReturnValue().Set(args[0]->Is##type());                                                \
+  }                                                                                                \
+  static bool Is##type##FastApi(v8::Local<v8::Value> unused, v8::Local<v8::Value> value) {         \
+    return value->Is##type();                                                                      \
+  }                                                                                                \
+  static const v8::CFunction fast_is_##type##_ = v8::CFunction::Make(Is##type##FastApi);
+
+VALUE_METHOD_MAP(V)
+#undef V
+
+static void IsAnyArrayBuffer(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  args.GetReturnValue().Set(args[0]->IsArrayBuffer() || args[0]->IsSharedArrayBuffer());
+}
+
+static bool IsAnyArrayBufferFastApi(v8::Local<v8::Value> unused, v8::Local<v8::Value> value) {
+  return value->IsArrayBuffer() || value->IsSharedArrayBuffer();
+}
+
+static const v8::CFunction fast_is_any_array_buffer_ = v8::CFunction::Make(IsAnyArrayBufferFastApi);
+
+static void MarkPromiseHandled(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  if (args[0]->IsPromise()) {
+    args[0].As<v8::Promise>()->MarkAsHandled();
+  }
+}
+
+static void MarkPromiseHandledFastApi(v8::Local<v8::Value> unused, v8::Local<v8::Value> value) {
+  if (value->IsPromise()) {
+    value.As<v8::Promise>()->MarkAsHandled();
+  }
+}
+
+static void GetApiSymbol(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  auto name = jsg::JsValue(args[0]);
+  auto str = JSG_REQUIRE_NONNULL(
+      name.tryCast<jsg::JsString>(), TypeError, "getApiSymbol() expects a string argument");
+  args.GetReturnValue().Set(v8::Symbol::ForApi(args.GetIsolate(), str));
+}
+
+static const v8::CFunction fast_mark_promise_handled_ =
+    v8::CFunction::Make(MarkPromiseHandledFastApi);
+
+v8::Local<v8::Value> getFastMethodNoSideEffect(
+    jsg::Lock& js, v8::FunctionCallback callback, const v8::CFunction* c_function) {
+  return jsg::check(v8::FunctionTemplate::New(js.v8Isolate, callback, v8::Local<v8::Value>(),
+      v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow,
+      v8::SideEffectType::kHasNoSideEffect, c_function)
+                        ->GetFunction(js.v8Context()));
+}
+
+v8::Local<v8::Value> getFastMethod(
+    jsg::Lock& js, v8::FunctionCallback callback, const v8::CFunction* c_function) {
+  return jsg::check(v8::FunctionTemplate::New(js.v8Isolate, callback, v8::Local<v8::Value>(),
+      v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow,
+      v8::SideEffectType::kHasSideEffect, c_function)
+                        ->GetFunction(js.v8Context()));
+}
+
+v8::Local<v8::Value> getMethod(jsg::Lock& js, v8::FunctionCallback callback) {
+  return jsg::check(v8::FunctionTemplate::New(js.v8Isolate, callback, v8::Local<v8::Value>(),
+      v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow)
+                        ->GetFunction(js.v8Context()));
+}
+
+// Creates an object with methods for performing fast type checks on JS values.
+// Because we are not fully bootstrapped at this point, we don't want to rely
+// on jsg::Object and the type wrapper system, etc. Instead, just use a plain
+// object with some properties set.
+jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
+  static constexpr std::string_view names[] = {
+#define V(Name) "is" #Name,
+    // NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
+    VALUE_METHOD_MAP(V)
+#undef V
+        "isAnyArrayBuffer",
+    "markPromiseHandled",
+    "getApiSymbol",
+  };
+  auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
+  v8::MaybeLocal<v8::Value> values[] = {
+#define V(Name) getFastMethodNoSideEffect(js, Is##Name, &fast_is_##Name##_),
+    VALUE_METHOD_MAP(V)
+#undef V
+        getFastMethodNoSideEffect(js, IsAnyArrayBuffer, &fast_is_any_array_buffer_),
+    getFastMethod(js, MarkPromiseHandled, &fast_mark_promise_handled_),
+    getMethod(js, GetApiSymbol),
+  };
+
+  static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());
+
+  return jsg::JsObject(tmpl->NewInstance(js.v8Context(), values)).addRef(js);
+}
 
 // Build the context extension object for a script. This provides the pseudo-global
 // variables that scripts access directly (e.g. `require`, `compatFlags`, `primordials`).
@@ -101,26 +204,31 @@ jsg::JsObject createContextExtension(jsg::Lock& js,
     bool includeRequire) {
 
   auto tmpl = state.contextExtensionTemplate.Get(js.v8Isolate);
+  static constexpr std::string_view names[] = {
+    "require",
+    "compatFlags",
+    "autogates",
+    "module",
+    "exports",
+    "primordials",
+    "utils",
+  };
   if (tmpl.IsEmpty()) {
-    static constexpr std::string_view names[] = {
-      "require",
-      "compatFlags",
-      "autogates",
-      "module",
-      "exports",
-      "primordials",
-    };
     tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
     state.contextExtensionTemplate.Reset(js.v8Isolate, tmpl);
   }
 
-  v8::MaybeLocal<v8::Value> values[6] = {
+  v8::MaybeLocal<v8::Value> values[] = {
     js.v8Undefined(),  // require
     v8::Local<v8::Value>(state.compatFlagsObj.getHandle(js)),
-    v8::Local<v8::Value>(state.autogatesObj.getHandle(js)), v8::Local<v8::Value>(moduleObj),
+    v8::Local<v8::Value>(state.autogatesObj.getHandle(js)),
+    v8::Local<v8::Value>(moduleObj),
     v8::Local<v8::Value>(exportsObj),
     js.v8Undefined(),  // primordials
+    v8::Local<v8::Value>(state.utilsObj.getHandle(js)),
   };
+
+  static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());
 
   if (includeRequire) {
     values[0] = v8::Local<v8::Value>(state.requireFn.getHandle(js));
@@ -314,6 +422,7 @@ void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
   // Build the compat flags and autogates objects.
   state->compatFlagsObj = buildCompatFlagsObject(js, flags);
   state->autogatesObj = buildAutogatesObject(js);
+  state->utilsObj = createUtilsObject(js);
 
   // Create the require() function. No v8::External needed — the callback
   // reads state from the context embedder slot.
