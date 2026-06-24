@@ -83,8 +83,7 @@ def write_capnp(
     for install_dir, path, on_disk in entries:
         embed = capnp_escape(str(on_disk.relative_to(work_dir)))
         lines.append(
-            '  (installDir = "%s", path = "%s", contents = embed "%s"),'
-            % (capnp_escape(install_dir), capnp_escape(path), embed)
+            f'  (installDir = "{capnp_escape(install_dir)}", path = "{capnp_escape(path)}", contents = embed "{embed}"),'
         )
     lines.append("]);")
     capnp_path.write_text("\n".join(lines) + "\n")

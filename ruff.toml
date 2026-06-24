@@ -30,6 +30,7 @@ ignore = [
   "UP038",  # Use X | Y in isinstance check instead of (X, Y)
   "PLR0911", # too many return statements
   "PLC0415", # `import` should be at the top-level of a file
+  "PTH123", # use Path.open instead of open
 ]
 
 [lint.per-file-ignores]
