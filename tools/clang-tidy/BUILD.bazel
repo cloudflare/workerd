@@ -37,6 +37,7 @@ exports_files([
     "visit-for-gc.h",
     "unsafe-continuation-capture.c++",
     "unsafe-continuation-capture.h",
+    "tests/unsafe-continuation-capture-test.c++",
 ])
 
 filegroup(
