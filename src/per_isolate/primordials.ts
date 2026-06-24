@@ -49,6 +49,7 @@ const applyBind = call.bind(bind, call.bind) as <
 // here ensures bootstrap scripts can always use the real built-ins.
 const ArrayCtor = Array;
 const ErrorCtor = Error;
+const FinalizationRegistryCtor = FinalizationRegistry;
 const FunctionCtor = Function;
 const MapCtor = Map;
 const ObjectCtor = Object;
@@ -59,6 +60,7 @@ const SetCtor = Set;
 const SymbolCtor = Symbol;
 const TypeErrorCtor = TypeError;
 const WeakMapCtor = WeakMap;
+const WeakRefCtor = WeakRef;
 const WeakSetCtor = WeakSet;
 
 // --- Selective captures: add as bootstrap scripts need them ---
@@ -128,6 +130,19 @@ const StringPrototypeStartsWith = uncurryThis(String.prototype.startsWith);
 // Symbol
 const SymbolIterator = Symbol.iterator;
 const SymbolToStringTag = Symbol.toStringTag;
+
+// WeakRef / FinalizationRegistry
+// These globals exist during bootstrap — their deletion from the global is
+// deferred until after bootstrap completes (see runPerIsolateBootstrap) —
+// but they are hidden from user code unless the enable_weak_ref compat flag
+// is set. The captures here keep working after the globals are deleted.
+const WeakRefPrototypeDeref = uncurryThis(WeakRef.prototype.deref);
+const FinalizationRegistryPrototypeRegister = uncurryThis(
+  FinalizationRegistry.prototype.register
+);
+const FinalizationRegistryPrototypeUnregister = uncurryThis(
+  FinalizationRegistry.prototype.unregister
+);
 
 // --- Safe types: wrappers that use captured methods internally ---
 // These are safe to use with normal method-call syntax (map.get(k))
@@ -245,6 +260,7 @@ module.exports = ObjectFreeze({
   // Global types
   Array: ArrayCtor,
   Error: ErrorCtor,
+  FinalizationRegistry: FinalizationRegistryCtor,
   Function: FunctionCtor,
   Map: MapCtor,
   Object: ObjectCtor,
@@ -255,6 +271,7 @@ module.exports = ObjectFreeze({
   Symbol: SymbolCtor,
   TypeError: TypeErrorCtor,
   WeakMap: WeakMapCtor,
+  WeakRef: WeakRefCtor,
   WeakSet: WeakSetCtor,
 
   // Function
@@ -308,6 +325,11 @@ module.exports = ObjectFreeze({
   WeakMapPrototypeGet,
   WeakMapPrototypeSet,
   WeakMapPrototypeHas,
+
+  // WeakRef / FinalizationRegistry
+  WeakRefPrototypeDeref,
+  FinalizationRegistryPrototypeRegister,
+  FinalizationRegistryPrototypeUnregister,
 
   // WeakSet
   WeakSetPrototypeAdd,
