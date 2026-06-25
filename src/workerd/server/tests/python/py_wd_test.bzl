@@ -32,16 +32,6 @@ def _py_wd_test_helper(
 
     pyodide_version = BUNDLE_VERSION_INFO[python_flag]["real_pyodide_version"]
 
-    # From Pyodide 314 on, we don't use the packages in the lockfile
-    # anymore.
-    if pyodide_version in ("0.26.0a2", "0.28.2"):
-        pkg_tag = BUNDLE_VERSION_INFO[python_flag]["packages"]
-        data = data + ["@all_pyodide_wheels_%s//:whls" % pkg_tag]
-        args = args + ["--pyodide-package-disk-cache-dir"]
-
-        # +pyodide+ is a bzlmod canonical repository name
-        args.append("../+pyodide+all_pyodide_wheels_%s" % pkg_tag)
-
     load_snapshot = None
     if use_snapshot == "stacked":
         if pyodide_version == "0.26.0a2":

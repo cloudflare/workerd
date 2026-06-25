@@ -1362,3 +1362,37 @@ export let doStubAsTail = {
     assert.strictEqual(event[0].logs[0].message[0], 'hello from tailed worker');
   },
 };
+
+export let minimalPythonPackage = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('minimalPythonPackage', () => {
+      return {
+        compatibilityDate: '2026-05-15',
+        mainModule: 'main.py',
+        compatibilityFlags: ['python_workers'],
+        modules: {
+          'main.py': `
+from workers import WorkerEntrypoint
+class Default(WorkerEntrypoint):
+  async def main(self):
+    import testpkg
+    return testpkg.testfunc()
+`,
+          'python_modules/testpkg/pkgmodule.py': `
+def testfunc():
+  return "Hello dynamic worker package"
+`,
+          'python_modules/testpkg/__init__.py': `
+from . import pkgmodule
+testfunc = pkgmodule.testfunc
+`,
+        },
+      };
+    });
+
+    {
+      let result = await worker.getEntrypoint().main();
+      assert.strictEqual(result, 'Hello dynamic worker package');
+    }
+  },
+};

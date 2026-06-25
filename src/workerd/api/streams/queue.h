@@ -162,12 +162,8 @@ class QueueImpl final {
   QueueImpl(QueueImpl&&) = default;
   QueueImpl& operator=(QueueImpl&&) = default;
 
-  ~QueueImpl() noexcept(false) {
-    // Detach all consumers before destruction to prevent UAF.
-    // This can happen during isolate teardown when the destruction order
-    // of JS wrapper objects doesn't follow the ownership hierarchy.
-    allConsumers.forEach([&](ConsumerImpl& consumer) { consumer.detachQueue(); });
-  }
+  // Consumer's Weak<QueueImpl> will be nullified automatically.
+  ~QueueImpl() noexcept(false) = default;
 
   // Closes the queue. The close is forwarded on to all consumers.
   // If we are already closed or errored, do nothing here.
@@ -357,7 +353,7 @@ class ConsumerImpl final {
     ~UpdateBackpressureScope() noexcept(false) {
       consumer->runIfAlive([](ConsumerImpl& consumer) {
         KJ_IF_SOME(q, consumer.queue) {
-          q.maybeUpdateBackpressure();
+          q->maybeUpdateBackpressure();
         }
       });
     }
@@ -368,36 +364,31 @@ class ConsumerImpl final {
   using Entry = Self::Entry;
   using QueueEntry = Self::QueueEntry;
 
-  ConsumerImpl(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none)
+  ConsumerImpl(
+      kj::Ptr<QueueImpl> queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none)
       : queue(queue),
         state(ConsumerState::template create<Ready>()),
         stateListener(stateListener) {
-    queue.addConsumer(selfRef.addRef());
+    queue->addConsumer(selfRef.addRef());
   }
 
   explicit ConsumerImpl(kj::Maybe<ConsumerImpl::StateListener&> stateListener)
-      : queue(kj::none),
+      : queue(nullptr),
         state(ConsumerState::template create<Ready>()),
         stateListener(stateListener) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ConsumerImpl);
 
   ~ConsumerImpl() noexcept(false) {
-    // queue may be none if the queue was destroyed before this consumer
+    // queue may be null if the queue was destroyed before this consumer
     // (e.g., during isolate teardown) or if cloned from a closed stream.
     // We must remove ourselves before invalidating selfRef, otherwise
     // removeConsumer won't find us (tryGet() would return none).
     KJ_IF_SOME(q, queue) {
-      q.removeConsumer(*this);
+      q->removeConsumer(*this);
     }
     // Invalidate after removal so any concurrent iteration will skip us.
     selfRef->invalidate();
-  }
-
-  // Called by QueueImpl destructor to detach this consumer from a queue
-  // that is about to be destroyed.
-  void detachQueue() {
-    queue = kj::none;
   }
 
   void cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue>) {
@@ -443,13 +434,13 @@ class ConsumerImpl final {
     // closes or errors another consumer in the same queue.
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       // If the consumer is already closing or the entry is empty, do nothing.
-      // Also skip if queue is none (consumer cloned from closed stream).
-      if (isClosing() || entry->getSize() == 0 || queue == kj::none) {
+      // Also skip if queue is null (consumer cloned from closed stream).
+      if (isClosing() || entry->getSize() == 0 || queue == nullptr) {
         return;
       }
 
       UpdateBackpressureScope scope(*this);
-      Self::handlePush(js, ready, *this, queue, kj::mv(entry));
+      Self::handlePush(js, ready, *this, kj::mv(entry));
     }
   }
 
@@ -610,7 +601,7 @@ class ConsumerImpl final {
       Closed,
       Errored>;
 
-  kj::Maybe<QueueImpl&> queue;
+  kj::Weak<QueueImpl> queue;
   ConsumerState state;
   kj::Maybe<ConsumerImpl::StateListener&> stateListener;
   // WeakRef to this consumer, used for safe registration with QueueImpl.
@@ -690,7 +681,7 @@ class ConsumerImpl final {
           // references. We must take a selfRef before calling handleMaybeClose
           // and check liveness after it returns.
           auto weak = selfRef.addRef();
-          if (!empty() && !Self::handleMaybeClose(js, ready, *this, queue)) {
+          if (!empty() && !Self::handleMaybeClose(js, ready, *this)) {
             // handleMaybeClose may have freed *this via re-entrant JS.
             if (!weak->isValid()) return;
             // If the queue is not empty, we'll have the implementation see
@@ -793,7 +784,8 @@ class ValueQueue final {
   class Consumer final {
    public:
     Consumer(ValueQueue& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
-    Consumer(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
+    Consumer(
+        kj::Ptr<QueueImpl> queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
     // Used when cloning a consumer whose queue has been destroyed.
     explicit Consumer(kj::Maybe<ConsumerImpl::StateListener&> stateListener);
     Consumer(Consumer&&) = delete;
@@ -872,22 +864,16 @@ class ValueQueue final {
   inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
-  QueueImpl impl;
+  kj::Pin<QueueImpl> impl;
 
-  static void handlePush(jsg::Lock& js,
-      ConsumerImpl::Ready& state,
-      ConsumerImpl& consumer,
-      kj::Maybe<QueueImpl&> queue,
-      kj::Rc<Entry> entry);
+  static void handlePush(
+      jsg::Lock& js, ConsumerImpl::Ready& state, ConsumerImpl& consumer, kj::Rc<Entry> entry);
   static void handleRead(jsg::Lock& js,
       ConsumerImpl::Ready& state,
       ConsumerImpl& consumer,
-      kj::Maybe<QueueImpl&> queue,
+      kj::Weak<QueueImpl> queue,
       ReadRequest request);
-  static bool handleMaybeClose(jsg::Lock& js,
-      ConsumerImpl::Ready& state,
-      ConsumerImpl& consumer,
-      kj::Maybe<QueueImpl&> queue);
+  static bool handleMaybeClose(jsg::Lock& js, ConsumerImpl::Ready& state, ConsumerImpl& consumer);
 
   friend ConsumerImpl;
 };
@@ -929,7 +915,7 @@ class ByteQueue final {
     void resolve(jsg::Lock& js);
     void reject(jsg::Lock& js, jsg::JsValue value);
 
-    kj::Own<ByobRequest> makeByobReadRequest(ConsumerImpl& consumer, QueueImpl& queue);
+    kj::Own<ByobRequest> makeByobReadRequest(ConsumerImpl& consumer, kj::Ptr<QueueImpl> queue);
 
     JSG_MEMORY_INFO(ByteQueue::ReadRequest) {
       tracker.trackField("resolver", resolver);
@@ -945,7 +931,7 @@ class ByteQueue final {
   // the ByobRequest is no longer usable and should be discarded.
   class ByobRequest final {
    public:
-    ByobRequest(ReadRequest& request, ConsumerImpl& consumer, QueueImpl& queue)
+    ByobRequest(ReadRequest& request, ConsumerImpl& consumer, kj::Ptr<QueueImpl> queue)
         : request(request),
           consumer(consumer),
           queue(queue) {}
@@ -987,7 +973,7 @@ class ByteQueue final {
    private:
     kj::Maybe<ReadRequest&> request;
     ConsumerImpl& consumer;
-    QueueImpl& queue;
+    kj::Weak<QueueImpl> queue;
   };
 
   struct State {
@@ -1042,7 +1028,8 @@ class ByteQueue final {
   class Consumer {
    public:
     Consumer(ByteQueue& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
-    Consumer(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
+    Consumer(
+        kj::Ptr<QueueImpl> queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
     // Used when cloning a consumer whose queue has been destroyed.
     explicit Consumer(kj::Maybe<ConsumerImpl::StateListener&> stateListener);
     Consumer(Consumer&&) = delete;
@@ -1127,22 +1114,16 @@ class ByteQueue final {
   inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
-  QueueImpl impl;
+  kj::Pin<QueueImpl> impl;
 
-  static void handlePush(jsg::Lock& js,
-      ConsumerImpl::Ready& state,
-      ConsumerImpl& consumer,
-      kj::Maybe<QueueImpl&> queue,
-      kj::Rc<Entry> entry);
+  static void handlePush(
+      jsg::Lock& js, ConsumerImpl::Ready& state, ConsumerImpl& consumer, kj::Rc<Entry> entry);
   static void handleRead(jsg::Lock& js,
       ConsumerImpl::Ready& state,
       ConsumerImpl& consumer,
-      kj::Maybe<QueueImpl&> queue,
+      kj::Weak<QueueImpl> queue,
       ReadRequest request);
-  static bool handleMaybeClose(jsg::Lock& js,
-      ConsumerImpl::Ready& state,
-      ConsumerImpl& consumer,
-      kj::Maybe<QueueImpl&> queue);
+  static bool handleMaybeClose(jsg::Lock& js, ConsumerImpl::Ready& state, ConsumerImpl& consumer);
 
   friend ConsumerImpl;
   friend class Consumer;

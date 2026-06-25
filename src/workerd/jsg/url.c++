@@ -668,7 +668,9 @@ kj::Maybe<kj::String> canonicalizePathname(
   auto input = kj::str("fake://fake-url", leadingSlash ? "" : "/-", pathname);
   KJ_IF_SOME(url, Url::tryParse(input.asPtr())) {
     auto result = url.getPathname();
-    return leadingSlash ? kj::str(result) : kj::str(result.slice(2));
+    // Strip off the two characters added at the start. This is not needed for leadingSlash or when
+    // the canonicalized name is a single character (when the result is "/").
+    return (leadingSlash || result.size() < 2) ? kj::str(result) : kj::str(result.slice(2));
   }
   return kj::none;
 }

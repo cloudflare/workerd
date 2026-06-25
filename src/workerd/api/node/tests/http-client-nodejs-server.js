@@ -8,10 +8,9 @@ const http = require('node:http');
 const assert = require('node:assert/strict');
 const zlib = require('node:zlib');
 
-function listenTo(server, port) {
-  server.listen(port, process.env.SIDECAR_HOSTNAME, () => {
-    const address = server.address();
-    console.info(`Listening on ${address.address}:${address.port}`);
+function listenAndReport(server, name) {
+  server.listen({ port: 0, host: process.env.SIDECAR_HOSTNAME }, () => {
+    console.log(`${name}=${server.address().port}`);
   });
 }
 
@@ -23,13 +22,13 @@ const pongServer = http.createServer((req, res) => {
   });
 });
 
-listenTo(pongServer, process.env.PONG_SERVER_PORT);
+listenAndReport(pongServer, 'PONG_SERVER_PORT');
 
 const asdServer = http.createServer((_req, res) => {
   res.end('asd');
 });
 
-listenTo(asdServer, process.env.ASD_SERVER_PORT);
+listenAndReport(asdServer, 'ASD_SERVER_PORT');
 
 {
   const expectedHeaders = {
@@ -65,7 +64,7 @@ listenTo(asdServer, process.env.ASD_SERVER_PORT);
     );
   });
 
-  listenTo(defaultHeadersExistServer, process.env.DEFAULT_HEADERS_EXIST_PORT);
+  listenAndReport(defaultHeadersExistServer, 'DEFAULT_HEADERS_EXIST_PORT');
 }
 
 const requestArgumentsServer = http.createServer((req, res) => {
@@ -73,7 +72,7 @@ const requestArgumentsServer = http.createServer((req, res) => {
   res.end();
 });
 
-listenTo(requestArgumentsServer, process.env.REQUEST_ARGUMENTS_PORT);
+listenAndReport(requestArgumentsServer, 'REQUEST_ARGUMENTS_PORT');
 
 const helloWorldServer = http.createServer((req, res) => {
   res.removeHeader('Date');
@@ -120,7 +119,7 @@ const helloWorldServer = http.createServer((req, res) => {
   }
 });
 
-listenTo(helloWorldServer, process.env.HELLO_WORLD_SERVER_PORT);
+listenAndReport(helloWorldServer, 'HELLO_WORLD_SERVER_PORT');
 
 const gzipServer = http.createServer((_req, res) => {
   const body = zlib.gzipSync(Buffer.from('hello from gzip server'));
@@ -131,7 +130,7 @@ const gzipServer = http.createServer((_req, res) => {
   res.end(body);
 });
 
-listenTo(gzipServer, process.env.GZIP_SERVER_PORT);
+listenAndReport(gzipServer, 'GZIP_SERVER_PORT');
 
 // Echoes back the Host header the sidecar received, so the test can verify
 // that a user-supplied Host header does not redirect the transport destination.
@@ -143,4 +142,4 @@ const hostEchoServer = http.createServer((req, res) => {
   });
 });
 
-listenTo(hostEchoServer, process.env.HOST_ECHO_SERVER_PORT);
+listenAndReport(hostEchoServer, 'HOST_ECHO_SERVER_PORT');

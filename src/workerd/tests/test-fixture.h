@@ -14,7 +14,16 @@
 #include <kj/function.h>
 #include <kj/test.h>
 
+#include <atomic>
+
 namespace workerd {
+
+// Shared, refcounted flag driving the test fixture's MockIsolateLimitEnforcer. Held by both the
+// fixture and the enforcer so neither outlives the other's view of it (avoids handing the
+// enforcer a bare reference).
+struct HeapLimitFlag: public kj::AtomicRefcounted {
+  std::atomic<bool> excessivelyExceeded{false};
+};
 
 // TestFixture is responsible for creating workerd environment during tests.
 // All the infrastructure is started in the constructor. It is accessed through run() method.
@@ -188,6 +197,12 @@ struct TestFixture {
   Worker::Actor& getActor() {
     return *KJ_ASSERT_NONNULL(actor);
   }
+
+  // Simulate the isolate being condemned for excessively exceeding its heap limit, so that
+  // IsolateLimitEnforcer::hasExcessivelyExceededHeapLimit() returns `value`.
+  void setHeapLimitExcessivelyExceeded(bool value) {
+    heapLimitFlag->excessivelyExceeded.store(value, std::memory_order_relaxed);
+  }
   TimerChannel& getTimerChannel() {
     return *timerChannel;
   }
@@ -228,6 +243,9 @@ struct TestFixture {
   kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
   v8::IsolateGroup isolateGroup;
   kj::Own<Worker::Api> api;
+  // Drives the isolate's MockIsolateLimitEnforcer::hasExcessivelyExceededHeapLimit(). Shared
+  // (refcounted) with the enforcer.
+  kj::Own<HeapLimitFlag> heapLimitFlag;
   kj::Own<Worker::Isolate> workerIsolate;
   kj::Own<Worker::Script> workerScript;
   kj::Own<Worker> worker;

@@ -68,6 +68,8 @@ py_wd_test("python-compat-flag")
 
 py_wd_test("pth-file")
 
+py_wd_test("metadata-read-overflow")
+
 # Shell-driven test for aborting the isolate on a Python fatal error. The Python worker
 # triggers a fatal error which calls abortIsolate(), terminating the workerd process. The shell
 # script verifies the expected fatal output and non-zero exit.

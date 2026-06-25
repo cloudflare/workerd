@@ -89,7 +89,7 @@ struct Docker {
     stdinOnce @9 :Bool $Json.name("StdinOnce");
     env @10 :List(Text) $Json.name("Env"); # Environment variables in "KEY=value" format
     cmd @11 :List(Text) $Json.name("Cmd"); # Command to run
-    entrypoint @12 :Text $Json.name("Entrypoint"); # Can be string or array - simplified as Text
+    entrypoint @12 :List(Text) $Json.name("Entrypoint");
     image @13 :Text $Json.name("Image"); # Image name/reference
     labels @14 :Json.Value $Json.name("Labels"); # Labels as key-value pairs
     volumes @15 :Json.Value $Json.name("Volumes"); # Volume mount points mapped to empty objects

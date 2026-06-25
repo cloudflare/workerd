@@ -167,6 +167,30 @@ KJ_TEST("ContainerCreateRequest encodes structured mounts with NoCopy") {
   KJ_EXPECT(decodedMounts[0].getVolumeOptions().getNoCopy());
 }
 
+KJ_TEST("ContainerCreateRequest encodes Entrypoint as array") {
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
+
+  capnp::MallocMessageBuilder message;
+  auto root = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
+  root.setImage("test-image");
+
+  auto entrypoint = root.initEntrypoint(1);
+  entrypoint.set(0, "/bin/cp");
+
+  auto json = codec.encode(root);
+  auto jsonText = json.asPtr();
+
+  KJ_EXPECT(jsonText.contains("\"Entrypoint\":[\"/bin/cp\"]"));
+
+  auto decoded = decodeJsonResponse<docker_api::Docker::ContainerCreateRequest>(jsonText);
+  auto decodedRoot = decoded->getRoot<docker_api::Docker::ContainerCreateRequest>();
+  auto decodedEntrypoint = decodedRoot.getEntrypoint();
+
+  KJ_REQUIRE(decodedEntrypoint.size() == 1);
+  KJ_EXPECT(decodedEntrypoint[0] == "/bin/cp");
+}
+
 KJ_TEST("ContainerCreateRequest encodes HostConfig Dns") {
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();

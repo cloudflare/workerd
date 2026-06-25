@@ -371,6 +371,12 @@ wd_test(
 )
 
 wd_test(
+    src = "actor-block-concurrency-depth-test.wd-test",
+    args = ["--experimental"],
+    data = ["actor-block-concurrency-depth-test.js"],
+)
+
+wd_test(
     src = "als-only-test.wd-test",
     args = ["--experimental"],
     data = ["als-only-test.js"],

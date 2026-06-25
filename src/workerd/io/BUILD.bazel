@@ -41,6 +41,7 @@ wd_cc_library(
         "io-context.c++",
         "io-own.c++",
         "io-util.c++",
+        "per-isolate-bootstrap.c++",
         "stored-value.c++",
         "trace-stream.c++",
         "tracer.c++",
@@ -56,6 +57,7 @@ wd_cc_library(
         "io-context.h",
         "io-own.h",
         "io-util.h",
+        "per-isolate-bootstrap.h",
         "stored-value.h",
         "trace-stream.h",
         "tracer.h",
@@ -63,6 +65,7 @@ wd_cc_library(
         "worker-fs.h",
     ] + ["//src/workerd/api:hdrs"],
     implementation_deps = [
+        "//src/per_isolate",
         "//src/rust/jsg",
         "//src/workerd/api:crypto-crc-impl",
         "//src/workerd/api:data-url",
@@ -410,6 +413,7 @@ wd_capnp_library(
 )
 
 kj_test(
+    size = "large",
     src = "io-gate-test.c++",
     deps = [
         ":io-gate",

@@ -140,6 +140,6 @@ const serverCA = net
       console.log('ServerCA socket error:', err.message);
     });
   })
-  .listen(process.env.STARTTLS_CA_PORT, () => {
-    console.info(`ServerCA listening on port ${serverCA.address().port}`);
+  .listen(0, () => {
+    console.log(`STARTTLS_CA_PORT=${serverCA.address().port}`);
   });

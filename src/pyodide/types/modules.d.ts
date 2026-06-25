@@ -14,7 +14,6 @@ declare module 'pyodide-internal:setup_python_search_path.py' {
 
 declare module 'pyodideRuntime-internal:emscriptenSetup' {
   function instantiateEmscriptenModule(
-    isWorkerd: boolean,
     pythonStdlib: ArrayBuffer,
     pyodideWasmModule: WebAssembly.Module
   ): Promise<Module>;

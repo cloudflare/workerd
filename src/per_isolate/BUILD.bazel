@@ -1,0 +1,10 @@
+load("@workerd//:build/wd_ts_script_bundle.bzl", "wd_ts_script_bundle")
+
+wd_ts_script_bundle(
+    name = "per_isolate",
+    gen_compile_cache = True,
+    # TODO: regenerate with `capnp id` if this value collides
+    schema_id = "0x8b3d4aff7fecd6d4",
+    scripts = glob(["**/*.ts"]),
+    tsconfig_json = "tsconfig.json",
+)

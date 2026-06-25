@@ -892,6 +892,92 @@ void doSomething(jsg::Identified<Foo> obj) {
 }
 ```
 
+### Self-Converting Types (`SelfConvertible`)
+
+Most JSG types require either registration via `JSG_DECLARE_ISOLATE_TYPE` (for resource and
+struct types) or have built-in support in the TypeWrapper (for primitives, containers, etc.).
+`SelfConvertible` types are a third option: a type can handle its own JS conversion by
+defining two static methods, with no registration required.
+
+To opt in, define static `jsgWrap()` and `jsgTryUnwrap()` methods on your type:
+
+```cpp
+struct MyType {
+  double value;
+
+  static v8::Local<v8::Value> jsgWrap(auto& typeWrapper, jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      MyType self) {
+    return v8::Number::New(js.v8Isolate, self.value);
+  }
+
+  static kj::Maybe<MyType> jsgTryUnwrap(auto& typeWrapper, jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (!handle->IsNumber()) return kj::none;
+    return MyType{handle.As<v8::Number>()->Value()};
+  }
+};
+```
+
+Once defined, `MyType` can be used directly as a parameter or return type in any JSG method
+-- no `JSG_DECLARE_ISOLATE_TYPE` entry, no `JSG_STRUCT`, no custom wrapper mixin needed.
+
+The `auto& typeWrapper` parameter provides access to the full TypeWrapper, allowing
+recursive conversion of inner types:
+
+```cpp
+struct Pair {
+  kj::String first;
+  double second;
+
+  static v8::Local<v8::Value> jsgWrap(auto& typeWrapper, jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      Pair self) {
+    auto obj = js.obj();
+    obj.set(js, "first",
+        jsg::JsValue(typeWrapper.wrap(js, context, creator, kj::mv(self.first))));
+    obj.set(js, "second",
+        jsg::JsValue(typeWrapper.wrap(js, context, creator, kj::mv(self.second))));
+    return obj;
+  }
+
+  static kj::Maybe<Pair> jsgTryUnwrap(auto& typeWrapper, jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (!handle->IsObject()) return kj::none;
+    auto obj = handle.As<v8::Object>();
+    auto firstVal = jsg::check(obj->Get(context, jsg::v8StrIntern(js.v8Isolate, "first"_kj)));
+    auto secondVal = jsg::check(obj->Get(context, jsg::v8StrIntern(js.v8Isolate, "second"_kj)));
+
+    KJ_IF_SOME(first, typeWrapper.tryUnwrap(
+        js, context, firstVal, static_cast<kj::String*>(nullptr), obj)) {
+      KJ_IF_SOME(second, typeWrapper.tryUnwrap(
+          js, context, secondVal, static_cast<double*>(nullptr), obj)) {
+        return Pair{kj::mv(first), second};
+      }
+    }
+    return kj::none;
+  }
+};
+```
+
+**When to use `SelfConvertible` vs other mechanisms:**
+
+- Use `JSG_STRUCT` for simple data objects with named fields -- it handles the boilerplate
+  automatically.
+- Use `JSG_RESOURCE_TYPE` for objects that need methods, prototypes, or GC integration.
+- Use `SelfConvertible` when you need full control over the conversion logic (e.g., custom
+  validation, non-trivial JS representations, or types that don't fit the struct/resource
+  model) without the overhead of a `TypeWrapperExtension` or explicit registration.
+
+The `jsg` prefix on the method names is intentional -- it avoids conflicts with any `wrap()`
+or `tryUnwrap()` methods the type might define for other purposes.
+
 ---
 
 ## 4. Structured Types (`JSG_STRUCT`)

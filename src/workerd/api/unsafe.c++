@@ -1,5 +1,6 @@
 #include "unsafe.h"
 
+#include <workerd/api/http.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/script.h>
@@ -17,6 +18,21 @@ static constexpr auto ASYNC_FN_SUFFIX = "}"_kjc;
 
 inline kj::StringPtr getName(jsg::Optional<kj::String>& name, kj::StringPtr def) {
   return name.map([](kj::String& str) { return str.asPtr(); }).orDefault(def);
+}
+
+IoChannelFactory::EvictWebSocketMode parseEvictWebSocketMode(
+    jsg::Optional<UnsafeModule::EvictOptions> options) {
+  auto opts = kj::mv(options).orDefault({});
+  KJ_IF_SOME(webSockets, opts.webSockets) {
+    if (webSockets == "hibernate") {
+      return IoChannelFactory::EvictWebSocketMode::HIBERNATE;
+    }
+    if (webSockets == "close") {
+      return IoChannelFactory::EvictWebSocketMode::CLOSE;
+    }
+    JSG_FAIL_REQUIRE(TypeError, "options.webSockets must be \"hibernate\" or \"close\".");
+  }
+  return IoChannelFactory::EvictWebSocketMode::HIBERNATE;
 }
 }  // namespace
 
@@ -211,6 +227,31 @@ jsg::Promise<void> UnsafeModule::deleteAllDurableObjects(jsg::Lock& js) {
   context.deleteAllActors(exception);
 
   return js.resolvedPromise();
+}
+
+jsg::Promise<void> UnsafeModule::evict(
+    jsg::Lock& js, jsg::Ref<Fetcher> stub, jsg::Optional<EvictOptions> options) {
+  auto& context = IoContext::current();
+
+  // Resolve the stub to its underlying channel. For a Durable Object stub this is an actor
+  // channel that supports evictForTest(); for any other Fetcher, evictForTest() throws.
+  // Use kj::evalNow() so that a synchronous throw (e.g. "not a Durable Object stub" or "not
+  // currently running") becomes a rejected promise rather than a synchronous exception.
+  auto channel = stub->getSubrequestChannel(context);
+  auto promise = kj::evalNow([&channel, options = kj::mv(options)]() mutable {
+    return channel->evictForTest(parseEvictWebSocketMode(kj::mv(options)));
+  }).attach(kj::mv(channel));
+  return context.awaitIo(js, kj::mv(promise));
+}
+
+jsg::Promise<void> UnsafeModule::evictAllDurableObjects(
+    jsg::Lock& js, jsg::Optional<EvictOptions> options) {
+  auto& context = IoContext::current();
+  // Use kj::evalNow() so that a synchronous throw becomes a rejected promise rather than a
+  // synchronous exception, matching evict()'s behaviour.
+  return context.awaitIo(js, kj::evalNow([&context, options = kj::mv(options)]() mutable {
+    return context.evictAllActorsForTest(parseEvictWebSocketMode(kj::mv(options)));
+  }));
 }
 
 bool UnsafeModule::isTestAutogateEnabled() {

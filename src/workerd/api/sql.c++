@@ -257,10 +257,25 @@ SqlStorage::Cursor::RowIterator::Next SqlStorage::Cursor::next(jsg::Lock& js) {
 jsg::JsArray SqlStorage::Cursor::toArray(jsg::Lock& js) {
   auto self = JSG_THIS;
   v8::LocalVector<v8::Value> results(js.v8Isolate);
+  auto& limitEnforcer = Worker::Isolate::from(js).getLimitEnforcer();
   for (;;) {
     auto maybeRow = rowIteratorNext(js, self);
     KJ_IF_SOME(row, maybeRow) {
       results.push_back(row);
+
+      // `toArray()` accumulates the entire result set in memory with no yield point, so there is
+      // no opportunity for the normal exit-JS memory-limit enforcement to run. A large enough
+      // result set can therefore drive the heap straight into a fatal, process-killing OOM. Guard
+      // against that by polling the (cheap) heap-limit flag, which the isolate's
+      // NearHeapLimitCallback flips synchronously once the isolate has excessively exceeded its
+      // heap limit, and bail out with a catchable error. We check after appending a row so that an
+      // already-condemned isolate doesn't throw a misleading error on an empty result set.
+      if (limitEnforcer.hasExcessivelyExceededHeapLimit()) {
+        JSG_FAIL_REQUIRE(Error,
+            "SQL query result set is too large to fit in memory. Use a streaming iterator "
+            "(e.g. `for (const row of cursor)` or `cursor.raw()`) or add a LIMIT clause instead "
+            "of calling toArray() on a very large result set.");
+      }
     } else {
       break;
     }

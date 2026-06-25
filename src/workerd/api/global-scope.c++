@@ -637,8 +637,9 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
         // This will include the error in inspector/tracers and log to syslog if internal.
         context.logUncaughtExceptionAsync(UncaughtExceptionSource::ALARM_HANDLER, kj::mv(e));
 
+        auto limitsExceeded = context.getLimitEnforcer().getLimitsExceeded();
         EventOutcome outcome = EventOutcome::EXCEPTION;
-        KJ_IF_SOME(status, context.getLimitEnforcer().getLimitsExceeded()) {
+        KJ_IF_SOME(status, limitsExceeded) {
           outcome = status;
         }
 
@@ -653,14 +654,19 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
         }
 
         auto isUserGeneratedError = isAlarmFailureUserError(description, isUserError);
-        auto shouldRetryCountsAgainstLimits = !context.isOutputGateBroken() || isUserGeneratedError;
+        auto shouldRetryCountsAgainstLimits = alarmRetryCountsAgainstLimit({
+          .outputGateBroken = context.isOutputGateBroken(),
+          .isUserError = isUserGeneratedError,
+          .resourceLimitExceeded = limitsExceeded != kj::none,
+        });
 
-        // We want to alert if we aren't going to count this alarm retry against limits.
-        // Skip logging when the output gate broke as a secondary effect of a user-generated error:
-        // that is expected behaviour and already counted as a user error.
-        if (!isUserGeneratedError && log && context.isOutputGateBroken()) {
+        // We want to alert if we aren't going to count this alarm retry against limits, since an
+        // uncounted broken-output-gate failure can retry forever. Skip logging when the retry IS
+        // counted: a user-generated error, or a resource-limit breach that broke the gate (e.g.
+        // SQLITE_INTERRUPT from the CPU limiter), is expected behaviour.
+        if (!shouldRetryCountsAgainstLimits && log && context.isOutputGateBroken()) {
           LOG_NOSENTRY(ERROR, "output lock broke during alarm execution", actorId, description);
-        } else if (!isUserGeneratedError && context.isOutputGateBroken()) {
+        } else if (!shouldRetryCountsAgainstLimits && context.isOutputGateBroken()) {
           // Tunneled or do-not-log non-user error with a broken output gate. Log for diagnostics
           // so we can investigate stuck alarms.
           LOG_NOSENTRY(ERROR,
@@ -689,19 +695,25 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           }
           auto isUserGeneratedError = isAlarmFailureUserError(
               e.getDescription(), e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none);
-          auto shouldRetryCountsAgainstLimits = isUserGeneratedError;
+          auto shouldRetryCountsAgainstLimits = alarmRetryCountsAgainstLimit({
+            // This continuation only runs when waitForOutputLocks() failed, i.e. the output gate
+            // is broken.
+            .outputGateBroken = true,
+            .isUserError = isUserGeneratedError,
+            .resourceLimitExceeded = context.getLimitEnforcer().getLimitsExceeded() != kj::none,
+          });
           if (auto desc = e.getDescription();
               !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)) {
-            if (!isUserGeneratedError) {
+            if (!shouldRetryCountsAgainstLimits) {
               if (isInterestingException(e)) {
                 LOG_EXCEPTION("alarmOutputLock"_kj, e);
               } else {
                 LOG_NOSENTRY(ERROR, "output lock broke after executing alarm", actorId, e);
               }
             }
-          } else if (!isUserGeneratedError) {
-            // Tunneled or do-not-log exception that is not a user error. Forward as-is without
-            // counting against retry limits.
+          } else if (!shouldRetryCountsAgainstLimits) {
+            // Tunneled or do-not-log exception that is neither a user error nor a resource-limit
+            // breach, so it is not counted against the retry limit.
             LOG_NOSENTRY(ERROR,
                 "output lock broke after executing alarm with tunneled non-user error", actorId,
                 e.getDescription());
