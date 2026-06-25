@@ -180,8 +180,9 @@ void HeapTracer::addToFreelist(JSGWrappable::CppgcShim& shim) {
 }
 
 JSGWrappable::CppgcShim* HeapTracer::allocateShim(JSGWrappable& wrappable) {
-  // Under gc-stress, skip freelist reuse so each shim has a unique address in logs.
-  if (!isGcStressModeForTest()) {
+  // Under gc-stress (either turn-boundary or alloc mode), skip freelist reuse so each freed shim
+  // keeps a unique address and ASAN poisoning sticks, giving cleaner use-after-free reports.
+  if (!isGcStressModeForTest() && !isAllocGcStressModeForTest()) {
     KJ_IF_SOME(shim, freelistedShims) {
       freelistedShims = shim.state.get<JSGWrappable::CppgcShim::Freelisted>().next;
       KJ_IF_SOME(next, freelistedShims) {
