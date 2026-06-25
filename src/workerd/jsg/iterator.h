@@ -620,7 +620,6 @@ struct Sequence: public kj::Array<T> {
   Sequence(kj::Array<T> items): kj::Array<T>(kj::mv(items)) {}
 };
 
-template <typename TypeWrapper>
 class SequenceWrapper {
   // TypeWrapper mixin for Sequences.
 
@@ -633,7 +632,8 @@ class SequenceWrapper {
   }
 
   template <typename U>
-  v8::Local<v8::Value> wrap(Lock& js,
+  v8::Local<v8::Value> wrap(this auto&& self,
+      Lock& js,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       Sequence<U> sequence) {
@@ -641,13 +641,14 @@ class SequenceWrapper {
     v8::EscapableHandleScope handleScope(isolate);
     v8::LocalVector<v8::Value> items(isolate, sequence.size());
     for (auto i: kj::indices(sequence)) {
-      items[i] = static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(sequence[i]));
+      items[i] = self.wrap(js, context, creator, kj::mv(sequence[i]));
     }
     return handleScope.Escape(v8::Array::New(isolate, items.data(), items.size()));
   }
 
   template <typename U>
-  v8::Local<v8::Value> wrap(Lock& js,
+  v8::Local<v8::Value> wrap(this auto&& self,
+      Lock& js,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       Sequence<U>& sequence) {
@@ -655,19 +656,20 @@ class SequenceWrapper {
     v8::EscapableHandleScope handleScope(isolate);
     v8::LocalVector<v8::Value> items(isolate, sequence.size());
     for (auto i: kj::indices(sequence)) {
-      items[i] = static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(sequence[i]));
+      items[i] = self.wrap(js, context, creator, kj::mv(sequence[i]));
     }
     return handleScope.Escape(v8::Array::New(isolate, items.data(), items.size()));
   }
 
   template <typename U>
-  kj::Maybe<Sequence<U>> tryUnwrap(Lock& js,
+  kj::Maybe<Sequence<U>> tryUnwrap(this auto&& self,
+      Lock& js,
       v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Sequence<U>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     auto isolate = js.v8Isolate;
-    auto& typeWrapper = TypeWrapper::from(isolate);
+    auto& typeWrapper = self.from(isolate);
     // In this case, if handle is a string, we likely do not want to treat it as
     // a sequence of characters, which the Generator case would do. If someone
     // really wants to treat a string as a sequence of characters, then they

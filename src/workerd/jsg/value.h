@@ -1078,7 +1078,6 @@ class ArrayBufferWrapper {
 // Dicts
 
 // TypeWrapper mixin for dictionaries (objects used as string -> value maps).
-template <typename TypeWrapper>
 class DictWrapper {
  public:
   template <typename K, typename V>
@@ -1087,7 +1086,8 @@ class DictWrapper {
   }
 
   template <typename K, typename V>
-  v8::Local<v8::Value> wrap(Lock& js,
+  v8::Local<v8::Value> wrap(this auto&& self,
+      Lock& js,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       Dict<V, K> dict) {
@@ -1099,22 +1099,20 @@ class DictWrapper {
     for (auto& field: dict.fields) {
       // Set() returns Maybe<bool>. As usual, if the Maybe is null, then there was an exception,
       // but I have no idea what it means if the Maybe was filled in with the boolean value false...
-      KJ_ASSERT(check(out->Set(context,
-          static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(field.name)),
-          static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(field.value)))));
+      KJ_ASSERT(check(out->Set(context, self.wrap(js, context, creator, kj::mv(field.name)),
+          self.wrap(js, context, creator, kj::mv(field.value)))));
     }
     return handleScope.Escape(out);
   }
 
   template <typename K, typename V>
-  kj::Maybe<Dict<V, K>> tryUnwrap(Lock& js,
+  kj::Maybe<Dict<V, K>> tryUnwrap(this auto&& self,
+      Lock& js,
       v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Dict<V, K>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     static_assert(webidl::isStringType<K>, "Dicts must be keyed on a string type.");
-
-    auto& wrapper = static_cast<TypeWrapper&>(*this);
 
     if (!handle->IsObject() || handle->IsArray()) {
       return kj::none;
@@ -1132,24 +1130,23 @@ class DictWrapper {
         auto strName = JsString(name).toString(js);
         const char* cstrName = strName.cStr();
         builder.add(typename Dict<V, K>::Field{kj::mv(strName),
-          wrapper.template unwrap<V>(
+          self.template unwrap<V>(
               js, context, value, TypeErrorContext::dictField(cstrName), object)});
       } else {
         // Here we have to be a bit more careful than for the kj::String case. The unwrap<K>() call
         // may throw, but we need the name in UTF-8 for the very exception that it needs to throw.
         // Thus, we do the unwrapping manually and UTF-8-convert the name only if it's needed.
-        auto unwrappedName = wrapper.tryUnwrap(js, context, name, static_cast<K*>(nullptr), object);
+        auto unwrappedName = self.tryUnwrap(js, context, name, static_cast<K*>(nullptr), object);
         if (unwrappedName == kj::none) {
           auto strName = JsString(name).toString(js);
           throwTypeError(js.v8Isolate, TypeErrorContext::dictKey(strName.cStr()),
-              TypeWrapper::getName(static_cast<K*>(nullptr)));
+              self.getName(static_cast<K*>(nullptr)));
         }
-        auto unwrappedValue =
-            wrapper.tryUnwrap(js, context, value, static_cast<V*>(nullptr), object);
+        auto unwrappedValue = self.tryUnwrap(js, context, value, static_cast<V*>(nullptr), object);
         if (unwrappedValue == kj::none) {
           auto strName = JsString(name).toString(js);
           throwTypeError(js.v8Isolate, TypeErrorContext::dictField(strName.cStr()),
-              TypeWrapper::getName(static_cast<V*>(nullptr)));
+              self.getName(static_cast<V*>(nullptr)));
         }
         builder.add(typename Dict<V, K>::Field{
           KJ_ASSERT_NONNULL(kj::mv(unwrappedName)), KJ_ASSERT_NONNULL(kj::mv(unwrappedValue))});

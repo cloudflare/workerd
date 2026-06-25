@@ -71,7 +71,7 @@ namespace workerd::jsg {
     ::workerd::jsg::visitSubclassForMemoryInfo<Type>(self, tracker);                               \
   }                                                                                                \
   template <typename>                                                                              \
-  friend constexpr bool ::workerd::jsg::resourceNeedsGcTracing();                                  \
+  friend consteval bool ::workerd::jsg::resourceNeedsGcTracing();                                  \
   template <typename T>                                                                            \
   friend void ::workerd::jsg::visitSubclassForGc(T* obj, ::workerd::jsg::GcVisitor& visitor);      \
   inline void jsgVisitForGc(::workerd::jsg::GcVisitor& visitor) override {                         \
@@ -766,13 +766,13 @@ inline consteval size_t prefixLengthToStrip(const char (&s)[N]) {
 
 #define JSG_STRUCT_FIELD_COL(_, name)                                                              \
   ::workerd::jsg::jsgAddToStructNames<decltype(::kj::instance<Self>().name),                       \
-      name##_JSG_NAME_DO_NOT_USE_DIRECTLY, ::workerd::jsg::prefixLengthToStrip(#name)>(names)
+      name##_JSG_NAME_DO_NOT_USE_DIRECTLY + ::workerd::jsg::prefixLengthToStrip(#name)>(names)
 
 // (Internal implementation details for JSG_STRUCT.)
 #define JSG_STRUCT_FIELD(_, name)                                                                  \
   ::workerd::jsg::FieldWrapper<TypeWrapper, Self, decltype(::kj::instance<Self>().name),           \
-      &Self::name, name##_JSG_NAME_DO_NOT_USE_DIRECTLY,                                            \
-      ::workerd::jsg::prefixLengthToStrip(#name)>
+      &Self::name,                                                                                 \
+      name##_JSG_NAME_DO_NOT_USE_DIRECTLY + ::workerd::jsg::prefixLengthToStrip(#name)>
 // (Internal implementation details for JSG_STRUCT.)
 #define JSG_STRUCT_REGISTER_MEMBER(_, name)                                                        \
   registry.template registerStructProperty<decltype(::kj::instance<Self>().name), &Self::name>(    \
@@ -1189,9 +1189,8 @@ template <typename U>
 static constexpr bool isUsableStructField = !kj::isSameType<U, SelfRef>() &&
     !kj::isSameType<U, Unimplemented>() && !kj::isSameType<U, WontImplement>();
 
-template <typename T, const char* name, size_t prefix>
+template <typename T, const char* exportedName>
 void jsgAddToStructNames(auto& names) {
-  constexpr const char* exportedName = name + prefix;
   if constexpr (isUsableStructField<T>) names.add(exportedName);
 }
 
@@ -1277,12 +1276,12 @@ struct IsArguments_<Arguments<T>> {
   static constexpr bool value = true;
 };
 template <typename T>
-constexpr bool isArguments() {
+consteval bool isArguments() {
   return IsArguments_<T>::value;
 }
 
 template <typename T>
-constexpr bool resourceNeedsGcTracing();
+consteval bool resourceNeedsGcTracing();
 template <typename T>
 void visitSubclassForGc(T* obj, GcVisitor& visitor);
 
@@ -1339,7 +1338,7 @@ class Object: private Wrappable {
   inline void visitForMemoryInfo(MemoryTracker& tracker) const {}
   inline void visitForGc(GcVisitor& visitor) {}
   template <typename>
-  friend constexpr bool ::workerd::jsg::resourceNeedsGcTracing();
+  friend consteval bool ::workerd::jsg::resourceNeedsGcTracing();
   template <typename T>
   friend void visitSubclassForGc(T* obj, GcVisitor& visitor);
   template <typename T>
@@ -1935,7 +1934,7 @@ struct IsPromise_<Promise<T>> {
   static constexpr bool value = true;
 };
 template <typename T>
-constexpr bool isPromise() {
+consteval bool isPromise() {
   return IsPromise_<T>::value;
 }
 
@@ -2067,7 +2066,7 @@ constexpr bool hasPublicVisitForGc_(T*) {
 }
 
 template <typename T>
-constexpr bool hasPublicVisitForGc() {
+consteval bool hasPublicVisitForGc() {
   return hasPublicVisitForGc_(static_cast<T*>(nullptr));
 }
 
@@ -2198,7 +2197,7 @@ constexpr bool isGcVisitable_(T*) {
 }
 
 template <typename T>
-constexpr bool isGcVisitable() {
+consteval bool isGcVisitable() {
   return isGcVisitable_(static_cast<T*>(nullptr));
 }
 

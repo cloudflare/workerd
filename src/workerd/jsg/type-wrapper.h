@@ -488,10 +488,10 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public OneOfWrapper<Self>,
                    public ArrayWrapper<Self>,
                    public SetWrapper<Self>,
-                   public SequenceWrapper<Self>,
+                   public SequenceWrapper,
                    public GeneratorWrapper<Self>,
                    public ArrayBufferWrapper,
-                   public DictWrapper<Self>,
+                   public DictWrapper,
                    public DateWrapper,
                    public BufferSourceWrapper,
                    public FunctionWrapper<Self>,
@@ -562,10 +562,10 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   USING_WRAPPER(OneOfWrapper<Self>);
   USING_WRAPPER(ArrayWrapper<Self>);
   USING_WRAPPER(SetWrapper<Self>);
-  USING_WRAPPER(SequenceWrapper<Self>);
+  USING_WRAPPER(SequenceWrapper);
   USING_WRAPPER(GeneratorWrapper<Self>);
   USING_WRAPPER(ArrayBufferWrapper);
-  USING_WRAPPER(DictWrapper<Self>);
+  USING_WRAPPER(DictWrapper);
   USING_WRAPPER(DateWrapper);
   USING_WRAPPER(BufferSourceWrapper);
   USING_WRAPPER(FunctionWrapper<Self>);

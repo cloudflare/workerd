@@ -80,11 +80,8 @@ template <typename TypeWrapper,
     typename Struct,
     typename T,
     T Struct::*field,
-    const char* name,
-    size_t namePrefixStripLength>
+    const char* exportedName>
 class FieldWrapper {
-  static constexpr inline const char* exportedName = name + namePrefixStripLength;
-
  public:
   using Type = T;
 

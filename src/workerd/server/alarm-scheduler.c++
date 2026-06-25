@@ -241,7 +241,7 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
         // If the notification fails, we keep the alarm in the scheduler so it is not silently
         // lost.
         try {
-          co_await getActor(kj::str(actorRef.actorId))->abandonAlarm(scheduledTime).ignoreResult();
+          co_await getActor(kj::str(actorRef.actorId))->abandonAlarm(scheduledTime);
         } catch (...) {
           auto exception = kj::getCaughtExceptionAsKj();
           KJ_LOG(
