@@ -1610,4 +1610,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # dispatches its methods as JSRPC calls on the inner fetcher instead of HTTP
   # requests against the binding-shim worker. Without the flag the legacy HTTP
   # transport is used.
+
+  typeScriptImplementedStreams @183 :Bool
+      $compatEnableFlag("typescript_implemented_streams")
+      $experimental;
+  # When enabled, the workers runtime uses the new typescript Web Streams
+  # implementation.
 }

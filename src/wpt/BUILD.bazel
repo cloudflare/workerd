@@ -117,6 +117,15 @@ wpt_test(
 )
 
 wpt_test(
+    name = "streams-ts",
+    size = "large",
+    autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
+    compat_flags = ["typescript_implemented_streams"],
+    config = "streams-test-ts.ts",
+    wpt_directory = "@wpt//:streams@module",
+)
+
+wpt_test(
     name = "fs",
     size = "large",
     compat_flags = ["enable_web_file_system"],
