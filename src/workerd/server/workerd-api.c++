@@ -305,10 +305,13 @@ CompatibilityFlags::Reader WorkerdApi::getFeatureFlags() const {
 }
 jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(
     jsg::Lock& lock, Worker::Api::NewContextOptions options) const {
+  bool deferWeakRefDeletion =
+      util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP);
   jsg::NewContextOptions opts{
     .newModuleRegistry = options.newModuleRegistry,
     .schemaLoader = options.schemaLoader,
     .enableWeakRef = getFeatureFlags().getJsWeakRef(),
+    .deferWeakRefDeletion = deferWeakRefDeletion,
   };
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).newContext<api::ServiceWorkerGlobalScope>(
       kj::mv(opts));

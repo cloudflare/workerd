@@ -1756,7 +1756,16 @@ struct NewContextOptions {
   kj::Maybe<const ModuleRegistryBase&> newModuleRegistry = kj::none;
   kj::Maybe<const capnp::SchemaLoader&> schemaLoader = kj::none;
   bool enableWeakRef = false;
+
+  // If true, WeakRef and FinalizationRegistry are NOT deleted from the global at
+  // context creation even when enableWeakRef is false. The caller takes
+  // responsibility for calling deleteWeakRefGlobals() before any user code runs.
+  // Used by the per-isolate bootstrap, which needs to capture these constructors
+  // (runPerIsolateBootstrap performs the deferred deletion).
+  bool deferWeakRefDeletion = false;
 };
+
+void deleteWeakRefGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
 // TypeWrapper mixin for resource types (application-defined C++ classes declared with a
 // JSG_RESOURCE_TYPE block).
@@ -1912,9 +1921,8 @@ class ResourceWrapper {
         [](v8::Local<v8::Context>) -> int64_t { return 0; });
 #endif
 
-    if (!options.enableWeakRef) {
-      check(global->Delete(context, v8StrIntern(isolate, "WeakRef"_kj)));
-      check(global->Delete(context, v8StrIntern(isolate, "FinalizationRegistry"_kj)));
+    if (!options.enableWeakRef && !options.deferWeakRefDeletion) {
+      deleteWeakRefGlobals(isolate, context);
     }
 
     // Store a pointer to this object in slot 1, to be extracted in callbacks.
