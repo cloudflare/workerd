@@ -54,26 +54,33 @@ class R2Bucket: public jsg::Object {
   // representing this namespace.
   explicit R2Bucket(CompatibilityFlags::Reader featureFlags, uint clientIndex)
       : featureFlags(featureFlags),
-        clientIndex(clientIndex) {}
+        clientChannel(clientIndex) {}
 
   explicit R2Bucket(FeatureFlags featureFlags, uint clientIndex, kj::String bucket, friend_tag_t)
       : featureFlags(featureFlags),
-        clientIndex(clientIndex),
+        clientChannel(clientIndex),
         adminBucket(kj::mv(bucket)) {}
 
   explicit R2Bucket(
       FeatureFlags featureFlags, uint clientIndex, kj::String bucket, kj::String binding)
       : featureFlags(featureFlags),
-        clientIndex(clientIndex),
+        clientChannel(clientIndex),
         bucket(kj::mv(bucket)),
         binding(kj::mv(binding)) {}
 
   explicit R2Bucket(
       FeatureFlags featureFlags, uint clientIndex, kj::String bucket, kj::String jwt, friend_tag_t)
       : featureFlags(featureFlags),
-        clientIndex(clientIndex),
+        clientChannel(clientIndex),
         adminBucket(kj::mv(bucket)),
         jwt(kj::mv(jwt)) {}
+
+  // Construct an R2Bucket backed by a live subrequest channel rather than a channel number, used
+  // when the binding is carried as a capability (e.g. via `ctx.props`).
+  explicit R2Bucket(
+      FeatureFlags featureFlags, IoOwn<IoChannelFactory::SubrequestChannel> subrequestChannel)
+      : featureFlags(featureFlags),
+        clientChannel(kj::mv(subrequestChannel)) {}
 
   struct Range {
     jsg::Optional<double> offset;
@@ -534,6 +541,14 @@ class R2Bucket: public jsg::Object {
     }
   }
 
+  // serialize() always throws; only deserialize() (from a Frankenvalue capability, e.g. ctx.props)
+  // is supported.
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<R2Bucket> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::R2_BUCKET);
+
   struct WildcardEtag {};
   struct WeakEtag {
     kj::String value;
@@ -574,11 +589,16 @@ class R2Bucket: public jsg::Object {
 
  private:
   FeatureFlags featureFlags;
-  uint clientIndex;
+
+  // A channel number, or a live channel when the binding is carried as a capability (e.g. props).
+  kj::OneOf<uint, IoOwn<IoChannelFactory::SubrequestChannel>> clientChannel;
+
   kj::Maybe<kj::String> adminBucket;
   kj::Maybe<kj::String> bucket;
   kj::Maybe<kj::String> binding;
   kj::Maybe<kj::String> jwt;
+
+  kj::Own<kj::HttpClient> getHttpClient(IoContext& context, TraceContext& traceContext);
 
   friend class R2MultipartUpload;
 };

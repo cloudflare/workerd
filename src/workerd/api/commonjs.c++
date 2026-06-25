@@ -42,13 +42,18 @@ jsg::JsValue CommonJsModuleContext::require(jsg::Lock& js, kj::String specifier)
   KJ_REQUIRE(modulesForResolveCallback != nullptr, "didn't expect resolveCallback() now");
 
   kj::Path targetPath = ([&] {
-    // If the specifier begins with one of our known prefixes, let's not resolve
-    // it against the referrer.
-    if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:") ||
-        specifier.startsWith("workerd:")) {
-      return kj::Path::parse(specifier);
+    KJ_TRY {
+      // If the specifier begins with one of our known prefixes, let's not resolve
+      // it against the referrer.
+      if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:") ||
+          specifier.startsWith("workerd:")) {
+        return kj::Path::parse(specifier);
+      }
+      return path.parent().eval(specifier);
     }
-    return path.parent().eval(specifier);
+    KJ_CATCH(_) {
+      JSG_FAIL_REQUIRE(TypeError, "Invalid module specifier \"", specifier, "\".");
+    }
   })();
 
   // require() is only exposed to worker bundle modules so the resolve here is only

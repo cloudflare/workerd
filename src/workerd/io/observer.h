@@ -329,10 +329,13 @@ class ActorObserver: public kj::Refcounted, public SqliteObserver {
   virtual void inputGateReleased() {}
   virtual void inputGateWaiterAdded() {}
   virtual void inputGateWaiterRemoved() {}
+
   virtual void outputGateLocked() {}
   virtual void outputGateReleased() {}
   virtual void outputGateWaiterAdded() {}
   virtual void outputGateWaiterRemoved() {}
+
+  virtual void blockConcurrencyWhileDepth(uint32_t depth) {}
 
   virtual void shutdown(uint16_t reasonCode, LimitEnforcer& limitEnforcer) {}
 };

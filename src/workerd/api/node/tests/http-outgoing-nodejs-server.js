@@ -7,9 +7,10 @@
 const http = require('node:http');
 const assert = require('node:assert/strict');
 
-function reportPort(server) {
-  const address = server.address();
-  console.info(`Listening on ${address.address}:${address.port}`);
+function listenAndReport(server, name) {
+  server.listen({ port: 0, host: process.env.SIDECAR_HOSTNAME }, () => {
+    console.log(`${name}=${server.address().port}`);
+  });
 }
 
 const finishWritableServer = http.createServer((req, res) => {
@@ -24,11 +25,7 @@ const finishWritableServer = http.createServer((req, res) => {
   assert.strictEqual(res.finished, true);
   assert.strictEqual(res.writableEnded, true);
 });
-finishWritableServer.listen(
-  process.env.FINISH_WRITABLE_PORT,
-  process.env.SIDECAR_HOSTNAME,
-  () => reportPort(finishWritableServer)
-);
+listenAndReport(finishWritableServer, 'FINISH_WRITABLE_PORT');
 
 const writableFinishedServer = http.createServer((req, res) => {
   assert.strictEqual(res.writableFinished, false);
@@ -37,17 +34,9 @@ const writableFinishedServer = http.createServer((req, res) => {
   });
   res.end();
 });
-writableFinishedServer.listen(
-  process.env.WRITABLE_FINISHED_PORT,
-  process.env.SIDECAR_HOSTNAME,
-  () => reportPort(writableFinishedServer)
-);
+listenAndReport(writableFinishedServer, 'WRITABLE_FINISHED_PORT');
 
 const propertiesServer = http.createServer((req, res) => {
   res.end();
 });
-propertiesServer.listen(
-  process.env.PROPERTIES_PORT,
-  process.env.SIDECAR_HOSTNAME,
-  () => reportPort(propertiesServer)
-);
+listenAndReport(propertiesServer, 'PROPERTIES_PORT');

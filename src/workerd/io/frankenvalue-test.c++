@@ -143,6 +143,87 @@ KJ_TEST("Frankenvalue") {
   });
 }
 
+KJ_TEST("Frankenvalue capability value") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+
+  e.run([&](auto& lock) {
+    jsg::Lock& js = lock;
+
+    // Build a Frankenvalue whose "binding" property is a bare capability -- i.e. it references a
+    // cap table entry directly, without going through V8 serialization. This is the form a control
+    // plane would produce to place a service binding (Fetcher) into `ctx.props`. Here we use the
+    // test serializable type instead of a real Fetcher.
+    Frankenvalue value;
+    {
+      capnp::MallocMessageBuilder message;
+      auto builder = message.initRoot<rpc::Frankenvalue>();
+      builder.setEmptyObject();
+      auto props = builder.initProperties(1);
+      props[0].setName("binding");
+      auto capBuilder = props[0].initCapability();
+      capBuilder.setCapIndex(0);
+      capBuilder.setTag(static_cast<uint16_t>(TestSerializationTag::TEST_SERIALIZABLE));
+      props[0].setCapTableSize(1);
+
+      kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> capTable;
+      capTable.add(kj::heap<TestCapEntry>(789));
+
+      value = Frankenvalue::fromCapnp(builder.asReader(), kj::mv(capTable));
+    }
+
+    // Exercise toCapnp/fromCapnp and clone() round trips for the capability variant.
+    {
+      capnp::MallocMessageBuilder message;
+      auto builder = message.initRoot<rpc::Frankenvalue>();
+      value.toCapnp(builder);
+
+      kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> newCapTable;
+      for (auto& entry: value.getCapTable()) {
+        newCapTable.add(entry->clone());
+      }
+      value = Frankenvalue::fromCapnp(builder.asReader(), kj::mv(newCapTable));
+    }
+    value = value.clone();
+
+    // The capability materializes to the registered type via its deserializer.
+    KJ_EXPECT(js.serializeJson(value.toJs(js)) == R"({"binding":789})"_kj);
+  });
+}
+
+KJ_TEST("Frankenvalue fromCapnp rejects capability index out of range") {
+  // Security: a `capability` value must not reference a cap table index beyond this node's base
+  // caps, or toJs() would read out of bounds.
+  capnp::MallocMessageBuilder message;
+  auto builder = message.initRoot<rpc::Frankenvalue>();
+  auto cap = builder.initCapability();
+  cap.setCapIndex(5);  // Out of range: only 1 base cap exists.
+  cap.setTag(0);
+  builder.setCapTableSize(1);
+
+  kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> capTable;
+  capTable.add(kj::heap<TestCapEntry>(42));
+
+  KJ_EXPECT_THROW_MESSAGE("capability index out of range",
+      Frankenvalue::fromCapnp(builder.asReader(), kj::mv(capTable)));
+}
+
+KJ_TEST("Frankenvalue fromCapnp rejects capability node with no caps") {
+  // A `capability` value must own at least one base cap. capIndex is unsigned, so a node that
+  // claims a capability but provides zero caps (capIndex=0, capTableSize=0) could never have an
+  // in-range index; reject it explicitly so the invariant is obvious.
+  capnp::MallocMessageBuilder message;
+  auto builder = message.initRoot<rpc::Frankenvalue>();
+  auto cap = builder.initCapability();
+  cap.setCapIndex(0);
+  cap.setTag(0);
+  builder.setCapTableSize(0);  // No caps provided.
+
+  kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> capTable;
+
+  KJ_EXPECT_THROW_MESSAGE("Frankenvalue capability node has no caps",
+      Frankenvalue::fromCapnp(builder.asReader(), kj::mv(capTable)));
+}
+
 KJ_TEST("Frankenvalue fromCapnp rejects capTableSize uint32 overflow") {
   // Regression test for AUTOVULN-EW-EDGEWORKER-15: fromCapnpImpl() accumulated per-node
   // UInt32 capTableSize fields into a 32-bit uint capCount with no overflow check. An attacker

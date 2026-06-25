@@ -8,7 +8,8 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "commonjs-module-test.js"),
           (name = "foo",
            commonJsModule = "exports.foo = 1",
-           namedExports = ["foo", "bar"])
+           namedExports = ["foo", "bar"]),
+          (name = "bad-require", commonJsModule = "require('../dep')")
         ],
         compatibilityFlags = ["nodejs_compat"],
       )

@@ -33,7 +33,8 @@ KJ_TEST("SQLite-KV") {
   SqliteDatabase::Vfs vfs(*dir);
   TestSqliteObserver sqliteObserver;
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
-      /*sqliteMaxMemoryBytes=*/kj::maxValue, sqliteObserver);
+      /*sqliteMaxMemoryBytes=*/kj::maxValue, /*sqliteMaxMemoryPerProcessBytes=*/kj::maxValue,
+      sqliteObserver);
   SqliteKv kv(db);
 
   kv.put("foo", "abc"_kj.asBytes());
@@ -177,7 +178,8 @@ KJ_TEST("SQLite-KV multi-put") {
   SqliteDatabase::Vfs vfs(*dir);
   TestSqliteObserver sqliteObserver;
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
-      /*sqliteMaxMemoryBytes=*/kj::maxValue, sqliteObserver);
+      /*sqliteMaxMemoryBytes=*/kj::maxValue, /*sqliteMaxMemoryPerProcessBytes=*/kj::maxValue,
+      sqliteObserver);
   SqliteKv kv(db);
 
   // Test basic multi-put with a simple struct

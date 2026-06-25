@@ -10,5 +10,11 @@ export const basics = {
     if (assert !== assert2 && assert !== assert3) {
       throw new Error('bad things happened');
     }
+
+    await assert3.rejects(import('bad-static-import'), {
+      name: 'TypeError',
+      message:
+        /Invalid module specifier "\.\.\/dep"[\s\S]*imported from "bad-static-import"\./,
+    });
   },
 };

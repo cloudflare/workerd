@@ -41,7 +41,6 @@ import {
 import { loadPackages } from 'pyodide-internal:loadPackage';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import { default as setupPythonSearchPathSource } from 'pyodide-internal:setup_python_search_path.py';
-import { IS_WORKERD } from 'pyodide-internal:metadata';
 import { getTrustedReadFunc } from 'pyodide-internal:readOnlyFS';
 import { PyodideVersion } from 'pyodide-internal:const';
 import { default as pythonStdlibZip } from 'pyodideRuntime-internal:python_stdlib.zip';
@@ -224,13 +223,11 @@ function compileModuleFromReadOnlyFS(
 }
 
 export async function loadPyodide(
-  isWorkerd: boolean,
-  lockfile: PackageLock,
   customSerializedObjects: CustomSerializedObjects
 ): Promise<Pyodide> {
   try {
     const Module = await enterJaegerSpan('instantiate_emscripten', () =>
-      instantiateEmscriptenModule(IS_WORKERD, pythonStdlibZip, pyodideAsmWasm)
+      instantiateEmscriptenModule(pythonStdlibZip, pyodideAsmWasm)
     );
     Module.compileModuleFromReadOnlyFS = compileModuleFromReadOnlyFS;
     if (Module.API.version === PyodideVersion.V0_28_2) {
@@ -240,9 +237,6 @@ export async function loadPyodide(
       );
     } else {
       Module.API.config.jsglobals = globalThis;
-    }
-    if (isWorkerd) {
-      Module.API.config.resolveLockFilePromise!(lockfile);
     }
     Module.setGetRandomValues(getRandomValues);
     Module.setSetTimeout(

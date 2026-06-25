@@ -242,7 +242,7 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 
 - `JSG_RESOURCE_TYPE` for reference types, `JSG_STRUCT` for value types
 - `js.alloc<T>()` for resource allocation
-- The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:jsg-lint`)
+- The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
   validates that GC-visitable fields are traced in `visitForGc()`. Run via
   `just clang-tidy <target>`. See `build/AGENTS.md` for details.
 
@@ -308,6 +308,5 @@ See the markdown files in the `docs/` directory for additional information on sp
 
 - [development.md](docs/development.md) - Development environment setup and tools
 - [api-updates.md](docs/api-updates.md) - Guidelines for adding new JavaScript APIs
-- [pyodide.md](docs/pyodide.md) - Pyodide package management and updates
 
 Some source directories also contain README.md files with more specific information about that component. Proactively look for these when working in unfamiliar areas of the codebase. Proactively suggest updates to the documentation when it is missing or out of date, but do not make edits without confirming accuracy.

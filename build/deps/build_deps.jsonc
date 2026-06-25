@@ -143,7 +143,7 @@
       "freeze_version": "clang-tidy-22.1.5"
     },
     {
-      // Clang/LLVM headers needed to build the workerd jsg-lint clang-tidy
+      // Clang/LLVM headers needed to build the workerd-lint clang-tidy
       // plugin out-of-tree. The clang-tidy plugin is just AST matching, so
       // the only platform-specific bits (arch-name macros in
       // build/include/llvm/Config/*.def and llvm-config.h) are irrelevant

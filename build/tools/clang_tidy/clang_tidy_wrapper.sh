@@ -9,7 +9,7 @@ shift
 OUTPUT=$1
 shift
 
-# Path to the workerd jsg-lint plugin shared library.
+# Path to the workerd-lint plugin shared library.
 CLANG_TIDY_PLUGIN=$1
 shift
 

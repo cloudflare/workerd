@@ -292,19 +292,18 @@ function loadDynlibFromTarFs(
   for (const part of soFile) {
     node = node?.children?.get(part);
   }
-  if (!node?.contentsOffset) {
+  // Note: contentsOffset can legitimately be 0 (embedded package files are read from their own
+  // per-file reader starting at offset 0), so compare against undefined rather than truthiness.
+  if (node?.contentsOffset === undefined) {
     node = VIRTUALIZED_DIR.getDynlibRoot();
     for (const part of soFile) {
       node = node?.children?.get(part);
     }
   }
-  if (!node?.contentsOffset) {
+  if (node?.contentsOffset === undefined) {
     throw Error(`fs node could not be found for ${soFile.join('/')}`);
   }
   const { contentsOffset, size, reader } = node;
-  if (contentsOffset === undefined) {
-    throw Error(`contentsOffset not defined for ${soFile.join('/')}`);
-  }
   if (!reader) {
     throw Error(`reader not defined for ${soFile.join('/')}`);
   }
