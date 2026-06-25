@@ -93,7 +93,6 @@ def make_snapshot(
     config_path.write_text(make_config(compat_flags))
     worker_path = d / "worker.py"
     worker_path.write_text(make_worker())
-    snapshot_flag = "--python-save-baseline-snapshot"
 
     if "WORKERD_BINARY" in environ:
         workerd = [environ["WORKERD_BINARY"]]
@@ -109,10 +108,10 @@ def make_snapshot(
             *workerd,
             "test",
             config_path,
-            snapshot_flag,
+            "--python-save-baseline-snapshot",
             "--pyodide-bundle-disk-cache-dir",
             d,
-            "--pyodide-package-disk-cache-dir",
+            "--python-snapshot-dir",
             d,
             "--experimental",
         ],

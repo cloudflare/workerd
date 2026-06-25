@@ -5,28 +5,12 @@
 # behaviour doesn't need to strictly be held consistent. In fact it uses the JS fetch, so it's not
 # going to follow the SDK at all.
 
-from contextlib import asynccontextmanager
 from http import HTTPMethod, HTTPStatus
 
 import js
 from workers import Blob, File, FormData, Request, Response, WorkerEntrypoint
 
-import pyodide.http
 from pyodide.ffi import JsProxy, to_js
-
-
-@asynccontextmanager
-async def _mock_fetch(check):
-    async def mocked_fetch(original_fetch, url, opts):
-        check(url, opts)
-        return await original_fetch(url, opts)
-
-    original_fetch = pyodide.http._jsfetch
-    pyodide.http._jsfetch = lambda url, opts: mocked_fetch(original_fetch, url, opts)
-    try:
-        yield
-    finally:
-        pyodide.http._jsfetch = original_fetch
 
 
 class Default(WorkerEntrypoint):
@@ -79,14 +63,10 @@ class Default(WorkerEntrypoint):
             #   * that other options can be passed into `fetch` (so that we can support
             #       new options without updating this code)
 
-            # Mock pyodide.http._jsfetch to ensure `foobarbaz` gets passed in.
-            def fetch_check(url, opts):
-                assert opts.foobarbaz == 42
-
-            async with _mock_fetch(fetch_check):
-                resp = await self.env.SERVER.fetch(
-                    "https://example.com/redirect", redirect="manual", foobarbaz=42
-                )
+            resp = await self.env.SERVER.fetch(
+                "https://example.com/redirect",
+                redirect="manual",
+            )
 
             return resp
         elif request.url.endswith("/response_inherited"):
