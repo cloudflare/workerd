@@ -332,6 +332,10 @@ void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
     // Run the entry point. This synchronously executes main.js, which may
     // require() other scripts. All execution is synchronous.
     state->requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("main"_kj));
+
+    if (!flags.getJsWeakRef()) {
+      jsg::deleteWeakRefGlobals(js.v8Isolate, context);
+    }
   }
   JSG_CATCH(exception) {
     kj::throwFatalException(js.exceptionToKj(kj::mv(exception)));
