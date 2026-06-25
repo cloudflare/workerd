@@ -152,16 +152,16 @@ async function testD1ApiWithSessionsOldTokensSkipped(DB, envD1MockFetcher) {
     return { ok: true };
   };
 
-  itShould('default DB', runTest(DB), { ok: true });
-  itShould('withSession()', runTest(DB.withSession()), { ok: true });
+  itShould('default DB', () => runTest(DB), { ok: true });
+  itShould('withSession()', () => runTest(DB.withSession()), { ok: true });
   itShould(
     'withSession(first-unconstrained)',
-    runTest(DB.withSession('first-unconstrained')),
+    () => runTest(DB.withSession('first-unconstrained')),
     { ok: true }
   );
   itShould(
     'withSession(first-primary)',
-    runTest(DB.withSession('first-primary')),
+    () => runTest(DB.withSession('first-primary')),
     { ok: true }
   );
 }
