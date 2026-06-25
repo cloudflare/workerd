@@ -15,6 +15,7 @@
 #include <workerd/jsg/macro-meta.h>
 #include <workerd/jsg/memory.h>
 #include <workerd/util/strong-bool.h>
+#include <workerd/util/thread-scopes.h>
 
 #include <v8-external-memory-accounter.h>
 #include <v8-forward.h>
@@ -2665,6 +2666,7 @@ class Lock {
 
   template <typename T, typename... Params>
   Ref<T> alloc(Params&&... params) {
+    maybeAllocGcStress();
     // TODO(soon): While it is possible to create jsg::Object instances outside of the
     // isolate lock, we intend to change that in order to improve memory accounting and
     // tracking of objects created while under lock. As such, all instances of jsg::alloc<T>(...)
@@ -2675,6 +2677,7 @@ class Lock {
   // Like alloc() but attaches an external memory adjustment of size indicated by `accountedSize`.
   template <typename T, typename... Params>
   Ref<T> allocAccounted(size_t accountedSize, Params&&... params) {
+    maybeAllocGcStress();
     return Ref<T>(kj::refcounted<T>(kj::fwd<Params>(params)...)
                       .attach(getExternalMemoryAdjustment(accountedSize)));
   }
@@ -3189,6 +3192,12 @@ class Lock {
   }
 
  private:
+#ifdef WORKERD_ASAN
+  void maybeAllocGcStress();
+#else
+  void maybeAllocGcStress() {}
+#endif
+
   // Mark the jsg::Lock as being disallowed from being passed as a parameter into
   // a kj promise coroutine. Note that this only blocks directly passing the Lock
   // in. Types that have the Lock included as a member field won't be caught and
