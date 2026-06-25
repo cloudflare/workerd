@@ -153,6 +153,20 @@ Lock::~Lock() noexcept(false) {
   v8Isolate->SetData(SET_DATA_LOCK, previousData);
 }
 
+#ifdef WORKERD_ASAN
+void Lock::maybeAllocGcStress() {
+  if (isAllocGcStressModeForTest()) [[unlikely]] {
+    // Force the GC *before* constructing the new object, so the new object cannot itself be the
+    // thing collected, and so the state being validated is exactly the state that existed just
+    // before the allocation that would naturally have triggered GC. Must be a full GC: only the
+    // major-GC ResetDeadNodes path zaps traced handles without calling ResetRoot(), which is the
+    // behavior that surfaces "collectible-but-still-used within a synchronous task" UAFs. A
+    // scavenge would go through ResetRoot() and hide the bug. Requires --expose-gc.
+    v8Isolate->RequestGarbageCollectionForTesting(v8::Isolate::kFullGarbageCollection);
+  }
+}
+#endif  // WORKERD_ASAN
+
 Value Lock::parseJson(kj::ArrayPtr<const char> data) {
   return withinHandleScope(
       [&] { return v8Ref(jsg::check(v8::JSON::Parse(v8Context(), v8Str(v8Isolate, data)))); });

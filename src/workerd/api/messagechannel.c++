@@ -105,22 +105,28 @@ void MessagePort::postMessage(jsg::Lock& js,
   }
   JSG_REQUIRE(!hasTransfer, Error, "Transfer list is not supported");
 
-  // If the port is closed or the peer has been collected, just drop the message.
+  // Per the spec, postMessage() serializes the message (StructuredSerializeWithTransfer) before it
+  // is routed to the peer. This means a non-serializable value (e.g. a Blob or an RpcTarget) must
+  // throw a DataCloneError even if the peer port has been closed or garbage-collected. We must not
+  // skip this validation just because there is no live recipient — otherwise the observable
+  // behavior of postMessage() depends on whether the peer happens to still be reachable, which is
+  // non-deterministic (the peer is held only via a weak ref and may be collected at any time).
+  jsg::Serializer ser(js);
+  KJ_IF_SOME(d, data) {
+    ser.write(js, d.getHandle(js));
+  } else {
+    ser.write(js, js.undefined());
+  }
+
+  auto released = ser.release();
+  JSG_REQUIRE(released.sharedArrayBuffers.size() == 0, TypeError,
+      "SharedArrayBuffer is unsupported with MessagePort");
+
+  // If the port is closed or the peer has been collected, just drop the (already-validated)
+  // message.
   KJ_IF_SOME(o, other) {
     KJ_IF_SOME(ref, o.tryAddRef(js)) {
-      jsg::Serializer ser(js);
-
-      KJ_IF_SOME(d, data) {
-        ser.write(js, d.getHandle(js));
-      } else {
-        ser.write(js, js.undefined());
-      }
-
-      auto released = ser.release();
-      JSG_REQUIRE(released.sharedArrayBuffers.size() == 0, TypeError,
-          "SharedArrayBuffer is unsupported with MessagePort");
-
-      // Now, deserialize the message into a JsValue
+      // Deserialize the message into a JsValue and deliver it to the peer.
       jsg::Deserializer deserializer(js, released);
       auto clonedData = deserializer.readValue(js);
       ref->deliver(js, clonedData);
