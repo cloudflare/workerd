@@ -81,20 +81,19 @@ async function testD1ApiWithSessionsTokensHandling(DB, envD1MockFetcher) {
     );
   };
 
-  // Assert tokens sent by the top level DB are always primary!
+  // Assert that the top level DB never sends any commit tokens (it will be read as null in our mock)!
   await resetCommitTokens(envD1MockFetcher);
   await testD1ApiQueriesHappyPath(DB);
   let tokens = await getCommitTokensSentFromBinding(envD1MockFetcher);
+  assert.deepEqual(tokens.length > 0, true);
   assert.deepEqual(
-    tokens.every((t) => t === 'first-primary'),
+    tokens.every((t) => t === null),
     true
   );
-  // Make sure we received different tokens, and still sent first-primary.
+  // Make sure we also received nothing from the eyeball worker since we never sent any commit tokens.
   assert.deepEqual(
-    (await getCommitTokensReturnedFromEyeball(envD1MockFetcher)).every(
-      (t) => t !== 'first-primary'
-    ),
-    true
+    await getCommitTokensReturnedFromEyeball(envD1MockFetcher),
+    []
   );
 
   // Assert tokens sent by the DEFAULT DB.withSession()
