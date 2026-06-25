@@ -112,8 +112,7 @@ clang-tidy target="//...":
 
 generate-types:
   bazel build //types
-  cp -r bazel-bin/types/definitions/latest types/generated-snapshot/
-  cp -r bazel-bin/types/definitions/experimental types/generated-snapshot/
+  cp -r bazel-bin/types/definitions/ types/generated-snapshot/
 
 update-reported-node-version:
   python3 tools/update_node_version.py src/workerd/api/node/node-version.h
