@@ -26,6 +26,11 @@ interface PyModule {
 
 interface Pyodide {
   _module: Module;
+  _api?: {
+    // Pyodide's equivalent public-facing API is pyodide.useNodeSockFS(),
+    // but it has a Node.js runtime check, so we use this internal API instead.
+    initializeNodeSockFS?: (connect: unknown) => void | Promise<void>;
+  };
   runPython: (
     code: string,
     opts?: { globals?: PyDict; filename?: string }

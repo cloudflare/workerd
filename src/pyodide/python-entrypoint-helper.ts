@@ -249,6 +249,20 @@ function disabledLoadPackage(): never {
   throw new PythonWorkersInternalError('pyodide.loadPackage is disabled');
 }
 
+/**
+ * Initialize socket operation for Pyodide.
+ */
+async function maybeInitializeNodeSockFS(pyodide: Pyodide): Promise<void> {
+  if (!pyodide._api?.initializeNodeSockFS) {
+    // This API exists only in Pyodide 314.0.0 and later.
+    return;
+  }
+
+  await pyodide._api.initializeNodeSockFS(
+    get_pyodide_entrypoint_helper().cloudflareSocketsModule.connect
+  );
+}
+
 async function setupPatches(pyodide: Pyodide): Promise<void> {
   await enterJaegerSpan('setup_patches', async () => {
     pyodide.loadPackage = disabledLoadPackage;
@@ -261,6 +275,8 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     );
 
     pyodide.registerJsModule('_cloudflare_compat_flags', COMPATIBILITY_FLAGS);
+
+    await maybeInitializeNodeSockFS(pyodide);
 
     // Inject modules that enable JS features to be used idiomatically from Python.
     await injectWorkersApi(pyodide);

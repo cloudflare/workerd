@@ -35,7 +35,7 @@ PYODIDE_INTERP_VERSIONS: dict[PyVer, str] = {
 PYODIDE_INDEX_VERSIONS: dict[PyVer, str] = {
     "3.12": "0.27.7",
     "3.13": "0.28.3",
-    "3.14": "314.0.0",
+    "3.14": "314.0.2",
 }
 
 
