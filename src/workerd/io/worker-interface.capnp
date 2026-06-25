@@ -489,6 +489,9 @@ enum SerializationTag {
   kvNamespace @14;
   # A KV namespace binding, backed by a subrequest channel. Only deserialized (e.g. from
   # `ctx.props`); cannot be serialized out of an isolate.
+
+  blob @15;
+  # A Blob, serialized as its MIME type followed by its raw bytes.
 }
 
 enum StreamEncoding {

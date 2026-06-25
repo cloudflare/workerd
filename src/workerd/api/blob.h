@@ -5,7 +5,9 @@
 #pragma once
 
 #include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/ser.h>
 
 namespace workerd::api {
 
@@ -77,6 +79,12 @@ class Blob: public jsg::Object {
       arrayBuffer(): Promise<ArrayBuffer>;
     });
   }
+
+  // Serialized as MIME type + raw bytes.
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<Blob> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+  JSG_SERIALIZABLE(rpc::SerializationTag::BLOB);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     KJ_SWITCH_ONEOF(ownData) {
