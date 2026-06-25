@@ -14334,6 +14334,13 @@ export interface ForwardableEmailMessage extends EmailMessage {
    * @returns A promise that resolves when the email message is replied.
    */
   reply(message: EmailMessage): Promise<EmailSendResult>;
+  /**
+   * Reply to the sender of this email message with a message built from the given
+   * fields. Threading headers (In-Reply-To/References) are set automatically.
+   * @param builder The reply message contents.
+   * @returns A promise that resolves when the email message is replied.
+   */
+  reply(builder: EmailReplyMessageBuilder): Promise<EmailSendResult>;
 }
 /** A file attachment for an email message */
 export type EmailAttachment =
@@ -14357,22 +14364,49 @@ export interface EmailAddress {
   email: string;
 }
 /**
+ * Recipient fields for `SendEmail.send()`. At least one of `to`, `cc`, or
+ * `bcc` must be provided.
+ */
+export type EmailDestinations = {
+  to?: string | EmailAddress | (string | EmailAddress)[];
+  cc?: string | EmailAddress | (string | EmailAddress)[];
+  bcc?: string | EmailAddress | (string | EmailAddress)[];
+} & (
+  | {
+      to: string | EmailAddress | (string | EmailAddress)[];
+    }
+  | {
+      cc: string | EmailAddress | (string | EmailAddress)[];
+    }
+  | {
+      bcc: string | EmailAddress | (string | EmailAddress)[];
+    }
+);
+/**
+ * Fields shared by all composed emails (no recipients). Used directly by
+ * `ForwardableEmailMessage.reply()`, which always replies to the original
+ * sender, and extended by `EmailMessageBuilder` for `SendEmail.send()`.
+ */
+export interface EmailReplyMessageBuilder {
+  from: string | EmailAddress;
+  subject: string;
+  replyTo?: string | EmailAddress;
+  headers?: Record<string, string>;
+  text?: string;
+  html?: string;
+  attachments?: EmailAttachment[];
+}
+/**
+ * Fields for composing an email without constructing raw MIME, for
+ * `SendEmail.send()`. Requires at least one of `to`, `cc`, or `bcc`.
+ */
+export type EmailMessageBuilder = EmailReplyMessageBuilder & EmailDestinations;
+/**
  * A binding that allows a Worker to send email messages.
  */
 export interface SendEmail {
   send(message: EmailMessage): Promise<EmailSendResult>;
-  send(builder: {
-    from: string | EmailAddress;
-    to: string | EmailAddress | (string | EmailAddress)[];
-    subject: string;
-    replyTo?: string | EmailAddress;
-    cc?: string | EmailAddress | (string | EmailAddress)[];
-    bcc?: string | EmailAddress | (string | EmailAddress)[];
-    headers?: Record<string, string>;
-    text?: string;
-    html?: string;
-    attachments?: EmailAttachment[];
-  }): Promise<EmailSendResult>;
+  send(builder: EmailMessageBuilder): Promise<EmailSendResult>;
 }
 export declare abstract class EmailEvent extends ExtendableEvent {
   readonly message: ForwardableEmailMessage;
