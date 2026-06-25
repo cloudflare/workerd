@@ -121,9 +121,10 @@ export default {
       const stub = env.db.get(env.db.idFromName('test'));
 
       // Add a commitToken to all responses.
-      return stub
-        .fetch(request)
-        .then((resp) => this.buildResponseWithCommitToken(resp));
+      return stub.fetch(request).then((resp) =>
+        // We don't return any bookmark when no constraint or bookmark is specified.
+        reqCommitToken ? this.buildResponseWithCommitToken(resp) : resp
+      );
     } catch (err) {
       return Response.json(
         { error: err.message, stack: err.stack },
