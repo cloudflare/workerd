@@ -15390,6 +15390,13 @@ declare namespace CloudflareWorkersModule {
     | `${number} ${WorkflowDurationLabel}${"s" | ""}`
     | number;
   export type WorkflowDelayDuration = WorkflowSleepDuration;
+  export type WorkflowDynamicDelayContext = {
+    ctx: WorkflowStepContext<WorkflowDelayFunction>;
+    error: Error;
+  };
+  export type WorkflowDelayFunction = (
+    input: WorkflowDynamicDelayContext,
+  ) => WorkflowDelayDuration | Promise<WorkflowDelayDuration>;
   export type WorkflowTimeoutDuration = WorkflowSleepDuration;
   export type WorkflowRetentionDuration = WorkflowSleepDuration;
   export type WorkflowBackoff = "constant" | "linear" | "exponential";
@@ -15397,7 +15404,7 @@ declare namespace CloudflareWorkersModule {
   export type WorkflowStepConfig = {
     retries?: {
       limit: number;
-      delay: WorkflowDelayDuration | number;
+      delay: WorkflowDelayDuration | number | WorkflowDelayFunction;
       backoff?: WorkflowBackoff;
     };
     timeout?: WorkflowTimeoutDuration | number;
@@ -15426,13 +15433,24 @@ declare namespace CloudflareWorkersModule {
     type: string;
     sensitive?: WorkflowStepSensitivity;
   };
-  export type WorkflowStepContext = {
+  export type WorkflowStepContext<Delay = WorkflowDelayDuration | number> = {
     step: {
       name: string;
       count: number;
     };
     attempt: number;
-    config: WorkflowStepConfig;
+    config: {
+      retries?: {
+        limit: number;
+        backoff?: WorkflowBackoff;
+      } & (Delay extends WorkflowDelayFunction
+        ? {}
+        : {
+            delay: WorkflowDelayDuration | number;
+          });
+      timeout?: WorkflowTimeoutDuration | number;
+      sensitive?: WorkflowStepSensitivity;
+    };
   };
   export type WorkflowRollbackContext<T = unknown> = {
     ctx: WorkflowStepContext;
@@ -15454,10 +15472,18 @@ declare namespace CloudflareWorkersModule {
       callback: (ctx: WorkflowStepContext) => Promise<T>,
       rollbackOptions?: WorkflowStepRollbackOptions<T>,
     ): Promise<T>;
-    do<T extends Rpc.Serializable<T>>(
+    do<T extends Rpc.Serializable<T>, const C extends WorkflowStepConfig>(
       name: string,
-      config: WorkflowStepConfig,
-      callback: (ctx: WorkflowStepContext) => Promise<T>,
+      config: C,
+      callback: (
+        ctx: WorkflowStepContext<
+          C["retries"] extends {
+            delay: infer D;
+          }
+            ? D
+            : WorkflowDelayDuration | number
+        >,
+      ) => Promise<T>,
       rollbackOptions?: WorkflowStepRollbackOptions<T>,
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;

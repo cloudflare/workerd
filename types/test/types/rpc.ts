@@ -9,6 +9,9 @@ import {
   RpcTarget,
   WorkerEntrypoint,
   type WorkflowCronSchedule,
+  type WorkflowDelayDuration,
+  type WorkflowDelayFunction,
+  type WorkflowDynamicDelayContext,
   type WorkflowEvent,
   type WorkflowStep,
   type WorkflowStepContext,
@@ -856,6 +859,69 @@ expectTypeOf(
     async (): Promise<string> => 'ok'
   )
 ).toMatchTypeOf<Promise<string>>();
+
+// A static delay is surfaced (present) in the step context config.
+workflowStep.do(
+  'static delay context',
+  {retries: {limit: 1, delay: '1 minute'}},
+  async (ctx): Promise<string> => {
+    expectTypeOf(ctx.config.retries).toMatchTypeOf<
+      {delay: WorkflowDelayDuration | number} | undefined
+    >();
+    expectTypeOf(ctx.config.retries?.delay).toEqualTypeOf<
+      WorkflowDelayDuration | number | undefined
+    >();
+    return 'ok';
+  }
+);
+
+// A delay function is accepted, and the step context omits the (dynamic) delay.
+workflowStep.do(
+  'dynamic delay context',
+  {
+    retries: {
+      limit: 1,
+      delay: (input): WorkflowDelayDuration => {
+        expectTypeOf(input).toEqualTypeOf<WorkflowDynamicDelayContext>();
+        expectTypeOf(input.ctx).toEqualTypeOf<
+          WorkflowStepContext<WorkflowDelayFunction>
+        >();
+        expectTypeOf(input.error).toEqualTypeOf<Error>();
+        // Inside a dynamic delay, `delay` is absent from the context config entirely.
+        // @ts-expect-error `delay` does not exist on a dynamic-delay step context
+        input.ctx.config.retries?.delay;
+        return '1 minute';
+      },
+    },
+  },
+  async (ctx): Promise<string> => {
+    // `delay` is absent here because it was supplied as a function.
+    ctx.config.retries = {limit: 1};
+    // @ts-expect-error `delay` does not exist on a dynamic-delay step context
+    ctx.config.retries?.delay;
+    return 'ok';
+  }
+);
+
+// An async delay function is also accepted.
+workflowStep.do(
+  'async dynamic delay',
+  {retries: {limit: 1, delay: async (): Promise<WorkflowDelayDuration> => 5}},
+  async (): Promise<string> => 'ok'
+);
+
+// rollbackConfig also accepts a delay function.
+workflowStep.do('rollback delay function', async (): Promise<string> => 'ok', {
+  rollback: async () => {},
+  rollbackConfig: {retries: {limit: 0, delay: () => 0}},
+});
+
+// A standalone delay function conforms to WorkflowDelayFunction.
+const dynamicDelay: WorkflowDelayFunction = ({error}) => {
+  expectTypeOf(error).toEqualTypeOf<Error>();
+  return '30 seconds';
+};
+void dynamicDelay;
 
 declare const cronSchedule: WorkflowCronSchedule;
 expectTypeOf(cronSchedule.cron).toEqualTypeOf<string>();
