@@ -13,8 +13,14 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/jsg/ser.h>
-#include <workerd/util/autogate.h>
+
+// TODO(EW-10817): Re-enable the autogate consultation in WebSocket::acceptAsHibernatable() and
+// in the revival ctor below when the HibernatableWebSocketAdapter path is functional. The
+// commented-out helpers are also waiting on that.
+//
+// #include "hibernatable-adapter.h"
+//
+// #include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
 #include <kj/compat/url.h>
@@ -33,6 +39,28 @@ kj::StringPtr KJ_STRINGIFY(const LegacyWebSocketAdapter::NativeState& state) {
   }
   KJ_UNREACHABLE;
 }
+
+// TODO(EW-10817): Re-enable this helper alongside the autogate consultations below when
+// HibernatableWebSocketAdapter is functional.
+//
+// namespace {
+//
+// // Adapter selection helper for the revival-from-hibernation path. When the
+// // `hibernatable-websocket-refactor` autogate is enabled, returns a fresh
+// // `HibernatableWebSocketAdapter`; otherwise returns the legacy adapter that owns the
+// // pre-EW-10817 implementation.
+// kj::Own<WebSocketAdapter> makeAdapterForHibernationRevival(jsg::Lock& js,
+//     WebSocket& shell,
+//     IoContext& ioContext,
+//     kj::WebSocket& ws,
+//     WebSocket::HibernationPackage package) {
+//   if (util::Autogate::isEnabled(util::AutogateKey::HIBERNATABLE_WEBSOCKET_REFACTOR)) {
+//     return kj::heap<HibernatableWebSocketAdapter>(js, shell, ioContext, ws, kj::mv(package));
+//   }
+//   return kj::heap<LegacyWebSocketAdapter>(js, shell, ioContext, ws, kj::mv(package));
+// }
+//
+// }  // namespace
 
 // =============================================================================
 // WebSocket — JSG-facing shell. Constructors and destructor live here; every
@@ -129,11 +157,17 @@ void WebSocket::setObserver(kj::Own<WebSocketObserver> observer) {
 }
 
 kj::Own<kj::WebSocket> WebSocket::acceptAsHibernatable(kj::Array<kj::StringPtr> tags) {
-  // TODO(soon): If an autogate is on, replace `impl` with the upcoming
-  //   `HibernatableWebSocketAdapter` implementation. When doing so, be mindful of the warning at
-  //   definition of `impl` at the bottom of the WebSocket class: If we've been traced, any V8
-  //   handles transitively owned by `impl` will be weak. You will need to strongify them or make
-  //   sure they are traced if `impl` is moved somewhere else.
+  // TODO(EW-10817): When the HibernatableWebSocketAdapter path is functional, re-enable the
+  // autogate-driven swap below — extract the kj::WebSocket from the legacy adapter (via
+  // `LegacyWebSocketAdapter::extractForHibernatableTransition`, also commented out today)
+  // and atomically replace `impl` with a fresh `HibernatableWebSocketAdapter`.
+  //
+  // if (util::Autogate::isEnabled(util::AutogateKey::HIBERNATABLE_WEBSOCKET_REFACTOR)) {
+  //   auto& legacy = kj::downcast<LegacyWebSocketAdapter>(*impl);
+  //   auto ws = legacy.extractForHibernatableTransition();
+  //   impl = kj::heap<HibernatableWebSocketAdapter>(*this, *ws, kj::mv(tags));
+  //   return kj::mv(ws);
+  // }
   return impl->acceptAsHibernatable(kj::mv(tags));
 }
 
@@ -1399,6 +1433,20 @@ kj::Own<kj::WebSocket> LegacyWebSocketAdapter::acceptAsHibernatable(kj::Array<kj
   JSG_FAIL_REQUIRE(TypeError,
       "Tried to make an api::WebSocket hibernatable when it was in an incompatible state.");
 }
+
+// TODO(EW-10817): Re-enable when WebSocket::acceptAsHibernatable's autogate consultation
+// above is uncommented. This helper yields the kj::WebSocket out of
+// `AwaitingAcceptanceOrCoupling` without transitioning state, so the shell can hand it to
+// the HibernationManager and replace this adapter with a `HibernatableWebSocketAdapter`
+// atomically.
+//
+// kj::Own<kj::WebSocket> LegacyWebSocketAdapter::extractForHibernatableTransition() {
+//   KJ_IF_SOME(hibernatable, farNative->state.tryGet<AwaitingAcceptanceOrCoupling>()) {
+//     return kj::mv(hibernatable.ws);
+//   }
+//   JSG_FAIL_REQUIRE(TypeError,
+//       "Tried to make an api::WebSocket hibernatable when it was in an incompatible state.");
+// }
 
 void LegacyWebSocketAdapter::initiateHibernatableRelease(jsg::Lock& js,
     kj::Own<kj::WebSocket> ws,
