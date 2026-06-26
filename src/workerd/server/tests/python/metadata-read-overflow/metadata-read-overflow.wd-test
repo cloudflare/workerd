@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "metadata-read-overflow",
+      worker = (
+        modules = [
+          (name = "worker.py", pythonModule = embed "worker.py"),
+          (name = "payload.dat", data = "payload.dat")
+        ],
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+      )
+    ),
+  ],
+);

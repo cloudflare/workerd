@@ -185,8 +185,9 @@ class Container: public jsg::Object {
 
   struct Info {
     jsg::Dict<kj::String> labels;
+    kj::String image;
 
-    JSG_STRUCT(labels);
+    JSG_STRUCT(labels, image);
   };
 
   struct StartupOptions {

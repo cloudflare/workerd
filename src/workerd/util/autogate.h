@@ -30,13 +30,13 @@ enum class AutogateKey {
   TAIL_STREAM_REFACTOR,
   // Enable fast TextEncoder implementation using simdutf
   ENABLE_FAST_TEXTENCODER,
-  // Increase the SQLite hard heap limit from 512 MiB to 8 GiB.
-  INCREASE_SQLITE_HARD_HEAP_LIMIT,
   // Apply an updated default autoAllocateChunkSize for ReadableStreams
   UPDATED_AUTO_ALLOCATE_CHUNK_SIZE,
   // When enabled, reject startTls calls that pass the expectedServerHostname option,
   // which is not currently supported. When disabled, log the usage instead.
   STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME,
+  // When enabled, turns on per-isolate TypeScript/JavaScript bootstrap
+  PER_ISOLATE_JAVASCRIPT_BOOTSTRAP,
   NumOfKeys  // Reserved for iteration.
 };
 

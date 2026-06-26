@@ -1284,5 +1284,130 @@ KJ_TEST("jsg::Name works") {
   e.expectEval("forSymbolShared('foo') !== forSymbolApi('foo')", "boolean", "true");
 }
 
+// ========================================================================================
+// SelfConvertible
+
+// A simple self-converting type that wraps/unwraps a number.
+struct SelfConvertibleNumber {
+  double value;
+
+  static v8::Local<v8::Value> jsgWrap(auto& typeWrapper,
+      Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      SelfConvertibleNumber self) {
+    return v8::Number::New(js.v8Isolate, self.value);
+  }
+
+  static kj::Maybe<SelfConvertibleNumber> jsgTryUnwrap(auto& typeWrapper,
+      Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (handle->IsNumber()) {
+      return SelfConvertibleNumber{handle.As<v8::Number>()->Value()};
+    }
+    return kj::none;
+  }
+};
+
+// A self-converting type that uses the typeWrapper to recursively convert an inner value.
+struct SelfConvertiblePair {
+  kj::String first;
+  double second;
+
+  static v8::Local<v8::Value> jsgWrap(auto& typeWrapper,
+      Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      SelfConvertiblePair self) {
+    auto first = jsg::JsValue(typeWrapper.wrap(js, context, creator, kj::mv(self.first)));
+    auto second = jsg::JsValue(typeWrapper.wrap(js, context, creator, kj::mv(self.second)));
+    auto obj = js.obj();
+    obj.set(js, "first", first);
+    obj.set(js, "second", second);
+    return obj;
+  }
+
+  static kj::Maybe<SelfConvertiblePair> jsgTryUnwrap(auto& typeWrapper,
+      Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (!handle->IsObject()) return kj::none;
+    auto jsobj = handle.As<v8::Object>();
+    auto obj = jsg::JsObject(jsobj);
+    auto firstVal = obj.get(js, "first");
+    auto secondVal = obj.get(js, "second");
+
+    auto first =
+        typeWrapper.tryUnwrap(js, context, firstVal, static_cast<kj::String*>(nullptr), jsobj);
+    auto second =
+        typeWrapper.tryUnwrap(js, context, secondVal, static_cast<double*>(nullptr), jsobj);
+
+    KJ_IF_SOME(f, first) {
+      KJ_IF_SOME(s, second) {
+        return SelfConvertiblePair{kj::mv(f), s};
+      }
+    }
+    return kj::none;
+  }
+};
+
+struct SelfConvertibleContext: public ContextGlobalObject {
+  // Simple round-trip: accept and return SelfConvertibleNumber.
+  SelfConvertibleNumber doubleIt(SelfConvertibleNumber n) {
+    return SelfConvertibleNumber{n.value * 2};
+  }
+
+  // Round-trip using the recursive-conversion type.
+  SelfConvertiblePair swapPair(SelfConvertiblePair p) {
+    return SelfConvertiblePair{kj::str(p.second), p.first.parseAs<double>()};
+  }
+
+  // Return a SelfConvertibleNumber (tests wrapping).
+  SelfConvertibleNumber makeNumber(double v) {
+    return SelfConvertibleNumber{v};
+  }
+
+  // Accept a SelfConvertibleNumber (tests unwrapping).
+  double readNumber(SelfConvertibleNumber n) {
+    return n.value;
+  }
+
+  JSG_RESOURCE_TYPE(SelfConvertibleContext) {
+    JSG_METHOD(doubleIt);
+    JSG_METHOD(swapPair);
+    JSG_METHOD(makeNumber);
+    JSG_METHOD(readNumber);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(SelfConvertibleIsolate, SelfConvertibleContext);
+
+KJ_TEST("SelfConvertible basic wrap/unwrap") {
+  Evaluator<SelfConvertibleContext, SelfConvertibleIsolate> e(v8System);
+  // Round-trip through C++.
+  e.expectEval("doubleIt(21)", "number", "42");
+  // Wrapping only.
+  e.expectEval("makeNumber(99)", "number", "99");
+  // Unwrapping only.
+  e.expectEval("readNumber(7.5)", "number", "7.5");
+  // Type mismatch: string is not a number, tryUnwrap returns none, TypeError thrown.
+  e.expectEval("readNumber('hello')", "throws",
+      "TypeError: Failed to execute 'readNumber' on 'SelfConvertibleContext': "
+      "parameter 1 is not of type 'SelfConvertibleNumber'.");
+}
+
+KJ_TEST("SelfConvertible with recursive typeWrapper usage") {
+  Evaluator<SelfConvertibleContext, SelfConvertibleIsolate> e(v8System);
+  // SelfConvertiblePair uses typeWrapper to convert inner kj::String and double.
+  e.expectEval("var p = swapPair({first: '7.5', second: 42});\n"
+               "p.first + ':' + p.second",
+      "string", "42:7.5");
+  e.expectEval("var p = swapPair({first: '3.14', second: 100});\n"
+               "p.first + ':' + p.second",
+      "string", "100:3.14");
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test

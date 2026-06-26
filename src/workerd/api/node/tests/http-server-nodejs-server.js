@@ -6,10 +6,6 @@
 // It is executed using the appropriate Node.js version defined in build/deps/nodejs.MODULE.bazel.
 const http = require('node:http');
 
-function reportPort(server) {
-  console.info(`Listening on port ${server.address().port}`);
-}
-
 const pongServer = http.createServer((req, res) => {
   req.resume();
   req.on('end', () => {
@@ -17,4 +13,6 @@ const pongServer = http.createServer((req, res) => {
     res.end('pong');
   });
 });
-pongServer.listen(process.env.PONG_SERVER_PORT, () => reportPort(pongServer));
+pongServer.listen({ port: 0, host: process.env.SIDECAR_HOSTNAME }, () => {
+  console.log(`PONG_SERVER_PORT=${pongServer.address().port}`);
+});

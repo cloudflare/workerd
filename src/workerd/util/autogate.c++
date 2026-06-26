@@ -27,12 +27,12 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "tail-stream-refactor"_kj;
     case AutogateKey::ENABLE_FAST_TEXTENCODER:
       return "enable-fast-textencoder"_kj;
-    case AutogateKey::INCREASE_SQLITE_HARD_HEAP_LIMIT:
-      return "increase-sqlite-hard-heap-limit"_kj;
     case AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE:
       return "updated-auto-allocate-chunk-size"_kj;
     case AutogateKey::STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME:
       return "starttls-reject-expected-server-hostname"_kj;
+    case AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP:
+      return "per-isolate-javascript-bootstrap"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

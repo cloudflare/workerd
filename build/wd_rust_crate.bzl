@@ -163,6 +163,12 @@ def wd_rust_crate(
         crate_features = crate_features,
         deps = test_deps,
         proc_macro_deps = test_proc_macro_deps,
+        # Optionally link via cc_common.link so embedder-selected cc link settings
+        # (e.g. --custom_malloc) take effect. Off standalone (see //build/config).
+        experimental_use_cc_common_link = select({
+            "@//build/config:rust_cc_common_link": 1,
+            "//conditions:default": -1,
+        }),
     )
 
     if len(proc_macro_deps) + len(cxx_bridge_srcs) > 0:

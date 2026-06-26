@@ -20,6 +20,7 @@
 #include <workerd/util/stream-utils.h>
 
 #include <algorithm>
+#include <atomic>
 
 namespace workerd {
 
@@ -205,13 +206,24 @@ struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
     return kj::none;
   }
   bool hasExcessivelyExceededHeapLimit() const override {
+    KJ_IF_SOME(f, heapLimitFlag) {
+      return f->excessivelyExceeded.load(std::memory_order_relaxed);
+    }
     return false;
   }
   const TrackedWasmInstanceList& getTrackedWasmInstances() const override {
     return trackedWasmInstances;
   }
 
+  MockIsolateLimitEnforcer() = default;
+  explicit MockIsolateLimitEnforcer(kj::Own<const HeapLimitFlag> heapLimitFlag)
+      : heapLimitFlag(kj::mv(heapLimitFlag)) {}
+
  private:
+  // When present, drives hasExcessivelyExceededHeapLimit(). Lets tests simulate an isolate that
+  // has been condemned for excessively exceeding its heap limit. Shared (refcounted) with the
+  // owning TestFixture.
+  kj::Maybe<kj::Own<const HeapLimitFlag>> heapLimitFlag;
   TrackedWasmInstanceList trackedWasmInstances;
 };
 
@@ -339,10 +351,11 @@ TestFixture::TestFixture(SetupParams&& params)
           kj::atomicRefcounted<JsgIsolateObserver>(),
           *memoryCacheProvider,
           defaultPythonConfig)),
+      heapLimitFlag(kj::atomicRefcounted<HeapLimitFlag>()),
       workerIsolate(kj::atomicRefcounted<Worker::Isolate>(kj::mv(api),
           kj::atomicRefcounted<IsolateObserver>(),
           scriptId,
-          kj::heap<MockIsolateLimitEnforcer>(),
+          kj::heap<MockIsolateLimitEnforcer>(kj::atomicAddRef(*heapLimitFlag)),
           Worker::Isolate::InspectorPolicy::DISALLOW)),
       workerScript(kj::atomicRefcounted<Worker::Script>(kj::atomicAddRef(*workerIsolate),
           scriptId,

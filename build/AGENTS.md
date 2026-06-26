@@ -20,7 +20,7 @@ Custom Bazel rules (`wd_*` macros) for C++, TypeScript, Rust, Cap'n Proto, and t
 | `wd_capnp_library.bzl`                     | Cap'n Proto schema compilation                                                                    |
 | `wd_rust_crate.bzl` / `wd_rust_binary.bzl` | Rust build rules                                                                                  |
 | `lint_test.bzl`                            | ESLint integration                                                                                |
-| `//tools/clang-tidy:jsg-lint`              | Custom clang-tidy plugin (source: `tools/clang-tidy/jsg-lint.c++`); ships the `jsg-visit-for-gc` check for GC-root validation |
+| `//tools/clang-tidy:workerd-lint`          | Custom clang-tidy plugin (source: `tools/clang-tidy/workerd-lint.c++`); ships the `jsg-visit-for-gc` and `workerd-unsafe-continuation-capture` checks |
 
 **Conventions:**
 
@@ -31,16 +31,23 @@ Custom Bazel rules (`wd_*` macros) for C++, TypeScript, Rust, Cap'n Proto, and t
 
 ## CLANG-TIDY PLUGIN
 
-`//tools/clang-tidy:jsg-lint` builds a shared-object clang-tidy plugin
-that adds workerd-specific static checks. Currently ships `jsg-visit-for-gc`,
-which flags JSG resource types whose visitable fields (`jsg::Ref`, `jsg::JsRef`,
-`jsg::V8Ref`, `jsg::Function`, `jsg::Promise`, `jsg::BufferSource`, `jsg::Value`,
-etc., plus `kj::Maybe`/`Array`/`Vector`/`OneOf` and `jsg::Optional` wrappers
-thereof) are missing from `visitForGc()`.
+`//tools/clang-tidy:workerd-lint` builds a shared-object clang-tidy plugin
+that adds workerd-specific static checks:
+
+- `jsg-visit-for-gc`: flags JSG resource types whose visitable fields
+  (`jsg::Ref`, `jsg::JsRef`, `jsg::V8Ref`, `jsg::Function`, `jsg::Promise`,
+  `jsg::BufferSource`, `jsg::Value`, etc., plus `kj::Maybe`/`Array`/`Vector`/
+  `OneOf` and `jsg::Optional` wrappers thereof) are missing from `visitForGc()`.
+- `workerd-unsafe-continuation-capture`: flags lambdas passed to async sinks
+  (e.g. `kj::Promise::then`) that capture bare references, raw pointers, or
+  non-owning views.
+
+Usage:
 
 - Run via `just clang-tidy <target>` (e.g., `just clang-tidy //src/workerd/api/...`).
-- Plugin sources live in `tools/clang-tidy/jsg-lint.c++` and are built as a
-  `cc_shared_library` target `//tools/clang-tidy:jsg-lint`. The source is
+- Plugin sources live in `tools/clang-tidy/workerd-lint.c++` and
+  `tools/clang-tidy/unsafe-continuation-capture.c++`, built as a
+  `cc_shared_library` target `//tools/clang-tidy:workerd-lint`. The sources are
   also exported via `exports_files` so downstream projects can rebuild
   against their own clang/LLVM headers.
 - The clang-tidy binary itself is published to `cloudflare/workerd-tools`
@@ -55,6 +62,37 @@ thereof) are missing from `visitForGc()`.
   comment explaining why the field is safe to skip (see `src/workerd/api/streams/queue.h`
   for `ByteQueue::Entry::store` and `src/workerd/api/node/diagnostics-channel.h`
   for `Channel::name`).
+
+### Incremental check rollout
+
+Some checks produce many warnings on existing code and need incremental rollout.
+The `CHECK_PATH_FILTERS` dict in `build/tools/clang_tidy/check_path_filters.bzl`
+supports this:
+
+1. Add the check to `.clang-tidy` Checks list
+2. Add an entry to `CHECK_PATH_FILTERS` with an empty list (runs nowhere)
+3. Add packages as they are cleaned up
+4. Remove the entry once fully rolled out (runs everywhere)
+
+Example:
+
+```python
+CHECK_PATH_FILTERS = {
+    "workerd-unsafe-continuation-capture": [
+        "//src/workerd/io",
+        "//src/workerd/api",
+    ],
+}
+```
+
+Package prefixes match themselves and all subpackages (`//src/workerd/io`
+matches `//src/workerd/io:*` and `//src/workerd/io/subdir:*`).
+
+To run a filtered check everywhere during development:
+
+```bash
+bazel build --config=clang-tidy-unsafe-continuation-capture //src/...
+```
 
 ## DEPENDENCY MANAGEMENT
 

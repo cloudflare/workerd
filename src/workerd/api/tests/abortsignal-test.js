@@ -258,13 +258,21 @@ export const anyAbort4 = {
     const ac = new AbortController();
     ac.signal.addEventListener('abort', (event) => {});
     const { promise, resolve } = Promise.withResolvers();
+    const reason = new Error('boom');
+
+    Object.defineProperty(reason, 'stack', {
+      get() {
+        gc();
+        return 'Error: boom';
+      },
+    });
 
     // Set up AbortSignal.any() to call "resolve" when ac.signal aborts.  We use a separate
     // function to avoid accidentally capturing references in this scope.
     initAny(ac.signal, resolve);
 
     gc();
-    ac.abort();
+    ac.abort(reason);
     await promise;
   },
 };

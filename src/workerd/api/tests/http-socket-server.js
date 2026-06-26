@@ -223,10 +223,8 @@ function handleWebSocketConnection(socket) {
   });
 }
 
-server.listen(process.env.HTTP_SOCKET_SERVER_PORT, () => {
-  console.info(
-    `HTTP Socket test server listening on port ${server.address().port}`
-  );
+server.listen(0, () => {
+  console.log(`HTTP_SOCKET_SERVER_PORT=${server.address().port}`);
 });
 
 // This socket grabs connections and immediately drop them
@@ -244,10 +242,8 @@ const dropServer = net.createServer((socket) => {
   socket.write(repeatedString + '\n');
 });
 
-dropServer.listen(process.env.SOCKET_PARTIALLY_WRITTEN, () => {
-  console.info(
-    `Drop Socket test server listening on port ${dropServer.address().port}`
-  );
+dropServer.listen(0, () => {
+  console.log(`SOCKET_PARTIALLY_WRITTEN=${dropServer.address().port}`);
 });
 
 // Flush Hello Socket server that checks for hello message and responds with HTTP pong
@@ -280,10 +276,8 @@ const flushHelloServer = net.createServer((socket) => {
   });
 });
 
-flushHelloServer.listen(process.env.FLUSH_HELLO_SOCKET, () => {
-  console.info(
-    `Flush Hello Socket server listening on port ${flushHelloServer.address().port}`
-  );
+flushHelloServer.listen(0, () => {
+  console.log(`FLUSH_HELLO_SOCKET=${flushHelloServer.address().port}`);
 });
 
 // Create a self-signed certificate for TLS with proper SAN extension
@@ -426,8 +420,6 @@ const startTlsSocketServer = net.createServer((s) => {
   });
 });
 
-startTlsSocketServer.listen(process.env.STARTTLS_SOCKET, () => {
-  console.info(
-    `STARTTLS Socket server listening on port ${startTlsSocketServer.address().port}`
-  );
+startTlsSocketServer.listen(0, () => {
+  console.log(`STARTTLS_SOCKET=${startTlsSocketServer.address().port}`);
 });

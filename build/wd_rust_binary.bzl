@@ -58,6 +58,12 @@ def wd_rust_binary(
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
         }),
+        # Optionally link via cc_common.link so embedder-selected cc link settings
+        # (e.g. --custom_malloc) take effect. Off standalone (see //build/config).
+        experimental_use_cc_common_link = select({
+            "@//build/config:rust_cc_common_link": 1,
+            "//conditions:default": -1,
+        }),
     )
 
     rust_test(
@@ -76,4 +82,10 @@ def wd_rust_binary(
         }),
         size = test_size,
         tags = ["no-coverage"],
+        # Optionally link via cc_common.link so embedder-selected cc link settings
+        # (e.g. --custom_malloc) take effect. Off standalone (see //build/config).
+        experimental_use_cc_common_link = select({
+            "@//build/config:rust_cc_common_link": 1,
+            "//conditions:default": -1,
+        }),
     )

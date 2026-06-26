@@ -4058,6 +4058,7 @@ export interface ContainerStartupOptions {
 }
 export interface ContainerInfo {
   labels: Record<string, string>;
+  image: string;
 }
 /**
  * The **`FileSystemHandle`** interface of the File System API is an object which represents a file or directory entry.
@@ -12998,6 +12999,8 @@ export interface RequestInitCfProperties extends Record<string, unknown> {
    * (e.g. { '200-299': 86400, '404': 1, '500-599': 0 })
    */
   cacheTtlByStatus?: Record<string, number>;
+  /** Controls how responses with a `Vary` header are cached for this request. */
+  vary?: RequestInitCfPropertiesVary;
   /**
    * Explicit Cache-Control header value to set on the response stored in cache.
    * This gives full control over cache directives (e.g. 'public, max-age=3600, s-maxage=86400').
@@ -13065,6 +13068,70 @@ export interface RequestInitCfProperties extends Record<string, unknown> {
    * to point to that CNAME record.
    */
   resolveOverride?: string;
+}
+/**
+ * Controls how Workers Standard Vary handles a request header listed by an
+ * origin `Vary` response header:
+ *
+ * - `"normalize"`: normalize the request header value before it is used in the
+ *   cache variance key.
+ * - `"passthrough"`: use the raw request header value in the cache variance
+ *   key.
+ * - `"bypass"`: bypass cache when the header appears in the origin `Vary`
+ *   response header.
+ */
+export type RequestInitCfPropertiesVaryAction =
+  | "normalize"
+  | "passthrough"
+  | "bypass";
+/** Configuration for Workers Standard Vary support. */
+export interface RequestInitCfPropertiesVary {
+  /** The fallback action for varied request headers not listed in `headers`. */
+  default: RequestInitCfPropertiesVaryHeader;
+  /**
+   * Lowercase request header names and their Vary configuration.
+   *
+   * The `accept` header can include `media_types`, the `accept-language`
+   * header can include `languages`, and other headers support only `action`.
+   */
+  headers?: RequestInitCfPropertiesVaryHeaders;
+}
+/** Common Vary behavior for a single request header. */
+export interface RequestInitCfPropertiesVaryHeader {
+  /** How this request header contributes to cache variance. */
+  action: RequestInitCfPropertiesVaryAction;
+}
+/** Vary behavior for the `accept` request header. */
+export interface RequestInitCfPropertiesVaryAcceptHeader extends RequestInitCfPropertiesVaryHeader {
+  /**
+   * Media types to keep when normalizing the `Accept` request header.
+   *
+   * Named `media_types` to match the serialized `cf.vary` configuration.
+   */
+  media_types?: string[];
+}
+/** Vary behavior for the `accept-language` request header. */
+export interface RequestInitCfPropertiesVaryAcceptLanguageHeader extends RequestInitCfPropertiesVaryHeader {
+  /**
+   * Language tags to keep when normalizing the `Accept-Language` request
+   * header.
+   */
+  languages?: string[];
+}
+/**
+ * Lowercase request header names and their Vary behavior.
+ *
+ * The index signature allows arbitrary custom request headers beyond the
+ * well-known `accept` and `accept-language` specializations.
+ */
+export interface RequestInitCfPropertiesVaryHeaders {
+  accept?: RequestInitCfPropertiesVaryAcceptHeader;
+  "accept-language"?: RequestInitCfPropertiesVaryAcceptLanguageHeader;
+  [header: string]:
+    | RequestInitCfPropertiesVaryHeader
+    | RequestInitCfPropertiesVaryAcceptHeader
+    | RequestInitCfPropertiesVaryAcceptLanguageHeader
+    | undefined;
 }
 export interface BasicImageTransformations {
   /**
