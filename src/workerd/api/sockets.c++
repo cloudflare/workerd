@@ -444,7 +444,8 @@ void Socket::handleProxyStatus(
     // Let's not log errors when we have a disconnected exception.
     // If we don't filter this out, whenever connect() fails, we'll
     // have noisy errors even though the user catches the error on JS side.
-    if (e.getType() != kj::Exception::Type::DISCONNECTED) {
+    if (e.getType() != kj::Exception::Type::DISCONNECTED &&
+        e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) == kj::none) {
       LOG_ERROR_PERIODICALLY("Socket proxy disconnected abruptly", e);
     }
     return kj::HttpClient::ConnectRequest::Status(500, nullptr, kj::Own<kj::HttpHeaders>());
@@ -490,7 +491,10 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
   // TODO(cleanup): Extend awaitIo to provide the jsg::Lock in more cases.
   auto& context = IoContext::current();
   auto errorHandler = [](kj::Exception&& e) -> kj::Maybe<kj::Exception> {
-    LOG_ERROR_PERIODICALLY("Socket proxy disconnected abruptly", e);
+    if (e.getType() != kj::Exception::Type::DISCONNECTED &&
+        e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) == kj::none) {
+      LOG_ERROR_PERIODICALLY("Socket proxy disconnected abruptly", e);
+    }
     return KJ_EXCEPTION(FAILED, "connectResult raised an error");
   };
   auto func = [this, self = JSG_THIS](jsg::Lock& js, kj::Maybe<kj::Exception> result) -> void {
