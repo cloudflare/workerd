@@ -70,14 +70,14 @@ ValueQueue::QueueEntry ValueQueue::QueueEntry::clone(jsg::Lock& js) {
 #pragma region ValueQueue::Consumer
 
 ValueQueue::Consumer::Consumer(
-    ValueQueue& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener)
+    ValueQueue& queue, kj::Weak<ConsumerImpl::StateListener> stateListener)
     : impl(queue.impl, stateListener) {}
 
 ValueQueue::Consumer::Consumer(
-    kj::Ptr<QueueImpl> impl, kj::Maybe<ConsumerImpl::StateListener&> stateListener)
+    kj::Ptr<QueueImpl> impl, kj::Weak<ConsumerImpl::StateListener> stateListener)
     : impl(impl, stateListener) {}
 
-ValueQueue::Consumer::Consumer(kj::Maybe<ConsumerImpl::StateListener&> stateListener)
+ValueQueue::Consumer::Consumer(kj::Weak<ConsumerImpl::StateListener> stateListener)
     : impl(stateListener) {}
 
 void ValueQueue::Consumer::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
@@ -113,7 +113,7 @@ size_t ValueQueue::Consumer::size() {
 }
 
 kj::Own<ValueQueue::Consumer> ValueQueue::Consumer::clone(
-    jsg::Lock& js, kj::Maybe<ConsumerImpl::StateListener&> stateListener) {
+    jsg::Lock& js, kj::Weak<ConsumerImpl::StateListener> stateListener) {
   // If the queue was destroyed (e.g., stream was closed), we can still clone
   // the consumer - the cloneTo() will copy the closed/errored state.
   kj::Own<Consumer> consumer;
@@ -229,10 +229,10 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
 
   // Pump the controller for more synchronously available data.
   // maxRead is checked here: we only proceed with pumping if we haven't exceeded it.
-  KJ_IF_SOME(listener, impl.stateListener) {
-    while (!isClosing && totalRead < maxRead) {
+  while (!isClosing && totalRead < maxRead) {
+    KJ_IF_SOME(listener, impl.stateListener) {
       size_t prevChunkCount = chunks.size();
-      bool pullCompletedSync = listener.onConsumerWantsData(js);
+      bool pullCompletedSync = allowDestruction(kj::mv(listener))->onConsumerWantsData(js);
 
       // The pull callback may have closed or errored the consumer, which
       // destroys the Ready state (and its RingBuffer). We must not touch
@@ -249,6 +249,8 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
       if (!pullCompletedSync || chunks.size() == prevChunkCount) {
         break;
       }
+    } else {
+      break;
     }
   }
 
@@ -313,7 +315,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
   ready.readRequests.push_back(kj::heap<ReadRequest>(kj::mv(request)));
 
   KJ_IF_SOME(listener, impl.stateListener) {
-    listener.onConsumerWantsData(js);
+    allowDestruction(kj::mv(listener))->onConsumerWantsData(js);
   }
 
   // Transform the ReadResult promise to DrainingReadResult.
@@ -461,7 +463,7 @@ void ValueQueue::handleRead(jsg::Lock& js,
     // or errors.
     state.readRequests.push_back(kj::heap<ReadRequest>(kj::mv(request)));
     KJ_IF_SOME(listener, consumer.stateListener) {
-      listener.onConsumerWantsData(js);
+      allowDestruction(kj::mv(listener))->onConsumerWantsData(js);
     }
   }
 }
@@ -595,15 +597,14 @@ ByteQueue::QueueEntry ByteQueue::QueueEntry::clone(jsg::Lock& js) {
 
 #pragma region ByteQueue::Consumer
 
-ByteQueue::Consumer::Consumer(
-    ByteQueue& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener)
+ByteQueue::Consumer::Consumer(ByteQueue& queue, kj::Weak<ConsumerImpl::StateListener> stateListener)
     : impl(queue.impl, stateListener) {}
 
 ByteQueue::Consumer::Consumer(
-    kj::Ptr<QueueImpl> impl, kj::Maybe<ConsumerImpl::StateListener&> stateListener)
+    kj::Ptr<QueueImpl> impl, kj::Weak<ConsumerImpl::StateListener> stateListener)
     : impl(impl, stateListener) {}
 
-ByteQueue::Consumer::Consumer(kj::Maybe<ConsumerImpl::StateListener&> stateListener)
+ByteQueue::Consumer::Consumer(kj::Weak<ConsumerImpl::StateListener> stateListener)
     : impl(stateListener) {}
 
 void ByteQueue::Consumer::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
@@ -639,7 +640,7 @@ size_t ByteQueue::Consumer::size() const {
 }
 
 kj::Own<ByteQueue::Consumer> ByteQueue::Consumer::clone(
-    jsg::Lock& js, kj::Maybe<ConsumerImpl::StateListener&> stateListener) {
+    jsg::Lock& js, kj::Weak<ConsumerImpl::StateListener> stateListener) {
   // If the queue was destroyed (e.g., stream was closed), we can still clone
   // the consumer - the cloneTo() will copy the closed/errored state.
   kj::Own<Consumer> consumer;
@@ -719,10 +720,10 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
 
   // Pump the controller for more synchronously available data.
   // maxRead is checked here: we only proceed with pumping if we haven't exceeded it.
-  KJ_IF_SOME(listener, impl.stateListener) {
-    while (!isClosing && totalRead < maxRead) {
+  while (!isClosing && totalRead < maxRead) {
+    KJ_IF_SOME(listener, impl.stateListener) {
       size_t prevChunkCount = chunks.size();
-      bool pullCompletedSync = listener.onConsumerWantsData(js);
+      bool pullCompletedSync = allowDestruction(kj::mv(listener))->onConsumerWantsData(js);
 
       // The pull callback may have closed or errored the consumer, which
       // destroys the Ready state (and its RingBuffer). We must not touch
@@ -736,6 +737,8 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
       if (!pullCompletedSync || chunks.size() == prevChunkCount) {
         break;
       }
+    } else {
+      break;
     }
   }
 
@@ -805,7 +808,7 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
     ready.readRequests.push_back(kj::heap<ReadRequest>(kj::mv(request)));
 
     KJ_IF_SOME(listener, impl.stateListener) {
-      listener.onConsumerWantsData(js);
+      allowDestruction(kj::mv(listener))->onConsumerWantsData(js);
     }
 
     // Transform the ReadResult promise to DrainingReadResult.
@@ -1248,7 +1251,7 @@ void ByteQueue::handleRead(jsg::Lock& js,
       }
     }
     KJ_IF_SOME(listener, consumer.stateListener) {
-      listener.onConsumerWantsData(js);
+      allowDestruction(kj::mv(listener))->onConsumerWantsData(js);
     }
   };
 

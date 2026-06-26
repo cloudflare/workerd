@@ -1258,7 +1258,7 @@ void ReadableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
 
 template <typename Self>
 kj::Own<typename ReadableImpl<Self>::Consumer> ReadableImpl<Self>::getConsumer(
-    kj::Maybe<ReadableImpl<Self>::StateListener&> listener) {
+    kj::Weak<ReadableImpl<Self>::StateListener> listener) {
   auto& queue = state.template getUnsafe<Queue>();
   return kj::heap<typename ReadableImpl<Self>::Consumer>(queue, listener);
 }
@@ -1773,19 +1773,19 @@ struct ReadableState {
         owner(owner) {}
 
   ReadableState(Controller controller,
-      Queue::ConsumerImpl::StateListener& listener,
+      kj::Weak<typename Queue::ConsumerImpl::StateListener> listener,
       ReadableStreamJsController& owner)
-      : ReadableState(controller.addRef(), controller->getConsumer(listener), owner) {}
+      : ReadableState(controller.addRef(), controller->getConsumer(kj::mv(listener)), owner) {}
 
   ReadableState clone(jsg::Lock& js,
-      Queue::ConsumerImpl::StateListener& listener,
+      kj::Weak<typename Queue::ConsumerImpl::StateListener> listener,
       ReadableStreamJsController& owner) {
-    return ReadableState(controller.addRef(), consumer->clone(js, listener), owner);
+    return ReadableState(controller.addRef(), consumer->clone(js, kj::mv(listener)), owner);
   }
 };
 
-struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener {
-
+struct ValueReadable final: public kj::PtrTarget,
+                            public api::ValueQueue::ConsumerImpl::StateListener {
   using State = ReadableState<DefaultController, ValueQueue>;
   kj::Maybe<State> state;
   bool reading = false;
@@ -1805,10 +1805,10 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
   }
 
   ValueReadable(DefaultController controller, ReadableStreamJsController& owner)
-      : state(State(kj::mv(controller), *this, owner)) {}
+      : state(State(kj::mv(controller), addWeakToThis(), owner)) {}
 
   ValueReadable(jsg::Lock& js, ReadableStreamJsController& owner, ValueReadable& other)
-      : state(KJ_ASSERT_NONNULL(other.state).clone(js, *this, owner)) {}
+      : state(KJ_ASSERT_NONNULL(other.state).clone(js, addWeakToThis(), owner)) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ValueReadable);
 
@@ -1978,7 +1978,8 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
   }
 };
 
-struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
+struct ByteReadable final: public kj::PtrTarget,
+                           public api::ByteQueue::ConsumerImpl::StateListener {
 
   using State = ReadableState<ByobController, ByteQueue>;
   kj::Maybe<State> state;
@@ -2002,11 +2003,11 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
   ByteReadable(ByobController controller,
       ReadableStreamJsController& owner,
       kj::Maybe<int> autoAllocateChunkSize)
-      : state(State(kj::mv(controller), *this, owner)),
+      : state(State(kj::mv(controller), addWeakToThis(), owner)),
         autoAllocateChunkSize(autoAllocateChunkSize) {}
 
   ByteReadable(jsg::Lock& js, ReadableStreamJsController& owner, ByteReadable& other)
-      : state(KJ_ASSERT_NONNULL(other.state).clone(js, *this, owner)),
+      : state(KJ_ASSERT_NONNULL(other.state).clone(js, addWeakToThis(), owner)),
         autoAllocateChunkSize(other.autoAllocateChunkSize) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ByteReadable);
@@ -2323,7 +2324,7 @@ void ReadableStreamDefaultController::forcePull(jsg::Lock& js) {
 }
 
 kj::Own<ValueQueue::Consumer> ReadableStreamDefaultController::getConsumer(
-    kj::Maybe<ValueQueue::ConsumerImpl::StateListener&> stateListener) {
+    kj::Weak<ValueQueue::ConsumerImpl::StateListener> stateListener) {
   return impl.getConsumer(stateListener);
 }
 
@@ -2613,7 +2614,7 @@ void ReadableByteStreamController::forcePull(jsg::Lock& js) {
 }
 
 kj::Own<ByteQueue::Consumer> ReadableByteStreamController::getConsumer(
-    kj::Maybe<ByteQueue::ConsumerImpl::StateListener&> stateListener) {
+    kj::Weak<ByteQueue::ConsumerImpl::StateListener> stateListener) {
   return impl.getConsumer(stateListener);
 }
 
