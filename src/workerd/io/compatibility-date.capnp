@@ -1275,14 +1275,25 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Instructs the readAllText method in streams to strip the leading UTF8 BOM if present.
 
   allowIrrevocableStubStorage @151 :Bool
-    $compatEnableFlag("allow_irrevocable_stub_storage")
-    $experimental;
+    $compatEnableFlag("allow_irrevocable_stub_storage");
   # Permits various stub types (e.g. ServiceStub aka Fetcher, DurableObjectClass) to be stored in
   # long-term Durable Object storage without any mechanism for the stub target to audit or revoke
-  # incoming connections.
+  # incoming connections. This is intended as a temporary measure to enable apps to experiment with
+  # stub storage, but long-term it will be replaced with a mechanism that allows stubs to be
+  # auditable and revocable.
   #
-  # This feature exists for experimental use only, and will be removed once we have a properly
-  # auditable and revocable storage mechanism.
+  # Also enables persistent stubs via the `[restore]()` mechanism.
+  #
+  # Both the Worker storing the stub and the Worker that the stub points to (as well as any members
+  # of the restore chain in between) must opt into the flag. If the target Worker later turns the
+  # flag off, existing stored stubs pointing at it will stop working.
+  #
+  # IRREVOCABLE STUB STORAGE IS INHERENTLY INSECURE. We strongly recommend against using this flag
+  # when passing stubs over real trust boundaries.
+  #
+  # THIS FEATURE IS EXPERIMENTAL AND TEMPORARY. Cloudflare WILL retract this feature and WILL break
+  # all stored stubs at some point in the future, as soon as an auditable and revocable alternative
+  # is available.
 
   rpcParamsDupStubs @152 :Bool
     $compatEnableFlag("rpc_params_dup_stubs")

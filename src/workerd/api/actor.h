@@ -179,12 +179,21 @@ class DurableObjectNamespace: public jsg::Object {
         kj::Maybe<ActorVersion> version) = 0;
   };
 
-  DurableObjectNamespace(uint channel, kj::Own<ActorIdFactory> idFactory)
+  // `persistent` indicates whether stubs minted from this namespace may be stored in long-term
+  // storage. It is `Persistent::YES` only for `ctx.exports` self-bindings of a worker that has
+  // `allow_irrevocable_stub_storage` enabled (see `LoopbackDurableObjectNamespace`); regular env
+  // bindings leave it `Persistent::NO`.
+  DurableObjectNamespace(
+      uint channel, kj::Own<ActorIdFactory> idFactory, Persistent persistent = Persistent::NO)
       : channel(channel),
-        idFactory(kj::mv(idFactory)) {}
-  DurableObjectNamespace(IoOwn<ActorChannelFactory> factory, kj::Own<ActorIdFactory> idFactory)
+        idFactory(kj::mv(idFactory)),
+        persistent(persistent) {}
+  DurableObjectNamespace(IoOwn<ActorChannelFactory> factory,
+      kj::Own<ActorIdFactory> idFactory,
+      Persistent persistent = Persistent::NO)
       : channel(kj::mv(factory)),
-        idFactory(kj::mv(idFactory)) {}
+        idFactory(kj::mv(idFactory)),
+        persistent(persistent) {}
 
   struct NewUniqueIdOptions {
     // Restricts the new unique ID to a set of colos within a jurisdiction.
@@ -307,6 +316,9 @@ class DurableObjectNamespace: public jsg::Object {
   kj::OneOf<uint, IoOwn<ActorChannelFactory>> channel;
   kj::Own<ActorIdFactory> idFactory;
 
+  // See doc comment on the constructor.
+  Persistent persistent;
+
   jsg::Ref<DurableObject> getImpl(jsg::Lock& js,
       ActorGetMode mode,
       jsg::Ref<DurableObjectId> id,
@@ -323,14 +335,16 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
       ActorGetMode mode,
       bool enableReplicaRouting,
       ActorRoutingMode routingMode,
-      kj::Maybe<ActorVersion> version)
+      kj::Maybe<ActorVersion> version,
+      Persistent persistent)
       : channelIdOrFactory(kj::mv(channelIdOrFactory)),
         id(kj::mv(id)),
         locationHint(kj::mv(locationHint)),
         mode(mode),
         enableReplicaRouting(enableReplicaRouting),
         routingMode(routingMode),
-        version(kj::mv(version)) {}
+        version(kj::mv(version)),
+        persistent(persistent) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
@@ -346,6 +360,11 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
   bool enableReplicaRouting;
   ActorRoutingMode routingMode;
   kj::Maybe<ActorVersion> version;
+
+  // Whether stubs minted from this namespace may be stored in long-term storage. See the
+  // `persistent` field of `DurableObjectNamespace`.
+  Persistent persistent;
+
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
 
   // Registered when actorChannel is lazily created, to reflect the cost of holding an open

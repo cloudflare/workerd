@@ -274,11 +274,12 @@ struct TestFixture {
     }
     kj::Own<SubrequestChannel> getSubrequestChannelResolved(uint channel,
         kj::Maybe<Frankenvalue> props,
-        kj::Maybe<VersionRequest> versionRequest) override {
+        kj::Maybe<VersionRequest> versionRequest,
+        Persistent persistent) override {
       KJ_FAIL_ASSERT("no subrequests");
     }
     kj::Own<ActorClassChannel> getActorClassResolved(
-        uint channel, kj::Maybe<Frankenvalue> props) override {
+        uint channel, kj::Maybe<Frankenvalue> props, Persistent persistent) override {
       KJ_FAIL_ASSERT("no actor classes");
     }
     capnp::Capability::Client getCapability(uint channel) override {
@@ -300,7 +301,8 @@ struct TestFixture {
         bool enableReplicaRouting,
         ActorRoutingMode routingMode,
         SpanParent parentSpan,
-        kj::Maybe<ActorVersion> version) override {
+        kj::Maybe<ActorVersion> version,
+        Persistent persistent) override {
       KJ_FAIL_REQUIRE("no actor channels");
     }
     kj::Own<ActorChannel> getColoLocalActor(

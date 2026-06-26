@@ -64,7 +64,8 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
       bool isDynamicDispatch,
       kj::Maybe<kj::Own<AccessInfo>> accessInfo,
-      kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
+      kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
+      Persistent fromPersistentStub);
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
@@ -205,8 +206,21 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
     bool isDynamicDispatch,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
-    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
+    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
+    Persistent fromPersistentStub) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::construct()");
+
+  // If this request came from a stored ("persistent") stub, re-verify that the target worker still
+  // has the `allow_irrevocable_stub_storage` compat flag enabled. The flag may have been removed
+  // since the stub was stored, in which case we must reject the request rather than silently
+  // honoring a stub that should no longer be reachable. This is the single choke point through
+  // which every event type funnels.
+  if (fromPersistentStub &&
+      !worker->getIsolate().getApi().getFeatureFlags().getAllowIrrevocableStubStorage()) {
+    return WorkerInterface::fromException(JSG_KJ_EXCEPTION(FAILED, Error,
+        "Invoked a Worker from a stored stub, but the target worker no longer has the "
+        "allow_irrevocable_stub_storage compatibility flag enabled."));
+  }
 
   // Arrange to forcefully cancel work when the Actor is aborted.
   kj::Maybe<kj::Canceler&> canceler;
@@ -1006,13 +1020,14 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
     bool isDynamicDispatch,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
-    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
+    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
+    Persistent fromPersistentStub) {
   return WorkerEntrypoint::construct(threadContext, kj::mv(worker), kj::mv(entrypointName),
       kj::mv(props), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::mv(metrics), waitUntilTasks, tunnelExceptions,
       kj::mv(workerTracer), kj::mv(cfBlobJson), kj::mv(versionInfo),
       kj::mv(maybeTriggerInvocationSpan), isDynamicDispatch, kj::mv(accessInfo),
-      kj::mv(selfTokenFactory));
+      kj::mv(selfTokenFactory), fromPersistentStub);
 }
 
 }  // namespace workerd

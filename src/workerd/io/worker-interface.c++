@@ -362,6 +362,7 @@ class ErrorWorkerInterface final: public WorkerInterface {
   }
 
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+    event->failed(exception);
     kj::throwFatalException(kj::mv(exception));
   }
 

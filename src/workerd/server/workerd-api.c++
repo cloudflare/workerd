@@ -662,7 +662,7 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
       value = lock.wrap(context,
           lock.alloc<api::LoopbackDurableObjectNamespace>(ns.actorChannel,
               kj::heap<ActorIdFactoryImpl>(ns.uniqueKey),
-              lock.alloc<api::LoopbackDurableObjectClass>(ns.classChannel)));
+              lock.alloc<api::LoopbackDurableObjectClass>(ns.classChannel), featureFlags));
     }
 
     KJ_CASE_ONEOF(ae, Global::AnalyticsEngine) {

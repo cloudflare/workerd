@@ -48,20 +48,25 @@ class MockSubrequestChannel: public IoChannelFactory::SubrequestChannel {
  public:
   // Simple mock used by the resolver when decoding tokens. Its getTokenMaybeSync() is never
   // called in that context.
-  MockSubrequestChannel(ServiceTriplet triplet): triplet(kj::mv(triplet)) {}
+  MockSubrequestChannel(ServiceTriplet triplet, Persistent persistent)
+      : triplet(kj::mv(triplet)),
+        persistent(persistent) {}
 
   // Mock used as a nested cap inside a parent channel's props. It generates its own token by
   // calling back into the ChannelTokenHandler. If `readyPromise` is provided, the token is only
   // produced asynchronously after `readyPromise` resolves.
   MockSubrequestChannel(ChannelTokenHandler& handler,
       ServiceTriplet triplet,
+      Persistent persistent,
       kj::Maybe<kj::Promise<void>> readyPromise = kj::none)
       : handler(handler),
         triplet(kj::mv(triplet)),
+        persistent(persistent),
         readyPromise(kj::mv(readyPromise)) {}
 
   kj::Maybe<ChannelTokenHandler&> handler;
   ServiceTriplet triplet;
+  Persistent persistent;
   kj::Maybe<kj::Promise<void>> readyPromise;
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
@@ -78,29 +83,35 @@ class MockSubrequestChannel: public IoChannelFactory::SubrequestChannel {
       readyPromise = kj::none;
       return promise.then([&h, usage, this]() mutable -> kj::Array<byte> {
         return expectSync(h.encodeSubrequestChannelToken(usage, triplet.serviceName,
-            triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }),
-            triplet.props));
+            triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }), triplet.props,
+            persistent));
       });
     } else {
       return expectSync(h.encodeSubrequestChannelToken(usage, triplet.serviceName,
-          triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }), triplet.props));
+          triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }), triplet.props,
+          persistent));
     }
   }
 };
 
 class MockActorClassChannel: public IoChannelFactory::ActorClassChannel {
  public:
-  MockActorClassChannel(ServiceTriplet triplet): triplet(kj::mv(triplet)) {}
+  MockActorClassChannel(ServiceTriplet triplet, Persistent persistent)
+      : triplet(kj::mv(triplet)),
+        persistent(persistent) {}
 
   MockActorClassChannel(ChannelTokenHandler& handler,
       ServiceTriplet triplet,
+      Persistent persistent,
       kj::Maybe<kj::Promise<void>> readyPromise = kj::none)
       : handler(handler),
         triplet(kj::mv(triplet)),
+        persistent(persistent),
         readyPromise(kj::mv(readyPromise)) {}
 
   kj::Maybe<ChannelTokenHandler&> handler;
   ServiceTriplet triplet;
+  Persistent persistent;
   kj::Maybe<kj::Promise<void>> readyPromise;
 
   void requireAllowsTransfer() override {
@@ -114,39 +125,46 @@ class MockActorClassChannel: public IoChannelFactory::ActorClassChannel {
       readyPromise = kj::none;
       return promise.then([&h, usage, this]() mutable -> kj::Array<byte> {
         return expectSync(h.encodeActorClassChannelToken(usage, triplet.serviceName,
-            triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }),
-            triplet.props));
+            triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }), triplet.props,
+            persistent));
       });
     } else {
       return expectSync(h.encodeActorClassChannelToken(usage, triplet.serviceName,
-          triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }), triplet.props));
+          triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }), triplet.props,
+          persistent));
     }
   }
 };
 
 class MockActorChannel: public IoChannelFactory::ActorChannel {
  public:
-  MockActorChannel(
-      kj::StringPtr namespaceKey, kj::ArrayPtr<const byte> id, kj::Maybe<kj::StringPtr> name)
+  MockActorChannel(kj::StringPtr namespaceKey,
+      kj::ArrayPtr<const byte> id,
+      kj::Maybe<kj::StringPtr> name,
+      Persistent persistent)
       : namespaceKey(kj::str(namespaceKey)),
         id(kj::heapArray(id)),
-        name(name.map([](kj::StringPtr s) { return kj::str(s); })) {}
+        name(name.map([](kj::StringPtr s) { return kj::str(s); })),
+        persistent(persistent) {}
 
   MockActorChannel(ChannelTokenHandler& handler,
       kj::StringPtr namespaceKey,
       kj::ArrayPtr<const byte> id,
       kj::Maybe<kj::StringPtr> name,
+      Persistent persistent,
       kj::Maybe<kj::Promise<void>> readyPromise = kj::none)
       : handler(handler),
         namespaceKey(kj::str(namespaceKey)),
         id(kj::heapArray(id)),
         name(name.map([](kj::StringPtr s) { return kj::str(s); })),
+        persistent(persistent),
         readyPromise(kj::mv(readyPromise)) {}
 
   kj::Maybe<ChannelTokenHandler&> handler;
   kj::String namespaceKey;
   kj::Array<byte> id;
   kj::Maybe<kj::String> name;
+  Persistent persistent;
   kj::Maybe<kj::Promise<void>> readyPromise;
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
@@ -162,34 +180,39 @@ class MockActorChannel: public IoChannelFactory::ActorChannel {
       auto promise = kj::mv(p);
       readyPromise = kj::none;
       return promise.then([&h, usage, this]() mutable -> kj::Array<byte> {
-        return h.encodeActorChannelToken(
-            usage, namespaceKey, id, name.map([](kj::String& s) -> kj::StringPtr { return s; }));
+        return h.encodeActorChannelToken(usage, namespaceKey, id,
+            name.map([](kj::String& s) -> kj::StringPtr { return s; }), persistent);
       });
     } else {
-      return h.encodeActorChannelToken(
-          usage, namespaceKey, id, name.map([](kj::String& s) -> kj::StringPtr { return s; }));
+      return h.encodeActorChannelToken(usage, namespaceKey, id,
+          name.map([](kj::String& s) -> kj::StringPtr { return s; }), persistent);
     }
   }
 };
 
 class MockResolver: public ChannelTokenHandler::Resolver {
  public:
-  kj::Own<IoChannelFactory::SubrequestChannel> resolveEntrypoint(
-      kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) override {
+  kj::Own<IoChannelFactory::SubrequestChannel> resolveEntrypoint(kj::StringPtr serviceName,
+      kj::Maybe<kj::StringPtr> entrypoint,
+      Frankenvalue props,
+      Persistent persistent) override {
     return kj::refcounted<MockSubrequestChannel>(
-        ServiceTriplet(serviceName, entrypoint, kj::mv(props)));
+        ServiceTriplet(serviceName, entrypoint, kj::mv(props)), persistent);
   }
 
-  kj::Own<IoChannelFactory::ActorClassChannel> resolveActorClass(
-      kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) override {
+  kj::Own<IoChannelFactory::ActorClassChannel> resolveActorClass(kj::StringPtr serviceName,
+      kj::Maybe<kj::StringPtr> entrypoint,
+      Frankenvalue props,
+      Persistent persistent) override {
     return kj::refcounted<MockActorClassChannel>(
-        ServiceTriplet(serviceName, entrypoint, kj::mv(props)));
+        ServiceTriplet(serviceName, entrypoint, kj::mv(props)), persistent);
   }
 
   kj::Own<IoChannelFactory::ActorChannel> resolveActor(kj::StringPtr namespaceKey,
       kj::ArrayPtr<const byte> id,
-      kj::Maybe<kj::StringPtr> name) override {
-    return kj::refcounted<MockActorChannel>(namespaceKey, id, name);
+      kj::Maybe<kj::StringPtr> name,
+      Persistent persistent) override {
+    return kj::refcounted<MockActorChannel>(namespaceKey, id, name, persistent);
   }
 };
 
@@ -223,14 +246,15 @@ KJ_TEST("channel token basics") {
   ChannelTokenHandler handler(resolver);
 
   auto props = Frankenvalue::fromJson(kj::str("{\"foo\": 123}"));
-  auto token =
-      expectSync(handler.encodeSubrequestChannelToken(Usage::RPC, "foo", "MyEntry"_kj, props));
+  auto token = expectSync(
+      handler.encodeSubrequestChannelToken(Usage::RPC, "foo", "MyEntry"_kj, props, Persistent::NO));
 
   // Decoding works.
   {
     auto channel =
         handler.decodeSubrequestChannelToken(Usage::RPC, token).downcast<MockSubrequestChannel>();
     KJ_EXPECT(channel->triplet == ServiceTriplet("foo", "MyEntry"_kj, props.clone()));
+    KJ_EXPECT(channel->persistent == Persistent::NO);
   }
 
   auto corruptedToken = [&](uint index) {
@@ -276,15 +300,21 @@ KJ_TEST("channel tokens for storage") {
   ChannelTokenHandler handler(resolver);
 
   auto props = Frankenvalue::fromJson(kj::str("{\"foo\": 123}"));
-  auto token =
-      expectSync(handler.encodeSubrequestChannelToken(Usage::STORAGE, "foo", "MyEntry"_kj, props));
+  auto token = expectSync(handler.encodeSubrequestChannelToken(
+      Usage::STORAGE, "foo", "MyEntry"_kj, props, Persistent::YES));
 
-  // Decoding works.
+  // Decoding works, and the persistent bit round-trips.
   {
     auto channel = handler.decodeSubrequestChannelToken(Usage::STORAGE, token)
                        .downcast<MockSubrequestChannel>();
     KJ_EXPECT(channel->triplet == ServiceTriplet("foo", "MyEntry"_kj, props.clone()));
+    KJ_EXPECT(channel->persistent == Persistent::YES);
   }
+
+  // A non-persistent target cannot be stored.
+  KJ_EXPECT_THROW_MESSAGE("allow_irrevocable_stub_storage",
+      handler.encodeSubrequestChannelToken(
+          Usage::STORAGE, "foo", "MyEntry"_kj, props, Persistent::NO));
 
   auto corruptedToken = [&](uint index) {
     auto copy = kj::heapArray(token.asPtr());
@@ -310,14 +340,15 @@ KJ_TEST("actor class channel tokens") {
   ChannelTokenHandler handler(resolver);
 
   auto props = Frankenvalue::fromJson(kj::str("{\"foo\": 123}"));
-  auto token =
-      expectSync(handler.encodeActorClassChannelToken(Usage::RPC, "foo", "MyEntry"_kj, props));
+  auto token = expectSync(
+      handler.encodeActorClassChannelToken(Usage::RPC, "foo", "MyEntry"_kj, props, Persistent::NO));
 
   // Decoding works.
   {
     auto channel =
         handler.decodeActorClassChannelToken(Usage::RPC, token).downcast<MockActorClassChannel>();
     KJ_EXPECT(channel->triplet == ServiceTriplet("foo", "MyEntry"_kj, props.clone()));
+    KJ_EXPECT(channel->persistent == Persistent::NO);
   }
 
   // Decoding as the wrong type fails.
@@ -331,22 +362,30 @@ KJ_TEST("actor channel tokens") {
 
   const byte actorId[] = {12, 34, 56, 78};
 
-  auto token = handler.encodeActorChannelToken(Usage::RPC, "foo-namespace", actorId, "my-actor"_kj);
+  auto token = handler.encodeActorChannelToken(
+      Usage::RPC, "foo-namespace", actorId, "my-actor"_kj, Persistent::NO);
 
   {
     auto channel =
         handler.decodeSubrequestChannelToken(Usage::RPC, token).downcast<MockActorChannel>();
     expectActorChannel(*channel, "foo-namespace", actorId, "my-actor"_kj);
+    KJ_EXPECT(channel->persistent == Persistent::NO);
   }
 
-  auto storageToken = handler.encodeActorChannelToken(
-      Usage::STORAGE, "foo-namespace", actorId, kj::Maybe<kj::StringPtr>(kj::none));
+  auto storageToken = handler.encodeActorChannelToken(Usage::STORAGE, "foo-namespace", actorId,
+      kj::Maybe<kj::StringPtr>(kj::none), Persistent::YES);
 
   {
     auto channel = handler.decodeSubrequestChannelToken(Usage::STORAGE, storageToken)
                        .downcast<MockActorChannel>();
     expectActorChannel(*channel, "foo-namespace", actorId, kj::Maybe<kj::StringPtr>(kj::none));
+    KJ_EXPECT(channel->persistent == Persistent::YES);
   }
+
+  // A non-persistent actor cannot be stored.
+  KJ_EXPECT_THROW_MESSAGE("allow_irrevocable_stub_storage",
+      handler.encodeActorChannelToken(Usage::STORAGE, "foo-namespace", actorId,
+          kj::Maybe<kj::StringPtr>(kj::none), Persistent::NO));
 
   KJ_EXPECT_THROW_MESSAGE(
       "channel token type mismatch", handler.decodeActorClassChannelToken(Usage::RPC, token));
@@ -363,17 +402,19 @@ KJ_TEST("channel token with nested channels (all synchronous)") {
   kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> caps;
   caps.add(kj::refcounted<MockSubrequestChannel>(handler,
       ServiceTriplet(
-          "nested-subreq", "NestedEntry"_kj, Frankenvalue::fromJson(kj::str("{\"inner\": 1}")))));
+          "nested-subreq", "NestedEntry"_kj, Frankenvalue::fromJson(kj::str("{\"inner\": 1}"))),
+      Persistent::YES));
   caps.add(kj::refcounted<MockActorClassChannel>(handler,
       ServiceTriplet("nested-actor", kj::Maybe<kj::StringPtr>(kj::none),
-          Frankenvalue::fromJson(kj::str("{\"inner\": 2}")))));
+          Frankenvalue::fromJson(kj::str("{\"inner\": 2}"))),
+      Persistent::YES));
   caps.add(kj::refcounted<MockActorChannel>(
-      handler, "nested-namespace", actorId, "nested-actor-name"_kj));
+      handler, "nested-namespace", actorId, "nested-actor-name"_kj, Persistent::YES));
   auto props = propsWithCaps(kj::mv(caps));
 
   // Encoding is synchronous.
-  auto token =
-      expectSync(handler.encodeSubrequestChannelToken(Usage::RPC, "outer", "OuterEntry"_kj, props));
+  auto token = expectSync(handler.encodeSubrequestChannelToken(
+      Usage::RPC, "outer", "OuterEntry"_kj, props, Persistent::YES));
 
   // Decoding works and restores the nested channels.
   {
@@ -404,8 +445,8 @@ KJ_TEST("channel token with nested channels (all synchronous)") {
   }
 
   // Also works with STORAGE usage.
-  auto storageToken = expectSync(
-      handler.encodeSubrequestChannelToken(Usage::STORAGE, "outer", "OuterEntry"_kj, props));
+  auto storageToken = expectSync(handler.encodeSubrequestChannelToken(
+      Usage::STORAGE, "outer", "OuterEntry"_kj, props, Persistent::YES));
   {
     auto channel = handler.decodeSubrequestChannelToken(Usage::STORAGE, storageToken)
                        .downcast<MockSubrequestChannel>();
@@ -413,8 +454,8 @@ KJ_TEST("channel token with nested channels (all synchronous)") {
   }
 
   // And the outer channel can itself be an ActorClassChannel.
-  auto actorToken =
-      expectSync(handler.encodeActorClassChannelToken(Usage::RPC, "outer", "OuterEntry"_kj, props));
+  auto actorToken = expectSync(handler.encodeActorClassChannelToken(
+      Usage::RPC, "outer", "OuterEntry"_kj, props, Persistent::YES));
   {
     auto channel = handler.decodeActorClassChannelToken(Usage::RPC, actorToken)
                        .downcast<MockActorClassChannel>();
@@ -435,18 +476,19 @@ KJ_TEST("channel token with nested channel that generates token asynchronously")
 
   kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> caps;
   caps.add(kj::refcounted<MockSubrequestChannel>(handler,
-      ServiceTriplet("sync-subreq", "SyncEntry"_kj,
-          Frankenvalue::fromJson(kj::str("{\"inner\": \"sync\"}")))));
+      ServiceTriplet(
+          "sync-subreq", "SyncEntry"_kj, Frankenvalue::fromJson(kj::str("{\"inner\": \"sync\"}"))),
+      Persistent::YES));
   caps.add(kj::refcounted<MockActorClassChannel>(handler,
       ServiceTriplet("async-actor", "AsyncEntry"_kj,
           Frankenvalue::fromJson(kj::str("{\"inner\": \"async\"}"))),
-      kj::mv(paf.promise)));
+      Persistent::YES, kj::mv(paf.promise)));
   auto props = propsWithCaps(kj::mv(caps));
 
   // Encoding returns a promise rather than a synchronous result, because one of the nested
   // channels needs to wait before generating its token.
-  auto tokenOneOf =
-      handler.encodeSubrequestChannelToken(Usage::RPC, "outer", "OuterEntry"_kj, props);
+  auto tokenOneOf = handler.encodeSubrequestChannelToken(
+      Usage::RPC, "outer", "OuterEntry"_kj, props, Persistent::YES);
   auto tokenPromise = KJ_ASSERT_NONNULL(kj::mv(tokenOneOf).tryGet<kj::Promise<kj::Array<byte>>>(),
       "expected token to be rendered asynchronously when a nested channel is pending");
 
