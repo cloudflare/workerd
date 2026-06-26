@@ -2,23 +2,29 @@
 
 ## OVERVIEW
 
-11 Rust library crates + 1 binary crate linked into workerd via CXX FFI. No Cargo workspace — entirely Bazel-driven (`wd_rust_crate.bzl`). Clippy pedantic+nursery enabled; `allow-unwrap-in-tests`.
+A dozen or so Rust crates — mostly libraries, plus the `gen-compile-cache` binary — linked into workerd via CXX FFI. No Cargo workspace — entirely Bazel-driven (`wd_rust_crate.bzl` / `wd_rust_binary.bzl`). Clippy pedantic+nursery enabled; `allow-unwrap-in-tests`.
+
+> **The "CXX FFI" above is [workerd-cxx](https://github.com/cloudflare/workerd-cxx), Cloudflare's heavily modified fork of [cxx-rs](https://cxx.rs)** — not stock cxx-rs. It adds deep KJ interoperability upstream lacks: `async` fns become `kj::Promise<T>`, you can return/hold `kj::Own<T>`, `Result<T>` throws `kj::Exception`, and other KJ types cross the boundary (see CXX BRIDGE below). cxx-rs is well represented in LLM training data, so it is easy to "recall" an API that is wrong here — prefer the prior art in these crates and the workerd-cxx sources (especially its `kj-rs` crate) over upstream cxx-rs docs or memory.
 
 ## CRATES
 
-| Crate                | Purpose                                                                                                |
-| -------------------- | ------------------------------------------------------------------------------------------------------ |
-| `jsg/`               | Rust JSG bindings: `Lock`, `Rc<T>`, `Resource`, `Struct`, `Type`, `Realm`, `FeatureFlags`, module registration; V8 handle types including typed arrays, `ArrayBuffer`, `ArrayBufferView`, `SharedArrayBuffer`, `BackingStore` |
-| `jsg-macros/`        | Proc macros: `#[jsg_struct]`, `#[jsg_method]`, `#[jsg_resource]`, `#[jsg_oneof]`, `#[jsg_static_constant]`, `#[jsg_constructor]` |
-| `jsg-test/`          | Test harness (`Harness`) for JSG Rust bindings                                                         |
-| `api/`               | Rust-implemented Node.js APIs; registers modules via `register_nodejs_modules()`                       |
-| `dns/`               | DNS record parsing (CAA, NAPTR) via CXX bridge; legacy duplicate of `api/dns.rs`, pending removal      |
-| `net/`               | Single function: `canonicalize_ip()`                                                                   |
-| `kj/`                | Rust bindings for KJ library (`http`, `io`, `own` submodules); `Result<T>` = `Result<T, cxx::KjError>` |
-| `cxx-integration/`   | Tokio runtime init; called from C++ `main()` before anything else                                      |
-| `transpiler/`        | TS type stripping via SWC (`ts_strip()`, `StripOnly` mode)                                             |
-| `python-parser/`     | Python import extraction via `ruff_python_parser`; **namespace: `edgeworker::rust::`**                 |
-| `gen-compile-cache/` | Binary crate — V8 bytecode cache generator; calls C++ `compile()` via CXX                              |
+_Snapshot — the set drifts as crates come and go; `bazel query //src/rust/...` is authoritative._
+
+| Crate                   | Purpose                                                                                                                                                                                                                       |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `jsg/`                  | Rust JSG bindings: `Lock`, `Rc<T>`, `Resource`, `Struct`, `Type`, `Realm`, `FeatureFlags`, module registration; V8 handle types including typed arrays, `ArrayBuffer`, `ArrayBufferView`, `SharedArrayBuffer`, `BackingStore` |
+| `jsg-macros/`           | Proc macros: `#[jsg_struct]`, `#[jsg_method]`, `#[jsg_resource]`, `#[jsg_oneof]`, `#[jsg_static_constant]`, `#[jsg_constructor]`                                                                                              |
+| `jsg-test/`             | Test harness (`Harness`) for JSG Rust bindings                                                                                                                                                                                |
+| `api/`                  | Rust-implemented Node.js APIs; registers modules via `register_nodejs_modules()`                                                                                                                                              |
+| `net/`                  | Single function: `canonicalize_ip()`                                                                                                                                                                                          |
+| `encoding/`             | WHATWG legacy text decoders via `encoding_rs`; an opaque streaming `Decoder` emits UTF-16 over the CXX bridge                                                                                                                 |
+| `kj/`                   | Rust bindings for KJ library (`http`, `io`, `own` submodules); `Result<T>` = `Result<T, cxx::KjError>`                                                                                                                        |
+| `worker/`               | Rust counterpart of `workerd::WorkerInterface` (the `worker::Interface` trait) plus FFI bindings; multi-bridge crate                                                                                                          |
+| `cxx-integration/`      | Tokio runtime init; called from C++ `main()` before anything else                                                                                                                                                             |
+| `cxx-integration-test/` | Non-production crate exercising Rust/C++ integration: callbacks, shared structs, `Result` error mapping                                                                                                                       |
+| `transpiler/`           | TS type stripping via SWC (`ts_strip()`, `StripOnly` mode)                                                                                                                                                                    |
+| `python-parser/`        | Python import extraction via `ruff_python_parser`; **namespace: `edgeworker::rust::`**                                                                                                                                        |
+| `gen-compile-cache/`    | Binary crate — V8 bytecode cache generator; calls C++ `compile()` via CXX                                                                                                                                                     |
 
 ## CONVENTIONS
 
@@ -80,3 +86,35 @@ Functions returning `Result<T>` in `extern "Rust"` blocks translate to C++ funct
 - **`thiserror` enums**: Define a crate-level `Error` enum for structured errors. This is the preferred pattern for crates with multiple error cases.
 - **`std::io::Error`**: Acceptable for purely I/O-related errors.
 - **`cxx::KjError`**: Use `KjError::new(KjExceptionType::Failed, message)` when you need direct control over the KJ exception type.
+
+## CXX BRIDGE: BUILD WIRING
+
+`wd_rust_crate` (and `wd_rust_binary`) generate, for each `cxx_bridge_src` / `cxx_bridge_srcs` entry, a companion `:<bridge>@cxx` cc_library — the C++ side of the bridge: the cxx-generated `<bridge>.rs.{h,cc}` plus every `**/*.h` in the package (globbed into its `hdrs`). C++ consumers `#include <workerd/rust/<pkg>/<bridge>.rs.h>` and depend on the crate (`//src/rust/<pkg>`); depend on `:<bridge>@cxx` alone if you only need the header. The header include prefix is `workerd/` + the package path with `src/` stripped. Any crate with a bridge auto-gets `@workerd-cxx//:cxx` and `@workerd-cxx//kj-rs`.
+
+### Rust → C++ (calling a C++ function from Rust)
+
+Template: **`gen-compile-cache`**, whose `main.rs` bridge calls C++ `compile()`. The shim header is conventionally named `cxx-bridge.h` (or `bridge.h`):
+
+```rust
+unsafe extern "C++" {
+    include!("workerd/rust/gen-compile-cache/cxx-bridge.h");
+    fn compile(path: &str, source_code: &str) -> Vec<u8>;
+}
+```
+
+1. Put the shim header **in the package** — the macro globs `**/*.h` into the generated `@cxx` library's `hdrs`, so the `include!` resolves. Keep it light (ideally just `#include <rust/cxx.h>` for `rust::Str` / `rust::Vec`).
+2. Implement the function in a `.c++` exposed as a **separate `wd_cc_library`** (e.g. `gen-compile-cache`'s `:cxx-bridge`); the heavy C++ deps (JSG, etc.) live there, not in the shim header.
+3. Add that `wd_cc_library` to the crate's `deps` so the symbol resolves at the final link.
+
+### Avoiding the C++ → Rust → C++ dependency cycle
+
+If a C++ library already depends on your crate (C++ → Rust) and you also add a Rust → C++ shim, the shim **must be a separate `cc_library`** from the one that depends on the crate, or Bazel reports a cycle. To pass a cxx shared struct to the shim without a cycle (see the `worker` crate's `:bridge`):
+
+- The shim's `.c++` includes `<workerd/rust/<pkg>/<bridge>.rs.h>` and the shim `cc_library` depends on the generated `:<bridge>@cxx` for that header. This is acyclic: `:<bridge>@cxx` depends only on cxx/kj-rs, never on the shim, and the shim's symbol is resolved at the final link.
+- **Forward-declare the struct in the shim _header_** — do not `#include` the generated `<bridge>.rs.h` there, because that generated header `#include`s your shim header, so including it back is circular. A forward declaration is enough for a `const T&` parameter; the full definition is only needed in the `.c++`.
+
+cxx also supports **reusing a binding type across bridges** ([docs](https://cxx.rs/extern-c++.html#reusing-existing-binding-types)): the `worker` crate's `error.rs` / `ok.rs` / `kill_switch.rs` bridges reuse `ffi.rs`'s types by depending on `:ffi.rs@cxx`. Still, keep a struct that only crosses FFI within one crate in that crate's bridge.
+
+### Testing crates that cross the FFI
+
+A `rust_test` exercising code that calls into heavy C++ (V8, etc.) must link those impl symbols itself via `test_deps` — the production binary already links them, so only the standalone test binary needs them. Symptom if missing: undefined C++ symbols at test link.
