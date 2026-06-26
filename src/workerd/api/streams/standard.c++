@@ -4666,16 +4666,15 @@ void TransformStreamDefaultController::visitForMemoryInfo(jsg::MemoryTracker& tr
 jsg::Ref<ReadableStream> ReadableStream::from(
     jsg::Lock& js, jsg::AsyncGenerator<jsg::V8Ref<v8::Value>> generator) {
 
-  // AsyncGenerator is not a refcounted type, so we need to wrap it in a refcounted
-  // struct so that we can keep it alive through the various promise branches below.
-  auto rcGenerator =
-      kj::rc<kj::RefcountedWrapper<jsg::AsyncGenerator<jsg::V8Ref<v8::Value>>>>(kj::mv(generator));
+  // AsyncGenerator is not a refcounted type, so keep it in an Rc through the various promise
+  // branches below.
+  auto rcGenerator = kj::rc<jsg::AsyncGenerator<jsg::V8Ref<v8::Value>>>(kj::mv(generator));
 
   // clang-format off
   return constructor(js, UnderlyingSource{
     .pull = [generator = rcGenerator.addRef()](jsg::Lock& js, auto controller) mutable {
       auto& c = controller.template get<DefaultController>();
-      return generator->getWrapped().next(js).then(js,
+      return generator->next(js).then(js,
           [controller = c.addRef(), generator = generator.addRef()]
           (jsg::Lock& js, kj::Maybe<jsg::Value> value) mutable {
                 KJ_IF_SOME(v, value) {
@@ -4707,7 +4706,7 @@ jsg::Ref<ReadableStream> ReadableStream::from(
               });
     },
     .cancel = [generator = rcGenerator.addRef()](jsg::Lock& js, jsg::JsValue reason) mutable {
-      return generator->getWrapped().return_(js, js.v8Ref<v8::Value>(reason))
+      return generator->return_(js, js.v8Ref<v8::Value>(reason))
           .then(js, [generator = kj::mv(generator)](auto& lock, auto) {
         // The generator might produce a value on return and might even want to continue,
         // but the stream has been canceled at this point, so we stop here.

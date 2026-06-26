@@ -10,10 +10,10 @@
 namespace workerd {
 
 // Attaches the given object to a `Request` so that it lives as long as the request's properties.
-// The given object must support `kj::addRef()` (e.g. `kj::Refcount`).
+// The given object must be a `kj::Rc<T>`.
 template <typename T>
 kj::HttpClient::Request attachToRequest(kj::HttpClient::Request req, T&& rcAttachment) {
-  req.body = req.body.attach(kj::addRef(*rcAttachment));
+  req.body = req.body.attach(rcAttachment.addRef());
   req.response = req.response.then(
       [rcAttachment = kj::mv(rcAttachment)](kj::HttpClient::Response&& response) mutable {
     response.body = response.body.attach(kj::mv(rcAttachment));

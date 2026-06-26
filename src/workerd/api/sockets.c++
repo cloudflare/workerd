@@ -158,9 +158,9 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     resolver.reject(js, exception.getHandle(js));
   });
 
-  auto refcountedConnection = kj::refcountedWrapper(kj::mv(connection));
+  kj::Rc<kj::AsyncIoStream> refcountedConnection(kj::mv(connection));
   // Initialize the readable/writable streams with the readable/writable sides of an AsyncIoStream.
-  auto sysStreams = newSystemMultiStream(*refcountedConnection, ioContext);
+  auto sysStreams = newSystemMultiStream(refcountedConnection.addRef(), ioContext);
   auto readable = js.alloc<ReadableStream>(ioContext, kj::mv(sysStreams.readable));
   auto allowHalfOpen = getAllowHalfOpen(options);
   kj::Maybe<jsg::Promise<void>> eofPromise;
@@ -419,7 +419,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
 
                 // Move the stream out of the plain text socket, to ensure the stream is properly
                 // destroyed when the socket is closed.
-                kj::Own<kj::AsyncIoStream> stream = connData->connectionStream->addWrappedRef();
+                kj::Own<kj::AsyncIoStream> stream = connData->connectionStream.addRef().toOwn();
                 self->connectionData = kj::none;
 
                 auto secureStream = forkedPromise.addBranch().then(
@@ -582,7 +582,7 @@ kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
       connectionData, TypeError, "The socket connection is closed or was already taken.");
   // Attach tlsStarter to the wrapper so it survives as long as the connection stream
   // and is destroyed before the stream itself.
-  auto wrapper = dataConn->connectionStream->addWrappedRef().attach(kj::mv(dataConn->tlsStarter));
+  auto wrapper = dataConn->connectionStream.addRef().toOwn().attach(kj::mv(dataConn->tlsStarter));
   connectionData = kj::none;
   closedResolver.resolve(js);
   return wrapper;
