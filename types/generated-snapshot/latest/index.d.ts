@@ -11456,15 +11456,13 @@ interface ArtifactsCreateRepoResult {
   defaultBranch: string;
   /** HTTPS git remote URL. */
   remote: string;
-  /** Plaintext access token (only returned at creation time). */
+  /** Plaintext access token (only returned at creation time). The token encodes its expiry as `art_v1_<secret>?expires=<unix_seconds>`. */
   token: string;
-  /** ISO 8601 token expiry timestamp. */
-  tokenExpiresAt: string;
 }
 /** Paginated list of repositories. */
 interface ArtifactsRepoListResult {
-  /** Repositories in this page (without the `remote` field). */
-  repos: Omit<ArtifactsRepoInfo, "remote">[];
+  /** Repositories in this page. */
+  repos: ArtifactsRepoInfo[];
   /** Total number of repositories in the namespace. */
   total: number;
   /** Cursor for the next page, if there are more results. */
@@ -11478,7 +11476,6 @@ interface ArtifactsCreateTokenResult {
   plaintext: string;
   /** Token scope: "read" or "write". */
   scope: "read" | "write";
-  /** ISO 8601 token expiry timestamp. */
   expiresAt: string;
 }
 /** Token metadata (no plaintext). */
