@@ -100,6 +100,7 @@ wd_cc_library(
         ":wasm-instantiate-shim",
         ":worker-interface",
         ":worker-source",
+        "//src/rust/api",
         "//src/rust/cxx-integration",
         "//src/workerd/api:analytics-engine_capnp",
         "//src/workerd/api:deferred-proxy",
