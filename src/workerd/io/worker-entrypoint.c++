@@ -564,6 +564,16 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
     //   4. Otherwise -> synthesize a 5xx response.
 
     if (isActor) {
+      // Reaching this catch means the request reached the actor (we are past
+      // `delivered()` in Stage 1), so user code may have run. Annotate DISCONNECTED failures so the
+      // caller-side actor-call classifier knows this failure must not be retried as a fresh
+      // delivery. Only DISCONNECTED failures participate in the delivery-position metric, so other
+      // exception types need no annotation. Set before exceptionToPropagate() so it survives the
+      // internal-exception description rewrite; the detail serializes back across the RPC boundary.
+      if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
+        exception.setDetail(
+            jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+      }
       // TODO(cleanup): We'd really like to tunnel exceptions any time a worker is calling another
       // worker, not just for actors (and W2W below), but getting that right will require cleaning
       // up error handling more generally.
@@ -713,6 +723,18 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     }
 
     if (isActor || tunnelExceptions) {
+      if (isActor) {
+        // Reaching this catch means the request reached the actor (we are past
+        // `delivered()` above), so user code may have run. Annotate DISCONNECTED failures so the
+        // caller-side actor-call classifier knows this failure must not be retried as a fresh
+        // delivery. Only DISCONNECTED failures participate in the delivery-position metric, so other
+        // exception types need no annotation. Set before exceptionToPropagate() so it survives the
+        // internal-exception description rewrite; the detail serializes back across the RPC boundary.
+        if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
+          exception.setDetail(
+              jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+        }
+      }
       // We want to tunnel exceptions from actors back to the caller.
       // TODO(cleanup): We'd really like to tunnel exceptions any time a worker is calling another
       // worker, not just for actors (and W2W below), but getting that right will require cleaning
