@@ -665,7 +665,7 @@ declare abstract class DurableObjectNamespace<
     options?: DurableObjectNamespaceGetDurableObjectOptions,
   ): DurableObjectStub<T>;
   jurisdiction(
-    jurisdiction: DurableObjectJurisdiction,
+    jurisdiction?: DurableObjectJurisdiction,
   ): DurableObjectNamespace<T>;
 }
 type DurableObjectJurisdiction = "eu" | "fedramp" | "fedramp-high";
