@@ -28,10 +28,9 @@ export const compatFlagsTest = {
     // That is... the only keys that should appear on the compatibilityFlags
     // object are the enable flags.
     //
-    // If a key does not appear, it can mean one of three things:
+    // If a key does not appear, it can mean one of two things:
     // 1. It is a disable flag.
-    // 2. It is an experimental flag and the experimental option is not set.
-    // 3. The flag does not exist.
+    // 2. The flag does not exist.
     //
     // At this level we make no attempt to differentiate between these cases
     ok(compatibilityFlags['nodejs_compat_v2']);
@@ -42,10 +41,8 @@ export const compatFlagsTest = {
     strictEqual(compatibilityFlags['no_nodejs_compat_v2'], undefined);
     strictEqual(compatibilityFlags['url_original'], undefined);
 
-    // Since we are not specifying the experimental flag, experimental flags should
-    // not be included in the output.
-    strictEqual(compatibilityFlags['durable_object_rename'], undefined);
-    strictEqual('durable_object_rename' in compatibilityFlags, false);
+    strictEqual(compatibilityFlags['durable_object_rename'], false);
+    strictEqual('durable_object_rename' in compatibilityFlags, true);
 
     // If a flag does not exist, the value will be undefined.
     strictEqual(compatibilityFlags['not-a-real-compat-flag'], undefined);

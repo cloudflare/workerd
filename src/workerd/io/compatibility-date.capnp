@@ -1573,4 +1573,27 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $pythonSnapshotRelease
       $experimental;
   # Enables Python Workers using Pyodide 314.0.0 (CPython 3.14.2, Emscripten 5.0.3).
+
+  enableNodeJsInspectorLocalDev @180 :Bool
+      $compatEnableFlag("enable_nodejs_inspector_local_dev")
+      $experimental;
+  # EXPERIMENTAL, LOCAL-DEV-ONLY. When enabled (and only when running the open-source
+  # `workerd` binary with `--experimental`, never in Cloudflare's multi-tenant production
+  # runtime), the `node:inspector` and `node:inspector/promises` modules expose a real
+  # `Session` that connects to the isolate's own V8 inspector and dispatches Chrome
+  # DevTools Protocol messages to it, instead of the non-functional stub.
+  # Scope: this flag enables *issuing CDP commands* to the V8 inspector backend via
+  # `Session` (`connect`/`post`/`disconnect` plus protocol-method notifications) -- primarily
+  # the `Profiler` domain, which is what powers V8 code coverage under test frameworks. It does
+  # NOT implement the DevTools event-*injection* helpers (`inspector.Network.*`, `DOMStorage`,
+  # `NetworkResources`): those remain throwing stubs. Those events are Node-synthetic (V8 has no
+  # such inspector domains) and would require separate host-side plumbing, gated by their own
+  # flag, if ever needed.
+  # Requires `nodejs_compat`, which is what makes the `node:inspector` and
+  # `node:inspector/promises` modules importable in the first place; this flag only controls whether
+  # the imported `Session` is the real implementation or the stub. This flag has no effect, and the
+  # real implementation is unreachable, in multi-tenant production processes.
+  # This flag is not enabled by default in local dev on purpose, we want local dev to mimic
+  # the production environment as much as possible, this flag is meant to be used by test
+  # frameworks when running tests that require the inspector to be functional, and not by end users.
 }
