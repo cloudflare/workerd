@@ -727,13 +727,16 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
       kj::HttpHeaders headers(threadContext.getHeaderTable());
       if (exception.getType() == kj::Exception::Type::OVERLOADED) {
+        // Overloaded-type exceptions generally represent some resource exhaustion (i.e. not
+        // necessarily an internal error) and correspond to HTTP error 503.
         response.reject(503, "Service Unavailable", headers, static_cast<uint64_t>(0));
       } else {
         response.reject(500, "Internal Server Error", headers, static_cast<uint64_t>(0));
       }
-      // TODO(o11y): Should we also indicate a return response code for TCP?
       KJ_IF_SOME(t, workerTracer) {
-        t.setReturn(kj::none);
+        t.setReturn(kj::none,
+            tracing::FetchResponseInfo(
+                exception.getType() == kj::Exception::Type::OVERLOADED ? 503 : 500));
       }
 
       return kj::READY_NOW;

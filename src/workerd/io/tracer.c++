@@ -508,7 +508,8 @@ void WorkerTracer::setReturn(
 
   // Add fetch response info for buffered tail worker
   KJ_IF_SOME(info, fetchResponseInfo) {
-    KJ_REQUIRE(KJ_REQUIRE_NONNULL(trace->eventInfo).is<tracing::FetchEventInfo>());
+    KJ_REQUIRE(KJ_REQUIRE_NONNULL(trace->eventInfo).is<tracing::FetchEventInfo>() ||
+        KJ_REQUIRE_NONNULL(trace->eventInfo).is<tracing::ConnectEventInfo>());
     KJ_ASSERT(trace->fetchResponseInfo == kj::none, "setFetchResponseInfo can only be called once");
     trace->fetchResponseInfo = kj::mv(info);
   }
