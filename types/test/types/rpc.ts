@@ -8,6 +8,7 @@ import {
   RpcStub,
   RpcTarget,
   WorkerEntrypoint,
+  type WorkflowBackoff,
   type WorkflowCronSchedule,
   type WorkflowDelayDuration,
   type WorkflowDelayFunction,
@@ -876,6 +877,11 @@ workflowStep.do(
 );
 
 // A delay function is accepted, and the step context omits the (dynamic) delay.
+// When `delay` is a function, it must NOT be present on the config exposed in
+// either context surface: the delay function's `input.ctx` and the step callback's
+// `ctx`. Both are asserted exactly (so a re-added `delay` fails the equality check)
+// and guarded by `@ts-expect-error` (so a re-added `delay` makes the now-unused
+// directive fail to compile).
 workflowStep.do(
   'dynamic delay context',
   {
@@ -887,18 +893,19 @@ workflowStep.do(
           WorkflowStepContext<WorkflowDelayFunction>
         >();
         expectTypeOf(input.error).toEqualTypeOf<Error>();
-        // Inside a dynamic delay, `delay` is absent from the context config entirely.
-        // @ts-expect-error `delay` does not exist on a dynamic-delay step context
-        input.ctx.config.retries?.delay;
+        // `delay` is absent from the dynamic-delay context config (read-side, exact).
+        expectTypeOf(input.ctx.config.retries).toEqualTypeOf<
+          {limit: number; backoff?: WorkflowBackoff} | undefined
+        >();
         return '1 minute';
       },
     },
   },
   async (ctx): Promise<string> => {
-    // `delay` is absent here because it was supplied as a function.
-    ctx.config.retries = {limit: 1};
-    // @ts-expect-error `delay` does not exist on a dynamic-delay step context
-    ctx.config.retries?.delay;
+    // `delay` is absent here too because it was supplied as a function.
+    expectTypeOf(ctx.config.retries).toEqualTypeOf<
+      {limit: number; backoff?: WorkflowBackoff} | undefined
+    >();
     return 'ok';
   }
 );
@@ -916,8 +923,19 @@ workflowStep.do('rollback delay function', async (): Promise<string> => 'ok', {
   rollbackConfig: {retries: {limit: 0, delay: () => 0}},
 });
 
-// A standalone delay function conforms to WorkflowDelayFunction.
-const dynamicDelay: WorkflowDelayFunction = ({error}) => {
+// No-config (2-arg) overload uses the default context: a static delay, so
+// `config.retries.delay` is present.
+workflowStep.do('no config delay present', async (ctx): Promise<string> => {
+  expectTypeOf(ctx.config.retries?.delay).toEqualTypeOf<
+    WorkflowDelayDuration | number | undefined
+  >();
+  return 'ok';
+});
+
+// A standalone delay function conforms to WorkflowDelayFunction and its `ctx`
+// is the recursive dynamic-delay step context.
+const dynamicDelay: WorkflowDelayFunction = ({ctx, error}) => {
+  expectTypeOf(ctx).toEqualTypeOf<WorkflowStepContext<WorkflowDelayFunction>>();
   expectTypeOf(error).toEqualTypeOf<Error>();
   return '30 seconds';
 };
