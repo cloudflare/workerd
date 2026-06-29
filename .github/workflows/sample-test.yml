@@ -1,0 +1,92 @@
+name: Sample Tests
+
+on:
+  push:
+    branches: ["edmundhung/request-cancellation-sample"]
+  # workflow_dispatch:
+  #   inputs:
+  #     directory:
+  #       description: "Directory of the sample"
+  #       required: true
+  #     server-args:
+  #       description: "Arguments to pass to the serve command"
+  #       required: false
+  #     test-command:
+  #       description: "Command to run to test the server (default: curl http://localhost:8080)"
+  #       required: false
+  #       default: "curl http://localhost:$PORT"
+  #     port:
+  #       type: number
+  #       description: "Port the server will listen on (default: 8080)"
+  #       required: false
+  #       default: 8080
+
+permissions:
+  # Read repo
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          [
+            { name: linux, arch: X64, image: ubuntu-22.04 },
+            { name: linux-arm, arch: ARM64, image: ubuntu-22.04-arm },
+            { name: macOS, arch: ARM64, image: macos-15 },
+            { name: windows, arch: X64, image: windows-2025 },
+          ]
+    name: Sample tests - request-cancellation (${{ matrix.os.name }}, ${{ matrix.os.image}})
+    runs-on: ${{ matrix.os.image }}
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: "pnpm"
+
+      - name: Start workerd server
+        shell: bash
+        run: |
+          pnpm dlx workerd serve samples/request-cancellation/config.capnp > /tmp/workerd.log 2>&1 &
+          echo $! > /tmp/workerd.pid
+          sleep 5
+
+      - name: Run test command
+        shell: bash
+        run: |
+          # Trigger the request cancellation by timing out
+          curl --max-time 2 http://localhost:8080 || true
+          # Give the server a moment to log the abort message
+          sleep 1
+
+      - name: Check server logs
+        shell: bash
+        run: |
+          echo "=== Server logs ==="
+          cat /tmp/workerd.log
+          echo "=================="
+
+          if grep -q "The request was aborted!" /tmp/workerd.log; then
+            echo "✓ Server correctly detected request cancellation"
+          else
+            echo "✗ Server did not log request cancellation"
+            exit 1
+          fi
+
+      - name: Stop workerd server
+        if: always()
+        shell: bash
+        run: |
+          if [ -f /tmp/workerd.pid ]; then
+            kill $(cat /tmp/workerd.pid) 2>/dev/null || true
+          fi
