@@ -94,6 +94,13 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "allow-destruction",
+    hdrs = ["allow-destruction.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
     name = "checked-queue",
     hdrs = ["checked-queue.h"],
     visibility = ["//visibility:public"],

@@ -7,6 +7,7 @@
 #include "common.h"
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/allow-destruction.h>
 #include <workerd/util/ring-buffer.h>
 #include <workerd/util/small-set.h>
 #include <workerd/util/state-machine.h>
@@ -365,14 +366,14 @@ class ConsumerImpl final {
   using QueueEntry = Self::QueueEntry;
 
   ConsumerImpl(
-      kj::Ptr<QueueImpl> queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none)
+      kj::Ptr<QueueImpl> queue, kj::Weak<ConsumerImpl::StateListener> stateListener = kj::none)
       : queue(queue),
         state(ConsumerState::template create<Ready>()),
         stateListener(stateListener) {
     queue->addConsumer(selfRef.addRef());
   }
 
-  explicit ConsumerImpl(kj::Maybe<ConsumerImpl::StateListener&> stateListener)
+  explicit ConsumerImpl(kj::Weak<ConsumerImpl::StateListener> stateListener)
       : queue(nullptr),
         state(ConsumerState::template create<Ready>()),
         stateListener(stateListener) {}
@@ -603,7 +604,10 @@ class ConsumerImpl final {
 
   kj::Weak<QueueImpl> queue;
   ConsumerState state;
-  kj::Maybe<ConsumerImpl::StateListener&> stateListener;
+  // StateListener callbacks may synchronously destroy the listener by transitioning the owning
+  // stream. Always invoke callbacks by upgrading this weak pointer and immediately wrapping the
+  // result in allowDestruction(kj::mv(listener)); do not call through the kj::Ptr directly.
+  kj::Weak<ConsumerImpl::StateListener> stateListener;
   // WeakRef to this consumer, used for safe registration with QueueImpl.
   // When this consumer is destroyed, we invalidate the WeakRef so that
   // any iteration over allConsumers in QueueImpl will safely skip us.
@@ -664,7 +668,7 @@ class ConsumerImpl final {
         weak->runIfAlive([&](ConsumerImpl& self) {
           self.state.template transitionTo<Errored>(reason.addRef(js));
           KJ_IF_SOME(listener, self.stateListener) {
-            listener.onConsumerError(js, reason);
+            allowDestruction(kj::mv(listener))->onConsumerError(js, reason);
             // After this point, we should not assume that this consumer can
             // be safely used at all. It's most likely the stateListener has
             // released it.
@@ -708,7 +712,7 @@ class ConsumerImpl final {
           weak->runIfAlive([&](ConsumerImpl& self) {
             self.state.template transitionTo<Closed>();
             KJ_IF_SOME(listener, self.stateListener) {
-              listener.onConsumerClose(js);
+              allowDestruction(kj::mv(listener))->onConsumerClose(js);
               // After this point, we should not assume that this consumer can
               // be safely used at all. It's most likely the stateListener has
               // released it.
@@ -782,11 +786,11 @@ class ValueQueue final {
 
   class Consumer final {
    public:
-    Consumer(ValueQueue& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
+    Consumer(ValueQueue& queue, kj::Weak<ConsumerImpl::StateListener> stateListener = nullptr);
     Consumer(
-        kj::Ptr<QueueImpl> queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
+        kj::Ptr<QueueImpl> queue, kj::Weak<ConsumerImpl::StateListener> stateListener = nullptr);
     // Used when cloning a consumer whose queue has been destroyed.
-    explicit Consumer(kj::Maybe<ConsumerImpl::StateListener&> stateListener);
+    explicit Consumer(kj::Weak<ConsumerImpl::StateListener> stateListener);
     Consumer(Consumer&&) = delete;
     Consumer(Consumer&) = delete;
     Consumer& operator=(Consumer&&) = delete;
@@ -818,7 +822,7 @@ class ValueQueue final {
     size_t size();
 
     kj::Own<Consumer> clone(
-        jsg::Lock& js, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
+        jsg::Lock& js, kj::Weak<ConsumerImpl::StateListener> stateListener = nullptr);
 
     bool hasReadRequests();
     bool hasPendingDrainingRead();
@@ -1026,11 +1030,11 @@ class ByteQueue final {
 
   class Consumer {
    public:
-    Consumer(ByteQueue& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
+    Consumer(ByteQueue& queue, kj::Weak<ConsumerImpl::StateListener> stateListener = nullptr);
     Consumer(
-        kj::Ptr<QueueImpl> queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
+        kj::Ptr<QueueImpl> queue, kj::Weak<ConsumerImpl::StateListener> stateListener = nullptr);
     // Used when cloning a consumer whose queue has been destroyed.
-    explicit Consumer(kj::Maybe<ConsumerImpl::StateListener&> stateListener);
+    explicit Consumer(kj::Weak<ConsumerImpl::StateListener> stateListener);
     Consumer(Consumer&&) = delete;
     Consumer(Consumer&) = delete;
     Consumer& operator=(Consumer&&) = delete;
@@ -1061,7 +1065,7 @@ class ByteQueue final {
     size_t size() const;
 
     kj::Own<Consumer> clone(
-        jsg::Lock& js, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
+        jsg::Lock& js, kj::Weak<ConsumerImpl::StateListener> stateListener = nullptr);
     bool hasReadRequests();
     bool hasPendingDrainingRead();
     void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason);
