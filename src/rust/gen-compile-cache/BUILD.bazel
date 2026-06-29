@@ -4,10 +4,12 @@ load("@workerd//:build/wd_rust_binary.bzl", "wd_rust_binary")
 wd_rust_binary(
     name = "gen-compile-cache",
     cxx_bridge_src = "main.rs",
+    link_deps = [
+        ":cxx-bridge",
+    ],
     test_size = "large",
     visibility = ["//visibility:public"],
     deps = [
-        ":cxx-bridge",
         "@crates_vendor//:clap",
     ],
 )

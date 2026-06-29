@@ -25,12 +25,14 @@ wd_rust_crate(
         "kill_switch.rs",
         "ok.rs",
     ],
+    link_deps = [
+        ":bridge",
+    ],
     proc_macro_deps = [
         "@crates_vendor//:async-trait",
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":bridge",
         "@workerd//src/rust/kj",
         "@workerd//src/workerd/io:outcome_capnp_rust",
     ],

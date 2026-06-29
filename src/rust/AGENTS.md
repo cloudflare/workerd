@@ -104,7 +104,7 @@ unsafe extern "C++" {
 
 1. Put the shim header **in the package** — the macro globs `**/*.h` into the generated `@cxx` library's `hdrs`, so the `include!` resolves. Keep it light (ideally just `#include <rust/cxx.h>` for `rust::Str` / `rust::Vec`).
 2. Implement the function in a `.c++` exposed as a **separate `wd_cc_library`** (e.g. `gen-compile-cache`'s `:cxx-bridge`); the heavy C++ deps (JSG, etc.) live there, not in the shim header.
-3. Add that `wd_cc_library` to the crate's `deps` so the symbol resolves at the final link.
+3. Add that `wd_cc_library` to the crate's `link_deps` so the symbol resolves at the final link.
 
 ### Avoiding the C++ → Rust → C++ dependency cycle
 
