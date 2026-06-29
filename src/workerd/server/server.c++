@@ -3599,12 +3599,23 @@ class Server::WorkerService final: public Service,
       // configured.
       auto executionModel =
           actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
+      kj::Maybe<kj::String> durableObjectId = kj::none;
+      KJ_IF_SOME(a, actor) {
+        KJ_SWITCH_ONEOF(a->getId()) {
+          KJ_CASE_ONEOF(id, kj::Own<ActorIdFactory::ActorId>) {
+            durableObjectId = id->toString();
+          }
+          KJ_CASE_ONEOF(id, kj::String) {
+            durableObjectId = kj::str(id);
+          }
+        }
+      }
       auto tailStreamWriter = tracing::initializeTailStreamWriter(
           streamingTailWorkers.releaseAsArray(), waitUntilTasks);
       auto trace = kj::refcounted<Trace>(kj::none /* stableId */, kj::none /* scriptName */,
           kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, kj::none /* scriptId */,
           nullptr /* scriptTags */, mapCopyString(entrypointName), executionModel,
-          kj::none /* durableObjectId */);
+          kj::mv(durableObjectId));
       kj::Own<WorkerTracer> tracer = kj::refcounted<WorkerTracer>(
           kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::mv(tailStreamWriter));
 

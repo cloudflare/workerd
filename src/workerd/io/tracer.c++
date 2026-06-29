@@ -360,6 +360,7 @@ void WorkerTracer::setEventInfoInternal(
       .scriptId = mapCopyString(trace->scriptId),
       .scriptTags = KJ_MAP(tag, trace->scriptTags) { return kj::str(tag); },
       .entrypoint = mapCopyString(trace->entrypoint),
+      .durableObjectId = mapCopyString(trace->durableObjectId),
     };
 
     tracing::SpanId parentSpanId = tracing::SpanId::nullId;
