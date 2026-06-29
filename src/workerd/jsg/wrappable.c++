@@ -405,6 +405,8 @@ v8::Local<v8::Object> Wrappable::attachOpaqueWrapper(
   auto isolate = v8::Isolate::GetCurrent();
   auto object =
       jsg::check(IsolateBase::getOpaqueTemplate(isolate)->InstanceTemplate()->NewInstance(context));
+  // Null prototype: opaque wrappers flow through v8::Promise::Resolver::Resolve(), whose thenable
+  // check does Get(value, "then"). A null prototype keeps that lookup off Object.prototype.
   jsg::check(object->SetPrototype(context, v8::Null(isolate)));
   attachWrapper(isolate, object, needsGcTracing);
   return object;

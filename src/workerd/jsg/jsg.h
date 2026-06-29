@@ -2967,8 +2967,9 @@ class Lock {
   // Use to enable/disable dynamic code evaluation (via eval(), new Function(), or WebAssembly).
   void setAllowEval(bool allow);
 
-  // Use to choose the safe path in unwrap() when under a `DisallowJavascriptExecution` scope
-  // TODO(cleanup): replace with scope guard if we need to use this in multiple places
+  // Tracks whether JavaScript execution is currently disallowed so that conversions in unwrap()
+  // can choose a safe, non-JS-invoking path. Prefer the RAII `DisallowJavaScriptScope` (which
+  // also installs V8's hard guard) over calling this directly.
   void setDisallowJavascriptExecution(bool allow);
   bool isJavascriptExecutionDisallowed() const;
 
@@ -3243,6 +3244,25 @@ template <typename T>
 inline kj::Maybe<V8Ref<T>> WeakV8Ref<T>::tryAddRef(Lock& js) const {
   return tryAddRef(js.v8Isolate);
 }
+
+// RAII scope that forbids executing JavaScript for its lifetime. Any attempt to run JS while in
+// scope — invoking a getter or callback, hitting a Proxy trap, adopting a thenable — is a fatal
+// error (process abort via V8). Use this to enforce invariants where C++ relies on no user code
+// running, e.g. resolving a promise with an opaque (null-prototype) value.
+//
+// As well as the hard V8 guard, this sets jsg's "JavaScript execution disallowed" flag so that
+// jsg's own conversions take their safe, non-JS-invoking paths (see
+// Lock::isJavascriptExecutionDisallowed()).
+class DisallowJavaScriptScope final {
+ public:
+  explicit DisallowJavaScriptScope(Lock& js);
+  ~DisallowJavaScriptScope() noexcept(false);
+  KJ_DISALLOW_COPY_AND_MOVE(DisallowJavaScriptScope);
+
+ private:
+  Lock& js;
+  v8::Isolate::DisallowJavascriptExecutionScope scope;
+};
 
 // Ensures that the given fn is run within both a handlescope and the context scope.
 // The lock must be assignable to a jsg::Lock, and the context must be or be assignable

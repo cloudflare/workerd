@@ -205,7 +205,7 @@ class Wrappable: public kj::Refcounted {
   // method does nothing anyway).
   void attachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object, bool needsGcTracing);
 
-  // Attach an empty object as the wrapper.
+  // Attach an empty, null-prototype object as the wrapper.
   v8::Local<v8::Object> attachOpaqueWrapper(v8::Local<v8::Context> context, bool needsGcTracing);
 
   // If `handle` was originally returned by attachOpaqueWrapper(), return the Wrappable it wraps.

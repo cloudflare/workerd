@@ -217,6 +217,16 @@ bool Lock::isJavascriptExecutionDisallowed() const {
   return IsolateBase::from(v8Isolate).getDisallowJavascriptExecution();
 }
 
+DisallowJavaScriptScope::DisallowJavaScriptScope(Lock& js)
+    : js(js),
+      scope(js.v8Isolate, v8::Isolate::DisallowJavascriptExecutionScope::CRASH_ON_FAILURE) {
+  js.setDisallowJavascriptExecution(true);
+}
+
+DisallowJavaScriptScope::~DisallowJavaScriptScope() noexcept(false) {
+  js.setDisallowJavascriptExecution(false);
+}
+
 void Lock::setUsingEnhancedErrorSerialization() {
   IsolateBase::from(v8Isolate).setUsingEnhancedErrorSerialization();
 }

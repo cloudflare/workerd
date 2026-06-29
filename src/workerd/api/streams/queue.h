@@ -673,16 +673,15 @@ class ConsumerImpl final {
       } else {
         // Otherwise, if isClosing() is true...
         if (isClosing()) {
-          // handleMaybeClose calls request->resolve(js) which can synchronously
-          // run user JavaScript via V8's promise resolution thenable check
-          // (Get(resolution, "then")). A malicious Object.prototype.then getter
-          // can call reader.cancel(), which frees *this (the ConsumerImpl) while
-          // handleMaybeClose / this frame still hold raw Ready& / ConsumerImpl&
-          // references. We must take a selfRef before calling handleMaybeClose
+          // handleMaybeClose calls request->resolve(js), which performs V8 allocations
+          // (wrapOpaque) that can trigger GC. GC can collect the ReadableStream that owns
+          // *this (the ConsumerImpl) via the ownership gap (QueueImpl only holds WeakRefs to
+          // consumers), freeing it while handleMaybeClose / this frame still hold raw Ready& /
+          // ConsumerImpl& references. We must take a selfRef before calling handleMaybeClose
           // and check liveness after it returns.
           auto weak = selfRef.addRef();
           if (!empty() && !Self::handleMaybeClose(js, ready, *this)) {
-            // handleMaybeClose may have freed *this via re-entrant JS.
+            // handleMaybeClose may have freed *this via GC during resolve.
             if (!weak->isValid()) return;
             // If the queue is not empty, we'll have the implementation see
             // if it can drain the remaining data into pending reads. If handleMaybeClose
@@ -692,8 +691,8 @@ class ConsumerImpl final {
             return;
           }
 
-          // handleMaybeClose may have freed *this via re-entrant JS during
-          // request->resolve(js). Re-check before touching any members.
+          // handleMaybeClose may have freed *this via GC during request->resolve(js)
+          // (its V8 allocations can trigger collection). Re-check before touching any members.
           if (!weak->isValid()) return;
 
           KJ_ASSERT(empty());
