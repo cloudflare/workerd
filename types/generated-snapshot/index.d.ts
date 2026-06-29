@@ -16423,6 +16423,14 @@ interface WorkflowError {
   code?: number;
   message: string;
 }
+interface WorkflowInstanceTerminateOptions {
+  /**
+   * If true, run registered rollback handlers before terminating the instance.
+   * Only steps that registered rollback handlers are rolled back.
+   */
+  rollback?: boolean;
+}
+
 interface WorkflowInstanceRestartOptions {
   /**
    * Restart from a specific step. If omitted, the instance restarts from the beginning.
@@ -16456,8 +16464,9 @@ declare abstract class WorkflowInstance {
   public resume(): Promise<void>;
   /**
    * Terminate the instance. If it is errored, terminated or complete, an error will be thrown.
+   * @param options Options for termination, including whether registered rollback handlers should run.
    */
-  public terminate(): Promise<void>;
+  public terminate(options?: WorkflowInstanceTerminateOptions): Promise<void>;
   /**
    * Restart the instance. Optionally restart from a specific step, preserving
    * cached results for all steps before it.
