@@ -437,8 +437,16 @@ void ValueQueue::handleRead(jsg::Lock& js,
       KJ_CASE_ONEOF(entry, QueueEntry) {
         auto freed = kj::mv(entry);
         state.buffer.pop_front();
-        request.resolve(js, freed.entry->getValue(js));
-        state.queueTotalSize -= freed.entry->getSize();
+        auto size = freed.entry->getSize();
+        // resolve() allocates and can trigger GC, so we use the weak reference
+        // to check our state was not collected. The DisallowJavaScriptScope
+        // guarantees the consumer's `state` cannot have transitioned.
+        auto weak = consumer.selfRef.addRef();
+        {
+          jsg::DisallowJavaScriptScope noJs(js);
+          request.resolve(js, freed.entry->getValue(js));
+        }
+        weak->runIfAlive([&](ConsumerImpl&) { state.queueTotalSize -= size; });
         return;
       }
     }
@@ -927,11 +935,10 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   // It is possible that the request was partially filled already.
   req.pullInto.filled -= unaligned;
 
-  // resolveRead calls request->resolve(js) which can synchronously run user
-  // JavaScript via V8's promise resolution thenable check (Get(resolution, "then")).
-  // A malicious Object.prototype.then getter can call controller.error() or
-  // reader.cancel(), which may destroy the ConsumerImpl. We hold a weak ref
-  // to detect this before accessing consumer again.
+  // resolveRead calls request->resolve(js), which performs V8 allocations (wrapOpaque) that
+  // can trigger GC. GC can collect the ReadableStream that owns this ConsumerImpl (via the
+  // ownership gap: QueueImpl only holds WeakRefs to consumers), destroying the ConsumerImpl
+  // mid-call. We hold a weak ref to detect this before accessing consumer again.
   auto weak = consumer.selfRef.addRef();
   // Fulfill this request!
   consumer.resolveRead(js, req);
@@ -1084,11 +1091,10 @@ void ByteQueue::handlePush(
   auto amountAvailable = state.queueTotalSize + entrySize;
   size_t entryOffset = 0;
 
-  // request->resolve(js) below can synchronously run user JavaScript via V8's
-  // promise resolution thenable check (Get(resolution, "then")). A malicious
-  // Object.prototype.then getter can call controller.error(), which transitions
-  // the ConsumerImpl from Ready to Errored, freeing the Ready storage that
-  // `state` references. We hold a weak ref to detect this and bail out.
+  // request->resolve(js) below performs V8 allocations (wrapOpaque) that can trigger GC.
+  // GC can collect the ReadableStream that owns this ConsumerImpl (via the ownership gap:
+  // QueueImpl only holds WeakRefs to consumers), freeing the Ready storage that `state`
+  // references. We hold a weak ref to detect this and bail out.
   auto weak = consumer.selfRef.addRef();
 
   while (!state.readRequests.empty() && amountAvailable > 0) {
@@ -1197,14 +1203,11 @@ void ByteQueue::handlePush(
     state.readRequests.pop_front();
     request->resolve(js);
 
-    // resolve(js) can synchronously run user JavaScript via V8's promise resolution
-    // thenable check. A malicious Object.prototype.then getter can call
-    // controller.error() or reader.cancel(), which destroys the ConsumerImpl and
-    // frees the Ready storage that `state` references. We must check liveness
-    // before continuing the loop.
+    // resolve(js) performs V8 allocations (wrapOpaque) that can trigger GC, which can collect
+    // the ReadableStream that owns this ConsumerImpl (ownership gap) and free the Ready storage
+    // that `state` references. We must check liveness before continuing the loop.
     if (!weak->isValid()) return;
-    // Also verify the consumer is still in the Ready state — the re-entrant JS
-    // may have transitioned it to Errored/Closed without fully destroying it.
+    // Defense-in-depth: also bail if the consumer left the Ready state.
     if (!consumer.state.isActive()) return;
   }
 
@@ -1373,12 +1376,15 @@ bool ByteQueue::handleMaybeClose(
   // We should also only be here if the consumer is closing.
   KJ_ASSERT(consumer.isClosing());
 
-  // request->resolve(js) below can synchronously run user JavaScript via V8's
-  // promise resolution thenable check (Get(resolution, "then")). A malicious
-  // Object.prototype.then getter can call reader.cancel(), which frees the
-  // ConsumerImpl that owns `state` while this frame still holds raw references.
-  // Hold a weak ref so we can detect that and bail out.
+  // request->resolve(js) below performs V8 allocations (wrapOpaque) that can trigger GC, which
+  // can collect the ReadableStream that owns this ConsumerImpl (ownership gap) and free `state`
+  // while this frame still holds raw references. Hold a weak ref so we can detect that and bail
+  // out.
   auto weak = consumer.selfRef.addRef();
+
+  // The drain resolves reads while holding raw `state`/`consumer` references; enforce that
+  // resolving runs no JS that could transition or free the consumer mid-drain.
+  jsg::DisallowJavaScriptScope noJs(js);
 
   const auto consume = [&] {
     // Consume will copy as much of the remaining data in the buffer as possible
@@ -1405,8 +1411,9 @@ bool ByteQueue::handleMaybeClose(
           auto request = kj::mv(state.readRequests.front());
           state.readRequests.pop_front();
           request->resolve(js);
-          // resolve(js) may have freed the consumer via re-entrant JS.
-          // Return true; caller must check liveness before touching consumer.
+          // resolve(js) may have freed the consumer via GC (its V8 allocations can trigger
+          // collection of the owning ReadableStream). Return true; caller must check liveness
+          // before touching consumer.
           return true;
         }
         KJ_CASE_ONEOF(entry, QueueEntry) {
@@ -1459,8 +1466,8 @@ bool ByteQueue::handleMaybeClose(
               state.readRequests.pop_front();
               request->resolve(js);
 
-              // resolve(js) may have freed the consumer via re-entrant JS.
-              // Check liveness before accessing state.
+              // resolve(js) may have freed the consumer via GC (its V8 allocations can trigger
+              // collection of the owning ReadableStream). Check liveness before accessing state.
               if (!weak->isValid()) return true;
 
               if (state.queueTotalSize == 0) {
@@ -1497,8 +1504,9 @@ bool ByteQueue::handleMaybeClose(
           auto request = kj::mv(state.readRequests.front());
           state.readRequests.pop_front();
           request->resolve(js);
-          // resolve(js) may have freed the consumer via re-entrant JS.
-          // Return false; caller must check liveness before continuing.
+          // resolve(js) may have freed the consumer via GC (its V8 allocations can trigger
+          // collection of the owning ReadableStream). Return false; caller must check liveness
+          // before continuing.
           return false;
         }
       }
@@ -1520,7 +1528,7 @@ bool ByteQueue::handleMaybeClose(
       return true;
     }
 
-    // consume() may have freed the consumer via re-entrant JS.
+    // consume() may have freed the consumer via GC during resolve.
     if (!weak->isValid()) return true;
 
     // If consume() returns false, there is still data left to consume in the queue.
