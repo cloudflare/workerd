@@ -797,6 +797,37 @@ enum SetDataIndex {
   SET_DATA_SLOTS_IN_USE,
 };
 
+// Refcounted holder of a weak (non-owning) back-reference to a v8::Isolate. The reference is
+// nulled out via detach() just before the isolate is destroyed, so that objects which may outlive
+// the isolate can cheaply and safely observe whether it is still alive via isIsolateAlive(),
+// without dereferencing a dangling pointer.
+class IsolateLiveness: public kj::AtomicRefcounted {
+ public:
+  IsolateLiveness(v8::Isolate* isolate): isolate(isolate) {}
+
+  // Returns the isolate if it is still alive, or nullptr if it has been torn down (detach()ed).
+  // The returned pointer is only safe to dereference while the isolate cannot be concurrently
+  // destroyed -- e.g. while holding (or about to take) the isolate lock.
+  v8::Isolate* tryGetIsolate() const {
+    return isolate.load(std::memory_order_relaxed);
+  }
+
+  // Returns true if the isolate is still alive (detach() has not been called).
+  bool isIsolateAlive() const {
+    return tryGetIsolate() != nullptr;
+  }
+
+  // Disconnects from the isolate (called just before destroying the isolate).
+  void detach() const {
+    isolate.store(nullptr, std::memory_order_relaxed);
+  }
+
+ protected:
+  // Mutable so that it can be set null when the isolate is destroyed.
+  mutable std::atomic<v8::Isolate*> isolate;
+  static_assert(std::atomic<v8::Isolate*>::is_always_lock_free);
+};
+
 // =======================================================================================
 // Special types
 //
@@ -1557,37 +1588,6 @@ Ref<T> _jsgThis(T* obj) {
 
 #define JSG_THIS (::workerd::jsg::_jsgThis(this))
 #define JSG_THIS_WEAK(js) (getWeakRefToThis<std::remove_pointer_t<decltype(this)>>(js))
-
-// Refcounted holder of a weak (non-owning) back-reference to a v8::Isolate. The reference is
-// nulled out via detach() just before the isolate is destroyed, so that objects which may outlive
-// the isolate can cheaply and safely observe whether it is still alive via isIsolateAlive(),
-// without dereferencing a dangling pointer.
-class IsolateLiveness: public kj::AtomicRefcounted {
- public:
-  IsolateLiveness(v8::Isolate* isolate): isolate(isolate) {}
-
-  // Returns the isolate if it is still alive, or nullptr if it has been torn down (detach()ed).
-  // The returned pointer is only safe to dereference while the isolate cannot be concurrently
-  // destroyed -- e.g. while holding (or about to take) the isolate lock.
-  v8::Isolate* tryGetIsolate() const {
-    return isolate.load(std::memory_order_relaxed);
-  }
-
-  // Returns true if the isolate is still alive (detach() has not been called).
-  bool isIsolateAlive() const {
-    return tryGetIsolate() != nullptr;
-  }
-
-  // Disconnects from the isolate (called just before destroying the isolate).
-  void detach() const {
-    isolate.store(nullptr, std::memory_order_relaxed);
-  }
-
- protected:
-  // Mutable so that it can be set null when the isolate is destroyed.
-  mutable std::atomic<v8::Isolate*> isolate;
-  static_assert(std::atomic<v8::Isolate*>::is_always_lock_free);
-};
 
 // A non-owning weak reference to a resource type (a type with a JSG_RESOURCE_TYPE block).
 //
