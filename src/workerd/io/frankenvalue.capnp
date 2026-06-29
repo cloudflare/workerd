@@ -40,6 +40,13 @@ struct Frankenvalue {
       # The `workerd::rpc::SerializationTag` value describing how to materialize the capability into
       # a JS value (e.g. `serviceStub` for a Fetcher). The cap table entry must be compatible with
       # the deserializer registered for this tag.
+
+      wrapperModule @10 :Text;
+      # If present, the materialized capability is the single inner binding of a *wrapped
+      # binding* (e.g. a D1Database backed by an inner service stub). The internal module named
+      # here is invoked via its `default` export to produce the user-facing JS value. See
+      # api/wrapped-binding.{h,c++}. If absent, the capability is materialized directly through
+      # the deserializer registered for `tag`.
     }
   }
 

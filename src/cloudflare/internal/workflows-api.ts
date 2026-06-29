@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+import wrappedBinding from 'cloudflare-internal:wrapped-binding';
+
 export class NonRetryableError extends Error {
   constructor(message: string, name = 'NonRetryableError') {
     super(message);
@@ -160,10 +162,11 @@ class InstanceImpl implements WorkflowInstance {
   }
 }
 
-class WorkflowImpl {
+class WorkflowImpl extends wrappedBinding.WrappedBinding {
   readonly #fetcher: Fetcher;
 
   constructor(fetcher: Fetcher) {
+    super(fetcher);
     this.#fetcher = fetcher;
   }
 
