@@ -1,11 +1,44 @@
 #include "data-url.h"
 
-#include <workerd/api/encoding.h>
+#include "simdutf.h"
+
 #include <workerd/util/strings.h>
 
-#include <kj/encoding.h>
+#include <kj/vector.h>
 
 namespace workerd::api {
+namespace {
+
+kj::Array<kj::byte> decodeDataUrlBase64(kj::ArrayPtr<const kj::byte> input) {
+  kj::Vector<char> filtered(input.size());
+
+  for (kj::byte c: input) {
+    if (isAlpha(c) || isDigit(c) || c == '+' || c == '/') {
+      filtered.add(static_cast<char>(c));
+    }
+  }
+
+  auto base64 = filtered.asPtr();
+  if (base64.size() % 4 == 1) {
+    base64 = base64.first(base64.size() - 1);
+  }
+
+  if (base64.size() == 0) {
+    return nullptr;
+  }
+
+  auto size = simdutf::maximal_binary_length_from_base64(base64.begin(), base64.size());
+  auto decoded = kj::heapArray<kj::byte>(size);
+  auto result = simdutf::base64_to_binary(
+      base64.begin(), base64.size(), decoded.asChars().begin(), simdutf::base64_default);
+  if (result.error != simdutf::SUCCESS || result.count == 0) {
+    return nullptr;
+  }
+  KJ_ASSERT(result.count <= size);
+  return decoded.first(result.count).attach(kj::mv(decoded));
+}
+
+}  // namespace
 
 kj::Maybe<DataUrl> DataUrl::tryParse(kj::StringPtr url) {
   KJ_IF_SOME(url, jsg::Url::tryParse(url)) {
@@ -53,8 +86,7 @@ kj::Maybe<DataUrl> DataUrl::from(const jsg::Url& url) {
     kj::Array<kj::byte> decoded = nullptr;
     if (isBase64(unparsed)) {
       unparsed = unparsed.first(KJ_ASSERT_NONNULL(unparsed.findLast(';')));
-      decoded =
-          kj::decodeBase64(stripInnerWhitespace(jsg::Url::percentDecode(data.asBytes())).asChars());
+      decoded = decodeDataUrlBase64(jsg::Url::percentDecode(data.asBytes()));
     } else {
       decoded = jsg::Url::percentDecode(data.asBytes());
     }
