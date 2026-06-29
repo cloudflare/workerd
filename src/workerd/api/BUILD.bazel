@@ -453,7 +453,6 @@ wd_cc_library(
     srcs = ["data-url.c++"],
     hdrs = ["data-url.h"],
     implementation_deps = [
-        ":encoding",
         "//src/workerd/util:strings",
     ],
     visibility = ["//visibility:public"],
@@ -461,6 +460,7 @@ wd_cc_library(
         "//src/workerd/jsg:url",
         "//src/workerd/util:mimetype",
         "@capnp-cpp//src/kj",
+        "@simdutf",
     ],
 )
 
