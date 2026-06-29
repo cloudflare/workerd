@@ -409,10 +409,7 @@ export class Source extends WorkerEntrypoint {
       let worker = this.env.LOADER.load({
         compatibilityDate: '2025-01-01',
         compatibilityFlags: this.allowStubStorage
-          ? [
-              'allow_irrevocable_stub_storage',
-              'enable_ctx_exports',
-            ]
+          ? ['allow_irrevocable_stub_storage', 'enable_ctx_exports']
           : ['enable_ctx_exports'],
         mainModule: 'foo.js',
         modules: { 'foo.js': NESTED_DYNAMIC_WORKER_CODE },

@@ -115,8 +115,8 @@ wd_cc_library(
 )
 
 wd_cc_library(
-    name = "small-set",
-    hdrs = ["small-set.h"],
+    name = "small-weak-vector",
+    hdrs = ["small-weak-vector.h"],
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj",
@@ -447,9 +447,9 @@ kj_test(
 )
 
 kj_test(
-    src = "small-set-test.c++",
+    src = "small-weak-vector-test.c++",
     deps = [
-        ":small-set",
+        ":small-weak-vector",
         ":util",
     ],
 )
