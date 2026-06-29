@@ -11,9 +11,11 @@ wd_rust_crate(
         "v8.rs",
     ],
     cxx_bridge_tags = ["no-clang-tidy"],
+    link_deps = [
+        ":ffi",
+    ],
     visibility = ["//visibility:public"],
     deps = [
-        ":ffi",
         "//src/workerd/io:compatibility-date_capnp_rust",
         "@crates_vendor//:capnp",
     ],

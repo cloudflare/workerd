@@ -113,10 +113,10 @@ archive_override(
         "//:patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch",
         "//:patches/perfetto/0002-disable-info-level-logging-re2.patch",
     ],
-    sha256 = "daa181f99c264de1edd2e5c67890f79dd2ea728a29ed3a0f1699dc2624b7521e",
-    strip_prefix = "google-perfetto-4c2a81c",
+    sha256 = "60dd39e5f21800c4f61032ca9f9f73973cfc7d93db9f0d39e63ad3d8fb3740e9",
+    strip_prefix = "google-perfetto-25e635e",
     type = "tgz",
-    url = "https://api.github.com/repos/google/perfetto/tarball/v56.0",
+    url = "https://api.github.com/repos/google/perfetto/tarball/v56.1",
 )
 
 # simdutf
@@ -136,10 +136,10 @@ bazel_dep(name = "tcmalloc", version = "0.0.0-20250927-12f2552")
 # workerd-cxx
 http.archive(
     name = "workerd-cxx",
-    sha256 = "3b41e4201af9e87ef452b4ebe93d018af033e5b1c8c81e653d56fd2632820b02",
-    strip_prefix = "cloudflare-workerd-cxx-2f7e595",
+    sha256 = "3d8c7098bb95b107f0cceca466b353d29df3edd99fdacdd518a4d468371ee509",
+    strip_prefix = "cloudflare-workerd-cxx-a4a5c4a",
     type = "tgz",
-    url = "https://github.com/cloudflare/workerd-cxx/tarball/2f7e59599bd05d22ab22cf1ab6963f1601a5d006",
+    url = "https://github.com/cloudflare/workerd-cxx/tarball/a4a5c4a1d128316efb33469f499b20b98a5ae375",
 )
 use_repo(http, "workerd-cxx")
 
@@ -148,7 +148,7 @@ bazel_dep(name = "zlib")
 git_override(
     module_name = "zlib",
     build_file = "//:build/BUILD.zlib",
-    commit = "3246f1b60849cc505e231c5d19d0cbf358093555",
+    commit = "8b3aa8a1cd7585c0c4c67351481227b046a662a0",
     patch_strip = 1,
     patches = [
         "//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch",

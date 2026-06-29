@@ -10,12 +10,14 @@ wd_rust_crate(
         "http.rs",
         "io.rs",
     ],
+    link_deps = [
+        ":ffi",
+    ],
     proc_macro_deps = [
         "@crates_vendor//:async-trait",
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":ffi",
         "@crates_vendor//:futures",
         "@crates_vendor//:static_assertions",
     ],

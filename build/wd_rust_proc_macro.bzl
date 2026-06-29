@@ -26,7 +26,7 @@ def wd_rust_proc_macro(
         name = name,
         crate_name = crate_name,
         srcs = srcs,
-        deps = deps + ["@workerd//deps/rust:runtime"],
+        deps = deps,
         visibility = visibility,
         data = data,
         target_compatible_with = select({
