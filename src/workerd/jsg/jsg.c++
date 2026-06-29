@@ -47,10 +47,22 @@ void Data::deferGlobalDestruction(v8::Isolate* isolate, v8::Global<v8::Data> han
   jsgIsolate.deferDestruction(v8::Global<v8::Data>(kj::mv(handle)));
 }
 
+kj::Arc<const IsolateLiveness> Data::getIsolateLiveness(v8::Isolate* isolate) {
+  return IsolateBase::from(isolate).getIsolateLiveness();
+}
+
 void Data::destroy() {
   assertInvariant();
-  if (isolate != nullptr) {
-    if (v8::Locker::IsLocked(isolate)) {
+  if (isolateLiveness != nullptr) {
+    v8::Isolate* isolate = isolateLiveness->tryGetIsolate();
+    if (isolate == nullptr) {
+      // The isolate has already been torn down (e.g. a strong jsg::Data outlived its isolate
+      // because the object holding it was destroyed during request cleanup after teardown). V8 has
+      // freed the isolate's global-handle storage, so we must NOT Reset() the handles -- that would
+      // touch freed memory. Abandon the slots instead; their backing was already reclaimed with the
+      // isolate. The TracedReference has a trivial destructor, so nothing to do for it.
+      handle.Clear();
+    } else if (v8::Locker::IsLocked(isolate)) {
       handle.Reset();
 
       // If we have a TracedReference, Reset() it too, to let V8 know that this value is no longer
@@ -83,7 +95,7 @@ void Data::destroy() {
       // The `tracedRef` part has a trivial destructor so can be destroyed on any thread.
       deferGlobalDestruction(isolate, kj::mv(handle));
     }
-    isolate = nullptr;
+    isolateLiveness = nullptr;
   }
 }
 
@@ -95,7 +107,9 @@ void Data::moveFromTraced(Data& other, v8::TracedReference<v8::Data>& otherTrace
   // segfault later.
 
   // We must hold a lock to move from a GC-reachable reference. (But we don't generally need a lock
-  // for moving from non-GC-reachable refs.)
+  // for moving from non-GC-reachable refs.) Moving a traced ref implies the isolate is alive, so
+  // getIsolate() is non-null here.
+  v8::Isolate* isolate = getIsolate();
   KJ_ASSERT(v8::Locker::IsLocked(isolate));
 
   // Verify the handle was not garbage-collected by trying to read it. The intention is for this

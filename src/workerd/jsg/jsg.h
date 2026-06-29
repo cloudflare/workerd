@@ -831,18 +831,18 @@ class Data {
   ~Data() noexcept(false) {
     destroy();
   }
-  Data(Data&& other) noexcept: isolate(other.isolate), handle(kj::mv(other.handle)) {
+  Data(Data&& other) noexcept
+      : isolateLiveness(kj::mv(other.isolateLiveness)),
+        handle(kj::mv(other.handle)) {
     KJ_IF_SOME(t, other.tracedHandle) {
       moveFromTraced(other, t);
     }
-    other.isolate = nullptr;
   }
   Data& operator=(Data&& other) {
     if (this != &other) {
       destroy();
-      isolate = other.isolate;
+      isolateLiveness = kj::mv(other.isolateLiveness);
       handle = kj::mv(other.handle);
-      other.isolate = nullptr;
       KJ_IF_SOME(t, other.tracedHandle) {
         moveFromTraced(other, t);
       }
@@ -854,7 +854,7 @@ class Data {
   KJ_DISALLOW_COPY(Data);
 
   Data(v8::Isolate* isolate, v8::Local<v8::Data> handle)
-      : isolate(isolate),
+      : isolateLiveness(getIsolateLiveness(isolate)),
         handle(isolate, handle) {}
 
   // Get the raw underlying v8 handle.
@@ -878,8 +878,18 @@ class Data {
   }
 
  private:
-  // The isolate with which the handles below are associated.
-  v8::Isolate* isolate = nullptr;
+  // Liveness handle for the isolate the handles below are associated with. Null exactly when this
+  // Data is empty. Reading the isolate through this (rather than caching a raw v8::Isolate*) lets
+  // destroy() detect when the isolate has already been torn down: a strong jsg::Data may outlive
+  // its isolate, e.g. an error JsRef held by a WebSocket whose request is cleaned up after the
+  // isolate is gone. Without this, destroy() would call v8::Locker::IsLocked() on a freed isolate.
+  kj::Arc<const IsolateLiveness> isolateLiveness;
+
+  // The isolate the handles below are associated with, or nullptr if this Data is empty or the
+  // isolate has already been torn down.
+  v8::Isolate* getIsolate() const {
+    return isolateLiveness == nullptr ? nullptr : isolateLiveness->tryGetIsolate();
+  }
 
   // Handle to the value which will be marked strong if any untraced C++ references exist, weak
   // otherwise.
@@ -902,7 +912,7 @@ class Data {
   // intended to be invoked from the move ctor and assignment operator. We expect them to be
   // invoked a lot and want them to be as optimizable as possible.
   void assertInvariant() {
-    KJ_IASSERT(isolate != nullptr || handle.IsEmpty());
+    KJ_IASSERT(isolateLiveness != nullptr || handle.IsEmpty());
   }
 
   // Implement move constructor when the source of the move has previously been visited for
@@ -912,6 +922,10 @@ class Data {
   // Defers destruction of a v8::Global handle to the next time the isolate is locked.
   // Used by Data::destroy() and WeakV8Ref::destroy().
   static void deferGlobalDestruction(v8::Isolate* isolate, v8::Global<v8::Data> handle);
+
+  // Looks up the IsolateLiveness handle for the given isolate. Captured at construction so that
+  // destroy() can tell whether the isolate is still alive. Used by Data and WeakV8Ref.
+  static kj::Arc<const IsolateLiveness> getIsolateLiveness(v8::Isolate* isolate);
 
   template <typename>
   friend class WeakV8Ref;
@@ -1039,7 +1053,9 @@ class WeakV8Ref final {
  public:
   WeakV8Ref(decltype(nullptr)) {}
 
-  WeakV8Ref(v8::Isolate* isolate, v8::Local<T> handle): isolate(isolate), handle(isolate, handle) {
+  WeakV8Ref(v8::Isolate* isolate, v8::Local<T> handle)
+      : isolateLiveness(Data::getIsolateLiveness(isolate)),
+        handle(isolate, handle) {
     this->handle.SetWeak();
   }
 
@@ -1047,18 +1063,18 @@ class WeakV8Ref final {
     destroy();
   }
 
-  WeakV8Ref(WeakV8Ref&& other) noexcept: isolate(other.isolate), handle(kj::mv(other.handle)) {
-    other.isolate = nullptr;
-  }
+  WeakV8Ref(WeakV8Ref&& other) noexcept
+      : isolateLiveness(kj::mv(other.isolateLiveness)),
+        handle(kj::mv(other.handle)) {}
 
   WeakV8Ref& operator=(WeakV8Ref&& other) {
     if (this != &other) {
       auto tmp = kj::mv(other.handle);
-      auto tmpIsolate = other.isolate;
+      auto tmpLiveness = kj::mv(other.isolateLiveness);
       other.handle = kj::mv(handle);
-      other.isolate = isolate;
+      other.isolateLiveness = kj::mv(isolateLiveness);
       handle = kj::mv(tmp);
-      isolate = tmpIsolate;
+      isolateLiveness = kj::mv(tmpLiveness);
       other.destroy();
     }
     return *this;
@@ -1099,17 +1115,24 @@ class WeakV8Ref final {
   kj::Maybe<V8Ref<T>> tryAddRef(Lock& js) const;
 
  private:
-  v8::Isolate* isolate = nullptr;
+  // Liveness handle for the owning isolate; see jsg::Data for why we hold this rather than a raw
+  // v8::Isolate*. Null exactly when this WeakV8Ref is empty.
+  kj::Arc<const IsolateLiveness> isolateLiveness;
   v8::Global<v8::Data> handle;
 
   void destroy() {
-    if (isolate != nullptr && !handle.IsEmpty()) {
-      if (v8::Locker::IsLocked(isolate)) {
+    if (isolateLiveness != nullptr && !handle.IsEmpty()) {
+      v8::Isolate* isolate = isolateLiveness->tryGetIsolate();
+      if (isolate == nullptr) {
+        // The isolate is already torn down; its global-handle storage is gone, so we must not
+        // Reset(). Abandon the slot instead (see Data::destroy()).
+        handle.Clear();
+      } else if (v8::Locker::IsLocked(isolate)) {
         handle.Reset();
       } else {
         Data::deferGlobalDestruction(isolate, kj::mv(handle));
       }
-      isolate = nullptr;
+      isolateLiveness = nullptr;
     }
   }
 };
