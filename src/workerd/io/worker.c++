@@ -745,14 +745,25 @@ struct Worker::Isolate::Impl {
     kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>> inspector;
     jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
       auto lock = api.lock(stackScope);
-      auto featureFlagsWords = capnp::canonicalize(api.getFeatureFlags());
+      auto featureFlags = api.getFeatureFlags();
+      auto featureFlagsWords = capnp::canonicalize(featureFlags);
       realm = ::workerd::rust::jsg::realm_create(
           lock->v8Isolate, featureFlagsWords.asBytes().as<kj_rs::Rust>());
       lock->v8Isolate->SetData(
           ::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &*KJ_REQUIRE_NONNULL(realm));
 
       limitEnforcer.customizeIsolate(lock->v8Isolate);
-      if (inspectorPolicy != InspectorPolicy::DISALLOW) {
+
+      // The experimental, local-dev-only node:inspector module needs the isolate's V8Inspector to
+      // exist so it can connect its own in-process CDP session. We create the inspector eagerly
+      // here (rather than lazily) so that setupContext()'s contextCreated() call registers the
+      // worker's context with it automatically. This is gated on `!isMultiTenantProcess()`, so it
+      // can never trigger in Cloudflare's production runtime. (The flag itself is `$experimental`,
+      // which already bars production use, but we double-guard with the same invariant the
+      // DevTools inspector relies on.)
+      bool enableInspectorForNodeModule =
+          featureFlags.getEnableNodeJsInspectorLocalDev() && !isMultiTenantProcess();
+      if (inspectorPolicy != InspectorPolicy::DISALLOW || enableInspectorForNodeModule) {
         // We just created our isolate, so we don't need to use Isolate::Impl::Lock.
         KJ_ASSERT(!isMultiTenantProcess(), "inspector is not safe in multi-tenant processes");
         inspector = v8_inspector::V8Inspector::create(lock->v8Isolate, inspectorClient.get());
@@ -4463,6 +4474,13 @@ void Worker::Isolate::completedRequest() const {
 
 bool Worker::Isolate::isInspectorEnabled() const {
   return impl->inspector != kj::none;
+}
+
+kj::Maybe<v8_inspector::V8Inspector&> Worker::Isolate::tryGetV8Inspector() const {
+  KJ_IF_SOME(i, impl->inspector) {
+    return *i.get();
+  }
+  return kj::none;
 }
 
 namespace {

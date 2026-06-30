@@ -32,6 +32,10 @@ class BackingStore;
 class Isolate;
 }  // namespace v8
 
+namespace v8_inspector {
+class V8Inspector;
+}  // namespace v8_inspector
+
 namespace workerd {
 
 WD_STRONG_BOOL(StructuredLogging);
@@ -496,6 +500,14 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   kj::Promise<AsyncLock> takeAsyncLock(RequestObserver&) const;
 
   bool isInspectorEnabled() const;
+
+  // Returns the isolate's V8 inspector, if one exists. An inspector is created either because a
+  // DevTools session is allowed (`InspectorPolicy != DISALLOW`, e.g. `workerd --inspector-addr`)
+  // or because the experimental, local-dev-only `enable_nodejs_inspector_local_dev` flag is set
+  // (which is impossible in multi-tenant production). Used by the experimental `node:inspector`
+  // module to connect its own in-process CDP session, independent of any DevTools session.
+  // Returns kj::none when no inspector exists.
+  kj::Maybe<v8_inspector::V8Inspector&> tryGetV8Inspector() const;
 
   // Get the process stdio prefixed setting from logging options
   inline kj::StringPtr getStdoutPrefix() const {
