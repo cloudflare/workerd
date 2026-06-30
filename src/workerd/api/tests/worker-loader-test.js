@@ -141,6 +141,48 @@ class alternate(WorkerEntrypoint):
   },
 };
 
+export let pythonArbitraryModuleExtensions = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('pythonArbitraryModuleExtensions', () => {
+      return {
+        compatibilityDate: '2026-05-15',
+        mainModule: 'foo.py',
+        compatibilityFlags: ['python_workers'],
+        modules: {
+          'foo.py': `
+from workers import WorkerEntrypoint
+from pathlib import Path
+import submodule;
+from subdirectory import subsubmodule;
+class Default(WorkerEntrypoint):
+  async def greet(self, name):
+    with open(str(Path(__file__).parent) + "/python_modules/data.txt", 'r') as f:
+      return f.read() + name
+  async def bytes(self):
+    with open(str(Path(__file__).parent) + "/python_modules/data.mycoolextension", 'rb') as f:
+      return (f.read())
+  async def modules_in_main_directory(self):
+    return submodule.submodule_value + subsubmodule.subsubmodule_value;
+          `,
+          'submodule.py': `submodule_value = 10`,
+          'subdirectory/subsubmodule.py': `subsubmodule_value = 20`,
+          'python_modules/data.txt': 'Hello, ',
+          'python_modules/data.mycoolextension': { data: new Uint8Array([1, 2, 3, 4]) },
+        },
+      };
+    });
+
+    let result = await worker.getEntrypoint().greet('Stacey');
+    assert.strictEqual(result, 'Hello, Stacey');
+
+    assert.deepEqual(
+      await worker.getEntrypoint().bytes(),
+      new Uint8Array([1, 2, 3, 4])
+    );
+    assert.strictEqual(await worker.getEntrypoint().modules_in_main_directory(), 30);
+  },
+};
+
 // Test supplying a basic `env` object.
 export let passEnv = {
   async test(ctrl, env, ctx) {
