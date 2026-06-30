@@ -475,6 +475,16 @@ export const testDnsLookup = {
       throws(() => dnsPromises.lookup(1, {}), err);
     }
 
+    {
+      const err = {
+        code: 'ERR_INVALID_ARG_VALUE',
+        name: 'TypeError',
+      };
+
+      throws(() => dns.lookup('nodejs.org\u0000', () => {}), err);
+      throws(() => dnsPromises.lookup('nodejs.org\u0000'), err);
+    }
+
     throws(
       () => {
         dns.lookup(false, 'cb');

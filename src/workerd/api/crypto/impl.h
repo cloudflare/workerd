@@ -12,6 +12,7 @@
 #include <workerd/api/util.h>
 #include <workerd/jsg/jsvalue.h>
 
+#include <limits.h>
 #include <ncrypto.h>
 #include <openssl/base.h>
 #include <openssl/bn.h>
@@ -77,6 +78,10 @@ std::pair<kj::StringPtr, const EVP_MD*> lookupDigestAlgorithm(kj::StringPtr algo
 // implement as a wrapper. Could be sufficient to just add a "urlEncoded" boolean so that
 // kj::decodeBase64 can do this in-situ for both cases.
 kj::EncodingResult<kj::Array<kj::byte>> decodeBase64Url(kj::String text);
+
+inline bool isOpenSslInputSizeValid(size_t inputSize, size_t extraOutputSize = 0) {
+  return inputSize <= INT_MAX && extraOutputSize <= INT_MAX - inputSize;
+}
 
 // WebCrypto likes to allow algorithms to be specified as a simple string name, or as a struct
 // containing a `name` field and possibly other fields. This helper collapses that.
