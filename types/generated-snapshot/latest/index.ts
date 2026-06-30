@@ -14569,6 +14569,53 @@ export declare namespace Rpc {
       Exclude<keyof T, Reserved | symbol | keyof StubBase<never>>
     >;
 }
+/**
+ * Error thrown across a Workers RPC boundary — for example, from a
+ * `DurableObjectStub`, a service binding, a `WorkerEntrypoint`, or an
+ * `RpcTarget`. The Workers runtime annotates tunneled exceptions with extra
+ * boolean hints so client code can decide whether to retry, back off, or give
+ * up.
+ *
+ * All properties are optional and only present when the runtime has set them;
+ * they are never set to `false`.
+ *
+ * @see https://developers.cloudflare.com/durable-objects/best-practices/error-handling/
+ */
+export interface WorkersRpcError extends Error {
+  /**
+   * `true` when the failure is transient (for example, a lost network
+   * connection) and the operation is safe to retry, typically with randomized
+   * exponential backoff. Only retry if the request is idempotent.
+   */
+  retryable?: boolean;
+  /**
+   * `true` when the RPC target is overloaded. Do NOT retry: additional
+   * requests will worsen the overload and increase the overall error rate.
+   */
+  overloaded?: boolean;
+  /**
+   * `true` when the exception originated on the remote side, either from user
+   * code running inside the RPC target or from infrastructure running on its
+   * behalf (for example, when a Durable Object exceeds its memory or CPU
+   * limits).
+   */
+  remote?: boolean;
+}
+/**
+ * Error thrown by a `DurableObjectStub` when a call to a remote Durable Object
+ * fails. Extends {@link WorkersRpcError} with Durable-Object-specific hints.
+ *
+ * @see https://developers.cloudflare.com/durable-objects/best-practices/error-handling/
+ */
+export interface DurableObjectError extends WorkersRpcError {
+  /**
+   * `true` when the Durable Object was reset (for example, due to a
+   * redeployment, an internal restart, or a storage operation that exceeded
+   * its timeout). The current stub is broken; create a new `DurableObjectStub`
+   * before issuing further requests.
+   */
+  durableObjectReset?: boolean;
+}
 export declare namespace Cloudflare {
   // Type of `env`.
   //
