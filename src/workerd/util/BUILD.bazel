@@ -94,8 +94,8 @@ wd_cc_library(
 )
 
 wd_cc_library(
-    name = "allow-destruction",
-    hdrs = ["allow-destruction.h"],
+    name = "consume",
+    hdrs = ["consume.h"],
     visibility = ["//visibility:public"],
     deps = ["@capnp-cpp//src/kj"],
 )

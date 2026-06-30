@@ -66,6 +66,7 @@ Checks: >
   readability-static-accessed-through-instance,
   readability-use-concise-preprocessor-directives,
   jsg-visit-for-gc,
+  workerd-consume,
   workerd-unsafe-continuation-capture
 
 # TODO: Fix and enable

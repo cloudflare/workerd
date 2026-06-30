@@ -20,7 +20,7 @@ Custom Bazel rules (`wd_*` macros) for C++, TypeScript, Rust, Cap'n Proto, and t
 | `wd_capnp_library.bzl`                     | Cap'n Proto schema compilation                                                                    |
 | `wd_rust_crate.bzl` / `wd_rust_binary.bzl` | Rust build rules                                                                                  |
 | `lint_test.bzl`                            | ESLint integration                                                                                |
-| `//tools/clang-tidy:workerd-lint`          | Custom clang-tidy plugin (source: `tools/clang-tidy/workerd-lint.c++`); ships the `jsg-visit-for-gc` and `workerd-unsafe-continuation-capture` checks |
+| `//tools/clang-tidy:workerd-lint`          | Custom clang-tidy plugin (source: `tools/clang-tidy/workerd-lint.c++`); ships the `jsg-visit-for-gc`, `workerd-consume`, and `workerd-unsafe-continuation-capture` checks |
 
 **Conventions:**
 
@@ -38,6 +38,9 @@ that adds workerd-specific static checks:
   (`jsg::Ref`, `jsg::JsRef`, `jsg::V8Ref`, `jsg::Function`, `jsg::Promise`,
   `jsg::BufferSource`, `jsg::Value`, etc., plus `kj::Maybe`/`Array`/`Vector`/
   `OneOf` and `jsg::Optional` wrappers thereof) are missing from `visitForGc()`.
+- `workerd-consume`: flags calls to methods annotated with `WD_CONSUME` when
+  the call is made directly through `kj::Ptr` instead of through
+  `consume(kj::mv(ptr))->method(...)`.
 - `workerd-unsafe-continuation-capture`: flags lambdas passed to async sinks
   (e.g. `kj::Promise::then`) that capture bare references, raw pointers, or
   non-owning views.
