@@ -140,7 +140,7 @@ def wd_rust_crate(
         crate_name = crate_name,
         srcs = srcs,
         deps = deps,
-        link_deps = link_deps + ["@workerd//deps/rust:runtime"],
+        link_deps = link_deps + ["@@//deps:rust_runtime"],
         visibility = visibility,
         data = data,
         proc_macro_deps = proc_macro_deps,
