@@ -45,6 +45,7 @@
 #include <capnp/message.h>
 #include <kj/compat/brotli.h>
 #include <kj/compat/gzip.h>
+#include <zstd.h>
 #include <kj/encoding.h>
 #include <kj/filesystem.h>
 #include <kj/map.h>
@@ -4486,6 +4487,37 @@ double getWallTimeForProcessSandboxOnly() {
 }
 }  // namespace
 
+// Synchronous zstd decompressor used by ResponseStreamWrapper for DevTools inspection.
+// Mirrors the GzipOutputStream/BrotliOutputStream pattern: write() pushes compressed chunks
+// through ZSTD_decompressStream() and emits decompressed bytes into `output`.
+class Worker::Isolate::ZstdDecompressor {
+ public:
+  explicit ZstdDecompressor(LimitedBodyWrapper& output)
+      : output(output), dctx(ZSTD_createDCtx()) {
+    KJ_ASSERT(dctx != nullptr, "failed to allocate ZSTD_DCtx");
+  }
+  ~ZstdDecompressor() noexcept(false) {
+    ZSTD_freeDCtx(dctx);
+  }
+  KJ_DISALLOW_COPY_AND_MOVE(ZstdDecompressor);
+
+  void write(kj::ArrayPtr<const kj::byte> data) {
+    kj::byte outBuf[16384];
+    ZSTD_inBuffer input = {data.begin(), data.size(), 0};
+    while (input.pos < input.size) {
+      ZSTD_outBuffer out = {outBuf, sizeof(outBuf), 0};
+      size_t result = ZSTD_decompressStream(dctx, &out, &input);
+      KJ_REQUIRE(!ZSTD_isError(result), "zstd decompression error", ZSTD_getErrorName(result));
+      output.write(kj::ArrayPtr<const kj::byte>(outBuf, out.pos));
+    }
+  }
+  void flush() {}
+
+ private:
+  LimitedBodyWrapper& output;
+  ZSTD_DCtx* dctx;
+};
+
 class Worker::Isolate::ResponseStreamWrapper final: public kj::AsyncOutputStream {
  public:
   ResponseStreamWrapper(kj::Own<const Isolate> isolate,
@@ -4502,6 +4534,8 @@ class Worker::Isolate::ResponseStreamWrapper final: public kj::AsyncOutputStream
     } else if (encoding == api::StreamEncoding::BROTLI) {
       compStream.emplace().init<kj::BrotliOutputStream>(
           decodedBuf, kj::BrotliOutputStream::DECOMPRESS);
+    } else if (encoding == api::StreamEncoding::ZSTD) {
+      compStream.emplace().init<ZstdDecompressor>(decodedBuf);
     }
   }
 
@@ -4564,6 +4598,12 @@ class Worker::Isolate::ResponseStreamWrapper final: public kj::AsyncOutputStream
           brotli.write(buffer);
           brotli.flush();
         }
+        KJ_CASE_ONEOF(zstd, ZstdDecompressor) {
+          KJ_ON_SCOPE_FAILURE(decodedBuf.reset());
+
+          zstd.write(buffer);
+          zstd.flush();
+        }
       }
     } else {
       decodedBuf.write(buffer);
@@ -4605,7 +4645,7 @@ class Worker::Isolate::ResponseStreamWrapper final: public kj::AsyncOutputStream
   kj::Own<kj::AsyncOutputStream> inner;
   size_t rawSize = 0;
   LimitedBodyWrapper decodedBuf;
-  kj::Maybe<kj::OneOf<kj::GzipOutputStream, kj::BrotliOutputStream>> compStream;
+  kj::Maybe<kj::OneOf<kj::GzipOutputStream, kj::BrotliOutputStream, ZstdDecompressor>> compStream;
   RequestObserver& requestMetrics;
 
   // Called when the wrapper is destroyed.
@@ -4790,6 +4830,8 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
         encoding = api::StreamEncoding::GZIP;
       } else if (encodingStr == "br") {
         encoding = api::StreamEncoding::BROTLI;
+      } else if (encodingStr == "zstd") {
+        encoding = api::StreamEncoding::ZSTD;
       }
     }
 

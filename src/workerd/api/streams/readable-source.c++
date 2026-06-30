@@ -14,6 +14,7 @@
 #include <kj/async-io.h>
 #include <kj/compat/brotli.h>
 #include <kj/compat/gzip.h>
+#include <zstd.h>
 
 #include <bit>
 
@@ -665,6 +666,63 @@ class NoDeferredProxySource final: public ReadableSourceWrapper {
   IoContext& ioctx;
 };
 
+class ZstdAsyncInputStream final: public kj::AsyncInputStream {
+ public:
+  explicit ZstdAsyncInputStream(kj::AsyncInputStream& inner)
+      : inner(inner), dctx(ZSTD_createDCtx()) {
+    KJ_ASSERT(dctx != nullptr, "failed to allocate ZSTD_DCtx");
+  }
+  ~ZstdAsyncInputStream() noexcept(false) {
+    ZSTD_freeDCtx(dctx);
+  }
+  KJ_DISALLOW_COPY_AND_MOVE(ZstdAsyncInputStream);
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return readImpl(reinterpret_cast<kj::byte*>(buffer), minBytes, maxBytes, 0);
+  }
+
+ private:
+  kj::AsyncInputStream& inner;
+  ZSTD_DCtx* dctx;
+  bool atValidEndpoint = false;
+  static constexpr size_t IN_BUFFER_SIZE = 16384;
+  kj::byte inBuffer[IN_BUFFER_SIZE];
+  size_t inAvail = 0;
+  size_t inPos = 0;
+
+  kj::Promise<size_t> readImpl(
+      kj::byte* out, size_t minBytes, size_t maxBytes, size_t alreadyRead) {
+    while (inAvail > 0 && alreadyRead < maxBytes) {
+      ZSTD_inBuffer input = {inBuffer + inPos, inAvail, 0};
+      ZSTD_outBuffer output = {out, maxBytes, alreadyRead};
+      size_t result = ZSTD_decompressStream(dctx, &output, &input);
+      inPos += input.pos;
+      inAvail -= input.pos;
+      alreadyRead = output.pos;
+      KJ_REQUIRE(!ZSTD_isError(result), "zstd decompression error", ZSTD_getErrorName(result));
+      if (result == 0) {
+        atValidEndpoint = true;
+        if (inAvail == 0) break;
+        atValidEndpoint = false;
+      }
+      if (alreadyRead >= minBytes) return alreadyRead;
+    }
+    if (alreadyRead >= minBytes) return alreadyRead;
+    inPos = 0;
+    inAvail = 0;
+    return inner.tryRead(inBuffer, 1, IN_BUFFER_SIZE)
+        .then([this, out, minBytes, maxBytes, alreadyRead](size_t n) -> kj::Promise<size_t> {
+      if (n == 0) {
+        KJ_REQUIRE(atValidEndpoint, "zstd-compressed stream ended prematurely");
+        return alreadyRead;
+      }
+      inAvail = n;
+      inPos = 0;
+      return readImpl(out, minBytes, maxBytes, alreadyRead);
+    });
+  }
+};
+
 // A ReadableSource implementation that lazily wraps an innner Gzip or Brotli
 // encoded AsyncInputStream when the first read() is called, or when pumpTo is called,
 // the encoding will be selectively and lazily applied to the inner stream.
@@ -694,6 +752,9 @@ class EncodedAsyncInputStream final: public ReadableSourceImpl {
                 {"brotli compression failed"_kj, "Brotli compression failed."},
                 {"brotli compressed stream ended prematurely"_kj,
                   "Brotli compressed stream ended prematurely."},
+                {"zstd decompression error"_kj, "Zstd decompression failed."},
+                {"zstd-compressed stream ended prematurely"_kj,
+                  "Zstd compressed stream ended prematurely."},
               })) {
         kj::throwFatalException(kj::mv(translated));
       } else {
@@ -738,6 +799,9 @@ class EncodedAsyncInputStream final: public ReadableSourceImpl {
       }
       case rpc::StreamEncoding::BROTLI: {
         return kj::heap<kj::BrotliAsyncInputStream>(*inner).attach(kj::mv(inner));
+      }
+      case rpc::StreamEncoding::ZSTD: {
+        return kj::heap<ZstdAsyncInputStream>(*inner).attach(kj::mv(inner));
       }
     }
     KJ_UNREACHABLE;

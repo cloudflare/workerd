@@ -501,6 +501,7 @@ enum StreamEncoding {
   identity @0;
   gzip @1;
   brotli @2;
+  zstd @3;
 }
 
 interface Handle {
