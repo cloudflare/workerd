@@ -74,25 +74,9 @@ jsg::Optional<kj::StringPtr> getCacheModeName(Request::CacheMode mode) {
 // capitalization). So, it's certainly not worth it to try to keep the original capitalization
 // across serialization.
 
-Body::Buffer Body::Buffer::clone(jsg::Lock& js) {
-  Buffer result;
-  result.view = view;
-  KJ_SWITCH_ONEOF(ownBytes) {
-    KJ_CASE_ONEOF(ref, jsg::JsRef<jsg::JsBufferSource>) {
-      result.ownBytes = ref.addRef(js);
-    }
-    KJ_CASE_ONEOF(refcounted, kj::Own<RefcountedBytes>) {
-      result.ownBytes = kj::addRef(*refcounted);
-    }
-    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-      result.ownBytes = blob.addRef();
-    }
-  }
-  return result;
-}
-
-Body::ExtractedBody::ExtractedBody(
-    jsg::Ref<ReadableStream> stream, kj::Maybe<Buffer> buffer, kj::Maybe<kj::String> contentType)
+Body::ExtractedBody::ExtractedBody(jsg::Ref<ReadableStream> stream,
+    kj::Maybe<kj::Rc<Buffer>> buffer,
+    kj::Maybe<kj::String> contentType)
     : impl{kj::mv(stream), kj::mv(buffer)},
       contentType(kj::mv(contentType)) {
   // This check is in the constructor rather than `extractBody()`, because we often construct
@@ -103,7 +87,7 @@ Body::ExtractedBody::ExtractedBody(
 }
 
 Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
-  Buffer buffer;
+  kj::Maybe<kj::Rc<Buffer>> buffer;
   kj::Maybe<kj::String> contentType;
 
   KJ_SWITCH_ONEOF(init) {
@@ -115,7 +99,7 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
     }
     KJ_CASE_ONEOF(text, kj::String) {
       contentType = kj::str(MimeType::PLAINTEXT_STRING);
-      buffer = kj::mv(text);
+      buffer = kj::rc<Buffer>(kj::mv(text));
     }
     KJ_CASE_ONEOF(bytesRef, jsg::JsRef<jsg::JsBufferSource>) {
       // Per the Fetch spec we must copy the input buffer here. Beyond spec conformance, this
@@ -123,7 +107,7 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       // be freed if the original ArrayBuffer is detached and transferred (e.g. via structuredClone
       // with a transfer list) and then garbage collected. This applies to both resizable and
       // fixed-size buffers. Copying severs the dependency on the V8 backing store.
-      buffer = kj::heapArray(bytesRef.getHandle(js).asArrayPtr());
+      buffer = kj::rc<Buffer>(kj::heapArray(bytesRef.getHandle(js).asArrayPtr()));
     }
     KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
       // Blobs always have a type, but it defaults to an empty string. We should NOT set
@@ -132,7 +116,7 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       if (blobType != nullptr) {
         contentType = kj::str(blobType);
       }
-      buffer = kj::mv(blob);
+      buffer = kj::rc<Buffer>(kj::mv(blob));
     }
     KJ_CASE_ONEOF(formData, jsg::Ref<FormData>) {
       // Make an array of characters containing random hexadecimal digits.
@@ -145,29 +129,31 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       workerd::getEntropy(boundaryBuffer);
       auto boundary = kj::encodeHex(boundaryBuffer);
       contentType = MimeType::formDataWithBoundary(boundary);
-      buffer = formData->serialize(boundary);
+      buffer = kj::rc<Buffer>(formData->serialize(boundary));
     }
     KJ_CASE_ONEOF(searchParams, jsg::Ref<URLSearchParams>) {
       contentType = MimeType::formUrlEncodedWithCharset("UTF-8"_kj);
-      buffer = searchParams->toString();
+      buffer = kj::rc<Buffer>(searchParams->toString());
     }
     KJ_CASE_ONEOF(searchParams, jsg::Ref<url::URLSearchParams>) {
       contentType = MimeType::formUrlEncodedWithCharset("UTF-8"_kj);
-      buffer = searchParams->toString();
+      buffer = kj::rc<Buffer>(searchParams->toString());
     }
   }
-
-  auto buf = buffer.clone(js);
 
   // We use streams::newMemorySource() here rather than newSystemStream() wrapping a
   // newMemoryInputStream() because we do NOT want deferred proxying for bodies with
   // V8 heap provenance. Some buffer types (e.g. Blob data) may reference V8 heap memory
   // and we must ensure the data is consumed and destroyed while under the isolate lock,
   // which means deferred proxying is not allowed.
-  auto rs = streams::newMemorySource(buf.view, kj::heap(kj::mv(buf.ownBytes)));
+  auto& buf = KJ_ASSERT_NONNULL(buffer);
+  auto rs = streams::newMemorySource(buf->view, buf.addRef().toOwn());
 
-  return {js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs)), kj::mv(buffer),
-    kj::mv(contentType)};
+  return {
+    js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs)),
+    kj::mv(buffer),
+    kj::mv(contentType),
+  };
 }
 
 Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers)
@@ -193,10 +179,10 @@ Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers)
       })),
       headersRef(headers) {}
 
-kj::Maybe<Body::Buffer> Body::getBodyBuffer(jsg::Lock& js) {
+kj::Maybe<kj::Rc<Body::Buffer>> Body::getBodyBuffer() {
   KJ_IF_SOME(i, impl) {
     KJ_IF_SOME(b, i.buffer) {
-      return b.clone(js);
+      return b.addRef();
     }
   }
   return kj::none;
@@ -215,14 +201,15 @@ void Body::rewindBody(jsg::Lock& js) {
   KJ_DASSERT(canRewindBody());
 
   KJ_IF_SOME(i, impl) {
-    auto bufferCopy = KJ_ASSERT_NONNULL(i.buffer).clone(js);
+    auto bufferCopy = KJ_ASSERT_NONNULL(i.buffer).addRef();
 
     // We use streams::newMemorySource() here rather than newSystemStream() wrapping a
     // newMemoryInputStream() because we do NOT want deferred proxying for bodies with
     // V8 heap provenance. Specifically, the bufferCopy.view here, while being a kj::ArrayPtr,
     // will typically be wrapping a v8::BackingStore, and we must ensure that is is consumed
     // and destroyed while under the isolate lock, which means deferred proxying is not allowed.
-    auto rs = streams::newMemorySource(bufferCopy.view, kj::heap(kj::mv(bufferCopy.ownBytes)));
+    auto view = bufferCopy->view;
+    auto rs = streams::newMemorySource(view, bufferCopy.toOwn());
     i.stream = js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs));
   }
 }
@@ -360,7 +347,8 @@ kj::Maybe<Body::ExtractedBody> Body::clone(jsg::Lock& js) {
 
     i.stream = kj::mv(branches[0]);
 
-    return ExtractedBody{kj::mv(branches[1]), i.buffer.map([&](Buffer& b) { return b.clone(js); })};
+    return ExtractedBody{
+      kj::mv(branches[1]), i.buffer.map([&](kj::Rc<Buffer>& b) { return b.addRef(); })};
   }
 
   return kj::none;
@@ -456,7 +444,7 @@ jsg::Ref<Request> Request::constructor(
           // body below. We don't need to do that. Instead, we just create a new ReadableStream
           // that takes over ownership of the internals of the given stream. The given stream
           // is left in a locked/disturbed mode so that it can no longer be used.
-          body = Body::ExtractedBody((oldJsBody)->detach(js), oldRequest->getBodyBuffer(js));
+          body = Body::ExtractedBody((oldJsBody)->detach(js), oldRequest->getBodyBuffer());
         }
       }
       cacheMode = oldRequest->getCacheMode();
@@ -1146,7 +1134,7 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
           "Response with null body status (101, 204, 205, or 304) cannot have a body.");
 
       // Fail if the body is backed by a non-zero-length buffer.
-      JSG_REQUIRE(buffer.view.size() == 0, TypeError,
+      JSG_REQUIRE(buffer->view.size() == 0, TypeError,
           "Response with null body status (101, 204, 205, or 304) cannot have a body.");
 
       auto& context = IoContext::current();

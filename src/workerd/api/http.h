@@ -52,14 +52,6 @@ class Body: public jsg::Object {
       jsg::Ref<url::URLSearchParams>,
       jsg::AsyncGeneratorIgnoringStrings<jsg::Value>>;
 
-  struct RefcountedBytes final: public kj::Refcounted {
-    kj::Array<kj::byte> bytes;
-    RefcountedBytes(kj::Array<kj::byte>&& bytes): bytes(kj::mv(bytes)) {}
-    JSG_MEMORY_INFO(RefcountedBytes) {
-      tracker.trackFieldWithSize("bytes", bytes.size());
-    }
-  };
-
   // The Fetch spec calls this type the body's "source", even though it really is a buffer. I end
   // talking about things like "a buffer-backed body", whereas in standardese I should say
   // "a body with a non-null source".
@@ -69,11 +61,11 @@ class Body: public jsg::Object {
     // In order to reconstruct buffer-backed ReadableStreams without gratuitous array copying, we
     // need to be able to tie the lifetime of the source buffer to the lifetime of the
     // ReadableStream's native stream, AND the lifetime of the Body itself. Thus we need
-    // refcounting.
+    // refcounting. The Buffer instance itself will be refcounted.
     //
     // NOTE: ownBytes may contain a v8::Global reference, hence instances of `Buffer` must exist
     //   only within the V8 heap space.
-    kj::OneOf<kj::Own<RefcountedBytes>, jsg::Ref<Blob>, jsg::JsRef<jsg::JsBufferSource>> ownBytes;
+    kj::OneOf<kj::Array<kj::byte>, jsg::Ref<Blob>, jsg::JsRef<jsg::JsBufferSource>> ownBytes;
     // TODO(cleanup): When we integrate with V8's garbage collection APIs, we need to account for
     //   that here.
 
@@ -92,26 +84,24 @@ class Body: public jsg::Object {
       KJ_ASSERT(!source.isResizable());
     }
     Buffer(kj::Array<kj::byte> array)
-        : ownBytes(kj::refcounted<RefcountedBytes>(kj::mv(array))),
-          view(ownBytes.get<kj::Own<RefcountedBytes>>()->bytes) {}
+        : ownBytes(kj::mv(array)),
+          view(ownBytes.get<kj::Array<kj::byte>>()) {}
     Buffer(kj::String string)
-        : ownBytes(kj::refcounted<RefcountedBytes>(string.releaseArray().releaseAsBytes())),
+        : ownBytes(string.releaseArray().releaseAsBytes()),
           view([this] {
-            auto bytesIncludingNull = ownBytes.get<kj::Own<RefcountedBytes>>()->bytes.asPtr();
+            auto bytesIncludingNull = ownBytes.get<kj::Array<kj::byte>>().asPtr();
             return bytesIncludingNull.first(bytesIncludingNull.size() - 1);
           }()) {}
     Buffer(jsg::Ref<Blob> blob)
         : ownBytes(kj::mv(blob)),
           view(ownBytes.get<jsg::Ref<Blob>>()->getData()) {}
 
-    Buffer clone(jsg::Lock& js);
-
     JSG_MEMORY_INFO(Buffer) {
       KJ_SWITCH_ONEOF(ownBytes) {
         KJ_CASE_ONEOF(ref, jsg::JsRef<jsg::JsBufferSource>) {
           tracker.trackField("ref", ref);
         }
-        KJ_CASE_ONEOF(bytes, kj::Own<RefcountedBytes>) {
+        KJ_CASE_ONEOF(bytes, kj::Array<kj::byte>) {
           tracker.trackField("bytes", bytes);
         }
         KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
@@ -123,16 +113,18 @@ class Body: public jsg::Object {
 
   struct Impl {
     jsg::Ref<ReadableStream> stream;
-    kj::Maybe<Buffer> buffer;
+    kj::Maybe<kj::Rc<Buffer>> buffer;
     JSG_MEMORY_INFO(Impl) {
       tracker.trackField("stream", stream);
-      tracker.trackField("buffer", buffer);
+      KJ_IF_SOME(buf, buffer) {
+        tracker.trackFieldWithSize("buffer", buf->view.size());
+      }
     }
   };
 
   struct ExtractedBody {
     ExtractedBody(jsg::Ref<ReadableStream> stream,
-        kj::Maybe<Buffer> source = kj::none,
+        kj::Maybe<kj::Rc<Buffer>> source = kj::none,
         kj::Maybe<kj::String> contentType = kj::none);
 
     Impl impl;
@@ -145,7 +137,7 @@ class Body: public jsg::Object {
 
   explicit Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers);
 
-  kj::Maybe<Buffer> getBodyBuffer(jsg::Lock& js);
+  kj::Maybe<kj::Rc<Buffer>> getBodyBuffer();
 
   // The following body rewind/nullification functions are helpers for implementing fetch() redirect
   // handling.
