@@ -898,7 +898,7 @@ class ByteQueue final {
     // The reference here should be cleared when the ByobRequest is invalidated,
     // which happens either when respond(), respondWithNewView(), or invalidate()
     // is called, or when the ByobRequest is destroyed, whichever comes first.
-    kj::Maybe<ByobRequest&> byobReadRequest;
+    kj::Weak<ByobRequest> byobReadRequest;
 
     struct PullInto {
       jsg::BufferSource store;
@@ -931,7 +931,7 @@ class ByteQueue final {
   // When isInvalidated() is false, respond() or respondWithNewView() can be called to fulfill
   // the BYOB read request. Once either of those are called, or once invalidate() is called,
   // the ByobRequest is no longer usable and should be discarded.
-  class ByobRequest final {
+  class ByobRequest final: public kj::PtrTarget {
    public:
     ByobRequest(kj::Weak<ReadRequest> request, ConsumerImpl& consumer, kj::Ptr<QueueImpl> queue)
         : request(request),
@@ -952,7 +952,7 @@ class ByteQueue final {
 
     // Disconnects this ByobRequest instance from the associated ByteQueue::ReadRequest.
     // The term "invalidate" is adopted from the streams spec for handling BYOB requests.
-    void invalidate();
+    void invalidate() WD_CONSUME;
 
     inline bool isInvalidated() const {
       return request == nullptr;
@@ -969,6 +969,10 @@ class ByteQueue final {
 
     // Returns the byte offset of the original view plus bytes filled.
     size_t getOriginalByteOffsetPlusBytesFilled() const;
+
+    kj::Weak<ByobRequest> addWeakRef() {
+      return addWeakToThis();
+    }
 
     JSG_MEMORY_INFO(ByteQueue::ByobRequest) {}
 

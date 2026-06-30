@@ -499,11 +499,11 @@ void ValueQueue::visitForGc(jsg::GcVisitor& visitor) {}
 #pragma region ByteQueue::ReadRequest
 
 namespace {
-void maybeInvalidateByobRequest(kj::Maybe<ByteQueue::ByobRequest&>& req) {
+void maybeInvalidateByobRequest(kj::Weak<ByteQueue::ByobRequest>& req) {
   KJ_IF_SOME(byobRequest, req) {
-    byobRequest.invalidate();
+    consume(kj::mv(byobRequest))->invalidate();
     // The call to byobRequest->invalidate() should have cleared the reference.
-    KJ_ASSERT(req == kj::none);
+    KJ_ASSERT(req == nullptr);
   }
 }
 }  // namespace
@@ -511,6 +511,7 @@ void maybeInvalidateByobRequest(kj::Maybe<ByteQueue::ByobRequest&>& req) {
 ByteQueue::ReadRequest::ReadRequest(
     jsg::Promise<ReadResult>::Resolver resolver, ByteQueue::ReadRequest::PullInto pullInto)
     : resolver(kj::mv(resolver)),
+      byobReadRequest(nullptr),
       pullInto(kj::mv(pullInto)) {}
 
 ByteQueue::ReadRequest::~ReadRequest() noexcept(false) {
@@ -558,7 +559,7 @@ void ByteQueue::ReadRequest::reject(jsg::Lock& js, jsg::JsValue value) {
 kj::Own<ByteQueue::ByobRequest> ByteQueue::ReadRequest::makeByobReadRequest(
     ConsumerImpl& consumer, kj::Ptr<QueueImpl> queue) {
   auto req = kj::heap<ByobRequest>(addWeakToThis(), consumer, queue);
-  byobReadRequest = *req;
+  byobReadRequest = req->addWeakRef();
   return kj::mv(req);
 }
 
@@ -866,7 +867,7 @@ ByteQueue::ByobRequest::~ByobRequest() noexcept(false) {
 
 void ByteQueue::ByobRequest::invalidate() {
   KJ_IF_SOME(req, request) {
-    req->byobReadRequest = kj::none;
+    req->byobReadRequest = nullptr;
     request = nullptr;
   }
 }
