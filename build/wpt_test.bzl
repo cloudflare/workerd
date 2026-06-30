@@ -86,6 +86,11 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         args = ["--experimental"],
         sidecar_port_bindings = PORT_BINDINGS if start_server else [],
         sidecar = "@wpt//:entrypoint" if start_server else None,
+        # The WPT entrypoint is a shell wrapper around upstream wpt.py that reads $HTTP_PORT,
+        # $HTTPS_PORT, etc. from the environment, so it can't participate in the report-on-stdout
+        # protocol that other sidecars use. Fall back to the preallocate flow (with retry inside
+        # the supervisor to mitigate the close-then-rebind race).
+        sidecar_port_mode = "preallocate",
         compat_date = compat_date,
         generate_all_compat_flags_variant = False,  # Already using future date where possible.
         # Predictable mode enables V8's --expose-gc, which can trigger additional JIT events

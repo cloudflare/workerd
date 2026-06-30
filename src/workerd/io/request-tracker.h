@@ -54,6 +54,10 @@ class RequestTracker final: public kj::Refcounted {
     return kj::addRef(*this);
   }
 
+  bool isActive() const {
+    return activeRequests > 0;
+  }
+
  private:
   void requestActive();
   void requestInactive();

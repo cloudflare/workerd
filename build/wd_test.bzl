@@ -142,6 +142,7 @@ if not "{sidecar}" == "" (
     REM These environment variables are processed by the supervisor executable
     set PORTS_TO_ASSIGN={port_bindings}
     set RANDOMIZE_IP={randomize_ip}
+    set SIDECAR_PORT_MODE={sidecar_port_mode}
     set SIDECAR_COMMAND="{sidecar}"
     powershell -Command \"{supervisor} {runtest}\"
 ) else (
@@ -164,7 +165,7 @@ fi
 # Run supervisor to start sidecar if specified
 if [ ! -z "{sidecar}" ]; then
     # These environment variables are processed by the supervisor executable
-    PORTS_TO_ASSIGN={port_bindings} RANDOMIZE_IP={randomize_ip} SIDECAR_COMMAND="{sidecar}" {supervisor} {runtest}
+    PORTS_TO_ASSIGN={port_bindings} RANDOMIZE_IP={randomize_ip} SIDECAR_PORT_MODE={sidecar_port_mode} SIDECAR_COMMAND="{sidecar}" {supervisor} {runtest}
 else
     {runtest}
 fi
@@ -230,6 +231,7 @@ def _wd_test_impl(ctx):
         supervisor = ctx.file.sidecar_supervisor.short_path if ctx.file.sidecar_supervisor else "",
         port_bindings = ",".join(ctx.attr.sidecar_port_bindings),
         randomize_ip = "true" if ctx.attr.sidecar_randomize_ip else "false",
+        sidecar_port_mode = ctx.attr.sidecar_port_mode,
     )
 
     ctx.actions.write(
@@ -336,6 +338,14 @@ _wd_test = rule(
         # If true, a random IP address will be assigned to the sidecar process, and provided in the
         # environment variable SIDECAR_HOSTNAME,
         "sidecar_randomize_ip": attr.bool(default = True),
+        # How port assignments are coordinated between the supervisor and the sidecar.
+        # - "report" (default): the sidecar binds port 0 and prints "<NAME>=<PORT>" on stdout, and
+        #   the supervisor reads those lines. Race-free; preferred for sidecars under our control.
+        # - "preallocate": the supervisor binds port 0, captures the kernel-assigned port, closes
+        #   the socket, and exports the port in the environment before spawning the sidecar. This
+        #   has an inherent close-then-rebind race (mitigated by retry inside the supervisor) and
+        #   exists only for sidecars that can't participate in the report protocol (e.g. wptserve).
+        "sidecar_port_mode": attr.string(default = "report", values = ["report", "preallocate"]),
         # An executable that is used to manage port assignments and child process creation when a
         # sidecar is specified.
         "sidecar_supervisor": attr.label(

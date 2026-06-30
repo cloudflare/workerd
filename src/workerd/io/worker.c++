@@ -14,6 +14,7 @@
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
 #include <workerd/io/frankenvalue.h>
+#include <workerd/io/per-isolate-bootstrap.h>
 #include <workerd/io/tracer.h>
 #include <workerd/io/wasm-instantiate-shim.embed.h>
 #include <workerd/io/worker.h>
@@ -667,6 +668,7 @@ struct Worker::Isolate::Impl {
     void disposeContext(jsg::JsContext<api::ServiceWorkerGlobalScope> context) {
       lock->withinHandleScope([&] {
         auto v8Context = context.getHandle(*lock);
+        cleanupPerIsolateBootstrap(*lock, v8Context);
         context->clear();
         KJ_IF_SOME(i, impl.inspector) {
           i.get()->contextDestroyed(v8Context);
@@ -1419,6 +1421,13 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         mContext->enableWarningOnSpecialEvents();
         context = mContext.getHandle(lock);
         recordedLock.setupContext(context);
+
+        if (util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)) {
+          // Run per-isolate bootstrap scripts before any user code.
+          JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
+            runPerIsolateBootstrap(js, isolate->getApi().getFeatureFlags());
+          });
+        }
       } else {
         // Although we're going to compile a script independent of context, V8 requires that
         // there be an active context, otherwise it will segfault, I guess. So we create a
@@ -1884,6 +1893,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
     // Create a stack-allocated handle scope.
     lock.withinHandleScope([&] {
       jsg::JsContext<api::ServiceWorkerGlobalScope>* jsContext;
+      bool freshContext = false;
 
       KJ_IF_SOME(c, script->impl->moduleContext) {
         // Use the shared context from the script.
@@ -1897,9 +1907,19 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               .newModuleRegistry = script->impl->getNewModuleRegistry(),
               .schemaLoader = script->getSchemaLoader(),
             }));
+        freshContext = true;
       }
 
       v8::Local<v8::Context> context = KJ_REQUIRE_NONNULL(jsContext).getHandle(lock);
+
+      // Run per-isolate bootstrap for freshly created service worker contexts.
+      // (Modular worker contexts already ran bootstrap in the Script constructor.)
+      if (freshContext &&
+          util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)) {
+        JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
+          runPerIsolateBootstrap(js, script->isolate->getApi().getFeatureFlags());
+        });
+      }
 
       // Install the virtual file system on the context. Keep in mind that for service
       // worker style workers, the Script may be shared between multiple Workers, even

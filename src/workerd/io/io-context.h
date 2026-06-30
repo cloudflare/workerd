@@ -47,6 +47,9 @@ class HttpOverCapnpFactory;
 
 namespace workerd {
 
+// Maximum depth to which blockConcurrencyWhile() calls may be nested.
+constexpr uint MAX_BLOCK_CONCURRENCY_WHILE_DEPTH = 64;
+
 // This wishes it were IoContext::Runnable::Exceptional.
 WD_STRONG_BOOL(IoContext_Runnable_Exceptional);
 
@@ -971,6 +974,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     getIoChannelFactory().deleteAllActors(reason);
   }
 
+  // Test-only: gracefully evict all currently-running actors. See
+  // IoChannelFactory::evictAllActorsForTest().
+  kj::Promise<void> evictAllActorsForTest(IoChannelFactory::EvictWebSocketMode webSocketMode) {
+    return getIoChannelFactory().evictAllActorsForTest(webSocketMode);
+  }
+
   // Condemn and terminate JS isolate
   void abortIsolate(kj::StringPtr reason = nullptr);
 
@@ -1712,6 +1721,14 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhileImpl(
     jsg::Lock& js, Func&& callback) {
   auto lock = getInputLock();
   auto cs = lock.startCriticalSection();
+
+  // Report the nesting depth. Perhaps we will want to adjust the limit here in the future.
+  KJ_IF_SOME(a, getActor()) {
+    a.getMetrics().blockConcurrencyWhileDepth(cs->getDepth());
+  }
+  JSG_REQUIRE(cs->getDepth() <= MAX_BLOCK_CONCURRENCY_WHILE_DEPTH, Error,
+      "blockConcurrencyWhile() calls are nested too deeply.");
+
   auto cs2 = kj::addRef(*cs);
 
   using T = jsg::RemovePromise<jsg::ReturnType<Func, void, true>>;

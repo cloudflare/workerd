@@ -388,6 +388,7 @@ wd_cc_library(
     deps = [
         "//src/pyodide:pyodide_extra_capnp",
         "//src/pyodide:pyodide_static",
+        "//src/pyodide:python_packages_capnp",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj:kj-async",
@@ -529,6 +530,7 @@ wd_cc_library(
     for f in [
         "streams/pendingabort-gc-uaf-test.c++",
         "actor-state-test.c++",
+        "alarm-retry-test.c++",
         "basics-test.c++",
         "crypto/aes-test.c++",
         "crypto/impl-test.c++",
@@ -610,6 +612,14 @@ kj_test(
 
 kj_test(
     src = "actor-state-iocontext-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "sql-toarray-oom-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",

@@ -51,41 +51,72 @@ class VirtualizedDir {
   }
 
   /**
-   * mountOverlay "overlays" a directory onto the site-packages root directory.
-   * All files and subdirectories in the overlay will be accessible at site-packages by the worker.
-   * If a file or directory already exists, an error is thrown.
-   * @param {TarInfo} overlayInfo The directory that is to be "copied" into site-packages
+   * Adds a single extracted package file to the virtualized filesystem, creating intermediate
+   * directories as needed. Files are routed to /usr/lib (dynlib) or site-packages (everything else)
+   * based on their `installDir`. The package stdlib is embedded in the bundle as individual files
+   * (see loadPackage.ts), so this is called once per file.
+   *
+   * @param installDir The package's `install_dir` (from the lock file).
+   * @param path The file's path within `installDir`, e.g. "ssl/__init__.py".
+   * @param reader Reads the file's contents.
+   * @param size The file's size in bytes.
    */
-  mountOverlay(overlayInfo: TarFSInfo, dir: InstallDir): void {
-    const dest = dir == 'dynlib' ? this.dynlibTarFs : this.rootInfo;
-    overlayInfo.children!.forEach((val, key) => {
-      if (dest.children!.has(key)) {
+  addFile(
+    installDir: InstallDir,
+    path: string,
+    reader: Reader,
+    size: number
+  ): void {
+    const dest = installDir == 'dynlib' ? this.dynlibTarFs : this.rootInfo;
+    const parts = path.split('/');
+    let dir = dest;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const part = parts[i]!;
+      let child = dir.children!.get(part);
+      if (!child) {
+        child = {
+          children: new Map(),
+          mode: 0o777,
+          type: '5',
+          modtime: 0,
+          size: 0,
+          path: parts.slice(0, i + 1).join('/'),
+          name: part,
+          parts: [],
+          reader: null,
+        };
+        dir.children!.set(part, child);
+      }
+      if (!child.children) {
         throw new PythonWorkersInternalError(
-          `File/folder ${key} being written by multiple packages`
+          `File/folder ${path} conflicts with a file written by another package`
         );
       }
-      dest.children!.set(key, val);
-    });
-  }
-
-  /**
-   * A small bundle contains just a single package, it can be thought of as a wheel.
-   *
-   * The entire bundle will be overlaid onto site-packages or /usr/lib depending on its install_dir.
-   *
-   * @param {TarInfo} tarInfo The root tarInfo for the small bundle (See tar.js)
-   * @param {List<String>} soFiles A list of .so files contained in the small bundle
-   * @param {InstallDir} installDir The `install_dir` field from the metadata about the package taken from the lockfile
-   */
-  addSmallBundle(
-    tarInfo: TarFSInfo,
-    soFiles: string[],
-    installDir: InstallDir
-  ): void {
-    for (const soFile of soFiles) {
-      this.soFiles.push(soFile.split('/'));
+      dir = child;
     }
-    this.mountOverlay(tarInfo, installDir);
+
+    const name = parts.at(-1)!;
+    if (dir.children!.has(name)) {
+      throw new PythonWorkersInternalError(
+        `File ${path} being written by multiple packages`
+      );
+    }
+    dir.children!.set(name, {
+      children: undefined,
+      mode: 0o755,
+      type: '0',
+      modtime: 0,
+      size,
+      path,
+      name,
+      parts: [],
+      contentsOffset: 0,
+      reader,
+    });
+
+    if (path.endsWith('.so')) {
+      this.soFiles.push(parts);
+    }
   }
 
   getSitePackagesRoot(): TarFSInfo {

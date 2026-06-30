@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  compatibilityFlags = ["experimental", "nodejs_compat", "js_rpc"],
+
+  modules = [
+    (name = "worker", esModule = embed "actor-block-concurrency-depth-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "DepthTester", uniqueKey = "9e8d7c6b5a4938271605f4e3d2c1b0a9"),
+  ],
+
+  durableObjectStorage = (inMemory = void),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "DepthTester"),
+  ],
+);

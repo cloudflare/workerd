@@ -20,6 +20,23 @@ struct Frankenvalue {
 
     v8Serialized @2 :Data;
     # Parse these V8-serialized bytes to compute the value.
+
+    capability :group {
+      # The value is a single capability (e.g. a service binding / Fetcher), taken directly from
+      # this value's cap table. This allows a capability to be expressed without going through V8
+      # serialization, which is useful when constructing a `Frankenvalue` outside of any JavaScript
+      # context -- in particular, it lets a control plane place a JS RPC binding (Fetcher) directly
+      # into `ctx.props`.
+
+      capIndex @7 :UInt32;
+      # Index into this value's base cap table -- that is, the caps referenced by the union, which
+      # come before any property caps. Must be less than `capTableSize`.
+
+      tag @8 :UInt16;
+      # The `workerd::rpc::SerializationTag` value describing how to materialize the capability into
+      # a JS value (e.g. `serviceStub` for a Fetcher). The cap table entry must be compatible with
+      # the deserializer registered for this tag.
+    }
   }
 
   properties @3 :List(Frankenvalue);

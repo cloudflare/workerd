@@ -481,6 +481,14 @@ enum SerializationTag {
   #
   # Similar to serviceStub, this refers to the entrypoint of a Worker that can be instantiated
   # anywhere and any time, and thus can be persisted and used in `env` and `ctx.props`, etc.
+
+  r2Bucket @13;
+  # An R2 bucket binding, backed by a subrequest channel. Only deserialized (e.g. from `ctx.props`);
+  # cannot be serialized out of an isolate.
+
+  kvNamespace @14;
+  # A KV namespace binding, backed by a subrequest channel. Only deserialized (e.g. from
+  # `ctx.props`); cannot be serialized out of an isolate.
 }
 
 enum StreamEncoding {

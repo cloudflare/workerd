@@ -24,7 +24,7 @@ Macro-driven C++/V8 binding layer: declares C++ types as JS-visible resources/st
 | `rtti.capnp`     | Cap'n Proto schema for type introspection; consumed by `types/` for TS generation                                           |
 | `rtti.h`         | C++ RTTI builder: walks JSG type graph → `rtti.capnp` structures                                                            |
 | `jsvalue.h`      | `JsValue`, `JsObject`, `JsString`, etc. — typed wrappers over `v8::Value`                                                   |
-| `type-wrapper.h` | `TypeWrapper` template: compile-time dispatch for C++ ↔ V8 conversions                                                     |
+| `type-wrapper.h` | `TypeWrapper` template: compile-time dispatch for C++ ↔ V8 conversions; `SelfConvertible` concept for self-converting types |
 | `meta.h`         | Argument unwrapping, `ArgumentContext`, parameter pack metaprogramming                                                      |
 | `unwrap-args.h`  | `UnwrappedArgs` helper: deterministic left-to-right argument unwrapping in V8 callbacks                                     |
 | `fast-api.h`     | V8 Fast API call optimizations                                                                                              |
@@ -99,7 +99,7 @@ These rules MUST be followed when writing or modifying JSG code:
     `jsg-visit-for-gc` clang-tidy diagnostic with a `// NOLINT(jsg-visit-for-gc)`
     comment and a brief explanation of *why* it's safe to skip.
 
-The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:jsg-lint`)
+The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
 automatically detects missing `visitForGc` implementations and unvisited fields
 across the codebase, enforcing invariants 1 and 2 at build time.
 
