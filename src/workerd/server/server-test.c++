@@ -4875,6 +4875,73 @@ KJ_TEST("Server: encodeResponseBody: manual pass-through") {
     fake-gzipped-content)"_blockquote);
 }
 
+KJ_TEST("Server: encodeResponseBody: auto strips Content-Encoding header") {
+  // Regression test for https://github.com/cloudflare/workerd/issues/5112
+  // When encodeResponseBody is "auto" (the default), workerd decompresses the body but
+  // was failing to remove the Content-Encoding header. This caused downstream consumers
+  // (e.g. the Cache API in service workers) to misinterpret the already-decompressed body
+  // as still being compressed, resulting in empty/corrupt cached responses.
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    // Default fetch uses encodeResponseBody: "auto"
+                `    let response = await fetch("http://subhost/foo");
+                `
+                `    // After auto-decoding, Content-Encoding should be removed
+                `    let ce = response.headers.get("Content-Encoding");
+                `
+                `    return new Response(
+                `      "Content-Encoding: " + ce
+                `    );
+                `  }
+                `}
+            )
+          ]
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  auto subreq = test.receiveInternetSubrequest("subhost");
+  subreq.recv(R"(
+    GET /foo HTTP/1.1
+    Host: subhost
+
+  )"_blockquote);
+
+  // Send a response with Content-Encoding: gzip. The body isn't real gzip data, but that's
+  // fine — we only inspect the headers here, not the body. The auto decoder wraps the stream
+  // but doesn't read until the body is consumed.
+  subreq.send(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 20
+    Content-Encoding: gzip
+
+    fake-gzipped-content
+  )"_blockquote);
+
+  // Content-Encoding should be null after auto-decoding strips the header.
+  conn.recvHttp200(R"(
+    Content-Encoding: null)"_blockquote);
+}
+
 KJ_TEST("Server: Catch websocket server errors") {
   TestServer test(R"((
     services = [
