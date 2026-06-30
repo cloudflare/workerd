@@ -6,7 +6,6 @@
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
-import { patch_env_helper } from 'pyodide-internal:envHelpers';
 import { enterJaegerSpan } from 'pyodide-internal:jaeger';
 import { default as Limiter } from 'pyodide-internal:limiter';
 import {
@@ -79,7 +78,6 @@ export type PyodideEntrypointHelper = {
   cloudflareSocketsModule: any;
   workerEntrypoint: any;
   patchWaitUntil: typeof patchWaitUntil;
-  patch_env_helper: (patch: unknown) => Generator<void>;
   TEST_ONLY_THROW_PYTHON_WORKERS_INTERNAL_ERROR: (message: string) => never;
 };
 
@@ -105,7 +103,6 @@ export async function setDoAnImport(
     cloudflareSocketsModule: await doAnImport('cloudflare:sockets'),
     workerEntrypoint,
     patchWaitUntil,
-    patch_env_helper,
     TEST_ONLY_THROW_PYTHON_WORKERS_INTERNAL_ERROR(message: string): never {
       if (!COMPATIBILITY_FLAGS.experimental) {
         throw new Error(

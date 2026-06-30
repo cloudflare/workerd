@@ -18,10 +18,6 @@ const unitTests :Workerd.Config = (
           "unwrap_custom_thenables",
         ],
         bindings = [
-          (
-            name = "secret",
-            text = "thisisasecret"
-          ),
           (name = "FOO", text = "BAR"),
           (name = "TEST_VALUE", text = "TEST_STRING"),
           (name = "CACHE", memoryCache = (
