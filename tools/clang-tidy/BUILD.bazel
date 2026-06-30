@@ -31,17 +31,29 @@ exports_files([
     "unsafe-continuation-capture.h",
 ])
 
-cc_library(
-    name = "workerd-lint-static",
+filegroup(
+    name = "srcs",
     srcs = [
         "unsafe-continuation-capture.c++",
         "visit-for-gc.c++",
         "workerd-lint.c++",
     ],
-    hdrs = [
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "hdrs",
+    srcs = [
         "unsafe-continuation-capture.h",
         "visit-for-gc.h",
     ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "workerd-lint-static",
+    srcs = [":srcs"],
+    hdrs = [":hdrs"],
     copts = select({
         # workerd-tools clang-tidy links against libstdc++ on Linux; the
         # plugin must match. macOS uses libc++ (Apple default).
