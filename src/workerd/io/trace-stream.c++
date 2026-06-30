@@ -36,6 +36,7 @@ namespace {
   V(DIAGNOSTICSTYPE, "diagnosticsType")                                                            \
   V(DISPATCHNAMESPACE, "dispatchNamespace")                                                        \
   V(DROPPEDEVENTS, "droppedEvents")                                                                \
+  V(DURABLEOBJECTID, "durableObjectId")                                                            \
   V(EMAIL, "email")                                                                                \
   V(ENTRYPOINT, "entrypoint")                                                                      \
   V(ERROR, "error")                                                                                \
@@ -357,6 +358,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const Onset& onset, StringCache& cache) {
   }
   KJ_IF_SOME(entrypoint, onset.workerInfo.entrypoint) {
     obj.set(js, ENTRYPOINT_STR, js.str(entrypoint));
+  }
+  KJ_IF_SOME(id, onset.workerInfo.durableObjectId) {
+    obj.set(js, DURABLEOBJECTID_STR, js.str(id));
   }
   KJ_IF_SOME(name, onset.workerInfo.scriptName) {
     obj.set(js, SCRIPTNAME_STR, js.str(name));

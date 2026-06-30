@@ -287,6 +287,7 @@ struct Trace @0x8e8d911203762d34 {
     scriptTags @5 :List(Text);
     entryPoint @6 :Text;
     preview @10 :TracePreviewInfo;
+    durableObjectId @11 :Text;
 
     struct Info { union {
       fetch @0 :FetchEventInfo;

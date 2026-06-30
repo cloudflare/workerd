@@ -15751,6 +15751,7 @@ export declare namespace TailStream {
     readonly dispatchNamespace?: string;
     readonly entrypoint?: string;
     readonly executionModel: string;
+    readonly durableObjectId?: string;
     readonly scriptName?: string;
     readonly scriptTags?: string[];
     readonly scriptVersion?: ScriptVersion;
