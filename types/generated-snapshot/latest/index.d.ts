@@ -11461,10 +11461,17 @@ interface ArtifactsCreateRepoResult {
   /** ISO 8601 token expiry timestamp. */
   tokenExpiresAt: string;
 }
+/** Provisioning state returned for repositories in Artifacts list results. */
+type ArtifactsRepoStatus = "creating" | "ready" | "importing" | "forking";
+/** Repository entry returned by Artifacts.list(). */
+interface ArtifactsRepoListItem extends Omit<ArtifactsRepoInfo, "remote"> {
+  /** Provisioning state for this repository. */
+  status: ArtifactsRepoStatus;
+}
 /** Paginated list of repositories. */
 interface ArtifactsRepoListResult {
   /** Repositories in this page (without the `remote` field). */
-  repos: Omit<ArtifactsRepoInfo, "remote">[];
+  repos: ArtifactsRepoListItem[];
   /** Total number of repositories in the namespace. */
   total: number;
   /** Cursor for the next page, if there are more results. */
@@ -11553,6 +11560,7 @@ interface ArtifactsRepo extends ArtifactsRepoInfo {
 type ArtifactsErrorCode =
   | "ALREADY_EXISTS"
   | "NOT_FOUND"
+  | "CREATE_IN_PROGRESS"
   | "IMPORT_IN_PROGRESS"
   | "FORK_IN_PROGRESS"
   | "INVALID_INPUT"
@@ -11605,6 +11613,7 @@ interface Artifacts {
    * @param name Repository name.
    * @returns Repo handle.
    * @throws {ArtifactsError} with code `NOT_FOUND` if the repo does not exist.
+   * @throws {ArtifactsError} with code `CREATE_IN_PROGRESS` if the repo is still being created.
    * @throws {ArtifactsError} with code `IMPORT_IN_PROGRESS` if the repo is still importing.
    * @throws {ArtifactsError} with code `FORK_IN_PROGRESS` if the repo is still forking.
    */
