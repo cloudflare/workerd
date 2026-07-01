@@ -645,6 +645,25 @@ export const test_images_list_with_options = {
   },
 };
 
+export const test_images_list_metadata_filter_forwards_correctly = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images.hosted.list({
+      metadataFilters: {
+        status: 'active',
+        priority: { gte: 1, lte: 3 },
+        'config.region': 'eu-west',
+      },
+    });
+
+    assert.equal(result.images.length, 1);
+    assert.equal(result.images[0].id, 'image-1');
+  },
+};
+
 // UPLOAD with base64 encoding
 export const test_images_upload_base64_stream = {
   /**
