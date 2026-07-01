@@ -7,7 +7,7 @@
 #include "common.h"
 
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/allow-destruction.h>
+#include <workerd/util/consume.h>
 #include <workerd/util/ring-buffer.h>
 #include <workerd/util/small-set.h>
 #include <workerd/util/state-machine.h>
@@ -333,13 +333,13 @@ template <typename Self>
 class ConsumerImpl final {
  public:
   struct StateListener {
-    virtual void onConsumerClose(jsg::Lock& js) = 0;
-    virtual void onConsumerError(jsg::Lock& js, jsg::JsValue reason) = 0;
+    virtual void onConsumerClose(jsg::Lock& js) WD_CONSUME = 0;
+    virtual void onConsumerError(jsg::Lock& js, jsg::JsValue reason) WD_CONSUME = 0;
     // Called when the consumer has a pending read and needs data.
     // Returns true if the pull algorithm completed synchronously (meaning
     // more pumping might yield additional synchronous data), false if the
     // pull is async (promise pending) or no pull was needed.
-    virtual bool onConsumerWantsData(jsg::Lock& js) = 0;
+    virtual bool onConsumerWantsData(jsg::Lock& js) WD_CONSUME = 0;
   };
 
   using QueueImpl = QueueImpl<Self>;
@@ -428,7 +428,7 @@ class ConsumerImpl final {
     }
   }
 
-  void push(jsg::Lock& js, kj::Rc<Entry> entry) {
+  void push(jsg::Lock& js, kj::Rc<Entry> entry) WD_CONSUME {
     // If the consumer is already closed or errored, then we do nothing here.
     // This can happen during iteration over consumers in QueueImpl::push() when
     // resolving a read request on one consumer triggers JavaScript code that
@@ -606,7 +606,7 @@ class ConsumerImpl final {
   ConsumerState state;
   // StateListener callbacks may synchronously destroy the listener by transitioning the owning
   // stream. Always invoke callbacks by upgrading this weak pointer and immediately wrapping the
-  // result in allowDestruction(kj::mv(listener)); do not call through the kj::Ptr directly.
+  // result in consume(kj::mv(listener)); do not call through the kj::Ptr directly.
   kj::Weak<ConsumerImpl::StateListener> stateListener;
   // WeakRef to this consumer, used for safe registration with QueueImpl.
   // When this consumer is destroyed, we invalidate the WeakRef so that
@@ -637,7 +637,8 @@ class ConsumerImpl final {
     return result;
   }
 
-  void maybeDrainAndSetState(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeReason = kj::none) {
+  void maybeDrainAndSetState(
+      jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeReason = kj::none) WD_CONSUME {
     // If the state is already errored or closed then there is nothing to drain.
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       UpdateBackpressureScope scope(*this);
@@ -668,7 +669,7 @@ class ConsumerImpl final {
         weak->runIfAlive([&](ConsumerImpl& self) {
           self.state.template transitionTo<Errored>(reason.addRef(js));
           KJ_IF_SOME(listener, self.stateListener) {
-            allowDestruction(kj::mv(listener))->onConsumerError(js, reason);
+            consume(kj::mv(listener))->onConsumerError(js, reason);
             // After this point, we should not assume that this consumer can
             // be safely used at all. It's most likely the stateListener has
             // released it.
@@ -712,7 +713,7 @@ class ConsumerImpl final {
           weak->runIfAlive([&](ConsumerImpl& self) {
             self.state.template transitionTo<Closed>();
             KJ_IF_SOME(listener, self.stateListener) {
-              allowDestruction(kj::mv(listener))->onConsumerClose(js);
+              consume(kj::mv(listener))->onConsumerClose(js);
               // After this point, we should not assume that this consumer can
               // be safely used at all. It's most likely the stateListener has
               // released it.

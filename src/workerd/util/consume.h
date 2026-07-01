@@ -6,6 +6,15 @@
 
 #include <kj/memory.h>
 
+#ifdef __clang__
+// Marks a member function that may synchronously destroy its target when called through a kj::Ptr.
+// Calls to annotated methods on kj::Ptr<T> must use consume(kj::mv(ptr))->method(...), which drops
+// the active kj::Ptr before entering the method.
+#define WD_CONSUME __attribute__((annotate("workerd_consume")))
+#else
+#define WD_CONSUME
+#endif
+
 namespace workerd {
 
 // Wraps a kj::Ptr for a single member-function call that may synchronously destroy the target.
@@ -15,7 +24,7 @@ namespace workerd {
 // helper only for that pattern:
 //
 //   KJ_IF_SOME(ptr, weak.upgrade()) {
-//     allowDestruction(kj::mv(ptr))->destructionCapableCallback(...);
+//     consume(kj::mv(ptr))->destructionCapableCallback(...);
 //   }
 //
 // operator->() drops the counted kj::Ptr before the member function starts, so the callee can
@@ -23,10 +32,10 @@ namespace workerd {
 // must only be used for the immediate member call expression; do not store it or call operator->()
 // manually.
 template <typename T>
-class AllowDestructionPtr final {
+class [[nodiscard]] ConsumePtr final {
  public:
-  explicit AllowDestructionPtr(kj::Ptr<T>&& ptr): ptr(kj::mv(ptr)) {}
-  KJ_DISALLOW_COPY_AND_MOVE(AllowDestructionPtr);
+  explicit ConsumePtr(kj::Ptr<T>&& ptr): ptr(kj::mv(ptr)) {}
+  KJ_DISALLOW_COPY_AND_MOVE(ConsumePtr);
 
   inline T* operator->() && {
     T* result = ptr.get();
@@ -42,8 +51,8 @@ class AllowDestructionPtr final {
 };
 
 template <typename T>
-inline AllowDestructionPtr<T> allowDestruction(kj::Ptr<T>&& ptr) {
-  return AllowDestructionPtr<T>(kj::mv(ptr));
+[[nodiscard]] inline ConsumePtr<T> consume(kj::Ptr<T>&& ptr) {
+  return ConsumePtr<T>(kj::mv(ptr));
 }
 
 }  // namespace workerd

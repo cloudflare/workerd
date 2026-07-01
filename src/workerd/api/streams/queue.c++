@@ -232,7 +232,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
   while (!isClosing && totalRead < maxRead) {
     KJ_IF_SOME(listener, impl.stateListener) {
       size_t prevChunkCount = chunks.size();
-      bool pullCompletedSync = allowDestruction(kj::mv(listener))->onConsumerWantsData(js);
+      bool pullCompletedSync = consume(kj::mv(listener))->onConsumerWantsData(js);
 
       // The pull callback may have closed or errored the consumer, which
       // destroys the Ready state (and its RingBuffer). We must not touch
@@ -315,7 +315,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
   ready.readRequests.push_back(kj::heap<ReadRequest>(kj::mv(request)));
 
   KJ_IF_SOME(listener, impl.stateListener) {
-    allowDestruction(kj::mv(listener))->onConsumerWantsData(js);
+    consume(kj::mv(listener))->onConsumerWantsData(js);
   }
 
   // Transform the ReadResult promise to DrainingReadResult.
@@ -463,7 +463,7 @@ void ValueQueue::handleRead(jsg::Lock& js,
     // or errors.
     state.readRequests.push_back(kj::heap<ReadRequest>(kj::mv(request)));
     KJ_IF_SOME(listener, consumer.stateListener) {
-      allowDestruction(kj::mv(listener))->onConsumerWantsData(js);
+      consume(kj::mv(listener))->onConsumerWantsData(js);
     }
   }
 }
@@ -723,7 +723,7 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
   while (!isClosing && totalRead < maxRead) {
     KJ_IF_SOME(listener, impl.stateListener) {
       size_t prevChunkCount = chunks.size();
-      bool pullCompletedSync = allowDestruction(kj::mv(listener))->onConsumerWantsData(js);
+      bool pullCompletedSync = consume(kj::mv(listener))->onConsumerWantsData(js);
 
       // The pull callback may have closed or errored the consumer, which
       // destroys the Ready state (and its RingBuffer). We must not touch
@@ -808,7 +808,7 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
     ready.readRequests.push_back(kj::heap<ReadRequest>(kj::mv(request)));
 
     KJ_IF_SOME(listener, impl.stateListener) {
-      allowDestruction(kj::mv(listener))->onConsumerWantsData(js);
+      consume(kj::mv(listener))->onConsumerWantsData(js);
     }
 
     // Transform the ReadResult promise to DrainingReadResult.
@@ -1251,7 +1251,7 @@ void ByteQueue::handleRead(jsg::Lock& js,
       }
     }
     KJ_IF_SOME(listener, consumer.stateListener) {
-      allowDestruction(kj::mv(listener))->onConsumerWantsData(js);
+      consume(kj::mv(listener))->onConsumerWantsData(js);
     }
   };
 
