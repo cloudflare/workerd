@@ -12,6 +12,16 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
+    src = "d1-api-test-jsrpc.wd-test",
+    args = ["--experimental"],
+    data = glob(
+        ["*.js"],
+        exclude = ["d1-api-test-with-sessions.js"],
+    ) + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+)
+
+wd_test(
     size = "enormous",
     src = "d1-api-test-with-sessions.wd-test",
     args = ["--experimental"],

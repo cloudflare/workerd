@@ -2,8 +2,11 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-export class D1MockDO {
+import { DurableObject } from 'cloudflare:workers';
+
+export class D1MockDO extends DurableObject {
   constructor(state, env) {
+    super(state, env);
     this.state = state;
     this.sql = this.state.storage.sql;
   }
@@ -37,6 +40,32 @@ export class D1MockDO {
     } else {
       return Response.json({ error: 'Not found' }, { status: 404 });
     }
+  }
+
+  async query(params) {
+    const results = params.statements.map((statement) => {
+      try {
+        return this.runQuery(statement, 'ROWS_AND_COLUMNS');
+      } catch (e) {
+        // Reproduce the production behavior by catching any error and returning a V4Failure
+        return { success: false, error: String(e.message) };
+      }
+    });
+    const failure = results.find((result) => !result.success);
+    if (failure) {
+      return { success: false, error: new Error(failure.error) };
+    }
+
+    return {
+      success: true,
+      results: {
+        statementResults: results.map((result) => ({
+          columns: result.results.columns,
+          rows: result.results.rows,
+          meta: result.meta,
+        })),
+      },
+    };
   }
 
   runQuery(query, resultsFormat) {
@@ -108,6 +137,31 @@ export default {
   commitTokensReturned: [],
   nextTokenExpected: null,
 
+  async query(params, env) {
+    this.commitTokensReceived.push(params.sessionBookmark ?? null);
+
+    try {
+      const stub = env.db.get(env.db.idFromName('test'));
+      const queryResult = await stub.query(params);
+      if (!queryResult.success) {
+        return queryResult;
+      }
+
+      return {
+        success: true,
+        results: {
+          statementResults: queryResult.results.statementResults,
+          sessionBookmark: this.nextCommitToken(),
+        },
+      };
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err : new Error(String(err)),
+      };
+    }
+  },
+
   async fetch(request, env, ctx) {
     if (request.url.startsWith('http://d1-api-test/commitTokens')) {
       return this.handleD1ApiTestRoutes(request);
@@ -132,7 +186,7 @@ export default {
     }
   },
 
-  async buildResponseWithCommitToken(resp) {
+  nextCommitToken() {
     let newToken = `token-${(++this.commitTokenNum).toLocaleString('en-US', {
       minimumIntegerDigits: 4,
       // no commas
@@ -143,6 +197,11 @@ export default {
       this.nextTokenExpected = null;
     }
     this.commitTokensReturned.push(newToken);
+    return newToken;
+  },
+
+  async buildResponseWithCommitToken(resp) {
+    const newToken = this.nextCommitToken();
     // Append an ever increasing commit token to the response.
     // Simulating the D1 eyeball worker.
     const newHeaders = new Headers(resp.headers);

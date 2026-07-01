@@ -1,0 +1,53 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "TEST_TMPDIR", disk = (writable = true) ),
+    ( name = "d1-api-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "d1-api-test.js"),
+          (name = "d1-api-test-common", esModule = embed "d1-api-test-common.js"),
+        ],
+        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers", "d1_binding_jsrpc"],
+        streamingTails = ["tail"],
+        bindings = [
+        (
+          name = "d1",
+          wrapped = (
+            moduleName = "cloudflare-internal:d1-api",
+            innerBindings = [(
+              name = "fetcher",
+              service = "d1-mock"
+            )],
+          )
+        )
+        ],
+      )
+    ),
+    ( name = "d1-mock",
+      worker = (
+        compatibilityFlags = ["experimental", "nodejs_compat"],
+        modules = [
+          (name = "worker", esModule = embed "d1-mock.js")
+        ],
+        durableObjectNamespaces = [
+          (className = "D1MockDO", uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06e"),
+        ],
+        durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+        bindings = [
+          (name = "db", durableObjectNamespace = "D1MockDO"),
+        ],
+      )
+    ),
+    ( name = "tail", worker = .tailWorker, ),
+  ]
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "d1-api-instrumentation-test.js"),
+    (name = "instrumentation-test-helper", esModule = embed "../instrumentation-test-helper.js")
+  ],
+  compatibilityFlags = ["experimental", "nodejs_compat", "d1_binding_jsrpc"],
+);

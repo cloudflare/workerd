@@ -20,7 +20,6 @@ type D1SessionBookmarkOrConstraint = D1SessionBookmark | D1SessionConstraint;
 
 type QueryParams = {
   statements: Array<Statement>;
-  omitStatementResults?: boolean;
   sessionBookmark?: D1SessionBookmarkOrConstraint;
 };
 
@@ -543,7 +542,6 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
         ? await this._query(
             {
               statements: lines.map((sql) => ({ sql })),
-              omitStatementResults: true,
             },
             span
           )
