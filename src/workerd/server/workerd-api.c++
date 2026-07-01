@@ -143,7 +143,6 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_TRACING_ISOLATE_TYPES,
     EW_WORKERD_DEBUG_PORT_CLIENT_ISOLATE_TYPES,
     workerd::api::EnvModule,
-    workerd::api::PythonPatchedEnv,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
     jsg::InjectConfiguration<CompatibilityFlags::Reader>,

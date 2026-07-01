@@ -1,6 +1,6 @@
 import pytest
-from js import Date, Reflect
-from workers import env, import_from_javascript, patch_env
+from js import Date
+from workers import env, import_from_javascript
 
 from pyodide import __version__
 from pyodide.ffi import create_proxy, to_js
@@ -42,52 +42,3 @@ async def test_with_env():
 
     result = await workers_module.withEnv(to_js({"FOO": 1}), import_with_env)
     assert result == 1
-
-
-def check_normal():
-    assert env.secret == "thisisasecret"
-    assert not hasattr(env, "NAME")
-    assert not hasattr(env, "place")
-    assert not hasattr(env, "extra")
-    assert set(Reflect.ownKeys(env).to_py()).issuperset({"secret"})
-
-
-def test_patch_env():
-    check_normal()
-
-    with patch_env(NAME=1, place="Somewhere"):
-        assert env.NAME == 1
-        assert env.place == "Somewhere"
-        assert not hasattr(env, "secret")
-
-    check_normal()
-
-    with patch_env({"NAME": 1, "place": "Somewhere"}):
-        assert env.NAME == 1
-        assert env.place == "Somewhere"
-        assert not hasattr(env, "secret")
-
-    check_normal()
-
-    with patch_env([("NAME", 1), ("place", "Somewhere")]):
-        assert env.NAME == 1
-        assert env.place == "Somewhere"
-        assert not hasattr(env, "secret")
-
-    check_normal()
-
-    with patch_env({"NAME": 1, "place": "Somewhere"}, extra=22):
-        assert env.NAME == 1
-        assert env.place == "Somewhere"
-        assert env.extra == 22
-        assert not hasattr(env, "secret")
-
-    check_normal()
-
-    try:
-        with patch_env(NAME=1, place="Somewhere"):
-            raise RuntimeError("oops")  # noqa: TRY301
-    except Exception:
-        pass
-
-    check_normal()
