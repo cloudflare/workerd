@@ -685,14 +685,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return waitUntilStatusValue;
   }
 
-  // DO NOT USE, use `addWaitUntil()` instead.
-  kj::TaskSet& getWaitUntilTasks() {
-    // TODO(cleanup): This is only needed for use with RpcWorkerInterface, but we can eliminate
-    //   that class's need for waitUntilTasks if we change the signature of sendTraces() to return
-    //   a promise, I think.
-    return waitUntilTasks;
-  }
-
   // Wraps a reference in a wrapper which:
   // 1. Will throw an exception if dereferenced while the IoContext is not current for the
   //    thread.

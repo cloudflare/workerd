@@ -149,8 +149,18 @@ const jsRpcWorker :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "tail-worker-test-jsrpc.js")
   ],
-  compatibilityFlags = ["nodejs_compat", "experimental"],
-
+  compatibilityFlags = [
+    "nodejs_compat",
+    "fetcher_no_get_put_delete",
+    "enable_abortsignal_rpc",
+    "enhanced_error_serialization",
+    "enable_ctx_exports",
+    "experimental",
+    "streams_enable_constructors",
+    "http_headers_getsetcookie",
+    "fetch_legacy_url",
+    "rpc_params_transfer_stubs",
+  ],
   bindings = [
     (name = "MyService", service = (name = "js-rpc-test", entrypoint = "MyService")),
     (name = "MyActor", durableObjectNamespace = "MyActor"),
