@@ -173,7 +173,7 @@ class QueueImpl final {
       isClosingOrErroring = true;
       KJ_DEFER(isClosingOrErroring = false);
 #endif
-      allConsumers.forEach([&](ConsumerImpl& consumer) { consumer.close(js); });
+      allConsumers.forEach([&](auto& consumer) { consumer.close(js); });
       state.template transitionTo<Closed>();
     }
   }
@@ -196,7 +196,7 @@ class QueueImpl final {
       isClosingOrErroring = true;
       KJ_DEFER(isClosingOrErroring = false);
 #endif
-      allConsumers.forEach([&](ConsumerImpl& consumer) { consumer.error(js, reason); });
+      allConsumers.forEach([&](auto& consumer) { consumer.error(js, reason); });
       state.template transitionTo<Errored>(reason.addRef(js));
     }
   }
@@ -207,9 +207,8 @@ class QueueImpl final {
   void maybeUpdateBackpressure() {
     totalQueueSize = 0;
     if (state.isActive()) {
-      allConsumers.forEach([&](ConsumerImpl& consumer) {
-        totalQueueSize = kj::max(totalQueueSize, consumer.size());
-      });
+      allConsumers.forEach(
+          [&](auto& consumer) { totalQueueSize = kj::max(totalQueueSize, consumer.size()); });
     }
   }
 
@@ -218,12 +217,12 @@ class QueueImpl final {
   // If the entry type is byteOriented and has not been fully consumed by pending consume
   // operations, then any left over data will be pushed into the consumer's buffer.
   // Asserts if the queue is closed or errored.
-  void push(jsg::Lock& js, kj::Rc<Entry> entry, kj::Maybe<ConsumerImpl&> skipConsumer = kj::none) {
+  void push(jsg::Lock& js, kj::Rc<Entry> entry, kj::Weak<ConsumerImpl> skipConsumer = nullptr) {
     state.requireActiveUnsafe("The queue is closed or errored.");
 
-    allConsumers.forEach([&](ConsumerImpl& consumer) {
+    allConsumers.forEach([&](auto& consumer) {
       KJ_IF_SOME(skip, skipConsumer) {
-        if (&skip == &consumer) {
+        if (skip.get() == &consumer) {
           return;
         }
       }
@@ -312,7 +311,7 @@ class QueueImpl final {
   }
 
   void removeConsumer(ConsumerImpl& consumer) {
-    allConsumers.removeAll([&consumer](ConsumerImpl& c) { return &c == &consumer; });
+    allConsumers.removeAll([&consumer](auto& c) { return &c == &consumer; });
     maybeUpdateBackpressure();
   }
 
@@ -341,11 +340,11 @@ class ConsumerImpl final: public kj::PtrTarget {
   // updated. Captures a weak ref to the consumer as there's a chance it'll be destroyed
   // while the scope is pending.
   struct UpdateBackpressureScope final {
-    kj::Weak<ConsumerImpl<Self>> weakConsumer;
-    UpdateBackpressureScope(ConsumerImpl& consumer): weakConsumer(consumer.addWeakToThis()) {}
+    kj::Weak<ConsumerImpl<Self>> consumer;
+    UpdateBackpressureScope(kj::Weak<ConsumerImpl> consumerRef): consumer(kj::mv(consumerRef)) {}
     ~UpdateBackpressureScope() noexcept(false) {
-      KJ_IF_SOME(consumer, weakConsumer) {
-        KJ_IF_SOME(q, consumer->queue) {
+      KJ_IF_SOME(liveConsumer, consumer) {
+        KJ_IF_SOME(q, liveConsumer->queue) {
           q->maybeUpdateBackpressure();
         }
       }
@@ -429,8 +428,9 @@ class ConsumerImpl final: public kj::PtrTarget {
         return;
       }
 
-      UpdateBackpressureScope scope(*this);
-      Self::handlePush(js, ready, *this, kj::mv(entry));
+      auto weak = addWeakToThis();
+      UpdateBackpressureScope scope(weak);
+      Self::handlePush(js, ready, weak, kj::mv(entry));
     }
   }
 
@@ -453,7 +453,7 @@ class ConsumerImpl final: public kj::PtrTarget {
     // maybeDrainAndSetState call against use-after-free by taking a weak ref before
     // handleRead and checking if we're still alive after it returns.
     auto weak = addWeakToThis();
-    Self::handleRead(js, ready, *this, queue, kj::mv(request));
+    Self::handleRead(js, ready, weak, queue, kj::mv(request));
     // Both read() and maybeDrainAndSetState() are void — no return value is lost.
     KJ_IF_SOME(self, weak) {
       consume(kj::mv(self))->maybeDrainAndSetState(js);
@@ -462,7 +462,7 @@ class ConsumerImpl final: public kj::PtrTarget {
 
   void reset() {
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
-      UpdateBackpressureScope scope(*this);
+      UpdateBackpressureScope scope(addWeakToThis());
       ready.buffer.clear();
       ready.queueTotalSize = 0;
     }
@@ -626,7 +626,7 @@ class ConsumerImpl final: public kj::PtrTarget {
       jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeReason = kj::none) WD_CONSUME {
     // If the state is already errored or closed then there is nothing to drain.
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
-      UpdateBackpressureScope scope(*this);
+      UpdateBackpressureScope scope(addWeakToThis());
       KJ_IF_SOME(reason, maybeReason) {
         // If maybeReason != nullptr, then we are draining because of an error.
         // In that case, we want to reset/clear the buffer and reject any remaining
@@ -670,7 +670,7 @@ class ConsumerImpl final: public kj::PtrTarget {
           // ConsumerImpl& references. We must take a weak ref before calling handleMaybeClose
           // and check liveness after it returns.
           auto weak = addWeakToThis();
-          if (!empty() && !Self::handleMaybeClose(js, ready, *this)) {
+          if (!empty() && !Self::handleMaybeClose(js, ready, weak)) {
             // handleMaybeClose may have freed *this via GC during resolve.
             if (weak == nullptr) return;
             // If the queue is not empty, we'll have the implementation see
@@ -855,14 +855,17 @@ class ValueQueue final {
  private:
   kj::Pin<QueueImpl> impl;
 
-  static void handlePush(
-      jsg::Lock& js, ConsumerImpl::Ready& state, ConsumerImpl& consumer, kj::Rc<Entry> entry);
+  static void handlePush(jsg::Lock& js,
+      ConsumerImpl::Ready& state,
+      kj::Weak<ConsumerImpl> consumer,
+      kj::Rc<Entry> entry);
   static void handleRead(jsg::Lock& js,
       ConsumerImpl::Ready& state,
-      ConsumerImpl& consumer,
+      kj::Weak<ConsumerImpl> consumer,
       kj::Weak<QueueImpl> queue,
       kj::Own<ReadRequest> request);
-  static bool handleMaybeClose(jsg::Lock& js, ConsumerImpl::Ready& state, ConsumerImpl& consumer);
+  static bool handleMaybeClose(
+      jsg::Lock& js, ConsumerImpl::Ready& state, kj::Weak<ConsumerImpl> consumer);
 
   friend ConsumerImpl;
 };
@@ -902,7 +905,8 @@ class ByteQueue final {
     void resolve(jsg::Lock& js);
     void reject(jsg::Lock& js, jsg::JsValue value);
 
-    kj::Own<ByobRequest> makeByobReadRequest(ConsumerImpl& consumer, kj::Ptr<QueueImpl> queue);
+    kj::Own<ByobRequest> makeByobReadRequest(
+        kj::Weak<ConsumerImpl> consumer, kj::Ptr<QueueImpl> queue);
 
     JSG_MEMORY_INFO(ByteQueue::ReadRequest) {
       tracker.trackField("resolver", resolver);
@@ -918,7 +922,8 @@ class ByteQueue final {
   // the ByobRequest is no longer usable and should be discarded.
   class ByobRequest final: public kj::PtrTarget {
    public:
-    ByobRequest(kj::Weak<ReadRequest> request, ConsumerImpl& consumer, kj::Ptr<QueueImpl> queue)
+    ByobRequest(
+        kj::Weak<ReadRequest> request, kj::Weak<ConsumerImpl> consumer, kj::Ptr<QueueImpl> queue)
         : request(request),
           consumer(consumer),
           queue(queue) {}
@@ -963,7 +968,7 @@ class ByteQueue final {
 
    private:
     kj::Weak<ReadRequest> request;
-    ConsumerImpl& consumer;
+    kj::Weak<ConsumerImpl> consumer;
     kj::Weak<QueueImpl> queue;
   };
 
@@ -1107,14 +1112,17 @@ class ByteQueue final {
  private:
   kj::Pin<QueueImpl> impl;
 
-  static void handlePush(
-      jsg::Lock& js, ConsumerImpl::Ready& state, ConsumerImpl& consumer, kj::Rc<Entry> entry);
+  static void handlePush(jsg::Lock& js,
+      ConsumerImpl::Ready& state,
+      kj::Weak<ConsumerImpl> consumer,
+      kj::Rc<Entry> entry);
   static void handleRead(jsg::Lock& js,
       ConsumerImpl::Ready& state,
-      ConsumerImpl& consumer,
+      kj::Weak<ConsumerImpl> consumer,
       kj::Weak<QueueImpl> queue,
       kj::Own<ReadRequest> request);
-  static bool handleMaybeClose(jsg::Lock& js, ConsumerImpl::Ready& state, ConsumerImpl& consumer);
+  static bool handleMaybeClose(
+      jsg::Lock& js, ConsumerImpl::Ready& state, kj::Weak<ConsumerImpl> consumer);
 
   friend ConsumerImpl;
   friend class Consumer;
