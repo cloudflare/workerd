@@ -102,7 +102,8 @@ const unitTests :Workerd.Config = (
     (name = "tcp", address = "*:8081", tcp = (), service = "connect-handler-test"),
     (name = "tcp", address = "*:8082", tcp = (), service = (name = "connect-handler-test-proxy", entrypoint = "ConnectProxy")),
     (name = "tcp", address = "*:8083", tcp = (), service = (name = "connect-handler-test-endpoint", entrypoint = "ConnectEndpoint"))
-  ]
+  ],
+  v8Flags = [ "--expose-gc" ],
 );
 
 const alarmsWorker :Workerd.Worker = (
@@ -147,16 +148,33 @@ const hiberWorker :Workerd.Worker = (
 
 const jsRpcWorker :Workerd.Worker = (
   modules = [
-    (name = "worker", esModule = embed "tail-worker-test-jsrpc.js")
+    (name = "worker", esModule = embed "js-rpc-test.js")
   ],
-  compatibilityFlags = ["nodejs_compat", "experimental"],
-
+  compatibilityFlags = [
+    "nodejs_compat",
+    "fetcher_no_get_put_delete",
+    "enable_abortsignal_rpc",
+    "enhanced_error_serialization",
+    "enable_ctx_exports",
+    "experimental",
+    "streams_enable_constructors",
+    "http_headers_getsetcookie",
+    "fetch_legacy_url",
+    "rpc_params_transfer_stubs",
+  ],
   bindings = [
+    (name = "self", service = (name = "js-rpc-test", entrypoint = "nonClass")),
     (name = "MyService", service = (name = "js-rpc-test", entrypoint = "MyService")),
+    (name = "MyServiceProxy", service = (name = "js-rpc-test", entrypoint = "MyServiceProxy")),
     (name = "MyActor", durableObjectNamespace = "MyActor"),
+    (name = "ActorNoExtends", durableObjectNamespace = "ActorNoExtends"),
+    (name = "defaultExport", service = "js-rpc-test"),
+    (name = "twelve", json = "12"),
+    (name = "GreeterFactory", service = (name = "js-rpc-test", entrypoint = "GreeterFactory")),
   ],
   durableObjectNamespaces = [
     (className = "MyActor", uniqueKey = "foo"),
+    (className = "ActorNoExtends", uniqueKey = "bar"),
   ],
   durableObjectStorage = (inMemory = void),
 

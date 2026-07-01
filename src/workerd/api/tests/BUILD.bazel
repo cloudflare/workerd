@@ -159,6 +159,7 @@ wd_test(
         "websocket-hibernation.js",
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
+        "js-rpc-test.js",
     ],
     tags = ["resources:socket:1"],
 )
