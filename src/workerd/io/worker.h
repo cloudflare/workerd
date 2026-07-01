@@ -499,6 +499,12 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // See Worker::takeAsyncLock().
   kj::Promise<AsyncLock> takeAsyncLock(RequestObserver&) const;
 
+  // Enters the isolate under `lockType` and runs `callback` with the resulting `jsg::Lock`. Unlike
+  // `Worker::runInLockScope`, this does not require a `Worker` -- it locks the isolate directly,
+  // which is useful for whole-isolate operations such as CPU profiling that are not tied to any
+  // particular Worker instance.
+  void runInLockScope(LockType lockType, kj::FunctionParam<void(jsg::Lock&)> callback) const;
+
   bool isInspectorEnabled() const;
 
   // Returns the isolate's V8 inspector, if one exists. An inspector is created either because a
