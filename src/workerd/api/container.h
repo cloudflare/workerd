@@ -6,7 +6,7 @@
 // Container management API for Durable Object-attached containers.
 //
 #include <workerd/api/basics.h>
-#include <workerd/api/streams/readable.h>
+#include <workerd/api/js-readable-stream.h>
 #include <workerd/api/streams/writable.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/container.capnp.h>
@@ -53,7 +53,7 @@ class ExecOutput: public jsg::Object {
 struct ExecOptions {
   // $ prefix avoids collision with stdin/stdout/stderr macros from <stdio.h>;
   // JSG_STRUCT strips the $ when exposing to JS.
-  jsg::Optional<kj::OneOf<jsg::Ref<ReadableStream>, kj::String>> $stdin;
+  jsg::Optional<kj::OneOf<JsReadableStream, kj::String>> $stdin;
   jsg::Optional<kj::String> $stdout;
   jsg::Optional<kj::String> $stderr;
   jsg::Optional<kj::String> cwd;
@@ -81,15 +81,15 @@ class ExecProcess: public jsg::Object {
   ExecProcess(jsg::Lock& js,
       IoContext& ioContext,
       jsg::Optional<jsg::Ref<WritableStream>> stdinStream,
-      jsg::Optional<jsg::Ref<ReadableStream>> stdoutStream,
-      jsg::Optional<jsg::Ref<ReadableStream>> stderrStream,
+      jsg::Optional<JsReadableStream> stdoutStream,
+      jsg::Optional<JsReadableStream> stderrStream,
       int pid,
       rpc::Container::ProcessHandle::Client handle,
       kj::Maybe<jsg::Ref<AbortSignal>> abortSignal = kj::none);
 
   jsg::Optional<jsg::Ref<WritableStream>> getStdin();
-  jsg::Optional<jsg::Ref<ReadableStream>> getStdout();
-  jsg::Optional<jsg::Ref<ReadableStream>> getStderr();
+  jsg::Optional<JsReadableStream> getStdout(jsg::Lock& js);
+  jsg::Optional<JsReadableStream> getStderr(jsg::Lock& js);
   int getPid() const {
     return pid;
   }
@@ -120,8 +120,12 @@ class ExecProcess: public jsg::Object {
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("stdin", stdinStream);
-    tracker.trackField("stdout", stdoutStream);
-    tracker.trackField("stderr", stderrStream);
+    KJ_IF_SOME(s, stdoutStream) {
+      s.visitForMemoryInfo(tracker);
+    }
+    KJ_IF_SOME(s, stderrStream) {
+      s.visitForMemoryInfo(tracker);
+    }
     tracker.trackField("exitCodePromise", exitCodePromise);
     tracker.trackField("exitCodePromiseCopy", exitCodePromiseCopy);
   }
@@ -135,8 +139,8 @@ class ExecProcess: public jsg::Object {
   void sendKill(int signo);
 
   jsg::Optional<jsg::Ref<WritableStream>> stdinStream;
-  jsg::Optional<jsg::Ref<ReadableStream>> stdoutStream;
-  jsg::Optional<jsg::Ref<ReadableStream>> stderrStream;
+  jsg::Optional<JsReadableStream> stdoutStream;
+  jsg::Optional<JsReadableStream> stderrStream;
   int pid;
   IoOwn<rpc::Container::ProcessHandle::Client> handle;
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<int>>> exitCodePromise;

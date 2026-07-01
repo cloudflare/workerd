@@ -229,11 +229,11 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
   kj::Rc<kj::AsyncIoStream> refcountedConnection(kj::mv(connection));
   // Initialize the readable/writable streams with the readable/writable sides of an AsyncIoStream.
   auto sysStreams = newSystemMultiStream(refcountedConnection.addRef(), ioContext);
-  auto readable = js.alloc<ReadableStream>(ioContext, kj::mv(sysStreams.readable));
+  auto readable = JsReadableStream::create(js, ioContext, kj::mv(sysStreams.readable));
   auto allowHalfOpen = getAllowHalfOpen(options);
   kj::Maybe<jsg::Promise<void>> eofPromise;
   if (!allowHalfOpen) {
-    eofPromise = readable->onEof(js);
+    eofPromise = readable.onEof(js);
   }
   auto openedPrPair = kj::mv(maybeOpenedPrPair).orDefault([&js]() {
     return js.newPromiseAndResolver<SocketInfo>();
@@ -373,7 +373,7 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
 
   isClosing = true;
   writable->getController().setPendingClosure();
-  readable->getController().setPendingClosure();
+  readable.setPendingClosure(js);
 
   // Wait until the socket connects (successfully or otherwise)
   // Note: `self` (jsg::Ref) is captured in each continuation to prevent GC from collecting
@@ -391,7 +391,7 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
       .then(js,
           [self = JSG_THIS](jsg::Lock& js) mutable {
     // Forcibly abort the readable/writable streams.
-    auto cancelPromise = self->readable->getController().cancel(js, kj::none);
+    auto cancelPromise = self->readable.forceCancel(js, kj::none);
     auto abortPromise = self->writable->getController().abort(js, kj::none);
 
     // The below is effectively `Promise.all(cancelPromise, abortPromise)`
@@ -460,7 +460,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
                 auto& context = IoContext::current();
 
                 self->writable->detach(js);
-                self->readable->detach(js, true);
+                self->readable.detach(js, IgnoreDisturbed::YES);
 
                 // We should set this before closedResolver.resolve() in order to give the user
                 // the option to check if the closed promise is resolved due to upgrade or not.
@@ -604,7 +604,7 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
 void Socket::handleProxyError(jsg::Lock& js, kj::Exception e) {
   resolveFulfiller(js, e.clone());
   openedResolver.reject(js, e.clone());
-  readable->getController().cancel(js, kj::none).markAsHandled(js);
+  readable.forceCancel(js, kj::none).markAsHandled(js);
   writable->getController().abort(js, js.error(e.getDescription())).markAsHandled(js);
 }
 
@@ -666,7 +666,7 @@ kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
   // We do not care if the socket was disturbed, we require the user to ensure the socket is not
   // being used.
   writable->detach(js);
-  readable->detach(js, true);
+  readable.detach(js, IgnoreDisturbed::YES);
 
   // Move the stream out of the socket, to ensure the stream is properly destroyed when the
   // caller is done with it.

@@ -261,7 +261,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   CfProperty cf(cfBlobJson);
 
   // We only create the body stream if there is a body to read.
-  kj::Maybe<jsg::Ref<ReadableStream>> maybeJsStream = kj::none;
+  kj::Maybe<JsReadableStream> maybeJsStream = kj::none;
 
   // If the request has "no body", we want `request.body` to be null. But, this is not the same
   // thing as the request having a body that happens to be empty. Unfortunately, KJ HTTP gives us
@@ -290,8 +290,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     // We do not automatically decode gzipped request bodies because the fetch() standard doesn't
     // specify any automatic encoding of requests. https://github.com/whatwg/fetch/issues/589
     auto b = newSystemStream(kj::addRef(*ownRequestBody), StreamEncoding::IDENTITY);
-    auto jsStream = js.alloc<ReadableStream>(ioContext, kj::mv(b));
-    body = Body::ExtractedBody(jsStream.addRef());
+    auto jsStream = JsReadableStream::create(js, ioContext, kj::mv(b));
+    body = Body::ExtractedBody(js, jsStream.addRef(js));
     maybeJsStream = kj::mv(jsStream);
   }
 
@@ -379,7 +379,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     }
 
     KJ_IF_SOME(jsStream, maybeJsStream) {
-      if (jsStream->isDisturbed()) {
+      if (jsStream.isDisturbed(js)) {
         lock.logUncaughtException(
             "Script consumed request body but didn't call respondWith(). Can't forward request.");
         return addNoopDeferredProxy(

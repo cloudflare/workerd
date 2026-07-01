@@ -126,6 +126,26 @@ struct TupleRttiBuilder {
   }
 };
 
+// Delegated RTTI
+//
+// A C++ type that converts to/from an existing JavaScript type (typically a SelfConvertible
+// type, see type-wrapper.h) can opt into RTTI by declaring a delegate:
+//
+//     class MyType {
+//      public:
+//       using JsgRttiDelegate = jsg::Ref<SomeApiType>;
+//       ...
+//     };
+//
+// RTTI (and therefore generated TypeScript) will then describe MyType exactly as it describes
+// the delegate type.
+template <typename Configuration, typename T>
+struct BuildRtti<Configuration, T, std::void_t<typename T::JsgRttiDelegate>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    BuildRtti<Configuration, typename T::JsgRttiDelegate>::build(builder, rtti);
+  }
+};
+
 // Primitives
 
 template <typename Configuration>

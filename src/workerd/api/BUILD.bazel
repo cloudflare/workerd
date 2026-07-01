@@ -25,6 +25,7 @@ filegroup(
         "hibernatable-adapter.c++",
         "hibernatable-web-socket.c++",
         "http.c++",
+        "js-readable-stream.c++",
         "messagechannel.c++",
         "performance.c++",
         "queue.c++",
@@ -75,6 +76,7 @@ filegroup(
         "hibernatable-adapter.h",
         "hibernatable-web-socket.h",
         "http.h",
+        "js-readable-stream.h",
         "messagechannel.h",
         "performance.h",
         "queue.h",
@@ -235,6 +237,10 @@ wd_cc_library(
 
 # for using EW_STREAMS_ISOLATE_TYPES with workerd-api etc. To use the different streams APIs,
 # include the headers you need directly.
+#
+# Note: JsReadableStream lives in js-readable-stream.{h,c++}, which is folded into
+# //src/workerd/io (via the :srcs/:hdrs filegroups) because http.h depends on it. This target
+# re-exports it via streams.h.
 wd_cc_library(
     name = "streams",
     hdrs = ["streams.h"],
@@ -597,6 +603,14 @@ kj_test(
 
 kj_test(
     src = "streams-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "js-readable-stream-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
