@@ -11,11 +11,10 @@ which leaves the type incomplete and fails under clang-cl with MSVC's STL.
 Include v8-fast-api-calls.h before these declarations so CFunction is complete.
 
 diff --git a/include/v8-template.h b/include/v8-template.h
-index 49f68abc64cbe746863969edcc0d190edac35c79..f250e6ce199d76070ae0e9fe323b09ebebf07498 100644
+index 5a890e70cac28a91b54888339aace254b2e29d18..c2d72da08c1b1dd1e93bb9df395456ad87537be2 100644
 --- a/include/v8-template.h
 +++ b/include/v8-template.h
-@@ -9,15 +9,15 @@
- #include <string_view>
+@@ -10,6 +10,7 @@
  
  #include "v8-data.h"               // NOLINT(build/include_directory)
  #include "v8-exception.h"          // NOLINT(build/include_directory)
@@ -23,8 +22,7 @@ index 49f68abc64cbe746863969edcc0d190edac35c79..f250e6ce199d76070ae0e9fe323b09eb
  #include "v8-function-callback.h"  // NOLINT(build/include_directory)
  #include "v8-local-handle.h"       // NOLINT(build/include_directory)
  #include "v8-memory-span.h"        // NOLINT(build/include_directory)
- #include "v8-object.h"             // NOLINT(build/include_directory)
- #include "v8config.h"              // NOLINT(build/include_directory)
+@@ -18,7 +19,6 @@
  
  namespace v8 {
  

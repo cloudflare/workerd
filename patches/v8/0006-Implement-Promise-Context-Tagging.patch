@@ -367,10 +367,10 @@ index fbe5f7c7c69b3f0ace50ed7dfb51a173abca0ff3..63d15d64de7a933353dedfbc9aa79f6d
    // TODO(v8) remove once embedder data slots are always zero-initialized.
    InitEmbedderFields(*promise, Smi::zero());
 diff --git a/src/maglev/maglev-graph-builder.cc b/src/maglev/maglev-graph-builder.cc
-index b95f8ac6ffd711ea25a72028e725b6d4fd936cf0..b8725fb9b86f0722ddd19e9423f256c295861977 100644
+index c4facfe62aa2fd8a0535e268e59a8dfb7eb34935..81db14a4e0b5f020f59f12d3126aa4ccf95c3098 100644
 --- a/src/maglev/maglev-graph-builder.cc
 +++ b/src/maglev/maglev-graph-builder.cc
-@@ -15059,9 +15059,10 @@ VirtualObject* MaglevGraphBuilder::CreateJSPromiseObject() {
+@@ -15061,9 +15061,10 @@ VirtualObject* MaglevGraphBuilder::CreateJSPromiseObject() {
    vobj->set(offsetof(JSObject, elements_),
              GetRootConstant(RootIndex::kEmptyFixedArray));
    vobj->set(offsetof(JSPromise, reactions_or_result_), GetSmiConstant(0));

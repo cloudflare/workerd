@@ -137,6 +137,7 @@ The other core runtime dependencies include:
 | fp16                                | Half-precision float support                                        |
 | highway                             | SIMD abstraction library                                            |
 | dragonbox                           | Float-to-string conversion                                          |
+| llvm-libc                           | Optimized C Math functions                                          |
 
 These dependencies are vendored via Bazel into the `external/` directory. See `MODULE.bazel` and the `build/deps/` directory for how they are integrated into the build system. (The project uses bzlmod; the legacy `WORKSPACE` file may still exist but is no longer the primary mechanism.)
 
