@@ -32,7 +32,7 @@ interface Hyperdrive {
   readonly port: number;
   /*
    * The username to use when authenticating to your database via Hyperdrive.
-   * Unlike the host and password, this will be the same every time 
+   * Unlike the host and password, this will be the same every time
    */
   readonly user: string;
   /*
@@ -46,4 +46,18 @@ interface Hyperdrive {
    * The name of the database to connect to.
    */
   readonly database: string;
+}
+
+/**
+ * Dynamic Hyperdrive binding handle
+ */
+interface HyperdriveHandle {
+  connect(): Promise<Socket>;
+}
+
+/**
+ * Returns a dynamic Hyperdrive binding handle
+ */
+interface HyperdriveApiBinding {
+  get(): HyperdriveHandle;
 }
