@@ -20,6 +20,76 @@ async function imageAsString(blob) {
   return blob.text();
 }
 
+/**
+ * Resolve a dot-notation path (e.g. `config.region`) against an object.
+ * @param {Record<string, unknown>} obj
+ * @param {string} path
+ * @returns {unknown}
+ */
+function resolveMetaPath(obj, path) {
+  return path
+    .split('.')
+    .reduce(
+      (acc, key) => (acc && typeof acc === 'object' ? acc[key] : undefined),
+      obj
+    );
+}
+
+/**
+ * Evaluate a single field condition against a resolved metadata value,
+ * mirroring images-core semantics. A bare value is treated as `eq`.
+ * @param {unknown} actual
+ * @param {unknown} condition
+ * @returns {boolean}
+ */
+function matchesCondition(actual, condition) {
+  if (
+    condition === null ||
+    typeof condition !== 'object' ||
+    Array.isArray(condition)
+  ) {
+    return actual === condition;
+  }
+
+  return Object.entries(condition).every(([op, expected]) => {
+    switch (op) {
+      case 'eq':
+        return actual === expected;
+      case 'in':
+        return (
+          Array.isArray(expected) &&
+          expected.some((candidate) => candidate === actual)
+        );
+      case 'gt':
+        return typeof actual === 'number' && actual > expected;
+      case 'gte':
+        return typeof actual === 'number' && actual >= expected;
+      case 'lt':
+        return typeof actual === 'number' && actual < expected;
+      case 'lte':
+        return typeof actual === 'number' && actual <= expected;
+      default:
+        return false;
+    }
+  });
+}
+
+/**
+ * Apply metadata filters (AND across fields) to an image's metadata.
+ * @param {{ meta?: Record<string, unknown> }} image
+ * @param {Record<string, unknown>} [filters]
+ * @returns {boolean}
+ */
+function matchesMetadataFilters(image, filters) {
+  if (!filters) {
+    return true;
+  }
+
+  return Object.entries(filters).every(([field, condition]) =>
+    matchesCondition(resolveMetaPath(image.meta ?? {}, field), condition)
+  );
+}
+
 class ImageHandleMock extends RpcTarget {
   /** @type {string} */
   #imageId;
@@ -133,7 +203,7 @@ export class ServiceEntrypoint extends WorkerEntrypoint {
         uploaded: '2024-01-01T00:00:00Z',
         requireSignedURLs: false,
         variants: ['public'],
-        meta: {},
+        meta: { status: 'active', priority: 1, config: { region: 'eu-west' } },
         creator: 'test-creator',
       },
       {
@@ -142,13 +212,23 @@ export class ServiceEntrypoint extends WorkerEntrypoint {
         uploaded: '2024-01-02T00:00:00Z',
         requireSignedURLs: false,
         variants: ['public'],
-        meta: {},
+        meta: {
+          status: 'archived',
+          priority: 5,
+          config: { region: 'us-east' },
+        },
         creator: 'test-creator',
       },
     ];
 
+    // Apply metadata filters so tests can observe that the binding forwarded
+    // them faithfully over RPC. The mock mirrors images-core's filter semantics.
+    const filtered = images.filter((image) =>
+      matchesMetadataFilters(image, options?.metadataFilters)
+    );
+
     const limit = options?.limit || 50;
-    const slicedImages = images.slice(0, limit);
+    const slicedImages = filtered.slice(0, limit);
 
     return {
       images: slicedImages,

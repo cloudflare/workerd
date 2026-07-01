@@ -14065,11 +14065,42 @@ export interface ImageUpdateOptions {
   metadata?: Record<string, unknown>;
   creator?: string;
 }
+export type ImageMetadataFilterOperators = {
+  /** Matches a field exactly. */
+  eq?: string | number | boolean;
+  /** Matches a field against any value in the list (maximum 10 values). */
+  in?: string[] | number[];
+  /** Greater than (numbers only). */
+  gt?: number;
+  /** Greater than or equal to (numbers only). */
+  gte?: number;
+  /** Less than (numbers only). */
+  lt?: number;
+  /** Less than or equal to (numbers only). */
+  lte?: number;
+};
+/**
+ * A condition applied to a single metadata field. A bare value is shorthand
+ * for `eq`, so `{ status: 'active' }` is equivalent to
+ * `{ status: { eq: 'active' } }`.
+ */
+export type ImageMetadataFilterValue =
+  | string
+  | number
+  | boolean
+  | ImageMetadataFilterOperators;
 export interface ImageListOptions {
   limit?: number;
   cursor?: string;
   sortOrder?: "asc" | "desc";
   creator?: string;
+  /**
+   * Filter images by custom metadata fields. Each key is a metadata field
+   * name and its value is the condition the field must meet. Use dot notation
+   * in the field name to filter on a nested field (e.g. `region.name`).
+   * When multiple fields are provided, an image must match all of them.
+   */
+  metadataFilters?: Record<string, ImageMetadataFilterValue>;
 }
 export interface ImageList {
   images: ImageMetadata[];

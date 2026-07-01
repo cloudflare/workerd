@@ -645,6 +645,100 @@ export const test_images_list_with_options = {
   },
 };
 
+// The binding forwards metadataFilters over RPC unchanged. These tests assert
+// that by checking the right images come back from the mock upstream, which
+// mirrors images-core's filter semantics. Filter correctness itself is covered
+// in depth by images-core and the local simulator (miniflare).
+export const test_images_list_metadata_filter_implicit_eq = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images.hosted.list({
+      metadataFilters: { status: 'active' },
+    });
+
+    assert.equal(result.images.length, 1);
+    assert.equal(result.images[0].id, 'image-1');
+  },
+};
+
+export const test_images_list_metadata_filter_explicit_eq = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images.hosted.list({
+      metadataFilters: { status: { eq: 'archived' } },
+    });
+
+    assert.equal(result.images.length, 1);
+    assert.equal(result.images[0].id, 'image-2');
+  },
+};
+
+export const test_images_list_metadata_filter_in = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images.hosted.list({
+      metadataFilters: { status: { in: ['active', 'archived'] } },
+    });
+
+    assert.equal(result.images.length, 2);
+  },
+};
+
+export const test_images_list_metadata_filter_range = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    // Bounded range - only image-1 has priority within [1, 3].
+    const result = await env.images.hosted.list({
+      metadataFilters: { priority: { gte: 1, lte: 3 } },
+    });
+
+    assert.equal(result.images.length, 1);
+    assert.equal(result.images[0].id, 'image-1');
+  },
+};
+
+export const test_images_list_metadata_filter_nested = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images.hosted.list({
+      metadataFilters: { 'config.region': 'us-east' },
+    });
+
+    assert.equal(result.images.length, 1);
+    assert.equal(result.images[0].id, 'image-2');
+  },
+};
+
+export const test_images_list_metadata_filter_multiple_fields_and = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    // AND across fields: no image is both active and priority >= 5.
+    const result = await env.images.hosted.list({
+      metadataFilters: { status: 'active', priority: { gte: 5 } },
+    });
+
+    assert.equal(result.images.length, 0);
+  },
+};
+
 // UPLOAD with base64 encoding
 export const test_images_upload_base64_stream = {
   /**
