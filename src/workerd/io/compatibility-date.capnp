@@ -1572,8 +1572,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("no_python_workers_20260610")
       $pythonSnapshotRelease
       $experimental;
-  # Enables Python Workers using Pyodide 314.0.0 (CPython 3.14.2, Emscripten 5.0.3).
 
+  # Enables Python Workers using Pyodide 314.0.0 (CPython 3.14.2, Emscripten 5.0.3).
   enableNodeJsInspectorLocalDev @180 :Bool
       $compatEnableFlag("enable_nodejs_inspector_local_dev")
       $experimental;
@@ -1596,4 +1596,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # This flag is not enabled by default in local dev on purpose, we want local dev to mimic
   # the production environment as much as possible, this flag is meant to be used by test
   # frameworks when running tests that require the inspector to be functional, and not by end users.
+
+  d1BindingJsrpc @181 :Bool
+      $compatEnableFlag("d1_binding_jsrpc");
+  # When enabled, D1 bindings use the internal JSRPC binding API for queries
+  # instead of issuing `fetch` calls to the D1 binding service. Without this
+  # flag, D1 bindings continue to use the `fetch` method of the Fetcher.
 }
