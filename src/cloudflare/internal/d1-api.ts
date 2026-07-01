@@ -5,14 +5,55 @@
 import { withSpan } from 'cloudflare-internal:tracing-helpers';
 import type { Span } from './tracing';
 
-interface D1Meta {
-  duration: number;
-  size_after: number;
-  rows_read: number;
-  rows_written: number;
-  last_row_id: number;
-  changed_db: boolean;
-  changes: number;
+const d1BindingJsrpc = !!Cloudflare.compatibilityFlags['d1_binding_jsrpc'];
+
+/////////////////////////////////////////////////////////////////////////////
+// Binding contract to create a custom binding                             //
+/////////////////////////////////////////////////////////////////////////////
+type D1BindingService = {
+  query(params: QueryParams): Promise<QueryResult>;
+};
+
+type D1SessionConstraint = 'first-primary' | 'first-unconstrained';
+type D1SessionBookmark = string;
+type D1SessionBookmarkOrConstraint = D1SessionBookmark | D1SessionConstraint;
+
+type QueryParams = {
+  statements: Array<Statement>;
+  omitStatementResults?: boolean;
+  sessionBookmark?: D1SessionBookmarkOrConstraint;
+};
+
+type QueryResult = RpcResponse<{
+  statementResults: StatementResult[];
+  sessionBookmark?: D1SessionBookmark;
+}>;
+
+type Statement = {
+  sql: string;
+  params?: unknown[];
+};
+
+type StatementResult = {
+  /** Column names for the returned rows. */
+  columns: string[];
+  /** Rows returned as arrays of column values. */
+  rows: unknown[][];
+  /** Metadata for this statement. */
+  meta: D1Meta;
+};
+
+type RpcResponse<T = unknown> =
+  | { success: true; results: T }
+  | { success: false; error: Error };
+
+type D1Meta = {
+  served_by?: string;
+
+  /**
+   * True if-and-only-if the database instance that executed the query was the primary.
+   */
+  served_by_primary?: boolean;
 
   /**
    * The region of the database instance that executed the query.
@@ -24,26 +65,31 @@ interface D1Meta {
    */
   served_by_colo?: string;
 
-  /**
-   * True if-and-only-if the database instance that executed the query was the primary.
-   */
-  served_by_primary?: boolean;
-
   timings?: {
     /**
      * The duration of the SQL query execution by the database instance. It doesn't include any network time.
      */
     sql_duration_ms: number;
   };
+  duration: number;
+  rows_read: number;
+  rows_written: number;
+  changes: number;
+  last_row_id: number;
+  changed_db: boolean;
+  size_after: number;
 
   /**
    * Number of total attempts to execute the query, due to automatic retries.
    * Note: All other fields in the response like `timings` only apply to the last attempt.
    */
   total_attempts?: number;
-}
+};
+/////////////////////////////////////////////////////////////////////////////
+// End of the binding contract                                             //
+/////////////////////////////////////////////////////////////////////////////
 
-interface Fetcher {
+interface Fetcher extends D1BindingService {
   fetch: typeof fetch;
 }
 
@@ -93,8 +139,6 @@ type SQLError = {
 
 type ResultsFormat = 'ARRAY_OF_OBJECTS' | 'ROWS_AND_COLUMNS' | 'NONE';
 
-type D1SessionBookmarkOrConstraint = string;
-type D1SessionBookmark = string;
 // Indicates that the first query should go to the primary, and the rest queries
 // using the same D1DatabaseSession will go to any replica that is consistent with
 // the bookmark maintained by the session (returned by the first query).
@@ -145,6 +189,21 @@ class D1Database {
       constraintOrBookmark = D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED;
     }
     return new D1DatabaseSession(this.fetcher, constraintOrBookmark);
+  }
+
+  /**
+   * Proxy the request to the underlying JSRPC `.query` method.
+   *
+   * @example
+   * ```
+   * await env.D1.query({
+   *   statements: [{ sql: "select * from users where id=?", params: [1] }],
+   *   sessionBookmark: "<insert_session_bookmark>"
+   * });
+   * ```
+   */
+  async query(params: QueryParams): Promise<QueryResult> {
+    return await this.fetcher.query(params);
   }
 
   /**
@@ -216,13 +275,23 @@ class D1DatabaseSession {
         this.getBookmark() ?? undefined
       );
 
-      const exec = (await this._sendOrThrow(
-        '/query',
-        statements.map((s: D1PreparedStatement) => s.statement),
-        statements.map((s: D1PreparedStatement) => s.params),
-        'ROWS_AND_COLUMNS',
-        span
-      )) as D1UpstreamSuccess<T>[];
+      const exec = (d1BindingJsrpc
+        ? await this._queryOrThrow(
+            {
+              statements: statements.map((s: D1PreparedStatement) => ({
+                sql: s.statement,
+                params: s.params,
+              })),
+            },
+            span
+          )
+        : await this._sendOrThrow(
+            '/query',
+            statements.map((s: D1PreparedStatement) => s.statement),
+            statements.map((s: D1PreparedStatement) => s.params),
+            'ROWS_AND_COLUMNS',
+            span
+          )) as D1UpstreamSuccess<T>[];
 
       span.setAttribute(
         'cloudflare.d1.response.bookmark',
@@ -357,6 +426,79 @@ class D1DatabaseSession {
       });
     }
   }
+
+  async _queryOrThrow(
+    params: QueryParams,
+    span: Span
+  ): Promise<D1RowsColumns[]> {
+    const results = await this._query(params, span);
+    const successes: D1RowsColumns[] = [];
+    for (const result of results) {
+      if (!result.success) {
+        span.setAttribute('error.type', result.error);
+        throw new Error(`D1_ERROR: ${result.error}`, {
+          cause: new Error(result.error),
+        });
+      }
+      successes.push(result);
+    }
+    return successes;
+  }
+
+  async _query(
+    params: QueryParams,
+    span: Span
+  ): Promise<Array<D1RowsColumns | D1UpstreamFailure>> {
+    try {
+      const response = await this.fetcher.query({
+        ...params,
+        sessionBookmark: this.bookmarkOrConstraint,
+      });
+
+      if (!response.success) {
+        return [{
+          success: false,
+          error: response.error.message,
+        }];
+      }
+
+      if (response.results.sessionBookmark) {
+        this._updateBookmark(response.results.sessionBookmark);
+      }
+
+      return response.results.statementResults.map(
+        (statementResult): D1RowsColumns => ({
+          success: true,
+          meta: statementResult.meta,
+          results: {
+            columns: statementResult.columns,
+            // FIXME: this assumes that the rows are returned from the D1 Eyeball as plain
+            // JavaScript arrays, which requires our Eyeball to parse the response from the DO.
+            // We are actively trying to avoid doing that because it means that the Eyeball would
+            // consume more memory than necessary.
+            // I'm doing this right now so that the MR is easier to review and I'll create another
+            // MR to add a property `rowsKind` (or similar) that is going to specify in which
+            // format the rows are defined in the `QueryResult`. We could return the rows in one or
+            // more ReadableStream for example.
+            rows: statementResult.rows,
+          },
+        })
+      );
+    } catch (_e) {
+      // TODO: this keep the same error pattern as for the `_send()` function
+      // but I find it extremely confusing to read so this will need a proper
+      // refactor.
+      const e = _e as Error;
+      const message =
+        (e.cause as Error | undefined)?.message ||
+        e.message ||
+        'Something went wrong';
+      span.setAttribute('error.type', message);
+      throw new Error(`D1_ERROR: ${message}`, {
+        cause: new Error(message),
+      });
+    }
+  }
 }
 
 class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
@@ -395,25 +537,40 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
       // can contain multiple statements (ex: `select 1; select 2;`).
       // Also, a statement can span multiple lines...
       // Either, we should do a more reasonable job to split the query into multiple statements
-      // like we do in the D1 codebase or we report a simpler error without the line number.
+      // like we do in the D1 codebase.
       const lines = query.trim().split('\n');
-      const _exec = await this._send('/execute', lines, [], 'NONE', span);
-      const exec = Array.isArray(_exec) ? _exec : [_exec];
+      const execResults = d1BindingJsrpc
+        ? await this._query(
+            {
+              statements: lines.map((sql) => ({ sql })),
+              omitStatementResults: true,
+            },
+            span
+          )
+        : await this._send('/execute', lines, [], 'NONE', span);
+      const results = Array.isArray(execResults) ? execResults : [execResults];
 
       let duration = 0;
       const metas: D1Meta[] = [];
-      for (let i = 0; i < exec.length; i++) {
-        const res = exec[i];
+      for (const [i, res] of results.entries()) {
         if (!res?.success) {
-          span.setAttribute('error.type', `Error in line ${i + 1}`);
-          throw new Error(
-            `D1_EXEC_ERROR: Error in line ${i + 1}: ${lines[i]}${res?.error ? `: ${res.error}` : ''}`,
-            {
-              cause: new Error(
-                `Error in line ${i + 1}: ${lines[i]}${res?.error ? `: ${res.error}` : ''}`
-              ),
-            }
-          );
+          const message = res?.error || 'Something went wrong';
+          if (!d1BindingJsrpc) {
+            // Keep the old behavior even if the line number is always going to be 1
+            // because the DO is only returning the first error only.
+            const lineNumber = i + 1;
+            const line = lines[lineNumber - 1];
+            const legacyMessage = `Error in line ${lineNumber}: ${line}: ${message}`;
+            span.setAttribute('error.type', `Error in line ${lineNumber}`);
+            throw new Error(`D1_EXEC_ERROR: ${legacyMessage}`, {
+              cause: new Error(legacyMessage),
+            });
+          }
+
+          span.setAttribute('error.type', message);
+          throw new Error(`D1_EXEC_ERROR: ${message}`, {
+            cause: new Error(message),
+          });
         }
 
         duration += res.meta.duration;
@@ -424,7 +581,7 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
         addAggregatedD1MetaToSpan(span, metas);
       }
       return {
-        count: exec.length,
+        count: d1BindingJsrpc ? lines.length : results.length,
         duration,
       };
     });
@@ -435,6 +592,10 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
    * Only applies to the deprecated v1 alpha databases.
    */
   async dump(): Promise<ArrayBuffer> {
+    // dump() is no longer callable, our D1 eyeball worker is throwing
+    // an error when using the method.
+    // TODO: Replace the body of this method and just throw an Error similar
+    // to what we return in our eyeball.
     const response = await this._wrappedFetch('http://d1/dump', {
       method: 'POST',
       headers: {
@@ -534,13 +695,18 @@ class D1PreparedStatement {
       );
 
       const info = firstIfArray(
-        await this.dbSession._sendOrThrow<Record<string, T>>(
-          '/query',
-          this.statement,
-          this.params,
-          'ROWS_AND_COLUMNS',
-          span
-        )
+        d1BindingJsrpc
+          ? await this.dbSession._queryOrThrow(
+              { statements: [{ sql: this.statement, params: this.params }] },
+              span
+            )
+          : await this.dbSession._sendOrThrow<Record<string, T>>(
+              '/query',
+              this.statement,
+              this.params,
+              'ROWS_AND_COLUMNS',
+              span
+            )
       );
 
       span.setAttribute(
@@ -549,7 +715,7 @@ class D1PreparedStatement {
       );
       addD1MetaToSpan(span, info.meta);
 
-      const results = toArrayOfObjects(info).results;
+      const results = toArrayOfObjects<Record<string, T>>(info).results;
       const hasResults = results.length > 0;
       if (!hasResults) return null;
 
@@ -581,13 +747,18 @@ class D1PreparedStatement {
       );
 
       const result = firstIfArray(
-        await this.dbSession._sendOrThrow<T>(
-          '/execute',
-          this.statement,
-          this.params,
-          'NONE',
-          span
-        )
+        d1BindingJsrpc
+          ? await this.dbSession._queryOrThrow(
+              { statements: [{ sql: this.statement, params: this.params }] },
+              span
+            )
+          : await this.dbSession._sendOrThrow<T>(
+              '/execute',
+              this.statement,
+              this.params,
+              'NONE',
+              span
+            )
       );
 
       span.setAttribute(
@@ -595,7 +766,7 @@ class D1PreparedStatement {
         this.dbSession.getBookmark() ?? undefined
       );
       addD1MetaToSpan(span, result.meta);
-      return result;
+      return d1BindingJsrpc ? toArrayOfObjects(result) : result;
     });
   }
 
@@ -611,13 +782,18 @@ class D1PreparedStatement {
       );
 
       const result = firstIfArray(
-        await this.dbSession._sendOrThrow<T[]>(
-          '/query',
-          this.statement,
-          this.params,
-          'ROWS_AND_COLUMNS',
-          span
-        )
+        d1BindingJsrpc
+          ? await this.dbSession._queryOrThrow(
+              { statements: [{ sql: this.statement, params: this.params }] },
+              span
+            )
+          : await this.dbSession._sendOrThrow<T[]>(
+              '/query',
+              this.statement,
+              this.params,
+              'ROWS_AND_COLUMNS',
+              span
+            )
       );
 
       span.setAttribute(
@@ -640,6 +816,26 @@ class D1PreparedStatement {
         'cloudflare.d1.query.bookmark',
         this.dbSession.getBookmark() ?? undefined
       );
+
+      if (d1BindingJsrpc) {
+        const s = firstIfArray(
+          await this.dbSession._queryOrThrow(
+            { statements: [{ sql: this.statement, params: this.params }] },
+            span
+          )
+        );
+
+        span.setAttribute(
+          'cloudflare.d1.response.bookmark',
+          this.dbSession.getBookmark() ?? undefined
+        );
+        addD1MetaToSpan(span, s.meta);
+
+        return [
+          ...(options?.columnNames ? [s.results.columns as T] : []),
+          ...(s.results.rows as T[]),
+        ];
+      }
 
       const s = firstIfArray(
         await this.dbSession._sendOrThrow<Record<string, unknown>>(

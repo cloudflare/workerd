@@ -10,6 +10,7 @@ import {
 
 // Create module-level state using the helper
 const state = createInstrumentationState();
+const d1BindingJsrpc = !!Cloudflare.compatibilityFlags['d1_binding_jsrpc'];
 
 export default {
   tailStream: createTailStreamHandler(state),
@@ -65,7 +66,9 @@ const expectedSpans = [
     'db.operation.name': 'exec',
     'db.query.text': 'INVALID SQL',
     'cloudflare.binding.type': 'D1',
-    'error.type': 'Error in line 1',
+    'error.type': d1BindingJsrpc
+      ? 'near "INVALID": syntax error at offset 0: SQLITE_ERROR'
+      : 'Error in line 1',
     closed: true,
   },
   {
