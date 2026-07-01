@@ -67,6 +67,7 @@ wd_cc_library(
     implementation_deps = [
         "//src/per_isolate",
         "//src/rust/jsg",
+        "//src/rust/sha3",
         "//src/workerd/api:crypto-crc-impl",
         "//src/workerd/api:data-url",
         "//src/workerd/api/node:exceptions",
