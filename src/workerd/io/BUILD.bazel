@@ -118,7 +118,7 @@ wd_cc_library(
         "//src/workerd/util:header-validation",
         "//src/workerd/util:immediate-crash",
         "//src/workerd/util:ring-buffer",
-        "//src/workerd/util:small-set",
+        "//src/workerd/util:small-weak-vector",
         "//src/workerd/util:sqlite",
         "//src/workerd/util:state-machine",
         "//src/workerd/util:strong-bool",
