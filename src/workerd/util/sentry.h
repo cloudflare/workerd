@@ -61,6 +61,15 @@ inline bool isInterestingException(const kj::Exception& e) {
     KJ_LOG(severity, __VA_ARGS__);                                                                 \
   }
 
+#define LOG_EXCEPTION_IF_INTERESTING(context, exception) do {
+if (::workerd::isInterestingException(exception)) {
+  LOG_EXCEPTION(context, exception);
+} else {
+  LOG_NOSENTRY(ERROR, context, exception);
+}
+}  // namespace workerd
+while (0)
+
 // Log this to Sentry once ever per process. Typically will be better to use LOG_PERIODICALLY.
 #define LOG_ONCE(severity, ...)                                                                    \
   do {                                                                                             \
