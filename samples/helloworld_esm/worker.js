@@ -4,6 +4,22 @@
 
 export default {
   async fetch(req, env) {
+
+    const r = new Request('https://example.com/', {
+      headers: {
+        'x-hello': 'world',
+      }
+    });
+
+    const r2 = new Request(new Proxy(r, {
+      get(...args) {
+        return Reflect.get(...args);
+      }
+    }));
+
+    console.log(r2.url);
+    console.log(r2.headers);
+
     return new Response("Hello World\n");
   }
 };

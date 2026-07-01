@@ -2321,6 +2321,13 @@ struct NonCoercible {
   T value;
 };
 
+// A type that unwraps only when the value is a v8::Proxy. The value is a JSG_STRUCT
+// instance that is extracted from the proxy.
+template <typename T>
+struct Proxy {
+  T value;
+};
+
 // -----------------------------------------------------------------------------
 
 // A Sequence<T> in C++ corresponds to a Sequence IDL type. A sequence is a list of values

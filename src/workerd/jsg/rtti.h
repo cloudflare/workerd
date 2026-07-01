@@ -410,6 +410,13 @@ struct BuildRtti<Configuration, jsg::Dict<V, K>> {
   }
 };
 
+template <typename Configuration, typename T>
+struct BuildRtti<Configuration, jsg::Proxy<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    // TODO(now)
+  }
+};
+
 template <typename Configuration, typename... Variants>
 struct BuildRtti<Configuration, kj::OneOf<Variants...>> {
   using Seq = std::index_sequence_for<Variants...>;

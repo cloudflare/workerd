@@ -1487,4 +1487,34 @@ class ExceptionWrapper {
   }
 };
 
+// =======================================================================================
+
+template <typename TypeWrapper>
+class ProxyWrapper {
+ public:
+  template <typename T>
+  static const std::type_info& getName(Proxy<T>*) {
+    return TypeWrapper::getName(static_cast<T*>(nullptr));
+  }
+
+  template <typename T>
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      Proxy<T> instance) = delete;
+
+  template <typename T>
+  kj::Maybe<Proxy<T>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      Proxy<T>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (handle->IsProxy()) {
+      auto& typeWrapper = static_cast<TypeWrapper&>(*this);
+      return typeWrapper.tryUnwrap(js, context, handle, static_cast<T*>(nullptr), parentObject);
+    }
+    return kj::none;
+  }
+};
+
 }  // namespace workerd::jsg
