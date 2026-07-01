@@ -2993,17 +2993,9 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override {
     try {
-      SimpleResponseObserver responseWrapper(&fetchStatus, response);
-      co_await KJ_ASSERT_NONNULL(inner).request(method, url, headers, requestBody, responseWrapper);
+      co_await KJ_ASSERT_NONNULL(inner).request(method, url, headers, requestBody, response);
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
-      // Overloaded-type exceptions generally represent some resource exhaustion (i.e. not
-      // necessarily an internal error) and correspond to HTTP error 503.
-      if (exception.getType() == kj::Exception::Type::OVERLOADED) {
-        fetchStatus = 503;
-      } else {
-        fetchStatus = 500;
-      }
       reportFailure(exception);
       kj::throwFatalException(kj::mv(exception));
     }
@@ -3082,7 +3074,6 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   kj::Maybe<kj::Own<WorkerTracer>> tracer;
   kj::Maybe<WorkerInterface&> inner;
   EventOutcome outcome = EventOutcome::OK;
-  kj::uint fetchStatus = 0;
 };
 
 class SequentialSpanSubmitter final: public SpanSubmitter {
