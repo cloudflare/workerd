@@ -180,12 +180,16 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   #setFetchResponse(response: Response): void {
     this[kHeaders] = {};
     this[kHeadersDistinct] = {};
-    for (const header of response.headers.keys()) {
-      const value = response.headers.get(header) as string;
-      this[kHeaders][header] = value;
-      this[kHeadersDistinct][header] = [value];
-      this[kHeadersCount]++;
+    this.rawHeaders = [];
+
+    // Fetch only exposes displayed headers here, so rawHeaders mirrors the
+    // lower-cased/combined header view that the client can observe.
+    for (const [header, value] of response.headers) {
+      this.rawHeaders.push(header, value);
+      this._addHeaderLine(header, value, this[kHeaders]);
+      this._addHeaderLineDistinct(header, value, this[kHeadersDistinct]);
     }
+    this[kHeadersCount] = this.rawHeaders.length;
 
     this.#response = response;
     this._readableState.readingMore = true;
