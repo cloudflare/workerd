@@ -445,18 +445,18 @@ class ConsumerImpl final {
     }
   }
 
-  void read(jsg::Lock& js, ReadRequest request) {
+  void read(jsg::Lock& js, kj::Own<ReadRequest> request) {
     if (state.template is<Closed>()) {
-      return request.resolveAsDone(js);
+      return request->resolveAsDone(js);
     }
     KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
-      return request.reject(js, errored.reason.getHandle(js));
+      return request->reject(js, errored.reason.getHandle(js));
     }
     auto& ready = state.requireActiveUnsafe();
     // Mutual exclusion with draining reads.
     if (ready.hasPendingDrainingRead) {
       auto err = js.typeError("Cannot call read while there is a pending draining read"_kj);
-      return request.reject(js, err);
+      return request->reject(js, err);
     }
     // handleRead may trigger the pull callback (via onConsumerWantsData), which
     // may synchronously call reader.cancel(). Cancel can destroy this ConsumerImpl
@@ -804,7 +804,7 @@ class ValueQueue final {
 
     void error(jsg::Lock& js, jsg::JsValue reason);
 
-    void read(jsg::Lock& js, ReadRequest request);
+    void read(jsg::Lock& js, kj::Own<ReadRequest> request);
 
     // Draining read for optimized pipe-to operations. Drains all currently buffered
     // data, pumps the controller for synchronously available data, and converts
@@ -875,7 +875,7 @@ class ValueQueue final {
       ConsumerImpl::Ready& state,
       ConsumerImpl& consumer,
       kj::Weak<QueueImpl> queue,
-      ReadRequest request);
+      kj::Own<ReadRequest> request);
   static bool handleMaybeClose(jsg::Lock& js, ConsumerImpl::Ready& state, ConsumerImpl& consumer);
 
   friend ConsumerImpl;
@@ -891,7 +891,7 @@ class ByteQueue final {
 
   class ByobRequest;
 
-  struct ReadRequest final {
+  struct ReadRequest final: public kj::PtrTarget {
     enum class Type { DEFAULT, BYOB };
     jsg::Promise<ReadResult>::Resolver resolver;
     // The reference here should be cleared when the ByobRequest is invalidated,
@@ -911,8 +911,6 @@ class ByteQueue final {
     } pullInto;
 
     ReadRequest(jsg::Promise<ReadResult>::Resolver resolver, PullInto pullInto);
-    ReadRequest(ReadRequest&&) = default;
-    ReadRequest& operator=(ReadRequest&&) = default;
     ~ReadRequest() noexcept(false);
     void resolveAsDone(jsg::Lock& js);
     void resolve(jsg::Lock& js);
@@ -934,7 +932,7 @@ class ByteQueue final {
   // the ByobRequest is no longer usable and should be discarded.
   class ByobRequest final {
    public:
-    ByobRequest(ReadRequest& request, ConsumerImpl& consumer, kj::Ptr<QueueImpl> queue)
+    ByobRequest(kj::Weak<ReadRequest> request, ConsumerImpl& consumer, kj::Ptr<QueueImpl> queue)
         : request(request),
           consumer(consumer),
           queue(queue) {}
@@ -944,7 +942,7 @@ class ByteQueue final {
     ~ByobRequest() noexcept(false);
 
     inline ReadRequest& getRequest() {
-      return KJ_ASSERT_NONNULL(request);
+      return request.assertLive();
     }
 
     bool respond(jsg::Lock& js, size_t amount);
@@ -956,7 +954,7 @@ class ByteQueue final {
     void invalidate();
 
     inline bool isInvalidated() const {
-      return request == kj::none;
+      return request == nullptr;
     }
 
     bool isPartiallyFulfilled();
@@ -974,7 +972,7 @@ class ByteQueue final {
     JSG_MEMORY_INFO(ByteQueue::ByobRequest) {}
 
    private:
-    kj::Maybe<ReadRequest&> request;
+    kj::Weak<ReadRequest> request;
     ConsumerImpl& consumer;
     kj::Weak<QueueImpl> queue;
   };
@@ -1048,7 +1046,7 @@ class ByteQueue final {
 
     void error(jsg::Lock& js, jsg::JsValue reason);
 
-    void read(jsg::Lock& js, ReadRequest request);
+    void read(jsg::Lock& js, kj::Own<ReadRequest> request);
 
     // Draining read for optimized pipe-to operations. Drains all currently buffered
     // data and pumps the controller for synchronously available data.
@@ -1125,7 +1123,7 @@ class ByteQueue final {
       ConsumerImpl::Ready& state,
       ConsumerImpl& consumer,
       kj::Weak<QueueImpl> queue,
-      ReadRequest request);
+      kj::Own<ReadRequest> request);
   static bool handleMaybeClose(jsg::Lock& js, ConsumerImpl::Ready& state, ConsumerImpl& consumer);
 
   friend ConsumerImpl;
