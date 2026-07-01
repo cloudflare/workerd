@@ -685,6 +685,14 @@ kj_test(
 )
 
 kj_test(
+    src = "fetch-retry-claim-hook-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "streams/writable-sink-test.c++",
     deps = [
         "//src/workerd/io",

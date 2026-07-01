@@ -345,6 +345,11 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   bool useDefaultHandling;
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.fetch) {
+      // Immediately before dispatching into user code, give the observer a chance to claim the
+      // request's retry-token nonce. No-op unless the request is to an actor and the observer
+      // overrides the hook. Only the exported-handler path is hooked: Durable Objects are always
+      // class-based, so actor fetches never take the service-worker dispatchEventImpl() path below.
+      ioContext.getMetrics().claimRetryTokenBeforeUserCode();
       auto promise = f(lock, event->getRequest(), h.env.addRef(js), h.getCtx());
       event->respondWith(lock, kj::mv(promise));
       useDefaultHandling = false;
