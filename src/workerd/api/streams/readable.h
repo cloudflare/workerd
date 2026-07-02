@@ -263,7 +263,7 @@ class DrainingReader: public ReadableStreamController::Reader {
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
 };
 
-class ReadableStream: public jsg::Object {
+class ReadableStream: public kj::PtrTarget, public jsg::Object {
 private:
 
   struct AsyncIteratorState {
