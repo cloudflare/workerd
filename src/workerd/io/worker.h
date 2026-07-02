@@ -579,6 +579,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   class SubrequestClient;
   class ResponseStreamWrapper;
   class LimitedBodyWrapper;
+  class ZstdDecompressor;
 
   size_t nextRequestId = 0;
   kj::Own<jsg::AsyncContextFrame::StorageKey> traceAsyncContextKey;

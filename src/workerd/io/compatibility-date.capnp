@@ -1555,4 +1555,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # When enabled, a Worker's outbound gRPC-web subrequest is converted to gRPC at
   # the edge.
+
+  zstdContentEncoding @179 :Bool
+      $compatEnableFlag("zstd_content_encoding")
+      $compatEnableDate("2026-06-21")
+      $compatDisableFlag("no_zstd_content_encoding")
+      $neededByFl;
+  # Enables decompression support for the zstd compression algorithm.
+  # With the flag enabled workerd will support the "zstd" content encoding in the Request and
+  # Response APIs and decompress data accordingly, as with gzip.
 }

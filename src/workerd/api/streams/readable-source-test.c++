@@ -7,6 +7,7 @@
 #include <workerd/util/stream-utils.h>
 
 #include <kj/async-io.h>
+#include <kj/compat/gzip.h>
 #include <kj/test.h>
 
 // We Thank Claude for Tests.
@@ -971,6 +972,81 @@ KJ_TEST("Gzip encoded stream (pumpTo different encoding)") {
   static const kj::byte expected[] = {
     5, 8, 128, 115, 111, 109, 101, 32, 100, 97, 116, 97, 32, 116, 111, 32, 103, 122, 105, 112, 3};
   KJ_ASSERT(inner.data == expected);
+}
+
+KJ_TEST("Zstd encoded stream") {
+  TestFixture fixture;
+  // zstd-compressed "some data to zstd"
+  static constexpr kj::byte data[] = {
+    40, 181, 47, 253, 36, 17, 137, 0, 0, 115, 111, 109, 101, 32, 100, 97,
+    116, 97, 32, 116, 111, 32, 122, 115, 116, 100, 89, 232, 89, 209};
+  auto inner = newMemoryInputStream(data);
+  auto source = newEncodedReadableSource(rpc::StreamEncoding::ZSTD, kj::mv(inner));
+
+  fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
+    auto allBytes = co_await source->readAllBytes(kj::maxValue);
+    KJ_ASSERT(allBytes == "some data to zstd"_kjb);
+  });
+}
+
+KJ_TEST("Zstd encoded stream (pumpTo)") {
+  TestFixture fixture;
+  static constexpr kj::byte data[] = {
+    40, 181, 47, 253, 36, 17, 137, 0, 0, 115, 111, 109, 101, 32, 100, 97,
+    116, 97, 32, 116, 111, 32, 122, 115, 116, 100, 89, 232, 89, 209};
+  auto inner = newMemoryInputStream(data);
+  auto source = newEncodedReadableSource(rpc::StreamEncoding::ZSTD, kj::mv(inner));
+
+  MockWritableSink sink;
+
+  fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
+    co_await environment.context.waitForDeferredProxy(source->pumpTo(sink, EndAfterPump::YES));
+  });
+
+  KJ_ASSERT(sink.writtenData == "some data to zstd"_kjb);
+}
+
+KJ_TEST("Zstd encoded stream (pumpTo same encoding)") {
+  TestFixture fixture;
+  static const kj::byte data[] = {
+    40, 181, 47, 253, 36, 17, 137, 0, 0, 115, 111, 109, 101, 32, 100, 97,
+    116, 97, 32, 116, 111, 32, 122, 115, 116, 100, 89, 232, 89, 209};
+  auto in = newMemoryInputStream(data);
+  auto source = newEncodedReadableSource(rpc::StreamEncoding::ZSTD, kj::mv(in));
+
+  MemoryAsyncOutputStream inner;
+  auto fakeOwn = kj::Own<MemoryAsyncOutputStream>(&inner, kj::NullDisposer::instance);
+  auto sink = newEncodedWritableSink(rpc::StreamEncoding::ZSTD, kj::mv(fakeOwn));
+
+  fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
+    co_await environment.context.waitForDeferredProxy(source->pumpTo(*sink, EndAfterPump::YES));
+  });
+
+  // The data should pass through unchanged (no decompress/recompress).
+  KJ_ASSERT(inner.data == data);
+}
+
+KJ_TEST("Zstd encoded stream (pumpTo different encoding)") {
+  TestFixture fixture;
+  static const kj::byte data[] = {
+    40, 181, 47, 253, 36, 17, 137, 0, 0, 115, 111, 109, 101, 32, 100, 97,
+    116, 97, 32, 116, 111, 32, 122, 115, 116, 100, 89, 232, 89, 209};
+  auto in = newMemoryInputStream(data);
+  auto source = newEncodedReadableSource(rpc::StreamEncoding::ZSTD, kj::mv(in));
+
+  MemoryAsyncOutputStream inner;
+  auto fakeOwn = kj::Own<MemoryAsyncOutputStream>(&inner, kj::NullDisposer::instance);
+  auto sink = newEncodedWritableSink(rpc::StreamEncoding::GZIP, kj::mv(fakeOwn));
+
+  fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
+    co_await environment.context.waitForDeferredProxy(source->pumpTo(*sink, EndAfterPump::YES));
+
+    // Verify the output is valid gzip containing the original plaintext.
+    auto mem = newMemoryInputStream(inner.data);
+    kj::GzipAsyncInputStream gunzip(*mem);
+    auto text = co_await gunzip.readAllText(kj::maxValue);
+    KJ_ASSERT(text == "some data to zstd"_kj);
+  });
 }
 
 // ======================================================================================

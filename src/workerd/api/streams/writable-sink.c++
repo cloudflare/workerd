@@ -8,6 +8,7 @@
 #include <kj/async-io.h>
 #include <kj/compat/brotli.h>
 #include <kj/compat/gzip.h>
+#include <zstd.h>
 
 namespace workerd::api::streams {
 
@@ -203,6 +204,10 @@ class EncodedAsyncOutputStream final: public WritableSinkImpl {
       : WritableSinkImpl(kj::mv(inner), encoding) {}
 
   kj::Promise<void> endImpl(kj::AsyncOutputStream& output) override {
+    // If prepareWrite() was never called (empty body), encoding hasn't been
+    // disowned yet. Reject unsupported encodings here for consistency.
+    KJ_REQUIRE(getEncoding() != rpc::StreamEncoding::ZSTD,
+        "zstd output compression is not supported; use encodeResponseBody: manual");
     if (auto gzip = dynamic_cast<kj::GzipAsyncOutputStream*>(&output)) {
       co_await gzip->end();
     } else if (auto br = dynamic_cast<kj::BrotliAsyncOutputStream*>(&output)) {
@@ -225,6 +230,9 @@ class EncodedAsyncOutputStream final: public WritableSinkImpl {
       }
       case rpc::StreamEncoding::IDENTITY: {
         return setStream(kj::mv(inner));
+      }
+      case rpc::StreamEncoding::ZSTD: {
+        KJ_FAIL_REQUIRE("zstd output compression is not supported; use encodeResponseBody: manual");
       }
     }
     KJ_UNREACHABLE;

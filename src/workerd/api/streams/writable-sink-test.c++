@@ -539,6 +539,46 @@ KJ_TEST("Gzip-encoding sink (identity)") {
   KJ_ASSERT(inner.data == kj::arrayPtr(check, sizeof(check)));
 }
 
+KJ_TEST("Zstd-encoding sink") {
+  // zstd output compression is not supported; verify it throws.
+  TestFixture fixture;
+  MemoryAsyncOutputStream inner;
+  auto fakeOwn = kj::Own<MemoryAsyncOutputStream>(&inner, kj::NullDisposer::instance);
+  auto sink = newEncodedWritableSink(rpc::StreamEncoding::ZSTD, kj::mv(fakeOwn));
+
+  fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
+    bool threw = false;
+    try {
+      co_await sink->write("some data to zstd"_kjb);
+    } catch (kj::Exception& e) {
+      KJ_ASSERT(kj::StringPtr(e.getDescription()).contains("zstd output compression is not supported"));
+      threw = true;
+    }
+    KJ_ASSERT(threw, "expected write() to throw for unsupported zstd compression");
+  });
+}
+
+KJ_TEST("Zstd-encoding sink (identity)") {
+  TestFixture fixture;
+  MemoryAsyncOutputStream inner;
+  auto fakeOwn = kj::Own<MemoryAsyncOutputStream>(&inner, kj::NullDisposer::instance);
+  auto sink = newEncodedWritableSink(rpc::StreamEncoding::ZSTD, kj::mv(fakeOwn));
+
+  static const kj::byte check[] = {
+    40, 181, 47, 253, 36, 17, 137, 0, 0, 115, 111, 109, 101, 32, 100, 97,
+    116, 97, 32, 116, 111, 32, 122, 115, 116, 100, 89, 232, 89, 209};
+
+  // When encoding is disowned, the data should be passed through unmodified.
+  sink->disownEncodingResponsibility();
+
+  fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
+    co_await sink->write(check);
+    co_await sink->end();
+  });
+
+  KJ_ASSERT(inner.data == kj::arrayPtr(check, sizeof(check)));
+}
+
 // ======================================================================================
 // IoContext-aware WritableSinkWrapper Tests
 

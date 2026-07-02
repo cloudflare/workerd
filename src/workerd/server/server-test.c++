@@ -104,6 +104,9 @@ class TestStream {
   void send(kj::StringPtr data, kj::SourceLocation loc = {}) {
     stream->write(data.asBytes()).wait(ws);
   }
+  void sendBytes(kj::ArrayPtr<const kj::byte> data) {
+    stream->write(data).wait(ws);
+  }
   void recv(kj::StringPtr expected, kj::SourceLocation loc = {}) {
     auto actual = readAllAvailable();
     if (actual == nullptr) {
@@ -4874,6 +4877,69 @@ KJ_TEST("Server: encodeResponseBody: manual pass-through") {
 
     fake-gzipped-content)"_blockquote);
 }
+
+KJ_TEST("Server: encodeResponseBody: zstd response body is decompressed") {
+  // Regression test for https://github.com/cloudflare/workerd/issues/5112
+  // zstd was not recognized by getContentEncoding(), so responses with Content-Encoding: zstd
+  // passed through with raw compressed bytes instead of being decompressed.
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          compatibilityFlags = ["zstd_content_encoding"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    let response = await fetch("http://subhost/foo");
+                `    let text = await response.text();
+                `    return new Response(text);
+                `  }
+                `}
+            )
+          ]
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  auto subreq = test.receiveInternetSubrequest("subhost");
+  subreq.recv(R"(
+    GET /foo HTTP/1.1
+    Host: subhost
+
+  )"_blockquote);
+
+  // zstd-compressed "zstd body ok"
+  static constexpr kj::byte zstdFrame[] = {
+    0x28, 0xb5, 0x2f, 0xfd, 0x24, 0x0c, 0x61, 0x00, 0x00, 0x7a,
+    0x73, 0x74, 0x64, 0x20, 0x62, 0x6f, 0x64, 0x79, 0x20, 0x6f,
+    0x6b, 0x88, 0x94, 0x46, 0x0e,
+  };
+  kj::String httpHeader = kj::str(
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Length: ", sizeof(zstdFrame), "\r\n"
+      "Content-Encoding: zstd\r\n"
+      "\r\n");
+  subreq.send(httpHeader);
+  subreq.sendBytes(zstdFrame);
+
+  // The worker should receive the decompressed plaintext, not the raw compressed bytes.
+  conn.recvHttp200("zstd body ok"_blockquote);
+}
+
 
 KJ_TEST("Server: Catch websocket server errors") {
   TestServer test(R"((
