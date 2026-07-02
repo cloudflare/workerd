@@ -52,9 +52,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
 
   ~ReadableStreamInternalController() noexcept(false) override;
 
-  void setOwnerRef(ReadableStream& stream) override {
-    owner = stream;
-  }
+  void setOwnerRef(kj::Weak<ReadableStream> stream) override;
 
   jsg::Ref<ReadableStream> addRef() override;
 
@@ -153,7 +151,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
     ReadableStreamInternalController& inner;
   };
 
-  kj::Maybe<ReadableStream&> owner;
+  kj::Weak<ReadableStream> owner;
 
   // State machine for ReadableStreamInternalController:
   // Closed is terminal, Errored is implicitly terminal via ErrorState.

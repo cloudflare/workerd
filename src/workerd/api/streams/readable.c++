@@ -390,7 +390,7 @@ ReadableStream::ReadableStream(IoContext& ioContext, kj::Own<ReadableStreamSourc
 ReadableStream::ReadableStream(kj::Own<ReadableStreamController> controller)
     : ioContext(tryGetIoContext()),
       controller(kj::mv(controller)) {
-  getController().setOwnerRef(*this);
+  getController().setOwnerRef(addWeakToThis());
 }
 
 void ReadableStream::visitForGc(jsg::GcVisitor& visitor) {

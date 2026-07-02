@@ -437,7 +437,7 @@ ReadableStreamInternalController::~ReadableStreamInternalController() noexcept(f
 }
 
 jsg::Ref<ReadableStream> ReadableStreamInternalController::addRef() {
-  return KJ_ASSERT_NONNULL(owner).addRef();
+  return owner.assertLive().addRef();
 }
 
 kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
@@ -604,7 +604,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
             controller.doClose(js);
           }
           KJ_IF_SOME(o, controller.owner) {
-            o.signalEof(js);
+            o->signalEof(js);
           }
           if (isByob && FeatureFlags::get(js).getInternalStreamByobReturn()) {
             // When using the BYOB reader, we must return a sized-0 Uint8Array that is backed
@@ -766,7 +766,7 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::dr
             controller.doClose(js);
           }
           KJ_IF_SOME(o, controller.owner) {
-            o.signalEof(js);
+            o->signalEof(js);
           }
           return js.resolvedPromise(DrainingReadResult{.done = true});
         }
@@ -803,8 +803,7 @@ jsg::Promise<void> ReadableStreamInternalController::pipeTo(
   }
 
   disturbed = true;
-  KJ_IF_SOME(promise,
-      destination.tryPipeFrom(js, KJ_ASSERT_NONNULL(owner).addRef(), kj::mv(options))) {
+  KJ_IF_SOME(promise, destination.tryPipeFrom(js, owner.assertLive().addRef(), kj::mv(options))) {
     return kj::mv(promise);
   }
 
@@ -2530,6 +2529,11 @@ kj::Maybe<uint64_t> ReadableStreamInternalController::tryGetLength(StreamEncodin
     }
   }
   KJ_UNREACHABLE;
+}
+
+void ReadableStreamInternalController::setOwnerRef(kj::Weak<ReadableStream> stream) {
+  KJ_ASSERT(owner == nullptr);
+  owner = kj::mv(stream);
 }
 
 kj::Own<ReadableStreamController> ReadableStreamInternalController::detach(

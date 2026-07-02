@@ -785,7 +785,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
   // See the comment for releaseReader in common.h for details on the use of maybeJs
   void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
 
-  void setOwnerRef(ReadableStream& stream) override;
+  void setOwnerRef(kj::Weak<ReadableStream> stream) override;
 
   Tee tee(jsg::Lock& js) override;
 
@@ -814,7 +814,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
   // If the stream was created within the scope of a request, we want to treat it as I/O
   // and make sure it is not advanced from the scope of a different request.
   kj::Maybe<IoContext&> ioContext;
-  kj::Maybe<ReadableStream&> owner;
+  kj::Weak<ReadableStream> owner;
 
   // Initial state before setup() is called.
   struct Initial {
@@ -2643,7 +2643,7 @@ ReadableStreamJsController::ReadableStreamJsController(jsg::Lock& js, ByteReadab
 }
 
 jsg::Ref<ReadableStream> ReadableStreamJsController::addRef() {
-  return KJ_REQUIRE_NONNULL(owner).addRef();
+  return owner.assertLive().addRef();
 }
 
 jsg::Promise<void> ReadableStreamJsController::cancel(
@@ -3024,9 +3024,9 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
   KJ_UNREACHABLE;
 }
 
-void ReadableStreamJsController::setOwnerRef(ReadableStream& stream) {
-  KJ_ASSERT(owner == kj::none);
-  owner = &stream;
+void ReadableStreamJsController::setOwnerRef(kj::Weak<ReadableStream> stream) {
+  KJ_ASSERT(owner == nullptr);
+  owner = kj::mv(stream);
 }
 
 void ReadableStreamJsController::setup(jsg::Lock& js,

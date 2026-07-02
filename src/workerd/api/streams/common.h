@@ -497,7 +497,7 @@ class ReadableStreamController {
 
   virtual ~ReadableStreamController() noexcept(false) {}
 
-  virtual void setOwnerRef(ReadableStream& stream) = 0;
+  virtual void setOwnerRef(kj::Weak<ReadableStream> stream) = 0;
 
   virtual jsg::Ref<ReadableStream> addRef() = 0;
 
