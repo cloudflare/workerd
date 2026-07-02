@@ -214,8 +214,8 @@ class WritableStreamInternalController: public WritableStreamController {
 
   ~WritableStreamInternalController() noexcept(false) override;
 
-  void setOwnerRef(WritableStream& stream) override {
-    owner = stream;
+  void setOwnerRef(kj::Weak<WritableStream> stream) override {
+    owner = kj::mv(stream);
   }
 
   jsg::Ref<WritableStream> addRef() override;
@@ -296,7 +296,7 @@ class WritableStreamInternalController: public WritableStreamController {
     ReadableStream& ref;
   };
 
-  kj::Maybe<WritableStream&> owner;
+  kj::Weak<WritableStream> owner;
 
   // State machine for WritableStreamInternalController:
   // Closed is terminal, Errored is implicitly terminal via ErrorState.

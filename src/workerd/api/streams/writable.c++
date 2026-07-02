@@ -187,7 +187,7 @@ WritableStream::WritableStream(IoContext& ioContext,
 WritableStream::WritableStream(kj::Own<WritableStreamController> controller)
     : ioContext(tryGetIoContext()),
       controller(kj::mv(controller)) {
-  getController().setOwnerRef(*this);
+  getController().setOwnerRef(addWeakToThis());
 }
 
 jsg::Ref<WritableStream> WritableStream::addRef() {

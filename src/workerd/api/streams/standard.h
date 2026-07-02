@@ -290,7 +290,7 @@ class WritableImpl {
     }
   };
 
-  WritableImpl(jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal);
+  WritableImpl(jsg::Lock& js, kj::Weak<WritableStream> owner, jsg::Ref<AbortSignal> abortSignal);
 
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsValue reason);
 
@@ -405,7 +405,7 @@ class WritableImpl {
   // uses this WritableImpl. This creates a strong circular reference between jsg::Refs
   // that isn't allowed. GcTracing ends up with a stack overflow as the two jsg::Refs
   // try tracing each other.
-  kj::Maybe<kj::Own<WeakRef<WritableStream>>> owner;
+  kj::Weak<WritableStream> owner;
   jsg::Ref<AbortSignal> signal;
   State state = State::template create<Writable>();
   Algorithms algorithms;
@@ -648,7 +648,7 @@ class WritableStreamDefaultController: public jsg::Object {
   using WritableImpl = WritableImpl<WritableStreamDefaultController>;
 
   explicit WritableStreamDefaultController(
-      jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal);
+      jsg::Lock& js, kj::Weak<WritableStream> owner, jsg::Ref<AbortSignal> abortSignal);
 
   ~WritableStreamDefaultController() noexcept(false);
 

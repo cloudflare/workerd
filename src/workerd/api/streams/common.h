@@ -716,7 +716,7 @@ class WritableStreamController {
 
   virtual ~WritableStreamController() noexcept(false) {}
 
-  virtual void setOwnerRef(WritableStream& stream) = 0;
+  virtual void setOwnerRef(kj::Weak<WritableStream> stream) = 0;
 
   virtual jsg::Ref<WritableStream> addRef() = 0;
 
