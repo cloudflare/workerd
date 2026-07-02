@@ -178,7 +178,7 @@ bool AlarmScheduler::deleteAlarm(ActorKey actor) {
 
 kj::Promise<AlarmScheduler::RetryInfo> AlarmScheduler::runAlarm(
     const ActorKey& actor, kj::Date scheduledTime, uint32_t retryCount) {
-  auto result = co_await getActor(kj::str(actor.actorId))->runAlarm(scheduledTime, retryCount);
+  auto result = co_await getActor(actor)->runAlarm(scheduledTime, retryCount);
 
   co_return RetryInfo{.retry = result.outcome != EventOutcome::OK && result.retry,
     .retryCountsAgainstLimit = result.retryCountsAgainstLimit};
@@ -262,7 +262,7 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
         // If the notification fails, we keep the alarm in the scheduler so it is not silently
         // lost.
         try {
-          co_await getActor(kj::str(actorRef.actorId))->abandonAlarm(scheduledTime);
+          co_await getActor(actorRef)->abandonAlarm(scheduledTime);
         } catch (...) {
           auto exception = kj::getCaughtExceptionAsKj();
           KJ_LOG(

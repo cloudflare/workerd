@@ -66,7 +66,9 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
   // some common dependency between a set of failed alarms
   static constexpr auto RETRY_JITTER_FACTOR = 0.25;
 
-  using GetActorFn = kj::Function<kj::Own<WorkerInterface>(kj::String)>;
+  // Obtains a WorkerInterface for the given actor. `actor.name` carries the actor's original name
+  // (from `idFromName()`) if it was persisted, so that the reconstructed ID exposes `ctx.id.name`.
+  using GetActorFn = kj::Function<kj::Own<WorkerInterface>(const ActorKey& actor)>;
 
   AlarmScheduler(const kj::Clock& clock,
       kj::Timer& timer,

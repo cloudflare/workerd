@@ -348,8 +348,9 @@ class Server::ActorNamespace final {
       auto idFactory = kj::heap<ActorIdFactoryImpl>(d.uniqueKey);
       AlarmScheduler::GetActorFn getActor =
           [this, idFactory = kj::mv(idFactory)](
-              kj::String idStr) mutable -> kj::Own<WorkerInterface> {
-        Worker::Actor::Id id = idFactory->idFromString(kj::mv(idStr));
+              const ActorKey& actor) mutable -> kj::Own<WorkerInterface> {
+        Worker::Actor::Id id = idFactory->idFromStringNamed(
+            kj::str(actor.actorId), actor.name.map([](kj::StringPtr n) { return kj::str(n); }));
         auto actorContainer = this->getActorContainer(kj::mv(id));
         return newPromisedWorkerInterface(
             actorContainer->startRequest({}).attach(actorContainer->addRef()));
@@ -1178,7 +1179,18 @@ class Server::ActorNamespace final {
     void start(kj::Own<ActorClass>& actorClass, Worker::Actor::Id& id) {
       KJ_REQUIRE(actor == nullptr);
 
-      auto makeActorCache = [this](const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
+      // Capture the actor's name (if it was created via `idFromName()`/`getByName()`) so the alarm
+      // scheduler can persist it and restore `ctx.id.name` when the alarm later fires, even if this
+      // actor has been evicted from memory by then.
+      kj::Maybe<kj::String> actorName;
+      KJ_IF_SOME(actorId, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
+        KJ_IF_SOME(n, actorId->getName()) {
+          actorName = kj::str(n);
+        }
+      }
+
+      auto makeActorCache = [this, actorName = kj::mv(actorName)](
+                                const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
                                 ActorCache::Hooks& hooks, SqliteObserver& sqliteObserver) mutable {
         return ns.config.tryGet<Durable>().map(
             [&](const Durable& d) -> kj::Own<ActorCacheInterface> {
@@ -1186,7 +1198,12 @@ class Server::ActorNamespace final {
             kj::Own<ActorSqlite::Hooks> sqliteHooks;
             if (parent == kj::none) {
               KJ_IF_SOME(a, ns.alarmScheduler) {
-                sqliteHooks = kj::heap<ActorSqliteHooks>(a, ActorKey{.actorId = key});
+                // clone() copies the id and name into storage owned by the returned ActorKey, so
+                // the temporary StringPtrs below only need to outlive this call.
+                auto actorKey = ActorKey{.actorId = key,
+                  .name = actorName.map([](kj::String& n) { return n.asPtr(); })}
+                                    .clone();
+                sqliteHooks = kj::heap<ActorSqliteHooks>(a, kj::mv(actorKey));
               } else {
                 // No alarm scheduler available, use default hooks instance.
                 sqliteHooks = fakeOwn(ActorSqlite::Hooks::getDefaultHooks());
@@ -1622,24 +1639,24 @@ class Server::ActorNamespace final {
 
   class ActorSqliteHooks final: public ActorSqlite::Hooks {
    public:
-    ActorSqliteHooks(AlarmScheduler& alarmScheduler, ActorKey actor)
+    ActorSqliteHooks(AlarmScheduler& alarmScheduler, kj::Own<ActorKey> actor)
         : alarmScheduler(alarmScheduler),
-          actor(actor) {}
+          actor(kj::mv(actor)) {}
 
     // We ignore the priorTask in workerd because everything should run synchronously.
     kj::Promise<void> scheduleRun(
         kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) override {
       KJ_IF_SOME(scheduledTime, newAlarmTime) {
-        alarmScheduler.setAlarm(actor, scheduledTime);
+        alarmScheduler.setAlarm(*actor, scheduledTime);
       } else {
-        alarmScheduler.deleteAlarm(actor);
+        alarmScheduler.deleteAlarm(*actor);
       }
       return kj::READY_NOW;
     }
 
    private:
     AlarmScheduler& alarmScheduler;
-    ActorKey actor;
+    kj::Own<ActorKey> actor;
   };
 };
 
