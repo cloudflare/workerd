@@ -48,6 +48,9 @@ kj::Own<capnp::MallocMessageBuilder> decodeJsonResponse(kj::StringPtr response) 
   return message;
 }
 
+// Wraps Docker exec's TTY-disabled attach stream and exposes stdout frames as a raw stream.
+kj::Own<kj::AsyncIoStream> newDockerExecOutputStream(kj::Own<kj::AsyncIoStream> inner);
+
 // Docker-based implementation that implements the rpc::Container::Server interface
 // so it can be used as a rpc::Container::Client via kj::heap<ContainerClient>().
 // This allows the Container JSG class to use Docker directly without knowing
@@ -164,6 +167,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   kj::Promise<kj::Maybe<InspectResponse>> inspectContainer();
 
+  kj::Promise<void> putSidecarEgressConfig(kj::String body);
   kj::Promise<void> updateSidecarEgressPort(uint16_t ingressHostPort, uint16_t egressPort);
   kj::Promise<void> updateSidecarEgressConfig(uint16_t ingressHostPort, uint16_t egressPort);
   kj::Promise<void> createContainer(kj::StringPtr effectiveImage,
@@ -176,8 +180,12 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       bool attachStdout,
       bool attachStderr);
   kj::Promise<kj::Own<kj::AsyncIoStream>> startExec(kj::String execId);
+  kj::Promise<kj::Own<kj::AsyncIoStream>> connectToContainerPortFromSidecar(
+      kj::StringPtr containerHost, uint16_t containerPort);
   kj::Promise<ExecInspectResponse> inspectExec(kj::StringPtr execId);
   kj::Promise<void> runSimpleExec(kj::ArrayPtr<const kj::String> cmd);
+  kj::Promise<void> runSimpleExecInContainer(
+      kj::StringPtr targetContainerName, kj::ArrayPtr<const kj::String> cmd);
   kj::Promise<void> startContainer();
   kj::Promise<void> stopContainer();
   kj::Promise<void> killContainer(uint32_t signal);
