@@ -167,7 +167,9 @@ class Default(WorkerEntrypoint):
           'submodule.py': `submodule_value = 10`,
           'subdirectory/subsubmodule.py': `subsubmodule_value = 20`,
           'python_modules/data.txt': 'Hello, ',
-          'python_modules/data.mycoolextension': { data: new Uint8Array([1, 2, 3, 4]) },
+          'python_modules/data.mycoolextension': {
+            data: new Uint8Array([1, 2, 3, 4]),
+          },
         },
       };
     });
@@ -179,7 +181,10 @@ class Default(WorkerEntrypoint):
       await worker.getEntrypoint().bytes(),
       new Uint8Array([1, 2, 3, 4])
     );
-    assert.strictEqual(await worker.getEntrypoint().modules_in_main_directory(), 30);
+    assert.strictEqual(
+      await worker.getEntrypoint().modules_in_main_directory(),
+      30
+    );
   },
 };
 

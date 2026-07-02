@@ -89,7 +89,7 @@ class WorkerLoader: public jsg::Object {
     // Modules are specified as an object mapping names to content. If the content is just a
     // string, an ES module is assumed for '.js' files and a Python module for '.py' files. For
     // Python dynamic workers, any other file name is treated as a text module as long as it's
-    // in the python_modules/ directory. If the content is an object, the type of module is 
+    // in the python_modules/ directory. If the content is an object, the type of module is
     // determined based on which property is set.
     jsg::Dict<kj::OneOf<Module, kj::String>> modules;
 

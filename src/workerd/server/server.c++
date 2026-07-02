@@ -1200,9 +1200,9 @@ class Server::ActorNamespace final {
               KJ_IF_SOME(a, ns.alarmScheduler) {
                 // clone() copies the id and name into storage owned by the returned ActorKey, so
                 // the temporary StringPtrs below only need to outlive this call.
-                auto actorKey = ActorKey{.actorId = key,
-                  .name = actorName.map([](kj::String& n) { return n.asPtr(); })}
-                                    .clone();
+                auto actorKey = ActorKey{.actorId = key, .name = actorName.map([](kj::String& n) {
+                  return n.asPtr();
+                })}.clone();
                 sqliteHooks = kj::heap<ActorSqliteHooks>(a, kj::mv(actorKey));
               } else {
                 // No alarm scheduler available, use default hooks instance.
