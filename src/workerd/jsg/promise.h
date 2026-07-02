@@ -602,9 +602,35 @@ class PromiseWrapper {
     // the object whose method returned the promise will not be destroyed while the promise is
     // still executing.
     auto markedAsHandled = promise.markedAsHandled;
+
+    v8::Local<v8::Promise> handle = promise.consumeHandle(js);
+
+    // If the promise is already rejected, we don't need to add the continuation to pass the
+    // eventual value that won't ever be materialized. Short-circuiting here does slightly
+    // alter the timing of when the rejection is observed, being one microtask earlier than
+    // if we added the continuation. Hopefully this won't cause issues in practice, unlike the
+    // void short-circuiting mentioned below, which was observed to cause real issues.
+    if (handle->State() == v8::Promise::kRejected) {
+      return handle;
+    }
+
+    // TODO(maybe): If T is void and the promise is already fulfilled, we really ought to be able
+    // to short-circuit and skip adding the continuation here. However, this is tricky because it
+    // changes the timing of when the promise is resolved relative to other promises, which causes
+    // some tests to fail and can change some timing expectations in user code. Because we add an
+    // extra continuation to non-void promises we have to add an extra continuation to void
+    // promises as well to keep the timing consistent. If we can work out a way around that then
+    // we can uncomment this optimization:
+    //
+    // if constexpr (isVoid<T>()) {
+    //   if (handle->State() == v8::Promise::kFulfilled && handle->Result()->IsUndefined()) {
+    //     return handle;
+    //   }
+    // }
+
     auto then = check(v8::Function::New(context, &thenWrap<TypeWrapper, T>, creator.orDefault({}),
         1, v8::ConstructorBehavior::kThrow));
-    auto ret = check(promise.consumeHandle(js)->Then(context, then));
+    auto ret = check(handle->Then(context, then));
     // Although we added a .then() to the promise to translate the value to JavaScript, we would
     // like things to behave as if the C++ code returned this Promise directly to JavaScript. In
     // particular, if the C++ code marked the Promise handled, then the derived JavaScript promise
@@ -624,6 +650,21 @@ class PromiseWrapper {
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (handle->IsPromise()) {
       auto promise = handle.As<v8::Promise>();
+
+      // If the promise is already resolved to undefined, then we can short-circuit and skip
+      // the unwrapping continuation.
+      if constexpr (isVoid<T>()) {
+        if (promise->State() == v8::Promise::kFulfilled && promise->Result()->IsUndefined()) {
+          return Promise<T>(js.v8Isolate, promise);
+        }
+      }
+
+      // Likewise, if the promise is already rejected, we can short-circuit and skip the
+      // unwrapping continuation.
+      if (promise->State() == v8::Promise::kRejected) {
+        return Promise<T>(js.v8Isolate, promise);
+      }
+
       if constexpr (!isVoid<T>() && !isV8Ref<T>()) {
         // Add a .then() to unwrap the promise's resolution (i.e. convert it from JS to C++).
         // Note that we don't need to handle the rejection case here as there is no wrapping
