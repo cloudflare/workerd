@@ -7,6 +7,7 @@
 #include "actor.h"
 #include "http.h"
 
+#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-channels.h>
 
 namespace workerd::api {
@@ -154,10 +155,17 @@ class LoopbackDurableObjectClass: public DurableObjectClass {
 // LoopbackDurableObjectClass.
 class LoopbackDurableObjectNamespace: public DurableObjectNamespace {
  public:
+  // `featureFlags` are the compat flags of the worker that owns this loopback binding. A loopback
+  // (ctx.exports) namespace mints persistent stubs iff that worker has
+  // `allow_irrevocable_stub_storage` enabled, so we record that on the base namespace's
+  // `persistent` bit.
   LoopbackDurableObjectNamespace(uint nsChannel,
       kj::Own<ActorIdFactory> idFactory,
-      jsg::Ref<LoopbackDurableObjectClass> loopbackClass)
-      : DurableObjectNamespace(nsChannel, kj::mv(idFactory)),
+      jsg::Ref<LoopbackDurableObjectClass> loopbackClass,
+      CompatibilityFlags::Reader featureFlags)
+      : DurableObjectNamespace(nsChannel,
+            kj::mv(idFactory),
+            Persistent(featureFlags.getAllowIrrevocableStubStorage())),
         loopbackClass(kj::mv(loopbackClass)) {}
 
   // getClass() accessor for use from C++ only.

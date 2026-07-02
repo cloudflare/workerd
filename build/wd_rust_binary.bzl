@@ -4,6 +4,7 @@ load("@workerd//:build/wd_rust_crate.bzl", "rust_cxx_bridge")
 def wd_rust_binary(
         name,
         deps = [],
+        link_deps = [],
         proc_macro_deps = [],
         data = [],
         rustc_env = {},
@@ -16,7 +17,8 @@ def wd_rust_binary(
 
     Args:
         name: crate name.
-        deps: crate dependencies: rust crates or c/c++ libraries.
+        deps: crate dependencies: rust crates.
+        link_deps: c/c++ libraries to link with the rust binary
         visibility: crate visibility.
         data: additional data files.
         proc_macro_deps: proc_macro dependencies.
@@ -43,7 +45,7 @@ def wd_rust_binary(
         )
 
         deps.append("@workerd-cxx//:cxx")
-        deps.append(name + "@cxx")
+        link_deps = link_deps + [name + "@cxx"]
 
     rust_binary(
         name = name,
@@ -51,6 +53,7 @@ def wd_rust_binary(
         srcs = srcs,
         rustc_env = rustc_env,
         deps = deps,
+        link_deps = link_deps,
         visibility = visibility,
         data = data,
         proc_macro_deps = proc_macro_deps,

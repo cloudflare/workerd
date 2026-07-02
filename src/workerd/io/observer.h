@@ -139,6 +139,16 @@ class RequestObserver: public kj::Refcounted {
   // the base observer; edgeworker overrides it to feed retry classification.
   virtual void setNextSubrequestBodyRewindable(SubrequestBodyRewindable bodyRewindable) {}
 
+  // Fired immediately before an actor fetch dispatches into user code, so an observer can claim the
+  // request's retry-token nonce against the actor's claim store. No-op in the base observer;
+  // edgeworker overrides it. Gating and fetch-only scoping are the override's concern.
+  //
+  // This is only fired on the exported-handler (ES modules) dispatch path, not the service-worker
+  // addEventListener('fetch') path. That is deliberate, not an omission: Durable Objects must be
+  // class-based and so are always invoked via an exported handler, meaning an actor fetch never
+  // reaches the service-worker path -- where this hook would be a guaranteed no-op anyway.
+  virtual void claimRetryTokenBeforeUserCode() {}
+
   // Used to record when a worker has used a dynamic dispatch binding.
   virtual void setHasDispatched() {};
 

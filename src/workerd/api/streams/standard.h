@@ -188,7 +188,7 @@ class ReadableImpl {
   // The consumer can be used to read from this readables queue so long as the queue
   // is open. The consumer instance may outlive the readable but will be put into
   // a closed state or errored state when the readable is destroyed.
-  kj::Own<Consumer> getConsumer(kj::Maybe<StateListener&> listener);
+  kj::Own<Consumer> getConsumer(kj::Weak<StateListener> listener);
 
   // The number of consumers that exist for this readable.
   size_t consumerCount();
@@ -470,7 +470,7 @@ class ReadableStreamDefaultController: public jsg::Object {
   }
 
   kj::Own<ValueQueue::Consumer> getConsumer(
-      kj::Maybe<ValueQueue::ConsumerImpl::StateListener&> stateListener);
+      kj::Weak<ValueQueue::ConsumerImpl::StateListener> stateListener);
 
   JSG_RESOURCE_TYPE(ReadableStreamDefaultController) {
     JSG_READONLY_PROTOTYPE_PROPERTY(desiredSize, getDesiredSize);
@@ -610,7 +610,7 @@ class ReadableByteStreamController: public jsg::Object {
   }
 
   kj::Own<ByteQueue::Consumer> getConsumer(
-      kj::Maybe<ByteQueue::ConsumerImpl::StateListener&> stateListener);
+      kj::Weak<ByteQueue::ConsumerImpl::StateListener> stateListener);
 
   JSG_RESOURCE_TYPE(ReadableByteStreamController) {
     JSG_READONLY_PROTOTYPE_PROPERTY(byobRequest, getByobRequest);

@@ -115,6 +115,21 @@ struct ChannelToken {
     }
   }
 
+  persistence :union {
+    # Specifies to what extent this channel is allowed to be persisted into long-term storage, such
+    # as Durable Object KV storage.
+
+    none @9 :Void;
+    # The stub cannot be persisted at all.
+
+    irrevocable @10 :Void;
+    # This stup permits irrevocable storage -- the creating worker had
+    # allow_irrevocable_stub_storage set in its compat flags.
+
+    # TODO(someday): Add a persistence mode where stubs are revocable, probably involving some
+    #   external grant-tracking service?
+  }
+
   struct FrankenvalueCapTable {
     # CapTable representation for `ChannelToken.props`.
 

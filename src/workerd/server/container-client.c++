@@ -1039,7 +1039,6 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
 
     pumpTask =
         kj::joinPromisesFailFast(kj::arr(upEnd->pumpTo(*connection), connection->pumpTo(*downEnd)))
-            .ignoreResult()
             .attach(kj::mv(httpClient), kj::mv(upEnd), kj::mv(connection), kj::mv(downEnd));
     co_return;
   }
@@ -1049,7 +1048,7 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
   ContainerClient& containerClient;
   kj::String containerHost;
   uint16_t containerPort;
-  kj::Maybe<kj::Promise<void>> pumpTask;
+  kj::Maybe<kj::Promise<kj::Array<uint64_t>>> pumpTask;
 };
 
 class ContainerClient::DockerProcessHandle final: public rpc::Container::ProcessHandle::Server {

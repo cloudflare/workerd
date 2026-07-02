@@ -360,6 +360,7 @@ void WorkerTracer::setEventInfoInternal(
       .scriptId = mapCopyString(trace->scriptId),
       .scriptTags = KJ_MAP(tag, trace->scriptTags) { return kj::str(tag); },
       .entrypoint = mapCopyString(trace->entrypoint),
+      .durableObjectId = mapCopyString(trace->durableObjectId),
     };
 
     tracing::SpanId parentSpanId = tracing::SpanId::nullId;
@@ -508,7 +509,8 @@ void WorkerTracer::setReturn(
 
   // Add fetch response info for buffered tail worker
   KJ_IF_SOME(info, fetchResponseInfo) {
-    KJ_REQUIRE(KJ_REQUIRE_NONNULL(trace->eventInfo).is<tracing::FetchEventInfo>());
+    KJ_REQUIRE(KJ_REQUIRE_NONNULL(trace->eventInfo).is<tracing::FetchEventInfo>() ||
+        KJ_REQUIRE_NONNULL(trace->eventInfo).is<tracing::ConnectEventInfo>());
     KJ_ASSERT(trace->fetchResponseInfo == kj::none, "setFetchResponseInfo can only be called once");
     trace->fetchResponseInfo = kj::mv(info);
   }

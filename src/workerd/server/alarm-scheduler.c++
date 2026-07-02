@@ -54,9 +54,28 @@ void AlarmScheduler::ensureInitialized(SqliteDatabase& db) {
   db.run(R"(
     CREATE TABLE IF NOT EXISTS _cf_ALARM (
       actor_id TEXT PRIMARY KEY,
-      scheduled_time INTEGER
+      scheduled_time INTEGER,
+      actor_name TEXT
     ) WITHOUT ROWID;
   )");
+
+  // Migrate databases created before the `actor_name` column existed. SQLite has no
+  // "ADD COLUMN IF NOT EXISTS", so detect the column via PRAGMA table_info first.
+  bool hasNameColumn = false;
+  {
+    auto info = db.run("PRAGMA table_info(_cf_ALARM);");
+    while (!info.isDone()) {
+      // Column 1 of table_info output is the column name.
+      if (info.getText(1) == "actor_name"_kj) {
+        hasNameColumn = true;
+        break;
+      }
+      info.nextRow();
+    }
+  }
+  if (!hasNameColumn) {
+    db.run("ALTER TABLE _cf_ALARM ADD COLUMN actor_name TEXT;");
+  }
 }
 
 void AlarmScheduler::loadAlarmsFromDb() {
@@ -65,14 +84,13 @@ void AlarmScheduler::loadAlarmsFromDb() {
   // TODO(someday): don't maintain the entire alarm set in memory -- right now for the usecase of
   // local development, doing so is sufficient.
   auto query = db->run(R"(
-    SELECT actor_id, scheduled_time FROM _cf_ALARM;
+    SELECT actor_id, scheduled_time, actor_name FROM _cf_ALARM;
   )");
 
   while (!query.isDone()) {
     auto date = kj::UNIX_EPOCH + (kj::NANOSECONDS * query.getInt64(1));
 
-    auto ownActorId = kj::str(query.getText(0));
-    auto actor = kj::attachVal(ActorKey{.actorId = ownActorId}, kj::mv(ownActorId));
+    auto actor = ActorKey{.actorId = query.getText(0), .name = query.getMaybeText(2)}.clone();
     auto& actorRef = *actor;
 
     alarms.insert(actorRef, scheduleAlarm(now, kj::mv(actor), date));
@@ -100,14 +118,17 @@ kj::Maybe<kj::Date> AlarmScheduler::getAlarm(ActorKey actor) {
 
 bool AlarmScheduler::setAlarm(ActorKey actor, kj::Date scheduledTime) {
   int64_t scheduledTimeNs = (scheduledTime - kj::UNIX_EPOCH) / kj::NANOSECONDS;
-  auto query = stmtSetAlarm.run(actor.actorId, scheduledTimeNs);
+  SqliteDatabase::Query::ValuePtr nameParam = nullptr;
+  KJ_IF_SOME(n, actor.name) {
+    nameParam = n;
+  }
+  auto query = stmtSetAlarm.run(actor.actorId, scheduledTimeNs, nameParam);
 
   bool existing = true;
   auto& entry = alarms.findOrCreate(actor, [&]() {
     existing = false;
 
-    auto ownActorId = kj::str(actor.actorId);
-    auto ownActor = kj::attachVal(ActorKey{.actorId = ownActorId}, kj::mv(ownActorId));
+    auto ownActor = actor.clone();
 
     return decltype(alarms)::Entry{
       *ownActor, scheduleAlarm(clock.now(), kj::mv(ownActor), scheduledTime)};
@@ -157,7 +178,7 @@ bool AlarmScheduler::deleteAlarm(ActorKey actor) {
 
 kj::Promise<AlarmScheduler::RetryInfo> AlarmScheduler::runAlarm(
     const ActorKey& actor, kj::Date scheduledTime, uint32_t retryCount) {
-  auto result = co_await getActor(kj::str(actor.actorId))->runAlarm(scheduledTime, retryCount);
+  auto result = co_await getActor(actor)->runAlarm(scheduledTime, retryCount);
 
   co_return RetryInfo{.retry = result.outcome != EventOutcome::OK && result.retry,
     .retryCountsAgainstLimit = result.retryCountsAgainstLimit};
@@ -241,7 +262,7 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
         // If the notification fails, we keep the alarm in the scheduler so it is not silently
         // lost.
         try {
-          co_await getActor(kj::str(actorRef.actorId))->abandonAlarm(scheduledTime).ignoreResult();
+          co_await getActor(actorRef)->abandonAlarm(scheduledTime);
         } catch (...) {
           auto exception = kj::getCaughtExceptionAsKj();
           KJ_LOG(

@@ -670,7 +670,11 @@ export declare abstract class DurableObjectNamespace<
     jurisdiction: DurableObjectJurisdiction,
   ): DurableObjectNamespace<T>;
 }
-export type DurableObjectJurisdiction = "eu" | "fedramp" | "fedramp-high";
+export type DurableObjectJurisdiction =
+  | "eu"
+  | "fedramp"
+  | "fedramp-high"
+  | "us";
 export interface DurableObjectNamespaceNewUniqueIdOptions {
   jurisdiction?: DurableObjectJurisdiction;
 }
@@ -14334,6 +14338,13 @@ export interface ForwardableEmailMessage extends EmailMessage {
    * @returns A promise that resolves when the email message is replied.
    */
   reply(message: EmailMessage): Promise<EmailSendResult>;
+  /**
+   * Reply to the sender of this email message with a message built from the given
+   * fields. Threading headers (In-Reply-To/References) are set automatically.
+   * @param builder The reply message contents.
+   * @returns A promise that resolves when the email message is replied.
+   */
+  reply(builder: EmailReplyMessageBuilder): Promise<EmailSendResult>;
 }
 /** A file attachment for an email message */
 export type EmailAttachment =
@@ -14357,22 +14368,49 @@ export interface EmailAddress {
   email: string;
 }
 /**
+ * Recipient fields for `SendEmail.send()`. At least one of `to`, `cc`, or
+ * `bcc` must be provided.
+ */
+export type EmailDestinations = {
+  to?: string | EmailAddress | (string | EmailAddress)[];
+  cc?: string | EmailAddress | (string | EmailAddress)[];
+  bcc?: string | EmailAddress | (string | EmailAddress)[];
+} & (
+  | {
+      to: string | EmailAddress | (string | EmailAddress)[];
+    }
+  | {
+      cc: string | EmailAddress | (string | EmailAddress)[];
+    }
+  | {
+      bcc: string | EmailAddress | (string | EmailAddress)[];
+    }
+);
+/**
+ * Fields shared by all composed emails (no recipients). Used directly by
+ * `ForwardableEmailMessage.reply()`, which always replies to the original
+ * sender, and extended by `EmailMessageBuilder` for `SendEmail.send()`.
+ */
+export interface EmailReplyMessageBuilder {
+  from: string | EmailAddress;
+  subject: string;
+  replyTo?: string | EmailAddress;
+  headers?: Record<string, string>;
+  text?: string;
+  html?: string;
+  attachments?: EmailAttachment[];
+}
+/**
+ * Fields for composing an email without constructing raw MIME, for
+ * `SendEmail.send()`. Requires at least one of `to`, `cc`, or `bcc`.
+ */
+export type EmailMessageBuilder = EmailReplyMessageBuilder & EmailDestinations;
+/**
  * A binding that allows a Worker to send email messages.
  */
 export interface SendEmail {
   send(message: EmailMessage): Promise<EmailSendResult>;
-  send(builder: {
-    from: string | EmailAddress;
-    to: string | EmailAddress | (string | EmailAddress)[];
-    subject: string;
-    replyTo?: string | EmailAddress;
-    cc?: string | EmailAddress | (string | EmailAddress)[];
-    bcc?: string | EmailAddress | (string | EmailAddress)[];
-    headers?: Record<string, string>;
-    text?: string;
-    html?: string;
-    attachments?: EmailAttachment[];
-  }): Promise<EmailSendResult>;
+  send(builder: EmailMessageBuilder): Promise<EmailSendResult>;
 }
 export declare abstract class EmailEvent extends ExtendableEvent {
   readonly message: ForwardableEmailMessage;
@@ -15330,6 +15368,13 @@ export declare namespace CloudflareWorkersModule {
     | `${number} ${WorkflowDurationLabel}${"s" | ""}`
     | number;
   export type WorkflowDelayDuration = WorkflowSleepDuration;
+  export type WorkflowDynamicDelayContext = {
+    ctx: WorkflowStepContext<WorkflowDelayFunction>;
+    error: Error;
+  };
+  export type WorkflowDelayFunction = (
+    input: WorkflowDynamicDelayContext,
+  ) => WorkflowDelayDuration | Promise<WorkflowDelayDuration>;
   export type WorkflowTimeoutDuration = WorkflowSleepDuration;
   export type WorkflowRetentionDuration = WorkflowSleepDuration;
   export type WorkflowBackoff = "constant" | "linear" | "exponential";
@@ -15337,7 +15382,7 @@ export declare namespace CloudflareWorkersModule {
   export type WorkflowStepConfig = {
     retries?: {
       limit: number;
-      delay: WorkflowDelayDuration | number;
+      delay: WorkflowDelayDuration | number | WorkflowDelayFunction;
       backoff?: WorkflowBackoff;
     };
     timeout?: WorkflowTimeoutDuration | number;
@@ -15366,13 +15411,24 @@ export declare namespace CloudflareWorkersModule {
     type: string;
     sensitive?: WorkflowStepSensitivity;
   };
-  export type WorkflowStepContext = {
+  export type WorkflowStepContext<Delay = WorkflowDelayDuration | number> = {
     step: {
       name: string;
       count: number;
     };
     attempt: number;
-    config: WorkflowStepConfig;
+    config: {
+      retries?: {
+        limit: number;
+        backoff?: WorkflowBackoff;
+      } & (Delay extends WorkflowDelayFunction
+        ? {}
+        : {
+            delay: WorkflowDelayDuration | number;
+          });
+      timeout?: WorkflowTimeoutDuration | number;
+      sensitive?: WorkflowStepSensitivity;
+    };
   };
   export type WorkflowRollbackContext<T = unknown> = {
     ctx: WorkflowStepContext;
@@ -15394,10 +15450,18 @@ export declare namespace CloudflareWorkersModule {
       callback: (ctx: WorkflowStepContext) => Promise<T>,
       rollbackOptions?: WorkflowStepRollbackOptions<T>,
     ): Promise<T>;
-    do<T extends Rpc.Serializable<T>>(
+    do<T extends Rpc.Serializable<T>, const C extends WorkflowStepConfig>(
       name: string,
-      config: WorkflowStepConfig,
-      callback: (ctx: WorkflowStepContext) => Promise<T>,
+      config: C,
+      callback: (
+        ctx: WorkflowStepContext<
+          C["retries"] extends {
+            delay: infer D;
+          }
+            ? D
+            : WorkflowDelayDuration | number
+        >,
+      ) => Promise<T>,
       rollbackOptions?: WorkflowStepRollbackOptions<T>,
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
@@ -16365,6 +16429,7 @@ export declare namespace TailStream {
     readonly dispatchNamespace?: string;
     readonly entrypoint?: string;
     readonly executionModel: string;
+    readonly durableObjectId?: string;
     readonly scriptName?: string;
     readonly scriptTags?: string[];
     readonly scriptVersion?: ScriptVersion;
@@ -16992,6 +17057,14 @@ export interface WorkflowError {
   code?: number;
   message: string;
 }
+export interface WorkflowInstanceTerminateOptions {
+  /**
+   * If true, run registered rollback handlers before terminating the instance.
+   * Only steps that registered rollback handlers are rolled back.
+   */
+  rollback?: boolean;
+}
+
 export interface WorkflowInstanceRestartOptions {
   /**
    * Restart from a specific step. If omitted, the instance restarts from the beginning.
@@ -17025,8 +17098,9 @@ export declare abstract class WorkflowInstance {
   public resume(): Promise<void>;
   /**
    * Terminate the instance. If it is errored, terminated or complete, an error will be thrown.
+   * @param options Options for termination, including whether registered rollback handlers should run.
    */
-  public terminate(): Promise<void>;
+  public terminate(options?: WorkflowInstanceTerminateOptions): Promise<void>;
   /**
    * Restart the instance. Optionally restart from a specific step, preserving
    * cached results for all steps before it.

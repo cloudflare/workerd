@@ -107,15 +107,16 @@ export const simple5 = {
 // Refs: https://github.com/web-platform-tests/wpt/blob/master/webmessaging/Channel_postMessage_DataCloneErr.any.js
 
 export const postMessageBlob = {
-  test() {
-    // Per the spec, Blob is a serializable object, but we don't implement it as such currently.
-    // So attempting to post a blob should throw an error.
-    const { port1 } = new MessageChannel();
-    throws(() => port1.postMessage(new Blob([''])), {
-      code: 25, // DATA_CLONE_ERR,
-      name: 'DataCloneError',
-      message: /Could not serialize/,
-    });
+  async test() {
+    // Per the spec, Blob is a serializable object, so it round-trips through postMessage.
+    const { port1, port2 } = new MessageChannel();
+    const { promise, resolve } = Promise.withResolvers();
+    port2.onmessage = (event) => resolve(event.data);
+    port1.postMessage(new Blob(['hello'], { type: 'text/plain' }));
+    const received = await promise;
+    ok(received instanceof Blob);
+    strictEqual(received.type, 'text/plain');
+    strictEqual(await received.text(), 'hello');
   },
 };
 

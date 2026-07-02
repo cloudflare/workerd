@@ -47,10 +47,22 @@ void Data::deferGlobalDestruction(v8::Isolate* isolate, v8::Global<v8::Data> han
   jsgIsolate.deferDestruction(v8::Global<v8::Data>(kj::mv(handle)));
 }
 
+kj::Arc<const IsolateLiveness> Data::getIsolateLiveness(v8::Isolate* isolate) {
+  return IsolateBase::from(isolate).getIsolateLiveness();
+}
+
 void Data::destroy() {
   assertInvariant();
-  if (isolate != nullptr) {
-    if (v8::Locker::IsLocked(isolate)) {
+  if (isolateLiveness != nullptr) {
+    v8::Isolate* isolate = isolateLiveness->tryGetIsolate();
+    if (isolate == nullptr) {
+      // The isolate has already been torn down (e.g. a strong jsg::Data outlived its isolate
+      // because the object holding it was destroyed during request cleanup after teardown). V8 has
+      // freed the isolate's global-handle storage, so we must NOT Reset() the handles -- that would
+      // touch freed memory. Abandon the slots instead; their backing was already reclaimed with the
+      // isolate. The TracedReference has a trivial destructor, so nothing to do for it.
+      handle.Clear();
+    } else if (v8::Locker::IsLocked(isolate)) {
       handle.Reset();
 
       // If we have a TracedReference, Reset() it too, to let V8 know that this value is no longer
@@ -83,7 +95,7 @@ void Data::destroy() {
       // The `tracedRef` part has a trivial destructor so can be destroyed on any thread.
       deferGlobalDestruction(isolate, kj::mv(handle));
     }
-    isolate = nullptr;
+    isolateLiveness = nullptr;
   }
 }
 
@@ -95,7 +107,9 @@ void Data::moveFromTraced(Data& other, v8::TracedReference<v8::Data>& otherTrace
   // segfault later.
 
   // We must hold a lock to move from a GC-reachable reference. (But we don't generally need a lock
-  // for moving from non-GC-reachable refs.)
+  // for moving from non-GC-reachable refs.) Moving a traced ref implies the isolate is alive, so
+  // getIsolate() is non-null here.
+  v8::Isolate* isolate = getIsolate();
   KJ_ASSERT(v8::Locker::IsLocked(isolate));
 
   // Verify the handle was not garbage-collected by trying to read it. The intention is for this
@@ -153,6 +167,20 @@ Lock::~Lock() noexcept(false) {
   v8Isolate->SetData(SET_DATA_LOCK, previousData);
 }
 
+#ifdef WORKERD_ASAN
+void Lock::maybeAllocGcStress() {
+  if (isAllocGcStressModeForTest()) [[unlikely]] {
+    // Force the GC *before* constructing the new object, so the new object cannot itself be the
+    // thing collected, and so the state being validated is exactly the state that existed just
+    // before the allocation that would naturally have triggered GC. Must be a full GC: only the
+    // major-GC ResetDeadNodes path zaps traced handles without calling ResetRoot(), which is the
+    // behavior that surfaces "collectible-but-still-used within a synchronous task" UAFs. A
+    // scavenge would go through ResetRoot() and hide the bug. Requires --expose-gc.
+    v8Isolate->RequestGarbageCollectionForTesting(v8::Isolate::kFullGarbageCollection);
+  }
+}
+#endif  // WORKERD_ASAN
+
 Value Lock::parseJson(kj::ArrayPtr<const char> data) {
   return withinHandleScope(
       [&] { return v8Ref(jsg::check(v8::JSON::Parse(v8Context(), v8Str(v8Isolate, data)))); });
@@ -201,6 +229,16 @@ void Lock::setDisallowJavascriptExecution(bool allow) {
 
 bool Lock::isJavascriptExecutionDisallowed() const {
   return IsolateBase::from(v8Isolate).getDisallowJavascriptExecution();
+}
+
+DisallowJavaScriptScope::DisallowJavaScriptScope(Lock& js)
+    : js(js),
+      scope(js.v8Isolate, v8::Isolate::DisallowJavascriptExecutionScope::CRASH_ON_FAILURE) {
+  js.setDisallowJavascriptExecution(true);
+}
+
+DisallowJavaScriptScope::~DisallowJavaScriptScope() noexcept(false) {
+  js.setDisallowJavascriptExecution(false);
 }
 
 void Lock::setUsingEnhancedErrorSerialization() {

@@ -187,7 +187,7 @@ These areas are always considered during analysis, regardless of focus mode.
 - Analyze separation of concerns across modules
 - Suggest improvements for maintainability, modularity, clarity
 - Suggest improvements for better use of tools like `util/weak-refs.h`, `util/state-machine.h`,
-  `util/ring-buffer.h`, `util/small-set.h`, etc, where applicable.
+  `util/ring-buffer.h`, `util/small-weak-vector.h`, etc, where applicable.
 - Review layering and dependency management
 - Suggest improvements for better alignment with project goals and constraints
 - Analyze trade-offs in design decisions

@@ -30,13 +30,21 @@ class ChannelTokenHandler {
   class Resolver {
    public:
     virtual kj::Own<IoChannelFactory::SubrequestChannel> resolveEntrypoint(
-        kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) = 0;
+        kj::StringPtr serviceName,
+        kj::Maybe<kj::StringPtr> entrypoint,
+        Frankenvalue props,
+        Persistent persistent) = 0;
 
     virtual kj::Own<IoChannelFactory::ActorClassChannel> resolveActorClass(
-        kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) = 0;
+        kj::StringPtr serviceName,
+        kj::Maybe<kj::StringPtr> entrypoint,
+        Frankenvalue props,
+        Persistent persistent) = 0;
 
-    virtual kj::Own<IoChannelFactory::ActorChannel> resolveActor(
-        kj::StringPtr namespaceKey, kj::ArrayPtr<const byte> id, kj::Maybe<kj::StringPtr> name) = 0;
+    virtual kj::Own<IoChannelFactory::ActorChannel> resolveActor(kj::StringPtr namespaceKey,
+        kj::ArrayPtr<const byte> id,
+        kj::Maybe<kj::StringPtr> name,
+        Persistent persistent) = 0;
   };
 
   // workerd's implementation of `IoChannelFactory::SelfTokenFactory`. Produces the encoded
@@ -53,43 +61,56 @@ class ChannelTokenHandler {
   explicit ChannelTokenHandler(Resolver& resolver);
 
   // Helpers to implement `IoChannelFactory::{SubrequestChannel,ActorClassChannel}::getToken()`.
+  //
+  // `persistent` records whether the channel's target is a storable (persistent) target. If `usage`
+  // is STORAGE and `persistent` is `Persistent::NO`, these throw `DOMDataCloneError`.
   kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> encodeSubrequestChannelToken(
       IoChannelFactory::ChannelTokenUsage usage,
       kj::StringPtr serviceName,
       kj::Maybe<kj::StringPtr> entrypoint,
-      Frankenvalue& props);
+      Frankenvalue& props,
+      Persistent persistent);
   kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> encodeActorClassChannelToken(
       IoChannelFactory::ChannelTokenUsage usage,
       kj::StringPtr serviceName,
       kj::Maybe<kj::StringPtr> entrypoint,
-      Frankenvalue& props);
+      Frankenvalue& props,
+      Persistent persistent);
   kj::Array<byte> encodeActorChannelToken(IoChannelFactory::ChannelTokenUsage usage,
       kj::StringPtr namespaceKey,
       kj::ArrayPtr<const byte> id,
-      kj::Maybe<kj::StringPtr> name);
+      kj::Maybe<kj::StringPtr> name,
+      Persistent persistent);
   kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> encodeRestoredChannelToken(
       IoChannelFactory::ChannelTokenUsage usage,
       ChannelToken::Type type,
       kj::ArrayPtr<const byte> vendorToken,
-      Frankenvalue restoreArg);
+      Frankenvalue restoreArg,
+      Persistent persistent);
   kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> encodeRestoredChannelToken(
       IoChannelFactory::ChannelTokenUsage usage,
       ChannelToken::Type type,
       kj::Own<IoChannelFactory::SubrequestChannel> vendor,
-      Frankenvalue restoreArg);
+      Frankenvalue restoreArg,
+      Persistent persistent);
   kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> encodeRestoredChannelToken(
       IoChannelFactory::ChannelTokenUsage usage,
       ChannelToken::Type type,
       kj::Own<ServerSelfTokenFactory> vendor,
-      Frankenvalue restoreArg);
+      Frankenvalue restoreArg,
+      Persistent persistent);
 
-  // Implements the respective methods of IoChannelFactory.
+  // Implements the respective methods of IoChannelFactory. `persistent` is the
+  // `allow_irrevocable_stub_storage` flag of the worker invoking `ctx.restore()`.
   kj::Own<IoChannelFactory::SubrequestChannel> makeRestoredSubrequestChannel(
       kj::Own<IoChannelFactory::SelfTokenFactory> selfTokenFactory,
       Frankenvalue restoreParams,
-      kj::Own<IoChannelFactory::SubrequestChannel> inner);
+      kj::Own<IoChannelFactory::SubrequestChannel> inner,
+      Persistent persistent);
   kj::Own<IoChannelFactory::RpcChannel> makeRestoredRpcChannel(
-      kj::Own<IoChannelFactory::SelfTokenFactory> selfTokenFactory, Frankenvalue restoreParams);
+      kj::Own<IoChannelFactory::SelfTokenFactory> selfTokenFactory,
+      Frankenvalue restoreParams,
+      Persistent persistent);
 
   // Helpers to implement `IoChannelFactory::{subrequestChannel,actorClass}FromToken()`.
   kj::Own<IoChannelFactory::SubrequestChannel> decodeSubrequestChannelToken(
@@ -119,13 +140,22 @@ class ChannelTokenHandler {
   };
   static_assert(sizeof(TokenHeader) == 32);
 
+  // Throws `DOMDataCloneError` if `usage` is STORAGE but `persistent` is `Persistent::NO`.
+  static void requireStorable(IoChannelFactory::ChannelTokenUsage usage, Persistent persistent);
+
+  // Encode/decode the `persistence` union, which records whether the target worker allowed
+  // irrevocable stub storage when the token was minted.
+  static void encodePersistent(ChannelToken::Builder builder, Persistent persistent);
+  static Persistent decodePersistent(ChannelToken::Reader reader);
+
   // Implementation for both `encode` methods.
   kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> encodeChannelTokenImpl(
       ChannelToken::Type type,
       IoChannelFactory::ChannelTokenUsage usage,
       kj::StringPtr serviceName,
       kj::Maybe<kj::StringPtr> entrypoint,
-      Frankenvalue& props);
+      Frankenvalue& props,
+      Persistent persistent);
   void encodeFrankenvalue(IoChannelFactory::ChannelTokenUsage usage,
       Frankenvalue& value,
       rpc::Frankenvalue::Builder valueBuilder,
@@ -153,7 +183,8 @@ class ChannelTokenHandler {
       ChannelToken::Type type,
       kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> vendorTokenMaybeSync,
       kj::Own<void> keepVendorAlive,
-      Frankenvalue restoreArg);
+      Frankenvalue restoreArg,
+      Persistent persistent);
 
   class RestoredSubrequestChannel;
   class RestoredRpcChannel;

@@ -1347,6 +1347,9 @@ Onset::WorkerInfo getWorkerInfoFromReader(const rpc::Trace::Onset::Reader& reade
     .scriptId = getScriptIdFromReader(reader),
     .scriptTags = getScriptTagsFromReader(reader),
     .entrypoint = getEntrypointFromReader(reader),
+    .durableObjectId = reader.hasDurableObjectId()
+        ? kj::Maybe<kj::String>(kj::str(reader.getDurableObjectId()))
+        : kj::none,
   };
 }
 }  // namespace
@@ -1391,6 +1394,9 @@ void Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
   KJ_IF_SOME(p, workerInfo.preview) {
     p.copyTo(builder.initPreview());
   }
+  KJ_IF_SOME(id, workerInfo.durableObjectId) {
+    builder.setDurableObjectId(id);
+  }
   auto infoBuilder = builder.initInfo();
   writeOnsetInfo(info, infoBuilder);
 
@@ -1411,6 +1417,7 @@ Onset::WorkerInfo Onset::WorkerInfo::clone() const {
     .scriptTags =
         scriptTags.map([](auto& tags) { return KJ_MAP(tag, tags) { return kj::str(tag); }; }),
     .entrypoint = mapCopyString(entrypoint),
+    .durableObjectId = mapCopyString(durableObjectId),
   };
 }
 

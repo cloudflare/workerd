@@ -485,6 +485,36 @@ export class ERR_METHOD_NOT_IMPLEMENTED extends NodeError {
   }
 }
 
+export class ERR_INSPECTOR_ALREADY_CONNECTED extends NodeError {
+  constructor(message: string) {
+    super('ERR_INSPECTOR_ALREADY_CONNECTED', `${message} is already connected`);
+  }
+}
+
+export class ERR_INSPECTOR_NOT_CONNECTED extends NodeError {
+  constructor() {
+    super('ERR_INSPECTOR_NOT_CONNECTED', 'Session is not connected');
+  }
+}
+
+export class ERR_INSPECTOR_CLOSED extends NodeError {
+  constructor() {
+    super('ERR_INSPECTOR_CLOSED', 'Session was closed');
+  }
+}
+
+export class ERR_INSPECTOR_COMMAND extends NodeError {
+  constructor(code: number, message: string) {
+    super('ERR_INSPECTOR_COMMAND', `Inspector error ${code}: ${message}`);
+  }
+}
+
+export class ERR_INSPECTOR_NOT_WORKER extends NodeError {
+  constructor() {
+    super('ERR_INSPECTOR_NOT_WORKER', 'Current thread is not a worker');
+  }
+}
+
 export class ERR_STREAM_CANNOT_PIPE extends NodeError {
   constructor() {
     super('ERR_STREAM_CANNOT_PIPE', 'Cannot pipe, not readable');

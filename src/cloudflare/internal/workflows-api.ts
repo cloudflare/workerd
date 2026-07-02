@@ -61,9 +61,10 @@ class InstanceImpl implements WorkflowInstance {
     });
   }
 
-  async terminate(): Promise<void> {
+  async terminate(options?: WorkflowInstanceTerminateOptions): Promise<void> {
     await callFetcher(this.fetcher, '/terminate', {
       id: this.id,
+      ...(options?.rollback === true ? { rollback: true } : {}),
     });
   }
 

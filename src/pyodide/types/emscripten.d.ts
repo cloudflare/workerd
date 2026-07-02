@@ -37,7 +37,7 @@ interface API {
     stdout?: (a: string) => void,
     stderr?: (a: string) => void
   ) => void;
-  version: '0.26.0a2' | '0.28.2';
+  version: '0.26.0a2' | '0.28.2' | '314.0.0';
   pyodide_base: {
     pyimport_impl: PyCallable;
   };
@@ -140,6 +140,7 @@ interface Module {
   LD_LIBRARY_PATH: string;
   Py_EmscriptenSignalBuffer: Uint8Array;
   _Py_EMSCRIPTEN_SIGNAL_HANDLING: number;
+  __Py_emscripten_signal_clock: number;
   ___memory_base: WebAssembly.Global<'i32'>;
   compileModuleFromReadOnlyFS: (
     Module: Module,

@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Wed, 1 Jul 2026 10:12:56 -0400
+Subject: Properly depend on llvm-libc
+
+Change-Id: I9858b147d027e67704c6ca84e0c42fab39a5c97a
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 20f28d46fb9d9ce396455eca12409f2a8cf15c5b..983c7e2e8a0d6605dcb420adfafaccde9b1c05ce 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -4600,13 +4600,6 @@ cc_library(
+     strip_include_prefix = "noicu",
+ )
+ 
+-cc_library(
+-    name = "llvm_libc_headers",
+-    hdrs = glob(["third_party/llvm-libc/src/shared/**/*.h"]),
+-    includes = ["third_party/llvm-libc/src"],
+-    defines = ["LIBC_NAMESPACE=__llvm_libc_cr"],
+-)
+-
+ v8_library(
+     name = "v8_libbase",
+     srcs = [
+@@ -4615,7 +4608,7 @@ v8_library(
+     ],
+     copts = ["-Wno-implicit-fallthrough"],
+     deps = [
+-        ":llvm_libc_headers",
++        "@llvm-libc",
+         "@abseil-cpp//absl/synchronization",
+         "@abseil-cpp//absl/time",
+         "@abseil-cpp//absl/functional:overload",

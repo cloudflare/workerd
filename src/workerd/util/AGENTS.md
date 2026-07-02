@@ -14,7 +14,7 @@ Shared utility library: data structures, SQLite wrapper, feature gating, logging
 | `autogate.h/c++`  | Runtime feature gates                                    | `AutogateKey` enum; `isEnabled()` check                                                |
 | `weak-refs.h`     | `WeakRef<T>` / `AtomicWeakRef<T>`                        | Non-owning refs; `tryAddStrongRef()` or `runIfAlive(fn)` pattern                       |
 | `ring-buffer.h`   | Amortized O(1) deque                                     | Replaces `std::list` in streams                                                        |
-| `small-set.h`     | `kj::OneOf`-based set                                    | O(1) for 0–2 items, fallback to `kj::HashSet`                                          |
+| `small-weak-vector.h` | `kj::OneOf`-based weak vector                      | O(1) for 0–2 items, fallback to `kj::Vector`                                           |
 | `batch-queue.h`   | Double-buffered cross-thread queue                       | Producer/consumer with mutex swap                                                      |
 | `checked-queue.h` | Safe `std::list` wrapper                                 | `pop()` returns `Maybe` instead of UB on empty                                         |
 | `strong-bool.h`   | `WD_STRONG_BOOL(Name)` macro                             | Type-safe boolean; prevents implicit conversions                                       |

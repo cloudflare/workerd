@@ -114,7 +114,7 @@ def main() -> int:
         work_dir = Path(tmp)
         entries = extract(wheels, lock, work_dir)
         capnp_path = write_capnp(entries, work_dir, schema_src)
-        with open(out_path, "wb") as out:
+        with Path(out_path).open("wb") as out:
             subprocess.run(
                 [capnp, "eval", capnp_path.name, "packages", "-o", "binary"],
                 cwd=work_dir,

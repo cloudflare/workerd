@@ -21,8 +21,8 @@ SDK_DIR = Path(__file__).parent / "workers-api"
 EXPECTED_HASHES = {
     "pyproject.toml": "2ba30eeea93f2cf161fce735981b382d2ca1f5aee77e663f447743aabe8575cf",
     "src/asgi.py": "da171340aa361f733d99d4a1e09c7fe440dd6c79fbca83e4f11d7c42f7622549",
-    "src/workers/__init__.py": "5db8f21adacc3ba625c8763c6e8c47220325109bdc4ec301d76925037844cfd7",
-    "src/workers/_workers.py": "a1e2d9b8199e4bb88c3e89e82dca037772d223bf58bcb1a241d9f03bc54282bd",
+    "src/workers/__init__.py": "de88115ccfcda08694b33fd01ea4d36c88a70f1bc85c034991926d05bb71a1e6",
+    "src/workers/_workers.py": "49c4f7c0eae18df70ff84aa1b7e71ca9c9f0591810a2feb09c95c06d84703383",
     "src/workers/workflows.py": "9379fdf416da56d2400369165a51b72da83f724aea893ac785285631d09803bf",
     "uv.lock": "8945fab16bffb1ea1fe5740ca677e40bf8fe28010325e4c389cd11b8a072a9fc",
 }

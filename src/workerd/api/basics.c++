@@ -891,7 +891,7 @@ kj::Promise<void> AbortSignal::sendToRpc(kj::Array<kj::byte>&& reason) {
 
 bool AbortSignal::hasPendingReason() {
   KJ_IF_SOME(pr, pendingReason) {
-    return pr->getWrapped() != nullptr;
+    return *pr != nullptr;
   }
 
   return false;
@@ -899,12 +899,12 @@ bool AbortSignal::hasPendingReason() {
 
 kj::Maybe<jsg::JsValue> AbortSignal::deserializePendingReason(jsg::Lock& js) {
   KJ_IF_SOME(pr, pendingReason) {
-    if (pr->getWrapped() == nullptr) {
+    if (*pr == nullptr) {
       // pendingReason not initialized. This means abort wasn't yet triggered
       return kj::none;
     }
 
-    KJ_SWITCH_ONEOF(pr->getWrapped()) {
+    KJ_SWITCH_ONEOF(*pr) {
       KJ_CASE_ONEOF(v8Serialized, kj::Array<kj::byte>) {
         jsg::Deserializer des(js, v8Serialized);
         return kj::some(des.readValue(js));

@@ -158,16 +158,18 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     resolver.reject(js, exception.getHandle(js));
   });
 
-  auto refcountedConnection = kj::refcountedWrapper(kj::mv(connection));
+  kj::Rc<kj::AsyncIoStream> refcountedConnection(kj::mv(connection));
   // Initialize the readable/writable streams with the readable/writable sides of an AsyncIoStream.
-  auto sysStreams = newSystemMultiStream(*refcountedConnection, ioContext);
+  auto sysStreams = newSystemMultiStream(refcountedConnection.addRef(), ioContext);
   auto readable = js.alloc<ReadableStream>(ioContext, kj::mv(sysStreams.readable));
   auto allowHalfOpen = getAllowHalfOpen(options);
   kj::Maybe<jsg::Promise<void>> eofPromise;
   if (!allowHalfOpen) {
     eofPromise = readable->onEof(js);
   }
-  auto openedPrPair = kj::mv(maybeOpenedPrPair).orDefault(js.newPromiseAndResolver<SocketInfo>());
+  auto openedPrPair = kj::mv(maybeOpenedPrPair).orDefault([&js]() {
+    return js.newPromiseAndResolver<SocketInfo>();
+  });
   openedPrPair.promise.markAsHandled(js);
   auto writable = js.alloc<WritableStream>(ioContext, kj::mv(sysStreams.writable),
       ioContext.getMetrics().tryCreateWritableByteStreamObserver(),
@@ -417,7 +419,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
 
                 // Move the stream out of the plain text socket, to ensure the stream is properly
                 // destroyed when the socket is closed.
-                kj::Own<kj::AsyncIoStream> stream = connData->connectionStream->addWrappedRef();
+                kj::Own<kj::AsyncIoStream> stream = connData->connectionStream.addRef().toOwn();
                 self->connectionData = kj::none;
 
                 auto secureStream = forkedPromise.addBranch().then(
@@ -442,7 +444,8 @@ void Socket::handleProxyStatus(
     // Let's not log errors when we have a disconnected exception.
     // If we don't filter this out, whenever connect() fails, we'll
     // have noisy errors even though the user catches the error on JS side.
-    if (e.getType() != kj::Exception::Type::DISCONNECTED) {
+    if (e.getType() != kj::Exception::Type::DISCONNECTED &&
+        e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) == kj::none) {
       LOG_ERROR_PERIODICALLY("Socket proxy disconnected abruptly", e);
     }
     return kj::HttpClient::ConnectRequest::Status(500, nullptr, kj::Own<kj::HttpHeaders>());
@@ -488,7 +491,10 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
   // TODO(cleanup): Extend awaitIo to provide the jsg::Lock in more cases.
   auto& context = IoContext::current();
   auto errorHandler = [](kj::Exception&& e) -> kj::Maybe<kj::Exception> {
-    LOG_ERROR_PERIODICALLY("Socket proxy disconnected abruptly", e);
+    if (e.getType() != kj::Exception::Type::DISCONNECTED &&
+        e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) == kj::none) {
+      LOG_ERROR_PERIODICALLY("Socket proxy disconnected abruptly", e);
+    }
     return KJ_EXCEPTION(FAILED, "connectResult raised an error");
   };
   auto func = [this, self = JSG_THIS](jsg::Lock& js, kj::Maybe<kj::Exception> result) -> void {
@@ -576,7 +582,7 @@ kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
       connectionData, TypeError, "The socket connection is closed or was already taken.");
   // Attach tlsStarter to the wrapper so it survives as long as the connection stream
   // and is destroyed before the stream itself.
-  auto wrapper = dataConn->connectionStream->addWrappedRef().attach(kj::mv(dataConn->tlsStarter));
+  auto wrapper = dataConn->connectionStream.addRef().toOwn().attach(kj::mv(dataConn->tlsStarter));
   connectionData = kj::none;
   closedResolver.resolve(js);
   return wrapper;
