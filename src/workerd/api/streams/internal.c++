@@ -1402,7 +1402,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
   }
   queue.push_back(WriteEvent{
     .outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
-    .event = Pipe(*this, sourceLock, kj::mv(prp.resolver), preventAbort, preventClose,
+    .event = kj::heap<Pipe>(*this, sourceLock, kj::mv(prp.resolver), preventAbort, preventClose,
         preventCancel, kj::mv(options.signal)),
   });
   ensureWriting(js);
@@ -1634,7 +1634,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
           KJ_CASE_ONEOF(close, Close) {
             events.add(kj::str("Close"));
           }
-          KJ_CASE_ONEOF(pipe, Pipe) {
+          KJ_CASE_ONEOF(pipe, kj::Own<Pipe>) {
             events.add(kj::str("Pipe"));
           }
         }
@@ -1663,7 +1663,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       if constexpr (kj::isSameType<Request, Close>()) {
         // Pipe and Close requests are always the last one in the queue.
         KJ_ASSERT(queue.size() == 1, queue.size(), inspectQueue(queue));
-      } else if constexpr (kj::isSameType<Request, Pipe>()) {
+      } else if constexpr (kj::isSameType<Request, kj::Own<Pipe>>()) {
         // Pipe and Close requests are always the last one in the queue.
         KJ_ASSERT(queue.size() == 1, queue.size(), inspectQueue(queue));
       }
@@ -1761,8 +1761,8 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         return js.resolvedPromise();
       }));
     }
-    KJ_CASE_ONEOF(request, Pipe) {
-      if (request.checkSignal(js)) {
+    KJ_CASE_ONEOF(request, kj::Own<Pipe>) {
+      if (request->checkSignal(js)) {
         // If the signal is triggered, checkSignal will handle erroring the source and destination.
         return js.resolvedPromise();
       }
@@ -1770,15 +1770,15 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       // The readable side should *should* still be readable here but let's double check, just
       // to be safe, both for closed state and errored states. We just constructed the Pipe
       // and haven't yet entered pipeLoop, so source is guaranteed non-null.
-      auto& sourceRef = KJ_ASSERT_NONNULL(request.source);
-      auto preventClose = request.flags.preventClose;
-      auto preventAbort = request.flags.preventAbort;
+      auto& sourceRef = KJ_ASSERT_NONNULL(request->source);
+      auto preventClose = request->flags.preventClose;
+      auto preventAbort = request->flags.preventAbort;
 
       if (sourceRef.isClosed()) {
         // Resolve the pipe promise before pop_front destroys the Pipe event.
-        auto promise = request.takePromise();
+        auto promise = request->takePromise();
         maybeResolvePromise(js, promise);
-        request.releaseSource(js);
+        request->releaseSource(js);
         // Pop the Pipe from the queue before calling close() — isPiping()
         // checks the queue, and close() rejects if isPiping() is true.
         queue.pop_front();
@@ -1796,9 +1796,9 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
 
       KJ_IF_SOME(errored, sourceRef.tryGetErrored(js)) {
         // Reject the pipe promise before pop_front destroys the Pipe event.
-        auto promise = request.takePromise();
+        auto promise = request->takePromise();
         maybeRejectPromise<void>(js, promise, errored);
-        request.releaseSource(js);
+        request->releaseSource(js);
         // Pop the Pipe from the queue before further processing — the source
         // has been released, so the Pipe entry is stale.
         queue.pop_front();
@@ -1833,14 +1833,14 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
           // Under some conditions, the clean up has already happened.
           if (controller.queue.empty()) return js.resolvedPromise();
 
-          auto& request = check.template operator()<Pipe>(controller);
+          auto& request = check.template operator()<kj::Own<Pipe>>(controller);
 
           // KJ_IF_SOME on request.source(): if pipeLoop already released the
           // source (via Pipe::State::releaseSource()), source is now
           // kj::none and we MUST NOT attempt a deref. Use the stashed
           // capturedSourceError in that case.
-          KJ_IF_SOME(sourceRef, request.source) {
-            auto fulfiller = request.takePromise();
+          KJ_IF_SOME(sourceRef, request->source) {
+            auto fulfiller = request->takePromise();
             KJ_IF_SOME(errored, sourceRef.tryGetErrored(js)) {
               if (preventAbort) preventClose = true;
               // Even through we're not going to close the destination, we still want the
@@ -1863,12 +1863,12 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
             // path, the loop detects isClosed() and releases on its next iteration.
             // But the KJ tryPumpTo path has no loop — handlePromise is the terminal
             // handler — so we must release explicitly here.
-            request.releaseSource(js);
+            request->releaseSource(js);
           } else {
             // pipeLoop already released the source; consult the stashed
             // error value (if any) rather than dereferencing source.
-            auto promise = request.takePromise();
-            KJ_IF_SOME(err, request.capturedSourceError) {
+            auto promise = request->takePromise();
+            KJ_IF_SOME(err, request->capturedSourceError) {
               if (preventAbort) preventClose = true;
               maybeRejectPromise<void>(js, promise, err.getHandle(js));
             } else KJ_IF_SOME(errored, controller.state.tryGetUnsafe<StreamStates::Errored>()) {
@@ -1902,13 +1902,13 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
 
           auto handle = jsg::JsValue(reason.getHandle(js));
 
-          auto& request = check.template operator()<Pipe>(controller);
+          auto& request = check.template operator()<kj::Own<Pipe>>(controller);
 
-          auto fulfiller = request.takePromise();
+          auto fulfiller = request->takePromise();
           maybeRejectPromise<void>(js, fulfiller, handle);
           // KJ_IF_SOME on request.source(): if pipeLoop already released the
           // source, skip — the underlying PipeController is gone.
-          KJ_IF_SOME(sourceRef, request.source) {
+          KJ_IF_SOME(sourceRef, request->source) {
             // TODO(conform): Remember all those checks we performed in ReadableStream::pipeTo()?
             // We're supposed to perform the same checks continually, e.g., errored writes should
             // cancel the readable side unless preventCancel is truthy... This would require
@@ -1920,7 +1920,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
             // Release the readable's pipe lock — same rationale as the success
             // path: the KJ tryPumpTo path has no loop iteration to detect the
             // error and release.
-            request.releaseSource(js);
+            request->releaseSource(js);
           }
           controller.queue.pop_front();
           if (!preventAbort) {
@@ -1941,14 +1941,14 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
           return handlePromise(js,
               ioContext.awaitIo(js,
                   writable->canceler.wrap(
-                      AbortSignal::maybeCancelWrap(js, request.maybeSignal, kj::mv(promise)))));
+                      AbortSignal::maybeCancelWrap(js, request->maybeSignal, kj::mv(promise)))));
         } else {
           // The ReadableStream is JavaScript-backed. We can still pipe the data but it's going to be
           // a bit slower because we will be relying on JavaScript promises when reading the data
           // from the ReadableStream, then waiting on kj::Promises to write the data. We will keep
           // reading until either the source or destination errors or until the source signals that
           // it is done.
-          return handlePromise(js, request.pipeLoop(js));
+          return handlePromise(js, request->pipeLoop(js));
         }
       }));
     }
@@ -2003,7 +2003,9 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
 bool WritableStreamInternalController::Pipe::State::checkSignal(jsg::Lock& js) {
   // If the weakRef is not alive, we'll return true to indicate aborted.
   bool answer = true;
-  weakRef->runIfAlive([&](Pipe& ref) { answer = ref.checkSignal(js); });
+  KJ_IF_SOME(ref, weakRef) {
+    answer = ref->checkSignal(js);
+  }
   return answer;
 }
 
@@ -2020,7 +2022,6 @@ bool WritableStreamInternalController::Pipe::checkSignal(jsg::Lock& js) {
       auto preventCancel = flags.preventCancel;
       auto preventAbort = flags.preventAbort;
       auto promiseCopy = kj::mv(promise);
-      auto weakRef = kj::mv(selfRef);
 
       // Before the drain, keep the readable alive so sourceRef stays valid
       auto readableRef = [&]() -> kj::Maybe<jsg::Ref<ReadableStream>> {
@@ -2052,7 +2053,6 @@ bool WritableStreamInternalController::Pipe::checkSignal(jsg::Lock& js) {
       }
 
       maybeRejectPromise<void>(js, promiseCopy, reason);
-      KJ_ASSERT_NONNULL(weakRef)->invalidate();
       return true;
     }
   }
@@ -2062,7 +2062,9 @@ bool WritableStreamInternalController::Pipe::checkSignal(jsg::Lock& js) {
 jsg::Promise<void> WritableStreamInternalController::Pipe::State::write(
     jsg::Lock& js, jsg::JsValue handle) {
   kj::Maybe<jsg::Promise<void>> promise;
-  weakRef->runIfAlive([&](auto& ref) { promise = ref.write(js, handle); });
+  KJ_IF_SOME(ref, weakRef) {
+    promise = ref->write(js, handle);
+  }
   KJ_IF_SOME(p, promise) {
     return kj::mv(p);
   }
@@ -2101,13 +2103,17 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::write(
 
 bool WritableStreamInternalController::Pipe::State::isSourceReleased() {
   bool answer = true;
-  weakRef->runIfAlive([&](auto& ref) { answer = ref.isSourceReleased(); });
+  KJ_IF_SOME(ref, weakRef) {
+    answer = ref->isSourceReleased();
+  }
   return answer;
 }
 
 void WritableStreamInternalController::Pipe::State::tryErrorParent(
     jsg::Lock& js, jsg::JsValue reason) {
-  weakRef->runIfAlive([&](auto& ref) { ref.errorParent(js, reason); });
+  KJ_IF_SOME(ref, weakRef) {
+    ref->errorParent(js, reason);
+  }
 }
 
 void WritableStreamInternalController::Pipe::errorParent(jsg::Lock& js, jsg::JsValue reason) {
@@ -2115,12 +2121,16 @@ void WritableStreamInternalController::Pipe::errorParent(jsg::Lock& js, jsg::JsV
 }
 
 void WritableStreamInternalController::Pipe::State::tryFinishCloseParent(jsg::Lock& js) {
-  weakRef->runIfAlive([&](auto& ref) { ref.finishCloseParent(js); });
+  KJ_IF_SOME(ref, weakRef) {
+    ref->finishCloseParent(js);
+  }
 }
 
 void WritableStreamInternalController::Pipe::State::tryFinishErrorParent(
     jsg::Lock& js, jsg::JsValue reason) {
-  weakRef->runIfAlive([&](auto& ref) { ref.finishErrorParent(js, reason); });
+  KJ_IF_SOME(ref, weakRef) {
+    ref->finishErrorParent(js, reason);
+  }
 }
 
 void WritableStreamInternalController::Pipe::finishCloseParent(jsg::Lock& js) {
@@ -2132,7 +2142,9 @@ void WritableStreamInternalController::Pipe::finishErrorParent(jsg::Lock& js, js
 }
 
 void WritableStreamInternalController::Pipe::State::tryNoBytesError(jsg::Lock& js) {
-  weakRef->runIfAlive([&](auto& ref) { ref.noBytesError(js); });
+  KJ_IF_SOME(ref, weakRef) {
+    ref->noBytesError(js);
+  }
 }
 
 void WritableStreamInternalController::Pipe::noBytesError(jsg::Lock& js) {
@@ -2144,7 +2156,9 @@ void WritableStreamInternalController::Pipe::noBytesError(jsg::Lock& js) {
 
 jsg::Promise<void> WritableStreamInternalController::Pipe::State::pipeLoop(jsg::Lock& js) {
   kj::Maybe<jsg::Promise<void>> promise;
-  weakRef->runIfAlive([&](auto& ref) { promise = ref.pipeLoop(js); });
+  KJ_IF_SOME(ref, weakRef) {
+    promise = ref->pipeLoop(js);
+  }
   KJ_IF_SOME(p, promise) {
     return kj::mv(p);
   }
@@ -2320,7 +2334,9 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
 
 void WritableStreamInternalController::Pipe::State::releaseSource(
     jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError) {
-  weakRef->runIfAlive([&](auto& ref) { ref.releaseSource(js, kj::mv(maybeError)); });
+  KJ_IF_SOME(ref, weakRef) {
+    ref->releaseSource(js, kj::mv(maybeError));
+  }
 }
 
 void WritableStreamInternalController::Pipe::releaseSource(
@@ -2350,13 +2366,13 @@ void WritableStreamInternalController::drain(jsg::Lock& js, jsg::JsValue reason)
         auto promise = kj::mv(writeRequest.promise);
         maybeRejectPromise<void>(js, promise, reason);
       }
-      KJ_CASE_ONEOF(pipeRequest, Pipe) {
-        if (!pipeRequest.flags.preventCancel) {
-          KJ_IF_SOME(sourceRef, pipeRequest.source) {
+      KJ_CASE_ONEOF(pipeRequest, kj::Own<Pipe>) {
+        if (!pipeRequest->flags.preventCancel) {
+          KJ_IF_SOME(sourceRef, pipeRequest->source) {
             sourceRef.cancel(js, reason);
           }
         }
-        auto promise = pipeRequest.takePromise();
+        auto promise = pipeRequest->takePromise();
         maybeRejectPromise<void>(js, promise, reason);
       }
       KJ_CASE_ONEOF(closeRequest, Close) {
@@ -2384,8 +2400,8 @@ void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
       KJ_CASE_ONEOF(flush, Flush) {
         visitor.visit(flush.promise);
       }
-      KJ_CASE_ONEOF(pipe, Pipe) {
-        pipe.visitForGc(visitor);
+      KJ_CASE_ONEOF(pipe, kj::Own<Pipe>) {
+        pipe->visitForGc(visitor);
       }
     }
   }
