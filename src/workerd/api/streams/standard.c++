@@ -932,7 +932,7 @@ class WritableStreamJsController final: public WritableStreamController {
   kj::Maybe<kj::Own<WritableStreamSink>> removeSink(jsg::Lock& js) override;
   void detach(jsg::Lock& js) override;
 
-  void setOwnerRef(WritableStream& stream) override;
+  void setOwnerRef(kj::Weak<WritableStream> stream) override;
 
   void setup(jsg::Lock& js,
       jsg::Optional<UnderlyingSink> maybeUnderlyingSink,
@@ -966,7 +966,7 @@ class WritableStreamJsController final: public WritableStreamController {
   jsg::Promise<void> pipeLoop(jsg::Lock& js);
 
   kj::Maybe<IoContext&> ioContext;
-  kj::Maybe<WritableStream&> owner;
+  kj::Weak<WritableStream> owner;
 
   // Initial state before setup() is called.
   struct Initial {
@@ -1267,8 +1267,8 @@ kj::Own<typename ReadableImpl<Self>::Consumer> ReadableImpl<Self>::getConsumer(
 
 template <typename Self>
 WritableImpl<Self>::WritableImpl(
-    jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal)
-    : owner(owner.addWeakRef()),
+    jsg::Lock& js, kj::Weak<WritableStream> owner, jsg::Ref<AbortSignal> abortSignal)
+    : owner(kj::mv(owner)),
       signal(kj::mv(abortSignal)) {
   flags.pedanticWpt = FeatureFlags::get(js).getPedanticWpt();
 }
@@ -1314,9 +1314,7 @@ jsg::Promise<void> WritableImpl<Self>::abort(
 template <typename Self>
 kj::Maybe<WritableStreamJsController&> WritableImpl<Self>::tryGetOwner() {
   KJ_IF_SOME(o, owner) {
-    return o->tryGet().map([](WritableStream& owner) -> WritableStreamJsController& {
-      return static_cast<WritableStreamJsController&>(owner.getController());
-    });
+    return static_cast<WritableStreamJsController&>(o->getController());
   }
   return kj::none;
 }
@@ -3587,9 +3585,9 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
 // ======================================================================================
 
 WritableStreamDefaultController::WritableStreamDefaultController(
-    jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal)
+    jsg::Lock& js, kj::Weak<WritableStream> owner, jsg::Ref<AbortSignal> abortSignal)
     : ioContext(tryGetIoContext()),
-      impl(js, owner, kj::mv(abortSignal)) {}
+      impl(js, kj::mv(owner), kj::mv(abortSignal)) {}
 
 jsg::Promise<void> WritableStreamDefaultController::abort(jsg::Lock& js, jsg::JsValue reason) {
   return impl.abort(js, JSG_THIS, reason);
@@ -3659,8 +3657,6 @@ WritableStreamJsController::~WritableStreamJsController() noexcept(false) {
   // Clear the state to break the circular reference to the controller.
   // During destruction, we force the transition since the current state doesn't matter.
   state.forceTransitionTo<StreamStates::Closed>();
-  // Clear owner reference
-  owner = kj::none;
   // Clear any pending abort promise
   maybeAbortPromise = kj::none;
 }
@@ -3707,7 +3703,7 @@ jsg::Promise<void> WritableStreamJsController::abort(
 }
 
 jsg::Ref<WritableStream> WritableStreamJsController::addRef() {
-  return KJ_ASSERT_NONNULL(owner).addRef();
+  return owner.assertLive().addRef();
 }
 
 bool WritableStreamJsController::isClosedOrClosing() {
@@ -3899,8 +3895,8 @@ void WritableStreamJsController::detach(jsg::Lock& js) {
   KJ_UNIMPLEMENTED("WritableStreamJsController::detach is not implemented");
 }
 
-void WritableStreamJsController::setOwnerRef(WritableStream& stream) {
-  owner = stream;
+void WritableStreamJsController::setOwnerRef(kj::Weak<WritableStream> stream) {
+  owner = kj::mv(stream);
 }
 
 void WritableStreamJsController::setup(jsg::Lock& js,
@@ -3919,7 +3915,7 @@ void WritableStreamJsController::setup(jsg::Lock& js,
   // We account for the memory usage of the WritableStreamDefaultController and AbortSignal together
   // because their lifetimes are identical and memory accounting itself has a memory overhead.
   auto controller = js.allocAccounted<WritableStreamDefaultController>(
-      sizeof(WritableStreamDefaultController) + sizeof(AbortSignal), js, KJ_ASSERT_NONNULL(owner),
+      sizeof(WritableStreamDefaultController) + sizeof(AbortSignal), js, owner,
       js.alloc<AbortSignal>());
   auto& controllerRef = *controller;
   state.transitionTo<Controller>(kj::mv(controller));
@@ -3940,7 +3936,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamJsController::tryPipeFrom(
   // completes, or is rejected if the pipe operation is aborted or errored.
 
   // Let's also acquire the destination pipe lock.
-  lock.pipeLock(KJ_ASSERT_NONNULL(owner), kj::mv(source), options);
+  lock.pipeLock(owner.assertLive(), kj::mv(source), options);
 
   return pipeLoop(js).then(js, [ref = addRef()](auto& js) {});
 }

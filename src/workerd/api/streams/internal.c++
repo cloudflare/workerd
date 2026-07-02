@@ -1017,7 +1017,7 @@ WritableStreamInternalController::~WritableStreamInternalController() noexcept(f
 }
 
 jsg::Ref<WritableStream> WritableStreamInternalController::addRef() {
-  return KJ_ASSERT_NONNULL(owner).addRef();
+  return owner.assertLive().addRef();
 }
 
 jsg::Promise<void> WritableStreamInternalController::write(
