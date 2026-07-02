@@ -345,6 +345,11 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   bool useDefaultHandling;
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.fetch) {
+      // Immediately before dispatching into user code, give the observer a chance to claim the
+      // request's retry-token nonce. No-op unless the request is to an actor and the observer
+      // overrides the hook. Only the exported-handler path is hooked: Durable Objects are always
+      // class-based, so actor fetches never take the service-worker dispatchEventImpl() path below.
+      ioContext.getMetrics().claimRetryTokenBeforeUserCode();
       auto promise = f(lock, event->getRequest(), h.env.addRef(js), h.getCtx());
       event->respondWith(lock, kj::mv(promise));
       useDefaultHandling = false;
@@ -396,16 +401,16 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
 
     // HACK: If the client disconnects, the `response` reference is no longer valid. But our
     //   promise resolves in JavaScript space, so won't be canceled. So we need to track
-    //   cancellation separately. We use a weird refcounted boolean.
+    //   cancellation separately. We use a refcounted boolean.
     // TODO(cleanup): Is there something less ugly we can do here?
-    auto canceled = kj::refcounted<kj::RefcountedWrapper<bool>>(false);
+    auto canceled = kj::rc<bool>(false);
 
     return ioContext
         .awaitJs(lock,
             promise.then(kj::implicitCast<jsg::Lock&>(lock),
                 ioContext.addFunctor(
                     [&response, allowWebSocket = headers.isWebSocket(),
-                        canceled = canceled->addWrappedRef(), &headers, span = kj::mv(span)](
+                        canceled = canceled.addRef(), &headers, span = kj::mv(span)](
                         jsg::Lock& js, jsg::Ref<Response> innerResponse) mutable
                     -> IoOwn<kj::Promise<DeferredProxy<void>>> {
       JSG_REQUIRE(innerResponse->getType() != "error"_kj, TypeError,
@@ -423,8 +428,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
             innerResponse->send(js, response, {.allowWebSocket = allowWebSocket}, headers)));
       }
     })))
-        .attach(
-            kj::defer([canceled = kj::mv(canceled)]() mutable { canceled->getWrapped() = true; }))
+        .attach(kj::defer([canceled = kj::mv(canceled)]() mutable { *canceled = true; }))
         .then(
             [ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)](
                 DeferredProxy<void> deferredProxy) mutable {
@@ -1224,22 +1228,8 @@ jsg::JsObject Cloudflare::getCompatibilityFlags(jsg::Lock& js) {
   auto dynamic = capnp::toDynamic(flags);
   auto schema = dynamic.getSchema();
 
-  bool skipExperimental = !flags.getWorkerdExperimental();
-
   for (auto field: schema.getFields()) {
-    // If this is an experimental flag, we expose it only if the experimental mode
-    // is enabled.
     auto annotations = field.getProto().getAnnotations();
-    bool skip = false;
-    if (skipExperimental) {
-      for (auto annotation: annotations) {
-        if (annotation.getId() == EXPERIMENTAl_ANNOTATION_ID) {
-          skip = true;
-          break;
-        }
-      }
-    }
-    if (skip) continue;
 
     // Note that disable flags are not exposed.
     for (auto annotation: annotations) {

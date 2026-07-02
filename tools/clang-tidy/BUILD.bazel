@@ -4,6 +4,8 @@
 
   - `jsg-visit-for-gc`: validates JSG resource types correctly visit their
     GC roots.
+  - `workerd-consume`: validates that calls to methods annotated with
+    WD_CONSUME are made through consume() when invoked on kj::Ptr.
   - `workerd-unsafe-continuation-capture`: flags lambdas passed to async
     sinks (e.g. kj::Promise::then) that capture bare references, raw
     pointers, or non-owning views.
@@ -22,8 +24,14 @@ against a system libclang rather than the workerd-tools dev archive).
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 exports_files([
+    "consume.c++",
+    "consume.h",
+    "consume-negative-test.c++",
+    "consume-positive-test.c++",
+    "consume-test.sh",
     "workerd-lint.c++",
     "visit-for-gc.c++",
     "visit-for-gc.h",
@@ -31,17 +39,31 @@ exports_files([
     "unsafe-continuation-capture.h",
 ])
 
-cc_library(
-    name = "workerd-lint-static",
+filegroup(
+    name = "srcs",
     srcs = [
+        "consume.c++",
         "unsafe-continuation-capture.c++",
         "visit-for-gc.c++",
         "workerd-lint.c++",
     ],
-    hdrs = [
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "hdrs",
+    srcs = [
+        "consume.h",
         "unsafe-continuation-capture.h",
         "visit-for-gc.h",
     ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "workerd-lint-static",
+    srcs = [":srcs"],
+    hdrs = [":hdrs"],
     copts = select({
         # workerd-tools clang-tidy links against libstdc++ on Linux; the
         # plugin must match. macOS uses libc++ (Apple default).
@@ -80,4 +102,20 @@ cc_shared_library(
     }),
     visibility = ["//visibility:public"],
     deps = [":workerd-lint-static"],
+)
+
+sh_test(
+    name = "consume-test",
+    srcs = ["consume-test.sh"],
+    data = [
+        ":consume-negative-test.c++",
+        ":consume-positive-test.c++",
+        ":workerd-lint",
+        "//tools:clang-tidy",
+    ],
+    tags = ["no-asan"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
 )

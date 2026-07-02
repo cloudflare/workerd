@@ -38,7 +38,7 @@ index 19cdfb8a7939ffb9678c881b40dea91b72373f3f..ab81034ff4b0696ffaed83949b1707ac
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index aeb2131d691a4c50fac0737192711e420b6e8aa7..f8154e97c239181f1b82f2d7f4ac30ec74182726 100644
+index 359d353797e59b71eb8a71f7f2e9ae0db6e9f30b..804bd5264043790ba70ed19e2dfc06c4ef8c2e3d 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -303,6 +303,7 @@ ValueSerializer::ValueSerializer(Isolate* isolate,

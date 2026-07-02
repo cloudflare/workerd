@@ -175,7 +175,7 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   v8::V8::SetFlagsFromString("--single-threaded-gc");
 #endif  // __APPLE__
 
-  if (isPredictableModeForTest() || isGcStressModeForTest()) {
+  if (isPredictableModeForTest() || isGcStressModeForTest() || isAllocGcStressModeForTest()) {
     v8::V8::SetFlagsFromString("--expose-gc");
   }
 

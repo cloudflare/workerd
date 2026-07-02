@@ -20,14 +20,27 @@ namespace workerd::server {
 struct ActorKey {
   kj::StringPtr actorId;
 
+  // The name the actor was created with via `idFromName()`/`getByName()`, if any. This is not
+  // part of the actor's identity (it does not participate in equality/hashing); it is carried
+  // alongside the ID so that it can be persisted and later restored onto the reconstructed ID
+  // when an alarm fires, making `ctx.id.name` available in the alarm handler.
+  kj::Maybe<kj::StringPtr> name;
+
   bool operator==(const ActorKey& other) const {
     return actorId == other.actorId;
   }
 
+  // Returns an owned copy, with `actorId` and `name` copied into storage attached to the result.
   kj::Own<ActorKey> clone() const {
     auto ownActorId = kj::str(actorId);
-
-    return kj::attachVal(ActorKey{.actorId = ownActorId}, kj::mv(ownActorId));
+    KJ_IF_SOME(n, name) {
+      auto ownName = kj::str(n);
+      ActorKey key{.actorId = ownActorId, .name = ownName.asPtr()};
+      return kj::attachVal(kj::mv(key), kj::mv(ownActorId), kj::mv(ownName));
+    } else {
+      ActorKey key{.actorId = ownActorId};
+      return kj::attachVal(kj::mv(key), kj::mv(ownActorId));
+    }
   }
 };
 
@@ -53,7 +66,9 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
   // some common dependency between a set of failed alarms
   static constexpr auto RETRY_JITTER_FACTOR = 0.25;
 
-  using GetActorFn = kj::Function<kj::Own<WorkerInterface>(kj::String)>;
+  // Obtains a WorkerInterface for the given actor. `actor.name` carries the actor's original name
+  // (from `idFromName()`) if it was persisted, so that the reconstructed ID exposes `ctx.id.name`.
+  using GetActorFn = kj::Function<kj::Own<WorkerInterface>(const ActorKey& actor)>;
 
   AlarmScheduler(const kj::Clock& clock,
       kj::Timer& timer,
@@ -114,9 +129,14 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
 
   kj::Promise<void> checkTimestamp(kj::Duration delay, kj::Date scheduledTime);
 
+  // On upsert we always refresh scheduled_time, but only overwrite actor_name when the incoming
+  // row actually carries one. The name is supplied when the actor is created via getByName(), but
+  // later setAlarm() calls (e.g. from an already-running alarm handler) bind NULL for it; COALESCE
+  // keeps the previously-stored name in that case instead of clobbering it with NULL.
   SqliteDatabase::Statement stmtSetAlarm = db->prepare(R"(
-    INSERT INTO _cf_ALARM VALUES(?, ?)
-      ON CONFLICT DO UPDATE SET scheduled_time = excluded.scheduled_time;
+    INSERT INTO _cf_ALARM VALUES(?, ?, ?)
+      ON CONFLICT DO UPDATE SET scheduled_time = excluded.scheduled_time,
+        actor_name = COALESCE(excluded.actor_name, _cf_ALARM.actor_name);
   )");
   SqliteDatabase::Statement stmtDeleteAlarm = db->prepare(R"(
     DELETE FROM _cf_ALARM WHERE actor_id = ?

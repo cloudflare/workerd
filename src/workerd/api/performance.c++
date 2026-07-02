@@ -21,8 +21,8 @@ double Performance::now(jsg::Lock& js) {
 jsg::Ref<PerformanceMark> PerformanceMark::constructor(
     jsg::Lock& js, kj::String name, jsg::Optional<Options> maybeOptions) {
   auto options = kj::mv(maybeOptions).orDefault({});
-  return js.alloc<PerformanceMark>(
-      kj::mv(name), kj::mv(options.detail), options.startTime.orDefault(dateNow()));
+  return js.alloc<PerformanceMark>(kj::mv(name), kj::mv(options.detail),
+      options.startTime.orDefault([]() { return dateNow(); }));
 }
 
 jsg::JsObject PerformanceMark::toJSON(jsg::Lock& js) {

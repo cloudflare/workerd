@@ -2,6 +2,7 @@
 
 #include "crypto.h"
 #include "diagnostics-channel.h"
+#include "inspector.h"
 #include "zlib-util.h"
 
 #include <workerd/api/node/async-hooks.h>
@@ -36,11 +37,19 @@ namespace workerd::api::node {
   V(ZlibUtil, "node-internal:zlib")                                                                \
   V(UrlUtil, "node-internal:url")                                                                  \
   V(TimersUtil, "node-internal:timers")                                                            \
-  V(SqliteUtil, "node-internal:sqlite")
+  V(SqliteUtil, "node-internal:sqlite")                                                            \
+  V(InspectorModule, "node-internal:inspector")
 
 // Add to the NODEJS_MODULES_EXPERIMENTAL list any currently in-development
 // node.js compat C++ modules that should be guarded by the experimental compat
 // flag. Once they are ready to ship, move them up to the NODEJS_MODULES list.
+//
+// Note: `node-internal:inspector` is intentionally in NODEJS_MODULES (always registered) rather
+// than here. It is an internal, non-user-importable module imported by the public
+// `node:inspector` TypeScript layer, so it must resolve whenever that layer loads. Its actual
+// functionality is gated at runtime: a Connection can only be created when the experimental
+// `enable_nodejs_inspector_local_dev` flag created the isolate's V8 inspector, and never in a
+// multi-tenant production process.
 #define NODEJS_MODULES_EXPERIMENTAL(V)
 
 bool isNodeJsCompatEnabled(auto featureFlags) {
@@ -338,4 +347,4 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(auto fea
       EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,                   \
       EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_PROCESS_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES,       \
       EW_NODE_URL_ISOLATE_TYPES, EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES,       \
-      EW_NODE_SQLITE_ISOLATE_TYPES
+      EW_NODE_SQLITE_ISOLATE_TYPES, EW_NODE_INSPECTOR_ISOLATE_TYPES

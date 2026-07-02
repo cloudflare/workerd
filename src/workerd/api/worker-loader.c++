@@ -236,6 +236,15 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
           };
         }
 
+        // Python packages bundled in Workers can have non-code files (METADATA, RECORD, etc),
+        // so we don't limit file extensions for Python workers.
+        if (code.mainModule.endsWith(".py"_kj) && entry.name.startsWith("python_modules/"_kj)) {
+          return {
+            .name = entry.name,
+            .content = Worker::Script::TextModule{.body = text},
+          };
+        }
+
         if (entry.name.endsWith(".ts"_kj) || entry.name.endsWith(".tsx"_kj) ||
             entry.name.endsWith(".jsx"_kj)) {
           JSG_FAIL_REQUIRE(TypeError,

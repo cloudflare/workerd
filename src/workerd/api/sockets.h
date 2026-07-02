@@ -62,7 +62,7 @@ class Socket: public jsg::Object {
  public:
   Socket(jsg::Lock& js,
       IoContext& context,
-      kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream,
+      kj::Rc<kj::AsyncIoStream> connectionStream,
       kj::Maybe<kj::String> remoteAddress,
       kj::Maybe<kj::String> localAddress,
       jsg::Ref<ReadableStream> readableParam,
@@ -182,13 +182,13 @@ class Socket: public jsg::Object {
 
  private:
   struct ConnectionData {
-    kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream;
+    kj::Rc<kj::AsyncIoStream> connectionStream;
     kj::Maybe<kj::Promise<void>> watchForDisconnectTask;
     // tlsStarter must be declared after connectionStream so that it is destroyed first,
     // since it holds a reference that keeps the connection alive.
     kj::Own<kj::TlsStarterCallback> tlsStarter;
     ConnectionData(kj::Own<kj::TlsStarterCallback> tlsStarter,
-        kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connStream,
+        kj::Rc<kj::AsyncIoStream> connStream,
         kj::Promise<void> disconnectTask)
         : connectionStream(kj::mv(connStream)),
           watchForDisconnectTask(kj::mv(disconnectTask)),

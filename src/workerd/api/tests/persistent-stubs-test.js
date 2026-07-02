@@ -162,16 +162,75 @@ export class Source extends WorkerEntrypoint {
     return await outer.callInner(value);
   }
 
+  // Receive (over a service binding / RPC) a ctx.exports stub minted by a worker that does NOT
+  // have allow_irrevocable_stub_storage enabled, then try to store it. This worker DOES have the
+  // flag, so the existing storing-worker gate passes; storage must still fail because the stub's
+  // target (the NO_FLAG worker) never opted in, so its `persistent` bit is unset.
+  async storeStubFromNonOptedInTarget(id) {
+    let stub = await this.env.NO_FLAG.mint(id);
+    let store = this.ctx.exports.Store.getByName(`no-flag-${id}`);
+    await store.put('stub', stub);
+  }
+
+  // Try to store a plain (static) service binding that points at the DEFAULT entrypoint of a worker
+  // which DOES have allow_irrevocable_stub_storage. This worker also has the flag, so the existing
+  // storing-worker gate passes; storage must still fail because a plain service binding was not
+  // created via ctx.exports, so its `persistent` bit is unset. The default-entrypoint case is
+  // tested specifically because it is routed differently (through the WorkerService itself rather
+  // than an EntrypointService) and is easy to get wrong.
+  async storePlainServiceBindingDefault(id) {
+    let store = this.ctx.exports.Store.getByName(`plain-service-default-${id}`);
+    await store.put('stub', this.env.WITH_FLAG_DEFAULT);
+  }
+
+  // Try to store a Durable Object instance stub obtained via a plain (static) namespace binding
+  // (env.STORE_NS), not via ctx.exports. Even though this worker has the flag (storing-worker gate
+  // passes), storage must fail: only stubs created through a ctx.exports self-binding (e.g.
+  // ctx.exports.Store.getByName(...)) are storable, not those from regular env bindings.
+  async storeActorStubFromEnvBinding(id) {
+    let store = this.ctx.exports.Store.getByName(`env-actor-${id}`);
+    let stub = this.env.STORE_NS.getByName(`env-actor-target-${id}`);
+    await store.put('stub', stub);
+  }
+
+  // The legitimate counterpart to storeActorStubFromEnvBinding: a Durable Object instance stub
+  // constructed via a ctx.exports self-binding (NOT via ctx.restore()) can be stored in another
+  // actor's storage, loaded back, and invoked. Writes a marker into the target actor, stores its
+  // stub in a second actor, then reads the marker back through the loaded stub.
+  async ctxExportsActorStubStorageRoundTrip(id, value) {
+    let target = this.ctx.exports.Store.getByName(`ctx-actor-target-${id}`);
+    await target.put('marker', value);
+    let store = this.ctx.exports.Store.getByName(`ctx-actor-store-${id}`);
+    await store.put('stub', target);
+    let loaded = await store.get('stub');
+    return await loaded.get('marker');
+  }
+
+  // Store a stub whose restore chain leads into a dynamic worker that currently has the flag, then
+  // restore + invoke it. The dynamic worker is (re)loaded inside [restore]() via LOADER.load()
+  // (which never caches), with the flag gated on `this.allowStubStorage`. During the live store
+  // pass this flag is set on the running instance, so the dynamic worker has the flag and the stub
+  // is storable. On replay, [restore]() runs on a *fresh* instance where the flag is unset, so the
+  // dynamic worker is reloaded WITHOUT allow_irrevocable_stub_storage and the fromPersistentStub
+  // re-verification in WorkerEntrypoint::construct() rejects the invocation.
+  async flagDropStorageRoundTrip(id, value) {
+    this.allowStubStorage = true;
+    let store = this.ctx.exports.Store.getByName(`flag-drop-${id}`);
+    let outer = await this.ctx.restore({ kind: 'flag-drop-dynamic', id });
+    let inner = await outer.makeInner();
+    await store.put('stub', inner);
+    let loaded = await store.get('stub');
+    return await loaded.ping(value);
+  }
+
   async directDynamicRestoreError(id) {
     let worker = this.env.LOADER.get(`direct-dynamic-${id}`, () => {
       return {
         compatibilityDate: '2025-01-01',
         compatibilityFlags: [
           'allow_irrevocable_stub_storage',
-          'experimental',
           'enable_ctx_exports',
         ],
-        allowExperimental: true,
         mainModule: 'foo.js',
         modules: { 'foo.js': NESTED_DYNAMIC_WORKER_CODE },
       };
@@ -192,8 +251,7 @@ export class Source extends WorkerEntrypoint {
     let worker = this.env.LOADER.get(`dynamic-env-rpc-${id}`, () => {
       return {
         compatibilityDate: '2025-01-01',
-        compatibilityFlags: ['allow_irrevocable_stub_storage', 'experimental'],
-        allowExperimental: true,
+        compatibilityFlags: ['allow_irrevocable_stub_storage'],
         mainModule: 'foo.js',
         modules: {
           'foo.js': `
@@ -217,8 +275,7 @@ export class Source extends WorkerEntrypoint {
     let worker = this.env.LOADER.get(`dynamic-props-rpc-${id}`, () => {
       return {
         compatibilityDate: '2025-01-01',
-        compatibilityFlags: ['allow_irrevocable_stub_storage', 'experimental'],
-        allowExperimental: true,
+        compatibilityFlags: ['allow_irrevocable_stub_storage'],
         mainModule: 'foo.js',
         modules: {
           'foo.js': `
@@ -334,13 +391,28 @@ export class Source extends WorkerEntrypoint {
           compatibilityDate: '2025-01-01',
           compatibilityFlags: [
             'allow_irrevocable_stub_storage',
-            'experimental',
             'enable_ctx_exports',
           ],
-          allowExperimental: true,
           mainModule: 'foo.js',
           modules: { 'foo.js': NESTED_DYNAMIC_WORKER_CODE },
         };
+      });
+
+      return worker.getEntrypoint('Outer', { props: { id: params.id } });
+    }
+
+    if (params.kind === 'flag-drop-dynamic') {
+      // Load a fresh dynamic worker (LOADER.load() never caches) whose compat flags depend on
+      // whether THIS instance opted in. On the live store pass `this.allowStubStorage` is set, so
+      // the dynamic worker gets allow_irrevocable_stub_storage; on replay this runs on a fresh
+      // instance where it is unset, so the dynamic worker is reloaded without the flag.
+      let worker = this.env.LOADER.load({
+        compatibilityDate: '2025-01-01',
+        compatibilityFlags: this.allowStubStorage
+          ? ['allow_irrevocable_stub_storage', 'enable_ctx_exports']
+          : ['enable_ctx_exports'],
+        mainModule: 'foo.js',
+        modules: { 'foo.js': NESTED_DYNAMIC_WORKER_CODE },
       });
 
       return worker.getEntrypoint('Outer', { props: { id: params.id } });
@@ -857,5 +929,74 @@ export let actorRestoreWithNoClientWaiting = {
     }
 
     assert.strictEqual(result, 'counter:wu:5');
+  },
+};
+
+// Storing a stub whose target never opted in fails, even when the storing worker has the flag.
+// The NO_FLAG service mints a ctx.exports stub of itself without allow_irrevocable_stub_storage,
+// so the stub's `persistent` bit is unset. This worker (which DOES have the flag) receives the
+// stub over RPC and tries to store it, which must fail with a DataCloneError from the target
+// opt-in check -- not from the storing-worker gate, which passes here.
+export let storingNonOptedInTargetFails = {
+  async test(ctrl, env, ctx) {
+    await assert.rejects(
+      () => ctx.exports.Source.storeStubFromNonOptedInTarget('a'),
+      /target worker does not have the allow_irrevocable_stub_storage compatibility flag enabled/i
+    );
+  },
+};
+
+// Restoring a stored stub after its target drops the flag fails. The stub is stored while the
+// dynamic worker that backs its restore chain has allow_irrevocable_stub_storage (so it is
+// storable), but on replay the dynamic worker is reloaded without the flag, so the runtime
+// re-verification (fromPersistentStub) in WorkerEntrypoint::construct() rejects the invocation.
+export let restoringAfterTargetDropsFlagFails = {
+  async test(ctrl, env, ctx) {
+    restoreEvents = [];
+
+    await assert.rejects(
+      () => ctx.exports.Source.flagDropStorageRoundTrip('drop', 'value'),
+      /no longer has the allow_irrevocable_stub_storage compatibility flag enabled/i
+    );
+  },
+};
+
+// A plain (static) service binding cannot be persisted, even when the target worker has
+// allow_irrevocable_stub_storage enabled. Only stubs created via ctx.exports are storable. This
+// specifically points at the target worker's DEFAULT entrypoint, which is routed differently than
+// named entrypoints and is easy to handle incorrectly.
+export let storingPlainServiceBindingFails = {
+  async test(ctrl, env, ctx) {
+    await assert.rejects(
+      () => ctx.exports.Source.storePlainServiceBindingDefault('a'),
+      /target worker does not have the allow_irrevocable_stub_storage compatibility flag enabled/i
+    );
+  },
+};
+
+// A Durable Object instance stub obtained via a plain env namespace binding
+// (env.STORE_NS.getByName(...)) cannot be persisted -- only stubs created through a ctx.exports
+// self-binding (e.g. ctx.exports.Store.getByName(...)) are storable.
+export let storingActorStubFromEnvBindingFails = {
+  async test(ctrl, env, ctx) {
+    await assert.rejects(
+      () => ctx.exports.Source.storeActorStubFromEnvBinding('a'),
+      /target worker does not have the allow_irrevocable_stub_storage compatibility flag enabled/i
+    );
+  },
+};
+
+// A Durable Object instance stub constructed via a ctx.exports self-binding can be stored in
+// another actor's storage and invoked after being loaded back. This is the legitimate counterpart
+// to storingActorStubFromEnvBindingFails.
+export let storingCtxExportsActorStubWorks = {
+  async test(ctrl, env, ctx) {
+    assert.strictEqual(
+      await ctx.exports.Source.ctxExportsActorStubStorageRoundTrip(
+        'a',
+        'value'
+      ),
+      'value'
+    );
   },
 };

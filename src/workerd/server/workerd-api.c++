@@ -143,7 +143,6 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_TRACING_ISOLATE_TYPES,
     EW_WORKERD_DEBUG_PORT_CLIENT_ISOLATE_TYPES,
     workerd::api::EnvModule,
-    workerd::api::PythonPatchedEnv,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
     jsg::InjectConfiguration<CompatibilityFlags::Reader>,
@@ -305,10 +304,13 @@ CompatibilityFlags::Reader WorkerdApi::getFeatureFlags() const {
 }
 jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(
     jsg::Lock& lock, Worker::Api::NewContextOptions options) const {
+  bool deferWeakRefDeletion =
+      util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP);
   jsg::NewContextOptions opts{
     .newModuleRegistry = options.newModuleRegistry,
     .schemaLoader = options.schemaLoader,
     .enableWeakRef = getFeatureFlags().getJsWeakRef(),
+    .deferWeakRefDeletion = deferWeakRefDeletion,
   };
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).newContext<api::ServiceWorkerGlobalScope>(
       kj::mv(opts));
@@ -659,7 +661,7 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
       value = lock.wrap(context,
           lock.alloc<api::LoopbackDurableObjectNamespace>(ns.actorChannel,
               kj::heap<ActorIdFactoryImpl>(ns.uniqueKey),
-              lock.alloc<api::LoopbackDurableObjectClass>(ns.classChannel)));
+              lock.alloc<api::LoopbackDurableObjectClass>(ns.classChannel), featureFlags));
     }
 
     KJ_CASE_ONEOF(ae, Global::AnalyticsEngine) {

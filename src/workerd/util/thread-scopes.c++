@@ -71,6 +71,18 @@ void setGcStressModeForTest() {
   gcStressMode = true;
 }
 
+#ifdef WORKERD_ASAN
+bool isAllocGcStressModeForTest() {
+  // Honor the WORKERD_GC_STRESS_ALLOC environment variable. Checked once and cached; thread-safe
+  // via C++ static local initialization.
+  static const bool fromEnv = [] {
+    const char* val = std::getenv("WORKERD_GC_STRESS_ALLOC");
+    return val != nullptr && val[0] != '0' && val[0] != '\0';
+  }();
+  return fromEnv;
+}
+#endif
+
 ThreadProgressCounter::ThreadProgressCounter(uint64_t& counter)
     : savedValue(__atomic_load_n(&counter, __ATOMIC_RELAXED)),
       counter(counter) {

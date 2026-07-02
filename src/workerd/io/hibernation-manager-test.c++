@@ -18,7 +18,7 @@
 // file for "regression test for EW-10817" to find them.
 
 #include <workerd/api/web-socket.h>
-#include <workerd/io/hibernation-manager.h>
+#include <workerd/io/legacy-hibernation-manager.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
 #include <workerd/tests/test-fixture.h>
@@ -127,7 +127,7 @@ TestFixture::SetupParams stubLoopbackParams(DispatchStats& stats, kj::String act
 // state.acceptWebSocket — runs in one. The HM itself is IoContext-independent and this test
 // pattern keeps that explicit so any inadvertent dependency growth shows up.
 kj::Own<Worker::Actor::HibernationManager> makeTestHm(TestFixture& fixture) {
-  auto hm = kj::refcounted<HibernationManagerImpl>(fixture.getActor().getLoopback(), 0);
+  auto hm = kj::refcounted<LegacyHibernationManagerImpl>(fixture.getActor().getLoopback(), 0);
   hm->setTimerChannel(fixture.getTimerChannel());
   return hm;
 }

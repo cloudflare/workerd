@@ -719,7 +719,7 @@ class AbortSignal final: public EventTarget {
   // A promise that is fulfilled if an abort() message is received over RPC.
   kj::Maybe<IoOwn<kj::Promise<void>>> rpcAbortPromise;
 
-  // A refcounted object used to receive a serialized abort reason
+  // A refcounted object used to receive a serialized abort reason.
   // The abort reason is required in asynchronous event handlers as well as synchronous methods
   // like getReason(). As a result, we can't pass the abort reason in the above promise, and both
   // sync and async methods will need to check this value.

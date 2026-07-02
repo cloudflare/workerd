@@ -8,7 +8,7 @@
 // would execute before primordials are captured, defeating their purpose.
 //
 // Captures built-in prototype methods and static functions as standalone
-// references immune to prototype pollution.
+// references resistant to prototype pollution.
 //
 // Usage in other bootstrap scripts (no require needed — it's a pseudo-global):
 //
@@ -47,8 +47,13 @@ const applyBind = call.bind(bind, call.bind) as <
 // If user code replaces e.g. globalThis.Promise, code using `new Promise()`
 // or `Promise.all()` would get the polluted version. Capturing the originals
 // here ensures bootstrap scripts can always use the real built-ins.
+const AggregateErrorCtor = AggregateError;
 const ArrayCtor = Array;
+const ArrayBufferCtor = ArrayBuffer;
+const BigIntCtor = BigInt;
+const DataViewCtor = DataView;
 const ErrorCtor = Error;
+const FinalizationRegistryCtor = FinalizationRegistry;
 const FunctionCtor = Function;
 const MapCtor = Map;
 const ObjectCtor = Object;
@@ -58,7 +63,9 @@ const RegExpCtor = RegExp;
 const SetCtor = Set;
 const SymbolCtor = Symbol;
 const TypeErrorCtor = TypeError;
+const Uint8ArrayCtor = Uint8Array;
 const WeakMapCtor = WeakMap;
+const WeakRefCtor = WeakRef;
 const WeakSetCtor = WeakSet;
 
 // --- Selective captures: add as bootstrap scripts need them ---
@@ -75,14 +82,114 @@ const ObjectDefineProperties = Object.defineProperties;
 const ObjectFreeze = Object.freeze;
 const ObjectGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
 const ObjectKeys = Object.keys;
+const ObjectGetPrototypeOf = Object.getPrototypeOf;
+const ObjectSetPrototypeOf = Object.setPrototypeOf;
+
+// %AsyncIteratorPrototype% — not directly exposed as a global.
+// Reached via: async function*(){} → .prototype → [[Prototype]] → [[Prototype]]
+const AsyncIteratorPrototype = ObjectGetPrototypeOf(
+  ObjectGetPrototypeOf(async function* () {}.prototype)
+);
 
 // Promise
 const PromisePrototypeThen = uncurryThis(Promise.prototype.then);
 const PromisePrototypeCatch = uncurryThis(Promise.prototype.catch);
 const PromisePrototypeFinally = uncurryThis(Promise.prototype.finally);
-const PromiseAll = Promise.all.bind(Promise);
-const PromiseResolve = Promise.resolve.bind(Promise);
-const PromiseReject = Promise.reject.bind(Promise);
+class SafePromise<T> extends PromiseCtor<T> {
+  constructor(
+    executor: (
+      resolve: (value: T | PromiseLike<T>) => void,
+      reject: (reason?: unknown) => void
+    ) => void
+  ) {
+    super(executor);
+  }
+  override then<TResult1 = T, TResult2 = never>(
+    onfulfilled?:
+      | ((value: T) => TResult1 | PromiseLike<TResult1>)
+      | undefined
+      | null,
+    onrejected?:
+      | ((reason: any) => TResult2 | PromiseLike<TResult2>)
+      | undefined
+      | null
+  ): SafePromise<TResult1 | TResult2> {
+    // The captured PromisePrototypeThen calls the original
+    // Promise.prototype.then, which uses SpeciesConstructor to create the
+    // result promise. Our Symbol.species override (below) ensures the result
+    // is a SafePromise, so the cast is truthful.
+    return PromisePrototypeThen(this, onfulfilled, onrejected) as SafePromise<
+      TResult1 | TResult2
+    >;
+  }
+  override catch<TResult = never>(
+    onrejected?:
+      | ((reason: any) => TResult | PromiseLike<TResult>)
+      | undefined
+      | null
+  ): SafePromise<T | TResult> {
+    return PromisePrototypeCatch(this, onrejected) as SafePromise<T | TResult>;
+  }
+  override finally(
+    onfinally?: (() => void) | undefined | null
+  ): SafePromise<T> {
+    return PromisePrototypeFinally(this, onfinally) as SafePromise<T>;
+  }
+}
+
+// --- SafePromise hardening (must follow class definition) ---
+
+// Pin Symbol.species as an OWN data property on SafePromise so that the
+// original Promise.prototype.then (called by the overridden then/catch/
+// finally) creates SafePromise instances for result promises. Because this
+// is an own property, it shadows any pollution of Promise[Symbol.species].
+ObjectDefineProperty(SafePromise, SymbolCtor.species, {
+  value: SafePromise,
+  configurable: false,
+  writable: false,
+});
+
+// Rebind inherited static methods so they use SafePromise as the constructor
+// receiver. Each call captures the CURRENT value of PromiseCtor.X (the
+// original, since this runs before any user code) and binds it to
+// SafePromise using the captured Function.prototype.bind. Even if
+// Promise.all (etc.) is later replaced on the global, SafePromise.all
+// still calls the original and returns SafePromise instances.
+ObjectDefineProperty(SafePromise, 'resolve', {
+  value: FunctionPrototypeBind(PromiseCtor.resolve, SafePromise),
+  writable: false,
+  configurable: false,
+});
+ObjectDefineProperty(SafePromise, 'reject', {
+  value: FunctionPrototypeBind(PromiseCtor.reject, SafePromise),
+  writable: false,
+  configurable: false,
+});
+ObjectDefineProperty(SafePromise, 'all', {
+  value: FunctionPrototypeBind(PromiseCtor.all, SafePromise),
+  writable: false,
+  configurable: false,
+});
+ObjectDefineProperty(SafePromise, 'allSettled', {
+  value: FunctionPrototypeBind(PromiseCtor.allSettled, SafePromise),
+  writable: false,
+  configurable: false,
+});
+ObjectDefineProperty(SafePromise, 'any', {
+  value: FunctionPrototypeBind(PromiseCtor.any, SafePromise),
+  writable: false,
+  configurable: false,
+});
+ObjectDefineProperty(SafePromise, 'race', {
+  value: FunctionPrototypeBind(PromiseCtor.race, SafePromise),
+  writable: false,
+  configurable: false,
+});
+ObjectDefineProperty(SafePromise, 'withResolvers', {
+  value: FunctionPrototypeBind(PromiseCtor.withResolvers, SafePromise),
+  writable: false,
+  configurable: false,
+});
 
 // Array
 const ArrayIsArray = Array.isArray;
@@ -93,7 +200,9 @@ const ArrayPrototypeFilter = uncurryThis(Array.prototype.filter);
 const ArrayPrototypeIncludes = uncurryThis(Array.prototype.includes);
 const ArrayPrototypeIndexOf = uncurryThis(Array.prototype.indexOf);
 const ArrayPrototypePush = uncurryThis(Array.prototype.push);
+const ArrayPrototypeShift = uncurryThis(Array.prototype.shift);
 const ArrayPrototypeSlice = uncurryThis(Array.prototype.slice);
+const ArrayPrototypeSplice = uncurryThis(Array.prototype.splice);
 
 // Map
 const MapPrototypeGet = uncurryThis(Map.prototype.get);
@@ -104,6 +213,7 @@ const MapPrototypeForEach = uncurryThis(Map.prototype.forEach);
 const MapPrototypeEntries = uncurryThis(Map.prototype.entries);
 const MapPrototypeKeys = uncurryThis(Map.prototype.keys);
 const MapPrototypeValues = uncurryThis(Map.prototype.values);
+const MapPrototypeClear = uncurryThis(Map.prototype.clear);
 
 // Set
 const SetPrototypeAdd = uncurryThis(Set.prototype.add);
@@ -111,28 +221,208 @@ const SetPrototypeHas = uncurryThis(Set.prototype.has);
 const SetPrototypeDelete = uncurryThis(Set.prototype.delete);
 const SetPrototypeForEach = uncurryThis(Set.prototype.forEach);
 const SetPrototypeValues = uncurryThis(Set.prototype.values);
+const SetPrototypeClear = uncurryThis(Set.prototype.clear);
+const SetPrototypeEntries = uncurryThis(Set.prototype.entries);
 
 // WeakMap
 const WeakMapPrototypeGet = uncurryThis(WeakMap.prototype.get);
 const WeakMapPrototypeSet = uncurryThis(WeakMap.prototype.set);
 const WeakMapPrototypeHas = uncurryThis(WeakMap.prototype.has);
+const WeakMapPrototypeDelete = uncurryThis(WeakMap.prototype.delete);
 
 // WeakSet
 const WeakSetPrototypeAdd = uncurryThis(WeakSet.prototype.add);
 const WeakSetPrototypeHas = uncurryThis(WeakSet.prototype.has);
+const WeakSetPrototypeDelete = uncurryThis(WeakSet.prototype.delete);
 
 // String
+const StringPrototypeCharCodeAt = uncurryThis(String.prototype.charCodeAt);
 const StringPrototypeSlice = uncurryThis(String.prototype.slice);
 const StringPrototypeStartsWith = uncurryThis(String.prototype.startsWith);
 
 // Symbol
 const SymbolIterator = Symbol.iterator;
+const SymbolAsyncIterator = Symbol.asyncIterator;
 const SymbolToStringTag = Symbol.toStringTag;
+
+// WeakRef / FinalizationRegistry
+// These globals exist during bootstrap — their deletion from the global is
+// deferred until after bootstrap completes (see runPerIsolateBootstrap) —
+// but they are hidden from user code unless the enable_weak_ref compat flag
+// is set. The captures here keep working after the globals are deleted.
+const WeakRefPrototypeDeref = uncurryThis(WeakRef.prototype.deref);
+const FinalizationRegistryPrototypeRegister = uncurryThis(
+  FinalizationRegistry.prototype.register
+);
+const FinalizationRegistryPrototypeUnregister = uncurryThis(
+  FinalizationRegistry.prototype.unregister
+);
+
+// Reflect
+const ReflectConstruct = Reflect.construct;
+
+// Math / Number (statics — plain value captures)
+const MathMax = Math.max;
+const MathMin = Math.min;
+const NumberIsFinite = Number.isFinite;
+const NumberIsNaN = Number.isNaN;
+
+// Helper: capture a spec-mandated prototype accessor getter, with a
+// validation guard instead of non-null assertions. These accessors are
+// guaranteed by the ECMAScript spec — the guard is a diagnostic safety
+// net, not a recoverable branch.
+function getProtoGetter<T>(proto: object, name: string | symbol): T {
+  const desc = ObjectGetOwnPropertyDescriptor(proto, name);
+  if (desc === undefined || desc.get === undefined) {
+    throw new TypeError(
+      `Expected accessor property '${String(name)}' on prototype`
+    );
+  }
+  return uncurryThis(desc.get) as T;
+}
+
+// Map / Set prototype accessor captures (size is a getter, not a data property)
+const MapPrototypeSizeGet = getProtoGetter<(map: Map<any, any>) => number>(
+  Map.prototype,
+  'size'
+);
+const SetPrototypeSizeGet = getProtoGetter<(set: Set<any>) => number>(
+  Set.prototype,
+  'size'
+);
+
+// %MapIteratorPrototype%.next — shared by entries(), keys(), values().
+// Reached by spinning up a throwaway iterator to get the prototype.
+const MapIteratorPrototypeNext: (iter: any) => IteratorResult<any> =
+  uncurryThis(
+    (ObjectGetPrototypeOf(MapPrototypeEntries(new MapCtor())) as any).next
+  );
+
+// %SetIteratorPrototype%.next — shared by entries(), keys(), values().
+const SetIteratorPrototypeNext: (iter: any) => IteratorResult<any> =
+  uncurryThis(
+    (ObjectGetPrototypeOf(SetPrototypeValues(new SetCtor())) as any).next
+  );
+
+// ArrayBuffer
+const ArrayBufferPrototypeTransfer = uncurryThis(
+  ArrayBuffer.prototype.transfer
+);
+const ArrayBufferPrototypeByteLengthGet = getProtoGetter<
+  (buffer: ArrayBuffer) => number
+>(ArrayBuffer.prototype, 'byteLength');
+
+// TypedArray — instance methods live on %TypedArray%.prototype, the shared
+// prototype of all typed array types. Capturing via Uint8Array.prototype
+// reaches the same (inherited) functions.
+const TypedArrayPrototypeSet = uncurryThis(Uint8Array.prototype.set);
+const TypedArrayPrototypeSlice = uncurryThis(Uint8Array.prototype.slice);
+const TypedArrayPrototypeSubarray = uncurryThis(Uint8Array.prototype.subarray);
+
+// %TypedArray%.prototype — the shared prototype holding the metadata
+// accessors for every typed array type.
+const TypedArrayPrototype = ObjectGetPrototypeOf(Uint8Array.prototype);
+
+// %TypedArray%.prototype[Symbol.toStringTag] is an accessor that reads the
+// internal [[TypedArrayName]] slot: returns e.g. "Uint8Array" for typed
+// arrays and undefined for anything else (including DataView, whose own
+// toStringTag is a plain data property). This is the pollution-proof way to
+// identify a view's REAL type — never use view.constructor, which is
+// user-controllable via an own property.
+const TypedArrayPrototypeGetSymbolToStringTag = getProtoGetter<
+  (value: unknown) => string | undefined
+>(TypedArrayPrototype, SymbolToStringTag);
+
+// Metadata getter captures — view.buffer / view.byteOffset / view.byteLength
+// / view.length are PROTOTYPE ACCESSORS, patchable by user code. Internal
+// reads of view metadata at trust boundaries must go through these (or the
+// DataView equivalents below), never through property access on the view.
+const TypedArrayPrototypeGetBuffer = getProtoGetter<
+  (view: ArrayBufferView) => ArrayBuffer
+>(TypedArrayPrototype, 'buffer');
+const TypedArrayPrototypeGetByteOffset = getProtoGetter<
+  (view: ArrayBufferView) => number
+>(TypedArrayPrototype, 'byteOffset');
+const TypedArrayPrototypeGetByteLength = getProtoGetter<
+  (view: ArrayBufferView) => number
+>(TypedArrayPrototype, 'byteLength');
+const TypedArrayPrototypeGetLength = getProtoGetter<
+  (view: ArrayBufferView) => number
+>(TypedArrayPrototype, 'length');
+
+// DataView metadata getters. NOTE: these brand-check their receiver (they
+// throw TypeError for non-DataView objects), which doubles as validation in
+// code paths that have already excluded typed arrays.
+const DataViewPrototypeGetBuffer = getProtoGetter<
+  (view: DataView) => ArrayBuffer
+>(DataView.prototype, 'buffer');
+const DataViewPrototypeGetByteOffset = getProtoGetter<
+  (view: DataView) => number
+>(DataView.prototype, 'byteOffset');
+const DataViewPrototypeGetByteLength = getProtoGetter<
+  (view: DataView) => number
+>(DataView.prototype, 'byteLength');
+
+// Captured constructors for every typed array type, keyed by the name
+// returned by TypedArrayPrototypeGetSymbolToStringTag. Null prototype so
+// lookups can't be confused via Object.prototype pollution. DataView is not
+// in this map (the getter returns undefined for it) — detect it separately
+// and use the DataView capture above.
+// Float16Array is enabled unconditionally via --js-float16array (jsg
+// setup.c++), so a plain capture is safe.
+const TypedArrayCtorByName = ObjectFreeze(
+  ObjectSetPrototypeOf(
+    {
+      Int8Array,
+      Uint8Array,
+      Uint8ClampedArray,
+      Int16Array,
+      Uint16Array,
+      Int32Array,
+      Uint32Array,
+      Float16Array,
+      Float32Array,
+      Float64Array,
+      BigInt64Array,
+      BigUint64Array,
+    },
+    null
+  )
+);
 
 // --- Safe types: wrappers that use captured methods internally ---
 // These are safe to use with normal method-call syntax (map.get(k))
 // because they override every method to dispatch through the captured
 // primordials, not the (potentially polluted) prototype chain.
+
+// Safe iterator wrappers — hold a real iterator internally and call the
+// captured .next(), so iteration is resistant to prototype pollution of
+// %MapIteratorPrototype% / %SetIteratorPrototype%.
+class SafeMapIterator<T> {
+  #inner: Iterator<T>;
+  constructor(inner: Iterator<T>) {
+    this.#inner = inner;
+  }
+  next(): IteratorResult<T> {
+    return MapIteratorPrototypeNext(this.#inner);
+  }
+  [SymbolIterator](): SafeMapIterator<T> {
+    return this;
+  }
+}
+
+class SafeSetIterator<T> {
+  #inner: Iterator<T>;
+  constructor(inner: Iterator<T>) {
+    this.#inner = inner;
+  }
+  next(): IteratorResult<T> {
+    return SetIteratorPrototypeNext(this.#inner);
+  }
+  [SymbolIterator](): SafeSetIterator<T> {
+    return this;
+  }
+}
 
 class SafeMap<K, V> extends MapCtor<K, V> {
   constructor(entries?: Iterable<[K, V]> | null) {
@@ -151,17 +441,37 @@ class SafeMap<K, V> extends MapCtor<K, V> {
   override delete(key: K): boolean {
     return MapPrototypeDelete(this, key);
   }
-  override forEach(cb: (value: V, key: K, map: Map<K, V>) => void): void {
-    MapPrototypeForEach(this, cb);
+  override clear(): void {
+    MapPrototypeClear(this);
+  }
+  override forEach(
+    cb: (value: V, key: K, map: Map<K, V>) => void,
+    thisArg?: any
+  ): void {
+    MapPrototypeForEach(this, cb, thisArg);
+  }
+  override get size(): number {
+    return MapPrototypeSizeGet(this);
   }
   override entries(): MapIterator<[K, V]> {
-    return MapPrototypeEntries(this);
+    return new SafeMapIterator(
+      MapPrototypeEntries(this)
+    ) as unknown as MapIterator<[K, V]>;
   }
   override keys(): MapIterator<K> {
-    return MapPrototypeKeys(this);
+    return new SafeMapIterator(
+      MapPrototypeKeys(this)
+    ) as unknown as MapIterator<K>;
   }
   override values(): MapIterator<V> {
-    return MapPrototypeValues(this);
+    return new SafeMapIterator(
+      MapPrototypeValues(this)
+    ) as unknown as MapIterator<V>;
+  }
+  [SymbolIterator](): MapIterator<[K, V]> {
+    return new SafeMapIterator(
+      MapPrototypeEntries(this)
+    ) as unknown as MapIterator<[K, V]>;
   }
 }
 
@@ -179,11 +489,39 @@ class SafeSet<T> extends SetCtor<T> {
   override delete(value: T): boolean {
     return SetPrototypeDelete(this, value);
   }
-  override forEach(cb: (value: T, value2: T, set: Set<T>) => void): void {
-    SetPrototypeForEach(this, cb);
+  override clear(): void {
+    SetPrototypeClear(this);
+  }
+  override forEach(
+    cb: (value: T, value2: T, set: Set<T>) => void,
+    thisArg?: any
+  ): void {
+    SetPrototypeForEach(this, cb, thisArg);
+  }
+  override get size(): number {
+    return SetPrototypeSizeGet(this);
+  }
+  override entries(): SetIterator<[T, T]> {
+    return new SafeSetIterator(
+      SetPrototypeEntries(this)
+    ) as unknown as SetIterator<[T, T]>;
+  }
+  // Per spec, Set.prototype.keys === Set.prototype.values (ECMA-262 §24.2.5.5),
+  // so delegating to SetPrototypeValues is correct.
+  override keys(): SetIterator<T> {
+    return new SafeSetIterator(
+      SetPrototypeValues(this)
+    ) as unknown as SetIterator<T>;
   }
   override values(): SetIterator<T> {
-    return SetPrototypeValues(this);
+    return new SafeSetIterator(
+      SetPrototypeValues(this)
+    ) as unknown as SetIterator<T>;
+  }
+  [SymbolIterator](): SetIterator<T> {
+    return new SafeSetIterator(
+      SetPrototypeValues(this)
+    ) as unknown as SetIterator<T>;
   }
 }
 
@@ -201,6 +539,9 @@ class SafeWeakMap<K extends WeakKey, V> extends WeakMapCtor<K, V> {
   override has(key: K): boolean {
     return WeakMapPrototypeHas(this, key);
   }
+  override delete(key: K): boolean {
+    return WeakMapPrototypeDelete(this, key);
+  }
 }
 
 class SafeWeakSet<T extends WeakKey> extends WeakSetCtor<T> {
@@ -213,6 +554,9 @@ class SafeWeakSet<T extends WeakKey> extends WeakSetCtor<T> {
   }
   override has(value: T): boolean {
     return WeakSetPrototypeHas(this, value);
+  }
+  override delete(value: T): boolean {
+    return WeakSetPrototypeDelete(this, value);
   }
 }
 
@@ -243,8 +587,13 @@ module.exports = ObjectFreeze({
   applyBind,
 
   // Global types
+  AggregateError: AggregateErrorCtor,
   Array: ArrayCtor,
+  ArrayBuffer: ArrayBufferCtor,
+  BigInt: BigIntCtor,
+  DataView: DataViewCtor,
   Error: ErrorCtor,
+  FinalizationRegistry: FinalizationRegistryCtor,
   Function: FunctionCtor,
   Map: MapCtor,
   Object: ObjectCtor,
@@ -254,7 +603,9 @@ module.exports = ObjectFreeze({
   Set: SetCtor,
   Symbol: SymbolCtor,
   TypeError: TypeErrorCtor,
+  Uint8Array: Uint8ArrayCtor,
   WeakMap: WeakMapCtor,
+  WeakRef: WeakRefCtor,
   WeakSet: WeakSetCtor,
 
   // Function
@@ -267,14 +618,17 @@ module.exports = ObjectFreeze({
   ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
   ObjectKeys,
+  ObjectGetPrototypeOf,
+  ObjectSetPrototypeOf,
+
+  // %AsyncIteratorPrototype%
+  AsyncIteratorPrototype,
 
   // Promise
   PromisePrototypeThen,
   PromisePrototypeCatch,
   PromisePrototypeFinally,
-  PromiseAll,
-  PromiseResolve,
-  PromiseReject,
+  SafePromise,
 
   // Array
   ArrayIsArray,
@@ -285,7 +639,9 @@ module.exports = ObjectFreeze({
   ArrayPrototypeIncludes,
   ArrayPrototypeIndexOf,
   ArrayPrototypePush,
+  ArrayPrototypeShift,
   ArrayPrototypeSlice,
+  ArrayPrototypeSplice,
 
   // Map
   MapPrototypeGet,
@@ -296,6 +652,9 @@ module.exports = ObjectFreeze({
   MapPrototypeEntries,
   MapPrototypeKeys,
   MapPrototypeValues,
+  MapPrototypeClear,
+  MapPrototypeSizeGet,
+  MapIteratorPrototypeNext,
 
   // Set
   SetPrototypeAdd,
@@ -303,25 +662,67 @@ module.exports = ObjectFreeze({
   SetPrototypeDelete,
   SetPrototypeForEach,
   SetPrototypeValues,
+  SetPrototypeClear,
+  SetPrototypeEntries,
+  SetPrototypeSizeGet,
+  SetIteratorPrototypeNext,
 
   // WeakMap
   WeakMapPrototypeGet,
   WeakMapPrototypeSet,
   WeakMapPrototypeHas,
+  WeakMapPrototypeDelete,
+
+  // WeakRef / FinalizationRegistry
+  WeakRefPrototypeDeref,
+  FinalizationRegistryPrototypeRegister,
+  FinalizationRegistryPrototypeUnregister,
 
   // WeakSet
   WeakSetPrototypeAdd,
   WeakSetPrototypeHas,
+  WeakSetPrototypeDelete,
+
+  // Reflect
+  ReflectConstruct,
+
+  // Math / Number
+  MathMax,
+  MathMin,
+  NumberIsFinite,
+  NumberIsNaN,
+
+  // ArrayBuffer
+  ArrayBufferPrototypeTransfer,
+  ArrayBufferPrototypeByteLengthGet,
+
+  // TypedArray
+  TypedArrayPrototypeSet,
+  TypedArrayPrototypeSlice,
+  TypedArrayPrototypeSubarray,
+  TypedArrayPrototypeGetSymbolToStringTag,
+  TypedArrayPrototypeGetBuffer,
+  TypedArrayPrototypeGetByteOffset,
+  TypedArrayPrototypeGetByteLength,
+  TypedArrayPrototypeGetLength,
+  TypedArrayCtorByName,
+
+  // DataView
+  DataViewPrototypeGetBuffer,
+  DataViewPrototypeGetByteOffset,
+  DataViewPrototypeGetByteLength,
 
   // String
+  StringPrototypeCharCodeAt,
   StringPrototypeSlice,
   StringPrototypeStartsWith,
 
   // Symbol
+  SymbolAsyncIterator,
   SymbolIterator,
   SymbolToStringTag,
 
-  // Safe types — use normal method syntax, immune to prototype pollution
+  // Safe types — use normal method syntax, resistant to prototype pollution
   SafeMap,
   SafeSet,
   SafeWeakMap,

@@ -2165,9 +2165,6 @@ void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       serializer.writeRawUint32(frankenvalueHandler.add(kj::mv(channel)));
       return;
     } else KJ_IF_SOME(rpcHandler, kj::tryDowncast<RpcSerializerExternalHandler>(handler)) {
-      JSG_REQUIRE(FeatureFlags::get(js).getWorkerdExperimental(), DOMDataCloneError,
-          "ServiceStub serialization requires the 'experimental' compat flag.");
-
       KJ_SWITCH_ONEOF(channel->getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::RPC)) {
         KJ_CASE_ONEOF(token, kj::Array<byte>) {
           rpcHandler.write([token = kj::mv(token)](rpc::JsValue::External::Builder builder) {
@@ -2249,9 +2246,6 @@ jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
         KJ_FAIL_REQUIRE("ServiceStub capability in Frankenvalue is not a SubrequestChannel?");
       }
     } else KJ_IF_SOME(rpcHandler, kj::tryDowncast<RpcDeserializerExternalHandler>(handler)) {
-      JSG_REQUIRE(FeatureFlags::get(js).getWorkerdExperimental(), DOMDataCloneError,
-          "ServiceStub serialization requires the 'experimental' compat flag.");
-
       auto external = rpcHandler.read();
       auto& ioctx = IoContext::current();
       kj::Own<IoChannelFactory::SubrequestChannel> channel;
@@ -2425,9 +2419,13 @@ jsg::Promise<Fetcher::QueueResult> Fetcher::queue(jsg::Lock& js,
         .body = serializer.release().data,
         .attempts = msg.attempts});
     } else KJ_IF_SOME(b, msg.serializedBody) {
+      // `b` arrives via jsg::asBytes() and aliases the V8 BackingStore in the
+      // sender's isolate.  The encoded IncomingQueueMessage may be dispatched
+      // to a consumer worker running in a different isolate.  Copy into a
+      // kj-heap allocation now in case the isolates use different MPKs.
       encodedMessages.add(IncomingQueueMessage{.id = kj::mv(msg.id),
         .timestamp = msg.timestamp,
-        .body = kj::mv(b),
+        .body = kj::heapArray(b.asPtr()),
         .attempts = msg.attempts});
     } else {
       JSG_FAIL_REQUIRE(TypeError, "Expected one of body or serializedBody for each message");

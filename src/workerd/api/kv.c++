@@ -229,7 +229,7 @@ jsg::Promise<jsg::JsRef<jsg::JsMap>> KvNamespace::getBulk(jsg::Lock& js,
         [client = kj::mv(client), urlStr = kj::mv(urlStr), headers = kj::mv(headers),
             expectedBodySize, supportedBody = kj::mv(body)]() mutable {
       auto innerReq = client->request(kj::HttpMethod::POST, urlStr, headers, expectedBodySize);
-      auto req = attachToRequest(kj::mv(innerReq), kj::refcountedWrapper(kj::mv(client)));
+      auto req = attachToRequest(kj::mv(innerReq), kj::Rc<kj::HttpClient>(kj::mv(client)));
 
       kj::Promise<void> writePromise = nullptr;
       writePromise = req.body->write(supportedBody.asBytes()).attach(kj::mv(supportedBody));
@@ -670,8 +670,7 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
         [&context, client = kj::mv(client), urlStr = kj::mv(urlStr), headers = kj::mv(headers),
             expectedBodySize, supportedBody = kj::mv(supportedBody)]() mutable {
       auto innerReq = client->request(kj::HttpMethod::PUT, urlStr, headers, expectedBodySize);
-      // TODO(perf): More efficient to explicitly attach rcClient below?
-      auto req = attachToRequest(kj::mv(innerReq), kj::refcountedWrapper(kj::mv(client)));
+      auto req = attachToRequest(kj::mv(innerReq), kj::Rc<kj::HttpClient>(kj::mv(client)));
 
       kj::Promise<void> writePromise = nullptr;
       KJ_SWITCH_ONEOF(supportedBody) {

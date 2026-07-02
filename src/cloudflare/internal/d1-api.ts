@@ -157,17 +157,22 @@ class D1Database {
 
 class D1DatabaseSession {
   protected fetcher: Fetcher;
-  protected bookmarkOrConstraint: D1SessionBookmarkOrConstraint;
+  protected bookmarkOrConstraint: D1SessionBookmarkOrConstraint | null;
 
   constructor(
     fetcher: Fetcher,
-    bookmarkOrConstraint: D1SessionBookmarkOrConstraint
+    bookmarkOrConstraint: D1SessionBookmarkOrConstraint | null
   ) {
     this.fetcher = fetcher;
-    this.bookmarkOrConstraint = bookmarkOrConstraint;
-
-    if (!this.bookmarkOrConstraint) {
-      throw new Error('D1_SESSION_ERROR: invalid bookmark or constraint');
+    // We should neve have received an empty string as a bookmark or constraint, but just be defensive.
+    // `null` values are special indicating not to send any bookmark or constraint to the D1 eyeball worker.
+    if (bookmarkOrConstraint == null) {
+      this.bookmarkOrConstraint = null;
+    } else {
+      this.bookmarkOrConstraint = bookmarkOrConstraint.trim();
+      if (!this.bookmarkOrConstraint) {
+        throw new Error('D1_SESSION_ERROR: invalid bookmark or constraint');
+      }
     }
   }
 
@@ -361,8 +366,9 @@ class D1DatabaseSession {
 
 class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
   constructor(fetcher: Fetcher) {
-    // Will always go to primary, since we won't be ever updating this constraint.
-    super(fetcher, D1_SESSION_CONSTRAINT_FIRST_PRIMARY);
+    // We always want to go to primary, so we specify a `null` constraint for this session.
+    // We never update this since we override the `_updateBookmark` and `getBookmark` methods to always return null.
+    super(fetcher, null);
   }
 
   // We ignore bookmarks for this special type of session,

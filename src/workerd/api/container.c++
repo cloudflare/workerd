@@ -801,7 +801,7 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
       return kj::NEVER_DONE;
     });
 
-    co_await pipeline.ignoreResult();
+    co_await pipeline;
     co_await kj::joinPromisesFailFast(kj::arr(kj::mv(upPumpTask), kj::mv(downPumpTask)));
   }
 };

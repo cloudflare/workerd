@@ -4,6 +4,7 @@
 
 #include "export-loopback.h"
 
+#include <workerd/io/features.h>
 #include <workerd/io/frankenvalue.h>
 
 namespace workerd::api {
@@ -23,8 +24,8 @@ jsg::Ref<Fetcher> LoopbackServiceStub::callImpl(jsg::Lock& js,
   }
 
   IoContext& ioctx = IoContext::current();
-  auto channelObj = ioctx.getIoChannelFactory().getSubrequestChannel(
-      channel, kj::mv(props), kj::mv(versionRequest));
+  auto channelObj = ioctx.getIoChannelFactory().getSubrequestChannel(channel, kj::mv(props),
+      kj::mv(versionRequest), Persistent(FeatureFlags::get(js).getAllowIrrevocableStubStorage()));
   return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channelObj)));
 }
 
@@ -35,7 +36,8 @@ jsg::Ref<DurableObjectClass> LoopbackDurableObjectClass::call(jsg::Lock& js, Opt
   }
 
   IoContext& ioctx = IoContext::current();
-  auto channelObj = ioctx.getIoChannelFactory().getActorClass(channel, kj::mv(props));
+  auto channelObj = ioctx.getIoChannelFactory().getActorClass(
+      channel, kj::mv(props), Persistent(FeatureFlags::get(js).getAllowIrrevocableStubStorage()));
   return js.alloc<DurableObjectClass>(ioctx.addObject(kj::mv(channelObj)));
 }
 

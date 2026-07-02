@@ -68,17 +68,19 @@ jsg::Promise<jsg::Value> restoreCurrentEntrypoint(jsg::Lock& js,
 
     auto& factory = ioctx.getIoChannelFactory();
 
+    Persistent persistent = Persistent(FeatureFlags::get(js).getAllowIrrevocableStubStorage());
+
     KJ_SWITCH_ONEOF(result) {
       KJ_CASE_ONEOF(fetcher, jsg::Ref<Fetcher>) {
         auto baseChannel = fetcher->getSubrequestChannel(ioctx);
         auto channel = factory.makeRestoredSubrequestChannel(
-            kj::addRef(*selfTokenFactory), kj::mv(restoreParams), kj::mv(baseChannel));
+            kj::addRef(*selfTokenFactory), kj::mv(restoreParams), kj::mv(baseChannel), persistent);
         auto restored = js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
         return jsg::Value(js.v8Isolate, fetcherHandler.wrap(js, kj::mv(restored)));
       }
       KJ_CASE_ONEOF(stub, jsg::Ref<JsRpcStub>) {
-        auto channel =
-            factory.makeRestoredRpcChannel(kj::addRef(*selfTokenFactory), kj::mv(restoreParams));
+        auto channel = factory.makeRestoredRpcChannel(
+            kj::addRef(*selfTokenFactory), kj::mv(restoreParams), persistent);
         auto client = stub->getClient();
         stub->dispose();
         auto restored = js.alloc<JsRpcStub>(
@@ -119,6 +121,7 @@ class RestoredRpcSubrequestChannel final: public IoChannelFactory::SubrequestCha
     KJ_IF_SOME(cf, metadata.cfBlobJson) {
       req.setCfBlobJson(cf);
     }
+    req.setFromPersistentStub(metadata.fromPersistentStub.toBool());
     auto dispatcher = req.sendForPipeline().getDispatcher();
 
     return kj::heap<RpcWorkerInterface>(
@@ -340,7 +343,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::sen
   channelFulfiller->fulfill(kj::refcounted<RestoredRpcSubrequestChannel>(
       httpOverCapnpFactory, byteStreamFactory, frankenvalueHandler, sent.getService()));
 
-  co_await sent.ignoreResult();
+  co_await sent;
 
   co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
 }

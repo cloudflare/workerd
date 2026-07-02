@@ -45,7 +45,7 @@ index 0e7e6cb2ed80c6b6ea0ec2b55705e904521efa5f..a2a77fb67133562f9e5c29395d8fbc80
                                          Local<Value> value) {
    auto i_isolate = i::Isolate::Current();
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 5ddab6a7727b8254cbe04c9e9a568b9608789d6d..791921f2f85cc68ea5311eb1dd1cfb10ddd204be 100644
+index fd54ce9a832b2bcc25a0a538449d0f85df1372d4..17ce9d28f78fc204cab8aadc543e64746331dac0 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -344,6 +344,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {

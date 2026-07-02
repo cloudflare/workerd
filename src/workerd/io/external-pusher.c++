@@ -16,8 +16,7 @@ namespace {
 //   wrap the two ends of the pipe in special adapters that track whether end() was called.
 class ExplicitEndOutputPipeAdapter final: public capnp::ExplicitEndOutputStream {
  public:
-  ExplicitEndOutputPipeAdapter(
-      kj::Own<kj::AsyncOutputStream> inner, kj::Own<kj::RefcountedWrapper<bool>> ended)
+  ExplicitEndOutputPipeAdapter(kj::Own<kj::AsyncOutputStream> inner, kj::Rc<bool> ended)
       : inner(kj::mv(inner)),
         ended(kj::mv(ended)) {}
 
@@ -39,21 +38,20 @@ class ExplicitEndOutputPipeAdapter final: public capnp::ExplicitEndOutputStream 
 
   kj::Promise<void> end() override {
     // Signal to the other side that end() was actually called.
-    ended->getWrapped() = true;
+    *ended = true;
     inner = kj::none;
     return kj::READY_NOW;
   }
 
  private:
   kj::Maybe<kj::Own<kj::AsyncOutputStream>> inner;
-  kj::Own<kj::RefcountedWrapper<bool>> ended;
+  kj::Rc<bool> ended;
 };
 
 class ExplicitEndInputPipeAdapter final: public kj::AsyncInputStream {
  public:
-  ExplicitEndInputPipeAdapter(kj::Own<kj::AsyncInputStream> inner,
-      kj::Own<kj::RefcountedWrapper<bool>> ended,
-      kj::Maybe<uint64_t> expectedLength)
+  ExplicitEndInputPipeAdapter(
+      kj::Own<kj::AsyncInputStream> inner, kj::Rc<bool> ended, kj::Maybe<uint64_t> expectedLength)
       : inner(kj::mv(inner)),
         ended(kj::mv(ended)),
         expectedLength(expectedLength) {}
@@ -68,13 +66,13 @@ class ExplicitEndInputPipeAdapter final: public kj::AsyncInputStream {
         // If we got all the bytes we expected, we treat this as a successful end, because the
         // underlying KJ pipe is not actually going to wait for the other side to drop. This is
         // consistent with the behavior of Content-Length in HTTP anyway.
-        ended->getWrapped() = true;
+        *ended = true;
       }
     }
 
     if (result < minBytes) {
       // Verify that end() was called.
-      if (!ended->getWrapped()) {
+      if (!*ended) {
         JSG_FAIL_REQUIRE(Error, "ReadableStream received over RPC disconnected prematurely.");
       }
     }
@@ -91,7 +89,7 @@ class ExplicitEndInputPipeAdapter final: public kj::AsyncInputStream {
 
  private:
   kj::Own<kj::AsyncInputStream> inner;
-  kj::Own<kj::RefcountedWrapper<bool>> ended;
+  kj::Rc<bool> ended;
   kj::Maybe<uint64_t> expectedLength;
 };
 
@@ -113,9 +111,9 @@ kj::Promise<void> ExternalPusherImpl::pushByteStream(PushByteStreamContext conte
 
   auto pipe = kj::newOneWayPipe(expectedLength);
 
-  auto endedFlag = kj::refcounted<kj::RefcountedWrapper<bool>>(false);
+  auto endedFlag = kj::rc<bool>(false);
 
-  auto out = kj::heap<ExplicitEndOutputPipeAdapter>(kj::mv(pipe.out), kj::addRef(*endedFlag));
+  auto out = kj::heap<ExplicitEndOutputPipeAdapter>(kj::mv(pipe.out), endedFlag.addRef());
   auto in =
       kj::heap<ExplicitEndInputPipeAdapter>(kj::mv(pipe.in), kj::mv(endedFlag), expectedLength);
 
@@ -148,7 +146,7 @@ namespace {
 class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
  public:
   AbortTriggerRpcServer(kj::Own<kj::PromiseFulfiller<void>> fulfiller,
-      kj::Own<ExternalPusherImpl::PendingAbortReason>&& pendingReason)
+      kj::Rc<ExternalPusherImpl::PendingAbortReason> pendingReason)
       : fulfiller(kj::mv(fulfiller)),
         pendingReason(kj::mv(pendingReason)) {}
 
@@ -156,7 +154,7 @@ class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
     auto params = abortCtx.getParams();
     auto reason = params.getReason().getV8Serialized();
 
-    pendingReason->getWrapped() = kj::heapArray(reason.asBytes());
+    *pendingReason = kj::heapArray(reason.asBytes());
     fulfiller->fulfill();
     return kj::READY_NOW;
   }
@@ -167,13 +165,13 @@ class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
   }
 
   ~AbortTriggerRpcServer() noexcept(false) {
-    if (pendingReason->getWrapped() != nullptr) {
+    if (*pendingReason != nullptr) {
       // Already triggered
       return;
     }
 
     if (!released) {
-      pendingReason->getWrapped() = JSG_KJ_EXCEPTION(FAILED, DOMAbortError,
+      *pendingReason = JSG_KJ_EXCEPTION(FAILED, DOMAbortError,
           "An AbortSignal received over RPC was implicitly aborted because the connection back to "
           "its trigger was lost.");
     }
@@ -184,7 +182,7 @@ class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
 
  private:
   kj::Own<kj::PromiseFulfiller<void>> fulfiller;
-  kj::Own<ExternalPusherImpl::PendingAbortReason> pendingReason;
+  kj::Rc<ExternalPusherImpl::PendingAbortReason> pendingReason;
   bool released = false;
 };
 
@@ -219,8 +217,8 @@ ExternalPusherImpl::AbortSignal ExternalPusherImpl::unwrapAbortSignal(
   // pushAbortSignal() might not have been received yet. So, we have to allocate the box here, so
   // we can return it. Then we can try to wire it up to the right trigger later, in
   // unwrapAbortSignalImpl().
-  auto pendingReason = kj::refcounted<PendingAbortReason>();
-  auto promise = unwrapAbortSignalImpl(kj::mv(cap), kj::addRef(*pendingReason));
+  auto pendingReason = kj::rc<PendingAbortReason>();
+  auto promise = unwrapAbortSignalImpl(kj::mv(cap), pendingReason.addRef());
 
   return {
     .signal = kj::mv(promise),
@@ -229,7 +227,7 @@ ExternalPusherImpl::AbortSignal ExternalPusherImpl::unwrapAbortSignal(
 }
 
 kj::Promise<void> ExternalPusherImpl::unwrapAbortSignalImpl(
-    ExternalPusher::AbortSignal::Client cap, kj::Own<PendingAbortReason> pendingReason) {
+    ExternalPusher::AbortSignal::Client cap, kj::Rc<PendingAbortReason> pendingReason) {
   auto paf = kj::newPromiseAndFulfiller<void>();
 
   {
