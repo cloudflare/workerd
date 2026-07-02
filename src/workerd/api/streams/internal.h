@@ -371,17 +371,17 @@ class WritableStreamInternalController: public WritableStreamController {
       tracker.trackField("promise", promise);
     }
   };
-  struct Pipe {
+  struct Pipe: kj::PtrTarget {
     struct State: public kj::Refcounted {
       jsg::Ref<WritableStream> owner;
-      kj::Rc<workerd::WeakRef<Pipe>> weakRef;
+      kj::Weak<Pipe> weakRef;
 
-      State(jsg::Ref<WritableStream> owner, kj::Rc<workerd::WeakRef<Pipe>> weakRef)
+      State(jsg::Ref<WritableStream> owner, kj::Weak<Pipe> weakRef)
           : owner(kj::mv(owner)),
             weakRef(kj::mv(weakRef)) {}
 
       inline bool isAborted() const {
-        return !weakRef->isValid();
+        return weakRef == nullptr;
       }
       bool checkSignal(jsg::Lock& js);
       jsg::Promise<void> pipeLoop(jsg::Lock& js);
@@ -405,7 +405,6 @@ class WritableStreamInternalController: public WritableStreamController {
     Flags flags{};
     kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
     kj::Maybe<jsg::JsRef<jsg::JsValue>> capturedSourceError;
-    kj::Maybe<kj::Rc<workerd::WeakRef<Pipe>>> selfRef;
 
     Pipe(WritableStreamInternalController& parent,
         ReadableStreamController::PipeController& source,
@@ -417,39 +416,18 @@ class WritableStreamInternalController: public WritableStreamController {
         : parent(parent),
           source(source),
           promise(kj::mv(promise)),
-          maybeSignal(kj::mv(maybeSignal)),
-          selfRef(kj::rc<workerd::WeakRef<Pipe>>(kj::Badge<Pipe>(), *this)) {
+          maybeSignal(kj::mv(maybeSignal)) {
       flags.preventAbort = preventAbort;
       flags.preventClose = preventClose;
       flags.preventCancel = preventCancel;
     }
 
-    Pipe(Pipe&& other) noexcept(false)
-        : parent(other.parent),
-          source(kj::mv(other.source)),
-          promise(kj::mv(other.promise)),
-          flags(other.flags),
-          maybeSignal(kj::mv(other.maybeSignal)),
-          capturedSourceError(kj::mv(other.capturedSourceError)),
-          selfRef(kj::rc<workerd::WeakRef<Pipe>>(kj::Badge<Pipe>(), *this)) {
-      // Invalidate the old Pipe's weak ref — any State objects pointing to it
-      // will see isAborted() = true.
-      KJ_IF_SOME(ref, other.selfRef) {
-        ref->invalidate();
-        other.selfRef = kj::none;
-      }
-    }
+    ~Pipe() noexcept(false) {}
 
-    ~Pipe() noexcept(false) {
-      KJ_IF_SOME(ref, selfRef) {
-        ref->invalidate();
-      }
-    }
-
-    KJ_DISALLOW_COPY(Pipe);
+    KJ_DISALLOW_COPY_AND_MOVE(Pipe);
 
     kj::Rc<State> getState() {
-      return kj::rc<State>(parent.addRef(), KJ_ASSERT_NONNULL(selfRef).addRef());
+      return kj::rc<State>(parent.addRef(), addWeakToThis());
     }
 
     void visitForGc(jsg::GcVisitor& visitor) {
@@ -479,14 +457,14 @@ class WritableStreamInternalController: public WritableStreamController {
   };
   struct WriteEvent {
     kj::Maybe<IoOwn<kj::Promise<void>>> outputLock;  // must wait for this before actually writing
-    kj::OneOf<Write, Pipe, Close, Flush> event;
+    kj::OneOf<Write, kj::Own<Pipe>, Close, Flush> event;
 
     bool isCloseOrFlush() const {
       return event.is<Close>() || event.is<Flush>();
     }
 
     bool isPipe() const {
-      return event.is<Pipe>();
+      return event.is<kj::Own<Pipe>>();
     }
 
     JSG_MEMORY_INFO(WriteEvent) {
@@ -497,8 +475,8 @@ class WritableStreamInternalController: public WritableStreamController {
         KJ_CASE_ONEOF(w, Write) {
           tracker.trackField("inner", w);
         }
-        KJ_CASE_ONEOF(p, Pipe) {
-          tracker.trackField("inner", p);
+        KJ_CASE_ONEOF(p, kj::Own<Pipe>) {
+          tracker.trackField("inner", *p);
         }
         KJ_CASE_ONEOF(c, Close) {
           tracker.trackField("inner", c);
