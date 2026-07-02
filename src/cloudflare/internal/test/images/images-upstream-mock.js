@@ -56,6 +56,10 @@ class ImageHandleMock extends RpcTarget {
     return new Blob([mockData]).stream();
   }
 
+  async signedUrl(options) {
+    return `https://imagedelivery.example/${this.#imageId}/${options.variant}?sig=mock-signature`;
+  }
+
   /**
    * @param {ImageUpdateOptions} body
    * @returns {Promise<ImageMetadata>}

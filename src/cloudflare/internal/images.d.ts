@@ -147,6 +147,12 @@ interface ImageListOptions {
   creator?: string;
 }
 
+interface ImageSignedUrlOptions {
+  variant: string;
+  expiresIn?: number;
+  keyName?: string;
+}
+
 interface ImageList {
   images: ImageMetadata[];
   cursor?: string;
@@ -165,6 +171,14 @@ interface ImageHandle {
    * @returns ReadableStream of image bytes, or null if not found
    */
   bytes(): Promise<ReadableStream<Uint8Array> | null>;
+
+  /**
+   * Generate a signed delivery URL for this hosted image.
+   * @param options Signing configuration
+   * @returns A signed image delivery URL
+   * @throws {@link ImagesError} if signing fails
+   */
+  signedUrl(options: ImageSignedUrlOptions): Promise<string>;
 
   /**
    * Update hosted image metadata
