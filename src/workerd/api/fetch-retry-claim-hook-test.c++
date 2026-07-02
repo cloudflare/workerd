@@ -40,10 +40,10 @@ KJ_TEST("claimRetryTokenBeforeUserCode fires once per fetch dispatch") {
           },
         };
       )SCRIPT"_kj,
-    .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
-        [&]() -> kj::Own<RequestObserver> {
-      return kj::refcounted<CountingRequestObserver>(claimCount);
-    }),
+    .requestObserverFactory =
+        kj::Function<kj::Own<RequestObserver>()>([&]() -> kj::Own<RequestObserver> {
+    return kj::refcounted<CountingRequestObserver>(claimCount);
+  }),
   });
 
   auto result = fixture.runRequest(kj::HttpMethod::GET, "http://www.example.com"_kj, ""_kj);
