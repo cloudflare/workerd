@@ -164,6 +164,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   kj::Promise<kj::Maybe<InspectResponse>> inspectContainer();
 
+  kj::Promise<void> ensureSidecarBridgeBypass(kj::String networkCidr);
   kj::Promise<void> updateSidecarEgressPort(uint16_t ingressHostPort, uint16_t egressPort);
   kj::Promise<void> updateSidecarEgressConfig(uint16_t ingressHostPort, uint16_t egressPort);
   kj::Promise<void> createContainer(kj::StringPtr effectiveImage,
@@ -177,6 +178,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       bool attachStderr);
   kj::Promise<kj::Own<kj::AsyncIoStream>> startExec(kj::String execId);
   kj::Promise<ExecInspectResponse> inspectExec(kj::StringPtr execId);
+  kj::Promise<void> runSimpleExecInContainer(kj::StringPtr targetContainerName,
+      kj::ArrayPtr<const kj::String> cmd);
   kj::Promise<void> runSimpleExec(kj::ArrayPtr<const kj::String> cmd);
   kj::Promise<void> startContainer();
   kj::Promise<void> stopContainer();
