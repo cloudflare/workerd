@@ -16457,7 +16457,6 @@ interface WorkflowInstanceTerminateOptions {
    */
   rollback?: boolean;
 }
-
 interface WorkflowInstanceRestartOptions {
   /**
    * Restart from a specific step. If omitted, the instance restarts from the beginning.
