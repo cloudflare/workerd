@@ -83,11 +83,16 @@ kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::idFromName(kj::String name)
 }
 
 kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::idFromString(kj::String str) {
+  return idFromStringNamed(kj::mv(str), kj::none);
+}
+
+kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::idFromStringNamed(
+    kj::String str, kj::Maybe<kj::String> name) {
   auto decoded = kj::decodeHex(str);
   JSG_REQUIRE(str.size() == SHA256_DIGEST_LENGTH * 2 && !decoded.hadErrors &&
           decoded.size() == SHA256_DIGEST_LENGTH,
       TypeError, "Invalid Durable Object ID: must be 64 hex digits");
-  return idFromRaw(decoded, kj::none);
+  return idFromRaw(decoded, kj::mv(name));
 }
 
 kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::idFromRaw(

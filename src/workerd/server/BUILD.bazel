@@ -366,6 +366,16 @@ kj_test(
 )
 
 kj_test(
+    src = "alarm-scheduler-test.c++",
+    deps = [
+        ":alarm-scheduler",
+        "//src/workerd/util:sqlite",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
+    ],
+)
+
+kj_test(
     src = "actor-id-impl-test.c++",
     deps = [
         ":actor-id-impl",

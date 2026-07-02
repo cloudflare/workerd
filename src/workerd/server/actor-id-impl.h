@@ -41,6 +41,13 @@ class ActorIdFactoryImpl final: public ActorIdFactory {
   kj::Own<ActorId> newUniqueId(kj::Maybe<kj::StringPtr> jurisdiction) override;
   kj::Own<ActorId> idFromName(kj::String name) override;
   kj::Own<ActorId> idFromString(kj::String str) override;
+
+  // Like `idFromString()`, but also attaches `name` (recovered from persistent storage) to the
+  // resulting ID so that `DurableObjectId.name` is available. The hex ID is still fully validated
+  // (its HMAC MAC must match this namespace's key, exactly as in `idFromString()`); only the
+  // relationship between `name` and the ID is trusted rather than re-derived, i.e. we do not
+  // recompute HMAC(name) to check it hashes to this ID.
+  kj::Own<ActorId> idFromStringNamed(kj::String str, kj::Maybe<kj::String> name);
   kj::Own<ActorIdFactory> cloneWithJurisdiction(
       kj::Maybe<kj::StringPtr> maybeJurisdiction) override;
   bool matchesJurisdiction(const ActorId& id) override;
