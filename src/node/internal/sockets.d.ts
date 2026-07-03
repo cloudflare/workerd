@@ -37,5 +37,9 @@ declare namespace sockets {
       secureTransport: 'on' | 'off' | 'starttls';
     }
   ): Socket;
+
+  // Returns the synthetic IP registered for a magic hostname (e.g. a Hyperdrive
+  // `.hyperdrive.local` hostname), or undefined if there is no override.
+  function getCallerDnsOverride(hostname: string): string | undefined;
 }
 export default sockets;

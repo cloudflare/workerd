@@ -1482,6 +1482,132 @@ KJ_TEST("Server: capability bindings") {
   )"_blockquote);
 }
 
+KJ_TEST("Server: Hyperdrive connect via synthetic IP") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { connect } from 'cloudflare:sockets';
+                `export default {
+                `  async fetch(request, env) {
+                `    const ip = env.hyperdrive.ip;
+                `    if (!/^240\.0\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+                `      throw new Error(`unexpected hyperdrive ip: ${ip}`);
+                `    }
+                `    const connection = connect(`${ip}:5432`);
+                `    const encoded = new TextEncoder().encode("hyperdrive-ip-test");
+                `    await connection.writable.getWriter().write(new Uint8Array(encoded));
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "hyperdrive",
+              hyperdrive = (
+                designator = "hyperdrive-outbound",
+                database = "test-db",
+                user = "test-user",
+                password = "test-password",
+                scheme = "postgresql"
+              )
+            )
+          ]
+        )
+      ),
+      ( name = "hyperdrive-outbound", external = (
+        address = "hyperdrive-host",
+        tcp = ()
+      ))
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  {
+    auto subreq = test.receiveSubrequest("hyperdrive-host");
+    subreq.recv("hyperdrive-ip-test");
+  }
+  conn.recvHttp200("OK");
+}
+
+KJ_TEST("Server: Hyperdrive host resolves via node:dns to synthetic IP") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          compatibilityFlags = ["nodejs_compat"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { connect } from 'cloudflare:sockets';
+                `import { promises as dns } from 'node:dns';
+                `export default {
+                `  async fetch(request, env) {
+                `    // Reading host primes the connect/dns overrides.
+                `    const host = env.hyperdrive.host;
+                `    const { address, family } = await dns.lookup(host);
+                `    if (family !== 4 || !/^240\.0\.\d{1,3}\.\d{1,3}$/.test(address)) {
+                `      throw new Error(`unexpected lookup result: ${address}/${family}`);
+                `    }
+                `    const connection = connect(`${address}:5432`);
+                `    const encoded = new TextEncoder().encode("hyperdrive-dns-test");
+                `    await connection.writable.getWriter().write(new Uint8Array(encoded));
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "hyperdrive",
+              hyperdrive = (
+                designator = "hyperdrive-outbound",
+                database = "test-db",
+                user = "test-user",
+                password = "test-password",
+                scheme = "postgresql"
+              )
+            )
+          ]
+        )
+      ),
+      ( name = "hyperdrive-outbound", external = (
+        address = "hyperdrive-host",
+        tcp = ()
+      ))
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  {
+    auto subreq = test.receiveSubrequest("hyperdrive-host");
+    subreq.recv("hyperdrive-dns-test");
+  }
+  conn.recvHttp200("OK");
+}
+
 KJ_TEST("Server: cyclic bindings") {
   TestServer test(R"((
     services = [

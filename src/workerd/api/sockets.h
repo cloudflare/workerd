@@ -281,8 +281,13 @@ class SocketsModule final: public jsg::Object {
   // Creates a Fetcher from a Socket that can perform HTTP requests over the socket connection
   jsg::Promise<jsg::Ref<Fetcher>> internalNewHttpClient(jsg::Lock& js, jsg::Ref<Socket> socket);
 
+  // Returns the synthetic IP registered for a magic hostname (e.g. a Hyperdrive `.hyperdrive.local`
+  // hostname), or null if there is no override. Used by node:dns to resolve such hostnames.
+  jsg::Optional<kj::String> getCallerDnsOverride(jsg::Lock& js, kj::String hostname);
+
   JSG_RESOURCE_TYPE(SocketsModule, CompatibilityFlags::Reader flags) {
     JSG_METHOD(connect);
+    JSG_METHOD(getCallerDnsOverride);
 
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(internalNewHttpClient);

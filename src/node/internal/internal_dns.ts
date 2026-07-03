@@ -38,6 +38,7 @@ import {
 } from 'node-internal:validators';
 import * as errorCodes from 'node-internal:internal_dns_constants';
 import { isIP } from 'node-internal:internal_net';
+import inner from 'cloudflare-internal:sockets';
 import type dns from 'node:dns';
 
 type DnsOrder = 'verbatim' | 'ipv4first' | 'ipv6first';
@@ -140,6 +141,25 @@ export function lookup(
       process.nextTick(callback, null, hostname, matchedFamily);
     }
     return;
+  }
+
+  // Magic hostnames such as Hyperdrive's `.hyperdrive.local` resolve to a synthetic IPv4 address
+  // that routes back to the corresponding service via a connect override. Since the address is
+  // IPv4, only honor the override when an IPv4 result is acceptable (family 0 or 4).
+  if (family !== 6) {
+    const overrideIp = inner.getCallerDnsOverride(hostname);
+    if (overrideIp != null) {
+      // Deliver asynchronously (as Node.js does) without depending on `process`, which may not be
+      // available depending on the Worker's compatibility settings.
+      queueMicrotask(() => {
+        if (all) {
+          callback(null, [{ address: overrideIp, family: 4 }]);
+        } else {
+          callback(null, overrideIp, 4);
+        }
+      });
+      return;
+    }
   }
 
   // If all is true and family is 0, we need to query both A and AAAA records

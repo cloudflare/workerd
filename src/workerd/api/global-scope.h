@@ -664,6 +664,14 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   void setConnectOverride(kj::String networkAddress, ConnectFn connectFn);
   kj::Maybe<ConnectFn&> getConnectOverride(kj::StringPtr networkAddress);
 
+  // Track a set of hostname->IP overrides so that the Node.js DNS resolver (node:dns) can resolve
+  // the magic hostnames used by e.g. Hyperdrive to a synthetic IP address. The returned IP has a
+  // corresponding connect override (see above) registered for it, so connecting to the resolved IP
+  // routes to the same place as the hostname. This lets database drivers that require an IP literal
+  // rather than a hostname work against these services.
+  void setDnsOverride(kj::String hostname, kj::String ip);
+  kj::Maybe<kj::StringPtr> getDnsOverride(kj::StringPtr hostname);
+
   // ---------------------------------------------------------------------------
   // JS API
 
@@ -1079,6 +1087,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   kj::Maybe<jsg::JsRef<jsg::JsValue>> bufferValue;
   kj::Maybe<jsg::Ref<Fetcher>> defaultFetcher;
   kj::HashMap<kj::String, ConnectFn> connectOverrides;
+  kj::HashMap<kj::String, kj::String> dnsOverrides;
 
   // Global properties such as scheduler, crypto, caches, self, and origin should
   // be monkeypatchable / mutable at the global scope.

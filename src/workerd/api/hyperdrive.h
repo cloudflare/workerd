@@ -34,6 +34,12 @@ class Hyperdrive: public jsg::Object {
   kj::StringPtr getScheme();
 
   kj::StringPtr getHost();
+
+  // A synthetic IPv4 address (in the reserved 240.0.0.0/4 block) that routes to this Hyperdrive
+  // binding. Some database drivers require the host to be an IP literal rather than a hostname;
+  // connecting to this address via `connect()` reaches the same place as `getHost()`.
+  kj::StringPtr getIP();
+
   uint16_t getPort();
 
   kj::String getConnectionString();
@@ -43,6 +49,7 @@ class Hyperdrive: public jsg::Object {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(user, getUser);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(password, getPassword);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(host, getHost);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(ip, getIP);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(port, getPort);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(connectionString, getConnectionString);
 
@@ -51,6 +58,7 @@ class Hyperdrive: public jsg::Object {
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("randomHost", randomHost);
+    tracker.trackField("randomIp", randomIp);
     tracker.trackField("database", database);
     tracker.trackField("user", user);
     tracker.trackField("password", password);
@@ -60,11 +68,17 @@ class Hyperdrive: public jsg::Object {
  private:
   uint clientIndex;
   kj::String randomHost;
+  kj::String randomIp;
   kj::String database;
   kj::String user;
   kj::String password;
   kj::String scheme;
   bool registeredConnectOverride = false;
+
+  // Registers connect() overrides for both the magic hostname and the synthetic IP so that
+  // cloudflare:sockets's connect() routes either of them through Hyperdrive. Requires an active
+  // IoContext, so this is done lazily on first access rather than in the constructor.
+  void registerConnectOverride();
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> connectToDb();
 };

@@ -852,6 +852,14 @@ kj::Maybe<ServiceWorkerGlobalScope::ConnectFn&> ServiceWorkerGlobalScope::getCon
   return connectOverrides.find(networkAddress);
 }
 
+void ServiceWorkerGlobalScope::setDnsOverride(kj::String hostname, kj::String ip) {
+  dnsOverrides.upsert(kj::mv(hostname), kj::mv(ip));
+}
+
+kj::Maybe<kj::StringPtr> ServiceWorkerGlobalScope::getDnsOverride(kj::StringPtr hostname) {
+  return dnsOverrides.find(hostname).map([](kj::String& ip) -> kj::StringPtr { return ip; });
+}
+
 jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsString str) {
   // We could implement btoa() by accepting a kj::String, but then we'd have to check that it
   // doesn't have any multibyte code points. Easier to perform that test using v8::String's
