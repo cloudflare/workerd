@@ -315,7 +315,10 @@ struct ParsedField {
   capnp::StructSchema::Field field;
 };
 
-kj::Array<const ParsedField> makeFieldTable(capnp::StructSchema::FieldList fields) {
+// When `onlyNeededByFl` is true, only fields annotated `$neededByFl` are included; otherwise every
+// field carrying a `$compatEnableFlag` is.
+kj::Array<const ParsedField> makeFieldTable(
+    capnp::StructSchema::FieldList fields, bool onlyNeededByFl) {
   kj::Vector<ParsedField> table(fields.size());
 
   for (auto field: fields) {
@@ -330,32 +333,48 @@ kj::Array<const ParsedField> makeFieldTable(capnp::StructSchema::FieldList field
       }
     }
 
-    if (neededByFl) {
+    if (onlyNeededByFl) {
+      if (!neededByFl) continue;
       table.add(ParsedField{
         .enableFlag = KJ_REQUIRE_NONNULL(enableFlag),
         .field = field,
       });
+    } else {
+      KJ_IF_SOME(flag, enableFlag) {
+        table.add(ParsedField{
+          .enableFlag = flag,
+          .field = field,
+        });
+      }
     }
   }
 
   return table.releaseAsArray();
 }
 
-}  // namespace
-
-kj::Array<kj::StringPtr> decompileCompatibilityFlagsForFl(CompatibilityFlags::Reader input) {
-  static const auto fieldTable =
-      makeFieldTable(capnp::Schema::from<CompatibilityFlags>().getFields());
-
-  kj::Vector<kj::StringPtr> enableFlags;
-  enableFlags.reserve(fieldTable.size());
-  for (auto field: fieldTable) {
+kj::Array<kj::StringPtr> decompileFlags(
+    CompatibilityFlags::Reader input, kj::ArrayPtr<const ParsedField> fieldTable) {
+  kj::Vector<kj::StringPtr> enableFlags(fieldTable.size());
+  for (auto& field: fieldTable) {
     if (capnp::toDynamic(input).get(field.field).as<bool>()) {
       enableFlags.add(field.enableFlag);
     }
   }
-
   return enableFlags.releaseAsArray();
+}
+
+}  // namespace
+
+kj::Array<kj::StringPtr> decompileCompatibilityFlagsForFl(CompatibilityFlags::Reader input) {
+  static const auto fieldTable = makeFieldTable(
+      capnp::Schema::from<CompatibilityFlags>().getFields(), /*onlyNeededByFl=*/true);
+  return decompileFlags(input, fieldTable);
+}
+
+kj::Array<kj::StringPtr> decompileCompatibilityFlags(CompatibilityFlags::Reader input) {
+  static const auto fieldTable = makeFieldTable(
+      capnp::Schema::from<CompatibilityFlags>().getFields(), /*onlyNeededByFl=*/false);
+  return decompileFlags(input, fieldTable);
 }
 
 kj::Maybe<kj::String> normalizeCompatDate(kj::StringPtr date) {

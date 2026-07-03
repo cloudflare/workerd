@@ -398,6 +398,71 @@ KJ_TEST("encode to flag list for FL") {
   }
 }
 
+KJ_TEST("encode to full flag list") {
+  // Same setup as "encode to flag list for FL", but exercises decompileCompatibilityFlags -- which
+  // must return EVERY set flag, not just the $neededByFl subset.
+
+  capnp::MallocMessageBuilder message;
+  auto orphanage = message.getOrphanage();
+
+  auto compileOwnFeatureFlags = [&](kj::StringPtr compatDate,
+                                    kj::ArrayPtr<const kj::StringPtr> featureFlags) {
+    auto flagListOrphan = orphanage.newOrphan<capnp::List<capnp::Text>>(featureFlags.size());
+    auto flagList = flagListOrphan.get();
+    for (auto i: kj::indices(featureFlags)) {
+      flagList.set(i, featureFlags.begin()[i]);
+    }
+
+    auto outputOrphan = orphanage.newOrphan<CompatibilityFlags>();
+    auto output = outputOrphan.get();
+
+    SimpleWorkerErrorReporter errorReporter;
+    compileCompatibilityFlags(compatDate, flagList.asReader(), output, errorReporter,
+        /*experimental=*/false, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr);
+    KJ_ASSERT(errorReporter.errors.empty());
+
+    return kj::mv(outputOrphan);
+  };
+
+  auto contains = [](kj::ArrayPtr<const kj::StringPtr> flags, kj::StringPtr needle) {
+    for (auto& f: flags) {
+      if (f == needle) return true;
+    }
+    return false;
+  };
+
+  {
+    // At 2021-11-10, several non-$neededByFl flags are enabled by date. The full variant returns
+    // them; -ForFl returns none. Note that the full variant may return additional flags that lack
+    // a $compatEnableDate but are on by default -- test explicit membership rather than size.
+    auto featureFlagsOrphan = compileOwnFeatureFlags("2021-11-10", {});
+    auto featureFlags = featureFlagsOrphan.get();
+    auto forFl = decompileCompatibilityFlagsForFl(featureFlags);
+    auto full = decompileCompatibilityFlags(featureFlags);
+    KJ_EXPECT(forFl.size() == 0);
+    KJ_EXPECT(contains(full, "formdata_parser_supports_files"_kj));
+    KJ_EXPECT(contains(full, "fetch_refuses_unknown_protocols"_kj));
+    // A flag whose $compatEnableDate is after this compat date is NOT set.
+    KJ_EXPECT(!contains(full, "minimal_subrequests"_kj));
+  }
+
+  {
+    // Explicit enable-flag on a date that would otherwise leave it off.
+    auto featureFlagsOrphan = compileOwnFeatureFlags("2021-05-17", {"minimal_subrequests"_kj});
+    auto strings = decompileCompatibilityFlags(featureFlagsOrphan.get());
+    KJ_EXPECT(contains(strings, "minimal_subrequests"_kj));
+  }
+
+  {
+    // Explicit disable-flag suppresses a date-enabled flag in the full variant too.
+    auto featureFlagsOrphan = compileOwnFeatureFlags("2022-07-01", {"cots_on_external_fetch"});
+    auto strings = decompileCompatibilityFlags(featureFlagsOrphan.get());
+    KJ_EXPECT(!contains(strings, "no_cots_on_external_fetch"_kj));
+    // But other date-enabled flags still appear.
+    KJ_EXPECT(contains(strings, "minimal_subrequests"_kj));
+  }
+}
+
 KJ_TEST("compatibility dates must be Tuesday, Wednesday, or Thursday") {
   // List of specific flags that are allowed to use non-conformant dates
   // (already deployed and can't be changed for compatibility reasons)
