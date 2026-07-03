@@ -2736,6 +2736,14 @@ Worker::Isolate::AsyncWaiterList::~AsyncWaiterList() noexcept {
   KJ_ASSERT(tail == &head, "tail pointer corrupted?");
 }
 
+void Worker::Isolate::runInLockScope(
+    LockType lockType, kj::FunctionParam<void(jsg::Lock&)> callback) const {
+  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    Isolate::Impl::Lock recordedLock(*this, lockType, stackScope);
+    callback(*recordedLock.lock);
+  });
+}
+
 kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockWithoutRequest(
     SpanParent parentSpan) const {
   auto lockTiming = getMetrics().tryCreateLockTiming(kj::mv(parentSpan));
