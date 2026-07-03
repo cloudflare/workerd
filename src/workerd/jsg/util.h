@@ -95,6 +95,20 @@ constexpr kj::Exception::DetailTypeId TUNNELED_EXCEPTION_DETAIL_ID = 0xe80272921
 // Detail type for JavaScript exception metadata (error type and stack trace)
 constexpr kj::Exception::DetailTypeId JS_EXCEPTION_METADATA_DETAIL_ID = 0xa9ae63464030fcefull;
 
+// Set on a DISCONNECTED actor-call failure that is known to have occurred BEFORE the call reached
+// the actor (i.e. user code definitely never ran). Such failures are safe to retry as a fresh
+// attempt. Set by edgeworker's pre-delivery routing/getActor failure paths; read by the caller-side
+// actor-call classifier. The payload is a zero-length array (marker only).
+constexpr kj::Exception::DetailTypeId REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID =
+    0x1a07d0b6559baea6ull;
+
+// Set on a failure that is known to have occurred AFTER the call reached the actor (user code may
+// have run). Must not be retried as a delivery failure. Set at the receiving entrypoint's actor
+// catch so it survives the internal-exception description rewrite and serializes back across the RPC
+// boundary. The payload is a zero-length array (marker only).
+constexpr kj::Exception::DetailTypeId REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID =
+    0x7f6e0bece261e8eeull;
+
 // Add a serialized copy of the exception value to the KJ exception, as a "detail".
 void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle);
 
