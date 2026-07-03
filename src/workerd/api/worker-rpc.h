@@ -270,8 +270,7 @@ class JsRpcProperty: public JsRpcClientProvider {
   // Maximum depth of pipelined property chains. Prevents stack overflow when a chain of
   // JsRpcProperty objects is destructed recursively. 64 is beyond any legitimate RPC pipelining
   // depth.
-  static constexpr uint MAX_PROPERTY_DEPTH = 5120;
-  static constexpr uint MAX_PROPERTY_WARNING_DEPTH = 64;
+  static constexpr uint MAX_PROPERTY_DEPTH = 64;
 
   JsRpcProperty(jsg::Ref<JsRpcClientProvider> parent, kj::String name, uint depth = 0)
       : parent(kj::mv(parent)),
