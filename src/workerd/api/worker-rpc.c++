@@ -541,9 +541,6 @@ jsg::JsValue JsRpcPromise::finally(jsg::Lock& js, v8::Local<v8::Function> onFina
 }
 
 kj::Maybe<jsg::Ref<JsRpcProperty>> JsRpcProperty::getProperty(jsg::Lock& js, kj::String name) {
-  if (depth >= MAX_PROPERTY_WARNING_DEPTH) {
-    LOG_PERIODICALLY(WARNING, "NOSENTRY VULN-136589 exceeded RPC property warning depth", depth);
-  }
   JSG_REQUIRE(depth < MAX_PROPERTY_DEPTH, TypeError,
       "RPC pipelined property path is too deep (max ", MAX_PROPERTY_DEPTH, ").");
   return js.alloc<JsRpcProperty>(JSG_THIS, kj::mv(name), depth + 1);

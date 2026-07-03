@@ -2200,7 +2200,7 @@ export let eOrderTest = {
 // Unbounded JsRpcProperty parent chain causes native stack overflow
 // (SIGSEGV) on destruction. Building a deep chain of pipelined
 // property accesses must be rejected once the depth exceeds
-// MAX_PROPERTY_DEPTH (5120).
+// MAX_PROPERTY_DEPTH (64).
 export let stubDepthLimitTest = {
   async test() {
     // Create a local RPC stub wrapping a plain object.
@@ -2210,12 +2210,12 @@ export let stubDepthLimitTest = {
     // this would create an unbounded linked list of native
     // JsRpcProperty objects whose recursive destruction overflows
     // the native stack. After the fix, getProperty() throws a
-    // TypeError once depth >= 5120.
+    // TypeError once depth >= 64.
     let p = stub;
     let threw = false;
     let depthReached = 0;
     try {
-      for (let i = 0; i < 10000; i++) {
+      for (let i = 0; i < 100; i++) {
         p = p.x;
         depthReached = i + 1;
       }
@@ -2236,16 +2236,16 @@ export let stubDepthLimitTest = {
       'Expected TypeError to be thrown at depth limit, ' +
         `but reached depth ${depthReached} without error`
     );
-    // The depth limit is 5120, so we should have reached at least 5120
+    // The depth limit is 64, so we should have reached at least 64
     // before the throw.
     assert.ok(
-      depthReached >= 5120,
-      `Expected to reach at least depth 5120, only reached ${depthReached}`
+      depthReached >= 64,
+      `Expected to reach at least depth 64, only reached ${depthReached}`
     );
-    // And we should NOT have reached 10000 (the full loop).
+    // And we should NOT have reached 100 (the full loop).
     assert.ok(
-      depthReached < 10000,
-      'Should not have reached depth 10000 without error'
+      depthReached < 100,
+      'Should not have reached depth 100 without error'
     );
   },
 };
