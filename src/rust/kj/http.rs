@@ -271,6 +271,14 @@ impl HeadersRef<'_> {
     }
 }
 
+impl<'a> HeadersRef<'a> {
+    /// The underlying `kj::HttpHeaders`, for passing to FFI functions that take a `const&`.
+    #[must_use]
+    pub fn as_ffi(self) -> &'a ffi::HttpHeaders {
+        self.0
+    }
+}
+
 impl<'a> From<&'a ffi::HttpHeaders> for HeadersRef<'a> {
     fn from(value: &'a ffi::HttpHeaders) -> Self {
         HeadersRef(value)
@@ -335,7 +343,7 @@ impl<'a> ServiceResponse<'a> {
         .into())
     }
 
-    pub(crate) fn into_ffi(self) -> Pin<&'a mut ffi::HttpServiceResponse> {
+    pub fn into_ffi(self) -> Pin<&'a mut ffi::HttpServiceResponse> {
         self.0
     }
 }
@@ -383,7 +391,7 @@ impl<'a> ConnectResponse<'a> {
         .into())
     }
 
-    pub(crate) fn into_ffi(self) -> Pin<&'a mut ffi::ConnectResponse> {
+    pub fn into_ffi(self) -> Pin<&'a mut ffi::ConnectResponse> {
         self.0
     }
 }

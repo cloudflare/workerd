@@ -418,7 +418,7 @@ KJ_TEST("encode to full flag list") {
 
     SimpleWorkerErrorReporter errorReporter;
     compileCompatibilityFlags(compatDate, flagList.asReader(), output, errorReporter,
-        /*experimental=*/false, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr);
+        /*allowExperimentalFeatures=*/false, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr);
     KJ_ASSERT(errorReporter.errors.empty());
 
     return kj::mv(outputOrphan);
