@@ -47,4 +47,8 @@ def wd_rust_proc_macro(
         } | test_env,
         tags = test_tags + ["no-coverage"],
         deps = test_deps,
+        target_compatible_with = select({
+            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
     )

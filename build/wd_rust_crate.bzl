@@ -172,6 +172,10 @@ def wd_rust_crate(
             "@//build/config:rust_cc_common_link": 1,
             "//conditions:default": -1,
         }),
+        target_compatible_with = select({
+            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
     )
 
     if len(proc_macro_deps) + len(cxx_bridge_srcs) > 0:
