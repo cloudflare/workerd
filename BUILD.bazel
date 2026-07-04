@@ -4,6 +4,7 @@ load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@npm//:capnp-es/package_json.bzl", capnp_es_bins = "bin")
 load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 
 # This is used to embed the ICU data file which libicu needs at runtime to do its thing.
