@@ -163,15 +163,11 @@ def wd_rust_crate(
         } | test_env,
         size = test_size,
         tags = test_tags + ["no-coverage"],
+        experimental_use_cc_common_link = 1,
         crate_features = crate_features,
         deps = test_deps,
+        link_deps = ["//build/deps:linkopts_default"],
         proc_macro_deps = test_proc_macro_deps,
-        # Optionally link via cc_common.link so embedder-selected cc link settings
-        # (e.g. --custom_malloc) take effect. Off standalone (see //build/config).
-        experimental_use_cc_common_link = select({
-            "@//build/config:rust_cc_common_link": 1,
-            "//conditions:default": -1,
-        }),
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
