@@ -874,9 +874,10 @@ kj::Promise<void> warnAboutStaleSnapshotVolumes(kj::Network& network, kj::String
 }
 
 // Returns the gateway IP on Linux for direct container access.
-// Returns kj::none on macOS where Docker Desktop routes host-gateway to host loopback.
+// Returns kj::none on macOS and Windows where Docker Desktop routes host-gateway to host loopback
+// through the VM (so the bridge gateway IP is not a local interface on the host).
 kj::Maybe<kj::String> gatewayForPlatform(kj::String gateway) {
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(_WIN32)
   return kj::none;
 #else
   return kj::mv(gateway);
