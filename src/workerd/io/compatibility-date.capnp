@@ -1602,4 +1602,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # When enabled, D1 bindings use the internal JSRPC binding API for queries
   # instead of issuing `fetch` calls to the D1 binding service. Without this
   # flag, D1 bindings continue to use the `fetch` method of the Fetcher.
+
+  workflowsBindingsRpc @182 :Bool
+    $compatEnableFlag("workflows_bindings_rpc")
+    $experimental;
+  # When enabled, the `env.WORKFLOW` binding (cloudflare-internal:workflows-api)
+  # dispatches its methods as JSRPC calls on the inner fetcher instead of HTTP
+  # requests against the binding-shim worker. Without the flag the legacy HTTP
+  # transport is used.
 }
