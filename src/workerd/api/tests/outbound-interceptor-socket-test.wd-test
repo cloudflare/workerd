@@ -1,0 +1,48 @@
+# Verifies that a Socket returned as a JS RPC value keeps working after the producing method
+# returns, including when forwarded through an intermediate "interceptor" service (two RPC hops).
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "outbound-interceptor-socket-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "outbound-interceptor-socket-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        bindings = [
+          # Reached by the test to obtain a forwarded socket.
+          (name = "INTERCEPTOR", service = "interceptor-loop"),
+          # Used by OutboundInterceptor to reach the downstream backend. Present on the shared worker
+          # definition so the OutboundInterceptor entrypoint sees it in `this.env`.
+          (name = "BACKEND", service = "backend-loop"),
+        ],
+      )
+    ),
+    ( name = "interceptor-loop",
+      external = (
+        address = "loopback:interceptor-loop",
+        http = (capnpConnectHost = "cappy")
+      )
+    ),
+    ( name = "backend-loop",
+      external = (
+        address = "loopback:backend-loop",
+        http = (capnpConnectHost = "cappy")
+      )
+    ),
+    ( name = "internet", network = ( allow = ["private"] ) ),
+  ],
+  sockets = [
+    ( name = "interceptor-loop",
+      address = "loopback:interceptor-loop",
+      service = (name = "outbound-interceptor-socket-test", entrypoint = "OutboundInterceptor"),
+      http = (capnpConnectHost = "cappy")
+    ),
+    ( name = "backend-loop",
+      address = "loopback:backend-loop",
+      service = (name = "outbound-interceptor-socket-test", entrypoint = "Backend"),
+      http = (capnpConnectHost = "cappy")
+    ),
+  ],
+);

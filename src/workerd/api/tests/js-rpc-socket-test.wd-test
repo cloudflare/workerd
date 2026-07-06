@@ -32,6 +32,9 @@ const unitTests :Workerd.Config = (
           (name = "defaultExport", service = "default-loop"),
           (name = "twelve", json = "12"),
           (name = "GreeterFactory", service = "GreeterFactory-loop"),
+          # Only present in the socket (loopback) variant: gates the socket-transfer assertions in
+          # js-rpc-test.js, which require a real RPC boundary to keep the producer context alive.
+          (name = "socketTransfer", json = "true"),
         ],
 
         durableObjectNamespaces = [

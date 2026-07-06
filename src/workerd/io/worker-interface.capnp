@@ -493,6 +493,8 @@ enum SerializationTag {
 
   blob @15;
   # A Blob, serialized as its MIME type followed by its raw bytes.
+
+  socket @16;
 }
 
 enum StreamEncoding {
@@ -590,6 +592,15 @@ struct JsValue {
       # token. We do not want to delay sending the RPC (especially as this could violate ordering
       # guarantees), so instead we send it with a placeholder representing the token to be provided
       # later.
+
+      socket :group {
+        # A Socket. Like ReadableStream, this requires bi-directional stream communication.
+        remoteAddress @16 :Text;
+        # The remote address this socket is connected to.
+
+        secureTransport @17 :Text;
+        # Security transport mode: "on", "off", or "starttls".
+      }
 
       # TODO(soon): WebSocket, Request, Response
     }

@@ -555,4 +555,11 @@ private:
   QueuingStrategyInit init;
 };
 
+// Wraps a ReadableStreamSource so that pumpTo() is never deferred past the IoContext's lifetime.
+// Needed for RPC/session-bound sources (e.g. a Socket transferred over RPC), whose backing stream
+// disconnects when the IoContext is destroyed (the JsRpcCustomEvent is canceled). See the
+// implementation in readable.c++ for details.
+kj::Own<ReadableStreamSource> newNoDeferredProxyReadableStream(
+    kj::Own<ReadableStreamSource> inner, IoContext& context);
+
 }  // namespace workerd::api

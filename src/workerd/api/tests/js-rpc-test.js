@@ -282,6 +282,19 @@ export class MyService extends WorkerEntrypoint {
     return func;
   }
 
+  async getSocket() {
+    // Connect to our own connect() handler (which writes "hello" and closes) and return the client
+    // socket. Returning it over RPC transfers the socket to the caller, which can then read the
+    // bytes back through the reconstructed (transferred) socket.
+    return this.env.MyService.connect('localhost:1234');
+  }
+
+  async getEchoSocket() {
+    // Connect to the default entrypoint's echo connect() handler and return the client socket, so
+    // the caller can transfer it over RPC and exercise a write→peer→read round-trip.
+    return this.env.defaultExport.connect('localhost:1234');
+  }
+
   getRpcPromise(callback) {
     return callback();
   }
@@ -607,6 +620,12 @@ export default class DefaultService extends WorkerEntrypoint {
     // Test this.env here just to prove omitting the constructor entirely works.
     return new Response('default service ' + this.env.twelve);
   }
+
+  // Echoes everything written to the socket back to the reader. Used by getEchoSocket() so the
+  // socket-transfer test can exercise a write→peer→read round-trip through a transferred socket.
+  async connect(socket) {
+    await socket.readable.pipeTo(socket.writable);
+  }
 }
 
 export let basicServiceBinding = {
@@ -878,6 +897,53 @@ export let namedServiceBinding = {
         'Could not serialize object of type "Object". This type does not support ' +
         'serialization.',
     });
+    // Socket transfer over RPC is only exercised in the socket (loopback) variant of this test.
+    // The in-process variant can't sustain it: once getSocket() returns, the producer's request
+    // context tears down (there is no persistent RPC session to hold it open), so the byte pump
+    // feeding the transferred readable stops. The `socketTransfer` marker binding is present only in
+    // js-rpc-socket-test.wd-test.
+    if (env.socketTransfer) {
+      // A Socket returned over RPC is transferred to the caller. Verify a real byte round-trip
+      // through the reconstructed (transferred) socket: getSocket() connects to our connect()
+      // handler which writes "hello" and closes, so reading to EOF must yield "hello".
+      {
+        const socket = await env.MyService.getSocket();
+
+        // The `opened` metadata must survive the transfer: getSocket() connected to
+        // 'localhost:1234', so the deserialized socket should report that as its remote address.
+        const info = await socket.opened;
+        assert.strictEqual(info.remoteAddress, 'localhost:1234');
+
+        const dec = new TextDecoder();
+        let result = '';
+        for await (const chunk of socket.readable) {
+          result += dec.decode(chunk, { stream: true });
+        }
+        result += dec.decode();
+        assert.strictEqual(result, 'hello');
+      }
+
+      // Exercise the write direction through a transferred socket: getEchoSocket() connects to an
+      // echo handler, so bytes we write must come back unchanged. This proves both socket.writable
+      // and socket.readable survive the RPC transfer.
+      {
+        const socket = await env.MyService.getEchoSocket();
+        await socket.opened;
+
+        const enc = new TextEncoder();
+        const dec = new TextDecoder();
+        const writer = socket.writable.getWriter();
+        await writer.write(enc.encode('ping'));
+        await writer.close();
+
+        let result = '';
+        for await (const chunk of socket.readable) {
+          result += dec.decode(chunk, { stream: true });
+        }
+        result += dec.decode();
+        assert.strictEqual(result, 'ping');
+      }
+    }
 
     // A stateless entryponit method that never returns should fail due to PendingEvent tracking.
     await assert.rejects(() => env.MyService.neverReturn(), {

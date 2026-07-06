@@ -852,6 +852,12 @@ wd_test(
 )
 
 wd_test(
+    src = "outbound-interceptor-socket-test.wd-test",
+    args = ["--experimental"],
+    data = ["outbound-interceptor-socket-test.js"],
+)
+
+wd_test(
     src = "http-test-ts.ts-wd-test",
     args = ["--experimental"],
     data = ["http-test-ts.ts"],

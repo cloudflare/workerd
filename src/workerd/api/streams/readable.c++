@@ -678,6 +678,11 @@ class NoDeferredProxyReadableStream final: public ReadableStreamSource {
 
 }  // namespace
 
+kj::Own<ReadableStreamSource> newNoDeferredProxyReadableStream(
+    kj::Own<ReadableStreamSource> inner, IoContext& context) {
+  return kj::heap<NoDeferredProxyReadableStream>(kj::mv(inner), context);
+}
+
 void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // Serialize by effectively creating a `JsRpcStub` around this object and serializing that.
   // Except we don't actually want to do _exactly_ that, because we do not want to actually create
@@ -751,8 +756,8 @@ jsg::Ref<ReadableStream> ReadableStream::deserialize(
 
   kj::Own<kj::AsyncInputStream> in = ioctx.getExternalPusher()->unwrapStream(rs.getStream());
 
-  return js.alloc<ReadableStream>(ioctx,
-      kj::heap<NoDeferredProxyReadableStream>(newSystemStream(kj::mv(in), encoding, ioctx), ioctx));
+  return js.alloc<ReadableStream>(
+      ioctx, newNoDeferredProxyReadableStream(newSystemStream(kj::mv(in), encoding, ioctx), ioctx));
 }
 
 kj::StringPtr ReaderImpl::jsgGetMemoryName() const {

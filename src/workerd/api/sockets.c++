@@ -7,6 +7,7 @@
 #include "global-scope.h"
 #include "streams/standard.h"
 #include "system-streams.h"
+#include "worker-rpc.h"
 
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker-interface.h>
@@ -14,9 +15,81 @@
 #include <workerd/jsg/url.h>
 #include <workerd/util/autogate.h>
 
+#include <capnp/compat/byte-stream.h>
+
 namespace workerd::api {
 
 namespace {
+
+// A kj::AsyncIoStream that bridges the two raw kj half-streams recovered when a Socket is
+// deserialized from RPC: the readable side (an AsyncInputStream unwrapped from the pushed
+// ByteStream) and the writable side (an ExplicitEndOutputStream over the peer's ByteStream).
+// setupSocket() builds the JS ReadableStream/WritableStream on top of this, exactly as it does for
+// a live socket.
+class TransferredSocketStream final: public kj::AsyncIoStream {
+ public:
+  TransferredSocketStream(
+      kj::Own<kj::AsyncInputStream> input, kj::Own<capnp::ExplicitEndOutputStream> output)
+      : input(kj::mv(input)),
+        output(kj::mv(output)) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return input->tryRead(buffer, minBytes, maxBytes);
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    return output->write(buffer);
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    return output->write(pieces);
+  }
+
+  kj::Promise<void> whenWriteDisconnected() override {
+    // NOTE: For an RPC-transferred stream this reliably fires only on hard RPC breakage (the
+    // underlying CapnpToKjStreamAdapter rejects). A clean peer-initiated close is instead surfaced
+    // via readable EOF, which setupSocket() turns into a close when allowHalfOpen is false.
+    if (output.get() == nullptr) return kj::NEVER_DONE;
+    return output->whenWriteDisconnected();
+  }
+
+  void shutdownWrite() override {
+    // ExplicitEndOutputStream needs an async end() to signal a clean EOF over the RPC ByteStream,
+    // but shutdownWrite() is synchronous. Kick off end() as an IoContext task so the clean-EOF RPC
+    // completes; dropping without end() would look like an abort to the peer. If there's no active
+    // IoContext (e.g. during teardown), just drop, which the ByteStream treats as an abort.
+    if (output.get() == nullptr) return;
+    auto out = kj::mv(output);
+    if (IoContext::hasCurrent()) {
+      IoContext::current().addTask(out->end().attach(kj::mv(out)).catch_([](kj::Exception&&) {}));
+    }
+  }
+
+  void abortRead() override {
+    // We cannot meaningfully abort the underlying RPC input stream mid-flight; it is released when
+    // this stream is destroyed. (A no-op also avoids canceling an in-flight tryRead().)
+  }
+
+  void getsockopt(int level, int option, void* value, uint* length) override {
+    KJ_UNIMPLEMENTED("getsockopt not available for transferred sockets");
+  }
+
+  void setsockopt(int level, int option, const void* value, uint length) override {
+    KJ_UNIMPLEMENTED("setsockopt not available for transferred sockets");
+  }
+
+  void getsockname(struct sockaddr* addr, uint* length) override {
+    KJ_UNIMPLEMENTED("getsockname not available for transferred sockets");
+  }
+
+  void getpeername(struct sockaddr* addr, uint* length) override {
+    KJ_UNIMPLEMENTED("getpeername not available for transferred sockets");
+  }
+
+ private:
+  kj::Own<kj::AsyncInputStream> input;
+  kj::Own<capnp::ExplicitEndOutputStream> output;
+};
 
 // This function performs some basic length and characters checks, it does not guarantee that
 // the specified host is a valid domain. It should only be used to reject malicious
@@ -270,7 +343,6 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
   auto httpClient = asHttpClient(kj::mv(client));
   auto request = httpClient->connect(addressStr, *headers, httpConnectSettings);
   request.connection = request.connection.attach(kj::mv(httpClient));
-
   auto result = setupSocket(js, kj::mv(request.connection), kj::mv(addressStr),
       kj::none /* localAddress */, kj::mv(options), kj::mv(tlsStarter), secureTransport,
       kj::mv(domain), isDefaultFetchPort, kj::none /* maybeOpenedPrPair */);
@@ -559,6 +631,124 @@ jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
       .then(js, JSG_VISITABLE_LAMBDA((ref = JSG_THIS), (ref), (jsg::Lock& js) {
         ref->closedResolver.resolve(js);
       }));
+}
+
+void Socket::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  auto& handler = JSG_REQUIRE_NONNULL(
+      serializer.getExternalHandler(), DOMDataCloneError, "Socket can only be serialized for RPC.");
+  auto externalHandler = dynamic_cast<RpcSerializerExternalHandler*>(&handler);
+  JSG_REQUIRE(
+      externalHandler != nullptr, DOMDataCloneError, "Socket can only be serialized for RPC.");
+
+  // Serialize the socket metadata, referencing the stream externals
+  externalHandler->write(
+      [this, remoteAddr = kj::str(remoteAddress)](rpc::JsValue::External::Builder builder) mutable {
+    auto socket = builder.initSocket();
+    socket.setRemoteAddress(remoteAddr);
+    socket.setSecureTransport(getSecureTransport());
+  });
+
+  // Serialize the readable and writable streams as separate externals
+  readable->serialize(js, serializer);
+
+  writable->serialize(js, serializer);
+}
+
+jsg::Ref<Socket> Socket::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto& handler = JSG_REQUIRE_NONNULL(deserializer.getExternalHandler(), DOMDataCloneError,
+      "Socket can only be deserialized from RPC.");
+  auto externalHandler = dynamic_cast<RpcDeserializerExternalHandler*>(&handler);
+  JSG_REQUIRE(
+      externalHandler != nullptr, DOMDataCloneError, "Socket can only be deserialized from RPC.");
+
+  auto& ioContext = IoContext::current();
+
+  // Read the externals in the same order Socket::serialize() wrote them: (1) socket metadata,
+  // (2) the readable stream, (3) the writable stream. The stream externals are consumed here
+  // directly (rather than via ReadableStream/WritableStream::deserialize) so that we recover the
+  // raw kj half-streams and can rebuild a real AsyncIoStream backing the Socket.
+
+  // (1) Socket metadata.
+  auto socketExternal = externalHandler->read();
+  JSG_REQUIRE(socketExternal.isSocket(), DOMDataCloneError,
+      "external table slot type doesn't match serialization tag");
+  auto socketData = socketExternal.getSocket();
+  auto remoteAddr = kj::str(socketData.getRemoteAddress());
+  auto transport = kj::str(socketData.getSecureTransport());
+
+  // (2) Readable side: recover the raw input stream from the pushed ByteStream (mirrors
+  // ReadableStream::deserialize).
+  auto readableExternal = externalHandler->read();
+  JSG_REQUIRE(readableExternal.isReadableStream(), DOMDataCloneError,
+      "external table slot type doesn't match serialization tag");
+  auto rs = readableExternal.getReadableStream();
+  // Socket streams are always identity-encoded; newSystemMultiStream() assumes IDENTITY.
+  KJ_REQUIRE(rs.getEncoding() == StreamEncoding::IDENTITY,
+      "transferred socket readable must use identity encoding");
+  kj::Own<kj::AsyncInputStream> input = ioContext.getExternalPusher()->unwrapStream(rs.getStream());
+
+  // (3) Writable side: recover the raw output stream from the peer's ByteStream (mirrors
+  // WritableStream::deserialize).
+  auto writableExternal = externalHandler->read();
+  JSG_REQUIRE(writableExternal.isWritableStream(), DOMDataCloneError,
+      "external table slot type doesn't match serialization tag");
+  auto ws = writableExternal.getWritableStream();
+  KJ_REQUIRE(ws.getEncoding() == StreamEncoding::IDENTITY,
+      "transferred socket writable must use identity encoding");
+  kj::Own<capnp::ExplicitEndOutputStream> output =
+      ioContext.getByteStreamFactory().capnpToKjExplicitEnd(ws.getByteStream());
+
+  // Parse the secure transport
+  SecureTransportKind secureTransport = SecureTransportKind::OFF;
+  if (transport == "on") {
+    secureTransport = SecureTransportKind::ON;
+  } else if (transport == "starttls") {
+    secureTransport = SecureTransportKind::STARTTLS;
+  }
+
+  // Combine the two half-streams into a real AsyncIoStream (used for the connection stream, e.g. by
+  // startTls/takeConnectionStream) and derive the readable/writable sources from it.
+  kj::Own<kj::AsyncIoStream> asyncIoStream =
+      kj::heap<TransferredSocketStream>(kj::mv(input), kj::mv(output));
+  auto refcountedConnection = kj::refcountedWrapper(kj::mv(asyncIoStream));
+  auto sysStreams = newSystemMultiStream(*refcountedConnection, ioContext);
+  // The underlying streams are bound to this IoContext (they disconnect when the RPC session's
+  // JsRpcCustomEvent is canceled), so their pumpTo() must not be deferred past the context's
+  // lifetime.
+  sysStreams.readable = newNoDeferredProxyReadableStream(kj::mv(sysStreams.readable), ioContext);
+  auto readable = js.alloc<ReadableStream>(ioContext, kj::mv(sysStreams.readable));
+
+  auto closedPrPair = js.newPromiseAndResolver<void>();
+  closedPrPair.promise.markAsHandled(js);
+  auto openedPrPair = js.newPromiseAndResolver<SocketInfo>();
+  openedPrPair.promise.markAsHandled(js);
+
+  // No opened-gate on the writable: the connection is already established (opened resolves below),
+  // and passing a gate is unnecessary here.
+  auto writable = js.alloc<WritableStream>(ioContext, kj::mv(sysStreams.writable),
+      ioContext.getMetrics().tryCreateWritableByteStreamObserver());
+
+  // The connection is already established, so resolve `opened` immediately. resolve() only schedules
+  // the settlement (handlers run later as microtasks), so it is safe under the deserialize scope.
+  openedPrPair.resolver.resolve(js,
+      SocketInfo{
+        .remoteAddress = kj::str(remoteAddr),
+        .localAddress = kj::none,
+      });
+
+  // TODO(soon): Wire `closed` to fire on disconnect. That bridge (ioContext.awaitIo(...).then(...))
+  // executes JS and therefore cannot run here; do it lazily on first access to `closed`, which runs
+  // in a normal JS-executing context. For now `closed` only resolves via an explicit close().
+  kj::Promise<void> watchForDisconnectTask = kj::READY_NOW;
+
+  // No real TLS starter exists for a transferred socket, so startTls is unsupported.
+  auto tlsStarter = kj::heap<kj::TlsStarterCallback>();
+
+  return js.alloc<Socket>(js, ioContext, kj::mv(refcountedConnection), kj::str(remoteAddr),
+      kj::none /* localAddress */, kj::mv(readable), kj::mv(writable), kj::mv(closedPrPair),
+      kj::mv(watchForDisconnectTask), kj::none /* options */, kj::mv(tlsStarter), secureTransport,
+      kj::none /* domain */, false /* isDefaultFetchPort */, kj::mv(openedPrPair));
 }
 
 jsg::Ref<Socket> SocketsModule::connect(
