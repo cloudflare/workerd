@@ -66,7 +66,6 @@ include:
       runOnBranches: "^$"
       SCRIPT: |
         import os
-        import runpy
         import subprocess
         import sys
 
@@ -77,7 +76,9 @@ include:
             "requests",
         ])
 
-        sys.argv = [
+        subprocess.check_call([
+            sys.executable,
+            "-u",
             "./tools/cross/internal_build.py",
             os.environ["CI_MERGE_REQUEST_IID"],
             os.environ["CI_COMMIT_SHA"],
@@ -87,9 +88,7 @@ include:
             os.environ["CI_URL"],
             os.environ["CI_CLIENT_ID"],
             os.environ["CI_CLIENT_SECRET"],
-        ]
-
-        runpy.run_path("./tools/cross/internal_build.py", run_name="__main__")
+        ])
 
 linux-x64-build:
   <<: *job-template
