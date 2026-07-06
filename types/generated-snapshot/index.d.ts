@@ -13926,6 +13926,15 @@ interface Hyperdrive {
    */
   readonly host: string;
   /*
+   * A synthetic IPv4 address (in the reserved 240.0.0.0/4 range) that, like the
+   * host field, is only valid within the context of the currently running
+   * Worker and, when passed into the `connect()` function from the
+   * "cloudflare:sockets" module, will connect to the Hyperdrive instance for
+   * your database. This is provided for database drivers that require the host
+   * to be an IP literal rather than a hostname.
+   */
+  readonly ip: string;
+  /*
    * The port that must be paired the the host field when connecting.
    */
   readonly port: number;
