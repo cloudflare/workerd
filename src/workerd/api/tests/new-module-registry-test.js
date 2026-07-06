@@ -271,11 +271,102 @@ export const importAssertionsFail = {
   },
 };
 
+// Note: 'zebra: ...' parses as a URL (scheme "zebra" with an opaque path), so it
+// resolves successfully and then fails as *not found*. This is deliberately the
+// not-found path, NOT the invalid-specifier path (covered by
+// `invalidModuleSpecifier` below).
 export const invalidUrlAsSpecifier = {
   async test() {
     await rejects(import('zebra: not a \x00 valid URL'), {
       message: /Module not found/,
     });
+  },
+};
+
+// The error class for a given module-resolution failure should be consistent
+// regardless of which path (static-import, dynamic-import, or require())
+// detects it:
+//   * "Module not found"          -> Error     (a lookup failure, not a type error)
+//   * "Invalid module specifier"  -> TypeError (a malformed value); see
+//                                    `invalidModuleSpecifier`
+//   * "Circular dependency ..."   -> Error     (a module-graph/loading error)
+// See the resolve/dynamicResolve/require paths in jsg/modules-new.c++. The exact
+// "Circular dependency when resolving module" message+class is pinned by the C++
+// test in jsg/modules-new-test.c++; at the JS boundary it surfaces as a (still
+// Error-classed) "Failed to instantiate module".
+export const errorClassConsistency = {
+  async test() {
+    const myRequire = createRequire(import.meta.url);
+
+    const assertPlainError = (err, label) => {
+      ok(err instanceof Error, `${label}: expected an Error, got ${err}`);
+      strictEqual(
+        Object.getPrototypeOf(err),
+        Error.prototype,
+        `${label}: expected a plain Error, not a subclass like TypeError`
+      );
+    };
+
+    // "Module not found" is a plain Error on every path.
+
+    // Dynamic import:
+    const dynNotFound = await import('module-not-found').then(
+      () => null,
+      (e) => e
+    );
+    assertPlainError(dynNotFound, 'dynamic import not-found');
+    ok(/Module not found/.test(dynNotFound.message), dynNotFound.message);
+
+    // Static import: importing a module whose own static import is missing
+    // surfaces the static-import resolution failure.
+    const staticNotFound = await import('static-import-missing').then(
+      () => null,
+      (e) => e
+    );
+    assertPlainError(staticNotFound, 'static import not-found');
+    ok(/Module not found/.test(staticNotFound.message), staticNotFound.message);
+
+    // require():
+    let reqNotFound = null;
+    try {
+      myRequire('module-not-found');
+    } catch (e) {
+      reqNotFound = e;
+    }
+    assertPlainError(reqNotFound, 'require not-found');
+    ok(/Module not found/.test(reqNotFound.message), reqNotFound.message);
+
+    // A circular dependency is also a plain Error (not a TypeError).
+    const circular = await import('circular-a').then(
+      () => null,
+      (e) => e
+    );
+    assertPlainError(circular, 'circular dependency');
+  },
+};
+
+// A malformed/unparseable specifier is a TypeError on both the dynamic-import
+// and static-import paths (matching Node's ERR_INVALID_MODULE_SPECIFIER, which
+// extends TypeError). 'https://' is a special-scheme URL with no host, so it
+// fails to parse rather than resolving to a (missing) module.
+export const invalidModuleSpecifier = {
+  async test() {
+    // Dynamic import:
+    const dyn = await import('https://').then(
+      () => null,
+      (e) => e
+    );
+    ok(dyn instanceof TypeError, `expected TypeError, got ${dyn && dyn.name}`);
+    ok(/Invalid module specifier/.test(dyn.message), dyn.message);
+
+    // Static import: a bundle ESM that statically imports the unparseable
+    // specifier surfaces the same TypeError.
+    const stat = await import('static-invalid-spec').then(
+      () => null,
+      (e) => e
+    );
+    ok(stat instanceof TypeError, `expected TypeError, got ${stat && stat.name}`);
+    ok(/Invalid module specifier/.test(stat.message), stat.message);
   },
 };
 
