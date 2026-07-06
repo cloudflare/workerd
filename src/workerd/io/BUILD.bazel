@@ -551,3 +551,11 @@ kj_test(
         "//src/workerd/tests:test-fixture",
     ],
 )
+
+kj_test(
+    src = "incoming-request-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)

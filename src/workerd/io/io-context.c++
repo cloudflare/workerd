@@ -584,6 +584,9 @@ kj::Promise<T> IoContext::IncomingRequest::maybeAddGcPassForTest(kj::Promise<T> 
 // Mark ourselves so we know that we made a best effort attempt to wait for waitUntilTasks.
 void IoContext::IncomingRequest::drain(
     kj::TaskSet& waitUntilTasks, kj::Own<IoContext_IncomingRequest>&& self) {
+  // Passing by rvalue reference keeps the call-site evaluation order safe, but does not itself
+  // consume the caller's owner. Move immediately so early returns still drop the request.
+  auto ownedSelf = kj::mv(self);
   waitedForWaitUntil = true;
 
   if (&context->incomingRequests.front() != this) {
@@ -618,7 +621,7 @@ void IoContext::IncomingRequest::drain(
                     .exclusiveJoin(kj::mv(timeoutPromise))
                     .exclusiveJoin(context->onAbort());
 
-  result = result.attach(kj::mv(self));
+  result = result.attach(kj::mv(ownedSelf));
 
   KJ_IF_SOME(a, context->actor) {
     // Make sure the drain is canceled and the IncomingRequest dropped on actor abort.
