@@ -1442,7 +1442,7 @@ KJ_TEST("ESM -> CJS -> require(ESM) -> static import CJS circular dependency fai
       JSG_FAIL_REQUIRE(Error, "Should have thrown");
     }, [&](Value exception) {
       auto str = kj::str(exception.getHandle(js));
-      KJ_ASSERT(str == "TypeError: Circular dependency when resolving module: b");
+      KJ_ASSERT(str == "Error: Circular dependency when resolving module: b");
     });
   });
 }

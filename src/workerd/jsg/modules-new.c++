@@ -554,7 +554,10 @@ class IsolateModuleRegistry final {
       }
 
       // Nothing found? Aw... fail!
-      JSG_FAIL_REQUIRE(TypeError, kj::str("Module not found: ", normalizedSpecifier.getHref()));
+      // A module that cannot be resolved is a lookup failure, not a type error,
+      // so this is an Error (matching the static-import and require paths, and
+      // Node's ERR_MODULE_NOT_FOUND which extends Error).
+      JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", normalizedSpecifier.getHref()));
     }, [&](Value exception) -> Promise<Value> {
       return js.rejectedPromise<Value>(kj::mv(exception));
     }));
@@ -1116,8 +1119,11 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
           return {};
         }
         if (resolved->GetStatus() == v8::Module::kEvaluating) {
+          // A circular dependency is a module-graph/loading error, not a type
+          // error, so this is an Error (matching the require path and Node's
+          // ERR_REQUIRE_CYCLE_MODULE which extends Error).
           js.throwException(
-              js.typeError(kj::str("Circular dependency when resolving module: ", spec)));
+              js.error(kj::str("Circular dependency when resolving module: ", spec)));
           return {};
         }
         // Validate import type attribute against the resolved module's content type.
@@ -1152,8 +1158,11 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
         return {};
       }
       if (resolved->GetStatus() == v8::Module::kEvaluating) {
+        // A circular dependency is a module-graph/loading error, not a type
+        // error, so this is an Error (matching the require path and Node's
+        // ERR_REQUIRE_CYCLE_MODULE which extends Error).
         js.throwException(
-            js.typeError(kj::str("Circular dependency when resolving module: ", spec)));
+            js.error(kj::str("Circular dependency when resolving module: ", spec)));
         return v8::MaybeLocal<ReturnType>();
       }
 
@@ -1202,7 +1211,10 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
       KJ_UNREACHABLE;
     }
 
-    js.throwException(js.error(kj::str("Invalid module specifier: "_kj, specifier)));
+    // A malformed/unparseable specifier is a bad-value error, so this is a
+    // TypeError (matching the dynamic-import path and Node's
+    // ERR_INVALID_MODULE_SPECIFIER which extends TypeError).
+    js.throwException(js.typeError(kj::str("Invalid module specifier: "_kj, specifier)));
     return {};
   }, [&](Value exception) -> v8::MaybeLocal<ReturnType> {
     // If there are any synchronously thrown exceptions, we want to catch them
