@@ -295,33 +295,34 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   // this object while the promise chain is pending. Without it, the bare `this` pointer dangles.
   return openedPromiseCopy.whenResolved(js)
       .then(js,
-          [this, self = JSG_THIS](jsg::Lock& js) {
-    if (!writable->getController().isClosedOrClosing()) {
-      return writable->getController().flush(js);
+          [self = JSG_THIS](jsg::Lock& js) mutable {
+    auto& controller = self->writable->getController();
+    if (!controller.isClosedOrClosing()) {
+      return controller.flush(js);
     } else {
       return js.resolvedPromise();
     }
   })
       .then(js,
-          [this, self = JSG_THIS](jsg::Lock& js) {
+          [self = JSG_THIS](jsg::Lock& js) mutable {
     // Forcibly abort the readable/writable streams.
-    auto cancelPromise = readable->getController().cancel(js, kj::none);
-    auto abortPromise = writable->getController().abort(js, kj::none);
+    auto cancelPromise = self->readable->getController().cancel(js, kj::none);
+    auto abortPromise = self->writable->getController().abort(js, kj::none);
 
     // The below is effectively `Promise.all(cancelPromise, abortPromise)`
     return cancelPromise.then(js, [abortPromise = kj::mv(abortPromise)](jsg::Lock& js) mutable {
       return kj::mv(abortPromise);
     });
   })
-      .then(js, [this, self = JSG_THIS](jsg::Lock& js) {
+      .then(js, [self = JSG_THIS](jsg::Lock& js) mutable {
     // Destroy the connection stream to close the connection.
-    { auto _ = kj::mv(connectionData); }
-    connectionData = kj::none;
+    { auto _ = kj::mv(self->connectionData); }
+    self->connectionData = kj::none;
 
-    resolveFulfiller(js, kj::none);
+    self->resolveFulfiller(js, kj::none);
     return js.resolvedPromise();
-  }).catch_(js, [this, self = JSG_THIS](jsg::Lock& js, jsg::Value err) {
-    errorHandler(js, kj::mv(err));
+  }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value err) mutable {
+    self->errorHandler(js, kj::mv(err));
   });
 }
 
@@ -450,32 +451,32 @@ void Socket::handleProxyStatus(
     }
     return kj::HttpClient::ConnectRequest::Status(500, nullptr, kj::Own<kj::HttpHeaders>());
   };
-  auto func = [this, self = JSG_THIS](
-                  jsg::Lock& js, kj::HttpClient::ConnectRequest::Status&& status) -> void {
+  auto func = [self = JSG_THIS](
+                  jsg::Lock& js, kj::HttpClient::ConnectRequest::Status&& status) mutable -> void {
     if (status.statusCode < 200 || status.statusCode >= 300) {
       // If the status indicates an unsuccessful connection we need to reject the `closeFulfiller`
       // with an exception. This will reject the socket's `closed` promise.
       auto msg = kj::str("proxy request failed, cannot connect to the specified address");
-      if (isDefaultFetchPort) {
+      if (self->isDefaultFetchPort) {
         msg = kj::str(msg, ". It looks like you might be trying to connect to a HTTP-based service",
             " — consider using fetch instead");
-      } else if (remoteAddress.orDefault(kj::String()).contains(".hyperdrive.local"_kj)) {
+      } else if (self->remoteAddress.orDefault(kj::String()).contains(".hyperdrive.local"_kj)) {
         // No attempts to connect to Hyperdrive should end up here, since they go through the other
         // version of handleProxyStatus. If they end up here somehow, log about it to get some
         // context that can aid in debugging.
         LOG_WARNING_PERIODICALLY(
-            "attempt to connect to Hyperdrive failed to trigger connectOverride", remoteAddress,
-            status.statusCode, status.statusText);
+            "attempt to connect to Hyperdrive failed to trigger connectOverride",
+            self->remoteAddress, status.statusCode, status.statusText);
       }
-      handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, msg));
+      self->handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, msg));
     } else {
       // For outbound sockets we have no useful local address to expose. Inbound sockets (produced
       // by the `connect()` handler dispatch path) populate `localAddress` with the CONNECT
       // authority that the peer targeted.
-      openedResolver.resolve(js,
+      self->openedResolver.resolve(js,
           SocketInfo{
-            .remoteAddress = mapCopyString(remoteAddress),
-            .localAddress = mapCopyString(localAddress),
+            .remoteAddress = mapCopyString(self->remoteAddress),
+            .localAddress = mapCopyString(self->localAddress),
           });
     }
   };
@@ -497,17 +498,17 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
     }
     return KJ_EXCEPTION(FAILED, "connectResult raised an error");
   };
-  auto func = [this, self = JSG_THIS](jsg::Lock& js, kj::Maybe<kj::Exception> result) -> void {
+  auto func = [self = JSG_THIS](jsg::Lock& js, kj::Maybe<kj::Exception> result) mutable -> void {
     if (result != kj::none) {
-      handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, "connection attempt failed"));
+      self->handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, "connection attempt failed"));
     } else {
       // For outbound sockets we have no useful local address to expose. Inbound sockets (produced
       // by the `connect()` handler dispatch path) populate `localAddress` with the CONNECT
       // authority that the peer targeted.
-      openedResolver.resolve(js,
+      self->openedResolver.resolve(js,
           SocketInfo{
-            .remoteAddress = mapCopyString(remoteAddress),
-            .localAddress = mapCopyString(localAddress),
+            .remoteAddress = mapCopyString(self->remoteAddress),
+            .localAddress = mapCopyString(self->localAddress),
           });
     }
   };

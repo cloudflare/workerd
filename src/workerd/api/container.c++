@@ -647,13 +647,13 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
       // Note: `self` (jsg::Ref) is captured to prevent GC from collecting this object while
       // the promise continuation is pending. Without it, the bare `this` pointer dangles.
       .then(js,
-          [this, self = JSG_THIS](
-              jsg::Lock& js, capnp::Response<rpc::Container::MonitorResults> results) {
-    running = false;
+          [self = JSG_THIS](
+              jsg::Lock& js, capnp::Response<rpc::Container::MonitorResults> results) mutable {
+    self->running = false;
     auto exitCode = results.getExitCode();
-    KJ_IF_SOME(d, destroyReason) {
+    KJ_IF_SOME(d, self->destroyReason) {
       jsg::Value error = kj::mv(d);
-      destroyReason = kj::none;
+      self->destroyReason = kj::none;
       js.throwException(kj::mv(error));
     }
 
@@ -663,9 +663,9 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
       js.throwException(err);
     }
   },
-          [this, self = JSG_THIS](jsg::Lock& js, jsg::Value&& error) {
-    running = false;
-    destroyReason = kj::none;
+          [self = JSG_THIS](jsg::Lock& js, jsg::Value&& error) mutable {
+    self->running = false;
+    self->destroyReason = kj::none;
     js.throwException(kj::mv(error));
   });
 }
