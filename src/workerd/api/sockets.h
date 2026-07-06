@@ -276,8 +276,12 @@ class SocketsModule final: public jsg::Object {
   // Creates a Fetcher from a Socket that can perform HTTP requests over the socket connection
   jsg::Promise<jsg::Ref<Fetcher>> internalNewHttpClient(jsg::Lock& js, jsg::Ref<Socket> socket);
 
+  // Returns the synthetic IP registered for a magic hostname, or undefined. Used by node:dns.
+  jsg::Optional<kj::StringPtr> getCallerDnsOverride(jsg::Lock& js, kj::String hostname);
+
   JSG_RESOURCE_TYPE(SocketsModule, CompatibilityFlags::Reader flags) {
     JSG_METHOD(connect);
+    JSG_METHOD(getCallerDnsOverride);
 
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(internalNewHttpClient);

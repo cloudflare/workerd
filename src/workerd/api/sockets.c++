@@ -79,6 +79,74 @@ kj::Maybe<uint64_t> getWritableHighWaterMark(jsg::Optional<SocketOptions>& opts)
   return kj::none;
 }
 
+kj::Maybe<uint16_t> parseHex16(kj::ArrayPtr<const char> s) {
+  if (s.size() == 0 || s.size() > 4) {
+    return kj::none;
+  }
+  uint16_t v = 0;
+  for (char c: s) {
+    v <<= 4;
+    if (c >= '0' && c <= '9') {
+      v |= (c - '0');
+    } else if (c >= 'a' && c <= 'f') {
+      v |= (c - 'a' + 10);
+    } else {
+      // Input is lowercased before parsing, so uppercase never reaches here.
+      return kj::none;
+    }
+  }
+  return v;
+}
+
+// If `host` is an IPv4-mapped IPv6 address, return its dotted-quad IPv4 form; otherwise kj::none.
+// The 96-bit `::ffff` prefix has three textual spellings (compressed, minimal, and fully-padded),
+// and the trailing 32 bits may be written dotted (`192.168.1.1`) or as two hex groups
+// (`c0a8:0101`). We match the prefix case-insensitively then decode the tail. Note
+// `::ffff:0:0:c0a8:0101` is a *different* address and is correctly rejected (its tail has too many
+// groups). Used solely to normalize the connect-override lookup key so a synthetic IPv4 override
+// (e.g. Hyperdrive's) matches every mapped spelling; the real connection path is left untouched.
+kj::Maybe<kj::String> tryGetMappedIpv4(kj::ArrayPtr<const char> host) {
+  // Strip surrounding brackets (the URL parser emits IPv6 hostnames bracketed) and lowercase for
+  // case-insensitive prefix/hex matching.
+  if (host.size() >= 2 && host.front() == '[' && host.back() == ']') {
+    host = host.slice(1, host.size() - 1);
+  }
+  auto lower = kj::heapString(host);
+  for (char& c: lower) {
+    if (c >= 'A' && c <= 'Z') {
+      c = c - 'A' + 'a';
+    }
+  }
+
+  static constexpr kj::StringPtr prefixes[] = {
+    "::ffff:"_kj,
+    "0:0:0:0:0:ffff:"_kj,
+    "0000:0000:0000:0000:0000:ffff:"_kj,
+  };
+  kj::ArrayPtr<const char> tail;
+  bool matched = false;
+  for (auto prefix: prefixes) {
+    if (lower.startsWith(prefix)) {
+      tail = lower.asArray().slice(prefix.size());
+      matched = true;
+      break;
+    }
+  }
+  if (!matched) {
+    return kj::none;
+  }
+
+  // Dotted spelling: the tail is already the IPv4.
+  if (tail.findFirst('.') != kj::none) {
+    return kj::str(tail);
+  }
+  // Hex spelling: exactly two groups `hi:lo`.
+  auto colon = KJ_UNWRAP_OR_RETURN(tail.findFirst(':'), kj::none);
+  auto hi = KJ_UNWRAP_OR_RETURN(parseHex16(tail.first(colon)), kj::none);
+  auto lo = KJ_UNWRAP_OR_RETURN(parseHex16(tail.slice(colon + 1, tail.size())), kj::none);
+  return kj::str(hi >> 8, ".", hi & 0xff, ".", lo >> 8, ".", lo & 0xff);
+}
+
 }  // namespace
 
 // Forward declarations
@@ -197,6 +265,11 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
   kj::String domain;
   bool isDefaultFetchPort = false;
 
+  // If the address is an IPv4-mapped IPv6 address, this holds the dotted-quad key its connect
+  // override would be registered under, so a synthetic IPv4 override (e.g. Hyperdrive's) also
+  // matches the mapped spelling.
+  kj::Maybe<kj::String> mappedOverrideKey;
+
   KJ_SWITCH_ONEOF(address) {
     KJ_CASE_ONEOF(str, kj::String) {
       // We need just the hostname part of the address, i.e. we want to strip out the port.
@@ -209,9 +282,15 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
       JSG_REQUIRE(host != ""_kj, TypeError, "Specified address is missing hostname.");
       JSG_REQUIRE(port != ""_kj, TypeError, "Specified address is missing port.");
       isDefaultFetchPort = port == "443"_kj || port == "80"_kj;
+      KJ_IF_SOME(ipv4, tryGetMappedIpv4(host)) {
+        mappedOverrideKey = kj::str(ipv4, ":", port);
+      }
       domain = kj::str(host);
     }
     KJ_CASE_ONEOF(record, SocketAddress) {
+      KJ_IF_SOME(ipv4, tryGetMappedIpv4(record.hostname)) {
+        mappedOverrideKey = kj::str(ipv4, ":", record.port);
+      }
       domain = kj::heapString(record.hostname);
       isDefaultFetchPort = record.port == 443 || record.port == 80;
     }
@@ -238,8 +317,14 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     // Support calling into arbitrary callbacks for any registered "magic" addresses for which
     // custom connect() logic is needed. Note that these overrides should only apply to calls of the
     // global connect() method, not for fetcher->connect(), hence why we check for them here.
-    KJ_IF_SOME(fn, ioContext.getCurrentLock().getGlobalScope().getConnectOverride(addressStr)) {
+    auto& globalScope = ioContext.getCurrentLock().getGlobalScope();
+    KJ_IF_SOME(fn, globalScope.getConnectOverride(addressStr)) {
       return fn(js);
+    }
+    KJ_IF_SOME(key, mappedOverrideKey) {
+      KJ_IF_SOME(fn, globalScope.getConnectOverride(key)) {
+        return fn(js);
+      }
     }
     actualFetcher =
         js.alloc<Fetcher>(IoContext::NULL_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES);
@@ -565,6 +650,12 @@ jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
 jsg::Ref<Socket> SocketsModule::connect(
     jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options) {
   return connectImpl(js, kj::none, kj::mv(address), kj::mv(options));
+}
+
+jsg::Optional<kj::StringPtr> SocketsModule::getCallerDnsOverride(
+    jsg::Lock& js, kj::String hostname) {
+  auto& ioContext = IoContext::current();
+  return ioContext.getCurrentLock().getGlobalScope().getDnsOverride(hostname);
 }
 
 kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {

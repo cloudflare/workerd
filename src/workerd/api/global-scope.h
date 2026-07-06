@@ -752,6 +752,11 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   void setConnectOverride(kj::String networkAddress, ConnectFn connectFn);
   kj::Maybe<ConnectFn&> getConnectOverride(kj::StringPtr networkAddress);
 
+  // hostname->IP overrides so node:dns can resolve magic hostnames (e.g. Hyperdrive's) to a
+  // synthetic IP that has a corresponding connect override registered above.
+  void setDnsOverride(kj::String hostname, kj::String ip);
+  kj::Maybe<kj::StringPtr> getDnsOverride(kj::StringPtr hostname);
+
   // ---------------------------------------------------------------------------
   // JS API
 
@@ -1167,6 +1172,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   kj::Maybe<jsg::JsRef<jsg::JsValue>> bufferValue;
   kj::Maybe<jsg::Ref<Fetcher>> defaultFetcher;
   kj::HashMap<kj::String, ConnectFn> connectOverrides;
+  kj::HashMap<kj::String, kj::String> dnsOverrides;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(processValue, bufferValue, defaultFetcher);
