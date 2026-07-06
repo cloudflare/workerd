@@ -78,16 +78,44 @@ jsg::JsArrayBuffer ExecOutput::getStderr(jsg::Lock& js) {
   return jsg::JsArrayBuffer::create(js, stderrBytes);
 }
 
-ExecProcess::ExecProcess(jsg::Optional<jsg::Ref<WritableStream>> stdinStream,
+ExecProcess::ExecProcess(jsg::Lock& js,
+    IoContext& ioContext,
+    jsg::Optional<jsg::Ref<WritableStream>> stdinStream,
     jsg::Optional<jsg::Ref<ReadableStream>> stdoutStream,
     jsg::Optional<jsg::Ref<ReadableStream>> stderrStream,
     int pid,
-    rpc::Container::ProcessHandle::Client handle)
+    rpc::Container::ProcessHandle::Client handle,
+    kj::Maybe<jsg::Ref<AbortSignal>> abortSignal)
     : stdinStream(kj::mv(stdinStream)),
       stdoutStream(kj::mv(stdoutStream)),
       stderrStream(kj::mv(stderrStream)),
       pid(pid),
-      handle(IoContext::current().addObject(kj::heap(kj::mv(handle)))) {}
+      handle(ioContext.addObject(kj::heap(kj::mv(handle)))) {
+  KJ_IF_SOME(signal, abortSignal) {
+    constexpr int kSigKill = 9;
+
+    auto& canceler = signal->getCanceler();
+
+    // exec() calls throwIfAborted() before sending the RPC, but the signal can still fire while the
+    // RPC is in flight, i.e. before this constructor runs in the RPC's continuation. If that
+    // happened, kill the freshly-started process immediately; there's no point registering a
+    // listener.
+    if (canceler.isCanceled()) {
+      sendKill(kSigKill);
+    } else {
+      // Hold a strong reference to the canceler so it outlives the AbortSignal's own IoOwn, then register
+      // a listener that kills the process when the signal is later triggered.
+      auto own = kj::addRef(canceler);
+      auto& ref = *own;
+      abortCanceler = ioContext.addObject(kj::mv(own));
+      abortListener.emplace(ref, [self = JSG_THIS_WEAK(js)]() {
+        KJ_IF_SOME(process, self.tryGet()) {
+          process.sendKill(kSigKill);
+        }
+      });
+    }
+  }
+}
 
 jsg::Optional<jsg::Ref<WritableStream>> ExecProcess::getStdin() {
   return stdinStream.map([](jsg::Ref<WritableStream>& stream) { return stream.addRef(); });
@@ -192,10 +220,15 @@ jsg::Promise<jsg::Ref<ExecOutput>> ExecProcess::output(jsg::Lock& js) {
 void ExecProcess::kill(jsg::Lock& js, jsg::Optional<int> signal) {
   auto signo = signal.orDefault(15);
   JSG_REQUIRE(signo > 0 && signo <= 64, RangeError, "Invalid signal number.");
+  sendKill(signo);
+}
 
+void ExecProcess::sendKill(int signo) {
+  // Grab the IoContext first so we fail fast if there is no active IoContext.
+  auto& ioContext = IoContext::current();
   auto req = handle->killRequest(capnp::MessageSize{4, 0});
   req.setSigno(signo);
-  IoContext::current().addTask(req.sendIgnoringResult());
+  ioContext.addTask(req.sendIgnoringResult());
 }
 // =======================================================================================
 // Basic lifecycle methods
@@ -459,6 +492,11 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
   JSG_REQUIRE(!combinedOutput || stdoutMode == "pipe", TypeError,
       "stderr: \"combined\" requires stdout to be \"pipe\".");
 
+  // If an already-aborted signal is provided, fail fast before spawning anything.
+  KJ_IF_SOME(signal, options.signal) {
+    signal->throwIfAborted(js);
+  }
+
   auto& ioContext = IoContext::current();
   auto& byteStreamFactory = ioContext.getByteStreamFactory();
 
@@ -574,8 +612,8 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
     }
 
     // return the instance to the process after getting pipeline of the process handle
-    return js.alloc<ExecProcess>(
-        kj::mv(stdinStream), kj::mv(stdoutStream), kj::mv(stderrStream), pid, kj::mv(handle));
+    return js.alloc<ExecProcess>(js, ioContext, kj::mv(stdinStream), kj::mv(stdoutStream),
+        kj::mv(stderrStream), pid, kj::mv(handle), kj::mv(options.signal));
   });
 }
 

@@ -3876,6 +3876,7 @@ export interface ContainerExecOptions {
   cwd?: string;
   env?: Record<string, string>;
   user?: string;
+  signal?: AbortSignal;
   stdin?: ReadableStream | "pipe";
   stdout?: "pipe" | "ignore";
   stderr?: "pipe" | "ignore" | "combined";
