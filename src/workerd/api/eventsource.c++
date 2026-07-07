@@ -251,12 +251,12 @@ jsg::Ref<EventSource> EventSource::constructor(
   return kj::mv(eventsource);
 }
 
-jsg::Ref<EventSource> EventSource::from(jsg::Lock& js, jsg::Ref<ReadableStream> readable) {
+jsg::Ref<EventSource> EventSource::from(jsg::Lock& js, JsReadableStream readable) {
   JSG_REQUIRE(IoContext::hasCurrent(), DOMNotSupportedError,
       "An EventSource can only be created within the context of a worker request.");
-  JSG_REQUIRE(!readable->isLocked(), TypeError, "This ReadableStream is locked.");
+  JSG_REQUIRE(!readable.isLocked(js), TypeError, "This ReadableStream is locked.");
   JSG_REQUIRE(
-      !readable->isDisturbed(), TypeError, "This ReadableStream has already been read from.");
+      !readable.isDisturbed(js), TypeError, "This ReadableStream has already been read from.");
   auto eventsource = js.alloc<EventSource>(js);
   eventsource->run(js, kj::mv(readable), false /* No reconnection attempts */);
   return kj::mv(eventsource);
@@ -388,7 +388,7 @@ void EventSource::start(jsg::Lock& js) {
         }  // Extra else block to squash compiler warning
         }
 
-        KJ_IF_SOME(body, response->getBody()) {
+        KJ_IF_SOME(body, response->getBody(js)) {
         // Well, ok! We're ready to start trying to process the stream! We do so by
         // pumping the body into an EventSourceSink until the body is closed, canceled,
         // or errored.
@@ -441,7 +441,7 @@ kj::Maybe<jsg::Ref<T>> addRef(kj::Maybe<jsg::Ref<T>>& ref) {
 }  // namespace
 
 void EventSource::run(jsg::Lock& js,
-    jsg::Ref<ReadableStream> readable,
+    JsReadableStream readable,
     bool withReconnection,
     kj::Maybe<jsg::Ref<Response>> response,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher) {
@@ -453,7 +453,7 @@ void EventSource::run(jsg::Lock& js,
   }
 
   auto onSuccess =
-      JSG_VISITABLE_LAMBDA((self = JSG_THIS, readable = readable.addRef(), withReconnection,
+      JSG_VISITABLE_LAMBDA((self = JSG_THIS, readable = readable.addRef(js), withReconnection,
                                response = addRef(response), fetcher = addRef(fetcher)),
           (self, readable, response, fetcher), (jsg::Lock& js) {
             // The pump finished. Did the server disconnect? If so, try reconnecting if we can.
@@ -474,8 +474,9 @@ void EventSource::run(jsg::Lock& js,
   // pumping the body into an EventSourceSink until the body is closed, canceled,
   // or errored.
   context
-      .awaitIo(
-          js, processBody(context, readable->pumpTo(js, kj::heap<EventSourceSink>(*this), true)))
+      .awaitIo(js,
+          processBody(
+              context, readable.pumpTo(js, kj::heap<EventSourceSink>(*this), EndStream::YES)))
       .then(js, kj::mv(onSuccess), kj::mv(onFailed));
 }
 

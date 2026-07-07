@@ -81,8 +81,8 @@ jsg::JsArrayBuffer ExecOutput::getStderr(jsg::Lock& js) {
 ExecProcess::ExecProcess(jsg::Lock& js,
     IoContext& ioContext,
     jsg::Optional<jsg::Ref<WritableStream>> stdinStream,
-    jsg::Optional<jsg::Ref<ReadableStream>> stdoutStream,
-    jsg::Optional<jsg::Ref<ReadableStream>> stderrStream,
+    jsg::Optional<JsReadableStream> stdoutStream,
+    jsg::Optional<JsReadableStream> stderrStream,
     int pid,
     rpc::Container::ProcessHandle::Client handle,
     kj::Maybe<jsg::Ref<AbortSignal>> abortSignal)
@@ -121,12 +121,12 @@ jsg::Optional<jsg::Ref<WritableStream>> ExecProcess::getStdin() {
   return stdinStream.map([](jsg::Ref<WritableStream>& stream) { return stream.addRef(); });
 }
 
-jsg::Optional<jsg::Ref<ReadableStream>> ExecProcess::getStdout() {
-  return stdoutStream.map([](jsg::Ref<ReadableStream>& stream) { return stream.addRef(); });
+jsg::Optional<JsReadableStream> ExecProcess::getStdout(jsg::Lock& js) {
+  return stdoutStream.map([&](JsReadableStream& stream) { return stream.addRef(js); });
 }
 
-jsg::Optional<jsg::Ref<ReadableStream>> ExecProcess::getStderr() {
-  return stderrStream.map([](jsg::Ref<ReadableStream>& stream) { return stream.addRef(); });
+jsg::Optional<JsReadableStream> ExecProcess::getStderr(jsg::Lock& js) {
+  return stderrStream.map([&](JsReadableStream& stream) { return stream.addRef(js); });
 }
 
 void ExecProcess::ensureExitCodePromise(jsg::Lock& js) {
@@ -177,11 +177,10 @@ jsg::Promise<jsg::Ref<ExecOutput>> ExecProcess::output(jsg::Lock& js) {
 
   auto stdoutPromise = js.resolvedPromise(emptyByteArray());
   KJ_IF_SOME(stream, stdoutStream) {
-    JSG_REQUIRE(!stream->isDisturbed(), TypeError,
+    JSG_REQUIRE(!stream.isDisturbed(js), TypeError,
         "Cannot call output() after stdout has started being consumed.");
     stdoutPromise =
-        stream->getController()
-            .readAllBytes(js, IoContext::current().getLimitEnforcer().getBufferingLimit())
+        stream.arrayBuffer(js, IoContext::current().getLimitEnforcer().getBufferingLimit())
             .then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> bytes) {
       return bytes.getHandle(js).copy();
     });
@@ -189,10 +188,9 @@ jsg::Promise<jsg::Ref<ExecOutput>> ExecProcess::output(jsg::Lock& js) {
 
   auto stderrPromise = js.resolvedPromise(emptyByteArray());
   KJ_IF_SOME(stream, stderrStream) {
-    JSG_REQUIRE(!stream->isDisturbed(), TypeError,
+    JSG_REQUIRE(!stream.isDisturbed(js), TypeError,
         "Cannot call output() after stderr has started being consumed.");
-    stderrPromise = stream->getController()
-                        .readAllBytes(js, kj::maxValue)
+    stderrPromise = stream.arrayBuffer(js, kj::maxValue)
                         .then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> bytes) {
       return bytes.getHandle(js).copy();
     });
@@ -560,17 +558,17 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
     auto pid = process.getPid();
 
     // Init the ReadableStreams (stdout/stderr)
-    jsg::Optional<jsg::Ref<ReadableStream>> stdoutStream = kj::none;
+    jsg::Optional<JsReadableStream> stdoutStream = kj::none;
     KJ_IF_SOME(input, stdoutInput) {
       auto source = newSystemStream(kj::mv(input), StreamEncoding::IDENTITY, ioContext);
-      stdoutStream = js.alloc<ReadableStream>(ioContext, kj::mv(source));
+      stdoutStream = JsReadableStream::create(js, ioContext, kj::mv(source));
     }
 
     // stderrInput is only set if using "pipe" on stderr and not "combined"
-    jsg::Optional<jsg::Ref<ReadableStream>> stderrStream = kj::none;
+    jsg::Optional<JsReadableStream> stderrStream = kj::none;
     KJ_IF_SOME(input, stderrInput) {
       auto source = newSystemStream(kj::mv(input), StreamEncoding::IDENTITY, ioContext);
-      stderrStream = js.alloc<ReadableStream>(ioContext, kj::mv(source));
+      stderrStream = JsReadableStream::create(js, ioContext, kj::mv(source));
     }
 
     jsg::Optional<jsg::Ref<WritableStream>> stdinStream = kj::none;
@@ -586,11 +584,11 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
 
       KJ_SWITCH_ONEOF(stdinOption) {
         // user sets ReadableStream...
-        KJ_CASE_ONEOF(readable, jsg::Ref<ReadableStream>) {
+        KJ_CASE_ONEOF(readable, JsReadableStream) {
           auto sink = newSystemStream(kj::mv(stdinWriter), StreamEncoding::IDENTITY, ioContext);
           auto pipePromise =
-              (ioContext.waitForDeferredProxy(readable->pumpTo(js, kj::mv(sink), true)));
-          ioContext.addTask(pipePromise.attach(readable.addRef()));
+              (ioContext.waitForDeferredProxy(readable.pumpTo(js, kj::mv(sink), EndStream::YES)));
+          ioContext.addTask(pipePromise.attach(readable.addRef(js)));
         }
         // user sets "pipe"... they want to consume the API with the stdin WritableStream
         KJ_CASE_ONEOF(mode, kj::String) {

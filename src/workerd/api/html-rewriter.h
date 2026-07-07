@@ -119,7 +119,7 @@ class HTMLRewriter: public jsg::Object {
 };
 
 // A chunk of text or HTML which can be passed to content token mutation functions.
-using Content = kj::OneOf<kj::String, jsg::Ref<ReadableStream>, jsg::Ref<Response>>;
+using Content = kj::OneOf<kj::String, JsReadableStream, jsg::Ref<Response>>;
 // TODO(soon): Support ReadableStream/Response types. Requires fibers or lol-html saveable state.
 
 // Options bag which can be passed to content token mutation functions.
@@ -167,7 +167,8 @@ class HTMLRewriter::Token: public jsg::Object {
     // Dispatches calls to the underlying lol_html methods for each event (e.g. before, after, replace).
     // Handles replacements of each supported type (string, ReadableStream, Body).
     template <auto Func, auto StreamingFunc>
-    void rewriteContentGeneric(Content content, jsg::Optional<ContentOptions> options);
+    void rewriteContentGeneric(
+        jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options);
 
     CType& element;
     Rewriter& rewriter;
@@ -195,14 +196,15 @@ class Element final: public HTMLRewriter::Token {
   jsg::Ref<Element> setAttribute(kj::String name, kj::String value);
   jsg::Ref<Element> removeAttribute(kj::String name);
 
-  jsg::Ref<Element> before(Content content, jsg::Optional<ContentOptions> options);
-  jsg::Ref<Element> after(Content content, jsg::Optional<ContentOptions> options);
+  jsg::Ref<Element> before(jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options);
+  jsg::Ref<Element> after(jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options);
 
-  jsg::Ref<Element> prepend(Content content, jsg::Optional<ContentOptions> options);
-  jsg::Ref<Element> append(Content content, jsg::Optional<ContentOptions> options);
+  jsg::Ref<Element> prepend(jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options);
+  jsg::Ref<Element> append(jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options);
 
-  jsg::Ref<Element> replace(Content content, jsg::Optional<ContentOptions> options);
-  jsg::Ref<Element> setInnerContent(Content content, jsg::Optional<ContentOptions> options);
+  jsg::Ref<Element> replace(jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options);
+  jsg::Ref<Element> setInnerContent(
+      jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options);
 
   jsg::Ref<Element> remove();
   jsg::Ref<Element> removeAndKeepContent();
@@ -293,8 +295,8 @@ class EndTag final: public HTMLRewriter::Token {
   kj::String getName();
   void setName(kj::String);
 
-  jsg::Ref<EndTag> before(Content content, jsg::Optional<ContentOptions> options);
-  jsg::Ref<EndTag> after(Content content, jsg::Optional<ContentOptions> options);
+  jsg::Ref<EndTag> before(jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options);
+  jsg::Ref<EndTag> after(jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options);
   jsg::Ref<EndTag> remove();
 
   JSG_RESOURCE_TYPE(EndTag) {
@@ -365,9 +367,9 @@ class Text final: public HTMLRewriter::Token {
 
   bool getRemoved();
 
-  jsg::Ref<Text> before(Content content, jsg::Optional<ContentOptions> options);
-  jsg::Ref<Text> after(Content content, jsg::Optional<ContentOptions> options);
-  jsg::Ref<Text> replace(Content content, jsg::Optional<ContentOptions> options);
+  jsg::Ref<Text> before(jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options);
+  jsg::Ref<Text> after(jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options);
+  jsg::Ref<Text> replace(jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options);
   jsg::Ref<Text> remove();
 
   JSG_RESOURCE_TYPE(Text) {

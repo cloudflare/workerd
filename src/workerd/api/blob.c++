@@ -275,10 +275,10 @@ jsg::Promise<jsg::JsRef<jsg::JsString>> Blob::text(jsg::Lock& js) {
   return js.resolvedPromise(js.str(data.asChars()).addRef(js));
 }
 
-jsg::Ref<ReadableStream> Blob::stream(jsg::Lock& js) {
+JsReadableStream Blob::stream(jsg::Lock& js) {
   FeatureObserver::maybeRecordUse(FeatureObserver::Feature::BLOB_AS_STREAM);
-  return js.alloc<ReadableStream>(
-      IoContext::current(), streams::newMemorySource(data, kj::heap(JSG_THIS)));
+  return JsReadableStream::create(
+      js, IoContext::current(), streams::newMemorySource(data, kj::heap(JSG_THIS)));
 }
 
 // =======================================================================================

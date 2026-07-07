@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <workerd/api/streams/readable.h>
+#include <workerd/api/js-readable-stream.h>
 #include <workerd/api/streams/writable.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
@@ -65,7 +65,7 @@ class Socket: public jsg::Object {
       kj::Rc<kj::AsyncIoStream> connectionStream,
       kj::Maybe<kj::String> remoteAddress,
       kj::Maybe<kj::String> localAddress,
-      jsg::Ref<ReadableStream> readableParam,
+      JsReadableStream readableParam,
       jsg::Ref<WritableStream> writable,
       jsg::PromiseResolverPair<void> closedPrPair,
       kj::Promise<void> watchForDisconnectTask,
@@ -92,8 +92,8 @@ class Socket: public jsg::Object {
         openedPromiseCopy(openedPrPair.promise.whenResolved(js)),
         openedPromise(kj::mv(openedPrPair.promise)) {};
 
-  jsg::Ref<ReadableStream> getReadable() {
-    return readable.addRef();
+  JsReadableStream getReadable(jsg::Lock& js) {
+    return readable.addRef(js);
   }
   jsg::Ref<WritableStream> getWritable() {
     return writable.addRef();
@@ -168,7 +168,7 @@ class Socket: public jsg::Object {
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackFieldWithSize("connectionData", sizeof(IoOwn<ConnectionData>));
-    tracker.trackField("readable", readable);
+    readable.visitForMemoryInfo(tracker);
     tracker.trackField("writable", writable);
     tracker.trackField("closedResolver", closedResolver);
     tracker.trackField("closedPromiseCopy", closedPromiseCopy);
@@ -196,7 +196,7 @@ class Socket: public jsg::Object {
   };
   kj::Maybe<IoOwn<ConnectionData>> connectionData;
 
-  jsg::Ref<ReadableStream> readable;
+  JsReadableStream readable;
   jsg::Ref<WritableStream> writable;
   // This fulfiller is used to resolve the `closedPromise` below.
   jsg::Promise<void>::Resolver closedResolver;

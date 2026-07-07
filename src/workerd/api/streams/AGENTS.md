@@ -6,6 +6,11 @@ See `docs/streams.md` for narrative tutorial.
 
 ## ARCHITECTURE
 
+NOTE: C++ code outside this directory does not use `jsg::Ref<ReadableStream>` directly; it goes
+through the `JsReadableStream` abstraction in `src/workerd/api/js-readable-stream.{h,c++}`, which
+hides which ReadableStream implementation backs a given stream. New C++ consumers of readable
+streams should use that abstraction, not the types defined here.
+
 Dual implementation behind unified API:
 
 - **Internal** (`internal.h`): kj-backed, byte-only, single pending read, no JS queue

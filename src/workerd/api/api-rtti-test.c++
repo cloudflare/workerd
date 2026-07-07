@@ -45,5 +45,15 @@ KJ_TEST("ServiceWorkerGlobalScope") {
   KJ_EXPECT(builder.structure("workerd::api::DurableObjectId"_kj) != kj::none);
 }
 
+KJ_TEST("JsReadableStream delegates its RTTI to ReadableStream") {
+  // JsReadableStream declares `using JsgRttiDelegate = jsg::Ref<ReadableStream>`, so RTTI (and
+  // therefore generated TypeScript) must describe it exactly as it describes ReadableStream.
+  jsg::rtti::Builder builder((CompatibilityFlags::Reader()));
+  auto type = builder.type<JsReadableStream>();
+  KJ_ASSERT(type.isStructure());
+  KJ_EXPECT(type.getStructure().getFullyQualifiedName() == "workerd::api::ReadableStream"_kj);
+  KJ_EXPECT(builder.structure("workerd::api::ReadableStream"_kj) != kj::none);
+}
+
 }  // namespace
 }  // namespace workerd::api
