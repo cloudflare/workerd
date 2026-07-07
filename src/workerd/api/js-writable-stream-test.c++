@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Copyright (c) 2026 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
@@ -310,7 +310,9 @@ KJ_TEST("JsReadableStream pipeTo pipes into a JsWritableStream and closes it") {
 
     JsReadableStream source(js, kj::str(kData));
     auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
-    auto promise = source.pipeTo(js, destination);
+    // source and destination must outlive the pipe: capture them into the continuation so they
+    // are not destroyed when the lambda returns (the pipe's write loop still references them).
+    auto promise = source.pipeTo(js, destination).then(js, JSG_VISITABLE_LAMBDA((source = kj::mv(source), destination = kj::mv(destination)), (source, destination), (jsg::Lock& js){}));
     return env.context.awaitJs(js, kj::mv(promise));
   });
   KJ_EXPECT(state.written.asPtr() == kData.asBytes());
@@ -325,7 +327,7 @@ KJ_TEST("JsReadableStream pipeTo with preventClose leaves the destination open")
 
     JsReadableStream source(js, kj::str(kData));
     auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
-    auto promise = source.pipeTo(js, destination, PipeToOptions{.preventClose = true});
+    auto promise = source.pipeTo(js, destination, PipeToOptions{.preventClose = true}).then(js, JSG_VISITABLE_LAMBDA((source = kj::mv(source), destination = kj::mv(destination)), (source, destination), (jsg::Lock& js){}));
     return env.context.awaitJs(js, kj::mv(promise));
   });
   KJ_EXPECT(state.written.asPtr() == kData.asBytes());
@@ -413,7 +415,8 @@ KJ_TEST("JsReadableStream pipeThrough composes with pipeTo") {
 
     JsReadableStream source(js, kj::str(kData));
     auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
-    auto promise = source.pipeThrough(js, makeIdentityPair(js)).pipeTo(js, destination);
+    auto piped = source.pipeThrough(js, makeIdentityPair(js));
+    auto promise = piped.pipeTo(js, destination).then(js, JSG_VISITABLE_LAMBDA((source = kj::mv(source), piped = kj::mv(piped), destination = kj::mv(destination)), (source, piped, destination), (jsg::Lock& js){}));
     return env.context.awaitJs(js, kj::mv(promise));
   });
   KJ_EXPECT(state.written.asPtr() == kData.asBytes());
