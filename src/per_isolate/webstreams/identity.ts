@@ -43,7 +43,7 @@ const {
   PromiseWithResolvers,
   Symbol,
   TextEncoder,
-  textEncoderEncode,
+  TextEncoderEncode,
   TypeError,
   TypedArrayPrototypeGetBuffer,
   TypedArrayPrototypeGetByteLength,
@@ -112,7 +112,7 @@ const textEncoderInstance = new TextEncoder();
 function validateAndCopyChunk(chunk: unknown): Uint8Array | undefined {
   if (typeof chunk === 'string') {
     if (chunk.length === 0) return undefined;
-    return textEncoderEncode(textEncoderInstance, chunk);
+    return TextEncoderEncode(textEncoderInstance, chunk);
   }
   if (isArrayBuffer(chunk) || isSharedArrayBuffer(chunk)) {
     // Wrap in Uint8Array for a uniform code path — Uint8Array accepts

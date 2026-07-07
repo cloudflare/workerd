@@ -633,12 +633,12 @@ const EventTargetRemoveEventListener = uncurryThis(
 const TextDecoderCtor = globalThis.TextDecoder;
 const TextEncoderCtor = globalThis.TextEncoder;
 
-const textEncoderEncode = uncurryThis(TextEncoderCtor.prototype.encode) as (
+const TextEncoderEncode = uncurryThis(TextEncoderCtor.prototype.encode) as (
   encoder: TextEncoder,
   input: string
 ) => Uint8Array;
 
-const textDecoderDecode = uncurryThis(TextDecoderCtor.prototype.decode) as (
+const TextDecoderDecode = uncurryThis(TextDecoderCtor.prototype.decode) as (
   decoder: TextDecoder,
   input?: BufferSource,
   options?: { stream?: boolean }
@@ -646,14 +646,14 @@ const textDecoderDecode = uncurryThis(TextDecoderCtor.prototype.decode) as (
 
 // TextDecoder readonly properties use the JSG layout trap: prototype
 // accessors under modern compat, own data properties under old dates.
-const textDecoderEncodingGet = captureJsgGetter<
+const TextDecoderEncodingGet = captureJsgGetter<
   (decoder: TextDecoder) => string
 >(TextDecoderCtor.prototype, 'encoding');
-const textDecoderFatalGet = captureJsgGetter<(decoder: TextDecoder) => boolean>(
+const TextDecoderFatalGet = captureJsgGetter<(decoder: TextDecoder) => boolean>(
   TextDecoderCtor.prototype,
   'fatal'
 );
-const textDecoderIgnoreBOMGet = captureJsgGetter<
+const TextDecoderIgnoreBOMGet = captureJsgGetter<
   (decoder: TextDecoder) => boolean
 >(TextDecoderCtor.prototype, 'ignoreBOM');
 
@@ -825,11 +825,11 @@ module.exports = ObjectFreeze({
   AbortSignalReasonGet,
 
   // TextDecoder/TextEncoder
-  textDecoderEncodingGet,
-  textDecoderFatalGet,
-  textDecoderIgnoreBOMGet,
-  textEncoderEncode,
-  textDecoderDecode,
+  TextDecoderEncodingGet,
+  TextDecoderFatalGet,
+  TextDecoderIgnoreBOMGet,
+  TextEncoderEncode,
+  TextDecoderDecode,
 
   // Safe types — use normal method syntax, resistant to prototype pollution
   SafeMap,

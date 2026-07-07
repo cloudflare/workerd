@@ -22,13 +22,13 @@ const {
   StringPrototypeCharCodeAt,
   StringPrototypeSlice,
   SymbolToStringTag,
-  textDecoderEncodingGet,
+  TextDecoderEncodingGet,
   TextDecoder,
   TextEncoder,
-  textDecoderFatalGet,
-  textDecoderIgnoreBOMGet,
-  textEncoderEncode,
-  textDecoderDecode,
+  TextDecoderFatalGet,
+  TextDecoderIgnoreBOMGet,
+  TextEncoderEncode,
+  TextDecoderDecode,
   TypeError,
   uncurryThis,
 } = primordials;
@@ -105,18 +105,18 @@ class TextEncoderStream {
           ) as string;
           const prefix = StringPrototypeSlice(text, 0, len - 1) as string;
           if (prefix.length > 0) {
-            controller.enqueue(textEncoderEncode(encoder, prefix));
+            controller.enqueue(TextEncoderEncode(encoder, prefix));
           }
         } else {
           self.#pendingHighSurrogate = '';
-          controller.enqueue(textEncoderEncode(encoder, text));
+          controller.enqueue(TextEncoderEncode(encoder, text));
         }
       },
       flush(controller: { enqueue: (c: Uint8Array) => void }) {
         // A pending high surrogate at end-of-stream is replaced with
         // U+FFFD (the replacement character).
         if (self.#pendingHighSurrogate !== '') {
-          controller.enqueue(textEncoderEncode(encoder, '\uFFFD'));
+          controller.enqueue(TextEncoderEncode(encoder, '\uFFFD'));
           self.#pendingHighSurrogate = '';
         }
       },
@@ -178,7 +178,7 @@ class TextDecoderStream {
             'TextDecoderStream: chunk must be a BufferSource'
           );
         }
-        const decoded = textDecoderDecode(decoder, chunk as BufferSource, {
+        const decoded = TextDecoderDecode(decoder, chunk as BufferSource, {
           stream: true,
         });
         if (decoded.length > 0) {
@@ -188,7 +188,7 @@ class TextDecoderStream {
       flush(controller: { enqueue: (c: string) => void }) {
         // Final decode: flushes any incomplete multi-byte sequences.
         // In fatal mode this throws if the sequence is incomplete.
-        const decoded = textDecoderDecode(decoder);
+        const decoded = TextDecoderDecode(decoder);
         if (decoded.length > 0) {
           controller.enqueue(decoded);
         }
@@ -198,17 +198,17 @@ class TextDecoderStream {
 
   get encoding(): string {
     assertIsTextDecoderStream(this);
-    return textDecoderEncodingGet(this.#decoder);
+    return TextDecoderEncodingGet(this.#decoder);
   }
 
   get fatal(): boolean {
     assertIsTextDecoderStream(this);
-    return textDecoderFatalGet(this.#decoder);
+    return TextDecoderFatalGet(this.#decoder);
   }
 
   get ignoreBOM(): boolean {
     assertIsTextDecoderStream(this);
-    return textDecoderIgnoreBOMGet(this.#decoder);
+    return TextDecoderIgnoreBOMGet(this.#decoder);
   }
 
   get readable(): ReadableStreamType<string> {
