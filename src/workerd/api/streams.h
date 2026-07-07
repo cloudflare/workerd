@@ -8,6 +8,7 @@
 // This is the most over-engineered spec...
 
 #include <workerd/api/js-readable-stream.h>
+#include <workerd/api/js-writable-stream.h>
 #include <workerd/api/streams/compression.h>
 #include <workerd/api/streams/encoding.h>
 #include <workerd/api/streams/identity-transform-stream.h>
