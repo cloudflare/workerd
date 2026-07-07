@@ -52,6 +52,7 @@ if (compatFlags['typescript_implemented_streams']) {
     FixedLengthStream,
     TextEncoderStream,
     TextDecoderStream,
+    ReadableStreamDrainingReader,
   } = require('webstreams/streams');
 
   ObjectDefineProperties(globalThis, {
@@ -175,4 +176,19 @@ if (compatFlags['typescript_implemented_streams']) {
       value: TextDecoderStream,
     },
   });
+
+  // Internal-only: expose the DrainingReader for testing expectedLength
+  // pass-through (Content-Length integration). Gated by a separate
+  // experimental flag that may never lose its experimental annotation.
+  if (compatFlags['expose_draining_reader']) {
+    ObjectDefineProperties(globalThis, {
+      ReadableStreamDrainingReader: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: ReadableStreamDrainingReader,
+      },
+    });
+  }
 }

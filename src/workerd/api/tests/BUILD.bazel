@@ -1148,6 +1148,12 @@ wd_test(
     data = ["ts-webstreams-test.js"],
 )
 
+wd_test(
+    src = "ts-identity-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["ts-identity-streams-test.js"],
+)
+
 sh_test(
     name = "abortIsolate",
     size = "medium",
