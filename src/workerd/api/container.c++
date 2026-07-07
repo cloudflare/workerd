@@ -80,7 +80,7 @@ jsg::JsArrayBuffer ExecOutput::getStderr(jsg::Lock& js) {
 
 ExecProcess::ExecProcess(jsg::Lock& js,
     IoContext& ioContext,
-    jsg::Optional<jsg::Ref<WritableStream>> stdinStream,
+    jsg::Optional<JsWritableStream> stdinStream,
     jsg::Optional<JsReadableStream> stdoutStream,
     jsg::Optional<JsReadableStream> stderrStream,
     int pid,
@@ -117,8 +117,8 @@ ExecProcess::ExecProcess(jsg::Lock& js,
   }
 }
 
-jsg::Optional<jsg::Ref<WritableStream>> ExecProcess::getStdin() {
-  return stdinStream.map([](jsg::Ref<WritableStream>& stream) { return stream.addRef(); });
+jsg::Optional<JsWritableStream> ExecProcess::getStdin(jsg::Lock& js) {
+  return stdinStream.map([&](JsWritableStream& stream) { return stream.addRef(js); });
 }
 
 jsg::Optional<JsReadableStream> ExecProcess::getStdout(jsg::Lock& js) {
@@ -577,7 +577,7 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
       stderrStream = JsReadableStream::create(js, ioContext, kj::mv(source));
     }
 
-    jsg::Optional<jsg::Ref<WritableStream>> stdinStream = kj::none;
+    jsg::Optional<JsWritableStream> stdinStream = kj::none;
 
     // If stdin is undefined, the JS API promises immediate EOF. We still use the pipelined stdin()
     // capability so exec() doesn't wait on an extra round-trip.
@@ -601,7 +601,7 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
           JSG_REQUIRE(
               mode == "pipe", TypeError, "stdin must be a ReadableStream or the string \"pipe\".");
           auto sink = newSystemStream(kj::mv(stdinWriter), StreamEncoding::IDENTITY, ioContext);
-          auto writable = js.alloc<WritableStream>(ioContext, kj::mv(sink),
+          auto writable = JsWritableStream::create(js, ioContext, kj::mv(sink),
               ioContext.getMetrics().tryCreateWritableByteStreamObserver());
           stdinStream = kj::mv(writable);
         }
