@@ -147,10 +147,7 @@ type ImageMetadataFilterOperators = {
 };
 
 type ImageMetadataFilterValue =
-  | string
-  | number
-  | boolean
-  | ImageMetadataFilterOperators;
+  string | number | boolean | ImageMetadataFilterOperators;
 
 interface ImageListOptions {
   limit?: number;
@@ -280,11 +277,16 @@ type ImageTransformationOutputOptions = {
   encoding?: 'base64';
 };
 
+type ImageTransformationResponseOptions = {
+  headers?: HeadersInit;
+};
+
 interface ImageTransformationResult {
   /**
    * The image as a response, ready to store in cache or return to users
+   * @param options Options that apply to the returned response, e.g. additional headers
    */
-  response(): Response;
+  response(options?: ImageTransformationResponseOptions): Response;
   /**
    * The content type of the returned image
    */
