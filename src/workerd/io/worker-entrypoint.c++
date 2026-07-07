@@ -369,6 +369,16 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
   TRACE_EVENT("workerd", "WorkerEntrypoint::request()", "url", url.cStr(),
       PERFETTO_FLOW_FROM_POINTER(this));
 
+  // Bind `waitUntilTasks` to the coroutine frame so the KJ_DEFER below doesn't reach through
+  // `this`. That DEFER runs from the coroutine's destructor, which on some subrequest paths
+  // fires after `WorkerEntrypoint` itself has been freed (the promise chain owning the coroutine
+  // can outlive the `Own<WorkerInterface>` — e.g. a fire-and-forget `env.QUEUE.send()` whose
+  // caller returned early; see queue-send-redirect-hang-test). Reading `this->waitUntilTasks`
+  // in that window yields a null reference that faults inside `TaskSet::add`.
+  // TODO(cleanup): the DEFER still reads other `this->*` members. A proper fix would tie the
+  //   entrypoint's lifetime to the coroutine's rather than defending each field individually.
+  kj::TaskSet& waitUntilTasks = this->waitUntilTasks;
+
   // ----- Stage 1: Set up per-request state. -----
 
   auto incomingRequest =
