@@ -952,17 +952,21 @@ void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value
 #endif
 
 jsg::JsString ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String data) {
-  auto decoded = kj::decodeBase64(data.asArray());
+  auto size = simdutf::maximal_binary_length_from_base64(data.begin(), data.size());
+  auto decoded = kj::heapArray<kj::byte>(size);
+  auto result = simdutf::base64_to_binary(
+      data.begin(), data.size(), decoded.asChars().begin(), simdutf::base64_default);
 
-  JSG_REQUIRE(!decoded.hadErrors, DOMInvalidCharacterError,
+  JSG_REQUIRE(result.error == simdutf::SUCCESS, DOMInvalidCharacterError,
       "atob() called with invalid base64-encoded data. (Only whitespace, '+', '/', alphanumeric "
       "ASCII, and up to two terminal '=' signs when the input data length is divisible by 4 are "
       "allowed.)");
 
   // Similar to btoa() taking a v8::Value, we return a v8::String directly, as this allows us to
-  // construct a string from the non-nul-terminated array returned from decodeBase64(). This avoids
+  // construct a string from the non-nul-terminated array returned from base64_to_binary(). This avoids
   // making a copy purely to append a nul byte.
-  return js.str(decoded.asBytes());
+  KJ_ASSERT(result.count <= size);
+  return js.str(decoded.first(result.count));
 }
 
 void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, jsg::Function<void()> task) {
