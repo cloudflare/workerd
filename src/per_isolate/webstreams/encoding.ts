@@ -21,6 +21,7 @@ const {
   ObjectGetOwnPropertyDescriptor,
   StringPrototypeCharCodeAt,
   StringPrototypeSlice,
+  SymbolToStringTag,
   textDecoderEncodingGet,
   TextDecoder,
   TextEncoder,
@@ -57,6 +58,9 @@ const transformStreamWritableGet = getProtoGetter<
   (stream: object) => WritableStreamType<unknown>
 >(TransformStream.prototype, 'writable');
 
+let assertIsTextEncoderStream: (self: TextEncoderStream) => void;
+let assertIsTextDecoderStream: (self: TextDecoderStream) => void;
+
 // ---------------------------------------------------------------------------
 // TextEncoderStream
 //
@@ -70,6 +74,12 @@ const transformStreamWritableGet = getProtoGetter<
 class TextEncoderStream {
   #transform: InstanceType<typeof TransformStream>;
   #pendingHighSurrogate: string = '';
+
+  static {
+    assertIsTextEncoderStream = function (self: TextEncoderStream) {
+      if (!(#transform in self)) throw new TypeError('Illegal invocation');
+    };
+  }
 
   constructor() {
     const self = this;
@@ -114,18 +124,19 @@ class TextEncoderStream {
   }
 
   get encoding(): string {
+    assertIsTextEncoderStream(this);
     return 'utf-8';
   }
 
   get readable(): ReadableStreamType<Uint8Array> {
-    if (!(#transform in this)) throw new TypeError('Illegal invocation');
+    assertIsTextEncoderStream(this);
     return transformStreamReadableGet(
       this.#transform
     ) as ReadableStreamType<Uint8Array>;
   }
 
   get writable(): WritableStreamType<string> {
-    if (!(#transform in this)) throw new TypeError('Illegal invocation');
+    assertIsTextEncoderStream(this);
     return transformStreamWritableGet(
       this.#transform
     ) as WritableStreamType<string>;
@@ -149,6 +160,12 @@ interface TextDecoderStreamOptions {
 class TextDecoderStream {
   #transform: InstanceType<typeof TransformStream>;
   #decoder: TextDecoder;
+
+  static {
+    assertIsTextDecoderStream = function (self: TextDecoderStream) {
+      if (!(#decoder in self)) throw new TypeError('Illegal invocation');
+    };
+  }
 
   constructor(label: string = 'utf-8', options?: TextDecoderStreamOptions) {
     const decoder = new TextDecoder(label, options);
@@ -180,47 +197,63 @@ class TextDecoderStream {
   }
 
   get encoding(): string {
-    if (!(#decoder in this)) throw new TypeError('Illegal invocation');
+    assertIsTextDecoderStream(this);
     return textDecoderEncodingGet(this.#decoder);
   }
 
   get fatal(): boolean {
-    if (!(#decoder in this)) throw new TypeError('Illegal invocation');
+    assertIsTextDecoderStream(this);
     return textDecoderFatalGet(this.#decoder);
   }
 
   get ignoreBOM(): boolean {
-    if (!(#decoder in this)) throw new TypeError('Illegal invocation');
+    assertIsTextDecoderStream(this);
     return textDecoderIgnoreBOMGet(this.#decoder);
   }
 
   get readable(): ReadableStreamType<string> {
-    if (!(#transform in this)) throw new TypeError('Illegal invocation');
+    assertIsTextDecoderStream(this);
     return transformStreamReadableGet(
       this.#transform
     ) as ReadableStreamType<string>;
   }
 
   get writable(): WritableStreamType<BufferSource> {
-    if (!(#transform in this)) throw new TypeError('Illegal invocation');
+    assertIsTextDecoderStream(this);
     return transformStreamWritableGet(
       this.#transform
     ) as WritableStreamType<BufferSource>;
   }
 }
 
+const kEnumerable = { __proto__: null, enumerable: true };
+
 ObjectDefineProperties(TextEncoderStream.prototype, {
-  encoding: { enumerable: true },
-  readable: { enumerable: true },
-  writable: { enumerable: true },
+  encoding: kEnumerable,
+  readable: kEnumerable,
+  writable: kEnumerable,
+  [SymbolToStringTag]: {
+    __proto__: null,
+    value: 'TextEncoderStream',
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  },
 });
 
 ObjectDefineProperties(TextDecoderStream.prototype, {
-  encoding: { enumerable: true },
-  fatal: { enumerable: true },
-  ignoreBOM: { enumerable: true },
-  readable: { enumerable: true },
-  writable: { enumerable: true },
+  encoding: kEnumerable,
+  fatal: kEnumerable,
+  ignoreBOM: kEnumerable,
+  readable: kEnumerable,
+  writable: kEnumerable,
+  [SymbolToStringTag]: {
+    __proto__: null,
+    value: 'TextDecoderStream',
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  },
 });
 
 module.exports = {
