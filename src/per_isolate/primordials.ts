@@ -26,7 +26,9 @@
 //   Getters:           {Type}Prototype{Prop}Get   e.g. MapPrototypeSizeGet
 
 // --- Foundation: capture call/bind FIRST, before anything else ---
-const { call, bind } = Function.prototype;
+const ObjectPrototype = Object.prototype;
+const FunctionPrototype = Function.prototype;
+const { call, bind } = FunctionPrototype;
 
 // uncurryThis(Proto.method) returns (thisArg, ...args) => Proto.method.call(thisArg, ...args)
 // Safe even if Function.prototype.call is later polluted.
@@ -73,7 +75,7 @@ const WeakSetCtor = WeakSet;
 // by per-isolate bootstrap scripts.
 
 // Function
-const FunctionPrototypeBind = uncurryThis(Function.prototype.bind);
+const FunctionPrototypeBind = uncurryThis(FunctionPrototype.bind);
 
 // Object
 const ObjectCreate = Object.create;
@@ -191,6 +193,16 @@ ObjectDefineProperty(SafePromise, 'withResolvers', {
   configurable: false,
 });
 
+// Regular-Promise static methods (captured before user code runs).
+// Use these for user-facing promises. SafePromise.resolve/reject/withResolvers
+// remain available for internal-only promises that need species protection.
+const PromiseResolve = FunctionPrototypeBind(PromiseCtor.resolve, PromiseCtor);
+const PromiseReject = FunctionPrototypeBind(PromiseCtor.reject, PromiseCtor);
+const PromiseWithResolvers = FunctionPrototypeBind(
+  PromiseCtor.withResolvers,
+  PromiseCtor
+);
+
 // Array
 const ArrayIsArray = Array.isArray;
 const ArrayFrom = Array.from;
@@ -305,12 +317,16 @@ const SetIteratorPrototypeNext: (iter: any) => IteratorResult<any> =
   );
 
 // ArrayBuffer
+const ArrayBufferPrototypeSlice = uncurryThis(ArrayBuffer.prototype.slice);
 const ArrayBufferPrototypeTransfer = uncurryThis(
   ArrayBuffer.prototype.transfer
 );
 const ArrayBufferPrototypeByteLengthGet = getProtoGetter<
   (buffer: ArrayBuffer) => number
 >(ArrayBuffer.prototype, 'byteLength');
+const ArrayBufferPrototypeDetachedGet = getProtoGetter<
+  (buffer: ArrayBuffer) => boolean
+>(ArrayBuffer.prototype, 'detached');
 
 // TypedArray — instance methods live on %TypedArray%.prototype, the shared
 // prototype of all typed array types. Capturing via Uint8Array.prototype
@@ -579,6 +595,68 @@ class SafeArrayIterator<T> {
   }
 }
 
+// Runtime built-ins that we also need to capture
+function captureJsgGetter<T>(proto: object, name: string): T {
+  const get = ObjectGetOwnPropertyDescriptor(proto, name)?.get;
+  if (get !== undefined) {
+    return uncurryThis(get) as T;
+  }
+  return ((instance: Record<string, unknown>) =>
+    instance[name]) as unknown as T;
+}
+
+const AbortControllerCtor = globalThis.AbortController;
+const AbortControllerAbort = uncurryThis(
+  AbortControllerCtor.prototype.abort
+) as (controller: AbortController, reason?: unknown) => void;
+const AbortControllerSignalGet = captureJsgGetter<
+  (controller: AbortController) => AbortSignal
+>(AbortControllerCtor.prototype, 'signal');
+
+const AbortSignalCtor = globalThis.AbortSignal;
+const AbortSignalAbortedGet = captureJsgGetter<
+  (signal: AbortSignal) => boolean
+>(AbortSignalCtor.prototype, 'aborted');
+const AbortSignalReasonGet = captureJsgGetter<(signal: AbortSignal) => unknown>(
+  AbortSignalCtor.prototype,
+  'reason'
+);
+
+const EventTargetCtor = globalThis.EventTarget;
+const EventTargetAddEventListener = uncurryThis(
+  EventTargetCtor.prototype.addEventListener
+) as (target: object, type: string, listener: () => void) => void;
+const EventTargetRemoveEventListener = uncurryThis(
+  EventTargetCtor.prototype.removeEventListener
+) as (target: object, type: string, listener: () => void) => void;
+
+const TextDecoderCtor = globalThis.TextDecoder;
+const TextEncoderCtor = globalThis.TextEncoder;
+
+const textEncoderEncode = uncurryThis(TextEncoderCtor.prototype.encode) as (
+  encoder: TextEncoder,
+  input: string
+) => Uint8Array;
+
+const textDecoderDecode = uncurryThis(TextDecoderCtor.prototype.decode) as (
+  decoder: TextDecoder,
+  input?: BufferSource,
+  options?: { stream?: boolean }
+) => string;
+
+// TextDecoder readonly properties use the JSG layout trap: prototype
+// accessors under modern compat, own data properties under old dates.
+const textDecoderEncodingGet = captureJsgGetter<
+  (decoder: TextDecoder) => string
+>(TextDecoderCtor.prototype, 'encoding');
+const textDecoderFatalGet = captureJsgGetter<(decoder: TextDecoder) => boolean>(
+  TextDecoderCtor.prototype,
+  'fatal'
+);
+const textDecoderIgnoreBOMGet = captureJsgGetter<
+  (decoder: TextDecoder) => boolean
+>(TextDecoderCtor.prototype, 'ignoreBOM');
+
 // Freeze the exports object to prevent accidental mutation by bootstrap scripts.
 // Uses the captured ObjectFreeze, not the potentially-polluted global.
 module.exports = ObjectFreeze({
@@ -587,6 +665,8 @@ module.exports = ObjectFreeze({
   applyBind,
 
   // Global types
+  AbortController: AbortControllerCtor,
+  AbortSignal: AbortSignalCtor,
   AggregateError: AggregateErrorCtor,
   Array: ArrayCtor,
   ArrayBuffer: ArrayBufferCtor,
@@ -602,6 +682,8 @@ module.exports = ObjectFreeze({
   RegExp: RegExpCtor,
   Set: SetCtor,
   Symbol: SymbolCtor,
+  TextDecoder: TextDecoderCtor,
+  TextEncoder: TextEncoderCtor,
   TypeError: TypeErrorCtor,
   Uint8Array: Uint8ArrayCtor,
   WeakMap: WeakMapCtor,
@@ -609,9 +691,11 @@ module.exports = ObjectFreeze({
   WeakSet: WeakSetCtor,
 
   // Function
+  FunctionPrototype,
   FunctionPrototypeBind,
 
   // Object
+  ObjectPrototype,
   ObjectCreate,
   ObjectDefineProperty,
   ObjectDefineProperties,
@@ -624,10 +708,15 @@ module.exports = ObjectFreeze({
   // %AsyncIteratorPrototype%
   AsyncIteratorPrototype,
 
-  // Promise
+  // Promise — regular Promise (for user-facing promises)
+  PromiseResolve,
+  PromiseReject,
+  PromiseWithResolvers,
+  // Promise — captured prototype methods
   PromisePrototypeThen,
   PromisePrototypeCatch,
   PromisePrototypeFinally,
+  // Promise — SafePromise (for internal-only promises needing species protection)
   SafePromise,
 
   // Array
@@ -693,8 +782,10 @@ module.exports = ObjectFreeze({
   NumberIsNaN,
 
   // ArrayBuffer
+  ArrayBufferPrototypeSlice,
   ArrayBufferPrototypeTransfer,
   ArrayBufferPrototypeByteLengthGet,
+  ArrayBufferPrototypeDetachedGet,
 
   // TypedArray
   TypedArrayPrototypeSet,
@@ -721,6 +812,24 @@ module.exports = ObjectFreeze({
   SymbolAsyncIterator,
   SymbolIterator,
   SymbolToStringTag,
+
+  // EventTarget
+  EventTargetAddEventListener,
+  EventTargetRemoveEventListener,
+
+  // AbortController
+  AbortControllerCtor,
+  AbortControllerAbort,
+  AbortControllerSignalGet,
+  AbortSignalAbortedGet,
+  AbortSignalReasonGet,
+
+  // TextDecoder/TextEncoder
+  textDecoderEncodingGet,
+  textDecoderFatalGet,
+  textDecoderIgnoreBOMGet,
+  textEncoderEncode,
+  textDecoderDecode,
 
   // Safe types — use normal method syntax, resistant to prototype pollution
   SafeMap,

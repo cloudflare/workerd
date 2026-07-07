@@ -1133,6 +1133,12 @@ wd_test(
     data = ["htmlrewriter-transform-cancel-test.js"],
 )
 
+wd_test(
+    src = "ts-webstreams-test.wd-test",
+    args = ["--experimental"],
+    data = ["ts-webstreams-test.js"],
+)
+
 sh_test(
     name = "abortIsolate",
     size = "medium",

@@ -1,3 +1,4 @@
+'use strict';
 // Per-isolate bootstrap entry point.
 // This script runs synchronously at context creation time,
 // before any user code.
@@ -30,3 +31,148 @@
 // const foo = require('./foo');
 // (globalThis as any).Foo = foo.bootstrapFoo(compatFlags);
 //
+const { ObjectDefineProperties } = primordials;
+
+if (compatFlags['typescript_implemented_streams']) {
+  const {
+    ReadableStream,
+    ReadableStreamDefaultReader,
+    ReadableStreamBYOBReader,
+    ReadableStreamDefaultController,
+    ReadableByteStreamController,
+    ReadableStreamBYOBRequest,
+    ByteLengthQueuingStrategy,
+    CountQueuingStrategy,
+    WritableStream,
+    WritableStreamDefaultWriter,
+    WritableStreamDefaultController,
+    TransformStream,
+    TransformStreamDefaultController,
+    IdentityTransformStream,
+    FixedLengthStream,
+    TextEncoderStream,
+    TextDecoderStream,
+  } = require('webstreams/streams');
+
+  ObjectDefineProperties(globalThis, {
+    ReadableStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: ReadableStream,
+    },
+    ReadableStreamDefaultReader: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: ReadableStreamDefaultReader,
+    },
+    ReadableStreamBYOBReader: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: ReadableStreamBYOBReader,
+    },
+    ReadableStreamDefaultController: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: ReadableStreamDefaultController,
+    },
+    ReadableByteStreamController: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: ReadableByteStreamController,
+    },
+    ReadableStreamBYOBRequest: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: ReadableStreamBYOBRequest,
+    },
+    ByteLengthQueuingStrategy: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: ByteLengthQueuingStrategy,
+    },
+    CountQueuingStrategy: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: CountQueuingStrategy,
+    },
+    WritableStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: WritableStream,
+    },
+    WritableStreamDefaultWriter: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: WritableStreamDefaultWriter,
+    },
+    WritableStreamDefaultController: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: WritableStreamDefaultController,
+    },
+    TransformStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: TransformStream,
+    },
+    TransformStreamDefaultController: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: TransformStreamDefaultController,
+    },
+    IdentityTransformStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: IdentityTransformStream,
+    },
+    FixedLengthStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: FixedLengthStream,
+    },
+    TextEncoderStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: TextEncoderStream,
+    },
+    TextDecoderStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: TextDecoderStream,
+    },
+  });
+}
