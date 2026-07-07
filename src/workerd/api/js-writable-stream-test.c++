@@ -3,12 +3,22 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/api/js-writable-stream.h>
+#include <workerd/api/streams/identity-transform-stream.h>
+#include <workerd/jsg/type-wrapper.h>
 #include <workerd/tests/test-fixture.h>
 
 #include <kj/test.h>
 
 namespace workerd::api {
 namespace {
+
+// The full wrap/unwrap template bodies are only instantiated once these types appear in
+// JSG-visible signatures; until then, at least pin the SelfConvertible signatures.
+static_assert(jsg::SelfConvertible<JsWritableStream>);
+static_assert(jsg::SelfConvertible<JsReadableWritablePair>);
+
+constexpr uint64_t kLimit = 1024 * 1024;
+constexpr kj::StringPtr kData = "hello world"_kj;
 
 // The user-visible message produced when performing a lock-checked operation on a stream that is
 // locked to a writer. This must match the message produced by WritableStream exactly.
@@ -279,6 +289,180 @@ KJ_TEST("JsWritableStream setPendingClosure is safe on live and null streams") {
     auto stream = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
     stream.setPendingClosure(js);
     KJ_EXPECT(!stream.isNull());
+  });
+}
+
+// Build a JsReadableWritablePair from the two ends of an IdentityTransformStream, the way the
+// two-tier unwrap's brand-first path would.
+JsReadableWritablePair makeIdentityPair(jsg::Lock& js) {
+  auto transform = IdentityTransformStream::constructor(js);
+  return JsReadableWritablePair{
+    .readable = JsReadableStream(transform->getReadable()),
+    .writable = JsWritableStream(transform->getWritable()),
+  };
+}
+
+KJ_TEST("JsReadableStream pipeTo pipes into a JsWritableStream and closes it") {
+  TestFixture testFixture;
+  SinkState state;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    JsReadableStream source(js, kj::str(kData));
+    auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
+    auto promise = source.pipeTo(js, destination);
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(state.written.asPtr() == kData.asBytes());
+  KJ_EXPECT(state.ended);
+}
+
+KJ_TEST("JsReadableStream pipeTo with preventClose leaves the destination open") {
+  TestFixture testFixture;
+  SinkState state;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    JsReadableStream source(js, kj::str(kData));
+    auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
+    auto promise = source.pipeTo(js, destination, PipeToOptions{.preventClose = true});
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(state.written.asPtr() == kData.asBytes());
+  KJ_EXPECT(!state.ended);
+}
+
+KJ_TEST("JsReadableStream pipeTo rejects when the source is locked") {
+  TestFixture testFixture;
+  SinkState state;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // detach() leaves the original as a locked husk, which is a convenient way to produce a
+    // locked stream without a reader.
+    JsReadableStream source(js, kj::str(kData));
+    auto detached = source.detach(js);
+    KJ_EXPECT(source.isLocked(js));
+
+    auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
+    auto promise = source.pipeTo(js, destination).then(js, [](jsg::Lock& js) {
+      KJ_FAIL_REQUIRE("expected pipeTo() from a locked source to reject");
+    }, [](jsg::Lock& js, jsg::Value exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("currently locked to a reader"), e.getDescription());
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(!state.ended);
+}
+
+KJ_TEST("JsReadableStream pipeTo rejects when the destination is locked") {
+  TestFixture testFixture;
+  SinkState state;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    JsReadableStream source(js, kj::str(kData));
+    auto ws = js.alloc<WritableStream>(env.context, state.makeSink(), kj::none);
+    auto writer = ws->getWriter(js);
+    JsWritableStream destination(kj::mv(ws));
+
+    auto promise = source.pipeTo(js, destination).then(js, [](jsg::Lock& js) {
+      KJ_FAIL_REQUIRE("expected pipeTo() into a locked destination to reject");
+    }, [](jsg::Lock& js, jsg::Value exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      // Note: unlike every other occurrence of this message, ReadableStream::pipeTo's
+      // destination-locked rejection has no trailing period. That text is load-bearing.
+      KJ_EXPECT(e.getDescription() ==
+              "jsg.TypeError: This WritableStream is currently locked to a writer"_kj,
+          e.getDescription());
+    });
+    return env.context.awaitJs(js, kj::mv(promise)).attach(kj::mv(writer));
+  });
+}
+
+KJ_TEST("JsReadableStream pipeThrough pipes through an identity transform") {
+  TestFixture testFixture;
+  testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    JsReadableStream source(js, kj::str(kData));
+    auto result = source.pipeThrough(js, makeIdentityPair(js));
+    KJ_EXPECT(!result.isNull());
+    // The source is now locked into the pipe.
+    KJ_EXPECT(source.isLocked(js));
+
+    auto promise = result.text(js, kLimit).then(js, [](jsg::Lock& js, kj::String text) {
+      KJ_EXPECT(text == kData);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream pipeThrough composes with pipeTo") {
+  // The readable returned by pipeThrough() feeds directly into further pipeline calls:
+  // source.pipeThrough(transform).pipeTo(destination). (Chaining two IdentityTransformStreams
+  // back to back is NOT covered here: the legacy C++ implementation rejects direct
+  // inter-IdentityTransformStream pipes -- "Inter-TransformStream ReadableStream.pipeTo() is
+  // not implemented", identity-transform-stream.c++ -- a pre-existing implementation
+  // limitation, identical in JavaScript, and not this abstraction's behavior to pin.)
+  TestFixture testFixture;
+  SinkState state;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    JsReadableStream source(js, kj::str(kData));
+    auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
+    auto promise = source.pipeThrough(js, makeIdentityPair(js)).pipeTo(js, destination);
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(state.written.asPtr() == kData.asBytes());
+  KJ_EXPECT(state.ended);
+}
+
+KJ_TEST("JsReadableStream pipeThrough throws synchronously when the source is locked") {
+  TestFixture testFixture;
+  testFixture.runInIoContext([](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    JsReadableStream source(js, kj::str(kData));
+    auto detached = source.detach(js);
+    KJ_EXPECT(source.isLocked(js));
+
+    js.tryCatch([&] {
+      source.pipeThrough(js, makeIdentityPair(js));
+      KJ_FAIL_REQUIRE("expected pipeThrough() from a locked source to throw");
+    }, [&](jsg::Value exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("currently locked to a reader"), e.getDescription());
+    });
+  });
+}
+
+KJ_TEST("JsReadableStream pipeThrough throws synchronously when the transform writable is locked") {
+  TestFixture testFixture;
+  testFixture.runInIoContext([](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    JsReadableStream source(js, kj::str(kData));
+
+    auto transform = IdentityTransformStream::constructor(js);
+    auto writable = transform->getWritable();
+    auto writer = writable->getWriter(js);
+    JsReadableWritablePair pair{
+      .readable = JsReadableStream(transform->getReadable()),
+      .writable = JsWritableStream(kj::mv(writable)),
+    };
+
+    js.tryCatch([&] {
+      source.pipeThrough(js, kj::mv(pair));
+      KJ_FAIL_REQUIRE("expected pipeThrough() into a locked transform writable to throw");
+    }, [&](jsg::Value exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      // pipeThrough's synchronous destination-locked message carries the trailing period,
+      // unlike pipeTo's rejection.
+      KJ_EXPECT(e.getDescription().contains(kWriterLockedError), e.getDescription());
+    });
   });
 }
 

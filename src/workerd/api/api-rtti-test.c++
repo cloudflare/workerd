@@ -65,5 +65,17 @@ KJ_TEST("JsWritableStream delegates its RTTI to WritableStream") {
   KJ_EXPECT(builder.structure("workerd::api::WritableStream"_kj) != kj::none);
 }
 
+KJ_TEST("JsReadableWritablePair delegates its RTTI to ReadableStream::Transform") {
+  // JsReadableWritablePair declares `using JsgRttiDelegate = ReadableStream::Transform`, so RTTI
+  // (and therefore generated TypeScript) must describe it exactly as it describes the
+  // ReadableWritablePair-shaped Transform struct.
+  jsg::rtti::Builder builder((CompatibilityFlags::Reader()));
+  auto type = builder.type<JsReadableWritablePair>();
+  KJ_ASSERT(type.isStructure());
+  KJ_EXPECT(
+      type.getStructure().getFullyQualifiedName() == "workerd::api::ReadableStream::Transform"_kj,
+      type.getStructure().getFullyQualifiedName());
+}
+
 }  // namespace
 }  // namespace workerd::api

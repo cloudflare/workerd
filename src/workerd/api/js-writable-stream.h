@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <workerd/api/js-readable-stream.h>
+#include <workerd/api/streams/transform.h>
 #include <workerd/api/streams/writable.h>
 
 #include <kj/common.h>
@@ -175,6 +177,87 @@ class JsWritableStream final {
   explicit JsWritableStream(Impl impl): impl(kj::mv(impl)) {}
 
   kj::Maybe<Impl> impl;
+
+  // JsReadableStream::pipeTo()/pipeThrough() dispatch on the backend of both pipe ends, which
+  // requires access to the destination's internal arm.
+  friend class JsReadableStream;
+};
+
+// A transform endpoint pair: a readable side and a writable side, typically (but not
+// necessarily) the two ends of a TransformStream, without prescribing which backend implements
+// them. This is the abstraction-level equivalent of the spec's ReadableWritablePair dictionary
+// (and of the ReadableStream::Transform JSG_STRUCT), and is the argument type of
+// JsReadableStream::pipeThrough().
+struct JsReadableWritablePair {
+  JsReadableStream readable;
+  JsWritableStream writable;
+
+  // Describe this type to RTTI (and therefore to generated TypeScript) exactly as
+  // ReadableStream::Transform (whose TS override is ReadableWritablePair). See the
+  // delegated-RTTI support in jsg/rtti.h.
+  using JsgRttiDelegate = ReadableStream::Transform;
+
+  static v8::Local<v8::Value> jsgWrap(auto& typeWrapper,
+      jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      JsReadableWritablePair pair) {
+    // Dictionary semantics: produce a plain { readable, writable } object, wrapping each member
+    // through its own conversion. Null members trip the members' own null-wrap asserts.
+    auto obj = js.obj();
+    obj.set(js, "readable"_kj,
+        jsg::JsValue(typeWrapper.wrap(js, context, creator, kj::mv(pair.readable))));
+    obj.set(js, "writable"_kj,
+        jsg::JsValue(typeWrapper.wrap(js, context, creator, kj::mv(pair.writable))));
+    return obj;
+  }
+
+  static kj::Maybe<JsReadableWritablePair> jsgTryUnwrap(auto& typeWrapper,
+      jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    // Tier 1 (brand-first): a genuine C++ TransformStream (or subclass, e.g.
+    // IdentityTransformStream) is used directly via its C++ accessors. No JS property reads
+    // occur, so instance-shadowed readable/writable getters are ignored -- exactly the semantics
+    // a jsg::Ref<TransformStream> parameter has today.
+    KJ_IF_SOME(transform,
+        typeWrapper.tryUnwrap(
+            js, context, handle, static_cast<jsg::Ref<TransformStream>*>(nullptr), parentObject)) {
+      return JsReadableWritablePair{
+        .readable = JsReadableStream(transform->getReadable()),
+        .writable = JsWritableStream(transform->getWritable()),
+      };
+    }
+
+    // Tier 2 (dictionary-shaped fallback): read the readable/writable properties (in
+    // ReadableStream::Transform field order) and unwrap each through the member abstractions'
+    // own conversions. This is what keeps the pair backend-agnostic: brand checks live in the
+    // members (including, later, the TypeScript implementation's). Either member failing fails
+    // the whole unwrap.
+    if (!handle->IsObject()) {
+      return kj::none;
+    }
+    auto obj = jsg::JsObject(handle.As<v8::Object>());
+    auto readable = obj.get(js, "readable"_kj);
+    auto writable = obj.get(js, "writable"_kj);
+    KJ_IF_SOME(r,
+        typeWrapper.tryUnwrap(
+            js, context, readable, static_cast<JsReadableStream*>(nullptr), parentObject)) {
+      KJ_IF_SOME(w,
+          typeWrapper.tryUnwrap(
+              js, context, writable, static_cast<JsWritableStream*>(nullptr), parentObject)) {
+        return JsReadableWritablePair{
+          .readable = kj::mv(r),
+          .writable = kj::mv(w),
+        };
+      }
+    }
+    return kj::none;
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor);
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 };
 
 }  // namespace workerd::api

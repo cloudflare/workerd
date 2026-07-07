@@ -200,4 +200,13 @@ void JsWritableStream::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   }
 }
 
+void JsReadableWritablePair::visitForGc(jsg::GcVisitor& visitor) {
+  visitor.visit(readable, writable);
+}
+
+void JsReadableWritablePair::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  readable.visitForMemoryInfo(tracker);
+  writable.visitForMemoryInfo(tracker);
+}
+
 }  // namespace workerd::api
