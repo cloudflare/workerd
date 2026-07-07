@@ -172,6 +172,19 @@ void JsWritableStream::detach(jsg::Lock& js) {
   }
 }
 
+jsg::Ref<WritableStream> JsWritableStream::getUnderlyingForTest(jsg::Lock& js) {
+  auto& i = KJ_ASSERT_NONNULL(impl, "getUnderlyingForTest() called on a null JsWritableStream");
+  KJ_SWITCH_ONEOF(i.stream) {
+    KJ_CASE_ONEOF(stream, jsg::Ref<WritableStream>) {
+      return stream.addRef();
+    }
+    KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+      KJ_UNIMPLEMENTED("TypeScript-backed WritableStream is not yet supported");
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 void JsWritableStream::visitForGc(jsg::GcVisitor& visitor) {
   KJ_IF_SOME(i, impl) {
     KJ_SWITCH_ONEOF(i.stream) {
