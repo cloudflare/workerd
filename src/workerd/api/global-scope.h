@@ -261,7 +261,20 @@ class AccessContext: public jsg::Object {
 
   // Fetches the full identity information for the authenticated user. Resolves to `undefined`
   // if no identity is associated with the request (e.g. service-token authentication).
-  jsg::Promise<jsg::Optional<jsg::JsValue>> getIdentity(jsg::Lock& js);
+  //
+  // Returns `jsg::Promise<jsg::Value>` (a persistent V8 ref) rather than `jsg::JsValue`: the
+  // resolved value must survive across microtask boundaries until the awaiting code runs, and a
+  // transient `jsg::JsValue` (a `v8::Local`) would dangle. The `undefined` case is represented as a
+  // JS `undefined` value. The TS type is pinned to `CloudflareAccessIdentity | undefined` via the
+  // JSG_TS_OVERRIDE below.
+  //
+  // `rpcPropHandler` wraps the `JsRpcProperty` returned by `Fetcher::getRpcMethodInternal` into a
+  // JS value; `getIdentityFnHandler` then adapts it into a `jsg::Function` so we can invoke the
+  // RPC method as a C++ functor without hand-rolling raw `v8::Function` casts. Both are injected
+  // automatically by JSG.
+  jsg::Promise<jsg::Value> getIdentity(jsg::Lock& js,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value()>>& getIdentityFnHandler);
 
   JSG_RESOURCE_TYPE(AccessContext) {
     JSG_READONLY_INSTANCE_PROPERTY(aud, getAud);

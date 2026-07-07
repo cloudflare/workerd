@@ -14,6 +14,7 @@
 #include <workerd/api/fuzzilli.h>
 #endif
 #include <workerd/api/hibernatable-web-socket.h>
+#include <workerd/api/http.h>
 #include <workerd/api/restore.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/sockets.h>
@@ -106,15 +107,30 @@ kj::StringPtr AccessContext::getAud() {
   return info->getAudience();
 }
 
-jsg::Promise<jsg::Optional<jsg::JsValue>> AccessContext::getIdentity(jsg::Lock& js) {
-  auto& ioctx = IoContext::current();
-  return ioctx.awaitIo(js, info->getIdentity(),
-      [](jsg::Lock& js, kj::Maybe<kj::String> json) -> jsg::Optional<jsg::JsValue> {
-    KJ_IF_SOME(j, json) {
-      return jsg::JsValue(js.parseJson(j).getHandle(js));
-    }
-    return kj::none;
-  });
+jsg::Promise<jsg::Value> AccessContext::getIdentity(jsg::Lock& js,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value()>>& getIdentityFnHandler) {
+  // Invoke the `getIdentity` JS-RPC method on the Access binding worker via a Fetcher bound to the
+  // embedder-supplied subrequest channel. If no identity service channel is available for this
+  // request (e.g. service-token auth), there is no identity to fetch, so resolve to `undefined`.
+  // Otherwise the binding worker's result (or error) propagates to the caller unchanged.
+  KJ_IF_SOME(channel, info->getIdentityServiceChannel()) {
+    auto fetcher =
+        js.alloc<Fetcher>(channel, Fetcher::RequiresHostAndProtocol::NO, true /* isInHouse */);
+    auto rpcProp = JSG_REQUIRE_NONNULL(fetcher->getRpcMethodInternal(js, kj::str("getIdentity")),
+        Error, "Access binding worker is missing the getIdentity method");
+
+    auto getIdentityFn = JSG_REQUIRE_NONNULL(
+        getIdentityFnHandler.tryUnwrap(js, rpcPropHandler.wrap(js, kj::mv(rpcProp))), Error,
+        "Access binding worker getIdentity is not callable");
+
+    // The RPC method returns a `JsRpcPromise` (custom thenable). Normalize it into a real promise
+    // via a resolver so we're independent of the `unwrapCustomThenables` compat flag.
+    auto paf = js.newPromiseAndResolver<jsg::Value>();
+    paf.resolver.resolve(js, getIdentityFn(js));
+    return kj::mv(paf.promise);
+  }
+  return js.resolvedPromise(jsg::Value(js.v8Isolate, v8::Undefined(js.v8Isolate)));
 }
 
 jsg::Optional<jsg::Ref<AccessContext>> ExecutionContext::getAccess(jsg::Lock& js) {
