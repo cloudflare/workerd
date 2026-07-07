@@ -126,6 +126,18 @@ wpt_test(
 )
 
 wpt_test(
+    name = "encoding-ts",
+    size = "large",
+    autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
+    compat_flags = [
+        "typescript_implemented_streams",
+        "text_decoder_cjk_decoder",
+    ],
+    config = "encoding-test-ts.ts",
+    wpt_directory = "@wpt//:encoding@module",
+)
+
+wpt_test(
     name = "fs",
     size = "large",
     compat_flags = ["enable_web_file_system"],
