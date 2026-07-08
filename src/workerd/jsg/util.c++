@@ -155,6 +155,15 @@ bool setDurableObjectResetError(v8::Isolate* isolate, v8::Local<v8::Value>& exce
   return jsg::check(obj->Set(isolate->GetCurrentContext(),
       jsg::v8StrIntern(isolate, "durableObjectReset"_kj), v8::True(isolate)));
 }
+
+bool setDurableObjectIdError(
+    v8::Isolate* isolate, v8::Local<v8::Value>& exception, kj::StringPtr durableObjectId) {
+  KJ_ASSERT(exception->IsObject());
+  auto obj = exception.As<v8::Object>();
+  return jsg::check(obj->Set(isolate->GetCurrentContext(),
+      jsg::v8StrIntern(isolate, "durableObjectId"_kj), jsg::v8Str(isolate, durableObjectId)));
+}
+
 struct DecodedException {
   v8::Local<v8::Value> handle;
   bool isInternal;
@@ -220,6 +229,10 @@ DecodedException decodeTunneledException(
 
     if (result.isDurableObjectReset) {
       setDurableObjectResetError(isolate, result.handle);
+    }
+
+    KJ_IF_SOME(durableObjectId, getDurableObjectId(exception)) {
+      setDurableObjectIdError(isolate, result.handle, durableObjectId);
     }
   };
 
@@ -324,6 +337,10 @@ DecodedException decodeTunneledException(
 
     if (tunneledInfo.isDurableObjectReset) {
       setDurableObjectResetError(isolate, result.handle);
+    }
+
+    KJ_IF_SOME(durableObjectId, getDurableObjectId(exception)) {
+      setDurableObjectIdError(isolate, result.handle, durableObjectId);
     }
   } else {
     // For everything return a generic error with an internal error id.
@@ -434,6 +451,18 @@ void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value>
     //    this case we cannot serialize the exception, but again we'll just move on without the
     //    annotation.
   }
+}
+
+void addDurableObjectId(kj::Exception& exception, kj::StringPtr durableObjectId) {
+  exception.setDetail(DURABLE_OBJECT_EXCEPTION_METADATA_DETAIL_ID,
+      kj::heapArray(durableObjectId.asBytes()));
+}
+
+kj::Maybe<kj::String> getDurableObjectId(const kj::Exception& exception) {
+  KJ_IF_SOME(detail, exception.getDetail(DURABLE_OBJECT_EXCEPTION_METADATA_DETAIL_ID)) {
+    return kj::str(detail.asChars());
+  }
+  return kj::none;
 }
 
 void addJsExceptionMetadata(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle) {

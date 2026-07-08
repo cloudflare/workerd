@@ -109,12 +109,22 @@ constexpr kj::Exception::DetailTypeId REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID =
 constexpr kj::Exception::DetailTypeId REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID =
     0x7f6e0bece261e8eeull;
 
+// Detail type for Durable Object metadata on exceptions propagated out of actor execution.
+constexpr kj::Exception::DetailTypeId DURABLE_OBJECT_EXCEPTION_METADATA_DETAIL_ID =
+    0xb6e3c4156a4f9d22ull;
+
 // Add a serialized copy of the exception value to the KJ exception, as a "detail".
 void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle);
 
 // Extract and add JavaScript exception metadata (error type and stack trace) to the KJ exception.
 // Serializes using Cap'n Proto schema defined in exception-metadata.capnp.
 void addJsExceptionMetadata(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle);
+
+// Attach the Durable Object id that produced an exception before it is propagated over RPC.
+void addDurableObjectId(kj::Exception& exception, kj::StringPtr durableObjectId);
+
+// Read Durable Object id metadata attached by addDurableObjectId(), if present.
+kj::Maybe<kj::String> getDurableObjectId(const kj::Exception& exception);
 
 struct TypeErrorContext {
   enum Kind : uint8_t {

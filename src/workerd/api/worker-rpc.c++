@@ -16,6 +16,39 @@
 
 namespace workerd::api {
 
+namespace {
+
+kj::Maybe<kj::String> getCurrentDurableObjectId() {
+  KJ_IF_SOME(context, IoContext::tryCurrent()) {
+    KJ_IF_SOME(actor, context.getActor()) {
+      KJ_IF_SOME(id, actor.getId().tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
+        return id->toString();
+      }
+    }
+  }
+  return kj::none;
+}
+
+void maybeAddDurableObjectId(kj::Exception& exception, kj::Maybe<kj::StringPtr> durableObjectId) {
+  if (jsg::isExceptionFromInputGateBroken(exception.getDescription())) return;
+  KJ_IF_SOME(id, durableObjectId) {
+    jsg::addDurableObjectId(exception, id);
+  }
+}
+
+// callPipeline rejects from the JS error path before js.exceptionToKj() creates a KJ exception,
+// so this overload annotates the live Error object directly.
+void maybeAddDurableObjectId(
+    jsg::Lock& js, jsg::Value& error, kj::Maybe<kj::StringPtr> durableObjectId) {
+  if (!error.getHandle(js)->IsObject()) return;
+  KJ_IF_SOME(id, durableObjectId) {
+    jsg::check(error.getHandle(js).As<v8::Object>()->Set(js.v8Context(),
+        jsg::v8StrIntern(js.v8Isolate, "durableObjectId"_kj), jsg::v8Str(js.v8Isolate, id)));
+  }
+}
+
+}  // namespace
+
 capnp::Orphan<capnp::List<rpc::JsValue::External>> RpcSerializerExternalHandler::build(
     capnp::Orphanage orphanage) {
   auto result = orphanage.newOrphan<capnp::List<rpc::JsValue::External>>(externals.size());
@@ -976,7 +1009,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   // makeReentryCallback() to guard against the possibility that the IoContext is canceled before
   // or during a call.
   JsRpcTargetBase(IoContext& ctx, MayOutliveIncomingRequest)
-      : enterIsolateAndCall(ctx.makeReentryCallback<IoContext::TOP_UP>(
+      : durableObjectId(getCurrentDurableObjectId()),
+        enterIsolateAndCall(ctx.makeReentryCallback<IoContext::TOP_UP>(
             [this, &ctx](Worker::Lock& lock, CallContext callContext) {
               return callImpl(lock, ctx, callContext);
             })),
@@ -985,7 +1019,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   // Constructor use by EntrypointJsRpcTarget, which is revoked and destroyed before the IoContext
   // can possibly be canceled. It can just use ctx.run().
   JsRpcTargetBase(IoContext& ctx, CantOutliveIncomingRequest)
-      : enterIsolateAndCall([this, &ctx](CallContext callContext) {
+      : durableObjectId(getCurrentDurableObjectId()),
+        enterIsolateAndCall([this, &ctx](CallContext callContext) {
           // Note: No need to topUpActor() since this is the start of a top-level request, so the
           // actor will already have been topped up by IncomingRequest::delivered().
           return ctx.run([this, &ctx, callContext](Worker::Lock& lock) mutable {
@@ -1019,7 +1054,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
     co_await kj::yield();
 
     // Try to execute the requested method.
-    co_return co_await enterIsolateAndCall(callContext).catch_([](kj::Exception&& e) {
+    co_return co_await enterIsolateAndCall(callContext).catch_([this](kj::Exception&& e) {
+      maybeAddDurableObjectId(e, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
       if (jsg::isTunneledException(e.getDescription())) {
         // Annotate exceptions in RPC worker calls as remote exceptions.
         auto description = jsg::stripRemoteExceptionPrefix(e.getDescription());
@@ -1052,6 +1088,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
  private:
   virtual void maybeSetJsRpcInfo(IoContext& ctx, const kj::ConstString& methodNameForTrace) = 0;
+
+  kj::Maybe<kj::String> durableObjectId;
 
   // Function which enters the isolate lock and IoContext and then invokes callImpl(). Created
   // using IoContext::makeReentryCallback().
@@ -1191,7 +1229,9 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
         // as a result of the promise being rejected). This will implicitly dispose the param
         // stubs.
       }),
-                  ctx.addFunctor([callPipelineFulfillerRef](jsg::Lock& js, jsg::Value&& error) {
+                  ctx.addFunctor([callPipelineFulfillerRef, durableObjectId = getCurrentDurableObjectId()](
+                          jsg::Lock& js, jsg::Value&& error) {
+        maybeAddDurableObjectId(js, error, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
         // If we set up a `callPipeline` early, we have to make sure it propagates the error.
         // (Otherwise we get a PromiseFulfiller error instead, which is pretty useless...)
         KJ_IF_SOME(cpf, callPipelineFulfillerRef) {
