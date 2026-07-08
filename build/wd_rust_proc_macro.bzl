@@ -45,8 +45,10 @@ def wd_rust_proc_macro(
             # our tests are usually very heavy and do not support concurrent invocation
             "RUST_TEST_THREADS": "1",
         } | test_env,
+        experimental_use_cc_common_link = 1,
         tags = test_tags + ["no-coverage"],
         deps = test_deps,
+        link_deps = ["@@//deps:rust_runtime", "//build/deps:linkopts_default"],
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
