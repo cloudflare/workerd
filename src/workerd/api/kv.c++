@@ -648,11 +648,6 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
         traceContext.setTag("cloudflare.kv.query.value_type"_kjc, "text"_kjc);
       }
       KJ_CASE_ONEOF(data, kj::Array<byte>) {
-        // `data` aliases the V8 BackingStore via jsg::asBytes().  The async
-        // write() below runs after context.waitForOutputLocks() has released
-        // the isolate lock, relinquishing any MPK keys.  Copy the data while
-        // we have the key.
-        data = kj::heapArray(data.asPtr());
         expectedBodySize = static_cast<uint64_t>(data.size());
         traceContext.setTag("cloudflare.kv.query.value_type"_kjc, "ArrayBuffer"_kjc);
       }
