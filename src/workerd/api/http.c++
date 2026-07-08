@@ -1562,7 +1562,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       SubrequestBodyRewindable(jsRequest->canRewindBody()));
 
   // Get client and trace context (if needed) in one clean call
-  auto clientWithTracing = fetcher->getClientWithTracing(ioContext, jsRequest->serializeCfBlobJson(js), "fetch"_kjc);
+  auto clientWithTracing =
+      fetcher->getClientWithTracing(ioContext, jsRequest->serializeCfBlobJson(js), "fetch"_kjc);
   auto traceContext = kj::mv(clientWithTracing.traceContext);
 
   // TODO(cleanup): Don't convert to HttpClient. Use the HttpService interface instead. This
@@ -2132,26 +2133,37 @@ kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethodInternal(jsg::Lock& js, 
   return js.alloc<JsRpcProperty>(JSG_THIS, kj::mv(name));
 }
 
-rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(
+kj::LiteralStringConst Fetcher::getRpcTargetKind() {
+  return "fetcher"_kjc;
+}
+
+JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(
     jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
   auto& ioContext = IoContext::current();
-  auto worker = getClient(ioContext, kj::none, "jsRpcSession"_kjc);
-  auto event = kj::heap<api::JsRpcSessionCustomEvent>(
-      JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
+
+  // The "jsRpcSession" trace context is attached to the customEvent task below so it covers the
+  // whole session. The per-call jsRpcCall span nests under this session in both the internal and
+  // user trace trees.
+  auto clientWithTracing = getClientWithTracing(ioContext, kj::none, "jsRpcSession"_kjc);
+  kj::Maybe<TraceContextParent> callSpanParents = clientWithTracing.traceContext.map(
+      [](TraceContext& tc) { return tc.getSpanParents(); });
+  auto worker = kj::mv(clientWithTracing.client);
+  auto event = kj::heap<api::JsRpcSessionCustomEvent>(JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
 
   auto result = event->getCap();
 
   // Arrange to cancel the CustomEvent if our I/O context is destroyed. But otherwise, we don't
   // actually care about the result of the event. If it throws, the membrane will already have
-  // propagated the exception to any RPC calls that we're waiting on, so we even ignore errors
-  // here -- otherwise they'll end up logged as "uncaught exceptions" even if they were, in fact,
-  // caught elsewhere.
-  ioContext.addTask(worker->customEvent(kj::mv(event)).attach(kj::mv(worker)).then([](auto&&) {
-  }, [](kj::Exception&&) {}));
+  // propagated the exception to any RPC calls that we're waiting on, so we even ignore errors here
+  // -- otherwise they'll end up logged as "uncaught exceptions" even if they were, in fact, caught
+  // elsewhere.
+  ioContext.addTask(worker->customEvent(kj::mv(event))
+          .attach(kj::mv(worker), kj::mv(clientWithTracing.traceContext))
+          .then([](auto&&) {}, [](kj::Exception&&) {}));
 
   // (Don't extend `path` because we're the root.)
 
-  return result;
+  return {.client = kj::mv(result), .callSpanParents = kj::mv(callSpanParents)};
 }
 
 void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
@@ -2482,15 +2494,35 @@ jsg::Promise<Fetcher::ScheduledResult> Fetcher::scheduled(
 
 kj::Own<WorkerInterface> Fetcher::getClient(
     IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName) {
-  auto clientWithTracing = getClientWithTracing(ioContext, kj::mv(cfStr), kj::mv(operationName));
+  auto clientWithTracing = getClientWithTracing(
+      ioContext, kj::mv(cfStr), kj::mv(operationName));
   return clientWithTracing.client.attach(kj::mv(clientWithTracing.traceContext));
 }
 
-Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
-    IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName) {
+Fetcher::ClientWithTracing Fetcher::getClientWithTracing(IoContext& ioContext,
+    kj::Maybe<kj::String> cfStr,
+    kj::ConstString operationName) {
+  return buildClient(ioContext, kj::mv(cfStr), kj::mv(operationName));
+}
+
+Fetcher::ClientWithTracing Fetcher::wrapWithInnerSpan(
+    OutgoingFactory::Result result, kj::ConstString operationName) {
+  KJ_IF_SOME(parents, result.spanParents) {
+    // Factories populate `spanParents` unconditionally. Only build the inner span when tracing is
+    // actually observed; otherwise returning a (non-recording) TraceContext would still force the
+    // fetch hot path to eagerly evaluate span tags (method, URL, etc.) that end up discarded.
+    if (parents.isObserved()) {
+      return ClientWithTracing{kj::mv(result.client), parents.newChild(kj::mv(operationName))};
+    }
+  }
+  return ClientWithTracing{kj::mv(result.client), kj::none};
+}
+
+Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
+    kj::Maybe<kj::String> cfStr,
+    kj::ConstString operationName) {
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
-      // For channels, create trace context
       auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
       auto client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext);
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
@@ -2510,17 +2542,15 @@ Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
     KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
-      // Outgoing factories are responsible for routing through getSubrequestNoChecks() (or
-      // getSubrequest()) internally if they create HTTP connections, to ensure external memory
-      // adjustment and other subrequest accounting are applied.
-      auto client = outgoingFactory->newSingleUseClient(kj::mv(cfStr));
-      return ClientWithTracing{kj::mv(client), kj::none};
+      // The factory creates its own outer dispatch span (e.g. durable_object_subrequest)
+      // and exposes it as `result.spanParents`. Nest our inner span under it so the trace
+      // tree shows `outerSpan -> operationName`.
+      auto result = outgoingFactory->newSingleUseClient(kj::mv(cfStr));
+      return wrapWithInnerSpan(kj::mv(result), kj::mv(operationName));
     }
     KJ_CASE_ONEOF(outgoingFactory, kj::Own<CrossContextOutgoingFactory>) {
-      // Same as OutgoingFactory above -- the factory is responsible for routing through
-      // getSubrequestNoChecks() internally.
-      auto client = outgoingFactory->newSingleUseClient(ioContext, kj::mv(cfStr));
-      return ClientWithTracing{kj::mv(client), kj::none};
+      auto result = outgoingFactory->newSingleUseClient(ioContext, kj::mv(cfStr));
+      return wrapWithInnerSpan(kj::mv(result), kj::mv(operationName));
     }
   }
   KJ_UNREACHABLE;

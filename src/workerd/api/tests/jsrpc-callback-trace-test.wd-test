@@ -1,0 +1,30 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Regression test for JSRPC tracing: a callback passed as an RPC argument, when invoked by the
+# callee, must produce a jsRpcCall span nested under the method's server-side jsRpcCall span.
+# The nesting is asserted in the tail worker's test() handler.
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "jsrpc-callback-trace-test", worker = .mainWorker),
+    (name = "tail", worker = .tailWorker),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "jsrpc-callback-trace-test.js")
+  ],
+  compatibilityFlags = ["nodejs_compat", "experimental", "rpc"],
+  bindings = [
+    (name = "CallbackService", service = (name = "jsrpc-callback-trace-test", entrypoint = "CallbackService")),
+  ],
+  streamingTails = ["tail"],
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "jsrpc-callback-trace-test-tail.js")
+  ],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+);

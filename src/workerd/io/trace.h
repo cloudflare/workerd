@@ -1315,6 +1315,35 @@ inline SpanBuilder SpanBuilder::newChild(
       kj::mv(operationName), startTime);
 }
 
+class TraceContext;
+
+// Pair of span parents (internal + user) used to express "open new spans nested
+// under these". Doesn't own SpanBuilders, unlike TraceContext.
+class TraceContextParent {
+ public:
+  TraceContextParent(SpanParent internalSpan, SpanParent userSpan)
+      : internalSpan(kj::mv(internalSpan)),
+        userSpan(kj::mv(userSpan)) {}
+  TraceContextParent(TraceContextParent&& other) = default;
+  TraceContextParent& operator=(TraceContextParent&& other) = default;
+  KJ_DISALLOW_COPY(TraceContextParent);
+
+  TraceContextParent addRef() {
+    return TraceContextParent(internalSpan.addRef(), userSpan.addRef());
+  }
+
+  // Useful to skip unnecessary work (e.g. creating child spans) when not observed.
+  bool isObserved() {
+    return internalSpan.isObserved() || userSpan.isObserved();
+  }
+
+  [[nodiscard]] TraceContext newChild(kj::ConstString operationName);
+
+ private:
+  SpanParent internalSpan;
+  SpanParent userSpan;
+};
+
 // TraceContext to keep track of user tracing/existing tracing better
 class TraceContext {
  public:
@@ -1339,10 +1368,31 @@ class TraceContext {
     return SpanParent(userSpan);
   }
 
+  TraceContextParent getSpanParents() {
+    return TraceContextParent(SpanParent(span), SpanParent(userSpan));
+  }
+
+  // Like getSpanParents(), but returns kj::none when neither span is observed. Use this when the
+  // parents may be retained beyond the current call (e.g. stored on a returned stub/promise):
+  // storing nothing on the untraced path avoids holding span state, while the traced path still
+  // nests follow-up calls correctly.
+  kj::Maybe<TraceContextParent> getSpanParentsIfObserved() {
+    if (!isObserved()) return kj::none;
+    return getSpanParents();
+  }
+
  private:
   SpanBuilder span;
   SpanBuilder userSpan;
 };
+
+inline TraceContext TraceContextParent::newChild(kj::ConstString operationName) {
+  // newChild() consumes its operationName argument, so clone it for the internal child and move
+  // the original into the user child.
+  auto internalChild = internalSpan.newChild(operationName.clone());
+  auto userChild = userSpan.newChild(kj::mv(operationName));
+  return TraceContext(kj::mv(internalChild), kj::mv(userChild));
+}
 
 // RAII object that measures the time duration over its lifetime. It tags this duration onto a
 // given request span using a specified tag name. Ideal for automatically tracking and logging

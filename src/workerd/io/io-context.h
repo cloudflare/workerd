@@ -856,6 +856,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
     // The tracing context to use for the subrequest if tracing is enabled.
     kj::Maybe<TraceContext&> existingTraceContext;
+
   };
 
   // Wraps a WorkerInterface factory with subrequest accounting: tracing, optional metrics wrapping,

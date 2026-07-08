@@ -288,7 +288,15 @@ class Fetcher: public JsRpcClientProvider {
   //   is almost the same thing.
   class OutgoingFactory {
    public:
-    virtual kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) = 0;
+    struct Result {
+      kj::Own<WorkerInterface> client;
+      // Parents of the dispatch-site span (e.g. durable_object_subrequest) that the
+      // caller can use to nest an inner operation span underneath. SpanParent holds an
+      // owning refcount on the underlying SpanObserver, so these are independently
+      // valid regardless of `client`'s lifetime. kj::none if no span was created.
+      kj::Maybe<TraceContextParent> spanParents;
+    };
+    virtual Result newSingleUseClient(kj::Maybe<kj::String> cfStr) = 0;
 
     // Get a `SubrequestChannel` representing this Fetcher. This is used especially when the
     // Fetcher is being passed to another isolate.
@@ -306,7 +314,7 @@ class Fetcher: public JsRpcClientProvider {
   // IoContext::getSubrequestNoChecks() internally.
   class CrossContextOutgoingFactory {
    public:
-    virtual kj::Own<WorkerInterface> newSingleUseClient(
+    virtual OutgoingFactory::Result newSingleUseClient(
         IoContext& context, kj::Maybe<kj::String> cfStr) = 0;
 
     virtual kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& context) {
@@ -333,7 +341,7 @@ class Fetcher: public JsRpcClientProvider {
         requiresHost(requiresHost),
         isInHouse(isInHouse) {}
 
-  // Returns an `WorkerInterface` that is only valid for the lifetime of the current
+  // Returns a `WorkerInterface` that is only valid for the lifetime of the current
   // `IoContext`.
   kj::Own<WorkerInterface> getClient(
       IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
@@ -344,9 +352,11 @@ class Fetcher: public JsRpcClientProvider {
     kj::Maybe<TraceContext> traceContext;
   };
 
-  // Get client and optionally create trace context, all in one call
-  ClientWithTracing getClientWithTracing(
-      IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
+  // Get client and optionally create trace context, all in one call.
+  //
+  [[nodiscard]] ClientWithTracing getClientWithTracing(IoContext& ioContext,
+      kj::Maybe<kj::String> cfStr,
+      kj::ConstString operationName);
 
   // Get a SubrequestChannel representing this Fetcher.
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);
@@ -438,8 +448,9 @@ class Fetcher: public JsRpcClientProvider {
     return getRpcMethod(js, kj::mv(name));
   }
 
-  rpc::JsRpcTarget::Client getClientForOneCall(
-      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+  ClientForOneCall getClientForOneCall(jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+
+  kj::LiteralStringConst getRpcTargetKind() override;
 
   JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
     // WARNING: New JSG_METHODs on Fetcher must be gated via compatibility flag to prevent
@@ -521,6 +532,16 @@ class Fetcher: public JsRpcClientProvider {
   JSG_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
 
  private:
+  [[nodiscard]] ClientWithTracing buildClient(IoContext& ioContext,
+      kj::Maybe<kj::String> cfStr,
+      kj::ConstString operationName);
+
+  // Wraps an OutgoingFactory result, nesting an inner operation span under the factory's outer
+  // dispatch span when it created one. Factories that create no dispatch span
+  // (result.spanParents == kj::none) yield no inner span and no trace context.
+  [[nodiscard]] static ClientWithTracing wrapWithInnerSpan(
+      OutgoingFactory::Result result, kj::ConstString operationName);
+
   kj::OneOf<uint,
       IoOwn<IoChannelFactory::SubrequestChannel>,
       kj::Own<CrossContextOutgoingFactory>,

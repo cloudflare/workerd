@@ -598,7 +598,7 @@ class StreamOutgoingFactory final: public Fetcher::OutgoingFactory, public kj::R
         httpClient(
             kj::newHttpClient(headerTable, *this->stream, {.entropySource = entropySource})) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
+  Result newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
 
  private:
   kj::Own<kj::AsyncIoStream> stream;
@@ -663,14 +663,18 @@ class StreamWorkerInterface final: public WorkerInterface {
   kj::Own<StreamOutgoingFactory> factory;
 };
 
-kj::Own<WorkerInterface> StreamOutgoingFactory::newSingleUseClient(kj::Maybe<kj::String> cfStr) {
+Fetcher::OutgoingFactory::Result StreamOutgoingFactory::newSingleUseClient(
+    kj::Maybe<kj::String> cfStr) {
+  // This factory creates no operation span.
   JSG_ASSERT(stream.get() != nullptr, Error,
       "Fetcher created from internalNewHttpClient can only be used once");
   // Create a WorkerInterface that wraps the stream, routing through getSubrequestNoChecks to apply
   // external memory adjustment for GC pressure.
-  return IoContext::current().getSubrequestNoChecks([&](auto& tracing, auto& channelFactory) {
+  auto client = IoContext::current().getSubrequestNoChecks(
+      [&](auto& tracing, auto& channelFactory) -> kj::Own<WorkerInterface> {
     return kj::heap<StreamWorkerInterface>(kj::addRef(*this));
   }, {.inHouse = false, .wrapMetrics = false});
+  return {.client = kj::mv(client), .spanParents = kj::none};
 }
 
 jsg::Promise<jsg::Ref<Fetcher>> SocketsModule::internalNewHttpClient(

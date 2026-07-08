@@ -176,6 +176,18 @@ wd_test(
     tags = ["no-coverage"],
 )
 
+# Regression test: a callback passed as an RPC argument, when invoked by the callee, must
+# produce a jsRpcCall span nested under the method's server-side jsRpcCall span.
+wd_test(
+    src = "jsrpc-callback-trace-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "jsrpc-callback-trace-test.js",
+        "jsrpc-callback-trace-test-tail.js",
+    ],
+    tags = ["no-coverage"],
+)
+
 # Regression test: jsrpc onset.info emitted into a streaming tail worker must remain
 # serializable when forwarded over service-binding RPC, just like fetch onset.info.
 wd_test(
