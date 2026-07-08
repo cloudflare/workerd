@@ -16,6 +16,7 @@ wd_cc_capnp_library(
 py_binary(
     name = "pack_python_packages",
     srcs = ["pack_python_packages.py"],
+    legacy_create_init = False,
     visibility = ["//visibility:public"],
 )
 
@@ -81,6 +82,7 @@ py_test(
         "internal/introspection.py",
         "internal/test_introspection.py",
     ] + glob(["internal/workers-api/src/workers/*"]),
+    legacy_create_init = False,
     main = "internal/test_introspection.py",
 )
 
@@ -88,6 +90,7 @@ py_test(
     name = "unit-test-frozen-sdk",
     srcs = ["internal/test_frozen_sdk.py"],
     data = glob(["internal/workers-api/**"]),
+    legacy_create_init = False,
     main = "internal/test_frozen_sdk.py",
     target_compatible_with = ["@platforms//os:linux"],
 )
