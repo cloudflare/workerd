@@ -101,9 +101,9 @@ KJ_TEST("JsWritableStream create wraps a native sink; forceClose ends it") {
     KJ_EXPECT(!stream.isLocked(js));
     KJ_EXPECT(!stream.isClosedOrClosing(js));
 
-    auto promise = stream.forceClose(js).then(js,
-        JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream),
-            (jsg::Lock& js) { KJ_EXPECT(stream.isClosedOrClosing(js)); }));
+    auto promise = stream.forceClose(js).then(js, [stream = kj::mv(stream)](jsg::Lock& js) mutable {
+      KJ_EXPECT(stream.isClosedOrClosing(js));
+    });
     return env.context.awaitJs(js, kj::mv(promise));
   });
   KJ_EXPECT(state.ended);
@@ -150,16 +150,16 @@ KJ_TEST("JsWritableStream flush rejects when a writer is held; forceFlush succee
     KJ_EXPECT(stream.isLocked(js));
 
     auto promise = stream.flush(js)
-                       .then(js, [](jsg::Lock& js) {
+                       .then(js, [](jsg::Lock& js) mutable {
       KJ_FAIL_REQUIRE("expected flush() of a writer-locked stream to reject");
     }, [](jsg::Lock& js, jsg::Value exception) {
       auto e = js.exceptionToKj(kj::mv(exception));
       KJ_EXPECT(
           e.getDescription() == kj::str("jsg.TypeError: ", kWriterLockedError), e.getDescription());
-    }).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock& js) {
-                         // forceFlush() bypasses the writer lock.
-                         return stream.forceFlush(js);
-                       }));
+    }).then(js, [stream = kj::mv(stream)](jsg::Lock& js) mutable {
+      // forceFlush() bypasses the writer lock.
+      return stream.forceFlush(js);
+    });
     return env.context.awaitJs(js, kj::mv(promise)).attach(kj::mv(writer));
   });
 }
@@ -224,13 +224,14 @@ KJ_TEST("JsWritableStream detach throws when a writer is held") {
     auto writer = ws->getWriter(js);
     JsWritableStream stream(kj::mv(ws));
 
-    js.tryCatch([&] {
+    JSG_TRY(js) {
       stream.detach(js);
       KJ_FAIL_REQUIRE("expected detach() of a writer-locked stream to throw");
-    }, [&](jsg::Value exception) {
+    }
+    JSG_CATCH(exception) {
       auto e = js.exceptionToKj(kj::mv(exception));
       KJ_EXPECT(e.getDescription().contains(kWriterLockedError), e.getDescription());
-    });
+    };
   });
 }
 
@@ -241,19 +242,18 @@ KJ_TEST("JsWritableStream detach of a closed stream throws") {
     auto& js = env.js;
 
     auto stream = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
-    auto promise =
-        stream.forceClose(js).then(js,
-            JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock& js) {
-              KJ_EXPECT(stream.isClosedOrClosing(js));
-              js.tryCatch([&] {
-                stream.detach(js);
-                KJ_FAIL_REQUIRE("expected detach() of a closed stream to throw");
-              }, [&](jsg::Value exception) {
-                auto e = js.exceptionToKj(kj::mv(exception));
-                KJ_EXPECT(e.getDescription().contains("This WritableStream is closed."),
-                    e.getDescription());
-              });
-            }));
+    auto promise = stream.forceClose(js).then(js, [stream = kj::mv(stream)](jsg::Lock& js) mutable {
+      KJ_EXPECT(stream.isClosedOrClosing(js));
+      JSG_TRY(js) {
+        stream.detach(js);
+        KJ_FAIL_REQUIRE("expected detach() of a closed stream to throw");
+      }
+      JSG_CATCH(exception) {
+        auto e = js.exceptionToKj(kj::mv(exception));
+        KJ_EXPECT(
+            e.getDescription().contains("This WritableStream is closed."), e.getDescription());
+      };
+    });
     return env.context.awaitJs(js, kj::mv(promise));
   });
 }
@@ -270,9 +270,9 @@ KJ_TEST("JsWritableStream addRef shares the underlying stream") {
     KJ_EXPECT(!ref.isClosedOrClosing(js));
 
     // Closing through the addRef closes the original: both wrap the same stream.
-    auto promise = ref.forceClose(js).then(js,
-        JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream),
-            (jsg::Lock& js) { KJ_EXPECT(stream.isClosedOrClosing(js)); }));
+    auto promise = ref.forceClose(js).then(js, [stream = kj::mv(stream)](jsg::Lock& js) mutable {
+      KJ_EXPECT(stream.isClosedOrClosing(js));
+    });
     return env.context.awaitJs(js, kj::mv(promise));
   });
   KJ_EXPECT(state.ended);
@@ -310,9 +310,11 @@ KJ_TEST("JsReadableStream pipeTo pipes into a JsWritableStream and closes it") {
 
     JsReadableStream source(js, kj::str(kData));
     auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
-    // source and destination must outlive the pipe: capture them into the continuation so they
-    // are not destroyed when the lambda returns (the pipe's write loop still references them).
-    auto promise = source.pipeTo(js, destination).then(js, JSG_VISITABLE_LAMBDA((source = kj::mv(source), destination = kj::mv(destination)), (source, destination), (jsg::Lock& js){}));
+    // pipeTo() self-retains the source; the destination must still outlive the pipe because the
+    // pipe's write loop runs inside the writable controller.
+    auto promise =
+        source.pipeTo(js, destination).then(js, [destination = kj::mv(destination)](jsg::Lock& js) {
+    });
     return env.context.awaitJs(js, kj::mv(promise));
   });
   KJ_EXPECT(state.written.asPtr() == kData.asBytes());
@@ -327,7 +329,8 @@ KJ_TEST("JsReadableStream pipeTo with preventClose leaves the destination open")
 
     JsReadableStream source(js, kj::str(kData));
     auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
-    auto promise = source.pipeTo(js, destination, PipeToOptions{.preventClose = true}).then(js, JSG_VISITABLE_LAMBDA((source = kj::mv(source), destination = kj::mv(destination)), (source, destination), (jsg::Lock& js){}));
+    auto promise = source.pipeTo(js, destination, PipeToOptions{.preventClose = true})
+                       .then(js, [destination = kj::mv(destination)](jsg::Lock& js) {});
     return env.context.awaitJs(js, kj::mv(promise));
   });
   KJ_EXPECT(state.written.asPtr() == kData.asBytes());
@@ -416,7 +419,11 @@ KJ_TEST("JsReadableStream pipeThrough composes with pipeTo") {
     JsReadableStream source(js, kj::str(kData));
     auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
     auto piped = source.pipeThrough(js, makeIdentityPair(js));
-    auto promise = piped.pipeTo(js, destination).then(js, JSG_VISITABLE_LAMBDA((source = kj::mv(source), piped = kj::mv(piped), destination = kj::mv(destination)), (source, piped, destination), (jsg::Lock& js){}));
+    // pipeTo() self-retains the piped source; pipeThrough() self-retains the original source
+    // via JSG_THIS; only the destination needs explicit keepalive.
+    auto promise =
+        piped.pipeTo(js, destination).then(js, [destination = kj::mv(destination)](jsg::Lock& js) {
+    });
     return env.context.awaitJs(js, kj::mv(promise));
   });
   KJ_EXPECT(state.written.asPtr() == kData.asBytes());
@@ -432,13 +439,14 @@ KJ_TEST("JsReadableStream pipeThrough throws synchronously when the source is lo
     auto detached = source.detach(js);
     KJ_EXPECT(source.isLocked(js));
 
-    js.tryCatch([&] {
+    JSG_TRY(js) {
       source.pipeThrough(js, makeIdentityPair(js));
       KJ_FAIL_REQUIRE("expected pipeThrough() from a locked source to throw");
-    }, [&](jsg::Value exception) {
+    }
+    JSG_CATCH(exception) {
       auto e = js.exceptionToKj(kj::mv(exception));
       KJ_EXPECT(e.getDescription().contains("currently locked to a reader"), e.getDescription());
-    });
+    };
   });
 }
 
@@ -457,15 +465,16 @@ KJ_TEST("JsReadableStream pipeThrough throws synchronously when the transform wr
       .writable = JsWritableStream(kj::mv(writable)),
     };
 
-    js.tryCatch([&] {
+    JSG_TRY(js) {
       source.pipeThrough(js, kj::mv(pair));
       KJ_FAIL_REQUIRE("expected pipeThrough() into a locked transform writable to throw");
-    }, [&](jsg::Value exception) {
+    }
+    JSG_CATCH(exception) {
       auto e = js.exceptionToKj(kj::mv(exception));
       // pipeThrough's synchronous destination-locked message carries the trailing period,
       // unlike pipeTo's rejection.
       KJ_EXPECT(e.getDescription().contains(kWriterLockedError), e.getDescription());
-    });
+    };
   });
 }
 

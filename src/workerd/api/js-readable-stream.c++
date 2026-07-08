@@ -381,8 +381,15 @@ jsg::Promise<void> JsReadableStream::pipeTo(
         KJ_CASE_ONEOF(writable, jsg::Ref<WritableStream>) {
           // Both ends are C++: delegate to ReadableStream::pipeTo, which preserves the exact
           // observable behavior (locked-end rejections and their texts) and internally selects
-          // the most efficient pump for the endpoint types.
-          return stream->pipeTo(js, writable.addRef(), kj::mv(options));
+          // the most efficient pump for the endpoint types. The internal pipe keeps only a bare
+          // reference to the source (WritableStreamInternalController::PipeLocked) and the
+          // destination controller holds only a kj::Weak<WritableStream> owner, so retain both
+          // ends across the pipe ourselves rather than making liveness the caller's
+          // responsibility.
+          // Note: there's no use for using JSG_VISITABLE_LAMBDA here since promise
+          // continuations are never actually visited for GC.
+          return stream->pipeTo(js, writable.addRef(), kj::mv(options))
+              .then(js, [source = stream.addRef(), dest = writable.addRef()](jsg::Lock& js) {});
         }
         KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
           // TODO(streams-ts): TS/TS pipes go through the TS pipeTo hook; mixed-backend pipes

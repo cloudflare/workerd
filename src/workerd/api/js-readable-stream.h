@@ -180,11 +180,12 @@ class JsReadableStream final {
   // pipe completes. Rejects (does not throw) if either end is already locked. By default the
   // destination is closed when this stream ends and aborted if it errors; see PipeToOptions.
   //
-  // The destination is borrowed, not consumed: the caller's handle remains valid and observes the
-  // stream's state as the pipe progresses. Unlike pumpTo(), this is a spec-level, isolate-bound
-  // pipe with no deferred-proxy support; when both ends are backed by the C++ implementation the
-  // pipe still uses the controllers' internal native fast paths. Preconditions: !isNull(),
-  // !destination.isNull().
+  // Both the source and destination are self-retained for the duration of the pipe; the caller
+  // does not need to keep either alive after calling pipeTo(). The destination is borrowed, not
+  // consumed: the caller's handle remains valid and observes the stream's state as the pipe
+  // progresses. Unlike pumpTo(), this is a spec-level, isolate-bound pipe with no deferred-proxy
+  // support; when both ends are backed by the C++ implementation the pipe still uses the
+  // controllers' internal native fast paths. Preconditions: !isNull(), !destination.isNull().
   jsg::Promise<void> pipeTo(
       jsg::Lock& js, JsWritableStream& destination, PipeToOptions options = {});
 
