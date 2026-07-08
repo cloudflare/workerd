@@ -25,48 +25,21 @@ void markHibernatableWebSocketReceive(IoContext& context) {
 
 HibernatableWebSocketEvent::HibernatableWebSocketEvent(): ExtendableEvent("webSocketMessage") {};
 
-Worker::Actor::HibernationManager& HibernatableWebSocketEvent::getHibernationManager(
-    jsg::Lock& lock) {
-  auto& actor = KJ_REQUIRE_NONNULL(IoContext::current().getActor());
-  return KJ_REQUIRE_NONNULL(actor.getHibernationManager());
-}
-
 HibernatableWebSocketEvent::ItemsForRelease HibernatableWebSocketEvent::prepareForRelease(
     jsg::Lock& lock, kj::StringPtr websocketId) {
-  auto& manager = kj::downcast<LegacyHibernationManagerImpl>(getHibernationManager(lock));
-  auto& hibernatableWebSocket =
-      KJ_REQUIRE_NONNULL(manager.webSocketsForEventHandler.findEntry(websocketId));
-
-  // Note that we don't call `claimWebSocket()` to get this, since we would lose our reference to
-  // the HibernatableWebSocket (it removes it from `webSocketsForEventHandler`).
-  auto websocketRef = hibernatableWebSocket.value->getActiveOrUnhibernate(lock);
-  auto ownedWebSocket = kj::mv(KJ_REQUIRE_NONNULL(hibernatableWebSocket.value->ws));
-  auto tags = hibernatableWebSocket.value->cloneTags();
-
-  // Now that we've obtained the websocket for the event, let's free up the slots we had allocated.
-  manager.webSocketsForEventHandler.erase(hibernatableWebSocket);
+  auto& hibernatableWebSocket = LegacyHibernationManagerImpl::takeWebSocketForEvent(websocketId);
+  auto websocketRef = hibernatableWebSocket.getActiveOrUnhibernate(lock);
+  auto ownedWebSocket = kj::mv(KJ_REQUIRE_NONNULL(hibernatableWebSocket.ws));
+  auto tags = hibernatableWebSocket.cloneTags();
 
   return ItemsForRelease(kj::mv(websocketRef), kj::mv(ownedWebSocket), kj::mv(tags));
 }
 
 jsg::Ref<WebSocket> HibernatableWebSocketEvent::claimWebSocket(
     jsg::Lock& lock, kj::StringPtr websocketId) {
-  // Should only be called once per event since it removes the HibernatableWebSocket from the
-  // webSocketsForEventHandler collection.
-  auto& manager = kj::downcast<LegacyHibernationManagerImpl>(getHibernationManager(lock));
-
-  // Grab it from our collection.
-  auto& hibernatableWebSocket =
-      KJ_REQUIRE_NONNULL(manager.webSocketsForEventHandler.findEntry(websocketId));
-
-  // Get the reference.
-  auto websocket = hibernatableWebSocket.value->getActiveOrUnhibernate(lock);
-
-  // Now that we've obtained the websocket, we need to remove the entry from the map and make the
-  // key available again.
-  manager.webSocketsForEventHandler.erase(hibernatableWebSocket);
-
-  return kj::mv(websocket);
+  // Should only be called once per event since it deregisters the event's HibernatableWebSocket.
+  auto& hibernatableWebSocket = LegacyHibernationManagerImpl::takeWebSocketForEvent(websocketId);
+  return hibernatableWebSocket.getActiveOrUnhibernate(lock);
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEvent::run(
@@ -84,14 +57,13 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
 
   EventOutcome outcome = EventOutcome::OK;
 
-  // We definitely have an actor by this point. Let's set the hibernation manager on the actor
-  // before we start running any events that might need to access it.
-  auto& a = KJ_REQUIRE_NONNULL(context.getActor());
-  if (a.getHibernationManager() == kj::none) {
-    a.setHibernationManager(kj::addRef(KJ_REQUIRE_NONNULL(manager)));
-  }
-
   auto eventParameters = consumeParams();
+
+  // Deliberately outside the try below. Failing to route this event is not a failure of the
+  // application's handler: the catch block would log it against user code and report the event as
+  // merely having thrown, leaving the message dropped with nothing that says why.
+  ensureHibernationManagerForEvent(
+      KJ_REQUIRE_NONNULL(context.getActor()), eventParameters.websocketId);
 
   try {
     co_await context.run(
@@ -145,6 +117,52 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
   };
 }
 
+void HibernatableWebSocketCustomEvent::ensureHibernationManagerForEvent(
+    Worker::Actor& actor, kj::StringPtr websocketId) {
+  // Resolve the manager before running any JS, so that an event that cannot be routed fails here
+  // rather than from inside a handler that has already observed it.
+  auto& manager = KJ_REQUIRE_NONNULL(LegacyHibernationManagerImpl::findManagerForEvent(websocketId),
+      "hibernatable WebSocket event manager was not found for this event ID");
+
+  // The adopt branch below has no manager of its own to compare against, so this is what stops an
+  // actor adopting a manager another actor is still using -- and with it, that actor's sockets.
+  //
+  // Identity is checked twice because neither check covers the other. The ID outlives the owning
+  // actor, so it still rejects an unrelated actor once a code update has destroyed the owner, which
+  // is precisely when a replacement adopts the manager. The instance check then rejects a second
+  // actor that is live at the same time as the owner and shares its ID -- the case the ID alone
+  // would admit, and the one that would cross isolates.
+  KJ_IF_SOME(ownerId, manager.getOwningActorId()) {
+    KJ_REQUIRE(Worker::Actor::idsEqual(ownerId, actor.getId()),
+        "hibernatable WebSocket event names a hibernation manager owned by a different actor");
+  }
+  KJ_IF_SOME(owner, manager.getOwningActor()) {
+    KJ_REQUIRE(&owner == &actor,
+        "hibernatable WebSocket event names a hibernation manager owned by a different live actor");
+  }
+
+  KJ_IF_SOME(existing, actor.getHibernationManager()) {
+    // The ID is looked up in a registry shared by every manager on the event loop, so it is the one
+    // part of an event that does not come from this actor. Requiring that it name the manager this
+    // actor already uses is what keeps an ID from reaching an actor that does not own the socket;
+    // before the ID existed, the lookup happened in this actor's own manager and could not stray.
+    //
+    // A code-update wake does not need the mismatching case: the replacement actor is handed the
+    // manager that has been holding its sockets, so by the time an event runs the two already
+    // agree. An actor holding some other manager means the event was misrouted, or that the actor
+    // built a second manager while this event was in flight -- and delivering anyway would strand
+    // the socket in a manager the actor's own getWebSockets() cannot see.
+    KJ_REQUIRE(&existing == &manager,
+        "hibernatable WebSocket event ID names a different hibernation manager than the receiving "
+        "actor's");
+  } else {
+    // A fresh actor starts without a manager and has to adopt the one holding the socket this event
+    // arrived on. Otherwise it would build a second manager on its first acceptWebSocket() call and
+    // split the actor's sockets across the two.
+    actor.setHibernationManager(manager.addRef());
+  }
+}
+
 kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEvent::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
@@ -183,6 +201,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
     }
   }
 
+  // The registration this event relies on is owned by the task that is delivering it, which
+  // deregisters the event once this promise settles either way.
   return req.send().then([](auto resp) {
     auto respResult = resp.getResult();
     return WorkerInterface::CustomEvent::Result{
@@ -197,16 +217,14 @@ HibernatableWebSocketEvent::ItemsForRelease::ItemsForRelease(
       ownedWebSocket(kj::mv(owned)),
       tags(kj::mv(tags)) {}
 
-HibernatableWebSocketCustomEvent::HibernatableWebSocketCustomEvent(uint16_t typeId,
-    kj::Own<HibernationReader> params,
-    kj::Maybe<Worker::Actor::HibernationManager&> manager)
+HibernatableWebSocketCustomEvent::HibernatableWebSocketCustomEvent(
+    uint16_t typeId, kj::Own<HibernationReader> params)
     : typeId(typeId),
       params(kj::mv(params)) {}
 HibernatableWebSocketCustomEvent::HibernatableWebSocketCustomEvent(
-    uint16_t typeId, HibernatableSocketParams params, Worker::Actor::HibernationManager& manager)
+    uint16_t typeId, HibernatableSocketParams params)
     : typeId(typeId),
-      params(kj::mv(params)),
-      manager(manager) {}
+      params(kj::mv(params)) {}
 
 // Try to extract event type from params if available
 tracing::HibernatableWebSocketEventInfo::Type HibernatableWebSocketCustomEvent::getEventType()
