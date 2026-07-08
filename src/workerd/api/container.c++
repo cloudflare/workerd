@@ -319,6 +319,9 @@ jsg::Promise<Container::DirectorySnapshot> Container::snapshotDirectory(
       "snapshotDirectory() requires an absolute directory path (starting with '/').");
 
   auto req = rpcClient->snapshotDirectoryRequest();
+  KJ_IF_SOME(spanContext, IoContext::current().getCurrentTraceSpan().toSpanContext()) {
+    spanContext.toCapnp(req.initSpanContext());
+  }
   req.setDir(options.dir);
 
   KJ_IF_SOME(name, options.name) {
@@ -349,6 +352,9 @@ jsg::Promise<Container::Snapshot> Container::snapshotContainer(
       running, Error, "snapshotContainer() cannot be called on a container that is not running.");
 
   auto req = rpcClient->snapshotContainerRequest();
+  KJ_IF_SOME(spanContext, IoContext::current().getCurrentTraceSpan().toSpanContext()) {
+    spanContext.toCapnp(req.initSpanContext());
+  }
 
   KJ_IF_SOME(name, options.name) {
     req.setName(name);
