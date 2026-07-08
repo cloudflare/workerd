@@ -506,6 +506,15 @@ wd_test(
 )
 
 wd_test(
+    src = "diagnostics-channel-tail-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "diagnostics-channel-tail.js",
+        "diagnostics-channel-tail-trigger.js",
+    ],
+)
+
+wd_test(
     size = "large",
     src = "global-scope-test.wd-test",
     args = ["--experimental"],
