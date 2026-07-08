@@ -278,7 +278,8 @@ jsg::Promise<jsg::Value> Body::json(jsg::Lock& js) {
 
 jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
   // Note: `self` (jsg::Ref) is captured to prevent GC from collecting this object while
-  // the promise continuation is pending. Without it, the bare `this` pointer dangles.
+  // the promise continuation is pending. Without it, accessing `*this` from the
+  // continuation would be a use-after-free.
   return arrayBuffer(js).then(
       js, [self = JSG_THIS](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) mutable {
     kj::String contentType = self->headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)
@@ -2269,7 +2270,8 @@ jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
 
 static jsg::Promise<void> throwOnError(
     jsg::Lock& js, kj::StringPtr method, jsg::Promise<jsg::Ref<Response>> promise) {
-  return promise.then(js, [method](jsg::Lock&, jsg::Ref<Response> response) {
+  return promise.then(js,
+      [method = kj::str(method)](jsg::Lock&, jsg::Ref<Response> response) {
     uint status = response->getStatus();
     // TODO(someday): Would be nice to attach the response to the JavaScript error, maybe? Or
     //   should people really use fetch() if they want to inspect error responses?

@@ -358,14 +358,15 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
 
     return startStreamPromise.then(js,
         context.addFunctor(
-            [this, &context, jsRequest = kj::mv(jsRequest), cacheControl = kj::mv(cacheControl),
+            [self = JSG_THIS, jsRequest = kj::mv(jsRequest), cacheControl = kj::mv(cacheControl),
                 serializePromise = kj::mv(serializePromise),
                 writePayloadHeadersPromise = kj::mv(payload.writeHeadersPromise),
                 enableCompatFlags = flags.getCacheApiCompatFlags(),
                 traceContext = kj::mv(traceContext)](jsg::Lock& js,
                 IoOwn<kj::AsyncInputStream> payloadStream) mutable -> jsg::Promise<void> {
+      auto& context = IoContext::current();
       // Make the PUT request to cache.
-      auto httpClient = getHttpClient(
+      auto httpClient = self->getHttpClient(
           context, jsRequest->serializeCfBlobJson(js), traceContext, enableCompatFlags);
       auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
       jsRequest->shallowCopyHeadersTo(requestHeaders);

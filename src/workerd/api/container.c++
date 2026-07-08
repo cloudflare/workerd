@@ -554,11 +554,13 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
 
   // We have to await, because PID won't be available until the response resolves
   return ioContext.awaitIo(js, req.send())
-      .then(js,
-          [&ioContext, &byteStreamFactory, options = kj::mv(options),
-              stdoutInput = kj::mv(stdoutInput), stderrInput = kj::mv(stderrInput)](
+      .then(js, ioContext.addFunctor(
+          [options = kj::mv(options), stdoutInput = kj::mv(stdoutInput),
+              stderrInput = kj::mv(stderrInput)](
               jsg::Lock& js, capnp::Response<rpc::Container::ExecResults> results) mutable
           -> jsg::Ref<ExecProcess> {
+    auto& ioContext = IoContext::current();
+    auto& byteStreamFactory = ioContext.getByteStreamFactory();
     auto process = results.getProcess();
     auto handle = process.getHandle();
     auto pid = process.getPid();
@@ -618,7 +620,7 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
     // return the instance to the process after getting pipeline of the process handle
     return js.alloc<ExecProcess>(js, ioContext, kj::mv(stdinStream), kj::mv(stdoutStream),
         kj::mv(stderrStream), pid, kj::mv(handle), kj::mv(options.signal));
-  });
+  }));
 }
 
 jsg::Promise<void> Container::interceptOutboundTcp(
@@ -836,6 +838,12 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
     auto up = pipeline.getUp();
 
     auto upStream = byteStreamFactory.capnpToKjExplicitEnd(up);
+    // The pumpTo continuation calls end() on the stream; the next .then() in the chain takes
+    // ownership of `upStream` (and `up`) by move so the stream and its capability stay alive for
+    // the NEVER_DONE-held duration of this task. The by-reference `&upStream = *upStream` capture
+    // here points at the pointee that is owned by the next .then's capture -- structurally safe
+    // but the analyzer can't see the ownership flow across the lambdas.
+    // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
     auto upPumpTask = connection.pumpTo(*upStream)
                           .then([&upStream = *upStream](uint64_t) mutable {
       return upStream.end();

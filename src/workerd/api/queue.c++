@@ -609,11 +609,13 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
     KJ_IF_SOME(f, queueHandler.queue) {
       auto promise = f(lock, js.alloc<QueueController>(event.addRef()),
           jsg::JsValue(h.env.getHandle(js)).addRef(js), h.getCtx())
-                         .then([event = event.addRef(), &context]() mutable {
+                         .then([event = event.addRef(), weakRef = context.getWeakRef()]() mutable {
         event->setCompletionStatus(QueueEvent::CompletedSuccessfully{});
-        KJ_IF_SOME(t, context.getWorkerTracer()) {
-          t.setReturn(context.now());
-        }
+        weakRef->runIfAlive([](IoContext& context) {
+          KJ_IF_SOME(t, context.getWorkerTracer()) {
+            t.setReturn(context.now());
+          }
+        });
       }, [event = event.addRef()](kj::Exception&& e) mutable {
         event->setCompletionStatus(QueueEvent::CompletedWithError{e.clone()});
         return kj::mv(e);
@@ -685,8 +687,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
 
   // 2. This is where we call into the worker's queue event handler
   auto runProm = context.run(
-      [this, entrypointName = entrypointName, queueEvent = kj::addRef(*queueEventHolder),
-          &metrics = incomingRequest->getMetrics(), versionInfo = kj::mv(versionInfo),
+      [self = addRefToThis(), entrypointName = entrypointName,
+          queueEvent = kj::addRef(*queueEventHolder), versionInfo = kj::mv(versionInfo),
           props = kj::mv(props),
           isDynamicDispatch](Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
@@ -697,8 +699,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
     // alive as long as the JSG QueueEvent/QueueMessage wrappers exist, even after
     // QueueCustomEvent is destroyed. This prevents a use-after-free under Durable Objects
     // where the IoContext outlives individual queue dispatches.
-    auto startResp = startQueueEvent(lock.getGlobalScope(), context, kj::mv(params),
-        context.addObject(kj::addRef(*result)), lock,
+    auto startResp = startQueueEvent(lock.getGlobalScope(), context, kj::mv(self->params),
+        context.addObject(kj::addRef(*self->result)), lock,
         lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
             context.getActor(), isDynamicDispatch),
         typeHandler);
@@ -830,22 +832,22 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::sendRpc(
     }
   }
 
-  return req.send().then([this](auto resp) {
+  return req.send().then([self = addRefToThis()](auto resp) mutable {
     auto respResult = resp.getResult();
-    this->result->ackAll = respResult.getAckAll();
+    self->result->ackAll = respResult.getAckAll();
     auto retryBatch = respResult.getRetryBatch();
-    this->result->retryBatch.retry = retryBatch.getRetry();
+    self->result->retryBatch.retry = retryBatch.getRetry();
     if (retryBatch.isDelaySeconds()) {
-      this->result->retryBatch.delaySeconds = retryBatch.getDelaySeconds();
+      self->result->retryBatch.delaySeconds = retryBatch.getDelaySeconds();
     }
 
-    this->result->explicitAcks.clear();
+    self->result->explicitAcks.clear();
     for (const auto& msgId: respResult.getExplicitAcks()) {
-      this->result->explicitAcks.insert(kj::heapString(msgId));
+      self->result->explicitAcks.insert(kj::heapString(msgId));
     }
-    this->result->retries.clear();
+    self->result->retries.clear();
     for (const auto& retry: respResult.getRetryMessages()) {
-      auto& entry = this->result->retries.upsert(kj::heapString(retry.getMsgId()), {});
+      auto& entry = self->result->retries.upsert(kj::heapString(retry.getMsgId()), {});
       if (retry.isDelaySeconds()) {
         entry.value.delaySeconds = retry.getDelaySeconds();
       }

@@ -4768,6 +4768,8 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
     kj::HttpService::Response& response) {
   using InspectorLock = InspectorChannelImpl::InspectorLock;
 
+  // This is immediately awaited down below so this capture is fine.
+  // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
   auto signalRequest = [this, method, urlCopy = kj::str(url),
                            headersCopy = headers.clone()]() -> kj::Maybe<kj::String> {
     return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> kj::Maybe<kj::String> {
@@ -4815,6 +4817,8 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
   };
 
   auto signalResponse =
+      // This gets dropped below before returning (through the wrapper) so this capture is ok.
+      // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
       [this](kj::String requestId, uint statusCode, kj::StringPtr statusText,
           const kj::HttpHeaders& headers,
           kj::Own<kj::AsyncOutputStream> responseBody) -> kj::Own<kj::AsyncOutputStream> {
@@ -4890,6 +4894,8 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
 
     // Defer to a later turn of the event loop so that it's safe to take a lock.
     return kj::newPromisedStream(kj::evalLater(
+        // Same as above, this is part of the wrapper.
+        // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
         [this, responseBody = kj::mv(responseBody), message = kj::mv(message), event, encoding,
             requestId = kj::mv(requestId)]() mutable -> kj::Own<kj::AsyncOutputStream> {
       // Now we know we can lock...

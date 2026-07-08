@@ -521,8 +521,8 @@ kj::Maybe<jsg::Promise<void>> WritableLockImpl<Controller>::PipeLocked::checkSig
       }
       if (!flags.preventAbort) {
         return self.abort(js, reason)
-            .then(js, [this, reason = reason.addRef(js), ref = self.addRef()](jsg::Lock& js) {
-          return rejectedMaybeHandledPromise<void>(js, reason.getHandle(js), flags.pipeThrough);
+            .then(js, [reason = reason.addRef(js), pipeThrough = flags.pipeThrough](jsg::Lock& js) {
+          return rejectedMaybeHandledPromise<void>(js, reason.getHandle(js), pipeThrough);
         });
       }
       return rejectedMaybeHandledPromise<void>(js, reason, flags.pipeThrough);
@@ -1385,6 +1385,8 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
     }
     // Here, however, let's avoid potentially deep recursion by hopping to a new
     // microtask to continue processing the queue.
+    // this is kept alive by the strong reference of Self
+    // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
     return js.resolvedPromise().then(js, [this, self = kj::mv(self)](jsg::Lock& js) mutable {
       if (isWritable() || state.template is<StreamStates::Erroring>()) {
         advanceQueueIfNeeded(js, kj::mv(self));
@@ -2862,8 +2864,11 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
   // state change only fires after the promise resolves/rejects and the Consumer's
   // this-capturing callbacks have already run.
   auto wrapDrainingRead =
+      // The ref provided keeps this alive for the duration of the call.
+      // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
       [this](jsg::Lock& js, jsg::Promise<DrainingReadResult> promise,
           jsg::Ref<ReadableStream> ref) mutable -> jsg::Promise<DrainingReadResult> {
+    // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
     return promise.then(js, [this, ref = ref.addRef()](jsg::Lock& js, DrainingReadResult result) {
       if (state.endOperation()) {
         // A pending state was applied. Call the appropriate callback.
@@ -2880,6 +2885,7 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
         }
       }
       return kj::mv(result);
+    // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
     }, [this, ref = ref.addRef()](jsg::Lock& js, jsg::Value exception) -> DrainingReadResult {
       state.clearPendingState();
       (void)state.endOperation();
@@ -3206,6 +3212,14 @@ kj::Maybe<kj::OneOf<DefaultController, ByobController>> ReadableStreamJsControll
 }
 
 namespace {
+
+void copyInto(kj::ArrayPtr<byte> out, kj::ArrayPtr<kj::ArrayPtr<byte>> in) {
+  for (auto& part: in) {
+    KJ_ASSERT(part.size() <= out.size());
+    out.write(part);
+  }
+}
+
 // Consumes all bytes from a stream, buffering in memory, with the purpose
 // of producing either a single concatenated kj::Array<byte> or kj::String.
 class AllReader {
@@ -3218,7 +3232,11 @@ class AllReader {
   KJ_DISALLOW_COPY_AND_MOVE(AllReader);
 
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> allBytes(jsg::Lock& js) {
+    // Note that these nested lambda retain references to `this` and are passed into to promise
+    // returned by this method. It is the responsibility of the caller to ensure that the AllReader
+    // instance is kept alive until the promise is settled.
     return loop(js).then(
+        // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
         js, [this](auto& js, PartList&& partPtrs) -> jsg::JsRef<jsg::JsArrayBuffer> {
       auto ab = jsg::JsArrayBuffer::create(js, runningTotal);
       copyInto(ab.asArrayPtr(), partPtrs.asPtr());
@@ -3228,6 +3246,10 @@ class AllReader {
 
   jsg::Promise<kj::String> allText(
       jsg::Lock& js, ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) {
+    // Note that these nested lambda retain references to `this` and are passed into to promise
+    // returned by this method. It is the responsibility of the caller to ensure that the AllReader
+    // instance is kept alive until the promise is settled.
+    // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
     return loop(js).then(js, [this, option](auto& js, PartList&& partPtrs) {
       // Strip UTF-8 BOM if requested
       if ((option & ReadAllTextOption::STRIP_BOM) && partPtrs.size() > 0 &&
@@ -3280,7 +3302,8 @@ class AllReader {
         // Note that these nested lambda retain references to `this` and `readable`
         // and are passed into to promise returned by this method. It is the responsibility
         // of the caller to ensure that the AllReader instance is kept alive until the
-        // promise is settled.
+        // promise is settled. This also applies to most of the nolints down below.
+        // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
         auto onSuccess = [this, readable = readable.addRef()](
                              jsg::Lock& js, ReadResult result) mutable -> jsg::Promise<PartList> {
           if (result.done) {
@@ -3295,7 +3318,9 @@ class AllReader {
             auto error = js.typeError("This ReadableStream did not return bytes.");
             state.template transitionTo<StreamStates::Errored>(error.addRef(js));
             return readable->getController().cancel(js, error).then(
-                js, [&](jsg::Lock& js) { return loop(js); });
+                // Immediately calls back into loop()
+                // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
+                js, [this](jsg::Lock& js) { return loop(js); });
           }
 
           jsg::BufferSource bufferSource(js, handle);
@@ -3309,7 +3334,9 @@ class AllReader {
             auto error = js.typeError("Memory limit exceeded before EOF.");
             state.template transitionTo<StreamStates::Errored>(error.addRef(js));
             return readable->getController().cancel(js, error).then(
-                js, [&](jsg::Lock& js) { return loop(js); });
+                // Immediately calls back into loop()
+                // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
+                js, [this](jsg::Lock& js) { return loop(js); });
           }
 
           runningTotal += bufferSource.size();
@@ -3317,6 +3344,8 @@ class AllReader {
           return loop(js);
         };
 
+        // Immediately calls back into loop()
+        // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
         auto onFailure = [this](auto& js, jsg::Value exception) -> jsg::Promise<PartList> {
           // In this case the stream should already be errored.
           auto error = jsg::JsValue(exception.getHandle(js));
@@ -3329,13 +3358,6 @@ class AllReader {
       }
     }
     KJ_UNREACHABLE;
-  }
-
-  void copyInto(kj::ArrayPtr<byte> out, kj::ArrayPtr<kj::ArrayPtr<byte>> in) {
-    for (auto& part: in) {
-      KJ_ASSERT(part.size() <= out.size());
-      out.write(part);
-    }
   }
 };
 
