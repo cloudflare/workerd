@@ -20,8 +20,12 @@
 //     is never exposed to user code.
 //   - pull(controller) discriminates the read mode via the controller:
 //     controller.byobRequest !== null ⇒ BYOB read — fill the request's
-//     view and call respond(bytesWritten)/respondWithNewView(view),
-//     honoring `atLeast` (the read's minimum, in bytes).
+//     view and call respond(bytesWritten), honoring `atLeast` (the
+//     read's minimum, in bytes). respondWithNewView() is deliberately
+//     omitted: the native source writes into consumer-provided memory
+//     (KJ tryRead semantics); buffer-swapping has no C++ analogue, and
+//     the default-read enqueue() path already covers source-allocated
+//     buffers.
 //     byobRequest === null ⇒ default read — the source allocates its OWN
 //     buffer and calls controller.enqueue(view).
 //   - The source calls enqueue-or-respond AT MOST ONCE per pull
@@ -112,7 +116,6 @@ const {
   AbortControllerAbort,
   AbortControllerSignalGet,
   AbortSignalAbortedGet,
-  ArrayBufferPrototypeByteLengthGet,
   ArrayPrototypePush,
   ArrayPrototypeShift,
   ArrayPrototypeSplice,
@@ -289,12 +292,13 @@ let getControllerConduit: (
 // The BYOB request façade
 //
 // Wraps the head pull-into descriptor for the native source's consumption
-// during pull. Mirrors the shape of the global ReadableStreamBYOBRequest
-// (view/atLeast/respond/respondWithNewView) but is a distinct, module-
-// private class: it is only ever handed to the native source, never to
-// user code, so it needs no global registration or brand hardening beyond
-// its private fields. Invalidated automatically once its descriptor is no
-// longer the head request (view/atLeast report null; responds throw).
+// during pull. Mirrors a subset of the global ReadableStreamBYOBRequest
+// (view/atLeast/respond — respondWithNewView is deliberately omitted; see
+// the contract header) but is a distinct, module-private class: it is only
+// ever handed to the native source, never to user code, so it needs no
+// global registration or brand hardening beyond its private fields.
+// Invalidated automatically once its descriptor is no longer the head
+// request (view/atLeast report null; responds throw).
 
 class NativeReadableStreamBYOBRequest {
   #conduit: NativePullConduit;
@@ -336,11 +340,6 @@ class NativeReadableStreamBYOBRequest {
   respond(bytesWritten: number): void {
     if (!(#desc in this)) throw new TypeError('Illegal invocation');
     this.#conduit.respondToDesc(this.#desc, bytesWritten);
-  }
-
-  respondWithNewView(view: ArrayBufferView): void {
-    if (!(#desc in this)) throw new TypeError('Illegal invocation');
-    this.#conduit.respondToDescWithNewView(this.#desc, view);
   }
 }
 
@@ -1032,65 +1031,6 @@ class NativePullConduit implements ByteStreamConsumerType {
         });
       }
     }
-  }
-
-  respondToDescWithNewView(
-    desc: PullIntoDescriptor,
-    view: ArrayBufferView
-  ): void {
-    // Source-initiated stragglers: silent discard.
-    if (this.#status !== 'active') return;
-    if (!this.isHeadDesc(desc)) {
-      if (this.#requests[0] === undefined) {
-        // REFUSAL BACKSTOP (same as enqueue/respond).
-        throw new TypeError(
-          'delivery refused: the pull was aborted (the source must check ' +
-            'signal.aborted before enqueue/respond and stash data for ' +
-            'redelivery)'
-        );
-      }
-      throw new TypeError('This BYOB request has been invalidated');
-    }
-    if (!isArrayBufferView(view)) {
-      throw new TypeError('respondWithNewView requires an ArrayBufferView');
-    }
-    const isDataView =
-      TypedArrayPrototypeGetSymbolToStringTag(view) === undefined;
-    const buffer = (
-      isDataView
-        ? DataViewPrototypeGetBuffer(view)
-        : TypedArrayPrototypeGetBuffer(view)
-    ) as ArrayBuffer;
-    const byteOffset = (
-      isDataView
-        ? DataViewPrototypeGetByteOffset(view)
-        : TypedArrayPrototypeGetByteOffset(view)
-    ) as number;
-    const byteLength = (
-      isDataView
-        ? DataViewPrototypeGetByteLength(view)
-        : TypedArrayPrototypeGetByteLength(view)
-    ) as number;
-    if (
-      ArrayBufferPrototypeByteLengthGet(buffer) !==
-      ArrayBufferPrototypeByteLengthGet(desc.buffer)
-    ) {
-      throw new RangeError(
-        "The view's buffer must have the same byteLength as the request"
-      );
-    }
-    if (byteOffset !== desc.byteOffset + desc.bytesFilled) {
-      throw new RangeError(
-        'The new view must start where the previous fill ended'
-      );
-    }
-    if (desc.bytesFilled + byteLength > desc.byteLength) {
-      throw new RangeError('The new view exceeds the remaining view size');
-    }
-    // Adopt the new backing buffer (the native source may have swapped
-    // buffers), then account the bytes like a plain respond.
-    desc.buffer = buffer;
-    this.respondToDesc(desc, byteLength);
   }
 
   closeFromSource(): void {
