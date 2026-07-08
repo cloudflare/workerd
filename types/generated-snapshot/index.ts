@@ -4794,6 +4794,13 @@ export type AiSearchListItemsParams = {
   source?: string;
   /** JSON-encoded Vectorize filter for metadata filtering. */
   metadata_filter?: string;
+  /** Filter items by their unique ID. Returns at most one item. */
+  item_id?: string;
+  /**
+   * Filter items by their exact key (object key / filename). Keys are unique
+   * per source, so combine with `source` to disambiguate across data sources.
+   */
+  key?: string;
 };
 export type AiSearchListItemsResponse = {
   result: AiSearchItemInfo[];
