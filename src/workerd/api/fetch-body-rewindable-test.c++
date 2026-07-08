@@ -80,19 +80,19 @@ class RetryMetadataOutgoingFactory final: public Fetcher::OutgoingFactory {
       : ordinaryDispatchCalled(ordinaryDispatchCalled),
         capturedMetadata(capturedMetadata) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String>) override {
+  Result newSingleUseClient(kj::Maybe<kj::String>) override {
     ordinaryDispatchCalled = true;
-    return kj::heap<MockFetchTarget>();
+    return {.client = kj::heap<MockFetchTarget>(), .spanParents = kj::none};
   }
 
   bool supportsActorRetryMetadata() const override {
     return true;
   }
 
-  kj::Own<WorkerInterface> newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String>,
+  Result newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String>,
       kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) override {
     capturedMetadata = kj::mv(actorRetryRequestMetadata);
-    return kj::heap<MockFetchTarget>();
+    return {.client = kj::heap<MockFetchTarget>(), .spanParents = kj::none};
   }
 
  private:
@@ -104,9 +104,9 @@ class UnsupportedOutgoingFactory final: public Fetcher::OutgoingFactory {
  public:
   UnsupportedOutgoingFactory(bool& called): called(called) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String>) override {
+  Result newSingleUseClient(kj::Maybe<kj::String>) override {
     called = true;
-    return kj::heap<MockFetchTarget>();
+    return {.client = kj::heap<MockFetchTarget>(), .spanParents = kj::none};
   }
 
  private:

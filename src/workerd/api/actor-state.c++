@@ -986,12 +986,14 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
         name(kj::mv(name)),
         getStartInfo(kj::mv(getStartInfo)) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
+  Result newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
     auto& context = IoContext::current();
 
-    return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
+    kj::Maybe<TraceContextParent> spanParents;
+    auto client = context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
         [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
       tracing.setTag("facet_name"_kjc, name.asPtr());
+      spanParents = tracing.getSpanParents();
 
       return getOrCreateActorChannel().startRequest({.cfBlobJson = kj::mv(cfStr),
         .parentSpan = tracing.getInternalSpanParent(),
@@ -1000,6 +1002,7 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
         {.inHouse = true,
           .wrapMetrics = true,
           .operationName = kj::ConstString("facet_subrequest"_kjc)}));
+    return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
   }
 
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override {

@@ -346,11 +346,11 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
         version(kj::mv(version)),
         persistent(persistent) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
+  Result newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
   bool supportsActorRetryMetadata() const override {
     return true;
   }
-  kj::Own<WorkerInterface> newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
+  Result newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
       kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) override;
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
 
@@ -385,7 +385,7 @@ class LocalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
       : channelId(channelId),
         actorId(kj::mv(actorId)) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
+  Result newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
 
  private:
@@ -410,11 +410,11 @@ class ReplicaActorOutgoingFactory final: public Fetcher::OutgoingFactory {
       : actorChannel(kj::mv(channel)),
         actorId(kj::mv(actorId)) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
+  Result newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
   bool supportsActorRetryMetadata() const override {
     return true;
   }
-  kj::Own<WorkerInterface> newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
+  Result newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
       kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) override;
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
 

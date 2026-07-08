@@ -170,7 +170,7 @@ export function findSpanByName(state, name, filterFn = () => true) {
  * @param {Array} expectedSpans - The expected spans to compare against
  * @param {Object} options - Options for the test
  * @param {Function} options.mapFn - Map function to transform spans before comparison (default: x => x)
- * @param {Function} options.filterFn - Filter function for spans (default: filters out jsRpcSession)
+ * @param {Function} options.filterFn - Filter function for spans (default: filters out jsRpcSession and jsRpcCall)
  * @param {string} options.testName - Name for the test (default: 'instrumentation')
  * @param {boolean} options.logReceived - Log received spans for debugging (default: false)
  *
@@ -185,7 +185,8 @@ export async function runInstrumentationTest(
 ) {
   const {
     mapFn = (x) => x,
-    filterFn = (span) => span.name !== 'jsRpcSession',
+    filterFn = (span) =>
+      span.name !== 'jsRpcSession' && span.name !== 'jsRpcCall',
     testName = 'instrumentation',
     logReceived = false,
   } = options;
