@@ -31,6 +31,7 @@ class WorkerInterface;
 // bindings of a flag-enabled worker are `Persistent::YES`; everything else is `Persistent::NO`.
 // A `Persistent::YES` channel/token may be stored in long-term storage; `Persistent::NO` may not.
 WD_STRONG_BOOL(Persistent);
+WD_STRONG_BOOL(ReresolveActorPipeline);
 
 // Whether an actor request is a retry of an earlier attempt.
 WD_STRONG_BOOL(IsActorRetry);
@@ -175,6 +176,11 @@ class IoChannelFactory: public virtual kj::Refcounted {
     // Present when the caller classified this as a retry-eligible actor request and selected its
     // logical-call token.
     kj::Maybe<ActorRetryRequestMetadata> actorRetryRequestMetadata;
+
+    // A hibernatable WebSocket event wakes an actor over a loopback that outlives it. With no live
+    // actor owning the manager, the pipeline that loopback holds can name a version that is no
+    // longer current, so runtimes with mutable actor code should re-resolve it from its script ID.
+    ReresolveActorPipeline reresolveActorPipeline = ReresolveActorPipeline::NO;
 
     // True if this request was started on a channel that was reconstructed from a stored
     // ("persistent") stub. The target worker re-verifies that it still has the
