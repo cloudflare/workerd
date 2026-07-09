@@ -1330,30 +1330,6 @@ export declare abstract class Crypto {
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto)
  */
 export declare abstract class SubtleCrypto {
-  static supports(
-    operation: string,
-    algorithm:
-      | string
-      | SubtleCryptoGenerateKeyAlgorithm
-      | SubtleCryptoImportKeyAlgorithm
-      | SubtleCryptoDeriveKeyAlgorithm
-      | SubtleCryptoHashAlgorithm
-      | SubtleCryptoEncryptAlgorithm
-      | SubtleCryptoSignAlgorithm,
-    length?: number | null,
-  ): boolean;
-  static supports(
-    operation: string,
-    algorithm:
-      | string
-      | SubtleCryptoGenerateKeyAlgorithm
-      | SubtleCryptoImportKeyAlgorithm
-      | SubtleCryptoDeriveKeyAlgorithm
-      | SubtleCryptoHashAlgorithm
-      | SubtleCryptoEncryptAlgorithm
-      | SubtleCryptoSignAlgorithm,
-    additionalAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
-  ): boolean;
   /**
    * The **`encrypt()`** method of the SubtleCrypto interface encrypts data.
    *
@@ -1479,6 +1455,30 @@ export declare abstract class SubtleCrypto {
     extractable: boolean,
     keyUsages: string[],
   ): Promise<CryptoKey>;
+  static supports(
+    operation: string,
+    algorithm:
+      | string
+      | SubtleCryptoGenerateKeyAlgorithm
+      | SubtleCryptoImportKeyAlgorithm
+      | SubtleCryptoDeriveKeyAlgorithm
+      | SubtleCryptoHashAlgorithm
+      | SubtleCryptoEncryptAlgorithm
+      | SubtleCryptoSignAlgorithm,
+    length?: number | null,
+  ): boolean;
+  static supports(
+    operation: string,
+    algorithm:
+      | string
+      | SubtleCryptoGenerateKeyAlgorithm
+      | SubtleCryptoImportKeyAlgorithm
+      | SubtleCryptoDeriveKeyAlgorithm
+      | SubtleCryptoHashAlgorithm
+      | SubtleCryptoEncryptAlgorithm
+      | SubtleCryptoSignAlgorithm,
+    additionalAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+  ): boolean;
   encapsulateKey(
     encapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
     encapsulationKey: CryptoKey,
