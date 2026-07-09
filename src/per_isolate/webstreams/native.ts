@@ -134,7 +134,6 @@ const {
   TypedArrayPrototypeGetBuffer,
   TypedArrayPrototypeGetByteLength,
   TypedArrayPrototypeGetByteOffset,
-  TypedArrayPrototypeGetSymbolToStringTag,
   Uint8Array,
   uncurryThis,
 } = primordials;
@@ -300,12 +299,22 @@ let getControllerConduit: (
 // Invalidated automatically once its descriptor is no longer the head
 // request (view/atLeast report null; responds throw).
 
+let assertIsNativeReadableStreamBYOBRequest: (
+  self: NativeReadableStreamBYOBRequest
+) => void;
+
 class NativeReadableStreamBYOBRequest {
   #conduit: NativePullConduit;
   #desc: PullIntoDescriptor;
 
   static {
     getRequestDesc = (request) => request.#desc;
+
+    assertIsNativeReadableStreamBYOBRequest = function (
+      self: NativeReadableStreamBYOBRequest
+    ): void {
+      if (!(#desc in self)) throw new TypeError('Illegal invocation');
+    };
   }
 
   constructor(conduit: NativePullConduit, desc: PullIntoDescriptor) {
@@ -314,7 +323,7 @@ class NativeReadableStreamBYOBRequest {
   }
 
   get view(): Uint8Array | null {
-    if (!(#desc in this)) throw new TypeError('Illegal invocation');
+    assertIsNativeReadableStreamBYOBRequest(this);
     if (!this.#conduit.isHeadDesc(this.#desc)) return null;
     const desc = this.#desc;
     return new Uint8Array(
@@ -330,7 +339,7 @@ class NativeReadableStreamBYOBRequest {
   // header). The subtraction is defensive: a live descriptor always has
   // bytesFilled === 0 under the once-per-read contract.
   get atLeast(): number | null {
-    if (!(#desc in this)) throw new TypeError('Illegal invocation');
+    assertIsNativeReadableStreamBYOBRequest(this);
     if (!this.#conduit.isHeadDesc(this.#desc)) return null;
     const desc = this.#desc;
     const remaining = desc.minimumFill - desc.bytesFilled;
@@ -338,7 +347,7 @@ class NativeReadableStreamBYOBRequest {
   }
 
   respond(bytesWritten: number): void {
-    if (!(#desc in this)) throw new TypeError('Illegal invocation');
+    assertIsNativeReadableStreamBYOBRequest(this);
     this.#conduit.respondToDesc(this.#desc, bytesWritten);
   }
 }
@@ -351,6 +360,10 @@ class NativeReadableStreamBYOBRequest {
 // ONLY by the native source — never handed to user code — but the methods
 // brand-check anyway, matching the file-wide convention.
 
+let assertIsNativeReadableStreamController: (
+  self: NativeReadableStreamController
+) => void;
+
 class NativeReadableStreamController {
   #conduit: NativePullConduit;
 
@@ -362,6 +375,12 @@ class NativeReadableStreamController {
     };
 
     getControllerConduit = (controller) => controller.#conduit;
+
+    assertIsNativeReadableStreamController = function (
+      self: NativeReadableStreamController
+    ): void {
+      if (!(#conduit in self)) throw new TypeError('Illegal invocation');
+    };
   }
 
   constructor(conduit: NativePullConduit) {
@@ -371,7 +390,7 @@ class NativeReadableStreamController {
   // Mode discrimination for the native source: non-null ⇔ the request at
   // the head of the FIFO is a BYOB read.
   get byobRequest(): NativeReadableStreamBYOBRequest | null {
-    if (!(#conduit in this)) throw new TypeError('Illegal invocation');
+    assertIsNativeReadableStreamController(this);
     return this.#conduit.getByobRequest();
   }
 
@@ -379,22 +398,22 @@ class NativeReadableStreamController {
   // source contractually never consults it: pacing is purely demand-
   // driven (effective high-water mark of zero; strategy is ignored).
   get desiredSize(): number | null {
-    if (!(#conduit in this)) throw new TypeError('Illegal invocation');
+    assertIsNativeReadableStreamController(this);
     return this.#conduit.desiredSize;
   }
 
   enqueue(chunk: ArrayBufferView): void {
-    if (!(#conduit in this)) throw new TypeError('Illegal invocation');
+    assertIsNativeReadableStreamController(this);
     this.#conduit.enqueue(chunk);
   }
 
   close(): void {
-    if (!(#conduit in this)) throw new TypeError('Illegal invocation');
+    assertIsNativeReadableStreamController(this);
     this.#conduit.closeFromSource();
   }
 
   error(reason?: unknown): void {
-    if (!(#conduit in this)) throw new TypeError('Illegal invocation');
+    assertIsNativeReadableStreamController(this);
     this.#conduit.errorFromSource(reason);
   }
 }
@@ -865,8 +884,7 @@ class NativePullConduit implements ByteStreamConsumerType {
       if (isUint8Array(chunk)) {
         view = chunk as Uint8Array;
       } else {
-        const isDataView =
-          TypedArrayPrototypeGetSymbolToStringTag(chunk) === undefined;
+        const isDataView = utils.isDataView(chunk);
         const buffer = (
           isDataView
             ? DataViewPrototypeGetBuffer(chunk)

@@ -93,6 +93,7 @@ struct BootstrapState {
 #define VALUE_METHOD_MAP(V)                                                                        \
   V(ArrayBuffer)                                                                                   \
   V(ArrayBufferView)                                                                               \
+  V(DataView)                                                                                      \
   V(Promise)                                                                                       \
   V(SharedArrayBuffer)                                                                             \
   V(Uint8Array)
