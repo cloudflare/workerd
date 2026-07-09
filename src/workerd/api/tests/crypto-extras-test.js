@@ -423,7 +423,7 @@ export const ecJwkKeyConsistencyCheck = {
 
 export const webCryptoModernAlgorithmsRequireCompatFlag = {
   async test() {
-    strictEqual('supports' in SubtleCrypto, false);
+    strictEqual('supports' in crypto.subtle.constructor, false);
     strictEqual('encapsulateKey' in crypto.subtle, false);
     strictEqual('encapsulateBits' in crypto.subtle, false);
     strictEqual('decapsulateKey' in crypto.subtle, false);
