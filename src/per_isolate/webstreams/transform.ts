@@ -109,6 +109,10 @@ let transformStreamDesiredSize: <I, O>(
   stream: TransformStream<I, O>
 ) => number | null;
 
+let assertIsTransformStreamDefaultController: <I, O>(
+  self: TransformStreamDefaultController<I, O>
+) => void;
+
 class TransformStreamDefaultController<
   I = unknown,
   O = unknown,
@@ -116,6 +120,13 @@ class TransformStreamDefaultController<
   #stream: TransformStream<I, O> | undefined;
 
   static {
+    assertIsTransformStreamDefaultController = function <I, O>(
+      self: TransformStreamDefaultController<I, O>
+    ): void {
+      if (!isActualObject(self) || !(#stream in self))
+        throw new TypeError('Illegal invocation');
+    };
+
     transformStreamDefaultControllerInit = (controller, stream) => {
       controller.#stream = stream;
     };
@@ -126,7 +137,7 @@ class TransformStreamDefaultController<
   }
 
   get desiredSize(): number | null {
-    if (!(#stream in this)) throw new TypeError('Illegal invocation');
+    assertIsTransformStreamDefaultController(this);
     const stream = this.#stream;
     if (stream === undefined) {
       throw new TypeError('Controller is not attached to a stream');
@@ -135,7 +146,7 @@ class TransformStreamDefaultController<
   }
 
   enqueue(chunk: O = undefined as O): void {
-    if (!(#stream in this)) throw new TypeError('Illegal invocation');
+    assertIsTransformStreamDefaultController(this);
     const stream = this.#stream;
     if (stream === undefined) {
       throw new TypeError('Controller is not attached to a stream');
@@ -144,7 +155,7 @@ class TransformStreamDefaultController<
   }
 
   error(reason: unknown = undefined): void {
-    if (!(#stream in this)) throw new TypeError('Illegal invocation');
+    assertIsTransformStreamDefaultController(this);
     const stream = this.#stream;
     if (stream === undefined) {
       throw new TypeError('Controller is not attached to a stream');
@@ -153,15 +164,13 @@ class TransformStreamDefaultController<
   }
 
   terminate(): void {
-    if (!(#stream in this)) throw new TypeError('Illegal invocation');
+    assertIsTransformStreamDefaultController(this);
     const stream = this.#stream;
     if (stream === undefined) {
       throw new TypeError('Controller is not attached to a stream');
     }
     transformStreamTerminate(stream);
   }
-
-  [SymbolToStringTag] = 'TransformStreamDefaultController';
 }
 
 class TransformStream<I = unknown, O = unknown> {
@@ -677,33 +686,53 @@ class TransformStream<I = unknown, O = unknown> {
   }
 
   get readable(): ReadableStreamType<O> {
-    if (!(#readable in this)) throw new TypeError('Illegal invocation');
+    if (!isActualObject(this) || !(#readable in this))
+      throw new TypeError('Illegal invocation');
     return this.#readable;
   }
 
   get writable(): WritableStreamType<I> {
-    if (!(#writable in this)) throw new TypeError('Illegal invocation');
+    if (!isActualObject(this) || !(#writable in this))
+      throw new TypeError('Illegal invocation');
     return this.#writable;
   }
-
-  [SymbolToStringTag] = 'TransformStream';
 }
 
+const kEnumerable = { __proto__: null, enumerable: true };
+
 ObjectDefineProperties(TransformStream, {
-  length: { value: 0 },
+  __proto__: null,
+  length: { __proto__: null, value: 0 },
 });
 ObjectDefineProperties(TransformStreamDefaultController, {
-  length: { value: 0 },
+  __proto__: null,
+  length: { __proto__: null, value: 0 },
 });
 ObjectDefineProperties(TransformStream.prototype, {
-  readable: { enumerable: true },
-  writable: { enumerable: true },
+  __proto__: null,
+  readable: kEnumerable,
+  writable: kEnumerable,
+  [SymbolToStringTag]: {
+    __proto__: null,
+    value: 'TransformStream',
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  },
 });
 ObjectDefineProperties(TransformStreamDefaultController.prototype, {
-  desiredSize: { enumerable: true },
-  enqueue: { enumerable: true },
-  error: { enumerable: true },
-  terminate: { enumerable: true },
+  __proto__: null,
+  desiredSize: kEnumerable,
+  enqueue: kEnumerable,
+  error: kEnumerable,
+  terminate: kEnumerable,
+  [SymbolToStringTag]: {
+    __proto__: null,
+    value: 'TransformStreamDefaultController',
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  },
 });
 
 module.exports = {

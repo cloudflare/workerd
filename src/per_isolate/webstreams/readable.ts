@@ -866,8 +866,6 @@ class ReadableStreamDefaultReader<
     if (!isReaderBoundToStream(this)) return;
     readableStreamReaderGenericRelease(this);
   }
-
-  [SymbolToStringTag] = 'ReadableStreamDefaultReader';
 }
 
 class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
@@ -1030,8 +1028,6 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     if (!isReaderBoundToStream(this)) return;
     readableStreamReaderGenericRelease(this);
   }
-
-  [SymbolToStringTag] = 'ReadableStreamBYOBReader';
 }
 
 // Stream-level state transitions shared by the controllers and (in later
@@ -1133,6 +1129,10 @@ function validateAndTransferView(view: ArrayBufferView): ByteQueueEntry {
   };
 }
 
+let assertIsReadableStreamDefaultController: <R>(
+  self: ReadableStreamDefaultController<R>
+) => void;
+
 class ReadableStreamDefaultController<
   R = unknown,
 > implements ReadableStreamDefaultControllerType<R> {
@@ -1150,6 +1150,13 @@ class ReadableStreamDefaultController<
   #cancelPromise: Promise<void> | undefined;
 
   static {
+    assertIsReadableStreamDefaultController = function <R>(
+      self: ReadableStreamDefaultController<R>
+    ): void {
+      if (!isActualObject(self) || !(#queue in self))
+        throw new TypeError('Illegal invocation');
+    };
+
     // BACKEND-DISPATCH: the chained controller helpers (one of the five
     // sanctioned dispatch points). Each backend wraps the previous
     // implementation behind its own brand check — private-brand `in` for
@@ -1283,7 +1290,7 @@ class ReadableStreamDefaultController<
   }
 
   get desiredSize(): number | null {
-    if (!(#queue in this)) throw new TypeError('Illegal invocation');
+    assertIsReadableStreamDefaultController(this);
     // null when ERRORED, 0 when CLOSED, computed while readable — including
     // while close-requested-but-still-draining (spec GetDesiredSize).
     switch (getReadableStreamGetState(this.#stream)) {
@@ -1297,7 +1304,7 @@ class ReadableStreamDefaultController<
   }
 
   enqueue(chunk: R = undefined as R): void {
-    if (!(#queue in this)) throw new TypeError('Illegal invocation');
+    assertIsReadableStreamDefaultController(this);
     if (!this.#canCloseOrEnqueue()) {
       throw new TypeError(
         'Cannot enqueue a chunk into a stream that is closed or closing'
@@ -1351,7 +1358,7 @@ class ReadableStreamDefaultController<
   }
 
   close(): void {
-    if (!(#queue in this)) throw new TypeError('Illegal invocation');
+    assertIsReadableStreamDefaultController(this);
     if (!this.#canCloseOrEnqueue()) {
       throw new TypeError(
         'Cannot close a stream that is already closed or closing'
@@ -1366,7 +1373,7 @@ class ReadableStreamDefaultController<
   }
 
   error(reason: unknown = undefined): void {
-    if (!(#queue in this)) throw new TypeError('Illegal invocation');
+    assertIsReadableStreamDefaultController(this);
     if (getReadableStreamGetState(this.#stream) !== 'readable') return;
     // Propagate to every live consumer stream (tee branches) via the
     // cursors' weak owner refs — no strong retention of branches. The
@@ -1483,8 +1490,6 @@ class ReadableStreamDefaultController<
     this.#cancelAlgorithm = undefined;
     this.#sizeAlgorithm = undefined;
   }
-
-  [SymbolToStringTag] = 'ReadableStreamDefaultController';
 }
 
 // Cross-class accessors for the BYOB request/controller pairing, assigned
@@ -1510,6 +1515,10 @@ let getByteControllerAutoAllocateChunkSize: (
   controller: ReadableByteStreamController
 ) => number | undefined;
 
+let assertIsReadableStreamBYOBRequest: (
+  self: ReadableStreamBYOBRequest
+) => void;
+
 class ReadableStreamBYOBRequest implements ReadableStreamBYOBRequestType {
   // All null once invalidated. Per spec, EVERY respond()/
   // respondWithNewView()/enqueue() invalidates the outstanding request;
@@ -1519,6 +1528,13 @@ class ReadableStreamBYOBRequest implements ReadableStreamBYOBRequestType {
   #atLeast: number | null = null;
 
   static {
+    assertIsReadableStreamBYOBRequest = function (
+      self: ReadableStreamBYOBRequest
+    ): void {
+      if (!isActualObject(self) || !(#view in self))
+        throw new TypeError('Illegal invocation');
+    };
+
     initializeByobRequest = (request, controller, view, atLeast) => {
       request.#controller = controller;
       request.#view = view;
@@ -1537,7 +1553,7 @@ class ReadableStreamBYOBRequest implements ReadableStreamBYOBRequestType {
   }
 
   get view(): Uint8Array | null {
-    if (!(#view in this)) throw new TypeError('Illegal invocation');
+    assertIsReadableStreamBYOBRequest(this);
     return this.#view;
   }
 
@@ -1552,12 +1568,12 @@ class ReadableStreamBYOBRequest implements ReadableStreamBYOBRequestType {
   // old implementation's max(elementSize, atLeast) floor. null once
   // invalidated, mirroring the old kj::Maybe behavior.
   get atLeast(): number | null {
-    if (!(#view in this)) throw new TypeError('Illegal invocation');
+    assertIsReadableStreamBYOBRequest(this);
     return this.#atLeast;
   }
 
   respond(bytesWritten: number): void {
-    if (!(#view in this)) throw new TypeError('Illegal invocation');
+    assertIsReadableStreamBYOBRequest(this);
     if (this.#controller === null) {
       throw new TypeError('This BYOB request has been invalidated');
     }
@@ -1565,7 +1581,7 @@ class ReadableStreamBYOBRequest implements ReadableStreamBYOBRequestType {
   }
 
   respondWithNewView(view: ArrayBufferView): void {
-    if (!(#view in this)) throw new TypeError('Illegal invocation');
+    assertIsReadableStreamBYOBRequest(this);
     if (this.#controller === null) {
       throw new TypeError('This BYOB request has been invalidated');
     }
@@ -1579,9 +1595,11 @@ class ReadableStreamBYOBRequest implements ReadableStreamBYOBRequestType {
     }
     byteControllerRespondWithNewView(this.#controller, view);
   }
-
-  [SymbolToStringTag] = 'ReadableStreamBYOBRequest';
 }
+
+let assertIsReadableByteStreamController: (
+  self: ReadableByteStreamController
+) => void;
 
 class ReadableByteStreamController implements ReadableByteStreamControllerType {
   #stream: ReadableStream<Uint8Array>;
@@ -1606,6 +1624,13 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   static {
     isByteStreamController = (value: unknown) => {
       return isActualObject(value) && #queue in value;
+    };
+
+    assertIsReadableByteStreamController = function (
+      self: ReadableByteStreamController
+    ): void {
+      if (!isByteStreamController(self))
+        throw new TypeError('Illegal invocation');
     };
 
     // Chain the controller dispatch helpers. The default controller's
@@ -1773,7 +1798,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   }
 
   get desiredSize(): number | null {
-    if (!(#queue in this)) throw new TypeError('Illegal invocation');
+    assertIsReadableByteStreamController(this);
     switch (getReadableStreamGetState(this.#stream)) {
       case 'errored':
         return null;
@@ -1785,7 +1810,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   }
 
   get byobRequest(): ReadableStreamBYOBRequestType | null {
-    if (!(#queue in this)) throw new TypeError('Illegal invocation');
+    assertIsReadableByteStreamController(this);
     if (this.#byobRequest === null) {
       // Zero-copy is only unambiguous with exactly one consumer, and only
       // when it has a head pull-into descriptor (from a BYOB read, or
@@ -1815,7 +1840,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   }
 
   enqueue(chunk: ArrayBufferView): void {
-    if (!(#queue in this)) throw new TypeError('Illegal invocation');
+    assertIsReadableByteStreamController(this);
     if (!this.#canCloseOrEnqueue()) {
       throw new TypeError(
         'Cannot enqueue a chunk into a stream that is closed or closing'
@@ -1869,7 +1894,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   }
 
   close(): void {
-    if (!(#queue in this)) throw new TypeError('Illegal invocation');
+    assertIsReadableByteStreamController(this);
     if (!this.#canCloseOrEnqueue()) {
       throw new TypeError(
         'Cannot close a stream that is already closed or closing'
@@ -1913,7 +1938,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   }
 
   error(reason: unknown = undefined): void {
-    if (!(#queue in this)) throw new TypeError('Illegal invocation');
+    assertIsReadableByteStreamController(this);
     if (getReadableStreamGetState(this.#stream) !== 'readable') return;
     this.#invalidateByobRequest();
     // Branch propagation — see the default controller's error() for why.
@@ -2149,8 +2174,6 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     this.#pullAlgorithm = undefined;
     this.#cancelAlgorithm = undefined;
   }
-
-  [SymbolToStringTag] = 'ReadableByteStreamController';
 }
 
 function setupReadableByteStreamControllerFromUnderlyingSource<R>(
@@ -2330,8 +2353,6 @@ class ReadableStreamDrainingReader<R> {
     if (!isReaderBoundToStream(this)) return;
     readableStreamReaderGenericRelease(this);
   }
-
-  [SymbolToStringTag] = 'ReadableStreamDrainingReader';
 }
 
 // The pipe (spec ReadableStreamPipeTo). Internal operations only on both
@@ -2689,6 +2710,8 @@ function pipeToInternal<R>(
   return promise;
 }
 
+let assertIsReadableStream: <W>(self: ReadableStream<W>) => void;
+
 class ReadableStream<R> {
   #controller?:
     | ReadableStreamDefaultControllerType
@@ -2722,6 +2745,10 @@ class ReadableStream<R> {
   static {
     isReadableStream = (value: unknown) => {
       return isActualObject(value) && #state in value;
+    };
+
+    assertIsReadableStream = function <W>(self: ReadableStream<W>): void {
+      if (!isReadableStream(self)) throw new TypeError('Illegal invocation');
     };
 
     isReadableStreamLocked = <R>(stream: ReadableStream<R>) => {
@@ -3124,9 +3151,7 @@ class ReadableStream<R> {
     // to extract the native underlying source; absent means "queued,
     // use DrainingReader". One-shot: subsequent calls throw.
     extractNativeSource = function <R>(this: ReadableStream<R>): object {
-      if (!isReadableStream(this)) {
-        throw new TypeError('Illegal invocation');
-      }
+      assertIsReadableStream(this);
       if (isReadableStreamLocked(this)) {
         throw new TypeError(
           'Cannot extract a native source from a locked stream'
@@ -3272,17 +3297,13 @@ class ReadableStream<R> {
   }
 
   get locked(): boolean {
-    if (!isReadableStream(this)) {
-      throw new TypeError('Illegal invocation');
-    }
+    assertIsReadableStream(this);
     return isReadableStreamLocked(this);
   }
 
   cancel(reason: unknown = undefined): Promise<void> {
     try {
-      if (!isReadableStream(this)) {
-        throw new TypeError('Illegal invocation');
-      }
+      assertIsReadableStream(this);
       if (isReadableStreamLocked(this)) {
         throw new TypeError('Cannot cancel a stream that is locked');
       }
@@ -3295,9 +3316,7 @@ class ReadableStream<R> {
   getReader(
     options: { mode?: 'byob' } | null = {}
   ): ReadableStreamReaderType<R> {
-    if (!isReadableStream(this)) {
-      throw new TypeError('Illegal invocation');
-    }
+    assertIsReadableStream(this);
     // WebIDL dictionary conversion: null and undefined become {},
     // objects have their properties read, primitives are rejected.
     if (options != null && !isActualObject(options)) {
@@ -3323,9 +3342,7 @@ class ReadableStream<R> {
     // Default = {} preserves Function.length = 1 (IDL harness check).
     options: StreamPipeOptions = {}
   ): ReadableStreamType<T> {
-    if (!isReadableStream(this)) {
-      throw new TypeError('Illegal invocation');
-    }
+    assertIsReadableStream(this);
     if (isReadableStreamLocked(this)) {
       throw new TypeError('Cannot pipe a stream that is locked');
     }
@@ -3360,9 +3377,7 @@ class ReadableStream<R> {
     options: StreamPipeOptions = {}
   ): Promise<void> {
     try {
-      if (!isReadableStream(this)) {
-        throw new TypeError('Illegal invocation');
-      }
+      assertIsReadableStream(this);
       if (isReadableStreamLocked(this)) {
         throw new TypeError('Cannot pipe a stream that is locked');
       }
@@ -3415,9 +3430,7 @@ class ReadableStream<R> {
   }
 
   tee(): [ReadableStream<R>, ReadableStream<R>] {
-    if (!isReadableStream(this)) {
-      throw new TypeError('Illegal invocation');
-    }
+    assertIsReadableStream(this);
     if (isReadableStreamLocked(this)) {
       throw new TypeError('Cannot tee a stream that is locked');
     }
@@ -3555,9 +3568,7 @@ class ReadableStream<R> {
   }
 
   values(options: { preventCancel?: boolean } = {}): AsyncIterableIterator<R> {
-    if (!isReadableStream(this)) {
-      throw new TypeError('Illegal invocation');
-    }
+    assertIsReadableStream(this);
     if (!isActualObject(options)) {
       throw new TypeError('Options must be an object');
     }
@@ -3583,67 +3594,121 @@ class ReadableStream<R> {
   }): AsyncIterableIterator<R> {
     return this.values(options);
   }
-
-  [SymbolToStringTag] = 'ReadableStream';
 }
 
+const kEnumerable = { __proto__: null, enumerable: true };
+
 ObjectDefineProperties(ReadableStreamDefaultReader.prototype, {
-  closed: { enumerable: true },
-  cancel: { enumerable: true },
-  read: { enumerable: true },
-  releaseLock: { enumerable: true },
+  __proto__: null,
+  closed: kEnumerable,
+  cancel: kEnumerable,
+  read: kEnumerable,
+  releaseLock: kEnumerable,
+  [SymbolToStringTag]: {
+    __proto__: null,
+    value: 'ReadableStreamDefaultReader',
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  },
 });
 ObjectDefineProperties(ReadableStreamBYOBReader.prototype, {
-  closed: { enumerable: true },
-  cancel: { enumerable: true },
-  read: { enumerable: true },
-  releaseLock: { enumerable: true },
+  __proto__: null,
+  closed: kEnumerable,
+  cancel: kEnumerable,
+  read: kEnumerable,
+  releaseLock: kEnumerable,
+  [SymbolToStringTag]: {
+    __proto__: null,
+    value: 'ReadableStreamBYOBReader',
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  },
 });
 ObjectDefineProperties(ReadableStream, {
-  from: { enumerable: true },
+  __proto__: null,
+  from: kEnumerable,
 });
 ObjectDefineProperties(ReadableStream.prototype, {
-  locked: { enumerable: true },
-  cancel: { enumerable: true },
-  getReader: { enumerable: true },
-  pipeThrough: { enumerable: true },
-  pipeTo: { enumerable: true },
-  tee: { enumerable: true },
-  values: { enumerable: true },
-  [SymbolAsyncIterator]: { enumerable: true },
+  __proto__: null,
+  locked: kEnumerable,
+  cancel: kEnumerable,
+  getReader: kEnumerable,
+  pipeThrough: kEnumerable,
+  pipeTo: kEnumerable,
+  tee: kEnumerable,
+  values: kEnumerable,
+  [SymbolAsyncIterator]: kEnumerable,
+  [SymbolToStringTag]: {
+    __proto__: null,
+    value: 'ReadableStream',
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  },
 });
 ObjectDefineProperties(ReadableStreamDefaultController, {
-  length: { value: 0 },
+  __proto__: null,
+  length: { __proto__: null, value: 0 },
 });
 ObjectDefineProperties(ReadableByteStreamController, {
-  length: { value: 0 },
+  __proto__: null,
+  length: { __proto__: null, value: 0 },
 });
 ObjectDefineProperties(ReadableStreamBYOBRequest, {
-  length: { value: 0 },
+  __proto__: null,
+  length: { __proto__: null, value: 0 },
 });
 ObjectDefineProperties(ReadableStreamDefaultController.prototype, {
-  close: { enumerable: true },
-  enqueue: { enumerable: true },
-  error: { enumerable: true },
-  desiredSize: { enumerable: true },
+  __proto__: null,
+  close: kEnumerable,
+  enqueue: kEnumerable,
+  error: kEnumerable,
+  desiredSize: kEnumerable,
+  [SymbolToStringTag]: {
+    __proto__: null,
+    value: 'ReadableStreamDefaultController',
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  },
 });
 ObjectDefineProperties(ReadableByteStreamController.prototype, {
-  close: { enumerable: true },
-  enqueue: { enumerable: true },
-  error: { enumerable: true },
-  byobRequest: { enumerable: true },
-  desiredSize: { enumerable: true },
+  __proto__: null,
+  close: kEnumerable,
+  enqueue: kEnumerable,
+  error: kEnumerable,
+  byobRequest: kEnumerable,
+  desiredSize: kEnumerable,
+  [SymbolToStringTag]: {
+    __proto__: null,
+    value: 'ReadableByteStreamController',
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  },
 });
 ObjectDefineProperties(ReadableStreamBYOBRequest.prototype, {
-  respond: { enumerable: true },
-  respondWithNewView: { enumerable: true },
-  view: { enumerable: true },
+  __proto__: null,
+  respond: kEnumerable,
+  respondWithNewView: kEnumerable,
+  view: kEnumerable,
+  [SymbolToStringTag]: {
+    __proto__: null,
+    value: 'ReadableStreamBYOBRequest',
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  },
 });
 ObjectDefineProperties(ReadableStreamDefaultController.prototype.enqueue, {
-  length: { value: 0 },
+  __proto__: null,
+  length: { __proto__: null, value: 0 },
 });
 ObjectDefineProperties(ReadableByteStreamController.prototype.enqueue, {
-  length: { value: 1 },
+  __proto__: null,
+  length: { __proto__: null, value: 1 },
 });
 
 module.exports = {

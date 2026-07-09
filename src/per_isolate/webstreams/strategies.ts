@@ -25,8 +25,22 @@ const countSize = {
   },
 }.size;
 
+let assertIsByteLengthQueuingStrategy: (
+  value: ByteLengthQueuingStrategy
+) => void;
+let assertIsCountQueuingStrategy: (value: CountQueuingStrategy) => void;
+
 class ByteLengthQueuingStrategy {
   #highWaterMark: number;
+
+  static {
+    assertIsByteLengthQueuingStrategy = function (
+      self: ByteLengthQueuingStrategy
+    ) {
+      if (!isActualObject(self) || !(#highWaterMark in self))
+        throw new TypeError('Illegal invocation');
+    };
+  }
 
   // The init type is optional-shaped because user input is arbitrary; the
   // required-member check is the explicit TypeError below.
@@ -44,20 +58,25 @@ class ByteLengthQueuingStrategy {
   }
 
   get highWaterMark(): number {
-    if (!(#highWaterMark in this)) throw new TypeError('Illegal invocation');
+    assertIsByteLengthQueuingStrategy(this);
     return this.#highWaterMark;
   }
 
   get size(): (chunk: ArrayBufferView) => number {
-    if (!(#highWaterMark in this)) throw new TypeError('Illegal invocation');
+    assertIsByteLengthQueuingStrategy(this);
     return byteLengthSize;
   }
-
-  [SymbolToStringTag] = 'ByteLengthQueuingStrategy';
 }
 
 class CountQueuingStrategy {
   #highWaterMark: number;
+
+  static {
+    assertIsCountQueuingStrategy = function (self: CountQueuingStrategy) {
+      if (!isActualObject(self) || !(#highWaterMark in self))
+        throw new TypeError('Illegal invocation');
+    };
+  }
 
   constructor(init: { highWaterMark?: number }) {
     if (!isActualObject(init)) {
@@ -70,26 +89,42 @@ class CountQueuingStrategy {
   }
 
   get highWaterMark(): number {
-    if (!(#highWaterMark in this)) throw new TypeError('Illegal invocation');
+    assertIsCountQueuingStrategy(this);
     return this.#highWaterMark;
   }
 
   get size(): () => number {
-    if (!(#highWaterMark in this)) throw new TypeError('Illegal invocation');
+    assertIsCountQueuingStrategy(this);
     return countSize;
   }
-
-  [SymbolToStringTag] = 'CountQueuingStrategy';
 }
 
+const kEnumerable = { __proto__: null, enumerable: true };
+
 ObjectDefineProperties(ByteLengthQueuingStrategy.prototype, {
-  highWaterMark: { enumerable: true },
-  size: { enumerable: true },
+  __proto__: null,
+  highWaterMark: kEnumerable,
+  size: kEnumerable,
+  [SymbolToStringTag]: {
+    __proto__: null,
+    value: 'ByteLengthQueuingStrategy',
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  },
 });
 
 ObjectDefineProperties(CountQueuingStrategy.prototype, {
-  highWaterMark: { enumerable: true },
-  size: { enumerable: true },
+  __proto__: null,
+  highWaterMark: kEnumerable,
+  size: kEnumerable,
+  [SymbolToStringTag]: {
+    __proto__: null,
+    value: 'CountQueuingStrategy',
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  },
 });
 
 module.exports = {
