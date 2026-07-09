@@ -363,18 +363,6 @@ class SubtleCrypto: public jsg::Object {
     JSG_STRUCT(name);
   };
 
-  // Type of the `algorithm` parameter passed to `digest()` specifically.
-  // Extends HashAlgorithm's fields with optional parameters for XOF algorithms.
-  struct DigestAlgorithm {
-    kj::String name;
-    jsg::Optional<int> outputLength;
-    jsg::Optional<int> domainSeparation;
-    jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> functionName;
-    jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> customization;
-
-    JSG_STRUCT(name, outputLength, domainSeparation, functionName, customization);
-  };
-
   // Type of the `algorithm` parameter passed to `encrypt()` and `decrypt()`. Different
   // algorithms call for different fields.
   struct EncryptAlgorithm {
@@ -574,9 +562,8 @@ class SubtleCrypto: public jsg::Object {
       jsg::JsBufferSource signature,
       jsg::JsBufferSource data);
 
-  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> digest(jsg::Lock& js,
-      kj::OneOf<kj::String, DigestAlgorithm> algorithm,
-      jsg::JsBufferSource data);
+  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> digest(
+      jsg::Lock& js, kj::OneOf<kj::String, HashAlgorithm> algorithm, jsg::JsBufferSource data);
 
   jsg::Promise<kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair>> generateKey(jsg::Lock& js,
       kj::OneOf<kj::String, GenerateKeyAlgorithm> algorithm,
@@ -681,7 +668,7 @@ class SubtleCrypto: public jsg::Object {
       jsg::Optional<v8::Local<v8::Value>> lengthOrAdditionalAlgorithm,
       const jsg::TypeHandler<kj::OneOf<kj::String, EncryptAlgorithm>>& encryptAlgorithmHandler,
       const jsg::TypeHandler<kj::OneOf<kj::String, SignAlgorithm>>& signAlgorithmHandler,
-      const jsg::TypeHandler<kj::OneOf<kj::String, DigestAlgorithm>>& digestAlgorithmHandler,
+      const jsg::TypeHandler<kj::OneOf<kj::String, HashAlgorithm>>& digestAlgorithmHandler,
       const jsg::TypeHandler<kj::OneOf<kj::String, GenerateKeyAlgorithm>>&
           generateKeyAlgorithmHandler,
       const jsg::TypeHandler<kj::OneOf<kj::String, DeriveKeyAlgorithm>>& deriveKeyAlgorithmHandler,
@@ -714,10 +701,10 @@ class SubtleCrypto: public jsg::Object {
 
     JSG_TS_OVERRIDE({
       static supports(operation: string,
-                      algorithm: string | SubtleCryptoGenerateKeyAlgorithm | SubtleCryptoImportKeyAlgorithm | SubtleCryptoDeriveKeyAlgorithm | SubtleCryptoDigestAlgorithm | SubtleCryptoEncryptAlgorithm | SubtleCryptoSignAlgorithm,
+                      algorithm: string | SubtleCryptoGenerateKeyAlgorithm | SubtleCryptoImportKeyAlgorithm | SubtleCryptoDeriveKeyAlgorithm | SubtleCryptoHashAlgorithm | SubtleCryptoEncryptAlgorithm | SubtleCryptoSignAlgorithm,
                       length?: number | null): boolean;
       static supports(operation: string,
-                      algorithm: string | SubtleCryptoGenerateKeyAlgorithm | SubtleCryptoImportKeyAlgorithm | SubtleCryptoDeriveKeyAlgorithm | SubtleCryptoDigestAlgorithm | SubtleCryptoEncryptAlgorithm | SubtleCryptoSignAlgorithm,
+                      algorithm: string | SubtleCryptoGenerateKeyAlgorithm | SubtleCryptoImportKeyAlgorithm | SubtleCryptoDeriveKeyAlgorithm | SubtleCryptoHashAlgorithm | SubtleCryptoEncryptAlgorithm | SubtleCryptoSignAlgorithm,
                       additionalAlgorithm: string | SubtleCryptoImportKeyAlgorithm): boolean;
       wrapKey(format: string,
               key: CryptoKey,
@@ -728,11 +715,9 @@ class SubtleCrypto: public jsg::Object {
                  baseKey : CryptoKey,
                  length? : number | null)
                  : Promise<ArrayBuffer>;
-      digest(algorithm: string | SubtleCryptoDigestAlgorithm,
+      digest(algorithm: string | SubtleCryptoHashAlgorithm,
              data: ArrayBuffer | ArrayBufferView)
           : Promise<ArrayBuffer>;
-      // SubtleCryptoDigestAlgorithm.functionName: ArrayBuffer | ArrayBufferView
-      // SubtleCryptoDigestAlgorithm.customization: ArrayBuffer | ArrayBufferView
       sign(algorithm: string | SubtleCryptoSignAlgorithm,
            key: CryptoKey,
            data: ArrayBuffer | ArrayBufferView)
@@ -905,12 +890,11 @@ class Crypto: public jsg::Object {
       api::SubtleCrypto::EncapsulatedBits, api::SubtleCrypto::EncapsulatedKey,                     \
       api::SubtleCrypto::DeriveKeyAlgorithm, api::SubtleCrypto::EncryptAlgorithm,                  \
       api::SubtleCrypto::GenerateKeyAlgorithm, api::SubtleCrypto::HashAlgorithm,                   \
-      api::SubtleCrypto::DigestAlgorithm, api::SubtleCrypto::ImportKeyAlgorithm,                   \
-      api::SubtleCrypto::SignAlgorithm, api::CryptoKey::KeyAlgorithm,                              \
-      api::CryptoKey::AesKeyAlgorithm, api::CryptoKey::HmacKeyAlgorithm,                           \
-      api::CryptoKey::RsaKeyAlgorithm, api::CryptoKey::EllipticKeyAlgorithm,                       \
-      api::CryptoKey::ArbitraryKeyAlgorithm, api::CryptoKey::AsymmetricKeyDetails,                 \
-      api::DigestStream
+      api::SubtleCrypto::ImportKeyAlgorithm, api::SubtleCrypto::SignAlgorithm,                     \
+      api::CryptoKey::KeyAlgorithm, api::CryptoKey::AesKeyAlgorithm,                               \
+      api::CryptoKey::HmacKeyAlgorithm, api::CryptoKey::RsaKeyAlgorithm,                           \
+      api::CryptoKey::EllipticKeyAlgorithm, api::CryptoKey::ArbitraryKeyAlgorithm,                 \
+      api::CryptoKey::AsymmetricKeyDetails, api::DigestStream
 
 }  // namespace workerd::api
 

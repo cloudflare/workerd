@@ -58,7 +58,7 @@ export default {
   },
   'derive_bits_keys/pbkdf2.js': supportFile,
   'derive_bits_keys/pbkdf2_vectors.js': supportFile,
-  'digest/cshake.tentative.https.any.js': {},
+  'digest/cshake.tentative.https.any.js': unsupported('cSHAKE'),
   'digest/digest.https.any.js': {
     comment: 'They expect TypeError, we have NotSupportedError',
     expectedFailures: [
@@ -69,7 +69,7 @@ export default {
     ],
   },
   'digest/kangarootwelve.tentative.https.any.js': unsupported('KangarooTwelve'),
-  'digest/sha3.tentative.https.any.js': {},
+  'digest/sha3.tentative.https.any.js': unsupported('SHA3'),
   'digest/turboshake.tentative.https.any.js': unsupported('TurboSHAKE'),
   'encap_decap/encap_decap_bits.tentative.https.any.js': {
     comment: 'ML-KEM-512 is not supported',
@@ -93,7 +93,8 @@ export default {
   'encrypt_decrypt/aes_ocb.tentative.https.any.js': unsupported('AES-OCB'),
   'encrypt_decrypt/aes_ocb_fixtures.js': supportFile,
   'encrypt_decrypt/aes_ocb_vectors.js': supportFile,
-  'encrypt_decrypt/chacha20_poly1305.tentative.https.any.js': {},
+  'encrypt_decrypt/chacha20_poly1305.tentative.https.any.js':
+    unsupported('ChaCha20-Poly1305'),
   'encrypt_decrypt/rsa.js': supportFile,
   'encrypt_decrypt/rsa_oaep.https.any.js': {},
   'encrypt_decrypt/rsa_vectors.js': supportFile,
@@ -157,10 +158,8 @@ export default {
     expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_X448.tentative.https.any.js': unsupported('X448'),
-  'generateKey/failures_chacha20_poly1305.tentative.https.any.js': {
-    comment: 'Wrong type of error returned',
-    expectedFailures: [/^(Empty|Bad) algorithm:/],
-  },
+  'generateKey/failures_chacha20_poly1305.tentative.https.any.js':
+    unsupported('ChaCha20-Poly1305'),
   'generateKey/failures_kmac.tentative.https.any.js': unsupported('KMAC'),
   'generateKey/successes.js': supportFile,
   'generateKey/successes_AES-CBC.https.any.js': {},
@@ -184,7 +183,8 @@ export default {
   'generateKey/successes_RSASSA-PKCS1-v1_5.https.any.js': {},
   'generateKey/successes_X25519.https.any.js': {},
   'generateKey/successes_X448.tentative.https.any.js': unsupported('X448'),
-  'generateKey/successes_chacha20_poly1305.tentative.https.any.js': {},
+  'generateKey/successes_chacha20_poly1305.tentative.https.any.js':
+    unsupported('ChaCha20-Poly1305'),
   'generateKey/successes_kmac.tentative.https.any.js': unsupported('KMAC'),
   'getPublicKey.tentative.https.any.js': {},
   'getRandomValues.any.js': {},
@@ -251,7 +251,8 @@ export default {
     unsupported('AES-OCB'),
   'import_export/Argon2_importKey.tentative.https.any.js':
     unsupported('Argon2'),
-  'import_export/ChaCha20-Poly1305_importKey.tentative.https.any.js': {},
+  'import_export/ChaCha20-Poly1305_importKey.tentative.https.any.js':
+    unsupported('ChaCha20-Poly1305'),
   'import_export/KMAC_importKey.tentative.https.any.js': unsupported('KMAC'),
   'import_export/ML-DSA_importKey.js': supportFile,
   'import_export/ML-DSA_importKey.tentative.https.any.js': {},

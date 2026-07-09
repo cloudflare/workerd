@@ -124,7 +124,6 @@ class CryptoKey::Impl {
   static ImportFunc importRsaRaw;
   static ImportFunc importMlDsa;
   static ImportFunc importMlKem;
-  static ImportFunc importChaCha20Poly1305;
 
   using GenerateFunc = kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair>(jsg::Lock& js,
       kj::StringPtr normalizedName,
@@ -140,7 +139,6 @@ class CryptoKey::Impl {
   static GenerateFunc generateEddsa;
   static GenerateFunc generateMlDsa;
   static GenerateFunc generateMlKem;
-  static GenerateFunc generateChaCha20Poly1305;
 
   Impl(bool extractable, CryptoKeyUsageSet usages): extractable(extractable), usages(usages) {}
 

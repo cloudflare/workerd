@@ -1337,7 +1337,7 @@ export declare abstract class SubtleCrypto {
       | SubtleCryptoGenerateKeyAlgorithm
       | SubtleCryptoImportKeyAlgorithm
       | SubtleCryptoDeriveKeyAlgorithm
-      | SubtleCryptoDigestAlgorithm
+      | SubtleCryptoHashAlgorithm
       | SubtleCryptoEncryptAlgorithm
       | SubtleCryptoSignAlgorithm,
     length?: number | null,
@@ -1349,7 +1349,7 @@ export declare abstract class SubtleCrypto {
       | SubtleCryptoGenerateKeyAlgorithm
       | SubtleCryptoImportKeyAlgorithm
       | SubtleCryptoDeriveKeyAlgorithm
-      | SubtleCryptoDigestAlgorithm
+      | SubtleCryptoHashAlgorithm
       | SubtleCryptoEncryptAlgorithm
       | SubtleCryptoSignAlgorithm,
     additionalAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
@@ -1401,7 +1401,7 @@ export declare abstract class SubtleCrypto {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/digest)
    */
   digest(
-    algorithm: string | SubtleCryptoDigestAlgorithm,
+    algorithm: string | SubtleCryptoHashAlgorithm,
     data: ArrayBuffer | ArrayBufferView,
   ): Promise<ArrayBuffer>;
   /**
@@ -1613,13 +1613,6 @@ export interface SubtleCryptoGenerateKeyAlgorithm {
 }
 export interface SubtleCryptoHashAlgorithm {
   name: string;
-}
-export interface SubtleCryptoDigestAlgorithm {
-  name: string;
-  outputLength?: number;
-  domainSeparation?: number;
-  functionName?: ArrayBuffer | ArrayBufferView;
-  customization?: ArrayBuffer | ArrayBufferView;
 }
 export interface SubtleCryptoImportKeyAlgorithm {
   name: string;

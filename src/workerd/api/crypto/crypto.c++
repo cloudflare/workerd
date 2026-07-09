@@ -13,7 +13,6 @@
 #include <workerd/api/util.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/rust/sha3/lib.rs.h>
 #include <workerd/util/uuid.h>
 
 #include <openssl/digest.h>
@@ -144,8 +143,6 @@ static kj::Maybe<const CryptoAlgorithm&> lookupAlgorithm(kj::StringPtr name) {
     {"ML-DSA-87"_kj, &CryptoKey::Impl::importMlDsa, &CryptoKey::Impl::generateMlDsa},
     {"ML-KEM-768"_kj, &CryptoKey::Impl::importMlKem, &CryptoKey::Impl::generateMlKem},
     {"ML-KEM-1024"_kj, &CryptoKey::Impl::importMlKem, &CryptoKey::Impl::generateMlKem},
-    {"ChaCha20-Poly1305"_kj, &CryptoKey::Impl::importChaCha20Poly1305,
-      &CryptoKey::Impl::generateChaCha20Poly1305},
   };
 
   auto iter = ALGORITHMS.find(CryptoAlgorithm{name});
@@ -191,7 +188,6 @@ kj::Maybe<uint32_t> getKeyLength(const SubtleCrypto::ImportKeyAlgorithm& derived
     {"AES-CBC"},
     {"AES-GCM"},
     {"AES-KW"},
-    {"ChaCha20-Poly1305"},
     {"HMAC"},
     {"HKDF"},
     {"PBKDF2"},
@@ -219,8 +215,6 @@ kj::Maybe<uint32_t> getKeyLength(const SubtleCrypto::ImportKeyAlgorithm& derived
             "Derived AES key must be 128, 192, or 256 bits in length but provided ", length, ".");
     }
     return length;
-  } else if (*algIter == "ChaCha20-Poly1305") {
-    return 256;
   } else if (*algIter == "HMAC") {
     KJ_IF_SOME(length, derivedKeyAlgorithm.length) {
       // If the user requested a specific HMAC key length, honor it.
@@ -309,42 +303,6 @@ Algorithm normalizeSupportAlgorithm(jsg::Lock& js,
 
 bool isOneOf(kj::StringPtr value, std::initializer_list<kj::StringPtr> names) {
   return std::find(names.begin(), names.end(), value) != names.end();
-}
-
-void validateOmittedOrEmptyBufferSource(jsg::Lock& js,
-    const jsg::Optional<jsg::JsRef<jsg::JsBufferSource>>& value,
-    kj::StringPtr name) {
-  KJ_IF_SOME(ref, value) {
-    JSG_REQUIRE(
-        ref.getHandle(js).size() == 0, DOMNotSupportedError, name, " must be omitted or empty.");
-  }
-}
-
-void validateSha3DerivedDigest(jsg::Lock& js, const SubtleCrypto::DigestAlgorithm& algorithm) {
-  if (strcasecmp(algorithm.name.cStr(), "cSHAKE128") == 0 ||
-      strcasecmp(algorithm.name.cStr(), "cSHAKE256") == 0) {
-    auto outputLengthBits = JSG_REQUIRE_NONNULL(
-        algorithm.outputLength, DOMOperationError, "outputLength is required for cSHAKE");
-    JSG_REQUIRE(outputLengthBits >= 0 && outputLengthBits % 8 == 0, DOMOperationError,
-        "outputLength must be a non-negative multiple of 8");
-
-    validateOmittedOrEmptyBufferSource(js, algorithm.functionName, "functionName");
-    validateOmittedOrEmptyBufferSource(js, algorithm.customization, "customization");
-    return;
-  }
-
-  JSG_REQUIRE(strcasecmp(algorithm.name.cStr(), "SHA3-256") == 0 ||
-          strcasecmp(algorithm.name.cStr(), "SHA3-384") == 0 ||
-          strcasecmp(algorithm.name.cStr(), "SHA3-512") == 0,
-      DOMNotSupportedError, "Unrecognized or unimplemented digest algorithm requested.");
-}
-
-bool supportsDigestAlgorithm(jsg::Lock& js, const SubtleCrypto::DigestAlgorithm& algorithm) {
-  KJ_IF_SOME(exception, kj::runCatchingExceptions([&] { lookupDigestAlgorithm(algorithm.name); })) {
-    (void)exception;
-    validateSha3DerivedDigest(js, algorithm);
-  }
-  return true;
 }
 
 void validateAesKeyLength(int length) {
@@ -452,8 +410,7 @@ void validateImportKeyAlgorithm(
 }
 
 bool supportsEncryptDecrypt(kj::StringPtr normalizedName) {
-  return isOneOf(normalizedName,
-      {"AES-CTR"_kj, "AES-CBC"_kj, "AES-GCM"_kj, "RSA-OAEP"_kj, "ChaCha20-Poly1305"_kj});
+  return isOneOf(normalizedName, {"AES-CTR"_kj, "AES-CBC"_kj, "AES-GCM"_kj, "RSA-OAEP"_kj});
 }
 
 bool supportsSign(kj::StringPtr normalizedName) {
@@ -477,7 +434,7 @@ bool supportsExportKey(kj::StringPtr normalizedName) {
       {"AES-CTR"_kj, "AES-CBC"_kj, "AES-GCM"_kj, "AES-KW"_kj, "HMAC"_kj, "RSASSA-PKCS1-v1_5"_kj,
         "RSA-PSS"_kj, "RSA-OAEP"_kj, "RSA-RAW"_kj, "ECDSA"_kj, "ECDH"_kj, "NODE-ED25519"_kj,
         "Ed25519"_kj, "X25519"_kj, "ML-DSA-44"_kj, "ML-DSA-65"_kj, "ML-DSA-87"_kj, "ML-KEM-768"_kj,
-        "ML-KEM-1024"_kj, "ChaCha20-Poly1305"_kj});
+        "ML-KEM-1024"_kj});
 }
 
 bool supportsEncapsulate(kj::StringPtr normalizedName) {
@@ -511,13 +468,6 @@ void validateEncryptAlgorithm(
         algorithm.length, TypeError, "Missing \"length\" member in \"algorithm\".");
     JSG_REQUIRE(counterLength > 0 && counterLength <= 128, DOMOperationError, "Invalid counter of ",
         counterLength, " bits length provided.");
-  } else if (normalizedName == "ChaCha20-Poly1305") {
-    auto iv = JSG_REQUIRE_NONNULL(algorithm.iv, TypeError, "Missing field \"iv\" in \"algorithm\".")
-                  .getHandle(js);
-    JSG_REQUIRE(iv.size() == 12, DOMOperationError, "ChaCha20-Poly1305 IV must be 12 bytes.");
-    KJ_IF_SOME(tagLength, algorithm.tagLength) {
-      JSG_REQUIRE(tagLength == 128, DOMOperationError, "ChaCha20-Poly1305 tag length must be 128.");
-    }
   }
 }
 
@@ -752,53 +702,14 @@ jsg::Promise<bool> SubtleCrypto::verify(jsg::Lock& js,
   });
 }
 
-jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::digest(jsg::Lock& js,
-    kj::OneOf<kj::String, DigestAlgorithm> algorithmParam,
-    jsg::JsBufferSource data) {
+jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::digest(
+    jsg::Lock& js, kj::OneOf<kj::String, HashAlgorithm> algorithmParam, jsg::JsBufferSource data) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
   return js.evalNow([&] {
     auto ptr = nonNullBytes(data.asArrayPtr());
-
-    if (strcasecmp(algorithm.name.cStr(), "cSHAKE128") == 0 ||
-        strcasecmp(algorithm.name.cStr(), "cSHAKE256") == 0) {
-      auto outputLengthBits = JSG_REQUIRE_NONNULL(
-          algorithm.outputLength, DOMOperationError, "outputLength is required for cSHAKE");
-      JSG_REQUIRE(outputLengthBits >= 0 && outputLengthBits % 8 == 0, DOMOperationError,
-          "outputLength must be a non-negative multiple of 8");
-      auto outputLengthBytes = static_cast<size_t>(outputLengthBits / 8);
-
-      validateOmittedOrEmptyBufferSource(js, algorithm.functionName, "functionName");
-      validateOmittedOrEmptyBufferSource(js, algorithm.customization, "customization");
-
-      auto input = ::rust::Slice<const uint8_t>(ptr.begin(), ptr.size());
-      auto result = strcasecmp(algorithm.name.cStr(), "cSHAKE128") == 0
-          ? workerd::rust::sha3::cshake128(input, outputLengthBytes)
-          : workerd::rust::sha3::cshake256(input, outputLengthBytes);
-      auto buf = jsg::JsArrayBuffer::create(js, result.size());
-      memcpy(buf.asArrayPtr().begin(), result.data(), result.size());
-      return buf.addRef(js);
-    }
-
-    auto sha3Fn = [&]() -> kj::Maybe<::rust::Vec<uint8_t> (*)(::rust::Slice<const uint8_t>)> {
-      if (strcasecmp(algorithm.name.cStr(), "SHA3-256") == 0) {
-        return workerd::rust::sha3::sha3_256;
-      } else if (strcasecmp(algorithm.name.cStr(), "SHA3-384") == 0) {
-        return workerd::rust::sha3::sha3_384;
-      } else if (strcasecmp(algorithm.name.cStr(), "SHA3-512") == 0) {
-        return workerd::rust::sha3::sha3_512;
-      }
-      return kj::none;
-    }();
-    KJ_IF_SOME(fn, sha3Fn) {
-      auto result = fn({ptr.begin(), ptr.size()});
-      auto buf = jsg::JsArrayBuffer::create(js, result.size());
-      memcpy(buf.asArrayPtr().begin(), result.data(), result.size());
-      return buf.addRef(js);
-    }
-
     auto type = lookupDigestAlgorithm(algorithm.name).second;
 
     auto digestCtx = kj::disposeWith<EVP_MD_CTX_free>(EVP_MD_CTX_new());
@@ -1181,7 +1092,7 @@ bool SubtleCrypto::supports(jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> lengthOrAdditionalAlgorithm,
     const jsg::TypeHandler<kj::OneOf<kj::String, EncryptAlgorithm>>& encryptAlgorithmHandler,
     const jsg::TypeHandler<kj::OneOf<kj::String, SignAlgorithm>>& signAlgorithmHandler,
-    const jsg::TypeHandler<kj::OneOf<kj::String, DigestAlgorithm>>& digestAlgorithmHandler,
+    const jsg::TypeHandler<kj::OneOf<kj::String, HashAlgorithm>>& digestAlgorithmHandler,
     const jsg::TypeHandler<kj::OneOf<kj::String, GenerateKeyAlgorithm>>&
         generateKeyAlgorithmHandler,
     const jsg::TypeHandler<kj::OneOf<kj::String, DeriveKeyAlgorithm>>& deriveKeyAlgorithmHandler,
@@ -1230,7 +1141,13 @@ bool SubtleCrypto::supports(jsg::Lock& js,
           case SubtleOperation::DIGEST: {
             auto normalizedAlgorithm =
                 normalizeSupportAlgorithm(js, algorithmValue, digestAlgorithmHandler);
-            return supportsDigestAlgorithm(js, normalizedAlgorithm);
+            KJ_IF_SOME(exception, kj::runCatchingExceptions([&] {
+              lookupDigestAlgorithm(normalizedAlgorithm.name);
+            })) {
+              (void)exception;
+              return false;
+            }
+            return true;
           }
 
           case SubtleOperation::GENERATE_KEY: {
