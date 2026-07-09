@@ -1,0 +1,22 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "ts-identity-streams-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "ts-identity-streams-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "expose_draining_reader",
+          "experimental",
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);

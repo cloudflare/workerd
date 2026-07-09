@@ -1616,4 +1616,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # When enabled, the workers runtime uses the new typescript Web Streams
   # implementation.
+
+  exposeDrainingReader @184 :Bool
+      $compatEnableFlag("expose_draining_reader")
+      $experimental;
+  # Exposes the internal ReadableStreamDrainingReader class on globalThis.
+  # The DrainingReader provides the expectedLength pass-through for the
+  # C++ bridge (Content-Length integration for FixedLengthStream). This
+  # flag is intended for internal testing only and may never have its
+  # experimental annotation removed.
 }
