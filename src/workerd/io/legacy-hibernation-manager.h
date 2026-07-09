@@ -16,6 +16,8 @@
 
 namespace workerd {
 
+struct LegacyHibernationManagerTestAccess;
+
 // Implements the HibernationManager class.
 class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManager {
  public:
@@ -53,6 +55,7 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
 
   friend class api::HibernatableWebSocketEvent;
   friend class api::HibernatableWebSocketCustomEvent;
+  friend struct LegacyHibernationManagerTestAccess;
 
   // Sets/Unset the maximum time in milliseconds that an hibernatable websocket event can run for.
   // If the timeout is reached, event is canceled.
