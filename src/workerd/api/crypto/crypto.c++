@@ -1010,8 +1010,10 @@ jsg::Promise<SubtleCrypto::EncapsulatedKey> SubtleCrypto::encapsulateKey(jsg::Lo
   return js.evalNow([&]() -> EncapsulatedKey {
     validateOperation(encapsulationKey, algorithm.name, CryptoKeyUsageSet::encapsulateKey());
     auto [sharedKey, ciphertext] = encapsulationKey.impl->encapsulate(js);
-    auto sharedKeyRef = importKeySync(js, "raw-secret", sharedKey.copy(),
-        kj::mv(sharedKeyAlgorithm), extractable, kj::mv(keyUsages));
+    auto sharedKeyBuffer = jsg::JsUint8Array::create(js, sharedKey.asArrayPtr());
+    auto sharedKeyRef =
+        importKeySync(js, "raw-secret", jsg::JsBufferSource(sharedKeyBuffer).addRef(js),
+            kj::mv(sharedKeyAlgorithm), extractable, kj::mv(keyUsages));
     return EncapsulatedKey{
       .sharedKey = kj::mv(sharedKeyRef),
       .ciphertext = ciphertext.addRef(js),
@@ -1048,8 +1050,9 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::decapsulateKey(jsg::Lock& js,
   return js.evalNow([&] {
     validateOperation(decapsulationKey, algorithm.name, CryptoKeyUsageSet::decapsulateKey());
     auto secret = decapsulationKey.impl->decapsulate(js, ciphertext);
-    return importKeySync(js, "raw-secret", secret.copy(), kj::mv(sharedKeyAlgorithm), extractable,
-        kj::mv(keyUsages));
+    auto secretBuffer = jsg::JsUint8Array::create(js, secret.asArrayPtr());
+    return importKeySync(js, "raw-secret", jsg::JsBufferSource(secretBuffer).addRef(js),
+        kj::mv(sharedKeyAlgorithm), extractable, kj::mv(keyUsages));
   });
 }
 
