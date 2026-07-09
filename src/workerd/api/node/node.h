@@ -19,6 +19,7 @@
 #include <workerd/jsg/url.h>
 #include <workerd/rust/api/lib.rs.h>
 #include <workerd/rust/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 
 #include <node/node.capnp.h>
 
@@ -35,7 +36,6 @@ namespace workerd::api::node {
   V(UtilModule, "node-internal:util")                                                              \
   V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")                                 \
   V(ZlibUtil, "node-internal:zlib")                                                                \
-  V(UrlUtil, "node-internal:url")                                                                  \
   V(TimersUtil, "node-internal:timers")                                                            \
   V(SqliteUtil, "node-internal:sqlite")                                                            \
   V(InspectorModule, "node-internal:inspector")
@@ -94,6 +94,17 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
   }
 
 #undef V
+
+  // The native `node-internal:url` module has both a C++ (`UrlUtil`) and a Rust
+  // implementation. The `NODEJS_URL_RUST` autogate selects the Rust one; when
+  // the gate is off we register the C++ implementation here instead. Exactly one
+  // of the two registers the `node-internal:url` specifier (the Rust side is
+  // told whether to register it via `register_nodejs_url_module` below).
+  bool useRustUrl = util::Autogate::isEnabled(util::AutogateKey::NODEJS_URL_RUST);
+  if (!useRustUrl) {
+    registry.template addBuiltinModule<UrlUtil>(
+        "node-internal:url", workerd::jsg::ModuleRegistry::Type::INTERNAL);
+  }
 
   bool nodeJsCompatEnabled = isNodeJsCompatEnabled(featureFlags);
 
@@ -219,6 +230,9 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
 
   ::workerd::rust::jsg::RustModuleRegistry r(registry);
   ::workerd::rust::api::register_nodejs_modules(r);
+  if (useRustUrl) {
+    ::workerd::rust::api::register_nodejs_url_module(r);
+  }
 }
 
 template <class TypeWrapper>
@@ -233,6 +247,15 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(auto fea
     NODEJS_MODULES_EXPERIMENTAL(V)
   }
 #undef V
+
+  // See registerNodeJsCompatModules(): the NODEJS_URL_RUST autogate selects
+  // between the C++ and Rust implementations of `node-internal:url`.
+  bool useRustUrl = util::Autogate::isEnabled(util::AutogateKey::NODEJS_URL_RUST);
+  if (!useRustUrl) {
+    static const auto kUrlUtilSpecifier = "node-internal:url"_url;
+    builder.addObject<UrlUtil, TypeWrapper>(kUrlUtilSpecifier);
+  }
+
   jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE);
 
   // Register Rust-implemented Node.js modules using the reusable adapter
@@ -240,6 +263,9 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(auto fea
   {
     ::workerd::rust::jsg::RustBuiltinModuleAdapter adapter(builder);
     ::workerd::rust::api::register_nodejs_modules(adapter);
+    if (useRustUrl) {
+      ::workerd::rust::api::register_nodejs_url_module(adapter);
+    }
   }
 
   return builder.finish();
