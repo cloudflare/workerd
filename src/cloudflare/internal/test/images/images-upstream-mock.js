@@ -203,7 +203,7 @@ export class ServiceEntrypoint extends WorkerEntrypoint {
     ];
 
     const filtered = images.filter((image) =>
-      matchesMetadataFilters(image, options?.metadataFilters)
+      matchesMetadataFilters(image, options?.filter?.metadata)
     );
 
     const limit = options?.limit || 50;

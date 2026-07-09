@@ -652,10 +652,12 @@ export const test_images_list_metadata_filter_forwards_correctly = {
    */
   async test(_, env) {
     const result = await env.images.hosted.list({
-      metadataFilters: {
-        status: 'active',
-        priority: { gte: 1, lte: 3 },
-        'config.region': 'eu-west',
+      filter: {
+        metadata: {
+          status: 'active',
+          priority: { gte: 1, lte: 3 },
+          'config.region': 'eu-west',
+        },
       },
     });
 

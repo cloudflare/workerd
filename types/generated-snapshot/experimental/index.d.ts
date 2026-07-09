@@ -14703,12 +14703,15 @@ type ImageMetadataFilterValue =
   | number
   | boolean
   | ImageMetadataFilterOperators;
+interface ImageListFilter {
+  metadata?: Record<string, ImageMetadataFilterValue>;
+}
 interface ImageListOptions {
   limit?: number;
   cursor?: string;
   sortOrder?: "asc" | "desc";
   creator?: string;
-  metadataFilters?: Record<string, ImageMetadataFilterValue>;
+  filter?: ImageListFilter;
 }
 interface ImageList {
   images: ImageMetadata[];
