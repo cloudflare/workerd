@@ -690,27 +690,31 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importMlKem(jsg::Lock& js,
     if (format == "raw-public") {
       auto usages = CryptoKeyUsageSet::validate(normalizedName,
           CryptoKeyUsageSet::Context::importPublic, keyUsages, ML_KEM_PUBLIC_USAGES);
-      auto& keyBytes = JSG_REQUIRE_NONNULL(keyData.tryGet<kj::Array<kj::byte>>(), DOMDataError,
-          "Import data for raw-public must be a buffer.");
-      return MlKemKey<P>::importRawPublic(keyBytes, normalizedName, extractable, usages);
+      auto& source = JSG_REQUIRE_NONNULL(keyData.tryGet<jsg::JsRef<jsg::JsBufferSource>>(),
+          DOMDataError, "Import data for raw-public must be a buffer.");
+      auto handle = source.getHandle(js);
+      return MlKemKey<P>::importRawPublic(handle.asArrayPtr(), normalizedName, extractable, usages);
     } else if (format == "raw-seed") {
       auto usages = CryptoKeyUsageSet::validate(normalizedName,
           CryptoKeyUsageSet::Context::importPrivate, keyUsages, ML_KEM_PRIVATE_USAGES);
-      auto& keyBytes = JSG_REQUIRE_NONNULL(keyData.tryGet<kj::Array<kj::byte>>(), DOMDataError,
-          "Import data for raw-seed must be a buffer.");
-      return MlKemKey<P>::importRawSeed(keyBytes, normalizedName, extractable, usages);
+      auto& source = JSG_REQUIRE_NONNULL(keyData.tryGet<jsg::JsRef<jsg::JsBufferSource>>(),
+          DOMDataError, "Import data for raw-seed must be a buffer.");
+      auto handle = source.getHandle(js);
+      return MlKemKey<P>::importRawSeed(handle.asArrayPtr(), normalizedName, extractable, usages);
     } else if (format == "spki") {
       auto usages = CryptoKeyUsageSet::validate(normalizedName,
           CryptoKeyUsageSet::Context::importPublic, keyUsages, ML_KEM_PUBLIC_USAGES);
-      auto& keyBytes = JSG_REQUIRE_NONNULL(keyData.tryGet<kj::Array<kj::byte>>(), DOMDataError,
-          "Import data for spki must be a buffer.");
-      return MlKemKey<P>::importSpki(keyBytes, normalizedName, extractable, usages);
+      auto& source = JSG_REQUIRE_NONNULL(keyData.tryGet<jsg::JsRef<jsg::JsBufferSource>>(),
+          DOMDataError, "Import data for spki must be a buffer.");
+      auto handle = source.getHandle(js);
+      return MlKemKey<P>::importSpki(handle.asArrayPtr(), normalizedName, extractable, usages);
     } else if (format == "pkcs8") {
       auto usages = CryptoKeyUsageSet::validate(normalizedName,
           CryptoKeyUsageSet::Context::importPrivate, keyUsages, ML_KEM_PRIVATE_USAGES);
-      auto& keyBytes = JSG_REQUIRE_NONNULL(keyData.tryGet<kj::Array<kj::byte>>(), DOMDataError,
-          "Import data for pkcs8 must be a buffer.");
-      return MlKemKey<P>::importPkcs8(keyBytes, normalizedName, extractable, usages);
+      auto& source = JSG_REQUIRE_NONNULL(keyData.tryGet<jsg::JsRef<jsg::JsBufferSource>>(),
+          DOMDataError, "Import data for pkcs8 must be a buffer.");
+      auto handle = source.getHandle(js);
+      return MlKemKey<P>::importPkcs8(handle.asArrayPtr(), normalizedName, extractable, usages);
     } else if (format == "jwk") {
       auto& jwk = JSG_REQUIRE_NONNULL(keyData.tryGet<SubtleCrypto::JsonWebKey>(), DOMDataError,
           "Import data for jwk must be a JsonWebKey.");
