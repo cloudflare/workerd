@@ -25,7 +25,11 @@ syn = { version = "2", features = ["full"] }
 # We prefer single-digit dependencies to stay up to date as much as possible
 # When adding packages here, please only enable features as needed to keep compile times and
 # binary sizes bounded.
-ada-url = "3"
+# The `bundled` feature is disabled (it is part of the default feature set): with
+# it off we skip compiling the crate's vendored copy of ada and instead link
+# workerd's existing C++ `@ada-url`, avoiding a duplicate copy of ada in the
+# binary.
+ada-url = { version = "3", default-features = false, features = ["std"] }
 anyhow = "1"
 async-trait = { version = "0", default-features = false }
 capnp = "0"
