@@ -495,6 +495,9 @@ enum SerializationTag {
   # A Blob, serialized as its MIME type followed by its raw bytes.
 
   socket @16;
+  # A transferred Socket. Serialized as socket metadata (see External.socket) followed by its
+  # readable and writable streams, which are emitted as separate readableStream/writableStream
+  # externals.
 }
 
 enum StreamEncoding {
@@ -526,6 +529,13 @@ struct JsValue {
   # (We could also call these "capabilities", but that word is pretty overloaded already.)
 
   struct External {
+    enum SecureTransport {
+      # Security transport mode for a transferred Socket. Mirrors api::SecureTransportKind.
+      off @0;
+      starttls @1;
+      on @2;
+    }
+
     union {
       invalid @0 :Void;
       # Invalid default value to reduce confusion if an External wasn't initialized properly.
@@ -598,8 +608,20 @@ struct JsValue {
         remoteAddress @16 :Text;
         # The remote address this socket is connected to.
 
-        secureTransport @17 :Text;
-        # Security transport mode: "on", "off", or "starttls".
+        secureTransport @17 :SecureTransport;
+        # Security transport mode.
+
+        isDefaultFetchPort @18 :Bool;
+        # Indicates whether the socket is connected to port 443 or 80.
+
+        localAddress @19 :Text;
+        # The local address of the socket, if known (e.g. the CONNECT authority for inbound
+        # sockets). Empty for outbound sockets where no useful local address exists.
+
+        allowHalfOpen @20 :Bool;
+        # Whether the socket allows the read and write sides to close independently. When false, the
+        # runtime auto-closes the write side once the read side reaches EOF, so this must be carried
+        # across transfer to preserve the origin socket's half-open semantics.
       }
 
       # TODO(soon): WebSocket, Request, Response

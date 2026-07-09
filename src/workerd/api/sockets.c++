@@ -38,19 +38,24 @@ class TransferredSocketStream final: public kj::AsyncIoStream {
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
-    return output->write(buffer);
+    return KJ_REQUIRE_NONNULL(output, "write after shutdownWrite() on transferred socket")
+        ->write(buffer);
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
-    return output->write(pieces);
+    return KJ_REQUIRE_NONNULL(output, "write after shutdownWrite() on transferred socket")
+        ->write(pieces);
   }
 
   kj::Promise<void> whenWriteDisconnected() override {
     // NOTE: For an RPC-transferred stream this reliably fires only on hard RPC breakage (the
     // underlying CapnpToKjStreamAdapter rejects). A clean peer-initiated close is instead surfaced
     // via readable EOF, which setupSocket() turns into a close when allowHalfOpen is false.
-    if (output.get() == nullptr) return kj::NEVER_DONE;
-    return output->whenWriteDisconnected();
+    KJ_IF_SOME(out, output) {
+      return out->whenWriteDisconnected();
+    }
+    // The write side was already shut down, so there is nothing left to disconnect.
+    return kj::NEVER_DONE;
   }
 
   void shutdownWrite() override {
@@ -58,10 +63,13 @@ class TransferredSocketStream final: public kj::AsyncIoStream {
     // but shutdownWrite() is synchronous. Kick off end() as an IoContext task so the clean-EOF RPC
     // completes; dropping without end() would look like an abort to the peer. If there's no active
     // IoContext (e.g. during teardown), just drop, which the ByteStream treats as an abort.
-    if (output.get() == nullptr) return;
-    auto out = kj::mv(output);
-    if (IoContext::hasCurrent()) {
-      IoContext::current().addTask(out->end().attach(kj::mv(out)).catch_([](kj::Exception&&) {}));
+    KJ_IF_SOME(out, output) {
+      auto owned = kj::mv(out);
+      output = kj::none;
+      if (IoContext::hasCurrent()) {
+        IoContext::current().addTask(
+            owned->end().attach(kj::mv(owned)).catch_([](kj::Exception&&) {}));
+      }
     }
   }
 
@@ -88,7 +96,8 @@ class TransferredSocketStream final: public kj::AsyncIoStream {
 
  private:
   kj::Own<kj::AsyncInputStream> input;
-  kj::Own<capnp::ExplicitEndOutputStream> output;
+  // Nulled by shutdownWrite(), which moves the stream out to drive a clean async end().
+  kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> output;
 };
 
 // This function performs some basic length and characters checks, it does not guarantee that
@@ -136,6 +145,33 @@ SecureTransportKind parseSecureTransport(SocketOptions& opts) {
   }
 }
 
+// Maps a SecureTransportKind to its wire representation for socket RPC transfer.
+rpc::JsValue::External::SecureTransport toRpcSecureTransport(SecureTransportKind kind) {
+  switch (kind) {
+    case SecureTransportKind::OFF:
+      return rpc::JsValue::External::SecureTransport::OFF;
+    case SecureTransportKind::STARTTLS:
+      return rpc::JsValue::External::SecureTransport::STARTTLS;
+    case SecureTransportKind::ON:
+      return rpc::JsValue::External::SecureTransport::ON;
+  }
+  KJ_UNREACHABLE;
+}
+
+// Maps the wire representation of a transferred socket's security transport back to
+// SecureTransportKind.
+SecureTransportKind fromRpcSecureTransport(rpc::JsValue::External::SecureTransport transport) {
+  switch (transport) {
+    case rpc::JsValue::External::SecureTransport::OFF:
+      return SecureTransportKind::OFF;
+    case rpc::JsValue::External::SecureTransport::STARTTLS:
+      return SecureTransportKind::STARTTLS;
+    case rpc::JsValue::External::SecureTransport::ON:
+      return SecureTransportKind::ON;
+  }
+  KJ_UNREACHABLE;
+}
+
 bool getAllowHalfOpen(jsg::Optional<SocketOptions>& opts) {
   KJ_IF_SOME(o, opts) {
     return o.allowHalfOpen;
@@ -150,6 +186,53 @@ kj::Maybe<uint64_t> getWritableHighWaterMark(jsg::Optional<SocketOptions>& opts)
     return o.highWaterMark;
   }
   return kj::none;
+}
+
+// Awaits a write-disconnect on `connection` and reports it through `fulfiller`: fulfills false when
+// the peer disconnects, or rejects on error.
+kj::Promise<void> handleDisconnected(
+    kj::AsyncIoStream& connection, kj::PromiseFulfiller<bool>& fulfiller) {
+  try {
+    co_await connection.whenWriteDisconnected();
+    fulfiller.fulfill(false);
+  } catch (...) {
+    fulfiller.reject(kj::getCaughtExceptionAsKj());
+  }
+}
+
+struct DisconnectWatcher {
+  // Resolves false when the connection reports write-disconnect, or true if the watch task is
+  // canceled (i.e. the Socket is GC'd) before that happens. Feed this to
+  // Socket::wireClosedToDisconnect() to resolve the `closed` promise. Awaiting it requires a
+  // JS-executing context.
+  kj::Promise<bool> disconnected;
+  // The kj task that watches for disconnect. It must be stored in the Socket so that it is canceled
+  // before the connection stream is destroyed, as required by KJ.
+  kj::Promise<void> watchTask;
+};
+
+// Sets up disconnection detection for `connection`.
+//
+// Disconnection handling is annoyingly complicated: we can't just `awaitIo(whenWriteDisconnected())`
+// directly, because the Socket could be GC'd before `whenWriteDisconnected()` completes, destroying
+// the underlying `connection`. By KJ rules we must cancel that promise before destroying the
+// connection, but there's no way to cancel a promise passed to `awaitIo()`. So the Socket holds the
+// watch task (`watchTask`), which waits for `whenWriteDisconnected()` and fulfills `disconnected`
+// with false; if the task is canceled first, a deferred fallback fulfills it with true instead.
+//
+// This part is pure kj and touches no JS, so it is safe to call where JS execution is disallowed
+// (e.g. Socket::deserialize()). The JS-side wiring that resolves `closed` is done separately by
+// Socket::wireClosedToDisconnect().
+DisconnectWatcher watchForDisconnect(kj::AsyncIoStream& connection) {
+  auto paf = kj::newPromiseAndFulfiller<bool>();
+  auto& fulfiller = *paf.fulfiller;
+  auto deferredCancel = kj::defer([fulfiller = kj::mv(paf.fulfiller)]() mutable {
+    // The watch task was canceled without fulfilling the fulfiller (the Socket was GC'd); silently
+    // fulfill with true so wireClosedToDisconnect() knows not to resolve `closed`.
+    fulfiller->fulfill(true);
+  });
+  auto watchTask = handleDisconnected(connection, fulfiller).attach(kj::mv(deferredCancel));
+  return DisconnectWatcher{.disconnected = kj::mv(paf.promise), .watchTask = kj::mv(watchTask)};
 }
 
 }  // namespace
@@ -169,67 +252,13 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     kj::Maybe<jsg::PromiseResolverPair<SocketInfo>> maybeOpenedPrPair) {
   auto& ioContext = IoContext::current();
 
-  // Disconnection handling is annoyingly complicated:
-  //
-  // We can't just context.awaitIo(connection->whenWriteDisconnected()) directly, because the
-  // Socket could be GC'ed before `whenWriteDisconnected()` completes, causing the underlying
-  // `connection` to be destroyed. By KJ rules, we are required to cancel the promise returned by
-  // `whenWriteDisconnected()` before destroying `connection`. But there's no way to cancel a
-  // promise passed to `context.awaitIo()`. We have to hold the promise directly in `Socket`, so
-  // that we can cancel it on destruction. But we *do* want to create a JS promise that resolves
-  // on disconnect, which is what awaitIo() would give us.
-  //
-  // So, we have to chain through a promise/fulfiller pair. The `Socket` holds
-  // `watchForDisconnectTask`, which is a `kj::Promise<void>` representing a task that waits for
-  // `whenWriteDisconnected()` and then fulfills the fulfiller end of `disconnectedPaf` with
-  // `false`. If the task is canceled, we instead fulfill `disconnectedPaf` with `true`.
-  //
-  // We then use `context.awaitIo()` to await the promise end of `disconnectedPaf`, and this gives
-  // us our `closed` promise. Well, almost...
-  //
-  // There's another wrinkle: There are some circumstances where we want to resolve the `closed`
-  // promise directly from an API call. We'd rather this did not have to drop out of the isolate
-  // and enter it a gain. So, our `awaitIo()` actually awaits a task that listens for the
-  // disconnected promise and then resolves some other JS resolver, `closedResolver`.
-  auto disconnectedPaf = kj::newPromiseAndFulfiller<bool>();
-  auto& disconnectedFulfiller = *disconnectedPaf.fulfiller;
-  auto deferredCancelDisconnected =
-      kj::defer([fulfiller = kj::mv(disconnectedPaf.fulfiller)]() mutable {
-    // In case the `whenWriteDisconected()` listener task is canceled without fulfilling the
-    // fulfiller, we want to silently fulfill it. This will happen when the Socket is GC'ed.
-    fulfiller->fulfill(true);
-  });
-
-  static auto constexpr handleDisconnected =
-      [](kj::AsyncIoStream& connection,
-          kj::PromiseFulfiller<bool>& fulfiller) -> kj::Promise<void> {
-    try {
-      co_await connection.whenWriteDisconnected();
-      fulfiller.fulfill(false);
-    } catch (...) {
-      auto exception = kj::getCaughtExceptionAsKj();
-      fulfiller.reject(kj::mv(exception));
-    }
-  };
-
-  auto watchForDisconnectTask = handleDisconnected(*connection, disconnectedFulfiller)
-                                    .attach(kj::mv(deferredCancelDisconnected));
+  // Set up disconnection detection. watchForDisconnect() builds the kj-side watch task (stored in
+  // the Socket so it is canceled before the connection stream is destroyed); the JS-side wiring that
+  // resolves `closed` is attached by wireClosedToDisconnect() after the Socket is constructed.
+  auto [disconnected, watchForDisconnectTask] = watchForDisconnect(*connection);
 
   auto closedPrPair = js.newPromiseAndResolver<void>();
   closedPrPair.promise.markAsHandled(js);
-
-  ioContext.awaitIo(js, kj::mv(disconnectedPaf.promise))
-      .then(
-          js, [resolver = closedPrPair.resolver.addRef(js)](jsg::Lock& js, bool canceled) mutable {
-    // We want to silently ignore the canceled case, without ever resolving anything. Note that
-    // if the application actually fetches the `closed` promise, then the JSG glue will prevent
-    // the socket from being GC'ed until that promise resolves, so it won't be canceled.
-    if (!canceled) {
-      resolver.resolve(js);
-    }
-  }, [resolver = closedPrPair.resolver.addRef(js)](jsg::Lock& js, jsg::Value exception) mutable {
-    resolver.reject(js, exception.getHandle(js));
-  });
 
   kj::Rc<kj::AsyncIoStream> refcountedConnection(kj::mv(connection));
   // Initialize the readable/writable streams with the readable/writable sides of an AsyncIoStream.
@@ -253,9 +282,11 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
       kj::mv(watchForDisconnectTask), kj::mv(options), kj::mv(tlsStarter), secureTransport,
       kj::mv(domain), isDefaultFetchPort, kj::mv(openedPrPair));
 
+  result->wireClosedToDisconnect(js, kj::mv(disconnected));
   KJ_IF_SOME(p, eofPromise) {
     result->handleReadableEof(js, kj::mv(p));
   }
+  result->trackOpenedState(js);
   return result;
 }
 
@@ -594,6 +625,31 @@ void Socket::handleProxyError(jsg::Lock& js, kj::Exception e) {
   writable->getController().abort(js, js.error(e.getDescription())).markAsHandled(js);
 }
 
+void Socket::trackOpenedState(jsg::Lock& js) {
+  // whenResolved() creates a fresh branch off the `opened` promise without consuming
+  // `openedPromiseCopy` (which `close()` relies on). The branch settles in lockstep with `opened`.
+  openedPromiseCopy.whenResolved(js)
+      .then(js, [this, self = JSG_THIS](jsg::Lock&) { openedState = OpenedState::OPENED; },
+          [this, self = JSG_THIS](jsg::Lock&, jsg::Value&&) {
+    openedState = OpenedState::FAILED;
+  }).markAsHandled(js);
+}
+
+void Socket::wireClosedToDisconnect(jsg::Lock& js, kj::Promise<bool> disconnected) {
+  auto& context = IoContext::current();
+  context.awaitIo(js, kj::mv(disconnected))
+      .then(js, [this, self = JSG_THIS](jsg::Lock& js, bool canceled) {
+    // Silently ignore the canceled case (the Socket was GC'd before disconnect) without resolving
+    // anything. If the app actually awaited `closed`, JSG keeps the Socket alive until that promise
+    // resolves, so we won't be canceled in that case.
+    if (!canceled) {
+      closedResolver.resolve(js);
+    }
+  }, [this, self = JSG_THIS](jsg::Lock& js, jsg::Value exception) {
+    closedResolver.reject(js, exception.getHandle(js));
+  }).markAsHandled(js);
+}
+
 void Socket::handleReadableEof(jsg::Lock& js, jsg::Promise<void> onEof) {
   KJ_ASSERT(!getAllowHalfOpen(options));
   // Listen for EOF on the ReadableStream.
@@ -640,12 +696,34 @@ void Socket::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   JSG_REQUIRE(
       externalHandler != nullptr, DOMDataCloneError, "Socket can only be serialized for RPC.");
 
+  // serialize() is synchronous and cannot await `opened`, so we require the caller to have already
+  // done so. This guarantees the connection is established and the SocketInfo (remote/local address)
+  // written below is authoritative, and avoids transferring a socket whose connection failed.
+  switch (openedState) {
+    case OpenedState::PENDING:
+      JSG_FAIL_REQUIRE(DOMDataCloneError,
+          "A Socket can only be serialized after it has opened. Await `socket.opened` before "
+          "transferring the socket over RPC.");
+    case OpenedState::FAILED:
+      JSG_FAIL_REQUIRE(DOMDataCloneError, "A Socket whose connection failed cannot be serialized.");
+    case OpenedState::OPENED:
+      break;
+  }
+
   // Serialize the socket metadata, referencing the stream externals
   externalHandler->write(
-      [this, remoteAddr = kj::str(remoteAddress)](rpc::JsValue::External::Builder builder) mutable {
+      [this, remoteAddr = kj::str(remoteAddress), localAddr = mapCopyString(localAddress),
+          transport = toRpcSecureTransport(secureTransport),
+          allowHalfOpen = getAllowHalfOpen(options)](
+          rpc::JsValue::External::Builder builder) mutable {
     auto socket = builder.initSocket();
     socket.setRemoteAddress(remoteAddr);
-    socket.setSecureTransport(getSecureTransport());
+    socket.setSecureTransport(transport);
+    socket.setIsDefaultFetchPort(isDefaultFetchPort);
+    socket.setAllowHalfOpen(allowHalfOpen);
+    KJ_IF_SOME(local, localAddr) {
+      socket.setLocalAddress(local);
+    }
   });
 
   // Serialize the readable and writable streams as separate externals
@@ -675,7 +753,16 @@ jsg::Ref<Socket> Socket::deserialize(
       "external table slot type doesn't match serialization tag");
   auto socketData = socketExternal.getSocket();
   auto remoteAddr = kj::str(socketData.getRemoteAddress());
-  auto transport = kj::str(socketData.getSecureTransport());
+  SecureTransportKind secureTransport = fromRpcSecureTransport(socketData.getSecureTransport());
+  bool allowHalfOpen = socketData.getAllowHalfOpen();
+  // An empty localAddress means the origin socket had none (the common case for outbound sockets).
+  kj::Maybe<kj::String> localAddr;
+  {
+    auto localText = socketData.getLocalAddress();
+    if (localText.size() > 0) {
+      localAddr = kj::str(localText);
+    }
+  }
 
   // (2) Readable side: recover the raw input stream from the pushed ByteStream (mirrors
   // ReadableStream::deserialize).
@@ -699,25 +786,25 @@ jsg::Ref<Socket> Socket::deserialize(
   kj::Own<capnp::ExplicitEndOutputStream> output =
       ioContext.getByteStreamFactory().capnpToKjExplicitEnd(ws.getByteStream());
 
-  // Parse the secure transport
-  SecureTransportKind secureTransport = SecureTransportKind::OFF;
-  if (transport == "on") {
-    secureTransport = SecureTransportKind::ON;
-  } else if (transport == "starttls") {
-    secureTransport = SecureTransportKind::STARTTLS;
-  }
-
   // Combine the two half-streams into a real AsyncIoStream (used for the connection stream, e.g. by
   // startTls/takeConnectionStream) and derive the readable/writable sources from it.
   kj::Own<kj::AsyncIoStream> asyncIoStream =
       kj::heap<TransferredSocketStream>(kj::mv(input), kj::mv(output));
-  auto refcountedConnection = kj::refcountedWrapper(kj::mv(asyncIoStream));
-  auto sysStreams = newSystemMultiStream(*refcountedConnection, ioContext);
+  kj::Rc<kj::AsyncIoStream> refcountedConnection(kj::mv(asyncIoStream));
+  auto sysStreams = newSystemMultiStream(refcountedConnection.addRef(), ioContext);
   // The underlying streams are bound to this IoContext (they disconnect when the RPC session's
   // JsRpcCustomEvent is canceled), so their pumpTo() must not be deferred past the context's
   // lifetime.
   sysStreams.readable = newNoDeferredProxyReadableStream(kj::mv(sysStreams.readable), ioContext);
   auto readable = js.alloc<ReadableStream>(ioContext, kj::mv(sysStreams.readable));
+
+  // Preserve the origin socket's half-open semantics: when allowHalfOpen is false, the write side is
+  // auto-closed once the read side reaches EOF. onEof() must be captured before `readable` is moved
+  // into the Socket below; the resulting promise is handed to handleReadableEof() after allocation.
+  kj::Maybe<jsg::Promise<void>> eofPromise;
+  if (!allowHalfOpen) {
+    eofPromise = readable->onEof(js);
+  }
 
   auto closedPrPair = js.newPromiseAndResolver<void>();
   closedPrPair.promise.markAsHandled(js);
@@ -729,26 +816,64 @@ jsg::Ref<Socket> Socket::deserialize(
   auto writable = js.alloc<WritableStream>(ioContext, kj::mv(sysStreams.writable),
       ioContext.getMetrics().tryCreateWritableByteStreamObserver());
 
-  // The connection is already established, so resolve `opened` immediately. resolve() only schedules
-  // the settlement (handlers run later as microtasks), so it is safe under the deserialize scope.
+  // The connection is already established (the origin socket's `opened` was awaited before it could
+  // be serialized), so resolve `opened` immediately with the transferred SocketInfo. resolve() only
+  // schedules the settlement (handlers run later as microtasks), so it is safe under the deserialize
+  // scope.
   openedPrPair.resolver.resolve(js,
       SocketInfo{
         .remoteAddress = kj::str(remoteAddr),
-        .localAddress = kj::none,
+        .localAddress = mapCopyString(localAddr),
       });
 
-  // TODO(soon): Wire `closed` to fire on disconnect. That bridge (ioContext.awaitIo(...).then(...))
-  // executes JS and therefore cannot run here; do it lazily on first access to `closed`, which runs
-  // in a normal JS-executing context. For now `closed` only resolves via an explicit close().
-  kj::Promise<void> watchForDisconnectTask = kj::READY_NOW;
+  // Set up disconnection detection now. This part is pure kj and safe under the deserialize scope;
+  // the JS wiring that resolves `closed` (wireClosedToDisconnect()) is attached in the deferred
+  // microtask below, since it cannot run where JS execution is disallowed.
+  auto [disconnected, watchForDisconnectTask] = watchForDisconnect(*refcountedConnection);
 
   // No real TLS starter exists for a transferred socket, so startTls is unsupported.
   auto tlsStarter = kj::heap<kj::TlsStarterCallback>();
 
-  return js.alloc<Socket>(js, ioContext, kj::mv(refcountedConnection), kj::str(remoteAddr),
-      kj::none /* localAddress */, kj::mv(readable), kj::mv(writable), kj::mv(closedPrPair),
-      kj::mv(watchForDisconnectTask), kj::none /* options */, kj::mv(tlsStarter), secureTransport,
-      kj::none /* domain */, false /* isDefaultFetchPort */, kj::mv(openedPrPair));
+  // default fetch port
+  auto isDefaultFetchPort = socketData.getIsDefaultFetchPort();
+
+  // Reconstruct the subset of SocketOptions that affects the transferred socket's runtime behavior.
+  // Only allowHalfOpen is carried across transfer; getAllowHalfOpen() and the handleReadableEof()
+  // asserts rely on this reflecting the origin socket's setting.
+  SocketOptions options{.allowHalfOpen = allowHalfOpen};
+
+  auto socket = js.alloc<Socket>(js, ioContext, kj::mv(refcountedConnection), kj::str(remoteAddr),
+      kj::mv(localAddr), kj::mv(readable), kj::mv(writable), kj::mv(closedPrPair),
+      kj::mv(watchForDisconnectTask), kj::mv(options), kj::mv(tlsStarter), secureTransport,
+      kj::none /* domain */, isDefaultFetchPort, kj::mv(openedPrPair));
+
+  // handleReadableEof() and wireClosedToDisconnect() both attach jsg `.then()` continuations, which
+  // invoke V8 and are therefore forbidden inside the deserialize scope (JS execution is disallowed
+  // here). Defer them to microtasks that run once readValue() returns and JS execution is permitted
+  // again. Wrapping the function and enqueuing the microtask do not themselves invoke JS, so both are
+  // safe here. The kj-side signals (onEof above and the disconnect watcher) were already set up, so
+  // no event can be missed while the microtasks are pending.
+  //
+  // `disconnected` is a kj promise reachable from the JS-heap functor, so it is wrapped in an IoOwn
+  // to be held safely.
+  auto disconnectedOwn = ioContext.addObject(kj::heap<kj::Promise<bool>>(kj::mv(disconnected)));
+  js.v8Isolate->EnqueueMicrotask(js.wrapSimpleFunction(js.v8Context(),
+      JSG_VISITABLE_LAMBDA((self = socket.addRef(), disconnected = kj::mv(disconnectedOwn)), (self),
+          (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& args) mutable {
+            self.get()->wireClosedToDisconnect(js, kj::mv(*disconnected));
+          })));
+  KJ_IF_SOME(p, eofPromise) {
+    js.v8Isolate->EnqueueMicrotask(js.wrapSimpleFunction(js.v8Context(),
+        JSG_VISITABLE_LAMBDA((self = socket.addRef(), eof = kj::mv(p)), (self, eof),
+            (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& args) mutable {
+              self.get()->handleReadableEof(js, kj::mv(eof));
+            })));
+  }
+
+  // `opened` was resolved synchronously above, so the transferred socket is immediately in the
+  // OPENED state and can itself be re-serialized for a further RPC hop.
+  socket.get()->openedState = OpenedState::OPENED;
+  return socket;
 }
 
 jsg::Ref<Socket> SocketsModule::connect(

@@ -16,6 +16,8 @@ const unitTests :Workerd.Config = (
           # Used by OutboundInterceptor to reach the downstream backend. Present on the shared worker
           # definition so the OutboundInterceptor entrypoint sees it in `this.env`.
           (name = "BACKEND", service = "backend-loop"),
+          # Half-close backend, used to verify allowHalfOpen survives socket transfer.
+          (name = "HALFCLOSE", service = "halfclose-loop"),
         ],
       )
     ),
@@ -31,6 +33,12 @@ const unitTests :Workerd.Config = (
         http = (capnpConnectHost = "cappy")
       )
     ),
+    ( name = "halfclose-loop",
+      external = (
+        address = "loopback:halfclose-loop",
+        http = (capnpConnectHost = "cappy")
+      )
+    ),
     ( name = "internet", network = ( allow = ["private"] ) ),
   ],
   sockets = [
@@ -42,6 +50,11 @@ const unitTests :Workerd.Config = (
     ( name = "backend-loop",
       address = "loopback:backend-loop",
       service = (name = "outbound-interceptor-socket-test", entrypoint = "Backend"),
+      http = (capnpConnectHost = "cappy")
+    ),
+    ( name = "halfclose-loop",
+      address = "loopback:halfclose-loop",
+      service = (name = "outbound-interceptor-socket-test", entrypoint = "HalfCloseBackend"),
       http = (capnpConnectHost = "cappy")
     ),
   ],

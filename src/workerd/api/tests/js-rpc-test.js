@@ -286,13 +286,19 @@ export class MyService extends WorkerEntrypoint {
     // Connect to our own connect() handler (which writes "hello" and closes) and return the client
     // socket. Returning it over RPC transfers the socket to the caller, which can then read the
     // bytes back through the reconstructed (transferred) socket.
-    return this.env.MyService.connect('localhost:1234');
+    const socket = this.env.MyService.connect('localhost:1234');
+    // A Socket can only be serialized for RPC once its connection has been established; await
+    // `opened` before returning it (Socket::serialize() is synchronous and cannot await this).
+    await socket.opened;
+    return socket;
   }
 
   async getEchoSocket() {
     // Connect to the default entrypoint's echo connect() handler and return the client socket, so
     // the caller can transfer it over RPC and exercise a write→peer→read round-trip.
-    return this.env.defaultExport.connect('localhost:1234');
+    const socket = this.env.defaultExport.connect('localhost:1234');
+    await socket.opened;
+    return socket;
   }
 
   getRpcPromise(callback) {
