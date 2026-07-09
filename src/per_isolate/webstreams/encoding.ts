@@ -40,6 +40,10 @@ const StringCoerce = String;
 
 const { TransformStream } = require('webstreams/transform');
 
+function isActualObject(value: unknown) {
+  return value != null && typeof value === 'object';
+}
+
 // Capture TransformStream.prototype accessors at bootstrap time so
 // internal reads do not go through the (user-patchable) prototype chain.
 // Uses the same validation guard pattern as getProtoGetter in primordials.ts.
@@ -77,7 +81,8 @@ class TextEncoderStream {
 
   static {
     assertIsTextEncoderStream = function (self: TextEncoderStream) {
-      if (!(#transform in self)) throw new TypeError('Illegal invocation');
+      if (!isActualObject(self) || !(#transform in self))
+        throw new TypeError('Illegal invocation');
     };
   }
 
@@ -163,7 +168,8 @@ class TextDecoderStream {
 
   static {
     assertIsTextDecoderStream = function (self: TextDecoderStream) {
-      if (!(#decoder in self)) throw new TypeError('Illegal invocation');
+      if (!isActualObject(self) || !(#decoder in self))
+        throw new TypeError('Illegal invocation');
     };
   }
 
@@ -229,6 +235,7 @@ class TextDecoderStream {
 const kEnumerable = { __proto__: null, enumerable: true };
 
 ObjectDefineProperties(TextEncoderStream.prototype, {
+  __proto__: null,
   encoding: kEnumerable,
   readable: kEnumerable,
   writable: kEnumerable,
@@ -242,6 +249,7 @@ ObjectDefineProperties(TextEncoderStream.prototype, {
 });
 
 ObjectDefineProperties(TextDecoderStream.prototype, {
+  __proto__: null,
   encoding: kEnumerable,
   fatal: kEnumerable,
   ignoreBOM: kEnumerable,

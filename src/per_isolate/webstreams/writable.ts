@@ -209,6 +209,7 @@ let getWriterClosedPromiseInternal: <W>(
 // readable side's kExtractNativeSource calling convention so the C++
 // TypeWrapper uses one uniform protocol for both directions.
 let extractNativeSink: <W>(this: WritableStream<W>) => object;
+let assertIsWritableStream: <W>(self: WritableStream<W>) => void;
 
 class WritableStream<W = unknown> {
   #controller?: WritableStreamDefaultController<W> | undefined;
@@ -227,6 +228,10 @@ class WritableStream<W = unknown> {
   #nativeSink?: object | undefined;
 
   static {
+    assertIsWritableStream = function <W>(self: WritableStream<W>): void {
+      if (!isActualObject(self) || !(#state in self))
+        throw new TypeError('Illegal invocation');
+    };
     getWritableStreamState = (stream) => stream.#state;
     getWritableStreamStoredError = (stream) => stream.#storedError;
     isWritableStreamLocked = (stream) => stream.#writer !== undefined;
@@ -240,9 +245,7 @@ class WritableStream<W = unknown> {
     // Mirrors extractNativeSource on the readable side: atomic
     // validate → extract → lock. No "disturbed" concept on writable.
     extractNativeSink = function <W>(this: WritableStream<W>): object {
-      if (!(#state in this)) {
-        throw new TypeError('Illegal invocation');
-      }
+      assertIsWritableStream(this);
       if (isWritableStreamLocked(this)) {
         throw new TypeError(
           'Cannot extract a native sink from a locked stream'
@@ -591,13 +594,13 @@ class WritableStream<W = unknown> {
   }
 
   get locked(): boolean {
-    if (!(#state in this)) throw new TypeError('Illegal invocation');
+    assertIsWritableStream(this);
     return isWritableStreamLocked(this);
   }
 
   abort(reason: unknown = undefined): Promise<void> {
     try {
-      if (!(#state in this)) throw new TypeError('Illegal invocation');
+      assertIsWritableStream(this);
       if (isWritableStreamLocked(this)) {
         throw new TypeError('Cannot abort a stream that is locked');
       }
@@ -609,7 +612,7 @@ class WritableStream<W = unknown> {
 
   close(): Promise<void> {
     try {
-      if (!(#state in this)) throw new TypeError('Illegal invocation');
+      assertIsWritableStream(this);
       if (isWritableStreamLocked(this)) {
         throw new TypeError('Cannot close a stream that is locked');
       }
@@ -623,11 +626,9 @@ class WritableStream<W = unknown> {
   }
 
   getWriter(): WritableStreamDefaultWriterType<W> {
-    if (!(#state in this)) throw new TypeError('Illegal invocation');
+    assertIsWritableStream(this);
     return new WritableStreamDefaultWriter<W>(this);
   }
-
-  [SymbolToStringTag] = 'WritableStream';
 }
 
 // Started-flag peek used by the stream's erroring machinery; assigned in
@@ -644,6 +645,10 @@ interface QueuedWrite<W> {
   size: number;
 }
 
+let assertIsWritableStreamDefaultController: <W>(
+  self: WritableStreamDefaultController<W>
+) => void;
+
 class WritableStreamDefaultController<
   W = unknown,
 > implements WritableStreamDefaultControllerType {
@@ -659,6 +664,12 @@ class WritableStreamDefaultController<
   #abortController = new AbortController();
 
   static {
+    assertIsWritableStreamDefaultController = function <W>(
+      self: WritableStreamDefaultController<W>
+    ): void {
+      if (!isActualObject(self) || !(#stream in self))
+        throw new TypeError('Illegal invocation');
+    };
     controllerStartedOf = (controller) => controller.#started;
 
     controllerGetDesiredSize = (controller) => {
@@ -829,12 +840,12 @@ class WritableStreamDefaultController<
   }
 
   get signal(): AbortSignal {
-    if (!(#stream in this)) throw new TypeError('Illegal invocation');
+    assertIsWritableStreamDefaultController(this);
     return AbortControllerSignalGet(this.#abortController);
   }
 
   error(reason: unknown = undefined): void {
-    if (!(#stream in this)) throw new TypeError('Illegal invocation');
+    assertIsWritableStreamDefaultController(this);
     if (getWritableStreamState(this.#stream) !== 'writable') return;
     this.#errorStream(reason);
   }
@@ -938,12 +949,13 @@ class WritableStreamDefaultController<
       }
     );
   }
-
-  [SymbolToStringTag] = 'WritableStreamDefaultController';
 }
 
 // ---------------------------------------------------------------------------
 // WritableStreamDefaultWriter
+let assertIsWritableStreamDefaultWriter: <W>(
+  self: WritableStreamDefaultWriter<W>
+) => void;
 
 class WritableStreamDefaultWriter<
   W = unknown,
@@ -954,6 +966,13 @@ class WritableStreamDefaultWriter<
 
   static {
     getWriterStream = (writer) => writer.#stream;
+
+    assertIsWritableStreamDefaultWriter = function <W>(
+      self: WritableStreamDefaultWriter<W>
+    ): void {
+      if (!isActualObject(self) || !(#stream in self))
+        throw new TypeError('Illegal invocation');
+    };
 
     getWriterReadyPromiseInternal = (writer) => {
       const promise = writer.#readyPromise;
@@ -1169,6 +1188,7 @@ class WritableStreamDefaultWriter<
 
   get closed(): Promise<void> {
     try {
+      assertIsWritableStreamDefaultWriter(this);
       const promise = this.#closedPromise;
       if (isPromise(promise)) return promise as Promise<void>;
       return (promise as PromiseWithResolversType<void>).promise;
@@ -1179,6 +1199,7 @@ class WritableStreamDefaultWriter<
 
   get ready(): Promise<void> {
     try {
+      assertIsWritableStreamDefaultWriter(this);
       const promise = this.#readyPromise;
       if (isPromise(promise)) return promise as Promise<void>;
       return (promise as PromiseWithResolversType<void>).promise;
@@ -1188,6 +1209,7 @@ class WritableStreamDefaultWriter<
   }
 
   get desiredSize(): number | null {
+    assertIsWritableStreamDefaultWriter(this);
     const stream = this.#stream;
     if (stream === undefined) {
       throw new TypeError('This writer has been released');
@@ -1201,6 +1223,7 @@ class WritableStreamDefaultWriter<
 
   abort(reason: unknown = undefined): Promise<void> {
     try {
+      assertIsWritableStreamDefaultWriter(this);
       const stream = this.#stream;
       if (stream === undefined) {
         throw new TypeError('This writer has been released');
@@ -1213,7 +1236,7 @@ class WritableStreamDefaultWriter<
 
   close(): Promise<void> {
     try {
-      // Brand check via private access.
+      assertIsWritableStreamDefaultWriter(this);
       if (this.#stream === undefined) {
         throw new TypeError('This writer has been released');
       }
@@ -1225,7 +1248,7 @@ class WritableStreamDefaultWriter<
 
   write(chunk: W = undefined as W): Promise<void> {
     try {
-      if (!(#stream in this)) throw new TypeError('Illegal invocation');
+      assertIsWritableStreamDefaultWriter(this);
       return writerWriteInternal(this, chunk);
     } catch (e) {
       return PromiseReject(e) as Promise<void>;
@@ -1233,11 +1256,9 @@ class WritableStreamDefaultWriter<
   }
 
   releaseLock(): void {
-    if (!(#stream in this)) throw new TypeError('Illegal invocation');
+    assertIsWritableStreamDefaultWriter(this);
     writerReleaseInternal(this);
   }
-
-  [SymbolToStringTag] = 'WritableStreamDefaultWriter';
 }
 
 // Spec WritableStreamDefaultWriterCloseWithErrorPropagation — the pipe's
@@ -1262,30 +1283,58 @@ function writerCloseWithErrorPropagation<W>(
   return writerCloseInternal(writer);
 }
 
+const kEnumerable = { __proto__: null, enumerable: true };
+
 ObjectDefineProperties(WritableStream, {
-  length: { value: 0 },
+  __proto__: null,
+  length: { __proto__: null, value: 0 },
 });
 ObjectDefineProperties(WritableStreamDefaultController, {
-  length: { value: 0 },
+  __proto__: null,
+  length: { __proto__: null, value: 0 },
 });
 ObjectDefineProperties(WritableStream.prototype, {
-  locked: { enumerable: true },
-  abort: { enumerable: true },
-  close: { enumerable: true },
-  getWriter: { enumerable: true },
+  __proto__: null,
+  locked: kEnumerable,
+  abort: kEnumerable,
+  close: kEnumerable,
+  getWriter: kEnumerable,
+  [SymbolToStringTag]: {
+    __proto__: null,
+    value: 'WritableStream',
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  },
 });
 ObjectDefineProperties(WritableStreamDefaultWriter.prototype, {
-  closed: { enumerable: true },
-  ready: { enumerable: true },
-  desiredSize: { enumerable: true },
-  abort: { enumerable: true },
-  close: { enumerable: true },
-  write: { enumerable: true },
-  releaseLock: { enumerable: true },
+  __proto__: null,
+  closed: kEnumerable,
+  ready: kEnumerable,
+  desiredSize: kEnumerable,
+  abort: kEnumerable,
+  close: kEnumerable,
+  write: kEnumerable,
+  releaseLock: kEnumerable,
+  [SymbolToStringTag]: {
+    __proto__: null,
+    value: 'WritableStreamDefaultWriter',
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  },
 });
 ObjectDefineProperties(WritableStreamDefaultController.prototype, {
-  signal: { enumerable: true },
-  error: { enumerable: true },
+  __proto__: null,
+  signal: kEnumerable,
+  error: kEnumerable,
+  [SymbolToStringTag]: {
+    __proto__: null,
+    value: 'WritableStreamDefaultController',
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  },
 });
 
 module.exports = {
