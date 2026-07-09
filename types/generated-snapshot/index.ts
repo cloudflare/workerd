@@ -1277,30 +1277,6 @@ export declare abstract class Crypto {
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto)
  */
 export declare abstract class SubtleCrypto {
-  static supports(
-    operation: string,
-    algorithm:
-      | string
-      | SubtleCryptoGenerateKeyAlgorithm
-      | SubtleCryptoImportKeyAlgorithm
-      | SubtleCryptoDeriveKeyAlgorithm
-      | SubtleCryptoHashAlgorithm
-      | SubtleCryptoEncryptAlgorithm
-      | SubtleCryptoSignAlgorithm,
-    length?: number | null,
-  ): boolean;
-  static supports(
-    operation: string,
-    algorithm:
-      | string
-      | SubtleCryptoGenerateKeyAlgorithm
-      | SubtleCryptoImportKeyAlgorithm
-      | SubtleCryptoDeriveKeyAlgorithm
-      | SubtleCryptoHashAlgorithm
-      | SubtleCryptoEncryptAlgorithm
-      | SubtleCryptoSignAlgorithm,
-    additionalAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
-  ): boolean;
   /**
    * The **`encrypt()`** method of the SubtleCrypto interface encrypts data.
    *
@@ -1426,31 +1402,6 @@ export declare abstract class SubtleCrypto {
     extractable: boolean,
     keyUsages: string[],
   ): Promise<CryptoKey>;
-  encapsulateKey(
-    encapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
-    encapsulationKey: CryptoKey,
-    sharedKeyAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
-    extractable: boolean,
-    keyUsages: string[],
-  ): Promise<SubtleCryptoEncapsulatedKey>;
-  encapsulateBits(
-    encapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
-    encapsulationKey: CryptoKey,
-  ): Promise<SubtleCryptoEncapsulatedBits>;
-  decapsulateKey(
-    decapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
-    decapsulationKey: CryptoKey,
-    ciphertext: ArrayBuffer | ArrayBufferView,
-    sharedKeyAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
-    extractable: boolean,
-    keyUsages: string[],
-  ): Promise<CryptoKey>;
-  decapsulateBits(
-    decapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
-    decapsulationKey: CryptoKey,
-    ciphertext: ArrayBuffer | ArrayBufferView,
-  ): Promise<ArrayBuffer>;
-  getPublicKey(key: CryptoKey, keyUsages: string[]): Promise<CryptoKey>;
   timingSafeEqual(
     a: ArrayBuffer | ArrayBufferView,
     b: ArrayBuffer | ArrayBufferView,
@@ -1524,14 +1475,6 @@ export interface RsaOtherPrimesInfo {
   r?: string;
   d?: string;
   t?: string;
-}
-export interface SubtleCryptoEncapsulatedBits {
-  sharedKey: ArrayBuffer;
-  ciphertext: ArrayBuffer;
-}
-export interface SubtleCryptoEncapsulatedKey {
-  sharedKey: CryptoKey;
-  ciphertext: ArrayBuffer;
 }
 export interface SubtleCryptoDeriveKeyAlgorithm {
   name: string;

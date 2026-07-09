@@ -98,7 +98,10 @@ wpt_test(
 wpt_test(
     name = "WebCryptoAPI",
     size = "enormous",
-    compat_flags = ["disable_fast_jsg_struct"],
+    compat_flags = [
+        "disable_fast_jsg_struct",
+        "webcrypto_modern_algorithms",
+    ],
     config = "WebCryptoAPI-test.ts",
     include_tentative = True,
     target_compatible_with = select({

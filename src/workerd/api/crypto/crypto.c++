@@ -151,6 +151,10 @@ static kj::Maybe<const CryptoAlgorithm&> lookupAlgorithm(kj::StringPtr name) {
     // algorithm registered.
     return Worker::Api::current().getCryptoAlgorithm(name);
   } else {
+    if ((iter->name.startsWith("ML-DSA-"_kj) || iter->name.startsWith("ML-KEM-"_kj)) &&
+        !Worker::Api::current().getFeatureFlags().getWebCryptoModernAlgorithms()) {
+      return kj::none;
+    }
     return *iter;
   }
 }

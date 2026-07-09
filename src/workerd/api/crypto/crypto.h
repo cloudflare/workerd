@@ -677,9 +677,7 @@ class SubtleCrypto: public jsg::Object {
   // This is a non-standard extension based off Node.js' implementation of crypto.timingSafeEqual.
   bool timingSafeEqual(jsg::JsBufferSource a, jsg::JsBufferSource b);
 
-  JSG_RESOURCE_TYPE(SubtleCrypto) {
-    JSG_STATIC_METHOD(supports);
-
+  JSG_RESOURCE_TYPE(SubtleCrypto, CompatibilityFlags::Reader flags) {
     JSG_METHOD(encrypt);
     JSG_METHOD(decrypt);
     JSG_METHOD(sign);
@@ -692,68 +690,101 @@ class SubtleCrypto: public jsg::Object {
     JSG_METHOD(exportKey);
     JSG_METHOD(wrapKey);
     JSG_METHOD(unwrapKey);
-    JSG_METHOD(encapsulateKey);
-    JSG_METHOD(encapsulateBits);
-    JSG_METHOD(decapsulateKey);
-    JSG_METHOD(decapsulateBits);
-    JSG_METHOD(getPublicKey);
+    if (flags.getWebCryptoModernAlgorithms()) {
+      JSG_STATIC_METHOD(supports);
+      JSG_METHOD(encapsulateKey);
+      JSG_METHOD(encapsulateBits);
+      JSG_METHOD(decapsulateKey);
+      JSG_METHOD(decapsulateBits);
+      JSG_METHOD(getPublicKey);
+    }
     JSG_METHOD(timingSafeEqual);
 
-    JSG_TS_OVERRIDE({
-      static supports(operation: string,
-                      algorithm: string | SubtleCryptoGenerateKeyAlgorithm | SubtleCryptoImportKeyAlgorithm | SubtleCryptoDeriveKeyAlgorithm | SubtleCryptoHashAlgorithm | SubtleCryptoEncryptAlgorithm | SubtleCryptoSignAlgorithm,
-                      length?: number | null): boolean;
-      static supports(operation: string,
-                      algorithm: string | SubtleCryptoGenerateKeyAlgorithm | SubtleCryptoImportKeyAlgorithm | SubtleCryptoDeriveKeyAlgorithm | SubtleCryptoHashAlgorithm | SubtleCryptoEncryptAlgorithm | SubtleCryptoSignAlgorithm,
-                      additionalAlgorithm: string | SubtleCryptoImportKeyAlgorithm): boolean;
-      wrapKey(format: string,
-              key: CryptoKey,
-              wrappingKey: CryptoKey,
-              wrapAlgorithm: string | SubtleCryptoEncryptAlgorithm)
-              : Promise<ArrayBuffer>;
-      deriveBits(algorithm: string | SubtleCryptoDeriveKeyAlgorithm,
-                 baseKey : CryptoKey,
-                 length? : number | null)
-                 : Promise<ArrayBuffer>;
-      digest(algorithm: string | SubtleCryptoHashAlgorithm,
+    if (flags.getWebCryptoModernAlgorithms()) {
+      JSG_TS_OVERRIDE({
+        static supports(operation: string,
+                        algorithm: string | SubtleCryptoGenerateKeyAlgorithm | SubtleCryptoImportKeyAlgorithm | SubtleCryptoDeriveKeyAlgorithm | SubtleCryptoHashAlgorithm | SubtleCryptoEncryptAlgorithm | SubtleCryptoSignAlgorithm,
+                        length?: number | null): boolean;
+        static supports(operation: string,
+                        algorithm: string | SubtleCryptoGenerateKeyAlgorithm | SubtleCryptoImportKeyAlgorithm | SubtleCryptoDeriveKeyAlgorithm | SubtleCryptoHashAlgorithm | SubtleCryptoEncryptAlgorithm | SubtleCryptoSignAlgorithm,
+                        additionalAlgorithm: string | SubtleCryptoImportKeyAlgorithm): boolean;
+        wrapKey(format: string,
+                key: CryptoKey,
+                wrappingKey: CryptoKey,
+                wrapAlgorithm: string | SubtleCryptoEncryptAlgorithm)
+                : Promise<ArrayBuffer>;
+        deriveBits(algorithm: string | SubtleCryptoDeriveKeyAlgorithm,
+                   baseKey : CryptoKey,
+                   length? : number | null)
+                   : Promise<ArrayBuffer>;
+        digest(algorithm: string | SubtleCryptoHashAlgorithm,
+               data: ArrayBuffer | ArrayBufferView)
+            : Promise<ArrayBuffer>;
+        sign(algorithm: string | SubtleCryptoSignAlgorithm,
+             key: CryptoKey,
              data: ArrayBuffer | ArrayBufferView)
-          : Promise<ArrayBuffer>;
-      sign(algorithm: string | SubtleCryptoSignAlgorithm,
-           key: CryptoKey,
-           data: ArrayBuffer | ArrayBufferView)
-           : Promise<ArrayBuffer>;
-      decrypt(algorithm: string | SubtleCryptoEncryptAlgorithm,
-              key: CryptoKey,
-              cipherText: ArrayBuffer | ArrayBufferView)
-              : Promise<ArrayBuffer>;
-      encrypt(algorithm: string | SubtleCryptoEncryptAlgorithm,
-              key: CryptoKey,
-              plainText: ArrayBuffer | ArrayBufferView)
-              : Promise<ArrayBuffer>;
-      exportKey(format: string, key: CryptoKey) : Promise<ArrayBuffer | JsonWebKey>;
-      encapsulateKey(encapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
-                     encapsulationKey: CryptoKey,
-                     sharedKeyAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
-                     extractable: boolean,
-                     keyUsages: string[])
-                     : Promise<SubtleCryptoEncapsulatedKey>;
-      encapsulateBits(encapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
-                      encapsulationKey: CryptoKey)
-                      : Promise<SubtleCryptoEncapsulatedBits>;
-      decapsulateKey(decapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
-                     decapsulationKey: CryptoKey,
-                     ciphertext: ArrayBuffer | ArrayBufferView,
-                     sharedKeyAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
-                     extractable: boolean,
-                     keyUsages: string[])
+             : Promise<ArrayBuffer>;
+        decrypt(algorithm: string | SubtleCryptoEncryptAlgorithm,
+                key: CryptoKey,
+                cipherText: ArrayBuffer | ArrayBufferView)
+                : Promise<ArrayBuffer>;
+        encrypt(algorithm: string | SubtleCryptoEncryptAlgorithm,
+                key: CryptoKey,
+                plainText: ArrayBuffer | ArrayBufferView)
+                : Promise<ArrayBuffer>;
+        exportKey(format: string, key: CryptoKey) : Promise<ArrayBuffer | JsonWebKey>;
+        encapsulateKey(encapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+                       encapsulationKey: CryptoKey,
+                       sharedKeyAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+                       extractable: boolean,
+                       keyUsages: string[])
+                       : Promise<SubtleCryptoEncapsulatedKey>;
+        encapsulateBits(encapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+                        encapsulationKey: CryptoKey)
+                        : Promise<SubtleCryptoEncapsulatedBits>;
+        decapsulateKey(decapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+                       decapsulationKey: CryptoKey,
+                       ciphertext: ArrayBuffer | ArrayBufferView,
+                       sharedKeyAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+                       extractable: boolean,
+                       keyUsages: string[])
+                       : Promise<CryptoKey>;
+        decapsulateBits(decapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+                        decapsulationKey: CryptoKey,
+                        ciphertext: ArrayBuffer | ArrayBufferView)
+                        : Promise<ArrayBuffer>;
+        getPublicKey(key: CryptoKey, keyUsages: string[])
                      : Promise<CryptoKey>;
-      decapsulateBits(decapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
-                      decapsulationKey: CryptoKey,
-                      ciphertext: ArrayBuffer | ArrayBufferView)
-                      : Promise<ArrayBuffer>;
-      getPublicKey(key: CryptoKey, keyUsages: string[])
-                   : Promise<CryptoKey>;
-    });
+      });
+    } else {
+      JSG_TS_OVERRIDE({
+        wrapKey(format: string,
+                key: CryptoKey,
+                wrappingKey: CryptoKey,
+                wrapAlgorithm: string | SubtleCryptoEncryptAlgorithm)
+                : Promise<ArrayBuffer>;
+        deriveBits(algorithm: string | SubtleCryptoDeriveKeyAlgorithm,
+                   baseKey : CryptoKey,
+                   length? : number | null)
+                   : Promise<ArrayBuffer>;
+        digest(algorithm: string | SubtleCryptoHashAlgorithm,
+               data: ArrayBuffer | ArrayBufferView)
+            : Promise<ArrayBuffer>;
+        sign(algorithm: string | SubtleCryptoSignAlgorithm,
+             key: CryptoKey,
+             data: ArrayBuffer | ArrayBufferView)
+             : Promise<ArrayBuffer>;
+        decrypt(algorithm: string | SubtleCryptoEncryptAlgorithm,
+                key: CryptoKey,
+                cipherText: ArrayBuffer | ArrayBufferView)
+                : Promise<ArrayBuffer>;
+        encrypt(algorithm: string | SubtleCryptoEncryptAlgorithm,
+                key: CryptoKey,
+                plainText: ArrayBuffer | ArrayBufferView)
+                : Promise<ArrayBuffer>;
+        exportKey(format: string, key: CryptoKey) : Promise<ArrayBuffer | JsonWebKey>;
+      });
+    }
   }
 };
 
