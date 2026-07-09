@@ -20,8 +20,12 @@
 //     is never exposed to user code.
 //   - pull(controller) discriminates the read mode via the controller:
 //     controller.byobRequest !== null ⇒ BYOB read — fill the request's
-//     view and call respond(bytesWritten)/respondWithNewView(view),
-//     honoring `atLeast` (the read's minimum, in bytes).
+//     view and call respond(bytesWritten), honoring `atLeast` (the
+//     read's minimum, in bytes). respondWithNewView() is deliberately
+//     omitted: the native source writes into consumer-provided memory
+//     (KJ tryRead semantics); buffer-swapping has no C++ analogue, and
+//     the default-read enqueue() path already covers source-allocated
+//     buffers.
 //     byobRequest === null ⇒ default read — the source allocates its OWN
 //     buffer and calls controller.enqueue(view).
 //   - The source calls enqueue-or-respond AT MOST ONCE per pull
@@ -63,7 +67,8 @@
 //     cancel).
 //   - expectedLength (non-standard extension, optional): the TOTAL bytes
 //     the source promises to produce — a non-negative bigint or integer
-//     number (normalized to bigint), read once at construction.
+//     number that fits in a uint64 (normalized to bigint), read once at
+//     construction.
 //     undefined = unknown (C++ uses chunked encoding). The conduit
 //     enforces the exact-total contract: overflow at delivery and
 //     underflow at source-initiated close (including min-read
@@ -111,7 +116,6 @@ const {
   AbortControllerAbort,
   AbortControllerSignalGet,
   AbortSignalAbortedGet,
-  ArrayBufferPrototypeByteLengthGet,
   ArrayPrototypePush,
   ArrayPrototypeShift,
   ArrayPrototypeSplice,
@@ -130,7 +134,6 @@ const {
   TypedArrayPrototypeGetBuffer,
   TypedArrayPrototypeGetByteLength,
   TypedArrayPrototypeGetByteOffset,
-  TypedArrayPrototypeGetSymbolToStringTag,
   Uint8Array,
   uncurryThis,
 } = primordials;
@@ -220,33 +223,38 @@ export interface NativeStreamHooks {
   errorStream: (reason: unknown) => void;
 }
 
+// Maximum expectedLength: uint64 max. The value is destined for the C++
+// bridge (Content-Length is carried as uint64_t through the C++/KJ HTTP
+// layer), so larger totals are not representable. Mirrors the
+// FixedLengthStream constructor validation in identity.ts.
+const MAX_UINT64 = 0xffff_ffff_ffff_ffffn;
+
 // Normalizes the non-standard `expectedLength` extension property: the
 // TOTAL number of bytes the source promises to produce over its
 // lifetime (undefined = unknown; C++ then uses chunked encoding).
-// Accepts a non-negative bigint or a non-negative integer number
-// (normalized to bigint — totals can exceed MAX_SAFE_INTEGER).
-// Shape violations are TypeErrors; range violations are RangeErrors.
-// Duplicated for the queued byte controller in readable.ts.
+// Accepts a bigint or integer number in [0, 2^64) — totals can exceed
+// MAX_SAFE_INTEGER but must fit in a uint64. Shape violations (wrong
+// type) are TypeErrors; value violations (non-integer, negative,
+// > uint64 max) are RangeErrors, matching FixedLengthStream
+// (identity.ts). A near-duplicate (pending consolidation; no uint64
+// cap yet) lives in readable.ts for the queued byte controller.
 function normalizeExpectedLength(value: unknown): bigint | undefined {
   if (value === undefined) return undefined;
-  if (typeof value === 'bigint') {
-    if (value < 0n) {
-      throw new RangeError('expectedLength must be non-negative');
-    }
-    return value;
+  if (typeof value !== 'bigint' && typeof value !== 'number') {
+    throw new TypeError(
+      'expectedLength must be a non-negative bigint or integer'
+    );
   }
-  if (typeof value === 'number') {
-    if (NumberIsNaN(value) || value % 1 !== 0) {
-      throw new TypeError('expectedLength must be an integer');
-    }
-    if (value < 0) {
-      throw new RangeError('expectedLength must be non-negative');
-    }
-    return BigInt(value);
+  // BigInt() conversion rejects NaN, ±Infinity, and fractions
+  // (RangeError) naturally. The typeof gate above is what prevents
+  // BigInt() string/object coercion (e.g. '5' → 5n) from sneaking in.
+  const normalized = typeof value === 'bigint' ? value : BigInt(value);
+  if (normalized < 0n || normalized > MAX_UINT64) {
+    throw new RangeError(
+      'expectedLength must be a non-negative integer that fits in a uint64'
+    );
   }
-  throw new TypeError(
-    'expectedLength must be a non-negative bigint or integer'
-  );
+  return normalized;
 }
 
 // ---------------------------------------------------------------------------
@@ -283,12 +291,17 @@ let getControllerConduit: (
 // The BYOB request façade
 //
 // Wraps the head pull-into descriptor for the native source's consumption
-// during pull. Mirrors the shape of the global ReadableStreamBYOBRequest
-// (view/atLeast/respond/respondWithNewView) but is a distinct, module-
-// private class: it is only ever handed to the native source, never to
-// user code, so it needs no global registration or brand hardening beyond
-// its private fields. Invalidated automatically once its descriptor is no
-// longer the head request (view/atLeast report null; responds throw).
+// during pull. Mirrors a subset of the global ReadableStreamBYOBRequest
+// (view/atLeast/respond — respondWithNewView is deliberately omitted; see
+// the contract header) but is a distinct, module-private class: it is only
+// ever handed to the native source, never to user code, so it needs no
+// global registration or brand hardening beyond its private fields.
+// Invalidated automatically once its descriptor is no longer the head
+// request (view/atLeast report null; responds throw).
+
+let assertIsNativeReadableStreamBYOBRequest: (
+  self: NativeReadableStreamBYOBRequest
+) => void;
 
 class NativeReadableStreamBYOBRequest {
   #conduit: NativePullConduit;
@@ -296,6 +309,12 @@ class NativeReadableStreamBYOBRequest {
 
   static {
     getRequestDesc = (request) => request.#desc;
+
+    assertIsNativeReadableStreamBYOBRequest = function (
+      self: NativeReadableStreamBYOBRequest
+    ): void {
+      if (!(#desc in self)) throw new TypeError('Illegal invocation');
+    };
   }
 
   constructor(conduit: NativePullConduit, desc: PullIntoDescriptor) {
@@ -304,7 +323,7 @@ class NativeReadableStreamBYOBRequest {
   }
 
   get view(): Uint8Array | null {
-    if (!(#desc in this)) throw new TypeError('Illegal invocation');
+    assertIsNativeReadableStreamBYOBRequest(this);
     if (!this.#conduit.isHeadDesc(this.#desc)) return null;
     const desc = this.#desc;
     return new Uint8Array(
@@ -320,7 +339,7 @@ class NativeReadableStreamBYOBRequest {
   // header). The subtraction is defensive: a live descriptor always has
   // bytesFilled === 0 under the once-per-read contract.
   get atLeast(): number | null {
-    if (!(#desc in this)) throw new TypeError('Illegal invocation');
+    assertIsNativeReadableStreamBYOBRequest(this);
     if (!this.#conduit.isHeadDesc(this.#desc)) return null;
     const desc = this.#desc;
     const remaining = desc.minimumFill - desc.bytesFilled;
@@ -328,13 +347,8 @@ class NativeReadableStreamBYOBRequest {
   }
 
   respond(bytesWritten: number): void {
-    if (!(#desc in this)) throw new TypeError('Illegal invocation');
+    assertIsNativeReadableStreamBYOBRequest(this);
     this.#conduit.respondToDesc(this.#desc, bytesWritten);
-  }
-
-  respondWithNewView(view: ArrayBufferView): void {
-    if (!(#desc in this)) throw new TypeError('Illegal invocation');
-    this.#conduit.respondToDescWithNewView(this.#desc, view);
   }
 }
 
@@ -345,6 +359,10 @@ class NativeReadableStreamBYOBRequest {
 // source's pull(controller) per the standard pull algorithm. Consumed
 // ONLY by the native source — never handed to user code — but the methods
 // brand-check anyway, matching the file-wide convention.
+
+let assertIsNativeReadableStreamController: (
+  self: NativeReadableStreamController
+) => void;
 
 class NativeReadableStreamController {
   #conduit: NativePullConduit;
@@ -357,6 +375,12 @@ class NativeReadableStreamController {
     };
 
     getControllerConduit = (controller) => controller.#conduit;
+
+    assertIsNativeReadableStreamController = function (
+      self: NativeReadableStreamController
+    ): void {
+      if (!(#conduit in self)) throw new TypeError('Illegal invocation');
+    };
   }
 
   constructor(conduit: NativePullConduit) {
@@ -366,7 +390,7 @@ class NativeReadableStreamController {
   // Mode discrimination for the native source: non-null ⇔ the request at
   // the head of the FIFO is a BYOB read.
   get byobRequest(): NativeReadableStreamBYOBRequest | null {
-    if (!(#conduit in this)) throw new TypeError('Illegal invocation');
+    assertIsNativeReadableStreamController(this);
     return this.#conduit.getByobRequest();
   }
 
@@ -374,22 +398,22 @@ class NativeReadableStreamController {
   // source contractually never consults it: pacing is purely demand-
   // driven (effective high-water mark of zero; strategy is ignored).
   get desiredSize(): number | null {
-    if (!(#conduit in this)) throw new TypeError('Illegal invocation');
+    assertIsNativeReadableStreamController(this);
     return this.#conduit.desiredSize;
   }
 
   enqueue(chunk: ArrayBufferView): void {
-    if (!(#conduit in this)) throw new TypeError('Illegal invocation');
+    assertIsNativeReadableStreamController(this);
     this.#conduit.enqueue(chunk);
   }
 
   close(): void {
-    if (!(#conduit in this)) throw new TypeError('Illegal invocation');
+    assertIsNativeReadableStreamController(this);
     this.#conduit.closeFromSource();
   }
 
   error(reason?: unknown): void {
-    if (!(#conduit in this)) throw new TypeError('Illegal invocation');
+    assertIsNativeReadableStreamController(this);
     this.#conduit.errorFromSource(reason);
   }
 }
@@ -860,8 +884,7 @@ class NativePullConduit implements ByteStreamConsumerType {
       if (isUint8Array(chunk)) {
         view = chunk as Uint8Array;
       } else {
-        const isDataView =
-          TypedArrayPrototypeGetSymbolToStringTag(chunk) === undefined;
+        const isDataView = utils.isDataView(chunk);
         const buffer = (
           isDataView
             ? DataViewPrototypeGetBuffer(chunk)
@@ -1026,65 +1049,6 @@ class NativePullConduit implements ByteStreamConsumerType {
         });
       }
     }
-  }
-
-  respondToDescWithNewView(
-    desc: PullIntoDescriptor,
-    view: ArrayBufferView
-  ): void {
-    // Source-initiated stragglers: silent discard.
-    if (this.#status !== 'active') return;
-    if (!this.isHeadDesc(desc)) {
-      if (this.#requests[0] === undefined) {
-        // REFUSAL BACKSTOP (same as enqueue/respond).
-        throw new TypeError(
-          'delivery refused: the pull was aborted (the source must check ' +
-            'signal.aborted before enqueue/respond and stash data for ' +
-            'redelivery)'
-        );
-      }
-      throw new TypeError('This BYOB request has been invalidated');
-    }
-    if (!isArrayBufferView(view)) {
-      throw new TypeError('respondWithNewView requires an ArrayBufferView');
-    }
-    const isDataView =
-      TypedArrayPrototypeGetSymbolToStringTag(view) === undefined;
-    const buffer = (
-      isDataView
-        ? DataViewPrototypeGetBuffer(view)
-        : TypedArrayPrototypeGetBuffer(view)
-    ) as ArrayBuffer;
-    const byteOffset = (
-      isDataView
-        ? DataViewPrototypeGetByteOffset(view)
-        : TypedArrayPrototypeGetByteOffset(view)
-    ) as number;
-    const byteLength = (
-      isDataView
-        ? DataViewPrototypeGetByteLength(view)
-        : TypedArrayPrototypeGetByteLength(view)
-    ) as number;
-    if (
-      ArrayBufferPrototypeByteLengthGet(buffer) !==
-      ArrayBufferPrototypeByteLengthGet(desc.buffer)
-    ) {
-      throw new RangeError(
-        "The view's buffer must have the same byteLength as the request"
-      );
-    }
-    if (byteOffset !== desc.byteOffset + desc.bytesFilled) {
-      throw new RangeError(
-        'The new view must start where the previous fill ended'
-      );
-    }
-    if (desc.bytesFilled + byteLength > desc.byteLength) {
-      throw new RangeError('The new view exceeds the remaining view size');
-    }
-    // Adopt the new backing buffer (the native source may have swapped
-    // buffers), then account the bytes like a plain respond.
-    desc.buffer = buffer;
-    this.respondToDesc(desc, byteLength);
   }
 
   closeFromSource(): void {
