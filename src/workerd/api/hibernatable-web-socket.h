@@ -18,6 +18,7 @@ namespace workerd::api {
 
 using HibernationReader =
     rpc::HibernatableWebSocketEventDispatcher::HibernatableWebSocketEventParams::Reader;
+struct HibernatableWebSocketCustomEventTestAccess;
 class HibernatableWebSocketEvent final: public ExtendableEvent {
  public:
   explicit HibernatableWebSocketEvent();
@@ -76,6 +77,8 @@ class HibernatableWebSocketCustomEvent final: public WorkerInterface::CustomEven
   }
 
  private:
+  friend struct HibernatableWebSocketCustomEventTestAccess;
+
   // Returns `params`, but if we have a HibernationReader we convert it to a
   // HibernatableSocketParams first.
   HibernatableSocketParams consumeParams();
