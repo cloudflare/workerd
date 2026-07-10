@@ -496,10 +496,26 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         context.logUncaughtExceptionAsync(
             UncaughtExceptionSource::REQUEST_HANDLER, exception.clone());
 
+        // Record a failure if cancellation interrupts either wait. Otherwise the WorkerInterface
+        // wrapper reports it. An output-gate failure takes precedence over the handler failure.
+        kj::Maybe<kj::Exception> outputGateException;
+        auto reportFailure = kj::defer([&]() {
+          KJ_IF_SOME(e, outputGateException) {
+            metricsForCatch->reportFailure(e);
+          } else {
+            metricsForCatch->reportFailure(exception);
+          }
+        });
+
         // Do not allow the exception to escape the isolate without waiting for the output gate to
         // open. Note that in the success path, this is taken care of in `FetchEvent::respondWith()`.
         // If the gate is broken, that exception propagates and replaces the original.
-        co_await context.waitForOutputLocks();
+        KJ_TRY {
+          co_await context.waitForOutputLocks();
+        }
+        KJ_CATCH(e) {
+          outputGateException.emplace(kj::mv(e));
+        }
         TRACE_EVENT("workerd", "WorkerEntrypoint::request() after output lock wait",
             PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
         // Yield to give a pending cancellation (e.g., the caller dropping our promise because
@@ -508,6 +524,11 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         // the chain crossed into the next `.then` after this catch; without it, downstream
         // observers can mistake a canceled request for one that threw.
         co_await kj::yield();
+        KJ_IF_SOME(e, outputGateException) {
+          reportFailure.cancel();
+          kj::throwFatalException(kj::mv(e));
+        }
+        reportFailure.cancel();
         kj::throwFatalException(kj::mv(exception));
       }
     }  // Above KJ_DEFER fires here: abort signal + drain.
@@ -539,6 +560,9 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() exception",
         PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
 
+    // Stage 1 called `delivered()`, so exceptions reaching this catch are post-delivery failures.
+    markExceptionAsDelivered(exception);
+
     auto isInternalException = !jsg::isTunneledException(exception.getDescription()) &&
         !jsg::isDoNotLogException(exception.getDescription());
     if (!loggedExceptionEarlier) {
@@ -557,11 +581,18 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
     }
 
     auto sendSyntheticStatus = [&](uint statusCode, kj::StringPtr statusText) {
-      if (wrappedResponse->isSent()) return;
-      kj::HttpHeaders errorHeaders(threadContext.getHeaderTable());
-      wrappedResponse->send(statusCode, statusText, errorHeaders, static_cast<uint64_t>(0));
-      KJ_IF_SOME(t, workerTracer) {
-        t.setReturn(kj::none, tracing::FetchResponseInfo(wrappedResponse->getHttpResponseStatus()));
+      KJ_TRY {
+        if (wrappedResponse->isSent()) return;
+        kj::HttpHeaders errorHeaders(threadContext.getHeaderTable());
+        wrappedResponse->send(statusCode, statusText, errorHeaders, static_cast<uint64_t>(0));
+        KJ_IF_SOME(t, workerTracer) {
+          t.setReturn(
+              kj::none, tracing::FetchResponseInfo(wrappedResponse->getHttpResponseStatus()));
+        }
+      }
+      KJ_CATCH(e) {
+        markExceptionAsDelivered(e);
+        kj::throwFatalException(kj::mv(e));
       }
     };
 
@@ -655,12 +686,17 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     // connect_pass_through feature flag means we should just forward the connect request on to
     // the global outbound.
 
-    auto next = context.getSubrequestChannelNoChecks(
-        IoContext::NEXT_CLIENT_CHANNEL, false, kj::mv(cfBlobJson));
-
     // Note: Intentionally return without co_await so that the `incomingRequest` is destroyed,
     //   because we don't have any need to keep the context around.
-    return next->connect(host, headers, connection, response, settings);
+    return kj::evalNow([&]() {
+      auto next = context.getSubrequestChannelNoChecks(
+          IoContext::NEXT_CLIENT_CHANNEL, false, kj::mv(cfBlobJson));
+      return next->connect(host, headers, connection, response, kj::mv(settings))
+          .attach(kj::mv(next));
+    }).catch_([](kj::Exception&& exception) -> kj::Promise<void> {
+      markExceptionAsDelivered(exception);
+      return kj::mv(exception);
+    });
   }
 
   // TODO(soon): Implement basic TLS support for connect handler.
@@ -714,6 +750,8 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
   }))
           .catch_([this, isActor, &response, metrics = kj::mv(metricsForCatch), workerTracer](
                       kj::Exception&& exception) mutable -> kj::Promise<void> {
+    markExceptionAsDelivered(exception);
+
     // Don't return errors to end user.
     auto isInternalException = !jsg::isTunneledException(exception.getDescription()) &&
         !jsg::isDoNotLogException(exception.getDescription());
@@ -752,18 +790,24 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       // an exception.
       metrics->reportFailure(exception);
 
-      kj::HttpHeaders headers(threadContext.getHeaderTable());
-      if (exception.getType() == kj::Exception::Type::OVERLOADED) {
-        // Overloaded-type exceptions generally represent some resource exhaustion (i.e. not
-        // necessarily an internal error) and correspond to HTTP error 503.
-        response.reject(503, "Service Unavailable", headers, static_cast<uint64_t>(0));
-      } else {
-        response.reject(500, "Internal Server Error", headers, static_cast<uint64_t>(0));
+      KJ_TRY {
+        kj::HttpHeaders headers(threadContext.getHeaderTable());
+        if (exception.getType() == kj::Exception::Type::OVERLOADED) {
+          // Overloaded-type exceptions generally represent some resource exhaustion (i.e. not
+          // necessarily an internal error) and correspond to HTTP error 503.
+          response.reject(503, "Service Unavailable", headers, static_cast<uint64_t>(0));
+        } else {
+          response.reject(500, "Internal Server Error", headers, static_cast<uint64_t>(0));
+        }
+        KJ_IF_SOME(t, workerTracer) {
+          t.setReturn(kj::none,
+              tracing::FetchResponseInfo(
+                  exception.getType() == kj::Exception::Type::OVERLOADED ? 503 : 500));
+        }
       }
-      KJ_IF_SOME(t, workerTracer) {
-        t.setReturn(kj::none,
-            tracing::FetchResponseInfo(
-                exception.getType() == kj::Exception::Type::OVERLOADED ? 503 : 500));
+      KJ_CATCH(e) {
+        markExceptionAsDelivered(e);
+        return kj::mv(e);
       }
 
       return kj::READY_NOW;
@@ -868,7 +912,12 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
 
   incomingRequest->delivered();
 
-  auto scheduleAlarmResult = co_await actor.scheduleAlarm(scheduledTime);
+  auto scheduleAlarmResult = co_await kj::evalNow([&]() {
+    return actor.scheduleAlarm(scheduledTime);
+  }).catch_([](kj::Exception&& exception) -> kj::Promise<WorkerInterface::ScheduleAlarmResult> {
+    markExceptionAsDelivered(exception);
+    return kj::mv(exception);
+  });
   KJ_SWITCH_ONEOF(scheduleAlarmResult) {
     KJ_CASE_ONEOF(af, WorkerInterface::AlarmFulfiller) {
       // We're now in charge of running this alarm!
@@ -883,7 +932,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
         incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
       });
 
-      try {
+      KJ_TRY {
         auto result = co_await context.run(
             [scheduledTime, retryCount, entrypointName = entrypointName.clone(),
                 versionInfo = kj::mv(versionInfo),
@@ -922,11 +971,13 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
         af.fulfill(result.asOutcome());
         cancellationGuard.cancel();
         co_return kj::mv(result);
-      } catch (const kj::Exception& e) {
+      }
+      KJ_CATCH(e) {
+        markExceptionAsDelivered(e);
         // We failed, inform any other entrypoints that may be waiting upon us.
         af.reject(e);
         cancellationGuard.cancel();
-        throw;
+        kj::throwFatalException(kj::mv(e));
       }
     }
     KJ_CASE_ONEOF(outcome, WorkerInterface::AlarmOutcome) {
@@ -1025,11 +1076,17 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
     t.setEventInfo(*incomingRequest, event->getEventInfo());
   }
 
-  return wrapWithCanceler(
-      event
-          ->run(kj::mv(incomingRequest), asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props),
-              waitUntilTasks, isDynamicDispatch)
-          .attach(kj::mv(event)));
+  KJ_TRY {
+    return wrapWithCanceler(
+        event
+            ->run(kj::mv(incomingRequest), asPtr(entrypointName), kj::mv(versionInfo),
+                kj::mv(props), waitUntilTasks, isDynamicDispatch)
+            .attach(kj::mv(event)));
+  }
+  KJ_CATCH(exception) {
+    markExceptionAsDelivered(exception);
+    return kj::mv(exception);
+  }
 }
 
 }  // namespace

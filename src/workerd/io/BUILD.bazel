@@ -610,6 +610,14 @@ kj_test(
 )
 
 kj_test(
+    src = "worker-entrypoint-test.c++",
+    deps = [
+        ":worker-entrypoint",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "hibernation-manager-test.c++",
     deps = [
         ":io",
