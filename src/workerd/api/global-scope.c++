@@ -114,7 +114,10 @@ jsg::Promise<jsg::Value> AccessContext::getIdentity(jsg::Lock& js,
   // embedder-supplied subrequest channel. If no identity service channel is available for this
   // request (e.g. service-token auth), there is no identity to fetch, so resolve to `undefined`.
   // Otherwise the binding worker's result (or error) propagates to the caller unchanged.
+  auto& context = IoContext::current();
+  auto span = context.makeTraceSpan("access_get_identity"_kjc);
   KJ_IF_SOME(channel, info->getIdentityServiceChannel()) {
+    span.setTag("access.has_identity_service"_kjc, true);
     auto fetcher =
         js.alloc<Fetcher>(channel, Fetcher::RequiresHostAndProtocol::NO, true /* isInHouse */);
     auto rpcProp = JSG_REQUIRE_NONNULL(fetcher->getRpcMethodInternal(js, kj::str("getIdentity")),
@@ -128,8 +131,9 @@ jsg::Promise<jsg::Value> AccessContext::getIdentity(jsg::Lock& js,
     // via a resolver so we're independent of the `unwrapCustomThenables` compat flag.
     auto paf = js.newPromiseAndResolver<jsg::Value>();
     paf.resolver.resolve(js, getIdentityFn(js));
-    return kj::mv(paf.promise);
+    return context.attachSpans(js, kj::mv(paf.promise), kj::mv(span));
   }
+  span.setTag("access.has_identity_service"_kjc, false);
   return js.resolvedPromise(jsg::Value(js.v8Isolate, v8::Undefined(js.v8Isolate)));
 }
 
