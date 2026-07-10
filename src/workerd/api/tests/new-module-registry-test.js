@@ -15,6 +15,7 @@ import { default as fs } from 'node:fs';
 import { Buffer } from 'buffer'; // Intentionally omit the 'node:' prefix
 import { foo as foo2, default as def2 } from 'bar';
 import { createRequire } from 'module'; // Intentionally omit the 'node:' prefix
+import { default as processStatic } from 'node:process';
 
 import * as workers from 'cloudflare:workers';
 strictEqual(typeof workers, 'object');
@@ -457,6 +458,36 @@ export const createRequireFromEval = {
 
     const util = exports.getUtil();
     ok(util.promisify, 'node:util should have promisify');
+  },
+};
+
+// Regression test: `node:process` (and bare `process`) is redirected to an
+// internal module (node-internal:public_process / legacy_process) that only
+// resolves in the builtin bucket. The static-import and require() paths force a
+// BUILTIN_ONLY resolve context for the redirect, but the dynamic-import path
+// previously derived its resolve context type from the *referrer* (a bundle
+// module), so `await import('node:process')` failed with
+// "Module not found: node-internal:public_process". This pins all three routes
+// to the same instance so the dynamic path can't silently regress again.
+// See maybeRedirectNodeProcess + dynamicResolve in jsg/modules-new.c++.
+export const processRedirectAcrossResolutionRoutes = {
+  async test() {
+    const myRequire = createRequire(import.meta.url);
+
+    // Static import (the branch that already worked).
+    ok(processStatic, 'node:process default export should exist');
+    strictEqual(typeof processStatic.nextTick, 'function');
+
+    // Dynamic import, both prefixed and bare. This is the branch that used to
+    // throw "Module not found: node-internal:public_process".
+    const viaNode = await import('node:process');
+    const viaBare = await import('process');
+    strictEqual(typeof viaNode.default.nextTick, 'function');
+
+    // Every route redirects to the same single internal process instance.
+    strictEqual(viaNode.default, viaBare.default);
+    strictEqual(viaNode.default, processStatic);
+    strictEqual(myRequire('node:process'), processStatic);
   },
 };
 

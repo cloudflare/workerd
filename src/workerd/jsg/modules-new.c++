@@ -448,6 +448,31 @@ class IsolateModuleRegistry final {
       return found.key.getHandle(js);
     }
 
+    // Nothing resolved it through the ordinary bundle/builtin search — e.g. no
+    // worker bundle module was registered under this exact specifier to shadow a
+    // built-in. node:process is special: unlike other built-ins, it has no direct
+    // registration of its own. It must be redirected to one of two internal
+    // implementations selected by the enable_nodejs_process_v2 compat flag. We only
+    // apply that redirect here, as a last resort, so that a worker bundle module
+    // that intentionally shadows "node:process" (exactly as it could for any other
+    // built-in) gets first crack at resolving it above.
+    KJ_IF_SOME(processUrl, maybeRedirectNodeProcess(js, context.normalizedSpecifier.getHref())) {
+      auto processSpec = kj::str(processUrl.getHref());
+      ResolveContext processContext = {
+        .type = ResolveContext::Type::BUILTIN_ONLY,
+        .source = context.source,
+        .normalizedSpecifier = processUrl,
+        .referrerNormalizedSpecifier = context.referrerNormalizedSpecifier,
+        .rawSpecifier = processSpec.asPtr(),
+      };
+      KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(processContext)) {
+        return found.key.getHandle(js);
+      }
+      KJ_IF_SOME(found, resolveWithCaching(js, processContext)) {
+        return found.key.getHandle(js);
+      }
+    }
+
     // Nothing found? Aw... fail!
     JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", context.normalizedSpecifier.getHref()));
   }
@@ -482,8 +507,8 @@ class IsolateModuleRegistry final {
           TypeError, kj::str("Referring module not found in the registry: ", referrer.getHref()));
 
       // Now that we know the referrer module, we can set the context for the
-      // next resolve. In particular, the "type" of the context is determine
-      // by the type of the referring module.
+      // next resolve. The "type" of the context is determined by the type of
+      // the referring module.
       ResolveContext context = {
         .type = moduleTypeToResolveContextType(referring.module.type()),
         .source = ResolveContext::Source::DYNAMIC_IMPORT,
@@ -551,6 +576,31 @@ class IsolateModuleRegistry final {
       // No? That's OK, let's look it up.
       KJ_IF_SOME(found, resolveWithCaching(js, context)) {
         return handleFoundModule(found);
+      }
+
+      // Nothing resolved it through the ordinary bundle/builtin search — e.g. no
+      // worker bundle module was registered under this exact specifier to shadow a
+      // built-in. node:process is special: unlike other built-ins, it has no direct
+      // registration of its own. It must be redirected to one of two internal
+      // implementations selected by the enable_nodejs_process_v2 compat flag. We only
+      // apply that redirect here, as a last resort, so that a worker bundle module
+      // that intentionally shadows "node:process" gets first crack at resolving it
+      // above.
+      KJ_IF_SOME(processUrl, maybeRedirectNodeProcess(js, normalizedSpecifier.getHref())) {
+        auto processSpec = kj::str(processUrl.getHref());
+        ResolveContext processContext = {
+          .type = ResolveContext::Type::BUILTIN_ONLY,
+          .source = ResolveContext::Source::DYNAMIC_IMPORT,
+          .normalizedSpecifier = processUrl,
+          .referrerNormalizedSpecifier = referrer,
+          .rawSpecifier = processSpec.asPtr(),
+        };
+        KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(processContext)) {
+          return handleFoundModule(found);
+        }
+        KJ_IF_SOME(found, resolveWithCaching(js, processContext)) {
+          return handleFoundModule(found);
+        }
       }
 
       // Nothing found? Aw... fail!
@@ -717,17 +767,6 @@ class IsolateModuleRegistry final {
     };
 
     return js.tryCatch([&]() -> v8::MaybeLocal<v8::Value> {
-      KJ_IF_SOME(processUrl, maybeRedirectNodeProcess(js, context.normalizedSpecifier.getHref())) {
-        ResolveContext newContext{
-          .type = ResolveContext::Type::BUILTIN_ONLY,
-          .source = context.source,
-          .normalizedSpecifier = processUrl,
-          .referrerNormalizedSpecifier = context.referrerNormalizedSpecifier,
-          .rawSpecifier = context.rawSpecifier,
-        };
-        return require(js, newContext, option);
-      }
-
       // Do we already have a cached module for this context?
       KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
         // Extract module handle and Module& before calling evaluate, since
@@ -743,6 +782,25 @@ class IsolateModuleRegistry final {
         auto& foundModuleDef = found.module;
         return evaluate(js, foundModule, foundModuleDef, context.normalizedSpecifier, getObserver(),
             inner.getEvaluator(), option);
+      }
+
+      // Nothing resolved it through the ordinary bundle/builtin search — e.g. no
+      // worker bundle module was registered under this exact specifier to shadow a
+      // built-in. node:process is special: unlike other built-ins, it has no direct
+      // registration of its own. It must be redirected to one of two internal
+      // implementations selected by the enable_nodejs_process_v2 compat flag. We only
+      // apply that redirect here, as a last resort, so that a worker bundle module
+      // that intentionally shadows "node:process" gets first crack at resolving it
+      // above.
+      KJ_IF_SOME(processUrl, maybeRedirectNodeProcess(js, context.normalizedSpecifier.getHref())) {
+        ResolveContext newContext{
+          .type = ResolveContext::Type::BUILTIN_ONLY,
+          .source = context.source,
+          .normalizedSpecifier = processUrl,
+          .referrerNormalizedSpecifier = context.referrerNormalizedSpecifier,
+          .rawSpecifier = context.rawSpecifier,
+        };
+        return require(js, newContext, option);
       }
 
       if ((option & RequireOption::RETURN_EMPTY) == RequireOption::RETURN_EMPTY) {
@@ -991,12 +1049,11 @@ v8::MaybeLocal<v8::Promise> dynamicImportModuleCallback(v8::Local<v8::Context> c
         }
       }
 
-      // Handle process module redirection based on enable_nodejs_process_v2 flag
-      KJ_IF_SOME(processUrl, maybeRedirectNodeProcess(js, spec.asPtr())) {
-        auto processSpec = kj::str(processUrl.getHref());
-        return registry.dynamicResolve(
-            js, processUrl.clone(), kj::mv(referrer), processSpec, isSourcePhase, importType);
-      }
+      // Note: node:process has no direct registration of its own in the builtin
+      // bundle; registry.dynamicResolve() below falls back to redirecting it to
+      // one of two internal implementations (selected by the
+      // enable_nodejs_process_v2 compat flag) only if nothing else — e.g. a worker
+      // bundle module intentionally shadowing "node:process" — resolves it first.
 
       KJ_IF_SOME(url, referrer.tryResolve(spec.asPtr())) {
         return registry.dynamicResolve(js, url.clone(Url::EquivalenceOption::NORMALIZE_PATH),
@@ -1098,41 +1155,11 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
       }
     }
 
-    // Handle process module redirection based on enable_nodejs_process_v2 flag
-    if constexpr (!IsSourcePhase) {
-      KJ_IF_SOME(processUrl, maybeRedirectNodeProcess(js, spec.asPtr())) {
-        auto processSpec = kj::str(processUrl.getHref());
-        ResolveContext resolveContext = {
-          .type = ResolveContext::Type::BUILTIN_ONLY,
-          .source = ResolveContext::Source::STATIC_IMPORT,
-          .normalizedSpecifier = processUrl,
-          .referrerNormalizedSpecifier = referrerUrl,
-          .rawSpecifier = processSpec.asPtr(),
-        };
-        auto maybeResolved = registry.resolve(js, resolveContext);
-        v8::Local<v8::Module> resolved;
-        if (!maybeResolved.ToLocal(&resolved)) {
-          return {};
-        }
-        if (resolved->GetStatus() == v8::Module::kErrored) {
-          js.throwException(JsValue(resolved->GetException()));
-          return {};
-        }
-        if (resolved->GetStatus() == v8::Module::kEvaluating) {
-          // A circular dependency is a module-graph/loading error, not a type
-          // error, so this is an Error (matching the require path and Node's
-          // ERR_REQUIRE_CYCLE_MODULE which extends Error).
-          js.throwException(
-              js.error(kj::str("Circular dependency when resolving module: ", spec)));
-          return {};
-        }
-        // Validate import type attribute against the resolved module's content type.
-        KJ_IF_SOME(entry, registry.lookup(js, resolved)) {
-          validateImportType(js, importType, entry.module, spec);
-        }
-        return resolved;
-      }
-    }
+    // Note: node:process has no direct registration of its own in the builtin
+    // bundle; registry.resolve() below falls back to redirecting it to one of two
+    // internal implementations (selected by the enable_nodejs_process_v2 compat
+    // flag) only if nothing else — e.g. a worker bundle module intentionally
+    // shadowing "node:process" — resolves it first.
 
     KJ_IF_SOME(url, referrerUrl.tryResolve(spec)) {
       // Make sure that percent-encoding in the path is normalized so we can match correctly.
