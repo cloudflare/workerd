@@ -271,14 +271,12 @@ class MlDsaKey final: public CryptoKey::Impl {
     if (otherMlDsa == nullptr) return false;
     if (keyType != otherMlDsa->keyType) return false;
     if (keyType == KeyType::PUBLIC) {
-      return publicKeyBytes.size() == otherMlDsa->publicKeyBytes.size() &&
-          CRYPTO_memcmp(publicKeyBytes.begin(), otherMlDsa->publicKeyBytes.begin(),
-              publicKeyBytes.size()) == 0;
+      return CRYPTO_memcmp(publicKeyBytes.begin(), otherMlDsa->publicKeyBytes.begin(),
+                 publicKeyBytes.size()) == 0;
     } else {
       auto& thisSeed = KJ_ASSERT_NONNULL(seed);
       auto& otherSeed = KJ_ASSERT_NONNULL(otherMlDsa->seed);
-      return thisSeed.size() == otherSeed.size() &&
-          CRYPTO_memcmp(thisSeed.begin(), otherSeed.begin(), thisSeed.size()) == 0;
+      return CRYPTO_memcmp(thisSeed.begin(), otherSeed.begin(), thisSeed.size()) == 0;
     }
   }
 

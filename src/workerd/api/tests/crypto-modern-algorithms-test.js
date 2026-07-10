@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { rejects, strictEqual } from 'node:assert';
+import { rejects, strictEqual, throws } from 'node:assert';
 
 export const supportsEcdhP521ByteRoundedDeriveBits = {
   async test() {
@@ -26,6 +26,16 @@ export const supportsEcdhP521ByteRoundedDeriveBits = {
     strictEqual(
       crypto.subtle.constructor.supports('deriveBits', algorithm, 529),
       false
+    );
+
+    throws(
+      () => crypto.subtle.constructor.supports('deriveBits', algorithm, -1),
+      TypeError
+    );
+    throws(
+      () =>
+        crypto.subtle.constructor.supports('deriveBits', algorithm, 2 ** 32),
+      TypeError
     );
   },
 };

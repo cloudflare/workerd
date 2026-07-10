@@ -47,22 +47,6 @@ auto lookupAesGcmType(uint bitLength) {
   }
 }
 
-// Ensure the tagLength passed to the AES-GCM algorithm is one of the allowed bit lengths.
-void validateAesGcmTagLength(int tagLength) {
-  switch (tagLength) {
-    case 32:
-    case 64:
-    case 96:
-    case 104:
-    case 112:
-    case 120:
-    case 128:
-      break;
-    default:
-      JSG_FAIL_REQUIRE(DOMOperationError, "Invalid AES-GCM tag length ", tagLength, ".");
-  }
-}
-
 int decryptFinalHelper(kj::StringPtr algorithm,
     size_t inputLength,
     size_t outputLength,

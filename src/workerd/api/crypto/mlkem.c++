@@ -205,14 +205,12 @@ class MlKemKey final: public CryptoKey::Impl {
     if (otherMlKem == nullptr) return false;
     if (keyType != otherMlKem->keyType) return false;
     if (keyType == KeyType::PUBLIC) {
-      return publicKeyBytes.size() == otherMlKem->publicKeyBytes.size() &&
-          CRYPTO_memcmp(publicKeyBytes.begin(), otherMlKem->publicKeyBytes.begin(),
-              publicKeyBytes.size()) == 0;
+      return CRYPTO_memcmp(publicKeyBytes.begin(), otherMlKem->publicKeyBytes.begin(),
+                 publicKeyBytes.size()) == 0;
     } else {
       auto& thisSeed = KJ_ASSERT_NONNULL(seed);
       auto& otherSeed = KJ_ASSERT_NONNULL(otherMlKem->seed);
-      return thisSeed.size() == otherSeed.size() &&
-          CRYPTO_memcmp(thisSeed.begin(), otherSeed.begin(), thisSeed.size()) == 0;
+      return CRYPTO_memcmp(thisSeed.begin(), otherSeed.begin(), thisSeed.size()) == 0;
     }
   }
 

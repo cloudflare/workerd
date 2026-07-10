@@ -314,21 +314,6 @@ void validateAesKeyLength(int length) {
       "AES key length must be 128, 192, or 256 bits.");
 }
 
-void validateAesGcmTagLength(int tagLength) {
-  switch (tagLength) {
-    case 32:
-    case 64:
-    case 96:
-    case 104:
-    case 112:
-    case 120:
-    case 128:
-      return;
-    default:
-      JSG_FAIL_REQUIRE(DOMOperationError, "Invalid AES-GCM tag length ", tagLength, ".");
-  }
-}
-
 void validateNamedCurve(kj::StringPtr namedCurve) {
   JSG_REQUIRE(namedCurve == "P-256" || namedCurve == "P-384" || namedCurve == "P-521",
       DOMNotSupportedError, "Unsupported namedCurve \"", namedCurve, "\".");
@@ -1110,6 +1095,13 @@ bool SubtleCrypto::supports(jsg::Lock& js,
     const jsg::TypeHandler<kj::OneOf<kj::String, DeriveKeyAlgorithm>>& deriveKeyAlgorithmHandler,
     const jsg::TypeHandler<kj::OneOf<kj::String, ImportKeyAlgorithm>>& importKeyAlgorithmHandler) {
   KJ_IF_SOME(parsedOperation, parseSubtleOperation(operation)) {
+    kj::Maybe<uint32_t> parsedLength = kj::none;
+    KJ_IF_SOME(thirdArgument, lengthOrAdditionalAlgorithm) {
+      if (!isAdditionalAlgorithmArgument(thirdArgument)) {
+        parsedLength = readSupportsLength(js, thirdArgument);
+      }
+    }
+
     return js.tryCatch([&]() -> bool {
       auto checkSupportForAlgorithm = [&](SubtleOperation checkedOperation,
                                           v8::Local<v8::Value> algorithmValue,
@@ -1285,11 +1277,7 @@ bool SubtleCrypto::supports(jsg::Lock& js,
         }
       }
 
-      kj::Maybe<uint32_t> maybeLength = kj::none;
-      KJ_IF_SOME(thirdArgument, lengthOrAdditionalAlgorithm) {
-        maybeLength = readSupportsLength(js, thirdArgument);
-      }
-      return checkSupportForAlgorithm(parsedOperation, algorithm, maybeLength);
+      return checkSupportForAlgorithm(parsedOperation, algorithm, parsedLength);
     }, [](jsg::Value&&) { return false; });
   }
 
