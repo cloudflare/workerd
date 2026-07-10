@@ -2039,6 +2039,14 @@
       "created_at": "2026-07-09T15:07:34Z",
       "repoId": 537085161,
       "pullRequestNo": 6872
+    },
+    {
+      "name": "dbezhetskov",
+      "id": 5621716,
+      "comment_id": 4934534574,
+      "created_at": "2026-07-10T10:47:49Z",
+      "repoId": 537085161,
+      "pullRequestNo": 6874
     }
   ]
 }
