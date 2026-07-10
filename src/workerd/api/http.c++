@@ -2093,11 +2093,7 @@ rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(
   // here -- otherwise they'll end up logged as "uncaught exceptions" even if they were, in fact,
   // caught elsewhere.
   ioContext.addTask(worker->customEvent(kj::mv(event)).attach(kj::mv(worker)).then([](auto&&) {
-  }, [](kj::Exception&& e) {
-    // This gets reached in all 5 cases – this could be a place for logging but could lead to over-reporting
-    KJ_LOG(WARNING, "exception trap here", e.getDescription());
-
-  }));
+  }, [](kj::Exception&&) {}));
 
   // (Don't extend `path` because we're the root.)
 

@@ -2,12 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 import assert from 'node:assert';
-import { waitUntil } from 'cloudflare:workers';
-import {
-  WorkerEntrypoint,
-  DurableObject,
-  RpcTarget,
-} from 'cloudflare:workers';
+import { WorkerEntrypoint, DurableObject, RpcTarget } from 'cloudflare:workers';
 
 export class MyService extends WorkerEntrypoint {
   // Define a property to test behavior of property accessors.
@@ -68,8 +63,6 @@ export class MyService extends WorkerEntrypoint {
     // Leak the input stub
     stub.dup();
 
-    let ctx = this.ctx;
-
     // Return something that contains stubs, holding the context open.
     return {
       noop() {},
@@ -87,8 +80,6 @@ export class MyService extends WorkerEntrypoint {
 }
 
 export class MyActor extends DurableObject {
-  #counter = 0;
-
   async functionProperty() {}
 
   constructor(ctx, env) {
@@ -186,7 +177,7 @@ export default {
 
 export let namedServiceBinding = {
   async test(controller, env, ctx) {
-    // A stateless entryponit method that never returns should fail due to PendingEvent tracking.
+    // A stateless entrypoint method that never returns should fail due to PendingEvent tracking.
     await assert.rejects(() => env.MyService.neverReturn(), {
       name: 'Error',
       message:
