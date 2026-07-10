@@ -3,6 +3,8 @@
 #include <openssl/bytestring.h>
 #include <openssl/mldsa.h>
 
+#include <algorithm>
+
 namespace workerd::api {
 namespace {
 
@@ -191,6 +193,9 @@ class MlDsaKey final: public CryptoKey::Impl {
     KJ_IF_SOME(s, seed) {
       OPENSSL_cleanse(s.begin(), s.size());
     }
+    KJ_IF_SOME(k, privateKey) {
+      OPENSSL_cleanse(&k, sizeof(k));
+    }
   }
 
   jsg::JsArrayBuffer sign(jsg::Lock& js,
@@ -294,12 +299,9 @@ class MlDsaKey final: public CryptoKey::Impl {
     JSG_REQUIRE(
         keyType == KeyType::PRIVATE, DOMInvalidAccessError, "getPublicKey requires a private key.");
 
-    // Parse the stored public key bytes into a PublicKey struct
     typename P::PublicKey pk;
-    CBS cbs;
-    CBS_init(&cbs, publicKeyBytes.begin(), publicKeyBytes.size());
-    JSG_REQUIRE(1 == P::parsePublicKey(&pk, &cbs), InternalDOMOperationError,
-        "Failed to parse public key from private key.");
+    JSG_REQUIRE(1 == P::publicFromPrivate(&pk, &KJ_ASSERT_NONNULL(privateKey)),
+        InternalDOMOperationError, "Failed to derive ", algorithmName, " public key.");
 
     return kj::heap<MlDsaKey<P>>(
         kj::mv(pk), kj::heapArray<kj::byte>(publicKeyBytes), algorithmName, true, usages);
@@ -317,17 +319,15 @@ class MlDsaKey final: public CryptoKey::Impl {
     JSG_REQUIRE(1 == P::generateKey(encodedPublicKey, seedBuf, &sk), DOMOperationError,
         "ML-DSA key generation failed", tryDescribeOpensslErrors());
     KJ_DEFER(OPENSSL_cleanse(seedBuf, sizeof(seedBuf)));
+    KJ_DEFER(OPENSSL_cleanse(&sk, sizeof(sk)));
 
     auto pkBytes = kj::heapArray<kj::byte>(encodedPublicKey, P::PUBLIC_KEY_BYTES);
     auto pkBytesCopy = kj::heapArray<kj::byte>(encodedPublicKey, P::PUBLIC_KEY_BYTES);
     auto seedArray = kj::heapArray<kj::byte>(seedBuf, MLDSA_SEED_BYTES);
 
-    // Parse public key for the public CryptoKey
     typename P::PublicKey pk;
-    CBS cbs;
-    CBS_init(&cbs, encodedPublicKey, P::PUBLIC_KEY_BYTES);
-    JSG_REQUIRE(1 == P::parsePublicKey(&pk, &cbs), InternalDOMOperationError,
-        "Failed to parse generated ML-DSA public key");
+    JSG_REQUIRE(1 == P::publicFromPrivate(&pk, &sk), InternalDOMOperationError, "Failed to derive ",
+        normalizedName, " public key");
 
     auto privateKey = js.alloc<CryptoKey>(kj::heap<MlDsaKey<P>>(kj::mv(seedArray), kj::mv(sk),
         kj::mv(pkBytesCopy), normalizedName, extractable, privateKeyUsages));
@@ -366,6 +366,7 @@ class MlDsaKey final: public CryptoKey::Impl {
     typename P::PrivateKey sk;
     JSG_REQUIRE(1 == P::privateKeyFromSeed(&sk, keyData.begin(), keyData.size()), DOMDataError,
         "Failed to regenerate ", normalizedName, " private key from seed");
+    KJ_DEFER(OPENSSL_cleanse(&sk, sizeof(sk)));
 
     // Derive public key bytes for getPublicKey/export
     typename P::PublicKey pk;
@@ -495,6 +496,7 @@ class MlDsaKey final: public CryptoKey::Impl {
     typename P::PrivateKey sk;
     JSG_REQUIRE(1 == P::privateKeyFromSeed(&sk, seedArray.begin(), seedArray.size()), DOMDataError,
         "Failed to regenerate ", normalizedName, " private key from PKCS8 seed.");
+    KJ_DEFER(OPENSSL_cleanse(&sk, sizeof(sk)));
 
     // Derive public key
     typename P::PublicKey pk;
@@ -519,14 +521,31 @@ class MlDsaKey final: public CryptoKey::Impl {
     JSG_REQUIRE(jwk.kty == "AKP", DOMDataError, "JWK \"kty\" field must be \"AKP\" for ",
         normalizedName, ".");
 
-    KJ_IF_SOME(alg, jwk.alg) {
-      JSG_REQUIRE(alg == normalizedName, DOMDataError, "JWK \"alg\" field \"", alg,
-          "\" does not match \"", normalizedName, "\".");
+    auto& alg = JSG_REQUIRE_NONNULL(
+        jwk.alg, DOMDataError, "JWK \"alg\" field is required for ", normalizedName, ".");
+    JSG_REQUIRE(alg == normalizedName, DOMDataError, "JWK \"alg\" field \"", alg,
+        "\" does not match \"", normalizedName, "\".");
+
+    if (usages.size() != 0) {
+      KJ_IF_SOME(use, jwk.use) {
+        JSG_REQUIRE(use == "sig", DOMDataError, "JWK \"use\" field must be \"sig\" for ",
+            normalizedName, ".");
+      }
     }
 
-    KJ_IF_SOME(use, jwk.use) {
-      JSG_REQUIRE(use == "sig", DOMDataError, "JWK \"use\" field must be \"sig\" for ",
-          normalizedName, ".");
+    KJ_IF_SOME(ops, jwk.key_ops) {
+      std::sort(ops.begin(), ops.end());
+      auto duplicate = std::adjacent_find(ops.begin(), ops.end());
+      JSG_REQUIRE(duplicate == ops.end(), DOMDataError, "JWK contains duplicate value \"",
+          *duplicate, "\", in \"key_ops\".");
+
+      for (const auto& usage: CryptoKeyUsageSet::singletons()) {
+        if (usage <= usages) {
+          JSG_REQUIRE(std::any_of(ops.begin(), ops.end(),
+                          [&](const auto& op) { return op == usage.name(); }),
+              DOMDataError, "\"jwk\" key missing usage \"", usage.name(), "\", in \"key_ops\".");
+        }
+      }
     }
 
     KJ_IF_SOME(ext, jwk.ext) {
@@ -548,6 +567,7 @@ class MlDsaKey final: public CryptoKey::Impl {
       typename P::PrivateKey sk;
       JSG_REQUIRE(1 == P::privateKeyFromSeed(&sk, seedBytes.begin(), seedBytes.size()),
           DOMDataError, "Failed to regenerate ", normalizedName, " private key from JWK seed.");
+      KJ_DEFER(OPENSSL_cleanse(&sk, sizeof(sk)));
 
       // Derive public key
       typename P::PublicKey pk;
@@ -600,7 +620,8 @@ class MlDsaKey final: public CryptoKey::Impl {
   KeyType keyType;
   kj::StringPtr algorithmName;
 
-  // Public key data (present for both public and private keys)
+  // Public key data. The parsed public key is present only for public CryptoKeys; private keys keep
+  // publicKeyBytes for export and getPublicKey().
   kj::Maybe<typename P::PublicKey> publicKey;
   kj::Array<kj::byte> publicKeyBytes;
 

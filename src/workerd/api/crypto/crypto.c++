@@ -352,7 +352,12 @@ uint32_t getEcdhMaxDeriveBits(jsg::Lock& js, const CryptoKey& publicKey) {
   if (namedCurve == "P-256") return 256;
   if (namedCurve == "P-384") return 384;
   KJ_ASSERT(namedCurve == "P-521", namedCurve);
-  return 521;
+
+  // WebCrypto compares `length` to the bit length of the derived secret byte sequence:
+  // https://www.w3.org/TR/WebCryptoAPI/#ecdh-operations
+  // P-521's field element is encoded in ceil(521 / 8) = 66 bytes, so the returned secret has
+  // 528 bits available for truncation.
+  return 528;
 }
 
 void validateGenerateKeyAlgorithm(jsg::Lock& js,

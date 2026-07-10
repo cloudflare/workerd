@@ -128,6 +128,9 @@ class MlKemKey final: public CryptoKey::Impl {
     KJ_IF_SOME(s, seed) {
       OPENSSL_cleanse(s.begin(), s.size());
     }
+    KJ_IF_SOME(k, privateKey) {
+      OPENSSL_cleanse(&k, sizeof(k));
+    }
   }
 
   std::pair<jsg::JsArrayBuffer, jsg::JsArrayBuffer> encapsulate(jsg::Lock& js) const override {
@@ -230,12 +233,8 @@ class MlKemKey final: public CryptoKey::Impl {
     JSG_REQUIRE(
         keyType == KeyType::PRIVATE, DOMInvalidAccessError, "getPublicKey requires a private key.");
 
-    // Parse the stored public key bytes into a PublicKey struct
     typename P::PublicKey pk;
-    CBS cbs;
-    CBS_init(&cbs, publicKeyBytes.begin(), publicKeyBytes.size());
-    JSG_REQUIRE(1 == P::parsePublicKey(&pk, &cbs), InternalDOMOperationError,
-        "Failed to parse public key from private key.");
+    P::publicFromPrivate(&pk, &KJ_ASSERT_NONNULL(privateKey));
 
     return kj::heap<MlKemKey<P>>(
         kj::mv(pk), kj::heapArray<kj::byte>(publicKeyBytes), algorithmName, true, usages);
@@ -252,17 +251,14 @@ class MlKemKey final: public CryptoKey::Impl {
     typename P::PrivateKey sk;
     P::generateKey(encodedPublicKey, seedBuf, &sk);
     KJ_DEFER(OPENSSL_cleanse(seedBuf, sizeof(seedBuf)));
+    KJ_DEFER(OPENSSL_cleanse(&sk, sizeof(sk)));
 
     auto pkBytes = kj::heapArray<kj::byte>(encodedPublicKey, P::PUBLIC_KEY_BYTES);
     auto pkBytesCopy = kj::heapArray<kj::byte>(encodedPublicKey, P::PUBLIC_KEY_BYTES);
     auto seedArray = kj::heapArray<kj::byte>(seedBuf, MLKEM_SEED_BYTES);
 
-    // Parse public key for the public CryptoKey
     typename P::PublicKey pk;
-    CBS cbs;
-    CBS_init(&cbs, encodedPublicKey, P::PUBLIC_KEY_BYTES);
-    JSG_REQUIRE(1 == P::parsePublicKey(&pk, &cbs), InternalDOMOperationError,
-        "Failed to parse generated ML-KEM public key");
+    P::publicFromPrivate(&pk, &sk);
 
     auto privateKey = js.alloc<CryptoKey>(kj::heap<MlKemKey<P>>(kj::mv(seedArray), kj::mv(sk),
         kj::mv(pkBytesCopy), normalizedName, extractable, privateKeyUsages));
@@ -301,6 +297,7 @@ class MlKemKey final: public CryptoKey::Impl {
     typename P::PrivateKey sk;
     JSG_REQUIRE(1 == P::privateKeyFromSeed(&sk, keyData.begin(), keyData.size()), DOMDataError,
         "Failed to regenerate ", normalizedName, " private key from seed");
+    KJ_DEFER(OPENSSL_cleanse(&sk, sizeof(sk)));
 
     // Derive public key bytes for export
     typename P::PublicKey pk;
@@ -427,6 +424,7 @@ class MlKemKey final: public CryptoKey::Impl {
     typename P::PrivateKey sk;
     JSG_REQUIRE(1 == P::privateKeyFromSeed(&sk, seedArray.begin(), seedArray.size()), DOMDataError,
         "Failed to regenerate ", normalizedName, " private key from PKCS8 seed.");
+    KJ_DEFER(OPENSSL_cleanse(&sk, sizeof(sk)));
 
     // Derive public key
     typename P::PublicKey pk;
@@ -494,6 +492,7 @@ class MlKemKey final: public CryptoKey::Impl {
       typename P::PrivateKey sk;
       JSG_REQUIRE(1 == P::privateKeyFromSeed(&sk, seedBytes.begin(), seedBytes.size()),
           DOMDataError, "Failed to regenerate ", normalizedName, " private key from JWK seed.");
+      KJ_DEFER(OPENSSL_cleanse(&sk, sizeof(sk)));
 
       typename P::PublicKey pk;
       P::publicFromPrivate(&pk, &sk);
@@ -542,7 +541,8 @@ class MlKemKey final: public CryptoKey::Impl {
   KeyType keyType;
   kj::StringPtr algorithmName;
 
-  // Public key data (present for both public and private keys)
+  // Public key data. The parsed public key is present only for public CryptoKeys; private keys keep
+  // publicKeyBytes for export and getPublicKey().
   kj::Maybe<typename P::PublicKey> publicKey;
   kj::Array<kj::byte> publicKeyBytes;
 
