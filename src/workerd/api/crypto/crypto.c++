@@ -703,12 +703,12 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::digest(
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
   return js.evalNow([&] {
-    auto ptr = nonNullBytes(data.asArrayPtr());
     auto type = lookupDigestAlgorithm(algorithm.name).second;
 
     auto digestCtx = kj::disposeWith<EVP_MD_CTX_free>(EVP_MD_CTX_new());
     KJ_ASSERT(digestCtx.get() != nullptr);
 
+    auto ptr = nonNullBytes(data.asArrayPtr());
     OSSLCALL(EVP_DigestInit_ex(digestCtx.get(), type, nullptr));
     OSSLCALL(EVP_DigestUpdate(digestCtx.get(), ptr.begin(), ptr.size()));
 
