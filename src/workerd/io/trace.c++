@@ -399,6 +399,10 @@ ConnectEventInfo ConnectEventInfo::clone() const {
   return ConnectEventInfo();
 }
 
+kj::String ConnectEventInfo::toString() const {
+  return kj::str("ConnectEventInfo");
+}
+
 FetchEventInfo::FetchEventInfo(
     kj::HttpMethod method, kj::String url, kj::String cfJson, kj::Array<Header> headers)
     : method(method),
@@ -492,6 +496,10 @@ ScheduledEventInfo ScheduledEventInfo::clone() const {
   return ScheduledEventInfo(scheduledTime, kj::str(cron));
 }
 
+kj::String ScheduledEventInfo::toString() const {
+  return kj::str("ScheduledEventInfo");
+}
+
 AlarmEventInfo::AlarmEventInfo(kj::Date scheduledTime): scheduledTime(scheduledTime) {}
 
 AlarmEventInfo::AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader)
@@ -503,6 +511,10 @@ void AlarmEventInfo::copyTo(rpc::Trace::AlarmEventInfo::Builder builder) const {
 
 AlarmEventInfo AlarmEventInfo::clone() const {
   return AlarmEventInfo(scheduledTime);
+}
+
+kj::String AlarmEventInfo::toString() const {
+  return kj::str("AlarmEventInfo");
 }
 
 QueueEventInfo::QueueEventInfo(kj::String queueName, uint32_t batchSize)
@@ -520,6 +532,10 @@ void QueueEventInfo::copyTo(rpc::Trace::QueueEventInfo::Builder builder) const {
 
 QueueEventInfo QueueEventInfo::clone() const {
   return QueueEventInfo(kj::str(queueName), batchSize);
+}
+
+kj::String QueueEventInfo::toString() const {
+  return kj::str("QueueEventInfo");
 }
 
 EmailEventInfo::EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize)
@@ -540,6 +556,10 @@ void EmailEventInfo::copyTo(rpc::Trace::EmailEventInfo::Builder builder) const {
 
 EmailEventInfo EmailEventInfo::clone() const {
   return EmailEventInfo(kj::str(mailFrom), kj::str(rcptTo), rawSize);
+}
+
+kj::String EmailEventInfo::toString() const {
+  return kj::str("EmailEventInfo");
 }
 
 namespace {
@@ -569,6 +589,10 @@ void TraceEventInfo::copyTo(rpc::Trace::TraceEventInfo::Builder builder) const {
 
 TraceEventInfo TraceEventInfo::clone() const {
   return TraceEventInfo(KJ_MAP(item, traces) { return item.clone(); });
+}
+
+kj::String TraceEventInfo::toString() const {
+  return kj::str("TraceEventInfo");
 }
 
 TracePreview::TracePreview(kj::String id, kj::String slug, kj::String name)
@@ -718,6 +742,14 @@ HibernatableWebSocketEventInfo::Type HibernatableWebSocketEventInfo::readFrom(
     }
   }
   KJ_UNREACHABLE;
+}
+
+kj::String HibernatableWebSocketEventInfo::toString() const {
+  return kj::str("HibernatableWebSocketEventInfo");
+}
+
+kj::String CustomEventInfo::toString() const {
+  return kj::str("CustomEventInfo");
 }
 
 FetchResponseInfo::FetchResponseInfo(uint16_t statusCode): statusCode(statusCode) {}

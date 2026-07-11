@@ -425,6 +425,7 @@ class ConnectEventInfo {
 
   void copyTo(rpc::Trace::ConnectEventInfo::Builder builder) const;
   ConnectEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes a scheduled request
@@ -440,6 +441,7 @@ struct ScheduledEventInfo final {
 
   void copyTo(rpc::Trace::ScheduledEventInfo::Builder builder) const;
   ScheduledEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes a Durable Object alarm request
@@ -454,6 +456,7 @@ struct AlarmEventInfo final {
 
   void copyTo(rpc::Trace::AlarmEventInfo::Builder builder) const;
   AlarmEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes a queue worker request
@@ -469,6 +472,7 @@ struct QueueEventInfo final {
 
   void copyTo(rpc::Trace::QueueEventInfo::Builder builder) const;
   QueueEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes an email request
@@ -485,6 +489,7 @@ struct EmailEventInfo final {
 
   void copyTo(rpc::Trace::EmailEventInfo::Builder builder) const;
   EmailEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes a buffered tail worker request
@@ -530,6 +535,7 @@ struct TraceEventInfo final {
 
   void copyTo(rpc::Trace::TraceEventInfo::Builder builder) const;
   TraceEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes a hibernatable web socket event
@@ -554,12 +560,14 @@ struct HibernatableWebSocketEventInfo final {
   void copyTo(rpc::Trace::HibernatableWebSocketEventInfo::Builder builder) const;
   HibernatableWebSocketEventInfo clone() const;
   static Type readFrom(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
+  kj::String toString() const;
 };
 
 // Describes a custom event
 struct CustomEventInfo final {
   explicit CustomEventInfo() {};
   CustomEventInfo(rpc::Trace::CustomEventInfo::Reader reader) {};
+  kj::String toString() const;
 };
 
 // Describes a fetch response
