@@ -400,6 +400,13 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
   trace->cpuTime = cpuTime;
   trace->wallTime = wallTime;
 
+  if (outcome == EventOutcome::EXCEPTION && pipelineLogLevel != PipelineLogLevel::NONE &&
+      !trace->exceededExceptionLimit && trace->exceptions.empty()) {
+    LOG_PERIODICALLY(WARNING,
+        "NOSENTRY reporting trace with exception outcome, but no actual exceptions",
+        trace->eventInfo);
+  }
+
   // Defer reporting the actual outcome event to the WorkerTracer destructor: The outcome is
   // reported when the metrics request is deallocated, but with ctx.waitUntil() there might be spans
   // continuing to exist beyond that point. By the time the WorkerTracer is deallocated, the
