@@ -319,6 +319,7 @@ wd_cc_library(
         "v8-platform-impl.h",
     ],
     deps = [
+        "//src/workerd/io",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
     ],
