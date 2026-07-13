@@ -29,7 +29,10 @@ export class D1MockDO extends DurableObject {
           return this.runQuery(query, resultsFormat);
         } catch (e) {
           // Reproduce the production behavior by catching any error and returning a V4Failure
-          return { success: false, error: String(e instanceof Error ? e.message : e) };
+          return {
+            success: false,
+            error: String(e instanceof Error ? e.message : e),
+          };
         }
       };
       return Response.json(
@@ -48,7 +51,10 @@ export class D1MockDO extends DurableObject {
         return this.runQuery(query, 'ROWS_AND_COLUMNS');
       } catch (e) {
         // Reproduce the production behavior by catching any error and returning a V4Failure
-        return { success: false, error: String(e instanceof Error ? e.message : e) };
+        return {
+          success: false,
+          error: String(e instanceof Error ? e.message : e),
+        };
       }
     });
     const failure = results.find((result) => !result.success);

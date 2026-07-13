@@ -295,23 +295,25 @@ class D1DatabaseSession {
         this.getBookmark() ?? undefined
       );
 
-      const exec = (d1BindingJsrpc
-        ? await this._queryOrThrow(
-            {
-              queries: statements.map((s) => ({
-                sql: s.statement,
-                params: s.params,
-              })),
-            },
-            span
-          )
-        : await this._sendOrThrow(
-            '/query',
-            statements.map((s) => s.statement),
-            statements.map((s) => s.params),
-            'ROWS_AND_COLUMNS',
-            span
-          )) as D1UpstreamSuccess<T>[];
+      const exec = (
+        d1BindingJsrpc
+          ? await this._queryOrThrow(
+              {
+                queries: statements.map((s) => ({
+                  sql: s.statement,
+                  params: s.params,
+                })),
+              },
+              span
+            )
+          : await this._sendOrThrow(
+              '/query',
+              statements.map((s) => s.statement),
+              statements.map((s) => s.params),
+              'ROWS_AND_COLUMNS',
+              span
+            )
+      ) as D1UpstreamSuccess<T>[];
 
       span.setAttribute(
         'cloudflare.d1.response.bookmark',

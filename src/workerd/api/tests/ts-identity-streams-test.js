@@ -744,7 +744,7 @@ export const flsUnderwriteZeroBytesThrows = {
     await rejects(
       () => writer.close(),
       (err) => {
-         ok(err instanceof RangeError);
+        ok(err instanceof RangeError);
         ok(err.message.includes('did not see all expected bytes'));
         return true;
       }

@@ -1087,8 +1087,8 @@ const allExpectedSpans = [
 ];
 
 const expectedSpans = d1BindingJsrpc
-  // The JSRPC binding path does not issue internal HTTP requests to the D1
-  // service, so it should not emit the transport-level fetch spans that the
-  // legacy path produces. The public D1 operation spans are still asserted.
-  ? allExpectedSpans.filter((span) => span.name !== 'fetch')
+  ? // The JSRPC binding path does not issue internal HTTP requests to the D1
+    // service, so it should not emit the transport-level fetch spans that the
+    // legacy path produces. The public D1 operation spans are still asserted.
+    allExpectedSpans.filter((span) => span.name !== 'fetch')
   : allExpectedSpans;

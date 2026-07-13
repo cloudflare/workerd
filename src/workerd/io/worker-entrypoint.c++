@@ -571,8 +571,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
       // exception types need no annotation. Set before exceptionToPropagate() so it survives the
       // internal-exception description rewrite; the detail serializes back across the RPC boundary.
       if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
-        exception.setDetail(
-            jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+        exception.setDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
       }
       // TODO(cleanup): We'd really like to tunnel exceptions any time a worker is calling another
       // worker, not just for actors (and W2W below), but getting that right will require cleaning

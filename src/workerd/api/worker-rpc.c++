@@ -1055,7 +1055,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
     // Try to execute the requested method.
     co_return co_await enterIsolateAndCall(callContext).catch_([this](kj::Exception&& e) {
-      maybeAddDurableObjectId(e, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
+      maybeAddDurableObjectId(
+          e, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
       if (jsg::isTunneledException(e.getDescription())) {
         // Annotate exceptions in RPC worker calls as remote exceptions.
         auto description = jsg::stripRemoteExceptionPrefix(e.getDescription());
@@ -1229,9 +1230,11 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
         // as a result of the promise being rejected). This will implicitly dispose the param
         // stubs.
       }),
-                  ctx.addFunctor([callPipelineFulfillerRef, durableObjectId = getCurrentDurableObjectId()](
+                  ctx.addFunctor(
+                      [callPipelineFulfillerRef, durableObjectId = getCurrentDurableObjectId()](
                           jsg::Lock& js, jsg::Value&& error) {
-        maybeAddDurableObjectId(js, error, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
+        maybeAddDurableObjectId(
+            js, error, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
         // If we set up a `callPipeline` early, we have to make sure it propagates the error.
         // (Otherwise we get a PromiseFulfiller error instead, which is pretty useless...)
         KJ_IF_SOME(cpf, callPipelineFulfillerRef) {

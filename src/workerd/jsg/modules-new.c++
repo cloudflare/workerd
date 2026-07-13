@@ -1188,8 +1188,7 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
         // A circular dependency is a module-graph/loading error, not a type
         // error, so this is an Error (matching the require path and Node's
         // ERR_REQUIRE_CYCLE_MODULE which extends Error).
-        js.throwException(
-            js.error(kj::str("Circular dependency when resolving module: ", spec)));
+        js.throwException(js.error(kj::str("Circular dependency when resolving module: ", spec)));
         return v8::MaybeLocal<ReturnType>();
       }
 

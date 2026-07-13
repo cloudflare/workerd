@@ -454,8 +454,8 @@ void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value>
 }
 
 void addDurableObjectId(kj::Exception& exception, kj::StringPtr durableObjectId) {
-  exception.setDetail(DURABLE_OBJECT_EXCEPTION_METADATA_DETAIL_ID,
-      kj::heapArray(durableObjectId.asBytes()));
+  exception.setDetail(
+      DURABLE_OBJECT_EXCEPTION_METADATA_DETAIL_ID, kj::heapArray(durableObjectId.asBytes()));
 }
 
 kj::Maybe<kj::String> getDurableObjectId(const kj::Exception& exception) {

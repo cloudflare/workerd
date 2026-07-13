@@ -575,7 +575,7 @@ export class MyActor extends DurableObject {
   }
 
   async throwingMethod() {
-    throw new Error("ACTOR METHOD THREW");
+    throw new Error('ACTOR METHOD THREW');
   }
 
   async doCallbackBlockingConcurrency() {
@@ -1825,19 +1825,19 @@ export let testExceptionProperties = {
 
 export let testDurableObjectExceptionProperties = {
   async test(controller, env, ctx) {
-    let id = env.MyActor.idFromName("exception-properties");
+    let id = env.MyActor.idFromName('exception-properties');
     try {
       await env.MyActor.get(id).throwingMethod();
-      assert.fail("expected actor RPC to throw");
+      assert.fail('expected actor RPC to throw');
     } catch (e) {
       assert.strictEqual(e.remote, true);
-      assert.strictEqual(e.message, "ACTOR METHOD THREW");
+      assert.strictEqual(e.message, 'ACTOR METHOD THREW');
       assert.strictEqual(e.durableObjectId, id.toString());
     }
 
     try {
       await env.MyService.throwingMethod();
-      assert.fail("expected service RPC to throw");
+      assert.fail('expected service RPC to throw');
     } catch (e) {
       assert.strictEqual(e.remote, true);
       assert.strictEqual(e.durableObjectId, undefined);
