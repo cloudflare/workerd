@@ -18,6 +18,9 @@ Frankenvalue Frankenvalue::cloneImpl() const {
     KJ_CASE_ONEOF(v8Serialized, V8Serialized) {
       result.value = V8Serialized{kj::heapArray(v8Serialized.data.asPtr())};
     }
+    KJ_CASE_ONEOF(bytes, Bytes) {
+      result.value = Bytes{kj::heapArray(bytes.data.asPtr())};
+    }
     KJ_CASE_ONEOF(capability, Capability) {
       result.value = capability;
     }
@@ -88,6 +91,9 @@ void Frankenvalue::toCapnpImpl(rpc::Frankenvalue::Builder builder, size_t capTab
     KJ_CASE_ONEOF(v8Serialized, V8Serialized) {
       builder.setV8Serialized(v8Serialized.data);
     }
+    KJ_CASE_ONEOF(bytes, Bytes) {
+      builder.setArrayBuffer(bytes.data);
+    }
     KJ_CASE_ONEOF(capability, Capability) {
       // Defense-in-depth: the cap index must reference one of this node's base caps. fromCapnp()
       // enforces the same invariant on the decode side (see fromCapnpImpl()).
@@ -141,6 +147,9 @@ size_t Frankenvalue::fromCapnpImpl(
       break;
     case rpc::Frankenvalue::V8_SERIALIZED:
       this->value = V8Serialized{kj::heapArray(reader.getV8Serialized())};
+      break;
+    case rpc::Frankenvalue::ARRAY_BUFFER:
+      this->value = Bytes{kj::heapArray(reader.getArrayBuffer())};
       break;
     case rpc::Frankenvalue::CAPABILITY: {
       auto cap = reader.getCapability();
@@ -211,6 +220,9 @@ jsg::JsValue Frankenvalue::toJsImpl(jsg::Lock& js, kj::ArrayPtr<kj::Own<CapTable
                 .externalHandler = capTableReader,
               });
           return deser.readValue(js);
+        }
+        KJ_CASE_ONEOF(bytes, Bytes) {
+          return jsg::JsValue(js.wrapBytes(kj::heapArray(bytes.data.asPtr())));
         }
         KJ_CASE_ONEOF(capability, Capability) {
           // The value is a single capability taken directly from the cap table, without going
@@ -298,6 +310,12 @@ Frankenvalue Frankenvalue::fromJson(kj::String json) {
   return result;
 }
 
+Frankenvalue Frankenvalue::fromBytes(kj::Array<byte> data) {
+  Frankenvalue result;
+  result.value = Bytes{kj::mv(data)};
+  return result;
+}
+
 size_t Frankenvalue::estimateSize() const {
   size_t result = 0;
 
@@ -308,6 +326,9 @@ size_t Frankenvalue::estimateSize() const {
     }
     KJ_CASE_ONEOF(v8Serialized, V8Serialized) {
       result += v8Serialized.data.size();
+    }
+    KJ_CASE_ONEOF(bytes, Bytes) {
+      result += bytes.data.size();
     }
     KJ_CASE_ONEOF(capability, Capability) {
       result += sizeof(Capability);

@@ -21,6 +21,10 @@ struct Frankenvalue {
     v8Serialized @2 :Data;
     # Parse these V8-serialized bytes to compute the value.
 
+    arrayBuffer @9 :Data;
+    # The value is an `ArrayBuffer` wrapping these bytes (no V8 serialization). Lets a control
+    # plane place binary data into `ctx.props` without a JavaScript context.
+
     capability :group {
       # The value is a single capability (e.g. a service binding / Fetcher), taken directly from
       # this value's cap table. This allows a capability to be expressed without going through V8
