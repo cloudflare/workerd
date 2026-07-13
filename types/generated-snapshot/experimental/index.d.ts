@@ -14724,11 +14724,28 @@ interface ImageUpdateOptions {
   metadata?: Record<string, unknown>;
   creator?: string;
 }
+type ImageMetadataFilterOperators = {
+  eq?: string | number | boolean;
+  in?: string[] | number[];
+  gt?: number;
+  gte?: number;
+  lt?: number;
+  lte?: number;
+};
+type ImageMetadataFilterValue =
+  | string
+  | number
+  | boolean
+  | ImageMetadataFilterOperators;
+interface ImageListFilter {
+  metadata?: Record<string, ImageMetadataFilterValue>;
+}
 interface ImageListOptions {
   limit?: number;
   cursor?: string;
   sortOrder?: "asc" | "desc";
   creator?: string;
+  filter?: ImageListFilter;
 }
 interface ImageList {
   images: ImageMetadata[];

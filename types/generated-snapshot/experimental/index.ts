@@ -14751,11 +14751,28 @@ export interface ImageUpdateOptions {
   metadata?: Record<string, unknown>;
   creator?: string;
 }
+export type ImageMetadataFilterOperators = {
+  eq?: string | number | boolean;
+  in?: string[] | number[];
+  gt?: number;
+  gte?: number;
+  lt?: number;
+  lte?: number;
+};
+export type ImageMetadataFilterValue =
+  | string
+  | number
+  | boolean
+  | ImageMetadataFilterOperators;
+export interface ImageListFilter {
+  metadata?: Record<string, ImageMetadataFilterValue>;
+}
 export interface ImageListOptions {
   limit?: number;
   cursor?: string;
   sortOrder?: "asc" | "desc";
   creator?: string;
+  filter?: ImageListFilter;
 }
 export interface ImageList {
   images: ImageMetadata[];
