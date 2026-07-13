@@ -51,7 +51,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
+        compatibilityFlags = ["nodejs_compat_v2"],
       )
     ),
     ( name = "connect-handler-test-proxy",
@@ -59,7 +59,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
+        compatibilityFlags = ["nodejs_compat_v2"],
       )
     ),
     ( name = "connect-handler-test-endpoint",
@@ -67,7 +67,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
+        compatibilityFlags = ["nodejs_compat_v2"],
       )
     ),
     ( name = "internet", network = ( allow = ["private"] ) ),

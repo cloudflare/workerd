@@ -652,8 +652,6 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     // Note: Intentionally return without co_await so that the `incomingRequest` is destroyed,
     //   because we don't have any need to keep the context around.
     return next->connect(host, headers, connection, response, settings);
-  } else if (!featureFlags.getWorkerdExperimental()) {
-    JSG_FAIL_REQUIRE(TypeError, "Incoming CONNECT on a worker not supported");
   }
 
   // TODO(soon): Implement basic TLS support for connect handler.

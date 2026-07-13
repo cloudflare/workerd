@@ -1208,14 +1208,9 @@ KJ_TEST("Server: connect() with Worker as outbound, no connect_pass_though") {
                 `
                 `export default {
                 `  async fetch(request, env) {
-                `    // TODO(bug): At present this throws synchronously, which seems like a bug in
-                `    //   the implementation of connect(): errors coming from the destination
-                `    //   service really ought to be async (in prod, they always will be), showing
-                `    //   up on the first read or write. At present, though, I'm not looking to
-                `    //   fix this bug.
-                `    assert.throws(() => connect("subhost:123"), {
-                `      name: "TypeError",
-                `      message: "Incoming CONNECT on a worker not supported",
+                `    await assert.rejects(async () => { await connect("subhost:123").opened; }, {
+                `       name: "Error",
+                `       message: "proxy request failed, cannot connect to the specified address",
                 `    });
                 `
                 `    return new Response("OK");
@@ -1249,6 +1244,7 @@ KJ_TEST("Server: connect() with Worker as outbound, no connect_pass_though") {
     ]
   ))"_kj);
 
+  KJ_EXPECT_LOG(ERROR, "Handler does not export a connect() function");
   test.server.allowExperimental();
   test.start();
   auto conn = test.connect("test-addr");
