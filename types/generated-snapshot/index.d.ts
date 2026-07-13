@@ -14840,18 +14840,30 @@ declare namespace CloudflareWorkersModule {
       sensitive?: WorkflowStepSensitivity;
     };
   };
-  export type WorkflowRollbackContext<T = unknown> = {
-    ctx: WorkflowStepContext;
+  // The rollback handler receives the step context, so it mirrors the same
+  // delay discriminant as the step callback: when the step was configured with
+  // a dynamic delay function the resolved `config.retries.delay` is omitted,
+  // otherwise it is present. `Delay` is threaded from the `WorkflowStep.do`
+  // overload that matched the step config.
+  export type WorkflowRollbackContext<
+    T = unknown,
+    Delay = WorkflowDelayDuration | number,
+  > = {
+    ctx: WorkflowStepContext<Delay>;
     error: Error;
     output: T | undefined;
     /** @deprecated Use `ctx.step.name` and `ctx.step.count` instead. */
     stepName: string;
   };
-  export type WorkflowRollbackHandler<T = unknown> = (
-    ctx: WorkflowRollbackContext<T>,
-  ) => Promise<void>;
-  export type WorkflowStepRollbackOptions<T = unknown> = {
-    rollback: WorkflowRollbackHandler<T>;
+  export type WorkflowRollbackHandler<
+    T = unknown,
+    Delay = WorkflowDelayDuration | number,
+  > = (ctx: WorkflowRollbackContext<T, Delay>) => Promise<void>;
+  export type WorkflowStepRollbackOptions<
+    T = unknown,
+    Delay = WorkflowDelayDuration | number,
+  > = {
+    rollback: WorkflowRollbackHandler<T, Delay>;
     rollbackConfig?: WorkflowStepRollbackConfig;
   };
   export abstract class WorkflowStep {
@@ -14871,7 +14883,7 @@ declare namespace CloudflareWorkersModule {
       name: string,
       config: WorkflowStepConfigWithDelayFunction,
       callback: (ctx: WorkflowStepContext<WorkflowDelayFunction>) => Promise<T>,
-      rollbackOptions?: WorkflowStepRollbackOptions<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions<T, WorkflowDelayFunction>,
     ): Promise<T>;
     do<T extends Rpc.Serializable<T>>(
       name: string,
@@ -14879,7 +14891,10 @@ declare namespace CloudflareWorkersModule {
       callback: (
         ctx: WorkflowStepContext<WorkflowDelayDuration | number>,
       ) => Promise<T>,
-      rollbackOptions?: WorkflowStepRollbackOptions<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions<
+        T,
+        WorkflowDelayDuration | number
+      >,
     ): Promise<T>;
     do<T extends Rpc.Serializable<T>>(
       name: string,

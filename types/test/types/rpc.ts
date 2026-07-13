@@ -1203,6 +1203,97 @@ void delayReturningDuration;
 const asyncDelay: WorkflowDelayFunction = async () => 5;
 void asyncDelay;
 
+// ---------------------------------------------------------------------------
+// Rollback context delay narrowing.
+//
+// The rollback handler receives the step context, so it mirrors the same delay
+// discriminant as the step callback: a static delay surfaces the resolved
+// `config.retries.delay`, while a delay function omits it. This holds under an
+// explicit return-type argument too. `rollbackConfig` continues to accept a
+// delay function of its own.
+// ---------------------------------------------------------------------------
+
+// A static-delay step exposes the resolved delay in the rollback context.
+workflowStep.do(
+  'rollback ctx static delay present',
+  {retries: {limit: 1, delay: 0}},
+  async (): Promise<string> => 'ok',
+  {
+    rollback: async (rollbackCtx) => {
+      expectTypeOf(rollbackCtx.ctx.config.retries?.delay).toEqualTypeOf<
+        WorkflowDelayDuration | number | undefined
+      >();
+    },
+  }
+);
+
+// A delay-function step omits the resolved delay in the rollback context.
+workflowStep.do(
+  'rollback ctx dynamic delay absent',
+  {retries: {limit: 1, delay: (): WorkflowDelayDuration => '1 minute'}},
+  async (): Promise<string> => 'ok',
+  {
+    rollback: async (rollbackCtx) => {
+      expectTypeOf(rollbackCtx.ctx.config.retries).toEqualTypeOf<
+        {limit: number; backoff?: WorkflowBackoff} | undefined
+      >();
+      // @ts-expect-error delay is absent when the step used a delay function
+      rollbackCtx.ctx.config.retries?.delay;
+    },
+  }
+);
+
+// The same omission holds under an explicit return-type argument.
+workflowStep.do<string>(
+  'rollback ctx dynamic delay absent explicit',
+  {retries: {limit: 1, delay: (): WorkflowDelayDuration => '1 minute'}},
+  async () => 'ok',
+  {
+    rollback: async (rollbackCtx) => {
+      expectTypeOf(rollbackCtx.ctx.config.retries).toEqualTypeOf<
+        {limit: number; backoff?: WorkflowBackoff} | undefined
+      >();
+      // @ts-expect-error delay is absent under an explicit type argument too
+      rollbackCtx.ctx.config.retries?.delay;
+    },
+  }
+);
+
+// An async delay-function step also omits the resolved delay.
+workflowStep.do(
+  'rollback ctx async dynamic delay absent',
+  {retries: {limit: 1, delay: async (): Promise<WorkflowDelayDuration> => 5}},
+  async (): Promise<string> => 'ok',
+  {
+    rollback: async (rollbackCtx) => {
+      expectTypeOf(rollbackCtx.ctx.config.retries).toEqualTypeOf<
+        {limit: number; backoff?: WorkflowBackoff} | undefined
+      >();
+    },
+  }
+);
+
+// The no-config (2-arg) form keeps the default (static) rollback context.
+workflowStep.do('rollback ctx default delay present', async (): Promise<string> => 'ok', {
+  rollback: async (rollbackCtx) => {
+    expectTypeOf(rollbackCtx.ctx.config.retries?.delay).toEqualTypeOf<
+      WorkflowDelayDuration | number | undefined
+    >();
+  },
+});
+
+// `rollbackConfig` accepts an async delay function of its own.
+workflowStep.do('rollback config async delay function', async (): Promise<string> => 'ok', {
+  rollback: async () => {},
+  rollbackConfig: {retries: {limit: 0, delay: async () => 5}},
+});
+
+// @ts-expect-error a rollbackConfig delay function must return a delay duration
+workflowStep.do('rollback config delay wrong return', async () => 'ok', {
+  rollback: async () => {},
+  rollbackConfig: {retries: {limit: 0, delay: (): boolean => true}},
+});
+
 declare const cronSchedule: WorkflowCronSchedule;
 expectTypeOf(cronSchedule.cron).toEqualTypeOf<string>();
 expectTypeOf(cronSchedule.scheduledTime).toEqualTypeOf<number>();
