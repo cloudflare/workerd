@@ -154,60 +154,27 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
   }
 }
 
-kj::Promise<R2Result> doR2HTTPPutRequest(kj::Own<kj::HttpClient> client,
+namespace {
+// The coroutine half of doR2HTTPPutRequest(). Split out of the public function because
+// computing the expected body size requires a jsg::Lock, and a jsg::Lock must never be
+// captured in a KJ coroutine frame. Everything up to the first co_await runs synchronously
+// in the caller's context (in particular, `path` is consumed before any suspension).
+kj::Promise<R2Result> doR2HTTPPutRequestImpl(kj::Own<kj::HttpClient> client,
     kj::Maybe<R2PutValue> supportedBody,
-    kj::Maybe<uint64_t> streamSize,
+    uint64_t expectedBodySize,
     kj::String metadataPayload,
     kj::ArrayPtr<kj::StringPtr> path,
     kj::Maybe<kj::StringPtr> jwt) {
-  // NOTE: A lot of code here is duplicated with kv.c++. Maybe it can be refactored to be more
-  // reusable?
   auto& context = IoContext::current();
   auto headers = kj::HttpHeaders(context.getHeaderTable());
   auto url = getFakeUrl(path);
-
-  kj::Maybe<uint64_t> expectedBodySize;
-
-  KJ_IF_SOME(b, supportedBody) {
-    KJ_SWITCH_ONEOF(b) {
-      KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
-        expectedBodySize = stream->tryGetLength(StreamEncoding::IDENTITY);
-        if (expectedBodySize == kj::none) {
-          expectedBodySize = streamSize;
-        }
-        JSG_REQUIRE(expectedBodySize != kj::none, TypeError,
-            "Provided readable stream must have a known length (request/response body or readable "
-            "half of FixedLengthStream)");
-        JSG_REQUIRE(streamSize.orDefault(KJ_ASSERT_NONNULL(expectedBodySize)) == expectedBodySize,
-            RangeError, "Provided stream length (", streamSize.orDefault(-1),
-            ") doesn't match what "
-            "the stream reports (",
-            KJ_ASSERT_NONNULL(expectedBodySize), ")");
-      }
-      KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
-        expectedBodySize = text.value.size();
-        KJ_REQUIRE(streamSize == kj::none);
-      }
-      KJ_CASE_ONEOF(data, kj::Array<kj::byte>) {
-        expectedBodySize = data.size();
-        KJ_REQUIRE(streamSize == kj::none);
-      }
-      KJ_CASE_ONEOF(data, jsg::Ref<Blob>) {
-        expectedBodySize = data->getSize();
-        KJ_REQUIRE(streamSize == kj::none);
-      }
-    }
-  } else {
-    expectedBodySize = static_cast<uint64_t>(0);
-    KJ_REQUIRE(streamSize == kj::none);
-  }
 
   headers.set(context.getHeaderIds().cfBlobMetadataSize, kj::str(metadataPayload.size()));
   KJ_IF_SOME(j, jwt) {
     headers.set(context.getHeaderIds().authorization, kj::str("Bearer ", j));
   }
 
-  uint64_t combinedSize = metadataPayload.size() + KJ_ASSERT_NONNULL(expectedBodySize);
+  uint64_t combinedSize = metadataPayload.size() + expectedBodySize;
 
   co_await context.waitForOutputLocks();
 
@@ -227,13 +194,14 @@ kj::Promise<R2Result> doR2HTTPPutRequest(kj::Own<kj::HttpClient> client,
         auto data = blob->getData();
         co_await request.body->write(data);
       }
-      KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
+      KJ_CASE_ONEOF(stream, JsReadableStream) {
         // Because the ReadableStream might be a fully JavaScript-backed stream, we must
         // start running the pump within the IoContext/isolate lock.
         co_await context.run(
             [dest = newSystemStream(kj::mv(request.body), StreamEncoding::IDENTITY, context),
                 stream = kj::mv(stream)](jsg::Lock& js) mutable {
-          return IoContext::current().waitForDeferredProxy(stream->pumpTo(js, kj::mv(dest), true));
+          return IoContext::current().waitForDeferredProxy(
+              stream.pumpTo(js, kj::mv(dest), EndStream::YES));
         });
       }
     }
@@ -265,5 +233,55 @@ kj::Promise<R2Result> doR2HTTPPutRequest(kj::Own<kj::HttpClient> client,
     .httpStatus = response.statusCode,
     .metadataPayload = responseBody.releaseArray(),
   };
+}
+}  // namespace
+
+kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js,
+    kj::Own<kj::HttpClient> client,
+    kj::Maybe<R2PutValue> supportedBody,
+    kj::Maybe<uint64_t> streamSize,
+    kj::String metadataPayload,
+    kj::ArrayPtr<kj::StringPtr> path,
+    kj::Maybe<kj::StringPtr> jwt) {
+  // NOTE: A lot of code here is duplicated with kv.c++. Maybe it can be refactored to be more
+  // reusable?
+  kj::Maybe<uint64_t> expectedBodySize;
+
+  KJ_IF_SOME(b, supportedBody) {
+    KJ_SWITCH_ONEOF(b) {
+      KJ_CASE_ONEOF(stream, JsReadableStream) {
+        expectedBodySize = stream.tryGetLength(js, StreamEncoding::IDENTITY);
+        if (expectedBodySize == kj::none) {
+          expectedBodySize = streamSize;
+        }
+        JSG_REQUIRE(expectedBodySize != kj::none, TypeError,
+            "Provided readable stream must have a known length (request/response body or readable "
+            "half of FixedLengthStream)");
+        JSG_REQUIRE(streamSize.orDefault(KJ_ASSERT_NONNULL(expectedBodySize)) == expectedBodySize,
+            RangeError, "Provided stream length (", streamSize.orDefault(-1),
+            ") doesn't match what "
+            "the stream reports (",
+            KJ_ASSERT_NONNULL(expectedBodySize), ")");
+      }
+      KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
+        expectedBodySize = text.value.size();
+        KJ_REQUIRE(streamSize == kj::none);
+      }
+      KJ_CASE_ONEOF(data, kj::Array<kj::byte>) {
+        expectedBodySize = data.size();
+        KJ_REQUIRE(streamSize == kj::none);
+      }
+      KJ_CASE_ONEOF(data, jsg::Ref<Blob>) {
+        expectedBodySize = data->getSize();
+        KJ_REQUIRE(streamSize == kj::none);
+      }
+    }
+  } else {
+    expectedBodySize = static_cast<uint64_t>(0);
+    KJ_REQUIRE(streamSize == kj::none);
+  }
+
+  return doR2HTTPPutRequestImpl(kj::mv(client), kj::mv(supportedBody),
+      KJ_ASSERT_NONNULL(expectedBodySize), kj::mv(metadataPayload), path, kj::mv(jwt));
 }
 }  // namespace workerd::api

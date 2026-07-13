@@ -8,8 +8,11 @@
 #include "util.h"
 
 #include <workerd/io/features.h>
+#include <workerd/io/frankenvalue.h>
+#include <workerd/io/io-channels.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/limit-enforcer.h>
+#include <workerd/io/worker-interface.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
 
@@ -101,7 +104,30 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
     }
   }
 
-  auto client = context.getHttpClient(subrequestChannel, true, kj::none, traceContext);
+  auto client = [&]() -> kj::Own<kj::HttpClient> {
+    KJ_SWITCH_ONEOF(subrequestChannel) {
+      KJ_CASE_ONEOF(channel, uint) {
+        return context.getHttpClient(channel, true, kj::none, traceContext);
+      }
+      KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
+        auto worker = context.getSubrequest(
+            [&](TraceContext& tracing, IoChannelFactory&) {
+          return channel->startRequest({
+            .cfBlobJson = kj::none,
+            .parentSpan = tracing.getInternalSpanParent(),
+            .userSpanParent = tracing.getUserSpanParent(),
+          });
+        },
+            {
+              .inHouse = true,
+              .wrapMetrics = false,
+              .existingTraceContext = traceContext,
+            });
+        return asHttpClient(kj::mv(worker));
+      }
+    }
+    KJ_UNREACHABLE;
+  }();
 
   headers.addPtrPtr(FLPROD_405_HEADER, urlStr);
   for (const auto& header: additionalHeaders) {
@@ -109,6 +135,33 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
   }
 
   return client;
+}
+
+void KvNamespace::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  JSG_FAIL_REQUIRE(DOMDataCloneError, "A KV namespace binding cannot be serialized.");
+}
+
+jsg::Ref<KvNamespace> KvNamespace::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto& handler = KJ_REQUIRE_NONNULL(
+      deserializer.getExternalHandler(), "got KvNamespace on non-RPC serialized object?");
+  auto& frankenvalueHandler =
+      KJ_REQUIRE_NONNULL(kj::tryDowncast<Frankenvalue::CapTableReader>(handler),
+          "KvNamespace can only be deserialized from a Frankenvalue capability (e.g. ctx.props).");
+
+  auto& cap = KJ_REQUIRE_NONNULL(frankenvalueHandler.get(deserializer.readRawUint32()),
+      "serialized KvNamespace had invalid cap table index");
+
+  KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(cap)) {
+    // Decoding dynamic ctx.props: the cap is a live subrequest channel.
+    return js.alloc<KvNamespace>(IoContext::current().addObject(kj::addRef(channel)));
+  } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
+    // Decoding dynamic isolate env: the cap is a numbered I/O channel.
+    return js.alloc<KvNamespace>(kj::String(), kj::Array<AdditionalHeader>(),
+        channel.getChannelNumber(IoChannelCapTableEntry::Type::SUBREQUEST));
+  } else {
+    KJ_FAIL_REQUIRE("KvNamespace capability in Frankenvalue is not a SubrequestChannel?");
+  }
 }
 
 jsg::Promise<KvNamespace::GetResult> KvNamespace::getSingle(jsg::Lock& js,
@@ -176,7 +229,7 @@ jsg::Promise<jsg::JsRef<jsg::JsMap>> KvNamespace::getBulk(jsg::Lock& js,
         [client = kj::mv(client), urlStr = kj::mv(urlStr), headers = kj::mv(headers),
             expectedBodySize, supportedBody = kj::mv(body)]() mutable {
       auto innerReq = client->request(kj::HttpMethod::POST, urlStr, headers, expectedBodySize);
-      auto req = attachToRequest(kj::mv(innerReq), kj::refcountedWrapper(kj::mv(client)));
+      auto req = attachToRequest(kj::mv(innerReq), kj::Rc<kj::HttpClient>(kj::mv(client)));
 
       kj::Promise<void> writePromise = nullptr;
       writePromise = req.body->write(supportedBody.asBytes()).attach(kj::mv(supportedBody));
@@ -397,7 +450,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadataImp
 
     if (typeName == "stream") {
       result = js.resolvedPromise(
-          KvNamespace::GetResult(js.alloc<ReadableStream>(context, kj::mv(stream))));
+          KvNamespace::GetResult(JsReadableStream::create(js, context, kj::mv(stream))));
     } else if (typeName == "text") {
       // NOTE: In theory we should be using awaitIoLegacy() here since ReadableStreamSource is
       //   supposed to handle pending events on its own, but we also know that the HTTP client
@@ -598,8 +651,8 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
         expectedBodySize = static_cast<uint64_t>(data.size());
         traceContext.setTag("cloudflare.kv.query.value_type"_kjc, "ArrayBuffer"_kjc);
       }
-      KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
-        expectedBodySize = stream->tryGetLength(StreamEncoding::IDENTITY);
+      KJ_CASE_ONEOF(stream, JsReadableStream) {
+        expectedBodySize = stream.tryGetLength(js, StreamEncoding::IDENTITY);
         traceContext.setTag("cloudflare.kv.query.value_type"_kjc, "ReadableStream"_kjc);
       }
     }
@@ -617,8 +670,7 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
         [&context, client = kj::mv(client), urlStr = kj::mv(urlStr), headers = kj::mv(headers),
             expectedBodySize, supportedBody = kj::mv(supportedBody)]() mutable {
       auto innerReq = client->request(kj::HttpMethod::PUT, urlStr, headers, expectedBodySize);
-      // TODO(perf): More efficient to explicitly attach rcClient below?
-      auto req = attachToRequest(kj::mv(innerReq), kj::refcountedWrapper(kj::mv(client)));
+      auto req = attachToRequest(kj::mv(innerReq), kj::Rc<kj::HttpClient>(kj::mv(client)));
 
       kj::Promise<void> writePromise = nullptr;
       KJ_SWITCH_ONEOF(supportedBody) {
@@ -628,12 +680,12 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
         KJ_CASE_ONEOF(data, kj::Array<byte>) {
           writePromise = req.body->write(data).attach(kj::mv(data));
         }
-        KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
+        KJ_CASE_ONEOF(stream, JsReadableStream) {
           writePromise = context.run(
               [dest = newSystemStream(kj::mv(req.body), StreamEncoding::IDENTITY, context),
                   stream = kj::mv(stream)](jsg::Lock& js) mutable {
             return IoContext::current().waitForDeferredProxy(
-                stream->pumpTo(js, kj::mv(dest), true));
+                stream.pumpTo(js, kj::mv(dest), EndStream::YES));
           });
         }
       }
@@ -688,7 +740,18 @@ jsg::Promise<void> KvNamespace::delete_(jsg::Lock& js, kj::String name) {
 
 jsg::Ref<JsRpcPromise> KvNamespace::deleteBulk(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
-  auto fetcher = js.alloc<Fetcher>(subrequestChannel, Fetcher::RequiresHostAndProtocol::NO, true);
+  auto fetcher = [&]() -> jsg::Ref<Fetcher> {
+    KJ_SWITCH_ONEOF(subrequestChannel) {
+      KJ_CASE_ONEOF(channel, uint) {
+        return js.alloc<Fetcher>(channel, Fetcher::RequiresHostAndProtocol::NO, true);
+      }
+      KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
+        return js.alloc<Fetcher>(IoContext::current().addObject(kj::addRef(*channel)),
+            Fetcher::RequiresHostAndProtocol::NO, true);
+      }
+    }
+    KJ_UNREACHABLE;
+  }();
   auto method = JSG_REQUIRE_NONNULL(
       fetcher->getRpcMethodInternal(js, kj::str("delete"_kj)), Error, "missing delete method");
   return method->call(args);

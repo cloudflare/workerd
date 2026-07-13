@@ -93,7 +93,7 @@ impl Interface for Worker {
 
     async fn custom_event(
         &mut self,
-        _event: Pin<&mut crate::CustomEvent>,
+        _event: crate::KjOwn<crate::CustomEvent>,
     ) -> crate::Result<crate::CustomEventResult> {
         Err(Self::not_implemented("custom_event"))
     }

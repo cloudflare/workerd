@@ -318,3 +318,6 @@ def wd_js_bundle(
         deps = ["@workerd//src/workerd/jsg:modules_capnp"],
         include_prefix = import_name,
     )
+
+# Public alias for use by wd_ts_script_bundle.bzl
+compile_cache_rule = _gen_compile_cache

@@ -144,6 +144,7 @@ KJ_TEST("kill_switch worker customEvent") {
 
     kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
         capnp::ByteStreamFactory& byteStreamFactory,
+        workerd::FrankenvalueHandler& frankenvalueHandler,
         workerd::rpc::EventDispatcher::Client dispatcher) override {
       KJ_UNIMPLEMENTED();
     }
@@ -280,6 +281,7 @@ KJ_TEST("error worker customEvent") {
     kj::Promise<workerd::WorkerInterface::CustomEvent::Result> sendRpc(
         capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
         capnp::ByteStreamFactory& byteStreamFactory,
+        workerd::FrankenvalueHandler& frankenvalueHandler,
         workerd::rpc::EventDispatcher::Client dispatcher) override {
       KJ_UNIMPLEMENTED();
     }
@@ -319,6 +321,176 @@ KJ_TEST("error worker test") {
   auto worker = kj::from<Rust>(new_error_worker("Test method failed"));
 
   KJ_ASSERT(!worker->test().wait(waitScope));
+}
+
+// ======================================================================================
+// Reverse direction: a Rust CxxWorkerInterface wrapping (delegating to) a C++ WorkerInterface.
+
+namespace {
+
+// Records the calls it receives, and returns distinctive values so the test can confirm the call
+// travelled C++ stub -> Rust CxxWorkerInterface -> back to C++.
+class StubWorker final: public WorkerInterface {
+ public:
+  bool prewarmCalled = false;
+  kj::String prewarmUrl;
+  bool runScheduledCalled = false;
+  bool runAlarmCalled = false;
+  bool customEventCalled = false;
+  bool testCalled = false;
+  bool connectCalled = false;
+  kj::String connectHost;
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response) override {
+    auto body = response.send(200, "OK", headers, kj::str("STUB").size());
+    return body->write("STUB"_kjb).attach(kj::mv(body));
+  }
+
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
+    connectCalled = true;
+    connectHost = kj::str(host);
+    response.accept(200, "OK", headers);
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> prewarm(kj::StringPtr url) override {
+    prewarmCalled = true;
+    prewarmUrl = kj::str(url);
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
+    runScheduledCalled = true;
+    return ScheduledResult{.retry = true, .outcome = workerd::EventOutcome::OK};
+  }
+
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
+    runAlarmCalled = true;
+    return AlarmResult{
+      .retry = true, .retryCountsAgainstLimit = false, .outcome = workerd::EventOutcome::OK};
+  }
+
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+    customEventCalled = true;
+    return CustomEvent::Result{.outcome = workerd::EventOutcome::OK};
+  }
+
+  kj::Promise<bool> test() override {
+    testCalled = true;
+    return true;
+  }
+};
+
+}  // namespace
+
+KJ_TEST("cxx_worker delegates non-HTTP events to the wrapped C++ worker") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto stub = kj::heap<StubWorker>();
+  auto& stubRef = *stub;
+  // Wrap the C++ stub as a Rust worker::Interface, then re-expose it to C++.
+  auto worker = kj::from<Rust>(new_cxx_worker(kj::mv(stub)));
+
+  worker->prewarm("/warm"_kj).wait(waitScope);
+  KJ_ASSERT(stubRef.prewarmCalled);
+  KJ_ASSERT(stubRef.prewarmUrl == "/warm");
+
+  auto scheduled =
+      worker->runScheduled(kj::UNIX_EPOCH + 1000 * kj::SECONDS, "0 0 * * *"_kj).wait(waitScope);
+  KJ_ASSERT(stubRef.runScheduledCalled);
+  KJ_ASSERT(scheduled.retry == true);
+  KJ_ASSERT(scheduled.outcome == workerd::EventOutcome::OK);
+
+  auto alarm = worker->runAlarm(kj::UNIX_EPOCH + 2000 * kj::SECONDS, 3).wait(waitScope);
+  KJ_ASSERT(stubRef.runAlarmCalled);
+  KJ_ASSERT(alarm.retry == true);
+  KJ_ASSERT(alarm.retryCountsAgainstLimit == false);
+  KJ_ASSERT(alarm.outcome == workerd::EventOutcome::OK);
+
+  KJ_ASSERT(worker->test().wait(waitScope));
+  KJ_ASSERT(stubRef.testCalled);
+}
+
+KJ_TEST("cxx_worker delegates customEvent (ownership transfer) to the wrapped C++ worker") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  class TestCustomEvent: public workerd::WorkerInterface::CustomEvent {
+   public:
+    virtual ~TestCustomEvent() = default;
+
+    kj::Promise<Result> run(kj::Own<workerd::IoContext_IncomingRequest> incomingRequest,
+        kj::Maybe<kj::StringPtr> entrypointName,
+        kj::Maybe<workerd::Worker::VersionInfo> versionInfo,
+        workerd::Frankenvalue props,
+        kj::TaskSet& waitUntilTasks,
+        bool) override {
+      KJ_UNIMPLEMENTED();
+    }
+    kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+        capnp::ByteStreamFactory& byteStreamFactory,
+        workerd::FrankenvalueHandler& frankenvalueHandler,
+        workerd::rpc::EventDispatcher::Client dispatcher) override {
+      KJ_UNIMPLEMENTED();
+    }
+    kj::Promise<Result> notSupported() override {
+      KJ_UNIMPLEMENTED();
+    }
+    uint16_t getType() override {
+      return 42;
+    }
+    workerd::tracing::EventInfo getEventInfo() const override {
+      return workerd::tracing::CustomEventInfo();
+    }
+  };
+
+  auto stub = kj::heap<StubWorker>();
+  auto& stubRef = *stub;
+  auto worker = kj::from<Rust>(new_cxx_worker(kj::mv(stub)));
+
+  auto result = worker->customEvent(kj::heap<TestCustomEvent>()).wait(waitScope);
+  KJ_ASSERT(stubRef.customEventCalled);
+  KJ_ASSERT(result.outcome == workerd::EventOutcome::OK);
+}
+
+KJ_TEST("cxx_worker delegates request to the wrapped C++ worker") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto client = newClient(new_cxx_worker(kj::heap<StubWorker>()));
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+
+  auto response =
+      client->request(kj::HttpMethod::GET, "http://test/"_kj, headers).response.wait(waitScope);
+  KJ_ASSERT(response.statusCode == 200);
+  KJ_ASSERT(response.body->readAllText().wait(waitScope) == "STUB");
+}
+
+KJ_TEST("cxx_worker delegates connect to the wrapped C++ worker") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto stub = kj::heap<StubWorker>();
+  auto& stubRef = *stub;
+  auto client = newClient(new_cxx_worker(kj::mv(stub)));
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+
+  auto response = client->connect("example.com:443"_kj, headers, kj::HttpConnectSettings{})
+                      .status.wait(waitScope);
+  KJ_ASSERT(stubRef.connectCalled);
+  KJ_ASSERT(stubRef.connectHost == "example.com:443");
+  KJ_ASSERT(response.statusCode == 200);
 }
 
 }  // namespace

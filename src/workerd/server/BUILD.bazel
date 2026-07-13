@@ -319,6 +319,7 @@ wd_cc_library(
         "v8-platform-impl.h",
     ],
     deps = [
+        "//src/workerd/io",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
     ],
@@ -362,6 +363,16 @@ kj_test(
     src = "channel-token-test.c++",
     deps = [
         ":server",
+    ],
+)
+
+kj_test(
+    src = "alarm-scheduler-test.c++",
+    deps = [
+        ":alarm-scheduler",
+        "//src/workerd/util:sqlite",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
     ],
 )
 

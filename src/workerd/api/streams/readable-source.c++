@@ -824,17 +824,17 @@ class MemoryInputStream final: public ReadableStreamSource {
     return kj::none;
   }
 
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
+  kj::Promise<DeferredProxy<void>> pumpTo(kj::Ptr<WritableStreamSink> output, bool end) override {
     // Explicitly NOT using KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING here!
     // The backing memory may be tied to V8 heap (e.g., ArrayBuffer, Blob data),
     // so we must complete all I/O before the IoContext can be released.
     if (unread.size() > 0) {
       auto data = unread;
       unread = nullptr;
-      co_await output.write(data);
+      co_await output->write(data);
     }
     if (end) {
-      co_await output.end();
+      co_await output->end();
     }
     co_return;
   }

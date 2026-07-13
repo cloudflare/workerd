@@ -270,8 +270,7 @@ class JsRpcProperty: public JsRpcClientProvider {
   // Maximum depth of pipelined property chains. Prevents stack overflow when a chain of
   // JsRpcProperty objects is destructed recursively. 64 is beyond any legitimate RPC pipelining
   // depth.
-  static constexpr uint MAX_PROPERTY_DEPTH = 5120;
-  static constexpr uint MAX_PROPERTY_WARNING_DEPTH = 64;
+  static constexpr uint MAX_PROPERTY_DEPTH = 64;
 
   JsRpcProperty(jsg::Ref<JsRpcClientProvider> parent, kj::String name, uint depth = 0)
       : parent(kj::mv(parent)),
@@ -353,12 +352,25 @@ class JsRpcStub: public JsRpcClientProvider {
   // response, creating MembraneHook + forked promise allocations. The other callers (dup() and
   // constructor()) just refcount existing capabilities or create local loopbacks.
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient): capnpClient(kj::mv(capnpClient)) {}
+  JsRpcStub(
+      IoOwn<rpc::JsRpcTarget::Client> capnpClient, IoOwn<IoChannelFactory::RpcChannel> rpcChannel)
+      : capnpClient(kj::mv(capnpClient)),
+        rpcChannel(kj::mv(rpcChannel)) {}
+  JsRpcStub(IoOwn<IoChannelFactory::RpcChannel> rpcChannel): rpcChannel(kj::mv(rpcChannel)) {}
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
       RpcStubDisposalGroup& disposalGroup,
       jsg::ExternalMemoryAdjustment externalMemoryAdjustment);
+  JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
+      IoOwn<IoChannelFactory::RpcChannel> rpcChannel,
+      RpcStubDisposalGroup& disposalGroup,
+      jsg::ExternalMemoryAdjustment externalMemoryAdjustment);
+  explicit JsRpcStub(uint channelNumber): channelNumber(channelNumber) {}
   ~JsRpcStub() noexcept(false);
 
   rpc::JsRpcTarget::Client getClient();
+
+  // If the stub is backed by a persistable RpcChannel, return it.
+  kj::Maybe<kj::Own<IoChannelFactory::RpcChannel>> getRpcChannel(IoContext& ioctx);
 
   rpc::JsRpcTarget::Client getClientForOneCall(
       jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
@@ -373,6 +385,15 @@ class JsRpcStub: public JsRpcClientProvider {
   // automatically handle `JsRpcTarget` by wrapping it in `JsRpcStub`. However, it can be useful
   // for testing to be able to construct a loopback stub.
   static jsg::Ref<JsRpcStub> constructor(jsg::Lock& js, jsg::JsObject object);
+
+  // Returns true if the RPC system would implicitly convert the given object into an RpcStub when
+  // passed as an RPC parameter or return value. In other words, checks if the object is a
+  // Function or an RpcTarget.
+  //
+  // Note that `constructor()` also accepts plain objects, even though shouldImplicitlyStubify()
+  // returns false for them. Plain objects can be *explicitly* stubified by explicitly calling
+  // `new RpcStub(obj)` in application code, but they are not *implicitly* stubified.
+  static bool shouldImplicitlyStubify(jsg::Lock& js, jsg::JsObject object);
 
   // Call the stub itself as a function.
   jsg::Ref<JsRpcPromise> call(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -395,6 +416,12 @@ class JsRpcStub: public JsRpcClientProvider {
  private:
   // Nulled out upon dispose().
   kj::Maybe<IoOwn<rpc::JsRpcTarget::Client>> capnpClient;
+  kj::Maybe<IoOwn<IoChannelFactory::RpcChannel>> rpcChannel;
+
+  // If set, this stub was part of `env` (e.g. to a Dynamic Worker) so cannot contain `IoOwn`s.
+  // The channel number will have to be exchanged for an RpcChannel via the IoChannelFactory on
+  // every invocation.
+  kj::Maybe<uint> channelNumber;
 
   kj::Maybe<RpcStubDisposalGroup&> disposalGroup;
   kj::ListLink<JsRpcStub> disposalGroupLink;
@@ -460,6 +487,7 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
 
   kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       capnp::ByteStreamFactory& byteStreamFactory,
+      FrankenvalueHandler& frankenvalueHandler,
       rpc::EventDispatcher::Client dispatcher) override;
 
   // Same as `EventDispatcher::Server::JsRpcSessionContext` -- but that typedef is `protected`.

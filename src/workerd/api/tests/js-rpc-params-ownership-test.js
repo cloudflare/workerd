@@ -196,4 +196,3 @@ export let rpcReturnsTransferOwnership = {
     assert.strictEqual(counter.disposeCount, 1);
   },
 };
-

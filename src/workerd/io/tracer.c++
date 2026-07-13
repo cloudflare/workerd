@@ -377,6 +377,7 @@ void WorkerTracer::setEventInfoInternal(
       .scriptId = mapCopyString(trace->scriptId),
       .scriptTags = KJ_MAP(tag, trace->scriptTags) { return kj::str(tag); },
       .entrypoint = mapCopyString(trace->entrypoint),
+      .durableObjectId = mapCopyString(trace->durableObjectId),
     };
 
     tracing::SpanId parentSpanId = tracing::SpanId::nullId;
@@ -415,6 +416,13 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
   trace->outcome = outcome;
   trace->cpuTime = cpuTime;
   trace->wallTime = wallTime;
+
+  if (outcome == EventOutcome::EXCEPTION && pipelineLogLevel != PipelineLogLevel::NONE &&
+      !trace->exceededExceptionLimit && trace->exceptions.empty()) {
+    LOG_PERIODICALLY(WARNING,
+        "NOSENTRY reporting trace with exception outcome, but no actual exceptions",
+        trace->eventInfo);
+  }
 
   // Defer reporting the actual outcome event to the WorkerTracer destructor: The outcome is
   // reported when the metrics request is deallocated, but with ctx.waitUntil() there might be spans
@@ -525,7 +533,8 @@ void WorkerTracer::setReturn(
 
   // Add fetch response info for buffered tail worker
   KJ_IF_SOME(info, fetchResponseInfo) {
-    KJ_REQUIRE(KJ_REQUIRE_NONNULL(trace->eventInfo).is<tracing::FetchEventInfo>());
+    KJ_REQUIRE(KJ_REQUIRE_NONNULL(trace->eventInfo).is<tracing::FetchEventInfo>() ||
+        KJ_REQUIRE_NONNULL(trace->eventInfo).is<tracing::ConnectEventInfo>());
     KJ_ASSERT(trace->fetchResponseInfo == kj::none, "setFetchResponseInfo can only be called once");
     trace->fetchResponseInfo = kj::mv(info);
   }

@@ -665,6 +665,14 @@ class FileImpl final: public File {
   FileImpl(kj::ArrayPtr<const kj::byte> data): ownedOrView(data), lastModified(kj::UNIX_EPOCH) {}
   FileImpl(kj::Array<kj::byte>&& owned) = delete;
 
+  // Constructor used to create a read-only file that owns its backing buffer.
+  // Unlike the writable Owned mode, this does not require a jsg::Lock and its
+  // contents are not counted toward the isolate external memory usage (matching
+  // the non-owning read-only file). See File::newReadable(kj::Array).
+  FileImpl(kj::Array<const kj::byte> owned)
+      : ownedOrView(kj::mv(owned)),
+        lastModified(kj::UNIX_EPOCH) {}
+
   // Constructor used to create a writable file.
   FileImpl(jsg::Lock& js, kj::Array<kj::byte> owned)
       : ownedOrView(Owned(js, kj::mv(owned))),
@@ -772,13 +780,18 @@ class FileImpl final: public File {
   }
 
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
-    // We only track the memory if we own the data.
+    // We only track the memory if we own the data as a writable file. Read-only
+    // files (whether a view or an owned buffer) are controlled by the runtime
+    // and are intentionally not counted toward the isolate external memory.
     KJ_SWITCH_ONEOF(ownedOrView) {
       KJ_CASE_ONEOF(owned, Owned) {
         tracker.trackField("owned", owned.data);
         return;
       }
       KJ_CASE_ONEOF(view, kj::ArrayPtr<const kj::byte>) {
+        return;
+      }
+      KJ_CASE_ONEOF(ownedView, kj::Array<const kj::byte>) {
         return;
       }
     }
@@ -799,6 +812,13 @@ class FileImpl final: public File {
           return FsError::FILE_SIZE_LIMIT_EXCEEDED;
         }
         kj::Rc<File> file = kj::rc<FileImpl>(js, kj::heapArray<kj::byte>(view));
+        return kj::mv(file);
+      }
+      KJ_CASE_ONEOF(ownedView, kj::Array<const kj::byte>) {
+        if (ownedView.size() > maxSize) [[unlikely]] {
+          return FsError::FILE_SIZE_LIMIT_EXCEEDED;
+        }
+        kj::Rc<File> file = kj::rc<FileImpl>(js, kj::heapArray<kj::byte>(ownedView));
         return kj::mv(file);
       }
     }
@@ -849,7 +869,11 @@ class FileImpl final: public File {
         : data(kj::mv(data)),
           adjustment(js.getExternalMemoryAdjustment(this->data.size())) {}
   };
-  kj::OneOf<Owned, kj::ArrayPtr<const kj::byte>> ownedOrView;
+  // - Owned: writable, isolate-memory-tracked buffer (see Owned).
+  // - kj::ArrayPtr<const kj::byte>: read-only view into caller-owned memory.
+  // - kj::Array<const kj::byte>: read-only buffer owned by this file.
+  // Only the Owned alternative is writable (see isWritable()).
+  kj::OneOf<Owned, kj::ArrayPtr<const kj::byte>, kj::Array<const kj::byte>> ownedOrView;
   kj::Date lastModified;
   mutable kj::Maybe<kj::String> maybeUniqueId;
   mutable kj::Maybe<jsg::ExternalMemoryAdjustment> maybeMemoryAdjustment;
@@ -874,6 +898,9 @@ class FileImpl final: public File {
       }
       KJ_CASE_ONEOF(owned, Owned) {
         return owned.data.asPtr().asConst();
+      }
+      KJ_CASE_ONEOF(ownedView, kj::Array<const kj::byte>) {
+        return ownedView.asPtr();
       }
     }
     KJ_UNREACHABLE;
@@ -1263,6 +1290,10 @@ kj::Rc<File> File::newWritable(jsg::Lock& js, kj::Maybe<uint32_t> size) {
 
 kj::Rc<File> File::newReadable(kj::ArrayPtr<const kj::byte> data) {
   return kj::rc<FileImpl>(data);
+}
+
+kj::Rc<File> File::newReadable(kj::Array<const kj::byte> data) {
+  return kj::rc<FileImpl>(kj::mv(data));
 }
 
 kj::Own<VirtualFileSystem> newVirtualFileSystem(

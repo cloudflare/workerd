@@ -3,48 +3,28 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 /**
- * This file contains code that roughly replaces pyodide.loadPackage, with workerd-specific
- * optimizations:
- * - Wheels are decompressed with a DecompressionStream instead of in Python
- * - Wheels are overlaid onto the site-packages dir instead of actually being copied
- * - Wheels are fetched from a disk cache if available.
+ * This file mounts the CPython stdlib packages (and the shared libraries they depend on) into the
+ * Pyodide filesystem.
  *
- * Every package in the (pre-filtered) lock file is loaded; see `loadPackages` below.
+ * The packages are extracted at build time and embedded directly in the Pyodide bundle as
+ * individual files (see src/pyodide/pack_python_packages.py and python_packages.capnp), so there is
+ * no gzip/tar work and no download at runtime: we simply overlay each embedded file onto
+ * site-packages or /usr/lib according to its install_dir.
  */
 
-import { LOCKFILE, PACKAGES_VERSION } from 'pyodide-internal:metadata';
+import { default as EmbeddedPackages } from 'pyodide-internal:packages';
 import { VIRTUALIZED_DIR } from 'pyodide-internal:setupPackages';
-import { parseTarInfo } from 'pyodide-internal:tar';
 import { createTarFS } from 'pyodide-internal:tarfs';
-import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
-import {
-  PythonWorkersInternalError,
-} from 'pyodide-internal:util';
-
-
-function loadBundleFromArtifactBundler(meta: PackageDeclaration): Reader {
-  const filename = meta.file_name;
-  const fullPath = `python-package-bucket/${PACKAGES_VERSION}/${filename}`;
-  const reader = ArtifactBundler.getPackage(fullPath);
-  if (!reader) {
-    throw new PythonWorkersInternalError(
-      'Failed to get package ' + fullPath + ' from ArtifactBundler'
-    );
-  }
-  return reader;
-}
 
 /**
- * Loads every package in the lock file into Pyodide. Built-in package requirements are no longer
- * supported, and the lock file is pre-filtered to contain exactly the set of packages we want to
- * load (the CPython stdlib modules and the shared libraries they depend on), so we simply load all
- * of them.
+ * Mounts every embedded stdlib package file into the virtualized filesystem.
  */
 export function loadPackages(Module: Module): void {
-  for (const meta of Object.values(LOCKFILE.packages)) {
-    const reader = loadBundleFromArtifactBundler(meta);
-    const [tarInfo, soFiles] = parseTarInfo(reader);
-    VIRTUALIZED_DIR.addSmallBundle(tarInfo, soFiles, meta.install_dir);
+  // A single bulk call (each entry carries its reader) rather than a reader accessor per file, to
+  // avoid a JS<->C++ round-trip for every stdlib file.
+  const files = EmbeddedPackages.getFiles();
+  for (const file of files) {
+    VIRTUALIZED_DIR.addFile(file.installDir, file.path, file.reader, file.size);
   }
 
   const tarFS = createTarFS(Module);

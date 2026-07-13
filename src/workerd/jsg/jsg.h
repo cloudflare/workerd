@@ -15,6 +15,7 @@
 #include <workerd/jsg/macro-meta.h>
 #include <workerd/jsg/memory.h>
 #include <workerd/util/strong-bool.h>
+#include <workerd/util/thread-scopes.h>
 
 #include <v8-external-memory-accounter.h>
 #include <v8-forward.h>
@@ -70,7 +71,7 @@ namespace workerd::jsg {
     ::workerd::jsg::visitSubclassForMemoryInfo<Type>(self, tracker);                               \
   }                                                                                                \
   template <typename>                                                                              \
-  friend constexpr bool ::workerd::jsg::resourceNeedsGcTracing();                                  \
+  friend consteval bool ::workerd::jsg::resourceNeedsGcTracing();                                  \
   template <typename T>                                                                            \
   friend void ::workerd::jsg::visitSubclassForGc(T* obj, ::workerd::jsg::GcVisitor& visitor);      \
   inline void jsgVisitForGc(::workerd::jsg::GcVisitor& visitor) override {                         \
@@ -765,13 +766,13 @@ inline consteval size_t prefixLengthToStrip(const char (&s)[N]) {
 
 #define JSG_STRUCT_FIELD_COL(_, name)                                                              \
   ::workerd::jsg::jsgAddToStructNames<decltype(::kj::instance<Self>().name),                       \
-      name##_JSG_NAME_DO_NOT_USE_DIRECTLY, ::workerd::jsg::prefixLengthToStrip(#name)>(names)
+      name##_JSG_NAME_DO_NOT_USE_DIRECTLY + ::workerd::jsg::prefixLengthToStrip(#name)>(names)
 
 // (Internal implementation details for JSG_STRUCT.)
 #define JSG_STRUCT_FIELD(_, name)                                                                  \
   ::workerd::jsg::FieldWrapper<TypeWrapper, Self, decltype(::kj::instance<Self>().name),           \
-      &Self::name, name##_JSG_NAME_DO_NOT_USE_DIRECTLY,                                            \
-      ::workerd::jsg::prefixLengthToStrip(#name)>
+      &Self::name,                                                                                 \
+      name##_JSG_NAME_DO_NOT_USE_DIRECTLY + ::workerd::jsg::prefixLengthToStrip(#name)>
 // (Internal implementation details for JSG_STRUCT.)
 #define JSG_STRUCT_REGISTER_MEMBER(_, name)                                                        \
   registry.template registerStructProperty<decltype(::kj::instance<Self>().name), &Self::name>(    \
@@ -794,6 +795,37 @@ enum SetDataIndex {
   SET_DATA_RUST_REALM,
   // The number of slots workerd uses in the API data for Isolate objects.
   SET_DATA_SLOTS_IN_USE,
+};
+
+// Refcounted holder of a weak (non-owning) back-reference to a v8::Isolate. The reference is
+// nulled out via detach() just before the isolate is destroyed, so that objects which may outlive
+// the isolate can cheaply and safely observe whether it is still alive via isIsolateAlive(),
+// without dereferencing a dangling pointer.
+class IsolateLiveness: public kj::AtomicRefcounted {
+ public:
+  IsolateLiveness(v8::Isolate* isolate): isolate(isolate) {}
+
+  // Returns the isolate if it is still alive, or nullptr if it has been torn down (detach()ed).
+  // The returned pointer is only safe to dereference while the isolate cannot be concurrently
+  // destroyed -- e.g. while holding (or about to take) the isolate lock.
+  v8::Isolate* tryGetIsolate() const {
+    return isolate.load(std::memory_order_relaxed);
+  }
+
+  // Returns true if the isolate is still alive (detach() has not been called).
+  bool isIsolateAlive() const {
+    return tryGetIsolate() != nullptr;
+  }
+
+  // Disconnects from the isolate (called just before destroying the isolate).
+  void detach() const {
+    isolate.store(nullptr, std::memory_order_relaxed);
+  }
+
+ protected:
+  // Mutable so that it can be set null when the isolate is destroyed.
+  mutable std::atomic<v8::Isolate*> isolate;
+  static_assert(std::atomic<v8::Isolate*>::is_always_lock_free);
 };
 
 // =======================================================================================
@@ -830,18 +862,18 @@ class Data {
   ~Data() noexcept(false) {
     destroy();
   }
-  Data(Data&& other) noexcept: isolate(other.isolate), handle(kj::mv(other.handle)) {
+  Data(Data&& other) noexcept
+      : isolateLiveness(kj::mv(other.isolateLiveness)),
+        handle(kj::mv(other.handle)) {
     KJ_IF_SOME(t, other.tracedHandle) {
       moveFromTraced(other, t);
     }
-    other.isolate = nullptr;
   }
   Data& operator=(Data&& other) {
     if (this != &other) {
       destroy();
-      isolate = other.isolate;
+      isolateLiveness = kj::mv(other.isolateLiveness);
       handle = kj::mv(other.handle);
-      other.isolate = nullptr;
       KJ_IF_SOME(t, other.tracedHandle) {
         moveFromTraced(other, t);
       }
@@ -853,7 +885,7 @@ class Data {
   KJ_DISALLOW_COPY(Data);
 
   Data(v8::Isolate* isolate, v8::Local<v8::Data> handle)
-      : isolate(isolate),
+      : isolateLiveness(getIsolateLiveness(isolate)),
         handle(isolate, handle) {}
 
   // Get the raw underlying v8 handle.
@@ -877,8 +909,18 @@ class Data {
   }
 
  private:
-  // The isolate with which the handles below are associated.
-  v8::Isolate* isolate = nullptr;
+  // Liveness handle for the isolate the handles below are associated with. Null exactly when this
+  // Data is empty. Reading the isolate through this (rather than caching a raw v8::Isolate*) lets
+  // destroy() detect when the isolate has already been torn down: a strong jsg::Data may outlive
+  // its isolate, e.g. an error JsRef held by a WebSocket whose request is cleaned up after the
+  // isolate is gone. Without this, destroy() would call v8::Locker::IsLocked() on a freed isolate.
+  kj::Arc<const IsolateLiveness> isolateLiveness;
+
+  // The isolate the handles below are associated with, or nullptr if this Data is empty or the
+  // isolate has already been torn down.
+  v8::Isolate* getIsolate() const {
+    return isolateLiveness == nullptr ? nullptr : isolateLiveness->tryGetIsolate();
+  }
 
   // Handle to the value which will be marked strong if any untraced C++ references exist, weak
   // otherwise.
@@ -901,7 +943,7 @@ class Data {
   // intended to be invoked from the move ctor and assignment operator. We expect them to be
   // invoked a lot and want them to be as optimizable as possible.
   void assertInvariant() {
-    KJ_IASSERT(isolate != nullptr || handle.IsEmpty());
+    KJ_IASSERT(isolateLiveness != nullptr || handle.IsEmpty());
   }
 
   // Implement move constructor when the source of the move has previously been visited for
@@ -911,6 +953,10 @@ class Data {
   // Defers destruction of a v8::Global handle to the next time the isolate is locked.
   // Used by Data::destroy() and WeakV8Ref::destroy().
   static void deferGlobalDestruction(v8::Isolate* isolate, v8::Global<v8::Data> handle);
+
+  // Looks up the IsolateLiveness handle for the given isolate. Captured at construction so that
+  // destroy() can tell whether the isolate is still alive. Used by Data and WeakV8Ref.
+  static kj::Arc<const IsolateLiveness> getIsolateLiveness(v8::Isolate* isolate);
 
   template <typename>
   friend class WeakV8Ref;
@@ -1038,7 +1084,9 @@ class WeakV8Ref final {
  public:
   WeakV8Ref(decltype(nullptr)) {}
 
-  WeakV8Ref(v8::Isolate* isolate, v8::Local<T> handle): isolate(isolate), handle(isolate, handle) {
+  WeakV8Ref(v8::Isolate* isolate, v8::Local<T> handle)
+      : isolateLiveness(Data::getIsolateLiveness(isolate)),
+        handle(isolate, handle) {
     this->handle.SetWeak();
   }
 
@@ -1046,18 +1094,18 @@ class WeakV8Ref final {
     destroy();
   }
 
-  WeakV8Ref(WeakV8Ref&& other) noexcept: isolate(other.isolate), handle(kj::mv(other.handle)) {
-    other.isolate = nullptr;
-  }
+  WeakV8Ref(WeakV8Ref&& other) noexcept
+      : isolateLiveness(kj::mv(other.isolateLiveness)),
+        handle(kj::mv(other.handle)) {}
 
   WeakV8Ref& operator=(WeakV8Ref&& other) {
     if (this != &other) {
       auto tmp = kj::mv(other.handle);
-      auto tmpIsolate = other.isolate;
+      auto tmpLiveness = kj::mv(other.isolateLiveness);
       other.handle = kj::mv(handle);
-      other.isolate = isolate;
+      other.isolateLiveness = kj::mv(isolateLiveness);
       handle = kj::mv(tmp);
-      isolate = tmpIsolate;
+      isolateLiveness = kj::mv(tmpLiveness);
       other.destroy();
     }
     return *this;
@@ -1098,17 +1146,24 @@ class WeakV8Ref final {
   kj::Maybe<V8Ref<T>> tryAddRef(Lock& js) const;
 
  private:
-  v8::Isolate* isolate = nullptr;
+  // Liveness handle for the owning isolate; see jsg::Data for why we hold this rather than a raw
+  // v8::Isolate*. Null exactly when this WeakV8Ref is empty.
+  kj::Arc<const IsolateLiveness> isolateLiveness;
   v8::Global<v8::Data> handle;
 
   void destroy() {
-    if (isolate != nullptr && !handle.IsEmpty()) {
-      if (v8::Locker::IsLocked(isolate)) {
+    if (isolateLiveness != nullptr && !handle.IsEmpty()) {
+      v8::Isolate* isolate = isolateLiveness->tryGetIsolate();
+      if (isolate == nullptr) {
+        // The isolate is already torn down; its global-handle storage is gone, so we must not
+        // Reset(). Abandon the slot instead (see Data::destroy()).
+        handle.Clear();
+      } else if (v8::Locker::IsLocked(isolate)) {
         handle.Reset();
       } else {
         Data::deferGlobalDestruction(isolate, kj::mv(handle));
       }
-      isolate = nullptr;
+      isolateLiveness = nullptr;
     }
   }
 };
@@ -1188,9 +1243,8 @@ template <typename U>
 static constexpr bool isUsableStructField = !kj::isSameType<U, SelfRef>() &&
     !kj::isSameType<U, Unimplemented>() && !kj::isSameType<U, WontImplement>();
 
-template <typename T, const char* name, size_t prefix>
+template <typename T, const char* exportedName>
 void jsgAddToStructNames(auto& names) {
-  constexpr const char* exportedName = name + prefix;
   if constexpr (isUsableStructField<T>) names.add(exportedName);
 }
 
@@ -1276,12 +1330,12 @@ struct IsArguments_<Arguments<T>> {
   static constexpr bool value = true;
 };
 template <typename T>
-constexpr bool isArguments() {
+consteval bool isArguments() {
   return IsArguments_<T>::value;
 }
 
 template <typename T>
-constexpr bool resourceNeedsGcTracing();
+consteval bool resourceNeedsGcTracing();
 template <typename T>
 void visitSubclassForGc(T* obj, GcVisitor& visitor);
 
@@ -1338,7 +1392,7 @@ class Object: private Wrappable {
   inline void visitForMemoryInfo(MemoryTracker& tracker) const {}
   inline void visitForGc(GcVisitor& visitor) {}
   template <typename>
-  friend constexpr bool ::workerd::jsg::resourceNeedsGcTracing();
+  friend consteval bool ::workerd::jsg::resourceNeedsGcTracing();
   template <typename T>
   friend void visitSubclassForGc(T* obj, GcVisitor& visitor);
   template <typename T>
@@ -1567,9 +1621,9 @@ class WeakRef {
   WeakRef(WeakRef<U>&& other) noexcept {
     KJ_IF_SOME(o, kj::mv(other.impl)) {
       impl = Impl{
-        .isolate = o.isolate,
         .target = o.target,
         .anchor = kj::mv(o.anchor),
+        .isolateLiveness = kj::mv(o.isolateLiveness),
       };
     }
   }
@@ -1591,9 +1645,9 @@ class WeakRef {
     destroy();
     KJ_IF_SOME(o, otherImpl) {
       impl = Impl{
-        .isolate = o.isolate,
         .target = o.target,
         .anchor = kj::mv(o.anchor),
+        .isolateLiveness = kj::mv(o.isolateLiveness),
       };
     }
     return *this;
@@ -1646,18 +1700,22 @@ class WeakRef {
 
  private:
   struct Impl {
-    v8::Isolate* isolate;
     T& target;
     kj::Rc<WeakRefAnchor> anchor;
+    // Holds the isolate this WeakRef belongs to and, crucially, lets destroy() learn whether that
+    // isolate has already been torn down. A WeakRef may outlive its isolate (e.g. a hibernatable
+    // WebSocket held by a HibernationManager); after teardown this reports the isolate as gone so
+    // destroy() never dereferences a dangling isolate pointer. See destroy() in setup.h.
+    kj::Arc<const IsolateLiveness> isolateLiveness;
   };
 
   kj::Maybe<Impl> impl;
 
-  WeakRef(v8::Isolate* isolate, T& target, kj::Rc<WeakRefAnchor> anchor)
+  WeakRef(T& target, kj::Rc<WeakRefAnchor> anchor, kj::Arc<const IsolateLiveness> isolateLiveness)
       : impl(Impl{
-          .isolate = isolate,
           .target = target,
           .anchor = kj::mv(anchor),
+          .isolateLiveness = kj::mv(isolateLiveness),
         }) {}
 
   // Arranges to have the anchor always dropped under isolate lock
@@ -1899,7 +1957,7 @@ struct IsPromise_<Promise<T>> {
   static constexpr bool value = true;
 };
 template <typename T>
-constexpr bool isPromise() {
+consteval bool isPromise() {
   return IsPromise_<T>::value;
 }
 
@@ -2031,7 +2089,7 @@ constexpr bool hasPublicVisitForGc_(T*) {
 }
 
 template <typename T>
-constexpr bool hasPublicVisitForGc() {
+consteval bool hasPublicVisitForGc() {
   return hasPublicVisitForGc_(static_cast<T*>(nullptr));
 }
 
@@ -2162,7 +2220,7 @@ constexpr bool isGcVisitable_(T*) {
 }
 
 template <typename T>
-constexpr bool isGcVisitable() {
+consteval bool isGcVisitable() {
   return isGcVisitable_(static_cast<T*>(nullptr));
 }
 
@@ -2499,32 +2557,23 @@ class ExternalMemoryAdjustment;
 // pointing to this isolate.
 //
 // Each isolate has a singleton `ExternalMemoryTarget`, which all `ExternalMemoryAdjustment`s
-// point to. The only purpose of this object is to hold a weak reference back to the isolate; the
-// reference is nulled out when the isolate is destroyed.
-class ExternalMemoryTarget: public kj::AtomicRefcounted {
+// point to. As an `IsolateLiveness`, it holds a weak reference back to the isolate that is nulled
+// out when the isolate is destroyed.
+class ExternalMemoryTarget: public IsolateLiveness {
  public:
-  ExternalMemoryTarget(v8::Isolate* isolate): isolate(isolate) {}
+  ExternalMemoryTarget(v8::Isolate* isolate): IsolateLiveness(isolate) {}
 
   ExternalMemoryAdjustment getAdjustment(size_t amount) const;
 
   // Apply any deferred external memory updates. Must be called with isolate locked.
   void applyDeferredMemoryUpdate() const;
 
-  // Disconnects the ExternalMemoryTarget from the isolate (called just before destroying the
-  // isolate).
-  void detach() const;
-
-  // These two methods are for tests only.
-  bool isIsolateAliveForTest() const;
+  // This method is for tests only.
   int64_t getPendingMemoryUpdateForTest() const;
 
  private:
   void maybeDeferAdjustment(ssize_t amount) const;
   void adjustNow(Lock& js, ssize_t amount) const;
-
-  // Mutable so that it can be set null when the isolate is destroyed.
-  mutable std::atomic<v8::Isolate*> isolate;
-  static_assert(std::atomic<v8::Isolate*>::is_always_lock_free);
 
   // Tracks changes to external memory that were applied from a thread that did not hold the
   // isolate lock. These will be applied the next time the lock is taken.
@@ -2639,6 +2688,7 @@ class Lock {
 
   template <typename T, typename... Params>
   Ref<T> alloc(Params&&... params) {
+    maybeAllocGcStress();
     // TODO(soon): While it is possible to create jsg::Object instances outside of the
     // isolate lock, we intend to change that in order to improve memory accounting and
     // tracking of objects created while under lock. As such, all instances of jsg::alloc<T>(...)
@@ -2649,6 +2699,7 @@ class Lock {
   // Like alloc() but attaches an external memory adjustment of size indicated by `accountedSize`.
   template <typename T, typename... Params>
   Ref<T> allocAccounted(size_t accountedSize, Params&&... params) {
+    maybeAllocGcStress();
     return Ref<T>(kj::refcounted<T>(kj::fwd<Params>(params)...)
                       .attach(getExternalMemoryAdjustment(accountedSize)));
   }
@@ -2939,8 +2990,9 @@ class Lock {
   // Use to enable/disable dynamic code evaluation (via eval(), new Function(), or WebAssembly).
   void setAllowEval(bool allow);
 
-  // Use to choose the safe path in unwrap() when under a `DisallowJavascriptExecution` scope
-  // TODO(cleanup): replace with scope guard if we need to use this in multiple places
+  // Tracks whether JavaScript execution is currently disallowed so that conversions in unwrap()
+  // can choose a safe, non-JS-invoking path. Prefer the RAII `DisallowJavaScriptScope` (which
+  // also installs V8's hard guard) over calling this directly.
   void setDisallowJavascriptExecution(bool allow);
   bool isJavascriptExecutionDisallowed() const;
 
@@ -3163,6 +3215,12 @@ class Lock {
   }
 
  private:
+#ifdef WORKERD_ASAN
+  void maybeAllocGcStress();
+#else
+  void maybeAllocGcStress() {}
+#endif
+
   // Mark the jsg::Lock as being disallowed from being passed as a parameter into
   // a kj promise coroutine. Note that this only blocks directly passing the Lock
   // in. Types that have the Lock included as a member field won't be caught and
@@ -3209,6 +3267,25 @@ template <typename T>
 inline kj::Maybe<V8Ref<T>> WeakV8Ref<T>::tryAddRef(Lock& js) const {
   return tryAddRef(js.v8Isolate);
 }
+
+// RAII scope that forbids executing JavaScript for its lifetime. Any attempt to run JS while in
+// scope — invoking a getter or callback, hitting a Proxy trap, adopting a thenable — is a fatal
+// error (process abort via V8). Use this to enforce invariants where C++ relies on no user code
+// running, e.g. resolving a promise with an opaque (null-prototype) value.
+//
+// As well as the hard V8 guard, this sets jsg's "JavaScript execution disallowed" flag so that
+// jsg's own conversions take their safe, non-JS-invoking paths (see
+// Lock::isJavascriptExecutionDisallowed()).
+class DisallowJavaScriptScope final {
+ public:
+  explicit DisallowJavaScriptScope(Lock& js);
+  ~DisallowJavaScriptScope() noexcept(false);
+  KJ_DISALLOW_COPY_AND_MOVE(DisallowJavaScriptScope);
+
+ private:
+  Lock& js;
+  v8::Isolate::DisallowJavascriptExecutionScope scope;
+};
 
 // Ensures that the given fn is run within both a handlescope and the context scope.
 // The lock must be assignable to a jsg::Lock, and the context must be or be assignable

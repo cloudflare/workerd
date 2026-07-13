@@ -147,9 +147,12 @@ bool InputGate::Lock::isFor(const InputGate& otherGate) const {
 InputGate::CriticalSection::CriticalSection(InputGate& parent) {
   isCriticalSection = true;
   if (parent.isCriticalSection) {
-    this->parent = kj::addRef(static_cast<CriticalSection&>(parent));
+    auto& parentCs = static_cast<CriticalSection&>(parent);
+    this->parent = kj::addRef(parentCs);
+    depth = parentCs.depth + 1;
   } else {
     this->parent = &parent;
+    depth = 1;
   }
 }
 InputGate::CriticalSection::~CriticalSection() noexcept(false) {
@@ -170,6 +173,37 @@ InputGate::CriticalSection::~CriticalSection() noexcept(false) {
     case REPARENTED:
       // Common case.
       break;
+  }
+
+  // A poorly behaved user can generate an enormous stack of concurrent critical sections and
+  // can cause a stack overflow if we use recursion here. So we're going to walk the linked list of
+  // critical sections, destroying them as we go.
+  kj::Maybe<kj::Own<CriticalSection>> next;
+  CriticalSection* ptr = this;
+  for (;;) {
+    KJ_SWITCH_ONEOF(ptr->parent) {
+      KJ_CASE_ONEOF(c, kj::None) {
+        return;
+      }
+      KJ_CASE_ONEOF(p, InputGate*) {
+        return;
+      }
+      KJ_CASE_ONEOF(c, kj::Own<CriticalSection>) {
+        // Manual destruction, break this connection to its parent.
+        ptr->parentLock = kj::none;
+        auto p = kj::mv(c);
+        ptr->parent = kj::None();
+
+        if (p->isShared()) {
+          // The parent is maybe still alive. Let's not walk into it and destroy it.
+          return;
+        }
+
+        // Parent is not shared, keep going with iterative destruction.
+        ptr = p.get();
+        next = kj::mv(p);
+      }
+    }
   }
 }
 
@@ -217,17 +251,27 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait(SpanParent parentS
       case REPARENTED:
         // Once the CriticalSection has declared itself done, then any straggler tasks it initiated
         // are adopted by the parent.
+        // Note that we can't recurse on wait to CriticalSections without risking a stack overflow.
         // WARNING: Don't use parentAsInputGate() here as that'll bypass the override of wait() if
         //   the parent is a CriticalSection itself.
-        KJ_SWITCH_ONEOF(parent) {
-          KJ_CASE_ONEOF(p, InputGate*) {
-            co_return co_await p->wait(methodSpan);
-          }
-          KJ_CASE_ONEOF(c, kj::Own<CriticalSection>) {
-            co_return co_await c->wait(methodSpan);
+        CriticalSection* cs = this;
+        for (;;) {
+          KJ_SWITCH_ONEOF(cs->parent) {
+            KJ_CASE_ONEOF(p, InputGate*) {
+              co_return co_await p->wait(methodSpan);
+            }
+            KJ_CASE_ONEOF(c, kj::Own<CriticalSection>) {
+              if (c->state != REPARENTED) {
+                co_return co_await c->wait(methodSpan);
+              }
+              cs = c.get();
+            }
+            KJ_CASE_ONEOF(p, kj::None) {
+              // `parent` is set to kj::None only during destruction.
+              KJ_UNREACHABLE;
+            }
           }
         }
-        KJ_UNREACHABLE;
     }
     KJ_UNREACHABLE;
   }
@@ -259,18 +303,27 @@ InputGate::Lock InputGate::CriticalSection::succeeded() {
 }
 
 void InputGate::CriticalSection::failed(const kj::Exception& e) {
-  if (brokenState.is<kj::Exception>()) {
-    // Already failed I guess.
-    return;
-  }
-
-  setBroken(e);
-  KJ_SWITCH_ONEOF(parent) {
-    KJ_CASE_ONEOF(p, InputGate*) {
-      p->setBroken(e);
+  CriticalSection* ptr = this;
+  for (;;) {
+    if (ptr->brokenState.is<kj::Exception>()) {
+      // Already failed I guess.
+      return;
     }
-    KJ_CASE_ONEOF(c, kj::Own<CriticalSection>) {
-      c->failed(e);
+
+    ptr->setBroken(e);
+
+    KJ_SWITCH_ONEOF(ptr->parent) {
+      KJ_CASE_ONEOF(p, InputGate*) {
+        p->setBroken(e);
+        return;
+      }
+      KJ_CASE_ONEOF(p, kj::None) {
+        return;
+      }
+      KJ_CASE_ONEOF(c, kj::Own<CriticalSection>) {
+        // Don't recurse and call failed() as these chains can get very large.
+        ptr = c.get();
+      }
     }
   }
 }
@@ -304,6 +357,10 @@ InputGate& InputGate::CriticalSection::parentAsInputGate() {
         } else {
           return *c.get();
         }
+      }
+      KJ_CASE_ONEOF(p, kj::None) {
+        // `parent` is set to kj::None only during destruction.
+        KJ_UNREACHABLE;
       }
     }
   }

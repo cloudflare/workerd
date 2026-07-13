@@ -499,15 +499,15 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
               auto fallbackSpan = readSpan.newChild("memory_cache_fallback"_kjc);
               fallbackSpan.setTag("key"_kjc, key.asPtr());
 
-              // Wrap the spans in RefcountedWrapper so they can be shared between then/catch
-              auto fallbackSpanRc = kj::refcountedWrapper<SpanBuilder>(kj::mv(fallbackSpan));
-              auto readSpanRc = kj::refcountedWrapper<SpanBuilder>(kj::mv(readSpan));
+              // Refcount the spans so they can be shared between then/catch.
+              auto fallbackSpanRc = kj::rc<SpanBuilder>(kj::mv(fallbackSpan));
+              auto readSpanRc = kj::rc<SpanBuilder>(kj::mv(readSpan));
 
               return js.evalNow([&]() { return fallback(js, kj::mv(key)); })
                   .then(js,
                       [callback = context.addObject(*heapCallback),
-                          fallbackSpan = fallbackSpanRc->addWrappedRef(),
-                          readSpan = readSpanRc->addWrappedRef()](jsg::Lock& js,
+                          fallbackSpan = fallbackSpanRc.addRef(),
+                          readSpan = readSpanRc.addRef()](jsg::Lock& js,
                           CacheValueProduceResult result) mutable -> jsg::JsRef<jsg::JsValue> {
                 // NOTE: `callback` is IoPtr, not IoOwn. The catch block gets the IoOwn, which
                 //   ensures the object still exists at this point.
@@ -532,8 +532,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
                   .catch_(js,
                   JSG_VISITABLE_LAMBDA(
                       (self = kj::mv(self), callback = context.addObject(kj::mv(heapCallback)),
-                          fallbackSpan = fallbackSpanRc->addWrappedRef(),
-                          readSpan = readSpanRc->addWrappedRef()),
+                          fallbackSpan = fallbackSpanRc.addRef(), readSpan = readSpanRc.addRef()),
                       (self),
                       (jsg::Lock & js, jsg::Value&& exception) mutable->jsg::JsRef<jsg::JsValue> {
                         fallbackSpan->setTag("fallback_success"_kjc, false);

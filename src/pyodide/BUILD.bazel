@@ -1,8 +1,24 @@
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("@rules_python//python:defs.bzl", "py_test")
+load("@rules_python//python:defs.bzl", "py_binary", "py_test")
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
+load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load(":helpers.bzl", "pyodide_extra", "pyodide_static", "python_bundles")
+
+wd_cc_capnp_library(
+    name = "python_packages_capnp",
+    srcs = ["python_packages.capnp"],
+    visibility = ["//visibility:public"],
+)
+
+# Build-time tool that extracts the stdlib wheels into a PythonPackages capnp message embedded in
+# the Pyodide bundle. Used by python_bundles() in helpers.bzl.
+py_binary(
+    name = "pack_python_packages",
+    srcs = ["pack_python_packages.py"],
+    legacy_create_init = False,
+    visibility = ["//visibility:public"],
+)
 
 pyodide_extra()
 
@@ -66,6 +82,7 @@ py_test(
         "internal/introspection.py",
         "internal/test_introspection.py",
     ] + glob(["internal/workers-api/src/workers/*"]),
+    legacy_create_init = False,
     main = "internal/test_introspection.py",
 )
 
@@ -73,6 +90,7 @@ py_test(
     name = "unit-test-frozen-sdk",
     srcs = ["internal/test_frozen_sdk.py"],
     data = glob(["internal/workers-api/**"]),
+    legacy_create_init = False,
     main = "internal/test_frozen_sdk.py",
     target_compatible_with = ["@platforms//os:linux"],
 )

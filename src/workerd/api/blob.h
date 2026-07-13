@@ -4,12 +4,14 @@
 
 #pragma once
 
+#include <workerd/api/js-readable-stream.h>
 #include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/ser.h>
 
 namespace workerd::api {
 
-class ReadableStream;
 class File;
 
 // An implementation of the Web Platform Standard Blob API
@@ -55,7 +57,7 @@ class Blob: public jsg::Object {
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> arrayBuffer(jsg::Lock& js);
   jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> bytes(jsg::Lock& js);
   jsg::Promise<jsg::JsRef<jsg::JsString>> text(jsg::Lock& js);
-  jsg::Ref<ReadableStream> stream(jsg::Lock& js);
+  JsReadableStream stream(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(Blob, CompatibilityFlags::Reader flags) {
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
@@ -77,6 +79,12 @@ class Blob: public jsg::Object {
       arrayBuffer(): Promise<ArrayBuffer>;
     });
   }
+
+  // Serialized as MIME type + raw bytes.
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<Blob> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+  JSG_SERIALIZABLE(rpc::SerializationTag::BLOB);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     KJ_SWITCH_ONEOF(ownData) {

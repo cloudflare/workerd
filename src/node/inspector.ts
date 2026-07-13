@@ -5,11 +5,18 @@
 
 import { EventEmitter } from 'node-internal:events';
 import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
+import { Session as RealSession } from 'node-internal:internal_inspector';
 import type {
   InspectorConsole,
   Session as _Session,
   Network as _Network,
 } from 'node:inspector';
+
+// EXPERIMENTAL, LOCAL-DEV-ONLY. When this flag is set (only possible under `workerd --experimental`,
+// never in production), `Session` connects to the isolate's own V8 inspector instead of throwing.
+// See compatibility-date.capnp ("enable_nodejs_inspector_local_dev") for details.
+const realInspectorEnabled =
+  !!Cloudflare.compatibilityFlags['enable_nodejs_inspector_local_dev'];
 
 export function close(): void {
   // Acts as a no-op.
@@ -61,7 +68,9 @@ export function waitForDebugger(): void {
   // Acts as a no-op.
 }
 
-export class Session extends EventEmitter implements _Session {
+// Non-functional stub used when the experimental flag is off (the default, and the only behavior
+// possible in production). Preserves the historical throwing behavior.
+class StubSession extends EventEmitter implements _Session {
   constructor() {
     super();
     throw new ERR_METHOD_NOT_IMPLEMENTED('Session');
@@ -84,6 +93,19 @@ export class Session extends EventEmitter implements _Session {
   }
 }
 
+// intentional: conditional class export requires a structural cast. Both RealSession and
+// StubSession implement the _Session interface; this is a TypeScript export-shape assertion to
+// present the public node:inspector Session type, not a runtime cast of untrusted/external data.
+export const Session = (realInspectorEnabled
+  ? RealSession
+  : StubSession) as unknown as typeof _Session;
+
+// The DevTools "Integration with DevTools" helpers (Network.*) inject Node-synthetic CDP events
+// into the inspector channel (feeding any connected Session, including an in-process one). They are
+// intentionally left as throwing stubs: this module's supported scope is *issuing commands* to the
+// V8 inspector backend (e.g. the Profiler domain for code coverage), not event injection. V8 has no
+// Network/DOMStorage domains, so implementing these would need separate host-side plumbing behind
+// its own flag.
 export const Network: typeof _Network = {
   requestWillBeSent(_params: _Network.RequestWillBeSentEventDataType): void {
     throw new ERR_METHOD_NOT_IMPLEMENTED('Network.requestWillBeSent');

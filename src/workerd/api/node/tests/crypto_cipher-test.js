@@ -519,6 +519,34 @@ export const modifiedAuthTagDecrypt = {
   },
 };
 
+export const invalidAuthTagDecrypt = {
+  test() {
+    // Decryption with an invalid auth tag results in a meaningful error message
+    const plainKey = Buffer.alloc(32, 0x01);
+    const plainIv = Buffer.alloc(12, 0x42);
+    const key = createSecretKey(plainKey);
+    const plaintext = Buffer.from('hello world');
+
+    const { ciphertext, tag } = chachaEncrypt(key, plainIv, plaintext);
+    // Modify first byte of tag
+    tag[0] ^= 1;
+
+    const decipher = createDecipheriv('chacha20-poly1305', key, plainIv);
+    decipher.setAuthTag(new Uint8Array(tag));
+
+    throws(
+      () => {
+        decipher.update(ciphertext);
+      },
+      {
+        name: 'OperationError',
+        message:
+          'Decryption failed: Incorrect key/IV or corrupted ciphertext/authentication tag provided.',
+      }
+    );
+  },
+};
+
 export const transferredIvChaCha20 = {
   test() {
     // Transferring IV buffer after cipher creation must not affect output.

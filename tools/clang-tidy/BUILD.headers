@@ -2,9 +2,9 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 package(default_visibility = ["//visibility:public"])
 
-# Headers needed to compile the workerd jsg-lint clang-tidy plugin
+# Headers needed to compile the workerd-lint clang-tidy plugin
 # out-of-tree against the clang-tidy binary published by
-# cloudflare/workerd-tools. jsg-lint.c++ uses the C++ API directly but
+# cloudflare/workerd-tools. workerd-lint.c++ uses the C++ API directly but
 # transitively pulls in llvm-c headers (e.g. llvm-c/DataTypes.h via
 # llvm/Support/DataTypes.h), so the C-API directories are kept.
 # clang-tools-extra is narrowed to the top-level clang-tidy plugin

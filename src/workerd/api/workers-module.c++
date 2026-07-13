@@ -76,4 +76,8 @@ void EntrypointsModule::abortIsolate(jsg::Lock& js, jsg::Optional<kj::String> re
   js.terminateExecutionNow();
 }
 
+jsg::JsSymbol EntrypointsModule::getRestoreSymbol(jsg::Lock& js) {
+  return js.symbolInternal("cloudflare:workers:restore");
+}
+
 }  // namespace workerd::api

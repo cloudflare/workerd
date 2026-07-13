@@ -72,9 +72,12 @@ IoChannelFactory::ActorChannel& GlobalActorOutgoingFactory::getOrCreateActorChan
       KJ_CASE_ONEOF(channelId, uint) {
         actorChannel =
             context.getGlobalActorChannel(channelId, id->getInner(), kj::mv(locationHint), mode,
-                enableReplicaRouting, routingMode, kj::mv(parentSpan), kj::mv(version));
+                enableReplicaRouting, routingMode, kj::mv(parentSpan), kj::mv(version), persistent);
       }
       KJ_CASE_ONEOF(factory, kj::Own<DurableObjectNamespace::ActorChannelFactory>) {
+        // Note: Dynamic actor namespaces (no relation to Dynamic Workers) never produce persistent
+        // stubs.
+        KJ_ASSERT(persistent == Persistent::NO);
         actorChannel = factory->getGlobalActor(id->getInner(), kj::mv(locationHint), mode,
             enableReplicaRouting, routingMode, kj::mv(parentSpan), kj::mv(version));
       }
@@ -216,13 +219,14 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
   kj::Own<Fetcher::OutgoingFactory> outgoingFactory;
   KJ_SWITCH_ONEOF(channel) {
     KJ_CASE_ONEOF(channelId, uint) {
-      outgoingFactory = kj::heap<GlobalActorOutgoingFactory>(channelId, id.addRef(),
-          kj::mv(locationHint), mode, enableReplicaRouting, routingMode, kj::mv(version));
+      outgoingFactory =
+          kj::heap<GlobalActorOutgoingFactory>(channelId, id.addRef(), kj::mv(locationHint), mode,
+              enableReplicaRouting, routingMode, kj::mv(version), persistent);
     }
     KJ_CASE_ONEOF(channelFactory, IoOwn<ActorChannelFactory>) {
-      outgoingFactory =
-          kj::heap<GlobalActorOutgoingFactory>(kj::addRef(*channelFactory), id.addRef(),
-              kj::mv(locationHint), mode, enableReplicaRouting, routingMode, kj::mv(version));
+      outgoingFactory = kj::heap<GlobalActorOutgoingFactory>(kj::addRef(*channelFactory),
+          id.addRef(), kj::mv(locationHint), mode, enableReplicaRouting, routingMode,
+          kj::mv(version), persistent);
     }
   }
 
@@ -237,13 +241,16 @@ jsg::Ref<DurableObjectNamespace> DurableObjectNamespace::jurisdiction(
     jsg::Lock& js, jsg::Optional<kj::Maybe<kj::String>> maybeJurisdiction) {
   auto newIdFactory = idFactory->cloneWithJurisdiction(maybeJurisdiction.orDefault(kj::none));
 
+  // A jurisdictional sub-namespace of a ctx.exports self-binding is still a self-binding, so it
+  // inherits the `persistent` bit.
   KJ_SWITCH_ONEOF(channel) {
     KJ_CASE_ONEOF(channelId, uint) {
-      return js.alloc<api::DurableObjectNamespace>(channelId, kj::mv(newIdFactory));
+      return js.alloc<api::DurableObjectNamespace>(channelId, kj::mv(newIdFactory), persistent);
     }
     KJ_CASE_ONEOF(channelFactory, IoOwn<ActorChannelFactory>) {
       return js.alloc<api::DurableObjectNamespace>(
-          IoContext::current().addObject(kj::addRef(*channelFactory)), kj::mv(newIdFactory));
+          IoContext::current().addObject(kj::addRef(*channelFactory)), kj::mv(newIdFactory),
+          persistent);
     }
   }
 
@@ -273,9 +280,6 @@ void DurableObjectClass::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       serializer.writeRawUint32(frankenvalueHandler.add(kj::mv(channel)));
       return;
     } else KJ_IF_SOME(rpcHandler, kj::tryDowncast<RpcSerializerExternalHandler>(handler)) {
-      JSG_REQUIRE(FeatureFlags::get(js).getWorkerdExperimental(), DOMDataCloneError,
-          "DurableObjectClass serialization requires the 'experimental' compat flag.");
-
       KJ_SWITCH_ONEOF(channel->getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::RPC)) {
         KJ_CASE_ONEOF(token, kj::Array<byte>) {
           rpcHandler.write([token = kj::mv(token)](rpc::JsValue::External::Builder builder) {
@@ -288,9 +292,9 @@ void DurableObjectClass::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
               rpc::JsValue::ExternalPusher::DelayedChannelToken::Client>();
 
           // Arrange to send the token when it's ready.
-          ioctx.addTask(
-              promise.then([pusher = rpcHandler.getExternalPusher(),
-                               fulfiller = kj::mv(paf.fulfiller)](kj::Array<byte> token) mutable {
+          ioctx.addTask(promise.then(
+              [pusher = rpcHandler.getExternalPusher(), fulfiller = kj::mv(paf.fulfiller),
+                  attachedChannel = kj::mv(channel)](kj::Array<byte> token) mutable {
             auto req = pusher.pushDelayedChannelTokenRequest(
                 capnp::MessageSize{4 + token.size() / sizeof(capnp::word), 0});
             req.setToken(token);
@@ -356,9 +360,6 @@ jsg::Ref<DurableObjectClass> DurableObjectClass::deserialize(
             "DurableObjectClass capability in Frankenvalue is not a ActorClassChannel?");
       }
     } else KJ_IF_SOME(rpcHandler, kj::tryDowncast<RpcDeserializerExternalHandler>(handler)) {
-      JSG_REQUIRE(FeatureFlags::get(js).getWorkerdExperimental(), DOMDataCloneError,
-          "DurableObjectClass serialization requires the 'experimental' compat flag.");
-
       auto external = rpcHandler.read();
       auto& ioctx = IoContext::current();
       kj::Own<IoChannelFactory::ActorClassChannel> channel;

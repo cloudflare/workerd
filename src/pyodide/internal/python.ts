@@ -36,12 +36,10 @@ import {
   loadPythonMod,
   reportError,
   setInternalErrorReporter,
-  unreachable,
 } from 'pyodide-internal:util';
 import { loadPackages } from 'pyodide-internal:loadPackage';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import { default as setupPythonSearchPathSource } from 'pyodide-internal:setup_python_search_path.py';
-import { IS_WORKERD } from 'pyodide-internal:metadata';
 import { getTrustedReadFunc } from 'pyodide-internal:readOnlyFS';
 import { PyodideVersion } from 'pyodide-internal:const';
 import { default as pythonStdlibZip } from 'pyodideRuntime-internal:python_stdlib.zip';
@@ -146,21 +144,22 @@ function makeSetTimeout(Module: Module): typeof setTimeout {
 }
 
 function getSignalClockAddr(Module: Module): number {
-  if (Module.API.version !== PyodideVersion.V0_28_2) {
+  if (Module.API.version === PyodideVersion.V0_26_0a2) {
     throw new PythonWorkersInternalError(
-      'getSignalClockAddr only supported in 0.28.2'
+      'getSignalClockAddr not supported in 0.26.0a2'
     );
+  } else if (Module.API.version === PyodideVersion.V0_28_2) {
+    // This is the address here:
+    // https://github.com/python/cpython/blob/main/Python/emscripten_signal.c#L42
+    //
+    // Since the symbol isn't exported in this version, we can't access it directly. Instead, we used wasm-objdump and
+    // searched for the call site to _Py_CheckEmscriptenSignals_Helper(), then read the offset out of
+    // the assembly code.
+    const emscripten_signal_clock_offset = 3171536;
+    return Module.___memory_base.value + emscripten_signal_clock_offset;
+  } else {
+    return Module.__Py_emscripten_signal_clock;
   }
-  // This is the address here:
-  // https://github.com/python/cpython/blob/main/Python/emscripten_signal.c#L42
-  //
-  // Since the symbol isn't exported, we can't access it directly. Instead, we used wasm-objdump and
-  // searched for the call site to _Py_CheckEmscriptenSignals_Helper(), then read the offset out of
-  // the assembly code.
-  //
-  // TODO: Export this symbol in the next Pyodide release so we can stop using the magic number.
-  const emscripten_signal_clock_offset = 3171536;
-  return Module.___memory_base.value + emscripten_signal_clock_offset;
 }
 
 function setupRuntimeSignalHandling(Module: Module): void {
@@ -169,27 +168,24 @@ function setupRuntimeSignalHandling(Module: Module): void {
   if (version === PyodideVersion.V0_26_0a2) {
     return;
   }
-  if (version === PyodideVersion.V0_28_2) {
-    // The callback sets signal_clock to 0 and signal_handling to 1. It has to be in C++ because we
-    // don't hold the isolate lock when we call it. JS code would be:
-    //
-    // function callback() { Module.HEAP8[getSignalClockAddr(Module)] = 0;
-    //    Module.HEAP8[Module._Py_EMSCRIPTEN_SIGNAL_HANDLING] = 1;
-    // }
-    setCpuLimitNearlyExceededCallback(
-      Module.HEAP8,
-      getSignalClockAddr(Module),
-      Module._Py_EMSCRIPTEN_SIGNAL_HANDLING
-    );
-    return;
-  }
-  unreachable(version);
+
+  // The callback sets signal_clock to 0 and signal_handling to 1. It has to be in C++ because we
+  // don't hold the isolate lock when we call it. JS code would be:
+  //
+  // function callback() { Module.HEAP8[getSignalClockAddr(Module)] = 0;
+  //    Module.HEAP8[Module._Py_EMSCRIPTEN_SIGNAL_HANDLING] = 1;
+  // }
+  setCpuLimitNearlyExceededCallback(
+    Module.HEAP8,
+    getSignalClockAddr(Module),
+    Module._Py_EMSCRIPTEN_SIGNAL_HANDLING
+  );
 }
 
 const SIGXCPU = 24;
 
 export function clearSignals(Module: Module): void {
-  if (Module.API.version === PyodideVersion.V0_28_2) {
+  if (Module.API.version !== PyodideVersion.V0_26_0a2) {
     // In case the previous request was aborted, make sure that:
     // 1. a sigint is waiting in the signal buffer
     // 2. signal handling is off
@@ -224,13 +220,11 @@ function compileModuleFromReadOnlyFS(
 }
 
 export async function loadPyodide(
-  isWorkerd: boolean,
-  lockfile: PackageLock,
   customSerializedObjects: CustomSerializedObjects
 ): Promise<Pyodide> {
   try {
     const Module = await enterJaegerSpan('instantiate_emscripten', () =>
-      instantiateEmscriptenModule(IS_WORKERD, pythonStdlibZip, pyodideAsmWasm)
+      instantiateEmscriptenModule(pythonStdlibZip, pyodideAsmWasm)
     );
     Module.compileModuleFromReadOnlyFS = compileModuleFromReadOnlyFS;
     if (Module.API.version === PyodideVersion.V0_28_2) {
@@ -240,9 +234,6 @@ export async function loadPyodide(
       );
     } else {
       Module.API.config.jsglobals = globalThis;
-    }
-    if (isWorkerd) {
-      Module.API.config.resolveLockFilePromise!(lockfile);
     }
     Module.setGetRandomValues(getRandomValues);
     Module.setSetTimeout(

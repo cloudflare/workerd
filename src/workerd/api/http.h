@@ -13,16 +13,19 @@
 #include "web-socket.h"
 #include "worker-rpc.h"
 
-#include <workerd/api/streams/readable.h>
+#include <workerd/api/js-readable-stream.h>
 #include <workerd/api/url-standard.h>
 #include <workerd/api/url.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/strong-bool.h>
 
 #include <kj/compat/http.h>
 
 namespace workerd::api {
+
+WD_STRONG_BOOL(IsHyperdrive);
 
 // Base class for Request and Response. In JavaScript, this class is a mixin, meaning no one will
 // be instantiating objects of this type -- it exists solely to house body-related functionality
@@ -32,18 +35,18 @@ class Body: public jsg::Object {
   // The types of objects from which a Body can be created.
   //
   // If the object is a ReadableStream, Body will adopt it directly; otherwise the object is some
-  // sort of buffer-like source. In this case, Body will store its own ReadableStream that wraps the
-  // source, and it keeps a reference to the source object around. This allows Requests and
-  // Responses created from Strings, ArrayBuffers, FormDatas, Blobs, or URLSearchParams to be
+  // sort of buffer-like source. In this case, Body will store a buffer-backed (rewindable)
+  // JsReadableStream that wraps a copy of / a reference to the source data. This allows Requests
+  // and Responses created from Strings, ArrayBuffers, FormDatas, Blobs, or URLSearchParams to be
   // retransmitted.
   //
   // For an example of where this is important, consider a POST Request in redirect-follow mode and
   // containing a body: if passed to a fetch() call that results in a 307 or 308 response, fetch()
   // will re-POST to the new URL. If the body was constructed from a ReadableStream, this re-POST
   // will fail, because there is no body source left. On the other hand, if the body was constructed
-  // from any of the other source types, Body can create a new ReadableStream from the source, and
-  // the POST will successfully retransmit.
-  using Initializer = kj::OneOf<jsg::Ref<ReadableStream>,
+  // from any of the other source types, Body can create a new stream from the buffer, and the POST
+  // will successfully retransmit.
+  using Initializer = kj::OneOf<JsReadableStream,
       kj::String,
       jsg::JsRef<jsg::JsBufferSource>,
       jsg::Ref<Blob>,
@@ -52,90 +55,14 @@ class Body: public jsg::Object {
       jsg::Ref<url::URLSearchParams>,
       jsg::AsyncGeneratorIgnoringStrings<jsg::Value>>;
 
-  struct RefcountedBytes final: public kj::Refcounted {
-    kj::Array<kj::byte> bytes;
-    RefcountedBytes(kj::Array<kj::byte>&& bytes): bytes(kj::mv(bytes)) {}
-    JSG_MEMORY_INFO(RefcountedBytes) {
-      tracker.trackFieldWithSize("bytes", bytes.size());
-    }
-  };
-
-  // The Fetch spec calls this type the body's "source", even though it really is a buffer. I end
-  // talking about things like "a buffer-backed body", whereas in standardese I should say
-  // "a body with a non-null source".
-  //
-  // I find that confusing, so let's just call it what it is: a Body::Buffer.
-  struct Buffer {
-    // In order to reconstruct buffer-backed ReadableStreams without gratuitous array copying, we
-    // need to be able to tie the lifetime of the source buffer to the lifetime of the
-    // ReadableStream's native stream, AND the lifetime of the Body itself. Thus we need
-    // refcounting.
-    //
-    // NOTE: ownBytes may contain a v8::Global reference, hence instances of `Buffer` must exist
-    //   only within the V8 heap space.
-    kj::OneOf<kj::Own<RefcountedBytes>, jsg::Ref<Blob>, jsg::JsRef<jsg::JsBufferSource>> ownBytes;
-    // TODO(cleanup): When we integrate with V8's garbage collection APIs, we need to account for
-    //   that here.
-
-    // Bodies constructed from buffers rather than ReadableStreams can be retransmitted if necessary
-    // (e.g. for redirects, authentication). In these cases, we need to keep an ArrayPtr view onto
-    // the Array source itself, because the source may be a string, and thus have a trailing nul
-    // byte.
-    kj::ArrayPtr<const kj::byte> view;
-
-    Buffer() = default;
-    Buffer(jsg::Lock& js, jsg::JsBufferSource& source)
-        : ownBytes(source.addRef(js)),
-          view(source.asArrayPtr()) {
-      // If the BufferSource is resizable, then it should have been copied into
-      // a kj::Array and passed in to that constructor.
-      KJ_ASSERT(!source.isResizable());
-    }
-    Buffer(kj::Array<kj::byte> array)
-        : ownBytes(kj::refcounted<RefcountedBytes>(kj::mv(array))),
-          view(ownBytes.get<kj::Own<RefcountedBytes>>()->bytes) {}
-    Buffer(kj::String string)
-        : ownBytes(kj::refcounted<RefcountedBytes>(string.releaseArray().releaseAsBytes())),
-          view([this] {
-            auto bytesIncludingNull = ownBytes.get<kj::Own<RefcountedBytes>>()->bytes.asPtr();
-            return bytesIncludingNull.first(bytesIncludingNull.size() - 1);
-          }()) {}
-    Buffer(jsg::Ref<Blob> blob)
-        : ownBytes(kj::mv(blob)),
-          view(ownBytes.get<jsg::Ref<Blob>>()->getData()) {}
-
-    Buffer clone(jsg::Lock& js);
-
-    JSG_MEMORY_INFO(Buffer) {
-      KJ_SWITCH_ONEOF(ownBytes) {
-        KJ_CASE_ONEOF(ref, jsg::JsRef<jsg::JsBufferSource>) {
-          tracker.trackField("ref", ref);
-        }
-        KJ_CASE_ONEOF(bytes, kj::Own<RefcountedBytes>) {
-          tracker.trackField("bytes", bytes);
-        }
-        KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-          tracker.trackField("blob", blob);
-        }
-      }
-    }
-  };
-
-  struct Impl {
-    jsg::Ref<ReadableStream> stream;
-    kj::Maybe<Buffer> buffer;
-    JSG_MEMORY_INFO(Impl) {
-      tracker.trackField("stream", stream);
-      tracker.trackField("buffer", buffer);
-    }
-  };
-
+  // The result of the "extract a body" algorithm: the body's stream plus the Content-Type it
+  // implies (if any). The stream carries its own retransmit buffer when the body was constructed
+  // from an in-memory source (see JsReadableStream::isBufferBacked()).
   struct ExtractedBody {
-    ExtractedBody(jsg::Ref<ReadableStream> stream,
-        kj::Maybe<Buffer> source = kj::none,
-        kj::Maybe<kj::String> contentType = kj::none);
+    ExtractedBody(
+        jsg::Lock& js, JsReadableStream stream, kj::Maybe<kj::String> contentType = kj::none);
 
-    Impl impl;
+    JsReadableStream stream;
     kj::Maybe<kj::String> contentType;
   };
 
@@ -145,12 +72,10 @@ class Body: public jsg::Object {
 
   explicit Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers);
 
-  kj::Maybe<Buffer> getBodyBuffer(jsg::Lock& js);
-
   // The following body rewind/nullification functions are helpers for implementing fetch() redirect
   // handling.
 
-  // True if this body is null or buffer-backed, false if this body is a ReadableStream.
+  // True if this body is null or buffer-backed, false if this body is an opaque ReadableStream.
   bool canRewindBody();
 
   // Reconstruct this body from its backing buffer. Precondition: `canRewindBody() == true`.
@@ -162,8 +87,8 @@ class Body: public jsg::Object {
   // ---------------------------------------------------------------------------
   // JS API
 
-  kj::Maybe<jsg::Ref<ReadableStream>> getBody();
-  bool getBodyUsed();
+  kj::Maybe<JsReadableStream> getBody(jsg::Lock& js);
+  bool getBodyUsed(jsg::Lock& js);
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> arrayBuffer(jsg::Lock& js);
   jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> bytes(jsg::Lock& js);
   jsg::Promise<kj::String> text(jsg::Lock& js);
@@ -202,7 +127,7 @@ class Body: public jsg::Object {
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("impl", impl);
+    bodyStream.visitForMemoryInfo(tracker);
   }
 
  protected:
@@ -210,7 +135,14 @@ class Body: public jsg::Object {
   kj::Maybe<ExtractedBody> clone(jsg::Lock& js);
 
  private:
-  kj::Maybe<Impl> impl;
+  // The body stream. The null state represents a null body ("no body"). Buffer-backed streams
+  // carry their own retransmit buffer, making the body rewindable for redirect handling.
+  JsReadableStream bodyStream;
+
+  // Returns the buffering limit to apply when consuming the body. Deliberately not consulted for
+  // null bodies: consuming a null body yields an empty result without any I/O, and must keep
+  // working outside of a request context (where IoContext::current() would throw).
+  uint64_t bufferingLimit();
 
   // HACK: This `headersRef` variable refers to a Headers object in the Request/Response subclass.
   //   As such, it will briefly dangle during object destruction. While unlikely to be an issue,
@@ -218,9 +150,7 @@ class Body: public jsg::Object {
   Headers& headersRef;
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    KJ_IF_SOME(i, impl) {
-      visitor.visit(i.stream);
-    }
+    visitor.visit(bodyStream);
   }
 };
 
@@ -363,7 +293,7 @@ class Fetcher: public JsRpcClientProvider {
       jsg::Optional<kj::OneOf<RequestInitializerDict, jsg::Ref<Request>>> requestInit);
 
   using GetResult =
-      kj::OneOf<jsg::Ref<ReadableStream>, jsg::JsRef<jsg::JsArrayBuffer>, kj::String, jsg::Value>;
+      kj::OneOf<JsReadableStream, jsg::JsRef<jsg::JsArrayBuffer>, kj::String, jsg::Value>;
 
   jsg::Promise<GetResult> get(jsg::Lock& js, kj::String url, jsg::Optional<kj::String> type);
 
@@ -520,6 +450,28 @@ class Fetcher: public JsRpcClientProvider {
 
   JSG_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
 
+  // Set up a connection string override for a random host and the given port. isHyperdrive
+  // signifies whether the legacy hostname for hyperdrive should be used (only used with
+  // ExtendedFetcher).
+  void registerOverride(jsg::Lock& js, IsHyperdrive isHyperdrive, uint16_t overridePort);
+
+  kj::Maybe<uint16_t> getPortInternal() const {
+    return port;
+  }
+  kj::Maybe<kj::StringPtr> getHostInternal() const {
+    return host;
+  }
+  bool hasConnectOverride() const {
+    return registeredConnectOverride;
+  }
+
+ protected:
+  // The connection string override is lazily initialized (when ctx.mapVirtualHost is invoked for
+  // the fetcher or when host is accessed for ExtendedFetcher), so the host/port may be none.
+  bool registeredConnectOverride = false;
+  kj::Maybe<kj::String> host;
+  kj::Maybe<uint16_t> port;
+
  private:
   kj::OneOf<uint,
       IoOwn<IoChannelFactory::SubrequestChannel>,
@@ -528,6 +480,44 @@ class Fetcher: public JsRpcClientProvider {
       channelOrClientFactory;
   RequiresHostAndProtocol requiresHost;
   bool isInHouse;
+};
+
+// Extended fetcher type that makes the getters for host/port available using the JSG API. Allows
+// us to support connection string overrides in a backwards-compatible way.
+class ExtendedFetcher final: public Fetcher {
+ public:
+  explicit ExtendedFetcher(uint channel,
+      RequiresHostAndProtocol requiresHost,
+      uint16_t connectionStringOverridePort,
+      IsHyperdrive isHyperdrive,
+      bool isInHouse = false)
+      : Fetcher(channel, requiresHost, isInHouse),
+        isHyperdrive(isHyperdrive) {
+    port = connectionStringOverridePort;
+  }
+
+  // Get port – this is guaranteed to be present for extended fetchers
+  uint16_t getPort() const {
+    return KJ_ASSERT_NONNULL(port);
+  }
+  // Get host and set up override, if needed.
+  kj::StringPtr getHost(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(ExtendedFetcher) {
+    JSG_INHERIT(Fetcher);
+
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(host, getHost);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(port, getPort);
+  }
+
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+    return Fetcher::serialize(js, serializer);
+  }
+
+  JSG_ONEWAY_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
+
+ private:
+  IsHyperdrive isHyperdrive;
 };
 
 // Type of the second parameter to Request's constructor. Also the type of the second parameter
@@ -1094,12 +1084,12 @@ class Response final: public Body {
   void serialize(jsg::Lock& js,
       jsg::Serializer& serializer,
       const jsg::TypeHandler<InitializerDict>& initDictHandler,
-      const jsg::TypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler);
+      const jsg::TypeHandler<kj::Maybe<JsReadableStream>>& streamHandler);
   static jsg::Ref<Response> deserialize(jsg::Lock& js,
       rpc::SerializationTag tag,
       jsg::Deserializer& deserializer,
       const jsg::TypeHandler<InitializerDict>& initDictHandler,
-      const jsg::TypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler);
+      const jsg::TypeHandler<kj::Maybe<JsReadableStream>>& streamHandler);
 
   JSG_SERIALIZABLE(rpc::SerializationTag::RESPONSE);
 
@@ -1226,7 +1216,7 @@ jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
       api::Headers::ValueIterator::Next, api::Body, api::Response, api::Response::InitializerDict, \
       api::Request, api::Request::InitializerDict, api::Fetcher, api::Fetcher::PutOptions,         \
       api::Fetcher::ScheduledOptions, api::Fetcher::ScheduledResult, api::Fetcher::QueueResult,    \
-      api::Fetcher::ServiceBindingQueueMessage
+      api::Fetcher::ServiceBindingQueueMessage, api::ExtendedFetcher
 
 // The list of http.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

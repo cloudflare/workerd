@@ -22,11 +22,15 @@ filegroup(
         "form-data.c++",
         "global-scope.c++",
         "headers.c++",
+        "hibernatable-adapter.c++",
         "hibernatable-web-socket.c++",
         "http.c++",
+        "js-readable-stream.c++",
+        "js-writable-stream.c++",
         "messagechannel.c++",
         "performance.c++",
         "queue.c++",
+        "restore.c++",
         "scheduled.c++",
         "sockets.c++",
         "sql.c++",
@@ -70,11 +74,15 @@ filegroup(
         "form-data.h",
         "global-scope.h",
         "headers.h",
+        "hibernatable-adapter.h",
         "hibernatable-web-socket.h",
         "http.h",
+        "js-readable-stream.h",
+        "js-writable-stream.h",
         "messagechannel.h",
         "performance.h",
         "queue.h",
+        "restore.h",
         "scheduled.h",
         "sockets.h",
         "sql.h",
@@ -231,6 +239,11 @@ wd_cc_library(
 
 # for using EW_STREAMS_ISOLATE_TYPES with workerd-api etc. To use the different streams APIs,
 # include the headers you need directly.
+#
+# Note: JsReadableStream and JsWritableStream live in js-readable-stream.{h,c++} and
+# js-writable-stream.{h,c++}, which are folded into //src/workerd/io (via the :srcs/:hdrs
+# filegroups) because io-target headers (http.h, sockets.h, container.h) depend on them. This
+# target re-exports them via streams.h.
 wd_cc_library(
     name = "streams",
     hdrs = ["streams.h"],
@@ -386,6 +399,7 @@ wd_cc_library(
     deps = [
         "//src/pyodide:pyodide_extra_capnp",
         "//src/pyodide:pyodide_static",
+        "//src/pyodide:python_packages_capnp",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj:kj-async",
@@ -450,7 +464,6 @@ wd_cc_library(
     srcs = ["data-url.c++"],
     hdrs = ["data-url.h"],
     implementation_deps = [
-        ":encoding",
         "//src/workerd/util:strings",
     ],
     visibility = ["//visibility:public"],
@@ -458,6 +471,7 @@ wd_cc_library(
         "//src/workerd/jsg:url",
         "//src/workerd/util:mimetype",
         "@capnp-cpp//src/kj",
+        "@simdutf",
     ],
 )
 
@@ -527,6 +541,7 @@ wd_cc_library(
     for f in [
         "streams/pendingabort-gc-uaf-test.c++",
         "actor-state-test.c++",
+        "alarm-retry-test.c++",
         "basics-test.c++",
         "crypto/aes-test.c++",
         "crypto/impl-test.c++",
@@ -598,6 +613,22 @@ kj_test(
 )
 
 kj_test(
+    src = "js-readable-stream-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "js-writable-stream-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "system-streams-test.c++",
     deps = [
         "//src/workerd/io",
@@ -607,6 +638,22 @@ kj_test(
 
 kj_test(
     src = "actor-state-iocontext-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "container-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "sql-toarray-oom-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
@@ -666,6 +713,14 @@ kj_test(
     deps = [
         "//src/workerd/io",
         "//src/workerd/io:worker-interface",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "fetch-retry-claim-hook-test.c++",
+    deps = [
+        "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
     ],
 )

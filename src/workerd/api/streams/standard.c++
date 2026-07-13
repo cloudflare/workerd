@@ -123,7 +123,7 @@ class ReadableLockImpl {
       inner.lock.state.template transitionTo<Unlocked>();
     }
 
-    kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) override;
+    kj::Maybe<kj::Promise<void>> tryPumpTo(kj::Ptr<WritableStreamSink> sink, bool end) override;
 
     jsg::Promise<ReadResult> read(jsg::Lock& js) override;
 
@@ -352,7 +352,7 @@ void ReadableLockImpl<Controller>::onError(jsg::Lock& js, jsg::JsValue reason) {
 
 template <typename Controller>
 kj::Maybe<kj::Promise<void>> ReadableLockImpl<Controller>::PipeLocked::tryPumpTo(
-    WritableStreamSink& sink, bool end) {
+    kj::Ptr<WritableStreamSink> sink, bool end) {
   // We return nullptr here because this controller does not support kj's pumpTo.
   return kj::none;
 }
@@ -785,7 +785,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
   // See the comment for releaseReader in common.h for details on the use of maybeJs
   void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
 
-  void setOwnerRef(ReadableStream& stream) override;
+  void setOwnerRef(kj::Weak<ReadableStream> stream) override;
 
   Tee tee(jsg::Lock& js) override;
 
@@ -814,7 +814,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
   // If the stream was created within the scope of a request, we want to treat it as I/O
   // and make sure it is not advanced from the scope of a different request.
   kj::Maybe<IoContext&> ioContext;
-  kj::Maybe<ReadableStream&> owner;
+  kj::Weak<ReadableStream> owner;
 
   // Initial state before setup() is called.
   struct Initial {
@@ -932,7 +932,7 @@ class WritableStreamJsController final: public WritableStreamController {
   kj::Maybe<kj::Own<WritableStreamSink>> removeSink(jsg::Lock& js) override;
   void detach(jsg::Lock& js) override;
 
-  void setOwnerRef(WritableStream& stream) override;
+  void setOwnerRef(kj::Weak<WritableStream> stream) override;
 
   void setup(jsg::Lock& js,
       jsg::Optional<UnderlyingSink> maybeUnderlyingSink,
@@ -966,7 +966,7 @@ class WritableStreamJsController final: public WritableStreamController {
   jsg::Promise<void> pipeLoop(jsg::Lock& js);
 
   kj::Maybe<IoContext&> ioContext;
-  kj::Maybe<WritableStream&> owner;
+  kj::Weak<WritableStream> owner;
 
   // Initial state before setup() is called.
   struct Initial {
@@ -1258,7 +1258,7 @@ void ReadableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
 
 template <typename Self>
 kj::Own<typename ReadableImpl<Self>::Consumer> ReadableImpl<Self>::getConsumer(
-    kj::Maybe<ReadableImpl<Self>::StateListener&> listener) {
+    kj::Weak<ReadableImpl<Self>::StateListener> listener) {
   auto& queue = state.template getUnsafe<Queue>();
   return kj::heap<typename ReadableImpl<Self>::Consumer>(queue, listener);
 }
@@ -1267,8 +1267,8 @@ kj::Own<typename ReadableImpl<Self>::Consumer> ReadableImpl<Self>::getConsumer(
 
 template <typename Self>
 WritableImpl<Self>::WritableImpl(
-    jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal)
-    : owner(owner.addWeakRef()),
+    jsg::Lock& js, kj::Weak<WritableStream> owner, jsg::Ref<AbortSignal> abortSignal)
+    : owner(kj::mv(owner)),
       signal(kj::mv(abortSignal)) {
   flags.pedanticWpt = FeatureFlags::get(js).getPedanticWpt();
 }
@@ -1314,9 +1314,7 @@ jsg::Promise<void> WritableImpl<Self>::abort(
 template <typename Self>
 kj::Maybe<WritableStreamJsController&> WritableImpl<Self>::tryGetOwner() {
   KJ_IF_SOME(o, owner) {
-    return o->tryGet().map([](WritableStream& owner) -> WritableStreamJsController& {
-      return static_cast<WritableStreamJsController&>(owner.getController());
-    });
+    return static_cast<WritableStreamJsController&>(o->getController());
   }
   return kj::none;
 }
@@ -1773,19 +1771,19 @@ struct ReadableState {
         owner(owner) {}
 
   ReadableState(Controller controller,
-      Queue::ConsumerImpl::StateListener& listener,
+      kj::Weak<typename Queue::ConsumerImpl::StateListener> listener,
       ReadableStreamJsController& owner)
-      : ReadableState(controller.addRef(), controller->getConsumer(listener), owner) {}
+      : ReadableState(controller.addRef(), controller->getConsumer(kj::mv(listener)), owner) {}
 
   ReadableState clone(jsg::Lock& js,
-      Queue::ConsumerImpl::StateListener& listener,
+      kj::Weak<typename Queue::ConsumerImpl::StateListener> listener,
       ReadableStreamJsController& owner) {
-    return ReadableState(controller.addRef(), consumer->clone(js, listener), owner);
+    return ReadableState(controller.addRef(), consumer->clone(js, kj::mv(listener)), owner);
   }
 };
 
-struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener {
-
+struct ValueReadable final: public kj::PtrTarget,
+                            public api::ValueQueue::ConsumerImpl::StateListener {
   using State = ReadableState<DefaultController, ValueQueue>;
   kj::Maybe<State> state;
   bool reading = false;
@@ -1805,10 +1803,10 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
   }
 
   ValueReadable(DefaultController controller, ReadableStreamJsController& owner)
-      : state(State(kj::mv(controller), *this, owner)) {}
+      : state(State(kj::mv(controller), addWeakToThis(), owner)) {}
 
   ValueReadable(jsg::Lock& js, ReadableStreamJsController& owner, ValueReadable& other)
-      : state(KJ_ASSERT_NONNULL(other.state).clone(js, *this, owner)) {}
+      : state(KJ_ASSERT_NONNULL(other.state).clone(js, addWeakToThis(), owner)) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ValueReadable);
 
@@ -1833,9 +1831,9 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
       reading = true;
       KJ_DEFER(reading = false);
       s.consumer->read(js,
-          ValueQueue::ReadRequest{
+          kj::heap<ValueQueue::ReadRequest>({
             .resolver = kj::mv(prp.resolver),
-          });
+          }));
       // reading is reset by KJ_DEFER above.
       if (pendingCancel) {
         // If we were canceled while reading, we need to drop our state now.
@@ -1978,7 +1976,8 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
   }
 };
 
-struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
+struct ByteReadable final: public kj::PtrTarget,
+                           public api::ByteQueue::ConsumerImpl::StateListener {
 
   using State = ReadableState<ByobController, ByteQueue>;
   kj::Maybe<State> state;
@@ -2002,11 +2001,11 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
   ByteReadable(ByobController controller,
       ReadableStreamJsController& owner,
       kj::Maybe<int> autoAllocateChunkSize)
-      : state(State(kj::mv(controller), *this, owner)),
+      : state(State(kj::mv(controller), addWeakToThis(), owner)),
         autoAllocateChunkSize(autoAllocateChunkSize) {}
 
   ByteReadable(jsg::Lock& js, ReadableStreamJsController& owner, ByteReadable& other)
-      : state(KJ_ASSERT_NONNULL(other.state).clone(js, *this, owner)),
+      : state(KJ_ASSERT_NONNULL(other.state).clone(js, addWeakToThis(), owner)),
         autoAllocateChunkSize(other.autoAllocateChunkSize) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ByteReadable);
@@ -2046,8 +2045,8 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
         auto atLeast = kj::max(source.getElementSize(), byob.atLeast.orDefault(1));
         atLeast = kj::max(1, atLeast - (atLeast % source.getElementSize()));
         s.consumer->read(js,
-            ByteQueue::ReadRequest(kj::mv(prp.resolver),
-                {
+            kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
+                ByteQueue::ReadRequest::PullInto{
                   .store = jsg::BufferSource(js, source.detach(js)),
                   .atLeast = atLeast,
                   .type = ByteQueue::ReadRequest::Type::BYOB,
@@ -2059,8 +2058,8 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
           // Ensure that the handle is created here so that the size of the buffer
           // is accounted for in the isolate memory tracking.
           s.consumer->read(js,
-              ByteQueue::ReadRequest(kj::mv(prp.resolver),
-                  {
+              kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
+                  ByteQueue::ReadRequest::PullInto{
                     .store = kj::mv(store),
                     .type = ByteQueue::ReadRequest::Type::BYOB,
                   }));
@@ -2074,8 +2073,8 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
         constexpr size_t kDefaultReadSize = 16384;  // 16KB default buffer
         KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, kDefaultReadSize)) {
           s.consumer->read(js,
-              ByteQueue::ReadRequest(kj::mv(prp.resolver),
-                  {
+              kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
+                  ByteQueue::ReadRequest::PullInto{
                     .store = kj::mv(store),
                     .type = ByteQueue::ReadRequest::Type::DEFAULT,
                   }));
@@ -2323,7 +2322,7 @@ void ReadableStreamDefaultController::forcePull(jsg::Lock& js) {
 }
 
 kj::Own<ValueQueue::Consumer> ReadableStreamDefaultController::getConsumer(
-    kj::Maybe<ValueQueue::ConsumerImpl::StateListener&> stateListener) {
+    kj::Weak<ValueQueue::ConsumerImpl::StateListener> stateListener) {
   return impl.getConsumer(stateListener);
 }
 
@@ -2613,7 +2612,7 @@ void ReadableByteStreamController::forcePull(jsg::Lock& js) {
 }
 
 kj::Own<ByteQueue::Consumer> ReadableByteStreamController::getConsumer(
-    kj::Maybe<ByteQueue::ConsumerImpl::StateListener&> stateListener) {
+    kj::Weak<ByteQueue::ConsumerImpl::StateListener> stateListener) {
   return impl.getConsumer(stateListener);
 }
 
@@ -2642,7 +2641,7 @@ ReadableStreamJsController::ReadableStreamJsController(jsg::Lock& js, ByteReadab
 }
 
 jsg::Ref<ReadableStream> ReadableStreamJsController::addRef() {
-  return KJ_REQUIRE_NONNULL(owner).addRef();
+  return owner.assertLive().addRef();
 }
 
 jsg::Promise<void> ReadableStreamJsController::cancel(
@@ -3023,9 +3022,9 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
   KJ_UNREACHABLE;
 }
 
-void ReadableStreamJsController::setOwnerRef(ReadableStream& stream) {
-  KJ_ASSERT(owner == kj::none);
-  owner = &stream;
+void ReadableStreamJsController::setOwnerRef(kj::Weak<ReadableStream> stream) {
+  KJ_ASSERT(owner == nullptr);
+  owner = kj::mv(stream);
 }
 
 void ReadableStreamJsController::setup(jsg::Lock& js,
@@ -3586,9 +3585,9 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
 // ======================================================================================
 
 WritableStreamDefaultController::WritableStreamDefaultController(
-    jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal)
+    jsg::Lock& js, kj::Weak<WritableStream> owner, jsg::Ref<AbortSignal> abortSignal)
     : ioContext(tryGetIoContext()),
-      impl(js, owner, kj::mv(abortSignal)) {}
+      impl(js, kj::mv(owner), kj::mv(abortSignal)) {}
 
 jsg::Promise<void> WritableStreamDefaultController::abort(jsg::Lock& js, jsg::JsValue reason) {
   return impl.abort(js, JSG_THIS, reason);
@@ -3658,8 +3657,6 @@ WritableStreamJsController::~WritableStreamJsController() noexcept(false) {
   // Clear the state to break the circular reference to the controller.
   // During destruction, we force the transition since the current state doesn't matter.
   state.forceTransitionTo<StreamStates::Closed>();
-  // Clear owner reference
-  owner = kj::none;
   // Clear any pending abort promise
   maybeAbortPromise = kj::none;
 }
@@ -3706,7 +3703,7 @@ jsg::Promise<void> WritableStreamJsController::abort(
 }
 
 jsg::Ref<WritableStream> WritableStreamJsController::addRef() {
-  return KJ_ASSERT_NONNULL(owner).addRef();
+  return owner.assertLive().addRef();
 }
 
 bool WritableStreamJsController::isClosedOrClosing() {
@@ -3898,8 +3895,8 @@ void WritableStreamJsController::detach(jsg::Lock& js) {
   KJ_UNIMPLEMENTED("WritableStreamJsController::detach is not implemented");
 }
 
-void WritableStreamJsController::setOwnerRef(WritableStream& stream) {
-  owner = stream;
+void WritableStreamJsController::setOwnerRef(kj::Weak<WritableStream> stream) {
+  owner = kj::mv(stream);
 }
 
 void WritableStreamJsController::setup(jsg::Lock& js,
@@ -3918,7 +3915,7 @@ void WritableStreamJsController::setup(jsg::Lock& js,
   // We account for the memory usage of the WritableStreamDefaultController and AbortSignal together
   // because their lifetimes are identical and memory accounting itself has a memory overhead.
   auto controller = js.allocAccounted<WritableStreamDefaultController>(
-      sizeof(WritableStreamDefaultController) + sizeof(AbortSignal), js, KJ_ASSERT_NONNULL(owner),
+      sizeof(WritableStreamDefaultController) + sizeof(AbortSignal), js, owner,
       js.alloc<AbortSignal>());
   auto& controllerRef = *controller;
   state.transitionTo<Controller>(kj::mv(controller));
@@ -3939,7 +3936,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamJsController::tryPipeFrom(
   // completes, or is rejected if the pipe operation is aborted or errored.
 
   // Let's also acquire the destination pipe lock.
-  lock.pipeLock(KJ_ASSERT_NONNULL(owner), kj::mv(source), options);
+  lock.pipeLock(owner.assertLive(), kj::mv(source), options);
 
   return pipeLoop(js).then(js, [ref = addRef()](auto& js) {});
 }
@@ -4666,16 +4663,15 @@ void TransformStreamDefaultController::visitForMemoryInfo(jsg::MemoryTracker& tr
 jsg::Ref<ReadableStream> ReadableStream::from(
     jsg::Lock& js, jsg::AsyncGenerator<jsg::V8Ref<v8::Value>> generator) {
 
-  // AsyncGenerator is not a refcounted type, so we need to wrap it in a refcounted
-  // struct so that we can keep it alive through the various promise branches below.
-  auto rcGenerator =
-      kj::rc<kj::RefcountedWrapper<jsg::AsyncGenerator<jsg::V8Ref<v8::Value>>>>(kj::mv(generator));
+  // AsyncGenerator is not a refcounted type, so keep it in an Rc through the various promise
+  // branches below.
+  auto rcGenerator = kj::rc<jsg::AsyncGenerator<jsg::V8Ref<v8::Value>>>(kj::mv(generator));
 
   // clang-format off
   return constructor(js, UnderlyingSource{
     .pull = [generator = rcGenerator.addRef()](jsg::Lock& js, auto controller) mutable {
       auto& c = controller.template get<DefaultController>();
-      return generator->getWrapped().next(js).then(js,
+      return generator->next(js).then(js,
           [controller = c.addRef(), generator = generator.addRef()]
           (jsg::Lock& js, kj::Maybe<jsg::Value> value) mutable {
                 KJ_IF_SOME(v, value) {
@@ -4707,7 +4703,7 @@ jsg::Ref<ReadableStream> ReadableStream::from(
               });
     },
     .cancel = [generator = rcGenerator.addRef()](jsg::Lock& js, jsg::JsValue reason) mutable {
-      return generator->getWrapped().return_(js, js.v8Ref<v8::Value>(reason))
+      return generator->return_(js, js.v8Ref<v8::Value>(reason))
           .then(js, [generator = kj::mv(generator)](auto& lock, auto) {
         // The generator might produce a value on return and might even want to continue,
         // but the stream has been canceled at this point, so we stop here.

@@ -134,6 +134,12 @@ wd_test(
 )
 
 wd_test(
+    src = "actor-alarms-name-test.wd-test",
+    args = ["--experimental"],
+    data = ["actor-alarms-name-test.js"],
+)
+
+wd_test(
     src = "tail-worker-test.wd-test",
     args = [
         "--experimental",
@@ -384,6 +390,12 @@ wd_test(
 )
 
 wd_test(
+    src = "actor-block-concurrency-depth-test.wd-test",
+    args = ["--experimental"],
+    data = ["actor-block-concurrency-depth-test.js"],
+)
+
+wd_test(
     src = "als-only-test.wd-test",
     args = ["--experimental"],
     data = ["als-only-test.js"],
@@ -507,6 +519,15 @@ wd_test(
 )
 
 wd_test(
+    src = "diagnostics-channel-tail-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "diagnostics-channel-tail.js",
+        "diagnostics-channel-tail-trigger.js",
+    ],
+)
+
+wd_test(
     size = "large",
     src = "global-scope-test.wd-test",
     args = ["--experimental"],
@@ -610,6 +631,12 @@ wd_test(
 )
 
 wd_test(
+    src = "persistent-stubs-test.wd-test",
+    args = ["--experimental"],
+    data = ["persistent-stubs-test.js"],
+)
+
+wd_test(
     src = "compression-streams-test.wd-test",
     args = ["--experimental"],
     data = ["compression-streams-test.js"],
@@ -639,6 +666,14 @@ wd_test(
     src = "streams-byob-close-reentry-test.wd-test",
     args = ["--experimental"],
     data = ["streams-byob-close-reentry-test.js"],
+    # This test exercises a SIGSEGV regression (EDGEWORKER-RUNTIME-H40) by
+    # forcing reentrant controller.error() during the ReadableStream close
+    # drain. Predictable mode triggers an extra GC pass after every worker
+    # entrypoint in KJ_DEBUG builds (see maybeAddGcPassForTest), which
+    # surfaces a separate latent GC-traceability issue in the stream's
+    # state machine. Opt out of predictable mode here so this test only
+    # covers the regression it was written for.
+    predictable = False,
 )
 
 wd_test(
@@ -1118,6 +1153,18 @@ wd_test(
 wd_test(
     src = "htmlrewriter-transform-cancel-test.wd-test",
     data = ["htmlrewriter-transform-cancel-test.js"],
+)
+
+wd_test(
+    src = "ts-webstreams-test.wd-test",
+    args = ["--experimental"],
+    data = ["ts-webstreams-test.js"],
+)
+
+wd_test(
+    src = "ts-identity-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["ts-identity-streams-test.js"],
 )
 
 sh_test(

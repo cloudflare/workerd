@@ -492,6 +492,7 @@ interface ExecutionContext<Props = unknown> {
   passThroughOnException(): void;
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
+  restore(params: any): Promise<any>;
   cache?: CacheContext;
   readonly version?: {
     readonly metadata?: {
@@ -667,7 +668,7 @@ declare abstract class DurableObjectNamespace<
     jurisdiction: DurableObjectJurisdiction,
   ): DurableObjectNamespace<T>;
 }
-type DurableObjectJurisdiction = "eu" | "fedramp" | "fedramp-high";
+type DurableObjectJurisdiction = "eu" | "fedramp" | "fedramp-high" | "us";
 interface DurableObjectNamespaceNewUniqueIdOptions {
   jurisdiction?: DurableObjectJurisdiction;
 }
@@ -701,6 +702,7 @@ interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
+  restore(params: any): Promise<any>;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   container?: Container;
@@ -3985,6 +3987,7 @@ interface ContainerExecOptions {
   cwd?: string;
   env?: Record<string, string>;
   user?: string;
+  signal?: AbortSignal;
   stdin?: ReadableStream | "pipe";
   stdout?: "pipe" | "ignore";
   stderr?: "pipe" | "ignore" | "combined";
@@ -4052,6 +4055,7 @@ interface ContainerStartupOptions {
 }
 interface ContainerInfo {
   labels: Record<string, string>;
+  image: string;
 }
 /**
  * The **`FileSystemHandle`** interface of the File System API is an object which represents a file or directory entry.
@@ -4798,6 +4802,239 @@ interface CloudflareAccessIdentity extends Record<string, unknown> {
   is_warp?: boolean;
   /** True if the user is authenticated via Cloudflare Gateway. */
   is_gateway?: boolean;
+}
+// ============================================================================
+// Agent Memory
+//
+// Public type surface for user Workers binding to an Agent Memory namespace.
+// ============================================================================
+/** Memory type — every memory is classified into exactly one. */
+type AgentMemoryMemoryType = "fact" | "event" | "instruction" | "task";
+/** Search intensity for recall. */
+type AgentMemoryThinkingLevel = "low" | "medium" | "high";
+/** Response verbosity for recall. */
+type AgentMemoryResponseLength = "short" | "medium" | "long";
+/** A conversation message passed to ingest(). */
+interface AgentMemoryMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+  /** Optional message timestamp. */
+  timestamp?: Date;
+}
+/** Raw memory content passed to remember(). */
+interface AgentMemoryIncomingMemory {
+  /** Raw memory content. The service classifies and summarizes automatically. */
+  content: string;
+  /** Optional session identifier to associate with this memory. */
+  sessionId?: string | null | undefined;
+}
+/** A stored memory returned from remember(), get(), and delete(). */
+interface AgentMemoryMemory {
+  /** Memory ID. */
+  id: string;
+  /** Memory type. */
+  type: AgentMemoryMemoryType;
+  /** Text summary. */
+  summary: string;
+  /** Memory text. */
+  content: string;
+  /** Session that created this memory. */
+  sessionId: string | null;
+  /** Memory creation time. */
+  createdAt: Date;
+  /** Memory last-update time. */
+  updatedAt: Date;
+}
+/** Single entry in a list() response. Same shape as Memory minus full content. */
+type AgentMemoryMemoryListEntry = Omit<AgentMemoryMemory, "content">;
+/** A scored memory candidate in a recall result. */
+interface AgentMemoryScoredCandidate {
+  /** Candidate ID. */
+  id: string;
+  /** Text summary. */
+  summary: string;
+  /** Session that created this candidate, when known. */
+  sessionId: string | null;
+  /** Relevance score (higher is better). Comparable only within a single query. */
+  score: number;
+}
+/** Options for the ingest() method. */
+interface AgentMemoryIngestOptions {
+  /** Session identifier to associate with memories created during ingestion. */
+  sessionId?: string | null | undefined;
+}
+/** Options for the getSummary() method. */
+interface AgentMemoryGetSummaryOptions {
+  /** Session identifier to retrieve session summary for. */
+  sessionId?: string | null | undefined;
+}
+/** Response from the getSummary() method. */
+interface AgentMemoryGetSummaryResponse {
+  /** Markdown summary. */
+  summary: string;
+}
+/**
+ * Options for the recall() method.
+ *
+ * `referenceDate` accepts a Date object, an ISO-8601 date string
+ * (YYYY-MM-DD), or a full ISO-8601 datetime string. When provided, this
+ * date is used as "today" for resolving relative time references
+ * ("how many days ago", "last week") instead of the server's wall-clock time.
+ */
+interface AgentMemoryRecallOptions {
+  /** Recall intensity: "low" (default), "medium", or "high". */
+  thinkingLevel?: AgentMemoryThinkingLevel;
+  /** Response verbosity: "short", "medium" (default), or "long". */
+  responseLength?: AgentMemoryResponseLength;
+  /** Temporal anchor for date arithmetic. */
+  referenceDate?: Date | string;
+}
+/** Response from the recall() method. */
+interface AgentMemoryRecallResult {
+  /** Number of memories retrieved. */
+  count: number;
+  /** LLM-generated answer synthesizing the matching memories. */
+  answer: string;
+  /** Matching memories ranked by relevance. */
+  candidates: AgentMemoryScoredCandidate[];
+}
+/**
+ * Options for the list() method.
+ *
+ * `cursor` is the opaque continuation token returned by the previous page;
+ * pass it back unchanged to fetch the next page. `sessionId` and `type`
+ * are exact-match filters; combining them is allowed.
+ */
+interface AgentMemoryListMemoriesOptions {
+  /** Maximum number of memories to return. Default 20, max 500. */
+  limit?: number;
+  /** Opaque cursor from a previous page. */
+  cursor?: string;
+  /** Exact-match session filter. */
+  sessionId?: string;
+  /** Exact-match memory-type filter. */
+  type?: AgentMemoryMemoryType;
+}
+/** Response from the list() method. */
+interface AgentMemoryListMemoriesResult {
+  memories: AgentMemoryMemoryListEntry[];
+  /** Continuation cursor; absent when this page exhausted the result set. */
+  cursor?: string;
+}
+/**
+ * A single Agent Memory profile, scoped to a profile name.
+ *
+ * Returned by {@link AgentMemoryNamespace.getProfile}.
+ */
+declare abstract class AgentMemoryProfile {
+  /**
+   * Retrieve a memory by ID.
+   *
+   * @param memoryId - ULID of the memory to retrieve.
+   * @throws if the memory does not exist.
+   */
+  get(memoryId: string): Promise<AgentMemoryMemory>;
+  /**
+   * Delete a memory by ID.
+   *
+   * Removes the memory and any source messages linked by the memory's
+   * source message IDs.
+   *
+   * @param memoryId - ULID of the memory to delete.
+   * @throws if the memory does not exist.
+   */
+  delete(memoryId: string): Promise<AgentMemoryMemory>;
+  /**
+   * Store a memory in this profile. The content is automatically classified,
+   * summarized, and indexed.
+   *
+   * @param memory - Raw memory content to persist.
+   */
+  remember(memory: AgentMemoryIncomingMemory): Promise<AgentMemoryMemory>;
+  /**
+   * Extract memories from a conversation.
+   *
+   * @param messages - Conversation messages to extract memories from.
+   * @param options  - Optional ingest options.
+   */
+  ingest(
+    messages: Iterable<AgentMemoryMessage>,
+    options?: AgentMemoryIngestOptions,
+  ): Promise<void>;
+  /**
+   * Get a profile summary.
+   *
+   * @param options - Optional getSummary options.
+   */
+  getSummary(
+    options?: AgentMemoryGetSummaryOptions,
+  ): Promise<AgentMemoryGetSummaryResponse>;
+  /**
+   * Recall memories in this profile.
+   *
+   * @param query   - Recall query matched against memory content and keywords.
+   * @param options - Optional recall parameters.
+   * @returns Matching memories with relevance scores and a synthesized answer.
+   */
+  recall(
+    query: string,
+    options?: AgentMemoryRecallOptions,
+  ): Promise<AgentMemoryRecallResult>;
+  /**
+   * List active memories in this profile.
+   *
+   * Returns a paginated, filterable view of stored memories. Superseded
+   * versions are excluded. Use the returned `cursor` (when present) to
+   * fetch the next page.
+   *
+   * @param options - Optional pagination and filter options.
+   */
+  list(
+    options?: AgentMemoryListMemoriesOptions,
+  ): Promise<AgentMemoryListMemoriesResult>;
+  /**
+   * Soft-delete every memory and message in this profile that is tagged
+   * with `sessionId`.
+   *
+   * Idempotent: deleting a sessionId that has no rows is a no-op.
+   *
+   * @param sessionId - Session to delete.
+   */
+  deleteSession(sessionId: string): Promise<void>;
+}
+/**
+ * Namespace-level Agent Memory binding.
+ *
+ * Used as the type of an `env.MEMORY`-style binding backed by the Agent
+ * Memory product.
+ *
+ * @example
+ * ```ts
+ * export default {
+ *   async fetch(_request: Request, env: Env): Promise<Response> {
+ *     const profile = await env.MEMORY.getProfile("wrangler-e2e");
+ *     const summary = await profile.getSummary();
+ *     return Response.json(summary);
+ *   },
+ * };
+ * ```
+ */
+declare abstract class AgentMemoryNamespace {
+  /**
+   * Get a memory profile by name. Profiles are isolated by namespace and
+   * addressed by a compound key (namespaceId:profileName).
+   *
+   * @param profileName - Profile name (validated against naming rules).
+   * @returns RPC target for interacting with the profile.
+   */
+  getProfile(profileName: string): Promise<AgentMemoryProfile>;
+  /**
+   * Soft-delete a profile and schedule deferred purge. Marks all
+   * memories and messages as deleted.
+   *
+   * @param profileName - Name of the profile to delete.
+   */
+  deleteProfile(profileName: string): Promise<void>;
 }
 // ============ AI Search Error Interfaces ============
 interface AiSearchInternalError extends Error {}
@@ -6242,9 +6479,6 @@ type ChatCompletionChoice = {
     | "function_call";
   logprobs: ChatCompletionLogprobs | null;
 };
-type ChatCompletionsPromptInput = {
-  prompt: string;
-} & ChatCompletionsCommonOptions;
 type ChatCompletionsMessagesInput = {
   messages: Array<ChatCompletionMessageParam>;
 } & ChatCompletionsCommonOptions;
@@ -10369,11 +10603,11 @@ declare abstract class Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2 {
   postProcessedOutputs: Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Output;
 }
 declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_120B {
-  inputs: XOR<ResponsesInput, ChatCompletionsInput>;
+  inputs: XOR<ResponsesInput, ChatCompletionsMessagesInput>;
   postProcessedOutputs: XOR<ResponsesOutput, ChatCompletionsOutput>;
 }
 declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_20B {
-  inputs: XOR<ResponsesInput, ChatCompletionsInput>;
+  inputs: XOR<ResponsesInput, ChatCompletionsMessagesInput>;
   postProcessedOutputs: XOR<ResponsesOutput, ChatCompletionsOutput>;
 }
 interface Ai_Cf_Leonardo_Phoenix_1_0_Input {
@@ -11467,6 +11701,10 @@ declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_5 {
   inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
 }
+declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_6 {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
 declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
   inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
@@ -11564,7 +11802,9 @@ interface AiModels {
   "@cf/black-forest-labs/flux-2-klein-9b": Base_Ai_Cf_Black_Forest_Labs_Flux_2_Klein_9B;
   "@cf/zai-org/glm-4.7-flash": Base_Ai_Cf_Zai_Org_Glm_4_7_Flash;
   "@cf/moonshotai/kimi-k2.5": Base_Ai_Cf_Moonshotai_Kimi_K2_5;
+  "@cf/moonshotai/kimi-k2.6": Base_Ai_Cf_Moonshotai_Kimi_K2_6;
   "@cf/nvidia/nemotron-3-120b-a12b": Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B;
+  "@cf/google/gemma-4-26b-a4b-it": Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT;
 }
 type AiOptions = {
   /**
@@ -11617,16 +11857,8 @@ type AiModelsSearchObject = {
     value: string;
   }[];
 };
-type ChatCompletionsBase = XOR<
-  ChatCompletionsPromptInput,
-  ChatCompletionsMessagesInput
->;
-type ChatCompletionsInput = XOR<
-  ChatCompletionsBase,
-  {
-    requests: ChatCompletionsBase[];
-  }
->;
+type ChatCompletionsBase = ChatCompletionsMessagesInput;
+type ChatCompletionsInput = ChatCompletionsMessagesInput;
 interface InferenceUpstreamError extends Error {}
 interface AiInternalError extends Error {}
 type AiModelListType = Record<string, any>;
@@ -11689,9 +11921,16 @@ declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
     inputs: AiModelList[Name]["inputs"],
     options?: AiOptions,
   ): Promise<AiModelList[Name]["postProcessedOutputs"]>;
-  // Unknown model (gateway fallback)
-  run(
-    model: string & {},
+  // Unknown model (fallback).
+  //
+  // The `Exclude<..., keyof AiModelList>` constraint forces TypeScript to
+  // route any model name that is a literal key of `AiModelList` to one of
+  // the known-model overloads above (so input/output mismatches surface as
+  // type errors rather than silently falling back to `Record<string, unknown>`).
+  // Names that aren't in `AiModelList` — e.g. third-party gateway models
+  // like `"google/nano-banana"` — still hit this overload.
+  run<Model extends string>(
+    model: Model extends keyof AiModelList ? never : Model,
     inputs: Record<string, unknown>,
     options?: AiOptions,
   ): Promise<Record<string, unknown>>;
@@ -11917,12 +12156,17 @@ interface ArtifactsTokenListResult {
   /** Total number of tokens for the repository. */
   total: number;
 }
-/** Handle for a single repository. Returned by Artifacts.get(). */
+/**
+ * Handle for a single repository. Returned by Artifacts.get().
+ *
+ * Methods may throw `ArtifactsError` with code `INTERNAL_ERROR` if an unexpected service error occurs.
+ */
 interface ArtifactsRepo extends ArtifactsRepoInfo {
   /**
    * Create an access token for this repo.
    * @param scope Token scope: "write" (default) or "read".
    * @param ttl Time-to-live in seconds (default 86400, min 60, max 31536000).
+   * @throws {ArtifactsError} with code `INVALID_TTL` if ttl is out of range.
    */
   createToken(
     scope?: "write" | "read",
@@ -11934,6 +12178,7 @@ interface ArtifactsRepo extends ArtifactsRepoInfo {
    * Revoke a token by plaintext or ID.
    * @param tokenOrId Plaintext token or token ID.
    * @returns true if revoked, false if not found.
+   * @throws {ArtifactsError} with code `INVALID_INPUT` if tokenOrId is empty.
    */
   revokeToken(tokenOrId: string): Promise<boolean>;
   // ── Fork ──
@@ -11941,6 +12186,9 @@ interface ArtifactsRepo extends ArtifactsRepoInfo {
    * Fork this repo to a new repo.
    * @param name Target repository name.
    * @param opts Optional: description, readOnly flag, defaultBranchOnly (default true).
+   * @throws {ArtifactsError} with code `INVALID_REPO_NAME` if name is invalid.
+   * @throws {ArtifactsError} with code `ALREADY_EXISTS` if the target repo already exists.
+   * @throws {ArtifactsError} with code `FORK_IN_PROGRESS` if a fork is already running.
    */
   fork(
     name: string,
@@ -11951,13 +12199,53 @@ interface ArtifactsRepo extends ArtifactsRepoInfo {
     },
   ): Promise<ArtifactsCreateRepoResult>;
 }
-/** Artifacts binding — namespace-level operations. */
+// ── Error types ──────────────────────────────────────────────────────────────
+/**
+ * Error codes returned by Artifacts binding operations.
+ *
+ * Each code maps to a numeric code available on `ArtifactsError.numericCode`.
+ */
+type ArtifactsErrorCode =
+  | "ALREADY_EXISTS"
+  | "NOT_FOUND"
+  | "IMPORT_IN_PROGRESS"
+  | "FORK_IN_PROGRESS"
+  | "INVALID_INPUT"
+  | "INVALID_REPO_NAME"
+  | "INVALID_TTL"
+  | "INVALID_URL"
+  | "REMOTE_AUTH_REQUIRED"
+  | "UPSTREAM_UNAVAILABLE"
+  | "MEMORY_LIMIT"
+  | "INTERNAL_ERROR";
+/**
+ * Error thrown by Artifacts binding operations.
+ *
+ * Uses a string `.code` discriminator following the Cloudflare platform
+ * convention (StreamError, ImagesError, etc.). The `.numericCode` matches
+ * the REST API `errors[].code` values.
+ */
+interface ArtifactsError extends Error {
+  readonly name: "ArtifactsError";
+  /** String error code for programmatic matching. */
+  readonly code: ArtifactsErrorCode;
+  /** Numeric error code matching the REST API. */
+  readonly numericCode: number;
+}
+// ── Binding ──────────────────────────────────────────────────────────────────
+/**
+ * Artifacts binding — namespace-level operations.
+ *
+ * Methods may throw `ArtifactsError` with code `INTERNAL_ERROR` if an unexpected service error occurs.
+ */
 interface Artifacts {
   /**
    * Create a new repository with an initial access token.
    * @param name Repository name (alphanumeric, dots, hyphens, underscores).
    * @param opts Optional: readOnly flag, description, default branch name.
    * @returns Repo metadata with initial token.
+   * @throws {ArtifactsError} with code `INVALID_REPO_NAME` if name is invalid.
+   * @throws {ArtifactsError} with code `ALREADY_EXISTS` if the repo already exists.
    */
   create(
     name: string,
@@ -11971,12 +12259,23 @@ interface Artifacts {
    * Get a handle to an existing repository.
    * @param name Repository name.
    * @returns Repo handle.
+   * @throws {ArtifactsError} with code `NOT_FOUND` if the repo does not exist.
+   * @throws {ArtifactsError} with code `IMPORT_IN_PROGRESS` if the repo is still importing.
+   * @throws {ArtifactsError} with code `FORK_IN_PROGRESS` if the repo is still forking.
    */
   get(name: string): Promise<ArtifactsRepo>;
   /**
    * Import a repository from an external git remote.
    * @param params Source URL and optional branch/depth, plus target name and options.
    * @returns Repo metadata with initial token.
+   * @throws {ArtifactsError} with code `INVALID_REPO_NAME` if the target name is invalid.
+   * @throws {ArtifactsError} with code `INVALID_INPUT` if the source URL is not valid HTTPS.
+   * @throws {ArtifactsError} with code `INVALID_URL` if the source URL does not point to a git repository.
+   * @throws {ArtifactsError} with code `REMOTE_AUTH_REQUIRED` if the remote requires authentication.
+   * @throws {ArtifactsError} with code `NOT_FOUND` if the remote repository does not exist.
+   * @throws {ArtifactsError} with code `UPSTREAM_UNAVAILABLE` if the remote cannot be reached.
+   * @throws {ArtifactsError} with code `MEMORY_LIMIT` if the import exceeds service memory limits.
+   * @throws {ArtifactsError} with code `ALREADY_EXISTS` if the target repo already exists.
    */
   import(params: {
     source: {
@@ -12004,6 +12303,7 @@ interface Artifacts {
    * Delete a repository and all associated tokens.
    * @param name Repository name.
    * @returns true if deleted, false if not found.
+   * @throws {ArtifactsError} with code `INVALID_REPO_NAME` if name is invalid.
    */
   delete(name: string): Promise<boolean>;
 }
@@ -12145,86 +12445,512 @@ declare abstract class AutoRAG {
     params: AutoRagAiSearchRequest,
   ): Promise<AutoRagAiSearchResponse | Response>;
 }
-interface BasicImageTransformations {
-  /**
-   * Maximum width in image pixels. The value must be an integer.
+type BrowserRunLifecycleEvent =
+  | "load"
+  | "domcontentloaded"
+  | "networkidle0"
+  | "networkidle2";
+type BrowserRunResourceType =
+  | "document"
+  | "stylesheet"
+  | "image"
+  | "media"
+  | "font"
+  | "script"
+  | "texttrack"
+  | "xhr"
+  | "fetch"
+  | "prefetch"
+  | "eventsource"
+  | "websocket"
+  | "manifest"
+  | "signedexchange"
+  | "ping"
+  | "cspviolationreport"
+  | "preflight"
+  | "other";
+/** Options fields shared by all quick actions. */
+interface BrowserRunBaseOptions {
+  /** Adds `<script>` tags into the page with the desired URL or content.
+   * @see https://pptr.dev/api/puppeteer.frameaddscripttagoptions
    */
-  width?: number;
-  /**
-   * Maximum height in image pixels. The value must be an integer.
+  addScriptTag?: Array<{
+    content?: string;
+    url?: string;
+    type?: string;
+    id?: string;
+  }>;
+  /** Adds `<link rel="stylesheet">` or `<style>` tags into the page.
+   * @see https://pptr.dev/api/puppeteer.frameaddstyletagoptions
    */
-  height?: number;
-  /**
-   * Resizing mode as a string. It affects interpretation of width and height
-   * options:
-   *  - scale-down: Similar to contain, but the image is never enlarged. If
-   *    the image is larger than given width or height, it will be resized.
-   *    Otherwise its original size will be kept.
-   *  - contain: Resizes to maximum size that fits within the given width and
-   *    height. If only a single dimension is given (e.g. only width), the
-   *    image will be shrunk or enlarged to exactly match that dimension.
-   *    Aspect ratio is always preserved.
-   *  - cover: Resizes (shrinks or enlarges) to fill the entire area of width
-   *    and height. If the image has an aspect ratio different from the ratio
-   *    of width and height, it will be cropped to fit.
-   *  - crop: The image will be shrunk and cropped to fit within the area
-   *    specified by width and height. The image will not be enlarged. For images
-   *    smaller than the given dimensions it's the same as scale-down. For
-   *    images larger than the given dimensions, it's the same as cover.
-   *    See also trim.
-   *  - pad: Resizes to the maximum size that fits within the given width and
-   *    height, and then fills the remaining area with a background color
-   *    (white by default). Use of this mode is not recommended, as the same
-   *    effect can be more efficiently achieved with the contain mode and the
-   *    CSS object-fit: contain property.
-   *  - squeeze: Stretches and deforms to the width and height given, even if it
-   *    breaks aspect ratio
+  addStyleTag?: Array<{
+    content?: string;
+    url?: string;
+  }>;
+  /** Provide credentials for HTTP authentication. @see https://pptr.dev/api/puppeteer.credentials */
+  authenticate?: {
+    username: string;
+    password: string;
+  };
+  /** Set cookies before navigating. @see https://pptr.dev/api/puppeteer.cookieparam */
+  cookies?: Array<{
+    name: string;
+    value: string;
+    url?: string;
+    domain?: string;
+    path?: string;
+    secure?: boolean;
+    httpOnly?: boolean;
+    sameSite?: "Strict" | "Lax" | "None";
+    expires?: number;
+    priority?: "Low" | "Medium" | "High";
+    sameParty?: boolean;
+    sourceScheme?: "Unset" | "NonSecure" | "Secure";
+    sourcePort?: number;
+    partitionKey?: string;
+  }>;
+  /** Emulate a specific CSS media type (e.g. `"screen"`, `"print"`). */
+  emulateMediaType?: string;
+  /** Navigation options. @see https://pptr.dev/api/puppeteer.gotooptions */
+  gotoOptions?: {
+    /** Navigation timeout in milliseconds (max 60 000). @default 30000 */
+    timeout?: number;
+    /** When to consider navigation complete. @default "domcontentloaded" */
+    waitUntil?: BrowserRunLifecycleEvent | BrowserRunLifecycleEvent[];
+    referer?: string;
+    referrerPolicy?: string;
+  };
+  /** Block requests matching these regex patterns. Mutually exclusive with `allowRequestPattern`. */
+  rejectRequestPattern?: string[];
+  /** Only allow requests matching these regex patterns. Mutually exclusive with `rejectRequestPattern`. */
+  allowRequestPattern?: string[];
+  /** Block requests of these resource types. Mutually exclusive with `allowResourceTypes`. */
+  rejectResourceTypes?: BrowserRunResourceType[];
+  /** Only allow requests of these resource types. Mutually exclusive with `rejectResourceTypes`. */
+  allowResourceTypes?: BrowserRunResourceType[];
+  /** Additional HTTP headers sent with every request. */
+  setExtraHTTPHeaders?: Record<string, string>;
+  /** Whether JavaScript is enabled on the page. */
+  setJavaScriptEnabled?: boolean;
+  /** Override the default user agent string.
+   * @default "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+   * */
+  userAgent?: string;
+  /** Set the browser viewport size.
+   * @see https://pptr.dev/api/puppeteer.viewport
+   * @default {width:1920,height:1080}
+   * */
+  viewport?: {
+    width: number;
+    height: number;
+    deviceScaleFactor?: number;
+    isMobile?: boolean;
+    isLandscape?: boolean;
+    hasTouch?: boolean;
+  };
+  /** Wait for a CSS selector to appear in the page before proceeding.
+   * @see https://pptr.dev/api/puppeteer.waitforselectoroptions
    */
-  fit?: "scale-down" | "contain" | "cover" | "crop" | "pad" | "squeeze";
-  /**
-   * Image segmentation using artificial intelligence models. Sets pixels not
-   * within selected segment area to transparent e.g "foreground" sets every
-   * background pixel as transparent.
+  waitForSelector?: {
+    selector: string;
+    hidden?: true;
+    visible?: true;
+    /** Timeout in milliseconds. Max 120000 */
+    timeout?: number;
+  };
+  /** Wait for a fixed delay in milliseconds before proceeding. Max 120000 */
+  waitForTimeout?: number;
+  /** When true, continue on best-effort when awaited events fail or timeout. */
+  bestAttempt?: boolean;
+  /** Maximum duration in milliseconds for the browser action after page load. Max 120000 */
+  actionTimeout?: number;
+  /** Cache time to live in seconds (0-86400). Set to 0 to disable.
+   * @default 5
    */
-  segment?: "foreground";
-  /**
-   * When cropping with fit: "cover", this defines the side or point that should
-   * be left uncropped. The value is either a string
-   * "left", "right", "top", "bottom", "auto", or "center" (the default),
-   * or an object {x, y} containing focal point coordinates in the original
-   * image expressed as fractions ranging from 0.0 (top or left) to 1.0
-   * (bottom or right), 0.5 being the center. {fit: "cover", gravity: "top"} will
-   * crop bottom or left and right sides as necessary, but won’t crop anything
-   * from the top. {fit: "cover", gravity: {x:0.5, y:0.2}} will crop each side to
-   * preserve as much as possible around a point at 20% of the height of the
-   * source image.
-   */
-  gravity?:
-    | "face"
-    | "left"
-    | "right"
-    | "top"
-    | "bottom"
-    | "center"
-    | "auto"
-    | "entropy"
-    | BasicImageTransformationsGravityCoordinates;
-  /**
-   * Background color to add underneath the image. Applies only to images with
-   * transparency (such as PNG). Accepts any CSS color (#RRGGBB, rgba(…),
-   * hsl(…), etc.)
-   */
-  background?: string;
-  /**
-   * Number of degrees (90, 180, 270) to rotate the image by. width and height
-   * options refer to axes after rotation.
-   */
-  rotate?: 0 | 90 | 180 | 270 | 360;
+  cacheTTL?: number;
 }
-interface BasicImageTransformationsGravityCoordinates {
-  x?: number;
-  y?: number;
-  mode?: "remainder" | "box-center";
+/** Common options shared by all quick actions. Exactly one of `url` or `html` must be provided.*/
+type BrowserRunCommonOptions =
+  | (BrowserRunBaseOptions & {
+      /** URL to navigate to, e.g. `"https://example.com"`. */
+      url: string;
+    })
+  | (BrowserRunBaseOptions & {
+      /** Set the HTML content of the page directly. */
+      html: string;
+    });
+type BrowserRunPuppeteerScreenshotOptions = {
+  /** @default "png" */
+  type?: "png" | "jpeg" | "webp";
+  /** @default "binary" */
+  encoding?: "binary" | "base64";
+  quality?: number;
+  fullPage?: boolean;
+  clip?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    scale?: number;
+  };
+  omitBackground?: boolean;
+  optimizeForSpeed?: boolean;
+  captureBeyondViewport?: boolean;
+  fromSurface?: boolean;
+};
+type BrowserRunScreenshotOptions = BrowserRunCommonOptions & {
+  /** CSS selector of the element to screenshot. */
+  selector?: string;
+  /** When true, scroll the entire page before taking the screenshot. */
+  scrollPage?: boolean;
+  /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
+  screenshotOptions?: BrowserRunPuppeteerScreenshotOptions;
+};
+type BrowserRunPDFOptions = BrowserRunCommonOptions & {
+  /** @see https://pptr.dev/api/puppeteer.pdfoptions */
+  pdfOptions?: {
+    /** @default 1 */
+    scale?: number;
+    /** @default false */
+    displayHeaderFooter?: boolean;
+    headerTemplate?: string;
+    footerTemplate?: string;
+    /** @default false */
+    printBackground?: boolean;
+    /** @default false */
+    landscape?: boolean;
+    pageRanges?: string;
+    /** @default "letter" */
+    format?:
+      | "letter"
+      | "legal"
+      | "tabloid"
+      | "ledger"
+      | "a0"
+      | "a1"
+      | "a2"
+      | "a3"
+      | "a4"
+      | "a5"
+      | "a6";
+    width?: string | number;
+    height?: string | number;
+    /** @default false */
+    preferCSSPageSize?: boolean;
+    margin?: {
+      top?: string | number;
+      right?: string | number;
+      bottom?: string | number;
+      left?: string | number;
+    };
+    /** @default false */
+    omitBackground?: boolean;
+    /** @default true */
+    tagged?: boolean;
+    /** @default false */
+    outline?: boolean;
+    /** @default 30000 */
+    timeout?: number;
+  };
+};
+type BrowserRunScrapeOptions = BrowserRunCommonOptions & {
+  /** CSS selectors to scrape. At least one element is required. */
+  elements: Array<{
+    selector: string;
+  }>;
+};
+type BrowserRunLinksOptions = BrowserRunCommonOptions & {
+  /** When true, only return links that are visible on the page. @default false */
+  visibleLinksOnly?: boolean;
+  /** When true, exclude links pointing to external domains. @default false */
+  excludeExternalLinks?: boolean;
+};
+type BrowserRunSnapshotOptions = BrowserRunCommonOptions & {
+  /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
+  screenshotOptions?: Omit<BrowserRunPuppeteerScreenshotOptions, "encoding">;
+};
+interface BrowserRunJsonBaseOptions {
+  /** Custom AI models to try in order. Max 3. Falls back to next on error. */
+  custom_ai?: Array<{
+    /** Model ID in `<provider>/<model_name>` format, e.g. `"workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"`. */
+    model: string;
+    /** Bearer token. Not needed for workers-ai models. */
+    authorization?: string;
+  }>;
+}
+/**
+ * Options for the `json` quick action.
+ * At least one of `prompt` or `response_format` must be provided.
+ */
+type BrowserRunJsonOptions = BrowserRunCommonOptions &
+  BrowserRunJsonBaseOptions &
+  (
+    | {
+        /** Natural-language prompt describing what data to extract. */
+        prompt: string;
+        /** Structured output schema for the AI model. @see https://developers.cloudflare.com/workers-ai/json-mode/ */
+        response_format?: AiTextGenerationResponseFormat;
+      }
+    | {
+        /** Natural-language prompt describing what data to extract. */
+        prompt?: string;
+        /** Structured output schema for the AI model. @see https://developers.cloudflare.com/workers-ai/json-mode/ */
+        response_format: AiTextGenerationResponseFormat;
+      }
+  );
+type BrowserRunContentOptions = BrowserRunCommonOptions;
+type BrowserRunMarkdownOptions = BrowserRunCommonOptions;
+type BrowserRunResponseMeta = {
+  /** HTTP status code of the rendered page */
+  status: number;
+  /** Page title */
+  title: string;
+};
+/** Success response for `content` action. */
+type BrowserRunContentSuccessResponse = {
+  success: true;
+  /** Extracted HTML content */
+  result: string;
+  meta: BrowserRunResponseMeta;
+};
+/** Success response for `links` action. */
+type BrowserRunLinksSuccessResponse = {
+  success: true;
+  /** Extracted links */
+  result: string[];
+};
+/** Success response for `scrape` action. */
+type BrowserRunScrapeSuccessResponse = {
+  success: true;
+  result: Array<{
+    /** The CSS selector used to find elements. */
+    selector: string;
+    /** Array of elements matching the selector. */
+    results: Array<{
+      /** Outer HTML of the element. */
+      html: string;
+      /** Text content of the element. */
+      text: string;
+      /** Width of the element in pixels. */
+      width: number;
+      /** Height of the element in pixels. */
+      height: number;
+      /** Top position of the element relative to the viewport in pixels. */
+      top: number;
+      /** Left position of the element relative to the viewport in pixels. */
+      left: number;
+      /** Array of HTML attributes on the element. */
+      attributes: Array<{
+        /** Attribute name. */
+        name: string;
+        /** Attribute value. */
+        value: string;
+      }>;
+    }>;
+  }>;
+};
+/** Success response for `snapshot` action. */
+type BrowserRunSnapshotSuccessResponse = {
+  success: true;
+  result: {
+    /** HTML content of the page. */
+    content: string;
+    /** Base64-encoded screenshot image. */
+    screenshot: string;
+  };
+  meta: BrowserRunResponseMeta;
+};
+/** Success response for `json` action. */
+type BrowserRunJsonSuccessResponse = {
+  success: true;
+  /** JSON data extracted from the page using an AI model */
+  result: Record<string, unknown>;
+};
+/** Success response for `markdown` action. */
+type BrowserRunMarkdownSuccessResponse = {
+  success: true;
+  /** Extracted markdown content */
+  result: string;
+};
+/** Error response for BrowserRun actions. */
+type BrowserRunErrorResponse = {
+  success: false;
+  errors: {
+    message: string;
+    code?: number;
+    detail?: string;
+    path?: string;
+  }[];
+};
+/** Error response for BrowserRun `json` action. */
+type BrowserRunJsonErrorResponse = BrowserRunErrorResponse & {
+  /** Raw AI response text for debugging */
+  rawAiResponse?: string;
+};
+/**
+ * Browser Run API binding for automating headless browsers.
+ * @see https://developers.cloudflare.com/browser-run/
+ */
+declare abstract class BrowserRun {
+  /**
+   * Send a raw HTTP request to the Browser Run API.
+   * Used by libraries like `@cloudflare/puppeteer` to acquire and connect to a browser instance.
+   * @see https://developers.cloudflare.com/browser-run/
+   */
+  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+  /**
+   * Take a screenshot of a web page.
+   * @param action - Must be `'screenshot'`.
+   * @param options - Screenshot options including viewport, selectors, and image format.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - Binary image data with `Content-Type: image/png`, `image/jpeg`, or `image/webp` (when `encoding: 'binary'`, the default)
+   * - Data URI string with `Content-Type: text/plain` (when `encoding: 'base64'`)
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(
+    action: "screenshot",
+    options: BrowserRunScreenshotOptions,
+  ): Promise<Response>;
+  /**
+   * Generate a PDF of a web page.
+   * @param action - Must be `'pdf'`.
+   * @param options - PDF generation options including page size, margins, and headers/footers.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - Binary PDF data with `Content-Type: application/pdf`
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(action: "pdf", options: BrowserRunPDFOptions): Promise<Response>;
+  /**
+   * Get the HTML content of a web page.
+   * @param action - Must be `'content'`.
+   * @param options - Navigation and page interaction options.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunContentSuccessResponse` JSON with `Content-Type: application/json`
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(
+    action: "content",
+    options: BrowserRunContentOptions,
+  ): Promise<Response>;
+  /**
+   * Scrape elements from a web page by CSS selector.
+   * @param action - Must be `'scrape'`.
+   * @param options - Scrape options with CSS selectors for elements to extract.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunScrapeSuccessResponse` JSON with `Content-Type: application/json`
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(
+    action: "scrape",
+    options: BrowserRunScrapeOptions,
+  ): Promise<Response>;
+  /**
+   * Extract all links from a web page.
+   * @param action - Must be `'links'`.
+   * @param options - Options to filter visible or internal links only.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunLinksSuccessResponse` JSON with `Content-Type: application/json`
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(
+    action: "links",
+    options: BrowserRunLinksOptions,
+  ): Promise<Response>;
+  /**
+   * Get both the HTML content and a base64-encoded screenshot of a web page.
+   * @param action - Must be `'snapshot'`.
+   * @param options - Snapshot options including screenshot settings (encoding is always base64).
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunSnapshotSuccessResponse` JSON with `Content-Type: application/json`
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(
+    action: "snapshot",
+    options: BrowserRunSnapshotOptions,
+  ): Promise<Response>;
+  /**
+   * Extract structured JSON data from a web page using AI.
+   * @param action - Must be `'json'`.
+   * @param options - JSON extraction options with prompt or response_format schema.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunJsonSuccessResponse` JSON with `Content-Type: application/json`
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   * - HTTP 422 with code `2012` for HTML-to-markdown conversion failures
+   * - HTTP 422/500 for AI extraction failures (may include `rawAiResponse` field)
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(
+    action: "json",
+    options: BrowserRunJsonOptions,
+  ): Promise<Response>;
+  /**
+   * Convert a web page to Markdown.
+   * @param action - Must be `'markdown'`.
+   * @param options - Navigation and page interaction options.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunMarkdownSuccessResponse` JSON with `Content-Type: application/json`
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   * - HTTP 422 with code `2012` for HTML-to-markdown conversion failures
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(
+    action: "markdown",
+    options: BrowserRunMarkdownOptions,
+  ): Promise<Response>;
 }
 /**
  * In addition to the properties you can set in the RequestInit dict
@@ -12264,6 +12990,8 @@ interface RequestInitCfProperties extends Record<string, unknown> {
    * (e.g. { '200-299': 86400, '404': 1, '500-599': 0 })
    */
   cacheTtlByStatus?: Record<string, number>;
+  /** Controls how responses with a `Vary` header are cached for this request. */
+  vary?: RequestInitCfPropertiesVary;
   /**
    * Explicit Cache-Control header value to set on the response stored in cache.
    * This gives full control over cache directives (e.g. 'public, max-age=3600, s-maxage=86400').
@@ -12332,49 +13060,142 @@ interface RequestInitCfProperties extends Record<string, unknown> {
    */
   resolveOverride?: string;
 }
-interface RequestInitCfPropertiesImageDraw extends BasicImageTransformations {
+/**
+ * Controls how Workers Standard Vary handles a request header listed by an
+ * origin `Vary` response header:
+ *
+ * - `"normalize"`: normalize the request header value before it is used in the
+ *   cache variance key.
+ * - `"passthrough"`: use the raw request header value in the cache variance
+ *   key.
+ * - `"bypass"`: bypass cache when the header appears in the origin `Vary`
+ *   response header.
+ */
+type RequestInitCfPropertiesVaryAction = "normalize" | "passthrough" | "bypass";
+/** Configuration for Workers Standard Vary support. */
+interface RequestInitCfPropertiesVary {
+  /** The fallback action for varied request headers not listed in `headers`. */
+  default: RequestInitCfPropertiesVaryHeader;
   /**
-   * Absolute URL of the image file to use for the drawing. It can be any of
-   * the supported file formats. For drawing of watermarks or non-rectangular
-   * overlays we recommend using PNG or WebP images.
-   */
-  url: string;
-  /**
-   * Floating-point number between 0 (transparent) and 1 (opaque).
-   * For example, opacity: 0.5 makes overlay semitransparent.
-   */
-  opacity?: number;
-  /**
-   * - If set to true, the overlay image will be tiled to cover the entire
-   *   area. This is useful for stock-photo-like watermarks.
-   * - If set to "x", the overlay image will be tiled horizontally only
-   *   (form a line).
-   * - If set to "y", the overlay image will be tiled vertically only
-   *   (form a line).
-   */
-  repeat?: true | "x" | "y";
-  /**
-   * Position of the overlay image relative to a given edge. Each property is
-   * an offset in pixels. 0 aligns exactly to the edge. For example, left: 10
-   * positions left side of the overlay 10 pixels from the left edge of the
-   * image it's drawn over. bottom: 0 aligns bottom of the overlay with bottom
-   * of the background image.
+   * Lowercase request header names and their Vary configuration.
    *
-   * Setting both left & right, or both top & bottom is an error.
-   *
-   * If no position is specified, the image will be centered.
+   * The `accept` header can include `media_types`, the `accept-language`
+   * header can include `languages`, and other headers support only `action`.
    */
-  top?: number;
-  left?: number;
-  bottom?: number;
-  right?: number;
+  headers?: RequestInitCfPropertiesVaryHeaders;
 }
-interface RequestInitCfPropertiesImage extends BasicImageTransformations {
+/** Common Vary behavior for a single request header. */
+interface RequestInitCfPropertiesVaryHeader {
+  /** How this request header contributes to cache variance. */
+  action: RequestInitCfPropertiesVaryAction;
+}
+/** Vary behavior for the `accept` request header. */
+interface RequestInitCfPropertiesVaryAcceptHeader extends RequestInitCfPropertiesVaryHeader {
   /**
-   * Device Pixel Ratio. Default 1. Multiplier for width/height that makes it
-   * easier to specify higher-DPI sizes in <img srcset>.
+   * Media types to keep when normalizing the `Accept` request header.
+   *
+   * Named `media_types` to match the serialized `cf.vary` configuration.
    */
-  dpr?: number;
+  media_types?: string[];
+}
+/** Vary behavior for the `accept-language` request header. */
+interface RequestInitCfPropertiesVaryAcceptLanguageHeader extends RequestInitCfPropertiesVaryHeader {
+  /**
+   * Language tags to keep when normalizing the `Accept-Language` request
+   * header.
+   */
+  languages?: string[];
+}
+/**
+ * Lowercase request header names and their Vary behavior.
+ *
+ * The index signature allows arbitrary custom request headers beyond the
+ * well-known `accept` and `accept-language` specializations.
+ */
+interface RequestInitCfPropertiesVaryHeaders {
+  accept?: RequestInitCfPropertiesVaryAcceptHeader;
+  "accept-language"?: RequestInitCfPropertiesVaryAcceptLanguageHeader;
+  [header: string]:
+    | RequestInitCfPropertiesVaryHeader
+    | RequestInitCfPropertiesVaryAcceptHeader
+    | RequestInitCfPropertiesVaryAcceptLanguageHeader
+    | undefined;
+}
+interface BasicImageTransformations {
+  /**
+   * Maximum width in image pixels. The value must be an integer.
+   */
+  width?: number;
+  /**
+   * Maximum height in image pixels. The value must be an integer.
+   */
+  height?: number;
+  /**
+   * When cropping with fit: "cover", this defines the side or point that should
+   * be left uncropped. The value is either a string
+   * "left", "right", "top", "bottom", "auto", or "center" (the default),
+   * or an object {x, y} containing focal point coordinates in the original
+   * image expressed as fractions ranging from 0.0 (top or left) to 1.0
+   * (bottom or right), 0.5 being the center. {fit: "cover", gravity: "top"} will
+   * crop bottom or left and right sides as necessary, but won’t crop anything
+   * from the top. {fit: "cover", gravity: {x:0.5, y:0.2}} will crop each side to
+   * preserve as much as possible around a point at 20% of the height of the
+   * source image.
+   */
+  gravity?:
+    | "face"
+    | "left"
+    | "right"
+    | "top"
+    | "bottom"
+    | "center"
+    | "auto"
+    | "entropy"
+    | BasicImageTransformationsGravityCoordinates;
+  /**
+   * Specifies how closely the image is cropped toward detected faces when combined
+   * with the gravity=face option. Accepts a valid range between 0.0 (includes as much
+   * of the background as possible) and 1.0 (crops the image as closely to the face as
+   * possible). The default is 0.
+   */
+  zoom?: number;
+  /**
+   * Resizing mode as a string. It affects interpretation of width and height
+   * options:
+   *  - scale-down: Similar to contain, but the image is never enlarged. If
+   *    the image is larger than given width or height, it will be resized.
+   *    Otherwise its original size will be kept.
+   *  - scale-up: Similar to contain, but the image is never shrunk. If the
+   *    image is smaller than the given width or height, it will be resized.
+   *    Otherwise its original size will be kept.
+   *  - contain: Resizes to maximum size that fits within the given width and
+   *    height. If only a single dimension is given (e.g. only width), the
+   *    image will be shrunk or enlarged to exactly match that dimension.
+   *    Aspect ratio is always preserved.
+   *  - cover: Resizes (shrinks or enlarges) to fill the entire area of width
+   *    and height. If the image has an aspect ratio different from the ratio
+   *    of width and height, it will be cropped to fit.
+   *  - crop: The image will be shrunk and cropped to fit within the area
+   *    specified by width and height. The image will not be enlarged. For images
+   *    smaller than the given dimensions it's the same as scale-down. For
+   *    images larger than the given dimensions, it's the same as cover.
+   *    See also trim.
+   *  - pad: Resizes to the maximum size that fits within the given width and
+   *    height, and then fills the remaining area with a background color
+   *    (white by default). Use of this mode is not recommended, as the same
+   *    effect can be more efficiently achieved with the contain mode and the
+   *    CSS object-fit: contain property.
+   *  - squeeze: Stretches and deforms to the width and height given, even if it
+   *    breaks aspect ratio
+   */
+  fit?:
+    | "scale-down"
+    | "scale-up"
+    | "contain"
+    | "cover"
+    | "crop"
+    | "pad"
+    | "squeeze";
   /**
    * Allows you to trim your image. Takes dpr into account and is performed before
    * resizing or rotation.
@@ -12407,6 +13228,155 @@ interface RequestInitCfPropertiesImage extends BasicImageTransformations {
               keep?: number;
             };
       };
+  /**
+   * Background color to add underneath the image. Applies only to images with
+   * transparency (such as PNG). Accepts any CSS color (#RRGGBB, rgba(…),
+   * hsl(…), etc.)
+   */
+  background?: string;
+  /**
+   * Flips the images horizontally, vertically, or both. Flipping is applied before
+   * rotation, so if you apply flip=h,rotate=90 then the image will be flipped
+   * horizontally, then rotated by 90 degrees.
+   */
+  flip?: "h" | "v" | "hv";
+  /**
+   * Number of degrees (90, 180, 270) to rotate the image by. width and height
+   * options refer to axes after rotation.
+   */
+  rotate?: 0 | 90 | 180 | 270 | 360;
+  /**
+   * Strength of sharpening filter to apply to the image. Floating-point
+   * number between 0 (no sharpening, default) and 10 (maximum). 1.0 is a
+   * recommended value for downscaled images.
+   */
+  sharpen?: number;
+  /**
+   * Radius of a blur filter (approximate gaussian). Maximum supported radius
+   * is 250.
+   */
+  blur?: number;
+  /**
+   * Increase contrast by a factor. A value of 1.0 equals no change, a value of
+   * 0.5 equals low contrast, and a value of 2.0 equals high contrast. 0 is
+   * ignored.
+   */
+  contrast?: number;
+  /**
+   * Increase brightness by a factor. A value of 1.0 equals no change, a value
+   * of 0.5 equals half brightness, and a value of 2.0 equals twice as bright.
+   * 0 is ignored.
+   */
+  brightness?: number;
+  /**
+   * Increase exposure by a factor. A value of 1.0 equals no change, a value of
+   * 0.5 darkens the image, and a value of 2.0 lightens the image. 0 is ignored.
+   */
+  gamma?: number;
+  /**
+   * Increase contrast by a factor. A value of 1.0 equals no change, a value of
+   * 0.5 equals low contrast, and a value of 2.0 equals high contrast. 0 is
+   * ignored.
+   */
+  saturation?: number;
+  /**
+   * Device Pixel Ratio. Default 1. Multiplier for width/height that makes it
+   * easier to specify higher-DPI sizes in <img srcset>.
+   */
+  dpr?: number;
+  /**
+   * Adds a border around the image. The border is added after resizing. Border
+   * width takes dpr into account, and can be specified either using a single
+   * width property, or individually for each side.
+   */
+  border?:
+    | {
+        color: string;
+        width: number;
+      }
+    | {
+        color: string;
+        top: number;
+        right: number;
+        bottom: number;
+        left: number;
+      };
+  /**
+   * Image segmentation using artificial intelligence models. Sets pixels not
+   * within selected segment area to transparent e.g "foreground" sets every
+   * background pixel as transparent.
+   */
+  segment?: "foreground";
+  /**
+   * Controls the algorithm used when an image needs to be enlarged. This
+   * parameter works with any fit mode that upscales, such as `contain`,
+   * `cover`, and `scale-up`. It has no effect when `fit=scale-down` or when
+   * the target dimensions are smaller than the source.
+   * - interpolate: Uses bicubic interpolation, which may reduce image quality.
+   *   This is the default behavior when `upscale` is not specified.
+   * - generate: Uses AI upscaling to produce sharper, more detailed results
+   *   when enlarging images.
+   */
+  upscale?: "interpolate" | "generate";
+}
+interface BasicImageTransformationsGravityCoordinates {
+  x?: number;
+  y?: number;
+  mode?: "remainder" | "box-center";
+}
+interface RequestInitCfPropertiesImageDraw extends BasicImageTransformations {
+  /**
+   * Absolute URL of the image file to use for the drawing. It can be any of
+   * the supported file formats. For drawing of watermarks or non-rectangular
+   * overlays we recommend using PNG or WebP images.
+   */
+  url: string;
+  /**
+   * Floating-point number between 0 (transparent) and 1 (opaque).
+   * For example, opacity: 0.5 makes overlay semitransparent.
+   */
+  opacity?: number;
+  /**
+   * - If set to true, the overlay image will be tiled to cover the entire
+   *   area. This is useful for stock-photo-like watermarks.
+   * - If set to "x", the overlay image will be tiled horizontally only
+   *   (form a line).
+   * - If set to "y", the overlay image will be tiled vertically only
+   *   (form a line).
+   */
+  repeat?: true | "x" | "y";
+  /**
+   * How to combine the foreground and backdrop pixels to create the result
+   */
+  composite?: /** Foreground drawn on top of backdrop (default) */
+    | "over"
+    /** Foreground shown only where backdrop is opaque */
+    | "in"
+    /** Foreground drawn on top, but clipped to the backdrop's shape */
+    | "atop"
+    /** Foreground shown only where backdrop is transparent */
+    | "out"
+    /** Foreground and backdrop visible only where the other is not */
+    | "xor"
+    /** Foreground and backdrop channels added (brightening) */
+    | "lighter";
+  /**
+   * Position of the overlay image relative to a given edge. Each property is
+   * an offset in pixels. 0 aligns exactly to the edge. For example, left: 10
+   * positions left side of the overlay 10 pixels from the left edge of the
+   * image it's drawn over. bottom: 0 aligns bottom of the overlay with bottom
+   * of the background image.
+   *
+   * Setting both left & right, or both top & bottom is an error.
+   *
+   * If no position is specified, the image will be centered.
+   */
+  top?: number;
+  left?: number;
+  bottom?: number;
+  right?: number;
+}
+interface RequestInitCfPropertiesImage extends BasicImageTransformations {
   /**
    * Quality setting from 1-100 (useful values are in 60-90 range). Lower values
    * make images look worse, but load faster. The default is 85. It applies only
@@ -12457,17 +13427,6 @@ interface RequestInitCfPropertiesImage extends BasicImageTransformations {
    */
   metadata?: "keep" | "copyright" | "none";
   /**
-   * Strength of sharpening filter to apply to the image. Floating-point
-   * number between 0 (no sharpening, default) and 10 (maximum). 1.0 is a
-   * recommended value for downscaled images.
-   */
-  sharpen?: number;
-  /**
-   * Radius of a blur filter (approximate gaussian). Maximum supported radius
-   * is 250.
-   */
-  blur?: number;
-  /**
    * Overlays are drawn in the order they appear in the array (last array
    * entry is the topmost layer).
    */
@@ -12478,52 +13437,6 @@ interface RequestInitCfPropertiesImage extends BasicImageTransformations {
    * the origin.
    */
   "origin-auth"?: "share-publicly";
-  /**
-   * Adds a border around the image. The border is added after resizing. Border
-   * width takes dpr into account, and can be specified either using a single
-   * width property, or individually for each side.
-   */
-  border?:
-    | {
-        color: string;
-        width: number;
-      }
-    | {
-        color: string;
-        top: number;
-        right: number;
-        bottom: number;
-        left: number;
-      };
-  /**
-   * Increase brightness by a factor. A value of 1.0 equals no change, a value
-   * of 0.5 equals half brightness, and a value of 2.0 equals twice as bright.
-   * 0 is ignored.
-   */
-  brightness?: number;
-  /**
-   * Increase contrast by a factor. A value of 1.0 equals no change, a value of
-   * 0.5 equals low contrast, and a value of 2.0 equals high contrast. 0 is
-   * ignored.
-   */
-  contrast?: number;
-  /**
-   * Increase exposure by a factor. A value of 1.0 equals no change, a value of
-   * 0.5 darkens the image, and a value of 2.0 lightens the image. 0 is ignored.
-   */
-  gamma?: number;
-  /**
-   * Increase contrast by a factor. A value of 1.0 equals no change, a value of
-   * 0.5 equals low contrast, and a value of 2.0 equals high contrast. 0 is
-   * ignored.
-   */
-  saturation?: number;
-  /**
-   * Flips the images horizontally, vertically, or both. Flipping is applied before
-   * rotation, so if you apply flip=h,rotate=90 then the image will be flipped
-   * horizontally, then rotated by 90 degrees.
-   */
-  flip?: "h" | "v" | "hv";
   /**
    * Slightly reduces latency on a cache miss by selecting a
    * quickest-to-compress file format, at a cost of increased file size and
@@ -13401,6 +14314,13 @@ interface ForwardableEmailMessage extends EmailMessage {
    * @returns A promise that resolves when the email message is replied.
    */
   reply(message: EmailMessage): Promise<EmailSendResult>;
+  /**
+   * Reply to the sender of this email message with a message built from the given
+   * fields. Threading headers (In-Reply-To/References) are set automatically.
+   * @param builder The reply message contents.
+   * @returns A promise that resolves when the email message is replied.
+   */
+  reply(builder: EmailReplyMessageBuilder): Promise<EmailSendResult>;
 }
 /** A file attachment for an email message */
 type EmailAttachment =
@@ -13424,22 +14344,49 @@ interface EmailAddress {
   email: string;
 }
 /**
+ * Recipient fields for `SendEmail.send()`. At least one of `to`, `cc`, or
+ * `bcc` must be provided.
+ */
+type EmailDestinations = {
+  to?: string | EmailAddress | (string | EmailAddress)[];
+  cc?: string | EmailAddress | (string | EmailAddress)[];
+  bcc?: string | EmailAddress | (string | EmailAddress)[];
+} & (
+  | {
+      to: string | EmailAddress | (string | EmailAddress)[];
+    }
+  | {
+      cc: string | EmailAddress | (string | EmailAddress)[];
+    }
+  | {
+      bcc: string | EmailAddress | (string | EmailAddress)[];
+    }
+);
+/**
+ * Fields shared by all composed emails (no recipients). Used directly by
+ * `ForwardableEmailMessage.reply()`, which always replies to the original
+ * sender, and extended by `EmailMessageBuilder` for `SendEmail.send()`.
+ */
+interface EmailReplyMessageBuilder {
+  from: string | EmailAddress;
+  subject: string;
+  replyTo?: string | EmailAddress;
+  headers?: Record<string, string>;
+  text?: string;
+  html?: string;
+  attachments?: EmailAttachment[];
+}
+/**
+ * Fields for composing an email without constructing raw MIME, for
+ * `SendEmail.send()`. Requires at least one of `to`, `cc`, or `bcc`.
+ */
+type EmailMessageBuilder = EmailReplyMessageBuilder & EmailDestinations;
+/**
  * A binding that allows a Worker to send email messages.
  */
 interface SendEmail {
   send(message: EmailMessage): Promise<EmailSendResult>;
-  send(builder: {
-    from: string | EmailAddress;
-    to: string | string[];
-    subject: string;
-    replyTo?: string | EmailAddress;
-    cc?: string | string[];
-    bcc?: string | string[];
-    headers?: Record<string, string>;
-    text?: string;
-    html?: string;
-    attachments?: EmailAttachment[];
-  }): Promise<EmailSendResult>;
+  send(builder: EmailMessageBuilder): Promise<EmailSendResult>;
 }
 declare abstract class EmailEvent extends ExtendableEvent {
   readonly message: ForwardableEmailMessage;
@@ -13633,6 +14580,15 @@ interface Hyperdrive {
    */
   readonly host: string;
   /*
+   * A synthetic IPv4 address (in the reserved 240.0.0.0/4 range) that, like the
+   * host field, is only valid within the context of the currently running
+   * Worker and, when passed into the `connect()` function from the
+   * "cloudflare:sockets" module, will connect to the Hyperdrive instance for
+   * your database. This is provided for database drivers that require the host
+   * to be an IP literal rather than a hostname.
+   */
+  readonly ip: string;
+  /*
    * The port that must be paired the the host field when connecting.
    */
   readonly port: number;
@@ -13726,11 +14682,25 @@ type ImageTransform = {
 type ImageDrawOptions = {
   opacity?: number;
   repeat?: boolean | string;
+  composite?: ImageCompositeMode;
   top?: number;
   left?: number;
   bottom?: number;
   right?: number;
 };
+type ImageCompositeMode =
+  /** Foreground drawn on top of backdrop (default) */
+  | "over"
+  /** Foreground shown only where backdrop is opaque */
+  | "in"
+  /** Foreground drawn on top, but clipped to the backdrop's shape */
+  | "atop"
+  /** Foreground shown only where backdrop is transparent */
+  | "out"
+  /** Foreground and backdrop visible only where the other is not */
+  | "xor"
+  /** Foreground and backdrop channels added (brightening) */
+  | "lighter";
 type ImageInputOptions = {
   encoding?: "base64";
 };
@@ -14436,44 +15406,101 @@ declare namespace CloudflareWorkersModule {
     | `${number} ${WorkflowDurationLabel}${"s" | ""}`
     | number;
   export type WorkflowDelayDuration = WorkflowSleepDuration;
+  export type WorkflowDynamicDelayContext = {
+    ctx: WorkflowStepContext<WorkflowDelayFunction>;
+    error: Error;
+  };
+  export type WorkflowDelayFunction = (
+    input: WorkflowDynamicDelayContext,
+  ) => WorkflowDelayDuration | Promise<WorkflowDelayDuration>;
   export type WorkflowTimeoutDuration = WorkflowSleepDuration;
   export type WorkflowRetentionDuration = WorkflowSleepDuration;
   export type WorkflowBackoff = "constant" | "linear" | "exponential";
+  export type WorkflowStepSensitivity = "output";
   export type WorkflowStepConfig = {
     retries?: {
       limit: number;
-      delay: WorkflowDelayDuration | number;
+      delay: WorkflowDelayDuration | number | WorkflowDelayFunction;
       backoff?: WorkflowBackoff;
     };
     timeout?: WorkflowTimeoutDuration | number;
+    sensitive?: WorkflowStepSensitivity;
+  };
+  export type WorkflowStepRollbackConfig = Pick<
+    WorkflowStepConfig,
+    "retries" | "timeout"
+  >;
+  export type WorkflowCronSchedule = {
+    /** Cron expression that triggered this event. */
+    cron: string;
+    /** Timestamp of the scheduled trigger, in milliseconds since the Unix epoch. */
+    scheduledTime: number;
   };
   export type WorkflowEvent<T> = {
     payload: Readonly<T>;
     timestamp: Date;
     instanceId: string;
+    workflowName: string;
+    schedule?: WorkflowCronSchedule;
   };
   export type WorkflowStepEvent<T> = {
     payload: Readonly<T>;
     timestamp: Date;
     type: string;
+    sensitive?: WorkflowStepSensitivity;
   };
-  export type WorkflowStepContext = {
+  export type WorkflowStepContext<Delay = WorkflowDelayDuration | number> = {
     step: {
       name: string;
       count: number;
     };
     attempt: number;
-    config: WorkflowStepConfig;
+    config: {
+      retries?: {
+        limit: number;
+        backoff?: WorkflowBackoff;
+      } & (Delay extends WorkflowDelayFunction
+        ? {}
+        : {
+            delay: WorkflowDelayDuration | number;
+          });
+      timeout?: WorkflowTimeoutDuration | number;
+      sensitive?: WorkflowStepSensitivity;
+    };
+  };
+  export type WorkflowRollbackContext<T = unknown> = {
+    ctx: WorkflowStepContext;
+    error: Error;
+    output: T | undefined;
+    /** @deprecated Use `ctx.step.name` and `ctx.step.count` instead. */
+    stepName: string;
+  };
+  export type WorkflowRollbackHandler<T = unknown> = (
+    ctx: WorkflowRollbackContext<T>,
+  ) => Promise<void>;
+  export type WorkflowStepRollbackOptions<T = unknown> = {
+    rollback: WorkflowRollbackHandler<T>;
+    rollbackConfig?: WorkflowStepRollbackConfig;
   };
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
       name: string,
       callback: (ctx: WorkflowStepContext) => Promise<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions<T>,
     ): Promise<T>;
-    do<T extends Rpc.Serializable<T>>(
+    do<T extends Rpc.Serializable<T>, const C extends WorkflowStepConfig>(
       name: string,
-      config: WorkflowStepConfig,
-      callback: (ctx: WorkflowStepContext) => Promise<T>,
+      config: C,
+      callback: (
+        ctx: WorkflowStepContext<
+          C["retries"] extends {
+            delay: infer D;
+          }
+            ? D
+            : WorkflowDelayDuration | number
+        >,
+      ) => Promise<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions<T>,
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
@@ -15291,12 +16318,13 @@ type MarkdownDocument = {
   name: string;
   blob: Blob;
 };
+type OutputFormat = "markdown" | "text";
 type ConversionResponse =
   | {
       id: string;
       name: string;
       mimeType: string;
-      format: "markdown";
+      format: OutputFormat;
       tokens: number;
       data: string;
     }
@@ -15314,7 +16342,11 @@ type EmbeddedImageConversionOptions = ImageConversionOptions & {
   convert?: boolean;
   maxConvertedImages?: number;
 };
+type ConversionOutputOptions = {
+  format?: OutputFormat;
+};
 type ConversionOptions = {
+  output?: ConversionOutputOptions;
   html?: {
     images?: EmbeddedImageConversionOptions & {
       convertOGImage?: boolean;
@@ -15450,6 +16482,7 @@ declare namespace TailStream {
     readonly dispatchNamespace?: string;
     readonly entrypoint?: string;
     readonly executionModel: string;
+    readonly durableObjectId?: string;
     readonly scriptName?: string;
     readonly scriptTags?: string[];
     readonly scriptVersion?: ScriptVersion;
@@ -15878,6 +16911,103 @@ type WorkerVersionMetadata = {
   /** The timestamp of when the Worker Version was uploaded */
   timestamp: string;
 };
+// ============ Web Search Request Types ============
+/**
+ * Options for a Web Search query.
+ */
+type WebSearchSearchOptions = {
+  /** The search query. */
+  query: string;
+  /**
+   * Maximum number of results to return. Defaults to 10, capped at 20.
+   * The actual count may be lower if fewer matches exist.
+   */
+  limit?: number;
+};
+// ============ Web Search Response Types ============
+/**
+ * A single Web Search result.
+ *
+ * Web Search is discovery-only -- results carry catalog metadata about a page
+ * but never the page body. To read a result's content the caller invokes the
+ * global `fetch()` API against the result's `url`, at which point the
+ * destination's own access controls apply (including Cloudflare Pay-per-Crawl).
+ */
+type WebSearchResult = {
+  /** Canonical URL. */
+  url: string;
+  /** Page title. */
+  title: string;
+  /** Page-level description. May be absent. */
+  description?: string;
+  /**
+   * Last-modified date for the page, when known. Naive (no timezone)
+   * ISO-8601 datetime, e.g. `"2025-11-30T04:39:48"`.
+   */
+  lastModifiedDate?: string;
+  /**
+   * Page meta image URL (typically the `og:image`). May be absent.
+   */
+  imageUrl?: string;
+  /** Optional favicon URL for UI hints. */
+  faviconUrl?: string;
+};
+/**
+ * Per-response metadata for a Web Search query. Carries operational
+ * fields useful for support and debugging.
+ */
+type WebSearchResponseMetadata = {
+  /** The query that was executed. */
+  query: string;
+  /** Opaque request identifier used for support and debugging. */
+  requestId: string;
+  /** End-to-end latency for this search request, in milliseconds. */
+  latencyMs: number;
+};
+/**
+ * Response from a Web Search query.
+ */
+type WebSearchSearchResponse = {
+  items: WebSearchResult[];
+  metadata: WebSearchResponseMetadata;
+};
+// ============ Web Search Binding Class ============
+/**
+ * Cloudflare Web Search binding.
+ *
+ * Discovery-only primitive for agents and Workers. Returns URLs and catalog
+ * metadata for a query; never returns page content or excerpts. To read a
+ * result's body, fetch the URL with the global `fetch()` API.
+ *
+ * Declared in wrangler with a single object (there is exactly one corpus, the
+ * public web, so there is no name, namespace, or instance to specify):
+ *
+ * ```jsonc
+ * { "web_search": { "binding": "WEBSEARCH" } }
+ * ```
+ *
+ * @example
+ * ```ts
+ * const { items, metadata } = await env.WEBSEARCH.search({
+ *   query: "Cloudflare Workers",
+ * });
+ *
+ * const top = items[0];
+ * console.log(top.url, top.title, metadata.latencyMs);
+ *
+ * // Read content yourself; pay-per-crawl and other publisher
+ * // controls apply at the fetch site, not at search time.
+ * const page = await fetch(top.url);
+ * ```
+ */
+declare abstract class WebSearch {
+  /**
+   * Run a Web Search query.
+   * @param options Search options. Only `query` is required.
+   * @returns The matching results plus per-response metadata.
+   */
+  search(options: WebSearchSearchOptions): Promise<WebSearchSearchResponse>;
+}
 interface DynamicDispatchLimits {
   /**
    * Limit CPU time in milliseconds.
@@ -16001,6 +17131,13 @@ interface WorkflowError {
   code?: number;
   message: string;
 }
+interface WorkflowInstanceTerminateOptions {
+  /**
+   * If true, run registered rollback handlers before terminating the instance.
+   * Only steps that registered rollback handlers are rolled back.
+   */
+  rollback?: boolean;
+}
 interface WorkflowInstanceRestartOptions {
   /**
    * Restart from a specific step. If omitted, the instance restarts from the beginning.
@@ -16034,8 +17171,9 @@ declare abstract class WorkflowInstance {
   public resume(): Promise<void>;
   /**
    * Terminate the instance. If it is errored, terminated or complete, an error will be thrown.
+   * @param options Options for termination, including whether registered rollback handlers should run.
    */
-  public terminate(): Promise<void>;
+  public terminate(options?: WorkflowInstanceTerminateOptions): Promise<void>;
   /**
    * Restart the instance. Optionally restart from a specific step, preserving
    * cached results for all steps before it.

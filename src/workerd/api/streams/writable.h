@@ -133,7 +133,7 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
   void visitForGc(jsg::GcVisitor& visitor);
 };
 
-class WritableStream: public jsg::Object {
+class WritableStream: public jsg::Object, public kj::PtrTarget {
  public:
   explicit WritableStream(IoContext& ioContext,
       kj::Own<WritableStreamSink> sink,
@@ -142,9 +142,7 @@ class WritableStream: public jsg::Object {
       kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none);
 
   explicit WritableStream(kj::Own<WritableStreamController> controller);
-  ~WritableStream() noexcept(false) {
-    weakRef->invalidate();
-  }
+  ~WritableStream() noexcept(false) = default;
 
   WritableStreamController& getController();
 
@@ -211,12 +209,6 @@ class WritableStream: public jsg::Object {
  private:
   kj::Maybe<IoContext&> ioContext;
   kj::Own<WritableStreamController> controller;
-  kj::Own<WeakRef<WritableStream>> weakRef =
-      kj::refcounted<WeakRef<WritableStream>>(kj::Badge<WritableStream>(), *this);
-
-  kj::Own<WeakRef<WritableStream>> addWeakRef() {
-    return weakRef->addRef();
-  }
 
   void visitForGc(jsg::GcVisitor& visitor);
 

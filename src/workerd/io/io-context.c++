@@ -220,12 +220,14 @@ IoContext::IncomingRequest::IoContext_IncomingRequest(kj::Own<IoContext> context
     kj::Own<RequestObserver> metricsParam,
     kj::Maybe<kj::Own<BaseTracer>> workerTracer,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
-    kj::Maybe<kj::Own<AccessInfo>> accessInfo)
+    kj::Maybe<kj::Own<AccessInfo>> accessInfo,
+    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory)
     : context(kj::mv(contextParam)),
       metrics(kj::mv(metricsParam)),
       workerTracer(kj::mv(workerTracer)),
       ioChannelFactory(kj::mv(ioChannelFactoryParam)),
       accessInfo(kj::mv(accessInfo)),
+      selfTokenFactory(kj::mv(selfTokenFactory)),
       maybeTriggerInvocationSpan(kj::mv(maybeTriggerInvocationSpan)) {}
 
 tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanContext() {
@@ -582,6 +584,9 @@ kj::Promise<T> IoContext::IncomingRequest::maybeAddGcPassForTest(kj::Promise<T> 
 // Mark ourselves so we know that we made a best effort attempt to wait for waitUntilTasks.
 void IoContext::IncomingRequest::drain(
     kj::TaskSet& waitUntilTasks, kj::Own<IoContext_IncomingRequest>&& self) {
+  // Passing by rvalue reference keeps the call-site evaluation order safe, but does not itself
+  // consume the caller's owner. Move immediately so early returns still drop the request.
+  auto ownedSelf = kj::mv(self);
   waitedForWaitUntil = true;
 
   if (&context->incomingRequests.front() != this) {
@@ -616,7 +621,7 @@ void IoContext::IncomingRequest::drain(
                     .exclusiveJoin(kj::mv(timeoutPromise))
                     .exclusiveJoin(context->onAbort());
 
-  result = result.attach(kj::mv(self));
+  result = result.attach(kj::mv(ownedSelf));
 
   KJ_IF_SOME(a, context->actor) {
     // Make sure the drain is canceled and the IncomingRequest dropped on actor abort.
@@ -647,9 +652,8 @@ kj::Promise<WorkerInterface::ScheduledResult> IoContext::IncomingRequest::finish
   KJ_ASSERT(context->incomingRequests.size() == 1);
   context->incomingRequests.front().waitedForWaitUntil = true;
 
-  auto timeoutPromise = context->limitEnforcer->limitScheduled().then([] {
-    return EventOutcome::EXCEEDED_WALL_TIME;
-  });
+  auto timeoutPromise = context->limitEnforcer->limitScheduled().then(
+      [] { return EventOutcome::EXCEEDED_WALL_TIME; });
   auto outcome = context->waitUntilTasks.onEmpty()
                      .then([this]() { return context->waitUntilStatus(); })
                      .exclusiveJoin(kj::mv(timeoutPromise))
@@ -1494,6 +1498,31 @@ bool IoContext::hasCurrent() {
 
 bool IoContext::isCurrent() {
   return this == threadLocalRequest;
+}
+
+void IoContext::setEntrypointHandler(jsg::Lock& js, jsg::JsObject handler) {
+  KJ_IF_SOME(_, entrypointHandler) {
+    KJ_FAIL_REQUIRE("entrypoint handler has already been set");
+  }
+  entrypointHandler = jsg::JsRef<jsg::JsObject>(js, handler);
+}
+
+jsg::JsObject IoContext::getEntrypointHandler(jsg::Lock& js) {
+  return KJ_REQUIRE_NONNULL(entrypointHandler, "entrypoint handler has not been set").getHandle(js);
+}
+
+kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> IoContext::getSelfTokenFactory() {
+  // Scan all IncomingRequests and return the first self-token factory we find. Scanning them all,
+  // rather that just using the "current" IncomingRequest, avoids unpredictable behavior in the
+  // presence of concurrent requests where some requests came in through a path that doesn't have a
+  // self-token factory available. In practice, though, applications ought to be consistent and
+  // either always use ctx.restore() or never use it for a particular dynamic worker or facet.
+  for (auto& req: incomingRequests) {
+    KJ_IF_SOME(s, req.selfTokenFactory) {
+      return kj::addRef(*s);
+    }
+  }
+  return kj::none;
 }
 
 auto IoContext::tryGetWeakRefForCurrent() -> kj::Maybe<kj::Own<WeakRef>> {

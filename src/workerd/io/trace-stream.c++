@@ -36,6 +36,7 @@ namespace {
   V(DIAGNOSTICSTYPE, "diagnosticsType")                                                            \
   V(DISPATCHNAMESPACE, "dispatchNamespace")                                                        \
   V(DROPPEDEVENTS, "droppedEvents")                                                                \
+  V(DURABLEOBJECTID, "durableObjectId")                                                            \
   V(EMAIL, "email")                                                                                \
   V(ENTRYPOINT, "entrypoint")                                                                      \
   V(ERROR, "error")                                                                                \
@@ -359,6 +360,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const Onset& onset, StringCache& cache) {
   KJ_IF_SOME(entrypoint, onset.workerInfo.entrypoint) {
     obj.set(js, ENTRYPOINT_STR, js.str(entrypoint));
   }
+  KJ_IF_SOME(id, onset.workerInfo.durableObjectId) {
+    obj.set(js, DURABLEOBJECTID_STR, js.str(id));
+  }
   KJ_IF_SOME(name, onset.workerInfo.scriptName) {
     obj.set(js, SCRIPTNAME_STR, js.str(name));
   }
@@ -679,8 +683,18 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   }
 
   kj::Promise<void> report(ReportContext reportContext) override {
-    IoContext& ioContext = KJ_REQUIRE_NONNULL(weakIoContext->tryGet(),
-        "The destination object for this tail session no longer exists.", doneReceiving);
+    // The destination IoContext may have been torn down (e.g. the tail worker's request completed,
+    // was canceled, or its isolate was evicted) while the source worker is still delivering tail
+    // events to us over RPC. This is a benign disconnection race rather than an internal error, so
+    // we throw a DISCONNECTED exception: this keeps it out of Sentry (see isInterestingException())
+    // and lets the source side treat it as the peer simply going away.
+    IoContext& ioContext = ([&]() -> IoContext& {
+      KJ_IF_SOME(ctx, weakIoContext->tryGet()) {
+        return ctx;
+      }
+      kj::throwFatalException(KJ_EXCEPTION(DISCONNECTED,
+          "The destination object for this tail session no longer exists.", doneReceiving));
+    })();
 
     ioContext.getLimitEnforcer().topUpActor();
 
@@ -747,7 +761,12 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     });
     promise = promise.attach(kj::defer([fulfiller = kj::mv(paf.fulfiller)]() mutable {
       if (fulfiller->isWaiting()) {
-        fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error,
+        // The promise above was canceled before completing, which happens when the destination
+        // IoContext is destroyed (e.g. the tail worker's isolate was evicted/terminated) while
+        // we're still delivering tail events. This is a benign disconnection race, so reject with
+        // a DISCONNECTED exception to keep it out of Sentry (see isInterestingException()) rather
+        // than treating it as an internal failure.
+        fulfiller->reject(JSG_KJ_EXCEPTION(DISCONNECTED, Error,
             "The destination execution context for this tail session was canceled while the "
             "call was still running."));
       }
@@ -1046,6 +1065,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::run(
 kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
+    FrankenvalueHandler& frankenvalueHandler,
     rpc::EventDispatcher::Client dispatcher) {
   auto revokePaf = kj::newPromiseAndFulfiller<void>();
 

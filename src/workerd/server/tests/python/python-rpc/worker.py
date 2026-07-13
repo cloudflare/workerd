@@ -237,12 +237,16 @@ async def test(ctrl, env, ctx):
     py_response2 = await env.PythonRpc.handle_response(js.Response.new("a JS response"))
     assert await py_response2.text() == "a JS response"
 
+    # - Verify that a Blob can be round-tripped.
+    blob = await env.PythonRpc.identity(Blob("print(42)", content_type="text/python"))
+    assert isinstance(blob, Blob)
+    assert blob.content_type == "text/python"
+    assert await blob.text() == "print(42)"
+
     # Verify that sending unsupported types fails.
     data_clone_regex = "^DataCloneError"
     with assertRaisesRegex(JsException, data_clone_regex):
         await env.PythonRpc.one_arg(CustomType(42))
-    with assertRaisesRegex(JsException, data_clone_regex):
-        await env.PythonRpc.one_arg(Blob("print(42)", content_type="text/python"))
     with assertRaisesRegex(JsException, data_clone_regex):
         await env.PythonRpc.identity(complex(1.23))
     with assertRaises(TypeError):

@@ -1039,7 +1039,6 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
 
     pumpTask =
         kj::joinPromisesFailFast(kj::arr(upEnd->pumpTo(*connection), connection->pumpTo(*downEnd)))
-            .ignoreResult()
             .attach(kj::mv(httpClient), kj::mv(upEnd), kj::mv(connection), kj::mv(downEnd));
     co_return;
   }
@@ -1049,7 +1048,7 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
   ContainerClient& containerClient;
   kj::String containerHost;
   uint16_t containerPort;
-  kj::Maybe<kj::Promise<void>> pumpTask;
+  kj::Maybe<kj::Promise<kj::Array<uint64_t>>> pumpTask;
 };
 
 class ContainerClient::DockerProcessHandle final: public rpc::Container::ProcessHandle::Server {
@@ -1561,7 +1560,16 @@ kj::Promise<kj::Maybe<ContainerClient::InspectResponse>> ContainerClient::inspec
     }
   }
 
-  co_return InspectResponse{.isRunning = running, .labels = labels.releaseAsArray()};
+  kj::String image;
+  if (jsonRoot.hasConfig() && jsonRoot.getConfig().hasImage()) {
+    image = kj::str(jsonRoot.getConfig().getImage());
+  }
+
+  co_return InspectResponse{
+    .isRunning = running,
+    .labels = labels.releaseAsArray(),
+    .image = kj::mv(image),
+  };
 }
 
 kj::Promise<kj::Maybe<ContainerClient::SidecarInspectResponse>> ContainerClient::inspectSidecar() {
@@ -2105,9 +2113,11 @@ kj::Promise<void> ContainerClient::cloneSnapshot(SnapshotRestoreMount& snapshot)
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
   jsonRoot.setImage(containerEgressInterceptorImage);
-  jsonRoot.setEntrypoint("/bin/cp");
 
   // Run `/bin/cp -a /src/. /dst/` so the clone volume gets the snapshot contents directly.
+  auto entrypoint = jsonRoot.initEntrypoint(1);
+  entrypoint.set(0, "/bin/cp");
+
   auto cmd = jsonRoot.initCmd(3);
   cmd.set(0, "-a");
   cmd.set(1, "/src/.");
@@ -2220,6 +2230,7 @@ kj::Promise<void> ContainerClient::inspect(InspectContext context) {
         list[i].setName(resp.labels[i].name);
         list[i].setValue(resp.labels[i].value);
       }
+      started.setImage(resp.image);
       co_return;
     }
   }

@@ -10,10 +10,10 @@
 namespace workerd {
 
 // Attaches the given object to a `Request` so that it lives as long as the request's properties.
-// The given object must support `kj::addRef()` (e.g. `kj::Refcount`).
+// The given object must be a `kj::Rc<T>`.
 template <typename T>
 kj::HttpClient::Request attachToRequest(kj::HttpClient::Request req, T&& rcAttachment) {
-  req.body = req.body.attach(kj::addRef(*rcAttachment));
+  req.body = req.body.attach(rcAttachment.addRef());
   req.response = req.response.then(
       [rcAttachment = kj::mv(rcAttachment)](kj::HttpClient::Response&& response) mutable {
     response.body = response.body.attach(kj::mv(rcAttachment));
@@ -40,31 +40,5 @@ kj::Promise<kj::HttpClient::WebSocketResponse> attachToWebSocketResponse(
     return kj::mv(response);
   });
 }
-
-// A Response kj::HttpService::Response implementation that records the status
-// code on the response.
-class SimpleResponseObserver final: public kj::HttpService::Response {
- public:
-  SimpleResponseObserver(kj::uint* statusCode, kj::HttpService::Response& response)
-      : inner(response),
-        statusCode(statusCode) {}
-  KJ_DISALLOW_COPY_AND_MOVE(SimpleResponseObserver);
-
-  kj::Own<kj::AsyncOutputStream> send(kj::uint status,
-      kj::StringPtr statusText,
-      const kj::HttpHeaders& headers,
-      kj::Maybe<uint64_t> expectedBodySize) override {
-    *statusCode = status;
-    return inner.send(status, statusText, headers, expectedBodySize);
-  }
-
-  kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
-    return inner.acceptWebSocket(headers);
-  }
-
- private:
-  kj::HttpService::Response& inner;
-  kj::uint* statusCode;
-};
 
 }  // namespace workerd

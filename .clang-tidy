@@ -65,7 +65,9 @@ Checks: >
   readability-reference-to-constructed-temporary,
   readability-static-accessed-through-instance,
   readability-use-concise-preprocessor-directives,
-  jsg-visit-for-gc
+  jsg-visit-for-gc,
+  workerd-consume,
+  workerd-unsafe-continuation-capture
 
 # TODO: Fix and enable
 # bugprone-derived-method-shadowing-base-method

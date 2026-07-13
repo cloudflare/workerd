@@ -62,7 +62,7 @@ struct OpaqueWrappable<T, true>: public OpaqueWrappable<T, false> {
 };
 
 // Create a JavaScript value that wraps `t` in an opaque way. JS code will see this as an empty
-// object, as if created by `{}`, but C++ code can unwrap the handle with `unwrapOpaque()`.
+// object with a null prototype, but C++ code can unwrap the handle with `unwrapOpaque()`.
 //
 // If `T` is a type that can be passed to GcVisitor::visit(), then it will be visited whenever
 // the opaque handle is found to be reachable.

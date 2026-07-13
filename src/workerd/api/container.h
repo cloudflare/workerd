@@ -5,12 +5,14 @@
 #pragma once
 // Container management API for Durable Object-attached containers.
 //
-#include <workerd/api/streams/readable.h>
-#include <workerd/api/streams/writable.h>
+#include <workerd/api/basics.h>
+#include <workerd/api/js-readable-stream.h>
+#include <workerd/api/js-writable-stream.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/io-own.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/canceler.h>
 
 namespace workerd::api {
 
@@ -51,14 +53,15 @@ class ExecOutput: public jsg::Object {
 struct ExecOptions {
   // $ prefix avoids collision with stdin/stdout/stderr macros from <stdio.h>;
   // JSG_STRUCT strips the $ when exposing to JS.
-  jsg::Optional<kj::OneOf<jsg::Ref<ReadableStream>, kj::String>> $stdin;
+  jsg::Optional<kj::OneOf<JsReadableStream, kj::String>> $stdin;
   jsg::Optional<kj::String> $stdout;
   jsg::Optional<kj::String> $stderr;
   jsg::Optional<kj::String> cwd;
   jsg::Optional<jsg::Dict<kj::String>> env;
   jsg::Optional<kj::String> user;
+  jsg::Optional<jsg::Ref<AbortSignal>> signal;
 
-  JSG_STRUCT($stdin, $stdout, $stderr, cwd, env, user);
+  JSG_STRUCT($stdin, $stdout, $stderr, cwd, env, user, signal);
   JSG_STRUCT_TS_OVERRIDE(ContainerExecOptions {
     stdin?: ReadableStream | "pipe";
     stdout?: "pipe" | "ignore";
@@ -66,6 +69,7 @@ struct ExecOptions {
     cwd?: string;
     env?: Record<string, string>;
     user?: string;
+    signal?: AbortSignal;
     $stdin: never;
     $stdout: never;
     $stderr: never;
@@ -74,15 +78,18 @@ struct ExecOptions {
 
 class ExecProcess: public jsg::Object {
  public:
-  ExecProcess(jsg::Optional<jsg::Ref<WritableStream>> stdinStream,
-      jsg::Optional<jsg::Ref<ReadableStream>> stdoutStream,
-      jsg::Optional<jsg::Ref<ReadableStream>> stderrStream,
+  ExecProcess(jsg::Lock& js,
+      IoContext& ioContext,
+      jsg::Optional<JsWritableStream> stdinStream,
+      jsg::Optional<JsReadableStream> stdoutStream,
+      jsg::Optional<JsReadableStream> stderrStream,
       int pid,
-      rpc::Container::ProcessHandle::Client handle);
+      rpc::Container::ProcessHandle::Client handle,
+      kj::Maybe<jsg::Ref<AbortSignal>> abortSignal = kj::none);
 
-  jsg::Optional<jsg::Ref<WritableStream>> getStdin();
-  jsg::Optional<jsg::Ref<ReadableStream>> getStdout();
-  jsg::Optional<jsg::Ref<ReadableStream>> getStderr();
+  jsg::Optional<JsWritableStream> getStdin(jsg::Lock& js);
+  jsg::Optional<JsReadableStream> getStdout(jsg::Lock& js);
+  jsg::Optional<JsReadableStream> getStderr(jsg::Lock& js);
   int getPid() const {
     return pid;
   }
@@ -112,9 +119,15 @@ class ExecProcess: public jsg::Object {
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("stdin", stdinStream);
-    tracker.trackField("stdout", stdoutStream);
-    tracker.trackField("stderr", stderrStream);
+    KJ_IF_SOME(s, stdinStream) {
+      s.visitForMemoryInfo(tracker);
+    }
+    KJ_IF_SOME(s, stdoutStream) {
+      s.visitForMemoryInfo(tracker);
+    }
+    KJ_IF_SOME(s, stderrStream) {
+      s.visitForMemoryInfo(tracker);
+    }
     tracker.trackField("exitCodePromise", exitCodePromise);
     tracker.trackField("exitCodePromiseCopy", exitCodePromiseCopy);
   }
@@ -123,15 +136,22 @@ class ExecProcess: public jsg::Object {
   void ensureExitCodePromise(jsg::Lock& js);
   jsg::Promise<int> getExitCodeForOutput(jsg::Lock& js);
 
-  jsg::Optional<jsg::Ref<WritableStream>> stdinStream;
-  jsg::Optional<jsg::Ref<ReadableStream>> stdoutStream;
-  jsg::Optional<jsg::Ref<ReadableStream>> stderrStream;
+  // Sends a kill signal to the underlying process. Used both by the public kill() method and by
+  // the AbortSignal handler.
+  void sendKill(int signo);
+
+  jsg::Optional<JsWritableStream> stdinStream;
+  jsg::Optional<JsReadableStream> stdoutStream;
+  jsg::Optional<JsReadableStream> stderrStream;
   int pid;
   IoOwn<rpc::Container::ProcessHandle::Client> handle;
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<int>>> exitCodePromise;
   kj::Maybe<jsg::Promise<void>> exitCodePromiseCopy;
   kj::Maybe<int> resolvedExitCode;
   bool outputCalled = false;
+
+  kj::Maybe<IoOwn<RefcountedCanceler>> abortCanceler;
+  kj::Maybe<RefcountedCanceler::Listener> abortListener;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(stdinStream, stdoutStream, stderrStream, exitCodePromise, exitCodePromiseCopy);
@@ -185,8 +205,9 @@ class Container: public jsg::Object {
 
   struct Info {
     jsg::Dict<kj::String> labels;
+    kj::String image;
 
-    JSG_STRUCT(labels);
+    JSG_STRUCT(labels, image);
   };
 
   struct StartupOptions {

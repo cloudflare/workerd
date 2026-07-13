@@ -14,6 +14,8 @@
 #include <workerd/api/fuzzilli.h>
 #endif
 #include <workerd/api/hibernatable-web-socket.h>
+#include <workerd/api/http.h>
+#include <workerd/api/restore.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/system-streams.h>
@@ -68,6 +70,13 @@ void ExecutionContext::passThroughOnException() {
   IoContext::current().setFailOpen();
 }
 
+jsg::Promise<jsg::Value> ExecutionContext::restore(jsg::Lock& js,
+    jsg::JsObject params,
+    const jsg::TypeHandler<jsg::Ref<Fetcher>>& fetcherHandler,
+    const jsg::TypeHandler<jsg::Ref<JsRpcStub>>& rpcStubHandler) {
+  return restoreCurrentEntrypoint(js, params, fetcherHandler, rpcStubHandler);
+}
+
 jsg::Optional<jsg::Ref<CacheContext>> ExecutionContext::getCache(jsg::Lock& js) {
   // Hook for the embedding application to provide a CacheContext.
   // The default Worker::Api implementation returns kj::none.
@@ -98,15 +107,34 @@ kj::StringPtr AccessContext::getAud() {
   return info->getAudience();
 }
 
-jsg::Promise<jsg::Optional<jsg::JsValue>> AccessContext::getIdentity(jsg::Lock& js) {
-  auto& ioctx = IoContext::current();
-  return ioctx.awaitIo(js, info->getIdentity(),
-      [](jsg::Lock& js, kj::Maybe<kj::String> json) -> jsg::Optional<jsg::JsValue> {
-    KJ_IF_SOME(j, json) {
-      return jsg::JsValue(js.parseJson(j).getHandle(js));
-    }
-    return kj::none;
-  });
+jsg::Promise<jsg::Value> AccessContext::getIdentity(jsg::Lock& js,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value()>>& getIdentityFnHandler) {
+  // Invoke the `getIdentity` JS-RPC method on the Access binding worker via a Fetcher bound to the
+  // embedder-supplied subrequest channel. If no identity service channel is available for this
+  // request (e.g. service-token auth), there is no identity to fetch, so resolve to `undefined`.
+  // Otherwise the binding worker's result (or error) propagates to the caller unchanged.
+  auto& context = IoContext::current();
+  auto span = context.makeTraceSpan("access_get_identity"_kjc);
+  KJ_IF_SOME(channel, info->getIdentityServiceChannel()) {
+    span.setTag("access.has_identity_service"_kjc, true);
+    auto fetcher =
+        js.alloc<Fetcher>(channel, Fetcher::RequiresHostAndProtocol::NO, true /* isInHouse */);
+    auto rpcProp = JSG_REQUIRE_NONNULL(fetcher->getRpcMethodInternal(js, kj::str("getIdentity")),
+        Error, "Access binding worker is missing the getIdentity method");
+
+    auto getIdentityFn = JSG_REQUIRE_NONNULL(
+        getIdentityFnHandler.tryUnwrap(js, rpcPropHandler.wrap(js, kj::mv(rpcProp))), Error,
+        "Access binding worker getIdentity is not callable");
+
+    // The RPC method returns a `JsRpcPromise` (custom thenable). Normalize it into a real promise
+    // via a resolver so we're independent of the `unwrapCustomThenables` compat flag.
+    auto paf = js.newPromiseAndResolver<jsg::Value>();
+    paf.resolver.resolve(js, getIdentityFn(js));
+    return context.attachSpans(js, kj::mv(paf.promise), kj::mv(span));
+  }
+  span.setTag("access.has_identity_service"_kjc, false);
+  return js.resolvedPromise(jsg::Value(js.v8Isolate, v8::Undefined(js.v8Isolate)));
 }
 
 jsg::Optional<jsg::Ref<AccessContext>> ExecutionContext::getAccess(jsg::Lock& js) {
@@ -119,6 +147,18 @@ jsg::Optional<jsg::Ref<AccessContext>> ExecutionContext::getAccess(jsg::Lock& js
   }
   return kj::none;
 }
+
+kj::String ExecutionContext::mapVirtualHost(
+    jsg::Lock& js, jsg::Ref<Fetcher> fetcher, uint16_t port) {
+  // Set up override, or return existing magic hostname if override already exists. Overrides
+  // created using mapVirtualHost() should never use the legacy hyperdrive hostname, so the only way
+  // for that hostname to be used is if an override was already registered earlier using
+  // ExtendedFetcher.
+  fetcher->registerOverride(js, IsHyperdrive::NO, port);
+  return kj::str(KJ_ASSERT_NONNULL(fetcher->getHostInternal()), ":",
+      KJ_ASSERT_NONNULL(fetcher->getPortInternal()));
+}
+
 void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {
   KJ_IF_SOME(r, reason) {
     IoContext::current().abort(js.exceptionToKj(kj::mv(r)));
@@ -253,7 +293,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   CfProperty cf(cfBlobJson);
 
   // We only create the body stream if there is a body to read.
-  kj::Maybe<jsg::Ref<ReadableStream>> maybeJsStream = kj::none;
+  kj::Maybe<JsReadableStream> maybeJsStream = kj::none;
 
   // If the request has "no body", we want `request.body` to be null. But, this is not the same
   // thing as the request having a body that happens to be empty. Unfortunately, KJ HTTP gives us
@@ -282,8 +322,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     // We do not automatically decode gzipped request bodies because the fetch() standard doesn't
     // specify any automatic encoding of requests. https://github.com/whatwg/fetch/issues/589
     auto b = newSystemStream(kj::addRef(*ownRequestBody), StreamEncoding::IDENTITY);
-    auto jsStream = js.alloc<ReadableStream>(ioContext, kj::mv(b));
-    body = Body::ExtractedBody(jsStream.addRef());
+    auto jsStream = JsReadableStream::create(js, ioContext, kj::mv(b));
+    body = Body::ExtractedBody(js, jsStream.addRef(js));
     maybeJsStream = kj::mv(jsStream);
   }
 
@@ -337,6 +377,11 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   bool useDefaultHandling;
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.fetch) {
+      // Immediately before dispatching into user code, give the observer a chance to claim the
+      // request's retry-token nonce. No-op unless the request is to an actor and the observer
+      // overrides the hook. Only the exported-handler path is hooked: Durable Objects are always
+      // class-based, so actor fetches never take the service-worker dispatchEventImpl() path below.
+      ioContext.getMetrics().claimRetryTokenBeforeUserCode();
       auto promise = f(lock, event->getRequest(), h.env.addRef(js), h.getCtx());
       event->respondWith(lock, kj::mv(promise));
       useDefaultHandling = false;
@@ -366,7 +411,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     }
 
     KJ_IF_SOME(jsStream, maybeJsStream) {
-      if (jsStream->isDisturbed()) {
+      if (jsStream.isDisturbed(js)) {
         lock.logUncaughtException(
             "Script consumed request body but didn't call respondWith(). Can't forward request.");
         return addNoopDeferredProxy(
@@ -388,16 +433,16 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
 
     // HACK: If the client disconnects, the `response` reference is no longer valid. But our
     //   promise resolves in JavaScript space, so won't be canceled. So we need to track
-    //   cancellation separately. We use a weird refcounted boolean.
+    //   cancellation separately. We use a refcounted boolean.
     // TODO(cleanup): Is there something less ugly we can do here?
-    auto canceled = kj::refcounted<kj::RefcountedWrapper<bool>>(false);
+    auto canceled = kj::rc<bool>(false);
 
     return ioContext
         .awaitJs(lock,
             promise.then(kj::implicitCast<jsg::Lock&>(lock),
                 ioContext.addFunctor(
                     [&response, allowWebSocket = headers.isWebSocket(),
-                        canceled = canceled->addWrappedRef(), &headers, span = kj::mv(span)](
+                        canceled = canceled.addRef(), &headers, span = kj::mv(span)](
                         jsg::Lock& js, jsg::Ref<Response> innerResponse) mutable
                     -> IoOwn<kj::Promise<DeferredProxy<void>>> {
       JSG_REQUIRE(innerResponse->getType() != "error"_kj, TypeError,
@@ -415,8 +460,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
             innerResponse->send(js, response, {.allowWebSocket = allowWebSocket}, headers)));
       }
     })))
-        .attach(
-            kj::defer([canceled = kj::mv(canceled)]() mutable { canceled->getWrapped() = true; }))
+        .attach(kj::defer([canceled = kj::mv(canceled)]() mutable { *canceled = true; }))
         .then(
             [ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)](
                 DeferredProxy<void> deferredProxy) mutable {
@@ -629,8 +673,9 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
         // This will include the error in inspector/tracers and log to syslog if internal.
         context.logUncaughtExceptionAsync(UncaughtExceptionSource::ALARM_HANDLER, kj::mv(e));
 
+        auto limitsExceeded = context.getLimitEnforcer().getLimitsExceeded();
         EventOutcome outcome = EventOutcome::EXCEPTION;
-        KJ_IF_SOME(status, context.getLimitEnforcer().getLimitsExceeded()) {
+        KJ_IF_SOME(status, limitsExceeded) {
           outcome = status;
         }
 
@@ -645,14 +690,19 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
         }
 
         auto isUserGeneratedError = isAlarmFailureUserError(description, isUserError);
-        auto shouldRetryCountsAgainstLimits = !context.isOutputGateBroken() || isUserGeneratedError;
+        auto shouldRetryCountsAgainstLimits = alarmRetryCountsAgainstLimit({
+          .outputGateBroken = context.isOutputGateBroken(),
+          .isUserError = isUserGeneratedError,
+          .resourceLimitExceeded = limitsExceeded != kj::none,
+        });
 
-        // We want to alert if we aren't going to count this alarm retry against limits.
-        // Skip logging when the output gate broke as a secondary effect of a user-generated error:
-        // that is expected behaviour and already counted as a user error.
-        if (!isUserGeneratedError && log && context.isOutputGateBroken()) {
+        // We want to alert if we aren't going to count this alarm retry against limits, since an
+        // uncounted broken-output-gate failure can retry forever. Skip logging when the retry IS
+        // counted: a user-generated error, or a resource-limit breach that broke the gate (e.g.
+        // SQLITE_INTERRUPT from the CPU limiter), is expected behaviour.
+        if (!shouldRetryCountsAgainstLimits && log && context.isOutputGateBroken()) {
           LOG_NOSENTRY(ERROR, "output lock broke during alarm execution", actorId, description);
-        } else if (!isUserGeneratedError && context.isOutputGateBroken()) {
+        } else if (!shouldRetryCountsAgainstLimits && context.isOutputGateBroken()) {
           // Tunneled or do-not-log non-user error with a broken output gate. Log for diagnostics
           // so we can investigate stuck alarms.
           LOG_NOSENTRY(ERROR,
@@ -681,19 +731,25 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           }
           auto isUserGeneratedError = isAlarmFailureUserError(
               e.getDescription(), e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none);
-          auto shouldRetryCountsAgainstLimits = isUserGeneratedError;
+          auto shouldRetryCountsAgainstLimits = alarmRetryCountsAgainstLimit({
+            // This continuation only runs when waitForOutputLocks() failed, i.e. the output gate
+            // is broken.
+            .outputGateBroken = true,
+            .isUserError = isUserGeneratedError,
+            .resourceLimitExceeded = context.getLimitEnforcer().getLimitsExceeded() != kj::none,
+          });
           if (auto desc = e.getDescription();
               !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)) {
-            if (!isUserGeneratedError) {
+            if (!shouldRetryCountsAgainstLimits) {
               if (isInterestingException(e)) {
                 LOG_EXCEPTION("alarmOutputLock"_kj, e);
               } else {
                 LOG_NOSENTRY(ERROR, "output lock broke after executing alarm", actorId, e);
               }
             }
-          } else if (!isUserGeneratedError) {
-            // Tunneled or do-not-log exception that is not a user error. Forward as-is without
-            // counting against retry limits.
+          } else if (!shouldRetryCountsAgainstLimits) {
+            // Tunneled or do-not-log exception that is neither a user error nor a resource-limit
+            // breach, so it is not counted against the retry limit.
             LOG_NOSENTRY(ERROR,
                 "output lock broke after executing alarm with tunneled non-user error", actorId,
                 e.getDescription());
@@ -882,6 +938,14 @@ kj::Maybe<ServiceWorkerGlobalScope::ConnectFn&> ServiceWorkerGlobalScope::getCon
   return connectOverrides.find(networkAddress);
 }
 
+void ServiceWorkerGlobalScope::setDnsOverride(kj::String hostname, kj::String ip) {
+  dnsOverrides.upsert(kj::mv(hostname), kj::mv(ip));
+}
+
+kj::Maybe<kj::StringPtr> ServiceWorkerGlobalScope::getDnsOverride(kj::StringPtr hostname) {
+  return dnsOverrides.find(hostname).map([](kj::String& ip) -> kj::StringPtr { return ip; });
+}
+
 jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsString str) {
   // We could implement btoa() by accepting a kj::String, but then we'd have to check that it
   // doesn't have any multibyte code points. Easier to perform that test using v8::String's
@@ -904,17 +968,21 @@ void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value
 #endif
 
 jsg::JsString ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String data) {
-  auto decoded = kj::decodeBase64(data.asArray());
+  auto size = simdutf::maximal_binary_length_from_base64(data.begin(), data.size());
+  auto decoded = kj::heapArray<kj::byte>(size);
+  auto result = simdutf::base64_to_binary(
+      data.begin(), data.size(), decoded.asChars().begin(), simdutf::base64_default);
 
-  JSG_REQUIRE(!decoded.hadErrors, DOMInvalidCharacterError,
+  JSG_REQUIRE(result.error == simdutf::SUCCESS, DOMInvalidCharacterError,
       "atob() called with invalid base64-encoded data. (Only whitespace, '+', '/', alphanumeric "
       "ASCII, and up to two terminal '=' signs when the input data length is divisible by 4 are "
       "allowed.)");
 
   // Similar to btoa() taking a v8::Value, we return a v8::String directly, as this allows us to
-  // construct a string from the non-nul-terminated array returned from decodeBase64(). This avoids
+  // construct a string from the non-nul-terminated array returned from base64_to_binary(). This avoids
   // making a copy purely to append a nul byte.
-  return js.str(decoded.asBytes());
+  KJ_ASSERT(result.count <= size);
+  return js.str(decoded.first(result.count));
 }
 
 void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, jsg::Function<void()> task) {
@@ -1204,22 +1272,8 @@ jsg::JsObject Cloudflare::getCompatibilityFlags(jsg::Lock& js) {
   auto dynamic = capnp::toDynamic(flags);
   auto schema = dynamic.getSchema();
 
-  bool skipExperimental = !flags.getWorkerdExperimental();
-
   for (auto field: schema.getFields()) {
-    // If this is an experimental flag, we expose it only if the experimental mode
-    // is enabled.
     auto annotations = field.getProto().getAnnotations();
-    bool skip = false;
-    if (skipExperimental) {
-      for (auto annotation: annotations) {
-        if (annotation.getId() == EXPERIMENTAl_ANNOTATION_ID) {
-          skip = true;
-          break;
-        }
-      }
-    }
-    if (skip) continue;
 
     // Note that disable flags are not exposed.
     for (auto annotation: annotations) {

@@ -49,10 +49,7 @@ void UnhandledRejectionHandler::report(
         handledAfterRejection(js, kj::mv(promise));
         return;
       }
-      case v8::PromiseRejectEvent::kPromiseRejectAfterResolved: {
-        break;
-      }
-      case v8::PromiseRejectEvent::kPromiseResolveAfterResolved: {
+      default: {
         break;
       }
     }

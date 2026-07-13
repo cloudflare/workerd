@@ -81,20 +81,18 @@ async function testD1ApiWithSessionsTokensHandling(DB, envD1MockFetcher) {
     );
   };
 
-  // Assert tokens sent by the top level DB are always primary!
+  // Assert that the top level DB never sends any commit tokens (it will be read as null in our mock)!
   await resetCommitTokens(envD1MockFetcher);
   await testD1ApiQueriesHappyPath(DB);
   let tokens = await getCommitTokensSentFromBinding(envD1MockFetcher);
+  assert.deepEqual(tokens.length > 0, true);
   assert.deepEqual(
-    tokens.every((t) => t === 'first-primary'),
+    tokens.every((t) => t === null),
     true
   );
-  // Make sure we received different tokens, and still sent first-primary.
   assert.deepEqual(
-    (await getCommitTokensReturnedFromEyeball(envD1MockFetcher)).every(
-      (t) => t !== 'first-primary'
-    ),
-    true
+    await getCommitTokensReturnedFromEyeball(envD1MockFetcher),
+    []
   );
 
   // Assert tokens sent by the DEFAULT DB.withSession()
@@ -119,7 +117,7 @@ export const test_d1_api_withsessions_old_token_skipped = test(
 );
 
 async function testD1ApiWithSessionsOldTokensSkipped(DB, envD1MockFetcher) {
-  const runTest = async (session) => {
+  const runTest = async (session, firstTokenFromBinding) => {
     await resetCommitTokens(envD1MockFetcher);
     await session.prepare(`SELECT * FROM sqlite_master;`).all();
     await session.prepare(`SELECT * FROM sqlite_master;`).all();
@@ -138,8 +136,16 @@ async function testD1ApiWithSessionsOldTokensSkipped(DB, envD1MockFetcher) {
       await getCommitTokensSentFromBinding(envD1MockFetcher);
     const tokensFromEyeball =
       await getCommitTokensReturnedFromEyeball(envD1MockFetcher);
+
+    // The default DB has no session, so it never sends or receives bookmarks.
+    if (firstTokenFromBinding === null) {
+      assert.deepEqual(tokensFromBinding, [null, null, null, null, null]);
+      assert.deepEqual(tokensFromEyeball, []);
+      return { ok: true };
+    }
+
     const expectedTokensFromBinding = [
-      'first-unconstrained',
+      firstTokenFromBinding,
       tokensFromEyeball[0],
       tokensFromEyeball[1],
       // We skip the commit token "------", since the previously received one was more recent.
@@ -152,16 +158,20 @@ async function testD1ApiWithSessionsOldTokensSkipped(DB, envD1MockFetcher) {
     return { ok: true };
   };
 
-  itShould('default DB', runTest(DB), { ok: true });
-  itShould('withSession()', runTest(DB.withSession()), { ok: true });
-  itShould(
-    'withSession(first-unconstrained)',
-    runTest(DB.withSession('first-unconstrained')),
+  await itShould('default DB', () => runTest(DB, null), { ok: true });
+  await itShould(
+    'withSession()',
+    () => runTest(DB.withSession(), 'first-unconstrained'),
     { ok: true }
   );
-  itShould(
+  await itShould(
+    'withSession(first-unconstrained)',
+    () => runTest(DB.withSession('first-unconstrained'), 'first-unconstrained'),
+    { ok: true }
+  );
+  await itShould(
     'withSession(first-primary)',
-    runTest(DB.withSession('first-primary')),
+    () => runTest(DB.withSession('first-primary'), 'first-primary'),
     { ok: true }
   );
 }

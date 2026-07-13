@@ -7,10 +7,7 @@
 // It must be in the internal/ directory to be compiled as part of the cloudflare bundle,
 // but it should never be used outside of test configurations.
 
-import {
-  startActiveSpan,
-  withSpan,
-} from 'cloudflare-internal:tracing-helpers';
+import { startActiveSpan, withSpan } from 'cloudflare-internal:tracing-helpers';
 
 interface TestWrapper {
   startActiveSpan: typeof startActiveSpan;

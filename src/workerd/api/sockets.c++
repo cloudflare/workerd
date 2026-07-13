@@ -79,6 +79,74 @@ kj::Maybe<uint64_t> getWritableHighWaterMark(jsg::Optional<SocketOptions>& opts)
   return kj::none;
 }
 
+kj::Maybe<uint16_t> parseHex16(kj::ArrayPtr<const char> s) {
+  if (s.size() == 0 || s.size() > 4) {
+    return kj::none;
+  }
+  uint16_t v = 0;
+  for (char c: s) {
+    v <<= 4;
+    if (c >= '0' && c <= '9') {
+      v |= (c - '0');
+    } else if (c >= 'a' && c <= 'f') {
+      v |= (c - 'a' + 10);
+    } else {
+      // Input is lowercased before parsing, so uppercase never reaches here.
+      return kj::none;
+    }
+  }
+  return v;
+}
+
+// If `host` is an IPv4-mapped IPv6 address, return its dotted-quad IPv4 form; otherwise kj::none.
+// The 96-bit `::ffff` prefix has three textual spellings (compressed, minimal, and fully-padded),
+// and the trailing 32 bits may be written dotted (`192.168.1.1`) or as two hex groups
+// (`c0a8:0101`). We match the prefix case-insensitively then decode the tail. Note
+// `::ffff:0:0:c0a8:0101` is a *different* address and is correctly rejected (its tail has too many
+// groups). Used solely to normalize the connect-override lookup key so a synthetic IPv4 override
+// (e.g. Hyperdrive's) matches every mapped spelling; the real connection path is left untouched.
+kj::Maybe<kj::String> tryGetMappedIpv4(kj::ArrayPtr<const char> host) {
+  // Strip surrounding brackets (the URL parser emits IPv6 hostnames bracketed) and lowercase for
+  // case-insensitive prefix/hex matching.
+  if (host.size() >= 2 && host.front() == '[' && host.back() == ']') {
+    host = host.slice(1, host.size() - 1);
+  }
+  auto lower = kj::heapString(host);
+  for (char& c: lower) {
+    if (c >= 'A' && c <= 'Z') {
+      c = c - 'A' + 'a';
+    }
+  }
+
+  static constexpr kj::StringPtr prefixes[] = {
+    "::ffff:"_kj,
+    "0:0:0:0:0:ffff:"_kj,
+    "0000:0000:0000:0000:0000:ffff:"_kj,
+  };
+  kj::ArrayPtr<const char> tail;
+  bool matched = false;
+  for (auto prefix: prefixes) {
+    if (lower.startsWith(prefix)) {
+      tail = lower.asArray().slice(prefix.size());
+      matched = true;
+      break;
+    }
+  }
+  if (!matched) {
+    return kj::none;
+  }
+
+  // Dotted spelling: the tail is already the IPv4.
+  if (tail.findFirst('.') != kj::none) {
+    return kj::str(tail);
+  }
+  // Hex spelling: exactly two groups `hi:lo`.
+  auto colon = KJ_UNWRAP_OR_RETURN(tail.findFirst(':'), kj::none);
+  auto hi = KJ_UNWRAP_OR_RETURN(parseHex16(tail.first(colon)), kj::none);
+  auto lo = KJ_UNWRAP_OR_RETURN(parseHex16(tail.slice(colon + 1, tail.size())), kj::none);
+  return kj::str(hi >> 8, ".", hi & 0xff, ".", lo >> 8, ".", lo & 0xff);
+}
+
 }  // namespace
 
 // Forward declarations
@@ -158,18 +226,20 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     resolver.reject(js, exception.getHandle(js));
   });
 
-  auto refcountedConnection = kj::refcountedWrapper(kj::mv(connection));
+  kj::Rc<kj::AsyncIoStream> refcountedConnection(kj::mv(connection));
   // Initialize the readable/writable streams with the readable/writable sides of an AsyncIoStream.
-  auto sysStreams = newSystemMultiStream(*refcountedConnection, ioContext);
-  auto readable = js.alloc<ReadableStream>(ioContext, kj::mv(sysStreams.readable));
+  auto sysStreams = newSystemMultiStream(refcountedConnection.addRef(), ioContext);
+  auto readable = JsReadableStream::create(js, ioContext, kj::mv(sysStreams.readable));
   auto allowHalfOpen = getAllowHalfOpen(options);
   kj::Maybe<jsg::Promise<void>> eofPromise;
   if (!allowHalfOpen) {
-    eofPromise = readable->onEof(js);
+    eofPromise = readable.onEof(js);
   }
-  auto openedPrPair = kj::mv(maybeOpenedPrPair).orDefault(js.newPromiseAndResolver<SocketInfo>());
+  auto openedPrPair = kj::mv(maybeOpenedPrPair).orDefault([&js]() {
+    return js.newPromiseAndResolver<SocketInfo>();
+  });
   openedPrPair.promise.markAsHandled(js);
-  auto writable = js.alloc<WritableStream>(ioContext, kj::mv(sysStreams.writable),
+  auto writable = JsWritableStream::create(js, ioContext, kj::mv(sysStreams.writable),
       ioContext.getMetrics().tryCreateWritableByteStreamObserver(),
       getWritableHighWaterMark(options), openedPrPair.promise.whenResolved(js));
 
@@ -195,6 +265,11 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
   kj::String domain;
   bool isDefaultFetchPort = false;
 
+  // If the address is an IPv4-mapped IPv6 address, this holds the dotted-quad key its connect
+  // override would be registered under, so a synthetic IPv4 override (e.g. Hyperdrive's) also
+  // matches the mapped spelling.
+  kj::Maybe<kj::String> mappedOverrideKey;
+
   KJ_SWITCH_ONEOF(address) {
     KJ_CASE_ONEOF(str, kj::String) {
       // We need just the hostname part of the address, i.e. we want to strip out the port.
@@ -207,9 +282,15 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
       JSG_REQUIRE(host != ""_kj, TypeError, "Specified address is missing hostname.");
       JSG_REQUIRE(port != ""_kj, TypeError, "Specified address is missing port.");
       isDefaultFetchPort = port == "443"_kj || port == "80"_kj;
+      KJ_IF_SOME(ipv4, tryGetMappedIpv4(host)) {
+        mappedOverrideKey = kj::str(ipv4, ":", port);
+      }
       domain = kj::str(host);
     }
     KJ_CASE_ONEOF(record, SocketAddress) {
+      KJ_IF_SOME(ipv4, tryGetMappedIpv4(record.hostname)) {
+        mappedOverrideKey = kj::str(ipv4, ":", record.port);
+      }
       domain = kj::heapString(record.hostname);
       isDefaultFetchPort = record.port == 443 || record.port == 80;
     }
@@ -236,8 +317,14 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     // Support calling into arbitrary callbacks for any registered "magic" addresses for which
     // custom connect() logic is needed. Note that these overrides should only apply to calls of the
     // global connect() method, not for fetcher->connect(), hence why we check for them here.
-    KJ_IF_SOME(fn, ioContext.getCurrentLock().getGlobalScope().getConnectOverride(addressStr)) {
+    auto& globalScope = ioContext.getCurrentLock().getGlobalScope();
+    KJ_IF_SOME(fn, globalScope.getConnectOverride(addressStr)) {
       return fn(js);
+    }
+    KJ_IF_SOME(key, mappedOverrideKey) {
+      KJ_IF_SOME(fn, globalScope.getConnectOverride(key)) {
+        return fn(js);
+      }
     }
     actualFetcher =
         js.alloc<Fetcher>(IoContext::NULL_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES);
@@ -285,41 +372,41 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   }
 
   isClosing = true;
-  writable->getController().setPendingClosure();
-  readable->getController().setPendingClosure();
+  writable.setPendingClosure(js);
+  readable.setPendingClosure(js);
 
   // Wait until the socket connects (successfully or otherwise)
   // Note: `self` (jsg::Ref) is captured in each continuation to prevent GC from collecting
   // this object while the promise chain is pending. Without it, the bare `this` pointer dangles.
   return openedPromiseCopy.whenResolved(js)
       .then(js,
-          [this, self = JSG_THIS](jsg::Lock& js) {
-    if (!writable->getController().isClosedOrClosing()) {
-      return writable->getController().flush(js);
+          [self = JSG_THIS](jsg::Lock& js) mutable {
+    if (!self->writable.isClosedOrClosing(js)) {
+      return self->writable.forceFlush(js);
     } else {
       return js.resolvedPromise();
     }
   })
       .then(js,
-          [this, self = JSG_THIS](jsg::Lock& js) {
+          [self = JSG_THIS](jsg::Lock& js) mutable {
     // Forcibly abort the readable/writable streams.
-    auto cancelPromise = readable->getController().cancel(js, kj::none);
-    auto abortPromise = writable->getController().abort(js, kj::none);
+    auto cancelPromise = self->readable.forceCancel(js, kj::none);
+    auto abortPromise = self->writable.forceAbort(js, kj::none);
 
     // The below is effectively `Promise.all(cancelPromise, abortPromise)`
     return cancelPromise.then(js, [abortPromise = kj::mv(abortPromise)](jsg::Lock& js) mutable {
       return kj::mv(abortPromise);
     });
   })
-      .then(js, [this, self = JSG_THIS](jsg::Lock& js) {
+      .then(js, [self = JSG_THIS](jsg::Lock& js) mutable {
     // Destroy the connection stream to close the connection.
-    { auto _ = kj::mv(connectionData); }
-    connectionData = kj::none;
+    { auto _ = kj::mv(self->connectionData); }
+    self->connectionData = kj::none;
 
-    resolveFulfiller(js, kj::none);
+    self->resolveFulfiller(js, kj::none);
     return js.resolvedPromise();
-  }).catch_(js, [this, self = JSG_THIS](jsg::Lock& js, jsg::Value err) {
-    errorHandler(js, kj::mv(err));
+  }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value err) mutable {
+    self->errorHandler(js, kj::mv(err));
   });
 }
 
@@ -354,7 +441,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   auto& context = IoContext::current();
   auto openedPrPair = js.newPromiseAndResolver<SocketInfo>();
   auto secureStreamPromise = context.awaitJs(js,
-      writable->flush(js).then(js,
+      writable.flush(js).then(js,
           // The openedResolver is a jsg::Promise::Resolver. It should be gc visited here in
           // case the opened promise it resolves captures a circular references to itself in
           // JavaScript (which is most likely). This prevents a possible memory leak.
@@ -371,8 +458,8 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
               (self, openedResolver), (jsg::Lock & js) mutable {
                 auto& context = IoContext::current();
 
-                self->writable->detach(js);
-                self->readable->detach(js, true);
+                self->writable.detach(js);
+                self->readable.detach(js, IgnoreDisturbed::YES);
 
                 // We should set this before closedResolver.resolve() in order to give the user
                 // the option to check if the closed promise is resolved due to upgrade or not.
@@ -417,7 +504,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
 
                 // Move the stream out of the plain text socket, to ensure the stream is properly
                 // destroyed when the socket is closed.
-                kj::Own<kj::AsyncIoStream> stream = connData->connectionStream->addWrappedRef();
+                kj::Own<kj::AsyncIoStream> stream = connData->connectionStream.addRef().toOwn();
                 self->connectionData = kj::none;
 
                 auto secureStream = forkedPromise.addBranch().then(
@@ -442,37 +529,45 @@ void Socket::handleProxyStatus(
     // Let's not log errors when we have a disconnected exception.
     // If we don't filter this out, whenever connect() fails, we'll
     // have noisy errors even though the user catches the error on JS side.
-    if (e.getType() != kj::Exception::Type::DISCONNECTED) {
+    if (e.getType() != kj::Exception::Type::DISCONNECTED &&
+        e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) == kj::none) {
       LOG_ERROR_PERIODICALLY("Socket proxy disconnected abruptly", e);
     }
     return kj::HttpClient::ConnectRequest::Status(500, nullptr, kj::Own<kj::HttpHeaders>());
   };
-  auto func = [this, self = JSG_THIS](
-                  jsg::Lock& js, kj::HttpClient::ConnectRequest::Status&& status) -> void {
+  auto func = [self = JSG_THIS](
+                  jsg::Lock& js, kj::HttpClient::ConnectRequest::Status&& status) mutable -> void {
     if (status.statusCode < 200 || status.statusCode >= 300) {
       // If the status indicates an unsuccessful connection we need to reject the `closeFulfiller`
       // with an exception. This will reject the socket's `closed` promise.
       auto msg = kj::str("proxy request failed, cannot connect to the specified address");
-      if (isDefaultFetchPort) {
+      if (self->isDefaultFetchPort) {
         msg = kj::str(msg, ". It looks like you might be trying to connect to a HTTP-based service",
             " — consider using fetch instead");
-      } else if (remoteAddress.orDefault(kj::String()).contains(".hyperdrive.local"_kj)) {
+      } else if (self->remoteAddress.orDefault(kj::String()).contains(".hyperdrive.local"_kj)) {
         // No attempts to connect to Hyperdrive should end up here, since they go through the other
         // version of handleProxyStatus. If they end up here somehow, log about it to get some
         // context that can aid in debugging.
         LOG_WARNING_PERIODICALLY(
-            "attempt to connect to Hyperdrive failed to trigger connectOverride", remoteAddress,
-            status.statusCode, status.statusText);
+            "attempt to connect to Hyperdrive failed to trigger connectOverride",
+            self->remoteAddress, status.statusCode, status.statusText);
+      } else if (self->remoteAddress.orDefault(kj::String()).contains(".workers.alt"_kj)) {
+        // No attempts to connect to Hyperdrive should end up here, since they go through the other
+        // version of handleProxyStatus. If they end up here somehow, log about it to get some
+        // context that can aid in debugging.
+        LOG_WARNING_PERIODICALLY(
+            "attempt to use connectionStringOverride failed to trigger connectOverride",
+            self->remoteAddress, status.statusCode, status.statusText);
       }
-      handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, msg));
+      self->handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, msg));
     } else {
       // For outbound sockets we have no useful local address to expose. Inbound sockets (produced
       // by the `connect()` handler dispatch path) populate `localAddress` with the CONNECT
       // authority that the peer targeted.
-      openedResolver.resolve(js,
+      self->openedResolver.resolve(js,
           SocketInfo{
-            .remoteAddress = mapCopyString(remoteAddress),
-            .localAddress = mapCopyString(localAddress),
+            .remoteAddress = mapCopyString(self->remoteAddress),
+            .localAddress = mapCopyString(self->localAddress),
           });
     }
   };
@@ -488,20 +583,23 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
   // TODO(cleanup): Extend awaitIo to provide the jsg::Lock in more cases.
   auto& context = IoContext::current();
   auto errorHandler = [](kj::Exception&& e) -> kj::Maybe<kj::Exception> {
-    LOG_ERROR_PERIODICALLY("Socket proxy disconnected abruptly", e);
+    if (e.getType() != kj::Exception::Type::DISCONNECTED &&
+        e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) == kj::none) {
+      LOG_ERROR_PERIODICALLY("Socket proxy disconnected abruptly", e);
+    }
     return KJ_EXCEPTION(FAILED, "connectResult raised an error");
   };
-  auto func = [this, self = JSG_THIS](jsg::Lock& js, kj::Maybe<kj::Exception> result) -> void {
+  auto func = [self = JSG_THIS](jsg::Lock& js, kj::Maybe<kj::Exception> result) mutable -> void {
     if (result != kj::none) {
-      handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, "connection attempt failed"));
+      self->handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, "connection attempt failed"));
     } else {
       // For outbound sockets we have no useful local address to expose. Inbound sockets (produced
       // by the `connect()` handler dispatch path) populate `localAddress` with the CONNECT
       // authority that the peer targeted.
-      openedResolver.resolve(js,
+      self->openedResolver.resolve(js,
           SocketInfo{
-            .remoteAddress = mapCopyString(remoteAddress),
-            .localAddress = mapCopyString(localAddress),
+            .remoteAddress = mapCopyString(self->remoteAddress),
+            .localAddress = mapCopyString(self->localAddress),
           });
     }
   };
@@ -512,8 +610,8 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
 void Socket::handleProxyError(jsg::Lock& js, kj::Exception e) {
   resolveFulfiller(js, e.clone());
   openedResolver.reject(js, e.clone());
-  readable->getController().cancel(js, kj::none).markAsHandled(js);
-  writable->getController().abort(js, js.error(e.getDescription())).markAsHandled(js);
+  readable.forceCancel(js, kj::none).markAsHandled(js);
+  writable.forceAbort(js, js.error(e.getDescription())).markAsHandled(js);
 }
 
 void Socket::handleReadableEof(jsg::Lock& js, jsg::Promise<void> onEof) {
@@ -533,9 +631,9 @@ jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
   // `allowHalfOpen` is false.
   KJ_ASSERT(!getAllowHalfOpen(options));
 
-  // Do not call `close` on a controller that has already been closed or is in the process
+  // Do not call `close` on a stream that has already been closed or is in the process
   // of closing.
-  if (writable->getController().isClosedOrClosing()) {
+  if (writable.isClosedOrClosing(js)) {
     return js.resolvedPromise();
   }
 
@@ -543,8 +641,7 @@ jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
   // below by calling `close` on the WritableStream which ensures that any data pending on it
   // is flushed. Then once the `close` either completes or fails we can be sure that any data has
   // been flushed.
-  return writable->getController()
-      .close(js)
+  return writable.forceClose(js)
       .catch_(js,
           JSG_VISITABLE_LAMBDA((ref = JSG_THIS), (ref),
               (jsg::Lock& js, jsg::Value&& exc) {
@@ -560,6 +657,12 @@ jsg::Ref<Socket> SocketsModule::connect(
   return connectImpl(js, kj::none, kj::mv(address), kj::mv(options));
 }
 
+jsg::Optional<kj::StringPtr> SocketsModule::getCallerDnsOverride(
+    jsg::Lock& js, kj::String hostname) {
+  auto& ioContext = IoContext::current();
+  return ioContext.getCurrentLock().getGlobalScope().getDnsOverride(hostname);
+}
+
 kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
   // Set this so that if `close` is called after this, that no closure steps are taken and instead
   // the `close` is a no-op.
@@ -567,8 +670,8 @@ kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
 
   // We do not care if the socket was disturbed, we require the user to ensure the socket is not
   // being used.
-  writable->detach(js);
-  readable->detach(js, true);
+  writable.detach(js);
+  readable.detach(js, IgnoreDisturbed::YES);
 
   // Move the stream out of the socket, to ensure the stream is properly destroyed when the
   // caller is done with it.
@@ -576,7 +679,7 @@ kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
       connectionData, TypeError, "The socket connection is closed or was already taken.");
   // Attach tlsStarter to the wrapper so it survives as long as the connection stream
   // and is destroyed before the stream itself.
-  auto wrapper = dataConn->connectionStream->addWrappedRef().attach(kj::mv(dataConn->tlsStarter));
+  auto wrapper = dataConn->connectionStream.addRef().toOwn().attach(kj::mv(dataConn->tlsStarter));
   connectionData = kj::none;
   closedResolver.resolve(js);
   return wrapper;
@@ -675,7 +778,7 @@ jsg::Promise<jsg::Ref<Fetcher>> SocketsModule::internalNewHttpClient(
 
   // Flush the writable stream before taking the connection stream to ensure all data is written
   // before the stream is detatched
-  return socket->getWritable()->flush(js).then(
+  return socket->getWritable(js).flush(js).then(
       js, JSG_VISITABLE_LAMBDA((socket = kj::mv(socket)), (socket), (jsg::Lock & js) mutable {
         auto& ioctx = IoContext::current();
 

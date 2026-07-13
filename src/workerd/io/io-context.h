@@ -47,6 +47,9 @@ class HttpOverCapnpFactory;
 
 namespace workerd {
 
+// Maximum depth to which blockConcurrencyWhile() calls may be nested.
+constexpr uint MAX_BLOCK_CONCURRENCY_WHILE_DEPTH = 64;
+
 // This wishes it were IoContext::Runnable::Exceptional.
 WD_STRONG_BOOL(IoContext_Runnable_Exceptional);
 
@@ -75,7 +78,8 @@ class IoContext_IncomingRequest final {
       kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::Own<BaseTracer>> workerTracer,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
-      kj::Maybe<kj::Own<AccessInfo>> accessInfo = kj::none);
+      kj::Maybe<kj::Own<AccessInfo>> accessInfo = kj::none,
+      kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory = kj::none);
   KJ_DISALLOW_COPY_AND_MOVE(IoContext_IncomingRequest);
   ~IoContext_IncomingRequest() noexcept(false);
 
@@ -165,6 +169,7 @@ class IoContext_IncomingRequest final {
   kj::Maybe<kj::Own<BaseTracer>> workerTracer;
   kj::Own<IoChannelFactory> ioChannelFactory;
   kj::Maybe<kj::Own<AccessInfo>> accessInfo;
+  kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory;
 
   // Root user trace span for this request. Populated during delivered() via
   // BaseTracer::makeUserRequestSpan(); otherwise a null SpanParent. The tracer it references
@@ -448,6 +453,15 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // True if this is the IoContext for the current thread (same as `hasCurrent() && tcx == current()`).
   bool isCurrent();
 
+  void setEntrypointHandler(jsg::Lock& js, jsg::JsObject handler);
+  jsg::JsObject getEntrypointHandler(jsg::Lock& js);
+
+  // Get the current context's self-token factory, used by ctx.restore() to create extended tokens.
+  // Returns null if this is a dynamic worker or facet that was not itself created by ctx.restore()
+  // in the parent worker and therefore cannot use ctx.restore() itself, because the runtime does
+  // not know how to recreate it.
+  kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> getSelfTokenFactory();
+
   // Check if a current request is available. Used to provide better diagnostics when this is
   // unexpectedly absent when reporting a user span.
   // TODO(cleanup): This is a hack, remove after addressing the underlying issue.
@@ -581,17 +595,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <typename T>
   jsg::Promise<T> awaitIoLegacy(jsg::Lock& js, kj::Promise<T> promise);
 
-  // DEPRECATED: Like awaitIo() but:
-  // - Does not have a continuation function, so suffers from the problems described in
-  //   `awaitIo()`'s doc comment.
-  // - Does not automatically register a pending event.
-  //
-  // This is used to implement the historical KJ-oriented PromiseWrapper behavior in terms of the
-  // new `awaitIo()` implementation. This should go away once all API implementations are
-  // refactored to use `awaitIo()`.
-  template <typename T>
-  jsg::Promise<T> awaitIoLegacyWithInputLock(jsg::Lock& js, kj::Promise<T> promise);
-
   // Returns a KJ promise that resolves when a particular JavaScript promise completes.
   //
   // The JS promise must complete within this IoContext. The KJ promise will reject
@@ -705,6 +708,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // 3. Invalidates itself when the request ends (such that dereferencing throws).
   template <typename T>
   IoPtr<T> addObject(T& obj);
+
+  // Wraps a reference in a wrapper which:
+  // 1. Will throw an exception if dereferenced while the IoContext is not current for the
+  //    thread.
+  // 2. Can be safely destroyed from any thread.
+  // 3. Invalidates itself when the request ends (such that dereferencing throws).
+  template <typename T>
+  IoOwn<T> addObject(kj::Rc<T> obj);
 
   // Like addObject() but takes a functor, returning a functor with the same signature but which
   // holds the original functor under a `IoOwn`, and so will stop working if the IoContext
@@ -943,9 +954,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       bool enableReplicaRouting,
       ActorRoutingMode routingMode,
       SpanParent parentSpan,
-      kj::Maybe<ActorVersion> version) {
+      kj::Maybe<ActorVersion> version,
+      Persistent persistent = Persistent::NO) {
     return getIoChannelFactory().getGlobalActor(channel, id, kj::mv(locationHint), mode,
-        enableReplicaRouting, routingMode, kj::mv(parentSpan), kj::mv(version));
+        enableReplicaRouting, routingMode, kj::mv(parentSpan), kj::mv(version), persistent);
   }
   kj::Own<IoChannelFactory::ActorChannel> getColoLocalActorChannel(
       uint channel, kj::StringPtr id, SpanParent parentSpan) {
@@ -958,6 +970,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   void deleteAllActors(kj::Maybe<kj::Exception&> reason) {
     getIoChannelFactory().deleteAllActors(reason);
+  }
+
+  // Test-only: gracefully evict all currently-running actors. See
+  // IoChannelFactory::evictAllActorsForTest().
+  kj::Promise<void> evictAllActorsForTest(IoChannelFactory::EvictWebSocketMode webSocketMode) {
+    return getIoChannelFactory().evictAllActorsForTest(webSocketMode);
   }
 
   // Condemn and terminate JS isolate
@@ -1134,6 +1152,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   void checkFarGet(const DeleteQueue& expectedQueue, const std::type_info& type);
 
   kj::Maybe<jsg::JsRef<jsg::JsObject>> promiseContextTag;
+  kj::Maybe<jsg::JsRef<jsg::JsObject>> entrypointHandler;
 
   class Runnable {
    public:
@@ -1355,11 +1374,6 @@ jsg::Promise<T> IoContext::awaitIoWithInputLock(jsg::Lock& js, kj::Promise<T> pr
 template <typename T>
 jsg::Promise<T> IoContext::awaitIoLegacy(jsg::Lock& js, kj::Promise<T> promise) {
   return awaitIoImpl(js, kj::mv(promise), getCriticalSection(), IdentityFunc<T>());
-}
-
-template <typename T>
-jsg::Promise<T> IoContext::awaitIoLegacyWithInputLock(jsg::Lock& js, kj::Promise<T> promise) {
-  return awaitIoImpl(js, kj::mv(promise), getInputLock(), IdentityFunc<T>());
 }
 
 // To reduce the code size impact of awaitIoImpl, move promise continuation code out of
@@ -1677,6 +1691,11 @@ inline IoPtr<T> IoContext::addObject(T& obj) {
   return IoPtr<T>(deleteQueue.queue.addRef(), &obj);
 }
 
+template <typename T>
+inline IoOwn<T> IoContext::addObject(kj::Rc<T> obj) {
+  return addObject(obj.toOwn());
+}
+
 template <typename Func>
 auto IoContext::addFunctor(Func&& func) {
   if constexpr (kj::isReference<Func>()) {
@@ -1700,6 +1719,14 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhileImpl(
     jsg::Lock& js, Func&& callback) {
   auto lock = getInputLock();
   auto cs = lock.startCriticalSection();
+
+  // Report the nesting depth. Perhaps we will want to adjust the limit here in the future.
+  KJ_IF_SOME(a, getActor()) {
+    a.getMetrics().blockConcurrencyWhileDepth(cs->getDepth());
+  }
+  JSG_REQUIRE(cs->getDepth() <= MAX_BLOCK_CONCURRENCY_WHILE_DEPTH, Error,
+      "blockConcurrencyWhile() calls are nested too deeply.");
+
   auto cs2 = kj::addRef(*cs);
 
   using T = jsg::RemovePromise<jsg::ReturnType<Func, void, true>>;

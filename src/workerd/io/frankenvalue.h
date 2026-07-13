@@ -62,6 +62,18 @@ class Frankenvalue {
   // then JSON-stringifying from there.)
   static Frankenvalue fromJson(kj::String json);
 
+  // Construct a Frankenvalue whose value is an `ArrayBuffer` wrapping `data`, without going
+  // through V8 serialization. For placing binary data into `ctx.props` where no JS context exists.
+  static Frankenvalue fromBytes(kj::Array<byte> data);
+
+  // Construct a Frankenvalue whose value is a single capability (cap table entry), without going
+  // through V8 serialization. When converted to JS, the capability is materialized using the
+  // deserializer registered for `tag` (a `workerd::rpc::SerializationTag` value, e.g.
+  // `serviceStub` to produce a Fetcher). This is useful when building a Frankenvalue outside of any
+  // JavaScript context, e.g. to place a service binding (Fetcher) into `ctx.props` from config or a
+  // control plane.
+  static Frankenvalue fromCapability(uint16_t tag, kj::Own<CapTableEntry> entry);
+
   // Add a property to the value, represented as another Frankenvalue. This is how you "stitch
   // together" values!
   //
@@ -176,7 +188,20 @@ class Frankenvalue {
   struct V8Serialized {
     kj::Array<byte> data;
   };
-  kj::OneOf<EmptyObject, Json, V8Serialized> value;
+  struct Bytes {
+    kj::Array<byte> data;
+  };
+  struct Capability {
+    // Index into this value's base cap table (the caps referenced by the union, before property
+    // caps).
+    uint32_t capIndex;
+
+    // The `workerd::rpc::SerializationTag` value describing how to materialize the capability into
+    // a JS value (e.g. `serviceStub` for a Fetcher). Stored as a raw integer so that this header
+    // need not depend on the `SerializationTag` schema.
+    uint16_t tag;
+  };
+  kj::OneOf<EmptyObject, Json, V8Serialized, Bytes, Capability> value;
 
   struct Property;
   kj::Vector<Property> properties;
@@ -200,5 +225,27 @@ struct Frankenvalue::Property {
   size_t capTableOffset = 0;
   size_t capTableSize = 0;
 };
+
+// Abstract interface for serializing a `Frankenvalue` -- including the contents of its cap table --
+// to capnp.
+//
+// `Frankenvalue::toCapnp()` deliberately serializes only the *value* and the cap table *size*, not
+// the cap table *contents*, because the meaning of a capability is environment-specific (in the
+// edge runtime, caps are dehydrated channel tokens; in a process sandbox, they are live channel
+// caps; etc.). A `FrankenvalueHandler` knows how to encode the cap table for a particular
+// transport and fills it in. It is passed alongside `HttpOverCapnpFactory` / `ByteStreamFactory`
+// wherever a Frankenvalue may need to cross an RPC boundary.
+//
+// This is intentionally *not* optional at call sites: silently dropping a Frankenvalue's caps (as
+// a bare `Frankenvalue::toCapnp()` would) is always a bug.
+class FrankenvalueHandler {
+ public:
+  // Serialize `value` (including the contents of its cap table) into `builder`.
+  virtual void toCapnp(Frankenvalue& value, rpc::Frankenvalue::Builder builder) = 0;
+};
+
+// Returns a shared `FrankenvalueHandler` for contexts that don't support it. Throws an exception
+// if used.
+FrankenvalueHandler& getUnsupportedFrankenvalueHandler();
 
 }  // namespace workerd

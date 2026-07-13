@@ -5,7 +5,7 @@
 #include "hibernatable-web-socket.h"
 
 #include <workerd/api/global-scope.h>
-#include <workerd/io/hibernation-manager.h>
+#include <workerd/io/legacy-hibernation-manager.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/ser.h>
 
@@ -21,7 +21,7 @@ Worker::Actor::HibernationManager& HibernatableWebSocketEvent::getHibernationMan
 
 HibernatableWebSocketEvent::ItemsForRelease HibernatableWebSocketEvent::prepareForRelease(
     jsg::Lock& lock, kj::StringPtr websocketId) {
-  auto& manager = kj::downcast<HibernationManagerImpl>(getHibernationManager(lock));
+  auto& manager = kj::downcast<LegacyHibernationManagerImpl>(getHibernationManager(lock));
   auto& hibernatableWebSocket =
       KJ_REQUIRE_NONNULL(manager.webSocketsForEventHandler.findEntry(websocketId));
 
@@ -41,7 +41,7 @@ jsg::Ref<WebSocket> HibernatableWebSocketEvent::claimWebSocket(
     jsg::Lock& lock, kj::StringPtr websocketId) {
   // Should only be called once per event since it removes the HibernatableWebSocket from the
   // webSocketsForEventHandler collection.
-  auto& manager = kj::downcast<HibernationManagerImpl>(getHibernationManager(lock));
+  auto& manager = kj::downcast<LegacyHibernationManagerImpl>(getHibernationManager(lock));
 
   // Grab it from our collection.
   auto& hibernatableWebSocket =
@@ -132,6 +132,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
 kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEvent::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
+    FrankenvalueHandler& frankenvalueHandler,
     rpc::EventDispatcher::Client dispatcher) {
   auto req = dispatcher.castAs<rpc::HibernatableWebSocketEventDispatcher>()
                  .hibernatableWebSocketEventRequest();

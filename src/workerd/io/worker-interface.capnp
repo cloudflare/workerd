@@ -315,6 +315,7 @@ struct Trace @0x8e8d911203762d34 {
     scriptTags @5 :List(Text);
     entryPoint @6 :Text;
     preview @10 :TracePreviewInfo;
+    durableObjectId @11 :Text;
 
     struct Info { union {
       fetch @0 :FetchEventInfo;
@@ -509,6 +510,17 @@ enum SerializationTag {
   #
   # Similar to serviceStub, this refers to the entrypoint of a Worker that can be instantiated
   # anywhere and any time, and thus can be persisted and used in `env` and `ctx.props`, etc.
+
+  r2Bucket @13;
+  # An R2 bucket binding, backed by a subrequest channel. Only deserialized (e.g. from `ctx.props`);
+  # cannot be serialized out of an isolate.
+
+  kvNamespace @14;
+  # A KV namespace binding, backed by a subrequest channel. Only deserialized (e.g. from
+  # `ctx.props`); cannot be serialized out of an isolate.
+
+  blob @15;
+  # A Blob, serialized as its MIME type followed by its raw bytes.
 }
 
 enum StreamEncoding {
@@ -545,8 +557,23 @@ struct JsValue {
       # Invalid default value to reduce confusion if an External wasn't initialized properly.
       # This should never appear in a real JsValue.
 
-      rpcTarget @1 :JsRpcTarget;
-      # An object that can be called over RPC.
+      rpcTarget :group {
+        # An object that can be called over RPC. Deserialized as RpcStub.
+
+        cap @1 :JsRpcTarget;
+        # Live capability to the target.
+
+        union {
+          channelToken @14 :Data;
+          # Optional: A channel token which can be restored to get this same RpcStub again. Most
+          # stubs don't have this, but if the stub was created by `ctx.restore()` then it will have
+          # an attached token. This makes it possible to store the stub in long-term storage, e.g.
+          # in Durable Object KV storage.
+
+          delayedChannelToken @15 :ExternalPusher.DelayedChannelToken;
+          # Like `delayedSubrequestChannelToken` below, but the token is for an RpcChannel.
+        }
+      }
 
       writableStream :group {
         # A WritableStream. This is much easier to represent that ReadableStream because the bytes
@@ -866,6 +893,25 @@ interface EventDispatcher @0xf20697475ec1752d {
   # indicating the user set a new alarm that should still fire. Returns 0 if the alarm was cleared
   # or no alarm was stored.
 
+  restoreService @12 (params :Frankenvalue) -> (service :WorkerdBootstrap);
+  restoreRpcStub @13 (params :Frankenvalue) -> (target :JsRpcTarget, session :JsRpcSession);
+  # Call the `[restore]()` method with the given params, expecting it to return either a Fetcher
+  # or an RpcStub/RpcTarget (depending on which method is used), then return a stub representing
+  # that.
+  #
+  # These methods are only intended to be callable by a "supervisor" of whatever the
+  # EventDispatcher points at. That is:
+  # * A facet's "supervisor" is the parent facet.
+  # * A dynamically-loaded WorkerEntrypoint's "supervisor" is the worker that loaded it.
+  #
+  # (At present, it is not possible to restore an actor class. Actor classes are tricky because
+  # to be used to instantiate a facet, the class must be local on the parent DO's machine. But an
+  # actor class created via a restore chain may end up being created somewhere entirely different,
+  # particularly if the restore chain is rooted in another actor. To solve this we probably need
+  # a way for dynamic workers to actually send their code back to the requesting machine, to be
+  # instantiated there -- or maybe some mechanism for running "remote facets". For now, though,
+  # we punt and simply don't support it.)
+
   # Other methods might be added to handle other kinds of events, e.g. TCP connections, or maybe
   # even native Cap'n Proto RPC eventually.
 }
@@ -873,11 +919,16 @@ interface EventDispatcher @0xf20697475ec1752d {
 interface WorkerdBootstrap {
   # Bootstrap interface exposed by workerd when serving Cap'n Proto RPC.
 
-  startEvent @0 (cfBlobJson :Text) -> (dispatcher :EventDispatcher);
+  startEvent @0 (cfBlobJson :Text, fromPersistentStub :Bool) -> (dispatcher :EventDispatcher);
   # Start a new event. Exactly one event should be delivered to the returned EventDispatcher.
   #
   # If the event is an HTTP request, `cfBlobJson` optionally carries the JSON-encoded `request.cf`
   # object. The dispatcher will pass it through to the worker via SubrequestMetadata.
+  #
+  # `fromPersistentStub` is true if this event was started on a channel reconstructed from a stored
+  # ("persistent") stub. The target worker re-verifies it still has the
+  # `allow_irrevocable_stub_storage` compat flag enabled; if not, it rejects the event. The
+  # dispatcher passes it through to the worker via SubrequestMetadata.
 }
 
 interface WorkerdDebugPort {

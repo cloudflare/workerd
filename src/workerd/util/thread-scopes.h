@@ -14,6 +14,14 @@
 
 #include <kj/common.h>
 
+// WORKERD_ASAN is defined when building under AddressSanitizer. The "super" alloc GC stress mode is
+// only compiled in under ASAN, since its whole value is producing a clean ASAN use-after-free
+// report — and it is far too slow to ever want in a non-ASAN build. In non-ASAN builds the
+// accessor and hook become inline no-ops with zero runtime overhead.
+#if (defined(__has_feature) && __has_feature(address_sanitizer)) || defined(__SANITIZE_ADDRESS__)
+#define WORKERD_ASAN 1
+#endif
+
 #include <cinttypes>
 
 namespace workerd {
@@ -76,6 +84,14 @@ void setPredictableModeForTest();
 // CLI flag, e.g., edgeworker tests where the test-runner spawns the server as a subprocess).
 bool isGcStressModeForTest();
 void setGcStressModeForTest();
+
+#ifdef WORKERD_ASAN
+bool isAllocGcStressModeForTest();
+#else
+inline bool isAllocGcStressModeForTest() {
+  return false;
+}
+#endif
 
 // RAII class which allows the thread's active watchdog to observe forward progress through
 // changes in a uint64_t. Use this in places where your code cannot call Watchdog::checkIn() and

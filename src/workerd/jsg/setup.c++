@@ -175,7 +175,7 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   v8::V8::SetFlagsFromString("--single-threaded-gc");
 #endif  // __APPLE__
 
-  if (isPredictableModeForTest() || isGcStressModeForTest()) {
+  if (isPredictableModeForTest() || isGcStressModeForTest() || isAllocGcStressModeForTest()) {
     v8::V8::SetFlagsFromString("--expose-gc");
   }
 
@@ -247,6 +247,12 @@ void IsolateBase::deferDestruction(v8::Global<v8::Data> item) {
 }
 
 kj::Arc<const ExternalMemoryTarget> IsolateBase::getExternalMemoryTarget() {
+  return externalMemoryTarget.addRef();
+}
+
+kj::Arc<const IsolateLiveness> IsolateBase::getIsolateLiveness() {
+  // ExternalMemoryTarget is an IsolateLiveness; reuse the isolate's singleton instance, which is
+  // already detached during isolate teardown (see ~IsolateBase).
   return externalMemoryTarget.addRef();
 }
 

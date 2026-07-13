@@ -768,6 +768,7 @@ auto TraceCustomEvent::run(kj::Own<IoContext::IncomingRequest> incomingRequest,
 
 auto TraceCustomEvent::sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
+    FrankenvalueHandler& frankenvalueHandler,
     workerd::rpc::EventDispatcher::Client dispatcher) -> kj::Promise<Result> {
   auto req = dispatcher.sendTracesRequest();
   auto out = req.initTraces(traces.size());

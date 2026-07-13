@@ -14,7 +14,16 @@
 #include <kj/function.h>
 #include <kj/test.h>
 
+#include <atomic>
+
 namespace workerd {
+
+// Shared, refcounted flag driving the test fixture's MockIsolateLimitEnforcer. Held by both the
+// fixture and the enforcer so neither outlives the other's view of it (avoids handing the
+// enforcer a bare reference).
+struct HeapLimitFlag: public kj::AtomicRefcounted {
+  std::atomic<bool> excessivelyExceeded{false};
+};
 
 // TestFixture is responsible for creating workerd environment during tests.
 // All the infrastructure is started in the constructor. It is accessed through run() method.
@@ -181,12 +190,18 @@ struct TestFixture {
     waitUntilTasks.onEmpty().wait(getWaitScope());
   }
 
-  // Accessors for tests that want to construct objects (e.g. HibernationManagerImpl) outside any
-  // IoContext, to keep their construction paths free of ambient state. Production usually
+  // Accessors for tests that want to construct objects (e.g. LegacyHibernationManagerImpl) outside
+  // any IoContext, to keep their construction paths free of ambient state. Production usually
   // constructs such objects lazily inside an IoContext just because the trigger (a JS handler)
   // happens to run there, but the constructors themselves don't need one.
   Worker::Actor& getActor() {
     return *KJ_ASSERT_NONNULL(actor);
+  }
+
+  // Simulate the isolate being condemned for excessively exceeding its heap limit, so that
+  // IsolateLimitEnforcer::hasExcessivelyExceededHeapLimit() returns `value`.
+  void setHeapLimitExcessivelyExceeded(bool value) {
+    heapLimitFlag->excessivelyExceeded.store(value, std::memory_order_relaxed);
   }
   TimerChannel& getTimerChannel() {
     return *timerChannel;
@@ -228,6 +243,9 @@ struct TestFixture {
   kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
   v8::IsolateGroup isolateGroup;
   kj::Own<Worker::Api> api;
+  // Drives the isolate's MockIsolateLimitEnforcer::hasExcessivelyExceededHeapLimit(). Shared
+  // (refcounted) with the enforcer.
+  kj::Own<HeapLimitFlag> heapLimitFlag;
   kj::Own<Worker::Isolate> workerIsolate;
   kj::Own<Worker::Script> workerScript;
   kj::Own<Worker> worker;
@@ -256,11 +274,12 @@ struct TestFixture {
     }
     kj::Own<SubrequestChannel> getSubrequestChannelResolved(uint channel,
         kj::Maybe<Frankenvalue> props,
-        kj::Maybe<VersionRequest> versionRequest) override {
+        kj::Maybe<VersionRequest> versionRequest,
+        Persistent persistent) override {
       KJ_FAIL_ASSERT("no subrequests");
     }
     kj::Own<ActorClassChannel> getActorClassResolved(
-        uint channel, kj::Maybe<Frankenvalue> props) override {
+        uint channel, kj::Maybe<Frankenvalue> props, Persistent persistent) override {
       KJ_FAIL_ASSERT("no actor classes");
     }
     capnp::Capability::Client getCapability(uint channel) override {
@@ -282,7 +301,8 @@ struct TestFixture {
         bool enableReplicaRouting,
         ActorRoutingMode routingMode,
         SpanParent parentSpan,
-        kj::Maybe<ActorVersion> version) override {
+        kj::Maybe<ActorVersion> version,
+        Persistent persistent) override {
       KJ_FAIL_REQUIRE("no actor channels");
     }
     kj::Own<ActorChannel> getColoLocalActor(

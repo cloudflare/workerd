@@ -9,7 +9,9 @@
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-util.h>
 #include <workerd/io/trace.h>
+#include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-source.h>
+#include <workerd/util/strong-bool.h>
 
 #include <capnp/capability.h>  // for Capability
 #include <kj/debug.h>
@@ -23,6 +25,12 @@ class Network;
 namespace workerd {
 
 class WorkerInterface;
+
+// Indicates whether the target worker of a stub had the `allow_irrevocable_stub_storage` compat
+// flag enabled when the stub was minted. Only stubs minted from `ctx.exports` ("loopback")
+// bindings of a flag-enabled worker are `Persistent::YES`; everything else is `Persistent::NO`.
+// A `Persistent::YES` channel/token may be stored in long-term storage; `Persistent::NO` may not.
+WD_STRONG_BOOL(Persistent);
 
 // Interface for talking to the Cache API. Needs to be declared here so that IoContext can
 // contain it.
@@ -98,6 +106,25 @@ struct DynamicWorkerSource;
 // anything in the world except for the client -- this is a useful property for sandboxing!
 class IoChannelFactory {
  public:
+  enum class EvictWebSocketMode {
+    HIBERNATE,
+    CLOSE,
+  };
+
+  // Opaque, IoContext-independent handle that knows how to construct a channel token referring to
+  // the current entrypoint ("self"). Used to implement `ctx.restore()`: the implementation of
+  // `ctx.restore()` passes this back into `makeRestored*()` so that the resulting restored channel
+  // can build a token chaining back to the current entrypoint.
+  //
+  // This is intentionally an empty interface. It is only ever consumed by the `makeRestored*()`
+  // implementation belonging to the same runtime, which downcasts it to a runtime-specific
+  // subtype.
+  //
+  // Token construction is deferred until actually needed, so that we avoid wasted work when
+  // `ctx.restore()` is never used, and so that any exceptions thrown while constructing the token
+  // surface only when the token is genuinely required.
+  class SelfTokenFactory: public kj::Refcounted {};
+
   // Contains metadata attached to an outgoing subrequest from a worker, independent of the type
   // of request.
   struct SubrequestMetadata {
@@ -117,6 +144,20 @@ class IoChannelFactory {
 
     // Timestamp for when a subrequest is started. (ms since the Unix Epoch)
     double startTime = dateNow();
+
+    // If the subrequest was originally made on a channel that was itself created by calling a
+    // `[restore]()` method on some other service, `restoredSelfTokenFactory` is able to construct a
+    // token referring to that channel. In the case that the target is a dynamic worker or facet
+    // (contexts which aren't inherently tokenizeable), then `restoredSelfTokenFactory` is
+    // appropriate to pass down to the IoContext as the `selfTokenFactory`, for use by the
+    // implementation of `ctx.restore()`, so that it can determine its own base token.
+    kj::Maybe<kj::Own<SelfTokenFactory>> restoredSelfTokenFactory;
+
+    // True if this request was started on a channel that was reconstructed from a stored
+    // ("persistent") stub. The target worker re-verifies that it still has the
+    // `allow_irrevocable_stub_storage` compat flag enabled; if not, it rejects the request. See
+    // `WorkerEntrypoint::construct()`.
+    Persistent fromPersistentStub = Persistent::NO;
   };
 
   // Parameters that can influence the version of a worker that is used to serve a subrequest.
@@ -235,6 +276,18 @@ class IoChannelFactory {
     // Note that the caller is expected to keep the SubrequestChannel alive until it is done with
     // the returned WorkerInterface.
     virtual kj::Own<WorkerInterface> startRequest(SubrequestMetadata metadata) = 0;
+
+    // Test-only: forcibly evict the target of this channel from its isolate, simulating the
+    // runtime tearing it down when it goes idle. For a Durable Object stub this destroys the actor
+    // instance while durable storage survives, so the next request rebuilds it. Depending on
+    // webSocketMode, hibernatable WebSockets are either hibernated first or closed. Only channels
+    // that point at an actor support this; others throw.
+    //
+    // Throws if the target Durable Object is not currently running (never instantiated, or
+    // already evicted/hibernated).
+    virtual kj::Promise<void> evictForTest(EvictWebSocketMode webSocketMode) {
+      JSG_FAIL_REQUIRE(Error, "evict() can only be used on a Durable Object stub.");
+    }
   };
 
   // Obtain an object representing a particular subrequest channel.
@@ -246,6 +299,10 @@ class IoChannelFactory {
   // `props` and `versionRequest` can only be specified if this is a loopback channel (i.e. from
   // ctx.exports). For any other channel, they will throw.
   //
+  // `persistent` records whether the current (target) worker had `allow_irrevocable_stub_storage`
+  // enabled. For loopback channels this is the channel's persistent bit; non-loopback callers pass
+  // `Persistent::NO`.
+  //
   // The non-virtual method dispatches to getSubrequestChannelResolved(), but only after resolving
   // all channels embedded in `props` (that is, calling `getResolved()` on all of them, waiting
   // for the resolutions if necessary, and replacing the caps with the resolutions).
@@ -253,12 +310,15 @@ class IoChannelFactory {
   // TODO(cleanup): Consider getting rid of `startSubrequest()` in favor of this.
   kj::Own<SubrequestChannel> getSubrequestChannel(uint channel,
       kj::Maybe<Frankenvalue> props = kj::none,
-      kj::Maybe<VersionRequest> versionRequest = kj::none);
+      kj::Maybe<VersionRequest> versionRequest = kj::none,
+      Persistent persistent = Persistent::NO);
 
   // Underlying implementation of getSubrequestChannel(). The implementation can assume that `props`
   // contains strictly resolved channels.
-  virtual kj::Own<SubrequestChannel> getSubrequestChannelResolved(
-      uint channel, kj::Maybe<Frankenvalue> props, kj::Maybe<VersionRequest> versionRequest) = 0;
+  virtual kj::Own<SubrequestChannel> getSubrequestChannelResolved(uint channel,
+      kj::Maybe<Frankenvalue> props,
+      kj::Maybe<VersionRequest> versionRequest,
+      Persistent persistent) = 0;
 
   // ActorChannel used to be its own type, but no longer is.
   // TODO(cleanup): Update all references.
@@ -270,6 +330,11 @@ class IoChannelFactory {
   // one of the worker's bindings, however it doesn't necessarily have to be from the the correct
   // `ActorIdFactory` -- if it's from some other factory, the method will throw an appropriate
   // exception.
+  //
+  // `persistent` records whether stubs minted from this namespace may be stored in long-term
+  // storage. This is `Persistent::YES` only when the namespace is a `ctx.exports` self-binding of a
+  // worker that has `allow_irrevocable_stub_storage` enabled; regular env bindings pass
+  // `Persistent::NO`.
   virtual kj::Own<ActorChannel> getGlobalActor(uint channel,
       const ActorIdFactory::ActorId& id,
       kj::Maybe<kj::String> locationHint,
@@ -277,7 +342,8 @@ class IoChannelFactory {
       bool enableReplicaRouting,
       ActorRoutingMode routingMode,
       SpanParent parentSpan,
-      kj::Maybe<ActorVersion> version) = 0;
+      kj::Maybe<ActorVersion> version,
+      Persistent persistent = Persistent::NO) = 0;
 
   // Get an actor stub from the given namespace for the actor with the given name.
   virtual kj::Own<ActorChannel> getColoLocalActor(
@@ -297,15 +363,42 @@ class IoChannelFactory {
   // `props` can only be specified if this is a loopback channel (i.e. from ctx.exports). For any
   // other channel, it will throw.
   //
+  // `persistent` records whether the current (target) worker had `allow_irrevocable_stub_storage`
+  // enabled. For loopback channels this is the channel's persistent bit; non-loopback callers pass
+  // `Persistent::NO`.
+  //
   // The non-virtual method dispatches to getActorClassResolved(), but only after resolving
   // all channels embedded in `props` (that is, calling `getResolved()` on all of them, waiting
   // for the resolutions if necessary, and replacing the caps with the resolutions).
-  kj::Own<ActorClassChannel> getActorClass(uint channel, kj::Maybe<Frankenvalue> props = kj::none);
+  kj::Own<ActorClassChannel> getActorClass(uint channel,
+      kj::Maybe<Frankenvalue> props = kj::none,
+      Persistent persistent = Persistent::NO);
 
   // Underlying implementation of getActorClass(). The implementation can assume that `props`
   // contains strictly resolved channels.
   virtual kj::Own<ActorClassChannel> getActorClassResolved(
-      uint channel, kj::Maybe<Frankenvalue> props) = 0;
+      uint channel, kj::Maybe<Frankenvalue> props, Persistent persistent) = 0;
+
+  // RpcChannel points at a persistent RpcTarget implemented by some other worker. "Persistent"
+  // means it can be saved as a channel token and restored later, recreating the same object,
+  // possibly in an entirely new isolate.
+  class RpcChannel: public TokenizableChannel {
+   public:
+    struct Session {
+      rpc::JsRpcTarget::Client cap;
+
+      // Cancelling this terminates the session. Typically you should pass this to
+      // ioContext.addTask(), so that it is canceled naturally if the parent context is canceled.
+      kj::Promise<void> task;
+    };
+
+    // Restoring the channel opens a fresh JS RPC session to the persistent target.
+    virtual Session restore() = 0;
+  };
+
+  virtual kj::Own<RpcChannel> getRpcChannel(uint channel) {
+    KJ_UNIMPLEMENTED("This runtime doesn't support RPC channels.");
+  }
 
   // Aborts all actors except those in namespaces marked with `preventEviction`.
   virtual void abortAllActors(kj::Maybe<kj::Exception&> reason) {
@@ -315,6 +408,15 @@ class IoChannelFactory {
   // Aborts all actors, cancels all alarms, and deletes all underlying storage for evictable
   // namespaces. After this, DOs can be recreated with clean state. Useful for test isolation.
   virtual void deleteAllActors(kj::Maybe<kj::Exception&> reason) {
+    KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");
+  }
+
+  // Test-only: gracefully evict every currently-running actor in the evictable namespaces this
+  // worker can address, simulating idle teardown. Unlike abortAllActors(), this leaves durable
+  // storage intact, so DOs rebuild on their next request. Depending on webSocketMode, hibernatable
+  // WebSockets are either hibernated first or closed. Actors that aren't currently running are
+  // skipped (no error).
+  virtual kj::Promise<void> evictAllActorsForTest(EvictWebSocketMode webSocketMode) {
     KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");
   }
 
@@ -342,6 +444,8 @@ class IoChannelFactory {
       ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
   virtual kj::Own<ActorClassChannel> actorClassFromToken(
       ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
+  virtual kj::Own<RpcChannel> rpcChannelFromToken(
+      ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
 
   // Overloads which accept a promise. Any attempts to use the channel will have to wait for the
   // token to arrive first, but this should be transparent.
@@ -349,6 +453,46 @@ class IoChannelFactory {
       ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token);
   kj::Own<ActorClassChannel> actorClassFromToken(
       ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token);
+  kj::Own<RpcChannel> rpcChannelFromToken(
+      ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token);
+
+  // Create a SubrequestChannel or RpcChannel representing the value returned by the
+  // `[restore]()` method of the current entrypoint. `selfTokenFactory` is able to construct a
+  // token referring to the current entrypoint (get this from `IoContext::getSelfTokenFactory()`).
+  // These are called in the implementation of `ctx.restore()`. The returned channel's getToken()
+  // will return a token of type `restored`.
+  //
+  // For `makeRestoredSubrequestChannel()`, the returned channel passes through all other calls
+  // to `inner`, which should be the channel constructed by the original call to `[restore]()`.
+  // The restoration process is only invoked when the token has been serialized and then restored.
+  //
+  // For `makeRestoredRpcChannel()`, the returned channel is expected to be paired with an
+  // already-live `JsRpcTarget::Client`. Each call to its restore() method will actually perform
+  // the restoration process again.
+  // `persistent` is the `allow_irrevocable_stub_storage` flag of the worker invoking
+  // `ctx.restore()`. It is ANDed with the vendor (self-token) bit to determine whether the
+  // resulting restored stub may be stored.
+  kj::Own<SubrequestChannel> makeRestoredSubrequestChannel(
+      kj::Own<SelfTokenFactory> selfTokenFactory,
+      Frankenvalue restoreParams,
+      kj::Own<SubrequestChannel> inner,
+      Persistent persistent);
+  kj::Own<RpcChannel> makeRestoredRpcChannel(kj::Own<SelfTokenFactory> selfTokenFactory,
+      Frankenvalue restoreParams,
+      Persistent persistent);
+
+  // Similar to how `getSubrequestChannel()` is implemented in terms of
+  // `getSubrequestChannelResolved()`, these also have "resolved" versions. The non-virtual
+  // version first resolves all capabilities in `restoreParams`, then forwards.
+  virtual kj::Own<SubrequestChannel> makeRestoredSubrequestChannelResolved(
+      kj::Own<SelfTokenFactory> selfTokenFactory,
+      Frankenvalue restoreParams,
+      kj::Own<SubrequestChannel> inner,
+      Persistent persistent);
+  virtual kj::Own<RpcChannel> makeRestoredRpcChannelResolved(
+      kj::Own<SelfTokenFactory> selfTokenFactory,
+      Frankenvalue restoreParams,
+      Persistent persistent);
 
   // Return a strong reference to this same factory. Used in the implementations of
   // getSubrequestChannel() and getActorClass() when delayed resolution is needed.
@@ -457,7 +601,7 @@ class IoChannelCapTableEntry final: public Frankenvalue::CapTableEntry {
   enum Type {
     SUBREQUEST,
     ACTOR_CLASS,
-    // TODO(someday): Other channel types, maybe.
+    RPC,
   };
 
   IoChannelCapTableEntry(Type type, uint channel): type(type), channel(channel) {}
@@ -492,5 +636,9 @@ template <>
 kj::Own<IoChannelFactory::ActorClassChannel> newPromisedChannel<
     IoChannelFactory::ActorClassChannel>(
     kj::Promise<kj::Own<IoChannelFactory::ActorClassChannel>> promise);
+
+template <>
+kj::Own<IoChannelFactory::RpcChannel> newPromisedChannel<IoChannelFactory::RpcChannel>(
+    kj::Promise<kj::Own<IoChannelFactory::RpcChannel>> promise);
 
 }  // namespace workerd

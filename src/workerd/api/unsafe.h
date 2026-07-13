@@ -19,6 +19,8 @@
 
 namespace workerd::api {
 
+class Fetcher;
+
 // A special binding object that allows for dynamic evaluation.
 class UnsafeEval: public jsg::Object {
  public:
@@ -104,6 +106,29 @@ class UnsafeModule: public jsg::Object {
   // restart with clean state. Namespaces with preventEviction are not affected.
   jsg::Promise<void> deleteAllDurableObjects(jsg::Lock& js);
 
+  struct EvictOptions {
+    jsg::Optional<kj::String> webSockets;
+
+    JSG_STRUCT(webSockets);
+    JSG_STRUCT_TS_OVERRIDE({
+      webSockets?: "hibernate" | "close";
+    });
+  };
+
+  // Test-only: gracefully evict the Durable Object referred to by `stub` from its isolate,
+  // simulating the runtime tearing it down when it goes idle. Durable storage is left intact, so
+  // the DO rebuilds (rerunning its constructor) on its next request. Hibernatable WebSockets are
+  // hibernated by default, or closed if options.webSockets is "close". Rejects if `stub` is not a
+  // Durable Object stub, or if the target DO is not currently running.
+  jsg::Promise<void> evict(
+      jsg::Lock& js, jsg::Ref<Fetcher> stub, jsg::Optional<EvictOptions> options);
+
+  // Test-only: gracefully evict every currently-running Durable Object that this worker can
+  // address (in evictable namespaces). Unlike abortAllDurableObjects(), this preserves durable
+  // storage and hibernates hibernatable WebSockets by default, or closes them if options.webSockets
+  // is "close". Idle DOs are skipped (not an error).
+  jsg::Promise<void> evictAllDurableObjects(jsg::Lock& js, jsg::Optional<EvictOptions> options);
+
   // Returns true if the TEST_WORKERD autogate is enabled.
   // This is used to verify that the all-autogates test variant is working correctly.
   bool isTestAutogateEnabled();
@@ -111,6 +136,8 @@ class UnsafeModule: public jsg::Object {
   JSG_RESOURCE_TYPE(UnsafeModule) {
     JSG_METHOD(abortAllDurableObjects);
     JSG_METHOD(deleteAllDurableObjects);
+    JSG_METHOD(evict);
+    JSG_METHOD(evictAllDurableObjects);
     JSG_METHOD(isTestAutogateEnabled);
   }
 };
@@ -142,9 +169,11 @@ void registerUnsafeModule(Registry& registry) {
 }
 
 #ifdef WORKERD_FUZZILLI
-#define EW_UNSAFE_ISOLATE_TYPES api::UnsafeEval, api::UnsafeModule, api::Stdin, api::Fuzzilli
+#define EW_UNSAFE_ISOLATE_TYPES                                                                    \
+  api::UnsafeEval, api::UnsafeModule, api::UnsafeModule::EvictOptions, api::Stdin, api::Fuzzilli
 #else
-#define EW_UNSAFE_ISOLATE_TYPES api::UnsafeEval, api::UnsafeModule, api::Stdin
+#define EW_UNSAFE_ISOLATE_TYPES                                                                    \
+  api::UnsafeEval, api::UnsafeModule, api::UnsafeModule::EvictOptions, api::Stdin
 #endif
 
 template <class Registry>

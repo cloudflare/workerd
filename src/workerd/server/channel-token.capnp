@@ -57,6 +57,7 @@ struct ChannelToken {
   enum Type {
     subrequest @0;  # token for IoChannelFactory::SubrequestChannel
     actorClass @1;  # token for IoChannelFactory::ActorClassChannel
+    rpc @2;         # token for IoChannelFactory::RpcChannel (`restoreChain` must not be empty)
   }
 
   union {
@@ -90,6 +91,43 @@ struct ChannelToken {
       name @6 :Text;
       # Name, if known, otherwise null.
     }
+
+    restored :group {
+      # If present, the capability represented by this token is constructed by loading some other
+      # token and then invoking its `[restore]()` method.
+      #
+      # At present, the final token must be either type `subrequest` or `rpc`. `actorClass` is not
+      # supported because when an actor class is used to create a Facet, it must be present on the
+      # *same machine* as the facet, but calling `[restore]()` inherently implies RPC to some other
+      # machine (especially when invoked on an actor). However, this limitation could perhaps be
+      # overcome in the future, especially if we could require that the vendor is not an actor.
+
+      vendor @7 :Data;
+      # Token for the service whose `[restore]()` method shall be called. This must be a token of
+      # type `subrequest`.
+      #
+      # This is embedded as an encoded token rather than a `ChannelToken` structure for the same
+      # reason as caps in `FrankenvalueCapTable` (see below).
+
+      restoreArg @8 :Frankenvalue;
+      # Argument object to pass to the `[restore]()` method call. Only one argument is supported,
+      # but it may be an arbitrary object.
+    }
+  }
+
+  persistence :union {
+    # Specifies to what extent this channel is allowed to be persisted into long-term storage, such
+    # as Durable Object KV storage.
+
+    none @9 :Void;
+    # The stub cannot be persisted at all.
+
+    irrevocable @10 :Void;
+    # This stup permits irrevocable storage -- the creating worker had
+    # allow_irrevocable_stub_storage set in its compat flags.
+
+    # TODO(someday): Add a persistence mode where stubs are revocable, probably involving some
+    #   external grant-tracking service?
   }
 
   struct FrankenvalueCapTable {
@@ -104,6 +142,7 @@ struct ChannelToken {
 
         subrequestChannel @1 :Data;
         actorClassChannel @2 :Data;
+        rpcChannel @3 :Data;
         # Nested capabilities are represented using fully encoded channel tokens themselves (rather
         # than ChannelToken capnp structs) for a couple reasons:
         # 1. This simplifies the abstractions needed when encoding a channel token -- just call

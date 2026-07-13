@@ -18,9 +18,9 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
-VERSION = "15.0.245.5"
+VERSION = "15.0.245.14"
 
-INTEGRITY = "sha256-m+nQ1NBU3SNNrAX/voq7It1dPkcFMf/i33LU2Dra8Bo="
+INTEGRITY = "sha256-6Txsw77ZX2BQoqTdA0WQQ5C2EmgUu6lYQAkT/wJ2UUM="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -59,8 +59,9 @@ PATCHES = [
     "0034-Remove-V8-MODULE.bazel-llvm-toolchain-and-libcxx-rep.patch",
     "0035-Remove-libcxx-dep-from-defs.bzl-not-resolvable-via-h.patch",
     "0036-Fix-non-portable-std-atomic_flag-construction-in-run.patch",
-    # TODO(cleanup): Need to address this properly by adding support for depending on llvm-libc.
-    "0037-Revert-Implement-Math.-atan-atan2-using-LLVM-s-libm.patch",
+    "0037-Fix-ExtendedMap-layout-on-Windows.patch",
+    "0038-Fix-CFunction-MemorySpan-declarations-on-Windows.patch",
+    "0039-Properly-depend-on-llvm-libc.patch",
 ]
 
 http_archive(
@@ -70,6 +71,13 @@ http_archive(
     patches = ["//:patches/v8/" + p for p in PATCHES],
     strip_prefix = "v8-" + VERSION,
     url = "https://github.com/v8/v8/archive/refs/tags/" + VERSION + ".tar.gz",
+)
+
+git_repository(
+    name = "llvm-libc",
+    build_file_content = "cc_library(name = 'llvm-libc', hdrs = glob(['**/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/llvm-libc/src')",
+    commit = "fe440a8abe663d6878686f147ef6b1a02075ae15",
+    remote = "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libc.git",
 )
 
 git_repository(

@@ -10,6 +10,7 @@
 
 #include <pyodide/generated/pyodide_extra.capnp.h>
 #include <pyodide/pyodide_static.capnp.h>
+#include <pyodide/python_packages.capnp.h>
 
 #include <capnp/serialize.h>
 #include <kj/array.h>
@@ -29,7 +30,6 @@ WD_STRONG_BOOL(IsValidating);
 WD_STRONG_BOOL(IsWorkerd);
 WD_STRONG_BOOL(SnapshotToDisk);
 
-const auto PYTHON_PACKAGES_URL = "https://pyodide-capnp-bin.edgeworker.net/";
 class PyodideBundleManager {
  public:
   void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data) const;
@@ -43,27 +43,17 @@ class PyodideBundleManager {
   const kj::MutexGuarded<kj::HashMap<kj::String, MessageBundlePair>> bundles;
 };
 
-class PyodidePackageManager {
- public:
-  void setPyodidePackageData(kj::String id, kj::Array<unsigned char> data) const;
-  const kj::Maybe<const kj::Array<unsigned char>&> getPyodidePackage(kj::StringPtr id) const;
-
- private:
-  const kj::MutexGuarded<kj::HashMap<kj::String, kj::Array<unsigned char>>> packages;
-};
-
 struct PythonConfig {
   kj::Maybe<kj::Own<const kj::Directory>> packageDiskCacheRoot;
   kj::Maybe<kj::Own<const kj::Directory>> pyodideDiskCacheRoot;
   kj::Maybe<kj::Own<const kj::Directory>> snapshotDirectory;
   const PyodideBundleManager pyodideBundleManager;
-  const PyodidePackageManager pyodidePackageManager;
   bool createSnapshot;
   bool createBaselineSnapshot;
   kj::Maybe<kj::String> loadSnapshotFromDisk;
 };
 
-// A function to read a segment of the tar file into a buffer
+// A function to read a segment of a buffer (e.g. an embedded package file) into a target buffer.
 // Set up this way to avoid copying files that aren't accessed.
 class ReadOnlyBuffer: public jsg::Object {
   kj::ArrayPtr<const kj::byte> source;
@@ -71,10 +61,57 @@ class ReadOnlyBuffer: public jsg::Object {
  public:
   ReadOnlyBuffer(kj::ArrayPtr<const kj::byte> src): source(src) {};
 
-  int read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf);
+  uint32_t read(jsg::Lock& js, uint64_t offset, kj::Array<kj::byte> buf);
 
   JSG_RESOURCE_TYPE(ReadOnlyBuffer) {
     JSG_METHOD(read);
+  }
+};
+
+// Metadata for a single embedded Python package file, returned to the runtime so it can build the
+// site-packages / dynlib filesystem (see src/pyodide/internal/loadPackage.ts). The string fields
+// point directly into the (process-lifetime) bundle message to avoid copying; they are only copied
+// when JSG marshals them into V8 strings.
+struct PythonPackageFileMetadata {
+  // Mount root ("site"/"stdlib" -> site-packages, "dynlib" -> /usr/lib).
+  kj::StringPtr installDir;
+  // Path within `installDir`, e.g. "ssl/__init__.py".
+  kj::StringPtr path;
+  // Size of the file contents in bytes.
+  int size;
+  // Reader for the (already-decompressed) bytes of this file.
+  jsg::Ref<ReadOnlyBuffer> reader;
+  JSG_STRUCT(installDir, path, size, reader);
+};
+
+// Exposes the Python stdlib package files that are extracted and embedded directly in the Pyodide
+// bundle as a PythonPackages capnp message (see python_packages.capnp / pack_python_packages.py).
+// The runtime reads `getFiles()` to learn the file layout; each returned entry carries a `reader`
+// for the (already-decompressed) bytes of that file. This is a single bulk call (rather than a
+// per-file accessor) to avoid a JS<->C++ round-trip per file.
+class EmbeddedPackagesReader: public jsg::Object {
+ public:
+  EmbeddedPackagesReader(kj::Maybe<kj::Own<capnp::FlatArrayMessageReader>> messageReader)
+      : messageReader(kj::mv(messageReader)) {}
+
+  // Builds a reader from a Pyodide bundle, locating the embedded `python_packages` data module. If
+  // the bundle has no embedded packages, the returned reader exposes an empty file list.
+  static jsg::Ref<EmbeddedPackagesReader> fromBundle(jsg::Lock& js, jsg::Bundle::Reader bundle);
+
+  kj::Array<PythonPackageFileMetadata> getFiles(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(EmbeddedPackagesReader) {
+    JSG_METHOD(getFiles);
+  }
+
+ private:
+  // Owns the message backing `files`. `kj::none` when the bundle has no embedded packages.
+  kj::Maybe<kj::Own<capnp::FlatArrayMessageReader>> messageReader;
+
+  kj::Maybe<PythonPackages::Reader> files() {
+    return messageReader.map([](kj::Own<capnp::FlatArrayMessageReader>& reader) {
+      return reader->getRoot<PythonPackages>();
+    });
   }
 };
 
@@ -176,24 +213,26 @@ class PyodideMetadataReader: public jsg::Object {
   // file extension.
   // TODO: Remove this.
   kj::Array<kj::StringPtr> getNames(jsg::Lock& js, jsg::Optional<kj::String> maybeExtFilter);
-  kj::Array<int> getSizes(jsg::Lock& js);
+  kj::Array<uint32_t> getSizes(jsg::Lock& js);
 
-  int read(jsg::Lock& js, int index, int offset, kj::Array<kj::byte> buf);
+  uint32_t read(jsg::Lock& js, uint64_t index, uint64_t offset, kj::Array<kj::byte> buf);
 
   bool hasMemorySnapshot() {
     return state->memorySnapshot != kj::none;
   }
-  int getMemorySnapshotSize() {
+  uint32_t getMemorySnapshotSize() {
     if (state->memorySnapshot == kj::none) {
       return 0;
     }
-    return KJ_REQUIRE_NONNULL(state->memorySnapshot).size();
+    auto size = KJ_REQUIRE_NONNULL(state->memorySnapshot).size();
+    KJ_REQUIRE(size <= static_cast<uint32_t>(kj::maxValue), "memory snapshot too large");
+    return size;
   }
 
   void disposeMemorySnapshot() {
     state->memorySnapshot = kj::none;
   }
-  int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
+  uint32_t readMemorySnapshot(uint64_t offset, kj::Array<kj::byte> buf);
 
   kj::StringPtr getPyodideVersion() {
     return state->pyodideVersion;
@@ -267,11 +306,6 @@ struct MemorySnapshotResult {
 // This used to be declared nested as ArtifactBundler::State, but then there was a need to
 // forward-declare it, so here we are.
 struct ArtifactBundler_State {
-  kj::Maybe<const PyodidePackageManager&> packageManager;
-  // ^ lifetime should be contained by lifetime of ArtifactBundler since there is normally one worker set for the whole process. see worker-set.h
-  // In other words:
-  // WorkerSet lifetime = PackageManager lifetime and Worker lifetime = ArtifactBundler lifetime and WorkerSet owns and will outlive Worker, so PackageManager outlives ArtifactBundler
-
   // The storedSnapshot is only used while isValidating is true.
   kj::Maybe<MemorySnapshotResult> storedSnapshot;
 
@@ -287,18 +321,16 @@ struct ArtifactBundler_State {
   // snapshots yet, so the Python runtime uses this to skip snapshot type validation.
   bool isDynamicWorkerFlag;
 
-  ArtifactBundler_State(kj::Maybe<const PyodidePackageManager&> packageManager,
-      kj::Maybe<kj::Array<const kj::byte>> existingSnapshot,
+  ArtifactBundler_State(kj::Maybe<kj::Array<const kj::byte>> existingSnapshot,
       bool isValidating = false,
       bool isDynamicWorker = false)
-      : packageManager(packageManager),
-        storedSnapshot(kj::none),
+      : storedSnapshot(kj::none),
         existingSnapshot(kj::mv(existingSnapshot)),
         isValidating(isValidating),
         isDynamicWorkerFlag(isDynamicWorker) {};
 
   kj::Own<ArtifactBundler_State> clone() {
-    return kj::heap<ArtifactBundler_State>(packageManager,
+    return kj::heap<ArtifactBundler_State>(
         existingSnapshot.map(
             [](kj::Array<const kj::byte>& data) { return kj::heapArray<const kj::byte>(data); }),
         isValidating, isDynamicWorkerFlag);
@@ -322,14 +354,16 @@ class ArtifactBundler: public jsg::Object {
     return inner->existingSnapshot != kj::none;
   }
 
-  int getMemorySnapshotSize() {
+  uint32_t getMemorySnapshotSize() {
     if (inner->existingSnapshot == kj::none) {
       return 0;
     }
-    return KJ_REQUIRE_NONNULL(inner->existingSnapshot).size();
+    auto size = KJ_REQUIRE_NONNULL(inner->existingSnapshot).size();
+    KJ_REQUIRE(size <= static_cast<uint32_t>(kj::maxValue), "memory snapshot too large");
+    return size;
   }
 
-  int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
+  uint32_t readMemorySnapshot(uint64_t offset, kj::Array<kj::byte> buf);
   void disposeMemorySnapshot() {
     inner->existingSnapshot = kj::none;
   }
@@ -345,12 +379,7 @@ class ArtifactBundler: public jsg::Object {
   }
 
   static kj::Own<State> makeDisabledBundler() {
-    return kj::heap<State>(kj::none, kj::none);
-  }
-
-  // Creates an ArtifactBundler that only grants access to packages, and not a memory snapshot.
-  static kj::Own<State> makePackagesOnlyBundler(kj::Maybe<const PyodidePackageManager&> manager) {
-    return kj::heap<State>(manager, kj::none);
+    return kj::heap<State>(kj::none);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -363,16 +392,6 @@ class ArtifactBundler: public jsg::Object {
     return false;  // TODO(later): Remove this function once we regenerate the bundle.
   }
 
-  kj::Maybe<jsg::Ref<ReadOnlyBuffer>> getPackage(jsg::Lock& js, kj::String path) {
-    KJ_IF_SOME(pacman, inner->packageManager) {
-      KJ_IF_SOME(ptr, pacman.getPyodidePackage(path)) {
-        return js.alloc<ReadOnlyBuffer>(ptr);
-      }
-    }
-
-    return kj::none;
-  }
-
   JSG_RESOURCE_TYPE(ArtifactBundler) {
     JSG_METHOD(hasMemorySnapshot);
     JSG_METHOD(getMemorySnapshotSize);
@@ -382,7 +401,6 @@ class ArtifactBundler: public jsg::Object {
     JSG_METHOD(isDynamicWorker);
     JSG_METHOD(storeMemorySnapshot);
     JSG_METHOD(isEnabled);
-    JSG_METHOD(getPackage);
   }
 
  private:
@@ -489,13 +507,6 @@ class SimplePythonLimiter: public jsg::Object {
 
 kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease);
 
-// Returns the list of filenames we need to fetch according to the pyodide-lock.json file. The lock
-// file is pre-filtered to contain exactly the packages we want to load, so we fetch all of them.
-kj::Array<kj::String> getPythonPackageFiles(kj::StringPtr lockFileContents);
-
-// Constructs the path to a Python package in the package repository
-kj::String getPyodidePackagePath(kj::StringPtr packagesVersion, kj::StringPtr filename);
-
 // Computes the subresource-integrity-style checksum ("sha256-<base64>") of the given bytes.
 kj::String computePyodideBundleIntegrity(kj::ArrayPtr<const kj::byte> bytes);
 
@@ -507,7 +518,8 @@ void verifyPyodideBundleIntegrity(
     kj::StringPtr version, kj::StringPtr expectedIntegrity, kj::ArrayPtr<const kj::byte> bytes);
 
 #define EW_PYODIDE_ISOLATE_TYPES                                                                   \
-  api::pyodide::ReadOnlyBuffer, api::pyodide::PyodideMetadataReader,                               \
+  api::pyodide::ReadOnlyBuffer, api::pyodide::PythonPackageFileMetadata,                           \
+      api::pyodide::EmbeddedPackagesReader, api::pyodide::PyodideMetadataReader,                   \
       api::pyodide::ArtifactBundler, api::pyodide::DiskCache,                                      \
       api::pyodide::DisabledInternalJaeger, api::pyodide::SimplePythonLimiter,                     \
       api::pyodide::WorkerFatalReporter, api::pyodide::MemorySnapshotResult

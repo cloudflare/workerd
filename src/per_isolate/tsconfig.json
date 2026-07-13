@@ -1,0 +1,16 @@
+{
+  "extends": "../../tools/base.tsconfig.json",
+  "compilerOptions": {
+    "declaration": true,
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "verbatimModuleSyntax": false,
+    "isolatedModules": false,
+    "baseUrl": ".",
+    "paths": {
+      "./*": ["./*"]
+    },
+    "types": []
+  },
+  "include": ["**/*.ts"]
+}

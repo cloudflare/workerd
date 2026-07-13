@@ -52,6 +52,7 @@ def wd_rust_crate(
         cxx_bridge_src = None,
         cxx_bridge_srcs = [],
         deps = [],
+        link_deps = [],
         proc_macro_deps = [],
         data = [],
         test_env = {},
@@ -70,7 +71,8 @@ def wd_rust_crate(
         name: crate name.
         cxx_bridge_src: (optional) .rs source file with cxx ffi bridge definition. The rule will
             generation additional<name>@cxx c++ library with cxx bindings if this is set.
-        deps: crate dependencies: rust crates or c/c++ libraries.
+        deps: crate dependencies: rust crates.
+        link_deps: c/c++ libraries to link with the rust crate/binary
         visibility: crate visibility.
         data: additional data files.
         proc_macro_deps: proc_macro dependencies.
@@ -129,7 +131,7 @@ def wd_rust_crate(
         )
 
     for bridge_src in cxx_bridge_srcs:
-        deps.append(bridge_src + "@cxx")
+        link_deps = link_deps + [bridge_src + "@cxx"]
 
     crate_features = []
 
@@ -137,7 +139,8 @@ def wd_rust_crate(
         name = name,
         crate_name = crate_name,
         srcs = srcs,
-        deps = deps + ["@workerd//deps/rust:runtime"],
+        deps = deps,
+        link_deps = link_deps + ["@@//deps:rust_runtime"],
         visibility = visibility,
         data = data,
         proc_macro_deps = proc_macro_deps,
@@ -160,9 +163,15 @@ def wd_rust_crate(
         } | test_env,
         size = test_size,
         tags = test_tags + ["no-coverage"],
+        experimental_use_cc_common_link = 1,
         crate_features = crate_features,
         deps = test_deps,
+        link_deps = ["//build/deps:linkopts_default"],
         proc_macro_deps = test_proc_macro_deps,
+        target_compatible_with = select({
+            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
     )
 
     if len(proc_macro_deps) + len(cxx_bridge_srcs) > 0:

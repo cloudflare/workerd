@@ -2,8 +2,11 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-export class D1MockDO {
+import { DurableObject } from 'cloudflare:workers';
+
+export class D1MockDO extends DurableObject {
   constructor(state, env) {
+    super(state, env);
     this.state = state;
     this.sql = this.state.storage.sql;
   }
@@ -26,7 +29,10 @@ export class D1MockDO {
           return this.runQuery(query, resultsFormat);
         } catch (e) {
           // Reproduce the production behavior by catching any error and returning a V4Failure
-          return { success: false, error: String(e.message) };
+          return {
+            success: false,
+            error: String(e instanceof Error ? e.message : e),
+          };
         }
       };
       return Response.json(
@@ -37,6 +43,38 @@ export class D1MockDO {
     } else {
       return Response.json({ error: 'Not found' }, { status: 404 });
     }
+  }
+
+  async query(params) {
+    const results = params.queries.map((query) => {
+      try {
+        return this.runQuery(query, 'ROWS_AND_COLUMNS');
+      } catch (e) {
+        // Reproduce the production behavior by catching any error and returning a V4Failure
+        return {
+          success: false,
+          error: String(e instanceof Error ? e.message : e),
+        };
+      }
+    });
+    const failure = results.find((result) => !result.success);
+    if (failure) {
+      return { success: false, error: new Error(failure.error) };
+    }
+
+    return {
+      success: true,
+      results: {
+        queryResults: results.map((result) => ({
+          meta: result.meta,
+          data: {
+            kind: 'raw',
+            columns: result.results.columns,
+            rows: result.results.rows,
+          },
+        })),
+      },
+    };
   }
 
   runQuery(query, resultsFormat) {
@@ -89,7 +127,6 @@ export class D1MockDO {
       results,
       meta: {
         duration: Math.random() * 0.01,
-        served_by: 'd1-mock',
         served_by_colo: 'DFW',
         changes: num_changes,
         last_row_id: last_row_id_after,
@@ -108,6 +145,35 @@ export default {
   commitTokensReturned: [],
   nextTokenExpected: null,
 
+  async query(params, env) {
+    this.commitTokensReceived.push(params.bookmark ?? null);
+
+    try {
+      const stub = env.db.get(env.db.idFromName('test'));
+      const queryResult = await stub.query(params);
+      if (!queryResult.success) {
+        return queryResult;
+      }
+
+      const results = {
+        queryResults: queryResult.results.queryResults,
+      };
+      if (params.bookmark) {
+        results.bookmark = this.nextCommitToken();
+      }
+
+      return {
+        success: true,
+        results,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err : new Error(String(err)),
+      };
+    }
+  },
+
   async fetch(request, env, ctx) {
     if (request.url.startsWith('http://d1-api-test/commitTokens')) {
       return this.handleD1ApiTestRoutes(request);
@@ -121,9 +187,10 @@ export default {
       const stub = env.db.get(env.db.idFromName('test'));
 
       // Add a commitToken to all responses.
-      return stub
-        .fetch(request)
-        .then((resp) => this.buildResponseWithCommitToken(resp));
+      return stub.fetch(request).then((resp) =>
+        // We don't return any bookmark when no constraint or bookmark is specified.
+        reqCommitToken ? this.buildResponseWithCommitToken(resp) : resp
+      );
     } catch (err) {
       return Response.json(
         { error: err.message, stack: err.stack },
@@ -132,7 +199,7 @@ export default {
     }
   },
 
-  async buildResponseWithCommitToken(resp) {
+  nextCommitToken() {
     let newToken = `token-${(++this.commitTokenNum).toLocaleString('en-US', {
       minimumIntegerDigits: 4,
       // no commas
@@ -143,6 +210,11 @@ export default {
       this.nextTokenExpected = null;
     }
     this.commitTokensReturned.push(newToken);
+    return newToken;
+  },
+
+  async buildResponseWithCommitToken(resp) {
+    const newToken = this.nextCommitToken();
     // Append an ever increasing commit token to the response.
     // Simulating the D1 eyeball worker.
     const newHeaders = new Headers(resp.headers);

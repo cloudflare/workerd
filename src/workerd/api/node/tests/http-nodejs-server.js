@@ -7,9 +7,10 @@
 const http = require('node:http');
 const assert = require('node:assert/strict');
 
-function reportPort(server) {
-  const address = server.address();
-  console.info(`Listening on ${address.address}:${address.port}`);
+function listenAndReport(server, name) {
+  server.listen({ port: 0, host: process.env.SIDECAR_HOSTNAME }, () => {
+    console.log(`${name}=${server.address().port}`);
+  });
 }
 
 const pongServer = http.createServer((req, res) => {
@@ -19,31 +20,19 @@ const pongServer = http.createServer((req, res) => {
     res.end('pong');
   });
 });
-pongServer.listen(
-  process.env.PONG_SERVER_PORT,
-  process.env.SIDECAR_HOSTNAME,
-  () => reportPort(pongServer)
-);
+listenAndReport(pongServer, 'PONG_SERVER_PORT');
 
 const asdServer = http.createServer((_req, res) => {
   res.end('asd');
 });
-asdServer.listen(
-  process.env.ASD_SERVER_PORT,
-  process.env.SIDECAR_HOSTNAME,
-  () => reportPort(asdServer)
-);
+listenAndReport(asdServer, 'ASD_SERVER_PORT');
 
 const timeoutServer = http.createServer((_req, res) => {
   setTimeout(() => {
     res.end('pong');
   }, 1000);
 });
-timeoutServer.listen(
-  process.env.TIMEOUT_SERVER_PORT,
-  process.env.SIDECAR_HOSTNAME,
-  () => reportPort(timeoutServer)
-);
+listenAndReport(timeoutServer, 'TIMEOUT_SERVER_PORT');
 
 const helloWorldServer = http.createServer((req, res) => {
   res.removeHeader('Date');
@@ -65,11 +54,7 @@ const helloWorldServer = http.createServer((req, res) => {
       res.end();
   }
 });
-helloWorldServer.listen(
-  process.env.HELLO_WORLD_SERVER_PORT,
-  process.env.SIDECAR_HOSTNAME,
-  () => reportPort(helloWorldServer)
-);
+listenAndReport(helloWorldServer, 'HELLO_WORLD_SERVER_PORT');
 
 let headerValidationServerCount = 0;
 const headerValidationServer = http.createServer((req, res) => {
@@ -104,8 +89,4 @@ const headerValidationServer = http.createServer((req, res) => {
 
   res.end('ok');
 });
-headerValidationServer.listen(
-  process.env.HEADER_VALIDATION_SERVER_PORT,
-  process.env.SIDECAR_HOSTNAME,
-  () => reportPort(headerValidationServer)
-);
+listenAndReport(headerValidationServer, 'HEADER_VALIDATION_SERVER_PORT');

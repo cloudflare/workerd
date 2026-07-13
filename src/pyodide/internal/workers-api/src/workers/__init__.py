@@ -23,7 +23,6 @@ from ._workers import (
     fetch,
     handler,
     import_from_javascript,
-    patch_env,
     python_from_rpc,
     python_to_rpc,
 )
@@ -51,7 +50,6 @@ __all__ = [
     "fetch",
     "handler",
     "import_from_javascript",
-    "patch_env",
     "python_from_rpc",
     "python_to_rpc",
     "waitUntil",

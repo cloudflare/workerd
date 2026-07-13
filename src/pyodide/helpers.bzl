@@ -42,12 +42,12 @@ def _copy_and_capnp_embed(src):
 def _fmt_python_snapshot_release(
         pyodide_version,
         pyodide_date,
-        packages,
         backport,
         baseline_snapshot_hash,
         flag,
         real_pyodide_version,
         integrity,
+        packages = "",
         **_kwds):
     content = ", ".join(
         [
@@ -107,6 +107,17 @@ def pyodide_extra():
         }),
     )
 
+def _packages_tag_for_version(version):
+    # Maps a Pyodide version to the package lock tag whose stdlib wheels should be embedded into
+    # that version's bundle. Newer Pyodide versions bundle the stdlib directly and have no lock
+    # file / wheels to embed, in which case this returns None.
+    for name, info in BUNDLE_VERSION_INFO.items():
+        if name == "development":
+            continue
+        if info["pyodide_version"] == version and "packages" in info:
+            return info["packages"]
+    return None
+
 def python_bundles(overrides = {}):
     srcs = [_python_bundle_helper(info, overrides) for info in PYODIDE_VERSIONS]
     native.filegroup(
@@ -163,20 +174,9 @@ import {
 } from "pyodide-internal:pool/builtin_wrappers";
 """
 
-# pyodide.asm.js patches
+# pyodide.asm.mjs patches
 # TODO: all of these should be fixed by linking our own Pyodide or by upstreaming.
-_REPLACEMENTS = [
-    [
-        # Convert pyodide.asm.js into an es6 module.
-        # When we link our own we can pass `-sES6_MODULE` to the linker and it will do this for us
-        # automatically.
-        "var _createPyodideModule",
-        _PRELUDE + "export const _createPyodideModule",
-    ],
-    [
-        "globalThis._createPyodideModule = _createPyodideModule;",
-        "",
-    ],
+_REPLACEMENTS_COMMON = [
     [
         "new WebAssembly.Module",
         "newWasmModule",
@@ -228,15 +228,6 @@ _REPLACEMENTS = [
         "getMemory(",
         "Module.getMemoryPatched(Module, libName, ",
     ],
-    # to fix RPC, applies https://github.com/pyodide/pyodide/commit/8da1f38f7
-    [
-        "nullToUndefined(func.apply(",
-        "nullToUndefined(patchedApplyFunc(API, func, ",
-    ],
-    [
-        "nullToUndefined(Function.prototype.apply.apply",
-        "nullToUndefined(API.config.jsglobals.Function.prototype.apply.apply",
-    ],
     [
         "function _PyEM_CountFuncParams(func){",
         "function _PyEM_CountFuncParams(func){ return patched_PyEM_CountFuncParams(Module, func);",
@@ -254,13 +245,54 @@ _REPLACEMENTS = [
     ],
 ]
 
-def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, python_stdlib_zip = None, emscripten_setup_override = None):
+_REPLACEMENTS_COMMON_0_26_0_28 = [
+    # for 0.28.2 or earlier, pyodide.asm.js was a commonjs module
+    [
+        # Convert pyodide.asm.js into an es6 module.
+        # When we link our own we can pass `-sES6_MODULE` to the linker and it will do this for us
+        # automatically.
+        "var _createPyodideModule",
+        _PRELUDE + "export const _createPyodideModule",
+    ],
+    [
+        "globalThis._createPyodideModule = _createPyodideModule;",
+        "",
+    ],
+    # to fix RPC, applies https://github.com/pyodide/pyodide/commit/8da1f38f7
+    [
+        "nullToUndefined(func.apply(",
+        "nullToUndefined(patchedApplyFunc(API, func, ",
+    ],
+    [
+        "nullToUndefined(Function.prototype.apply.apply",
+        "nullToUndefined(API.config.jsglobals.Function.prototype.apply.apply",
+    ],
+]
+
+_REPLACEMENTS = {
+    "0.26.0a2": _REPLACEMENTS_COMMON + _REPLACEMENTS_COMMON_0_26_0_28,
+    "0.28.2": _REPLACEMENTS_COMMON + _REPLACEMENTS_COMMON_0_26_0_28,
+    "314.0.2": _REPLACEMENTS_COMMON + [
+        # for 314 or later, pyodide.asm.mjs is es6 module
+        [
+            "export default _createPyodideModule;",
+            # still expose _createPyodideModule for compatibility (import { _createPyodideModule })
+            _PRELUDE + "export default _createPyodideModule; export { _createPyodideModule };",
+        ],
+    ],
+}
+
+def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, python_stdlib_zip = None, emscripten_setup_override = None):
     pyodide_package = "@pyodide-%s//" % version
     if not pyodide_asm_wasm:
         pyodide_asm_wasm = pyodide_package + ":pyodide/pyodide.asm.wasm"
 
-    if not pyodide_asm_js:
-        pyodide_asm_js = pyodide_package + ":pyodide/pyodide.asm.js"
+    if not pyodide_asm_mjs:
+        if version in ("0.26.0a2", "0.28.2"):
+            pyodide_asm_mjs = pyodide_package + ":pyodide/pyodide.asm.js"
+        else:
+            # for 314 or later, pyodide.asm.mjs is es6 module
+            pyodide_asm_mjs = pyodide_package + ":pyodide/pyodide.asm.mjs"
 
     if not python_stdlib_zip:
         python_stdlib_zip = pyodide_package + ":pyodide/python_stdlib.zip"
@@ -270,16 +302,16 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
     _copy_to_generated(python_stdlib_zip, version, out_name = "python_stdlib.zip")
 
     expand_template(
-        name = "pyodide.asm.js@rule@" + version,
-        out = _out_path("pyodide.asm.js", version),
-        substitutions = dict(_REPLACEMENTS),
-        template = pyodide_asm_js,
+        name = "pyodide.asm.mjs@rule@" + version,
+        out = _out_path("pyodide.asm.mjs", version),
+        substitutions = dict(_REPLACEMENTS[version]),
+        template = pyodide_asm_mjs,
     )
 
     js_file(
-        name = "pyodide.asm.js@rule_js@" + version,
-        srcs = [_out_path("pyodide.asm.js", version)],
-        deps = ["pyodide.asm.js@rule@" + version],
+        name = "pyodide.asm.mjs@rule_js@" + version,
+        srcs = [_out_path("pyodide.asm.mjs", version)],
+        deps = ["pyodide.asm.mjs@rule@" + version],
     )
 
     if emscripten_setup_override:
@@ -301,7 +333,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
             srcs = native.glob([
                 "internal/pool/*.ts",
             ], exclude = ["internal/pool/emscriptenSetup.ts"]) + [
-                _out_path("pyodide.asm.js", version),
+                _out_path("pyodide.asm.mjs", version),
                 "internal/util.ts",
                 "internal/const.ts",
             ],
@@ -321,13 +353,56 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
                 "node:path",
                 "node:url",
                 "node:vm",
+                "node:stream",
+                "node:tls",
+                "node:net",
+                "node:module",
                 "internal:unsafe-eval",
             ],
             format = "esm",
             output = _out_path("emscriptenSetup.js", version),
             target = "esnext",
-            deps = ["pyodide.asm.js@rule_js@" + version],
+            deps = ["pyodide.asm.mjs@rule_js@" + version],
         )
+
+    # The CPython stdlib modules and the shared libraries they depend on are embedded directly into
+    # the bundle so that the runtime no longer has to download or unpack them at request time. The
+    # wheels listed in the (pre-filtered) lock file are extracted at build time into a single
+    # PythonPackages capnp message (one entry per file, keyed by install_dir + path; see
+    # python_packages.capnp / pack_python_packages.py) which is embedded as the `python_packages`
+    # data module. Newer Pyodide versions bundle the stdlib directly and have no wheels to embed.
+    packages_tag = _packages_tag_for_version(version)
+    internal_data_modules = [
+        _out_path("python_stdlib.zip", version),
+    ]
+    extra_deps = []
+    has_packages = bool(packages_tag)
+    if has_packages:
+        lockfile = "python-lock/pyodide-lock_%s.json" % packages_tag
+        wheels = "@all_pyodide_wheels_%s//:whls" % packages_tag
+        native.genrule(
+            name = "python_packages.bin@rule@" + version,
+            srcs = [wheels, lockfile, "python_packages.capnp"],
+            outs = [_out_path("python_packages.bin", version)],
+            cmd = " ".join([
+                "$(execpath :pack_python_packages)",
+                "--capnp $(execpath @capnp-cpp//src/capnp:capnp_tool)",
+                "--schema $(location python_packages.capnp)",
+                "--lock $(location %s)" % lockfile,
+                "--out $@",
+                "$(locations %s)" % wheels,
+            ]),
+            tools = [
+                ":pack_python_packages",
+                "@capnp-cpp//src/capnp:capnp_tool",
+            ],
+            target_compatible_with = select({
+                "@//build/config:no_build": ["@platforms//:incompatible"],
+                "//conditions:default": [],
+            }),
+        )
+        internal_data_modules.append(_out_path("python_packages.bin", version))
+        extra_deps.append("python_packages.bin@rule@" + version)
 
     import_name = "pyodideRuntime"
     wd_js_bundle(
@@ -341,27 +416,28 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
         internal_wasm_modules = [
             _out_path("pyodide.asm.wasm", version),
         ],
-        internal_data_modules = [
-            _out_path("python_stdlib.zip", version),
-        ],
+        internal_data_modules = internal_data_modules,
         deps = [
             "emscriptenSetup@" + version,
             "pyodide.asm.wasm@copy@" + version,
             "python_stdlib.zip@copy@" + version,
-        ],
+        ] + extra_deps,
         out_dir = _out_path("", version),
     )
 
     pyodide_cappn_bin_rule = "pyodide.capnp.bin@rule@" + version
+    bin_srcs = [
+        ":pyodide@%s.capnp" % version,
+        "//src/workerd/jsg:modules.capnp",
+        _ts_bundle_out(import_name + "-internal_", "emscriptenSetup", version),
+        _ts_bundle_out(import_name + "-internal_", "pyodide.asm.wasm", version),
+        _ts_bundle_out(import_name + "-internal_", "python_stdlib.zip", version),
+    ]
+    if has_packages:
+        bin_srcs.append(_ts_bundle_out(import_name + "-internal_", "python_packages.bin", version))
     native.genrule(
         name = pyodide_cappn_bin_rule,
-        srcs = [
-            ":pyodide@%s.capnp" % version,
-            "//src/workerd/jsg:modules.capnp",
-            _ts_bundle_out(import_name + "-internal_", "emscriptenSetup", version),
-            _ts_bundle_out(import_name + "-internal_", "pyodide.asm.wasm", version),
-            _ts_bundle_out(import_name + "-internal_", "python_stdlib.zip", version),
-        ],
+        srcs = bin_srcs,
         outs = [_out_path("pyodide.capnp.bin", version)],
         cmd = " ".join([
             # Annoying logic to deal with different paths in workerd vs downstream.

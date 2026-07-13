@@ -226,8 +226,14 @@ struct Transformer {
 // Likewise, when creating a new kind of *internal* WritableStream, where the data destination is
 // a kj stream, you will implement the WritableStreamSink API.
 
-class WritableStreamSink {
+class WritableStreamSink: public kj::PtrTarget {
  public:
+  // Obtain a strong pointer to this sink. Callers must ensure the sink outlives the returned
+  // kj::Ptr (see docs/hardening.md).
+  kj::Ptr<WritableStreamSink> getPtr() {
+    return addPtrToThis();
+  }
+
   virtual kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) KJ_WARN_UNUSED_RESULT = 0;
   virtual kj::Promise<void> write(
       kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) KJ_WARN_UNUSED_RESULT = 0;
@@ -236,7 +242,7 @@ class WritableStreamSink {
   // Must call to flush and finish the stream.
 
   virtual kj::Maybe<kj::Promise<DeferredProxy<void>>> tryPumpFrom(
-      ReadableStreamSource& input, bool end);
+      kj::Ptr<ReadableStreamSource> input, bool end);
 
   virtual void abort(kj::Exception reason) = 0;
   // TODO(conform): abort() should return a promise after which closed fulfillers should be
@@ -252,7 +258,7 @@ class WritableStreamSink {
   }
 };
 
-class ReadableStreamSource {
+class ReadableStreamSource: public kj::PtrTarget {
  public:
   virtual kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) = 0;
 
@@ -262,7 +268,7 @@ class ReadableStreamSource {
   // If `end` is true, then `output.end()` will be called after pumping. Note that it's especially
   // important to take advantage of this when using deferred proxying since calling `end()`
   // directly might attempt to use the `IoContext` to call `registerPendingEvent()`.
-  virtual kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end);
+  virtual kj::Promise<DeferredProxy<void>> pumpTo(kj::Ptr<WritableStreamSink> output, bool end);
 
   // If pumpTo() pumps to a system stream, what is the best encoding for that system stream to
   // use? This is just a hint.
@@ -491,13 +497,13 @@ class ReadableStreamController {
     virtual void close(jsg::Lock& js) = 0;
     virtual void error(jsg::Lock& js, jsg::JsValue reason) = 0;
     virtual void release(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) = 0;
-    virtual kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) = 0;
+    virtual kj::Maybe<kj::Promise<void>> tryPumpTo(kj::Ptr<WritableStreamSink> sink, bool end) = 0;
     virtual jsg::Promise<ReadResult> read(jsg::Lock& js) = 0;
   };
 
   virtual ~ReadableStreamController() noexcept(false) {}
 
-  virtual void setOwnerRef(ReadableStream& stream) = 0;
+  virtual void setOwnerRef(kj::Weak<ReadableStream> stream) = 0;
 
   virtual jsg::Ref<ReadableStream> addRef() = 0;
 
@@ -716,7 +722,7 @@ class WritableStreamController {
 
   virtual ~WritableStreamController() noexcept(false) {}
 
-  virtual void setOwnerRef(WritableStream& stream) = 0;
+  virtual void setOwnerRef(kj::Weak<WritableStream> stream) = 0;
 
   virtual jsg::Ref<WritableStream> addRef() = 0;
 

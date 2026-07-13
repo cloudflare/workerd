@@ -4,8 +4,8 @@
 
 #pragma once
 
-#include <workerd/api/streams/readable.h>
-#include <workerd/api/streams/writable.h>
+#include <workerd/api/js-readable-stream.h>
+#include <workerd/api/js-writable-stream.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
@@ -62,11 +62,11 @@ class Socket: public jsg::Object {
  public:
   Socket(jsg::Lock& js,
       IoContext& context,
-      kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream,
+      kj::Rc<kj::AsyncIoStream> connectionStream,
       kj::Maybe<kj::String> remoteAddress,
       kj::Maybe<kj::String> localAddress,
-      jsg::Ref<ReadableStream> readableParam,
-      jsg::Ref<WritableStream> writable,
+      JsReadableStream readableParam,
+      JsWritableStream writable,
       jsg::PromiseResolverPair<void> closedPrPair,
       kj::Promise<void> watchForDisconnectTask,
       jsg::Optional<SocketOptions> options,
@@ -92,11 +92,11 @@ class Socket: public jsg::Object {
         openedPromiseCopy(openedPrPair.promise.whenResolved(js)),
         openedPromise(kj::mv(openedPrPair.promise)) {};
 
-  jsg::Ref<ReadableStream> getReadable() {
-    return readable.addRef();
+  JsReadableStream getReadable(jsg::Lock& js) {
+    return readable.addRef(js);
   }
-  jsg::Ref<WritableStream> getWritable() {
-    return writable.addRef();
+  JsWritableStream getWritable(jsg::Lock& js) {
+    return writable.addRef(js);
   }
   jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed() {
     return closedPromise;
@@ -168,8 +168,8 @@ class Socket: public jsg::Object {
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackFieldWithSize("connectionData", sizeof(IoOwn<ConnectionData>));
-    tracker.trackField("readable", readable);
-    tracker.trackField("writable", writable);
+    readable.visitForMemoryInfo(tracker);
+    writable.visitForMemoryInfo(tracker);
     tracker.trackField("closedResolver", closedResolver);
     tracker.trackField("closedPromiseCopy", closedPromiseCopy);
     tracker.trackField("closedPromise", closedPromise);
@@ -182,13 +182,13 @@ class Socket: public jsg::Object {
 
  private:
   struct ConnectionData {
-    kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream;
+    kj::Rc<kj::AsyncIoStream> connectionStream;
     kj::Maybe<kj::Promise<void>> watchForDisconnectTask;
     // tlsStarter must be declared after connectionStream so that it is destroyed first,
     // since it holds a reference that keeps the connection alive.
     kj::Own<kj::TlsStarterCallback> tlsStarter;
     ConnectionData(kj::Own<kj::TlsStarterCallback> tlsStarter,
-        kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connStream,
+        kj::Rc<kj::AsyncIoStream> connStream,
         kj::Promise<void> disconnectTask)
         : connectionStream(kj::mv(connStream)),
           watchForDisconnectTask(kj::mv(disconnectTask)),
@@ -196,8 +196,8 @@ class Socket: public jsg::Object {
   };
   kj::Maybe<IoOwn<ConnectionData>> connectionData;
 
-  jsg::Ref<ReadableStream> readable;
-  jsg::Ref<WritableStream> writable;
+  JsReadableStream readable;
+  JsWritableStream writable;
   // This fulfiller is used to resolve the `closedPromise` below.
   jsg::Promise<void>::Resolver closedResolver;
   // Copy kept so that it can be returned from `close`.
@@ -276,8 +276,12 @@ class SocketsModule final: public jsg::Object {
   // Creates a Fetcher from a Socket that can perform HTTP requests over the socket connection
   jsg::Promise<jsg::Ref<Fetcher>> internalNewHttpClient(jsg::Lock& js, jsg::Ref<Socket> socket);
 
+  // Returns the synthetic IP registered for a magic hostname, or undefined. Used by node:dns.
+  jsg::Optional<kj::StringPtr> getCallerDnsOverride(jsg::Lock& js, kj::String hostname);
+
   JSG_RESOURCE_TYPE(SocketsModule, CompatibilityFlags::Reader flags) {
     JSG_METHOD(connect);
+    JSG_METHOD(getCallerDnsOverride);
 
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(internalNewHttpClient);

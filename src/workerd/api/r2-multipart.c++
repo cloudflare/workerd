@@ -91,8 +91,8 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
 
     kj::Maybe<int64_t> requestSize = kj::none;
     KJ_SWITCH_ONEOF(value) {
-      KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
-        KJ_IF_SOME(size, stream->tryGetLength(StreamEncoding::IDENTITY)) {
+      KJ_CASE_ONEOF(stream, JsReadableStream) {
+        KJ_IF_SOME(size, stream.tryGetLength(js, StreamEncoding::IDENTITY)) {
           requestSize = size;
         }
       }
@@ -115,9 +115,9 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
 
     kj::StringPtr components[1];
     auto path = fillR2Path(components, this->bucket->adminBucket);
-    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
+    auto client = this->bucket->getHttpClient(context, traceContext);
     auto promise = doR2HTTPPutRequest(
-        kj::mv(client), kj::mv(value), kj::none, kj::mv(requestJson), path, kj::none);
+        js, kj::mv(client), kj::mv(value), kj::none, kj::mv(requestJson), path, kj::none);
 
     return context.awaitIo(js, kj::mv(promise),
         [&errorType, partNumber, traceContext = kj::mv(traceContext)](
@@ -187,9 +187,9 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
 
     kj::StringPtr components[1];
     auto path = fillR2Path(components, this->bucket->adminBucket);
-    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
-    auto promise =
-        doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, kj::none);
+    auto client = this->bucket->getHttpClient(context, traceContext);
+    auto promise = doR2HTTPPutRequest(
+        js, kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, kj::none);
 
     return context.awaitIo(js, kj::mv(promise),
         [&errorType, traceContext = kj::mv(traceContext)](
@@ -240,9 +240,9 @@ jsg::Promise<void> R2MultipartUpload::abort(
 
     kj::StringPtr components[1];
     auto path = fillR2Path(components, this->bucket->adminBucket);
-    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
-    auto promise =
-        doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, kj::none);
+    auto client = this->bucket->getHttpClient(context, traceContext);
+    auto promise = doR2HTTPPutRequest(
+        js, kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, kj::none);
 
     return context.awaitIo(js, kj::mv(promise),
         [&errorType, traceContext = kj::mv(traceContext)](

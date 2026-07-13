@@ -111,7 +111,7 @@ Key elements: `modules` (embed JS/TS files), `compatibilityFlags`, `bindings` (s
 
 ### Dependencies
 
-- **Cap'n Proto source code** available in `external/capnp-cpp` - contains KJ C++ base library and
+- **Cap'n Proto source code** available in `external/+http+capnp-cpp/` - it contains KJ C++ base library and
   capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/` includes and
   `kj::` and `capnp::` namespaces.
 
@@ -137,6 +137,7 @@ The other core runtime dependencies include:
 | fp16                                | Half-precision float support                                        |
 | highway                             | SIMD abstraction library                                            |
 | dragonbox                           | Float-to-string conversion                                          |
+| llvm-libc                           | Optimized C Math functions                                          |
 
 These dependencies are vendored via Bazel into the `external/` directory. See `MODULE.bazel` and the `build/deps/` directory for how they are integrated into the build system. (The project uses bzlmod; the legacy `WORKSPACE` file may still exist but is no longer the primary mechanism.)
 
@@ -215,12 +216,20 @@ This project uses the KJ library instead of the C++ standard library for most ty
 | `std::vector`           | `kj::Array<T>` (fixed) / `kj::Vector<T>` (growable) |
 | `std::unique_ptr`       | `kj::Own<T>`                                        |
 | `std::shared_ptr`       | `kj::Rc<T>` / `kj::Arc<T>` (thread-safe)            |
+| `std::weak_ptr`         | `kj::Weak<T>`                                       |
 | `std::optional`         | `kj::Maybe<T>`                                      |
 | `std::function`         | `kj::Function<T>`                                   |
 | `std::variant`          | `kj::OneOf<T...>`                                   |
 | `std::span` / array ref | `kj::ArrayPtr<T>`                                   |
 | `std::exception`        | `kj::Exception`                                     |
 | `std::promise`/`future` | `kj::Promise<T>` / `kj::ForkedPromise<T>`           |
+
+### Safety
+
+KJ library provides several constructs that should be preferred to improve the safety of the program:
+
+- `kj::ArrayPtr<T>` should be used instead of `T*`
+- `kj::Ptr<T>` should be used instead of `T&` when it is bound by T's lifetime
 
 ### Error Handling
 
@@ -234,9 +243,14 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 
 - `JSG_RESOURCE_TYPE` for reference types, `JSG_STRUCT` for value types
 - `js.alloc<T>()` for resource allocation
-- The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:jsg-lint`)
+- The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
   validates that GC-visitable fields are traced in `visitForGc()`. Run via
   `just clang-tidy <target>`. See `build/AGENTS.md` for details.
+- The `workerd-unsafe-continuation-capture` clang-tidy check flags lambdas
+  passed to async sinks (`kj/jsg::Promise::then`, `IoContext::run/awaitIo/...`,
+  `kj::evalLater`, ...) that capture bare references, `[this]`, or non-owning
+  views. See `docs/reference/detail/async-patterns.md` §Continuation Captures
+  for the safe-capture pattern catalog.
 
 ### Feature Management
 
@@ -300,6 +314,5 @@ See the markdown files in the `docs/` directory for additional information on sp
 
 - [development.md](docs/development.md) - Development environment setup and tools
 - [api-updates.md](docs/api-updates.md) - Guidelines for adding new JavaScript APIs
-- [pyodide.md](docs/pyodide.md) - Pyodide package management and updates
 
 Some source directories also contain README.md files with more specific information about that component. Proactively look for these when working in unfamiliar areas of the codebase. Proactively suggest updates to the documentation when it is missing or out of date, but do not make edits without confirming accuracy.

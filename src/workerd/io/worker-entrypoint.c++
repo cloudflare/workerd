@@ -63,7 +63,9 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Maybe<Worker::VersionInfo> versionInfo,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
       bool isDynamicDispatch,
-      kj::Maybe<kj::Own<AccessInfo>> accessInfo);
+      kj::Maybe<kj::Own<AccessInfo>> accessInfo,
+      kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
+      Persistent fromPersistentStub);
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
@@ -114,7 +116,8 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::Own<BaseTracer>> workerTracer,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
-      kj::Maybe<kj::Own<AccessInfo>> accessInfo);
+      kj::Maybe<kj::Own<AccessInfo>> accessInfo,
+      kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
 
   kj::Promise<void> requestImpl(kj::HttpMethod method,
       kj::StringPtr url,
@@ -202,8 +205,22 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
     kj::Maybe<Worker::VersionInfo> versionInfo,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
     bool isDynamicDispatch,
-    kj::Maybe<kj::Own<AccessInfo>> accessInfo) {
+    kj::Maybe<kj::Own<AccessInfo>> accessInfo,
+    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
+    Persistent fromPersistentStub) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::construct()");
+
+  // If this request came from a stored ("persistent") stub, re-verify that the target worker still
+  // has the `allow_irrevocable_stub_storage` compat flag enabled. The flag may have been removed
+  // since the stub was stored, in which case we must reject the request rather than silently
+  // honoring a stub that should no longer be reachable. This is the single choke point through
+  // which every event type funnels.
+  if (fromPersistentStub &&
+      !worker->getIsolate().getApi().getFeatureFlags().getAllowIrrevocableStubStorage()) {
+    return WorkerInterface::fromException(JSG_KJ_EXCEPTION(FAILED, Error,
+        "Invoked a Worker from a stored stub, but the target worker no longer has the "
+        "allow_irrevocable_stub_storage compatibility flag enabled."));
+  }
 
   // Arrange to forcefully cancel work when the Actor is aborted.
   kj::Maybe<kj::Canceler&> canceler;
@@ -216,7 +233,7 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
       kj::mv(cfBlobJson), kj::mv(versionInfo));
   obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer),
-      kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo));
+      kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo), kj::mv(selfTokenFactory));
   auto& wrapper = metrics->wrapWorkerInterface(*obj);
   return kj::attachRef(wrapper, kj::mv(obj), kj::mv(metrics));
 }
@@ -249,7 +266,8 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     kj::Own<RequestObserver> metrics,
     kj::Maybe<kj::Own<BaseTracer>> workerTracer,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
-    kj::Maybe<kj::Own<AccessInfo>> accessInfo) {
+    kj::Maybe<kj::Own<AccessInfo>> accessInfo,
+    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::init()");
   // We need to construct the IoContext -- unless this is an actor and it already has a
   // IoContext, in which case we reuse it.
@@ -279,7 +297,8 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
   }
 
   incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::mv(context), kj::mv(ioChannelFactory),
-      kj::mv(metrics), kj::mv(workerTracer), kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo))
+      kj::mv(metrics), kj::mv(workerTracer), kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo),
+      kj::mv(selfTokenFactory))
                         .attach(kj::mv(actor));
 }
 
@@ -545,6 +564,15 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
     //   4. Otherwise -> synthesize a 5xx response.
 
     if (isActor) {
+      // Reaching this catch means the request reached the actor (we are past
+      // `delivered()` in Stage 1), so user code may have run. Annotate DISCONNECTED failures so the
+      // caller-side actor-call classifier knows this failure must not be retried as a fresh
+      // delivery. Only DISCONNECTED failures participate in the delivery-position metric, so other
+      // exception types need no annotation. Set before exceptionToPropagate() so it survives the
+      // internal-exception description rewrite; the detail serializes back across the RPC boundary.
+      if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
+        exception.setDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+      }
       // TODO(cleanup): We'd really like to tunnel exceptions any time a worker is calling another
       // worker, not just for actors (and W2W below), but getting that right will require cleaning
       // up error handling more generally.
@@ -694,6 +722,18 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     }
 
     if (isActor || tunnelExceptions) {
+      if (isActor) {
+        // Reaching this catch means the request reached the actor (we are past
+        // `delivered()` above), so user code may have run. Annotate DISCONNECTED failures so the
+        // caller-side actor-call classifier knows this failure must not be retried as a fresh
+        // delivery. Only DISCONNECTED failures participate in the delivery-position metric, so other
+        // exception types need no annotation. Set before exceptionToPropagate() so it survives the
+        // internal-exception description rewrite; the detail serializes back across the RPC boundary.
+        if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
+          exception.setDetail(
+              jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+        }
+      }
       // We want to tunnel exceptions from actors back to the caller.
       // TODO(cleanup): We'd really like to tunnel exceptions any time a worker is calling another
       // worker, not just for actors (and W2W below), but getting that right will require cleaning
@@ -708,13 +748,16 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
       kj::HttpHeaders headers(threadContext.getHeaderTable());
       if (exception.getType() == kj::Exception::Type::OVERLOADED) {
+        // Overloaded-type exceptions generally represent some resource exhaustion (i.e. not
+        // necessarily an internal error) and correspond to HTTP error 503.
         response.reject(503, "Service Unavailable", headers, static_cast<uint64_t>(0));
       } else {
         response.reject(500, "Internal Server Error", headers, static_cast<uint64_t>(0));
       }
-      // TODO(o11y): Should we also indicate a return response code for TCP?
       KJ_IF_SOME(t, workerTracer) {
-        t.setReturn(kj::none);
+        t.setReturn(kj::none,
+            tracing::FetchResponseInfo(
+                exception.getType() == kj::Exception::Type::OVERLOADED ? 503 : 500));
       }
 
       return kj::READY_NOW;
@@ -1000,12 +1043,15 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::Maybe<Worker::VersionInfo> versionInfo,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
     bool isDynamicDispatch,
-    kj::Maybe<kj::Own<AccessInfo>> accessInfo) {
+    kj::Maybe<kj::Own<AccessInfo>> accessInfo,
+    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
+    Persistent fromPersistentStub) {
   return WorkerEntrypoint::construct(threadContext, kj::mv(worker), kj::mv(entrypointName),
       kj::mv(props), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::mv(metrics), waitUntilTasks, tunnelExceptions,
       kj::mv(workerTracer), kj::mv(cfBlobJson), kj::mv(versionInfo),
-      kj::mv(maybeTriggerInvocationSpan), isDynamicDispatch, kj::mv(accessInfo));
+      kj::mv(maybeTriggerInvocationSpan), isDynamicDispatch, kj::mv(accessInfo),
+      kj::mv(selfTokenFactory), fromPersistentStub);
 }
 
 }  // namespace workerd

@@ -47,31 +47,18 @@ void PyodideBundleManager::setPyodideBundleData(
       kj::mv(version), {.messageReader = kj::mv(messageReader), .bundle = bundle});
 }
 
-const kj::Maybe<const kj::Array<unsigned char>&> PyodidePackageManager::getPyodidePackage(
-    kj::StringPtr id) const {
-  return packages.lockShared()->find(id);
-}
-
-void PyodidePackageManager::setPyodidePackageData(
-    kj::String id, kj::Array<unsigned char> data) const {
-  packages.lockExclusive()->insert(kj::mv(id), kj::mv(data));
-}
-
-static int readToTarget(
-    kj::ArrayPtr<const kj::byte> source, int offset, kj::ArrayPtr<kj::byte> buf) {
-  int size = source.size();
-  if (offset >= size || offset < 0) {
+static uint32_t readToTarget(
+    kj::ArrayPtr<const kj::byte> source, uint64_t offset, kj::ArrayPtr<kj::byte> buf) {
+  size_t size = source.size();
+  if (offset >= size) {
     return 0;
   }
-  int toCopy = buf.size();
-  if (size - offset < toCopy) {
-    toCopy = size - offset;
-  }
+  size_t toCopy = kj::min(buf.size(), size - offset);
   memcpy(buf.begin(), source.begin() + offset, toCopy);
   return toCopy;
 }
 
-int ReadOnlyBuffer::read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf) {
+uint32_t ReadOnlyBuffer::read(jsg::Lock& js, uint64_t offset, kj::Array<kj::byte> buf) {
   return readToTarget(source, offset, buf);
 }
 
@@ -139,30 +126,31 @@ kj::HashSet<kj::String> PythonModuleInfo::getWorkerModuleSet() {
   return result;
 }
 
-kj::Array<int> PyodideMetadataReader::getSizes(jsg::Lock& js) {
-  auto builder = kj::heapArrayBuilder<int>(state->moduleInfo.names.size());
+kj::Array<uint32_t> PyodideMetadataReader::getSizes(jsg::Lock& js) {
+  auto builder = kj::heapArrayBuilder<uint32_t>(state->moduleInfo.names.size());
   for (auto i: kj::zeroTo(builder.capacity())) {
     builder.add(state->moduleInfo.contents[i].size());
   }
   return builder.finish();
 }
 
-int PyodideMetadataReader::read(jsg::Lock& js, int index, int offset, kj::Array<kj::byte> buf) {
-  if (index >= state->moduleInfo.contents.size() || index < 0) {
+uint32_t PyodideMetadataReader::read(
+    jsg::Lock& js, uint64_t index, uint64_t offset, kj::Array<kj::byte> buf) {
+  if (index >= state->moduleInfo.contents.size()) {
     return 0;
   }
   auto& data = state->moduleInfo.contents[index];
   return readToTarget(data, offset, buf);
 }
 
-int PyodideMetadataReader::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
+uint32_t PyodideMetadataReader::readMemorySnapshot(uint64_t offset, kj::Array<kj::byte> buf) {
   if (state->memorySnapshot == kj::none) {
     return 0;
   }
   return readToTarget(KJ_REQUIRE_NONNULL(state->memorySnapshot), offset, buf);
 }
 
-int ArtifactBundler::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
+uint32_t ArtifactBundler::readMemorySnapshot(uint64_t offset, kj::Array<kj::byte> buf) {
   if (inner->existingSnapshot == kj::none) {
     return 0;
   }
@@ -425,18 +413,58 @@ kj::String getPythonBundleName(PythonSnapshotRelease::Reader pyodideRelease) {
 
 namespace api::pyodide {
 
-kj::Array<kj::String> getPythonPackageFiles(kj::StringPtr lockFileContents) {
-  auto packages = parseLockFile(lockFileContents);
+// The Python stdlib packages are extracted at build time and embedded in the Pyodide bundle as a
+// PythonPackages capnp message, carried in a data module whose name ends with this segment.
+static constexpr kj::StringPtr PACKAGES_MODULE_SUFFIX = "python_packages.bin"_kj;
 
-  // The lock file is pre-filtered to contain exactly the packages we want to load, so we fetch the
-  // file for every package in it.
-  kj::Vector<kj::String> res;
-  for (const auto& ent: *packages) {
-    auto obj = ent.getValue().getObject();
-    res.add(kj::str(getField(obj, "file_name").getString()));
+jsg::Ref<EmbeddedPackagesReader> EmbeddedPackagesReader::fromBundle(
+    jsg::Lock& js, jsg::Bundle::Reader bundle) {
+  for (auto module: bundle.getModules()) {
+    if (module.which() != jsg::Module::DATA) {
+      continue;
+    }
+    kj::StringPtr name = module.getName();
+    if (!name.endsWith(PACKAGES_MODULE_SUFFIX)) {
+      continue;
+    }
+
+    // The data module holds a serialized PythonPackages message. Its bytes live in the
+    // process-wide bundle message (word-aligned, since capnp allocates Data on word boundaries),
+    // so we can read it in place without copying.
+    auto data = module.getData().asBytes();
+    auto words = kj::arrayPtr(
+        reinterpret_cast<const capnp::word*>(data.begin()), data.size() / sizeof(capnp::word));
+    // We're going to reuse this for every Python isolate, so set the traversal
+    // limit to infinity or else eventually a new Python isolate will fail.
+    auto messageReader = kj::heap<capnp::FlatArrayMessageReader>(
+        words, capnp::ReaderOptions{.traversalLimitInWords = kj::maxValue});
+    return js.alloc<EmbeddedPackagesReader>(kj::mv(messageReader));
   }
 
-  return res.releaseAsArray();
+  // No embedded packages (e.g. a newer Pyodide version that bundles the stdlib directly).
+  return js.alloc<EmbeddedPackagesReader>(kj::none);
+}
+
+kj::Array<PythonPackageFileMetadata> EmbeddedPackagesReader::getFiles(jsg::Lock& js) {
+  KJ_IF_SOME(packages, files()) {
+    auto files = packages.getFiles();
+    auto builder = kj::heapArrayBuilder<PythonPackageFileMetadata>(files.size());
+    for (auto file: files) {
+      auto size = file.getContents().size();
+      KJ_REQUIRE(size <= size_t(int(kj::maxValue)),
+          "embedded Python package file is too large to address with an int size", file.getPath(),
+          size);
+      // installDir/path are kj::StringPtr pointing into the message; only copied when marshaled.
+      builder.add(PythonPackageFileMetadata{
+        .installDir = file.getInstallDir(),
+        .path = file.getPath(),
+        .size = static_cast<int>(size),
+        .reader = js.alloc<ReadOnlyBuffer>(file.getContents().asBytes()),
+      });
+    }
+    return builder.finish();
+  }
+  return kj::Array<PythonPackageFileMetadata>();
 }
 
 void WorkerFatalReporter::reportFatal(jsg::Lock& js, kj::String error) {

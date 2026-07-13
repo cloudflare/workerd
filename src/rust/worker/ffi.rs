@@ -6,6 +6,14 @@ use std::pin::Pin;
 
 use kj::http::ConnectSettings;
 use kj_rs::KjDate;
+// `KjMaybe` is only referenced inside the cxx bridge module below, but the macro expansion needs
+// the type in scope.
+#[expect(
+    unused_imports,
+    reason = "referenced inside the #[cxx::bridge] macro expansion"
+)]
+use kj_rs::KjMaybe;
+use kj_rs::KjOwn;
 
 use crate::CustomEvent;
 use crate::Result;
@@ -14,6 +22,10 @@ use crate::ffi::bridge::CustomEventResult;
 use crate::ffi::bridge::ScheduledResult;
 
 #[cxx::bridge(namespace = "workerd::rust::worker")]
+#[expect(
+    clippy::missing_safety_doc,
+    reason = "cxx bridge extern decls; safety is uniform"
+)]
 pub mod bridge {
     #[namespace = "kj::rust"]
     unsafe extern "C++" {
@@ -49,13 +61,13 @@ pub mod bridge {
         pub outcome: EventOutcome,
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug)]
     // keep in sync with `src/workerd/io/worker-interface.h`
     pub struct AlarmResult {
         pub retry: bool,
         pub retry_counts_against_limit: bool,
         pub outcome: EventOutcome,
-        pub error_description: String,
+        pub error_description: KjMaybe<String>,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +83,15 @@ pub mod bridge {
 
     extern "Rust" {
         type Wrapper;
+
+        // Wrap a C++ WorkerInterface as a Rust worker::Interface (via CxxWorkerInterface), then
+        // re-expose it to C++ as a WorkerInterface. On its own this is an identity decorator; it
+        // exists so C++ can hand a worker to Rust for decoration and get a WorkerInterface back.
+        #[expect(
+            clippy::unnecessary_box_returns,
+            reason = "c++ expects heap-allocation"
+        )]
+        fn new_cxx_worker(inner: KjOwn<WorkerInterface>) -> Box<Wrapper>;
 
         async unsafe fn request<'a>(
             self: &'a mut Wrapper,
@@ -106,7 +127,7 @@ pub mod bridge {
 
         async unsafe fn custom_event<'a>(
             self: &'a mut Wrapper,
-            event: Pin<&'a mut CustomEvent>,
+            event: KjOwn<CustomEvent>,
         ) -> Result<CustomEventResult>;
 
         async unsafe fn test<'a>(self: &'a mut Wrapper) -> Result<bool>;
@@ -120,11 +141,70 @@ pub mod bridge {
         type CustomEvent;
     }
 
+    // Reverse direction: call a C++ `workerd::WorkerInterface` from Rust. Lets a Rust
+    // `worker::Interface` decorate/delegate to a C++ worker (see `CxxWorkerInterface`).
+    unsafe extern "C++" {
+        type WorkerInterface;
+
+        async unsafe fn worker_request<'a>(
+            worker: Pin<&'a mut WorkerInterface>,
+            method: HttpMethod,
+            url: &'a [u8],
+            headers: &'a HttpHeaders,
+            request_body: Pin<&'a mut AsyncInputStream>,
+            response: Pin<&'a mut HttpServiceResponse>,
+        ) -> Result<()>;
+
+        async unsafe fn worker_connect<'a>(
+            worker: Pin<&'a mut WorkerInterface>,
+            host: &'a [u8],
+            headers: &'a HttpHeaders,
+            connection: Pin<&'a mut AsyncIoStream>,
+            response: Pin<&'a mut ConnectResponse>,
+            settings: HttpConnectSettings<'a>,
+        ) -> Result<()>;
+
+        async unsafe fn worker_prewarm<'a>(
+            worker: Pin<&'a mut WorkerInterface>,
+            url: &'a [u8],
+        ) -> Result<()>;
+
+        // Dates cross as i64 nanoseconds since the Unix epoch (kj_rs::repr::{to,from}Nanos), to
+        // avoid marshalling KjDate through an extern "C++" boundary.
+        async unsafe fn worker_run_scheduled<'a>(
+            worker: Pin<&'a mut WorkerInterface>,
+            scheduled_time_nanos: i64,
+            cron: &'a [u8],
+        ) -> Result<ScheduledResult>;
+
+        async unsafe fn worker_run_alarm<'a>(
+            worker: Pin<&'a mut WorkerInterface>,
+            scheduled_time_nanos: i64,
+            retry_count: u32,
+        ) -> Result<AlarmResult>;
+
+        // Takes ownership of the event and forwards it to the C++ worker.
+        async unsafe fn worker_custom_event(
+            worker: Pin<&mut WorkerInterface>,
+            event: KjOwn<CustomEvent>,
+        ) -> Result<CustomEventResult>;
+
+        async unsafe fn worker_test<'a>(worker: Pin<&'a mut WorkerInterface>) -> Result<bool>;
+    }
+
     impl Box<Wrapper> {}
 }
 
 pub struct Wrapper {
     worker: Box<dyn crate::Interface>,
+}
+
+#[expect(
+    clippy::unnecessary_box_returns,
+    reason = "c++ expects heap-allocation"
+)]
+fn new_cxx_worker(inner: kj_rs::KjOwn<bridge::WorkerInterface>) -> Box<Wrapper> {
+    crate::Interface::into_ffi(crate::CxxWorkerInterface::new(inner))
 }
 
 impl Wrapper {
@@ -186,7 +266,7 @@ impl Wrapper {
         Ok(result.into())
     }
 
-    async fn custom_event(&mut self, event: Pin<&mut CustomEvent>) -> Result<CustomEventResult> {
+    async fn custom_event(&mut self, event: KjOwn<CustomEvent>) -> Result<CustomEventResult> {
         let result = self.worker.custom_event(event).await?;
         Ok(result.into())
     }
@@ -212,7 +292,7 @@ impl From<crate::AlarmResult> for bridge::AlarmResult {
             retry: value.retry,
             retry_counts_against_limit: value.retry_counts_against_limit,
             outcome: value.outcome.into(),
-            error_description: value.error_description.unwrap_or_default(),
+            error_description: value.error_description.into(),
         }
     }
 }

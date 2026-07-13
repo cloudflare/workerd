@@ -275,10 +275,10 @@ jsg::Promise<jsg::JsRef<jsg::JsString>> Blob::text(jsg::Lock& js) {
   return js.resolvedPromise(js.str(data.asChars()).addRef(js));
 }
 
-jsg::Ref<ReadableStream> Blob::stream(jsg::Lock& js) {
+JsReadableStream Blob::stream(jsg::Lock& js) {
   FeatureObserver::maybeRecordUse(FeatureObserver::Feature::BLOB_AS_STREAM);
-  return js.alloc<ReadableStream>(
-      IoContext::current(), streams::newMemorySource(data, kj::heap(JSG_THIS)));
+  return JsReadableStream::create(
+      js, IoContext::current(), streams::newMemorySource(data, kj::heap(JSG_THIS)));
 }
 
 // =======================================================================================
@@ -342,6 +342,34 @@ jsg::Ref<File> File::constructor(
     return js.alloc<File>(js, data, kj::mv(name), kj::mv(type), lastModified);
   }
   return js.alloc<File>(kj::mv(name), kj::mv(type), lastModified);
+}
+
+void Blob::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  // TODO(perf): For JSRPC, copying the data is necessary. For
+  // structuredClone, we should find a way for the clones to
+  // just share the same backend data to avoid the copy.
+  serializer.writeLengthDelimited(type);
+  serializer.writeRawUint64(data.size());
+  serializer.writeRawBytes(data);
+}
+
+jsg::Ref<Blob> Blob::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto type = normalizeType(deserializer.readLengthDelimitedString());
+
+  // Guard against a bogus length triggering a huge allocation.
+  uint64_t size = deserializer.readRawUint64();
+  auto limit = Worker::Isolate::from(js).getLimitEnforcer().getBlobSizeLimit();
+  JSG_REQUIRE(size <= limit, DOMDataCloneError, "Deserialization failed: Blob size exceeds limit (",
+      size, ")");
+
+  if (size == 0) {
+    return js.alloc<Blob>(kj::mv(type));
+  }
+
+  auto bytes = deserializer.readRawBytes(size);
+  auto ab = jsg::JsArrayBuffer::create(js, bytes);
+  return js.alloc<Blob>(js, jsg::JsBufferSource(ab), kj::mv(type));
 }
 
 }  // namespace workerd::api

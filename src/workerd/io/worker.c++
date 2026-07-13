@@ -14,6 +14,7 @@
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
 #include <workerd/io/frankenvalue.h>
+#include <workerd/io/per-isolate-bootstrap.h>
 #include <workerd/io/tracer.h>
 #include <workerd/io/wasm-instantiate-shim.embed.h>
 #include <workerd/io/worker.h>
@@ -669,6 +670,8 @@ struct Worker::Isolate::Impl {
     KJ_DISALLOW_COPY_AND_MOVE(Lock);
 
     void setupContext(v8::Local<v8::Context> context) {
+      Worker::setupContextInternalScripts(*lock, context);
+
       // The V8Inspector implements the `console` object.
       KJ_IF_SOME(i, impl.inspector) {
         i.get()->contextCreated(v8_inspector::V8ContextInfo(
@@ -680,6 +683,7 @@ struct Worker::Isolate::Impl {
     void disposeContext(jsg::JsContext<api::ServiceWorkerGlobalScope> context) {
       lock->withinHandleScope([&] {
         auto v8Context = context.getHandle(*lock);
+        cleanupPerIsolateBootstrap(*lock, v8Context);
         context->clear();
         KJ_IF_SOME(i, impl.inspector) {
           i.get()->contextDestroyed(v8Context);
@@ -757,14 +761,25 @@ struct Worker::Isolate::Impl {
     kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>> inspector;
     jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
       auto lock = api.lock(stackScope);
-      auto featureFlagsWords = capnp::canonicalize(api.getFeatureFlags());
+      auto featureFlags = api.getFeatureFlags();
+      auto featureFlagsWords = capnp::canonicalize(featureFlags);
       realm = ::workerd::rust::jsg::realm_create(
           lock->v8Isolate, featureFlagsWords.asBytes().as<kj_rs::Rust>());
       lock->v8Isolate->SetData(
           ::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &*KJ_REQUIRE_NONNULL(realm));
 
       limitEnforcer.customizeIsolate(lock->v8Isolate);
-      if (inspectorPolicy != InspectorPolicy::DISALLOW) {
+
+      // The experimental, local-dev-only node:inspector module needs the isolate's V8Inspector to
+      // exist so it can connect its own in-process CDP session. We create the inspector eagerly
+      // here (rather than lazily) so that setupContext()'s contextCreated() call registers the
+      // worker's context with it automatically. This is gated on `!isMultiTenantProcess()`, so it
+      // can never trigger in Cloudflare's production runtime. (The flag itself is `$experimental`,
+      // which already bars production use, but we double-guard with the same invariant the
+      // DevTools inspector relies on.)
+      bool enableInspectorForNodeModule =
+          featureFlags.getEnableNodeJsInspectorLocalDev() && !isMultiTenantProcess();
+      if (inspectorPolicy != InspectorPolicy::DISALLOW || enableInspectorForNodeModule) {
         // We just created our isolate, so we don't need to use Isolate::Impl::Lock.
         KJ_ASSERT(!isMultiTenantProcess(), "inspector is not safe in multi-tenant processes");
         inspector = v8_inspector::V8Inspector::create(lock->v8Isolate, inspectorClient.get());
@@ -1432,6 +1447,13 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         mContext->enableWarningOnSpecialEvents();
         context = mContext.getHandle(lock);
         recordedLock.setupContext(context);
+
+        if (util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)) {
+          // Run per-isolate bootstrap scripts before any user code.
+          JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
+            runPerIsolateBootstrap(js, isolate->getApi().getFeatureFlags());
+          });
+        }
       } else {
         // Although we're going to compile a script independent of context, V8 requires that
         // there be an active context, otherwise it will segfault, I guess. So we create a
@@ -1765,12 +1787,6 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
 
 void Worker::setupContext(
     jsg::Lock& lock, v8::Local<v8::Context> context, const LoggingOptions& loggingOptions) {
-  // Set WebAssembly.Module @@HasInstance
-  setWebAssemblyModuleHasInstance(lock, context);
-
-  // Shim WebAssembly.instantiate to detect modules exporting "__instance_signal".
-  shimWebAssemblyInstantiate(lock, context);
-
   // We replace the default V8 console.log(), etc. methods, to give the worker access to
   // logged content, and log formatted values to stdout/stderr locally.
   auto global = context->Global();
@@ -1795,6 +1811,14 @@ void Worker::setupContext(
   setHandler("info", LogLevel::INFO);
   setHandler("log", LogLevel::LOG);
   setHandler("warn", LogLevel::WARN);
+}
+
+void Worker::setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context> context) {
+  // Set WebAssembly.Module @@HasInstance
+  setWebAssemblyModuleHasInstance(lock, context);
+
+  // Shim WebAssembly.instantiate to detect modules exporting "__instance_signal".
+  shimWebAssemblyInstantiate(lock, context);
 }
 // =======================================================================================
 
@@ -1895,6 +1919,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
     // Create a stack-allocated handle scope.
     lock.withinHandleScope([&] {
       jsg::JsContext<api::ServiceWorkerGlobalScope>* jsContext;
+      bool freshContext = false;
 
       KJ_IF_SOME(c, script->impl->moduleContext) {
         // Use the shared context from the script.
@@ -1908,9 +1933,19 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               .newModuleRegistry = script->impl->getNewModuleRegistry(),
               .schemaLoader = script->getSchemaLoader(),
             }));
+        freshContext = true;
       }
 
       v8::Local<v8::Context> context = KJ_REQUIRE_NONNULL(jsContext).getHandle(lock);
+
+      // Run per-isolate bootstrap for freshly created service worker contexts.
+      // (Modular worker contexts already ran bootstrap in the Script constructor.)
+      if (freshContext &&
+          util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)) {
+        JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
+          runPerIsolateBootstrap(js, script->isolate->getApi().getFeatureFlags());
+        });
+      }
 
       // Install the virtual file system on the context. Keep in mind that for service
       // worker style workers, the Script may be shared between multiple Workers, even
@@ -2416,6 +2451,7 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
   }
 
   kj::StringPtr n = name.orDefault("default"_kj);
+  auto& ioctx = IoContext::current();
 
   auto getHandlerFromEntrypointClass =
       [&](EntrypointClass& cls) -> kj::Maybe<kj::Own<api::ExportedHandler>> {
@@ -2432,6 +2468,8 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     handler->env = js.v8Ref(js.v8Undefined());
     handler->ctx = kj::none;
 
+    ioctx.setEntrypointHandler(js, jsg::JsObject(handler->self.getHandle(js)));
+
     return handler;
   };
 
@@ -2442,8 +2480,10 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
       constructedHandler.ctx = js.alloc<api::ExecutionContext>(js,
           jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js),
           kj::mv(versionInfo));
+      ioctx.setEntrypointHandler(js, jsg::JsObject(constructedHandler.self.getHandle(js)));
       return kj::heap(kj::mv(constructedHandler));
     }
+    ioctx.setEntrypointHandler(js, jsg::JsObject(h.self.getHandle(js)));
     return fakeOwn(h);
   } else KJ_IF_SOME(cls, worker.impl->statelessClasses.find(n)) {
     return getHandlerFromEntrypointClass(cls);
@@ -2763,6 +2803,14 @@ Worker::Isolate::AsyncWaiterList::~AsyncWaiterList() noexcept {
   // dangling pointers.
   KJ_ASSERT(head == kj::none, "destroying non-empty waiter list?");
   KJ_ASSERT(tail == &head, "tail pointer corrupted?");
+}
+
+void Worker::Isolate::runInLockScope(
+    LockType lockType, kj::FunctionParam<void(jsg::Lock&)> callback) const {
+  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    Isolate::Impl::Lock recordedLock(*this, lockType, stackScope);
+    callback(*recordedLock.lock);
+  });
 }
 
 kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockWithoutRequest(
@@ -4013,7 +4061,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       containerRunning = status.getRunning();
     }
 
-    co_await context.run([this, &info, containerRunning](Worker::Lock& lock) {
+    co_await context.run([this, &context, &info, containerRunning](Worker::Lock& lock) {
       jsg::Lock& js = lock;
 
       kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
@@ -4043,6 +4091,8 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       handler.env = js.v8Ref(js.v8Undefined());
       handler.ctx = kj::none;
       handler.missingSuperclass = info.missingSuperclass;
+
+      context.setEntrypointHandler(js, jsg::JsObject(handler.self.getHandle(js)));
 
       impl->classInstance = kj::mv(handler);
     }, inputLock.addRef(context.getCurrentTraceSpan()));
@@ -4501,6 +4551,13 @@ void Worker::Isolate::completedRequest() const {
 
 bool Worker::Isolate::isInspectorEnabled() const {
   return impl->inspector != kj::none;
+}
+
+kj::Maybe<v8_inspector::V8Inspector&> Worker::Isolate::tryGetV8Inspector() const {
+  KJ_IF_SOME(i, impl->inspector) {
+    return *i.get();
+  }
+  return kj::none;
 }
 
 namespace {

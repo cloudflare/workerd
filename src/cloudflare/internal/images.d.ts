@@ -72,11 +72,26 @@ type ImageTransform = {
 type ImageDrawOptions = {
   opacity?: number;
   repeat?: boolean | string;
+  composite?: ImageCompositeMode;
   top?: number;
   left?: number;
   bottom?: number;
   right?: number;
 };
+
+type ImageCompositeMode =
+  /** Foreground drawn on top of backdrop (default) */
+  | 'over'
+  /** Foreground shown only where backdrop is opaque */
+  | 'in'
+  /** Foreground drawn on top, but clipped to the backdrop's shape */
+  | 'atop'
+  /** Foreground shown only where backdrop is transparent */
+  | 'out'
+  /** Foreground and backdrop visible only where the other is not */
+  | 'xor'
+  /** Foreground and backdrop channels added (brightening) */
+  | 'lighter';
 
 type ImageInputOptions = {
   encoding?: 'base64';

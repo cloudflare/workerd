@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <workerd/api/streams/readable.h>
+#include <workerd/api/js-readable-stream.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/jsg/jsg.h>
@@ -40,6 +40,13 @@ class KvNamespace: public jsg::Object {
         subrequestChannel(subrequestChannel),
         bindingName(kj::mv(bindingName)) {}
 
+  // Construct a KvNamespace backed by a live subrequest channel rather than a channel number, used
+  // when the binding is carried as a capability (e.g. via `ctx.props`).
+  explicit KvNamespace(IoOwn<IoChannelFactory::SubrequestChannel> subrequestChannel)
+      : additionalHeaders(nullptr),
+        subrequestChannel(kj::mv(subrequestChannel)),
+        bindingName(nullptr) {}
+
   struct GetOptions {
     jsg::Optional<kj::String> type;
     jsg::Optional<int> cacheTtl;
@@ -50,8 +57,8 @@ class KvNamespace: public jsg::Object {
     });
   };
 
-  using GetResult = kj::Maybe<
-      kj::OneOf<jsg::Ref<ReadableStream>, kj::Array<byte>, kj::String, jsg::JsRef<jsg::JsValue>>>;
+  using GetResult =
+      kj::Maybe<kj::OneOf<JsReadableStream, kj::Array<byte>, kj::String, jsg::JsRef<jsg::JsValue>>>;
 
   jsg::Promise<KvNamespace::GetResult> getSingle(jsg::Lock& js,
       IoContext& context,
@@ -134,7 +141,7 @@ class KvNamespace: public jsg::Object {
   // we specifically support later.
   using PutBody = kj::OneOf<kj::String, jsg::JsObject>;
 
-  using PutSupportedTypes = kj::OneOf<kj::String, kj::Array<byte>, jsg::Ref<ReadableStream>>;
+  using PutSupportedTypes = kj::OneOf<kj::String, kj::Array<byte>, JsReadableStream>;
 
   jsg::Promise<void> put(jsg::Lock& js,
       kj::String name,
@@ -257,6 +264,14 @@ class KvNamespace: public jsg::Object {
     tracker.trackField("additionalHeaders", additionalHeaders.asPtr());
   }
 
+  // serialize() always throws; only deserialize() (from a Frankenvalue capability, e.g. ctx.props)
+  // is supported.
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<KvNamespace> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::KV_NAMESPACE);
+
  protected:
   // Do the boilerplate work of constructing an HTTP client to KV. Setting a KvOptType causes
   // the limiter for that op type to be checked. If a string is used, there isn't any limiter
@@ -271,7 +286,10 @@ class KvNamespace: public jsg::Object {
 
  private:
   kj::Array<AdditionalHeader> additionalHeaders;
-  uint subrequestChannel;
+
+  // A channel number, or a live channel when the binding is carried as a capability (e.g. props).
+  kj::OneOf<uint, IoOwn<IoChannelFactory::SubrequestChannel>> subrequestChannel;
+
   kj::String bindingName;
 };
 

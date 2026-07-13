@@ -20,6 +20,10 @@ PYODIDE_VERSIONS = [
         "version": "0.28.2",
         "sha256": "c9f6dd067d119e50850849f7428e3c636ecbc2684a0d2ff992f3bd48a1062b6c",
     },
+    {
+        "version": "314.0.2",
+        "sha256": "86e3d5e0cbd39b1def1e424b3f1abdcc9edc66ae200fa5280ae8825bf71799ec",
+    },
 ]
 
 # The below is a list of package tags for the old builtin packages support.
@@ -109,8 +113,8 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "pyodide_version": "0.26.0a2",
         "pyodide_date": "2024-03-01",
         "packages": "20240829.4",
-        "backport": "79",
-        "integrity": "sha256-LO3jNW3PXEiwHm10GgnssxwKw+v37KMGZBiBwjUReVk=",
+        "backport": "83",
+        "integrity": "sha256-b5xYvWAd5U7jolloM/yW2xESIrvmGMRHXzYUktezCGk=",
         "flag": "pythonWorkers",
         "enable_flag_name": "python_workers",
         "emscripten_version": "3.1.52",
@@ -137,8 +141,8 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "pyodide_version": "0.28.2",
         "pyodide_date": "2025-01-16",
         "packages": "20250808",
-        "backport": "10",
-        "integrity": "sha256-k37ELtvRw8fd3QHsMgja0Tl+4QKP1qGTnNdjxUiqb2E=",
+        "backport": "14",
+        "integrity": "sha256-dFxfG3CZ3z3B6fKYJ9SYVMtvGuY+6zZSoElCIbF4xw0=",
         "flag": "pythonWorkers20250116",
         "enable_flag_name": "python_workers_20250116",
         "emscripten_version": "4.0.9",
@@ -166,7 +170,27 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         ],
     },
     {
-        "real_pyodide_version": "0.28.2",
+        "name": "314.0.2",
+        "pyodide_version": "314.0.2",
+        "pyodide_date": "2026-06-10",
+        "backport": "12",
+        "integrity": "sha256-Q8miBQHo7Gqys4rDVoCAIuHKRPwUaCcnrLnbplfgWRI=",
+        "flag": "pythonWorkers20260610",
+        "enable_flag_name": "python_workers_20260610",
+        "emscripten_version": "5.0.3",
+        "python_version": "3.14.2",
+        "baseline_snapshot": "baseline-484e61538.bin",
+        "baseline_snapshot_hash": "484e6153873eea75f6e63476bc8972b62bb374d8113531ad9782505be454137a",
+        "vendored_packages_for_tests": VENDORED_VERSION_INDEPENDENT + [
+            {
+                "name": "numpy",
+                "abi": "3.14",
+                "sha256": "28bea03aa0a18bbc1884ea4cebe8d93a9004455c497417e172c221f0a245b439",
+            },
+        ],
+    },
+    {
+        "real_pyodide_version": "314.0.2",
         "name": "development",
         "pyodide_version": "dev",
         "pyodide_date": "dev",

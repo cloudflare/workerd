@@ -6,6 +6,7 @@
 
 #include "actor.h"
 #include "export-loopback.h"
+#include "restore.h"
 #include "sql.h"
 #include "sync-kv.h"
 #include "util.h"
@@ -15,7 +16,7 @@
 #include <workerd/io/actor-id.h>
 #include <workerd/io/actor-sqlite.h>
 #include <workerd/io/features.h>
-#include <workerd/io/hibernation-manager.h>
+#include <workerd/io/legacy-hibernation-manager.h>
 #include <workerd/io/stored-value.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
@@ -24,6 +25,13 @@
 #include <v8.h>
 
 namespace workerd::api {
+
+jsg::Promise<jsg::Value> DurableObjectState::restore(jsg::Lock& js,
+    jsg::JsObject params,
+    const jsg::TypeHandler<jsg::Ref<Fetcher>>& fetcherHandler,
+    const jsg::TypeHandler<jsg::Ref<JsRpcStub>>& rpcStubHandler) {
+  return restoreCurrentEntrypoint(js, params, fetcherHandler, rpcStubHandler);
+}
 
 namespace {
 
@@ -985,19 +993,17 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
         [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
       tracing.setTag("facet_name"_kjc, name.asPtr());
 
-      // Lazily initialize actorChannel
-      if (actorChannel == kj::none) {
-        actorChannel = facetManager.getFacet(name, kj::mv(getStartInfo));
-      }
-
-      return KJ_REQUIRE_NONNULL(actorChannel)
-          ->startRequest({.cfBlobJson = kj::mv(cfStr),
-            .parentSpan = tracing.getInternalSpanParent(),
-            .userSpanParent = tracing.getUserSpanParent()});
+      return getOrCreateActorChannel().startRequest({.cfBlobJson = kj::mv(cfStr),
+        .parentSpan = tracing.getInternalSpanParent(),
+        .userSpanParent = tracing.getUserSpanParent()});
     },
         {.inHouse = true,
           .wrapMetrics = true,
           .operationName = kj::ConstString("facet_subrequest"_kjc)}));
+  }
+
+  kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override {
+    return kj::addRef(getOrCreateActorChannel());
   }
 
  private:
@@ -1008,6 +1014,14 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
   kj::Function<kj::Promise<Worker::Actor::FacetManager::StartInfo>()> getStartInfo;
 
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
+
+  IoChannelFactory::ActorChannel& getOrCreateActorChannel() {
+    if (actorChannel == kj::none) {
+      actorChannel = facetManager.getFacet(name, kj::mv(getStartInfo));
+    }
+
+    return *KJ_REQUIRE_NONNULL(actorChannel);
+  }
 };
 
 jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js,
@@ -1178,8 +1192,12 @@ void DurableObjectState::abort(jsg::Lock& js, jsg::Optional<kj::String> reason) 
 Worker::Actor::HibernationManager& DurableObjectState::maybeInitHibernationManager(
     Worker::Actor& actor) {
   if (actor.getHibernationManager() == kj::none) {
-    // If there's no hibernation manager created yet, we should create one.
-    actor.setHibernationManager(kj::refcounted<HibernationManagerImpl>(
+    // TODO(EW-10817): When the new HibernationManagerImpl path is functional, gate this
+    // construction on `util::Autogate::isEnabled(util::AutogateKey::HIBERNATABLE_WEBSOCKET_REFACTOR)`
+    // and dispatch to either LegacyHibernationManagerImpl (autogate off) or the new
+    // HibernationManagerImpl (autogate on). For now the autogate is unconsulted and only the
+    // legacy path is reachable.
+    actor.setHibernationManager(kj::refcounted<LegacyHibernationManagerImpl>(
         actor.getLoopback(), KJ_REQUIRE_NONNULL(actor.getHibernationEventType())));
   }
   return KJ_REQUIRE_NONNULL(actor.getHibernationManager());

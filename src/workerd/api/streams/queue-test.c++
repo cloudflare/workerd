@@ -75,15 +75,15 @@ struct MustNotCall<Ret(Args...)> {
 
 auto read(jsg::Lock& js, auto& consumer) {
   auto prp = js.newPromiseAndResolver<ReadResult>();
-  consumer.read(js, ValueQueue::ReadRequest{.resolver = kj::mv(prp.resolver)});
+  consumer.read(js, kj::heap<ValueQueue::ReadRequest>({.resolver = kj::mv(prp.resolver)}));
   return kj::mv(prp.promise);
 }
 
 auto byobRead(jsg::Lock& js, auto& consumer, int size) {
   auto prp = js.newPromiseAndResolver<ReadResult>();
   consumer.read(js,
-      ByteQueue::ReadRequest(kj::mv(prp.resolver),
-          {
+      kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
+          ByteQueue::ReadRequest::PullInto{
             .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, size)),
             .type = ByteQueue::ReadRequest::Type::BYOB,
           }));
@@ -161,7 +161,7 @@ KJ_TEST("ValueQueue with single consumer") {
     KJ_ASSERT(queue.desiredSize() == 0);
 
     auto prp = js.newPromiseAndResolver<ReadResult>();
-    consumer.read(js, ValueQueue::ReadRequest{.resolver = kj::mv(prp.resolver)});
+    consumer.read(js, kj::heap<ValueQueue::ReadRequest>({.resolver = kj::mv(prp.resolver)}));
 
     MustCall<ReadContinuation> readContinuation([&](jsg::Lock& js, auto&& result) -> auto {
       KJ_ASSERT(!result.done);
@@ -426,8 +426,8 @@ KJ_TEST("ByteQueue with single consumer") {
 
     auto prp = js.newPromiseAndResolver<ReadResult>();
     consumer.read(js,
-        ByteQueue::ReadRequest(kj::mv(prp.resolver),
-            {
+        kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
+            ByteQueue::ReadRequest::PullInto{
               .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
             }));
 
@@ -464,8 +464,8 @@ KJ_TEST("ByteQueue with single byob consumer") {
 
     auto prp = js.newPromiseAndResolver<ReadResult>();
     consumer.read(js,
-        ByteQueue::ReadRequest(kj::mv(prp.resolver),
-            {
+        kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
+            ByteQueue::ReadRequest::PullInto{
               .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
               .type = ByteQueue::ReadRequest::Type::BYOB,
             }));
@@ -519,8 +519,8 @@ KJ_TEST("ByteQueue with byob consumer and default consumer") {
 
     auto prp = js.newPromiseAndResolver<ReadResult>();
     consumer1.read(js,
-        ByteQueue::ReadRequest(kj::mv(prp.resolver),
-            {
+        kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
+            ByteQueue::ReadRequest::PullInto{
               .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
               .type = ByteQueue::ReadRequest::Type::BYOB,
             }));
@@ -587,8 +587,8 @@ KJ_TEST("ByteQueue with byob consumer and default consumer") {
 
     auto prp2 = js.newPromiseAndResolver<ReadResult>();
     consumer2.read(js,
-        ByteQueue::ReadRequest(kj::mv(prp2.resolver),
-            {
+        kj::heap<ByteQueue::ReadRequest>(kj::mv(prp2.resolver),
+            ByteQueue::ReadRequest::PullInto{
               .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
               .type = ByteQueue::ReadRequest::Type::DEFAULT,
             }));
@@ -888,8 +888,8 @@ KJ_TEST("ByteQueue with default consumer with atLeast") {
     const auto read = [&](jsg::Lock& js, uint atLeast) {
       auto prp = js.newPromiseAndResolver<ReadResult>();
       consumer.read(js,
-          ByteQueue::ReadRequest(kj::mv(prp.resolver),
-              {
+          kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
+              ByteQueue::ReadRequest::PullInto{
                 .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 5)),
                 .atLeast = atLeast,
               }));
@@ -976,8 +976,8 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (same rate)") {
     const auto read = [&](jsg::Lock& js, auto& consumer, uint atLeast = 1) {
       auto prp = js.newPromiseAndResolver<ReadResult>();
       consumer.read(js,
-          ByteQueue::ReadRequest(kj::mv(prp.resolver),
-              {
+          kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
+              ByteQueue::ReadRequest::PullInto{
                 .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 5)),
                 .atLeast = atLeast,
               }));
@@ -1082,8 +1082,8 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (different rate)
     const auto read = [&](jsg::Lock& js, auto& consumer, uint atLeast = 1) {
       auto prp = js.newPromiseAndResolver<ReadResult>();
       consumer.read(js,
-          ByteQueue::ReadRequest(kj::mv(prp.resolver),
-              {
+          kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
+              ByteQueue::ReadRequest::PullInto{
                 .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 5)),
                 .atLeast = atLeast,
               }));
@@ -1353,7 +1353,7 @@ KJ_TEST("ValueQueue draining read rejects with pending reads") {
 
     // Queue a regular read
     auto prp = js.newPromiseAndResolver<ReadResult>();
-    consumer.read(js, ValueQueue::ReadRequest{.resolver = kj::mv(prp.resolver)});
+    consumer.read(js, kj::heap<ValueQueue::ReadRequest>({.resolver = kj::mv(prp.resolver)}));
 
     KJ_ASSERT(consumer.hasReadRequests());
 
@@ -1388,7 +1388,7 @@ KJ_TEST("ValueQueue read rejects with pending draining read") {
       return js.rejectedPromise<ReadResult>(kj::mv(value));
     });
 
-    consumer.read(js, ValueQueue::ReadRequest{.resolver = kj::mv(prp.resolver)});
+    consumer.read(js, kj::heap<ValueQueue::ReadRequest>({.resolver = kj::mv(prp.resolver)}));
     prp.promise.then(js, readContinuation, errorContinuation);
     js.runMicrotasks();
   });
@@ -1486,8 +1486,8 @@ KJ_TEST("ByteQueue draining read rejects with pending reads") {
     // Queue a regular read
     auto prp = js.newPromiseAndResolver<ReadResult>();
     consumer.read(js,
-        ByteQueue::ReadRequest(kj::mv(prp.resolver),
-            {
+        kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
+            ByteQueue::ReadRequest::PullInto{
               .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
             }));
 
@@ -1525,8 +1525,8 @@ KJ_TEST("ByteQueue read rejects with pending draining read") {
     });
 
     consumer.read(js,
-        ByteQueue::ReadRequest(kj::mv(prp.resolver),
-            {
+        kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
+            ByteQueue::ReadRequest::PullInto{
               .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
             }));
     prp.promise.then(js, readContinuation, errorContinuation);
@@ -1942,7 +1942,7 @@ KJ_TEST("ValueQueue destroyed with pending read requests doesn't crash") {
 
     // Queue a read request (no data pushed, so it will be pending)
     auto prp = js.newPromiseAndResolver<ReadResult>();
-    consumer->read(js, ValueQueue::ReadRequest{.resolver = kj::mv(prp.resolver)});
+    consumer->read(js, kj::heap<ValueQueue::ReadRequest>({.resolver = kj::mv(prp.resolver)}));
 
     KJ_ASSERT(consumer->hasReadRequests());
 
@@ -2051,8 +2051,8 @@ KJ_TEST("ByteQueue push handles consumer destroyed by microtask between pushes")
     // Set up a pending read on consumer1
     auto prp = js.newPromiseAndResolver<ReadResult>();
     consumer1->read(js,
-        ByteQueue::ReadRequest(kj::mv(prp.resolver),
-            {
+        kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
+            ByteQueue::ReadRequest::PullInto{
               .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
             }));
 

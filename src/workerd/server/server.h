@@ -272,13 +272,18 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
 
   // Pretty similar to lookupService() and lookupActorClass(), but these callbacks are called by
   // the `ChannelTokenHandler` when decoding tokens.
-  kj::Own<IoChannelFactory::SubrequestChannel> resolveEntrypoint(
-      kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) override;
-  kj::Own<IoChannelFactory::ActorClassChannel> resolveActorClass(
-      kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) override;
+  kj::Own<IoChannelFactory::SubrequestChannel> resolveEntrypoint(kj::StringPtr serviceName,
+      kj::Maybe<kj::StringPtr> entrypoint,
+      Frankenvalue props,
+      Persistent persistent) override;
+  kj::Own<IoChannelFactory::ActorClassChannel> resolveActorClass(kj::StringPtr serviceName,
+      kj::Maybe<kj::StringPtr> entrypoint,
+      Frankenvalue props,
+      Persistent persistent) override;
   kj::Own<IoChannelFactory::ActorChannel> resolveActor(kj::StringPtr namespaceKey,
       kj::ArrayPtr<const byte> id,
-      kj::Maybe<kj::StringPtr> name) override;
+      kj::Maybe<kj::StringPtr> name,
+      Persistent persistent) override;
 
   kj::Array<byte> encodeChannelToken(IoChannelFactory::ChannelTokenUsage usage,
       kj::StringPtr serviceName,

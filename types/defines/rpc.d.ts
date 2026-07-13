@@ -290,51 +290,114 @@ declare namespace CloudflareWorkersModule {
 
   export type WorkflowDelayDuration = WorkflowSleepDuration;
 
+  export type WorkflowDynamicDelayContext = {
+    ctx: WorkflowStepContext<WorkflowDelayFunction>;
+    error: Error;
+  };
+
+  export type WorkflowDelayFunction = (
+    input: WorkflowDynamicDelayContext
+  ) => WorkflowDelayDuration | Promise<WorkflowDelayDuration>;
+
   export type WorkflowTimeoutDuration = WorkflowSleepDuration;
 
   export type WorkflowRetentionDuration = WorkflowSleepDuration;
 
   export type WorkflowBackoff = 'constant' | 'linear' | 'exponential';
 
+  export type WorkflowStepSensitivity = 'output';
+
   export type WorkflowStepConfig = {
     retries?: {
       limit: number;
-      delay: WorkflowDelayDuration | number;
+      delay: WorkflowDelayDuration | number | WorkflowDelayFunction;
       backoff?: WorkflowBackoff;
     };
     timeout?: WorkflowTimeoutDuration | number;
+    sensitive?: WorkflowStepSensitivity;
+  };
+
+  export type WorkflowStepRollbackConfig = Pick<
+    WorkflowStepConfig,
+    'retries' | 'timeout'
+  >;
+
+  export type WorkflowCronSchedule = {
+    /** Cron expression that triggered this event. */
+    cron: string;
+    /** Timestamp of the scheduled trigger, in milliseconds since the Unix epoch. */
+    scheduledTime: number;
   };
 
   export type WorkflowEvent<T> = {
     payload: Readonly<T>;
     timestamp: Date;
     instanceId: string;
+    workflowName: string;
+    schedule?: WorkflowCronSchedule;
   };
 
   export type WorkflowStepEvent<T> = {
     payload: Readonly<T>;
     timestamp: Date;
     type: string;
+    sensitive?: WorkflowStepSensitivity;
   };
 
-  export type WorkflowStepContext = {
+  export type WorkflowStepContext<
+    Delay = WorkflowDelayDuration | number,
+  > = {
     step: {
       name: string;
       count: number;
     };
     attempt: number;
-    config: WorkflowStepConfig;
+    config: {
+      retries?: {
+        limit: number;
+        backoff?: WorkflowBackoff;
+      } & (Delay extends WorkflowDelayFunction
+        ? {}
+        : { delay: WorkflowDelayDuration | number });
+      timeout?: WorkflowTimeoutDuration | number;
+      sensitive?: WorkflowStepSensitivity;
+    };
+  };
+
+  export type WorkflowRollbackContext<T = unknown> = {
+    ctx: WorkflowStepContext;
+    error: Error;
+    output: T | undefined;
+    /** @deprecated Use `ctx.step.name` and `ctx.step.count` instead. */
+    stepName: string;
+  };
+
+  export type WorkflowRollbackHandler<T = unknown> = (
+    ctx: WorkflowRollbackContext<T>
+  ) => Promise<void>;
+
+  export type WorkflowStepRollbackOptions<T = unknown> = {
+    rollback: WorkflowRollbackHandler<T>;
+    rollbackConfig?: WorkflowStepRollbackConfig;
   };
 
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
       name: string,
-      callback: (ctx: WorkflowStepContext) => Promise<T>
+      callback: (ctx: WorkflowStepContext) => Promise<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions<T>
     ): Promise<T>;
-    do<T extends Rpc.Serializable<T>>(
+    do<T extends Rpc.Serializable<T>, const C extends WorkflowStepConfig>(
       name: string,
-      config: WorkflowStepConfig,
-      callback: (ctx: WorkflowStepContext) => Promise<T>
+      config: C,
+      callback: (
+        ctx: WorkflowStepContext<
+          C['retries'] extends { delay: infer D }
+          ? D
+          : WorkflowDelayDuration | number
+        >
+      ) => Promise<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions<T>
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;

@@ -4,6 +4,7 @@
 
 #include "channel-token.h"
 
+#include <workerd/api/restore.h>
 #include <workerd/server/channel-token.capnp.h>
 #include <workerd/util/entropy.h>
 
@@ -35,17 +36,42 @@ ChannelTokenHandler::ChannelTokenHandler(Resolver& resolver): resolver(resolver)
   kj::arrayPtr(keyId).copyFrom(kj::arrayPtr(hash).first(KEY_ID_SIZE));
 }
 
+void ChannelTokenHandler::requireStorable(
+    IoChannelFactory::ChannelTokenUsage usage, Persistent persistent) {
+  if (usage == IoChannelFactory::ChannelTokenUsage::STORAGE) {
+    JSG_REQUIRE(persistent.toBool(), DOMDataCloneError,
+        "Cannot store this stub because the target worker does not have the "
+        "allow_irrevocable_stub_storage compatibility flag enabled.");
+  }
+}
+
+void ChannelTokenHandler::encodePersistent(ChannelToken::Builder builder, Persistent persistent) {
+  if (persistent.toBool()) {
+    builder.getPersistence().setIrrevocable();
+  } else {
+    builder.getPersistence().setNone();
+  }
+}
+
+Persistent ChannelTokenHandler::decodePersistent(ChannelToken::Reader reader) {
+  return Persistent(reader.getPersistence().isIrrevocable());
+}
+
 kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
     encodeChannelTokenImpl(ChannelToken::Type type,
         IoChannelFactory::ChannelTokenUsage usage,
         kj::StringPtr serviceName,
         kj::Maybe<kj::StringPtr> entrypoint,
-        Frankenvalue& props) {
+        Frankenvalue& props,
+        Persistent persistent) {
+  requireStorable(usage, persistent);
+
   auto message = kj::heap<capnp::MallocMessageBuilder>(128);
   auto builder = message->getRoot<ChannelToken>();
   kj::Vector<kj::Promise<void>> promises;
 
   builder.setType(type);
+  encodePersistent(builder, persistent);
 
   auto service = builder.getService();
   service.setName(serviceName);
@@ -54,46 +80,7 @@ kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
     service.setEntrypoint(e);
   }
 
-  {
-    auto propsBuilder = service.initProps();
-    props.toCapnp(propsBuilder);
-
-    auto capTable = props.getCapTable();
-    if (capTable.size() > 0) {
-      auto tableBuilder = propsBuilder.initCapTable().initAs<ChannelToken::FrankenvalueCapTable>();
-
-      auto caps = tableBuilder.initCaps(capTable.size());
-
-      for (auto i: kj::indices(capTable)) {
-        KJ_IF_SOME(subreq, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(*capTable[i])) {
-          KJ_SWITCH_ONEOF(subreq.getTokenMaybeSync(usage)) {
-            KJ_CASE_ONEOF(token, kj::Array<byte>) {
-              caps[i].setSubrequestChannel(token);
-            }
-            KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
-              promises.add(promise.then([slot = caps[i]](kj::Array<byte> token) mutable {
-                slot.setSubrequestChannel(token);
-              }));
-            }
-          }
-        } else KJ_IF_SOME(actorClass,
-            kj::tryDowncast<IoChannelFactory::ActorClassChannel>(*capTable[i])) {
-          KJ_SWITCH_ONEOF(actorClass.getTokenMaybeSync(usage)) {
-            KJ_CASE_ONEOF(token, kj::Array<byte>) {
-              caps[i].setActorClassChannel(token);
-            }
-            KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
-              promises.add(promise.then([slot = caps[i]](kj::Array<byte> token) mutable {
-                slot.setActorClassChannel(token);
-              }));
-            }
-          }
-        } else {
-          KJ_FAIL_REQUIRE("unknown type in props");
-        }
-      }
-    }
-  }
+  encodeFrankenvalue(usage, props, service.initProps(), promises);
 
   if (promises.empty()) {
     return serializeTokenImpl(usage, *message);
@@ -102,6 +89,59 @@ kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
         .then([this, usage, message = kj::mv(message)]() mutable {
       return serializeTokenImpl(usage, *message);
     });
+  }
+}
+
+void ChannelTokenHandler::encodeFrankenvalue(IoChannelFactory::ChannelTokenUsage usage,
+    Frankenvalue& value,
+    rpc::Frankenvalue::Builder valueBuilder,
+    kj::Vector<kj::Promise<void>>& promises) {
+  value.toCapnp(valueBuilder);
+
+  auto capTable = value.getCapTable();
+  if (capTable.size() > 0) {
+    auto tableBuilder = valueBuilder.initCapTable().initAs<ChannelToken::FrankenvalueCapTable>();
+
+    auto caps = tableBuilder.initCaps(capTable.size());
+
+    for (auto i: kj::indices(capTable)) {
+      KJ_IF_SOME(subreq, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(*capTable[i])) {
+        KJ_SWITCH_ONEOF(subreq.getTokenMaybeSync(usage)) {
+          KJ_CASE_ONEOF(token, kj::Array<byte>) {
+            caps[i].setSubrequestChannel(token);
+          }
+          KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+            promises.add(promise.then([slot = caps[i]](kj::Array<byte> token) mutable {
+              slot.setSubrequestChannel(token);
+            }));
+          }
+        }
+      } else KJ_IF_SOME(actorClass,
+          kj::tryDowncast<IoChannelFactory::ActorClassChannel>(*capTable[i])) {
+        KJ_SWITCH_ONEOF(actorClass.getTokenMaybeSync(usage)) {
+          KJ_CASE_ONEOF(token, kj::Array<byte>) {
+            caps[i].setActorClassChannel(token);
+          }
+          KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+            promises.add(promise.then([slot = caps[i]](kj::Array<byte> token) mutable {
+              slot.setActorClassChannel(token);
+            }));
+          }
+        }
+      } else KJ_IF_SOME(rpcChannel, kj::tryDowncast<IoChannelFactory::RpcChannel>(*capTable[i])) {
+        KJ_SWITCH_ONEOF(rpcChannel.getTokenMaybeSync(usage)) {
+          KJ_CASE_ONEOF(token, kj::Array<byte>) {
+            caps[i].setRpcChannel(token);
+          }
+          KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+            promises.add(promise.then(
+                [slot = caps[i]](kj::Array<byte> token) mutable { slot.setRpcChannel(token); }));
+          }
+        }
+      } else {
+        KJ_FAIL_REQUIRE("unknown type in props");
+      }
+    }
   }
 }
 
@@ -171,29 +211,35 @@ kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
     encodeSubrequestChannelToken(IoChannelFactory::ChannelTokenUsage usage,
         kj::StringPtr serviceName,
         kj::Maybe<kj::StringPtr> entrypoint,
-        Frankenvalue& props) {
+        Frankenvalue& props,
+        Persistent persistent) {
   return encodeChannelTokenImpl(
-      ChannelToken::Type::SUBREQUEST, usage, serviceName, entrypoint, props);
+      ChannelToken::Type::SUBREQUEST, usage, serviceName, entrypoint, props, persistent);
 }
 
 kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
     encodeActorClassChannelToken(IoChannelFactory::ChannelTokenUsage usage,
         kj::StringPtr serviceName,
         kj::Maybe<kj::StringPtr> entrypoint,
-        Frankenvalue& props) {
+        Frankenvalue& props,
+        Persistent persistent) {
   return encodeChannelTokenImpl(
-      ChannelToken::Type::ACTOR_CLASS, usage, serviceName, entrypoint, props);
+      ChannelToken::Type::ACTOR_CLASS, usage, serviceName, entrypoint, props, persistent);
 }
 
 kj::Array<byte> ChannelTokenHandler::encodeActorChannelToken(
     IoChannelFactory::ChannelTokenUsage usage,
     kj::StringPtr namespaceKey,
     kj::ArrayPtr<const byte> id,
-    kj::Maybe<kj::StringPtr> name) {
+    kj::Maybe<kj::StringPtr> name,
+    Persistent persistent) {
+  requireStorable(usage, persistent);
+
   capnp::word scratch[128]{};
   capnp::MallocMessageBuilder message(scratch);
   auto builder = message.getRoot<ChannelToken>();
   builder.setType(ChannelToken::Type::SUBREQUEST);
+  encodePersistent(builder, persistent);
 
   auto actor = builder.initActor();
   actor.setNamespaceKey(namespaceKey);
@@ -203,6 +249,353 @@ kj::Array<byte> ChannelTokenHandler::encodeActorChannelToken(
   }
 
   return serializeTokenImpl(usage, message);
+}
+
+kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
+    encodeRestoredChannelToken(IoChannelFactory::ChannelTokenUsage usage,
+        ChannelToken::Type type,
+        kj::ArrayPtr<const byte> vendorToken,
+        Frankenvalue restoreArg,
+        Persistent persistent) {
+  requireStorable(usage, persistent);
+
+  auto message = kj::heap<capnp::MallocMessageBuilder>(128);
+  auto builder = message->getRoot<ChannelToken>();
+  builder.setType(type);
+  encodePersistent(builder, persistent);
+
+  auto restored = builder.initRestored();
+  restored.setVendor(vendorToken);
+
+  kj::Vector<kj::Promise<void>> promises;
+  encodeFrankenvalue(usage, restoreArg, restored.initRestoreArg(), promises);
+
+  if (promises.empty()) {
+    return serializeTokenImpl(usage, *message);
+  } else {
+    return kj::joinPromisesFailFast(promises.releaseAsArray())
+        .then([this, usage, message = kj::mv(message)]() mutable {
+      return serializeTokenImpl(usage, *message);
+    });
+  }
+}
+
+kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
+    encodeRestoredChannelToken(IoChannelFactory::ChannelTokenUsage usage,
+        ChannelToken::Type type,
+        kj::Own<IoChannelFactory::SubrequestChannel> vendor,
+        Frankenvalue restoreArg,
+        Persistent persistent) {
+  auto vendorTokenMaybeSync = vendor->getTokenMaybeSync(usage);
+  return encodeRestoredChannelTokenImpl(
+      usage, type, kj::mv(vendorTokenMaybeSync), kj::mv(vendor), kj::mv(restoreArg), persistent);
+}
+
+kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
+    encodeRestoredChannelToken(IoChannelFactory::ChannelTokenUsage usage,
+        ChannelToken::Type type,
+        kj::Own<ServerSelfTokenFactory> vendor,
+        Frankenvalue restoreArg,
+        Persistent persistent) {
+  auto vendorTokenMaybeSync = vendor->getSelfToken(usage);
+  return encodeRestoredChannelTokenImpl(
+      usage, type, kj::mv(vendorTokenMaybeSync), kj::mv(vendor), kj::mv(restoreArg), persistent);
+}
+
+kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
+    encodeRestoredChannelTokenImpl(IoChannelFactory::ChannelTokenUsage usage,
+        ChannelToken::Type type,
+        kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> vendorTokenMaybeSync,
+        kj::Own<void> keepVendorAlive,
+        Frankenvalue restoreArg,
+        Persistent persistent) {
+  KJ_SWITCH_ONEOF(vendorTokenMaybeSync) {
+    KJ_CASE_ONEOF(vendorToken, kj::Array<byte>) {
+      return encodeRestoredChannelToken(usage, type, vendorToken, kj::mv(restoreArg), persistent);
+    }
+    KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+      return promise.then([this, usage, type, keepVendorAlive = kj::mv(keepVendorAlive),
+                              restoreArg = kj::mv(restoreArg), persistent](
+                              kj::Array<byte> vendorToken) mutable -> kj::Promise<kj::Array<byte>> {
+        // Ugh, we need to deconstruct the variant just to wrap a sychronous token in an
+        // immediate promise.
+        // TODO(cleanup): This could benefit from some helper around OneOf<T, Promise<T>> that
+        //   lets us write `.then()` in a way that is synchronous if possible otherwise
+        //   asynchronous.
+        // TODO(cleanup): Another, different way to clean this up would be to allow kj::OneOf to
+        //   convert to type T if all of the OneOf's variants can convert to T.
+        KJ_SWITCH_ONEOF(encodeRestoredChannelToken(
+                            usage, type, vendorToken, kj::mv(restoreArg), persistent)) {
+          KJ_CASE_ONEOF(baseToken, kj::Array<byte>) {
+            return kj::mv(baseToken);
+          }
+          KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+            return kj::mv(promise);
+          }
+        }
+        KJ_UNREACHABLE;
+      });
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+// SubrequestChannel representing a `restored` token, that is, where we must call `[restore]()` on
+// some other service in order to create the true channel.
+//
+// The main purpose of this class is to delay calling `[restore]()` until a request is actually
+// made, so that if the channel is merely used to create a new token (i.e. the app deserialized a
+// channel token and then simply serialized it again without making a call), then we don't bother
+// invoking `[restore]()`.
+class ChannelTokenHandler::RestoredSubrequestChannel final
+    : public IoChannelFactory::SubrequestChannel {
+ public:
+  // Constructor for the "fresh" path: created by `ctx.restore()` (via makeRestoredSubrequestChannel
+  // -> makeRestoredSubrequestChannelResolved). Here the vendor is the current entrypoint's
+  // `ServerSelfTokenFactory` (used only to construct the token, never to call `[restore]()`,
+  // because `inner` is already the freshly-restored channel).
+  RestoredSubrequestChannel(ChannelTokenHandler& handler,
+      kj::Own<ServerSelfTokenFactory> vendor,
+      Frankenvalue restoreArg,
+      kj::Own<IoChannelFactory::SubrequestChannel> inner,
+      Persistent persistent)
+      : handler(handler),
+        vendor(kj::mv(vendor)),
+        restoreArg(kj::mv(restoreArg)),
+        persistent(persistent),
+        restored(kj::mv(inner)) {}
+
+  // Constructor for the "decoded" path: created by decoding a stored token. Here the vendor is a
+  // real channel pointing at the entrypoint whose `[restore]()` method must be called (on first
+  // use) to reconstruct the live channel.
+  RestoredSubrequestChannel(ChannelTokenHandler& handler,
+      kj::Own<IoChannelFactory::SubrequestChannel> vendor,
+      Frankenvalue restoreArg,
+      Persistent persistent)
+      : handler(handler),
+        vendor(kj::mv(vendor)),
+        restoreArg(kj::mv(restoreArg)),
+        persistent(persistent) {}
+
+  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+    // Set this channel's token factory as `restoredSelfTokenFactory` so that if the target is a
+    // dynamic worker or facet, it can still use `ctx.restore()` by wrapping this channel's token.
+    metadata.restoredSelfTokenFactory = kj::refcounted<SelfTokenFactory>(kj::addRef(*this));
+
+    // Note: We do NOT want to modify `metadata.fromPersistentStub` here. Our own `persistent` flag
+    // indicates whether the Worker whose `[restore]()` method was called allows persistence. The
+    // metadata forwarded here is for the request to the target worker that [restore]() returned.
+    // That worker is not required to have opted into stub storage, because this token does not
+    // encode anything private to the target worker (e.g. props).
+    //
+    // Unless, of course, the restore chain continues *through* the target worker, in which case,
+    // `metadata` will already have `persistent = YES` set by its caller. No need for us to modify.
+    return ensureRestored().startRequest(kj::mv(metadata));
+  }
+
+  void requireAllowsTransfer() override {}
+
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
+    KJ_SWITCH_ONEOF(vendor) {
+      KJ_CASE_ONEOF(factory, kj::Own<ServerSelfTokenFactory>) {
+        return handler.encodeRestoredChannelToken(usage, ChannelToken::Type::SUBREQUEST,
+            kj::addRef(*factory), restoreArg.clone(), persistent);
+      }
+      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::SubrequestChannel>) {
+        return handler.encodeRestoredChannelToken(usage, ChannelToken::Type::SUBREQUEST,
+            kj::addRef(*channel), restoreArg.clone(), persistent);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+ private:
+  ChannelTokenHandler& handler;
+  kj::OneOf<kj::Own<ServerSelfTokenFactory>, kj::Own<IoChannelFactory::SubrequestChannel>> vendor;
+  Frankenvalue restoreArg;
+  Persistent persistent;
+  kj::Maybe<kj::Promise<void>> eventPromise;
+  kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> restored;
+
+  // A `SelfTokenFactory` that exposes this RestoredSubrequestChannel's own token, so that the
+  // target of a request made on this channel can chain `ctx.restore()` off of it.
+  class SelfTokenFactory final: public ServerSelfTokenFactory {
+   public:
+    SelfTokenFactory(kj::Own<RestoredSubrequestChannel> channel): channel(kj::mv(channel)) {}
+
+    kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getSelfToken(
+        IoChannelFactory::ChannelTokenUsage usage) override {
+      return channel->getTokenMaybeSync(usage);
+    }
+
+   private:
+    kj::Own<RestoredSubrequestChannel> channel;
+  };
+
+  // Actually call `[restore]()` on first use.
+  IoChannelFactory::SubrequestChannel& ensureRestored() {
+    KJ_IF_SOME(r, restored) {
+      return *r;
+    }
+
+    auto& vendorChannel =
+        KJ_REQUIRE_NONNULL(vendor.tryGet<kj::Own<IoChannelFactory::SubrequestChannel>>(),
+            "a freshly-created RestoredSubrequestChannel should always have `inner` set, so "
+            "ensureRestored() should never need to call the vendor");
+
+    // When the `persistent` flag is set on a restore token, it means that the worker on which we
+    // are calling `[restore]()` is required to support persistence. Specifically, the
+    // allow_irrevocable_stub_storage flag in this case is protecting the restore params. So, we
+    // propogate our `persistent` flag to the SubrequestMetadata passed into the restore request.
+    // Note that worker targeted by the stub *returned by* [restore]() is *not* required to support
+    // persistence. This can be a bit confusing compared to root (non-restore-based) tokens, where
+    // the root token is persistable when the Worker it points to is persistable.
+    // TODO(someday): Should we pass in some more metadata here? Maybe trace spans at least?
+    IoChannelFactory::SubrequestMetadata vendorMetadata;
+    vendorMetadata.fromPersistentStub = persistent;
+    auto worker = vendorChannel->startRequest(kj::mv(vendorMetadata));
+
+    auto event = kj::heap<api::RestoreServiceCustomEvent>(
+        api::RestoreServiceCustomEvent::RESTORE_SERVICE_EVENT_TYPE, restoreArg.clone());
+    auto channel = event->getChannel();
+
+    // Awkward: What do we do with the CustomEvent promise? Presumably if the event fails, the
+    // error will propagate through the channel. But we do need to keep the promise alive so that
+    // it is not canceled. So... we keep it as a member of this class.
+    eventPromise = worker->customEvent(kj::mv(event))
+                       .ignoreResult()
+                       .eagerlyEvaluate(nullptr)
+                       .attach(kj::mv(worker));
+
+    return *restored.emplace(kj::mv(channel));
+  }
+};
+
+// Like RestoredSubrequestChannel, except it's an RpcChannel, that is, this restores an RpcStub /
+// RpcTarget.
+class ChannelTokenHandler::RestoredRpcChannel final: public IoChannelFactory::RpcChannel {
+ public:
+  // Constructor for the "fresh" path: created by `ctx.restore()`. The vendor is the current
+  // entrypoint's `ServerSelfTokenFactory`, used only to construct the token. `restore()` is never
+  // called in this case, because the freshly-created stub is paired with a live capability.
+  RestoredRpcChannel(ChannelTokenHandler& handler,
+      kj::Own<ServerSelfTokenFactory> vendor,
+      Frankenvalue restoreArg,
+      Persistent persistent)
+      : handler(handler),
+        vendor(kj::mv(vendor)),
+        restoreArg(kj::mv(restoreArg)),
+        persistent(persistent) {}
+
+  // Constructor for the "decoded" path: created by decoding a stored token. The vendor is a real
+  // channel; each `restore()` calls `[restore]()` on it to open a fresh session.
+  RestoredRpcChannel(ChannelTokenHandler& handler,
+      kj::Own<IoChannelFactory::SubrequestChannel> vendor,
+      Frankenvalue restoreArg,
+      Persistent persistent)
+      : handler(handler),
+        vendor(kj::mv(vendor)),
+        restoreArg(kj::mv(restoreArg)),
+        persistent(persistent) {}
+
+  Session restore() override {
+    // Unlike RestoredSubrequestChannel, we expect the caller of restore() already caches the
+    // resulting stub, rather than calling again for every request. So, we don't need to cache
+    // our result.
+    return restoreWith(getVendorChannel());
+  }
+
+  void requireAllowsTransfer() override {}
+
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
+    KJ_SWITCH_ONEOF(vendor) {
+      KJ_CASE_ONEOF(factory, kj::Own<ServerSelfTokenFactory>) {
+        return handler.encodeRestoredChannelToken(
+            usage, ChannelToken::Type::RPC, kj::addRef(*factory), restoreArg.clone(), persistent);
+      }
+      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::SubrequestChannel>) {
+        return handler.encodeRestoredChannelToken(
+            usage, ChannelToken::Type::RPC, kj::addRef(*channel), restoreArg.clone(), persistent);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+ private:
+  ChannelTokenHandler& handler;
+  kj::OneOf<kj::Own<ServerSelfTokenFactory>, kj::Own<IoChannelFactory::SubrequestChannel>> vendor;
+  Frankenvalue restoreArg;
+  Persistent persistent;
+
+  // Obtain a callable channel to the vendor, i.e. the entrypoint whose `[restore]()` method must
+  // be invoked to (re)create the live RPC target.
+  kj::Own<IoChannelFactory::SubrequestChannel> getVendorChannel() {
+    KJ_SWITCH_ONEOF(vendor) {
+      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::SubrequestChannel>) {
+        return kj::addRef(*channel);
+      }
+      KJ_CASE_ONEOF(factory, kj::Own<ServerSelfTokenFactory>) {
+        KJ_SWITCH_ONEOF(factory->getSelfToken(IoChannelFactory::ChannelTokenUsage::RPC)) {
+          KJ_CASE_ONEOF(token, kj::Array<byte>) {
+            return handler.decodeSubrequestChannelToken(
+                IoChannelFactory::ChannelTokenUsage::RPC, token);
+          }
+          KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+            auto& handlerRef = handler;
+            return newPromisedChannel<IoChannelFactory::SubrequestChannel>(
+                promise.then([&handlerRef](kj::Array<byte> token) {
+              return handlerRef.decodeSubrequestChannelToken(
+                  IoChannelFactory::ChannelTokenUsage::RPC, token);
+            }));
+          }
+        }
+        KJ_UNREACHABLE;
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+  Session restoreWith(kj::Own<IoChannelFactory::SubrequestChannel> vendorChannel) {
+    // Just like RestoredSubrequestChannel::ensureRestored(), we must verify that the worker on
+    // which we call `[restore]()` allows persistence, if we are marked persistent.
+    // TODO(someday): Should we pass in some more metadata here? Maybe trace spans at least?
+    IoChannelFactory::SubrequestMetadata vendorMetadata;
+    vendorMetadata.fromPersistentStub = persistent;
+    auto worker = vendorChannel->startRequest(kj::mv(vendorMetadata));
+
+    auto event = kj::heap<api::RestoreRpcStubCustomEvent>(
+        api::RestoreRpcStubCustomEvent::RESTORE_RPC_STUB_EVENT_TYPE, restoreArg.clone());
+    auto cap = event->getCap();
+    auto task = worker->customEvent(kj::mv(event))
+                    .ignoreResult()
+                    .attach(kj::mv(vendorChannel))
+                    .eagerlyEvaluate(nullptr);
+
+    return {
+      .cap = kj::mv(cap),
+      .task = task.attach(kj::mv(worker)),
+    };
+  }
+};
+
+kj::Own<IoChannelFactory::SubrequestChannel> ChannelTokenHandler::makeRestoredSubrequestChannel(
+    kj::Own<IoChannelFactory::SelfTokenFactory> selfTokenFactory,
+    Frankenvalue restoreParams,
+    kj::Own<IoChannelFactory::SubrequestChannel> inner,
+    Persistent persistent) {
+  return kj::refcounted<RestoredSubrequestChannel>(*this,
+      kj::mv(selfTokenFactory).downcast<ServerSelfTokenFactory>(), kj::mv(restoreParams),
+      kj::mv(inner), persistent);
+}
+kj::Own<IoChannelFactory::RpcChannel> ChannelTokenHandler::makeRestoredRpcChannel(
+    kj::Own<IoChannelFactory::SelfTokenFactory> selfTokenFactory,
+    Frankenvalue restoreParams,
+    Persistent persistent) {
+  return kj::refcounted<RestoredRpcChannel>(*this,
+      kj::mv(selfTokenFactory).downcast<ServerSelfTokenFactory>(), kj::mv(restoreParams),
+      persistent);
 }
 
 kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl(
@@ -278,6 +671,15 @@ kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl
 
   KJ_REQUIRE(reader.getType() == type, "channel token type mismatch");
 
+  Persistent persistent = decodePersistent(reader);
+  if (usage == IoChannelFactory::ChannelTokenUsage::STORAGE && !persistent) {
+    // Backwards compatibility: tokens minted before the `persistence` union existed default to
+    // `none`. But since they were successfully stored, treat them as implicitly persistent. This
+    // ensures that when we exercise the token, we will verify that the target worker has the
+    // allow_irrevocable_stub_storage flag set.
+    persistent = Persistent::YES;
+  }
+
   switch (reader.which()) {
     case ChannelToken::SERVICE: {
       auto service = reader.getService();
@@ -289,30 +691,7 @@ kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl
 
       Frankenvalue props;
       if (service.hasProps()) {
-        auto propsReader = service.getProps();
-        auto tableReader = propsReader.getCapTable().getAs<ChannelToken::FrankenvalueCapTable>();
-
-        kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> capTable;
-        if (tableReader.hasCaps()) {
-          auto caps = tableReader.getCaps();
-          capTable.reserve(caps.size());
-
-          for (auto cap: caps) {
-            switch (cap.which()) {
-              case ChannelToken::FrankenvalueCapTable::Cap::UNKNOWN:
-                break;
-              case ChannelToken::FrankenvalueCapTable::Cap::SUBREQUEST_CHANNEL:
-                capTable.add(decodeSubrequestChannelToken(usage, cap.getSubrequestChannel()));
-                continue;
-              case ChannelToken::FrankenvalueCapTable::Cap::ACTOR_CLASS_CHANNEL:
-                capTable.add(decodeActorClassChannelToken(usage, cap.getActorClassChannel()));
-                continue;
-            }
-            KJ_FAIL_REQUIRE("unknown cap table type", cap.which());
-          }
-        }
-
-        props = Frankenvalue::fromCapnp(propsReader, kj::mv(capTable));
+        props = decodeFrankenvalue(usage, service.getProps());
       }
 
       // HACK: It would be more type-safe for us to return the (name, entrypoint, props) triplet and
@@ -322,9 +701,13 @@ kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl
       //   call here, return either type, and let the caller downcast to the right type.
       switch (type) {
         case ChannelToken::Type::SUBREQUEST:
-          return resolver.resolveEntrypoint(service.getName(), entrypoint, kj::mv(props));
+          return resolver.resolveEntrypoint(
+              service.getName(), entrypoint, kj::mv(props), persistent);
         case ChannelToken::Type::ACTOR_CLASS:
-          return resolver.resolveActorClass(service.getName(), entrypoint, kj::mv(props));
+          return resolver.resolveActorClass(
+              service.getName(), entrypoint, kj::mv(props), persistent);
+        case ChannelToken::Type::RPC:
+          KJ_FAIL_REQUIRE("RPC channel tokens must have a restore chain");
       }
 
       KJ_UNREACHABLE;
@@ -340,11 +723,61 @@ kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl
         name = actor.getName();
       }
 
-      return resolver.resolveActor(actor.getNamespaceKey(), actor.getId(), name);
+      return resolver.resolveActor(actor.getNamespaceKey(), actor.getId(), name, persistent);
+    }
+
+    case ChannelToken::RESTORED: {
+      auto restored = reader.getRestored();
+      auto vendor = decodeSubrequestChannelToken(usage, restored.getVendor());
+      auto restoreArg = decodeFrankenvalue(usage, restored.getRestoreArg());
+
+      switch (type) {
+        case ChannelToken::Type::SUBREQUEST:
+          return kj::refcounted<RestoredSubrequestChannel>(
+              *this, kj::mv(vendor), kj::mv(restoreArg), persistent);
+        case ChannelToken::Type::ACTOR_CLASS:
+          KJ_FAIL_REQUIRE("actor class channel tokens cannot have a restore chain");
+        case ChannelToken::Type::RPC:
+          return kj::refcounted<RestoredRpcChannel>(
+              *this, kj::mv(vendor), kj::mv(restoreArg), persistent);
+      }
     }
   }
 
   KJ_FAIL_REQUIRE("unknown channel token kind", reader.which());
+}
+
+Frankenvalue ChannelTokenHandler::decodeFrankenvalue(
+    IoChannelFactory::ChannelTokenUsage usage, rpc::Frankenvalue::Reader reader) {
+  kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> capTable;
+  if (reader.hasCapTable()) {
+    auto tableReader = reader.getCapTable().getAs<ChannelToken::FrankenvalueCapTable>();
+    if (!tableReader.hasCaps()) {
+      return Frankenvalue::fromCapnp(reader, kj::mv(capTable));
+    }
+
+    auto caps = tableReader.getCaps();
+    capTable.reserve(caps.size());
+
+    for (auto cap: caps) {
+      switch (cap.which()) {
+        case ChannelToken::FrankenvalueCapTable::Cap::UNKNOWN:
+          break;
+        case ChannelToken::FrankenvalueCapTable::Cap::SUBREQUEST_CHANNEL:
+          capTable.add(decodeSubrequestChannelToken(usage, cap.getSubrequestChannel()));
+          continue;
+        case ChannelToken::FrankenvalueCapTable::Cap::ACTOR_CLASS_CHANNEL:
+          capTable.add(decodeActorClassChannelToken(usage, cap.getActorClassChannel()));
+          continue;
+        case ChannelToken::FrankenvalueCapTable::Cap::RPC_CHANNEL:
+          capTable.add(decodeRpcChannelToken(usage, cap.getRpcChannel()));
+          continue;
+      }
+      KJ_FAIL_REQUIRE("unknown cap table type", cap.which());
+    }
+  }
+
+  return Frankenvalue::fromCapnp(reader, kj::mv(capTable));
 }
 
 kj::Own<IoChannelFactory::SubrequestChannel> ChannelTokenHandler::decodeSubrequestChannelToken(
@@ -357,6 +790,12 @@ kj::Own<IoChannelFactory::ActorClassChannel> ChannelTokenHandler::decodeActorCla
     IoChannelFactory::ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) {
   return decodeChannelTokenImpl(ChannelToken::Type::ACTOR_CLASS, usage, token)
       .downcast<IoChannelFactory::ActorClassChannel>();
+}
+
+kj::Own<IoChannelFactory::RpcChannel> ChannelTokenHandler::decodeRpcChannelToken(
+    IoChannelFactory::ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) {
+  return decodeChannelTokenImpl(ChannelToken::Type::RPC, usage, token)
+      .downcast<IoChannelFactory::RpcChannel>();
 }
 
 }  // namespace workerd::server

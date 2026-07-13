@@ -44,6 +44,38 @@ export const tests = {
       assert.deepStrictEqual(instances[0].id, 'foo');
       assert.deepStrictEqual(instances[1].id, 'bar');
     }
+
+    {
+      const instance = await env.workflow.get('status-http');
+      const status = await instance.status();
+      assert.deepStrictEqual(status.status, 'running');
+      assert.strictEqual(status.transport, 'http');
+    }
+
+    {
+      for (const method of ['get', 'create', 'createBatch']) {
+        assert.strictEqual(typeof env.workflow[method], 'function');
+      }
+
+      const fromGet = await env.workflow.get('a');
+      const fromCreate = await env.workflow.create({ id: 'b' });
+      const [fromBatch] = await env.workflow.createBatch([{ id: 'c' }]);
+
+      const proto = Object.getPrototypeOf(fromGet);
+      assert.strictEqual(Object.getPrototypeOf(fromCreate), proto);
+      assert.strictEqual(Object.getPrototypeOf(fromBatch), proto);
+
+      for (const method of [
+        'pause',
+        'resume',
+        'terminate',
+        'restart',
+        'status',
+        'sendEvent',
+      ]) {
+        assert.strictEqual(typeof fromGet[method], 'function');
+      }
+    }
   },
 
   async testRestartNoOptions(_, env) {

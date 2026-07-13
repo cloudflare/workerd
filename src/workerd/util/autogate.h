@@ -30,13 +30,24 @@ enum class AutogateKey {
   TAIL_STREAM_REFACTOR,
   // Enable fast TextEncoder implementation using simdutf
   ENABLE_FAST_TEXTENCODER,
-  // Increase the SQLite hard heap limit from 512 MiB to 8 GiB.
-  INCREASE_SQLITE_HARD_HEAP_LIMIT,
   // Apply an updated default autoAllocateChunkSize for ReadableStreams
   UPDATED_AUTO_ALLOCATE_CHUNK_SIZE,
   // When enabled, reject startTls calls that pass the expectedServerHostname option,
   // which is not currently supported. When disabled, log the usage instead.
   STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME,
+  // Enable the HibernatableWebSocketAdapter-based implementation of HibernationManager and
+  // related plumbing. Gates the refactor of hibernatable-WebSocket internals tracked by
+  // EW-10817.
+  HIBERNATABLE_WEBSOCKET_REFACTOR,
+  // When enabled, turns on per-isolate TypeScript/JavaScript bootstrap
+  PER_ISOLATE_JAVASCRIPT_BOOTSTRAP,
+  // Gate for the Durable Object fetch-retries feature, scoped to DO `fetch()`. Enables the
+  // retry-token claim machinery.
+  DURABLE_OBJECT_RETRIES_FETCH,
+  // When enabled, the native `node-internal:url` module is provided by the Rust
+  // implementation (api::node UrlUtil ported to src/rust/api) instead of the
+  // C++ implementation. The C++ implementation is retained for rollback.
+  NODEJS_URL_RUST,
   NumOfKeys  // Reserved for iteration.
 };
 

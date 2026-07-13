@@ -8,6 +8,14 @@ import {
   RpcStub,
   RpcTarget,
   WorkerEntrypoint,
+  type WorkflowBackoff,
+  type WorkflowCronSchedule,
+  type WorkflowDelayDuration,
+  type WorkflowDelayFunction,
+  type WorkflowDynamicDelayContext,
+  type WorkflowEvent,
+  type WorkflowStep,
+  type WorkflowStepContext,
 } from 'cloudflare:workers';
 import { expectTypeOf } from 'expect-type';
 
@@ -794,3 +802,165 @@ export default <ExportedHandler<Env>>{
     return new Response();
   },
 };
+
+declare const workflowStep: WorkflowStep;
+
+expectTypeOf(
+  workflowStep.do('step with rollback', async (): Promise<string> => 'ok', {
+    rollback: async (rollbackCtx) => {
+      expectTypeOf(rollbackCtx.ctx).toEqualTypeOf<WorkflowStepContext>();
+      expectTypeOf(rollbackCtx.error).toEqualTypeOf<Error>();
+      expectTypeOf(rollbackCtx.output).toEqualTypeOf<string | undefined>();
+      expectTypeOf(rollbackCtx.stepName).toEqualTypeOf<string>();
+    },
+  })
+).toMatchTypeOf<Promise<string>>();
+
+workflowStep.do(
+  'configured rollback',
+  {retries: {limit: 0, delay: 0}},
+  async (): Promise<string> => 'ok',
+  {
+    rollback: async (rollbackCtx) => {
+      expectTypeOf(rollbackCtx.ctx).toEqualTypeOf<WorkflowStepContext>();
+      expectTypeOf(rollbackCtx.output).toEqualTypeOf<string | undefined>();
+      expectTypeOf(rollbackCtx.stepName).toEqualTypeOf<string>();
+    },
+    rollbackConfig: {retries: {limit: 0, delay: 0}},
+  }
+);
+
+workflowStep.do('rollback with timeout only', async (): Promise<string> => 'ok', {
+  rollback: async () => {},
+  rollbackConfig: {timeout: '10 seconds'},
+});
+
+// @ts-expect-error rollbackConfig only accepts retries and timeout
+workflowStep.do('rollback config with sensitivity', async () => 'ok', {
+  rollback: async () => {},
+  rollbackConfig: {sensitive: 'output'},
+});
+
+// @ts-expect-error rollback options require a rollback handler
+workflowStep.do('empty rollback options', async () => 'ok', {});
+
+// @ts-expect-error rollbackConfig requires a rollback handler
+workflowStep.do('rollback config without handler', async () => 'ok', {
+  rollbackConfig: {retries: {limit: 0, delay: 0}},
+});
+
+expectTypeOf(
+  workflowStep.do('no rollback 2-arg', async (): Promise<string> => 'ok')
+).toMatchTypeOf<Promise<string>>();
+
+expectTypeOf(
+  workflowStep.do(
+    'no rollback 3-arg',
+    {retries: {limit: 1, delay: 0}},
+    async (): Promise<string> => 'ok'
+  )
+).toMatchTypeOf<Promise<string>>();
+
+// A static delay is surfaced (present) in the step context config.
+workflowStep.do(
+  'static delay context',
+  {retries: {limit: 1, delay: '1 minute'}},
+  async (ctx): Promise<string> => {
+    expectTypeOf(ctx.config.retries).toMatchTypeOf<
+      {delay: WorkflowDelayDuration | number} | undefined
+    >();
+    expectTypeOf(ctx.config.retries?.delay).toEqualTypeOf<
+      WorkflowDelayDuration | number | undefined
+    >();
+    return 'ok';
+  }
+);
+
+// A delay function is accepted, and the step context omits the (dynamic) delay.
+// When `delay` is a function, it must NOT be present on the config exposed in
+// either context surface: the delay function's `input.ctx` and the step callback's
+// `ctx`. Both are asserted exactly (so a re-added `delay` fails the equality check)
+// and guarded by `@ts-expect-error` (so a re-added `delay` makes the now-unused
+// directive fail to compile).
+workflowStep.do(
+  'dynamic delay context',
+  {
+    retries: {
+      limit: 1,
+      delay: (input): WorkflowDelayDuration => {
+        expectTypeOf(input).toEqualTypeOf<WorkflowDynamicDelayContext>();
+        expectTypeOf(input.ctx).toEqualTypeOf<
+          WorkflowStepContext<WorkflowDelayFunction>
+        >();
+        expectTypeOf(input.error).toEqualTypeOf<Error>();
+        // `delay` is absent from the dynamic-delay context config (read-side, exact).
+        expectTypeOf(input.ctx.config.retries).toEqualTypeOf<
+          {limit: number; backoff?: WorkflowBackoff} | undefined
+        >();
+        return '1 minute';
+      },
+    },
+  },
+  async (ctx): Promise<string> => {
+    // `delay` is absent here too because it was supplied as a function.
+    expectTypeOf(ctx.config.retries).toEqualTypeOf<
+      {limit: number; backoff?: WorkflowBackoff} | undefined
+    >();
+    return 'ok';
+  }
+);
+
+// An async delay function is also accepted.
+workflowStep.do(
+  'async dynamic delay',
+  {retries: {limit: 1, delay: async (): Promise<WorkflowDelayDuration> => 5}},
+  async (): Promise<string> => 'ok'
+);
+
+// rollbackConfig also accepts a delay function.
+workflowStep.do('rollback delay function', async (): Promise<string> => 'ok', {
+  rollback: async () => {},
+  rollbackConfig: {retries: {limit: 0, delay: () => 0}},
+});
+
+// No-config (2-arg) overload uses the default context: a static delay, so
+// `config.retries.delay` is present.
+workflowStep.do('no config delay present', async (ctx): Promise<string> => {
+  expectTypeOf(ctx.config.retries?.delay).toEqualTypeOf<
+    WorkflowDelayDuration | number | undefined
+  >();
+  return 'ok';
+});
+
+// A standalone delay function conforms to WorkflowDelayFunction and its `ctx`
+// is the recursive dynamic-delay step context.
+const dynamicDelay: WorkflowDelayFunction = ({ctx, error}) => {
+  expectTypeOf(ctx).toEqualTypeOf<WorkflowStepContext<WorkflowDelayFunction>>();
+  expectTypeOf(error).toEqualTypeOf<Error>();
+  return '30 seconds';
+};
+void dynamicDelay;
+
+declare const cronSchedule: WorkflowCronSchedule;
+expectTypeOf(cronSchedule.cron).toEqualTypeOf<string>();
+expectTypeOf(cronSchedule.scheduledTime).toEqualTypeOf<number>();
+
+type WorkflowPayload = {foo: string};
+declare const workflowEvent: WorkflowEvent<WorkflowPayload>;
+expectTypeOf(workflowEvent.payload).toEqualTypeOf<Readonly<WorkflowPayload>>();
+expectTypeOf(workflowEvent.timestamp).toEqualTypeOf<Date>();
+expectTypeOf(workflowEvent.instanceId).toEqualTypeOf<string>();
+expectTypeOf(workflowEvent.workflowName).toEqualTypeOf<string>();
+expectTypeOf(workflowEvent.schedule).toEqualTypeOf<
+  WorkflowCronSchedule | undefined
+>();
+
+const withoutSchedule: WorkflowEvent<WorkflowPayload> = {
+  payload: {foo: 'bar'},
+  timestamp: new Date(),
+  instanceId: 'abc',
+  workflowName: 'my-workflow',
+};
+expectTypeOf(withoutSchedule.schedule).toEqualTypeOf<
+  WorkflowCronSchedule | undefined
+>();

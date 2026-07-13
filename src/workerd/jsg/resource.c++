@@ -61,4 +61,10 @@ void scheduleUnimplementedPropertyError(
           "': the property is not implemented.")));
 }
 
+void deleteWeakRefGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context) {
+  auto global = context->Global();
+  check(global->Delete(context, v8StrIntern(isolate, "WeakRef"_kj)));
+  check(global->Delete(context, v8StrIntern(isolate, "FinalizationRegistry"_kj)));
+}
+
 }  // namespace workerd::jsg

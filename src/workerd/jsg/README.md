@@ -64,6 +64,7 @@ For file map and coding invariants, see [AGENTS.md](AGENTS.md).
 | `jsg::Identified<T>`          | Any                         | Captures JS object identity + unwrapped value               |
 | `jsg::NonCoercible<T>`        | Exact type                  | No automatic coercion; `T` = `kj::String`, `bool`, `double` |
 | `jsg::LenientOptional<T>`     | Optional                    | Silently ignores type errors → `undefined`                  |
+| `SelfConvertible` types       | Custom                      | Types defining static `jsgWrap()`/`jsgTryUnwrap()`; no registration needed. Declare `using JsgRttiDelegate = ...` to describe the type to RTTI (TypeScript generation) as an existing type |
 
 ## JsValue Type Mapping
 

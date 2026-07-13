@@ -7,6 +7,30 @@ load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES")
 load("@rules_cc//cc:find_cc_toolchain.bzl", "find_cc_toolchain")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load("//build/tools/clang_tidy:check_path_filters.bzl", "CHECK_PATH_FILTERS")
+
+def _get_disabled_checks_for_file(file_path):
+    """Returns checks that should be disabled for this file.
+
+    Checks listed in CHECK_PATH_FILTERS are only enabled for files under their
+    allowed paths. For files not under any allowed path, the check is disabled.
+    """
+    disabled = []
+    for check, allowed_paths in CHECK_PATH_FILTERS.items():
+        enabled = False
+        for allowed in allowed_paths:
+            # Normalize: remove leading "//" or "src/" for comparison
+            allowed_path = allowed
+            if allowed_path.startswith("//"):
+                allowed_path = allowed_path[2:]
+
+            # Prefix match: "src/foo" matches "src/foo/bar.c++" and "src/foo/baz/qux.c++"
+            if file_path.startswith(allowed_path + "/") or file_path.startswith(allowed_path):
+                enabled = True
+                break
+        if not enabled:
+            disabled.append(check)
+    return disabled
 
 def _clang_tidy_aspect_impl(target, ctx):
     # not a c++ target
@@ -124,8 +148,34 @@ def _clang_tidy_aspect_impl(target, ctx):
         args.add("--experimental-custom-checks")
         args.add("--config-file=" + clang_tidy_config.path)
 
+        # Disable checks that are path-filtered and not enabled for this file
+        real_path = src.path.removeprefix(src.owner.workspace_root + "/")
+        disabled_checks = _get_disabled_checks_for_file(real_path)
+
+        # Parse clang_tidy_args to separate --checks from other args.
+        # We must combine all --checks into a single argument because multiple
+        # --checks flags don't accumulate - each one replaces the previous filter,
+        # which would undo the path-based disabling.
+        extra_checks = []
+        other_args = []
         if ctx.attr.clang_tidy_args:
-            args.add_all(ctx.attr.clang_tidy_args.split(" "))
+            for arg in ctx.attr.clang_tidy_args.split(" "):
+                if arg.startswith("--checks="):
+                    # Extract the checks value (after --checks=)
+                    extra_checks.append(arg[len("--checks="):])
+                elif arg:  # skip empty strings
+                    other_args.append(arg)
+
+        # Build a single combined --checks argument
+        checks_parts = []
+        if disabled_checks:
+            checks_parts.append("-" + ",-".join(disabled_checks))
+        checks_parts.extend(extra_checks)
+        if checks_parts:
+            args.add("--checks=" + ",".join(checks_parts))
+
+        # Add any non-checks arguments
+        args.add_all(other_args)
 
         args.add(src.path)
 
@@ -210,7 +260,7 @@ clang_tidy_aspect = aspect(
             allow_single_file = True,
         ),
         "_clang_tidy_plugin": attr.label(
-            default = Label("//tools/clang-tidy:jsg-lint"),
+            default = Label("//tools/clang-tidy:workerd-lint"),
             allow_single_file = True,
         ),
         "_clang_tidy_compiler_flags": attr.string_list(

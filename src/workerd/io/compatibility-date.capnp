@@ -1275,14 +1275,25 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Instructs the readAllText method in streams to strip the leading UTF8 BOM if present.
 
   allowIrrevocableStubStorage @151 :Bool
-    $compatEnableFlag("allow_irrevocable_stub_storage")
-    $experimental;
+    $compatEnableFlag("allow_irrevocable_stub_storage");
   # Permits various stub types (e.g. ServiceStub aka Fetcher, DurableObjectClass) to be stored in
   # long-term Durable Object storage without any mechanism for the stub target to audit or revoke
-  # incoming connections.
+  # incoming connections. This is intended as a temporary measure to enable apps to experiment with
+  # stub storage, but long-term it will be replaced with a mechanism that allows stubs to be
+  # auditable and revocable.
   #
-  # This feature exists for experimental use only, and will be removed once we have a properly
-  # auditable and revocable storage mechanism.
+  # Also enables persistent stubs via the `[restore]()` mechanism.
+  #
+  # Both the Worker storing the stub and the Worker that the stub points to (as well as any members
+  # of the restore chain in between) must opt into the flag. If the target Worker later turns the
+  # flag off, existing stored stubs pointing at it will stop working.
+  #
+  # IRREVOCABLE STUB STORAGE IS INHERENTLY INSECURE. We strongly recommend against using this flag
+  # when passing stubs over real trust boundaries.
+  #
+  # THIS FEATURE IS EXPERIMENTAL AND TEMPORARY. Cloudflare WILL retract this feature and WILL break
+  # all stored stubs at some point in the future, as soon as an auditable and revocable alternative
+  # is available.
 
   rpcParamsDupStubs @152 :Bool
     $compatEnableFlag("rpc_params_dup_stubs")
@@ -1555,4 +1566,63 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # When enabled, a Worker's outbound gRPC-web subrequest is converted to gRPC at
   # the edge.
+
+  pythonWorkers20260610 @179 :Bool
+      $compatEnableFlag("python_workers_20260610")
+      $compatDisableFlag("no_python_workers_20260610")
+      $pythonSnapshotRelease
+      $experimental;
+  # Enables Python Workers using Pyodide 314.0.2 (CPython 3.14.2, Emscripten 5.0.3).
+
+  enableNodeJsInspectorLocalDev @180 :Bool
+      $compatEnableFlag("enable_nodejs_inspector_local_dev")
+      $experimental;
+  # EXPERIMENTAL, LOCAL-DEV-ONLY. When enabled (and only when running the open-source
+  # `workerd` binary with `--experimental`, never in Cloudflare's multi-tenant production
+  # runtime), the `node:inspector` and `node:inspector/promises` modules expose a real
+  # `Session` that connects to the isolate's own V8 inspector and dispatches Chrome
+  # DevTools Protocol messages to it, instead of the non-functional stub.
+  # Scope: this flag enables *issuing CDP commands* to the V8 inspector backend via
+  # `Session` (`connect`/`post`/`disconnect` plus protocol-method notifications) -- primarily
+  # the `Profiler` domain, which is what powers V8 code coverage under test frameworks. It does
+  # NOT implement the DevTools event-*injection* helpers (`inspector.Network.*`, `DOMStorage`,
+  # `NetworkResources`): those remain throwing stubs. Those events are Node-synthetic (V8 has no
+  # such inspector domains) and would require separate host-side plumbing, gated by their own
+  # flag, if ever needed.
+  # Requires `nodejs_compat`, which is what makes the `node:inspector` and
+  # `node:inspector/promises` modules importable in the first place; this flag only controls whether
+  # the imported `Session` is the real implementation or the stub. This flag has no effect, and the
+  # real implementation is unreachable, in multi-tenant production processes.
+  # This flag is not enabled by default in local dev on purpose, we want local dev to mimic
+  # the production environment as much as possible, this flag is meant to be used by test
+  # frameworks when running tests that require the inspector to be functional, and not by end users.
+
+  d1BindingJsrpc @181 :Bool
+      $compatEnableFlag("d1_binding_jsrpc");
+  # When enabled, D1 bindings use the internal JSRPC binding API for queries
+  # instead of issuing `fetch` calls to the D1 binding service. Without this
+  # flag, D1 bindings continue to use the `fetch` method of the Fetcher.
+
+  workflowsBindingsRpc @182 :Bool
+    $compatEnableFlag("workflows_bindings_rpc")
+    $experimental;
+  # When enabled, the `env.WORKFLOW` binding (cloudflare-internal:workflows-api)
+  # dispatches its methods as JSRPC calls on the inner fetcher instead of HTTP
+  # requests against the binding-shim worker. Without the flag the legacy HTTP
+  # transport is used.
+
+  typeScriptImplementedStreams @183 :Bool
+      $compatEnableFlag("typescript_implemented_streams")
+      $experimental;
+  # When enabled, the workers runtime uses the new typescript Web Streams
+  # implementation.
+
+  exposeDrainingReader @184 :Bool
+      $compatEnableFlag("expose_draining_reader")
+      $experimental;
+  # Exposes the internal ReadableStreamDrainingReader class on globalThis.
+  # The DrainingReader provides the expectedLength pass-through for the
+  # C++ bridge (Content-Length integration for FixedLengthStream). This
+  # flag is intended for internal testing only and may never have its
+  # experimental annotation removed.
 }

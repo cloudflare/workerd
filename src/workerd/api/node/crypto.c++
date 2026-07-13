@@ -1141,7 +1141,6 @@ jsg::JsUint8Array CryptoImpl::AeadHandle::update(jsg::Lock& js, jsg::JsBufferSou
     aadBuf = {.data = aadRef.begin(), .len = aadRef.size()};
   }
 
-  bool r;
   if (mode == CipherMode::CIPHER) {
     auto& info = JSG_REQUIRE_NONNULL(maybeAuthInfo, Error, "Missing required auth info");
     // In GCM mode, the authentication tag length can be specified in advance,
@@ -1156,18 +1155,16 @@ jsg::JsUint8Array CryptoImpl::AeadHandle::update(jsg::Lock& js, jsg::JsBufferSou
 
     ncrypto::Buffer<unsigned char> tagBuf = {.data = tag.begin(), .len = info.auth_tag_len};
 
-    r = ctx.encrypt(buffer, outBuf, tagBuf, ivBuf, aadBuf);
+    OSSLCALL(ctx.encrypt(buffer, outBuf, tagBuf, ivBuf, aadBuf));
     maybeAuthTag = kj::mv(tag);
   } else {
     auto& tag = JSG_REQUIRE_NONNULL(maybeAuthTag, Error, "No auth tag provided");
 
     ncrypto::Buffer<const unsigned char> tagBuf = {.data = tag.begin(), .len = tag.size()};
 
-    r = ctx.decrypt(buffer, outBuf, tagBuf, ivBuf, aadBuf);
-    ERR_print_errors_fp(stderr);
+    OSSLCALL(ctx.decrypt(buffer, outBuf, tagBuf, ivBuf, aadBuf));
   }
 
-  JSG_REQUIRE(r, Error, "Authentication failed");
   // EVP_AEAD operations always return an output of the same size as the input
   KJ_REQUIRE(outBuf.len == buf.size(), "Invalid output length for AEAD operation");
   updated = true;

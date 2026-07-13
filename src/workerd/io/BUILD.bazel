@@ -41,6 +41,8 @@ wd_cc_library(
         "io-context.c++",
         "io-own.c++",
         "io-util.c++",
+        "legacy-hibernation-manager.c++",
+        "per-isolate-bootstrap.c++",
         "stored-value.c++",
         "trace-stream.c++",
         "tracer.c++",
@@ -56,6 +58,8 @@ wd_cc_library(
         "io-context.h",
         "io-own.h",
         "io-util.h",
+        "legacy-hibernation-manager.h",
+        "per-isolate-bootstrap.h",
         "stored-value.h",
         "trace-stream.h",
         "tracer.h",
@@ -63,6 +67,7 @@ wd_cc_library(
         "worker-fs.h",
     ] + ["//src/workerd/api:hdrs"],
     implementation_deps = [
+        "//src/per_isolate",
         "//src/rust/jsg",
         "//src/workerd/api:crypto-crc-impl",
         "//src/workerd/api:data-url",
@@ -108,11 +113,12 @@ wd_cc_library(
         "//src/workerd/jsg:inspector",
         "//src/workerd/jsg:script",
         "//src/workerd/util:checked-queue",
+        "//src/workerd/util:consume",
         "//src/workerd/util:exception",
         "//src/workerd/util:header-validation",
         "//src/workerd/util:immediate-crash",
         "//src/workerd/util:ring-buffer",
-        "//src/workerd/util:small-set",
+        "//src/workerd/util:small-weak-vector",
         "//src/workerd/util:sqlite",
         "//src/workerd/util:state-machine",
         "//src/workerd/util:strong-bool",
@@ -540,6 +546,14 @@ kj_test(
 
 kj_test(
     src = "hibernation-manager-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "incoming-request-test.c++",
     deps = [
         ":io",
         "//src/workerd/tests:test-fixture",

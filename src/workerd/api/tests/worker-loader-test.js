@@ -141,6 +141,53 @@ class alternate(WorkerEntrypoint):
   },
 };
 
+export let pythonArbitraryModuleExtensions = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('pythonArbitraryModuleExtensions', () => {
+      return {
+        compatibilityDate: '2026-05-15',
+        mainModule: 'foo.py',
+        compatibilityFlags: ['python_workers'],
+        modules: {
+          'foo.py': `
+from workers import WorkerEntrypoint
+from pathlib import Path
+import submodule;
+from subdirectory import subsubmodule;
+class Default(WorkerEntrypoint):
+  async def greet(self, name):
+    with open(str(Path(__file__).parent) + "/python_modules/data.txt", 'r') as f:
+      return f.read() + name
+  async def bytes(self):
+    with open(str(Path(__file__).parent) + "/python_modules/data.mycoolextension", 'rb') as f:
+      return (f.read())
+  async def modules_in_main_directory(self):
+    return submodule.submodule_value + subsubmodule.subsubmodule_value;
+          `,
+          'submodule.py': `submodule_value = 10`,
+          'subdirectory/subsubmodule.py': `subsubmodule_value = 20`,
+          'python_modules/data.txt': 'Hello, ',
+          'python_modules/data.mycoolextension': {
+            data: new Uint8Array([1, 2, 3, 4]),
+          },
+        },
+      };
+    });
+
+    let result = await worker.getEntrypoint().greet('Stacey');
+    assert.strictEqual(result, 'Hello, Stacey');
+
+    assert.deepEqual(
+      await worker.getEntrypoint().bytes(),
+      new Uint8Array([1, 2, 3, 4])
+    );
+    assert.strictEqual(
+      await worker.getEntrypoint().modules_in_main_directory(),
+      30
+    );
+  },
+};
+
 // Test supplying a basic `env` object.
 export let passEnv = {
   async test(ctrl, env, ctx) {
@@ -831,23 +878,6 @@ export let noMixedJsPythonModules = {
     let worker = env.loader.get('noMixedJsPythonModules', () => {
       return {
         ...mixedModules,
-        mainModule: 'foo.py',
-      };
-    });
-
-    await assert.rejects(worker.getEntrypoint().greet('Alice'), {
-      name: 'TypeError',
-      message:
-        'Module "foo.js" is a JS module, but the main module is a Python module.',
-    });
-  },
-};
-
-export let noMixedJsPythonModules2 = {
-  async test(ctrl, env, ctx) {
-    let worker = env.loader.get('noMixedJsPythonModules2', () => {
-      return {
-        ...mixedModules,
         mainModule: 'foo.js',
       };
     });
@@ -1360,5 +1390,39 @@ export let doStubAsTail = {
 
     let event = await tailReceiver.wait();
     assert.strictEqual(event[0].logs[0].message[0], 'hello from tailed worker');
+  },
+};
+
+export let minimalPythonPackage = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('minimalPythonPackage', () => {
+      return {
+        compatibilityDate: '2026-05-15',
+        mainModule: 'main.py',
+        compatibilityFlags: ['python_workers'],
+        modules: {
+          'main.py': `
+from workers import WorkerEntrypoint
+class Default(WorkerEntrypoint):
+  async def main(self):
+    import testpkg
+    return testpkg.testfunc()
+`,
+          'python_modules/testpkg/pkgmodule.py': `
+def testfunc():
+  return "Hello dynamic worker package"
+`,
+          'python_modules/testpkg/__init__.py': `
+from . import pkgmodule
+testfunc = pkgmodule.testfunc
+`,
+        },
+      };
+    });
+
+    {
+      let result = await worker.getEntrypoint().main();
+      assert.strictEqual(result, 'Hello dynamic worker package');
+    }
   },
 };

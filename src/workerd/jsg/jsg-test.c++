@@ -488,7 +488,7 @@ KJ_TEST("External memory adjustment - defered") {
     }
 
     KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 1000);
-    KJ_ASSERT(target->isIsolateAliveForTest());
+    KJ_ASSERT(target->isIsolateAlive());
 
     isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
       // Once lock is taken, the amount is applied
@@ -498,7 +498,7 @@ KJ_TEST("External memory adjustment - defered") {
       adjuster1.adjust(-500);
       KJ_ASSERT(adjuster1.getAmount() == 500);
       KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 0);
-      KJ_ASSERT(target->isIsolateAliveForTest());
+      KJ_ASSERT(target->isIsolateAlive());
     });
 
     mem = isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
@@ -506,7 +506,7 @@ KJ_TEST("External memory adjustment - defered") {
     });
   }
 
-  KJ_ASSERT(!target->isIsolateAliveForTest());
+  KJ_ASSERT(!target->isIsolateAlive());
 
   // Delete the long-lived array, which will call the adjustment's destructor, to make sure it's safe.
   mem = nullptr;
@@ -514,6 +514,26 @@ KJ_TEST("External memory adjustment - defered") {
   // Making an adjustment anyway won't do anything but also won't crash
   auto adjuster3 = target->getAdjustment(500);
   KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 400);
+}
+
+KJ_TEST("strong jsg::Data destroyed after isolate teardown") {
+  // A strong jsg::Data (here a JsRef) can outlive its isolate when it is owned by an async task
+  // that is torn down after the isolate is gone -- e.g. the WebSocket adapter's `error` JsRef held
+  // by a `couple()` coroutine. Data::destroy() must not dereference the dead isolate: by the time
+  // the isolate has been disposed, V8 has deleted its ThreadManager, so v8::Locker::IsLocked()
+  // would load through a null pointer and segfault.
+  kj::Maybe<JsRef<JsValue>> stored;
+
+  {
+    IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
+    isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
+      JsValue value = lock.num(42);
+      stored = value.addRef(lock);
+    });
+  }
+
+  // The isolate is now destroyed. Destroying the JsRef must not touch the dead isolate.
+  stored = kj::none;
 }
 
 KJ_TEST("Memory Allocation Error Propagation") {
