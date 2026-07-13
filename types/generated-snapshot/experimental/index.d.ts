@@ -16312,12 +16312,13 @@ type MarkdownDocument = {
   name: string;
   blob: Blob;
 };
+type OutputFormat = "markdown" | "text";
 type ConversionResponse =
   | {
       id: string;
       name: string;
       mimeType: string;
-      format: "markdown";
+      format: OutputFormat;
       tokens: number;
       data: string;
     }
@@ -16335,7 +16336,11 @@ type EmbeddedImageConversionOptions = ImageConversionOptions & {
   convert?: boolean;
   maxConvertedImages?: number;
 };
+type ConversionOutputOptions = {
+  format?: OutputFormat;
+};
 type ConversionOptions = {
+  output?: ConversionOutputOptions;
   html?: {
     images?: EmbeddedImageConversionOptions & {
       convertOGImage?: boolean;
@@ -17115,7 +17120,6 @@ interface WorkflowInstanceTerminateOptions {
    */
   rollback?: boolean;
 }
-
 interface WorkflowInstanceRestartOptions {
   /**
    * Restart from a specific step. If omitted, the instance restarts from the beginning.
