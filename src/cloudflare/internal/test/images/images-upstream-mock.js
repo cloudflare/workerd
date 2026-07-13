@@ -220,6 +220,18 @@ export class ServiceEntrypoint extends WorkerEntrypoint {
   }
 
   /**
+   * @param {ImageDirectUploadOptions} [options]
+   * @returns {Promise<ImageDirectUploadResult>}
+   */
+  async createDirectUpload(options) {
+    const id = options?.id || 'generated-upload-id';
+    return {
+      id,
+      uploadURL: `https://upload.imagedelivery.example/${id}`,
+    };
+  }
+
+  /**
    * Handle HTTP requests for info and transform operations.
    * In production these go to a separate transformation service,
    * but in tests we mock both the ServiceEntrypoint and transformation service in one place.

@@ -725,3 +725,36 @@ export const test_images_upload_base64_arraybuffer = {
     assert.notEqual(metadata.id, null);
   },
 };
+
+// CREATE DIRECT UPLOAD
+export const test_images_create_direct_upload_default = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images.hosted.createDirectUpload();
+
+    assert.notEqual(result.id, null);
+    assert.equal(result.uploadURL.includes(result.id), true);
+  },
+};
+
+export const test_images_create_direct_upload_with_options = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images.hosted.createDirectUpload({
+      id: 'custom-upload-id',
+      requireSignedURLs: true,
+      metadata: { userId: 'abc123' },
+      creator: 'direct-upload-creator',
+      expiresIn: 600,
+    });
+
+    assert.equal(result.id, 'custom-upload-id');
+    assert.equal(result.uploadURL.includes('custom-upload-id'), true);
+  },
+};
