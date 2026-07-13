@@ -15398,6 +15398,32 @@ export declare namespace CloudflareWorkersModule {
     timeout?: WorkflowTimeoutDuration | number;
     sensitive?: WorkflowStepSensitivity;
   };
+  // Internal discriminators used only for `WorkflowStep.do` overload
+  // resolution. They mirror `WorkflowStepConfig` but pin `retries.delay` to a
+  // single kind so the callback context can be narrowed based on the shape of
+  // the config argument (rather than on an inferred type parameter, which is
+  // lost when the caller supplies an explicit return-type argument). Not
+  // exported: they must not widen the public type surface.
+  type WorkflowStepConfigWithStaticDelay = Omit<
+    WorkflowStepConfig,
+    "retries"
+  > & {
+    retries?: {
+      limit: number;
+      delay: WorkflowDelayDuration | number;
+      backoff?: WorkflowBackoff;
+    };
+  };
+  type WorkflowStepConfigWithDelayFunction = Omit<
+    WorkflowStepConfig,
+    "retries"
+  > & {
+    retries: {
+      limit: number;
+      delay: WorkflowDelayFunction;
+      backoff?: WorkflowBackoff;
+    };
+  };
   export type WorkflowStepRollbackConfig = Pick<
     WorkflowStepConfig,
     "retries" | "timeout"
@@ -15460,18 +15486,31 @@ export declare namespace CloudflareWorkersModule {
       callback: (ctx: WorkflowStepContext) => Promise<T>,
       rollbackOptions?: WorkflowStepRollbackOptions<T>,
     ): Promise<T>;
-    do<T extends Rpc.Serializable<T>, const C extends WorkflowStepConfig>(
+    // The config overloads discriminate on the shape of `config.retries.delay`
+    // so the callback context reflects whether the resolved delay is present
+    // (static delay) or omitted (dynamic delay function). Each has a single
+    // type parameter, so an explicit return-type argument (`do<T>(...)`) still
+    // resolves here. ORDERING IS LOAD-BEARING: the broad `WorkflowStepConfig`
+    // fallback MUST remain last, otherwise it shadows the discriminating
+    // overloads and narrowing is silently lost.
+    do<T extends Rpc.Serializable<T>>(
       name: string,
-      config: C,
+      config: WorkflowStepConfigWithDelayFunction,
+      callback: (ctx: WorkflowStepContext<WorkflowDelayFunction>) => Promise<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions<T>,
+    ): Promise<T>;
+    do<T extends Rpc.Serializable<T>>(
+      name: string,
+      config: WorkflowStepConfigWithStaticDelay,
       callback: (
-        ctx: WorkflowStepContext<
-          C["retries"] extends {
-            delay: infer D;
-          }
-            ? D
-            : WorkflowDelayDuration | number
-        >,
+        ctx: WorkflowStepContext<WorkflowDelayDuration | number>,
       ) => Promise<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions<T>,
+    ): Promise<T>;
+    do<T extends Rpc.Serializable<T>>(
+      name: string,
+      config: WorkflowStepConfig,
+      callback: (ctx: WorkflowStepContext) => Promise<T>,
       rollbackOptions?: WorkflowStepRollbackOptions<T>,
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;

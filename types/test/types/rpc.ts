@@ -15,7 +15,9 @@ import {
   type WorkflowDynamicDelayContext,
   type WorkflowEvent,
   type WorkflowStep,
+  type WorkflowStepConfig,
   type WorkflowStepContext,
+  type WorkflowStepSensitivity,
 } from 'cloudflare:workers';
 import { expectTypeOf } from 'expect-type';
 
@@ -940,6 +942,266 @@ const dynamicDelay: WorkflowDelayFunction = ({ctx, error}) => {
   return '30 seconds';
 };
 void dynamicDelay;
+
+// ---------------------------------------------------------------------------
+// Regression coverage (WOR-1364) and `step.do` overload matrix.
+//
+// The config overloads discriminate on the shape of `config.retries.delay`
+// (static duration vs. delay function) via distinct single-type-parameter
+// overloads, plus a broad `WorkflowStepConfig` fallback. This fixes the
+// regression where a single explicit type argument (the return type) combined
+// with a config object failed to resolve to a config overload, and it also
+// preserves callback-context narrowing even when an explicit type argument is
+// supplied.
+// ---------------------------------------------------------------------------
+
+// G1: return type propagates across every arg form (inferred + explicit).
+expectTypeOf(
+  workflowStep.do<string>('g1: 2-arg explicit', async () => 'ok')
+).toEqualTypeOf<Promise<string>>();
+// The `T extends Rpc.Serializable<T>` constraint preserves the inferred literal
+// return type rather than widening it to `number`.
+expectTypeOf(
+  workflowStep.do('g1: 2-arg inferred literal', async () => 42)
+).toEqualTypeOf<Promise<42>>();
+expectTypeOf(
+  workflowStep.do<string>(
+    'g1: 3-arg static explicit',
+    {retries: {limit: 1, delay: 0}},
+    async () => 'ok'
+  )
+).toEqualTypeOf<Promise<string>>();
+expectTypeOf(
+  workflowStep.do(
+    'g1: 3-arg dynamic inferred',
+    {retries: {limit: 1, delay: (): WorkflowDelayDuration => 5}},
+    async (): Promise<string> => 'ok'
+  )
+).toEqualTypeOf<Promise<string>>();
+expectTypeOf(
+  workflowStep.do<string>(
+    'g1: 3-arg dynamic explicit',
+    {retries: {limit: 1, delay: (): WorkflowDelayDuration => 5}},
+    async () => 'ok'
+  )
+).toEqualTypeOf<Promise<string>>();
+expectTypeOf(
+  workflowStep.do<string>(
+    'g1: 4-arg config + rollback explicit',
+    {retries: {limit: 1, delay: 0}},
+    async () => 'ok',
+    {rollback: async () => {}}
+  )
+).toEqualTypeOf<Promise<string>>();
+expectTypeOf(
+  workflowStep.do('g1: object return', async () => ({foo: 'x'}))
+).toEqualTypeOf<Promise<{foo: string}>>();
+expectTypeOf(
+  workflowStep.do('g1: union return', async (): Promise<string | number> => 1)
+).toEqualTypeOf<Promise<string | number>>();
+expectTypeOf(
+  workflowStep.do('g1: void return', async (): Promise<void> => {})
+).toEqualTypeOf<Promise<void>>();
+expectTypeOf(
+  workflowStep.do('g1: array return', async (): Promise<string[]> => [])
+).toEqualTypeOf<Promise<string[]>>();
+
+// G2: a static delay is surfaced (present) in the callback context, and this
+// holds even when the caller supplies an explicit type argument (the case that
+// previously regressed to a spurious type error).
+workflowStep.do<string>(
+  'g2: explicit static number delay present',
+  {retries: {limit: 1, delay: 0}},
+  async (ctx) => {
+    expectTypeOf(ctx.config.retries?.delay).toEqualTypeOf<
+      WorkflowDelayDuration | number | undefined
+    >();
+    return 'ok';
+  }
+);
+workflowStep.do<string>(
+  'g2: explicit static duration delay present',
+  {retries: {limit: 1, delay: '2 hours'}},
+  async (ctx) => {
+    expectTypeOf(ctx.config.retries?.delay).toEqualTypeOf<
+      WorkflowDelayDuration | number | undefined
+    >();
+    return 'ok';
+  }
+);
+workflowStep.do(
+  'g2: inferred static delay with backoff',
+  {retries: {limit: 1, delay: 0, backoff: 'exponential'}},
+  async (ctx): Promise<string> => {
+    expectTypeOf(ctx.config.retries?.backoff).toEqualTypeOf<
+      WorkflowBackoff | undefined
+    >();
+    expectTypeOf(ctx.config.retries?.delay).toEqualTypeOf<
+      WorkflowDelayDuration | number | undefined
+    >();
+    return 'ok';
+  }
+);
+
+// G3: a delay function omits the resolved delay from the callback context,
+// including under an explicit type argument and for async delay functions.
+workflowStep.do<string>(
+  'g3: explicit dynamic delay absent',
+  {retries: {limit: 1, delay: (): WorkflowDelayDuration => '1 minute'}},
+  async (ctx) => {
+    expectTypeOf(ctx.config.retries).toEqualTypeOf<
+      {limit: number; backoff?: WorkflowBackoff} | undefined
+    >();
+    // @ts-expect-error delay is absent under an explicit type argument too
+    ctx.config.retries?.delay;
+    return 'ok';
+  }
+);
+workflowStep.do<string>(
+  'g3: explicit async dynamic delay absent',
+  {retries: {limit: 1, delay: async (): Promise<WorkflowDelayDuration> => 5}},
+  async (ctx) => {
+    expectTypeOf(ctx.config.retries).toEqualTypeOf<
+      {limit: number; backoff?: WorkflowBackoff} | undefined
+    >();
+    return 'ok';
+  }
+);
+workflowStep.do(
+  'g3: inferred async dynamic delay absent',
+  {retries: {limit: 1, delay: async (): Promise<WorkflowDelayDuration> => 5}},
+  async (ctx): Promise<string> => {
+    expectTypeOf(ctx.config.retries).toEqualTypeOf<
+      {limit: number; backoff?: WorkflowBackoff} | undefined
+    >();
+    // @ts-expect-error delay is absent for an async delay function
+    ctx.config.retries?.delay;
+    return 'ok';
+  }
+);
+workflowStep.do(
+  'g3: dynamic delay with backoff, delay absent',
+  {retries: {limit: 1, delay: (): WorkflowDelayDuration => 5, backoff: 'linear'}},
+  async (ctx): Promise<string> => {
+    expectTypeOf(ctx.config.retries?.backoff).toEqualTypeOf<
+      WorkflowBackoff | undefined
+    >();
+    // @ts-expect-error delay is absent even when backoff is present
+    ctx.config.retries?.delay;
+    return 'ok';
+  }
+);
+
+// G4: a config typed broadly (e.g. built separately) resolves to the fallback
+// overload; it still compiles and exposes the non-narrowed (static) context.
+declare const broadConfig: WorkflowStepConfig;
+expectTypeOf(
+  workflowStep.do('g4: prebuilt broad config', broadConfig, async (ctx) => {
+    expectTypeOf(ctx.config.retries?.delay).toEqualTypeOf<
+      WorkflowDelayDuration | number | undefined
+    >();
+    return 'ok';
+  })
+).toMatchTypeOf<Promise<string>>();
+expectTypeOf(
+  workflowStep.do<string>('g4: prebuilt broad config explicit', broadConfig, async () => 'ok')
+).toEqualTypeOf<Promise<string>>();
+declare const unionDelay:
+  | WorkflowDelayDuration
+  | number
+  | WorkflowDelayFunction;
+expectTypeOf(
+  workflowStep.do(
+    'g4: union-typed delay falls back',
+    {retries: {limit: 1, delay: unionDelay}},
+    async (): Promise<string> => 'ok'
+  )
+).toMatchTypeOf<Promise<string>>();
+
+// G5: minimal / retries-less configs.
+workflowStep.do(
+  'g5: timeout only',
+  {timeout: '10 seconds'},
+  async (ctx): Promise<string> => {
+    expectTypeOf(ctx.config.timeout).toMatchTypeOf<string | number | undefined>();
+    return 'ok';
+  }
+);
+workflowStep.do('g5: numeric timeout', {timeout: 5000}, async (): Promise<string> => 'ok');
+workflowStep.do('g5: empty config', {}, async (): Promise<string> => 'ok');
+workflowStep.do(
+  'g5: sensitive only',
+  {sensitive: 'output'},
+  async (ctx): Promise<string> => {
+    expectTypeOf(ctx.config.sensitive).toEqualTypeOf<
+      WorkflowStepSensitivity | undefined
+    >();
+    return 'ok';
+  }
+);
+workflowStep.do(
+  'g5: full config',
+  {retries: {limit: 1, delay: 0}, timeout: '1 minute', sensitive: 'output'},
+  async (ctx): Promise<string> => {
+    expectTypeOf(ctx.config.retries?.delay).toEqualTypeOf<
+      WorkflowDelayDuration | number | undefined
+    >();
+    return 'ok';
+  }
+);
+
+// G6: rollback combinations.
+workflowStep.do(
+  'g6: config + rollbackConfig delay function',
+  {retries: {limit: 1, delay: 0}},
+  async (): Promise<string> => 'ok',
+  {rollback: async () => {}, rollbackConfig: {retries: {limit: 0, delay: () => 0}}}
+);
+workflowStep.do('g6: rollback output non-string', async (): Promise<{foo: string}> => ({foo: 'x'}), {
+  rollback: async (rollbackCtx) => {
+    expectTypeOf(rollbackCtx.output).toEqualTypeOf<{foo: string} | undefined>();
+  },
+});
+workflowStep.do<string>(
+  'g6: explicit + config + rollback options',
+  {retries: {limit: 1, delay: 0}},
+  async () => 'ok',
+  {rollback: async () => {}, rollbackConfig: {retries: {limit: 0, delay: 0}}}
+);
+
+// G7: negatives.
+// @ts-expect-error delay must not be a boolean
+workflowStep.do('g7: delay boolean', {retries: {limit: 1, delay: true}}, async () => 'ok');
+// @ts-expect-error delay must not be an object
+workflowStep.do('g7: delay object', {retries: {limit: 1, delay: {}}}, async () => 'ok');
+// @ts-expect-error retries requires a limit
+workflowStep.do('g7: retries no limit', {retries: {delay: 0}}, async () => 'ok');
+// @ts-expect-error retries requires a delay
+workflowStep.do('g7: retries no delay', {retries: {limit: 1}}, async () => 'ok');
+// @ts-expect-error timeout must not be a boolean
+workflowStep.do('g7: timeout boolean', {timeout: true}, async () => 'ok');
+// @ts-expect-error sensitive must be the 'output' literal
+workflowStep.do('g7: sensitive wrong', {sensitive: 'nope'}, async () => 'ok');
+// @ts-expect-error a sync delay function must return a delay duration
+workflowStep.do('g7: delay fn wrong return', {retries: {limit: 1, delay: (): boolean => true}}, async () => 'ok');
+// @ts-expect-error an async delay function must resolve to a delay duration
+workflowStep.do('g7: async delay fn wrong return', {retries: {limit: 1, delay: async (): Promise<boolean> => true}}, async () => 'ok');
+// @ts-expect-error each overload declares a single type parameter
+workflowStep.do<string, WorkflowStepConfig>('g7: too many type args', {retries: {limit: 1, delay: 0}}, async () => 'ok');
+// @ts-expect-error the callback must return a Promise
+workflowStep.do('g7: callback not async', {retries: {limit: 1, delay: 0}}, () => 'ok');
+// @ts-expect-error the step name must be a string
+workflowStep.do(123, async (): Promise<string> => 'ok');
+// @ts-expect-error unknown config keys are rejected
+workflowStep.do('g7: excess config key', {retries: {limit: 1, delay: 0}, bogus: 1}, async () => 'ok');
+
+// G8: standalone delay functions may return any accepted delay duration shape.
+const delayReturningNumber: WorkflowDelayFunction = () => 5;
+void delayReturningNumber;
+const delayReturningDuration: WorkflowDelayFunction = () => '1 minute';
+void delayReturningDuration;
+const asyncDelay: WorkflowDelayFunction = async () => 5;
+void asyncDelay;
 
 declare const cronSchedule: WorkflowCronSchedule;
 expectTypeOf(cronSchedule.cron).toEqualTypeOf<string>();
