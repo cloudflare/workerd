@@ -7,7 +7,7 @@
 //
 #include <workerd/api/basics.h>
 #include <workerd/api/js-readable-stream.h>
-#include <workerd/api/streams/writable.h>
+#include <workerd/api/js-writable-stream.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/io-own.h>
@@ -80,14 +80,14 @@ class ExecProcess: public jsg::Object {
  public:
   ExecProcess(jsg::Lock& js,
       IoContext& ioContext,
-      jsg::Optional<jsg::Ref<WritableStream>> stdinStream,
+      jsg::Optional<JsWritableStream> stdinStream,
       jsg::Optional<JsReadableStream> stdoutStream,
       jsg::Optional<JsReadableStream> stderrStream,
       int pid,
       rpc::Container::ProcessHandle::Client handle,
       kj::Maybe<jsg::Ref<AbortSignal>> abortSignal = kj::none);
 
-  jsg::Optional<jsg::Ref<WritableStream>> getStdin();
+  jsg::Optional<JsWritableStream> getStdin(jsg::Lock& js);
   jsg::Optional<JsReadableStream> getStdout(jsg::Lock& js);
   jsg::Optional<JsReadableStream> getStderr(jsg::Lock& js);
   int getPid() const {
@@ -119,7 +119,9 @@ class ExecProcess: public jsg::Object {
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("stdin", stdinStream);
+    KJ_IF_SOME(s, stdinStream) {
+      s.visitForMemoryInfo(tracker);
+    }
     KJ_IF_SOME(s, stdoutStream) {
       s.visitForMemoryInfo(tracker);
     }
@@ -138,7 +140,7 @@ class ExecProcess: public jsg::Object {
   // the AbortSignal handler.
   void sendKill(int signo);
 
-  jsg::Optional<jsg::Ref<WritableStream>> stdinStream;
+  jsg::Optional<JsWritableStream> stdinStream;
   jsg::Optional<JsReadableStream> stdoutStream;
   jsg::Optional<JsReadableStream> stderrStream;
   int pid;

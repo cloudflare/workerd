@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Copyright (c) 2026 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
@@ -16,6 +16,8 @@ namespace workerd::api {
 
 class Blob;
 class FormData;
+class JsWritableStream;
+struct JsReadableWritablePair;
 class URLSearchParams;
 namespace url {
 class URLSearchParams;
@@ -172,6 +174,28 @@ class JsReadableStream final {
   // source supports it. Precondition: !isNull().
   kj::Promise<DeferredProxy<void>> pumpTo(
       jsg::Lock& js, kj::Own<WritableStreamSink> sink, EndStream end);
+
+  // Pipe this stream into the given destination, exactly like ReadableStream.prototype.pipeTo():
+  // both ends are locked for the duration of the pipe, and the returned promise settles when the
+  // pipe completes. Rejects (does not throw) if either end is already locked. By default the
+  // destination is closed when this stream ends and aborted if it errors; see PipeToOptions.
+  //
+  // Both the source and destination are self-retained for the duration of the pipe; the caller
+  // does not need to keep either alive after calling pipeTo(). The destination is borrowed, not
+  // consumed: the caller's handle remains valid and observes the stream's state as the pipe
+  // progresses. Unlike pumpTo(), this is a spec-level, isolate-bound pipe with no deferred-proxy
+  // support; when both ends are backed by the C++ implementation the pipe still uses the
+  // controllers' internal native fast paths. Preconditions: !isNull(), !destination.isNull().
+  jsg::Promise<void> pipeTo(
+      jsg::Lock& js, JsWritableStream& destination, PipeToOptions options = {});
+
+  // Pipe this stream through the given transform, exactly like
+  // ReadableStream.prototype.pipeThrough(): pipes this into transform.writable (with the pipe
+  // promise marked as handled) and returns transform.readable. Throws synchronously if this
+  // stream or transform.writable is already locked. The transform is consumed. Preconditions:
+  // !isNull(), neither transform member is null.
+  JsReadableStream pipeThrough(
+      jsg::Lock& js, JsReadableWritablePair transform, PipeToOptions options = {});
 
   // Split a live stream into two independent branches that each read the same data, consuming
   // (nullifying) this. Both branches share the retransmit buffer (if any). Works for any stream.

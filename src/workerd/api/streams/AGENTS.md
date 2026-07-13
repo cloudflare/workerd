@@ -6,10 +6,12 @@ See `docs/streams.md` for narrative tutorial.
 
 ## ARCHITECTURE
 
-NOTE: C++ code outside this directory does not use `jsg::Ref<ReadableStream>` directly; it goes
-through the `JsReadableStream` abstraction in `src/workerd/api/js-readable-stream.{h,c++}`, which
-hides which ReadableStream implementation backs a given stream. New C++ consumers of readable
-streams should use that abstraction, not the types defined here.
+NOTE: C++ code outside this directory does not use `jsg::Ref<ReadableStream>` or
+`jsg::Ref<WritableStream>` directly; it goes through the `JsReadableStream` / `JsWritableStream`
+abstractions in `src/workerd/api/js-{readable,writable}-stream.{h,c++}`, which hide which stream
+implementation backs a given stream (and provide `JsReadableWritablePair` +
+`pipeTo`/`pipeThrough` for abstraction-level pipelines). New C++ consumers of streams should use
+those abstractions, not the types defined here.
 
 Dual implementation behind unified API:
 

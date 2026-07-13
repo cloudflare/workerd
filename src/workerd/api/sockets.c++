@@ -239,7 +239,7 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     return js.newPromiseAndResolver<SocketInfo>();
   });
   openedPrPair.promise.markAsHandled(js);
-  auto writable = js.alloc<WritableStream>(ioContext, kj::mv(sysStreams.writable),
+  auto writable = JsWritableStream::create(js, ioContext, kj::mv(sysStreams.writable),
       ioContext.getMetrics().tryCreateWritableByteStreamObserver(),
       getWritableHighWaterMark(options), openedPrPair.promise.whenResolved(js));
 
@@ -372,7 +372,7 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   }
 
   isClosing = true;
-  writable->getController().setPendingClosure();
+  writable.setPendingClosure(js);
   readable.setPendingClosure(js);
 
   // Wait until the socket connects (successfully or otherwise)
@@ -381,9 +381,8 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   return openedPromiseCopy.whenResolved(js)
       .then(js,
           [self = JSG_THIS](jsg::Lock& js) mutable {
-    auto& controller = self->writable->getController();
-    if (!controller.isClosedOrClosing()) {
-      return controller.flush(js);
+    if (!self->writable.isClosedOrClosing(js)) {
+      return self->writable.forceFlush(js);
     } else {
       return js.resolvedPromise();
     }
@@ -392,7 +391,7 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
           [self = JSG_THIS](jsg::Lock& js) mutable {
     // Forcibly abort the readable/writable streams.
     auto cancelPromise = self->readable.forceCancel(js, kj::none);
-    auto abortPromise = self->writable->getController().abort(js, kj::none);
+    auto abortPromise = self->writable.forceAbort(js, kj::none);
 
     // The below is effectively `Promise.all(cancelPromise, abortPromise)`
     return cancelPromise.then(js, [abortPromise = kj::mv(abortPromise)](jsg::Lock& js) mutable {
@@ -442,7 +441,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   auto& context = IoContext::current();
   auto openedPrPair = js.newPromiseAndResolver<SocketInfo>();
   auto secureStreamPromise = context.awaitJs(js,
-      writable->flush(js).then(js,
+      writable.flush(js).then(js,
           // The openedResolver is a jsg::Promise::Resolver. It should be gc visited here in
           // case the opened promise it resolves captures a circular references to itself in
           // JavaScript (which is most likely). This prevents a possible memory leak.
@@ -459,7 +458,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
               (self, openedResolver), (jsg::Lock & js) mutable {
                 auto& context = IoContext::current();
 
-                self->writable->detach(js);
+                self->writable.detach(js);
                 self->readable.detach(js, IgnoreDisturbed::YES);
 
                 // We should set this before closedResolver.resolve() in order to give the user
@@ -605,7 +604,7 @@ void Socket::handleProxyError(jsg::Lock& js, kj::Exception e) {
   resolveFulfiller(js, e.clone());
   openedResolver.reject(js, e.clone());
   readable.forceCancel(js, kj::none).markAsHandled(js);
-  writable->getController().abort(js, js.error(e.getDescription())).markAsHandled(js);
+  writable.forceAbort(js, js.error(e.getDescription())).markAsHandled(js);
 }
 
 void Socket::handleReadableEof(jsg::Lock& js, jsg::Promise<void> onEof) {
@@ -625,9 +624,9 @@ jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
   // `allowHalfOpen` is false.
   KJ_ASSERT(!getAllowHalfOpen(options));
 
-  // Do not call `close` on a controller that has already been closed or is in the process
+  // Do not call `close` on a stream that has already been closed or is in the process
   // of closing.
-  if (writable->getController().isClosedOrClosing()) {
+  if (writable.isClosedOrClosing(js)) {
     return js.resolvedPromise();
   }
 
@@ -635,8 +634,7 @@ jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
   // below by calling `close` on the WritableStream which ensures that any data pending on it
   // is flushed. Then once the `close` either completes or fails we can be sure that any data has
   // been flushed.
-  return writable->getController()
-      .close(js)
+  return writable.forceClose(js)
       .catch_(js,
           JSG_VISITABLE_LAMBDA((ref = JSG_THIS), (ref),
               (jsg::Lock& js, jsg::Value&& exc) {
@@ -665,7 +663,7 @@ kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
 
   // We do not care if the socket was disturbed, we require the user to ensure the socket is not
   // being used.
-  writable->detach(js);
+  writable.detach(js);
   readable.detach(js, IgnoreDisturbed::YES);
 
   // Move the stream out of the socket, to ensure the stream is properly destroyed when the
@@ -773,7 +771,7 @@ jsg::Promise<jsg::Ref<Fetcher>> SocketsModule::internalNewHttpClient(
 
   // Flush the writable stream before taking the connection stream to ensure all data is written
   // before the stream is detatched
-  return socket->getWritable()->flush(js).then(
+  return socket->getWritable(js).flush(js).then(
       js, JSG_VISITABLE_LAMBDA((socket = kj::mv(socket)), (socket), (jsg::Lock & js) mutable {
         auto& ioctx = IoContext::current();
 

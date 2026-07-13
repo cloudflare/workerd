@@ -1,9 +1,10 @@
-// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Copyright (c) 2026 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/api/blob.h>
 #include <workerd/api/js-readable-stream.h>
+#include <workerd/api/js-writable-stream.h>
 #include <workerd/api/streams/readable-source.h>
 #include <workerd/api/url-standard.h>
 #include <workerd/api/url.h>
@@ -361,6 +362,92 @@ kj::Promise<DeferredProxy<void>> JsReadableStream::pumpTo(
   KJ_SWITCH_ONEOF(i.stream) {
     KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
       return stream->pumpTo(js, kj::mv(sink), end == EndStream::YES);
+    }
+    KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+      KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+jsg::Promise<void> JsReadableStream::pipeTo(
+    jsg::Lock& js, JsWritableStream& destination, PipeToOptions options) {
+  auto& i = KJ_ASSERT_NONNULL(impl, "pipeTo() called on a null JsReadableStream");
+  auto& d = KJ_ASSERT_NONNULL(
+      destination.impl, "pipeTo() called with a null destination JsWritableStream");
+  KJ_SWITCH_ONEOF(i.stream) {
+    KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
+      KJ_SWITCH_ONEOF(d.stream) {
+        KJ_CASE_ONEOF(writable, jsg::Ref<WritableStream>) {
+          // Both ends are C++: delegate to ReadableStream::pipeTo, which preserves the exact
+          // observable behavior (locked-end rejections and their texts) and internally selects
+          // the most efficient pump for the endpoint types. The internal pipe keeps only a bare
+          // reference to the source (WritableStreamInternalController::PipeLocked) and the
+          // destination controller holds only a kj::Weak<WritableStream> owner, so retain both
+          // ends across the pipe ourselves rather than making liveness the caller's
+          // responsibility.
+          // Note: there's no use for using JSG_VISITABLE_LAMBDA here since promise
+          // continuations are never actually visited for GC.
+          return stream->pipeTo(js, writable.addRef(), kj::mv(options))
+              .then(js, [source = stream.addRef(), dest = writable.addRef()](jsg::Lock& js) {});
+        }
+        KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+          // TODO(streams-ts): TS/TS pipes go through the TS pipeTo hook; mixed-backend pipes
+          // are a wiring-session concern.
+          KJ_UNIMPLEMENTED("TypeScript-backed WritableStream is not yet supported");
+        }
+      }
+      KJ_UNREACHABLE;
+    }
+    KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+      KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+JsReadableStream JsReadableStream::pipeThrough(
+    jsg::Lock& js, JsReadableWritablePair transform, PipeToOptions options) {
+  auto& i = KJ_ASSERT_NONNULL(impl, "pipeThrough() called on a null JsReadableStream");
+  auto& r = KJ_ASSERT_NONNULL(
+      transform.readable.impl, "pipeThrough() called with a null transform.readable");
+  auto& w = KJ_ASSERT_NONNULL(
+      transform.writable.impl, "pipeThrough() called with a null transform.writable");
+
+  KJ_SWITCH_ONEOF(i.stream) {
+    KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
+      KJ_SWITCH_ONEOF(w.stream) {
+        KJ_CASE_ONEOF(writable, jsg::Ref<WritableStream>) {
+          KJ_SWITCH_ONEOF(r.stream) {
+            KJ_CASE_ONEOF(readable, jsg::Ref<ReadableStream>) {
+              // All three arms are C++: delegate to ReadableStream::pipeThrough, which preserves
+              // the exact observable behavior (synchronous locked-end throws and their texts,
+              // the pipeThrough-marked handled pipe promise, and the source keepalive).
+              auto returned = stream->pipeThrough(js,
+                  ReadableStream::Transform{
+                    .readable = readable.addRef(),
+                    .writable = writable.addRef(),
+                  },
+                  kj::mv(options));
+              // ReadableStream::pipeThrough returns the transform's readable untouched. Return
+              // the abstraction value it arrived in (the same underlying stream), which
+              // preserves any additional abstraction-level state (e.g. buffer-backedness).
+              KJ_ASSERT(returned.get() == readable.get());
+              return kj::mv(transform.readable);
+            }
+            KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+              KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+            }
+          }
+          KJ_UNREACHABLE;
+        }
+        KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+          // TODO(streams-ts): all-TS pipes go through the TS pipeThrough hook; mixed-backend
+          // pipes are a wiring-session concern.
+          KJ_UNIMPLEMENTED("TypeScript-backed WritableStream is not yet supported");
+        }
+      }
+      KJ_UNREACHABLE;
     }
     KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
       KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
