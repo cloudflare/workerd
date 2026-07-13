@@ -36,7 +36,7 @@ namespace {
 }
 
 kj::Promise<void> pumpTo(
-    kj::Ptr<ReadableStreamSource> input, WritableStreamSink& output, bool end) {
+    kj::Ptr<ReadableStreamSource> input, kj::Ptr<WritableStreamSink> output, bool end) {
   kj::byte buffer[65536]{};
 
   while (true) {
@@ -44,12 +44,12 @@ kj::Promise<void> pumpTo(
 
     if (amount == 0) {
       if (end) {
-        co_await output.end();
+        co_await output->end();
       }
       co_return;
     }
 
-    co_await output.write(kj::arrayPtr(buffer, amount));
+    co_await output->write(kj::arrayPtr(buffer, amount));
   }
 }
 
@@ -295,7 +295,7 @@ class TeeBranch final: public ReadableStreamSource {
     return inner->tryRead(buffer, minBytes, maxBytes);
   }
 
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
+  kj::Promise<DeferredProxy<void>> pumpTo(kj::Ptr<WritableStreamSink> output, bool end) override {
 #ifdef KJ_NO_RTTI
     // Yes, I'm paranoid.
     static_assert(!KJ_NO_RTTI, "Need RTTI for correctness");
@@ -315,7 +315,7 @@ class TeeBranch final: public ReadableStreamSource {
     co_await inner->pumpTo(outputAdapter);
 
     if (end) {
-      co_await output.end();
+      co_await output->end();
     }
 
     // We only use `TeeBranch` when a locally-sourced stream was tee'd (because system streams
@@ -353,21 +353,24 @@ class TeeBranch final: public ReadableStreamSource {
   // read logic.
   class PumpAdapter final: public kj::AsyncOutputStream {
    public:
-    explicit PumpAdapter(WritableStreamSink& inner): inner(inner) {}
+    explicit PumpAdapter(kj::Ptr<WritableStreamSink> inner): inner(kj::mv(inner)) {}
 
     kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
-      return inner.write(buffer);
+      return inner->write(buffer);
     }
 
     kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-      return inner.write(pieces);
+      return inner->write(pieces);
     }
 
     kj::Promise<void> whenWriteDisconnected() override {
       KJ_UNIMPLEMENTED("whenWriteDisconnected() not expected on PumpAdapter");
     }
 
-    WritableStreamSink& inner;
+    // Non-owning pointer to the sink being pumped to. The caller of `TeeBranch::pumpTo()` owns the
+    // sink and must keep it alive for the entire duration of the pump; this PumpAdapter (and the
+    // kj::Ptr it holds) only lives within that pump and must not outlive the sink.
+    kj::Ptr<WritableStreamSink> inner;
   };
 
   kj::Own<kj::AsyncInputStream> inner;
@@ -377,14 +380,14 @@ class TeeBranch final: public ReadableStreamSource {
 // =======================================================================================
 
 kj::Promise<DeferredProxy<void>> ReadableStreamSource::pumpTo(
-    WritableStreamSink& output, bool end) {
-  KJ_IF_SOME(p, output.tryPumpFrom(addPtrToThis(), end)) {
+    kj::Ptr<WritableStreamSink> output, bool end) {
+  KJ_IF_SOME(p, output->tryPumpFrom(addPtrToThis(), end)) {
     return kj::mv(p);
   }
 
   // Non-optimized pumpTo() is presumed to require the IoContext to remain live, so don't do
   // anything in the deferred proxy part.
-  return addNoopDeferredProxy(api::pumpTo(addPtrToThis(), output, end));
+  return addNoopDeferredProxy(api::pumpTo(addPtrToThis(), kj::mv(output), end));
 }
 
 kj::Maybe<uint64_t> ReadableStreamSource::tryGetLength(StreamEncoding encoding) {
@@ -1939,7 +1942,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       // error. But in that case, the queue would already have been drained and we wouldn't be here.
       return KJ_ASSERT_NONNULL(
           state.whenActive([&](IoOwn<Writable>& writable) mutable -> jsg::Promise<void> {
-        KJ_IF_SOME(promise, sourceRef.tryPumpTo(*writable->sink, !preventClose)) {
+        KJ_IF_SOME(promise, sourceRef.tryPumpTo(writable->sink->getPtr(), !preventClose)) {
           return handlePromise(js,
               ioContext.awaitIo(js,
                   writable->canceler.wrap(
@@ -2461,11 +2464,11 @@ void ReadableStreamInternalController::PipeLocked::release(
 }
 
 kj::Maybe<kj::Promise<void>> ReadableStreamInternalController::PipeLocked::tryPumpTo(
-    WritableStreamSink& sink, bool end) {
+    kj::Ptr<WritableStreamSink> sink, bool end) {
   // This is safe because the caller should have already checked isClosed and tryGetErrored
   // and handled those before calling tryPumpTo.
   auto& readable = KJ_ASSERT_NONNULL(inner.state.tryGetUnsafe<Readable>());
-  return IoContext::current().waitForDeferredProxy(readable->pumpTo(sink, end));
+  return IoContext::current().waitForDeferredProxy(readable->pumpTo(kj::mv(sink), end));
 }
 
 jsg::Promise<ReadResult> ReadableStreamInternalController::PipeLocked::read(jsg::Lock& js) {
@@ -2589,7 +2592,7 @@ kj::Promise<DeferredProxy<void>> ReadableStreamInternalController::pumpTo(
   };
 
   auto holder = kj::rc<Holder>(kj::mv(sink), kj::mv(source));
-  return holder->source->pumpTo(*holder->sink, end)
+  return holder->source->pumpTo(holder->sink->getPtr(), end)
       .then([holder = holder.addRef()](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
     proxy.proxyTask = proxy.proxyTask.attach(holder.addRef());
     holder->done = true;

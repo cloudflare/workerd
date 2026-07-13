@@ -642,12 +642,12 @@ class NoDeferredProxyReadableStream final: public ReadableStreamSource {
     return inner->tryRead(buffer, minBytes, maxBytes);
   }
 
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
+  kj::Promise<DeferredProxy<void>> pumpTo(kj::Ptr<WritableStreamSink> output, bool end) override {
     // Move the deferred proxy part of the task over to the non-deferred part. To do this,
     // we use `ioctx.waitForDeferredProxy()`, which returns a single promise covering both parts
     // (and, importantly, registering pending events where needed). Then, we add a noop deferred
     // proxy to the end of that.
-    return addNoopDeferredProxy(ioctx.waitForDeferredProxy(inner->pumpTo(output, end)));
+    return addNoopDeferredProxy(ioctx.waitForDeferredProxy(inner->pumpTo(kj::mv(output), end)));
   }
 
   StreamEncoding getPreferredEncoding() override {

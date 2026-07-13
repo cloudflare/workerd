@@ -123,7 +123,7 @@ class ReadableLockImpl {
       inner.lock.state.template transitionTo<Unlocked>();
     }
 
-    kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) override;
+    kj::Maybe<kj::Promise<void>> tryPumpTo(kj::Ptr<WritableStreamSink> sink, bool end) override;
 
     jsg::Promise<ReadResult> read(jsg::Lock& js) override;
 
@@ -352,7 +352,7 @@ void ReadableLockImpl<Controller>::onError(jsg::Lock& js, jsg::JsValue reason) {
 
 template <typename Controller>
 kj::Maybe<kj::Promise<void>> ReadableLockImpl<Controller>::PipeLocked::tryPumpTo(
-    WritableStreamSink& sink, bool end) {
+    kj::Ptr<WritableStreamSink> sink, bool end) {
   // We return nullptr here because this controller does not support kj's pumpTo.
   return kj::none;
 }

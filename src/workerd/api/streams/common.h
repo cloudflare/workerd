@@ -226,8 +226,14 @@ struct Transformer {
 // Likewise, when creating a new kind of *internal* WritableStream, where the data destination is
 // a kj stream, you will implement the WritableStreamSink API.
 
-class WritableStreamSink {
+class WritableStreamSink: public kj::PtrTarget {
  public:
+  // Obtain a strong pointer to this sink. Callers must ensure the sink outlives the returned
+  // kj::Ptr (see docs/hardening.md).
+  kj::Ptr<WritableStreamSink> getPtr() {
+    return addPtrToThis();
+  }
+
   virtual kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) KJ_WARN_UNUSED_RESULT = 0;
   virtual kj::Promise<void> write(
       kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) KJ_WARN_UNUSED_RESULT = 0;
@@ -262,7 +268,7 @@ class ReadableStreamSource: public kj::PtrTarget {
   // If `end` is true, then `output.end()` will be called after pumping. Note that it's especially
   // important to take advantage of this when using deferred proxying since calling `end()`
   // directly might attempt to use the `IoContext` to call `registerPendingEvent()`.
-  virtual kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end);
+  virtual kj::Promise<DeferredProxy<void>> pumpTo(kj::Ptr<WritableStreamSink> output, bool end);
 
   // If pumpTo() pumps to a system stream, what is the best encoding for that system stream to
   // use? This is just a hint.
@@ -491,7 +497,7 @@ class ReadableStreamController {
     virtual void close(jsg::Lock& js) = 0;
     virtual void error(jsg::Lock& js, jsg::JsValue reason) = 0;
     virtual void release(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) = 0;
-    virtual kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) = 0;
+    virtual kj::Maybe<kj::Promise<void>> tryPumpTo(kj::Ptr<WritableStreamSink> sink, bool end) = 0;
     virtual jsg::Promise<ReadResult> read(jsg::Lock& js) = 0;
   };
 

@@ -143,7 +143,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
 
     void release(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) override;
 
-    kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) override;
+    kj::Maybe<kj::Promise<void>> tryPumpTo(kj::Ptr<WritableStreamSink> sink, bool end) override;
 
     jsg::Promise<ReadResult> read(jsg::Lock& js) override;
 
