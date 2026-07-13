@@ -35,11 +35,12 @@ namespace {
       kj::str(JSG_EXCEPTION(TypeError) ": ", message)));
 }
 
-kj::Promise<void> pumpTo(ReadableStreamSource& input, WritableStreamSink& output, bool end) {
+kj::Promise<void> pumpTo(
+    kj::Ptr<ReadableStreamSource> input, WritableStreamSink& output, bool end) {
   kj::byte buffer[65536]{};
 
   while (true) {
-    auto amount = co_await input.tryRead(buffer, 1, kj::size(buffer));
+    auto amount = co_await input->tryRead(buffer, 1, kj::size(buffer));
 
     if (amount == 0) {
       if (end) {
@@ -55,9 +56,11 @@ kj::Promise<void> pumpTo(ReadableStreamSource& input, WritableStreamSink& output
 // Modified from AllReader in kj/async-io.c++.
 class AllReader final {
  public:
-  explicit AllReader(ReadableStreamSource& input, uint64_t limit): input(input), limit(limit) {
+  explicit AllReader(kj::Ptr<ReadableStreamSource> input, uint64_t limit)
+      : input(kj::mv(input)),
+        limit(limit) {
     JSG_REQUIRE(limit > 0, TypeError, "Memory limit exceeded before EOF.");
-    KJ_IF_SOME(length, input.tryGetLength(StreamEncoding::IDENTITY)) {
+    KJ_IF_SOME(length, this->input->tryGetLength(StreamEncoding::IDENTITY)) {
       // Oh hey, we might be able to bail early.
       JSG_REQUIRE(length < limit, TypeError, "Memory limit would be exceeded before EOF.");
     }
@@ -75,7 +78,7 @@ class AllReader final {
   }
 
  private:
-  ReadableStreamSource& input;
+  kj::Ptr<ReadableStreamSource> input;
   uint64_t limit;
 
   template <typename T>
@@ -137,7 +140,7 @@ class AllReader final {
     // optimize the loop here by setting the value specifically so we are only
     // allocating at most twice. But, to be safe, let's enforce an upper bound on each
     // allocation even if we do know the total.
-    kj::Maybe<uint64_t> maybeLength = input.tryGetLength(StreamEncoding::IDENTITY);
+    kj::Maybe<uint64_t> maybeLength = input->tryGetLength(StreamEncoding::IDENTITY);
 
     // The amountToRead is the regular allocation size we'll use right up until we've
     // read the number of expected bytes (if known). This number is calculated as the
@@ -157,7 +160,7 @@ class AllReader final {
         // Note that we're passing amountToRead as the *minBytes* here so the tryRead should
         // attempt to fill the entire buffer. If it doesn't, the implication is that we read
         // everything.
-        uint64_t amount = co_await input.tryRead(bytes.begin(), amountToRead, amountToRead);
+        uint64_t amount = co_await input->tryRead(bytes.begin(), amountToRead, amountToRead);
         KJ_DASSERT(amount <= amountToRead);
 
         runningTotal += amount;
@@ -375,13 +378,13 @@ class TeeBranch final: public ReadableStreamSource {
 
 kj::Promise<DeferredProxy<void>> ReadableStreamSource::pumpTo(
     WritableStreamSink& output, bool end) {
-  KJ_IF_SOME(p, output.tryPumpFrom(*this, end)) {
+  KJ_IF_SOME(p, output.tryPumpFrom(addPtrToThis(), end)) {
     return kj::mv(p);
   }
 
   // Non-optimized pumpTo() is presumed to require the IoContext to remain live, so don't do
   // anything in the deferred proxy part.
-  return addNoopDeferredProxy(api::pumpTo(*this, output, end));
+  return addNoopDeferredProxy(api::pumpTo(addPtrToThis(), output, end));
 }
 
 kj::Maybe<uint64_t> ReadableStreamSource::tryGetLength(StreamEncoding encoding) {
@@ -390,7 +393,7 @@ kj::Maybe<uint64_t> ReadableStreamSource::tryGetLength(StreamEncoding encoding) 
 
 kj::Promise<kj::Array<byte>> ReadableStreamSource::readAllBytes(uint64_t limit) {
   try {
-    AllReader allReader(*this, limit);
+    AllReader allReader(addPtrToThis(), limit);
     co_return co_await allReader.readAllBytes();
   } catch (...) {
     // TODO(soon): Temporary logging.
@@ -405,7 +408,7 @@ kj::Promise<kj::Array<byte>> ReadableStreamSource::readAllBytes(uint64_t limit) 
 kj::Promise<kj::String> ReadableStreamSource::readAllText(
     uint64_t limit, ReadAllTextOption option) {
   try {
-    AllReader allReader(*this, limit);
+    AllReader allReader(addPtrToThis(), limit);
     co_return co_await allReader.readAllText(option);
   } catch (...) {
     // TODO(soon): Temporary logging.
@@ -424,7 +427,7 @@ kj::Maybe<ReadableStreamSource::Tee> ReadableStreamSource::tryTee(uint64_t limit
 }
 
 kj::Maybe<kj::Promise<DeferredProxy<void>>> WritableStreamSink::tryPumpFrom(
-    ReadableStreamSource& input, bool end) {
+    kj::Ptr<ReadableStreamSource> input, bool end) {
   return kj::none;
 }
 

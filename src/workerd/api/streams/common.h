@@ -236,7 +236,7 @@ class WritableStreamSink {
   // Must call to flush and finish the stream.
 
   virtual kj::Maybe<kj::Promise<DeferredProxy<void>>> tryPumpFrom(
-      ReadableStreamSource& input, bool end);
+      kj::Ptr<ReadableStreamSource> input, bool end);
 
   virtual void abort(kj::Exception reason) = 0;
   // TODO(conform): abort() should return a promise after which closed fulfillers should be
@@ -252,7 +252,7 @@ class WritableStreamSink {
   }
 };
 
-class ReadableStreamSource {
+class ReadableStreamSource: public kj::PtrTarget {
  public:
   virtual kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) = 0;
 
