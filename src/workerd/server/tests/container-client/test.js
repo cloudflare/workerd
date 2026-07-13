@@ -309,9 +309,12 @@ export class DurableObjectExample extends DurableObject {
     {
       const ac = new AbortController();
       ac.abort();
-      assert.throws(() => container.exec(['echo', 'hello'], { signal: ac.signal }), {
-        name: 'AbortError',
-      });
+      assert.throws(
+        () => container.exec(['echo', 'hello'], { signal: ac.signal }),
+        {
+          name: 'AbortError',
+        }
+      );
     }
 
     // 14. Aborting the signal while the process is running kills it (SIGKILL).

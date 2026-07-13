@@ -106,8 +106,7 @@ constexpr kj::Exception::DetailTypeId REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID =
 // have run). Must not be retried as a delivery failure. Set at the receiving entrypoint's actor
 // catch so it survives the internal-exception description rewrite and serializes back across the RPC
 // boundary. The payload is a zero-length array (marker only).
-constexpr kj::Exception::DetailTypeId REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID =
-    0x7f6e0bece261e8eeull;
+constexpr kj::Exception::DetailTypeId REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID = 0x7f6e0bece261e8eeull;
 
 // Detail type for Durable Object metadata on exceptions propagated out of actor execution.
 constexpr kj::Exception::DetailTypeId DURABLE_OBJECT_EXCEPTION_METADATA_DETAIL_ID =

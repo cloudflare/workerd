@@ -46,6 +46,9 @@ export const testDirectQuery = {
       },
     });
     assert.equal(typeof response.results.bookmark, 'string');
-    assert.equal(typeof response.results.queryResults[0].meta.duration, 'number');
+    assert.equal(
+      typeof response.results.queryResults[0].meta.duration,
+      'number'
+    );
   },
 };

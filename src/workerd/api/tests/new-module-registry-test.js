@@ -366,7 +366,10 @@ export const invalidModuleSpecifier = {
       () => null,
       (e) => e
     );
-    ok(stat instanceof TypeError, `expected TypeError, got ${stat && stat.name}`);
+    ok(
+      stat instanceof TypeError,
+      `expected TypeError, got ${stat && stat.name}`
+    );
     ok(/Invalid module specifier/.test(stat.message), stat.message);
   },
 };

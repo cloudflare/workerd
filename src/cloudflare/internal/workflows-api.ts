@@ -22,7 +22,10 @@ interface Fetcher {
 
   pause(id: string): Promise<void>;
   resume(id: string): Promise<void>;
-  terminate(id: string, options?: WorkflowInstanceTerminateOptions): Promise<void>;
+  terminate(
+    id: string,
+    options?: WorkflowInstanceTerminateOptions
+  ): Promise<void>;
   restart(id: string, options?: WorkflowInstanceRestartOptions): Promise<void>;
   status(id: string): Promise<InstanceStatus>;
   sendEvent(

@@ -327,7 +327,9 @@ export function resolve4(
 
   const overrideIp = getMagicHostOverride(name);
   if (overrideIp != null) {
-    return Promise.resolve([ttl ? { ttl: 0, address: overrideIp } : overrideIp]);
+    return Promise.resolve([
+      ttl ? { ttl: 0, address: overrideIp } : overrideIp,
+    ]);
   }
 
   // Validation errors needs to be sync.
