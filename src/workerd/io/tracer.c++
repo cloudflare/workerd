@@ -150,8 +150,8 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     // Clone errorInfo for the STW path because the batched-tail path below also needs it.
     auto streamErrorInfo = tracing::cloneLogErrorInfo(errorInfo);
     writer->report(context,
-        {tracing::Log(timestamp, logLevel, kj::str(message.first(messageSize)),
-            kj::mv(streamErrorInfo))},
+        {tracing::Log(
+            timestamp, logLevel, kj::str(message.first(messageSize)), kj::mv(streamErrorInfo))},
         timestamp, messageSize + errorInfoSize);
   }
 
@@ -442,8 +442,9 @@ void WorkerTracer::recordTimestamp(kj::Date timestamp) {
 kj::Date BaseTracer::getTime() {
   auto& weakIoCtx = KJ_ASSERT_NONNULL(weakIoContext);
   kj::Date timestamp = kj::UNIX_EPOCH;
-  weakIoCtx->runIfAlive([&timestamp](IoContext& context) { timestamp = context.now(); });
-  if (!weakIoCtx->isValid()) {
+  KJ_IF_SOME(context, weakIoCtx) {
+    timestamp = context->now();
+  } else {
     // This can happen if we the IoContext gets destroyed following an exception, but we still need
     // to report a time for the return event.
     if (completeTime != kj::UNIX_EPOCH) {
@@ -471,9 +472,9 @@ void BaseTracer::adjustSpanTime(tracing::SpanEndData& span, kj::Maybe<kj::Date> 
     // present. For the RPC case, the adjustment will already have been done earlier and it's ok
     // for maybeStartTime to be none as this code won't run based on weakIoContext being none.
     kj::Date startTime = KJ_ASSERT_NONNULL(maybeStartTime);
-    weakIoCtx->runIfAlive([this, &span, &startTime](IoContext& context) {
-      if (context.hasCurrentIncomingRequest()) {
-        span.endTime = context.now();
+    KJ_IF_SOME(context, weakIoCtx) {
+      if (context->hasCurrentIncomingRequest()) {
+        span.endTime = context->now();
       } else {
         // We have an IOContext, but there's no current IncomingRequest. Always log a warning here,
         // this should not be happening. Still report completeTime as a useful timestamp if
@@ -491,8 +492,7 @@ void BaseTracer::adjustSpanTime(tracing::SpanEndData& span, kj::Maybe<kj::Date> 
           LOG_WARNING_PERIODICALLY("reported span without current request");
         }
       }
-    });
-    if (!weakIoCtx->isValid()) {
+    } else {
       // This can happen if we start a customEvent from this event and cancel it after this IoContext
       // gets destroyed. In that case we no longer have an IoContext available and can't get the
       // current time, but the outcome timestamp will have already been set. Since the outcome
