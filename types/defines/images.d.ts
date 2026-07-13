@@ -170,6 +170,19 @@ interface ImageSignedUrlOptions {
   keyName?: string;
 }
 
+interface ImageDirectUploadOptions {
+  id?: string;
+  requireSignedURLs?: boolean;
+  metadata?: Record<string, unknown>;
+  creator?: string;
+  expiresIn?: number;
+}
+
+interface ImageDirectUploadResult {
+  id: string;
+  uploadURL: string;
+}
+
 interface ImageList {
   images: ImageMetadata[];
   cursor?: string;
@@ -239,6 +252,17 @@ interface HostedImagesBinding {
    * @throws {@link ImagesError} if list fails
    */
   list(options?: ImageListOptions): Promise<ImageList>;
+
+  /**
+   * Create a Direct Creator Upload link, letting an end user upload an
+   * image straight to Cloudflare without exposing an API token
+   * @param options Upload link configuration
+   * @returns The new image ID and the upload URL to hand to the end user
+   * @throws {@link ImagesError} if creation fails
+   */
+  createDirectUpload(
+    options?: ImageDirectUploadOptions
+  ): Promise<ImageDirectUploadResult>;
 }
 
 interface ImagesBinding {
