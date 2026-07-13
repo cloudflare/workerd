@@ -55,7 +55,7 @@ def wd_rust_binary(
         deps = deps,
         # wd_rust_binary is not used for the workerd production binary so far – apply default
         # optimization instead of linkopts_tool
-        link_deps = link_deps + ["//build/deps:linkopts_default"],
+        link_deps = link_deps + ["//build/deps:linkopts_default", "@@//deps:rust_runtime"],
         visibility = visibility,
         data = data,
         experimental_use_cc_common_link = 1,
@@ -81,7 +81,7 @@ def wd_rust_binary(
             "//conditions:default": [],
         }),
         experimental_use_cc_common_link = 1,
-        link_deps = ["//build/deps:linkopts_default"],
+        link_deps = ["//build/deps:linkopts_default", "@@//deps:rust_runtime"],
         size = test_size,
         tags = ["no-coverage"],
     )
