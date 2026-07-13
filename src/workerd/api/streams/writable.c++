@@ -288,10 +288,10 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
-    return canceler.wrap(getInner().write(buffer));
+    return canceler.wrap(getInner()->write(buffer));
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-    return canceler.wrap(getInner().write(pieces));
+    return canceler.wrap(getInner()->write(pieces));
   }
 
   // TODO(perf): We can't properly implement tryPumpFrom(), which means that Cap'n Proto will
@@ -305,7 +305,7 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
   }
 
   kj::Promise<void> end() override {
-    return canceler.wrap(getInner().end());
+    return canceler.wrap(getInner()->end());
   }
 
  private:
@@ -316,8 +316,8 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
       kj::refcounted<WeakRef<WritableStreamRpcAdapter>>(
           kj::Badge<WritableStreamRpcAdapter>(), *this);
 
-  WritableStreamSink& getInner() {
-    return *KJ_UNWRAP_OR(inner, { kj::throwFatalException(cancellationException()); });
+  kj::Ptr<WritableStreamSink> getInner() {
+    return KJ_UNWRAP_OR(inner, { kj::throwFatalException(cancellationException()); })->getPtr();
   }
 
   static kj::Exception cancellationException() {
