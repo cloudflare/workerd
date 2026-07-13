@@ -511,6 +511,23 @@ export const test_images_getImage_not_found = {
   },
 };
 
+export const test_images_signed_url = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const url = await env.images.hosted
+      .image('test-image-id')
+      .signedUrl({ variant: 'private' });
+
+    assert.equal(
+      url,
+      'https://imagedelivery.example/test-image-id/private?sig=mock-signature'
+    );
+  },
+};
+
 // UPLOAD
 export const test_images_upload_with_options = {
   /**
