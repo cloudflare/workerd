@@ -14,6 +14,7 @@
 #include "worker-rpc.h"
 #include "workerd/jsg/jsvalue.h"
 
+#include <workerd/api/global-scope.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/stored-value.h>
@@ -2025,6 +2026,38 @@ jsg::Promise<jsg::Ref<Response>> fetchImpl(jsg::Lock& js,
 jsg::Ref<Socket> Fetcher::connect(
     jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options) {
   return connectImpl(js, JSG_THIS, kj::mv(address), kj::mv(options));
+}
+
+void Fetcher::registerOverride(jsg::Lock& js, IsHyperdrive isHyperdrive, uint16_t overridePort) {
+  if (registeredConnectOverride) {
+    return;
+  }
+  KJ_DASSERT(host == kj::none);
+  kj::FixedArray<kj::byte, 16> randomBytes;
+  workerd::getEntropy(randomBytes);
+  host = kj::str(kj::encodeHex(randomBytes), isHyperdrive ? ".hyperdrive.local" : ".workers.alt");
+
+  // Register an entry in the global scope connectOverrides HashMap so that cloudflare:sockets's
+  // connect() will route connections to this magic hostname through the fetcher.
+  auto& globalScope = IoContext::current().getCurrentLock().getGlobalScope();
+  globalScope.setConnectOverride(
+    kj::str(KJ_ASSERT_NONNULL(host), ":", overridePort),
+    [self = JSG_THIS](jsg::Lock& js) mutable {
+      return self->connect(
+          js,
+          kj::str(KJ_ASSERT_NONNULL(self->host), ":", KJ_ASSERT_NONNULL(self->port)),
+          kj::none);
+    });
+  // port may already be set for extended fetchers, in that case this is a no-op
+  port = overridePort;
+  registeredConnectOverride = true;
+}
+
+kj::StringPtr ExtendedFetcher::getHost(jsg::Lock& js) {
+  // Ensures the connect override is registered on the global scope using registerOverride(), then
+  // returns the random hostname.
+  registerOverride(js, isHyperdrive, KJ_ASSERT_NONNULL(port));
+  return KJ_ASSERT_NONNULL(host);
 }
 
 jsg::Promise<jsg::Ref<Response>> Fetcher::fetch(jsg::Lock& js,

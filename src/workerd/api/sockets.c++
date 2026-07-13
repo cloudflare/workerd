@@ -551,6 +551,13 @@ void Socket::handleProxyStatus(
         LOG_WARNING_PERIODICALLY(
             "attempt to connect to Hyperdrive failed to trigger connectOverride",
             self->remoteAddress, status.statusCode, status.statusText);
+      } else if (self->remoteAddress.orDefault(kj::String()).contains(".workers.alt"_kj)) {
+        // No attempts to connect to Hyperdrive should end up here, since they go through the other
+        // version of handleProxyStatus. If they end up here somehow, log about it to get some
+        // context that can aid in debugging.
+        LOG_WARNING_PERIODICALLY(
+            "attempt to use connectionStringOverride failed to trigger connectOverride",
+            self->remoteAddress, status.statusCode, status.statusText);
       }
       self->handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, msg));
     } else {

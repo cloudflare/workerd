@@ -19,10 +19,13 @@
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/strong-bool.h>
 
 #include <kj/compat/http.h>
 
 namespace workerd::api {
+
+WD_STRONG_BOOL(IsHyperdrive);
 
 // Base class for Request and Response. In JavaScript, this class is a mixin, meaning no one will
 // be instantiating objects of this type -- it exists solely to house body-related functionality
@@ -447,6 +450,28 @@ class Fetcher: public JsRpcClientProvider {
 
   JSG_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
 
+  // Set up a connection string override for a random host and the given port. isHyperdrive
+  // signifies whether the legacy hostname for hyperdrive should be used (only used with
+  // ExtendedFetcher).
+  void registerOverride(jsg::Lock& js, IsHyperdrive isHyperdrive, uint16_t overridePort);
+
+  kj::Maybe<uint16_t> getPortInternal() const {
+    return port;
+  }
+  kj::Maybe<kj::StringPtr> getHostInternal() const {
+    return host;
+  }
+  bool hasConnectOverride() const {
+    return registeredConnectOverride;
+  }
+
+ protected:
+  // The connection string override is lazily initialized (when ctx.mapVirtualHost is invoked for
+  // the fetcher or when host is accessed for ExtendedFetcher), so the host/port may be none.
+  bool registeredConnectOverride = false;
+  kj::Maybe<kj::String> host;
+  kj::Maybe<uint16_t> port;
+
  private:
   kj::OneOf<uint,
       IoOwn<IoChannelFactory::SubrequestChannel>,
@@ -455,6 +480,44 @@ class Fetcher: public JsRpcClientProvider {
       channelOrClientFactory;
   RequiresHostAndProtocol requiresHost;
   bool isInHouse;
+};
+
+// Extended fetcher type that makes the getters for host/port available using the JSG API. Allows
+// us to support connection string overrides in a backwards-compatible way.
+class ExtendedFetcher final: public Fetcher {
+ public:
+  explicit ExtendedFetcher(uint channel,
+      RequiresHostAndProtocol requiresHost,
+      uint16_t connectionStringOverridePort,
+      IsHyperdrive isHyperdrive,
+      bool isInHouse = false)
+      : Fetcher(channel, requiresHost, isInHouse),
+        isHyperdrive(isHyperdrive) {
+    port = connectionStringOverridePort;
+  }
+
+  // Get port – this is guaranteed to be present for extended fetchers
+  uint16_t getPort() const {
+    return KJ_ASSERT_NONNULL(port);
+  }
+  // Get host and set up override, if needed.
+  kj::StringPtr getHost(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(ExtendedFetcher) {
+    JSG_INHERIT(Fetcher);
+
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(host, getHost);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(port, getPort);
+  }
+
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+    return Fetcher::serialize(js, serializer);
+  }
+
+  JSG_ONEWAY_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
+
+ private:
+  IsHyperdrive isHyperdrive;
 };
 
 // Type of the second parameter to Request's constructor. Also the type of the second parameter
@@ -1153,7 +1216,7 @@ jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
       api::Headers::ValueIterator::Next, api::Body, api::Response, api::Response::InitializerDict, \
       api::Request, api::Request::InitializerDict, api::Fetcher, api::Fetcher::PutOptions,         \
       api::Fetcher::ScheduledOptions, api::Fetcher::ScheduledResult, api::Fetcher::QueueResult,    \
-      api::Fetcher::ServiceBindingQueueMessage
+      api::Fetcher::ServiceBindingQueueMessage, api::ExtendedFetcher
 
 // The list of http.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api
