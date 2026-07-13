@@ -4,17 +4,19 @@ wd_rust_crate(
     name = "api",
     cxx_bridge_deps = ["//src/rust/jsg"],
     cxx_bridge_srcs = ["lib.rs"],
+    link_deps = [
+        # ada-url is built with its `bundled` feature disabled (see
+        # //deps/rust:Cargo.toml), so it does not compile its own copy of the
+        # C++ ada library. Provide the symbols via workerd's existing C++
+        # @ada-url instead, avoiding a duplicate copy of ada in the binary.
+        "@ada-url",
+    ],
     proc_macro_deps = [
         "//src/rust/jsg-macros",
     ],
     test_deps = ["//src/rust/jsg-test"],
     visibility = ["//visibility:public"],
     deps = [
-        # ada-url is built with its `bundled` feature disabled (see
-        # //deps/rust:Cargo.toml), so it does not compile its own copy of the
-        # C++ ada library. Provide the symbols via workerd's existing C++
-        # @ada-url instead, avoiding a duplicate copy of ada in the binary.
-        "@ada-url",
         "//src/rust/jsg",
         "@crates_vendor//:ada-url",
         "@crates_vendor//:thiserror",
