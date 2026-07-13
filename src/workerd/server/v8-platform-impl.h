@@ -68,7 +68,9 @@ class WorkerdPlatform final: public v8::Platform {
     return inner.MonotonicallyIncreasingTime();
   }
 
-  // Overridden to return KJ time
+  // Overridden to defer to `workerd::dateNow()`, which returns the current IoContext's time
+  // when inside a request handler and 0 otherwise. This matches the behavior of production
+  // Cloudflare Workers, where `Date.now()` in top-level (module-scope) code returns 0.
   double CurrentClockTimeMillis() noexcept override;
 
   v8::TracingController* GetTracingController() noexcept override {

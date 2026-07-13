@@ -4,12 +4,12 @@
 
 #include "v8-platform-impl.h"
 
-#include <kj/time.h>
+#include <workerd/io/io-util.h>
 
 namespace workerd::server {
 
 double WorkerdPlatform::CurrentClockTimeMillis() noexcept {
-  return (kj::systemPreciseCalendarClock().now() - kj::UNIX_EPOCH) / kj::MILLISECONDS;
+  return dateNow();
 }
 
 }  // namespace workerd::server
