@@ -436,14 +436,14 @@ FetchEventInfo FetchEventInfo::clone() const {
 }
 
 kj::String FetchEventInfo::toString() const {
-  // Only stringify headers in predictable mode, these should not be logged in prod
+  // Only stringify cfJson and headers in predictable mode, these should not be logged in prod
   if (isPredictableModeForTest()) {
     return kj::str("FetchEventInfo: ",
         kj::delimited(
             kj::arr(kj::str(method), kj::str(url), kj::str(cfJson), kj::str(headers)), ", "_kjc));
   } else {
-    return kj::str("FetchEventInfo: ",
-        kj::delimited(kj::arr(kj::str(method), kj::str(url), kj::str(cfJson)), ", "_kjc));
+    return kj::str(
+        "FetchEventInfo: ", kj::delimited(kj::arr(kj::str(method), kj::str(url)), ", "_kjc));
   }
 }
 

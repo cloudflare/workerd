@@ -537,8 +537,11 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
       // logged to the IoContext earlier.
       if (exception.getType() != kj::Exception::Type::DISCONNECTED && isInternalException) {
         LOG_EXCEPTION("workerEntrypoint", exception);
+      } else if (!isInternalException) {
+        context.logUncaughtExceptionAsync(
+            UncaughtExceptionSource::REQUEST_HANDLER, exception.clone());
       } else {
-        KJ_LOG(INFO, exception);  // Run with --verbose to see exception logs.
+        KJ_LOG(INFO, exception);  // Run with --verbose to see internal disconnected exception logs.
       }
     }
 
@@ -703,8 +706,8 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     // The request has been canceled, but allow it to continue executing in the background.
     incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
   }))
-          .catch_([this, isActor, &response, metrics = kj::mv(metricsForCatch), workerTracer](
-                      kj::Exception&& exception) mutable -> kj::Promise<void> {
+          .catch_([this, &context, isActor, &response, metrics = kj::mv(metricsForCatch),
+                      workerTracer](kj::Exception&& exception) mutable -> kj::Promise<void> {
     // Don't return errors to end user.
     auto isInternalException = !jsg::isTunneledException(exception.getDescription()) &&
         !jsg::isDoNotLogException(exception.getDescription());
@@ -713,8 +716,11 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       // logged to the IoContext earlier.
       if (exception.getType() != kj::Exception::Type::DISCONNECTED && isInternalException) {
         LOG_EXCEPTION("workerEntrypoint", exception);
+      } else if (!isInternalException) {
+        context.logUncaughtExceptionAsync(
+            UncaughtExceptionSource::REQUEST_HANDLER, exception.clone());
       } else {
-        KJ_LOG(INFO, exception);  // Run with --verbose to see exception logs.
+        KJ_LOG(INFO, exception);  // Run with --verbose to see internal disconnected exception logs.
       }
     }
 
@@ -917,6 +923,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
         // We failed, inform any other entrypoints that may be waiting upon us.
         af.reject(e);
         cancellationGuard.cancel();
+        context.logUncaughtExceptionAsync(UncaughtExceptionSource::ALARM_HANDLER, e.clone());
         throw;
       }
     }
