@@ -37,6 +37,8 @@
 #include <workerd/util/uncaught-exception-source.h>
 #include <workerd/util/use-perfetto-categories.h>
 
+#include <v8-microtask-queue.h>
+
 #include <kj/encoding.h>
 
 namespace workerd::api {
@@ -1019,7 +1021,7 @@ void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, jsg::Function<void(
             });
           }));
 
-  js.v8Isolate->EnqueueMicrotask(fn);
+  js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate, fn);
 }
 
 jsg::JsValue ServiceWorkerGlobalScope::structuredClone(

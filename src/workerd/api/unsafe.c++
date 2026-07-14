@@ -6,6 +6,8 @@
 #include <workerd/jsg/script.h>
 #include <workerd/util/autogate.h>
 
+#include <span>
+
 namespace workerd::api {
 
 namespace {
@@ -205,7 +207,7 @@ jsg::JsValue UnsafeEval::newWasmModule(jsg::Lock& js, kj::Array<kj::byte> src) {
   KJ_DEFER(js.setAllowEval(false));
 
   auto maybeWasmModule = v8::WasmModuleObject::Compile(
-      js.v8Isolate, v8::MemorySpan<const uint8_t>(src.begin(), src.size()));
+      js.v8Isolate, std::span<const uint8_t>(src.begin(), src.size()));
   return jsg::JsValue(jsg::check(maybeWasmModule));
 }
 
