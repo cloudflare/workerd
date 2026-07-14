@@ -52,10 +52,10 @@ archive_override(
     build_file_content = "cc_library(name = 'fast_float', hdrs = glob(['include/fast_float/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/fast_float/src')",
     remote_file_integrity = {"MODULE.bazel": "sha256-Q1BGZO/fpMbPE0libIcTXJuHkmMlxyBFjzlu7iVWjto="},
     remote_file_urls = {"MODULE.bazel": ["https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/refs/heads/main/modules/fast_float/8.0.2/MODULE.bazel"]},
-    sha256 = "aa2ab8d370d1011a7a6d4ab90589b298b7e5973fe00041c06ecc7298328c25b4",
-    strip_prefix = "fastfloat-fast_float-05087a3",
+    sha256 = "9b239eaa54c58fc3a1bb7e1a11030b67211e38ce7f4781b41b004f26f6fd1528",
+    strip_prefix = "fastfloat-fast_float-34164f5",
     type = "tgz",
-    url = "https://github.com/fastfloat/fast_float/tarball/05087a303dad9c98768b33c829d398223a649bc6",
+    url = "https://github.com/fastfloat/fast_float/tarball/34164f547b7df3f5d794ff67e9f885c36819ebfc",
 )
 
 # fp16
@@ -65,10 +65,10 @@ archive_override(
     build_file_content = "exports_files(glob(['**']))",
     remote_file_integrity = {"MODULE.bazel": "sha256-2YAHXAyoWo6FapWo2MBLpWyewByY+F4tSWUMbYt8gmg="},
     remote_file_urls = {"MODULE.bazel": ["https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/refs/heads/main/modules/fp16/0.0.0-20210320-0a92994/MODULE.bazel"]},
-    sha256 = "81686dc45a7897cf958ee99f655879a066dde41db5fc1379a1e8db338ad17589",
-    strip_prefix = "Maratyszcza-FP16-3d2de18",
+    sha256 = "ee835b205fabb4035d2c64a2dda54f2e8ff720f9f77a1945b8fa71ba61290c70",
+    strip_prefix = "Maratyszcza-FP16-782eea1",
     type = "tgz",
-    url = "https://github.com/Maratyszcza/FP16/tarball/3d2de1816307bac63c16a297e8c4dc501b4076df",
+    url = "https://github.com/Maratyszcza/FP16/tarball/782eea126dc5c755827be751a099eb01826175cf",
 )
 
 # highway
