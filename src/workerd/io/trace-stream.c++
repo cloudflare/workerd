@@ -1045,16 +1045,13 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::run(
 
   auto eventOutcome = co_await donePromise.exclusiveJoin(ioContext.onAbort()).then([&]() {
     return ioContext.waitUntilStatus();
-  }, [&incomingRequest](kj::Exception&& e) {
-    // If we have a JSG exception, just set the appropriate return code – this will already have
-    // been logged and we do not need to treat it like a KJ exception. Otherwise, re-throw the
-    // exception.
-    if (jsg::isTunneledException(e.getDescription())) {
-      incomingRequest->getMetrics().reportFailure(e);
-      return EventOutcome::EXCEPTION;
-    }
-    kj::throwRecoverableException(kj::mv(e));
-    KJ_UNREACHABLE;
+  }, [&ioContext, &incomingRequest](kj::Exception&& e) {
+    // If we get an exception, report it for metrics, add a log to the trace and return an exception
+    // outcome. There is no need to re-throw it as for tail workers we're not interested in
+    // propagating the exception via jsRpc.
+    incomingRequest->getMetrics().reportFailure(e);
+    ioContext.logUncaughtExceptionAsync(UncaughtExceptionSource::TRACE_HANDLER, kj::mv(e));
+    return EventOutcome::EXCEPTION;
   });
   KJ_IF_SOME(t, ioContext.getWorkerTracer()) {
     t.setReturn(ioContext.now());

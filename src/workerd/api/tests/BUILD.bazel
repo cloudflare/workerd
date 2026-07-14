@@ -156,6 +156,7 @@ wd_test(
         "tail-worker-test-invalid.js",
         "tail-worker-test-no-op.js",
         "tail-worker-test-jsrpc.js",
+        "tail-worker-test-throw.js",
         "websocket-hibernation.js",
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",

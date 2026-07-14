@@ -122,6 +122,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
       LOG_EXCEPTION("HibernatableWebSocketCustomEvent"_kj, e);
     }
     incomingRequest->getMetrics().reportFailure(e);
+    context.logUncaughtExceptionAsync(UncaughtExceptionSource::ASYNC_TASK, e.clone());
     outcome = EventOutcome::EXCEPTION;
   }
 
