@@ -8,6 +8,7 @@
 #include "http.h"
 #include "worker-rpc.h"
 
+#include <workerd/io/tracer.h>
 #include <workerd/util/completion-membrane.h>
 
 namespace workerd::api {
@@ -321,10 +322,14 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::run
 
     // Keep the restore event's IoContext alive as long as the restored service channel exists.
     co_await donePromise.exclusiveJoin(ioctx.onAbort());
+    KJ_IF_SOME(t, ioctx.getWorkerTracer()) {
+      t.setReturn(ioctx.now());
+    }
 
     co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
   }
   KJ_CATCH(exception) {
+    incomingRequest->getMetrics().reportFailure(exception);
     channelFulfiller->reject(kj::mv(exception));
 
     co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::EXCEPTION};
@@ -440,10 +445,14 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreRpcStubCustomEvent::run
     // `donePromise` resolves once there are no longer any capabilities pointing between the client
     // and server as part of this session.
     co_await donePromise.exclusiveJoin(ioctx.onAbort());
+    KJ_IF_SOME(t, ioctx.getWorkerTracer()) {
+      t.setReturn(ioctx.now());
+    }
 
     co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
   }
   KJ_CATCH(exception) {
+    incomingRequest->getMetrics().reportFailure(exception);
     capFulfiller->reject(kj::mv(exception));
 
     co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::EXCEPTION};

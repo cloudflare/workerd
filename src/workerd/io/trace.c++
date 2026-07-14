@@ -436,9 +436,15 @@ FetchEventInfo FetchEventInfo::clone() const {
 }
 
 kj::String FetchEventInfo::toString() const {
-  return kj::str("FetchEventInfo: ",
-      kj::delimited(
-          kj::arr(kj::str(method), kj::str(url), kj::str(cfJson), kj::str(headers)), ", "_kjc));
+  // Only stringify headers in predictable mode, these should not be logged in prod
+  if (isPredictableModeForTest()) {
+    return kj::str("FetchEventInfo: ",
+        kj::delimited(
+            kj::arr(kj::str(method), kj::str(url), kj::str(cfJson), kj::str(headers)), ", "_kjc));
+  } else {
+    return kj::str("FetchEventInfo: ",
+        kj::delimited(kj::arr(kj::str(method), kj::str(url), kj::str(cfJson)), ", "_kjc));
+  }
 }
 
 FetchEventInfo::Header::Header(kj::String name, kj::String value)

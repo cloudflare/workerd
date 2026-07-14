@@ -121,6 +121,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
         !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)) {
       LOG_EXCEPTION("HibernatableWebSocketCustomEvent"_kj, e);
     }
+    incomingRequest->getMetrics().reportFailure(e);
     outcome = EventOutcome::EXCEPTION;
   }
 
