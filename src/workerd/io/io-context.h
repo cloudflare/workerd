@@ -1659,8 +1659,8 @@ auto IoContext::makeReentryCallbackImpl(Func func, kj::Own<void> attachment) {
     }
 
     return ctx.canceler.wrap(ctx.run(
-        [&ctx, &ioFunc, ... params = kj::fwd<decltype(params)>(params)](
-            Worker::Lock& lock) mutable {
+        [&ioFunc, ... params = kj::fwd<decltype(params)>(params)](
+            Worker::Lock& lock, IoContext& ctx) mutable {
       using ResultType = kj::Decay<decltype(func(lock, kj::fwd<decltype(params)>(params)...))>;
 
       auto& func = *ioFunc;

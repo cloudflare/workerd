@@ -67,7 +67,8 @@ Checks: >
   readability-use-concise-preprocessor-directives,
   jsg-visit-for-gc,
   workerd-consume,
-  workerd-unsafe-continuation-capture
+  workerd-unsafe-continuation-capture,
+  custom-iocontext-run-manual-capture
 
 # TODO: Fix and enable
 # bugprone-derived-method-shadowing-base-method
@@ -93,3 +94,43 @@ CheckOptions:
     value: "jsg/jsg.h|jsg/dom-exception.h"
   - key: cppcoreguidelines-missing-std-forward.ForwardFunction
     value: "kj::fwd"
+
+####
+# Custom checks.
+#
+# Query-based custom checks (see capnp-cpp's `.clang-tidy` for more examples).
+# These require clang-tidy's `--experimental-custom-checks` flag, which is passed
+# by `build/tools/clang_tidy/clang_tidy.bzl`.
+#
+# References:
+# - https://clang.llvm.org/extra/clang-tidy/QueryBasedCustomChecks.html
+# - https://clang.llvm.org/docs/LibASTMatchersReference.html
+CustomChecks:
+  - Name: iocontext-run-manual-capture
+    # `IoContext::run()` (and friends) accept a callback of either
+    # `(Worker::Lock&)` or `(Worker::Lock&, IoContext&)`. When the callback needs
+    # the IoContext, the two-argument form should be used so that the IoContext is
+    # passed in as a parameter, rather than capturing it manually in the lambda
+    # capture list (which is easy to get wrong with respect to lifetimes).
+    #
+    # This matches a call to `IoContext::run(...)` whose first argument is a lambda
+    # that captures a variable whose type is `IoContext` (by value, reference, or
+    # pointer), e.g. `ctx.run([&ctx](Worker::Lock& lock) { ... })`.
+    Query: |
+      match cxxMemberCallExpr(
+        callee(cxxMethodDecl(
+          hasName("run"),
+          ofClass(cxxRecordDecl(hasName("::workerd::IoContext")))
+        )),
+        hasArgument(0, ignoringParenImpCasts(lambdaExpr(
+          hasAnyCapture(lambdaCapture(capturesVar(varDecl(hasType(qualType(anyOf(
+            hasDeclaration(cxxRecordDecl(hasName("::workerd::IoContext"))),
+            references(cxxRecordDecl(hasName("::workerd::IoContext"))),
+            pointsTo(cxxRecordDecl(hasName("::workerd::IoContext")))
+          )))))))
+        ).bind("lambda")))
+      ).bind("call")
+    Diagnostic:
+      - BindName: lambda
+        Message: "IoContext::run() lambda captures the IoContext manually; use the two-argument (Worker::Lock&, IoContext&) lambda form instead"
+        Level: Warning

@@ -1023,7 +1023,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
         enterIsolateAndCall([this, &ctx](CallContext callContext) {
           // Note: No need to topUpActor() since this is the start of a top-level request, so the
           // actor will already have been topped up by IncomingRequest::delivered().
-          return ctx.run([this, &ctx, callContext](Worker::Lock& lock) mutable {
+          return ctx.run([this, callContext](Worker::Lock& lock, IoContext& ctx) mutable {
             return callImpl(lock, ctx, callContext);
           });
         }),
