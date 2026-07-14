@@ -162,7 +162,8 @@ def wd_rust_crate(
             "RUST_TEST_THREADS": "1",
         } | test_env,
         size = test_size,
-        tags = test_tags + ["no-coverage"],
+        # Tag with cpu:4 since this target depends on linkopts_default.
+        tags = test_tags + ["no-coverage", "cpu:4"],
         experimental_use_cc_common_link = 1,
         crate_features = crate_features,
         deps = test_deps,
