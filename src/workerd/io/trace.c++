@@ -855,10 +855,14 @@ Log::Log(rpc::Trace::Log::Reader reader)
     auto slots = kj::heapArray<kj::Maybe<ErrorInfo>>(listReader.size());
     for (auto i: kj::zeroTo(listReader.size())) {
       auto slotReader = listReader[i];
-      if (slotReader.which() == rpc::Trace::ErrorInfoSlot::INFO) {
-        slots[i] = ErrorInfo(slotReader.getInfo());
-      }
-      // else: stays kj::none
+        switch (slotReader.which()) {
+          case rpc::Trace::ErrorInfoSlot::INFO:
+            slots[i] = tracing::ErrorInfo(slotReader.getInfo());
+            break;
+          case rpc::Trace::ErrorInfoSlot::NONE:
+            // slot stays kj::none
+            break;
+        }
     }
     errorInfo = kj::mv(slots);
   }
