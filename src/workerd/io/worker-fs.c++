@@ -5,6 +5,8 @@
 #include <workerd/util/uuid.h>
 #include <workerd/util/weak-refs.h>
 
+#include <v8-microtask-queue.h>
+
 #include <algorithm>
 
 namespace workerd {
@@ -1998,7 +2000,7 @@ class StdioFile final: public File {
         }
       });
     });
-    js.v8Isolate->EnqueueMicrotask(callback);
+    js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate, callback);
   }
 };
 
