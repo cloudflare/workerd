@@ -771,19 +771,72 @@ FetchResponseInfo FetchResponseInfo::clone() const {
   return FetchResponseInfo(statusCode);
 }
 
-Log::Log(kj::Date timestamp, LogLevel logLevel, kj::String message)
+ErrorInfo::ErrorInfo(kj::String name, kj::String message, kj::Maybe<kj::String> stack)
+    : name(kj::mv(name)),
+      message(kj::mv(message)),
+      stack(kj::mv(stack)) {}
+
+ErrorInfo::ErrorInfo(rpc::Trace::ErrorInfo::Reader reader)
+    : name(kj::str(reader.getName())),
+      message(kj::str(reader.getMessage())) {
+  if (reader.hasStack()) {
+    stack = kj::str(reader.getStack());
+  }
+}
+
+void ErrorInfo::copyTo(rpc::Trace::ErrorInfo::Builder builder) const {
+  builder.setName(name);
+  builder.setMessage(message);
+  KJ_IF_SOME(s, stack) {
+    builder.setStack(s);
+  }
+}
+
+ErrorInfo ErrorInfo::clone() const {
+  return ErrorInfo(kj::str(name), kj::str(message),
+      stack.map([](const kj::String& s) { return kj::str(s); }));
+}
+
+LogErrorInfo cloneLogErrorInfo(const LogErrorInfo& src) {
+  KJ_IF_SOME(slots, src) {
+    // Each slot starts out kj::none (default-constructed by heapArray); we only
+    // populate slots that hold an Error in the source.
+    auto out = kj::heapArray<kj::Maybe<ErrorInfo>>(slots.size());
+    for (auto i: kj::zeroTo(slots.size())) {
+      KJ_IF_SOME(info, slots[i]) {
+        out[i] = info.clone();
+      }
+    }
+    return out;
+  }
+  return kj::none;
+}
+
+Log::Log(kj::Date timestamp, LogLevel logLevel, kj::String message, LogErrorInfo errorInfo)
     : timestamp(timestamp),
       logLevel(logLevel),
-      message(kj::mv(message)) {}
+      message(kj::mv(message)),
+      errorInfo(kj::mv(errorInfo)) {}
 
 void Log::copyTo(rpc::Trace::Log::Builder builder) const {
   builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setLogLevel(logLevel);
   builder.setMessage(message);
+  KJ_IF_SOME(slots, errorInfo) {
+    auto listBuilder = builder.initErrorInfo(slots.size());
+    for (auto i: kj::zeroTo(slots.size())) {
+      auto slotBuilder = listBuilder[i];
+      KJ_IF_SOME(info, slots[i]) {
+        info.copyTo(slotBuilder.initInfo());
+      } else {
+        slotBuilder.setNone();
+      }
+    }
+  }
 }
 
 Log Log::clone() const {
-  return Log(timestamp, logLevel, kj::str(message));
+  return Log(timestamp, logLevel, kj::str(message), cloneLogErrorInfo(errorInfo));
 }
 
 Exception::Exception(
@@ -796,7 +849,24 @@ Exception::Exception(
 Log::Log(rpc::Trace::Log::Reader reader)
     : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
       logLevel(reader.getLogLevel()),
-      message(kj::str(reader.getMessage())) {}
+      message(kj::str(reader.getMessage())) {
+  if (reader.hasErrorInfo()) {
+    auto listReader = reader.getErrorInfo();
+    auto slots = kj::heapArray<kj::Maybe<ErrorInfo>>(listReader.size());
+    for (auto i: kj::zeroTo(listReader.size())) {
+      auto slotReader = listReader[i];
+        switch (slotReader.which()) {
+          case rpc::Trace::ErrorInfoSlot::INFO:
+            slots[i] = tracing::ErrorInfo(slotReader.getInfo());
+            break;
+          case rpc::Trace::ErrorInfoSlot::NONE:
+            // slot stays kj::none
+            break;
+        }
+    }
+    errorInfo = kj::mv(slots);
+  }
+}
 
 Exception::Exception(rpc::Trace::Exception::Reader reader)
     : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),

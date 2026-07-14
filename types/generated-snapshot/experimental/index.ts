@@ -3424,6 +3424,12 @@ export interface TraceLog {
   readonly timestamp: number;
   readonly level: string;
   readonly message: any;
+  readonly errorInfo?: (TraceLogErrorInfo | null)[];
+}
+export interface TraceLogErrorInfo {
+  name: string;
+  message: string;
+  stack?: string;
 }
 export interface TraceException {
   readonly timestamp: number;
@@ -16547,6 +16553,18 @@ export declare namespace TailStream {
     readonly type: "log";
     readonly level: "debug" | "error" | "info" | "log" | "warn";
     readonly message: object;
+    /**
+     * Per-argument structured Error fields for the originating `console.*` call.
+     * The array is positional: index `i` corresponds to the i-th argument. Indices
+     * whose argument was not a native Error are `null`. The whole property is
+     * absent (undefined) when none of the arguments was a native Error.
+     */
+    readonly errorInfo?: readonly (TailStreamErrorInfo | null)[];
+  }
+  interface TailStreamErrorInfo {
+    readonly name: string;
+    readonly message: string;
+    readonly stack?: string;
   }
   interface DroppedEventsDiagnostic {
     readonly diagnosticsType: "droppedEvents";

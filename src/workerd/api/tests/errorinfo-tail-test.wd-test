@@ -1,0 +1,21 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "errorinfo-tail", worker = .errorinfoTailWorker),
+  ],
+);
+
+const errorinfoTailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "errorinfo-tail-test.js")
+  ],
+  bindings = [
+    (name = "SERVICE", service = "errorinfo-tail"),
+  ],
+  compatibilityFlags = ["nodejs_compat"],
+  # Self-tail: the worker is registered as its own batched tail worker so the
+  # `tail` handler in the same module receives the trace events emitted by its
+  # own `fetch` handler. This avoids needing a separate tail worker module.
+  tails = ["errorinfo-tail"],
+);

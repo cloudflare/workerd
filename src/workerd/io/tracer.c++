@@ -122,9 +122,23 @@ constexpr kj::LiteralStringConst logSizeExceeded =
 void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     LogLevel logLevel,
-    kj::String message) {
+    kj::String message,
+    tracing::LogErrorInfo errorInfo) {
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
+  }
+
+  // Compute the heap size of errorInfo once for both the streaming and buffered paths.
+  size_t errorInfoSize = 0;
+  KJ_IF_SOME(infos, errorInfo) {
+    for (const auto& entry: infos) {
+      KJ_IF_SOME(info, entry) {
+        errorInfoSize += info.name.size() + info.message.size();
+        KJ_IF_SOME(s, info.stack) {
+          errorInfoSize += s.size();
+        }
+      }
+    }
   }
 
   // TODO(streaming-tail): Here we add the log to the trace object and the tail stream writer, if
@@ -133,16 +147,19 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     // If message is too big on its own, truncate it.
     size_t messageSize = kj::min(message.size(), MAX_TRACE_BYTES);
+    // Clone errorInfo for the STW path because the batched-tail path below also needs it.
+    auto streamErrorInfo = tracing::cloneLogErrorInfo(errorInfo);
     writer->report(context,
-        {tracing::Log(timestamp, logLevel, kj::str(message.first(messageSize)))}, timestamp,
-        messageSize);
+        {tracing::Log(timestamp, logLevel, kj::str(message.first(messageSize)),
+            kj::mv(streamErrorInfo))},
+        timestamp, messageSize + errorInfoSize);
   }
 
   if (trace->exceededLogLimit) {
     return;
   }
 
-  size_t messageSize = sizeof(tracing::Log) + message.size();
+  size_t messageSize = sizeof(tracing::Log) + message.size() + errorInfoSize;
   if (trace->bytesUsed + messageSize > MAX_TRACE_BYTES) {
     // We use a JSON encoded array/string to match other console.log() recordings:
     trace->logs.add(timestamp, LogLevel::WARN, kj::str(logSizeExceeded));
@@ -150,7 +167,7 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     trace->truncated = true;
   } else {
     trace->bytesUsed += messageSize;
-    trace->logs.add(timestamp, logLevel, kj::mv(message));
+    trace->logs.add(timestamp, logLevel, kj::mv(message), kj::mv(errorInfo));
   }
 }
 

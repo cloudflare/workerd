@@ -601,10 +601,39 @@ bool TraceItem::HibernatableWebSocketEventInfo::Close::getWasClean() {
   return eventInfo.wasClean;
 }
 
+TraceLogErrorInfo::TraceLogErrorInfo(const tracing::ErrorInfo& info)
+    : name(kj::str(info.name)),
+      message(kj::str(info.message)),
+      stack(mapCopyString(info.stack)) {}
+
+TraceLogErrorInfo::TraceLogErrorInfo(const TraceLogErrorInfo& other)
+    : name(kj::str(other.name)),
+      message(kj::str(other.message)),
+      stack(other.stack.map([](const kj::String& s) { return kj::str(s); })) {}
+
+namespace {
+kj::Maybe<kj::Array<kj::Maybe<TraceLogErrorInfo>>> convertLogErrorInfo(
+    const tracing::LogErrorInfo& src) {
+  KJ_IF_SOME(slots, src) {
+    // Each slot starts out kj::none (default-constructed by heapArray); we only
+    // populate slots that hold an ErrorInfo in the source.
+    auto out = kj::heapArray<kj::Maybe<TraceLogErrorInfo>>(slots.size());
+    for (auto i: kj::zeroTo(slots.size())) {
+      KJ_IF_SOME(info, slots[i]) {
+        out[i] = TraceLogErrorInfo(info);
+      }
+    }
+    return kj::mv(out);
+  }
+  return kj::none;
+}
+}  // namespace
+
 TraceLog::TraceLog(jsg::Lock& js, const Trace& trace, const tracing::Log& log)
     : timestamp(getTraceLogTimestamp(log)),
       level(getTraceLogLevel(log)),
-      message(getTraceLogMessage(js, log)) {}
+      message(getTraceLogMessage(js, log)),
+      errorInfo(convertLogErrorInfo(log.errorInfo)) {}
 
 double TraceLog::getTimestamp() {
   return timestamp;
@@ -616,6 +645,21 @@ kj::StringPtr TraceLog::getLevel() {
 
 jsg::V8Ref<v8::Object> TraceLog::getMessage(jsg::Lock& js) {
   return message.addRef(js);
+}
+
+jsg::Optional<kj::Array<kj::Maybe<TraceLogErrorInfo>>> TraceLog::getErrorInfo() {
+  KJ_IF_SOME(slots, errorInfo) {
+    // Each slot starts out kj::none (default-constructed by heapArray); we only
+    // populate slots that hold a TraceLogErrorInfo in the source.
+    auto out = kj::heapArray<kj::Maybe<TraceLogErrorInfo>>(slots.size());
+    for (auto i: kj::zeroTo(slots.size())) {
+      KJ_IF_SOME(info, slots[i]) {
+        out[i] = TraceLogErrorInfo(info);
+      }
+    }
+    return kj::mv(out);
+  }
+  return kj::none;
 }
 
 TraceException::TraceException(const Trace& trace, const tracing::Exception& exception)

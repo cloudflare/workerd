@@ -615,9 +615,42 @@ struct StreamDiagnosticsEvent final {
   StreamDiagnosticsEvent clone() const;
 };
 
+// Describes structured Error fields extracted from an Error argument passed to a
+// console.* call. Attached to a Log entry via Log::errorInfo. Mirrors the shape of
+// tracing::Exception (which represents uncaught exceptions) but has no timestamp of
+// its own — the enclosing Log already carries one.
+struct ErrorInfo final {
+  explicit ErrorInfo(kj::String name, kj::String message, kj::Maybe<kj::String> stack);
+  ErrorInfo(rpc::Trace::ErrorInfo::Reader reader);
+  ErrorInfo(ErrorInfo&&) noexcept = default;
+  KJ_DISALLOW_COPY(ErrorInfo);
+  ~ErrorInfo() noexcept(false) = default;
+
+  kj::String name;
+  kj::String message;
+  kj::Maybe<kj::String> stack;
+
+  void copyTo(rpc::Trace::ErrorInfo::Builder builder) const;
+  ErrorInfo clone() const;
+};
+
+// Per-argument errorInfo for a Log. The outer kj::Maybe is `kj::none` when none
+// of the originating console call's arguments was a native Error (the dominant
+// case, kept cheap on the wire). When present, the inner array's length matches
+// the argument count; slot `i` is `kj::some(ErrorInfo)` if `info[i]` was a native
+// Error, `kj::none` otherwise.
+using LogErrorInfo = kj::Maybe<kj::Array<kj::Maybe<ErrorInfo>>>;
+
+// Helper: deep-copy a LogErrorInfo. Needed because kj::Array is move-only and
+// ErrorInfo contains non-copyable strings.
+LogErrorInfo cloneLogErrorInfo(const LogErrorInfo& src);
+
 // Describes a log event
 struct Log final {
-  explicit Log(kj::Date timestamp, LogLevel logLevel, kj::String message);
+  explicit Log(kj::Date timestamp,
+      LogLevel logLevel,
+      kj::String message,
+      LogErrorInfo errorInfo = kj::none);
   Log(rpc::Trace::Log::Reader reader);
   Log(Log&&) noexcept = default;
   KJ_DISALLOW_COPY(Log);
@@ -629,6 +662,9 @@ struct Log final {
   LogLevel logLevel;
   // TODO(soon): Just string for now.  Eventually, capture serialized JS objects.
   kj::String message;
+
+  // Per-argument structured Error fields. See LogErrorInfo above for semantics.
+  LogErrorInfo errorInfo;
 
   void copyTo(rpc::Trace::Log::Builder builder) const;
   Log clone() const;

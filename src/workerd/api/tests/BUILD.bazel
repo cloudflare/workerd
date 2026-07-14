@@ -196,6 +196,19 @@ wd_test(
     ],
 )
 
+# Tests for WO-1390: structured errorInfo on TraceLog entries from console.*(Error, ...).
+# Covers both batched tail (`tail(events)`) and streaming tail (`tailStream`) surfaces.
+wd_test(
+    src = "errorinfo-tail-test.wd-test",
+    data = ["errorinfo-tail-test.js"],
+)
+
+wd_test(
+    src = "errorinfo-stw-test.wd-test",
+    args = ["--experimental"],
+    data = ["errorinfo-stw-test.js"],
+)
+
 wd_test(
     src = "analytics-engine-test.wd-test",
     args = ["--experimental"],
