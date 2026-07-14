@@ -342,7 +342,7 @@ class ActorCacheInterface: public ActorCacheOps {
 // The cache implements LRU eviction triggered by both time and memory pressure. Memory usage is
 // accounted across many actors (typically, all actors in the same isolate), so that the cache
 // size limit can be set based on the per-isolate memory limit.
-class ActorCache final: public ActorCacheInterface {
+class ActorCache final: public ActorCacheInterface, public kj::PtrTarget {
  public:
   // Shared LRU for a whole isolate.
   class SharedLru;

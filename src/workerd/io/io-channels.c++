@@ -65,10 +65,9 @@ class PromisedTokenizableChannel: public ChannelType {
     KJ_IF_SOME(channel, inner) {
       return channel->getTokenMaybeSync(usage);
     } else {
-      // The caller is expected to keep this promised channel alive until the promise resolves.
-      // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
-      return readyPromise.addBranch().then([this, usage]() -> kj::Promise<kj::Array<byte>> {
-        KJ_SWITCH_ONEOF(KJ_ASSERT_NONNULL(inner)->getTokenMaybeSync(usage)) {
+      return readyPromise.addBranch().then(
+          [self = kj::addRef(*this), usage]() mutable -> kj::Promise<kj::Array<byte>> {
+        KJ_SWITCH_ONEOF(KJ_ASSERT_NONNULL(self->inner)->getTokenMaybeSync(usage)) {
           KJ_CASE_ONEOF(token, kj::Array<byte>) {
             return kj::mv(token);
           }
@@ -87,10 +86,8 @@ class PromisedTokenizableChannel: public ChannelType {
     KJ_IF_SOME(channel, inner) {
       return kj::addRef<IoChannelFactory::TokenizableChannel>(*channel);
     } else {
-      // The caller is expected to keep this promised channel alive until the promise resolves.
-      // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
-      return readyPromise.addBranch().then([this]() mutable {
-        return kj::addRef<IoChannelFactory::TokenizableChannel>(*KJ_ASSERT_NONNULL(inner));
+      return readyPromise.addBranch().then([self = kj::addRef(*this)]() mutable {
+        return kj::addRef<IoChannelFactory::TokenizableChannel>(*KJ_ASSERT_NONNULL(self->inner));
       });
     }
   }
@@ -150,10 +147,8 @@ class PromisedRpcChannel final: public PromisedTokenizableChannel<IoChannelFacto
       return channel->restore();
     } else {
       auto splitPromise = readyPromise.addBranch()
-      // The caller is expected to keep this promised channel alive until the promise resolves.
-      // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
-                              .then([this]() {
-        auto innerRestore = KJ_ASSERT_NONNULL(inner)->restore();
+                              .then([self = kj::addRef(*this)]() mutable {
+        auto innerRestore = KJ_ASSERT_NONNULL(self->inner)->restore();
         return kj::tuple(kj::mv(innerRestore.cap), kj::mv(innerRestore.task));
       }).split();
       return {
@@ -193,7 +188,7 @@ kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::getSubrequestChan
   KJ_IF_SOME(p, props) {
     KJ_IF_SOME(promise, p.resolveCaps(resolveCap)) {
       return kj::refcounted<PromisedSubrequestChannel>(
-          // Keeps this alive through self = addRef()
+          // `this` outliving `self` by making the lambda own `self`. See comment on `addRef()`.
           // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
           promise.then([this, self = addRef(), channel, props = kj::mv(p),
                            versionRequest = kj::mv(versionRequest), persistent]() mutable {
@@ -210,7 +205,7 @@ kj::Own<IoChannelFactory::ActorClassChannel> IoChannelFactory::getActorClass(
   KJ_IF_SOME(p, props) {
     KJ_IF_SOME(promise, p.resolveCaps(resolveCap)) {
       return kj::refcounted<PromisedActorClassChannel>(
-          // Keeps this alive through self = addRef()
+          // `self = addRef()` prevents `this` from being destroyed while the lambda is alive.
           // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
           promise.then([this, self = addRef(), channel, props = kj::mv(p), persistent]() mutable {
         return getActorClassResolved(channel, kj::mv(props), persistent);
@@ -231,7 +226,7 @@ kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::makeRestoredSubre
 
   KJ_IF_SOME(promise, restoreParams.resolveCaps(resolveCap)) {
     return kj::refcounted<PromisedSubrequestChannel>(promise.then(
-        // Keeps this alive through self = addRef()
+        // `self = addRef()` prevents `this` from being destroyed while the lambda is alive.
         // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
         [this, self = addRef(), selfTokenFactory = kj::mv(selfTokenFactory),
             restoreParams = kj::mv(restoreParams), inner = kj::mv(inner), persistent]() mutable {
@@ -248,7 +243,7 @@ kj::Own<IoChannelFactory::RpcChannel> IoChannelFactory::makeRestoredRpcChannel(
     kj::Own<SelfTokenFactory> selfTokenFactory, Frankenvalue restoreParams, Persistent persistent) {
   KJ_IF_SOME(promise, restoreParams.resolveCaps(resolveCap)) {
     return kj::refcounted<PromisedRpcChannel>(
-        // Keeps this alive through self = addRef()
+        // `self = addRef()` prevents `this` from being destroyed while the lambda is alive.
         // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
         promise.then([this, self = addRef(), selfTokenFactory = kj::mv(selfTokenFactory),
                          restoreParams = kj::mv(restoreParams), persistent]() mutable {
@@ -265,8 +260,6 @@ kj::Own<IoChannelFactory::SubrequestChannel> WorkerStubChannel::getEntrypoint(
     kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) {
   KJ_IF_SOME(promise, props.resolveCaps(resolveCap)) {
     return kj::refcounted<PromisedSubrequestChannel>(
-        // Keeps this alive through self = addRef()
-        // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
         promise.then([self = addRefToThis(), name = kj::mv(name), props = kj::mv(props),
                          limits = kj::mv(limits)]() mutable {
       return self->getEntrypointResolved(kj::mv(name), kj::mv(props), kj::mv(limits));
@@ -292,7 +285,7 @@ kj::Own<IoChannelFactory::ActorClassChannel> WorkerStubChannel::getActorClass(
 kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::subrequestChannelFromToken(
     ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token) {
   return kj::refcounted<PromisedSubrequestChannel>(token.then(
-      // Keeps this alive through self = addRef()
+      // `self = addRef()` prevents `this` from being destroyed while the lambda is alive.
       // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
       [this, self = addRef(), usage](kj::Array<byte> token) {
     return subrequestChannelFromToken(usage, token.asPtr());
@@ -302,7 +295,7 @@ kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::subrequestChannel
 kj::Own<IoChannelFactory::ActorClassChannel> IoChannelFactory::actorClassFromToken(
     ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token) {
   return kj::refcounted<PromisedActorClassChannel>(token.then(
-      // Keeps this alive through self = addRef()
+      // `self = addRef()` prevents `this` from being destroyed while the lambda is alive.
       // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
       [this, self = addRef(), usage](kj::Array<byte> token) {
     return actorClassFromToken(usage, token.asPtr());
@@ -312,7 +305,7 @@ kj::Own<IoChannelFactory::ActorClassChannel> IoChannelFactory::actorClassFromTok
 kj::Own<IoChannelFactory::RpcChannel> IoChannelFactory::rpcChannelFromToken(
     ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token) {
   return kj::refcounted<PromisedRpcChannel>(token.then(
-      // Keeps this alive through self = addRef()
+      // `self = addRef()` prevents `this` from being destroyed while the lambda is alive.
       // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
       [this, self = addRef(), usage](kj::Array<byte> token) {
     return rpcChannelFromToken(usage, token.asPtr());

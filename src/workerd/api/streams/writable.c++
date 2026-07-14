@@ -329,7 +329,8 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
 // that will arrange to acquire the isolate lock when necessary to perform writes
 // directly on the WritableStreamController. Note that this approach is necessarily
 // a lot slower
-class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
+class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream,
+                                       public kj::PtrTarget {
  public:
   WritableStreamJsRpcAdapter(
       kj::WeakRc<IoContext> context, jsg::Ref<WritableStreamDefaultWriter> writer)
@@ -337,7 +338,6 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
         writer(kj::mv(writer)) {}
 
   ~WritableStreamJsRpcAdapter() noexcept(false) {
-    weakRef->invalidate();
     doneFulfiller->fulfill();
 
     // If the stream was not explicitly ended and the writer still exists at this point,
@@ -380,15 +380,15 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
     auto paf = kj::newPromiseAndFulfiller<void>();
     doneFulfiller = kj::mv(paf.fulfiller);
 
-    return paf.promise.attach(kj::defer([weakRef = weakRef->addRef()]() mutable {
-      KJ_IF_SOME(obj, weakRef->tryGet()) {
+    return paf.promise.attach(kj::defer([weak = addWeakToThis()]() mutable {
+      KJ_IF_SOME(obj, weak) {
         // Stream is still alive, revoke it.
-        if (!obj.canceler.isEmpty()) {
-          obj.canceler.cancel(cancellationException());
+        if (!obj->canceler.isEmpty()) {
+          obj->canceler.cancel(cancellationException());
         }
-        auto w = kj::mv(obj.writer);
+        auto w = kj::mv(obj->writer);
         KJ_IF_SOME(writer, w) {
-          auto& ctx = obj.context.assertLive();
+          auto& ctx = obj->context.assertLive();
           ctx.addTask(ctx.run([writer = kj::mv(writer), exception = cancellationException()](
                                   Worker::Lock& lock) mutable {
             jsg::Lock& js = lock;
@@ -405,12 +405,13 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
       return KJ_EXCEPTION(FAILED, "Write after stream has been closed.");
     }
     if (buffer == nullptr) return kj::READY_NOW;
-    // This API requires that pieces stay alive until the returned promise completes.
-    // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
-    return canceler.wrap(context.assertLive().run([this, buffer](Worker::Lock& lock) mutable {
-      auto& writer = getInner();
+    // The weak ref will assert if `this` is destroyed before the promise resolves.
+    return canceler.wrap(context.assertLive().run([weak = addWeakToThis(), buffer]
+        (Worker::Lock& lock, IoContext& context) mutable {
+      auto& self = weak.assertLive();
+      auto& writer = self.getInner();
       auto ab = jsg::JsArrayBuffer::create(lock, buffer);
-      return context.assertLive().awaitJs(lock, writer.write(lock, jsg::JsValue(ab)));
+      return context.awaitJs(lock, writer.write(lock, jsg::JsValue(ab)));
     }));
   }
 
@@ -423,11 +424,12 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
       amount += piece.size();
     }
     if (amount == 0) return kj::READY_NOW;
-    // This API requires that pieces stay alive until the returned promise completes.
-    // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
+    // The weak ref will assert if `this` is destroyed before the promise resolves.
     return canceler.wrap(
-        context.assertLive().run([this, amount, pieces](Worker::Lock& lock) mutable {
-      auto& writer = getInner();
+        context.assertLive().run([weak = addWeakToThis(), amount, pieces]
+          (Worker::Lock& lock, IoContext& context) mutable {
+      auto& self = weak.assertLive();
+      auto& writer = self.getInner();
       // Sadly, we have to allocate and copy here. Our received set of buffers are only
       // guaranteed to live until the returned promise is resolved, but the application code
       // may hold onto the ArrayBuffer for longer. We need to make sure that the backing store
@@ -441,7 +443,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
         ptr.write(piece);
       }
 
-      return context.assertLive().awaitJs(lock, writer.write(lock, jsg::JsValue(ab)));
+      return context.awaitJs(lock, writer.write(lock, jsg::JsValue(ab)));
     }));
   }
 
@@ -472,10 +474,10 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
       return KJ_EXCEPTION(FAILED, "End after stream has been closed.");
     }
     ended = true;
-    // This API requires that pieces stay alive until the returned promise completes.
-    // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
-    return canceler.wrap(context.assertLive().run([this](Worker::Lock& lock) mutable {
-      return context.assertLive().awaitJs(lock, getInner().close(lock));
+    return canceler.wrap(context.assertLive().run([weak = addWeakToThis()]
+        (Worker::Lock& lock, IoContext& ctx) mutable {
+      auto& self = weak.assertLive();
+      return ctx.awaitJs(lock, self.getInner().close(lock));
     }));
   }
 
@@ -484,9 +486,6 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
   kj::Maybe<jsg::Ref<WritableStreamDefaultWriter>> writer;
   kj::Canceler canceler;
   kj::Own<kj::PromiseFulfiller<void>> doneFulfiller;
-  kj::Own<WeakRef<WritableStreamJsRpcAdapter>> weakRef =
-      kj::refcounted<WeakRef<WritableStreamJsRpcAdapter>>(
-          kj::Badge<WritableStreamJsRpcAdapter>(), *this);
   bool ended = false;
 
   WritableStreamDefaultWriter& getInner() {

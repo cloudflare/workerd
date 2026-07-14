@@ -611,11 +611,11 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
           jsg::JsValue(h.env.getHandle(js)).addRef(js), h.getCtx())
                          .then([event = event.addRef(), weakRef = context.getWeakRef()]() mutable {
         event->setCompletionStatus(QueueEvent::CompletedSuccessfully{});
-        weakRef->runIfAlive([](IoContext& context) {
-          KJ_IF_SOME(t, context.getWorkerTracer()) {
-            t.setReturn(context.now());
+        KJ_IF_SOME(context, weakRef) {
+          KJ_IF_SOME(t, context->getWorkerTracer()) {
+            t.setReturn(context->now());
           }
-        });
+        }
       }, [event = event.addRef()](kj::Exception&& e) mutable {
         event->setCompletionStatus(QueueEvent::CompletedWithError{e.clone()});
         return kj::mv(e);
