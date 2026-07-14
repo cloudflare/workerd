@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "crypto_cipher-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
+        compatibilityFlags = ["nodejs_compat_v2", "add_nodejs_compat_eol"],
         bindings = [
           ( name = "rsa_private.pem", text = embed "fixtures/rsa_private.pem" ),
           ( name = "rsa_public.pem", text = embed "fixtures/rsa_public.pem" ),
