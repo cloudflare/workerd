@@ -829,7 +829,7 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
   //   the timer, so we don't want to addTask() it, which awaitIo() does implicitly.
   auto promise =
       paf.promise.then([this, &context, it, cs = context.getCriticalSection()]() mutable {
-    return context.run([this, &context, it](Worker::Lock& lock) mutable {
+    return context.run([this, it](Worker::Lock& lock, IoContext& context) mutable {
       auto& state = it->second;
 
       auto stateGuard = kj::defer([&] {

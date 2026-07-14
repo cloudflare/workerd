@@ -32,6 +32,9 @@ exports_files([
     "consume-negative-test.c++",
     "consume-positive-test.c++",
     "consume-test.sh",
+    "iocontext-run-manual-capture-negative-test.c++",
+    "iocontext-run-manual-capture-positive-test.c++",
+    "iocontext-run-manual-capture-test.sh",
     "workerd-lint.c++",
     "visit-for-gc.c++",
     "visit-for-gc.h",
@@ -112,6 +115,27 @@ sh_test(
         ":consume-negative-test.c++",
         ":consume-positive-test.c++",
         ":workerd-lint",
+        "//tools:clang-tidy",
+    ],
+    tags = ["no-asan"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+
+# Tests the `custom-iocontext-run-manual-capture` query-based check, which is
+# defined in the workerd `.clang-tidy` config rather than in the plugin. The
+# test drives clang-tidy against the real merged config, so it does not need the
+# plugin loaded.
+sh_test(
+    name = "iocontext-run-manual-capture-test",
+    srcs = ["iocontext-run-manual-capture-test.sh"],
+    data = [
+        ":iocontext-run-manual-capture-negative-test.c++",
+        ":iocontext-run-manual-capture-positive-test.c++",
+        "//:merged_clang_tidy_config",
         "//tools:clang-tidy",
     ],
     tags = ["no-asan"],

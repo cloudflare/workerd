@@ -3992,7 +3992,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       containerRunning = status.getRunning();
     }
 
-    co_await context.run([this, &context, &info, containerRunning](Worker::Lock& lock) {
+    co_await context.run([this, &info, containerRunning](Worker::Lock& lock, IoContext& context) {
       jsg::Lock& js = lock;
 
       kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
