@@ -240,7 +240,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   nodeJsCompat @21 :Bool
       $compatEnableFlag("nodejs_compat")
-      $compatDisableFlag("no_nodejs_compat");
+      $compatDisableFlag("no_nodejs_compat")
+      $compatEnableDate("2026-08-04");
   # Enables nodejs compat imports in the application.
 
   obsolete22 @22 :Bool
