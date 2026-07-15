@@ -950,6 +950,19 @@ class JsFunction final: public JsBase<v8::Function, JsFunction> {
   // as the receiver, the global object is used instead.
   JsValue callNoReceiver(Lock& js, v8::LocalVector<v8::Value>& args) const;
 
+  // Calls the function as a constructor with the given arguments, returning the
+  // new object.
+  template <IsJsValue... Args>
+  JsObject newInstance(Lock& js, Args... args) const {
+    v8::Local<v8::Function> fn = *this;
+    v8::Local<v8::Value> argv[] = {args...};
+    return JsObject(check(fn->NewInstance(js.v8Context(), sizeof...(Args), argv)));
+  }
+
+  // Calls the function as a constructor with the given arguments, returning the
+  // new object.
+  JsObject newInstance(Lock& js, v8::LocalVector<v8::Value>& args) const;
+
   // Gets the function's length property.
   size_t length(Lock& js) const;
 

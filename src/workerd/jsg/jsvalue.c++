@@ -661,6 +661,11 @@ JsValue JsFunction::callNoReceiver(Lock& js, v8::LocalVector<v8::Value>& args) c
   return call(js, js.null(), args);
 }
 
+JsObject JsFunction::newInstance(Lock& js, v8::LocalVector<v8::Value>& args) const {
+  v8::Local<v8::Function> fn = *this;
+  return JsObject(check(fn->NewInstance(js.v8Context(), args.size(), args.data())));
+}
+
 uint JsFunction::hashCode() const {
   v8::Local<v8::Function> obj = *this;
   return kj::hashCode(obj->GetIdentityHash());
