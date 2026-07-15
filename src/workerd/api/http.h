@@ -6,13 +6,13 @@
 
 #include "basics.h"
 #include "blob.h"
-#include "cf-property.h"
 #include "form-data.h"
 #include "headers.h"
 #include "queue.h"
 #include "web-socket.h"
 #include "worker-rpc.h"
 
+#include <workerd/api/cf-property.h>
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/url-standard.h>
 #include <workerd/api/url.h>

@@ -33,8 +33,6 @@ wd_cc_library(
     # IoContext -> Worker -> ServiceWorkerGlobalScope -> (various api targets) dependency chain.
     # TODO(cleanup): Fix this.
     srcs = [
-        "compatibility-date.c++",
-        "external-pusher.c++",
         "features.c++",
         "hibernation-manager.c++",
         "io-channels.c++",
@@ -51,8 +49,6 @@ wd_cc_library(
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
         "access-info.h",
-        "compatibility-date.h",
-        "external-pusher.h",
         "hibernation-manager.h",
         "io-channels.h",
         "io-context.h",
@@ -89,7 +85,9 @@ wd_cc_library(
         ":actor-id",
         ":actor-storage_capnp",
         ":cdp_capnp",
+        ":compatibility-date",
         ":container_capnp",
+        ":external-pusher",
         ":features",
         ":frankenvalue",
         ":io-gate",
@@ -104,6 +102,7 @@ wd_cc_library(
         ":worker-source",
         "//src/rust/cxx-integration",
         "//src/workerd/api:analytics-engine_capnp",
+        "//src/workerd/api:cf-property",
         "//src/workerd/api:deferred-proxy",
         "//src/workerd/api:encoding",
         "//src/workerd/api:fuzzilli",
@@ -127,6 +126,36 @@ wd_cc_library(
         "@capnp-cpp//src/kj:kj-async",
         "@ncrypto",
         "@ssl",
+    ],
+)
+
+wd_cc_library(
+    name = "compatibility-date",
+    srcs = ["compatibility-date.c++"],
+    hdrs = [
+        "compatibility-date.h",
+        "validation.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":compatibility-date_capnp",
+        ":maximum-compatibility-date",
+        ":release-version",
+        "@capnp-cpp//src/capnp",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
+    name = "external-pusher",
+    srcs = ["external-pusher.c++"],
+    hdrs = ["external-pusher.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":worker-interface_capnp",
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/capnp/compat:http-over-capnp",
+        "@capnp-cpp//src/kj:kj-async",
     ],
 )
 
@@ -457,6 +486,7 @@ kj_test(
 kj_test(
     src = "compatibility-date-test.c++",
     deps = [
+        ":compatibility-date",
         ":io",
         "@capnp-cpp//src/capnp:capnpc",
     ],

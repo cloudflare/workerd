@@ -13,7 +13,6 @@ filegroup(
         "basics.c++",
         "blob.c++",
         "cache.c++",
-        "cf-property.c++",
         "container.c++",
         "events.c++",
         "eventsource.c++",
@@ -65,7 +64,6 @@ filegroup(
         "basics.h",
         "blob.h",
         "cache.h",
-        "cf-property.h",
         "container.h",
         "events.h",
         "eventsource.h",
@@ -177,6 +175,20 @@ wd_cc_library(
     deps = [
         "//src/workerd/jsg",
         "@simdutf",
+    ],
+)
+
+wd_cc_library(
+    name = "cf-property",
+    srcs = ["cf-property.c++"],
+    hdrs = ["cf-property.h"],
+    implementation_deps = [
+        "//src/workerd/io:features",
+        "//src/workerd/util:own-util",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
     ],
 )
 
