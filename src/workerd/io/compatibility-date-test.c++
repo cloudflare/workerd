@@ -5,10 +5,12 @@
 #include "compatibility-date.h"
 
 #include <workerd/io/maximum-compatibility-date.embed.h>
+#include <workerd/io/worker.h>
 
 #include <capnp/message.h>
 #include <capnp/serialize-text.h>
 #include <kj/debug.h>
+#include <kj/map.h>
 #include <kj/test.h>
 
 #include <chrono>

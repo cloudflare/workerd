@@ -284,8 +284,7 @@ class SyntheticModule final: public Module {
       exports[n++] = js.strIntern(exp);
     }
     return v8::Module::CreateSyntheticModule(js.v8Isolate, js.str(id().getHref()),
-        std::span<const v8::Local<v8::String>>(exports.data(), exports.size()),
-        evaluationSteps);
+        std::span<const v8::Local<v8::String>>(exports.data(), exports.size()), evaluationSteps);
   }
 
  private:

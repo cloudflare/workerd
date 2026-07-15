@@ -66,7 +66,7 @@ struct CompatDate {
     return CompatDate{year, month, day};
   }
 
-  static CompatDate parse(kj::StringPtr text, Worker::ValidationErrorReporter& errorReporter) {
+  static CompatDate parse(kj::StringPtr text, ValidationErrorReporter& errorReporter) {
     static constexpr CompatDate DEFAULT_DATE{2021, 5, 1};
     KJ_IF_SOME(v, parse(text)) {
       return v;
@@ -102,7 +102,7 @@ kj::String currentDateStr() {
 static void compileCompatibilityFlags(kj::StringPtr compatDate,
     kj::HashSet<kj::String> flagSet,
     CompatibilityFlags::Builder output,
-    Worker::ValidationErrorReporter& errorReporter,
+    ValidationErrorReporter& errorReporter,
     bool allowExperimentalFeatures,
     CompatibilityDateValidation dateValidation,
     kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags) {
@@ -273,7 +273,7 @@ static void compileCompatibilityFlags(kj::StringPtr compatDate,
 void compileCompatibilityFlags(kj::StringPtr compatDate,
     capnp::List<capnp::Text>::Reader compatFlags,
     CompatibilityFlags::Builder output,
-    Worker::ValidationErrorReporter& errorReporter,
+    ValidationErrorReporter& errorReporter,
     bool allowExperimentalFeatures,
     CompatibilityDateValidation dateValidation,
     kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags) {
@@ -292,7 +292,7 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
 void compileCompatibilityFlags(kj::StringPtr compatDate,
     kj::ArrayPtr<const kj::String> compatFlags,
     CompatibilityFlags::Builder output,
-    Worker::ValidationErrorReporter& errorReporter,
+    ValidationErrorReporter& errorReporter,
     bool allowExperimentalFeatures,
     CompatibilityDateValidation dateValidation,
     kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags) {
