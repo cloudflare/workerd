@@ -199,7 +199,11 @@ await rejects(import('cjs6'), {
   message: /^Top-level await is not supported/,
 });
 
-// Cannot directly require an ESM with top-level await either.
+// Cannot directly require an ESM with top-level await either. This must hold
+// even after the module has already been fully evaluated by a prior import:
+// require()'s top-level-await rejection must not depend on evaluation order
+// (regression -- the already-evaluated early-return used to skip the check).
+await import('tla');
 throws(() => myRequire('tla'), {
   message: /^Top-level await is not supported/,
 });
