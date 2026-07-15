@@ -98,6 +98,7 @@ pub mod ffi {
         type HttpHeaders;
         fn new_http_headers(table: &HttpHeaderTable) -> KjOwn<HttpHeaders>;
         fn clone_shallow(this_: &HttpHeaders) -> KjOwn<HttpHeaders>;
+        fn clear_headers(this_: Pin<&mut HttpHeaders>);
         fn set_header(this_: Pin<&mut HttpHeaders>, id: BuiltinIndicesEnum, value: &str);
         unsafe fn get_header<'a>(
             this_: &'a HttpHeaders,
@@ -107,6 +108,7 @@ pub mod ffi {
             this_: &'a HttpHeaders,
             id: &HttpHeaderId,
         ) -> KjMaybe<&'a [u8]>;
+        unsafe fn get_header_by_name<'a>(this_: &'a HttpHeaders, name: &str) -> KjMaybe<&'a [u8]>;
     }
 
     // --- kj::HttpService ffi
@@ -272,6 +274,16 @@ impl HeadersRef<'_> {
 }
 
 impl<'a> HeadersRef<'a> {
+    /// Look up a header value by name, matching case-insensitively.
+    ///
+    /// If the same header name appears more than once, the first set value is returned (matching
+    /// [`get`](Self::get) / [`get_by_id`](Self::get_by_id)). Only headers that have been explicitly
+    /// set are considered; a header registered in the header table but never set returns `None`.
+    pub fn get_by_name(&self, name: &str) -> Option<&'a [u8]> {
+        // SAFETY: the returned value borrows header storage owned for `'a`.
+        unsafe { ffi::get_header_by_name(self.0, name).into() }
+    }
+
     /// The underlying `kj::HttpHeaders`, for passing to FFI functions that take a `const&`.
     #[must_use]
     pub fn as_ffi(self) -> &'a ffi::HttpHeaders {
@@ -305,6 +317,12 @@ impl<'a> Headers<'a> {
 
     pub fn set(&mut self, id: HeaderId, value: &str) {
         ffi::set_header(self.own.as_mut(), id, value);
+    }
+
+    /// Remove all headers, leaving the collection empty. This is a destructive operation; after
+    /// calling it, [`get`](HeadersRef::get) for any previously-set header returns `None`.
+    pub fn clear(&mut self) {
+        ffi::clear_headers(self.own.as_mut());
     }
 
     pub fn as_ref(&'a self) -> HeadersRef<'a> {

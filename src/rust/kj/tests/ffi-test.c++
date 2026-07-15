@@ -101,6 +101,81 @@ KJ_TEST("get header by id round-trip through Rust") {
   }
 }
 
+KJ_TEST("get header by name round-trip through Rust") {
+  kj::HttpHeaderTable::Builder builder;
+  auto customId = builder.add("X-Custom-Header");
+  auto table = builder.build();
+
+  kj::HttpHeaders headers(*table);
+  headers.setPtr(customId, "hello-from-cpp");
+  headers.setPtr(kj::HttpHeaderId::HOST, "example.com");
+
+  // Case-insensitive match on a custom header.
+  {
+    auto maybe = kj::rust::tests::get_header_value_via_name(headers, "x-custom-header");
+    KJ_IF_SOME(value, maybe) {
+      auto strValue = kj::StringPtr(reinterpret_cast<const char*>(value.data()), value.size());
+      KJ_EXPECT(strValue == "hello-from-cpp", strValue);
+    } else {
+      KJ_FAIL_EXPECT("expected Some for custom header, got None");
+    }
+  }
+
+  // Case-insensitive match on a builtin header.
+  {
+    auto maybe = kj::rust::tests::get_header_value_via_name(headers, "HOST");
+    KJ_IF_SOME(value, maybe) {
+      auto strValue = kj::StringPtr(reinterpret_cast<const char*>(value.data()), value.size());
+      KJ_EXPECT(strValue == "example.com", strValue);
+    } else {
+      KJ_FAIL_EXPECT("expected Some for HOST header, got None");
+    }
+  }
+
+  // Absent header returns None.
+  {
+    auto maybe = kj::rust::tests::get_header_value_via_name(headers, "X-Absent-Header");
+    KJ_EXPECT(maybe == kj::none, "expected None for absent header");
+  }
+}
+
+KJ_TEST("get header by name returns first value for duplicate names") {
+  kj::HttpHeaderTable table;
+  kj::HttpHeaders headers(table);
+
+  // Add the same (unindexed) header name twice; forEach visits both, and get_header_by_name must
+  // return the first value to match kj::HttpHeaders::get() semantics.
+  headers.addPtrPtr("X-Dup", "first");
+  headers.addPtrPtr("X-Dup", "second");
+
+  auto maybe = kj::rust::tests::get_header_value_via_name(headers, "x-dup");
+  KJ_IF_SOME(value, maybe) {
+    auto strValue = kj::StringPtr(reinterpret_cast<const char*>(value.data()), value.size());
+    KJ_EXPECT(strValue == "first", strValue);
+  } else {
+    KJ_FAIL_EXPECT("expected Some for duplicate header, got None");
+  }
+}
+
+KJ_TEST("clear headers round-trip through Rust") {
+  kj::HttpHeaderTable::Builder builder;
+  auto customId = builder.add("X-Custom-Header");
+  auto table = builder.build();
+
+  kj::HttpHeaders headers(*table);
+  headers.setPtr(customId, "hello-from-cpp");
+  headers.setPtr(kj::HttpHeaderId::HOST, "example.com");
+
+  // Sanity check: the header is present before clearing.
+  KJ_EXPECT(kj::rust::tests::get_header_value_via_id(headers, customId) != kj::none);
+
+  kj::rust::tests::clear_headers_via_rust(headers);
+
+  // After clearing, previously-set headers are gone.
+  KJ_EXPECT(kj::rust::tests::get_header_value_via_id(headers, customId) == kj::none);
+  KJ_EXPECT(kj::rust::tests::get_header_value_via_id(headers, kj::HttpHeaderId::HOST) == kj::none);
+}
+
 KJ_TEST("assert header ids present via ArrayPtr round-trip through Rust") {
   kj::HttpHeaderTable::Builder builder;
   auto custom1 = builder.add("X-First");
