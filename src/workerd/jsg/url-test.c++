@@ -1512,6 +1512,32 @@ KJ_TEST("Normalize path for comparison and cloning") {
   auto url9 = "file:///foo%2f%2F/bar"_url;
   url9 = url9.clone(Url::EquivalenceOption::NORMALIZE_PATH);
   KJ_ASSERT(url9.getHref() == "file:///foo%2F%2F/bar"_kj);
+
+  // Regression: an encoded slash that is preceded by some OTHER "%2X" escape
+  // (here "%20" = space) must still be preserved. Previously
+  // normalizePathEncoding only inspected the first "%2" occurrence and, finding
+  // it was not "%2f", decoded the whole segment -- turning the later %2F into a
+  // real '/' (i.e. "file:///a%20%2Fb" would become "file:///a%20/b").
+  auto url10 = "file:///a%20%2Fb"_url;
+  url10 = url10.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+  KJ_ASSERT(url10.getHref() == "file:///a%20%2Fb"_kj);
+
+  // Same class with a "%2E" ('.') decoy before the encoded slash.
+  auto url11 = "file:///p%2Eq%2Fr"_url;
+  url11 = url11.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+  KJ_ASSERT(url11.getHref() == "file:///p.q%2Fr"_kj);
+
+  // Multiple encoded slashes trailing a decoy: each must survive.
+  auto url12 = "file:///a%20%2Fb%2Fc"_url;
+  url12 = url12.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+  KJ_ASSERT(url12.getHref() == "file:///a%20%2Fb%2Fc"_kj);
+
+  // A pathname ending in a bare "%2" must not read past the end of the buffer.
+  // Normalization must be safe and idempotent (the exact canonical form of the
+  // dangling escape is up to the URL parser, so we only assert stability).
+  auto url13 = "file:///foo%2"_url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+  auto url13b = url13.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+  KJ_ASSERT(url13.getHref() == url13b.getHref());
 }
 
 // Regression test for AUTOVULN-CLOUDFLARE-WORKERD-387: deeply nested non-capturing groups in a
