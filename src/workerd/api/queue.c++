@@ -685,10 +685,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
 
   // 2. This is where we call into the worker's queue event handler
   auto runProm = context.run(
-      [this, entrypointName = entrypointName, &context, queueEvent = kj::addRef(*queueEventHolder),
+      [this, entrypointName = entrypointName, queueEvent = kj::addRef(*queueEventHolder),
           &metrics = incomingRequest->getMetrics(), versionInfo = kj::mv(versionInfo),
           props = kj::mv(props),
-          isDynamicDispatch](Worker::Lock& lock) mutable -> kj::Promise<void> {
+          isDynamicDispatch](Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 

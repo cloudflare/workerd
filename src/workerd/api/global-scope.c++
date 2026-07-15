@@ -620,9 +620,9 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
       auto& alarm = KJ_ASSERT_NONNULL(handler.alarm);
 
       return context
-          .run([exportedHandler, &context, timeout, retryCount, scheduledTime, &alarm,
-                   maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)](
-                   Worker::Lock& lock) mutable -> kj::Promise<WorkerInterface::AlarmResult> {
+          .run([exportedHandler, timeout, retryCount, scheduledTime, &alarm,
+                   maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)](Worker::Lock& lock,
+                   IoContext& context) mutable -> kj::Promise<WorkerInterface::AlarmResult> {
         jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
         // We want to limit alarm handler walltime to 15 minutes at most. If the timeout promise
         // completes we want to cancel the alarm handler. If the alarm handler promise completes

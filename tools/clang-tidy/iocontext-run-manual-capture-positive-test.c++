@@ -21,6 +21,14 @@ class IoContext {
   void run(Func&& func) {}
 };
 
+// A type with a non-trivial destructor. When captured, it makes the closure's
+// own destructor non-trivial, so the lambda argument to run() is wrapped in a
+// CXXBindTemporaryExpr in the AST. The matcher must still see through it.
+struct OwnsResource {
+  ~OwnsResource();
+  OwnsResource clone();
+};
+
 void captureByReference(IoContext& ctx) {
   // Captures `ctx` (an IoContext&) explicitly by reference.
   ctx.run([&ctx](Worker::Lock& lock) { (void)ctx; });
@@ -34,6 +42,14 @@ void captureByPointer(IoContext* ctx) {
 void captureByDefaultReference(IoContext& ctx) {
   // Default-capture-by-reference implicitly captures `ctx`.
   ctx.run([&](Worker::Lock& lock) { (void)ctx; });
+}
+
+void captureAlongsideNonTrivialClosure(IoContext& ctx, OwnsResource& resource) {
+  // The init-capture gives the closure a non-trivial destructor, wrapping the
+  // lambda argument in a CXXBindTemporaryExpr. The check must still flag the
+  // manual IoContext capture (regression test for ignoringImplicit vs
+  // ignoringParenImpCasts).
+  ctx.run([&ctx, held = resource.clone()](Worker::Lock& lock) { (void)ctx; });
 }
 
 }  // namespace workerd

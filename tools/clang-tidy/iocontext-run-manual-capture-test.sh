@@ -48,10 +48,10 @@ if [[ "${positive_output}" != *"${MESSAGE}"* ]]; then
   exit 1
 fi
 
-# Each of the three positive cases should be flagged.
+# Each of the four positive cases should be flagged.
 positive_count=$(printf '%s\n' "${positive_output}" | grep -c "${CHECK}")
-if [[ ${positive_count} -ne 3 ]]; then
-  printf '%s\n' "Expected 3 ${CHECK} diagnostics, got ${positive_count}." >&2
+if [[ ${positive_count} -ne 4 ]]; then
+  printf '%s\n' "Expected 4 ${CHECK} diagnostics, got ${positive_count}." >&2
   printf '%s\n' "${positive_output}" >&2
   exit 1
 fi

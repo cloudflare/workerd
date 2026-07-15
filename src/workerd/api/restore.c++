@@ -275,9 +275,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::run
   KJ_DEFER({ incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest)); });
 
   KJ_TRY {
-    auto channel = co_await ioctx.run(
-        [this, entrypointName = entrypointName, &ioctx, versionInfo = kj::mv(versionInfo),
-            props = kj::mv(props), isDynamicDispatch](Worker::Lock& lock) mutable {
+    auto channel =
+        co_await ioctx.run([this, entrypointName = entrypointName,
+                               versionInfo = kj::mv(versionInfo), props = kj::mv(props),
+                               isDynamicDispatch](Worker::Lock& lock, IoContext& ioctx) mutable {
       // Now that we're inside the IoContext, rehydrate any cap-table entries in the params (e.g.
       // in the edge runtime, turn dehydrated channel tokens into live channels). See
       // RestoreRehydrateCallback.
@@ -397,9 +398,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreRpcStubCustomEvent::run
   });
 
   KJ_TRY {
-    auto cap = co_await ioctx.run(
-        [this, entrypointName = entrypointName, &ioctx, versionInfo = kj::mv(versionInfo),
-            props = kj::mv(props), isDynamicDispatch](Worker::Lock& lock) mutable {
+    auto cap =
+        co_await ioctx.run([this, entrypointName = entrypointName,
+                               versionInfo = kj::mv(versionInfo), props = kj::mv(props),
+                               isDynamicDispatch](Worker::Lock& lock, IoContext& ioctx) mutable {
       // Now that we're inside the IoContext, rehydrate any cap-table entries in the params (e.g.
       // in the edge runtime, turn dehydrated channel tokens into live channels). See
       // RestoreRehydrateCallback.

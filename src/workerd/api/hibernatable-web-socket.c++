@@ -83,9 +83,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
 
   try {
     co_await context.run(
-        [entrypointName = entrypointName, &context, eventParameters = kj::mv(eventParameters),
+        [entrypointName = entrypointName, eventParameters = kj::mv(eventParameters),
             versionInfo = kj::mv(versionInfo), props = kj::mv(props),
-            isDynamicDispatch](Worker::Lock& lock) mutable {
+            isDynamicDispatch](Worker::Lock& lock, IoContext& context) mutable {
       KJ_SWITCH_ONEOF(eventParameters.eventType) {
         KJ_CASE_ONEOF(text, HibernatableSocketParams::Text) {
           return lock.getGlobalScope().sendHibernatableWebSocketMessage(context,
