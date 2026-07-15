@@ -462,4 +462,16 @@ void cleanupPerIsolateBootstrap(jsg::Lock& js, v8::Local<v8::Context> context) {
   }
 }
 
+kj::Maybe<jsg::JsValue> tryGetBootstrapExport(jsg::Lock& js, kj::StringPtr specifier) {
+  auto& state = getBootstrapState(js);
+  auto normalized = normalizeSpecifier(specifier);
+
+  // The cache is populated by require() calls during bootstrap. If the module
+  // was never required, it won't be in the cache and we return none.
+  KJ_IF_SOME(cached, state.cache.find(normalized)) {
+    return cached.getHandle(js);
+  }
+  return kj::none;
+}
+
 }  // namespace workerd
