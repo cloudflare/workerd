@@ -25,6 +25,12 @@ jsg::JsValue ProcessModule::getBuiltinModule(jsg::Lock& js, kj::String specifier
 
   if (FeatureFlags::get(js).getNewModuleRegistry()) {
     KJ_IF_SOME(mod, js.resolvePublicBuiltinModule(specifier)) {
+      // resolvePublicBuiltinModule returns the module namespace. For Node.js
+      // modules we return the default export (matching require() and the legacy
+      // registry path below); for other built-ins we return the namespace.
+      if (isNode) {
+        return mod.get(js, "default"_kj);
+      }
       return mod;
     }
     return js.undefined();
