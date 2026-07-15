@@ -279,8 +279,7 @@ class SyntheticModule final: public Module {
       exports[n++] = js.strIntern(exp);
     }
     return v8::Module::CreateSyntheticModule(js.v8Isolate, js.str(id().getHref()),
-        std::span<const v8::Local<v8::String>>(exports.data(), exports.size()),
-        evaluationSteps);
+        std::span<const v8::Local<v8::String>>(exports.data(), exports.size()), evaluationSteps);
   }
 
  private:
@@ -709,6 +708,17 @@ class IsolateModuleRegistry final {
       // to a degree. Just like in Node.js, however, such circular dependencies
       // can still be problematic depending on how they are used.
       if (status == v8::Module::kEvaluated || status == v8::Module::kEvaluating) {
+        // require() must reject a module that uses top-level await (matching
+        // Node.js require(esm), which throws ERR_REQUIRE_ASYNC_MODULE) even when
+        // the module has already been evaluated by a prior import. Without this
+        // check here -- before we return the cached namespace -- whether
+        // require() throws would depend on evaluation order (it would throw only
+        // if nothing had imported the module first). The module is already
+        // instantiated at this point, so IsGraphAsync() is valid to query.
+        if ((option & RequireOption::NO_TOP_LEVEL_AWAIT) == RequireOption::NO_TOP_LEVEL_AWAIT) {
+          JSG_REQUIRE(!module->IsGraphAsync(), Error,
+              "Top-level await is not supported in this context for module: ", id);
+        }
         return maybeUnwrapDefault(js, module, moduleDef, option);
       }
 
