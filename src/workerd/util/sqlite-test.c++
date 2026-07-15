@@ -104,6 +104,14 @@ void checkSql(SqliteDatabase& db) {
   }
 }
 
+class DefaultRegulatorForTest: public SqliteDatabase::Regulator {
+ public:
+  bool isAllowedName(kj::StringPtr name) const override {
+    return !name.startsWith("_cf_");
+  }
+};
+static constexpr DefaultRegulatorForTest DEFAULT_REGULATOR_FOR_TEST;
+
 KJ_TEST("SQLite backed by in-memory directory") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
@@ -1782,14 +1790,7 @@ KJ_TEST("SQLite Regulator blocks RENAME TO reserved name") {
   SqliteDatabase::Vfs vfs(*dir);
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 
-  // Regulator that blocks names starting with _cf_ (mirrors SqlStorageRegulator).
-  class CfRegulator: public SqliteDatabase::Regulator {
-   public:
-    bool isAllowedName(kj::StringPtr name) const override {
-      return !name.startsWith("_cf_");
-    }
-  };
-  static CfRegulator reg;
+  auto& reg = DEFAULT_REGULATOR_FOR_TEST;
 
   // Create a user table and populate it.
   db.run("CREATE TABLE user_data (key TEXT PRIMARY KEY, value BLOB)");
