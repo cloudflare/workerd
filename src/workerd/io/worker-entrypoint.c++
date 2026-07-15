@@ -439,10 +439,9 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
       });
 
       KJ_TRY {
-        api::DeferredProxy<void> deferredProxy =
-            co_await context.run([this, &context, method, url, &headers, &requestBody,
-                                     &wrappedResponse = *wrappedResponse,
-                                     entrypointName = entrypointName](Worker::Lock& lock) mutable {
+        api::DeferredProxy<void> deferredProxy = co_await context.run(
+            [this, method, url, &headers, &requestBody, &wrappedResponse = *wrappedResponse,
+                entrypointName = entrypointName](Worker::Lock& lock, IoContext& context) mutable {
           TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(&context));
           TRACE_EVENT(
               "workerd", "WorkerEntrypoint::request() run", PERFETTO_FLOW_FROM_POINTER(this));
@@ -674,9 +673,9 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
   return wrapWithCanceler(
       context
-          .run([this, &headers, &context, &connection, &response, entrypointName = entrypointName,
+          .run([this, &headers, &connection, &response, entrypointName = entrypointName,
                    versionInfo = kj::mv(versionInfo),
-                   host = kj::str(host)](Worker::Lock& lock) mutable {
+                   host = kj::str(host)](Worker::Lock& lock, IoContext& context) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
@@ -803,10 +802,10 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
   incomingRequest->delivered();
 
   // Scheduled handlers run entirely in waitUntil() tasks.
-  context.addWaitUntil(
-      context.run([scheduledTime, cron, entrypointName = entrypointName,
-                      versionInfo = kj::mv(versionInfo), props = kj::mv(props), &context,
-                      &metrics = incomingRequest->getMetrics()](Worker::Lock& lock) mutable {
+  context.addWaitUntil(context.run(
+      [scheduledTime, cron, entrypointName = entrypointName, versionInfo = kj::mv(versionInfo),
+          props = kj::mv(props), &metrics = incomingRequest->getMetrics()](
+          Worker::Lock& lock, IoContext& context) mutable {
     TRACE_EVENT("workerd", "WorkerEntrypoint::runScheduled() run");
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
@@ -880,8 +879,8 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
       try {
         auto result =
             co_await context.run([scheduledTime, retryCount, entrypointName = entrypointName,
-                                     versionInfo = kj::mv(versionInfo), props = kj::mv(props),
-                                     &context](Worker::Lock& lock) mutable {
+                                     versionInfo = kj::mv(versionInfo), props = kj::mv(props)](
+                                     Worker::Lock& lock, IoContext& context) mutable {
           jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
           jsg::AsyncContextFrame::StorageScope userTraceScope =
               context.makeUserAsyncTraceScope(lock);
@@ -977,8 +976,8 @@ kj::Promise<bool> WorkerEntrypoint::test() {
 
   context.addWaitUntil(
       context.run([entrypointName = entrypointName, versionInfo = kj::mv(versionInfo),
-                      props = kj::mv(props), &context, &metrics = incomingRequest->getMetrics()](
-                      Worker::Lock& lock) mutable -> kj::Promise<void> {
+                      props = kj::mv(props), &metrics = incomingRequest->getMetrics()](
+                      Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::test() run");
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);

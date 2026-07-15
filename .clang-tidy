@@ -122,7 +122,7 @@ CustomChecks:
           hasName("run"),
           ofClass(cxxRecordDecl(hasName("::workerd::IoContext")))
         )),
-        hasArgument(0, ignoringParenImpCasts(lambdaExpr(
+        hasArgument(0, ignoringImplicit(lambdaExpr(
           hasAnyCapture(lambdaCapture(capturesVar(varDecl(hasType(qualType(anyOf(
             hasDeclaration(cxxRecordDecl(hasName("::workerd::IoContext"))),
             references(cxxRecordDecl(hasName("::workerd::IoContext"))),

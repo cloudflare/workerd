@@ -717,9 +717,9 @@ void sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest> incomingReq
   auto entrypointName = mapCopyString(entrypointNamePtr);
   context.addWaitUntil(
       context
-          .run([&context, nonEmptyTraces = kj::mv(nonEmptyTraces),
-                   entrypointName = kj::mv(entrypointName), versionInfo = kj::mv(versionInfo),
-                   props = kj::mv(props), isDynamicDispatch](Worker::Lock& lock) mutable {
+          .run([nonEmptyTraces = kj::mv(nonEmptyTraces), entrypointName = kj::mv(entrypointName),
+                   versionInfo = kj::mv(versionInfo), props = kj::mv(props),
+                   isDynamicDispatch](Worker::Lock& lock, IoContext& context) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 

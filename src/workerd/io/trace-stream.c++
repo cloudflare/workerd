@@ -703,9 +703,10 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     // exception handler.
     auto sharedResults = kj::rc<SharedResults>(reportContext.initResults());
 
-    auto promise = ioContext.run([this, &ioContext, sharedResults = sharedResults.addRef(),
-                                     reportContext, ownReportContext = ownReportContext->addRef()](
-                                     Worker::Lock& lock) mutable -> kj::Promise<void> {
+    auto promise =
+        ioContext.run([this, sharedResults = sharedResults.addRef(), reportContext,
+                          ownReportContext = ownReportContext->addRef()](
+                          Worker::Lock& lock, IoContext& ioContext) mutable -> kj::Promise<void> {
       auto params = reportContext.getParams();
       KJ_ASSERT(params.hasEvents(), "Events are required.");
       auto eventReaders = params.getEvents();
