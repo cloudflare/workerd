@@ -6,10 +6,11 @@
 #include "setup.h"
 #include "util.h"
 
-#include <span>
 #include <v8-wasm.h>
 
 #include <kj/mutex.h>
+
+#include <span>
 
 namespace workerd::jsg {
 

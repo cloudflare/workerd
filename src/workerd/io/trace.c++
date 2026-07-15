@@ -793,8 +793,8 @@ void ErrorInfo::copyTo(rpc::Trace::ErrorInfo::Builder builder) const {
 }
 
 ErrorInfo ErrorInfo::clone() const {
-  return ErrorInfo(kj::str(name), kj::str(message),
-      stack.map([](const kj::String& s) { return kj::str(s); }));
+  return ErrorInfo(
+      kj::str(name), kj::str(message), stack.map([](const kj::String& s) { return kj::str(s); }));
 }
 
 LogErrorInfo cloneLogErrorInfo(const LogErrorInfo& src) {
@@ -855,14 +855,14 @@ Log::Log(rpc::Trace::Log::Reader reader)
     auto slots = kj::heapArray<kj::Maybe<ErrorInfo>>(listReader.size());
     for (auto i: kj::zeroTo(listReader.size())) {
       auto slotReader = listReader[i];
-        switch (slotReader.which()) {
-          case rpc::Trace::ErrorInfoSlot::INFO:
-            slots[i] = tracing::ErrorInfo(slotReader.getInfo());
-            break;
-          case rpc::Trace::ErrorInfoSlot::NONE:
-            // slot stays kj::none
-            break;
-        }
+      switch (slotReader.which()) {
+        case rpc::Trace::ErrorInfoSlot::INFO:
+          slots[i] = tracing::ErrorInfo(slotReader.getInfo());
+          break;
+        case rpc::Trace::ErrorInfoSlot::NONE:
+          // slot stays kj::none
+          break;
+      }
     }
     errorInfo = kj::mv(slots);
   }

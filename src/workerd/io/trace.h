@@ -647,10 +647,8 @@ LogErrorInfo cloneLogErrorInfo(const LogErrorInfo& src);
 
 // Describes a log event
 struct Log final {
-  explicit Log(kj::Date timestamp,
-      LogLevel logLevel,
-      kj::String message,
-      LogErrorInfo errorInfo = kj::none);
+  explicit Log(
+      kj::Date timestamp, LogLevel logLevel, kj::String message, LogErrorInfo errorInfo = kj::none);
   Log(rpc::Trace::Log::Reader reader);
   Log(Log&&) noexcept = default;
   KJ_DISALLOW_COPY(Log);
