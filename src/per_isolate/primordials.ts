@@ -279,6 +279,10 @@ const MathMin = Math.min;
 const NumberIsFinite = Number.isFinite;
 const NumberIsNaN = Number.isNaN;
 
+// JSON
+const JSONParse = JSON.parse;
+const JSONStringify = JSON.stringify;
+
 // Helper: capture a spec-mandated prototype accessor getter, with a
 // validation guard instead of non-null assertions. These accessors are
 // guaranteed by the ECMAScript spec — the guard is a diagnostic safety
@@ -812,6 +816,10 @@ module.exports = ObjectFreeze({
   SymbolAsyncIterator,
   SymbolIterator,
   SymbolToStringTag,
+
+  // JSON
+  JSONParse,
+  JSONStringify,
 
   // EventTarget
   EventTargetAddEventListener,

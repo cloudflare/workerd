@@ -8,6 +8,8 @@
 #include <workerd/api/streams/readable-source.h>
 #include <workerd/api/url-standard.h>
 #include <workerd/api/url.h>
+#include <workerd/io/per-isolate-bootstrap.h>
+#include <workerd/jsg/jsg.h>
 
 #include <kj/debug.h>
 
@@ -26,7 +28,7 @@ constexpr kj::StringPtr kBodyUsedError =
 kj::Array<const kj::byte> stringToBytes(kj::String data) {
   size_t len = data.size();
   auto chars = data.releaseArray();
-  return chars.first(len).asBytes().asConst().attach(kj::mv(chars));
+  return chars.first(len).asBytes().attach(kj::mv(chars));
 }
 
 // Copy the bytes viewed by a JsBufferSource into an owned array. Copying (rather than retaining the
@@ -35,8 +37,117 @@ kj::Array<const kj::byte> stringToBytes(kj::String data) {
 // the Fetch requirement to copy the input buffer.
 kj::Array<const kj::byte> bufferSourceToBytes(
     jsg::Lock& js, jsg::JsRef<jsg::JsBufferSource>& view) {
-  auto copy = kj::heapArray<kj::byte>(view.getHandle(js).asArrayPtr());
-  return copy.asPtr().asConst().attach(kj::mv(copy));
+  return kj::heapArray<kj::byte>(view.getHandle(js).asArrayPtr());
+}
+
+template <jsg::IsJsValue... Args>
+jsg::JsValue dispatchCall(jsg::Lock& js, kj::StringPtr name, Args... args) {
+  // Will surface as an "Internal error" to user code. That's intended.
+  auto cppExports = KJ_REQUIRE_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+  auto cppExportsObj = KJ_REQUIRE_NONNULL(cppExports.tryCast<jsg::JsObject>());
+  auto func = KJ_REQUIRE_NONNULL(cppExportsObj.get(js, name).tryCast<jsg::JsFunction>());
+  return func.call(js, kj::fwd<Args>(args)...);
+}
+
+bool getReadableStreamIsDisturbed(jsg::Lock& js, jsg::JsObject obj) {
+  return dispatchCall(js, "getReadableStreamIsDisturbed", obj).isTrue();
+}
+
+bool getReadableStreamIsLocked(jsg::Lock& js, jsg::JsObject obj) {
+  return dispatchCall(js, "isReadableStreamLocked", obj).isTrue();
+}
+
+jsg::Promise<void> readableStreamCancel(
+    jsg::Lock& js, jsg::JsObject obj, jsg::Optional<jsg::JsValue>& reason) {
+  jsg::JsValue result =
+      dispatchCall(js, "readableStreamCancel", obj, reason.orDefault(js.undefined()));
+  // The result must be a promise
+  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(result.tryCast<jsg::JsPromise>());
+  return js.toVoidPromise(promise);
+}
+
+void setReadableStreamPendingClosure(jsg::Lock& js, jsg::JsObject obj) {
+  // The result is undefined/ignored
+  auto res KJ_UNUSED = dispatchCall(js, "setReadableStreamPendingClosure", obj);
+}
+
+jsg::Promise<void> getReadableStreamOnEof(jsg::Lock& js, jsg::JsObject obj) {
+  jsg::JsValue result = dispatchCall(js, "getReadableStreamOnEof", obj);
+  // The result must be a promise
+  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(result.tryCast<jsg::JsPromise>());
+  return js.toVoidPromise(promise);
+}
+
+kj::Maybe<uint64_t> getReadableStreamExpectedLength(jsg::Lock& js, jsg::JsObject obj) {
+  jsg::JsValue result = dispatchCall(js, "getReadableStreamExpectedLength", obj);
+  KJ_IF_SOME(bi, result.tryCast<jsg::JsBigInt>()) {
+    KJ_IF_SOME(len, bi.tryToUint64(js)) {
+      return len;
+    }
+  }
+  return kj::none;
+}
+
+jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> getReadableStreamArrayBuffer(
+    jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
+  jsg::JsValue result =
+      dispatchCall(js, "consumeReadableStreamAsArrayBuffer", obj, js.bigInt(limit));
+  // The result must be a promise for an Arraybuffer
+  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(result.tryCast<jsg::JsPromise>());
+  return js.toPromise(promise).then(js, [](jsg::Lock& js, jsg::Value ref) {
+    auto value = jsg::JsValue(ref.getHandle(js));
+    // If it throws, it manifests as an internal error. That's intended.
+    auto ab = KJ_REQUIRE_NONNULL(value.tryCast<jsg::JsArrayBuffer>());
+    return ab.addRef(js);
+  });
+}
+
+jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> getReadableStreamBytes(
+    jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
+  jsg::JsValue result =
+      dispatchCall(js, "consumeReadableStreamAsUint8Array", obj, js.bigInt(limit));
+  // The result must be a promise for an Uint8Array
+  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(result.tryCast<jsg::JsPromise>());
+  return js.toPromise(promise).then(js, [](jsg::Lock& js, jsg::Value ref) {
+    auto value = jsg::JsValue(ref.getHandle(js));
+    // If it throws, it manifests as an internal error. That's intended.
+    auto ab = KJ_REQUIRE_NONNULL(value.tryCast<jsg::JsUint8Array>());
+    return ab.addRef(js);
+  });
+}
+
+jsg::Promise<kj::String> getReadableStreamText(jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
+  jsg::JsValue result = dispatchCall(js, "consumeReadableStreamAsText", obj, js.bigInt(limit));
+  // The result must be a promise for a String
+  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(result.tryCast<jsg::JsPromise>());
+  return js.toPromise(promise).then(js, [](jsg::Lock& js, jsg::Value ref) {
+    auto value = jsg::JsValue(ref.getHandle(js));
+    return value.toString(js);
+  });
+}
+
+jsg::Promise<jsg::JsRef<jsg::JsValue>> getReadableStreamJson(
+    jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
+  jsg::JsValue result = dispatchCall(js, "consumeReadableStreamAsText", obj, js.bigInt(limit));
+  // The result must be a promise for a JS value
+  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(result.tryCast<jsg::JsPromise>());
+  return js.toPromise(promise).then(
+      js, [](jsg::Lock& js, jsg::Value ref) { return jsg::JsValue(ref.getHandle(js)).addRef(js); });
+}
+
+jsg::Promise<jsg::Ref<Blob>> getReadableStreamBlob(
+    jsg::Lock& js, jsg::JsObject obj, uint64_t limit, kj::String contentType) {
+  jsg::JsValue result =
+      dispatchCall(js, "consumeReadableStreamAsArrayBuffer", obj, js.bigInt(limit));
+  // The result must be a promise for an Arraybuffer
+  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(result.tryCast<jsg::JsPromise>());
+  return js.toPromise(promise).then(
+      js, [contentType = kj::mv(contentType)](jsg::Lock& js, jsg::Value ref) mutable {
+    auto value = jsg::JsValue(ref.getHandle(js));
+    // If it throws, it manifests as an internal error. That's intended.
+    auto ab = KJ_REQUIRE_NONNULL(value.tryCast<jsg::JsArrayBuffer>());
+    return js.alloc<Blob>(js, jsg::JsBufferSource(ab), kj::mv(contentType));
+  });
 }
 }  // namespace
 
@@ -71,9 +182,10 @@ JsReadableStream::JsReadableStream(jsg::Ref<ReadableStream> stream)
         .maybeOwnedBuffer = kj::none,
       }) {}
 
-JsReadableStream::JsReadableStream(jsg::Lock&, jsg::JsRef<jsg::JsObject>) {
-  KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
-}
+JsReadableStream::JsReadableStream(jsg::Lock&, jsg::JsRef<jsg::JsObject> obj)
+    : impl(Impl{
+        .stream = StreamImpl(kj::mv(obj)),
+      }) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock& js, kj::Array<const kj::byte> data)
     : impl(bufferBackedImpl(js, kj::rc<Buffer>(kj::mv(data)))) {}
@@ -138,7 +250,7 @@ bool JsReadableStream::isDisturbed(jsg::Lock& js) {
         return stream->isDisturbed();
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+        return getReadableStreamIsDisturbed(js, obj.getHandle(js));
       }
     }
     KJ_UNREACHABLE;
@@ -153,7 +265,7 @@ bool JsReadableStream::isLocked(jsg::Lock& js) {
         return stream->isLocked();
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+        return getReadableStreamIsLocked(js, obj.getHandle(js));
       }
     }
     KJ_UNREACHABLE;
@@ -168,7 +280,9 @@ jsg::Promise<void> JsReadableStream::cancel(jsg::Lock& js, jsg::Optional<jsg::Js
         return stream->cancel(js, kj::mv(reason));
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+        // TODO(streams-ts): This bypasses the locked check. We need a variant
+        // that rejects if the stream is locked.
+        return readableStreamCancel(js, obj.getHandle(js), reason);
       }
     }
     KJ_UNREACHABLE;
@@ -187,7 +301,7 @@ jsg::Promise<void> JsReadableStream::forceCancel(
         return stream->getController().cancel(js, kj::mv(reason));
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+        return readableStreamCancel(js, obj.getHandle(js), reason);
       }
     }
     KJ_UNREACHABLE;
@@ -203,7 +317,7 @@ void JsReadableStream::setPendingClosure(jsg::Lock& js) {
         stream->getController().setPendingClosure();
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+        setReadableStreamPendingClosure(js, obj.getHandle(js));
       }
     }
   }
@@ -216,7 +330,7 @@ jsg::Promise<void> JsReadableStream::onEof(jsg::Lock& js) {
       return stream->onEof(js);
     }
     KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-      KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+      return getReadableStreamOnEof(js, obj.getHandle(js));
     }
   }
   KJ_UNREACHABLE;
@@ -229,7 +343,7 @@ kj::Maybe<uint64_t> JsReadableStream::tryGetLength(jsg::Lock& js, StreamEncoding
         return stream->tryGetLength(encoding);
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+        return getReadableStreamExpectedLength(js, obj.getHandle(js));
       }
     }
     KJ_UNREACHABLE;
@@ -248,7 +362,7 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> JsReadableStream::arrayBuffer(
         return stream->getController().readAllBytes(js, limit);
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+        return getReadableStreamArrayBuffer(js, obj.getHandle(js), limit);
       }
     }
     KJ_UNREACHABLE;
@@ -268,7 +382,7 @@ jsg::Promise<kj::String> JsReadableStream::text(jsg::Lock& js, uint64_t limit) {
         return stream->getController().readAllText(js, limit);
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+        return getReadableStreamText(js, obj.getHandle(js), limit);
       }
     }
     KJ_UNREACHABLE;
@@ -292,7 +406,7 @@ jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> JsReadableStream::bytes(jsg::Lock& j
         });
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+        return getReadableStreamBytes(js, obj.getHandle(js), limit);
       }
     }
     KJ_UNREACHABLE;
@@ -316,7 +430,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> JsReadableStream::json(jsg::Lock& js, uin
         });
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+        return getReadableStreamJson(js, obj.getHandle(js), limit);
       }
     }
     KJ_UNREACHABLE;
@@ -346,7 +460,7 @@ jsg::Promise<jsg::Ref<Blob>> JsReadableStream::blob(
         });
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+        return getReadableStreamBlob(js, obj.getHandle(js), limit, kj::mv(contentType));
       }
     }
     KJ_UNREACHABLE;
@@ -355,6 +469,12 @@ jsg::Promise<jsg::Ref<Blob>> JsReadableStream::blob(
   // A null stream yields an empty Blob with the given Content-Type.
   return js.resolvedPromise(js.alloc<Blob>(kj::mv(contentType)));
 }
+
+// pumpTo and pipeTo/pipeThrough are similar but serve different purposes.
+// pumpTo is a low-level primitive that pumps bytes from a ReadableStream
+// to a WritableStreamSink, always internal, and potentially supporting
+// deferred proxying. pipeTo and pipeThrough are higher-level operations that
+// pump data from a ReadableStream to a WritableStream.
 
 kj::Promise<DeferredProxy<void>> JsReadableStream::pumpTo(
     jsg::Lock& js, kj::Own<WritableStreamSink> sink, EndStream end) {

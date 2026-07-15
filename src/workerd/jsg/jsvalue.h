@@ -717,6 +717,10 @@ class JsBigInt final: public JsBase<v8::BigInt, JsBigInt> {
   // and schedules an exception on the isolate.
   kj::Maybe<uint64_t> toUint64(Lock& js) const KJ_WARN_UNUSED_RESULT;
 
+  // If the BigInt value does not fit in int64_t, returns kj::none.
+  // Does not schedule an exception on the isolate.
+  kj::Maybe<uint64_t> tryToUint64(Lock& js) const KJ_WARN_UNUSED_RESULT;
+
   using JsBase<v8::BigInt, JsBigInt>::JsBase;
 };
 

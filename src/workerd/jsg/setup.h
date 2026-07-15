@@ -877,6 +877,10 @@ class Isolate: public IsolateBase {
       return jsgIsolate.getWrapperByContext(*this)->template unwrap<jsg::Promise<jsg::Value>>(
           *this, v8Isolate->GetCurrentContext(), promise, jsg::TypeErrorContext::other());
     }
+    jsg::Promise<void> toVoidPromise(v8::Local<v8::Value> promise) override {
+      return jsgIsolate.getWrapperByContext(*this)->template unwrap<jsg::Promise<void>>(
+          *this, v8Isolate->GetCurrentContext(), promise, jsg::TypeErrorContext::other());
+    }
 
     template <typename T, typename... Args>
     JsContext<T> newContextWithWrapper(

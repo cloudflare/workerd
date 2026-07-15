@@ -261,6 +261,16 @@ kj::Maybe<uint64_t> JsBigInt::toUint64(Lock& js) const {
   return value;
 }
 
+kj::Maybe<uint64_t> JsBigInt::tryToUint64(Lock& js) const {
+  KJ_ASSERT(!inner.IsEmpty());
+  bool lossless = false;
+  uint64_t value = inner->Uint64Value(&lossless);
+  if (!lossless) {
+    return kj::none;
+  }
+  return value;
+}
+
 kj::Maybe<double> JsNumber::value(Lock& js) const {
   KJ_ASSERT(!inner.IsEmpty());
   double value;
