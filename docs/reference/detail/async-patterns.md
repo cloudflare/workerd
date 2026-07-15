@@ -57,7 +57,7 @@ Use one of these patterns:
 | JSG resource | `[self = JSG_THIS]` |
 | `kj::Refcounted` | `[self = addRefToThis()]` |
 | IoContext, in JS-lock scope (`Worker::Lock&`/`jsg::Lock&` available) | `auto& context = IoContext::current();` inside the lambda (but see caveat below) |
-| IoContext, outside JS-lock scope | `[weakRef = context.getWeakRef()]` + `KJ_ASSERT_NONNULL(weakRef->tryGet())` (alive by invariant) or `weakRef->runIfAlive(...)` (may be gone) |
+| IoContext, outside JS-lock scope | `[weakRef = context.getWeakRef()]` + `KJ_ASSERT_NONNULL(weakRef)` (alive by invariant) or `KJ_IF_SOME(ctx, weakRef) { ... }` (may be gone) |
 | Chain feeds opaque wrapper (`oomCanceler.wrap`, `gate.lockWhile`, `.fork()`) | IILE coroutine — pass `this`/`&context` as a coroutine parameter, not a lambda capture |
 | Chain is `co_await`ed / `.wait()`ed / joined from a local container | already safe; no change |
 
@@ -75,14 +75,19 @@ possibility. When it can happen, capture the originating context's
 `getWeakRef()` instead (or use `IoContext::addFunctor`) so the continuation
 either runs under the correct context or fails loudly.
 
-**IoContext WeakRef.** `IoContext::WeakRef` (returned by `context.getWeakRef()`)
-is a refcounted, non-owning handle to an `IoContext`. The WeakRef itself is
-safe to hold past the IoContext's destruction; `tryGet()` returns a `Maybe<IoContext&>`
-that becomes `kj::none` once the context is gone, and `runIfAlive(func)` runs
-`func` with the live `IoContext&` and returns whether it did. Use the WeakRef
-pattern any time a continuation may outlive its originating context, or when
-the continuation runs outside a JS-lock scope where `IoContext::current()` may
-not be the right context (or may not exist at all).
+**IoContext WeakRc.** `context.getWeakRef()` returns a `kj::WeakRc<IoContext>`,
+a non-owning handle to an `IoContext`. The `WeakRc` itself is safe to hold past
+the IoContext's destruction. Upgrade it with `KJ_IF_SOME(ctx, weakRef) { ... }`
+(or `KJ_ASSERT_NONNULL`/`JSG_REQUIRE_NONNULL`), which binds `ctx` to a transient
+strong `kj::Rc<IoContext>` while the block runs and yields `kj::none` once the
+context is gone. Test liveness alone with `weakRef != nullptr`, or get a bare
+`Maybe<IoContext&>` via `weakRef.tryGet()`; make additional weak handles with
+`weakRef.addRef()`. The upgraded `Rc` is only safe while it stays local to the
+continuation — do not capture or store it, or you reintroduce the refcount cycle
+warned about above. Use the WeakRc pattern any time a continuation may outlive
+its originating context, or when the continuation runs outside a JS-lock scope
+where `IoContext::current()` may not be the right context (or may not exist at
+all).
 
 For invariants the analyzer fundamentally can't see (capnp `thisCap()`,
 fiber-blocked stacks, constructor-time `*this`, `CantOutliveIncomingRequest`-style

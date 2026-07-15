@@ -701,8 +701,8 @@ IoContext::~IoContext() noexcept(false) {
     pe.maybeContext = kj::none;
   }
 
-  // Kill the sentinel so that no weak references can refer to this IoContext anymore.
-  selfRef->invalidate();
+  // Note: Any outstanding kj::WeakRc<IoContext> references are automatically invalidated as the
+  // last strong reference is dropped (before this destructor runs), so there's nothing to do here.
 }
 
 IoContext::PendingEvent::~PendingEvent() noexcept(false) {
@@ -894,16 +894,20 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
   // to be removed when the promise completes.
   TimeoutTime timeoutTimesKey{when, timeoutTimesTiebreakerCounter++};
   timeoutTimes.insert(timeoutTimesKey, kj::mv(paf.fulfiller));
-  auto deferredTimeoutTimeRemoval = kj::defer([this, &context, timeoutTimesKey]() {
+  auto deferredTimeoutTimeRemoval =
+      kj::defer([this, weakContext = context.getWeakRef(), timeoutTimesKey]() {
     // If the promise is being destroyed due to IoContext teardown then IoChannelFactory may
     // no longer be available, but we can just skip starting a new timer in that case as it'd be
-    // canceled anyway. Similarly we should skip rescheduling if the context has been aborted since
-    // there's no way the events can run anyway (and we'll cause trouble if `cancelAll()` is being
-    // called in ~IoContext_IncomingRequest).
-    if (context.selfRef->isValid() && context.abortException == kj::none) {
-      bool isNext = timeoutTimes.begin()->key == timeoutTimesKey;
-      timeoutTimes.erase(timeoutTimesKey);
-      if (isNext) resetTimerTask(context.getIoChannelFactory().getTimer());
+    // canceled anyway. The weak reference upgrade fails once the IoContext is being torn down.
+    // Similarly we should skip rescheduling if the context has been aborted since there's no way
+    // the events can run anyway (and we'll cause trouble if `cancelAll()` is being called in
+    // ~IoContext_IncomingRequest).
+    KJ_IF_SOME(context, weakContext) {
+      if (context->abortException == kj::none) {
+        bool isNext = timeoutTimes.begin()->key == timeoutTimesKey;
+        timeoutTimes.erase(timeoutTimesKey);
+        if (isNext) resetTimerTask(context->getIoChannelFactory().getTimer());
+      }
     }
   });
 
@@ -1525,11 +1529,11 @@ kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> IoContext::getSelfTokenFa
   return kj::none;
 }
 
-auto IoContext::tryGetWeakRefForCurrent() -> kj::Maybe<kj::Own<WeakRef>> {
+kj::WeakRc<IoContext> IoContext::tryGetWeakRefForCurrent() {
   KJ_IF_SOME(ioContext, tryCurrent()) {
     return ioContext.getWeakRef();
   } else {
-    return kj::none;
+    return nullptr;
   }
 }
 
@@ -1617,9 +1621,9 @@ void IoContext::requireCurrentOrThrowJs() {
   }
 }
 
-void IoContext::requireCurrentOrThrowJs(WeakRef& weak) {
-  KJ_IF_SOME(ctx, weak.tryGet()) {
-    if (ctx.isCurrent()) {
+void IoContext::requireCurrentOrThrowJs(kj::WeakRc<IoContext>& weak) {
+  KJ_IF_SOME(ctx, weak) {
+    if (ctx->isCurrent()) {
       return;
     }
   }
