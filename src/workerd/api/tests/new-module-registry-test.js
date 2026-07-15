@@ -494,6 +494,22 @@ export const processRedirectAcrossResolutionRoutes = {
   },
 };
 
+// Regression test: the node:process redirect ignores any query/fragment, just
+// like every other built-in (which is resolved with IGNORE_SEARCH |
+// IGNORE_FRAGMENTS). maybeRedirectNodeProcess previously matched the full href
+// exactly, so `import('node:process?foo')` failed with
+// "Module not found: node:process?foo" while e.g. `import('node:assert?foo')`
+// resolved. See maybeRedirectNodeProcess in jsg/modules-new.c++.
+export const processRedirectIgnoresQueryAndFragment = {
+  async test() {
+    const withQuery = await import('node:process?foo=1');
+    const withFragment = await import('node:process#bar');
+    strictEqual(typeof withQuery.default.nextTick, 'function');
+    strictEqual(withQuery.default, processStatic);
+    strictEqual(withFragment.default, processStatic);
+  },
+};
+
 // TODO(now): Tests
 // * [x] Include tests for all known module types
 //   * [x] ESM

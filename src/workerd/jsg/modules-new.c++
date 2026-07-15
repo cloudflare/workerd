@@ -29,8 +29,13 @@ kj::Maybe<const Module&> checkModule(const ResolveContext& context, const Module
 
 // If the specifier is "node:process", returns the appropriate internal module
 // URL based on the enable_nodejs_process_v2 flag. Otherwise returns kj::none.
-kj::Maybe<const Url&> maybeRedirectNodeProcess(Lock& js, kj::ArrayPtr<const char> spec) {
-  if (spec == "node:process"_kjb.asChars()) {
+// Any query/fragment is ignored so that e.g. "node:process?foo" and
+// "node:process#bar" redirect the same as "node:process", matching how all
+// other built-ins are resolved (see IGNORE_SEARCH | IGNORE_FRAGMENTS below).
+kj::Maybe<const Url&> maybeRedirectNodeProcess(Lock& js, const Url& spec) {
+  auto normalized =
+      spec.clone(Url::EquivalenceOption::IGNORE_SEARCH | Url::EquivalenceOption::IGNORE_FRAGMENTS);
+  if (normalized.getHref() == "node:process"_kjb.asChars()) {
     static const auto publicProcess = "node-internal:public_process"_url;
     static const auto legacyProcess = "node-internal:legacy_process"_url;
     return isNodeJsProcessV2Enabled(js) ? publicProcess : legacyProcess;
@@ -458,7 +463,7 @@ class IsolateModuleRegistry final {
     // apply that redirect here, as a last resort, so that a worker bundle module
     // that intentionally shadows "node:process" (exactly as it could for any other
     // built-in) gets first crack at resolving it above.
-    KJ_IF_SOME(processUrl, maybeRedirectNodeProcess(js, context.normalizedSpecifier.getHref())) {
+    KJ_IF_SOME(processUrl, maybeRedirectNodeProcess(js, context.normalizedSpecifier)) {
       auto processSpec = kj::str(processUrl.getHref());
       ResolveContext processContext = {
         .type = ResolveContext::Type::BUILTIN_ONLY,
@@ -588,7 +593,7 @@ class IsolateModuleRegistry final {
       // apply that redirect here, as a last resort, so that a worker bundle module
       // that intentionally shadows "node:process" gets first crack at resolving it
       // above.
-      KJ_IF_SOME(processUrl, maybeRedirectNodeProcess(js, normalizedSpecifier.getHref())) {
+      KJ_IF_SOME(processUrl, maybeRedirectNodeProcess(js, normalizedSpecifier)) {
         auto processSpec = kj::str(processUrl.getHref());
         ResolveContext processContext = {
           .type = ResolveContext::Type::BUILTIN_ONLY,
@@ -794,7 +799,7 @@ class IsolateModuleRegistry final {
       // apply that redirect here, as a last resort, so that a worker bundle module
       // that intentionally shadows "node:process" gets first crack at resolving it
       // above.
-      KJ_IF_SOME(processUrl, maybeRedirectNodeProcess(js, context.normalizedSpecifier.getHref())) {
+      KJ_IF_SOME(processUrl, maybeRedirectNodeProcess(js, context.normalizedSpecifier)) {
         ResolveContext newContext{
           .type = ResolveContext::Type::BUILTIN_ONLY,
           .source = context.source,
