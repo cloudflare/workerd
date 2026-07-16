@@ -234,36 +234,39 @@ class EncodedAsyncOutputStream final: public WritableSinkImpl {
 // A wrapper around a WritableSink that registers pending events with an IoContext.
 class IoContextWritableSinkWrapper: public WritableSinkWrapper {
  public:
-  IoContextWritableSinkWrapper(IoContext& ioContext, kj::Own<WritableSink> inner)
+  IoContextWritableSinkWrapper(kj::WeakRc<IoContext> ioContext, kj::Own<WritableSink> inner)
       : WritableSinkWrapper(kj::mv(inner)),
-        ioContext(ioContext) {}
+        ioContext(kj::mv(ioContext)) {}
 
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
-    auto pending = ioContext.registerPendingEvent();
-    KJ_IF_SOME(p, ioContext.waitForOutputLocksIfNecessary()) {
+    auto& ctx = ioContext.assertLive();
+    auto pending = ctx.registerPendingEvent();
+    KJ_IF_SOME(p, ctx.waitForOutputLocksIfNecessary()) {
       co_await p;
     }
     co_await getInner().write(buffer);
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-    auto pending = ioContext.registerPendingEvent();
-    KJ_IF_SOME(p, ioContext.waitForOutputLocksIfNecessary()) {
+    auto& ctx = ioContext.assertLive();
+    auto pending = ctx.registerPendingEvent();
+    KJ_IF_SOME(p, ctx.waitForOutputLocksIfNecessary()) {
       co_await p;
     }
     co_await getInner().write(pieces);
   }
 
   kj::Promise<void> end() override {
-    auto pending = ioContext.registerPendingEvent();
-    KJ_IF_SOME(p, ioContext.waitForOutputLocksIfNecessary()) {
+    auto& ctx = ioContext.assertLive();
+    auto pending = ctx.registerPendingEvent();
+    KJ_IF_SOME(p, ctx.waitForOutputLocksIfNecessary()) {
       co_await p;
     }
     co_await getInner().end();
   }
 
  private:
-  IoContext& ioContext;
+  kj::WeakRc<IoContext> ioContext;
 };
 }  // namespace
 
@@ -289,8 +292,8 @@ kj::Own<WritableSink> newEncodedWritableSink(
 }
 
 kj::Own<WritableSink> newIoContextWrappedWritableSink(
-    IoContext& ioContext, kj::Own<WritableSink> inner) {
-  return kj::heap<IoContextWritableSinkWrapper>(ioContext, kj::mv(inner));
+    kj::WeakRc<IoContext> ioContext, kj::Own<WritableSink> inner) {
+  return kj::heap<IoContextWritableSinkWrapper>(kj::mv(ioContext), kj::mv(inner));
 }
 
 }  // namespace workerd::api::streams

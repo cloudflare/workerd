@@ -38,6 +38,7 @@ import {
 } from 'node-internal:validators';
 import * as errorCodes from 'node-internal:internal_dns_constants';
 import { isIP } from 'node-internal:internal_net';
+import inner from 'cloudflare-internal:sockets';
 import type dns from 'node:dns';
 
 type DnsOrder = 'verbatim' | 'ipv4first' | 'ipv6first';
@@ -50,6 +51,25 @@ export const validDnsOrders: DnsOrder[] = [
 ];
 
 let defaultDnsOrder: DnsOrder = 'verbatim';
+
+// Magic hostnames (e.g. Hyperdrive's) resolve to a synthetic IPv4 that routes via a connect
+// override. Gate on the suffix so ordinary lookups stay entirely in JS rather than crossing into
+// C++ on every resolution.
+function getMagicHostOverride(hostname: string): string | undefined {
+  if (
+    !hostname.endsWith('.hyperdrive.local') &&
+    !hostname.endsWith('.workers.alt')
+  ) {
+    return undefined;
+  }
+  return inner.getCallerDnsOverride(hostname);
+}
+
+// The synthetic address is IPv4; its IPv4-mapped IPv6 form is a known, derived value that connect()
+// normalizes back to the IPv4 override key, so no separate registration is needed.
+function toMappedIpv6(ipv4: string): string {
+  return `::ffff:${ipv4}`;
+}
 
 export function getServers(): ReturnType<(typeof dns)['getServers']> {
   return ['1.1.1.1', '2606:4700:4700::1111', '1.0.0.1', '2606:4700:4700::1001'];
@@ -139,6 +159,23 @@ export function lookup(
     } else {
       process.nextTick(callback, null, hostname, matchedFamily);
     }
+    return;
+  }
+
+  const overrideIp = getMagicHostOverride(hostname);
+  if (overrideIp != null) {
+    // family 6 gets the IPv4-mapped form; family 0/4 gets the raw IPv4.
+    const address = family === 6 ? toMappedIpv6(overrideIp) : overrideIp;
+    const resultFamily = family === 6 ? 6 : 4;
+    // Deliver via queueMicrotask rather than process.nextTick: this path is reachable in
+    // node:dns configs where the `process` global is not defined.
+    queueMicrotask(() => {
+      if (all) {
+        callback(null, [{ address, family: resultFamily }]);
+      } else {
+        callback(null, address, resultFamily);
+      }
+    });
     return;
   }
 
@@ -291,6 +328,13 @@ export function resolve4(
   // The following change is done to comply with Node.js behavior
   const ttl = !!options?.ttl;
 
+  const overrideIp = getMagicHostOverride(name);
+  if (overrideIp != null) {
+    return Promise.resolve([
+      ttl ? { ttl: 0, address: overrideIp } : overrideIp,
+    ]);
+  }
+
   // Validation errors needs to be sync.
   // Return a promise rather than using async qualifier.
   return sendDnsRequest(name, 'A').then((json) => {
@@ -310,6 +354,12 @@ export function resolve6(
 
   // The following change is done to comply with Node.js behavior
   const ttl = !!options?.ttl;
+
+  const overrideIp = getMagicHostOverride(name);
+  if (overrideIp != null) {
+    const address = toMappedIpv6(overrideIp);
+    return Promise.resolve([ttl ? { ttl: 0, address } : address]);
+  }
 
   // Validation errors needs to be sync.
   // Return a promise rather than using async qualifier.

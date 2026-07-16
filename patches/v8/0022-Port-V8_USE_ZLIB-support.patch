@@ -6,10 +6,10 @@ Subject: Port V8_USE_ZLIB support
 Change-Id: Icfedf3e90522f1ff5037517a39a5f0e3d44abace
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 60c6d5f762e9e325ccb8dbe9518b47a251a7e8e3..23665c89fd04db517ccf0ab8dccb5346cd5cac45 100644
+index 4521044b5ae2a2c36d0b141f1149cc632a6f2cf3..bd86f080c6e96327aec1addaa11cddd7eb947dd4 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -162,6 +162,11 @@ v8_flag(name = "v8_enable_verify_predictable")
+@@ -168,6 +168,11 @@ v8_flag(name = "v8_enable_verify_predictable")
  
  v8_flag(name = "v8_enable_test_features")
  
@@ -21,7 +21,7 @@ index 60c6d5f762e9e325ccb8dbe9518b47a251a7e8e3..23665c89fd04db517ccf0ab8dccb5346
  v8_flag(name = "v8_wasm_random_fuzzers")
  
  v8_flag(
-@@ -533,6 +538,7 @@ v8_config(
+@@ -540,6 +545,7 @@ v8_config(
          "v8_enable_vtunejit": "ENABLE_VTUNE_JIT_INTERFACE",
          "v8_enable_undefined_double": "V8_ENABLE_UNDEFINED_DOUBLE",
          "v8_use_host_cpu_arm_features": "V8_USE_HOST_CPU_ARM_FEATURES",
@@ -29,7 +29,7 @@ index 60c6d5f762e9e325ccb8dbe9518b47a251a7e8e3..23665c89fd04db517ccf0ab8dccb5346
      },
      defines = [
          "GOOGLE3",
-@@ -4699,6 +4705,8 @@ v8_library(
+@@ -4730,6 +4736,8 @@ v8_library(
          "@highway//:hwy",
          "@fast_float",
          "@simdutf",
@@ -39,11 +39,11 @@ index 60c6d5f762e9e325ccb8dbe9518b47a251a7e8e3..23665c89fd04db517ccf0ab8dccb5346
  )
  
 diff --git a/src/deoptimizer/frame-translation-builder.cc b/src/deoptimizer/frame-translation-builder.cc
-index 497f11e5cd2c20b33b86a71615fb12e48c32048f..b2bbe6aca39bec6299551be0932eda89034775e8 100644
+index d8d430ea39e6e1ede1125b6230d9ecd2ec275535..3433a528b3adaf1dc2a7310222311cf623ed7f25 100644
 --- a/src/deoptimizer/frame-translation-builder.cc
 +++ b/src/deoptimizer/frame-translation-builder.cc
-@@ -11,7 +11,7 @@
- #include "src/objects/fixed-array-inl.h"
+@@ -13,7 +13,7 @@
+ #include "src/objects/fixed-primitive-array-inl.h"
  
  #ifdef V8_USE_ZLIB
 -#include "third_party/zlib/google/compression_utils_portable.h"

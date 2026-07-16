@@ -71,6 +71,21 @@ const unitTests :Workerd.Config = (
           (name = "部品", esModule = "export default 1;"),
 
           (name = "tla", esModule = "export default await import('text')"),
+
+          # An ESM that statically imports a module that does not exist. Importing
+          # this exercises the static-import resolution path's not-found error.
+          (name = "static-import-missing", esModule = "import 'definitely-not-a-real-module-xyz'; export default 1;"),
+
+          # ESM (circular-a) -> CJS (circular-b) -> require(ESM circular-c) which
+          # statically imports circular-b back while it is still evaluating. This
+          # exercises the circular-dependency guard on the instantiation path.
+          (name = "circular-a", esModule = "import b from 'circular-b'; export default b;"),
+          (name = "circular-b", commonJsModule = "module.exports = require('circular-c')"),
+          (name = "circular-c", esModule = "import b from 'circular-b'; export default b;"),
+
+          # An ESM that statically imports an unparseable specifier, to exercise
+          # the static-import "Invalid module specifier" path.
+          (name = "static-invalid-spec", esModule = "import 'https://'; export default 1;"),
         ],
         compatibilityFlags = [
           "nodejs_compat_v2",

@@ -10,6 +10,7 @@ import {
 
 // Create module-level state using the helper
 const state = createInstrumentationState();
+const d1BindingJsrpc = !!Cloudflare.compatibilityFlags['d1_binding_jsrpc'];
 
 export default {
   tailStream: createTailStreamHandler(state),
@@ -30,7 +31,7 @@ export const test = {
   },
 };
 
-const expectedSpans = [
+const allExpectedSpans = [
   // testExec: exec() happy path and error handling (regression test for #5218).
   {
     name: 'd1_exec',
@@ -65,7 +66,9 @@ const expectedSpans = [
     'db.operation.name': 'exec',
     'db.query.text': 'INVALID SQL',
     'cloudflare.binding.type': 'D1',
-    'error.type': 'Error in line 1',
+    'error.type': d1BindingJsrpc
+      ? 'near "INVALID": syntax error at offset 0: SQLITE_ERROR'
+      : 'Error in line 1',
     closed: true,
   },
   {
@@ -1082,3 +1085,10 @@ const expectedSpans = [
     closed: true,
   },
 ];
+
+const expectedSpans = d1BindingJsrpc
+  ? // The JSRPC binding path does not issue internal HTTP requests to the D1
+    // service, so it should not emit the transport-level fetch spans that the
+    // legacy path produces. The public D1 operation spans are still asserted.
+    allExpectedSpans.filter((span) => span.name !== 'fetch')
+  : allExpectedSpans;

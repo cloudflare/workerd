@@ -41,5 +41,7 @@ declare namespace sockets {
       secureTransport: 'on' | 'off' | 'starttls';
     }
   ): Socket;
+
+  function getCallerDnsOverride(hostname: string): string | undefined;
 }
 export default sockets;

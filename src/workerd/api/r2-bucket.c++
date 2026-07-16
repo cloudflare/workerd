@@ -591,10 +591,10 @@ R2Bucket::get(jsg::Lock& js,
       if (r2Result.preconditionFailed()) {
         result = KJ_ASSERT_NONNULL(parseObjectMetadata<HeadResult>(js, "get", r2Result, errorType));
       } else {
-        jsg::Ref<ReadableStream> body = nullptr;
+        JsReadableStream body;
 
         KJ_IF_SOME(s, r2Result.stream) {
-          body = js.alloc<ReadableStream>(context, kj::mv(s));
+          body = JsReadableStream::create(js, context, kj::mv(s));
           r2Result.stream = kj::none;
         }
         result = parseObjectMetadata<GetResult>(js, "get", r2Result, errorType, kj::mv(body));
@@ -625,8 +625,8 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
     auto cancelReader = kj::defer([&] {
       KJ_IF_SOME(v, value) {
         KJ_SWITCH_ONEOF(v) {
-          KJ_CASE_ONEOF(v, jsg::Ref<ReadableStream>) {
-            (*v).cancel(js,
+          KJ_CASE_ONEOF(v, JsReadableStream) {
+            v.cancel(js,
                 js.error(
                     "Stream cancelled because the associated put operation encountered an error."));
           }
@@ -850,8 +850,8 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
 
     KJ_IF_SOME(v, value) {
       KJ_SWITCH_ONEOF(v) {
-        KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
-          KJ_IF_SOME(size, stream->tryGetLength(StreamEncoding::IDENTITY)) {
+        KJ_CASE_ONEOF(stream, JsReadableStream) {
+          KJ_IF_SOME(size, stream.tryGetLength(js, StreamEncoding::IDENTITY)) {
             traceContext.setTag("cloudflare.r2.request.size"_kjc, static_cast<int64_t>(size));
           }
         }
@@ -875,8 +875,8 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
     kj::StringPtr components[1];
     auto path = fillR2Path(components, adminBucket);
     auto client = getHttpClient(context, traceContext);
-    auto promise =
-        doR2HTTPPutRequest(kj::mv(client), kj::mv(value), kj::none, kj::mv(requestJson), path, jwt);
+    auto promise = doR2HTTPPutRequest(
+        js, kj::mv(client), kj::mv(value), kj::none, kj::mv(requestJson), path, jwt);
 
     return context.awaitIo(js, kj::mv(promise),
         [sentHttpMetadata = kj::mv(sentHttpMetadata),
@@ -997,7 +997,7 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
     auto path = fillR2Path(components, adminBucket);
     auto client = getHttpClient(context, traceContext);
     auto promise =
-        doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, jwt);
+        doR2HTTPPutRequest(js, kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, jwt);
 
     return context.awaitIo(js, kj::mv(promise),
         [&errorType, key = kj::mv(key), this, traceContext = kj::mv(traceContext)](
@@ -1070,7 +1070,7 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
     auto path = fillR2Path(components, adminBucket);
     auto client = getHttpClient(context, traceContext);
     auto promise =
-        doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, jwt);
+        doR2HTTPPutRequest(js, kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, jwt);
 
     return context.awaitIo(js, kj::mv(promise),
         [&errorType, traceContext = kj::mv(traceContext)](
@@ -1424,35 +1424,24 @@ void R2Bucket::HeadResult::writeHttpMetadata(jsg::Lock& js, Headers& headers) {
 
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> R2Bucket::GetResult::arrayBuffer(jsg::Lock& js) {
   return js.evalNow([&] {
-    JSG_REQUIRE(!body->isDisturbed(), TypeError,
-        "Body has already been used. "
-        "It can only be used once. Use tee() first if you need to read it twice.");
-
     auto& context = IoContext::current();
-    return body->getController().readAllBytes(js, context.getLimitEnforcer().getBufferingLimit());
+    return body.arrayBuffer(js, context.getLimitEnforcer().getBufferingLimit());
   });
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> R2Bucket::GetResult::bytes(jsg::Lock& js) {
   return js.evalNow([&] {
-    JSG_REQUIRE(!body->isDisturbed(), TypeError,
-        "Body has already been used. "
-        "It can only be used once. Use tee() first if you need to read it twice.");
-
     auto& context = IoContext::current();
-    return body->getController()
-        .readAllBytes(js, context.getLimitEnforcer().getBufferingLimit())
-        .then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> data) {
-      auto handle = data.getHandle(js);
-      return jsg::JsUint8Array::create(js, handle).addRef(js);
-    });
+    return body.bytes(js, context.getLimitEnforcer().getBufferingLimit());
   });
 }
 
 jsg::Promise<kj::String> R2Bucket::GetResult::text(jsg::Lock& js) {
   // Copy-pasted from http.c++
   return js.evalNow([&] {
-    JSG_REQUIRE(!body->isDisturbed(), TypeError,
+    // Check for a disturbed body before emitting the non-text warning below. (body.text()
+    // performs the same check with the same error message; this one just runs first.)
+    JSG_REQUIRE(!body.isDisturbed(js), TypeError,
         "Body has already been used. "
         "It can only be used once. Use tee() first if you need to read it twice.");
 
@@ -1467,7 +1456,7 @@ jsg::Promise<kj::String> R2Bucket::GetResult::text(jsg::Lock& js) {
       }
     }
 
-    return body->getController().readAllText(js, context.getLimitEnforcer().getBufferingLimit());
+    return body.text(js, context.getLimitEnforcer().getBufferingLimit());
   });
 }
 
@@ -1479,12 +1468,12 @@ jsg::Promise<jsg::Value> R2Bucket::GetResult::json(jsg::Lock& js) {
 jsg::Promise<jsg::Ref<Blob>> R2Bucket::GetResult::blob(jsg::Lock& js) {
   // Copy-pasted from http.c++
   return arrayBuffer(js).then(
-      js, [this, self = JSG_THIS](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) {
+      js, [self = JSG_THIS](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) mutable {
     // httpMetadata can't be null because GetResult always populates it.
     // Note: `self` (jsg::Ref) is captured to prevent GC from collecting this object while
     // the promise continuation is pending. Without it, the bare `this` pointer dangles.
     kj::String contentType =
-        mapCopyString(KJ_REQUIRE_NONNULL(httpMetadata).contentType).orDefault(nullptr);
+        mapCopyString(KJ_REQUIRE_NONNULL(self->httpMetadata).contentType).orDefault(nullptr);
     return js.alloc<Blob>(js, jsg::JsBufferSource(buffer.getHandle(js)), kj::mv(contentType));
   });
 }

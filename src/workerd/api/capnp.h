@@ -33,7 +33,7 @@ class CapnpServer final: public capnp::DynamicCapability::Server {
       capnp::CallContext<capnp::DynamicStruct, capnp::DynamicStruct> context) override;
 
  private:
-  kj::Own<IoContext::WeakRef> ioContext;
+  kj::WeakRc<IoContext> ioContext;
   jsg::V8Ref<v8::Object> object;
   kj::Maybe<jsg::V8Ref<v8::Function>> closeMethod;
   CapnpTypeWrapperBase& wrapper;  // only valid if isolate is locked!

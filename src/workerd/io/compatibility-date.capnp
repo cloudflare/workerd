@@ -240,7 +240,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   nodeJsCompat @21 :Bool
       $compatEnableFlag("nodejs_compat")
-      $compatDisableFlag("no_nodejs_compat");
+      $compatDisableFlag("no_nodejs_compat")
+      $compatEnableDate("2026-08-04");
   # Enables nodejs compat imports in the application.
 
   obsolete22 @22 :Bool
@@ -465,7 +466,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   nodeJsCompatV2 @50 :Bool
       $compatEnableFlag("nodejs_compat_v2")
       $compatDisableFlag("no_nodejs_compat_v2")
-      $impliedByAfterDate(name = "nodeJsCompat", date = "2024-09-23");
+      $impliedByAfterDate(name = "nodeJsCompat", date = "2024-09-23")
+      $compatEnableDate("2026-08-04");
   # Implies nodeJSCompat with the following additional modifications:
   # * Node.js Compat built-ins may be imported/required with or without the node: prefix
   # * Node.js Compat the globals Buffer and process are available everywhere
@@ -1572,7 +1574,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("no_python_workers_20260610")
       $pythonSnapshotRelease
       $experimental;
-  # Enables Python Workers using Pyodide 314.0.0 (CPython 3.14.2, Emscripten 5.0.3).
+  # Enables Python Workers using Pyodide 314.0.2 (CPython 3.14.2, Emscripten 5.0.3).
 
   enableNodeJsInspectorLocalDev @180 :Bool
       $compatEnableFlag("enable_nodejs_inspector_local_dev")
@@ -1596,4 +1598,33 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # This flag is not enabled by default in local dev on purpose, we want local dev to mimic
   # the production environment as much as possible, this flag is meant to be used by test
   # frameworks when running tests that require the inspector to be functional, and not by end users.
+
+  d1BindingJsrpc @181 :Bool
+      $compatEnableFlag("d1_binding_jsrpc");
+  # When enabled, D1 bindings use the internal JSRPC binding API for queries
+  # instead of issuing `fetch` calls to the D1 binding service. Without this
+  # flag, D1 bindings continue to use the `fetch` method of the Fetcher.
+
+  workflowsBindingsRpc @182 :Bool
+    $compatEnableFlag("workflows_bindings_rpc")
+    $experimental;
+  # When enabled, the `env.WORKFLOW` binding (cloudflare-internal:workflows-api)
+  # dispatches its methods as JSRPC calls on the inner fetcher instead of HTTP
+  # requests against the binding-shim worker. Without the flag the legacy HTTP
+  # transport is used.
+
+  typeScriptImplementedStreams @183 :Bool
+      $compatEnableFlag("typescript_implemented_streams")
+      $experimental;
+  # When enabled, the workers runtime uses the new typescript Web Streams
+  # implementation.
+
+  exposeDrainingReader @184 :Bool
+      $compatEnableFlag("expose_draining_reader")
+      $experimental;
+  # Exposes the internal ReadableStreamDrainingReader class on globalThis.
+  # The DrainingReader provides the expectedLength pass-through for the
+  # C++ bridge (Content-Length integration for FixedLengthStream). This
+  # flag is intended for internal testing only and may never have its
+  # experimental annotation removed.
 }

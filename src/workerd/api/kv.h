@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <workerd/api/streams/readable.h>
+#include <workerd/api/js-readable-stream.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/jsg/jsg.h>
@@ -57,8 +57,8 @@ class KvNamespace: public jsg::Object {
     });
   };
 
-  using GetResult = kj::Maybe<
-      kj::OneOf<jsg::Ref<ReadableStream>, kj::Array<byte>, kj::String, jsg::JsRef<jsg::JsValue>>>;
+  using GetResult =
+      kj::Maybe<kj::OneOf<JsReadableStream, kj::Array<byte>, kj::String, jsg::JsRef<jsg::JsValue>>>;
 
   jsg::Promise<KvNamespace::GetResult> getSingle(jsg::Lock& js,
       IoContext& context,
@@ -141,7 +141,7 @@ class KvNamespace: public jsg::Object {
   // we specifically support later.
   using PutBody = kj::OneOf<kj::String, jsg::JsObject>;
 
-  using PutSupportedTypes = kj::OneOf<kj::String, kj::Array<byte>, jsg::Ref<ReadableStream>>;
+  using PutSupportedTypes = kj::OneOf<kj::String, kj::Array<byte>, JsReadableStream>;
 
   jsg::Promise<void> put(jsg::Lock& js,
       kj::String name,

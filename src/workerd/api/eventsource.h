@@ -65,7 +65,7 @@ class EventSource: public EventTarget {
   // or underlying fetch used. The ReadableStream instance must produce bytes. It will be
   // locked and disturbed, and will be read until it either ends or errors. Calling close()
   // will cause the stream to be canceled.
-  static jsg::Ref<EventSource> from(jsg::Lock& js, jsg::Ref<ReadableStream> stream);
+  static jsg::Ref<EventSource> from(jsg::Lock& js, JsReadableStream stream);
 
   kj::Maybe<jsg::JsValue> getOnOpen(jsg::Lock& js) {
     return onopenValue.map(
@@ -190,7 +190,7 @@ class EventSource: public EventTarget {
 
   // The run() method handles the actual processing of the stream.
   void run(jsg::Lock& js,
-      jsg::Ref<ReadableStream> stream,
+      JsReadableStream stream,
       bool withReconnection = true,
       kj::Maybe<jsg::Ref<Response>> response = kj::none,
       kj::Maybe<jsg::Ref<Fetcher>> fetcher = kj::none);

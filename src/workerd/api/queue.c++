@@ -685,10 +685,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
 
   // 2. This is where we call into the worker's queue event handler
   auto runProm = context.run(
-      [this, entrypointName = entrypointName, &context, queueEvent = kj::addRef(*queueEventHolder),
+      [this, entrypointName = entrypointName, queueEvent = kj::addRef(*queueEventHolder),
           &metrics = incomingRequest->getMetrics(), versionInfo = kj::mv(versionInfo),
           props = kj::mv(props),
-          isDynamicDispatch](Worker::Lock& lock) mutable -> kj::Promise<void> {
+          isDynamicDispatch](Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
@@ -728,8 +728,11 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
     // all waitUntil'ed promises.
     auto outcome = co_await runProm
                        .then([]() mutable -> kj::Promise<EventOutcome> { return EventOutcome::OK; })
-                       .catch_([](kj::Exception&& e) {
+                       .catch_([weakIoctx = context.getWeakRef()](kj::Exception&& e) {
       // If any exceptions were thrown, mark the outcome accordingly.
+      KJ_IF_SOME(context, weakIoctx) {
+        context->getMetrics().reportFailure(e);
+      }
       return EventOutcome::EXCEPTION;
     })
                        .exclusiveJoin(timeoutPromise.then([] {
@@ -739,8 +742,15 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
       // Also handle anything that might cause the worker to get aborted.
       // This is a change from the outcome we returned on abort before the compat flag, but better
       // matches the behavior of fetch() handlers and the semantics of what's actually happening.
+      // abortFulfiller should only ever be rejected instead of being fulfilled, return an
+      // internalError outcome if it does happen
+      return EventOutcome::INTERNAL_ERROR;
+    }, [weakIoctx = context.getWeakRef()](kj::Exception&& e) {
+      KJ_IF_SOME(context, weakIoctx) {
+        context->getMetrics().reportFailure(e);
+      }
       return EventOutcome::EXCEPTION;
-    }, [](kj::Exception&&) { return EventOutcome::EXCEPTION; }));
+    }));
 
     if (outcome == EventOutcome::OK && queueEventHolder->isServiceWorkerHandler) {
       // HACK: For service-worker syntax, we effectively ignore the compatibility flag and wait

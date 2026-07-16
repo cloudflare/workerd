@@ -51,14 +51,14 @@ KJ_TEST("getPythonSnapshotRelease") {
   featureFlags.setPythonWorkers20260610(true);
   {
     auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-    KJ_ASSERT(res.getPyodide() == "314.0.0");
+    KJ_ASSERT(res.getPyodide() == "314.0.2");
     KJ_ASSERT(res.getFlagName() == "pythonWorkers20260610");
   }
 
   featureFlags.setPythonWorkersDevPyodide(false);
   {
     auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-    KJ_ASSERT(res.getPyodide() == "314.0.0");
+    KJ_ASSERT(res.getPyodide() == "314.0.2");
     KJ_ASSERT(res.getFlagName() == "pythonWorkers20260610");
   }
 

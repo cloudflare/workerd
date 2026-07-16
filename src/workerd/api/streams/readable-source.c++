@@ -637,18 +637,18 @@ class ReadableSourceImpl: public ReadableSource {
 // of the operations on the stream.
 class NoDeferredProxySource final: public ReadableSourceWrapper {
  public:
-  NoDeferredProxySource(kj::Own<ReadableSource> inner, IoContext& ioctx)
+  NoDeferredProxySource(kj::Own<ReadableSource> inner, kj::WeakRc<IoContext> ioctx)
       : ReadableSourceWrapper(kj::mv(inner)),
-        ioctx(ioctx) {}
+        ioctx(kj::mv(ioctx)) {}
 
   kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes = 1) override {
-    auto pending = ioctx.registerPendingEvent();
+    auto pending = ioctx.assertLive().registerPendingEvent();
     co_return co_await getInner().read(buffer, minBytes);
   }
 
   kj::Promise<DeferredProxy<void>> pumpTo(
       WritableSink& output, EndAfterPump end = EndAfterPump::YES) override {
-    auto pending = ioctx.registerPendingEvent();
+    auto pending = ioctx.assertLive().registerPendingEvent();
     auto [proxyTask] = co_await getInner().pumpTo(output, end);
     co_await proxyTask;
   }
@@ -656,13 +656,13 @@ class NoDeferredProxySource final: public ReadableSourceWrapper {
   Tee tee(size_t limit) override {
     auto tee = getInner().tee(limit);
     return Tee{
-      .branch1 = kj::heap<NoDeferredProxySource>(kj::mv(tee.branch1), ioctx),
-      .branch2 = kj::heap<NoDeferredProxySource>(kj::mv(tee.branch2), ioctx),
+      .branch1 = kj::heap<NoDeferredProxySource>(kj::mv(tee.branch1), ioctx.clone()),
+      .branch2 = kj::heap<NoDeferredProxySource>(kj::mv(tee.branch2), ioctx.clone()),
     };
   }
 
  private:
-  IoContext& ioctx;
+  kj::WeakRc<IoContext> ioctx;
 };
 
 // A ReadableSource implementation that lazily wraps an innner Gzip or Brotli
@@ -759,8 +759,8 @@ kj::Own<ReadableSource> newReadableSourceFromBytes(
 }
 
 kj::Own<ReadableSource> newIoContextWrappedReadableSource(
-    IoContext& ioctx, kj::Own<ReadableSource> inner) {
-  return kj::heap<NoDeferredProxySource>(kj::mv(inner), ioctx);
+    kj::WeakRc<IoContext> ioctx, kj::Own<ReadableSource> inner) {
+  return kj::heap<NoDeferredProxySource>(kj::mv(inner), kj::mv(ioctx));
 }
 
 kj::Own<ReadableSource> newReadableSourceFromProducer(
@@ -824,17 +824,17 @@ class MemoryInputStream final: public ReadableStreamSource {
     return kj::none;
   }
 
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
+  kj::Promise<DeferredProxy<void>> pumpTo(kj::Ptr<WritableStreamSink> output, bool end) override {
     // Explicitly NOT using KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING here!
     // The backing memory may be tied to V8 heap (e.g., ArrayBuffer, Blob data),
     // so we must complete all I/O before the IoContext can be released.
     if (unread.size() > 0) {
       auto data = unread;
       unread = nullptr;
-      co_await output.write(data);
+      co_await output->write(data);
     }
     if (end) {
-      co_await output.end();
+      co_await output->end();
     }
     co_return;
   }

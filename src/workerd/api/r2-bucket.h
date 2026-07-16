@@ -377,7 +377,7 @@ class R2Bucket: public jsg::Object {
         jsg::Optional<Range> range,
         kj::String storageClass,
         jsg::Optional<kj::String> ssecKeyMd5,
-        jsg::Ref<ReadableStream> body)
+        JsReadableStream body)
         : HeadResult(kj::mv(name),
               kj::mv(version),
               size,
@@ -391,12 +391,12 @@ class R2Bucket: public jsg::Object {
               kj::mv(ssecKeyMd5)),
           body(kj::mv(body)) {}
 
-    jsg::Ref<ReadableStream> getBody() {
-      return body.addRef();
+    JsReadableStream getBody(jsg::Lock& js) {
+      return body.addRef(js);
     }
 
-    bool getBodyUsed() {
-      return body->isDisturbed();
+    bool getBodyUsed(jsg::Lock& js) {
+      return body.isDisturbed(js);
     }
 
     jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> arrayBuffer(jsg::Lock& js);
@@ -422,11 +422,11 @@ class R2Bucket: public jsg::Object {
     }
 
     void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-      tracker.trackField("body", body);
+      body.visitForMemoryInfo(tracker);
     }
 
    private:
-    jsg::Ref<ReadableStream> body;
+    JsReadableStream body;
 
     void visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(body);
