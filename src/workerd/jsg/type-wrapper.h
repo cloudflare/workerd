@@ -593,6 +593,34 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   template <typename U>
   static constexpr TypeHandlerImpl<U> TYPE_HANDLER_INSTANCE = TypeHandlerImpl<U>();
 
+  // Invokes func(const std::type_info&, const TypeHandler<Ref<T>>*) for every resource
+  // type registered with this TypeWrapper. The handler instances are the static constexpr
+  // TYPE_HANDLER_INSTANCE singletons, so the pointers remain valid forever.
+  //
+  // Only resource types participate: their handlers always support both wrap and
+  // tryUnwrap. Struct (and other value) types cannot be registered eagerly because
+  // instantiating a TypeHandler requires BOTH directions to compile, and some registered
+  // structs are deliberately one-directional (e.g. output-only structs with no unwrap
+  // path, or input-only structs with Unimplemented members whose wrap is deleted).
+  // Value types continue to obtain handlers via TypeHandler<T> parameter injection,
+  // which only instantiates handlers for types that actually support it. Extension and
+  // configuration entries are likewise skipped (they are not themselves wrappable).
+  //
+  // Used by jsg::Isolate to populate the isolate-wide registry backing
+  // jsg::Lock::tryGetTypeHandler(); see setup.h.
+  template <typename Func>
+  static void forEachTypeHandler(Func&& func) {
+    (forEachTypeHandlerImpl<T>(func), ...);
+  }
+
+  template <typename U, typename Func>
+  static void forEachTypeHandlerImpl(Func& func) {
+    if constexpr (U::JSG_KIND == JsgKind::RESOURCE) {
+      func(typeid(TypeHandler<Ref<U>>),
+          static_cast<const TypeHandler<Ref<U>>*>(&TYPE_HANDLER_INSTANCE<Ref<U>>));
+    }
+  }
+
   template <typename U>
   static constexpr const char* getName(TypeHandler<U>*) {
     return "TypeHandler";

@@ -94,6 +94,23 @@ For file map and coding invariants, see [AGENTS.md](AGENTS.md).
 Key rules: stack-only allocation (enforced in debug); implicit conversion to `v8::Local<T>`;
 use `JsRef<T>` to persist beyond current scope.
 
+## TypeHandler Acquisition
+
+`jsg::TypeHandler<T>` converts between C++ values and V8 handles (`wrap`/`tryUnwrap`).
+Two ways to obtain one:
+
+| Mechanism                                    | Where it works                       | Types supported                                                            |
+| -------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------- |
+| Trailing `const TypeHandler<T>&` parameter   | JSG-called functions/methods only    | Any wrappable `T` (instantiated on demand)                                  |
+| `js.tryGetTypeHandler<T>()`                  | Anywhere a `jsg::Lock` is available  | Resource types only, as `TypeHandler<jsg::Ref<T>>`; returns `kj::Maybe`     |
+
+`Lock::tryGetTypeHandler` is backed by a per-isolate registry populated at isolate
+construction (see `TypeWrapper::forEachTypeHandler`). It lets C++-initiated code wrap a
+fresh resource object into its JavaScript wrapper (or unwrap one) without a JS→C++ call.
+Value types (JSG_STRUCTs) are deliberately not registered — eager handler instantiation
+requires both conversion directions to compile, and some structs are one-directional —
+so they remain injection-only.
+
 ## JSG Macro Catalog
 
 ### Resource Type Declaration

@@ -32,6 +32,7 @@
 #include <kj/time.h>
 
 #include <span>
+#include <typeinfo>
 
 using kj::byte;
 using kj::uint;
@@ -2263,6 +2264,11 @@ class TypeHandler {
   virtual kj::Maybe<T> tryUnwrap(Lock& js, v8::Local<v8::Value> handle) const = 0;
 };
 
+// Internal implementation detail of Lock::tryGetTypeHandler(). Looks up the type-erased
+// TypeHandler singleton registered with the isolate for the given typeid(TypeHandler<T>).
+// Defined in setup.c++ (the registry lives on IsolateBase).
+kj::Maybe<const void*> tryGetTypeHandlerErased(v8::Isolate* isolate, const std::type_info& type);
+
 // Utility that allows C++ code in a resource type to examine properties that have been added to
 // its JavaScript wrapper.
 //
@@ -2986,6 +2992,28 @@ class Lock {
   virtual jsg::Dict<JsValue> toDict(const jsg::JsValue& value) = 0;
   virtual Promise<Value> toPromise(v8::Local<v8::Value> promise) = 0;
   virtual Promise<void> toVoidPromise(v8::Local<v8::Value> promise) = 0;
+
+  // Looks up the TypeHandler for type T among the RESOURCE types registered with this
+  // isolate via JSG_DECLARE_ISOLATE_TYPE, returning kj::none if T was not registered.
+  // Request the resource type's handler as TypeHandler<jsg::Ref<T>>.
+  //
+  // Unlike TypeHandler parameter injection (which is only available in JSG-called
+  // functions), this works anywhere a Lock is available. It is useful when C++-initiated
+  // code needs to wrap a fresh resource object into its JavaScript wrapper (or unwrap a
+  // JS value) outside of any JSG callback.
+  //
+  // Only resource types are registered: their handlers always support both wrap and
+  // tryUnwrap. Value types (JSG_STRUCTs etc.) are not available here because eagerly
+  // instantiating their handlers requires both directions to compile, and some structs
+  // are deliberately one-directional; they continue to use parameter injection. See
+  // TypeWrapper::forEachTypeHandler in type-wrapper.h.
+  template <typename T>
+  kj::Maybe<const TypeHandler<T>&> tryGetTypeHandler() {
+    KJ_IF_SOME(handler, tryGetTypeHandlerErased(v8Isolate, typeid(TypeHandler<T>))) {
+      return *static_cast<const TypeHandler<T>*>(handler);
+    }
+    return kj::none;
+  }
 
   // ---------------------------------------------------------------------------
   // Setup stuff
