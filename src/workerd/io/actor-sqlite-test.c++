@@ -13,6 +13,9 @@
 #include <kj/debug.h>
 #include <kj/test.h>
 
+// This is a test, ignore unsafe-continuation lints
+// NOLINTBEGIN(workerd-unsafe-continuation-capture)
+
 namespace workerd {
 namespace {
 
@@ -3257,6 +3260,8 @@ KJ_TEST("ActorSqlite abandonAlarm returns kj::none when inAlarmHandler") {
   // abandonAlarm was a no-op while the handler was running.
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 }
+
+// NOLINTEND(workerd-unsafe-continuation-capture)
 
 }  // namespace
 }  // namespace workerd

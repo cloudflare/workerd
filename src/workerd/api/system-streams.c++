@@ -252,18 +252,29 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
     if (end) {
       // TODO(cleanup): When KJ streams are refactored to have a general end(), this stupid switch
       //   can go away.
+      //
+      // The by-reference captures below reference the inner kj::Own held in `this->inner`. Per
+      // the WritableStreamSink::tryPumpFrom contract, the caller keeps `*this` alive until the
+      // returned promise resolves, so the referenced object outlives the chain. This is the C++
+      // equivalent of what Rust's borrow checker would prove statically via a lifetime parameter
+      // tying the returned future to `&mut self` -- C++'s type system can't express that, so the
+      // analyzer can't see it.
       KJ_SWITCH_ONEOF(inner) {
         KJ_CASE_ONEOF(stream, kj::Own<kj::AsyncOutputStream>) {
           KJ_IF_SOME(ee, kj::dynamicDowncastIfAvailable<capnp::ExplicitEndOutputStream>(*stream)) {
+            // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
             promise = promise.then([&ee = ee]() { return ee.end(); });
           } else KJ_IF_SOME(aio, kj::dynamicDowncastIfAvailable<kj::AsyncIoStream>(*stream)) {
+            // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
             promise = promise.then([&aio = aio]() { aio.shutdownWrite(); });
           }
         }
         KJ_CASE_ONEOF(gz, kj::Own<kj::GzipAsyncOutputStream>) {
+          // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
           promise = promise.then([&gz = gz]() { return gz->end(); });
         }
         KJ_CASE_ONEOF(br, kj::Own<kj::BrotliAsyncOutputStream>) {
+          // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
           promise = promise.then([&br = br]() { return br->end(); });
         }
         KJ_CASE_ONEOF(e, Ended) {}

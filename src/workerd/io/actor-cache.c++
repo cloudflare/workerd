@@ -235,8 +235,10 @@ kj::Promise<kj::Maybe<kj::Date>> ActorCache::abandonAlarm(kj::Date scheduledTime
 kj::Maybe<kj::Promise<void>> ActorCache::getBackpressure() {
   if (dirtyList.sizeInBytes() > lru.options.dirtyListByteLimit && !lru.options.neverFlush) {
     // Wait for dirty entries to be flushed.
-    return lastFlush.addBranch().then([this]() -> kj::Promise<void> {
-      KJ_IF_SOME(p, getBackpressure()) {
+    // The weak ref will assert if ActorCache is destroyed before the promise resolves.
+    return lastFlush.addBranch().then([weak = addWeakToThis()]() -> kj::Promise<void> {
+      auto& self = weak.assertLive();
+      KJ_IF_SOME(p, self.getBackpressure()) {
         return kj::mv(p);
       } else {
         return kj::READY_NOW;
@@ -470,12 +472,12 @@ auto ActorCache::getImpl(
 
 class ActorCache::GetMultiStreamImpl final: public rpc::ActorStorage::ListStream::Server {
  public:
-  GetMultiStreamImpl(ActorCache& cache,
+  GetMultiStreamImpl(kj::Weak<ActorCache> cache,
       kj::Vector<kj::Own<Entry>> cachedEntries,
       kj::Vector<Key> keysToFetchParam,
       kj::Own<kj::PromiseFulfiller<GetResultList>> fulfiller,
       const ReadOptions& options)
-      : cache(cache),
+      : cache(kj::mv(cache)),
         cachedEntries(kj::mv(cachedEntries)),
         keysToFetch(kj::mv(keysToFetchParam)),
         nextExpectedKey(keysToFetch.begin()),
@@ -488,7 +490,8 @@ class ActorCache::GetMultiStreamImpl final: public rpc::ActorStorage::ListStream
       return KJ_EXCEPTION(DISCONNECTED, "canceled");
     }
 
-    auto lock = cache.lru.cleanList.lockExclusive();
+    auto& cacheRef = cache.assertLive();
+    auto lock = cacheRef.lru.cleanList.lockExclusive();
     auto params = context.getParams();
     kj::String prevKey;
     for (auto kv: params.getList()) {
@@ -509,14 +512,14 @@ class ActorCache::GetMultiStreamImpl final: public rpc::ActorStorage::ListStream
           break;
         } else if (key == *nextExpectedKey) {
           fetchedEntries.add(
-              cache.addReadResultToCache(lock, kj::mv(*nextExpectedKey), kv.getValue(), options));
+              cacheRef.addReadResultToCache(lock, kj::mv(*nextExpectedKey), kv.getValue(), options));
           ++nextExpectedKey;
           break;
         }
 
         // It seems the list results have moved past `nextExpectedKey`, meaning it wasn't present
         // on disk. Write a negative cache entry.
-        cache.addReadResultToCache(lock, kj::mv(*nextExpectedKey), kj::none, options);
+        cacheRef.addReadResultToCache(lock, kj::mv(*nextExpectedKey), kj::none, options);
         ++nextExpectedKey;
       }
 
@@ -526,7 +529,7 @@ class ActorCache::GetMultiStreamImpl final: public rpc::ActorStorage::ListStream
 
       prevKey = kj::mv(key);
     }
-    cache.evictOrOomIfNeeded(lock);
+    cacheRef.evictOrOomIfNeeded(lock);
     return kj::READY_NOW;
   }
 
@@ -538,11 +541,12 @@ class ActorCache::GetMultiStreamImpl final: public rpc::ActorStorage::ListStream
 
     if (nextExpectedKey < keysToFetch.end()) {
       // Some trailing keys weren't seen, better mark them as not present.
-      auto lock = cache.lru.cleanList.lockExclusive();
+      auto& cacheRef = cache.assertLive();
+      auto lock = cacheRef.lru.cleanList.lockExclusive();
       while (nextExpectedKey < keysToFetch.end()) {
-        cache.addReadResultToCache(lock, kj::mv(*nextExpectedKey++), kj::none, options);
+        cacheRef.addReadResultToCache(lock, kj::mv(*nextExpectedKey++), kj::none, options);
       }
-      cache.evictOrOomIfNeeded(lock);
+      cacheRef.evictOrOomIfNeeded(lock);
     }
 
     fulfill();
@@ -584,7 +588,7 @@ class ActorCache::GetMultiStreamImpl final: public rpc::ActorStorage::ListStream
     fetchedEntries.clear();
   }
 
-  ActorCache& cache;
+  kj::Weak<ActorCache> cache;
   kj::Vector<kj::Own<Entry>> cachedEntries;
   kj::Vector<kj::Own<Entry>> fetchedEntries;
   kj::Vector<Key> keysToFetch;
@@ -635,35 +639,35 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
   }
 
   auto paf = kj::newPromiseAndFulfiller<GetResultList>();
-  auto streamServer = kj::heap<GetMultiStreamImpl>(
-      *this, kj::mv(cachedEntries), kj::mv(keysToFetch), kj::mv(paf.fulfiller), options);
-  auto& streamServerRef = *streamServer;
-
-  rpc::ActorStorage::ListStream::Client streamClient = kj::mv(streamServer);
+  auto streamServer = kj::rc<GetMultiStreamImpl>(
+      addWeakToThis(), kj::mv(cachedEntries), kj::mv(keysToFetch), kj::mv(paf.fulfiller), options);
 
   auto sendPromise = scheduleStorageRead(
-      [sizeHint, streamClient, &streamServerRef](
+      [sizeHint, streamServer = streamServer.addRef()](
           rpc::ActorStorage::Operations::Client client) mutable -> kj::Promise<void> {
-    if (streamServerRef.nextExpectedKey == streamServerRef.keysToFetch.end()) {
+    if (streamServer->nextExpectedKey == streamServer->keysToFetch.end()) {
       // No more keys expected, must have finished listing on a previous try.
       return kj::READY_NOW;
     }
     auto req = client.getMultipleRequest(sizeHint);
     auto keysToFetch =
-        kj::arrayPtr(streamServerRef.nextExpectedKey, streamServerRef.keysToFetch.end());
+        kj::arrayPtr(streamServer->nextExpectedKey, streamServer->keysToFetch.end());
     auto list = req.initKeys(keysToFetch.size());
     for (auto i: kj::indices(keysToFetch)) {
       list.set(i, keysToFetch[i].asBytes());
     }
-    req.setStream(streamClient);
+    // Be sure to addRef before calling toOwn since toOwn moves out of the Rc, but this function
+    // may be called multiple times.
+    req.setStream(streamServer.addRef().toOwn());
     return req.sendIgnoringResult();
   });
 
   // Wait on the RPC only until stream.end() is called, then report the results. We prevent
   // `stream` from being destroyed until we have a result so that if the RPC throws an exception,
   // we don't accidentally report "PromiseFulfiller not fulfilled" instead of the exception.
-  auto promise = sendPromise.then([&streamServerRef]() -> kj::Promise<ActorCache::GetResultList> {
-    if (streamServerRef.fulfiller->isWaiting()) {
+  // The strong ref to streamServer ensures the object outlives all callbacks.
+  auto promise = sendPromise.then([streamServer = streamServer.addRef()]() mutable -> kj::Promise<ActorCache::GetResultList> {
+    if (streamServer->fulfiller->isWaiting()) {
       return KJ_EXCEPTION(FAILED, "getMultiple() never called stream.end()");
     } else {
       // We'll be canceled momentarily...
@@ -671,8 +675,9 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
     }
   });
   return paf.promise.exclusiveJoin(kj::mv(promise))
-      .attach(kj::defer(
-          [client = kj::mv(streamClient), &streamServerRef]() { streamServerRef.cancel(); }));
+      .attach(kj::defer([streamServer = kj::mv(streamServer)]() mutable {
+        streamServer->cancel();
+      }));
 }
 
 kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorCache::getAlarm(
@@ -691,12 +696,14 @@ kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorCache::get
       return entry.time;
     }
     KJ_CASE_ONEOF(_, ActorCache::UnknownAlarmTime) {
+      // The weak ref will assert if ActorCache is destroyed before the promise resolves.
       return scheduleStorageRead([](rpc::ActorStorage::Operations::Client client) {
         auto req = client.getAlarmRequest();
         return req.send().dropPipeline();
       })
-          .then([this, options](capnp::Response<rpc::ActorStorage::Operations::GetAlarmResults>
+          .then([weak = addWeakToThis(), options](capnp::Response<rpc::ActorStorage::Operations::GetAlarmResults>
                         response) mutable -> kj::Maybe<kj::Date> {
+        auto& self = weak.assertLive();
         auto scheduledTimeMs = response.getScheduledTimeMs();
         auto result = [&]() -> kj::Maybe<kj::Date> {
           if (scheduledTimeMs == 0) {
@@ -706,14 +713,14 @@ kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorCache::get
           }
         }();
 
-        if (!options.noCache && currentAlarmTime.is<UnknownAlarmTime>()) {
+        if (!options.noCache && self.currentAlarmTime.is<UnknownAlarmTime>()) {
           // If we don't end up in this branch, the time that's already in currentAlarmTime must
           // be at least as fresh as the one we just read.
           //
           // If it was created by a setAlarm(), then it is actually fresher. If it was created
           // by a concurrent getAlarm(), then it should be exactly the same time.
 
-          currentAlarmTime =
+          self.currentAlarmTime =
               ActorCache::KnownAlarmTime{ActorCache::KnownAlarmTime::Status::CLEAN, result};
         }
 
@@ -773,7 +780,7 @@ inline auto seekOrEnd(auto& map, kj::Maybe<ActorCache::KeyPtr> key) {
 
 class ActorCache::ForwardListStreamImpl final: public rpc::ActorStorage::ListStream::Server {
  public:
-  ForwardListStreamImpl(ActorCache& cache,
+  ForwardListStreamImpl(kj::Weak<ActorCache> cache,
       Key beginKey,
       kj::Maybe<Key> endKey,
       kj::Vector<kj::Own<Entry>> cachedEntries,
@@ -782,7 +789,7 @@ class ActorCache::ForwardListStreamImpl final: public rpc::ActorStorage::ListStr
       kj::Maybe<uint> adjustedLimit,
       bool beginKeyIsKnown,
       const ReadOptions& options)
-      : cache(cache),
+      : cache(kj::mv(cache)),
         beginKey(kj::mv(beginKey)),
         endKey(kj::mv(endKey)),
         cachedEntries(kj::mv(cachedEntries)),
@@ -799,7 +806,8 @@ class ActorCache::ForwardListStreamImpl final: public rpc::ActorStorage::ListStr
     }
 
     {
-      auto lock = cache.lru.cleanList.lockExclusive();
+      auto& cacheRef = cache.assertLive();
+      auto lock = cacheRef.lru.cleanList.lockExclusive();
       auto list = context.getParams().getList();
 
       bool insertedAny = false;
@@ -813,7 +821,7 @@ class ActorCache::ForwardListStreamImpl final: public rpc::ActorStorage::ListStr
             // point of the list. Therefore, we should insert an entry with a null value, to make
             // sure the whole range can be marked as empty. We'll end up marking this entry as
             // part of markGapsEmpty(), later.
-            markBeginAsEmpty(lock);
+            markBeginAsEmpty(lock, cacheRef);
           }
         } else {
           if (key <= beginKey) {
@@ -825,19 +833,19 @@ class ActorCache::ForwardListStreamImpl final: public rpc::ActorStorage::ListStr
         }
 
         KJ_ASSERT(kv.hasValue());  // values that don't exist aren't listed!
-        auto entry = cache.addReadResultToCache(lock, kj::mv(key), kv.getValue(), options);
+        auto entry = cacheRef.addReadResultToCache(lock, kj::mv(key), kv.getValue(), options);
         fetchedEntries.add(kj::mv(entry));
         insertedAny = true;
       }
 
       if (insertedAny) {
         // Update `gapIsKnownEmpty` on the whole range.
-        cache.markGapsEmpty(lock, beginKey, fetchedEntries.back()->key.asPtr(), options);
+        cacheRef.markGapsEmpty(lock, beginKey, fetchedEntries.back()->key.asPtr(), options);
         beginKey = cloneKey(fetchedEntries.back()->key);
         beginKeyIsKnown = true;
       }
 
-      cache.evictOrOomIfNeeded(lock);
+      cacheRef.evictOrOomIfNeeded(lock);
     }
 
     if (fetchedEntries.size() >= adjustedLimit.orDefault(kj::maxValue)) {
@@ -857,19 +865,20 @@ class ActorCache::ForwardListStreamImpl final: public rpc::ActorStorage::ListStr
 
     // Mark the rest of the range as empty.
     {
-      auto lock = cache.lru.cleanList.lockExclusive();
+      auto& cacheRef = cache.assertLive();
+      auto lock = cacheRef.lru.cleanList.lockExclusive();
 
       if (!beginKeyIsKnown) {
         // We received no results at all, so the start of the list is definitely not in storage.
-        markBeginAsEmpty(lock);
+        markBeginAsEmpty(lock, cacheRef);
       }
 
       if (fetchedEntries.size() < adjustedLimit.orDefault(kj::maxValue)) {
         // We didn't reach the limit, so the rest of the range must be empty.
-        cache.markGapsEmpty(lock, beginKey, endKey, options);
+        cacheRef.markGapsEmpty(lock, beginKey, endKey, options);
       }
 
-      cache.evictOrOomIfNeeded(lock);
+      cacheRef.evictOrOomIfNeeded(lock);
     }
 
     fulfill();
@@ -891,8 +900,8 @@ class ActorCache::ForwardListStreamImpl final: public rpc::ActorStorage::ListStr
   //    so the insertion of a new null entry is ignored for being redundant. This case is
   //    fine too, as the gap is already marked. Our markGapsEmpty() call will start with the
   //    following entry.
-  void markBeginAsEmpty(Lock& lock) {
-    cache.addReadResultToCache(lock, cloneKey(beginKey), kj::none, options);
+  void markBeginAsEmpty(Lock& lock, ActorCache& cacheRef) {
+    cacheRef.addReadResultToCache(lock, cloneKey(beginKey), kj::none, options);
   }
 
   // Indicates that the operation is being canceled. Proactively drops all entries. This
@@ -905,7 +914,7 @@ class ActorCache::ForwardListStreamImpl final: public rpc::ActorStorage::ListStr
     fetchedEntries.clear();
   }
 
-  ActorCache& cache;
+  kj::Weak<ActorCache> cache;
 
   // Either:
   // - No prefix of the list is known yet, and `beginKey` is the original begin point passed to
@@ -1081,62 +1090,62 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
       limit.map([&](uint orig) { return orig + limitAdjustment - knownPrefixSize; });
 
   auto paf = kj::newPromiseAndFulfiller<GetResultList>();
-  auto streamServer = kj::heap<ForwardListStreamImpl>(*this,
+  auto streamServer = kj::rc<ForwardListStreamImpl>(addWeakToThis(),
       cloneKey(KJ_ASSERT_NONNULL(storageListStart)), kj::mv(endKey), kj::mv(cachedEntries),
       kj::mv(paf.fulfiller), limit, adjustedLimit, storageListStartIsKnown, options);
-  auto& streamServerRef = *streamServer;
-
-  rpc::ActorStorage::ListStream::Client streamClient = kj::mv(streamServer);
 
   auto sendPromise = scheduleStorageRead(
-      [&streamServerRef, streamClient](
+      [streamServer = streamServer.addRef()](
           rpc::ActorStorage::Operations::Client client) mutable -> kj::Promise<void> {
     auto req = client.listRequest(
-        capnp::MessageSize{8 + streamServerRef.beginKey.size() / sizeof(capnp::word) +
-              streamServerRef.endKey.map([](KeyPtr k) {
+        capnp::MessageSize{8 + streamServer->beginKey.size() / sizeof(capnp::word) +
+              streamServer->endKey.map([](KeyPtr k) {
       return k.size() / sizeof(capnp::word);
     }).orDefault(0),
           1});
 
-    if (streamServerRef.beginKeyIsKnown) {
-      // `streamServerRef.beginKey` points to a key for which we already know the value, either
+    if (streamServer->beginKeyIsKnown) {
+      // `streamServer->beginKey` points to a key for which we already know the value, either
       // because it was already in cache when we started, or because we are retrying and a previous
       // call to `values()` produced this key. Querying it again would be redundant. But, list
       // operations are inclusive of the start key. So, we compute the successor of the start key,
       // which is the key with a zero byte appended.
-      auto buffer = req.initStart(streamServerRef.beginKey.size() + 1);
-      memcpy(buffer.begin(), streamServerRef.beginKey.begin(), buffer.size() - 1);
+      auto buffer = req.initStart(streamServer->beginKey.size() + 1);
+      memcpy(buffer.begin(), streamServer->beginKey.begin(), buffer.size() - 1);
       // Technically capnp is zero-initialized so this is redundant, but just for safety and
       // clarity...
       buffer[buffer.size() - 1] = 0;
     } else {
-      if (streamServerRef.beginKey.size() > 0) {
-        req.setStart(streamServerRef.beginKey.asBytes());
+      if (streamServer->beginKey.size() > 0) {
+        req.setStart(streamServer->beginKey.asBytes());
       }
     }
 
-    KJ_IF_SOME(e, streamServerRef.endKey) {
+    KJ_IF_SOME(e, streamServer->endKey) {
       req.setEnd(e.asBytes());
     }
 
-    KJ_IF_SOME(l, streamServerRef.adjustedLimit) {
-      if (streamServerRef.fetchedEntries.size() >= l) {
+    KJ_IF_SOME(l, streamServer->adjustedLimit) {
+      if (streamServer->fetchedEntries.size() >= l) {
         // Oh it turns out we actually satisfied the limit already so we don't actually have to
         // retry. The fulfiller would have already been fulfilled.
         return kj::READY_NOW;
       }
-      req.setLimit(l - streamServerRef.fetchedEntries.size());
+      req.setLimit(l - streamServer->fetchedEntries.size());
     }
 
-    req.setStream(streamClient);
+    // Be sure to addRef before calling toOwn since toOwn moves out of the Rc, but this function
+    // may be called multiple times.
+    req.setStream(streamServer.addRef().toOwn());
     return req.sendIgnoringResult();
   });
 
   // Wait on the RPC only until stream.end() is called, then report the results. We prevent
   // `stream` from being destroyed until we have a result so that if the RPC throws an exception,
   // we don't accidentally report "PromiseFulfiller not fulfilled" instead of the exception.
-  auto promise = sendPromise.then([&streamServerRef]() -> kj::Promise<ActorCache::GetResultList> {
-    if (streamServerRef.fulfiller->isWaiting()) {
+  // The strong ref to streamServer ensures the object outlives all callbacks.
+  auto promise = sendPromise.then([streamServer = streamServer.addRef()]() mutable -> kj::Promise<ActorCache::GetResultList> {
+    if (streamServer->fulfiller->isWaiting()) {
       return KJ_EXCEPTION(FAILED, "list() never called stream.end()");
     } else {
       // We'll be canceled momentarily...
@@ -1145,15 +1154,16 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
   });
 
   return paf.promise.exclusiveJoin(kj::mv(promise))
-      .attach(kj::defer(
-          [client = kj::mv(streamClient), &streamServerRef]() { streamServerRef.cancel(); }));
+      .attach(kj::defer([streamServer = kj::mv(streamServer)]() mutable {
+        streamServer->cancel();
+      }));
 }
 
 // -----------------------------------------------------------------------------
 
 class ActorCache::ReverseListStreamImpl final: public rpc::ActorStorage::ListStream::Server {
  public:
-  ReverseListStreamImpl(ActorCache& cache,
+  ReverseListStreamImpl(kj::Weak<ActorCache> cache,
       Key beginKey,
       kj::Maybe<Key> endKey,
       kj::Vector<kj::Own<Entry>> cachedEntries,
@@ -1161,7 +1171,7 @@ class ActorCache::ReverseListStreamImpl final: public rpc::ActorStorage::ListStr
       kj::Maybe<uint> originalLimit,
       kj::Maybe<uint> adjustedLimit,
       ReadOptions options)
-      : cache(cache),
+      : cache(kj::mv(cache)),
         beginKey(kj::mv(beginKey)),
         endKey(kj::mv(endKey)),
         cachedEntries(kj::mv(cachedEntries)),
@@ -1177,7 +1187,8 @@ class ActorCache::ReverseListStreamImpl final: public rpc::ActorStorage::ListStr
     }
 
     {
-      auto lock = cache.lru.cleanList.lockExclusive();
+      auto& cacheRef = cache.assertLive();
+      auto lock = cacheRef.lru.cleanList.lockExclusive();
       auto list = context.getParams().getList();
 
       bool insertedAny = false;
@@ -1193,18 +1204,18 @@ class ActorCache::ReverseListStreamImpl final: public rpc::ActorStorage::ListStr
         }
 
         KJ_ASSERT(kv.hasValue());  // values that don't exist aren't listed!
-        auto entry = cache.addReadResultToCache(lock, kj::mv(key), kv.getValue(), options);
+        auto entry = cacheRef.addReadResultToCache(lock, kj::mv(key), kv.getValue(), options);
         fetchedEntries.add(kj::mv(entry));
         insertedAny = true;
       }
 
       if (insertedAny) {
         // Update `gapIsKnownEmpty` on the whole range.
-        cache.markGapsEmpty(lock, fetchedEntries.back()->key, endKey, options);
+        cacheRef.markGapsEmpty(lock, fetchedEntries.back()->key, endKey, options);
         endKey = cloneKey(fetchedEntries.back()->key);
       }
 
-      cache.evictOrOomIfNeeded(lock);
+      cacheRef.evictOrOomIfNeeded(lock);
     }
 
     if (fetchedEntries.size() >= adjustedLimit.orDefault(kj::maxValue) || beginKey == endKey) {
@@ -1225,7 +1236,8 @@ class ActorCache::ReverseListStreamImpl final: public rpc::ActorStorage::ListStr
 
     // Mark the rest of the range as empty.
     {
-      auto lock = cache.lru.cleanList.lockExclusive();
+      auto& cacheRef = cache.assertLive();
+      auto lock = cacheRef.lru.cleanList.lockExclusive();
 
       if (fetchedEntries.size() < adjustedLimit.orDefault(kj::maxValue)) {
         // We didn't reach the limit, so the rest of the range must be empty.
@@ -1233,13 +1245,13 @@ class ActorCache::ReverseListStreamImpl final: public rpc::ActorStorage::ListStr
         // We may need to insert a negative entry at the beginning of the list range, since we
         // didn't see it, implying it's not present on disk. addResultToCache() will conveniently
         // avoid adding anything if it turns out this is already in a known-empty gap.
-        auto beginEntry = cache.addReadResultToCache(lock, cloneKey(beginKey), kj::none, options);
+        auto beginEntry = cacheRef.addReadResultToCache(lock, cloneKey(beginKey), kj::none, options);
 
         // And we need to mark gaps empty from there to the final entry we actually saw.
-        cache.markGapsEmpty(lock, beginEntry->key, endKey, options);
+        cacheRef.markGapsEmpty(lock, beginEntry->key, endKey, options);
       }
 
-      cache.evictOrOomIfNeeded(lock);
+      cacheRef.evictOrOomIfNeeded(lock);
     }
 
     fulfill();
@@ -1262,7 +1274,7 @@ class ActorCache::ReverseListStreamImpl final: public rpc::ActorStorage::ListStr
     fetchedEntries.clear();
   }
 
-  ActorCache& cache;
+  kj::Weak<ActorCache> cache;
 
   // The beginning of the list range, as originally passed to list().
   Key beginKey;
@@ -1426,45 +1438,45 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
       limit.map([&](uint orig) { return orig + limitAdjustment - knownSuffixSize; });
 
   auto paf = kj::newPromiseAndFulfiller<GetResultList>();
-  auto streamServer = kj::heap<ReverseListStreamImpl>(*this, kj::mv(beginKey), kj::mv(endKey),
+  auto streamServer = kj::rc<ReverseListStreamImpl>(addWeakToThis(), kj::mv(beginKey), kj::mv(endKey),
       kj::mv(cachedEntries), kj::mv(paf.fulfiller), limit, adjustedLimit, options);
-  auto& streamServerRef = *streamServer;
-
-  rpc::ActorStorage::ListStream::Client streamClient = kj::mv(streamServer);
 
   auto sendPromise = scheduleStorageRead(
-      [&streamServerRef, streamClient](
+      [streamServer = streamServer.addRef()](
           rpc::ActorStorage::Operations::Client client) mutable -> kj::Promise<void> {
     auto req = client.listRequest(
-        capnp::MessageSize{8 + streamServerRef.beginKey.size() / sizeof(capnp::word) +
-              streamServerRef.endKey.map([](KeyPtr k) {
+        capnp::MessageSize{8 + streamServer->beginKey.size() / sizeof(capnp::word) +
+              streamServer->endKey.map([](KeyPtr k) {
       return k.size() / sizeof(capnp::word);
     }).orDefault(0),
           1});
-    if (streamServerRef.beginKey.size() > 0) {
-      req.setStart(streamServerRef.beginKey.asBytes());
+    if (streamServer->beginKey.size() > 0) {
+      req.setStart(streamServer->beginKey.asBytes());
     }
-    KJ_IF_SOME(e, streamServerRef.endKey) {
+    KJ_IF_SOME(e, streamServer->endKey) {
       req.setEnd(e.asBytes());
     }
     req.setReverse(true);
-    KJ_IF_SOME(l, streamServerRef.adjustedLimit) {
-      if (streamServerRef.fetchedEntries.size() >= l) {
+    KJ_IF_SOME(l, streamServer->adjustedLimit) {
+      if (streamServer->fetchedEntries.size() >= l) {
         // Oh it turns out we actually satisfied the limit already so we don't actually have to
         // retry. The fulfiller would have already been fulfilled.
         return kj::READY_NOW;
       }
-      req.setLimit(l - streamServerRef.fetchedEntries.size());
+      req.setLimit(l - streamServer->fetchedEntries.size());
     }
-    req.setStream(streamClient);
+    // Be sure to addRef before calling toOwn since toOwn moves out of the Rc, but this function
+    // may be called multiple times.
+    req.setStream(streamServer.addRef().toOwn());
     return req.sendIgnoringResult();
   });
 
   // Wait on the RPC only until stream.end() is called, then report the results. We prevent
   // `stream` from being destroyed until we have a result so that if the RPC throws an exception,
   // we don't accidentally report "PromiseFulfiller not fulfilled" instead of the exception.
-  auto promise = sendPromise.then([&streamServerRef]() -> kj::Promise<ActorCache::GetResultList> {
-    if (streamServerRef.fulfiller->isWaiting()) {
+  // The strong ref to streamServer ensures the object outlives all callbacks.
+  auto promise = sendPromise.then([streamServer = streamServer.addRef()]() mutable -> kj::Promise<ActorCache::GetResultList> {
+    if (streamServer->fulfiller->isWaiting()) {
       return KJ_EXCEPTION(FAILED, "list() never called stream.end()");
     } else {
       // We'll be canceled momentarily...
@@ -1473,8 +1485,9 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
   });
 
   return paf.promise.exclusiveJoin(kj::mv(promise))
-      .attach(kj::defer(
-          [client = kj::mv(streamClient), &streamServerRef]() { streamServerRef.cancel(); }));
+      .attach(kj::defer([streamServer = kj::mv(streamServer)]() mutable {
+        streamServer->cancel();
+      }));
 }
 
 // -----------------------------------------------------------------------------
@@ -1833,14 +1846,16 @@ kj::PromiseForResult<Func, rpc::ActorStorage::Operations::Client> ActorCache::sc
   // This is basically kj::retryOnDisconnect() except that we make the first call synchronously.
   // For our use case, this is safe, and I wanted to make sure reads get sent concurrently with
   // further JavaScript execution if possible.
+  // The weak ref will assert if ActorCache is destroyed before the promise resolves.
   auto promise = kj::evalNow(
       [&]() mutable { return function(storage).attach(recordStorageRead(hooks, clock)); });
   return oomCanceler.wrap(
       promise
-          .catch_([this, function = kj::mv(function)](kj::Exception&& e) mutable
+          .catch_([weak = addWeakToThis(), function = kj::mv(function)](kj::Exception&& e) mutable
               -> kj::PromiseForResult<Func, rpc::ActorStorage::Operations::Client> {
+    auto& self = weak.assertLive();
     if (e.getType() == kj::Exception::Type::DISCONNECTED) {
-      return function(storage).attach(recordStorageRead(hooks, clock));
+      return function(self.storage).attach(recordStorageRead(self.hooks, self.clock));
     } else {
       return kj::mv(e);
     }
@@ -2255,25 +2270,33 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options, SpanParent tr
     // Capture the trace span from the first write in this flush batch.
     currentFlushSpan = kj::mv(traceSpan);
 
+    // The weak refs will assert if ActorCache is destroyed before the promises resolve.
     auto flushPromise = lastFlush.addBranch()
-                            .attach(kj::defer([this]() {
-      flushScheduled = false;
-      flushScheduledWithOutputGate = false;
+                            .attach(kj::defer([weak = addWeakToThis()]() {
+      auto& self = weak.assertLive();
+      self.flushScheduled = false;
+      self.flushScheduledWithOutputGate = false;
       // Reset the flush span for the next batch
-      currentFlushSpan = nullptr;
-    })).then([this]() {
-      ++flushesEnqueued;
-      return kj::evalNow([this]() {
+      self.currentFlushSpan = nullptr;
+    })).then([weak = addWeakToThis()]() {
+      auto& self = weak.assertLive();
+      ++self.flushesEnqueued;
+      return kj::evalNow([weak = kj::Weak<ActorCache>(weak)]() {
+        auto& self = weak.assertLive();
         // `flushImpl()` can throw, so we need to wrap it in `evalNow()` to observe all pathways.
-        return flushImpl();
-      }).attach(kj::defer([this]() { --flushesEnqueued; }));
+        return self.flushImpl();
+      }).attach(kj::defer([weak = kj::Weak<ActorCache>(weak)]() {
+        auto& self = weak.assertLive();
+        --self.flushesEnqueued;
+      }));
     });
 
     if (options.allowUnconfirmed) {
       // Don't apply output gate. But, if an exception is thrown, we still want to break the gate,
       // so arrange for that.
-      flushPromise = flushPromise.catch_([this](kj::Exception&& e) {
-        return gate.lockWhile(kj::Promise<void>(kj::mv(e)), nullptr);
+      flushPromise = flushPromise.catch_([weak = addWeakToThis()](kj::Exception&& e) {
+        auto& self = weak.assertLive();
+        return self.gate.lockWhile(kj::Promise<void>(kj::mv(e)), nullptr);
       });
     } else {
       flushPromise = gate.lockWhile(kj::mv(flushPromise), currentFlushSpan.addRef());
@@ -2608,18 +2631,20 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
 
   auto flushProm = startFlushTransaction();
 
+  // The weak ref will assert if ActorCache is destroyed before the promise resolves.
   bool flushingBeforeDeleteAll = requestedDeleteAll != kj::none;
   return oomCanceler.wrap(kj::mv(flushProm))
-      .then([this, flushingBeforeDeleteAll]() -> kj::Promise<void> {
+      .then([weak = addWeakToThis(), flushingBeforeDeleteAll]() -> kj::Promise<void> {
+    auto& self = weak.assertLive();
     // We need to process the alarm result before we (potentially) start the delete all because if
     // we did not our alarm state can't know if it need to flush a new time or not after the delete
     // all. This might be another reason why delete all should not be considered truly deleting the
     // durable object: alarms are not cleared by a delete all.
-    KJ_SWITCH_ONEOF(currentAlarmTime) {
+    KJ_SWITCH_ONEOF(self.currentAlarmTime) {
       KJ_CASE_ONEOF(knownAlarmTime, ActorCache::KnownAlarmTime) {
         if (knownAlarmTime.status == KnownAlarmTime::Status::FLUSHING) {
           if (knownAlarmTime.noCache) {
-            currentAlarmTime = UnknownAlarmTime{};
+            self.currentAlarmTime = UnknownAlarmTime{};
           } else {
             knownAlarmTime.status = KnownAlarmTime::Status::CLEAN;
           }
@@ -2629,9 +2654,9 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
         if (deferredDelete.status == DeferredAlarmDelete::Status::FLUSHING) {
           bool wasDeleted = KJ_ASSERT_NONNULL(deferredDelete.wasDeleted);
           if (deferredDelete.noCache || !wasDeleted) {
-            currentAlarmTime = UnknownAlarmTime{};
+            self.currentAlarmTime = UnknownAlarmTime{};
           } else {
-            currentAlarmTime = KnownAlarmTime{.status = KnownAlarmTime::Status::CLEAN,
+            self.currentAlarmTime = KnownAlarmTime{.status = KnownAlarmTime::Status::CLEAN,
               .time = kj::none,
               .noCache = deferredDelete.noCache};
           }
@@ -2642,12 +2667,12 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
     if (flushingBeforeDeleteAll) {
       // The writes we flushed were writes that had occurred before a deleteAll. Now that they are
       // written, we must perform the deleteAll() itself.
-      return flushImplDeleteAll();
+      return self.flushImplDeleteAll();
     }
 
-    auto lock = lru.cleanList.lockExclusive();
+    auto lock = self.lru.cleanList.lockExclusive();
 
-    KJ_IF_SOME(r, requestedDeleteAll) {
+    KJ_IF_SOME(r, self.requestedDeleteAll) {
       // It would appear that all dirty entries were moved into `requestedDeleteAll` during the
       // time that we were waiting for the flushImpl(). We want to remove the flushing entries
       // from that vector now.
@@ -2663,7 +2688,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
     } else {
       // Mark all flushing entries as `CLEAN`. Note that we know that all flushing entries must
       // form a prefix of `dirtyList` since any new entries would have been added to the end.
-      for (auto& entry: dirtyList) {
+      for (auto& entry: self.dirtyList) {
         if (!entry.flushStarted) {
           // Completed all flushing entries.
           break;
@@ -2678,15 +2703,15 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
         // next flush we won't attempt to delete again.
         entry.isCountedDelete = false;
 
-        dirtyList.remove(entry);
+        self.dirtyList.remove(entry);
         if (entry.noCache) {
           entry.setNotInCache();
-          evictEntry(lock, entry);
+          self.evictEntry(lock, entry);
         } else {
           if (entry.gapIsKnownEmpty && entry.getValueStatus() == EntryValueStatus::ABSENT) {
             // This is a negative entry, and is followed by a known-empty gap. If the previous entry
             // also has `gapIsKnownEmpty`, then this entry is entirely redundant.
-            auto& map = currentValues.get(lock);
+            auto& map = self.currentValues.get(lock);
             auto entryIter = map.seek(entry.key);
             KJ_ASSERT(entryIter->get() == &entry);
 
@@ -2703,18 +2728,19 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
             }
           }
 
-          addToCleanList(lock, entry);
+          self.addToCleanList(lock, entry);
         }
       }
     }
 
-    evictOrOomIfNeeded(lock);
+    self.evictOrOomIfNeeded(lock);
 
     return kj::READY_NOW;
-  }, [this, retryCount](kj::Exception&& e) -> kj::Promise<void> {
+  }, [weak = addWeakToThis(), retryCount](kj::Exception&& e) -> kj::Promise<void> {
+    auto& self = weak.assertLive();
     static const size_t MAX_RETRIES = 4;
     if (e.getType() == kj::Exception::Type::DISCONNECTED && retryCount < MAX_RETRIES) {
-      return flushImpl(retryCount + 1);
+      return self.flushImpl(retryCount + 1);
     } else if (jsg::isTunneledException(e.getDescription()) ||
         jsg::isDoNotLogException(e.getDescription())) {
       // Before passing along the exception, give it the proper brokenness reason.
@@ -3064,12 +3090,14 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
 
   KJ_ASSERT(requestedDeleteAll != kj::none);
 
+  // The weak ref will assert if ActorCache is destroyed before the promise resolves.
   return storage.deleteAllRequest(capnp::MessageSize{2, 0})
       .send()
       .then(
-          [this](capnp::Response<rpc::ActorStorage::Operations::DeleteAllResults> results)
+          [weak = addWeakToThis()](capnp::Response<rpc::ActorStorage::Operations::DeleteAllResults> results)
               -> kj::Promise<void> {
-    auto& deleteAllState = KJ_ASSERT_NONNULL(requestedDeleteAll);
+    auto& self = weak.assertLive();
+    auto& deleteAllState = KJ_ASSERT_NONNULL(self.requestedDeleteAll);
     deleteAllState.countFulfiller->fulfill(results.getNumDeleted());
     bool shouldDeleteAlarm = deleteAllState.deleteAlarm;
 
@@ -3079,7 +3107,7 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
     // finishes, subsequent ones see `requestedDeleteAll` is already non-null and they don't change
     // it. Instead, the writes that occurred between the deleteAll()s are simply discarded, as if
     // the two deleteAll()s had been coalesced into a single one.
-    requestedDeleteAll = kj::none;
+    self.requestedDeleteAll = kj::none;
 
     if (shouldDeleteAlarm) {
       // The deleteAll() was requested with deleteAlarm=true. Now that the deleteAll RPC has
@@ -3091,11 +3119,11 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
       // was made after the deleteAll() was initiated, and that newer alarm value should take
       // precedence over the deletion.
       bool alreadyDirty = false;
-      KJ_IF_SOME(known, currentAlarmTime.tryGet<KnownAlarmTime>()) {
+      KJ_IF_SOME(known, self.currentAlarmTime.tryGet<KnownAlarmTime>()) {
         alreadyDirty = known.status == KnownAlarmTime::Status::DIRTY;
       }
       if (!alreadyDirty) {
-        currentAlarmTime = ActorCache::KnownAlarmTime{
+        self.currentAlarmTime = ActorCache::KnownAlarmTime{
           .status = ActorCache::KnownAlarmTime::Status::DIRTY,
           .time = kj::none,
         };
@@ -3103,8 +3131,8 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
     }
 
     {
-      auto lock = lru.cleanList.lockExclusive();
-      evictOrOomIfNeeded(lock);
+      auto lock = self.lru.cleanList.lockExclusive();
+      self.evictOrOomIfNeeded(lock);
     }
 
     // Now we must flush any writes that happened after the deleteAll(). (If there are none, this
@@ -3112,12 +3140,13 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
     // TODO(soon) This will use the write options for the deleteAll() even if the options for future
     // operations differ. This can mean that we will not wait for the output gate when we were asked
     // to do so. We should fix this.
-    return flushImpl();
+    return self.flushImpl();
   },
-          [this, retryCount](kj::Exception&& e) -> kj::Promise<void> {
+          [weak = addWeakToThis(), retryCount](kj::Exception&& e) -> kj::Promise<void> {
+    auto& self = weak.assertLive();
     static const size_t MAX_RETRIES = 4;
     if (e.getType() == kj::Exception::Type::DISCONNECTED && retryCount < MAX_RETRIES) {
-      return flushImplDeleteAll(retryCount + 1);
+      return self.flushImplDeleteAll(retryCount + 1);
     } else if (jsg::isTunneledException(e.getDescription()) ||
         jsg::isDoNotLogException(e.getDescription())) {
       // Before passing along the exception, give it the proper brokenness reason.

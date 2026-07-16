@@ -1018,11 +1018,18 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
   // Constructor use by EntrypointJsRpcTarget, which is revoked and destroyed before the IoContext
   // can possibly be canceled. It can just use ctx.run().
+  //
+  // The `ctx.run()` lambda below captures `this` raw. This is safe because JsRpcTargetBase is a
+  // capnp RPC Server (neither JSG resource nor kj::Refcounted), and this
+  // `CantOutliveIncomingRequest` constructor is reserved for EntrypointJsRpcTarget which is
+  // structurally guaranteed to be revoked and destroyed before the IoContext can be canceled
+  // (see comment above). ctx.run()'s continuation therefore cannot outlive `this`.
   JsRpcTargetBase(IoContext& ctx, CantOutliveIncomingRequest)
       : durableObjectId(getCurrentDurableObjectId()),
         enterIsolateAndCall([this, &ctx](CallContext callContext) {
           // Note: No need to topUpActor() since this is the start of a top-level request, so the
           // actor will already have been topped up by IncomingRequest::delivered().
+          // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
           return ctx.run([this, callContext](Worker::Lock& lock, IoContext& ctx) mutable {
             return callImpl(lock, ctx, callContext);
           });
@@ -1244,11 +1251,9 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       })));
 
       if (ctx.hasOutputGate()) {
-        // Note: If `ctx` is destroyed, the entire call to `callImpl()` will be canceled
-        // (makeReentryCallback() ensures this). This does NOT cancel the JavaScript (because JS
-        // promises are not RAII-cancelable), but it will cancel this trailing .then(), which is
-        // why it's safe to capture `&ctx` here.
-        return result.then([&ctx]() mutable { return ctx.waitForOutputLocks(); });
+        return result.then([weakRef = ctx.getWeakRef()]() mutable {
+          return KJ_ASSERT_NONNULL(weakRef.tryGet()).waitForOutputLocks();
+        });
       } else {
         return result;
       }
@@ -2009,10 +2014,19 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   // Override call() to emit the Return event when the top-level RPC call completes.
   // This marks when the handler returned a value, NOT when all data has been streamed or all
   // capabilities released.
+  //
+  // Capturing `this` raw below is safe because EntrypointJsRpcTarget is a capnp RPC Server
+  // (neither JSG resource nor kj::Refcounted) and is constructed with `CantOutliveIncomingRequest`,
+  // meaning it is structurally guaranteed to be revoked and destroyed before its IoContext can be
+  // canceled. The returned promise (and hence this continuation) is owned by the in-flight RPC
+  // call, which is itself owned by the target, so `this` necessarily outlives the .then()
+  // continuation.
   kj::Promise<void> call(CallContext callContext) override {
-    return JsRpcTargetBase::call(kj::mv(callContext)).then([this]() {
-      KJ_IF_SOME(t, ioCtx.getWorkerTracer()) {
-        t.setReturn(ioCtx.now());
+    return JsRpcTargetBase::call(kj::mv(callContext)).then([weakRef = ioCtx.getWeakRef()]() {
+      KJ_IF_SOME(context, weakRef) {
+        KJ_IF_SOME(t, context->getWorkerTracer()) {
+          t.setReturn(context->now());
+        }
       }
     });
   }
