@@ -149,6 +149,17 @@ jsg::Promise<jsg::Ref<Blob>> getReadableStreamBlob(
     return js.alloc<Blob>(js, jsg::JsBufferSource(ab), kj::mv(contentType));
   });
 }
+
+// Calls the named method on the given object, with the object itself as the receiver.
+// Used to invoke the TypeScript conduit's controller facade methods (enqueue, close,
+// respond, ...). The facade objects are module-owned TypeScript code, not user objects,
+// so a missing method indicates an internal error.
+template <jsg::IsJsValue... Args>
+jsg::JsValue invokeMethod(jsg::Lock& js, jsg::JsObject obj, kj::StringPtr name, Args... args) {
+  auto func =
+      KJ_REQUIRE_NONNULL(obj.get(js, name).tryCast<jsg::JsFunction>(), "method not found", name);
+  return func.call(js, obj, args...);
+}
 }  // namespace
 
 // The -Wdangling-field warnings below are false positives. view captures the heap buffer pointer
@@ -674,6 +685,265 @@ void JsReadableStream::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
       tracker.trackFieldWithSize("buffer", buffer->view.size());
     }
   }
+}
+
+// =======================================================================================
+// ReadableStreamNativeSource
+
+ReadableStreamNativeSource::ReadableStreamNativeSource(
+    IoContext& ioContext, kj::Own<ReadableStreamSource> source)
+    : state(Active{.source = ioContext.addObject(kj::mv(source))}) {}
+
+jsg::Promise<void> ReadableStreamNativeSource::pull(
+    jsg::Lock& js, jsg::JsObject controller, jsg::Ref<AbortSignal> signal) {
+  // Defensive: the TypeScript conduit guarantees at most one pull in flight (standard
+  // pulling/pullAgain serialization); a concurrent pull is a contract violation and must
+  // fail loudly.
+  JSG_REQUIRE(!pullInFlight, TypeError, "pull() is already in flight.");
+
+  KJ_IF_SOME(active, state) {
+    // The read mode follows the consumer: a non-null byobRequest means a BYOB read is at
+    // the head of the conduit's request queue; null means a default read is.
+    KJ_IF_SOME(byobRequest, controller.get(js, "byobRequest"_kj).tryCast<jsg::JsObject>()) {
+      return pullByob(js, controller, byobRequest, kj::mv(signal), active);
+    }
+    return pullDefault(js, controller, kj::mv(signal), active);
+  }
+
+  // The source already reached EOF or was canceled. The conduit stops pulling once it
+  // observes close/error, so this is unreachable in practice; tolerate it defensively.
+  return js.resolvedPromise();
+}
+
+jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
+    jsg::Lock& js, jsg::JsObject controller, jsg::Ref<AbortSignal> signal, Active& active) {
+  // Bytes retained from an abandoned pull are redelivered first, before any new data.
+  if (stash.size() > 0) {
+    // Contract: check the signal synchronously immediately before delivering. If the
+    // consumer has already abandoned this read too, keep the bytes for the next pull.
+    if (!signal->getAborted(js)) {
+      auto chunk = jsg::JsUint8Array::create(js, stash.asPtr());
+      stash.clear();
+      invokeMethod(js, controller, "enqueue"_kj, chunk);
+    }
+    return js.resolvedPromise();
+  }
+
+  ensureScratch(kScratchSize);
+
+  auto& ioContext = IoContext::current();
+  pullInFlight = true;
+  return ioContext.awaitIo(js, active.source->tryRead(scratch.begin(), 1, scratch.size()))
+      .then(js,
+          [self = JSG_THIS, controller = controller.addRef(js), signal = kj::mv(signal)](
+              jsg::Lock& js, size_t amount) mutable {
+    self->pullInFlight = false;
+    if (self->pendingCancel) {
+      // cancel() arrived while the read was in flight: complete the deferred teardown and
+      // discard the bytes (post-cancel stragglers are discarded, per the contract).
+      self->pendingCancel = false;
+      self->state = kj::none;
+      return;
+    }
+    if (signal->getAborted(js)) {
+      // The consumer abandoned the read while it was in flight (e.g. releaseLock()).
+      // Retain the bytes for redelivery on the next pull; the conduit treats this pull's
+      // settlement as inert.
+      self->stash.addAll(self->scratch.first(amount));
+      return;
+    }
+    if (amount == 0) {
+      // EOF. Settle our own state before notifying, in case the close call re-enters.
+      self->state = kj::none;
+      invokeMethod(js, controller.getHandle(js), "close"_kj);
+      return;
+    }
+    invokeMethod(js, controller.getHandle(js), "enqueue"_kj,
+        jsg::JsUint8Array::create(js, self->scratch.first(amount)));
+  },
+          [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
+    // The read failed; the source is no longer usable. Rethrow to reject the pull promise
+    // -- the conduit errors the stream (or ignores the settlement if this pull was already
+    // abandoned).
+    self->pullInFlight = false;
+    self->pendingCancel = false;
+    self->state = kj::none;
+    js.throwException(kj::mv(exception));
+  });
+}
+
+jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
+    jsg::JsObject controller,
+    jsg::JsObject byobRequest,
+    jsg::Ref<AbortSignal> signal,
+    Active& active) {
+  // Extract the request's view and minimum. The view is a Uint8Array over the remaining
+  // unfilled region of the consumer's (transferred, conduit-owned) buffer; atLeast is the
+  // minimum number of bytes that must be delivered to satisfy the read (>= 1). These come
+  // from the module-owned conduit facade, not from user code, so shape violations indicate
+  // internal errors and fail loudly.
+  auto view = KJ_REQUIRE_NONNULL(
+      byobRequest.get(js, "view"_kj).tryCast<jsg::JsUint8Array>(), "the BYOB request has no view");
+  size_t atLeast = 1;
+  KJ_IF_SOME(num, byobRequest.get(js, "atLeast"_kj).tryCast<jsg::JsNumber>()) {
+    KJ_IF_SOME(value, num.value(js)) {
+      atLeast = kj::max(static_cast<size_t>(1), static_cast<size_t>(value));
+    }
+  }
+  auto dest = view.asArrayPtr();
+  JSG_REQUIRE(dest.size() > 0, TypeError, "The BYOB request view is empty or detached.");
+  JSG_REQUIRE(
+      atLeast <= dest.size(), TypeError, "The BYOB request's minimum exceeds its view size.");
+
+  // Bytes retained from an abandoned pull are redelivered first. If they alone satisfy the
+  // read's minimum, no I/O is needed at all.
+  if (stash.size() >= atLeast) {
+    // Contract: check the signal synchronously immediately before delivering.
+    if (!signal->getAborted(js)) {
+      size_t amount = kj::min(stash.size(), dest.size());
+      dest.first(amount).copyFrom(stash.asPtr().first(amount));
+      consumeStash(amount);
+      invokeMethod(js, byobRequest, "respond"_kj, js.num(static_cast<double>(amount)));
+    }
+    return js.resolvedPromise();
+  }
+
+  // Top up with a fresh read. Any retained bytes count toward the minimum. The underlying
+  // source performs its own internal accumulation toward minBytes (KJ tryRead semantics),
+  // so this single read is the source's complete answer for the read: delivering fewer
+  // than the minimum in total implicitly signals EOF (the conduit commits the partial fill
+  // fused as {done: true, value: partialView} and closes the stream).
+  size_t stashed = stash.size();
+  size_t minBytes = atLeast - stashed;
+  ensureScratch(kj::max(kScratchSize, minBytes));
+  size_t maxBytes = kj::min(dest.size() - stashed, scratch.size());
+
+  auto& ioContext = IoContext::current();
+  pullInFlight = true;
+  return ioContext.awaitIo(js, active.source->tryRead(scratch.begin(), minBytes, maxBytes))
+      .then(js,
+          [self = JSG_THIS, controller = controller.addRef(js),
+              byobRequest = byobRequest.addRef(js), view = view.addRef(js), signal = kj::mv(signal),
+              minBytes](jsg::Lock& js, size_t amount) mutable {
+    self->pullInFlight = false;
+    if (self->pendingCancel) {
+      // cancel() arrived while the read was in flight: complete the deferred teardown and
+      // discard the bytes.
+      self->pendingCancel = false;
+      self->state = kj::none;
+      return;
+    }
+    if (signal->getAborted(js)) {
+      // The consumer abandoned the read; retain the bytes (after any previously retained
+      // ones, preserving order) for redelivery on the next pull.
+      self->stash.addAll(self->scratch.first(amount));
+      return;
+    }
+    size_t stashed = self->stash.size();
+    size_t total = stashed + amount;
+    if (total == 0) {
+      // EOF with nothing to deliver: respond(0) is forbidden; close() is the EOF signal.
+      self->state = kj::none;
+      invokeMethod(js, controller.getHandle(js), "close"_kj);
+      return;
+    }
+    auto dest = view.getHandle(js).asArrayPtr();
+    if (dest.size() < total) {
+      // The view was detached while the read was in flight. Treat the read as abandoned:
+      // retain the bytes for the next consumer.
+      self->stash.addAll(self->scratch.first(amount));
+      return;
+    }
+    if (stashed > 0) {
+      dest.first(stashed).copyFrom(self->stash.asPtr());
+      self->stash.clear();
+    }
+    if (amount > 0) {
+      dest.slice(stashed, stashed + amount).copyFrom(self->scratch.first(amount));
+    }
+    bool eof = amount < minBytes;
+    if (eof) {
+      // The source delivered fewer than minBytes: EOF (KJ semantics). Settle our own
+      // state before making the JS calls below.
+      self->state = kj::none;
+    }
+    invokeMethod(js, byobRequest.getHandle(js), "respond"_kj, js.num(static_cast<double>(total)));
+    if (eof) {
+      // Fused close-commit: deliver the partial bytes, then explicitly signal EOF in the
+      // same pull turn. (The under-delivered respond() above already implies closure to
+      // the conduit, which tolerates this close as a no-op; the explicit close keeps the
+      // EOF signal unambiguous rather than relying on that inference.)
+      invokeMethod(js, controller.getHandle(js), "close"_kj);
+    }
+  },
+          [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
+    self->pullInFlight = false;
+    self->pendingCancel = false;
+    self->state = kj::none;
+    js.throwException(kj::mv(exception));
+  });
+}
+
+void ReadableStreamNativeSource::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) {
+  KJ_IF_SOME(active, state) {
+    kj::Exception exception = [&]() {
+      KJ_IF_SOME(r, reason) {
+        return js.exceptionToKj(r);
+      }
+      return JSG_KJ_EXCEPTION(DISCONNECTED, Error, "This ReadableStream was cancelled.");
+    }();
+    active.source->cancel(kj::mv(exception));
+    if (pullInFlight) {
+      // A read is in flight; releasing the source now would destroy it out from under its
+      // own read. Defer the release to the pull's settlement.
+      pendingCancel = true;
+    } else {
+      state = kj::none;
+    }
+  }
+  // Canceling an already-done source is a no-op.
+}
+
+void ReadableStreamNativeSource::tee(jsg::Lock& js) {
+  // TODO(streams-ts): Implement native tee: tryTee() fast path constructing two new
+  // ReadableStreamNativeSources (each seeded with a copy of the stash), with the open
+  // questions (generic fallback when tryTee() returns none, tee during an in-flight pull,
+  // branch marker stamping) tracked in the design doc.
+  KJ_UNIMPLEMENTED("ReadableStreamNativeSource::tee() is not implemented yet");
+}
+
+kj::Maybe<jsg::JsBigInt> ReadableStreamNativeSource::getExpectedLength(jsg::Lock& js) {
+  KJ_IF_SOME(active, state) {
+    KJ_IF_SOME(length, active.source->tryGetLength(StreamEncoding::IDENTITY)) {
+      return js.bigInt(length);
+    }
+  }
+  return kj::none;
+}
+
+void ReadableStreamNativeSource::ensureScratch(size_t capacity) {
+  if (scratch.size() < capacity) {
+    scratch = kj::heapArray<kj::byte>(capacity);
+  }
+}
+
+void ReadableStreamNativeSource::consumeStash(size_t bytes) {
+  KJ_DASSERT(bytes <= stash.size());
+  if (bytes >= stash.size()) {
+    stash.clear();
+  } else {
+    // Partial consumption (rare: a BYOB view smaller than the current stash). Rebuild
+    // from the remainder rather than shifting in place: ArrayPtr::copyFrom() forbids
+    // overlapping ranges.
+    kj::Vector<kj::byte> remainder;
+    remainder.addAll(stash.asPtr().slice(bytes, stash.size()));
+    stash = kj::mv(remainder);
+  }
+}
+
+void ReadableStreamNativeSource::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackFieldWithSize("scratch", scratch.size());
+  tracker.trackFieldWithSize("stash", stash.size());
 }
 
 }  // namespace workerd::api

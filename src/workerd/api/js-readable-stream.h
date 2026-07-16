@@ -273,4 +273,114 @@ struct JsReadableStream::Tee {
   JsReadableStream branch2;
 };
 
+// The C++ implementation of the "native underlying source" contract defined by the
+// TypeScript streams implementation. The authoritative statement of the contract is the
+// header comment in src/per_isolate/webstreams/native.ts (one amendment applies:
+// byobRequest.respondWithNewView has been removed from the controller facade and is never
+// used).
+//
+// A ReadableStreamNativeSource wraps a kj-native ReadableStreamSource so that a
+// TypeScript-implemented ReadableStream can be backed directly by C++ byte sources: the
+// TypeScript conduit invokes pull()/cancel() (and eventually tee()) on this object, which
+// translates them into tryRead()/cancel() calls on the underlying source.
+//
+// Instances are created only from C++ (there is no JavaScript constructor) and are handed
+// to the TypeScript ReadableStream constructor carrying the native-source marker symbol.
+// The object is internal plumbing: it is never exposed to user code, and it is suppressed
+// from the generated TypeScript types.
+//
+// The underlying ReadableStreamSource is a KJ I/O object tied to the creating request, so
+// it is held via IoOwn: all methods must be invoked with that request's IoContext current.
+// This holds in practice because the TypeScript conduit only invokes the source hooks in
+// response to JavaScript activity within the owning request; a wrong-context call throws,
+// surfacing as a pull rejection that errors the stream.
+class ReadableStreamNativeSource final: public jsg::Object {
+ public:
+  ReadableStreamNativeSource(IoContext& ioContext, kj::Own<ReadableStreamSource> source);
+
+  // The contract's data-delivery hook, called by the TypeScript conduit whenever there is
+  // read demand, with at most one pull in flight at a time. `controller` is the conduit's
+  // controller facade: its byobRequest property discriminates the read mode (an object for
+  // BYOB reads, null for default reads), and delivery happens through exactly one
+  // byobRequest.respond() / controller.enqueue() / controller.close() call per pull (pull
+  // rejection is the error path). `signal` is the per-pull cancellation signal: it aborts
+  // when the consumer abandons the in-flight read (reader release, cancel, tee), in which
+  // case any bytes read are retained for redelivery by the next pull rather than delivered
+  // or dropped.
+  jsg::Promise<void> pull(jsg::Lock& js, jsg::JsObject controller, jsg::Ref<AbortSignal> signal);
+
+  // Cancels the underlying source, indicating a loss of interest in the data, and releases
+  // it. If a pull's read is in flight, the release is deferred until that read settles
+  // (destroying a ReadableStreamSource with an outstanding tryRead() is unsafe); any bytes
+  // that read produces are discarded.
+  void cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
+
+  // Splits the source into two independent branches, leaving this source consumed.
+  // TODO(streams-ts): Not yet implemented.
+  void tee(jsg::Lock& js);
+
+  // The total number of bytes the source promises to produce, if known. Queried live from
+  // the underlying source on each call; undefined once the source is done or canceled. The
+  // TypeScript side reads this once at stream construction, per the contract, and enforces
+  // the exact-total accounting itself.
+  kj::Maybe<jsg::JsBigInt> getExpectedLength(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(ReadableStreamNativeSource) {
+    JSG_METHOD(pull);
+    JSG_METHOD(cancel);
+    JSG_METHOD(tee);
+    JSG_READONLY_PROTOTYPE_PROPERTY(expectedLength, getExpectedLength);
+
+    // Internal plumbing type: keep it out of the generated TypeScript types.
+    JSG_TS_OVERRIDE(type ReadableStreamNativeSource = never);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
+ private:
+  struct Active {
+    IoOwn<ReadableStreamSource> source;
+  };
+
+  jsg::Promise<void> pullDefault(
+      jsg::Lock& js, jsg::JsObject controller, jsg::Ref<AbortSignal> signal, Active& active);
+  jsg::Promise<void> pullByob(jsg::Lock& js,
+      jsg::JsObject controller,
+      jsg::JsObject byobRequest,
+      jsg::Ref<AbortSignal> signal,
+      Active& active);
+
+  // Ensure the scratch buffer can hold at least `capacity` bytes. Only called at the start
+  // of a pull, when the scratch buffer holds no live data, so growing may discard previous
+  // contents.
+  void ensureScratch(size_t capacity);
+
+  // Drop the first `bytes` bytes of the stash (they have been delivered).
+  void consumeStash(size_t bytes);
+
+  // kj::none once the source has reached EOF, been canceled, or been consumed by tee().
+  kj::Maybe<Active> state;
+
+  // Reusable read target, lazily allocated. KJ reads always land here -- never directly in
+  // V8-visible memory -- and delivery copies out under the isolate lock. Sized
+  // kScratchSize, growing when a BYOB read's minimum exceeds that (the conduit never
+  // re-pulls an unsatisfied minimum, so a single read must be able to satisfy it).
+  kj::Array<kj::byte> scratch;
+
+  // Bytes that were read by a pull whose consumer abandoned it (per-pull signal aborted)
+  // before delivery. Redelivered by the next pull, in order, before any new data, so no
+  // bytes are lost across a reader release. Multiple abandoned pulls may accumulate.
+  kj::Vector<kj::byte> stash;
+
+  // Defensive only: the TypeScript conduit guarantees at most one pull in flight (standard
+  // pulling/pullAgain serialization).
+  bool pullInFlight = false;
+
+  // Set when cancel() arrives while a pull's read is in flight: the source's release is
+  // deferred to the pull's settlement.
+  bool pendingCancel = false;
+
+  static constexpr size_t kScratchSize = 32 * 1024;
+};
+
 }  // namespace workerd::api

@@ -27,7 +27,8 @@ class ContentSource final: public ReadableStreamSource {
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     auto amount = kj::min(maxBytes, data.size() - offset);
-    memcpy(buffer, data.begin() + offset, amount);
+    kj::arrayPtr(static_cast<kj::byte*>(buffer), amount)
+        .copyFrom(data.slice(offset, offset + amount).asBytes());
     offset += amount;
     return amount;
   }
@@ -324,13 +325,14 @@ KJ_TEST("JsReadableStream detach of a consumed stream throws without IgnoreDistu
 
     JsReadableStream stream(js, kj::str(kData));
     auto promise = stream.text(js, kLimit).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock& js, kj::String) {
-      js.tryCatch([&] {
-        stream.detach(js);  // defaults to IgnoreDisturbed::NO
-        KJ_FAIL_REQUIRE("expected detach() of a consumed stream to throw");
-      }, [&](jsg::Value exception) {
-        auto e = js.exceptionToKj(kj::mv(exception));
-        KJ_EXPECT(e.getDescription().contains("TypeError"), e.getDescription());
-      });
+      JSG_TRY(js) {
+      stream.detach(js);  // defaults to IgnoreDisturbed::NO
+      KJ_FAIL_REQUIRE("expected detach() of a consumed stream to throw");
+      }
+      JSG_CATCH(exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("TypeError"), e.getDescription());
+      };
     }));
     return env.context.awaitJs(js, kj::mv(promise));
   });
@@ -472,6 +474,381 @@ KJ_TEST("JsReadableStream pumpTo with EndStream::NO leaves the sink open") {
   });
   KJ_EXPECT(collected.asPtr() == kData.asBytes());
   KJ_EXPECT(!ended);
+}
+
+// =======================================================================================
+// ReadableStreamNativeSource
+
+// A ContentSource that additionally records cancellation into externally-owned state.
+class CancelableContentSource final: public ReadableStreamSource {
+ public:
+  CancelableContentSource(kj::StringPtr data, kj::Maybe<kj::Exception>& canceled)
+      : data(data),
+        canceled(canceled) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    auto amount = kj::min(maxBytes, data.size() - offset);
+    kj::arrayPtr(static_cast<kj::byte*>(buffer), amount)
+        .copyFrom(data.slice(offset, offset + amount).asBytes());
+    offset += amount;
+    return amount;
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    if (encoding == StreamEncoding::IDENTITY) {
+      return data.size() - offset;
+    }
+    return kj::none;
+  }
+
+  void cancel(kj::Exception reason) override {
+    canceled = kj::mv(reason);
+  }
+
+ private:
+  kj::StringPtr data;
+  size_t offset = 0;
+  kj::Maybe<kj::Exception>& canceled;
+};
+
+// A ReadableStreamSource whose reads always fail. Uses a tunneled JS exception so the
+// failure surfaces to JavaScript with its message intact (a bare KJ exception would
+// surface as an opaque "internal error").
+class ErroringSource final: public ReadableStreamSource {
+ public:
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return JSG_KJ_EXCEPTION(FAILED, Error, "test read failure");
+  }
+};
+
+// Records the conduit-side observations of a native source's deliveries.
+struct MockControllerState {
+  kj::Vector<kj::Array<kj::byte>> enqueued;
+  bool closed = false;
+  kj::Maybe<double> responded;
+};
+
+// Builds a mock of the TypeScript conduit's controller facade recording into `state`.
+// `byobRequest` is null for default-read pulls, or a mock BYOB request object (see
+// makeMockByobRequest).
+jsg::JsObject makeMockController(
+    jsg::Lock& js, MockControllerState& state, jsg::JsValue byobRequest) {
+  auto obj = js.obj();
+  obj.set(js, "byobRequest"_kj, byobRequest);
+  obj.set(js, "enqueue"_kj,
+      jsg::JsValue(js.wrapSimpleFunction(
+          js.v8Context(), [&state](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+    auto chunk = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsUint8Array>());
+    state.enqueued.add(kj::heapArray<kj::byte>(chunk.asArrayPtr()));
+  })));
+  obj.set(js, "close"_kj,
+      jsg::JsValue(js.wrapSimpleFunction(
+          js.v8Context(), [&state](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+    state.closed = true;
+  })));
+  return obj;
+}
+
+// Builds a mock of the conduit's BYOB request facade over the given view, recording
+// respond() calls into `state`.
+jsg::JsObject makeMockByobRequest(
+    jsg::Lock& js, MockControllerState& state, jsg::JsUint8Array view, double atLeast) {
+  auto obj = js.obj();
+  obj.set(js, "view"_kj, view);
+  obj.set(js, "atLeast"_kj, js.num(atLeast));
+  obj.set(js, "respond"_kj,
+      jsg::JsValue(js.wrapSimpleFunction(
+          js.v8Context(), [&state](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+    state.responded = info[0].As<v8::Number>()->Value();
+  })));
+  return obj;
+}
+
+jsg::Ref<AbortSignal> freshSignal(jsg::Lock& js) {
+  return AbortController::constructor(js)->getSignal();
+}
+
+KJ_TEST("ReadableStreamNativeSource default pull delivers chunks then closes at EOF") {
+  TestFixture testFixture;
+  MockControllerState state;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    auto controller = makeMockController(js, state, js.null());
+
+    auto promise = source->pull(js, controller, freshSignal(js))
+                       .then(js,
+                           [&state, source = source.addRef(), controller = controller.addRef(js)](
+                               jsg::Lock& js) mutable {
+      KJ_EXPECT(state.enqueued.size() == 1);
+      KJ_EXPECT(state.enqueued[0].asPtr() == kData.asBytes());
+      KJ_EXPECT(!state.closed);
+      // The next pull observes EOF and closes (never enqueues an empty chunk).
+      return source->pull(js, controller.getHandle(js), freshSignal(js));
+    }).then(js, [&state](jsg::Lock& js) {
+      KJ_EXPECT(state.enqueued.size() == 1);
+      KJ_EXPECT(state.closed);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource BYOB pull fills the view; zero-byte EOF closes") {
+  TestFixture testFixture;
+  MockControllerState state;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    auto view = jsg::JsUint8Array::create(js, static_cast<size_t>(64));
+    auto byobRequest = makeMockByobRequest(js, state, view, 4);
+    auto controller = makeMockController(js, state, byobRequest);
+
+    auto promise = source->pull(js, controller, freshSignal(js))
+                       .then(js,
+                           [&state, source = source.addRef(), controller = controller.addRef(js),
+                               view = view.addRef(js)](jsg::Lock& js) mutable {
+      KJ_EXPECT(KJ_ASSERT_NONNULL(state.responded) == kData.size());
+      auto filled = view.getHandle(js).asArrayPtr().first(kData.size());
+      KJ_EXPECT(filled == kData.asBytes());
+      KJ_EXPECT(!state.closed);
+      state.responded = kj::none;
+      // EOF with zero bytes must be signaled via close(), never respond(0).
+      return source->pull(js, controller.getHandle(js), freshSignal(js));
+    }).then(js, [&state](jsg::Lock& js) {
+      KJ_EXPECT(state.responded == kj::none);
+      KJ_EXPECT(state.closed);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource BYOB under-delivery responds then closes (fused EOF)") {
+  TestFixture testFixture;
+  MockControllerState state;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    // The source can only ever produce 11 bytes, so a minimum of 20 cannot be satisfied:
+    // the partial bytes commit via respond() and EOF is signaled explicitly via close()
+    // in the same pull turn (the fused close-commit), and the source is done.
+    auto view = jsg::JsUint8Array::create(js, static_cast<size_t>(64));
+    auto byobRequest = makeMockByobRequest(js, state, view, 20);
+    auto controller = makeMockController(js, state, byobRequest);
+
+    auto promise = source->pull(js, controller, freshSignal(js))
+                       .then(js,
+                           [&state, source = source.addRef(), controller = controller.addRef(js)](
+                               jsg::Lock& js) mutable {
+      KJ_EXPECT(KJ_ASSERT_NONNULL(state.responded) == kData.size());
+      KJ_EXPECT(state.closed);
+      state.responded = kj::none;
+      // The source released itself at the under-delivery; a further (contract-violating)
+      // pull is tolerated as an inert no-op.
+      return source->pull(js, controller.getHandle(js), freshSignal(js));
+    }).then(js, [&state](jsg::Lock& js) {
+      KJ_EXPECT(state.responded == kj::none);
+      KJ_EXPECT(state.enqueued.size() == 0);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource abandoned default pull stashes and redelivers") {
+  TestFixture testFixture;
+  MockControllerState state;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    auto controller = makeMockController(js, state, js.null());
+
+    // Start a pull, then abort its signal before the read's completion is processed --
+    // the consumer abandoned the read (e.g. releaseLock()). The bytes must not be
+    // delivered OR dropped: they are retained for the next pull.
+    auto abortController = AbortController::constructor(js);
+    auto pullPromise = source->pull(js, controller, abortController->getSignal());
+    abortController->abort(js, kj::none);
+
+    auto promise = pullPromise
+                       .then(js,
+                           [&state, source = source.addRef(), controller = controller.addRef(js)](
+                               jsg::Lock& js) mutable {
+      KJ_EXPECT(state.enqueued.size() == 0);
+      KJ_EXPECT(!state.closed);
+      // The next pull redelivers the stashed bytes without touching the source.
+      return source->pull(js, controller.getHandle(js), freshSignal(js));
+    }).then(js, [&state](jsg::Lock& js) {
+      KJ_EXPECT(state.enqueued.size() == 1);
+      KJ_EXPECT(state.enqueued[0].asPtr() == kData.asBytes());
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource abandoned BYOB pull stashes; redelivery is synchronous") {
+  TestFixture testFixture;
+  MockControllerState state;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    auto view = jsg::JsUint8Array::create(js, static_cast<size_t>(64));
+    auto byobRequest = makeMockByobRequest(js, state, view, 4);
+    auto controller = makeMockController(js, state, byobRequest);
+
+    auto abortController = AbortController::constructor(js);
+    auto pullPromise = source->pull(js, controller, abortController->getSignal());
+    abortController->abort(js, kj::none);
+
+    auto promise = pullPromise.then(js,
+        [&state, source = source.addRef(), controller = controller.addRef(js),
+            view = view.addRef(js)](jsg::Lock& js) mutable {
+      KJ_EXPECT(state.responded == kj::none);
+      // The retained bytes satisfy the next read's minimum, so redelivery happens
+      // synchronously from the stash (no I/O).
+      auto promise = source->pull(js, controller.getHandle(js), freshSignal(js));
+      KJ_EXPECT(KJ_ASSERT_NONNULL(state.responded) == kData.size());
+      auto filled = view.getHandle(js).asArrayPtr().first(kData.size());
+      KJ_EXPECT(filled == kData.asBytes());
+      return kj::mv(promise);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource cancel propagates and later pulls are inert") {
+  TestFixture testFixture;
+  MockControllerState state;
+  kj::Maybe<kj::Exception> canceled;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = js.alloc<ReadableStreamNativeSource>(
+        env.context, kj::heap<CancelableContentSource>(kData, canceled));
+    KJ_EXPECT(KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(source->getExpectedLength(js)).tryToUint64(js)) ==
+        kData.size());
+
+    source->cancel(js, js.error("lost interest"));
+    auto& e = KJ_ASSERT_NONNULL(canceled);
+    KJ_EXPECT(e.getDescription().contains("lost interest"), e.getDescription());
+
+    // The source has been released: expectedLength is unknown and pulls are inert.
+    KJ_EXPECT(source->getExpectedLength(js) == kj::none);
+    auto controller = makeMockController(js, state, js.null());
+    auto promise = source->pull(js, controller, freshSignal(js)).then(js, [&state](jsg::Lock& js) {
+      KJ_EXPECT(state.enqueued.size() == 0);
+      KJ_EXPECT(!state.closed);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource cancel during an in-flight pull defers the release") {
+  TestFixture testFixture;
+  MockControllerState state;
+  kj::Maybe<kj::Exception> canceled;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = js.alloc<ReadableStreamNativeSource>(
+        env.context, kj::heap<CancelableContentSource>(kData, canceled));
+    auto controller = makeMockController(js, state, js.null());
+
+    // Cancel while the pull's read is in flight: the source must not be destroyed out
+    // from under its own read; the read's bytes are discarded at settlement.
+    auto pullPromise = source->pull(js, controller, freshSignal(js));
+    source->cancel(js, js.error("teardown"));
+    KJ_EXPECT(canceled != kj::none);
+
+    auto promise = pullPromise
+                       .then(js,
+                           [&state, source = source.addRef(), controller = controller.addRef(js)](
+                               jsg::Lock& js) mutable {
+      KJ_EXPECT(state.enqueued.size() == 0);
+      KJ_EXPECT(!state.closed);
+      // The deferred teardown completed at settlement; the source is now done.
+      KJ_EXPECT(source->getExpectedLength(js) == kj::none);
+      return source->pull(js, controller.getHandle(js), freshSignal(js));
+    }).then(js, [&state](jsg::Lock& js) { KJ_EXPECT(state.enqueued.size() == 0); });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource expectedLength queries the source live") {
+  TestFixture testFixture;
+  MockControllerState state;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    KJ_EXPECT(KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(source->getExpectedLength(js)).tryToUint64(js)) ==
+        kData.size());
+
+    auto controller = makeMockController(js, state, js.null());
+    auto promise = source->pull(js, controller, freshSignal(js))
+                       .then(js, [source = source.addRef()](jsg::Lock& js) mutable {
+      // ContentSource reports its REMAINING length, and expectedLength is not cached, so
+      // consuming the content is observable.
+      KJ_EXPECT(
+          KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(source->getExpectedLength(js)).tryToUint64(js)) == 0);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource read failure rejects the pull") {
+  TestFixture testFixture;
+  MockControllerState state;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ErroringSource>());
+    auto controller = makeMockController(js, state, js.null());
+
+    auto promise = source->pull(js, controller, freshSignal(js)).then(js, [](jsg::Lock& js) {
+      KJ_FAIL_REQUIRE("expected pull() to reject");
+    }, [&state](jsg::Lock& js, jsg::Value exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("test read failure"), e.getDescription());
+      KJ_EXPECT(state.enqueued.size() == 0);
+      KJ_EXPECT(!state.closed);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource rejects concurrent pulls") {
+  TestFixture testFixture;
+  MockControllerState state;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    auto controller = makeMockController(js, state, js.null());
+
+    auto pullPromise = source->pull(js, controller, freshSignal(js));
+
+    // The conduit structurally guarantees pull serialization; the guard is defensive and
+    // must fail loudly.
+    JSG_TRY(js) {
+      auto ignored KJ_UNUSED = source->pull(js, controller, freshSignal(js));
+      KJ_FAIL_REQUIRE("expected concurrent pull() to throw");
+    }
+    JSG_CATCH(exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("already in flight"), e.getDescription());
+    };
+
+    auto promise = pullPromise.then(js, [&state](jsg::Lock& js) {
+      // The original pull is unaffected by the rejected concurrent attempt.
+      KJ_EXPECT(state.enqueued.size() == 1);
+      KJ_EXPECT(state.enqueued[0].asPtr() == kData.asBytes());
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
 }
 
 }  // namespace
