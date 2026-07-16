@@ -27,6 +27,7 @@ interface Fetcher {
     options?: WorkflowInstanceTerminateOptions
   ): Promise<void>;
   restart(id: string, options?: WorkflowInstanceRestartOptions): Promise<void>;
+  delete(id: string): Promise<void>;
   status(id: string): Promise<InstanceStatus>;
   sendEvent(
     id: string,
@@ -108,6 +109,16 @@ class InstanceImpl implements WorkflowInstance {
     }
     await callFetcher(this.fetcher, '/restart', {
       ...options,
+      id: this.id,
+    });
+  }
+
+  async delete(): Promise<void> {
+    if (workflowsBindingsRpc) {
+      await this.fetcher.delete(this.id);
+      return;
+    }
+    await callFetcher(this.fetcher, '/delete', {
       id: this.id,
     });
   }

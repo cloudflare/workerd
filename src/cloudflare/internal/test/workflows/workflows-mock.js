@@ -49,6 +49,7 @@ async function handleHttp(request) {
       case '/pause':
       case '/resume':
       case '/terminate':
+      case '/delete':
       case '/send-event':
         return Response.json({ result: null }, { status: 200 });
       case '/restart':
@@ -90,6 +91,8 @@ export default class WorkflowsMock extends WorkerEntrypoint {
   async resume(_id) {}
 
   async terminate(_id) {}
+
+  async delete(_id) {}
 
   async restart(id, options) {
     restartBodies.set(id, { ...options, id });

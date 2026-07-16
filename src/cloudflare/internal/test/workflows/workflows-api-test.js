@@ -53,6 +53,12 @@ export const tests = {
     }
 
     {
+      // Test delete hits the /delete endpoint without throwing
+      const instance = await env.workflow.get('delete-http');
+      await instance.delete();
+    }
+
+    {
       for (const method of ['get', 'create', 'createBatch']) {
         assert.strictEqual(typeof env.workflow[method], 'function');
       }
@@ -70,6 +76,7 @@ export const tests = {
         'resume',
         'terminate',
         'restart',
+        'delete',
         'status',
         'sendEvent',
       ]) {

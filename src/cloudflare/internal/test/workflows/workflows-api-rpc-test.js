@@ -37,6 +37,7 @@ export const tests = {
       await instance.pause();
       await instance.resume();
       await instance.terminate();
+      await instance.delete();
       await instance.sendEvent({
         type: 'my-event',
         payload: { hello: 'world' },
@@ -69,6 +70,7 @@ export const tests = {
         'resume',
         'terminate',
         'restart',
+        'delete',
         'status',
         'sendEvent',
       ]) {
