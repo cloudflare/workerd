@@ -17208,6 +17208,10 @@ export declare abstract class WorkflowInstance {
    */
   public restart(options?: WorkflowInstanceRestartOptions): Promise<void>;
   /**
+   * Delete the instance, wiping its stored state. Any in-flight execution is stopped.
+   */
+  public delete(): Promise<void>;
+  /**
    * Returns the current status of the instance.
    */
   public status(): Promise<InstanceStatus>;
