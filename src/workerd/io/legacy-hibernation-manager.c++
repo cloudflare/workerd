@@ -283,8 +283,9 @@ kj::Promise<void> LegacyHibernationManagerImpl::handleSocketTermination(
       .userSpanParent = kj::mv(userSpanParent),
     });
     event = workerInterface
-                ->customEvent(kj::heap<api::HibernatableWebSocketCustomEvent>(
-                    hibernationEventType, kj::mv(KJ_REQUIRE_NONNULL(params)), *this))
+                ->customEvent(kj::rc<api::HibernatableWebSocketCustomEvent>(
+                    hibernationEventType, kj::mv(KJ_REQUIRE_NONNULL(params)), *this)
+                                  .toOwn())
                 .ignoreResult()
                 .attach(kj::mv(workerInterface));
   }
@@ -402,8 +403,9 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
     auto workerInterface = loopback->getWorker({
       .userSpanParent = kj::mv(userSpanParent),
     });
-    co_await workerInterface->customEvent(kj::heap<api::HibernatableWebSocketCustomEvent>(
-        hibernationEventType, kj::mv(params), *this));
+    co_await workerInterface->customEvent(
+        kj::rc<api::HibernatableWebSocketCustomEvent>(hibernationEventType, kj::mv(params), *this)
+            .toOwn());
     if (isClose) {
       co_return;
     }

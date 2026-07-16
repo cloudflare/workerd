@@ -8,6 +8,7 @@
 #include <kj/list.h>
 #include <kj/map.h>
 #include <kj/mutex.h>
+#include <kj/refcount.h>
 
 namespace workerd {
 
@@ -74,7 +75,11 @@ class CrossThreadWaitList {
   struct Waiter;
 
  public:
-  using WaiterMap = kj::HashMap<const CrossThreadWaitList::State*, Waiter*>;
+  // The map holds only a *weak* reference to each Waiter. The Waiter is kept alive by the promise
+  // branches handed out by addWaiter(); the Waiter's destructor is what removes it from this map.
+  // Holding a strong reference here would form a cycle (map keeps Waiter alive -> refcount never
+  // reaches zero -> destructor never runs -> entry never removed), so this must stay weak.
+  using WaiterMap = kj::HashMap<const CrossThreadWaitList::State*, kj::WeakRc<Waiter>>;
 
  private:
   struct Waiter: public kj::Refcounted {

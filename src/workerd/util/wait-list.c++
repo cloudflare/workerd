@@ -51,7 +51,10 @@ CrossThreadWaitList::Waiter::~Waiter() noexcept(false) {
 
   if (state->useThreadLocalOptimization) {
     auto& entry = KJ_ASSERT_NONNULL(threadLocalWaiters->findEntry(state.get()));
-    KJ_ASSERT(entry.value == this);
+    // Our refcount has reached zero, so the weak reference to us has already expired. Since the map
+    // holds exactly one entry per State (in this thread) and we own a reference to that State, this
+    // entry must be ours.
+    KJ_ASSERT(entry.value == nullptr);
     threadLocalWaiters->erase(entry);
   }
 }
@@ -66,25 +69,30 @@ kj::Promise<void> CrossThreadWaitList::addWaiter() const {
   }
 
   if (state->useThreadLocalOptimization) {
-    kj::Own<Waiter> ownWaiter;
+    // The map holds only a weak reference to the shared Waiter; the strong reference lives on the
+    // returned promise (via attach), and ~Waiter is what removes the entry. Because destruction is
+    // synchronous and single-threaded, a present entry is always still alive when observed here, so
+    // findOrCreate() only ever runs its lambda when there is genuinely no waiter yet.
+    kj::Rc<Waiter> ownWaiter;
 
-    auto& waiter = threadLocalWaiters->findOrCreate(
+    auto& weak = threadLocalWaiters->findOrCreate(
         state.get(), [&]() -> CrossThreadWaitList::WaiterMap::Entry {
       auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
-      ownWaiter = kj::refcounted<Waiter>(*state, kj::mv(paf.fulfiller));
+      ownWaiter = kj::rc<Waiter>(*state, kj::mv(paf.fulfiller));
       ownWaiter->forkedPromise = paf.promise.fork();
-      return {state.get(), ownWaiter.get()};
+      return {state.get(), ownWaiter.addWeakRef()};
     });
 
     if (ownWaiter.get() == nullptr) {
-      ownWaiter = kj::addRef(*waiter);
+      // Reusing a waiter created earlier by another waiter in this thread.
+      ownWaiter = KJ_ASSERT_NONNULL(weak.upgrade());
     }
 
-    return waiter->forkedPromise.addBranch().attach(kj::mv(ownWaiter));
+    return ownWaiter->forkedPromise.addBranch().attach(kj::mv(ownWaiter));
   } else {
     // No refcounting, no forked promise.
     auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
-    auto waiter = kj::heap<Waiter>(*state, kj::mv(paf.fulfiller));
+    auto waiter = kj::rc<Waiter>(*state, kj::mv(paf.fulfiller));
     return paf.promise.attach(kj::mv(waiter));
   }
 }
