@@ -323,9 +323,17 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // that read produces are discarded.
   void cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
 
-  // Splits the source into two independent branches, leaving this source consumed.
-  // TODO(streams-ts): Not yet implemented.
-  void tee(jsg::Lock& js);
+  // Splits the source into two fully independent branch sources, each of which will
+  // produce the same bytes this source would have produced, leaving this source consumed
+  // (contract §7). Uses the underlying source's optimized tryTee() when available, and
+  // otherwise falls back to a generic kj::newTee()-based split (mirroring the legacy
+  // internal controller's tee). Any bytes retained from an abandoned pull are inherited
+  // by BOTH branches, delivered before anything further from upstream.
+  //
+  // Throws if the source has already been consumed, or if an abandoned pull's read is
+  // still in flight (bytes that read produces after the split would be lost; see the
+  // design doc's open question D).
+  kj::Array<jsg::Ref<ReadableStreamNativeSource>> tee(jsg::Lock& js);
 
   // The total number of bytes the source promises to produce, if known. Queried live from
   // the underlying source on each call; undefined once the source is done or canceled. The

@@ -521,6 +521,40 @@ class ErroringSource final: public ReadableStreamSource {
   }
 };
 
+// A ContentSource with an optimized tee: each branch is an independent ContentSource over
+// the remaining content (exercising ReadableStreamNativeSource::tee()'s tryTee fast
+// path).
+class TeeableContentSource final: public ReadableStreamSource {
+ public:
+  TeeableContentSource(kj::StringPtr data): data(data) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    auto amount = kj::min(maxBytes, data.size() - offset);
+    kj::arrayPtr(static_cast<kj::byte*>(buffer), amount)
+        .copyFrom(data.slice(offset, offset + amount).asBytes());
+    offset += amount;
+    return amount;
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    if (encoding == StreamEncoding::IDENTITY) {
+      return data.size() - offset;
+    }
+    return kj::none;
+  }
+
+  kj::Maybe<Tee> tryTee(uint64_t limit) override {
+    auto remaining = data.slice(offset);
+    return Tee{
+      .branches = {kj::heap<ContentSource>(remaining), kj::heap<ContentSource>(remaining)},
+    };
+  }
+
+ private:
+  kj::StringPtr data;
+  size_t offset = 0;
+};
+
 // Records the conduit-side observations of a native source's deliveries.
 struct MockControllerState {
   kj::Vector<kj::Array<kj::byte>> enqueued;
@@ -817,6 +851,153 @@ KJ_TEST("ReadableStreamNativeSource read failure rejects the pull") {
       KJ_EXPECT(!state.closed);
     });
     return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource tee splits via the source's optimized tryTee") {
+  TestFixture testFixture;
+  MockControllerState state1;
+  MockControllerState state2;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source =
+        js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<TeeableContentSource>(kData));
+    auto branches = source->tee(js);
+    KJ_EXPECT(branches.size() == 2);
+    // The original is consumed: its source is released and expectedLength is unknown.
+    KJ_EXPECT(source->getExpectedLength(js) == kj::none);
+
+    auto controller1 = makeMockController(js, state1, js.null());
+    auto controller2 = makeMockController(js, state2, js.null());
+    auto promise = branches[0]
+                       ->pull(js, controller1, freshSignal(js))
+                       .then(js,
+                           [&state1, branch = branches[1].addRef(),
+                               controller2 = controller2.addRef(js)](jsg::Lock& js) mutable {
+      KJ_EXPECT(state1.enqueued.size() == 1);
+      KJ_EXPECT(state1.enqueued[0].asPtr() == kData.asBytes());
+      return branch->pull(js, controller2.getHandle(js), freshSignal(js));
+    }).then(js, [&state2](jsg::Lock& js) {
+      KJ_EXPECT(state2.enqueued.size() == 1);
+      KJ_EXPECT(state2.enqueued[0].asPtr() == kData.asBytes());
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource tee falls back to a generic kj tee") {
+  TestFixture testFixture;
+  MockControllerState state1;
+  MockControllerState state2;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // ContentSource has no tryTee() override, so this exercises the kj::newTee fallback.
+    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    auto branches = source->tee(js);
+    KJ_EXPECT(branches.size() == 2);
+    KJ_EXPECT(source->getExpectedLength(js) == kj::none);
+
+    auto controller1 = makeMockController(js, state1, js.null());
+    auto controller2 = makeMockController(js, state2, js.null());
+    auto promise = branches[0]
+                       ->pull(js, controller1, freshSignal(js))
+                       .then(js,
+                           [&state1, branch = branches[1].addRef(),
+                               controller2 = controller2.addRef(js)](jsg::Lock& js) mutable {
+      KJ_EXPECT(state1.enqueued.size() == 1);
+      KJ_EXPECT(state1.enqueued[0].asPtr() == kData.asBytes());
+      return branch->pull(js, controller2.getHandle(js), freshSignal(js));
+    }).then(js, [&state2](jsg::Lock& js) {
+      KJ_EXPECT(state2.enqueued.size() == 1);
+      KJ_EXPECT(state2.enqueued[0].asPtr() == kData.asBytes());
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource tee seeds both branches with stashed bytes") {
+  TestFixture testFixture;
+  MockControllerState state0;
+  MockControllerState state1;
+  MockControllerState state2;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source =
+        js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<TeeableContentSource>(kData));
+
+    // Abandon a pull so its bytes land in the stash.
+    auto controller = makeMockController(js, state0, js.null());
+    auto abortController = AbortController::constructor(js);
+    auto pullPromise = source->pull(js, controller, abortController->getSignal());
+    abortController->abort(js, kj::none);
+
+    auto promise = pullPromise
+                       .then(js, [&, source = source.addRef()](jsg::Lock& js) mutable {
+      KJ_EXPECT(state0.enqueued.size() == 0);
+
+      auto branches = source->tee(js);
+      // The upstream is exhausted (the abandoned pull consumed everything); both branches
+      // will produce exactly the inherited stash bytes, and their expectedLength accounts
+      // for them (the conduit enforces expectedLength as an exact total, so this matters).
+      KJ_EXPECT(KJ_ASSERT_NONNULL(
+                    KJ_ASSERT_NONNULL(branches[0]->getExpectedLength(js)).tryToUint64(js)) ==
+          kData.size());
+      KJ_EXPECT(KJ_ASSERT_NONNULL(
+                    KJ_ASSERT_NONNULL(branches[1]->getExpectedLength(js)).tryToUint64(js)) ==
+          kData.size());
+
+      auto controller1 = makeMockController(js, state1, js.null());
+      auto controller2 = makeMockController(js, state2, js.null());
+      auto p1 = branches[0]->pull(js, controller1, freshSignal(js));
+      auto p2 = branches[1]->pull(js, controller2, freshSignal(js));
+      return p1.then(js, [p2 = kj::mv(p2)](jsg::Lock& js) mutable { return kj::mv(p2); });
+    }).then(js, [&](jsg::Lock& js) {
+      KJ_EXPECT(state1.enqueued.size() == 1);
+      KJ_EXPECT(state1.enqueued[0].asPtr() == kData.asBytes());
+      KJ_EXPECT(state2.enqueued.size() == 1);
+      KJ_EXPECT(state2.enqueued[0].asPtr() == kData.asBytes());
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource tee guards: consumed source and in-flight pull") {
+  TestFixture testFixture;
+  MockControllerState state;
+  kj::Maybe<kj::Exception> canceled;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // A consumed (canceled) source refuses to tee.
+    auto consumed = js.alloc<ReadableStreamNativeSource>(
+        env.context, kj::heap<CancelableContentSource>(kData, canceled));
+    consumed->cancel(js, kj::none);
+    JSG_TRY(js) {
+      auto branches KJ_UNUSED = consumed->tee(js);
+      KJ_FAIL_REQUIRE("expected tee() of a consumed source to throw");
+    }
+    JSG_CATCH(exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("already been consumed"), e.getDescription());
+    };
+
+    // A source with a read in flight refuses to tee (bytes the read produces after the
+    // split would be lost).
+    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    auto controller = makeMockController(js, state, js.null());
+    auto pullPromise = source->pull(js, controller, freshSignal(js));
+    JSG_TRY(js) {
+      auto branches KJ_UNUSED = source->tee(js);
+      KJ_FAIL_REQUIRE("expected tee() with a read in flight to throw");
+    }
+    JSG_CATCH(exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("while a read is in flight"), e.getDescription());
+    };
+    return env.context.awaitJs(js, kj::mv(pullPromise));
   });
 }
 

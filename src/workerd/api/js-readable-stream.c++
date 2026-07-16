@@ -171,6 +171,52 @@ jsg::JsValue invokeMethod(jsg::Lock& js, jsg::JsObject obj, kj::StringPtr name, 
       KJ_REQUIRE_NONNULL(obj.get(js, name).tryCast<jsg::JsFunction>(), "method not found", name);
   return func.call(js, obj, args...);
 }
+
+// Adapts a ReadableStreamSource into a kj::AsyncInputStream so that it can feed
+// kj::newTee() -- the generic tee fallback for sources without an optimized tryTee().
+class TeeInputAdapter final: public kj::AsyncInputStream {
+ public:
+  TeeInputAdapter(kj::Own<ReadableStreamSource> inner): inner(kj::mv(inner)) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return inner->tryRead(buffer, minBytes, maxBytes);
+  }
+
+  kj::Maybe<uint64_t> tryGetLength() override {
+    return inner->tryGetLength(StreamEncoding::IDENTITY);
+  }
+
+ private:
+  kj::Own<ReadableStreamSource> inner;
+};
+
+// Adapts a kj::newTee() branch back into a ReadableStreamSource so that a branch
+// ReadableStreamNativeSource can own it.
+class TeeBranchSource final: public ReadableStreamSource {
+ public:
+  TeeBranchSource(kj::Own<kj::AsyncInputStream> inner): inner(kj::mv(inner)) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return inner->tryRead(buffer, minBytes, maxBytes);
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    if (encoding == StreamEncoding::IDENTITY) {
+      return inner->tryGetLength();
+    }
+    return kj::none;
+  }
+
+  void cancel(kj::Exception reason) override {
+    // Nothing to do here: dropping the branch is the real cancellation (kj::newTee
+    // releases the upstream once every branch is gone), and the owning
+    // ReadableStreamNativeSource drops us right after this call. This matches the legacy
+    // internal controller's tee branches, whose cancel() is likewise a no-op.
+  }
+
+ private:
+  kj::Own<kj::AsyncInputStream> inner;
+};
 }  // namespace
 
 // The -Wdangling-field warnings below are false positives. view captures the heap buffer pointer
@@ -928,18 +974,65 @@ void ReadableStreamNativeSource::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValu
   // Canceling an already-done source is a no-op.
 }
 
-void ReadableStreamNativeSource::tee(jsg::Lock& js) {
-  // TODO(streams-ts): Implement native tee: tryTee() fast path constructing two new
-  // ReadableStreamNativeSources (each seeded with a copy of the stash), with the open
-  // questions (generic fallback when tryTee() returns none, tee during an in-flight pull,
-  // branch marker stamping) tracked in the design doc.
-  KJ_UNIMPLEMENTED("ReadableStreamNativeSource::tee() is not implemented yet");
+kj::Array<jsg::Ref<ReadableStreamNativeSource>> ReadableStreamNativeSource::tee(jsg::Lock& js) {
+  auto& active = JSG_REQUIRE_NONNULL(
+      state, TypeError, "This ReadableStream source has already been consumed.");
+
+  // An abandoned pull's read may still be in flight (the reader was released mid-pull).
+  // Bytes that read produces after the split would land in this (dead) source's stash,
+  // invisible to both branches -- silent loss. Refuse loudly instead. Revisit per the
+  // design doc's open question D if this proves reachable in practice.
+  JSG_REQUIRE(
+      !pullInFlight, TypeError, "Cannot tee this ReadableStream while a read is in flight.");
+
+  auto& ioContext = IoContext::current();
+  auto limit = ioContext.getLimitEnforcer().getBufferingLimit();
+
+  auto branches = [&]() -> ReadableStreamSource::Tee {
+    KJ_IF_SOME(tee, active.source->tryTee(limit)) {
+      // The underlying source has an optimized tee implementation.
+      return kj::mv(tee);
+    }
+    // Generic fallback (mirroring the legacy internal controller's tee): pull the source
+    // out of its IoOwn and run it through kj::newTee, with each branch wrapped back into
+    // a ReadableStreamSource. streams::wrapTeeBranch applies the same tee error
+    // translation the legacy path uses.
+    auto tee = kj::newTee(
+        kj::heap<TeeInputAdapter>(kj::Own<ReadableStreamSource>(kj::mv(active.source))), limit);
+    return ReadableStreamSource::Tee{
+      .branches = {kj::heap<TeeBranchSource>(streams::wrapTeeBranch(kj::mv(tee.branches[0]))),
+        kj::heap<TeeBranchSource>(streams::wrapTeeBranch(kj::mv(tee.branches[1])))},
+    };
+  }();
+
+  auto branch1 = js.alloc<ReadableStreamNativeSource>(ioContext, kj::mv(branches.branches[0]));
+  auto branch2 = js.alloc<ReadableStreamNativeSource>(ioContext, kj::mv(branches.branches[1]));
+
+  // Any bytes retained from an abandoned pull were already consumed from the underlying
+  // source, so the branch sources will never produce them: seed a copy into BOTH branches
+  // (they are stream content that precedes everything upstream), and let each branch
+  // deliver them before any new data.
+  if (stash.size() > 0) {
+    branch1->stash.addAll(stash.asPtr());
+    branch2->stash.addAll(stash.asPtr());
+    stash.clear();
+  }
+
+  // This source is consumed: per the contract it must never be pulled again.
+  state = kj::none;
+
+  return kj::arr(kj::mv(branch1), kj::mv(branch2));
 }
 
 kj::Maybe<jsg::JsBigInt> ReadableStreamNativeSource::getExpectedLength(jsg::Lock& js) {
   KJ_IF_SOME(active, state) {
     KJ_IF_SOME(length, active.source->tryGetLength(StreamEncoding::IDENTITY)) {
-      return js.bigInt(length);
+      // Bytes retained in the stash (from an abandoned pull, or inherited from a tee
+      // parent) were already consumed from the underlying source but not yet delivered,
+      // so they count toward the total this source will produce. Getting this right
+      // matters for tee branches: the conduit reads expectedLength at construction and
+      // enforces it as an exact total.
+      return js.bigInt(length + stash.size());
     }
   }
   return kj::none;

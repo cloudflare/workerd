@@ -128,3 +128,27 @@ export const nativeBackedCancel = {
     strictEqual(done, true);
   },
 };
+
+export const nativeBackedTee = {
+  async test() {
+    const stream = new Blob(['hello world']).stream();
+    // Native tee goes through the source's tee hook: the C++ side splits the underlying
+    // source (via kj::newTee here -- the memory source has no optimized tee) and returns
+    // two new native sources, each wrapped in a fully independent branch stream.
+    const [a, b] = stream.tee();
+    ok(stream.locked);
+    ok(a instanceof ReadableStream);
+    ok(b instanceof ReadableStream);
+
+    async function readAll(s) {
+      const decoder = new TextDecoder();
+      let text = '';
+      for await (const chunk of s) {
+        text += decoder.decode(chunk, { stream: true });
+      }
+      return text + decoder.decode();
+    }
+    strictEqual(await readAll(a), 'hello world');
+    strictEqual(await readAll(b), 'hello world');
+  },
+};
