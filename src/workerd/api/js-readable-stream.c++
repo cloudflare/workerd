@@ -217,6 +217,192 @@ class TeeBranchSource final: public ReadableStreamSource {
  private:
   kj::Own<kj::AsyncInputStream> inner;
 };
+
+// An always-EOF ReadableStreamSource, used when pumping a native-backed stream whose
+// source already completed (extraction of closed streams is legal per the contract; the
+// pump simply finishes).
+class NullSource final: public ReadableStreamSource {
+ public:
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return static_cast<size_t>(0);
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    return static_cast<uint64_t>(0);
+  }
+};
+
+// Serves the given prefix bytes, then delegates to the inner source. Used for the rare
+// pump-with-stashed-bytes case (a tee-seeded branch extracted before being read).
+// Deliberately does NOT override pumpTo(): the generic pump loop is used, at the cost of
+// deferred proxying, which only this rare path pays.
+class PrefixedSource final: public ReadableStreamSource {
+ public:
+  PrefixedSource(kj::Array<kj::byte> prefix, kj::Own<ReadableStreamSource> inner)
+      : prefix(kj::mv(prefix)),
+        inner(kj::mv(inner)) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    if (offset < prefix.size()) {
+      size_t amount = kj::min(maxBytes, prefix.size() - offset);
+      kj::arrayPtr(static_cast<kj::byte*>(buffer), amount)
+          .copyFrom(prefix.slice(offset, offset + amount));
+      offset += amount;
+      if (amount >= minBytes) {
+        return amount;
+      }
+      // Returning fewer than minBytes would falsely signal EOF (KJ semantics); top up
+      // from the inner source.
+      return inner
+          ->tryRead(static_cast<kj::byte*>(buffer) + amount, minBytes - amount, maxBytes - amount)
+          .then([amount](size_t n) { return amount + n; });
+    }
+    return inner->tryRead(buffer, minBytes, maxBytes);
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    if (encoding == StreamEncoding::IDENTITY) {
+      KJ_IF_SOME(length, inner->tryGetLength(encoding)) {
+        return length + (prefix.size() - offset);
+      }
+    }
+    return kj::none;
+  }
+
+  void cancel(kj::Exception reason) override {
+    inner->cancel(kj::mv(reason));
+  }
+
+ private:
+  kj::Array<kj::byte> prefix;
+  size_t offset = 0;
+  kj::Own<ReadableStreamSource> inner;
+};
+
+// Pumps an extracted native source into the sink, mirroring the legacy internal
+// controller's pump (ReadableStreamInternalController::pumpTo): the sink and source ride
+// a refcounted holder attached through both deferred-proxy phases; dropping the pump
+// cancels the source; a pump failure aborts the sink and cancels the source.
+kj::Promise<DeferredProxy<void>> pumpExtractedSource(
+    kj::Own<ReadableStreamSource> source, kj::Own<WritableStreamSink> sink, bool end) {
+  struct Holder: public kj::Refcounted {
+    kj::Own<WritableStreamSink> sink;
+    kj::Own<ReadableStreamSource> source;
+    bool done = false;
+
+    Holder(kj::Own<WritableStreamSink> sink, kj::Own<ReadableStreamSource> source)
+        : sink(kj::mv(sink)),
+          source(kj::mv(source)) {}
+    ~Holder() noexcept(false) {
+      if (!done) {
+        // The pump was canceled (e.g. the client disconnected); make sure the source
+        // finds out so anything feeding it doesn't hang.
+        source->cancel(KJ_EXCEPTION(DISCONNECTED, "pump canceled"));
+      }
+    }
+  };
+
+  auto holder = kj::rc<Holder>(kj::mv(sink), kj::mv(source));
+  return holder->source->pumpTo(holder->sink->getPtr(), end)
+      .then([holder = holder.addRef()](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
+    proxy.proxyTask = proxy.proxyTask.attach(holder.addRef());
+    holder->done = true;
+    return kj::mv(proxy);
+  }, [holder = holder.addRef()](kj::Exception&& exception) mutable -> DeferredProxy<void> {
+    holder->sink->abort(exception.clone());
+    holder->source->cancel(exception.clone());
+    holder->done = true;
+    kj::throwFatalException(kj::mv(exception));
+  });
+}
+
+// One iteration of the queued-backend pump: collect everything the draining reader has
+// buffered (one isolate-lock trip per batch), copy it to KJ-owned memory, perform a
+// vectored write, and recurse until done. All JS state (the reader) travels through the
+// jsg promise chain; the sink is an IoOwn so that no JS-heap continuation ever owns a KJ
+// I/O object directly.
+jsg::Promise<void> queuedPumpStep(
+    jsg::Lock& js, jsg::JsRef<jsg::JsObject> reader, IoOwn<WritableStreamSink> sink, bool end);
+
+jsg::Promise<void> queuedPumpStep(
+    jsg::Lock& js, jsg::JsRef<jsg::JsObject> reader, IoOwn<WritableStreamSink> sink, bool end) {
+  auto readResult = invokeMethod(js, reader.getHandle(js), "read"_kj);
+  auto readPromise = KJ_REQUIRE_NONNULL(readResult.tryCast<jsg::JsPromise>());
+  return js.toPromise(readPromise)
+      .then(js,
+          [reader = kj::mv(reader), sink = kj::mv(sink), end](
+              jsg::Lock& js, jsg::Value value) mutable -> jsg::Promise<void> {
+    auto result = KJ_REQUIRE_NONNULL(jsg::JsValue(value.getHandle(js)).tryCast<jsg::JsObject>());
+    bool done = result.get(js, "done"_kj).isTrue();
+    auto chunks = KJ_REQUIRE_NONNULL(result.get(js, "chunks"_kj).tryCast<jsg::JsArray>());
+
+    // Copy the batch out to KJ-owned memory under the lock, validating byte-ness: a
+    // value-oriented stream can produce arbitrary chunks, which cannot be pumped.
+    auto pieces = kj::heapArrayBuilder<kj::Array<kj::byte>>(chunks.size());
+    for (uint32_t i = 0; i < chunks.size(); i++) {
+      auto chunk = chunks.get(js, i);
+      KJ_IF_SOME(view, chunk.tryCast<jsg::JsArrayBufferView>()) {
+        pieces.add(
+            kj::heapArray<kj::byte>(static_cast<const jsg::JsArrayBufferView&>(view).asArrayPtr()));
+      } else KJ_IF_SOME(buffer, chunk.tryCast<jsg::JsArrayBuffer>()) {
+        pieces.add(
+            kj::heapArray<kj::byte>(static_cast<const jsg::JsArrayBuffer&>(buffer).asArrayPtr()));
+      } else {
+        JSG_FAIL_REQUIRE(TypeError, "This ReadableStream did not return bytes.");
+      }
+    }
+
+    auto& context = IoContext::current();
+    auto writePromise = [&]() -> kj::Promise<void> {
+      if (pieces.size() == 0) {
+        return kj::READY_NOW;
+      }
+      auto arrays = pieces.finish();
+      auto ptrs = KJ_MAP(a, arrays) -> kj::ArrayPtr<const kj::byte> { return a.asPtr(); };
+      auto promise = sink->write(ptrs.asPtr());
+      return promise.attach(kj::mv(arrays), kj::mv(ptrs));
+    }();
+
+    if (done) {
+      if (!end) {
+        return context.awaitIo(js, kj::mv(writePromise));
+      }
+      return context.awaitIo(js, kj::mv(writePromise))
+          .then(js, [sink = kj::mv(sink)](jsg::Lock& js) mutable {
+        return IoContext::current().awaitIo(js, sink->end());
+      });
+    }
+    return context.awaitIo(js, kj::mv(writePromise))
+        .then(js, [reader = kj::mv(reader), sink = kj::mv(sink), end](jsg::Lock& js) mutable {
+      return queuedPumpStep(js, kj::mv(reader), kj::mv(sink), end);
+    });
+  });
+}
+
+// Pumps a queued-backed (JS underlying source) TypeScript stream into the sink by
+// driving the internal ReadableStreamDrainingReader. Isolate-bound (the JS conduit is in
+// the data path), so the deferred-proxy phase is a no-op.
+kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
+    IoContext& context,
+    jsg::JsObject reader,
+    kj::Own<WritableStreamSink> sink,
+    bool end) {
+  auto loop =
+      queuedPumpStep(js, reader.addRef(js), context.addObject(kj::mv(sink)), end)
+          .catch_(js, [reader = reader.addRef(js)](jsg::Lock& js, jsg::Value exception) mutable {
+    // The pump failed (source error, non-byte chunk, or sink failure): cancel the reader
+    // so the underlying source learns the pipe is gone, then propagate the failure.
+    // TODO(streams-ts): consider explicitly aborting the sink as well, for exact parity
+    // with the legacy pump's error path.
+    auto reason = jsg::JsValue(exception.getHandle(js));
+    auto cancelResult = invokeMethod(js, reader.getHandle(js), "cancel"_kj, reason);
+    KJ_IF_SOME(promise, cancelResult.tryCast<jsg::JsPromise>()) {
+      js.toPromise(promise).markAsHandled(js);
+    }
+    js.throwException(kj::mv(exception));
+  });
+  return addNoopDeferredProxy(context.awaitJs(js, kj::mv(loop)));
+}
 }  // namespace
 
 // The -Wdangling-field warnings below are false positives. view captures the heap buffer pointer
@@ -565,7 +751,43 @@ kj::Promise<DeferredProxy<void>> JsReadableStream::pumpTo(
       return stream->pumpTo(js, kj::mv(sink), end == EndStream::YES);
     }
     KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-      KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+      // Precondition parity with the legacy arm (ReadableStream::pumpTo).
+      JSG_REQUIRE(IoContext::hasCurrent(), Error,
+          "Unable to consume this ReadableStream outside of a request");
+      auto handle = obj.getHandle(js);
+      JSG_REQUIRE(!getReadableStreamIsLocked(js, handle), TypeError,
+          "The ReadableStream has been locked to a reader.");
+      auto& context = IoContext::current();
+
+      // Classify the backend by probing for the extraction marker: an own property keyed
+      // by the kExtractNativeSource API-registry symbol, present only on native-backed
+      // streams (see the contract in src/per_isolate/webstreams/native.ts).
+      auto extractSymbol = jsg::JsValue(
+          v8::Symbol::ForApi(js.v8Isolate, jsg::v8StrIntern(js.v8Isolate, "kExtractNativeSource")));
+      if (handle.has(js, extractSymbol, jsg::JsObject::HasOption::OWN)) {
+        // Native-backed: extract the underlying source and pump entirely at the C++
+        // layer, preserving each source's own deferred-proxy behavior. The extractor is
+        // atomic (validate, detach, lock + disturb) and returns the source wrapper.
+        auto extractor =
+            KJ_REQUIRE_NONNULL(handle.get(js, extractSymbol).tryCast<jsg::JsFunction>());
+        auto sourceObj = extractor.call(js, handle);
+        auto& handler =
+            KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+        auto source = KJ_REQUIRE_NONNULL(handler.tryUnwrap(js, sourceObj),
+            "the extractor did not return a ReadableStreamNativeSource");
+        auto released = source->releaseForPump(js);
+        if (released.prefix.size() > 0) {
+          released.source =
+              kj::heap<PrefixedSource>(kj::mv(released.prefix), kj::mv(released.source));
+        }
+        return pumpExtractedSource(kj::mv(released.source), kj::mv(sink), end == EndStream::YES);
+      }
+
+      // Queued-backed (JS underlying source): the JS conduit stays in the data path, so
+      // drive the internal DrainingReader batch by batch under the isolate lock.
+      auto reader = KJ_REQUIRE_NONNULL(
+          dispatchCall(js, "acquireReadableStreamDrainingReader", handle).tryCast<jsg::JsObject>());
+      return pumpQueuedTsStream(js, context, reader, kj::mv(sink), end == EndStream::YES);
     }
   }
   KJ_UNREACHABLE;
@@ -1024,7 +1246,7 @@ kj::Array<jsg::Ref<ReadableStreamNativeSource>> ReadableStreamNativeSource::tee(
   return kj::arr(kj::mv(branch1), kj::mv(branch2));
 }
 
-kj::Maybe<jsg::JsBigInt> ReadableStreamNativeSource::getExpectedLength(jsg::Lock& js) {
+jsg::JsValue ReadableStreamNativeSource::getExpectedLength(jsg::Lock& js) {
   KJ_IF_SOME(active, state) {
     KJ_IF_SOME(length, active.source->tryGetLength(StreamEncoding::IDENTITY)) {
       // Bytes retained in the stash (from an abandoned pull, or inherited from a tee
@@ -1035,7 +1257,25 @@ kj::Maybe<jsg::JsBigInt> ReadableStreamNativeSource::getExpectedLength(jsg::Lock
       return js.bigInt(length + stash.size());
     }
   }
-  return kj::none;
+  // "Unknown" must surface as undefined, never null: the conduit's construction-time
+  // validation rejects null (contract: non-negative bigint | integer | undefined).
+  return js.undefined();
+}
+
+ReadableStreamNativeSource::Released ReadableStreamNativeSource::releaseForPump(jsg::Lock& js) {
+  KJ_IF_SOME(active, state) {
+    // Extraction requires an undisturbed stream, and any pull implies a read (which
+    // disturbs), so no read can be in flight here.
+    KJ_ASSERT(!pullInFlight);
+    Released released{
+      .source = kj::Own<ReadableStreamSource>(kj::mv(active.source)),
+      .prefix = stash.releaseAsArray(),
+    };
+    state = kj::none;
+    return released;
+  }
+  // The source already completed (EOF, or cancel released it); the pump simply finishes.
+  return Released{.source = kj::heap<NullSource>(), .prefix = nullptr};
 }
 
 void ReadableStreamNativeSource::ensureScratch(size_t capacity) {

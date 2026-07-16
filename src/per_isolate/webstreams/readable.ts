@@ -3650,7 +3650,7 @@ async function consumeReadableStreamAsArrayBuffer<R>(
   if (isReadableStreamLocked(stream)) {
     throw new TypeError('Cannot consume a stream that is locked');
   }
-  let amountRead = 0;
+  let amountRead = 0n;
   const chunks: Uint8Array[] = [];
   const reader = new ReadableStreamDrainingReader<R>(stream);
   while (true) {
@@ -3667,7 +3667,9 @@ async function consumeReadableStreamAsArrayBuffer<R>(
     if (result.done) break;
   }
 
-  const res = new ArrayBuffer(amountRead);
+  // amountRead is bounded by the limit, but Number() is still safe unguarded:
+  // any total that would lose precision (>2^53) could never be allocated below.
+  const res = new ArrayBuffer(Number(amountRead));
   const u8 = new Uint8Array(res);
   let offset = 0;
   for (const chunk of chunks) {
@@ -3699,7 +3701,7 @@ async function consumeReadableStreamAsText<R>(
     throw new TypeError('Cannot consume a stream that is locked');
   }
 
-  let amountRead = 0;
+  let amountRead = 0n;
   const chunks: Uint8Array[] = [];
   const reader = new ReadableStreamDrainingReader<R>(stream);
   while (true) {
@@ -3717,7 +3719,7 @@ async function consumeReadableStreamAsText<R>(
   }
 
   let res = '';
-  if (amountRead === 0) return res;
+  if (amountRead === 0n) return res;
 
   const decoder = new TextDecoder();
   for (const chunk of chunks) {
@@ -3851,11 +3853,21 @@ ObjectDefineProperties(ReadableByteStreamController.prototype.enqueue, {
   length: { __proto__: null, value: 1 },
 });
 
+// Acquires the internal draining reader for the C++ bridge's pump path (locks the
+// stream). Each read() collects everything currently buffered, so the C++ pump pays one
+// isolate-lock trip per batch rather than per chunk.
+function acquireReadableStreamDrainingReader<R>(
+  stream: ReadableStream<R>
+): ReadableStreamDrainingReader<R> {
+  return new ReadableStreamDrainingReader<R>(stream);
+}
+
 // The cppExports are not part of the public API. They are exported to the
 // C++ side of the implementation to allow for certain internal operations
 // to be performed on ReadableStream instances.
 const cppExports = {
   ReadableStream,
+  acquireReadableStreamDrainingReader,
   getReadableStreamExpectedLength,
   getReadableStreamIsDisturbed,
   getReadableStreamOnEof,

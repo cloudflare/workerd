@@ -244,12 +244,15 @@ inline server::config::Worker::Reader buildConfig(
   modules[0].setName(mainModuleName);
   modules[0].setEsModule(params.mainModuleSource.orDefault(mainModuleSource));
 
-  // Initialize autogates with an empty config. TODO(later): allow TestFixture to accept autogate
-  // states and pass them in here.
+  // Initialize autogates (with an empty config unless the test supplied gate names).
   //
   // This needs to happen here because `buildConfig` is called early in the construction of
   // `TestFixture`.
-  util::Autogate::initAutogate({});
+  KJ_IF_SOME(gates, params.autogates) {
+    util::Autogate::initAutogateNamesForTest(gates);
+  } else {
+    util::Autogate::initAutogate({});
+  }
 
   return config;
 }

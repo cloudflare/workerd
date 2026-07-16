@@ -77,6 +77,7 @@ class Autogate {
 
   // Convenience method for bin-tests to invoke initAutogate() with an appropriate config.
   static void initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gateNames);
+  static void initAutogateNamesForTest(kj::ArrayPtr<const kj::StringPtr> gateNames);
 
   // Initializes all autogates to true. Used for testing with the --all-autogates flag.
   static void initAllAutogates();

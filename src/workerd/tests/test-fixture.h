@@ -32,6 +32,9 @@ struct TestFixture {
     // waitScope of outer IO loop. New IO will be set up if missing.
     kj::Maybe<kj::WaitScope&> waitScope;
     kj::Maybe<CompatibilityFlags::Reader> featureFlags;
+    // If set, the named autogates (bare names, without the "workerd-autogate-" prefix)
+    // are enabled for the test. Otherwise autogates are initialized empty.
+    kj::Maybe<kj::Array<kj::StringPtr>> autogates;
     kj::Maybe<kj::StringPtr> mainModuleSource;
     // If set, make a stub of an Actor with the given id.
     kj::Maybe<Worker::Actor::Id> actorId;

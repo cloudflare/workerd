@@ -339,7 +339,11 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // the underlying source on each call; undefined once the source is done or canceled. The
   // TypeScript side reads this once at stream construction, per the contract, and enforces
   // the exact-total accounting itself.
-  kj::Maybe<jsg::JsBigInt> getExpectedLength(jsg::Lock& js);
+  //
+  // Returns a JsValue (bigint | undefined) rather than kj::Maybe<JsBigInt>: JSG maps a
+  // none Maybe return to JS null, but the contract's validation accepts only a bigint,
+  // a number, or undefined -- null must not appear.
+  jsg::JsValue getExpectedLength(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(ReadableStreamNativeSource) {
     JSG_METHOD(pull);
@@ -374,6 +378,23 @@ class ReadableStreamNativeSource final: public jsg::Object {
       jsg::Ref<AbortSignal> signal,
       Active& active);
 
+  struct Released {
+    kj::Own<ReadableStreamSource> source;
+
+    // Bytes already consumed from the source but never delivered (the stash), which the
+    // pump must emit before anything the source produces. Only reachable when a
+    // tee-seeded branch is extracted before being read.
+    kj::Array<kj::byte> prefix;
+  };
+
+  // Releases the underlying source (plus any stashed bytes) for a C++-driven pump.
+  // Called by JsReadableStream::pumpTo()'s TypeScript arm after the TypeScript-side
+  // extractor (kExtractNativeSource) has already detached the stream, validated it
+  // unlocked/undisturbed, and returned this object. If the source already completed (EOF
+  // or cancel released it), returns an always-EOF source: extraction of closed streams is
+  // legal per the contract, and the pump simply finishes.
+  Released releaseForPump(jsg::Lock& js);
+
   // Ensure the scratch buffer can hold at least `capacity` bytes. Only called at the start
   // of a pull, when the scratch buffer holds no live data, so growing may discard previous
   // contents.
@@ -405,6 +426,9 @@ class ReadableStreamNativeSource final: public jsg::Object {
   bool pendingCancel = false;
 
   static constexpr size_t kScratchSize = 32 * 1024;
+
+  // JsReadableStream::pumpTo()'s TypeScript arm extracts the source for C++-driven pumps.
+  friend class JsReadableStream;
 };
 
 }  // namespace workerd::api

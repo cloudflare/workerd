@@ -4,8 +4,10 @@
 
 #include <workerd/api/blob.h>
 #include <workerd/api/js-readable-stream.h>
+#include <workerd/io/per-isolate-bootstrap.h>
 #include <workerd/tests/test-fixture.h>
 
+#include <capnp/message.h>
 #include <kj/test.h>
 
 namespace workerd::api {
@@ -602,6 +604,18 @@ jsg::Ref<AbortSignal> freshSignal(jsg::Lock& js) {
   return AbortController::constructor(js)->getSignal();
 }
 
+// Reads a source's expectedLength (a JS bigint | undefined, per the conduit contract)
+// back into C++ terms. Asserts the "unknown" representation is undefined specifically:
+// null would pass a naive falsy check but is rejected by the conduit's validation.
+kj::Maybe<uint64_t> expectedLengthOf(jsg::Lock& js, ReadableStreamNativeSource& source) {
+  auto value = source.getExpectedLength(js);
+  KJ_IF_SOME(bigint, value.tryCast<jsg::JsBigInt>()) {
+    return bigint.tryToUint64(js);
+  }
+  KJ_EXPECT(value == js.undefined());
+  return kj::none;
+}
+
 KJ_TEST("ReadableStreamNativeSource default pull delivers chunks then closes at EOF") {
   TestFixture testFixture;
   MockControllerState state;
@@ -762,15 +776,14 @@ KJ_TEST("ReadableStreamNativeSource cancel propagates and later pulls are inert"
 
     auto source = js.alloc<ReadableStreamNativeSource>(
         env.context, kj::heap<CancelableContentSource>(kData, canceled));
-    KJ_EXPECT(KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(source->getExpectedLength(js)).tryToUint64(js)) ==
-        kData.size());
+    KJ_EXPECT(KJ_ASSERT_NONNULL(expectedLengthOf(js, *source)) == kData.size());
 
     source->cancel(js, js.error("lost interest"));
     auto& e = KJ_ASSERT_NONNULL(canceled);
     KJ_EXPECT(e.getDescription().contains("lost interest"), e.getDescription());
 
     // The source has been released: expectedLength is unknown and pulls are inert.
-    KJ_EXPECT(source->getExpectedLength(js) == kj::none);
+    KJ_EXPECT(expectedLengthOf(js, *source) == kj::none);
     auto controller = makeMockController(js, state, js.null());
     auto promise = source->pull(js, controller, freshSignal(js)).then(js, [&state](jsg::Lock& js) {
       KJ_EXPECT(state.enqueued.size() == 0);
@@ -804,7 +817,7 @@ KJ_TEST("ReadableStreamNativeSource cancel during an in-flight pull defers the r
       KJ_EXPECT(state.enqueued.size() == 0);
       KJ_EXPECT(!state.closed);
       // The deferred teardown completed at settlement; the source is now done.
-      KJ_EXPECT(source->getExpectedLength(js) == kj::none);
+      KJ_EXPECT(expectedLengthOf(js, *source) == kj::none);
       return source->pull(js, controller.getHandle(js), freshSignal(js));
     }).then(js, [&state](jsg::Lock& js) { KJ_EXPECT(state.enqueued.size() == 0); });
     return env.context.awaitJs(js, kj::mv(promise));
@@ -818,16 +831,14 @@ KJ_TEST("ReadableStreamNativeSource expectedLength queries the source live") {
     auto& js = env.js;
 
     auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
-    KJ_EXPECT(KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(source->getExpectedLength(js)).tryToUint64(js)) ==
-        kData.size());
+    KJ_EXPECT(KJ_ASSERT_NONNULL(expectedLengthOf(js, *source)) == kData.size());
 
     auto controller = makeMockController(js, state, js.null());
     auto promise = source->pull(js, controller, freshSignal(js))
                        .then(js, [source = source.addRef()](jsg::Lock& js) mutable {
       // ContentSource reports its REMAINING length, and expectedLength is not cached, so
       // consuming the content is observable.
-      KJ_EXPECT(
-          KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(source->getExpectedLength(js)).tryToUint64(js)) == 0);
+      KJ_EXPECT(KJ_ASSERT_NONNULL(expectedLengthOf(js, *source)) == 0);
     });
     return env.context.awaitJs(js, kj::mv(promise));
   });
@@ -866,7 +877,7 @@ KJ_TEST("ReadableStreamNativeSource tee splits via the source's optimized tryTee
     auto branches = source->tee(js);
     KJ_EXPECT(branches.size() == 2);
     // The original is consumed: its source is released and expectedLength is unknown.
-    KJ_EXPECT(source->getExpectedLength(js) == kj::none);
+    KJ_EXPECT(expectedLengthOf(js, *source) == kj::none);
 
     auto controller1 = makeMockController(js, state1, js.null());
     auto controller2 = makeMockController(js, state2, js.null());
@@ -897,7 +908,7 @@ KJ_TEST("ReadableStreamNativeSource tee falls back to a generic kj tee") {
     auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
     auto branches = source->tee(js);
     KJ_EXPECT(branches.size() == 2);
-    KJ_EXPECT(source->getExpectedLength(js) == kj::none);
+    KJ_EXPECT(expectedLengthOf(js, *source) == kj::none);
 
     auto controller1 = makeMockController(js, state1, js.null());
     auto controller2 = makeMockController(js, state2, js.null());
@@ -942,12 +953,8 @@ KJ_TEST("ReadableStreamNativeSource tee seeds both branches with stashed bytes")
       // The upstream is exhausted (the abandoned pull consumed everything); both branches
       // will produce exactly the inherited stash bytes, and their expectedLength accounts
       // for them (the conduit enforces expectedLength as an exact total, so this matters).
-      KJ_EXPECT(KJ_ASSERT_NONNULL(
-                    KJ_ASSERT_NONNULL(branches[0]->getExpectedLength(js)).tryToUint64(js)) ==
-          kData.size());
-      KJ_EXPECT(KJ_ASSERT_NONNULL(
-                    KJ_ASSERT_NONNULL(branches[1]->getExpectedLength(js)).tryToUint64(js)) ==
-          kData.size());
+      KJ_EXPECT(KJ_ASSERT_NONNULL(expectedLengthOf(js, *branches[0])) == kData.size());
+      KJ_EXPECT(KJ_ASSERT_NONNULL(expectedLengthOf(js, *branches[1])) == kData.size());
 
       auto controller1 = makeMockController(js, state1, js.null());
       auto controller2 = makeMockController(js, state2, js.null());
@@ -1019,6 +1026,205 @@ KJ_TEST("ReadableStreamNativeSource instances carry the kNativeSource marker") {
         v8::Symbol::ForApi(js.v8Isolate, jsg::v8StrIntern(js.v8Isolate, "kNativeSource")));
     KJ_EXPECT(obj.has(js, symbol, jsg::JsObject::HasOption::OWN));
     KJ_EXPECT(obj.get(js, symbol) == symbol);
+  });
+}
+
+// =======================================================================================
+// pumpTo of TypeScript-backed streams
+
+// Builds a TestFixture in which the TypeScript streams implementation is active: the
+// typescript_implemented_streams compat flag plus the per-isolate bootstrap autogate.
+TestFixture makeTsStreamsFixture() {
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setTypeScriptImplementedStreams(true);
+  return TestFixture({
+    .featureFlags = flags.asReader(),
+    .autogates = kj::arr("per-isolate-javascript-bootstrap"_kj),
+  });
+}
+
+// Constructs a TypeScript ReadableStream over the given underlying source object (via
+// the constructor exposed through the bootstrap's cpp_exports module) and adopts it as a
+// TypeScript-backed JsReadableStream.
+JsReadableStream makeTsStream(jsg::Lock& js, jsg::JsValue underlyingSource) {
+  auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+  auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+  auto constructor =
+      KJ_ASSERT_NONNULL(exportsObj.get(js, "ReadableStream"_kj).tryCast<jsg::JsFunction>());
+  return JsReadableStream(js, constructor.newInstance(js, underlyingSource).addRef(js));
+}
+
+KJ_TEST("JsReadableStream pumpTo drains a TypeScript-backed native stream") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // Under the flag, create() produces a TypeScript-backed stream over the native
+    // source; pumpTo() must extract it and pump at the C++ layer.
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    return stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
+        .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+  });
+  KJ_EXPECT(collected.asPtr() == kData.asBytes());
+  KJ_EXPECT(ended);
+}
+
+KJ_TEST("JsReadableStream pumpTo of a TypeScript-backed stream honors EndStream::NO") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    return stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::NO)
+        .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+  });
+  KJ_EXPECT(collected.asPtr() == kData.asBytes());
+  KJ_EXPECT(!ended);
+}
+
+KJ_TEST("JsReadableStream pumpTo emits stashed bytes before the source") {
+  auto fixture = makeTsStreamsFixture();
+  MockControllerState state;
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // Stash the whole content by abandoning a pull, then build a TypeScript stream over
+    // the source. Extraction hands the stash to the pump as a prefix.
+    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    auto controller = makeMockController(js, state, js.null());
+    auto abortController = AbortController::constructor(js);
+    auto pullPromise = source->pull(js, controller, abortController->getSignal());
+    abortController->abort(js, kj::none);
+
+    auto promise = pullPromise.then(js, [&, source = source.addRef()](jsg::Lock& js) mutable {
+      auto& handler =
+          KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+      auto stream = makeTsStream(js, jsg::JsValue(handler.wrap(js, kj::mv(source))));
+      auto pump = stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
+                      .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+      return IoContext::current().awaitIo(js, kj::mv(pump));
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(collected.asPtr() == kData.asBytes());
+  KJ_EXPECT(ended);
+}
+
+KJ_TEST("JsReadableStream pumpTo of an already-completed native stream just finishes") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // The source completes (via cancel) before the stream is even constructed;
+    // extraction of a closed stream is legal and the pump simply ends.
+    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    source->cancel(js, kj::none);
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+    auto stream = makeTsStream(js, jsg::JsValue(handler.wrap(js, kj::mv(source))));
+    return stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
+        .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+  });
+  KJ_EXPECT(collected.size() == 0);
+  KJ_EXPECT(ended);
+}
+
+KJ_TEST("JsReadableStream pumpTo drains a TypeScript-backed queued stream") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // A plain JS underlying source (no native marker): the queued backend, pumped via
+    // the internal DrainingReader.
+    auto underlying = js.obj();
+    underlying.set(js, "start"_kj,
+        jsg::JsValue(js.wrapSimpleFunction(
+            js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
+      auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
+      enqueue.call(js, controller, jsg::JsUint8Array::create(js, kData.asBytes()));
+      auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
+      close.call(js, controller);
+    })));
+
+    auto stream = makeTsStream(js, underlying);
+    return stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
+        .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+  });
+  KJ_EXPECT(collected.asPtr() == kData.asBytes());
+  KJ_EXPECT(ended);
+}
+
+KJ_TEST("JsReadableStream pumpTo rejects when a queued stream produces non-byte chunks") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto underlying = js.obj();
+    underlying.set(js, "start"_kj,
+        jsg::JsValue(js.wrapSimpleFunction(
+            js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
+      auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
+      enqueue.call(js, controller, js.str("not bytes"_kj));
+    })));
+
+    auto stream = makeTsStream(js, underlying);
+    return stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
+        .then([](DeferredProxy<void> proxy) {
+      return kj::mv(proxy.proxyTask);
+    }).then([]() {
+      KJ_FAIL_REQUIRE("expected the pump to reject");
+    }, [](kj::Exception&& exception) {
+      KJ_EXPECT(
+          exception.getDescription().contains("did not return bytes"), exception.getDescription());
+    });
+  });
+  KJ_EXPECT(!ended);
+}
+
+KJ_TEST("JsReadableStream pumpTo of a locked TypeScript-backed stream throws") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    auto constructor =
+        KJ_ASSERT_NONNULL(exportsObj.get(js, "ReadableStream"_kj).tryCast<jsg::JsFunction>());
+    auto streamObj = constructor.newInstance(js, jsg::JsValue(js.obj()));
+    auto stream = JsReadableStream(js, streamObj.addRef(js));
+
+    // Lock the stream by acquiring the internal draining reader, then verify the
+    // legacy-parity precondition.
+    auto acquire = KJ_ASSERT_NONNULL(
+        exportsObj.get(js, "acquireReadableStreamDrainingReader"_kj).tryCast<jsg::JsFunction>());
+    auto reader KJ_UNUSED = acquire.call(js, js.undefined(), jsg::JsValue(streamObj));
+    KJ_EXPECT(stream.isLocked(js));
+
+    JSG_TRY(js) {
+      auto pump KJ_UNUSED =
+          stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES);
+      KJ_FAIL_REQUIRE("expected pumpTo() of a locked stream to throw");
+    }
+    JSG_CATCH(exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("locked to a reader"), e.getDescription());
+    };
   });
 }
 

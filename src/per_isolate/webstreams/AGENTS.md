@@ -13,7 +13,7 @@ private-brand dispatch, no `instanceof`) apply here — see
 | File          | Role                                                                                         |
 | ------------- | -------------------------------------------------------------------------------------------- |
 | `queue.ts`    | QUEUED backend: single-queue/multi-cursor, JS sources; fence interfaces; invariant list      |
-| `native.ts`   | NATIVE backend: C++-(eventually-)backed pull conduit; **the C++/JS contract** + invariants   |
+| `native.ts`   | NATIVE backend: C++-backed pull conduit; **the C++/JS contract** + invariants                |
 | `readable.ts` | Reader layer + queued controllers + the BACKEND-DISPATCH points (constructor, tee, chains, byte-capable gate, JS-to-C++ extraction) |
 | `writable.ts` / `transform.ts` / `strategies.ts` | WHATWG writable/transform/strategies                                     |
 | `identity.ts` | IdentityTransformStream and FixedLengthStream (byte-capable identity transforms)             |
@@ -32,13 +32,16 @@ private-brand dispatch, no `instanceof`) apply here — see
   signal for cancellation, under-delivery = fused
   `{done: true, value: partial}` EOF, tee hook, `expectedLength`
   exact-total byte contract) is specified in the `native.ts` header.
-  The future C++ integration MUST conform to it; it is currently exercised
-  by JS mocks only. Key addition: `pull` receives an extension `signal`
+  The C++ implementation (`ReadableStreamNativeSource` in
+  `src/workerd/api/js-readable-stream.{h,c++}`) MUST conform to it; JS
+  mocks in tests exercise the conduit independently. Key addition:
+  `pull` receives an extension `signal`
   argument — the source checks `signal.aborted` before delivery and stashes
   bytes for redelivery if aborted (race buffering lives source-side; the JS
   conduit is uniformly bufferless).
 - `kNativeSource` is TEMPORARILY re-exported via `streams.ts` for tests;
-  it is removed when the real C++ handshake lands.
+  the real C++ handshake has landed, so this removal is now due
+  (follow-up; requires migrating the JS-mock tests off it).
 
 ## ANTI-PATTERNS
 

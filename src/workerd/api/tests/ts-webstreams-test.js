@@ -129,6 +129,32 @@ export const nativeBackedCancel = {
   },
 };
 
+// Serves the fetch handlers backing the pumpTo test below. `/plain` responds with a
+// buffer-backed body; `/proxy` forwards the fetched Response object UNMODIFIED, so its
+// body -- a C++-created, TypeScript-backed stream held internally -- gets pumped by
+// Response::send without JavaScript ever unwrapping it. That drives the native
+// extraction pump path end to end over real HTTP.
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname === '/plain') {
+      return new Response('hello world');
+    }
+    if (url.pathname === '/proxy') {
+      return env.SELF.fetch(new URL('/plain', request.url));
+    }
+    return new Response('not found', { status: 404 });
+  },
+};
+
+export const nativeBackedPumpTo = {
+  async test(ctrl, env) {
+    const response = await env.SELF.fetch('http://example.org/proxy');
+    strictEqual(response.status, 200);
+    strictEqual(await response.text(), 'hello world');
+  },
+};
+
 export const nativeBackedTee = {
   async test() {
     const stream = new Blob(['hello world']).stream();
