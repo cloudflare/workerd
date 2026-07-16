@@ -820,6 +820,27 @@ KJ_TEST("ReadableStreamNativeSource read failure rejects the pull") {
   });
 }
 
+KJ_TEST("ReadableStreamNativeSource instances carry the kNativeSource marker") {
+  TestFixture testFixture;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    // Wrap an instance via the Lock-acquired TypeHandler -- the same path create()'s
+    // TypeScript arm will use -- then verify the contract's detection shape: an own data
+    // property keyed by the kNativeSource API-registry symbol whose value is the symbol
+    // itself, re-acquirable by name at any time.
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+    auto handle = handler.wrap(
+        js, js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData)));
+    auto obj = KJ_ASSERT_NONNULL(jsg::JsValue(handle).tryCast<jsg::JsObject>());
+
+    auto symbol = jsg::JsValue(
+        v8::Symbol::ForApi(js.v8Isolate, jsg::v8StrIntern(js.v8Isolate, "kNativeSource")));
+    KJ_EXPECT(obj.has(js, symbol, jsg::JsObject::HasOption::OWN));
+    KJ_EXPECT(obj.get(js, symbol) == symbol);
+  });
+}
+
 KJ_TEST("ReadableStreamNativeSource rejects concurrent pulls") {
   TestFixture testFixture;
   MockControllerState state;

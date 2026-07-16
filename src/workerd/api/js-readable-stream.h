@@ -331,6 +331,14 @@ class ReadableStreamNativeSource final: public jsg::Object {
     JSG_METHOD(tee);
     JSG_READONLY_PROTOTYPE_PROPERTY(expectedLength, getExpectedLength);
 
+    // The native-source marker (contract §1): every instance carries an own, read-only,
+    // non-enumerable property keyed by the `kNativeSource` API-registry symbol whose value
+    // is the symbol itself. The TypeScript conduit acquires the same symbol via
+    // utils.getApiSymbol('kNativeSource') (see src/per_isolate/webstreams/native.ts) and
+    // detects native sources by this property, so instances are born recognizable -- no
+    // manual stamping at creation, and tee branches are automatically marked.
+    JSG_PRIVATE_SYMBOL(kNativeSource);
+
     // Internal plumbing type: keep it out of the generated TypeScript types.
     JSG_TS_OVERRIDE(type ReadableStreamNativeSource = never);
   }

@@ -1490,6 +1490,19 @@ struct ResourceTypeBuilder {
     instance->Set(v8Name, v8Value, v8::PropertyAttribute::ReadOnly);
   }
 
+  template <const char* name>
+  inline void registerPrivateSymbol() {
+    // The symbol is acquired from the per-isolate API symbol registry, so C++ code (and
+    // runtime-provided JavaScript handed the symbol via the same registry) can re-acquire
+    // the identical symbol by name at any time. Both the property key and its value are
+    // the symbol itself, supporting own-property marker checks of the form
+    // `getOwnPropertyDescriptor(obj, sym)?.value === sym`.
+    auto symbol = v8::Symbol::ForApi(isolate, v8StrIntern(isolate, name));
+    instance->Set(symbol, symbol,
+        static_cast<v8::PropertyAttribute>(v8::PropertyAttribute::ReadOnly |
+            v8::PropertyAttribute::DontEnum | v8::PropertyAttribute::DontDelete));
+  }
+
   template <const char* name, typename Getter, Getter getter>
   inline void registerReadonlyPrototypeProperty() {
     auto v8Name = v8StrIntern(isolate, name);
@@ -1705,6 +1718,9 @@ struct JsSetup {
 
   template <typename T>
   inline void registerReadonlyInstanceProperty(kj::StringPtr name, T value) {}
+
+  template <const char* name>
+  inline void registerPrivateSymbol() {}
 
   template <const char* name, typename Getter, Getter getter>
   inline void registerReadonlyPrototypeProperty() {}
