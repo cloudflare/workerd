@@ -42,9 +42,10 @@ WD_STRONG_BOOL(IgnoreDisturbed);
 // implemented ReadableStream (represented as a JS object) is supported alongside the legacy
 // C++ ReadableStream. Every method that touches the underlying stream switches on the
 // backend. Most TypeScript backend branches are implemented (creation, wrap/unwrap,
-// consumers, pumpTo); the few remaining KJ_UNIMPLEMENTED branches (tee, detach, pipe
-// dispatch cells) are tracked in the design doc and fail loudly under the experimental
-// compat flag until their increments land.
+// consumers, pumpTo, tee); the few remaining KJ_UNIMPLEMENTED branches (detach, pipe
+// dispatch cells -- the latter deliberately waiting on the JsWritableStream TS work) are
+// tracked in the design doc and fail loudly under the experimental compat flag until
+// their increments land.
 class JsReadableStream final {
  public:
   // The underlying stream. Today only the legacy C++ ReadableStream alternative is populated; the
@@ -108,10 +109,10 @@ class JsReadableStream final {
   // stream is constructed by the TypeScript implementation; otherwise the legacy C++
   // ReadableStream is used.
   //
-  // TODO(streams-ts): Several JsReadableStream operations still have unimplemented
-  // TypeScript arms (tee, detach, pipe dispatch cells), so under the (experimental)
-  // flag, consumers exercising those paths will fail until the remaining arms are
-  // implemented. (pumpTo and unwrap have landed.)
+  // TODO(streams-ts): A few JsReadableStream operations still have unimplemented
+  // TypeScript arms (detach, pipe dispatch cells), so under the (experimental) flag,
+  // consumers exercising those paths will fail until the remaining arms are
+  // implemented. (pumpTo, unwrap, and tee have landed.)
   static JsReadableStream create(
       jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source);
 

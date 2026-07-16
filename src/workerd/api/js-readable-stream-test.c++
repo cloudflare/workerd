@@ -1055,6 +1055,22 @@ JsReadableStream makeTsStream(jsg::Lock& js, jsg::JsValue underlyingSource) {
   return JsReadableStream(js, constructor.newInstance(js, underlyingSource).addRef(js));
 }
 
+// Builds a plain-JS underlying source (the queued backend) that enqueues kData once as
+// bytes and closes.
+jsg::JsValue makeQueuedByteSource(jsg::Lock& js) {
+  auto underlying = js.obj();
+  underlying.set(js, "start"_kj,
+      jsg::JsValue(js.wrapSimpleFunction(
+          js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+    auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
+    auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
+    enqueue.call(js, controller, jsg::JsUint8Array::create(js, kData.asBytes()));
+    auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
+    close.call(js, controller);
+  })));
+  return jsg::JsValue(underlying);
+}
+
 KJ_TEST("JsReadableStream pumpTo drains a TypeScript-backed native stream") {
   auto fixture = makeTsStreamsFixture();
   kj::Vector<kj::byte> collected;
@@ -1146,18 +1162,7 @@ KJ_TEST("JsReadableStream pumpTo drains a TypeScript-backed queued stream") {
 
     // A plain JS underlying source (no native marker): the queued backend, pumped via
     // the internal DrainingReader.
-    auto underlying = js.obj();
-    underlying.set(js, "start"_kj,
-        jsg::JsValue(js.wrapSimpleFunction(
-            js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
-      auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
-      enqueue.call(js, controller, jsg::JsUint8Array::create(js, kData.asBytes()));
-      auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
-      close.call(js, controller);
-    })));
-
-    auto stream = makeTsStream(js, underlying);
+    auto stream = makeTsStream(js, makeQueuedByteSource(js));
     return stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
         .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
   });
@@ -1310,6 +1315,98 @@ KJ_TEST("JsReadableStream::tryUnwrapTs is inert without the compat flag") {
     // Without the flag there is no TypeScript implementation and no bootstrap export;
     // the guard must return none rather than reaching for the absent export.
     KJ_EXPECT(JsReadableStream::tryUnwrapTs(js, jsg::JsValue(js.obj())) == kj::none);
+  });
+}
+
+// =======================================================================================
+// tee of TypeScript-backed streams
+
+KJ_TEST("JsReadableStream::tee splits a TypeScript-backed queued stream") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected1;
+  kj::Vector<kj::byte> collected2;
+  bool ended1 = false;
+  bool ended2 = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto stream = makeTsStream(js, makeQueuedByteSource(js));
+    auto tee = stream.tee(js);
+    // tee() consumes the wrapper, exactly like the legacy arm (Body::clone relies on it).
+    KJ_EXPECT(stream.isNull());
+    KJ_EXPECT(!tee.branch1.isNull());
+    KJ_EXPECT(!tee.branch2.isNull());
+
+    // Both branches produce the full content independently (pumped via the queued
+    // drain-loop pump; both pumps run concurrently, sequenced only for awaiting).
+    auto p1 = tee.branch1.pumpTo(js, kj::heap<CollectingSink>(collected1, ended1), EndStream::YES)
+                  .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+    auto p2 = tee.branch2.pumpTo(js, kj::heap<CollectingSink>(collected2, ended2), EndStream::YES)
+                  .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+    return p1.then([p2 = kj::mv(p2)]() mutable { return kj::mv(p2); });
+  });
+  KJ_EXPECT(collected1.asPtr() == kData.asBytes());
+  KJ_EXPECT(collected2.asPtr() == kData.asBytes());
+  KJ_EXPECT(ended1);
+  KJ_EXPECT(ended2);
+}
+
+KJ_TEST("JsReadableStream::tee splits a TypeScript-backed native stream") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected1;
+  kj::Vector<kj::byte> collected2;
+  bool ended1 = false;
+  bool ended2 = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // create() under the flag builds a TypeScript stream over the native source; the
+    // C++ tee arm then routes through the TS tee, which drives the native tee hook
+    // (ReadableStreamNativeSource::tee -> tryTee fast path here).
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<TeeableContentSource>(kData));
+    auto tee = stream.tee(js);
+    KJ_EXPECT(stream.isNull());
+
+    auto p1 = tee.branch1.pumpTo(js, kj::heap<CollectingSink>(collected1, ended1), EndStream::YES)
+                  .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+    auto p2 = tee.branch2.pumpTo(js, kj::heap<CollectingSink>(collected2, ended2), EndStream::YES)
+                  .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+    return p1.then([p2 = kj::mv(p2)]() mutable { return kj::mv(p2); });
+  });
+  KJ_EXPECT(collected1.asPtr() == kData.asBytes());
+  KJ_EXPECT(collected2.asPtr() == kData.asBytes());
+  KJ_EXPECT(ended1);
+  KJ_EXPECT(ended2);
+}
+
+KJ_TEST("JsReadableStream::tee of a locked TypeScript-backed stream throws") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    auto constructor =
+        KJ_ASSERT_NONNULL(exportsObj.get(js, "ReadableStream"_kj).tryCast<jsg::JsFunction>());
+    auto streamObj = constructor.newInstance(js, jsg::JsValue(js.obj()));
+    auto stream = JsReadableStream(js, streamObj.addRef(js));
+
+    auto acquire = KJ_ASSERT_NONNULL(
+        exportsObj.get(js, "acquireReadableStreamDrainingReader"_kj).tryCast<jsg::JsFunction>());
+    auto reader KJ_UNUSED = acquire.call(js, js.undefined(), jsg::JsValue(streamObj));
+    KJ_EXPECT(stream.isLocked(js));
+
+    JSG_TRY(js) {
+      auto tee KJ_UNUSED = stream.tee(js);
+      KJ_FAIL_REQUIRE("expected tee() of a locked stream to throw");
+    }
+    JSG_CATCH(exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("locked"), e.getDescription());
+    };
+    // The precondition throw happens before consumption: the wrapper is intact.
+    KJ_EXPECT(!stream.isNull());
+    KJ_EXPECT(stream.isLocked(js));
   });
 }
 

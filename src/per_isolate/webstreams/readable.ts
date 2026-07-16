@@ -2865,6 +2865,12 @@ class ReadableStream<R> {
     // go to each branch's OWN source). The parent becomes the same inert
     // locked shell as in the queued model.
     readableStreamTee = <R>(stream: ReadableStream<R>) => {
+      // The locked precondition lives HERE (not in the prototype method) so that every
+      // entry point shares it -- the method after its brand assert, and the C++
+      // JsReadableStream::tee arm via cppExports, which calls this directly.
+      if (isReadableStreamLocked(stream)) {
+        throw new TypeError('Cannot tee a stream that is locked');
+      }
       const controller = stream.#controller;
       if (isNativeController(controller)) {
         if (stream.#state !== 'readable') {
@@ -3461,9 +3467,8 @@ class ReadableStream<R> {
 
   tee(): [ReadableStream<R>, ReadableStream<R>] {
     assertIsReadableStream(this);
-    if (isReadableStreamLocked(this)) {
-      throw new TypeError('Cannot tee a stream that is locked');
-    }
+    // The locked precondition is enforced by readableStreamTee itself (shared with the
+    // C++ bridge entry point).
     return readableStreamTee(this);
   }
 
@@ -3877,6 +3882,12 @@ const cppExports = {
   // design-doc entry.
   isReadableStream,
   isReadableStreamLocked,
+  // The internal tee operation (what ReadableStream.prototype.tee delegates to after its
+  // brand assert). Enforces the locked precondition itself. The C++
+  // JsReadableStream::tee TS arm calls this so C++-initiated clones
+  // (Request/Response.clone, cache.put) tee TypeScript-backed bodies through the same
+  // backend-dispatched machinery as JS-initiated tees.
+  readableStreamTee,
   readableStreamCancel,
   setReadableStreamPendingClosure,
   consumeReadableStreamAsArrayBuffer,

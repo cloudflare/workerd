@@ -935,7 +935,37 @@ JsReadableStream::Tee JsReadableStream::tee(jsg::Lock& js) {
       };
     }
     KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-      KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+      // Delegate to the TypeScript implementation's internal tee (the same
+      // backend-dispatched machinery ReadableStream.prototype.tee uses, including the
+      // native-source tee hook for C++-backed streams). It throws (e.g. for a locked
+      // stream) exactly as the legacy arm does; the exception propagates as-is.
+      auto result = dispatchCall(js, "readableStreamTee", obj.getHandle(js));
+      auto branches = KJ_REQUIRE_NONNULL(
+          result.tryCast<jsg::JsArray>(), "readableStreamTee must return an array");
+      KJ_REQUIRE(branches.size() == 2, "readableStreamTee must return two branches");
+      auto branch1 = KJ_REQUIRE_NONNULL(branches.get(js, 0).tryCast<jsg::JsObject>());
+      auto branch2 = KJ_REQUIRE_NONNULL(branches.get(js, 1).tryCast<jsg::JsObject>());
+
+      // TS-backed streams cannot currently be buffer-backed (bufferBackedImpl always
+      // constructs the legacy arm; design-doc open question F), but carry the buffer
+      // through anyway so this arm stays correct if F ever changes that.
+      auto buffer1 = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); });
+      auto buffer2 = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); });
+
+      // Same consumption contract as the legacy arm: the original JS stream object is
+      // left locked by the tee (spec behavior); this wrapper drops its handle.
+      impl = kj::none;
+
+      return Tee{
+        .branch1 = JsReadableStream(Impl{
+          .stream = StreamImpl(branch1.addRef(js)),
+          .maybeOwnedBuffer = kj::mv(buffer1),
+        }),
+        .branch2 = JsReadableStream(Impl{
+          .stream = StreamImpl(branch2.addRef(js)),
+          .maybeOwnedBuffer = kj::mv(buffer2),
+        }),
+      };
     }
   }
   KJ_UNREACHABLE;

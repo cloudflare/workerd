@@ -242,6 +242,60 @@ export const plainObjectBodyStillStringifies = {
   },
 };
 
+// Response.clone() with a TypeScript-backed (queued) body: clone happens at the C++
+// layer (Body::clone -> JsReadableStream::tee's TS arm -> the TS tee machinery), and
+// both bodies read the full content independently.
+export const tsStreamBodyClone = {
+  async test() {
+    const encoder = new TextEncoder();
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue(encoder.encode('clone'));
+        c.enqueue(encoder.encode(' me'));
+        c.close();
+      },
+    });
+    const response = new Response(rs);
+    const clone = response.clone();
+    const [a, b] = await Promise.all([response.text(), clone.text()]);
+    strictEqual(a, 'clone me');
+    strictEqual(b, 'clone me');
+  },
+};
+
+// The same for a native-backed body: the fetched response's body is a C++-created,
+// TypeScript-backed stream, so clone() routes C++ tee -> TS tee -> the native tee hook
+// (ReadableStreamNativeSource::tee).
+export const nativeBackedBodyClone = {
+  async test(ctrl, env) {
+    const response = await env.SELF.fetch('http://example.org/plain');
+    const clone = response.clone();
+    const [a, b] = await Promise.all([response.text(), clone.text()]);
+    strictEqual(a, 'hello world');
+    strictEqual(b, 'hello world');
+  },
+};
+
+// Request.clone() takes the same path as Response.clone().
+export const tsStreamRequestClone = {
+  async test() {
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue(new TextEncoder().encode('request body'));
+        c.close();
+      },
+    });
+    const request = new Request('http://example.org/', {
+      method: 'POST',
+      body: rs,
+    });
+    const clone = request.clone();
+    const [a, b] = await Promise.all([request.text(), clone.text()]);
+    strictEqual(a, 'request body');
+    strictEqual(b, 'request body');
+  },
+};
+
 export const nativeBackedTee = {
   async test() {
     const stream = new Blob(['hello world']).stream();
