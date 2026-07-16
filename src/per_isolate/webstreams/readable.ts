@@ -3871,6 +3871,11 @@ const cppExports = {
   getReadableStreamExpectedLength,
   getReadableStreamIsDisturbed,
   getReadableStreamOnEof,
+  // The private-brand check (#state in value). The C++ jsgTryUnwrap arm uses this to
+  // recognize TypeScript-implemented streams handed in from JS (e.g. new Response(rs));
+  // it is the single authoritative brand -- do not add parallel markers without a
+  // design-doc entry.
+  isReadableStream,
   isReadableStreamLocked,
   readableStreamCancel,
   setReadableStreamPendingClosure,

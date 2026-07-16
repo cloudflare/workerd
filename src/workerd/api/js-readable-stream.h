@@ -39,12 +39,12 @@ WD_STRONG_BOOL(IgnoreDisturbed);
 //   * stream-backed -- wraps an opaque, one-shot ReadableStream.
 //
 // Backend branching: the underlying stream is stored as a kj::OneOf so that a TypeScript
-// implemented ReadableStream (represented as a JS object) can eventually be supported alongside
-// the legacy C++ ReadableStream. Every method that touches the underlying stream switches on the
-// backend. Today only the C++ ReadableStream backend is implemented; the TypeScript backend
-// branches are KJ_UNIMPLEMENTED and the corresponding constructor cannot yet be used. When the
-// TypeScript implementation lands, fill in those branches -- the stored type (and therefore
-// Body / ExtractedBody) will not need to change.
+// implemented ReadableStream (represented as a JS object) is supported alongside the legacy
+// C++ ReadableStream. Every method that touches the underlying stream switches on the
+// backend. Most TypeScript backend branches are implemented (creation, wrap/unwrap,
+// consumers, pumpTo); the few remaining KJ_UNIMPLEMENTED branches (tee, detach, pipe
+// dispatch cells) are tracked in the design doc and fail loudly under the experimental
+// compat flag until their increments land.
 class JsReadableStream final {
  public:
   // The underlying stream. Today only the legacy C++ ReadableStream alternative is populated; the
@@ -76,7 +76,10 @@ class JsReadableStream final {
   // Adopt an existing legacy C++ ReadableStream. The result is not rewindable.
   JsReadableStream(jsg::Ref<ReadableStream> stream);
 
-  // Adopt a TypeScript-implemented ReadableStream (a JS object). Not yet supported.
+  // Adopt a TypeScript-implemented ReadableStream (a JS object). No brand validation
+  // happens here -- the caller asserts the object really is one. Untrusted values arrive
+  // through jsgTryUnwrap/tryUnwrapTs, which brand-check before adopting; internal callers
+  // (create()) construct from a known-good conduit instance.
   JsReadableStream(jsg::Lock& js, jsg::JsRef<jsg::JsObject> obj);
 
   // Create a buffer-backed (rewindable) JsReadableStream from various in-memory data sources. The
@@ -106,9 +109,9 @@ class JsReadableStream final {
   // ReadableStream is used.
   //
   // TODO(streams-ts): Several JsReadableStream operations still have unimplemented
-  // TypeScript arms (pumpTo, tee, detach, pipe dispatch cells, unwrap), so under the
-  // (experimental) flag, consumers exercising those paths will fail until the remaining
-  // arms are implemented.
+  // TypeScript arms (tee, detach, pipe dispatch cells), so under the (experimental)
+  // flag, consumers exercising those paths will fail until the remaining arms are
+  // implemented. (pumpTo and unwrap have landed.)
   static JsReadableStream create(
       jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source);
 
@@ -259,11 +262,25 @@ class JsReadableStream final {
       v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    // For now, we only support unwrapping the legacy C++ ReadableStream.
-    // Later we will also support the TypeScript implementation.
-    return typeWrapper.tryUnwrap(
-        js, context, handle, static_cast<jsg::Ref<ReadableStream>*>(nullptr), parentObject);
+    KJ_IF_SOME(legacy,
+        typeWrapper.tryUnwrap(
+            js, context, handle, static_cast<jsg::Ref<ReadableStream>*>(nullptr), parentObject)) {
+      return JsReadableStream(kj::mv(legacy));
+    }
+    // TypeScript-implemented streams are plain JS objects with no JSG wrapper, so the
+    // typeWrapper cannot recognize them; ask the TS implementation's own brand check.
+    return tryUnwrapTs(js, handle);
   }
+
+  // The TypeScript arm of jsgTryUnwrap: recognizes a TypeScript-implemented ReadableStream
+  // by the implementation's private brand (via the bootstrap bridge's isReadableStream) and
+  // adopts it. Returns kj::none if the typescript_implemented_streams compat flag is off
+  // (the bootstrap export does not exist then) or if the value is not a TS stream.
+  //
+  // Deliberately performs no locked/disturbed checks, matching the legacy arm: unwrap
+  // adopts the handle as-is and consumers (e.g. Body) enforce their own preconditions.
+  // Public so tests can drive it directly; production code goes through jsgTryUnwrap.
+  static kj::Maybe<JsReadableStream> tryUnwrapTs(jsg::Lock& js, v8::Local<v8::Value> handle);
 
  private:
   explicit JsReadableStream(Impl impl): impl(kj::mv(impl)) {}

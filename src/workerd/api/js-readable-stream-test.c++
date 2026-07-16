@@ -1259,5 +1259,59 @@ KJ_TEST("ReadableStreamNativeSource rejects concurrent pulls") {
   });
 }
 
+// =======================================================================================
+// jsgTryUnwrap of TypeScript-backed streams
+
+KJ_TEST("JsReadableStream::tryUnwrapTs adopts TypeScript streams and rejects impostors") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    auto constructor =
+        KJ_ASSERT_NONNULL(exportsObj.get(js, "ReadableStream"_kj).tryCast<jsg::JsFunction>());
+    auto streamObj = constructor.newInstance(js, jsg::JsValue(js.obj()));
+
+    // A genuine TypeScript stream unwraps.
+    auto unwrapped = KJ_ASSERT_NONNULL(JsReadableStream::tryUnwrapTs(js, jsg::JsValue(streamObj)));
+    KJ_EXPECT(!unwrapped.isNull());
+    KJ_EXPECT(!unwrapped.isLocked(js));
+
+    // Unwrap ADOPTS the same underlying stream (it does not copy): locking through the
+    // original JS handle is visible through the adopted JsReadableStream.
+    auto acquire = KJ_ASSERT_NONNULL(
+        exportsObj.get(js, "acquireReadableStreamDrainingReader"_kj).tryCast<jsg::JsFunction>());
+    auto reader KJ_UNUSED = acquire.call(js, js.undefined(), jsg::JsValue(streamObj));
+    KJ_EXPECT(unwrapped.isLocked(js));
+
+    // Unwrap has no locked/disturbed preconditions (legacy parity): a locked stream
+    // still unwraps; consumers enforce their own requirements.
+    auto unwrappedWhileLocked =
+        KJ_ASSERT_NONNULL(JsReadableStream::tryUnwrapTs(js, jsg::JsValue(streamObj)));
+    KJ_EXPECT(unwrappedWhileLocked.isLocked(js));
+
+    // Impostors do not unwrap: plain objects, primitives, and JSG resource objects that
+    // are not streams all fail the brand check.
+    KJ_EXPECT(JsReadableStream::tryUnwrapTs(js, jsg::JsValue(js.obj())) == kj::none);
+    KJ_EXPECT(JsReadableStream::tryUnwrapTs(js, js.str("stream"_kj)) == kj::none);
+    KJ_EXPECT(JsReadableStream::tryUnwrapTs(js, js.num(42.0)) == kj::none);
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+    auto sourceObj = jsg::JsValue(handler.wrap(
+        js, js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData))));
+    KJ_EXPECT(JsReadableStream::tryUnwrapTs(js, sourceObj) == kj::none);
+  });
+}
+
+KJ_TEST("JsReadableStream::tryUnwrapTs is inert without the compat flag") {
+  TestFixture testFixture;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    // Without the flag there is no TypeScript implementation and no bootstrap export;
+    // the guard must return none rather than reaching for the absent export.
+    KJ_EXPECT(JsReadableStream::tryUnwrapTs(js, jsg::JsValue(js.obj())) == kj::none);
+  });
+}
+
 }  // namespace
 }  // namespace workerd::api

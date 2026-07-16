@@ -64,6 +64,14 @@ bool getReadableStreamIsDisturbed(jsg::Lock& js, jsg::JsObject obj) {
   return dispatchCall(js, "getReadableStreamIsDisturbed", obj).isTrue();
 }
 
+// The TypeScript implementation's private-brand check. True only for genuine
+// TypeScript-implemented ReadableStream instances (including subclasses); false for
+// everything else, including proxies wrapping a stream (private fields do not tunnel
+// through proxies, deliberately matching the TS-side behavior).
+bool isTypeScriptReadableStream(jsg::Lock& js, jsg::JsObject obj) {
+  return dispatchCall(js, "isReadableStream", obj).isTrue();
+}
+
 bool getReadableStreamIsLocked(jsg::Lock& js, jsg::JsObject obj) {
   return dispatchCall(js, "isReadableStreamLocked", obj).isTrue();
 }
@@ -475,6 +483,28 @@ JsReadableStream JsReadableStream::create(
     return JsReadableStream(js, constructor.newInstance(js, sourceObj).addRef(js));
   }
   return JsReadableStream(js.alloc<ReadableStream>(ioContext, kj::mv(source)));
+}
+
+kj::Maybe<JsReadableStream> JsReadableStream::tryUnwrapTs(
+    jsg::Lock& js, v8::Local<v8::Value> handle) {
+  // Without the flag there is no TypeScript implementation (and no bootstrap export to
+  // ask), so nothing can match. This also keeps the flag-off unwrap path allocation- and
+  // JS-call-free.
+  if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+    return kj::none;
+  }
+  KJ_IF_SOME(obj, jsg::JsValue(handle).tryCast<jsg::JsObject>()) {
+    // PERF NOTE: this is a JS call per unwrap attempt on any object-typed value. Since
+    // JsReadableStream is typically the first alternative in consumer OneOfs (e.g.
+    // Body::Initializer), object bodies that are NOT streams (ArrayBuffer, Blob, FormData,
+    // ...) pay it before falling through. If this shows up in profiles, the alternative is
+    // an own api-symbol marker stamped by the conduit constructor (same machinery as
+    // kNativeSource) -- see the design doc's unwrap decision entry.
+    if (isTypeScriptReadableStream(js, obj)) {
+      return JsReadableStream(js, obj.addRef(js));
+    }
+  }
+  return kj::none;
 }
 
 JsReadableStream JsReadableStream::addRef(jsg::Lock& js) {
