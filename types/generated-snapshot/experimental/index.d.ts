@@ -503,6 +503,7 @@ interface ExecutionContext<Props = unknown> {
     readonly override?: string;
   };
   readonly access?: CloudflareAccessContext;
+  mapVirtualHost(fetcher: Fetcher, port: number): string;
   tracing: Tracing;
   abort(reason?: any): void;
 }
