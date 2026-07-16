@@ -8,6 +8,7 @@
 #include <workerd/api/streams/readable-source.h>
 #include <workerd/api/url-standard.h>
 #include <workerd/api/url.h>
+#include <workerd/io/features.h>
 #include <workerd/io/per-isolate-bootstrap.h>
 #include <workerd/jsg/jsg.h>
 
@@ -40,13 +41,23 @@ kj::Array<const kj::byte> bufferSourceToBytes(
   return kj::heapArray<kj::byte>(view.getHandle(js).asArrayPtr());
 }
 
-template <jsg::IsJsValue... Args>
-jsg::JsValue dispatchCall(jsg::Lock& js, kj::StringPtr name, Args... args) {
-  // Will surface as an "Internal error" to user code. That's intended.
+// Fetches a named function export of the webstreams/cpp_exports bootstrap module. The
+// module is eagerly required by the bootstrap when the typescript_implemented_streams
+// compat flag is enabled, so lookups can only fail on internal errors or gross
+// misconfiguration (e.g. the flag enabled without the bootstrap autogate); the resulting
+// "internal error" surfaced to user code is intended.
+jsg::JsFunction getCppExport(jsg::Lock& js, kj::StringPtr name) {
   auto cppExports = KJ_REQUIRE_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
   auto cppExportsObj = KJ_REQUIRE_NONNULL(cppExports.tryCast<jsg::JsObject>());
-  auto func = KJ_REQUIRE_NONNULL(cppExportsObj.get(js, name).tryCast<jsg::JsFunction>());
-  return func.call(js, kj::fwd<Args>(args)...);
+  return KJ_REQUIRE_NONNULL(cppExportsObj.get(js, name).tryCast<jsg::JsFunction>());
+}
+
+template <jsg::IsJsValue... Args>
+jsg::JsValue dispatchCall(jsg::Lock& js, kj::StringPtr name, Args... args) {
+  auto func = getCppExport(js, name);
+  // The cppExports functions take their target (e.g. the stream) as their first
+  // argument; the receiver is unused.
+  return func.call(js, js.undefined(), kj::fwd<Args>(args)...);
 }
 
 bool getReadableStreamIsDisturbed(jsg::Lock& js, jsg::JsObject obj) {
@@ -219,8 +230,18 @@ JsReadableStream::JsReadableStream(
 
 JsReadableStream JsReadableStream::create(
     jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source) {
-  // TODO(streams-ts): Dispatch on the worker's configuration to construct either the legacy
-  // C++ ReadableStream or a TypeScript-backed stream.
+  if (FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+    // TypeScript-implemented streams: wrap the native source in a
+    // ReadableStreamNativeSource -- whose instances are born carrying the kNativeSource
+    // marker (JSG_PRIVATE_SYMBOL) that the TypeScript ReadableStream constructor detects
+    // -- and construct the TypeScript stream over it via the constructor exposed through
+    // the bootstrap's cpp_exports module.
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+    auto sourceObj = jsg::JsValue(
+        handler.wrap(js, js.alloc<ReadableStreamNativeSource>(ioContext, kj::mv(source))));
+    auto constructor = getCppExport(js, "ReadableStream");
+    return JsReadableStream(js, constructor.newInstance(js, sourceObj).addRef(js));
+  }
   return JsReadableStream(js.alloc<ReadableStream>(ioContext, kj::mv(source)));
 }
 
@@ -234,7 +255,10 @@ JsReadableStream JsReadableStream::addRef(jsg::Lock& js) {
         });
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+        return JsReadableStream(Impl{
+          .stream = StreamImpl(obj.addRef(js)),
+          .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); }),
+        });
       }
     }
     KJ_UNREACHABLE;

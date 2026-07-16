@@ -100,9 +100,15 @@ class JsReadableStream final {
   // source. This is the canonical way for C++ code to mint a new ReadableStream to hand to
   // JavaScript.
   //
-  // TODO(streams-ts): This is the future compatibility-flag dispatch point. Once the
-  // TypeScript implementation lands, this will construct either the legacy C++ ReadableStream
-  // or a TypeScript-backed stream depending on the worker's configuration.
+  // This is the compatibility-flag dispatch point: when the typescript_implemented_streams
+  // compat flag is enabled, the source is wrapped in a ReadableStreamNativeSource and the
+  // stream is constructed by the TypeScript implementation; otherwise the legacy C++
+  // ReadableStream is used.
+  //
+  // TODO(streams-ts): Several JsReadableStream operations still have unimplemented
+  // TypeScript arms (pumpTo, tee, detach, pipe dispatch cells, unwrap), so under the
+  // (experimental) flag, consumers exercising those paths will fail until the remaining
+  // arms are implemented.
   static JsReadableStream create(
       jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source);
 
@@ -240,7 +246,9 @@ class JsReadableStream final {
         return typeWrapper.wrap(js, context, creator, kj::mv(legacy));
       }
       KJ_CASE_ONEOF(ts, jsg::JsRef<jsg::JsObject>) {
-        KJ_UNIMPLEMENTED("TypeScript ReadableStream not yet supported");
+        // The TypeScript-implemented stream IS a JS object; wrapping just hands the same
+        // handle back, which is what preserves identity (request.body === request.body).
+        return ts.getHandle(js);
       }
     }
     KJ_UNREACHABLE;
