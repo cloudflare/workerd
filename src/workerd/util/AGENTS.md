@@ -38,6 +38,6 @@ Shared utility library: data structures, SQLite wrapper, feature gating, logging
 - **StateMachine `underlying()`**: bypasses ALL safety (transition lock, terminal states) — last resort only
 - **StateMachine + `KJ_SWITCH_ONEOF`**: does NOT acquire transition lock — UAF risk; use `whenState<T>(fn)` instead
 - **StateMachine `deferTransitionTo()`**: first-wins semantics; second call silently ignored
-- **SQLite**: `SQLITE_MISUSE` always throws; virtual tables disallowed (except FTS5); `ATTACH`/`DETACH` forbidden; callbacks must not write
+- **SQLite**: `SQLITE_MISUSE` always throws; virtual tables disallowed (except FTS5 and RTREE); `ATTACH`/`DETACH` forbidden; callbacks must not write
 - **ThreadScopes**: thread-local state crossing module boundaries — acknowledged hack, do not proliferate
 - **RingBuffer**: moves on grow invalidating references; iterators invalidated on push/pop; intentionally not thread-safe.
