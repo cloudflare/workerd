@@ -2885,7 +2885,7 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
         }
       }
       return kj::mv(result);
-    // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
+      // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
     }, [this, ref = ref.addRef()](jsg::Lock& js, jsg::Value exception) -> DrainingReadResult {
       state.clearPendingState();
       (void)state.endOperation();
@@ -3233,8 +3233,8 @@ class AllReader final: public kj::PtrTarget {
 
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> allBytes(jsg::Lock& js) {
     // The weak ref will assert if `this` is destroyed before the promise resolves.
-    return loop(js).then(
-        js, [weak = addWeakToThis()](auto& js, PartList&& partPtrs) -> jsg::JsRef<jsg::JsArrayBuffer> {
+    return loop(js).then(js,
+        [weak = addWeakToThis()](auto& js, PartList&& partPtrs) -> jsg::JsRef<jsg::JsArrayBuffer> {
       auto& self = weak.assertLive();
       auto ab = jsg::JsArrayBuffer::create(js, self.runningTotal);
       copyInto(ab.asArrayPtr(), partPtrs.asPtr());
@@ -3310,9 +3310,8 @@ class AllReader final: public kj::PtrTarget {
           if (!handle.isArrayBufferView() && !handle.isArrayBuffer()) {
             auto error = js.typeError("This ReadableStream did not return bytes.");
             self.state.template transitionTo<StreamStates::Errored>(error.addRef(js));
-            return readable->getController().cancel(js, error).then(js, [weak](jsg::Lock& js) {
-              return weak.assertLive().loop(js);
-            });
+            return readable->getController().cancel(js, error).then(
+                js, [weak](jsg::Lock& js) { return weak.assertLive().loop(js); });
           }
 
           jsg::BufferSource bufferSource(js, handle);
@@ -3325,9 +3324,8 @@ class AllReader final: public kj::PtrTarget {
           if ((self.runningTotal + bufferSource.size()) > self.limit) {
             auto error = js.typeError("Memory limit exceeded before EOF.");
             self.state.template transitionTo<StreamStates::Errored>(error.addRef(js));
-            return readable->getController().cancel(js, error).then(js, [weak](jsg::Lock& js) {
-              return weak.assertLive().loop(js);
-            });
+            return readable->getController().cancel(js, error).then(
+                js, [weak](jsg::Lock& js) { return weak.assertLive().loop(js); });
           }
 
           self.runningTotal += bufferSource.size();
@@ -3336,7 +3334,8 @@ class AllReader final: public kj::PtrTarget {
         };
 
         // The weak ref will assert if `this` is destroyed before the promise resolves.
-        auto onFailure = [weak = addWeakToThis()](auto& js, jsg::Value exception) -> jsg::Promise<PartList> {
+        auto onFailure = [weak = addWeakToThis()](
+                             auto& js, jsg::Value exception) -> jsg::Promise<PartList> {
           auto& self = weak.assertLive();
           // In this case the stream should already be errored.
           auto error = jsg::JsValue(exception.getHandle(js));
