@@ -629,7 +629,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
       return context
           .run([exportedHandler, timeout, retryCount, scheduledTime,
                    maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)](Worker::Lock& lock,
-                    IoContext& context) mutable -> kj::Promise<WorkerInterface::AlarmResult> {
+                   IoContext& context) mutable -> kj::Promise<WorkerInterface::AlarmResult> {
         jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
         // Re-derive the alarm handler from the captured `exportedHandler` rather than capturing
         // it by reference; its lifetime matches `exportedHandler` itself.
@@ -639,7 +639,8 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
         // first timeout will be canceled.
         jsg::Lock& js = lock;
         auto timeoutPromise = context.afterLimitTimeout(timeout).then(
-            [weakCtx = context.getWeakRef()]() mutable -> kj::Promise<WorkerInterface::AlarmResult> {
+            [weakCtx =
+                    context.getWeakRef()]() mutable -> kj::Promise<WorkerInterface::AlarmResult> {
           auto& context = weakCtx.assertLive();
           // We don't want to delete the alarm since we have not successfully completed the alarm
           // execution.
@@ -671,9 +672,8 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           return WorkerInterface::AlarmResult{.retry = false, .outcome = EventOutcome::OK};
         }).exclusiveJoin(kj::mv(timeoutPromise));
       })
-          .catch_(
-              [deferredDelete = kj::mv(armResult.deferredDelete), weakCtx = context.getWeakRef()](
-                  kj::Exception&& e) mutable {
+          .catch_([deferredDelete = kj::mv(armResult.deferredDelete),
+                      weakCtx = context.getWeakRef()](kj::Exception&& e) mutable {
         auto& context = weakCtx.assertLive();
         auto& actor = KJ_ASSERT_NONNULL(context.getActor());
         auto& persistent = KJ_ASSERT_NONNULL(actor.getPersistent());

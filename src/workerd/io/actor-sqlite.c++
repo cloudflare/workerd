@@ -196,8 +196,9 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
     // if we return a promise here, the one call site (DurableObjectStorage::asyncTransactionImpl())
     // will actually keep the input gate locked until the commit finishes, which is what we need.
     return actorSqlite.blockTasks.onEmpty()
-        .then([self = kj::addRef(*this)]() mutable { self->commitImpl(); })
-        .catch_([self = kj::addRef(*this)](kj::Exception&& e) mutable {
+        .then([self = kj::addRef(*this)]() mutable {
+      self->commitImpl();
+    }).catch_([self = kj::addRef(*this)](kj::Exception&& e) mutable {
       if (self->actorSqlite.broken == kj::none) {
         self->rollbackImpl();
       }
@@ -440,7 +441,8 @@ kj::Promise<void> ActorSqlite::requestScheduledAlarm(
 
   // The [this] capture is safe because the caller ensures ActorSqlite stays alive
   // while the alarm scheduling promise resolves.
-  return hooks.scheduleRun(requestedTime, kj::mv(priorTask))
+  return hooks
+      .scheduleRun(requestedTime, kj::mv(priorTask))
       // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
       .then([this, movingAlarmLater, requestedTime]() {
     if (!movingAlarmLater) {

@@ -319,8 +319,9 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
   }
 
   // Transform the ReadResult promise to DrainingReadResult.
-  return prp.promise.then(
-      js, [impl = impl.addWeakToThis()](jsg::Lock& js, ReadResult result) mutable -> DrainingReadResult {
+  return prp.promise.then(js,
+      [impl = impl.addWeakToThis()](
+          jsg::Lock& js, ReadResult result) mutable -> DrainingReadResult {
     KJ_IF_SOME(ready, impl.assertLive().state.tryGetActiveUnsafe()) {
       ready.hasPendingDrainingRead = false;
     }
@@ -343,7 +344,9 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
       .chunks = chunks.releaseAsArray(),
       .done = false,
     };
-  }, [impl = impl.addWeakToThis()](jsg::Lock& js, jsg::Value exception) mutable -> DrainingReadResult {
+  },
+      [impl = impl.addWeakToThis()](
+          jsg::Lock& js, jsg::Value exception) mutable -> DrainingReadResult {
     KJ_IF_SOME(ready, impl.assertLive().state.tryGetActiveUnsafe()) {
       ready.hasPendingDrainingRead = false;
     }
@@ -815,8 +818,9 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
     }
 
     // Transform the ReadResult promise to DrainingReadResult.
-    return prp.promise.then(
-        js, [impl = impl.addWeakToThis()](jsg::Lock& js, ReadResult result) mutable -> DrainingReadResult {
+    return prp.promise.then(js,
+        [impl = impl.addWeakToThis()](
+            jsg::Lock& js, ReadResult result) mutable -> DrainingReadResult {
       KJ_IF_SOME(ready, impl.assertLive().state.tryGetActiveUnsafe()) {
         ready.hasPendingDrainingRead = false;
       }
@@ -839,7 +843,9 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
         .chunks = chunks.releaseAsArray(),
         .done = false,
       };
-    }, [impl = impl.addWeakToThis()](jsg::Lock& js, jsg::Value exception) mutable -> DrainingReadResult {
+    },
+        [impl = impl.addWeakToThis()](
+            jsg::Lock& js, jsg::Value exception) mutable -> DrainingReadResult {
       KJ_IF_SOME(ready, impl.assertLive().state.tryGetActiveUnsafe()) {
         ready.hasPendingDrainingRead = false;
       }

@@ -596,7 +596,8 @@ kj::Promise<void> WritableStreamSinkKjAdapter::write(
   }
   active.writePending = true;
 
-  return active.canceler
+  return active
+      .canceler
       // This API requires that pieces stay alive until the returned promise completes.
       .wrap(active.ioContext.assertLive().run(
           // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
