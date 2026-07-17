@@ -55,6 +55,7 @@ const {
   ObjectCreate,
   ObjectDefineProperty,
   ObjectDefineProperties,
+  ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
   ObjectSetPrototypeOf,
   PromiseResolve,
@@ -204,9 +205,7 @@ function assertPrivateSymbol(symbol: symbol) {
 }
 
 let isReadableStreamLocked: <R>(stream: ReadableStream<R>) => boolean;
-// Accessor to extract the encapsulated ReadableStreamReaderBase from any
-// outer reader (DefaultReader, BYOBReader, DrainingReader). Assigned in
-// each outer reader's static {} block.
+let isReadableStreamUnusable: <R>(stream: ReadableStream<R>) => boolean;
 let getReaderBase: <R>(reader: object) => ReadableStreamReaderBase<R>;
 let isReaderBoundToStream: (reader: object) => boolean;
 let acquireReadableStreamDefaultReader: <R>(
@@ -2753,7 +2752,7 @@ class ReadableStream<R> {
   // not to accept reads because it is pending closure. We don't yet fully
   // implement this but we provide for the signal.
   // @ts-expect-error
-  #pendingClosure?: boolean = false;
+  #pendingClosure: boolean = false;
 
   static {
     isReadableStream = (value: unknown) => {
@@ -2787,6 +2786,11 @@ class ReadableStream<R> {
       // real, never-exposed internal reader, and the pipe/draining paths
       // hold ordinary reader locks.
       return stream.#reader !== undefined;
+    };
+
+    isReadableStreamUnusable = <R>(stream: ReadableStream<R>) => {
+      assertIsReadableStream(stream);
+      return stream.#disturbed || isReadableStreamLocked(stream);
     };
 
     readableStreamCancel = <R>(stream: ReadableStream<R>, reason?: unknown) => {
@@ -3631,33 +3635,45 @@ class ReadableStream<R> {
   }
 }
 
-// The limit is adjusted to the expected length if it is defined and smaller than the limit.
+const kMaximumAllowedLimit = 128n * 1024n * 1024n; // 128 MB
+
+function bigIntMin(a: bigint, b: bigint): bigint {
+  return a < b ? a : b;
+}
+
 function adjustLimit(
   limit: bigint,
   maybeExpectedLength: bigint | undefined
 ): bigint {
-  if (maybeExpectedLength === undefined) {
-    return limit;
+  let result = bigIntMin(kMaximumAllowedLimit, limit);
+  if (maybeExpectedLength !== undefined) {
+    result = bigIntMin(result, maybeExpectedLength);
   }
-  if (limit > maybeExpectedLength) {
-    return maybeExpectedLength;
-  }
-  return limit;
+  return result;
 }
 
-// TODO(streams-ts): Implement
-// Consume the entire stream and return a promise for an ArrayBuffer containing all of the data.
-async function consumeReadableStreamAsArrayBuffer<R>(
+function acquireReadableStreamDrainingReader<R>(
+  stream: ReadableStream<R>
+): ReadableStreamDrainingReader<R> {
+  return new ReadableStreamDrainingReader<R>(stream);
+}
+
+type CollectChunksResult = {
+  amountRead: bigint;
+  chunks: Uint8Array[];
+};
+
+async function collectChunks<R>(
   stream: ReadableStream<R>,
   limit: bigint
-): Promise<ArrayBuffer> {
-  limit = adjustLimit(limit, getReadableStreamExpectedLength(stream));
-  if (isReadableStreamLocked(stream)) {
-    throw new TypeError('Cannot consume a stream that is locked');
+): Promise<CollectChunksResult> {
+  if (isReadableStreamUnusable(stream)) {
+    throw new TypeError('Cannot consume a stream that is locked or disturbed');
   }
+  const reader = acquireReadableStreamDrainingReader(stream);
+  limit = adjustLimit(limit, getReadableStreamExpectedLength(stream));
   let amountRead = 0n;
   const chunks: Uint8Array[] = [];
-  const reader = new ReadableStreamDrainingReader<R>(stream);
   while (true) {
     const result = await reader.read();
     for (const chunk of result.chunks as Uint8Array[]) {
@@ -3665,15 +3681,24 @@ async function consumeReadableStreamAsArrayBuffer<R>(
       if (length === 0) continue;
       amountRead += BigInt(length);
       if (amountRead > limit) {
-        throw new RangeError('Stream exceeded the specified limit');
+        throw new RangeError(
+          `Stream exceeded the maximum allowed limit of ${Number(limit)} bytes`
+        );
       }
       ArrayPrototypePush(chunks, chunk);
     }
     if (result.done) break;
   }
 
-  // amountRead is bounded by the limit, but Number() is still safe unguarded:
-  // any total that would lose precision (>2^53) could never be allocated below.
+  return { amountRead, chunks };
+}
+
+async function consumeReadableStreamAsArrayBuffer<R>(
+  stream: ReadableStream<R>,
+  limit: bigint
+): Promise<ArrayBuffer> {
+  const { amountRead, chunks } = await collectChunks(stream, limit);
+
   const res = new ArrayBuffer(Number(amountRead));
   const u8 = new Uint8Array(res);
   let offset = 0;
@@ -3685,7 +3710,6 @@ async function consumeReadableStreamAsArrayBuffer<R>(
   return res;
 }
 
-// Consume the entire stream and return a promise for a Uint8Array containing all of the data.
 async function consumeReadableStreamAsUint8Array<R>(
   stream: ReadableStream<R>,
   limit: bigint
@@ -3695,47 +3719,24 @@ async function consumeReadableStreamAsUint8Array<R>(
   );
 }
 
-// TODO(streams-ts): Implement
-// Consume the entire stream and return a promise for a string containing all of the data.
 async function consumeReadableStreamAsText<R>(
   stream: ReadableStream<R>,
   limit: bigint
 ): Promise<string> {
-  limit = adjustLimit(limit, getReadableStreamExpectedLength(stream));
-  if (isReadableStreamLocked(stream)) {
-    throw new TypeError('Cannot consume a stream that is locked');
-  }
-
-  let amountRead = 0n;
-  const chunks: Uint8Array[] = [];
-  const reader = new ReadableStreamDrainingReader<R>(stream);
-  while (true) {
-    const result = await reader.read();
-    for (const chunk of result.chunks as Uint8Array[]) {
-      const length = TypedArrayPrototypeGetByteLength(chunk);
-      if (length === 0) continue;
-      amountRead += BigInt(length);
-      if (amountRead > limit) {
-        throw new RangeError('Stream exceeded the specified limit');
-      }
-      ArrayPrototypePush(chunks, chunk);
-    }
-    if (result.done) break;
-  }
+  const { amountRead, chunks } = await collectChunks(stream, limit);
 
   let res = '';
   if (amountRead === 0n) return res;
 
   const decoder = new TextDecoder();
   for (const chunk of chunks) {
-    res += TextDecoderDecode(decoder, chunk, { stream: true });
+    res += TextDecoderDecode(decoder, chunk, { __proto__: null, stream: true });
   }
   res += TextDecoderDecode(decoder); // flush
 
   return res;
 }
 
-// Consume the entire stream and return a promise for a string containing all of the data.
 async function consumeReadableStreamAsJSON<R>(
   stream: ReadableStream<R>,
   limit: bigint
@@ -3858,43 +3859,25 @@ ObjectDefineProperties(ReadableByteStreamController.prototype.enqueue, {
   length: { __proto__: null, value: 1 },
 });
 
-// Acquires the internal draining reader for the C++ bridge's pump path (locks the
-// stream). Each read() collects everything currently buffered, so the C++ pump pays one
-// isolate-lock trip per batch rather than per chunk.
-function acquireReadableStreamDrainingReader<R>(
-  stream: ReadableStream<R>
-): ReadableStreamDrainingReader<R> {
-  return new ReadableStreamDrainingReader<R>(stream);
-}
-
 // The cppExports are not part of the public API. They are exported to the
 // C++ side of the implementation to allow for certain internal operations
 // to be performed on ReadableStream instances.
-const cppExports = {
+const cppExports = ObjectFreeze({
   ReadableStream,
   acquireReadableStreamDrainingReader,
+  consumeReadableStreamAsArrayBuffer,
+  consumeReadableStreamAsJSON,
+  consumeReadableStreamAsText,
+  consumeReadableStreamAsUint8Array,
   getReadableStreamExpectedLength,
   getReadableStreamIsDisturbed,
   getReadableStreamOnEof,
-  // The private-brand check (#state in value). The C++ jsgTryUnwrap arm uses this to
-  // recognize TypeScript-implemented streams handed in from JS (e.g. new Response(rs));
-  // it is the single authoritative brand -- do not add parallel markers without a
-  // design-doc entry.
   isReadableStream,
   isReadableStreamLocked,
-  // The internal tee operation (what ReadableStream.prototype.tee delegates to after its
-  // brand assert). Enforces the locked precondition itself. The C++
-  // JsReadableStream::tee TS arm calls this so C++-initiated clones
-  // (Request/Response.clone, cache.put) tee TypeScript-backed bodies through the same
-  // backend-dispatched machinery as JS-initiated tees.
-  readableStreamTee,
   readableStreamCancel,
+  readableStreamTee,
   setReadableStreamPendingClosure,
-  consumeReadableStreamAsArrayBuffer,
-  consumeReadableStreamAsUint8Array,
-  consumeReadableStreamAsText,
-  consumeReadableStreamAsJSON,
-};
+});
 
 module.exports = {
   ReadableStream,
@@ -3909,12 +3892,12 @@ module.exports = {
   ReadableStreamDrainingReader,
   // Internal operations consumed by the TransformStream cancel/flush
   // coordination (finishPromise guard). Unreachable from user code.
-  internalsForTransform: {
+  internalsForTransform: ObjectFreeze({
     getState: <R>(stream: ReadableStream<R>) =>
       getReadableStreamGetState(stream),
     getStoredError: <R>(stream: ReadableStream<R>) =>
       getReadableStreamStoredError(stream),
-  },
+  }),
 
   // Part of the internal implementation. Do not re-export to user code
   cppExports,

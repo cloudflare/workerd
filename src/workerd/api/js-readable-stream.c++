@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "kj/common.h"
+
 #include <workerd/api/blob.h>
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-writable-stream.h>
@@ -36,9 +38,8 @@ kj::Array<const kj::byte> stringToBytes(kj::String data) {
 // JsBufferSource) severs the dependency on the V8 backing store, which could otherwise be freed if
 // the source ArrayBuffer is detached/transferred and then garbage collected. This also satisfies
 // the Fetch requirement to copy the input buffer.
-kj::Array<const kj::byte> bufferSourceToBytes(
-    jsg::Lock& js, jsg::JsRef<jsg::JsBufferSource>& view) {
-  return kj::heapArray<kj::byte>(view.getHandle(js).asArrayPtr());
+kj::Array<const kj::byte> bufferSourceToBytes(jsg::Lock& js, jsg::JsBufferSource view) {
+  return kj::heapArray<kj::byte>(view.asArrayPtr());
 }
 
 // Fetches a named function export of the webstreams/cpp_exports bootstrap module. The
@@ -55,9 +56,18 @@ jsg::JsFunction getCppExport(jsg::Lock& js, kj::StringPtr name) {
 template <jsg::IsJsValue... Args>
 jsg::JsValue dispatchCall(jsg::Lock& js, kj::StringPtr name, Args... args) {
   auto func = getCppExport(js, name);
-  // The cppExports functions take their target (e.g. the stream) as their first
-  // argument; the receiver is unused.
   return func.call(js, js.undefined(), kj::fwd<Args>(args)...);
+}
+
+// Calls the named method on the given object, with the object itself as the receiver.
+// Used to invoke the TypeScript conduit's controller facade methods (enqueue, close,
+// respond, ...). The facade objects are module-owned TypeScript code, not user objects,
+// so a missing method indicates an internal error.
+template <jsg::IsJsValue... Args>
+jsg::JsValue invokeMethod(jsg::Lock& js, jsg::JsObject obj, kj::StringPtr name, Args... args) {
+  auto func =
+      KJ_REQUIRE_NONNULL(obj.get(js, name).tryCast<jsg::JsFunction>(), "method not found", name);
+  return func.call(js, obj, args...);
 }
 
 bool getReadableStreamIsDisturbed(jsg::Lock& js, jsg::JsObject obj) {
@@ -147,7 +157,7 @@ jsg::Promise<kj::String> getReadableStreamText(jsg::Lock& js, jsg::JsObject obj,
 
 jsg::Promise<jsg::JsRef<jsg::JsValue>> getReadableStreamJson(
     jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
-  jsg::JsValue result = dispatchCall(js, "consumeReadableStreamAsText", obj, js.bigInt(limit));
+  jsg::JsValue result = dispatchCall(js, "consumeReadableStreamAsJSON", obj, js.bigInt(limit));
   // The result must be a promise for a JS value
   jsg::JsPromise promise = KJ_REQUIRE_NONNULL(result.tryCast<jsg::JsPromise>());
   return js.toPromise(promise).then(
@@ -167,17 +177,6 @@ jsg::Promise<jsg::Ref<Blob>> getReadableStreamBlob(
     auto ab = KJ_REQUIRE_NONNULL(value.tryCast<jsg::JsArrayBuffer>());
     return js.alloc<Blob>(js, jsg::JsBufferSource(ab), kj::mv(contentType));
   });
-}
-
-// Calls the named method on the given object, with the object itself as the receiver.
-// Used to invoke the TypeScript conduit's controller facade methods (enqueue, close,
-// respond, ...). The facade objects are module-owned TypeScript code, not user objects,
-// so a missing method indicates an internal error.
-template <jsg::IsJsValue... Args>
-jsg::JsValue invokeMethod(jsg::Lock& js, jsg::JsObject obj, kj::StringPtr name, Args... args) {
-  auto func =
-      KJ_REQUIRE_NONNULL(obj.get(js, name).tryCast<jsg::JsFunction>(), "method not found", name);
-  return func.call(js, obj, args...);
 }
 
 // Adapts a ReadableStreamSource into a kj::AsyncInputStream so that it can feed
@@ -238,52 +237,78 @@ class NullSource final: public ReadableStreamSource {
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
     return static_cast<uint64_t>(0);
   }
+
+  void cancel(kj::Exception reason) override {
+    // Nothing to do here.
+  }
 };
 
 // Serves the given prefix bytes, then delegates to the inner source. Used for the rare
 // pump-with-stashed-bytes case (a tee-seeded branch extracted before being read).
 // Deliberately does NOT override pumpTo(): the generic pump loop is used, at the cost of
 // deferred proxying, which only this rare path pays.
+// TODO(streams-ts): Since the prefix is a kj::Array, this actually can implement
+// pumpTo and support deferred proxying.
 class PrefixedSource final: public ReadableStreamSource {
  public:
   PrefixedSource(kj::Array<kj::byte> prefix, kj::Own<ReadableStreamSource> inner)
-      : prefix(kj::mv(prefix)),
+      : maybePrefix(kj::mv(prefix)),
         inner(kj::mv(inner)) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    if (offset < prefix.size()) {
-      size_t amount = kj::min(maxBytes, prefix.size() - offset);
-      kj::arrayPtr(static_cast<kj::byte*>(buffer), amount)
-          .copyFrom(prefix.slice(offset, offset + amount));
-      offset += amount;
-      if (amount >= minBytes) {
-        return amount;
+    auto dest = kj::arrayPtr(static_cast<kj::byte*>(buffer), maxBytes);
+    KJ_IF_SOME(prefix, maybePrefix) {
+      if (prefix.view != nullptr) {
+        size_t amount = kj::min(dest.size(), prefix.view.size());
+        // Because the AI review agent likes to flag this, the dest.write(...)
+        // will advance the internal pointer of dest by amount, so the tryRead
+        // below picks up at the right place and does not overwrite the prefix
+        // bytes.
+        dest.write(prefix.view.first(amount));
+        prefix.view = prefix.view.slice(amount);
+        if (prefix.view == nullptr) {
+          // We have fully consumed the prefix. Clear it out.
+          maybePrefix = kj::none;
+        }
+        if (amount >= minBytes) {
+          co_return amount;
+        }
+        minBytes -= amount;
+        maxBytes -= amount;
+        size_t n = co_await inner->tryRead(dest.begin(), minBytes, maxBytes);
+        co_return amount + n;
+      } else {
+        maybePrefix = kj::none;
       }
-      // Returning fewer than minBytes would falsely signal EOF (KJ semantics); top up
-      // from the inner source.
-      return inner
-          ->tryRead(static_cast<kj::byte*>(buffer) + amount, minBytes - amount, maxBytes - amount)
-          .then([amount](size_t n) { return amount + n; });
     }
-    return inner->tryRead(buffer, minBytes, maxBytes);
+    co_return co_await inner->tryRead(buffer, minBytes, maxBytes);
   }
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
     if (encoding == StreamEncoding::IDENTITY) {
       KJ_IF_SOME(length, inner->tryGetLength(encoding)) {
-        return length + (prefix.size() - offset);
+        size_t prefixSize = 0;
+        KJ_IF_SOME(prefix, maybePrefix) {
+          prefixSize = prefix.view.size();
+        }
+        return length + prefixSize;
       }
     }
     return kj::none;
   }
 
   void cancel(kj::Exception reason) override {
+    maybePrefix = kj::none;
     inner->cancel(kj::mv(reason));
   }
 
  private:
-  kj::Array<kj::byte> prefix;
-  size_t offset = 0;
+  struct Prefix {
+    kj::Array<kj::byte> owned;
+    kj::ArrayPtr<const kj::byte> view;
+    Prefix(kj::Array<kj::byte> owned): owned(kj::mv(owned)), view(this->owned.asPtr()) {}
+  };
+  kj::Maybe<Prefix> maybePrefix;
   kj::Own<ReadableStreamSource> inner;
 };
 
@@ -293,7 +318,7 @@ class PrefixedSource final: public ReadableStreamSource {
 // cancels the source; a pump failure aborts the sink and cancels the source.
 kj::Promise<DeferredProxy<void>> pumpExtractedSource(
     kj::Own<ReadableStreamSource> source, kj::Own<WritableStreamSink> sink, bool end) {
-  struct Holder: public kj::Refcounted {
+  struct Holder {
     kj::Own<WritableStreamSink> sink;
     kj::Own<ReadableStreamSource> source;
     bool done = false;
@@ -324,67 +349,76 @@ kj::Promise<DeferredProxy<void>> pumpExtractedSource(
   });
 }
 
+// Writes one drained batch to the sink and, when this is the final batch, ends it. A
+// free-standing coroutine (NOT a capturing lambda) so that everything it touches across
+// suspension points lives in the coroutine frame: `pieces` is moved in (the vectored
+// write's pointers reference its arrays and must stay valid for the duration of the
+// write), and `endAfter` is copied in. `sink` is passed by reference: the owning
+// IoOwn handle rides in queuedPumpStep's post-write continuation, which cannot be
+// released while this coroutine is pending (the pending awaitIo holds the resolver that
+// keeps the continuation reachable), and cancellation destroys the coroutine at its
+// suspension point without touching the sink again.
+kj::Promise<void> queuedWriteStep(
+    WritableStreamSink& sink, kj::Array<kj::Array<const kj::byte>> pieces, bool endAfter) {
+  if (pieces.size() > 0) {
+    auto ptrs = KJ_MAP(piece, pieces) -> kj::ArrayPtr<const kj::byte> { return piece.asPtr(); };
+    co_await sink.write(ptrs.asPtr());
+  }
+  if (endAfter) {
+    co_await sink.end();
+  }
+}
+
 // One iteration of the queued-backend pump: collect everything the draining reader has
 // buffered (one isolate-lock trip per batch), copy it to KJ-owned memory, perform a
 // vectored write, and recurse until done. All JS state (the reader) travels through the
-// jsg promise chain; the sink is an IoOwn so that no JS-heap continuation ever owns a KJ
-// I/O object directly.
-jsg::Promise<void> queuedPumpStep(
-    jsg::Lock& js, jsg::JsRef<jsg::JsObject> reader, IoOwn<WritableStreamSink> sink, bool end);
-
-jsg::Promise<void> queuedPumpStep(
-    jsg::Lock& js, jsg::JsRef<jsg::JsObject> reader, IoOwn<WritableStreamSink> sink, bool end) {
+// jsg promise chain.
+jsg::Promise<void> queuedPumpStep(jsg::Lock& js,
+    jsg::JsRef<jsg::JsObject> reader,
+    IoOwn<WritableStreamSink> sink,
+    EndStream end) {
+  auto& context = IoContext::current();
   auto readResult = invokeMethod(js, reader.getHandle(js), "read"_kj);
   auto readPromise = KJ_REQUIRE_NONNULL(readResult.tryCast<jsg::JsPromise>());
   return js.toPromise(readPromise)
       .then(js,
-          [reader = kj::mv(reader), sink = kj::mv(sink), end](
-              jsg::Lock& js, jsg::Value value) mutable -> jsg::Promise<void> {
+          context.addFunctor([reader = kj::mv(reader), sink = kj::mv(sink), end](
+                                 jsg::Lock& js, jsg::Value value) mutable -> jsg::Promise<void> {
+    auto& context = IoContext::current();
     auto result = KJ_REQUIRE_NONNULL(jsg::JsValue(value.getHandle(js)).tryCast<jsg::JsObject>());
     bool done = result.get(js, "done"_kj).isTrue();
     auto chunks = KJ_REQUIRE_NONNULL(result.get(js, "chunks"_kj).tryCast<jsg::JsArray>());
 
-    // Copy the batch out to KJ-owned memory under the lock, validating byte-ness: a
-    // value-oriented stream can produce arbitrary chunks, which cannot be pumped.
-    auto pieces = kj::heapArrayBuilder<kj::Array<kj::byte>>(chunks.size());
+    // Only ArrayBuffer/ArrayBufferView chunks are usable as bytes. Everything else
+    // (including strings) rejects, matching the legacy pump's historical behavior and
+    // error text exactly.
+    auto pieces = kj::Vector<kj::Array<const kj::byte>>(chunks.size());
     for (uint32_t i = 0; i < chunks.size(); i++) {
       auto chunk = chunks.get(js, i);
       KJ_IF_SOME(view, chunk.tryCast<jsg::JsArrayBufferView>()) {
-        pieces.add(
-            kj::heapArray<kj::byte>(static_cast<const jsg::JsArrayBufferView&>(view).asArrayPtr()));
+        pieces.add(bufferSourceToBytes(js, jsg::JsBufferSource(view)));
       } else KJ_IF_SOME(buffer, chunk.tryCast<jsg::JsArrayBuffer>()) {
-        pieces.add(
-            kj::heapArray<kj::byte>(static_cast<const jsg::JsArrayBuffer&>(buffer).asArrayPtr()));
+        pieces.add(bufferSourceToBytes(js, jsg::JsBufferSource(buffer)));
       } else {
         JSG_FAIL_REQUIRE(TypeError, "This ReadableStream did not return bytes.");
       }
     }
 
-    auto& context = IoContext::current();
-    auto writePromise = [&]() -> kj::Promise<void> {
-      if (pieces.size() == 0) {
-        return kj::READY_NOW;
+    // Evaluation order matters: `*sink` is dereferenced (IoContext current here) and the
+    // coroutine launched before `kj::mv(sink)` in the continuation's capture-init runs.
+    // Moving the IoOwn transfers only the handle -- the sink object itself lives in the
+    // IoContext and its address is stable -- so the reference remains valid.
+    bool endAfter = done && end == EndStream::YES;
+    return context.awaitIo(js, queuedWriteStep(*sink, pieces.releaseAsArray(), endAfter))
+        .then(js,
+            context.addFunctor(
+                [reader = kj::mv(reader), sink = kj::mv(sink), end, done](jsg::Lock& js) mutable {
+      if (done) {
+        return js.resolvedPromise();
       }
-      auto arrays = pieces.finish();
-      auto ptrs = KJ_MAP(a, arrays) -> kj::ArrayPtr<const kj::byte> { return a.asPtr(); };
-      auto promise = sink->write(ptrs.asPtr());
-      return promise.attach(kj::mv(arrays), kj::mv(ptrs));
-    }();
-
-    if (done) {
-      if (!end) {
-        return context.awaitIo(js, kj::mv(writePromise));
-      }
-      return context.awaitIo(js, kj::mv(writePromise))
-          .then(js, [sink = kj::mv(sink)](jsg::Lock& js) mutable {
-        return IoContext::current().awaitIo(js, sink->end());
-      });
-    }
-    return context.awaitIo(js, kj::mv(writePromise))
-        .then(js, [reader = kj::mv(reader), sink = kj::mv(sink), end](jsg::Lock& js) mutable {
       return queuedPumpStep(js, kj::mv(reader), kj::mv(sink), end);
-    });
-  });
+    }));
+  }));
 }
 
 // Pumps a queued-backed (JS underlying source) TypeScript stream into the sink by
@@ -394,7 +428,7 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
     IoContext& context,
     jsg::JsObject reader,
     kj::Own<WritableStreamSink> sink,
-    bool end) {
+    EndStream end) {
   auto loop =
       queuedPumpStep(js, reader.addRef(js), context.addObject(kj::mv(sink)), end)
           .catch_(js, [reader = reader.addRef(js)](jsg::Lock& js, jsg::Value exception) mutable {
@@ -403,9 +437,11 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
     // TODO(streams-ts): consider explicitly aborting the sink as well, for exact parity
     // with the legacy pump's error path.
     auto reason = jsg::JsValue(exception.getHandle(js));
+    // Call the reader's cancel() method. It returns a promise, but we are not
+    // going to await it, the pump is already failing.
     auto cancelResult = invokeMethod(js, reader.getHandle(js), "cancel"_kj, reason);
     KJ_IF_SOME(promise, cancelResult.tryCast<jsg::JsPromise>()) {
-      js.toPromise(promise).markAsHandled(js);
+      promise.markAsHandled(js);
     }
     js.throwException(kj::mv(exception));
   });
@@ -456,7 +492,7 @@ JsReadableStream::JsReadableStream(jsg::Lock& js, kj::String data)
     : JsReadableStream(js, stringToBytes(kj::mv(data))) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::JsRef<jsg::JsBufferSource> view)
-    : JsReadableStream(js, bufferSourceToBytes(js, view)) {}
+    : JsReadableStream(js, bufferSourceToBytes(js, view.getHandle(js))) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::Ref<Blob> blob)
     : impl(bufferBackedImpl(js, kj::rc<Buffer>(kj::mv(blob)))) {}
@@ -541,13 +577,15 @@ bool JsReadableStream::isBufferBacked() const {
 }
 
 bool JsReadableStream::isDisturbed(jsg::Lock& js) {
+  // Disturbed is a one-way switch
+  if (cachedIsDisturbed) return true;
   KJ_IF_SOME(i, impl) {
     KJ_SWITCH_ONEOF(i.stream) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
-        return stream->isDisturbed();
+        return cachedIsDisturbed = stream->isDisturbed();
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        return getReadableStreamIsDisturbed(js, obj.getHandle(js));
+        return cachedIsDisturbed = getReadableStreamIsDisturbed(js, obj.getHandle(js));
       }
     }
     KJ_UNREACHABLE;
@@ -611,12 +649,13 @@ void JsReadableStream::setPendingClosure(jsg::Lock& js) {
   KJ_IF_SOME(i, impl) {
     KJ_SWITCH_ONEOF(i.stream) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
-        stream->getController().setPendingClosure();
+        return stream->getController().setPendingClosure();
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        setReadableStreamPendingClosure(js, obj.getHandle(js));
+        return setReadableStreamPendingClosure(js, obj.getHandle(js));
       }
     }
+    KJ_UNREACHABLE;
   }
 }
 
@@ -817,7 +856,7 @@ kj::Promise<DeferredProxy<void>> JsReadableStream::pumpTo(
       // drive the internal DrainingReader batch by batch under the isolate lock.
       auto reader = KJ_REQUIRE_NONNULL(
           dispatchCall(js, "acquireReadableStreamDrainingReader", handle).tryCast<jsg::JsObject>());
-      return pumpQueuedTsStream(js, context, reader, kj::mv(sink), end == EndStream::YES);
+      return pumpQueuedTsStream(js, context, reader, kj::mv(sink), end);
     }
   }
   KJ_UNREACHABLE;
@@ -1070,7 +1109,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pull(
 jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
     jsg::Lock& js, jsg::JsObject controller, jsg::Ref<AbortSignal> signal, Active& active) {
   // Bytes retained from an abandoned pull are redelivered first, before any new data.
-  if (stash.size() > 0) {
+  if (!stash.empty()) {
     // Contract: check the signal synchronously immediately before delivering. If the
     // consumer has already abandoned this read too, keep the bytes for the next pull.
     if (!signal->getAborted(js)) {
@@ -1153,7 +1192,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
     // Contract: check the signal synchronously immediately before delivering.
     if (!signal->getAborted(js)) {
       size_t amount = kj::min(stash.size(), dest.size());
-      dest.first(amount).copyFrom(stash.asPtr().first(amount));
+      dest.write(stash.asPtr().first(amount));
       consumeStash(amount);
       invokeMethod(js, byobRequest, "respond"_kj, js.num(static_cast<double>(amount)));
     }
@@ -1207,11 +1246,13 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
       return;
     }
     if (stashed > 0) {
-      dest.first(stashed).copyFrom(self->stash.asPtr());
+      // write() advances dest past the copied prefix, so the fresh bytes below land
+      // immediately after the redelivered stash.
+      dest.write(self->stash.asPtr());
       self->stash.clear();
     }
     if (amount > 0) {
-      dest.slice(stashed, stashed + amount).copyFrom(self->scratch.first(amount));
+      dest.write(self->scratch.first(amount));
     }
     bool eof = amount < minBytes;
     if (eof) {
@@ -1294,7 +1335,7 @@ kj::Array<jsg::Ref<ReadableStreamNativeSource>> ReadableStreamNativeSource::tee(
   // source, so the branch sources will never produce them: seed a copy into BOTH branches
   // (they are stream content that precedes everything upstream), and let each branch
   // deliver them before any new data.
-  if (stash.size() > 0) {
+  if (!stash.empty()) {
     branch1->stash.addAll(stash.asPtr());
     branch2->stash.addAll(stash.asPtr());
     stash.clear();
@@ -1306,7 +1347,7 @@ kj::Array<jsg::Ref<ReadableStreamNativeSource>> ReadableStreamNativeSource::tee(
   return kj::arr(kj::mv(branch1), kj::mv(branch2));
 }
 
-jsg::JsValue ReadableStreamNativeSource::getExpectedLength(jsg::Lock& js) {
+jsg::Optional<jsg::JsBigInt> ReadableStreamNativeSource::getExpectedLength(jsg::Lock& js) {
   KJ_IF_SOME(active, state) {
     KJ_IF_SOME(length, active.source->tryGetLength(StreamEncoding::IDENTITY)) {
       // Bytes retained in the stash (from an abandoned pull, or inherited from a tee
@@ -1317,9 +1358,7 @@ jsg::JsValue ReadableStreamNativeSource::getExpectedLength(jsg::Lock& js) {
       return js.bigInt(length + stash.size());
     }
   }
-  // "Unknown" must surface as undefined, never null: the conduit's construction-time
-  // validation rejects null (contract: non-negative bigint | integer | undefined).
-  return js.undefined();
+  return kj::none;
 }
 
 ReadableStreamNativeSource::Released ReadableStreamNativeSource::releaseForPump(jsg::Lock& js) {

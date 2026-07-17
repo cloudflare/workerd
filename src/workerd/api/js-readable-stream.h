@@ -38,23 +38,14 @@ WD_STRONG_BOOL(IgnoreDisturbed);
 //     (isBufferBacked()); or
 //   * stream-backed -- wraps an opaque, one-shot ReadableStream.
 //
-// Backend branching: the underlying stream is stored as a kj::OneOf so that a TypeScript
-// implemented ReadableStream (represented as a JS object) is supported alongside the legacy
-// C++ ReadableStream. Every method that touches the underlying stream switches on the
-// backend. Most TypeScript backend branches are implemented (creation, wrap/unwrap,
-// consumers, pumpTo, tee); the few remaining KJ_UNIMPLEMENTED branches (detach, pipe
-// dispatch cells -- the latter deliberately waiting on the JsWritableStream TS work) are
-// tracked in the design doc and fail loudly under the experimental compat flag until
-// their increments land.
+// When stream-backed, the underlying stream is either a legacy C++ ReadableStream or a TypeScript
+// implemented ReadableStream (a JS object).
 class JsReadableStream final {
  public:
-  // The underlying stream. Today only the legacy C++ ReadableStream alternative is populated; the
-  // jsg::JsRef<jsg::JsObject> alternative is reserved for the future TypeScript implementation.
+  // The underlying stream.
   using StreamImpl = kj::OneOf<jsg::Ref<ReadableStream>, jsg::JsRef<jsg::JsObject>>;
 
-  // Holds the in-memory data backing a buffer-backed (rewindable) JsReadableStream. Refcounted so
-  // its lifetime can be tied both to the native stream (as the newMemorySource backing) and to the
-  // JsReadableStream itself (so the stream can be rebuilt for retransmission).
+  // Holds the in-memory data backing a buffer-backed (rewindable) JsReadableStream.
   struct Buffer {
     kj::ArrayPtr<const kj::byte> view;
     kj::OneOf<kj::Array<const kj::byte>, jsg::Ref<Blob>> owned;
@@ -127,6 +118,9 @@ class JsReadableStream final {
   // True if this is a null / empty stream ("no body"). Inspects only C++-side state; a
   // jsg::Lock& is not required because it never dispatches to the JS backend.
   bool isNull() const;
+  operator bool() const {
+    return !isNull();
+  }
 
   // True if this is backed by an in-memory buffer, and therefore rewindable via tryClone().
   // Inspects only C++-side state; a jsg::Lock& is not required.
@@ -292,6 +286,10 @@ class JsReadableStream final {
   static Impl bufferBackedImpl(jsg::Lock& js, kj::Rc<Buffer> buffer);
 
   kj::Maybe<Impl> impl;
+  // Cache the result of isDisturbed() so that repeated calls don't dispatch to the JS
+  // side. Since disturbed is a one-way transition, the cache is always valid once set
+  // to true.
+  bool cachedIsDisturbed = false;
 };
 
 struct JsReadableStream::Tee {
@@ -300,10 +298,7 @@ struct JsReadableStream::Tee {
 };
 
 // The C++ implementation of the "native underlying source" contract defined by the
-// TypeScript streams implementation. The authoritative statement of the contract is the
-// header comment in src/per_isolate/webstreams/native.ts (one amendment applies:
-// byobRequest.respondWithNewView has been removed from the controller facade and is never
-// used).
+// TypeScript streams implementation.
 //
 // A ReadableStreamNativeSource wraps a kj-native ReadableStreamSource so that a
 // TypeScript-implemented ReadableStream can be backed directly by C++ byte sources: the
@@ -312,14 +307,8 @@ struct JsReadableStream::Tee {
 //
 // Instances are created only from C++ (there is no JavaScript constructor) and are handed
 // to the TypeScript ReadableStream constructor carrying the native-source marker symbol.
-// The object is internal plumbing: it is never exposed to user code, and it is suppressed
-// from the generated TypeScript types.
-//
-// The underlying ReadableStreamSource is a KJ I/O object tied to the creating request, so
-// it is held via IoOwn: all methods must be invoked with that request's IoContext current.
-// This holds in practice because the TypeScript conduit only invokes the source hooks in
-// response to JavaScript activity within the owning request; a wrong-context call throws,
-// surfacing as a pull rejection that errors the stream.
+// The object is never exposed to user code, and it is suppressed from the generated TypeScript
+// types.
 class ReadableStreamNativeSource final: public jsg::Object {
  public:
   ReadableStreamNativeSource(IoContext& ioContext, kj::Own<ReadableStreamSource> source);
@@ -342,40 +331,28 @@ class ReadableStreamNativeSource final: public jsg::Object {
   void cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
 
   // Splits the source into two fully independent branch sources, each of which will
-  // produce the same bytes this source would have produced, leaving this source consumed
-  // (contract §7). Uses the underlying source's optimized tryTee() when available, and
-  // otherwise falls back to a generic kj::newTee()-based split (mirroring the legacy
-  // internal controller's tee). Any bytes retained from an abandoned pull are inherited
-  // by BOTH branches, delivered before anything further from upstream.
+  // produce the same bytes this source would have produced, leaving this source consumed.
+  // Uses the underlying source's optimized tryTee() when available, and otherwise falls
+  // back to a generic kj::newTee()-based split (mirroring the legacy internal controller's
+  // tee). Any bytes retained from an abandoned pull are inherited by BOTH branches,
+  // delivered before anything further from upstream.
   //
   // Throws if the source has already been consumed, or if an abandoned pull's read is
-  // still in flight (bytes that read produces after the split would be lost; see the
-  // design doc's open question D).
+  // still in flight.
   kj::Array<jsg::Ref<ReadableStreamNativeSource>> tee(jsg::Lock& js);
 
   // The total number of bytes the source promises to produce, if known. Queried live from
   // the underlying source on each call; undefined once the source is done or canceled. The
   // TypeScript side reads this once at stream construction, per the contract, and enforces
   // the exact-total accounting itself.
-  //
-  // Returns a JsValue (bigint | undefined) rather than kj::Maybe<JsBigInt>: JSG maps a
-  // none Maybe return to JS null, but the contract's validation accepts only a bigint,
-  // a number, or undefined -- null must not appear.
-  jsg::JsValue getExpectedLength(jsg::Lock& js);
+  jsg::Optional<jsg::JsBigInt> getExpectedLength(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(ReadableStreamNativeSource) {
+    JSG_PRIVATE_SYMBOL(kNativeSource);
     JSG_METHOD(pull);
     JSG_METHOD(cancel);
     JSG_METHOD(tee);
     JSG_READONLY_PROTOTYPE_PROPERTY(expectedLength, getExpectedLength);
-
-    // The native-source marker (contract §1): every instance carries an own, read-only,
-    // non-enumerable property keyed by the `kNativeSource` API-registry symbol whose value
-    // is the symbol itself. The TypeScript conduit acquires the same symbol via
-    // utils.getApiSymbol('kNativeSource') (see src/per_isolate/webstreams/native.ts) and
-    // detects native sources by this property, so instances are born recognizable -- no
-    // manual stamping at creation, and tee branches are automatically marked.
-    JSG_PRIVATE_SYMBOL(kNativeSource);
 
     // Internal plumbing type: keep it out of the generated TypeScript types.
     JSG_TS_OVERRIDE(type ReadableStreamNativeSource = never);

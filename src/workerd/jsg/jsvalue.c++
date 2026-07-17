@@ -560,6 +560,10 @@ JsValue JsPromise::result() {
   return JsValue(inner->Result());
 }
 
+void JsPromise::markAsHandled(Lock& js) {
+  inner->MarkAsHandled();
+}
+
 JsValue JsProxy::target() {
   return JsValue(inner->GetTarget());
 }

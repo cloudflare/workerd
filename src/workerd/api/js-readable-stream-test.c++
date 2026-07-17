@@ -608,11 +608,9 @@ jsg::Ref<AbortSignal> freshSignal(jsg::Lock& js) {
 // back into C++ terms. Asserts the "unknown" representation is undefined specifically:
 // null would pass a naive falsy check but is rejected by the conduit's validation.
 kj::Maybe<uint64_t> expectedLengthOf(jsg::Lock& js, ReadableStreamNativeSource& source) {
-  auto value = source.getExpectedLength(js);
-  KJ_IF_SOME(bigint, value.tryCast<jsg::JsBigInt>()) {
+  KJ_IF_SOME(bigint, source.getExpectedLength(js)) {
     return bigint.tryToUint64(js);
   }
-  KJ_EXPECT(value == js.undefined());
   return kj::none;
 }
 

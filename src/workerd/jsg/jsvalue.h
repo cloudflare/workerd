@@ -671,6 +671,8 @@ class JsPromise final: public JsBase<v8::Promise, JsPromise> {
   PromiseState state();
   JsValue result();
   using JsBase<v8::Promise, JsPromise>::JsBase;
+
+  void markAsHandled(Lock& js);
 };
 
 class JsProxy final: public JsBase<v8::Proxy, JsProxy> {
