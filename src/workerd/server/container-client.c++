@@ -1060,12 +1060,14 @@ ContainerClient::~ContainerClient() noexcept(false) {
 
 // Docker-specific Port implementation that implements rpc::Container::Port::Server
 // It does a HTTP CONNECT to the proxy-everything sidecar port.
-class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
+class ContainerClient::DockerPort final: public rpc::Container::Port::Server,
+                                         private kj::TaskSet::ErrorHandler {
  public:
   DockerPort(ContainerClient& containerClient, kj::String containerHost, uint16_t containerPort)
       : containerClient(containerClient),
         containerHost(kj::mv(containerHost)),
-        containerPort(containerPort) {}
+        containerPort(containerPort),
+        pumpTasks(*this) {}
 
   kj::Promise<void> connect(ConnectContext context) override {
     auto mappedPort = JSG_REQUIRE_NONNULL(containerClient.sidecarIngressHostPort, Error,
@@ -1108,11 +1110,20 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
     auto upEnd = kj::mv(upPipe.in);
     auto results = context.getResults();
     results.setUp(containerClient.byteStreamFactory.kjToCapnp(kj::mv(upPipe.out)));
-    auto downEnd = containerClient.byteStreamFactory.capnpToKj(context.getParams().getDown());
+    auto downEnd =
+        containerClient.byteStreamFactory.capnpToKjExplicitEnd(context.getParams().getDown());
 
-    pumpTask =
-        kj::joinPromisesFailFast(kj::arr(upEnd->pumpTo(*connection), connection->pumpTo(*downEnd)))
-            .attach(kj::mv(httpClient), kj::mv(upEnd), kj::mv(connection), kj::mv(downEnd));
+    auto& connectionRef = *connection;
+    auto& downEndRef = *downEnd;
+    auto upPump = upEnd->pumpTo(connectionRef).then([&connectionRef](uint64_t) {
+      connectionRef.shutdownWrite();
+    });
+    auto downPump =
+        connectionRef.pumpTo(downEndRef).then([&downEndRef](uint64_t) { return downEndRef.end(); });
+
+    pumpTasks.add(
+        kj::joinPromisesFailFast(kj::arr(kj::mv(upPump), kj::mv(downPump)))
+            .attach(kj::mv(httpClient), kj::mv(upEnd), kj::mv(connection), kj::mv(downEnd)));
     co_return;
   }
 
@@ -1121,7 +1132,11 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
   ContainerClient& containerClient;
   kj::String containerHost;
   uint16_t containerPort;
-  kj::Maybe<kj::Promise<kj::Array<uint64_t>>> pumpTask;
+  kj::TaskSet pumpTasks;
+
+  void taskFailed(kj::Exception&&) override {
+    // Tunnel disconnects are reported to the peer through the ByteStreams.
+  }
 };
 
 class ContainerClient::DockerProcessHandle final: public rpc::Container::ProcessHandle::Server {

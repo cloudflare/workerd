@@ -97,7 +97,9 @@ namespace workerd::util {
      createUVException) are created by the Rust implementation                                     \
      (src/rust/node-exceptions) instead of the C++ implementation. The C++                         \
      implementation is retained for rollback.*/                                                    \
-  V(NODEJS_EXCEPTIONS_RUST)
+  V(NODEJS_EXCEPTIONS_RUST)                                                                        \
+  /* Reuse HTTP/1.1 tunnels opened by Container.getTcpPort().fetch(). */                           \
+  V(CONTAINER_TUNNEL_REUSE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
@@ -158,8 +160,10 @@ class Autogate {
 
   // Convenience method for bin-tests to invoke initAutogate() with an appropriate config.
   // Prefer the AutogateKey overload in hand-written tests for compile-time safety.
-  static void initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gateNames);
-  static void initAutogateNamesForTest(kj::ArrayPtr<const kj::StringPtr> gateNames);
+  static void initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gateNames,
+      IgnoreAllAutogatesEnv ignoreEnv = IgnoreAllAutogatesEnv::NO);
+  static void initAutogateNamesForTest(kj::ArrayPtr<const kj::StringPtr> gateNames,
+      IgnoreAllAutogatesEnv ignoreEnv = IgnoreAllAutogatesEnv::NO);
 
   // Type-safe overload: takes enum values directly, avoiding silent typo bugs.
   static void initAutogateForTest(std::initializer_list<AutogateKey> keys);

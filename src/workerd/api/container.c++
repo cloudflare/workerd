@@ -10,13 +10,17 @@
 #include <workerd/api/system-streams.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
+#include <workerd/util/autogate.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <kj/filesystem.h>
+#include <kj/refcount.h>
 
 namespace workerd::api {
 
 namespace {
+
+constexpr size_t MAX_CACHED_TCP_PORTS = 4;
 
 kj::Maybe<kj::Path> parseRestorePath(kj::StringPtr path) {
   JSG_REQUIRE(path.size() > 0 && path[0] == '/', TypeError,
@@ -58,6 +62,61 @@ capnp::ByteStream::Client makeExecPipe(
     capnp::ByteStreamFactory& factory, kj::Own<kj::AsyncOutputStream> output) {
   return factory.kjToCapnp(capnp::ExplicitEndOutputStream::wrap(kj::mv(output), []() {}));
 }
+
+class ContainerPortReadCanceler final: public kj::Refcounted {
+ public:
+  ContainerPortReadCanceler(): ContainerPortReadCanceler(kj::newPromiseAndFulfiller<void>()) {}
+
+  kj::Promise<size_t> wrap(kj::Promise<size_t> read) {
+    auto disconnect =
+        disconnected.addBranch().then([]() -> kj::Promise<size_t> { return kj::NEVER_DONE; });
+    return canceler.wrap(kj::mv(read)).exclusiveJoin(kj::mv(disconnect));
+  }
+
+  kj::Promise<void> whenDisconnected() {
+    return disconnected.addBranch();
+  }
+
+  kj::Promise<void> whenWriteDisconnected() {
+    return whenDisconnected().catch_([](kj::Exception&&) {});
+  }
+
+  void notifyUncleanDisconnect() {
+    if (connecting) {
+      uncleanDisconnectPending = true;
+    } else {
+      disconnect();
+    }
+  }
+
+  void connectSucceeded() {
+    connecting = false;
+    if (uncleanDisconnectPending) disconnect();
+  }
+
+  void connectFailed(kj::Exception exception) {
+    connecting = false;
+    disconnect(kj::mv(exception));
+  }
+
+  void disconnect(kj::Exception exception = JSG_KJ_EXCEPTION(
+                      DISCONNECTED, Error, "Container port connection closed unexpectedly.")) {
+    auto signalException = exception.clone();
+    canceler.cancel(kj::mv(exception));
+    fulfiller->reject(kj::mv(signalException));
+  }
+
+ private:
+  explicit ContainerPortReadCanceler(kj::PromiseFulfillerPair<void> paf)
+      : fulfiller(kj::mv(paf.fulfiller)),
+        disconnected(paf.promise.fork()) {}
+
+  kj::Canceler canceler;
+  kj::Own<kj::PromiseFulfiller<void>> fulfiller;
+  kj::ForkedPromise<void> disconnected;
+  bool connecting = true;
+  bool uncleanDisconnectPending = false;
+};
 
 }  // namespace
 
@@ -259,6 +318,7 @@ Container::Container(rpc::Container::Client rpcClient, bool running)
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
   auto flags = FeatureFlags::get(js);
   JSG_REQUIRE(!running, Error, "start() cannot be called on a container that is already running.");
+  invalidateTcpPortStates();
 
   StartupOptions options = kj::mv(maybeOptions).orDefault({});
 
@@ -722,6 +782,7 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
           [self = JSG_THIS](
               jsg::Lock& js, capnp::Response<rpc::Container::MonitorResults> results) mutable {
     self->running = false;
+    self->invalidateTcpPortStates();
     auto exitCode = results.getExitCode();
     KJ_IF_SOME(d, self->destroyReason) {
       jsg::Value error = kj::mv(d);
@@ -737,6 +798,7 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
   },
           [self = JSG_THIS](jsg::Lock& js, jsg::Value&& error) mutable {
     self->running = false;
+    self->invalidateTcpPortStates();
     self->destroyReason = kj::none;
     js.throwException(kj::mv(error));
   });
@@ -744,6 +806,7 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
 
 jsg::Promise<void> Container::destroy(jsg::Lock& js, jsg::Optional<jsg::Value> error) {
   if (!running) return js.resolvedPromise();
+  invalidateTcpPortStates();
 
   if (destroyReason == kj::none) {
     destroyReason = kj::mv(error);
@@ -765,18 +828,204 @@ void Container::signal(jsg::Lock& js, int signo) {
 // =======================================================================================
 // getTcpPort()
 
+class ContainerPortAsyncIoStream final: public kj::AsyncIoStream {
+ public:
+  ContainerPortAsyncIoStream(kj::Own<kj::AsyncInputStream> input,
+      kj::Own<capnp::ExplicitEndOutputStream> output,
+      kj::Rc<ContainerPortReadCanceler> readCanceler,
+      kj::Promise<void> connectTask,
+      kj::Promise<void> outputWatchTask)
+      : input(kj::mv(input)),
+        output(kj::mv(output)),
+        readCanceler(kj::mv(readCanceler)),
+        connectTask(connectTask.eagerlyEvaluate(nullptr)),
+        outputWatchTask(outputWatchTask.eagerlyEvaluate(nullptr)) {}
+
+  ~ContainerPortAsyncIoStream() noexcept(false) {
+    shutdownWrite();
+  }
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return readCanceler->wrap(KJ_REQUIRE_NONNULL(input)->tryRead(buffer, minBytes, maxBytes));
+  }
+
+  kj::Maybe<uint64_t> tryGetLength() override {
+    return KJ_REQUIRE_NONNULL(input)->tryGetLength();
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    return propagateWriteFailure(KJ_REQUIRE_NONNULL(output)->write(buffer));
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    return propagateWriteFailure(KJ_REQUIRE_NONNULL(output)->write(pieces));
+  }
+
+  kj::Promise<void> whenWriteDisconnected() override {
+    return readCanceler->whenWriteDisconnected();
+  }
+
+  kj::Promise<void> whenDisconnected() {
+    return readCanceler->whenDisconnected();
+  }
+
+  void shutdownWrite() override {
+    outputWatchTask = nullptr;
+    KJ_IF_SOME(stream, kj::mv(output)) {
+      stream->end().attach(kj::mv(stream)).detach([](kj::Exception&&) {});
+    }
+  }
+
+  kj::Promise<void> endWrite() {
+    outputWatchTask = nullptr;
+    auto stream = kj::mv(KJ_REQUIRE_NONNULL(output));
+    output = kj::none;
+    return stream->end().attach(kj::mv(stream));
+  }
+
+  void abortRead() override {
+    readCanceler->disconnect(KJ_EXCEPTION(DISCONNECTED, "Container port connection read aborted."));
+    input = kj::none;
+  }
+
+ private:
+  kj::Maybe<kj::Own<kj::AsyncInputStream>> input;
+  kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> output;
+  kj::Rc<ContainerPortReadCanceler> readCanceler;
+  kj::Promise<void> connectTask;
+  kj::Promise<void> outputWatchTask;
+
+  kj::Promise<void> propagateWriteFailure(kj::Promise<void> promise) {
+    return promise.catch_([this](kj::Exception&& exception) -> kj::Promise<void> {
+      readCanceler->disconnect(exception.clone());
+      return kj::mv(exception);
+    });
+  }
+};
+
+class ContainerPortNetworkAddress final: public kj::NetworkAddress {
+ public:
+  ContainerPortNetworkAddress(
+      capnp::ByteStreamFactory& byteStreamFactory, rpc::Container::Port::Client port)
+      : byteStreamFactory(byteStreamFactory),
+        port(kj::mv(port)),
+        failed(kj::rc<bool>(false)) {}
+
+  kj::Promise<kj::Own<kj::AsyncIoStream>> connect() override {
+    auto req = port.connectRequest(capnp::MessageSize{4, 1});
+    auto downPipe = kj::newOneWayPipe();
+    auto readCanceler = kj::rc<ContainerPortReadCanceler>();
+    auto down = capnp::ExplicitEndOutputStream::wrap(
+        kj::mv(downPipe.out), [readCanceler = readCanceler.addRef()]() mutable {
+      readCanceler->notifyUncleanDisconnect();
+    });
+    req.setDown(byteStreamFactory.kjToCapnp(kj::mv(down)));
+    auto pipeline = req.send();
+    { auto drop = kj::mv(req); }
+
+    auto up = byteStreamFactory.capnpToKjExplicitEnd(pipeline.getUp());
+    auto outputWatchTask =
+        up->whenWriteDisconnected().then([readCanceler = readCanceler.addRef()]() mutable {
+      readCanceler->notifyUncleanDisconnect();
+    });
+    auto connectTask = pipeline.then([readCanceler = readCanceler.addRef()](
+                                         auto&&) mutable { readCanceler->connectSucceeded(); },
+        [readCanceler = readCanceler.addRef(), failed = failed.addRef()](
+            kj::Exception&& exception) mutable {
+      *failed = true;
+      readCanceler->connectFailed(kj::mv(exception));
+    });
+    kj::Own<kj::AsyncIoStream> result = kj::heap<ContainerPortAsyncIoStream>(kj::mv(downPipe.in),
+        kj::mv(up), kj::mv(readCanceler), kj::mv(connectTask), kj::mv(outputWatchTask));
+    return kj::mv(result);
+  }
+
+  kj::Own<kj::ConnectionReceiver> listen() override {
+    KJ_UNIMPLEMENTED("cannot listen on a container port address");
+  }
+
+  kj::Own<kj::NetworkAddress> clone() override {
+    KJ_UNIMPLEMENTED("cannot clone a container port address");
+  }
+
+  kj::String toString() override {
+    return kj::str("container-port");
+  }
+
+  void markFailed() {
+    *failed = true;
+  }
+
+  bool hasFailed() const {
+    return *failed;
+  }
+
+ private:
+  capnp::ByteStreamFactory& byteStreamFactory;
+  rpc::Container::Port::Client port;
+  kj::Rc<bool> failed;
+};
+
+class Container::TcpPortState {
+ public:
+  TcpPortState(capnp::ByteStreamFactory& byteStreamFactory, rpc::Container::Port::Client port)
+      : address(byteStreamFactory, kj::mv(port)) {}
+
+  TcpPortState(kj::Timer& timer,
+      capnp::ByteStreamFactory& byteStreamFactory,
+      kj::EntropySource& entropySource,
+      const kj::HttpHeaderTable& headerTable,
+      rpc::Container::Port::Client port)
+      : TcpPortState(byteStreamFactory, kj::mv(port)) {
+    client = kj::newHttpClient(timer, headerTable, address, {.entropySource = entropySource});
+  }
+
+  kj::Promise<kj::Own<kj::AsyncIoStream>> connect() {
+    return address.connect();
+  }
+
+  void invalidate() {
+    invalidated = true;
+  }
+
+  kj::Maybe<kj::HttpClient&> getHttpClient() {
+    if (invalidated) return kj::none;
+    return client.map([](kj::Own<kj::HttpClient>& client) -> kj::HttpClient& { return *client; });
+  }
+
+  void markPortFailed() {
+    address.markFailed();
+  }
+
+  bool hasPortFailed() const {
+    return address.hasFailed();
+  }
+
+ private:
+  ContainerPortNetworkAddress address;
+  kj::Maybe<kj::Own<kj::HttpClient>> client;
+  bool invalidated = false;
+};
+
+void Container::invalidateTcpPortStates() {
+  KJ_IF_SOME(states, tcpPortStates) {
+    for (auto& entry: *states) {
+      entry.value->invalidate();
+    }
+  }
+  tcpPortStates = kj::none;
+}
+
 // `getTcpPort()` returns a `Fetcher`, on which `fetch()` and `connect()` can be called. `Fetcher`
 // is a JavaScript wrapper around `WorkerInterface`, so we need to implement that.
 class Container::TcpPortWorkerInterface final: public WorkerInterface {
  public:
-  TcpPortWorkerInterface(capnp::ByteStreamFactory& byteStreamFactory,
-      kj::EntropySource& entropySource,
+  TcpPortWorkerInterface(kj::EntropySource& entropySource,
       const kj::HttpHeaderTable& headerTable,
-      rpc::Container::Port::Client port)
-      : byteStreamFactory(byteStreamFactory),
-        entropySource(entropySource),
+      kj::Rc<TcpPortState> portState)
+      : entropySource(entropySource),
         headerTable(headerTable),
-        port(kj::mv(port)) {}
+        portState(kj::mv(portState)) {}
 
   // Implements fetch(), i.e., HTTP requests. We form a TCP connection, then run HTTP over it
   // (as opposed to, say, speaking http-over-capnp to the container service).
@@ -804,41 +1053,16 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
     newHeaders.setPtr(kj::HttpHeaderId::HOST, parsedUrl.host);
     auto noHostUrl = parsedUrl.toString(kj::Url::Context::HTTP_REQUEST);
 
-    // Make a TCP connection...
-    auto pipe = kj::newTwoWayPipe();
-    kj::Maybe<kj::Exception> connectionException = kj::none;
+    KJ_IF_SOME(client, portState->getHttpClient()) {
+      auto service = kj::newHttpService(client);
+      co_await service->request(method, noHostUrl, newHeaders, requestBody, response);
+      co_return;
+    }
 
-    auto connectionPromise = connectImpl(*pipe.ends[1]);
-
-    // ... and then stack an HttpClient on it ...
-    auto client = kj::newHttpClient(headerTable, *pipe.ends[0], {.entropySource = entropySource});
-
-    // ... and then adapt that to an HttpService ...
+    auto connection = kj::newPromisedStream(portState->connect());
+    auto client = kj::newHttpClient(headerTable, *connection, {.entropySource = entropySource});
     auto service = kj::newHttpService(*client);
-
-    // ... fork connection promises so we can keep the original exception around ...
-    auto connectionPromiseForked = connectionPromise.fork();
-    auto connectionPromiseBranch = connectionPromiseForked.addBranch();
-    auto connectionPromiseToKeepException = connectionPromiseForked.addBranch();
-
-    // ... and now we can just forward our call to that ...
-    try {
-      co_await service->request(method, noHostUrl, newHeaders, requestBody, response)
-          .exclusiveJoin(
-              // never done as we do not want a Connection RPC exiting successfully
-              // affecting the request
-              connectionPromiseBranch.then([]() -> kj::Promise<void> { return kj::NEVER_DONE; }));
-    } catch (...) {
-      auto exception = kj::getCaughtExceptionAsKj();
-      connectionException = kj::some(kj::mv(exception));
-    }
-
-    // ... and last but not least, if the connect() call succeeded but the connection
-    // was broken, we throw that exception.
-    KJ_IF_SOME(exception, connectionException) {
-      co_await connectionPromiseToKeepException;
-      kj::throwFatalException(kj::mv(exception));
-    }
+    co_await service->request(method, noHostUrl, newHeaders, requestBody, response);
   }
 
   // Implements connect(), i.e., forms a raw socket.
@@ -848,10 +1072,10 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override {
     JSG_REQUIRE(!settings.useTls, Error,
-        "Connencting to a container using TLS is not currently supported. It is unnecessary "
+        "Connecting to a container using TLS is not currently supported. It is unnecessary "
         "anyway, as the connection is already secure by default.");
 
-    auto promise = connectImpl(connection);
+    auto promise = connectImpl(kj::Own<kj::AsyncIoStream>(&connection, kj::NullDisposer::instance));
 
     kj::HttpHeaders responseHeaders(headerTable);
     response.accept(200, "OK", responseHeaders);
@@ -877,42 +1101,28 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
   }
 
  private:
-  capnp::ByteStreamFactory& byteStreamFactory;
   kj::EntropySource& entropySource;
   const kj::HttpHeaderTable& headerTable;
-  rpc::Container::Port::Client port;
+  kj::Rc<TcpPortState> portState;
 
-  // Connect to the port and pump bytes to/from `connection`. Used by both request() and
-  // connect().
-  kj::Promise<void> connectImpl(kj::AsyncIoStream& connection) {
-    // A lot of the following is copied from
-    // capnp::HttpOverCapnpFactory::KjToCapnpHttpServiceAdapter::connect().
-    auto req = port.connectRequest(capnp::MessageSize{4, 1});
-    auto downPipe = kj::newOneWayPipe();
-    req.setDown(byteStreamFactory.kjToCapnp(kj::mv(downPipe.out)));
-    auto pipeline = req.send();
-
-    // Make sure the request message isn't pinned into memory through the co_await below.
-    { auto drop = kj::mv(req); }
+  // Connect to the port and pump bytes to/from `connection`.
+  kj::Promise<void> connectImpl(kj::Own<kj::AsyncIoStream> connection) {
+    auto portConnection = co_await portState->connect();
+    auto& portStream = kj::downcast<ContainerPortAsyncIoStream>(*portConnection);
 
     auto downPumpTask =
-        downPipe.in->pumpTo(connection)
-            .then([&connection, down = kj::mv(downPipe.in)](uint64_t) -> kj::Promise<void> {
-      connection.shutdownWrite();
+        portConnection->pumpTo(*connection).then([&connection](uint64_t) -> kj::Promise<void> {
+      connection->shutdownWrite();
       return kj::NEVER_DONE;
     });
-    auto up = pipeline.getUp();
+    auto upPumpTask = connection->pumpTo(*portConnection)
+                          .then([&portStream](uint64_t) {
+      return portStream.endWrite();
+    }).then([]() -> kj::Promise<void> { return kj::NEVER_DONE; });
+    auto disconnected = portStream.whenDisconnected();
 
-    auto upStream = byteStreamFactory.capnpToKjExplicitEnd(up);
-    auto upPumpTask = connection.pumpTo(*upStream)
-                          .then([&upStream = *upStream](uint64_t) mutable {
-      return upStream.end();
-    }).then([up = kj::mv(up), upStream = kj::mv(upStream)]() mutable -> kj::Promise<void> {
-      return kj::NEVER_DONE;
-    });
-
-    co_await pipeline;
-    co_await kj::joinPromisesFailFast(kj::arr(kj::mv(upPumpTask), kj::mv(downPumpTask)));
+    co_await kj::joinPromisesFailFast(
+        kj::arr(kj::mv(upPumpTask), kj::mv(downPumpTask), kj::mv(disconnected)));
   }
 };
 
@@ -920,44 +1130,71 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
 // request, so this is that.
 class Container::TcpPortOutgoingFactory final: public Fetcher::OutgoingFactory {
  public:
-  TcpPortOutgoingFactory(capnp::ByteStreamFactory& byteStreamFactory,
-      kj::EntropySource& entropySource,
+  TcpPortOutgoingFactory(kj::EntropySource& entropySource,
       const kj::HttpHeaderTable& headerTable,
-      rpc::Container::Port::Client port)
-      : byteStreamFactory(byteStreamFactory),
-        entropySource(entropySource),
+      kj::Rc<TcpPortState> portState)
+      : entropySource(entropySource),
         headerTable(headerTable),
-        port(kj::mv(port)) {}
+        portState(kj::mv(portState)) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
     // At present we have no use for `cfStr`.
-    return IoContext::current().getSubrequestNoChecks([&](auto& tracing, auto& channelFactory) {
-      return kj::heap<TcpPortWorkerInterface>(byteStreamFactory, entropySource, headerTable, port);
+    return IoContext::current().getSubrequestNoChecks(
+        [&](auto& tracing, auto& channelFactory) -> kj::Own<WorkerInterface> {
+      return kj::heap<TcpPortWorkerInterface>(entropySource, headerTable, portState.addRef());
     }, {.inHouse = false, .wrapMetrics = false});
   }
 
  private:
-  capnp::ByteStreamFactory& byteStreamFactory;
   kj::EntropySource& entropySource;
   const kj::HttpHeaderTable& headerTable;
-  rpc::Container::Port::Client port;
+
+  kj::Rc<TcpPortState> portState;
 };
 
 jsg::Ref<Fetcher> Container::getTcpPort(jsg::Lock& js, int port) {
   JSG_REQUIRE(port > 0 && port < 65536, TypeError, "Invalid port number: ", port);
 
-  auto req = rpcClient->getTcpPortRequest(
-      capnp::MessageSize{4 + capnp::sizeInWords<rpc::SpanContext>(), 0});
-  req.setPort(port);
-
   auto& ioctx = IoContext::current();
-  KJ_IF_SOME(spanContext, ioctx.getCurrentTraceSpan().toSpanContext()) {
-    spanContext.toCapnp(req.initSpanContext());
-  }
+  auto makePortRequest = [&]() {
+    auto req = rpcClient->getTcpPortRequest(
+        capnp::MessageSize{4 + capnp::sizeInWords<rpc::SpanContext>(), 0});
+    req.setPort(port);
+    KJ_IF_SOME(spanContext, ioctx.getCurrentTraceSpan().toSpanContext()) {
+      spanContext.toCapnp(req.initSpanContext());
+    }
+    return req;
+  };
 
-  kj::Own<Fetcher::OutgoingFactory> factory =
-      kj::heap<TcpPortOutgoingFactory>(ioctx.getByteStreamFactory(), ioctx.getEntropySource(),
-          ioctx.getHeaderTable(), req.send().getPort());
+  auto portState = [&]() -> kj::Rc<TcpPortState> {
+    if (util::Autogate::isEnabled(util::AutogateKey::CONTAINER_TUNNEL_REUSE)) {
+      if (tcpPortStates == kj::none) {
+        tcpPortStates = ioctx.addObject(kj::heap<kj::HashMap<int, kj::Rc<TcpPortState>>>());
+      }
+      auto& states = *KJ_ASSERT_NONNULL(tcpPortStates);
+
+      KJ_IF_SOME(existing, states.find(port)) {
+        if (!existing->hasPortFailed()) return existing.addRef();
+        states.erase(port);
+      }
+      if (states.size() < MAX_CACHED_TCP_PORTS) {
+        auto req = makePortRequest();
+        auto response = req.send();
+        auto state = kj::rc<TcpPortState>(ioctx.getUnsafeTimer(), ioctx.getByteStreamFactory(),
+            ioctx.getEntropySource(), ioctx.getHeaderTable(), response.getPort());
+        ioctx.addTask(response.then([](auto&&) {},
+            [state = state.addRef()](kj::Exception&&) mutable { state->markPortFailed(); }));
+        states.insert(port, state.addRef());
+        return state;
+      }
+    }
+
+    auto req = makePortRequest();
+    return kj::rc<TcpPortState>(ioctx.getByteStreamFactory(), req.send().getPort());
+  }();
+
+  kj::Own<Fetcher::OutgoingFactory> factory = kj::heap<TcpPortOutgoingFactory>(
+      ioctx.getEntropySource(), ioctx.getHeaderTable(), kj::mv(portState));
 
   return js.alloc<Fetcher>(
       ioctx.addObject(kj::mv(factory)), Fetcher::RequiresHostAndProtocol::YES, true);

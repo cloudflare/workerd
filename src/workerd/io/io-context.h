@@ -826,6 +826,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return getIoChannelFactory().getTimer().afterLimitTimeout(t);
   }
 
+  // Access the unmitigated event-loop timer for internal housekeeping whose timing is not exposed
+  // to JavaScript, such as connection-pool eviction. Do not use this for application-visible
+  // clocks or timers.
+  kj::Timer& getUnsafeTimer() {
+    return thread.getUnsafeTimer();
+  }
+
   // Provide access to the system CSPRNG.
   kj::EntropySource& getEntropySource() {
     return thread.getEntropySource();
