@@ -23,6 +23,13 @@ function createBatchInstances(options) {
   return options.map((val) => ({ id: val.id }));
 }
 
+function deleteBatchInstances(options) {
+  return {
+    deleted: options.instances.map((id) => ({ id })),
+    errors: [],
+  };
+}
+
 function instanceStatus(id, transport) {
   return { status: 'running', output: id, transport };
 }
@@ -46,10 +53,14 @@ async function handleHttp(request) {
           { result: createBatchInstances(data) },
           { status: 201 }
         );
+      case '/deleteBatch':
+        return Response.json(
+          { result: deleteBatchInstances(data) },
+          { status: 200 }
+        );
       case '/pause':
       case '/resume':
       case '/terminate':
-      case '/delete':
       case '/send-event':
         return Response.json({ result: null }, { status: 200 });
       case '/restart':
@@ -86,13 +97,15 @@ export default class WorkflowsMock extends WorkerEntrypoint {
     return createBatchInstances(options);
   }
 
+  async deleteBatch(options) {
+    return deleteBatchInstances(options);
+  }
+
   async pause(_id) {}
 
   async resume(_id) {}
 
   async terminate(_id) {}
-
-  async delete(_id) {}
 
   async restart(id, options) {
     restartBodies.set(id, { ...options, id });
