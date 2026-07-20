@@ -730,9 +730,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
                        .then([]() mutable -> kj::Promise<EventOutcome> { return EventOutcome::OK; })
                        .catch_([weakIoctx = context.getWeakRef()](kj::Exception&& e) {
       // If any exceptions were thrown, mark the outcome accordingly.
-      KJ_IF_SOME(context, weakIoctx) {
-        context->getMetrics().reportFailure(e);
-      }
+      weakIoctx->runIfAlive([&e](IoContext& context) { context.getMetrics().reportFailure(e); });
       return EventOutcome::EXCEPTION;
     })
                        .exclusiveJoin(timeoutPromise.then([] {
@@ -746,9 +744,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
       // internalError outcome if it does happen
       return EventOutcome::INTERNAL_ERROR;
     }, [weakIoctx = context.getWeakRef()](kj::Exception&& e) {
-      KJ_IF_SOME(context, weakIoctx) {
-        context->getMetrics().reportFailure(e);
-      }
+      weakIoctx->runIfAlive([&e](IoContext& context) { context.getMetrics().reportFailure(e); });
       return EventOutcome::EXCEPTION;
     }));
 

@@ -17,27 +17,27 @@ namespace {
 // and check it against the current IoContext where the snapshot function
 // is invoked.
 jsg::Function<void()> getValidator(jsg::Lock& js) {
-  if (!FeatureFlags::get(js).getBindAsyncLocalStorageSnapshot() || !IoContext::hasCurrent()) {
-    return [](jsg::Lock&) {};
+  kj::Maybe<kj::Own<IoContext::WeakRef>> maybeIoContext;
+  if (FeatureFlags::get(js).getBindAsyncLocalStorageSnapshot() && IoContext::hasCurrent()) {
+    // We use a weak reference to the IoContext because the current IoContext
+    // may be destroyed before the snapshot function is called.
+    maybeIoContext = IoContext::current().getWeakRef();
   }
-
-  // We use a weak reference to the IoContext because the current IoContext
-  // may be destroyed before the snapshot function is called.
-  auto context = IoContext::current().getWeakRef();
 
   static constexpr auto kErrorMessage =
       "Cannot call this AsyncLocalStorage bound function outside of the "
       "request in which it was created."_kj;
 
-  return [context = kj::mv(context)](jsg::Lock&) {
-    // We had an IoContext when we created the snapshot function.
-    // If it is not the current IoContext, or if there is no current
-    // IoContext, or if the captured IoContext has been destroyed,
-    // we throw an error.
-    KJ_IF_SOME(originIoContext, context) {
-      JSG_REQUIRE(originIoContext->isCurrent(), Error, kErrorMessage);
-    } else {
-      JSG_FAIL_REQUIRE(Error, kErrorMessage);
+  return [maybeIoContext = kj::mv(maybeIoContext)](jsg::Lock&) {
+    KJ_IF_SOME(originIoContext, maybeIoContext) {
+      // We had an IoContext when we created the snapshot function.
+      // If it is not the current IoContext, or if there is no current
+      // IoContext, or if the captured IoContext has been destroyed,
+      // we throw an error.
+      JSG_REQUIRE(IoContext::hasCurrent() && originIoContext->isValid(), Error, kErrorMessage);
+      originIoContext->runIfAlive([&](IoContext& otherContext) {
+        JSG_REQUIRE(&otherContext == &IoContext::current(), Error, kErrorMessage);
+      });
     }
   };
 }
