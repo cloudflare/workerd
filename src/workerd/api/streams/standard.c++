@@ -726,7 +726,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
 
   KJ_DISALLOW_COPY_AND_MOVE(ReadableStreamJsController);
 
-  ReadableStreamJsController() = default;
+  explicit ReadableStreamJsController();
   explicit ReadableStreamJsController(StreamStates::Closed closed);
   explicit ReadableStreamJsController(StreamStates::Errored errored);
   explicit ReadableStreamJsController(jsg::Lock& js, ValueReadable& consumer);
@@ -813,7 +813,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
  private:
   // If the stream was created within the scope of a request, we want to treat it as I/O
   // and make sure it is not advanced from the scope of a different request.
-  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
+  kj::Maybe<IoContext&> ioContext;
   kj::Weak<ReadableStream> owner;
 
   // Initial state before setup() is called.
@@ -875,7 +875,7 @@ class WritableStreamJsController final: public WritableStreamController {
 
   using Controller = jsg::Ref<WritableStreamDefaultController>;
 
-  WritableStreamJsController() = default;
+  explicit WritableStreamJsController();
 
   explicit WritableStreamJsController(StreamStates::Closed closed);
 
@@ -965,7 +965,7 @@ class WritableStreamJsController final: public WritableStreamController {
  private:
   jsg::Promise<void> pipeLoop(jsg::Lock& js);
 
-  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
+  kj::Maybe<IoContext&> ioContext;
   kj::Weak<WritableStream> owner;
 
   // Initial state before setup() is called.
@@ -2236,7 +2236,8 @@ struct ByteReadable final: public kj::PtrTarget,
 
 ReadableStreamDefaultController::ReadableStreamDefaultController(
     UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy)
-    : impl(kj::mv(underlyingSource), kj::mv(queuingStrategy)) {}
+    : ioContext(tryGetIoContext()),
+      impl(kj::mv(underlyingSource), kj::mv(queuingStrategy)) {}
 
 kj::Maybe<StreamStates::Errored> ReadableStreamDefaultController::getMaybeErrorState(
     jsg::Lock& js) {
@@ -2351,7 +2352,8 @@ void ReadableStreamBYOBRequest::visitForGc(jsg::GcVisitor& visitor) {
 ReadableStreamBYOBRequest::ReadableStreamBYOBRequest(jsg::Lock& js,
     kj::Own<ByteQueue::ByobRequest> readRequest,
     kj::Rc<WeakRef<ReadableByteStreamController>> controller)
-    : maybeImpl(Impl(js, kj::mv(readRequest), kj::mv(controller))) {}
+    : ioContext(tryGetIoContext()),
+      maybeImpl(Impl(js, kj::mv(readRequest), kj::mv(controller))) {}
 
 kj::Maybe<int> ReadableStreamBYOBRequest::getAtLeast() {
   KJ_IF_SOME(impl, maybeImpl) {
@@ -2500,6 +2502,7 @@ ReadableByteStreamController::ReadableByteStreamController(
     UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy)
     : weakSelf(kj::rc<WeakRef<ReadableByteStreamController>>(
           kj::Badge<ReadableByteStreamController>{}, *this)),
+      ioContext(tryGetIoContext()),
       impl(kj::mv(underlyingSource), kj::mv(queuingStrategy)) {}
 
 ReadableByteStreamController::~ReadableByteStreamController() noexcept(false) {
@@ -2615,19 +2618,25 @@ kj::Own<ByteQueue::Consumer> ReadableByteStreamController::getConsumer(
 
 // ======================================================================================
 
-ReadableStreamJsController::ReadableStreamJsController(StreamStates::Closed closed) {
+ReadableStreamJsController::ReadableStreamJsController(): ioContext(tryGetIoContext()) {}
+
+ReadableStreamJsController::ReadableStreamJsController(StreamStates::Closed closed)
+    : ioContext(tryGetIoContext()) {
   state.transitionTo<StreamStates::Closed>();
 }
 
-ReadableStreamJsController::ReadableStreamJsController(StreamStates::Errored errored) {
+ReadableStreamJsController::ReadableStreamJsController(StreamStates::Errored errored)
+    : ioContext(tryGetIoContext()) {
   state.transitionTo<StreamStates::Errored>(kj::mv(errored));
 }
 
-ReadableStreamJsController::ReadableStreamJsController(jsg::Lock& js, ValueReadable& consumer) {
+ReadableStreamJsController::ReadableStreamJsController(jsg::Lock& js, ValueReadable& consumer)
+    : ioContext(tryGetIoContext()) {
   state.transitionTo<kj::Own<ValueReadable>>(consumer.clone(js, *this));
 }
 
-ReadableStreamJsController::ReadableStreamJsController(jsg::Lock& js, ByteReadable& consumer) {
+ReadableStreamJsController::ReadableStreamJsController(jsg::Lock& js, ByteReadable& consumer)
+    : ioContext(tryGetIoContext()) {
   state.transitionTo<kj::Own<ByteReadable>>(consumer.clone(js, *this));
 }
 
@@ -3577,7 +3586,8 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
 
 WritableStreamDefaultController::WritableStreamDefaultController(
     jsg::Lock& js, kj::Weak<WritableStream> owner, jsg::Ref<AbortSignal> abortSignal)
-    : impl(js, kj::mv(owner), kj::mv(abortSignal)) {}
+    : ioContext(tryGetIoContext()),
+      impl(js, kj::mv(owner), kj::mv(abortSignal)) {}
 
 jsg::Promise<void> WritableStreamDefaultController::abort(jsg::Lock& js, jsg::JsValue reason) {
   return impl.abort(js, JSG_THIS, reason);
@@ -3637,6 +3647,8 @@ WritableStreamDefaultController::~WritableStreamDefaultController() noexcept(fal
 }
 
 // ======================================================================================
+WritableStreamJsController::WritableStreamJsController(): ioContext(tryGetIoContext()) {}
+
 WritableStreamJsController::~WritableStreamJsController() noexcept(false) {
   // Clear algorithms to break circular references during destruction
   KJ_IF_SOME(controller, state.tryGetUnsafe<Controller>()) {
@@ -3649,11 +3661,13 @@ WritableStreamJsController::~WritableStreamJsController() noexcept(false) {
   maybeAbortPromise = kj::none;
 }
 
-WritableStreamJsController::WritableStreamJsController(StreamStates::Closed closed) {
+WritableStreamJsController::WritableStreamJsController(StreamStates::Closed closed)
+    : ioContext(tryGetIoContext()) {
   state.transitionTo<StreamStates::Closed>();
 }
 
-WritableStreamJsController::WritableStreamJsController(StreamStates::Errored errored) {
+WritableStreamJsController::WritableStreamJsController(StreamStates::Errored errored)
+    : ioContext(tryGetIoContext()) {
   state.transitionTo<StreamStates::Errored>(kj::mv(errored));
 }
 
@@ -4106,7 +4120,8 @@ void WritableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
 // =======================================================================================
 
 TransformStreamDefaultController::TransformStreamDefaultController(jsg::Lock& js)
-    : startPromise(js.newPromiseAndResolver<void>()) {}
+    : ioContext(tryGetIoContext()),
+      startPromise(js.newPromiseAndResolver<void>()) {}
 
 kj::Maybe<int> TransformStreamDefaultController::getDesiredSize() {
   KJ_IF_SOME(readableController, tryGetReadableController()) {

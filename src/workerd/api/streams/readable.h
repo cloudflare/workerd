@@ -80,7 +80,7 @@ private:
       Closed,
       Released>;
 
-  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
+  kj::Maybe<IoContext&> ioContext;
   ReadableStreamController::Reader& reader;
 
   ReaderState state;
@@ -226,7 +226,7 @@ private:
 // This is intended for optimized pipe operations.
 class DrainingReader: public ReadableStreamController::Reader {
  public:
-  DrainingReader() = default;
+  explicit DrainingReader();
 
   // Factory method to create and lock to a stream. Returns nullptr if stream is locked.
   static kj::Maybe<kj::Own<DrainingReader>> create(jsg::Lock& js, ReadableStream& stream);
@@ -258,7 +258,7 @@ class DrainingReader: public ReadableStreamController::Reader {
   using Attached = jsg::Ref<ReadableStream>;
   struct Released {};
 
-  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
+  kj::Maybe<IoContext&> ioContext;
   kj::OneOf<Initial, Attached, StreamStates::Closed, Released> state = Initial();
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
 };
@@ -267,6 +267,7 @@ class ReadableStream: public kj::PtrTarget, public jsg::Object {
 private:
 
   struct AsyncIteratorState {
+    kj::Maybe<IoContext&> ioContext;
     jsg::Ref<ReadableStreamDefaultReader> reader;
     bool preventCancel;
   };
@@ -476,7 +477,7 @@ public:
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
-  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
+  kj::Maybe<IoContext&> ioContext;
   kj::Own<ReadableStreamController> controller;
 
   // Used to signal when this ReadableStream reads EOF. This signal is required for TCP sockets.

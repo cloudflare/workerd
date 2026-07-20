@@ -146,7 +146,7 @@ WritableStreamSinkJsAdapter::WritableStreamSinkJsAdapter(jsg::Lock& js,
     : WritableStreamSinkJsAdapter(js,
           ioContext,
           newIoContextWrappedWritableSink(
-              ioContext.getWeakRef(), newEncodedWritableSink(encoding, kj::mv(stream))),
+              ioContext, newEncodedWritableSink(encoding, kj::mv(stream))),
           kj::mv(options)) {}
 
 WritableStreamSinkJsAdapter::~WritableStreamSinkJsAdapter() noexcept(false) {
@@ -504,7 +504,7 @@ kj::Maybe<const WritableStreamSinkJsAdapter::Options&> WritableStreamSinkJsAdapt
 // ================================================================================================
 
 struct WritableStreamSinkKjAdapter::Active {
-  kj::WeakRc<IoContext> ioContext;
+  IoContext& ioContext;
   jsg::Ref<WritableStream> stream;
   jsg::Ref<WritableStreamDefaultWriter> writer;
   kj::Canceler canceler;
@@ -519,7 +519,7 @@ struct WritableStreamSinkKjAdapter::Active {
   // Prevent abort() from being called multiple times.
   bool aborted = false;
 
-  Active(jsg::Lock& js, kj::WeakRc<IoContext> ioContext, jsg::Ref<WritableStream> stream);
+  Active(jsg::Lock& js, IoContext& ioContext, jsg::Ref<WritableStream> stream);
   KJ_DISALLOW_COPY_AND_MOVE(Active);
   ~Active() noexcept(false);
 
@@ -534,8 +534,8 @@ jsg::Ref<WritableStreamDefaultWriter> initWriter(jsg::Lock& js, jsg::Ref<Writabl
 }  // namespace
 
 WritableStreamSinkKjAdapter::Active::Active(
-    jsg::Lock& js, kj::WeakRc<IoContext> ioContext, jsg::Ref<WritableStream> stream)
-    : ioContext(kj::mv(ioContext)),
+    jsg::Lock& js, IoContext& ioContext, jsg::Ref<WritableStream> stream)
+    : ioContext(ioContext),
       stream(kj::mv(stream)),
       writer(initWriter(js, this->stream)) {}
 
@@ -547,9 +547,8 @@ void WritableStreamSinkKjAdapter::Active::abort(kj::Exception reason) {
   if (aborted) return;
   aborted = true;
   canceler.cancel(reason.clone());
-  auto& ctx = ioContext.assertLive();
-  ctx.addTask(ctx.run([writable = kj::mv(stream), writer = kj::mv(writer),
-                          exception = reason.clone()](jsg::Lock& js) mutable {
+  ioContext.addTask(ioContext.run([writable = kj::mv(stream), writer = kj::mv(writer),
+                                      exception = reason.clone()](jsg::Lock& js) mutable {
     auto& ioContext = IoContext::current();
     auto error = js.exceptionToJsValue(kj::mv(exception));
     auto promise = writer->abort(js, error.getHandle(js));
@@ -558,8 +557,8 @@ void WritableStreamSinkKjAdapter::Active::abort(kj::Exception reason) {
 }
 
 WritableStreamSinkKjAdapter::WritableStreamSinkKjAdapter(
-    jsg::Lock& js, kj::WeakRc<IoContext> ioContext, jsg::Ref<WritableStream> stream)
-    : state(KjState::create<KjOpen>(kj::heap<Active>(js, kj::mv(ioContext), kj::mv(stream)))),
+    jsg::Lock& js, IoContext& ioContext, jsg::Ref<WritableStream> stream)
+    : state(KjState::create<KjOpen>(kj::heap<Active>(js, ioContext, kj::mv(stream)))),
       selfRef(kj::rc<WeakRef<WritableStreamSinkKjAdapter>>(
           kj::Badge<WritableStreamSinkKjAdapter>{}, *this)) {}
 
@@ -597,9 +596,8 @@ kj::Promise<void> WritableStreamSinkKjAdapter::write(
   active.writePending = true;
 
   return active.canceler
-      .wrap(active.ioContext.assertLive().run(
-          [self = selfRef.addRef(), writer = active.writer.addRef(), pieces = pieces](
-              jsg::Lock& js) mutable -> kj::Promise<void> {
+      .wrap(active.ioContext.run([self = selfRef.addRef(), writer = active.writer.addRef(),
+                                     pieces = pieces](jsg::Lock& js) mutable -> kj::Promise<void> {
     size_t totalAmount = 0;
     for (auto piece: pieces) {
       totalAmount += piece.size();
@@ -662,7 +660,7 @@ kj::Promise<void> WritableStreamSinkKjAdapter::end() {
   }
   active.closePending = true;
   return active.canceler
-      .wrap(active.ioContext.assertLive().run(
+      .wrap(active.ioContext.run(
           [self = selfRef.addRef(), writer = active.writer.addRef()](jsg::Lock& js) mutable {
     auto promise = writer->close(js);
     return IoContext::current().awaitJs(js, kj::mv(promise));

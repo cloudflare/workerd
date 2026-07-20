@@ -637,18 +637,18 @@ class ReadableSourceImpl: public ReadableSource {
 // of the operations on the stream.
 class NoDeferredProxySource final: public ReadableSourceWrapper {
  public:
-  NoDeferredProxySource(kj::Own<ReadableSource> inner, kj::WeakRc<IoContext> ioctx)
+  NoDeferredProxySource(kj::Own<ReadableSource> inner, IoContext& ioctx)
       : ReadableSourceWrapper(kj::mv(inner)),
-        ioctx(kj::mv(ioctx)) {}
+        ioctx(ioctx) {}
 
   kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes = 1) override {
-    auto pending = ioctx.assertLive().registerPendingEvent();
+    auto pending = ioctx.registerPendingEvent();
     co_return co_await getInner().read(buffer, minBytes);
   }
 
   kj::Promise<DeferredProxy<void>> pumpTo(
       WritableSink& output, EndAfterPump end = EndAfterPump::YES) override {
-    auto pending = ioctx.assertLive().registerPendingEvent();
+    auto pending = ioctx.registerPendingEvent();
     auto [proxyTask] = co_await getInner().pumpTo(output, end);
     co_await proxyTask;
   }
@@ -656,13 +656,13 @@ class NoDeferredProxySource final: public ReadableSourceWrapper {
   Tee tee(size_t limit) override {
     auto tee = getInner().tee(limit);
     return Tee{
-      .branch1 = kj::heap<NoDeferredProxySource>(kj::mv(tee.branch1), ioctx.clone()),
-      .branch2 = kj::heap<NoDeferredProxySource>(kj::mv(tee.branch2), ioctx.clone()),
+      .branch1 = kj::heap<NoDeferredProxySource>(kj::mv(tee.branch1), ioctx),
+      .branch2 = kj::heap<NoDeferredProxySource>(kj::mv(tee.branch2), ioctx),
     };
   }
 
  private:
-  kj::WeakRc<IoContext> ioctx;
+  IoContext& ioctx;
 };
 
 // A ReadableSource implementation that lazily wraps an innner Gzip or Brotli
@@ -759,8 +759,8 @@ kj::Own<ReadableSource> newReadableSourceFromBytes(
 }
 
 kj::Own<ReadableSource> newIoContextWrappedReadableSource(
-    kj::WeakRc<IoContext> ioctx, kj::Own<ReadableSource> inner) {
-  return kj::heap<NoDeferredProxySource>(kj::mv(inner), kj::mv(ioctx));
+    IoContext& ioctx, kj::Own<ReadableSource> inner) {
+  return kj::heap<NoDeferredProxySource>(kj::mv(inner), ioctx);
 }
 
 kj::Own<ReadableSource> newReadableSourceFromProducer(

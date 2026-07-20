@@ -314,7 +314,7 @@ class ReadableSourceKjAdapter final: public ReadableSource {
   };
 
   ReadableSourceKjAdapter(jsg::Lock& js,
-      kj::WeakRc<IoContext> ioContext,
+      IoContext& ioContext,
       jsg::Ref<ReadableStream> stream,
       Options options = {.minReadPolicy = MinReadPolicy::OPPORTUNISTIC});
   ~ReadableSourceKjAdapter() noexcept(false);

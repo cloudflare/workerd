@@ -15,7 +15,8 @@
 namespace workerd::api {
 
 ReaderImpl::ReaderImpl(ReadableStreamController::Reader& reader)
-    : reader(reader),
+    : ioContext(tryGetIoContext()),
+      reader(reader),
       state(ReaderState::create<Initial>()) {}
 
 ReaderImpl::~ReaderImpl() noexcept(false) {
@@ -257,6 +258,8 @@ void ReadableStreamBYOBReader::visitForGc(jsg::GcVisitor& visitor) {
 // ======================================================================================
 // DrainingReader implementation
 
+DrainingReader::DrainingReader(): ioContext(tryGetIoContext()) {}
+
 DrainingReader::~DrainingReader() noexcept(false) {
   KJ_IF_SOME(stream, state.tryGet<Attached>()) {
     stream->getController().releaseReader(*this, kj::none);
@@ -385,7 +388,8 @@ ReadableStream::ReadableStream(IoContext& ioContext, kj::Own<ReadableStreamSourc
     : ReadableStream(newReadableStreamInternalController(ioContext, kj::mv(source))) {}
 
 ReadableStream::ReadableStream(kj::Own<ReadableStreamController> controller)
-    : controller(kj::mv(controller)) {
+    : ioContext(tryGetIoContext()),
+      controller(kj::mv(controller)) {
   getController().setOwnerRef(PtrTarget::addWeakToThis());
 }
 
@@ -457,9 +461,9 @@ ReadableStream::Reader ReadableStream::getReader(
 jsg::Ref<ReadableStream::ReadableStreamAsyncIterator> ReadableStream::values(
     jsg::Lock& js, jsg::Optional<ValuesOptions> options) {
   static const auto defaultOptions = ValuesOptions{};
-  return js.alloc<ReadableStreamAsyncIterator>(
-      AsyncIteratorState{.reader = ReadableStreamDefaultReader::constructor(js, JSG_THIS),
-        .preventCancel = options.orDefault(defaultOptions).preventCancel.orDefault(false)});
+  return js.alloc<ReadableStreamAsyncIterator>(AsyncIteratorState{.ioContext = ioContext,
+    .reader = ReadableStreamDefaultReader::constructor(js, JSG_THIS),
+    .preventCancel = options.orDefault(defaultOptions).preventCancel.orDefault(false)});
 }
 
 jsg::Ref<ReadableStream> ReadableStream::pipeThrough(
@@ -630,9 +634,9 @@ namespace {
 //   beyond the destruction of the IoContext, if it is being used for deferred proxying.
 class NoDeferredProxyReadableStream final: public ReadableStreamSource {
  public:
-  NoDeferredProxyReadableStream(kj::Own<ReadableStreamSource> inner, kj::WeakRc<IoContext> ioctx)
+  NoDeferredProxyReadableStream(kj::Own<ReadableStreamSource> inner, IoContext& ioctx)
       : inner(kj::mv(inner)),
-        ioctx(kj::mv(ioctx)) {}
+        ioctx(ioctx) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     return inner->tryRead(buffer, minBytes, maxBytes);
@@ -643,8 +647,7 @@ class NoDeferredProxyReadableStream final: public ReadableStreamSource {
     // we use `ioctx.waitForDeferredProxy()`, which returns a single promise covering both parts
     // (and, importantly, registering pending events where needed). Then, we add a noop deferred
     // proxy to the end of that.
-    return addNoopDeferredProxy(
-        ioctx.assertLive().waitForDeferredProxy(inner->pumpTo(kj::mv(output), end)));
+    return addNoopDeferredProxy(ioctx.waitForDeferredProxy(inner->pumpTo(kj::mv(output), end)));
   }
 
   StreamEncoding getPreferredEncoding() override {
@@ -662,15 +665,15 @@ class NoDeferredProxyReadableStream final: public ReadableStreamSource {
   kj::Maybe<Tee> tryTee(uint64_t limit) override {
     return inner->tryTee(limit).map([&](Tee tee) {
       return Tee{.branches = {
-                   kj::heap<NoDeferredProxyReadableStream>(kj::mv(tee.branches[0]), ioctx.clone()),
-                   kj::heap<NoDeferredProxyReadableStream>(kj::mv(tee.branches[1]), ioctx.clone()),
+                   kj::heap<NoDeferredProxyReadableStream>(kj::mv(tee.branches[0]), ioctx),
+                   kj::heap<NoDeferredProxyReadableStream>(kj::mv(tee.branches[1]), ioctx),
                  }};
     });
   }
 
  private:
   kj::Own<ReadableStreamSource> inner;
-  kj::WeakRc<IoContext> ioctx;
+  IoContext& ioctx;
 };
 
 }  // namespace
@@ -749,8 +752,7 @@ jsg::Ref<ReadableStream> ReadableStream::deserialize(
   kj::Own<kj::AsyncInputStream> in = ioctx.getExternalPusher()->unwrapStream(rs.getStream());
 
   return js.alloc<ReadableStream>(ioctx,
-      kj::heap<NoDeferredProxyReadableStream>(
-          newSystemStream(kj::mv(in), encoding, ioctx), ioctx.getWeakRef()));
+      kj::heap<NoDeferredProxyReadableStream>(newSystemStream(kj::mv(in), encoding, ioctx), ioctx));
 }
 
 kj::StringPtr ReaderImpl::jsgGetMemoryName() const {
