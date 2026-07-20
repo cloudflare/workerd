@@ -195,8 +195,11 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
     // Although the promise returned here was originally intended for "backpressure", it turns out
     // if we return a promise here, the one call site (DurableObjectStorage::asyncTransactionImpl())
     // will actually keep the input gate locked until the commit finishes, which is what we need.
+    // The [this] capture in the then() callback is safe because the catch_() continuation
+    // captures kj::addRef(*this), ensuring ExplicitTxn outlives the then() callback.
     return actorSqlite.blockTasks.onEmpty()
-        .then([self = kj::addRef(*this)]() mutable { self->commitImpl(); })
+        // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
+        .then([this]() { commitImpl(); })
         .catch_([self = kj::addRef(*this)](kj::Exception&& e) mutable {
       if (self->actorSqlite.broken == kj::none) {
         self->rollbackImpl();

@@ -3222,7 +3222,7 @@ void copyInto(kj::ArrayPtr<byte> out, kj::ArrayPtr<kj::ArrayPtr<byte>> in) {
 
 // Consumes all bytes from a stream, buffering in memory, with the purpose
 // of producing either a single concatenated kj::Array<byte> or kj::String.
-class AllReader final: public kj::PtrTarget {
+class AllReader {
  public:
   using PartList = kj::Array<kj::ArrayPtr<byte>>;
 
@@ -3232,11 +3232,13 @@ class AllReader final: public kj::PtrTarget {
   KJ_DISALLOW_COPY_AND_MOVE(AllReader);
 
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> allBytes(jsg::Lock& js) {
-    // The weak ref will assert if `this` is destroyed before the promise resolves.
+    // Note that these nested lambda retain references to `this` and are passed into to promise
+    // returned by this method. It is the responsibility of the caller to ensure that the AllReader
+    // instance is kept alive until the promise is settled.
     return loop(js).then(
-        js, [weak = addWeakToThis()](auto& js, PartList&& partPtrs) -> jsg::JsRef<jsg::JsArrayBuffer> {
-      auto& self = weak.assertLive();
-      auto ab = jsg::JsArrayBuffer::create(js, self.runningTotal);
+        // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
+        js, [this](auto& js, PartList&& partPtrs) -> jsg::JsRef<jsg::JsArrayBuffer> {
+      auto ab = jsg::JsArrayBuffer::create(js, runningTotal);
       copyInto(ab.asArrayPtr(), partPtrs.asPtr());
       return ab.addRef(js);
     });
@@ -3244,20 +3246,22 @@ class AllReader final: public kj::PtrTarget {
 
   jsg::Promise<kj::String> allText(
       jsg::Lock& js, ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) {
-    // The weak ref will assert if `this` is destroyed before the promise resolves.
-    return loop(js).then(js, [weak = addWeakToThis(), option](auto& js, PartList&& partPtrs) {
-      auto& self = weak.assertLive();
+    // Note that these nested lambda retain references to `this` and are passed into to promise
+    // returned by this method. It is the responsibility of the caller to ensure that the AllReader
+    // instance is kept alive until the promise is settled.
+    // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
+    return loop(js).then(js, [this, option](auto& js, PartList&& partPtrs) {
       // Strip UTF-8 BOM if requested
       if ((option & ReadAllTextOption::STRIP_BOM) && partPtrs.size() > 0 &&
           hasUtf8Bom(partPtrs[0])) {
         partPtrs[0] = partPtrs[0].slice(UTF8_BOM_SIZE);
-        self.runningTotal -= UTF8_BOM_SIZE;
+        runningTotal -= UTF8_BOM_SIZE;
       }
 
-      JSG_REQUIRE(self.runningTotal <= v8::String::kMaxLength, RangeError,
+      JSG_REQUIRE(runningTotal <= v8::String::kMaxLength, RangeError,
           "String length exceeds v8::String::kMaxLength.");
 
-      auto out = kj::heapArray<char>(self.runningTotal + 1);
+      auto out = kj::heapArray<char>(runningTotal + 1);
       copyInto(out.first(out.size() - 1).asBytes(), partPtrs.asPtr());
       out.back() = '\0';
       return kj::String(kj::mv(out));
@@ -3295,13 +3299,16 @@ class AllReader final: public kj::PtrTarget {
         return js.template rejectedPromise<PartList>(errored.getHandle(js));
       }
       KJ_CASE_ONEOF(readable, jsg::Ref<ReadableStream>) {
-        // The weak ref will assert if `this` is destroyed before the promise resolves.
-        auto onSuccess = [weak = addWeakToThis(), readable = readable.addRef()](
+        // Note that these nested lambda retain references to `this` and `readable`
+        // and are passed into to promise returned by this method. It is the responsibility
+        // of the caller to ensure that the AllReader instance is kept alive until the
+        // promise is settled. This also applies to most of the nolints down below.
+        // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
+        auto onSuccess = [this, readable = readable.addRef()](
                              jsg::Lock& js, ReadResult result) mutable -> jsg::Promise<PartList> {
-          auto& self = weak.assertLive();
           if (result.done) {
-            self.state.template transitionTo<StreamStates::Closed>();
-            return self.loop(js);
+            state.template transitionTo<StreamStates::Closed>();
+            return loop(js);
           }
 
           // If we're not done, the result value must be interpretable as
@@ -3309,39 +3316,41 @@ class AllReader final: public kj::PtrTarget {
           auto handle = KJ_ASSERT_NONNULL(result.value).getHandle(js);
           if (!handle.isArrayBufferView() && !handle.isArrayBuffer()) {
             auto error = js.typeError("This ReadableStream did not return bytes.");
-            self.state.template transitionTo<StreamStates::Errored>(error.addRef(js));
-            return readable->getController().cancel(js, error).then(js, [weak](jsg::Lock& js) {
-              return weak.assertLive().loop(js);
-            });
+            state.template transitionTo<StreamStates::Errored>(error.addRef(js));
+            return readable->getController().cancel(js, error).then(
+                // Immediately calls back into loop()
+                // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
+                js, [this](jsg::Lock& js) { return loop(js); });
           }
 
           jsg::BufferSource bufferSource(js, handle);
 
           if (bufferSource.size() == 0) {
             // Weird but allowed, we'll skip it.
-            return self.loop(js);
+            return loop(js);
           }
 
-          if ((self.runningTotal + bufferSource.size()) > self.limit) {
+          if ((runningTotal + bufferSource.size()) > limit) {
             auto error = js.typeError("Memory limit exceeded before EOF.");
-            self.state.template transitionTo<StreamStates::Errored>(error.addRef(js));
-            return readable->getController().cancel(js, error).then(js, [weak](jsg::Lock& js) {
-              return weak.assertLive().loop(js);
-            });
+            state.template transitionTo<StreamStates::Errored>(error.addRef(js));
+            return readable->getController().cancel(js, error).then(
+                // Immediately calls back into loop()
+                // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
+                js, [this](jsg::Lock& js) { return loop(js); });
           }
 
-          self.runningTotal += bufferSource.size();
-          self.parts.add(bufferSource.copy(js));
-          return self.loop(js);
+          runningTotal += bufferSource.size();
+          parts.add(bufferSource.copy(js));
+          return loop(js);
         };
 
-        // The weak ref will assert if `this` is destroyed before the promise resolves.
-        auto onFailure = [weak = addWeakToThis()](auto& js, jsg::Value exception) -> jsg::Promise<PartList> {
-          auto& self = weak.assertLive();
+        // Immediately calls back into loop()
+        // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
+        auto onFailure = [this](auto& js, jsg::Value exception) -> jsg::Promise<PartList> {
           // In this case the stream should already be errored.
           auto error = jsg::JsValue(exception.getHandle(js));
-          self.state.template transitionTo<StreamStates::Errored>(error.addRef(js));
-          return self.loop(js);
+          state.template transitionTo<StreamStates::Errored>(error.addRef(js));
+          return loop(js);
         };
 
         return maybeAddFunctor(js, KJ_ASSERT_NONNULL(readable->getController().read(js, kj::none)),

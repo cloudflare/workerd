@@ -1252,7 +1252,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
       if (ctx.hasOutputGate()) {
         return result.then([weakRef = ctx.getWeakRef()]() mutable {
-          return KJ_ASSERT_NONNULL(weakRef.tryGet()).waitForOutputLocks();
+          return KJ_ASSERT_NONNULL(weakRef->tryGet()).waitForOutputLocks();
         });
       } else {
         return result;
@@ -2023,11 +2023,11 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   // continuation.
   kj::Promise<void> call(CallContext callContext) override {
     return JsRpcTargetBase::call(kj::mv(callContext)).then([weakRef = ioCtx.getWeakRef()]() {
-      KJ_IF_SOME(context, weakRef) {
-        KJ_IF_SOME(t, context->getWorkerTracer()) {
-          t.setReturn(context->now());
+      weakRef->runIfAlive([](IoContext& ioCtx) {
+        KJ_IF_SOME(t, ioCtx.getWorkerTracer()) {
+          t.setReturn(ioCtx.now());
         }
-      }
+      });
     });
   }
 

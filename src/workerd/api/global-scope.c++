@@ -548,13 +548,12 @@ void ServiceWorkerGlobalScope::startScheduled(kj::Date scheduledTime,
     KJ_IF_SOME(f, h.scheduled) {
       auto promise =
           f(lock, js.alloc<ScheduledController>(event.addRef()), h.env.addRef(isolate), h.getCtx())
-              .then([weakCtx = context.getWeakRef()]() {
-        KJ_IF_SOME(context, weakCtx) {
-          KJ_IF_SOME(t, context->getWorkerTracer()) {
-            t.setReturn(context->now());
-          }
+              .then(context.addFunctor([]() {
+        auto& context = IoContext::current();
+        KJ_IF_SOME(t, context.getWorkerTracer()) {
+          t.setReturn(context.now());
         }
-      });
+      }));
       event->waitUntil(kj::mv(promise));
     } else {
       lock.logWarningOnce(
@@ -640,7 +639,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
         jsg::Lock& js = lock;
         auto timeoutPromise = context.afterLimitTimeout(timeout).then(
             [weakCtx = context.getWeakRef()]() mutable -> kj::Promise<WorkerInterface::AlarmResult> {
-          auto& context = weakCtx.assertLive();
+          auto& context = KJ_ASSERT_NONNULL(weakCtx->tryGet());
           // We don't want to delete the alarm since we have not successfully completed the alarm
           // execution.
           auto& actor = KJ_ASSERT_NONNULL(context.getActor());
@@ -674,7 +673,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           .catch_(
               [deferredDelete = kj::mv(armResult.deferredDelete), weakCtx = context.getWeakRef()](
                   kj::Exception&& e) mutable {
-        auto& context = weakCtx.assertLive();
+        auto& context = KJ_ASSERT_NONNULL(weakCtx->tryGet());
         auto& actor = KJ_ASSERT_NONNULL(context.getActor());
         auto& persistent = KJ_ASSERT_NONNULL(actor.getPersistent());
         persistent.cancelDeferredAlarmDeletion();
@@ -731,11 +730,11 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
       })
           .then([weakCtx = context.getWeakRef()](WorkerInterface::AlarmResult result) mutable
               -> kj::Promise<WorkerInterface::AlarmResult> {
-        auto& context = weakCtx.assertLive();
+        auto& context = KJ_ASSERT_NONNULL(weakCtx->tryGet());
         return context.waitForOutputLocks().then([result = kj::mv(result)]() mutable {
           return kj::mv(result);
         }, [weakCtx = context.getWeakRef()](kj::Exception&& e) mutable {
-          auto& context = weakCtx.assertLive();
+          auto& context = KJ_ASSERT_NONNULL(weakCtx->tryGet());
           auto& actor = KJ_ASSERT_NONNULL(context.getActor());
           kj::String actorId;
           KJ_SWITCH_ONEOF(actor.getId()) {
@@ -850,11 +849,11 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketMessage(IoContext& conte
       event->waitUntil(setHibernatableEventTimeout(
           handler(lock, kj::mv(websocket), kj::mv(message)), eventTimeoutMs)
                            .then([weakRef = context.getWeakRef()]() {
-        KJ_IF_SOME(context, weakRef) {
-          KJ_IF_SOME(t, context->getWorkerTracer()) {
-            t.setReturn(context->now());
+        weakRef->runIfAlive([](IoContext& context) {
+          KJ_IF_SOME(t, context.getWorkerTracer()) {
+            t.setReturn(context.now());
           }
-        }
+        });
       }));
     }
     // We want to deliver a message, but if no webSocketMessage handler is exported, we shouldn't fail
@@ -884,11 +883,11 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketClose(IoContext& context
           handler(lock, kj::mv(websocket), close.code, kj::mv(close.reason), close.wasClean),
           eventTimeoutMs)
                            .then([weakCtx = context.getWeakRef()]() {
-        KJ_IF_SOME(context, weakCtx) {
-          KJ_IF_SOME(t, context->getWorkerTracer()) {
-            t.setReturn(context->now());
+        weakCtx->runIfAlive([](IoContext& context) {
+          KJ_IF_SOME(t, context.getWorkerTracer()) {
+            t.setReturn(context.now());
           }
-        }
+        });
       }));
     }
     // We want to deliver close, but if no webSocketClose handler is exported, we shouldn't fail
@@ -918,11 +917,11 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketError(IoContext& context
       event->waitUntil(setHibernatableEventTimeout(
           handler(js, kj::mv(websocket), js.exceptionToJs(kj::mv(e))), eventTimeoutMs)
                            .then([weakCtx = context.getWeakRef()]() {
-        KJ_IF_SOME(context, weakCtx) {
-          KJ_IF_SOME(t, context->getWorkerTracer()) {
-            t.setReturn(context->now());
+        weakCtx->runIfAlive([](IoContext& context) {
+          KJ_IF_SOME(t, context.getWorkerTracer()) {
+            t.setReturn(context.now());
           }
-        }
+        });
       }));
     }
     // We want to deliver an error, but if no webSocketError handler is exported, we shouldn't fail
