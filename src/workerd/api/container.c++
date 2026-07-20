@@ -554,11 +554,11 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
 
   // We have to await, because PID won't be available until the response resolves
   return ioContext.awaitIo(js, req.send())
-      .then(js,
-          ioContext.addFunctor([options = kj::mv(options), stdoutInput = kj::mv(stdoutInput),
-                                   stderrInput = kj::mv(stderrInput)](jsg::Lock& js,
-                                   capnp::Response<rpc::Container::ExecResults> results) mutable
-              -> jsg::Ref<ExecProcess> {
+      .then(js, ioContext.addFunctor(
+          [options = kj::mv(options), stdoutInput = kj::mv(stdoutInput),
+              stderrInput = kj::mv(stderrInput)](
+              jsg::Lock& js, capnp::Response<rpc::Container::ExecResults> results) mutable
+          -> jsg::Ref<ExecProcess> {
     auto& ioContext = IoContext::current();
     auto& byteStreamFactory = ioContext.getByteStreamFactory();
     auto process = results.getProcess();

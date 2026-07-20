@@ -330,7 +330,7 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
 // directly on the WritableStreamController. Note that this approach is necessarily
 // a lot slower
 class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream,
-                                        public kj::PtrTarget {
+                                       public kj::PtrTarget {
  public:
   WritableStreamJsRpcAdapter(
       kj::WeakRc<IoContext> context, jsg::Ref<WritableStreamDefaultWriter> writer)
@@ -406,8 +406,8 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream,
     }
     if (buffer == nullptr) return kj::READY_NOW;
     // The weak ref will assert if `this` is destroyed before the promise resolves.
-    return canceler.wrap(context.assertLive().run(
-        [weak = addWeakToThis(), buffer](Worker::Lock& lock, IoContext& context) mutable {
+    return canceler.wrap(context.assertLive().run([weak = addWeakToThis(), buffer]
+        (Worker::Lock& lock, IoContext& context) mutable {
       auto& self = weak.assertLive();
       auto& writer = self.getInner();
       auto ab = jsg::JsArrayBuffer::create(lock, buffer);
@@ -425,8 +425,9 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream,
     }
     if (amount == 0) return kj::READY_NOW;
     // The weak ref will assert if `this` is destroyed before the promise resolves.
-    return canceler.wrap(context.assertLive().run(
-        [weak = addWeakToThis(), amount, pieces](Worker::Lock& lock, IoContext& context) mutable {
+    return canceler.wrap(
+        context.assertLive().run([weak = addWeakToThis(), amount, pieces]
+          (Worker::Lock& lock, IoContext& context) mutable {
       auto& self = weak.assertLive();
       auto& writer = self.getInner();
       // Sadly, we have to allocate and copy here. Our received set of buffers are only
@@ -473,8 +474,8 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream,
       return KJ_EXCEPTION(FAILED, "End after stream has been closed.");
     }
     ended = true;
-    return canceler.wrap(context.assertLive().run(
-        [weak = addWeakToThis()](Worker::Lock& lock, IoContext& ctx) mutable {
+    return canceler.wrap(context.assertLive().run([weak = addWeakToThis()]
+        (Worker::Lock& lock, IoContext& ctx) mutable {
       auto& self = weak.assertLive();
       return ctx.awaitJs(lock, self.getInner().close(lock));
     }));

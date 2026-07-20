@@ -581,10 +581,9 @@ R2Bucket::get(jsg::Lock& js,
     auto client = getHttpClient(context, traceContext);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
-    return context.awaitIo(js, kj::mv(promise),
-        context.addFunctor([&errorType, traceContext = kj::mv(traceContext)](
-                               jsg::Lock& js, R2Result r2Result) mutable
-            -> kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> {
+    return context.awaitIo(js, kj::mv(promise), context.addFunctor(
+        [&errorType, traceContext = kj::mv(traceContext)](jsg::Lock& js, R2Result r2Result) mutable
+        -> kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> {
       auto& context = IoContext::current();
       kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> result;
 

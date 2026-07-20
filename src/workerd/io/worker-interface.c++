@@ -281,16 +281,16 @@ kj::Promise<void> RevocableWebSocketWorkerInterface::connect(kj::StringPtr host,
   // The captures here are safe because both the lambda (as part of revokeTask) and
   // wrappedConnection are attached to the returned promise, so they have the same lifetime.
   // connection is a parameter reference that outlives the returned promise.
-  auto revokeTask = revokeProm
-                        .addBranch()
+  auto revokeTask = revokeProm.addBranch()
                         // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
                         .catch_([&connection, &wrappedConnection = *wrappedConnection](
                                     kj::Exception&& e) -> kj::Promise<void> {
-    wrappedConnection.neuter(e.clone());
-    connection.abortWrite(kj::mv(e));
-    connection.abortRead();
-    return kj::READY_NOW;
-  }).eagerlyEvaluate(nullptr);
+                          wrappedConnection.neuter(e.clone());
+                          connection.abortWrite(kj::mv(e));
+                          connection.abortRead();
+                          return kj::READY_NOW;
+                        })
+                        .eagerlyEvaluate(nullptr);
 
   return worker.connect(host, headers, *wrappedConnection, response, kj::mv(settings))
       .attach(kj::mv(wrappedConnection), kj::mv(revokeTask));

@@ -572,8 +572,8 @@ kj::Promise<void> CapnpServer::call(capnp::InterfaceSchema::Method method,
     // guarantees `this` outlives the returned promise. `wrapper` is owned by the isolate's
     // TypeWrapper and is valid whenever the isolate is locked.
     // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
-    result = rc->run(
-        [this, method, rpcContext](Worker::Lock& lock, IoContext& rc) mutable -> kj::Promise<void> {
+    result = rc->run([this, method, rpcContext](
+                         Worker::Lock& lock, IoContext& rc) mutable -> kj::Promise<void> {
       jsg::Lock& js = lock;
       auto handle = object.getHandle(js);
       auto methodName = method.getProto().getName();

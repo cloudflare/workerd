@@ -511,8 +511,8 @@ class ActorCache::GetMultiStreamImpl final: public rpc::ActorStorage::ListStream
           // This may be a duplicate due to a retry. Ignore it.
           break;
         } else if (key == *nextExpectedKey) {
-          fetchedEntries.add(cacheRef.addReadResultToCache(
-              lock, kj::mv(*nextExpectedKey), kv.getValue(), options));
+          fetchedEntries.add(
+              cacheRef.addReadResultToCache(lock, kj::mv(*nextExpectedKey), kv.getValue(), options));
           ++nextExpectedKey;
           break;
         }
@@ -650,7 +650,8 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
       return kj::READY_NOW;
     }
     auto req = client.getMultipleRequest(sizeHint);
-    auto keysToFetch = kj::arrayPtr(streamServer->nextExpectedKey, streamServer->keysToFetch.end());
+    auto keysToFetch =
+        kj::arrayPtr(streamServer->nextExpectedKey, streamServer->keysToFetch.end());
     auto list = req.initKeys(keysToFetch.size());
     for (auto i: kj::indices(keysToFetch)) {
       list.set(i, keysToFetch[i].asBytes());
@@ -665,8 +666,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
   // `stream` from being destroyed until we have a result so that if the RPC throws an exception,
   // we don't accidentally report "PromiseFulfiller not fulfilled" instead of the exception.
   // The strong ref to streamServer ensures the object outlives all callbacks.
-  auto promise = sendPromise.then(
-      [streamServer = streamServer.addRef()]() mutable -> kj::Promise<ActorCache::GetResultList> {
+  auto promise = sendPromise.then([streamServer = streamServer.addRef()]() mutable -> kj::Promise<ActorCache::GetResultList> {
     if (streamServer->fulfiller->isWaiting()) {
       return KJ_EXCEPTION(FAILED, "getMultiple() never called stream.end()");
     } else {
@@ -675,8 +675,9 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
     }
   });
   return paf.promise.exclusiveJoin(kj::mv(promise))
-      .attach(
-          kj::defer([streamServer = kj::mv(streamServer)]() mutable { streamServer->cancel(); }));
+      .attach(kj::defer([streamServer = kj::mv(streamServer)]() mutable {
+        streamServer->cancel();
+      }));
 }
 
 kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorCache::getAlarm(
@@ -700,10 +701,8 @@ kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorCache::get
         auto req = client.getAlarmRequest();
         return req.send().dropPipeline();
       })
-          .then(
-              [weak = addWeakToThis(), options](
-                  capnp::Response<rpc::ActorStorage::Operations::GetAlarmResults> response) mutable
-              -> kj::Maybe<kj::Date> {
+          .then([weak = addWeakToThis(), options](capnp::Response<rpc::ActorStorage::Operations::GetAlarmResults>
+                        response) mutable -> kj::Maybe<kj::Date> {
         auto& self = weak.assertLive();
         auto scheduledTimeMs = response.getScheduledTimeMs();
         auto result = [&]() -> kj::Maybe<kj::Date> {
@@ -1145,8 +1144,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
   // `stream` from being destroyed until we have a result so that if the RPC throws an exception,
   // we don't accidentally report "PromiseFulfiller not fulfilled" instead of the exception.
   // The strong ref to streamServer ensures the object outlives all callbacks.
-  auto promise = sendPromise.then(
-      [streamServer = streamServer.addRef()]() mutable -> kj::Promise<ActorCache::GetResultList> {
+  auto promise = sendPromise.then([streamServer = streamServer.addRef()]() mutable -> kj::Promise<ActorCache::GetResultList> {
     if (streamServer->fulfiller->isWaiting()) {
       return KJ_EXCEPTION(FAILED, "list() never called stream.end()");
     } else {
@@ -1156,8 +1154,9 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
   });
 
   return paf.promise.exclusiveJoin(kj::mv(promise))
-      .attach(
-          kj::defer([streamServer = kj::mv(streamServer)]() mutable { streamServer->cancel(); }));
+      .attach(kj::defer([streamServer = kj::mv(streamServer)]() mutable {
+        streamServer->cancel();
+      }));
 }
 
 // -----------------------------------------------------------------------------
@@ -1246,8 +1245,7 @@ class ActorCache::ReverseListStreamImpl final: public rpc::ActorStorage::ListStr
         // We may need to insert a negative entry at the beginning of the list range, since we
         // didn't see it, implying it's not present on disk. addResultToCache() will conveniently
         // avoid adding anything if it turns out this is already in a known-empty gap.
-        auto beginEntry =
-            cacheRef.addReadResultToCache(lock, cloneKey(beginKey), kj::none, options);
+        auto beginEntry = cacheRef.addReadResultToCache(lock, cloneKey(beginKey), kj::none, options);
 
         // And we need to mark gaps empty from there to the final entry we actually saw.
         cacheRef.markGapsEmpty(lock, beginEntry->key, endKey, options);
@@ -1440,8 +1438,8 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
       limit.map([&](uint orig) { return orig + limitAdjustment - knownSuffixSize; });
 
   auto paf = kj::newPromiseAndFulfiller<GetResultList>();
-  auto streamServer = kj::rc<ReverseListStreamImpl>(addWeakToThis(), kj::mv(beginKey),
-      kj::mv(endKey), kj::mv(cachedEntries), kj::mv(paf.fulfiller), limit, adjustedLimit, options);
+  auto streamServer = kj::rc<ReverseListStreamImpl>(addWeakToThis(), kj::mv(beginKey), kj::mv(endKey),
+      kj::mv(cachedEntries), kj::mv(paf.fulfiller), limit, adjustedLimit, options);
 
   auto sendPromise = scheduleStorageRead(
       [streamServer = streamServer.addRef()](
@@ -1477,8 +1475,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
   // `stream` from being destroyed until we have a result so that if the RPC throws an exception,
   // we don't accidentally report "PromiseFulfiller not fulfilled" instead of the exception.
   // The strong ref to streamServer ensures the object outlives all callbacks.
-  auto promise = sendPromise.then(
-      [streamServer = streamServer.addRef()]() mutable -> kj::Promise<ActorCache::GetResultList> {
+  auto promise = sendPromise.then([streamServer = streamServer.addRef()]() mutable -> kj::Promise<ActorCache::GetResultList> {
     if (streamServer->fulfiller->isWaiting()) {
       return KJ_EXCEPTION(FAILED, "list() never called stream.end()");
     } else {
@@ -1488,8 +1485,9 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
   });
 
   return paf.promise.exclusiveJoin(kj::mv(promise))
-      .attach(
-          kj::defer([streamServer = kj::mv(streamServer)]() mutable { streamServer->cancel(); }));
+      .attach(kj::defer([streamServer = kj::mv(streamServer)]() mutable {
+        streamServer->cancel();
+      }));
 }
 
 // -----------------------------------------------------------------------------
@@ -3096,8 +3094,7 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
   return storage.deleteAllRequest(capnp::MessageSize{2, 0})
       .send()
       .then(
-          [weak = addWeakToThis()](
-              capnp::Response<rpc::ActorStorage::Operations::DeleteAllResults> results)
+          [weak = addWeakToThis()](capnp::Response<rpc::ActorStorage::Operations::DeleteAllResults> results)
               -> kj::Promise<void> {
     auto& self = weak.assertLive();
     auto& deleteAllState = KJ_ASSERT_NONNULL(self.requestedDeleteAll);

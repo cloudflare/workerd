@@ -111,8 +111,8 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
         cancel(exception.clone());
         kj::throwFatalException(kj::mv(exception));
       } else if (amount == 0 && l != 0) {
-        auto exception = JSG_KJ_EXCEPTION(
-            FAILED, TypeError, "FixedLengthStream did not see all expected bytes before close().");
+        auto exception = JSG_KJ_EXCEPTION(FAILED, TypeError,
+            "FixedLengthStream did not see all expected bytes before close().");
         cancel(exception.clone());
         kj::throwFatalException(kj::mv(exception));
       }

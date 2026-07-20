@@ -660,8 +660,7 @@ kj::Promise<WorkerInterface::ScheduledResult> IoContext::IncomingRequest::finish
       [] { return EventOutcome::EXCEEDED_WALL_TIME; });
   // The [this] captures are safe because self (which is this) is attached to the final result
   // promise via result.attach(kj::mv(self)), ensuring this IncomingRequest outlives all callbacks.
-  auto outcome = context->waitUntilTasks
-                     .onEmpty()
+  auto outcome = context->waitUntilTasks.onEmpty()
                      // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
                      .then([this]() { return context->waitUntilStatus(); })
                      .exclusiveJoin(kj::mv(timeoutPromise))
@@ -731,8 +730,7 @@ IoContext::PendingEvent::~PendingEvent() noexcept(false) {
                                   // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
                                   .then([&context = context]() noexcept {
     // We have nothing left to do and no PendingEvent has been registered. Abort now.
-    return context.worker
-        ->takeAsyncLock(context.getMetrics())
+    return context.worker->takeAsyncLock(context.getMetrics())
         // Same as above.
         // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
         .then([&context](Worker::AsyncLock asyncLock) { context.abortFromHang(asyncLock); });

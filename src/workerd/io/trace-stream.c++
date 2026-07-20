@@ -847,8 +847,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       return ioContext.awaitJs(js,
           js.toPromise(result).then(js,
               // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
-              ioContext.addFunctor(
-                  [this, results = results.addRef()](jsg::Lock& js, jsg::Value value) mutable {
+              ioContext.addFunctor([this, results = results.addRef()](
+                                       jsg::Lock& js, jsg::Value value) mutable {
         auto& ioContext = IoContext::current();
         // The value here can be one of a function, an object, or undefined.
         // Any value other than these will result in a warning but will otherwise

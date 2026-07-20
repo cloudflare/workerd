@@ -287,8 +287,9 @@ kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::subrequestChannel
   return kj::refcounted<PromisedSubrequestChannel>(token.then(
       // `self = addRef()` prevents `this` from being destroyed while the lambda is alive.
       // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
-      [this, self = addRef(), usage](
-          kj::Array<byte> token) { return subrequestChannelFromToken(usage, token.asPtr()); }));
+      [this, self = addRef(), usage](kj::Array<byte> token) {
+    return subrequestChannelFromToken(usage, token.asPtr());
+  }));
 }
 
 kj::Own<IoChannelFactory::ActorClassChannel> IoChannelFactory::actorClassFromToken(
@@ -296,8 +297,9 @@ kj::Own<IoChannelFactory::ActorClassChannel> IoChannelFactory::actorClassFromTok
   return kj::refcounted<PromisedActorClassChannel>(token.then(
       // `self = addRef()` prevents `this` from being destroyed while the lambda is alive.
       // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
-      [this, self = addRef(), usage](
-          kj::Array<byte> token) { return actorClassFromToken(usage, token.asPtr()); }));
+      [this, self = addRef(), usage](kj::Array<byte> token) {
+    return actorClassFromToken(usage, token.asPtr());
+  }));
 }
 
 kj::Own<IoChannelFactory::RpcChannel> IoChannelFactory::rpcChannelFromToken(
@@ -305,8 +307,9 @@ kj::Own<IoChannelFactory::RpcChannel> IoChannelFactory::rpcChannelFromToken(
   return kj::refcounted<PromisedRpcChannel>(token.then(
       // `self = addRef()` prevents `this` from being destroyed while the lambda is alive.
       // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
-      [this, self = addRef(), usage](
-          kj::Array<byte> token) { return rpcChannelFromToken(usage, token.asPtr()); }));
+      [this, self = addRef(), usage](kj::Array<byte> token) {
+    return rpcChannelFromToken(usage, token.asPtr());
+  }));
 }
 
 kj::Promise<void> DynamicWorkerSource::ensureAllResolved() {
