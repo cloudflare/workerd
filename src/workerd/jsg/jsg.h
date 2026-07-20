@@ -1581,10 +1581,14 @@ class Ref {
   // typically this should only be called on a newly-allocated object.
   // `tag` is the per-type CppHeapPointerTag for T, computed by the caller via
   // TypeWrapper::wrappableTag<T>() (the caller has the TypeWrapper and thus the full type list
-  // needed to number T; Ref<T> does not).
-  void attachWrapper(
-      v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTag tag) {
-    inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>(), tag);
+  // needed to number T; Ref<T> does not). Context globals pass kContextGlobalWrappableTag and
+  // IsContextGlobal::YES instead; see Wrappable::attachWrapper().
+  void attachWrapper(v8::Isolate* isolate,
+      v8::Local<v8::Object> object,
+      v8::CppHeapPointerTag tag,
+      IsContextGlobal isContextGlobal = IsContextGlobal::NO) {
+    inner->Wrappable::attachWrapper(
+        isolate, object, resourceNeedsGcTracing<T>(), tag, isContextGlobal);
   }
 
   // Obtain a weak reference to the referenced object. The weak reference does not keep the
@@ -3330,9 +3334,9 @@ class Lock {
   // Returns the capnp::SchemaLoader for this isolate/context
   template <typename T>
   const capnp::SchemaLoader& getCapnpSchemaLoader() const {
-    return KJ_ASSERT_NONNULL(
-        jsg::getAlignedPointerFromEmbedderData<T>(
-            v8Isolate->GetCurrentContext(), ContextPointerSlot::GLOBAL_WRAPPER))
+    auto context = v8Isolate->GetCurrentContext();
+    return extractInternalPointer<T, true>(
+        v8Isolate, context, context->Global(), kNonResourceWrappableTagRange)
         .getSchemaLoader();
   }
 
