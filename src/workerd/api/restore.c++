@@ -299,8 +299,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::run
 
       return ioctx.awaitJs(lock,
           invokeRestoreAndCoerce(lock, target, params)
-              .then(lock, ioctx.addFunctor([](jsg::Lock& js, RestoreResult result) {
-        auto& ioctx = IoContext::current();
+              .then(lock, [&ioctx](jsg::Lock& js, RestoreResult result) {
         KJ_SWITCH_ONEOF(result) {
           KJ_CASE_ONEOF(fetcher, jsg::Ref<Fetcher>) {
             return fetcher->getSubrequestChannel(ioctx);
@@ -314,7 +313,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::run
           }
         }
         KJ_UNREACHABLE;
-      })));
+      }));
     });
 
     auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();

@@ -608,11 +608,7 @@ void IoContext::IncomingRequest::drain(
     timeoutPromise = timeoutPromise.exclusiveJoin(kj::mv(drainPaf.promise));
   } else {
     // For non-actor requests, apply the configured soft timeout, typically 30 seconds.
-    // The [this] captures are safe because ownedSelf (which is this) is attached to the final
-    // result promise, ensuring this IncomingRequest outlives all callbacks.
-    // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
     auto timeoutLogPromise = [this]() -> kj::Promise<void> {
-      // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
       return context->run([this](Worker::Lock&) {
         context->logWarning(
             "waitUntil() tasks did not complete within the allowed time after invocation end and have been cancelled. "
@@ -658,11 +654,7 @@ kj::Promise<WorkerInterface::ScheduledResult> IoContext::IncomingRequest::finish
 
   auto timeoutPromise = context->limitEnforcer->limitScheduled().then(
       [] { return EventOutcome::EXCEEDED_WALL_TIME; });
-  // The [this] captures are safe because self (which is this) is attached to the final result
-  // promise via result.attach(kj::mv(self)), ensuring this IncomingRequest outlives all callbacks.
-  auto outcome = context->waitUntilTasks
-                     .onEmpty()
-                     // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
+  auto outcome = context->waitUntilTasks.onEmpty()
                      .then([this]() { return context->waitUntilStatus(); })
                      .exclusiveJoin(kj::mv(timeoutPromise))
                      .exclusiveJoin(context->onAbort().then([] {
@@ -674,7 +666,6 @@ kj::Promise<WorkerInterface::ScheduledResult> IoContext::IncomingRequest::finish
     return RequestObserver::outcomeFromException(e);
   }));
 
-  // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
   auto result = outcome.then([this](EventOutcome outcome) {
     return WorkerInterface::ScheduledResult{
       .retry = context->shouldRetryScheduled(),
@@ -710,8 +701,8 @@ IoContext::~IoContext() noexcept(false) {
     pe.maybeContext = kj::none;
   }
 
-  // Note: Any outstanding kj::WeakRc<IoContext> references are automatically invalidated as the
-  // last strong reference is dropped (before this destructor runs), so there's nothing to do here.
+  // Kill the sentinel so that no weak references can refer to this IoContext anymore.
+  selfRef->invalidate();
 }
 
 IoContext::PendingEvent::~PendingEvent() noexcept(false) {
@@ -726,15 +717,9 @@ IoContext::PendingEvent::~PendingEvent() noexcept(false) {
   // events come back into JavaScript. If registerPendingEvent() is called in the meantime, this
   // will be canceled.
   context.abortFromHangTask = Worker::AsyncLock::whenThreadIdle()
-                                  // This is fine since if the IoContext is destroyed this promise
-                                  // will too.
-                                  // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
                                   .then([&context = context]() noexcept {
     // We have nothing left to do and no PendingEvent has been registered. Abort now.
-    return context.worker
-        ->takeAsyncLock(context.getMetrics())
-        // Same as above.
-        // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
+    return context.worker->takeAsyncLock(context.getMetrics())
         .then([&context](Worker::AsyncLock asyncLock) { context.abortFromHang(asyncLock); });
   }).eagerlyEvaluate(nullptr);
 }
@@ -842,13 +827,8 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
   // TODO(cleanup): The manual use of run() here (including carrying over the critical section) is
   //   kind of ugly, but using awaitIo() doesn't work here because we need the ability to cancel
   //   the timer, so we don't want to addTask() it, which awaitIo() does implicitly.
-  // The captures of this, &context, and it are safe because the promise is attached to
-  // context.registerPendingEvent() which keeps the IoContext (and thus TimeoutManagerImpl
-  // and the timeouts map) alive while the promise is pending.
   auto promise =
-      // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
       paf.promise.then([this, &context, it, cs = context.getCriticalSection()]() mutable {
-    // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
     return context.run([this, it](Worker::Lock& lock, IoContext& context) mutable {
       auto& state = it->second;
 
@@ -914,20 +894,16 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
   // to be removed when the promise completes.
   TimeoutTime timeoutTimesKey{when, timeoutTimesTiebreakerCounter++};
   timeoutTimes.insert(timeoutTimesKey, kj::mv(paf.fulfiller));
-  auto deferredTimeoutTimeRemoval =
-      kj::defer([this, weakContext = context.getWeakRef(), timeoutTimesKey]() {
+  auto deferredTimeoutTimeRemoval = kj::defer([this, &context, timeoutTimesKey]() {
     // If the promise is being destroyed due to IoContext teardown then IoChannelFactory may
     // no longer be available, but we can just skip starting a new timer in that case as it'd be
-    // canceled anyway. The weak reference upgrade fails once the IoContext is being torn down.
-    // Similarly we should skip rescheduling if the context has been aborted since there's no way
-    // the events can run anyway (and we'll cause trouble if `cancelAll()` is being called in
-    // ~IoContext_IncomingRequest).
-    KJ_IF_SOME(context, weakContext) {
-      if (context->abortException == kj::none) {
-        bool isNext = timeoutTimes.begin()->key == timeoutTimesKey;
-        timeoutTimes.erase(timeoutTimesKey);
-        if (isNext) resetTimerTask(context->getIoChannelFactory().getTimer());
-      }
+    // canceled anyway. Similarly we should skip rescheduling if the context has been aborted since
+    // there's no way the events can run anyway (and we'll cause trouble if `cancelAll()` is being
+    // called in ~IoContext_IncomingRequest).
+    if (context.selfRef->isValid() && context.abortException == kj::none) {
+      bool isNext = timeoutTimes.begin()->key == timeoutTimesKey;
+      timeoutTimes.erase(timeoutTimesKey);
+      if (isNext) resetTimerTask(context.getIoChannelFactory().getTimer());
     }
   });
 
@@ -1549,11 +1525,11 @@ kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> IoContext::getSelfTokenFa
   return kj::none;
 }
 
-kj::WeakRc<IoContext> IoContext::tryGetWeakRefForCurrent() {
+auto IoContext::tryGetWeakRefForCurrent() -> kj::Maybe<kj::Own<WeakRef>> {
   KJ_IF_SOME(ioContext, tryCurrent()) {
     return ioContext.getWeakRef();
   } else {
-    return nullptr;
+    return kj::none;
   }
 }
 
@@ -1608,8 +1584,6 @@ jsg::Promise<IoOwn<kj::AsyncInputStream>> IoContext::makeCachePutStream(
 
   KJ_DEFER(cachePutSerializer = kj::mv(paf.promise));
 
-  // The [this] capture is safe because awaitIo() is a method of IoContext that internally
-  // tracks pending work and cancels it when the IoContext is destroyed.
   return awaitIo(js,
       cachePutSerializer.then(
           [fulfiller = kj::mv(paf.fulfiller),
@@ -1626,7 +1600,6 @@ jsg::Promise<IoOwn<kj::AsyncInputStream>> IoContext::makeCachePutStream(
       return kj::heap<CacheSerializedInputStream>(kj::mv(stream), kj::mv(fulfiller));
     }
   }),
-      // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
       [this](
           jsg::Lock&, kj::Own<kj::AsyncInputStream> result) { return addObject(kj::mv(result)); });
 }
@@ -1644,9 +1617,9 @@ void IoContext::requireCurrentOrThrowJs() {
   }
 }
 
-void IoContext::requireCurrentOrThrowJs(kj::WeakRc<IoContext>& weak) {
-  KJ_IF_SOME(ctx, weak) {
-    if (ctx->isCurrent()) {
+void IoContext::requireCurrentOrThrowJs(WeakRef& weak) {
+  KJ_IF_SOME(ctx, weak.tryGet()) {
+    if (ctx.isCurrent()) {
       return;
     }
   }

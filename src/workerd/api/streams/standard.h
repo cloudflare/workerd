@@ -490,7 +490,7 @@ class ReadableStreamDefaultController: public jsg::Object {
   kj::Maybe<StreamStates::Errored> getMaybeErrorState(jsg::Lock& js);
 
  private:
-  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
+  kj::Maybe<IoContext&> ioContext;
   ReadableImpl impl;
 
   void visitForGc(jsg::GcVisitor& visitor);
@@ -560,7 +560,7 @@ class ReadableStreamBYOBRequest: public jsg::Object {
     void updateView(jsg::Lock& js);
   };
 
-  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
+  kj::Maybe<IoContext&> ioContext;
   kj::Maybe<Impl> maybeImpl;
 
   void visitForGc(jsg::GcVisitor& visitor);
@@ -627,7 +627,7 @@ class ReadableByteStreamController: public jsg::Object {
 
  private:
   kj::Rc<WeakRef<ReadableByteStreamController>> weakSelf;
-  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
+  kj::Maybe<IoContext&> ioContext;
   ReadableImpl impl;
   kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> maybeByobRequest;
 
@@ -694,7 +694,7 @@ class WritableStreamDefaultController: public jsg::Object {
   void clearAlgorithms();
 
  private:
-  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
+  kj::Maybe<IoContext&> ioContext;
   WritableImpl impl;
 
   void visitForGc(jsg::GcVisitor& visitor);
@@ -785,7 +785,7 @@ class TransformStreamDefaultController: public jsg::Object {
   jsg::Promise<void> performTransform(jsg::Lock& js, jsg::JsValue chunk);
   void setBackpressure(jsg::Lock& js, bool newBackpressure);
 
-  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
+  kj::Maybe<IoContext&> ioContext;
   jsg::PromiseResolverPair<void> startPromise;
 
   kj::Maybe<ReadableStreamDefaultController&> tryGetReadableController();

@@ -446,69 +446,60 @@ kj::Promise<void> Rewriter::write(kj::ArrayPtr<const byte> buffer) {
   // (e.g. by stream pump cancellation), no fiber is created, avoiding
   // a KJ assertion failure when destroying an unfired fiber. Once the event loop processes this,
   // the fiber is created and immediately fires (armDepthFirst), so cancellation works normally.
-  // The WritableStreamSink contract guarantees that the sink and `buffer` outlive the returned
-  // promise (the caller of write() must keep both alive until completion).
-  co_await kj::yield();
-  co_await getFiberPool().startFiber([this, buffer](kj::WaitScope& scope) {
-    maybeWaitScope = scope;
-    if (!isPoisoned()) {
-      // Cannot use `check()` because `finishWrite()` implements the error path.
-      auto rc = lol_html_rewriter_write(rewriter, buffer.asChars().begin(), buffer.size());
-      tryHandleCancellation(rc);
-      if (rc == -1) {
-        maybePoison(getLastError());
+  return kj::evalLater([this, buffer]() {
+    return getFiberPool().startFiber([this, buffer](kj::WaitScope& scope) {
+      maybeWaitScope = scope;
+      if (!isPoisoned()) {
+        // Cannot use `check()` because `finishWrite()` implements the error path.
+        auto rc = lol_html_rewriter_write(rewriter, buffer.asChars().begin(), buffer.size());
+        tryHandleCancellation(rc);
+        if (rc == -1) {
+          maybePoison(getLastError());
+        }
       }
-    }
-    return finishWrite();
+      return finishWrite();
+    });
   });
 }
 
 kj::Promise<void> Rewriter::write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) {
   KJ_ASSERT(maybeWaitScope == kj::none);
-  // The WritableStreamSink contract guarantees the sink and `pieces` (including the pointed-to
-  // sub-arrays) both outlive the returned promise.
-  co_await kj::yield();
-  co_await getFiberPool().startFiber([this, pieces](kj::WaitScope& scope) {
-    maybeWaitScope = scope;
-    if (!isPoisoned()) {
-      for (auto bytes: pieces) {
-        auto chars = bytes.asChars();
-        // Cannot use `check()` because `finishWrite()` implements the error path.
-        auto rc = lol_html_rewriter_write(rewriter, chars.begin(), chars.size());
-        tryHandleCancellation(rc);
-        if (rc == -1) {
-          maybePoison(getLastError());
-          // A handler threw an exception; stop calling `lol_html_rewriter_write()`.
-          break;
+  return kj::evalLater([this, pieces]() {
+    return getFiberPool().startFiber([this, pieces](kj::WaitScope& scope) {
+      maybeWaitScope = scope;
+      if (!isPoisoned()) {
+        for (auto bytes: pieces) {
+          auto chars = bytes.asChars();
+          // Cannot use `check()` because `finishWrite()` implements the error path.
+          auto rc = lol_html_rewriter_write(rewriter, chars.begin(), chars.size());
+          tryHandleCancellation(rc);
+          if (rc == -1) {
+            maybePoison(getLastError());
+            // A handler threw an exception; stop calling `lol_html_rewriter_write()`.
+            break;
+          }
         }
       }
-    }
-    return finishWrite();
+      return finishWrite();
+    });
   });
 }
 
 kj::Promise<void> Rewriter::end() {
   KJ_ASSERT(maybeWaitScope == kj::none);
-  // The WritableStreamSink contract guarantees the sink outlives the returned promise.
-  co_await kj::yield();
-  co_await getFiberPool().startFiber([this](kj::WaitScope& scope) {
-    maybeWaitScope = scope;
-    if (!isPoisoned()) {
-      // Cannot use `check()` because `finishWrite()` implements the error path.
-      auto rc = lol_html_rewriter_end(rewriter);
-      tryHandleCancellation(rc);
-      if (rc == -1) {
-        maybePoison(getLastError());
+  return kj::evalLater([this]() {
+    return getFiberPool().startFiber([this](kj::WaitScope& scope) {
+      maybeWaitScope = scope;
+      if (!isPoisoned()) {
+        // Cannot use `check()` because `finishWrite()` implements the error path.
+        auto rc = lol_html_rewriter_end(rewriter);
+        tryHandleCancellation(rc);
+        if (rc == -1) {
+          maybePoison(getLastError());
+        }
       }
-    }
-    // Synchronously wait inside this fiber for any pending writes triggered by
-    // lol_html_rewriter_end() above to complete. The fiber's stack keeps `*this` alive (the
-    // outer pumpTo holds a reference) and there is no captured state that could outlive the
-    // wait: we're already on a separate fiber stack, blocking only the fiber's event loop until
-    // the underlying inner-stream writes drain. This is equivalent to `co_await finishWrite()`
-    // but is required here because we're inside a fiber callable (not a coroutine).
-    finishWrite().wait(scope);
-    return inner->end();
+      return finishWrite().then([this]() { return inner->end(); });
+    });
   });
 }
 
@@ -605,14 +596,7 @@ void Rewriter::removeEndTagHandler(RegisteredHandler& handler) {
 
 template <typename T, typename CType>
 kj::Promise<void> Rewriter::thunkPromise(CType* content, RegisteredHandler& registeredHandler) {
-  // This promise is created and immediately .wait()ed synchronously inside a fiber in thunkImpl().
-  // While the fiber blocks on .wait(), the entire C++ call stack is preserved: `this` (the
-  // Rewriter) is alive on the outer pumpTo stack, `content` is a token owned by lol-html for the
-  // duration of the in-progress lol_html_rewriter_write() call which is below the fiber's frame
-  // on the call stack, and `registeredHandler` is a kj::Own<RegisteredHandler> stored in
-  // `this->registeredHandlers` / `this->registeredEndTagHandlers`.
   return ioContext.run(
-      // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
       [this, content, &registeredHandler](Worker::Lock& lock) -> kj::Promise<void> {
     // We enter the AsyncContextFrame that was current when the Rewriter was created
     // (when transform() was called). If someone wants, instead, to use the context
@@ -737,12 +721,6 @@ int Rewriter::replacerThunkImpl(
 
 kj::Promise<void> Rewriter::replacerThunkPromise(
     lol_html_streaming_sink_t* sink, RegisteredReplacer& registration) {
-  // This promise is created and immediately .wait()ed synchronously inside a fiber in
-  // replacerThunkImpl(). While the fiber blocks on .wait(), the entire C++ call stack is
-  // preserved: `this` (the Rewriter) is alive on the outer pumpTo stack, `sink` is owned by
-  // lol-html for the duration of the in-progress streaming-handler callback below the fiber's
-  // frame, and `registration` is a kj::Own<RegisteredReplacer> stored in `this->registeredReplacers`.
-  // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
   return ioContext.run([this, sink, &registration](Worker::Lock& lock) -> kj::Promise<void> {
     jsg::AsyncContextFrame::Scope asyncContextScope(lock, maybeAsyncContext);
 

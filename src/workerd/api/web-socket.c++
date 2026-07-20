@@ -767,9 +767,6 @@ void LegacyWebSocketAdapter::startReadLoop(
   context.addWaitUntil(context.awaitJs(js,
       context.awaitIoLegacy(js, kj::mv(promise))
           .then(js,
-              // We can't add a reference to the adapter, but we can add a reference to the shell.
-              // The shell will keep the this pointer alive without us needing to do casting.
-              // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
               [this, thisHandle = jsg::Ref<WebSocket>(kj::addRef(shell))](
                   jsg::Lock& js, kj::Maybe<kj::Exception>&& maybeError) mutable {
     auto& native = *farNative;

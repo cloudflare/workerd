@@ -101,11 +101,12 @@ class DeleteQueue: public kj::AtomicRefcounted {
   IoOwn<T> addObject(kj::Own<T> obj, OwnedObjectList& ownedObjects) const;
 
   template <typename T>
-  ReverseIoOwn<T> addObjectReverse(
-      kj::WeakRc<IoContext> weakRef, kj::Own<T> obj, OwnedObjectList& ownedObjects) const;
+  ReverseIoOwn<T> addObjectReverse(kj::Own<workerd::WeakRef<IoContext>> weakRef,
+      kj::Own<T> obj,
+      OwnedObjectList& ownedObjects) const;
 
   static void checkFarGet(const DeleteQueue& deleteQueue, const std::type_info& type);
-  static void checkWeakGet(kj::WeakRc<IoContext>& weak);
+  static void checkWeakGet(workerd::WeakRef<IoContext>& weak);
 
  private:
   template <typename T>
@@ -161,8 +162,9 @@ inline IoOwn<T> DeleteQueue::addObject(kj::Own<T> obj, OwnedObjectList& ownedObj
 }
 
 template <typename T>
-inline ReverseIoOwn<T> DeleteQueue::addObjectReverse(
-    kj::WeakRc<IoContext> weakRef, kj::Own<T> obj, OwnedObjectList& ownedObjects) const {
+inline ReverseIoOwn<T> DeleteQueue::addObjectReverse(kj::Own<workerd::WeakRef<IoContext>> weakRef,
+    kj::Own<T> obj,
+    OwnedObjectList& ownedObjects) const {
   return ReverseIoOwn<T>(kj::mv(weakRef), addObjectImpl(kj::mv(obj), ownedObjects));
 }
 
@@ -275,7 +277,7 @@ template <typename T>
 class ReverseIoOwn {
  public:
   ReverseIoOwn(ReverseIoOwn&& other) noexcept;
-  ReverseIoOwn(decltype(nullptr)): weakRef(nullptr), item(nullptr) {}
+  ReverseIoOwn(decltype(nullptr)): item(nullptr) {}
   ~ReverseIoOwn() noexcept(false);
   KJ_DISALLOW_COPY(ReverseIoOwn);
 
@@ -291,7 +293,7 @@ class ReverseIoOwn {
   // Returns kj::none if the IoContext has been destroyed or if this is null.
   // This is a safe alternative to operator->() that won't throw or crash.
   kj::Maybe<T&> tryGet() {
-    if (item != nullptr && weakRef != nullptr) {
+    if (item != nullptr && weakRef->isValid()) {
       return *item->ptr.get();
     }
     return kj::none;
@@ -301,10 +303,10 @@ class ReverseIoOwn {
   friend class IoContext;
   friend class DeleteQueue;
 
-  kj::WeakRc<IoContext> weakRef;
+  kj::Own<workerd::WeakRef<IoContext>> weakRef;
   SpecificOwnedObject<T>* item;
 
-  ReverseIoOwn(kj::WeakRc<IoContext> weakRef, SpecificOwnedObject<T>* item)
+  ReverseIoOwn(kj::Own<workerd::WeakRef<IoContext>> weakRef, SpecificOwnedObject<T>* item)
       : weakRef(kj::mv(weakRef)),
         item(item) {}
 };
@@ -389,15 +391,14 @@ ReverseIoOwn<T>::ReverseIoOwn(ReverseIoOwn&& other) noexcept
 
 template <typename T>
 ReverseIoOwn<T>::~ReverseIoOwn() noexcept(false) {
-  if (item != nullptr && weakRef != nullptr) {
+  if (item != nullptr && weakRef->isValid()) {
     OwnedObjectList::unlink(*item);
   }
 }
 
 template <typename T>
 ReverseIoOwn<T>& ReverseIoOwn<T>::operator=(ReverseIoOwn<T>&& other) {
-  // Only unlink if the IoContext is still alive; otherwise `item` dangles (see ~ReverseIoOwn()).
-  if (item != nullptr && weakRef != nullptr) {
+  if (item != nullptr) {
     OwnedObjectList::unlink(*item);
   }
   weakRef = kj::mv(other.weakRef);
@@ -408,8 +409,7 @@ ReverseIoOwn<T>& ReverseIoOwn<T>::operator=(ReverseIoOwn<T>&& other) {
 
 template <typename T>
 ReverseIoOwn<T>& ReverseIoOwn<T>::operator=(decltype(nullptr)) {
-  // Only unlink if the IoContext is still alive; otherwise `item` dangles (see ~ReverseIoOwn()).
-  if (item != nullptr && weakRef != nullptr) {
+  if (item != nullptr) {
     OwnedObjectList::unlink(*item);
   }
   weakRef = nullptr;
@@ -419,13 +419,13 @@ ReverseIoOwn<T>& ReverseIoOwn<T>::operator=(decltype(nullptr)) {
 
 template <typename T>
 inline T* ReverseIoOwn<T>::operator->() {
-  DeleteQueue::checkWeakGet(weakRef);
+  DeleteQueue::checkWeakGet(*weakRef);
   return item->ptr;
 }
 
 template <typename T>
 inline ReverseIoOwn<T>::operator kj::Own<T>() && {
-  DeleteQueue::checkWeakGet(weakRef);
+  DeleteQueue::checkWeakGet(*weakRef);
   auto result = kj::mv(item->ptr);
   OwnedObjectList::unlink(*item);
   item = nullptr;

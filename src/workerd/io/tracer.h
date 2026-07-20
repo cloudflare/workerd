@@ -123,7 +123,7 @@ class BaseTracer: public kj::Refcounted {
   kj::Date completeTime = kj::UNIX_EPOCH;
 
   // Weak reference to the IoContext, used to report span end time if available.
-  kj::Maybe<kj::WeakRc<IoContext>> weakIoContext;
+  kj::Maybe<kj::Own<IoContext::WeakRef>> weakIoContext;
 
   // When true, the destructor will not log a warning about missing Onset event.
   // Set via markUnused() when a tracer is intentionally not used (e.g., duplicate alarm requests).

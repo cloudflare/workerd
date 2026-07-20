@@ -405,8 +405,7 @@ class WritableStreamSinkJsAdapter final {
 //
 class WritableStreamSinkKjAdapter final: public WritableSink {
  public:
-  WritableStreamSinkKjAdapter(
-      jsg::Lock& js, kj::WeakRc<IoContext> ioContext, jsg::Ref<WritableStream> stream);
+  WritableStreamSinkKjAdapter(jsg::Lock& js, IoContext& ioContext, jsg::Ref<WritableStream> stream);
   ~WritableStreamSinkKjAdapter() noexcept(false);
 
   // Attempts to write the given buffer to the underlying stream.
