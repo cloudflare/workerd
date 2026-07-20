@@ -2450,8 +2450,9 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
 }
 
 api::ServiceWorkerGlobalScope& Worker::Lock::getGlobalScope() {
-  return KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<api::ServiceWorkerGlobalScope>(
-      getContext(), jsg::ContextPointerSlot::GLOBAL_WRAPPER));
+  auto context = getContext();
+  return jsg::extractInternalPointer<api::ServiceWorkerGlobalScope, true>(
+      context, context->Global());
 }
 
 TimeoutId::Generator& Worker::Lock::getTimeoutIdGenerator() {

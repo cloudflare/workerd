@@ -8,6 +8,8 @@
 // This file defines basic helpers involved in wrapping C++ objects for JavaScript consumption,
 // including garbage-collecting those objects.
 
+#include <workerd/util/strong-bool.h>
+
 #include <v8-context.h>
 #include <v8-object.h>
 #include <v8-version.h>
@@ -41,16 +43,17 @@ class Visitor;
 
 namespace workerd::jsg {
 
+WD_STRONG_BOOL(IsContextGlobal);
+
 // The ContextPointerSlot enum defines the embedder slots we use in v8::Context for
 // storing pointers to various important objects.
 enum class ContextPointerSlot : int {
   // Pointer slot 0 is special and should never be used by us.
   RESERVED = 0,
-  GLOBAL_WRAPPER = 1,
-  MODULE_REGISTRY = 2,
-  EXTENDED_CONTEXT_WRAPPER = 3,
-  VIRTUAL_FILE_SYSTEM = 4,
-  BOOTSTRAP_STATE = 5,
+  MODULE_REGISTRY = 1,
+  EXTENDED_CONTEXT_WRAPPER = 2,
+  VIRTUAL_FILE_SYSTEM = 3,
+  BOOTSTRAP_STATE = 4,
   // Keep the MAX_POINTER_SLOT as the last entry and always set to
   // to the highest value of the other entries. We use this to
   // ensure that the highest used index is always initialized in
@@ -157,6 +160,13 @@ class Wrappable: public kj::Refcounted {
 
   static constexpr v8::CppHeapPointerTag WRAPPABLE_TAG = v8::CppHeapPointerTag::kDefaultTag;
 
+  // CppHeapPointer tag used for context globals (set via v8::Object::WrapGlobal() on both the
+  // JSGlobalProxy and the hidden JSGlobalObject). Distinct from WRAPPABLE_TAG so that
+  // Unwrap(receiver) with this tag matches *only* context globals, never ordinary jsg wrappers.
+  // Any value in the embedder range works; 0 is kNullTag, so use 1.
+  static constexpr v8::CppHeapPointerTag GLOBAL_WRAPPABLE_TAG =
+      static_cast<v8::CppHeapPointerTag>(1);
+
   // The value pointed to by the internal field field `WRAPPABLE_TAG_FIELD_INDEX`.
   //
   // This value was chosen randomly.
@@ -203,7 +213,20 @@ class Wrappable: public kj::Refcounted {
   // If `needsGcTracing` is true, then the virtual method jsgVisitForGc() will be called to
   // perform GC tracing. If false, the method is never called (may be more efficient, if the
   // method does nothing anyway).
-  void attachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object, bool needsGcTracing);
+  //
+  // If `isContextGlobal` is IsContextGlobal::YES, `object` must be a context's JSGlobalProxy
+  // (context->Global()); the cppgc wrappable is then set via v8::Object::WrapGlobal() on both
+  // the proxy and its hidden prototype (the JSGlobalObject), under GLOBAL_WRAPPABLE_TAG.
+  void attachWrapper(v8::Isolate* isolate,
+      v8::Local<v8::Object> object,
+      bool needsGcTracing,
+      IsContextGlobal isContextGlobal = IsContextGlobal::NO);
+
+  // If `object` is a live context global (the JSGlobalProxy or its hidden JSGlobalObject) that
+  // was attached via attachWrapper(..., IsContextGlobal::YES), returns the attached Wrappable.
+  // Returns kj::none for any other object.
+  static kj::Maybe<Wrappable&> tryUnwrapGlobalReceiver(
+      v8::Isolate* isolate, v8::Local<v8::Object> object);
 
   // Attach an empty, null-prototype object as the wrapper.
   v8::Local<v8::Object> attachOpaqueWrapper(v8::Local<v8::Context> context, bool needsGcTracing);
@@ -379,16 +402,14 @@ class HeapTracer: public v8::EmbedderRootsHandler {
 template <typename T, bool isContext>
 T& extractInternalPointer(
     const v8::Local<v8::Context>& context, const v8::Local<v8::Object>& object) {
-  // Due to bugs in V8, we can't use internal fields on the global object:
-  //   https://groups.google.com/d/msg/v8-users/RET5b3KOa5E/3EvpRBzwAQAJ
-  //
-  // So, when wrapping a global object, we store the pointer in the "embedder data" of the context
-  // instead of the internal fields of the object.
-
   if constexpr (isContext) {
-    // V8 docs say EmbedderData slot 0 is special, so we use slot 1. (See comments in newContext().)
-    return KJ_ASSERT_NONNULL(
-        getAlignedPointerFromEmbedderData<T>(context, ContextPointerSlot::GLOBAL_WRAPPER));
+    auto* isolate = v8::Isolate::GetCurrent();
+    KJ_IF_SOME(w, Wrappable::tryUnwrapGlobalReceiver(isolate, object)) {
+      return *reinterpret_cast<T*>(&w);
+    }
+    // Fall back to the current context's global for the Fast API and instance properties callbacks.
+    return *reinterpret_cast<T*>(
+        &KJ_ASSERT_NONNULL(Wrappable::tryUnwrapGlobalReceiver(isolate, context->Global())));
   } else {
     KJ_ASSERT(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
     auto* ptr = object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,

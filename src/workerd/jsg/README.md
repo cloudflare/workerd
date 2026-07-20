@@ -480,11 +480,10 @@ Both may take additional `TypeHandler<T>&` trailing parameters.
 | Slot | Enum                       | Purpose                           |
 | ---- | -------------------------- | --------------------------------- |
 | 0    | `RESERVED`                 | **Never use** — reserved by V8    |
-| 1    | `GLOBAL_WRAPPER`           | Pointer to global object wrapper  |
-| 2    | `MODULE_REGISTRY`          | Pointer to module registry        |
-| 3    | `EXTENDED_CONTEXT_WRAPPER` | Extended type wrapper for context |
-| 4    | `VIRTUAL_FILE_SYSTEM`      | Virtual file system               |
-| 5    | `RUST_REALM`               | Rust realm pointer                |
+| 1    | `MODULE_REGISTRY`          | Pointer to module registry        |
+| 2    | `EXTENDED_CONTEXT_WRAPPER` | Extended type wrapper for context |
+| 3    | `VIRTUAL_FILE_SYSTEM`      | Virtual file system               |
+| 4    | `RUST_REALM`               | Rust realm pointer                |
 
 ## Wrappable Lifecycle
 

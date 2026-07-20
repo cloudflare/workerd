@@ -1521,8 +1521,10 @@ class Ref {
   //
   // It is an error to attach a wrapper when another wrapper is already attached. Hence,
   // typically this should only be called on a newly-allocated object.
-  void attachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object) {
-    inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>());
+  void attachWrapper(v8::Isolate* isolate,
+      v8::Local<v8::Object> object,
+      IsContextGlobal isContextGlobal = IsContextGlobal::NO) {
+    inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>(), isContextGlobal);
   }
 
   // Obtain a weak reference to the referenced object. The weak reference does not keep the
@@ -3208,10 +3210,8 @@ class Lock {
   // Returns the capnp::SchemaLoader for this isolate/context
   template <typename T>
   const capnp::SchemaLoader& getCapnpSchemaLoader() const {
-    return KJ_ASSERT_NONNULL(
-        jsg::getAlignedPointerFromEmbedderData<T>(
-            v8Isolate->GetCurrentContext(), ContextPointerSlot::GLOBAL_WRAPPER))
-        .getSchemaLoader();
+    auto context = v8Isolate->GetCurrentContext();
+    return extractInternalPointer<T, true>(context, context->Global()).getSchemaLoader();
   }
 
  private:
