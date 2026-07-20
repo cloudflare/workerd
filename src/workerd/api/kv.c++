@@ -666,12 +666,9 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
     auto client =
         getHttpClient(context, headers, LimitEnforcer::KvOpType::PUT, urlStr, traceContext);
 
-    auto promise = context.awaitIo(js, context.waitForOutputLocks(),
-        [client = kj::mv(client), urlStr = kj::mv(urlStr),
-            headers = kj::mv(headers), expectedBodySize,
-            supportedBody = kj::mv(supportedBody)](jsg::Lock& js) mutable {
-      auto& context = IoContext::current();
-
+    auto promise = context.waitForOutputLocks().then(
+        [&context, client = kj::mv(client), urlStr = kj::mv(urlStr), headers = kj::mv(headers),
+            expectedBodySize, supportedBody = kj::mv(supportedBody)]() mutable {
       auto innerReq = client->request(kj::HttpMethod::PUT, urlStr, headers, expectedBodySize);
       auto req = attachToRequest(kj::mv(innerReq), kj::Rc<kj::HttpClient>(kj::mv(client)));
 
@@ -686,24 +683,24 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
         KJ_CASE_ONEOF(stream, JsReadableStream) {
           writePromise = context.run(
               [dest = newSystemStream(kj::mv(req.body), StreamEncoding::IDENTITY, context),
-                  stream = kj::mv(stream)](jsg::Lock& js, IoContext& context) mutable {
-            return context.waitForDeferredProxy(
+                  stream = kj::mv(stream)](jsg::Lock& js) mutable {
+            return IoContext::current().waitForDeferredProxy(
                 stream.pumpTo(js, kj::mv(dest), EndStream::YES));
           });
         }
       }
 
-      return context.awaitIo(js, writePromise.attach(kj::mv(req.body)).then([resp = kj::mv(req.response)]() mutable {
+      return writePromise.attach(kj::mv(req.body)).then([resp = kj::mv(req.response)]() mutable {
         return resp.then([](kj::HttpClient::Response&& response) mutable {
           checkForErrorStatus("PUT", response);
 
           // Read and discard response body, otherwise we might burn the HTTP connection.
           return response.body->readAllBytes().attach(kj::mv(response.body)).ignoreResult();
         });
-      }));
+      });
     });
 
-    return context.attachSpans(js, kj::mv(promise), kj::mv(traceContext));
+    return context.attachSpans(js, context.awaitIo(js, kj::mv(promise)), kj::mv(traceContext));
   });
 }
 

@@ -597,11 +597,9 @@ kj::Promise<void> WritableStreamSinkKjAdapter::write(
   active.writePending = true;
 
   return active.canceler
-      // This API requires that pieces stay alive until the returned promise completes.
       .wrap(active.ioContext.assertLive().run(
-          // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
           [self = selfRef.addRef(), writer = active.writer.addRef(), pieces = pieces](
-              jsg::Lock& js, IoContext& ctx) mutable -> kj::Promise<void> {
+              jsg::Lock& js) mutable -> kj::Promise<void> {
     size_t totalAmount = 0;
     for (auto piece: pieces) {
       totalAmount += piece.size();
@@ -623,7 +621,7 @@ kj::Promise<void> WritableStreamSinkKjAdapter::write(
                 js, [writer = writer.addRef(), source = source.addRef(js)](jsg::Lock& js) mutable {
       return writer->write(js, jsg::JsValue(source.getHandle(js)));
     });
-    return ctx.awaitJs(js, kj::mv(promise));
+    return IoContext::current().awaitJs(js, kj::mv(promise));
   })).then([self = selfRef.addRef()]() {
     self->runIfAlive([&](WritableStreamSinkKjAdapter& self) {
       KJ_IF_SOME(open, self.state.tryGetActiveUnsafe()) {

@@ -102,24 +102,27 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
   }
 
   kj::Promise<size_t> tryReadInternal(void* buffer, size_t maxBytes) {
-    auto amount = co_await readHelper(kj::arrayPtr(static_cast<kj::byte*>(buffer), maxBytes));
+    auto promise = readHelper(kj::arrayPtr(static_cast<kj::byte*>(buffer), maxBytes));
 
     KJ_IF_SOME(l, limit) {
-      if (amount > l) {
-        auto exception = JSG_KJ_EXCEPTION(
-            FAILED, TypeError, "Attempt to write too many bytes through a FixedLengthStream.");
-        cancel(exception.clone());
-        kj::throwFatalException(kj::mv(exception));
-      } else if (amount == 0 && l != 0) {
-        auto exception = JSG_KJ_EXCEPTION(FAILED, TypeError,
-            "FixedLengthStream did not see all expected bytes before close().");
-        cancel(exception.clone());
-        kj::throwFatalException(kj::mv(exception));
-      }
-      l -= amount;
+      promise = promise.then([this, &l = l](size_t amount) -> kj::Promise<size_t> {
+        if (amount > l) {
+          auto exception = JSG_KJ_EXCEPTION(
+              FAILED, TypeError, "Attempt to write too many bytes through a FixedLengthStream.");
+          cancel(exception.clone());
+          return kj::mv(exception);
+        } else if (amount == 0 && l != 0) {
+          auto exception = JSG_KJ_EXCEPTION(FAILED, TypeError,
+              "FixedLengthStream did not see all expected bytes before close().");
+          cancel(exception.clone());
+          return kj::mv(exception);
+        }
+        l -= amount;
+        return amount;
+      });
     }
 
-    co_return amount;
+    return promise;
   }
 
   kj::Promise<DeferredProxy<void>> pumpTo(kj::Ptr<WritableStreamSink> output, bool end) override {

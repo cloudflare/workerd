@@ -568,12 +568,8 @@ kj::Promise<void> CapnpServer::call(capnp::InterfaceSchema::Method method,
   kj::Promise<void> result = nullptr;
 
   KJ_IF_SOME(rc, ioContext) {
-    // Justification: This is a capnp::DynamicCapability::Server::call() override; capnp
-    // guarantees `this` outlives the returned promise. `wrapper` is owned by the isolate's
-    // TypeWrapper and is valid whenever the isolate is locked.
-    // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
     result = rc->run([this, method, rpcContext](
-                         Worker::Lock& lock, IoContext& rc) mutable -> kj::Promise<void> {
+                         Worker::Lock& lock, IoContext& ctx) mutable -> kj::Promise<void> {
       jsg::Lock& js = lock;
       auto handle = object.getHandle(js);
       auto methodName = method.getProto().getName();
@@ -592,16 +588,12 @@ kj::Promise<void> CapnpServer::call(capnp::InterfaceSchema::Method method,
       auto result = jsg::check(
           methodHandle.As<v8::Function>()->Call(lock.getContext(), handle, 1, &jsParams));
       KJ_IF_SOME(promise, wrapper.tryUnwrapPromise(lock, lock.getContext(), result)) {
-        // Justification: This continuation is awaited as part of the kj::Promise returned
-        // by this capnp::DynamicCapability::Server::call() override; capnp guarantees
-        // `this` outlives that promise, and `wrapper` is owned by the isolate's TypeWrapper.
-        auto functor =
-            // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
-            rc.addFunctor([this, rpcContext](jsg::Lock& js, jsg::Value result) mutable {
+        return ctx.awaitJs(js,
+            promise.then(
+                js, ctx.addFunctor([this, rpcContext](jsg::Lock& js, jsg::Value result) mutable {
           JsCapnpConverter converter{wrapper};
           converter.rpcResultsFromJs(js, rpcContext, result.getHandle(js));
-        });
-        return rc.awaitJs(js, promise.then(js, kj::mv(functor)));
+        })));
 
       } else {
         converter.rpcResultsFromJs(js, rpcContext, result);
@@ -698,17 +690,14 @@ v8::Local<v8::Value> CapnpCapability::call(jsg::Lock& js,
       }
       return kj::mv(ex);
     });
-    auto awaitedResponse = ioContext.awaitIo(js, kj::mv(responsePromise),
-        // Justification: `wrapper` is the isolate's CapnpTypeWrapperBase (a base of TypeWrapper);
-        // it is owned by the isolate and the reference is stable for the duration of any
-        // continuation run within this isolate.
-        [&wrapper, pipelinedCapHolder = kj::mv(pipelinedCapHolder)](
-            jsg::Lock& js, capnp::Response<capnp::DynamicStruct> resp) mutable {
+    auto result =
+        wrapper.wrapPromise(js, js.v8Context(), KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(js)),
+            ioContext.awaitIo(js, kj::mv(responsePromise),
+                [&wrapper, pipelinedCapHolder = kj::mv(pipelinedCapHolder)](
+                    jsg::Lock& js, capnp::Response<capnp::DynamicStruct> resp) mutable {
       JsCapnpConverter converter{wrapper};
       return js.v8Ref(converter.valueToJs(js, resp, resp.getSchema(), *pipelinedCapHolder));
-    });
-    auto result = wrapper.wrapPromise(
-        js, js.v8Context(), KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(js)), kj::mv(awaitedResponse));
+    }));
 
     // Now we take the pipeline part of `rpcPromise` and merge it into the V8 promise object, by
     // adding fields representing the pipelined struct.

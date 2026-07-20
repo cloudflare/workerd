@@ -235,8 +235,6 @@ kj::Promise<kj::Maybe<kj::Date>> ActorCache::abandonAlarm(kj::Date scheduledTime
 kj::Maybe<kj::Promise<void>> ActorCache::getBackpressure() {
   if (dirtyList.sizeInBytes() > lru.options.dirtyListByteLimit && !lru.options.neverFlush) {
     // Wait for dirty entries to be flushed.
-    // The [this] capture is safe because ActorCache is assumed to outlive these promises.
-    // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
     return lastFlush.addBranch().then([this]() -> kj::Promise<void> {
       KJ_IF_SOME(p, getBackpressure()) {
         return kj::mv(p);
@@ -664,9 +662,6 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
   // Wait on the RPC only until stream.end() is called, then report the results. We prevent
   // `stream` from being destroyed until we have a result so that if the RPC throws an exception,
   // we don't accidentally report "PromiseFulfiller not fulfilled" instead of the exception.
-  // streamServerRef is safe to capture because streamClient (which owns the underlying object)
-  // is attached to the returned promise, ensuring the object outlives all callbacks.
-  // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
   auto promise = sendPromise.then([&streamServerRef]() -> kj::Promise<ActorCache::GetResultList> {
     if (streamServerRef.fulfiller->isWaiting()) {
       return KJ_EXCEPTION(FAILED, "getMultiple() never called stream.end()");
@@ -677,7 +672,6 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
   });
   return paf.promise.exclusiveJoin(kj::mv(promise))
       .attach(kj::defer(
-          // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
           [client = kj::mv(streamClient), &streamServerRef]() { streamServerRef.cancel(); }));
 }
 
@@ -697,12 +691,10 @@ kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorCache::get
       return entry.time;
     }
     KJ_CASE_ONEOF(_, ActorCache::UnknownAlarmTime) {
-      // The [this] capture is safe because ActorCache is assumed to outlive these promises.
       return scheduleStorageRead([](rpc::ActorStorage::Operations::Client client) {
         auto req = client.getAlarmRequest();
         return req.send().dropPipeline();
       })
-          // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
           .then([this, options](capnp::Response<rpc::ActorStorage::Operations::GetAlarmResults>
                         response) mutable -> kj::Maybe<kj::Date> {
         auto scheduledTimeMs = response.getScheduledTimeMs();
@@ -1143,9 +1135,6 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
   // Wait on the RPC only until stream.end() is called, then report the results. We prevent
   // `stream` from being destroyed until we have a result so that if the RPC throws an exception,
   // we don't accidentally report "PromiseFulfiller not fulfilled" instead of the exception.
-  // streamServerRef is safe to capture because streamClient (which owns the underlying object)
-  // is attached to the returned promise, ensuring the object outlives all callbacks.
-  // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
   auto promise = sendPromise.then([&streamServerRef]() -> kj::Promise<ActorCache::GetResultList> {
     if (streamServerRef.fulfiller->isWaiting()) {
       return KJ_EXCEPTION(FAILED, "list() never called stream.end()");
@@ -1157,7 +1146,6 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
 
   return paf.promise.exclusiveJoin(kj::mv(promise))
       .attach(kj::defer(
-          // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
           [client = kj::mv(streamClient), &streamServerRef]() { streamServerRef.cancel(); }));
 }
 
@@ -1475,9 +1463,6 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
   // Wait on the RPC only until stream.end() is called, then report the results. We prevent
   // `stream` from being destroyed until we have a result so that if the RPC throws an exception,
   // we don't accidentally report "PromiseFulfiller not fulfilled" instead of the exception.
-  // streamServerRef is safe to capture because streamClient (which owns the underlying object)
-  // is attached to the returned promise, ensuring the object outlives all callbacks.
-  // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
   auto promise = sendPromise.then([&streamServerRef]() -> kj::Promise<ActorCache::GetResultList> {
     if (streamServerRef.fulfiller->isWaiting()) {
       return KJ_EXCEPTION(FAILED, "list() never called stream.end()");
@@ -1489,7 +1474,6 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
 
   return paf.promise.exclusiveJoin(kj::mv(promise))
       .attach(kj::defer(
-          // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
           [client = kj::mv(streamClient), &streamServerRef]() { streamServerRef.cancel(); }));
 }
 
@@ -1849,12 +1833,10 @@ kj::PromiseForResult<Func, rpc::ActorStorage::Operations::Client> ActorCache::sc
   // This is basically kj::retryOnDisconnect() except that we make the first call synchronously.
   // For our use case, this is safe, and I wanted to make sure reads get sent concurrently with
   // further JavaScript execution if possible.
-  // The [this] capture is safe because ActorCache is assumed to outlive these promises.
   auto promise = kj::evalNow(
       [&]() mutable { return function(storage).attach(recordStorageRead(hooks, clock)); });
   return oomCanceler.wrap(
       promise
-          // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
           .catch_([this, function = kj::mv(function)](kj::Exception&& e) mutable
               -> kj::PromiseForResult<Func, rpc::ActorStorage::Operations::Client> {
     if (e.getType() == kj::Exception::Type::DISCONNECTED) {
@@ -2273,14 +2255,12 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options, SpanParent tr
     // Capture the trace span from the first write in this flush batch.
     currentFlushSpan = kj::mv(traceSpan);
 
-    // The [this] captures are safe because ActorCache is assumed to outlive these promises.
     auto flushPromise = lastFlush.addBranch()
                             .attach(kj::defer([this]() {
       flushScheduled = false;
       flushScheduledWithOutputGate = false;
       // Reset the flush span for the next batch
       currentFlushSpan = nullptr;
-      // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
     })).then([this]() {
       ++flushesEnqueued;
       return kj::evalNow([this]() {
@@ -2292,7 +2272,6 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options, SpanParent tr
     if (options.allowUnconfirmed) {
       // Don't apply output gate. But, if an exception is thrown, we still want to break the gate,
       // so arrange for that.
-      // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
       flushPromise = flushPromise.catch_([this](kj::Exception&& e) {
         return gate.lockWhile(kj::Promise<void>(kj::mv(e)), nullptr);
       });
@@ -2629,10 +2608,8 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
 
   auto flushProm = startFlushTransaction();
 
-  // The [this] capture is safe because ActorCache is assumed to outlive these promises.
   bool flushingBeforeDeleteAll = requestedDeleteAll != kj::none;
   return oomCanceler.wrap(kj::mv(flushProm))
-      // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
       .then([this, flushingBeforeDeleteAll]() -> kj::Promise<void> {
     // We need to process the alarm result before we (potentially) start the delete all because if
     // we did not our alarm state can't know if it need to flush a new time or not after the delete
@@ -3087,11 +3064,9 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
 
   KJ_ASSERT(requestedDeleteAll != kj::none);
 
-  // The [this] capture is safe because ActorCache is assumed to outlive these promises.
   return storage.deleteAllRequest(capnp::MessageSize{2, 0})
       .send()
       .then(
-          // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
           [this](capnp::Response<rpc::ActorStorage::Operations::DeleteAllResults> results)
               -> kj::Promise<void> {
     auto& deleteAllState = KJ_ASSERT_NONNULL(requestedDeleteAll);

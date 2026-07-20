@@ -842,14 +842,10 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // The handler can return a function, an object, undefined, or a promise
       // for any of these. We will convert the result to a promise for consistent
       // handling...
-      // The [this] captures are safe because the caller ensures the TailStreamTarget
-      // (RPC server) stays alive until its promises resolve.
       return ioContext.awaitJs(js,
           js.toPromise(result).then(js,
-              // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
-              ioContext.addFunctor([this, results = results.addRef()](
+              ioContext.addFunctor([this, results = results.addRef(), &ioContext](
                                        jsg::Lock& js, jsg::Value value) mutable {
-        auto& ioContext = IoContext::current();
         // The value here can be one of a function, an object, or undefined.
         // Any value other than these will result in a warning but will otherwise
         // be treated like undefined.
@@ -882,8 +878,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         doneFulfiller->fulfill();
       }),
               ioContext.addFunctor(
-                  // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
-                  [this, results = results.addRef()](jsg::Lock& js, jsg::Value&& error) mutable {
+                  [&, results = results.addRef()](jsg::Lock& js, jsg::Value&& error) mutable {
         // Received a JS error. Do not reject doneFulfiller yet, this will be handled when we catch
         // the exception later.
         results->setStop(true);
@@ -986,10 +981,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // from the onset event etc. JSG knows how JS exceptions look like, so we don't need an
       // identifier for them.
       if (doFulfill) {
-        // The [this] capture is safe because the caller ensures the TailStreamTarget
-        // (RPC server) stays alive until its promises resolve.
-        // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
-        p = p.then(js, [this](jsg::Lock& js) {
+        p = p.then(js, [&](jsg::Lock& js) {
           doneReceiving = true;
           doneFulfiller->fulfill();
         });

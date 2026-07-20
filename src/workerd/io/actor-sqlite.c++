@@ -195,12 +195,9 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
     // Although the promise returned here was originally intended for "backpressure", it turns out
     // if we return a promise here, the one call site (DurableObjectStorage::asyncTransactionImpl())
     // will actually keep the input gate locked until the commit finishes, which is what we need.
-    // The [this] capture in the then() callback is safe because the catch_() continuation
-    // captures kj::addRef(*this), ensuring ExplicitTxn outlives the then() callback.
-    return actorSqlite.blockTasks.onEmpty()
-        // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
-        .then([this]() { commitImpl(); })
-        .catch_([self = kj::addRef(*this)](kj::Exception&& e) mutable {
+    return actorSqlite.blockTasks.onEmpty().then([this]() {
+      commitImpl();
+    }).catch_([self = kj::addRef(*this)](kj::Exception&& e) mutable {
       if (self->actorSqlite.broken == kj::none) {
         self->rollbackImpl();
       }
@@ -248,13 +245,10 @@ void ActorSqlite::ExplicitTxn::commitImpl() {
     // Unlike ImplicitTxn, which locks the output gate at the start of the first write that requires
     // confirmation, ExplicitTxn only locks when we're going to confirm the commit.  I think this
     // makes since given the explicit commit call.
-    // The outputGate pointer capture is safe because the caller ensures ActorSqlite (which
-    // receives outputGate from its caller) stays alive while the commit promise resolves.
     auto commitPromise = kj::evalNow([this, &precommitAlarmState]() {
       return actorSqlite.commitImpl(
           kj::mv(KJ_ASSERT_NONNULL(precommitAlarmState)), actorSqlite.currentCommitSpan.addRef());
     })
-                             // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
                              .catch_([outputGate = &actorSqlite.outputGate,
                                          spanParent = actorSqlite.currentCommitSpan.addRef()](
                                          kj::Exception&& e) mutable {
@@ -441,10 +435,7 @@ kj::Promise<void> ActorSqlite::requestScheduledAlarm(
     alarmScheduledNoLaterThan = requestedTime;
   }
 
-  // The [this] capture is safe because the caller ensures ActorSqlite stays alive
-  // while the alarm scheduling promise resolves.
   return hooks.scheduleRun(requestedTime, kj::mv(priorTask))
-      // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
       .then([this, movingAlarmLater, requestedTime]() {
     if (!movingAlarmLater) {
       alarmScheduledNoLaterThan = requestedTime;
@@ -909,9 +900,6 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(
 
   if (!deleteAllCommitScheduled) {
     // Make sure a commit callback is queued for the deleteAll().
-    // The [this] capture is safe because the promise is stored in commitTasks, which is
-    // a member of ActorSqlite, so the caller ensures ActorSqlite outlives this promise.
-    // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
     commitTasks.add(outputGate.lockWhile(kj::evalLater([this]() mutable -> kj::Promise<void> {
       // Don't commit if shutdown() has been called.
       requireNotBroken();

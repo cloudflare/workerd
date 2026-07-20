@@ -405,8 +405,6 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
       return KJ_EXCEPTION(FAILED, "Write after stream has been closed.");
     }
     if (buffer == nullptr) return kj::READY_NOW;
-    // This API requires that pieces stay alive until the returned promise completes.
-    // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
     return canceler.wrap(context.assertLive().run([this, buffer](Worker::Lock& lock) mutable {
       auto& writer = getInner();
       auto ab = jsg::JsArrayBuffer::create(lock, buffer);
@@ -423,8 +421,6 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
       amount += piece.size();
     }
     if (amount == 0) return kj::READY_NOW;
-    // This API requires that pieces stay alive until the returned promise completes.
-    // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
     return canceler.wrap(
         context.assertLive().run([this, amount, pieces](Worker::Lock& lock) mutable {
       auto& writer = getInner();
@@ -472,8 +468,6 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
       return KJ_EXCEPTION(FAILED, "End after stream has been closed.");
     }
     ended = true;
-    // This API requires that pieces stay alive until the returned promise completes.
-    // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
     return canceler.wrap(context.assertLive().run([this](Worker::Lock& lock) mutable {
       return context.assertLive().awaitJs(lock, getInner().close(lock));
     }));

@@ -488,16 +488,6 @@ void EventSource::close(jsg::Lock& js) {
 }
 
 void EventSource::enqueueMessages(kj::Array<PendingMessage> messages) {
-  // `enqueueMessages` is called from outside the isolate lock (from the pumpTo continuation), so
-  // we cannot construct a jsg::Ref via JSG_THIS here. Instead, capture `this` raw and let
-  // `context.run()` acquire the lock before the body runs. The task is owned by `context.tasks`;
-  // when `*this` is destroyed it terminates this chain (EventSource ownership chains through the
-  // IoContext-anchored pump), so `this` cannot dangle when the lambda body executes.
-  //
-  // TODO(soon): Once jsg::WeakRef lands (https://gitlab.cfdata.org/cloudflare/ew/workerd/-/merge_requests/140/),
-  // switch this to `[weakSelf = JSG_WEAKTHIS]` -- JSG_WEAKTHIS doesn't require the isolate lock at
-  // construction time, so we can drop the NOLINT and the structural-safety justification.
-  // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
   context.addTask(context.run([this, messages = kj::mv(messages)](
                                   auto& lock) mutable { notifyMessages(lock, kj::mv(messages)); }));
 }

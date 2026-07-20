@@ -581,10 +581,10 @@ R2Bucket::get(jsg::Lock& js,
     auto client = getHttpClient(context, traceContext);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
-    return context.awaitIo(js, kj::mv(promise), context.addFunctor(
-        [&errorType, traceContext = kj::mv(traceContext)](jsg::Lock& js, R2Result r2Result) mutable
+    return context.awaitIo(js, kj::mv(promise),
+        [&context, &errorType, traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, R2Result r2Result) mutable
         -> kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> {
-      auto& context = IoContext::current();
       kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> result;
 
       addR2ResponseSpanTags(traceContext, r2Result);
@@ -612,7 +612,7 @@ R2Bucket::get(jsg::Lock& js,
       }
 
       return result;
-    }));
+    });
   });
 }
 
@@ -879,8 +879,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
         js, kj::mv(client), kj::mv(value), kj::none, kj::mv(requestJson), path, jwt);
 
     return context.awaitIo(js, kj::mv(promise),
-        [&errorType, sentHttpMetadata = kj::mv(sentHttpMetadata),
-            sentCustomMetadata = kj::mv(sentCustomMetadata), traceContext = kj::mv(traceContext)](
+        [sentHttpMetadata = kj::mv(sentHttpMetadata),
+            sentCustomMetadata = kj::mv(sentCustomMetadata), &errorType,
+            traceContext = kj::mv(traceContext)](
             jsg::Lock& js, R2Result r2Result) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
       addR2ResponseSpanTags(traceContext, r2Result);
       if (r2Result.preconditionFailed()) {
@@ -999,7 +1000,7 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
         doR2HTTPPutRequest(js, kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, jwt);
 
     return context.awaitIo(js, kj::mv(promise),
-        [&errorType, key = kj::mv(key), self = JSG_THIS, traceContext = kj::mv(traceContext)](
+        [&errorType, key = kj::mv(key), this, traceContext = kj::mv(traceContext)](
             jsg::Lock& js, R2Result r2Result) mutable {
       addR2ResponseSpanTags(traceContext, r2Result);
       r2Result.throwIfError("createMultipartUpload", errorType);
@@ -1012,7 +1013,7 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
       json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
       kj::StringPtr uploadId = responseBuilder.getUploadId();
       traceContext.setTag("cloudflare.r2.response.upload_id"_kjc, uploadId);
-      return js.alloc<R2MultipartUpload>(kj::mv(key), kj::str(uploadId), kj::mv(self));
+      return js.alloc<R2MultipartUpload>(kj::mv(key), kj::str(uploadId), JSG_THIS);
     });
   });
 }
@@ -1469,6 +1470,8 @@ jsg::Promise<jsg::Ref<Blob>> R2Bucket::GetResult::blob(jsg::Lock& js) {
   return arrayBuffer(js).then(
       js, [self = JSG_THIS](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) mutable {
     // httpMetadata can't be null because GetResult always populates it.
+    // Note: `self` (jsg::Ref) is captured to prevent GC from collecting this object while
+    // the promise continuation is pending. Without it, the bare `this` pointer dangles.
     kj::String contentType =
         mapCopyString(KJ_REQUIRE_NONNULL(self->httpMetadata).contentType).orDefault(nullptr);
     return js.alloc<Blob>(js, jsg::JsBufferSource(buffer.getHandle(js)), kj::mv(contentType));
