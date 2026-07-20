@@ -3404,6 +3404,160 @@ KJ_TEST("Server: Durable Objects websocket hibernation") {
   KJ_EXPECT(wsConn.isEof());
 }
 
+KJ_TEST("Server: Durable Objects websocket constructor throws after send") {
+  // This is a regression test for https://jira.cfdata.org/browse/VULN-146323,
+  // It should be run under ASAN.
+  TestServer test(R"((
+    services = [(
+      name = "main",
+      worker = (
+        compatibilityDate = "2026-07-01",
+        modules = [(
+          name = "main.js",
+          esModule =
+            `export default {
+            `  fetch(request, env) {
+            `    return env.ns.getByName("repro").fetch(request);
+            `  }
+            `};
+            `
+            `export class VulnerableActor {
+            `  constructor(ctx) {
+            `    this.ctx = ctx;
+            `    const sockets = ctx.getWebSockets();
+            `    if (sockets.length > 0) {
+            `      sockets[0].send("pending");
+            `      throw new Error("constructor failed after send");
+            `    }
+            `  }
+            `
+            `  fetch() {
+            `    const [client, server] = Object.values(new WebSocketPair());
+            `    this.ctx.acceptWebSocket(server);
+            `    return new Response(null, {status: 101, webSocket: client});
+            `  }
+            `}
+        )],
+        bindings = [(name = "ns", durableObjectNamespace = "VulnerableActor")],
+        durableObjectNamespaces = [(
+          className = "VulnerableActor",
+          uniqueKey = "repro-key",
+        )],
+        durableObjectStorage = (inMemory = void),
+      ),
+    )],
+    sockets = [(name = "main", address = "test-addr", service = "main")],
+  ))"_kj);
+
+  test.start();
+  auto wsConn = test.connect("test-addr");
+  wsConn.upgradeToWebSocket();
+
+  // Force hibernation by waiting 10 seconds.
+  test.wait(10);
+
+  // Send a close event. The event reconstructs an actor whose constructor starts a send pump and then throws.
+  // Before the fix, `ws.send` inside `LegacyWebSocketAdapter::pump` was called on the freed
+  // `kj::WebSocket& ws`, which caused a UAF.
+  wsConn.send(kj::str("\x88\x02\x03\xe8"));
+  // Wait for a pump loop to finish.
+  test.wait(1);
+  // Nothing was sent from the DO, ws is closed now.
+  KJ_ASSERT(wsConn.isEof());
+}
+
+KJ_TEST("Server: Durable Objects websocket constructor blockConcurrencyWhile throws after send") {
+  // Calling `blockConcurrencyWhile()` from the constructor lets us do two things:
+  // 1. Make the websocket suspend on send before we throw an exception.
+  // 2. Observe the "normal" behavior when `LegacyWebSocketAdapter::pump` is canceled after `ctx.abort()`.
+  // This test showcases that the only situation in which `ws` can be freed during the pump loop is when
+  // we throw from the constructor.
+  TestServer test(R"((
+    services = [(
+      name = "main",
+      worker = (
+        compatibilityDate = "2026-07-01",
+        modules = [(
+          name = "main.js",
+          esModule =
+            `export default {
+            `  fetch(request, env) {
+            `    return env.ns.getByName("repro").fetch(request);
+            `  }
+            `};
+            `
+            `export class VulnerableActor {
+            `  constructor(ctx) {
+            `    this.ctx = ctx;
+            `    const sockets = ctx.getWebSockets();
+            `    if (sockets.length > 0) {
+            `      ctx.blockConcurrencyWhile(async () => {
+            `        sockets[0].send("pending");
+            `        // we use fetch to yield from JS to IO event loop
+            `        const resp = await fetch("http://subhost/foo");
+            `        const text = await resp.text();
+            `        // at that moment we expect `sockets[0]` to suspend on `ws.send`
+            `        // in `LegacyWebSocketAdapter::pump` loop, because we haven't read from this websocket yet
+            `        throw new Error("constructor failed after send");
+            `      });
+            `    }
+            `  }
+            `
+            `  fetch() {
+            `    const [client, server] = Object.values(new WebSocketPair());
+            `    this.ctx.acceptWebSocket(server);
+            `    return new Response(null, {status: 101, webSocket: client});
+            `  }
+            `}
+        )],
+        bindings = [(name = "ns", durableObjectNamespace = "VulnerableActor")],
+        durableObjectNamespaces = [(
+          className = "VulnerableActor",
+          uniqueKey = "repro-key",
+        )],
+        durableObjectStorage = (inMemory = void),
+      ),
+    )],
+    sockets = [(name = "main", address = "test-addr", service = "main")],
+  ))"_kj);
+
+  test.start();
+  auto wsConn = test.connect("test-addr");
+  wsConn.upgradeToWebSocket();
+
+  // Force hibernation by waiting 10 seconds.
+  test.wait(10);
+
+  // Send a close event. The event reconstructs an actor whose constructor enters a `blockConcurrencyWhile` block,
+  // starts a send pump and then throws.
+  wsConn.send(kj::str("\x88\x02\x03\xe8"));
+
+  // The reconstructed actor's constructor makes an outbound fetch to yield from JS to IO event loop,
+  // we need wait for it.
+  auto subreq = test.receiveInternetSubrequest("subhost");
+  subreq.recv(R"(
+    GET /foo HTTP/1.1
+    Host: subhost
+
+  )"_blockquote);
+  subreq.send(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 11
+
+    hello world
+  )"_blockquote);
+
+  // The only way I can find to check that the `LegacyWebSocketAdapter::pump` was canceled is to
+  // assert on the disconnection exception that gets logged when the WebSocketPipe is torn down:
+  //   exception = kj/compat/http.c++:4362: disconnected: other end of WebSocketPipe was destroyed
+  KJ_EXPECT_LOG(INFO, "other end of WebSocketPipe was destroyed");
+
+  // Wait for a pump loop to finish.
+  test.wait(1);
+  // Nothing was sent from the DO, ws is closed now.
+  KJ_ASSERT(wsConn.isEof());
+}
+
 KJ_TEST("Server: tail workers") {
   TestServer test(R"((
     services = [

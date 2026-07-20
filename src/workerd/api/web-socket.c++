@@ -1214,6 +1214,22 @@ kj::Promise<void> LegacyWebSocketAdapter::pump(IoContext& context,
         co_await promise;
       }
 
+      // If a DO constructor throws after sending data to a websocket, the `kj::WebSocket& ws` may already
+      // have been freed by the hibernation manager, so we must stop the pump loop and not touch `ws`.
+      //
+      // A constructor failure aborts the IoContext, so we use that as an early-return condition.
+      // Message sent from constructor always wait for an output gate, so by the time that await
+      // returns, this is the first line that runs after the constructor completes, regardless of its
+      // outcome.
+      //
+      // Note that `ws` can be freed during the pump loop only when the constructor throws. In all other
+      // cases the coroutine is canceled normally — for example, when we call send from
+      // `blockConcurrencyWhile()` inside the constructor, which then throws, or when the DO waits on
+      // `ws.send()` to deliver the data while another event handler calls `ctx.abort()`.
+      if (context.getAbortReason() != kj::none) {
+        co_return;
+      }
+
       auto size = countBytesFromMessage(gatedMessage.message);
 
       while (gatedMessage.pendingAutoResponses > 0) {
