@@ -172,11 +172,21 @@ impl Error {
 
     /// Creates a V8 exception from this error.
     pub fn to_local<'a>(&self, isolate: v8::IsolatePtr) -> v8::Local<'a, v8::Value> {
-        // SAFETY: isolate is valid and locked (guaranteed by caller).
+        let message = self.message.as_bytes();
+        // Strings longer than i32::MAX bytes are truncated to satisfy V8's
+        // int-typed length parameter; V8 rejects strings that large anyway.
+        let len = i32::try_from(message.len()).unwrap_or(i32::MAX);
+        // SAFETY: isolate is valid and locked (guaranteed by caller); message
+        // pointer and len describe a valid byte slice.
         unsafe {
             v8::Local::from_ffi(
                 isolate,
-                v8::ffi::exception_create(isolate.as_ffi(), self.name, &self.message),
+                v8::ffi::exception_create_from_bytes(
+                    isolate.as_ffi(),
+                    self.name,
+                    message.as_ptr(),
+                    len,
+                ),
             )
         }
     }
@@ -541,6 +551,85 @@ impl Lock {
                 v8::ffi::local_new_object(self.isolate().as_ffi()),
             )
         }
+    }
+
+    /// Creates a JavaScript `Error` object with the given message.
+    ///
+    /// Mirrors C++ `jsg::Lock::error()`. The returned object can have additional
+    /// properties attached before being thrown or returned.
+    pub fn error<'a>(&mut self, message: &str) -> v8::Local<'a, v8::Object> {
+        self.create_error(ExceptionType::Error, message)
+    }
+
+    /// Creates a JavaScript `TypeError` object with the given message.
+    ///
+    /// Mirrors C++ `jsg::Lock::typeError()`.
+    pub fn type_error<'a>(&mut self, message: &str) -> v8::Local<'a, v8::Object> {
+        self.create_error(ExceptionType::TypeError, message)
+    }
+
+    /// Creates a JavaScript `RangeError` object with the given message.
+    ///
+    /// Mirrors C++ `jsg::Lock::rangeError()`.
+    pub fn range_error<'a>(&mut self, message: &str) -> v8::Local<'a, v8::Object> {
+        self.create_error(ExceptionType::RangeError, message)
+    }
+
+    /// Like [`Lock::error`], but builds the message from raw bytes interpreted
+    /// as UTF-8.
+    ///
+    /// Invalid UTF-8 sequences are replaced with U+FFFD rather than rejected,
+    /// so this accepts arbitrary byte input (e.g. filesystem paths).
+    pub fn error_from_bytes<'a>(&mut self, message: &[u8]) -> v8::Local<'a, v8::Object> {
+        self.create_error_from_bytes(ExceptionType::Error, message)
+    }
+
+    /// Like [`Lock::type_error`], but builds the message from raw bytes.
+    /// See [`Lock::error_from_bytes`].
+    pub fn type_error_from_bytes<'a>(&mut self, message: &[u8]) -> v8::Local<'a, v8::Object> {
+        self.create_error_from_bytes(ExceptionType::TypeError, message)
+    }
+
+    /// Like [`Lock::range_error`], but builds the message from raw bytes.
+    /// See [`Lock::error_from_bytes`].
+    pub fn range_error_from_bytes<'a>(&mut self, message: &[u8]) -> v8::Local<'a, v8::Object> {
+        self.create_error_from_bytes(ExceptionType::RangeError, message)
+    }
+
+    fn create_error<'a>(
+        &mut self,
+        exception_type: ExceptionType,
+        message: &str,
+    ) -> v8::Local<'a, v8::Object> {
+        // A &str is always valid UTF-8, so delegating to the byte-based path
+        // produces identical output (no invalid sequences to replace) while
+        // keeping a single exception-construction implementation.
+        self.create_error_from_bytes(exception_type, message.as_bytes())
+    }
+
+    fn create_error_from_bytes<'a>(
+        &mut self,
+        exception_type: ExceptionType,
+        message: &[u8],
+    ) -> v8::Local<'a, v8::Object> {
+        // Strings longer than i32::MAX bytes are truncated to satisfy V8's
+        // int-typed length parameter; V8 rejects strings that large anyway.
+        let len = i32::try_from(message.len()).unwrap_or(i32::MAX);
+        // SAFETY: Lock guarantees the isolate is valid and locked; message.as_ptr()
+        // and len describe a valid byte slice.
+        let value: v8::Local<'a, v8::Value> = unsafe {
+            v8::Local::from_ffi(
+                self.isolate(),
+                v8::ffi::exception_create_from_bytes(
+                    self.isolate().as_ffi(),
+                    exception_type,
+                    message.as_ptr(),
+                    len,
+                ),
+            )
+        };
+        // Error, TypeError, and RangeError are all JS objects.
+        value.into()
     }
 
     pub fn throw_error(&mut self, message: &str) {

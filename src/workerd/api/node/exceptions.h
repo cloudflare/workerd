@@ -1,18 +1,14 @@
 #pragma once
 
+#include <workerd/api/node/exception-type.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api::node {
 
 // Utilities for creating Node.js-style exceptions.
-
-// Most Node.js exceptions are represented as either Error,
-// TypeError, or RangeError.
-enum class JsErrorType {
-  Error,
-  TypeError,
-  RangeError,
-};
+//
+// JsErrorType is defined in exception-type.h (a dependency-free header) so it
+// can be shared with the Rust node-exceptions crate as a cxx extern enum.
 
 // Node.js Exception Codes
 #define NODE_EXCEPTION_CODE_LIST(V)                                                                \

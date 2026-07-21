@@ -39,6 +39,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "durable-object-retries-fetch"_kj;
     case AutogateKey::NODEJS_URL_RUST:
       return "nodejs-url-rust"_kj;
+    case AutogateKey::NODEJS_EXCEPTIONS_RUST:
+      return "nodejs-exceptions-rust"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

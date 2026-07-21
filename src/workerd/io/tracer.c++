@@ -150,8 +150,8 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     // Clone errorInfo for the STW path because the batched-tail path below also needs it.
     auto streamErrorInfo = tracing::cloneLogErrorInfo(errorInfo);
     writer->report(context,
-        {tracing::Log(timestamp, logLevel, kj::str(message.first(messageSize)),
-            kj::mv(streamErrorInfo))},
+        {tracing::Log(
+            timestamp, logLevel, kj::str(message.first(messageSize)), kj::mv(streamErrorInfo))},
         timestamp, messageSize + errorInfoSize);
   }
 
