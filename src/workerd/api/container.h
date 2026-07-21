@@ -247,6 +247,7 @@ class Container: public jsg::Object {
     bool enableInternet = false;
     jsg::Optional<jsg::Dict<kj::String>> env;
     jsg::Optional<int64_t> hardTimeout;
+    jsg::Optional<kj::String> image;
     jsg::Optional<jsg::Dict<kj::String>> labels;
     jsg::Optional<kj::Array<DirectorySnapshotRestoreParams>> directorySnapshots;
     jsg::Optional<Snapshot> containerSnapshot;
@@ -257,26 +258,38 @@ class Container: public jsg::Object {
         enableInternet,
         env,
         hardTimeout,
+        image,
         labels,
         directorySnapshots,
         containerSnapshot);
     JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
       if (flags.getWorkerdExperimental()) {
-        JSG_TS_OVERRIDE(ContainerStartupOptions {
+        JSG_TS_OVERRIDE(type ContainerStartupOptions = {
           entrypoint?: string[];
           enableInternet: boolean;
           env?: Record<string, string>;
           hardTimeout?: number | bigint;
           labels?: Record<string, string>;
           directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
-          containerSnapshot?: ContainerSnapshot;
-        });
+        } & (
+          | {
+              /** Cannot be used with `containerSnapshot`. */
+              image: string;
+              containerSnapshot?: never;
+            }
+          | {
+              image?: never;
+              /** Cannot be used with `image`. */
+              containerSnapshot?: ContainerSnapshot;
+            }
+        ));
       } else {
         JSG_TS_OVERRIDE(ContainerStartupOptions {
           entrypoint?: string[];
           enableInternet: boolean;
           env?: Record<string, string>;
           hardTimeout?: never;
+          image?: never;
           labels?: Record<string, string>;
           directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
           containerSnapshot?: ContainerSnapshot;

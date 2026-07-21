@@ -4053,15 +4053,23 @@ interface ContainerSnapshot {
 interface ContainerSnapshotOptions {
   name?: string;
 }
-interface ContainerStartupOptions {
+type ContainerStartupOptions = {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
   hardTimeout?: number | bigint;
   labels?: Record<string, string>;
   directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
-  containerSnapshot?: ContainerSnapshot;
-}
+} & (
+  | {
+      image: string;
+      containerSnapshot?: never;
+    }
+  | {
+      image?: never;
+      containerSnapshot?: ContainerSnapshot;
+    }
+);
 interface ContainerInfo {
   labels: Record<string, string>;
   image: string;

@@ -53,9 +53,13 @@ interface Container @0x9aaceefc06523bca {
     # Directory snapshots to restore before the container starts.
 
     containerSnapshotId @7 :Text;
-    # Id of the full container snapshot to restore before the container starts.
+    # Id of the full container snapshot to restore before the container starts. Mutually exclusive
+    # with image.
 
     spanContext @8 :SpanContext;
+
+    image @9 :Text;
+    # Image reference to use for this start. Mutually exclusive with containerSnapshotId.
   }
 
   struct Label {

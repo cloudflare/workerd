@@ -641,6 +641,46 @@ export class DurableObjectExample extends DurableObject {
     assert.strictEqual(container.running, false);
   }
 
+  async testImageValidation() {
+    const container = this.ctx.container;
+
+    assert.throws(() => container.start({ image: 'bad\nimage' }), {
+      message: /Container image reference cannot contain control characters/,
+    });
+    assert.throws(() => container.start({ image: 'x'.repeat(4097) }), {
+      message: /Container image reference cannot exceed 4096 bytes/,
+    });
+  }
+
+  async testImageOverride() {
+    const container = this.ctx.container;
+    const image = 'cloudflare/workerd/container-client-test:override';
+
+    container.start({ enableInternet: true, image });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    const info = await container.inspect();
+    assert.match(info.image, /container-client-test:override$/);
+
+    const snapshot = await container.snapshotContainer({});
+    await container.destroy();
+    await monitor;
+
+    assert.throws(
+      () => container.start({ image, containerSnapshot: snapshot }),
+      {
+        message: /`image` and `containerSnapshot` are mutually exclusive/,
+      }
+    );
+
+    container.start({ enableInternet: true, containerSnapshot: snapshot });
+    const restoreMonitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+    await container.destroy();
+    await restoreMonitor;
+  }
+
   async testInspectBeforeStart() {
     const container = this.ctx.container;
     if (container.running) {
@@ -2914,6 +2954,26 @@ export const testLabelValidation = {
       getRandomDurableObjectName('testLabelValidation')
     );
     await stub.testLabelValidation();
+  },
+};
+
+export const testImageValidation = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testImageValidation')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testImageValidation();
+  },
+};
+
+export const testImageOverride = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testImageOverride')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testImageOverride();
   },
 };
 

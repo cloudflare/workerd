@@ -28,6 +28,8 @@ namespace {
 //   permanently relegated to the slower path.
 constexpr size_t MAX_CACHED_TCP_PORTS = 4;
 
+constexpr size_t MAX_IMAGE_REFERENCE_SIZE = 4096;
+
 kj::Maybe<kj::Path> parseRestorePath(kj::StringPtr path) {
   JSG_REQUIRE(path.size() > 0 && path[0] == '/', TypeError,
       "Directory snapshot restore path must be absolute. Got: ", path);
@@ -321,9 +323,20 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   }
 
   if (flags.getWorkerdExperimental()) {
+    JSG_REQUIRE(options.image == kj::none || options.containerSnapshot == kj::none, TypeError,
+        "`image` and `containerSnapshot` are mutually exclusive.");
     KJ_IF_SOME(hardTimeoutMs, options.hardTimeout) {
       JSG_REQUIRE(hardTimeoutMs > 0, RangeError, "Hard timeout must be greater than 0");
       req.setHardTimeoutMs(hardTimeoutMs);
+    }
+    KJ_IF_SOME(image, options.image) {
+      JSG_REQUIRE(image.size() <= MAX_IMAGE_REFERENCE_SIZE, TypeError,
+          "Container image reference cannot exceed ", MAX_IMAGE_REFERENCE_SIZE, " bytes.");
+      for (auto c: image) {
+        JSG_REQUIRE(static_cast<kj::byte>(c) >= 0x20 && c != 0x7f, TypeError,
+            "Container image reference cannot contain control characters.");
+      }
+      req.setImage(image);
     }
   }
 
