@@ -1,0 +1,29 @@
+types/generated-snapshot/experimental/index.d.ts
+  s_82ae919c84e6c2::t_6fd119b9ef109d 14995-15059
+types/test/types/messaging.ts
+  s_82ae919c84e6c2::t_ba70398976154f 36-37,40-43
+types/generated-snapshot/index.d.ts
+  s_82ae919c84e6c2::t_6fd119b9ef109d 14347-14411
+types/generated-snapshot/index.ts
+  s_82ae919c84e6c2::t_6fd119b9ef109d 14374-14438
+types/generated-snapshot/experimental/index.ts
+  s_82ae919c84e6c2::t_6fd119b9ef109d 15022-15086
+types/defines/messaging.d.ts
+  s_82ae919c84e6c2::t_ba70398976154f 5-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "54566fe5025c7b99b9970385a0f72c1bd825aa32",
+  "prompts": {},
+  "sessions": {
+    "s_82ae919c84e6c2": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_07bf80f27ffeGYM5uASTKJxS3a",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Gabriel Massadas <gmassadas@cloudflare.com>"
+    }
+  }
+}
