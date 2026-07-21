@@ -224,8 +224,6 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     kj::Maybe<ExportedHandler&> exportedHandler) {
   ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
       "Connect ingress is not currently supported with Service Workers syntax.");
-  KJ_REQUIRE(FeatureFlags::get(lock).getWorkerdExperimental(),
-      "connect handling requires the experimental flag.");
 
   KJ_IF_SOME(handler, eh.connect) {
     // Has a connect handler!
