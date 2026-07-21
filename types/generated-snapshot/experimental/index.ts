@@ -4068,6 +4068,13 @@ export type ContainerStartupOptions = {
   enableInternet: boolean;
   env?: Record<string, string>;
   hardTimeout?: number | bigint;
+  instance?:
+    | "lite"
+    | "standard-1"
+    | "standard-2"
+    | "standard-3"
+    | "standard-4"
+    | ContainerStartResources;
   labels?: Record<string, string>;
   directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
 } & (
@@ -4083,6 +4090,11 @@ export type ContainerStartupOptions = {
 export interface ContainerInfo {
   labels: Record<string, string>;
   image: string;
+}
+export interface ContainerStartResources {
+  vcpu: number;
+  memoryMib: number;
+  diskMb: number;
 }
 /**
  * The **`FileSystemHandle`** interface of the File System API is an object which represents a file or directory entry.

@@ -16,6 +16,8 @@
 #include <kj/filesystem.h>
 #include <kj/refcount.h>
 
+#include <cmath>
+
 namespace workerd::api {
 
 namespace {
@@ -29,6 +31,17 @@ namespace {
 constexpr size_t MAX_CACHED_TCP_PORTS = 4;
 
 constexpr size_t MAX_IMAGE_REFERENCE_SIZE = 4096;
+
+// JS numbers are doubles, but the wire format is UInt64.
+uint64_t requireResourceAmount(double value, kj::StringPtr name) {
+  JSG_REQUIRE(std::isfinite(value) && value > 0, RangeError, "Container resource ", name,
+      " must be a finite number greater than 0.");
+  JSG_REQUIRE(
+      value == std::floor(value), RangeError, "Container resource ", name, " must be an integer.");
+  JSG_REQUIRE(value <= static_cast<double>(jsg::MAX_SAFE_INTEGER), RangeError,
+      "Container resource ", name, " exceeds Number.MAX_SAFE_INTEGER.");
+  return static_cast<uint64_t>(value);
+}
 
 kj::Maybe<kj::Path> parseRestorePath(kj::StringPtr path) {
   JSG_REQUIRE(path.size() > 0 && path[0] == '/', TypeError,
@@ -337,6 +350,27 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
             "Container image reference cannot contain control characters.");
       }
       req.setImage(image);
+    }
+    KJ_IF_SOME(instance, options.instance) {
+      auto instanceBuilder = req.initInstance();
+      KJ_SWITCH_ONEOF(instance) {
+        KJ_CASE_ONEOF(named, kj::String) {
+          JSG_REQUIRE(named == "lite" || named == "standard-1" || named == "standard-2" ||
+                  named == "standard-3" || named == "standard-4",
+              TypeError, "Invalid container instance type.");
+          instanceBuilder.setNamed(named);
+        }
+        KJ_CASE_ONEOF(custom, StartResources) {
+          JSG_REQUIRE(std::isfinite(custom.vcpu) && custom.vcpu > 0, RangeError,
+              "Container resource vcpu must be a finite number greater than 0.");
+          auto memoryMib = requireResourceAmount(custom.memoryMib, "memoryMib"_kj);
+          auto diskMb = requireResourceAmount(custom.diskMb, "diskMb"_kj);
+          auto resources = instanceBuilder.initCustom();
+          resources.setVcpu(custom.vcpu);
+          resources.setMemoryMib(memoryMib);
+          resources.setDiskMb(diskMb);
+        }
+      }
     }
   }
 

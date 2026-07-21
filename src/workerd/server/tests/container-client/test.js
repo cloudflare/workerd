@@ -681,6 +681,52 @@ export class DurableObjectExample extends DurableObject {
     await restoreMonitor;
   }
 
+  async testInstanceTypeValidation() {
+    const container = this.ctx.container;
+
+    assert.throws(() => container.start({ instance: 'invalid' }), {
+      message: /Invalid container instance type/,
+    });
+
+    const custom = { vcpu: 1, memoryMib: 4096, diskMb: 20000 };
+
+    for (const vcpu of [0, -1, Infinity, NaN]) {
+      assert.throws(() => container.start({ instance: { ...custom, vcpu } }), {
+        message:
+          /Container resource vcpu must be a finite number greater than 0/,
+      });
+    }
+
+    for (const field of ['memoryMib', 'diskMb']) {
+      for (const value of [0, -1, Infinity, NaN]) {
+        assert.throws(
+          () => container.start({ instance: { ...custom, [field]: value } }),
+          {
+            message: new RegExp(
+              `Container resource ${field} must be a finite number greater than 0`
+            ),
+          }
+        );
+      }
+
+      assert.throws(
+        () => container.start({ instance: { ...custom, [field]: 0.5 } }),
+        {
+          message: new RegExp(`Container resource ${field} must be an integer`),
+        }
+      );
+
+      assert.throws(
+        () => container.start({ instance: { ...custom, [field]: 2 ** 53 } }),
+        {
+          message: new RegExp(
+            `Container resource ${field} exceeds Number.MAX_SAFE_INTEGER`
+          ),
+        }
+      );
+    }
+  }
+
   async testInspectBeforeStart() {
     const container = this.ctx.container;
     if (container.running) {
@@ -2974,6 +3020,16 @@ export const testImageOverride = {
     );
     const stub = env.MY_CONTAINER.get(id);
     await stub.testImageOverride();
+  },
+};
+
+export const testInstanceTypeValidation = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testInstanceTypeValidation')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testInstanceTypeValidation();
   },
 };
 

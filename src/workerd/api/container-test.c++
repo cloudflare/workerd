@@ -11,6 +11,7 @@
 #include <workerd/util/stream-utils.h>
 
 #include <capnp/compat/byte-stream.h>
+#include <capnp/message.h>
 #include <kj/test.h>
 
 namespace workerd::api {
@@ -35,11 +36,41 @@ class TracingRequestObserver final: public RequestObserver {
   }
 };
 
+struct CapturedInstance {
+  bool isCustom = false;
+  kj::String named;
+  double vcpu = 0;
+  uint64_t memoryMib = 0;
+  uint64_t diskMb = 0;
+};
+
 class MockContainerServer final: public rpc::Container::Server {
  public:
+  explicit MockContainerServer(kj::Own<kj::PromiseFulfiller<CapturedInstance>> fulfiller)
+      : startFulfiller(kj::mv(fulfiller)) {}
   MockContainerServer(bool& directoryCalled, bool& containerCalled)
       : directoryCalled(directoryCalled),
         containerCalled(containerCalled) {}
+
+  kj::Promise<void> start(StartContext context) override {
+    auto instance = context.getParams().getInstance();
+    CapturedInstance captured;
+    switch (instance.which()) {
+      case rpc::Container::StartInstance::NAMED:
+        captured.named = kj::str(instance.getNamed());
+        break;
+      case rpc::Container::StartInstance::CUSTOM: {
+        auto custom = instance.getCustom();
+        captured.isCustom = true;
+        captured.vcpu = custom.getVcpu();
+        captured.memoryMib = custom.getMemoryMib();
+        captured.diskMb = custom.getDiskMb();
+        break;
+      }
+    }
+    KJ_REQUIRE_NONNULL(startFulfiller)->fulfill(kj::mv(captured));
+    return kj::READY_NOW;
+  }
 
   kj::Promise<void> snapshotDirectory(SnapshotDirectoryContext context) override {
     auto params = context.getParams();
@@ -47,7 +78,7 @@ class MockContainerServer final: public rpc::Container::Server {
     expectSpanContext(params.getSpanContext());
     KJ_EXPECT(params.getDir() == "/data");
     KJ_EXPECT(params.getName() == "directory-snapshot");
-    directoryCalled = true;
+    KJ_REQUIRE_NONNULL(directoryCalled) = true;
 
     auto snapshot = context.getResults().initSnapshot();
     snapshot.setId("directory-snapshot-id");
@@ -62,7 +93,7 @@ class MockContainerServer final: public rpc::Container::Server {
     KJ_EXPECT(params.hasSpanContext());
     expectSpanContext(params.getSpanContext());
     KJ_EXPECT(params.getName() == "container-snapshot");
-    containerCalled = true;
+    KJ_REQUIRE_NONNULL(containerCalled) = true;
 
     auto snapshot = context.getResults().initSnapshot();
     snapshot.setId("container-snapshot-id");
@@ -72,8 +103,9 @@ class MockContainerServer final: public rpc::Container::Server {
   }
 
  private:
-  bool& directoryCalled;
-  bool& containerCalled;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<CapturedInstance>>> startFulfiller;
+  kj::Maybe<bool&> directoryCalled;
+  kj::Maybe<bool&> containerCalled;
 };
 
 // Records the arguments passed to exec()/resize() so tests can assert the pty option is piped
@@ -496,6 +528,61 @@ TestFixture makeFixture() {
     .useRealTimers = false,
     .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
         []() -> kj::Own<RequestObserver> { return kj::refcounted<TracingRequestObserver>(); }),
+  });
+}
+
+KJ_TEST("Container::start forwards a named instance type") {
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setWorkerdExperimental(true);
+  auto fixture = TestFixture({.featureFlags = flags.asReader(), .useRealTimers = false});
+  auto paf = kj::newPromiseAndFulfiller<CapturedInstance>();
+  auto promise = kj::mv(paf.promise);
+
+  fixture.runInIoContext([promise = kj::mv(promise), fulfiller = kj::mv(paf.fulfiller)](
+                             const TestFixture::Environment& env) mutable {
+    auto container = kj::heap<Container>(
+        rpc::Container::Client(kj::heap<MockContainerServer>(kj::mv(fulfiller))), false);
+    container->start(env.js,
+        Container::StartupOptions{
+          .instance = kj::str("standard-1"),
+        });
+    return kj::mv(promise)
+        .then([](CapturedInstance captured) {
+      KJ_EXPECT(!captured.isCustom);
+      KJ_EXPECT(captured.named == "standard-1");
+    }).attach(kj::mv(container));
+  });
+}
+
+KJ_TEST("Container::start forwards custom instance resources") {
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setWorkerdExperimental(true);
+  auto fixture = TestFixture({.featureFlags = flags.asReader(), .useRealTimers = false});
+  auto paf = kj::newPromiseAndFulfiller<CapturedInstance>();
+  auto promise = kj::mv(paf.promise);
+
+  fixture.runInIoContext([promise = kj::mv(promise), fulfiller = kj::mv(paf.fulfiller)](
+                             const TestFixture::Environment& env) mutable {
+    auto container = kj::heap<Container>(
+        rpc::Container::Client(kj::heap<MockContainerServer>(kj::mv(fulfiller))), false);
+    container->start(env.js,
+        Container::StartupOptions{
+          .instance =
+              Container::StartResources{
+                .vcpu = 0.5,
+                .memoryMib = 4096,
+                .diskMb = 20000,
+              },
+        });
+    return kj::mv(promise)
+        .then([](CapturedInstance captured) {
+      KJ_EXPECT(captured.isCustom);
+      KJ_EXPECT(captured.vcpu == 0.5);
+      KJ_EXPECT(captured.memoryMib == 4096);
+      KJ_EXPECT(captured.diskMb == 20000);
+    }).attach(kj::mv(container));
   });
 }
 
