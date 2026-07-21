@@ -188,6 +188,24 @@ const E = {
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"attributes","info":[{"name":"jsrpc.method","value":"getCounter"}]}{"type":"log","level":"log","message":["bar"]}{"type":"log","level":"log","message":["getCounter called"]}{"type":"return"}{"type":"log","level":"log","message":["increment called on transient"]}{"type":"log","level":"log","message":["getValue called on transient"]}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
   jsrpcDoSubrequest:
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000001"}{"type":"spanOpen","name":"durable_object_subrequest","spanId":"0000000000000002"}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000003"}{"type":"attributes","info":[{"name":"objectId","value":"af6dd8b6678e07bac992dae1bbbb3f385af19ebae7e5ea8c66d6341b246d3328"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanClose","outcome":"ok"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  jsrpcDisposal:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"disposal","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000002"}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000003"}{"type":"spanClose","outcome":"ok"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  jsrpcNamedServiceBinding:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"namedServiceBinding","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  jsrpcPortAbortCall:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"portAbortCall","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"durable_object_subrequest","spanId":"0000000000000001"}{"type":"attributes","info":[{"name":"objectId","value":"000000000000000000000000000000002aae183609eb9745ae9a5bb18ffb4793"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"durable_object_subrequest","spanId":"0000000000000002"}{"type":"attributes","info":[{"name":"objectId","value":"0100000000000000000000000000000067d1138346e9d456110d9e5cdfb6d564"}]}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  jsrpcTestDispose:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"attributes","info":[{"name":"jsrpc.method","value":"leak"}]}{"type":"log","level":"log","message":["bar"]}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  jsrpcExceptionI:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"attributes","info":[{"name":"jsrpc.method","value":"neverReturn"}]}{"type":"log","level":"log","message":["bar"]}{"type":"exception","name":"Error","message":"The Workers runtime canceled this request because it detected that your Worker\'s code had hung and would never generate a response. Refer to: https://developers.cloudflare.com/workers/observability/errors/"}{"type":"outcome","outcome":"exception","cpuTime":0,"wallTime":0}',
+  jsrpcExceptionII:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"attributes","info":[{"name":"jsrpc.method","value":"leakButReturnPlainObject"}]}{"type":"log","level":"log","message":["bar"]}{"type":"return"}{"type":"exception","name":"Error","message":"The Workers runtime canceled this request because it detected that your Worker\'s code had hung and would never generate a response. Refer to: https://developers.cloudflare.com/workers/observability/errors/"}{"type":"outcome","outcome":"exception","cpuTime":0,"wallTime":0}',
+  jsrpcExceptionIII:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"attributes","info":[{"name":"jsrpc.method","value":"testDispose"}]}{"type":"log","level":"log","message":["bar"]}{"type":"return"}{"type":"exception","name":"Error","message":"The Workers runtime canceled this request because it detected that your Worker\'s code had hung and would never generate a response. Refer to: https://developers.cloudflare.com/workers/observability/errors/"}{"type":"outcome","outcome":"exception","cpuTime":0,"wallTime":0}',
+  jsrpcExceptionIV:
+    '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"MyActor","durableObjectId":"DO_ID","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"log","level":"log","message":["baz"]}{"type":"attributes","info":[{"name":"jsrpc.method","value":"makePostAbortCallTester"}]}{"type":"return"}{"type":"exception","name":"Error","message":"test aborted by abort()"}{"type":"outcome","outcome":"exception","cpuTime":0,"wallTime":0}',
+  jsrpcExceptionV:
+    '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"MyActor","durableObjectId":"DO_ID","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"log","level":"log","message":["baz"]}{"type":"attributes","info":[{"name":"jsrpc.method","value":"makePostAbortCallTester"}]}{"type":"return"}{"type":"exception","name":"Error","message":"test broken critical section","stack":"    at worker:144:13"}{"type":"exception","name":"Error","message":"test broken critical section","stack":"    at worker:144:13"}{"type":"outcome","outcome":"exception","cpuTime":0,"wallTime":0}',
 
   // cacheMode
   cacheMode:
@@ -274,6 +292,13 @@ const expected = [
     n(E.jsrpcGetCounter),
     n(E.jsrpcNonFunction),
   ]),
+  n(E.jsrpcNamedServiceBinding, [n(E.jsrpcExceptionI)]),
+  n(E.jsrpcDisposal, [
+    n(E.jsrpcExceptionII),
+    n(E.jsrpcExceptionIII),
+    n(E.jsrpcTestDispose),
+  ]),
+  n(E.jsrpcPortAbortCall, [n(E.jsrpcExceptionIV), n(E.jsrpcExceptionV)]),
 
   // http-test: main test handler with subrequest children
   n(E.httpTest, [

@@ -267,7 +267,6 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 - **NEVER** call `recursivelyFreeze()` on user-provided content (unsafe for cyclic values)
 - **NEVER** add new `Fetcher` methods without compat flag (conflicts with JS RPC wildcard)
 - **NEVER** change `Headers::Guard` enum values (serialized)
-- **NEVER** use `getWaitUntilTasks()` (use `addWaitUntil()`)
 - **NEVER** use boolean arguments; prefer `WD_STRONG_BOOL`
 - `Ref<T>` stored in C++ objects visible from JS heap **MUST** implement `visitForGc()`; C++ reference cycles are **NEVER** collected
 - SQLite `SQLITE_MISUSE` errors always throw (never suppressed); transactions disallowed in DO SQLite
