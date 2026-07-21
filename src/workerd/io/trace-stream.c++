@@ -526,8 +526,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const Log& log, StringCache& cache) {
   KJ_IF_SOME(slots, log.errorInfo) {
     // Emit as a positional JS array: each slot is either { name, message, stack? }
     // for arguments that were native Errors, or `null` for non-Error arguments.
-    auto arr = js.arr(slots.asPtr(),
-        [&cache](jsg::Lock& js, const kj::Maybe<ErrorInfo>& slot) -> jsg::JsValue {
+    auto arr = js.arr(
+        slots.asPtr(), [&cache](jsg::Lock& js, const kj::Maybe<ErrorInfo>& slot) -> jsg::JsValue {
       KJ_IF_SOME(info, slot) {
         auto errObj = js.obj();
         errObj.set(js, NAME_STR, cache.get(js, info.name));

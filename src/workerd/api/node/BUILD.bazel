@@ -1,6 +1,18 @@
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
+# Dependency-free header defining api::node::JsErrorType. Kept separate so it can
+# be shared with the Rust node-exceptions crate as a cxx extern enum without
+# creating a dependency cycle (the crate must not depend on anything that depends
+# on it). Do not add deps to this target.
+wd_cc_library(
+    name = "exception-type",
+    hdrs = [
+        "exception-type.h",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 wd_cc_library(
     name = "exceptions",
     srcs = [
@@ -11,7 +23,12 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":exception-type",
+        "//src/rust/jsg:ffi",
+        "//src/rust/node-exceptions",
         "//src/workerd/jsg",
+        "//src/workerd/util:autogate",
+        "@workerd-cxx//kj-rs",
     ],
 )
 
