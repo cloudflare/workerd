@@ -63,9 +63,10 @@ capnp::ByteStream::Client makeExecPipe(
   return factory.kjToCapnp(capnp::ExplicitEndOutputStream::wrap(kj::mv(output), []() {}));
 }
 
-class ContainerPortReadCanceler final: public kj::Refcounted {
+class ContainerPortConnectionState final: public kj::Refcounted {
  public:
-  ContainerPortReadCanceler(): ContainerPortReadCanceler(kj::newPromiseAndFulfiller<void>()) {}
+  ContainerPortConnectionState()
+      : ContainerPortConnectionState(kj::newPromiseAndFulfiller<void>()) {}
 
   kj::Promise<size_t> wrap(kj::Promise<size_t> read) {
     auto disconnect =
@@ -107,7 +108,7 @@ class ContainerPortReadCanceler final: public kj::Refcounted {
   }
 
  private:
-  explicit ContainerPortReadCanceler(kj::PromiseFulfillerPair<void> paf)
+  explicit ContainerPortConnectionState(kj::PromiseFulfillerPair<void> paf)
       : fulfiller(kj::mv(paf.fulfiller)),
         disconnected(paf.promise.fork()) {}
 
@@ -832,12 +833,12 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream {
  public:
   ContainerPortAsyncIoStream(kj::Own<kj::AsyncInputStream> input,
       kj::Own<capnp::ExplicitEndOutputStream> output,
-      kj::Rc<ContainerPortReadCanceler> readCanceler,
+      kj::Rc<ContainerPortConnectionState> connState,
       kj::Promise<void> connectTask,
       kj::Promise<void> outputWatchTask)
       : input(kj::mv(input)),
         output(kj::mv(output)),
-        readCanceler(kj::mv(readCanceler)),
+        connState(kj::mv(connState)),
         connectTask(connectTask.eagerlyEvaluate(nullptr)),
         outputWatchTask(outputWatchTask.eagerlyEvaluate(nullptr)) {}
 
@@ -846,7 +847,7 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream {
   }
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return readCanceler->wrap(KJ_REQUIRE_NONNULL(input)->tryRead(buffer, minBytes, maxBytes));
+    return connState->wrap(KJ_REQUIRE_NONNULL(input)->tryRead(buffer, minBytes, maxBytes));
   }
 
   kj::Maybe<uint64_t> tryGetLength() override {
@@ -862,11 +863,11 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream {
   }
 
   kj::Promise<void> whenWriteDisconnected() override {
-    return readCanceler->whenWriteDisconnected();
+    return connState->whenWriteDisconnected();
   }
 
   kj::Promise<void> whenDisconnected() {
-    return readCanceler->whenDisconnected();
+    return connState->whenDisconnected();
   }
 
   void shutdownWrite() override {
@@ -884,20 +885,20 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream {
   }
 
   void abortRead() override {
-    readCanceler->disconnect(KJ_EXCEPTION(DISCONNECTED, "Container port connection read aborted."));
+    connState->disconnect(KJ_EXCEPTION(DISCONNECTED, "Container port connection read aborted."));
     input = kj::none;
   }
 
  private:
   kj::Maybe<kj::Own<kj::AsyncInputStream>> input;
   kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> output;
-  kj::Rc<ContainerPortReadCanceler> readCanceler;
+  kj::Rc<ContainerPortConnectionState> connState;
   kj::Promise<void> connectTask;
   kj::Promise<void> outputWatchTask;
 
   kj::Promise<void> propagateWriteFailure(kj::Promise<void> promise) {
     return promise.catch_([this](kj::Exception&& exception) -> kj::Promise<void> {
-      readCanceler->disconnect(exception.clone());
+      connState->disconnect(exception.clone());
       return kj::mv(exception);
     });
   }
@@ -911,32 +912,36 @@ class ContainerPortNetworkAddress final: public kj::NetworkAddress {
         port(kj::mv(port)),
         failed(kj::rc<bool>(false)) {}
 
-  kj::Promise<kj::Own<kj::AsyncIoStream>> connect() override {
+  // Establishes a new connection to the container port, returning the concrete stream type so
+  // callers that need `ContainerPortAsyncIoStream`-specific behavior (e.g. `endWrite()`,
+  // `whenDisconnected()`) can avoid a downcast. The `connect()` override upcasts for the
+  // `kj::NetworkAddress` interface (used by the pooled `NetworkAddressHttpClient`).
+  kj::Own<ContainerPortAsyncIoStream> connectTyped() {
     auto req = port.connectRequest(capnp::MessageSize{4, 1});
     auto downPipe = kj::newOneWayPipe();
-    auto readCanceler = kj::rc<ContainerPortReadCanceler>();
-    auto down = capnp::ExplicitEndOutputStream::wrap(
-        kj::mv(downPipe.out), [readCanceler = readCanceler.addRef()]() mutable {
-      readCanceler->notifyUncleanDisconnect();
-    });
+    auto connState = kj::rc<ContainerPortConnectionState>();
+    auto down = capnp::ExplicitEndOutputStream::wrap(kj::mv(downPipe.out),
+        [connState = connState.addRef()]() mutable { connState->notifyUncleanDisconnect(); });
     req.setDown(byteStreamFactory.kjToCapnp(kj::mv(down)));
     auto pipeline = req.send();
     { auto drop = kj::mv(req); }
 
     auto up = byteStreamFactory.capnpToKjExplicitEnd(pipeline.getUp());
-    auto outputWatchTask =
-        up->whenWriteDisconnected().then([readCanceler = readCanceler.addRef()]() mutable {
-      readCanceler->notifyUncleanDisconnect();
-    });
-    auto connectTask = pipeline.then([readCanceler = readCanceler.addRef()](
-                                         auto&&) mutable { readCanceler->connectSucceeded(); },
-        [readCanceler = readCanceler.addRef(), failed = failed.addRef()](
+    auto outputWatchTask = up->whenWriteDisconnected().then(
+        [connState = connState.addRef()]() mutable { connState->notifyUncleanDisconnect(); });
+    auto connectTask = pipeline.then(
+        [connState = connState.addRef()](auto&&) mutable { connState->connectSucceeded(); },
+        [connState = connState.addRef(), failed = failed.addRef()](
             kj::Exception&& exception) mutable {
       *failed = true;
-      readCanceler->connectFailed(kj::mv(exception));
+      connState->connectFailed(kj::mv(exception));
     });
-    kj::Own<kj::AsyncIoStream> result = kj::heap<ContainerPortAsyncIoStream>(kj::mv(downPipe.in),
-        kj::mv(up), kj::mv(readCanceler), kj::mv(connectTask), kj::mv(outputWatchTask));
+    return kj::heap<ContainerPortAsyncIoStream>(kj::mv(downPipe.in), kj::mv(up), kj::mv(connState),
+        kj::mv(connectTask), kj::mv(outputWatchTask));
+  }
+
+  kj::Promise<kj::Own<kj::AsyncIoStream>> connect() override {
+    kj::Own<kj::AsyncIoStream> result = connectTyped();
     return kj::mv(result);
   }
 
@@ -977,20 +982,34 @@ class Container::TcpPortState {
       const kj::HttpHeaderTable& headerTable,
       rpc::Container::Port::Client port)
       : TcpPortState(byteStreamFactory, kj::mv(port)) {
-    client = kj::newHttpClient(timer, headerTable, address, {.entropySource = entropySource});
+    pooled.emplace(PooledPort{
+      .client = kj::newHttpClient(timer, headerTable, address, {.entropySource = entropySource}),
+    });
   }
 
+  // Establishes a new raw-socket connection, returning the concrete stream type so raw-socket
+  // pumping can call `endWrite()`/`whenDisconnected()` without a downcast.
+  kj::Own<ContainerPortAsyncIoStream> connectForRawSocket() {
+    return address.connectTyped();
+  }
+
+  // Used by the HTTP fallback path (non-pooled port, or one whose pooled client was
+  // invalidated), via `kj::newPromisedStream`.
   kj::Promise<kj::Own<kj::AsyncIoStream>> connect() {
     return address.connect();
   }
 
   void invalidate() {
-    invalidated = true;
+    KJ_IF_SOME(p, pooled) {
+      p.invalidated = true;
+    }
   }
 
   kj::Maybe<kj::HttpClient&> getHttpClient() {
-    if (invalidated) return kj::none;
-    return client.map([](kj::Own<kj::HttpClient>& client) -> kj::HttpClient& { return *client; });
+    KJ_IF_SOME(p, pooled) {
+      if (!p.invalidated) return *p.client;
+    }
+    return kj::none;
   }
 
   void markPortFailed() {
@@ -1002,9 +1021,16 @@ class Container::TcpPortState {
   }
 
  private:
+  // Present only for pooled ports (the CONTAINER_TUNNEL_REUSE autogate): a persistent HTTP client
+  // that reuses connections across requests. `invalidated` is set when the container lifecycle
+  // changes such that pooled reuse must stop; thereafter a fresh connection is formed per request.
+  struct PooledPort {
+    kj::Own<kj::HttpClient> client;
+    bool invalidated = false;
+  };
+
   ContainerPortNetworkAddress address;
-  kj::Maybe<kj::Own<kj::HttpClient>> client;
-  bool invalidated = false;
+  kj::Maybe<PooledPort> pooled;
 };
 
 void Container::invalidateTcpPortStates() {
@@ -1107,8 +1133,8 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
 
   // Connect to the port and pump bytes to/from `connection`.
   kj::Promise<void> connectImpl(kj::Own<kj::AsyncIoStream> connection) {
-    auto portConnection = co_await portState->connect();
-    auto& portStream = kj::downcast<ContainerPortAsyncIoStream>(*portConnection);
+    auto portConnection = portState->connectForRawSocket();
+    auto& portStream = *portConnection;
 
     auto downPumpTask =
         portConnection->pumpTo(*connection).then([&connection](uint64_t) -> kj::Promise<void> {
