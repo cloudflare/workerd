@@ -1011,7 +1011,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   JsRpcTargetBase(IoContext& ctx, MayOutliveIncomingRequest)
       : durableObjectId(getCurrentDurableObjectId()),
         enterIsolateAndCall(ctx.makeReentryCallback<IoContext::TOP_UP>(
-            [this, &ctx](Worker::Lock& lock, CallContext callContext) {
+            [this](Worker::Lock& lock, IoContext& ctx, CallContext callContext) {
               return callImpl(lock, ctx, callContext);
             })),
         externalPusher(ctx.getExternalPusher()) {}
