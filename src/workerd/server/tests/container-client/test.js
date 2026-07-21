@@ -30,7 +30,7 @@ export class DurableObjectExample extends DurableObject {
   async testExitCode() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -42,7 +42,7 @@ export class DurableObjectExample extends DurableObject {
         entrypoint: ['node', 'nonexistant.js'],
       });
 
-      let exitCode = undefined;
+      let exitCode;
       await container.monitor().catch((err) => {
         exitCode = err.exitCode;
       });
@@ -57,7 +57,7 @@ export class DurableObjectExample extends DurableObject {
 
       await scheduler.wait(500);
 
-      let exitCode = undefined;
+      let exitCode;
       const monitor = container.monitor().catch((err) => {
         exitCode = err.exitCode;
       });
@@ -72,7 +72,7 @@ export class DurableObjectExample extends DurableObject {
   async testBasics() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
 
       await container.destroy();
       await monitor;
@@ -301,9 +301,7 @@ export class DurableObjectExample extends DurableObject {
     }
 
     // 12. Make sure Stdin EOF's by default if not set
-    {
-      await container.exec(['cat']).then((p) => p.output());
-    }
+    await container.exec(['cat']).then((p) => p.output());
 
     // 13. An already-aborted signal causes exec() to throw synchronously.
     {
@@ -372,7 +370,7 @@ export class DurableObjectExample extends DurableObject {
   async testSetInactivityTimeout(timeout) {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -605,7 +603,7 @@ export class DurableObjectExample extends DurableObject {
   async testLabels() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -730,7 +728,7 @@ export class DurableObjectExample extends DurableObject {
   async testInspectBeforeStart() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -744,7 +742,7 @@ export class DurableObjectExample extends DurableObject {
   async testInspectEmptyLabels() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -765,7 +763,7 @@ export class DurableObjectExample extends DurableObject {
   async testInspectAfterDestroy() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -788,7 +786,7 @@ export class DurableObjectExample extends DurableObject {
   async testLabelValidation() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -1052,7 +1050,7 @@ export class DurableObjectExample extends DurableObject {
   async testPidNamespace() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -1085,7 +1083,7 @@ export class DurableObjectExample extends DurableObject {
   async testSetEgressHttpWithInternet() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -2771,9 +2769,7 @@ export class TestService extends WorkerEntrypoint {
     }
 
     // Regular HTTP request
-    return new Response(
-      'hello binding: ' + this.ctx.props.id + ' ' + request.url
-    );
+    return new Response(`hello binding: ${this.ctx.props.id} ${request.url}`);
   }
 
   // Handle raw TCP connections forwarded by interceptOutboundTcp.
@@ -3171,7 +3167,7 @@ export const testSetEgressHttpWithInternet = {
     const id = env.MY_CONTAINER.idFromName(
       getRandomDurableObjectName('testSetEgressHttpWithInternet')
     );
-    let stub = env.MY_CONTAINER.get(id);
+    const stub = env.MY_CONTAINER.get(id);
     await stub.testSetEgressHttpWithInternet();
   },
 };
@@ -3182,7 +3178,7 @@ export const testSetEgressHttpNoInternet = {
     const id = env.MY_CONTAINER.idFromName(
       getRandomDurableObjectName('testSetEgressHttpNoInternet')
     );
-    let stub = env.MY_CONTAINER.get(id);
+    const stub = env.MY_CONTAINER.get(id);
     await stub.testSetEgressHttpNoInternet();
   },
 };
