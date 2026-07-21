@@ -644,9 +644,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // `func` is a function with a signature similar to:
   //
   //     template <typename... Params, typename Result>
-  //     jsg::Promise<Result> func(jsg::Lock& js, Params&&... params);
+  //     jsg::Promise<Result> func(jsg::Lock& js, IoContext& ctx, Params&&... params);
   //
   // (Optionally, the `jsg::Promise<Result>` can just be `Result` instead.)
+  //
+  // Like `ctx.run()`, the callback is passed a reference to the re-entered `IoContext`, so callers
+  // do not need to capture a (weak) reference to the context themselves. Capturing the context
+  // manually is error-prone: if the returned callback is destroyed on another thread (e.g. during
+  // isolate eviction), a captured `WeakRef` would race with the owning thread on its refcount.
   //
   // The returned lambda will a signature like:
   //
@@ -1694,18 +1699,16 @@ auto IoContext::makeReentryCallbackImpl(Func func, kj::Own<void> attachment) {
     return ctx.canceler.wrap(ctx.run(
         [&ioFunc, ... params = kj::fwd<decltype(params)>(params)](
             Worker::Lock& lock, IoContext& ctx) mutable {
-      using ResultType = kj::Decay<decltype(func(lock, kj::fwd<decltype(params)>(params)...))>;
+      using ResultType = kj::Decay<decltype(func(lock, ctx, kj::fwd<decltype(params)>(params)...))>;
 
       auto& func = *ioFunc;
 
       if constexpr (kj::isSameType<ResultType, void>()) {
-        (void)ctx;
-        func(lock, kj::fwd<decltype(params)>(params)...);
+        func(lock, ctx, kj::fwd<decltype(params)>(params)...);
       } else if constexpr (jsg::isPromise<ResultType>()) {
-        return ctx.awaitJs(lock, func(lock, kj::fwd<decltype(params)>(params)...));
+        return ctx.awaitJs(lock, func(lock, ctx, kj::fwd<decltype(params)>(params)...));
       } else {
-        (void)ctx;
-        return func(lock, kj::fwd<decltype(params)>(params)...);
+        return func(lock, ctx, kj::fwd<decltype(params)>(params)...);
       }
     },
         kj::mv(cs)));
