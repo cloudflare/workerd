@@ -18,6 +18,7 @@
 
 #include <kj/debug.h>
 
+#include <atomic>
 #include <cmath>
 #include <map>
 
@@ -156,6 +157,7 @@ IoContext::IoContext(ThreadContext& thread,
       worker(kj::mv(workerParam)),
       actor(actorParam),
       limitEnforcer(kj::mv(limitEnforcerParam)),
+      id(nextId()),
       threadId(getThreadId()),
       deleteQueue(kj::arc<DeleteQueue>()),
       cachePutSerializer(kj::READY_NOW),
@@ -1500,6 +1502,19 @@ bool IoContext::isCurrent() {
   return this == threadLocalRequest;
 }
 
+IoContext::Id IoContext::nextId() {
+  // Monotonically increasing, never reused. See getId().
+  static std::atomic<uint64_t> counter{0};
+  return Id(counter.fetch_add(1, std::memory_order_relaxed));
+}
+
+bool IoContext::Id::isCurrent() const {
+  KJ_IF_SOME(ctx, IoContext::tryCurrent()) {
+    return ctx.getId() == *this;
+  }
+  return false;
+}
+
 void IoContext::setEntrypointHandler(jsg::Lock& js, jsg::JsObject handler) {
   KJ_IF_SOME(_, entrypointHandler) {
     KJ_FAIL_REQUIRE("entrypoint handler has already been set");
@@ -1617,13 +1632,10 @@ void IoContext::requireCurrentOrThrowJs() {
   }
 }
 
-void IoContext::requireCurrentOrThrowJs(WeakRef& weak) {
-  KJ_IF_SOME(ctx, weak.tryGet()) {
-    if (ctx.isCurrent()) {
-      return;
-    }
+void IoContext::requireCurrentOrThrowJs(Id id) {
+  if (!id.isCurrent()) {
+    throwNotCurrentJsError();
   }
-  throwNotCurrentJsError();
 }
 
 void IoContext::throwNotCurrentJsError(kj::Maybe<const std::type_info&> maybeType) {

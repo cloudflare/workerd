@@ -453,6 +453,31 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // True if this is the IoContext for the current thread (same as `hasCurrent() && tcx == current()`).
   bool isCurrent();
 
+  // A process-unique identifier assigned to each IoContext at construction. IDs are monotonically
+  // increasing and never reused, so a captured Id can be compared against the current IoContext's
+  // Id to determine whether execution is happening in the same context -- without retaining a
+  // (possibly dangling) reference to the IoContext. Prefer this over holding a WeakRef when all
+  // that's needed is a "same IoContext" identity check.
+  class Id final {
+   public:
+    // Returns true if this Id identifies the IoContext that is current on this thread. This is
+    // false if there is no current IoContext, or if the current IoContext is a different one (e.g.
+    // because the IoContext this Id was taken from has since been destroyed -- ids are never
+    // reused, so a stale id can never alias a live context).
+    bool isCurrent() const;
+
+    bool operator==(const Id& other) const = default;
+
+   private:
+    constexpr explicit Id(uint64_t value): value(value) {}
+    uint64_t value;
+    friend class IoContext;
+  };
+
+  Id getId() const {
+    return id;
+  }
+
   void setEntrypointHandler(jsg::Lock& js, jsg::JsObject handler);
   jsg::JsObject getEntrypointHandler(jsg::Lock& js);
 
@@ -495,8 +520,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // If there is a current IoContext, return its WeakRef.
   static kj::Maybe<kj::Own<WeakRef>> tryGetWeakRefForCurrent();
 
-  // Like requireCurrentOrThrowJs() but works on a WeakRef.
-  static void requireCurrentOrThrowJs(WeakRef& weak);
+  // Like requireCurrentOrThrowJs() but checks whether the IoContext identified by `id` is the
+  // current one. Takes an Id rather than a WeakRef so callers need not retain a reference to the
+  // (possibly destroyed) IoContext.
+  static void requireCurrentOrThrowJs(Id id);
 
   // Just throw the error that requireCurrentOrThrowJs() would throw on failure.
   [[noreturn]] static void throwNotCurrentJsError(
@@ -1075,6 +1102,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   capnp::CapabilityServerSet<capnp::DynamicCapability> localCapSet;
 
   bool failOpen = false;
+
+  // Allocates the next process-unique IoContext Id. See getId().
+  static Id nextId();
+
+  // Process-unique identifier for this IoContext. See getId().
+  const Id id;
 
   // For debug checks.
   void* threadId;
