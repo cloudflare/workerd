@@ -689,8 +689,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     // we throw a DISCONNECTED exception: this keeps it out of Sentry (see isInterestingException())
     // and lets the source side treat it as the peer simply going away.
     IoContext& ioContext = ([&]() -> IoContext& {
-      KJ_IF_SOME(ctx, weakIoContext->tryGet()) {
-        return ctx;
+      KJ_IF_SOME(ctx, weakIoContext) {
+        return *ctx;
       }
       kj::throwFatalException(KJ_EXCEPTION(DISCONNECTED,
           "The destination object for this tail session no longer exists.", doneReceiving));
@@ -731,8 +731,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       })();
 
       if (ioContext.hasOutputGate()) {
-        return result.then([weakIoContext = weakIoContext->addRef()]() mutable {
-          return KJ_REQUIRE_NONNULL(weakIoContext->tryGet()).waitForOutputLocks();
+        return result.then([weakIoContext = weakIoContext.addRef()]() mutable {
+          return KJ_REQUIRE_NONNULL(weakIoContext)->waitForOutputLocks();
         });
       } else {
         return kj::mv(result);
@@ -997,7 +997,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     return kj::READY_NOW;
   }
 
-  kj::Own<IoContext::WeakRef> weakIoContext;
+  kj::WeakRc<IoContext> weakIoContext;
   kj::Maybe<kj::StringPtr> entrypointNamePtr;
   kj::Maybe<Worker::VersionInfo> versionInfo;
   Frankenvalue props;

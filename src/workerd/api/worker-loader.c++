@@ -91,9 +91,9 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
     return getCode(js).then(js,
         [weakIoctx = ioctx.getWeakRef(), compatDateValidation](
             jsg::Lock& js, WorkerCode code) -> DynamicWorkerSource {
-      auto& ioctx = JSG_REQUIRE_NONNULL(weakIoctx->tryGet(), Error,
+      auto ioctx = JSG_REQUIRE_NONNULL(weakIoctx, Error,
           "The request which initiated this dynamic worker load has already completed.");
-      return toDynamicWorkerSource(js, ioctx, compatDateValidation, kj::mv(code));
+      return toDynamicWorkerSource(js, *ioctx, compatDateValidation, kj::mv(code));
     });
   });
 
