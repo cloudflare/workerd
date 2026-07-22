@@ -207,12 +207,26 @@ export class ServiceEntrypoint extends WorkerEntrypoint {
           }
         }
 
+        if (form.get('text_input')) {
+          // @ts-expect-error - form.get() returns FormDataEntryValue
+          obj['text_input'] = JSON.parse(form.get('text_input'));
+        }
+
         if (form.get('draw_image')) {
           const drawImages = [];
           for (const entry of form.getAll('draw_image')) {
             drawImages.push(await imageAsString(entry));
           }
           obj['draw_image'] = drawImages;
+        }
+
+        if (form.get('draw_text')) {
+          const drawTexts = [];
+          for (const entry of form.getAll('draw_text')) {
+            // @ts-expect-error - form.get() returns FormDataEntryValue
+            drawTexts.push(JSON.parse(entry));
+          }
+          obj['draw_text'] = drawTexts;
         }
 
         return Response.json(obj);

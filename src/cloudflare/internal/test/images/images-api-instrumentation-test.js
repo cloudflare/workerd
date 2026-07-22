@@ -39,6 +39,7 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.format': 'image/avif',
     closed: true,
   },
@@ -57,6 +58,7 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.format': 'image/avif',
     closed: true,
   },
@@ -75,6 +77,7 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
     'cloudflare.images.options.format': 'image/avif',
     closed: true,
@@ -94,6 +97,7 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
     'cloudflare.images.options.format': 'image/avif',
     closed: true,
@@ -113,6 +117,7 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
     'cloudflare.images.options.format': 'image/avif',
     closed: true,
@@ -132,6 +137,7 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
     'cloudflare.images.options.format': 'image/avif',
     closed: true,
@@ -151,6 +157,7 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
     'cloudflare.images.options.format': 'image/avif',
     closed: true,
@@ -170,6 +177,7 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
     'cloudflare.images.options.format': 'image/avif',
     closed: true,
@@ -189,6 +197,7 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
     'cloudflare.images.options.format': 'image/avif',
     closed: true,
@@ -208,6 +217,7 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.format': 'image/avif',
     closed: true,
   },
@@ -226,6 +236,7 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.format': 'image/avif',
     closed: true,
   },
@@ -244,6 +255,7 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.format': 'image/avif',
     closed: true,
   },
@@ -262,6 +274,7 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.format': 'image/avif',
     closed: true,
   },
@@ -280,6 +293,7 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.format': 'image/avif',
     closed: true,
   },
@@ -298,6 +312,7 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.format': 'image/avif',
     closed: true,
   },
@@ -311,6 +326,72 @@ const expectedSpans = [
       'multipart/form-data; boundary=<dynamic>',
     'http.response.status_code': 200n,
     'http.response.body.size': 63n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'text',
+    'cloudflare.images.options.transforms':
+      '[{"drawImageIndex":1,"targetImageIndex":0,"top":10,"left":10}]',
+    'cloudflare.images.overlays.image': 1,
+    'cloudflare.images.options.format': 'image/png',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 255n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
+    'cloudflare.images.options.transforms':
+      '[{"drawImageIndex":1,"targetImageIndex":0,"top":20,"left":10,"opacity":0.9}]',
+    'cloudflare.images.overlays.text': 1,
+    'cloudflare.images.options.format': 'image/png',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 236n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'text',
+    'cloudflare.images.options.transforms':
+      '[{"drawImageIndex":1,"targetImageIndex":0,"top":50,"left":50}]',
+    'cloudflare.images.overlays.text': 1,
+    'cloudflare.images.options.format': 'image/png',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 337n,
     closed: true,
   },
   {
@@ -399,8 +480,33 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
+    'cloudflare.images.options.transforms':
+      '[{"drawImageIndex":1,"targetImageIndex":0},{"drawImageIndex":2,"targetImageIndex":0},{"drawImageIndex":3,"targetImageIndex":0}]',
+    'cloudflare.images.overlays.text': 2,
+    'cloudflare.images.overlays.image': 1,
+    'cloudflare.images.options.format': 'image/jpeg',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 409n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.transforms':
       '[{"imageIndex":0,"rotate":90},{"imageIndex":1,"rotate":180},{"drawImageIndex":1,"targetImageIndex":0},{"drawImageIndex":3,"targetImageIndex":2},{"imageIndex":2,"rotate":270},{"drawImageIndex":2,"targetImageIndex":0},{"drawImageIndex":4,"targetImageIndex":0}]',
+    'cloudflare.images.overlays.image': 4,
     'cloudflare.images.options.format': 'image/avif',
     closed: true,
   },
@@ -419,6 +525,46 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'text',
+    'cloudflare.images.options.format': 'image/png',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 168n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'text',
+    'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
+    'cloudflare.images.options.format': 'image/png',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 194n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
     'cloudflare.images.options.format': 'image/avif',
     'cloudflare.images.options.anim': true,
@@ -439,6 +585,7 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
     'cloudflare.images.options.format': 'image/avif',
     'cloudflare.images.error.code': '123',
@@ -460,6 +607,7 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
     'cloudflare.images.options.format': 'image/avif',
     closed: true,
@@ -479,6 +627,7 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
     closed: true,
   },
   {

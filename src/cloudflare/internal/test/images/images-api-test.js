@@ -687,3 +687,207 @@ export const test_images_upload_base64_arraybuffer = {
     assert.notEqual(metadata.id, null);
   },
 };
+
+export const test_images_text_only = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .text({
+        text: 'Hello World',
+        font: { url: 'https://example.com/font.ttf' },
+        size: 48,
+        color: '#FF0000',
+      })
+      .output({ format: 'image/png' });
+
+    const body = await result.response().json();
+    assert.deepStrictEqual(body.text_input, {
+      text: 'Hello World',
+      font: { url: 'https://example.com/font.ttf' },
+      size: 48,
+      color: '#FF0000',
+    });
+    assert.equal(body.output_format, 'image/png');
+  },
+};
+
+export const test_images_text_with_transform = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .text({
+        text: 'Rotated Text',
+        font: { url: 'https://example.com/font.ttf' },
+        size: 64,
+        color: 'blue',
+      })
+      .transform({ rotate: 90 })
+      .output({ format: 'image/png' });
+
+    const body = await result.response().json();
+    assert.deepStrictEqual(body.text_input, {
+      text: 'Rotated Text',
+      font: { url: 'https://example.com/font.ttf' },
+      size: 64,
+      color: 'blue',
+    });
+    assert.deepStrictEqual(body.transforms, [{ rotate: 90, imageIndex: 0 }]);
+  },
+};
+
+export const test_images_draw_text_on_image = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .input(inputStream(['png']))
+      .draw(
+        env.images.text({
+          text: 'Overlay',
+          font: { url: 'https://example.com/font.ttf' },
+          size: 72,
+          color: 'red',
+        }),
+        { top: 20, left: 10, opacity: 0.9 }
+      )
+      .output({ format: 'image/png' });
+
+    const body = await result.response().json();
+    assert.equal(body.image, 'png');
+    assert.deepStrictEqual(body.draw_text, [
+      {
+        text: 'Overlay',
+        font: { url: 'https://example.com/font.ttf' },
+        size: 72,
+        color: 'red',
+      },
+    ]);
+  },
+};
+
+export const test_images_draw_image_on_text = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .text({
+        text: 'Background Text',
+        font: { url: 'https://example.com/font.ttf' },
+        size: 100,
+        color: '#0000FF',
+      })
+      .draw(env.images.input(inputStream(['logo'])), {
+        top: 10,
+        left: 10,
+      })
+      .output({ format: 'image/png' });
+
+    const body = await result.response().json();
+    assert.deepStrictEqual(body.text_input, {
+      text: 'Background Text',
+      font: { url: 'https://example.com/font.ttf' },
+      size: 100,
+      color: '#0000FF',
+    });
+    assert.deepStrictEqual(body.draw_image, ['logo']);
+  },
+};
+
+export const test_images_draw_text_on_text = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .text({
+        text: 'Background',
+        font: { url: 'https://example.com/bg-font.ttf' },
+        size: 100,
+        color: 'blue',
+      })
+      .draw(
+        env.images.text({
+          text: 'Foreground',
+          font: { url: 'https://example.com/fg-font.ttf' },
+          size: 50,
+          color: 'red',
+        }),
+        { top: 50, left: 50 }
+      )
+      .output({ format: 'image/png' });
+
+    const body = await result.response().json();
+    assert.deepStrictEqual(body.text_input, {
+      text: 'Background',
+      font: { url: 'https://example.com/bg-font.ttf' },
+      size: 100,
+      color: 'blue',
+    });
+    assert.deepStrictEqual(body.draw_text, [
+      {
+        text: 'Foreground',
+        font: { url: 'https://example.com/fg-font.ttf' },
+        size: 50,
+        color: 'red',
+      },
+    ]);
+  },
+};
+
+export const test_images_mixed_overlays = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .input(inputStream(['product']))
+      .draw(inputStream(['logo']))
+      .draw(
+        env.images.text({
+          text: 'SALE!',
+          font: { url: 'https://example.com/bold.ttf' },
+          size: 72,
+          color: '#FF0000',
+        })
+      )
+      .draw(
+        env.images.text({
+          text: '50% OFF',
+          font: { url: 'https://example.com/bold.ttf' },
+          size: 48,
+          color: '#FFD700',
+        })
+      )
+      .output({ format: 'image/jpeg' });
+
+    const body = await result.response().json();
+    assert.equal(body.image, 'product');
+    assert.deepStrictEqual(body.draw_image, ['logo']);
+    assert.deepStrictEqual(body.draw_text, [
+      {
+        text: 'SALE!',
+        font: { url: 'https://example.com/bold.ttf' },
+        size: 72,
+        color: '#FF0000',
+      },
+      {
+        text: '50% OFF',
+        font: { url: 'https://example.com/bold.ttf' },
+        size: 48,
+        color: '#FFD700',
+      },
+    ]);
+  },
+};
