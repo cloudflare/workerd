@@ -43,7 +43,7 @@ const unitTests :Workerd.Config = (
             name = "connect-handler-test-local-address-endpoint",
             entrypoint = "LocalAddressEndpoint")),
         ],
-        streamingTails = ["log"],
+        streamingTails = ["log", "tail-worker-throwing"],
       )
     ),
     ( name = "connect-handler-test-local-address-endpoint",
@@ -96,7 +96,16 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "tail-worker-test-no-op.js")
         ],
       ),
-    )
+    ),
+    ( name = "tail-worker-throwing",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "tail-worker-test-throw.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat_v2"],
+        streamingTails = ["log"],
+      )
+    ),
   ],
   sockets = [
     (name = "tcp", address = "*:8081", tcp = (), service = "connect-handler-test"),

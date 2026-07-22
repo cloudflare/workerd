@@ -178,6 +178,8 @@ const E = {
     '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"DurableObjectExample","durableObjectId":"DO_ID","scriptTags":[],"info":{"type":"hibernatableWebSocket","info":{"type":"message"}}}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
   wsClose:
     '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"DurableObjectExample","durableObjectId":"DO_ID","scriptTags":[],"info":{"type":"hibernatableWebSocket","info":{"type":"close","code":1000,"wasClean":true}}}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  wsThrow:
+    '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"DurableObjectExample","durableObjectId":"DO_ID","scriptTags":[],"info":{"type":"fetch","method":"GET","url":"http://example.com/throw","headers":[{"name":"upgrade","value":"websocket"}]}}{"type":"exception","name":"Error","message":"boom","stack":"    at DurableObjectExample.fetch (worker:25:13)"}{"type":"outcome","outcome":"exception","cpuTime":0,"wallTime":0}',
 
   // jsrpc
   myActorJsrpc:
@@ -260,6 +262,8 @@ const E = {
   // buffered tail worker traces
   trace:
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"trace","traces":[""]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  traceThrow:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"trace","traces":[]}}{"type":"exception","name":"Error","message":"boom","stack":"    at Function.<anonymous> (worker:11:13)"}{"type":"return"}{"type":"outcome","outcome":"exception","cpuTime":0,"wallTime":0}',
 };
 
 // Subrequest callees are children of their callers.
@@ -275,6 +279,7 @@ const expected = [
   // wsMessage and wsClose are children of wsHibernation because the trace context
   // was captured at acceptWebSocket() time and restored when the DO was woken up.
   n(E.wsHibernation, [n(E.wsMessage), n(E.wsClose)]),
+  n(E.wsThrow),
 
   // cacheMode: standalone
   n(E.cacheMode),
@@ -328,6 +333,12 @@ const expected = [
   // buffered tail worker traces
   n(E.trace),
   n(E.trace),
+
+  // traces of throwing tail worker
+  n(E.traceThrow),
+  n(E.traceThrow),
+  n(E.traceThrow),
+  n(E.traceThrow),
 ].sort((a, b) => a.events.localeCompare(b.events));
 
 // Sort children in expected trees to match buildTree's sort order.

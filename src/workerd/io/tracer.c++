@@ -422,6 +422,9 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
     LOG_PERIODICALLY(WARNING,
         "NOSENTRY reporting trace with exception outcome, but no actual exceptions",
         trace->eventInfo);
+  } else if (outcome != EventOutcome::EXCEPTION && !trace->exceptions.empty()) {
+    LOG_PERIODICALLY(WARNING, "NOSENTRY reporting trace with exceptions, but no exception outcome",
+        trace->eventInfo);
   }
 
   // Defer reporting the actual outcome event to the WorkerTracer destructor: The outcome is
