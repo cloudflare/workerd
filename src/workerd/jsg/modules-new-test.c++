@@ -1577,6 +1577,124 @@ KJ_TEST("ESM -> CJS -> require(ESM) -> static import CJS circular dependency fai
 
 // ======================================================================================
 
+KJ_TEST("Nested require() that pumps microtasks does not crash a sibling TLA module "
+        "(kEvaluatingAsync)") {
+  // Regression test for a V8 fatal CHECK: "status() >= kEvaluatingAsync".
+  //
+  // The entrypoint ESM (entry) statically imports a top-level-await module (leaf)
+  // and then a CJS module (pump). During entry's synchronous graph evaluation V8
+  // evaluates leaf first: leaf suspends at its await, becoming kEvaluatingAsync and
+  // recording entry as an async parent, while entry itself is still kEvaluating.
+  // V8 then evaluates pump, whose CJS body performs a nested require('trivial').
+  // That require() pumps the microtask queue -- which, before the fix, would run
+  // leaf's fulfillment callback while entry was still kEvaluating, driving
+  // SourceTextModule::AsyncModuleExecutionFulfilled -> GatherAvailableAncestors ->
+  // GetCycleRoot(entry) into a fatal CHECK.
+  //
+  // With the fix, the module loader inspects the module's evaluation promise before
+  // draining anything: a synchronous module (like trivial) resolves its promise
+  // during Evaluate() and is returned without any pump. A drain happens only for a
+  // genuinely-pending top-level await, and even then only when not nested inside
+  // another module's evaluation (js.isEvaluatingModule(), tracked by the RAII
+  // Lock::ModuleEvaluationScope around module->Evaluate()). So the nested
+  // require('trivial') never pumps, and entry's own top-level await is settled only
+  // after its Evaluate() returns at depth 0, when the graph is coherent.
+  PREAMBLE([&](Lock& js) {
+    ResolveObserverImpl observer;
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+
+    auto entry = kj::str("import { v } from 'leaf';\n"
+                         "import 'pump';\n"
+                         "export default v;\n");
+    bundleBuilder.addEsmModule("entry", entry, Module::Flags::MAIN);
+
+    // Top-level await: leaf's evaluation promise fulfills on a later microtask.
+    auto leaf = kj::str("await Promise.resolve();\n"
+                        "export const v = 1;\n");
+    bundleBuilder.addEsmModule("leaf", leaf);
+
+    // pump (CJS): its evaluation performs a nested require(), which pumps the
+    // microtask queue while entry is still kEvaluating.
+    auto pumpSrc = kj::str("require('trivial');\n");
+    bundleBuilder.addSyntheticModule("pump",
+        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(pumpSrc, "pump"_kj));
+
+    auto trivialSrc = kj::str("// nothing; require()-ing this pumps the microtask queue\n");
+    bundleBuilder.addSyntheticModule("trivial",
+        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(
+            trivialSrc, "trivial"_kj));
+
+    auto registry = ModuleRegistry::Builder(observer, BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    js.tryCatch([&] {
+      auto val = ModuleRegistry::resolve(js, "file:///entry", "default"_kjc);
+      KJ_ASSERT(val.isNumber());
+      auto num = KJ_ASSERT_NONNULL(val.tryCast<JsNumber>());
+      KJ_ASSERT(KJ_ASSERT_NONNULL(num.value(js)) == 1.0);  // leaf's v
+    }, [&](Value exception) { KJ_FAIL_ASSERT("resolve threw", kj::str(exception.getHandle(js))); });
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("A throwing module evaluation does not leak the evaluation depth") {
+  // Companion to the kEvaluatingAsync regression test above. Each module->Evaluate()
+  // is wrapped in a Lock::ModuleEvaluationScope (an evaluation-depth counter); the
+  // loader only settles a pending top-level await when js.isEvaluatingModule() is
+  // false (depth 0). This test guards the exception path: because the scope is RAII,
+  // its destructor must run on both normal and exceptional exit -- otherwise the
+  // depth would leak and the loader would treat itself as perpetually nested,
+  // refusing to settle any subsequent top-level await.
+  //
+  // The boom module's top-level throws. Afterwards a *subsequent* top-level require
+  // of a module whose top-level await settles synchronously must still succeed: if
+  // the depth had leaked, isEvaluatingModule() would remain true and the loader
+  // would throw the unsettled-top-level-await error instead of draining.
+  PREAMBLE([&](Lock& js) {
+    ResolveObserverImpl observer;
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+
+    auto boom = kj::str("throw new Error('boom');\n");
+    bundleBuilder.addEsmModule("boom", boom, Module::Flags::MAIN);
+
+    // Top-level await that settles within a single microtask drain. Requiring this at
+    // the top level must pump and resolve -- which only works if the depth is back at 0.
+    auto after = kj::str("await Promise.resolve();\n"
+                         "export const ok = 1;\n");
+    bundleBuilder.addEsmModule("after", after);
+
+    auto registry = ModuleRegistry::Builder(observer, BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    bool threw = false;
+    js.tryCatch([&] {
+      ModuleRegistry::resolve(js, "file:///boom", "default"_kjc);
+      JSG_FAIL_REQUIRE(Error, "Should have thrown");
+    }, [&](Value exception) {
+      threw = true;
+      auto str = kj::str(exception.getHandle(js));
+      KJ_ASSERT(str == "Error: boom", str);
+    });
+    KJ_ASSERT(threw);
+
+    // A throwing evaluation must not leave the evaluation depth leaked: a subsequent
+    // top-level require whose top-level await settles synchronously must resolve.
+    js.tryCatch([&] {
+      auto val = ModuleRegistry::resolve(js, "file:///after", "ok"_kjc);
+      KJ_ASSERT(val.isNumber());
+      auto num = KJ_ASSERT_NONNULL(val.tryCast<JsNumber>());
+      KJ_ASSERT(KJ_ASSERT_NONNULL(num.value(js)) == 1.0);
+    }, [&](Value exception) { KJ_FAIL_ASSERT("resolve threw", kj::str(exception.getHandle(js))); });
+  });
+}
+
+// ======================================================================================
+
 KJ_TEST("UNWRAP_DEFAULT returns namespace for bundle ESM, default for others") {
   PREAMBLE([&](Lock& js) {
     ResolveObserverImpl observer;

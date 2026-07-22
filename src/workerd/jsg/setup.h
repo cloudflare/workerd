@@ -160,6 +160,19 @@ class IsolateBase {
     return requested;
   }
 
+  inline void enterModuleEvaluation(kj::Badge<Lock>) {
+    ++moduleEvaluationDepth;
+  }
+
+  inline void leaveModuleEvaluation(kj::Badge<Lock>) {
+    KJ_ASSERT(moduleEvaluationDepth > 0);
+    --moduleEvaluationDepth;
+  }
+
+  inline bool isEvaluatingModule() const {
+    return moduleEvaluationDepth > 0;
+  }
+
   inline void setAllowEval(kj::Badge<Lock>, bool allow) {
     if (alwaysAllowEval) return;
     evalAllowed = allow;
@@ -429,6 +442,8 @@ class IsolateBase {
   bool usingEnhancedErrorSerialization = false;
   bool usingFastJsgStruct = false;
   bool extraMicrotaskCheckpointRequested = false;
+
+  uint moduleEvaluationDepth = 0;
 
   // Only used when the original module registry is used.
   bool throwOnUnrecognizedImportAssertion = false;
