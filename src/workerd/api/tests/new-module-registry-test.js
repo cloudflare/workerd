@@ -72,6 +72,9 @@ console.log(import.meta);
 strictEqual(import.meta.resolve('./.././test/.././.%2e/foo'), 'file:///foo');
 strictEqual(import.meta.resolve('foo'), 'file:///bundle/foo');
 
+// import.meta.resolve throws (never returns null) for an unparseable specifier.
+throws(() => import.meta.resolve('https://[bad'), { name: 'TypeError' });
+
 // There are four tests at this top level... one for the import of the node:assert
 // module without the node: prefix specifier, two for the imports of the foo and
 // bar modules from the worker, and one for the aliases node:fs module from the
@@ -184,6 +187,12 @@ strictEqual(mod7, 1);
 strictEqual(mod8, 1);
 strictEqual(mod9, 1);
 strictEqual(mod10, 1);
+
+// require() must resolve the same specifier forms as import(); a one-byte
+// (raw-byte UTF-8) specifier must not be double-encoded on the require path.
+strictEqual(myRequire('部品').default, 1);
+strictEqual(myRequire('\xE9\x83\xA8\xE5\x93\x81').default, 1);
+strictEqual(myRequire('%E9%83%A8%E5%93%81').default, 1);
 
 // The percent-encoded UTF-16 form of 部品 should not work.
 await rejects(import('%E8%90%C1%54'), {
