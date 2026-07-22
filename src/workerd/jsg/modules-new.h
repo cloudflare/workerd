@@ -188,6 +188,11 @@ namespace workerd::jsg::modules {
 //   up module compilation since the same compile cache can be used across all
 //   replicas.
 
+// Converts a V8 specifier string to a kj::String, handling one-byte strings
+// (which carry raw UTF-8 bytes) without double-encoding. Used by every
+// resolution path so require() and import() treat specifiers identically.
+kj::String specifierToString(jsg::Lock& js, v8::Local<v8::String> spec);
+
 // The ResolveContext identifies the module that is being resolved along with
 // other key bits of information that may be used to resolve the module.
 struct ResolveContext final {

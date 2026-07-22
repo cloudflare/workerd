@@ -17,6 +17,27 @@
 
 namespace workerd::jsg::modules {
 
+kj::String specifierToString(jsg::Lock& js, v8::Local<v8::String> spec) {
+  // Source files in workers end up being converted to UTF-8 bytes, so if the specifier
+  // string contains non-ASCII unicode characters, those will be directly encoded as UTF-8
+  // bytes, which unfortunately end up double-encoded if we try to read them using the
+  // regular js.toString() method. Doh! Fortunately they come through as one-byte strings,
+  // so we can detect that case and handle those correctly here.
+  if (spec->ContainsOnlyOneByte()) {
+    auto buf = kj::heapArray<char>(spec->Length() + 1);
+#if V8_MAJOR_VERSION >= 15
+    spec->WriteOneByte(js.v8Isolate, 0, spec->Length(), buf.asBytes().begin(),
+        v8::String::WriteFlags::kNullTerminate);
+#else
+    spec->WriteOneByteV2(js.v8Isolate, 0, spec->Length(), buf.asBytes().begin(),
+        v8::String::WriteFlags::kNullTerminate);
+#endif
+    KJ_ASSERT(buf[buf.size() - 1] == '\0');
+    return kj::String(kj::mv(buf));
+  }
+  return js.toString(spec);
+}
+
 namespace {
 // Returns kj::none if this given module is incapable of resolving the given
 // context. Otherwise, returns the module.
@@ -41,27 +62,6 @@ kj::Maybe<const Url&> maybeRedirectNodeProcess(Lock& js, const Url& spec) {
     return isNodeJsProcessV2Enabled(js) ? publicProcess : legacyProcess;
   }
   return kj::none;
-}
-
-kj::String specifierToString(jsg::Lock& js, v8::Local<v8::String> spec) {
-  // Source files in workers end up being converted to UTF-8 bytes, so if the specifier
-  // string contains non-ASCII unicode characters, those will be directly encoded as UTF-8
-  // bytes, which unfortunately end up double-encoded if we try to read them using the
-  // regular js.toString() method. Doh! Fortunately they come through as one-byte strings,
-  // so we can detect that case and handle those correctly here.
-  if (spec->ContainsOnlyOneByte()) {
-    auto buf = kj::heapArray<char>(spec->Length() + 1);
-#if V8_MAJOR_VERSION >= 15
-    spec->WriteOneByte(js.v8Isolate, 0, spec->Length(), buf.asBytes().begin(),
-        v8::String::WriteFlags::kNullTerminate);
-#else
-    spec->WriteOneByteV2(js.v8Isolate, 0, spec->Length(), buf.asBytes().begin(),
-        v8::String::WriteFlags::kNullTerminate);
-#endif
-    KJ_ASSERT(buf[buf.size() - 1] == '\0');
-    return kj::String(kj::mv(buf));
-  }
-  return js.toString(spec);
 }
 
 // Ensure that the given module has been instantiated or errored.
@@ -996,11 +996,10 @@ void importMeta(
           KJ_IF_SOME(resolved, Url::tryParse(specifier.asPtr(), href)) {
             auto normalized = resolved.clone(Url::EquivalenceOption::NORMALIZE_PATH);
             return js.str(normalized.getHref());
-          } else {
-            // If the specifier could not be parsed and resolved successfully,
-            // the spec says to return null.
-            return js.null();
           }
+          // Node.js/HTML import.meta.resolve throws when the specifier cannot be
+          // resolved to a URL; it must not return null.
+          js.throwException(js.typeError(kj::str("Invalid module specifier: ", specifier)));
         });
 
         if (meta->CreateDataProperty(
