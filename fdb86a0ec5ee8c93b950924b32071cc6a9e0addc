@@ -1,0 +1,20 @@
+src/workerd/io/worker-entrypoint.c++
+  s_b89908ec6702ef::t_2ef6c7a4f15047 567-572
+  s_b89908ec6702ef::t_4ef7924e468fd4 573-574
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fdb86a0ec5ee8c93b950924b32071cc6a9e0addc",
+  "prompts": {},
+  "sessions": {
+    "s_b89908ec6702ef": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_099438990ffeWe36UqrxWBC8Si",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
