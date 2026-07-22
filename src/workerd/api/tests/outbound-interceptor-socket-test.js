@@ -61,6 +61,17 @@ export class OutboundInterceptor extends WorkerEntrypoint {
     return this.env.BACKEND.connect(host);
   }
 
+  // Connects to the backend requesting `secureTransport: 'starttls'` (so the connection is opened in
+  // plaintext with the option to upgrade later), awaits `opened`, and transfers the socket to the
+  // caller. Used to verify that a transferred socket cannot be upgraded to TLS.
+  async interceptConnectStartTls(host) {
+    const socket = this.env.BACKEND.connect(host, {
+      secureTransport: 'starttls',
+    });
+    await socket.opened;
+    return socket;
+  }
+
   // Connects to the half-close backend with the given `allowHalfOpen` option and transfers the
   // socket to the caller. The option must survive serialization so the transferred socket behaves
   // the same as a locally-created one.
@@ -104,6 +115,25 @@ export let interceptorForwardsSocket = {
     const socket = await env.INTERCEPTOR.interceptConnect('backend:5432');
     const echoed = await echoRoundTrip(socket, 'ping');
     assert.strictEqual(echoed, 'ping');
+  },
+};
+
+export let transferredSocketCannotStartTls = {
+  async test(ctrl, env) {
+    // The backend opens with `secureTransport: 'starttls'`, and that option survives serialization,
+    // so the transferred socket reports `secureTransport === 'starttls'`.
+    const socket =
+      await env.INTERCEPTOR.interceptConnectStartTls('backend:5432');
+    assert.strictEqual(socket.secureTransport, 'starttls');
+
+    // But a transferred socket has no real TLS starter (Socket::deserialize installs an empty
+    // TlsStarterCallback and clears `domain`), so startTls() must reject cleanly with a TypeError
+    // rather than crashing. See Socket::startTls in api/sockets.c++.
+    assert.throws(() => socket.startTls(), {
+      name: 'TypeError',
+      message:
+        'startTls is not supported on a socket that was transferred over RPC.',
+    });
   },
 };
 

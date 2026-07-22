@@ -64,12 +64,17 @@ class TransferredSocketStream final: public kj::AsyncIoStream {
     // completes; dropping without end() would look like an abort to the peer. If there's no active
     // IoContext (e.g. during teardown), just drop, which the ByteStream treats as an abort.
     KJ_IF_SOME(out, output) {
+      if (!IoContext::hasCurrent()) {
+        output = kj::none;
+        return;
+      }
       auto owned = kj::mv(out);
       output = kj::none;
-      if (IoContext::hasCurrent()) {
-        IoContext::current().addTask(
-            owned->end().attach(kj::mv(owned)).catch_([](kj::Exception&&) {}));
-      }
+      IoContext::current().addTask(owned->end().attach(kj::mv(owned)).catch_([](kj::Exception&& e) {
+        // end() failing is non-fatal (the socket is being shut down anyway), so we don't propagate
+        // the exception, but surface it periodically rather than swallowing it silently.
+        LOG_ERROR_PERIODICALLY("Transferred socket shutdownWrite end() failed", e);
+      }));
     }
   }
 
@@ -191,12 +196,22 @@ kj::Maybe<uint64_t> getWritableHighWaterMark(jsg::Optional<SocketOptions>& opts)
 // Awaits a write-disconnect on `connection` and reports it through `fulfiller`: fulfills false when
 // the peer disconnects, or rejects on error.
 kj::Promise<void> handleDisconnected(
-    kj::AsyncIoStream& connection, kj::PromiseFulfiller<bool>& fulfiller) {
-  try {
+    kj::AsyncIoStream& connection, kj::Own<kj::PromiseFulfiller<bool>> fulfiller) {
+  // If this coroutine is canceled before it settles the fulfiller -- i.e. the Socket was GC'd before
+  // whenWriteDisconnected() resolved -- fulfill with true so wireClosedToDisconnect() knows not to
+  // resolve `closed`. On the normal paths below the fulfiller is already settled by the time this
+  // runs, so `isWaiting()` is false and it becomes a no-op.
+  auto deferredCancel = kj::defer([&fulfiller]() {
+    if (fulfiller->isWaiting()) {
+      fulfiller->fulfill(true);
+    }
+  });
+  KJ_TRY {
     co_await connection.whenWriteDisconnected();
-    fulfiller.fulfill(false);
-  } catch (...) {
-    fulfiller.reject(kj::getCaughtExceptionAsKj());
+    fulfiller->fulfill(false);
+  }
+  KJ_CATCH(e) {
+    fulfiller->reject(kj::mv(e));
   }
 }
 
@@ -225,13 +240,7 @@ struct DisconnectWatcher {
 // Socket::wireClosedToDisconnect().
 DisconnectWatcher watchForDisconnect(kj::AsyncIoStream& connection) {
   auto paf = kj::newPromiseAndFulfiller<bool>();
-  auto& fulfiller = *paf.fulfiller;
-  auto deferredCancel = kj::defer([fulfiller = kj::mv(paf.fulfiller)]() mutable {
-    // The watch task was canceled without fulfilling the fulfiller (the Socket was GC'd); silently
-    // fulfill with true so wireClosedToDisconnect() knows not to resolve `closed`.
-    fulfiller->fulfill(true);
-  });
-  auto watchTask = handleDisconnected(connection, fulfiller).attach(kj::mv(deferredCancel));
+  auto watchTask = handleDisconnected(connection, kj::mv(paf.fulfiller));
   return DisconnectWatcher{.disconnected = kj::mv(paf.promise), .watchTask = kj::mv(watchTask)};
 }
 
@@ -436,7 +445,8 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   auto invalidOptKindMsg =
       "The `secureTransport` socket option must be set to 'starttls' for startTls to be used.";
   JSG_REQUIRE(secureTransport == SecureTransportKind::STARTTLS, TypeError, invalidOptKindMsg);
-  JSG_REQUIRE(domain != kj::none, TypeError, "startTls can only be called once.");
+  JSG_REQUIRE(domain != kj::none, TypeError,
+      "startTls is not supported on a socket that was transferred over RPC.");
 
   KJ_IF_SOME(opts, tlsOptions) {
     if (opts.expectedServerHostname != kj::none) {
@@ -627,26 +637,33 @@ void Socket::handleProxyError(jsg::Lock& js, kj::Exception e) {
 
 void Socket::trackOpenedState(jsg::Lock& js) {
   // whenResolved() creates a fresh branch off the `opened` promise without consuming
-  // `openedPromiseCopy` (which `close()` relies on). The branch settles in lockstep with `opened`.
-  openedPromiseCopy.whenResolved(js)
-      .then(js, [this, self = JSG_THIS](jsg::Lock&) { openedState = OpenedState::OPENED; },
-          [this, self = JSG_THIS](jsg::Lock&, jsg::Value&&) {
-    openedState = OpenedState::FAILED;
-  }).markAsHandled(js);
+  // `openedPromiseCopy` (which `close()` relies on).
+  //
+  // This branch merely observes `opened`; it does not settle in lockstep with it. Continuations run
+  // in registration order per-promise, so other consumers of `openedPromiseCopy` (e.g. `close()`,
+  // the writable opened-gate) may run before this branch updates `openedState`. That is harmless:
+  // the only reader of `openedState` is serialize(), which is invoked synchronously from user code
+  // (after the user awaits `socket.opened`), never from a continuation of this promise. So there is
+  // no re-entrant reader that could observe a stale PENDING value.
+  openedPromiseCopy.whenResolved(js).then(js, [self = JSG_THIS](jsg::Lock&) mutable {
+    self->openedState = OpenedState::OPENED;
+  }, [self = JSG_THIS](jsg::Lock&, jsg::Value&&) mutable {
+    self->openedState = OpenedState::FAILED;
+  });
 }
 
 void Socket::wireClosedToDisconnect(jsg::Lock& js, kj::Promise<bool> disconnected) {
   auto& context = IoContext::current();
   context.awaitIo(js, kj::mv(disconnected))
-      .then(js, [this, self = JSG_THIS](jsg::Lock& js, bool canceled) {
+      .then(js, [self = JSG_THIS](jsg::Lock& js, bool canceled) mutable {
     // Silently ignore the canceled case (the Socket was GC'd before disconnect) without resolving
     // anything. If the app actually awaited `closed`, JSG keeps the Socket alive until that promise
     // resolves, so we won't be canceled in that case.
     if (!canceled) {
-      closedResolver.resolve(js);
+      self->closedResolver.resolve(js);
     }
-  }, [this, self = JSG_THIS](jsg::Lock& js, jsg::Value exception) {
-    closedResolver.reject(js, exception.getHandle(js));
+  }, [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
+    self->closedResolver.reject(js, exception.getHandle(js));
   }).markAsHandled(js);
 }
 
@@ -711,6 +728,7 @@ void Socket::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   }
 
   // Serialize the socket metadata, referencing the stream externals
+  // The call to write is synchronous, so capturing this is safe.
   externalHandler->write(
       [this, remoteAddr = kj::str(remoteAddress), localAddr = mapCopyString(localAddress),
           transport = toRpcSecureTransport(secureTransport),
@@ -795,7 +813,7 @@ jsg::Ref<Socket> Socket::deserialize(
   // The underlying streams are bound to this IoContext (they disconnect when the RPC session's
   // JsRpcCustomEvent is canceled), so their pumpTo() must not be deferred past the context's
   // lifetime.
-  sysStreams.readable = newNoDeferredProxyReadableStream(kj::mv(sysStreams.readable), ioContext);
+  sysStreams.readable = newNoDeferredProxyReadableStream(ioContext, kj::mv(sysStreams.readable));
   auto readable = js.alloc<ReadableStream>(ioContext, kj::mv(sysStreams.readable));
 
   // Preserve the origin socket's half-open semantics: when allowHalfOpen is false, the write side is
@@ -851,8 +869,18 @@ jsg::Ref<Socket> Socket::deserialize(
   // invoke V8 and are therefore forbidden inside the deserialize scope (JS execution is disallowed
   // here). Defer them to microtasks that run once readValue() returns and JS execution is permitted
   // again. Wrapping the function and enqueuing the microtask do not themselves invoke JS, so both are
-  // safe here. The kj-side signals (onEof above and the disconnect watcher) were already set up, so
-  // no event can be missed while the microtasks are pending.
+  // safe here. (The jsg promise-based deferral primitives -- js.resolvedPromise().then() and
+  // ioContext.awaitIo() -- can't be used instead: both construct a jsg promise synchronously, which
+  // invokes V8 and aborts under this DisallowJavascriptExecutionScope.) The kj-side signals (onEof
+  // above and the disconnect watcher) were already set up, so no event can be missed while the
+  // microtasks are pending.
+  //
+  // The microtask bodies touch IoContext-bound state (wireClosedToDisconnect() calls
+  // IoContext::current(); `disconnected` below is an IoOwn that can only be dereferenced from within
+  // its owning IoContext). A raw microtask *usually* drains within this IoContext, but the isolate's
+  // microtask queue can in principle be drained with no active IoContext -- so both bodies bail out
+  // early if there is no current IoContext rather than crash. Skipping is safe: with no context the
+  // socket is being torn down, so there is nothing left to wire up.
   //
   // `disconnected` is a kj promise reachable from the JS-heap functor, so it is wrapped in an IoOwn
   // to be held safely.
@@ -860,12 +888,14 @@ jsg::Ref<Socket> Socket::deserialize(
   js.v8Isolate->EnqueueMicrotask(js.wrapSimpleFunction(js.v8Context(),
       JSG_VISITABLE_LAMBDA((self = socket.addRef(), disconnected = kj::mv(disconnectedOwn)), (self),
           (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& args) mutable {
+            if (!IoContext::hasCurrent()) return;
             self.get()->wireClosedToDisconnect(js, kj::mv(*disconnected));
           })));
   KJ_IF_SOME(p, eofPromise) {
     js.v8Isolate->EnqueueMicrotask(js.wrapSimpleFunction(js.v8Context(),
         JSG_VISITABLE_LAMBDA((self = socket.addRef(), eof = kj::mv(p)), (self, eof),
             (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& args) mutable {
+              if (!IoContext::hasCurrent()) return;
               self.get()->handleReadableEof(js, kj::mv(eof));
             })));
   }

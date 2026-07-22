@@ -560,6 +560,6 @@ private:
 // disconnects when the IoContext is destroyed (the JsRpcCustomEvent is canceled). See the
 // implementation in readable.c++ for details.
 kj::Own<ReadableStreamSource> newNoDeferredProxyReadableStream(
-    kj::Own<ReadableStreamSource> inner, IoContext& context);
+    IoContext& context, kj::Own<ReadableStreamSource> inner);
 
 }  // namespace workerd::api

@@ -679,7 +679,7 @@ class NoDeferredProxyReadableStream final: public ReadableStreamSource {
 }  // namespace
 
 kj::Own<ReadableStreamSource> newNoDeferredProxyReadableStream(
-    kj::Own<ReadableStreamSource> inner, IoContext& context) {
+    IoContext& context, kj::Own<ReadableStreamSource> inner) {
   return kj::heap<NoDeferredProxyReadableStream>(kj::mv(inner), context);
 }
 
@@ -757,7 +757,7 @@ jsg::Ref<ReadableStream> ReadableStream::deserialize(
   kj::Own<kj::AsyncInputStream> in = ioctx.getExternalPusher()->unwrapStream(rs.getStream());
 
   return js.alloc<ReadableStream>(
-      ioctx, newNoDeferredProxyReadableStream(newSystemStream(kj::mv(in), encoding, ioctx), ioctx));
+      ioctx, newNoDeferredProxyReadableStream(ioctx, newSystemStream(kj::mv(in), encoding, ioctx)));
 }
 
 kj::StringPtr ReaderImpl::jsgGetMemoryName() const {
