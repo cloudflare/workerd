@@ -4598,6 +4598,88 @@ KJ_TEST("Server: cached response") {
     cached)"_blockquote);
 }
 
+KJ_TEST("Server: re-put of raw cache.match() body resolves") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          cacheApiOutbound = "cache-outbound",
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    const cache = caches.default;
+                `    const cached = await cache.match(request);
+                `    if (cached === undefined) return new Response('MISS');
+                `    const put = cache.put(request, new Response(cached.body, cached));
+                `    const result = await Promise.race([
+                `      put.then(() => 'RESOLVED', (e) => 'REJECTED: ' + e),
+                `      scheduler.wait(5000).then(() => 'HUNG'),
+                `    ]);
+                `    return new Response(result);
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "cache-outbound", external = "cache-host" ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  auto getSubreq = test.receiveSubrequest("cache-host");
+  getSubreq.recv(R"(
+    GET / HTTP/1.1
+    Host: foo
+    Cache-Control: only-if-cached
+
+  )"_blockquote);
+  getSubreq.send(R"(
+    HTTP/1.1 200 OK
+    CF-Cache-Status: HIT
+    Cache-Control: max-age=300
+    Content-Length: 4
+
+    seed)"_blockquote);
+
+  {
+    auto putSubreq = test.receiveSubrequest("cache-host");
+    putSubreq.recv(R"(
+      PUT / HTTP/1.1
+      Content-Length: 92
+      Host: foo
+
+      HTTP/1.1 200 OK
+      Content-Length: 4
+      Cache-Control: max-age=300
+      CF-Cache-Status: HIT
+
+      seed)"_blockquote);
+    putSubreq.send(R"(
+      HTTP/1.1 204 No Content
+      Content-Length: 0
+
+    )"_blockquote);
+  }
+
+  // Advance past the 5-second hang-detection race in the worker.
+  test.wait(6);
+
+  conn.recvHttp200("RESOLVED");
+}
+
 KJ_TEST("Server: cache name is passed through to service") {
   TestServer test(R"((
     services = [

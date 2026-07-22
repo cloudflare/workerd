@@ -248,7 +248,26 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
       nativeInput.ensureIdentityEncoding();
     }
 
-    auto promise = nativeInput.inner->pumpTo(getInner()).ignoreResult();
+    // When the input advertises its length, pump exactly that length and then verify EOF with
+    // a direct read on the input. A single unbounded pump-to-EOF can deadlock: if the
+    // destination adopts the pump (e.g. kj's AsyncPipe) and its reader consumes exactly the
+    // expected number of bytes and then stops reading while keeping the read end open, no one
+    // ever issues the read that would observe the input's EOF, and the pump never settles.
+    // The explicit read still drains the input through EOF, so the producer observes clean
+    // completion rather than a mid-stream drop.
+    kj::Promise<void> promise = nullptr;
+    KJ_IF_SOME(length, nativeInput.inner->tryGetLength()) {
+      promise = nativeInput.inner->pumpTo(getInner(), length)
+                    .then([&input = *nativeInput.inner](uint64_t) {
+        auto buffer = kj::heap<kj::byte>();
+        auto read = input.tryRead(buffer.get(), 1, 1);
+        return read.attach(kj::mv(buffer));
+      }).then([](size_t n) {
+        JSG_REQUIRE(n == 0, TypeError, "Stream produced more data than its advertised length.");
+      });
+    } else {
+      promise = nativeInput.inner->pumpTo(getInner()).ignoreResult();
+    }
     if (end) {
       // TODO(cleanup): When KJ streams are refactored to have a general end(), this stupid switch
       //   can go away.
