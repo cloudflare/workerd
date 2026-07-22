@@ -42,10 +42,12 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
 
   // `getExternalPusherFunc` will be called at most once, the first time a stream is encountered in
   // serialization, to get the ExternalPusher that should be used.
-  RpcSerializerExternalHandler(
-      StubOwnership stubOwnership, rpc::JsValue::ExternalPusher::Client externalPusher)
+  RpcSerializerExternalHandler(StubOwnership stubOwnership,
+      rpc::JsValue::ExternalPusher::Client externalPusher,
+      kj::Maybe<TraceContextParent> originatingCall)
       : stubOwnership(stubOwnership),
-        externalPusher(kj::mv(externalPusher)) {}
+        externalPusher(kj::mv(externalPusher)),
+        originatingCall(kj::mv(originatingCall)) {}
 
   inline StubOwnership getStubOwnership() {
     return stubOwnership;
@@ -71,6 +73,10 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
 
   size_t size() {
     return externals.size();
+  }
+
+  kj::Maybe<TraceContextParent> getOriginatingCall() {
+    return originatingCall.map([](TraceContextParent& parent) { return parent.addRef(); });
   }
 
   // Add an object that will be released once the serialized value is no longer needed to handle
@@ -109,6 +115,10 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
  private:
   StubOwnership stubOwnership;
   rpc::JsValue::ExternalPusher::Client externalPusher;
+
+  // The jsRpcCall that exported capabilities in this payload, used to parent callbacks.
+  // Absent on untraced calls and serializer uses without an originating RPC.
+  kj::Maybe<TraceContextParent> originatingCall;
 
   kj::Vector<BuilderCallback> externals;
   kj::Vector<kj::Own<void>> stubDisposers;
@@ -439,15 +449,25 @@ class JsRpcProperty: public JsRpcClientProvider {
 // `JsRpcStub::sendJsRpc()`.
 class JsRpcStub: public JsRpcClientProvider {
  public:
-  // Only deserialize() needs ExternalMemoryAdjustment — it extracts a new capability from an RPC
-  // response, creating MembraneHook + forked promise allocations. The other callers (dup() and
-  // constructor()) just refcount existing capabilities or create local loopbacks.
-  JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient): capnpClient(kj::mv(capnpClient)) {}
-  JsRpcStub(
-      IoOwn<rpc::JsRpcTarget::Client> capnpClient, IoOwn<IoChannelFactory::RpcChannel> rpcChannel)
+  // Only deserialize() needs ExternalMemoryAdjustment for allocations made while extracting a new
+  // capability from an RPC response; dup() and constructor() do not create those allocations.
+
+  // These overloads accept an already-owned originatingCall so dup() can retain the parent in the
+  // current IoContext.
+  JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
+      kj::Maybe<IoOwn<TraceContextParent>> originatingCall)
       : capnpClient(kj::mv(capnpClient)),
-        rpcChannel(kj::mv(rpcChannel)) {}
-  JsRpcStub(IoOwn<IoChannelFactory::RpcChannel> rpcChannel): rpcChannel(kj::mv(rpcChannel)) {}
+        originatingCall(kj::mv(originatingCall)) {}
+  JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
+      IoOwn<IoChannelFactory::RpcChannel> rpcChannel,
+      kj::Maybe<IoOwn<TraceContextParent>> originatingCall)
+      : capnpClient(kj::mv(capnpClient)),
+        rpcChannel(kj::mv(rpcChannel)),
+        originatingCall(kj::mv(originatingCall)) {}
+  JsRpcStub(IoOwn<IoChannelFactory::RpcChannel> rpcChannel,
+      kj::Maybe<IoOwn<TraceContextParent>> originatingCall)
+      : rpcChannel(kj::mv(rpcChannel)),
+        originatingCall(kj::mv(originatingCall)) {}
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
       RpcStubDisposalGroup& disposalGroup,
       jsg::ExternalMemoryAdjustment externalMemoryAdjustment,
