@@ -150,6 +150,13 @@ struct TestFixture {
     worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) { callback(lock); });
   }
 
+  // Acquire a Worker::Lock synchronously without an IoContext.
+  template <typename Callback>
+  void enterWorkerLockSynchronously(Callback&& callback) {
+    worker->runInLockScope(
+        Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) { callback(lock); });
+  }
+
   kj::WaitScope& getWaitScope() {
     KJ_IF_SOME(ws, waitScope) {
       return ws;

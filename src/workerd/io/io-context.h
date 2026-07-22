@@ -440,17 +440,19 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     }
   }
 
-  // Returns the current IoContext for the thread.
+  // Returns the current IoContext for the V8 isolate entered on this thread.
   // Throws an exception if there is no current context (see hasCurrent() below).
   static IoContext& current();
 
   // Like current(), but returns kj::none if there is no current context.
   static kj::Maybe<IoContext&> tryCurrent();
 
-  // True if there is a current IoContext for the thread (current() will not throw).
+  // True if there is a current IoContext for the V8 isolate entered on this thread (current() will
+  // not throw).
   static bool hasCurrent();
 
-  // True if this is the IoContext for the current thread (same as `hasCurrent() && tcx == current()`).
+  // True if this is the IoContext for the V8 isolate entered on the current thread (same as
+  // `hasCurrent() && tcx == current()`).
   bool isCurrent();
 
   // A process-unique identifier assigned to each IoContext at construction. IDs are monotonically
