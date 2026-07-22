@@ -368,8 +368,9 @@ KJ_TEST("Read/Write TraceEventInfo works") {
   auto infoBuilder = builder.initRoot<rpc::Trace::TraceEventInfo>();
 
   kj::Vector<kj::Own<Trace>> items(1);
-  items.add(kj::heap<Trace>(kj::none, kj::str("foo"), kj::none, kj::none, kj::none,
-      kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS));
+  items.add(kj::rc<Trace>(kj::none, kj::str("foo"), kj::none, kj::none, kj::none,
+      kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS)
+                .toOwn());
 
   TraceEventInfo info(items.asPtr());
   info.copyTo(infoBuilder);
