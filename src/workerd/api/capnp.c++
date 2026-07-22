@@ -550,16 +550,16 @@ kj::Maybe<jsg::V8Ref<v8::Function>> CapnpServer::getCloseMethod(jsg::Lock& js) {
 
 CapnpServer::~CapnpServer() noexcept(false) {
   KJ_IF_SOME(c, closeMethod) {
-    ioContext->runIfAlive([&](IoContext& rc) {
-      rc.addTask(
-          rc.run([object = kj::mv(object), closeMethod = kj::mv(c)](Worker::Lock& lock) mutable {
+    KJ_IF_SOME(rc, ioContext) {
+      rc->addTask(
+          rc->run([object = kj::mv(object), closeMethod = kj::mv(c)](Worker::Lock& lock) mutable {
         auto handle = object.getHandle(lock);
         auto methodHandle = closeMethod.getHandle(lock);
         if (methodHandle->IsFunction()) {
           jsg::check(methodHandle.As<v8::Function>()->Call(lock.getContext(), handle, 0, nullptr));
         }
       }));
-    });
+    };
   }
 }
 
@@ -567,9 +567,9 @@ kj::Promise<void> CapnpServer::call(capnp::InterfaceSchema::Method method,
     capnp::CallContext<capnp::DynamicStruct, capnp::DynamicStruct> rpcContext) {
   kj::Promise<void> result = nullptr;
 
-  bool live = ioContext->runIfAlive([&](IoContext& rc) {
-    result = rc.run(
-        [this, method, rpcContext](Worker::Lock& lock, IoContext& rc) mutable -> kj::Promise<void> {
+  KJ_IF_SOME(rc, ioContext) {
+    result = rc->run([this, method, rpcContext](
+                         Worker::Lock& lock, IoContext& ctx) mutable -> kj::Promise<void> {
       jsg::Lock& js = lock;
       auto handle = object.getHandle(js);
       auto methodName = method.getProto().getName();
@@ -588,9 +588,9 @@ kj::Promise<void> CapnpServer::call(capnp::InterfaceSchema::Method method,
       auto result = jsg::check(
           methodHandle.As<v8::Function>()->Call(lock.getContext(), handle, 1, &jsParams));
       KJ_IF_SOME(promise, wrapper.tryUnwrapPromise(lock, lock.getContext(), result)) {
-        return rc.awaitJs(js,
+        return ctx.awaitJs(js,
             promise.then(
-                js, rc.addFunctor([this, rpcContext](jsg::Lock& js, jsg::Value result) mutable {
+                js, ctx.addFunctor([this, rpcContext](jsg::Lock& js, jsg::Value result) mutable {
           JsCapnpConverter converter{wrapper};
           converter.rpcResultsFromJs(js, rpcContext, result.getHandle(js));
         })));
@@ -600,9 +600,7 @@ kj::Promise<void> CapnpServer::call(capnp::InterfaceSchema::Method method,
         return kj::READY_NOW;
       }
     });
-  });
 
-  if (live) {
     return result;
   } else {
     return KJ_EXCEPTION(DISCONNECTED, "jsg.Error: Called to event context that is no longer live.");

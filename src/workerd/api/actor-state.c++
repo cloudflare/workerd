@@ -1048,7 +1048,7 @@ jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js,
     // participate in the cross-thread destruction race.
     return getStartupOptions(js).then(
         js, [weakIoctx = ioCtx.getWeakRef()](jsg::Lock& js, StartupOptions options) {
-      auto& ioCtx = JSG_REQUIRE_NONNULL(weakIoctx->tryGet(), Error,
+      auto ioCtx = JSG_REQUIRE_NONNULL(weakIoctx, Error,
           "The request which initiated this facet startup has already completed.");
       Worker::Actor::Id id;
       KJ_IF_SOME(i, options.id) {
@@ -1062,7 +1062,7 @@ jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js,
         }
       } else {
         // Child inherits parent ID.
-        id = ioCtx.getActorOrThrow().cloneId();
+        id = ioCtx->getActorOrThrow().cloneId();
       }
 
       DurableObjectClass& actorClass = [&]() -> DurableObjectClass& {
@@ -1081,7 +1081,7 @@ jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js,
       }();
 
       return Worker::Actor::FacetManager::StartInfo{
-        .actorClass = actorClass.getChannel(ioCtx),
+        .actorClass = actorClass.getChannel(*ioCtx),
         .id = kj::mv(id),
       };
     });

@@ -22,13 +22,13 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/exception.h>
 #include <workerd/util/uncaught-exception-source.h>
-#include <workerd/util/weak-refs.h>
 
 #include <capnp/dynamic.h>
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
 #include <kj/function.h>
 #include <kj/mutex.h>
+#include <kj/refcount.h>
 
 #include <concepts>
 
@@ -468,6 +468,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     // reused, so a stale id can never alias a live context).
     bool isCurrent() const;
 
+    // Checks whether the IoContext identified by this Id is the current one and throws js
+    // exception if it doesn't.
+    void requireCurrentOrThrowJs() const;
+
     bool operator==(const Id& other) const = default;
 
    private:
@@ -499,33 +503,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Like requireCurrent() but throws a JS error if this IoContext is not the current.
   void requireCurrentOrThrowJs();
 
-  // A WeakRef is a weak reference to a IoContext. Note that because IoContext is not
-  // itself ref-counted, we cannot follow the usual pattern of a weak reference that potentially
-  // converts to a strong reference. Instead, intended usage looks like so:
-  // ```
-  // auto& context = IoContext::current();
-  // return canOutliveContext().then([contextWeakRef = context.getWeakRef()]() mutable {
-  //   auto hadContext = contextWeakRef.runIfAlive([&](IoContext& context){
-  //     useContextFinally(context);
-  //   });
-  //   if (!hadContext) {
-  //     doWhatMustBeDone();
-  //   }
-  // });
-  // ```
-  using WeakRef = workerd::WeakRef<IoContext>;
-
-  kj::Own<WeakRef> getWeakRef() {
-    return kj::addRef(*selfRef);
+  kj::WeakRc<IoContext> getWeakRef() {
+    return addWeakToThis();
   }
 
   // If there is a current IoContext, return its WeakRef.
-  static kj::Maybe<kj::Own<WeakRef>> tryGetWeakRefForCurrent();
-
-  // Like requireCurrentOrThrowJs() but checks whether the IoContext identified by `id` is the
-  // current one. Takes an Id rather than a WeakRef so callers need not retain a reference to the
-  // (possibly destroyed) IoContext.
-  static void requireCurrentOrThrowJs(Id id);
+  static kj::WeakRc<IoContext> tryGetWeakRefForCurrent();
 
   // Just throw the error that requireCurrentOrThrowJs() would throw on failure.
   [[noreturn]] static void throwNotCurrentJsError(
@@ -1084,8 +1067,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
  private:
   ThreadContext& thread;
-
-  kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<IoContext>(), *this);
 
   kj::Maybe<kj::Own<TmpDirStoreScope>> tmpDirStoreScope;
 
@@ -1683,14 +1664,14 @@ auto IoContext::makeReentryCallbackImpl(Func func, kj::Own<void> attachment) {
 
   return [self = getWeakRef(), cs = getCriticalSection(), attachment = kj::mv(attachment),
              ioFunc = kj::mv(ioFunc)](auto&&... params) mutable {
-    auto& ctx = JSG_REQUIRE_NONNULL(self->tryGet(), Error,
-        "The execution context which hosts this callback is no longer running.");
+    auto ctx = JSG_REQUIRE_NONNULL(
+        self, Error, "The execution context which hosts this callback is no longer running.");
 
     if constexpr (topUp == TOP_UP) {
-      ctx.getLimitEnforcer().topUpActor();
+      ctx->getLimitEnforcer().topUpActor();
     }
 
-    return ctx.canceler.wrap(ctx.run(
+    return ctx->canceler.wrap(ctx->run(
         [&ioFunc, ... params = kj::fwd<decltype(params)>(params)](
             Worker::Lock& lock, IoContext& ctx) mutable {
       using ResultType = kj::Decay<decltype(func(lock, ctx, kj::fwd<decltype(params)>(params)...))>;
