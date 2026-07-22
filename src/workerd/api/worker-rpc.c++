@@ -443,7 +443,8 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
               ? RpcSerializerExternalHandler::DUPLICATE
               : RpcSerializerExternalHandler::TRANSFER;
 
-          RpcSerializerExternalHandler externalHandler(stubOwnership, client);
+          RpcSerializerExternalHandler externalHandler(
+              stubOwnership, client, jsRpcCallSpan.getSpanParentsIfObserved());
           serializeJsValue(js, jsg::JsValue(arr), externalHandler, [&](capnp::MessageSize hint) {
             // TODO(perf): Actually use the size hint.
             return builder.getOperation().initCallWithArgs();
@@ -1061,8 +1062,10 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   // Constructor used by TransientJsRpcTarget, which does not own the context. It needs to use
   // makeReentryCallback() to guard against the possibility that the IoContext is canceled before
   // or during a call.
-  JsRpcTargetBase(IoContext& ctx, MayOutliveIncomingRequest)
-      : enterIsolateAndCall(ctx.makeReentryCallback<IoContext::TOP_UP>(
+  JsRpcTargetBase(
+      IoContext& ctx, MayOutliveIncomingRequest, kj::Maybe<TraceContextParent> originatingCall)
+      : originatingCall(kj::mv(originatingCall)),
+        enterIsolateAndCall(ctx.makeReentryCallback<IoContext::TOP_UP>(
             [this, &ctx](Worker::Lock& lock, CallContext callContext) {
               return callImpl(lock, ctx, callContext);
             })),
@@ -1139,6 +1142,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
  private:
   virtual void maybeSetJsRpcInfo(IoContext& ctx, const kj::ConstString& methodNameForTrace) = 0;
 
+  kj::Maybe<TraceContextParent> originatingCall;
+
   // Function which enters the isolate lock and IoContext and then invokes callImpl(). Created
   // using IoContext::makeReentryCallback().
   kj::Function<kj::Promise<void>(CallContext callContext)> enterIsolateAndCall;
@@ -1179,15 +1184,25 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       }
     }
 
-    // Server-side jsRpcCall, attached to the dispatch promise below so it stays
-    // open through JS invocation and result serialization.
-    auto jsRpcCallSpan = ctx.makeUserTraceSpan("jsRpcCall"_kjc);
+    // Server-side jsRpcCall, nested under an exported capability's origin when available.
+    // It stays open through JS invocation and result serialization via the dispatch promise.
+    auto jsRpcCallSpan = [&]() -> TraceContext {
+      KJ_IF_SOME(parent, originatingCall) {
+        return parent.newChild("jsRpcCall"_kjc);
+      }
+      return ctx.makeUserTraceSpan("jsRpcCall"_kjc);
+    }();
     jsRpcCallSpan.setTag("jsrpc.method"_kjc, methodNameForTrace.asPtr());
     jsRpcCallSpan.setTag("jsrpc.target_kind"_kjc, getTargetKind());
     jsRpcCallSpan.setTag("jsrpc.operation"_kjc,
         params.getOperation().isGetProperty() ? "getProperty"_kjc : "call"_kjc);
 
     maybeSetJsRpcInfo(ctx, methodNameForTrace);
+
+    jsg::AsyncContextFrame::StorageScope traceScope =
+        ctx.makeAsyncTraceScope(lock, jsRpcCallSpan.getInternalSpanParent());
+    jsg::AsyncContextFrame::StorageScope userTraceScope =
+        ctx.makeUserAsyncTraceScope(lock, jsRpcCallSpan.getUserSpanParent());
 
     auto targetInfo = getTargetInfo(lock, ctx);
 
@@ -1627,9 +1642,12 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
 class TransientJsRpcTarget final: public JsRpcTargetBase {
  public:
-  TransientJsRpcTarget(
-      jsg::Lock& js, IoContext& ioCtx, jsg::JsObject object, bool allowInstanceProperties = false)
-      : JsRpcTargetBase(ioCtx, MayOutliveIncomingRequest()),
+  TransientJsRpcTarget(jsg::Lock& js,
+      IoContext& ioCtx,
+      jsg::JsObject object,
+      bool allowInstanceProperties = false,
+      kj::Maybe<TraceContextParent> originatingCall = kj::none)
+      : JsRpcTargetBase(ioCtx, MayOutliveIncomingRequest(), kj::mv(originatingCall)),
         handles(ioCtx.addObjectReverse(kj::heap<Handles>(js, object))),
         allowInstanceProperties(allowInstanceProperties) {
     // Check for the existence of a dispose function now so that the destructor doesn't have to
@@ -1648,8 +1666,9 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
       jsg::JsObject object,
       kj::Maybe<jsg::V8Ref<v8::Function>> dispose,
       kj::Vector<kj::Own<void>> stubDisposers,
-      bool allowInstanceProperties = false)
-      : JsRpcTargetBase(ioCtx, MayOutliveIncomingRequest()),
+      bool allowInstanceProperties = false,
+      kj::Maybe<TraceContextParent> originatingCall = kj::none)
+      : JsRpcTargetBase(ioCtx, MayOutliveIncomingRequest(), kj::mv(originatingCall)),
         handles(ioCtx.addObjectReverse(kj::heap<Handles>(js, object))),
         disposeFulfiller(addDisposeTask(js, ioCtx, object, kj::mv(dispose), kj::mv(stubDisposers))),
         allowInstanceProperties(allowInstanceProperties) {}
@@ -1956,7 +1975,8 @@ void JsRpcTarget::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
     }
   }
 
-  rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(js, IoContext::current(), handle);
+  rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(
+      js, IoContext::current(), handle, false, externalHandler->getOriginatingCall());
 
   externalHandler->write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
     builder.initRpcTarget().setCap(kj::mv(cap));
@@ -1993,7 +2013,7 @@ void RpcSerializerExternalHandler::serializeFunction(
   }
 
   rpc::JsRpcTarget::Client cap =
-      kj::heap<TransientJsRpcTarget>(js, IoContext::current(), handle, true);
+      kj::heap<TransientJsRpcTarget>(js, IoContext::current(), handle, true, getOriginatingCall());
   write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
     builder.initRpcTarget().setCap(kj::mv(cap));
   });
@@ -2046,8 +2066,8 @@ void RpcSerializerExternalHandler::serializeProxy(
   // Great, we've concluded we can indeed point a stub at this proxy.
   serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::JS_RPC_STUB));
 
-  rpc::JsRpcTarget::Client cap =
-      kj::heap<TransientJsRpcTarget>(js, IoContext::current(), handle, allowInstanceProperties);
+  rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(
+      js, IoContext::current(), handle, allowInstanceProperties, getOriginatingCall());
   write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
     builder.initRpcTarget().setCap(kj::mv(cap));
   });

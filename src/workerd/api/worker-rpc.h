@@ -40,10 +40,12 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
 
   // `getExternalPusherFunc` will be called at most once, the first time a stream is encountered in
   // serialization, to get the ExternalPusher that should be used.
-  RpcSerializerExternalHandler(
-      StubOwnership stubOwnership, rpc::JsValue::ExternalPusher::Client externalPusher)
+  RpcSerializerExternalHandler(StubOwnership stubOwnership,
+      rpc::JsValue::ExternalPusher::Client externalPusher,
+      kj::Maybe<TraceContextParent> originatingCall = kj::none)
       : stubOwnership(stubOwnership),
-        externalPusher(kj::mv(externalPusher)) {}
+        externalPusher(kj::mv(externalPusher)),
+        originatingCall(kj::mv(originatingCall)) {}
 
   inline StubOwnership getStubOwnership() {
     return stubOwnership;
@@ -69,6 +71,10 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
 
   size_t size() {
     return externals.size();
+  }
+
+  kj::Maybe<TraceContextParent> getOriginatingCall() {
+    return originatingCall.map([](TraceContextParent& parent) { return parent.addRef(); });
   }
 
   // Add an object that will be released once the serialized value is no longer needed to handle
@@ -99,6 +105,10 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
  private:
   StubOwnership stubOwnership;
   rpc::JsValue::ExternalPusher::Client externalPusher;
+
+  // The jsRpcCall that exported capabilities in this payload, used to parent callbacks.
+  // Absent on untraced calls and serializer uses without an originating RPC.
+  kj::Maybe<TraceContextParent> originatingCall;
 
   kj::Vector<BuilderCallback> externals;
   kj::Vector<kj::Own<void>> stubDisposers;
