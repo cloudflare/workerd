@@ -3163,6 +3163,18 @@ class Lock {
   // Request an extra microtask checkpoint after the current one completes.
   void requestExtraMicrotaskCheckpoint();
 
+  bool isEvaluatingModule();
+
+  class ModuleEvaluationScope {
+   public:
+    explicit ModuleEvaluationScope(Lock& js);
+    ~ModuleEvaluationScope() noexcept(false);
+    KJ_DISALLOW_COPY_AND_MOVE(ModuleEvaluationScope);
+
+   private:
+    Lock& js;
+  };
+
   // Sets the terminate-execution flag on the isolate so that the next time code tries to run, it
   // will be terminated. (But note that V8 only checks the flag at certain times, so it's possible
   // some code will actually execute before termination kicks in.)

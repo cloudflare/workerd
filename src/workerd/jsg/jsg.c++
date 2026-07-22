@@ -365,6 +365,18 @@ void Lock::requestExtraMicrotaskCheckpoint() {
   IsolateBase::from(v8Isolate).requestExtraMicrotaskCheckpoint({});
 }
 
+bool Lock::isEvaluatingModule() {
+  return IsolateBase::from(v8Isolate).isEvaluatingModule();
+}
+
+Lock::ModuleEvaluationScope::ModuleEvaluationScope(Lock& js): js(js) {
+  IsolateBase::from(js.v8Isolate).enterModuleEvaluation({});
+}
+
+Lock::ModuleEvaluationScope::~ModuleEvaluationScope() noexcept(false) {
+  IsolateBase::from(js.v8Isolate).leaveModuleEvaluation({});
+}
+
 void Lock::terminateNextExecution() {
   v8Isolate->TerminateExecution();
 }

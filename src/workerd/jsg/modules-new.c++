@@ -224,6 +224,7 @@ class EsModule final: public Module {
  private:
   v8::MaybeLocal<v8::Value> actuallyEvaluate(
       Lock& js, v8::Local<v8::Module> module, const CompilationObserver& observer) const override {
+    Lock::ModuleEvaluationScope moduleEvaluationScope(js);
     return module->Evaluate(js.v8Context());
   }
 
@@ -327,6 +328,7 @@ class SyntheticModule final: public Module {
         return val;
       }
     }
+    Lock::ModuleEvaluationScope moduleEvaluationScope(js);
     return module->Evaluate(js.v8Context());
   }
 
@@ -741,44 +743,62 @@ class IsolateModuleRegistry final {
       auto promise =
           check(moduleDef.evaluate(js, module, observer, maybeEvaluate)).As<v8::Promise>();
 
-      // Run the microtasks to ensure that any promises that happen to be scheduled
-      // during the evaluation of the top-level scope have a chance to be settled.
-      // We only pump the microtasks queue if NO_TOP_LEVEL_AWAIT is not set.
-      if ((option & RequireOption::NO_TOP_LEVEL_AWAIT) != RequireOption::NO_TOP_LEVEL_AWAIT) {
-        js.runMicrotasks();
-
-        static const auto kTopLevelAwaitError =
-            "Use of top-level await in a synchronously required module is restricted to "
-            "promises that are resolved synchronously. This includes any top-level awaits "
-            "in the entrypoint module for a worker."_kj;
-
-        switch (promise->State()) {
-          case v8::Promise::kFulfilled: {
-            // This is what we want. The module namespace should be fully populated
-            // and evaluated at this point.
-            return maybeUnwrapDefault(js, module, moduleDef, option);
-          }
-          case v8::Promise::kRejected: {
-            // Oops, there was an error. We should throw it.
-            js.throwException(JsValue(promise->Result()));
-            break;
-          }
-          case v8::Promise::kPending: {
-            // The module evaluation could not complete in a single drain of the
-            // microtask queue. This means we've got a pending promise somewhere
-            // that is being awaited preventing the module from being ready to
-            // go. We can't have that! Throw! Throw!
-            JSG_FAIL_REQUIRE(Error, kTopLevelAwaitError, " Specifier: \"", id, "\".");
-          }
+      // A synchronous module graph resolves its evaluation promise during Evaluate(),
+      // so promise->State() is already settled here without draining the microtask
+      // queue. This covers every internal builtin and any require target without
+      // top-level await. Only a genuinely-suspended top-level await leaves the promise
+      // pending, and that is the sole case that needs -- or is permitted -- a drain.
+      switch (promise->State()) {
+        case v8::Promise::kFulfilled: {
+          // Fully evaluated; the namespace is populated. No drain needed.
+          return maybeUnwrapDefault(js, module, moduleDef, option);
         }
-      } else {
-        KJ_ASSERT(!module->IsGraphAsync() && promise->State() != v8::Promise::kPending,
-            "Top-level await is not supported in this context, so the module promise "
-            "should never be pending");
-        if (promise->State() == v8::Promise::kRejected) {
+        case v8::Promise::kRejected: {
+          // Evaluation threw. Propagate it.
           js.throwException(JsValue(promise->Result()));
+          break;
         }
-        return maybeUnwrapDefault(js, module, moduleDef, option);
+        case v8::Promise::kPending: {
+          // NO_TOP_LEVEL_AWAIT rejects async graphs before evaluation (via
+          // IsGraphAsync()), so a pending promise is impossible in that mode.
+          KJ_ASSERT(
+              (option & RequireOption::NO_TOP_LEVEL_AWAIT) != RequireOption::NO_TOP_LEVEL_AWAIT,
+              "A module required with NO_TOP_LEVEL_AWAIT must never leave a pending promise");
+
+          static const auto kTopLevelAwaitError =
+              "Use of top-level await in a synchronously required module is restricted to "
+              "promises that are resolved synchronously. This includes any top-level awaits "
+              "in the entrypoint module for a worker."_kj;
+
+          // The module has a genuinely-suspended top-level await. Settling it requires
+          // draining the microtask queue, which is only safe when no module is being
+          // evaluated on the stack. If this require() is nested inside another module's
+          // evaluation (isEvaluatingModule()), draining now could fire an async module's
+          // fulfillment callback while an ancestor is still kEvaluating, tripping a fatal
+          // V8 CHECK (status() >= kEvaluatingAsync). We therefore cannot settle it here;
+          // report it as unsettled, matching Node.js require(esm)'s ERR_REQUIRE_ASYNC_MODULE.
+          JSG_REQUIRE(
+              !js.isEvaluatingModule(), Error, kTopLevelAwaitError, " Specifier: \"", id, "\".");
+
+          // At the top level (depth 0) nothing is being evaluated, so draining is safe.
+          js.runMicrotasks();
+
+          switch (promise->State()) {
+            case v8::Promise::kFulfilled: {
+              return maybeUnwrapDefault(js, module, moduleDef, option);
+            }
+            case v8::Promise::kRejected: {
+              js.throwException(JsValue(promise->Result()));
+              break;
+            }
+            case v8::Promise::kPending: {
+              // The top-level await did not settle within a single drain (e.g. it is
+              // awaiting a promise that never resolves synchronously). Throw.
+              JSG_FAIL_REQUIRE(Error, kTopLevelAwaitError, " Specifier: \"", id, "\".");
+            }
+          }
+          break;
+        }
       }
       KJ_UNREACHABLE;
     };
