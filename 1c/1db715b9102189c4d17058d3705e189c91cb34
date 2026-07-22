@@ -1,0 +1,20 @@
+ci/v8_nightly_shared.py
+  s_3d52627c39d3e5::t_cf31560a6d29e1 107-108,112,114-118
+  s_3d52627c39d3e5::t_ceb924def474f4 105-106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1c1db715b9102189c4d17058d3705e189c91cb34",
+  "prompts": {},
+  "sessions": {
+    "s_3d52627c39d3e5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_07f3956a4ffe5XwuD2oblTWD6c",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cormick Holland <cormick@cloudflare.com>"
+    }
+  }
+}
