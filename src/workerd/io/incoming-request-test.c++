@@ -57,5 +57,30 @@ KJ_TEST("IoContext::IncomingRequest::drain() releases a superseded (non-front) r
   fixture.drainAndDestroy(kj::mv(second));
 }
 
+KJ_TEST("ambient IoContext is hidden while another V8 isolate is entered") {
+  auto io = kj::setupAsyncIo();
+  TestFixture outer({.waitScope = io.waitScope, .useRealTimers = false});
+  TestFixture inner({.waitScope = io.waitScope, .useRealTimers = false});
+
+  outer.runInIoContext([&](const TestFixture::Environment& env) {
+    KJ_EXPECT(IoContext::hasCurrent());
+    KJ_EXPECT(&KJ_ASSERT_NONNULL(IoContext::tryCurrent()) == &env.context);
+    KJ_EXPECT(env.context.isCurrent());
+    KJ_EXPECT(env.context.getId().isCurrent());
+
+    inner.enterWorkerLockSynchronously([&](Worker::Lock&) {
+      KJ_EXPECT(!IoContext::hasCurrent());
+      KJ_EXPECT(IoContext::tryCurrent() == kj::none);
+      KJ_EXPECT(!env.context.isCurrent());
+      KJ_EXPECT(!env.context.getId().isCurrent());
+    });
+
+    KJ_EXPECT(IoContext::hasCurrent());
+    KJ_EXPECT(&KJ_ASSERT_NONNULL(IoContext::tryCurrent()) == &env.context);
+    KJ_EXPECT(env.context.isCurrent());
+    KJ_EXPECT(env.context.getId().isCurrent());
+  });
+}
+
 }  // namespace
 }  // namespace workerd

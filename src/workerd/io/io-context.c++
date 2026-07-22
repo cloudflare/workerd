@@ -1251,7 +1251,7 @@ void IoContext::taskFailed(kj::Exception&& exception) {
 }
 
 void IoContext::requireCurrent() {
-  KJ_REQUIRE(threadLocalRequest == this, "request is not current in this thread");
+  KJ_REQUIRE(isCurrent(), "request is not current in this isolate");
 }
 
 void IoContext::checkFarGet(const DeleteQueue& expectedQueue, const std::type_info& type) {
@@ -1476,7 +1476,7 @@ static constexpr auto kAsyncIoErrorMessage =
     "https://developers.cloudflare.com/workers/runtime-apis/handlers/";
 
 IoContext& IoContext::current() {
-  if (threadLocalRequest == nullptr) {
+  if (!hasCurrent()) {
     v8::Isolate* isolate = v8::Isolate::TryGetCurrent();
     KJ_REQUIRE(isolate != nullptr, "there is no current request on this thread");
     isolate->ThrowError(jsg::v8StrIntern(isolate, kAsyncIoErrorMessage));
@@ -1487,19 +1487,25 @@ IoContext& IoContext::current() {
 }
 
 kj::Maybe<IoContext&> IoContext::tryCurrent() {
-  if (threadLocalRequest == nullptr) {
-    return kj::none;
-  } else {
+  if (hasCurrent()) {
     return *threadLocalRequest;
+  } else {
+    return kj::none;
   }
 }
 
 bool IoContext::hasCurrent() {
-  return threadLocalRequest != nullptr;
+  return threadLocalRequest != nullptr && threadLocalRequest->isCurrent();
 }
 
 bool IoContext::isCurrent() {
-  return this == threadLocalRequest;
+  if (this != threadLocalRequest) return false;
+
+  // An IoContext is only current while its isolate is entered.
+  KJ_IF_SOME(lock, currentLock) {
+    return lock.getIsolate() == v8::Isolate::TryGetCurrent();
+  }
+  return false;
 }
 
 IoContext::Id IoContext::nextId() {
@@ -1644,7 +1650,10 @@ void IoContext::throwNotCurrentJsError(kj::Maybe<const std::type_info&> maybeTyp
     return kj::str(" (I/O type: ", jsg::typeName(type), ")");
   }).orDefault(kj::String());
 
-  if (threadLocalRequest != nullptr && threadLocalRequest->actor != kj::none) {
+  auto isActor = tryCurrent().map([](IoContext& context) {
+    return context.actor != kj::none;
+  }).orDefault(false);
+  if (isActor) {
     JSG_FAIL_REQUIRE(Error,
         kj::str(
             "Cannot perform I/O on behalf of a different Durable Object. I/O objects "
