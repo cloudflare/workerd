@@ -72,6 +72,14 @@ console.log(import.meta);
 strictEqual(import.meta.resolve('./.././test/.././.%2e/foo'), 'file:///foo');
 strictEqual(import.meta.resolve('foo'), 'file:///bundle/foo');
 
+// import.meta.resolve must be equivalent to `new URL(specifier, import.meta.url).href`.
+// The URL parser collapses dot segments (including percent-encoded "%2e" forms, as
+// exercised above) but must NOT percent-decode already-encoded unreserved bytes:
+// "%66" (an encoded 'f') stays "%66" rather than becoming "f". This matches Node.js
+// and the HTML specification. See importMeta in jsg/modules-new.c++.
+strictEqual(import.meta.resolve('./%66oo.js'), 'file:///bundle/%66oo.js');
+strictEqual(import.meta.resolve('./a/../%66oo.js'), 'file:///bundle/%66oo.js');
+
 // import.meta.resolve throws (never returns null) for an unparseable specifier.
 throws(() => import.meta.resolve('https://[bad'), { name: 'TypeError' });
 

@@ -1014,8 +1014,19 @@ void importMeta(
           // into a string or throw if it cannot be coerced.
           auto specifier = js.toString(args[0]);
           KJ_IF_SOME(resolved, Url::tryParse(specifier.asPtr(), href)) {
-            auto normalized = resolved.clone(Url::EquivalenceOption::NORMALIZE_PATH);
-            return js.str(normalized.getHref());
+            // import.meta.resolve is specified to be equivalent to
+            // `new URL(specifier, import.meta.url).href` (see the comment above).
+            // The WHATWG URL parser already collapses dot segments (including the
+            // percent-encoded "%2e"/"%2E" forms) during tryParse, so we can return
+            // the resolved href directly.
+            //
+            // We must NOT apply NORMALIZE_PATH here: normalizePathEncoding
+            // percent-decodes every escape whose byte is not in the path
+            // percent-encode set (e.g. "%66" -> "f"), which is not what
+            // `new URL(...).href` produces. Doing so silently rewrites an
+            // already-encoded specifier and diverges from Node.js/HTML, which
+            // leave such percent-encoding intact.
+            return js.str(resolved.getHref());
           }
           // Node.js/HTML import.meta.resolve throws when the specifier cannot be
           // resolved to a URL; it must not return null.
