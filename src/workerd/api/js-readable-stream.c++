@@ -833,19 +833,19 @@ kj::Promise<DeferredProxy<void>> JsReadableStream::pumpTo(
       // Classify the backend by probing for the extraction marker: an own property keyed
       // by the kExtractNativeSource API-registry symbol, present only on native-backed
       // streams (see the contract in src/per_isolate/webstreams/native.ts).
-      auto extractSymbol = jsg::JsValue(
-          v8::Symbol::ForApi(js.v8Isolate, jsg::v8StrIntern(js.v8Isolate, "kExtractNativeSource")));
+      auto extractSymbol = js.symbolInternal("kExtractNativeSource");
       if (handle.has(js, extractSymbol, jsg::JsObject::HasOption::OWN)) {
         // Native-backed: extract the underlying source and pump entirely at the C++
         // layer, preserving each source's own deferred-proxy behavior. The extractor is
         // atomic (validate, detach, lock + disturb) and returns the source wrapper.
         auto extractor =
-            KJ_REQUIRE_NONNULL(handle.get(js, extractSymbol).tryCast<jsg::JsFunction>());
+            JSG_REQUIRE_NONNULL(handle.get(js, extractSymbol).tryCast<jsg::JsFunction>(), TypeError,
+                "ReadableStream kExtractNativeSource property is not a function");
         auto sourceObj = extractor.call(js, handle);
         auto& handler =
             KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
-        auto source = KJ_REQUIRE_NONNULL(handler.tryUnwrap(js, sourceObj),
-            "the extractor did not return a ReadableStreamNativeSource");
+        auto source = JSG_REQUIRE_NONNULL(handler.tryUnwrap(js, sourceObj), TypeError,
+            "The kExtractNativeSource extractor did not return a ReadableStreamNativeSource");
         auto released = source->releaseForPump(js);
         if (released.prefix.size() > 0) {
           released.source =
@@ -1138,8 +1138,8 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
 
   auto& ioContext = IoContext::current();
   pullInFlight = true;
-  return ioContext.awaitIo(js, active.source->tryRead(scratch.begin(), 1, scratch.size()))
-      .then(js,
+  return ioContext
+      .awaitIo(js, active.source->tryRead(scratch.begin(), 1, scratch.size()),
           [self = JSG_THIS, controller = controller.addRef(js), signal = kj::mv(signal)](
               jsg::Lock& js, size_t amount) mutable {
     self->pullInFlight = false;
@@ -1150,11 +1150,12 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
       self->state = kj::none;
       return;
     }
+    auto data = self->scratch.first(amount);
     if (signal->getAborted(js)) {
       // The consumer abandoned the read while it was in flight (e.g. releaseLock()).
       // Retain the bytes for redelivery on the next pull; the conduit treats this pull's
       // settlement as inert.
-      self->stash.addAll(self->scratch.first(amount));
+      self->stash.addAll(data);
       return;
     }
     if (amount == 0) {
@@ -1163,10 +1164,8 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
       invokeMethod(js, controller.getHandle(js), "close"_kj);
       return;
     }
-    invokeMethod(js, controller.getHandle(js), "enqueue"_kj,
-        jsg::JsUint8Array::create(js, self->scratch.first(amount)));
-  },
-          [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
+    invokeMethod(js, controller.getHandle(js), "enqueue"_kj, jsg::JsUint8Array::create(js, data));
+  }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
     // The read failed; the source is no longer usable. Rethrow to reject the pull promise
     // -- the conduit errors the stream (or ignores the settlement if this pull was already
     // abandoned).
@@ -1225,8 +1224,8 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
 
   auto& ioContext = IoContext::current();
   pullInFlight = true;
-  return ioContext.awaitIo(js, active.source->tryRead(scratch.begin(), minBytes, maxBytes))
-      .then(js,
+  return ioContext
+      .awaitIo(js, active.source->tryRead(scratch.begin(), minBytes, maxBytes),
           [self = JSG_THIS, controller = controller.addRef(js),
               byobRequest = byobRequest.addRef(js), view = view.addRef(js), signal = kj::mv(signal),
               minBytes](jsg::Lock& js, size_t amount) mutable {
@@ -1238,10 +1237,11 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
       self->state = kj::none;
       return;
     }
+    auto data = self->scratch.first(amount);
     if (signal->getAborted(js)) {
       // The consumer abandoned the read; retain the bytes (after any previously retained
       // ones, preserving order) for redelivery on the next pull.
-      self->stash.addAll(self->scratch.first(amount));
+      self->stash.addAll(data);
       return;
     }
     size_t stashed = self->stash.size();
@@ -1256,7 +1256,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
     if (dest.size() < total) {
       // The view was detached while the read was in flight. Treat the read as abandoned:
       // retain the bytes for the next consumer.
-      self->stash.addAll(self->scratch.first(amount));
+      self->stash.addAll(data);
       return;
     }
     if (stashed > 0) {
@@ -1266,7 +1266,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
       self->stash.clear();
     }
     if (amount > 0) {
-      dest.write(self->scratch.first(amount));
+      dest.write(data);
     }
     bool eof = amount < minBytes;
     if (eof) {
@@ -1282,8 +1282,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
       // EOF signal unambiguous rather than relying on that inference.)
       invokeMethod(js, controller.getHandle(js), "close"_kj);
     }
-  },
-          [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
+  }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
     self->pullInFlight = false;
     self->pendingCancel = false;
     self->state = kj::none;
@@ -1388,7 +1387,10 @@ ReadableStreamNativeSource::Released ReadableStreamNativeSource::releaseForPump(
     return released;
   }
   // The source already completed (EOF, or cancel released it); the pump simply finishes.
-  return Released{.source = kj::heap<NullSource>(), .prefix = nullptr};
+  return Released{
+    .source = kj::heap<NullSource>(),
+    .prefix = nullptr,
+  };
 }
 
 void ReadableStreamNativeSource::ensureScratch(size_t capacity) {
