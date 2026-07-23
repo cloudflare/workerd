@@ -516,7 +516,7 @@ jsg::Promise<void> WritableStreamNativeSink::close(jsg::Lock& js) {
     return promise.then(js, [self = JSG_THIS](jsg::Lock& js) mutable {
       return self->closeImpl(js);
     }, [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
-      // Load-bearing legacy quirk (WritableStreamInternalController::close): a rejected
+      // Legacy quirk (WritableStreamInternalController::close): a rejected
       // closure waitable resolves the close WITHOUT ending the sink -- the failure is
       // reported through the owning object's own promises (e.g. Socket.closed/opened)
       // instead. Release the sink; it will never be driven again.

@@ -915,7 +915,7 @@ KJ_TEST("JsWritableStream create TS arm: closure waitable rejection skips the si
         js, env.context, state.makeSink(), kj::none, kj::none, kj::mv(prp.promise));
 
     auto closePromise = stream.forceClose(js);
-    // Load-bearing legacy quirk: a rejected closure waitable resolves the close WITHOUT
+    // A rejected closure waitable resolves the close WITHOUT
     // ending the sink (the failure is reported through the owning object's own promises).
     prp.resolver.reject(js, js.error("connect failed"));
     return env.context.awaitJs(js, kj::mv(closePromise));

@@ -27,14 +27,6 @@ constexpr kj::StringPtr kBodyUsedError =
     "Body has already been used. It can only be used once. Use tee() first if you need to "
     "read it twice."_kj;
 
-// Copy the bytes viewed by a JsBufferSource into an owned array. Copying (rather than retaining the
-// JsBufferSource) severs the dependency on the V8 backing store, which could otherwise be freed if
-// the source ArrayBuffer is detached/transferred and then garbage collected. This also satisfies
-// the Fetch requirement to copy the input buffer.
-kj::Array<const kj::byte> bufferSourceToBytes(jsg::Lock& js, jsg::JsBufferSource view) {
-  return kj::heapArray<kj::byte>(view.asArrayPtr());
-}
-
 bool getReadableStreamIsDisturbed(jsg::Lock& js, jsg::JsObject obj) {
   return webstreams::dispatchCall(js, "getReadableStreamIsDisturbed", obj).isTrue();
 }
@@ -316,15 +308,7 @@ kj::Promise<DeferredProxy<void>> pumpExtractedSource(
   });
 }
 
-// Writes one drained batch to the sink and, when this is the final batch, ends it. A
-// free-standing coroutine (NOT a capturing lambda) so that everything it touches across
-// suspension points lives in the coroutine frame: `pieces` is moved in (the vectored
-// write's pointers reference its arrays and must stay valid for the duration of the
-// write), and `endAfter` is copied in. `sink` is passed by reference: the owning
-// IoOwn handle rides in queuedPumpStep's post-write continuation, which cannot be
-// released while this coroutine is pending (the pending awaitIo holds the resolver that
-// keeps the continuation reachable), and cancellation destroys the coroutine at its
-// suspension point without touching the sink again.
+// Writes one drained batch to the sink and, when this is the final batch, ends it.
 kj::Promise<void> queuedWriteStep(
     kj::Ptr<WritableStreamSink> sink, kj::Array<kj::Array<const kj::byte>> pieces, EndStream end) {
   if (pieces.size() > 0) {
@@ -368,20 +352,17 @@ jsg::Promise<void> queuedPumpStep(jsg::Lock& js, kj::Rc<QueuedPumpState> state, 
     for (uint32_t i = 0; i < chunks.size(); i++) {
       auto chunk = chunks.get(js, i);
       KJ_IF_SOME(view, JSG_CAST(chunk, JsArrayBufferView)) {
-        pieces.add(bufferSourceToBytes(js, jsg::JsBufferSource(view)));
+        pieces.add(jsg::JsBufferSource(view).copy());
       } else KJ_IF_SOME(buffer, JSG_CAST_ARRAYBUFFER(chunk)) {
-        pieces.add(bufferSourceToBytes(js, jsg::JsBufferSource(buffer)));
+        pieces.add(jsg::JsBufferSource(buffer).copy());
       } else {
         JSG_FAIL_REQUIRE(TypeError, "This ReadableStream did not return bytes.");
       }
     }
 
-    // Evaluation order matters: `*sink` is dereferenced (IoContext current here) and the
-    // coroutine launched before `kj::mv(sink)` in the continuation's capture-init runs.
-    // Moving the IoOwn transfers only the handle -- the sink object itself lives in the
-    // IoContext and its address is stable -- so the reference remains valid.
-    return context.awaitIo(js,
-        queuedWriteStep(state->sink->getPtr(), pieces.releaseAsArray(), done ? end : EndStream::NO),
+    auto writeStep =
+        queuedWriteStep(state->sink->getPtr(), pieces.releaseAsArray(), done ? end : EndStream::NO);
+    return context.awaitIo(js, kj::mv(writeStep),
         context.addFunctor([state = kj::mv(state), end, done](jsg::Lock& js, IoContext&) mutable {
       return done ? js.resolvedPromise() : queuedPumpStep(js, kj::mv(state), end);
     }));
@@ -467,7 +448,7 @@ JsReadableStream::JsReadableStream(jsg::Lock& js, kj::String data)
     : JsReadableStream(js, webstreams::stringToBytes(kj::mv(data))) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::JsRef<jsg::JsBufferSource> view)
-    : JsReadableStream(js, bufferSourceToBytes(js, view.getHandle(js))) {}
+    : JsReadableStream(js, view.getHandle(js).copy()) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::Ref<Blob> blob)
     : impl(bufferBackedImpl(js, kj::rc<Buffer>(kj::mv(blob)))) {}
