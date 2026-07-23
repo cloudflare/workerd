@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "kj/common.h"
+
 #include <workerd/api/js-writable-stream.h>
 
 #include <kj/debug.h>
@@ -13,9 +15,8 @@ JsWritableStream::JsWritableStream(jsg::Ref<WritableStream> stream)
         .stream = StreamImpl(kj::mv(stream)),
       }) {}
 
-JsWritableStream::JsWritableStream(jsg::Lock&, jsg::JsRef<jsg::JsObject>) {
-  KJ_UNIMPLEMENTED("TypeScript-backed WritableStream is not yet supported");
-}
+JsWritableStream::JsWritableStream(jsg::Lock&, jsg::JsRef<jsg::JsObject> obj)
+    : impl(Impl{.stream = kj::mv(obj)}) {}
 
 JsWritableStream JsWritableStream::create(jsg::Lock& js,
     IoContext& ioContext,
@@ -223,6 +224,34 @@ void JsWritableStream::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
       }
     }
   }
+}
+
+kj::Maybe<jsg::Ref<WritableStream>> JsWritableStream::tryGetLegacy(jsg::Lock& js) {
+  KJ_IF_SOME(i, impl) {
+    KJ_SWITCH_ONEOF(i.stream) {
+      KJ_CASE_ONEOF(stream, jsg::Ref<WritableStream>) {
+        return stream.addRef();
+      }
+      KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+        return kj::none;
+      }
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::Maybe<jsg::JsObject> JsWritableStream::tryGetTs(jsg::Lock& js) {
+  KJ_IF_SOME(i, impl) {
+    KJ_SWITCH_ONEOF(i.stream) {
+      KJ_CASE_ONEOF(stream, jsg::Ref<WritableStream>) {
+        return kj::none;
+      }
+      KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+        return obj.getHandle(js);
+      }
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 void JsReadableWritablePair::visitForGc(jsg::GcVisitor& visitor) {

@@ -189,6 +189,9 @@ class JsWritableStream final {
         js, context, handle, static_cast<jsg::Ref<WritableStream>*>(nullptr), parentObject);
   }
 
+  kj::Maybe<jsg::Ref<WritableStream>> tryGetLegacy(jsg::Lock& js);
+  kj::Maybe<jsg::JsObject> tryGetTs(jsg::Lock& js);
+
  private:
   explicit JsWritableStream(Impl impl): impl(kj::mv(impl)) {}
 
