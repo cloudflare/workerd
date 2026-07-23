@@ -2996,11 +2996,9 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   void reportFailure(
       const kj::Exception& exception, FailureSource source = FailureSource::OTHER) override {
-    outcome = RequestObserver::outcomeFromException(exception, source);
-  }
-
-  void setOutcome(EventOutcome newOutcome) override {
-    outcome = newOutcome;
+    if (outcome == EventOutcome::OK) {
+      outcome = RequestObserver::outcomeFromException(exception, source);
+    }
   }
 
   // WorkerInterface
@@ -3045,7 +3043,13 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
     try {
-      co_return co_await KJ_ASSERT_NONNULL(inner).runScheduled(scheduledTime, cron);
+      WorkerInterface::ScheduledResult result =
+          co_await KJ_ASSERT_NONNULL(inner).runScheduled(scheduledTime, cron);
+      if (outcome == EventOutcome::OK) {
+        // Haven't set an outcome yet from `reportFailure()` or some other pathway.
+        outcome = result.outcome;
+      }
+      co_return result;
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception);
@@ -3055,7 +3059,13 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
     try {
-      co_return co_await KJ_ASSERT_NONNULL(inner).runAlarm(scheduledTime, retryCount);
+      WorkerInterface::AlarmResult result =
+          co_await KJ_ASSERT_NONNULL(inner).runAlarm(scheduledTime, retryCount);
+      if (outcome == EventOutcome::OK) {
+        // Haven't set an outcome yet from `reportFailure()` or some other pathway.
+        outcome = result.outcome;
+      }
+      co_return result;
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception);
@@ -3075,7 +3085,13 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     try {
-      co_return co_await KJ_ASSERT_NONNULL(inner).customEvent(kj::mv(event));
+      WorkerInterface::CustomEvent::Result result =
+          co_await KJ_ASSERT_NONNULL(inner).customEvent(kj::mv(event));
+      if (outcome == EventOutcome::OK) {
+        // Haven't set an outcome yet from `reportFailure()` or some other pathway.
+        outcome = result.outcome;
+      }
+      co_return result;
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception);
