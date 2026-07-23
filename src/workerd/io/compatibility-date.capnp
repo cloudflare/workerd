@@ -1598,11 +1598,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # frameworks when running tests that require the inspector to be functional, and not by end users.
 
   webCryptoModernAlgorithms @181 :Bool
-      $compatEnableFlag("webcrypto_modern_algorithms")
-      $experimental;
-  # Enables experimental WebCrypto modern algorithm support. This currently exposes the subset of
+      $compatEnableFlag("webcrypto_modern_algorithms");
+  # Enables opt-in WebCrypto modern algorithm support. This currently exposes the subset of
   # the evolving WICG Modern Algorithms draft implemented by workerd: ML-KEM, ML-DSA, related
   # key encapsulation helpers, getPublicKey(), SubtleCrypto.supports(), and AKP JWK support. It is
-  # intentionally gated because the draft is still changing and workerd does not implement the full
-  # proposal.
+  # explicitly gated because the draft is still changing and workerd does not implement the full
+  # proposal. The API may change as the draft evolves.
 }

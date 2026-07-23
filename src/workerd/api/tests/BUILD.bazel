@@ -426,7 +426,6 @@ wd_test(
 
 wd_test(
     src = "crypto-modern-algorithms-test.wd-test",
-    args = ["--experimental"],
     data = ["crypto-modern-algorithms-test.js"],
 )
 
