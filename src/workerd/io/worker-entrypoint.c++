@@ -515,6 +515,9 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
       // without pinning it or the isolate into memory.
       KJ_TRY {
         co_await p;
+        // Match the continuation boundary in the old promise chain. This lets the completed
+        // awaiter's WebSocket ownership unwind before the HTTP request handler completes.
+        co_await kj::yield();
       }
       KJ_CATCH(e) {
         metricsForProxyTask->reportFailure(e, RequestObserver::FailureSource::DEFERRED_PROXY);
