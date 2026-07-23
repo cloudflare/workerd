@@ -3358,15 +3358,41 @@ class AllReader {
 //
 // The pump loop is a kj coroutine. Dropping the returned kj::Promise drops the
 // coroutine frame, which destroys the DrainingReader (releasing the stream lock)
-// and the sink. No WeakRef/IoOwn dance is needed because ownership is clear.
-// The coroutine that implements the pump loop takes ownership of the DrainingReader
-// and sink. The jsg::Ref<ReadableStream> is not passed into the coroutine because
-// jsg::Ref is disallowed in coroutine parameters; instead, the DrainingReader holds
-// a reference to the stream internally.
-kj::Promise<void> pumpToImpl(IoContext& ioContext,
-    kj::Own<DrainingReader> reader,
-    kj::Own<WritableStreamSink> sink,
-    bool end) {
+// and the sink. The cleanup state also schedules a JavaScript-level cancellation
+// while the IoContext is still available, so a pending pull is not left running.
+// KJ promises are event-loop-affine, so PumpState destruction occurs on the
+// IoContext's event-loop thread.
+class PumpState final {
+ public:
+  PumpState(IoContext& ioContext, kj::Own<DrainingReader> reader, kj::Own<WritableStreamSink> sink)
+      : ioContext(ioContext.getWeakRef()),
+        reader(ioContext.addObject(kj::mv(reader))),
+        sink(kj::mv(sink)) {}
+
+  ~PumpState() noexcept(false) {
+    if (done || cleanupStarted) return;
+
+    auto reader = kj::mv(this->reader);
+    ioContext->runIfAlive([reader = kj::mv(reader)](IoContext& ioContext) mutable {
+      if (!ioContext.hasCurrentIncomingRequest()) return;
+      ioContext.addTask(
+          ioContext.run([reader = kj::mv(reader)](jsg::Lock& js, IoContext& ioContext) mutable {
+        auto reason = js.error("ReadableStream pump canceled");
+        return ioContext.awaitJs(js, reader->cancel(js, reason)).catch_([](kj::Exception&&) {});
+      }));
+    });
+  }
+
+  KJ_DISALLOW_COPY_AND_MOVE(PumpState);
+
+  kj::Own<IoContext::WeakRef> ioContext;
+  IoOwn<DrainingReader> reader;
+  kj::Own<WritableStreamSink> sink;
+  bool done = false;
+  bool cleanupStarted = false;
+};
+
+kj::Promise<void> pumpToImpl(IoContext& ioContext, kj::Own<PumpState> state, bool end) {
 
   bool writeFailed = false;
 
@@ -3374,12 +3400,12 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
     while (true) {
       // Perform a draining read to get all synchronously available data if possible
       // or fall back to a regular read if not.
-      DrainingReadResult result = co_await ioContext.run([&reader](jsg::Lock& js) mutable {
+      DrainingReadResult result = co_await ioContext.run([&state](jsg::Lock& js) mutable {
         auto& ioContext = IoContext::current();
         // Use a 256KB limit to allow periodic yielding to the event loop,
         // preventing a fast producer from monopolizing the thread.
         constexpr size_t kMaxReadPerCycle = 256 * 1024;
-        return ioContext.awaitJs(js, reader->read(js, kMaxReadPerCycle));
+        return ioContext.awaitJs(js, state->reader->read(js, kMaxReadPerCycle));
       });
 
       // Write all the chunks we received using vectored write for efficiency.
@@ -3387,29 +3413,33 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
         KJ_ON_SCOPE_FAILURE(writeFailed = true);
         auto pieces =
             KJ_MAP(chunk, result.chunks) -> kj::ArrayPtr<const kj::byte> { return chunk.asPtr(); };
-        co_await sink->write(pieces);
+        co_await state->sink->write(pieces);
       }
 
       // If the stream is done, end the output if needed and exit.
       if (result.done) {
         KJ_ON_SCOPE_FAILURE(writeFailed = true);
         if (end) {
-          co_await sink->end();
+          co_await state->sink->end();
         }
+        state->done = true;
         co_return;
       }
     }
   }
   KJ_CATCH(exception) {
     if (!writeFailed) {
-      sink->abort(exception.clone());
+      state->sink->abort(exception.clone());
     }
 
-    co_await ioContext.run([&reader, ex = exception.clone()](jsg::Lock& js) mutable {
+    co_await ioContext
+        .run([&state, ex = exception.clone()](jsg::Lock& js) mutable {
       auto& ioContext = IoContext::current();
+      state->cleanupStarted = true;
       auto error = js.exceptionToJsValue(kj::mv(ex));
-      return ioContext.awaitJs(js, reader->cancel(js, error.getHandle(js)));
-    });
+      return ioContext.awaitJs(js, state->reader->cancel(js, error.getHandle(js)));
+    }).catch_([](kj::Exception&&) {});
+    state->done = true;
     kj::throwFatalException(kj::mv(exception));
   }
 }
@@ -3559,7 +3589,8 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
     auto reader = KJ_ASSERT_NONNULL(DrainingReader::create(js, *this->addRef()),
         "Failed to create DrainingReader — stream should not be locked");
     auto& ioContext = IoContext::current();
-    return addNoopDeferredProxy(pumpToImpl(ioContext, kj::mv(reader), kj::mv(sink), end));
+    return addNoopDeferredProxy(
+        pumpToImpl(ioContext, kj::heap<PumpState>(ioContext, kj::mv(reader), kj::mv(sink)), end));
   };
 
   KJ_SWITCH_ONEOF(state) {
