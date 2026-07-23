@@ -503,6 +503,7 @@ interface ExecutionContext<Props = unknown> {
     readonly override?: string;
   };
   readonly access?: CloudflareAccessContext;
+  mapVirtualHost(fetcher: Fetcher, port: number): string;
   tracing: Tracing;
   abort(reason?: any): void;
 }
@@ -17149,7 +17150,8 @@ declare abstract class Workflow<PARAMS = unknown> {
   ): Promise<WorkflowInstance[]>;
   /**
    * Delete a batch of Workflow instances and their stored state.
-   * `deleteBatch` is limited to 100 instances at a time.
+   * `deleteBatch` is limited to 100 instances at a time. Duplicate IDs are processed once;
+   * IDs that do not exist are returned as per-instance errors.
    * @param instanceIds IDs of the Workflow instances to delete
    * @returns A promise that resolves with the successfully deleted instances and any per-instance errors.
    */
