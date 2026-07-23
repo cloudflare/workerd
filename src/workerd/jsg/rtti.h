@@ -657,6 +657,9 @@ struct MemberCounter {
     ++members;
   }
 
+  template <const char* name>
+  inline void registerPrivateSymbol() { /* not included in RTTI */ }
+
   template <const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
   inline void registerInstanceProperty() {
     ++members;
@@ -763,6 +766,9 @@ struct MembersBuilder {
     prop.setReadonly(true);
     BuildRtti<Configuration, T>::build(prop.initType(), rtti);
   }
+
+  template <const char* name>
+  inline void registerPrivateSymbol() { /* not included in RTTI */ }
 
   template <const char* name, typename Getter, Getter getter, bool readOnly>
   inline void registerLazyInstanceProperty() {

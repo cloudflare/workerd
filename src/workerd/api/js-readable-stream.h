@@ -38,22 +38,14 @@ WD_STRONG_BOOL(IgnoreDisturbed);
 //     (isBufferBacked()); or
 //   * stream-backed -- wraps an opaque, one-shot ReadableStream.
 //
-// Backend branching: the underlying stream is stored as a kj::OneOf so that a TypeScript
-// implemented ReadableStream (represented as a JS object) can eventually be supported alongside
-// the legacy C++ ReadableStream. Every method that touches the underlying stream switches on the
-// backend. Today only the C++ ReadableStream backend is implemented; the TypeScript backend
-// branches are KJ_UNIMPLEMENTED and the corresponding constructor cannot yet be used. When the
-// TypeScript implementation lands, fill in those branches -- the stored type (and therefore
-// Body / ExtractedBody) will not need to change.
+// When stream-backed, the underlying stream is either a legacy C++ ReadableStream or a TypeScript
+// implemented ReadableStream (a JS object).
 class JsReadableStream final {
  public:
-  // The underlying stream. Today only the legacy C++ ReadableStream alternative is populated; the
-  // jsg::JsRef<jsg::JsObject> alternative is reserved for the future TypeScript implementation.
+  // The underlying stream.
   using StreamImpl = kj::OneOf<jsg::Ref<ReadableStream>, jsg::JsRef<jsg::JsObject>>;
 
-  // Holds the in-memory data backing a buffer-backed (rewindable) JsReadableStream. Refcounted so
-  // its lifetime can be tied both to the native stream (as the newMemorySource backing) and to the
-  // JsReadableStream itself (so the stream can be rebuilt for retransmission).
+  // Holds the in-memory data backing a buffer-backed (rewindable) JsReadableStream.
   struct Buffer {
     kj::ArrayPtr<const kj::byte> view;
     kj::OneOf<kj::Array<const kj::byte>, jsg::Ref<Blob>> owned;
@@ -76,7 +68,10 @@ class JsReadableStream final {
   // Adopt an existing legacy C++ ReadableStream. The result is not rewindable.
   JsReadableStream(jsg::Ref<ReadableStream> stream);
 
-  // Adopt a TypeScript-implemented ReadableStream (a JS object). Not yet supported.
+  // Adopt a TypeScript-implemented ReadableStream (a JS object). No brand validation
+  // happens here -- the caller asserts the object really is one. Untrusted values arrive
+  // through jsgTryUnwrap/tryUnwrapTs, which brand-check before adopting; internal callers
+  // (create()) construct from a known-good conduit instance.
   JsReadableStream(jsg::Lock& js, jsg::JsRef<jsg::JsObject> obj);
 
   // Create a buffer-backed (rewindable) JsReadableStream from various in-memory data sources. The
@@ -100,9 +95,15 @@ class JsReadableStream final {
   // source. This is the canonical way for C++ code to mint a new ReadableStream to hand to
   // JavaScript.
   //
-  // TODO(streams-ts): This is the future compatibility-flag dispatch point. Once the
-  // TypeScript implementation lands, this will construct either the legacy C++ ReadableStream
-  // or a TypeScript-backed stream depending on the worker's configuration.
+  // This is the compatibility-flag dispatch point: when the typescript_implemented_streams
+  // compat flag is enabled, the source is wrapped in a ReadableStreamNativeSource and the
+  // stream is constructed by the TypeScript implementation; otherwise the legacy C++
+  // ReadableStream is used.
+  //
+  // TODO(streams-ts): A few JsReadableStream operations still have unimplemented
+  // TypeScript arms (detach, pipe dispatch cells), so under the (experimental) flag,
+  // consumers exercising those paths will fail until the remaining arms are
+  // implemented. (pumpTo, unwrap, and tee have landed.)
   static JsReadableStream create(
       jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source);
 
@@ -117,6 +118,9 @@ class JsReadableStream final {
   // True if this is a null / empty stream ("no body"). Inspects only C++-side state; a
   // jsg::Lock& is not required because it never dispatches to the JS backend.
   bool isNull() const;
+  operator bool() const {
+    return !isNull();
+  }
 
   // True if this is backed by an in-memory buffer, and therefore rewindable via tryClone().
   // Inspects only C++-side state; a jsg::Lock& is not required.
@@ -240,7 +244,9 @@ class JsReadableStream final {
         return typeWrapper.wrap(js, context, creator, kj::mv(legacy));
       }
       KJ_CASE_ONEOF(ts, jsg::JsRef<jsg::JsObject>) {
-        KJ_UNIMPLEMENTED("TypeScript ReadableStream not yet supported");
+        // The TypeScript-implemented stream IS a JS object; wrapping just hands the same
+        // handle back, which is what preserves identity (request.body === request.body).
+        return ts.getHandle(js);
       }
     }
     KJ_UNREACHABLE;
@@ -251,11 +257,25 @@ class JsReadableStream final {
       v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    // For now, we only support unwrapping the legacy C++ ReadableStream.
-    // Later we will also support the TypeScript implementation.
-    return typeWrapper.tryUnwrap(
-        js, context, handle, static_cast<jsg::Ref<ReadableStream>*>(nullptr), parentObject);
+    KJ_IF_SOME(legacy,
+        typeWrapper.tryUnwrap(
+            js, context, handle, static_cast<jsg::Ref<ReadableStream>*>(nullptr), parentObject)) {
+      return JsReadableStream(kj::mv(legacy));
+    }
+    // TypeScript-implemented streams are plain JS objects with no JSG wrapper, so the
+    // typeWrapper cannot recognize them; ask the TS implementation's own brand check.
+    return tryUnwrapTs(js, handle);
   }
+
+  // The TypeScript arm of jsgTryUnwrap: recognizes a TypeScript-implemented ReadableStream
+  // by the implementation's private brand (via the bootstrap bridge's isReadableStream) and
+  // adopts it. Returns kj::none if the typescript_implemented_streams compat flag is off
+  // (the bootstrap export does not exist then) or if the value is not a TS stream.
+  //
+  // Deliberately performs no locked/disturbed checks, matching the legacy arm: unwrap
+  // adopts the handle as-is and consumers (e.g. Body) enforce their own preconditions.
+  // Public so tests can drive it directly; production code goes through jsgTryUnwrap.
+  static kj::Maybe<JsReadableStream> tryUnwrapTs(jsg::Lock& js, v8::Local<v8::Value> handle);
 
  private:
   explicit JsReadableStream(Impl impl): impl(kj::mv(impl)) {}
@@ -266,11 +286,144 @@ class JsReadableStream final {
   static Impl bufferBackedImpl(jsg::Lock& js, kj::Rc<Buffer> buffer);
 
   kj::Maybe<Impl> impl;
+  // Cache the result of isDisturbed() so that repeated calls don't dispatch to the JS
+  // side. Since disturbed is a one-way transition, the cache is always valid once set
+  // to true.
+  bool cachedIsDisturbed = false;
 };
 
 struct JsReadableStream::Tee {
   JsReadableStream branch1;
   JsReadableStream branch2;
+};
+
+// The C++ implementation of the "native underlying source" contract defined by the
+// TypeScript streams implementation.
+//
+// A ReadableStreamNativeSource wraps a kj-native ReadableStreamSource so that a
+// TypeScript-implemented ReadableStream can be backed directly by C++ byte sources: the
+// TypeScript conduit invokes pull()/cancel() (and eventually tee()) on this object, which
+// translates them into tryRead()/cancel() calls on the underlying source.
+//
+// Instances are created only from C++ (there is no JavaScript constructor) and are handed
+// to the TypeScript ReadableStream constructor carrying the native-source marker symbol.
+// The object is never exposed to user code, and it is suppressed from the generated TypeScript
+// types.
+class ReadableStreamNativeSource final: public jsg::Object {
+ public:
+  ReadableStreamNativeSource(IoContext& ioContext, kj::Own<ReadableStreamSource> source);
+
+  // The contract's data-delivery hook, called by the TypeScript conduit whenever there is
+  // read demand, with at most one pull in flight at a time. `controller` is the conduit's
+  // controller facade: its byobRequest property discriminates the read mode (an object for
+  // BYOB reads, null for default reads), and delivery happens through exactly one
+  // byobRequest.respond() / controller.enqueue() / controller.close() call per pull (pull
+  // rejection is the error path). `signal` is the per-pull cancellation signal: it aborts
+  // when the consumer abandons the in-flight read (reader release, cancel, tee), in which
+  // case any bytes read are retained for redelivery by the next pull rather than delivered
+  // or dropped.
+  jsg::Promise<void> pull(jsg::Lock& js, jsg::JsObject controller, jsg::Ref<AbortSignal> signal);
+
+  // Cancels the underlying source, indicating a loss of interest in the data, and releases
+  // it. If a pull's read is in flight, the release is deferred until that read settles
+  // (destroying a ReadableStreamSource with an outstanding tryRead() is unsafe); any bytes
+  // that read produces are discarded.
+  void cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
+
+  // Splits the source into two fully independent branch sources, each of which will
+  // produce the same bytes this source would have produced, leaving this source consumed.
+  // Uses the underlying source's optimized tryTee() when available, and otherwise falls
+  // back to a generic kj::newTee()-based split (mirroring the legacy internal controller's
+  // tee). Any bytes retained from an abandoned pull are inherited by BOTH branches,
+  // delivered before anything further from upstream.
+  //
+  // Throws if the source has already been consumed, or if an abandoned pull's read is
+  // still in flight.
+  kj::Array<jsg::Ref<ReadableStreamNativeSource>> tee(jsg::Lock& js);
+
+  // The total number of bytes the source promises to produce, if known. Queried live from
+  // the underlying source on each call; undefined once the source is done or canceled. The
+  // TypeScript side reads this once at stream construction, per the contract, and enforces
+  // the exact-total accounting itself.
+  jsg::Optional<jsg::JsBigInt> getExpectedLength(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(ReadableStreamNativeSource) {
+    JSG_PRIVATE_SYMBOL(kNativeSource);
+    JSG_METHOD(pull);
+    JSG_METHOD(cancel);
+    JSG_METHOD(tee);
+    JSG_READONLY_PROTOTYPE_PROPERTY(expectedLength, getExpectedLength);
+
+    // Internal plumbing type: keep it out of the generated TypeScript types.
+    JSG_TS_OVERRIDE(type ReadableStreamNativeSource = never);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
+ private:
+  struct Active {
+    IoOwn<ReadableStreamSource> source;
+  };
+
+  jsg::Promise<void> pullDefault(
+      jsg::Lock& js, jsg::JsObject controller, jsg::Ref<AbortSignal> signal, Active& active);
+  jsg::Promise<void> pullByob(jsg::Lock& js,
+      jsg::JsObject controller,
+      jsg::JsObject byobRequest,
+      jsg::Ref<AbortSignal> signal,
+      Active& active);
+
+  struct Released {
+    kj::Own<ReadableStreamSource> source;
+
+    // Bytes already consumed from the source but never delivered (the stash), which the
+    // pump must emit before anything the source produces. Only reachable when a
+    // tee-seeded branch is extracted before being read.
+    kj::Array<kj::byte> prefix;
+  };
+
+  // Releases the underlying source (plus any stashed bytes) for a C++-driven pump.
+  // Called by JsReadableStream::pumpTo()'s TypeScript arm after the TypeScript-side
+  // extractor (kExtractNativeSource) has already detached the stream, validated it
+  // unlocked/undisturbed, and returned this object. If the source already completed (EOF
+  // or cancel released it), returns an always-EOF source: extraction of closed streams is
+  // legal per the contract, and the pump simply finishes.
+  Released releaseForPump(jsg::Lock& js);
+
+  // Ensure the scratch buffer can hold at least `capacity` bytes. Only called at the start
+  // of a pull, when the scratch buffer holds no live data, so growing may discard previous
+  // contents.
+  void ensureScratch(size_t capacity);
+
+  // Drop the first `bytes` bytes of the stash (they have been delivered).
+  void consumeStash(size_t bytes);
+
+  // kj::none once the source has reached EOF, been canceled, or been consumed by tee().
+  kj::Maybe<Active> state;
+
+  // Reusable read target, lazily allocated. KJ reads always land here -- never directly in
+  // V8-visible memory -- and delivery copies out under the isolate lock. Sized
+  // kScratchSize, growing when a BYOB read's minimum exceeds that (the conduit never
+  // re-pulls an unsatisfied minimum, so a single read must be able to satisfy it).
+  kj::Array<kj::byte> scratch;
+
+  // Bytes that were read by a pull whose consumer abandoned it (per-pull signal aborted)
+  // before delivery. Redelivered by the next pull, in order, before any new data, so no
+  // bytes are lost across a reader release. Multiple abandoned pulls may accumulate.
+  kj::Vector<kj::byte> stash;
+
+  // Defensive only: the TypeScript conduit guarantees at most one pull in flight (standard
+  // pulling/pullAgain serialization).
+  bool pullInFlight = false;
+
+  // Set when cancel() arrives while a pull's read is in flight: the source's release is
+  // deferred to the pull's settlement.
+  bool pendingCancel = false;
+
+  static constexpr size_t kScratchSize = 32 * 1024;
+
+  // JsReadableStream::pumpTo()'s TypeScript arm extracts the source for C++-driven pumps.
+  friend class JsReadableStream;
 };
 
 }  // namespace workerd::api

@@ -808,5 +808,53 @@ KJ_TEST("Object.getOwnPropertyDescriptors does not throw on prototype with inspe
 
 // ========================================================================================
 
+struct PrivateSymbolContext: public ContextGlobalObject {
+  struct Marked: public Object {
+    static Ref<Marked> constructor(Lock& js) {
+      return js.alloc<Marked>();
+    }
+    JSG_RESOURCE_TYPE(Marked) {
+      JSG_PRIVATE_SYMBOL(kTestMarker);
+    }
+  };
+
+  // Hands the API-registry symbol to the test script, demonstrating that C++ can
+  // re-acquire the identical symbol by name at any time.
+  JsValue getTestMarkerSymbol(Lock& js) {
+    return JsValue(v8::Symbol::ForApi(js.v8Isolate, v8StrIntern(js.v8Isolate, "kTestMarker")));
+  }
+
+  JSG_RESOURCE_TYPE(PrivateSymbolContext) {
+    JSG_NESTED_TYPE(Marked);
+    JSG_METHOD(getTestMarkerSymbol);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(PrivateSymbolIsolate, PrivateSymbolContext, PrivateSymbolContext::Marked);
+
+KJ_TEST("JSG_PRIVATE_SYMBOL marks instances with an own self-valued API symbol property") {
+  Evaluator<PrivateSymbolContext, PrivateSymbolIsolate> e(v8System);
+
+  // The marker is an own property of each instance: a data property whose value is the
+  // symbol itself, read-only, non-enumerable, and non-configurable.
+  e.expectEval("const s = getTestMarkerSymbol();"
+               "const d = Object.getOwnPropertyDescriptor(new Marked(), s);"
+               "d !== undefined && d.value === s && !d.writable && !d.enumerable "
+               "&& !d.configurable",
+      "boolean", "true");
+
+  // The symbol is NOT reachable through the public Symbol.for() registry, and every
+  // instance carries the same symbol.
+  e.expectEval("const s = getTestMarkerSymbol();"
+               "Symbol.for('kTestMarker') !== s "
+               "&& Object.getOwnPropertyDescriptor(new Marked(), s).value === "
+               "   Object.getOwnPropertyDescriptor(new Marked(), s).value",
+      "boolean", "true");
+
+  // The marker lives on instances, not on the prototype.
+  e.expectEval("const s = getTestMarkerSymbol();"
+               "Object.getOwnPropertyDescriptor(Marked.prototype, s) === undefined",
+      "boolean", "true");
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test

@@ -5,8 +5,10 @@
 // queue. See native-stream-integration.md §10 for the fence conventions
 // separating this backend from the queued one (queue.ts).
 //
-// THE C++/JS CONTRACT (phase 3; currently exercised via JS mocks — the
-// real C++ source arrives in a later integration step and must conform):
+// THE C++/JS CONTRACT (phase 3; implemented on the C++ side by
+// ReadableStreamNativeSource in src/workerd/api/js-readable-stream.{h,c++},
+// which must conform; JS mocks in tests exercise the conduit
+// independently of it):
 //   - A native underlying source is an ordinary object carrying the
 //     kNativeSource marker as an OWN property whose value is the marker
 //     symbol itself. Marker presence ⇒ native ⇒ BYTE CAPABLE (there is

@@ -12,6 +12,9 @@ const unitTests :Workerd.Config = (
           "typescript_implemented_streams",
           "experimental",
         ],
+        bindings = [
+          ( name = "SELF", service = "ts-webstreams-test" ),
+        ],
       )
     ),
   ],

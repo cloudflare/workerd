@@ -94,6 +94,23 @@ For file map and coding invariants, see [AGENTS.md](AGENTS.md).
 Key rules: stack-only allocation (enforced in debug); implicit conversion to `v8::Local<T>`;
 use `JsRef<T>` to persist beyond current scope.
 
+## TypeHandler Acquisition
+
+`jsg::TypeHandler<T>` converts between C++ values and V8 handles (`wrap`/`tryUnwrap`).
+Two ways to obtain one:
+
+| Mechanism                                    | Where it works                       | Types supported                                                            |
+| -------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------- |
+| Trailing `const TypeHandler<T>&` parameter   | JSG-called functions/methods only    | Any wrappable `T` (instantiated on demand)                                  |
+| `js.tryGetTypeHandler<T>()`                  | Anywhere a `jsg::Lock` is available  | Resource types only, as `TypeHandler<jsg::Ref<T>>`; returns `kj::Maybe`     |
+
+`Lock::tryGetTypeHandler` is backed by a per-isolate registry populated at isolate
+construction (see `TypeWrapper::forEachTypeHandler`). It lets C++-initiated code wrap a
+fresh resource object into its JavaScript wrapper (or unwrap one) without a JS→C++ call.
+Value types (JSG_STRUCTs) are deliberately not registered — eager handler instantiation
+requires both conversion directions to compile, and some structs are one-directional —
+so they remain injection-only.
+
 ## JSG Macro Catalog
 
 ### Resource Type Declaration
@@ -124,6 +141,16 @@ use `JsRef<T>` to persist beyond current scope.
 | `JSG_LAZY_READONLY_INSTANCE_PROPERTY(name, getter)` | Instance  | No               | No                      |
 | `JSG_LAZY_INSTANCE_PROPERTY(name, getter)`          | Instance  | Yes (after eval) | No                      |
 | `JSG_STATIC_CONSTANT(name)`                         | Class     | No               | N/A                     |
+| `JSG_PRIVATE_SYMBOL(name)`                          | Instance  | No               | No                      |
+
+`JSG_PRIVATE_SYMBOL(kName)` marks every instance with an own, read-only, non-enumerable,
+non-configurable property keyed by the `v8::Symbol::ForApi(isolate, "kName")` API-registry
+symbol, with the symbol itself as the value. C++ (and runtime-provided JS handed the symbol,
+e.g. via the per-isolate bootstrap's `utils.getApiSymbol()`) can re-acquire the identical
+symbol by name at any time; user code cannot mint it (the API registry is distinct from
+`Symbol.for()`'s). Useful as a tamper-resistant instance brand/marker recognizable from both
+sides of the boundary; note it is visible to `Object.getOwnPropertySymbols`, so it is a
+brand, not a secret. Not represented in RTTI/generated types.
 
 ### Type Relationships
 

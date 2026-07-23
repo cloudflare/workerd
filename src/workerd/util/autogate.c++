@@ -105,6 +105,10 @@ void Autogate::initAllAutogates() {
 }
 
 void Autogate::initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gateNames) {
+  initAutogateNamesForTest(kj::ArrayPtr<const kj::StringPtr>(gateNames.begin(), gateNames.size()));
+}
+
+void Autogate::initAutogateNamesForTest(kj::ArrayPtr<const kj::StringPtr> gateNames) {
   capnp::MallocMessageBuilder message;
   auto orphanage = message.getOrphanage();
   auto gatesOrphan = orphanage.newOrphan<capnp::List<capnp::Text>>(gateNames.size());

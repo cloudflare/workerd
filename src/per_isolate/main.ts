@@ -177,6 +177,9 @@ if (compatFlags['typescript_implemented_streams']) {
     },
   });
 
+  // Bootstrap the cpp exports module
+  require('webstreams/cpp_exports');
+
   // Internal-only: expose the DrainingReader for testing expectedLength
   // pass-through (Content-Length integration). Gated by a separate
   // experimental flag that may never lose its experimental annotation.

@@ -32,6 +32,7 @@
 #include <kj/time.h>
 
 #include <span>
+#include <typeinfo>
 
 using kj::byte;
 using kj::uint;
@@ -490,6 +491,37 @@ namespace workerd::jsg {
   do {                                                                                             \
     static const char NAME[] = #name;                                                              \
     registry.template registerStaticConstant<NAME, decltype(constant)>(constant);                  \
+  } while (false)
+
+// Use inside a JSG_RESOURCE_TYPE block to attach a marker property to every instance of
+// the resource type. The property is keyed by a symbol acquired from V8's API symbol
+// registry (v8::Symbol::ForApi) using the stringified `name`, and its value is the symbol
+// itself. The property is created directly on each instance (not the prototype) as
+// read-only, non-enumerable, and non-configurable:
+//
+//     class Foo: public jsg::Object {
+//      public:
+//       JSG_RESOURCE_TYPE(Foo) {
+//         JSG_PRIVATE_SYMBOL(kUniqueSymbol);
+//       }
+//     };
+//
+// Because the symbol lives in the per-isolate API symbol registry, C++ code can re-acquire
+// the exact same symbol at any time via v8::Symbol::ForApi(isolate, "kUniqueSymbol") --
+// there is nothing to store or plumb around. Runtime-provided JavaScript can likewise be
+// handed the symbol (e.g. the per-isolate bootstrap exposes utils.getApiSymbol()), while
+// user code cannot mint it: the API registry is distinct from the Symbol.for() registry.
+// This makes the property a tamper-resistant brand/marker that both C++ and
+// runtime-provided JavaScript can recognize on instances via an own-property check.
+//
+// Note that the symbol registry is keyed process-wide by name (per isolate), so two
+// resource types declaring JSG_PRIVATE_SYMBOL with the same identifier share the same
+// symbol. The property itself remains visible to reflection (Object.getOwnPropertySymbols)
+// on instances, so it is a brand, not a secret.
+#define JSG_PRIVATE_SYMBOL(name)                                                                   \
+  do {                                                                                             \
+    static const char NAME[] = #name;                                                              \
+    registry.template registerPrivateSymbol<NAME>();                                               \
   } while (false)
 
 // Use inside a JSG_RESOURCE_TYPE block to declare that this type inherits from another type,
@@ -2263,6 +2295,11 @@ class TypeHandler {
   virtual kj::Maybe<T> tryUnwrap(Lock& js, v8::Local<v8::Value> handle) const = 0;
 };
 
+// Internal implementation detail of Lock::tryGetTypeHandler(). Looks up the type-erased
+// TypeHandler singleton registered with the isolate for the given typeid(TypeHandler<T>).
+// Defined in setup.c++ (the registry lives on IsolateBase).
+kj::Maybe<const void*> tryGetTypeHandlerErased(v8::Isolate* isolate, const std::type_info& type);
+
 // Utility that allows C++ code in a resource type to examine properties that have been added to
 // its JavaScript wrapper.
 //
@@ -2985,6 +3022,29 @@ class Lock {
   virtual jsg::Dict<v8::Local<v8::Value>> toDict(v8::Local<v8::Value> value) = 0;
   virtual jsg::Dict<JsValue> toDict(const jsg::JsValue& value) = 0;
   virtual Promise<Value> toPromise(v8::Local<v8::Value> promise) = 0;
+  virtual Promise<void> toVoidPromise(v8::Local<v8::Value> promise) = 0;
+
+  // Looks up the TypeHandler for type T among the RESOURCE types registered with this
+  // isolate via JSG_DECLARE_ISOLATE_TYPE, returning kj::none if T was not registered.
+  // Request the resource type's handler as TypeHandler<jsg::Ref<T>>.
+  //
+  // Unlike TypeHandler parameter injection (which is only available in JSG-called
+  // functions), this works anywhere a Lock is available. It is useful when C++-initiated
+  // code needs to wrap a fresh resource object into its JavaScript wrapper (or unwrap a
+  // JS value) outside of any JSG callback.
+  //
+  // Only resource types are registered: their handlers always support both wrap and
+  // tryUnwrap. Value types (JSG_STRUCTs etc.) are not available here because eagerly
+  // instantiating their handlers requires both directions to compile, and some structs
+  // are deliberately one-directional; they continue to use parameter injection. See
+  // TypeWrapper::forEachTypeHandler in type-wrapper.h.
+  template <typename T>
+  kj::Maybe<const TypeHandler<T>&> tryGetTypeHandler() {
+    KJ_IF_SOME(handler, tryGetTypeHandlerErased(v8Isolate, typeid(TypeHandler<T>))) {
+      return *static_cast<const TypeHandler<T>*>(handler);
+    }
+    return kj::none;
+  }
 
   // ---------------------------------------------------------------------------
   // Setup stuff

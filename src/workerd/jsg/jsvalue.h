@@ -671,6 +671,8 @@ class JsPromise final: public JsBase<v8::Promise, JsPromise> {
   PromiseState state();
   JsValue result();
   using JsBase<v8::Promise, JsPromise>::JsBase;
+
+  void markAsHandled(Lock& js);
 };
 
 class JsProxy final: public JsBase<v8::Proxy, JsProxy> {
@@ -716,6 +718,10 @@ class JsBigInt final: public JsBase<v8::BigInt, JsBigInt> {
   // If the BigInt value does not fit in int64_t, returns kj::none
   // and schedules an exception on the isolate.
   kj::Maybe<uint64_t> toUint64(Lock& js) const KJ_WARN_UNUSED_RESULT;
+
+  // If the BigInt value does not fit in int64_t, returns kj::none.
+  // Does not schedule an exception on the isolate.
+  kj::Maybe<uint64_t> tryToUint64(Lock& js) const KJ_WARN_UNUSED_RESULT;
 
   using JsBase<v8::BigInt, JsBigInt>::JsBase;
 };
@@ -949,6 +955,19 @@ class JsFunction final: public JsBase<v8::Function, JsFunction> {
   // Calls the function with a null receiver and arguments. When null is passed
   // as the receiver, the global object is used instead.
   JsValue callNoReceiver(Lock& js, v8::LocalVector<v8::Value>& args) const;
+
+  // Calls the function as a constructor with the given arguments, returning the
+  // new object.
+  template <IsJsValue... Args>
+  JsObject newInstance(Lock& js, Args... args) const {
+    v8::Local<v8::Function> fn = *this;
+    v8::Local<v8::Value> argv[] = {args...};
+    return JsObject(check(fn->NewInstance(js.v8Context(), sizeof...(Args), argv)));
+  }
+
+  // Calls the function as a constructor with the given arguments, returning the
+  // new object.
+  JsObject newInstance(Lock& js, v8::LocalVector<v8::Value>& args) const;
 
   // Gets the function's length property.
   size_t length(Lock& js) const;

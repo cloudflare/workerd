@@ -261,6 +261,16 @@ kj::Maybe<uint64_t> JsBigInt::toUint64(Lock& js) const {
   return value;
 }
 
+kj::Maybe<uint64_t> JsBigInt::tryToUint64(Lock& js) const {
+  KJ_ASSERT(!inner.IsEmpty());
+  bool lossless = false;
+  uint64_t value = inner->Uint64Value(&lossless);
+  if (!lossless) {
+    return kj::none;
+  }
+  return value;
+}
+
 kj::Maybe<double> JsNumber::value(Lock& js) const {
   KJ_ASSERT(!inner.IsEmpty());
   double value;
@@ -550,6 +560,10 @@ JsValue JsPromise::result() {
   return JsValue(inner->Result());
 }
 
+void JsPromise::markAsHandled(Lock& js) {
+  inner->MarkAsHandled();
+}
+
 JsValue JsProxy::target() {
   return JsValue(inner->GetTarget());
 }
@@ -659,6 +673,11 @@ JsValue JsFunction::call(Lock& js, const JsValue& recv, v8::LocalVector<v8::Valu
 
 JsValue JsFunction::callNoReceiver(Lock& js, v8::LocalVector<v8::Value>& args) const {
   return call(js, js.null(), args);
+}
+
+JsObject JsFunction::newInstance(Lock& js, v8::LocalVector<v8::Value>& args) const {
+  v8::Local<v8::Function> fn = *this;
+  return JsObject(check(fn->NewInstance(js.v8Context(), args.size(), args.data())));
 }
 
 uint JsFunction::hashCode() const {
