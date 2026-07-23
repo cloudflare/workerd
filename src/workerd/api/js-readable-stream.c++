@@ -891,24 +891,38 @@ jsg::Promise<void> JsReadableStream::pipeTo(
       // If one end is a jsg::JsRef<jsg::JsObject>, the other must also be a
       // jsg:JsRef<jsg::JsObject> since it means the compat flag is on and we're
       // using the TypeScript impl.
-      auto dest KJ_UNUSED = KJ_ASSERT_NONNULL(destination.tryGetTs(js));
+      auto dest = KJ_ASSERT_NONNULL(destination.tryGetTs(js));
 
-      // If the source is a native-backed stream, and the dest is a native-backed
-      // stream, then we can extract both and do the pipe entirely in C++. Otherwise,
-      // we have to go through a JS loop, in which case we'll just call the TypeScript
-      // pipeTo method on the source.
-      // TODO(streams-ts): Implement the C++-to-C++ pipeTo path
+      // Forward the options as a StreamPipeOptions dictionary. Absent booleans are simply
+      // omitted (the TS pump coerces missing members to false). The internal pipeThrough
+      // marker is NOT forwarded: at this level its only effect (marking the pipe promise
+      // handled) is applied by pipeThrough() itself.
+      auto optionsObj = js.obj();
+      KJ_IF_SOME(preventAbort, options.preventAbort) {
+        optionsObj.set(js, "preventAbort"_kj, js.boolean(preventAbort));
+      }
+      KJ_IF_SOME(preventCancel, options.preventCancel) {
+        optionsObj.set(js, "preventCancel"_kj, js.boolean(preventCancel));
+      }
+      KJ_IF_SOME(preventClose, options.preventClose) {
+        optionsObj.set(js, "preventClose"_kj, js.boolean(preventClose));
+      }
+      KJ_IF_SOME(signal, options.signal) {
+        auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<AbortSignal>>());
+        optionsObj.set(js, "signal"_kj, jsg::JsValue(handler.wrap(js, kj::mv(signal))));
+      }
 
-      // Call out to the TypeScript implementation's pipeTo method.
+      // Call out to the TypeScript implementation's pipeTo method. When BOTH ends are
+      // native-backed, its pipe dispatch extracts the two endpoints and runs the pipe
+      // entirely at the C++ layer via the native sink's pipeFrom hook; the JS pump is
+      // used only when a JS conduit is genuinely in the data path.
       auto handle = source.getHandle(js);
       auto pipeToFnHandle = handle.get(js, "pipeTo"_kj);
       auto pipeToFn = JSG_REQUIRE_NONNULL(
           JSG_CAST_FUNCTION(pipeToFnHandle), TypeError, "The pipeTo property is not a function");
 
-      // TODO(streams-ts): We need to forward the PipeToOptions to the function call.
-
-      auto res = JSG_REQUIRE_NONNULL(JSG_CAST_PROMISE(pipeToFn.call(js, handle, dest)), TypeError,
-          "The pipeTo function did not return a promise");
+      auto res = JSG_REQUIRE_NONNULL(JSG_CAST_PROMISE(pipeToFn.call(js, handle, dest, optionsObj)),
+          TypeError, "The pipeTo function did not return a promise");
       return js.toVoidPromise(res).then(
           js, [source = source.addRef(js), dest = dest.addRef(js)](jsg::Lock& js) {});
     }

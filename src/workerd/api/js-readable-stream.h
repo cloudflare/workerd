@@ -102,10 +102,10 @@ class JsReadableStream final {
   // stream is constructed by the TypeScript implementation; otherwise the legacy C++
   // ReadableStream is used.
   //
-  // TODO(streams-ts): A few JsReadableStream operations still have unimplemented
-  // TypeScript arms (detach, pipe dispatch cells), so under the (experimental) flag,
-  // consumers exercising those paths will fail until the remaining arms are
-  // implemented. (pumpTo, unwrap, and tee have landed.)
+  // TODO(streams-ts): detach() is the one JsReadableStream operation still lacking a
+  // TypeScript arm, so under the (experimental) flag, consumers exercising that path
+  // will fail until it is implemented. (pumpTo, unwrap, tee, and the pipe dispatch
+  // cells have landed.)
   static JsReadableStream create(
       jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source);
 
@@ -430,8 +430,11 @@ class ReadableStreamNativeSource final: public jsg::Object {
 
   static constexpr size_t kScratchSize = 32 * 1024;
 
-  // JsReadableStream::pumpTo()'s TypeScript arm extracts the source for C++-driven pumps.
+  // JsReadableStream::pumpTo()'s TypeScript arm extracts the source for C++-driven pumps,
+  // and WritableStreamNativeSink::pipeFrom() (the native+native pipe fast path) does the
+  // same on behalf of the TS pipeTo.
   friend class JsReadableStream;
+  friend class WritableStreamNativeSink;
 };
 
 }  // namespace workerd::api

@@ -27,17 +27,16 @@ namespace workerd::api {
 // Unlike JsReadableStream there is no buffer-backed (rewindable) state: writables have no
 // retransmission concept. There is also no "disturbed" concept for writables.
 //
-// Backend branching: the underlying stream is stored as a kj::OneOf so that a TypeScript
-// implemented WritableStream (represented as a JS object) can eventually be supported alongside
-// the legacy C++ WritableStream. Every method that touches the underlying stream switches on the
-// backend. Today only the C++ WritableStream backend is implemented; the TypeScript backend
-// branches are KJ_UNIMPLEMENTED and the corresponding constructor cannot yet be used. When the
-// TypeScript implementation lands, fill in those branches -- the stored type (and therefore the
-// consumers) will not need to change.
+// Backend branching: the underlying stream is stored as a kj::OneOf -- either the legacy C++
+// WritableStream or a TypeScript implemented WritableStream (represented as a JS object). Every
+// method that touches the underlying stream switches on the backend. The TypeScript arms
+// dispatch through the webstreams/cpp_exports bootstrap module (see js-writable-stream.c++),
+// which exists only when the typescript_implemented_streams compat flag (plus the per-isolate
+// bootstrap autogate) is enabled.
 class JsWritableStream final {
  public:
-  // The underlying stream. Today only the legacy C++ WritableStream alternative is populated; the
-  // jsg::JsRef<jsg::JsObject> alternative is reserved for the future TypeScript implementation.
+  // The underlying stream: either the legacy C++ WritableStream or the TypeScript
+  // implementation's stream object.
   using StreamImpl = kj::OneOf<jsg::Ref<WritableStream>, jsg::JsRef<jsg::JsObject>>;
 
   struct Impl {
@@ -53,7 +52,10 @@ class JsWritableStream final {
   // Adopt an existing legacy C++ WritableStream.
   JsWritableStream(jsg::Ref<WritableStream> stream);
 
-  // Adopt a TypeScript-implemented WritableStream (a JS object). Not yet supported.
+  // Adopt a TypeScript-implemented WritableStream (a JS object). No brand validation happens
+  // here -- the caller asserts the object really is one. Untrusted values arrive through
+  // jsgTryUnwrap/tryUnwrapTs, which brand-check before adopting; internal callers (create())
+  // construct from a known-good conduit instance.
   JsWritableStream(jsg::Lock& js, jsg::JsRef<jsg::JsObject> obj);
 
   JsWritableStream(JsWritableStream&&) = default;
@@ -70,9 +72,10 @@ class JsWritableStream final {
   // closing the stream will not complete until the given promise resolves (used by sockets to
   // gate closure on connection establishment).
   //
-  // TODO(streams-ts): This is the future compatibility-flag dispatch point. Once the
-  // TypeScript implementation lands, this will construct either the legacy C++ WritableStream
-  // or a TypeScript-backed stream depending on the worker's configuration.
+  // This is the compatibility-flag dispatch point: when the typescript_implemented_streams
+  // compat flag is enabled, the sink is wrapped in a WritableStreamNativeSink and the stream is
+  // constructed by the TypeScript implementation; otherwise the legacy C++ WritableStream is
+  // used.
   static JsWritableStream create(jsg::Lock& js,
       IoContext& ioContext,
       kj::Own<WritableStreamSink> sink,
@@ -172,7 +175,9 @@ class JsWritableStream final {
         return typeWrapper.wrap(js, context, creator, kj::mv(legacy));
       }
       KJ_CASE_ONEOF(ts, jsg::JsRef<jsg::JsObject>) {
-        KJ_UNIMPLEMENTED("TypeScript WritableStream not yet supported");
+        // The TypeScript-implemented stream IS a JS object; wrapping just hands the same
+        // handle back, which is what preserves identity (socket.writable === socket.writable).
+        return ts.getHandle(js);
       }
     }
     KJ_UNREACHABLE;
@@ -183,12 +188,30 @@ class JsWritableStream final {
       v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    // For now, we only support unwrapping the legacy C++ WritableStream.
-    // Later we will also support the TypeScript implementation.
-    return typeWrapper.tryUnwrap(
-        js, context, handle, static_cast<jsg::Ref<WritableStream>*>(nullptr), parentObject);
+    KJ_IF_SOME(legacy,
+        typeWrapper.tryUnwrap(
+            js, context, handle, static_cast<jsg::Ref<WritableStream>*>(nullptr), parentObject)) {
+      return JsWritableStream(kj::mv(legacy));
+    }
+    // TypeScript-implemented streams are plain JS objects with no JSG wrapper, so the
+    // typeWrapper cannot recognize them; ask the TS implementation's own brand check.
+    return tryUnwrapTs(js, handle);
   }
 
+  // The TypeScript arm of jsgTryUnwrap: recognizes a TypeScript-implemented WritableStream
+  // by the implementation's private brand (via the bootstrap bridge's isWritableStream) and
+  // adopts it. Returns kj::none if the typescript_implemented_streams compat flag is off
+  // (the bootstrap export does not exist then) or if the value is not a TS stream.
+  //
+  // Deliberately performs no locked/closing checks, matching the legacy arm: unwrap adopts
+  // the handle as-is and consumers enforce their own preconditions. Public so tests can
+  // drive it directly; production code goes through jsgTryUnwrap.
+  static kj::Maybe<JsWritableStream> tryUnwrapTs(jsg::Lock& js, v8::Local<v8::Value> handle);
+
+  // Return the underlying stream if it is backed by the given arm, kj::none otherwise
+  // (including when this is a null stream). Used by JsReadableStream's pipe dispatch cells;
+  // production code outside the pipe dispatch should not inspect arms (see the dispatch
+  // guardrails in the design doc).
   kj::Maybe<jsg::Ref<WritableStream>> tryGetLegacy(jsg::Lock& js);
   kj::Maybe<jsg::JsObject> tryGetTs(jsg::Lock& js);
 
@@ -277,6 +300,102 @@ struct JsReadableWritablePair {
 
   void visitForGc(jsg::GcVisitor& visitor);
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+};
+
+// The C++ implementation of the "native underlying sink" contract defined by the
+// TypeScript streams implementation (see the writable-side markers in
+// src/per_isolate/webstreams/native.ts).
+//
+// A WritableStreamNativeSink wraps a kj-native WritableStreamSink so that a
+// TypeScript-implemented WritableStream can be backed directly by a C++ byte sink. Unlike
+// the readable side's pull conduit, no new backend machinery exists on the TS side: the
+// standard WritableStream machinery drives this object through the ordinary UnderlyingSink
+// hooks (write/close/abort), one operation at a time. The marker symbol exists for pipe
+// dispatch and extraction; the one extension hook is pipeFrom(source, options), which the
+// TS pipeTo calls when BOTH pipe ends are native-backed so the pipe runs entirely at the
+// C++ layer.
+//
+// Instances are created only from C++ (there is no JavaScript constructor) and are handed
+// to the TypeScript WritableStream constructor carrying the native-sink marker symbol.
+// The object is never exposed to user code, and it is suppressed from the generated
+// TypeScript types.
+class WritableStreamNativeSink final: public jsg::Object {
+ public:
+  WritableStreamNativeSink(IoContext& ioContext,
+      kj::Own<WritableStreamSink> sink,
+      kj::Maybe<kj::Own<ByteStreamObserver>> observer,
+      kj::Maybe<jsg::Promise<void>> maybeClosureWaitable);
+
+  // The standard UnderlyingSink write hook. Accepts the same chunk types as the legacy
+  // internal controller (ArrayBuffer, SharedArrayBuffer, ArrayBufferView, and -- as the
+  // same ergonomic extension -- strings, encoded as UTF-8); anything else rejects with the
+  // legacy "only supports writing byte types" TypeError, which errors the stream. The
+  // bytes are copied to KJ-owned memory under the isolate lock before the I/O write (the
+  // source buffer may be detached/resized while the write is in flight). Undefined and
+  // empty chunks resolve without touching the sink.
+  jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<jsg::JsValue> chunk);
+
+  // The standard UnderlyingSink close hook: ends the sink. If a closure waitable was
+  // provided at construction, closing waits for it first; if the waitable REJECTS, the
+  // close resolves WITHOUT ending the sink (the teardown is reported through the owning
+  // object's own promises instead -- e.g. a Socket's closed/opened), mirroring the legacy
+  // controller's closure-waitable quirk. The sink is released either way.
+  jsg::Promise<void> close(jsg::Lock& js);
+
+  // The standard UnderlyingSink abort hook: aborts the sink and releases it. If a write's
+  // I/O is somehow still in flight (the TS machinery serializes sink operations, so this
+  // is defensive), the release is deferred to the write's settlement.
+  jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
+
+  // The native+native pipe fast path, called by the TS pipeTo when both ends carry
+  // extraction markers (with `this` being the extracted sink and `source` the extracted
+  // ReadableStreamNativeSource). Consumes both endpoints and runs the pump entirely at
+  // the C++ layer, honoring the StreamPipeOptions members (preventClose / preventAbort /
+  // preventCancel / signal) with the option-read order and validation error text of the
+  // TS JS pump. The returned promise is what ReadableStream.prototype.pipeTo resolves.
+  jsg::Promise<void> pipeFrom(jsg::Lock& js, jsg::JsObject sourceObj, jsg::JsObject optionsObj);
+
+  JSG_RESOURCE_TYPE(WritableStreamNativeSink) {
+    JSG_PRIVATE_SYMBOL(kNativeSink);
+    JSG_METHOD(write);
+    JSG_METHOD(close);
+    JSG_METHOD(abort);
+    JSG_METHOD(pipeFrom);
+
+    // Internal plumbing type: keep it out of the generated TypeScript types.
+    JSG_TS_OVERRIDE(type WritableStreamNativeSink = never);
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor);
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
+ private:
+  struct Active {
+    IoOwn<WritableStreamSink> sink;
+  };
+
+  // Ends the sink and releases it (the post-waitable phase of close()).
+  jsg::Promise<void> closeImpl(jsg::Lock& js);
+
+  // kj::none once the sink has been ended, aborted, or consumed by pipeFrom().
+  kj::Maybe<Active> state;
+
+  // Byte stream metrics. Reported per chunk: onChunkEnqueued when the write hook accepts
+  // the chunk, onChunkDequeued when its I/O settles. (The queue itself lives on the TS
+  // side, so unlike the legacy controller at most one chunk is "enqueued" at a time.)
+  kj::Maybe<kj::Own<ByteStreamObserver>> observer;
+
+  // If present, close() must not complete before this resolves (used by sockets to gate
+  // closure on connection establishment). Consumed by the first close().
+  kj::Maybe<jsg::Promise<void>> maybeClosureWaitable;
+
+  // Defensive only: the TS machinery serializes sink operations (at most one write or
+  // close in flight).
+  bool writeInFlight = false;
+
+  // Set when abort() arrives while a write's I/O is in flight: the sink's release is
+  // deferred to the write's settlement.
+  bool pendingAbort = false;
 };
 
 }  // namespace workerd::api
