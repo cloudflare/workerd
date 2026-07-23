@@ -314,7 +314,8 @@ User code: const mod = await import('./bar.js')
 
 1. V8 calls dynamicImport(context, host_options, resource_name, specifier, attrs)
 
-2. Reject any import attributes (not yet supported)
+2. Parse import attributes (parseImportAttributes). Supports `type: 'json'`;
+   throws TypeError for unrecognized keys or unsupported type values.
 
 3. Parse referrer from resource_name (or fall back to bundleBase)
 
