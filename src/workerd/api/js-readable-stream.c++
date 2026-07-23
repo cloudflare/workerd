@@ -357,35 +357,41 @@ kj::Promise<DeferredProxy<void>> pumpExtractedSource(
 // keeps the continuation reachable), and cancellation destroys the coroutine at its
 // suspension point without touching the sink again.
 kj::Promise<void> queuedWriteStep(
-    WritableStreamSink& sink, kj::Array<kj::Array<const kj::byte>> pieces, bool endAfter) {
+    kj::Ptr<WritableStreamSink> sink, kj::Array<kj::Array<const kj::byte>> pieces, EndStream end) {
   if (pieces.size() > 0) {
     auto ptrs = KJ_MAP(piece, pieces) -> kj::ArrayPtr<const kj::byte> { return piece.asPtr(); };
-    co_await sink.write(ptrs.asPtr());
+    co_await sink->write(ptrs.asPtr());
   }
-  if (endAfter) {
-    co_await sink.end();
+  if (end) {
+    co_await sink->end();
   }
 }
+
+struct QueuedPumpState {
+  jsg::JsRef<jsg::JsObject> reader;
+  IoOwn<WritableStreamSink> sink;
+};
 
 // One iteration of the queued-backend pump: collect everything the draining reader has
 // buffered (one isolate-lock trip per batch), copy it to KJ-owned memory, perform a
 // vectored write, and recurse until done. All JS state (the reader) travels through the
 // jsg promise chain.
-jsg::Promise<void> queuedPumpStep(jsg::Lock& js,
-    jsg::JsRef<jsg::JsObject> reader,
-    IoOwn<WritableStreamSink> sink,
-    EndStream end) {
+jsg::Promise<void> queuedPumpStep(jsg::Lock& js, kj::Rc<QueuedPumpState> state, EndStream end) {
   auto& context = IoContext::current();
-  auto readResult = invokeMethod(js, reader.getHandle(js), "read"_kj);
-  auto readPromise = KJ_REQUIRE_NONNULL(readResult.tryCast<jsg::JsPromise>());
+  auto readResult = invokeMethod(js, state->reader.getHandle(js), "read"_kj);
+  auto readPromise = JSG_REQUIRE_NONNULL(readResult.tryCast<jsg::JsPromise>(), TypeError,
+      "ReadableStreamDrainingReader.read() did not return a promise.");
   return js.toPromise(readPromise)
       .then(js,
-          context.addFunctor(
-              [reader = kj::mv(reader), sink = kj::mv(sink), end](jsg::Lock& js, IoContext& context,
-                  jsg::Value value) mutable -> jsg::Promise<void> {
-    auto result = KJ_REQUIRE_NONNULL(jsg::JsValue(value.getHandle(js)).tryCast<jsg::JsObject>());
+          context.addFunctor([state = kj::mv(state), end](jsg::Lock& js, IoContext& context,
+                                 jsg::Value value) mutable -> jsg::Promise<void> {
+    auto result = JSG_REQUIRE_NONNULL(jsg::JsValue(value.getHandle(js)).tryCast<jsg::JsObject>(),
+        TypeError, "ReadableStreamDrainingReader.read() promise did not resolve to an object.");
     bool done = result.get(js, "done"_kj).isTrue();
-    auto chunks = KJ_REQUIRE_NONNULL(result.get(js, "chunks"_kj).tryCast<jsg::JsArray>());
+    auto chunks =
+        JSG_REQUIRE_NONNULL(result.get(js, "chunks"_kj).tryCast<jsg::JsArray>(), TypeError,
+            "ReadableStreamDrainingReader.read() promise did not resolve to an object "
+            "with a chunks array.");
 
     // Only ArrayBuffer/ArrayBufferView chunks are usable as bytes. Everything else
     // (including strings) rejects, matching the legacy pump's historical behavior and
@@ -406,15 +412,9 @@ jsg::Promise<void> queuedPumpStep(jsg::Lock& js,
     // coroutine launched before `kj::mv(sink)` in the continuation's capture-init runs.
     // Moving the IoOwn transfers only the handle -- the sink object itself lives in the
     // IoContext and its address is stable -- so the reference remains valid.
-    bool endAfter = done && end == EndStream::YES;
-    return context.awaitIo(js, queuedWriteStep(*sink, pieces.releaseAsArray(), endAfter))
-        .then(js,
-            context.addFunctor(
-                [reader = kj::mv(reader), sink = kj::mv(sink), end, done](jsg::Lock& js) mutable {
-      if (done) {
-        return js.resolvedPromise();
-      }
-      return queuedPumpStep(js, kj::mv(reader), kj::mv(sink), end);
+    return context.awaitIo(js, queuedWriteStep(state->sink->getPtr(), pieces.releaseAsArray(), end),
+        context.addFunctor([state = kj::mv(state), end, done](jsg::Lock& js, IoContext&) mutable {
+      return done ? js.resolvedPromise() : queuedPumpStep(js, kj::mv(state), end);
     }));
   }));
 }
@@ -427,17 +427,20 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
     jsg::JsObject reader,
     kj::Own<WritableStreamSink> sink,
     EndStream end) {
-  auto loop =
-      queuedPumpStep(js, reader.addRef(js), context.addObject(kj::mv(sink)), end)
-          .catch_(js, [reader = reader.addRef(js)](jsg::Lock& js, jsg::Value exception) mutable {
+
+  auto state = kj::rc<QueuedPumpState>(
+      QueuedPumpState{.reader = reader.addRef(js), .sink = context.addObject(kj::mv(sink))});
+
+  auto loop = queuedPumpStep(js, state.addRef(), end)
+                  .catch_(js, [state = kj::mv(state)](jsg::Lock& js, jsg::Value exception) mutable {
     // The pump failed (source error, non-byte chunk, or sink failure): cancel the reader
     // so the underlying source learns the pipe is gone, then propagate the failure.
-    // TODO(streams-ts): consider explicitly aborting the sink as well, for exact parity
-    // with the legacy pump's error path.
     auto reason = jsg::JsValue(exception.getHandle(js));
     // Call the reader's cancel() method. It returns a promise, but we are not
     // going to await it, the pump is already failing.
-    auto cancelResult = invokeMethod(js, reader.getHandle(js), "cancel"_kj, reason);
+    state->sink->abort(js.exceptionToKj(reason));
+
+    auto cancelResult = invokeMethod(js, state->reader.getHandle(js), "cancel"_kj, reason);
     KJ_IF_SOME(promise, cancelResult.tryCast<jsg::JsPromise>()) {
       promise.markAsHandled(js);
     }
