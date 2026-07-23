@@ -10,9 +10,7 @@
 
 namespace workerd::api {
 
-WritableStreamDefaultWriter::WritableStreamDefaultWriter()
-    : ioContext(tryGetIoContext()),
-      state(WriterState::create<Initial>()) {}
+WritableStreamDefaultWriter::WritableStreamDefaultWriter(): state(WriterState::create<Initial>()) {}
 
 WritableStreamDefaultWriter::~WritableStreamDefaultWriter() noexcept(false) {
   KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
@@ -185,8 +183,7 @@ WritableStream::WritableStream(IoContext& ioContext,
           kj::mv(maybeClosureWaitable))) {}
 
 WritableStream::WritableStream(kj::Own<WritableStreamController> controller)
-    : ioContext(tryGetIoContext()),
-      controller(kj::mv(controller)) {
+    : controller(kj::mv(controller)) {
   getController().setOwnerRef(PtrTarget::addWeakToThis());
 }
 
@@ -334,8 +331,9 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
 // a lot slower
 class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
  public:
-  WritableStreamJsRpcAdapter(IoContext& context, jsg::Ref<WritableStreamDefaultWriter> writer)
-      : context(context),
+  WritableStreamJsRpcAdapter(
+      kj::WeakRc<IoContext> context, jsg::Ref<WritableStreamDefaultWriter> writer)
+      : context(kj::mv(context)),
         writer(kj::mv(writer)) {}
 
   ~WritableStreamJsRpcAdapter() noexcept(false) {
@@ -365,12 +363,16 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
     // hopefully improve the situation here.
     if (!ended) {
       KJ_IF_SOME(writer, this->writer) {
-        context.addTask(context.run([writer = kj::mv(writer), exception = cancellationException()](
-                                        Worker::Lock& lock) mutable {
-          jsg::Lock& js = lock;
-          auto ex = js.exceptionToJsValue(kj::mv(exception));
-          return IoContext::current().awaitJs(lock, writer->abort(lock, ex.getHandle(js)));
-        }));
+        // The stream may outlive its IoContext. In that case there is no
+        // isolate in which to run the best-effort abort algorithm.
+        KJ_IF_SOME(ctx, context) {
+          ctx->addTask(ctx->run([writer = kj::mv(writer), exception = cancellationException()](
+                                    Worker::Lock& lock, IoContext& ioContext) mutable {
+            jsg::Lock& js = lock;
+            auto ex = js.exceptionToJsValue(kj::mv(exception));
+            return ioContext.awaitJs(lock, writer->abort(lock, ex.getHandle(js)));
+          }));
+        }
       }
     }
   }
@@ -389,13 +391,15 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
         }
         auto w = kj::mv(obj.writer);
         KJ_IF_SOME(writer, w) {
-          obj.context.addTask(
-              obj.context.run([writer = kj::mv(writer), exception = cancellationException()](
-                                  Worker::Lock& lock) mutable {
-            jsg::Lock& js = lock;
-            auto ex = js.exceptionToJsValue(kj::mv(exception));
-            return IoContext::current().awaitJs(lock, writer->abort(lock, ex.getHandle(js)));
-          }));
+          // A canceled request invalidates the WeakRc before this cleanup runs.
+          KJ_IF_SOME(ctx, obj.context) {
+            ctx->addTask(ctx->run([writer = kj::mv(writer), exception = cancellationException()](
+                                      Worker::Lock& lock, IoContext& ioContext) mutable {
+              jsg::Lock& js = lock;
+              auto ex = js.exceptionToJsValue(kj::mv(exception));
+              return ioContext.awaitJs(lock, writer->abort(lock, ex.getHandle(js)));
+            }));
+          }
         }
       }
     }));
@@ -406,10 +410,10 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
       return KJ_EXCEPTION(FAILED, "Write after stream has been closed.");
     }
     if (buffer == nullptr) return kj::READY_NOW;
-    return canceler.wrap(context.run([this, buffer](Worker::Lock& lock) mutable {
+    return canceler.wrap(context.assertLive().run([this, buffer](Worker::Lock& lock) mutable {
       auto& writer = getInner();
       auto ab = jsg::JsArrayBuffer::create(lock, buffer);
-      return context.awaitJs(lock, writer.write(lock, jsg::JsValue(ab)));
+      return context.assertLive().awaitJs(lock, writer.write(lock, jsg::JsValue(ab)));
     }));
   }
 
@@ -422,7 +426,8 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
       amount += piece.size();
     }
     if (amount == 0) return kj::READY_NOW;
-    return canceler.wrap(context.run([this, amount, pieces](Worker::Lock& lock) mutable {
+    return canceler.wrap(
+        context.assertLive().run([this, amount, pieces](Worker::Lock& lock) mutable {
       auto& writer = getInner();
       // Sadly, we have to allocate and copy here. Our received set of buffers are only
       // guaranteed to live until the returned promise is resolved, but the application code
@@ -437,7 +442,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
         ptr.write(piece);
       }
 
-      return context.awaitJs(lock, writer.write(lock, jsg::JsValue(ab)));
+      return context.assertLive().awaitJs(lock, writer.write(lock, jsg::JsValue(ab)));
     }));
   }
 
@@ -468,13 +473,13 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
       return KJ_EXCEPTION(FAILED, "End after stream has been closed.");
     }
     ended = true;
-    return canceler.wrap(context.run([this](Worker::Lock& lock) mutable {
-      return context.awaitJs(lock, getInner().close(lock));
+    return canceler.wrap(context.assertLive().run([this](Worker::Lock& lock) mutable {
+      return context.assertLive().awaitJs(lock, getInner().close(lock));
     }));
   }
 
  private:
-  IoContext& context;
+  kj::WeakRc<IoContext> context;
   kj::Maybe<jsg::Ref<WritableStreamDefaultWriter>> writer;
   kj::Canceler canceler;
   kj::Own<kj::PromiseFulfiller<void>> doneFulfiller;
@@ -538,7 +543,7 @@ void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
     // NOTE: We're counting on `getWriter()` to check that the stream is not locked and other
     // common checks. It's important we don't modify the WritableStream before this call.
-    auto wrapper = kj::heap<WritableStreamJsRpcAdapter>(ioctx, getWriter(js));
+    auto wrapper = kj::heap<WritableStreamJsRpcAdapter>(ioctx.getWeakRef(), getWriter(js));
 
     // Make sure this stream will be revoked if the IoContext ends.
     ioctx.addTask(wrapper->waitForCompletionOrRevoke().attach(ioctx.registerPendingEvent()));

@@ -119,7 +119,7 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
       Closed,
       Released>;
 
-  kj::Maybe<IoContext&> ioContext;
+  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
   WriterState state;
 
   inline void assertAttachedOrTerminal() const {
@@ -207,7 +207,7 @@ class WritableStream: public jsg::Object, public kj::PtrTarget {
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
-  kj::Maybe<IoContext&> ioContext;
+  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
   kj::Own<WritableStreamController> controller;
 
   void visitForGc(jsg::GcVisitor& visitor);

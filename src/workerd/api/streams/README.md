@@ -327,6 +327,24 @@ impl.controller->runIfAlive(
     [](ReadableByteStreamController& controller) { controller.maybeByobRequest = kj::none; });
 ```
 
+### Pattern: Weak `IoContext` Reference
+
+- **When**: A stream adapter, RPC bridge, or coroutine may outlive the request that created it
+- **Why**: An `IoContext&` becomes dangling when its request ends, while keeping a strong
+  `kj::Rc<IoContext>` alive can create a request-lifetime cycle
+- **How**: Store `kj::WeakRc<IoContext>`, upgrade it only at the point of use, and use the
+  `IoContext&` passed as the second argument to `run()` callbacks. Skip best-effort cleanup when
+  the weak reference has expired; use `assertLive()` only where a live request is an invariant.
+
+```cpp
+KJ_IF_SOME(ioContext, weakIoContext) {
+  ioContext->addTask(ioContext->run(
+      [](jsg::Lock& js, IoContext& ioContext) {
+    return ioContext.awaitJs(js, doWork(js));
+  }));
+}
+```
+
 ### Pattern: Weak Owner Link
 
 - **When**: A controller or controller implementation needs to reach back to its owning
