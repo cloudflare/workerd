@@ -1317,3 +1317,15 @@ const withoutSchedule: WorkflowEvent<WorkflowPayload> = {
 expectTypeOf(withoutSchedule.schedule).toEqualTypeOf<
   WorkflowCronSchedule | undefined
 >();
+
+declare const workflow: Workflow;
+declare const workflowInstance: WorkflowInstance;
+expectTypeOf(workflowInstance.delete()).toEqualTypeOf<Promise<void>>();
+expectTypeOf(workflow.deleteBatch(['one', 'two'])).toEqualTypeOf<
+  Promise<WorkflowBatchDeleteResult>
+>();
+expectTypeOf<WorkflowBatchDeleteResult['errors'][number]>().toEqualTypeOf<{
+  id: string;
+  code: number;
+  message: string;
+}>();

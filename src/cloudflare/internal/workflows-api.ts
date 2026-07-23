@@ -14,7 +14,7 @@ const workflowsBindingsRpc =
 
 type WorkflowBatchDeleteResult = {
   deleted: { id: string }[];
-  errors: { index: number; id: string; code: number; message: string }[];
+  errors: { id: string; code: number; message: string }[];
 };
 
 interface Fetcher {
@@ -116,6 +116,12 @@ class InstanceImpl implements WorkflowInstance {
     }
     await callFetcher(this.fetcher, '/restart', {
       ...options,
+      id: this.id,
+    });
+  }
+
+  async delete(): Promise<void> {
+    await callFetcher(this.fetcher, '/delete', {
       id: this.id,
     });
   }

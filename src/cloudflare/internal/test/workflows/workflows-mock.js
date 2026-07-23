@@ -61,6 +61,7 @@ async function handleHttp(request) {
       case '/pause':
       case '/resume':
       case '/terminate':
+      case '/delete':
       case '/send-event':
         return Response.json({ result: null }, { status: 200 });
       case '/restart':

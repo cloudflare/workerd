@@ -53,7 +53,12 @@ export const tests = {
     }
 
     {
-      // The mock only implements /deleteBatch, so this also verifies the endpoint.
+      // Test delete hits the /delete endpoint without throwing.
+      const instance = await env.workflow.get('delete-http');
+      await instance.delete();
+    }
+
+    {
       const result = await env.workflow.deleteBatch([
         'delete-http-1',
         'delete-http-2',
@@ -82,6 +87,7 @@ export const tests = {
         'resume',
         'terminate',
         'restart',
+        'delete',
         'status',
         'sendEvent',
       ]) {

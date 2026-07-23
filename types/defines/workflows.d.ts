@@ -37,8 +37,8 @@ declare abstract class Workflow<PARAMS = unknown> {
 
   /**
    * Delete a batch of Workflow instances and their stored state.
-   * `deleteBatch` is limited to 100 instances at a time. Duplicate IDs are processed once;
-   * IDs that do not exist are returned as per-instance errors.
+   * `deleteBatch` is limited to 100 instances at a time. Duplicate IDs are deleted once.
+   * The result contains one entry for each input position; IDs that do not exist are returned as per-instance errors.
    * @param instanceIds IDs of the Workflow instances to delete
    * @returns A promise that resolves with the successfully deleted instances and any per-instance errors.
    */
@@ -48,7 +48,6 @@ declare abstract class Workflow<PARAMS = unknown> {
 type WorkflowBatchDeleteResult = {
   deleted: { id: string }[];
   errors: {
-    index: number;
     id: string;
     code: number;
     message: string;
@@ -167,6 +166,11 @@ declare abstract class WorkflowInstance {
    * @param options Options for the restart, including an optional step to restart from.
    */
   public restart(options?: WorkflowInstanceRestartOptions): Promise<void>;
+
+  /**
+   * Delete the instance and its stored state.
+   */
+  public delete(): Promise<void>;
 
   /**
    * Returns the current status of the instance.
