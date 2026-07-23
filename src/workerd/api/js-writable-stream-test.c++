@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include <workerd/api/js-streams-bridge.h>
 #include <workerd/api/js-writable-stream.h>
 #include <workerd/api/streams/identity-transform-stream.h>
 #include <workerd/io/per-isolate-bootstrap.h>
@@ -512,13 +513,6 @@ TestFixture makeTsStreamsFixture() {
   });
 }
 
-// Calls the named method on the given object, with the object itself as the receiver.
-template <jsg::IsJsValue... Args>
-jsg::JsValue invokeMethod(jsg::Lock& js, jsg::JsObject obj, kj::StringPtr name, Args... args) {
-  auto func = KJ_ASSERT_NONNULL(obj.get(js, name).tryCast<jsg::JsFunction>());
-  return func.call(js, obj, kj::fwd<Args>(args)...);
-}
-
 // A ReadableStreamSource serving fixed content with a known length (for pipe tests).
 class ContentSource final: public ReadableStreamSource {
  public:
@@ -657,8 +651,8 @@ KJ_TEST("JsWritableStream flush TS arm: locked rejection, terminal-state rejecti
       // Acquire a writer through JS; the lock-checked flush must reject with the exact
       // legacy text.
       auto handle = KJ_ASSERT_NONNULL(stream.tryGetTs(js));
-      auto writer =
-          KJ_ASSERT_NONNULL(invokeMethod(js, handle, "getWriter"_kj).tryCast<jsg::JsObject>());
+      auto writer = KJ_ASSERT_NONNULL(
+          webstreams::invokeMethod(js, handle, "getWriter"_kj).tryCast<jsg::JsObject>());
       KJ_EXPECT(stream.isLocked(js));
 
       auto locked = stream.flush(js).then(js, [](jsg::Lock& js) {
@@ -678,7 +672,8 @@ KJ_TEST("JsWritableStream flush TS arm: locked rejection, terminal-state rejecti
               js, [stream = stream.addRef(js), writer = writer.addRef(js)](jsg::Lock& js) mutable {
         // Release the writer so the closed-stream flush below exercises the terminal-state
         // rejection rather than the locked one (the composed flush checks the lock first).
-        auto releaseResult KJ_UNUSED = invokeMethod(js, writer.getHandle(js), "releaseLock"_kj);
+        auto releaseResult KJ_UNUSED =
+            webstreams::invokeMethod(js, writer.getHandle(js), "releaseLock"_kj);
         return stream.forceClose(js);
       }).then(js, [stream = stream.addRef(js)](jsg::Lock& js) mutable {
         // flush of a closed stream rejects with the legacy text.
@@ -709,10 +704,10 @@ KJ_TEST("JsWritableStream flush TS arm parks behind an in-flight write") {
     auto stream =
         JsWritableStream::create(js, env.context, kj::heap<GatedSink>(written, gate), kj::none);
     auto handle = KJ_ASSERT_NONNULL(stream.tryGetTs(js));
-    auto writer =
-        KJ_ASSERT_NONNULL(invokeMethod(js, handle, "getWriter"_kj).tryCast<jsg::JsObject>());
-    auto writeResult =
-        invokeMethod(js, writer, "write"_kj, jsg::JsUint8Array::create(js, kData.asBytes()));
+    auto writer = KJ_ASSERT_NONNULL(
+        webstreams::invokeMethod(js, handle, "getWriter"_kj).tryCast<jsg::JsObject>());
+    auto writeResult = webstreams::invokeMethod(
+        js, writer, "write"_kj, jsg::JsUint8Array::create(js, kData.asBytes()));
     KJ_ASSERT_NONNULL(writeResult.tryCast<jsg::JsPromise>());
 
     // The flush is positional: its marker is queued behind the (gated) write.
@@ -746,11 +741,11 @@ KJ_TEST("WritableStreamNativeSink write hook: strings and non-byte chunks") {
 
     auto stream = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
     auto handle = KJ_ASSERT_NONNULL(stream.tryGetTs(js));
-    auto writer =
-        KJ_ASSERT_NONNULL(invokeMethod(js, handle, "getWriter"_kj).tryCast<jsg::JsObject>());
+    auto writer = KJ_ASSERT_NONNULL(
+        webstreams::invokeMethod(js, handle, "getWriter"_kj).tryCast<jsg::JsObject>());
 
     // Strings are written as UTF-8 (the legacy controller's ergonomic extension).
-    auto writeResult = invokeMethod(js, writer, "write"_kj, js.str(kData));
+    auto writeResult = webstreams::invokeMethod(js, writer, "write"_kj, js.str(kData));
     auto writePromise = KJ_ASSERT_NONNULL(writeResult.tryCast<jsg::JsPromise>());
     auto promise = js.toVoidPromise(writePromise)
                        .then(js,
@@ -759,7 +754,8 @@ KJ_TEST("WritableStreamNativeSink write hook: strings and non-byte chunks") {
       KJ_EXPECT(state.written.asPtr() == kData.asBytes());
 
       // A non-byte chunk rejects the write with the legacy byte-types error.
-      auto badResult = invokeMethod(js, writer.getHandle(js), "write"_kj, jsg::JsValue(js.obj()));
+      auto badResult =
+          webstreams::invokeMethod(js, writer.getHandle(js), "write"_kj, jsg::JsValue(js.obj()));
       auto badPromise = KJ_ASSERT_NONNULL(badResult.tryCast<jsg::JsPromise>());
       return js.toVoidPromise(badPromise).then(js, [](jsg::Lock& js) {
         KJ_FAIL_REQUIRE("expected a non-byte write to reject");
@@ -788,7 +784,7 @@ KJ_TEST("JsWritableStream detach TS arm neutralizes and enforces preconditions")
     // detach() of a locked stream throws the exact legacy text (including the period).
     auto locked = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
     auto handle = KJ_ASSERT_NONNULL(locked.tryGetTs(js));
-    auto writer KJ_UNUSED = invokeMethod(js, handle, "getWriter"_kj);
+    auto writer KJ_UNUSED = webstreams::invokeMethod(js, handle, "getWriter"_kj);
     JSG_TRY(js) {
       locked.detach(js);
       KJ_FAIL_REQUIRE("expected detach() of a writer-locked stream to throw");
@@ -944,7 +940,7 @@ KJ_TEST("JsWritableStream::tryUnwrapTs adopts TypeScript streams and rejects imp
     auto unwrapped = KJ_ASSERT_NONNULL(JsWritableStream::tryUnwrapTs(js, jsg::JsValue(streamObj)));
     KJ_EXPECT(!unwrapped.isNull());
     KJ_EXPECT(!unwrapped.isLocked(js));
-    auto writer KJ_UNUSED = invokeMethod(js, streamObj, "getWriter"_kj);
+    auto writer KJ_UNUSED = webstreams::invokeMethod(js, streamObj, "getWriter"_kj);
     KJ_EXPECT(unwrapped.isLocked(js));
 
     // Unwrap has no locked precondition (legacy parity): a locked stream still unwraps.

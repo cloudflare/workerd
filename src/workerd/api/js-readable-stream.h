@@ -381,22 +381,16 @@ class ReadableStreamNativeSource final: public jsg::Object {
       jsg::Ref<AbortSignal> signal,
       Active& active);
 
-  struct Released {
-    kj::Own<ReadableStreamSource> source;
-
-    // Bytes already consumed from the source but never delivered (the stash), which the
-    // pump must emit before anything the source produces. Only reachable when a
-    // tee-seeded branch is extracted before being read.
-    kj::Array<kj::byte> prefix;
-  };
-
-  // Releases the underlying source (plus any stashed bytes) for a C++-driven pump.
-  // Called by JsReadableStream::pumpTo()'s TypeScript arm after the TypeScript-side
-  // extractor (kExtractNativeSource) has already detached the stream, validated it
-  // unlocked/undisturbed, and returned this object. If the source already completed (EOF
-  // or cancel released it), returns an always-EOF source: extraction of closed streams is
-  // legal per the contract, and the pump simply finishes.
-  Released releaseForPump(jsg::Lock& js);
+  // Releases the underlying source for a C++-driven pump. Any bytes already consumed from
+  // the source but never delivered (the stash -- only reachable when a tee-seeded branch is
+  // extracted before being read) are folded in ahead of it as a prefix, so the returned
+  // source produces exactly the stream's remaining content. Called by
+  // JsReadableStream::pumpTo()'s TypeScript arm and WritableStreamNativeSink::pipeFrom()
+  // after the TypeScript-side extractor (kExtractNativeSource) has already detached the
+  // stream, validated it unlocked/undisturbed, and returned this object. If the source
+  // already completed (EOF or cancel released it), returns an always-EOF source: extraction
+  // of closed streams is legal per the contract, and the pump simply finishes.
+  kj::Own<ReadableStreamSource> releaseForPump(jsg::Lock& js);
 
   // Ensure the scratch buffer can hold at least `capacity` bytes. Only called at the start
   // of a pull, when the scratch buffer holds no live data, so growing may discard previous

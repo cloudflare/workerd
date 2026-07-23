@@ -2,9 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include <workerd/api/js-streams-bridge.h>
 #include <workerd/api/js-writable-stream.h>
 #include <workerd/io/features.h>
-#include <workerd/io/per-isolate-bootstrap.h>
 #include <workerd/jsg/jsg.h>
 
 #include <kj/common.h>
@@ -14,48 +14,20 @@ namespace workerd::api {
 
 namespace {
 
-// NOTE: The dispatch plumbing below (the JSG_CAST macros, getCppExport, dispatchCall,
-// invokeMethod) is deliberately duplicated from js-readable-stream.c++ -- both files keep
-// their helpers file-local while the TypeScript bridge is being built out. Deduplication into
-// a shared header is deferred until the bridge surface stabilizes.
-
-#define JSG_CAST(val, type) val.tryCast<jsg::type>()
-#define JSG_CAST_OBJECT(val) JSG_CAST(val, JsObject)
-#define JSG_CAST_FUNCTION(val) JSG_CAST(val, JsFunction)
-#define JSG_CAST_PROMISE(val) JSG_CAST(val, JsPromise)
-#define JSG_CAST_ARRAYBUFFER(val) JSG_CAST(val, JsArrayBuffer)
-
-// Fetches a named function export of the webstreams/cpp_exports bootstrap module. The
-// module is eagerly required by the bootstrap when the typescript_implemented_streams
-// compat flag is enabled, so lookups can only fail on internal errors or gross
-// misconfiguration (e.g. the flag enabled without the bootstrap autogate); the resulting
-// "internal error" surfaced to user code is intended.
-jsg::JsFunction getCppExport(jsg::Lock& js, kj::StringPtr name) {
-  auto cppExports = KJ_REQUIRE_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
-  auto cppExportsObj = KJ_REQUIRE_NONNULL(JSG_CAST_OBJECT(cppExports));
-  return KJ_REQUIRE_NONNULL(JSG_CAST_FUNCTION(cppExportsObj.get(js, name)));
-}
-
-template <jsg::IsJsValue... Args>
-jsg::JsValue dispatchCall(jsg::Lock& js, kj::StringPtr name, Args... args) {
-  auto func = getCppExport(js, name);
-  return func.call(js, js.undefined(), kj::fwd<Args>(args)...);
-}
-
 // The TypeScript implementation's private-brand check. True only for genuine
 // TypeScript-implemented WritableStream instances (including subclasses); false for
 // everything else, including proxies wrapping a stream (private fields do not tunnel
 // through proxies, deliberately matching the TS-side behavior).
 bool isTypeScriptWritableStream(jsg::Lock& js, jsg::JsObject obj) {
-  return dispatchCall(js, "isWritableStream", obj).isTrue();
+  return webstreams::dispatchCall(js, "isWritableStream", obj).isTrue();
 }
 
 bool getWritableStreamIsLocked(jsg::Lock& js, jsg::JsObject obj) {
-  return dispatchCall(js, "isWritableStreamLocked", obj).isTrue();
+  return webstreams::dispatchCall(js, "isWritableStreamLocked", obj).isTrue();
 }
 
 bool getWritableStreamIsClosedOrClosing(jsg::Lock& js, jsg::JsObject obj) {
-  return dispatchCall(js, "isWritableStreamClosedOrClosing", obj).isTrue();
+  return webstreams::dispatchCall(js, "isWritableStreamClosedOrClosing", obj).isTrue();
 }
 
 // The forcible abort: the TS-side internal abort algorithm (spec WritableStreamAbort
@@ -63,7 +35,7 @@ bool getWritableStreamIsClosedOrClosing(jsg::Lock& js, jsg::JsObject obj) {
 jsg::Promise<void> writableStreamAbort(
     jsg::Lock& js, jsg::JsObject obj, jsg::Optional<jsg::JsValue>& reason) {
   jsg::JsValue result =
-      dispatchCall(js, "writableStreamAbort", obj, reason.orDefault(js.undefined()));
+      webstreams::dispatchCall(js, "writableStreamAbort", obj, reason.orDefault(js.undefined()));
   // The result must be a promise
   jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_CAST_PROMISE(result));
   return js.toVoidPromise(promise);
@@ -73,7 +45,7 @@ jsg::Promise<void> writableStreamAbort(
 // equivalent), likewise lock-blind. Already closed-or-closing resolves (idempotent);
 // errored rejects with the stored error -- matching the legacy controller's close().
 jsg::Promise<void> writableStreamClose(jsg::Lock& js, jsg::JsObject obj) {
-  jsg::JsValue result = dispatchCall(js, "writableStreamClose", obj);
+  jsg::JsValue result = webstreams::dispatchCall(js, "writableStreamClose", obj);
   // The result must be a promise
   jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_CAST_PROMISE(result));
   return js.toVoidPromise(promise);
@@ -85,7 +57,7 @@ jsg::Promise<void> writableStreamClose(jsg::Lock& js, jsg::JsObject obj) {
 // TS side implements it as a positional marker in the controller's write queue,
 // mirroring the legacy internal controller's Flush write-event.
 jsg::Promise<void> writableStreamFlush(jsg::Lock& js, jsg::JsObject obj) {
-  jsg::JsValue result = dispatchCall(js, "writableStreamFlush", obj);
+  jsg::JsValue result = webstreams::dispatchCall(js, "writableStreamFlush", obj);
   // The result must be a promise
   jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_CAST_PROMISE(result));
   return js.toVoidPromise(promise);
@@ -93,14 +65,14 @@ jsg::Promise<void> writableStreamFlush(jsg::Lock& js, jsg::JsObject obj) {
 
 void setWritableStreamPendingClosure(jsg::Lock& js, jsg::JsObject obj) {
   // The result is undefined/ignored
-  auto res KJ_UNUSED = dispatchCall(js, "setWritableStreamPendingClosure", obj);
+  auto res KJ_UNUSED = webstreams::dispatchCall(js, "setWritableStreamPendingClosure", obj);
 }
 
 // Permanently neutralizes the stream. Throws (propagated as-is) with the legacy arm's
 // exact error behavior: locked / closed-or-closing TypeErrors, or the stored error if
 // the stream is errored.
 void detachWritableStream(jsg::Lock& js, jsg::JsObject obj) {
-  auto res KJ_UNUSED = dispatchCall(js, "detachWritableStream", obj);
+  auto res KJ_UNUSED = webstreams::dispatchCall(js, "detachWritableStream", obj);
 }
 
 // Convert a write-hook chunk to owned bytes, mirroring the legacy internal controller's
@@ -126,79 +98,12 @@ kj::Maybe<kj::Array<kj::byte>> chunkToBytes(jsg::Lock& js, jsg::Optional<jsg::Js
     } else if (chunk.isString()) {
       auto str = chunk.toString(js);
       if (str.size() == 0) return kj::none;
-      size_t len = str.size();
-      auto chars = str.releaseArray();
-      return chars.first(len).asBytes().attach(kj::mv(chars));
+      return webstreams::stringToBytes(kj::mv(str));
     }
     JSG_FAIL_REQUIRE(TypeError, "This WritableStream only supports writing byte types.");
   }
   return kj::none;
 }
-
-// Serves the given prefix bytes, then delegates to the inner source. Used by pipeFrom()
-// when the extracted source carries stashed bytes (a tee-seeded branch, or an abandoned
-// pull's retained bytes). Duplicated from js-readable-stream.c++ (same deferred-dedup
-// note as the dispatch plumbing above).
-class PrefixedSource final: public ReadableStreamSource {
- public:
-  PrefixedSource(kj::Array<kj::byte> prefix, kj::Own<ReadableStreamSource> inner)
-      : maybePrefix(kj::mv(prefix)),
-        inner(kj::mv(inner)) {}
-
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    auto dest = kj::arrayPtr(static_cast<kj::byte*>(buffer), maxBytes);
-    KJ_IF_SOME(prefix, maybePrefix) {
-      if (prefix.view != nullptr) {
-        size_t amount = kj::min(dest.size(), prefix.view.size());
-        // dest.write(...) advances the internal pointer of dest by amount, so the tryRead
-        // below picks up at the right place and does not overwrite the prefix bytes.
-        dest.write(prefix.view.first(amount));
-        prefix.view = prefix.view.slice(amount);
-        if (prefix.view == nullptr) {
-          // We have fully consumed the prefix. Clear it out.
-          maybePrefix = kj::none;
-        }
-        if (amount >= minBytes) {
-          co_return amount;
-        }
-        minBytes -= amount;
-        maxBytes -= amount;
-        size_t n = co_await inner->tryRead(dest.begin(), minBytes, maxBytes);
-        co_return amount + n;
-      } else {
-        maybePrefix = kj::none;
-      }
-    }
-    co_return co_await inner->tryRead(buffer, minBytes, maxBytes);
-  }
-
-  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
-    if (encoding == StreamEncoding::IDENTITY) {
-      KJ_IF_SOME(length, inner->tryGetLength(encoding)) {
-        size_t prefixSize = 0;
-        KJ_IF_SOME(prefix, maybePrefix) {
-          prefixSize = prefix.view.size();
-        }
-        return length + prefixSize;
-      }
-    }
-    return kj::none;
-  }
-
-  void cancel(kj::Exception reason) override {
-    maybePrefix = kj::none;
-    inner->cancel(kj::mv(reason));
-  }
-
- private:
-  struct Prefix {
-    kj::Array<kj::byte> owned;
-    kj::ArrayPtr<const kj::byte> view;
-    Prefix(kj::Array<kj::byte> owned): owned(kj::mv(owned)), view(this->owned.asPtr()) {}
-  };
-  kj::Maybe<Prefix> maybePrefix;
-  kj::Own<ReadableStreamSource> inner;
-};
 
 // The endpoints of a native+native pipe (WritableStreamNativeSink::pipeFrom), held
 // refcounted because the failure path needs them after the pump promise rejects, and an
@@ -251,10 +156,10 @@ JsWritableStream JsWritableStream::create(jsg::Lock& js,
             ioContext, kj::mv(sink), kj::mv(observer), kj::mv(maybeClosureWaitable))));
     jsg::JsValue stream = [&]() -> jsg::JsValue {
       KJ_IF_SOME(highWaterMark, maybeHighWaterMark) {
-        return dispatchCall(
+        return webstreams::dispatchCall(
             js, "createNativeWritableStream", sinkObj, js.num(static_cast<double>(highWaterMark)));
       }
-      return dispatchCall(js, "createNativeWritableStream", sinkObj);
+      return webstreams::dispatchCall(js, "createNativeWritableStream", sinkObj);
     }();
     auto obj = KJ_REQUIRE_NONNULL(JSG_CAST_OBJECT(stream));
     return JsWritableStream(js, obj.addRef(js));
@@ -682,16 +587,13 @@ jsg::Promise<void> WritableStreamNativeSink::pipeFrom(
         "options.signal must be an AbortSignal");
   }
 
-  // Unwrap the extracted source and release it for the pump (plus any stashed bytes,
-  // which are emitted ahead of everything the source produces).
+  // Unwrap the extracted source and release it for the pump (any stashed bytes are folded
+  // in ahead of the source by releaseForPump itself).
   auto& sourceHandler =
       KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
   auto source = JSG_REQUIRE_NONNULL(sourceHandler.tryUnwrap(js, jsg::JsValue(sourceObj)), TypeError,
       "pipeFrom() requires a native ReadableStream source");
-  auto released = source->releaseForPump(js);
-  if (released.prefix.size() > 0) {
-    released.source = kj::heap<PrefixedSource>(kj::mv(released.prefix), kj::mv(released.source));
-  }
+  auto releasedSource = source->releaseForPump(js);
 
   // Consume the sink: after extraction the TS stream is permanently locked and no further
   // hooks will be dispatched; the pipe owns both endpoints outright.
@@ -705,12 +607,12 @@ jsg::Promise<void> WritableStreamNativeSink::pipeFrom(
       auto reason = signal->getReason(js);
       auto exception = js.exceptionToKj(reason);
       if (!preventAbort) sink->abort(exception.clone());
-      if (!preventCancel) released.source->cancel(kj::mv(exception));
+      if (!preventCancel) releasedSource->cancel(kj::mv(exception));
       return js.rejectedPromise<void>(reason);
     }
   }
 
-  auto pipeState = kj::rc<PipeFromState>(kj::mv(sink), kj::mv(released.source));
+  auto pipeState = kj::rc<PipeFromState>(kj::mv(sink), kj::mv(releasedSource));
   kj::Promise<void> pump = pipeFromPump(pipeState.addRef(), !preventClose);
   KJ_IF_SOME(signal, maybeSignal) {
     // The canceler destroys the pump at its suspension point when the signal fires; the
