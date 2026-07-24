@@ -1,0 +1,33 @@
+src/workerd/io/tracer.h
+  s_b27eb293e3a79c::t_d91e1fb82077bf 56-58,171-173
+src/workerd/io/tracer.c++
+  s_b27eb293e3a79c::t_d91e1fb82077bf 228-252
+src/workerd/api/tracing.h
+  s_b27eb293e3a79c::t_c17914e334c7b9 37
+  s_b27eb293e3a79c::t_d91e1fb82077bf 38,49,71,76
+src/cloudflare/internal/test/tracing/opentelemetry-context-instrumentation-test.js
+  s_b27eb293e3a79c::t_e26df3016134af 13,24-26,45-48
+  s_b27eb293e3a79c::t_9b2ceecbe37dea 12,14-23,27-30,42-44,49
+  s_b27eb293e3a79c::t_002acd5516bb69 50
+src/workerd/api/tracing.c++
+  s_b27eb293e3a79c::t_d91e1fb82077bf 54-59,85,100,103,106,113-120,122,133,541-555
+src/cloudflare/internal/test/tracing/opentelemetry-context-test.js
+  s_b27eb293e3a79c::t_9b2ceecbe37dea 28-31,33-36
+  s_b27eb293e3a79c::t_e26df3016134af 32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fc6f7d9a21e6da09ea4a5568e3c1194066426177",
+  "prompts": {},
+  "sessions": {
+    "s_b27eb293e3a79c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_077f20387ffed8e7iIyvCiLbfx",
+        "model": "gpt-5.6"
+      },
+      "human_author": "Jeremy Morrell <jmorrell@cloudflare.com>"
+    }
+  }
+}
