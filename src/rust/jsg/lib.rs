@@ -198,6 +198,47 @@ impl From<ParseIntError> for Error {
     }
 }
 
+impl From<cxx::KjException> for Error {
+    /// Converts a `kj::Exception` caught at the FFI boundary into a JS-throwable
+    /// [`Error`], parsing the `jsg.<Type>: <message>` tunneling prefix.
+    fn from(err: cxx::KjException) -> Self {
+        Self::from_kj_description(err.what())
+    }
+}
+
+impl Error {
+    /// Parses a `jsg.<Type>: <message>` (or `jsg.DOMException(<Name>): <message>`)
+    /// KJ exception description. Unrecognized prefixes default to `TypeError`.
+    fn from_kj_description(description: &str) -> Self {
+        let body = description
+            .strip_prefix("jsg.")
+            .or_else(|| description.strip_prefix("jsg-internal."))
+            .unwrap_or(description);
+
+        if let Some(rest) = body.strip_prefix("DOMException(")
+            && let Some((name, message)) = rest.split_once("): ")
+        {
+            return Self {
+                name: ExceptionType::from(name),
+                message: message.to_owned(),
+            };
+        }
+
+        // `<Type>: <message>`, but only if the prefix is a known error type;
+        // otherwise fall through to a TypeError carrying the full description.
+        if let Some((ty, message)) = body.split_once(": ")
+            && (!matches!(ExceptionType::from(ty), ExceptionType::Error) || ty == "Error")
+        {
+            return Self {
+                name: ExceptionType::from(ty),
+                message: message.to_owned(),
+            };
+        }
+
+        Self::new_type_error(description.to_owned())
+    }
+}
+
 /// A wrapper type that prevents automatic type coercion when unwrapping from JavaScript.
 ///
 /// JavaScript automatically coerces types in certain contexts. For instance, when a JavaScript

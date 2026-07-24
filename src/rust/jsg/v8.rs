@@ -397,7 +397,11 @@ pub mod ffi {
             index: u32,
             value: Local,
         );
-        pub unsafe fn local_array_iterate(isolate: *mut Isolate, value: Local) -> Vec<Global>;
+        // Fallible: KJ_REQUIREs the value is an array. See "Unwrappers" below.
+        pub unsafe fn local_array_iterate(
+            isolate: *mut Isolate,
+            value: Local,
+        ) -> Result<Vec<Global>>;
 
         // Local<TypedArray>
         pub unsafe fn local_typed_array_length(isolate: *mut Isolate, array: &Local) -> usize;
@@ -502,19 +506,33 @@ pub mod ffi {
         pub unsafe fn traced_reference_reset(traced: &mut TracedReference);
 
         // Unwrappers
-        pub unsafe fn unwrap_string(isolate: *mut Isolate, value: Local) -> String;
+        //
+        // Shims that can throw (coercion via jsg::check, building rust::String/Vec
+        // from V8 data, or KJ_REQUIRE) MUST return Result<T>: workerd-cxx then
+        // catches the throw in C++ instead of aborting across the nounwind FFI
+        // frame. Shims that provably can't throw stay bare (see unwrap_boolean).
+        pub unsafe fn unwrap_string(isolate: *mut Isolate, value: Local) -> Result<String>;
+        // Infallible: ToBoolean can't throw and builds no rust::String/Vec.
         pub unsafe fn unwrap_boolean(isolate: *mut Isolate, value: Local) -> bool;
-        pub unsafe fn unwrap_number(isolate: *mut Isolate, value: Local) -> f64;
-        pub unsafe fn unwrap_uint8_array(isolate: *mut Isolate, value: Local) -> Vec<u8>;
-        pub unsafe fn unwrap_uint16_array(isolate: *mut Isolate, value: Local) -> Vec<u16>;
-        pub unsafe fn unwrap_uint32_array(isolate: *mut Isolate, value: Local) -> Vec<u32>;
-        pub unsafe fn unwrap_int8_array(isolate: *mut Isolate, value: Local) -> Vec<i8>;
-        pub unsafe fn unwrap_int16_array(isolate: *mut Isolate, value: Local) -> Vec<i16>;
-        pub unsafe fn unwrap_int32_array(isolate: *mut Isolate, value: Local) -> Vec<i32>;
-        pub unsafe fn unwrap_float32_array(isolate: *mut Isolate, value: Local) -> Vec<f32>;
-        pub unsafe fn unwrap_float64_array(isolate: *mut Isolate, value: Local) -> Vec<f64>;
-        pub unsafe fn unwrap_bigint64_array(isolate: *mut Isolate, value: Local) -> Vec<i64>;
-        pub unsafe fn unwrap_biguint64_array(isolate: *mut Isolate, value: Local) -> Vec<u64>;
+        pub unsafe fn unwrap_number(isolate: *mut Isolate, value: Local) -> Result<f64>;
+        pub unsafe fn unwrap_uint8_array(isolate: *mut Isolate, value: Local) -> Result<Vec<u8>>;
+        pub unsafe fn unwrap_uint16_array(isolate: *mut Isolate, value: Local) -> Result<Vec<u16>>;
+        pub unsafe fn unwrap_uint32_array(isolate: *mut Isolate, value: Local) -> Result<Vec<u32>>;
+        pub unsafe fn unwrap_int8_array(isolate: *mut Isolate, value: Local) -> Result<Vec<i8>>;
+        pub unsafe fn unwrap_int16_array(isolate: *mut Isolate, value: Local) -> Result<Vec<i16>>;
+        pub unsafe fn unwrap_int32_array(isolate: *mut Isolate, value: Local) -> Result<Vec<i32>>;
+        pub unsafe fn unwrap_float32_array(isolate: *mut Isolate, value: Local)
+        -> Result<Vec<f32>>;
+        pub unsafe fn unwrap_float64_array(isolate: *mut Isolate, value: Local)
+        -> Result<Vec<f64>>;
+        pub unsafe fn unwrap_bigint64_array(
+            isolate: *mut Isolate,
+            value: Local,
+        ) -> Result<Vec<i64>>;
+        pub unsafe fn unwrap_biguint64_array(
+            isolate: *mut Isolate,
+            value: Local,
+        ) -> Result<Vec<u64>>;
 
         // ArrayBuffer detach/detachable/was-detached
         pub unsafe fn local_array_buffer_detach(isolate: *mut Isolate, buffer: &mut Local);
@@ -632,6 +650,8 @@ pub mod ffi {
             args: Pin<&mut FunctionCallbackInfo>,
         );
 
+        // Infallible: only defensive tag checks; returns kj::none for non-Rust
+        // wrappables rather than throwing.
         pub unsafe fn unwrap_resource(
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
@@ -1600,13 +1620,15 @@ impl Local<'_, Array> {
 
     /// Iterates over array elements using V8's native `Array::Iterate()`.
     /// Returns Global handles because Local handles get reused during iteration.
-    pub fn iterate(self) -> Vec<Global<Value>> {
+    /// Errs (rather than aborting) if the value is not an array.
+    pub fn iterate(self) -> crate::Result<Vec<Global<Value>>> {
         // SAFETY: handle is valid within the current HandleScope.
-        unsafe { ffi::local_array_iterate(self.isolate.as_ffi(), self.into_ffi()) }
+        let globals = unsafe { ffi::local_array_iterate(self.isolate.as_ffi(), self.into_ffi()) }?;
+        Ok(globals
             .into_iter()
             // SAFETY: each Global handle was created by the C++ side and is valid.
             .map(|g| unsafe { Global::from_ffi(g) })
-            .collect()
+            .collect())
     }
 }
 

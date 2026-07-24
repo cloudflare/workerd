@@ -300,3 +300,19 @@ pub unsafe fn realm_create(isolate: *mut v8::ffi::Isolate, feature_flags_data: &
     // ...
 }
 ```
+
+## Fallible FFI shims
+
+A bare-`T` `extern "C++"` shim is `nounwind`: if its C++ body throws (via
+`jsg::check`, building a `rust::String`/`rust::Vec` from V8 data, or
+`KJ_REQUIRE`), the exception unwinds through the Rust frame into `abort()`
+(SIGABRT) — trivially reachable from JS (e.g. `unwrap_string` on `Symbol()` or a
+lone surrogate `'\uD800'`).
+
+**Rule:** any shim whose C++ body can throw MUST be declared `-> Result<T>`.
+workerd-cxx then catches the throw in C++ and hands Rust an
+`Err(cxx::KjException)`; convert it with `?` (see `impl From<cxx::KjException> for
+Error`). The C++ implementation still returns a bare `T` that throws — only the
+Rust declaration gains `Result`. Shims that provably can't throw may stay bare,
+but must not then call `jsg::check`, build `rust::String`/`rust::Vec` from V8
+data, or `KJ_REQUIRE`.

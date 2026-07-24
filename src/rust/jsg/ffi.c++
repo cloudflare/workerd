@@ -41,7 +41,7 @@ namespace workerd::rust::jsg {
 #define DEFINE_TYPED_ARRAY_UNWRAP(name, v8_type, elem_type)                                        \
   ::rust::Vec<elem_type> unwrap_##name(Isolate* isolate, Local value) {                            \
     auto v8Val = local_from_ffi<v8::Value>(kj::mv(value));                                         \
-    KJ_REQUIRE(v8Val->Is##v8_type());                                                              \
+    KJ_REQUIRE(v8Val->Is##v8_type(), "Expected a " #v8_type);                                      \
     auto typed = v8Val.As<v8::v8_type>();                                                          \
     ::rust::Vec<elem_type> result;                                                                 \
     result.reserve(typed->Length());                                                               \
@@ -641,12 +641,36 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
 }
 
 // Unwrappers
+
+// Runs `fn` (returning a v8::MaybeLocal<T>) under a TryCatch. On failure it
+// converts the pending JS exception into a `jsg.<Type>:`-prefixed kj::Exception
+// and throws it, so workerd-cxx's Result::run catches it in C++ and hands Rust a
+// catchable error instead of aborting. Termination exceptions are re-thrown
+// unchanged, mirroring jsg::Lock::tryCatch.
+template <typename T, typename Func>
+static v8::Local<T> unwrapCoerce(v8::Isolate* isolate, Func&& fn) {
+  v8::TryCatch tryCatch(isolate);
+  v8::Local<T> result;
+  if (fn().ToLocal(&result)) {
+    return result;
+  }
+  if (!tryCatch.CanContinue() || !tryCatch.HasCaught() || tryCatch.Exception().IsEmpty()) {
+    tryCatch.ReThrow();
+    throw ::workerd::jsg::JsExceptionThrown();
+  }
+  auto exception = ::workerd::jsg::createTunneledException(isolate, tryCatch.Exception());
+  tryCatch.Reset();
+  kj::throwFatalException(kj::mv(exception));
+}
+
 ::rust::String unwrap_string(Isolate* isolate, Local value) {
-  v8::Local<v8::String> v8Str = ::workerd::jsg::check(
-      local_from_ffi<v8::Value>(kj::mv(value))->ToString(isolate->GetCurrentContext()));
+  auto context = isolate->GetCurrentContext();
+  v8::Local<v8::String> v8Str = unwrapCoerce<v8::String>(
+      isolate, [&] { return local_from_ffi<v8::Value>(kj::mv(value))->ToString(context); });
   v8::String::ValueView view(isolate, v8Str);
   if (!view.is_one_byte()) {
-    return ::rust::String(reinterpret_cast<const char16_t*>(view.data16()), view.length());
+    // lossy(): lone surrogates become U+FFFD instead of throwing (which aborts).
+    return ::rust::String::lossy(reinterpret_cast<const char16_t*>(view.data16()), view.length());
   }
   return ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
 }
@@ -656,9 +680,10 @@ bool unwrap_boolean(Isolate* isolate, Local value) {
 }
 
 double unwrap_number(Isolate* isolate, Local value) {
-  return ::workerd::jsg::check(
-      local_from_ffi<v8::Value>(kj::mv(value))->ToNumber(isolate->GetCurrentContext()))
-      ->Value();
+  auto context = isolate->GetCurrentContext();
+  v8::Local<v8::Number> number = unwrapCoerce<v8::Number>(
+      isolate, [&] { return local_from_ffi<v8::Value>(kj::mv(value))->ToNumber(context); });
+  return number->Value();
 }
 
 kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value) {

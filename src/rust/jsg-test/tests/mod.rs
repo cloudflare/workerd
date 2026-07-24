@@ -4,6 +4,7 @@
 
 mod arrays;
 mod buffer_types;
+mod coercion_safety;
 mod collections_gc;
 mod eval;
 mod function;

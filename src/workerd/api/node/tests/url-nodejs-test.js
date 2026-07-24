@@ -76,6 +76,45 @@ export const whatwgURLCustomDomainTo = {
   },
 };
 
+// Regression test for the Rust JSG `unwrap_string` boundary: with the
+// `nodejs_url_rust` autogate on, `domainToASCII`/`domainToUnicode` route through
+// Rust and used to abort (SIGABRT) on lone surrogates or throwing coercions.
+// Runs under both gate states via the `@all-autogates` variant.
+export const domainToAsciiCoercionSafety = {
+  test() {
+    // Lone/unpaired surrogates must not crash; output is lossy, not contractual.
+    for (const domain of [
+      '\uD800',
+      'a\uD800b',
+      '\uDC00',
+      'xn--\uD800.example',
+      '\uD800'.repeat(1000),
+    ]) {
+      strictEqual(typeof domainToASCII(domain), 'string');
+      strictEqual(typeof domainToUnicode(domain), 'string');
+    }
+
+    // Values that throw during string coercion must surface as a catchable
+    // error, never a crash.
+    for (const hostile of [
+      Symbol('s'),
+      {
+        toString() {
+          throw new TypeError('boom');
+        },
+      },
+      {
+        [Symbol.toPrimitive]() {
+          throw new RangeError('nope');
+        },
+      },
+    ]) {
+      throws(() => domainToASCII(hostile));
+      throws(() => domainToUnicode(hostile));
+    }
+  },
+};
+
 export const urlAndSearchParams = {
   test() {
     assert(URLImpl, 'URL should be exported from node:url');
