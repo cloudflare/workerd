@@ -106,7 +106,11 @@ namespace workerd::util {
   /* Allow a Socket to be transferred over JS RPC. When disabled, serializing a Socket fails as    \
      though the type were not serializable at all, and an incoming transferred Socket is           \
      rejected. */                                                                                  \
-  V(SOCKET_RPC_TRANSFER)
+  V(SOCKET_RPC_TRANSFER)                                                                           \
+  /* Enable synchronous tryReadSync/tryWriteSync fast paths in stream controllers, allowing        \
+     reader.read() / writer.write() promises to settle without an event-loop round trip. The        \
+     C++ pump paths (pumpTo, pumpToImpl) are not gated. */                                         \
+  V(STREAM_CONTROLLER_SYNC_FAST_PATHS)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

@@ -238,6 +238,27 @@ class WritableStreamSink: public kj::PtrTarget {
   virtual kj::Promise<void> write(
       kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) KJ_WARN_UNUSED_RESULT = 0;
 
+  // Attempt to perform a synchronous write, as an optimization to avoid promise overhead when
+  // the sink can accept the bytes immediately. This follows the same contract as
+  // kj::AsyncOutputStream::tryWriteSync():
+  //
+  // - All-or-nothing: either the entire buffer (or every piece) is written synchronously
+  //   (returns true), or nothing is written at all (returns false).
+  // - Returns false -- and MUST NOT throw -- when the write cannot complete synchronously,
+  //   including when an asynchronous write or pump is already in progress, or when the sink is
+  //   in an errored or ended state (the caller's subsequent write() will surface the
+  //   appropriate exception).
+  // - MUST NOT have side effects when returning false: the caller may immediately invoke
+  //   write() with the same arguments and must observe the same result as if tryWriteSync()
+  //   had never been called.
+  // - May throw only if a synchronous write is possible but the write itself fails, exactly as
+  //   write() would have reported it.
+  //
+  // The default implementations always return false.
+  virtual bool tryWriteSync(kj::ArrayPtr<const byte> buffer) KJ_WARN_UNUSED_RESULT;
+  virtual bool tryWriteSync(
+      kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) KJ_WARN_UNUSED_RESULT;
+
   virtual kj::Promise<void> end() KJ_WARN_UNUSED_RESULT = 0;
   // Must call to flush and finish the stream.
 
@@ -261,6 +282,23 @@ class WritableStreamSink: public kj::PtrTarget {
 class ReadableStreamSource: public kj::PtrTarget {
  public:
   virtual kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) = 0;
+
+  // Attempt to perform a synchronous read, as an optimization to avoid promise overhead when
+  // data is already available. This follows the same contract as
+  // kj::AsyncInputStream::tryReadSync():
+  //
+  // - Semantics match tryRead(): at least `minBytes` are read, `buffer.size()` acts as the
+  //   maximum, and a return value less than `minBytes` indicates EOF.
+  // - Returns kj::none -- and MUST NOT throw -- when the read cannot complete synchronously,
+  //   including when an asynchronous read or pump is already in progress.
+  // - MUST NOT have side effects when returning kj::none: the caller may immediately invoke
+  //   tryRead() with the same arguments and must observe the same result as if tryReadSync()
+  //   had never been called.
+  // - May throw only if a synchronous read is possible but the read itself fails, exactly as
+  //   tryRead() would have reported it.
+  //
+  // The default implementation always returns kj::none.
+  virtual kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes);
 
   // The ReadableStreamSource version of pumpTo() has no `amount` parameter, since the Streams spec
   // only defines pumping everything.

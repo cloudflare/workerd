@@ -191,6 +191,13 @@ class LazyBuffer {
   // has been processed.
   kj::ArrayPtr<byte> take(size_t read_size) {
     KJ_ASSERT(read_size <= valid_size_);
+    if (read_size == 0) {
+      // There is no data to point at, so return an empty chunk. Note that we must not fall
+      // through to the general case here: when the valid region is empty (e.g. serving an EOF
+      // read in the terminal state after all buffered data has been consumed), the expression
+      // below would index one past the end of the vector.
+      return nullptr;
+    }
     kj::ArrayPtr<byte> chunk = kj::arrayPtr(&output[output.size() - valid_size_], read_size);
     valid_size_ -= read_size;
     return chunk;
@@ -266,6 +273,32 @@ class CompressionStreamBase: public kj::Refcounted,
     co_return;
   }
 
+  bool tryWriteSync(kj::ArrayPtr<const byte> buffer) override final {
+    // Writes never involve async I/O: they compress into the internal output buffer (there is
+    // currently no backpressure), so any write in the active state can complete synchronously.
+    if (isInTerminalState()) {
+      // Closed or errored; let the async path surface the appropriate exception.
+      return false;
+    }
+    // Note: writeInternal() may throw if the compression itself fails, exactly as the async
+    // write() would.
+    context.setInput(buffer.begin(), buffer.size());
+    writeInternal(Z_NO_FLUSH);
+    return true;
+  }
+
+  bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override final {
+    if (isInTerminalState()) {
+      // Closed or errored; let the async path surface the appropriate exception.
+      return false;
+    }
+    for (auto piece: pieces) {
+      context.setInput(piece.begin(), piece.size());
+      writeInternal(Z_NO_FLUSH);
+    }
+    return true;
+  }
+
   kj::Promise<void> end() override final {
     transitionToEnded();
     writeInternal(Z_FINISH);
@@ -293,6 +326,31 @@ class CompressionStreamBase: public kj::Refcounted,
     // Active or terminal with data remaining
     co_return co_await tryReadInternal(
         kj::arrayPtr(reinterpret_cast<kj::byte*>(buffer), maxBytes), minBytes);
+  }
+
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override final {
+    KJ_ASSERT(minBytes <= buffer.size());
+    // Re-throw any stored exception: a synchronous answer exists, and it is this error, exactly
+    // as tryRead() would report it.
+    throwIfException();
+
+    // Preserve FIFO ordering: if asynchronous reads are already waiting for data, we must not
+    // serve a synchronous read ahead of them.
+    if (!pendingReads.empty()) {
+      return kj::none;
+    }
+
+    if (output.size() >= minBytes || isInTerminalState()) {
+      // Serve directly from the buffered output. (In the terminal state this may copy fewer
+      // than minBytes -- possibly zero -- which correctly signals EOF, matching tryRead().)
+      auto maxBytesToCopy = kj::min(buffer.size(), output.size());
+      buffer.write(output.take(maxBytesToCopy));
+      output.maybeShift();
+      return maxBytesToCopy;
+    }
+
+    // Not enough decompressed data buffered; the read would have to wait for a future write.
+    return kj::none;
   }
 
  protected:
@@ -542,6 +600,11 @@ class CompressionStreamAdapter final: public kj::Refcounted,
     return impl->tryRead(buffer, minBytes, maxBytes).attach(ioContext.registerPendingEvent());
   }
 
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    // No pending event registration is needed since a synchronous read never suspends.
+    return impl->tryReadSync(buffer, minBytes);
+  }
+
   void cancel(kj::Exception reason) override {
     // AsyncInputStream doesn't have cancel, but we can abort the write side
     impl->abortWrite(kj::mv(reason));
@@ -554,6 +617,15 @@ class CompressionStreamAdapter final: public kj::Refcounted,
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
     return impl->write(pieces).attach(ioContext.registerPendingEvent());
+  }
+
+  bool tryWriteSync(kj::ArrayPtr<const byte> buffer) override {
+    // No pending event registration is needed since a synchronous write never suspends.
+    return impl->tryWriteSync(buffer);
+  }
+
+  bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+    return impl->tryWriteSync(pieces);
   }
 
   kj::Promise<void> end() override {

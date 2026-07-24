@@ -17,6 +17,30 @@ namespace workerd::api {
 
 namespace {
 
+// Translate exceptions from the underlying encoded stream (e.g. compression failures) into
+// friendlier user-facing errors. Exceptions which do not match are passed through unchanged,
+// since they are likely already jsg.TypeErrors.
+kj::Exception translateEncodedStreamException(kj::Exception&& exception) {
+  KJ_IF_SOME(e,
+      translateKjException(exception,
+          {
+            {"gzip compressed stream ended prematurely"_kj,
+              "Gzip compressed stream ended prematurely."_kj},
+            {"gzip decompression failed"_kj, "Gzip decompression failed."},
+            {"brotli state allocation failed"_kj, "Brotli state allocation failed."},
+            {"invalid brotli window size"_kj, "Invalid brotli window size."},
+            {"invalid brotli compression level"_kj, "Invalid brotli compression level."},
+            {"brotli window size too big"_kj, "Brotli window size too big."},
+            {"brotli compression failed"_kj, "Brotli compression failed."},
+            {"brotli decompression failed"_kj, "Brotli decompression failed."},
+            {"brotli compressed stream ended prematurely"_kj,
+              "Brotli compressed stream ended prematurely."},
+          })) {
+    return kj::mv(e);
+  }
+  return kj::mv(exception);
+}
+
 // A wrapper around a native `kj::AsyncInputStream` which knows the underlying encoding of the
 // stream and whether or not it requires pending event registration.
 class EncodedAsyncInputStream final: public ReadableStreamSource {
@@ -27,6 +51,8 @@ class EncodedAsyncInputStream final: public ReadableStreamSource {
   // Read bytes in identity encoding. If the stream is not already in identity encoding, it will be
   // converted to identity encoding via an appropriate stream wrapper.
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
+
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override;
 
   StreamEncoding getPreferredEncoding() override {
     return encoding;
@@ -71,31 +97,38 @@ kj::Promise<size_t> EncodedAsyncInputStream::tryRead(
     void* buffer, size_t minBytes, size_t maxBytes) {
   ensureIdentityEncoding();
 
-  return kj::evalNow([&]() {
+  return kj::evalNow([&]() -> kj::Promise<size_t> {
+    // Fast path: serve the read synchronously if the data is already available (e.g. buffered
+    // decompressed data or a pending pipe write). There is no need to register a pending event
+    // since we never suspend, and the canceler does not apply since there is no in-flight
+    // operation to cancel. Note that tryReadSync() may throw (e.g. on corrupt compressed data),
+    // which the evalNow() catches so that the error translation below applies exactly as it
+    // does for asynchronous reads.
+    KJ_IF_SOME(n,
+        inner->tryReadSync(kj::arrayPtr(static_cast<kj::byte*>(buffer), maxBytes), minBytes)) {
+      return n;
+    }
+
     return canceler.wrap(inner->tryRead(buffer, minBytes, maxBytes))
         .attach(ioContext.registerPendingEvent());
   }).catch_([](kj::Exception&& exception) -> kj::Promise<size_t> {
-    KJ_IF_SOME(e,
-        translateKjException(exception,
-            {
-              {"gzip compressed stream ended prematurely"_kj,
-                "Gzip compressed stream ended prematurely."_kj},
-              {"gzip decompression failed"_kj, "Gzip decompression failed."},
-              {"brotli state allocation failed"_kj, "Brotli state allocation failed."},
-              {"invalid brotli window size"_kj, "Invalid brotli window size."},
-              {"invalid brotli compression level"_kj, "Invalid brotli compression level."},
-              {"brotli window size too big"_kj, "Brotli window size too big."},
-              {"brotli decompression failed"_kj, "Brotli decompression failed."},
-              {"brotli compression failed"_kj, "Brotli compression failed."},
-              {"brotli compressed stream ended prematurely"_kj,
-                "Brotli compressed stream ended prematurely."},
-            })) {
-      return kj::mv(e);
-    }
-
-    // Let the original exception pass through, since it is likely already a jsg.TypeError.
-    return kj::mv(exception);
+    return translateEncodedStreamException(kj::mv(exception));
   });
+}
+
+kj::Maybe<size_t> EncodedAsyncInputStream::tryReadSync(
+    kj::ArrayPtr<kj::byte> buffer, size_t minBytes) {
+  ensureIdentityEncoding();
+
+  // There is no need to register a pending event since a synchronous read never suspends, and
+  // the canceler does not apply since there is no in-flight operation to cancel.
+  try {
+    return inner->tryReadSync(buffer, minBytes);
+  } catch (...) {
+    // tryReadSync() may throw when a synchronous read is possible but fails (e.g. corrupt
+    // compressed data); translate the error exactly as the asynchronous path would.
+    kj::throwFatalException(translateEncodedStreamException(kj::getCaughtExceptionAsKj()));
+  }
 }
 
 kj::Maybe<uint64_t> EncodedAsyncInputStream::tryGetLength(StreamEncoding outEncoding) {
@@ -165,6 +198,9 @@ class EncodedAsyncOutputStream final: public WritableStreamSink {
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override;
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override;
 
+  bool tryWriteSync(kj::ArrayPtr<const byte> buffer) override;
+  bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override;
+
   kj::Maybe<kj::Promise<DeferredProxy<void>>> tryPumpFrom(
       kj::Ptr<ReadableStreamSource> input, bool end) override;
 
@@ -210,7 +246,14 @@ kj::Promise<void> EncodedAsyncOutputStream::write(kj::ArrayPtr<const byte> buffe
 
   ensureIdentityEncoding();
 
-  return getInner().write(buffer).attach(ioContext.registerPendingEvent());
+  auto& target = getInner();
+  if (target.tryWriteSync(buffer)) {
+    // Fast path: the write completed synchronously (e.g. into a waiting reader or an in-memory
+    // buffer). No pending event registration is needed since we never suspend.
+    return kj::READY_NOW;
+  }
+
+  return target.write(buffer).attach(ioContext.registerPendingEvent());
 }
 
 kj::Promise<void> EncodedAsyncOutputStream::write(
@@ -220,7 +263,34 @@ kj::Promise<void> EncodedAsyncOutputStream::write(
 
   ensureIdentityEncoding();
 
-  return getInner().write(pieces).attach(ioContext.registerPendingEvent());
+  auto& target = getInner();
+  if (target.tryWriteSync(pieces)) {
+    // Fast path: the write completed synchronously (e.g. into a waiting reader or an in-memory
+    // buffer). No pending event registration is needed since we never suspend.
+    return kj::READY_NOW;
+  }
+
+  return target.write(pieces).attach(ioContext.registerPendingEvent());
+}
+
+bool EncodedAsyncOutputStream::tryWriteSync(kj::ArrayPtr<const byte> buffer) {
+  // Mirrors write(): writes on an ended stream are silently ignored, so they trivially
+  // "complete" synchronously.
+  if (inner.is<Ended>()) return true;
+
+  ensureIdentityEncoding();
+
+  // No pending event registration is needed since a synchronous write never suspends.
+  return getInner().tryWriteSync(buffer);
+}
+
+bool EncodedAsyncOutputStream::tryWriteSync(
+    kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) {
+  if (inner.is<Ended>()) return true;
+
+  ensureIdentityEncoding();
+
+  return getInner().tryWriteSync(pieces);
 }
 
 kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFrom(

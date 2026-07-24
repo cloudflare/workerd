@@ -43,6 +43,52 @@ class NoopSink final: public WritableStreamSink {
   void abort(kj::Exception) override {}
 };
 
+KJ_TEST("IdentityTransformStream declines tryReadSync/tryWriteSync") {
+  // IdentityTransformStreamImpl deliberately does not implement the synchronous fast paths:
+  // serving the read/write rendezvous synchronously would make the result observable to
+  // JavaScript ahead of the counterpart's controller-level completion bookkeeping (write
+  // promise resolution and highWaterMark accounting), inverting the ordering guaranteed by
+  // the asynchronous path. See the note in identity-transform-stream.c++ and
+  // identitytransformstream-backpressure-test.js. This test guards against the fast path
+  // being reintroduced without preserving that ordering, and verifies that declining has no
+  // side effects.
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto pipe = newIdentityPipe();
+
+  kj::byte buf[16]{};
+
+  // Nothing pending: declined.
+  KJ_EXPECT(pipe.in->tryReadSync(kj::arrayPtr(buf), 1) == kj::none);
+  KJ_EXPECT(!pipe.out->tryWriteSync("abc"_kjb));
+
+  {
+    // A pending write is not served synchronously, and declining has no side effects: the
+    // async path then completes normally with the same arguments.
+    auto writePromise = pipe.out->write("foobar"_kjb);
+    KJ_EXPECT(pipe.in->tryReadSync(kj::arrayPtr(buf), 1) == kj::none);
+    KJ_EXPECT(!writePromise.poll(ws));
+    KJ_EXPECT(pipe.in->tryRead(buf, 1, sizeof(buf)).wait(ws) == 6);
+    KJ_EXPECT(kj::arrayPtr(buf).first(6) == "foobar"_kjb);
+    writePromise.wait(ws);
+  }
+
+  {
+    // A pending read is not served synchronously, and declining has no side effects.
+    auto readPromise = pipe.in->tryRead(buf, 1, sizeof(buf));
+    KJ_EXPECT(!pipe.out->tryWriteSync("abc"_kjb));
+    KJ_EXPECT(!readPromise.poll(ws));
+    pipe.out->write("abc"_kjb).wait(ws);
+    KJ_EXPECT(readPromise.wait(ws) == 3);
+    KJ_EXPECT(kj::arrayPtr(buf).first(3) == "abc"_kjb);
+  }
+
+  // EOF is likewise reported only via the async path.
+  pipe.out->end().wait(ws);
+  KJ_EXPECT(pipe.in->tryReadSync(kj::arrayPtr(buf), 1) == kj::none);
+}
+
 // Creates a TestFixture with common flags for stream tests
 TestFixture makeStreamTestFixture() {
   capnp::MallocMessageBuilder message;
