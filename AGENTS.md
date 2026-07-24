@@ -206,6 +206,13 @@ This project generally follows the [KJ Style Guide](https://github.com/capnproto
 - **Commit discipline**: Split PRs into small commits; each must compile + pass tests; no fixup commits
 - **TypeScript**: Strict mode, `exactOptionalPropertyTypes`, private `#` syntax enforced, explicit return types
 
+### Comment guidelines
+
+- Write comments that describe the current state of the system, not the task, change, or debugging that produced the code.
+- Don't refer to a prior state as if the reader already knows it; the reader has only the code in front of them, not the diff or the ticket.
+- Referring to historical state is occasionally legitimate, but it's rare and must be explicitly introduced as history, ideally explaining what problem the old approach caused (e.g. "Historically we did X, but that caused Y, so now we do Z").
+- Don't explain what a widely-used tag, flag, or API does at every use site; document such conventions once where they're defined and let readers find that via search.
+
 ### Use KJ types, not STL
 
 This project uses the KJ library instead of the C++ standard library for most types:
