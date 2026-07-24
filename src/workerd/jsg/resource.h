@@ -1779,6 +1779,9 @@ struct NewContextOptions {
   // Used by the per-isolate bootstrap, which needs to capture these constructors
   // (runPerIsolateBootstrap performs the deferred deletion).
   bool deferWeakRefDeletion = false;
+
+  // Install the experimental WebAssembly memory.discard proposal on the new context.
+  bool installWasmMemoryDiscard = false;
 };
 
 void deleteWeakRefGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context);
