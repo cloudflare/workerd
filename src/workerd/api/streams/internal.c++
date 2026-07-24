@@ -38,8 +38,31 @@ kj::Promise<void> pumpTo(
     kj::Ptr<ReadableStreamSource> input, kj::Ptr<WritableStreamSink> output, bool end) {
   kj::byte buffer[65536]{};
 
+  // Maximum number of bytes served by the synchronous fast paths before we skip them once and
+  // take the asynchronous read instead. A KJ co_await always suspends through the event loop,
+  // so without this cap a source and sink that both keep completing synchronously (e.g. a large
+  // buffered body feeding a compression sink, which currently exerts no backpressure) would
+  // monopolize the event loop for the entire pump. The budget is denominated in bytes rather
+  // than iterations so that the bound on un-yielded work does not scale with the sink's cost
+  // per byte (a compression sink runs the codec inline in tryWriteSync()). The budget resets
+  // whenever we actually suspend (asynchronous read or write).
+  static constexpr size_t kMaxSyncBytes = 256 * 1024;
+  size_t syncBytes = 0;
+
   while (true) {
-    auto amount = co_await input->tryRead(buffer, 1, kj::size(buffer));
+    auto ptr = kj::arrayPtr(buffer, kj::size(buffer));
+    size_t amount = 0;
+    kj::Maybe<size_t> maybeSyncAmount;
+    if (syncBytes < kMaxSyncBytes) {
+      maybeSyncAmount = input->tryReadSync(ptr, 1);
+    }
+    KJ_IF_SOME(amt, maybeSyncAmount) {
+      amount = amt;
+      syncBytes += amt;
+    } else {
+      amount = co_await input->tryRead(buffer, 1, kj::size(buffer));
+      syncBytes = 0;
+    }
 
     if (amount == 0) {
       if (end) {
@@ -48,7 +71,11 @@ kj::Promise<void> pumpTo(
       co_return;
     }
 
-    co_await output->write(kj::arrayPtr(buffer, amount));
+    ptr = ptr.first(amount);
+    if (!output->tryWriteSync(ptr)) {
+      co_await output->write(ptr);
+      syncBytes = 0;
+    }
   }
 }
 
@@ -153,13 +180,38 @@ class AllReader final {
         kj::min(limit, kj::min(MAX_BUFFER_CHUNK, maybeLength.orDefault(DEFAULT_BUFFER_CHUNK)));
     // amountToRead can be zero if the stream reported a zero-length. While the stream could
     // be lying about its length, let's skip reading anything in this case.
+    // Maximum number of bytes served by the synchronous read fast path before we skip it once
+    // and take an asynchronous read instead. The memory `limit` does not bound un-yielded work
+    // here: it can be kj::maxValue (the server's buffering limit), and this coroutine may run
+    // eagerly under the isolate lock until its first suspension. Without a budget, a source
+    // that keeps serving reads synchronously (e.g. a decompression stream fed a small, highly
+    // compressed input) would hold the lock for the entire read. The budget resets whenever we
+    // actually suspend.
+    static constexpr uint64_t MAX_SYNC_BYTES = 256 * 1024;  // 256KB
+    uint64_t syncBytes = 0;
+
     if (amountToRead > 0) {
       for (;;) {
         auto bytes = kj::heapArray<T>(amountToRead);
         // Note that we're passing amountToRead as the *minBytes* here so the tryRead should
         // attempt to fill the entire buffer. If it doesn't, the implication is that we read
         // everything.
-        uint64_t amount = co_await input->tryRead(bytes.begin(), amountToRead, amountToRead);
+        // Fast path: serve the read synchronously when the data is already available (e.g.
+        // buffered compressed output). A synchronous throw from tryReadSync() is equivalent
+        // to a rejected tryRead() promise here since both reject this coroutine's promise.
+        uint64_t amount = 0;
+        kj::Maybe<size_t> maybeSyncAmount;
+        if (syncBytes < MAX_SYNC_BYTES &&
+            util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+          maybeSyncAmount = input->tryReadSync(bytes.asBytes(), amountToRead);
+        }
+        KJ_IF_SOME(syncAmount, maybeSyncAmount) {
+          amount = syncAmount;
+          syncBytes += syncAmount;
+        } else {
+          amount = co_await input->tryRead(bytes.begin(), amountToRead, amountToRead);
+          syncBytes = 0;
+        }
         KJ_DASSERT(amount <= amountToRead);
 
         runningTotal += amount;
@@ -279,6 +331,10 @@ class TeeAdapter final: public kj::AsyncInputStream {
     return inner->tryRead(buffer, minBytes, maxBytes);
   }
 
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    return inner->tryReadSync(buffer, minBytes);
+  }
+
   kj::Maybe<uint64_t> tryGetLength() override {
     return inner->tryGetLength(StreamEncoding::IDENTITY);
   }
@@ -293,6 +349,10 @@ class TeeBranch final: public ReadableStreamSource {
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     return inner->tryRead(buffer, minBytes, maxBytes);
+  }
+
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    return inner->tryReadSync(buffer, minBytes);
   }
 
   kj::Promise<DeferredProxy<void>> pumpTo(kj::Ptr<WritableStreamSink> output, bool end) override {
@@ -363,6 +423,14 @@ class TeeBranch final: public ReadableStreamSource {
       return inner->write(pieces);
     }
 
+    bool tryWriteSync(kj::ArrayPtr<const byte> buffer) override {
+      return inner->tryWriteSync(buffer);
+    }
+
+    bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+      return inner->tryWriteSync(pieces);
+    }
+
     kj::Promise<void> whenWriteDisconnected() override {
       KJ_UNIMPLEMENTED("whenWriteDisconnected() not expected on PumpAdapter");
     }
@@ -409,6 +477,19 @@ void ReadableStreamSource::cancel(kj::Exception reason) {}
 
 kj::Maybe<ReadableStreamSource::Tee> ReadableStreamSource::tryTee(uint64_t limit) {
   return kj::none;
+}
+
+kj::Maybe<size_t> ReadableStreamSource::tryReadSync(
+    kj::ArrayPtr<kj::byte> buffer, size_t minBytes) {
+  return kj::none;
+}
+
+bool WritableStreamSink::tryWriteSync(kj::ArrayPtr<const byte> buffer) {
+  return false;
+}
+
+bool WritableStreamSink::tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) {
+  return false;
 }
 
 kj::Maybe<kj::Promise<DeferredProxy<void>>> WritableStreamSink::tryPumpFrom(
@@ -568,9 +649,66 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
         // into.
         KJ_ASSERT(atLeast <= byteLength, "minBytes must not exceed maxBytes in tryRead");
 
+        auto tempBuffer = kj::heapArray<kj::byte>(byteLength);
+        auto bytes = tempBuffer.asPtr();
+
+        // Fast path: attempt to complete the read synchronously, avoiding a trip through the KJ
+        // event loop when the data is already available (e.g. buffered decompressed data or a
+        // pending write on an identity transform).
+        kj::Maybe<size_t> maybeSyncAmount;
+        if (util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+          KJ_TRY {
+            maybeSyncAmount = readable->tryReadSync(bytes, atLeast);
+          }
+          KJ_CATCH(exception) {
+            // tryReadSync() may throw when a synchronous read is possible but fails. Handle the
+            // failure exactly like the asynchronous error path below.
+            readPending = false;
+            auto error = jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js));
+            if (!state.is<StreamStates::Errored>()) {
+              doError(js, error);
+            }
+            return js.rejectedPromise<ReadResult>(error);
+          }
+        }
+
+        KJ_IF_SOME(amount, maybeSyncAmount) {
+          // The read completed synchronously. No JS has run since the buffer was set up, so it
+          // cannot have been detached or resized — no revalidation needed.
+          readPending = false;
+          KJ_ASSERT(amount <= byteLength);
+          if (amount == 0) {
+            if (!state.is<StreamStates::Errored>()) {
+              doClose(js);
+            }
+            KJ_IF_SOME(o, owner) {
+              o->signalEof(js);
+            }
+            if (maybeByobOptions != kj::none &&
+                FeatureFlags::get(js).getInternalStreamByobReturn()) {
+              return js.resolvedPromise(ReadResult{
+                .value = jsg::JsValue(store.getBuffer().newUint8View(0, 0)).addRef(js),
+                .done = true,
+              });
+            }
+            return js.resolvedPromise(ReadResult{.done = true});
+          }
+
+          // Copy from the temp buffer into the BackingStore (same as the async completion path).
+          KJ_ASSERT(byteOffset <= store.getBuffer().size() &&
+              amount <= store.getBuffer().size() - byteOffset);
+          store.getBuffer()
+              .asArrayPtr()
+              .slice(byteOffset, byteOffset + amount)
+              .copyFrom(tempBuffer.first(amount));
+
+          return js.resolvedPromise(ReadResult{
+            .value = jsg::JsValue(store.getBuffer().newUint8View(byteOffset, amount)).addRef(js),
+            .done = false,
+          });
+        }
+
         auto promise = kj::evalNow([&]() -> kj::Promise<kj::Array<kj::byte>> {
-          auto tempBuffer = kj::heapArray<kj::byte>(byteLength);
-          auto bytes = tempBuffer.asPtr();
           return readable->tryRead(bytes.begin(), atLeast, bytes.size())
               .then([tempBuffer = kj::mv(tempBuffer)](size_t amount) mutable {
             KJ_ASSERT(amount <= tempBuffer.size());
@@ -710,9 +848,11 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::dr
   // like read(). The significant difference is that with JS-backed streams, a draining
   // read will pull any already enqueued data from the stream buffer and try synchronously
   // pumping the stream for more data until either maxRead is satisfied or the stream
-  // indicates EOF, error, or that it needs to wait for more data. Internal streams have
-  // no such internal buffering and never provide data synchronously so drainingRead
-  // is effectively the same as read().
+  // indicates EOF, error, or that it needs to wait for more data. Most internal streams
+  // provide data only asynchronously, making drainingRead effectively the same as read();
+  // however, sources that buffer internally (e.g. compression) can serve the read
+  // synchronously via tryReadSync(), in which case we deliver the buffered data without
+  // a trip through the event loop, which comes closest to the draining intent.
 
   if (isPendingClosure) {
     return js.rejectedPromise<DrainingReadResult>(
@@ -756,11 +896,47 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::dr
         });
       }
 
+      auto store = kj::heapArray<kj::byte>(maxRead);
+      auto bytes = store.asPtr();
+
+      // Fast path: attempt to complete the read synchronously, avoiding a trip through the
+      // KJ event loop when data is already available (e.g. buffered compressed output). A
+      // single synchronous read of everything the source has buffered is exactly the
+      // draining behavior this method approximates.
+      kj::Maybe<size_t> maybeSyncAmount;
+      if (util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+        KJ_TRY {
+          maybeSyncAmount = readable->tryReadSync(bytes, kAtLeast);
+        }
+        KJ_CATCH(exception) {
+          readPending = false;
+          auto error = jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js));
+          if (!state.is<StreamStates::Errored>()) {
+            doError(js, error);
+          }
+          return js.rejectedPromise<DrainingReadResult>(error);
+        }
+      }
+
+      KJ_IF_SOME(amount, maybeSyncAmount) {
+        readPending = false;
+        KJ_ASSERT(amount <= store.size());
+        if (amount == 0) {
+          if (!state.is<StreamStates::Errored>()) {
+            doClose(js);
+          }
+          KJ_IF_SOME(o, owner) {
+            o->signalEof(js);
+          }
+          return js.resolvedPromise(DrainingReadResult{.done = true});
+        }
+        return js.resolvedPromise(DrainingReadResult{
+          .chunks = kj::arr(store.slice(0, amount).attach(kj::mv(store))), .done = false});
+      }
+
       // The buffer is owned by the kj promise chain rather than by the continuation below. See the
       // corresponding comment in read().
       auto promise = kj::evalNow([&]() -> kj::Promise<kj::Array<kj::byte>> {
-        auto store = kj::heapArray<kj::byte>(maxRead);
-        auto bytes = store.asPtr();
         return readable->tryRead(bytes.begin(), kAtLeast, bytes.size())
             .then([store = kj::mv(store)](size_t amount) mutable {
           KJ_ASSERT(amount <= store.size());
@@ -953,6 +1129,11 @@ kj::Maybe<kj::Own<ReadableStreamSource>> ReadableStreamInternalController::remov
           return static_cast<size_t>(0);
         }
 
+        kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+          // EOF is a valid synchronous answer.
+          return static_cast<size_t>(0);
+        }
+
         kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
           return static_cast<uint64_t>(0);
         }
@@ -1102,6 +1283,50 @@ jsg::Promise<void> WritableStreamInternalController::write(
       KJ_IF_SOME(data, processChunk(js, value)) {
         size_t len = data.size();
         auto ptr = data.asPtr();
+
+        // Fast path: complete the write synchronously when ALL of:
+        // - The queue is empty. Anything queued must complete first (FIFO), and the write loop
+        //   is in flight if and only if the queue is non-empty.
+        // - No abort is pending.
+        // - No explicit high water mark is configured. This path skips the write-buffer
+        //   accounting; with a high water mark set that accounting is observable through
+        //   writer.desiredSize and writer.ready, so such writes must take the queued path.
+        // - We are not running in an actor. An actor's output gate must serialize with writes,
+        //   and there is currently no synchronous way to check that the gate is open.
+        //
+        // TODO(perf): Consider adding a synchronous "output gate is open" check so that actors
+        // can also take this fast path when no storage writes are pending.
+        if (len > 0 && queue.empty() && maybePendingAbort == kj::none &&
+            maybeHighWaterMark == kj::none && IoContext::current().getActor() == kj::none &&
+            util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+          bool syncSuccess = false;
+          KJ_TRY {
+            syncSuccess = writable->sink->tryWriteSync(ptr);
+          }
+          KJ_CATCH(exception) {
+            // tryWriteSync() may throw when a synchronous write is possible but fails. Handle
+            // this exactly like a failed asynchronous write: abort the sink and error the
+            // stream. drain() delivers the error to any queued promises (there are none here,
+            // since we checked queue.empty()), so we return a rejected promise directly.
+            auto jsErr = js.exceptionToJs(kj::mv(exception));
+            auto handle = jsg::JsValue(jsErr.getHandle(js));
+            writable->abort(js.exceptionToKj(kj::mv(jsErr)));
+            drain(js, handle);
+            return js.rejectedPromise<void>(handle);
+          }
+          if (syncSuccess) {
+            // The write completed synchronously, so there is nothing to queue. The write buffer
+            // accounting would net out to zero and is unobservable here (no high water mark is
+            // configured, per the check above), so we skip it entirely (also avoiding a spurious
+            // backpressure toggle), but we still inform the observer that a chunk passed
+            // through.
+            KJ_IF_SOME(o, observer) {
+              o->onChunkEnqueued(len);
+              o->onChunkDequeued(len);
+            }
+            return js.resolvedPromise();
+          }
+        }
 
         auto prp = js.newPromiseAndResolver<void>();
         adjustWriteBufferSize(js, len);
@@ -1611,17 +1836,19 @@ void WritableStreamInternalController::ensureWriting(jsg::Lock& js) {
 }
 
 jsg::Promise<void> WritableStreamInternalController::writeLoop(
-    jsg::Lock& js, IoContext& ioContext) {
+    jsg::Lock& js, IoContext& ioContext, size_t syncDepth) {
   if (queue.empty()) {
     return js.resolvedPromise();
   } else KJ_IF_SOME(promise, queue.front().outputLock) {
+    // Note: The functor deliberately does not propagate `syncDepth`: awaiting the output lock is
+    // a true asynchronous boundary, so the synchronous recursion budget resets.
     return ioContext.awaitIo(
         js, kj::mv(*promise), [ref = addRef()](jsg::Lock& js) mutable -> jsg::Promise<void> {
       auto& controller = static_cast<WritableStreamInternalController&>(ref->getController());
       return controller.writeLoopAfterFrontOutputLock(js);
     });
   } else {
-    return writeLoopAfterFrontOutputLock(js);
+    return writeLoopAfterFrontOutputLock(js, syncDepth);
   }
 }
 
@@ -1644,8 +1871,14 @@ void WritableStreamInternalController::finishError(jsg::Lock& js, jsg::JsValue r
   doError(js, reason);
 }
 
-jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLock(jsg::Lock& js) {
+jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLock(
+    jsg::Lock& js, size_t syncDepth) {
   auto& ioContext = IoContext::current();
+
+  // Maximum number of consecutive synchronous loop continuations (tryWriteSync() completions and
+  // zero-length writes) before we force the asynchronous path, bounding C++ recursion depth
+  // through writeLoop().
+  static constexpr size_t kMaxSyncWriteDepth = 64;
 
   // This helper function is just used to enhance the assert logging when checking
   // that the request in flight is the one we expect.
@@ -1729,7 +1962,55 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         // Note: we don't bother checking for an abort() here because either this write was just
         //   queued, in which case abort() cannot have been called yet, or this write was processed
         //   immediately after a previous write, in which case we just checked for an abort().
-        return writeLoop(js, ioContext);
+        return writeLoop(js, ioContext, syncDepth + 1);
+      }
+
+      // Fast path: try to complete the write synchronously, avoiding a trip through the KJ
+      // event loop when the sink can accept data immediately.
+      if (syncDepth < kMaxSyncWriteDepth &&
+          util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+        auto ptr = request.bytes;
+        bool syncSuccess = false;
+        KJ_TRY {
+          syncSuccess = KJ_ASSERT_NONNULL(state.whenActive(
+              [&](IoOwn<Writable>& writable) { return writable->sink->tryWriteSync(ptr); }));
+        }
+        KJ_CATCH(exception) {
+          // tryWriteSync() may throw when a synchronous write is possible but fails. Handle
+          // this exactly like the async write-error functor below: balance the buffer
+          // accounting, reject and pop the current write, then check for a pending abort()
+          // before aborting the sink and draining remaining writes. Checking maybeAbort is
+          // critical — without it, drain() → doError() discards maybePendingAbort without
+          // settling it, leaving a writer.abort() caller hanging forever.
+          adjustWriteBufferSize(js, -amountToWrite);
+          KJ_IF_SOME(o, observer) {
+            o->onChunkDequeued(amountToWrite);
+          }
+          auto jsErr = js.exceptionToJs(kj::mv(exception));
+          auto handle = jsg::JsValue(jsErr.getHandle(js));
+          maybeRejectPromise<void>(js, request.promise, handle);
+          queue.pop_front();
+          if (!maybeAbort(js, *this)) {
+            state.whenActive([&](IoOwn<Writable>& writable) {
+              writable->abort(js.exceptionToKj(kj::mv(jsErr)));
+            });
+            drain(js, handle);
+          }
+          return js.resolvedPromise();
+        }
+
+        if (syncSuccess) {
+          maybeResolvePromise(js, request.promise);
+          adjustWriteBufferSize(js, -amountToWrite);
+          KJ_IF_SOME(o, observer) {
+            o->onChunkDequeued(amountToWrite);
+          }
+          queue.pop_front();
+
+          if (maybeAbort(js, *this)) return js.resolvedPromise();
+
+          return writeLoop(js, ioContext, syncDepth + 1);
+        }
       }
 
       auto check = makeChecker(*this);
@@ -2134,6 +2415,22 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::write(
   // here but that's to be expected.
   //
   auto writeBytes = [&](kj::Array<const kj::byte> data) {
+    // Fast path: complete the write synchronously when the sink can accept data immediately.
+    if (util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+      bool syncSuccess = false;
+      KJ_TRY {
+        syncSuccess = KJ_ASSERT_NONNULL(parent.state.whenActive(
+            [&](IoOwn<Writable>& writable) { return writable->sink->tryWriteSync(data); }));
+      }
+      KJ_CATCH(exception) {
+        // A sync throw is equivalent to a rejected write() promise; surface it as one so the
+        // caller's rejection continuation handles it identically to an async write failure.
+        return js.rejectedPromise<void>(js.exceptionToJs(kj::mv(exception)));
+      }
+      if (syncSuccess) {
+        return js.resolvedPromise();
+      }
+    }
     auto& ioContext = IoContext::current();
     return KJ_ASSERT_NONNULL(parent.state.whenActive([&](IoOwn<Writable>& writable) {
       return ioContext.awaitIo(js,

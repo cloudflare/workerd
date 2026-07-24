@@ -157,6 +157,26 @@ class BufferedAsyncIoStream final: public kj::AsyncIoStream {
     co_return copied + read;
   }
 
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    KJ_REQUIRE(minBytes <= buffer.size());
+
+    auto bufferedRemaining = buffered.size() - bufferedOffset;
+    if (bufferedRemaining > 0) {
+      if (bufferedRemaining < minBytes) {
+        // We cannot atomically combine the remaining buffered data with a read from the inner
+        // stream: if the inner stream declined afterwards, we'd have already consumed the
+        // buffered bytes. Fall back to the async path.
+        return kj::none;
+      }
+      auto toCopy = kj::min(buffer.size(), bufferedRemaining);
+      buffer.write(buffered.asPtr().slice(bufferedOffset, bufferedOffset + toCopy));
+      bufferedOffset += toCopy;
+      return toCopy;
+    }
+
+    return inner->tryReadSync(buffer, minBytes);
+  }
+
   kj::Maybe<uint64_t> tryGetLength() override {
     KJ_IF_SOME(innerLength, inner->tryGetLength()) {
       return innerLength + (buffered.size() - bufferedOffset);
@@ -186,6 +206,12 @@ class BufferedAsyncIoStream final: public kj::AsyncIoStream {
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
     return inner->write(pieces);
+  }
+  bool tryWriteSync(kj::ArrayPtr<const byte> buffer) override {
+    return inner->tryWriteSync(buffer);
+  }
+  bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+    return inner->tryWriteSync(pieces);
   }
   kj::Maybe<kj::Promise<uint64_t>> tryPumpFrom(
       kj::AsyncInputStream& input, uint64_t amount = kj::maxValue) override {

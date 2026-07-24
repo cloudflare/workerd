@@ -4588,6 +4588,16 @@ class Worker::Isolate::ResponseStreamWrapper final: public kj::AsyncOutputStream
 
   // Intentionally not wrapping `tryPumpFrom` to force consumer to use `write` in a loop which,
   // in turn, will report each chunk to the inspector to show progress of a slow response.
+  //
+  // tryWriteSync() is likewise intentionally not overridden. The inherited default always
+  // declines, forcing every chunk through write() above so that it is reported to the
+  // inspector. Do NOT add a forwarding override that calls reportBytes(): reportBytes()
+  // unconditionally acquires the isolate lock, and unlike write() -- which is only invoked
+  // from the response pump without the isolate lock held -- tryWriteSync() is reached from
+  // paths that already hold it (e.g. a JS writer.write() taking the internal controller's
+  // synchronous fast path through EncodedAsyncOutputStream), so it would recursively acquire
+  // the lock. This wrapper only exists while an inspector session has network inspection
+  // enabled, so the lost fast path is not a concern.
 
   kj::Promise<void> whenWriteDisconnected() override {
     return inner->whenWriteDisconnected();

@@ -75,6 +75,15 @@ wd_cc_benchmark(
 )
 
 wd_cc_benchmark(
+    name = "bench-try-sync",
+    srcs = ["bench-try-sync.c++"],
+    deps = [
+        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
+    ],
+)
+
+wd_cc_benchmark(
     name = "bench-api-headers",
     srcs = ["bench-api-headers.c++"],
     deps = [

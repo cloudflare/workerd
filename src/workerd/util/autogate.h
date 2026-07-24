@@ -86,10 +86,10 @@ namespace workerd::util {
   V(HIBERNATABLE_WEBSOCKET_REFACTOR)                                                               \
   /* When enabled, turns on per-isolate TypeScript/JavaScript bootstrap */                         \
   V(PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)                                                              \
-  /* Gate for the Durable Object fetch-retries feature, scoped to DO `fetch()`. Enables           \
+  /* Gate for the Durable Object fetch-retries feature, scoped to DO `fetch()`. Enables            \
     observe-only retry-token claim machinery. */                                                   \
   V(DURABLE_OBJECT_RETRIES_FETCH)                                                                  \
-  /* Enables Durable Object fetch retry requests and fail-closed receiver enforcement. The        \
+  /* Enables Durable Object fetch retry requests and fail-closed receiver enforcement. The         \
      observe-only DURABLE_OBJECT_RETRIES_FETCH gate is a prerequisite. */                          \
   V(DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS)                                                   \
   /* When enabled, the native `node-internal:url` module is provided by the Rust                   \
@@ -116,17 +116,24 @@ namespace workerd::util {
      existed; the typescript_implemented_streams compat flag requires this gate to receive         \
      streams over RPC (that combination is rejected, not degraded). */                             \
   V(RPC_EXTERNALS_HYDRATION)                                                                       \
-  /* Route all zlib usage in the process to zlib-rs (libz-rs-sys), the memory-safe Rust          \
-     implementation, instead of chromium zlib. The unprefixed zlib symbols are owned by the      \
-     routing layer in util/zlib-router.c++, so this covers every consumer: node:zlib, web        \
-     CompressionStream, crypto crc32, kj-gzip/http (fetch and WebSocket compression), and V8's   \
-     compression utils. Chromium zlib remains the default. */                                    \
-  V(COMPRESSION_RS)                                                                                 \
-  /* Enables per-call JSRPC tracing, trace-context propagation, and related Fetcher spans. */       \
-  V(JSRPC_TRACING)                                                                                  \
+  /* Route all zlib usage in the process to zlib-rs (libz-rs-sys), the memory-safe Rust            \
+     implementation, instead of chromium zlib. The unprefixed zlib symbols are owned by the        \
+     routing layer in util/zlib-router.c++, so this covers every consumer: node:zlib, web          \
+     CompressionStream, crypto crc32, kj-gzip/http (fetch and WebSocket compression), and V8's     \
+     compression utils. Chromium zlib remains the default. */                                      \
+  V(COMPRESSION_RS)                                                                                \
+  /* Enables per-call JSRPC tracing, trace-context propagation, and related Fetcher spans. */      \
+  V(JSRPC_TRACING)                                                                                 \
   /* Selects the redesigned memory cache implementation. The legacy implementation remains         \
      available for rollback while this gate is rolled out. */                                      \
-  V(MEMORY_CACHE_V2)
+  V(MEMORY_CACHE_V2)                                                                               \
+  /* Enable the JS-observable synchronous tryReadSync/tryWriteSync fast paths: the stream          \
+     controllers' read/write paths (reader.read() / writer.write() promises settle without an      \
+     event-loop round trip) and readAll()'s read loop. The C++ pump loops stay ungated: pumpTo()   \
+     never enters JavaScript and byte-budgets its un-yielded work, while pumpToImpl() still        \
+     suspends through the event loop on every iteration (only the write suspension is elided),     \
+     leaving the JS-visible pull() ordering unchanged. */                                          \
+  V(STREAM_CONTROLLER_SYNC_FAST_PATHS)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

@@ -8,6 +8,7 @@
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <kj/common.h>
@@ -652,11 +653,51 @@ jsg::Promise<void> WritableStreamNativeSink::write(
   KJ_IF_SOME(active, state) {
     KJ_IF_SOME(data, chunkToBytes(js, chunk)) {
       size_t len = data.size();
+      auto& ioContext = IoContext::current();
+
+      // Fast path: complete the write synchronously when the sink can accept the bytes
+      // immediately, settling the hook's promise without an event-loop round trip.
+      // Requires ALL of:
+      // - A non-empty chunk.
+      // - We are not running in an actor. An actor's output gate must serialize with
+      //   writes, and there is no synchronous way to check that the gate is open
+      //   (waitForOutputLocksIfNecessary() returns a promise for every actor).
+      //
+      // The legacy controller's queue-empty condition holds here by construction: the
+      // writeInFlight guard above plus the TS machinery's own serialization mean no other
+      // sink operation can be outstanding. Backpressure accounting lives in the TS
+      // machinery and is driven by this hook promise's settlement, so a synchronously
+      // resolved promise is spec-normal.
+      if (len > 0 && ioContext.getActor() == kj::none &&
+          util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+        bool syncSuccess = false;
+        KJ_TRY {
+          syncSuccess = active.sink->tryWriteSync(data.asPtr());
+        }
+        KJ_CATCH(exception) {
+          // tryWriteSync() may throw when a synchronous write is possible but fails.
+          // Handle it exactly like the asynchronous catch_ below: the sink is no longer
+          // usable; reject the hook's promise so the TS machinery errors the stream.
+          state = kj::none;
+          return js.rejectedPromise<void>(
+              jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js)));
+        }
+        if (syncSuccess) {
+          // The write completed synchronously, so there is no in-flight window: no
+          // writeInFlight to track and no deferred abort() release to settle. We still
+          // inform the observer that a chunk passed through.
+          KJ_IF_SOME(o, observer) {
+            o->onChunkEnqueued(len);
+            o->onChunkDequeued(len);
+          }
+          return js.resolvedPromise();
+        }
+      }
+
       KJ_IF_SOME(o, observer) {
         o->onChunkEnqueued(len);
       }
       writeInFlight = true;
-      auto& ioContext = IoContext::current();
       // Durable Object output gate: the write's bytes must not become externally
       // observable while an output lock is pending, exactly like the legacy internal
       // controller, which stores an output lock with every queued write event and awaits
