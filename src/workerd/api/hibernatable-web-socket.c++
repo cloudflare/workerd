@@ -6,10 +6,22 @@
 
 #include <workerd/api/global-scope.h>
 #include <workerd/io/legacy-hibernation-manager.h>
+#include <workerd/io/limit-enforcer.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/ser.h>
 
 namespace workerd::api {
+
+namespace {
+
+// Hibernatable sockets bypass the regular readLoop (which marks non-hibernatable receives), so we
+// mark the receive here, in-scope, from both the Text and Data dispatch branches. The enforcer
+// captures the timestamp, so this side stays time-agnostic.
+void markHibernatableWebSocketReceive(IoContext& context) {
+  context.getWorker().getIsolate().getLimitEnforcer().markPerfEvent("ws_received"_kjc);
+}
+
+}  // namespace
 
 HibernatableWebSocketEvent::HibernatableWebSocketEvent(): ExtendableEvent("webSocketMessage") {};
 
@@ -88,6 +100,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
             isDynamicDispatch](Worker::Lock& lock, IoContext& context) mutable {
       KJ_SWITCH_ONEOF(eventParameters.eventType) {
         KJ_CASE_ONEOF(text, HibernatableSocketParams::Text) {
+          markHibernatableWebSocketReceive(context);
           return lock.getGlobalScope().sendHibernatableWebSocketMessage(context,
               kj::mv(text.message), eventParameters.eventTimeoutMs,
               kj::mv(eventParameters.websocketId), lock,
@@ -95,6 +108,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
                   context.getActor(), isDynamicDispatch));
         }
         KJ_CASE_ONEOF(data, HibernatableSocketParams::Data) {
+          markHibernatableWebSocketReceive(context);
           return lock.getGlobalScope().sendHibernatableWebSocketMessage(context,
               kj::mv(data.message), eventParameters.eventTimeoutMs,
               kj::mv(eventParameters.websocketId), lock,

@@ -27,6 +27,19 @@
 
 namespace workerd::api {
 
+namespace {
+
+// Emits a perf-counter mark for a WebSocket event from the current in-scope point (the JS send()
+// call or the readLoop message dispatch). No-op when not in an IoContext. The IsolateLimitEnforcer
+// implementation captures the timestamp, so this side stays time-agnostic and works on every
+// platform workerd builds for.
+void markWebSocketPerfEvent(kj::LiteralStringConst name) {
+  if (!IoContext::hasCurrent()) return;
+  IoContext::current().getWorker().getIsolate().getLimitEnforcer().markPerfEvent(name);
+}
+
+}  // namespace
+
 kj::StringPtr KJ_STRINGIFY(const LegacyWebSocketAdapter::NativeState& state) {
   // TODO(someday) We might care more about this `OneOf` than its which, that probably means
   // returning a kj::String instead.
@@ -87,6 +100,10 @@ void WebSocket::accept(jsg::Lock& js, jsg::Optional<WebSocket::AcceptOptions> op
 }
 
 void WebSocket::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> message) {
+  // Mark the send here, at the in-scope JS call, rather than in the async output pump where the
+  // observer's sentMessage() fires -- the pump runs outside a perf-counter monitor scope, so a
+  // mark there would be dropped. "now" at the send() call is the send-initiation time.
+  markWebSocketPerfEvent("ws_sent"_kjc);
   impl->send(js, kj::mv(message));
 }
 
@@ -1303,6 +1320,9 @@ kj::Promise<kj::Maybe<kj::Exception>> LegacyWebSocketAdapter::readLoop(
       auto result = co_await context.run([this, message = kj::mv(message)](auto& wLock) mutable {
         auto& native = *farNative;
         jsg::Lock& js = wLock;
+        // Emit the mark here, in-scope, so it isn't dropped for want of a perf-counter monitor
+        // scope. The limiter stamps the time (dispatch time, ~= receive time).
+        markWebSocketPerfEvent("ws_received"_kjc);
         KJ_SWITCH_ONEOF(message) {
           KJ_CASE_ONEOF(text, kj::String) {
             shell.dispatchEventImpl(js, js.alloc<MessageEvent>(js, js.str(text)));
