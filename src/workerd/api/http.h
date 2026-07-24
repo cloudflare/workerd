@@ -657,6 +657,18 @@ struct RequestInitializerDict {
   void validate(jsg::Lock&);
 };
 
+struct RequestProxy {
+  kj::String url;
+  jsg::Optional<kj::String> method;
+  jsg::Optional<Headers::Initializer> headers;
+  jsg::Optional<kj::Maybe<Body::Initializer>> body;
+  jsg::Optional<kj::String> redirect;
+  jsg::Optional<kj::Maybe<jsg::Ref<AbortSignal>>> signal;
+  jsg::Optional<jsg::V8Ref<v8::Object>> cf;
+
+  JSG_STRUCT(url, method, headers, body, redirect, signal, cf);
+};
+
 class Request final: public Body {
  public:
   enum class Redirect {
@@ -732,7 +744,7 @@ class Request final: public Body {
 
   using InitializerDict = RequestInitializerDict;
 
-  using Info = kj::OneOf<jsg::Ref<Request>, kj::String>;
+  using Info = kj::OneOf<jsg::Ref<Request>, jsg::Proxy<RequestProxy>, kj::String>;
   using Initializer = kj::OneOf<InitializerDict, jsg::Ref<Request>>;
 
   // Wrapper around Request::constructor that calls it only if necessary, and returns a
@@ -1226,7 +1238,7 @@ jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
       api::Headers::ValueIterator::Next, api::Body, api::Response, api::Response::InitializerDict, \
       api::Request, api::Request::InitializerDict, api::Fetcher, api::Fetcher::PutOptions,         \
       api::Fetcher::ScheduledOptions, api::Fetcher::ScheduledResult, api::Fetcher::QueueResult,    \
-      api::Fetcher::ServiceBindingQueueMessage
+      api::Fetcher::ServiceBindingQueueMessage, api::RequestProxy
 
 // The list of http.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api
