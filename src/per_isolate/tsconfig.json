@@ -6,6 +6,10 @@
     "moduleResolution": "node",
     "verbatimModuleSyntax": false,
     "isolatedModules": false,
+    "baseUrl": ".",
+    "paths": {
+      "./*": ["./*"]
+    },
     "types": []
   },
   "include": ["**/*.ts"]

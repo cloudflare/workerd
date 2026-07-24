@@ -48,4 +48,36 @@ declare const autogates: {
  *
  * See primordials.ts for the full list of captures.
  */
-declare const primordials: Record<string, any>;
+declare const primordials: {
+  // Well-known symbols must be typed precisely so computed properties
+  // using them (e.g., [SymbolAsyncIterator]) satisfy interface constraints.
+  // NOTE: destructuring widens unique symbol → symbol. Files that need the
+  // precise type for indexing should use primordials.SymbolXxx directly.
+  readonly SymbolIterator: typeof Symbol.iterator;
+  readonly SymbolAsyncIterator: typeof Symbol.asyncIterator;
+  readonly SymbolToStringTag: typeof Symbol.toStringTag;
+
+  // uncurryThis accepts Function (the typeof-narrowed type) in addition to
+  // properly typed callables, so callers don't need to cast after a
+  // `typeof fn === 'function'` guard.
+  readonly uncurryThis: <T extends ((...args: any[]) => any) | Function>(
+    fn: T
+  ) => T extends (...args: any[]) => any
+    ? (thisArg: ThisParameterType<T>, ...args: Parameters<T>) => ReturnType<T>
+    : (...args: any[]) => any;
+
+  // Everything else is loosely typed — add specific entries as needed.
+  readonly [key: string]: any;
+};
+
+declare const utils: {
+  isArrayBuffer(value: unknown): value is ArrayBuffer;
+  isArrayBufferView(value: unknown): value is ArrayBufferView;
+  isDataView(value: unknown): value is DataView;
+  isPromise(value: unknown): value is Promise;
+  isSharedArrayBuffer(value: unknown): value is SharedArrayBuffer;
+  isUint8Array(value: unknown): value is Uint8Array;
+  isAnyArrayBuffer(value: unknown): value is ArrayBuffer | SharedArrayBuffer;
+  markPromiseHandled(promise: Promise): void;
+  getApiSymbol(name: string): symbol;
+};

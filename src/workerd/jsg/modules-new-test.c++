@@ -728,6 +728,134 @@ KJ_TEST("Bundle shadows built-in") {
 
 // ======================================================================================
 
+KJ_TEST("A worker bundle module can shadow node:process") {
+  // Regression test: unlike every other built-in (e.g. node:buffer, which *can* be
+  // shadowed by a same-named bundle module -- see "Bundle shadows built-in" above),
+  // "node:process" used to be unconditionally redirected to an internal
+  // node-internal:public_process/legacy_process module *before* the worker bundle
+  // ever had a chance to resolve it. This meant a worker bundle module registered
+  // under "node:process" was silently unreachable. Verify that a worker bundle
+  // module named "node:process" now takes priority over the internal redirect,
+  // exactly as it would for any other built-in.
+  PREAMBLE([&](Lock& js) {
+    ResolveObserver resolveObserver;
+    CompilationObserver compilationObserver;
+    ModuleRegistry::Builder registryBuilder(resolveObserver, BASE);
+
+    // Fake stand-ins for the real node-internal:public_process / legacy_process
+    // modules. If the redirect were incorrectly taken instead of the shadowing
+    // bundle module below, we'd observe one of these values instead.
+    ModuleBundle::BuiltinBuilder internalBuilder(ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+    auto publicSource = "export default 'internal-public-process';"_kjc;
+    auto legacySource = "export default 'internal-legacy-process';"_kjc;
+    internalBuilder.addEsm("node-internal:public_process"_url, publicSource.asArray());
+    internalBuilder.addEsm("node-internal:legacy_process"_url, legacySource.asArray());
+    registryBuilder.add(internalBuilder.finish());
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+    auto shadowSource = kj::str("export default 'shadowed-process';");
+    bundleBuilder.addEsmModule("node:process", shadowSource);
+    registryBuilder.add(bundleBuilder.finish());
+
+    auto registry = registryBuilder.finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    js.tryCatch([&] {
+      auto val = ModuleRegistry::resolve(js, "node:process");
+      KJ_ASSERT(val.isString());
+      KJ_ASSERT(kj::str(val) == "shadowed-process"_kjc);
+    }, [&](Value exception) { js.throwException(kj::mv(exception)); });
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("A worker bundle module can shadow node:process via dynamic import") {
+  // Companion to "A worker bundle module can shadow node:process", which only
+  // exercises the static resolve path (ModuleRegistry::resolve -> resolveCallback).
+  // The dynamic import path (dynamicImportModuleCallback ->
+  // IsolateModuleRegistry::dynamicResolve) previously derived its resolve context
+  // type from the referrer and applied the node:process -> internal redirect
+  // *before* consulting the worker bundle, so `await import('node:process')`
+  // bypassed a same-named bundle module. Verify the bundle module also wins on the
+  // dynamic-import path, so the shadow-priority fix in dynamicResolve() cannot
+  // silently regress.
+  PREAMBLE([&](Lock& js) {
+    ResolveObserver resolveObserver;
+    CompilationObserver compilationObserver;
+    ModuleRegistry::Builder registryBuilder(resolveObserver, BASE);
+
+    // Fake stand-ins for the real node-internal:public_process / legacy_process
+    // modules. If the redirect were incorrectly taken instead of the shadowing
+    // bundle module below, we'd observe one of these values instead.
+    ModuleBundle::BuiltinBuilder internalBuilder(ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+    auto publicSource = "export default 'internal-public-process';"_kjc;
+    auto legacySource = "export default 'internal-legacy-process';"_kjc;
+    internalBuilder.addEsm("node-internal:public_process"_url, publicSource.asArray());
+    internalBuilder.addEsm("node-internal:legacy_process"_url, legacySource.asArray());
+    registryBuilder.add(internalBuilder.finish());
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+    auto shadowSource = kj::str("export default 'shadowed-process';");
+    bundleBuilder.addEsmModule("node:process", shadowSource);
+    // Entrypoint module that reaches node:process exclusively through dynamic
+    // import(), forcing resolution through dynamicResolve() rather than the
+    // static resolveCallback path.
+    auto mainSource = kj::str("export default (await import('node:process')).default;");
+    bundleBuilder.addEsmModule("main", mainSource);
+    registryBuilder.add(bundleBuilder.finish());
+
+    auto registry = registryBuilder.finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    js.tryCatch([&] {
+      auto val = ModuleRegistry::resolve(js, "file:///main", "default"_kjc);
+      KJ_ASSERT(val.isString());
+      KJ_ASSERT(kj::str(val) == "shadowed-process"_kjc);
+    }, [&](Value exception) { js.throwException(kj::mv(exception)); });
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("node:process falls back to the internal module when not shadowed") {
+  // Companion to the test above: when no worker bundle module shadows
+  // "node:process", resolution must still fall back to the internal
+  // node-internal:public_process / legacy_process module selected by the
+  // enable_nodejs_process_v2 compat flag.
+  PREAMBLE([&](Lock& js) {
+    ResolveObserver resolveObserver;
+    CompilationObserver compilationObserver;
+    ModuleRegistry::Builder registryBuilder(resolveObserver, BASE);
+
+    ModuleBundle::BuiltinBuilder internalBuilder(ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+    auto publicSource = "export default 'internal-public-process';"_kjc;
+    auto legacySource = "export default 'internal-legacy-process';"_kjc;
+    internalBuilder.addEsm("node-internal:public_process"_url, publicSource.asArray());
+    internalBuilder.addEsm("node-internal:legacy_process"_url, legacySource.asArray());
+    registryBuilder.add(internalBuilder.finish());
+
+    auto registry = registryBuilder.finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    js.tryCatch([&] {
+      auto val = ModuleRegistry::resolve(js, "node:process");
+      KJ_ASSERT(val.isString());
+      KJ_ASSERT(kj::str(val) == "internal-legacy-process"_kjc);
+    }, [&](Value exception) { js.throwException(kj::mv(exception)); });
+
+    js.setNodeJsProcessV2Enabled();
+
+    js.tryCatch([&] {
+      auto val = ModuleRegistry::resolve(js, "node:process");
+      KJ_ASSERT(val.isString());
+      KJ_ASSERT(kj::str(val) == "internal-public-process"_kjc);
+    }, [&](Value exception) { js.throwException(kj::mv(exception)); });
+  });
+}
+
+// ======================================================================================
+
 KJ_TEST("Attaching a module registry works") {
   PREAMBLE(([&](Lock& js) {
     ResolveObserver resolveObserver;
@@ -1442,7 +1570,7 @@ KJ_TEST("ESM -> CJS -> require(ESM) -> static import CJS circular dependency fai
       JSG_FAIL_REQUIRE(Error, "Should have thrown");
     }, [&](Value exception) {
       auto str = kj::str(exception.getHandle(js));
-      KJ_ASSERT(str == "TypeError: Circular dependency when resolving module: b");
+      KJ_ASSERT(str == "Error: Circular dependency when resolving module: b");
     });
   });
 }

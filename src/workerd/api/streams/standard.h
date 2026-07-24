@@ -290,7 +290,7 @@ class WritableImpl {
     }
   };
 
-  WritableImpl(jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal);
+  WritableImpl(jsg::Lock& js, kj::Weak<WritableStream> owner, jsg::Ref<AbortSignal> abortSignal);
 
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsValue reason);
 
@@ -405,7 +405,7 @@ class WritableImpl {
   // uses this WritableImpl. This creates a strong circular reference between jsg::Refs
   // that isn't allowed. GcTracing ends up with a stack overflow as the two jsg::Refs
   // try tracing each other.
-  kj::Maybe<kj::Own<WeakRef<WritableStream>>> owner;
+  kj::Weak<WritableStream> owner;
   jsg::Ref<AbortSignal> signal;
   State state = State::template create<Writable>();
   Algorithms algorithms;
@@ -490,7 +490,7 @@ class ReadableStreamDefaultController: public jsg::Object {
   kj::Maybe<StreamStates::Errored> getMaybeErrorState(jsg::Lock& js);
 
  private:
-  kj::Maybe<IoContext&> ioContext;
+  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
   ReadableImpl impl;
 
   void visitForGc(jsg::GcVisitor& visitor);
@@ -560,7 +560,7 @@ class ReadableStreamBYOBRequest: public jsg::Object {
     void updateView(jsg::Lock& js);
   };
 
-  kj::Maybe<IoContext&> ioContext;
+  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
   kj::Maybe<Impl> maybeImpl;
 
   void visitForGc(jsg::GcVisitor& visitor);
@@ -627,7 +627,7 @@ class ReadableByteStreamController: public jsg::Object {
 
  private:
   kj::Rc<WeakRef<ReadableByteStreamController>> weakSelf;
-  kj::Maybe<IoContext&> ioContext;
+  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
   ReadableImpl impl;
   kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> maybeByobRequest;
 
@@ -648,7 +648,7 @@ class WritableStreamDefaultController: public jsg::Object {
   using WritableImpl = WritableImpl<WritableStreamDefaultController>;
 
   explicit WritableStreamDefaultController(
-      jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal);
+      jsg::Lock& js, kj::Weak<WritableStream> owner, jsg::Ref<AbortSignal> abortSignal);
 
   ~WritableStreamDefaultController() noexcept(false);
 
@@ -694,7 +694,7 @@ class WritableStreamDefaultController: public jsg::Object {
   void clearAlgorithms();
 
  private:
-  kj::Maybe<IoContext&> ioContext;
+  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
   WritableImpl impl;
 
   void visitForGc(jsg::GcVisitor& visitor);
@@ -785,7 +785,7 @@ class TransformStreamDefaultController: public jsg::Object {
   jsg::Promise<void> performTransform(jsg::Lock& js, jsg::JsValue chunk);
   void setBackpressure(jsg::Lock& js, bool newBackpressure);
 
-  kj::Maybe<IoContext&> ioContext;
+  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
   jsg::PromiseResolverPair<void> startPromise;
 
   kj::Maybe<ReadableStreamDefaultController&> tryGetReadableController();

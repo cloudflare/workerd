@@ -472,7 +472,7 @@ kj::Maybe<ReadableStreamSourceJsAdapter::Tee> ReadableStreamSourceJsAdapter::try
 // ===============================================================================================
 
 struct ReadableSourceKjAdapter::Active {
-  IoContext& ioContext;
+  kj::WeakRc<IoContext> ioContext;
   jsg::Ref<ReadableStream> stream;
   jsg::Ref<ReadableStreamDefaultReader> reader;
   kj::Canceler canceler;
@@ -526,7 +526,7 @@ struct ReadableSourceKjAdapter::Active {
       Canceled>;
   InnerState state;
 
-  Active(jsg::Lock& js, IoContext& ioContext, jsg::Ref<ReadableStream> stream);
+  Active(jsg::Lock& js, kj::WeakRc<IoContext> ioContext, jsg::Ref<ReadableStream> stream);
   KJ_DISALLOW_COPY_AND_MOVE(Active);
   ~Active() noexcept(false);
 
@@ -675,8 +675,8 @@ kj::Maybe<kj::Array<const kj::byte>> copyFromSource(
 }  // namespace
 
 ReadableSourceKjAdapter::Active::Active(
-    jsg::Lock& js, IoContext& ioContext, jsg::Ref<ReadableStream> stream)
-    : ioContext(ioContext),
+    jsg::Lock& js, kj::WeakRc<IoContext> ioContext, jsg::Ref<ReadableStream> stream)
+    : ioContext(kj::mv(ioContext)),
       stream(kj::mv(stream)),
       reader(initReader(js, this->stream)),
       state(InnerState::create<Idle>()) {}
@@ -696,9 +696,10 @@ void ReadableSourceKjAdapter::Active::cancel(kj::Exception reason) {
     // If the previous read indicated that it was the last read, then
     // the reader will have already been dropped. We do not need to
     // cancel it here.
-    ioContext.addTask(
-        ioContext.run([readable = kj::mv(stream), reader = kj::mv(reader),
-                          exception = kj::mv(reason)](jsg::Lock& js, IoContext& ioContext) mutable {
+    auto& ctx = ioContext.assertLive();
+    ctx.addTask(
+        ctx.run([readable = kj::mv(stream), reader = kj::mv(reader), exception = kj::mv(reason)](
+                    jsg::Lock& js, IoContext& ioContext) mutable {
       auto error = js.exceptionToJsValue(kj::mv(exception));
       auto promise = reader->cancel(js, error.getHandle(js));
       return ioContext.awaitJs(js, kj::mv(promise));
@@ -706,9 +707,11 @@ void ReadableSourceKjAdapter::Active::cancel(kj::Exception reason) {
   }
 }
 
-ReadableSourceKjAdapter::ReadableSourceKjAdapter(
-    jsg::Lock& js, IoContext& ioContext, jsg::Ref<ReadableStream> stream, Options options)
-    : state(KjState::create<KjOpen>(kj::heap<Active>(js, ioContext, kj::mv(stream)))),
+ReadableSourceKjAdapter::ReadableSourceKjAdapter(jsg::Lock& js,
+    kj::WeakRc<IoContext> ioContext,
+    jsg::Ref<ReadableStream> stream,
+    Options options)
+    : state(KjState::create<KjOpen>(kj::heap<Active>(js, kj::mv(ioContext), kj::mv(stream)))),
       options(options),
       selfRef(
           kj::rc<WeakRef<ReadableSourceKjAdapter>>(kj::Badge<ReadableSourceKjAdapter>{}, *this)) {}
@@ -894,9 +897,10 @@ kj::Promise<size_t> ReadableSourceKjAdapter::readImpl(
           // while we are in the promise chain. Instead, we capture a weak
           // reference to the adapter itself and check that we are still alive
           // and active before trying to update any state.
-          active.ioContext.run([context = kj::mv(context), self = selfRef.addRef(),
-                                   minReadPolicy = options.minReadPolicy](jsg::Lock& js,
-                                   IoContext& ioContext) mutable -> kj::Promise<size_t> {
+          active.ioContext.assertLive().run(
+              [context = kj::mv(context), self = selfRef.addRef(),
+                  minReadPolicy = options.minReadPolicy](
+                  jsg::Lock& js, IoContext& ioContext) mutable -> kj::Promise<size_t> {
     // Perform the actual read.
     return ioContext.awaitJs(js, readInternal(js, kj::mv(context), minReadPolicy))
         .then([self = kj::mv(self)](kj::Own<ReadContext> context) mutable -> kj::Promise<size_t> {
@@ -1092,7 +1096,7 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
 
   // Initialize the pump by releasing the default reader and creating a DrainingReader.
   // This requires the isolate lock.
-  co_await active->ioContext.run(
+  co_await active->ioContext.assertLive().run(
       [&active, &maybeReader](jsg::Lock& js) mutable -> kj::Promise<void> {
     // Release the existing reader's lock so we can create a DrainingReader.
     active->reader->releaseLock(js);
@@ -1117,8 +1121,8 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
       // from the stream as possible each time we are holding the isolate lock
       // to minimize the number of times we need to re-enter the lock.
       DrainingReader* readerPtr = reader.get();
-      DrainingReadResult result =
-          co_await active->ioContext.run([readerPtr](jsg::Lock& js, IoContext& ioContext) mutable {
+      DrainingReadResult result = co_await active->ioContext.assertLive().run(
+          [readerPtr](jsg::Lock& js, IoContext& ioContext) mutable {
         // Use a 256KB limit to allow periodic yielding to the event loop,
         // preventing a fast producer from monopolizing the thread. This limit
         // only affects subsequent pump iterations after the initial buffer drain.
@@ -1157,7 +1161,7 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
   // If there was an error, cancel the reader and propagate the exception.
   KJ_IF_SOME(exception, pendingException) {
     DrainingReader* readerPtr = reader.get();
-    co_await active->ioContext.run(
+    co_await active->ioContext.assertLive().run(
         [readerPtr, ex = exception.clone()](jsg::Lock& js, IoContext& ioContext) mutable {
       auto error = js.exceptionToJsValue(kj::mv(ex));
       return ioContext.awaitJs(js, readerPtr->cancel(js, error.getHandle(js)));

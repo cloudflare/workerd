@@ -93,6 +93,9 @@ interface Container @0x9aaceefc06523bca {
 
     name @1 :Text;
     # Optional human-friendly name. Empty string means not set.
+
+    spanContext @2 :SpanContext;
+    # Trace context propagated from the Workers request.
   }
 
   struct ContainerSnapshot {
@@ -111,6 +114,9 @@ interface Container @0x9aaceefc06523bca {
   struct SnapshotContainerParams {
     name @0 :Text;
     # Optional human-friendly name. Empty string means not set.
+
+    spanContext @1 :SpanContext;
+    # Trace context propagated from the Workers request.
   }
 
   struct ExecOptions {

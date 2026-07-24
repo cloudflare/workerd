@@ -35,6 +35,7 @@ tests/               # JS integration tests (238 entries); each test = .js + .wd
 | KV / SyncKV                    | `kv.h`, `sync-kv.h`                                   |
 | SQL (DO)                       | `sql.h`                                               |
 | Body mixin (shared Req/Res)    | `http.h` — `Body` class, `Body::Initializer` OneOf    |
+| Readable/WritableStream from C++ | `js-readable-stream.{h,c++}` + `js-writable-stream.{h,c++}` — `JsReadableStream`/`JsWritableStream` abstractions, plus `JsReadableWritablePair` and `pipeTo`/`pipeThrough`; ALWAYS use these (not `jsg::Ref<ReadableStream>`/`jsg::Ref<WritableStream>`) outside `streams/` |
 
 ## CONVENTIONS
 

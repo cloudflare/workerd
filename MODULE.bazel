@@ -49,9 +49,6 @@ include("//build/deps:v8.MODULE.bazel")
 include("//build/deps:oci.MODULE.bazel")
 include("//build/deps/formatters:rustfmt.MODULE.bazel")
 
-# compatibility proxy is needed when using current rules_cc with Bazel 8
-compat = use_extension("@rules_cc//cc:extensions.bzl", "compatibility_proxy")
-use_repo(compat, "cc_compatibility_proxy")
-
+# Make local_config_cc available, used for retrieving Windows clang-cl toolchain
 cc_configure = use_extension("@rules_cc//cc:extensions.bzl", "cc_configure_extension")
 use_repo(cc_configure, "local_config_cc")

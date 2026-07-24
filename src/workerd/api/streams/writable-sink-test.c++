@@ -550,7 +550,7 @@ KJ_TEST("IoContext aware wrapper") {
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
     IoContext& ioContext = environment.context;
-    auto wrapper = newIoContextWrappedWritableSink(ioContext, kj::mv(sink));
+    auto wrapper = newIoContextWrappedWritableSink(ioContext.getWeakRef(), kj::mv(sink));
     co_await wrapper->write("some data"_kjb);
     co_await wrapper->end();
   });

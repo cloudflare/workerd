@@ -350,6 +350,14 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ReadableByteStreamController: typeof ReadableByteStreamController;
   WritableStreamDefaultController: typeof WritableStreamDefaultController;
   TransformStreamDefaultController: typeof TransformStreamDefaultController;
+  Buffer: any;
+  process: any;
+  global: ServiceWorkerGlobalScope;
+  setImmediate(
+    $function: (...param0: any[]) => void,
+    ...args: any[]
+  ): Immediate;
+  clearImmediate(immediate: Immediate | null): void;
   CompressionStream: typeof CompressionStream;
   DecompressionStream: typeof DecompressionStream;
   TextEncoderStream: typeof TextEncoderStream;
@@ -381,6 +389,13 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   FixedLengthStream: typeof FixedLengthStream;
   IdentityTransformStream: typeof IdentityTransformStream;
   HTMLRewriter: typeof HTMLRewriter;
+  Performance: typeof Performance;
+  PerformanceEntry: typeof PerformanceEntry;
+  PerformanceMark: typeof PerformanceMark;
+  PerformanceMeasure: typeof PerformanceMeasure;
+  PerformanceResourceTiming: typeof PerformanceResourceTiming;
+  PerformanceObserver: typeof PerformanceObserver;
+  PerformanceObserverEntryList: typeof PerformanceObserverEntryList;
 }
 export declare function addEventListener<
   Type extends keyof WorkerGlobalScopeEventMap,
@@ -474,6 +489,14 @@ export declare const scheduler: Scheduler;
 export declare const performance: Performance;
 export declare const Cloudflare: Cloudflare;
 export declare const origin: string;
+export declare const Buffer: any;
+export declare const process: any;
+export declare const global: ServiceWorkerGlobalScope;
+export declare function setImmediate(
+  $function: (...param0: any[]) => void,
+  ...args: any[]
+): Immediate;
+export declare function clearImmediate(immediate: Immediate | null): void;
 export declare const navigator: Navigator;
 export interface TestController {}
 export interface ExecutionContext<Props = unknown> {
@@ -564,6 +587,11 @@ export interface AlarmInvocationInfo {
   readonly isRetry: boolean;
   readonly retryCount: number;
   readonly scheduledTime: number;
+}
+export interface Immediate {
+  ref(): void;
+  unref(): void;
+  hasRef(): boolean;
 }
 export interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;
@@ -3319,6 +3347,12 @@ export interface TraceLog {
   readonly timestamp: number;
   readonly level: string;
   readonly message: any;
+  readonly errorInfo?: (TraceLogErrorInfo | null)[];
+}
+export interface TraceLogErrorInfo {
+  name: string;
+  message: string;
+  stack?: string;
 }
 export interface TraceException {
   readonly timestamp: number;
@@ -3876,6 +3910,7 @@ export interface ContainerExecOptions {
   cwd?: string;
   env?: Record<string, string>;
   user?: string;
+  signal?: AbortSignal;
   stdin?: ReadableStream | "pipe";
   stdout?: "pipe" | "ignore";
   stderr?: "pipe" | "ignore" | "combined";
@@ -4083,17 +4118,363 @@ export interface workerdResourceLimits {
  *
  * [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/)
  */
-export declare abstract class Performance {
+export declare abstract class Performance extends EventTarget {
   /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/#performancetimeorigin) */
   get timeOrigin(): number;
   /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/#performancenow) */
   now(): number;
+  get eventCounts(): EventCounts;
+  /**
+   * The **`clearMarks()`** method removes all or specific PerformanceMark objects from the browser's performance timeline.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/clearMarks)
+   */
+  clearMarks(name?: string): void;
+  /**
+   * The **`clearMeasures()`** method removes all or specific PerformanceMeasure objects from the browser's performance timeline.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/clearMeasures)
+   */
+  clearMeasures(name?: string): void;
+  /**
+   * The **`clearResourceTimings()`** method removes all performance entries with an PerformanceEntry.entryType of `'resource'` from the browser's performance timeline and sets the size of the performance resource data buffer to zero.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/clearResourceTimings)
+   */
+  clearResourceTimings(): void;
+  /**
+   * The **`getEntries()`** method returns an array of all PerformanceEntry objects currently present in the performance timeline.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/getEntries)
+   */
+  getEntries(): PerformanceEntry[];
+  /**
+   * The **`getEntriesByName()`** method returns an array of PerformanceEntry objects currently present in the performance timeline with the given _name_ and _type_.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/getEntriesByName)
+   */
+  getEntriesByName(name: string, type?: string): PerformanceEntry[];
+  /**
+   * The **`getEntriesByType()`** method returns an array of PerformanceEntry objects currently present in the performance timeline for a given _type_.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/getEntriesByType)
+   */
+  getEntriesByType(type: string): PerformanceEntry[];
+  /**
+   * The **`mark()`** method creates a named PerformanceMark object representing a high resolution timestamp marker in the browser's performance timeline.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/mark)
+   */
+  mark(name: string, options?: PerformanceMarkOptions): PerformanceMark;
+  /**
+   * The **`measure()`** method creates a named PerformanceMeasure object representing a time measurement between two marks in the browser's performance timeline.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/measure)
+   */
+  measure(
+    measureName: string,
+    measureOptionsOrStartMark?: PerformanceMeasureOptions | string,
+    maybeEndMark?: string,
+  ): PerformanceMeasure;
+  /**
+   * The **`setResourceTimingBufferSize()`** method sets the desired size of the browser's resource timing buffer which stores the `'resource'` performance entries.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/setResourceTimingBufferSize)
+   */
+  setResourceTimingBufferSize(size: number): void;
   /**
    * The **`toJSON()`** method of the Performance interface is a Serialization; it returns a JSON representation of the Performance object.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/toJSON)
    */
   toJSON(): object;
+  get nodeTiming(): PerformanceNodeTiming;
+  eventLoopUtilization(): PerformanceEventLoopUtilization;
+  markResourceTiming(): void;
+  timerify(fn: () => void): () => void;
+}
+export interface PerformanceEventLoopUtilization {
+  idle: number;
+  active: number;
+  utilization: number;
+}
+export interface PerformanceNodeTiming extends PerformanceEntry {
+  readonly nodeStart: number;
+  readonly v8Start: number;
+  readonly bootstrapComplete: number;
+  readonly environment: number;
+  readonly loopStart: number;
+  readonly loopExit: number;
+  readonly idleTime: number;
+  readonly uvMetricsInfo: UvMetricsInfo;
+  toJSON(): object;
+}
+export interface UvMetricsInfo {
+  loopCount: number;
+  events: number;
+  eventsWaiting: number;
+}
+/**
+ * **`PerformanceMark`** is an interface for PerformanceEntry objects with an PerformanceEntry.entryType of `'mark'`.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMark)
+ */
+export declare class PerformanceMark extends PerformanceEntry {
+  constructor(name: string, maybeOptions?: PerformanceMarkOptions);
+  /**
+   * The read-only **`detail`** property returns arbitrary metadata that was included in the mark upon construction (either when using Performance.mark or the PerformanceMark.PerformanceMark constructor).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMark/detail)
+   */
+  get detail(): any;
+  toJSON(): object;
+}
+/**
+ * **`PerformanceMeasure`** is an _abstract_ interface for PerformanceEntry objects with an PerformanceEntry.entryType of `'measure'`.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMeasure)
+ */
+export declare abstract class PerformanceMeasure extends PerformanceEntry {
+  /**
+   * The read-only **`detail`** property returns arbitrary metadata that was included in the mark upon construction (when using Performance.measure.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMeasure/detail)
+   */
+  get detail(): any;
+  toJSON(): object;
+}
+export interface PerformanceMarkOptions {
+  detail?: any;
+  startTime?: number;
+}
+export interface PerformanceMeasureOptions {
+  detail?: any;
+  start?: number;
+  duration?: number;
+  end?: number;
+}
+/**
+ * The **`PerformanceObserverEntryList`** interface is a list of PerformanceEntry that were explicitly observed via the PerformanceObserver.observe method.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList)
+ */
+export declare abstract class PerformanceObserverEntryList {
+  /**
+   * The **`getEntries()`** method of the PerformanceObserverEntryList interface returns a list of explicitly observed PerformanceEntry objects.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList/getEntries)
+   */
+  getEntries(): PerformanceEntry[];
+  /**
+   * The **`getEntriesByType()`** method of the PerformanceObserverEntryList returns a list of explicitly _observed_ PerformanceEntry objects for a given PerformanceEntry.entryType.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList/getEntriesByType)
+   */
+  getEntriesByType(type: string): PerformanceEntry[];
+  /**
+   * The **`getEntriesByName()`** method of the PerformanceObserverEntryList interface returns a list of explicitly observed PerformanceEntry objects for a given PerformanceEntry.name and PerformanceEntry.entryType.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList/getEntriesByName)
+   */
+  getEntriesByName(name: string, type?: string): PerformanceEntry[];
+}
+/**
+ * The **`PerformanceEntry`** object encapsulates a single performance metric that is part of the browser's performance timeline.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry)
+ */
+export declare abstract class PerformanceEntry {
+  /**
+   * The read-only **`name`** property of the PerformanceEntry interface is a string representing the name for a performance entry.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/name)
+   */
+  get name(): string;
+  /**
+   * The read-only **`entryType`** property returns a string representing the type of performance metric that this entry represents.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/entryType)
+   */
+  get entryType(): string;
+  /**
+   * The read-only **`startTime`** property returns the first DOMHighResTimeStamp recorded for this PerformanceEntry.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/startTime)
+   */
+  get startTime(): number;
+  /**
+   * The read-only **`duration`** property returns a DOMHighResTimeStamp that is the duration of the PerformanceEntry.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/duration)
+   */
+  get duration(): number;
+  /**
+   * The **`toJSON()`** method is a Serialization; it returns a JSON representation of the PerformanceEntry object.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/toJSON)
+   */
+  toJSON(): object;
+}
+/**
+ * The **`PerformanceResourceTiming`** interface enables retrieval and analysis of detailed network timing data regarding the loading of an application's resources.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming)
+ */
+export declare abstract class PerformanceResourceTiming extends PerformanceEntry {
+  /**
+   * The **`connectEnd`** read-only property returns the DOMHighResTimeStamp immediately after the browser finishes establishing the connection to the server to retrieve the resource.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/connectEnd)
+   */
+  get connectEnd(): number;
+  /**
+   * The **`connectStart`** read-only property returns the DOMHighResTimeStamp immediately before the user agent starts establishing the connection to the server to retrieve the resource.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/connectStart)
+   */
+  get connectStart(): number;
+  /**
+   * The **`decodedBodySize`** read-only property returns the size (in octets) received from the fetch (HTTP or cache) of the message body after removing any applied content encoding (like gzip or Brotli).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/decodedBodySize)
+   */
+  get decodedBodySize(): number;
+  /**
+   * The **`domainLookupEnd`** read-only property returns the DOMHighResTimeStamp immediately after the browser finishes the domain-name lookup for the resource.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/domainLookupEnd)
+   */
+  get domainLookupEnd(): number;
+  /**
+   * The **`domainLookupStart`** read-only property returns the DOMHighResTimeStamp immediately before the browser starts the domain name lookup for the resource.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/domainLookupStart)
+   */
+  get domainLookupStart(): number;
+  /**
+   * The **`encodedBodySize`** read-only property represents the size (in octets) received from the fetch (HTTP or cache) of the payload body before removing any applied content encodings (like gzip or Brotli).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/encodedBodySize)
+   */
+  get encodedBodySize(): number;
+  /**
+   * The **`fetchStart`** read-only property represents a DOMHighResTimeStamp immediately before the browser starts to fetch the resource.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/fetchStart)
+   */
+  get fetchStart(): number;
+  /**
+   * The **`initiatorType`** read-only property is a string representing web platform feature that initiated the resource load.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/initiatorType)
+   */
+  get initiatorType(): string;
+  /**
+   * The **`nextHopProtocol`** read-only property is a string representing the network protocol used to fetch the resource, as identified by the ALPN Protocol ID (RFC7301).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/nextHopProtocol)
+   */
+  get nextHopProtocol(): string;
+  /**
+   * The **`redirectEnd`** read-only property returns a DOMHighResTimeStamp immediately after receiving the last byte of the response of the last redirect.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/redirectEnd)
+   */
+  get redirectEnd(): number;
+  /**
+   * The **`redirectStart`** read-only property returns a DOMHighResTimeStamp representing the start time of the fetch which that initiates the redirect.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/redirectStart)
+   */
+  get redirectStart(): number;
+  /**
+   * The **`requestStart`** read-only property returns a DOMHighResTimeStamp of the time immediately before the browser starts requesting the resource from the server, cache, or local resource.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/requestStart)
+   */
+  get requestStart(): number;
+  /**
+   * The **`responseEnd`** read-only property returns a DOMHighResTimeStamp immediately after the browser receives the last byte of the resource or immediately before the transport connection is closed, whichever comes first.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/responseEnd)
+   */
+  get responseEnd(): number;
+  /**
+   * The **`responseStart`** read-only property returns a DOMHighResTimeStamp immediately after the browser receives the first byte of the response from the server, cache, or local resource.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/responseStart)
+   */
+  get responseStart(): number;
+  /**
+   * The **`responseStatus`** read-only property represents the HTTP response status code returned when fetching the resource.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/responseStatus)
+   */
+  get responseStatus(): number;
+  /**
+   * The **`secureConnectionStart`** read-only property returns a DOMHighResTimeStamp immediately before the browser starts the handshake process to secure the current connection.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/secureConnectionStart)
+   */
+  get secureConnectionStart(): number | undefined;
+  /**
+   * The **`transferSize`** read-only property represents the size (in octets) of the fetched resource.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/transferSize)
+   */
+  get transferSize(): number;
+  /**
+   * The **`workerStart`** read-only property of the PerformanceResourceTiming interface returns a The `workerStart` property can have the following values: - A DOMHighResTimeStamp.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/workerStart)
+   */
+  get workerStart(): number;
+}
+/**
+ * The **`PerformanceObserver`** interface is used to observe performance measurement events and be notified of new PerformanceEntry as they are recorded in the browser's _performance timeline_.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver)
+ */
+export declare class PerformanceObserver {
+  constructor(callback: any);
+  /**
+   * The **`disconnect()`** method of the PerformanceObserver interface is used to stop the performance observer from receiving any PerformanceEntry events.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver/disconnect)
+   */
+  disconnect(): void;
+  /**
+   * The **`observe()`** method of the **PerformanceObserver** interface is used to specify the set of performance entry types to observe.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver/observe)
+   */
+  observe(options?: PerformanceObserverObserveOptions): void;
+  /**
+   * The **`takeRecords()`** method of the PerformanceObserver interface returns the current list of PerformanceEntry objects stored in the performance observer, emptying it out.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver/takeRecords)
+   */
+  takeRecords(): PerformanceEntry[];
+  readonly supportedEntryTypes: string[];
+}
+export interface PerformanceObserverObserveOptions {
+  buffered?: boolean;
+  durationThreshold?: number;
+  entryTypes?: string[];
+  type?: string;
+}
+export interface EventCounts {
+  get size(): number;
+  get(eventType: string): number | undefined;
+  has(eventType: string): boolean;
+  entries(): IterableIterator<string[]>;
+  keys(): IterableIterator<string>;
+  values(): IterableIterator<number>;
+  forEach(
+    param1: (param0: number, param1: string, param2: EventCounts) => void,
+    param2?: any,
+  ): void;
+  [Symbol.iterator](): IterableIterator<string[]>;
 }
 export interface Tracing {
   enterSpan<T, A extends unknown[]>(
@@ -4787,6 +5168,13 @@ export type AiSearchListItemsParams = {
   source?: string;
   /** JSON-encoded Vectorize filter for metadata filtering. */
   metadata_filter?: string;
+  /** Filter items by their unique ID. Returns at most one item. */
+  item_id?: string;
+  /**
+   * Filter items by their exact key (object key / filename). Keys are unique
+   * per source, so combine with `source` to disambiguate across data sources.
+   */
+  key?: string;
 };
 export type AiSearchListItemsResponse = {
   result: AiSearchItemInfo[];
@@ -13952,6 +14340,15 @@ export interface Hyperdrive {
    */
   readonly host: string;
   /*
+   * A synthetic IPv4 address (in the reserved 240.0.0.0/4 range) that, like the
+   * host field, is only valid within the context of the currently running
+   * Worker and, when passed into the `connect()` function from the
+   * "cloudflare:sockets" module, will connect to the Hyperdrive instance for
+   * your database. This is provided for database drivers that require the host
+   * to be an IP literal rather than a hostname.
+   */
+  readonly ip: string;
+  /*
    * The port that must be paired the the host field when connecting.
    */
   readonly port: number;
@@ -14740,6 +15137,32 @@ export declare namespace CloudflareWorkersModule {
     timeout?: WorkflowTimeoutDuration | number;
     sensitive?: WorkflowStepSensitivity;
   };
+  // Internal discriminators used only for `WorkflowStep.do` overload
+  // resolution. They mirror `WorkflowStepConfig` but pin `retries.delay` to a
+  // single kind so the callback context can be narrowed based on the shape of
+  // the config argument (rather than on an inferred type parameter, which is
+  // lost when the caller supplies an explicit return-type argument). Not
+  // exported: they must not widen the public type surface.
+  type WorkflowStepConfigWithStaticDelay = Omit<
+    WorkflowStepConfig,
+    "retries"
+  > & {
+    retries?: {
+      limit: number;
+      delay: WorkflowDelayDuration | number;
+      backoff?: WorkflowBackoff;
+    };
+  };
+  type WorkflowStepConfigWithDelayFunction = Omit<
+    WorkflowStepConfig,
+    "retries"
+  > & {
+    retries: {
+      limit: number;
+      delay: WorkflowDelayFunction;
+      backoff?: WorkflowBackoff;
+    };
+  };
   export type WorkflowStepRollbackConfig = Pick<
     WorkflowStepConfig,
     "retries" | "timeout"
@@ -14782,18 +15205,30 @@ export declare namespace CloudflareWorkersModule {
       sensitive?: WorkflowStepSensitivity;
     };
   };
-  export type WorkflowRollbackContext<T = unknown> = {
-    ctx: WorkflowStepContext;
+  // The rollback handler receives the step context, so it mirrors the same
+  // delay discriminant as the step callback: when the step was configured with
+  // a dynamic delay function the resolved `config.retries.delay` is omitted,
+  // otherwise it is present. `Delay` is threaded from the `WorkflowStep.do`
+  // overload that matched the step config.
+  export type WorkflowRollbackContext<
+    T = unknown,
+    Delay = WorkflowDelayDuration | number,
+  > = {
+    ctx: WorkflowStepContext<Delay>;
     error: Error;
     output: T | undefined;
     /** @deprecated Use `ctx.step.name` and `ctx.step.count` instead. */
     stepName: string;
   };
-  export type WorkflowRollbackHandler<T = unknown> = (
-    ctx: WorkflowRollbackContext<T>,
-  ) => Promise<void>;
-  export type WorkflowStepRollbackOptions<T = unknown> = {
-    rollback: WorkflowRollbackHandler<T>;
+  export type WorkflowRollbackHandler<
+    T = unknown,
+    Delay = WorkflowDelayDuration | number,
+  > = (ctx: WorkflowRollbackContext<T, Delay>) => Promise<void>;
+  export type WorkflowStepRollbackOptions<
+    T = unknown,
+    Delay = WorkflowDelayDuration | number,
+  > = {
+    rollback: WorkflowRollbackHandler<T, Delay>;
     rollbackConfig?: WorkflowStepRollbackConfig;
   };
   export abstract class WorkflowStep {
@@ -14802,18 +15237,34 @@ export declare namespace CloudflareWorkersModule {
       callback: (ctx: WorkflowStepContext) => Promise<T>,
       rollbackOptions?: WorkflowStepRollbackOptions<T>,
     ): Promise<T>;
-    do<T extends Rpc.Serializable<T>, const C extends WorkflowStepConfig>(
+    // The config overloads discriminate on the shape of `config.retries.delay`
+    // so the callback context reflects whether the resolved delay is present
+    // (static delay) or omitted (dynamic delay function). Each has a single
+    // type parameter, so an explicit return-type argument (`do<T>(...)`) still
+    // resolves here. ORDERING IS LOAD-BEARING: the broad `WorkflowStepConfig`
+    // fallback MUST remain last, otherwise it shadows the discriminating
+    // overloads and narrowing is silently lost.
+    do<T extends Rpc.Serializable<T>>(
       name: string,
-      config: C,
+      config: WorkflowStepConfigWithDelayFunction,
+      callback: (ctx: WorkflowStepContext<WorkflowDelayFunction>) => Promise<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions<T, WorkflowDelayFunction>,
+    ): Promise<T>;
+    do<T extends Rpc.Serializable<T>>(
+      name: string,
+      config: WorkflowStepConfigWithStaticDelay,
       callback: (
-        ctx: WorkflowStepContext<
-          C["retries"] extends {
-            delay: infer D;
-          }
-            ? D
-            : WorkflowDelayDuration | number
-        >,
+        ctx: WorkflowStepContext<WorkflowDelayDuration | number>,
       ) => Promise<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions<
+        T,
+        WorkflowDelayDuration | number
+      >,
+    ): Promise<T>;
+    do<T extends Rpc.Serializable<T>>(
+      name: string,
+      config: WorkflowStepConfig,
+      callback: (ctx: WorkflowStepContext) => Promise<T>,
       rollbackOptions?: WorkflowStepRollbackOptions<T>,
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
@@ -15622,12 +16073,13 @@ export type MarkdownDocument = {
   name: string;
   blob: Blob;
 };
+export type OutputFormat = "markdown" | "text";
 export type ConversionResponse =
   | {
       id: string;
       name: string;
       mimeType: string;
-      format: "markdown";
+      format: OutputFormat;
       tokens: number;
       data: string;
     }
@@ -15645,7 +16097,11 @@ export type EmbeddedImageConversionOptions = ImageConversionOptions & {
   convert?: boolean;
   maxConvertedImages?: number;
 };
+export type ConversionOutputOptions = {
+  format?: OutputFormat;
+};
 export type ConversionOptions = {
+  output?: ConversionOutputOptions;
   html?: {
     images?: EmbeddedImageConversionOptions & {
       convertOGImage?: boolean;
@@ -15830,6 +16286,18 @@ export declare namespace TailStream {
     readonly type: "log";
     readonly level: "debug" | "error" | "info" | "log" | "warn";
     readonly message: object;
+    /**
+     * Per-argument structured Error fields for the originating `console.*` call.
+     * The array is positional: index `i` corresponds to the i-th argument. Indices
+     * whose argument was not a native Error are `null`. The whole property is
+     * absent (undefined) when none of the arguments was a native Error.
+     */
+    readonly errorInfo?: readonly (TailStreamErrorInfo | null)[];
+  }
+  interface TailStreamErrorInfo {
+    readonly name: string;
+    readonly message: string;
+    readonly stack?: string;
   }
   interface DroppedEventsDiagnostic {
     readonly diagnosticsType: "droppedEvents";

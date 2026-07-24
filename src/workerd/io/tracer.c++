@@ -122,9 +122,23 @@ constexpr kj::LiteralStringConst logSizeExceeded =
 void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     LogLevel logLevel,
-    kj::String message) {
+    kj::String message,
+    tracing::LogErrorInfo errorInfo) {
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
+  }
+
+  // Compute the heap size of errorInfo once for both the streaming and buffered paths.
+  size_t errorInfoSize = 0;
+  KJ_IF_SOME(infos, errorInfo) {
+    for (const auto& entry: infos) {
+      KJ_IF_SOME(info, entry) {
+        errorInfoSize += info.name.size() + info.message.size();
+        KJ_IF_SOME(s, info.stack) {
+          errorInfoSize += s.size();
+        }
+      }
+    }
   }
 
   // TODO(streaming-tail): Here we add the log to the trace object and the tail stream writer, if
@@ -133,16 +147,19 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     // If message is too big on its own, truncate it.
     size_t messageSize = kj::min(message.size(), MAX_TRACE_BYTES);
+    // Clone errorInfo for the STW path because the batched-tail path below also needs it.
+    auto streamErrorInfo = tracing::cloneLogErrorInfo(errorInfo);
     writer->report(context,
-        {tracing::Log(timestamp, logLevel, kj::str(message.first(messageSize)))}, timestamp,
-        messageSize);
+        {tracing::Log(
+            timestamp, logLevel, kj::str(message.first(messageSize)), kj::mv(streamErrorInfo))},
+        timestamp, messageSize + errorInfoSize);
   }
 
   if (trace->exceededLogLimit) {
     return;
   }
 
-  size_t messageSize = sizeof(tracing::Log) + message.size();
+  size_t messageSize = sizeof(tracing::Log) + message.size() + errorInfoSize;
   if (trace->bytesUsed + messageSize > MAX_TRACE_BYTES) {
     // We use a JSON encoded array/string to match other console.log() recordings:
     trace->logs.add(timestamp, LogLevel::WARN, kj::str(logSizeExceeded));
@@ -150,7 +167,7 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     trace->truncated = true;
   } else {
     trace->bytesUsed += messageSize;
-    trace->logs.add(timestamp, logLevel, kj::mv(message));
+    trace->logs.add(timestamp, logLevel, kj::mv(message), kj::mv(errorInfo));
   }
 }
 
@@ -400,6 +417,13 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
   trace->cpuTime = cpuTime;
   trace->wallTime = wallTime;
 
+  if (outcome == EventOutcome::EXCEPTION && pipelineLogLevel != PipelineLogLevel::NONE &&
+      !trace->exceededExceptionLimit && trace->exceptions.empty()) {
+    LOG_PERIODICALLY(WARNING,
+        "NOSENTRY reporting trace with exception outcome, but no actual exceptions",
+        trace->eventInfo);
+  }
+
   // Defer reporting the actual outcome event to the WorkerTracer destructor: The outcome is
   // reported when the metrics request is deallocated, but with ctx.waitUntil() there might be spans
   // continuing to exist beyond that point. By the time the WorkerTracer is deallocated, the
@@ -418,8 +442,9 @@ void WorkerTracer::recordTimestamp(kj::Date timestamp) {
 kj::Date BaseTracer::getTime() {
   auto& weakIoCtx = KJ_ASSERT_NONNULL(weakIoContext);
   kj::Date timestamp = kj::UNIX_EPOCH;
-  weakIoCtx->runIfAlive([&timestamp](IoContext& context) { timestamp = context.now(); });
-  if (!weakIoCtx->isValid()) {
+  KJ_IF_SOME(context, weakIoCtx) {
+    timestamp = context->now();
+  } else {
     // This can happen if we the IoContext gets destroyed following an exception, but we still need
     // to report a time for the return event.
     if (completeTime != kj::UNIX_EPOCH) {
@@ -447,9 +472,9 @@ void BaseTracer::adjustSpanTime(tracing::SpanEndData& span, kj::Maybe<kj::Date> 
     // present. For the RPC case, the adjustment will already have been done earlier and it's ok
     // for maybeStartTime to be none as this code won't run based on weakIoContext being none.
     kj::Date startTime = KJ_ASSERT_NONNULL(maybeStartTime);
-    weakIoCtx->runIfAlive([this, &span, &startTime](IoContext& context) {
-      if (context.hasCurrentIncomingRequest()) {
-        span.endTime = context.now();
+    KJ_IF_SOME(context, weakIoCtx) {
+      if (context->hasCurrentIncomingRequest()) {
+        span.endTime = context->now();
       } else {
         // We have an IOContext, but there's no current IncomingRequest. Always log a warning here,
         // this should not be happening. Still report completeTime as a useful timestamp if
@@ -467,8 +492,7 @@ void BaseTracer::adjustSpanTime(tracing::SpanEndData& span, kj::Maybe<kj::Date> 
           LOG_WARNING_PERIODICALLY("reported span without current request");
         }
       }
-    });
-    if (!weakIoCtx->isValid()) {
+    } else {
       // This can happen if we start a customEvent from this event and cancel it after this IoContext
       // gets destroyed. In that case we no longer have an IoContext available and can't get the
       // current time, but the outcome timestamp will have already been set. Since the outcome

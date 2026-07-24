@@ -239,8 +239,32 @@ globalThis.assert_array_equals = (actual, expected, description): void => {
   }
 };
 
+// Recursively copy null-prototype objects into regular {__proto__: Object.prototype}
+// objects so that deepStrictEqual (which checks [[Prototype]] identity) does not
+// reject them.  This is necessary because our streams implementation returns
+// { value, done } read-result objects with a null prototype to prevent
+// Object.prototype.then interception in V8's PromiseResolveFunction — an
+// intentional spec variance.  WPT tests never rely on read-result prototypes in
+// assert_object_equals comparisons, so normalizing is safe.
+function normalizeNullPrototype(obj: unknown): unknown {
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return (obj as unknown[]).map(normalizeNullPrototype);
+  const rec = obj as Record<string, unknown>;
+  const keys = Object.keys(rec);
+  const out: Record<string, unknown> = {};
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i] as string;
+    out[key] = normalizeNullPrototype(rec[key]);
+  }
+  return out;
+}
+
 globalThis.assert_object_equals = (a, b, message): void => {
-  deepStrictEqual(a, b, message);
+  deepStrictEqual(
+    normalizeNullPrototype(a),
+    normalizeNullPrototype(b),
+    message
+  );
 };
 
 /**

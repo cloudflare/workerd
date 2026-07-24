@@ -261,7 +261,20 @@ class AccessContext: public jsg::Object {
 
   // Fetches the full identity information for the authenticated user. Resolves to `undefined`
   // if no identity is associated with the request (e.g. service-token authentication).
-  jsg::Promise<jsg::Optional<jsg::JsValue>> getIdentity(jsg::Lock& js);
+  //
+  // Returns `jsg::Promise<jsg::Value>` (a persistent V8 ref) rather than `jsg::JsValue`: the
+  // resolved value must survive across microtask boundaries until the awaiting code runs, and a
+  // transient `jsg::JsValue` (a `v8::Local`) would dangle. The `undefined` case is represented as a
+  // JS `undefined` value. The TS type is pinned to `CloudflareAccessIdentity | undefined` via the
+  // JSG_TS_OVERRIDE below.
+  //
+  // `rpcPropHandler` wraps the `JsRpcProperty` returned by `Fetcher::getRpcMethodInternal` into a
+  // JS value; `getIdentityFnHandler` then adapts it into a `jsg::Function` so we can invoke the
+  // RPC method as a C++ functor without hand-rolling raw `v8::Function` casts. Both are injected
+  // automatically by JSG.
+  jsg::Promise<jsg::Value> getIdentity(jsg::Lock& js,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value()>>& getIdentityFnHandler);
 
   JSG_RESOURCE_TYPE(AccessContext) {
     JSG_READONLY_INSTANCE_PROPERTY(aud, getAud);
@@ -358,6 +371,10 @@ class ExecutionContext: public jsg::Object {
   // Called by the runtime to provide Cloudflare Access authentication context.
   jsg::Optional<jsg::Ref<AccessContext>> getAccess(jsg::Lock& js);
 
+  // Maps a virtual host to the given fetcher on the specified port. This is a no-op if an override
+  // has already been installed. Returns the string <host:port> for the override.
+  kj::String mapVirtualHost(jsg::Lock& js, jsg::Ref<Fetcher> fetcher, uint16_t port);
+
   JSG_RESOURCE_TYPE(ExecutionContext, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     JSG_METHOD(passThroughOnException);
@@ -373,6 +390,9 @@ class ExecutionContext: public jsg::Object {
       JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
     }
     JSG_LAZY_INSTANCE_PROPERTY(access, getAccess);
+    if (flags.getWorkerdExperimental()) {
+      JSG_METHOD(mapVirtualHost);
+    }
 
     // ctx.tracing - user tracing API. Always available; the Tracing object is stateless
     // and enterSpan() is a no-op when called outside a traced request.
@@ -751,6 +771,11 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   using ConnectFn = kj::Function<jsg::Ref<api::Socket>(jsg::Lock&)>;
   void setConnectOverride(kj::String networkAddress, ConnectFn connectFn);
   kj::Maybe<ConnectFn&> getConnectOverride(kj::StringPtr networkAddress);
+
+  // hostname->IP overrides so node:dns can resolve magic hostnames (e.g. Hyperdrive's) to a
+  // synthetic IP that has a corresponding connect override registered above.
+  void setDnsOverride(kj::String hostname, kj::String ip);
+  kj::Maybe<kj::StringPtr> getDnsOverride(kj::StringPtr hostname);
 
   // ---------------------------------------------------------------------------
   // JS API
@@ -1167,6 +1192,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   kj::Maybe<jsg::JsRef<jsg::JsValue>> bufferValue;
   kj::Maybe<jsg::Ref<Fetcher>> defaultFetcher;
   kj::HashMap<kj::String, ConnectFn> connectOverrides;
+  kj::HashMap<kj::String, kj::String> dnsOverrides;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(processValue, bufferValue, defaultFetcher);

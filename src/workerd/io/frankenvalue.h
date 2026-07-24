@@ -62,6 +62,10 @@ class Frankenvalue {
   // then JSON-stringifying from there.)
   static Frankenvalue fromJson(kj::String json);
 
+  // Construct a Frankenvalue whose value is an `ArrayBuffer` wrapping `data`, without going
+  // through V8 serialization. For placing binary data into `ctx.props` where no JS context exists.
+  static Frankenvalue fromBytes(kj::Array<byte> data);
+
   // Construct a Frankenvalue whose value is a single capability (cap table entry), without going
   // through V8 serialization. When converted to JS, the capability is materialized using the
   // deserializer registered for `tag` (a `workerd::rpc::SerializationTag` value, e.g.
@@ -184,6 +188,9 @@ class Frankenvalue {
   struct V8Serialized {
     kj::Array<byte> data;
   };
+  struct Bytes {
+    kj::Array<byte> data;
+  };
   struct Capability {
     // Index into this value's base cap table (the caps referenced by the union, before property
     // caps).
@@ -194,7 +201,7 @@ class Frankenvalue {
     // need not depend on the `SerializationTag` schema.
     uint16_t tag;
   };
-  kj::OneOf<EmptyObject, Json, V8Serialized, Capability> value;
+  kj::OneOf<EmptyObject, Json, V8Serialized, Bytes, Capability> value;
 
   struct Property;
   kj::Vector<Property> properties;
