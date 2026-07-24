@@ -15,6 +15,65 @@ void preamble(auto callback) {
   fixture.runInIoContext([&](const TestFixture::Environment& env) { callback(env.js); });
 }
 
+class PumpTestSink final: public WritableStreamSink {
+ public:
+  kj::Promise<void> write(kj::ArrayPtr<const byte>) override {
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>>) override {
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> end() override {
+    return kj::READY_NOW;
+  }
+
+  void abort(kj::Exception) override {}
+};
+
+KJ_TEST("standard stream pump cancellation invokes source cancel") {
+  TestFixture fixture;
+  bool cancelCalled = false;
+  bool pullCalled = false;
+  kj::Maybe<jsg::Promise<void>::Resolver> pendingResolver;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto cancelDone = env.js.newPromiseAndResolver<void>();
+    auto rs = env.js.alloc<ReadableStream>(newReadableStreamJsController());
+    rs->getController().setup(env.js,
+        UnderlyingSource{
+          .pull =
+              [&pullCalled, &pendingResolver](jsg::Lock& js, UnderlyingSource::Controller) {
+      pullCalled = true;
+      auto pending = js.newPromiseAndResolver<void>();
+      pendingResolver = kj::mv(pending.resolver);
+      return kj::mv(pending.promise);
+    },
+          .cancel =
+              [resolver = kj::mv(cancelDone.resolver), &cancelCalled](jsg::Lock& js, auto) mutable {
+      cancelCalled = true;
+      resolver.resolve(js);
+      return js.resolvedPromise();
+    },
+        },
+        StreamQueuingStrategy{.highWaterMark = 1});
+    KJ_ASSERT(pullCalled, "pull() should be pending before the pump starts");
+    KJ_ASSERT(pendingResolver != kj::none, "pull() should leave a promise pending");
+
+    auto canceler = kj::heap<kj::Canceler>();
+    auto pump = canceler->wrap(rs->getController().pumpTo(env.js, kj::heap<PumpTestSink>(), true))
+                    .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); },
+                        [](kj::Exception&&) {});
+    canceler->cancel(KJ_EXCEPTION(DISCONNECTED, "test canceled"));
+    auto waitForCancel = env.context.awaitJs(env.js, kj::mv(cancelDone.promise));
+    return kj::joinPromises(kj::arr(kj::mv(pump), kj::mv(waitForCancel))).then([&] {
+      KJ_ASSERT(pullCalled, "pull() should be called before the pump is canceled");
+      KJ_ASSERT(cancelCalled, "cancel() should be called when the pump is canceled");
+    });
+  });
+}
+
 jsg::JsValue toBytes(jsg::Lock& js, kj::String str) {
   return jsg::JsValue(
       jsg::BackingStore::from(js, str.asBytes().attach(kj::mv(str))).createHandle(js));
