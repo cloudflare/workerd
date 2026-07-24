@@ -57,6 +57,31 @@ KJ_TEST("redactUrl can detect base64 ids") {
   expectUnredacted("https://domain/IThinkIShallNeverSee0/x"_kj);
 }
 
+KJ_TEST("redactUrl can detect payment card numbers") {
+  expectRedacted(
+      "https://domain/path?number=4222222222222"_kj, "https://domain/path?number=REDACTED"_kj);
+  expectRedacted(
+      "https://domain/path?number=30569309025904"_kj, "https://domain/path?number=REDACTED"_kj);
+  expectRedacted(
+      "https://domain/path?number=378282246310005"_kj, "https://domain/path?number=REDACTED"_kj);
+  expectRedacted(
+      "https://domain/path?number=4111111111111111"_kj, "https://domain/path?number=REDACTED"_kj);
+  expectRedacted("https://domain/path?number=4000000000000000006"_kj,
+      "https://domain/path?number=REDACTED"_kj);
+
+  // URL-safe separators do not affect the checksum.
+  expectRedacted("https://domain/path?number=4111-1111-1111-1111"_kj,
+      "https://domain/path?number=REDACTED"_kj);
+  expectRedacted("https://domain/path?number=4111+1111+1111+1111"_kj,
+      "https://domain/path?number=REDACTED"_kj);
+
+  // Numeric identifiers which fail Luhn validation are preserved.
+  expectUnredacted("https://domain/path?number=4111111111111112"_kj);
+
+  // Luhn-valid values outside the 13 to 19 digit PAN range are preserved.
+  expectUnredacted("https://domain/path?short=79927398713&long=40000000000000000002"_kj);
+}
+
 KJ_TEST("readContentTypeParameter can fetch boundary parameter") {
 
   // normal
