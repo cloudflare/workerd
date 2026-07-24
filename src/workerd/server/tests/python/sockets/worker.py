@@ -1,7 +1,10 @@
 import asyncio
 import socket
+import ssl
 
 from workers import WorkerEntrypoint
+
+TLS_HOSTNAME = "127.0.0.1"
 
 
 def recv_all(sock):
@@ -25,12 +28,29 @@ def recv_line(sock):
 
 
 class Default(WorkerEntrypoint):
+    def tls_context(self):
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        return context
+
     def connect(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.connect(
             (self.env.SIDECAR_HOSTNAME, int(self.env.PYTHON_SOCKET_SERVER_PORT))
         )
         return sock
+
+    def connect_tls(self):
+        return self.tls_context().wrap_socket(
+            socket.create_connection(
+                (
+                    TLS_HOSTNAME,
+                    int(self.env.PYTHON_TLS_SOCKET_SERVER_PORT),
+                )
+            ),
+            server_hostname="localhost",
+        )
 
     def test_basic_send_recv(self):
         message = b"BASIC hello from python\n"
@@ -44,6 +64,35 @@ class Default(WorkerEntrypoint):
             sock.close()
 
         assert response == expected
+
+    def test_tls_send_recv(self):
+        sock = self.connect_tls()
+        try:
+            sock.sendall(b"BASIC hello over tls\n")
+            response = recv_line(sock)
+        finally:
+            sock.close()
+
+        assert response == b"tls echo: hello over tls\n"
+
+    def test_starttls_send_recv(self):
+        sock = socket.create_connection(
+            (
+                TLS_HOSTNAME,
+                int(self.env.PYTHON_STARTTLS_SOCKET_SERVER_PORT),
+            )
+        )
+        try:
+            assert recv_line(sock) == b"HELLO\n"
+            sock.sendall(b"HELLO_BACK\n")
+            assert recv_line(sock) == b"START_TLS\n"
+
+            tls_sock = self.tls_context().wrap_socket(sock, server_hostname="localhost")
+            sock = tls_sock
+            tls_sock.sendall(b"ping\n")
+            assert recv_line(tls_sock) == b"pong\n"
+        finally:
+            sock.close()
 
     def test_multiple_send_recv(self):
         sock = self.connect()
@@ -268,6 +317,8 @@ class Default(WorkerEntrypoint):
 
     async def test(self):
         self.test_basic_send_recv()
+        self.test_starttls_send_recv()
+        self.test_tls_send_recv()
         self.test_multiple_send_recv()
         self.test_large_send()
         self.test_large_recv()
