@@ -85,11 +85,13 @@ ExecProcess::ExecProcess(jsg::Lock& js,
     jsg::Optional<JsReadableStream> stderrStream,
     int pid,
     rpc::Container::ProcessHandle::Client handle,
+    IsPty isPty,
     kj::Maybe<jsg::Ref<AbortSignal>> abortSignal)
     : stdinStream(kj::mv(stdinStream)),
       stdoutStream(kj::mv(stdoutStream)),
       stderrStream(kj::mv(stderrStream)),
       pid(pid),
+      isPty(isPty.toBool()),
       handle(ioContext.addObject(kj::heap(kj::mv(handle)))) {
   KJ_IF_SOME(signal, abortSignal) {
     constexpr int kSigKill = 9;
@@ -226,6 +228,25 @@ void ExecProcess::sendKill(int signo) {
   auto& ioContext = IoContext::current();
   auto req = handle->killRequest(capnp::MessageSize{4, 0});
   req.setSigno(signo);
+  ioContext.addTask(req.sendIgnoringResult());
+}
+
+void ExecProcess::resize(jsg::Lock& js, int cols, int rows) {
+  // PTY dimensions are UInt16 on the wire, so the largest value either dimension can take is 65535.
+  static constexpr int kMaxPtyDimension = 65535;
+
+  JSG_REQUIRE(
+      isPty, TypeError, "resize() can only be called on a process that was started with a PTY.");
+  JSG_REQUIRE(cols >= 1 && cols <= kMaxPtyDimension, RangeError, "PTY cols must be between 1 and ",
+      kMaxPtyDimension, ".");
+  JSG_REQUIRE(rows >= 1 && rows <= kMaxPtyDimension, RangeError, "PTY rows must be between 1 and ",
+      kMaxPtyDimension, ".");
+
+  // TODO: This is fire-and-forget with no coalescing or rate-limiting
+  auto& ioContext = IoContext::current();
+  auto req = handle->resizeRequest(capnp::MessageSize{4, 0});
+  req.setCols(cols);
+  req.setRows(rows);
   ioContext.addTask(req.sendIgnoringResult());
 }
 // =======================================================================================
@@ -490,8 +511,45 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
   JSG_REQUIRE(cmd.size() > 0, TypeError, "exec() requires a non-empty command array.");
 
   auto options = kj::mv(maybeOptions).orDefault({});
+
+  // Resolve the pty option, which can be a boolean shorthand or an object with dimensions.
+  // Presence of an object always means the PTY is enabled; `pty: true` is the shorthand for an
+  // object with default dimensions, while `pty: false` (or an absent option) leaves it disabled.
+  bool ptyEnabled = false;
+  kj::Maybe<uint16_t> ptyCols;
+  kj::Maybe<uint16_t> ptyRows;
+  KJ_IF_SOME(pty, options.pty) {
+    KJ_SWITCH_ONEOF(pty) {
+      KJ_CASE_ONEOF(enabled, bool) {
+        ptyEnabled = enabled;
+      }
+      KJ_CASE_ONEOF(ptyOptions, ExecPtyOptions) {
+        ptyEnabled = true;
+        ptyCols = ptyOptions.cols;
+        ptyRows = ptyOptions.rows;
+      }
+    }
+  }
+
+  // A PTY exposes a single stream that merges stdout and stderr, so when one is enabled stdin
+  // defaults to "pipe" and stderr defaults to (and must be) "combined".
+  if (ptyEnabled && options.$stdin == kj::none) {
+    options.$stdin.emplace(kj::str("pipe"));
+  }
+
   auto stdoutMode = getExecOutputMode(kj::mv(options.$stdout), "stdout");
-  auto stderrMode = getExecOutputMode(kj::mv(options.$stderr), "stderr");
+  kj::String stderrMode;
+  if (ptyEnabled) {
+    KJ_IF_SOME(stderr, options.$stderr) {
+      stderrMode = kj::mv(stderr);
+    } else {
+      stderrMode = kj::str("combined");
+    }
+    JSG_REQUIRE(
+        stderrMode == "combined", TypeError, "stderr must be \"combined\" when PTY is enabled.");
+  } else {
+    stderrMode = getExecOutputMode(kj::mv(options.$stderr), "stderr");
+  }
   bool combinedOutput = stderrMode == "combined";
   JSG_REQUIRE(!combinedOutput || stdoutMode == "pipe", TypeError,
       "stderr: \"combined\" requires stdout to be \"pipe\".");
@@ -531,6 +589,16 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
     spanContext.toCapnp(params.initSpanContext());
   }
 
+  if (ptyEnabled) {
+    auto ptyParams = params.initPty();
+    KJ_IF_SOME(cols, ptyCols) {
+      ptyParams.setCols(cols);
+    }
+    KJ_IF_SOME(rows, ptyRows) {
+      ptyParams.setRows(rows);
+    }
+  }
+
   // Some basic validation...
   KJ_IF_SOME(cwd, options.cwd) {
     JSG_REQUIRE(cwd.findFirst('\0') == kj::none, TypeError, "cwd cannot contain '\\0' characters.");
@@ -555,7 +623,7 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
   // We have to await, because PID won't be available until the response resolves
   return ioContext.awaitIo(js, req.send())
       .then(js,
-          [&ioContext, &byteStreamFactory, options = kj::mv(options),
+          [&ioContext, &byteStreamFactory, options = kj::mv(options), ptyEnabled,
               stdoutInput = kj::mv(stdoutInput), stderrInput = kj::mv(stderrInput)](
               jsg::Lock& js, capnp::Response<rpc::Container::ExecResults> results) mutable
           -> jsg::Ref<ExecProcess> {
@@ -617,7 +685,7 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
 
     // return the instance to the process after getting pipeline of the process handle
     return js.alloc<ExecProcess>(js, ioContext, kj::mv(stdinStream), kj::mv(stdoutStream),
-        kj::mv(stderrStream), pid, kj::mv(handle), kj::mv(options.signal));
+        kj::mv(stderrStream), pid, kj::mv(handle), IsPty(ptyEnabled), kj::mv(options.signal));
   });
 }
 

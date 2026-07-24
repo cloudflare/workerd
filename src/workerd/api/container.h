@@ -13,8 +13,13 @@
 #include <workerd/io/io-own.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/canceler.h>
+#include <workerd/util/strong-bool.h>
 
 namespace workerd::api {
+
+// Whether an exec'd process was started with a PTY allocated. Using a strong bool avoids
+// positional-bool mis-wiring at the ExecProcess constructor and exec() call site.
+WD_STRONG_BOOL(IsPty);
 
 class Fetcher;
 class ExecOutput: public jsg::Object {
@@ -50,6 +55,16 @@ class ExecOutput: public jsg::Object {
   int exitCode;
 };
 
+struct ExecPtyOptions {
+  // Initial column count for the PTY. If omitted, the runtime default (80) is used.
+  jsg::Optional<uint16_t> cols;
+  // Initial row count for the PTY. If omitted, the runtime default (24) is used.
+  jsg::Optional<uint16_t> rows;
+
+  JSG_STRUCT(cols, rows);
+  JSG_STRUCT_TS_OVERRIDE(ContainerExecPtyOptions);
+};
+
 struct ExecOptions {
   // $ prefix avoids collision with stdin/stdout/stderr macros from <stdio.h>;
   // JSG_STRUCT strips the $ when exposing to JS.
@@ -60,8 +75,11 @@ struct ExecOptions {
   jsg::Optional<jsg::Dict<kj::String>> env;
   jsg::Optional<kj::String> user;
   jsg::Optional<jsg::Ref<AbortSignal>> signal;
+  // Allocates a PTY for the process. `true` (or an object) enables a PTY with default dimensions;
+  // an object may additionally specify initial `cols`/`rows`. Absent or `false` means no PTY.
+  jsg::Optional<kj::OneOf<bool, ExecPtyOptions>> pty;
 
-  JSG_STRUCT($stdin, $stdout, $stderr, cwd, env, user, signal);
+  JSG_STRUCT($stdin, $stdout, $stderr, cwd, env, user, signal, pty);
   JSG_STRUCT_TS_OVERRIDE(ContainerExecOptions {
     stdin?: ReadableStream | "pipe";
     stdout?: "pipe" | "ignore";
@@ -70,6 +88,7 @@ struct ExecOptions {
     env?: Record<string, string>;
     user?: string;
     signal?: AbortSignal;
+    pty?: boolean | ContainerExecPtyOptions;
     $stdin: never;
     $stdout: never;
     $stderr: never;
@@ -85,6 +104,7 @@ class ExecProcess: public jsg::Object {
       jsg::Optional<JsReadableStream> stderrStream,
       int pid,
       rpc::Container::ProcessHandle::Client handle,
+      IsPty isPty,
       kj::Maybe<jsg::Ref<AbortSignal>> abortSignal = kj::none);
 
   jsg::Optional<JsWritableStream> getStdin(jsg::Lock& js);
@@ -93,28 +113,39 @@ class ExecProcess: public jsg::Object {
   int getPid() const {
     return pid;
   }
+  // Whether this process was started with a PTY. resize() is only valid when this is true.
+  bool getIsPty() const {
+    return isPty;
+  }
   jsg::MemoizedIdentity<jsg::Promise<int>>& getExitCode(jsg::Lock& js);
 
   jsg::Promise<jsg::Ref<ExecOutput>> output(jsg::Lock& js);
   void kill(jsg::Lock& js, jsg::Optional<int> signal);
+  // Resizes the PTY window to the given dimensions. Throws unless the process was started with a
+  // PTY. Both dimensions must be in the range [1, 65535].
+  void resize(jsg::Lock& js, int cols, int rows);
 
   JSG_RESOURCE_TYPE(ExecProcess) {
     JSG_READONLY_PROTOTYPE_PROPERTY(stdin, getStdin);
     JSG_READONLY_PROTOTYPE_PROPERTY(stdout, getStdout);
     JSG_READONLY_PROTOTYPE_PROPERTY(stderr, getStderr);
     JSG_READONLY_PROTOTYPE_PROPERTY(pid, getPid);
+    JSG_READONLY_PROTOTYPE_PROPERTY(isPty, getIsPty);
     JSG_READONLY_PROTOTYPE_PROPERTY(exitCode, getExitCode);
     JSG_METHOD(output);
     JSG_METHOD(kill);
+    JSG_METHOD(resize);
 
     JSG_TS_OVERRIDE({
       readonly stdin: WritableStream | null;
       readonly stdout: ReadableStream | null;
       readonly stderr: ReadableStream | null;
       readonly pid: number;
+      readonly isPty: boolean;
       readonly exitCode: Promise<number>;
       output(): Promise<ExecOutput>;
       kill(signal?: number): void;
+      resize(cols: number, rows: number): void;
     });
   }
 
@@ -144,6 +175,7 @@ class ExecProcess: public jsg::Object {
   jsg::Optional<JsReadableStream> stdoutStream;
   jsg::Optional<JsReadableStream> stderrStream;
   int pid;
+  bool isPty;
   IoOwn<rpc::Container::ProcessHandle::Client> handle;
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<int>>> exitCodePromise;
   kj::Maybe<jsg::Promise<void>> exitCodePromiseCopy;
@@ -335,7 +367,7 @@ class Container: public jsg::Object {
 };
 
 #define EW_CONTAINER_ISOLATE_TYPES                                                                 \
-  api::ExecOutput, api::ExecOptions, api::ExecProcess, api::Container,                             \
+  api::ExecOutput, api::ExecOptions, api::ExecPtyOptions, api::ExecProcess, api::Container,        \
       api::Container::DirectorySnapshot, api::Container::DirectorySnapshotOptions,                 \
       api::Container::DirectorySnapshotRestoreParams, api::Container::Snapshot,                    \
       api::Container::SnapshotOptions, api::Container::StartupOptions, api::Container::Info
