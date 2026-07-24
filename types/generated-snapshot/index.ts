@@ -13985,6 +13985,15 @@ export type ImageInfoResponse =
       width: number;
       height: number;
     };
+export type TextRasterize = {
+  text: string;
+  font: {
+    url: string;
+  };
+  size: number;
+  color: string;
+};
+export type ImageSource = ReadableStream<Uint8Array> | TextRasterize;
 export type ImageTransform = {
   width?: number;
   height?: number;
@@ -14183,6 +14192,12 @@ export interface ImagesBinding {
     stream: ReadableStream<Uint8Array>,
     options?: ImageInputOptions,
   ): ImageTransformer;
+  /**
+   * Begin applying a series of transformations to text
+   * @param spec Text specification including content, font, size, and color
+   * @returns A transform handle
+   */
+  text(spec: TextRasterize): ImageTransformer;
   /**
    * Access hosted images CRUD operations
    */
