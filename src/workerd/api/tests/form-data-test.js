@@ -515,6 +515,11 @@ export const testFormDataSerializer = {
     expected.append('field0', 'part2');
     expected.append('field1', 'part3');
     expected.append('field-with-a-"-in-it', 'part4');
+    expected.append(
+      'file-field\n"\\name',
+      new File(['file-part'], 'file\n"\\name.txt', { type: 'text/plain' })
+    );
+    expected.append('default-file', new File(['default-part'], 'default.bin'));
 
     // Serialize the FormData.
     const response = new Response(expected);
@@ -535,10 +540,16 @@ export const testFormDataSerializer = {
       'field0=part2',
       'field1=part3',
       'field-with-a-%22-in-it=part4',
+      'file-field%0A%22\\name=file%0A%22\\name.txt:text/plain:file-part',
+      'default-file=default.bin:application/octet-stream:default-part',
     ];
     const actualData = [];
     for (let [k, v] of actual) {
-      actualData.push(`${k}=${v}`);
+      if (v instanceof File) {
+        actualData.push(`${k}=${v.name}:${v.type}:${await v.text()}`);
+      } else {
+        actualData.push(`${k}=${v}`);
+      }
     }
 
     strictEqual('' + actualData.join(','), '' + expectedData.join(','));
