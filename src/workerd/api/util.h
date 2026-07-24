@@ -81,6 +81,7 @@ kj::Own<kj::AsyncInputStream> newTeeErrorAdapter(kj::Own<kj::AsyncInputStream> i
 //   - Any run of hex characters of 32 or more digits, ignoring potential "+-_" separators
 //   - Any run of base64 characters of 21 or more digits, including at least
 //     two each of digits, capital letters, and lowercase letters.
+//   - Any 13 to 19 digit value with a valid Luhn checksum.
 // Such ids are replaced with the text "REDACTED".
 kj::String redactUrl(kj::StringPtr url);
 

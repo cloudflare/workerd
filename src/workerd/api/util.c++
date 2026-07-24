@@ -137,6 +137,34 @@ kj::Own<kj::AsyncInputStream> newTeeErrorAdapter(kj::Own<kj::AsyncInputStream> i
   }
 }
 
+namespace {
+
+bool isLuhnPan(kj::ArrayPtr<const char> span) {
+  uint digitCount = 0;
+  uint sum = 0;
+  bool shouldDouble = false;
+
+  for (size_t i = span.size(); i > 0; --i) {
+    char c = span[i - 1];
+    if (c == '+' || c == '-' || c == '_') continue;
+    if (c < '0' || c > '9') return false;
+
+    uint digit = c - '0';
+    if (shouldDouble) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+
+    sum += digit;
+    digitCount++;
+    shouldDouble = !shouldDouble;
+  }
+
+  return digitCount >= 13 && digitCount <= 19 && sum % 10 == 0;
+}
+
+}  // namespace
+
 kj::String redactUrl(kj::StringPtr url) {
   kj::Vector<char> redacted(url.size() + 1);
   const char* spanStart = url.begin();
@@ -151,7 +179,7 @@ kj::String redactUrl(kj::StringPtr url) {
     bool probablyBase64Id =
         (span.size() >= 21 && digitCount >= 2 && upperCount >= 2 && lowerCount >= 2);
 
-    if (isHexId || probablyBase64Id) {
+    if (isHexId || probablyBase64Id || isLuhnPan(span)) {
       redacted.addAll("REDACTED"_kj);
     } else {
       redacted.addAll(span);
