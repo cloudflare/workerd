@@ -209,6 +209,13 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
     locationHint = kj::mv(o.locationHint);
     if (FeatureFlags::get(js).getEnableVersionApi()) {
       KJ_IF_SOME(v, o.version) {
+        KJ_IF_SOME(c, v.cohort) {
+          // Cohort length is limited to kMaxActorCohortLength bytes, so silently drop
+          // oversized values rather than passing them through.
+          if (c.size() > kMaxActorCohortLength) {
+            v.cohort = kj::none;
+          }
+        }
         version = ActorVersion{.cohort = kj::mv(v.cohort)};
       }
     }
