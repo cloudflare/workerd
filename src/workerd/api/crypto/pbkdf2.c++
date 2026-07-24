@@ -132,7 +132,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importPbkdf2(jsg::Lock& js,
       CryptoKeyUsageSet::Context::importSecret, keyUsages, CryptoKeyUsageSet::derivationKeyMask());
 
   JSG_REQUIRE(!extractable, DOMSyntaxError, "PBKDF2 key cannot be extractable.");
-  JSG_REQUIRE(format == "raw", DOMNotSupportedError,
+  JSG_REQUIRE(format == "raw" || format == "raw-secret", DOMNotSupportedError,
       "PBKDF2 key must be imported in \"raw\" format (requested \"", format, "\").");
 
   // NOTE: Checked in SubtleCrypto::importKey().

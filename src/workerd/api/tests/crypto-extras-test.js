@@ -420,3 +420,23 @@ export const ecJwkKeyConsistencyCheck = {
     ok(threw, 'Import should have thrown for inconsistent EC JWK private key');
   },
 };
+
+export const webCryptoModernAlgorithmsRequireCompatFlag = {
+  async test() {
+    strictEqual('supports' in crypto.subtle.constructor, false);
+    strictEqual('encapsulateKey' in crypto.subtle, false);
+    strictEqual('encapsulateBits' in crypto.subtle, false);
+    strictEqual('decapsulateKey' in crypto.subtle, false);
+    strictEqual('decapsulateBits' in crypto.subtle, false);
+    strictEqual('getPublicKey' in crypto.subtle, false);
+
+    await crypto.subtle.generateKey('ML-DSA-44', true, ['sign']).then(
+      () => {
+        throw new Error('generateKey should not have resolved');
+      },
+      (error) => {
+        strictEqual(error.name, 'NotSupportedError');
+      }
+    );
+  },
+};
