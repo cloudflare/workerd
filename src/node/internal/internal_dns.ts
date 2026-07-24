@@ -31,6 +31,7 @@ import {
 } from 'node-internal:internal_errors';
 import {
   validateString,
+  validateStringWithoutNullBytes,
   validateFunction,
   validateOneOf,
   validateNumber,
@@ -72,7 +73,7 @@ export function lookup(
 
   // Parse arguments
   if (hostname) {
-    validateString(hostname, 'hostname');
+    validateStringWithoutNullBytes(hostname, 'hostname');
   }
 
   if (typeof options === 'function') {
