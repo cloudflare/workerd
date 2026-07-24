@@ -95,7 +95,10 @@ pub fn parse_replacement(input: &[&str]) -> jsg::Result<String, DnsParserError> 
     // Each frame starts with the length of the remaining frame.
     while length_index < input.len() {
         let length = usize::from_str_radix(input[length_index], 16)?;
-        if length + offset_index > input.len() {
+        // `length` is parsed from the hex token, so it can be as large as
+        // usize::MAX. Use saturating_add so a length near the top of the
+        // usize range can't wrap and silently bypass the bounds check.
+        if length.saturating_add(offset_index) > input.len() {
             return Err(DnsParserError::InvalidDnsResponse(
                 "replacement data too short for declared frame length".to_owned(),
             ));
@@ -167,7 +170,9 @@ impl DnsUtil {
         let critical = data[0].parse::<u8>()?;
         let prefix_length = data[1].parse::<usize>()?;
 
-        if data.len() < 2 + prefix_length {
+        // `prefix_length` is attacker-supplied; saturate the addition so a
+        // value near usize::MAX can't wrap past the bounds check.
+        if data.len() < 2usize.saturating_add(prefix_length) {
             return Err(DnsParserError::InvalidDnsResponse(format!(
                 "CAA record data too short for prefix_length {prefix_length}"
             )));
@@ -243,8 +248,11 @@ impl DnsUtil {
         let preference = u32::from_str_radix(&preference_str.join(""), 16)?;
 
         let flag_length = usize::from_str_radix(data[5], 16)?;
-        let flag_offset = 6;
-        if data.len() < flag_offset + flag_length + 1 {
+        let flag_offset = 6usize;
+        // Length fields are parsed from attacker-controlled hex tokens, so
+        // saturate every addition that could otherwise wrap past
+        // `data.len()` and let the slice/index that follows panic.
+        if data.len() < flag_offset.saturating_add(flag_length).saturating_add(1) {
             return Err(DnsParserError::InvalidDnsResponse(
                 "NAPTR record too short for flags field".to_owned(),
             ));
@@ -253,7 +261,7 @@ impl DnsUtil {
 
         let service_length = usize::from_str_radix(data[flag_offset + flag_length], 16)?;
         let service_offset = flag_offset + flag_length + 1;
-        if data.len() < service_offset + service_length + 1 {
+        if data.len() < service_offset.saturating_add(service_length).saturating_add(1) {
             return Err(DnsParserError::InvalidDnsResponse(
                 "NAPTR record too short for service field".to_owned(),
             ));
@@ -262,7 +270,7 @@ impl DnsUtil {
 
         let regexp_length = usize::from_str_radix(data[service_offset + service_length], 16)?;
         let regexp_offset = service_offset + service_length + 1;
-        if data.len() < regexp_offset + regexp_length {
+        if data.len() < regexp_offset.saturating_add(regexp_length) {
             return Err(DnsParserError::InvalidDnsResponse(
                 "NAPTR record too short for regexp field".to_owned(),
             ));
@@ -436,6 +444,70 @@ mod tests {
         assert!(
             dns_util
                 .parse_naptr_record("\\# 06 15 b3 08 ae 05".to_owned())
+                .is_err()
+        );
+    }
+
+    // The cases below set a hex length token to FFFFFFFFFFFFFFFF (usize::MAX
+    // on 64-bit). Without saturating arithmetic in the bounds checks, the
+    // addition wraps to a small value, the check passes, and the slice/index
+    // that follows panics — they should return Err instead.
+
+    #[test]
+    fn test_parse_replacement_length_overflow() {
+        // length token is usize::MAX on 64-bit; raw `length + offset_index`
+        // wraps to 0, the bounds check passes, and `input[1..0]` panics.
+        let input = vec!["FFFFFFFFFFFFFFFF", "01"];
+        assert!(parse_replacement(&input).is_err());
+    }
+
+    #[test]
+    fn test_parse_caa_record_prefix_length_overflow() {
+        let dns_util = DnsUtil {};
+        // critical=00, prefix_length=18446744073709551615 (usize::MAX as decimal)
+        assert!(
+            dns_util
+                .parse_caa_record("\\# 02 00 18446744073709551615".to_owned())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_parse_naptr_record_flag_length_overflow() {
+        let dns_util = DnsUtil {};
+        // 6 fields total; flag_length token = FFFFFFFFFFFFFFFF makes the
+        // `flag_offset + flag_length + 1` check overflow.
+        assert!(
+            dns_util
+                .parse_naptr_record(
+                    "\\# 06 15 b3 08 ae FFFFFFFFFFFFFFFF".to_owned()
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_parse_naptr_record_service_length_overflow() {
+        let dns_util = DnsUtil {};
+        // flag_length=01, then service_length token = FFFFFFFFFFFFFFFF.
+        assert!(
+            dns_util
+                .parse_naptr_record(
+                    "\\# 09 15 b3 08 ae 01 73 FFFFFFFFFFFFFFFF 00".to_owned()
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_parse_naptr_record_regexp_length_overflow() {
+        let dns_util = DnsUtil {};
+        // flag_length=01, service_length=01, regexp_length=FFFFFFFFFFFFFFFF.
+        assert!(
+            dns_util
+                .parse_naptr_record(
+                    "\\# 0b 15 b3 08 ae 01 73 01 73 FFFFFFFFFFFFFFFF 00".to_owned()
+                )
                 .is_err()
         );
     }
