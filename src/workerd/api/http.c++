@@ -1961,9 +1961,15 @@ jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
   // and the Fetch spec doesn't allow users to create Requests with CONNECT methods.
   kj::Maybe<Body::ExtractedBody> responseBody = kj::none;
   if (method != kj::HttpMethod::HEAD && !isNullBodyStatusCode(statusCode)) {
+    auto encoding = getContentEncoding(context, headers, bodyEncoding, FeatureFlags::get(js));
     responseBody = Body::ExtractedBody(js.alloc<ReadableStream>(context,
-        newSystemStream(kj::mv(body),
-            getContentEncoding(context, headers, bodyEncoding, FeatureFlags::get(js)))));
+        newSystemStream(kj::mv(body), encoding)));
+    // When the body is automatically decoded, strip the Content-Encoding header so downstream
+    // consumers (e.g. the Cache API in service workers) don't misinterpret the already-decoded
+    // body as still being compressed.
+    if (encoding != StreamEncoding::IDENTITY) {
+      responseHeaders->deleteCommon(capnp::CommonHeaderName::CONTENT_ENCODING);
+    }
   }
 
   // The Fetch spec defines "response URLs" as having no fragments. Since the last URL in the list
