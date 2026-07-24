@@ -156,8 +156,6 @@ class RequestObserver: public kj::Refcounted {
     return nullptr;
   }
 
-  virtual void setOutcome(EventOutcome outcome) {}
-
   virtual kj::Own<void> addedContextTask() {
     return kj::Own<void>();
   }

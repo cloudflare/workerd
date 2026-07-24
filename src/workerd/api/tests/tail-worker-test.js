@@ -225,7 +225,7 @@ const E = {
 
   // http-test.js: main test() handler with fetches + scheduled
   httpTest:
-    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"fetch","spanId":"0000000000000001"}{"type":"attributes","info":[{"name":"network.protocol.name","value":"http"},{"name":"network.protocol.version","value":"HTTP/1.1"},{"name":"http.request.method","value":"POST"},{"name":"url.full","value":"http://placeholder/body-length"},{"name":"http.request.body.size","value":"3"},{"name":"http.response.status_code","value":"200"},{"name":"http.response.body.size","value":"22"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"fetch","spanId":"0000000000000002"}{"type":"attributes","info":[{"name":"network.protocol.name","value":"http"},{"name":"network.protocol.version","value":"HTTP/1.1"},{"name":"http.request.method","value":"POST"},{"name":"url.full","value":"http://placeholder/body-length"},{"name":"http.response.status_code","value":"200"},{"name":"http.response.body.size","value":"31"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"fetch","spanId":"0000000000000003"}{"type":"spanOpen","name":"scheduled","spanId":"0000000000000004"}{"type":"attributes","info":[{"name":"network.protocol.name","value":"http"},{"name":"network.protocol.version","value":"HTTP/1.1"},{"name":"http.request.method","value":"GET"},{"name":"url.full","value":"http://placeholder/ray-id"},{"name":"http.response.status_code","value":"200"},{"name":"http.response.body.size","value":"0"},{"name":"cloudflare.ray_id","value":"test-ray-id-123"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"scheduled","spanId":"0000000000000005"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"fetch","spanId":"0000000000000001"}{"type":"attributes","info":[{"name":"network.protocol.name","value":"http"},{"name":"network.protocol.version","value":"HTTP/1.1"},{"name":"http.request.method","value":"POST"},{"name":"url.full","value":"http://placeholder/body-length"},{"name":"http.request.body.size","value":"3"},{"name":"http.response.status_code","value":"200"},{"name":"http.response.body.size","value":"22"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"fetch","spanId":"0000000000000002"}{"type":"attributes","info":[{"name":"network.protocol.name","value":"http"},{"name":"network.protocol.version","value":"HTTP/1.1"},{"name":"http.request.method","value":"POST"},{"name":"url.full","value":"http://placeholder/body-length"},{"name":"http.response.status_code","value":"200"},{"name":"http.response.body.size","value":"31"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"fetch","spanId":"0000000000000003"}{"type":"spanOpen","name":"scheduled","spanId":"0000000000000004"}{"type":"attributes","info":[{"name":"network.protocol.name","value":"http"},{"name":"network.protocol.version","value":"HTTP/1.1"},{"name":"http.request.method","value":"GET"},{"name":"url.full","value":"http://placeholder/ray-id"},{"name":"http.response.status_code","value":"200"},{"name":"http.response.body.size","value":"0"},{"name":"cloudflare.ray_id","value":"test-ray-id-123"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"scheduled","spanId":"0000000000000005"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"scheduled","spanId":"0000000000000006"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
 
   // http-test subrequest handlers
   fetchBodyLength:
@@ -242,6 +242,8 @@ const E = {
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"scheduled","scheduledTime":"1970-01-01T00:00:00.000Z","cron":""}}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
   scheduledCron:
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"scheduled","scheduledTime":"1970-01-01T00:00:00.000Z","cron":"* * * * 30"}}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  scheduledException:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"scheduled","scheduledTime":"1970-01-01T00:00:00.000Z","cron":"* * * * *"}}{"type":"exception","name":"Error","message":"boom","stack":"    at Object.scheduled (worker:39:42)"}{"type":"outcome","outcome":"exception","cpuTime":0,"wallTime":0}',
 
   // queue-test.js
   queueTest:
@@ -312,6 +314,7 @@ const expected = [
     n(E.fetchBodyLength),
     n(E.scheduledEmpty),
     n(E.scheduledCron),
+    n(E.scheduledException),
   ]),
 
   // http-test: standalone fetch handlers that are NOT subrequests of the main test
