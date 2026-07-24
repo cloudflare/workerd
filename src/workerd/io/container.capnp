@@ -133,6 +133,18 @@ interface Container @0x9aaceefc06523bca {
     # If true, stderr is combined into stdout. If stdout is not set, combined output is discarded.
 
     spanContext @4 :SpanContext;
+
+    pty @5 :PtyOptions;
+    # If set, allocates a PTY for the exec'd process. When a PTY is active,
+    # stderr is always combined into stdout
+
+    struct PtyOptions {
+      cols @0 :UInt16;
+      # Initial column count. 0 means use the default (80).
+
+      rows @1 :UInt16;
+      # Initial row count. 0 means use the default (24).
+    }
   }
 
   struct Process {
@@ -151,6 +163,10 @@ interface Container @0x9aaceefc06523bca {
 
     kill @2 (signo :UInt32);
     # Sends the given signal to the process.
+
+    resize @3 (cols :UInt16, rows :UInt16);
+    # Resizes the PTY window. Throws an error if the process was not started
+    # with a PTY, or if either dimension is zero.
   }
 
   monitor @2 () -> (exitCode: Int32);

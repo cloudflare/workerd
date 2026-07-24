@@ -3883,18 +3883,25 @@ export interface ContainerExecOptions {
   env?: Record<string, string>;
   user?: string;
   signal?: AbortSignal;
+  pty?: boolean | ContainerExecPtyOptions;
   stdin?: ReadableStream | "pipe";
   stdout?: "pipe" | "ignore";
   stderr?: "pipe" | "ignore" | "combined";
+}
+export interface ContainerExecPtyOptions {
+  cols?: number;
+  rows?: number;
 }
 export interface ExecProcess {
   readonly stdin: WritableStream | null;
   readonly stdout: ReadableStream | null;
   readonly stderr: ReadableStream | null;
   readonly pid: number;
+  readonly isPty: boolean;
   readonly exitCode: Promise<number>;
   output(): Promise<ExecOutput>;
   kill(signal?: number): void;
+  resize(cols: number, rows: number): void;
 }
 export interface Container {
   get running(): boolean;

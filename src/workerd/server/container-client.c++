@@ -13,6 +13,7 @@
 #include <workerd/server/docker-api.capnp.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/strings.h>
+#include <workerd/util/strong-bool.h>
 #include <workerd/util/uuid.h>
 
 #include <stdio.h>
@@ -31,6 +32,13 @@
 #include <limits>
 
 namespace workerd::server {
+
+// Whether an exec's stderr is merged into its stdout stream.
+WD_STRONG_BOOL(CombinedOutput);
+
+// Whether an exec was started with a PTY (raw single-stream output) rather than Docker's
+// multiplexed frame protocol.
+WD_STRONG_BOOL(Pty);
 
 namespace {
 
@@ -735,7 +743,7 @@ void detachEnd(kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> stream) {
 kj::Promise<void> demuxDockerExecOutput(kj::AsyncInputStream& input,
     kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> stdoutWriter,
     kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> stderrWriter,
-    bool combinedOutput) {
+    CombinedOutput combinedOutput) {
   kj::Vector<kj::byte> buffer;
   size_t offset = 0;
 
@@ -810,6 +818,34 @@ kj::Promise<void> demuxDockerExecOutput(kj::AsyncInputStream& input,
     }
     KJ_IF_SOME(err, stderrWriter) {
       err->abortWrite(exception.clone());
+    }
+    kj::throwFatalException(kj::mv(exception));
+  }
+}
+
+// Copies a raw (unframed) Docker exec stream straight through to stdout. This is
+// used for PTY execs, where Docker hijacks the connection as a single raw stream that merges
+// stdout and stderr rather than the 8-byte multiplexed framing used for non-TTY execs.
+kj::Promise<void> copyRawExecOutput(
+    kj::AsyncInputStream& input, kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> stdoutWriter) {
+  kj::byte scratch[16384];
+  KJ_TRY {
+    for (;;) {
+      auto amount = co_await input.tryRead(scratch, 1, sizeof(scratch));
+      if (amount == 0) {
+        break;
+      }
+      KJ_IF_SOME(out, stdoutWriter) {
+        co_await out->write(kj::ArrayPtr<kj::byte>(scratch, amount));
+      }
+    }
+
+    // Detach from end() since the user might've decided not to read the output altogether.
+    detachEnd(kj::mv(stdoutWriter));
+  }
+  KJ_CATCH(exception) {
+    KJ_IF_SOME(out, stdoutWriter) {
+      out->abortWrite(exception.clone());
     }
     kj::throwFatalException(kj::mv(exception));
   }
@@ -1058,15 +1094,27 @@ class ContainerClient::DockerProcessHandle final: public rpc::Container::Process
       kj::Own<kj::AsyncIoStream> connection,
       kj::Maybe<capnp::ByteStream::Client> stdoutWriter,
       kj::Maybe<capnp::ByteStream::Client> stderrWriter,
-      bool combinedOutput)
+      CombinedOutput combinedOutput,
+      Pty pty)
       : containerClient(containerClient.addRef()),
         execId(kj::mv(execId)),
+        pty(pty),
         sharedConnection(kj::refcounted<SharedExecConnection>(kj::mv(connection))) {
     kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> stdoutStream = kj::none;
     KJ_IF_SOME(out, stdoutWriter) {
       stdoutStream = this->containerClient->byteStreamFactory.capnpToKjExplicitEnd(out);
     } else {
       stdoutStream = capnp::ExplicitEndOutputStream::wrap(newNullOutputStream(), []() {});
+    }
+
+    if (pty) {
+      // A PTY hijacks the connection as a single raw stream that merges stdout and stderr, so copy
+      // it straight through to stdout instead of demultiplexing Docker's frame protocol. stderr is
+      // always combined into stdout when a PTY is active, so there is no separate stderr stream.
+      auto task = copyRawExecOutput(*sharedConnection->connection, kj::mv(stdoutStream))
+                      .attach(this->containerClient->addRef(), kj::addRef(*sharedConnection));
+      streamClosedTask = kj::mv(task).fork();
+      return;
     }
 
     kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> stderrStream = kj::none;
@@ -1131,9 +1179,17 @@ class ContainerClient::DockerProcessHandle final: public rpc::Container::Process
     co_await containerClient->runSimpleExec(cmd.asPtr());
   }
 
+  kj::Promise<void> resize(ResizeContext context) override {
+    JSG_REQUIRE(pty.toBool(), Error,
+        "resize() can only be called on a process that was started with a PTY.");
+    auto params = context.getParams();
+    co_await containerClient->resizeExec(execId, params.getCols(), params.getRows());
+  }
+
  private:
   kj::Own<ContainerClient> containerClient;
   kj::String execId;
+  Pty pty;
   kj::Own<SharedExecConnection> sharedConnection;
   bool waitStarted = false;
   kj::Maybe<kj::ForkedPromise<void>> streamClosedTask;
@@ -1768,7 +1824,7 @@ kj::Promise<kj::String> ContainerClient::createExec(capnp::List<capnp::Text>::Re
   request.setAttachStdin(true);
   request.setAttachStdout(attachStdout);
   request.setAttachStderr(attachStderr);
-  request.setTty(false);
+  request.setTty(params.hasPty());
 
   auto jsonCmd = request.initCmd(cmd.size());
   for (auto i: kj::zeroTo(cmd.size())) {
@@ -1800,14 +1856,23 @@ kj::Promise<kj::String> ContainerClient::createExec(capnp::List<capnp::Text>::Re
   co_return kj::str(parsed->getRoot<docker_api::Docker::ExecCreateResponse>().getId());
 }
 
-kj::Promise<kj::Own<kj::AsyncIoStream>> ContainerClient::startExec(kj::String execId) {
+kj::Promise<kj::Own<kj::AsyncIoStream>> ContainerClient::startExec(
+    kj::String execId, bool tty, uint16_t cols, uint16_t rows) {
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ExecStartRequest>();
 
   capnp::MallocMessageBuilder message;
   auto requestBody = message.initRoot<docker_api::Docker::ExecStartRequest>();
   requestBody.setDetach(false);
-  requestBody.setTty(false);
+  requestBody.setTty(tty);
+  // Set the initial TTY dimensions when at least one was explicitly provided. A 0 dimension
+  // means "use Docker's default", so partial specs (e.g. only cols) still work — the unset
+  // dimension passes through as 0. Docker expects [height, width].
+  if (tty && (cols != 0 || rows != 0)) {
+    auto consoleSize = requestBody.initConsoleSize(2);
+    consoleSize.set(0, rows);
+    consoleSize.set(1, cols);
+  }
   auto encodedBody = codec.encode(requestBody);
 
   // Exec attach uses HTTP connection hijacking. A plain POST can succeed with 200 OK but then not
@@ -1832,6 +1897,14 @@ kj::Promise<kj::Own<kj::AsyncIoStream>> ContainerClient::startExec(kj::String ex
   }
 
   co_return kj::mv(response.connection);
+}
+
+kj::Promise<void> ContainerClient::resizeExec(kj::StringPtr execId, uint16_t cols, uint16_t rows) {
+  KJ_REQUIRE(cols > 0 && rows > 0, "PTY resize dimensions must be non-zero.");
+  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+      kj::str("/exec/", execId, "/resize?h=", rows, "&w=", cols));
+  JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 201, Error,
+      "Resizing Docker exec failed with [", response.statusCode, "] ", response.body);
 }
 
 kj::Promise<ContainerClient::ExecInspectResponse> ContainerClient::inspectExec(
@@ -2394,8 +2467,17 @@ kj::Promise<void> ContainerClient::exec(ExecContext context) {
   bool attachStdout = true;
   bool attachStderr = true;
 
+  bool pty = execParams.hasPty();
+  uint16_t ptyCols = 0;
+  uint16_t ptyRows = 0;
+  if (pty) {
+    ptyCols = execParams.getPty().getCols();
+    ptyRows = execParams.getPty().getRows();
+  }
+
   auto execId = co_await createExec(request.getCmd(), execParams, attachStdout, attachStderr);
-  kj::Own<kj::AsyncIoStream> execConnection = co_await startExec(kj::str(execId));
+  kj::Own<kj::AsyncIoStream> execConnection =
+      co_await startExec(kj::str(execId), pty, ptyCols, ptyRows);
   kj::Maybe<capnp::ByteStream::Client> stdoutWriter = kj::none;
   if (request.hasStdoutWriter()) {
     stdoutWriter = request.getStdoutWriter();
@@ -2422,7 +2504,8 @@ kj::Promise<void> ContainerClient::exec(ExecContext context) {
   auto process = context.getResults().initProcess();
   process.setPid(static_cast<int32_t>(inspect.pid));
   process.setHandle(kj::heap<DockerProcessHandle>(*this, kj::mv(execId), kj::mv(execConnection),
-      kj::mv(stdoutWriter), kj::mv(stderrWriter), execParams.getCombinedOutput()));
+      kj::mv(stdoutWriter), kj::mv(stderrWriter), CombinedOutput(execParams.getCombinedOutput()),
+      Pty(pty)));
 }
 
 kj::Promise<void> ContainerClient::setInactivityTimeout(SetInactivityTimeoutContext context) {

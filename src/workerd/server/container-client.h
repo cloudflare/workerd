@@ -175,8 +175,11 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       rpc::Container::ExecOptions::Reader params,
       bool attachStdout,
       bool attachStderr);
-  kj::Promise<kj::Own<kj::AsyncIoStream>> startExec(kj::String execId);
+  kj::Promise<kj::Own<kj::AsyncIoStream>> startExec(
+      kj::String execId, bool tty, uint16_t cols, uint16_t rows);
   kj::Promise<ExecInspectResponse> inspectExec(kj::StringPtr execId);
+  // Resizes the TTY of a running PTY exec to the given dimensions via Docker's resize endpoint.
+  kj::Promise<void> resizeExec(kj::StringPtr execId, uint16_t cols, uint16_t rows);
   kj::Promise<void> runSimpleExec(kj::ArrayPtr<const kj::String> cmd);
   kj::Promise<void> startContainer();
   kj::Promise<void> stopContainer();
