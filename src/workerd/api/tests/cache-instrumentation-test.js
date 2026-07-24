@@ -237,6 +237,31 @@ export const test = {
         'cache.response.success': true,
         closed: true,
       },
+      {
+        name: 'cache_put',
+        'cache.request.url': 'http://example.com/query-test',
+        'cache.request.method': 'QUERY',
+        'cache.request.payload.status_code': 200n,
+        'cache.request.payload.header.cache_control': 'max-age=3600',
+        'cache.request.payload.size': 125n,
+        'cache.response.success': true,
+        closed: true
+      },
+      {
+        name: 'cache_match',
+        'cache.request.url': 'http://example.com/query-test',
+        'cache.request.method': 'QUERY',
+        'cache.response.status_code': 404n,
+        'cache.response.body.size': 9n,
+        'cache.response.success': false,
+        closed: true
+      },
+      {
+        name: 'cache_delete',
+        'cache.request.url': 'http://example.com/query-test',
+        'cache.request.method': 'QUERY',
+        closed: true
+      }
     ];
 
     assert.equal(
