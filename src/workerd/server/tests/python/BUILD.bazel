@@ -81,7 +81,11 @@ py_wd_test(
     # sidecar and python_snapshot_test currently cannot be used together
     make_snapshot = False,
     sidecar = ":socket-server",
-    sidecar_port_bindings = ["PYTHON_SOCKET_SERVER_PORT"],
+    sidecar_port_bindings = [
+        "PYTHON_SOCKET_SERVER_PORT",
+        "PYTHON_STARTTLS_SOCKET_SERVER_PORT",
+        "PYTHON_TLS_SOCKET_SERVER_PORT",
+    ],
     skip_python_flags = [
         # Older versions does not support sockets
         "0.26.0a2",

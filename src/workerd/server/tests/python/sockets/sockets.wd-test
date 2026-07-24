@@ -13,6 +13,8 @@ const unitTests :Workerd.Config = (
         bindings = [
           (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
           (name = "PYTHON_SOCKET_SERVER_PORT", fromEnvironment = "PYTHON_SOCKET_SERVER_PORT"),
+          (name = "PYTHON_STARTTLS_SOCKET_SERVER_PORT", fromEnvironment = "PYTHON_STARTTLS_SOCKET_SERVER_PORT"),
+          (name = "PYTHON_TLS_SOCKET_SERVER_PORT", fromEnvironment = "PYTHON_TLS_SOCKET_SERVER_PORT"),
         ],
       )
     ),
