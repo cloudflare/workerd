@@ -43,6 +43,8 @@ ruff_python_parser = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1"
 # param_extractor depends on unbounded_depth feature
 serde_json = { version = "1", features = ["unbounded_depth"] }
 serde = { version = "1", features = ["derive"] }
+sha3 = "0"
+hmac = "0"
 thiserror = "2"
 # tokio is huge, let's enable only features when we actually need them.
 tokio = { version = "1", default-features = false, features = ["net", "rt", "rt-multi-thread", "time"] }

@@ -3,6 +3,7 @@
 #include "impl.h"
 
 #include <workerd/api/crypto/crypto.h>
+#include <workerd/rust/api/lib.rs.h>
 
 KJ_DECLARE_NON_POLYMORPHIC(HMAC_CTX)
 
@@ -10,6 +11,9 @@ namespace workerd::api {
 class HmacContext final {
  public:
   using KeyData = kj::OneOf<kj::ArrayPtr<kj::byte>, CryptoKey::Impl*>;
+  using State = kj::OneOf<kj::Own<HMAC_CTX>,
+      ::rust::Box<workerd::rust::api::Sha3Hmac>,
+      jsg::JsRef<jsg::JsUint8Array>>;
 
   HmacContext(jsg::Lock& js, kj::StringPtr algorithm, KeyData key);
   HmacContext(HmacContext&&) = default;
@@ -22,13 +26,17 @@ class HmacContext final {
   size_t size() const;
 
  private:
-  // Will be kj::Own<HMAC_CTX> while the HMAC data is being updated,
+  // Will be kj::Own<HMAC_CTX> or Rust SHA-3 HMAC state while the HMAC data is being updated,
   // and jsg::JsRef<jsg::JsUint8Array> after the digest() has been called.
-  kj::OneOf<kj::Own<HMAC_CTX>, jsg::JsRef<jsg::JsUint8Array>> state;
+  State state;
 };
 
 class HashContext final {
  public:
+  using State = kj::OneOf<kj::Own<EVP_MD_CTX>,
+      ::rust::Box<workerd::rust::api::Sha3Hash>,
+      jsg::JsRef<jsg::JsUint8Array>>;
+
   HashContext(kj::StringPtr algorithm, kj::Maybe<uint32_t> maybeXof);
   HashContext(HashContext&&) = default;
   HashContext& operator=(HashContext&&) = default;
@@ -41,12 +49,11 @@ class HashContext final {
   size_t size() const;
 
  private:
-  HashContext(
-      kj::OneOf<kj::Own<EVP_MD_CTX>, jsg::JsRef<jsg::JsUint8Array>>, kj::Maybe<uint32_t> maybeXof);
+  HashContext(State state, kj::Maybe<uint32_t> maybeXof);
 
-  // Will be kj::Own<EVP_MD_CTX> while the hash data is being updated,
+  // Will be kj::Own<EVP_MD_CTX> or Rust SHA-3 state while the hash data is being updated,
   // and jsg::JsRef<jsg::JsUint8Array> after the digest() has been called.
-  kj::OneOf<kj::Own<EVP_MD_CTX>, jsg::JsRef<jsg::JsUint8Array>> state;
+  State state;
   kj::Maybe<uint32_t> maybeXof;
 };
 }  // namespace workerd::api
