@@ -664,9 +664,16 @@ static v8::Local<T> unwrapCoerce(v8::Isolate* isolate, Func&& fn) {
 }
 
 ::rust::String unwrap_string(Isolate* isolate, Local value) {
-  auto context = isolate->GetCurrentContext();
-  v8::Local<v8::String> v8Str = unwrapCoerce<v8::String>(
-      isolate, [&] { return local_from_ffi<v8::Value>(kj::mv(value))->ToString(context); });
+  auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
+  // Fast path: a string primitive needs no coercion and can't throw, so skip
+  // the TryCatch/ToString machinery. (String wrapper objects are not IsString.)
+  v8::Local<v8::String> v8Str;
+  if (v8Value->IsString()) {
+    v8Str = v8Value.As<v8::String>();
+  } else {
+    auto context = isolate->GetCurrentContext();
+    v8Str = unwrapCoerce<v8::String>(isolate, [&] { return v8Value->ToString(context); });
+  }
   v8::String::ValueView view(isolate, v8Str);
   if (!view.is_one_byte()) {
     // lossy(): lone surrogates become U+FFFD instead of throwing (which aborts).
@@ -680,9 +687,14 @@ bool unwrap_boolean(Isolate* isolate, Local value) {
 }
 
 double unwrap_number(Isolate* isolate, Local value) {
+  auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
+  // Fast path: a number primitive needs no coercion and can't throw.
+  if (v8Value->IsNumber()) {
+    return v8Value.As<v8::Number>()->Value();
+  }
   auto context = isolate->GetCurrentContext();
-  v8::Local<v8::Number> number = unwrapCoerce<v8::Number>(
-      isolate, [&] { return local_from_ffi<v8::Value>(kj::mv(value))->ToNumber(context); });
+  v8::Local<v8::Number> number =
+      unwrapCoerce<v8::Number>(isolate, [&] { return v8Value->ToNumber(context); });
   return number->Value();
 }
 
