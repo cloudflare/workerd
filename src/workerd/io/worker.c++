@@ -661,7 +661,7 @@ struct Worker::Isolate::Impl {
         i.get()->contextCreated(v8_inspector::V8ContextInfo(
             context, 1, jsg::toInspectorStringView("Worker").stringView));
       }
-      Worker::setupContext(*lock, context, loggingOptions);
+      Worker::setupContext(*lock, context);
     }
 
     void disposeContext(jsg::JsContext<api::ServiceWorkerGlobalScope> context) {
@@ -1769,32 +1769,226 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
   shimFn.call(lock, lock.global(), jsg::JsFunction(registerFn));
 }
 
-void Worker::setupContext(
-    jsg::Lock& lock, v8::Local<v8::Context> context, const LoggingOptions& loggingOptions) {
+namespace {
+
+// The console methods wrapped by setupContext (debug, error, info, log, warn). Each entry has the
+// method name with its log level and the native decorator callback.
+struct ConsoleMethod {
+  const char* name;
+  LogLevel level;
+  v8::FunctionCallback callback;
+};
+
+// The C++ decorator template for console.* methods.
+template <size_t methodIndex>
+void consoleDecorator(const v8::FunctionCallbackInfo<v8::Value>& info);
+
+constexpr ConsoleMethod kConsoleMethods[] = {
+  {"debug", LogLevel::DEBUG_, &consoleDecorator<0>},
+  {"error", LogLevel::ERROR, &consoleDecorator<1>},
+  {"info", LogLevel::INFO, &consoleDecorator<2>},
+  {"log", LogLevel::LOG, &consoleDecorator<3>},
+  {"warn", LogLevel::WARN, &consoleDecorator<4>},
+};
+
+constexpr size_t kConsoleMethodsCount = kj::size(kConsoleMethods);
+
+// Each decorator reads its method's saved original from a context embedder-data slot at
+// CONSOLE_ORIGINAL_DEBUG + methodIndex, so the table must hold exactly one entry per
+// CONSOLE_ORIGINAL_* slot, in the same order.
+static_assert(static_cast<int>(jsg::ContextDataSlot::CONSOLE_ORIGINAL_WARN) -
+            static_cast<int>(jsg::ContextDataSlot::CONSOLE_ORIGINAL_DEBUG) + 1 ==
+        static_cast<int>(kConsoleMethodsCount),
+    "kConsoleMethods must have one entry per CONSOLE_ORIGINAL_* embedder-data slot, in slot order");
+
+void handleLog(jsg::Lock& js,
+    const Worker::LoggingOptions& loggingOptions,
+    LogLevel level,
+    v8::Local<v8::Function> original,
+    const v8::FunctionCallbackInfo<v8::Value>& info) {
+  // Call original V8 implementation so messages sent to connected inspector if any
+  auto context = js.v8Context();
+  int length = info.Length();
+  // to pass additional arguments from this function to js' `formatLog` we add arguments to the end
+  // of the arguments vector, then in formatLog we `pop` these from the vector.
+  // 3 is just the number of args we currently pass.
+  v8::LocalVector<v8::Value> args(js.v8Isolate, length + 3);
+  for (auto i: kj::zeroTo(length)) args[i] = info[i];
+  jsg::check(original->Call(context, info.This(), length, args.data()));
+
+  // The TryCatch is initialized here to catch cases where the v8 isolate's execution is
+  // terminating, usually as a result of an infinite loop. We need to perform the initialization
+  // here because `message` is called multiple times.
+  v8::TryCatch tryCatch(js.v8Isolate);
+  auto message = [&]() {
+    int length = info.Length();
+    kj::Vector<kj::String> stringified(length);
+    for (auto i: kj::zeroTo(length)) {
+      auto arg = info[i];
+      // serializeJson and v8::Value::ToString can throw JS exceptions
+      // (e.g. for recursive objects) so we eat them here, to ensure logging and non-logging code
+      // have the same exception behavior.
+      if (!tryCatch.CanContinue()) {
+        stringified.add(kj::str("{}"));
+        break;
+      }
+      // The following code checks the `arg` to see if it should be serialised to JSON.
+      //
+      // We use the following criteria: if arg is null, a number, a boolean, an array, a string, an
+      // object or it defines a `toJSON` property that is a function, then the arg gets serialised
+      // to JSON.
+      //
+      // Otherwise we stringify the argument.
+      js.withinHandleScope([&] {
+        auto context = js.v8Context();
+        bool shouldSerialiseToJson = false;
+        if (arg->IsNull() || arg->IsNumber() || arg->IsArray() || arg->IsBoolean() ||
+            arg->IsString() ||
+            arg->IsUndefined()) {  // This is special cased for backwards compatibility.
+          shouldSerialiseToJson = true;
+        }
+        if (arg->IsObject()) {
+          v8::Local<v8::Object> obj = arg.As<v8::Object>();
+          v8::Local<v8::Object> freshObj = v8::Object::New(js.v8Isolate);
+
+          // Determine whether `obj` is constructed using `{}` or `new Object()`. This ensures
+          // we don't serialise values like Promises to JSON.
+          if (obj->GetPrototype()->SameValue(freshObj->GetPrototype()) ||
+              obj->GetPrototype()->IsNull()) {
+            shouldSerialiseToJson = true;
+          }
+
+          // Check if arg has a `toJSON` property which is a function.
+          auto toJSONStr = jsg::v8StrIntern(js.v8Isolate, "toJSON"_kj);
+          v8::MaybeLocal<v8::Value> toJSON = obj->GetRealNamedProperty(context, toJSONStr);
+          if (!toJSON.IsEmpty()) {
+            if (jsg::check(toJSON)->IsFunction()) {
+              shouldSerialiseToJson = true;
+            }
+          }
+        }
+
+        if (kj::runCatchingExceptions([&]() {
+          // On the off chance the the arg is the request.cf object, let's make
+          // sure we do not log proxied fields here.
+          if (shouldSerialiseToJson) {
+            auto s = js.serializeJson(arg);
+            // serializeJson returns the string "undefined" for some values (undefined,
+            // Symbols, functions).  We remap these values to null to ensure valid JSON output.
+            if (s == "undefined"_kj) {
+              stringified.add(kj::str("null"));
+            } else {
+              stringified.add(kj::mv(s));
+            }
+          } else {
+            stringified.add(js.serializeJson(jsg::check(arg->ToString(context))));
+          }
+        }) != kj::none) {
+          stringified.add(kj::str("{}"));
+        };
+      });
+    }
+    return kj::str("[", kj::delimited(stringified, ", "_kj), "]");
+  };
+
+  // Only check tracing if console.log() was not invoked at the top level.
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+    KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
+      auto timestamp = ioContext.now();
+      tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, level, message());
+    }
+  }
+
+  if (loggingOptions.consoleMode == Worker::ConsoleMode::INSPECTOR_ONLY) {
+    // Lets us dump console.log()s to stdout when running test-runner with --verbose flag, to make
+    // it easier to debug tests.  Note that when --verbose is not passed, KJ_LOG(INFO, ...) will
+    // not even evaluate its arguments, so `message()` will not be called at all.
+    KJ_LOG(INFO, "console.log()", message());
+  } else {
+    // Write to stdio if allowed by console mode. This is making use of our internal
+    // built-in implementation of the node:util inspect API.
+    static const ColorMode COLOR_MODE = permitsColor();
+#if _WIN32
+    static bool STDOUT_TTY = _isatty(_fileno(stdout));
+    static bool STDERR_TTY = _isatty(_fileno(stderr));
+#else
+    static bool STDOUT_TTY = isatty(STDOUT_FILENO);
+    static bool STDERR_TTY = isatty(STDERR_FILENO);
+#endif
+
+    // Log warnings and errors to stderr
+    // Always log to stdout when structuredLogging is enabled.
+    auto useStderr = level >= LogLevel::WARN && !loggingOptions.structuredLogging;
+    auto fd = useStderr ? stderr : stdout;
+    auto tty = useStderr ? STDERR_TTY : STDOUT_TTY;
+    auto colors =
+        COLOR_MODE == ColorMode::ENABLED || (COLOR_MODE == ColorMode::ENABLED_IF_TTY && tty);
+
+    constexpr auto kSpecifier = "node-internal:internal_inspect"_kj;
+    auto inspectModule = KJ_ASSERT_NONNULL(js.resolveInternalModule(kSpecifier));
+    v8::Local<v8::Value> formatLogVal = inspectModule.get(js, "formatLog"_kj);
+    KJ_ASSERT(formatLogVal->IsFunction());
+    auto formatLog = formatLogVal.As<v8::Function>();
+
+    auto levelStr = logLevelToString(level);
+    args[length] = js.boolean(colors);
+    args[length + 1] = js.boolean(loggingOptions.structuredLogging.toBool());
+    args[length + 2] = js.strIntern(levelStr);
+    auto formatted = js.toString(
+        jsg::check(formatLog->Call(context, js.v8Undefined(), length + 3, args.data())));
+    fprintf(fd, "%s\n", formatted.cStr());
+    fflush(fd);
+  }
+}
+
+template <size_t methodIndex>
+void consoleDecorator(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  auto& js = jsg::Lock::from(info.GetIsolate());
+  js.withinHandleScope([&] {
+    auto original_slot_index = static_cast<jsg::ContextDataSlot>(
+        static_cast<int>(jsg::ContextDataSlot::CONSOLE_ORIGINAL_DEBUG) +
+        static_cast<int>(methodIndex));
+    auto original_method_value =
+        jsg::getContextDataSlot(js.v8Context(), original_slot_index).As<v8::Value>();
+    KJ_ASSERT(!original_method_value.IsEmpty() && original_method_value->IsFunction(),
+        "console original method slot was not initialized");
+    auto original_function = original_method_value.As<v8::Function>();
+    auto& isolate = Worker::Isolate::from(js);
+    handleLog(js, isolate.getLoggingOptions(), kConsoleMethods[methodIndex].level,
+        original_function, info);
+  });
+}
+
+}  // namespace
+
+void Worker::setupContext(jsg::Lock& lock, v8::Local<v8::Context> context) {
   // We replace the default V8 console.log(), etc. methods, to give the worker access to
   // logged content, and log formatted values to stdout/stderr locally.
   auto global = context->Global();
   auto consoleStr = jsg::v8StrIntern(lock.v8Isolate, "console");
   auto console = jsg::check(global->Get(context, consoleStr)).As<v8::Object>();
 
-  auto setHandler = [&](const char* method, LogLevel level) {
-    auto methodStr = jsg::v8StrIntern(lock.v8Isolate, method);
-    v8::Global<v8::Function> original(
-        lock.v8Isolate, jsg::check(console->Get(context, methodStr)).As<v8::Function>());
+  // Skip decorating and saving the originals if they have already been saved.
+  auto debugSlotIndex = static_cast<uint32_t>(jsg::ContextDataSlot::CONSOLE_ORIGINAL_DEBUG);
+  if (context->GetNumberOfEmbedderDataFields() > debugSlotIndex) {
+    auto savedDebug = jsg::getContextDataSlot(context, jsg::ContextDataSlot::CONSOLE_ORIGINAL_DEBUG)
+                          .As<v8::Value>();
+    if (!savedDebug.IsEmpty() && savedDebug->IsFunction()) {
+      return;
+    }
+  }
 
-    auto f = lock.wrapSimpleFunction(context,
-        [loggingOptions, level, original = kj::mv(original)](
-            jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-      handleLog(js, loggingOptions, level, original, info);
-    });
-    jsg::check(console->Set(context, methodStr, f));
-  };
-
-  setHandler("debug", LogLevel::DEBUG_);
-  setHandler("error", LogLevel::ERROR);
-  setHandler("info", LogLevel::INFO);
-  setHandler("log", LogLevel::LOG);
-  setHandler("warn", LogLevel::WARN);
+  // Save original methods into context so that GC can track them (so they are captured in a
+  // snapshot) and we can find them at a known location from the decorator.
+  for (size_t i = 0; i < kConsoleMethodsCount; ++i) {
+    auto methodStr = jsg::v8StrIntern(lock.v8Isolate, kConsoleMethods[i].name);
+    auto original = jsg::check(console->Get(context, methodStr)).As<v8::Function>();
+    auto slot = static_cast<jsg::ContextDataSlot>(
+        static_cast<int>(jsg::ContextDataSlot::CONSOLE_ORIGINAL_DEBUG) + static_cast<int>(i));
+    jsg::setContextDataSlot(context, slot, original);
+    auto decorator = jsg::check(v8::Function::New(context, kConsoleMethods[i].callback));
+    jsg::check(console->Set(context, methodStr, decorator));
+  }
 }
 
 void Worker::setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context> context) {
@@ -2160,146 +2354,6 @@ void Worker::processEntrypointClass(jsg::Lock& js,
       });
     }
   });
-}
-
-void Worker::handleLog(jsg::Lock& js,
-    const LoggingOptions& loggingOptions,
-    LogLevel level,
-    const v8::Global<v8::Function>& original,
-    const v8::FunctionCallbackInfo<v8::Value>& info) {
-  // Call original V8 implementation so messages sent to connected inspector if any
-  auto context = js.v8Context();
-  int length = info.Length();
-  // to pass additional arguments from this function to js' `formatLog` we add arguments to the end
-  // of the arguments vector, then in formatLog we `pop` these from the vector.
-  // 3 is just the number of args we currently pass.
-  v8::LocalVector<v8::Value> args(js.v8Isolate, length + 3);
-  for (auto i: kj::zeroTo(length)) args[i] = info[i];
-  jsg::check(original.Get(js.v8Isolate)->Call(context, info.This(), length, args.data()));
-
-  // The TryCatch is initialized here to catch cases where the v8 isolate's execution is
-  // terminating, usually as a result of an infinite loop. We need to perform the initialization
-  // here because `message` is called multiple times.
-  v8::TryCatch tryCatch(js.v8Isolate);
-  auto message = [&]() {
-    int length = info.Length();
-    kj::Vector<kj::String> stringified(length);
-    for (auto i: kj::zeroTo(length)) {
-      auto arg = info[i];
-      // serializeJson and v8::Value::ToString can throw JS exceptions
-      // (e.g. for recursive objects) so we eat them here, to ensure logging and non-logging code
-      // have the same exception behavior.
-      if (!tryCatch.CanContinue()) {
-        stringified.add(kj::str("{}"));
-        break;
-      }
-      // The following code checks the `arg` to see if it should be serialised to JSON.
-      //
-      // We use the following criteria: if arg is null, a number, a boolean, an array, a string, an
-      // object or it defines a `toJSON` property that is a function, then the arg gets serialised
-      // to JSON.
-      //
-      // Otherwise we stringify the argument.
-      js.withinHandleScope([&] {
-        auto context = js.v8Context();
-        bool shouldSerialiseToJson = false;
-        if (arg->IsNull() || arg->IsNumber() || arg->IsArray() || arg->IsBoolean() ||
-            arg->IsString() ||
-            arg->IsUndefined()) {  // This is special cased for backwards compatibility.
-          shouldSerialiseToJson = true;
-        }
-        if (arg->IsObject()) {
-          v8::Local<v8::Object> obj = arg.As<v8::Object>();
-          v8::Local<v8::Object> freshObj = v8::Object::New(js.v8Isolate);
-
-          // Determine whether `obj` is constructed using `{}` or `new Object()`. This ensures
-          // we don't serialise values like Promises to JSON.
-          if (obj->GetPrototype()->SameValue(freshObj->GetPrototype()) ||
-              obj->GetPrototype()->IsNull()) {
-            shouldSerialiseToJson = true;
-          }
-
-          // Check if arg has a `toJSON` property which is a function.
-          auto toJSONStr = jsg::v8StrIntern(js.v8Isolate, "toJSON"_kj);
-          v8::MaybeLocal<v8::Value> toJSON = obj->GetRealNamedProperty(context, toJSONStr);
-          if (!toJSON.IsEmpty()) {
-            if (jsg::check(toJSON)->IsFunction()) {
-              shouldSerialiseToJson = true;
-            }
-          }
-        }
-
-        if (kj::runCatchingExceptions([&]() {
-          // On the off chance the the arg is the request.cf object, let's make
-          // sure we do not log proxied fields here.
-          if (shouldSerialiseToJson) {
-            auto s = js.serializeJson(arg);
-            // serializeJson returns the string "undefined" for some values (undefined,
-            // Symbols, functions).  We remap these values to null to ensure valid JSON output.
-            if (s == "undefined"_kj) {
-              stringified.add(kj::str("null"));
-            } else {
-              stringified.add(kj::mv(s));
-            }
-          } else {
-            stringified.add(js.serializeJson(jsg::check(arg->ToString(context))));
-          }
-        }) != kj::none) {
-          stringified.add(kj::str("{}"));
-        };
-      });
-    }
-    return kj::str("[", kj::delimited(stringified, ", "_kj), "]");
-  };
-
-  // Only check tracing if console.log() was not invoked at the top level.
-  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
-    KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
-      auto timestamp = ioContext.now();
-      tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, level, message());
-    }
-  }
-
-  if (loggingOptions.consoleMode == Worker::ConsoleMode::INSPECTOR_ONLY) {
-    // Lets us dump console.log()s to stdout when running test-runner with --verbose flag, to make
-    // it easier to debug tests.  Note that when --verbose is not passed, KJ_LOG(INFO, ...) will
-    // not even evaluate its arguments, so `message()` will not be called at all.
-    KJ_LOG(INFO, "console.log()", message());
-  } else {
-    // Write to stdio if allowed by console mode. This is making use of our internal
-    // built-in implementation of the node:util inspect API.
-    static const ColorMode COLOR_MODE = permitsColor();
-#if _WIN32
-    static bool STDOUT_TTY = _isatty(_fileno(stdout));
-    static bool STDERR_TTY = _isatty(_fileno(stderr));
-#else
-    static bool STDOUT_TTY = isatty(STDOUT_FILENO);
-    static bool STDERR_TTY = isatty(STDERR_FILENO);
-#endif
-
-    // Log warnings and errors to stderr
-    // Always log to stdout when structuredLogging is enabled.
-    auto useStderr = level >= LogLevel::WARN && !loggingOptions.structuredLogging;
-    auto fd = useStderr ? stderr : stdout;
-    auto tty = useStderr ? STDERR_TTY : STDOUT_TTY;
-    auto colors =
-        COLOR_MODE == ColorMode::ENABLED || (COLOR_MODE == ColorMode::ENABLED_IF_TTY && tty);
-
-    constexpr auto kSpecifier = "node-internal:internal_inspect"_kj;
-    auto inspectModule = KJ_ASSERT_NONNULL(js.resolveInternalModule(kSpecifier));
-    v8::Local<v8::Value> formatLogVal = inspectModule.get(js, "formatLog"_kj);
-    KJ_ASSERT(formatLogVal->IsFunction());
-    auto formatLog = formatLogVal.As<v8::Function>();
-
-    auto levelStr = logLevelToString(level);
-    args[length] = js.boolean(colors);
-    args[length + 1] = js.boolean(loggingOptions.structuredLogging.toBool());
-    args[length + 2] = js.strIntern(levelStr);
-    auto formatted = js.toString(
-        jsg::check(formatLog->Call(context, js.v8Undefined(), length + 3, args.data())));
-    fprintf(fd, "%s\n", formatted.cStr());
-    fflush(fd);
-  }
 }
 
 Worker::Lock::TakeSynchronously::TakeSynchronously(kj::Maybe<RequestObserver&> requestParam) {
