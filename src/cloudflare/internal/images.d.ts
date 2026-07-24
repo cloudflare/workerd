@@ -140,11 +140,50 @@ interface ImageUpdateOptions {
   creator?: string;
 }
 
+type ImageMetadataFilterOperators = {
+  eq?: string | number | boolean;
+  in?: string[] | number[];
+  gt?: number;
+  gte?: number;
+  lt?: number;
+  lte?: number;
+};
+
+type ImageMetadataFilterValue =
+  | string
+  | number
+  | boolean
+  | ImageMetadataFilterOperators;
+
+interface ImageListFilter {
+  metadata?: Record<string, ImageMetadataFilterValue>;
+}
+
 interface ImageListOptions {
   limit?: number;
   cursor?: string;
   sortOrder?: 'asc' | 'desc';
   creator?: string;
+  filter?: ImageListFilter;
+}
+
+interface ImageSignedUrlOptions {
+  variant: string;
+  expiresIn?: number;
+  keyName?: string;
+}
+
+interface ImageDirectUploadOptions {
+  id?: string;
+  requireSignedURLs?: boolean;
+  metadata?: Record<string, unknown>;
+  creator?: string;
+  expiresIn?: number;
+}
+
+interface ImageDirectUploadResult {
+  id: string;
+  uploadURL: string;
 }
 
 interface ImageList {
@@ -165,6 +204,14 @@ interface ImageHandle {
    * @returns ReadableStream of image bytes, or null if not found
    */
   bytes(): Promise<ReadableStream<Uint8Array> | null>;
+
+  /**
+   * Generate a signed delivery URL for this hosted image.
+   * @param options Signing configuration
+   * @returns A signed image delivery URL
+   * @throws {@link ImagesError} if signing fails
+   */
+  signedUrl(options: ImageSignedUrlOptions): Promise<string>;
 
   /**
    * Update hosted image metadata
@@ -208,6 +255,17 @@ interface HostedImagesBinding {
    * @throws {@link ImagesError} if list fails
    */
   list(options?: ImageListOptions): Promise<ImageList>;
+
+  /**
+   * Create a Direct Creator Upload link, letting an end user upload an
+   * image straight to Cloudflare without exposing an API token
+   * @param options Upload link configuration
+   * @returns The new image ID and the upload URL to hand to the end user
+   * @throws {@link ImagesError} if creation fails
+   */
+  createDirectUpload(
+    options?: ImageDirectUploadOptions
+  ): Promise<ImageDirectUploadResult>;
 }
 
 interface ImagesBinding {

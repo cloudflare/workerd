@@ -20,6 +20,57 @@ async function imageAsString(blob) {
   return blob.text();
 }
 
+function resolveMetaPath(obj, path) {
+  return path
+    .split('.')
+    .reduce(
+      (acc, key) => (acc && typeof acc === 'object' ? acc[key] : undefined),
+      obj
+    );
+}
+
+function matchesCondition(actual, condition) {
+  if (
+    condition === null ||
+    typeof condition !== 'object' ||
+    Array.isArray(condition)
+  ) {
+    return actual === condition;
+  }
+
+  return Object.entries(condition).every(([op, expected]) => {
+    switch (op) {
+      case 'eq':
+        return actual === expected;
+      case 'in':
+        return (
+          Array.isArray(expected) &&
+          expected.some((candidate) => candidate === actual)
+        );
+      case 'gt':
+        return typeof actual === 'number' && actual > expected;
+      case 'gte':
+        return typeof actual === 'number' && actual >= expected;
+      case 'lt':
+        return typeof actual === 'number' && actual < expected;
+      case 'lte':
+        return typeof actual === 'number' && actual <= expected;
+      default:
+        return false;
+    }
+  });
+}
+
+function matchesMetadataFilters(image, filters) {
+  if (!filters) {
+    return true;
+  }
+
+  return Object.entries(filters).every(([field, condition]) =>
+    matchesCondition(resolveMetaPath(image.meta ?? {}, field), condition)
+  );
+}
+
 class ImageHandleMock extends RpcTarget {
   /** @type {string} */
   #imageId;
@@ -54,6 +105,10 @@ class ImageHandleMock extends RpcTarget {
 
     const mockData = `MOCK_IMAGE_DATA_${this.#imageId}`;
     return new Blob([mockData]).stream();
+  }
+
+  async signedUrl(options) {
+    return `https://imagedelivery.example/${this.#imageId}/${options.variant}?sig=mock-signature`;
   }
 
   /**
@@ -133,7 +188,7 @@ export class ServiceEntrypoint extends WorkerEntrypoint {
         uploaded: '2024-01-01T00:00:00Z',
         requireSignedURLs: false,
         variants: ['public'],
-        meta: {},
+        meta: { status: 'active', priority: 1, config: { region: 'eu-west' } },
         creator: 'test-creator',
       },
       {
@@ -142,17 +197,37 @@ export class ServiceEntrypoint extends WorkerEntrypoint {
         uploaded: '2024-01-02T00:00:00Z',
         requireSignedURLs: false,
         variants: ['public'],
-        meta: {},
+        meta: {
+          status: 'archived',
+          priority: 5,
+          config: { region: 'us-east' },
+        },
         creator: 'test-creator',
       },
     ];
 
+    const filtered = images.filter((image) =>
+      matchesMetadataFilters(image, options?.filter?.metadata)
+    );
+
     const limit = options?.limit || 50;
-    const slicedImages = images.slice(0, limit);
+    const slicedImages = filtered.slice(0, limit);
 
     return {
       images: slicedImages,
       listComplete: true,
+    };
+  }
+
+  /**
+   * @param {ImageDirectUploadOptions} [options]
+   * @returns {Promise<ImageDirectUploadResult>}
+   */
+  async createDirectUpload(options) {
+    const id = options?.id || 'generated-upload-id';
+    return {
+      id,
+      uploadURL: `https://upload.imagedelivery.example/${id}`,
     };
   }
 

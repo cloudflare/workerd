@@ -511,6 +511,23 @@ export const test_images_getImage_not_found = {
   },
 };
 
+export const test_images_signed_url = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const url = await env.images.hosted
+      .image('test-image-id')
+      .signedUrl({ variant: 'private' });
+
+    assert.equal(
+      url,
+      'https://imagedelivery.example/test-image-id/private?sig=mock-signature'
+    );
+  },
+};
+
 // UPLOAD
 export const test_images_upload_with_options = {
   /**
@@ -645,6 +662,27 @@ export const test_images_list_with_options = {
   },
 };
 
+export const test_images_list_metadata_filter_forwards_correctly = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images.hosted.list({
+      filter: {
+        metadata: {
+          status: 'active',
+          priority: { gte: 1, lte: 3 },
+          'config.region': 'eu-west',
+        },
+      },
+    });
+
+    assert.equal(result.images.length, 1);
+    assert.equal(result.images[0].id, 'image-1');
+  },
+};
+
 // UPLOAD with base64 encoding
 export const test_images_upload_base64_stream = {
   /**
@@ -685,5 +723,38 @@ export const test_images_upload_base64_arraybuffer = {
 
     assert.equal(metadata.filename, 'base64-buffer-test.jpg');
     assert.notEqual(metadata.id, null);
+  },
+};
+
+// CREATE DIRECT UPLOAD
+export const test_images_create_direct_upload_default = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images.hosted.createDirectUpload();
+
+    assert.notEqual(result.id, null);
+    assert.equal(result.uploadURL.includes(result.id), true);
+  },
+};
+
+export const test_images_create_direct_upload_with_options = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images.hosted.createDirectUpload({
+      id: 'custom-upload-id',
+      requireSignedURLs: true,
+      metadata: { userId: 'abc123' },
+      creator: 'direct-upload-creator',
+      expiresIn: 600,
+    });
+
+    assert.equal(result.id, 'custom-upload-id');
+    assert.equal(result.uploadURL.includes('custom-upload-id'), true);
   },
 };
