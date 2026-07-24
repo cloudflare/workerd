@@ -1882,18 +1882,7 @@ class ResourceWrapper {
       T*,
       Args&&... args) {
     // Construct an instance of this type to be used as the Javascript global object, creating
-    // a new JavaScript context. Unfortunately, we have to do some things differently in this
-    // case, because of quirks in how V8 handles the global object. There appear to be bugs
-    // that prevent it from being treated uniformly for callback purposes. See:
-    //
-    //     https://groups.google.com/d/msg/v8-users/RET5b3KOa5E/3EvpRBzwAQAJ
-    //
-    // Because of this, our entire type registration system threads through an extra template
-    // parameter `bool isContext`. When the application decides to create a context using this
-    // type as the global, we instantiate this separate branch specifically for that type.
-    // Fortunately, for types that are never used as the global object, we never have to
-    // instantiate the `isContext = true` branch.
-
+    // a new JavaScript context.
     auto isolate = js.v8Isolate;
     auto tmpl = getTemplate<true>(isolate, nullptr)->InstanceTemplate();
     v8::Local<v8::Context> context = v8::Context::New(isolate, nullptr, tmpl);
@@ -1903,7 +1892,8 @@ class ResourceWrapper {
     if constexpr (T::jsgHasReflection) {
       ptr->jsgInitReflection(static_cast<TypeWrapper&>(*this));
     }
-    ptr.attachWrapper(isolate, global);
+    ptr.attachWrapper(isolate, global, IsContextGlobal::YES);
+    KJ_DASSERT((&extractInternalPointer<T, true>(context, global) == ptr.get()));
 
     // Disable `eval(code)` and `new Function(code)`. (Actually, setting this to `false` really
     // means "call the callback registered on the isolate to check" -- setting it to `true` means
@@ -1925,19 +1915,11 @@ class ResourceWrapper {
       deleteWeakRefGlobals(isolate, context);
     }
 
-    // Store a pointer to this object in slot 1, to be extracted in callbacks.
-    jsg::setAlignedPointerInEmbedderData(
-        context, jsg::ContextPointerSlot::GLOBAL_WRAPPER, ptr.get());
     // We need to set the highest used index in every context we create to be a nullptr
     // This is because we might later on call GetAlignedPointerFromEmbedderData which fails with
     // a fatal error if the array is smaller than the given index.
     jsg::setAlignedPointerInEmbedderData(
         context, jsg::ContextPointerSlot::MAX_POINTER_SLOT, nullptr);
-
-    // (Note: V8 docs say: "Note that index 0 currently has a special meaning for Chrome's
-    // debugger." We aren't Chrome, but it does appear that some versions of V8 will mess with
-    // slot 0, causing us to segfault if we try to put anything there. So we avoid it and use slot
-    // 1, which seems to work just fine.)
 
     // Expose the type of the global scope in the global scope itself.
     exposeGlobalScopeType(isolate, context);
