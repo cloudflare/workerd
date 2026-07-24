@@ -125,6 +125,7 @@ const toobig = [
   { N: 2, p: 2 ** 30, r: 1 }, // p > (2**30-1)/r
   { N: 2 ** 20, p: 1, r: 8 },
   { N: 2 ** 10, p: 1, r: 8, maxmem: 2 ** 20 },
+  { N: 32768, p: 1, r: 8, maxmem: 0 }, // maxmem coalesces to default; ratio still fails
 ];
 
 const badargs = [
@@ -200,8 +201,10 @@ export const badTests = {
         if (err) reject(err);
       });
       scrypt('pass', 'salt', 1, options, fn);
-      await rejects(promise);
-      throws(() => scryptSync('pass', 'salt', 1, options));
+      await rejects(promise, { code: 'ERR_CRYPTO_INVALID_SCRYPT_PARAMS' });
+      throws(() => scryptSync('pass', 'salt', 1, options), {
+        code: 'ERR_CRYPTO_INVALID_SCRYPT_PARAMS',
+      });
     }
     throws(() => scryptSync('pass', 'salt', 1, { N: 1, cost: 1 }));
     throws(() => scryptSync('pass', 'salt', 1, { p: 1, parallelization: 1 }));
@@ -217,10 +220,12 @@ export const tooBigTests = {
         if (err) reject(err);
       });
       scrypt('pass', 'salt', 1, options, fn);
-      await rejects(promise);
+      await rejects(promise, { code: 'ERR_CRYPTO_INVALID_SCRYPT_PARAMS' });
       strictEqual(fn.mock.calls.length, 1);
 
-      throws(() => scryptSync('pass', 'salt', 1, options));
+      throws(() => scryptSync('pass', 'salt', 1, options), {
+        code: 'ERR_CRYPTO_INVALID_SCRYPT_PARAMS',
+      });
     }
   },
 };
