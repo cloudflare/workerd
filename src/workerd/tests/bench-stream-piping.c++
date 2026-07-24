@@ -420,7 +420,8 @@ static void benchNewApproachPumpTo(
 
     fixture.runInIoContext([&](const TestFixture::Environment& env) {
       auto stream = createConfiguredStream(env.js, chunkSize, numChunks, config);
-      auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
+      auto adapter =
+          kj::heap<ReadableSourceKjAdapter>(env.js, env.context.getWeakRef(), stream.addRef());
       return adapter->pumpTo(*writableSink, EndAfterPump::YES).attach(kj::mv(adapter));
     });
 

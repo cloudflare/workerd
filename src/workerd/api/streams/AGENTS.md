@@ -53,9 +53,12 @@ These rules MUST be followed when modifying stream code:
 3. **Never access `this`** after calling a StateListener callback that may destroy the object
 4. **Always re-check lock state** in lambda continuations that may execute after lock release
 5. **Use WeakRef** for any handle that user code may hold longer than the underlying object
-6. **State before promises**: Transition state before resolving promises; pop queue entries
+6. **Use `kj::WeakRc<IoContext>`** rather than `IoContext&` when stream state or a coroutine
+   can outlive its originating request. Upgrade it at the point of use; skip best-effort cleanup
+   if it has expired, and use `assertLive()` only when liveness is an invariant.
+7. **State before promises**: Transition state before resolving promises; pop queue entries
    only after resolving/rejecting their associated promises
-7. **No dangling captures**: Prefer capturing `this` + re-acquiring refs inside lambdas
+8. **No dangling captures**: Prefer capturing `this` + re-acquiring refs inside lambdas
    over capturing raw references that may become dangling
 
 See `README.md` §Safety Pattern Catalog for detailed When/Why/How for each pattern.
