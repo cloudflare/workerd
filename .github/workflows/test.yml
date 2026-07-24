@@ -229,16 +229,19 @@ jobs:
         run: pnpm test:ci --filter miniflare
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
+          GITHUB_STEP_SUMMARY: /tmp/suppress-summary.txt
 
       - name: Run Vite unit tests
         run: pnpm test:ci --filter @cloudflare/vite-plugin
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
+          GITHUB_STEP_SUMMARY: /tmp/suppress-summary.txt
 
       - name: Run Vitest unit tests
         run: pnpm test:ci --filter="./fixtures/vitest-pool-workers-examples"
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
+          GITHUB_STEP_SUMMARY: /tmp/suppress-summary.txt
 
       - name: Run Wrangler Node.js e2e tests
         run: pnpm test:e2e --filter wrangler -- unenv-preset
