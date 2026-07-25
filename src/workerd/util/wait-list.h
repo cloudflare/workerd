@@ -5,6 +5,7 @@
 #pragma once
 
 #include <kj/async.h>
+#include <kj/exception.h>
 #include <kj/list.h>
 #include <kj/map.h>
 #include <kj/mutex.h>
@@ -98,6 +99,9 @@ class CrossThreadWaitList {
 
     // Only initialized if useThreadLocalOptimization is enabled.
     kj::ForkedPromise<void> forkedPromise = nullptr;
+
+    // ~Waiter() is `noexcept(false)`
+    kj::UnwindDetector unwindDetector;
   };
 
   struct State: public kj::AtomicRefcounted {
