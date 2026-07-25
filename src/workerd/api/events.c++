@@ -5,12 +5,22 @@
 
 namespace workerd::api {
 
+namespace {
+constexpr kj::StringPtr kDefaultErrorEventName = "error"_kj;
+constexpr kj::StringPtr kMessageEventName = "message"_kj;
+constexpr kj::StringPtr kOpenEventName = "open"_kj;
+constexpr kj::StringPtr kRejectionHandledEventName = "rejectionhandled"_kj;
+constexpr kj::StringPtr kUnhandledRejectionEventName = "unhandledrejection"_kj;
+}  // namespace
+
+OpenEvent::OpenEvent(): Event(kOpenEventName) {}
+
 MessageEvent::MessageEvent(jsg::Lock& js,
     const jsg::JsValue& data,
     kj::String lastEventId,
     kj::Maybe<jsg::Ref<MessagePort>> source,
     kj::Maybe<jsg::Url&> urlForOrigin)
-    : Event("message"),
+    : Event(kMessageEventName),
       data(jsg::JsRef(js, data)),
       lastEventId(kj::mv(lastEventId)),
       maybeSource(kj::mv(source)),
@@ -20,7 +30,7 @@ MessageEvent::MessageEvent(jsg::Lock& js,
     kj::String lastEventId,
     kj::Maybe<jsg::Ref<MessagePort>> source,
     kj::Maybe<jsg::Url&> urlForOrigin)
-    : Event("message"),
+    : Event(kMessageEventName),
       data(kj::mv(data)),
       lastEventId(kj::mv(lastEventId)),
       maybeSource(kj::mv(source)),
@@ -111,10 +121,6 @@ void MessageEvent::visitForGc(jsg::GcVisitor& visitor) {
 }
 
 // ======================================================================================
-namespace {
-const kj::StringPtr kDefaultErrorEventName = "error"_kj;
-}  // namespace
-
 ErrorEvent::ErrorEvent(ErrorEventInit init): Event(kDefaultErrorEventName), init(kj::mv(init)) {}
 
 ErrorEvent::ErrorEvent(kj::String type, ErrorEventInit init)
@@ -165,9 +171,6 @@ void ErrorEvent::visitForGc(jsg::GcVisitor& visitor) {
 
 // ======================================================================================
 namespace {
-constexpr kj::StringPtr kUnhandledRejectionEventName = "unhandledrejection"_kj;
-constexpr kj::StringPtr kRejectionHandledEventName = "rejectionhandled"_kj;
-
 constexpr kj::StringPtr getPromiseRejectionEventName(v8::PromiseRejectEvent type) {
   switch (type) {
     case v8::PromiseRejectEvent::kPromiseRejectWithNoHandler:
