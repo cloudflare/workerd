@@ -7,6 +7,7 @@
 
 #include <capnp/blob.h>
 #include <capnp/list.h>
+#include <kj/common.h>
 #include <kj/string.h>
 
 #include <initializer_list>
@@ -114,6 +115,24 @@ enum class AutogateKey {
       NumOfKeys  // Reserved for iteration.
 };
 
+// Convert an AutogateKey to an array index.
+constexpr size_t autogateToIndex(AutogateKey key) {
+  return static_cast<size_t>(key);
+}
+
+// Returns all AutogateKey values (excluding NumOfKeys) as an iterable range:
+//
+//     for (AutogateKey key: getAutogateKeys()) { ... }
+constexpr kj::ArrayPtr<const AutogateKey> getAutogateKeys() {
+  static constexpr AutogateKey keys[] = {
+#define V(key) AutogateKey::key,
+    WORKERD_AUTOGATES(V)
+#undef V
+  };
+  return keys;
+}
+static_assert(getAutogateKeys().size() == autogateToIndex(AutogateKey::NumOfKeys));
+
 // This class allows code changes to be rolled out independent of full binary releases. It enables
 // specific code paths to be gradually rolled out via our internal tooling.
 // See the equivalent file in our internal repo for more details.
@@ -138,8 +157,12 @@ class Autogate {
       IgnoreAllAutogatesEnv ignoreEnv = IgnoreAllAutogatesEnv::NO);
 
   // Convenience method for bin-tests to invoke initAutogate() with an appropriate config.
+  // Prefer the AutogateKey overload in hand-written tests for compile-time safety.
   static void initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gateNames);
   static void initAutogateNamesForTest(kj::ArrayPtr<const kj::StringPtr> gateNames);
+
+  // Type-safe overload: takes enum values directly, avoiding silent typo bugs.
+  static void initAutogateForTest(std::initializer_list<AutogateKey> keys);
 
   // Initializes all autogates to true. Used for testing with the --all-autogates flag.
   static void initAllAutogates();
@@ -148,7 +171,7 @@ class Autogate {
   static void deinitAutogate();
 
  private:
-  bool gates[static_cast<unsigned long>(AutogateKey::NumOfKeys)] = {};
+  bool gates[autogateToIndex(AutogateKey::NumOfKeys)] = {};
 
   Autogate() = default;
   Autogate(capnp::List<capnp::Text>::Reader autogates);

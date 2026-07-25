@@ -71,11 +71,10 @@ Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
     }
     auto sliced = name.slice(WORKERD_PREFIX.size());
 
-    // Parse the gate name into a AutogateKey.
-    for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys;
-         i = AutogateKey(static_cast<int>(i) + 1)) {
-      if (kj::str(i) == sliced) {
-        gates[static_cast<unsigned long>(i)] = true;
+    // Parse the gate name into an AutogateKey.
+    for (AutogateKey key: getAutogateKeys()) {
+      if (kj::str(key) == sliced) {
+        gates[autogateToIndex(key)] = true;
         break;
       }
     }
@@ -84,7 +83,7 @@ Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
 
 bool Autogate::isEnabled(AutogateKey key) {
   KJ_IF_SOME(a, globalAutogate) {
-    return a.gates[static_cast<unsigned long>(key)];
+    return a.gates[autogateToIndex(key)];
   }
 
   static const bool defaultResult = getenv("WORKERD_ALL_AUTOGATES") != nullptr;
@@ -113,9 +112,8 @@ void Autogate::deinitAutogate() {
 
 void Autogate::initAllAutogates() {
   Autogate autogate;
-  for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys;
-       i = AutogateKey(static_cast<int>(i) + 1)) {
-    autogate.gates[static_cast<unsigned long>(i)] = true;
+  for (AutogateKey key: getAutogateKeys()) {
+    autogate.gates[autogateToIndex(key)] = true;
   }
   globalAutogate = kj::mv(autogate);
 }
@@ -134,6 +132,17 @@ void Autogate::initAutogateNamesForTest(kj::ArrayPtr<const kj::StringPtr> gateNa
     gates.set(count++, kj::str(WORKERD_PREFIX, name));
   }
   Autogate::initAutogate(gates.asReader());
+}
+
+void Autogate::initAutogateForTest(std::initializer_list<AutogateKey> keys) {
+  if (getenv("WORKERD_ALL_AUTOGATES") != nullptr) {
+    return initAllAutogates();
+  }
+  Autogate autogate;
+  for (auto key: keys) {
+    autogate.gates[autogateToIndex(key)] = true;
+  }
+  globalAutogate = kj::mv(autogate);
 }
 
 }  // namespace workerd::util
