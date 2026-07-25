@@ -721,8 +721,17 @@ IoContext::PendingEvent::~PendingEvent() noexcept(false) {
   context.abortFromHangTask = Worker::AsyncLock::whenThreadIdle()
                                   .then([&context = context]() noexcept {
     // We have nothing left to do and no PendingEvent has been registered. Abort now.
-    return context.worker->takeAsyncLock(context.getMetrics())
-        .then([&context](Worker::AsyncLock asyncLock) { context.abortFromHang(asyncLock); });
+    //
+    // By the time the thread goes idle the IncomingRequest may already be gone, even though the
+    // IoContext lives on (e.g. waitUntil work is still outstanding). getMetrics() requires a
+    // current IncomingRequest, and this continuation is `noexcept`, so reaching for it in that
+    // state would terminate the process instead of aborting the context. Fall back to the
+    // request-less lock, which only costs us the lock-timing metrics.
+    auto lockPromise = context.incomingRequests.empty()
+        ? context.worker->takeAsyncLockWithoutRequest(nullptr)
+        : context.worker->takeAsyncLock(context.getMetrics());
+    return lockPromise.then(
+        [&context](Worker::AsyncLock asyncLock) { context.abortFromHang(asyncLock); });
   }).eagerlyEvaluate(nullptr);
 }
 
