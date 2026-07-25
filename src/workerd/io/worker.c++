@@ -399,45 +399,6 @@ uint64_t getCurrentThreadId() {
 
 }  // namespace
 
-// Represents a thread's attempt to take an async lock. Each Isolate has a linked list of
-// `AsyncWaiter`s. A particular thread only ever owns one `AsyncWaiter` at a time.
-class Worker::AsyncWaiter: public kj::Refcounted {
- public:
-  AsyncWaiter(kj::Own<const Isolate> isolate);
-  ~AsyncWaiter() noexcept;
-  KJ_DISALLOW_COPY_AND_MOVE(AsyncWaiter);
-
- private:
-  // Executor for this waiter's thread.
-  const kj::Executor& executor;
-
-  // The isolate for which this waiter is currently waiting.
-  kj::Own<const Isolate> isolate;
-
-  // Promise/fulfiller to fire when the waiter reaches the front of the list for the corresponding
-  // isolate.
-  kj::ForkedPromise<void> readyPromise = nullptr;
-  kj::Own<kj::CrossThreadPromiseFulfiller<void>> readyFulfiller;
-
-  // Promise/fulfiller to fire when the AsyncLock is finally released. This is used when a thread
-  // tries to take locks on multiple different isolates concurrently, in order to serialize the
-  // locks so only one is taken at a time. This is NOT a cross-thread fulfiller; it can only be
-  // fulfilled by the thread that owns the waiter.
-  kj::ForkedPromise<void> releasePromise = nullptr;
-  kj::Own<kj::PromiseFulfiller<void>> releaseFulfiller;
-
-  // Protected by the lock on `Isolate::asyncWaiters` for the isolate identified by
-  // `currentIsolate`. Must be null if `currentIsolate` is null. (All other members of `Waiter`
-  // can only be accessed by the thread that created the `Waiter`.)
-  kj::Maybe<AsyncWaiter&> next;
-  kj::Maybe<AsyncWaiter&>* prev;
-
-  static const kj::EventLoopLocal<AsyncWaiter*> threadCurrentWaiter;
-
-  friend class Worker::Isolate;
-  friend class Worker::AsyncLock;
-};
-
 class Worker::InspectorClient: public v8_inspector::V8InspectorClient {
  public:
   // Wall time in milliseconds with millisecond precision. console.time() and friends rely on this
@@ -589,10 +550,6 @@ struct Worker::Isolate::Impl {
   // Set of error log lines that should not be logged again.
   kj::HashSet<kj::String> errorOnceDescriptions;
 
-  // Instantaneous count of how many threads are trying to or have successfully obtained an
-  // AsyncLock on this isolate, used to implement getCurrentLoad().
-  mutable uint lockAttemptGauge = 0;
-
   // Atomically incremented upon every successful lock. The ThreadProgressCounter in Impl::Lock
   // registers a reference to `lockSuccessCounter` as the thread's progress counter during a lock
   // attempt. This allows watchdogs to see evidence of forward progress in other threads, even if
@@ -617,7 +574,7 @@ struct Worker::Isolate::Impl {
                 return isolate.getMetrics().tryCreateLockTiming(sync.getRequest());
               }
               KJ_CASE_ONEOF(async, AsyncLock*) {
-                KJ_REQUIRE(async->waiter->isolate.get() == &isolate,
+                KJ_REQUIRE(&async->lock.getResource() == &isolate,
                     "async lock was taken against a different isolate than the synchronous lock");
                 return kj::mv(async->lockTiming);
               }
@@ -2795,15 +2752,27 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
 // =======================================================================================
 // AsyncLock implementation
 
-const kj::EventLoopLocal<Worker::AsyncWaiter*> Worker::AsyncWaiter::threadCurrentWaiter;
+namespace {
 
-Worker::Isolate::AsyncWaiterList::~AsyncWaiterList() noexcept {
-  // It should be impossible for this list to be non-empty since each member of the list holds a
-  // strong reference back to us. But if the list is non-empty, we'd better crash here, to avoid
-  // dangling pointers.
-  KJ_ASSERT(head == kj::none, "destroying non-empty waiter list?");
-  KJ_ASSERT(tail == &head, "tail pointer corrupted?");
-}
+// Bridges the scheduler's observability callbacks onto the isolate observer.
+class AsyncLockHooks final: public AsyncLockQueue<Worker::Isolate>::Hooks {
+ public:
+  explicit AsyncLockHooks(IsolateObserver::LockTiming& lockTiming): lockTiming(lockTiming) {}
+
+  void waitingForOtherResource(kj::StringPtr id) override {
+    lockTiming.waitingForOtherIsolate(id);
+  }
+
+  void reportAsyncInfo(
+      uint currentLoad, bool coalesced, uint blockedByOtherResourceCount) override {
+    lockTiming.reportAsyncInfo(currentLoad, coalesced, blockedByOtherResourceCount);
+  }
+
+ private:
+  IsolateObserver::LockTiming& lockTiming;
+};
+
+}  // namespace
 
 void Worker::Isolate::runInLockScope(
     LockType lockType, kj::FunctionParam<void(jsg::Lock&)> callback) const {
@@ -2826,44 +2795,15 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLock(RequestObserver& r
 
 kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
     kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const {
-  kj::Maybe<uint> currentLoad;
-  if (lockTiming != kj::none) {
-    currentLoad = getCurrentLoad();
+  // Held on the coroutine frame so it outlives the wait below.
+  kj::Maybe<AsyncLockHooks> hooks;
+  kj::Maybe<AsyncLockQueue<Isolate>::Hooks&> hooksRef;
+  KJ_IF_SOME(lt, lockTiming) {
+    hooksRef = hooks.emplace(*lt);
   }
 
-  for (uint threadWaitingDifferentLockCount = 0;; ++threadWaitingDifferentLockCount) {
-    AsyncWaiter* waiter = *AsyncWaiter::threadCurrentWaiter;
-
-    if (waiter == nullptr) {
-      // Thread is not currently waiting on a lock.
-      KJ_IF_SOME(lt, lockTiming) {
-        lt.get()->reportAsyncInfo(KJ_ASSERT_NONNULL(currentLoad), false /* threadWaitingSameLock */,
-            threadWaitingDifferentLockCount);
-      }
-      auto newWaiter = kj::refcounted<AsyncWaiter>(kj::atomicAddRef(*this));
-      co_await newWaiter->readyPromise;
-      co_return AsyncLock(kj::mv(newWaiter), kj::mv(lockTiming));
-    } else if (waiter->isolate == this) {
-      // Thread is waiting on a lock already, and it's for the same isolate. We can coalesce the
-      // locks.
-      KJ_IF_SOME(lt, lockTiming) {
-        lt.get()->reportAsyncInfo(KJ_ASSERT_NONNULL(currentLoad), true /* threadWaitingSameLock */,
-            threadWaitingDifferentLockCount);
-      }
-      auto newWaiterRef = kj::addRef(*waiter);
-      co_await newWaiterRef->readyPromise;
-      co_return AsyncLock(kj::mv(newWaiterRef), kj::mv(lockTiming));
-    } else {
-      // Thread is already waiting for or holding a different isolate lock. Wait for that one to
-      // be released before we try to lock a different isolate.
-      // TODO(perf): Use of ForkedPromise leads to thundering herd here. Should be minor in practice,
-      //   but we could consider creating another linked list instead...
-      KJ_IF_SOME(lt, lockTiming) {
-        lt.get()->waitingForOtherIsolate(waiter->isolate->getId());
-      }
-      co_await waiter->releasePromise;
-    }
-  }
+  auto lock = co_await asyncLockQueue.lock(kj::atomicAddRef(*this), hooksRef);
+  co_return AsyncLock(kj::mv(lock), kj::mv(lockTiming));
 }
 
 kj::Promise<Worker::AsyncLock> Worker::takeAsyncLockWithoutRequest(SpanParent parentSpan) const {
@@ -2874,87 +2814,8 @@ kj::Promise<Worker::AsyncLock> Worker::takeAsyncLock(RequestObserver& request) c
   return script->getIsolate().takeAsyncLock(request);
 }
 
-Worker::AsyncWaiter::AsyncWaiter(kj::Own<const Isolate> isolateParam)
-    : executor(kj::getCurrentThreadExecutor()),
-      isolate(kj::mv(isolateParam)) {
-  // Init `releasePromise` / `releaseFulfiller`.
-  {
-    auto paf = kj::newPromiseAndFulfiller<void>();
-    releasePromise = paf.promise.fork();
-    releaseFulfiller = kj::mv(paf.fulfiller);
-  }
-
-  // Add ourselves to the wait queue for this isolate.
-  auto lock = isolate->asyncWaiters.lockExclusive();
-  if (lock->tail == &lock->head) {
-    // Looks like the queue is empty, so we immediately get the lock.
-    readyPromise = kj::Promise<void>(kj::READY_NOW).fork();
-    // We can leave `readyFulfiller` null as no one will ever invoke it anyway.
-  } else {
-    // Arrange to get notified later.
-    auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
-    readyPromise = paf.promise.fork();
-    readyFulfiller = kj::mv(paf.fulfiller);
-  }
-
-  next = kj::none;
-  prev = lock->tail;
-  *lock->tail = this;
-  lock->tail = &next;
-
-  *threadCurrentWaiter = this;
-
-  __atomic_add_fetch(&isolate->impl->lockAttemptGauge, 1, __ATOMIC_RELAXED);
-}
-
-Worker::AsyncWaiter::~AsyncWaiter() noexcept {
-  // This destructor is `noexcept` because an exception here probably leaves the process in a bad
-  // state.
-
-  __atomic_sub_fetch(&isolate->impl->lockAttemptGauge, 1, __ATOMIC_RELAXED);
-
-  auto lock = isolate->asyncWaiters.lockExclusive();
-
-  releaseFulfiller->fulfill();
-
-  // Remove ourselves from the list.
-  *prev = next;
-  KJ_IF_SOME(n, next) {
-    n.prev = prev;
-  } else {
-    lock->tail = prev;
-  }
-
-  if (prev == &lock->head) {
-    // We held the lock before now. Alert the next waiter that they are now at the front of the
-    // line.
-    KJ_IF_SOME(n, next) {
-      n.readyFulfiller->fulfill();
-    }
-  }
-
-  auto& w = *threadCurrentWaiter;
-  KJ_ASSERT(w == this);
-  w = nullptr;
-}
-
 kj::Promise<void> Worker::AsyncLock::whenThreadIdle() {
-  AsyncWaiter*& currentWaiter = *AsyncWaiter::threadCurrentWaiter;
-  for (;;) {
-    if (currentWaiter != nullptr) {
-      co_await currentWaiter->releasePromise;
-      continue;
-    }
-
-    // yieldUntilWouldSleep() waits for both the queue and event port signals,
-    // so cross-thread fulfiller wakeups are processed before we declare idle.
-    co_await kj::yieldUntilWouldSleep();
-
-    if (currentWaiter == nullptr) {
-      co_return;
-    }
-    // Whoops, a new lock attempt appeared, loop.
-  }
+  return AsyncLockQueue<Isolate>::whenThreadIdle();
 }
 
 // =======================================================================================
@@ -4523,7 +4384,7 @@ kj::Own<Worker::Actor> Worker::Actor::addRef() {
 // =======================================================================================
 
 uint Worker::Isolate::getCurrentLoad() const {
-  return __atomic_load_n(&impl->lockAttemptGauge, __ATOMIC_RELAXED);
+  return asyncLockQueue.getCurrentLoad();
 }
 
 uint Worker::Isolate::getLockSuccessCount() const {

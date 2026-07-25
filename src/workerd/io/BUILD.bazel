@@ -84,6 +84,7 @@ wd_cc_library(
         ":actor",
         ":actor-id",
         ":actor-storage_capnp",
+        ":async-lock-scheduler",
         ":cdp_capnp",
         ":compatibility-date",
         ":container_capnp",
@@ -312,6 +313,18 @@ wd_cc_library(
     ],
 )
 
+# Deliberately depends on nothing but KJ, so that the isolate lock scheduling behaviour can be
+# tested without standing up a JavaScript isolate.
+wd_cc_library(
+    name = "async-lock-scheduler",
+    hdrs = ["async-lock-scheduler.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
+    ],
+)
+
 wd_cc_library(
     name = "limit-enforcer",
     srcs = ["tracked-wasm-instance.c++"],
@@ -448,6 +461,13 @@ kj_test(
     src = "io-gate-test.c++",
     deps = [
         ":io-gate",
+    ],
+)
+
+kj_test(
+    src = "async-lock-scheduler-test.c++",
+    deps = [
+        ":async-lock-scheduler",
     ],
 )
 
