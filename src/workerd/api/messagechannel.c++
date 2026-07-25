@@ -154,6 +154,7 @@ void MessagePort::closeImpl() {
 }
 
 void MessagePort::close(jsg::Lock& js) {
+  static constexpr kj::StringPtr name = "close"_kj;
   if (state.is<Closed>()) return;
   state = Closed{};
   KJ_IF_SOME(o, other) {
@@ -162,7 +163,7 @@ void MessagePort::close(jsg::Lock& js) {
     }
     other = kj::none;
   }
-  auto closeEvent = js.alloc<Event>(kj::str("close"), Event::Init{}, true);
+  auto closeEvent = js.alloc<Event>(name, Event::Init{});
   dispatchEventImpl(js, kj::mv(closeEvent));
 }
 

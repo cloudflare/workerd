@@ -159,7 +159,7 @@ uint EventTarget::EventHandlerHashCallbacks::hashCode(const EventHandler::Handle
 
 jsg::Ref<Event> Event::constructor(jsg::Lock& js, kj::String type, jsg::Optional<Init> init) {
   static const Init defaultInit;
-  return js.alloc<Event>(kj::mv(type), init.orDefault(defaultInit), false /* not trusted */);
+  return js.alloc<Event>(kj::mv(type), init.orDefault(defaultInit), Trusted::NO);
 }
 
 kj::StringPtr Event::getType() {
