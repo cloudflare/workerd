@@ -490,6 +490,20 @@ export default {
               body: 'nt',
             });
           }
+          case 'rangeOffsetOnly': {
+            assert.deepEqual(jsonRequest.range, {
+              offset: '5',
+            });
+            return buildGetResponse({
+              head: {
+                range: {
+                  offset: 5,
+                  length: 3,
+                },
+              },
+              body: 'ent',
+            });
+          }
           case 'onlyIfStrongEtag': {
             assert.deepStrictEqual(jsonRequest.onlyIf, {
               etagMatches: [
@@ -701,6 +715,52 @@ export default {
         },
         'nt'
       );
+      // Offset only (no length)
+      {
+        await compareResponse(
+          env.BUCKET.get('rangeOffsetOnly', {
+            range: { offset: 5 },
+          }),
+          {
+            head: {
+              range: {
+                offset: 5,
+                length: 3,
+              },
+            },
+          },
+          'ent'
+        );
+      }
+      // Empty range should throw TypeError
+      {
+        try {
+          await env.BUCKET.get('basicKey', { range: {} });
+          throw new Error('This should have thrown');
+        } catch (e) {
+          assert(e.message.includes('Range must specify at least one of'));
+        }
+      }
+      // Unrecognized properties only should throw TypeError
+      {
+        try {
+          await env.BUCKET.get('basicKey', { range: { invalid: 1 } });
+          throw new Error('This should have thrown');
+        } catch (e) {
+          assert(e.message.includes('Range must specify at least one of'));
+        }
+      }
+      // Suffix with offset should throw TypeError
+      {
+        try {
+          await env.BUCKET.get('basicKey', {
+            range: { suffix: 2, offset: 1 },
+          });
+          throw new Error('This should have thrown');
+        } catch (e) {
+          assert(e.message.includes('Suffix is incompatible with offset'));
+        }
+      }
     }
     // Conditionals
     {
