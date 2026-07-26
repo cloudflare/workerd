@@ -190,9 +190,9 @@ export function getHashes(): string[] {
   // expected to change infrequently based of bssl's stability-focused approach.
 
   // prettier-ignore
-  return ['md4', 'md5', 'sha1', 'sha224', 'sha256', 'sha384', 'sha512', 'md5-sha1', 'RSA-MD5',
-          'RSA-SHA1', 'RSA-SHA224', 'RSA-SHA256', 'RSA-SHA384', 'RSA-SHA512', 'DSA-SHA',
-          'DSA-SHA1', 'ecdsa-with-SHA1'];
+  return ['md4', 'md5', 'sha1', 'sha224', 'sha256', 'sha384', 'sha512', 'sha3-224', 'sha3-256',
+          'sha3-384', 'sha3-512', 'md5-sha1', 'RSA-MD5', 'RSA-SHA1', 'RSA-SHA224', 'RSA-SHA256',
+          'RSA-SHA384', 'RSA-SHA512', 'DSA-SHA', 'DSA-SHA1', 'ecdsa-with-SHA1'];
 }
 
 // We do not implement the openssl secure heap.

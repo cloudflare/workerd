@@ -130,6 +130,35 @@ export const hash_correctness_tests = {
       .update('123')
       .digest('hex');
     assert.strictEqual(h1, h2);
+
+    const sha3Vectors = {
+      'sha3-224': 'e642824c3f8cf24ad09234ee7d3c766fc9a3a5168d0c94ad73b46fdf',
+      'sha3-256':
+        '3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532',
+      'sha3-384':
+        'ec01498288516fc926459f58e2c6ad8df9b473cb0fc08c2596da7cf0e49be4b29' +
+        '8d88cea927ac7f539f1edf228376d25',
+      'sha3-512':
+        'b751850b1a57168a5693cd924b6b096e08f621827444f70d884f5d0240d2712e' +
+        '10e116e9192af3c91a7ec57647e3934057340b4cf408d5a56592f8274eec53f0',
+    };
+
+    for (const [algorithm, expected] of Object.entries(sha3Vectors)) {
+      assert.ok(crypto.getHashes().includes(algorithm));
+      assert.strictEqual(
+        crypto.createHash(algorithm).update('abc').digest('hex'),
+        expected
+      );
+      assert.strictEqual(
+        crypto
+          .createHash(algorithm.toUpperCase())
+          .update('a')
+          .update('bc')
+          .digest('hex'),
+        expected
+      );
+      assert.strictEqual(crypto.hash(algorithm, 'abc'), expected);
+    }
   },
 };
 
@@ -261,6 +290,17 @@ export const hash_copy_test = {
     const d = crypto.createHash('sha512').update('abcdef');
     assert.strictEqual(a.digest('hex'), b.digest('hex'));
     assert.strictEqual(c.digest('hex'), d.digest('hex'));
+
+    const sha3 = crypto.createHash('sha3-256').update('abc');
+    const sha3Copy = sha3.copy().update('def');
+    assert.strictEqual(
+      sha3.digest('hex'),
+      '3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532'
+    );
+    assert.strictEqual(
+      sha3Copy.digest('hex'),
+      '59890c1d183aa279505750422e6384ccb1499c793872d6f31bb3bcaa4bc9f5a5'
+    );
   },
 };
 
