@@ -11,6 +11,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/url.h>
 #include <workerd/server/docker-api.capnp.h>
+#include <workerd/util/sentry.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/strings.h>
 #include <workerd/util/strong-bool.h>
@@ -948,6 +949,40 @@ kj::Maybe<uint16_t> tryParsePublishedHostPort(capnp::json::Value::Reader portMap
 
 }  // namespace
 
+void configureContainerPrivileges(
+    docker_api::Docker::ContainerCreateRequest::HostConfig::Builder hostConfig,
+    const ContainerPrivileges& privileges) {
+  if (privileges.isEmpty()) {
+    return;
+  }
+
+  // The init*() calls below overwrite these HostConfig lists rather than appending. This function
+  // must remain the sole writer of CapAdd/Devices/SecurityOpt for the main container; otherwise,
+  // earlier values will be silently truncated.
+  if (privileges.capabilities.size() > 0) {
+    auto capAdd = hostConfig.initCapAdd(privileges.capabilities.size());
+    for (auto i: kj::indices(privileges.capabilities)) {
+      capAdd.set(i, privileges.capabilities[i]);
+    }
+  }
+  if (privileges.devices.size() > 0) {
+    auto devices = hostConfig.initDevices(privileges.devices.size());
+    for (auto i: kj::indices(privileges.devices)) {
+      auto output = devices[i];
+      auto& input = privileges.devices[i];
+      output.setPathOnHost(input.pathOnHost);
+      output.setPathInContainer(input.pathInContainer);
+      output.setCgroupPermissions(input.cgroupPermissions);
+    }
+  }
+  if (privileges.securityOpt.size() > 0) {
+    auto securityOpt = hostConfig.initSecurityOpt(privileges.securityOpt.size());
+    for (auto i: kj::indices(privileges.securityOpt)) {
+      securityOpt.set(i, privileges.securityOpt[i]);
+    }
+  }
+}
+
 // Represents a parsed egress mapping. IP/CIDR mappings match destination IPs,
 // while hostnameGlob mappings match either HTTP hostnames or TLS SNI depending on protocol.
 // Defined here (not in the header) to avoid pulling kj::OneOf, kj::CidrRange, and
@@ -975,7 +1010,8 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::TaskSet& waitUntilTasks,
     kj::Promise<void> pendingCleanup,
     kj::Function<void(kj::Promise<void>)> cleanupCallback,
-    ChannelTokenHandler& channelTokenHandler)
+    ChannelTokenHandler& channelTokenHandler,
+    ContainerPrivileges privileges)
     : byteStreamFactory(byteStreamFactory),
       timer(timer),
       network(network),
@@ -984,6 +1020,7 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       sidecarContainerName(kj::encodeUriComponent(kj::str(containerName, "-proxy"))),
       imageName(kj::mv(imageName)),
       containerEgressInterceptorImage(kj::mv(containerEgressInterceptorImage)),
+      privileges(kj::mv(privileges)),
       waitUntilTasks(waitUntilTasks),
       pendingCleanup(kj::mv(pendingCleanup).fork()),
       cleanupCallback(kj::mv(cleanupCallback)),
@@ -1785,6 +1822,20 @@ kj::Promise<void> ContainerClient::createContainer(kj::StringPtr effectiveImage,
       mount.initVolumeOptions().setNoCopy(true);
     }
   }
+
+  if (!privileges.isEmpty()) {
+    auto deviceBuilder = kj::heapArrayBuilder<kj::String>(privileges.devices.size());
+    for (const auto& device: privileges.devices) {
+      deviceBuilder.add(kj::str("{ pathOnHost = ", device.pathOnHost, ", pathInContainer = ",
+          device.pathInContainer, ", cgroupPermissions = ", device.cgroupPermissions, " }"));
+    }
+    auto devices = deviceBuilder.finish();
+    KJ_LOG(WARNING,
+        "Creating a container with explicitly configured Docker privileges. Capabilities, devices, "
+        "and security options may grant host-level access.",
+        containerName, privileges.capabilities, devices, privileges.securityOpt);
+  }
+  configureContainerPrivileges(hostConfig, privileges);
 
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/containers/create?name=", containerName), codec.encode(jsonRoot));

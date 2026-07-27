@@ -283,6 +283,7 @@ wd_cc_library(
         "//src/workerd/io",
         "//src/workerd/io:container_capnp",
         "//src/workerd/jsg",
+        "//src/workerd/util:sentry",
         "//src/workerd/util:strings",
         "//src/workerd/util:uuid",
         "@ada-url",

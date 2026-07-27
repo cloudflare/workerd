@@ -13,6 +13,7 @@
 #include <capnp/compat/json.h>
 #include <capnp/list.h>
 #include <capnp/message.h>
+#include <kj/array.h>
 #include <kj/async-io.h>
 #include <kj/async.h>
 #include <kj/compat/http.h>
@@ -24,6 +25,22 @@
 #include <atomic>
 
 namespace workerd::server {
+
+struct ContainerPrivileges {
+  struct Device {
+    kj::String pathOnHost;
+    kj::String pathInContainer;
+    kj::String cgroupPermissions;
+  };
+
+  kj::Array<kj::String> capabilities;
+  kj::Array<Device> devices;
+  kj::Array<kj::String> securityOpt;
+
+  bool isEmpty() const {
+    return capabilities.size() == 0 && devices.size() == 0 && securityOpt.size() == 0;
+  }
+};
 
 // Distinguishes how an egress mapping should proxy matched connections.
 enum class EgressProtocol : uint8_t {
@@ -48,6 +65,12 @@ kj::Own<capnp::MallocMessageBuilder> decodeJsonResponse(kj::StringPtr response) 
   return message;
 }
 
+// Declared here solely so the unit test can call it directly; production callers reach it via
+// createContainer() in the .c++ file.
+void configureContainerPrivileges(
+    docker_api::Docker::ContainerCreateRequest::HostConfig::Builder hostConfig,
+    const ContainerPrivileges& privileges);
+
 // Docker-based implementation that implements the rpc::Container::Server interface
 // so it can be used as a rpc::Container::Client via kj::heap<ContainerClient>().
 // This allows the Container JSG class to use Docker directly without knowing
@@ -68,7 +91,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       kj::TaskSet& waitUntilTasks,
       kj::Promise<void> pendingCleanup,
       kj::Function<void(kj::Promise<void>)> cleanupCallback,
-      ChannelTokenHandler& channelTokenHandler);
+      ChannelTokenHandler& channelTokenHandler,
+      ContainerPrivileges privileges);
 
   ~ContainerClient() noexcept(false);
 
@@ -103,6 +127,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   // Container egress interceptor image name (sidecar for egress proxy)
   kj::String containerEgressInterceptorImage;
+
+  ContainerPrivileges privileges;
 
   kj::TaskSet& waitUntilTasks;
 

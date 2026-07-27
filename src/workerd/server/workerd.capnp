@@ -668,6 +668,30 @@ struct Worker {
       imageName @0 :Text;
       # Image name to be used to create the container using supported provider.
       # By default, we pull the "latest" tag of this image.
+
+      privileges @1 :ContainerPrivileges;
+      # Extra Docker HostConfig privileges applied when creating the container.
+      # These fields are passed through to Docker as-is and are empty by default.
+      # They are not validated or allow-listed. Depending on the values and Docker daemon mode,
+      # they can expose arbitrary host devices, disable security profiles, or grant capabilities
+      # such as CAP_SYS_ADMIN that may provide host-level access. Only use trusted configuration.
+
+      struct ContainerPrivileges {
+        capabilities @0 :List(Text);
+        # Docker HostConfig.CapAdd values.
+
+        devices @1 :List(Device);
+        # Docker HostConfig.Devices values.
+
+        securityOpt @2 :List(Text);
+        # Docker HostConfig.SecurityOpt values.
+
+        struct Device {
+          pathOnHost @0 :Text;
+          pathInContainer @1 :Text;
+          cgroupPermissions @2 :Text;
+        }
+      }
     }
   }
 
