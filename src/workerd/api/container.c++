@@ -792,10 +792,6 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
  public:
   explicit ContainerPortAsyncIoStream(kj::Own<kj::AsyncInputStream> input): input(kj::mv(input)) {}
 
-  ~ContainerPortAsyncIoStream() noexcept(false) {
-    shutdownWrite();
-  }
-
   // Adopts the write half of the tunnel once the connect pipeline has resolved, and begins
   // watching it for disconnection.
   void adoptOutput(kj::Own<capnp::ExplicitEndOutputStream> up) {
@@ -846,15 +842,10 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
 
   void shutdownWrite() override {
     // shutdownWrite() is a clean half-close, which we convey to the container by calling the
-    // capnp stream's explicit end(). Since shutdownWrite() is a synchronous void method (and is
-    // also invoked from the destructor), there is nowhere to await end(); we detach it, keeping
-    // the stream alive via attach() until it flushes.
-    //
-    // NOTE: the destructor calls this unconditionally, so an error teardown also sends a clean
-    // end() rather than dropping `output` uncleanly. The container therefore cannot distinguish
-    // an aborted write from a clean one in the up direction. That is tolerable today; revisit
-    // (e.g. gate end() on a recorded disconnect) if the container protocol needs to detect
-    // truncated requests.
+    // capnp stream's explicit end(). Since shutdownWrite() is a synchronous void method, there is
+    // nowhere to await end(); we detach it, keeping the stream alive via attach() until it
+    // flushes. This is only reached on a clean half-close; abnormal teardown drops `output`
+    // without end() (see the destructor), which the container sees as an abort.
     outputWatchTask = nullptr;
     KJ_IF_SOME(stream, kj::mv(output)) {
       stream->end().attach(kj::mv(stream)).detach([](kj::Exception&&) {});
@@ -891,6 +882,13 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
 
  private:
   kj::Maybe<kj::Own<kj::AsyncInputStream>> input;
+  // The write half of the tunnel. `output` is an ExplicitEndOutputStream, whose clean-EOF signal
+  // is end(); dropping it without end() is an abort. The clean paths (shutdownWrite() for an HTTP
+  // half-close, endWrite() for a completed raw-socket up pump) move `output` out before they run,
+  // so if it is still present when this stream is destroyed the teardown is abnormal and the
+  // destructor's default drop correctly conveys an abort -- not a clean end -- to the container.
+  // (This matches the behavior before container tunnels were pooled, where the up stream was
+  // likewise dropped without end() on any abnormal teardown.)
   kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> output;
   kj::Canceler canceler;
   kj::Maybe<kj::Exception> disconnectException;

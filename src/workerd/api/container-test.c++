@@ -224,11 +224,13 @@ class TestPort final: public rpc::Container::Port::Server, private kj::TaskSet::
   TestPort(capnp::ByteStreamFactory& byteStreamFactory,
       ResponseMode mode,
       size_t& connectCount,
-      kj::Maybe<kj::PromiseFulfiller<void>&> closeFulfiller)
+      kj::Maybe<kj::PromiseFulfiller<void>&> closeFulfiller,
+      kj::Maybe<bool&> upEndedUncleanly = kj::none)
       : byteStreamFactory(byteStreamFactory),
         mode(mode),
         connectCount(connectCount),
         closeFulfiller(closeFulfiller),
+        upEndedUncleanly(upEndedUncleanly),
         tasks(*this) {}
 
   kj::Promise<void> connect(ConnectContext context) override {
@@ -247,7 +249,13 @@ class TestPort final: public rpc::Container::Port::Server, private kj::TaskSet::
       return kj::READY_NOW;
     }
     auto upPipe = kj::newOneWayPipe();
-    context.getResults().setUp(byteStreamFactory.kjToCapnp(kj::mv(upPipe.out)));
+    kj::Own<kj::AsyncOutputStream> up = kj::mv(upPipe.out);
+    KJ_IF_SOME(flag, upEndedUncleanly) {
+      // Wrap the receive end so that a clean end() vs. an unclean capability drop becomes
+      // observable: the callback fires only if the up stream is destroyed without end().
+      up = capnp::ExplicitEndOutputStream::wrap(kj::mv(up), [&flag]() { flag = true; });
+    }
+    context.getResults().setUp(byteStreamFactory.kjToCapnp(kj::mv(up)));
     auto down = byteStreamFactory.capnpToKjExplicitEnd(context.getParams().getDown());
     tasks.add(serve(kj::mv(upPipe.in), kj::mv(down)));
     return kj::READY_NOW;
@@ -258,6 +266,7 @@ class TestPort final: public rpc::Container::Port::Server, private kj::TaskSet::
   ResponseMode mode;
   size_t& connectCount;
   kj::Maybe<kj::PromiseFulfiller<void>&> closeFulfiller;
+  kj::Maybe<bool&> upEndedUncleanly;
   kj::TaskSet tasks;
   kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> heldDown;
 
@@ -332,19 +341,21 @@ class TestContainerServer final: public rpc::Container::Server {
   TestContainerServer(capnp::ByteStreamFactory& byteStreamFactory,
       ResponseMode mode,
       size_t& connectCount,
-      kj::Maybe<kj::PromiseFulfiller<void>&> closeFulfiller = kj::none)
+      kj::Maybe<kj::PromiseFulfiller<void>&> closeFulfiller = kj::none,
+      kj::Maybe<bool&> upEndedUncleanly = kj::none)
       : byteStreamFactory(byteStreamFactory),
         mode(mode),
         connectCount(connectCount),
-        closeFulfiller(closeFulfiller) {}
+        closeFulfiller(closeFulfiller),
+        upEndedUncleanly(upEndedUncleanly) {}
 
   kj::Promise<void> start(StartContext context) override {
     return kj::READY_NOW;
   }
 
   kj::Promise<void> getTcpPort(GetTcpPortContext context) override {
-    context.getResults().setPort(
-        kj::heap<TestPort>(byteStreamFactory, mode, connectCount, closeFulfiller));
+    context.getResults().setPort(kj::heap<TestPort>(
+        byteStreamFactory, mode, connectCount, closeFulfiller, upEndedUncleanly));
     return kj::READY_NOW;
   }
 
@@ -353,6 +364,7 @@ class TestContainerServer final: public rpc::Container::Server {
   ResponseMode mode;
   size_t& connectCount;
   kj::Maybe<kj::PromiseFulfiller<void>&> closeFulfiller;
+  kj::Maybe<bool&> upEndedUncleanly;
 };
 
 class TestResponse final: public kj::HttpService::Response {
@@ -846,6 +858,63 @@ KJ_TEST("Container fails a raw connect() when the tunnel disconnects uncleanly")
   });
 
   KJ_EXPECT(connectCount == 1);
+}
+
+KJ_TEST("Container aborts the up tunnel when a connect() is torn down mid-request") {
+  // When the tunnel is torn down before the client has finished writing its request (so no clean
+  // half-close/end() has happened), the up direction must be dropped uncleanly -- i.e. reported to
+  // the container as an abort, not as a completed request. This matches the pre-tunnel-reuse
+  // behavior, where the up ExplicitEndOutputStream was simply destroyed without end() on any
+  // abnormal teardown.
+  auto fixture = makeFixture();
+  AutogateScope autogateScope;
+  capnp::ByteStreamFactory byteStreamFactory;
+  size_t connectCount = 0;
+  bool upEndedUncleanly = false;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto container = env.js.alloc<Container>(
+        rpc::Container::Client(kj::heap<TestContainerServer>(byteStreamFactory,
+            ResponseMode::TRUNCATED_DISCONNECT, connectCount, kj::none, upEndedUncleanly)),
+        true);
+    auto fetcher = container->getTcpPort(env.js, 8080);
+    auto client = fetcher->getClient(env.context, kj::none, "container"_kjc);
+    auto& headerTable = env.context.getHeaderTable();
+
+    auto pipe = kj::newTwoWayPipe();
+    TestConnectResponse response;
+    kj::NullStream discard;
+    kj::HttpHeaders headers(headerTable);
+    kj::HttpConnectSettings settings{.useTls = false};
+
+    auto connectPromise =
+        client->connect("container"_kjc, headers, *pipe.ends[0], response, settings);
+
+    // Write a partial request and then leave the write half open (NEVER_DONE), so the up pump
+    // never sees EOF and never performs a clean end(). The container-side truncated disconnect is
+    // what tears the tunnel down.
+    auto driveRequest =
+        pipe.ends[1]->write("GET / HTTP/1.1\r\n\r\n"_kjb).then([]() -> kj::Promise<void> {
+      return kj::NEVER_DONE;
+    });
+    auto drainResponse = pipe.ends[1]->pumpTo(discard).then(
+        [](uint64_t) -> kj::Promise<void> { return kj::NEVER_DONE; });
+
+    try {
+      co_await connectPromise.exclusiveJoin(kj::mv(driveRequest))
+          .exclusiveJoin(kj::mv(drainResponse));
+    } catch (...) {
+      // Expected: the truncated tunnel fails the connect().
+    }
+
+    // Let the aborted up capability's drop propagate back to the container-side receiver.
+    for (auto i = 0; i < 20 && !upEndedUncleanly; ++i) {
+      co_await kj::evalLater([]() {});
+    }
+  });
+
+  KJ_EXPECT(connectCount == 1);
+  KJ_EXPECT(upEndedUncleanly, "up tunnel should be aborted, not cleanly ended, on teardown");
 }
 
 KJ_TEST("Container fails a raw connect() when the upstream half-close fails") {
