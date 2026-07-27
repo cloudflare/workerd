@@ -796,11 +796,21 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
   // watching it for disconnection.
   void adoptOutput(kj::Own<capnp::ExplicitEndOutputStream> up) {
     output = kj::mv(up);
+    // whenWriteDisconnected()'s contract is to *resolve* (not reject) once writes would fail, and
+    // in that case we disconnect() with the default exception. Defensively handle a rejection as
+    // well: it is not known to be reachable through the capnp byte-stream machinery today, but if
+    // it ever were, funneling it into disconnect() keeps the invariant that every output-side
+    // failure tears the stream down, rather than silently stranding a parked read or a
+    // rejectWhenDisconnected() waiter.
     outputWatchTask = KJ_REQUIRE_NONNULL(output)
                           ->whenWriteDisconnected()
                           .then([weak = addWeakToThis()]() {
       KJ_IF_SOME(stream, weak) {
         stream->disconnect();
+      }
+    }, [weak = addWeakToThis()](kj::Exception&& exception) {
+      KJ_IF_SOME(stream, weak) {
+        stream->disconnect(kj::mv(exception));
       }
     }).eagerlyEvaluate(nullptr);
   }
@@ -847,14 +857,25 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
   }
 
   void shutdownWrite() override {
-    // shutdownWrite() is a clean half-close, which we convey to the container by calling the
+    // shutdownWrite() is a clean half-close, which we would convey to the container by calling the
     // capnp stream's explicit end(). Since shutdownWrite() is a synchronous void method, there is
-    // nowhere to await end(); we detach it, keeping the stream alive via attach() until it
-    // flushes. This is only reached on a clean half-close; abnormal teardown drops `output`
-    // without end() (see the destructor), which the container sees as an abort.
+    // nowhere to await end(); we detach it, keeping the stream alive via attach() until it flushes.
+    //
+    // No current caller actually reaches this override: the HTTP path tears the transport down by
+    // dropping it (an abort -- see the destructor), and the raw-socket path half-closes via
+    // endWrite() instead. We nonetheless implement the AsyncIoStream contract correctly. If end()
+    // fails while the read half is still open, funnel the failure into disconnect() -- capturing a
+    // WeakRc, since the detached promise can outlive the stream -- so the read side is torn down
+    // deterministically rather than left hanging.
     outputWatchTask = nullptr;
     KJ_IF_SOME(stream, kj::mv(output)) {
-      stream->end().attach(kj::mv(stream)).detach([](kj::Exception&&) {});
+      stream->end()
+          .attach(kj::mv(stream))
+          .detach([weak = addWeakToThis()](kj::Exception&& exception) {
+        KJ_IF_SOME(self, weak) {
+          self->disconnect(kj::mv(exception));
+        }
+      });
     }
   }
 
