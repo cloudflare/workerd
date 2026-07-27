@@ -282,42 +282,35 @@ pub trait FromJS: Sized {
 // Primitive type implementations
 // =============================================================================
 
-/// Implements `Type`, `ToJS`, and `FromJS` for primitive types.
-macro_rules! impl_primitive {
-    { $type:ty, $class_name:literal, $is_exact:ident, $unwrap_fn:ident } => {
-        impl Type for $type {
-            fn class_name() -> &'static str {
-                $class_name
-            }
+// Boolean implementation for JavaScript booleans.
+impl Type for bool {
+    fn class_name() -> &'static str {
+        "boolean"
+    }
 
-            fn is_exact(value: &v8::Local<v8::Value>) -> bool {
-                value.$is_exact()
-            }
-        }
-
-        impl ToJS for $type {
-            fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-            where
-                'b: 'a,
-            {
-                self.to_local(lock)
-            }
-        }
-
-        impl FromJS for $type {
-            type ResultType = Self;
-
-            fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
-                // SAFETY: The isolate is locked and value is a valid V8 local handle.
-                Ok(unsafe { v8::ffi::$unwrap_fn(lock.isolate().as_ffi(), value.into_ffi()) })
-            }
-        }
-    };
+    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+        value.is_boolean()
+    }
 }
 
-impl_primitive!(bool, "boolean", is_boolean, unwrap_boolean);
+impl ToJS for bool {
+    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+    where
+        'b: 'a,
+    {
+        self.to_local(lock)
+    }
+}
 
-// Split out of `impl_primitive!` because `unwrap_string` is fallible (`?`).
+impl FromJS for bool {
+    type ResultType = Self;
+
+    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+        // SAFETY: The isolate is locked and value is a valid V8 local handle.
+        Ok(unsafe { v8::ffi::unwrap_boolean(lock.isolate().as_ffi(), value.into_ffi()) })
+    }
+}
+
 impl Type for std::string::String {
     fn class_name() -> &'static str {
         "string"
