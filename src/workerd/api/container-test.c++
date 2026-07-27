@@ -276,13 +276,16 @@ class TestPort final: public rpc::Container::Port::Server, private kj::TaskSet::
     }
   }
 
-  kj::Promise<void> readRequest(kj::AsyncInputStream& input) {
+  // Reads a request's header block. Resolves to true once a full \r\n\r\n-delimited block has been
+  // read, or false if the client cleanly closed the connection first. A client close is a normal
+  // end-of-connection for a keep-alive server, not an error, so it must not throw (see taskFailed).
+  kj::Promise<bool> readRequest(kj::AsyncInputStream& input) {
     kj::byte buffer[1024];
     size_t matched = 0;
     constexpr kj::byte delimiter[] = {'\r', '\n', '\r', '\n'};
     while (matched < kj::size(delimiter)) {
       auto amount = co_await input.tryRead(buffer, 1, kj::size(buffer));
-      KJ_REQUIRE(amount > 0, "client disconnected before completing request headers");
+      if (amount == 0) co_return false;
       for (auto byte: kj::arrayPtr(buffer, amount)) {
         if (byte == delimiter[matched]) {
           ++matched;
@@ -291,12 +294,13 @@ class TestPort final: public rpc::Container::Port::Server, private kj::TaskSet::
         }
       }
     }
+    co_return true;
   }
 
   kj::Promise<void> serve(
       kj::Own<kj::AsyncInputStream> input, kj::Own<capnp::ExplicitEndOutputStream> down) {
     for (;;) {
-      co_await readRequest(*input);
+      if (!co_await readRequest(*input)) co_return;
       switch (mode) {
         case ResponseMode::KEEP_ALIVE:
           co_await down->write("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"_kjb);
@@ -333,7 +337,19 @@ class TestPort final: public rpc::Container::Port::Server, private kj::TaskSet::
     }
   }
 
-  void taskFailed(kj::Exception&&) override {}
+  void taskFailed(kj::Exception&& exception) override {
+    // serve() exits cleanly when the client closes the connection (see readRequest), so a failure
+    // reaching here is not part of normal teardown. Tolerate the benign DISCONNECTED/OVERLOADED
+    // exceptions that a teardown race on the write half can still surface, but log anything else as
+    // an ERROR -- which fails the test -- so unexpected mock or code-under-test breakage does not
+    // pass silently. (This is the same benign/interesting split as util::isInterestingException,
+    // inlined to keep the test free of that dependency.)
+    if (exception.getType() == kj::Exception::Type::DISCONNECTED ||
+        exception.getType() == kj::Exception::Type::OVERLOADED) {
+      return;
+    }
+    KJ_LOG(ERROR, "unexpected container mock serve() failure", exception);
+  }
 };
 
 class TestContainerServer final: public rpc::Container::Server {
