@@ -20,6 +20,12 @@ namespace workerd::api {
 
 namespace {
 
+// Upper bound on the number of distinct container ports whose tunnels we pool per Container. This
+// is a hard admission cap: once this many ports are pooled, any further distinct port falls back
+// to the non-pooled connect path (a fresh tunnel per request) for the Container's lifetime.
+// TODO(perf): This has no eviction policy or observability. Consider LRU eviction of cold entries
+//   and/or a debug log or metric when the cap is hit, so ports beyond the cap are not silently and
+//   permanently relegated to the slower path.
 constexpr size_t MAX_CACHED_TCP_PORTS = 4;
 
 kj::Maybe<kj::Path> parseRestorePath(kj::StringPtr path) {
@@ -964,6 +970,13 @@ class ContainerPortNetworkAddress final: public kj::NetworkAddress {
   // must be buffered: by the time the stream exists, the connection is established, and the
   // disconnect callbacks below are only wired up afterward. The extra round-trip is negligible,
   // as the container service is reached over a local socket.
+  //
+  // We deliberately do not impose our own timeout on this await. The Workers runtime relies on a
+  // higher-level bound -- the enclosing request's lifetime -- to cap how long any subrequest can
+  // wait, and historically edgeworker has not layered its own timeouts underneath that. Timeout
+  // policy is the application's to choose: the Worker (or the code driving the container) is best
+  // placed to decide an appropriate deadline for its own traffic, so we surface the connection as
+  // it completes or fails rather than second-guessing it here.
   kj::Promise<kj::Own<ContainerPortAsyncIoStream>> connectTyped() {
     auto req = port.connectRequest(capnp::MessageSize{4, 1});
     auto downPipe = kj::newOneWayPipe();
@@ -1073,6 +1086,13 @@ class Container::TcpPortState {
     return kj::none;
   }
 
+  // `markPortFailed()`/`hasPortFailed()` record a sticky failure so the next getTcpPort() lookup
+  // discards this cached state and rebuilds a fresh tunnel. This is intentionally not a full
+  // circuit breaker (no failure-count threshold, fail-fast window, or state-transition metrics):
+  // the container sidecar is reached over a local socket via a single Port capability, and the
+  // enclosing request lifetime already bounds how long a request can wait on an unhealthy sidecar.
+  // A retry storm against a dead sidecar would be capped by that request-level teardown rather
+  // than by an explicit breaker here.
   void markPortFailed() {
     address.markFailed();
   }

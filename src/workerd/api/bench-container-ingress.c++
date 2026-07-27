@@ -265,6 +265,13 @@ TestFixture::SetupParams setupParams() {
   return TestFixture::SetupParams{.useRealTimers = false};
 }
 
+// TODO(perf): This benchmark uses fake timers and in-process kj::newTwoWayPipe transports, so the
+//   simulated tunnel/network latency is zero. That means the Managed vs. ManagedReuse comparison
+//   measures only CPU and allocation cost, not the per-connection round-trip that tunnel pooling
+//   is meant to amortize. To make the comparison representative, inject a configurable synthetic
+//   delay into the tunnel transport (e.g. a stream wrapper that defers reads/writes on the shared
+//   fake timer) so the establishment RTT shows up in the numbers.
+
 kj::TimerImpl& sharedFakeTimer() {
   static kj::TimerImpl inst{kj::origin<kj::TimePoint>()};
   return inst;

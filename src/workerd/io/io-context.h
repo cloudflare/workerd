@@ -828,7 +828,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // Access the unmitigated event-loop timer for internal housekeeping whose timing is not exposed
   // to JavaScript, such as connection-pool eviction. Do not use this for application-visible
-  // clocks or timers.
+  // clocks or timers -- those must go through the Spectre-mitigated path (now(), atTime(),
+  // afterLimitTimeout()), which this deliberately bypasses.
   kj::Timer& getUnsafeTimer() {
     return thread.getUnsafeTimer();
   }
