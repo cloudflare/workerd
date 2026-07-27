@@ -684,6 +684,11 @@ class NoDeferredProxyReadableStream final: public ReadableStreamSource {
 
 }  // namespace
 
+kj::Own<ReadableStreamSource> newNoDeferredProxyReadableStream(
+    IoContext& context, kj::Own<ReadableStreamSource> inner) {
+  return kj::heap<NoDeferredProxyReadableStream>(kj::mv(inner), context);
+}
+
 void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // Serialize by effectively creating a `JsRpcStub` around this object and serializing that.
   // Except we don't actually want to do _exactly_ that, because we do not want to actually create
