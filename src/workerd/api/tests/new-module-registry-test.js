@@ -219,6 +219,14 @@ throws(() => myRequire('tla'), {
 
 // Verify that a module is unable to perform IO operations at the top level, even if
 // the dynamic import is initiated within the scope of an active IoContext.
+export const nestedRequireDoesNotCrashSiblingTlaModule = {
+  async test() {
+    // Before the evaluation-depth scope covered the eval callback, this aborted the process.
+    const mod = await import('tla-entry');
+    strictEqual(mod.default, 1);
+  },
+};
+
 export const noTopLevelIo = {
   async test() {
     await rejects(import('bad'), {

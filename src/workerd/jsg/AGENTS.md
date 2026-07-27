@@ -99,6 +99,18 @@ These rules MUST be followed when writing or modifying JSG code:
     `jsg-visit-for-gc` clang-tidy diagnostic with a `// NOLINT(jsg-visit-for-gc)`
     comment and a brief explanation of *why* it's safe to skip.
 
+12. **Module evaluation MUST NOT drain the microtask queue while nested.** Draining
+    while an ancestor module is still `kEvaluating` can run an async module's
+    fulfillment callback early and trip a fatal V8 CHECK
+    (`status() >= kEvaluatingAsync`). Evaluation depth is tracked by the RAII
+    `Lock::ModuleEvaluationScope`, queried via `js.isEvaluatingModule()`; both module
+    registries check it before settling a pending top-level await. Any code path that
+    calls `v8::Module::Evaluate()` MUST hold a `ModuleEvaluationScope`, including
+    embedder-supplied evaluation callbacks (`ModuleRegistry::Builder::setEvalCallback`),
+    or the guard is silently bypassed. Callers that can return a promise to their own
+    caller may pass `InstantiateModuleOptions::ALLOW_PENDING_EVALUATION` to receive the
+    pending evaluation promise instead of an error.
+
 The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
 automatically detects missing `visitForGc` implementations and unvisited fields
 across the codebase, enforcing invariants 1 and 2 at build time.

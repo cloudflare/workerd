@@ -590,6 +590,12 @@ wd_test(
 )
 
 wd_test(
+    src = "module-tla-nested-require-test.wd-test",
+    args = ["--experimental"],
+    data = ["module-tla-nested-require-test.js"],
+)
+
+wd_test(
     src = "navigator-beacon-test.wd-test",
     args = ["--experimental"],
     data = ["navigator-beacon-test.js"],

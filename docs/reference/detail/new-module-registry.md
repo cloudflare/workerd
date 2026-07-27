@@ -347,7 +347,11 @@ CJS code: const foo = require('./bar.js')
    c. If status == kEvaluated or kEvaluating -> return namespace directly
       (allows CJS circular deps with incomplete exports, same as Node.js)
    d. Otherwise: call module.evaluate() -> Promise
-   e. Run microtasks
+      (wrapped in Lock::ModuleEvaluationScope, which tracks evaluation depth)
+   e. If nested inside another module's evaluation (js.isEvaluatingModule()), do
+      not drain microtasks -- doing so could trip a fatal V8 CHECK
+      (status() >= kEvaluatingAsync). Otherwise (evaluation depth 0) run
+      microtasks.
    f. Check promise state:
       - kFulfilled -> return module namespace
       - kRejected -> throw rejection reason
@@ -760,6 +764,13 @@ returning a rejected promise with the cached exception.
    `KJ_FAIL_ASSERT` for `PythonModule` content. Python support remains on the
    legacy registry path.
 
-10. **Top-level await handling.** Same as legacy: after `Evaluate`, microtasks
-    are drained. If the returned Promise is still pending, a "top-level await"
-    error is thrown. Workers must fully initialize synchronously.
+10. **Top-level await handling.** After `Evaluate`, microtasks are drained unless
+    the evaluation is nested inside another module's evaluation (evaluation depth
+    tracked by `Lock::ModuleEvaluationScope`, queried via
+    `js.isEvaluatingModule()`). Draining while an ancestor module is still
+    `kEvaluating` could fire an async module's fulfillment callback early and trip
+    a fatal V8 CHECK (`status() >= kEvaluatingAsync`). If the returned Promise is
+    still pending, a "top-level await" error is thrown. Workers must fully
+    initialize synchronously.
+
+    The legacy registry (`modules.c++`) follows the same rules.
