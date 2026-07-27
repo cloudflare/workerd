@@ -171,6 +171,9 @@ class IsolateBase {
     return requested;
   }
 
+  // Counts v8::Module::Evaluate() calls on the stack. Non-zero means some module is
+  // kEvaluating, which makes draining the microtask queue unsafe; the module registries
+  // check this before settling a pending top-level await.
   inline void enterModuleEvaluation(kj::Badge<Lock>) {
     ++moduleEvaluationDepth;
   }
