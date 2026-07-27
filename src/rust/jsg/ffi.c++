@@ -642,25 +642,18 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
 
 // Unwrappers
 
-// Runs `fn` (returning a v8::MaybeLocal<T>) under a TryCatch. On failure it
-// converts the pending JS exception into a `jsg.<Type>:`-prefixed kj::Exception
-// and throws it, so workerd-cxx's Result::run catches it in C++ and hands Rust a
-// catchable error instead of aborting. Termination exceptions are re-thrown
-// unchanged, mirroring jsg::Lock::tryCatch.
+// Runs `fn` (returning a v8::MaybeLocal<T>) and, on failure, converts the pending
+// JS exception into a `jsg.<Type>:`-prefixed kj::Exception and throws it, so
+// workerd-cxx's Result::run catches it in C++ and hands Rust a catchable error
+// instead of aborting. Termination exceptions are re-thrown unchanged. The
+// TryCatch and termination handling are delegated to jsg::Lock::tryCatch.
 template <typename T, typename Func>
 static v8::Local<T> unwrapCoerce(v8::Isolate* isolate, Func&& fn) {
-  v8::TryCatch tryCatch(isolate);
-  v8::Local<T> result;
-  if (fn().ToLocal(&result)) {
-    return result;
-  }
-  if (!tryCatch.CanContinue() || !tryCatch.HasCaught() || tryCatch.Exception().IsEmpty()) {
-    tryCatch.ReThrow();
-    throw ::workerd::jsg::JsExceptionThrown();
-  }
-  auto exception = ::workerd::jsg::createTunneledException(isolate, tryCatch.Exception());
-  tryCatch.Reset();
-  kj::throwFatalException(kj::mv(exception));
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  return js.tryCatch([&]() -> v8::Local<T> { return ::workerd::jsg::check(fn()); },
+      [&](::workerd::jsg::Value error) -> v8::Local<T> {
+    kj::throwFatalException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
+  });
 }
 
 ::rust::String unwrap_string(Isolate* isolate, Local value) {
