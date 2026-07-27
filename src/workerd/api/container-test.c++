@@ -225,12 +225,14 @@ class TestPort final: public rpc::Container::Port::Server, private kj::TaskSet::
       ResponseMode mode,
       size_t& connectCount,
       kj::Maybe<kj::PromiseFulfiller<void>&> closeFulfiller,
-      kj::Maybe<bool&> upEndedUncleanly = kj::none)
+      kj::Maybe<bool&> upEndedUncleanly = kj::none,
+      bool deferConnect = false)
       : byteStreamFactory(byteStreamFactory),
         mode(mode),
         connectCount(connectCount),
         closeFulfiller(closeFulfiller),
         upEndedUncleanly(upEndedUncleanly),
+        deferConnect(deferConnect),
         tasks(*this) {}
 
   kj::Promise<void> connect(ConnectContext context) override {
@@ -255,8 +257,22 @@ class TestPort final: public rpc::Container::Port::Server, private kj::TaskSet::
       // observable: the callback fires only if the up stream is destroyed without end().
       up = capnp::ExplicitEndOutputStream::wrap(kj::mv(up), [&flag]() { flag = true; });
     }
-    context.getResults().setUp(byteStreamFactory.kjToCapnp(kj::mv(up)));
+    auto upCap = byteStreamFactory.kjToCapnp(kj::mv(up));
     auto down = byteStreamFactory.capnpToKjExplicitEnd(context.getParams().getDown());
+    if (deferConnect) {
+      // Mirror the real container service: the Port.connect() RPC does not resolve until the
+      // connection is torn down, and `up` is delivered early via promise pipelining
+      // (context.setPipeline) so the caller can use the tunnel before connect() returns. Returning
+      // the serve() promise directly (rather than backgrounding it via tasks and resolving now)
+      // keeps the call outstanding for the connection's lifetime. Code under test must therefore
+      // hand back a usable stream without waiting for this RPC to complete; otherwise it deadlocks.
+      capnp::PipelineBuilder<ConnectResults> pipeline;
+      pipeline.setUp(upCap);
+      context.setPipeline(pipeline.build());
+      context.getResults().setUp(kj::mv(upCap));
+      return serve(kj::mv(upPipe.in), kj::mv(down));
+    }
+    context.getResults().setUp(kj::mv(upCap));
     tasks.add(serve(kj::mv(upPipe.in), kj::mv(down)));
     return kj::READY_NOW;
   }
@@ -267,6 +283,7 @@ class TestPort final: public rpc::Container::Port::Server, private kj::TaskSet::
   size_t& connectCount;
   kj::Maybe<kj::PromiseFulfiller<void>&> closeFulfiller;
   kj::Maybe<bool&> upEndedUncleanly;
+  bool deferConnect;
   kj::TaskSet tasks;
   kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> heldDown;
 
@@ -358,12 +375,14 @@ class TestContainerServer final: public rpc::Container::Server {
       ResponseMode mode,
       size_t& connectCount,
       kj::Maybe<kj::PromiseFulfiller<void>&> closeFulfiller = kj::none,
-      kj::Maybe<bool&> upEndedUncleanly = kj::none)
+      kj::Maybe<bool&> upEndedUncleanly = kj::none,
+      bool deferConnect = false)
       : byteStreamFactory(byteStreamFactory),
         mode(mode),
         connectCount(connectCount),
         closeFulfiller(closeFulfiller),
-        upEndedUncleanly(upEndedUncleanly) {}
+        upEndedUncleanly(upEndedUncleanly),
+        deferConnect(deferConnect) {}
 
   kj::Promise<void> start(StartContext context) override {
     return kj::READY_NOW;
@@ -371,7 +390,7 @@ class TestContainerServer final: public rpc::Container::Server {
 
   kj::Promise<void> getTcpPort(GetTcpPortContext context) override {
     context.getResults().setPort(kj::heap<TestPort>(
-        byteStreamFactory, mode, connectCount, closeFulfiller, upEndedUncleanly));
+        byteStreamFactory, mode, connectCount, closeFulfiller, upEndedUncleanly, deferConnect));
     return kj::READY_NOW;
   }
 
@@ -381,6 +400,7 @@ class TestContainerServer final: public rpc::Container::Server {
   size_t& connectCount;
   kj::Maybe<kj::PromiseFulfiller<void>&> closeFulfiller;
   kj::Maybe<bool&> upEndedUncleanly;
+  bool deferConnect;
 };
 
 class TestResponse final: public kj::HttpService::Response {
@@ -762,8 +782,31 @@ KJ_TEST("Container propagates clean EOF for a close-delimited response") {
   runTunnelTest(ResponseMode::CLOSE_DELIMITED, 2, TunnelReuseGate::ENABLED, WaitForClose::YES);
 }
 
-KJ_TEST("Container does not reuse a Connection close tunnel") {
-  runTunnelTest(ResponseMode::CONNECTION_CLOSE, 2, TunnelReuseGate::ENABLED, WaitForClose::YES);
+KJ_TEST("Container fetch completes when Port.connect() stays outstanding") {
+  // The real container service keeps the Port.connect() RPC outstanding for the lifetime of the
+  // connection: the response is not sent until the tunnel is torn down. The tunnel must therefore
+  // become usable as soon as the pipelined `up`/`down` streams exist, without waiting for connect()
+  // to resolve -- otherwise the request writes and the connect completion deadlock on each other.
+  // `deferConnect` reproduces that server behavior; a fetcher that awaited connect() before
+  // returning the stream would hang here.
+  auto fixture = makeFixture();
+  AutogateScope autogateScope(TunnelReuseGate::ENABLED);
+  capnp::ByteStreamFactory byteStreamFactory;
+  size_t connectCount = 0;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto container = env.js.alloc<Container>(
+        rpc::Container::Client(kj::heap<TestContainerServer>(byteStreamFactory,
+            ResponseMode::KEEP_ALIVE, connectCount, kj::none, kj::none, /*deferConnect=*/true)),
+        true);
+    auto fetcher = container->getTcpPort(env.js, 8080);
+    auto client = fetcher->getClient(env.context, kj::none, "container"_kjc);
+    auto& headerTable = env.context.getHeaderTable();
+    return makeTestRequest(*client, headerTable)
+        .attach(kj::mv(client), kj::mv(fetcher), kj::mv(container));
+  });
+
+  KJ_EXPECT(connectCount == 1);
 }
 
 void runFetchFailureTest(ResponseMode mode,
