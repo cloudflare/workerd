@@ -1134,8 +1134,13 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server,
   uint16_t containerPort;
   kj::TaskSet pumpTasks;
 
-  void taskFailed(kj::Exception&&) override {
-    // Tunnel disconnects are reported to the peer through the ByteStreams.
+  void taskFailed(kj::Exception&& exception) override {
+    // Tunnel disconnects are expected during normal teardown and are reported to the peer through
+    // the ByteStreams, so ignore them (and other uninteresting errors such as OVERLOADED). Log
+    // anything unexpected so that genuine failures are not silently swallowed.
+    if (isInterestingException(exception)) {
+      KJ_LOG(ERROR, "container tunnel pump task failed", exception);
+    }
   }
 };
 
