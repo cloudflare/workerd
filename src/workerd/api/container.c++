@@ -817,10 +817,16 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    KJ_IF_SOME(exception, disconnectException) {
+      return exception.clone();
+    }
     return propagateWriteFailure(KJ_REQUIRE_NONNULL(output)->write(buffer));
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    KJ_IF_SOME(exception, disconnectException) {
+      return exception.clone();
+    }
     return propagateWriteFailure(KJ_REQUIRE_NONNULL(output)->write(pieces));
   }
 
@@ -870,9 +876,12 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
     // rejects the pending write (propagateWriteFailure) and resolves whenWriteDisconnected()
     // (outputWatchTask), and the `down`-drop callback and abortRead() are further triggers. Make
     // it idempotent: only the first call takes effect, so every observer sees the first reported
-    // exception. Recording that exception is also what lets reads and disconnect waiters
+    // exception. Recording that exception is also what lets reads, writes, and disconnect waiters
     // registered *after* this point observe the failure, since kj::Canceler retains no canceled
-    // state of its own.
+    // state of its own. (Writes consult the recorded exception rather than being canceler-wrapped:
+    // an in-flight write should not be forcibly cancelled -- unlike a parked read, it either makes
+    // progress or fails on its own -- but a write issued after disconnect must fail deterministically
+    // instead of being retried against a stream we already consider broken.)
     if (disconnectException != kj::none) {
       return;
     }
