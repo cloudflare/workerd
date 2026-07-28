@@ -84,14 +84,13 @@ jsg::ModuleRegistry::ModuleInfo addCapnpModule(
 // on the TypeWrapper specific to each project.
 template <typename TypeWrapper>
 static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
-    const jsg::ResolveObserver& resolveObserver,
     kj::Maybe<const Worker::Script::ModulesSource&> maybeSource,
     const CompatibilityFlags::Reader& featureFlags,
     const jsg::Url& bundleBase,
     auto setupForApi,
     jsg::modules::ModuleRegistry::Builder::Options options =
         jsg::modules::ModuleRegistry::Builder::Options::NONE) {
-  jsg::modules::ModuleRegistry::Builder builder(resolveObserver, bundleBase, options);
+  jsg::modules::ModuleRegistry::Builder builder(bundleBase, options);
 
   // This callback is used when a module is being loaded to arrange evaluating the
   // module outside of the current IoContext.

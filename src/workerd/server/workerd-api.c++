@@ -864,7 +864,6 @@ const WorkerdApi& WorkerdApi::from(const Worker::Api& api) {
 // }  // namespace
 
 kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
-    const jsg::ResolveObserver& observer,
     kj::Maybe<const Worker::Script::ModulesSource&> maybeSource,
     const CompatibilityFlags::Reader& featureFlags,
     const PythonConfig& pythonConfig,
@@ -873,7 +872,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
     kj::Maybe<kj::String> maybeFallbackService,
     kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) {
 
-  return newWorkerModuleRegistry<JsgWorkerdIsolate_TypeWrapper>(observer, maybeSource, featureFlags,
+  return newWorkerModuleRegistry<JsgWorkerdIsolate_TypeWrapper>(maybeSource, featureFlags,
       bundleBase,
       [&](jsg::modules::ModuleRegistry::Builder& builder, IsPythonWorker isPythonWorker) {
     // TODO(later): The new module registry should eventually support python workers

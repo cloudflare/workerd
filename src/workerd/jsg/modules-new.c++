@@ -17,6 +17,14 @@
 
 namespace workerd::jsg::modules {
 
+namespace {
+// A no-op ResolveObserver used when no per-isolate observer has been injected.
+// All methods on ResolveObserver have default no-op implementations.
+// TODO(soon): Once ResolveObserver is injected per-isolate via attachToIsolate(),
+// this can be removed.
+ResolveObserver noopResolveObserver;
+}  // namespace
+
 kj::String specifierToString(jsg::Lock& js, v8::Local<v8::String> spec) {
   // Source files in workers end up being converted to UTF-8 bytes, so if the specifier
   // string contains non-ASCII unicode characters, those will be directly encoded as UTF-8
@@ -924,7 +932,7 @@ class IsolateModuleRegistry final {
       .attributes = kj::mv(clonedAttrs),
     };
 
-    KJ_IF_SOME(found, inner.lookup(innerContext)) {
+    KJ_IF_SOME(found, inner.lookup(innerContext, noopResolveObserver)) {
       return kj::Maybe<Entry&>(lookupCache.upsert(
           Entry{
             .key = HashableV8Ref<v8::Module>(
@@ -1742,10 +1750,8 @@ ModuleRegistry::Impl::Impl(kj::ArrayPtr<kj::Vector<kj::Own<ModuleBundle>>> vecto
   bundles[kFallback] = vectors[kFallback].releaseAsArray();
 }
 
-ModuleRegistry::Builder::Builder(
-    const ResolveObserver& observer, const jsg::Url& bundleBase, Options options)
-    : observer(observer),
-      bundleBase(bundleBase),
+ModuleRegistry::Builder::Builder(const jsg::Url& bundleBase, Options options)
+    : bundleBase(bundleBase),
       options(options),
       schemaLoader(kj::heap<capnp::SchemaLoader>()) {}
 
@@ -1772,8 +1778,7 @@ kj::Arc<ModuleRegistry> ModuleRegistry::Builder::finish() {
 }
 
 ModuleRegistry::ModuleRegistry(ModuleRegistry::Builder* builder)
-    : observer(builder->observer),
-      bundleBase(builder->bundleBase.clone()),
+    : bundleBase(builder->bundleBase.clone()),
       impl(Impl(builder->bundles_.asPtr())),
       maybeEvalCallback(kj::mv(builder->maybeEvalCallback)),
       schemaLoader(kj::mv(builder->schemaLoader)) {}
@@ -1890,7 +1895,8 @@ kj::Maybe<const Module&> ModuleRegistry::lookupImpl(
   return kj::none;
 }
 
-kj::Maybe<const Module&> ModuleRegistry::lookup(const ResolveContext& context) const {
+kj::Maybe<const Module&> ModuleRegistry::lookup(
+    const ResolveContext& context, const ResolveObserver& observer) const {
   // If the embedder supports it, collect metrics on what modules were resolved.
   auto metrics =
       observer.onResolveModule(context.normalizedSpecifier, context.type, context.source);
