@@ -134,7 +134,10 @@ namespace workerd::util {
      never enters JavaScript and byte-budgets its un-yielded work, while pumpToImpl() still        \
      suspends through the event loop on every iteration (only the write suspension is elided),     \
      leaving the JS-visible pull() ordering unchanged. */                                          \
-  V(STREAM_CONTROLLER_SYNC_FAST_PATHS)
+  V(STREAM_CONTROLLER_SYNC_FAST_PATHS)                                                              \
+  /* Enables the V8 startup-snapshot pipeline: a throwaway zygote Worker is built to produce a      \
+     startup snapshot, and the real Worker's isolate is then created from it. */                    \
+  V(STARTUP_SNAPSHOT)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

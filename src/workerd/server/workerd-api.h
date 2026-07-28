@@ -44,7 +44,8 @@ class WorkerdApi final: public Worker::Api {
       kj::Own<JsgIsolateObserver> observer,
       api::MemoryCacheProvider& memoryCacheProvider,
       const PythonConfig& pythonConfig,
-      kj::Array<Worker::Api::InboundListener> inboundListeners = nullptr);
+      kj::Array<Worker::Api::InboundListener> inboundListeners = nullptr,
+      kj::Maybe<jsg::SnapshotConfig> snapshotConfig = kj::none);
   ~WorkerdApi() noexcept(false);
 
   static const WorkerdApi& from(const Worker::Api&);
