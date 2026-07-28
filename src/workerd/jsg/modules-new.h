@@ -768,8 +768,12 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
     Impl(kj::ArrayPtr<kj::Vector<kj::Own<ModuleBundle>>> bundles);
   };
 
+  // TODO(soon): The observer is stored as a bare reference, meaning the caller must
+  // guarantee that the ResolveObserver outlives the registry. In edgeworker's replica
+  // model, a shared registry cannot safely reference a per-isolate observer. This will
+  // be addressed by passing the observer at resolve-time rather than at construction.
   const ResolveObserver& observer;
-  const jsg::Url& bundleBase;
+  jsg::Url bundleBase;
   kj::MutexGuarded<Impl> impl;
   // Marked mutable because kj::Function::operator() is non-const, but the eval
   // callback is conceptually const — it is only ever invoked while holding the

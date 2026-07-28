@@ -1773,7 +1773,7 @@ kj::Arc<ModuleRegistry> ModuleRegistry::Builder::finish() {
 
 ModuleRegistry::ModuleRegistry(ModuleRegistry::Builder* builder)
     : observer(builder->observer),
-      bundleBase(builder->bundleBase),
+      bundleBase(builder->bundleBase.clone()),
       impl(Impl(builder->bundles_.asPtr())),
       maybeEvalCallback(kj::mv(builder->maybeEvalCallback)),
       schemaLoader(kj::mv(builder->schemaLoader)) {}
