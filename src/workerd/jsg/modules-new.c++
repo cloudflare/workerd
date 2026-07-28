@@ -1003,9 +1003,24 @@ void importMeta(
         auto resolve = js.wrapReturningFunction(js.v8Context(),
             [href = kj::mv(href)](
                 Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) -> JsValue {
+          // Node.js and the HTML spec both require import.meta.resolve to be called
+          // with a specifier argument; calling it with none is a TypeError rather
+          // than silently resolving the string "undefined".
+          JSG_REQUIRE(args.Length() >= 1, TypeError,
+              "import.meta.resolve requires a specifier argument");
           // Note that we intentionally use ToString here to coerce whatever value is given
           // into a string or throw if it cannot be coerced.
           auto specifier = js.toString(args[0]);
+          // If Node.js Compat mode is enabled, a bare specifier naming a Node.js
+          // built-in (e.g. "fs") — or any "node:"-prefixed specifier — must resolve
+          // to the canonical "node:" URL, exactly as import() and require() do.
+          // Without this, import.meta.resolve("fs") would incorrectly resolve the
+          // bare specifier against the module's base URL (e.g. "file:///bundle/fs").
+          if (isNodeJsCompatEnabled(js)) {
+            KJ_IF_SOME(nodeSpec, checkNodeSpecifier(specifier)) {
+              specifier = kj::mv(nodeSpec);
+            }
+          }
           KJ_IF_SOME(resolved, Url::tryParse(specifier.asPtr(), href)) {
             // import.meta.resolve is specified to be equivalent to
             // `new URL(specifier, import.meta.url).href` (see the comment above).

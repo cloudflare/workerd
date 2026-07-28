@@ -83,6 +83,18 @@ strictEqual(import.meta.resolve('./a/../%66oo.js'), 'file:///bundle/%66oo.js');
 // import.meta.resolve throws (never returns null) for an unparseable specifier.
 throws(() => import.meta.resolve('https://[bad'), { name: 'TypeError' });
 
+// A bare specifier naming a Node.js built-in resolves to its canonical "node:"
+// URL — matching import()/require() and Node's own import.meta.resolve — rather
+// than being treated as a bare path relative to the module's base URL (which
+// would incorrectly yield 'file:///bundle/fs').
+strictEqual(import.meta.resolve('fs'), 'node:fs');
+strictEqual(import.meta.resolve('node:fs'), 'node:fs');
+// The deprecated "sys" alias maps to node:util, as it does elsewhere.
+strictEqual(import.meta.resolve('sys'), 'node:util');
+// Calling import.meta.resolve with no argument is a TypeError (Node parity),
+// not a silent resolution of the coerced string "undefined".
+throws(() => import.meta.resolve(), { name: 'TypeError' });
+
 // There are four tests at this top level... one for the import of the node:assert
 // module without the node: prefix specifier, two for the imports of the foo and
 // bar modules from the worker, and one for the aliases node:fs module from the
