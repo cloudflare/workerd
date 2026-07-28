@@ -139,6 +139,15 @@ class IoContext_IncomingRequest final {
   // based on setTimeout() when needed.
   kj::Date now(kj::Maybe<kj::Date> nextTimeout = kj::none);
 
+  // Read the time for trace onset information, which is recorded ahead of delivered().
+  //
+  // Side effect: for actors this forces a clock resync (syncTime()) before reading. Actors reuse
+  // an IoContext across requests, so between requests their Spectre-coarsened clock is frozen at
+  // whatever value the previous request left it at. delivered() normally resyncs it, but the onset
+  // timestamp is read before delivered() runs, so without this the onset would be stale (and could
+  // predate its own parent span). This is NOT a cheap read; prefer now() everywhere else.
+  kj::Date nowForTraceOnset();
+
   RequestObserver& getMetrics() {
     return *metrics;
   }

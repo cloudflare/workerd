@@ -282,6 +282,9 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
 
   KJ_IF_SOME(a, context->actor) {
     // Re-synchronize the timer and top up limits for every new incoming request to an actor.
+    // Note: when tracing is active this resync may have already happened via nowForTraceOnset(),
+    // which reads the onset timestamp before delivered() runs. Syncing again here is harmless (the
+    // two calls are back-to-back) and keeps the resync unconditional for the non-traced path.
     ioChannelFactory->getTimer().syncTime();
     context->limitEnforcer->topUpActor();
 
@@ -296,6 +299,13 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
 kj::Date IoContext::IncomingRequest::now(kj::Maybe<kj::Date> nextTimeout) {
   metrics->clockRead();
   return ioChannelFactory->getTimer().now(kj::mv(nextTimeout));
+}
+
+kj::Date IoContext::IncomingRequest::nowForTraceOnset() {
+  if (context->actor != kj::none) {
+    ioChannelFactory->getTimer().syncTime();
+  }
+  return now();
 }
 
 IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
