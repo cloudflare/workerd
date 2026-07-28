@@ -397,6 +397,18 @@ auto onSuccess = [this, ref = addRef(), ...](...) mutable {
 };
 ```
 
+### Pattern: Pipe-Lock Lifetime
+
+- **When**: A `ReadableStream` is piped to a `WritableStream` (`pipeTo`/`pipeThrough`),
+  putting the source's lock state machine into `PipeLocked`
+- **Why**: The destination's pipe loop holds a `ReadableStreamController::PipeController&`
+  that points into the source's `PipeLocked` lock state. If the source unlocked
+  (`PipeLocked -> Unlocked`) while the pipe loop is still running, that reference would dangle.
+- **Rule**: The source stays `PipeLocked` for the entire lifetime of the pipe. ONLY
+  the pipe machinery  may perform the `PipeLocked -> Unlocked` transition.
+  `onClose`/`onError` MUST NOT unlock the source — they signal the loop, which then
+  releases the lock itself.
+
 ### Pattern: StateListener Self-Destruction Guard
 
 - **When**: Consumer state listener callbacks (`onConsumerClose`, etc.)

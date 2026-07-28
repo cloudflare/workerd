@@ -139,7 +139,10 @@ class ReadableLockImpl {
   //   Unlocked -> ReaderLocked (lockReader() called)
   //   Unlocked -> PipeLocked (tryPipeLock() called)
   //   ReaderLocked -> Unlocked (releaseReader() called)
-  //   PipeLocked -> Unlocked (release() or onClose/onError called)
+  //   PipeLocked -> Unlocked (release() called)
+  //     Only the pipe machinery performs this transition.
+  //     The destination's pipe loop holds a reference into the PipeLocked
+  //     state (its PipeController), which would otherwise dangle.
   //   Locked -> (remains until stream is done)
   using LockState = StateMachine<Locked, PipeLocked, ReaderLocked, Unlocked>;
   LockState state = LockState::template create<Unlocked>();
@@ -328,9 +331,11 @@ void ReadableLockImpl<Controller>::onClose(jsg::Lock& js) {
       // point is not recoverable. Log and move on.
       LOG_NOSENTRY(ERROR, "Error resolving ReadableStream reader closed promise");
     };
-  } else {
-    (void)state.template transitionFromTo<PipeLocked, Unlocked>();
   }
+  // When PipeLocked, we must NOT release the lock here: the destination's pipe lock holds a raw
+  // reference to our PipeController, and the pipe loop is responsible for releasing it (via
+  // source.release()) once it observes our closed/errored state. Tearing the PipeController down
+  // here leaves that reference dangling.
 }
 
 template <typename Controller>
@@ -345,9 +350,11 @@ void ReadableLockImpl<Controller>::onError(jsg::Lock& js, jsg::JsValue reason) {
       // point is not recoverable. Log and move on.
       LOG_NOSENTRY(ERROR, "Error rejecting ReadableStream reader closed promise");
     }
-  } else {
-    (void)state.template transitionFromTo<PipeLocked, Unlocked>();
   }
+  // When PipeLocked, we must NOT release the lock here: the destination's pipe lock holds a raw
+  // reference to our PipeController, and the pipe loop is responsible for releasing it (via
+  // source.release()) once it observes our closed/errored state. Tearing the PipeController down
+  // here leaves that reference dangling.
 }
 
 template <typename Controller>
