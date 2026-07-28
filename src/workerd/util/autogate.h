@@ -115,7 +115,10 @@ namespace workerd::util {
      disabled, deserialization constructs legacy streams in place, exactly as before the gate      \
      existed; the typescript_implemented_streams compat flag requires this gate to receive         \
      streams over RPC (that combination is rejected, not degraded). */                             \
-  V(RPC_EXTERNALS_HYDRATION)
+  V(RPC_EXTERNALS_HYDRATION)                                                                       \
+  /* Selects the redesigned memory cache implementation. The legacy implementation remains         \
+     available for rollback while this gate is rolled out. */                                      \
+  V(MEMORY_CACHE_V2)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
