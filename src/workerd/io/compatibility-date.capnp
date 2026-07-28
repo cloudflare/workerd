@@ -1653,4 +1653,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # RangeError (JS API) or trap (wasm opcode).
   # WARNING: Do not remove the `$experimental` marker before
   # the v8 change becomes part of chrome's default config.
+
+  startupSnapshot @187 :Bool
+      $compatEnableFlag("startup_snapshot")
+      $experimental;
+  # Enables the V8 startup-snapshot pipeline: a throwaway zygote Worker is
+  # built in PREPARE_SNAPSHOT mode to capture a V8 startup snapshot, and the
+  # real Worker's isolate is then created from that snapshot.
 }
