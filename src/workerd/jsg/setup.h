@@ -385,9 +385,32 @@ class IsolateBase {
     return ptr;
   }
 
+  bool isPreparingSnapshot() const {
+    return mode == IsolateMode::PREPARE_SNAPSHOT;
+  }
+
+  bool isStartingFromSnapshot() const {
+    return mode == IsolateMode::START_FROM_SNAPSHOT;
+  }
+
+  // In PREPARE_SNAPSHOT mode: serialize the isolate with `defaultContext` as the default
+  // context and fill the SnapshotArtifact slot passed at isolate creation. No-op otherwise.
+  void prepareSnapshot(v8::Local<v8::Context> defaultContext);
+
  private:
   template <typename TypeWrapper>
   friend class Isolate;
+
+  // Three modes in which an isolate can be created:
+  //  * NO_SNAPSHOT: plain `v8::Isolate::New(params)`, no SnapshotCreator. The default.
+  //  * PREPARE_SNAPSHOT: an isolate constructed via `v8::SnapshotCreator`, which is used later
+  //    to serialize a startup snapshot.
+  //  * START_FROM_SNAPSHOT: an isolate initialized from a previously-produced snapshot blob.
+  enum class IsolateMode {
+    NO_SNAPSHOT,
+    PREPARE_SNAPSHOT,
+    START_FROM_SNAPSHOT,
+  };
 
   static void buildEmbedderGraph(v8::Isolate* isolate, v8::EmbedderGraph* graph, void* data);
 
@@ -428,10 +451,15 @@ class IsolateBase {
   using Item = kj::OneOf<GlobalToDelete, RefToDelete, kj::Own<void>>;
 
   V8System& v8System;
+  IsolateMode mode;
   // TODO(cleanup): After v8 13.4 is fully released we can inline this into `newIsolate`
   //                and remove this member.
   std::unique_ptr<class v8::CppHeap> cppHeap;
+
+  kj::Maybe<kj::Own<v8::SnapshotCreator>> snapshotCreator;
+
   v8::Isolate* ptr;
+  kj::Maybe<SnapshotArtifact&> snapshotArtifact;
   // When true, evalAllowed is true and switching it to false is a no-op.
   bool alwaysAllowEval = false;
   bool evalAllowed = false;
@@ -579,11 +607,17 @@ class IsolateBase {
       v8::Isolate::CreateParams&& createParams,
       kj::Own<IsolateObserver> observer,
       kj::Own<ExternalStringAllocator> externalStringAllocator,
-      v8::IsolateGroup group);
+      v8::IsolateGroup group,
+      kj::Maybe<SnapshotArtifact&> snapshotArtifact);
   ~IsolateBase() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(IsolateBase);
 
   void dropWrappers(kj::FunctionParam<void()> drop);
+
+  v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params,
+      v8::CppHeap* cppHeap,
+      v8::IsolateGroup group,
+      kj::Maybe<SnapshotArtifact&> snapshotArtifact);
 
   bool getCaptureThrowsAsRejections() const {
     return captureThrowsAsRejections;
@@ -709,12 +743,14 @@ class Isolate: public IsolateBase {
       kj::Own<IsolateObserver> observer,
       kj::Own<ExternalStringAllocator> externalStringAllocator = defaultExternalStringAllocator(),
       v8::Isolate::CreateParams createParams = {},
-      bool instantiateTypeWrapper = true)
+      bool instantiateTypeWrapper = true,
+      kj::Maybe<SnapshotArtifact&> snapshotArtifact = kj::none)
       : IsolateBase(system,
             kj::mv(createParams),
             kj::mv(observer),
             kj::mv(externalStringAllocator),
-            group) {
+            group,
+            kj::mv(snapshotArtifact)) {
     wrappers.resize(1);
     registerTypeHandlers();
     if (instantiateTypeWrapper) {
@@ -729,12 +765,14 @@ class Isolate: public IsolateBase {
       MetaConfiguration&& configuration,
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {},
-      bool instantiateTypeWrapper = true)
+      bool instantiateTypeWrapper = true,
+      kj::Maybe<SnapshotArtifact&> snapshotArtifact = kj::none)
       : IsolateBase(system,
             kj::mv(createParams),
             kj::mv(observer),
             defaultExternalStringAllocator(),
-            v8::IsolateGroup::Create()) {
+            v8::IsolateGroup::Create(),
+            kj::mv(snapshotArtifact)) {
     wrappers.resize(1);
     registerTypeHandlers();
     if (instantiateTypeWrapper) {

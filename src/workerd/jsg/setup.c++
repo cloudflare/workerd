@@ -371,8 +371,12 @@ std::unique_ptr<v8::CppHeap> newCppHeap(V8PlatformWrapper* system) {
     return v8::CppHeap::Create(system, heapParams);
   });
 }
-static v8::Isolate* newIsolate(
-    v8::Isolate::CreateParams&& params, v8::CppHeap* cppHeap, v8::IsolateGroup group) {
+}  // namespace
+
+v8::Isolate* IsolateBase::newIsolate(v8::Isolate::CreateParams&& params,
+    v8::CppHeap* cppHeap,
+    v8::IsolateGroup group,
+    kj::Maybe<SnapshotArtifact&> snapshotArtifact) {
   return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> v8::Isolate* {
     // We currently don't attempt to support incremental marking or sweeping. We probably could
     // support them, but it will take some careful investigation and testing. It's not clear if
@@ -398,18 +402,49 @@ static v8::Isolate* newIsolate(
           v8::ArrayBuffer::Allocator::NewDefaultAllocator());
 #endif
     }
+
+    if (mode == IsolateMode::PREPARE_SNAPSHOT) {
+      // Create Isolate through v8::SnapshotCreator.
+      auto& artifact =
+          KJ_REQUIRE_NONNULL(snapshotArtifact, "PREPARE_SNAPSHOT mode requires a SnapshotArtifact");
+      KJ_DASSERT(artifact.mode == SnapshotArtifact::Mode::PRODUCE);
+
+      auto creator = kj::heap<v8::SnapshotCreator>(params);
+      v8::Isolate* isolate = creator->GetIsolate();
+      snapshotCreator = kj::mv(creator);
+      return isolate;
+    }
+
+    if (mode == IsolateMode::START_FROM_SNAPSHOT) {
+      auto& artifact = KJ_REQUIRE_NONNULL(
+          snapshotArtifact, "START_FROM_SNAPSHOT mode requires a SnapshotArtifact");
+      KJ_DASSERT(artifact.mode == SnapshotArtifact::Mode::CONSUME);
+      params.snapshot_blob = &artifact.blob;
+    }
+
     return v8::Isolate::New(group, params);
   });
 }
-}  // namespace
+
 IsolateBase::IsolateBase(V8System& system,
     v8::Isolate::CreateParams&& createParams,
     kj::Own<IsolateObserver> observer,
     kj::Own<ExternalStringAllocator> externalStringAllocator,
-    v8::IsolateGroup group)
+    v8::IsolateGroup group,
+    kj::Maybe<SnapshotArtifact&> snapArtifact)
     : v8System(system),
+      mode([&snapArtifact]() {
+        KJ_IF_SOME(v, snapArtifact) {
+          if (v.mode == jsg::SnapshotArtifact::Mode::PRODUCE) {
+            return IsolateMode::PREPARE_SNAPSHOT;
+          }
+          return IsolateMode::START_FROM_SNAPSHOT;
+        }
+        return IsolateMode::NO_SNAPSHOT;
+      }()),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(system.platformWrapper.get()))),
-      ptr(newIsolate(kj::mv(createParams), cppHeap.release(), group)),
+      ptr(newIsolate(kj::mv(createParams), cppHeap.release(), group, snapArtifact)),
+      snapshotArtifact(snapArtifact),
       externalMemoryTarget(kj::arc<ExternalMemoryTarget>(ptr)),
       envAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
       exportsAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
@@ -478,6 +513,17 @@ IsolateBase::IsolateBase(V8System& system,
   });
 }
 
+void IsolateBase::prepareSnapshot(v8::Local<v8::Context> defaultContext) {
+  if (mode != IsolateMode::PREPARE_SNAPSHOT) return;
+  // PREPARE_SNAPSHOT mode implies the isolate was constructed with a PRODUCE-mode artifact,
+  // so the slot is guaranteed to be present.
+  auto& artifact = KJ_REQUIRE_NONNULL(snapshotArtifact);
+  auto& creator = KJ_ASSERT_NONNULL(snapshotCreator);
+  creator->SetDefaultContext(defaultContext);
+  KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
+  artifact.blob = creator->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
+}
+
 IsolateBase::~IsolateBase() noexcept(false) {
   // Ensure objects that outlive the isolate won't attempt to modify external memory
   // on the now-destroyed isolate.
@@ -486,7 +532,16 @@ IsolateBase::~IsolateBase() noexcept(false) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     // Terminate the v8::platform's task queue associated with this isolate
     v8System.shutdownIsolate(ptr);
-    ptr->Dispose();
+    // In PREPARE_SNAPSHOT mode the v8::SnapshotCreator owns the isolate and keeps it "entered" by
+    // the current thread; v8::Isolate::Dispose() refuses to run on an entered isolate. Destroy the
+    // SnapshotCreator first — its destructor exits and disposes the isolate — and skip
+    // ptr->Dispose() in that case.
+    if (mode == IsolateMode::PREPARE_SNAPSHOT) {
+      // Destroying the SnapshotCreator exits and disposes its isolate.
+      snapshotCreator = kj::none;
+    } else {
+      ptr->Dispose();
+    }
     ptr = nullptr;
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();

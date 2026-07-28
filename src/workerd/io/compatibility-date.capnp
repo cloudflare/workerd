@@ -1642,4 +1642,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2026-08-11");
   # Enables fast Workflow engine creation by generating instance IDs with the Durable Object
   # namespace's `newUniqueId()` method instead of UUIDs.
+
+  startupSnapshot @186 :Bool
+      $compatEnableFlag("snapshot")
+      $experimental;
+  # When enabled, workerd builds a throwaway "zygote" isolate to capture a V8 startup
+  # snapshot of the worker's evaluated top-level scope, then starts the real worker
+  # from that snapshot instead of re-evaluating top-level code. ESM workers only;
+  # Not compatible with Python workers.
 }

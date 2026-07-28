@@ -328,6 +328,11 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       capnp::List<config::Extension>::Reader extensions,
       ErrorReporter& errorReporter);
 
+  jsg::SnapshotArtifact& makeSnapshot(kj::StringPtr name,
+      WorkerDef& def,
+      capnp::List<config::Extension>::Reader extensions,
+      ErrorReporter& errorReporter);
+
   kj::Promise<void> startServices(jsg::V8System& v8System,
       config::Config::Reader config,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
