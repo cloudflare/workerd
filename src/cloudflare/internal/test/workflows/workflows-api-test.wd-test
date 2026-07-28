@@ -7,8 +7,33 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "workflows-api-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "experimental",
-                              "service_binding_extra_handlers", "rpc"],
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+        (
+          name = "workflow",
+          wrapped = (
+            moduleName = "cloudflare-internal:workflows-api",
+            innerBindings = [(
+              name = "fetcher",
+              service = "workflows-mock"
+            )],
+          )
+        ),
+        (
+          name = "mock",
+          service = "workflows-mock"
+        )
+        ],
+      )
+    ),
+    ( name = "workflows-api-rpc-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "workflows-api-rpc-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "workflows_bindings_rpc",
+                              "experimental", "service_binding_extra_handlers",
+                              "rpc"],
         bindings = [
         (
           name = "workflow",
