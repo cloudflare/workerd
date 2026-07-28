@@ -376,10 +376,9 @@ jsg::JsRef<jsg::JsObject> buildCompatFlagsObject(jsg::Lock& js, CompatibilityFla
 jsg::JsRef<jsg::JsObject> buildAutogatesObject(jsg::Lock& js) {
   auto obj = js.obj();
 
-  for (auto i = util::AutogateKey(0); i < util::AutogateKey::NumOfKeys;
-       i = util::AutogateKey(static_cast<int>(i) + 1)) {
-    if (util::Autogate::isEnabled(i)) {
-      auto name = kj::str(i);
+  for (util::AutogateKey key: util::getAutogateKeys()) {
+    if (util::Autogate::isEnabled(key)) {
+      auto name = kj::str(key);
       obj.set(js, name, js.boolean(true));
     }
   }

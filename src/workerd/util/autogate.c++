@@ -15,32 +15,48 @@ namespace workerd::util {
 
 kj::Maybe<Autogate> globalAutogate;
 
+namespace {
+constexpr auto WORKERD_PREFIX = "workerd-autogate-"_kj;
+
+// Converts a SCREAMING_SNAKE_CASE string to kebab-case at compile time.
+template <size_t N>
+struct ScreamingSnakeToKebab {
+  char value[N]{};
+
+  consteval ScreamingSnakeToKebab(const char (&s)[N]) {
+    for (size_t i = 0; i < N; ++i) {
+      if (s[i] == '_') {
+        value[i] = '-';
+      } else if (s[i] >= 'A' && s[i] <= 'Z') {
+        value[i] = static_cast<char>(s[i] + ('a' - 'A'));
+      } else {
+        value[i] = s[i];
+      }
+    }
+  }
+
+  template <size_t M>
+  consteval bool operator==(const char (&other)[M]) const {
+    if constexpr (N != M) return false;
+    for (size_t i = 0; i < N; ++i) {
+      if (value[i] != other[i]) return false;
+    }
+    return true;
+  }
+};
+// Quick compile-time test to ensure the conversion works as expected.
+static_assert(ScreamingSnakeToKebab("TEST_WORKERD") == "test-workerd");
+}  // namespace
+
 kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
   switch (key) {
-    case AutogateKey::TEST_WORKERD:
-      return "test-workerd"_kj;
-    case AutogateKey::V8_FAST_API:
-      return "v8-fast-api"_kj;
-    case AutogateKey::STREAMING_TAIL_WORKER:
-      return "streaming-tail-worker"_kj;
-    case AutogateKey::TAIL_STREAM_REFACTOR:
-      return "tail-stream-refactor"_kj;
-    case AutogateKey::ENABLE_FAST_TEXTENCODER:
-      return "enable-fast-textencoder"_kj;
-    case AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE:
-      return "updated-auto-allocate-chunk-size"_kj;
-    case AutogateKey::STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME:
-      return "starttls-reject-expected-server-hostname"_kj;
-    case AutogateKey::HIBERNATABLE_WEBSOCKET_REFACTOR:
-      return "hibernatable-websocket-refactor"_kj;
-    case AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP:
-      return "per-isolate-javascript-bootstrap"_kj;
-    case AutogateKey::DURABLE_OBJECT_RETRIES_FETCH:
-      return "durable-object-retries-fetch"_kj;
-    case AutogateKey::NODEJS_URL_RUST:
-      return "nodejs-url-rust"_kj;
-    case AutogateKey::NODEJS_EXCEPTIONS_RUST:
-      return "nodejs-exceptions-rust"_kj;
+#define V(key)                                                                                     \
+  case AutogateKey::key: {                                                                         \
+    static constexpr ScreamingSnakeToKebab<sizeof(#key)> s(#key);                                  \
+    return kj::StringPtr(s.value, sizeof(#key) - 1);                                               \
+  }
+    WORKERD_AUTOGATES(V)
+#undef V
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }
@@ -49,17 +65,16 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
 Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
   // gates array is zero-initialized by default.
   for (auto name: autogates) {
-    if (!name.startsWith("workerd-autogate-")) {
+    if (!name.startsWith(WORKERD_PREFIX)) {
       LOG_ERROR_ONCE("Autogate configuration includes gate with invalid prefix.");
       continue;
     }
-    auto sliced = name.slice(17);
+    auto sliced = name.slice(WORKERD_PREFIX.size());
 
-    // Parse the gate name into a AutogateKey.
-    for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys;
-         i = AutogateKey(static_cast<int>(i) + 1)) {
-      if (kj::str(i) == sliced) {
-        gates[static_cast<unsigned long>(i)] = true;
+    // Parse the gate name into an AutogateKey.
+    for (AutogateKey key: getAutogateKeys()) {
+      if (kj::str(key) == sliced) {
+        gates[autogateToIndex(key)] = true;
         break;
       }
     }
@@ -68,7 +83,7 @@ Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
 
 bool Autogate::isEnabled(AutogateKey key) {
   KJ_IF_SOME(a, globalAutogate) {
-    return a.gates[static_cast<unsigned long>(key)];
+    return a.gates[autogateToIndex(key)];
   }
 
   static const bool defaultResult = getenv("WORKERD_ALL_AUTOGATES") != nullptr;
@@ -97,9 +112,8 @@ void Autogate::deinitAutogate() {
 
 void Autogate::initAllAutogates() {
   Autogate autogate;
-  for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys;
-       i = AutogateKey(static_cast<int>(i) + 1)) {
-    autogate.gates[static_cast<unsigned long>(i)] = true;
+  for (AutogateKey key: getAutogateKeys()) {
+    autogate.gates[autogateToIndex(key)] = true;
   }
   globalAutogate = kj::mv(autogate);
 }
@@ -115,9 +129,20 @@ void Autogate::initAutogateNamesForTest(kj::ArrayPtr<const kj::StringPtr> gateNa
   auto gates = gatesOrphan.get();
   size_t count = 0;
   for (auto name: gateNames) {
-    gates.set(count++, kj::str("workerd-autogate-", name));
+    gates.set(count++, kj::str(WORKERD_PREFIX, name));
   }
   Autogate::initAutogate(gates.asReader());
+}
+
+void Autogate::initAutogateForTest(std::initializer_list<AutogateKey> keys) {
+  if (getenv("WORKERD_ALL_AUTOGATES") != nullptr) {
+    return initAllAutogates();
+  }
+  Autogate autogate;
+  for (auto key: keys) {
+    autogate.gates[autogateToIndex(key)] = true;
+  }
+  globalAutogate = kj::mv(autogate);
 }
 
 }  // namespace workerd::util
