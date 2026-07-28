@@ -361,6 +361,18 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       capnp::List<config::Extension>::Reader extensions,
       ErrorReporter& errorReporter);
 
+  kj::Own<Worker::Isolate> makeWorkerIsolate(kj::StringPtr name,
+      kj::StringPtr inboundListenersKey,
+      const WorkerDef& def,
+      capnp::List<config::Extension>::Reader extensions,
+      Worker::Isolate::InspectorPolicy inspectorPolicy,
+      kj::Maybe<jsg::SnapshotConfig> snapshotConfig);
+
+  // Creates a throwaway zygote Worker in PREPARE_SNAPSHOT mode and returns the filled snapshot
+  // artifact, or kj::none when the zygote failed to start.
+  kj::Maybe<kj::Own<jsg::SnapshotArtifact>> makeSnapshot(
+      kj::StringPtr name, WorkerDef& def, capnp::List<config::Extension>::Reader extensions);
+
   kj::Promise<void> startServices(jsg::V8System& v8System,
       config::Config::Reader config,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
