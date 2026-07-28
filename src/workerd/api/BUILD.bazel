@@ -338,18 +338,33 @@ wd_cc_library(
 
 wd_cc_library(
     name = "memory-cache",
-    srcs = ["memory-cache.c++"],
-    hdrs = ["memory-cache.h"],
+    srcs = [
+        "memory-cache.c++",
+        "memory-cache-v2.c++",
+        "memory-cache-v2-test.h",
+    ],
+    hdrs = [
+        "memory-cache.h",
+    ],
     implementation_deps = [
+        "//src/rust/memory-cache/ffi:memory-cache-ffi",
         "//src/workerd/io",
+        "//src/workerd/util:autogate",
+        "//src/workerd/util:thread-scopes",
     ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "//src/workerd/util:checked-queue",
-        "//src/workerd/util:uuid",
     ],
+)
+
+wd_cc_library(
+    name = "memory-cache-test-support",
+    testonly = True,
+    hdrs = ["memory-cache-v2-test.h"],
+    deps = [":memory-cache"],
 )
 
 wd_cc_library(
@@ -627,8 +642,11 @@ kj_test(
     src = "memory-cache-test.c++",
     deps = [
         ":memory-cache",
+        ":memory-cache-test-support",
         "//src/workerd/io",
         "//src/workerd/io:trace",
+        "//src/workerd/tests:test-fixture",
+        "//src/workerd/util:autogate",
     ],
 )
 

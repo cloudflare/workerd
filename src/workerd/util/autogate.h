@@ -123,7 +123,10 @@ namespace workerd::util {
      compression utils. Chromium zlib remains the default. */                                    \
   V(COMPRESSION_RS)                                                                                 \
   /* Enables per-call JSRPC tracing, trace-context propagation, and related Fetcher spans. */       \
-  V(JSRPC_TRACING)
+  V(JSRPC_TRACING)                                                                                  \
+  /* Selects the redesigned memory cache implementation. The legacy implementation remains         \
+     available for rollback while this gate is rolled out. */                                      \
+  V(MEMORY_CACHE_V2)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
