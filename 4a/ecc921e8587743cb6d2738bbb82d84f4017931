@@ -6,7 +6,7 @@ src/workerd/io/observer.h
 {
   "schema_version": "authorship/3.0.0",
   "git_ai_version": "1.6.10",
-  "base_commit_sha": "f0183f7fa41f17c92c39dd7e4c14182b4d8463bf",
+  "base_commit_sha": "4aecc921e8587743cb6d2738bbb82d84f4017931",
   "prompts": {},
   "sessions": {
     "s_2192e8a6d105f9": {
