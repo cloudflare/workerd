@@ -395,8 +395,12 @@ std::unique_ptr<v8::CppHeap> newCppHeap(V8PlatformWrapper* system) {
     return v8::CppHeap::Create(system, heapParams);
   });
 }
-static v8::Isolate* newIsolate(
-    v8::Isolate::CreateParams&& params, v8::CppHeap* cppHeap, v8::IsolateGroup group) {
+
+v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params,
+    v8::CppHeap* cppHeap,
+    v8::IsolateGroup group,
+    kj::Maybe<SnapshotConfig>& snapshotConfig,
+    kj::Maybe<kj::Own<v8::SnapshotCreator>>* snapshotCreator) {
   return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> v8::Isolate* {
     // We currently don't attempt to support incremental marking or sweeping. We probably could
     // support them, but it will take some careful investigation and testing. It's not clear if
@@ -422,18 +426,43 @@ static v8::Isolate* newIsolate(
           v8::ArrayBuffer::Allocator::NewDefaultAllocator());
 #endif
     }
+
+    KJ_IF_SOME(c, snapshotConfig) {
+      KJ_SWITCH_ONEOF(c) {
+        KJ_CASE_ONEOF(mutableSnapshot, MutableSnapshot) {
+          auto& artifact = *mutableSnapshot.artifact;
+          KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
+
+          auto creator = kj::heap<v8::SnapshotCreator>(params);
+          v8::Isolate* isolate = creator->GetIsolate();
+          *snapshotCreator = kj::mv(creator);
+          return isolate;
+        }
+        KJ_CASE_ONEOF(roSnapshot, ReadonlySharedSnapshot) {
+          const SnapshotArtifact& artifact = *roSnapshot.artifact;
+          KJ_REQUIRE(artifact.blob.data != nullptr, "snapshot artifact holds no blob");
+          params.snapshot_blob = &artifact.blob;
+        }
+      }
+    }
+
     return v8::Isolate::New(group, params);
   });
 }
 }  // namespace
+
 IsolateBase::IsolateBase(V8System& system,
     v8::Isolate::CreateParams&& createParams,
     kj::Own<IsolateObserver> observer,
     kj::Own<ExternalStringAllocator> externalStringAllocator,
-    v8::IsolateGroup group)
+    v8::IsolateGroup group,
+    kj::Maybe<SnapshotConfig> snapshotConf)
     : v8System(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(system.platformWrapper.get()))),
-      ptr(newIsolate(kj::mv(createParams), cppHeap.release(), group)),
+      snapshotCreator(kj::none),
+      ptr(newIsolate(
+          kj::mv(createParams), cppHeap.release(), group, snapshotConf, &snapshotCreator)),
+      snapshotConfig(kj::mv(snapshotConf)),
       externalMemoryTarget(kj::arc<ExternalMemoryTarget>(ptr)),
       envAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
       exportsAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
@@ -503,6 +532,15 @@ IsolateBase::IsolateBase(V8System& system,
   });
 }
 
+void IsolateBase::prepareSnapshot(v8::Local<v8::Context> defaultContext) {
+  KJ_REQUIRE(isPreparingSnapshot());
+  auto& artifact = mutableSnapshotArtifact();
+  auto& creator = KJ_ASSERT_NONNULL(snapshotCreator);
+  creator->SetDefaultContext(defaultContext);
+  KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
+  artifact.blob = creator->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
+}
+
 IsolateBase::~IsolateBase() noexcept(false) {
   // Ensure objects that outlive the isolate won't attempt to modify external memory
   // on the now-destroyed isolate.
@@ -511,7 +549,16 @@ IsolateBase::~IsolateBase() noexcept(false) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     // Terminate the v8::platform's task queue associated with this isolate
     v8System.shutdownIsolate(ptr);
-    ptr->Dispose();
+    // When preparing a snapshot the v8::SnapshotCreator owns the isolate and keeps it "entered" by
+    // the current thread; v8::Isolate::Dispose() refuses to run on an entered isolate. Destroy the
+    // SnapshotCreator first — its destructor exits and disposes the isolate — and skip
+    // ptr->Dispose() in that case.
+    if (isPreparingSnapshot()) {
+      // Destroying the SnapshotCreator exits and disposes its isolate.
+      snapshotCreator = kj::none;
+    } else {
+      ptr->Dispose();
+    }
     ptr = nullptr;
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();
