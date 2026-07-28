@@ -6,6 +6,7 @@
 
 #include <workerd/api/memory-cache.h>
 #include <workerd/io/io-context.h>
+#include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/server/workerd.capnp.h>
@@ -130,6 +131,11 @@ struct TestFixture {
   // IncomingRequests against the same actor (and hence the same IoContext). The IoContext must
   // outlive the returned IncomingRequest.
   kj::Own<IoContext::IncomingRequest> newIncomingRequest(IoContext& context);
+
+  // Like newIncomingRequest(IoContext&), but leaves delivery to the caller. This models code paths
+  // that report trace onset immediately before delivered().
+  kj::Own<IoContext::IncomingRequest> newUndeliveredIncomingRequest(
+      IoContext& context, kj::Maybe<kj::Own<BaseTracer>> workerTracer = kj::none);
 
   // Enter an IoContext. Callback receives Environment& and must return void (NOT a
   // Promise — the Worker::Lock is only valid for the synchronous duration of the

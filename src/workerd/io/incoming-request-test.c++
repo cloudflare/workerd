@@ -5,6 +5,8 @@
 // Tests for IoContext::IncomingRequest lifecycle behavior.
 
 #include <workerd/io/io-context.h>
+#include <workerd/io/trace-stream.h>
+#include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
 #include <workerd/tests/test-fixture.h>
 
@@ -20,6 +22,70 @@ class ErrorHandlerImpl: public kj::TaskSet::ErrorHandler {
     KJ_FAIL_EXPECT(exception);
   }
 };
+
+class FrozenTimerChannel final: public TimerChannel {
+ public:
+  void syncTime() override {
+    currentTime = wallTime;
+  }
+
+  kj::Date now(kj::Maybe<kj::Date>) override {
+    return currentTime;
+  }
+
+  kj::Promise<void> atTime(kj::Date) override {
+    return kj::NEVER_DONE;
+  }
+
+  kj::Promise<void> afterLimitTimeout(kj::Duration) override {
+    return kj::NEVER_DONE;
+  }
+
+  void advance(kj::Duration duration) {
+    wallTime += duration;
+  }
+
+  kj::Date getWallTime() const {
+    return wallTime;
+  }
+
+ private:
+  kj::Date wallTime = kj::UNIX_EPOCH;
+  kj::Date currentTime = kj::UNIX_EPOCH;
+};
+
+KJ_TEST("trace onset synchronizes an idle actor's clock before reading it") {
+  FrozenTimerChannel timer;
+  kj::Function<kj::Own<IoChannelFactory>(TimerChannel&)> makeChannelFactory =
+      [&timer](TimerChannel&) -> kj::Own<IoChannelFactory> {
+    return kj::heap<TestFixture::DummyIoChannelFactory>(timer);
+  };
+  TestFixture fixture({
+    .actorId = Worker::Actor::Id(kj::str("trace-timing-test")),
+    .useRealTimers = false,
+    .ioChannelFactory = kj::mv(makeChannelFactory),
+  });
+
+  auto context = fixture.newIoContext();
+  auto previousRequest = fixture.newIncomingRequest(*context);
+  fixture.drainAndDestroy(kj::mv(previousRequest));
+
+  timer.advance(3 * kj::SECONDS);
+
+  auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+      kj::Array<kj::String>(), kj::none, ExecutionModel::DURABLE_OBJECT);
+  auto traceRef = kj::addRef(*trace);
+  kj::Own<BaseTracer> tracer = kj::refcounted<WorkerTracer>(
+      kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::none);
+  auto request = fixture.newUndeliveredIncomingRequest(*context, kj::mv(tracer));
+
+  KJ_EXPECT(request->now() == kj::UNIX_EPOCH);
+  KJ_ASSERT_NONNULL(request->getWorkerTracer()).setEventInfo(*request, tracing::CustomEventInfo());
+  KJ_EXPECT(traceRef->eventTimestamp == timer.getWallTime());
+
+  request->delivered();
+  fixture.drainAndDestroy(kj::mv(request));
+}
 
 // Regression test: two IncomingRequests share a single actor IoContext, as happens when a Durable
 // Object receives overlapping requests. Draining the older, superseded request hits drain()'s

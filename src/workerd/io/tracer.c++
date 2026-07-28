@@ -327,7 +327,7 @@ void WorkerTracer::setEventInfo(
   KJ_ASSERT(weakIoContext == kj::none, "tracer can only be used for a single event");
   weakIoContext = incomingRequest.getContext().getWeakRef();
   setEventInfoInternal(
-      incomingRequest.getInvocationSpanContext(), incomingRequest.now(), kj::mv(info));
+      incomingRequest.getInvocationSpanContext(), incomingRequest.nowForTraceOnset(), kj::mv(info));
 }
 
 void WorkerTracer::setEventInfoInternal(
