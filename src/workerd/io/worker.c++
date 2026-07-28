@@ -900,7 +900,10 @@ struct Worker::Script::Impl {
   using DynamicImportHandler = kj::Function<jsg::Value()>;
 
   void configureDynamicImports(jsg::Lock& js, jsg::ModuleRegistry& modules) {
-    // This is only used with the original module registry implementation.
+    // This is only used with the original module registry implementation. The new
+    // module registry handles dynamic imports via dynamicImportModuleCallback() in
+    // modules-new.c++, which resolves synchronously within the V8 callback and relies
+    // on the ambient request/startup CPU budget rather than enterDynamicImportJs().
     KJ_ASSERT(!FeatureFlags::get(js).getNewModuleRegistry(),
         "legacy dynamic imports must not be used with the new module registry");
     static auto constexpr handleDynamicImport =

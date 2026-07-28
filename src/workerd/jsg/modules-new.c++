@@ -1066,7 +1066,16 @@ void importMeta(
   }
 }
 
-// Templated implementation for both evaluation and source phase dynamic imports
+// Dynamic import callback for the new module registry.
+//
+// Unlike the legacy module registry (see Worker::Script::Impl::configureDynamicImports in
+// worker.c++), the new registry resolves dynamic imports synchronously within the V8
+// callback rather than popping out of the IoContext for a separate compile step. This
+// means no per-import CPU limit (enterDynamicImportJs) is applied; instead, the import
+// charges against the ambient request or startup CPU budget. This is intentional: the
+// new registry's lazy compilation model means dynamic imports do not trigger eager
+// compilation of all transitive dependencies, so the per-import limit that protected
+// against that in the legacy path is unnecessary.
 v8::MaybeLocal<v8::Promise> dynamicImportModuleCallback(v8::Local<v8::Context> context,
     v8::Local<v8::Data> host_defined_options,
     v8::Local<v8::Value> resource_name,
