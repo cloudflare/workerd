@@ -1992,11 +1992,17 @@ void Worker::setupContext(jsg::Lock& lock, v8::Local<v8::Context> context) {
 }
 
 void Worker::setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context> context) {
-  // Set WebAssembly.Module @@HasInstance
-  setWebAssemblyModuleHasInstance(lock, context);
+  // For isolates created by SnapshotCreator V8's bootstrapper skips InstallSpecialObjects,
+  // so the `WebAssembly` global does not exist and these shims would fail.
+  // That's fine: wasm modules aren't captured in the snapshot anyway, and this runs again
+  // in normal mode on the context restored from the snapshot, installing the shims then.
+  if (!lock.isPreparingSnapshot()) {
+    // Set WebAssembly.Module @@HasInstance
+    setWebAssemblyModuleHasInstance(lock, context);
 
-  // Shim WebAssembly.instantiate to detect modules exporting "__instance_signal".
-  shimWebAssemblyInstantiate(lock, context);
+    // Shim WebAssembly.instantiate to detect modules exporting "__instance_signal".
+    shimWebAssemblyInstantiate(lock, context);
+  }
 }
 // =======================================================================================
 
@@ -2296,6 +2302,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       if (script->isolate->impl->inspector == kj::none) {
         lock.v8Isolate->SetCaptureStackTraceForUncaughtExceptions(false);
       }
+
+      jsg::IsolateBase::from(lock.v8Isolate).prepareSnapshotIfNeeded(context);
     });
   });
 }

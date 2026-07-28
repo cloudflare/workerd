@@ -365,6 +365,14 @@ void Lock::requestExtraMicrotaskCheckpoint() {
   IsolateBase::from(v8Isolate).requestExtraMicrotaskCheckpoint({});
 }
 
+bool Lock::isPreparingSnapshot() const {
+  return IsolateBase::from(v8Isolate).isPreparingSnapshot();
+}
+
+bool Lock::isStartingFromSnapshot() const {
+  return IsolateBase::from(v8Isolate).isStartingFromSnapshot();
+}
+
 void Lock::terminateNextExecution() {
   v8Isolate->TerminateExecution();
 }
