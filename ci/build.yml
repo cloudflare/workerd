@@ -50,13 +50,13 @@ include:
       jobPrefix: "linux-x64-lint"
       CFSETUP_TARGET: "ci-bazel-x64-lint"
 
-  - component: $CI_SERVER_FQDN/cloudflare/ci/ai/opencode@mschwarzl/APPSEC-2912
+  - component: $CI_SERVER_FQDN/cloudflare/ci/ai/opencode@canary
     inputs:
       stage: build
       runOnMR: true
       runOnBranches: false
       USE_COORDINATOR: true
-      OPENCODE_MODEL: "cloudflare-ai-gateway/anthropic/claude-opus-4-7"
+      OPENCODE_MODEL: "cloudflare-ai-gateway/anthropic/claude-opus-5"
 
   - component: $CI_SERVER_FQDN/cloudflare/ci/python/run@~latest
     inputs:
