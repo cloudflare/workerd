@@ -9,8 +9,8 @@ namespace workerd::api::webstreams {
 
 jsg::JsFunction getCppExport(jsg::Lock& js, kj::StringPtr name) {
   auto cppExports = KJ_REQUIRE_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
-  auto cppExportsObj = KJ_REQUIRE_NONNULL(JSG_CAST_OBJECT(cppExports));
-  return KJ_REQUIRE_NONNULL(JSG_CAST_FUNCTION(cppExportsObj.get(js, name)));
+  auto cppExportsObj = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_OBJECT(cppExports));
+  return KJ_REQUIRE_NONNULL(JSG_TRY_CAST_FUNCTION(cppExportsObj.get(js, name)));
 }
 
 kj::Array<kj::byte> stringToBytes(kj::String data) {

@@ -40,7 +40,8 @@ jsg::JsValue dispatchCall(jsg::Lock& js, kj::StringPtr name, Args... args) {
 // so a missing method indicates an internal error.
 template <jsg::IsJsValue... Args>
 jsg::JsValue invokeMethod(jsg::Lock& js, jsg::JsObject obj, kj::StringPtr name, Args... args) {
-  auto func = KJ_REQUIRE_NONNULL(JSG_CAST_FUNCTION(obj.get(js, name)), "method not found", name);
+  auto func =
+      KJ_REQUIRE_NONNULL(JSG_TRY_CAST_FUNCTION(obj.get(js, name)), "method not found", name);
   return func.call(js, obj, args...);
 }
 

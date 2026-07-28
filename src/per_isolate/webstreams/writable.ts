@@ -329,9 +329,20 @@ class WritableStream<W = unknown> {
       if (state === 'errored' || state === 'erroring') {
         throw stream.#storedError;
       }
-      // Drop the native-sink back-reference FIRST: extraction must never
-      // hand out a sink whose connection has been taken over.
-      stream.#nativeSink = undefined;
+      // Release a native sink's C++ state FIRST: the controller's stored
+      // hook algorithms close over the sink object, which would otherwise
+      // keep the taken-over connection's C++ sink alive until the stream is
+      // GC'd (the legacy controller's detach drops its sink immediately);
+      // and extraction must never hand out a sink whose connection has been
+      // taken over. The hook drops the owned sink without ending or
+      // aborting it -- the takeover owns the connection now.
+      const nativeSink = stream.#nativeSink;
+      if (nativeSink !== undefined) {
+        const detachFn = (nativeSink as { detach: (this: object) => void })
+          .detach;
+        uncurryThis(detachFn)(nativeSink);
+        stream.#nativeSink = undefined;
+      }
       // Permanently lock via an internal writer (never exposed, never
       // released), leaving the stream unusable for further writes.
       new WritableStreamDefaultWriter<W>(stream);
@@ -1572,8 +1583,11 @@ function byteSizeOf(chunk: unknown): number {
 // marker). The strategy policy lives here rather than in C++: with a
 // highWaterMark the stream gets byte-based sizing (legacy parity, see
 // byteSizeOf); without one the constructor's defaults apply (highWaterMark 1,
-// chunk counting) exactly as the legacy controller applies no backpressure
-// accounting when no highWaterMark is configured.
+// chunk counting). That default is a deliberate, flag-guarded delta from the
+// legacy controller, which does no backpressure accounting at all when no
+// highWaterMark is configured (desiredSize pinned at 1, ready never pending);
+// the spec-default strategy instead signals backpressure (desiredSize 0,
+// ready pending) whenever a write is queued or in flight.
 function createNativeWritableStream(
   sink: object,
   highWaterMark?: number
@@ -1613,6 +1627,8 @@ module.exports = {
   // Sink-side symbols for the pipe dispatch in readable.ts.
   kExtractNativeSink,
   internalsForPipe: {
+    isWritableStream,
+    isWritableStreamLocked,
     acquireWriter<W>(
       stream: WritableStream<W>
     ): WritableStreamDefaultWriter<W> {

@@ -22,14 +22,20 @@ static_assert(jsg::SelfConvertible<JsReadableWritablePair>);
 
 constexpr uint64_t kLimit = 1024 * 1024;
 constexpr kj::StringPtr kData = "hello world"_kj;
+constexpr kj::StringPtr kMoreData = " and goodbye"_kj;
 
 // A WritableStreamSink recording its interactions into externally-owned state.
 class RecordingSink final: public WritableStreamSink {
  public:
-  RecordingSink(kj::Vector<kj::byte>& data, bool& ended, bool& aborted)
+  RecordingSink(kj::Vector<kj::byte>& data, bool& ended, bool& aborted, bool& destroyed)
       : data(data),
         ended(ended),
-        aborted(aborted) {}
+        aborted(aborted),
+        destroyed(destroyed) {}
+
+  ~RecordingSink() noexcept(false) {
+    destroyed = true;
+  }
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
     data.addAll(buffer);
@@ -56,6 +62,7 @@ class RecordingSink final: public WritableStreamSink {
   kj::Vector<kj::byte>& data;
   bool& ended;
   bool& aborted;
+  bool& destroyed;
 };
 
 // Test state bundling the externally-owned sink observations. Declared outside runInIoContext
@@ -65,9 +72,10 @@ struct SinkState {
   kj::Vector<kj::byte> written;
   bool ended = false;
   bool aborted = false;
+  bool destroyed = false;
 
   kj::Own<RecordingSink> makeSink() {
-    return kj::heap<RecordingSink>(written, ended, aborted);
+    return kj::heap<RecordingSink>(written, ended, aborted, destroyed);
   }
 };
 
@@ -208,6 +216,10 @@ KJ_TEST("JsWritableStream detach neutralizes the stream without ending the sink"
     // The stream is left permanently locked and closed to further writes...
     KJ_EXPECT(stream.isLocked(js));
     KJ_EXPECT(stream.isClosedOrClosing(js));
+
+    // ...and the sink is released immediately (a takeover leaves nothing behind to hold
+    // the taken-over connection), not at some later GC.
+    KJ_EXPECT(state.destroyed);
   });
   // ...but detach is a takeover, not a close: the sink is dropped without end().
   KJ_EXPECT(!state.ended);
@@ -573,6 +585,48 @@ class GatedSink final: public WritableStreamSink {
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>>& gate;
 };
 
+// A ContentSource variant recording whether cancel() reached the underlying source (for
+// preventCancel pipe tests).
+class CancelRecordingSource final: public ReadableStreamSource {
+ public:
+  CancelRecordingSource(kj::StringPtr data, bool& cancelled): data(data), cancelled(cancelled) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    auto amount = kj::min(maxBytes, data.size() - offset);
+    kj::arrayPtr(static_cast<kj::byte*>(buffer), amount)
+        .copyFrom(data.slice(offset, offset + amount).asBytes());
+    offset += amount;
+    return amount;
+  }
+
+  void cancel(kj::Exception reason) override {
+    cancelled = true;
+  }
+
+ private:
+  kj::StringPtr data;
+  bool& cancelled;
+  size_t offset = 0;
+};
+
+// A WritableStreamSink whose writes always fail (for pipe failure-path tests).
+class FailingSink final: public WritableStreamSink {
+ public:
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    return KJ_EXCEPTION(FAILED, "jsg.Error: write failed");
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    return KJ_EXCEPTION(FAILED, "jsg.Error: write failed");
+  }
+
+  kj::Promise<void> end() override {
+    return KJ_EXCEPTION(FAILED, "jsg.Error: end failed");
+  }
+
+  void abort(kj::Exception reason) override {}
+};
+
 KJ_TEST("WritableStreamNativeSink instances carry the kNativeSink marker") {
   TestFixture testFixture;
   SinkState state;
@@ -780,6 +834,11 @@ KJ_TEST("JsWritableStream detach TS arm neutralizes and enforces preconditions")
     auto stream = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
     stream.detach(js);
     KJ_EXPECT(stream.isLocked(js));
+
+    // The sink is released immediately (legacy parity): the controller's stored hook
+    // algorithms still reference the WritableStreamNativeSink wrapper until the stream
+    // is GC'd, but the C++ sink it owned must not survive the takeover.
+    KJ_EXPECT(state.destroyed);
 
     // detach() of a locked stream throws the exact legacy text (including the period).
     auto locked = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
@@ -990,7 +1049,133 @@ KJ_TEST("JsReadableStream pipeTo runs a native+native TypeScript pipe at the C++
   KJ_EXPECT(!state.aborted);
 }
 
-KJ_TEST("JsReadableStream pipeTo native+native honors preventClose") {
+KJ_TEST(
+    "JsReadableStream pipeTo preventClose leaves the destination usable (socket concatenation)") {
+  auto fixture = makeTsStreamsFixture();
+  SinkState state;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    auto source2 = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kMoreData));
+    auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
+
+    // A prevent* option routes the pipe through the JS pump: extraction would consume
+    // both endpoints permanently, but the legacy pipe contract leaves the un-prevented
+    // endpoint usable after the pipe settles.
+    auto promise = source.pipeTo(js, destination, PipeToOptions{.preventClose = true})
+                       .then(js,
+                           [destination = destination.addRef(js), source2 = kj::mv(source2)](
+                               jsg::Lock& js) mutable {
+      // The destination is unlocked and still writable after the pipe...
+      KJ_EXPECT(!destination.isLocked(js));
+      KJ_EXPECT(!destination.isClosedOrClosing(js));
+      // ...so a second pipe can append onto the same sink (the socket-concatenation
+      // pattern). Without options this one takes the native+native fast path and ends
+      // the sink.
+      return source2.pipeTo(js, destination);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  auto expected = kj::str(kData, kMoreData);
+  KJ_EXPECT(state.written.asPtr() == expected.asBytes());
+  KJ_EXPECT(state.ended);
+}
+
+KJ_TEST("JsReadableStream pipeTo preventCancel leaves the source usable after a failed pipe") {
+  auto fixture = makeTsStreamsFixture();
+  bool cancelled = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = JsReadableStream::create(
+        js, env.context, kj::heap<CancelRecordingSource>(kData, cancelled));
+    auto destination = JsWritableStream::create(js, env.context, kj::heap<FailingSink>(), kj::none);
+
+    // A prevent* option routes the pipe through the JS pump; the failing destination
+    // rejects the pipe, and preventCancel leaves the source untouched: unlocked and
+    // uncancelled.
+    auto promise = source.pipeTo(js, destination, PipeToOptions{.preventCancel = true})
+                       .then(js, [](jsg::Lock& js) {
+      KJ_FAIL_REQUIRE("expected pipeTo() into a failing sink to reject");
+    }, [source = source.addRef(js)](jsg::Lock& js, jsg::Value exception) mutable {
+      KJ_EXPECT(!source.isLocked(js));
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(!cancelled);
+}
+
+KJ_TEST("JsReadableStream pipeTo without preventCancel cancels the source on a failed pipe") {
+  auto fixture = makeTsStreamsFixture();
+  bool cancelled = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = JsReadableStream::create(
+        js, env.context, kj::heap<CancelRecordingSource>(kData, cancelled));
+    auto destination = JsWritableStream::create(js, env.context, kj::heap<FailingSink>(), kj::none);
+
+    // Control leg: with no options this is the native+native fast path; on failure the
+    // pump cancels the source and the pipe rejects with the write error.
+    auto promise = source.pipeTo(js, destination).then(js, [](jsg::Lock& js) {
+      KJ_FAIL_REQUIRE("expected pipeTo() into a failing sink to reject");
+    }, [](jsg::Lock& js, jsg::Value exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("write failed"), e.getDescription());
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(cancelled);
+}
+
+KJ_TEST("JsReadableStream pipeTo validates options before consuming the endpoints") {
+  auto fixture = makeTsStreamsFixture();
+  SinkState state;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // A bogus signal cannot be expressed through the typed C++ PipeToOptions, so build
+    // the native-backed TS stream the same way create()'s TypeScript arm does -- keeping
+    // the raw handle -- and invoke its pipeTo the way user code would.
+    auto& sourceHandler =
+        KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+    auto sourceObj = jsg::JsValue(sourceHandler.wrap(
+        js, js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData))));
+    auto constructor = webstreams::getCppExport(js, "ReadableStream");
+    auto sourceHandle = constructor.newInstance(js, sourceObj);
+    auto source = JsReadableStream(js, sourceHandle.addRef(js));
+    auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
+    auto destHandle = KJ_ASSERT_NONNULL(destination.tryGetTs(js));
+    auto badOptions = js.obj();
+    badOptions.set(js, "signal"_kj, js.num(42));
+    auto rejected = KJ_ASSERT_NONNULL(
+        webstreams::invokeMethod(js, sourceHandle, "pipeTo"_kj, destHandle, badOptions)
+            .tryCast<jsg::JsPromise>());
+
+    auto promise = js.toVoidPromise(rejected).then(js,
+        [](jsg::Lock& js) -> jsg::Promise<void> {
+      KJ_FAIL_REQUIRE("expected pipeTo() with a non-AbortSignal signal to reject");
+    },
+        [source = source.addRef(js), destination = destination.addRef(js)](
+            jsg::Lock& js, jsg::Value exception) mutable -> jsg::Promise<void> {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(
+          e.getDescription().contains("options.signal must be an AbortSignal"), e.getDescription());
+      // Validation ran BEFORE extraction: both endpoints are untouched (not locked, not
+      // disturbed) and the pipe can be retried successfully.
+      KJ_EXPECT(!source.isLocked(js));
+      KJ_EXPECT(!source.isDisturbed(js));
+      KJ_EXPECT(!destination.isLocked(js));
+      return source.pipeTo(js, destination);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(state.written.asPtr() == kData.asBytes());
+  KJ_EXPECT(state.ended);
+}
+
+KJ_TEST("JsReadableStream pipeTo into an errored destination rejects with the stored error") {
   auto fixture = makeTsStreamsFixture();
   SinkState state;
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
@@ -998,11 +1183,24 @@ KJ_TEST("JsReadableStream pipeTo native+native honors preventClose") {
 
     auto source = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
     auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
-    auto promise = source.pipeTo(js, destination, PipeToOptions{.preventClose = true})
-                       .then(js, [destination = kj::mv(destination)](jsg::Lock& js) {});
+
+    // Error the destination, then pipe into it. The fast-path gate requires a 'writable'
+    // destination, so this routes to the JS pump, which rejects with the destination's
+    // STORED error (spec behavior) rather than a generic closed-stream TypeError.
+    auto promise = destination.forceAbort(js, js.error("boom"))
+                       .then(js,
+                           [source = kj::mv(source), destination = destination.addRef(js)](
+                               jsg::Lock& js) mutable {
+      return source.pipeTo(js, destination);
+    }).then(js, [](jsg::Lock& js) {
+      KJ_FAIL_REQUIRE("expected pipeTo() into an errored destination to reject");
+    }, [](jsg::Lock& js, jsg::Value exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("boom"), e.getDescription());
+    });
     return env.context.awaitJs(js, kj::mv(promise));
   });
-  KJ_EXPECT(state.written.asPtr() == kData.asBytes());
+  KJ_EXPECT(state.aborted);
   KJ_EXPECT(!state.ended);
 }
 

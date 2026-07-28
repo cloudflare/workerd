@@ -347,13 +347,26 @@ class WritableStreamNativeSink final: public jsg::Object {
   // is defensive), the release is deferred to the write's settlement.
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
 
-  // The native+native pipe fast path, called by the TS pipeTo when both ends carry
-  // extraction markers (with `this` being the extracted sink and `source` the extracted
-  // ReadableStreamNativeSource). Consumes both endpoints and runs the pump entirely at
-  // the C++ layer, honoring the StreamPipeOptions members (preventClose / preventAbort /
-  // preventCancel / signal) with the option-read order and validation error text of the
-  // TS JS pump. The returned promise is what ReadableStream.prototype.pipeTo resolves.
+  // The native+native pipe fast path, called by the TS pipeTo dispatch when both ends
+  // carry extraction markers, no prevent* option is set, and both endpoints are in their
+  // normal flowing states (the dispatch routes everything else to the JS pump, which can
+  // honor post-pipe endpoint usability and stored-error rejections; `this` is the
+  // extracted sink and `source` the extracted ReadableStreamNativeSource). Consumes both
+  // endpoints and runs the pump entirely at the C++ layer. The options arrive
+  // pre-converted and pre-validated by the dispatch as plain data properties; the
+  // prevent* handling here implements the intended fast-path semantics but only sees
+  // false values under the current dispatch gate. The returned promise is what
+  // ReadableStream.prototype.pipeTo resolves.
   jsg::Promise<void> pipeFrom(jsg::Lock& js, jsg::JsObject sourceObj, jsg::JsObject optionsObj);
+
+  // The C++ half of JsWritableStream::detach()'s TS arm, called by the TypeScript
+  // detachWritableStream just before it drops its reference to this object: releases the
+  // owned sink WITHOUT ending or aborting it -- the underlying connection is being taken
+  // over by other code (e.g. Socket startTls / takeConnectionStream) -- matching the
+  // legacy controller's detach, which drops its sink outright. Without this, the
+  // controller's stored hook algorithms (which close over this object) would keep the
+  // taken-over connection's sink alive until the stream is GC'd.
+  void detach(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(WritableStreamNativeSink) {
     JSG_PRIVATE_SYMBOL(kNativeSink);
@@ -361,6 +374,7 @@ class WritableStreamNativeSink final: public jsg::Object {
     JSG_METHOD(close);
     JSG_METHOD(abort);
     JSG_METHOD(pipeFrom);
+    JSG_METHOD(detach);
 
     // Internal plumbing type: keep it out of the generated TypeScript types.
     JSG_TS_OVERRIDE(type WritableStreamNativeSink = never);

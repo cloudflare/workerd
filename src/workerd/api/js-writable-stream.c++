@@ -37,7 +37,7 @@ jsg::Promise<void> writableStreamAbort(
   jsg::JsValue result =
       webstreams::dispatchCall(js, "writableStreamAbort", obj, reason.orDefault(js.undefined()));
   // The result must be a promise
-  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_CAST_PROMISE(result));
+  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_PROMISE(result));
   return js.toVoidPromise(promise);
 }
 
@@ -47,7 +47,7 @@ jsg::Promise<void> writableStreamAbort(
 jsg::Promise<void> writableStreamClose(jsg::Lock& js, jsg::JsObject obj) {
   jsg::JsValue result = webstreams::dispatchCall(js, "writableStreamClose", obj);
   // The result must be a promise
-  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_CAST_PROMISE(result));
+  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_PROMISE(result));
   return js.toVoidPromise(promise);
 }
 
@@ -59,7 +59,7 @@ jsg::Promise<void> writableStreamClose(jsg::Lock& js, jsg::JsObject obj) {
 jsg::Promise<void> writableStreamFlush(jsg::Lock& js, jsg::JsObject obj) {
   jsg::JsValue result = webstreams::dispatchCall(js, "writableStreamFlush", obj);
   // The result must be a promise
-  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_CAST_PROMISE(result));
+  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_PROMISE(result));
   return js.toVoidPromise(promise);
 }
 
@@ -121,8 +121,8 @@ struct PipeFromState {
 // reference lives in the coroutine frame across suspension points. This pipe is
 // isolate-consumed (the returned promise is awaited by JS), so there is no deferred-proxy
 // phase to split off; both pump phases simply run to completion.
-kj::Promise<void> pipeFromPump(kj::Rc<PipeFromState> state, bool end) {
-  auto proxy = co_await state->source->pumpTo(state->sink->getPtr(), end);
+kj::Promise<void> pipeFromPump(kj::Rc<PipeFromState> state, EndStream end) {
+  auto proxy = co_await state->source->pumpTo(state->sink->getPtr(), end == EndStream::YES);
   co_await kj::mv(proxy.proxyTask);
 }
 
@@ -161,7 +161,7 @@ JsWritableStream JsWritableStream::create(jsg::Lock& js,
       }
       return webstreams::dispatchCall(js, "createNativeWritableStream", sinkObj);
     }();
-    auto obj = KJ_REQUIRE_NONNULL(JSG_CAST_OBJECT(stream));
+    auto obj = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_OBJECT(stream));
     return JsWritableStream(js, obj.addRef(js));
   }
   return JsWritableStream(js.alloc<WritableStream>(
@@ -391,7 +391,7 @@ kj::Maybe<JsWritableStream> JsWritableStream::tryUnwrapTs(
   if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
     return kj::none;
   }
-  KJ_IF_SOME(obj, JSG_CAST_OBJECT(jsg::JsValue(handle))) {
+  KJ_IF_SOME(obj, JSG_TRY_CAST_OBJECT(jsg::JsValue(handle))) {
     // PERF NOTE: this is a JS call per unwrap attempt on any object-typed value (same
     // caveat as JsReadableStream::tryUnwrapTs; see the alternative sketched there). Today
     // the only unwrap consumer is JsReadableWritablePair's dictionary tier, so the cost is
@@ -565,6 +565,22 @@ jsg::Promise<void> WritableStreamNativeSink::abort(
   return js.resolvedPromise();
 }
 
+void WritableStreamNativeSink::detach(jsg::Lock& js) {
+  if (writeInFlight) {
+    // releaseLock() does not wait for pending writes, so a write can genuinely be in
+    // flight when detach is called. Defer the sink release to the write's settlement
+    // (same mechanism as abort). Queued-but-not-yet-dispatched writes that arrive after
+    // detach resolve successfully against the released sink (silent data drop); this
+    // matches the legacy controller's detach behavior.
+    pendingAbort = true;
+  } else {
+    state = kj::none;
+  }
+  // The stream is permanently locked after detach, so close() can never be dispatched
+  // again; drop the closure waitable's promise ref eagerly.
+  maybeClosureWaitable = kj::none;
+}
+
 jsg::Promise<void> WritableStreamNativeSink::pipeFrom(
     jsg::Lock& js, jsg::JsObject sourceObj, jsg::JsObject optionsObj) {
   // The TS pipeTo dispatch extracted both endpoints before calling (extraction only
@@ -573,9 +589,13 @@ jsg::Promise<void> WritableStreamNativeSink::pipeFrom(
   auto& active = JSG_REQUIRE_NONNULL(state, TypeError, "This WritableStream has been closed.");
   JSG_REQUIRE(!writeInFlight, TypeError, "pipeFrom() while a write is in flight.");
 
-  // Option reads in the spec-mandated order (preventAbort, preventCancel, preventClose,
-  // signal), matching the TS pump's observable getter side-effect order and its signal
-  // validation error text exactly.
+  // The TS dispatch converted and validated the options BEFORE extraction (spec getter
+  // order, spec error text), so these are side-effect-free reads of plain data
+  // properties, and the signal check below is defense-in-depth. The dispatch currently
+  // routes any pipe with a prevent* option to the JS pump (extraction cannot honor
+  // post-pipe endpoint usability), so the prevent* values here are false today; the
+  // handling below is kept as the intended fast-path semantics should the dispatch gate
+  // ever widen (see the TODO(streams-ts) at the dispatch).
   bool preventAbort = optionsObj.get(js, "preventAbort"_kj).isTrue();
   bool preventCancel = optionsObj.get(js, "preventCancel"_kj).isTrue();
   bool preventClose = optionsObj.get(js, "preventClose"_kj).isTrue();
@@ -613,7 +633,8 @@ jsg::Promise<void> WritableStreamNativeSink::pipeFrom(
   }
 
   auto pipeState = kj::rc<PipeFromState>(kj::mv(sink), kj::mv(releasedSource));
-  kj::Promise<void> pump = pipeFromPump(pipeState.addRef(), !preventClose);
+  kj::Promise<void> pump =
+      pipeFromPump(pipeState.addRef(), preventClose ? EndStream::NO : EndStream::YES);
   KJ_IF_SOME(signal, maybeSignal) {
     // The canceler destroys the pump at its suspension point when the signal fires; the
     // shutdown continuation below is attached OUTSIDE the wrap, so it still runs and
