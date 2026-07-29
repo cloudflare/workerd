@@ -488,6 +488,12 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   }
   void clearWrappers();
 
+  // Detach the V8 wrapper from every live Wrappable and release the wrapper's ownership share,
+  // destroying each Wrappable whose last owner that was. Startup-snapshot preparation only: the
+  // zygote never runs again, and the destructors reset every member handle (jsg::Data, V8Ref,
+  // jsg::Function, raw v8::Global) that CreateBlob's global-handle check would otherwise reject.
+  void destroyLiveWrappableInstances();
+
   void addToFreelist(Wrappable::CppgcShim& shim);
   Wrappable::CppgcShim* allocateShim(Wrappable& wrappable, v8::CppHeapPointerTag tag);
   void clearFreelistedShims();

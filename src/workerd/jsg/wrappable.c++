@@ -63,6 +63,25 @@ void HeapTracer::clearWrappers() {
   clearFreelistedShims();
 }
 
+void HeapTracer::destroyLiveWrappableInstances() {
+  v8::HandleScope scope(isolate);
+  while (!wrappers.empty()) {
+    auto& wrappable = wrappers.front();
+    // Empty Local if the wrapper is already detached.
+    auto handle = wrappable.tryGetHandle(isolate).orDefault({});
+    auto own = wrappable.detachWrapper(true);
+    if (own.get() == nullptr) {
+      KJ_DASSERT(wrappable.isCondemned());
+      wrappers.remove(wrappable);
+      continue;
+    }
+    // Detach the JS object from its CppgcShim: the serialized object must not point at C++.
+    if (!handle.IsEmpty()) {
+      v8::Object::Wrap<Wrappable::WRAPPABLE_TAG>(isolate, handle, nullptr);
+    }
+  }
+}
+
 using JSGWrappable = workerd::jsg::Wrappable;
 
 // V8's GC integrates with cppgc, aka "oilpan", a garbage collector for C++ objects. We want to
