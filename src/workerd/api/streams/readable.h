@@ -80,6 +80,7 @@ private:
       Closed,
       Released>;
 
+  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
   ReadableStreamController::Reader& reader;
 
   ReaderState state;
@@ -257,6 +258,7 @@ class DrainingReader: public ReadableStreamController::Reader {
   using Attached = jsg::Ref<ReadableStream>;
   struct Released {};
 
+  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
   kj::OneOf<Initial, Attached, StreamStates::Closed, Released> state = Initial();
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
 };
@@ -474,6 +476,7 @@ public:
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
+  kj::WeakRc<IoContext> ioContext = IoContext::tryGetWeakRefForCurrent();
   kj::Own<ReadableStreamController> controller;
 
   // Used to signal when this ReadableStream reads EOF. This signal is required for TCP sockets.
