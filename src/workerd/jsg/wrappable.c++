@@ -55,6 +55,25 @@ void HeapTracer::clearWrappers() {
   clearFreelistedShims();
 }
 
+kj::Vector<kj::Own<Wrappable>> HeapTracer::resetLiveWrappableInstances() {
+  kj::Vector<kj::Own<Wrappable>> keepalives;
+  v8::HandleScope scope(isolate);
+  while (!wrappers.empty()) {
+    auto& wrappable = wrappers.front();
+    // Empty Local if the wrapper is already detached.
+    auto handle = wrappable.tryGetHandle(isolate).orDefault({});
+    auto own = wrappable.detachWrapper(true);
+    if (own.get() != nullptr) {
+      keepalives.add(kj::mv(own));
+    }
+    // Detach the JS object from its CppgcShim.
+    if (!handle.IsEmpty()) {
+      v8::Object::Wrap<Wrappable::WRAPPABLE_TAG>(isolate, handle, nullptr);
+    }
+  }
+  return keepalives;
+}
+
 using JSGWrappable = workerd::jsg::Wrappable;
 
 // V8's GC integrates with cppgc, aka "oilpan", a garbage collector for C++ objects. We want to

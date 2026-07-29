@@ -536,6 +536,13 @@ void IsolateBase::prepareSnapshot(v8::Global<v8::Context> defaultContextHandle) 
   KJ_REQUIRE(isPreparingSnapshot());
   auto& artifact = mutableSnapshotArtifact();
   auto& creator = KJ_ASSERT_NONNULL(snapshotCreator);
+
+  // Detach the strongWrapper / traced wrapper of every live Wrappable.
+  // The returned keepalives are held in this scope so they
+  // outlive CreateBlob() below, which dereferences the Wrappable* stored in internal
+  // fields while serializing.
+  auto snapshotKeepalives = heapTracer.resetLiveWrappableInstances();
+
   auto defaultContext = defaultContextHandle.Get(ptr);
   creator->SetDefaultContext(defaultContext);
   KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
