@@ -417,9 +417,9 @@ class IsolateBase {
     return kj::mv(KJ_REQUIRE_NONNULL(snapshotConfig).get<MutableSnapshot>().artifact);
   }
 
-  // When preparing a snapshot: serialize the isolate with `defaultContext` as the default
+  // When preparing a snapshot: serialize the isolate with `defaultContextHandle` as the default
   // context and fill the SnapshotArtifact slot passed at isolate creation. No-op otherwise.
-  void prepareSnapshot(v8::Local<v8::Context> defaultContext);
+  void prepareSnapshot(v8::Global<v8::Context> defaultContextHandle);
 
   // Enumerates every resource type's constructor-template slots (memoizedConstructor and
   // contextConstructor, empty or not) for startup-snapshot handling, in a fixed compile-time

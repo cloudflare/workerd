@@ -532,10 +532,11 @@ IsolateBase::IsolateBase(V8System& system,
   });
 }
 
-void IsolateBase::prepareSnapshot(v8::Local<v8::Context> defaultContext) {
+void IsolateBase::prepareSnapshot(v8::Global<v8::Context> defaultContextHandle) {
   KJ_REQUIRE(isPreparingSnapshot());
   auto& artifact = mutableSnapshotArtifact();
   auto& creator = KJ_ASSERT_NONNULL(snapshotCreator);
+  auto defaultContext = defaultContextHandle.Get(ptr);
   creator->SetDefaultContext(defaultContext);
   KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
 
@@ -554,6 +555,18 @@ void IsolateBase::prepareSnapshot(v8::Local<v8::Context> defaultContext) {
   // 3. Reset struct-type handles: dictionary template + field-name handles per JSG_STRUCT.
   visitStructTypeHandles([](v8::Global<v8::Name>& h) { h.Reset(); },
       [](v8::Global<v8::DictionaryTemplate>& h) { h.Reset(); });
+
+  // 4. Reset module registry: per-entry module / source-object / mutable-exports / synthetic
+  // handles (incl. CommonJS evalFunc); the jsg::Data visitors also drop the paired
+  // TracedReference.
+  KJ_REQUIRE(!usingNewModuleRegistry, "snapshot not yet supported with the new module registry");
+  auto& moduleRegistry = KJ_ASSERT_NONNULL(getAlignedPointerFromEmbedderData<ModuleRegistry>(
+      defaultContext, ContextPointerSlot::MODULE_REGISTRY));
+  moduleRegistry.visitHandlesForSnapshot([](v8::Global<v8::Data>& h) { h.Reset(); });
+
+  // 5. Reset the Global holding the default context, extracted from the script's module
+  // context. The Local above keeps the context reachable for CreateBlob.
+  defaultContextHandle.Reset();
 
   artifact.blob = creator->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
 }

@@ -2117,7 +2117,15 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
       if (auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
           isolateBase.isPreparingSnapshot()) {
-        isolateBase.prepareSnapshot(context);
+        // Context Global is consumed by prepareSnapshot() even when it throws,
+        // so we clean it here to prevent double free.
+        KJ_DEFER({
+          const_cast<Script&>(*script).impl->moduleContext = kj::none;
+          impl->context = kj::none;
+        });
+        isolateBase.prepareSnapshot(jsContext->extractContextGlobalForSnapshot());
+        KJ_DASSERT(jsContext->getHandle(lock).IsEmpty(),
+            "zygote context handle must be consumed by prepareSnapshot");
       }
     });
   });
