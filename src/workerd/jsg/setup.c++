@@ -547,6 +547,10 @@ void IsolateBase::prepareSnapshot(v8::Local<v8::Context> defaultContext) {
   workerEnvObj.Reset();
   workerExportsObj.Reset();
 
+  // 2. Reset resource-type constructor templates: the memoized and context slot per
+  // JSG_RESOURCE type, owned by the TypeWrapper machinery.
+  iterateResourceTypeTemplates([&](v8::Global<v8::FunctionTemplate>& h) { h.Reset(); });
+
   artifact.blob = creator->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
 }
 
