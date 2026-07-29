@@ -7,6 +7,8 @@
 //
 // TODO(cleanup): Rename to events.h?
 
+#include "workerd/util/strong-bool.h"
+
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/external-pusher.h>
 #include <workerd/io/io-own.h>
@@ -24,6 +26,8 @@ class AbortSignal;
 class AbortController;
 class ActorState;
 
+WD_STRONG_BOOL(Trusted);
+
 // An implementation of the Web Platform Standard Event API
 class Event: public jsg::Object {
  public:
@@ -34,17 +38,18 @@ class Event: public jsg::Object {
     JSG_STRUCT(bubbles, cancelable, composed);
   };
 
-  inline explicit Event(kj::String ownType, Init init = {}, bool trusted = true)
+  inline explicit Event(kj::String ownType, Init init = {}, Trusted trusted = Trusted::YES)
       : ownType(kj::mv(ownType)),
         type(this->ownType) {
-    flags.trusted = trusted;
+    flags.trusted = trusted == Trusted::YES;
     flags.bubbles = init.bubbles.orDefault(false);
     flags.cancelable = init.cancelable.orDefault(false);
     flags.composed = init.composed.orDefault(false);
   }
 
-  inline explicit Event(kj::StringPtr type, Init init = {}, bool trusted = true): type(type) {
-    flags.trusted = trusted;
+  inline explicit Event(kj::StringPtr type, Init init = {}, Trusted trusted = Trusted::YES)
+      : type(type) {
+    flags.trusted = trusted == Trusted::YES;
     flags.bubbles = init.bubbles.orDefault(false);
     flags.cancelable = init.cancelable.orDefault(false);
     flags.composed = init.composed.orDefault(false);

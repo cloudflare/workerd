@@ -39,14 +39,14 @@ MessagePort::MessagePort(): state(Pending()) {
 
 void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
   JSG_TRY(js) {
-    auto message = js.alloc<MessageEvent>(js, kj::str("message"), value, kj::String(), JSG_THIS);
+    auto message = js.alloc<MessageEvent>(js, value, kj::String(), JSG_THIS);
     dispatchEventImpl(js, kj::mv(message));
   }
   JSG_CATCH(exception) {
     // There was an error dispatching the message event.
     // We will dispatch a messageerror event instead.
-    auto message = js.alloc<MessageEvent>(
-        js, kj::str("message"), jsg::JsValue(exception.getHandle(js)), kj::String(), JSG_THIS);
+    auto message =
+        js.alloc<MessageEvent>(js, jsg::JsValue(exception.getHandle(js)), kj::String(), JSG_THIS);
     dispatchEventImpl(js, kj::mv(message));
     // Now, if this dispatchEventImpl throws, we just blow up. Don't try to catch it.
   }
@@ -154,6 +154,7 @@ void MessagePort::closeImpl() {
 }
 
 void MessagePort::close(jsg::Lock& js) {
+  static constexpr kj::StringPtr name = "close"_kj;
   if (state.is<Closed>()) return;
   state = Closed{};
   KJ_IF_SOME(o, other) {
@@ -162,7 +163,7 @@ void MessagePort::close(jsg::Lock& js) {
     }
     other = kj::none;
   }
-  auto closeEvent = js.alloc<Event>(kj::str("close"), Event::Init{}, true);
+  auto closeEvent = js.alloc<Event>(name, Event::Init{});
   dispatchEventImpl(js, kj::mv(closeEvent));
 }
 

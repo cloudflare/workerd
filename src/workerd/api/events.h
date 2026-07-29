@@ -89,14 +89,14 @@ class MessageEvent final: public Event {
 
 class OpenEvent final: public Event {
  public:
-  OpenEvent(): Event("open"_kjc) {}
+  OpenEvent();
   static jsg::Ref<OpenEvent> constructor() = delete;
   JSG_RESOURCE_TYPE(OpenEvent) {
     JSG_INHERIT(Event);
   }
 };
 
-class ErrorEvent: public Event {
+class ErrorEvent final: public Event {
  public:
   struct ErrorEventInit {
     jsg::Optional<kj::String> message;
@@ -141,7 +141,7 @@ class ErrorEvent: public Event {
 };
 
 // ======================================================================================
-class PromiseRejectionEvent: public Event {
+class PromiseRejectionEvent final: public Event {
  public:
   PromiseRejectionEvent(
       v8::PromiseRejectEvent type, jsg::V8Ref<v8::Promise> promise, jsg::Value reason);

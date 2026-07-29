@@ -1044,7 +1044,8 @@ kj::Maybe<kj::Date> LegacyWebSocketAdapter::getAutoResponseTimestamp() {
 }
 
 void LegacyWebSocketAdapter::dispatchOpen(jsg::Lock& js) {
-  shell.dispatchEventImpl(js, js.alloc<Event>("open"));
+  constexpr kj::StringPtr kOpenEvent = "open"_kj;
+  shell.dispatchEventImpl(js, js.alloc<Event>(kOpenEvent));
 }
 
 void LegacyWebSocketAdapter::ensurePumping(jsg::Lock& js) {
