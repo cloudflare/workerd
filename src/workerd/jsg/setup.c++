@@ -536,20 +536,28 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   // We need to reset all C++ handles that point to JavaScript objects before creating
   // the snapshot blob, because V8 does not know how to serialize them.
 
-  // 1. Reset isolate level handles.
+  // 1. Destroy every live Wrappable.
+  heapTracer.destroyLiveWrappableInstances();
+
+  // Destructors under the isolate lock release their handles synchronously; drain the
+  // deferred-destruction queue regardless, as it would otherwise be applied only by the next
+  // lock, after CreateBlob().
+  applyDeferredActions();
+
+  // 2. Reset isolate level handles.
   opaqueTemplate.Reset();
   workerEnvObj.Reset();
   workerExportsObj.Reset();
 
-  // 2. Reset resource-type constructor templates: the memoized and context slot per
+  // 3. Reset resource-type constructor templates: the memoized and context slot per
   // JSG_RESOURCE type, owned by the TypeWrapper machinery.
   iterateResourceTypeTemplates([&](v8::Global<v8::FunctionTemplate>& h) { h.Reset(); });
 
-  // 3. Reset struct-type handles: dictionary template + field-name handles per JSG_STRUCT.
+  // 4. Reset struct-type handles: dictionary template + field-name handles per JSG_STRUCT.
   visitStructTypeHandles([](v8::Global<v8::Name>& h) { h.Reset(); },
       [](v8::Global<v8::DictionaryTemplate>& h) { h.Reset(); });
 
-  // 4. Reset the Global holding the default context, extracted from the script's module
+  // 5. Reset the Global holding the default context, extracted from the script's module
   // context. The SnapshotCreator keeps its own handle on the default context until CreateBlob()
   // consumes it.
   defaultContextHandle.Reset();
