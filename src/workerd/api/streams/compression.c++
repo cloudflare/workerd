@@ -538,12 +538,13 @@ class CompressionStreamAdapter final: public kj::Refcounted,
                                       public ReadableStreamSource,
                                       public WritableStreamSink {
  public:
-  explicit CompressionStreamAdapter(kj::Rc<CompressionStreamBase<mode>> impl): impl(kj::mv(impl)) {}
+  explicit CompressionStreamAdapter(kj::Rc<CompressionStreamBase<mode>> impl)
+      : impl(kj::mv(impl)),
+        ioContext(IoContext::current()) {}
 
   // ReadableStreamSource implementation
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return impl->tryRead(buffer, minBytes, maxBytes)
-        .attach(ioContext.assertLive().registerPendingEvent());
+    return impl->tryRead(buffer, minBytes, maxBytes).attach(ioContext.registerPendingEvent());
   }
 
   void cancel(kj::Exception reason) override {
@@ -553,15 +554,15 @@ class CompressionStreamAdapter final: public kj::Refcounted,
 
   // WritableStreamSink implementation
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
-    return impl->write(buffer).attach(ioContext.assertLive().registerPendingEvent());
+    return impl->write(buffer).attach(ioContext.registerPendingEvent());
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-    return impl->write(pieces).attach(ioContext.assertLive().registerPendingEvent());
+    return impl->write(pieces).attach(ioContext.registerPendingEvent());
   }
 
   kj::Promise<void> end() override {
-    return impl->end().attach(ioContext.assertLive().registerPendingEvent());
+    return impl->end().attach(ioContext.registerPendingEvent());
   }
 
   void abort(kj::Exception reason) override {
@@ -570,7 +571,7 @@ class CompressionStreamAdapter final: public kj::Refcounted,
 
  private:
   kj::Rc<CompressionStreamBase<mode>> impl;
-  kj::WeakRc<IoContext> ioContext = IoContext::current().getWeakRef();
+  IoContext& ioContext;
 };
 
 kj::Rc<CompressionStreamBase<Context::Mode::COMPRESS>> createCompressionStreamImpl(
