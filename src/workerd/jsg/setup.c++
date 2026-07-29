@@ -545,6 +545,10 @@ void IsolateBase::createSnapshotBlob() {
   // JSG_RESOURCE type, owned by the TypeWrapper machinery.
   iterateResourceTypeTemplates([&](v8::Global<v8::FunctionTemplate>& h) { h.Reset(); });
 
+  // 3. Reset struct-type handles: dictionary template + field-name handles per JSG_STRUCT.
+  visitStructTypeHandles([](v8::Global<v8::Name>& h) { h.Reset(); },
+      [](v8::Global<v8::DictionaryTemplate>& h) { h.Reset(); });
+
   artifact.blob = KJ_ASSERT_NONNULL(snapshotCreator)
                       ->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
 }
