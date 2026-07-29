@@ -546,6 +546,20 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       // can avoid doing it in the future.
       auto backing = theStore->GetBackingStore();
 
+      // The destination for the read below is derived from byteOffset/byteLength, which the BYOB
+      // path copies out of the in-cage v8::ArrayBufferView metadata. Were that metadata corrupted,
+      // the destination would land outside the allocation and the read would write there, so bound
+      // it against the BackingStore's length, which lives outside the V8 sandbox. The comparison is
+      // arranged to avoid overflowing when both values are attacker-chosen. For a resizable buffer
+      // this length is the maximum reservation rather than the live size; the branch below narrows
+      // it to the live size.
+      auto backingSize = backing->ByteLength();
+      if (byteOffset > backingSize || byteLength > backingSize - byteOffset) {
+        readPending = false;
+        return js.rejectedPromise<ReadResult>(
+            js.typeError("BYOB read destination view exceeds backing buffer bounds."_kj));
+      }
+
       // For resizable ArrayBuffers, the buffer may be resized while the read is
       // pending, decommitting memory pages and making the pointer invalid (SIGSEGV).
       // We read into a temporary buffer and copy the data back in the .then()
