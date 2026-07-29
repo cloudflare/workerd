@@ -17,6 +17,8 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+import jsonc
+
 TARGET_FILTER = None if len(sys.argv) < 2 else sys.argv[1]
 
 SCRIPT_DIR = Path(__file__).parent
@@ -591,14 +593,6 @@ def split_bzl_file(file: Path) -> dict[str, str]:
     return deps
 
 
-def strip_comments(text):
-    # capture string literals first, comments send
-    regex = re.compile(r"(\".*\")|(//.*$)", re.MULTILINE)
-    return regex.sub(
-        lambda match: "" if match.group(2) is not None else match.group(1), text
-    )
-
-
 def read_access_token():
     if not sys.stdin.isatty():
         return ""
@@ -651,8 +645,7 @@ def process_config(deps_file):
 
     try:
         with deps_path.open() as fp:
-            json_text = strip_comments(fp.read())
-            process_deps(json.loads(json_text), current_deps, bzl_path)
+            process_deps(jsonc.load(fp).data, current_deps, bzl_path)
     except FileNotFoundError:
         pass
 

@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 from urllib.request import urlopen
 
+import jsonc
 import v8_nightly_shared
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,18 +84,12 @@ def changed_dependencies(old, target):
 
 
 def _update_aligned_dependencies():
-    text = DEPS.read_text()
+    doc = jsonc.loads(DEPS.read_text())
+    repositories = {repo["name"]: repo for repo in doc.data["repositories"]}
     for name, (path, aligned) in V8_DEPENDENCIES.items():
-        if not aligned:
-            continue
-        text = re.sub(
-            rf'("name": "{name}".*?"freeze_commit": ")[0-9a-f]{{40}}(")',
-            rf"\g<1>{_v8_dependency_commit(path)}\g<2>",
-            text,
-            count=1,
-            flags=re.DOTALL,
-        )
-    DEPS.write_text(text)
+        if aligned:
+            repositories[name]["freeze_commit"] = _v8_dependency_commit(path)
+    DEPS.write_text(jsonc.dumps(doc) + "\n")
 
 
 def _update_module(tag, patch_names):
