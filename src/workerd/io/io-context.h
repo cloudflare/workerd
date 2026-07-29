@@ -531,6 +531,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // If there is a current IoContext, return its WeakRef.
   static kj::Maybe<kj::Own<WeakRef>> tryGetWeakRefForCurrent();
 
+  // If there is a current IoContext, return its Id. Use this when the caller only needs to
+  // determine later whether it is running in the same IoContext, rather than access the context.
+  // Unlike a WeakRef, an Id is safe to retain in objects that may be destroyed on another thread.
+  static kj::Maybe<Id> tryGetCurrentId();
+
   // Like requireCurrentOrThrowJs() but checks whether the IoContext identified by `id` is the
   // current one. Takes an Id rather than a WeakRef so callers need not retain a reference to the
   // (possibly destroyed) IoContext.

@@ -11,7 +11,7 @@
 namespace workerd::api {
 
 WritableStreamDefaultWriter::WritableStreamDefaultWriter()
-    : ioContext(tryGetIoContext()),
+    : ioContext(tryGetIoContextId()),
       state(WriterState::create<Initial>()) {}
 
 WritableStreamDefaultWriter::~WritableStreamDefaultWriter() noexcept(false) {
@@ -185,7 +185,7 @@ WritableStream::WritableStream(IoContext& ioContext,
           kj::mv(maybeClosureWaitable))) {}
 
 WritableStream::WritableStream(kj::Own<WritableStreamController> controller)
-    : ioContext(tryGetIoContext()),
+    : ioContext(tryGetIoContextId()),
       controller(kj::mv(controller)) {
   getController().setOwnerRef(PtrTarget::addWeakToThis());
 }
