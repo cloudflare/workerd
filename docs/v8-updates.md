@@ -70,7 +70,8 @@ from the V8 directory.
     where `<tarball_filename>` is the file available at
     `https://github.com/v8/v8/archive/refs/tags/<new_version>.tar.gz`
 
-10. Update V8's dependencies in `v8.MODULE.bazel` and `deps.MODULE.bazel`.
+10. Update V8's dependencies in `deps.jsonc`, then regenerate `deps.MODULE.bazel` by
+    running `update-deps.py`.
 
     You can find the commit versions for V8's dependencies under `<path_to_v8>/DEPS`.
 

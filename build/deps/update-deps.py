@@ -197,6 +197,8 @@ def repo_attributes(repo):
         "downloaded_file_path",
         "build_file_content",
         "patches",
+        "patch_cmds",
+        "patch_cmds_win",
     ):
         if option in repo:
             repo_attrs[option] = repo[option]

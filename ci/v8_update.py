@@ -23,6 +23,7 @@ DEPS = ROOT / "build/deps/deps.jsonc"
 PATCHES = ROOT / "patches/v8"
 
 V8_DEPENDENCIES = {
+    "com_googlesource_chromium_icu": ("third_party/icu", True),
     "dragonbox": ("third_party/dragonbox/src", True),
     "fast_float": ("third_party/fast_float/src", True),
     "fp16": ("third_party/fp16/src", True),
@@ -117,15 +118,6 @@ def _update_module(tag, patch_names):
         text,
         count=1,
         flags=re.MULTILINE | re.DOTALL,
-    )
-    # ICU is a direct git_repository in this module rather than an update-deps.py
-    # dependency, so its V8-aligned revision is updated here.
-    text = re.sub(
-        r'(name = "com_googlesource_chromium_icu",.*?commit = ")[0-9a-f]{40}("[,])',
-        rf"\g<1>{_v8_dependency_commit('third_party/icu')}\g<2>",
-        text,
-        count=1,
-        flags=re.DOTALL,
     )
     MODULE.write_text(text)
 
