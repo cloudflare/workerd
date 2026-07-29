@@ -118,11 +118,14 @@ void Autogate::initAllAutogates() {
   globalAutogate = kj::mv(autogate);
 }
 
-void Autogate::initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gateNames) {
-  initAutogateNamesForTest(kj::ArrayPtr<const kj::StringPtr>(gateNames.begin(), gateNames.size()));
+void Autogate::initAutogateNamesForTest(
+    std::initializer_list<kj::StringPtr> gateNames, IgnoreAllAutogatesEnv ignoreEnv) {
+  initAutogateNamesForTest(
+      kj::ArrayPtr<const kj::StringPtr>(gateNames.begin(), gateNames.size()), ignoreEnv);
 }
 
-void Autogate::initAutogateNamesForTest(kj::ArrayPtr<const kj::StringPtr> gateNames) {
+void Autogate::initAutogateNamesForTest(
+    kj::ArrayPtr<const kj::StringPtr> gateNames, IgnoreAllAutogatesEnv ignoreEnv) {
   capnp::MallocMessageBuilder message;
   auto orphanage = message.getOrphanage();
   auto gatesOrphan = orphanage.newOrphan<capnp::List<capnp::Text>>(gateNames.size());
@@ -131,7 +134,7 @@ void Autogate::initAutogateNamesForTest(kj::ArrayPtr<const kj::StringPtr> gateNa
   for (auto name: gateNames) {
     gates.set(count++, kj::str(WORKERD_PREFIX, name));
   }
-  Autogate::initAutogate(gates.asReader());
+  Autogate::initAutogate(gates.asReader(), ignoreEnv);
 }
 
 void Autogate::initAutogateForTest(std::initializer_list<AutogateKey> keys) {

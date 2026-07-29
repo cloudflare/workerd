@@ -10,13 +10,23 @@
 #include <workerd/api/system-streams.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
+#include <workerd/util/autogate.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <kj/filesystem.h>
+#include <kj/refcount.h>
 
 namespace workerd::api {
 
 namespace {
+
+// Upper bound on the number of distinct container ports whose tunnels we pool per Container. This
+// is a hard admission cap: once this many ports are pooled, any further distinct port falls back
+// to the non-pooled connect path (a fresh tunnel per request) for the Container's lifetime.
+// TODO(perf): This has no eviction policy or observability. Consider LRU eviction of cold entries
+//   and/or a debug log or metric when the cap is hit, so ports beyond the cap are not silently and
+//   permanently relegated to the slower path.
+constexpr size_t MAX_CACHED_TCP_PORTS = 4;
 
 kj::Maybe<kj::Path> parseRestorePath(kj::StringPtr path) {
   JSG_REQUIRE(path.size() > 0 && path[0] == '/', TypeError,
@@ -259,6 +269,7 @@ Container::Container(rpc::Container::Client rpcClient, bool running)
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
   auto flags = FeatureFlags::get(js);
   JSG_REQUIRE(!running, Error, "start() cannot be called on a container that is already running.");
+  invalidateTcpPortStates();
 
   StartupOptions options = kj::mv(maybeOptions).orDefault({});
 
@@ -722,6 +733,7 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
           [self = JSG_THIS](
               jsg::Lock& js, capnp::Response<rpc::Container::MonitorResults> results) mutable {
     self->running = false;
+    self->invalidateTcpPortStates();
     auto exitCode = results.getExitCode();
     KJ_IF_SOME(d, self->destroyReason) {
       jsg::Value error = kj::mv(d);
@@ -737,6 +749,7 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
   },
           [self = JSG_THIS](jsg::Lock& js, jsg::Value&& error) mutable {
     self->running = false;
+    self->invalidateTcpPortStates();
     self->destroyReason = kj::none;
     js.throwException(kj::mv(error));
   });
@@ -744,6 +757,7 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
 
 jsg::Promise<void> Container::destroy(jsg::Lock& js, jsg::Optional<jsg::Value> error) {
   if (!running) return js.resolvedPromise();
+  invalidateTcpPortStates();
 
   if (destroyReason == kj::none) {
     destroyReason = kj::mv(error);
@@ -765,18 +779,428 @@ void Container::signal(jsg::Lock& js, int signo) {
 // =======================================================================================
 // getTcpPort()
 
+// A bidirectional stream over a container Port.connect() tunnel. It owns the tunnel's byte-stream
+// halves and its disconnect state: a kj::Canceler that forcefully cancels in-flight reads on
+// disconnect, plus a sticky exception so that reads and disconnect waiters registered after the
+// disconnect still observe the failure.
+//
+// The `down`-drop callback must be baked into the `down` capability before the connect request is
+// sent, i.e. before the write half exists. The stream is therefore constructed with only its read
+// half and adopts the write half via adoptOutput() once the connect pipeline resolves.
+//
+// The stream is kj::Refcounted so that its disconnect callbacks can hold it safely. The `down`-drop
+// callback is owned by the capnp byte-stream machinery and so can fire after the stream itself is
+// gone; the write-failure and write-disconnect continuations can likewise outlive the stream. Each
+// captures a kj::WeakRc and upgrades it before touching the stream, keeping them memory-safe (and
+// satisfying the workerd-unsafe-continuation-capture lint). Construct via kj::rc<>() and hand the
+// single reference back to callers with toOwn().
+class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Refcounted {
+ public:
+  explicit ContainerPortAsyncIoStream(kj::Own<kj::AsyncInputStream> input): input(kj::mv(input)) {}
+
+  // Adopts the write half of the tunnel and begins watching it for disconnection. In the
+  // pipelined connect model this runs before the `Port.connect()` RPC has resolved, so an
+  // output-side failure observed here must defer to the connect outcome (see
+  // notifyUncleanDisconnect()) rather than tearing the stream down with a generic exception that
+  // would mask the specific connect error.
+  void adoptOutput(kj::Own<capnp::ExplicitEndOutputStream> up) {
+    output = kj::mv(up);
+    // whenWriteDisconnected()'s contract is to *resolve* (not reject) once writes would fail, and
+    // in that case we route the teardown through notifyUncleanDisconnect() so a failure observed
+    // during the connecting window yields to the (more specific) connect result. Defensively
+    // handle a rejection as well: it is not known to be reachable through the capnp byte-stream
+    // machinery today, but if it ever were, funneling it into disconnect() keeps the invariant
+    // that every output-side failure tears the stream down, rather than silently stranding a
+    // parked read or a rejectWhenDisconnected() waiter.
+    outputWatchTask = KJ_REQUIRE_NONNULL(output)
+                          ->whenWriteDisconnected()
+                          .then([weak = addWeakToThis()]() {
+      KJ_IF_SOME(stream, weak) {
+        stream->notifyUncleanDisconnect();
+      }
+    }, [weak = addWeakToThis()](kj::Exception&& exception) {
+      KJ_IF_SOME(stream, weak) {
+        stream->disconnect(kj::mv(exception));
+      }
+    }).eagerlyEvaluate(nullptr);
+  }
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    KJ_IF_SOME(exception, disconnectException) {
+      return exception.clone();
+    }
+    return canceler.wrap(KJ_REQUIRE_NONNULL(input)->tryRead(buffer, minBytes, maxBytes));
+  }
+
+  kj::Maybe<uint64_t> tryGetLength() override {
+    return KJ_REQUIRE_NONNULL(input)->tryGetLength();
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    KJ_IF_SOME(exception, disconnectException) {
+      return exception.clone();
+    }
+    return propagateWriteFailure(KJ_REQUIRE_NONNULL(output)->write(buffer));
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    KJ_IF_SOME(exception, disconnectException) {
+      return exception.clone();
+    }
+    return propagateWriteFailure(KJ_REQUIRE_NONNULL(output)->write(pieces));
+  }
+
+  kj::Promise<void> whenWriteDisconnected() override {
+    // rejectWhenDisconnected() has exactly one failure mode -- the disconnect exception -- and
+    // whenWriteDisconnected()'s contract is to *resolve* (not reject) once writes would fail, so
+    // mapping that sole rejection to a clean resolution is correct.
+    return rejectWhenDisconnected().catch_([](kj::Exception&&) {});
+  }
+
+  // Returns a promise that rejects when the connection is disconnected, or immediately if it is
+  // already disconnected.
+  kj::Promise<void> rejectWhenDisconnected() {
+    KJ_IF_SOME(exception, disconnectException) {
+      return exception.clone();
+    }
+    return canceler.wrap(kj::Promise<void>(kj::NEVER_DONE));
+  }
+
+  void shutdownWrite() override {
+    // shutdownWrite() is a clean half-close, which we would convey to the container by calling the
+    // capnp stream's explicit end(). Since shutdownWrite() is a synchronous void method, there is
+    // nowhere to await end(); we detach it, keeping the stream alive via attach() until it flushes.
+    //
+    // No current caller actually reaches this override: the HTTP path tears the transport down by
+    // dropping it (an abort -- see the destructor), and the raw-socket path half-closes via
+    // endWrite() instead. We nonetheless implement the AsyncIoStream contract correctly. If end()
+    // fails while the read half is still open, funnel the failure into disconnect() -- capturing a
+    // WeakRc, since the detached promise can outlive the stream -- so the read side is torn down
+    // deterministically rather than left hanging.
+    outputWatchTask = nullptr;
+    KJ_IF_SOME(stream, kj::mv(output)) {
+      stream->end()
+          .attach(kj::mv(stream))
+          .detach([weak = addWeakToThis()](kj::Exception&& exception) {
+        KJ_IF_SOME(self, weak) {
+          self->disconnect(kj::mv(exception));
+        }
+      });
+    }
+  }
+
+  kj::Promise<void> endWrite() {
+    outputWatchTask = nullptr;
+    auto stream = kj::mv(KJ_REQUIRE_NONNULL(output));
+    output = kj::none;
+    return stream->end().attach(kj::mv(stream));
+  }
+
+  void abortRead() override {
+    disconnect(KJ_EXCEPTION(DISCONNECTED, "Container port connection read aborted."));
+    input = kj::none;
+  }
+
+  void disconnect(kj::Exception exception = JSG_KJ_EXCEPTION(
+                      DISCONNECTED, Error, "Container port connection closed unexpectedly.")) {
+    // A single teardown can invoke disconnect() more than once -- e.g. a write failure both
+    // rejects the pending write (propagateWriteFailure) and resolves whenWriteDisconnected()
+    // (outputWatchTask), and the `down`-drop callback and abortRead() are further triggers. Make
+    // it idempotent: only the first call takes effect, so every observer sees the first reported
+    // exception. Recording that exception is also what lets reads, writes, and disconnect waiters
+    // registered *after* this point observe the failure, since kj::Canceler retains no canceled
+    // state of its own. (Writes consult the recorded exception rather than being canceler-wrapped:
+    // an in-flight write should not be forcibly cancelled -- unlike a parked read, it either makes
+    // progress or fails on its own -- but a write issued after disconnect must fail deterministically
+    // instead of being retried against a stream we already consider broken.)
+    if (disconnectException != kj::none) {
+      return;
+    }
+    disconnectException = exception.clone();
+    canceler.cancel(kj::mv(exception));
+  }
+
+  // Adopts the background task that watches the `Port.connect()` RPC. connectTyped() hands the
+  // stream back before that RPC resolves (promise pipelining), so ownership of the task lives on
+  // the stream; it upgrades a WeakRc before delivering connectSucceeded()/connectFailed().
+  void adoptConnectTask(kj::Promise<void> task) {
+    connectTask = task.eagerlyEvaluate(nullptr);
+  }
+
+  // Called when an output-side signal (down-drop callback or whenWriteDisconnected()) reports an
+  // unclean disconnect. While the connect RPC is still outstanding we cannot tell an ordinary
+  // teardown apart from the container refusing/failing the connection, and the latter carries a
+  // more specific exception. So during the connecting window we merely remember that a disconnect
+  // is pending and let the connect result decide; once settled, we tear down immediately.
+  void notifyUncleanDisconnect() {
+    if (connectState == ConnectState::SETTLED) {
+      disconnect();
+    } else {
+      connectState = ConnectState::PENDING_WITH_DISCONNECT;
+    }
+  }
+
+  // The connect RPC resolved successfully. If an unclean-disconnect signal arrived during the
+  // connecting window, honor it now with a generic exception.
+  void connectSucceeded() {
+    bool disconnectPending = connectState == ConnectState::PENDING_WITH_DISCONNECT;
+    connectState = ConnectState::SETTLED;
+    if (disconnectPending) {
+      disconnect();
+    }
+  }
+
+  // The connect RPC failed. Tear the stream down with the specific connect exception, which (by
+  // disconnect()'s first-wins rule) takes precedence over any buffered generic disconnect.
+  void connectFailed(kj::Exception exception) {
+    connectState = ConnectState::SETTLED;
+    disconnect(kj::mv(exception));
+  }
+
+ private:
+  kj::Maybe<kj::Own<kj::AsyncInputStream>> input;
+  // The write half of the tunnel. `output` is an ExplicitEndOutputStream, whose clean-EOF signal
+  // is end(); dropping it without end() is an abort. The clean paths (shutdownWrite() for an HTTP
+  // half-close, endWrite() for a completed raw-socket up pump) move `output` out before they run,
+  // so if it is still present when this stream is destroyed the teardown is abnormal and the
+  // destructor's default drop correctly conveys an abort -- not a clean end -- to the container.
+  // (This matches the behavior before container tunnels were pooled, where the up stream was
+  // likewise dropped without end() on any abnormal teardown.)
+  kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> output;
+  kj::Canceler canceler;
+  kj::Maybe<kj::Exception> disconnectException;
+  kj::Promise<void> outputWatchTask = nullptr;
+
+  // Tracks the pipelined `Port.connect()` RPC while it is outstanding. See
+  // notifyUncleanDisconnect() for why an unclean disconnect observed during the connecting window
+  // must be buffered rather than acted on immediately.
+  enum class ConnectState {
+    // The RPC is outstanding and no unclean-disconnect signal has fired.
+    PENDING,
+    // The RPC is outstanding and an unclean-disconnect signal has fired; it will be honored once
+    // the connect resolves, unless the connect itself fails first (whose specific exception wins).
+    PENDING_WITH_DISCONNECT,
+    // The RPC has settled (resolved or rejected); disconnect signals now take effect immediately.
+    SETTLED,
+  };
+  ConnectState connectState = ConnectState::PENDING;
+
+  // Background watcher for the connect RPC; see adoptConnectTask().
+  kj::Promise<void> connectTask = nullptr;
+
+  kj::Promise<void> propagateWriteFailure(kj::Promise<void> promise) {
+    // The returned promise is handed to the caller and can, in principle, outlive the stream, so
+    // capture a weak reference and upgrade it before recording the disconnect.
+    return promise.catch_([weak = addWeakToThis()](kj::Exception&& exception) -> kj::Promise<void> {
+      KJ_IF_SOME(stream, weak) {
+        stream->disconnect(exception.clone());
+      }
+      return kj::mv(exception);
+    });
+  }
+};
+
+// A kj::NetworkAddress backed by a single container `Port` capability. Each connect() opens a
+// fresh tunnel to that port via `Port.connect()`.
+//
+// This adapter exists mainly because `kj::newHttpClient()` produces a client that dials a
+// `kj::NetworkAddress&`; the pooled HTTP path holds one of these and reuses its connections. The
+// raw-socket path instead calls connectTyped() directly to obtain the concrete stream type.
+// listen() and clone() are unsupported: this is a dial-only address, not a bindable endpoint.
+//
+// `failed` is a sticky flag recording that a connection attempt to this port failed. Callers
+// consult it to decide whether a cached port is still usable or must be discarded and rebuilt.
+class ContainerPortNetworkAddress final: public kj::NetworkAddress {
+ public:
+  ContainerPortNetworkAddress(
+      capnp::ByteStreamFactory& byteStreamFactory, rpc::Container::Port::Client port)
+      : byteStreamFactory(byteStreamFactory),
+        port(kj::mv(port)) {}
+
+  // Establishes a new connection to the container port, returning the concrete stream type so
+  // callers that need `ContainerPortAsyncIoStream`-specific behavior (e.g. `endWrite()`,
+  // `rejectWhenDisconnected()`) can avoid a downcast. The `connect()` override upcasts for the
+  // `kj::NetworkAddress` interface (used by the pooled `NetworkAddressHttpClient`).
+  //
+  // We pipeline the `Port.connect()` RPC: the stream is handed back immediately, before the RPC
+  // resolves, so the caller can begin writing request bytes that ride the same round-trip as the
+  // connect itself. The connect result is watched in the background (see adoptConnectTask()); a
+  // failure surfaces as a disconnect carrying the specific connect exception, and the stream's
+  // connecting-window bookkeeping (notifyUncleanDisconnect()) ensures that specific error wins
+  // over any generic unclean-disconnect signal that races it.
+  //
+  // We deliberately do not impose our own timeout on the connect. The Workers runtime relies on a
+  // higher-level bound -- the enclosing request's lifetime -- to cap how long any subrequest can
+  // wait, and historically edgeworker has not layered its own timeouts underneath that. Timeout
+  // policy is the application's to choose: the Worker (or the code driving the container) is best
+  // placed to decide an appropriate deadline for its own traffic, so we surface the connection as
+  // it completes or fails rather than second-guessing it here.
+  kj::Own<ContainerPortAsyncIoStream> connectTyped() {
+    auto req = port.connectRequest(capnp::MessageSize{4, 1});
+    auto downPipe = kj::newOneWayPipe();
+
+    // Construct the connection object up-front (with only its read half) so that the down-drop
+    // callback -- which must be baked into the `down` capability before we send -- can reference
+    // it. The write half is adopted below, before we return.
+    auto conn = kj::rc<ContainerPortAsyncIoStream>(kj::mv(downPipe.in));
+
+    // Capture a weak reference: this callback is owned by the capnp byte-stream machinery once
+    // `down` is sent to the container, so it may fire after `conn` has been destroyed. Upgrading
+    // the weak reference makes that safe. Route through notifyUncleanDisconnect() so a drop seen
+    // while the connect is still outstanding defers to the (more specific) connect result.
+    auto down =
+        capnp::ExplicitEndOutputStream::wrap(kj::mv(downPipe.out), [weak = conn.addWeakRef()]() {
+      KJ_IF_SOME(stream, weak) {
+        stream->notifyUncleanDisconnect();
+      }
+    });
+    req.setDown(byteStreamFactory.kjToCapnp(kj::mv(down)));
+    auto pipeline = req.send();
+    { auto drop = kj::mv(req); }
+
+    auto up = byteStreamFactory.capnpToKjExplicitEnd(pipeline.getUp());
+    conn->adoptOutput(kj::mv(up));
+
+    // Watch the connect result in the background. On failure, mark the port failed (so a future
+    // getTcpPort() lookup discards this cached address and rebuilds) and tear the stream down with
+    // the specific exception. `failed` is shared into the callback because the connect may resolve
+    // after this address (and the stream) are gone.
+    conn->adoptConnectTask(pipeline.ignoreResult().then([weak = conn.addWeakRef()]() {
+      KJ_IF_SOME(stream, weak) {
+        stream->connectSucceeded();
+      }
+    }, [weak = conn.addWeakRef(), failed = failed.addRef()](kj::Exception&& exception) mutable {
+      *failed = true;
+      KJ_IF_SOME(stream, weak) {
+        stream->connectFailed(kj::mv(exception));
+      }
+    }));
+
+    return conn.toOwn();
+  }
+
+  kj::Promise<kj::Own<kj::AsyncIoStream>> connect() override {
+    kj::Own<kj::AsyncIoStream> result = connectTyped();
+    return kj::mv(result);
+  }
+
+  kj::Own<kj::ConnectionReceiver> listen() override {
+    KJ_UNIMPLEMENTED("cannot listen on a container port address");
+  }
+
+  kj::Own<kj::NetworkAddress> clone() override {
+    KJ_UNIMPLEMENTED("cannot clone a container port address");
+  }
+
+  kj::String toString() override {
+    return kj::str("container-port");
+  }
+
+  void markFailed() {
+    *failed = true;
+  }
+
+  bool hasFailed() const {
+    return *failed;
+  }
+
+ private:
+  capnp::ByteStreamFactory& byteStreamFactory;
+  rpc::Container::Port::Client port;
+  // Sticky flag recording that a connect attempt to this port failed. It is a shared Rc because
+  // the pipelined connect task (see connectTyped()) may set it after this address is gone.
+  kj::Rc<bool> failed = kj::rc<bool>(false);
+};
+
+class Container::TcpPortState {
+ public:
+  TcpPortState(capnp::ByteStreamFactory& byteStreamFactory, rpc::Container::Port::Client port)
+      : address(byteStreamFactory, kj::mv(port)) {}
+
+  TcpPortState(kj::Timer& timer,
+      capnp::ByteStreamFactory& byteStreamFactory,
+      kj::EntropySource& entropySource,
+      const kj::HttpHeaderTable& headerTable,
+      rpc::Container::Port::Client port)
+      : TcpPortState(byteStreamFactory, kj::mv(port)) {
+    pooled.emplace(PooledPort{
+      .client = kj::newHttpClient(timer, headerTable, address, {.entropySource = entropySource}),
+    });
+  }
+
+  // Establishes a new raw-socket connection, returning the concrete stream type so raw-socket
+  // pumping can call `endWrite()`/`rejectWhenDisconnected()` without a downcast. The connect is
+  // pipelined, so this returns synchronously.
+  kj::Own<ContainerPortAsyncIoStream> connectForRawSocket() {
+    return address.connectTyped();
+  }
+
+  // Used by the HTTP fallback path (non-pooled port, or one whose pooled client was
+  // invalidated), via `kj::newPromisedStream`.
+  kj::Promise<kj::Own<kj::AsyncIoStream>> connect() {
+    return address.connect();
+  }
+
+  void invalidate() {
+    KJ_IF_SOME(p, pooled) {
+      p.invalidated = true;
+    }
+  }
+
+  kj::Maybe<kj::HttpClient&> getHttpClient() {
+    KJ_IF_SOME(p, pooled) {
+      if (!p.invalidated) return *p.client;
+    }
+    return kj::none;
+  }
+
+  // `markPortFailed()`/`hasPortFailed()` record a sticky failure so the next getTcpPort() lookup
+  // discards this cached state and rebuilds a fresh tunnel. This is intentionally not a full
+  // circuit breaker (no failure-count threshold, fail-fast window, or state-transition metrics):
+  // the container sidecar is reached over a local socket via a single Port capability, and the
+  // enclosing request lifetime already bounds how long a request can wait on an unhealthy sidecar.
+  // A retry storm against a dead sidecar would be capped by that request-level teardown rather
+  // than by an explicit breaker here.
+  void markPortFailed() {
+    address.markFailed();
+  }
+
+  bool hasPortFailed() const {
+    return address.hasFailed();
+  }
+
+ private:
+  // Present only for pooled ports (the CONTAINER_TUNNEL_REUSE autogate): a persistent HTTP client
+  // that reuses connections across requests. `invalidated` is set when the container lifecycle
+  // changes such that pooled reuse must stop; thereafter a fresh connection is formed per request.
+  struct PooledPort {
+    kj::Own<kj::HttpClient> client;
+    bool invalidated = false;
+  };
+
+  ContainerPortNetworkAddress address;
+  kj::Maybe<PooledPort> pooled;
+};
+
+void Container::invalidateTcpPortStates() {
+  KJ_IF_SOME(states, tcpPortStates) {
+    for (auto& entry: *states) {
+      entry.value->invalidate();
+    }
+  }
+  tcpPortStates = kj::none;
+}
+
 // `getTcpPort()` returns a `Fetcher`, on which `fetch()` and `connect()` can be called. `Fetcher`
 // is a JavaScript wrapper around `WorkerInterface`, so we need to implement that.
 class Container::TcpPortWorkerInterface final: public WorkerInterface {
  public:
-  TcpPortWorkerInterface(capnp::ByteStreamFactory& byteStreamFactory,
-      kj::EntropySource& entropySource,
+  TcpPortWorkerInterface(kj::EntropySource& entropySource,
       const kj::HttpHeaderTable& headerTable,
-      rpc::Container::Port::Client port)
-      : byteStreamFactory(byteStreamFactory),
-        entropySource(entropySource),
+      kj::Rc<TcpPortState> portState)
+      : entropySource(entropySource),
         headerTable(headerTable),
-        port(kj::mv(port)) {}
+        portState(kj::mv(portState)) {}
 
   // Implements fetch(), i.e., HTTP requests. We form a TCP connection, then run HTTP over it
   // (as opposed to, say, speaking http-over-capnp to the container service).
@@ -804,41 +1228,16 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
     newHeaders.setPtr(kj::HttpHeaderId::HOST, parsedUrl.host);
     auto noHostUrl = parsedUrl.toString(kj::Url::Context::HTTP_REQUEST);
 
-    // Make a TCP connection...
-    auto pipe = kj::newTwoWayPipe();
-    kj::Maybe<kj::Exception> connectionException = kj::none;
+    KJ_IF_SOME(client, portState->getHttpClient()) {
+      auto service = kj::newHttpService(client);
+      co_await service->request(method, noHostUrl, newHeaders, requestBody, response);
+      co_return;
+    }
 
-    auto connectionPromise = connectImpl(*pipe.ends[1]);
-
-    // ... and then stack an HttpClient on it ...
-    auto client = kj::newHttpClient(headerTable, *pipe.ends[0], {.entropySource = entropySource});
-
-    // ... and then adapt that to an HttpService ...
+    auto connection = kj::newPromisedStream(portState->connect());
+    auto client = kj::newHttpClient(headerTable, *connection, {.entropySource = entropySource});
     auto service = kj::newHttpService(*client);
-
-    // ... fork connection promises so we can keep the original exception around ...
-    auto connectionPromiseForked = connectionPromise.fork();
-    auto connectionPromiseBranch = connectionPromiseForked.addBranch();
-    auto connectionPromiseToKeepException = connectionPromiseForked.addBranch();
-
-    // ... and now we can just forward our call to that ...
-    try {
-      co_await service->request(method, noHostUrl, newHeaders, requestBody, response)
-          .exclusiveJoin(
-              // never done as we do not want a Connection RPC exiting successfully
-              // affecting the request
-              connectionPromiseBranch.then([]() -> kj::Promise<void> { return kj::NEVER_DONE; }));
-    } catch (...) {
-      auto exception = kj::getCaughtExceptionAsKj();
-      connectionException = kj::some(kj::mv(exception));
-    }
-
-    // ... and last but not least, if the connect() call succeeded but the connection
-    // was broken, we throw that exception.
-    KJ_IF_SOME(exception, connectionException) {
-      co_await connectionPromiseToKeepException;
-      kj::throwFatalException(kj::mv(exception));
-    }
+    co_await service->request(method, noHostUrl, newHeaders, requestBody, response);
   }
 
   // Implements connect(), i.e., forms a raw socket.
@@ -848,10 +1247,10 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override {
     JSG_REQUIRE(!settings.useTls, Error,
-        "Connencting to a container using TLS is not currently supported. It is unnecessary "
+        "Connecting to a container using TLS is not currently supported. It is unnecessary "
         "anyway, as the connection is already secure by default.");
 
-    auto promise = connectImpl(connection);
+    auto promise = connectImpl(kj::Own<kj::AsyncIoStream>(&connection, kj::NullDisposer::instance));
 
     kj::HttpHeaders responseHeaders(headerTable);
     response.accept(200, "OK", responseHeaders);
@@ -877,42 +1276,28 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
   }
 
  private:
-  capnp::ByteStreamFactory& byteStreamFactory;
   kj::EntropySource& entropySource;
   const kj::HttpHeaderTable& headerTable;
-  rpc::Container::Port::Client port;
+  kj::Rc<TcpPortState> portState;
 
-  // Connect to the port and pump bytes to/from `connection`. Used by both request() and
-  // connect().
-  kj::Promise<void> connectImpl(kj::AsyncIoStream& connection) {
-    // A lot of the following is copied from
-    // capnp::HttpOverCapnpFactory::KjToCapnpHttpServiceAdapter::connect().
-    auto req = port.connectRequest(capnp::MessageSize{4, 1});
-    auto downPipe = kj::newOneWayPipe();
-    req.setDown(byteStreamFactory.kjToCapnp(kj::mv(downPipe.out)));
-    auto pipeline = req.send();
-
-    // Make sure the request message isn't pinned into memory through the co_await below.
-    { auto drop = kj::mv(req); }
+  // Connect to the port and pump bytes to/from `connection`.
+  kj::Promise<void> connectImpl(kj::Own<kj::AsyncIoStream> connection) {
+    auto portConnection = portState->connectForRawSocket();
+    auto& portStream = *portConnection;
 
     auto downPumpTask =
-        downPipe.in->pumpTo(connection)
-            .then([&connection, down = kj::mv(downPipe.in)](uint64_t) -> kj::Promise<void> {
-      connection.shutdownWrite();
+        portConnection->pumpTo(*connection).then([&connection](uint64_t) -> kj::Promise<void> {
+      connection->shutdownWrite();
       return kj::NEVER_DONE;
     });
-    auto up = pipeline.getUp();
+    auto upPumpTask = connection->pumpTo(*portConnection)
+                          .then([&portStream](uint64_t) {
+      return portStream.endWrite();
+    }).then([]() -> kj::Promise<void> { return kj::NEVER_DONE; });
+    auto disconnected = portStream.rejectWhenDisconnected();
 
-    auto upStream = byteStreamFactory.capnpToKjExplicitEnd(up);
-    auto upPumpTask = connection.pumpTo(*upStream)
-                          .then([&upStream = *upStream](uint64_t) mutable {
-      return upStream.end();
-    }).then([up = kj::mv(up), upStream = kj::mv(upStream)]() mutable -> kj::Promise<void> {
-      return kj::NEVER_DONE;
-    });
-
-    co_await pipeline;
-    co_await kj::joinPromisesFailFast(kj::arr(kj::mv(upPumpTask), kj::mv(downPumpTask)));
+    co_await kj::joinPromisesFailFast(
+        kj::arr(kj::mv(upPumpTask), kj::mv(downPumpTask), kj::mv(disconnected)));
   }
 };
 
@@ -920,44 +1305,71 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
 // request, so this is that.
 class Container::TcpPortOutgoingFactory final: public Fetcher::OutgoingFactory {
  public:
-  TcpPortOutgoingFactory(capnp::ByteStreamFactory& byteStreamFactory,
-      kj::EntropySource& entropySource,
+  TcpPortOutgoingFactory(kj::EntropySource& entropySource,
       const kj::HttpHeaderTable& headerTable,
-      rpc::Container::Port::Client port)
-      : byteStreamFactory(byteStreamFactory),
-        entropySource(entropySource),
+      kj::Rc<TcpPortState> portState)
+      : entropySource(entropySource),
         headerTable(headerTable),
-        port(kj::mv(port)) {}
+        portState(kj::mv(portState)) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
     // At present we have no use for `cfStr`.
-    return IoContext::current().getSubrequestNoChecks([&](auto& tracing, auto& channelFactory) {
-      return kj::heap<TcpPortWorkerInterface>(byteStreamFactory, entropySource, headerTable, port);
+    return IoContext::current().getSubrequestNoChecks(
+        [&](auto& tracing, auto& channelFactory) -> kj::Own<WorkerInterface> {
+      return kj::heap<TcpPortWorkerInterface>(entropySource, headerTable, portState.addRef());
     }, {.inHouse = false, .wrapMetrics = false});
   }
 
  private:
-  capnp::ByteStreamFactory& byteStreamFactory;
   kj::EntropySource& entropySource;
   const kj::HttpHeaderTable& headerTable;
-  rpc::Container::Port::Client port;
+
+  kj::Rc<TcpPortState> portState;
 };
 
 jsg::Ref<Fetcher> Container::getTcpPort(jsg::Lock& js, int port) {
   JSG_REQUIRE(port > 0 && port < 65536, TypeError, "Invalid port number: ", port);
 
-  auto req = rpcClient->getTcpPortRequest(
-      capnp::MessageSize{4 + capnp::sizeInWords<rpc::SpanContext>(), 0});
-  req.setPort(port);
-
   auto& ioctx = IoContext::current();
-  KJ_IF_SOME(spanContext, ioctx.getCurrentTraceSpan().toSpanContext()) {
-    spanContext.toCapnp(req.initSpanContext());
-  }
+  auto makePortRequest = [&]() {
+    auto req = rpcClient->getTcpPortRequest(
+        capnp::MessageSize{4 + capnp::sizeInWords<rpc::SpanContext>(), 0});
+    req.setPort(port);
+    KJ_IF_SOME(spanContext, ioctx.getCurrentTraceSpan().toSpanContext()) {
+      spanContext.toCapnp(req.initSpanContext());
+    }
+    return req;
+  };
 
-  kj::Own<Fetcher::OutgoingFactory> factory =
-      kj::heap<TcpPortOutgoingFactory>(ioctx.getByteStreamFactory(), ioctx.getEntropySource(),
-          ioctx.getHeaderTable(), req.send().getPort());
+  auto portState = [&]() -> kj::Rc<TcpPortState> {
+    if (util::Autogate::isEnabled(util::AutogateKey::CONTAINER_TUNNEL_REUSE)) {
+      if (tcpPortStates == kj::none) {
+        tcpPortStates = ioctx.addObject(kj::heap<kj::HashMap<int, kj::Rc<TcpPortState>>>());
+      }
+      auto& states = *KJ_ASSERT_NONNULL(tcpPortStates);
+
+      KJ_IF_SOME(entry, states.findEntry(port)) {
+        if (!entry.value->hasPortFailed()) return entry.value.addRef();
+        states.erase(entry);
+      }
+      if (states.size() < MAX_CACHED_TCP_PORTS) {
+        auto req = makePortRequest();
+        auto response = req.send();
+        auto state = kj::rc<TcpPortState>(ioctx.getUnsafeTimer(), ioctx.getByteStreamFactory(),
+            ioctx.getEntropySource(), ioctx.getHeaderTable(), response.getPort());
+        ioctx.addTask(response.ignoreResult().catch_(
+            [state = state.addRef()](kj::Exception&&) mutable { state->markPortFailed(); }));
+        states.insert(port, state.addRef());
+        return state;
+      }
+    }
+
+    auto req = makePortRequest();
+    return kj::rc<TcpPortState>(ioctx.getByteStreamFactory(), req.send().getPort());
+  }();
+
+  kj::Own<Fetcher::OutgoingFactory> factory = kj::heap<TcpPortOutgoingFactory>(
+      ioctx.getEntropySource(), ioctx.getHeaderTable(), kj::mv(portState));
 
   return js.alloc<Fetcher>(
       ioctx.addObject(kj::mv(factory)), Fetcher::RequiresHostAndProtocol::YES, true);

@@ -1,5 +1,6 @@
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
+load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_test.bzl", "wd_test")
 
@@ -661,6 +662,19 @@ kj_test(
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
+        "//src/workerd/util:autogate",
+    ],
+)
+
+# Micro-benchmark for the managed-container ingress data path.
+wd_cc_benchmark(
+    name = "bench-container-ingress",
+    srcs = ["bench-container-ingress.c++"],
+    tags = ["manual"],
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+        "//src/workerd/util:autogate",
     ],
 )
 
