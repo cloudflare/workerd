@@ -1,9 +1,7 @@
-src/workerd/io/observer.h
-  s_2192e8a6d105f9::t_39132021bb134c 129-136
 src/workerd/api/BUILD.bazel
-  s_b89908ec6702ef::t_3e9a8a50ffc440 663-671
-src/workerd/tests/test-fixture.c++
-  s_b89908ec6702ef::t_b6ea776a26aa89 371-372,464-471
+  s_b89908ec6702ef::t_6db59b0d379734 663-671
+src/workerd/io/observer.h
+  s_2192e8a6d105f9::t_e9966ab1d7fc01 129-136
 ---
 {
   "schema_version": "authorship/3.0.0",
