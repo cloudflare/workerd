@@ -561,14 +561,26 @@ kj::Own<ByteQueue::ByobRequest> ByteQueue::ReadRequest::makeByobReadRequest(
 
 #pragma region ByteQueue::Entry
 
-ByteQueue::Entry::Entry(jsg::BufferSource store): store(kj::mv(store)) {}
+ByteQueue::Entry::Entry(jsg::Lock& js, jsg::JsBufferSource store)
+    : store(store.addRef(js)),
+      size(store.size()),
+      offset(store.getOffset()) {}
 
-kj::ArrayPtr<kj::byte> ByteQueue::Entry::toArrayPtr() {
-  return store.asArrayPtr();
+kj::ArrayPtr<kj::byte> ByteQueue::Entry::toArrayPtr(jsg::Lock& js) {
+  auto handle = store.getHandle(js);
+  // Size and offset should not have changed since construction.
+  // This is purely defensive. The handle.asArrayPtr below is safe
+  // as it alays returns a correctly sized ArrayPtr for the live
+  // data, and KJ_IREQUIRE bounds checks the kj::ArrayPtr operations
+  // themselves, but we want to catch any unexpected variance early.
+  // A ByteQueue::Entry is not supposed to be mutable after construction.
+  KJ_ASSERT(size == handle.size());
+  KJ_ASSERT(offset == handle.getOffset());
+  return handle.asArrayPtr();
 }
 
 size_t ByteQueue::Entry::getSize() const {
-  return store.size();
+  return size;
 }
 
 kj::Rc<ByteQueue::Entry> ByteQueue::Entry::clone(jsg::Lock& js) {
@@ -687,7 +699,7 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
 
   // Drains buffered byte data into chunks. Stops draining when totalRead reaches
   // or exceeds maxRead (after finishing the current item).
-  static const auto drainBuffer = [](ConsumerImpl::Ready& ready,
+  static const auto drainBuffer = [](jsg::Lock& js, ConsumerImpl::Ready& ready,
                                       kj::Vector<kj::Array<kj::byte>>& chunks, size_t& totalRead,
                                       bool& isClosing, size_t maxRead) {
     while (!ready.buffer.empty() && !isClosing && totalRead < maxRead) {
@@ -698,7 +710,7 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
           break;
         }
         KJ_CASE_ONEOF(entry, QueueEntry) {
-          auto ptr = entry.entry->toArrayPtr();
+          auto ptr = entry.entry->toArrayPtr(js);
           auto offset = entry.offset;
           auto size = ptr.size() - offset;
           totalRead += size;
@@ -711,7 +723,7 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
   };
 
   // Drain the buffer up to maxRead bytes, then pump for more if under the limit.
-  drainBuffer(ready, chunks, totalRead, isClosing, maxRead);
+  drainBuffer(js, ready, chunks, totalRead, isClosing, maxRead);
 
   // Pump the controller for more synchronously available data.
   // maxRead is checked here: we only proceed with pumping if we haven't exceeded it.
@@ -726,7 +738,7 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
       if (!impl.state.isActive()) break;
 
       // Drain buffered data that was added by the pull, respecting maxRead.
-      drainBuffer(ready, chunks, totalRead, isClosing, maxRead);
+      drainBuffer(js, ready, chunks, totalRead, isClosing, maxRead);
 
       // If pull is async or no new data was added, stop pumping.
       if (!pullCompletedSync || chunks.size() == prevChunkCount) {
@@ -758,7 +770,7 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
   if (impl.queue == nullptr) {
     // Drain remaining buffer up to maxRead. If there's still more, the caller
     // will loop back and we'll drain the rest on subsequent calls.
-    drainBuffer(ready, chunks, totalRead, isClosing, maxRead);
+    drainBuffer(js, ready, chunks, totalRead, isClosing, maxRead);
     ready.hasPendingDrainingRead = false;
     bool done = ready.buffer.empty() || isClosing;
     // If isClosing, finalize the consumer so onConsumerClose fires promptly.
@@ -896,13 +908,13 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   if (queue->getConsumerCount() > 1) {
     // Allocate the entry into which we will be copying the provided data for the
     // other consumers of the queue.
-    KJ_IF_SOME(store, jsg::BufferSource::tryAllocUnsafe(js, amount)) {
-      auto entry = kj::rc<Entry>(kj::mv(store));
+    KJ_IF_SOME(store, jsg::JsUint8Array::tryCreate(js, amount)) {
+      auto entry = kj::rc<Entry>(js, jsg::JsBufferSource(store));
 
       auto start = sourcePtr.slice(req.pullInto.filled);
 
       // Safely copy the data over into the entry.
-      entry->toArrayPtr().write(start.first(amount));
+      entry->toArrayPtr(js).write(start.first(amount));
 
       // Push the entry into the other consumers.
       queue->push(js, kj::mv(entry), consumer);
@@ -947,9 +959,9 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
       if (!liveConsumer->state.isActive()) return true;
       auto start = sourcePtr.slice(amount - unaligned);
 
-      KJ_IF_SOME(store, jsg::BufferSource::tryAllocUnsafe(js, unaligned)) {
-        auto excess = kj::rc<Entry>(kj::mv(store));
-        excess->toArrayPtr().write(start.first(unaligned));
+      KJ_IF_SOME(store, jsg::JsUint8Array::tryCreate(js, unaligned)) {
+        auto excess = kj::rc<Entry>(js, jsg::JsBufferSource(store));
+        excess->toArrayPtr(js).write(start.first(unaligned));
         consume(kj::mv(liveConsumer))->push(js, kj::mv(excess));
       } else {
         js.throwException(js.error("Failed to allocate memory for the byob read response."_kj));
@@ -1142,7 +1154,7 @@ void ByteQueue::handlePush(jsg::Lock& js,
           KJ_FAIL_ASSERT("The consumer is closed.");
         }
         KJ_CASE_ONEOF(entry, QueueEntry) {
-          auto sourcePtr = entry.entry->toArrayPtr();
+          auto sourcePtr = entry.entry->toArrayPtr(js);
           auto sourceSize = sourcePtr.size() - entry.offset;
 
           auto destView = pending.pullInto.view.getHandle(js);
@@ -1207,7 +1219,7 @@ void ByteQueue::handlePush(jsg::Lock& js,
     // the remaining space in pending.pullInto.view, being careful to account for
     // the entryOffset and pending.pullInto.filled offsets to determine the range
     // where we start copying.
-    auto entryPtr = newEntry->toArrayPtr();
+    auto entryPtr = newEntry->toArrayPtr(js);
     auto destPtr = handle.asArrayPtr().slice(pending.pullInto.filled);
     destPtr.write(entryPtr.slice(entryOffset).first(amountToCopy));
 
@@ -1304,7 +1316,7 @@ void ByteQueue::handleRead(jsg::Lock& js,
 
           // Once we have the amount, we safely copy amountToCopy bytes from the
           // entry into the destination request, accounting properly for the offsets.
-          auto sourcePtr = entry.entry->toArrayPtr().slice(entry.offset);
+          auto sourcePtr = entry.entry->toArrayPtr(js).slice(entry.offset);
           auto destPtr = handle.asArrayPtr().slice(request->pullInto.filled);
 
           destPtr.write(sourcePtr.first(amountToCopy));
@@ -1437,7 +1449,7 @@ bool ByteQueue::handleMaybeClose(
           return true;
         }
         KJ_CASE_ONEOF(entry, QueueEntry) {
-          auto sourcePtr = entry.entry->toArrayPtr();
+          auto sourcePtr = entry.entry->toArrayPtr(js);
           auto sourceSize = sourcePtr.size() - entry.offset;
 
           auto destView = pending.pullInto.view.getHandle(js);
