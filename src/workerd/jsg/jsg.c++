@@ -412,7 +412,7 @@ kj::Maybe<JsObject> Lock::resolveInternalModule(kj::StringPtr specifier) {
   auto& isolate = IsolateBase::from(v8Isolate);
   if (isolate.isUsingNewModuleRegistry()) {
     return jsg::modules::ModuleRegistry::tryResolveModuleNamespace(
-        *this, specifier, jsg::modules::ResolveContext::Type::BUILTIN)
+        *this, specifier, jsg::modules::ResolveContext::Type::BUILTIN_ONLY)
         .map([](JsValue val) { return KJ_ASSERT_NONNULL(val.tryCast<JsObject>()); });
   }
 

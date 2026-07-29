@@ -180,9 +180,9 @@ namespace workerd::jsg::modules {
 //   closer to a symbolic link or a redirect than a true alias but "alias" is
 //   the term we've used historically with the fallback service in the original
 //   implementation so we're sticking with it for now.
-// * Import attributes are not currently implemented but will be in a future
-//   iteration. For now, if any import attributes are specified an error will
-//   be thrown.
+// * Import attributes support type: "json" for JSON modules. Unsupported
+//   attribute keys are rejected, and the "text" and "bytes" types are
+//   recognized but not yet supported.
 // * ES modules all support the compile cache. When the ModuleRegistry is
 //   shared across multiple replicas of a Worker, the compile cache will speed
 //   up module compilation since the same compile cache can be used across all

@@ -411,6 +411,18 @@ kj_test(
 )
 
 kj_test(
+    src = "fallback-service-test.c++",
+    deps = [
+        ":fallback-service",
+        ":workerd_capnp",
+        "@capnp-cpp//src/capnp/compat:json",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
+kj_test(
     src = "json-logger-test.c++",
     deps = [
         ":json-logger",
