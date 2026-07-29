@@ -41,9 +41,7 @@ def main():
 
     v8_nightly_shared.setup_git("workerd")
 
-    v8_nightly_shared.run(
-        ["git", "checkout", "-B", v8_nightly_shared.BRANCH, "HEAD"]
-    )
+    v8_nightly_shared.run(["git", "checkout", "-B", v8_nightly_shared.BRANCH, "HEAD"])
     old_tag = read_version()
     target_tag = latest_beta_v8()
 
@@ -58,18 +56,14 @@ def main():
         return 1
 
     for dependency in changed_dependencies(old_tag, target_tag):
-        v8_nightly_shared.run(
-            ["python3", "build/deps/update-deps.py", dependency]
-        )
+        v8_nightly_shared.run(["python3", "build/deps/update-deps.py", dependency])
 
     v8_nightly_shared.commit(
         f"[v8-nightly] AI guided update for V8 {old_tag} -> {target_tag}"
     )
 
     if bazel_test():
-        if not v8_nightly_shared.ai(
-            "workerd", "test", old_tag, target_tag, CHECKOUT
-        ):
+        if not v8_nightly_shared.ai("workerd", "test", old_tag, target_tag, CHECKOUT):
             return 1
 
         v8_nightly_shared.commit(f"[v8-nightly] AI fix for V8 {target_tag}")

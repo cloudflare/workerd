@@ -295,7 +295,7 @@ kj::Promise<void> LegacyHibernationManagerImpl::handleSocketTermination(
     event = workerInterface
                 ->customEvent(kj::rc<api::HibernatableWebSocketCustomEvent>(
                     hibernationEventType, kj::mv(KJ_REQUIRE_NONNULL(params)), *this)
-                        .toOwn())
+                                  .toOwn())
                 .ignoreResult()
                 .attach(kj::mv(workerInterface));
   }

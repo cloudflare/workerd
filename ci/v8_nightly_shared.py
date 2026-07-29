@@ -25,7 +25,7 @@ def init(root):
     REPORT = ROOT / "ci/v8-nightly-report.md"
 
 
-def run(args, *, check=True, capture=False, cwd=None, env=None, timeout=None):
+def run(args, *, check=True, capture=False, cwd=None, env=None, timeout=None):  # noqa: PLR0913
     print("+", shlex.join(map(str, args)), flush=True)
     return subprocess.run(
         list(map(str, args)),
