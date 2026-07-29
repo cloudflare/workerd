@@ -30,7 +30,7 @@ vendored_py_wd_test(
     make_snapshot = True,
     python_flags = [
         "0.28.2",
-        "314.0.2",
+        "314.0.3",
     ],
     use_snapshot = "baseline",
 )
