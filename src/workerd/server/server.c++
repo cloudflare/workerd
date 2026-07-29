@@ -5411,7 +5411,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
     auto artifactBundler = ArtifactBundler::makeDisabledBundler();
 
-    newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(*jsgobserver,
+    newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(
         def.source.variant.tryGet<Worker::Script::ModulesSource>(), def.featureFlags, pythonConfig,
         bundleBase, extensions, kj::mv(maybeFallbackService), kj::mv(artifactBundler));
   }

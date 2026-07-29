@@ -685,9 +685,7 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
       // checked. The fallback service should only be used for local dev.
       ALLOW_FALLBACK = 1 << 0,
     };
-    Builder(const ResolveObserver& observer,
-        const jsg::Url& bundleBase,
-        Options options = Options::NONE);
+    Builder(const jsg::Url& bundleBase, Options options = Options::NONE);
     KJ_DISALLOW_COPY_AND_MOVE(Builder);
 
     Builder& add(kj::Own<ModuleBundle> bundle) KJ_LIFETIMEBOUND;
@@ -704,7 +702,6 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
     bool allowsFallback() const;
 
     // One slot for each of ModuleBundle::Type
-    const ResolveObserver& observer;
     const jsg::Url& bundleBase;
     const Options options;
     kj::FixedArray<kj::Vector<kj::Own<ModuleBundle>>, ModuleRegistry::kBundleCount> bundles_;
@@ -713,8 +710,8 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
     friend class ModuleRegistry;
   };
 
-  kj::Maybe<const Module&> lookup(
-      const ResolveContext& context) const KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
+  kj::Maybe<const Module&> lookup(const ResolveContext& context,
+      const ResolveObserver& observer) const KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
 
   // Attaches the ModuleRegistry to the given isolate by creating an IsolateModuleRegistry
   // and linking that to the isolate.
@@ -768,8 +765,7 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
     Impl(kj::ArrayPtr<kj::Vector<kj::Own<ModuleBundle>>> bundles);
   };
 
-  const ResolveObserver& observer;
-  const jsg::Url& bundleBase;
+  jsg::Url bundleBase;
   kj::MutexGuarded<Impl> impl;
   // Marked mutable because kj::Function::operator() is non-const, but the eval
   // callback is conceptually const — it is only ever invoked while holding the
