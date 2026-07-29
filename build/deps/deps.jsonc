@@ -125,7 +125,9 @@
       "url": "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
       "branch": "main",
       "build_file": "//:build/BUILD.zlib",
-      "patches": ["//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch"]
+      "patches": [
+        "//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch"
+      ]
     },
     {
       "name": "workerd-cxx",
