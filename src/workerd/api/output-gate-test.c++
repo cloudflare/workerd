@@ -117,8 +117,7 @@ KJ_TEST("queue sends wait for output gate") {
 
     auto queue = env.js.alloc<WorkerQueue>(0);
     static const DefaultTypeHandler<WorkerQueue::SendResponse> sendResponseHandler;
-    queue
-        ->send(env.js, jsg::JsValue(env.js.str("message"_kj)), kj::none, sendResponseHandler)
+    queue->send(env.js, jsg::JsValue(env.js.str("message"_kj)), kj::none, sendResponseHandler)
         .markAsHandled(env.js);
 
     auto messages = kj::heapArray<WorkerQueue::MessageSendRequest>(1);

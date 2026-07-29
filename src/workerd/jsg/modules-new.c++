@@ -1006,8 +1006,8 @@ void importMeta(
           // Node.js and the HTML spec both require import.meta.resolve to be called
           // with a specifier argument; calling it with none is a TypeError rather
           // than silently resolving the string "undefined".
-          JSG_REQUIRE(args.Length() >= 1, TypeError,
-              "import.meta.resolve requires a specifier argument");
+          JSG_REQUIRE(
+              args.Length() >= 1, TypeError, "import.meta.resolve requires a specifier argument");
           // Note that we intentionally use ToString here to coerce whatever value is given
           // into a string or throw if it cannot be coerced.
           auto specifier = js.toString(args[0]);

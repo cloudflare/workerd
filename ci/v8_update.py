@@ -228,7 +228,9 @@ def parse_args():
         description="Automate workerd's mechanical V8 patch rebase and pin updates."
     )
     commands = parser.add_subparsers(dest="command", required=True)
-    check = commands.add_parser("check-update", help="check Chrome Beta for a V8 update")
+    check = commands.add_parser(
+        "check-update", help="check Chrome Beta for a V8 update"
+    )
     check.add_argument("--machine-readable", action="store_true")
     for name in ("update", "finish"):
         command = commands.add_parser(name)

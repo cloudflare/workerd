@@ -263,8 +263,8 @@ jsg::Promise<WorkerQueue::SendResponse> WorkerQueue::send(jsg::Lock& js,
   const auto exposeErrorCodes = workerd::FeatureFlags::get(js).getQueueExposeErrorCodes();
 
   static constexpr auto handleSend = [](auto outputLock, auto headers, auto serialized, auto client,
-                                          auto& headerIds,
-                                          bool exposeErrorCodes) -> kj::Promise<kj::String> {
+                                         auto& headerIds,
+                                         bool exposeErrorCodes) -> kj::Promise<kj::String> {
     KJ_IF_SOME(lock, outputLock) {
       // For Durable Objects, defer the send until the output gate is open so we never emit a
       // message before confirmed storage writes.
@@ -406,8 +406,8 @@ jsg::Promise<WorkerQueue::SendBatchResponse> WorkerQueue::sendBatch(jsg::Lock& j
   const auto& headerIds = context.getHeaderIds();
   const auto exposeErrorCodes = workerd::FeatureFlags::get(js).getQueueExposeErrorCodes();
   static constexpr auto handleWrite = [](auto outputLock, auto headers, auto body, auto client,
-                                           auto& headerIds,
-                                           bool exposeErrorCodes) -> kj::Promise<kj::String> {
+                                          auto& headerIds,
+                                          bool exposeErrorCodes) -> kj::Promise<kj::String> {
     KJ_IF_SOME(lock, outputLock) {
       // For Durable Objects, defer the send until the output gate is open so we never emit a
       // message before confirmed storage writes.
