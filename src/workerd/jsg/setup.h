@@ -429,6 +429,10 @@ class IsolateBase {
   virtual void iterateResourceTypeTemplates(
       kj::FunctionParam<void(v8::Global<v8::FunctionTemplate>&)> cb) {}
 
+  // Visits every struct type's persistent handles (dictionary template + field-name handles).
+  virtual void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
+      kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictTmpl) {}
+
  private:
   template <typename TypeWrapper>
   friend class Isolate;
@@ -844,6 +848,15 @@ class Isolate: public IsolateBase {
       kj::FunctionParam<void(v8::Global<v8::FunctionTemplate>&)> cb) override {
     if (!hasExtraWrappers) {
       wrappers[0]->iterateResourceTypeTemplates(cb);
+    } else {
+      KJ_FAIL_ASSERT("Not yet implemented");
+    }
+  }
+
+  void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
+      kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictTmpl) override {
+    if (!hasExtraWrappers) {
+      wrappers[0]->visitStructTypeHandles(visitName, visitDictTmpl);
     } else {
       KJ_FAIL_ASSERT("Not yet implemented");
     }
