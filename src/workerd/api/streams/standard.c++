@@ -2045,29 +2045,35 @@ struct ByteReadable final: public kj::PtrTarget,
       reading = true;
       KJ_DEFER(reading = false);
       KJ_IF_SOME(byob, byobOptions) {
-        jsg::BufferSource source(js, byob.bufferView.getHandle(js));
+        jsg::JsArrayBufferView view = jsg::JsArrayBufferView(byob.bufferView.getHandle(js));
+        view = view.detachAndTake(js);
+        size_t elementSize = view.getElementSize();
         // If atLeast is not given, then by default it is the element size of the view
         // that we were given. If atLeast is given, we make sure that it is aligned
         // with the element size. No matter what, atLeast cannot be less than 1.
-        auto atLeast = kj::max(source.getElementSize(), byob.atLeast.orDefault(1));
-        atLeast = kj::max(1, atLeast - (atLeast % source.getElementSize()));
+        auto atLeast = kj::max(elementSize, byob.atLeast.orDefault(1));
+        atLeast = kj::max(1, atLeast - (atLeast % elementSize));
         s.consumer->read(js,
             kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
                 ByteQueue::ReadRequest::PullInto{
-                  .store = jsg::BufferSource(js, source.detach(js)),
+                  .view = view.addRef(js),
+                  .elementSize = elementSize,
+                  .originalOffset = view.getOffset(),
                   .atLeast = atLeast,
                   .type = ByteQueue::ReadRequest::Type::BYOB,
                 }));
       } else KJ_IF_SOME(chunkSize, autoAllocateChunkSize) {
         // autoAllocateChunkSize is set, so we allocate a buffer and do a BYOB read.
         // This makes the buffer available to the underlying source via controller.byobRequest.
-        KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, chunkSize)) {
+        KJ_IF_SOME(store, jsg::JsUint8Array::tryCreate(js, chunkSize)) {
           // Ensure that the handle is created here so that the size of the buffer
           // is accounted for in the isolate memory tracking.
           s.consumer->read(js,
               kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
                   ByteQueue::ReadRequest::PullInto{
-                    .store = kj::mv(store),
+                    .view = jsg::JsArrayBufferView(store).addRef(js),
+                    .elementSize = 1,
+                    .originalOffset = 0,
                     .type = ByteQueue::ReadRequest::Type::BYOB,
                   }));
         } else {
@@ -2078,11 +2084,13 @@ struct ByteReadable final: public kj::PtrTarget,
         // the underlying source's pull method won't get a byobRequest. It must use
         // controller.enqueue() to provide data instead.
         constexpr size_t kDefaultReadSize = 16384;  // 16KB default buffer
-        KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, kDefaultReadSize)) {
+        KJ_IF_SOME(store, jsg::JsUint8Array::tryCreate(js, kDefaultReadSize)) {
           s.consumer->read(js,
               kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
                   ByteQueue::ReadRequest::PullInto{
-                    .store = kj::mv(store),
+                    .view = jsg::JsArrayBufferView(store).addRef(js),
+                    .elementSize = 1,
+                    .originalOffset = 0,
                     .type = ByteQueue::ReadRequest::Type::DEFAULT,
                   }));
         } else {
@@ -2335,19 +2343,28 @@ kj::Own<ValueQueue::Consumer> ReadableStreamDefaultController::getConsumer(
 
 // ======================================================================================
 
+namespace {
+jsg::JsRef<jsg::JsUint8Array> getViewRef(jsg::Lock& js, kj::Maybe<jsg::JsUint8Array> maybeView) {
+  KJ_IF_SOME(view, maybeView) {
+    return view.addRef(js);
+  }
+  KJ_FAIL_ASSERT("BYOB read request's view is expected to be present when updating the view");
+}
+}  // namespace
+
 ReadableStreamBYOBRequest::Impl::Impl(jsg::Lock& js,
     kj::Own<ByteQueue::ByobRequest> readRequest,
     kj::Rc<WeakRef<ReadableByteStreamController>> controller)
     : readRequest(kj::mv(readRequest)),
       controller(kj::mv(controller)),
-      view(js.v8Ref(this->readRequest->getView(js))),
+      view(getViewRef(js, this->readRequest->getView(js))),
       originalBufferByteLength(this->readRequest->getOriginalBufferByteLength(js)),
       originalByteOffsetPlusBytesFilled(this->readRequest->getOriginalByteOffsetPlusBytesFilled()) {
 }
 
 void ReadableStreamBYOBRequest::Impl::updateView(jsg::Lock& js) {
-  jsg::check(view.getHandle(js)->Buffer()->Detach(v8::Local<v8::Value>()));
-  view = js.v8Ref(readRequest->getView(js));
+  view.getHandle(js).detachInPlace(js);
+  view = getViewRef(js, readRequest->getView(js));
 }
 
 void ReadableStreamBYOBRequest::visitForGc(jsg::GcVisitor& visitor) {
@@ -2369,9 +2386,9 @@ kj::Maybe<int> ReadableStreamBYOBRequest::getAtLeast() {
   return kj::none;
 }
 
-kj::Maybe<jsg::V8Ref<v8::Uint8Array>> ReadableStreamBYOBRequest::getView(jsg::Lock& js) {
+kj::Maybe<jsg::JsUint8Array> ReadableStreamBYOBRequest::getView(jsg::Lock& js) {
   KJ_IF_SOME(impl, maybeImpl) {
-    return impl.view.addRef(js);
+    return impl.view.getHandle(js);
   }
   return kj::none;
 }
@@ -2381,7 +2398,7 @@ void ReadableStreamBYOBRequest::invalidate(jsg::Lock& js) {
     // If the user code happened to have retained a reference to the view or
     // the buffer, we need to detach it so that those references cannot be used
     // to modify or observe modifications.
-    jsg::check(impl.view.getHandle(js)->Buffer()->Detach(v8::Local<v8::Value>()));
+    impl.view.getHandle(js).detachInPlace(js);
     impl.controller->runIfAlive(
         [](ReadableByteStreamController& controller) { controller.maybeByobRequest = kj::none; });
   }
@@ -2392,7 +2409,7 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
   auto& impl = JSG_REQUIRE_NONNULL(
       maybeImpl, TypeError, "This ReadableStreamBYOBRequest has been invalidated.");
   JSG_REQUIRE(impl.controller->isValid(), Error, "The ReadableStreamBYOBRequest is invalid.");
-  JSG_REQUIRE(impl.view.getHandle(js)->ByteLength() > 0, TypeError,
+  JSG_REQUIRE(impl.view.getHandle(js).size() > 0, TypeError,
       "Cannot respond with a zero-length or detached view");
   impl.controller->runIfAlive([&](ReadableByteStreamController& controller) {
     if (!controller.canCloseOrEnqueue()) {
@@ -2439,7 +2456,7 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
   });
 }
 
-void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSource view) {
+void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::JsBufferSource view) {
   auto& impl = JSG_REQUIRE_NONNULL(
       maybeImpl, TypeError, "This ReadableStreamBYOBRequest has been invalidated.");
   JSG_REQUIRE(impl.controller->isValid(), Error, "The ReadableStreamBYOBRequest is invalid.");
@@ -2454,22 +2471,20 @@ void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSou
         // 2. The underlying buffer must not be detached (TypeError)
         // 3. The buffer byte length must not be zero (RangeError)
         // 4. The buffer byte length must match the original (RangeError)
-        auto handle = view.getHandle(js);
-        auto buffer = handle->IsArrayBuffer() ? handle.As<v8::ArrayBuffer>()
-                                              : handle.As<v8::ArrayBufferView>()->Buffer();
-        JSG_REQUIRE(
-            !buffer->WasDetached(), TypeError, "The underlying ArrayBuffer has been detached.");
+        JSG_REQUIRE(!view.isDetached(), TypeError, "The underlying ArrayBuffer has been detached.");
 
-        JSG_REQUIRE(view.canDetach(js), TypeError, "Unable to use non-detachable ArrayBuffer.");
+        JSG_REQUIRE(view.isDetachable(), TypeError, "Unable to use non-detachable ArrayBuffer.");
+
         // Use the stored values since the ByobRequest may have been invalidated during close.
-        auto actualBufferByteLength = buffer->ByteLength();
+        auto actualBufferByteLength = view.underlyingArrayBufferSize(js);
+
         JSG_REQUIRE(
             actualBufferByteLength != 0, RangeError, "The underlying ArrayBuffer is zero-length.");
         JSG_REQUIRE(actualBufferByteLength == impl.originalBufferByteLength, RangeError,
             "The underlying ArrayBuffer is not the correct length.");
         // The view's byte offset must match the original byte offset plus bytes filled.
-        auto viewByteOffset =
-            handle->IsArrayBuffer() ? 0 : handle.As<v8::ArrayBufferView>()->ByteOffset();
+        auto viewByteOffset = view.getOffset();
+
         JSG_REQUIRE(viewByteOffset == impl.originalByteOffsetPlusBytesFilled, RangeError,
             "The view has an invalid byte offset.");
       } else {
@@ -2482,7 +2497,8 @@ void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSou
       if (impl.readRequest->isInvalidated() && controller.impl.consumerCount() >= 1) {
         // While this particular request may be invalidated, there are still
         // other branches we can push the data to. Let's do so.
-        auto entry = kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, view.detach(js)));
+        // TODO(soon): Eliminate the use of jsg::BufferSource here.
+        auto entry = kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, view.detachAndTake(js)));
         controller.impl.enqueue(js, kj::mv(entry), controller.getSelf());
       } else {
         JSG_REQUIRE(view.size() > 0, TypeError,
@@ -2587,8 +2603,8 @@ void ReadableByteStreamController::enqueue(jsg::Lock& js, jsg::BufferSource chun
 
   KJ_IF_SOME(byobRequest, maybeByobRequest) {
     KJ_IF_SOME(view, byobRequest->getView(js)) {
-      JSG_REQUIRE(view.getHandle(js)->ByteLength() > 0, TypeError,
-          "The byobRequest.view is zero-length or was detached");
+      JSG_REQUIRE(
+          view.size() > 0, TypeError, "The byobRequest.view is zero-length or was detached");
     }
     byobRequest->invalidate(js);
   }

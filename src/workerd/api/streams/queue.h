@@ -889,13 +889,15 @@ class ByteQueue final {
     kj::Weak<ByobRequest> byobReadRequest;
 
     struct PullInto {
-      jsg::BufferSource store;
+      jsg::JsRef<jsg::JsArrayBufferView> view;
+      size_t elementSize;
+      size_t originalOffset;
       size_t filled = 0;
       size_t atLeast = 1;
       Type type = Type::DEFAULT;
 
       JSG_MEMORY_INFO(ByteQueue::ReadRequest::PullInto) {
-        tracker.trackField("store", store);
+        tracker.trackField("view", view);
       }
     } pullInto;
 
@@ -938,7 +940,7 @@ class ByteQueue final {
 
     bool respond(jsg::Lock& js, size_t amount);
 
-    bool respondWithNewView(jsg::Lock& js, jsg::BufferSource view);
+    bool respondWithNewView(jsg::Lock& js, jsg::JsBufferSource view);
 
     // Disconnects this ByobRequest instance from the associated ByteQueue::ReadRequest.
     // The term "invalidate" is adopted from the streams spec for handling BYOB requests.
@@ -952,7 +954,7 @@ class ByteQueue final {
 
     size_t getAtLeast() const;
 
-    v8::Local<v8::Uint8Array> getView(jsg::Lock& js);
+    kj::Maybe<jsg::JsUint8Array> getView(jsg::Lock& js);
 
     // Returns the byte length of the original underlying ArrayBuffer.
     size_t getOriginalBufferByteLength(jsg::Lock& js) const;

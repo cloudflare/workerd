@@ -521,33 +521,25 @@ ByteQueue::ReadRequest::~ReadRequest() noexcept(false) {
 }
 
 void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
-  if (pullInto.filled > 0) {
-    // There's been at least some data written, we need to respond but not
-    // set done to true since that's what the streams spec requires.
-    pullInto.store.trim(js, pullInto.store.size() - pullInto.filled);
-    resolver.resolve(js,
-        ReadResult{
-          .value = jsg::JsValue(pullInto.store.getHandle(js)).addRef(js),
-          .done = false,
-        });
-  } else {
-    // Otherwise, we set the length to zero
-    pullInto.store.trim(js, pullInto.store.size());
-    KJ_ASSERT(pullInto.store.size() == 0);
-    resolver.resolve(js,
-        ReadResult{
-          .value = jsg::JsValue(pullInto.store.getHandle(js)).addRef(js),
-          .done = true,
-        });
-  }
+  auto handle = pullInto.view.getHandle(js);
+  // If there's been at least some data written, we need to respond
+  // but not set done to true since that's what the streams spec
+  // requires.
+  auto view = handle.slice(js, 0, pullInto.filled);
+  resolver.resolve(js,
+      ReadResult{
+        .value = jsg::JsValue(view).addRef(js),
+        .done = !(pullInto.filled > 0),
+      });
   maybeInvalidateByobRequest(byobReadRequest);
 }
 
 void ByteQueue::ReadRequest::resolve(jsg::Lock& js) {
-  pullInto.store.trim(js, pullInto.store.size() - pullInto.filled);
+  auto handle = pullInto.view.getHandle(js);
+  auto view = handle.slice(js, 0, pullInto.filled);
   resolver.resolve(js,
       ReadResult{
-        .value = jsg::JsValue(pullInto.store.getHandle(js)).addRef(js),
+        .value = jsg::JsValue(view).addRef(js),
         .done = false,
       });
   maybeInvalidateByobRequest(byobReadRequest);
@@ -798,11 +790,13 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
   // We allocate a buffer for the read - the data will be copied into it.
   // The flag remains set (was set at the start) and will be cleared by the promise callbacks.
   constexpr size_t kDefaultReadSize = 16384;  // 16KB default buffer
-  KJ_IF_SOME(store, jsg::BufferSource::tryAllocUnsafe(js, kDefaultReadSize)) {
+  KJ_IF_SOME(store, jsg::JsUint8Array::tryCreate(js, kDefaultReadSize)) {
     auto prp = js.newPromiseAndResolver<ReadResult>();
 
     ReadRequest::PullInto pullInto{
-      .store = kj::mv(store),
+      .view = jsg::JsArrayBufferView(store).addRef(js),
+      .elementSize = 1,
+      .originalOffset = 0,
       .filled = 0,
       .atLeast = 1,
       .type = ReadRequest::Type::DEFAULT,
@@ -876,7 +870,7 @@ void ByteQueue::ByobRequest::invalidate() {
 
 bool ByteQueue::ByobRequest::isPartiallyFulfilled() {
   return !isInvalidated() && getRequest().pullInto.filled > 0 &&
-      getRequest().pullInto.store.getElementSize() > 1;
+      getRequest().pullInto.elementSize > 1;
 }
 
 bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
@@ -890,12 +884,13 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   // Here, invalidated is a fancy word for the promise having been resolved or
   // rejected already.
   auto& req = request.assertLive();
+  auto view = req.pullInto.view.getHandle(js);
 
   // The amount cannot be more than the total space in the request store.
-  JSG_REQUIRE(req.pullInto.filled + amount <= req.pullInto.store.size(), RangeError,
+  JSG_REQUIRE(req.pullInto.filled + amount <= view.size(), RangeError,
       kj::str("Too many bytes [", amount, "] in response to a BYOB read request."));
 
-  auto sourcePtr = req.pullInto.store.asArrayPtr();
+  auto sourcePtr = view.asArrayPtr();
   auto queue = KJ_REQUIRE_NONNULL(this->queue, "queue was destroyed");
 
   if (queue->getConsumerCount() > 1) {
@@ -937,7 +932,7 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   // There is no need to adjust the pullInto.atLeast here because we are resolving
   // the read immediately.
 
-  auto unaligned = req.pullInto.filled % req.pullInto.store.getElementSize();
+  auto unaligned = req.pullInto.filled % req.pullInto.elementSize;
   // It is possible that the request was partially filled already.
   req.pullInto.filled -= unaligned;
 
@@ -965,7 +960,7 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   return true;
 }
 
-bool ByteQueue::ByobRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSource view) {
+bool ByteQueue::ByobRequest::respondWithNewView(jsg::Lock& js, jsg::JsBufferSource view) {
   // The idea here is that rather than filling the view that the controller was given,
   // it chose to create its own view and fill that, likely over the same ArrayBuffer.
   // What we do here is perform some basic validations on what we were given, and if
@@ -973,16 +968,27 @@ bool ByteQueue::ByobRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSource
   // given, then continue on issuing the respond as normal.
   auto& req = request.assertLive();
   auto amount = view.size();
+  auto destView = req.pullInto.view.getHandle(js);
 
-  JSG_REQUIRE(view.canDetach(js), TypeError, "Unable to use non-detachable ArrayBuffer.");
-  JSG_REQUIRE(req.pullInto.store.getOffset() + req.pullInto.filled == view.getOffset(), RangeError,
+  JSG_REQUIRE(view.isDetachable(), TypeError, "Unable to use non-detachable ArrayBuffer.");
+  JSG_REQUIRE(destView.getOffset() + req.pullInto.filled == view.getOffset(), RangeError,
       "The given view has an invalid byte offset.");
-  JSG_REQUIRE(req.pullInto.store.size() == view.underlyingArrayBufferSize(js), RangeError,
+  JSG_REQUIRE(destView.size() == view.underlyingArrayBufferSize(js), RangeError,
       "The underlying ArrayBuffer is not the correct length.");
-  JSG_REQUIRE(req.pullInto.filled + amount <= req.pullInto.store.size(), RangeError,
+  JSG_REQUIRE(req.pullInto.filled + amount <= destView.size(), RangeError,
       "The view is not the correct length.");
 
-  req.pullInto.store = jsg::BufferSource(js, view.detach(js));
+  auto detached = view.detachAndTake(js);
+
+  KJ_IF_SOME(newView, jsg::JsValue(detached).tryCast<jsg::JsArrayBufferView>()) {
+    req.pullInto.view = newView.addRef(js);
+    req.pullInto.elementSize = newView.getElementSize();
+  } else {
+    jsg::JsUint8Array u8 = detached;
+    req.pullInto.view = jsg::JsArrayBufferView(u8).addRef(js);
+    req.pullInto.elementSize = 1;
+  }
+
   return respond(js, amount);
 }
 
@@ -993,28 +999,37 @@ size_t ByteQueue::ByobRequest::getAtLeast() const {
   return 0;
 }
 
-v8::Local<v8::Uint8Array> ByteQueue::ByobRequest::getView(jsg::Lock& js) {
+kj::Maybe<jsg::JsUint8Array> ByteQueue::ByobRequest::getView(jsg::Lock& js) {
   KJ_IF_SOME(req, request) {
-    return req->pullInto.store
-        .getTypedViewSlice<v8::Uint8Array>(js, req->pullInto.filled, req->pullInto.store.size())
-        .getHandle(js)
-        .As<v8::Uint8Array>();
+    // The view handed out to JS sits on its own ArrayBuffer instance rather than the one
+    // backing pullInto.view. ReadableStreamBYOBRequest detaches this view to revoke the
+    // user's access to it once the request settles or the fill offset moves; sharing an
+    // ArrayBuffer with pullInto.view would make that detach also destroy the read
+    // request's destination buffer and any result view already sliced from it. clone()
+    // shares the backing store without sharing the ArrayBuffer, so the two detach
+    // independently.
+    //
+    // Normalizing to a Uint8Array first matters: `filled` is a byte count and need not be
+    // a multiple of the view's element size, so slicing at that offset while preserving
+    // the original element type would build a misaligned typed array.
+    jsg::JsUint8Array view = req->pullInto.view.getHandle(js);
+    auto cloned = view.clone(js);
+    return cloned.slice(js, req->pullInto.filled, cloned.size() - req->pullInto.filled);
   }
-  return v8::Local<v8::Uint8Array>();
+  return kj::none;
 }
 
 size_t ByteQueue::ByobRequest::getOriginalBufferByteLength(jsg::Lock& js) const {
   KJ_IF_SOME(req, request) {
-    KJ_IF_SOME(size, req->pullInto.store.underlyingArrayBufferSize(js)) {
-      return size;
-    }
+    auto view = req->pullInto.view.getHandle(js);
+    return view.getBuffer().size();
   }
   return 0;
 }
 
 size_t ByteQueue::ByobRequest::getOriginalByteOffsetPlusBytesFilled() const {
   KJ_IF_SOME(req, request) {
-    return req->pullInto.store.getOffset() + req->pullInto.filled;
+    return req->pullInto.originalOffset + req->pullInto.filled;
   }
   return 0;
 }
@@ -1130,8 +1145,9 @@ void ByteQueue::handlePush(jsg::Lock& js,
           auto sourcePtr = entry.entry->toArrayPtr();
           auto sourceSize = sourcePtr.size() - entry.offset;
 
-          auto destPtr = pending.pullInto.store.asArrayPtr().slice(pending.pullInto.filled);
-          auto destAmount = pending.pullInto.store.size() - pending.pullInto.filled;
+          auto destView = pending.pullInto.view.getHandle(js);
+          auto destPtr = destView.asArrayPtr().slice(pending.pullInto.filled);
+          auto destAmount = destView.size() - pending.pullInto.filled;
 
           // sourceSize is the amount of data remaining in the current entry to copy.
           // destAmount is the amount of space remaining to be filled in the pending read.
@@ -1163,8 +1179,11 @@ void ByteQueue::handlePush(jsg::Lock& js,
     // At this point, there shouldn't be any data remaining in the buffer.
     KJ_REQUIRE(state.queueTotalSize == 0);
 
+    auto handle = pending.pullInto.view.getHandle(js);
+    size_t handleSize = handle.size();
+
     // And there should be data remaining in the pending pullInto destination.
-    KJ_REQUIRE(pending.pullInto.filled < pending.pullInto.store.size());
+    KJ_REQUIRE(pending.pullInto.filled < handleSize);
 
     // And the amountAvailable should be equal to the current push size.
     KJ_REQUIRE(amountAvailable == entrySize - entryOffset);
@@ -1173,24 +1192,23 @@ void ByteQueue::handlePush(jsg::Lock& js,
     // destination pullInto by taking the lesser of amountAvailable and
     // destination pullInto size - filled (which gives us the amount of space
     // remaining in the destination).
-    auto amountToCopy =
-        kj::min(amountAvailable, pending.pullInto.store.size() - pending.pullInto.filled);
+    auto amountToCopy = kj::min(amountAvailable, handleSize - pending.pullInto.filled);
 
     // The amountToCopy should not be more than the entry size minus the entryOffset
     // (which is the amount of data remaining to be consumed in the current entry).
     KJ_REQUIRE(amountToCopy <= entrySize - entryOffset);
 
     // The amountToCopy plus pending.pullInto.filled should be more than or equal to atLeast
-    // and less than or equal pending.pullInto.store.size().
+    // and less than or equal pending.pullInto.view.getHandle(js).size().
     KJ_REQUIRE(amountToCopy + pending.pullInto.filled >= pending.pullInto.atLeast &&
-        amountToCopy + pending.pullInto.filled <= pending.pullInto.store.size());
+        amountToCopy + pending.pullInto.filled <= handleSize);
 
     // Awesome, so now we safely copy amountToCopy bytes from the current entry into
-    // the remaining space in pending.pullInto.store, being careful to account for
+    // the remaining space in pending.pullInto.view, being careful to account for
     // the entryOffset and pending.pullInto.filled offsets to determine the range
     // where we start copying.
     auto entryPtr = newEntry->toArrayPtr();
-    auto destPtr = pending.pullInto.store.asArrayPtr().slice(pending.pullInto.filled);
+    auto destPtr = handle.asArrayPtr().slice(pending.pullInto.filled);
     destPtr.write(entryPtr.slice(entryOffset).first(amountToCopy));
 
     // Yay! this pending read has been fulfilled. There might be more tho. Let's adjust
@@ -1263,6 +1281,7 @@ void ByteQueue::handleRead(jsg::Lock& js,
       KJ_REQUIRE(!state.buffer.empty());
       // There must be at least one item in the buffer.
       auto& item = state.buffer.front();
+      auto handle = request->pullInto.view.getHandle(js);
 
       KJ_SWITCH_ONEOF(item) {
         KJ_CASE_ONEOF(c, ConsumerImpl::Close) {
@@ -1273,9 +1292,9 @@ void ByteQueue::handleRead(jsg::Lock& js,
           // The amount to copy is the lesser of the current entry size minus
           // offset and the data remaining in the destination to fill.
           auto entrySize = entry.entry->getSize();
-          auto amountToCopy = kj::min(
-              entrySize - entry.offset, request->pullInto.store.size() - request->pullInto.filled);
-          auto elementSize = request->pullInto.store.getElementSize();
+          auto amountToCopy =
+              kj::min(entrySize - entry.offset, handle.size() - request->pullInto.filled);
+          auto elementSize = request->pullInto.elementSize;
           if (amountToCopy > elementSize) {
             amountToCopy -= amountToCopy % elementSize;
           }
@@ -1286,7 +1305,7 @@ void ByteQueue::handleRead(jsg::Lock& js,
           // Once we have the amount, we safely copy amountToCopy bytes from the
           // entry into the destination request, accounting properly for the offsets.
           auto sourcePtr = entry.entry->toArrayPtr().slice(entry.offset);
-          auto destPtr = request->pullInto.store.asArrayPtr().slice(request->pullInto.filled);
+          auto destPtr = handle.asArrayPtr().slice(request->pullInto.filled);
 
           destPtr.write(sourcePtr.first(amountToCopy));
 
@@ -1344,7 +1363,8 @@ void ByteQueue::handleRead(jsg::Lock& js,
     // to minimally fill this read request! The amount to copy is the lesser
     // of the queue total size and the maximum amount of space in the request
     // pull into.
-    if (consume(kj::min(state.queueTotalSize, request->pullInto.store.size()))) {
+    auto handle = request->pullInto.view.getHandle(js);
+    if (consume(kj::min(state.queueTotalSize, handle.size()))) {
 
       // If consume returns true, the consumer hit the end and we need to
       // just resolve the request as done and return.
@@ -1420,8 +1440,9 @@ bool ByteQueue::handleMaybeClose(
           auto sourcePtr = entry.entry->toArrayPtr();
           auto sourceSize = sourcePtr.size() - entry.offset;
 
-          auto destPtr = pending.pullInto.store.asArrayPtr().slice(pending.pullInto.filled);
-          auto destAmount = pending.pullInto.store.size() - pending.pullInto.filled;
+          auto destView = pending.pullInto.view.getHandle(js);
+          auto destPtr = destView.asArrayPtr().slice(pending.pullInto.filled);
+          auto destAmount = destPtr.size();
 
           // There should be space available to copy into and data to copy from, or
           // something else went wrong.
