@@ -2,7 +2,7 @@ variables:
   GIT_DEPTH: 1000
   FLAVOR: trixie
 
-stages: [build]
+stages: [build, downstream]
 
 .cfsetup-input-template: &cfsetup-input-template
   stage: "build"
@@ -49,6 +49,10 @@ include:
       <<: *cfsetup-input-template
       jobPrefix: "linux-x64-lint"
       CFSETUP_TARGET: "ci-bazel-x64-lint"
+
+  - local: templates/v8-nightly.yml
+    inputs:
+      pipeline-rule: $CI_COMMIT_BRANCH != null && $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_TASK == "v8-nightly"
 
   - component: $CI_SERVER_FQDN/cloudflare/ci/ai/opencode@canary
     inputs:
@@ -105,3 +109,16 @@ linux-x64-lint-build:
 opencode-review:
   image: docker-registry.cfdata.org/branches/ci/ai/opencode-reviewer/mschwarzl/appsec-2912:392-9648062@sha256:18c838ff972e62facd24e4f25ea7b1fe5b701718d7d28aae5f3c0d09a5c4d5a8
   allow_failure: true
+
+trigger-edgeworker-v8-nightly:
+  stage: downstream
+  needs:
+    - v8-nightly-build
+  variables:
+    SCHEDULE_TASK: v8-nightly
+  trigger:
+    project: cloudflare/ew/edgeworker
+    branch: master
+    strategy: depend
+  rules:
+    - if: $CI_COMMIT_BRANCH != null && $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_TASK == "v8-nightly"
