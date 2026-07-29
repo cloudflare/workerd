@@ -160,6 +160,7 @@ wd_test(
         "websocket-hibernation.js",
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
+        "stw-large-log-subject.js",
     ],
     tags = ["resources:socket:1"],
 )

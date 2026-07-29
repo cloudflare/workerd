@@ -34,6 +34,20 @@ size_t estimateTagValueSize(TagValue& value) {
   KJ_UNREACHABLE;
 }
 
+// This is a CF semantic for warning conditions surfaced on spans, modeled on OpenTelemetry's exception
+// semantic conventions (`exception.type` / `exception.message`).
+enum class SpanWarningType {
+  SPAN_DATA_LIMIT_EXCEEDED,
+};
+
+kj::LiteralStringConst spanWarningTypeName(SpanWarningType type) {
+  switch (type) {
+    case SpanWarningType::SPAN_DATA_LIMIT_EXCEEDED:
+      return "span_data_limit_exceeded"_kjc;
+  }
+  KJ_UNREACHABLE;
+}
+
 }  // namespace
 
 // ======================================================================================
@@ -103,7 +117,9 @@ void SpanImpl::setSpanDataLimitError(kj::StringPtr itemKind, kj::StringPtr name,
   }
   auto message = kj::ConstString(kj::str("exceeded span data limit while trying to record ",
       itemKind, " ", shortName, " of size ", valueSize));
-  builder.setTag("span_error"_kjc, kj::mv(message));
+  builder.setTag("cloudflare.warning.type"_kjc,
+      spanWarningTypeName(SpanWarningType::SPAN_DATA_LIMIT_EXCEEDED));
+  builder.setTag("cloudflare.warning.message"_kjc, kj::mv(message));
 }
 
 // ======================================================================================

@@ -812,16 +812,22 @@ LogErrorInfo cloneLogErrorInfo(const LogErrorInfo& src) {
   return kj::none;
 }
 
-Log::Log(kj::Date timestamp, LogLevel logLevel, kj::String message, LogErrorInfo errorInfo)
+Log::Log(kj::Date timestamp,
+    LogLevel logLevel,
+    kj::String message,
+    LogErrorInfo errorInfo,
+    LogTruncated truncated)
     : timestamp(timestamp),
       logLevel(logLevel),
       message(kj::mv(message)),
+      truncated(truncated.toBool()),
       errorInfo(kj::mv(errorInfo)) {}
 
 void Log::copyTo(rpc::Trace::Log::Builder builder) const {
   builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setLogLevel(logLevel);
   builder.setMessage(message);
+  builder.setTruncated(truncated);
   KJ_IF_SOME(slots, errorInfo) {
     auto listBuilder = builder.initErrorInfo(slots.size());
     for (auto i: kj::zeroTo(slots.size())) {
@@ -836,7 +842,8 @@ void Log::copyTo(rpc::Trace::Log::Builder builder) const {
 }
 
 Log Log::clone() const {
-  return Log(timestamp, logLevel, kj::str(message), cloneLogErrorInfo(errorInfo));
+  return Log(
+      timestamp, logLevel, kj::str(message), cloneLogErrorInfo(errorInfo), LogTruncated(truncated));
 }
 
 Exception::Exception(
@@ -849,7 +856,8 @@ Exception::Exception(
 Log::Log(rpc::Trace::Log::Reader reader)
     : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
       logLevel(reader.getLogLevel()),
-      message(kj::str(reader.getMessage())) {
+      message(kj::str(reader.getMessage())),
+      truncated(reader.getTruncated()) {
   if (reader.hasErrorInfo()) {
     auto listReader = reader.getErrorInfo();
     auto slots = kj::heapArray<kj::Maybe<ErrorInfo>>(listReader.size());

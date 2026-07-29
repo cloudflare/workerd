@@ -29,6 +29,18 @@ const unitTests :Workerd.Config = (
         streamingTails = ["log"],
       )
     ),
+    ( name = "large-log",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "stw-large-log-subject.js")
+        ],
+        bindings = [
+          (name = "SERVICE", service = "large-log"),
+        ],
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        streamingTails = ["log"],
+      )
+    ),
     (name = "alarms", worker = .alarmsWorker),
     (name = "hiber", worker = .hiberWorker),
     (name = "js-rpc-test", worker = .jsRpcWorker),

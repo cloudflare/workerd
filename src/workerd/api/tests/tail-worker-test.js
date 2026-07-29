@@ -161,6 +161,70 @@ function n(events, children = []) {
   return { events, children };
 }
 
+// Regression check (WO-1436) for the "large-log" subject worker, which is tailed by this same
+// "log" streaming tail worker. The point of the regression is that an oversized log / span attribute must
+// NOT tear down the stream.
+function isLargeLogInvocation(inv) {
+  return inv.events.includes('subject/big-');
+}
+
+function assertLargeLogRegression(invocations) {
+  assert.ok(
+    invocations.length > 0,
+    'expected the large-log subject to be tailed by the shared "log" tail worker'
+  );
+
+  const events = invocations.map((inv) => inv.events).join('');
+
+  // --- Oversized console.log ---
+  assert.ok(
+    events.includes('"type":"outcome"'),
+    'the outcome event was not delivered after the oversized log (stream torn down?)'
+  );
+  assert.ok(
+    events.includes('marker-after-big-log'),
+    'the log after the oversized log was not delivered (stream torn down?)'
+  );
+  // The oversized log is delivered as a raw truncated prefix.
+  assert.ok(
+    events.includes(
+      '"type":"log","level":"log","message":"[\\"AAAAAAAAAAAAAAAAAAAA'
+    ),
+    'the oversized log was not delivered as a raw serialized prefix'
+  );
+  assert.ok(
+    events.includes('"truncated":true'),
+    'the oversized log was not marked as truncated'
+  );
+  assert.ok(
+    events.includes('"message":["marker-after-big-log"]'),
+    'the normal log after the oversized log was not parsed normally'
+  );
+
+  // --- Oversized span attribute ---
+  assert.ok(
+    events.includes('big-attribute-span'),
+    'the custom span was not delivered'
+  );
+  assert.ok(
+    events.includes(
+      '"name":"cloudflare.warning.type","value":"span_data_limit_exceeded"'
+    ),
+    'the oversized attribute did not degrade into a cloudflare.warning.type tag'
+  );
+  assert.ok(
+    events.includes('"name":"cloudflare.warning.message"'),
+    'the oversized attribute did not produce a cloudflare.warning.message tag'
+  );
+
+  // The complete oversized payload must not be shipped. A bounded prefix is retained for the
+  // truncated log, while the oversized span attribute is dropped entirely.
+  assert.ok(
+    !events.includes('A'.repeat(300 * 1024)),
+    'the complete oversized payload leaked into the tail stream'
+  );
+}
+
 // Event strings shared between both expected trees (sorted alphabetically within each group).
 const E = {
   // actor-alarms-test.js
@@ -360,6 +424,12 @@ export const test = {
     await scheduler.wait(50);
 
     verifyTraceIds(allInvocations);
-    assert.deepStrictEqual(buildTree(allInvocations), expected);
+
+    const largeLog = allInvocations.filter(isLargeLogInvocation);
+    const rest = allInvocations.filter((inv) => !isLargeLogInvocation(inv));
+
+    assertLargeLogRegression(largeLog);
+
+    assert.deepStrictEqual(buildTree(rest), expected);
   },
 };
