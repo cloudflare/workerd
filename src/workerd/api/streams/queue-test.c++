@@ -447,7 +447,7 @@ KJ_TEST("ByteQueue with single consumer") {
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto handle = value.getHandle(js);
       KJ_ASSERT(handle.isArrayBufferView());
-      jsg::BufferSource source(js, handle);
+      auto source = jsg::JsBufferSource(handle);
       KJ_ASSERT(source.size() == 4);
       KJ_ASSERT(source.asArrayPtr()[0] == 'a');
       KJ_ASSERT(source.asArrayPtr()[1] == 'a');
@@ -488,7 +488,7 @@ KJ_TEST("ByteQueue with single byob consumer") {
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto handle = value.getHandle(js);
       KJ_ASSERT(handle.isArrayBufferView());
-      jsg::BufferSource source(js, handle);
+      auto source = jsg::JsBufferSource(handle);
       auto ptr = source.asArrayPtr();
       KJ_ASSERT(source.size() == 3);
       KJ_ASSERT(ptr[0] == 'b');
@@ -545,7 +545,7 @@ KJ_TEST("ByteQueue with byob consumer and default consumer") {
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto handle = value.getHandle(js);
       KJ_ASSERT(handle.isArrayBufferView());
-      jsg::BufferSource source(js, handle);
+      auto source = jsg::JsBufferSource(handle);
       auto ptr = source.asArrayPtr();
       KJ_ASSERT(source.size() == 3);
       KJ_ASSERT(ptr[0] == 'b');
@@ -585,7 +585,7 @@ KJ_TEST("ByteQueue with byob consumer and default consumer") {
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto handle = value.getHandle(js);
       KJ_ASSERT(handle.isArrayBufferView());
-      jsg::BufferSource source(js, handle);
+      auto source = jsg::JsBufferSource(handle);
       auto ptr = source.asArrayPtr();
       // The second consumer receives exactly the same data.
       KJ_ASSERT(source.size() == 3);
@@ -627,7 +627,7 @@ KJ_TEST("ByteQueue with multiple byob consumers") {
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto handle = value.getHandle(js);
       KJ_ASSERT(handle.isArrayBufferView());
-      jsg::BufferSource source(js, handle);
+      auto source = jsg::JsBufferSource(handle);
       auto ptr = source.asArrayPtr();
       KJ_ASSERT(source.size() == 3);
       KJ_ASSERT(ptr[0] == 'b');
@@ -684,7 +684,7 @@ KJ_TEST("ByteQueue with multiple byob consumers") {
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto handle = value.getHandle(js);
       KJ_ASSERT(handle.isArrayBufferView());
-      jsg::BufferSource source(js, handle);
+      auto source = jsg::JsBufferSource(handle);
       auto ptr = source.asArrayPtr();
       KJ_ASSERT(source.size() == 3);
       KJ_ASSERT(ptr[0] == 'b');
@@ -741,7 +741,7 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads)") {
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto handle = value.getHandle(js);
       KJ_ASSERT(handle.isArrayBufferView());
-      jsg::BufferSource source(js, handle);
+      auto source = jsg::JsBufferSource(handle);
       auto ptr = source.asArrayPtr();
       KJ_ASSERT(source.size() == 3);
       KJ_ASSERT(ptr[0] == 'a');
@@ -756,7 +756,7 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads)") {
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto handle = value.getHandle(js);
       KJ_ASSERT(handle.isArrayBufferView());
-      jsg::BufferSource source(js, handle);
+      auto source = jsg::JsBufferSource(handle);
       auto ptr = source.asArrayPtr();
       KJ_ASSERT(source.size() == 3);
       KJ_ASSERT(ptr[0] == 'a');
@@ -771,7 +771,7 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads)") {
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto handle = value.getHandle(js);
       KJ_ASSERT(handle.isArrayBufferView());
-      jsg::BufferSource source(js, handle);
+      auto source = jsg::JsBufferSource(handle);
       auto ptr = source.asArrayPtr();
       KJ_ASSERT(source.size() == 2);
       KJ_ASSERT(ptr[0] == 'b');
@@ -825,7 +825,7 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads, 2)") {
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto handle = value.getHandle(js);
       KJ_ASSERT(handle.isArrayBufferView());
-      jsg::BufferSource source(js, handle);
+      auto source = jsg::JsBufferSource(handle);
       auto ptr = source.asArrayPtr();
       KJ_ASSERT(source.size() == 3);
       KJ_ASSERT(ptr[0] == 'a');
@@ -839,7 +839,7 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads, 2)") {
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto handle = value.getHandle(js);
       KJ_ASSERT(handle.isArrayBufferView());
-      jsg::BufferSource source(js, handle);
+      auto source = jsg::JsBufferSource(handle);
       auto ptr = source.asArrayPtr();
       KJ_ASSERT(source.size() == 3);
       KJ_ASSERT(ptr[0] == 'a');
@@ -854,7 +854,7 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads, 2)") {
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto handle = value.getHandle(js);
       KJ_ASSERT(handle.isArrayBufferView());
-      jsg::BufferSource source(js, handle);
+      auto source = jsg::JsBufferSource(handle);
       auto ptr = source.asArrayPtr();
       KJ_ASSERT(source.size() == 2);
       KJ_ASSERT(ptr[0] == 'b');
@@ -928,7 +928,7 @@ KJ_TEST("ByteQueue with default consumer with atLeast") {
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto view = value.getHandle(js);
       KJ_ASSERT(view.isArrayBufferView());
-      jsg::BufferSource source(js, view);
+      auto source = jsg::JsBufferSource(view);
       auto ptr = source.asArrayPtr();
       KJ_ASSERT(ptr[0] == 1);
       KJ_ASSERT(ptr[1] == 2);
@@ -945,7 +945,7 @@ KJ_TEST("ByteQueue with default consumer with atLeast") {
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto view = value.getHandle(js);
       KJ_ASSERT(view.isArrayBufferView());
-      jsg::BufferSource source(js, view);
+      auto source = jsg::JsBufferSource(view);
       KJ_ASSERT(source.asArrayPtr()[0], 6);
       KJ_ASSERT(source.size() == 1);
       return js.resolvedPromise(kj::mv(result));
@@ -1018,7 +1018,7 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (same rate)") {
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto view = value.getHandle(js);
       KJ_ASSERT(view.isArrayBufferView());
-      jsg::BufferSource source(js, view);
+      auto source = jsg::JsBufferSource(view);
       auto ptr = source.asArrayPtr();
       KJ_ASSERT(ptr[0] == 1);
       KJ_ASSERT(ptr[1] == 2);
@@ -1035,7 +1035,7 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (same rate)") {
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto view = value.getHandle(js);
       KJ_ASSERT(view.isArrayBufferView());
-      jsg::BufferSource source(js, view);
+      auto source = jsg::JsBufferSource(view);
       auto ptr = source.asArrayPtr();
       KJ_ASSERT(ptr[0] == 1);
       KJ_ASSERT(ptr[1] == 2);
@@ -1052,7 +1052,7 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (same rate)") {
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto view = value.getHandle(js);
       KJ_ASSERT(view.isArrayBufferView());
-      jsg::BufferSource source(js, view);
+      auto source = jsg::JsBufferSource(view);
       KJ_ASSERT(source.asArrayPtr()[0], 6);
       KJ_ASSERT(source.size() == 1);
       return js.resolvedPromise(kj::mv(result));
@@ -1126,7 +1126,7 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (different rate)
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto view = value.getHandle(js);
       KJ_ASSERT(view.isArrayBufferView());
-      jsg::BufferSource source(js, view);
+      auto source = jsg::JsBufferSource(view);
       KJ_ASSERT(source.size() == 4);
       auto ptr = source.asArrayPtr();
       // Our read was for at least 3 bytes, with a maximum of 5.
@@ -1144,7 +1144,7 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (different rate)
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto view = value.getHandle(js);
       KJ_ASSERT(view.isArrayBufferView());
-      jsg::BufferSource source(js, view);
+      auto source = jsg::JsBufferSource(view);
       KJ_ASSERT(source.size() == 2);
       auto ptr = source.asArrayPtr();
       KJ_ASSERT(ptr[0] == 5);
@@ -1157,7 +1157,7 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (different rate)
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto view = value.getHandle(js);
       KJ_ASSERT(view.isArrayBufferView());
-      jsg::BufferSource source(js, view);
+      auto source = jsg::JsBufferSource(view);
       auto ptr = source.asArrayPtr();
       KJ_ASSERT(source.size() == 5);
       KJ_ASSERT(ptr[0] == 1);
@@ -1174,7 +1174,7 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (different rate)
       auto& value = KJ_ASSERT_NONNULL(result.value);
       auto view = value.getHandle(js);
       KJ_ASSERT(view.isArrayBufferView());
-      jsg::BufferSource source(js, view);
+      auto source = jsg::JsBufferSource(view);
       KJ_ASSERT(source.asArrayPtr()[0] == 6);
       KJ_ASSERT(source.size() == 1);
       return js.resolvedPromise(kj::mv(result));
