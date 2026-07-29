@@ -39,7 +39,8 @@
       "branch": "v2",
       "extra_strip_prefix": "/c++"
     },
-    // We want to avoid version skew with v8, so we use identical versions.
+    // We want to avoid version skew with v8, so we use identical versions. Keep this
+    // V8-aligned dependency marked as such in ci/v8_update.py.
     {
       "name": "dragonbox",
       "type": "github_tarball",
