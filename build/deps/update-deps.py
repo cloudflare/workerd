@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 """
 Usage: update-deps.py [dep_name]
 """
@@ -652,7 +652,7 @@ def process_config(deps_file):
         pass
 
 
-def run():
+def main():
     global GITHUB_ACCESS_TOKEN
     GITHUB_ACCESS_TOKEN = read_access_token()
 
@@ -665,4 +665,5 @@ def run():
         process_config(deps)
 
 
-run()
+if __name__ == "__main__":
+    main()
