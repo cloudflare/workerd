@@ -121,6 +121,7 @@ class InstanceImpl implements WorkflowInstance {
   }
 
   async delete(): Promise<void> {
+    // Fetcher.delete() is the legacy HTTP helper and shadows the binding RPC method.
     await callFetcher(this.fetcher, '/delete', {
       id: this.id,
     });

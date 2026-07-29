@@ -35,11 +35,18 @@ export const tests = {
     {
       const result = await env.workflow.deleteBatch([
         'delete-rpc-1',
-        'delete-rpc-2',
+        'missing-delete',
+        'delete-rpc-1',
       ]);
       assert.deepStrictEqual(result, {
-        deleted: [{ id: 'delete-rpc-1' }, { id: 'delete-rpc-2' }],
-        errors: [],
+        deleted: [{ id: 'delete-rpc-1' }, { id: 'delete-rpc-1' }],
+        errors: [
+          {
+            id: 'missing-delete',
+            code: 10400,
+            message: 'workflows.api.error.instance.not_found',
+          },
+        ],
       });
     }
 

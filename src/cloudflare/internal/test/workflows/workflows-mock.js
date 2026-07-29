@@ -7,6 +7,7 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 const restartBodies = new Map();
 
 const THROW_ID = 'throw';
+const MISSING_DELETE_ID = 'missing-delete';
 
 function getInstance(id) {
   if (id === THROW_ID) {
@@ -25,8 +26,16 @@ function createBatchInstances(options) {
 
 function deleteBatchInstances(options) {
   return {
-    deleted: options.instances.map((id) => ({ id })),
-    errors: [],
+    deleted: options.instances
+      .filter((id) => id !== MISSING_DELETE_ID)
+      .map((id) => ({ id })),
+    errors: options.instances
+      .filter((id) => id === MISSING_DELETE_ID)
+      .map((id) => ({
+        id,
+        code: 10400,
+        message: 'workflows.api.error.instance.not_found',
+      })),
   };
 }
 
