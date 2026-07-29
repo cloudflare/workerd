@@ -7,7 +7,6 @@
 //
 // The TypeWrapper knows how to convert a variety of types between C++ and JavaScript.
 
-#include <workerd/jsg/buffersource.h>
 #include <workerd/jsg/dom-exception.h>
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/iterator.h>
@@ -498,7 +497,6 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public ArrayBufferWrapper,
                    public DictWrapper,
                    public DateWrapper,
-                   public BufferSourceWrapper,
                    public FunctionWrapper<Self>,
                    public PromiseWrapper<Self>,
                    public NonCoercibleWrapper<Self>,
@@ -572,7 +570,6 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   USING_WRAPPER(ArrayBufferWrapper);
   USING_WRAPPER(DictWrapper);
   USING_WRAPPER(DateWrapper);
-  USING_WRAPPER(BufferSourceWrapper);
   USING_WRAPPER(FunctionWrapper<Self>);
   USING_WRAPPER(PromiseWrapper<Self>);
   USING_WRAPPER(NonCoercibleWrapper<Self>);

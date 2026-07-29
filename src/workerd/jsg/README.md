@@ -52,7 +52,6 @@ For file map and coding invariants, see [AGENTS.md](AGENTS.md).
 | `jsg::Function<Ret(Args...)>` | `Function`                  | Bidirectional: JS↔C++ callable                              |
 | `jsg::Promise<T>`             | `Promise`                   | Full `.then()`/`.catch_()` API                              |
 | `jsg::Name`                   | `string` or `Symbol`        | Property name wrapper                                       |
-| `jsg::BufferSource`           | `ArrayBuffer`/`TypedArray`  | Type-preserving; supports detach                            |
 | `jsg::V8Ref<T>`               | Any V8 type                 | Persistent strong reference                                 |
 | `jsg::Value`                  | Any                         | Alias for `V8Ref<v8::Value>`                                |
 | `jsg::Ref<T>`                 | Resource wrapper            | Strong ref to JSG Resource Type                             |
@@ -240,7 +239,6 @@ All types that must be visited in `visitForGc()` if held as Resource Type member
 | `jsg::Function<Sig>`        | Wrapped JS/C++ function          |
 | `jsg::Promise<T>`           | JS promise wrapper               |
 | `jsg::Promise<T>::Resolver` | Promise resolver                 |
-| `jsg::BufferSource`         | Buffer with JS handle            |
 | `jsg::Sequence<T>`          | Iterable sequence                |
 | `jsg::Generator<T>`         | Sync generator                   |
 | `jsg::AsyncGenerator<T>`    | Async generator                  |
@@ -465,7 +463,7 @@ Both may take additional `TypeHandler<T>&` trailing parameters.
 | String            | `StringType`           | `kj::String`, `USVString`, `DOMString`, `JsString` |
 | Object            | `ObjectType`           | `v8::Local<v8::Object>`, `v8::Global<v8::Object>`  |
 | Symbol            | `SymbolType`           | (not yet implemented)                              |
-| Interface-like    | `InterfaceLikeType`    | `JSG_RESOURCE` types, `BufferSource`               |
+| Interface-like    | `InterfaceLikeType`    | `JSG_RESOURCE` types                               |
 | Callback function | `CallbackFunctionType` | `kj::Function<T>`, `Constructor<T>`                |
 | Dictionary-like   | `DictionaryLikeType`   | `JSG_STRUCT` types, `Dict<V, K>`                   |
 | Sequence-like     | `SequenceLikeType`     | `kj::Array<T>`, `Sequence<T>`                      |

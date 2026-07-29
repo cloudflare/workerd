@@ -538,8 +538,7 @@ class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
 };
 
 // A lightweight wrapper for ArrayBuffer | ArrayBufferView (the Web IDL "BufferSource"
-// type). Unlike jsg::BufferSource, this does NOT maintain a BackingStore, does NOT
-// support detach, and is stack-only. Use JsRef<JsBufferSource> for persistent storage.
+// type). Use JsRef<JsBufferSource> for persistent storage.
 //
 // This type is based on v8::Value (not a specific V8 type) because there is no single
 // V8 type that represents both ArrayBuffer and ArrayBufferView. It is NOT included in

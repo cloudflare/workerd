@@ -14,7 +14,7 @@ namespace clang_tidy {
 
 // Clang-tidy check that validates JSG resource types correctly visit their
 // GC roots. Flags fields of visitable types (jsg::Ref, jsg::V8Ref, jsg::JsRef,
-// jsg::Function, jsg::Promise, jsg::BufferSource, jsg::Value, etc., plus
+// jsg::Function, jsg::Promise, jsg::Value, etc., plus
 // kj::Maybe/Array/Vector/OneOf and jsg::Optional wrappers thereof) that are
 // not visited in the class's visitForGc() method.
 //

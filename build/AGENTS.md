@@ -36,7 +36,7 @@ that adds workerd-specific static checks:
 
 - `jsg-visit-for-gc`: flags JSG resource types whose visitable fields
   (`jsg::Ref`, `jsg::JsRef`, `jsg::V8Ref`, `jsg::Function`, `jsg::Promise`,
-  `jsg::BufferSource`, `jsg::Value`, etc., plus `kj::Maybe`/`Array`/`Vector`/
+  `jsg::Value`, etc., plus `kj::Maybe`/`Array`/`Vector`/
   `OneOf` and `jsg::Optional` wrappers thereof) are missing from `visitForGc()`.
 - `workerd-consume`: flags calls to methods annotated with `WD_CONSUME` when
   the call is made directly through `kj::Ptr` instead of through

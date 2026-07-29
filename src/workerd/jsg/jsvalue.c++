@@ -1,6 +1,5 @@
 #include "jsvalue.h"
 
-#include "buffersource.h"
 #include "ser.h"
 #include "simdutf.h"
 

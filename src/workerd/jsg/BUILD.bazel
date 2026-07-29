@@ -75,7 +75,6 @@ wd_cc_library(
     name = "jsg-core",
     srcs = [
         "async-context.c++",
-        "buffersource.c++",
         "dom-exception.c++",
         "jsg.c++",
         "jsvalue.c++",
@@ -91,7 +90,6 @@ wd_cc_library(
     ],
     hdrs = [
         "async-context.h",
-        "buffersource.h",
         "dom-exception.h",
         "fast-api.h",
         "function.h",

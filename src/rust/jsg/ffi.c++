@@ -591,8 +591,6 @@ bool local_array_buffer_is_shared(const Local& value) {
 }
 
 // TypedArray creation functions
-// TODO(perf): These macros duplicate patterns in buffersource.h — unify when the
-// Rust FFI stabilises.
 DEFINE_TYPED_ARRAY_NEW(uint8_array, Uint8Array, uint8_t)
 DEFINE_TYPED_ARRAY_NEW(uint16_array, Uint16Array, uint16_t)
 DEFINE_TYPED_ARRAY_NEW(uint32_array, Uint32Array, uint32_t)
