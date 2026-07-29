@@ -2402,9 +2402,19 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
       bool shouldInvalidate = false;
       if (impl.readRequest->isInvalidated() && controller.impl.consumerCount() >= 1) {
         // While this particular request may be invalidated, there are still
-        // other branches we can push the data to. Let's do so.
+        // other branches we can push the data to. Forward only the first
+        // bytesWritten bytes — not the entire view — to avoid fabricating
+        // trailing zeros on the surviving branch.
+        JSG_REQUIRE(bytesWritten > 0, TypeError,
+            "The bytesWritten must be more than zero while the stream is open.");
         jsg::BufferSource source(js, impl.view.getHandle(js));
-        auto entry = kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, source.detach(js)));
+        jsg::BufferSource sliced(js, source.detach(js));
+        // bytesWritten is JS-controlled; reject overreads before trim() (whose
+        // size_t subtraction would otherwise underflow and trip a KJ_ASSERT).
+        JSG_REQUIRE(static_cast<size_t>(bytesWritten) <= sliced.size(), RangeError,
+            kj::str("Too many bytes [", bytesWritten, "] in response to a BYOB read request."));
+        sliced.trim(js, sliced.size() - bytesWritten);
+        auto entry = kj::rc<ByteQueue::Entry>(kj::mv(sliced));
         controller.impl.enqueue(js, kj::mv(entry), controller.getSelf());
       } else {
         JSG_REQUIRE(bytesWritten > 0, TypeError,
