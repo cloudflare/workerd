@@ -496,8 +496,13 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
   }
 
   auto client = context.getHttpClient(0, false, kj::none, "websocket_open"_kjc);
-  auto prom =
-      ([](auto& context, auto connUrl, auto headers, auto client) -> kj::Promise<PackedWebSocket> {
+  auto prom = ([](auto& context, auto outputLock, auto connUrl, auto headers,
+                   auto client) -> kj::Promise<PackedWebSocket> {
+    KJ_IF_SOME(lock, outputLock) {
+      // For Durable Objects, defer the handshake until the output gate is open so we never open a
+      // connection before confirmed storage writes.
+      co_await lock;
+    }
     auto response = co_await client->openWebSocket(connUrl, headers);
 
     JSG_REQUIRE(response.statusCode == 101, TypeError,
@@ -531,7 +536,8 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
       }
     }
     KJ_UNREACHABLE
-  })(context, kj::mv(connUrl), kj::mv(headers), kj::mv(client));
+  })(context, context.waitForOutputLocksIfNecessary(), kj::mv(connUrl), kj::mv(headers),
+      kj::mv(client));
 
   ws->impl->initConnection(js, kj::mv(prom));
 
