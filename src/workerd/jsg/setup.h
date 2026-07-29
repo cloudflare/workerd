@@ -450,6 +450,14 @@ class IsolateBase {
   // Serializes the isolate into the SnapshotArtifact passed at isolate creation.
   void createSnapshotBlob();
 
+  // Enumerates every resource type's constructor-template slots (memoizedConstructor and
+  // contextConstructor, empty or not) for startup-snapshot handling, in a fixed compile-time
+  // order that PREPARE_SNAPSHOT and START_FROM_SNAPSHOT passes rely on to pair slots by
+  // position (see SnapshotArtifact::constructorTemplateIndices). Overridden by
+  // Isolate<TypeWrapper> to fan out over its type wrapper; the base implementation is a no-op.
+  virtual void iterateResourceTypeTemplates(
+      kj::FunctionParam<void(v8::Global<v8::FunctionTemplate>&)> cb) {}
+
  private:
   template <typename TypeWrapper>
   friend class Isolate;
@@ -870,6 +878,15 @@ class Isolate: public IsolateBase {
 
   ~Isolate() noexcept(false) {
     dropWrappers([this]() { wrappers.clear(); });
+  }
+
+  void iterateResourceTypeTemplates(
+      kj::FunctionParam<void(v8::Global<v8::FunctionTemplate>&)> cb) override {
+    if (!hasExtraWrappers) {
+      wrappers[0]->iterateResourceTypeTemplates(cb);
+    } else {
+      KJ_FAIL_ASSERT("Not yet implemented");
+    }
   }
 
   kj::Exception unwrapException(
