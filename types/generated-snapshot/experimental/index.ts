@@ -4768,6 +4768,7 @@ export interface Tracing {
     callback: (span: Span, ...args: A) => T,
     ...args: A
   ): T;
+  startSpan(name: string): Span;
   Span: typeof Span;
 }
 export declare abstract class Span {

@@ -149,9 +149,14 @@ class Tracing: public jsg::Object {
       jsg::Arguments<jsg::Value> args,
       const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
 
+  // Creates a child span of the current user tracing span without making it active. The caller
+  // must call span.end() explicitly. If no IoContext is available, returns a no-op span.
+  jsg::Ref<user_tracing::Span> startSpan(jsg::Lock& js, kj::String operationName);
+
   JSG_RESOURCE_TYPE(Tracing) {
     JSG_METHOD(enterSpan);
     JSG_METHOD(startActiveSpan);
+    JSG_METHOD(startSpan);
 
     // Use the _NAMED variant so the property ends up as `tracing.Span` rather than
     // `tracing["user_tracing::Span"]`.
@@ -172,6 +177,7 @@ class Tracing: public jsg::Object {
         callback: (span: Span, ...args: A) => T,
         ...args: A
       ): T;
+      startSpan(name: string): Span;
     });
   }
 };

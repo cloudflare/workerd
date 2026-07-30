@@ -99,6 +99,45 @@ export const siblingEnterSpans = {
   },
 };
 
+export const startSpanDoesNotBecomeActive = {
+  async test(ctrl, env, ctx) {
+    const { withSpan } = env.tracingTest;
+
+    const detached = ctx.tracing.startSpan('hierarchy-detached-start-span');
+    detached.setAttribute('case', 'startSpanDoesNotBecomeActive');
+    detached.setAttribute('role', 'detached');
+
+    withSpan('hierarchy-after-detached-start-span', (span) => {
+      span.setAttribute('case', 'startSpanDoesNotBecomeActive');
+      span.setAttribute('role', 'after-detached');
+    });
+
+    detached.end();
+  },
+};
+
+export const startSpanUsesCurrentActiveSpan = {
+  async test(ctrl, env, ctx) {
+    const { withSpan } = env.tracingTest;
+
+    withSpan('hierarchy-start-span-active-parent', (outer) => {
+      outer.setAttribute('case', 'startSpanUsesCurrentActiveSpan');
+      outer.setAttribute('role', 'outer');
+
+      const detached = ctx.tracing.startSpan('hierarchy-detached-active-child');
+      detached.setAttribute('case', 'startSpanUsesCurrentActiveSpan');
+      detached.setAttribute('role', 'detached');
+
+      withSpan('hierarchy-after-detached-active-child', (span) => {
+        span.setAttribute('case', 'startSpanUsesCurrentActiveSpan');
+        span.setAttribute('role', 'after-detached');
+      });
+
+      detached.end();
+    });
+  },
+};
+
 export const abandonedPromiseSpan = {
   async test(ctrl, env, ctx) {
     const { withSpan } = env.tracingTest;

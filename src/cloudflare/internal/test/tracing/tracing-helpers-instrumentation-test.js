@@ -39,6 +39,10 @@ export const validateSpans = {
         test: 'publicImportStartActiveSpan',
         expectedSpan: 'public-start-active-op',
       },
+      {
+        test: 'publicImportStartSpan',
+        expectedSpan: 'public-start-span-op',
+      },
       { test: 'ctxTracing', expectedSpan: 'ctx-tracing-op' },
       {
         test: 'detachedSpanEndsAfterStreamDrain',
@@ -86,6 +90,15 @@ export const validateSpans = {
       assert.strictEqual(span.path, 'import-from-cloudflare-workers');
       assert.strictEqual(span['ended.explicitly'], true);
       assert(span.closed, 'Public startActiveSpan span should be closed');
+    }
+
+    {
+      const span = (spansByTest.get('publicImportStartSpan') || []).find(
+        (s) => s.name === 'public-start-span-op'
+      );
+      assert(span, 'publicImportStartSpan: span present');
+      assert.strictEqual(span.path, 'import-from-cloudflare-workers');
+      assert(span.closed, 'Public startSpan span should be closed');
     }
 
     {
