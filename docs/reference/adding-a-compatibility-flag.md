@@ -1,26 +1,18 @@
----
-name: add-compat-flag
-description: Step-by-step guide for adding a new compatibility flag to workerd, including capnp schema, C++ usage, testing, and documentation requirements.
----
-
-## Adding a Compatibility Flag
+# Adding a Compatibility Flag
 
 Compatibility flags control behavioral changes in workerd. They allow breaking changes to be rolled out gradually using compatibility dates. Follow these steps in order.
 
-### Step 1: Choose flag names
+## Step 1: Choose flag names
 
 Every flag needs:
 
 - **Enable flag**: Opts in to the new behavior (e.g., `text_decoder_replace_surrogates`)
 - **Disable flag**: Opts out after it becomes default (e.g., `disable_text_decoder_replace_surrogates`). Only needed if the flag will eventually become default for all workers.
 
-Naming conventions:
+Use `snake_case` for flag names.
+Enable flag positively describes the new behavior. Disable flag uses a `no_` or `disable_` prefix, or describes the old behavior.
 
-- Use `snake_case`
-- Enable flag describes the new behavior positively
-- Disable flag uses a `no_` or `disable_` prefix, or describes the old behavior
-
-### Step 2: Add to `compatibility-date.capnp`
+## Step 2: Add to `compatibility-date.capnp`
 
 Edit `src/workerd/io/compatibility-date.capnp`. Add a new field at the end of the `CompatibilityFlags` struct.
 
@@ -35,17 +27,13 @@ Edit `src/workerd/io/compatibility-date.capnp`. Add a new field at the end of th
 
 Replace `<NEXT_ORDINAL>` with the value returned by the `next-capnp-ordinal` tool.
 
-Key points:
+The field name is `camelCase` and becomes the C++ getter name (e.g., `getMyNewBehavior()`).
 
-- The field number must be the next sequential ordinal. **Use the `next-capnp-ordinal` tool** to find it: call it with `file: "src/workerd/io/compatibility-date.capnp"` and `struct: "CompatibilityFlags"`. Do NOT guess or hardcode the number.
-- The field name is `camelCase` and becomes the C++ getter name (e.g., `getMyNewBehavior()`).
-- `$compatEnableDate` is the date after which new workers get this behavior by default. Set this to a future date. If the flag is not yet ready for a default date, omit `$compatEnableDate` — the flag will only activate when explicitly listed in `compatibilityFlags`.
-- Add `$experimental` annotation if the feature is experimental and should require `--experimental` to use.
-- The comment block is required and serves as internal documentation.
+The comment block is required and serves as internal documentation.
 
 Available annotations:
 | Annotation | Purpose |
-|---|---|
+|------------|---------|
 | `$compatEnableFlag("name")` | Flag name to enable the behavior |
 | `$compatDisableFlag("name")` | Flag name to disable after it's default |
 | `$compatEnableDate("YYYY-MM-DD")` | Date after which behavior is default |
@@ -54,7 +42,7 @@ Available annotations:
 | `$neededByFl` | Must be propagated to Cloudflare's FL proxy layer |
 | `$impliedByAfterDate(name = "otherFlag", date = "YYYY-MM-DD")` | Implied by another flag after a date |
 
-### Step 3: Use the flag in C++ code
+## Step 3: Use the flag in C++ code
 
 Access the flag via the auto-generated getter:
 
@@ -79,7 +67,7 @@ JSG_RESOURCE_TYPE(MyApi, workerd::CompatibilityFlags::Reader flags) {
 }
 ```
 
-### Step 4: Add tests
+## Step 4: Add tests
 
 Test both the old and new behavior. The test variant system helps:
 
@@ -104,7 +92,7 @@ For tests, the `compatibilityDate` field should not be included.
 
 Write test cases that verify both behaviors. Consider edge cases where the flag changes observable behavior.
 
-### Step 5: Document the flag
+## Step 5: Document the flag
 
 **This is required before the enable date.**
 
@@ -117,7 +105,7 @@ Write test cases that verify both behaviors. Consider edge cases where the flag 
 
 See `docs/api-updates.md` for more details on the documentation process.
 
-### Step 6: Build and verify
+## Step 6: Build and verify
 
 ```bash
 # Build to verify the capnp schema compiles
@@ -132,14 +120,3 @@ just stream-test //src/workerd/api/tests:my-test@all-compat-flags
 # Run the compatibility-date test to verify flag registration
 just stream-test //src/workerd/io:compatibility-date-test@
 ```
-
-### Checklist
-
-- [ ] Flag added to `compatibility-date.capnp` with correct sequential field number
-- [ ] Enable and disable flag names follow naming conventions
-- [ ] Comment block describes old behavior, new behavior, and rationale
-- [ ] Enable date is set (or intentionally omitted for experimental/unreleased flags)
-- [ ] C++ code uses `FeatureFlags::get(js).getMyNewBehavior()` to branch on the flag
-- [ ] Tests cover both old and new behavior
-- [ ] Documentation PR created in cloudflare-docs (required before enable date)
-- [ ] `compatibility-date-test` passes
