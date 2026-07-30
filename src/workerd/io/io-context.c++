@@ -1573,6 +1573,10 @@ auto IoContext::tryGetWeakRefForCurrent() -> kj::Maybe<kj::Own<WeakRef>> {
   }
 }
 
+kj::Maybe<IoContext::Id> IoContext::tryGetCurrentId() {
+  return tryCurrent().map([](IoContext& ioContext) { return ioContext.getId(); });
+}
+
 void IoContext::abortFromHang(Worker::AsyncLock& asyncLock) {
   KJ_ASSERT(actor == kj::none);  // we don't perform hang detection on actor requests
 

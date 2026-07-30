@@ -959,9 +959,10 @@ jsg::Promise<T> rejectedMaybeHandledPromise(jsg::Lock& js, jsg::JsValue reason, 
   return kj::mv(prp.promise);
 }
 
-inline kj::Maybe<IoContext&> tryGetIoContext() {
-  // TODO(cleanup): This function is obsolete; callers should just call IoContext::tryCurrent()
-  return IoContext::tryCurrent();
+// Captures the current context's identity for stream objects without retaining a reference that
+// could be destroyed from a different thread during garbage collection.
+inline kj::Maybe<IoContext::Id> tryGetIoContextId() {
+  return IoContext::tryGetCurrentId();
 }
 
 }  // namespace workerd::api
