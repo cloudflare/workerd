@@ -1455,4 +1455,12 @@ inline size_t JsString::utf8Length(jsg::Lock& js) const {
 #endif
 }
 
+template <IsJsValue T>
+void MemoryTracker::trackField(
+    kj::StringPtr edgeName, const JsRef<T>& value, kj::Maybe<kj::StringPtr> nodeName) {
+  auto& js = Lock::from(isolate_);
+  v8::Local<v8::Value> handle = value.getHandle(js);
+  trackField(edgeName, handle, nodeName);
+}
+
 }  // namespace workerd::jsg
