@@ -482,7 +482,6 @@ void ZlibUtil::CompressionStream<CompressionContext>::emitError(
     onError(js, error.err, kj::mv(error.code), kj::mv(error.message));
   }
 
-  writing = false;
   if (pending_close) {
     close();
   }
@@ -497,59 +496,58 @@ void ZlibUtil::CompressionStream<CompressionContext>::writeStream(
   JSG_REQUIRE(!writing, Error, "Writing is in progress"_kj);
   JSG_REQUIRE(!pending_close, Error, "Pending close"_kj);
 
-  writing = true;
-  // Ensure `writing` is reset on any exception path so that the destructor's
-  // check never fires due to a stuck flag. Without this, a throwing backend
-  // (e.g. KJ_UNREACHABLE in initializeZlib()) leaves `writing` permanently
-  // true, and the destructor's assertion crosses the noexcept ~CppgcShim()
-  // boundary during V8 GC, triggering std::terminate().
-  KJ_ON_SCOPE_FAILURE({ writing = false; });
+  uint32_t availIn = 0;
+  uint32_t availOut = 0;
+  kj::Maybe<CompressionError> maybeError;
+  {
+    // Ensure `writing` is reset on any exception path so that the destructor's
+    // check never fires due to a stuck flag. Without this, a throwing backend
+    // (e.g. KJ_UNREACHABLE in initializeZlib()) leaves `writing` permanently
+    // true, and the destructor's assertion crosses the noexcept ~CppgcShim()
+    // boundary during V8 GC, triggering std::terminate().
+    //
+    // TODO(someday): If the asynchronous variant of this method actually worked asynchronously,
+    //   this would need to remain true until after `updateWriteResult` so that calls to `close`
+    //   can be properly deferred.
+    KJ_DEFER({ writing = false; });
 
-  context()->setBuffers(input, output);
-  context()->setFlush(flush);
+    // Clear buffer pointers from the compression context when this scope exits.
+    // The input/output kj::Array parameters are backed by V8 BackingStores
+    // whose lifetimes are tied to their JavaScript ArrayBuffer objects.
+    KJ_DEFER({ context()->clearBuffers(); });
 
-  // Clear buffer pointers from the compression context when this scope exits.
-  // The input/output kj::Array parameters are backed by V8 BackingStores
-  // whose lifetimes are tied to their JavaScript ArrayBuffer objects. Once
-  // this method returns, the kj::Array destructor releases its shared_ptr
-  // to the BackingStore. If the JS buffer subsequently becomes unreachable
-  // and is garbage-collected, the BackingStore is freed — leaving any
-  // retained pointers (e.g. z_stream.next_out) dangling. A later call to
-  // deflateParams() (via params()) could then write to freed memory.
-  //
-  // Using KJ_DEFER ensures the pointers are cleared even if an exception
-  // is thrown (e.g. from updateWriteResult() when the writeState buffer is
-  // too small). Without this, the exception would unwind the stack before
-  // reaching an explicit clearBuffers() call, leaving stale pointers.
-  KJ_DEFER(context()->clearBuffers());
-
-  if constexpr (!async) {
+    writing = true;
+    context()->setBuffers(input, output);
+    context()->setFlush(flush);
     context()->work();
-    if (checkError(js)) {
-      writing = false;
-      updateWriteResult(js);
+    context()->getAfterWriteResult(&availIn, &availOut);
+    maybeError = context()->getError();
+  }
+
+  // These pointers may become invalid if any JS calls below invalidate the JS objects' underlying
+  // buffers. Setting them to nullptr to make this obvious.
+  input = nullptr;
+  output = nullptr;
+
+  KJ_IF_SOME(error, maybeError) {
+    emitError(js, kj::mv(error));
+    return;
+  }
+
+  updateWriteResult(js, availIn, availOut);
+
+  if constexpr (async) {
+    // Only the async variant of this method runs the callback.
+    KJ_IF_SOME(cb, writeCallback) {
+      cb(js);
     }
-    return;
-  }
 
-  // On Node.js, this is called as a result of `ScheduleWork()` call.
-  // Since, we implement the whole thing as sync, we're going to ahead and call the whole thing here.
-  context()->work();
-
-  // This is implemented slightly differently in Node.js
-  // Node.js calls AfterThreadPoolWork().
-  // Ref: https://github.com/nodejs/node/blob/9edf4a0856681a7665bd9dcf2ca7cac252784b98/src/node_zlib.cc#L402
-  writing = false;
-  if (!checkError(js)) {
-    return;
-  }
-  updateWriteResult(js);
-  KJ_IF_SOME(cb, writeCallback) {
-    cb(js);
-  }
-
-  if (pending_close) {
-    close();
+    // Only the async variant of this method can result in deferred `close` calls.
+    // TODO(someday): This possibly can't actually be hit because `writing` is never true during any
+    //   JS callbacks as a result of this method not truly being asynchronous?
+    if (pending_close) {
+      close();
+    }
   }
 }
 
@@ -577,15 +575,6 @@ void ZlibUtil::CompressionStream<CompressionContext>::close() {
 }
 
 template <typename CompressionContext>
-bool ZlibUtil::CompressionStream<CompressionContext>::checkError(jsg::Lock& js) {
-  KJ_IF_SOME(error, context()->getError()) {
-    emitError(js, kj::mv(error));
-    return false;
-  }
-  return true;
-}
-
-template <typename CompressionContext>
 void ZlibUtil::CompressionStream<CompressionContext>::initializeStream(
     jsg::Lock& js, jsg::JsArrayBufferView& _writeResult, jsg::Function<void()> _writeCallback) {
   writeResult = _writeResult.addRef(js);
@@ -594,12 +583,14 @@ void ZlibUtil::CompressionStream<CompressionContext>::initializeStream(
 }
 
 template <typename CompressionContext>
-void ZlibUtil::CompressionStream<CompressionContext>::updateWriteResult(jsg::Lock& js) {
+void ZlibUtil::CompressionStream<CompressionContext>::updateWriteResult(
+    jsg::Lock& js, uint32_t availIn, uint32_t availOut) {
   KJ_IF_SOME(wr, writeResult) {
     auto result = wr.getHandle(js);
     auto ptr = result.template asArrayPtr<uint32_t>();
     JSG_REQUIRE(ptr.size() >= 2, Error, "Invalid write result buffer"_kj);
-    context()->getAfterWriteResult(&ptr[1], &ptr[0]);
+    ptr[0] = availOut;
+    ptr[1] = availIn;
   }
 }
 
