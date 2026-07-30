@@ -16,8 +16,7 @@ void preamble(auto callback) {
 }
 
 jsg::JsValue toBytes(jsg::Lock& js, kj::String str) {
-  return jsg::JsValue(
-      jsg::BackingStore::from(js, str.asBytes().attach(kj::mv(str))).createHandle(js));
+  return jsg::JsUint8Array::create(js, str.asBytes());
 }
 
 jsg::JsBufferSource toBufferSource(jsg::Lock& js, kj::String str) {
