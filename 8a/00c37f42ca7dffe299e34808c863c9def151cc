@@ -1,0 +1,25 @@
+.gitignore
+  s_03acf2309a4ac3::t_d48f3a77a29924 29-30
+ci/v8_update.py
+  s_03acf2309a4ac3::t_df220c52974fc5 61-62,68-69,73-74
+  s_03acf2309a4ac3::t_d48f3a77a29924 23-30,67,70-72,75-77,80-81
+  s_03acf2309a4ac3::t_a49a75c2a3cdae 31
+ci/v8_nightly.py
+  s_03acf2309a4ac3::t_d48f3a77a29924 7-13,58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8a00c37f42ca7dffe299e34808c863c9def151cc",
+  "prompts": {},
+  "sessions": {
+    "s_03acf2309a4ac3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_075d7c3a5ffeUU1f0YdOY4tEVX",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Cormick Holland <cormick@cloudflare.com>"
+    }
+  }
+}
