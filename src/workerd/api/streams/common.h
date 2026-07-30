@@ -925,28 +925,39 @@ class WriterLocked {
 template <typename T>
 void maybeResolvePromise(
     jsg::Lock& js, kj::Maybe<typename jsg::Promise<T>::Resolver>& maybeResolver, T&& t) {
-  KJ_IF_SOME(resolver, maybeResolver) {
+  // Resolving may trigger garbage collection, which can destroy the resolver
+  // while we resolving. Doh!
+  // Let's not rely on a possibly traced (and therefore weak) reference to the
+  // resolver and move it into a local. Here and in the other maybeResolvePromise()
+  // overload below and the maybeRejectPromise()
+  auto theResolver = kj::mv(maybeResolver);
+  KJ_IF_SOME(resolver, theResolver) {
     resolver.resolve(js, kj::fwd<T>(t));
-    maybeResolver = nullptr;
   }
+  // Moving the resolver out should have cleared the maybeResolver
+  KJ_DASSERT(maybeResolver == kj::none);
 }
 
 inline void maybeResolvePromise(
     jsg::Lock& js, kj::Maybe<jsg::Promise<void>::Resolver>& maybeResolver) {
-  KJ_IF_SOME(resolver, maybeResolver) {
+  auto theResolver = kj::mv(maybeResolver);
+  KJ_IF_SOME(resolver, theResolver) {
     resolver.resolve(js);
-    maybeResolver = kj::none;
   }
+  // Moving the resolver out should have cleared the maybeResolver
+  KJ_DASSERT(maybeResolver == kj::none);
 }
 
 template <typename T>
 void maybeRejectPromise(jsg::Lock& js,
     kj::Maybe<typename jsg::Promise<T>::Resolver>& maybeResolver,
     jsg::JsValue reason) {
-  KJ_IF_SOME(resolver, maybeResolver) {
+  auto theResolver = kj::mv(maybeResolver);
+  KJ_IF_SOME(resolver, theResolver) {
     resolver.reject(js, reason);
-    maybeResolver = kj::none;
   }
+  // Moving the resolver out should have cleared the maybeResolver
+  KJ_DASSERT(maybeResolver == kj::none);
 }
 
 template <typename T>
