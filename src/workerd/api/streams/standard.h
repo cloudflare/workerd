@@ -588,7 +588,7 @@ class ReadableByteStreamController: public jsg::Object {
 
   void close(jsg::Lock& js);
 
-  void enqueue(jsg::Lock& js, jsg::BufferSource chunk);
+  void enqueue(jsg::Lock& js, jsg::JsBufferSource chunk);
 
   void error(jsg::Lock& js, jsg::JsValue reason);
 

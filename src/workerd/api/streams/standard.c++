@@ -2426,14 +2426,14 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
         // trailing zeros on the surviving branch.
         JSG_REQUIRE(bytesWritten > 0, TypeError,
             "The bytesWritten must be more than zero while the stream is open.");
-        jsg::BufferSource source(js, impl.view.getHandle(js));
-        jsg::BufferSource sliced(js, source.detach(js));
-        // bytesWritten is JS-controlled; reject overreads before trim() (whose
-        // size_t subtraction would otherwise underflow and trip a KJ_ASSERT).
-        JSG_REQUIRE(static_cast<size_t>(bytesWritten) <= sliced.size(), RangeError,
+        auto view = impl.view.getHandle(js);
+
+        JSG_REQUIRE(static_cast<size_t>(bytesWritten) <= view.size(), RangeError,
             kj::str("Too many bytes [", bytesWritten, "] in response to a BYOB read request."));
-        sliced.trim(js, sliced.size() - bytesWritten);
-        auto entry = kj::rc<ByteQueue::Entry>(kj::mv(sliced));
+
+        view = view.detachAndTake(js).slice(js, 0, bytesWritten);
+
+        auto entry = kj::rc<ByteQueue::Entry>(js, jsg::JsBufferSource(view));
         controller.impl.enqueue(js, kj::mv(entry), controller.getSelf());
       } else {
         JSG_REQUIRE(bytesWritten > 0, TypeError,
@@ -2497,8 +2497,8 @@ void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::JsBufferS
       if (impl.readRequest->isInvalidated() && controller.impl.consumerCount() >= 1) {
         // While this particular request may be invalidated, there are still
         // other branches we can push the data to. Let's do so.
-        // TODO(soon): Eliminate the use of jsg::BufferSource here.
-        auto entry = kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, view.detachAndTake(js)));
+        view = view.detachAndTake(js);
+        auto entry = kj::rc<ByteQueue::Entry>(js, view);
         controller.impl.enqueue(js, kj::mv(entry), controller.getSelf());
       } else {
         JSG_REQUIRE(view.size() > 0, TypeError,
@@ -2591,14 +2591,14 @@ void ReadableByteStreamController::close(jsg::Lock& js) {
   impl.close(js);
 }
 
-void ReadableByteStreamController::enqueue(jsg::Lock& js, jsg::BufferSource chunk) {
+void ReadableByteStreamController::enqueue(jsg::Lock& js, jsg::JsBufferSource chunk) {
   // Hold a strong reference up front. Operations below (invalidate, detach) touch
   // the JS heap and C++ argument evaluation order is unspecified, so JSG_THIS as a
   // function argument would not reliably precede chunk.detach(js).
   auto self = JSG_THIS;
 
   JSG_REQUIRE(chunk.size() > 0, TypeError, "Cannot enqueue a zero-length ArrayBuffer.");
-  JSG_REQUIRE(chunk.canDetach(js), TypeError, "The provided ArrayBuffer must be detachable.");
+  JSG_REQUIRE(chunk.isDetachable(), TypeError, "The provided ArrayBuffer must be detachable.");
   JSG_REQUIRE(impl.canCloseOrEnqueue(), TypeError, "This ReadableByteStreamController is closed.");
 
   KJ_IF_SOME(byobRequest, maybeByobRequest) {
@@ -2609,7 +2609,7 @@ void ReadableByteStreamController::enqueue(jsg::Lock& js, jsg::BufferSource chun
     byobRequest->invalidate(js);
   }
 
-  impl.enqueue(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, chunk.detach(js))), kj::mv(self));
+  impl.enqueue(js, kj::rc<ByteQueue::Entry>(js, chunk.detachAndTake(js)), kj::mv(self));
 }
 
 void ReadableByteStreamController::error(jsg::Lock& js, jsg::JsValue reason) {

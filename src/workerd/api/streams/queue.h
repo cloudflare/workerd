@@ -986,13 +986,13 @@ class ByteQueue final {
     }
   };
 
-  // A byte queue entry consists of a jsg::BufferSource containing a non-zero-length
+  // A byte queue entry consists of a jsg::JsBufferSource containing a non-zero-length
   // sequence of bytes. The size is determined by the number of bytes in the entry.
   class Entry: public kj::Refcounted {
    public:
-    explicit Entry(jsg::BufferSource store);
+    explicit Entry(jsg::Lock& js, jsg::JsBufferSource store);
 
-    kj::ArrayPtr<kj::byte> toArrayPtr();
+    kj::ArrayPtr<kj::byte> toArrayPtr(jsg::Lock& js);
 
     size_t getSize() const;
 
@@ -1006,10 +1006,14 @@ class ByteQueue final {
 
    private:
     // Intentionally not visited by visitForGc: Entry is not reachable from JS;
-    // it is owned via kj::Rc<Entry> (C++ refcount), so the BufferSource cannot be
-    // part of a JS→C++→JS reference cycle and a strong v8::Global suffices
-    // to keep it alive. See queue.c++:562 for the empty visitForGc body.
-    jsg::BufferSource store;  // NOLINT(jsg-visit-for-gc)
+    jsg::JsRef<jsg::JsBufferSource> store;  // NOLINT(jsg-visit-for-gc)
+
+    // We can safely cache the size of the entry because the store is either
+    // created by us or detached from JS. It cannot change size after the
+    // entry is created. We will assert that as such in toArrayPtr().
+    // We cache the offset also for assertion.
+    size_t size;
+    size_t offset;
   };
 
   struct QueueEntry {

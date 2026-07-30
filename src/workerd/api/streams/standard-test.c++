@@ -20,14 +20,14 @@ jsg::JsValue toBytes(jsg::Lock& js, kj::String str) {
       jsg::BackingStore::from(js, str.asBytes().attach(kj::mv(str))).createHandle(js));
 }
 
-jsg::BufferSource toBufferSource(jsg::Lock& js, kj::String str) {
-  auto backing = jsg::BackingStore::from(js, str.asBytes().attach(kj::mv(str))).createHandle(js);
-  return jsg::BufferSource(js, kj::mv(backing));
+jsg::JsBufferSource toBufferSource(jsg::Lock& js, kj::String str) {
+  auto u8 = jsg::JsUint8Array::create(js, str.asBytes());
+  return jsg::JsBufferSource(u8);
 }
 
-jsg::BufferSource toBufferSource(jsg::Lock& js, kj::Array<kj::byte> bytes) {
-  auto backing = jsg::BackingStore::from(js, kj::mv(bytes)).createHandle(js);
-  return jsg::BufferSource(js, kj::mv(backing));
+jsg::JsBufferSource toBufferSource(jsg::Lock& js, kj::Array<kj::byte> bytes) {
+  auto u8 = jsg::JsUint8Array::create(js, bytes);
+  return jsg::JsBufferSource(u8);
 }
 
 // ======================================================================================
