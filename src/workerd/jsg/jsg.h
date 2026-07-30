@@ -2549,45 +2549,6 @@ class JsRef;
   V(Dispose)                                                                                       \
   V(AsyncDispose)
 
-class JsValue;
-class JsMessage;
-#define JS_TYPE_CLASSES(V)                                                                         \
-  V(Object)                                                                                        \
-  V(Boolean)                                                                                       \
-  V(Array)                                                                                         \
-  V(String)                                                                                        \
-  V(Symbol)                                                                                        \
-  V(BigInt)                                                                                        \
-  V(Number)                                                                                        \
-  V(Int32)                                                                                         \
-  V(Uint32)                                                                                        \
-  V(Date)                                                                                          \
-  V(RegExp)                                                                                        \
-  V(Map)                                                                                           \
-  V(Set)                                                                                           \
-  V(Promise)                                                                                       \
-  V(Proxy)                                                                                         \
-  V(Function)                                                                                      \
-  V(Uint8Array)                                                                                    \
-  V(ArrayBuffer)                                                                                   \
-  V(ArrayBufferView)                                                                               \
-  V(SharedArrayBuffer)
-
-#define V(Name) class Js##Name;
-JS_TYPE_CLASSES(V)
-#undef V
-
-// JsBufferSource is not in JS_TYPE_CLASSES because there is no v8::BufferSource
-// type (and hence no v8::Value::IsBufferSource() check). It is instead handled
-// with special-case logic in JsValue::tryCast and JsValueWrapper.
-class JsBufferSource;
-
-#define V(Name) || kj::isSameType<T, Js##Name>()
-template <typename T>
-concept IsJsValue = kj::isSameType<T, JsValue>() ||
-    kj::isSameType<T, JsMessage>() JS_TYPE_CLASSES(V) || kj::isSameType<T, JsBufferSource>();
-#undef V
-
 class DOMException;
 class ExternalMemoryAdjustment;
 
