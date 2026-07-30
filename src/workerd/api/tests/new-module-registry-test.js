@@ -415,6 +415,31 @@ export const invalidModuleSpecifier = {
   },
 };
 
+export const dynamicImportAttributes = {
+  async test() {
+    const withoutAttributes = await import('json');
+    const withAttributes = await import('json', {
+      with: { type: 'json' },
+    });
+
+    deepStrictEqual(withAttributes.default, { foo: 1 });
+
+    // Module::evaluateContext() currently ignores attributes when looking up the
+    // per-isolate cache entry. Updating that TODO requires deliberately changing
+    // this assertion along with the cache-key behavior.
+    strictEqual(withAttributes, withoutAttributes);
+
+    await rejects(import('text', { with: { type: 'text' } }), {
+      name: 'TypeError',
+      message: 'Import attribute type "text" is not yet supported',
+    });
+    await rejects(import('data', { with: { type: 'bytes' } }), {
+      name: 'TypeError',
+      message: 'Import attribute type "bytes" is not yet supported',
+    });
+  },
+};
+
 export const evalErrorsInEsmTopLevel = {
   async test() {
     await rejects(import('esm-error'), {
@@ -573,7 +598,10 @@ export const processRedirectIgnoresQueryAndFragment = {
 //   * [x] Querys and fragments resolve new instances of known modules
 //   * [x] URL resolution works correctly
 //   * [x] Invalid URLs are correctly reported as errors
-// * [x] Import attributes should be rejected
+// * [x] Import attributes are validated for static and dynamic imports
+//   * [x] type: "json" succeeds for JSON modules
+//   * [x] type: "text" and type: "bytes" report that they are not yet supported
+//   * [x] Unsupported attribute keys are rejected
 // * [x] require(...) Works in CommonJs Modules
 // * [x] require(...) correctly handles node: modules with/without the node: prefix
 // * [x] Circular dependencies are correctly handled
@@ -581,6 +609,6 @@ export const processRedirectIgnoresQueryAndFragment = {
 // * [x] CommonJs modules correctly expose named exports
 // * [x] require('module').createRequire API works as expected
 // * [x] Entry point ESM with no default export is correctly reported as error
-// * [ ] Fallback service works as expected
+// * [x] Fallback service works as expected (server fallback-service tests)
 // * [x] console.log output correctly uses node-internal:inspect for output
 // ...

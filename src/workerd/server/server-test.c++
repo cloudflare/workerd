@@ -643,6 +643,38 @@ KJ_TEST("Server: serve basic Service Worker") {
     Bad Request)"_blockquote);
 }
 
+KJ_TEST("Server: serve Service Worker using the new module registry") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    compatibilityFlags = ["new_module_registry"],
+    serviceWorkerScript =
+        `addEventListener("fetch", event => {
+        `  event.respondWith(new Response("NMR: " + event.request.url));
+        `})
+  ))"_kj));
+
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/service-worker", "NMR: http://foo/service-worker");
+}
+
+KJ_TEST("Server: Python workers reject the new module registry") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    compatibilityFlags = ["python_workers", "new_module_registry"],
+    serviceWorkerScript =
+        `addEventListener("fetch", event => {
+        `  event.respondWith(new Response("unused"));
+        `})
+  ))"_kj));
+
+  test.server.allowExperimental();
+  KJ_EXPECT_THROW_MESSAGE("Python workers do not currently support the new ModuleRegistry",
+      test.server.run(v8System, *test.config).wait(test.ws));
+}
+
 KJ_TEST("Server: use service name as Service Worker origin") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",

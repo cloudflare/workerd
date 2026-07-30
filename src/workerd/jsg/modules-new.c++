@@ -530,12 +530,17 @@ class IsolateModuleRegistry final {
       // Now that we know the referrer module, we can set the context for the
       // next resolve. The "type" of the context is determined by the type of
       // the referring module.
+      kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
+      KJ_IF_SOME(type, importType) {
+        attributes.insert("type"_kj, type);
+      }
       ResolveContext context = {
         .type = moduleTypeToResolveContextType(referring.module.type()),
         .source = ResolveContext::Source::DYNAMIC_IMPORT,
         .normalizedSpecifier = normalizedSpecifier,
         .referrerNormalizedSpecifier = referrer,
         .rawSpecifier = rawSpecifier,
+        .attributes = kj::mv(attributes),
       };
 
       auto handleFoundModule = [&](Entry& found) -> Promise<Value> {
@@ -1236,12 +1241,17 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
     KJ_IF_SOME(url, referrerUrl.tryResolve(spec)) {
       // Make sure that percent-encoding in the path is normalized so we can match correctly.
       auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+      kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
+      KJ_IF_SOME(attributeType, importType) {
+        attributes.insert("type"_kj, attributeType);
+      }
       ResolveContext resolveContext = {
         .type = type,
         .source = ResolveContext::Source::STATIC_IMPORT,
         .normalizedSpecifier = normalized,
         .referrerNormalizedSpecifier = referrerUrl,
         .rawSpecifier = spec.asPtr(),
+        .attributes = kj::mv(attributes),
       };
 
       auto maybeResolved = registry.resolve(js, resolveContext);

@@ -27,6 +27,52 @@ V8System v8System;
 const jsg::Url BASE = "file:///"_url;
 ResolveObserver noopResolveObserver;
 
+kj::Array<kj::byte> makeTestWasm() {
+  return kj::heapArray<kj::byte>({
+    0x00,
+    0x61,
+    0x73,
+    0x6d,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x07,
+    0x01,
+    0x60,
+    0x02,
+    0x7f,
+    0x7f,
+    0x01,
+    0x7f,
+    0x03,
+    0x02,
+    0x01,
+    0x00,
+    0x07,
+    0x07,
+    0x01,
+    0x03,
+    0x61,
+    0x64,
+    0x64,
+    0x00,
+    0x00,
+    0x0a,
+    0x09,
+    0x01,
+    0x07,
+    0x00,
+    0x20,
+    0x00,
+    0x20,
+    0x01,
+    0x6a,
+    0x0b,
+  });
+}
+
 struct ResolveObserverImpl: public ResolveObserver {
   struct Request {
     Url id;
@@ -56,6 +102,57 @@ struct ResolveObserverImpl: public ResolveObserver {
     });
     return kj::heap<MyResolveStatus>(modules.back());
   }
+};
+
+struct CountingCompilationObserver final: public CompilationObserver {
+  struct Counts {
+    uint cacheFound = 0;
+    uint cacheRejected = 0;
+    uint cacheGenerated = 0;
+    uint cacheGenerationFailed = 0;
+    uint wasmCompiled = 0;
+    uint wasmFromCache = 0;
+  };
+
+  Counts getCounts() const {
+    auto lock = counts.lockShared();
+    return *lock;
+  }
+
+  kj::Own<void> onWasmCompilationStart(v8::Isolate*, size_t) const override {
+    auto lock = counts.lockExclusive();
+    ++lock->wasmCompiled;
+    return kj::Own<void>();
+  }
+
+  kj::Own<void> onWasmCompilationFromCacheStart(v8::Isolate*) const override {
+    auto lock = counts.lockExclusive();
+    ++lock->wasmFromCache;
+    return kj::Own<void>();
+  }
+
+  void onCompileCacheFound(v8::Isolate*) const override {
+    auto lock = counts.lockExclusive();
+    ++lock->cacheFound;
+  }
+
+  void onCompileCacheRejected(v8::Isolate*) const override {
+    auto lock = counts.lockExclusive();
+    ++lock->cacheRejected;
+  }
+
+  void onCompileCacheGenerated(v8::Isolate*) const override {
+    auto lock = counts.lockExclusive();
+    ++lock->cacheGenerated;
+  }
+
+  void onCompileCacheGenerationFailed(v8::Isolate*) const override {
+    auto lock = counts.lockExclusive();
+    ++lock->cacheGenerationFailed;
+  }
+
+ private:
+  mutable kj::MutexGuarded<Counts> counts;
 };
 
 struct TestType: public jsg::Object {
@@ -918,49 +1015,7 @@ KJ_TEST("Basic types of modules work (text, data, json, wasm)") {
     auto json = kj::str("{\"foo\":123}");
     bundleBuilder.addSyntheticModule("json", Module::newJsonModuleHandler(json.first(json.size())));
 
-    auto wasm = kj::heapArray<kj::byte>({
-      0x00,
-      0x61,
-      0x73,
-      0x6d,
-      0x01,
-      0x00,
-      0x00,
-      0x00,
-      0x01,
-      0x07,
-      0x01,
-      0x60,
-      0x02,
-      0x7f,
-      0x7f,
-      0x01,
-      0x7f,
-      0x03,
-      0x02,
-      0x01,
-      0x00,
-      0x07,
-      0x07,
-      0x01,
-      0x03,
-      0x61,
-      0x64,
-      0x64,
-      0x00,
-      0x00,
-      0x0a,
-      0x09,
-      0x01,
-      0x07,
-      0x00,
-      0x20,
-      0x00,
-      0x20,
-      0x01,
-      0x6a,
-      0x0b,
-    });
+    auto wasm = makeTestWasm();
     bundleBuilder.addSyntheticModule("wasm", Module::newWasmModuleHandler(wasm));
 
     auto mainSource2 = kj::str("export { default as abc } from 'abc';"
@@ -1020,6 +1075,54 @@ KJ_TEST("Basic types of modules work (text, data, json, wasm)") {
       KJ_ASSERT(!wasm1.strictEquals(wasm3));
     }, [&](Value exception) { js.throwException(kj::mv(exception)); });
   }));
+}
+
+// ======================================================================================
+
+KJ_TEST("Source phase imports work for bundled and fallback Wasm modules") {
+  auto wasm = makeTestWasm();
+
+  ModuleBundle::BundleBuilder bundleBuilder(BASE);
+  bundleBuilder.addWasmModule("wasm", wasm);
+  bundleBuilder.addEsmModule("plain", "export default 123;"_kjc);
+  bundleBuilder.addEsmModule("static", "import source wasm from 'wasm'; export default wasm;"_kjc);
+  bundleBuilder.addEsmModule("dynamic", "export default await import.source('wasm');"_kjc);
+  bundleBuilder.addEsmModule("failure",
+      "export default await import.source('plain').then(() => 'resolved', "
+      "    (error) => String(error));"_kjc);
+  bundleBuilder.addEsmModule(
+      "fallback", "import source wasm from 'fallback.wasm'; export default wasm;"_kjc);
+
+  bool fallbackCalled = false;
+  auto fallback = ModuleBundle::newFallbackBundle(
+      [&](const ResolveContext& context) -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+    if (context.normalizedSpecifier != "file:///fallback.wasm"_url) return kj::none;
+    fallbackCalled = true;
+    return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(
+        Module::newSynthetic(context.normalizedSpecifier.clone(), Module::Type::FALLBACK,
+            Module::newWasmModuleHandler(wasm), nullptr, Module::Flags::WASM,
+            Module::ContentType::WASM));
+  });
+
+  auto registry = ModuleRegistry::Builder(BASE, ModuleRegistry::Builder::Options::ALLOW_FALLBACK)
+                      .add(bundleBuilder.finish())
+                      .add(kj::mv(fallback))
+                      .finish();
+
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    KJ_ASSERT(ModuleRegistry::resolve(js, "static").isWasmModuleObject());
+    KJ_ASSERT(ModuleRegistry::resolve(js, "dynamic").isWasmModuleObject());
+    KJ_ASSERT(ModuleRegistry::resolve(js, "fallback").isWasmModuleObject());
+
+    auto failure = ModuleRegistry::resolve(js, "failure");
+    KJ_ASSERT(kj::str(failure) ==
+        "SyntaxError: Source phase import not available for module: file:///plain");
+  });
+
+  KJ_ASSERT(fallbackCalled);
 }
 
 // ======================================================================================
@@ -1934,6 +2037,73 @@ KJ_TEST("Building a bundle from a capnp description works") {
 
 // ======================================================================================
 
+KJ_TEST("ESM compile cache is reused across isolates") {
+  CountingCompilationObserver observer;
+  ModuleBundle::BundleBuilder bundleBuilder(BASE);
+  bundleBuilder.addEsmModule("foo", "export default 123;"_kjc);
+  auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+
+  {
+    PREAMBLE([&](Lock& js) {
+      auto attached = registry->attachToIsolate(js, observer);
+      KJ_ASSERT(ModuleRegistry::resolve(js, "foo").isNumber());
+    });
+  }
+
+  auto first = observer.getCounts();
+  KJ_ASSERT(first.cacheGenerated == 1);
+  KJ_ASSERT(first.cacheFound == 0);
+  KJ_ASSERT(first.cacheRejected == 0);
+  KJ_ASSERT(first.cacheGenerationFailed == 0);
+
+  {
+    PREAMBLE([&](Lock& js) {
+      auto attached = registry->attachToIsolate(js, observer);
+      KJ_ASSERT(ModuleRegistry::resolve(js, "foo").isNumber());
+    });
+  }
+
+  auto second = observer.getCounts();
+  KJ_ASSERT(second.cacheGenerated == 1);
+  KJ_ASSERT(second.cacheFound == 1);
+  KJ_ASSERT(second.cacheRejected == 0);
+  KJ_ASSERT(second.cacheGenerationFailed == 0);
+}
+
+// ======================================================================================
+
+KJ_TEST("Wasm compile cache is reused across isolates") {
+  CountingCompilationObserver observer;
+  auto wasm = makeTestWasm();
+  ModuleBundle::BundleBuilder bundleBuilder(BASE);
+  bundleBuilder.addWasmModule("wasm", wasm);
+  auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+
+  {
+    PREAMBLE([&](Lock& js) {
+      auto attached = registry->attachToIsolate(js, observer);
+      KJ_ASSERT(ModuleRegistry::resolve(js, "wasm").isWasmModuleObject());
+    });
+  }
+
+  auto first = observer.getCounts();
+  KJ_ASSERT(first.wasmCompiled == 1);
+  KJ_ASSERT(first.wasmFromCache == 0);
+
+  {
+    PREAMBLE([&](Lock& js) {
+      auto attached = registry->attachToIsolate(js, observer);
+      KJ_ASSERT(ModuleRegistry::resolve(js, "wasm").isWasmModuleObject());
+    });
+  }
+
+  auto second = observer.getCounts();
+  KJ_ASSERT(second.wasmCompiled == 1);
+  KJ_ASSERT(second.wasmFromCache == 1);
+}
+
+// ======================================================================================
+
 KJ_TEST("Using a registry from multiple threads works") {
 
   kj::AsyncIoContext io = kj::setupAsyncIo();
@@ -1943,25 +2113,42 @@ KJ_TEST("Using a registry from multiple threads works") {
   bundleBuilder.addEsmModule("foo", foo);
 
   auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+  CountingCompilationObserver compilationObserver;
 
-  struct NonOpErrorHandler final: public kj::TaskSet::ErrorHandler {
-    void taskFailed(kj::Exception&& exception) override {}
+  struct ErrorHandler final: public kj::TaskSet::ErrorHandler {
+    void taskFailed(kj::Exception&& exception) override {
+      if (error == kj::none) {
+        error = kj::mv(exception);
+      }
+    }
+
+    kj::Maybe<kj::Exception> error;
   };
-  NonOpErrorHandler errorHandler;
+  ErrorHandler errorHandler;
 
   kj::TaskSet tasks(errorHandler);
+  kj::MutexGuarded<uint> successfulResolutions(0);
 
   static const auto makeRunnable = [](kj::Arc<workerd::jsg::modules::ModuleRegistry> registry,
+                                       const CountingCompilationObserver& compilationObserver,
+                                       kj::MutexGuarded<uint>& successfulResolutions,
                                        kj::Own<kj::PromiseFulfiller<void>> fulfiller) {
-    return [registry = kj::mv(registry), fulfiller = kj::mv(fulfiller)]() mutable {
-      PREAMBLE([&](Lock& js) {
-        CompilationObserver compilationObserver;
-        auto attached = registry->attachToIsolate(js, compilationObserver);
-        js.tryCatch([&] {
-          auto val = ModuleRegistry::resolve(js, "file:///foo");
-          KJ_ASSERT(val.isNumber());
-        }, [&](Value exception) { js.throwException(kj::mv(exception)); });
-      });
+    return [registry = kj::mv(registry), &compilationObserver, &successfulResolutions,
+               fulfiller = kj::mv(fulfiller)]() mutable {
+      KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+        PREAMBLE([&](Lock& js) {
+          auto attached = registry->attachToIsolate(js, compilationObserver);
+          js.tryCatch([&] {
+            auto val = ModuleRegistry::resolve(js, "file:///foo");
+            KJ_ASSERT(val.isNumber());
+          }, [&](Value exception) { js.throwException(kj::mv(exception)); });
+        });
+        auto count = successfulResolutions.lockExclusive();
+        ++*count;
+      })) {
+        fulfiller->reject(kj::mv(exception));
+        return;
+      }
       fulfiller->fulfill();
     };
   };
@@ -1972,20 +2159,29 @@ KJ_TEST("Using a registry from multiple threads works") {
   };
 
   static const auto makeRunnableAndPromise =
-      [](kj::Arc<workerd::jsg::modules::ModuleRegistry> registry) -> RunnableAndPromise {
+      [](kj::Arc<workerd::jsg::modules::ModuleRegistry> registry,
+          const CountingCompilationObserver& compilationObserver,
+          kj::MutexGuarded<uint>& successfulResolutions) -> RunnableAndPromise {
     auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
-    return {kj::mv(paf.promise), makeRunnable(kj::mv(registry), kj::mv(paf.fulfiller))};
+    return {kj::mv(paf.promise),
+      makeRunnable(
+          kj::mv(registry), compilationObserver, successfulResolutions, kj::mv(paf.fulfiller))};
   };
 
-  auto [paf1, task1] = makeRunnableAndPromise(registry.addRef());
+  auto [paf1, task1] =
+      makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
   kj::Thread(kj::mv(task1)).detach();
-  auto [paf2, task2] = makeRunnableAndPromise(registry.addRef());
+  auto [paf2, task2] =
+      makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
   kj::Thread(kj::mv(task2)).detach();
-  auto [paf3, task3] = makeRunnableAndPromise(registry.addRef());
+  auto [paf3, task3] =
+      makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
   kj::Thread(kj::mv(task3)).detach();
-  auto [paf4, task4] = makeRunnableAndPromise(registry.addRef());
+  auto [paf4, task4] =
+      makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
   kj::Thread(kj::mv(task4)).detach();
-  auto [paf5, task5] = makeRunnableAndPromise(registry.addRef());
+  auto [paf5, task5] =
+      makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
   kj::Thread(kj::mv(task5)).detach();
 
   tasks.add(kj::mv(paf1));
@@ -1994,6 +2190,16 @@ KJ_TEST("Using a registry from multiple threads works") {
   tasks.add(kj::mv(paf4));
   tasks.add(kj::mv(paf5));
   tasks.onEmpty().wait(io.waitScope);
+  KJ_IF_SOME(exception, errorHandler.error) {
+    kj::throwRecoverableException(kj::mv(exception));
+  }
+
+  KJ_ASSERT(*successfulResolutions.lockShared() == 5);
+  auto counts = compilationObserver.getCounts();
+  KJ_ASSERT(counts.cacheGenerated == 1);
+  KJ_ASSERT(counts.cacheFound <= 4);
+  KJ_ASSERT(counts.cacheRejected == 0);
+  KJ_ASSERT(counts.cacheGenerationFailed == 0);
 }
 
 // ======================================================================================
@@ -2077,6 +2283,77 @@ KJ_TEST("Fallback service can return a module with a different specifier") {
   KJ_ASSERT(module1.id() == url);
   KJ_ASSERT(&module1 == &module2);
   KJ_ASSERT(&module2 == &module3);
+}
+
+// ======================================================================================
+
+KJ_TEST("Fallback redirect restarts module resolution") {
+  const auto source = "file:///source"_url;
+  const auto target = "file:///target"_url;
+  uint calls = 0;
+
+  auto fallback = ModuleBundle::newFallbackBundle(
+      [&](const ResolveContext& context) -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+    ++calls;
+    if (context.normalizedSpecifier == source) {
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(
+          kj::OneOf<kj::String, kj::Own<Module>>(kj::str(target.getHref())));
+    }
+    if (context.normalizedSpecifier == target) {
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(Module::newSynthetic(
+          target.clone(), Module::Type::FALLBACK, Module::newDataModuleHandler(nullptr)));
+    }
+    return kj::none;
+  });
+
+  auto registry = ModuleRegistry::Builder(BASE, ModuleRegistry::Builder::Options::ALLOW_FALLBACK)
+                      .add(kj::mv(fallback))
+                      .finish();
+  ResolveContext context{
+    .type = ResolveContext::Type::BUNDLE,
+    .source = ResolveContext::Source::INTERNAL,
+    .normalizedSpecifier = source,
+    .referrerNormalizedSpecifier = BASE,
+  };
+
+  auto& module = KJ_ASSERT_NONNULL(registry->lookup(context, noopResolveObserver));
+  KJ_ASSERT(module.id() == target);
+  KJ_ASSERT(calls == 2);
+}
+
+// ======================================================================================
+
+KJ_TEST("Fallback redirect loops stop after one redirect") {
+  const auto first = "file:///first"_url;
+  const auto second = "file:///second"_url;
+  uint calls = 0;
+
+  auto fallback = ModuleBundle::newFallbackBundle(
+      [&](const ResolveContext& context) -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+    ++calls;
+    if (context.normalizedSpecifier == first) {
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(
+          kj::OneOf<kj::String, kj::Own<Module>>(kj::str(second.getHref())));
+    }
+    if (context.normalizedSpecifier == second) {
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(
+          kj::OneOf<kj::String, kj::Own<Module>>(kj::str(first.getHref())));
+    }
+    return kj::none;
+  });
+
+  auto registry = ModuleRegistry::Builder(BASE, ModuleRegistry::Builder::Options::ALLOW_FALLBACK)
+                      .add(kj::mv(fallback))
+                      .finish();
+  ResolveContext context{
+    .type = ResolveContext::Type::BUNDLE,
+    .source = ResolveContext::Source::INTERNAL,
+    .normalizedSpecifier = first,
+    .referrerNormalizedSpecifier = BASE,
+  };
+
+  KJ_ASSERT(registry->lookup(context, noopResolveObserver) == kj::none);
+  KJ_ASSERT(calls == 2);
 }
 
 // ======================================================================================
@@ -2192,6 +2469,61 @@ KJ_TEST("Aliased modules (import maps) work") {
 
 // ======================================================================================
 
+KJ_TEST("Reserved protocols cannot be used in bundle module names") {
+  ModuleBundle::BundleBuilder builder(BASE);
+
+  KJ_EXPECT_THROW_MESSAGE("The data: protocol cannot be used in module bundles",
+      (void)builder.addEsmModule("data:text/javascript,export default 1", ""_kjc));
+  KJ_EXPECT_THROW_MESSAGE("The cloudflare: protocol is reserved",
+      (void)builder.addEsmModule("cloudflare:test", ""_kjc));
+  KJ_EXPECT_THROW_MESSAGE(
+      "The workerd: protocol is reserved", (void)builder.addEsmModule("workerd:test", ""_kjc));
+  KJ_EXPECT_THROW_MESSAGE("The data: protocol cannot be used in module bundles",
+      (void)builder.alias("alias", "data:text/javascript,export default 1"));
+  KJ_EXPECT_THROW_MESSAGE("The data: protocol cannot be used in module bundles",
+      (void)builder.alias("data:text/javascript,export default 1", "target"));
+}
+
+// ======================================================================================
+
+KJ_TEST("Module resolution currently ignores import attributes in its cache key") {
+  const auto id = "file:///data.json"_url;
+  auto module =
+      Module::newSynthetic(id.clone(), Module::Type::BUNDLE, Module::newDataModuleHandler(nullptr),
+          nullptr, Module::Flags::NONE, Module::ContentType::JSON);
+
+  ResolveContext withoutAttributes{
+    .type = ResolveContext::Type::BUNDLE,
+    .source = ResolveContext::Source::INTERNAL,
+    .normalizedSpecifier = id,
+    .referrerNormalizedSpecifier = BASE,
+  };
+  ResolveContext withAttributes{
+    .type = ResolveContext::Type::BUNDLE,
+    .source = ResolveContext::Source::INTERNAL,
+    .normalizedSpecifier = id,
+    .referrerNormalizedSpecifier = BASE,
+  };
+  withAttributes.attributes.insert("type"_kjc, "json"_kjc);
+
+  // Module::evaluateContext() intentionally ignores attributes until its TODO(soon) is resolved,
+  // despite ResolveContext documenting attributes as part of the cache key.
+  KJ_ASSERT(module->evaluateContext(withoutAttributes));
+  KJ_ASSERT(module->evaluateContext(withAttributes));
+
+  auto json = kj::str("{}");
+  ModuleBundle::BundleBuilder builder(BASE);
+  builder.addSyntheticModule(
+      "data.json", Module::newJsonModuleHandler(json), nullptr, Module::ContentType::JSON);
+  auto registry = ModuleRegistry::Builder(BASE).add(builder.finish()).finish();
+
+  auto& first = KJ_ASSERT_NONNULL(registry->lookup(withoutAttributes, noopResolveObserver));
+  auto& second = KJ_ASSERT_NONNULL(registry->lookup(withAttributes, noopResolveObserver));
+  KJ_ASSERT(&first == &second);
+}
+
+// ======================================================================================
+
 KJ_TEST("Import attribute type:json succeeds for JSON modules") {
 
   CompilationObserver compilationObserver;
@@ -2215,6 +2547,28 @@ KJ_TEST("Import attribute type:json succeeds for JSON modules") {
       // The JSON module should have been resolved and its value should be the parsed object.
       KJ_ASSERT(!val.isUndefined());
     }, [&](Value exception) { js.throwException(kj::mv(exception)); });
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("Dynamic import attribute type:json succeeds for JSON modules") {
+  CompilationObserver compilationObserver;
+  ModuleBundle::BundleBuilder builder(BASE);
+
+  auto entry = kj::str(
+      "export default (await import('data.json', { with: { type: 'json' } })).default.key;");
+  builder.addEsmModule("entry", entry, Module::Flags::MAIN);
+
+  auto json = kj::str("{\"key\": \"value\"}");
+  builder.addSyntheticModule(
+      "data.json", Module::newJsonModuleHandler(json), nullptr, Module::ContentType::JSON);
+
+  auto registry = ModuleRegistry::Builder(BASE).add(builder.finish()).finish();
+  PREAMBLE([&](Lock& js) {
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+    auto value = ModuleRegistry::resolve(js, "entry");
+    KJ_ASSERT(kj::str(value) == "value");
   });
 }
 
@@ -2244,6 +2598,79 @@ KJ_TEST("Import attribute type:json fails for non-JSON modules") {
       auto str = kj::str(exception.getHandle(js));
       KJ_ASSERT(str == "TypeError: Module \"other\" is not of type \"json\"");
     });
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("Dynamic import rejects unsupported attribute keys") {
+  CompilationObserver compilationObserver;
+  ModuleBundle::BundleBuilder builder(BASE);
+
+  auto entry =
+      kj::str("export default await import('data.json', { with: { unsupported: 'value' } })"
+              "    .then(() => 'resolved', (error) => String(error));");
+  builder.addEsmModule("entry", entry, Module::Flags::MAIN);
+
+  auto json = kj::str("{}");
+  builder.addSyntheticModule(
+      "data.json", Module::newJsonModuleHandler(json), nullptr, Module::ContentType::JSON);
+
+  auto registry = ModuleRegistry::Builder(BASE).add(builder.finish()).finish();
+  PREAMBLE([&](Lock& js) {
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+    auto value = ModuleRegistry::resolve(js, "entry");
+    KJ_ASSERT(kj::str(value) == "TypeError: Unsupported import attribute: \"unsupported\"");
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("Import attribute types text and bytes are not yet supported") {
+  CompilationObserver compilationObserver;
+  ModuleBundle::BundleBuilder builder(BASE);
+
+  auto text = kj::str("hello");
+  builder.addSyntheticModule(
+      "data.txt", Module::newTextModuleHandler(text), nullptr, Module::ContentType::TEXT);
+  builder.addSyntheticModule(
+      "data.bin", Module::newDataModuleHandler(nullptr), nullptr, Module::ContentType::DATA);
+  builder.addEsmModule("static-text",
+      "import value from 'data.txt' with { type: 'text' }; export default value;"_kjc);
+  builder.addEsmModule("static-bytes",
+      "import value from 'data.bin' with { type: 'bytes' }; export default value;"_kjc);
+  builder.addEsmModule("dynamic-text",
+      "export default await import('data.txt', { with: { type: 'text' } })"
+      "    .then(() => 'resolved', (error) => String(error));"_kjc);
+  builder.addEsmModule("dynamic-bytes",
+      "export default await import('data.bin', { with: { type: 'bytes' } })"
+      "    .then(() => 'resolved', (error) => String(error));"_kjc);
+
+  auto registry = ModuleRegistry::Builder(BASE).add(builder.finish()).finish();
+  PREAMBLE([&](Lock& js) {
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    js.tryCatch([&] {
+      ModuleRegistry::resolve(js, "static-text");
+      JSG_FAIL_REQUIRE(Error, "Should have thrown");
+    }, [&](Value exception) {
+      KJ_ASSERT(kj::str(exception.getHandle(js)) ==
+          "TypeError: Import attribute type \"text\" is not yet supported");
+    });
+    js.tryCatch([&] {
+      ModuleRegistry::resolve(js, "static-bytes");
+      JSG_FAIL_REQUIRE(Error, "Should have thrown");
+    }, [&](Value exception) {
+      KJ_ASSERT(kj::str(exception.getHandle(js)) ==
+          "TypeError: Import attribute type \"bytes\" is not yet supported");
+    });
+
+    auto dynamicText = ModuleRegistry::resolve(js, "dynamic-text");
+    KJ_ASSERT(
+        kj::str(dynamicText) == "TypeError: Import attribute type \"text\" is not yet supported");
+    auto dynamicBytes = ModuleRegistry::resolve(js, "dynamic-bytes");
+    KJ_ASSERT(
+        kj::str(dynamicBytes) == "TypeError: Import attribute type \"bytes\" is not yet supported");
   });
 }
 
@@ -2319,10 +2746,11 @@ KJ_TEST("Fallback receives rawSpecifier and source through V8 static import reso
   // The entry module statically imports "./missing", which is not in the bundle.
   // This forces fallback resolution through resolveWithCaching.
   ModuleBundle::BundleBuilder bundleBuilder(BASE);
-  auto main = kj::str("import './missing';");
+  auto main = kj::str("import value from './missing' with { type: 'json' }; export default value;");
   bundleBuilder.addEsmModule("main", main, Module::Flags::MAIN);
 
   bool fallbackCalled = false;
+  auto json = kj::str("{}");
   auto fallback = ModuleBundle::newFallbackBundle(
       [&](const ResolveContext& context) -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
     fallbackCalled = true;
@@ -2330,10 +2758,13 @@ KJ_TEST("Fallback receives rawSpecifier and source through V8 static import reso
     KJ_ASSERT(context.rawSpecifier == "./missing"_kjc);
     // A static import should have source == STATIC_IMPORT.
     KJ_ASSERT(context.source == ResolveContext::Source::STATIC_IMPORT);
+    KJ_ASSERT(context.attributes.size() == 1);
+    KJ_ASSERT(KJ_ASSERT_NONNULL(context.attributes.find("type"_kj)) == "json"_kj);
     // Return a synthetic module to satisfy the import.
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(
         Module::newSynthetic(context.normalizedSpecifier.clone(), Module::Type::FALLBACK,
-            Module::newDataModuleHandler(nullptr)));
+            Module::newJsonModuleHandler(json), nullptr, Module::Flags::NONE,
+            Module::ContentType::JSON));
   });
 
   auto registry = ModuleRegistry::Builder(BASE, ModuleRegistry::Builder::Options::ALLOW_FALLBACK)
