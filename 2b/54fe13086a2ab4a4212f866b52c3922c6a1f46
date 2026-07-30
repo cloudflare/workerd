@@ -1,0 +1,19 @@
+src/workerd/api/tests/outbound-interceptor-socket-test.js
+  s_2fecc69ef0ed56::t_08c584ff8107d8 64-74,121-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2b54fe13086a2ab4a4212f866b52c3922c6a1f46",
+  "prompts": {},
+  "sessions": {
+    "s_2fecc69ef0ed56": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_074f11090ffefNG5a5uACnqHPQ",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "adriangracia <adrian.gracia@icloud.com>"
+    }
+  }
+}
