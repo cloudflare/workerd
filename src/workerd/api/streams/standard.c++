@@ -3245,12 +3245,13 @@ kj::Maybe<kj::OneOf<DefaultController, ByobController>> ReadableStreamJsControll
   KJ_UNREACHABLE;
 }
 
+WD_STRONG_BOOL(StripBom);
 namespace {
 // Consumes all bytes from a stream, buffering in memory, with the purpose
 // of producing either a single concatenated kj::Array<byte> or kj::String.
 class AllReader {
  public:
-  using PartList = kj::Array<kj::ArrayPtr<byte>>;
+  using PartList = kj::Array<kj::Array<kj::byte>>;
 
   AllReader(jsg::Ref<ReadableStream> stream, uint64_t limit)
       : state(State::create<jsg::Ref<ReadableStream>>(kj::mv(stream))),
@@ -3258,29 +3259,30 @@ class AllReader {
   KJ_DISALLOW_COPY_AND_MOVE(AllReader);
 
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> allBytes(jsg::Lock& js) {
-    return loop(js).then(
-        js, [this](auto& js, PartList&& partPtrs) -> jsg::JsRef<jsg::JsArrayBuffer> {
+    return loop(js).then(js, [this](auto& js, PartList partPtrs) -> jsg::JsRef<jsg::JsArrayBuffer> {
       auto ab = jsg::JsArrayBuffer::create(js, runningTotal);
-      copyInto(ab.asArrayPtr(), partPtrs.asPtr());
+      copyInto(ab.asArrayPtr(), partPtrs);
       return ab.addRef(js);
     });
   }
 
   jsg::Promise<kj::String> allText(
       jsg::Lock& js, ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) {
-    return loop(js).then(js, [this, option](auto& js, PartList&& partPtrs) {
+    return loop(js).then(js, [this, option](auto& js, PartList partPtrs) {
       // Strip UTF-8 BOM if requested
+      bool hadBom = false;
       if ((option & ReadAllTextOption::STRIP_BOM) && partPtrs.size() > 0 &&
           hasUtf8Bom(partPtrs[0])) {
-        partPtrs[0] = partPtrs[0].slice(UTF8_BOM_SIZE);
         runningTotal -= UTF8_BOM_SIZE;
+        hadBom = true;
       }
 
       JSG_REQUIRE(runningTotal <= v8::String::kMaxLength, RangeError,
           "String length exceeds v8::String::kMaxLength.");
 
       auto out = kj::heapArray<char>(runningTotal + 1);
-      copyInto(out.first(out.size() - 1).asBytes(), partPtrs.asPtr());
+      copyInto(
+          out.first(out.size() - 1).asBytes(), partPtrs, hadBom ? StripBom::YES : StripBom::NO);
       out.back() = '\0';
       return kj::String(kj::mv(out));
     });
@@ -3288,9 +3290,6 @@ class AllReader {
 
   void visitForGc(jsg::GcVisitor& visitor) {
     state.visitForGc(visitor);
-    for (auto& part: parts) {
-      visitor.visit(part);
-    }
   }
 
  private:
@@ -3305,13 +3304,13 @@ class AllReader {
       jsg::Ref<ReadableStream>>;
   State state;
   uint64_t limit;
-  kj::Vector<jsg::BufferSource> parts;
+  kj::Vector<kj::Array<kj::byte>> parts;
   uint64_t runningTotal = 0;
 
   jsg::Promise<PartList> loop(jsg::Lock& js) {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-        return js.resolvedPromise(KJ_MAP(p, parts) { return p.asArrayPtr(); });
+        return js.resolvedPromise(parts.releaseAsArray());
       }
       KJ_CASE_ONEOF(errored, StreamStates::Errored) {
         return js.template rejectedPromise<PartList>(errored.getHandle(js));
@@ -3338,7 +3337,7 @@ class AllReader {
                 js, [&](jsg::Lock& js) { return loop(js); });
           }
 
-          jsg::BufferSource bufferSource(js, handle);
+          auto bufferSource = jsg::JsBufferSource(handle);
 
           if (bufferSource.size() == 0) {
             // Weird but allowed, we'll skip it.
@@ -3353,7 +3352,16 @@ class AllReader {
           }
 
           runningTotal += bufferSource.size();
-          parts.add(bufferSource.copy(js));
+          // Unfortunately there is a double copy required (one here, and one
+          // in copyInto). We need to defensively copy the bufferSource because
+          // there's a chance user-code could detach, resize, or modify the
+          // underlying ArrayBuffer after we return from the read. We don't
+          // know how much data the stream will produce tho so we can't read
+          // into a pre-allocated buffer for the final result. So we have to
+          // copy once here, then copy again into the final result.
+          // TODO(perf): Later, we can try optimizing this but for now we want
+          // to be correct and safe.
+          parts.add(bufferSource.copy());
           return loop(js);
         };
 
@@ -3371,10 +3379,22 @@ class AllReader {
     KJ_UNREACHABLE;
   }
 
-  void copyInto(kj::ArrayPtr<byte> out, kj::ArrayPtr<kj::ArrayPtr<byte>> in) {
+  void copyInto(
+      kj::ArrayPtr<byte> out, kj::ArrayPtr<kj::Array<byte>> in, StripBom stripBom = StripBom::NO) {
+    bool firstPart = true;
     for (auto& part: in) {
-      KJ_ASSERT(part.size() <= out.size());
-      out.write(part);
+      // If requested, strip the UTF-8 BOM from the first part.
+      // stripBom will only be set to YES if the caller has already
+      // verified that the first part is non-empty and has the BOM
+      if (stripBom && firstPart) {
+        firstPart = false;
+        auto partWithoutBom = part.slice(UTF8_BOM_SIZE);
+        KJ_ASSERT(partWithoutBom.size() <= out.size());
+        out.write(partWithoutBom);
+      } else {
+        KJ_ASSERT(part.size() <= out.size());
+        out.write(part);
+      }
     }
   }
 };
