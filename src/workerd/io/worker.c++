@@ -2021,6 +2021,17 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               KJ_CASE_ONEOF(mainModule, kj::Path) {
                 KJ_IF_SOME(ns,
                     tryResolveMainModule(lock, mainModule, *jsContext, *script, limitErrorOrTime)) {
+                  // To avoid resetting Worker-level C++ handles before snapshotting, we simply do not
+                  // create them eagerly. This is safe because the top-level code has already executed,
+                  // and the zygote worker will not handle any requests.
+                  // We also do not lose any JavaScript values during garbage collection, because the
+                  // handles below refer to values that are already retained elsewhere. For example:
+                  //     impl->env == IsolateBase::workerEnvObj,
+                  //     impl->ctxExports == IsolateBase::workerExportsObj.
+                  // A real Worker repopulates these handles in START_FROM_SNAPSHOT mode.
+                  if (lock.isPreparingSnapshot()) {
+                    break;
+                  }
                   impl->env = lock.v8Ref(bindingsScope.As<v8::Value>());
                   impl->ctxExports = lock.v8Ref(ctxExports.As<v8::Value>());
 
