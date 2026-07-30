@@ -73,6 +73,10 @@ struct MustNotCall<Ret(Args...)> {
   }
 };
 
+jsg::JsArrayBufferView createView(jsg::Lock& js, size_t size) {
+  return jsg::JsArrayBufferView(jsg::JsUint8Array::create(js, size));
+}
+
 auto read(jsg::Lock& js, auto& consumer) {
   auto prp = js.newPromiseAndResolver<ReadResult>();
   consumer.read(js, kj::heap<ValueQueue::ReadRequest>({.resolver = kj::mv(prp.resolver)}));
@@ -84,7 +88,9 @@ auto byobRead(jsg::Lock& js, auto& consumer, int size) {
   consumer.read(js,
       kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
           ByteQueue::ReadRequest::PullInto{
-            .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, size)),
+            .view = createView(js, size).addRef(js),
+            .elementSize = 1,
+            .originalOffset = 0,
             .type = ByteQueue::ReadRequest::Type::BYOB,
           }));
   return kj::mv(prp.promise);
@@ -428,7 +434,9 @@ KJ_TEST("ByteQueue with single consumer") {
     consumer.read(js,
         kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
             ByteQueue::ReadRequest::PullInto{
-              .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
+              .view = createView(js, 4).addRef(js),
+              .elementSize = 1,
+              .originalOffset = 0,
             }));
 
     MustCall<ReadContinuation> readContinuation([&](jsg::Lock& js, auto&& result) -> auto {
@@ -466,7 +474,9 @@ KJ_TEST("ByteQueue with single byob consumer") {
     consumer.read(js,
         kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
             ByteQueue::ReadRequest::PullInto{
-              .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
+              .view = createView(js, 4).addRef(js),
+              .elementSize = 1,
+              .originalOffset = 0,
               .type = ByteQueue::ReadRequest::Type::BYOB,
             }));
 
@@ -496,7 +506,7 @@ KJ_TEST("ByteQueue with single byob consumer") {
     KJ_ASSERT(!pendingByob->isInvalidated());
 
     auto& req = pendingByob->getRequest();
-    auto ptr = req.pullInto.store.asArrayPtr();
+    auto ptr = req.pullInto.view.getHandle(js).asArrayPtr();
     ptr.first(3).fill('b');
     pendingByob->respond(js, 3);
     KJ_ASSERT(pendingByob->isInvalidated());
@@ -521,7 +531,9 @@ KJ_TEST("ByteQueue with byob consumer and default consumer") {
     consumer1.read(js,
         kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
             ByteQueue::ReadRequest::PullInto{
-              .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
+              .view = createView(js, 4).addRef(js),
+              .elementSize = 1,
+              .originalOffset = 0,
               .type = ByteQueue::ReadRequest::Type::BYOB,
             }));
 
@@ -552,7 +564,7 @@ KJ_TEST("ByteQueue with byob consumer and default consumer") {
     KJ_ASSERT(!pendingByob->isInvalidated());
 
     auto& req = pendingByob->getRequest();
-    auto ptr = req.pullInto.store.asArrayPtr();
+    auto ptr = req.pullInto.view.getHandle(js).asArrayPtr();
     ptr.first(3).fill('b');
     pendingByob->respond(js, 3);
     KJ_ASSERT(pendingByob->isInvalidated());
@@ -589,7 +601,9 @@ KJ_TEST("ByteQueue with byob consumer and default consumer") {
     consumer2.read(js,
         kj::heap<ByteQueue::ReadRequest>(kj::mv(prp2.resolver),
             ByteQueue::ReadRequest::PullInto{
-              .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
+              .view = createView(js, 4).addRef(js),
+              .elementSize = 1,
+              .originalOffset = 0,
               .type = ByteQueue::ReadRequest::Type::DEFAULT,
             }));
     prp2.promise.then(js, read2Continuation);
@@ -636,7 +650,7 @@ KJ_TEST("ByteQueue with multiple byob consumers") {
     KJ_ASSERT(!pendingByob->isInvalidated());
 
     auto& req = pendingByob->getRequest();
-    auto ptr = req.pullInto.store.asArrayPtr();
+    auto ptr = req.pullInto.view.getHandle(js).asArrayPtr();
     ptr.first(3).fill('b');
     pendingByob->respond(js, 3);
     KJ_ASSERT(pendingByob->isInvalidated());
@@ -693,7 +707,7 @@ KJ_TEST("ByteQueue with multiple byob consumers") {
     KJ_ASSERT(!pendingByob->isInvalidated());
 
     auto& req = pendingByob->getRequest();
-    auto ptr = req.pullInto.store.asArrayPtr();
+    auto ptr = req.pullInto.view.getHandle(js).asArrayPtr();
     ptr.first(3).fill('b');
     pendingByob->respond(js, 3);
     KJ_ASSERT(pendingByob->isInvalidated());
@@ -776,7 +790,7 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads)") {
     MustCall<void(ByteQueue::ByobRequest&)> respond([&](jsg::Lock&, auto& pending) {
       static uint counter = 0;
       auto& req = pending.getRequest();
-      auto ptr = req.pullInto.store.asArrayPtr();
+      auto ptr = req.pullInto.view.getHandle(js).asArrayPtr();
       auto num = 3 - counter;
       ptr.first(num).fill('a' + counter++);
       pending.respond(js, num);
@@ -859,7 +873,7 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads, 2)") {
     MustCall<void(ByteQueue::ByobRequest&)> respond([&](jsg::Lock&, auto& pending) {
       static uint counter = 0;
       auto& req = pending.getRequest();
-      auto ptr = req.pullInto.store.asArrayPtr();
+      auto ptr = req.pullInto.view.getHandle(js).asArrayPtr();
       auto num = 3 - counter;
       ptr.first(num).fill('a' + counter++);
       pending.respond(js, num);
@@ -890,7 +904,9 @@ KJ_TEST("ByteQueue with default consumer with atLeast") {
       consumer.read(js,
           kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
               ByteQueue::ReadRequest::PullInto{
-                .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 5)),
+                .view = createView(js, 5).addRef(js),
+                .elementSize = 1,
+                .originalOffset = 0,
                 .atLeast = atLeast,
               }));
       return kj::mv(prp.promise);
@@ -978,7 +994,9 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (same rate)") {
       consumer.read(js,
           kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
               ByteQueue::ReadRequest::PullInto{
-                .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 5)),
+                .view = createView(js, 5).addRef(js),
+                .elementSize = 1,
+                .originalOffset = 0,
                 .atLeast = atLeast,
               }));
       return kj::mv(prp.promise);
@@ -1084,7 +1102,9 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (different rate)
       consumer.read(js,
           kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
               ByteQueue::ReadRequest::PullInto{
-                .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 5)),
+                .view = createView(js, 5).addRef(js),
+                .elementSize = 1,
+                .originalOffset = 0,
                 .atLeast = atLeast,
               }));
       return kj::mv(prp.promise);
@@ -1488,7 +1508,9 @@ KJ_TEST("ByteQueue draining read rejects with pending reads") {
     consumer.read(js,
         kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
             ByteQueue::ReadRequest::PullInto{
-              .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
+              .view = createView(js, 4).addRef(js),
+              .elementSize = 1,
+              .originalOffset = 0,
             }));
 
     KJ_ASSERT(consumer.hasReadRequests());
@@ -1527,7 +1549,9 @@ KJ_TEST("ByteQueue read rejects with pending draining read") {
     consumer.read(js,
         kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
             ByteQueue::ReadRequest::PullInto{
-              .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
+              .view = createView(js, 4).addRef(js),
+              .elementSize = 1,
+              .originalOffset = 0,
             }));
     prp.promise.then(js, readContinuation, errorContinuation);
     js.runMicrotasks();
@@ -2053,7 +2077,9 @@ KJ_TEST("ByteQueue push handles consumer destroyed by microtask between pushes")
     consumer1->read(js,
         kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
             ByteQueue::ReadRequest::PullInto{
-              .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
+              .view = createView(js, 4).addRef(js),
+              .elementSize = 1,
+              .originalOffset = 0,
             }));
 
     // The continuation destroys consumer2
