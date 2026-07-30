@@ -538,6 +538,15 @@ void IsolateBase::prepareSnapshot(v8::Local<v8::Context> defaultContext) {
   auto& creator = KJ_ASSERT_NONNULL(snapshotCreator);
   creator->SetDefaultContext(defaultContext);
   KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
+
+  // We need to reset all C++ handles that point to JavaScript objects before creating
+  // the snapshot blob, because V8 does not know how to serialize them.
+
+  // 1. Reset isolate level handles.
+  opaqueTemplate.Reset();
+  workerEnvObj.Reset();
+  workerExportsObj.Reset();
+
   artifact.blob = creator->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
 }
 
