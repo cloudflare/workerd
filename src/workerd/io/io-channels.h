@@ -104,7 +104,7 @@ struct DynamicWorkerSource;
 // I/O, i.e. the event that started the Worker. If IoChannelFactory is implemented such that
 // all methods throw exceptions, then the Worker will be completely unable to communicate with
 // anything in the world except for the client -- this is a useful property for sandboxing!
-class IoChannelFactory {
+class IoChannelFactory: public virtual kj::Refcounted {
  public:
   enum class EvictWebSocketMode {
     HIBERNATE,
@@ -210,7 +210,7 @@ class IoChannelFactory {
 
   // Base class for all channel types that can be tokenized, e.g. SubrequestChannel,
   // ActorClassChannel.
-  class TokenizableChannel: public kj::Refcounted, public Frankenvalue::CapTableEntry {
+  class TokenizableChannel: public virtual kj::Refcounted, public Frankenvalue::CapTableEntry {
    public:
     kj::Own<CapTableEntry> clone() override final {
       return kj::addRef(*this);
@@ -493,15 +493,6 @@ class IoChannelFactory {
       kj::Own<SelfTokenFactory> selfTokenFactory,
       Frankenvalue restoreParams,
       Persistent persistent);
-
-  // Return a strong reference to this same factory. Used in the implementations of
-  // getSubrequestChannel() and getActorClass() when delayed resolution is needed.
-  //
-  // TODO(cleanup): This is hacky. IoChannelFactory isn't declared to simply extend kj::Refcounted
-  //   because the workerd implementation is privately implemented by Server::WorkerService, which
-  //   inherits kj::Refcounted a different way. But maybe it's time for Server::WorkerService to
-  //   stop working that way?
-  virtual kj::Own<void> addRef() = 0;
 };
 
 // ResourceLimits provides a means to control the resource allocation for a worker stage via a

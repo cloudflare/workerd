@@ -99,9 +99,9 @@ TestFixture makeFixture(uint& requestCount) {
   return TestFixture(TestFixture::SetupParams{
     .actorId = Worker::Actor::Id(kj::str("test-actor")),
     .useRealTimers = false,
-    .ioChannelFactory = kj::Function<kj::Own<IoChannelFactory>(TimerChannel&)>(
-        [&](TimerChannel& timer) -> kj::Own<IoChannelFactory> {
-    return kj::heap<HttpTestIoChannelFactory>(timer, requestCount);
+    .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
+        [&](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<HttpTestIoChannelFactory>(timer, requestCount);
   }),
   });
 }

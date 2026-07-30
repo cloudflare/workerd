@@ -56,9 +56,9 @@ class FrozenTimerChannel final: public TimerChannel {
 
 KJ_TEST("trace onset synchronizes an idle actor's clock before reading it") {
   FrozenTimerChannel timer;
-  kj::Function<kj::Own<IoChannelFactory>(TimerChannel&)> makeChannelFactory =
-      [&timer](TimerChannel&) -> kj::Own<IoChannelFactory> {
-    return kj::heap<TestFixture::DummyIoChannelFactory>(timer);
+  kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)> makeChannelFactory =
+      [&timer](TimerChannel&) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<TestFixture::DummyIoChannelFactory>(timer);
   };
   TestFixture fixture({
     .actorId = Worker::Actor::Id(kj::str("trace-timing-test")),

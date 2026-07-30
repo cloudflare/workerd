@@ -98,9 +98,9 @@ KJ_TEST("socket writes are blocked by output gate") {
   TestFixture fixture(TestFixture::SetupParams{
     .actorId = kj::mv(actorId),
     .useRealTimers = false,
-    .ioChannelFactory = kj::Function<kj::Own<IoChannelFactory>(TimerChannel&)>(
-        [&](TimerChannel& timer) -> kj::Own<IoChannelFactory> {
-    return kj::heap<ConnectTestIoChannelFactory>(timer, connectCalled, headerTable, pipeEnd);
+    .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
+        [&](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<ConnectTestIoChannelFactory>(timer, connectCalled, headerTable, pipeEnd);
   }),
   });
 
@@ -161,9 +161,9 @@ KJ_TEST("connectImpl defers connect until output gate clears") {
   TestFixture fixture(TestFixture::SetupParams{
     .actorId = kj::mv(actorId),
     .useRealTimers = false,
-    .ioChannelFactory = kj::Function<kj::Own<IoChannelFactory>(TimerChannel&)>(
-        [&](TimerChannel& timer) -> kj::Own<IoChannelFactory> {
-    return kj::heap<ConnectTestIoChannelFactory>(timer, connectCalled, headerTable, pipeEnd);
+    .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
+        [&](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<ConnectTestIoChannelFactory>(timer, connectCalled, headerTable, pipeEnd);
   }),
   });
 

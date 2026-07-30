@@ -3326,7 +3326,7 @@ struct Server::DynamicErrorReporter final: public ErrorReporter {
 
 class Server::WorkerService final: public Service,
                                    private kj::TaskSet::ErrorHandler,
-                                   private IoChannelFactory,
+                                   public IoChannelFactory,
                                    private TimerChannel,
                                    private LimitEnforcer {
  public:
@@ -3714,8 +3714,7 @@ class Server::WorkerService final: public Service,
         kj::mv(props), kj::mv(actor),
         kj::attachRef(static_cast<LimitEnforcer&>(*this), kj::addRef(*this)),
         {},  // ioContextDependency
-        kj::attachRef(static_cast<IoChannelFactory&>(*this), kj::addRef(*this)), kj::mv(observer),
-        waitUntilTasks,
+        addRefToThis(), kj::mv(observer), waitUntilTasks,
         true,                  // tunnelExceptions
         kj::mv(workerTracer),  // workerTracer
         kj::mv(metadata.cfBlobJson),
@@ -4266,10 +4265,6 @@ class Server::WorkerService final: public Service,
       Persistent persistent) override {
     return channelTokenHandler.makeRestoredRpcChannel(
         kj::mv(selfTokenFactory), kj::mv(restoreParams), persistent);
-  }
-
-  kj::Own<void> addRef() override {
-    return kj::addRef(*this);
   }
 
   // ---------------------------------------------------------------------------
