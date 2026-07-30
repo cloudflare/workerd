@@ -1,0 +1,24 @@
+src/workerd/server/server-test.c++
+  s_0e56c3301e5173::t_71e37b8539cdd3 7102-7112,7119-7133,7135-7136,7141,7144,7149,7162-7163,7166,7169,7171-7291
+  s_0e56c3301e5173::t_5ee092fa3c846f 7101,7113-7118,7134,7137-7140,7142-7143,7145-7148,7150-7161,7164-7165,7167-7168,7170
+src/workerd/api/global-scope.c++
+  s_0e56c3301e5173::t_58cfb30fdabcd6 115-120
+src/workerd/server/server.c++
+  s_0e56c3301e5173::t_0a31a122a68ff5 17,63-206,3510-3511,3527-3528,3742-3766,3772-3773,3897,4144,5003-5006,5534-5544,5775,5777,5938-5939,6424
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ecdf5220d241123bda9206e66f97fd1e4f49bc6b",
+  "prompts": {},
+  "sessions": {
+    "s_0e56c3301e5173": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_09dbefc92ffel4Y7irj65GOs7y",
+        "model": "unknown"
+      },
+      "human_author": null
+    }
+  }
+}
