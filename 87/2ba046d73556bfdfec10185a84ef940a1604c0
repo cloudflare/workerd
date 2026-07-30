@@ -1,12 +1,18 @@
-src/workerd/api/BUILD.bazel
-  s_b89908ec6702ef::t_b5c48b30386dce 663-671
+src/workerd/api/fetch-body-rewindable-test.c++
+  s_2192e8a6d105f9::t_890a437f866d0f 1-125
 src/workerd/io/observer.h
-  s_2192e8a6d105f9::t_9f01df14d923b1 13,22-25,134-141
+  s_2192e8a6d105f9::t_5350c504b9c72a 13,22-25,134-141
+src/workerd/api/BUILD.bazel
+  s_b89908ec6702ef::t_3c0d724709f9ea 664-672
+src/workerd/tests/test-fixture.c++
+  s_b89908ec6702ef::t_b9259ca06a4391 371-372,464-471
+src/workerd/api/http.c++
+  s_b89908ec6702ef::t_cae20d84fb4d97 1556-1563
 ---
 {
   "schema_version": "authorship/3.0.0",
   "git_ai_version": "1.6.10",
-  "base_commit_sha": "f0183f7fa41f17c92c39dd7e4c14182b4d8463bf",
+  "base_commit_sha": "872ba046d73556bfdfec10185a84ef940a1604c0",
   "prompts": {},
   "sessions": {
     "s_2192e8a6d105f9": {
