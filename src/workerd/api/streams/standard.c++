@@ -2111,11 +2111,10 @@ struct ByteReadable final: public kj::PtrTarget,
     KJ_IF_SOME(byob, byobOptions) {
       // If a BYOB buffer was given, we need to give it back wrapped in a TypedArray
       // whose size is set to zero.
-      jsg::BufferSource source(js, byob.bufferView.getHandle(js));
-      auto store = source.detach(js);
-      store.consume(store.size());
+      auto view = jsg::JsArrayBufferView(byob.bufferView.getHandle(js));
+      view = view.detachAndTake(js).slice(js, 0, 0);
       return js.resolvedPromise(ReadResult{
-        .value = jsg::JsValue(store.createHandle(js)).addRef(js),
+        .value = jsg::JsValue(view).addRef(js),
         .done = true,
       });
     } else {
@@ -2826,11 +2825,10 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
       // If it is a BYOB read, then the spec requires that we return an empty
       // view of the same type provided, that uses the same backing memory
       // as that provided, but with zero-length.
-      auto source = jsg::BufferSource(js, byobOptions.bufferView.getHandle(js));
-      auto store = source.detach(js);
-      store.consume(store.size());
+      auto source = jsg::JsArrayBufferView(byobOptions.bufferView.getHandle(js));
+      source = source.detachAndTake(js).slice(js, 0, 0);
       return js.resolvedPromise(ReadResult{
-        .value = jsg::JsValue(store.createHandle(js)).addRef(js),
+        .value = jsg::JsValue(source).addRef(js),
         .done = true,
       });
     }
