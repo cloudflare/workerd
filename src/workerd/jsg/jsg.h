@@ -2112,8 +2112,6 @@ class JsContext {
   Ref<T> object;
 };
 
-class BufferSource;
-
 constexpr bool hasPublicVisitForGc_(...) {
   return false;
 }
@@ -2198,8 +2196,6 @@ class GcVisitor {
       visit(value);
     }
   }
-
-  void visit(BufferSource& bufferSource);
 
   template <typename T, typename = kj::EnableIf<hasPublicVisitForGc<T>()>()>
   void visit(T& supportsVisit) {

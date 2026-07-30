@@ -146,7 +146,7 @@ KJ_TEST("generic types") {
 }
 
 KJ_TEST("builtins") {
-  KJ_EXPECT(tType<jsg::BufferSource>() == "(builtin = (type = jsgBufferSource))");
+  KJ_EXPECT(tType<jsg::JsBufferSource>() == "(builtin = (type = jsgBufferSource))");
   KJ_EXPECT(tType<v8::Uint8Array>() == "(builtin = (type = v8Uint8Array))");
   KJ_EXPECT(tType<v8::ArrayBufferView>() == "(builtin = (type = v8ArrayBufferView))");
   KJ_EXPECT(tType<v8::Function>() == "(builtin = (type = v8Function))");

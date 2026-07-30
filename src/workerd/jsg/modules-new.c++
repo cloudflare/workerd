@@ -4,8 +4,6 @@
 
 #include "modules-new.h"
 
-#include "buffersource.h"
-
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/util.h>

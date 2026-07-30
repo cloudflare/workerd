@@ -492,7 +492,6 @@ struct BuildRtti<Configuration, v8::Promise> {
   F(jsg::JsArrayBuffer, BuiltinType::Type::V8_ARRAY_BUFFER)                                        \
   F(jsg::JsArrayBufferView, BuiltinType::Type::V8_ARRAY_BUFFER_VIEW)                               \
   F(jsg::JsBufferSource, BuiltinType::Type::JSG_BUFFER_SOURCE)                                     \
-  F(jsg::BufferSource, BuiltinType::Type::JSG_BUFFER_SOURCE)                                       \
   F(kj::Date, BuiltinType::Type::KJ_DATE)                                                          \
   F(v8::ArrayBufferView, BuiltinType::Type::V8_ARRAY_BUFFER_VIEW)                                  \
   F(v8::ArrayBuffer, BuiltinType::Type::V8_ARRAY_BUFFER)                                           \

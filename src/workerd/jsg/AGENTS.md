@@ -78,7 +78,7 @@ class MyType: public jsg::Object {
 These rules MUST be followed when writing or modifying JSG code:
 
 1. **MUST implement `visitForGc()`** on any Resource Type holding `Ref<T>`, `V8Ref<T>`,
-   `JsRef<T>`, `Function<T>`, `Promise<T>`, `Promise<T>::Resolver`, `BufferSource`, or
+   `JsRef<T>`, `Function<T>`, `Promise<T>`, `Promise<T>::Resolver`, or
    `Name` — see `README.md` §GC-Visitable Types for the complete list
 2. **MUST visit ALL GC-visitable fields** — missing one causes GC corruption
 3. **MUST NOT store `v8::Local<T>` or `JsValue` types as class members** — use `V8Ref<T>`
