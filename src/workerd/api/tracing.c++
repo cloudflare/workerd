@@ -176,13 +176,12 @@ namespace {
 
 enum class SpanEndMode { AUTO_END, MANUAL_END };
 
-v8::Local<v8::Value> runSpan(jsg::Lock& js,
-    kj::String operationName,
-    v8::Local<v8::Function> callback,
-    jsg::Arguments<jsg::Value> args,
-    const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler,
-    const jsg::TypeHandler<jsg::Promise<jsg::Value>>* valuePromiseHandler,
-    SpanEndMode endMode) {
+struct CreatedSpan {
+  jsg::Ref<user_tracing::Span> span;
+  kj::Maybe<SpanParent> childSpanForAsyncContext;
+};
+
+CreatedSpan createSpan(jsg::Lock& js, kj::String operationName) {
   // We use qualified `user_tracing::Span` / `user_tracing::SpanImpl` throughout because an
   // unqualified `Span` in this namespace resolves to workerd::Span (the runtime span struct),
   // which is a different type.
@@ -208,9 +207,9 @@ v8::Local<v8::Value> runSpan(jsg::Lock& js,
         auto childObserver = observer.newChildFromUserCode();
         impl = kj::refcounted<user_tracing::SpanImpl>(
             kj::mv(childObserver), kj::ConstString(kj::heapString(operationName)));
-        // Capture a SpanParent for the child so we can push it onto the AsyncContextFrame
-        // below. Safe to carry across the request boundary thanks to BaseTracer::WeakRef in
-        // the submitter - stale parents cannot pin the tracer.
+        // Capture a SpanParent for the child so startActiveSpan() / enterSpan() can push it onto
+        // the AsyncContextFrame. Safe to carry across the request boundary thanks to
+        // BaseTracer::WeakRef in the submitter - stale parents cannot pin the tracer.
         childSpanForAsyncContext = impl->makeSpanParent();
       } else {
         impl = kj::refcounted<user_tracing::SpanImpl>(nullptr);
@@ -219,21 +218,34 @@ v8::Local<v8::Value> runSpan(jsg::Lock& js,
       impl = kj::refcounted<user_tracing::SpanImpl>(nullptr);
     }
   } else {
-    // No IoContext: callback still runs, but with a no-op span and no async-context push.
+    // No IoContext: create a no-op span.
     impl = kj::refcounted<user_tracing::SpanImpl>(nullptr);
   }
 
   // Wrap impl in IoOwn (when inside an IoContext) so destruction funnels through the
   // IoContext's delete queue and cannot cross threads. Outside an IoContext, fall back to
-  // kj::Own; tracing without an IoContext is a no-op tracing-wise but still runs the
-  // callback.
-  jsg::Ref<user_tracing::Span> jsSpan = [&]() -> jsg::Ref<user_tracing::Span> {
+  // kj::Own; tracing without an IoContext is a no-op tracing-wise.
+  auto span = [&]() -> jsg::Ref<user_tracing::Span> {
     if (hasIoContext) {
       auto ownedImpl = IoContext::current().addObject(kj::mv(impl));
       return js.alloc<user_tracing::Span>(kj::mv(ownedImpl));
     }
     return js.alloc<user_tracing::Span>(kj::mv(impl));
   }();
+
+  return CreatedSpan{
+    .span = kj::mv(span), .childSpanForAsyncContext = kj::mv(childSpanForAsyncContext)};
+}
+
+v8::Local<v8::Value> runSpan(jsg::Lock& js,
+    kj::String operationName,
+    v8::Local<v8::Function> callback,
+    jsg::Arguments<jsg::Value> args,
+    const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler,
+    const jsg::TypeHandler<jsg::Promise<jsg::Value>>* valuePromiseHandler,
+    SpanEndMode endMode) {
+  auto createdSpan = createSpan(js, kj::mv(operationName));
+  auto jsSpan = kj::mv(createdSpan.span);
 
   // Build argv for the callback: (span, ...args).
   v8::LocalVector<v8::Value> argv(js.v8Isolate);
@@ -290,7 +302,7 @@ v8::Local<v8::Value> runSpan(jsg::Lock& js,
   // async-context storage on scope exit; any async continuations captured during the
   // callback will already have snapshotted the new frame and will see our child span as
   // "current".
-  KJ_IF_SOME(span, kj::mv(childSpanForAsyncContext)) {
+  KJ_IF_SOME(span, kj::mv(createdSpan.childSpanForAsyncContext)) {
     auto& context = IoContext::current();
     jsg::AsyncContextFrame::StorageScope traceScope =
         context.makeUserAsyncTraceScope(context.getCurrentLock(), kj::mv(span));
@@ -319,6 +331,10 @@ v8::Local<v8::Value> Tracing::startActiveSpan(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler) {
   return runSpan(js, kj::mv(operationName), callback, kj::mv(args), spanHandler, nullptr,
       SpanEndMode::MANUAL_END);
+}
+
+jsg::Ref<user_tracing::Span> Tracing::startSpan(jsg::Lock& js, kj::String operationName) {
+  return createSpan(js, kj::mv(operationName)).span;
 }
 
 }  // namespace workerd::api

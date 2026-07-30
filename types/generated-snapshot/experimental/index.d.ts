@@ -4758,6 +4758,7 @@ interface Tracing {
     callback: (span: Span, ...args: A) => T,
     ...args: A
   ): T;
+  startSpan(name: string): Span;
   Span: typeof Span;
 }
 declare abstract class Span {

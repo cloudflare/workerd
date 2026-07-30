@@ -219,6 +219,17 @@ export const publicImportStartActiveSpan = {
   },
 };
 
+export const publicImportStartSpan = {
+  async test(ctrl, env, ctx) {
+    const span = publicTracing.startSpan('public-start-span-op');
+    span.setAttribute('test', 'publicImportStartSpan');
+    span.setAttribute('path', 'import-from-cloudflare-workers');
+    assert.strictEqual(span.isTraced, true);
+    span.end();
+    assert.strictEqual(span.isTraced, false);
+  },
+};
+
 // Verify ctx.tracing: same Tracing instance should be reachable off the execution context.
 export const ctxTracing = {
   async test(ctrl, env, ctx) {
