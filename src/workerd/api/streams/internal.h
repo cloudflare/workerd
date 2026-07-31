@@ -372,6 +372,16 @@ class WritableStreamInternalController: public WritableStreamController {
     }
   };
   struct Pipe: kj::PtrTarget {
+    // Shared handle used by the pipe loop's promise continuations. The Weak<Pipe>
+    // detects whether the Pipe (a queue event owned by the destination controller) is
+    // still alive.
+    //
+    // NOTE: The wrapper methods below must not hold a strong kj::Ptr<Pipe> across the
+    // delegated call: several of the delegated methods can destroy the Pipe (e.g.
+    // checkSignal() drains the destination queue, and any releaseSource() with a
+    // cancel reason can run user JS that does the same). They use weakRef.tryGet() to
+    // obtain a plain reference instead — the Weak protects against *entering* a dead
+    // Pipe, and nothing touches the Pipe after the delegated call returns.
     struct State: public kj::Refcounted {
       jsg::Ref<WritableStream> owner;
       kj::Weak<Pipe> weakRef;

@@ -200,7 +200,13 @@ class WritableLockImpl {
     void releaseSource(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) {
       if (source.get() == nullptr) return;
       source = nullptr;
-      readableStreamRef->getController().releasePipeLock(js, maybeError);
+      // Hold a local ref across the call: when maybeError is given and the source is
+      // JS-backed, releasePipeLock() runs the source's cancel algorithm (arbitrary
+      // user JS) synchronously. That JS may re-enter the controller and release the
+      // write-side pipe lock, destroying *this — including the readableStreamRef
+      // member — while the source's controller is still executing releasePipeLock().
+      auto readable = readableStreamRef.addRef();
+      readable->getController().releasePipeLock(js, maybeError);
     }
 
     struct Flags {
@@ -547,18 +553,28 @@ kj::Maybe<jsg::Promise<void>> WritableLockImpl<Controller>::PipeLocked::checkSig
   KJ_IF_SOME(signal, maybeSignal) {
     if (signal->getAborted(js)) {
       auto reason = signal->getReason(js);
-      if (!flags.preventCancel) {
+      // Copy the flags needed below before calling releaseSource(): with a cancel
+      // reason it runs the source's cancel algorithm (arbitrary user JS)
+      // synchronously, and that JS may re-enter the controller and release the
+      // write-side pipe lock, destroying *this. For the same reason the abort
+      // continuation must not capture `this`: it runs after the caller has already
+      // released the pipe lock.
+      auto preventCancel = flags.preventCancel;
+      auto preventAbort = flags.preventAbort;
+      auto pipeThrough = flags.pipeThrough;
+      if (!preventCancel) {
         releaseSource(js, reason);
       } else {
         releaseSource(js);
       }
-      if (!flags.preventAbort) {
+      if (!preventAbort) {
         return self.abort(js, reason)
-            .then(js, [this, reason = reason.addRef(js), ref = self.addRef()](jsg::Lock& js) {
-          return rejectedMaybeHandledPromise<void>(js, reason.getHandle(js), flags.pipeThrough);
+            .then(
+                js, [pipeThrough, reason = reason.addRef(js), ref = self.addRef()](jsg::Lock& js) {
+          return rejectedMaybeHandledPromise<void>(js, reason.getHandle(js), pipeThrough);
         });
       }
-      return rejectedMaybeHandledPromise<void>(js, reason, flags.pipeThrough);
+      return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
     }
   }
   return kj::none;

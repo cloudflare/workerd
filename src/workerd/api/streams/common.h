@@ -582,6 +582,12 @@ class ReadableStreamController {
   //
   // The caller must drop every kj::Ptr<PipeController> it holds *before* calling this;
   // the PipeController's destructor asserts (in debug builds) that no pointers remain.
+  //
+  // WARNING: When maybeError is given and the stream is JS-backed, the stream's cancel
+  // algorithm — arbitrary user JS — runs synchronously before the lock is released.
+  // Callers must treat this like any other JS call site: copy any state needed
+  // afterwards into locals first, and re-validate (or avoid touching) anything that
+  // reentrant JS could have invalidated, including the caller's own `this`.
   virtual void releasePipeLock(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) = 0;
 
   virtual void visitForGc(jsg::GcVisitor& visitor) {};

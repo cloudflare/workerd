@@ -1821,16 +1821,22 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       // ReadableStream is JavaScript-backed and we need to setup a JavaScript-promise read/write
       // loop to pass the data into the destination.
 
-      // Capturing `this` in the handlePromise lambda is safe. Handle promise is only
-      // invoked synchronously and `this` is not propagated into the promise continuations.
-      const auto handlePromise = [this, &ioContext, check = makeChecker(*this), preventAbort,
-                                     preventClose](jsg::Lock& js, auto promise) {
+      // Capturing `this` and `request` in the handlePromise lambda is safe. Handle
+      // promise is only invoked synchronously and neither is propagated into the
+      // promise continuations.
+      const auto handlePromise = [this, &ioContext, &request, check = makeChecker(*this),
+                                     preventAbort, preventClose](jsg::Lock& js, auto promise) {
         return promise.then(js,
-            ioContext.addFunctor(
-                [self = addRef(), check, preventAbort, preventClose](jsg::Lock& js) mutable {
+            ioContext.addFunctor([self = addRef(), pipeState = request->getState(), check,
+                                     preventAbort, preventClose](jsg::Lock& js) mutable {
           auto& controller = static_cast<WritableStreamInternalController&>(self->getController());
-          // Under some conditions, the clean up has already happened.
-          if (controller.queue.empty()) return js.resolvedPromise();
+          // If the Pipe has already been torn down, there is nothing left to do. This
+          // happens when checkSignal() handled an abort (settling the pipe promise,
+          // releasing the locks, and popping the queue entry) or when doAbort/drain ran
+          // externally before this continuation. Note that an empty-queue check is NOT
+          // a sufficient guard: unrelated events may have been queued since the
+          // teardown, so we track the Pipe itself via its weak ref.
+          if (pipeState->isAborted()) return js.resolvedPromise();
 
           auto& request = check.template operator()<kj::Own<Pipe>>(controller);
 
@@ -1889,15 +1895,13 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
           }
           return js.resolvedPromise();
         }),
-            ioContext.addFunctor(
-                [self = addRef(), check, preventAbort](jsg::Lock& js, jsg::Value reason) mutable {
+            ioContext.addFunctor([self = addRef(), pipeState = request->getState(), check,
+                                     preventAbort](jsg::Lock& js, jsg::Value reason) mutable {
           auto& controller = static_cast<WritableStreamInternalController&>(self->getController());
-          // Under some conditions, the clean up has already happened — either
-          // because checkSignal popped the Pipe before rejecting, or because
-          // doAbort/drain ran externally between pipeLoop's rejection and
-          // this microtask. Mirror the success continuation's empty-queue
-          // guard to avoid the fatal check() assertion on an empty queue.
-          if (controller.queue.empty()) return js.resolvedPromise();
+          // If the Pipe has already been torn down, there is nothing left to do — see
+          // the success continuation above for why this is a weak-ref check rather
+          // than an empty-queue check.
+          if (pipeState->isAborted()) return js.resolvedPromise();
 
           auto handle = jsg::JsValue(reason.getHandle(js));
 
@@ -2002,8 +2006,10 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
 bool WritableStreamInternalController::Pipe::State::checkSignal(jsg::Lock& js) {
   // If the weakRef is not alive, we'll return true to indicate aborted.
   bool answer = true;
-  KJ_IF_SOME(ref, weakRef) {
-    answer = ref->checkSignal(js);
+  KJ_IF_SOME(pipe, weakRef.tryGet()) {
+    // checkSignal() may destroy the Pipe (see the State declaration for why this is a
+    // plain reference); it must be the last use of `pipe`.
+    answer = pipe.checkSignal(js);
   }
   return answer;
 }
@@ -2030,10 +2036,24 @@ bool WritableStreamInternalController::Pipe::checkSignal(jsg::Lock& js) {
         return kj::mv(maybeRef);
       }();
 
+      auto weakSelf = addWeakToThis();
+
       if (!preventCancel) {
+        // May run arbitrary user JS (the source's cancel algorithm), which can re-enter
+        // the destination and tear this Pipe down (e.g. via drain()).
         releaseSource(js, reason);
       } else {
         releaseSource(js);
+      }
+
+      if (weakSelf == nullptr) {
+        // Reentrant user JS from the source's cancel algorithm already tore this Pipe
+        // down: the queue entry is gone and the writable side has been cleaned up.
+        // Just settle the pipe promise — we moved it into a temp above, so the
+        // teardown could not have settled it — and bail before touching `this` or
+        // popping an entry that no longer exists.
+        maybeRejectPromise<void>(js, promiseCopy, reason);
+        return true;
       }
 
       if (!preventAbort) {
@@ -2061,8 +2081,8 @@ bool WritableStreamInternalController::Pipe::checkSignal(jsg::Lock& js) {
 jsg::Promise<void> WritableStreamInternalController::Pipe::State::write(
     jsg::Lock& js, jsg::JsValue handle) {
   kj::Maybe<jsg::Promise<void>> promise;
-  KJ_IF_SOME(ref, weakRef) {
-    promise = ref->write(js, handle);
+  KJ_IF_SOME(pipe, weakRef.tryGet()) {
+    promise = pipe.write(js, handle);
   }
   KJ_IF_SOME(p, promise) {
     return kj::mv(p);
@@ -2102,16 +2122,16 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::write(
 
 bool WritableStreamInternalController::Pipe::State::isSourceReleased() {
   bool answer = true;
-  KJ_IF_SOME(ref, weakRef) {
-    answer = ref->isSourceReleased();
+  KJ_IF_SOME(pipe, weakRef.tryGet()) {
+    answer = pipe.isSourceReleased();
   }
   return answer;
 }
 
 void WritableStreamInternalController::Pipe::State::tryErrorParent(
     jsg::Lock& js, jsg::JsValue reason) {
-  KJ_IF_SOME(ref, weakRef) {
-    ref->errorParent(js, reason);
+  KJ_IF_SOME(pipe, weakRef.tryGet()) {
+    pipe.errorParent(js, reason);
   }
 }
 
@@ -2120,15 +2140,15 @@ void WritableStreamInternalController::Pipe::errorParent(jsg::Lock& js, jsg::JsV
 }
 
 void WritableStreamInternalController::Pipe::State::tryFinishCloseParent(jsg::Lock& js) {
-  KJ_IF_SOME(ref, weakRef) {
-    ref->finishCloseParent(js);
+  KJ_IF_SOME(pipe, weakRef.tryGet()) {
+    pipe.finishCloseParent(js);
   }
 }
 
 void WritableStreamInternalController::Pipe::State::tryFinishErrorParent(
     jsg::Lock& js, jsg::JsValue reason) {
-  KJ_IF_SOME(ref, weakRef) {
-    ref->finishErrorParent(js, reason);
+  KJ_IF_SOME(pipe, weakRef.tryGet()) {
+    pipe.finishErrorParent(js, reason);
   }
 }
 
@@ -2141,8 +2161,8 @@ void WritableStreamInternalController::Pipe::finishErrorParent(jsg::Lock& js, js
 }
 
 void WritableStreamInternalController::Pipe::State::tryNoBytesError(jsg::Lock& js) {
-  KJ_IF_SOME(ref, weakRef) {
-    ref->noBytesError(js);
+  KJ_IF_SOME(pipe, weakRef.tryGet()) {
+    pipe.noBytesError(js);
   }
 }
 
@@ -2155,8 +2175,10 @@ void WritableStreamInternalController::Pipe::noBytesError(jsg::Lock& js) {
 
 jsg::Promise<void> WritableStreamInternalController::Pipe::State::pipeLoop(jsg::Lock& js) {
   kj::Maybe<jsg::Promise<void>> promise;
-  KJ_IF_SOME(ref, weakRef) {
-    promise = ref->pipeLoop(js);
+  KJ_IF_SOME(pipe, weakRef.tryGet()) {
+    // pipeLoop() may destroy the Pipe via reentrant user JS (see the State
+    // declaration); it must be the last use of `pipe`.
+    promise = pipe.pipeLoop(js);
   }
   KJ_IF_SOME(p, promise) {
     return kj::mv(p);
@@ -2334,8 +2356,10 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
 
 void WritableStreamInternalController::Pipe::State::releaseSource(
     jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError) {
-  KJ_IF_SOME(ref, weakRef) {
-    ref->releaseSource(js, kj::mv(maybeError));
+  KJ_IF_SOME(pipe, weakRef.tryGet()) {
+    // releaseSource() with a cancel reason may destroy the Pipe via reentrant user JS
+    // (see the State declaration); it must be the last use of `pipe`.
+    pipe.releaseSource(js, kj::mv(maybeError));
   }
 }
 
@@ -2366,13 +2390,25 @@ void WritableStreamInternalController::Pipe::releaseSource(
   // have been pipe-locked again by someone else.
   if (source == kj::none) return;
   source = kj::none;
-  readable->getController().releasePipeLock(js, maybeError);
+  // Hold a local ref to the readable across the call: when maybeError is given and the
+  // source is JS-backed, releasePipeLock() runs the source's cancel algorithm
+  // (arbitrary user JS) synchronously. That JS may re-enter the destination and tear
+  // this Pipe down — dropping the `readable` member — while the source's controller is
+  // still executing releasePipeLock().
+  auto readableRef = readable.addRef();
+  readableRef->getController().releasePipeLock(js, maybeError);
 }
 
 void WritableStreamInternalController::drain(jsg::Lock& js, jsg::JsValue reason) {
   doError(js, reason);
-  while (!queue.empty()) {
-    KJ_SWITCH_ONEOF(queue.front().event) {
+  // Move the queue into a local before iterating. releaseSource() below can run
+  // arbitrary user JS (a JS-backed source's cancel algorithm), which may re-enter this
+  // controller and mutate `queue` — and RingBuffer mutation invalidates references.
+  // With the queue moved out, reentrant code observes an empty queue and can neither
+  // invalidate our iteration nor double-process these events.
+  auto draining = kj::mv(queue);
+  while (!draining.empty()) {
+    KJ_SWITCH_ONEOF(draining.front().event) {
       KJ_CASE_ONEOF(writeRequest, Write) {
         auto promise = kj::mv(writeRequest.promise);
         maybeRejectPromise<void>(js, promise, reason);
@@ -2399,7 +2435,7 @@ void WritableStreamInternalController::drain(jsg::Lock& js, jsg::JsValue reason)
         maybeRejectPromise<void>(js, promise, reason);
       }
     }
-    queue.pop_front();
+    draining.pop_front();
   }
 }
 
