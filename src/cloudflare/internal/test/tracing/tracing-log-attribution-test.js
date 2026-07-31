@@ -81,3 +81,31 @@ export const diagnosticsChannelInsideEnterSpan = {
     });
   },
 };
+
+export const recordExceptionUsesReceiverSpan = {
+  async test(ctrl, env, ctx) {
+    const { withSpan } = env.tracingTest;
+    withSpan('record-exception-active', (active) => {
+      active.setAttribute('case', 'recordExceptionUsesReceiverSpan');
+      const detached = ctx.tracing.startSpan('record-exception-receiver');
+      detached.recordException(new Error('recorded-error'));
+      detached.recordException({ code: 42, message: 'recorded-code' });
+      detached.recordException('recorded-string');
+      detached.recordException({ message: 'recorded-message' });
+      detached.recordException({
+        code: 0,
+        name: 'FallbackError',
+        message: 'recorded-zero-code',
+      });
+      detached.end();
+    });
+  },
+};
+
+export const recordExceptionAfterEndIsIgnored = {
+  async test(ctrl, env, ctx) {
+    const span = ctx.tracing.startSpan('record-exception-ended');
+    span.end();
+    span.recordException('ignored-after-end');
+  },
+};

@@ -28,6 +28,15 @@ constexpr size_t MAX_USER_OPERATION_NAME_BYTES = 64;
 // The types allowed for tag and log values from JavaScript.
 using TagValue = kj::OneOf<bool, double, kj::String>;
 
+struct ExceptionData {
+  jsg::Optional<kj::OneOf<kj::String, double>> code;
+  jsg::Optional<kj::String> name;
+  jsg::Optional<kj::String> message;
+  jsg::Optional<kj::String> stack;
+
+  JSG_STRUCT(code, name, message, stack);
+};
+
 // Refcounted wrapper around workerd::SpanBuilder, exposing the JS Span surface: bytes-used
 // limit enforcement and JS-side TagValue forwarding. Span lifecycle (onOpen/onClose) is
 // delegated to SpanBuilder.
@@ -57,6 +66,8 @@ class SpanImpl final: public kj::Refcounted {
 
   // Sets a single attribute on the span. If value is kj::none, the attribute is not set.
   void setAttribute(kj::String key, kj::Maybe<TagValue> maybeValue);
+
+  void recordException(kj::String name, kj::String message, kj::Maybe<kj::String> stack);
 
  private:
   workerd::SpanBuilder builder;
@@ -90,6 +101,9 @@ class Span: public jsg::Object {
   // Sets each attribute in `attributes` as if by calling setAttribute().
   jsg::Ref<Span> setAttributes(jsg::Lock& js, jsg::Dict<jsg::Optional<TagValue>> attributes);
 
+  void recordException(
+      jsg::Lock& js, jsg::Value exception, const jsg::TypeHandler<ExceptionData>& exceptionHandler);
+
   // Ends the span and submits its content to the tracing system. Idempotent.
   void end();
 
@@ -98,6 +112,7 @@ class Span: public jsg::Object {
 
     JSG_METHOD(setAttribute);
     JSG_METHOD(setAttributes);
+    JSG_METHOD(recordException);
     JSG_METHOD(end);
 
     JSG_TS_OVERRIDE({
@@ -105,6 +120,10 @@ class Span: public jsg::Object {
       setAttributes(
         attributes: Record<string, boolean | number | string | undefined>
       ): this;
+      recordException(exception: string
+        | { code: string | number; name?: string; message?: string; stack?: string }
+        | { code?: string | number; name: string; message?: string; stack?: string }
+        | { code?: string | number; name?: string; message: string; stack?: string }): void;
     });
   }
 
@@ -212,4 +231,5 @@ kj::Own<jsg::modules::ModuleBundle> getInternalTracingModuleBundle(auto featureF
 
 }  // namespace workerd::api
 
-#define EW_TRACING_ISOLATE_TYPES api::Tracing, api::user_tracing::Span
+#define EW_TRACING_ISOLATE_TYPES                                                                   \
+  api::Tracing, api::user_tracing::Span, api::user_tracing::ExceptionData
