@@ -74,7 +74,7 @@ class IoContext;
 class IoContext_IncomingRequest final {
  public:
   IoContext_IncomingRequest(kj::Own<IoContext> context,
-      kj::Own<IoChannelFactory> ioChannelFactory,
+      kj::Rc<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::Own<BaseTracer>> workerTracer,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
@@ -176,7 +176,7 @@ class IoContext_IncomingRequest final {
   kj::Own<IoContext> context;
   kj::Own<RequestObserver> metrics;
   kj::Maybe<kj::Own<BaseTracer>> workerTracer;
-  kj::Own<IoChannelFactory> ioChannelFactory;
+  kj::Rc<IoChannelFactory> ioChannelFactory;
   kj::Maybe<kj::Own<AccessInfo>> accessInfo;
   kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory;
 

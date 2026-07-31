@@ -44,7 +44,7 @@ struct TestFixture {
     bool useRealTimers;
     // If set, used instead of the default DummyIoChannelFactory when creating incoming requests.
     // The factory receives the TimerChannel reference.
-    kj::Maybe<kj::Function<kj::Own<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
+    kj::Maybe<kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
     // If set, used as the actor's Loopback (only meaningful when actorId is set). Defaults to a
     // MockActorLoopback that throws on getWorker(). Tests that need to intercept hibernation
     // event dispatch can supply a custom Loopback here, then later retrieve it (or a fresh ref
@@ -266,7 +266,7 @@ struct TestFixture {
   kj::Own<kj::TaskSet::ErrorHandler> errorHandler;
   kj::TaskSet waitUntilTasks;
   kj::Own<kj::HttpHeaderTable> headerTable;
-  kj::Maybe<kj::Function<kj::Own<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
+  kj::Maybe<kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
   kj::Maybe<kj::Function<kj::Own<RequestObserver>()>> requestObserverFactory;
 
   // Construct a fresh Worker::Actor with the given id, using the saved Loopback.
@@ -322,10 +322,6 @@ struct TestFixture {
     kj::Own<ActorChannel> getColoLocalActor(
         uint channel, kj::StringPtr id, SpanParent parentSpan) override {
       KJ_FAIL_REQUIRE("no actor channels");
-    }
-
-    kj::Own<void> addRef() override {
-      KJ_FAIL_REQUIRE("not used");
     }
 
     TimerChannel& timer;
