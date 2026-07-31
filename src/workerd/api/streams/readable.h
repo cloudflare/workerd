@@ -16,7 +16,7 @@ class ReadableStreamBYOBReader;
 
 class ReaderImpl final {
 public:
-  ReaderImpl(ReadableStreamController::Reader& reader);
+  ReaderImpl(kj::Ptr<ReadableStreamController::Reader> reader);
 
   ~ReaderImpl() noexcept(false);
 
@@ -81,7 +81,7 @@ private:
       Released>;
 
   kj::Maybe<IoContext::Id> ioContext;
-  ReadableStreamController::Reader& reader;
+  kj::Ptr<ReadableStreamController::Reader> reader;
 
   ReaderState state;
 
@@ -252,6 +252,8 @@ class DrainingReader: public ReadableStreamController::Reader {
   bool isByteOriented() const override { return false; }
 
   void visitForGc(jsg::GcVisitor& visitor);
+
+  kj::Ptr<ReadableStreamController::Reader> getPtr() { return addPtrToThis(); }
 
  private:
   struct Initial {};

@@ -377,7 +377,7 @@ class ReadableStreamController {
   // implementations and is used solely as a means of attaching a Reader implementation to
   // the internal state of the controller. See the ReadableStream::*Reader classes for the
   // full Reader API.
-  class Reader {
+  class Reader: public virtual kj::PtrTarget {
    public:
     // True if the reader is a BYOB reader.
     virtual bool isByteOriented() const = 0;
@@ -561,12 +561,12 @@ class ReadableStreamController {
 
   // Locks this controller to the given reader, returning true if the lock was successful, or false
   // if the controller was already locked.
-  virtual bool lockReader(jsg::Lock& js, Reader& reader) = 0;
+  virtual bool lockReader(jsg::Lock& js, kj::Ptr<Reader> reader) = 0;
 
   // Removes the lock and releases the reader from this controller.
   // maybeJs will be nullptr when the isolate lock is not available.
   // If maybeJs is set, the reader's closed promise will be resolved.
-  virtual void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) = 0;
+  virtual void releaseReader(kj::Ptr<Reader> reader, kj::Maybe<jsg::Lock&> maybeJs) = 0;
 
   virtual kj::Maybe<PipeController&> tryPipeLock() = 0;
 
@@ -815,7 +815,7 @@ struct Locked {
 class ReaderLocked {
  public:
   static constexpr kj::StringPtr NAME KJ_UNUSED = "reader-locked"_kj;
-  ReaderLocked(ReadableStreamController::Reader& reader,
+  ReaderLocked(kj::Ptr<ReadableStreamController::Reader> reader,
       jsg::Promise<void>::Resolver closedFulfiller,
       kj::Maybe<IoOwn<kj::Canceler>> canceler = kj::none)
       : reader(reader),
@@ -825,7 +825,7 @@ class ReaderLocked {
   ReaderLocked(ReaderLocked&&) = default;
   ~ReaderLocked() noexcept(false) {
     KJ_IF_SOME(r, reader) {
-      r.detach();
+      r->detach();
     }
   }
   KJ_DISALLOW_COPY(ReaderLocked);
@@ -834,7 +834,7 @@ class ReaderLocked {
     visitor.visit(closedFulfiller);
   }
 
-  ReadableStreamController::Reader& getReader() {
+  kj::Ptr<ReadableStreamController::Reader> getReader() {
     return KJ_ASSERT_NONNULL(reader);
   }
 
@@ -858,7 +858,7 @@ class ReaderLocked {
   }
 
  private:
-  kj::Maybe<ReadableStreamController::Reader&> reader;
+  kj::Maybe<kj::Ptr<ReadableStreamController::Reader>> reader;
   kj::Maybe<jsg::Promise<void>::Resolver> closedFulfiller;
   kj::Maybe<IoOwn<kj::Canceler>> canceler;
 };
