@@ -31,8 +31,7 @@ namespace {
     }
   }
 
-  kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
-      kj::str(JSG_EXCEPTION(TypeError) ": ", message)));
+  kj::throwFatalException(JSG_KJ_EXCEPTION(FAILED, TypeError, message));
 }
 
 kj::Promise<void> pumpTo(
@@ -262,7 +261,8 @@ kj::Exception reasonToException(jsg::Lock& js,
   KJ_IF_SOME(reason, maybeReason) {
     return js.exceptionToKj(reason);
   } else {
-    // We get here if the caller is something like `r.cancel()` (or `r.cancel(undefined)`).
+    // Unfortunately this can't use the KJ_EXCEPTION macro since that will cause
+    // the defaultDescription to be serialized into the message
     return kj::Exception(
         kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::mv(defaultDescription));
   }
