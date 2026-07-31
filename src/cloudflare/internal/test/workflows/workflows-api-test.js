@@ -53,7 +53,31 @@ export const tests = {
     }
 
     {
-      for (const method of ['get', 'create', 'createBatch']) {
+      // Test delete hits the /delete endpoint without throwing.
+      const instance = await env.workflow.get('delete-http');
+      await instance.delete();
+    }
+
+    {
+      const result = await env.workflow.deleteBatch([
+        'delete-http-1',
+        'missing-delete',
+        'delete-http-1',
+      ]);
+      assert.deepStrictEqual(result, {
+        deleted: [{ id: 'delete-http-1' }, { id: 'delete-http-1' }],
+        errors: [
+          {
+            id: 'missing-delete',
+            code: 10400,
+            message: 'workflows.api.error.instance.not_found',
+          },
+        ],
+      });
+    }
+
+    {
+      for (const method of ['get', 'create', 'createBatch', 'deleteBatch']) {
         assert.strictEqual(typeof env.workflow[method], 'function');
       }
 
@@ -70,6 +94,7 @@ export const tests = {
         'resume',
         'terminate',
         'restart',
+        'delete',
         'status',
         'sendEvent',
       ]) {

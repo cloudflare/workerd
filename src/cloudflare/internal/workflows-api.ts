@@ -12,6 +12,11 @@ export class NonRetryableError extends Error {
 const workflowsBindingsRpc =
   !!Cloudflare.compatibilityFlags['workflows_bindings_rpc'];
 
+type WorkflowBatchDeleteResult = {
+  deleted: { id: string }[];
+  errors: { id: string; code: number; message: string }[];
+};
+
 interface Fetcher {
   fetch: typeof fetch;
   getInstance(id: string): Promise<{ id: string }>;
@@ -19,6 +24,9 @@ interface Fetcher {
   createBatch(
     options: WorkflowInstanceCreateOptions[]
   ): Promise<{ id: string }[]>;
+  deleteBatch(options: {
+    instances: string[];
+  }): Promise<WorkflowBatchDeleteResult>;
 
   pause(id: string): Promise<void>;
   resume(id: string): Promise<void>;
@@ -112,6 +120,13 @@ class InstanceImpl implements WorkflowInstance {
     });
   }
 
+  async delete(): Promise<void> {
+    // Fetcher.delete() is the legacy HTTP helper and shadows the binding RPC method.
+    await callFetcher(this.fetcher, '/delete', {
+      id: this.id,
+    });
+  }
+
   async status(): Promise<InstanceStatus> {
     if (workflowsBindingsRpc) {
       return await this.fetcher.status(this.id);
@@ -185,6 +200,17 @@ class WorkflowImpl {
         >(this.fetcher, '/createBatch', options);
 
     return results.map((result) => new InstanceImpl(result.id, this.fetcher));
+  }
+
+  async deleteBatch(instanceIds: string[]): Promise<WorkflowBatchDeleteResult> {
+    const options = { instances: instanceIds };
+    return workflowsBindingsRpc
+      ? await this.fetcher.deleteBatch(options)
+      : await callFetcher<WorkflowBatchDeleteResult>(
+          this.fetcher,
+          '/deleteBatch',
+          options
+        );
   }
 }
 

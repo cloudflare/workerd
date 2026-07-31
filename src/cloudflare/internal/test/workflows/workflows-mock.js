@@ -7,6 +7,7 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 const restartBodies = new Map();
 
 const THROW_ID = 'throw';
+const MISSING_DELETE_ID = 'missing-delete';
 
 function getInstance(id) {
   if (id === THROW_ID) {
@@ -21,6 +22,21 @@ function createInstance(options) {
 
 function createBatchInstances(options) {
   return options.map((val) => ({ id: val.id }));
+}
+
+function deleteBatchInstances(options) {
+  return {
+    deleted: options.instances
+      .filter((id) => id !== MISSING_DELETE_ID)
+      .map((id) => ({ id })),
+    errors: options.instances
+      .filter((id) => id === MISSING_DELETE_ID)
+      .map((id) => ({
+        id,
+        code: 10400,
+        message: 'workflows.api.error.instance.not_found',
+      })),
+  };
 }
 
 function instanceStatus(id, transport) {
@@ -46,9 +62,15 @@ async function handleHttp(request) {
           { result: createBatchInstances(data) },
           { status: 201 }
         );
+      case '/deleteBatch':
+        return Response.json(
+          { result: deleteBatchInstances(data) },
+          { status: 200 }
+        );
       case '/pause':
       case '/resume':
       case '/terminate':
+      case '/delete':
       case '/send-event':
         return Response.json({ result: null }, { status: 200 });
       case '/restart':
@@ -83,6 +105,10 @@ export default class WorkflowsMock extends WorkerEntrypoint {
 
   async createBatch(options) {
     return createBatchInstances(options);
+  }
+
+  async deleteBatch(options) {
+    return deleteBatchInstances(options);
   }
 
   async pause(_id) {}
