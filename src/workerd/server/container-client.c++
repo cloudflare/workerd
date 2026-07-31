@@ -1230,9 +1230,8 @@ class ContainerClient::DockerProcessHandle final: public rpc::Container::Process
     auto inspect = co_await containerClient->inspectExec(execId);
     JSG_REQUIRE(inspect.pid > 0, Error, "Exec process does not have a visible pid to signal.");
 
-    auto signal = kj::str("-", signalToString(context.getParams().getSigno()));
-    auto pid = kj::str(inspect.pid);
-    auto cmd = kj::arr(kj::str("kill"), kj::mv(signal), kj::mv(pid));
+    auto killCmd = kj::str("kill -", context.getParams().getSigno(), " ", inspect.pid);
+    auto cmd = kj::arr(kj::str("/bin/sh"), kj::str("-c"), kj::mv(killCmd));
     co_await containerClient->runSimpleExec(cmd.asPtr());
   }
 
