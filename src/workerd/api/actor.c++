@@ -43,7 +43,7 @@ IoChannelFactory::ActorChannel& LocalActorOutgoingFactory::getOrCreateActorChann
 }
 
 Fetcher::OutgoingFactory::Result LocalActorOutgoingFactory::newSingleUseClient(
-    kj::Maybe<kj::String> cfStr) {
+    kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) {
   auto& context = IoContext::current();
 
   kj::Maybe<TraceContextParent> spanParents;
@@ -51,12 +51,16 @@ Fetcher::OutgoingFactory::Result LocalActorOutgoingFactory::newSingleUseClient(
       [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
     tracing.setTag("objectId"_kjc, actorId.asPtr());
     spanParents = tracing.getSpanParents();
+    auto userSpanParent = tracing.getUserSpanParent();
+    KJ_IF_SOME(parent, makeUserSpanParent(tracing)) {
+      userSpanParent = kj::mv(parent);
+    }
 
     return getOrCreateActorChannel(context, tracing.getInternalSpanParent())
         .startRequest({.cfBlobJson = kj::mv(cfStr),
           .parentSpan = tracing.getInternalSpanParent(),
-          .userSpanParent = tracing.getUserSpanParent()});
-      },
+          .userSpanParent = kj::mv(userSpanParent)});
+  },
       {.inHouse = true,
         .wrapMetrics = true,
         .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
@@ -95,14 +99,14 @@ IoChannelFactory::ActorChannel& GlobalActorOutgoingFactory::getOrCreateActorChan
 }
 
 Fetcher::OutgoingFactory::Result GlobalActorOutgoingFactory::newSingleUseClient(
-    kj::Maybe<kj::String> cfStr) {
-  return newSingleUseClientWithActorRetryMetadata(kj::mv(cfStr), kj::none);
+    kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) {
+  return newSingleUseClientWithActorRetryMetadata(kj::mv(cfStr), kj::none, makeUserSpanParent);
 }
 
-Fetcher::OutgoingFactory::Result
-GlobalActorOutgoingFactory::newSingleUseClientWithActorRetryMetadata(
-    kj::Maybe<kj::String> cfStr,
-    kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) {
+Fetcher::OutgoingFactory::Result GlobalActorOutgoingFactory::
+    newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
+        kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata,
+        MakeUserSpanParent makeUserSpanParent) {
   auto& context = IoContext::current();
 
   kj::Maybe<TraceContextParent> spanParents;
@@ -110,13 +114,17 @@ GlobalActorOutgoingFactory::newSingleUseClientWithActorRetryMetadata(
       [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
     tracing.setTag("objectId"_kjc, id->toString());
     spanParents = tracing.getSpanParents();
+    auto userSpanParent = tracing.getUserSpanParent();
+    KJ_IF_SOME(parent, makeUserSpanParent(tracing)) {
+      userSpanParent = kj::mv(parent);
+    }
 
     return getOrCreateActorChannel(context, tracing.getInternalSpanParent())
         .startRequest({.cfBlobJson = kj::mv(cfStr),
           .parentSpan = tracing.getInternalSpanParent(),
-          .userSpanParent = tracing.getUserSpanParent(),
+          .userSpanParent = kj::mv(userSpanParent),
           .actorRetryRequestMetadata = kj::mv(actorRetryRequestMetadata)});
-      },
+  },
       {.inHouse = true,
         .wrapMetrics = true,
         .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
@@ -129,14 +137,14 @@ kj::Own<IoChannelFactory::SubrequestChannel> GlobalActorOutgoingFactory::getSubr
 }
 
 Fetcher::OutgoingFactory::Result ReplicaActorOutgoingFactory::newSingleUseClient(
-    kj::Maybe<kj::String> cfStr) {
-  return newSingleUseClientWithActorRetryMetadata(kj::mv(cfStr), kj::none);
+    kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) {
+  return newSingleUseClientWithActorRetryMetadata(kj::mv(cfStr), kj::none, makeUserSpanParent);
 }
 
-Fetcher::OutgoingFactory::Result
-ReplicaActorOutgoingFactory::newSingleUseClientWithActorRetryMetadata(
-    kj::Maybe<kj::String> cfStr,
-    kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) {
+Fetcher::OutgoingFactory::Result ReplicaActorOutgoingFactory::
+    newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
+        kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata,
+        MakeUserSpanParent makeUserSpanParent) {
   auto& context = IoContext::current();
 
   kj::Maybe<TraceContextParent> spanParents;
@@ -144,12 +152,16 @@ ReplicaActorOutgoingFactory::newSingleUseClientWithActorRetryMetadata(
       [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
     tracing.setTag("objectId"_kjc, actorId.asPtr());
     spanParents = tracing.getSpanParents();
+    auto userSpanParent = tracing.getUserSpanParent();
+    KJ_IF_SOME(parent, makeUserSpanParent(tracing)) {
+      userSpanParent = kj::mv(parent);
+    }
 
     // Unlike in `GlobalActorOutgoingFactory`, we do not create this lazily, since our channel was
     // already open prior to this DO starting up.
     return actorChannel->startRequest({.cfBlobJson = kj::mv(cfStr),
       .parentSpan = tracing.getInternalSpanParent(),
-      .userSpanParent = tracing.getUserSpanParent(),
+      .userSpanParent = kj::mv(userSpanParent),
       .actorRetryRequestMetadata = kj::mv(actorRetryRequestMetadata)});
   },
       {.inHouse = true,

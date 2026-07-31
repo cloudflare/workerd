@@ -301,20 +301,20 @@ JsRpcClientProvider::ClientForOneCall JsRpcPromise::getClientForOneCall(
 
       return {
         .client = js.withinHandleScope([&]() -> rpc::JsRpcTarget::Client {
-          auto value = jsg::JsValue(resolved.result.getHandle(js));
+        auto value = jsg::JsValue(resolved.result.getHandle(js));
 
-          KJ_IF_SOME(obj, value.tryCast<jsg::JsObject>()) {
-            KJ_IF_SOME(stub, obj.tryUnwrapAs<JsRpcStub>(js)) {
-              // Oh, the return value is actually a stub itself. Just use it.
-              return stub->getClient();
-            } else {
-              // Must be a plain object.
-              return makeJsRpcTargetForSingleLoopbackCall(js, obj);
-            }
+        KJ_IF_SOME(obj, value.tryCast<jsg::JsObject>()) {
+          KJ_IF_SOME(stub, obj.tryUnwrapAs<JsRpcStub>(js)) {
+            // Oh, the return value is actually a stub itself. Just use it.
+            return stub->getClient();
           } else {
-            JSG_FAIL_REQUIRE(TypeError, "Can't pipeline on RPC that did not return an object.");
+            // Must be a plain object.
+            return makeJsRpcTargetForSingleLoopbackCall(js, obj);
           }
-        }),
+        } else {
+          JSG_FAIL_REQUIRE(TypeError, "Can't pipeline on RPC that did not return an object.");
+        }
+      }),
         .callSpanParents = kj::mv(callSpanParents),
       };
     }
@@ -354,20 +354,11 @@ enum class JsRpcOperation {
   GET_PROPERTY,
 };
 
-// Creates the per-call client-side `jsRpcCall` span, nested under `callSpanParents` when
-// provided (set by Fetcher for root sessions and by JsRpcStub for follow-up calls on returned
-// stubs/promises) or under the current async context's spans otherwise.
-static TraceContext makeJsRpcCallSpan(IoContext& ioContext,
+static void setJsRpcCallSpanTags(TraceContext& span,
     JsRpcClientProvider& parent,
     kj::Maybe<const kj::String&> name,
     kj::ArrayPtr<const kj::StringPtr> path,
-    kj::Maybe<TraceContextParent> callSpanParents,
     JsRpcOperation operation) {
-  TraceContextParent parents = kj::mv(callSpanParents).orDefault([&] {
-    return TraceContextParent(ioContext.getCurrentTraceSpan(), ioContext.getCurrentUserTraceSpan());
-  });
-  TraceContext span = parents.newChild("jsRpcCall"_kjc);
-
   // Guard tag population on observation: `setTag` no-ops when unobserved, but its arguments
   // (notably the `kj::strArray` join below) are evaluated eagerly, so skip them entirely on
   // the untraced hot path.
@@ -391,6 +382,22 @@ static TraceContext makeJsRpcCallSpan(IoContext& ioContext,
       span.setTag("jsrpc.method"_kjc, kj::strArray(fullPath, "."));
     }
   }
+}
+
+// Creates the per-call client-side `jsRpcCall` span, nested under `callSpanParents` when
+// provided (set by Fetcher for root sessions and by JsRpcStub for follow-up calls on returned
+// stubs/promises) or under the current async context's spans otherwise.
+static TraceContext makeJsRpcCallSpan(IoContext& ioContext,
+    JsRpcClientProvider& parent,
+    kj::Maybe<const kj::String&> name,
+    kj::ArrayPtr<const kj::StringPtr> path,
+    kj::Maybe<TraceContextParent> callSpanParents,
+    JsRpcOperation operation) {
+  TraceContextParent parents = kj::mv(callSpanParents).orDefault([&] {
+    return TraceContextParent(ioContext.getCurrentTraceSpan(), ioContext.getCurrentUserTraceSpan());
+  });
+  TraceContext span = parents.newChild("jsRpcCall"_kjc);
+  setJsRpcCallSpanTags(span, parent, name, path, operation);
   return span;
 }
 
@@ -428,9 +435,15 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
 
       // Per-call dispatch span, captured into the awaitIo callback below so it stays
       // open until the response settles.
-      TraceContext jsRpcCallSpan =
-          makeJsRpcCallSpan(ioContext, parent, name, path.asPtr(), kj::mv(oneCall.callSpanParents),
-              maybeArgs != kj::none ? JsRpcOperation::CALL : JsRpcOperation::GET_PROPERTY);
+      auto operation = maybeArgs != kj::none ? JsRpcOperation::CALL : JsRpcOperation::GET_PROPERTY;
+      TraceContext jsRpcCallSpan;
+      KJ_IF_SOME(span, oneCall.callSpan) {
+        jsRpcCallSpan = kj::mv(span);
+        setJsRpcCallSpanTags(jsRpcCallSpan, parent, name, path.asPtr(), operation);
+      } else {
+        jsRpcCallSpan = makeJsRpcCallSpan(
+            ioContext, parent, name, path.asPtr(), kj::mv(oneCall.callSpanParents), operation);
+      }
 
       KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
         // Replace the client with a promise client that will delay the call until the output gate
@@ -439,6 +452,13 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       }
 
       auto builder = client.callRequest();
+
+      // Tell the callee which caller span corresponds to this dispatch. A session carries many
+      // calls (e.g. calls pipelined on a returned stub), so the context propagated when the session
+      // opened identifies only the first call. Yields kj::none when untraced.
+      KJ_IF_SOME(callerSpanContext, jsRpcCallSpan.getUserSpanParent().toSpanContext()) {
+        callerSpanContext.toCapnp(builder.initCallerSpanContext());
+      }
 
       // This code here is slightly overcomplicated in order to avoid pushing anything to the
       // kj::Vector in the common case that the parent path is empty. I'm probably trying too hard
@@ -1225,6 +1245,17 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
     jsRpcCallSpan.setTag("jsrpc.target_kind"_kjc, getTargetKind());
     jsRpcCallSpan.setTag("jsrpc.operation"_kjc,
         params.getOperation().isGetProperty() ? "getProperty"_kjc : "call"_kjc);
+
+    // Link this dispatch to the caller's per-call span. This span stays a child of its own
+    // invocation root, so that a consumer reading this invocation's tail stream can always resolve
+    // the parent. The link is what attributes the work to an individual call: one session (and so
+    // one invocation) carries many calls, e.g. calls pipelined on a returned stub.
+    if (jsRpcCallSpan.isObserved() && params.hasCallerSpanContext()) {
+      auto callerContext = tracing::SpanContext::fromCapnp(params.getCallerSpanContext());
+      KJ_IF_SOME(callerSpanId, callerContext.getSpanId()) {
+        jsRpcCallSpan.setTag("jsrpc.caller_span_id"_kjc, callerSpanId.toGoString());
+      }
+    }
 
     maybeSetJsRpcInfo(ctx, methodNameForTrace);
 

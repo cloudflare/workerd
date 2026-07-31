@@ -199,6 +199,18 @@ wd_test(
     tags = ["no-coverage"],
 )
 
+# Test: a callee invocation is parented to the first caller jsRpcCall, and each dispatch links to
+# its corresponding caller span.
+wd_test(
+    src = "jsrpc-pipelined-trace-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "jsrpc-pipelined-trace-test.js",
+        "jsrpc-pipelined-trace-test-tail.js",
+    ],
+    tags = ["no-coverage"],
+)
+
 # Regression test: jsrpc onset.info emitted into a streaming tail worker must remain
 # serializable when forwarded over service-binding RPC, just like fetch onset.info.
 wd_test(

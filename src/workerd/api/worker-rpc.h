@@ -171,6 +171,10 @@ class JsRpcClientProvider: public jsg::Object {
     // jsRpcSession as the parent; follow-up calls on returned stubs/promises use the call that
     // produced them.
     kj::Maybe<TraceContextParent> callSpanParents;
+
+    // The per-call span may be opened while resolving a root Fetcher so its user span can be
+    // propagated as the callee invocation's parent before the session client is constructed.
+    kj::Maybe<TraceContext> callSpan;
   };
 
   // Get a capnp client that can be used to dispatch one call.

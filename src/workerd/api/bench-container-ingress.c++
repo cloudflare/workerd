@@ -228,12 +228,14 @@ class DirectWorkerInterface final: public WorkerInterface {
 class DirectOutgoingFactory final: public Fetcher::OutgoingFactory {
  public:
   explicit DirectOutgoingFactory(kj::HttpClient& client): client(client) {}
-  Result newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
-    auto client = IoContext::current().getSubrequestNoChecks(
-        [this](auto& tracing, auto& channelFactory) {
+  Result newSingleUseClient(
+      kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override {
+    auto result = IoContext::current().getSubrequestNoChecks(
+        [this, &makeUserSpanParent](auto& tracing, auto& channelFactory) {
+      makeUserSpanParent(tracing);
       return kj::heap<DirectWorkerInterface>(client);
     }, {.inHouse = false, .wrapMetrics = false});
-    return {.client = kj::mv(client), .spanParents = kj::none};
+    return {.client = kj::mv(result), .spanParents = kj::none};
   }
 
  private:

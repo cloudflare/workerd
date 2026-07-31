@@ -2127,10 +2127,14 @@ JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(
   auto& ioContext = IoContext::current();
 
   // The "jsRpcSession" trace context is attached to the customEvent task below so it covers the
-  // whole session. The per-call jsRpcCall span nests under this session in both the internal and
-  // user trace trees.
-  auto clientWithTracing = getClientWithTracing(
-      ioContext, kj::none, "jsRpcSession"_kjc, kj::none /* actorRetryRequestMetadata */);
+  // whole session. The first jsRpcCall span is opened before the session client so its user span
+  // can also become the callee invocation's parent.
+  kj::Maybe<TraceContext> callSpan;
+  auto clientWithTracing = buildClient(ioContext, kj::none, "jsRpcSession"_kjc,
+      [&](TraceContext& sessionSpan) -> kj::Maybe<SpanParent> {
+    callSpan = sessionSpan.getSpanParents().newChild("jsRpcCall"_kjc);
+    return KJ_ASSERT_NONNULL(callSpan).getUserSpanParent();
+  });
   kj::Maybe<TraceContextParent> callSpanParents = clientWithTracing.traceContext.map(
       [](TraceContext& tc) { return tc.getSpanParents(); });
   auto worker = kj::mv(clientWithTracing.client);
@@ -2149,7 +2153,9 @@ JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(
 
   // (Don't extend `path` because we're the root.)
 
-  return {.client = kj::mv(result), .callSpanParents = kj::mv(callSpanParents)};
+  return {.client = kj::mv(result),
+    .callSpanParents = kj::mv(callSpanParents),
+    .callSpan = kj::mv(callSpan)};
 }
 
 void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
@@ -2511,9 +2517,14 @@ Fetcher::ClientWithTracing Fetcher::getClientWithTracing(IoContext& ioContext,
         "actor retry metadata supplied to an unsupported Fetcher");
     KJ_REQUIRE(outgoingFactory->supportsActorRetryMetadata(),
         "actor retry metadata supplied to an unsupported Fetcher");
-    auto result = outgoingFactory->newSingleUseClientWithActorRetryMetadata(
-        kj::mv(cfStr), kj::mv(metadata));
-    return wrapWithInnerSpan(kj::mv(result), kj::mv(operationName));
+    kj::Maybe<TraceContext> traceContext;
+    auto result = outgoingFactory->newSingleUseClientWithActorRetryMetadata(kj::mv(cfStr),
+        kj::mv(metadata), [&](TraceContext& outerTraceContext) -> kj::Maybe<SpanParent> {
+      if (!outerTraceContext.isObserved()) return kj::none;
+      traceContext = outerTraceContext.getSpanParents().newChild(operationName.clone());
+      return KJ_ASSERT_NONNULL(traceContext).getUserSpanParent();
+    });
+    return ClientWithTracing{kj::mv(result.client), kj::mv(traceContext)};
   }
 
   return buildClient(ioContext, kj::mv(cfStr), kj::mv(operationName));
@@ -2559,11 +2570,13 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
       // The factory creates its own outer dispatch span (e.g. durable_object_subrequest)
       // and exposes it as `result.spanParents`. Nest our inner span under it so the trace
       // tree shows `outerSpan -> operationName`.
-      auto result = outgoingFactory->newSingleUseClient(kj::mv(cfStr));
+      auto result = outgoingFactory->newSingleUseClient(kj::mv(cfStr),
+          [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
       return wrapWithInnerSpan(kj::mv(result), kj::mv(operationName));
     }
     KJ_CASE_ONEOF(outgoingFactory, kj::Own<CrossContextOutgoingFactory>) {
-      auto result = outgoingFactory->newSingleUseClient(ioContext, kj::mv(cfStr));
+      auto result = outgoingFactory->newSingleUseClient(ioContext, kj::mv(cfStr),
+          [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
       return wrapWithInnerSpan(kj::mv(result), kj::mv(operationName));
     }
   }
@@ -2575,6 +2588,65 @@ bool Fetcher::supportsActorRetryMetadata() {
     return outgoingFactory->supportsActorRetryMetadata();
   }
   return false;
+}
+
+Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
+    kj::Maybe<kj::String> cfStr,
+    kj::ConstString operationName,
+    MakeUserSpanParent makeUserSpanParent) {
+  KJ_SWITCH_ONEOF(channelOrClientFactory) {
+    KJ_CASE_ONEOF(channel, uint) {
+      auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
+      auto userSpanParent = makeUserSpanParent(traceContext);
+      kj::Own<WorkerInterface> client;
+      KJ_IF_SOME(parent, userSpanParent) {
+        client = ioContext.getSubrequestChannel(
+            channel, isInHouse, kj::mv(cfStr), traceContext, kj::mv(parent));
+      } else {
+        client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext);
+      }
+      return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
+    }
+    KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
+      auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
+      auto propagatedUserSpanParent = traceContext.getUserSpanParent();
+      KJ_IF_SOME(parent, makeUserSpanParent(traceContext)) {
+        propagatedUserSpanParent = kj::mv(parent);
+      }
+      auto client = ioContext.getSubrequest(
+          [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
+        return channel->startRequest({.cfBlobJson = kj::mv(cfStr),
+            .parentSpan = tracing.getInternalSpanParent(),
+            .userSpanParent = kj::mv(propagatedUserSpanParent)});
+      }, {
+        .inHouse = isInHouse,
+        .wrapMetrics = !isInHouse,
+        .existingTraceContext = traceContext,
+      });
+      return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
+    }
+    KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
+      kj::Maybe<TraceContext> traceContext;
+      auto result = outgoingFactory->newSingleUseClient(kj::mv(cfStr),
+          [&](TraceContext& outerTraceContext) -> kj::Maybe<SpanParent> {
+        if (!outerTraceContext.isObserved()) return kj::none;
+        traceContext = outerTraceContext.getSpanParents().newChild(operationName.clone());
+        return makeUserSpanParent(KJ_ASSERT_NONNULL(traceContext));
+      });
+      return ClientWithTracing{kj::mv(result.client), kj::mv(traceContext)};
+    }
+    KJ_CASE_ONEOF(outgoingFactory, kj::Own<CrossContextOutgoingFactory>) {
+      kj::Maybe<TraceContext> traceContext;
+      auto result = outgoingFactory->newSingleUseClient(ioContext, kj::mv(cfStr),
+          [&](TraceContext& outerTraceContext) -> kj::Maybe<SpanParent> {
+        if (!outerTraceContext.isObserved()) return kj::none;
+        traceContext = outerTraceContext.getSpanParents().newChild(operationName.clone());
+        return makeUserSpanParent(KJ_ASSERT_NONNULL(traceContext));
+      });
+      return ClientWithTracing{kj::mv(result.client), kj::mv(traceContext)};
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 kj::Own<IoChannelFactory::SubrequestChannel> Fetcher::getSubrequestChannel(IoContext& ioContext) {

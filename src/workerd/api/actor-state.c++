@@ -986,7 +986,8 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
         name(kj::mv(name)),
         getStartInfo(kj::mv(getStartInfo)) {}
 
-  Result newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
+  Result newSingleUseClient(
+      kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override {
     auto& context = IoContext::current();
 
     kj::Maybe<TraceContextParent> spanParents;
@@ -994,10 +995,14 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
         [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
       tracing.setTag("facet_name"_kjc, name.asPtr());
       spanParents = tracing.getSpanParents();
+      auto userSpanParent = tracing.getUserSpanParent();
+      KJ_IF_SOME(parent, makeUserSpanParent(tracing)) {
+        userSpanParent = kj::mv(parent);
+      }
 
       return getOrCreateActorChannel().startRequest({.cfBlobJson = kj::mv(cfStr),
         .parentSpan = tracing.getInternalSpanParent(),
-        .userSpanParent = tracing.getUserSpanParent()});
+        .userSpanParent = kj::mv(userSpanParent)});
     },
         {.inHouse = true,
           .wrapMetrics = true,

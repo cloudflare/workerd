@@ -908,7 +908,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
     // The tracing context to use for the subrequest if tracing is enabled.
     kj::Maybe<TraceContext&> existingTraceContext;
-
   };
 
   // Wraps a WorkerInterface factory with subrequest accounting: tracing, optional metrics wrapping,
@@ -972,6 +971,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // `traceContext` is the trace context to use for the subrequest, if tracing is turned on.
   kj::Own<WorkerInterface> getSubrequestChannel(
       uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext);
+
+  kj::Own<WorkerInterface> getSubrequestChannel(uint channel,
+      bool isInHouse,
+      kj::Maybe<kj::String> cfBlobJson,
+      TraceContext& traceContext,
+      SpanParent userSpanParent);
 
   // Like getSubrequestChannel() but doesn't enforce limits. Use for trusted paths only.
   kj::Own<WorkerInterface> getSubrequestChannelNoChecks(uint channel,
@@ -1199,7 +1204,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
       TraceContext& tracing,
-      IoChannelFactory& channelFactory);
+      IoChannelFactory& channelFactory,
+      kj::Maybe<SpanParent> userSpanParent = kj::none);
 
   friend class IoContext_IncomingRequest;
   template <typename T>
