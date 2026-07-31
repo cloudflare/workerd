@@ -151,6 +151,22 @@ class Socket: public jsg::Object {
   void handleReadableEof(jsg::Lock& js, jsg::Promise<void> onEof);
   // Sets up relevant callbacks to handle the case when the readable stream reaches EOF.
 
+  // Resolves the `closed` promise when `disconnected` (from watchForDisconnect()) reports a
+  // disconnect. This attaches jsg `.then()` continuations, so it must run in a JS-executing context:
+  // directly in setupSocket(), or deferred to a microtask in deserialize() (which runs under a scope
+  // that forbids JS execution).
+  void wireClosedToDisconnect(jsg::Lock& js, kj::Promise<bool> disconnected);
+
+  // Observes the `opened` promise and records its settled state in `openedState`. Must be called
+  // after allocation (it uses JSG_THIS, which requires an initialized refcount). This lets
+  // serialize() reject transfers of sockets that haven't finished connecting.
+  void trackOpenedState(jsg::Lock& js);
+
+  // RPC serialization support
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<Socket> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
   JSG_RESOURCE_TYPE(Socket) {
     JSG_READONLY_PROTOTYPE_PROPERTY(readable, getReadable);
     JSG_READONLY_PROTOTYPE_PROPERTY(writable, getWritable);
@@ -165,6 +181,8 @@ class Socket: public jsg::Object {
       get secureTransport(): 'on' | 'off' | 'starttls';
     });
   }
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::SOCKET);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackFieldWithSize("connectionData", sizeof(IoOwn<ConnectionData>));
@@ -221,6 +239,12 @@ class Socket: public jsg::Object {
   jsg::MemoizedIdentity<jsg::Promise<SocketInfo>> openedPromise;
   // Used to keep track of a pending `close` operation on the socket.
   bool isClosing = false;
+
+  // Tracks the settled state of `openedPromise`. A Socket can only be serialized for RPC transfer
+  // once its connection has been established (OPENED); serializing while still PENDING or after a
+  // FAILED connection throws, since serialize() is synchronous and cannot await `opened`.
+  enum class OpenedState : uint8_t { PENDING, OPENED, FAILED };
+  OpenedState openedState = OpenedState::PENDING;
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
   jsg::Promise<void> maybeCloseWriteSide(jsg::Lock& js);

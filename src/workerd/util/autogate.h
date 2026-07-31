@@ -99,7 +99,11 @@ namespace workerd::util {
      implementation is retained for rollback.*/                                                    \
   V(NODEJS_EXCEPTIONS_RUST)                                                                        \
   /* Reuse HTTP/1.1 tunnels opened by Container.getTcpPort().fetch(). */                           \
-  V(CONTAINER_TUNNEL_REUSE)
+  V(CONTAINER_TUNNEL_REUSE)                                                                        \
+  /* Allow a Socket to be transferred over JS RPC. When disabled, serializing a Socket fails as    \
+     though the type were not serializable at all, and an incoming transferred Socket is           \
+     rejected. */                                                                                  \
+  V(SOCKET_RPC_TRANSFER)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

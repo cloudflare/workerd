@@ -223,6 +223,12 @@ class JsReadableStream final {
   // Convert this into a null / empty stream.
   void nullify();
 
+  // Serialize the stream for RPC transfer, exactly like ReadableStream::serialize(): the stream is
+  // pumped into a pushed capnp ByteStream and an external table entry describing it is written to
+  // the serializer. Used by consumers that transfer a stream over RPC (e.g. Socket). Precondition:
+  // !isNull().
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+
   void visitForGc(jsg::GcVisitor& visitor);
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 

@@ -145,6 +145,12 @@ class JsWritableStream final {
   // writes will need a backend-neutral mechanism (or per-backend test variants).
   jsg::Ref<WritableStream> getUnderlyingForTest(jsg::Lock& js);
 
+  // Serialize the stream for RPC transfer, exactly like WritableStream::serialize(): the peer's
+  // ByteStream is adopted as the stream's sink and an external table entry describing it is written
+  // to the serializer. Used by consumers that transfer a stream over RPC (e.g. Socket).
+  // Precondition: !isNull().
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+
   void visitForGc(jsg::GcVisitor& visitor);
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 

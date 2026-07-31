@@ -1045,6 +1045,18 @@ void JsReadableStream::nullify() {
   impl = kj::none;
 }
 
+void JsReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  auto& i = KJ_ASSERT_NONNULL(impl, "serialize() called on a null JsReadableStream");
+  KJ_SWITCH_ONEOF(i.stream) {
+    KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
+      stream->serialize(js, serializer);
+    }
+    KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+      KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+    }
+  }
+}
+
 void JsReadableStream::visitForGc(jsg::GcVisitor& visitor) {
   KJ_IF_SOME(i, impl) {
     KJ_SWITCH_ONEOF(i.stream) {
