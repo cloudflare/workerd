@@ -36,6 +36,7 @@ export default {
   async scheduled(ctrl, env, ctx) {
     scheduledLastCtrl = ctrl;
     if (ctrl.cron === '* * * * 30') ctrl.noRetry();
+    if (ctrl.cron === '* * * * *') throw new Error('boom');
   },
 
   async test(ctrl, env, ctx) {
@@ -102,6 +103,15 @@ export default {
       assert(result.noRetry);
       assert.strictEqual(scheduledLastCtrl.scheduledTime, 1000);
       assert.strictEqual(scheduledLastCtrl.cron, '* * * * 30');
+    }
+
+    // Call `scheduled()` and confirm that exception is thrown
+    {
+      const result = await env.SERVICE.scheduled({
+        scheduledTime: 1000,
+        cron: '* * * * *',
+      });
+      assert.strictEqual(result.outcome, 'exception');
     }
   },
 };

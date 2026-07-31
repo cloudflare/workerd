@@ -5,14 +5,21 @@
 #pragma once
 // Container management API for Durable Object-attached containers.
 //
-#include <workerd/api/streams/readable.h>
-#include <workerd/api/streams/writable.h>
+#include <workerd/api/basics.h>
+#include <workerd/api/js-readable-stream.h>
+#include <workerd/api/js-writable-stream.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/io-own.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/canceler.h>
+#include <workerd/util/strong-bool.h>
 
 namespace workerd::api {
+
+// Whether an exec'd process was started with a PTY allocated. Using a strong bool avoids
+// positional-bool mis-wiring at the ExecProcess constructor and exec() call site.
+WD_STRONG_BOOL(IsPty);
 
 class Fetcher;
 class ExecOutput: public jsg::Object {
@@ -48,17 +55,31 @@ class ExecOutput: public jsg::Object {
   int exitCode;
 };
 
+struct ExecPtyOptions {
+  // Initial column count for the PTY. If omitted, the runtime default (80) is used.
+  jsg::Optional<uint16_t> cols;
+  // Initial row count for the PTY. If omitted, the runtime default (24) is used.
+  jsg::Optional<uint16_t> rows;
+
+  JSG_STRUCT(cols, rows);
+  JSG_STRUCT_TS_OVERRIDE(ContainerExecPtyOptions);
+};
+
 struct ExecOptions {
   // $ prefix avoids collision with stdin/stdout/stderr macros from <stdio.h>;
   // JSG_STRUCT strips the $ when exposing to JS.
-  jsg::Optional<kj::OneOf<jsg::Ref<ReadableStream>, kj::String>> $stdin;
+  jsg::Optional<kj::OneOf<JsReadableStream, kj::String>> $stdin;
   jsg::Optional<kj::String> $stdout;
   jsg::Optional<kj::String> $stderr;
   jsg::Optional<kj::String> cwd;
   jsg::Optional<jsg::Dict<kj::String>> env;
   jsg::Optional<kj::String> user;
+  jsg::Optional<jsg::Ref<AbortSignal>> signal;
+  // Allocates a PTY for the process. `true` (or an object) enables a PTY with default dimensions;
+  // an object may additionally specify initial `cols`/`rows`. Absent or `false` means no PTY.
+  jsg::Optional<kj::OneOf<bool, ExecPtyOptions>> pty;
 
-  JSG_STRUCT($stdin, $stdout, $stderr, cwd, env, user);
+  JSG_STRUCT($stdin, $stdout, $stderr, cwd, env, user, signal, pty);
   JSG_STRUCT_TS_OVERRIDE(ContainerExecOptions {
     stdin?: ReadableStream | "pipe";
     stdout?: "pipe" | "ignore";
@@ -66,6 +87,8 @@ struct ExecOptions {
     cwd?: string;
     env?: Record<string, string>;
     user?: string;
+    signal?: AbortSignal;
+    pty?: boolean | ContainerExecPtyOptions;
     $stdin: never;
     $stdout: never;
     $stderr: never;
@@ -74,47 +97,68 @@ struct ExecOptions {
 
 class ExecProcess: public jsg::Object {
  public:
-  ExecProcess(jsg::Optional<jsg::Ref<WritableStream>> stdinStream,
-      jsg::Optional<jsg::Ref<ReadableStream>> stdoutStream,
-      jsg::Optional<jsg::Ref<ReadableStream>> stderrStream,
+  ExecProcess(jsg::Lock& js,
+      IoContext& ioContext,
+      jsg::Optional<JsWritableStream> stdinStream,
+      jsg::Optional<JsReadableStream> stdoutStream,
+      jsg::Optional<JsReadableStream> stderrStream,
       int pid,
-      rpc::Container::ProcessHandle::Client handle);
+      rpc::Container::ProcessHandle::Client handle,
+      IsPty isPty,
+      kj::Maybe<jsg::Ref<AbortSignal>> abortSignal = kj::none);
 
-  jsg::Optional<jsg::Ref<WritableStream>> getStdin();
-  jsg::Optional<jsg::Ref<ReadableStream>> getStdout();
-  jsg::Optional<jsg::Ref<ReadableStream>> getStderr();
+  jsg::Optional<JsWritableStream> getStdin(jsg::Lock& js);
+  jsg::Optional<JsReadableStream> getStdout(jsg::Lock& js);
+  jsg::Optional<JsReadableStream> getStderr(jsg::Lock& js);
   int getPid() const {
     return pid;
+  }
+  // Whether this process was started with a PTY. resize() is only valid when this is true.
+  bool getIsPty() const {
+    return isPty;
   }
   jsg::MemoizedIdentity<jsg::Promise<int>>& getExitCode(jsg::Lock& js);
 
   jsg::Promise<jsg::Ref<ExecOutput>> output(jsg::Lock& js);
   void kill(jsg::Lock& js, jsg::Optional<int> signal);
+  // Resizes the PTY window to the given dimensions. Throws unless the process was started with a
+  // PTY. Both dimensions must be in the range [1, 65535].
+  void resize(jsg::Lock& js, int cols, int rows);
 
   JSG_RESOURCE_TYPE(ExecProcess) {
     JSG_READONLY_PROTOTYPE_PROPERTY(stdin, getStdin);
     JSG_READONLY_PROTOTYPE_PROPERTY(stdout, getStdout);
     JSG_READONLY_PROTOTYPE_PROPERTY(stderr, getStderr);
     JSG_READONLY_PROTOTYPE_PROPERTY(pid, getPid);
+    JSG_READONLY_PROTOTYPE_PROPERTY(isPty, getIsPty);
     JSG_READONLY_PROTOTYPE_PROPERTY(exitCode, getExitCode);
     JSG_METHOD(output);
     JSG_METHOD(kill);
+    JSG_METHOD(resize);
 
     JSG_TS_OVERRIDE({
       readonly stdin: WritableStream | null;
       readonly stdout: ReadableStream | null;
       readonly stderr: ReadableStream | null;
       readonly pid: number;
+      readonly isPty: boolean;
       readonly exitCode: Promise<number>;
       output(): Promise<ExecOutput>;
       kill(signal?: number): void;
+      resize(cols: number, rows: number): void;
     });
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("stdin", stdinStream);
-    tracker.trackField("stdout", stdoutStream);
-    tracker.trackField("stderr", stderrStream);
+    KJ_IF_SOME(s, stdinStream) {
+      s.visitForMemoryInfo(tracker);
+    }
+    KJ_IF_SOME(s, stdoutStream) {
+      s.visitForMemoryInfo(tracker);
+    }
+    KJ_IF_SOME(s, stderrStream) {
+      s.visitForMemoryInfo(tracker);
+    }
     tracker.trackField("exitCodePromise", exitCodePromise);
     tracker.trackField("exitCodePromiseCopy", exitCodePromiseCopy);
   }
@@ -123,15 +167,23 @@ class ExecProcess: public jsg::Object {
   void ensureExitCodePromise(jsg::Lock& js);
   jsg::Promise<int> getExitCodeForOutput(jsg::Lock& js);
 
-  jsg::Optional<jsg::Ref<WritableStream>> stdinStream;
-  jsg::Optional<jsg::Ref<ReadableStream>> stdoutStream;
-  jsg::Optional<jsg::Ref<ReadableStream>> stderrStream;
+  // Sends a kill signal to the underlying process. Used both by the public kill() method and by
+  // the AbortSignal handler.
+  void sendKill(int signo);
+
+  jsg::Optional<JsWritableStream> stdinStream;
+  jsg::Optional<JsReadableStream> stdoutStream;
+  jsg::Optional<JsReadableStream> stderrStream;
   int pid;
+  bool isPty;
   IoOwn<rpc::Container::ProcessHandle::Client> handle;
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<int>>> exitCodePromise;
   kj::Maybe<jsg::Promise<void>> exitCodePromiseCopy;
   kj::Maybe<int> resolvedExitCode;
   bool outputCalled = false;
+
+  kj::Maybe<IoOwn<RefcountedCanceler>> abortCanceler;
+  kj::Maybe<RefcountedCanceler::Listener> abortListener;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(stdinStream, stdoutStream, stderrStream, exitCodePromise, exitCodePromiseCopy);
@@ -299,6 +351,14 @@ class Container: public jsg::Object {
   class TcpPortWorkerInterface;
   class TcpPortOutgoingFactory;
 
+  // Per-TCP-port state for the tunnel-reuse optimization. Populated lazily by getTcpPort() when
+  // the container-tunnel-reuse autogate is enabled. Held via IoOwn because it holds KJ I/O objects
+  // (Cap'n Proto capabilities, kj streams) that must remain tied to the Durable Object's IoContext.
+  class TcpPortState;
+  kj::Maybe<IoOwn<kj::HashMap<int, kj::Rc<TcpPortState>>>> tcpPortStates;
+
+  void invalidateTcpPortStates();
+
   // These helpers are static since they will leave the IoContext on the first co_await, so we
   // don't want them trying to access `rpcClient` via the `IoOwn`.
   static kj::Promise<void> interceptOutboundHttpImpl(rpc::Container::Client rpcClient,
@@ -315,7 +375,7 @@ class Container: public jsg::Object {
 };
 
 #define EW_CONTAINER_ISOLATE_TYPES                                                                 \
-  api::ExecOutput, api::ExecOptions, api::ExecProcess, api::Container,                             \
+  api::ExecOutput, api::ExecOptions, api::ExecPtyOptions, api::ExecProcess, api::Container,        \
       api::Container::DirectorySnapshot, api::Container::DirectorySnapshotOptions,                 \
       api::Container::DirectorySnapshotRestoreParams, api::Container::Snapshot,                    \
       api::Container::SnapshotOptions, api::Container::StartupOptions, api::Container::Info

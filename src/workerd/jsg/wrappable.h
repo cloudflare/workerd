@@ -155,7 +155,10 @@ class Wrappable: public kj::Refcounted {
     INTERNAL_FIELD_COUNT,
   };
 
-  static constexpr v8::CppHeapPointerTag WRAPPABLE_TAG = v8::CppHeapPointerTag::kDefaultTag;
+  // kFirstObjectWrappableTag is the first embedder-assignable wrappable tag. It is valid in both
+  // sandbox configurations (workerd uses a single tag consistently for all of its objects).
+  static constexpr v8::CppHeapPointerTag WRAPPABLE_TAG =
+      v8::CppHeapPointerTag::kFirstObjectWrappableTag;
 
   // The value pointed to by the internal field field `WRAPPABLE_TAG_FIELD_INDEX`.
   //

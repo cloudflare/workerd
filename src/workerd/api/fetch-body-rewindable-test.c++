@@ -100,9 +100,9 @@ KJ_TEST("fetch reports each outgoing body's rewindability per-call without stale
           },
         };
       )SCRIPT"_kj,
-    .ioChannelFactory = kj::Function<kj::Own<IoChannelFactory>(TimerChannel&)>(
-        [&](TimerChannel& timer) -> kj::Own<IoChannelFactory> {
-    return kj::heap<FetchTargetIoChannelFactory>(timer);
+    .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
+        [&](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<FetchTargetIoChannelFactory>(timer);
   }),
     .requestObserverFactory =
         kj::Function<kj::Own<RequestObserver>()>([&]() -> kj::Own<RequestObserver> {

@@ -333,7 +333,6 @@ class WorkerdApi final: public Worker::Api {
 
   // Create the ModuleRegistry instance for the worker.
   static kj::Arc<jsg::modules::ModuleRegistry> newWorkerdModuleRegistry(
-      const jsg::ResolveObserver& resolveObserver,
       kj::Maybe<const Worker::Script::ModulesSource&> source,
       const CompatibilityFlags::Reader& featureFlags,
       const PythonConfig& pythonConfig,

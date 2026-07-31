@@ -305,6 +305,65 @@ export class DurableObjectExample extends DurableObject {
       await container.exec(['cat']).then((p) => p.output());
     }
 
+    // 13. An already-aborted signal causes exec() to throw synchronously.
+    {
+      const ac = new AbortController();
+      ac.abort();
+      assert.throws(
+        () => container.exec(['echo', 'hello'], { signal: ac.signal }),
+        {
+          name: 'AbortError',
+        }
+      );
+    }
+
+    // 14. Aborting the signal while the process is running kills it (SIGKILL).
+    {
+      const ac = new AbortController();
+      const proc = await container.exec(['sh', '-lc', 'sleep 60'], {
+        signal: ac.signal,
+        stdout: 'ignore',
+      });
+      ac.abort();
+      // A process killed by SIGKILL (9) reports exit code 128 + 9 = 137.
+      assert.strictEqual(await proc.exitCode, 137);
+    }
+
+    // 15. Allocate a PTY via the boolean shorthand: stdout is a single combined raw terminal
+    // stream, isPty is true, and resize() is accepted without throwing.
+    {
+      const proc = await container.exec(
+        ['sh', '-lc', 'tty; test -t 1 && echo IS_TTY'],
+        {
+          pty: true,
+        }
+      );
+      assert.ok(proc.isPty);
+      // Resizing a PTY process should not throw.
+      proc.resize(100, 40);
+      const output = await proc.output();
+      const stdout = decode(output.stdout);
+      // A PTY makes stdout a terminal, so `tty` prints a device path and `test -t 1` succeeds.
+      assert.ok(
+        stdout.includes('/dev/'),
+        `expected a tty device path in: ${stdout}`
+      );
+      assert.ok(stdout.includes('IS_TTY'), `expected IS_TTY in: ${stdout}`);
+      assert.strictEqual(output.exitCode, 0);
+    }
+
+    // 16. Allocate a PTY with explicit initial dimensions: the terminal starts at the requested
+    // size, so `stty size` reports "rows cols".
+    {
+      const proc = await container.exec(['stty', 'size'], {
+        pty: { cols: 100, rows: 40 },
+      });
+      assert.ok(proc.isPty);
+      const output = await proc.output();
+      assert.strictEqual(decode(output.stdout).trim(), '40 100');
+      assert.strictEqual(output.exitCode, 0);
+    }
+
     await container.destroy();
     await monitor;
     assert.strictEqual(container.running, false);

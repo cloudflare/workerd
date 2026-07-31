@@ -7,6 +7,7 @@
 
 #include <workerd/io/actor-cache.h>  // because we can't forward-declare ActorCache::SharedLru.
 #include <workerd/io/actor-id.h>
+#include <workerd/io/async-lock-scheduler.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/frankenvalue.h>
@@ -15,6 +16,7 @@
 #include <workerd/io/observer.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/trace.h>
+#include <workerd/io/validation.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker-source.h>
 #include <workerd/jsg/async-context.h>
@@ -106,21 +108,7 @@ class Worker: public kj::AtomicRefcounted {
   class Isolate;
   class Api;
 
-  class ValidationErrorReporter {
-   public:
-    virtual void addError(kj::String error) = 0;
-
-    // Report that the Worker implements a stateless entrypoint (e.g. WorkerEntrypoint or plain
-    // object export) with the given export name and methods.
-    virtual void addEntrypoint(
-        kj::Maybe<kj::StringPtr> exportName, kj::Array<kj::String> methods) = 0;
-
-    // Report that the Worker exports a Durable Object class with the given name.
-    virtual void addActorClass(kj::StringPtr exportName) = 0;
-
-    // Report that the Worker exports a Workflow class with the given name.
-    virtual void addWorkflowClass(kj::StringPtr exportName, kj::Array<kj::String> methods) = 0;
-  };
+  using ValidationErrorReporter = workerd::ValidationErrorReporter;
 
   class LockType;
 
@@ -240,8 +228,6 @@ class Worker: public kj::AtomicRefcounted {
   };
 
   class InspectorClient;
-  class AsyncWaiter;
-  friend constexpr bool _kj_internal_isPolymorphic(AsyncWaiter*);
 
   static void handleLog(jsg::Lock& js,
       const LoggingOptions& loggingOptions,
@@ -499,6 +485,12 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // See Worker::takeAsyncLock().
   kj::Promise<AsyncLock> takeAsyncLock(RequestObserver&) const;
 
+  // Enters the isolate under `lockType` and runs `callback` with the resulting `jsg::Lock`. Unlike
+  // `Worker::runInLockScope`, this does not require a `Worker` -- it locks the isolate directly,
+  // which is useful for whole-isolate operations such as CPU profiling that are not tied to any
+  // particular Worker instance.
+  void runInLockScope(LockType lockType, kj::FunctionParam<void(jsg::Lock&)> callback) const;
+
   bool isInspectorEnabled() const;
 
   // Returns the isolate's V8 inspector, if one exists. An inspector is created either because a
@@ -566,19 +558,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   class InspectorChannelImpl;
   kj::Maybe<InspectorChannelImpl&> currentInspectorSession;
 
-  struct AsyncWaiterList {
-    kj::Maybe<AsyncWaiter&> head = kj::none;
-    kj::Maybe<AsyncWaiter&>* tail = &head;
-
-    ~AsyncWaiterList() noexcept;
-  };
-
-  // Mutex-guarded linked list of threads waiting for an async lock on this worker. The lock
-  // protects the `AsyncWaiterList` as well as the next/prev pointers in each `AsyncWaiter` that
-  // is currently in the list.
-  kj::MutexGuarded<AsyncWaiterList> asyncWaiters;
-  // TODO(perf): Use a lock-free list? Tricky to get right. `asyncWaiters` should only be locked
-  //   briefly so there's probably not that much to gain.
+  // Queue of threads waiting to use this isolate. See async-lock-scheduler.h.
+  AsyncLockQueue<Isolate> asyncLockQueue;
 
   friend class Worker::AsyncLock;
 
@@ -849,15 +830,15 @@ class Worker::AsyncLock {
   static kj::Promise<void> whenThreadIdle();
 
  private:
-  kj::Own<AsyncWaiter> waiter;
+  AsyncLockQueue<Isolate>::Lock lock;
   kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming;
 
-  AsyncLock(kj::Own<AsyncWaiter> waiter, kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming)
-      : waiter(kj::mv(waiter)),
+  AsyncLock(AsyncLockQueue<Isolate>::Lock lock,
+      kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming)
+      : lock(kj::mv(lock)),
         lockTiming(kj::mv(lockTiming)) {}
 
   friend class Worker::Isolate;
-  friend class Worker::AsyncWaiter;
 };
 
 // Represents actor state within a Worker instance. This object tracks the JavaScript heap
@@ -1140,8 +1121,6 @@ struct Worker_VersionInfo {
 inline const Worker::Isolate& Worker::getIsolate() const {
   return *script->isolate;
 }
-
-KJ_DECLARE_NON_POLYMORPHIC(Worker::AsyncWaiter);
 
 // An implementation of Worker::ValidationErrorReporter that collects errors into
 // a kj::Vector<kj::String>.

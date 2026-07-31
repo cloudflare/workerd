@@ -621,6 +621,27 @@ class TraceDiagnosticChannelEvent final: public jsg::Object {
   kj::Array<kj::byte> message;
 };
 
+// Structured Error fields surfaced on a TraceLog whose originating console.* call had
+// a native Error among its arguments. Mirrors the shape of TraceException, but is
+// attached to a log entry instead of being a standalone trace item. Absent on logs
+// whose arguments did not include any native Error.
+struct TraceLogErrorInfo {
+  explicit TraceLogErrorInfo(const tracing::ErrorInfo& info);
+  TraceLogErrorInfo(const TraceLogErrorInfo&);
+
+  kj::String name;
+  kj::String message;
+  jsg::Optional<kj::String> stack;
+
+  JSG_STRUCT(name, message, stack);
+
+  JSG_MEMORY_INFO(TraceLogErrorInfo) {
+    tracker.trackField("name", name);
+    tracker.trackField("message", message);
+    tracker.trackField("stack", stack);
+  }
+};
+
 class TraceLog final: public jsg::Object {
  public:
   TraceLog(jsg::Lock& js, const Trace& trace, const tracing::Log& log);
@@ -628,11 +649,17 @@ class TraceLog final: public jsg::Object {
   double getTimestamp();
   kj::StringPtr getLevel();
   jsg::V8Ref<v8::Object> getMessage(jsg::Lock& js);
+  // Returns the per-argument errorInfo list, or kj::none / undefined when none of
+  // the originating console call's arguments was a native Error. When present,
+  // the array length matches the argument count; slots whose argument was not an
+  // Error are JS `null`.
+  jsg::Optional<kj::Array<kj::Maybe<TraceLogErrorInfo>>> getErrorInfo();
 
   JSG_RESOURCE_TYPE(TraceLog) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(timestamp, getTimestamp);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(level, getLevel);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(message, getMessage);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(errorInfo, getErrorInfo);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -643,6 +670,7 @@ class TraceLog final: public jsg::Object {
   double timestamp;
   kj::LiteralStringConst level;
   jsg::V8Ref<v8::Object> message;
+  kj::Maybe<kj::Array<kj::Maybe<TraceLogErrorInfo>>> errorInfo;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(message);
@@ -757,8 +785,9 @@ class TraceCustomEvent final: public WorkerInterface::CustomEvent {
       api::TraceItem::HibernatableWebSocketEventInfo,                                              \
       api::TraceItem::HibernatableWebSocketEventInfo::Message,                                     \
       api::TraceItem::HibernatableWebSocketEventInfo::Close,                                       \
-      api::TraceItem::HibernatableWebSocketEventInfo::Error, api::TraceLog, api::TraceException,   \
-      api::TraceDiagnosticChannelEvent, api::TraceMetrics, api::UnsafeTraceMetrics
+      api::TraceItem::HibernatableWebSocketEventInfo::Error, api::TraceLog,                        \
+      api::TraceLogErrorInfo, api::TraceException, api::TraceDiagnosticChannelEvent,               \
+      api::TraceMetrics, api::UnsafeTraceMetrics
 // The list of trace.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

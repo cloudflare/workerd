@@ -1276,6 +1276,31 @@ class Server::ActorNamespace final {
       KJ_IF_SOME(config, containerOptions) {
         KJ_ASSERT(config.hasImageName(), "Image name is required");
         auto imageName = config.getImageName();
+        auto privilegeConfig = config.getPrivileges();
+        auto capabilities =
+            kj::heapArrayBuilder<kj::String>(privilegeConfig.getCapabilities().size());
+        for (auto capability: privilegeConfig.getCapabilities()) {
+          capabilities.add(kj::str(capability));
+        }
+        auto devices =
+            kj::heapArrayBuilder<ContainerPrivileges::Device>(privilegeConfig.getDevices().size());
+        for (auto device: privilegeConfig.getDevices()) {
+          devices.add(ContainerPrivileges::Device{
+            .pathOnHost = kj::str(device.getPathOnHost()),
+            .pathInContainer = kj::str(device.getPathInContainer()),
+            .cgroupPermissions = kj::str(device.getCgroupPermissions()),
+          });
+        }
+        auto securityOpt =
+            kj::heapArrayBuilder<kj::String>(privilegeConfig.getSecurityOpt().size());
+        for (auto option: privilegeConfig.getSecurityOpt()) {
+          securityOpt.add(kj::str(option));
+        }
+        ContainerPrivileges privileges{
+          .capabilities = capabilities.finish(),
+          .devices = devices.finish(),
+          .securityOpt = securityOpt.finish(),
+        };
         kj::String containerId;
         KJ_SWITCH_ONEOF(id) {
           KJ_CASE_ONEOF(globalId, kj::Own<ActorIdFactory::ActorId>) {
@@ -1287,7 +1312,8 @@ class Server::ActorNamespace final {
         }
 
         container = ns.getContainerClient(
-            kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId), imageName);
+            kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId), imageName,
+            kj::mv(privileges));
       }
 
       auto actor =
@@ -1342,7 +1368,8 @@ class Server::ActorNamespace final {
     })->addRef();
   }
 
-  kj::Own<ContainerClient> getContainerClient(kj::StringPtr containerId, kj::StringPtr imageName) {
+  kj::Own<ContainerClient> getContainerClient(
+      kj::StringPtr containerId, kj::StringPtr imageName, ContainerPrivileges privileges) {
     KJ_IF_SOME(existingClient, containerClients.find(containerId)) {
       return existingClient->addRef();
     }
@@ -1400,7 +1427,8 @@ class Server::ActorNamespace final {
         kj::str(dockerPathRef), kj::str(containerId), kj::str(imageName),
         kj::str(KJ_ASSERT_NONNULL(containerEgressInterceptorImage,
             "containerEgressInterceptorImage must be configured for containers.")),
-        waitUntilTasks, kj::mv(previousCleanup), kj::mv(cleanupCallback), channelTokenHandler);
+        waitUntilTasks, kj::mv(previousCleanup), kj::mv(cleanupCallback), channelTokenHandler,
+        kj::mv(privileges));
 
     // Store raw pointer in map (does not own)
     containerClients.insert(kj::str(containerId), client.get());
@@ -2996,11 +3024,9 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   void reportFailure(
       const kj::Exception& exception, FailureSource source = FailureSource::OTHER) override {
-    outcome = RequestObserver::outcomeFromException(exception, source);
-  }
-
-  void setOutcome(EventOutcome newOutcome) override {
-    outcome = newOutcome;
+    if (outcome == EventOutcome::OK) {
+      outcome = RequestObserver::outcomeFromException(exception, source);
+    }
   }
 
   // WorkerInterface
@@ -3045,7 +3071,13 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
     try {
-      co_return co_await KJ_ASSERT_NONNULL(inner).runScheduled(scheduledTime, cron);
+      WorkerInterface::ScheduledResult result =
+          co_await KJ_ASSERT_NONNULL(inner).runScheduled(scheduledTime, cron);
+      if (outcome == EventOutcome::OK) {
+        // Haven't set an outcome yet from `reportFailure()` or some other pathway.
+        outcome = result.outcome;
+      }
+      co_return result;
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception);
@@ -3055,7 +3087,13 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
     try {
-      co_return co_await KJ_ASSERT_NONNULL(inner).runAlarm(scheduledTime, retryCount);
+      WorkerInterface::AlarmResult result =
+          co_await KJ_ASSERT_NONNULL(inner).runAlarm(scheduledTime, retryCount);
+      if (outcome == EventOutcome::OK) {
+        // Haven't set an outcome yet from `reportFailure()` or some other pathway.
+        outcome = result.outcome;
+      }
+      co_return result;
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception);
@@ -3075,7 +3113,13 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     try {
-      co_return co_await KJ_ASSERT_NONNULL(inner).customEvent(kj::mv(event));
+      WorkerInterface::CustomEvent::Result result =
+          co_await KJ_ASSERT_NONNULL(inner).customEvent(kj::mv(event));
+      if (outcome == EventOutcome::OK) {
+        // Haven't set an outcome yet from `reportFailure()` or some other pathway.
+        outcome = result.outcome;
+      }
+      co_return result;
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception);
@@ -3282,7 +3326,7 @@ struct Server::DynamicErrorReporter final: public ErrorReporter {
 
 class Server::WorkerService final: public Service,
                                    private kj::TaskSet::ErrorHandler,
-                                   private IoChannelFactory,
+                                   public IoChannelFactory,
                                    private TimerChannel,
                                    private LimitEnforcer {
  public:
@@ -3670,8 +3714,7 @@ class Server::WorkerService final: public Service,
         kj::mv(props), kj::mv(actor),
         kj::attachRef(static_cast<LimitEnforcer&>(*this), kj::addRef(*this)),
         {},  // ioContextDependency
-        kj::attachRef(static_cast<IoChannelFactory&>(*this), kj::addRef(*this)), kj::mv(observer),
-        waitUntilTasks,
+        addRefToThis(), kj::mv(observer), waitUntilTasks,
         true,                  // tunnelExceptions
         kj::mv(workerTracer),  // workerTracer
         kj::mv(metadata.cfBlobJson),
@@ -4222,10 +4265,6 @@ class Server::WorkerService final: public Service,
       Persistent persistent) override {
     return channelTokenHandler.makeRestoredRpcChannel(
         kj::mv(selfTokenFactory), kj::mv(restoreParams), persistent);
-  }
-
-  kj::Own<void> addRef() override {
-    return kj::addRef(*this);
   }
 
   // ---------------------------------------------------------------------------
@@ -5319,7 +5358,16 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     WorkerDef def,
     capnp::List<config::Extension>::Reader extensions,
     ErrorReporter& errorReporter) {
-  // Load Python artifacts if this is a Python worker
+  // TODO(soon): Either make python workers support the new module registry before
+  // NMR is defaulted on, or disable NMR by default when python workers are enabled.
+  // While NMR is experimental, we'll just throw an error if both are enabled.
+  if (def.featureFlags.getPythonWorkers()) {
+    KJ_REQUIRE(!def.featureFlags.getNewModuleRegistry(),
+        "Python workers do not currently support the new ModuleRegistry implementation. "
+        "Please disable the new ModuleRegistry feature flag to use Python workers.");
+  }
+
+  // Load Python artifacts if this is a Python worker.
   co_await preloadPython(name, def, errorReporter);
 
   auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
@@ -5332,15 +5380,6 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   // points for known roots but we currently do not expose that in the
   // config. So for now this just uses the defaults.
   auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(def.source));
-
-  // TODO(soon): Either make python workers support the new module registry before
-  // NMR is defaulted on, or disable NMR by default when python workers are enabled.
-  // While NMR is experimental, we'll just throw an error if both are enabled.
-  if (def.featureFlags.getPythonWorkers()) {
-    KJ_REQUIRE(!def.featureFlags.getNewModuleRegistry(),
-        "Python workers do not currently support the new ModuleRegistry implementation. "
-        "Please disable the new ModuleRegistry feature flag to use Python workers.");
-  }
 
   bool usingNewModuleRegistry = def.featureFlags.getNewModuleRegistry();
   kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> newModuleRegistry;
@@ -5367,7 +5406,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
     auto artifactBundler = ArtifactBundler::makeDisabledBundler();
 
-    newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(*jsgobserver,
+    newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(
         def.source.variant.tryGet<Worker::Script::ModulesSource>(), def.featureFlags, pythonConfig,
         bundleBase, extensions, kj::mv(maybeFallbackService), kj::mv(artifactBundler));
   }

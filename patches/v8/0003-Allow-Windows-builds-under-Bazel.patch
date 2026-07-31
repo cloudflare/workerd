@@ -6,10 +6,10 @@ Subject: Allow Windows builds under Bazel
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 38c0bf152ebffe97b31ed7999366182680dae82d..539001e56b09feff43d47e9dda308854d68b5627 100644
+index decf32a574257963d4f30f1bc40ddc6a22c071cb..6be6167f027a77ffc28c59827eb261eeaf31ef77 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4130,6 +4130,8 @@ filegroup(
+@@ -4157,6 +4157,8 @@ filegroup(
          "@v8//bazel/config:is_inline_asm_x64": ["src/heap/base/asm/x64/push_registers_asm.cc"],
          "@v8//bazel/config:is_inline_asm_arm": ["src/heap/base/asm/arm/push_registers_asm.cc"],
          "@v8//bazel/config:is_inline_asm_arm64": ["src/heap/base/asm/arm64/push_registers_asm.cc"],
@@ -19,10 +19,10 @@ index 38c0bf152ebffe97b31ed7999366182680dae82d..539001e56b09feff43d47e9dda308854
          "@v8//bazel/config:is_inline_asm_riscv64": ["src/heap/base/asm/riscv64/push_registers_asm.cc"],
          "@v8//bazel/config:is_inline_asm_ppc64le": ["src/heap/base/asm/ppc/push_registers_asm.cc"],
 diff --git a/bazel/config/BUILD.bazel b/bazel/config/BUILD.bazel
-index 17e379b8e27baaa33f58ee852cfd919a9b39d729..7c2154b8ac2e817abebf89f5fa7d30354591d381 100644
+index 4d002e3659aabe48faf357ba07a3f6c689a30e67..c6741a87758ec3c88807800eca9dca17454e7f0c 100644
 --- a/bazel/config/BUILD.bazel
 +++ b/bazel/config/BUILD.bazel
-@@ -270,6 +270,7 @@ selects.config_setting_group(
+@@ -271,6 +271,7 @@ selects.config_setting_group(
      match_all = [
          ":is_windows",
          ":is_x64",
@@ -30,7 +30,7 @@ index 17e379b8e27baaa33f58ee852cfd919a9b39d729..7c2154b8ac2e817abebf89f5fa7d3035
      ],
  )
  
-@@ -278,6 +279,7 @@ selects.config_setting_group(
+@@ -279,6 +280,7 @@ selects.config_setting_group(
      match_all = [
          ":is_windows",
          ":is_ia32",
@@ -38,7 +38,7 @@ index 17e379b8e27baaa33f58ee852cfd919a9b39d729..7c2154b8ac2e817abebf89f5fa7d3035
      ],
  )
  
-@@ -286,6 +288,34 @@ selects.config_setting_group(
+@@ -287,6 +289,34 @@ selects.config_setting_group(
      match_all = [
          ":is_windows",
          ":is_arm64",
@@ -73,7 +73,7 @@ index 17e379b8e27baaa33f58ee852cfd919a9b39d729..7c2154b8ac2e817abebf89f5fa7d3035
      ],
  )
  
-@@ -319,6 +349,13 @@ config_setting(
+@@ -320,6 +350,13 @@ config_setting(
      },
  )
  
@@ -88,10 +88,10 @@ index 17e379b8e27baaa33f58ee852cfd919a9b39d729..7c2154b8ac2e817abebf89f5fa7d3035
      name = "is_clang",
      match_any = [
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index cbe27e0c23488416993b4196cd2c3ee4ffacfc71..f9a883940d15c66e80fdd56e42dbddbd60566c9f 100644
+index ff118a6311e55e7de385f441ef1752ad97e4ec84..c56c0c2c3fbf3529b5dcf5d54921d4fd0b1f1b2a 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
-@@ -125,6 +125,24 @@ def _default_args():
+@@ -134,6 +134,24 @@ def _default_args():
                  "-Wno-non-virtual-dtor",
                  "-isystem .",
              ],
@@ -116,7 +116,7 @@ index cbe27e0c23488416993b4196cd2c3ee4ffacfc71..f9a883940d15c66e80fdd56e42dbddbd
              "//conditions:default": [],
          }) + select({
              "@v8//bazel/config:is_clang": [
-@@ -174,13 +192,23 @@ def _default_args():
+@@ -183,13 +201,23 @@ def _default_args():
              ],
              "//conditions:default": [
              ],

@@ -157,7 +157,7 @@ KJ_TEST("wrapDrainingRead ref prevents UAF when DrainingReader is dropped (byte 
     });
 
     auto& ctrl = KJ_ASSERT_NONNULL(savedCtrl);
-    ctrl->enqueue(js, jsg::BufferSource(js, jsg::JsBufferSource(toBytes(js, "test"))));
+    ctrl->enqueue(js, jsg::JsBufferSource(toBytes(js, "test")));
     savedCtrl = kj::none;
 
     { auto drop = kj::mv(reader); }

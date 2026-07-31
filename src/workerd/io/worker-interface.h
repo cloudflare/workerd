@@ -102,10 +102,12 @@ class WorkerInterface: public kj::HttpService {
   // Trigger a scheduled event with the given scheduled (unix timestamp) time and cron string.
   // The cron string must be valid until the returned promise completes.
   // Async work is queued in a "waitUntil" task set.
-  virtual kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) = 0;
+  [[nodiscard]] virtual kj::Promise<ScheduledResult> runScheduled(
+      kj::Date scheduledTime, kj::StringPtr cron) = 0;
 
   // Trigger an alarm event with the given scheduled (unix timestamp) time.
-  virtual kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) = 0;
+  [[nodiscard]] virtual kj::Promise<AlarmResult> runAlarm(
+      kj::Date scheduledTime, uint32_t retryCount) = 0;
 
   // Called when AlarmManager has given up retrying an alarm after too many counted failures.
   // The actor should clear its alarm state so getAlarm() reflects the deletion.

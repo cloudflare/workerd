@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <workerd/jsg/jsvalue-defs.h>
+
 #include <v8-profiler.h>
 
 #include <kj/common.h>
@@ -200,6 +202,10 @@ class MemoryTracker final {
   template <MemoryRetainer T>
   inline void trackField(
       kj::StringPtr edgeName, const Ref<T>& value, kj::Maybe<kj::StringPtr> nodeName = kj::none);
+
+  template <IsJsValue T>
+  inline void trackField(
+      kj::StringPtr edgeName, const JsRef<T>& value, kj::Maybe<kj::StringPtr> nodeName = kj::none);
 
   template <MemoryRetainer T>
   inline void trackField(

@@ -327,6 +327,29 @@ impl.controller->runIfAlive(
     [](ReadableByteStreamController& controller) { controller.maybeByobRequest = kj::none; });
 ```
 
+### Pattern: Weak Owner Link
+
+- **When**: A controller or controller implementation needs to reach back to its owning
+  stream (`ReadableStreamController::setOwnerRef()`, `WritableImpl::tryGetOwner()`)
+- **Why**: The owner holds the controller, so a strong back-reference can create a GC
+  tracing cycle or keep the stream alive only through its own controller. A raw
+  back-reference can also outlive the owner when async cleanup crosses ownership
+  boundaries.
+- **How**: Store a weak owner reference during stream construction, then re-acquire
+  the owner only at the point of use. This is an internal owner back-link pattern,
+  distinct from weak refs used for handles exposed to user code.
+
+```cpp
+ReadableStream::ReadableStream(kj::Own<ReadableStreamController> controller)
+    : controller(kj::mv(controller)) {
+  getController().setOwnerRef(addWeakToThis());
+}
+
+jsg::Ref<ReadableStream> ReadableStreamJsController::addRef() {
+  return owner.assertLive().addRef();
+}
+```
+
 ### Pattern: `Rc<Entry>` for Shared Queue Data
 
 - **When**: Queue entries shared across teed stream consumers
@@ -355,6 +378,18 @@ auto onSuccess = [this, ref = addRef(), ...](...) mutable {
     // Now safe to use pipeLock
 };
 ```
+
+### Pattern: Pipe-Lock Lifetime
+
+- **When**: A `ReadableStream` is piped to a `WritableStream` (`pipeTo`/`pipeThrough`),
+  putting the source's lock state machine into `PipeLocked`
+- **Why**: The destination's pipe loop holds a `ReadableStreamController::PipeController&`
+  that points into the source's `PipeLocked` lock state. If the source unlocked
+  (`PipeLocked -> Unlocked`) while the pipe loop is still running, that reference would dangle.
+- **Rule**: The source stays `PipeLocked` for the entire lifetime of the pipe. ONLY
+  the pipe machinery  may perform the `PipeLocked -> Unlocked` transition.
+  `onClose`/`onError` MUST NOT unlock the source — they signal the loop, which then
+  releases the lock itself.
 
 ### Pattern: StateListener Self-Destruction Guard
 

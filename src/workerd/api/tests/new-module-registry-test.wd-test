@@ -10,6 +10,18 @@ const unitTests :Workerd.Config = (
           (name = "bar", esModule = "export const foo = 1; export default 2;"),
           (name = "node:fs", esModule = "export default 'abc'"),
 
+          # Regression coverage for a V8 fatal CHECK (status() >= kEvaluatingAsync).
+          # tla-entry statically imports a top-level-await module, giving it an async-parent
+          # link to the still-kEvaluating tla-entry, and then a CommonJS module whose nested
+          # require() must not drain the microtask queue. The eval callback registered in
+          # worker-modules.h calls Evaluate() directly, so this also guards the evaluation
+          # depth being tracked on that path and not only in actuallyEvaluate().
+          (name = "tla-entry",
+           esModule = "import { v } from 'tla-leaf';\nimport 'tla-pump';\nexport default v;\n"),
+          (name = "tla-leaf", esModule = "await Promise.resolve();\nexport const v = 1;\n"),
+          (name = "tla-pump", commonJsModule = "require('tla-trivial'); exports.ok = true;"),
+          (name = "tla-trivial", commonJsModule = "exports.ok = true;"),
+
           # Intentionally bad module to test error handling.
           # Evaluation will error because i/o is not permitted at top-level scope.
           (name = "bad", esModule = "export default 1; setTimeout(() => {}, 10)"),
@@ -71,6 +83,21 @@ const unitTests :Workerd.Config = (
           (name = "部品", esModule = "export default 1;"),
 
           (name = "tla", esModule = "export default await import('text')"),
+
+          # An ESM that statically imports a module that does not exist. Importing
+          # this exercises the static-import resolution path's not-found error.
+          (name = "static-import-missing", esModule = "import 'definitely-not-a-real-module-xyz'; export default 1;"),
+
+          # ESM (circular-a) -> CJS (circular-b) -> require(ESM circular-c) which
+          # statically imports circular-b back while it is still evaluating. This
+          # exercises the circular-dependency guard on the instantiation path.
+          (name = "circular-a", esModule = "import b from 'circular-b'; export default b;"),
+          (name = "circular-b", commonJsModule = "module.exports = require('circular-c')"),
+          (name = "circular-c", esModule = "import b from 'circular-b'; export default b;"),
+
+          # An ESM that statically imports an unparseable specifier, to exercise
+          # the static-import "Invalid module specifier" path.
+          (name = "static-invalid-spec", esModule = "import 'https://'; export default 1;"),
         ],
         compatibilityFlags = [
           "nodejs_compat_v2",

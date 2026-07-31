@@ -45,5 +45,37 @@ KJ_TEST("ServiceWorkerGlobalScope") {
   KJ_EXPECT(builder.structure("workerd::api::DurableObjectId"_kj) != kj::none);
 }
 
+KJ_TEST("JsReadableStream delegates its RTTI to ReadableStream") {
+  // JsReadableStream declares `using JsgRttiDelegate = jsg::Ref<ReadableStream>`, so RTTI (and
+  // therefore generated TypeScript) must describe it exactly as it describes ReadableStream.
+  jsg::rtti::Builder builder((CompatibilityFlags::Reader()));
+  auto type = builder.type<JsReadableStream>();
+  KJ_ASSERT(type.isStructure());
+  KJ_EXPECT(type.getStructure().getFullyQualifiedName() == "workerd::api::ReadableStream"_kj);
+  KJ_EXPECT(builder.structure("workerd::api::ReadableStream"_kj) != kj::none);
+}
+
+KJ_TEST("JsWritableStream delegates its RTTI to WritableStream") {
+  // JsWritableStream declares `using JsgRttiDelegate = jsg::Ref<WritableStream>`, so RTTI (and
+  // therefore generated TypeScript) must describe it exactly as it describes WritableStream.
+  jsg::rtti::Builder builder((CompatibilityFlags::Reader()));
+  auto type = builder.type<JsWritableStream>();
+  KJ_ASSERT(type.isStructure());
+  KJ_EXPECT(type.getStructure().getFullyQualifiedName() == "workerd::api::WritableStream"_kj);
+  KJ_EXPECT(builder.structure("workerd::api::WritableStream"_kj) != kj::none);
+}
+
+KJ_TEST("JsReadableWritablePair delegates its RTTI to ReadableStream::Transform") {
+  // JsReadableWritablePair declares `using JsgRttiDelegate = ReadableStream::Transform`, so RTTI
+  // (and therefore generated TypeScript) must describe it exactly as it describes the
+  // ReadableWritablePair-shaped Transform struct.
+  jsg::rtti::Builder builder((CompatibilityFlags::Reader()));
+  auto type = builder.type<JsReadableWritablePair>();
+  KJ_ASSERT(type.isStructure());
+  KJ_EXPECT(
+      type.getStructure().getFullyQualifiedName() == "workerd::api::ReadableStream::Transform"_kj,
+      type.getStructure().getFullyQualifiedName());
+}
+
 }  // namespace
 }  // namespace workerd::api

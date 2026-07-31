@@ -98,9 +98,9 @@ KJ_TEST("socket writes are blocked by output gate") {
   TestFixture fixture(TestFixture::SetupParams{
     .actorId = kj::mv(actorId),
     .useRealTimers = false,
-    .ioChannelFactory = kj::Function<kj::Own<IoChannelFactory>(TimerChannel&)>(
-        [&](TimerChannel& timer) -> kj::Own<IoChannelFactory> {
-    return kj::heap<ConnectTestIoChannelFactory>(timer, connectCalled, headerTable, pipeEnd);
+    .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
+        [&](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<ConnectTestIoChannelFactory>(timer, connectCalled, headerTable, pipeEnd);
   }),
   });
 
@@ -120,7 +120,7 @@ KJ_TEST("socket writes are blocked by output gate") {
     // Prepare write data and lock gate BEFORE any co_await (Worker lock still held).
     auto paf = kj::newPromiseAndFulfiller<void>();
     auto blocker = actor.getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
-    auto writable = socket->getWritable();
+    auto writable = socket->getWritable(env.js).getUnderlyingForTest(env.js);
     jsg::JsValue jsBuffer = jsg::JsUint8Array::create(env.js, "hi"_kjb);
     writable->getController().write(env.js, jsBuffer).markAsHandled(env.js);
 
@@ -161,9 +161,9 @@ KJ_TEST("connectImpl defers connect until output gate clears") {
   TestFixture fixture(TestFixture::SetupParams{
     .actorId = kj::mv(actorId),
     .useRealTimers = false,
-    .ioChannelFactory = kj::Function<kj::Own<IoChannelFactory>(TimerChannel&)>(
-        [&](TimerChannel& timer) -> kj::Own<IoChannelFactory> {
-    return kj::heap<ConnectTestIoChannelFactory>(timer, connectCalled, headerTable, pipeEnd);
+    .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
+        [&](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<ConnectTestIoChannelFactory>(timer, connectCalled, headerTable, pipeEnd);
   }),
   });
 

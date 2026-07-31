@@ -44,7 +44,6 @@ const llvm::StringRef kVisitableLeafTemplates[] = {
 
 // Non-template visitable leaf types.
 const llvm::StringRef kVisitableLeafTypes[] = {
-    "jsg::BufferSource",
     "jsg::Name",
     "jsg::Value",
     "jsg::Data",
@@ -88,7 +87,7 @@ bool isVisitableType(clang::QualType qt) {
   if (qt.isNull()) return false;
   qt = qt.getNonReferenceType().getUnqualifiedType();
 
-  // Direct named record type, e.g. `jsg::BufferSource`.
+  // Direct named record type.
   if (const auto *rt = qt.getTypePtr()->getAs<clang::RecordType>()) {
     auto fqn = rt->getDecl()->getQualifiedNameAsString();
     for (auto suffix : kVisitableLeafTypes) {

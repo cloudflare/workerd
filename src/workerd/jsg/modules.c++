@@ -10,6 +10,8 @@
 
 #include <kj/mutex.h>
 
+#include <span>
+
 namespace workerd::jsg {
 
 namespace {
@@ -283,7 +285,7 @@ ModuleRegistry* getModulesForResolveCallback(v8::Isolate* isolate) {
       isolate->GetCurrentContext(), jsg::ContextPointerSlot::MODULE_REGISTRY));
 }
 
-void instantiateModule(
+kj::Maybe<v8::Local<v8::Promise>> instantiateModule(
     jsg::Lock& js, v8::Local<v8::Module>& module, InstantiateModuleOptions options) {
   KJ_ASSERT(!module.IsEmpty());
   auto isolate = js.v8Isolate;
@@ -298,23 +300,51 @@ void instantiateModule(
   }
 
   // Nothing to do if the module is already evaluated.
-  if (status == v8::Module::Status::kEvaluated || status == v8::Module::Status::kEvaluating) return;
+  if (status == v8::Module::Status::kEvaluated || status == v8::Module::Status::kEvaluating) {
+    return kj::none;
+  }
 
   if (status == v8::Module::Status::kUninstantiated) {
     jsg::check(module->InstantiateModule(
         context, resolveModuleCallback<false>, resolveModuleCallback<true>));
   }
 
-  auto prom = jsg::check(module->Evaluate(context)).As<v8::Promise>();
+  v8::Local<v8::Promise> prom;
+  {
+    Lock::ModuleEvaluationScope moduleEvaluationScope(js);
+    prom = jsg::check(module->Evaluate(context)).As<v8::Promise>();
+  }
 
   if (module->IsGraphAsync() && prom->State() == v8::Promise::kPending) {
     // If top level await has been disable, error.
     JSG_REQUIRE(options != InstantiateModuleOptions::NO_TOP_LEVEL_AWAIT, Error,
         "Top-level await in module is not permitted at this time.");
   }
-  // We run microtasks to ensure that any promises that happen to be scheduled
-  // during the evaluation of the top level scope have a chance to be settled,
-  // even if those are not directly awaited.
+
+  // Draining while an ancestor module is still kEvaluating can fire an async module's
+  // fulfillment callback early and trip a fatal V8 CHECK (status() >= kEvaluatingAsync), so
+  // when nested we must never drain. A synchronous graph is already settled and needs no drain
+  // (this covers every internal builtin).
+  if (js.isEvaluatingModule()) {
+    switch (prom->State()) {
+      case v8::Promise::kFulfilled:
+        return kj::none;
+      case v8::Promise::kRejected:
+        isolate->ThrowException(module->GetException());
+        throw jsg::JsExceptionThrown();
+      case v8::Promise::kPending:
+        // Callers that cannot chain on the promise (require(), the main module) have no way to
+        // settle this, so for them it is an error.
+        JSG_REQUIRE(options == InstantiateModuleOptions::ALLOW_PENDING_EVALUATION, Error,
+            "Top-level await in module is unsettled.");
+        return prom;
+    }
+    KJ_UNREACHABLE;
+  }
+
+  // At depth 0 draining is safe, and we do it unconditionally so that any promises scheduled
+  // during top-level evaluation are settled even if not directly awaited. Worker code depends
+  // on this, e.g. a bare `import(...).catch(...)` in the entrypoint.
   js.runMicrotasks();
 
   switch (prom->State()) {
@@ -330,6 +360,7 @@ void instantiateModule(
     case v8::Promise::kFulfilled:
       break;
   }
+  return kj::none;
 }
 
 // ===================================================================================
@@ -400,7 +431,7 @@ v8::Local<v8::Module> createSyntheticModule(
     }
   }
   return v8::Module::CreateSyntheticModule(js.v8Isolate, v8StrIntern(js.v8Isolate, name),
-      v8::MemorySpan<const v8::Local<v8::String>>(exportNames.data(), exportNames.size()),
+      std::span<const v8::Local<v8::String>>(exportNames.data(), exportNames.size()),
       &evaluateSyntheticModuleCallback);
 }
 }  // namespace
@@ -443,7 +474,7 @@ v8::Local<v8::WasmModuleObject> compileWasmModule(
   auto compilationObserver = observer.onWasmCompilationStart(js.v8Isolate, code.size());
 
   return jsg::check(v8::WasmModuleObject::Compile(
-      js.v8Isolate, v8::MemorySpan<const uint8_t>(code.begin(), code.size())));
+      js.v8Isolate, std::span<const uint8_t>(code.begin(), code.size())));
 }
 
 // ======================================================================================

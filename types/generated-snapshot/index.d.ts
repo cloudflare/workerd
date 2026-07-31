@@ -3309,6 +3309,12 @@ interface TraceLog {
   readonly timestamp: number;
   readonly level: string;
   readonly message: any;
+  readonly errorInfo?: (TraceLogErrorInfo | null)[];
+}
+interface TraceLogErrorInfo {
+  name: string;
+  message: string;
+  stack?: string;
 }
 interface TraceException {
   readonly timestamp: number;
@@ -3866,18 +3872,26 @@ interface ContainerExecOptions {
   cwd?: string;
   env?: Record<string, string>;
   user?: string;
+  signal?: AbortSignal;
+  pty?: boolean | ContainerExecPtyOptions;
   stdin?: ReadableStream | "pipe";
   stdout?: "pipe" | "ignore";
   stderr?: "pipe" | "ignore" | "combined";
+}
+interface ContainerExecPtyOptions {
+  cols?: number;
+  rows?: number;
 }
 interface ExecProcess {
   readonly stdin: WritableStream | null;
   readonly stdout: ReadableStream | null;
   readonly stderr: ReadableStream | null;
   readonly pid: number;
+  readonly isPty: boolean;
   readonly exitCode: Promise<number>;
   output(): Promise<ExecOutput>;
   kill(signal?: number): void;
+  resize(cols: number, rows: number): void;
 }
 interface Container {
   get running(): boolean;
@@ -4096,6 +4110,7 @@ interface Tracing {
     callback: (span: Span, ...args: A) => T,
     ...args: A
   ): T;
+  startSpan(name: string): Span;
   Span: typeof Span;
 }
 declare abstract class Span {
@@ -4776,6 +4791,13 @@ type AiSearchListItemsParams = {
   source?: string;
   /** JSON-encoded Vectorize filter for metadata filtering. */
   metadata_filter?: string;
+  /** Filter items by their unique ID. Returns at most one item. */
+  item_id?: string;
+  /**
+   * Filter items by their exact key (object key / filename). Keys are unique
+   * per source, so combine with `source` to disambiguate across data sources.
+   */
+  key?: string;
 };
 type AiSearchListItemsResponse = {
   result: AiSearchItemInfo[];
@@ -13925,6 +13947,15 @@ interface Hyperdrive {
    */
   readonly host: string;
   /*
+   * A synthetic IPv4 address (in the reserved 240.0.0.0/4 range) that, like the
+   * host field, is only valid within the context of the currently running
+   * Worker and, when passed into the `connect()` function from the
+   * "cloudflare:sockets" module, will connect to the Hyperdrive instance for
+   * your database. This is provided for database drivers that require the host
+   * to be an IP literal rather than a hostname.
+   */
+  readonly ip: string;
+  /*
    * The port that must be paired the the host field when connecting.
    */
   readonly port: number;
@@ -14762,6 +14793,32 @@ declare namespace CloudflareWorkersModule {
     timeout?: WorkflowTimeoutDuration | number;
     sensitive?: WorkflowStepSensitivity;
   };
+  // Internal discriminators used only for `WorkflowStep.do` overload
+  // resolution. They mirror `WorkflowStepConfig` but pin `retries.delay` to a
+  // single kind so the callback context can be narrowed based on the shape of
+  // the config argument (rather than on an inferred type parameter, which is
+  // lost when the caller supplies an explicit return-type argument). Not
+  // exported: they must not widen the public type surface.
+  type WorkflowStepConfigWithStaticDelay = Omit<
+    WorkflowStepConfig,
+    "retries"
+  > & {
+    retries?: {
+      limit: number;
+      delay: WorkflowDelayDuration | number;
+      backoff?: WorkflowBackoff;
+    };
+  };
+  type WorkflowStepConfigWithDelayFunction = Omit<
+    WorkflowStepConfig,
+    "retries"
+  > & {
+    retries: {
+      limit: number;
+      delay: WorkflowDelayFunction;
+      backoff?: WorkflowBackoff;
+    };
+  };
   export type WorkflowStepRollbackConfig = Pick<
     WorkflowStepConfig,
     "retries" | "timeout"
@@ -14804,18 +14861,30 @@ declare namespace CloudflareWorkersModule {
       sensitive?: WorkflowStepSensitivity;
     };
   };
-  export type WorkflowRollbackContext<T = unknown> = {
-    ctx: WorkflowStepContext;
+  // The rollback handler receives the step context, so it mirrors the same
+  // delay discriminant as the step callback: when the step was configured with
+  // a dynamic delay function the resolved `config.retries.delay` is omitted,
+  // otherwise it is present. `Delay` is threaded from the `WorkflowStep.do`
+  // overload that matched the step config.
+  export type WorkflowRollbackContext<
+    T = unknown,
+    Delay = WorkflowDelayDuration | number,
+  > = {
+    ctx: WorkflowStepContext<Delay>;
     error: Error;
     output: T | undefined;
     /** @deprecated Use `ctx.step.name` and `ctx.step.count` instead. */
     stepName: string;
   };
-  export type WorkflowRollbackHandler<T = unknown> = (
-    ctx: WorkflowRollbackContext<T>,
-  ) => Promise<void>;
-  export type WorkflowStepRollbackOptions<T = unknown> = {
-    rollback: WorkflowRollbackHandler<T>;
+  export type WorkflowRollbackHandler<
+    T = unknown,
+    Delay = WorkflowDelayDuration | number,
+  > = (ctx: WorkflowRollbackContext<T, Delay>) => Promise<void>;
+  export type WorkflowStepRollbackOptions<
+    T = unknown,
+    Delay = WorkflowDelayDuration | number,
+  > = {
+    rollback: WorkflowRollbackHandler<T, Delay>;
     rollbackConfig?: WorkflowStepRollbackConfig;
   };
   export abstract class WorkflowStep {
@@ -14824,18 +14893,34 @@ declare namespace CloudflareWorkersModule {
       callback: (ctx: WorkflowStepContext) => Promise<T>,
       rollbackOptions?: WorkflowStepRollbackOptions<T>,
     ): Promise<T>;
-    do<T extends Rpc.Serializable<T>, const C extends WorkflowStepConfig>(
+    // The config overloads discriminate on the shape of `config.retries.delay`
+    // so the callback context reflects whether the resolved delay is present
+    // (static delay) or omitted (dynamic delay function). Each has a single
+    // type parameter, so an explicit return-type argument (`do<T>(...)`) still
+    // resolves here. ORDERING IS LOAD-BEARING: the broad `WorkflowStepConfig`
+    // fallback MUST remain last, otherwise it shadows the discriminating
+    // overloads and narrowing is silently lost.
+    do<T extends Rpc.Serializable<T>>(
       name: string,
-      config: C,
+      config: WorkflowStepConfigWithDelayFunction,
+      callback: (ctx: WorkflowStepContext<WorkflowDelayFunction>) => Promise<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions<T, WorkflowDelayFunction>,
+    ): Promise<T>;
+    do<T extends Rpc.Serializable<T>>(
+      name: string,
+      config: WorkflowStepConfigWithStaticDelay,
       callback: (
-        ctx: WorkflowStepContext<
-          C["retries"] extends {
-            delay: infer D;
-          }
-            ? D
-            : WorkflowDelayDuration | number
-        >,
+        ctx: WorkflowStepContext<WorkflowDelayDuration | number>,
       ) => Promise<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions<
+        T,
+        WorkflowDelayDuration | number
+      >,
+    ): Promise<T>;
+    do<T extends Rpc.Serializable<T>>(
+      name: string,
+      config: WorkflowStepConfig,
+      callback: (ctx: WorkflowStepContext) => Promise<T>,
       rollbackOptions?: WorkflowStepRollbackOptions<T>,
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
@@ -15654,12 +15739,13 @@ type MarkdownDocument = {
   name: string;
   blob: Blob;
 };
+type OutputFormat = "markdown" | "text";
 type ConversionResponse =
   | {
       id: string;
       name: string;
       mimeType: string;
-      format: "markdown";
+      format: OutputFormat;
       tokens: number;
       data: string;
     }
@@ -15677,7 +15763,11 @@ type EmbeddedImageConversionOptions = ImageConversionOptions & {
   convert?: boolean;
   maxConvertedImages?: number;
 };
+type ConversionOutputOptions = {
+  format?: OutputFormat;
+};
 type ConversionOptions = {
+  output?: ConversionOutputOptions;
   html?: {
     images?: EmbeddedImageConversionOptions & {
       convertOGImage?: boolean;
@@ -15862,6 +15952,18 @@ declare namespace TailStream {
     readonly type: "log";
     readonly level: "debug" | "error" | "info" | "log" | "warn";
     readonly message: object;
+    /**
+     * Per-argument structured Error fields for the originating `console.*` call.
+     * The array is positional: index `i` corresponds to the i-th argument. Indices
+     * whose argument was not a native Error are `null`. The whole property is
+     * absent (undefined) when none of the arguments was a native Error.
+     */
+    readonly errorInfo?: readonly (TailStreamErrorInfo | null)[];
+  }
+  interface TailStreamErrorInfo {
+    readonly name: string;
+    readonly message: string;
+    readonly stack?: string;
   }
   interface DroppedEventsDiagnostic {
     readonly diagnosticsType: "droppedEvents";
@@ -16398,7 +16500,25 @@ declare abstract class Workflow<PARAMS = unknown> {
   public createBatch(
     batch: WorkflowInstanceCreateOptions<PARAMS>[],
   ): Promise<WorkflowInstance[]>;
+  /**
+   * Delete a batch of Workflow instances and their stored state.
+   * `deleteBatch` is limited to 100 instances at a time. Duplicate IDs are deleted once.
+   * The result contains one entry for each input position; IDs that do not exist are returned as per-instance errors.
+   * @param instanceIds IDs of the Workflow instances to delete
+   * @returns A promise that resolves with the successfully deleted instances and any per-instance errors.
+   */
+  public deleteBatch(instanceIds: string[]): Promise<WorkflowBatchDeleteResult>;
 }
+type WorkflowBatchDeleteResult = {
+  deleted: {
+    id: string;
+  }[];
+  errors: {
+    id: string;
+    code: number;
+    message: string;
+  }[];
+};
 type WorkflowDurationLabel =
   | "second"
   | "minute"
@@ -16499,6 +16619,10 @@ declare abstract class WorkflowInstance {
    * @param options Options for the restart, including an optional step to restart from.
    */
   public restart(options?: WorkflowInstanceRestartOptions): Promise<void>;
+  /**
+   * Delete the instance and its stored state.
+   */
+  public delete(): Promise<void>;
   /**
    * Returns the current status of the instance.
    */

@@ -7,7 +7,6 @@
 //
 // The TypeWrapper knows how to convert a variety of types between C++ and JavaScript.
 
-#include <workerd/jsg/buffersource.h>
 #include <workerd/jsg/dom-exception.h>
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/iterator.h>
@@ -229,6 +228,11 @@ class UnimplementedWrapper {
 //           v8::Local<v8::Value> handle,
 //           kj::Maybe<v8::Local<v8::Object>> parentObject);
 //     };
+//
+// If a SelfConvertible type appears in JSG-visible signatures (method parameters or return
+// types, JSG_STRUCT fields, etc.), it also needs an RTTI representation for TypeScript type
+// generation. Declare `using JsgRttiDelegate = ...;` to describe the type to RTTI as some
+// existing type; see the delegated-RTTI support in rtti.h.
 template <typename T>
 concept SelfConvertible = requires(Lock& js,
     v8::Local<v8::Context> ctx,
@@ -493,7 +497,6 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public ArrayBufferWrapper,
                    public DictWrapper,
                    public DateWrapper,
-                   public BufferSourceWrapper,
                    public FunctionWrapper<Self>,
                    public PromiseWrapper<Self>,
                    public NonCoercibleWrapper<Self>,
@@ -567,7 +570,6 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   USING_WRAPPER(ArrayBufferWrapper);
   USING_WRAPPER(DictWrapper);
   USING_WRAPPER(DateWrapper);
-  USING_WRAPPER(BufferSourceWrapper);
   USING_WRAPPER(FunctionWrapper<Self>);
   USING_WRAPPER(PromiseWrapper<Self>);
   USING_WRAPPER(NonCoercibleWrapper<Self>);
@@ -587,6 +589,34 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
 
   template <typename U>
   static constexpr TypeHandlerImpl<U> TYPE_HANDLER_INSTANCE = TypeHandlerImpl<U>();
+
+  // Invokes func(const std::type_info&, const TypeHandler<Ref<T>>*) for every resource
+  // type registered with this TypeWrapper. The handler instances are the static constexpr
+  // TYPE_HANDLER_INSTANCE singletons, so the pointers remain valid forever.
+  //
+  // Only resource types participate: their handlers always support both wrap and
+  // tryUnwrap. Struct (and other value) types cannot be registered eagerly because
+  // instantiating a TypeHandler requires BOTH directions to compile, and some registered
+  // structs are deliberately one-directional (e.g. output-only structs with no unwrap
+  // path, or input-only structs with Unimplemented members whose wrap is deleted).
+  // Value types continue to obtain handlers via TypeHandler<T> parameter injection,
+  // which only instantiates handlers for types that actually support it. Extension and
+  // configuration entries are likewise skipped (they are not themselves wrappable).
+  //
+  // Used by jsg::Isolate to populate the isolate-wide registry backing
+  // jsg::Lock::tryGetTypeHandler(); see setup.h.
+  template <typename Func>
+  static void forEachTypeHandler(Func&& func) {
+    (forEachTypeHandlerImpl<T>(func), ...);
+  }
+
+  template <typename U, typename Func>
+  static void forEachTypeHandlerImpl(Func& func) {
+    if constexpr (U::JSG_KIND == JsgKind::RESOURCE) {
+      func(typeid(TypeHandler<Ref<U>>),
+          static_cast<const TypeHandler<Ref<U>>*>(&TYPE_HANDLER_INSTANCE<Ref<U>>));
+    }
+  }
 
   template <typename U>
   static constexpr const char* getName(TypeHandler<U>*) {

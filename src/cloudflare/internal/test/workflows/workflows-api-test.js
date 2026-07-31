@@ -44,6 +44,63 @@ export const tests = {
       assert.deepStrictEqual(instances[0].id, 'foo');
       assert.deepStrictEqual(instances[1].id, 'bar');
     }
+
+    {
+      const instance = await env.workflow.get('status-http');
+      const status = await instance.status();
+      assert.deepStrictEqual(status.status, 'running');
+      assert.strictEqual(status.transport, 'http');
+    }
+
+    {
+      // Test delete hits the /delete endpoint without throwing.
+      const instance = await env.workflow.get('delete-http');
+      await instance.delete();
+    }
+
+    {
+      const result = await env.workflow.deleteBatch([
+        'delete-http-1',
+        'missing-delete',
+        'delete-http-1',
+      ]);
+      assert.deepStrictEqual(result, {
+        deleted: [{ id: 'delete-http-1' }, { id: 'delete-http-1' }],
+        errors: [
+          {
+            id: 'missing-delete',
+            code: 10400,
+            message: 'workflows.api.error.instance.not_found',
+          },
+        ],
+      });
+    }
+
+    {
+      for (const method of ['get', 'create', 'createBatch', 'deleteBatch']) {
+        assert.strictEqual(typeof env.workflow[method], 'function');
+      }
+
+      const fromGet = await env.workflow.get('a');
+      const fromCreate = await env.workflow.create({ id: 'b' });
+      const [fromBatch] = await env.workflow.createBatch([{ id: 'c' }]);
+
+      const proto = Object.getPrototypeOf(fromGet);
+      assert.strictEqual(Object.getPrototypeOf(fromCreate), proto);
+      assert.strictEqual(Object.getPrototypeOf(fromBatch), proto);
+
+      for (const method of [
+        'pause',
+        'resume',
+        'terminate',
+        'restart',
+        'delete',
+        'status',
+        'sendEvent',
+      ]) {
+        assert.strictEqual(typeof fromGet[method], 'function');
+      }
+    }
   },
 
   async testRestartNoOptions(_, env) {

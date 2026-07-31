@@ -43,6 +43,7 @@ namespace {
 struct DispatchStats {
   uint getWorkerCalls = 0;
   uint customEventCalls = 0;
+  bool rejectCustomEvents = false;
 };
 
 // Minimal WorkerInterface for tests. Returns success on customEvent (so the HM's
@@ -56,6 +57,10 @@ class StubWorkerInterface final: public WorkerInterface {
   kj::Promise<WorkerInterface::CustomEvent::Result> customEvent(
       kj::Own<WorkerInterface::CustomEvent> event) override {
     ++stats.customEventCalls;
+    if (stats.rejectCustomEvents) {
+      return kj::Promise<WorkerInterface::CustomEvent::Result>(KJ_EXCEPTION(
+          OVERLOADED, "jsg.Error: Durable Object is overloaded. Too many requests queued."));
+    }
     return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
   }
 
@@ -280,6 +285,27 @@ KJ_TEST("HibernationManager: eyeball close dispatches webSocketClose to worker")
   KJ_ASSERT(stats.customEventCalls == 1, "expected exactly one customEvent dispatch",
       stats.customEventCalls);
 
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: failed event dispatches remove WebSocket") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("failed-termination-dispatch")));
+  auto hm = makeTestHm(fixture);
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm, "terminated"_kj);
+
+  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
+
+  stats.rejectCustomEvents = true;
+  end1->send("message"_kj).wait(fixture.getWaitScope());
+  fixture.pollEventLoop();
+  KJ_ASSERT(stats.customEventCalls == 2, stats.customEventCalls);
+
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    KJ_ASSERT(hm->getWebSockets(env.js, kj::none).size() == 0);
+    KJ_ASSERT(hm->getWebSockets(env.js, "terminated"_kj).size() == 0);
+  });
   fixture.drainAndDestroy(kj::mv(request));
 }
 

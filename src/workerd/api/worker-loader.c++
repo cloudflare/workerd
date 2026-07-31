@@ -80,10 +80,16 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
   // WorkerStub and any entrypoint stubs in vends until they are GC'd. We don't want to create
   // a cycle where a request context holds itself open (which would block DO hibernation).
   auto reenterAndGetCode = ioctx.makeReentryCallbackWeak(
-      [weakIoctx = ioctx.getWeakRef(), getCode = kj::mv(getCode),
-          compatDateValidation = compatDateValidation](jsg::Lock& js) mutable {
+      [getCode = kj::mv(getCode), compatDateValidation = compatDateValidation](
+          jsg::Lock& js, IoContext& ioctx) mutable {
+    // Note: We reference the original context (the one that initiated the load) via a weak ref
+    // rather than `IoContext::current()`. `getCode` is application-provided and may resolve its
+    // promise from a *different* context, in which case `IoContext::current()` inside this
+    // continuation would not be the context we want. Unlike the outer callback's captures, this
+    // weak ref is created (and destroyed) on the context's own thread as part of the promise
+    // chain, so it does not participate in the cross-thread destruction race.
     return getCode(js).then(js,
-        [weakIoctx = kj::addRef(*weakIoctx), compatDateValidation](
+        [weakIoctx = ioctx.getWeakRef(), compatDateValidation](
             jsg::Lock& js, WorkerCode code) -> DynamicWorkerSource {
       auto& ioctx = JSG_REQUIRE_NONNULL(weakIoctx->tryGet(), Error,
           "The request which initiated this dynamic worker load has already completed.");
@@ -306,16 +312,12 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
   };
 
   bool isPython = code.mainModule.endsWith(".py"_kj);
-  // Disallow Python modules when the main module is a JS module, and vice versa. Also tally up the
+  // Disallow Python modules when the main module is a JS module. Also tally up the
   // total size of all module bodies so we can enforce the worker code size limit.
+  // This behavior is deliberately not replicated for Python main modules since Python packages
+  // can contain arbitrary .js files.
   size_t totalCodeSize = 0;
   for (auto& module: modules) {
-    auto isJsModule = module.content.is<Worker::Script::EsModule>() ||
-        module.content.is<Worker::Script::CommonJsModule>();
-    if (isPython && isJsModule) {
-      JSG_FAIL_REQUIRE(TypeError, "Module \"", module.name,
-          "\" is a JS module, but the main module is a Python module.");
-    }
     auto isPythonModule = module.content.is<Worker::Script::PythonModule>();
     if (!isPython && isPythonModule) {
       JSG_FAIL_REQUIRE(TypeError, "Module \"", module.name,

@@ -49,6 +49,10 @@ I/O lifecycle, per-request context, worker/isolate management, actor storage, co
 - `InputGate::CriticalSection` must succeed or permanently breaks the gate
 - Observer classes (`RequestObserver`, `IsolateObserver`, etc.) have no-op defaults; all methods optional
 
+## Adding a compatibility flag
+
+When needing to add a compatibility flag, see [`adding-a-compatibility-flag.md`](../../../docs/reference/adding-a-compatibility-flag.md) for guidance.
+
 ## ANTI-PATTERNS
 
 - **NEVER** use `awaitIoLegacy()` in new code — use `awaitIo()` with continuation

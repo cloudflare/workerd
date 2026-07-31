@@ -55,9 +55,8 @@ inline workerd::WorkerInterface::AlarmResult fromImpl(
     .retry = result.retry,
     .retryCountsAgainstLimit = result.retry_counts_against_limit,
     .outcome = kj::from<kj_rs::Rust>(result.outcome),
-    .errorDescription = result.error_description.empty()
-        ? kj::none
-        : kj::Maybe<kj::String>(kj::str(result.error_description)),
+    .errorDescription =
+        result.error_description.map([](const ::rust::String& desc) { return kj::str(desc); }),
   };
 }
 
@@ -107,7 +106,7 @@ class RustWorkerInterface final: public workerd::WorkerInterface {
   }
 
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
-    co_return kj::from<kj_rs::Rust>(co_await impl->custom_event(*event));
+    co_return kj::from<kj_rs::Rust>(co_await impl->custom_event(kj::mv(event)));
   }
 
   kj::Promise<bool> test() override {

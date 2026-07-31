@@ -40,6 +40,7 @@ wd_rust_crate(
 
 wd_cc_library(
     name = "bridge",
+    srcs = ["ffi.c++"],
     hdrs = ["bridge.h"],
     deps = [
         ":ffi.rs@cxx",

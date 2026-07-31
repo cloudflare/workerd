@@ -1,0 +1,24 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "ts-webstreams-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "ts-webstreams-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "experimental",
+        ],
+        bindings = [
+          ( name = "SELF", service = "ts-webstreams-test" ),
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);

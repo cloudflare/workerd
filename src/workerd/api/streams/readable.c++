@@ -15,7 +15,7 @@
 namespace workerd::api {
 
 ReaderImpl::ReaderImpl(ReadableStreamController::Reader& reader)
-    : ioContext(tryGetIoContext()),
+    : ioContext(tryGetIoContextId()),
       reader(reader),
       state(ReaderState::create<Initial>()) {}
 
@@ -107,6 +107,12 @@ jsg::Promise<ReadResult> ReaderImpl::read(
     options.atLeast = atLeast;
   }
 
+  // Hold a strong reference to the stream across the read() call.
+  // The read can synchronously invoke the user's pull() callback, which could
+  // call reader.releaseLock() — dropping the jsg::Ref inside Attached. Without
+  // this local ref, GC could collect the ReadableStream (and its controller /
+  // ValueReadable / ByteReadable) while the C++ stack is still inside read().
+  auto ref = attached.stream.addRef();
   return KJ_ASSERT_NONNULL(attached.stream->getController().read(js, kj::mv(byobOptions)));
 }
 
@@ -258,7 +264,7 @@ void ReadableStreamBYOBReader::visitForGc(jsg::GcVisitor& visitor) {
 // ======================================================================================
 // DrainingReader implementation
 
-DrainingReader::DrainingReader(): ioContext(tryGetIoContext()) {}
+DrainingReader::DrainingReader(): ioContext(tryGetIoContextId()) {}
 
 DrainingReader::~DrainingReader() noexcept(false) {
   KJ_IF_SOME(stream, state.tryGet<Attached>()) {
@@ -388,9 +394,9 @@ ReadableStream::ReadableStream(IoContext& ioContext, kj::Own<ReadableStreamSourc
     : ReadableStream(newReadableStreamInternalController(ioContext, kj::mv(source))) {}
 
 ReadableStream::ReadableStream(kj::Own<ReadableStreamController> controller)
-    : ioContext(tryGetIoContext()),
+    : ioContext(tryGetIoContextId()),
       controller(kj::mv(controller)) {
-  getController().setOwnerRef(*this);
+  getController().setOwnerRef(PtrTarget::addWeakToThis());
 }
 
 void ReadableStream::visitForGc(jsg::GcVisitor& visitor) {
@@ -642,12 +648,12 @@ class NoDeferredProxyReadableStream final: public ReadableStreamSource {
     return inner->tryRead(buffer, minBytes, maxBytes);
   }
 
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
+  kj::Promise<DeferredProxy<void>> pumpTo(kj::Ptr<WritableStreamSink> output, bool end) override {
     // Move the deferred proxy part of the task over to the non-deferred part. To do this,
     // we use `ioctx.waitForDeferredProxy()`, which returns a single promise covering both parts
     // (and, importantly, registering pending events where needed). Then, we add a noop deferred
     // proxy to the end of that.
-    return addNoopDeferredProxy(ioctx.waitForDeferredProxy(inner->pumpTo(output, end)));
+    return addNoopDeferredProxy(ioctx.waitForDeferredProxy(inner->pumpTo(kj::mv(output), end)));
   }
 
   StreamEncoding getPreferredEncoding() override {
@@ -677,6 +683,11 @@ class NoDeferredProxyReadableStream final: public ReadableStreamSource {
 };
 
 }  // namespace
+
+kj::Own<ReadableStreamSource> newNoDeferredProxyReadableStream(
+    IoContext& context, kj::Own<ReadableStreamSource> inner) {
+  return kj::heap<NoDeferredProxyReadableStream>(kj::mv(inner), context);
+}
 
 void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // Serialize by effectively creating a `JsRpcStub` around this object and serializing that.

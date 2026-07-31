@@ -123,7 +123,7 @@ class ReadableLockImpl {
       inner.lock.state.template transitionTo<Unlocked>();
     }
 
-    kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) override;
+    kj::Maybe<kj::Promise<void>> tryPumpTo(kj::Ptr<WritableStreamSink> sink, bool end) override;
 
     jsg::Promise<ReadResult> read(jsg::Lock& js) override;
 
@@ -139,7 +139,10 @@ class ReadableLockImpl {
   //   Unlocked -> ReaderLocked (lockReader() called)
   //   Unlocked -> PipeLocked (tryPipeLock() called)
   //   ReaderLocked -> Unlocked (releaseReader() called)
-  //   PipeLocked -> Unlocked (release() or onClose/onError called)
+  //   PipeLocked -> Unlocked (release() called)
+  //     Only the pipe machinery performs this transition.
+  //     The destination's pipe loop holds a reference into the PipeLocked
+  //     state (its PipeController), which would otherwise dangle.
   //   Locked -> (remains until stream is done)
   using LockState = StateMachine<Locked, PipeLocked, ReaderLocked, Unlocked>;
   LockState state = LockState::template create<Unlocked>();
@@ -328,9 +331,11 @@ void ReadableLockImpl<Controller>::onClose(jsg::Lock& js) {
       // point is not recoverable. Log and move on.
       LOG_NOSENTRY(ERROR, "Error resolving ReadableStream reader closed promise");
     };
-  } else {
-    (void)state.template transitionFromTo<PipeLocked, Unlocked>();
   }
+  // When PipeLocked, we must NOT release the lock here: the destination's pipe lock holds a raw
+  // reference to our PipeController, and the pipe loop is responsible for releasing it (via
+  // source.release()) once it observes our closed/errored state. Tearing the PipeController down
+  // here leaves that reference dangling.
 }
 
 template <typename Controller>
@@ -345,14 +350,16 @@ void ReadableLockImpl<Controller>::onError(jsg::Lock& js, jsg::JsValue reason) {
       // point is not recoverable. Log and move on.
       LOG_NOSENTRY(ERROR, "Error rejecting ReadableStream reader closed promise");
     }
-  } else {
-    (void)state.template transitionFromTo<PipeLocked, Unlocked>();
   }
+  // When PipeLocked, we must NOT release the lock here: the destination's pipe lock holds a raw
+  // reference to our PipeController, and the pipe loop is responsible for releasing it (via
+  // source.release()) once it observes our closed/errored state. Tearing the PipeController down
+  // here leaves that reference dangling.
 }
 
 template <typename Controller>
 kj::Maybe<kj::Promise<void>> ReadableLockImpl<Controller>::PipeLocked::tryPumpTo(
-    WritableStreamSink& sink, bool end) {
+    kj::Ptr<WritableStreamSink> sink, bool end) {
   // We return nullptr here because this controller does not support kj's pumpTo.
   return kj::none;
 }
@@ -785,7 +792,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
   // See the comment for releaseReader in common.h for details on the use of maybeJs
   void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
 
-  void setOwnerRef(ReadableStream& stream) override;
+  void setOwnerRef(kj::Weak<ReadableStream> stream) override;
 
   Tee tee(jsg::Lock& js) override;
 
@@ -813,8 +820,8 @@ class ReadableStreamJsController final: public ReadableStreamController {
  private:
   // If the stream was created within the scope of a request, we want to treat it as I/O
   // and make sure it is not advanced from the scope of a different request.
-  kj::Maybe<IoContext&> ioContext;
-  kj::Maybe<ReadableStream&> owner;
+  kj::Maybe<IoContext::Id> ioContext = IoContext::tryGetCurrentId();
+  kj::Weak<ReadableStream> owner;
 
   // Initial state before setup() is called.
   struct Initial {
@@ -932,7 +939,7 @@ class WritableStreamJsController final: public WritableStreamController {
   kj::Maybe<kj::Own<WritableStreamSink>> removeSink(jsg::Lock& js) override;
   void detach(jsg::Lock& js) override;
 
-  void setOwnerRef(WritableStream& stream) override;
+  void setOwnerRef(kj::Weak<WritableStream> stream) override;
 
   void setup(jsg::Lock& js,
       jsg::Optional<UnderlyingSink> maybeUnderlyingSink,
@@ -965,8 +972,8 @@ class WritableStreamJsController final: public WritableStreamController {
  private:
   jsg::Promise<void> pipeLoop(jsg::Lock& js);
 
-  kj::Maybe<IoContext&> ioContext;
-  kj::Maybe<WritableStream&> owner;
+  kj::Maybe<IoContext::Id> ioContext = IoContext::tryGetCurrentId();
+  kj::Weak<WritableStream> owner;
 
   // Initial state before setup() is called.
   struct Initial {
@@ -1267,8 +1274,8 @@ kj::Own<typename ReadableImpl<Self>::Consumer> ReadableImpl<Self>::getConsumer(
 
 template <typename Self>
 WritableImpl<Self>::WritableImpl(
-    jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal)
-    : owner(owner.addWeakRef()),
+    jsg::Lock& js, kj::Weak<WritableStream> owner, jsg::Ref<AbortSignal> abortSignal)
+    : owner(kj::mv(owner)),
       signal(kj::mv(abortSignal)) {
   flags.pedanticWpt = FeatureFlags::get(js).getPedanticWpt();
 }
@@ -1314,9 +1321,7 @@ jsg::Promise<void> WritableImpl<Self>::abort(
 template <typename Self>
 kj::Maybe<WritableStreamJsController&> WritableImpl<Self>::tryGetOwner() {
   KJ_IF_SOME(o, owner) {
-    return o->tryGet().map([](WritableStream& owner) -> WritableStreamJsController& {
-      return static_cast<WritableStreamJsController&>(owner.getController());
-    });
+    return static_cast<WritableStreamJsController&>(o->getController());
   }
   return kj::none;
 }
@@ -2040,29 +2045,35 @@ struct ByteReadable final: public kj::PtrTarget,
       reading = true;
       KJ_DEFER(reading = false);
       KJ_IF_SOME(byob, byobOptions) {
-        jsg::BufferSource source(js, byob.bufferView.getHandle(js));
+        jsg::JsArrayBufferView view = jsg::JsArrayBufferView(byob.bufferView.getHandle(js));
+        view = view.detachAndTake(js);
+        size_t elementSize = view.getElementSize();
         // If atLeast is not given, then by default it is the element size of the view
         // that we were given. If atLeast is given, we make sure that it is aligned
         // with the element size. No matter what, atLeast cannot be less than 1.
-        auto atLeast = kj::max(source.getElementSize(), byob.atLeast.orDefault(1));
-        atLeast = kj::max(1, atLeast - (atLeast % source.getElementSize()));
+        auto atLeast = kj::max(elementSize, byob.atLeast.orDefault(1));
+        atLeast = kj::max(1, atLeast - (atLeast % elementSize));
         s.consumer->read(js,
             kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
                 ByteQueue::ReadRequest::PullInto{
-                  .store = jsg::BufferSource(js, source.detach(js)),
+                  .view = view.addRef(js),
+                  .elementSize = elementSize,
+                  .originalOffset = view.getOffset(),
                   .atLeast = atLeast,
                   .type = ByteQueue::ReadRequest::Type::BYOB,
                 }));
       } else KJ_IF_SOME(chunkSize, autoAllocateChunkSize) {
         // autoAllocateChunkSize is set, so we allocate a buffer and do a BYOB read.
         // This makes the buffer available to the underlying source via controller.byobRequest.
-        KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, chunkSize)) {
+        KJ_IF_SOME(store, jsg::JsUint8Array::tryCreate(js, chunkSize)) {
           // Ensure that the handle is created here so that the size of the buffer
           // is accounted for in the isolate memory tracking.
           s.consumer->read(js,
               kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
                   ByteQueue::ReadRequest::PullInto{
-                    .store = kj::mv(store),
+                    .view = jsg::JsArrayBufferView(store).addRef(js),
+                    .elementSize = 1,
+                    .originalOffset = 0,
                     .type = ByteQueue::ReadRequest::Type::BYOB,
                   }));
         } else {
@@ -2073,11 +2084,13 @@ struct ByteReadable final: public kj::PtrTarget,
         // the underlying source's pull method won't get a byobRequest. It must use
         // controller.enqueue() to provide data instead.
         constexpr size_t kDefaultReadSize = 16384;  // 16KB default buffer
-        KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, kDefaultReadSize)) {
+        KJ_IF_SOME(store, jsg::JsUint8Array::tryCreate(js, kDefaultReadSize)) {
           s.consumer->read(js,
               kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
                   ByteQueue::ReadRequest::PullInto{
-                    .store = kj::mv(store),
+                    .view = jsg::JsArrayBufferView(store).addRef(js),
+                    .elementSize = 1,
+                    .originalOffset = 0,
                     .type = ByteQueue::ReadRequest::Type::DEFAULT,
                   }));
         } else {
@@ -2098,11 +2111,10 @@ struct ByteReadable final: public kj::PtrTarget,
     KJ_IF_SOME(byob, byobOptions) {
       // If a BYOB buffer was given, we need to give it back wrapped in a TypedArray
       // whose size is set to zero.
-      jsg::BufferSource source(js, byob.bufferView.getHandle(js));
-      auto store = source.detach(js);
-      store.consume(store.size());
+      auto view = jsg::JsArrayBufferView(byob.bufferView.getHandle(js));
+      view = view.detachAndTake(js).slice(js, 0, 0);
       return js.resolvedPromise(ReadResult{
-        .value = jsg::JsValue(store.createHandle(js)).addRef(js),
+        .value = jsg::JsValue(view).addRef(js),
         .done = true,
       });
     } else {
@@ -2238,7 +2250,7 @@ struct ByteReadable final: public kj::PtrTarget,
 
 ReadableStreamDefaultController::ReadableStreamDefaultController(
     UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy)
-    : ioContext(tryGetIoContext()),
+    : ioContext(tryGetIoContextId()),
       impl(kj::mv(underlyingSource), kj::mv(queuingStrategy)) {}
 
 kj::Maybe<StreamStates::Errored> ReadableStreamDefaultController::getMaybeErrorState(
@@ -2330,19 +2342,28 @@ kj::Own<ValueQueue::Consumer> ReadableStreamDefaultController::getConsumer(
 
 // ======================================================================================
 
+namespace {
+jsg::JsRef<jsg::JsUint8Array> getViewRef(jsg::Lock& js, kj::Maybe<jsg::JsUint8Array> maybeView) {
+  KJ_IF_SOME(view, maybeView) {
+    return view.addRef(js);
+  }
+  KJ_FAIL_ASSERT("BYOB read request's view is expected to be present when updating the view");
+}
+}  // namespace
+
 ReadableStreamBYOBRequest::Impl::Impl(jsg::Lock& js,
     kj::Own<ByteQueue::ByobRequest> readRequest,
     kj::Rc<WeakRef<ReadableByteStreamController>> controller)
     : readRequest(kj::mv(readRequest)),
       controller(kj::mv(controller)),
-      view(js.v8Ref(this->readRequest->getView(js))),
+      view(getViewRef(js, this->readRequest->getView(js))),
       originalBufferByteLength(this->readRequest->getOriginalBufferByteLength(js)),
       originalByteOffsetPlusBytesFilled(this->readRequest->getOriginalByteOffsetPlusBytesFilled()) {
 }
 
 void ReadableStreamBYOBRequest::Impl::updateView(jsg::Lock& js) {
-  jsg::check(view.getHandle(js)->Buffer()->Detach(v8::Local<v8::Value>()));
-  view = js.v8Ref(readRequest->getView(js));
+  view.getHandle(js).detachInPlace(js);
+  view = getViewRef(js, readRequest->getView(js));
 }
 
 void ReadableStreamBYOBRequest::visitForGc(jsg::GcVisitor& visitor) {
@@ -2354,7 +2375,7 @@ void ReadableStreamBYOBRequest::visitForGc(jsg::GcVisitor& visitor) {
 ReadableStreamBYOBRequest::ReadableStreamBYOBRequest(jsg::Lock& js,
     kj::Own<ByteQueue::ByobRequest> readRequest,
     kj::Rc<WeakRef<ReadableByteStreamController>> controller)
-    : ioContext(tryGetIoContext()),
+    : ioContext(tryGetIoContextId()),
       maybeImpl(Impl(js, kj::mv(readRequest), kj::mv(controller))) {}
 
 kj::Maybe<int> ReadableStreamBYOBRequest::getAtLeast() {
@@ -2364,9 +2385,9 @@ kj::Maybe<int> ReadableStreamBYOBRequest::getAtLeast() {
   return kj::none;
 }
 
-kj::Maybe<jsg::V8Ref<v8::Uint8Array>> ReadableStreamBYOBRequest::getView(jsg::Lock& js) {
+kj::Maybe<jsg::JsUint8Array> ReadableStreamBYOBRequest::getView(jsg::Lock& js) {
   KJ_IF_SOME(impl, maybeImpl) {
-    return impl.view.addRef(js);
+    return impl.view.getHandle(js);
   }
   return kj::none;
 }
@@ -2376,7 +2397,7 @@ void ReadableStreamBYOBRequest::invalidate(jsg::Lock& js) {
     // If the user code happened to have retained a reference to the view or
     // the buffer, we need to detach it so that those references cannot be used
     // to modify or observe modifications.
-    jsg::check(impl.view.getHandle(js)->Buffer()->Detach(v8::Local<v8::Value>()));
+    impl.view.getHandle(js).detachInPlace(js);
     impl.controller->runIfAlive(
         [](ReadableByteStreamController& controller) { controller.maybeByobRequest = kj::none; });
   }
@@ -2387,7 +2408,7 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
   auto& impl = JSG_REQUIRE_NONNULL(
       maybeImpl, TypeError, "This ReadableStreamBYOBRequest has been invalidated.");
   JSG_REQUIRE(impl.controller->isValid(), Error, "The ReadableStreamBYOBRequest is invalid.");
-  JSG_REQUIRE(impl.view.getHandle(js)->ByteLength() > 0, TypeError,
+  JSG_REQUIRE(impl.view.getHandle(js).size() > 0, TypeError,
       "Cannot respond with a zero-length or detached view");
   impl.controller->runIfAlive([&](ReadableByteStreamController& controller) {
     if (!controller.canCloseOrEnqueue()) {
@@ -2399,9 +2420,19 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
       bool shouldInvalidate = false;
       if (impl.readRequest->isInvalidated() && controller.impl.consumerCount() >= 1) {
         // While this particular request may be invalidated, there are still
-        // other branches we can push the data to. Let's do so.
-        jsg::BufferSource source(js, impl.view.getHandle(js));
-        auto entry = kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, source.detach(js)));
+        // other branches we can push the data to. Forward only the first
+        // bytesWritten bytes — not the entire view — to avoid fabricating
+        // trailing zeros on the surviving branch.
+        JSG_REQUIRE(bytesWritten > 0, TypeError,
+            "The bytesWritten must be more than zero while the stream is open.");
+        auto view = impl.view.getHandle(js);
+
+        JSG_REQUIRE(static_cast<size_t>(bytesWritten) <= view.size(), RangeError,
+            kj::str("Too many bytes [", bytesWritten, "] in response to a BYOB read request."));
+
+        view = view.detachAndTake(js).slice(js, 0, bytesWritten);
+
+        auto entry = kj::rc<ByteQueue::Entry>(js, jsg::JsBufferSource(view));
         controller.impl.enqueue(js, kj::mv(entry), controller.getSelf());
       } else {
         JSG_REQUIRE(bytesWritten > 0, TypeError,
@@ -2424,7 +2455,7 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
   });
 }
 
-void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSource view) {
+void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::JsBufferSource view) {
   auto& impl = JSG_REQUIRE_NONNULL(
       maybeImpl, TypeError, "This ReadableStreamBYOBRequest has been invalidated.");
   JSG_REQUIRE(impl.controller->isValid(), Error, "The ReadableStreamBYOBRequest is invalid.");
@@ -2439,22 +2470,20 @@ void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSou
         // 2. The underlying buffer must not be detached (TypeError)
         // 3. The buffer byte length must not be zero (RangeError)
         // 4. The buffer byte length must match the original (RangeError)
-        auto handle = view.getHandle(js);
-        auto buffer = handle->IsArrayBuffer() ? handle.As<v8::ArrayBuffer>()
-                                              : handle.As<v8::ArrayBufferView>()->Buffer();
-        JSG_REQUIRE(
-            !buffer->WasDetached(), TypeError, "The underlying ArrayBuffer has been detached.");
+        JSG_REQUIRE(!view.isDetached(), TypeError, "The underlying ArrayBuffer has been detached.");
 
-        JSG_REQUIRE(view.canDetach(js), TypeError, "Unable to use non-detachable ArrayBuffer.");
+        JSG_REQUIRE(view.isDetachable(), TypeError, "Unable to use non-detachable ArrayBuffer.");
+
         // Use the stored values since the ByobRequest may have been invalidated during close.
-        auto actualBufferByteLength = buffer->ByteLength();
+        auto actualBufferByteLength = view.underlyingArrayBufferSize(js);
+
         JSG_REQUIRE(
             actualBufferByteLength != 0, RangeError, "The underlying ArrayBuffer is zero-length.");
         JSG_REQUIRE(actualBufferByteLength == impl.originalBufferByteLength, RangeError,
             "The underlying ArrayBuffer is not the correct length.");
         // The view's byte offset must match the original byte offset plus bytes filled.
-        auto viewByteOffset =
-            handle->IsArrayBuffer() ? 0 : handle.As<v8::ArrayBufferView>()->ByteOffset();
+        auto viewByteOffset = view.getOffset();
+
         JSG_REQUIRE(viewByteOffset == impl.originalByteOffsetPlusBytesFilled, RangeError,
             "The view has an invalid byte offset.");
       } else {
@@ -2467,7 +2496,8 @@ void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSou
       if (impl.readRequest->isInvalidated() && controller.impl.consumerCount() >= 1) {
         // While this particular request may be invalidated, there are still
         // other branches we can push the data to. Let's do so.
-        auto entry = kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, view.detach(js)));
+        view = view.detachAndTake(js);
+        auto entry = kj::rc<ByteQueue::Entry>(js, view);
         controller.impl.enqueue(js, kj::mv(entry), controller.getSelf());
       } else {
         JSG_REQUIRE(view.size() > 0, TypeError,
@@ -2504,7 +2534,7 @@ ReadableByteStreamController::ReadableByteStreamController(
     UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy)
     : weakSelf(kj::rc<WeakRef<ReadableByteStreamController>>(
           kj::Badge<ReadableByteStreamController>{}, *this)),
-      ioContext(tryGetIoContext()),
+      ioContext(tryGetIoContextId()),
       impl(kj::mv(underlyingSource), kj::mv(queuingStrategy)) {}
 
 ReadableByteStreamController::~ReadableByteStreamController() noexcept(false) {
@@ -2560,25 +2590,25 @@ void ReadableByteStreamController::close(jsg::Lock& js) {
   impl.close(js);
 }
 
-void ReadableByteStreamController::enqueue(jsg::Lock& js, jsg::BufferSource chunk) {
+void ReadableByteStreamController::enqueue(jsg::Lock& js, jsg::JsBufferSource chunk) {
   // Hold a strong reference up front. Operations below (invalidate, detach) touch
   // the JS heap and C++ argument evaluation order is unspecified, so JSG_THIS as a
   // function argument would not reliably precede chunk.detach(js).
   auto self = JSG_THIS;
 
   JSG_REQUIRE(chunk.size() > 0, TypeError, "Cannot enqueue a zero-length ArrayBuffer.");
-  JSG_REQUIRE(chunk.canDetach(js), TypeError, "The provided ArrayBuffer must be detachable.");
+  JSG_REQUIRE(chunk.isDetachable(), TypeError, "The provided ArrayBuffer must be detachable.");
   JSG_REQUIRE(impl.canCloseOrEnqueue(), TypeError, "This ReadableByteStreamController is closed.");
 
   KJ_IF_SOME(byobRequest, maybeByobRequest) {
     KJ_IF_SOME(view, byobRequest->getView(js)) {
-      JSG_REQUIRE(view.getHandle(js)->ByteLength() > 0, TypeError,
-          "The byobRequest.view is zero-length or was detached");
+      JSG_REQUIRE(
+          view.size() > 0, TypeError, "The byobRequest.view is zero-length or was detached");
     }
     byobRequest->invalidate(js);
   }
 
-  impl.enqueue(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, chunk.detach(js))), kj::mv(self));
+  impl.enqueue(js, kj::rc<ByteQueue::Entry>(js, chunk.detachAndTake(js)), kj::mv(self));
 }
 
 void ReadableByteStreamController::error(jsg::Lock& js, jsg::JsValue reason) {
@@ -2620,30 +2650,30 @@ kj::Own<ByteQueue::Consumer> ReadableByteStreamController::getConsumer(
 
 // ======================================================================================
 
-ReadableStreamJsController::ReadableStreamJsController(): ioContext(tryGetIoContext()) {}
+ReadableStreamJsController::ReadableStreamJsController(): ioContext(tryGetIoContextId()) {}
 
 ReadableStreamJsController::ReadableStreamJsController(StreamStates::Closed closed)
-    : ioContext(tryGetIoContext()) {
+    : ioContext(tryGetIoContextId()) {
   state.transitionTo<StreamStates::Closed>();
 }
 
 ReadableStreamJsController::ReadableStreamJsController(StreamStates::Errored errored)
-    : ioContext(tryGetIoContext()) {
+    : ioContext(tryGetIoContextId()) {
   state.transitionTo<StreamStates::Errored>(kj::mv(errored));
 }
 
 ReadableStreamJsController::ReadableStreamJsController(jsg::Lock& js, ValueReadable& consumer)
-    : ioContext(tryGetIoContext()) {
+    : ioContext(tryGetIoContextId()) {
   state.transitionTo<kj::Own<ValueReadable>>(consumer.clone(js, *this));
 }
 
 ReadableStreamJsController::ReadableStreamJsController(jsg::Lock& js, ByteReadable& consumer)
-    : ioContext(tryGetIoContext()) {
+    : ioContext(tryGetIoContextId()) {
   state.transitionTo<kj::Own<ByteReadable>>(consumer.clone(js, *this));
 }
 
 jsg::Ref<ReadableStream> ReadableStreamJsController::addRef() {
-  return KJ_REQUIRE_NONNULL(owner).addRef();
+  return owner.assertLive().addRef();
 }
 
 jsg::Promise<void> ReadableStreamJsController::cancel(
@@ -2795,11 +2825,10 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
       // If it is a BYOB read, then the spec requires that we return an empty
       // view of the same type provided, that uses the same backing memory
       // as that provided, but with zero-length.
-      auto source = jsg::BufferSource(js, byobOptions.bufferView.getHandle(js));
-      auto store = source.detach(js);
-      store.consume(store.size());
+      auto source = jsg::JsArrayBufferView(byobOptions.bufferView.getHandle(js));
+      source = source.detachAndTake(js).slice(js, 0, 0);
       return js.resolvedPromise(ReadResult{
-        .value = jsg::JsValue(store.createHandle(js)).addRef(js),
+        .value = jsg::JsValue(source).addRef(js),
         .done = true,
       });
     }
@@ -3024,9 +3053,9 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
   KJ_UNREACHABLE;
 }
 
-void ReadableStreamJsController::setOwnerRef(ReadableStream& stream) {
-  KJ_ASSERT(owner == kj::none);
-  owner = &stream;
+void ReadableStreamJsController::setOwnerRef(kj::Weak<ReadableStream> stream) {
+  KJ_ASSERT(owner == nullptr);
+  owner = kj::mv(stream);
 }
 
 void ReadableStreamJsController::setup(jsg::Lock& js,
@@ -3216,12 +3245,13 @@ kj::Maybe<kj::OneOf<DefaultController, ByobController>> ReadableStreamJsControll
   KJ_UNREACHABLE;
 }
 
+WD_STRONG_BOOL(StripBom);
 namespace {
 // Consumes all bytes from a stream, buffering in memory, with the purpose
 // of producing either a single concatenated kj::Array<byte> or kj::String.
 class AllReader {
  public:
-  using PartList = kj::Array<kj::ArrayPtr<byte>>;
+  using PartList = kj::Array<kj::Array<kj::byte>>;
 
   AllReader(jsg::Ref<ReadableStream> stream, uint64_t limit)
       : state(State::create<jsg::Ref<ReadableStream>>(kj::mv(stream))),
@@ -3229,29 +3259,30 @@ class AllReader {
   KJ_DISALLOW_COPY_AND_MOVE(AllReader);
 
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> allBytes(jsg::Lock& js) {
-    return loop(js).then(
-        js, [this](auto& js, PartList&& partPtrs) -> jsg::JsRef<jsg::JsArrayBuffer> {
+    return loop(js).then(js, [this](auto& js, PartList partPtrs) -> jsg::JsRef<jsg::JsArrayBuffer> {
       auto ab = jsg::JsArrayBuffer::create(js, runningTotal);
-      copyInto(ab.asArrayPtr(), partPtrs.asPtr());
+      copyInto(ab.asArrayPtr(), partPtrs);
       return ab.addRef(js);
     });
   }
 
   jsg::Promise<kj::String> allText(
       jsg::Lock& js, ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) {
-    return loop(js).then(js, [this, option](auto& js, PartList&& partPtrs) {
+    return loop(js).then(js, [this, option](auto& js, PartList partPtrs) {
       // Strip UTF-8 BOM if requested
+      bool hadBom = false;
       if ((option & ReadAllTextOption::STRIP_BOM) && partPtrs.size() > 0 &&
           hasUtf8Bom(partPtrs[0])) {
-        partPtrs[0] = partPtrs[0].slice(UTF8_BOM_SIZE);
         runningTotal -= UTF8_BOM_SIZE;
+        hadBom = true;
       }
 
       JSG_REQUIRE(runningTotal <= v8::String::kMaxLength, RangeError,
           "String length exceeds v8::String::kMaxLength.");
 
       auto out = kj::heapArray<char>(runningTotal + 1);
-      copyInto(out.first(out.size() - 1).asBytes(), partPtrs.asPtr());
+      copyInto(
+          out.first(out.size() - 1).asBytes(), partPtrs, hadBom ? StripBom::YES : StripBom::NO);
       out.back() = '\0';
       return kj::String(kj::mv(out));
     });
@@ -3259,9 +3290,6 @@ class AllReader {
 
   void visitForGc(jsg::GcVisitor& visitor) {
     state.visitForGc(visitor);
-    for (auto& part: parts) {
-      visitor.visit(part);
-    }
   }
 
  private:
@@ -3276,13 +3304,13 @@ class AllReader {
       jsg::Ref<ReadableStream>>;
   State state;
   uint64_t limit;
-  kj::Vector<jsg::BufferSource> parts;
+  kj::Vector<kj::Array<kj::byte>> parts;
   uint64_t runningTotal = 0;
 
   jsg::Promise<PartList> loop(jsg::Lock& js) {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-        return js.resolvedPromise(KJ_MAP(p, parts) { return p.asArrayPtr(); });
+        return js.resolvedPromise(parts.releaseAsArray());
       }
       KJ_CASE_ONEOF(errored, StreamStates::Errored) {
         return js.template rejectedPromise<PartList>(errored.getHandle(js));
@@ -3309,7 +3337,7 @@ class AllReader {
                 js, [&](jsg::Lock& js) { return loop(js); });
           }
 
-          jsg::BufferSource bufferSource(js, handle);
+          auto bufferSource = jsg::JsBufferSource(handle);
 
           if (bufferSource.size() == 0) {
             // Weird but allowed, we'll skip it.
@@ -3324,7 +3352,16 @@ class AllReader {
           }
 
           runningTotal += bufferSource.size();
-          parts.add(bufferSource.copy(js));
+          // Unfortunately there is a double copy required (one here, and one
+          // in copyInto). We need to defensively copy the bufferSource because
+          // there's a chance user-code could detach, resize, or modify the
+          // underlying ArrayBuffer after we return from the read. We don't
+          // know how much data the stream will produce tho so we can't read
+          // into a pre-allocated buffer for the final result. So we have to
+          // copy once here, then copy again into the final result.
+          // TODO(perf): Later, we can try optimizing this but for now we want
+          // to be correct and safe.
+          parts.add(bufferSource.copy());
           return loop(js);
         };
 
@@ -3342,10 +3379,22 @@ class AllReader {
     KJ_UNREACHABLE;
   }
 
-  void copyInto(kj::ArrayPtr<byte> out, kj::ArrayPtr<kj::ArrayPtr<byte>> in) {
+  void copyInto(
+      kj::ArrayPtr<byte> out, kj::ArrayPtr<kj::Array<byte>> in, StripBom stripBom = StripBom::NO) {
+    bool firstPart = true;
     for (auto& part: in) {
-      KJ_ASSERT(part.size() <= out.size());
-      out.write(part);
+      // If requested, strip the UTF-8 BOM from the first part.
+      // stripBom will only be set to YES if the caller has already
+      // verified that the first part is non-empty and has the BOM
+      if (stripBom && firstPart) {
+        firstPart = false;
+        auto partWithoutBom = part.slice(UTF8_BOM_SIZE);
+        KJ_ASSERT(partWithoutBom.size() <= out.size());
+        out.write(partWithoutBom);
+      } else {
+        KJ_ASSERT(part.size() <= out.size());
+        out.write(part);
+      }
     }
   }
 };
@@ -3587,9 +3636,9 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
 // ======================================================================================
 
 WritableStreamDefaultController::WritableStreamDefaultController(
-    jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal)
-    : ioContext(tryGetIoContext()),
-      impl(js, owner, kj::mv(abortSignal)) {}
+    jsg::Lock& js, kj::Weak<WritableStream> owner, jsg::Ref<AbortSignal> abortSignal)
+    : ioContext(tryGetIoContextId()),
+      impl(js, kj::mv(owner), kj::mv(abortSignal)) {}
 
 jsg::Promise<void> WritableStreamDefaultController::abort(jsg::Lock& js, jsg::JsValue reason) {
   return impl.abort(js, JSG_THIS, reason);
@@ -3649,7 +3698,7 @@ WritableStreamDefaultController::~WritableStreamDefaultController() noexcept(fal
 }
 
 // ======================================================================================
-WritableStreamJsController::WritableStreamJsController(): ioContext(tryGetIoContext()) {}
+WritableStreamJsController::WritableStreamJsController(): ioContext(tryGetIoContextId()) {}
 
 WritableStreamJsController::~WritableStreamJsController() noexcept(false) {
   // Clear algorithms to break circular references during destruction
@@ -3659,19 +3708,17 @@ WritableStreamJsController::~WritableStreamJsController() noexcept(false) {
   // Clear the state to break the circular reference to the controller.
   // During destruction, we force the transition since the current state doesn't matter.
   state.forceTransitionTo<StreamStates::Closed>();
-  // Clear owner reference
-  owner = kj::none;
   // Clear any pending abort promise
   maybeAbortPromise = kj::none;
 }
 
 WritableStreamJsController::WritableStreamJsController(StreamStates::Closed closed)
-    : ioContext(tryGetIoContext()) {
+    : ioContext(tryGetIoContextId()) {
   state.transitionTo<StreamStates::Closed>();
 }
 
 WritableStreamJsController::WritableStreamJsController(StreamStates::Errored errored)
-    : ioContext(tryGetIoContext()) {
+    : ioContext(tryGetIoContextId()) {
   state.transitionTo<StreamStates::Errored>(kj::mv(errored));
 }
 
@@ -3707,7 +3754,7 @@ jsg::Promise<void> WritableStreamJsController::abort(
 }
 
 jsg::Ref<WritableStream> WritableStreamJsController::addRef() {
-  return KJ_ASSERT_NONNULL(owner).addRef();
+  return owner.assertLive().addRef();
 }
 
 bool WritableStreamJsController::isClosedOrClosing() {
@@ -3899,8 +3946,8 @@ void WritableStreamJsController::detach(jsg::Lock& js) {
   KJ_UNIMPLEMENTED("WritableStreamJsController::detach is not implemented");
 }
 
-void WritableStreamJsController::setOwnerRef(WritableStream& stream) {
-  owner = stream;
+void WritableStreamJsController::setOwnerRef(kj::Weak<WritableStream> stream) {
+  owner = kj::mv(stream);
 }
 
 void WritableStreamJsController::setup(jsg::Lock& js,
@@ -3919,7 +3966,7 @@ void WritableStreamJsController::setup(jsg::Lock& js,
   // We account for the memory usage of the WritableStreamDefaultController and AbortSignal together
   // because their lifetimes are identical and memory accounting itself has a memory overhead.
   auto controller = js.allocAccounted<WritableStreamDefaultController>(
-      sizeof(WritableStreamDefaultController) + sizeof(AbortSignal), js, KJ_ASSERT_NONNULL(owner),
+      sizeof(WritableStreamDefaultController) + sizeof(AbortSignal), js, owner,
       js.alloc<AbortSignal>());
   auto& controllerRef = *controller;
   state.transitionTo<Controller>(kj::mv(controller));
@@ -3940,7 +3987,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamJsController::tryPipeFrom(
   // completes, or is rejected if the pipe operation is aborted or errored.
 
   // Let's also acquire the destination pipe lock.
-  lock.pipeLock(KJ_ASSERT_NONNULL(owner), kj::mv(source), options);
+  lock.pipeLock(owner.assertLive(), kj::mv(source), options);
 
   return pipeLoop(js).then(js, [ref = addRef()](auto& js) {});
 }
@@ -4124,7 +4171,7 @@ void WritableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
 // =======================================================================================
 
 TransformStreamDefaultController::TransformStreamDefaultController(jsg::Lock& js)
-    : ioContext(tryGetIoContext()),
+    : ioContext(tryGetIoContextId()),
       startPromise(js.newPromiseAndResolver<void>()) {}
 
 kj::Maybe<int> TransformStreamDefaultController::getDesiredSize() {

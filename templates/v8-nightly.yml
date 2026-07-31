@@ -1,0 +1,58 @@
+spec:
+  inputs:
+    pipeline-rule:
+      description: Rule selecting the repository's V8 nightly pipeline.
+      type: string
+    git-submodule-strategy:
+      description: Git submodule strategy needed by the repository.
+      type: string
+      default: none
+---
+
+include:
+  - component: $CI_SERVER_FQDN/cloudflare/ci/cfsetup/build@~latest
+    inputs:
+      stage: build
+      runner: vm-linux-x86-16cpu-32gb
+      runOnCustomRules:
+        - if: $[[ inputs.pipeline-rule ]]
+      jobPrefix: v8-nightly
+      artifactDir: artifacts
+      CFSETUP_TARGET: ci-v8-nightly
+      env:
+        - SSH_PRIVKEY
+        - GCHAT_URL
+        - FREIGHTER_REGISTRY_READ_ACCESS_CLIENT_ID
+        - FREIGHTER_REGISTRY_READ_ACCESS_CLIENT_SECRET
+        - OPENCODE_AI_GATEWAY_API_TOKEN
+
+v8-nightly-build:
+  resource_group: v8-nightly
+  timeout: 6h
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.cfdata.org
+  secrets:
+    SSH_PRIVKEY:
+      vault: gitlab/cloudflare/ew/edgeworker/_dev/ew-1404-ssh-privkey/key@kv
+      file: false
+    GCHAT_URL:
+      vault: gitlab/cloudflare/ew/edgeworker/_dev/gchat_url/data@kv
+      file: false
+    FREIGHTER_REGISTRY_READ_ACCESS_CLIENT_ID:
+      vault: gitlab/_ci_components/_dev/rust/freighterClient@kv
+      file: false
+    FREIGHTER_REGISTRY_READ_ACCESS_CLIENT_SECRET:
+      vault: gitlab/_ci_components/_dev/rust/freighterSecret@kv
+      file: false
+    OPENCODE_AI_GATEWAY_API_TOKEN:
+      vault: gitlab/_ci_components/_dev/_terraform_atlantis/ai/runtime/cloudflare_api_token/data@kv
+      file: false
+  variables:
+    GIT_SUBMODULE_STRATEGY: $[[ inputs.git-submodule-strategy ]]
+  artifacts:
+    when: always
+    expire_in: 14 days
+    paths:
+      - artifacts
+      - ci/v8-nightly-report.md

@@ -45,6 +45,10 @@ declare const tracing: {
     ...args: A
   ): T;
 
+  // Creates a span as a child of the current active user tracing span without making it active.
+  // Callers must invoke `span.end()` explicitly.
+  startSpan(name: string): Span;
+
   // The `Span` class is exposed as a nested type so callers can reference the type via
   // `InstanceType<typeof tracing.Span>` (see `tracing-helpers.ts`).
   readonly Span: typeof Span;

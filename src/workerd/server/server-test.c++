@@ -643,6 +643,38 @@ KJ_TEST("Server: serve basic Service Worker") {
     Bad Request)"_blockquote);
 }
 
+KJ_TEST("Server: serve Service Worker using the new module registry") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    compatibilityFlags = ["new_module_registry"],
+    serviceWorkerScript =
+        `addEventListener("fetch", event => {
+        `  event.respondWith(new Response("NMR: " + event.request.url));
+        `})
+  ))"_kj));
+
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/service-worker", "NMR: http://foo/service-worker");
+}
+
+KJ_TEST("Server: Python workers reject the new module registry") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    compatibilityFlags = ["python_workers", "new_module_registry"],
+    serviceWorkerScript =
+        `addEventListener("fetch", event => {
+        `  event.respondWith(new Response("unused"));
+        `})
+  ))"_kj));
+
+  test.server.allowExperimental();
+  KJ_EXPECT_THROW_MESSAGE("Python workers do not currently support the new ModuleRegistry",
+      test.server.run(v8System, *test.config).wait(test.ws));
+}
+
 KJ_TEST("Server: use service name as Service Worker origin") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
@@ -1208,14 +1240,9 @@ KJ_TEST("Server: connect() with Worker as outbound, no connect_pass_though") {
                 `
                 `export default {
                 `  async fetch(request, env) {
-                `    // TODO(bug): At present this throws synchronously, which seems like a bug in
-                `    //   the implementation of connect(): errors coming from the destination
-                `    //   service really ought to be async (in prod, they always will be), showing
-                `    //   up on the first read or write. At present, though, I'm not looking to
-                `    //   fix this bug.
-                `    assert.throws(() => connect("subhost:123"), {
-                `      name: "TypeError",
-                `      message: "Incoming CONNECT on a worker not supported",
+                `    await assert.rejects(async () => { await connect("subhost:123").opened; }, {
+                `       name: "Error",
+                `       message: "proxy request failed, cannot connect to the specified address",
                 `    });
                 `
                 `    return new Response("OK");
@@ -1249,6 +1276,7 @@ KJ_TEST("Server: connect() with Worker as outbound, no connect_pass_though") {
     ]
   ))"_kj);
 
+  KJ_EXPECT_LOG(ERROR, "Handler does not export a connect() function");
   test.server.allowExperimental();
   test.start();
   auto conn = test.connect("test-addr");
@@ -1481,6 +1509,255 @@ KJ_TEST("Server: capability bindings") {
     Hello from Queue
     Hello from Hyperdrive(test-user)
   )"_blockquote);
+}
+
+KJ_TEST("Server: Hyperdrive connect via synthetic IP") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { connect } from 'cloudflare:sockets';
+                `export default {
+                `  async fetch(request, env) {
+                `    const ip = env.hyperdrive.ip;
+                `    if (!/^240\.0\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+                `      throw new Error(`unexpected hyperdrive ip: ${ip}`);
+                `    }
+                `    const connection = connect(`${ip}:5432`);
+                `    const encoded = new TextEncoder().encode("hyperdrive-ip-test");
+                `    await connection.writable.getWriter().write(new Uint8Array(encoded));
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "hyperdrive",
+              hyperdrive = (
+                designator = "hyperdrive-outbound",
+                database = "test-db",
+                user = "test-user",
+                password = "test-password",
+                scheme = "postgresql"
+              )
+            )
+          ]
+        )
+      ),
+      ( name = "hyperdrive-outbound", external = (
+        address = "hyperdrive-host",
+        tcp = ()
+      ))
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  {
+    auto subreq = test.receiveSubrequest("hyperdrive-host");
+    subreq.recv("hyperdrive-ip-test");
+  }
+  conn.recvHttp200("OK");
+}
+
+KJ_TEST("Server: Hyperdrive host resolves via node:dns to synthetic IP") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          compatibilityFlags = ["nodejs_compat"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { connect } from 'cloudflare:sockets';
+                `import { promises as dns } from 'node:dns';
+                `export default {
+                `  async fetch(request, env) {
+                `    // Reading host primes the connect/dns overrides.
+                `    const host = env.hyperdrive.host;
+                `    const { address, family } = await dns.lookup(host);
+                `    if (family !== 4 || !/^240\.0\.\d{1,3}\.\d{1,3}$/.test(address)) {
+                `      throw new Error(`unexpected lookup result: ${address}/${family}`);
+                `    }
+                `    const connection = connect(`${address}:5432`);
+                `    const encoded = new TextEncoder().encode("hyperdrive-dns-test");
+                `    await connection.writable.getWriter().write(new Uint8Array(encoded));
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "hyperdrive",
+              hyperdrive = (
+                designator = "hyperdrive-outbound",
+                database = "test-db",
+                user = "test-user",
+                password = "test-password",
+                scheme = "postgresql"
+              )
+            )
+          ]
+        )
+      ),
+      ( name = "hyperdrive-outbound", external = (
+        address = "hyperdrive-host",
+        tcp = ()
+      ))
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  {
+    auto subreq = test.receiveSubrequest("hyperdrive-host");
+    subreq.recv("hyperdrive-dns-test");
+  }
+  conn.recvHttp200("OK");
+}
+
+KJ_TEST("Server: Hyperdrive host resolves via node:dns resolve4 to synthetic IP") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          compatibilityFlags = ["nodejs_compat"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { connect } from 'cloudflare:sockets';
+                `import { promises as dns } from 'node:dns';
+                `export default {
+                `  async fetch(request, env) {
+                `    // Reading host primes the connect/dns overrides.
+                `    const host = env.hyperdrive.host;
+                `    const [address] = await dns.resolve4(host);
+                `    if (!/^240\.0\.\d{1,3}\.\d{1,3}$/.test(address)) {
+                `      throw new Error(`unexpected resolve4 result: ${address}`);
+                `    }
+                `    const connection = connect(`${address}:5432`);
+                `    const encoded = new TextEncoder().encode("hyperdrive-resolve4-test");
+                `    await connection.writable.getWriter().write(new Uint8Array(encoded));
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "hyperdrive",
+              hyperdrive = (
+                designator = "hyperdrive-outbound",
+                database = "test-db",
+                user = "test-user",
+                password = "test-password",
+                scheme = "postgresql"
+              )
+            )
+          ]
+        )
+      ),
+      ( name = "hyperdrive-outbound", external = (
+        address = "hyperdrive-host",
+        tcp = ()
+      ))
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  {
+    auto subreq = test.receiveSubrequest("hyperdrive-host");
+    subreq.recv("hyperdrive-resolve4-test");
+  }
+  conn.recvHttp200("OK");
+}
+
+KJ_TEST("Server: Hyperdrive connect via IPv4-mapped IPv6") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { connect } from 'cloudflare:sockets';
+                `export default {
+                `  async fetch(request, env) {
+                `    // The IPv4-mapped IPv6 spelling must route to the same override as the IPv4.
+                `    const connection = connect(`[::ffff:${env.hyperdrive.ip}]:5432`);
+                `    const encoded = new TextEncoder().encode("hyperdrive-mapped-test");
+                `    await connection.writable.getWriter().write(new Uint8Array(encoded));
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "hyperdrive",
+              hyperdrive = (
+                designator = "hyperdrive-outbound",
+                database = "test-db",
+                user = "test-user",
+                password = "test-password",
+                scheme = "postgresql"
+              )
+            )
+          ]
+        )
+      ),
+      ( name = "hyperdrive-outbound", external = (
+        address = "hyperdrive-host",
+        tcp = ()
+      ))
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  {
+    auto subreq = test.receiveSubrequest("hyperdrive-host");
+    subreq.recv("hyperdrive-mapped-test");
+  }
+  conn.recvHttp200("OK");
 }
 
 KJ_TEST("Server: cyclic bindings") {
@@ -3159,6 +3436,160 @@ KJ_TEST("Server: Durable Objects websocket hibernation") {
   KJ_EXPECT(wsConn.isEof());
 }
 
+KJ_TEST("Server: Durable Objects websocket constructor throws after send") {
+  // This is a regression test for https://jira.cfdata.org/browse/VULN-146323,
+  // It should be run under ASAN.
+  TestServer test(R"((
+    services = [(
+      name = "main",
+      worker = (
+        compatibilityDate = "2026-07-01",
+        modules = [(
+          name = "main.js",
+          esModule =
+            `export default {
+            `  fetch(request, env) {
+            `    return env.ns.getByName("repro").fetch(request);
+            `  }
+            `};
+            `
+            `export class VulnerableActor {
+            `  constructor(ctx) {
+            `    this.ctx = ctx;
+            `    const sockets = ctx.getWebSockets();
+            `    if (sockets.length > 0) {
+            `      sockets[0].send("pending");
+            `      throw new Error("constructor failed after send");
+            `    }
+            `  }
+            `
+            `  fetch() {
+            `    const [client, server] = Object.values(new WebSocketPair());
+            `    this.ctx.acceptWebSocket(server);
+            `    return new Response(null, {status: 101, webSocket: client});
+            `  }
+            `}
+        )],
+        bindings = [(name = "ns", durableObjectNamespace = "VulnerableActor")],
+        durableObjectNamespaces = [(
+          className = "VulnerableActor",
+          uniqueKey = "repro-key",
+        )],
+        durableObjectStorage = (inMemory = void),
+      ),
+    )],
+    sockets = [(name = "main", address = "test-addr", service = "main")],
+  ))"_kj);
+
+  test.start();
+  auto wsConn = test.connect("test-addr");
+  wsConn.upgradeToWebSocket();
+
+  // Force hibernation by waiting 10 seconds.
+  test.wait(10);
+
+  // Send a close event. The event reconstructs an actor whose constructor starts a send pump and then throws.
+  // Before the fix, `ws.send` inside `LegacyWebSocketAdapter::pump` was called on the freed
+  // `kj::WebSocket& ws`, which caused a UAF.
+  wsConn.send(kj::str("\x88\x02\x03\xe8"));
+  // Wait for a pump loop to finish.
+  test.wait(1);
+  // Nothing was sent from the DO, ws is closed now.
+  KJ_ASSERT(wsConn.isEof());
+}
+
+KJ_TEST("Server: Durable Objects websocket constructor blockConcurrencyWhile throws after send") {
+  // Calling `blockConcurrencyWhile()` from the constructor lets us do two things:
+  // 1. Make the websocket suspend on send before we throw an exception.
+  // 2. Observe the "normal" behavior when `LegacyWebSocketAdapter::pump` is canceled after `ctx.abort()`.
+  // This test showcases that the only situation in which `ws` can be freed during the pump loop is when
+  // we throw from the constructor.
+  TestServer test(R"((
+    services = [(
+      name = "main",
+      worker = (
+        compatibilityDate = "2026-07-01",
+        modules = [(
+          name = "main.js",
+          esModule =
+            `export default {
+            `  fetch(request, env) {
+            `    return env.ns.getByName("repro").fetch(request);
+            `  }
+            `};
+            `
+            `export class VulnerableActor {
+            `  constructor(ctx) {
+            `    this.ctx = ctx;
+            `    const sockets = ctx.getWebSockets();
+            `    if (sockets.length > 0) {
+            `      ctx.blockConcurrencyWhile(async () => {
+            `        sockets[0].send("pending");
+            `        // we use fetch to yield from JS to IO event loop
+            `        const resp = await fetch("http://subhost/foo");
+            `        const text = await resp.text();
+            `        // at that moment we expect `sockets[0]` to suspend on `ws.send`
+            `        // in `LegacyWebSocketAdapter::pump` loop, because we haven't read from this websocket yet
+            `        throw new Error("constructor failed after send");
+            `      });
+            `    }
+            `  }
+            `
+            `  fetch() {
+            `    const [client, server] = Object.values(new WebSocketPair());
+            `    this.ctx.acceptWebSocket(server);
+            `    return new Response(null, {status: 101, webSocket: client});
+            `  }
+            `}
+        )],
+        bindings = [(name = "ns", durableObjectNamespace = "VulnerableActor")],
+        durableObjectNamespaces = [(
+          className = "VulnerableActor",
+          uniqueKey = "repro-key",
+        )],
+        durableObjectStorage = (inMemory = void),
+      ),
+    )],
+    sockets = [(name = "main", address = "test-addr", service = "main")],
+  ))"_kj);
+
+  test.start();
+  auto wsConn = test.connect("test-addr");
+  wsConn.upgradeToWebSocket();
+
+  // Force hibernation by waiting 10 seconds.
+  test.wait(10);
+
+  // Send a close event. The event reconstructs an actor whose constructor enters a `blockConcurrencyWhile` block,
+  // starts a send pump and then throws.
+  wsConn.send(kj::str("\x88\x02\x03\xe8"));
+
+  // The reconstructed actor's constructor makes an outbound fetch to yield from JS to IO event loop,
+  // we need wait for it.
+  auto subreq = test.receiveInternetSubrequest("subhost");
+  subreq.recv(R"(
+    GET /foo HTTP/1.1
+    Host: subhost
+
+  )"_blockquote);
+  subreq.send(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 11
+
+    hello world
+  )"_blockquote);
+
+  // The only way I can find to check that the `LegacyWebSocketAdapter::pump` was canceled is to
+  // assert on the disconnection exception that gets logged when the WebSocketPipe is torn down:
+  //   exception = kj/compat/http.c++:4362: disconnected: other end of WebSocketPipe was destroyed
+  KJ_EXPECT_LOG(INFO, "other end of WebSocketPipe was destroyed");
+
+  // Wait for a pump loop to finish.
+  test.wait(1);
+  // Nothing was sent from the DO, ws is closed now.
+  KJ_ASSERT(wsConn.isEof());
+}
+
 KJ_TEST("Server: tail workers") {
   TestServer test(R"((
     services = [
@@ -4351,6 +4782,88 @@ KJ_TEST("Server: cached response") {
     CF-Cache-Status: HIT
 
     cached)"_blockquote);
+}
+
+KJ_TEST("Server: re-put of raw cache.match() body resolves") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          cacheApiOutbound = "cache-outbound",
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    const cache = caches.default;
+                `    const cached = await cache.match(request);
+                `    if (cached === undefined) return new Response('MISS');
+                `    const put = cache.put(request, new Response(cached.body, cached));
+                `    const result = await Promise.race([
+                `      put.then(() => 'RESOLVED', (e) => 'REJECTED: ' + e),
+                `      scheduler.wait(5000).then(() => 'HUNG'),
+                `    ]);
+                `    return new Response(result);
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "cache-outbound", external = "cache-host" ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  auto getSubreq = test.receiveSubrequest("cache-host");
+  getSubreq.recv(R"(
+    GET / HTTP/1.1
+    Host: foo
+    Cache-Control: only-if-cached
+
+  )"_blockquote);
+  getSubreq.send(R"(
+    HTTP/1.1 200 OK
+    CF-Cache-Status: HIT
+    Cache-Control: max-age=300
+    Content-Length: 4
+
+    seed)"_blockquote);
+
+  {
+    auto putSubreq = test.receiveSubrequest("cache-host");
+    putSubreq.recv(R"(
+      PUT / HTTP/1.1
+      Content-Length: 92
+      Host: foo
+
+      HTTP/1.1 200 OK
+      Content-Length: 4
+      Cache-Control: max-age=300
+      CF-Cache-Status: HIT
+
+      seed)"_blockquote);
+    putSubreq.send(R"(
+      HTTP/1.1 204 No Content
+      Content-Length: 0
+
+    )"_blockquote);
+  }
+
+  // Advance past the 5-second hang-detection race in the worker.
+  test.wait(6);
+
+  conn.recvHttp200("RESOLVED");
 }
 
 KJ_TEST("Server: cache name is passed through to service") {

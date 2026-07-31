@@ -32,11 +32,9 @@ class R2MultipartUpload: public jsg::Object {
         bucket(kj::mv(bucket)) {}
 
   kj::StringPtr getKey() const {
-    LOG_WARNING_PERIODICALLY("NOSENTRY R2MultipartUpload::getKey called");
     return key;
   }
   kj::StringPtr getUploadId() const {
-    LOG_WARNING_PERIODICALLY("NOSENTRY R2MultipartUpload::getUploadId called");
     return uploadId;
   }
 
