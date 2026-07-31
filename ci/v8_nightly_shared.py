@@ -44,7 +44,7 @@ def output(args, **kwargs):
 
 def logged(args, path):
     print("+", shlex.join(map(str, args)), flush=True)
-    with Path(path).open("a") as log:
+    with Path(path).open("w") as log:
         return subprocess.run(
             list(map(str, args)), cwd=ROOT, stdout=log, stderr=subprocess.STDOUT
         ).returncode
@@ -150,6 +150,13 @@ def ai(repo, mode, old, new, detail=None):
             "For any focused Bazel command, pass `--config=ci-common "
             "--config=cloudflare-direct-access --remote_executor= --remote_cache=`. "
         )
+    else:
+        prompt += (
+            "For any focused Bazel command, pass `--config=ci "
+            "--config=ci-limit-storage --config=ci-linux-common --config=ci-test "
+            "--remote_cache=`. A successful `bazel query` is not sufficient "
+            "verification; build the affected target. "
+        )
     if mode == "rebase":
         finish = (
             f"python3 ci/v8_update.py finish {new}"
@@ -169,24 +176,31 @@ def ai(repo, mode, old, new, detail=None):
         prompt += (
             "The V8 update and patch rebase are already complete. Diagnose "
             f"{BUILD_LOG} and make only durable tracked source changes. Do not modify "
-            "generated Bazel outputs or V8 build artifacts. If verification is blocked, "
-            "report that explicitly and do not claim it passed."
+            "generated Bazel outputs or V8 build artifacts. Failures can be layered, so "
+            "inspect every distinct root error in the latest invocation rather than "
+            "stopping after the first or treating downstream failures as independent. "
+            "If verification is blocked, report that explicitly and do not claim it passed."
         )
     elif repo == "workerd":
         prompt += (
             "The V8 update and patch rebase are already complete. Diagnose "
             f"{TEST_LOG} and {BEP}, and make only durable tracked source changes. Do "
-            "not modify generated Bazel outputs or V8 build artifacts. The orchestrator "
-            "will rerun all tests. If verification is blocked, report that explicitly "
-            "and do not claim it passed."
+            "not modify generated Bazel outputs or V8 build artifacts. Inspect every "
+            "distinct root error in the latest invocation and ignore failures that merely "
+            "fan out from those root errors. The orchestrator will rerun all tests. If "
+            "verification is blocked, report that explicitly and do not claim it passed."
         )
     else:
         prompt += (
             "The V8 update and patch rebase are already complete. Diagnose "
-            f"{TEST_LOG} and {BEP}, and make only durable tracked source changes. Do "
-            "not modify generated Bazel outputs or V8 build artifacts. Pass the local "
-            f"V8 override at {detail} to focused tests. If verification is blocked, "
-            "report that explicitly and do not claim it passed."
+            f"the latest failing phase using {BUILD_LOG}, {TEST_LOG}, and {BEP}, and "
+            "make only durable tracked source changes. Do not modify generated Bazel "
+            "outputs or V8 build artifacts. Failures can be layered, so inspect every "
+            "distinct root error rather than stopping after the first or treating "
+            "downstream failures as independent. Pass the local V8 override at "
+            f"{detail} to focused tests. The orchestrator will rebuild V8 and rerun all "
+            "tests. If verification is blocked, report that explicitly and do not claim "
+            "it passed."
         )
 
     config_dir = Path.home() / ".config/opencode"
