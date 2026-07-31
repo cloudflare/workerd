@@ -40,7 +40,14 @@ def bazel_build():
 def bazel_test():
     return (
         v8_nightly_shared.logged(
-            ["bazel", "test", *BAZEL_CI_ARGS, "--test_output=errors", f"--build_event_json_file={v8_nightly_shared.BEP}", "//...",],
+            [
+                "bazel",
+                "test",
+                *BAZEL_CI_ARGS,
+                "--test_output=errors",
+                f"--build_event_json_file={v8_nightly_shared.BEP}",
+                "//...",
+            ],
             v8_nightly_shared.TEST_LOG,
         )
         == 0
@@ -58,9 +65,7 @@ def repair(mode, check, old_tag, target_tag):
         if not v8_nightly_shared.ai("workerd", mode, old_tag, target_tag, CHECKOUT):
             return False
 
-        v8_nightly_shared.commit(
-            f"[v8-nightly] AI fix for V8 {target_tag}"
-        )
+        v8_nightly_shared.commit(f"[v8-nightly] AI fix for V8 {target_tag}")
 
     print(f"Workerd V8 nightly {mode} is still broken; AI fix budget exhausted")
     return check()
