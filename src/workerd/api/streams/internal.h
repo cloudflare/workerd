@@ -37,7 +37,7 @@ namespace workerd::api {
 
 class WritableStreamInternalController;
 
-class ReadableStreamInternalController: public ReadableStreamController {
+class ReadableStreamInternalController: public ReadableStreamController, public kj::PtrTarget {
  public:
   using Readable = IoOwn<ReadableStreamSource>;
 
@@ -97,7 +97,9 @@ class ReadableStreamInternalController: public ReadableStreamController {
   void releaseReader(kj::Ptr<Reader> reader, kj::Maybe<jsg::Lock&> maybeJs) override;
   // See the comment for releaseReader in common.h for details on the use of maybeJs
 
-  kj::Maybe<PipeController&> tryPipeLock() override;
+  kj::Maybe<kj::Ptr<PipeController>> tryPipeLock() override;
+
+  void releasePipeLock(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) override;
 
   void visitForGc(jsg::GcVisitor& visitor) override;
 
@@ -129,26 +131,26 @@ class ReadableStreamInternalController: public ReadableStreamController {
   class PipeLocked: public PipeController {
    public:
     static constexpr kj::StringPtr NAME KJ_UNUSED = "pipe-locked"_kj;
-    PipeLocked(ReadableStreamInternalController& inner): inner(inner) {}
+    PipeLocked(kj::Ptr<ReadableStreamInternalController> inner): inner(kj::mv(inner)) {}
 
     bool isClosed() override;
 
     kj::Maybe<jsg::JsValue> tryGetErrored(jsg::Lock& js) override;
 
-    void cancel(jsg::Lock& js, jsg::JsValue reason) override;
-
     void close(jsg::Lock& js) override;
 
     void error(jsg::Lock& js, jsg::JsValue reason) override;
-
-    void release(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) override;
 
     kj::Maybe<kj::Promise<void>> tryPumpTo(kj::Ptr<WritableStreamSink> sink, bool end) override;
 
     jsg::Promise<ReadResult> read(jsg::Lock& js) override;
 
+    kj::Ptr<PipeController> getPtr() override {
+      return addPtrToThis();
+    }
+
    private:
-    ReadableStreamInternalController& inner;
+    kj::Ptr<ReadableStreamInternalController> inner;
   };
 
   kj::Weak<ReadableStream> owner;
@@ -393,7 +395,13 @@ class WritableStreamInternalController: public WritableStreamController {
     };
 
     WritableStreamInternalController& parent;
-    kj::Maybe<ReadableStreamController::PipeController&> source;
+    // Keeps the source ReadableStream (and therefore the PipeController that lives in
+    // its lock state) alive for the duration of the pipe, and provides the handle
+    // through which releaseSource() releases the source's pipe lock. Declared before
+    // `source` so that the kj::Ptr is destroyed first: the PipeController must not be
+    // destroyed (by the readable's death) while our pointer to it remains.
+    jsg::Ref<ReadableStream> readable;
+    kj::Maybe<kj::Ptr<ReadableStreamController::PipeController>> source;
     kj::Maybe<jsg::Promise<void>::Resolver> promise;
     struct Flags {
       uint8_t preventAbort : 1;
@@ -405,14 +413,16 @@ class WritableStreamInternalController: public WritableStreamController {
     kj::Maybe<jsg::JsRef<jsg::JsValue>> capturedSourceError;
 
     Pipe(WritableStreamInternalController& parent,
-        ReadableStreamController::PipeController& source,
+        jsg::Ref<ReadableStream> readable,
+        kj::Ptr<ReadableStreamController::PipeController> source,
         jsg::Promise<void>::Resolver promise,
         bool preventAbort,
         bool preventClose,
         bool preventCancel,
         kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal)
         : parent(parent),
-          source(source),
+          readable(kj::mv(readable)),
+          source(kj::mv(source)),
           promise(kj::mv(promise)),
           maybeSignal(kj::mv(maybeSignal)) {
       flags.preventAbort = preventAbort;
@@ -429,7 +439,7 @@ class WritableStreamInternalController: public WritableStreamController {
     }
 
     void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(promise, maybeSignal, capturedSourceError);
+      visitor.visit(readable, promise, maybeSignal, capturedSourceError);
     }
 
     void releaseSource(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none);
@@ -447,11 +457,12 @@ class WritableStreamInternalController: public WritableStreamController {
       return kj::mv(promise);
     }
 
-    JSG_MEMORY_INFO(Pipe) {
-      tracker.trackField("promise", promise);
-      tracker.trackField("signal", maybeSignal);
-      tracker.trackField("capturedSourceError", capturedSourceError);
-    }
+    // Memory info methods are defined out-of-line (in internal.c++) because tracking
+    // the `readable` field requires ReadableStream to be a complete type, and this
+    // header only sees its forward declaration.
+    kj::StringPtr jsgGetMemoryName() const;
+    size_t jsgGetMemorySelfSize() const;
+    void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
   };
   struct WriteEvent {
     kj::Maybe<IoOwn<kj::Promise<void>>> outputLock;  // must wait for this before actually writing

@@ -487,17 +487,23 @@ class ReadableStreamController {
   // The PipeController simplifies the abstraction between ReadableStreamController
   // and WritableStreamController so that the pipeTo/pipeThrough/tryPipeTo can work
   // without caring about what kind of controller it is working with.
-  class PipeController {
+  //
+  // A PipeController is obtained from tryPipeLock() as a kj::Ptr and is owned by the
+  // readable controller's lock state: it is destroyed when the pipe lock is released.
+  // Because kj::Ptr tracks liveness (asserting in debug builds if the target is
+  // destroyed while pointers remain), no operation on this interface may release the
+  // pipe lock. The pipe machinery must instead drop its kj::Ptr first and then call
+  // ReadableStreamController::releasePipeLock() on the source's controller.
+  class PipeController: public virtual kj::PtrTarget {
    public:
     virtual ~PipeController() noexcept(false) {}
     virtual bool isClosed() = 0;
     virtual kj::Maybe<jsg::JsValue> tryGetErrored(jsg::Lock& js) = 0;
-    virtual void cancel(jsg::Lock& js, jsg::JsValue reason) = 0;
     virtual void close(jsg::Lock& js) = 0;
     virtual void error(jsg::Lock& js, jsg::JsValue reason) = 0;
-    virtual void release(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) = 0;
     virtual kj::Maybe<kj::Promise<void>> tryPumpTo(kj::Ptr<WritableStreamSink> sink, bool end) = 0;
     virtual jsg::Promise<ReadResult> read(jsg::Lock& js) = 0;
+    virtual kj::Ptr<PipeController> getPtr() = 0;
   };
 
   virtual ~ReadableStreamController() noexcept(false) {}
@@ -567,7 +573,16 @@ class ReadableStreamController {
   // If maybeJs is set, the reader's closed promise will be resolved.
   virtual void releaseReader(kj::Ptr<Reader> reader, kj::Maybe<jsg::Lock&> maybeJs) = 0;
 
-  virtual kj::Maybe<PipeController&> tryPipeLock() = 0;
+  virtual kj::Maybe<kj::Ptr<PipeController>> tryPipeLock() = 0;
+
+  // Releases the pipe lock acquired via tryPipeLock(), destroying the PipeController.
+  // If maybeError is given, the stream is canceled with that reason first (unless it
+  // is already closed or errored). A no-op if the stream is not currently pipe-locked,
+  // so it is safe to call from multiple cleanup paths.
+  //
+  // The caller must drop every kj::Ptr<PipeController> it holds *before* calling this;
+  // the PipeController's destructor asserts (in debug builds) that no pointers remain.
+  virtual void releasePipeLock(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) = 0;
 
   virtual void visitForGc(jsg::GcVisitor& visitor) {};
 

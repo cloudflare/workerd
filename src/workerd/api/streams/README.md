@@ -383,13 +383,22 @@ auto onSuccess = [this, ref = addRef(), ...](...) mutable {
 
 - **When**: A `ReadableStream` is piped to a `WritableStream` (`pipeTo`/`pipeThrough`),
   putting the source's lock state machine into `PipeLocked`
-- **Why**: The destination's pipe loop holds a `ReadableStreamController::PipeController&`
-  that points into the source's `PipeLocked` lock state. If the source unlocked
-  (`PipeLocked -> Unlocked`) while the pipe loop is still running, that reference would dangle.
-- **Rule**: The source stays `PipeLocked` for the entire lifetime of the pipe. ONLY
-  the pipe machinery  may perform the `PipeLocked -> Unlocked` transition.
-  `onClose`/`onError` MUST NOT unlock the source — they signal the loop, which then
-  releases the lock itself.
+- **Why**: The destination's pipe machinery holds a `kj::Ptr<PipeController>` that points
+  into the source's `PipeLocked` lock state. `kj::Ptr` tracks liveness (asserting in
+  debug builds): the `PipeLocked` state must not be destroyed while any pointer to its
+  `PipeController` remains.
+- **Rule**: The source stays `PipeLocked` for the entire lifetime of the pipe. ONLY the
+  pipe machinery may release the lock, and only via
+  `ReadableStreamController::releasePipeLock()` *after* dropping every
+  `kj::Ptr<PipeController>` it holds (`Pipe::releaseSource()` /
+  `WritableLockImpl::PipeLocked::releaseSource()` encapsulate this ordering). No
+  `PipeController` operation releases the lock, and `doClose`/`doError`/`onClose`/
+  `onError` MUST NOT unlock the source — they signal the loop, which then releases the
+  lock itself.
+- **Keep-alive**: The holder of the `kj::Ptr` also holds a GC-visited
+  `jsg::Ref<ReadableStream>` to the source (declared *before* the `kj::Ptr` so the Ptr
+  is destroyed first), guaranteeing the `PipeController` outlives the pointer even if
+  user code drops the source stream mid-pipe.
 
 ### Pattern: StateListener Self-Destruction Guard
 
