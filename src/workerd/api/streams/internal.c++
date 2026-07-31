@@ -395,32 +395,14 @@ kj::Maybe<uint64_t> ReadableStreamSource::tryGetLength(StreamEncoding encoding) 
 }
 
 kj::Promise<kj::Array<byte>> ReadableStreamSource::readAllBytes(uint64_t limit) {
-  try {
-    AllReader allReader(addPtrToThis(), limit);
-    co_return co_await allReader.readAllBytes();
-  } catch (...) {
-    // TODO(soon): Temporary logging.
-    auto ex = kj::getCaughtExceptionAsKj();
-    if (ex.getDescription().endsWith("exceeded before EOF.")) {
-      LOG_WARNING_PERIODICALLY("NOSENTRY Internal Stream readAllBytes - Exceeded limit");
-    }
-    kj::throwFatalException(kj::mv(ex));
-  }
+  AllReader allReader(addPtrToThis(), limit);
+  co_return co_await allReader.readAllBytes();
 }
 
 kj::Promise<kj::String> ReadableStreamSource::readAllText(
     uint64_t limit, ReadAllTextOption option) {
-  try {
-    AllReader allReader(addPtrToThis(), limit);
-    co_return co_await allReader.readAllText(option);
-  } catch (...) {
-    // TODO(soon): Temporary logging.
-    auto ex = kj::getCaughtExceptionAsKj();
-    if (ex.getDescription().endsWith("exceeded before EOF.")) {
-      LOG_WARNING_PERIODICALLY("NOSENTRY Internal Stream readAllText - Exceeded limit");
-    }
-    kj::throwFatalException(kj::mv(ex));
-  }
+  AllReader allReader(addPtrToThis(), limit);
+  co_return co_await allReader.readAllText(option);
 }
 
 void ReadableStreamSource::cancel(kj::Exception reason) {}
