@@ -64,7 +64,7 @@ class ReadableLockImpl {
   void onClose(jsg::Lock& js);
   void onError(jsg::Lock& js, jsg::JsValue reason);
 
-  kj::Maybe<kj::Ptr<PipeController>> tryPipeLock(Controller& self);
+  kj::Maybe<kj::Ptr<PipeController>> tryPipeLock(kj::Ptr<Controller> self);
 
   // Releases the pipe lock acquired via tryPipeLock(), destroying the PipeController.
   // The caller must have dropped every kj::Ptr to the PipeController first. A no-op if
@@ -95,25 +95,25 @@ class ReadableLockImpl {
   class PipeLocked final: public PipeController {
    public:
     static constexpr kj::StringPtr NAME KJ_UNUSED = "pipe-locked"_kj;
-    explicit PipeLocked(Controller& inner): inner(inner) {}
+    explicit PipeLocked(kj::Ptr<Controller> inner): inner(kj::mv(inner)) {}
 
     bool isClosed() override {
-      return inner.state.template is<StreamStates::Closed>();
+      return inner->state.template is<StreamStates::Closed>();
     }
 
     kj::Maybe<jsg::JsValue> tryGetErrored(jsg::Lock& js) override {
-      KJ_IF_SOME(errored, inner.state.template tryGetUnsafe<StreamStates::Errored>()) {
+      KJ_IF_SOME(errored, inner->state.template tryGetUnsafe<StreamStates::Errored>()) {
         return errored.getHandle(js);
       }
       return kj::none;
     }
 
     void close(jsg::Lock& js) override {
-      inner.doClose(js);
+      inner->doClose(js);
     }
 
     void error(jsg::Lock& js, jsg::JsValue reason) override {
-      inner.doError(js, reason);
+      inner->doError(js, reason);
     }
 
     kj::Maybe<kj::Promise<void>> tryPumpTo(kj::Ptr<WritableStreamSink> sink, bool end) override;
@@ -125,7 +125,9 @@ class ReadableLockImpl {
     }
 
    private:
-    Controller& inner;
+    // The enclosing controller: this PipeLocked lives in the controller's own lock
+    // state machine, so the pointer is always valid.
+    kj::Ptr<Controller> inner;
 
     friend Controller;
   };
@@ -318,11 +320,11 @@ void ReadableLockImpl<Controller>::releaseReader(
 
 template <typename Controller>
 kj::Maybe<kj::Ptr<ReadableStreamController::PipeController>> ReadableLockImpl<
-    Controller>::tryPipeLock(Controller& self) {
+    Controller>::tryPipeLock(kj::Ptr<Controller> self) {
   if (isLockedToReader()) {
     return kj::none;
   }
-  return state.template transitionTo<PipeLocked>(self).getPtr();
+  return state.template transitionTo<PipeLocked>(kj::mv(self)).getPtr();
 }
 
 template <typename Controller>
@@ -400,7 +402,7 @@ kj::Maybe<kj::Promise<void>> ReadableLockImpl<Controller>::PipeLocked::tryPumpTo
 
 template <typename Controller>
 jsg::Promise<ReadResult> ReadableLockImpl<Controller>::PipeLocked::read(jsg::Lock& js) {
-  return KJ_ASSERT_NONNULL(inner.read(js, kj::none));
+  return KJ_ASSERT_NONNULL(inner->read(js, kj::none));
 }
 
 // ======================================================================================
@@ -771,7 +773,7 @@ jsg::Promise<ReadResult> deferControllerStateChange(jsg::Lock& js,
 // jsg::Ref<ReadableStreamDefaultController> or jsg::Ref<ReadableByteStreamController>.
 // These are the objects that are actually passed on to the user-code's Underlying Source
 // implementation.
-class ReadableStreamJsController final: public ReadableStreamController {
+class ReadableStreamJsController final: public ReadableStreamController, public kj::PtrTarget {
  public:
   using ReadableLockImpl = ReadableLockImpl<ReadableStreamJsController>;
 
@@ -1814,24 +1816,27 @@ template <typename Controller, typename Queue>
 struct ReadableState {
   Controller controller;
   kj::Own<typename Queue::Consumer> consumer;
-  ReadableStreamJsController& owner;
+  // The ReadableStreamJsController that owns the ValueReadable/ByteReadable holding
+  // this state, so the pointer is always valid while this state exists.
+  kj::Ptr<ReadableStreamJsController> owner;
 
   ReadableState(Controller controller,
       kj::Own<typename Queue::Consumer> consumer,
-      ReadableStreamJsController& owner)
+      kj::Ptr<ReadableStreamJsController> owner)
       : controller(kj::mv(controller)),
         consumer(kj::mv(consumer)),
-        owner(owner) {}
+        owner(kj::mv(owner)) {}
 
   ReadableState(Controller controller,
       kj::Weak<typename Queue::ConsumerImpl::StateListener> listener,
-      ReadableStreamJsController& owner)
-      : ReadableState(controller.addRef(), controller->getConsumer(kj::mv(listener)), owner) {}
+      kj::Ptr<ReadableStreamJsController> owner)
+      : ReadableState(
+            controller.addRef(), controller->getConsumer(kj::mv(listener)), kj::mv(owner)) {}
 
   ReadableState clone(jsg::Lock& js,
       kj::Weak<typename Queue::ConsumerImpl::StateListener> listener,
-      ReadableStreamJsController& owner) {
-    return ReadableState(controller.addRef(), consumer->clone(js, kj::mv(listener)), owner);
+      kj::Ptr<ReadableStreamJsController> owner) {
+    return ReadableState(controller.addRef(), consumer->clone(js, kj::mv(listener)), kj::mv(owner));
   }
 };
 
@@ -1855,11 +1860,11 @@ struct ValueReadable final: public kj::PtrTarget,
     }
   }
 
-  ValueReadable(DefaultController controller, ReadableStreamJsController& owner)
-      : state(State(kj::mv(controller), addWeakToThis(), owner)) {}
+  ValueReadable(DefaultController controller, kj::Ptr<ReadableStreamJsController> owner)
+      : state(State(kj::mv(controller), addWeakToThis(), kj::mv(owner))) {}
 
-  ValueReadable(jsg::Lock& js, ReadableStreamJsController& owner, ValueReadable& other)
-      : state(KJ_ASSERT_NONNULL(other.state).clone(js, addWeakToThis(), owner)) {}
+  ValueReadable(jsg::Lock& js, kj::Ptr<ReadableStreamJsController> owner, ValueReadable& other)
+      : state(KJ_ASSERT_NONNULL(other.state).clone(js, addWeakToThis(), kj::mv(owner))) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ValueReadable);
 
@@ -1869,13 +1874,13 @@ struct ValueReadable final: public kj::PtrTarget,
     }
   }
 
-  kj::Own<ValueReadable> clone(jsg::Lock& js, ReadableStreamJsController& owner) {
+  kj::Own<ValueReadable> clone(jsg::Lock& js, kj::Ptr<ReadableStreamJsController> owner) {
     // A single ReadableStreamDefaultController can have multiple consumers.
     // When the ValueReadable constructor is used, the new consumer is added
     // and starts to receive new data that becomes enqueued. When clone
     // is used, any state currently held by this consumer is copied to the
     // new consumer.
-    return kj::heap<ValueReadable>(js, owner, *this);
+    return kj::heap<ValueReadable>(js, kj::mv(owner), *this);
   }
 
   jsg::Promise<ReadResult> read(jsg::Lock& js) {
@@ -1955,7 +1960,7 @@ struct ValueReadable final: public kj::PtrTarget,
     // readable in doClose so it is not safe to access anything on this
     // after calling doClose.
     KJ_IF_SOME(s, state) {
-      s.owner.doClose(js);
+      s.owner->doClose(js);
     }
   }
 
@@ -1965,7 +1970,7 @@ struct ValueReadable final: public kj::PtrTarget,
     // readable in doClose so it is not safe to access anything on this
     // after calling doError.
     KJ_IF_SOME(s, state) {
-      s.owner.doError(js, reason);
+      s.owner->doError(js, reason);
     }
   }
 
@@ -1976,12 +1981,13 @@ struct ValueReadable final: public kj::PtrTarget,
     // Returns true if the pull completed synchronously (meaning more pumping
     // might yield additional synchronous data), false otherwise.
     KJ_IF_SOME(s, state) {
-      // Save a reference to the owner before calling pull. The pull callback
-      // may trigger close/error which could destroy this ValueReadable. By
-      // using beginOperation(), we ensure doClose/doError defers the
-      // actual destruction until after we return.
-      ReadableStreamJsController& owner = s.owner;
-      owner.state.beginOperation();
+      // Save a COPY of the owner Ptr before calling pull — not a reference to the
+      // member, which dies with `this`. The pull callback may trigger close/error
+      // which could destroy this ValueReadable. By using beginOperation(), we ensure
+      // doClose/doError defers the actual destruction until after we return. The
+      // owner itself outlives us: only the owner can drop this ValueReadable.
+      auto owner = s.owner;
+      owner->state.beginOperation();
 
       // For draining reads, use forcePull to bypass backpressure checks.
       // This ensures we pull all available data regardless of highWaterMark.
@@ -1997,13 +2003,13 @@ struct ValueReadable final: public kj::PtrTarget,
           state.map([](State& s2) { return !s2.controller->isPulling(); }).orDefault(false);
 
       // Process any deferred close/error. This may destroy this ValueReadable.
-      if (owner.state.endOperation()) {
+      if (owner->state.endOperation()) {
         // A pending state was applied. Call the appropriate callback.
-        if (owner.state.template is<StreamStates::Closed>()) {
-          owner.lock.onClose(js);
-        } else if (owner.state.template is<StreamStates::Errored>()) {
-          KJ_IF_SOME(err, owner.state.template tryGetUnsafe<StreamStates::Errored>()) {
-            owner.lock.onError(js, err.getHandle(js));
+        if (owner->state.template is<StreamStates::Closed>()) {
+          owner->lock.onClose(js);
+        } else if (owner->state.template is<StreamStates::Errored>()) {
+          KJ_IF_SOME(err, owner->state.template tryGetUnsafe<StreamStates::Errored>()) {
+            owner->lock.onError(js, err.getHandle(js));
           }
         }
       }
@@ -2052,13 +2058,13 @@ struct ByteReadable final: public kj::PtrTarget,
   }
 
   ByteReadable(ByobController controller,
-      ReadableStreamJsController& owner,
+      kj::Ptr<ReadableStreamJsController> owner,
       kj::Maybe<int> autoAllocateChunkSize)
-      : state(State(kj::mv(controller), addWeakToThis(), owner)),
+      : state(State(kj::mv(controller), addWeakToThis(), kj::mv(owner))),
         autoAllocateChunkSize(autoAllocateChunkSize) {}
 
-  ByteReadable(jsg::Lock& js, ReadableStreamJsController& owner, ByteReadable& other)
-      : state(KJ_ASSERT_NONNULL(other.state).clone(js, addWeakToThis(), owner)),
+  ByteReadable(jsg::Lock& js, kj::Ptr<ReadableStreamJsController> owner, ByteReadable& other)
+      : state(KJ_ASSERT_NONNULL(other.state).clone(js, addWeakToThis(), kj::mv(owner))),
         autoAllocateChunkSize(other.autoAllocateChunkSize) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ByteReadable);
@@ -2074,8 +2080,8 @@ struct ByteReadable final: public kj::PtrTarget,
   // and starts to receive new data that becomes enqueued. When clone
   // is used, any state currently held by this consumer is copied to the
   // new consumer.
-  kj::Own<ByteReadable> clone(jsg::Lock& js, ReadableStreamJsController& owner) {
-    return kj::heap<ByteReadable>(js, owner, *this);
+  kj::Own<ByteReadable> clone(jsg::Lock& js, kj::Ptr<ReadableStreamJsController> owner) {
+    return kj::heap<ByteReadable>(js, kj::mv(owner), *this);
   }
 
   jsg::Promise<ReadResult> read(
@@ -2219,7 +2225,7 @@ struct ByteReadable final: public kj::PtrTarget,
     // Note that the owner may drop this readable in doClose so it
     // is not safe to access anything on this after calling doClose.
     KJ_IF_SOME(s, state) {
-      s.owner.doClose(js);
+      s.owner->doClose(js);
     }
   }
 
@@ -2227,7 +2233,7 @@ struct ByteReadable final: public kj::PtrTarget,
     // Note that the owner may drop this readable in doClose so it
     // is not safe to access anything on this after calling doError.
     KJ_IF_SOME(s, state) {
-      s.owner.doError(js, reason);
+      s.owner->doError(js, reason);
     };
   }
 
@@ -2238,12 +2244,13 @@ struct ByteReadable final: public kj::PtrTarget,
   // might yield additional synchronous data), false otherwise.
   bool onConsumerWantsData(jsg::Lock& js) override {
     KJ_IF_SOME(s, state) {
-      // Save a reference to the owner before calling pull. The pull callback
-      // may trigger close/error which could destroy this ByteReadable. By
-      // using beginOperation(), we ensure doClose/doError defers the
-      // actual destruction until after we return.
-      ReadableStreamJsController& owner = s.owner;
-      owner.state.beginOperation();
+      // Save a COPY of the owner Ptr before calling pull — not a reference to the
+      // member, which dies with `this`. The pull callback may trigger close/error
+      // which could destroy this ByteReadable. By using beginOperation(), we ensure
+      // doClose/doError defers the actual destruction until after we return. The
+      // owner itself outlives us: only the owner can drop this ByteReadable.
+      auto owner = s.owner;
+      owner->state.beginOperation();
 
       // For draining reads, use forcePull to bypass backpressure checks.
       // This ensures we pull all available data regardless of highWaterMark.
@@ -2259,13 +2266,13 @@ struct ByteReadable final: public kj::PtrTarget,
           state.map([](State& s2) { return !s2.controller->isPulling(); }).orDefault(false);
 
       // Process any deferred close/error. This may destroy this ByteReadable.
-      if (owner.state.endOperation()) {
+      if (owner->state.endOperation()) {
         // A pending state was applied. Call the appropriate callback.
-        if (owner.state.template is<StreamStates::Closed>()) {
-          owner.lock.onClose(js);
-        } else if (owner.state.template is<StreamStates::Errored>()) {
-          KJ_IF_SOME(err, owner.state.template tryGetUnsafe<StreamStates::Errored>()) {
-            owner.lock.onError(js, err.getHandle(js));
+        if (owner->state.template is<StreamStates::Closed>()) {
+          owner->lock.onClose(js);
+        } else if (owner->state.template is<StreamStates::Errored>()) {
+          KJ_IF_SOME(err, owner->state.template tryGetUnsafe<StreamStates::Errored>()) {
+            owner->lock.onError(js, err.getHandle(js));
           }
         }
       }
@@ -2710,12 +2717,12 @@ ReadableStreamJsController::ReadableStreamJsController(StreamStates::Errored err
 
 ReadableStreamJsController::ReadableStreamJsController(jsg::Lock& js, ValueReadable& consumer)
     : ioContext(tryGetIoContextId()) {
-  state.transitionTo<kj::Own<ValueReadable>>(consumer.clone(js, *this));
+  state.transitionTo<kj::Own<ValueReadable>>(consumer.clone(js, addPtrToThis()));
 }
 
 ReadableStreamJsController::ReadableStreamJsController(jsg::Lock& js, ByteReadable& consumer)
     : ioContext(tryGetIoContextId()) {
-  state.transitionTo<kj::Own<ByteReadable>>(consumer.clone(js, *this));
+  state.transitionTo<kj::Own<ByteReadable>>(consumer.clone(js, addPtrToThis()));
 }
 
 jsg::Ref<ReadableStream> ReadableStreamJsController::addRef() {
@@ -3177,7 +3184,7 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
     // their lifetimes are identical (in practice) and memory accounting itself has a memory
     // overhead. The same applies to ValueReadable below.
     state.transitionTo<kj::Own<ByteReadable>>(
-        kj::heap<ByteReadable>(controller.addRef(), *this, autoAllocateChunkSize)
+        kj::heap<ByteReadable>(controller.addRef(), addPtrToThis(), autoAllocateChunkSize)
             .attach(js.getExternalMemoryAdjustment(
                 sizeof(ByteReadable) + sizeof(ReadableByteStreamController))));
     controller->start(js);
@@ -3187,7 +3194,7 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
     auto controller = js.alloc<ReadableStreamDefaultController>(
         kj::mv(underlyingSource), kj::mv(queuingStrategy));
     state.transitionTo<kj::Own<ValueReadable>>(
-        kj::heap<ValueReadable>(controller.addRef(), *this)
+        kj::heap<ValueReadable>(controller.addRef(), addPtrToThis())
             .attach(js.getExternalMemoryAdjustment(
                 sizeof(ValueReadable) + sizeof(ReadableStreamDefaultController))));
     controller->start(js);
@@ -3196,7 +3203,7 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
 
 kj::Maybe<kj::Ptr<ReadableStreamController::PipeController>> ReadableStreamJsController::
     tryPipeLock() {
-  return lock.tryPipeLock(*this);
+  return lock.tryPipeLock(addPtrToThis());
 }
 
 void ReadableStreamJsController::releasePipeLock(
@@ -3704,13 +3711,15 @@ kj::Own<ReadableStreamController> ReadableStreamJsController::detach(
     }
     KJ_CASE_ONEOF(readable, kj::Own<ValueReadable>) {
       KJ_ASSERT(lock.lock());
-      controller->state.transitionTo<kj::Own<ValueReadable>>(readable->clone(js, *controller));
+      controller->state.transitionTo<kj::Own<ValueReadable>>(
+          readable->clone(js, controller->addPtrToThis()));
       state.transitionTo<StreamStates::Closed>();
       lock.onClose(js);
     }
     KJ_CASE_ONEOF(readable, kj::Own<ByteReadable>) {
       KJ_ASSERT(lock.lock());
-      controller->state.transitionTo<kj::Own<ByteReadable>>(readable->clone(js, *controller));
+      controller->state.transitionTo<kj::Own<ByteReadable>>(
+          readable->clone(js, controller->addPtrToThis()));
       state.transitionTo<StreamStates::Closed>();
       lock.onClose(js);
     }
