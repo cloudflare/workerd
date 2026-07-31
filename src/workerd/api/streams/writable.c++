@@ -16,7 +16,7 @@ WritableStreamDefaultWriter::WritableStreamDefaultWriter()
 
 WritableStreamDefaultWriter::~WritableStreamDefaultWriter() noexcept(false) {
   KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
-    attached.stream->getController().releaseWriter(*this, kj::none);
+    attached.stream->getController().releaseWriter(addPtrToThis(), kj::none);
   }
 }
 
@@ -110,7 +110,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamDefaultWriter::isReady(jsg::Lock& js
 
 void WritableStreamDefaultWriter::lockToStream(jsg::Lock& js, WritableStream& stream) {
   KJ_ASSERT(!stream.isLocked());
-  KJ_ASSERT(stream.getController().lockWriter(js, *this));
+  KJ_ASSERT(stream.getController().lockWriter(js, addPtrToThis()));
 }
 
 void WritableStreamDefaultWriter::releaseLock(jsg::Lock& js) {
@@ -123,7 +123,7 @@ void WritableStreamDefaultWriter::releaseLock(jsg::Lock& js) {
     // strong reference to be cleared, so let's make sure we keep a reference
     // to the stream at least until the call to releaseLock completes.
     auto ref = attached.stream.addRef();
-    attached.stream->getController().releaseWriter(*this, js);
+    attached.stream->getController().releaseWriter(addPtrToThis(), js);
     state.transitionTo<Released>();
   }
 }

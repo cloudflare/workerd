@@ -675,7 +675,7 @@ class WritableStreamController {
   // implementations and is used solely as a means of attaching a Writer implementation to
   // the internal state of the controller. See the WritableStream::*Writer classes for the
   // full Writer API.
-  class Writer {
+  class Writer: public virtual kj::PtrTarget {
    public:
     // When a Writer is locked to a controller, the controller will attach itself to the writer,
     // passing along the closed and ready promises that will be used to communicate state to the
@@ -785,12 +785,12 @@ class WritableStreamController {
 
   // Locks this controller to the given writer, returning true if the lock was successful, or false
   // if the controller was already locked.
-  virtual bool lockWriter(jsg::Lock& js, Writer& writer) = 0;
+  virtual bool lockWriter(jsg::Lock& js, kj::Ptr<Writer> writer) = 0;
 
   // Removes the lock and releases the writer from this controller.
   // maybeJs will be nullptr when the isolate lock is not available.
   // If maybeJs is set, the writer's closed and ready promises will be resolved.
-  virtual void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) = 0;
+  virtual void releaseWriter(kj::Ptr<Writer> writer, kj::Maybe<jsg::Lock&> maybeJs) = 0;
 
   virtual kj::Maybe<jsg::JsValue> isErroring(jsg::Lock& js) = 0;
 
@@ -888,17 +888,17 @@ class ReaderLocked {
 class WriterLocked {
  public:
   static constexpr kj::StringPtr NAME KJ_UNUSED = "writer-locked"_kj;
-  WriterLocked(WritableStreamController::Writer& writer,
+  WriterLocked(kj::Ptr<WritableStreamController::Writer> writer,
       jsg::Promise<void>::Resolver closedFulfiller,
       kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller = kj::none)
-      : writer(writer),
+      : writer(kj::mv(writer)),
         closedFulfiller(kj::mv(closedFulfiller)),
         readyFulfiller(kj::mv(readyFulfiller)) {}
 
   WriterLocked(WriterLocked&&) = default;
   ~WriterLocked() noexcept(false) {
     KJ_IF_SOME(w, writer) {
-      w.detach();
+      w->detach();
     }
   }
 
@@ -906,7 +906,7 @@ class WriterLocked {
     visitor.visit(closedFulfiller, readyFulfiller);
   }
 
-  WritableStreamController::Writer& getWriter() {
+  kj::Ptr<WritableStreamController::Writer> getWriter() {
     return KJ_ASSERT_NONNULL(writer);
   }
 
@@ -921,7 +921,7 @@ class WriterLocked {
   void setReadyFulfiller(jsg::Lock& js, jsg::PromiseResolverPair<void>& pair) {
     KJ_IF_SOME(w, writer) {
       readyFulfiller = kj::mv(pair.resolver);
-      w.replaceReadyPromise(js, kj::mv(pair.promise));
+      w->replaceReadyPromise(js, kj::mv(pair.promise));
     }
   }
 
@@ -937,7 +937,7 @@ class WriterLocked {
   }
 
  private:
-  kj::Maybe<WritableStreamController::Writer&> writer;
+  kj::Maybe<kj::Ptr<WritableStreamController::Writer>> writer;
   kj::Maybe<jsg::Promise<void>::Resolver> closedFulfiller;
   kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller;
 };

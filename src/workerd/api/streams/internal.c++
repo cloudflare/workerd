@@ -1478,7 +1478,7 @@ kj::Maybe<int> WritableStreamInternalController::getDesiredSize() {
   KJ_UNREACHABLE;
 }
 
-bool WritableStreamInternalController::lockWriter(jsg::Lock& js, Writer& writer) {
+bool WritableStreamInternalController::lockWriter(jsg::Lock& js, kj::Ptr<Writer> writer) {
   if (isLockedToWriter()) {
     return false;
   }
@@ -1506,14 +1506,13 @@ bool WritableStreamInternalController::lockWriter(jsg::Lock& js, Writer& writer)
   }
 
   writeState.transitionTo<WriterLocked>(kj::mv(lock));
-  writer.attach(js, *this, kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
+  writer->attach(js, *this, kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
   return true;
 }
 
 void WritableStreamInternalController::releaseWriter(
-    Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) {
+    kj::Ptr<Writer> writer, kj::Maybe<jsg::Lock&> maybeJs) {
   KJ_IF_SOME(locked, writeState.tryGetUnsafe<WriterLocked>()) {
-    KJ_ASSERT(&locked.getWriter() == &writer);
     KJ_IF_SOME(js, maybeJs) {
       maybeRejectPromise<void>(js, locked.getClosedFulfiller(),
           js.typeError("This WritableStream writer has been released."_kj));

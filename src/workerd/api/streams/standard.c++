@@ -155,10 +155,10 @@ class WritableLockImpl {
 
   bool isLockedToWriter() const;
 
-  bool lockWriter(jsg::Lock& js, Controller& self, Writer& writer);
+  bool lockWriter(jsg::Lock& js, Controller& self, kj::Ptr<Writer> writer);
 
   // See the comment for releaseWriter in common.h for details on the use of maybeJs
-  void releaseWriter(Controller& self, Writer& writer, kj::Maybe<jsg::Lock&> maybeJs);
+  void releaseWriter(Controller& self, kj::Ptr<Writer> writer, kj::Maybe<jsg::Lock&> maybeJs);
 
   void visitForGc(jsg::GcVisitor& visitor);
 
@@ -411,7 +411,8 @@ bool WritableLockImpl<Controller>::isLockedToWriter() const {
 }
 
 template <typename Controller>
-bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js, Controller& self, Writer& writer) {
+bool WritableLockImpl<Controller>::lockWriter(
+    jsg::Lock& js, Controller& self, kj::Ptr<Writer> writer) {
   if (isLockedToWriter()) {
     return false;
   }
@@ -448,15 +449,14 @@ bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js, Controller& self, W
   }
 
   state.template transitionTo<WriterLocked>(kj::mv(lock));
-  writer.attach(js, self, kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
+  writer->attach(js, self, kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
   return true;
 }
 
 template <typename Controller>
 void WritableLockImpl<Controller>::releaseWriter(
-    Controller& self, Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) {
+    Controller& self, kj::Ptr<Writer> writer, kj::Maybe<jsg::Lock&> maybeJs) {
   KJ_IF_SOME(locked, state.template tryGetUnsafe<WriterLocked>()) {
-    KJ_ASSERT(&locked.getWriter() == &writer);
     KJ_IF_SOME(js, maybeJs) {
       KJ_SWITCH_ONEOF(self.state) {
         KJ_CASE_ONEOF(initial, typename Controller::Initial) {}
@@ -973,14 +973,14 @@ class WritableStreamJsController final: public WritableStreamController {
     return state.isActive();
   }
 
-  bool lockWriter(jsg::Lock& js, Writer& writer) override;
+  bool lockWriter(jsg::Lock& js, kj::Ptr<Writer> writer) override;
 
   void maybeRejectReadyPromise(jsg::Lock& js, jsg::JsValue reason);
 
   void maybeResolveReadyPromise(jsg::Lock& js);
 
   // See the comment for releaseWriter in common.h for details on the use of maybeJs
-  void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) override;
+  void releaseWriter(kj::Ptr<Writer> writer, kj::Maybe<jsg::Lock&> maybeJs) override;
 
   kj::Maybe<kj::Own<WritableStreamSink>> removeSink(jsg::Lock& js) override;
   void detach(jsg::Lock& js) override;
@@ -4006,8 +4006,8 @@ bool WritableStreamJsController::isLockedToWriter() const {
   return !lock.state.is<Unlocked>();
 }
 
-bool WritableStreamJsController::lockWriter(jsg::Lock& js, Writer& writer) {
-  return lock.lockWriter(js, *this, writer);
+bool WritableStreamJsController::lockWriter(jsg::Lock& js, kj::Ptr<Writer> writer) {
+  return lock.lockWriter(js, *this, kj::mv(writer));
 }
 
 void WritableStreamJsController::maybeRejectReadyPromise(jsg::Lock& js, jsg::JsValue reason) {
@@ -4029,8 +4029,9 @@ void WritableStreamJsController::maybeResolveReadyPromise(jsg::Lock& js) {
   }
 }
 
-void WritableStreamJsController::releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) {
-  lock.releaseWriter(*this, writer, maybeJs);
+void WritableStreamJsController::releaseWriter(
+    kj::Ptr<Writer> writer, kj::Maybe<jsg::Lock&> maybeJs) {
+  lock.releaseWriter(*this, kj::mv(writer), maybeJs);
 }
 
 kj::Maybe<kj::Own<WritableStreamSink>> WritableStreamJsController::removeSink(jsg::Lock& js) {
