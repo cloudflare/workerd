@@ -257,7 +257,7 @@ bool ReadableLockImpl<Controller>::lockReader(
   }
 
   state.template transitionTo<ReaderLocked>(kj::mv(lock));
-  reader->attach(self, kj::mv(prp.promise));
+  reader->attach(self.addRef(), kj::mv(prp.promise));
   return true;
 }
 

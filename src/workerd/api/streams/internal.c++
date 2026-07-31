@@ -977,7 +977,7 @@ bool ReadableStreamInternalController::lockReader(jsg::Lock& js, kj::Ptr<Reader>
   }
 
   readState.transitionTo<ReaderLocked>(kj::mv(lock));
-  reader->attach(*this, kj::mv(prp.promise));
+  reader->attach(addRef(), kj::mv(prp.promise));
   return true;
 }
 

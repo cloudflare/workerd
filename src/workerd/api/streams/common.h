@@ -387,9 +387,8 @@ class ReadableStreamController {
     // user code.
     //
     // The Reader will hold a reference to the controller that will be cleared when the reader
-    // is released or destroyed. The controller is guaranteed to either outlive or detach the
-    // reader so the ReadableStreamController& reference should remain valid.
-    virtual void attach(ReadableStreamController& controller, jsg::Promise<void> closedPromise) = 0;
+    // is released or destroyed.
+    virtual void attach(jsg::Ref<ReadableStream> stream, jsg::Promise<void> closedPromise) = 0;
 
     // When a Reader lock is released, the controller will signal to the reader that it has been
     // detached.

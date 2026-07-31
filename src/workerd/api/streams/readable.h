@@ -20,7 +20,7 @@ public:
 
   ~ReaderImpl() noexcept(false);
 
-  void attach(ReadableStreamController& controller, jsg::Promise<void> closedPromise);
+  void attach(jsg::Ref<ReadableStream> stream, jsg::Promise<void> closedPromise);
 
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason);
 
@@ -126,7 +126,7 @@ public:
 
   // Internal API
 
-  void attach(ReadableStreamController& controller, jsg::Promise<void> closedPromise) override;
+  void attach(jsg::Ref<ReadableStream> stream, jsg::Promise<void> closedPromise) override;
 
   void detach() override;
 
@@ -201,7 +201,7 @@ public:
   // Internal API
 
   void attach(
-      ReadableStreamController& controller,
+      jsg::Ref<ReadableStream> stream,
       jsg::Promise<void> closedPromise) override;
 
   void detach() override;
@@ -247,7 +247,7 @@ class DrainingReader: public ReadableStreamController::Reader {
   bool isAttached() const;
 
   // ReadableStreamController::Reader interface
-  void attach(ReadableStreamController& controller, jsg::Promise<void> closedPromise) override;
+  void attach(jsg::Ref<ReadableStream> stream, jsg::Promise<void> closedPromise) override;
   void detach() override;
   bool isByteOriented() const override { return false; }
 

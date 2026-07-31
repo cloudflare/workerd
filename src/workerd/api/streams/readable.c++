@@ -25,9 +25,9 @@ ReaderImpl::~ReaderImpl() noexcept(false) {
   }
 }
 
-void ReaderImpl::attach(ReadableStreamController& controller, jsg::Promise<void> closedPromise) {
+void ReaderImpl::attach(jsg::Ref<ReadableStream> stream, jsg::Promise<void> closedPromise) {
   KJ_ASSERT(state.is<Initial>());
-  state.transitionTo<Attached>(controller.addRef());
+  state.transitionTo<Attached>(kj::mv(stream));
   this->closedPromise = kj::mv(closedPromise);
 }
 
@@ -153,8 +153,8 @@ jsg::Ref<ReadableStreamDefaultReader> ReadableStreamDefaultReader::constructor(
 }
 
 void ReadableStreamDefaultReader::attach(
-    ReadableStreamController& controller, jsg::Promise<void> closedPromise) {
-  impl.attach(controller, kj::mv(closedPromise));
+    jsg::Ref<ReadableStream> stream, jsg::Promise<void> closedPromise) {
+  impl.attach(kj::mv(stream), kj::mv(closedPromise));
 }
 
 jsg::Promise<void> ReadableStreamDefaultReader::cancel(
@@ -206,8 +206,8 @@ jsg::Ref<ReadableStreamBYOBReader> ReadableStreamBYOBReader::constructor(
 }
 
 void ReadableStreamBYOBReader::attach(
-    ReadableStreamController& controller, jsg::Promise<void> closedPromise) {
-  impl.attach(controller, kj::mv(closedPromise));
+    jsg::Ref<ReadableStream> stream, jsg::Promise<void> closedPromise) {
+  impl.attach(kj::mv(stream), kj::mv(closedPromise));
 }
 
 jsg::Promise<void> ReadableStreamBYOBReader::cancel(
@@ -283,10 +283,9 @@ kj::Maybe<kj::Own<DrainingReader>> DrainingReader::create(jsg::Lock& js, Readabl
   return kj::mv(reader);
 }
 
-void DrainingReader::attach(
-    ReadableStreamController& controller, jsg::Promise<void> closedPromise) {
+void DrainingReader::attach(jsg::Ref<ReadableStream> stream, jsg::Promise<void> closedPromise) {
   KJ_ASSERT(state.is<Initial>());
-  state = controller.addRef();
+  state = kj::mv(stream);
   this->closedPromise = kj::mv(closedPromise);
 }
 
