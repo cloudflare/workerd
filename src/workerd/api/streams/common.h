@@ -681,10 +681,10 @@ class WritableStreamController {
     // passing along the closed and ready promises that will be used to communicate state to the
     // user code.
     //
-    // The controller is guaranteed to either outlive the Writer or will detach the Writer so the
-    // WritableStreamController& reference should always remain valid.
+    // The Writer will hold a reference to the stream that will be cleared when the writer
+    // is released or destroyed.
     virtual void attach(jsg::Lock& js,
-        WritableStreamController& controller,
+        jsg::Ref<WritableStream> stream,
         jsg::Promise<void> closedPromise,
         jsg::Promise<void> readyPromise) = 0;
 

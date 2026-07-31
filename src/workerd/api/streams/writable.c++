@@ -49,11 +49,11 @@ jsg::Promise<void> WritableStreamDefaultWriter::abort(
 }
 
 void WritableStreamDefaultWriter::attach(jsg::Lock& js,
-    WritableStreamController& controller,
+    jsg::Ref<WritableStream> stream,
     jsg::Promise<void> closedPromise,
     jsg::Promise<void> readyPromise) {
   KJ_ASSERT(state.is<Initial>());
-  state.transitionTo<Attached>(controller.addRef());
+  state.transitionTo<Attached>(kj::mv(stream));
   this->closedPromise = kj::mv(closedPromise);
   replaceReadyPromise(js, kj::mv(readyPromise));
 }

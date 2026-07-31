@@ -1506,7 +1506,7 @@ bool WritableStreamInternalController::lockWriter(jsg::Lock& js, kj::Ptr<Writer>
   }
 
   writeState.transitionTo<WriterLocked>(kj::mv(lock));
-  writer->attach(js, *this, kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
+  writer->attach(js, addRef(), kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
   return true;
 }
 

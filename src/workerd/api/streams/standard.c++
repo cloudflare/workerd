@@ -449,7 +449,7 @@ bool WritableLockImpl<Controller>::lockWriter(
   }
 
   state.template transitionTo<WriterLocked>(kj::mv(lock));
-  writer->attach(js, self, kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
+  writer->attach(js, self.addRef(), kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
   return true;
 }
 
