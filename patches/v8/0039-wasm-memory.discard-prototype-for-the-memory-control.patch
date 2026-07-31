@@ -390,7 +390,7 @@ index db94a3567e117e1487ecff46fdbf3436e5964e42..3de9d13bda6c513f5492dcf3d1e63e5c
 +        }
 +        MemoryIndexImmediate imm(this, this->pc_ + opcode_length, validate);
 +        if (!this->Validate(this->pc_ + opcode_length, imm)) return 0;
-+        if (!VALIDATE(imm.memory->is_shared == SharedFlag::kNo)) {
++        if (!VALIDATE(!imm.memory->is_shared)) {
 +          this->DecodeError(
 +              "memory.discard does not yet support shared memories");
 +          return 0;

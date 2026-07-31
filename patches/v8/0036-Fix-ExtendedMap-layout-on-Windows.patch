@@ -8,40 +8,58 @@ tail padding. ExtendedMap intentionally leaves kTaggedSize - 1 bytes after
 bit_field_ex_ for subclasses, but Torque expects ExtendedMap itself to be
 rounded up before JSInterceptorMap fields start.
 
-Make the padding explicit in ExtendedMap's Torque and C++ layouts, and let
-JSInterceptorMap start directly with its tagged fields. This keeps the C++
-layout and generated Torque offsets consistent on Windows.
+Make the padding explicit in ExtendedMap's Torque and C++ layouts, and give
+JSInterceptorMap's flags padding a distinct name. This keeps the C++ layout
+and generated Torque offsets consistent on Windows.
 
+There are now two padding arrays and both must be zeroed, otherwise
+nondeterministic bytes end up in the heap and in snapshots.
+
+diff --git a/src/objects/js-interceptor-map-inl.h b/src/objects/js-interceptor-map-inl.h
+index e10726eb855b2573d8750573e6decaff63ad1ef4..061c6e7c53ec077f9cd3f13e50892d84881c2687 100644
+--- a/src/objects/js-interceptor-map-inl.h
++++ b/src/objects/js-interceptor-map-inl.h
+@@ -53,6 +53,7 @@ void JSInterceptorMap::set_supports_fast_iterable_to_list(bool value) {
+ void JSInterceptorMap::init_flags_and_clear_extended_padding() {
+   flags_ = 0;
+   memset(extended_padding_, 0, sizeof(extended_padding_));
++  memset(flags_padding_, 0, sizeof(flags_padding_));
+ }
+ 
+ Tagged<InterceptorInfo> Map::GetNamedInterceptor() const {
 diff --git a/src/objects/js-interceptor-map.h b/src/objects/js-interceptor-map.h
-index 546a15e1bc6ba44e528ba66e5a45a0f002a81cce..976b022ad9d3e2e1fcc3bcdc4c6b8bfc47c10d12 100644
+index 1bf77351fa028f6c7b2147827f38590aedfa0e1d..4b816042831c0c50d8171ce9de7509036e4f2272 100644
 --- a/src/objects/js-interceptor-map.h
 +++ b/src/objects/js-interceptor-map.h
-@@ -31,7 +31,6 @@ V8_OBJECT class JSInterceptorMap : public ExtendedMap {
-   inline void clear_extended_padding();
+@@ -41,7 +41,7 @@ V8_OBJECT class JSInterceptorMap : public ExtendedMap {
  
   public:
--  uint8_t extended_padding_[kTaggedSize - 1];
+   uint8_t flags_;
+-  uint8_t extended_padding_[kTaggedSize - 2];
++  uint8_t flags_padding_[kTaggedSize - 1];
    TaggedMember<InterceptorInfo> named_interceptor_;
    TaggedMember<InterceptorInfo> indexed_interceptor_;
- } V8_OBJECT_END;
+   TaggedMember<Cell> fast_case_validity_cell_;
 diff --git a/src/objects/js-interceptor-map.tq b/src/objects/js-interceptor-map.tq
-index 7a0838bb84d985467fd495e5b5fd10764bf82bf0..25f1d670094ec2f43739c992314fc474ebfd6d3c 100644
+index f351cb0fb0a75ab7639b56d0e4f8c0dc10e935e8..3cbe7c66e301af9dbd017598bb4985d0cbd9b051 100644
 --- a/src/objects/js-interceptor-map.tq
 +++ b/src/objects/js-interceptor-map.tq
-@@ -8,8 +8,6 @@
- @hasSameInstanceTypeAsParent
+@@ -9,8 +9,8 @@
  @doNotGenerateCast
  extern class JSInterceptorMap extends ExtendedMap {
--  @ifnot(TAGGED_SIZE_8_BYTES) extended_padding[3]: uint8;
--  @if(TAGGED_SIZE_8_BYTES) extended_padding[7]: uint8;
+   flags: uint8;
+-  @ifnot(TAGGED_SIZE_8_BYTES) extended_padding[2]: uint8;
+-  @if(TAGGED_SIZE_8_BYTES) extended_padding[6]: uint8;
++  @ifnot(TAGGED_SIZE_8_BYTES) flags_padding[3]: uint8;
++  @if(TAGGED_SIZE_8_BYTES) flags_padding[7]: uint8;
    named_interceptor: InterceptorInfo;
    indexed_interceptor: InterceptorInfo;
- }
+   // This prototype validity cell guards modifications of the interceptor's
 diff --git a/src/objects/map.h b/src/objects/map.h
-index b907c3ddc112618f40480e06b314213587b90e1c..9eb229400c8d29e84e1b599c14ffa6224aaa7b40 100644
+index 594d4c7c79ae2ad007163ca9881b0a4b949ca17e..f31c99af4e27c11668c37a140b167c5a9c5d9264 100644
 --- a/src/objects/map.h
 +++ b/src/objects/map.h
-@@ -1290,7 +1290,8 @@ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
+@@ -1288,7 +1288,8 @@ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
    static const int kStartOfStrongExtendedFieldsOffset;
  
    std::atomic<uint8_t> bit_field_ex_;

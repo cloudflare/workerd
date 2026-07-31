@@ -6,7 +6,7 @@ Subject: Port V8_USE_ZLIB support
 Change-Id: Icfedf3e90522f1ff5037517a39a5f0e3d44abace
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 4521044b5ae2a2c36d0b141f1149cc632a6f2cf3..bd86f080c6e96327aec1addaa11cddd7eb947dd4 100644
+index cbddddb8f9c601906ab28bffefef6c5f37cb0370..28e151b7363a2589a88a6835c14ae7a91e36f976 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -168,6 +168,11 @@ v8_flag(name = "v8_enable_verify_predictable")
@@ -29,7 +29,7 @@ index 4521044b5ae2a2c36d0b141f1149cc632a6f2cf3..bd86f080c6e96327aec1addaa11cddd7
      },
      defines = [
          "GOOGLE3",
-@@ -4730,6 +4736,8 @@ v8_library(
+@@ -4734,6 +4740,8 @@ v8_library(
          "@highway//:hwy",
          "@fast_float",
          "@simdutf",

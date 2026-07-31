@@ -37,10 +37,10 @@ index 0cb3e045bc46ec732956318b980e749d1847d06d..40ad805c7970cc9379e69f046205836d
     * Reads raw data in various common formats to the buffer.
     * Note that integer types are read in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 9ba67d3388d8328c93309138bbf8b0954a0850aa..cbe74a9614c347753561b45b9c07598b4263bf09 100644
+index 6298f80d299fa4b345a1ecf67204eba79e3f5a4c..33b9f61c8f63766cf9ebf8df09005eed9f7a9ec3 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3731,6 +3731,10 @@ uint32_t ValueDeserializer::GetWireFormatVersion() const {
+@@ -3753,6 +3753,10 @@ uint32_t ValueDeserializer::GetWireFormatVersion() const {
    return private_->deserializer.GetWireFormatVersion();
  }
  
@@ -52,10 +52,10 @@ index 9ba67d3388d8328c93309138bbf8b0954a0850aa..cbe74a9614c347753561b45b9c07598b
    PrepareForExecutionScope api_scope{context,
                                       RCCId::kAPI_ValueDeserializer_ReadValue};
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index bef656e4ed0de07435da6fb2c044171784ca2cbe..edde26bf9cc19d7a1a50ec780484cd1871602060 100644
+index 0329d4e5bc201c21a14edb02cd182d9d1c83a122..98b1413ce36899243fa607a5d9aca8cef29e6106 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
-@@ -221,6 +221,13 @@ class ValueDeserializer {
+@@ -223,6 +223,13 @@ class ValueDeserializer {
     */
    uint32_t GetWireFormatVersion() const { return version_; }
  

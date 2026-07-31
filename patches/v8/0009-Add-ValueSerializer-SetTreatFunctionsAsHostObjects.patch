@@ -30,10 +30,10 @@ index 596be18adeb3a5a81794aaa44b1d347dec6c0c7d..141f138e08de849e3e02b3b2b346e643
     * Write raw data in various common formats to the buffer.
     * Note that integer types are written in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index e97e02becb356808b6f5026bb9fa65e278dab155..ca176118c9299870c366a4d58e54f0e2ed691117 100644
+index 47a19406ed7d601ec84dee55df01556aa1180496..a6daf3e44563c6678d034edbb492d6420987a25a 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3613,6 +3613,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
+@@ -3635,6 +3635,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
    private_->serializer.SetTreatArrayBufferViewsAsHostObjects(mode);
  }
  
@@ -45,7 +45,7 @@ index e97e02becb356808b6f5026bb9fa65e278dab155..ca176118c9299870c366a4d58e54f0e2
                                          Local<Value> value) {
    auto i_isolate = i::Isolate::Current();
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 1063a750c3b3ccb8f10127d77237880a6f8a15cf..608501699c7868ce07d0b7c93c68513fe1e6b299 100644
+index 95cd09d4143092d7fb64231fd837676a39b1d727..24feedf7f8d27d74c448e88c97877b2f5d76c4c6 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -339,6 +339,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
@@ -81,10 +81,10 @@ index 1063a750c3b3ccb8f10127d77237880a6f8a15cf..608501699c7868ce07d0b7c93c68513f
    }
  
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index 1409bf5d0009f9b663892913ebc1e773921f585b..309df6a18eb7a3c24996b3e30a89ece37c47cc1c 100644
+index 4a6da3c3d024efa395820b25822a2bce1dd90188..7b3c4f96bc06d935d80a048fefa15c11137bc42d 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
-@@ -102,6 +102,15 @@ class ValueSerializer {
+@@ -104,6 +104,15 @@ class ValueSerializer {
     */
    void SetTreatArrayBufferViewsAsHostObjects(bool mode);
  
@@ -100,7 +100,7 @@ index 1409bf5d0009f9b663892913ebc1e773921f585b..309df6a18eb7a3c24996b3e30a89ece3
   private:
    // Managing allocations of the internal buffer.
    Maybe<bool> ExpandBuffer(size_t required_capacity);
-@@ -185,6 +194,7 @@ class ValueSerializer {
+@@ -187,6 +196,7 @@ class ValueSerializer {
    size_t buffer_capacity_ = 0;
    bool has_custom_host_objects_ = false;
    bool treat_array_buffer_views_as_host_objects_ = false;
