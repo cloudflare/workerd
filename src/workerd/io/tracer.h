@@ -62,6 +62,13 @@ class BaseTracer: public kj::Refcounted {
       kj::String message,
       kj::Maybe<kj::String> stack) = 0;
 
+  // Records an exception event on a span without treating the invocation as having thrown.
+  virtual void addSpanException(tracing::SpanId spanId,
+      kj::Date timestamp,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) = 0;
+
   virtual void addDiagnosticChannelEvent(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       kj::String channel,
@@ -165,6 +172,11 @@ class WorkerTracer final: public BaseTracer {
       kj::String name,
       kj::String message,
       kj::Maybe<kj::String> stack) override;
+  void addSpanException(tracing::SpanId spanId,
+      kj::Date timestamp,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) override;
   void addDiagnosticChannelEvent(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       kj::String channel,
@@ -235,6 +247,12 @@ class SpanSubmitter: public kj::Refcounted {
   virtual void submitSpanClose(
       tracing::SpanId spanId, kj::Date startTime, kj::Date endTime, Span::TagMap&& tags) = 0;
 
+  virtual void submitSpanException(tracing::SpanId spanId,
+      kj::Date timestamp,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) = 0;
+
   virtual tracing::SpanId makeSpanId() = 0;
 };
 
@@ -276,6 +294,10 @@ class UserSpanObserver final: public SpanObserver {
   kj::Rc<SpanObserver> newChildFromUserCode() override;
   void onOpen(kj::ConstString operationName, kj::Date startTime) override;
   void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) override;
+  void onException(kj::Date timestamp,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) override;
   kj::Date getTime() override;
   kj::Maybe<tracing::SpanContext> toSpanContext() override;
   tracing::SpanId getSpanId() override;

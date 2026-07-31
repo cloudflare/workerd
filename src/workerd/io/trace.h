@@ -1256,6 +1256,9 @@ class SpanBuilder {
   // duplicate keys.
   void addLog(kj::Date timestamp, kj::ConstString key, TagValue value);
 
+  // Records an exception associated with this span. Calls after end() are ignored.
+  void recordException(kj::String name, kj::String message, kj::Maybe<kj::String> stack);
+
  private:
   kj::Rc<SpanObserver> observer;
   // The under-construction span, or null if the span has ended.
@@ -1293,6 +1296,9 @@ class SpanObserver: public kj::Refcounted {
   // Called exactly once per observer, after onOpen(). Tags and logs are moved from the span;
   // the observer takes ownership.
   virtual void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) = 0;
+
+  virtual void onException(
+      kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack) {}
 
   // Called when the operation name is changed after the span was opened (via
   // SpanBuilder::setOperationName()). Observers that eagerly stream the open event should handle

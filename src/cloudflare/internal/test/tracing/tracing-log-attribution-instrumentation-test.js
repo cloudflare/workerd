@@ -166,6 +166,16 @@ function findLog(inv, substring) {
   return matches[0];
 }
 
+function findException(inv, message) {
+  const matches = inv.exceptions.filter((e) => e.message === message);
+  assert.strictEqual(
+    matches.length,
+    1,
+    `Expected exactly one exception with message "${message}" in invocation ${inv.invocationId}, got ${matches.length}`
+  );
+  return matches[0];
+}
+
 export const validate = {
   async test() {
     // Wait for every invocation's `outcome` event to arrive.
@@ -283,6 +293,44 @@ export const validate = {
         inv.topLevelSpanId,
         'diagnosticChannelEvent must NOT be attributed to the root'
       );
+    }
+
+    // recordException() targets the receiver span, even when a different span is active.
+    {
+      const { inv, span: active } = findInvocationBySpanName(
+        'record-exception-active'
+      );
+      const receiver = Array.from(inv.spans.values()).find(
+        (span) => span.name === 'record-exception-receiver'
+      );
+      assert.ok(receiver, 'expected the receiver span');
+
+      const error = findException(inv, 'recorded-error');
+      assert.strictEqual(error.name, 'Error');
+      assert.strictEqual(error.spanContextSpanId, receiver.spanId);
+      assert.notStrictEqual(error.spanContextSpanId, active.spanId);
+
+      const coded = findException(inv, 'recorded-code');
+      assert.strictEqual(coded.name, '42');
+      assert.strictEqual(coded.spanContextSpanId, receiver.spanId);
+
+      const string = findException(inv, 'recorded-string');
+      assert.strictEqual(string.name, '');
+      assert.strictEqual(string.spanContextSpanId, receiver.spanId);
+
+      const messageOnly = findException(inv, 'recorded-message');
+      assert.strictEqual(messageOnly.name, '');
+      assert.strictEqual(messageOnly.spanContextSpanId, receiver.spanId);
+
+      const zeroCode = findException(inv, 'recorded-zero-code');
+      assert.strictEqual(zeroCode.name, 'FallbackError');
+      assert.strictEqual(zeroCode.spanContextSpanId, receiver.spanId);
+    }
+
+    // Calls after end() must not emit an exception event.
+    {
+      const { inv } = findInvocationBySpanName('record-exception-ended');
+      assert.strictEqual(inv.exceptions.length, 0);
     }
 
     console.log('All tracing-log-attribution tests passed!');

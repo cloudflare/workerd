@@ -1923,6 +1923,15 @@ void SpanBuilder::addLog(kj::Date timestamp, kj::ConstString key, TagValue value
   }
 }
 
+void SpanBuilder::recordException(
+    kj::String name, kj::String message, kj::Maybe<kj::String> stack) {
+  if (span == kj::none) {
+    return;
+  }
+  observer->onException(
+      observer->getTime(), kj::mv(name), kj::mv(message), kj::mv(stack));
+}
+
 void TraceContext::setTag(kj::ConstString key, SpanBuilder::TagInitValue value) {
   if (!isObserved()) {
     return;
