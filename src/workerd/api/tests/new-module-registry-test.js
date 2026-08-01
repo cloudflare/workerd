@@ -136,6 +136,11 @@ import { foo as cjs1foo, bar as cjs1bar } from 'cjs1';
 strictEqual(cjs1foo, 1);
 strictEqual(cjs1bar, 2);
 
+// Duplicate named exports, including the implicit default export, must not be passed to V8.
+import duplicateExports, { foo as duplicateFoo } from 'cjs-duplicate-exports';
+deepStrictEqual(duplicateExports, { foo: 1 });
+strictEqual(duplicateFoo, 1);
+
 // The createRequire API works as expected.
 const myRequire = createRequire(import.meta.url);
 const customRequireCjs = myRequire('cjs1');

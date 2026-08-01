@@ -109,6 +109,19 @@ constexpr ModuleBundle::Type toModuleBuilderType(ModuleBundle::BuiltinBuilder::T
   KJ_UNREACHABLE;
 }
 
+kj::Array<kj::String> normalizeNamedExports(kj::Array<kj::String> namedExports) {
+  kj::HashSet<kj::StringPtr> seen;
+  seen.insert("default"_kj);
+
+  kj::Vector<kj::String> normalized;
+  for (auto& name: namedExports) {
+    if (seen.find(name) != kj::none) continue;
+    seen.insert(name);
+    normalized.add(kj::mv(name));
+  }
+  return normalized.releaseAsArray();
+}
+
 // The implementation of Module for ESM.
 class EsModule final: public Module {
  public:
@@ -282,7 +295,7 @@ class SyntheticModule final: public Module {
       ContentType contentType = ContentType::NONE)
       : Module(kj::mv(id), type, flags, contentType),
         callback(kj::mv(callback)),
-        namedExports(kj::mv(namedExports)) {
+        namedExports(normalizeNamedExports(kj::mv(namedExports))) {
     // Synthetic modules can never be ESM or Main
     KJ_DASSERT(!isEsm() && !isMain());
   }
@@ -1469,8 +1482,6 @@ class StaticModuleBundle final: public ModuleBundle {
 kj::HashSet<kj::StringPtr> toHashSet(kj::ArrayPtr<const kj::String> arr) {
   kj::HashSet<kj::StringPtr> set;
   set.insertAll(arr);
-  // Make sure there is no "default" export listed explicitly in the set.
-  set.eraseMatch("default"_kj);
   return kj::mv(set);
 }
 

@@ -41,6 +41,9 @@ const unitTests :Workerd.Config = (
           (name = "cjs1",
            namedExports = ["foo", "bar"],
            commonJsModule = "module.exports = { foo: 1, bar: 2, filename: __filename, dirname: __dirname, assert: require('assert') }"),
+          (name = "cjs-duplicate-exports",
+           namedExports = ["foo", "foo", "default"],
+           commonJsModule = "module.exports = { foo: 1 }"),
           (name = "cjs2", commonJsModule = "module.exports = require('cjs1')"),
           (name = "cjs3", commonJsModule = "throw new Error('boom')"),
           # Intentional circular dependency
