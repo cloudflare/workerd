@@ -398,19 +398,7 @@ class ExecutionContext: public jsg::Object {
     // and enterSpan() is a no-op when called outside a traced request.
     JSG_LAZY_INSTANCE_PROPERTY(tracing, getTracing);
 
-    if (flags.getWorkerdExperimental()) {
-      // TODO(soon): Before making this generally available we need to:
-      // * Consider whether to use TerminateExecution() instead of throwing.
-      // * Make sure it's really not possible for more code to run in the context after abort().
-      //   Currently, abort() triggers in a partially async way so there's an opportunity for some
-      //   other event in the event queue to squeeze in.
-      // * Try to ensure that the provided error is actually the one that propagates out of event
-      //   handlers. Currently this is not consistently true.
-      // * Make sure all event handlers actually honor onAbort().
-      // * Enable the Durable Object version at the same time -- and make sure they're suitably
-      //   consistent with each other.
-      JSG_METHOD(abort);
-    }
+    JSG_METHOD(abort);
 
     // TODO(soon): This is getting unwieldy.
     if (flags.getEnableCtxExports()) {
