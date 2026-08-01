@@ -255,6 +255,9 @@ class JsArrayBuffer final: public JsBase<v8::ArrayBuffer, JsArrayBuffer> {
 
   size_t size() const;
 
+  // Used for safety checks
+  size_t backingStoreSize() const;
+
   // Return a copy of this buffer's data as a kj::Array.
   kj::Array<kj::byte> copy();
 

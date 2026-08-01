@@ -2091,7 +2091,7 @@ struct ByteReadable final: public kj::PtrTarget,
       reading = true;
       KJ_DEFER(reading = false);
       KJ_IF_SOME(byob, byobOptions) {
-        jsg::JsArrayBufferView view = jsg::JsArrayBufferView(byob.bufferView.getHandle(js));
+        auto view = byob.bufferView.getHandle(js);
         view = view.detachAndTake(js);
         size_t elementSize = view.getElementSize();
         // If atLeast is not given, then by default it is the element size of the view
@@ -2874,12 +2874,12 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
   KJ_IF_SOME(byobOptions, maybeByobOptions) {
     byobOptions.detachBuffer = true;
     auto view = byobOptions.bufferView.getHandle(js);
-    if (!view->Buffer()->IsDetachable()) {
+    if (!view.isDetachable()) {
       return js.rejectedPromise<ReadResult>(
           js.typeError("Unabled to use non-detachable ArrayBuffer."_kj));
     }
 
-    if (view->ByteLength() == 0 || view->Buffer()->ByteLength() == 0) {
+    if (view.size() == 0) {
       return js.rejectedPromise<ReadResult>(
           js.typeError("Unable to use a zero-length ArrayBuffer."_kj));
     }
@@ -2893,10 +2893,9 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
       // If it is a BYOB read, then the spec requires that we return an empty
       // view of the same type provided, that uses the same backing memory
       // as that provided, but with zero-length.
-      auto source = jsg::JsArrayBufferView(byobOptions.bufferView.getHandle(js));
-      source = source.detachAndTake(js).slice(js, 0, 0);
+      view = view.detachAndTake(js).slice(js, 0, 0);
       return js.resolvedPromise(ReadResult{
-        .value = jsg::JsValue(source).addRef(js),
+        .value = jsg::JsValue(view).addRef(js),
         .done = true,
       });
     }
