@@ -1365,6 +1365,11 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
 
   return asyncLockPromise.then([this, inputLock = kj::mv(inputLock), func = kj::fwd<Func>(func)](
                                    Worker::AsyncLock lock) mutable {
+    // Re-check if context was aborted while we waited for the lock.
+    KJ_IF_SOME(ex, abortException) {
+      kj::throwFatalException(ex.clone());
+    }
+
     using Result = decltype(func(kj::instance<Worker::Lock&>()));
 
     if constexpr (kj::isSameType<Result, void>()) {
