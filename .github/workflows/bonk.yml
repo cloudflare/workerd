@@ -39,6 +39,10 @@ jobs:
           mentions: '/bonk,@ask-bonk'
           permissions: write
           opencode_version: "1.14.33"
-          # token_permissions defaults to WRITE (i.e. Bonk can push commits).
-          # We intentionally leave it that way here because users may ask Bonk
-          # to update their PR via /bonk.
+          # token_permissions stays WRITE on PR-context invocations because
+          # users may ask Bonk to update their PR via /bonk. The `issue_comment`
+          # event, however, also fires on plain issue comments — where there is
+          # no PR branch to push to — so for that path we drop to NO_PUSH so a
+          # supply-chain or prompt-injection mishap cannot turn an issue
+          # comment into a write to the repo.
+          token_permissions: ${{ (github.event_name == 'issue_comment' && !github.event.issue.pull_request) && 'NO_PUSH' || 'WRITE' }}
