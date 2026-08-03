@@ -12,7 +12,6 @@
 #include "system-streams.h"
 #include "util.h"
 #include "worker-rpc.h"
-#include "workerd/jsg/jsvalue.h"
 
 #include <workerd/api/global-scope.h>
 #include <workerd/io/features.h>

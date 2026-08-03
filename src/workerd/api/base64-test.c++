@@ -1,5 +1,6 @@
 #include "base64.h"
-#include "workerd/tests/test-fixture.h"
+
+#include <workerd/tests/test-fixture.h>
 
 #include <kj/encoding.h>
 #include <kj/test.h>

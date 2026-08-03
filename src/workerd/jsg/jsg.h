@@ -7,7 +7,6 @@
 //
 // Any files declaring an API to export to JavaScript will need to include this header.
 
-#include "kj/common.h"
 #include "util.h"
 #include "wrappable.h"
 
