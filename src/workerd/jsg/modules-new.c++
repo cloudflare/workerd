@@ -356,17 +356,37 @@ class SyntheticModule final: public Module {
 WD_STRONG_BOOL(SourcePhase);
 #pragma clang diagnostic pop
 
-// Parses import attributes from V8's FixedArray format (key-value-location triples).
+// V8 hands import attributes to the embedder in two different FixedArray layouts,
+// and the stride must match the callsite or we will read a value as if it were a
+// key and index past the end of the array:
+//
+//  * Static imports (ModuleRequest::GetImportAttributes, i.e. the array given to
+//    ResolveModuleCallback) use triples: [key, value, source_offset, ...].
+//  * Dynamic imports (HostImportModuleDynamicallyCallback) use pairs:
+//    [key, value, ...]. Per v8-callbacks.h: "unlike the FixedArray passed to
+//    ResolveModuleCallback ... this array does not contain the source Locations
+//    of the attributes."
+enum class AttributeStride : int {
+  PAIRS = 2,
+  TRIPLES = 3,
+};
+
+// Parses import attributes from V8's FixedArray format.
 // Returns the value of the "type" attribute if present, or kj::none if no attributes.
 // Throws TypeError for any unrecognized attribute keys or unsupported type values.
 kj::Maybe<kj::StringPtr> parseImportAttributes(
-    Lock& js, v8::Local<v8::FixedArray> import_attributes) {
+    Lock& js, v8::Local<v8::FixedArray> import_attributes, AttributeStride stride) {
   if (import_attributes.IsEmpty() || import_attributes->Length() == 0) {
     return kj::none;
   }
-  // V8 encodes import attributes as a FixedArray of triples: [key, value, location, ...]
+  const int step = static_cast<int>(stride);
+  const int length = import_attributes->Length();
   kj::Maybe<kj::StringPtr> typeValue;
-  for (int i = 0; i < import_attributes->Length(); i += 3) {
+  // The `i + 1 < length` bound is deliberate. v8::FixedArray::Get only range-checks the
+  // index under V8_ENABLE_CHECKS, which release builds do not set, so an out-of-range
+  // index silently reads the adjacent tagged word and As<v8::String>() then type-confuses
+  // it. Keep this guard even though the strides above should already make it unreachable.
+  for (int i = 0; i + 1 < length; i += step) {
     auto key = js.toString(import_attributes->Get(i).As<v8::String>());
     if (key == "type"_kj) {
       auto value = js.toString(import_attributes->Get(i + 1).As<v8::String>());
@@ -1106,7 +1126,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportModuleCallback(v8::Local<v8::Context> c
 
       // Parse import attributes. Throws for unrecognized attribute keys.
       // Returns the "type" value if specified, or kj::none.
-      auto importType = parseImportAttributes(js, import_attributes);
+      auto importType = parseImportAttributes(js, import_attributes, AttributeStride::PAIRS);
 
       Url referrer = ([&] {
         if (resource_name.IsEmpty()) {
@@ -1208,7 +1228,7 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
     // for backwards compatibility.
     //
     // Parse import attributes. Throws for unrecognized attribute keys.
-    auto importType = parseImportAttributes(js, import_attributes);
+    auto importType = parseImportAttributes(js, import_attributes, AttributeStride::TRIPLES);
 
     ResolveContext::Type type = ResolveContext::Type::BUNDLE;
 
@@ -1939,18 +1959,25 @@ kj::Maybe<JsValue> ModuleRegistry::tryResolveModuleNamespace(Lock& js,
     kj::Maybe<const Url&> maybeReferrer,
     UnwrapDefault unwrapDefault) {
   auto& bound = IsolateModuleRegistry::from(js.v8Isolate);
-  auto url = ([&] {
-    KJ_IF_SOME(referrer, maybeReferrer) {
-      return KJ_ASSERT_NONNULL(referrer.tryResolve(specifier));
+  const Url& base = maybeReferrer.orDefault(bound.getBundleBase());
+  // The specifier arrives straight from user code on the require() paths (CommonJS
+  // require(...) and node:module createRequire(...)), so it may fail to resolve against
+  // the base at all: "https://" is a special-scheme URL with no host and parses as
+  // nothing. A malformed specifier is a bad value, which the dynamic-import and
+  // static-import paths both report as a TypeError, and the error class must not depend
+  // on which path detects it.
+  Url url = ([&]() -> Url {
+    KJ_IF_SOME(resolved, base.tryResolve(specifier)) {
+      return kj::mv(resolved);
     }
-    return KJ_ASSERT_NONNULL(bound.getBundleBase().tryResolve(specifier));
+    js.throwException(js.typeError(kj::str("Invalid module specifier: "_kj, specifier)));
   })();
   auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
   ResolveContext context{
     .type = type,
     .source = source,
     .normalizedSpecifier = normalized,
-    .referrerNormalizedSpecifier = maybeReferrer.orDefault(bound.getBundleBase()),
+    .referrerNormalizedSpecifier = base,
     .rawSpecifier = specifier,
   };
   v8::TryCatch tryCatch(js.v8Isolate);

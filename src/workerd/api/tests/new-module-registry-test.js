@@ -313,6 +313,37 @@ export const importAssertionsFail = {
   },
 };
 
+// V8 hands static imports [key, value, source_offset, ...] but dynamic imports
+// [key, value, ...]. Reading the dynamic array with a stride of 3 walked off the
+// end of it, so every case below needs at least two attributes to be meaningful.
+export const multipleImportAttributes = {
+  async test() {
+    // The second attribute's key must be the one reported, not its value, and not
+    // the value of some other attribute.
+    await rejects(import('json', { with: { type: 'json', a: 'b' } }), {
+      message: /^Unsupported import attribute: "a"/,
+    });
+
+    // With the array length at 4, a stride of 3 read index 3 as a key; because that
+    // slot holds the string "type" it then read index 4, one past the end.
+    await rejects(import('json', { with: { type: 'json', a: 'type' } }), {
+      message: /^Unsupported import attribute: "a"/,
+    });
+
+    // Attribute order is the object's own-property order and is not sorted, so the
+    // unsupported key must be reported regardless of which position it occupies.
+    await rejects(import('json', { with: { a: 'type', type: 'json' } }), {
+      message: /^Unsupported import attribute: "a"/,
+    });
+
+    // An unknown attribute is rejected during parsing, so it takes precedence over
+    // the content-type mismatch that 'foo' would otherwise produce for type: 'json'.
+    await rejects(import('foo', { with: { type: 'json', a: 'b' } }), {
+      message: /^Unsupported import attribute: "a"/,
+    });
+  },
+};
+
 // Note: 'zebra: ...' parses as a URL (scheme "zebra" with an opaque path), so it
 // resolves successfully and then fails as *not found*. This is deliberately the
 // not-found path, NOT the invalid-specifier path (covered by
@@ -387,10 +418,11 @@ export const errorClassConsistency = {
   },
 };
 
-// A malformed/unparseable specifier is a TypeError on both the dynamic-import
-// and static-import paths (matching Node's ERR_INVALID_MODULE_SPECIFIER, which
-// extends TypeError). 'https://' is a special-scheme URL with no host, so it
-// fails to parse rather than resolving to a (missing) module.
+// A malformed/unparseable specifier is a TypeError on the dynamic-import,
+// static-import and require() paths alike (matching Node's
+// ERR_INVALID_MODULE_SPECIFIER, which extends TypeError). 'https://' is a
+// special-scheme URL with no host, so it fails to parse rather than resolving to a
+// (missing) module.
 export const invalidModuleSpecifier = {
   async test() {
     // Dynamic import:
@@ -412,6 +444,23 @@ export const invalidModuleSpecifier = {
       `expected TypeError, got ${stat && stat.name}`
     );
     ok(/Invalid module specifier/.test(stat.message), stat.message);
+
+    // require(): every one of these fails to parse as a URL, whether because the
+    // special scheme has no host or because the host itself is malformed.
+    for (const specifier of [
+      'https://',
+      'http://',
+      'http://[',
+      'https://[::1',
+    ]) {
+      throws(
+        () => myRequire(specifier),
+        (err) =>
+          err instanceof TypeError &&
+          /Invalid module specifier/.test(err.message),
+        specifier
+      );
+    }
   },
 };
 
@@ -437,6 +486,28 @@ export const dynamicImportAttributes = {
       name: 'TypeError',
       message: 'Import attribute type "bytes" is not yet supported',
     });
+
+    // A supported type that does not match the module's content type is rejected.
+    await rejects(import('foo', { with: { type: 'json' } }), {
+      message: /is not of type "json"/,
+    });
+  },
+};
+
+// A module specifier whose URL has an opaque path has a pathname with no leading "/":
+// "opaque:foo" has the pathname "foo" and "opaque:" has an empty pathname. __filename and
+// __dirname convert the pathname to a relative kj::Path, which must not consume a character
+// that isn't a leading "/".
+export const commonJsOpaquePathSpecifier = {
+  async test() {
+    const foo = await import('opaque:foo');
+    strictEqual(foo.default.filename(), 'foo');
+    strictEqual(foo.default.dirname(), '/');
+
+    // An empty opaque path has neither a filename nor a directory.
+    const empty = await import('opaque:');
+    throws(() => empty.default.filename());
+    throws(() => empty.default.dirname());
   },
 };
 
