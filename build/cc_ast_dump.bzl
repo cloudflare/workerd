@@ -51,6 +51,7 @@ def _cc_ast_dump_impl(ctx):
         outputs = [ctx.outputs.out],
         inputs = inputs,
         command = command,
+        mnemonic = "CcAstDump",
         env = env,
     )
 

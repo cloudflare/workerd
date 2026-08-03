@@ -39,6 +39,7 @@ clang-ast = "0"
 encoding_rs = "0"
 flate2 = "1"
 futures = "0"
+libc = "0"
 lol_html_c_api = { git = "https://github.com/cloudflare/lol-html", tag = "v2.7.2" }
 nix = "0"
 pico-args = "0"
