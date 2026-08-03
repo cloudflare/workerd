@@ -54,10 +54,10 @@ class ReadableLockImpl {
     return !state.template is<Unlocked>();
   }
 
-  bool lockReader(jsg::Lock& js, Controller& self, Reader& reader);
+  bool lockReader(jsg::Lock& js, Controller& self, kj::Ptr<Reader> reader);
 
   // See the comment for releaseReader in common.h for details on the use of maybeJs
-  void releaseReader(Controller& self, Reader& reader, kj::Maybe<jsg::Lock&> maybeJs);
+  void releaseReader(Controller& self, kj::Ptr<Reader> reader, kj::Maybe<jsg::Lock&> maybeJs);
 
   bool lock();
 
@@ -239,7 +239,8 @@ bool ReadableLockImpl<Controller>::lock() {
 }
 
 template <typename Controller>
-bool ReadableLockImpl<Controller>::lockReader(jsg::Lock& js, Controller& self, Reader& reader) {
+bool ReadableLockImpl<Controller>::lockReader(
+    jsg::Lock& js, Controller& self, kj::Ptr<Reader> reader) {
   if (isLockedToReader()) {
     return false;
   }
@@ -256,16 +257,14 @@ bool ReadableLockImpl<Controller>::lockReader(jsg::Lock& js, Controller& self, R
   }
 
   state.template transitionTo<ReaderLocked>(kj::mv(lock));
-  reader.attach(self, kj::mv(prp.promise));
+  reader->attach(self.addRef(), kj::mv(prp.promise));
   return true;
 }
 
 template <typename Controller>
 void ReadableLockImpl<Controller>::releaseReader(
-    Controller& self, Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) {
+    Controller& self, kj::Ptr<Reader> reader, kj::Maybe<jsg::Lock&> maybeJs) {
   KJ_IF_SOME(locked, state.template tryGetUnsafe<ReaderLocked>()) {
-    KJ_ASSERT(&locked.getReader() == &reader);
-
     KJ_IF_SOME(js, maybeJs) {
       auto reason = js.typeError("This ReadableStream reader has been released."_kj);
       KJ_SWITCH_ONEOF(self.state) {
@@ -771,7 +770,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
 
   bool isLockedToReader() const override;
 
-  bool lockReader(jsg::Lock& js, Reader& reader) override;
+  bool lockReader(jsg::Lock& js, kj::Ptr<Reader> reader) override;
 
   kj::Maybe<jsg::JsValue> isErrored(jsg::Lock& js);
 
@@ -790,7 +789,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
       jsg::Lock& js, size_t maxRead = kj::maxValue) override;
 
   // See the comment for releaseReader in common.h for details on the use of maybeJs
-  void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
+  void releaseReader(kj::Ptr<Reader> reader, kj::Maybe<jsg::Lock&> maybeJs) override;
 
   void setOwnerRef(kj::Weak<ReadableStream> stream) override;
 
@@ -2781,7 +2780,7 @@ bool ReadableStreamJsController::isLockedToReader() const {
   return lock.isLockedToReader();
 }
 
-bool ReadableStreamJsController::lockReader(jsg::Lock& js, Reader& reader) {
+bool ReadableStreamJsController::lockReader(jsg::Lock& js, kj::Ptr<Reader> reader) {
   return lock.lockReader(js, *this, reader);
 }
 
@@ -2976,8 +2975,9 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
   KJ_UNREACHABLE;
 }
 
-void ReadableStreamJsController::releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) {
-  lock.releaseReader(*this, reader, maybeJs);
+void ReadableStreamJsController::releaseReader(
+    kj::Ptr<Reader> reader, kj::Maybe<jsg::Lock&> maybeJs) {
+  lock.releaseReader(*this, kj::mv(reader), maybeJs);
 }
 
 ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {

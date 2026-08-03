@@ -953,7 +953,7 @@ kj::Maybe<kj::Own<ReadableStreamSource>> ReadableStreamInternalController::remov
   KJ_UNREACHABLE;
 }
 
-bool ReadableStreamInternalController::lockReader(jsg::Lock& js, Reader& reader) {
+bool ReadableStreamInternalController::lockReader(jsg::Lock& js, kj::Ptr<Reader> reader) {
   if (isLockedToReader()) {
     return false;
   }
@@ -977,14 +977,13 @@ bool ReadableStreamInternalController::lockReader(jsg::Lock& js, Reader& reader)
   }
 
   readState.transitionTo<ReaderLocked>(kj::mv(lock));
-  reader.attach(*this, kj::mv(prp.promise));
+  reader->attach(addRef(), kj::mv(prp.promise));
   return true;
 }
 
 void ReadableStreamInternalController::releaseReader(
-    Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) {
+    kj::Ptr<Reader> reader, kj::Maybe<jsg::Lock&> maybeJs) {
   KJ_IF_SOME(locked, readState.tryGetUnsafe<ReaderLocked>()) {
-    KJ_ASSERT(&locked.getReader() == &reader);
     KJ_IF_SOME(js, maybeJs) {
       KJ_IF_SOME(canceler, locked.getCanceler()) {
         JSG_REQUIRE(canceler->isEmpty(), TypeError,
