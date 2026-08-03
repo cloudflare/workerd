@@ -4563,7 +4563,9 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
           IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(FutureSubrequestChannel{binding.getQueue(), kj::mv(errorContext)});
 
-      return makeGlobal(Global::QueueBinding{.subrequestChannel = channel});
+      return makeGlobal(Global::QueueBinding{.subrequestChannel = channel,
+        .queueName = kj::str(binding.getQueue().getName()),
+        .bindingName = kj::str(binding.getName())});
     }
 
     case config::Worker::Binding::WRAPPED: {

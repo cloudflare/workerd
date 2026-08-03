@@ -602,8 +602,10 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
               featureFlags, r2.subrequestChannel, kj::str(r2.bucket), kj::str(r2.bindingName)));
     }
 
-    KJ_CASE_ONEOF(ns, Global::QueueBinding) {
-      value = lock.wrap(context, lock.alloc<api::WorkerQueue>(ns.subrequestChannel));
+    KJ_CASE_ONEOF(queue, Global::QueueBinding) {
+      value = lock.wrap(context,
+          lock.alloc<api::WorkerQueue>(
+              queue.subrequestChannel, kj::str(queue.queueName), kj::str(queue.bindingName)));
     }
 
     KJ_CASE_ONEOF(key, Global::CryptoKey) {

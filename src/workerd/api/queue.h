@@ -25,7 +25,10 @@ class WorkerQueue: public jsg::Object {
  public:
   // `subrequestChannel` is what to pass to IoContext::getHttpClient() to get an HttpClient
   // representing this queue.
-  WorkerQueue(uint subrequestChannel): subrequestChannel(subrequestChannel) {}
+  WorkerQueue(uint subrequestChannel, kj::String queueName, kj::String bindingName)
+      : subrequestChannel(subrequestChannel),
+        queueName(kj::mv(queueName)),
+        bindingName(kj::mv(bindingName)) {}
 
   // The metrics structs below (Metrics, SendMetrics, SendBatchMetrics) are deserialized from
   // JSON responses where the upstream service uses 0 as a sentinel for "no data" on timestamp
@@ -149,6 +152,8 @@ class WorkerQueue: public jsg::Object {
 
  private:
   uint subrequestChannel;
+  kj::String queueName;
+  kj::String bindingName;
 };
 
 // Event handler types

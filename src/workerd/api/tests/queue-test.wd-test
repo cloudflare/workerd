@@ -12,8 +12,10 @@ const unitTests :Workerd.Config = (
           ( name = "SERVICE", service = "queue-test" ),
         ],
         compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "queues_json_messages", "rpc", "capture_async_api_throws", "disable_fast_jsg_struct"],
+        streamingTails = ["tail"],
       )
     ),
+    (name = "tail", worker = .tailWorker, ),
     ( name = "queue-error-codes-enabled",
       worker = (
         modules = [
@@ -39,4 +41,16 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
+  extensions = [ (
+    modules = [
+      ( name = "test:instrumentation-tail", esModule = embed "instrumentation-tail-worker.js" ),
+    ]
+  ) ]
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "queue-instrumentation-test.js")
+  ],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
 );

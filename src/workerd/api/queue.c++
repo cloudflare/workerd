@@ -258,7 +258,18 @@ jsg::Promise<WorkerQueue::SendResponse> WorkerQueue::send(jsg::Lock& js,
     serialized = serializeV8(js, body);
   }
 
-  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_send"_kjc);
+  TraceContext traceContext = context.makeUserTraceSpan("queue_send"_kjc);
+  traceContext.setTag("cloudflare.binding.name"_kjc, bindingName.asPtr());
+  traceContext.setTag("cloudflare.binding.type"_kjc, "queue"_kjc);
+  traceContext.setTag("cloudflare.queue.operation"_kjc, "send"_kjc);
+  traceContext.setTag("messaging.system"_kjc, "cloudflare.queues"_kjc);
+  traceContext.setTag("messaging.destination.name"_kjc, queueName.asPtr());
+  traceContext.setTag("messaging.operation.name"_kjc, "send"_kjc);
+  traceContext.setTag("messaging.operation.type"_kjc, "send"_kjc);
+  traceContext.setTag(
+      "messaging.message.body.size"_kjc, static_cast<int64_t>(serialized.data.size()));
+
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, traceContext);
   auto req = client->request(
       kj::HttpMethod::POST, "https://fake-host/message"_kjc, headers, serialized.data.size());
 
@@ -284,9 +295,10 @@ jsg::Promise<WorkerQueue::SendResponse> WorkerQueue::send(jsg::Lock& js,
   auto promise =
       handleSend(kj::mv(req), kj::mv(serialized), kj::mv(client), headerIds, exposeErrorCodes);
 
-  return context.awaitIo(js, kj::mv(promise),
+  auto result = context.awaitIo(js, kj::mv(promise),
       parseQueueResponse(responseHandler, "Failed to parse queue send response"_kj,
           [](SendResponse& r) -> auto& { return r.metadata.metrics.oldestMessageTimestamp; }));
+  return context.attachSpans(js, kj::mv(result), kj::mv(traceContext));
 }
 
 jsg::Promise<WorkerQueue::Metrics> WorkerQueue::metrics(
@@ -384,7 +396,20 @@ jsg::Promise<WorkerQueue::SendBatchResponse> WorkerQueue::sendBatch(jsg::Lock& j
   kj::String body(bodyBuilder.releaseAsArray());
   KJ_DASSERT(jsg::JsValue::fromJson(js, body).isObject());
 
-  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_send"_kjc);
+  TraceContext traceContext = context.makeUserTraceSpan("queue_send"_kjc);
+  traceContext.setTag("cloudflare.binding.name"_kjc, bindingName.asPtr());
+  traceContext.setTag("cloudflare.binding.type"_kjc, "queue"_kjc);
+  traceContext.setTag("cloudflare.queue.operation"_kjc, "sendBatch"_kjc);
+  traceContext.setTag("messaging.system"_kjc, "cloudflare.queues"_kjc);
+  traceContext.setTag("messaging.destination.name"_kjc, queueName.asPtr());
+  traceContext.setTag("messaging.operation.name"_kjc, "send"_kjc);
+  traceContext.setTag("messaging.operation.type"_kjc, "send"_kjc);
+  traceContext.setTag("messaging.batch.message_count"_kjc, static_cast<int64_t>(messageCount));
+  traceContext.setTag("cloudflare.queue.batch.body.size"_kjc, static_cast<int64_t>(totalSize));
+  traceContext.setTag(
+      "cloudflare.queue.batch.largest_message.size"_kjc, static_cast<int64_t>(largestMessage));
+
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, traceContext);
 
   auto headers = kj::HttpHeaders(context.getHeaderTable());
   headers.addPtr("CF-Queue-Batch-Count"_kj, kj::str(messageCount));
@@ -422,9 +447,10 @@ jsg::Promise<WorkerQueue::SendBatchResponse> WorkerQueue::sendBatch(jsg::Lock& j
   auto promise =
       handleWrite(kj::mv(req), kj::mv(body), kj::mv(client), headerIds, exposeErrorCodes);
 
-  return context.awaitIo(js, kj::mv(promise),
+  auto result = context.awaitIo(js, kj::mv(promise),
       parseQueueResponse(responseHandler, "Failed to parse queue send response"_kj,
           [](SendBatchResponse& r) -> auto& { return r.metadata.metrics.oldestMessageTimestamp; }));
+  return context.attachSpans(js, kj::mv(result), kj::mv(traceContext));
 }
 
 QueueMessage::QueueMessage(

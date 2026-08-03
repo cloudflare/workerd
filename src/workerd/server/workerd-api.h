@@ -133,9 +133,13 @@ class WorkerdApi final: public Worker::Api {
     };
     struct QueueBinding {
       uint subrequestChannel;
+      kj::String queueName;
+      kj::String bindingName;
 
       QueueBinding clone() const {
-        return *this;
+        return QueueBinding{.subrequestChannel = subrequestChannel,
+          .queueName = kj::str(queueName),
+          .bindingName = kj::str(bindingName)};
       }
     };
     struct CryptoKey {
