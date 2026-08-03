@@ -58,9 +58,9 @@ void DeleteQueue::checkFarGet(const DeleteQueue& deleteQueue, const std::type_in
   IoContext::current().checkFarGet(deleteQueue, type);
 }
 
-void DeleteQueue::checkWeakGet(workerd::WeakRef<IoContext>& weak) {
-  JSG_REQUIRE(weak.isValid(), Error,
-      "Couldn't complete operation because the execution context has ended.");
+void ReverseIoOwnValidity::checkValid() const {
+  JSG_REQUIRE(
+      isValid(), Error, "Couldn't complete operation because the execution context has ended.");
 }
 
 kj::Promise<void> DeleteQueue::resetCrossThreadSignal() const {

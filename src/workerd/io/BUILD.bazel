@@ -610,3 +610,11 @@ kj_test(
         "//src/workerd/tests:test-fixture",
     ],
 )
+
+kj_test(
+    src = "io-own-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
