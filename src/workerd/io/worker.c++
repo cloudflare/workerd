@@ -1121,6 +1121,12 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     KJ_DASSERT(lock->v8Isolate->GetData(jsg::SET_DATA_ISOLATE) == nullptr);
     lock->v8Isolate->SetData(jsg::SET_DATA_ISOLATE, this);
 
+    for (auto& m: kConsoleMethods) {
+      jsg::isolateRegisterExternalReference(
+          lock->v8Isolate, reinterpret_cast<intptr_t>(m.callback));
+    }
+    jsg::isolateRegisterExternalReference(lock->v8Isolate, jsg::getSyntheticModuleEvalRef());
+
     lock->setCaptureThrowsAsRejections(features.getCaptureThrowsAsRejections());
     // TODO(cleanup): Now that this list has grown significantly, we should probably
     // refactor to pass all of the options in a single call instead of one by one.
@@ -1184,6 +1190,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     // If no message listeners are registered, then the default message reporter writes errors to
     // stdout. Add a callback that instead writes the message to KJ_LOG
     lock->v8Isolate->AddMessageListener(messageCallback);
+    jsg::isolateRegisterExternalReference(
+        lock->v8Isolate, reinterpret_cast<intptr_t>(&messageCallback));
 
     // By default, V8's memory pressure level is "none". This tells V8 that no one else on the
     // machine is competing for memory so it might as well use all it wants and be lazy about GC.

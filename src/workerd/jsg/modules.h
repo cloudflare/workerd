@@ -43,6 +43,11 @@ kj::Maybe<v8::Local<v8::Promise>> instantiateModule(jsg::Lock& js,
     v8::Local<v8::Module>& module,
     InstantiateModuleOptions options = InstantiateModuleOptions::DEFAULT);
 
+// Returns the address of the synthetic-module SyntheticModuleEvaluationSteps callback so it can
+// be registered in the V8 external_references array for snapshot SAVE/LOAD. The callback itself
+// lives in an anonymous namespace in modules.c++, hence this accessor.
+intptr_t getSyntheticModuleEvalRef();
+
 enum class ModuleInfoCompileOption {
   // The BUNDLE options tells the compile operation to treat the content as coming
   // from a worker bundle.

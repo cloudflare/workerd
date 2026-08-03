@@ -436,6 +436,10 @@ v8::Local<v8::Module> createSyntheticModule(
 }
 }  // namespace
 
+intptr_t getSyntheticModuleEvalRef() {
+  return reinterpret_cast<intptr_t>(&evaluateSyntheticModuleCallback);
+}
+
 ModuleRegistry::ModuleInfo::ModuleInfo(
     jsg::Lock& js, v8::Local<v8::Module> module, kj::Maybe<SyntheticModuleInfo> maybeSynthetic)
     : module(js.v8Isolate, module),
