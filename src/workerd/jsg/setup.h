@@ -421,6 +421,16 @@ class IsolateBase {
   // context and fill the SnapshotArtifact slot passed at isolate creation. No-op otherwise.
   void prepareSnapshot(v8::Global<v8::Context> defaultContextHandle);
 
+  void registerExternalReference(intptr_t addr) {
+    if (!isPreparingSnapshot()) return;
+    auto& artifact = mutableSnapshotArtifact();
+    auto& refs = artifact.externalReferences;
+    // The final slot must remain 0: V8 reads the table up to the 0 terminator.
+    KJ_REQUIRE(artifact.externalReferenceCursor < refs.size() - 1,
+        "external_references table is full; bump kExternalReferencesCapacity");
+    refs[artifact.externalReferenceCursor++] = addr;
+  }
+
   // Enumerates every resource type's constructor-template slots (memoizedConstructor and
   // contextConstructor, empty or not) for startup-snapshot handling, in a fixed compile-time
   // order that PREPARE_SNAPSHOT and START_FROM_SNAPSHOT passes rely on to pair slots by
@@ -698,6 +708,13 @@ class IsolateBase {
   // this template.
   static v8::Local<v8::FunctionTemplate> getOpaqueTemplate(v8::Isolate* isolate);
 };
+
+// Free-function form of IsolateBase::registerExternalReference() for call sites that only have a
+// v8::Isolate* and cannot include setup.h (e.g. ResourceTypeBuilder in resource.h, which
+// forward-declares this function).
+inline void isolateRegisterExternalReference(v8::Isolate* isolate, intptr_t addr) {
+  IsolateBase::from(isolate).registerExternalReference(addr);
+}
 
 // If JavaScript frames are currently on the stack, returns a string representing a stack trace
 // through it. The trace is built inside `scratch` without performing any allocation. This is

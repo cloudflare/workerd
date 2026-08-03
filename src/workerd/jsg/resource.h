@@ -47,6 +47,8 @@ const auto kIllegalInvocation =
 class Serializer;
 class Deserializer;
 
+void isolateRegisterExternalReference(v8::Isolate* isolate, intptr_t addr);
+
 // Return true if the type requires GC visitation, which we assume is the case if the type or any
 // superclass (other than Object) declares a `visitForGc()` method.
 template <typename T>
@@ -1288,13 +1290,28 @@ struct ResourceTypeBuilder {
             v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
   }
 
+  // Record a callback pointer in the isolate's external-reference table. V8 reads the table when
+  // serializing the heap to a snapshot blob and again when deserializing it, so
+  // every callback address baked into the templates below must be registered.
+  inline void registerExternalReference(intptr_t addr) {
+    isolateRegisterExternalReference(isolate, addr);
+  }
+
+  template <typename T>
+  inline void registerExternalReference(T* fnPtr) {
+    registerExternalReference(reinterpret_cast<intptr_t>(fnPtr));
+  }
+
   template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
   inline void registerWildcardProperty() {
     auto& resourceWrapper = static_cast<ResourceWrapper<TypeWrapper, Type>&>(typeWrapper);
     KJ_ASSERT(
         resourceWrapper.wildcardHandler == kj::none, "only one wildcard per instance supported");
-    resourceWrapper.wildcardHandler =
-        WildcardPropertyCallbacks<TypeWrapper, Type, GetNamedMethod, getNamedMethod>{};
+    using Cb = WildcardPropertyCallbacks<TypeWrapper, Type, GetNamedMethod, getNamedMethod>;
+    resourceWrapper.wildcardHandler = Cb{};
+    registerExternalReference(&Cb::getter);
+    registerExternalReference(&Cb::query);
+    registerExternalReference(&Cb::descriptor);
   }
 
   template <typename Type>
@@ -1326,8 +1343,10 @@ struct ResourceTypeBuilder {
     // TODO(cleanup): Specifying the name (for error messages) as "(called as function)" is a bit
     //   hacky but it's hard to do better while reusing `MethodCallback`.
     static const char NAME[] = "(called as function)";
-    instance->SetCallAsFunctionHandler(&MethodCallback<TypeWrapper, NAME, isContext, Self, Method,
-                                       method, ArgumentIndexes<Method>>::callback);
+    using Mcb =
+        MethodCallback<TypeWrapper, NAME, isContext, Self, Method, method, ArgumentIndexes<Method>>;
+    instance->SetCallAsFunctionHandler(&Mcb::callback);
+    registerExternalReference(&Mcb::callback);
   }
 
   template <const char* name, auto method>
@@ -1336,31 +1355,32 @@ struct ResourceTypeBuilder {
     constexpr int specLength = requiredArgumentCount<TypeWrapper, decltype(method)>;
     const int length = getSpecCompliantPropertyAttributes(isolate) ? specLength : 0;
 
+    using Mcb = MethodCallback<TypeWrapper, name, isContext, Self, decltype(method), method,
+        ArgumentIndexes<decltype(method)>>;
+
     if constexpr (isFastApiCompatible<decltype(method)>) {
       if (typeWrapper.isFastApiEnabled()) {
         // V8's FunctionTemplate::SetCallHandler stores a pointer to this CFunction (not a copy),
         // so it must outlive the FunctionTemplate. This register function is a unique template
         // instantiation per method, so a function-local static gives us exactly one persistent
         // CFunction per registered method.
-        static const auto cFunction =
-            v8::CFunction::Make(MethodCallback<TypeWrapper, name, isContext, Self, decltype(method),
-                method, ArgumentIndexes<decltype(method)>>::template fastCallback<>);
+        static const auto cFunction = v8::CFunction::Make(Mcb::template fastCallback<>);
         auto functionTemplate = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate,
-            &MethodCallback<TypeWrapper, name, isContext, Self, decltype(method), method,
-                ArgumentIndexes<decltype(method)>>::callback,
-            v8::Local<v8::Value>(), signature, length, v8::ConstructorBehavior::kThrow,
-            v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
+            &Mcb::callback, v8::Local<v8::Value>(), signature, length,
+            v8::ConstructorBehavior::kThrow, v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
 
         prototype->Set(isolate, name, functionTemplate);
+        registerExternalReference(&Mcb::callback);
+        registerExternalReference(Mcb::template fastCallback<>);
+        registerExternalReference(cFunction.GetTypeInfo());
         return;
       }
     }
 
     prototype->Set(isolate, name,
-        v8::FunctionTemplate::New(isolate,
-            &MethodCallback<TypeWrapper, name, isContext, Self, decltype(method), method,
-                ArgumentIndexes<decltype(method)>>::callback,
-            v8::Local<v8::Value>(), signature, length, v8::ConstructorBehavior::kThrow));
+        v8::FunctionTemplate::New(isolate, &Mcb::callback, v8::Local<v8::Value>(), signature,
+            length, v8::ConstructorBehavior::kThrow));
+    registerExternalReference(&Mcb::callback);
   }
 
   template <const char* name, typename Method, Method method>
@@ -1369,35 +1389,37 @@ struct ResourceTypeBuilder {
     constexpr int specLength = requiredArgumentCount<TypeWrapper, Method>;
     const int length = getSpecCompliantPropertyAttributes(isolate) ? specLength : 0;
 
+    using Smcb =
+        StaticMethodCallback<TypeWrapper, name, Self, Method, method, ArgumentIndexes<Method>>;
+
     if constexpr (isFastApiCompatible<Method>) {
       if (typeWrapper.isFastApiEnabled()) {
         // Must outlive the FunctionTemplate; see registerMethod for details.
-        static const auto cFunction = v8::CFunction::Make(StaticMethodCallback<TypeWrapper, name,
-            Self, Method, method, ArgumentIndexes<Method>>::template fastCallback<>);
+        static const auto cFunction = v8::CFunction::Make(Smcb::template fastCallback<>);
 
         // Create a function template with both slow and fast paths
         // Notably, we specify an empty signature because a static method invocation will have no holder
         // object.
         auto functionTemplate = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate,
-            &StaticMethodCallback<TypeWrapper, name, Self, Method, method,
-                ArgumentIndexes<Method>>::callback,
-            v8::Local<v8::Value>(), v8::Local<v8::Signature>(), length,
+            &Smcb::callback, v8::Local<v8::Value>(), v8::Local<v8::Signature>(), length,
             v8::ConstructorBehavior::kThrow, v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
         functionTemplate->RemovePrototype();
         constructor->Set(v8StrIntern(isolate, name), functionTemplate);
+        registerExternalReference(&Smcb::callback);
+        registerExternalReference(Smcb::template fastCallback<>);
+        registerExternalReference(cFunction.GetTypeInfo());
         return;
       }
     }
 
     // Notably, we specify an empty signature because a static method invocation will have no holder
     // object.
-    auto functionTemplate = v8::FunctionTemplate::New(isolate,
-        &StaticMethodCallback<TypeWrapper, name, Self, Method, method,
-            ArgumentIndexes<Method>>::callback,
-        v8::Local<v8::Value>(), v8::Local<v8::Signature>(), length,
-        v8::ConstructorBehavior::kThrow);
+    auto functionTemplate =
+        v8::FunctionTemplate::New(isolate, &Smcb::callback, v8::Local<v8::Value>(),
+            v8::Local<v8::Signature>(), length, v8::ConstructorBehavior::kThrow);
     functionTemplate->RemovePrototype();
     constructor->Set(v8StrIntern(isolate, name), functionTemplate);
+    registerExternalReference(&Smcb::callback);
   }
 
   template <const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
@@ -1405,16 +1427,17 @@ struct ResourceTypeBuilder {
     auto v8Name = v8StrIntern(isolate, name);
 
     using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
+    using Scb = SetterCallback<TypeWrapper, name, Setter, setter, isContext>;
     if (!Gcb::enumerable) {
       // Mark as unimplemented if `Gcb::enumerable` is `false`. This is only the case when `Getter`
       // returns `Unimplemented`.
       inspectProperties->Set(v8Name, v8::False(isolate), v8::PropertyAttribute::ReadOnly);
     }
 
-    instance->SetNativeDataProperty(v8Name, Gcb::callback,
-        &SetterCallback<TypeWrapper, name, Setter, setter, isContext>::callback,
-        v8::Local<v8::Value>(),
+    instance->SetNativeDataProperty(v8Name, Gcb::callback, &Scb::callback, v8::Local<v8::Value>(),
         Gcb::enumerable ? v8::PropertyAttribute::None : v8::PropertyAttribute::DontEnum);
+    registerExternalReference(&Gcb::callback);
+    registerExternalReference(&Scb::callback);
   }
 
   template <const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
@@ -1446,6 +1469,9 @@ struct ResourceTypeBuilder {
             v8::ConstructorBehavior::kThrow, v8::SideEffectType::kHasSideEffect,
             {&setterCFunction, 1});
 
+        registerExternalReference(getterCFunction.GetTypeInfo());
+        registerExternalReference(setterCFunction.GetTypeInfo());
+
         useSlowApi = false;
       }
     }
@@ -1475,6 +1501,14 @@ struct ResourceTypeBuilder {
 
     prototype->SetAccessorProperty(v8Name, getterFn, setterFn,
         Gcb::enumerable ? v8::PropertyAttribute::None : v8::PropertyAttribute::DontEnum);
+    registerExternalReference(&Gcb::callback);
+    registerExternalReference(&Scb::callback);
+    if constexpr (isFastApiCompatible<Getter> && isFastApiCompatible<Setter>) {
+      if (typeWrapper.isFastApiEnabled()) {
+        registerExternalReference(Gcb::template fastCallback<>);
+        registerExternalReference(Scb::template fastCallback<>);
+      }
+    }
   }
 
   template <const char* name, typename Getter, Getter getter>
@@ -1490,6 +1524,7 @@ struct ResourceTypeBuilder {
         Gcb::enumerable ? v8::PropertyAttribute::ReadOnly
                         : static_cast<v8::PropertyAttribute>(
                               v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
+    registerExternalReference(&Gcb::callback);
   }
 
   template <typename T>
@@ -1534,6 +1569,7 @@ struct ResourceTypeBuilder {
         Gcb::enumerable ? v8::PropertyAttribute::ReadOnly
                         : static_cast<v8::PropertyAttribute>(
                               v8::PropertyAttribute::DontEnum | v8::PropertyAttribute::ReadOnly));
+    registerExternalReference(&Gcb::callback);
   }
 
   template <const char* name, typename Getter, Getter getter, bool readOnly>
@@ -1551,6 +1587,7 @@ struct ResourceTypeBuilder {
       attributes = static_cast<v8::PropertyAttribute>(attributes | v8::PropertyAttribute::ReadOnly);
     }
     instance->SetLazyDataProperty(v8Name, &Gcb::callback, v8::Local<v8::Value>(), attributes);
+    registerExternalReference(&Gcb::callback);
   }
 
   template <const char* name, typename Getter, Getter getter>
@@ -1567,6 +1604,7 @@ struct ResourceTypeBuilder {
     prototype->SetAccessorProperty(symbol, getterFn, {},
         static_cast<v8::PropertyAttribute>(
             v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
+    registerExternalReference(&Gcb::callback);
   }
 
   template <const char* name, typename T>
@@ -1588,49 +1626,54 @@ struct ResourceTypeBuilder {
 
   template <const char* name, typename Getter, Getter getter>
   inline void registerStaticProperty() {
-    constructor->SetNativeDataProperty(v8StrIntern(isolate, name),
-        &StaticPropertyCallback<TypeWrapper, name, Self, Getter, getter>::callback, nullptr,
+    using Spc = StaticPropertyCallback<TypeWrapper, name, Self, Getter, getter>;
+    constructor->SetNativeDataProperty(v8StrIntern(isolate, name), &Spc::callback, nullptr,
         v8::Local<v8::Value>(), v8::PropertyAttribute::ReadOnly);
+    registerExternalReference(&Spc::callback);
   }
 
   template <const char* name, typename Method, Method method>
   inline void registerIterable() {
+    using Mcb =
+        MethodCallback<TypeWrapper, name, isContext, Self, Method, method, ArgumentIndexes<Method>>;
     prototype->Set(v8::Symbol::GetIterator(isolate),
-        v8::FunctionTemplate::New(isolate,
-            &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
-                ArgumentIndexes<Method>>::callback,
-            v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow),
+        v8::FunctionTemplate::New(isolate, &Mcb::callback, v8::Local<v8::Value>(), signature, 0,
+            v8::ConstructorBehavior::kThrow),
         v8::PropertyAttribute::DontEnum);
+    registerExternalReference(&Mcb::callback);
   }
 
   template <const char* name, typename Method, Method method>
   inline void registerAsyncIterable() {
+    using Mcb =
+        MethodCallback<TypeWrapper, name, isContext, Self, Method, method, ArgumentIndexes<Method>>;
     prototype->Set(v8::Symbol::GetAsyncIterator(isolate),
-        v8::FunctionTemplate::New(isolate,
-            &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
-                ArgumentIndexes<Method>>::callback,
-            v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow),
+        v8::FunctionTemplate::New(isolate, &Mcb::callback, v8::Local<v8::Value>(), signature, 0,
+            v8::ConstructorBehavior::kThrow),
         v8::PropertyAttribute::DontEnum);
+    registerExternalReference(&Mcb::callback);
   }
 
   template <const char* name, typename Method, Method method>
   inline void registerDispose() {
+    using Mcb =
+        MethodCallback<TypeWrapper, name, isContext, Self, Method, method, ArgumentIndexes<Method>>;
     prototype->Set(v8::Symbol::GetDispose(isolate),
-        v8::FunctionTemplate::New(isolate,
-            &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
-                ArgumentIndexes<Method>>::callback,
-            v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow),
+        v8::FunctionTemplate::New(isolate, &Mcb::callback, v8::Local<v8::Value>(), signature, 0,
+            v8::ConstructorBehavior::kThrow),
         v8::PropertyAttribute::DontEnum);
+    registerExternalReference(&Mcb::callback);
   }
 
   template <const char* name, typename Method, Method method>
   inline void registerAsyncDispose() {
+    using Mcb =
+        MethodCallback<TypeWrapper, name, isContext, Self, Method, method, ArgumentIndexes<Method>>;
     prototype->Set(v8::Symbol::GetAsyncDispose(isolate),
-        v8::FunctionTemplate::New(isolate,
-            &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
-                ArgumentIndexes<Method>>::callback,
-            v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow),
+        v8::FunctionTemplate::New(isolate, &Mcb::callback, v8::Local<v8::Value>(), signature, 0,
+            v8::ConstructorBehavior::kThrow),
         v8::PropertyAttribute::DontEnum);
+    registerExternalReference(&Mcb::callback);
   }
 
   template <typename Type, const char* name>
@@ -1945,8 +1988,12 @@ class ResourceWrapper {
     // Spectre mitigation (high-resolution timers are a timing-attack vector). Install a dummy
     // returning 0 now so we don't forget this requirement when Temporal is turned on; revisit the
     // returned value (and its resolution) at that point.
-    context->SetTemporalHostSystemUTCEpochNanosecondsCallback(
-        [](v8::Local<v8::Context>) -> int64_t { return 0; });
+    int64_t (*temporalNowCallback)(
+        v8::Local<v8::Context>) = [](v8::Local<v8::Context>) -> int64_t { return 0; };
+    context->SetTemporalHostSystemUTCEpochNanosecondsCallback(temporalNowCallback);
+    // V8 stores the callback as a Foreign on the context, so it is serialized into snapshots and
+    // its address must be resolvable by index.
+    isolateRegisterExternalReference(isolate, reinterpret_cast<intptr_t>(temporalNowCallback));
 #endif
 
     if (!options.enableWeakRef && !options.deferWeakRefDeletion) {
@@ -2036,11 +2083,14 @@ class ResourceWrapper {
         // Per Web IDL, constructor .length = number of required arguments.
         constexpr int specCtorLength = requiredArgumentCount<TypeWrapper, decltype(T::constructor)>;
         const int ctorLength = getSpecCompliantPropertyAttributes(isolate) ? specCtorLength : 0;
-        constructor =
-            v8::FunctionTemplate::New(isolate, &ConstructorCallback<TypeWrapper, T>::callback,
-                v8::Local<v8::Value>(), v8::Local<v8::Signature>(), ctorLength);
+        using Cc = ConstructorCallback<TypeWrapper, T>;
+        constructor = v8::FunctionTemplate::New(
+            isolate, &Cc::callback, v8::Local<v8::Value>(), v8::Local<v8::Signature>(), ctorLength);
+        isolateRegisterExternalReference(isolate, reinterpret_cast<intptr_t>(&Cc::callback));
       } else {
         constructor = v8::FunctionTemplate::New(isolate, &throwIllegalConstructor);
+        isolateRegisterExternalReference(
+            isolate, reinterpret_cast<intptr_t>(&throwIllegalConstructor));
       }
 
       auto prototype = constructor->PrototypeTemplate();

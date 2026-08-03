@@ -387,6 +387,10 @@ bool HeapTracer::TryResetRoot(const v8::TracedReference<v8::Value>& handle) {
 }
 
 namespace {
+// Capacity reserved upfront for the external_references array so that the
+// `.begin()` pointer handed to V8 stays stable as references are appended (no reallocation).
+constexpr size_t kExternalReferencesCapacity = 16384;
+
 std::unique_ptr<v8::CppHeap> newCppHeap(V8PlatformWrapper* system) {
   return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     v8::CppHeapCreateParams heapParams{{}};
@@ -433,6 +437,11 @@ v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params,
           auto& artifact = *mutableSnapshot.artifact;
           KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
 
+          // Zero-fill provides the 0 terminator V8 expects.
+          artifact.externalReferences = kj::heapArray<intptr_t>(kExternalReferencesCapacity);
+          artifact.externalReferences.asPtr().fill(0);
+          params.external_references = artifact.externalReferences.begin();
+
           auto creator = kj::heap<v8::SnapshotCreator>(params);
           v8::Isolate* isolate = creator->GetIsolate();
           *snapshotCreator = kj::mv(creator);
@@ -442,6 +451,7 @@ v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params,
           const SnapshotArtifact& artifact = *roSnapshot.artifact;
           KJ_REQUIRE(artifact.blob.data != nullptr, "snapshot artifact holds no blob");
           params.snapshot_blob = &artifact.blob;
+          params.external_references = artifact.externalReferences.begin();
         }
       }
     }
