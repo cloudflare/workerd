@@ -675,6 +675,41 @@ KJ_TEST("Server: Python workers reject the new module registry") {
       test.server.run(v8System, *test.config).wait(test.ws));
 }
 
+KJ_TEST("Server: wrapped bindings work under the new module registry") {
+  // Wrapped bindings resolve their module through jsg::Lock::resolveInternalModule, which
+  // dispatches on which module registry the isolate is using. Both registries store their
+  // own type in the same MODULE_REGISTRY context slot, and the slot is read back with an
+  // unchecked reinterpret_cast whose V8 embedder type tag is derived from the slot rather
+  // than the type -- so reaching the wrong registry's accessor from here would type-confuse
+  // rather than fail. Exercise the binding end to end under new_module_registry so that
+  // any regression to a registry-specific lookup shows up as a test failure.
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-10-01",
+    compatibilityFlags = ["new_module_registry", "experimental"],
+    modules = [
+      ( name = "worker",
+        esModule =
+          `export default {
+          `  fetch(req, env) { return new Response("wrapped: " + typeof env.wrapped); }
+          `}
+      )
+    ],
+    bindings = [
+      ( name = "wrapped",
+        wrapped = (
+          moduleName = "cloudflare-internal:d1-api"
+        )
+      )
+    ]
+  ))"_kj));
+
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "wrapped: object");
+}
+
 KJ_TEST("Server: use service name as Service Worker origin") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",

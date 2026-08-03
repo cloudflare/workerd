@@ -2287,6 +2287,46 @@ KJ_TEST("Fallback service can return a module with a different specifier") {
 
 // ======================================================================================
 
+KJ_TEST("Fallback service CommonJS module name outlives the resolve callback") {
+  // newCjsStyleModuleHandler retains both the source and the module name as non-owning
+  // kj::StringPtr, and does not read either until the module is first evaluated -- which
+  // happens on the resolve below, long after the resolve callback has returned. A
+  // callback that builds a module from storage it owns locally must therefore attach that
+  // storage to the Module, as WorkerdApi's fallback callback does for a CommonJS module
+  // returned by a fallback service.
+  //
+  // Both buffers below are freed when the callback returns unless they are attached, so
+  // dropping either attachment makes this a heap-use-after-free. Only ASAN observes that;
+  // the assertions themselves just confirm the module still evaluates.
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    ModuleRegistry::Builder builder(BASE, ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
+
+    builder.add(ModuleBundle::newFallbackBundle(
+        [](const ResolveContext& context) -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+      auto ownedName = kj::str("fallback-cjs");
+      auto ownedSource = kj::str("exports.ok = 123;");
+      auto namePtr = ownedName.asPtr();
+      auto sourcePtr = ownedSource.asPtr();
+
+      kj::Own<Module> mod = Module::newSynthetic(context.normalizedSpecifier.clone(),
+          Module::Type::FALLBACK,
+          Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(sourcePtr, namePtr));
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(
+          mod.attach(kj::mv(ownedName), kj::mv(ownedSource)));
+    }));
+
+    auto registry = builder.finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    auto value = ModuleRegistry::resolve(js, "file:///fallback-cjs", "default"_kjc);
+    KJ_ASSERT(value.tryCast<JsObject>() != kj::none);
+  });
+}
+
+// ======================================================================================
+
 KJ_TEST("Fallback redirect restarts module resolution") {
   const auto source = "file:///source"_url;
   const auto target = "file:///target"_url;

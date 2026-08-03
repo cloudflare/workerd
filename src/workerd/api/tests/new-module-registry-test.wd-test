@@ -47,6 +47,13 @@ const unitTests :Workerd.Config = (
           (name = "cjs4", commonJsModule = "module.exports = require('cjs5')"),
           (name = "cjs5", commonJsModule = "module.exports = require('cjs4')"),
           (name = "cjs6", commonJsModule = "module.exports = require('tla')"),
+          # A module name may be a URL with an opaque path. Such a pathname has no leading "/",
+          # and is empty when the opaque path is empty.
+          # __filename/__dirname are read lazily here so the import itself succeeds.
+          (name = "opaque:",
+           commonJsModule = "module.exports = { filename: () => __filename, dirname: () => __dirname }"),
+          (name = "opaque:foo",
+           commonJsModule = "module.exports = { filename: () => __filename, dirname: () => __dirname }"),
 
           # Other module types work
           (name = "text", text = "abc"),
