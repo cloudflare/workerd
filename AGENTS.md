@@ -208,8 +208,10 @@ This project generally follows the [KJ Style Guide](https://github.com/capnproto
 
 ### Comment guidelines
 
+These apply to every kind of commentary that ships with the code, not just code comments: doc comments, Markdown under `docs/`, and READMEs all count. Read "comment" as "comment or document" and "code" as "code or document" throughout. Commit messages are the counterpart and the exception: they are where the narrative of a change belongs.
+
 - Write comments that describe the current state of the system, not the task, change, or debugging that produced the code.
-- Don't refer to a prior state as if the reader already knows it; the reader has only the code in front of them, not the diff or the ticket.
+- Don't refer to a prior state as if the reader already knows it; the reader has only the code in front of them, not the diff or the ticket. When you correct a comment or a document, the story of the correction goes in the commit message; don't leave behind a note about what the previous version claimed.
 - Referring to historical state is occasionally legitimate, but it's rare and must be explicitly introduced as history, ideally explaining what problem the old approach caused (e.g. "Historically we did X, but that caused Y, so now we do Z").
 - Don't explain what a widely-used tag, flag, or API does at every use site; document such conventions once where they're defined and let readers find that via search.
 
