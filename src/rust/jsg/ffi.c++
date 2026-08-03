@@ -935,12 +935,21 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
   // Construct lazily.
   v8::EscapableHandleScope scope(isolate);
 
+  // Every callback address baked into the templates below must be registered as a V8
+  // external reference so that templates (and functions instantiated from them) can be
+  // serialized into a startup snapshot. No-op unless the isolate is in a snapshot mode.
+  auto registerExternalRef = [&](size_t callback) {
+    workerd::jsg::isolateRegisterExternalReference(isolate, static_cast<intptr_t>(callback));
+  };
+
   v8::Local<v8::FunctionTemplate> constructor;
   KJ_IF_SOME(descriptor, descriptor.constructor) {
     constructor = v8::FunctionTemplate::New(isolate,
         reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(descriptor.callback)));
+    registerExternalRef(descriptor.callback);
   } else {
     constructor = v8::FunctionTemplate::New(isolate, &workerd::jsg::throwIllegalConstructor);
+    registerExternalRef(reinterpret_cast<size_t>(&workerd::jsg::throwIllegalConstructor));
   }
 
   auto prototype = constructor->PrototypeTemplate();
@@ -971,6 +980,7 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
     auto functionTemplate = v8::FunctionTemplate::New(isolate,
         reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(method.callback)),
         v8::Local<v8::Value>(), v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow);
+    registerExternalRef(method.callback);
     functionTemplate->RemovePrototype();
     constructor->Set(makeInternedStr(isolate, method.name), functionTemplate);
   }
@@ -979,6 +989,7 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
     auto functionTemplate = v8::FunctionTemplate::New(isolate,
         reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(method.callback)),
         v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow);
+    registerExternalRef(method.callback);
     auto name = makeInternedStr(isolate, method.name);
     prototype->Set(name, functionTemplate);
   }
@@ -1005,6 +1016,7 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
     // spec_compliant_property_attributes name/length rules when enabled.
     // `isGetter` true → length=0, name="get <prop>"; false → length=1, name="set <prop>".
     auto makePropFn = [&](size_t callback, bool isGetter) {
+      registerExternalRef(callback);
       v8::Local<v8::FunctionTemplate> fn;
       if (specCompliant) {
         int len = isGetter ? 0 : 1;
