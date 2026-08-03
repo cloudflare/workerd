@@ -455,6 +455,7 @@ dependencies = [
  "flate2",
  "foldhash",
  "futures",
+ "libc",
  "lol_html_c_api",
  "nix",
  "pico-args",
