@@ -293,8 +293,8 @@ impl DnsUtil {
                 "CAA record data too short: expected critical and prefix length fields".to_owned(),
             ));
         }
-        let critical = data[0].parse::<u8>()?;
-        let prefix_length = data[1].parse::<usize>()?;
+        let critical = u8::from_str_radix(data[0], 16)?;
+        let prefix_length = usize::from_str_radix(data[1], 16)?;
 
         if data.len() < 2 + prefix_length {
             return Err(DnsParserError::InvalidDnsResponse(format!(
@@ -466,6 +466,20 @@ mod tests {
         assert_eq!(record.critical, 0);
         assert_eq!(record.field, "issuewild");
         assert_eq!(record.value, "letsencrypt");
+    }
+
+    #[test]
+    fn test_parse_caa_record_issuer_critical() {
+        let dns_util = DnsUtil {};
+        let record = dns_util
+            .parse_caa_record("\\# 15 80 05 69 73 73 75 65 70 6b 69 2e 67 6f 6f 67".to_owned())
+            .unwrap();
+
+        // The issuer critical bit is the high bit of the flags octet, so the
+        // hex octet `80` is 128. Reading it as decimal would give 80.
+        assert_eq!(record.critical, 128);
+        assert_eq!(record.field, "issue");
+        assert_eq!(record.value, "pki.goog");
     }
 
     #[test]
