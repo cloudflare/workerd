@@ -68,6 +68,7 @@ Checks: >
   jsg-visit-for-gc,
   workerd-angled-includes,
   workerd-consume,
+  workerd-promise-ignore-result,
   workerd-unsafe-continuation-capture,
   custom-iocontext-run-manual-capture
 

@@ -504,7 +504,7 @@ kj::Promise<void> Container::interceptOutboundHttpImpl(rpc::Container::Client rp
   auto req = rpcClient.setEgressHttpRequest();
   req.setHostPort(addr);
   req.setChannelToken(token);
-  co_await req.send();
+  co_await req.sendIgnoringResult();
 }
 
 jsg::Promise<void> Container::interceptAllOutboundHttp(jsg::Lock& js, jsg::Ref<Fetcher> binding) {
@@ -548,7 +548,7 @@ kj::Promise<void> Container::interceptOutboundHttpsImpl(rpc::Container::Client r
   req.setHostPort(addr);
   req.setChannelToken(token);
 
-  co_await req.send();
+  co_await req.sendIgnoringResult();
 }
 
 jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
@@ -754,7 +754,7 @@ kj::Promise<void> Container::interceptOutboundTcpImpl(rpc::Container::Client rpc
   auto req = rpcClient.setEgressTcpRequest();
   req.setHostPort(addr);
   req.setChannelToken(token);
-  co_await req.send();
+  co_await req.sendIgnoringResult();
 }
 
 jsg::Promise<void> Container::monitor(jsg::Lock& js) {

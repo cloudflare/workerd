@@ -43,6 +43,9 @@ that adds workerd-specific static checks:
 - `workerd-consume`: flags calls to methods annotated with `WD_CONSUME` when
   the call is made directly through `kj::Ptr` instead of through
   `consume(kj::mv(ptr))->method(...)`.
+- `workerd-promise-ignore-result` - warns on superfluous `ignoreResult()` calls:
+  on promises that are immediately `co_await`ed, and on `capnp::Request::send()`
+  results, which should use `sendIgnoringResult()` instead
 - `workerd-unsafe-continuation-capture`: flags lambdas passed to async sinks
   (e.g. `kj::Promise::then`) that capture bare references, raw pointers, or
   non-owning views.
