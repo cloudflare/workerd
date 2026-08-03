@@ -2,6 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+use std::iter::Peekable;
+use std::str::Chars;
+
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 use jsg_macros::jsg_struct;
@@ -116,6 +119,129 @@ pub fn parse_replacement(input: &[&str]) -> jsg::Result<String, DnsParserError> 
     Ok(output.join("."))
 }
 
+/// Marks RDATA in the RFC 3597 generic format: `\# <length> <hex octets>`.
+/// Anything else is in presentation format.
+const GENERIC_RDATA_PREFIX: &str = "\\#";
+
+fn unterminated_rdata() -> DnsParserError {
+    DnsParserError::InvalidDnsResponse("unterminated escape or quote in RDATA".to_owned())
+}
+
+/// Decodes the escape sequence following a backslash, leaving the iterator
+/// positioned after it. RFC 1035 §5.1 defines two forms: `\DDD`, exactly three
+/// decimal digits naming an octet, and `\X`, a literal X.
+///
+/// An octet becomes the character with the same numeric value, matching how
+/// `decode_hex` maps the octets of generic-format RDATA.
+fn decode_escape(chars: &mut Peekable<Chars<'_>>) -> Result<char, DnsParserError> {
+    let digits: Vec<char> = chars.clone().take(3).collect();
+    if digits.len() == 3 && digits.iter().all(char::is_ascii_digit) {
+        let octet: u8 = digits.iter().collect::<String>().parse()?;
+        chars.nth(2);
+        return Ok(char::from(octet));
+    }
+
+    chars.next().ok_or_else(unterminated_rdata)
+}
+
+/// Splits presentation-format RDATA into its fields. A field is either a bare
+/// whitespace-delimited token or a `"`-quoted character-string; escape
+/// sequences are decoded in both, so escaped whitespace does not end a field.
+///
+/// The master-file metacharacters `;`, `@` and `( )` are deliberately not
+/// implemented: the input is a single RDATA field rather than a zone file, so
+/// there is no comment or origin context. Treating `;` as a comment would
+/// truncate CAA values carrying RFC 8657 parameters.
+fn split_rdata_fields(input: &str) -> Result<Vec<String>, DnsParserError> {
+    let mut fields = Vec::new();
+    let mut chars = input.chars().peekable();
+    loop {
+        while chars.next_if(char::is_ascii_whitespace).is_some() {}
+
+        let quoted = match chars.peek() {
+            None => return Ok(fields),
+            Some('"') => {
+                chars.next();
+                true
+            }
+            Some(_) => false,
+        };
+
+        let mut field = String::new();
+        loop {
+            let Some(c) = chars.next() else {
+                if quoted {
+                    return Err(unterminated_rdata());
+                }
+                break;
+            };
+            match c {
+                '"' if quoted => break,
+                '\\' => field.push(decode_escape(&mut chars)?),
+                c if !quoted && c.is_ascii_whitespace() => break,
+                c => field.push(c),
+            }
+        }
+        fields.push(field);
+    }
+}
+
+/// A CAA property tag must be one of "issue", "issuewild" or "iodef".
+fn validate_caa_field(field: &str) -> Result<(), DnsParserError> {
+    if field == "issuewild" || field == "issue" || field == "iodef" {
+        return Ok(());
+    }
+    Err(DnsParserError::InvalidDnsResponse(format!(
+        "Received unknown field '{field}'"
+    )))
+}
+
+/// Parses CAA RDATA in presentation format: `<flags> <tag> <value>`,
+/// e.g. `0 issue "pki.goog"`.
+fn parse_presentation_caa_record(record: &str) -> Result<CaaRecord, DnsParserError> {
+    let fields = split_rdata_fields(record)?;
+    let [critical, field, value] = fields.as_slice() else {
+        return Err(DnsParserError::InvalidDnsResponse(format!(
+            "CAA record expected 3 fields, got {}",
+            fields.len()
+        )));
+    };
+    validate_caa_field(field)?;
+
+    Ok(CaaRecord {
+        critical: critical.parse()?,
+        field: field.clone(),
+        value: value.clone(),
+    })
+}
+
+/// Parses NAPTR RDATA in presentation format:
+/// `<order> <preference> "<flags>" "<service>" "<regexp>" <replacement>`,
+/// e.g. `20 100 "s" "SIP+D2U" "" _sip._udp.sip2sip.info.`.
+fn parse_presentation_naptr_record(record: &str) -> Result<NaptrRecord, DnsParserError> {
+    let fields = split_rdata_fields(record)?;
+    let [order, preference, flags, service, regexp, replacement] = fields.as_slice() else {
+        return Err(DnsParserError::InvalidDnsResponse(format!(
+            "NAPTR record expected 6 fields, got {}",
+            fields.len()
+        )));
+    };
+
+    Ok(NaptrRecord {
+        flags: flags.clone(),
+        service: service.clone(),
+        regexp: regexp.clone(),
+        // Presentation-format names are fully qualified, but Node.js reports
+        // them without the trailing dot (and the root name as an empty string).
+        replacement: replacement
+            .strip_suffix('.')
+            .unwrap_or(replacement)
+            .to_owned(),
+        order: order.parse()?,
+        preference: preference.parse()?,
+    })
+}
+
 #[jsg_resource]
 pub struct DnsUtil;
 
@@ -153,6 +279,9 @@ impl DnsUtil {
     pub fn parse_caa_record(&self, record: String) -> Result<CaaRecord, DnsParserError> {
         // Let's remove "\\#" and the length of data from the beginning of the record
         let parts: Vec<_> = record.split_ascii_whitespace().collect();
+        if parts.first() != Some(&GENERIC_RDATA_PREFIX) {
+            return parse_presentation_caa_record(&record);
+        }
         if parts.len() < 3 {
             return Err(DnsParserError::InvalidDnsResponse(
                 "CAA record too short: expected at least 3 fields".to_owned(),
@@ -175,12 +304,7 @@ impl DnsUtil {
         let field = decode_hex(&data[2..prefix_length + 2])?.join("");
         let value = decode_hex(&data[(prefix_length + 2)..])?.join("");
 
-        // Field can be "issuewild", "issue" or "iodef"
-        if field != "issuewild" && field != "issue" && field != "iodef" {
-            return Err(DnsParserError::InvalidDnsResponse(format!(
-                "Received unknown field '{field}'"
-            )));
-        }
+        validate_caa_field(&field)?;
 
         Ok(CaaRecord {
             critical,
@@ -223,6 +347,9 @@ impl DnsUtil {
     #[jsg_method]
     pub fn parse_naptr_record(&self, record: String) -> jsg::Result<NaptrRecord, DnsParserError> {
         let parts: Vec<_> = record.split_ascii_whitespace().collect();
+        if parts.first() != Some(&GENERIC_RDATA_PREFIX) {
+            return parse_presentation_naptr_record(&record);
+        }
         if parts.len() < 2 {
             return Err(DnsParserError::InvalidDnsResponse(
                 "NAPTR record too short".to_owned(),
@@ -364,6 +491,143 @@ mod tests {
         assert_eq!(record.replacement, "replacement");
         assert_eq!(record.order, 5555);
         assert_eq!(record.preference, 2222);
+    }
+
+    // =========================================================================
+    // Presentation-format RDATA. Cloudflare DNS serves CAA and NAPTR as either
+    // RFC 3597 generic hex RDATA or presentation format; both must parse.
+    // =========================================================================
+
+    #[test]
+    fn test_parse_caa_record_presentation() {
+        let dns_util = DnsUtil {};
+        let record = dns_util
+            .parse_caa_record("0 issue \"pki.goog\"".to_owned())
+            .unwrap();
+
+        assert_eq!(record.critical, 0);
+        assert_eq!(record.field, "issue");
+        assert_eq!(record.value, "pki.goog");
+    }
+
+    #[test]
+    fn test_parse_caa_record_presentation_critical_flags() {
+        let dns_util = DnsUtil {};
+        let record = dns_util
+            .parse_caa_record("128 iodef \"mailto:security@example.com\"".to_owned())
+            .unwrap();
+
+        assert_eq!(record.critical, 128);
+        assert_eq!(record.field, "iodef");
+        assert_eq!(record.value, "mailto:security@example.com");
+    }
+
+    #[test]
+    fn test_parse_caa_record_presentation_value_with_space() {
+        let dns_util = DnsUtil {};
+        let record = dns_util
+            .parse_caa_record(
+                "0 issuewild \"letsencrypt.org; validationmethods=dns-01\"".to_owned(),
+            )
+            .unwrap();
+
+        assert_eq!(record.field, "issuewild");
+        assert_eq!(record.value, "letsencrypt.org; validationmethods=dns-01");
+    }
+
+    #[test]
+    fn test_parse_caa_record_presentation_rejects_bad_input() {
+        let dns_util = DnsUtil {};
+        // Unknown tag.
+        assert!(
+            dns_util
+                .parse_caa_record("0 contactemail \"admin@example.com\"".to_owned())
+                .is_err()
+        );
+        // Wrong field count.
+        assert!(dns_util.parse_caa_record("0 issue".to_owned()).is_err());
+        assert!(
+            dns_util
+                .parse_caa_record("0 issue \"pki.goog\" extra".to_owned())
+                .is_err()
+        );
+        // Unterminated quote.
+        assert!(
+            dns_util
+                .parse_caa_record("0 issue \"pki.goog".to_owned())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_parse_naptr_record_presentation() {
+        let dns_util = DnsUtil {};
+        let record = dns_util
+            .parse_naptr_record("20 100 \"s\" \"SIP+D2U\" \"\" _sip._udp.sip2sip.info.".to_owned())
+            .unwrap();
+
+        assert_eq!(record.order, 20);
+        assert_eq!(record.preference, 100);
+        assert_eq!(record.flags, "s");
+        assert_eq!(record.service, "SIP+D2U");
+        assert_eq!(record.regexp, "");
+        assert_eq!(record.replacement, "_sip._udp.sip2sip.info");
+    }
+
+    #[test]
+    fn test_parse_naptr_record_presentation_regexp_and_root() {
+        let dns_util = DnsUtil {};
+        let record = dns_util
+            .parse_naptr_record(
+                "100 10 \"u\" \"E2U+sip\" \"!^.*$!sip:info@example.com !\" .".to_owned(),
+            )
+            .unwrap();
+
+        assert_eq!(record.flags, "u");
+        assert_eq!(record.service, "E2U+sip");
+        assert_eq!(record.regexp, "!^.*$!sip:info@example.com !");
+        assert_eq!(record.replacement, "");
+    }
+
+    #[test]
+    fn test_parse_naptr_record_presentation_rejects_bad_input() {
+        let dns_util = DnsUtil {};
+        assert!(
+            dns_util
+                .parse_naptr_record("20 100 \"s\" \"SIP+D2U\" \"\"".to_owned())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_split_rdata_fields() {
+        assert!(split_rdata_fields("").unwrap().is_empty());
+        assert_eq!(
+            split_rdata_fields("  a  \"b c\" \"\" d ").unwrap(),
+            vec!["a", "b c", "", "d"]
+        );
+        assert!(split_rdata_fields("\"unterminated").is_err());
+        assert!(split_rdata_fields("trailing\\").is_err());
+    }
+
+    #[test]
+    fn test_split_rdata_fields_escapes() {
+        // RFC 1035 §5.1: `\DDD` names an octet, `\X` is a literal X.
+        assert_eq!(split_rdata_fields("a\\065b").unwrap(), vec!["aAb"]);
+        assert_eq!(split_rdata_fields("\"a\\065b\"").unwrap(), vec!["aAb"]);
+        assert_eq!(
+            split_rdata_fields("\\000\\255").unwrap(),
+            vec!["\u{0}\u{ff}"]
+        );
+        assert!(split_rdata_fields("\\256").is_err());
+
+        // Fewer than three digits is the literal form, not an octet.
+        assert_eq!(split_rdata_fields("a\\6b").unwrap(), vec!["a6b"]);
+        assert_eq!(split_rdata_fields("a\\\\b").unwrap(), vec!["a\\b"]);
+        assert_eq!(split_rdata_fields("\"a\\\"b\"").unwrap(), vec!["a\"b"]);
+
+        // Escaped whitespace does not terminate a field.
+        assert_eq!(split_rdata_fields("x;\\032y z").unwrap(), vec!["x; y", "z"]);
     }
 
     // =========================================================================
