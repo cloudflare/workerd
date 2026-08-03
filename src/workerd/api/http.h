@@ -362,6 +362,16 @@ class Fetcher: public JsRpcClientProvider {
   jsg::Promise<ScheduledResult> scheduled(jsg::Lock& js, jsg::Optional<ScheduledOptions> options);
 
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethod(jsg::Lock& js, kj::String name);
+
+  // Exempt this one Fetcher from the `fetcher_rpc` compatibility gate that getRpcMethod()
+  // applies, so its JSRPC wildcard works regardless of the worker's compatibility date.
+
+  // Only for fetchers a `cloudflare-internal:` wrapper module keeps private, and only before the
+  // fetcher is exposed to JS. An ungated wildcard is user-visible; see getRpcMethod().
+  void bypassRpcCompatGate() {
+    rpcCompatGateBypassed = true;
+  }
+
   // Internal method for use from bindings code. It skips compatibility flags checks.
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethodInternal(jsg::Lock& js, kj::String name);
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethodForTestOnly(jsg::Lock& js, kj::String name) {
@@ -480,6 +490,10 @@ class Fetcher: public JsRpcClientProvider {
       channelOrClientFactory;
   RequiresHostAndProtocol requiresHost;
   bool isInHouse;
+
+  // Deliberately not serialized: a stub deserialized in another isolate is subject to that
+  // isolate's own compatibility flags, like any other fetcher it could have obtained.
+  bool rpcCompatGateBypassed = false;
 };
 
 // Extended fetcher type that makes the getters for host/port available using the JSG API. Allows

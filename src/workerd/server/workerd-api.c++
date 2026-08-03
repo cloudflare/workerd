@@ -60,6 +60,7 @@
 #include <workerd/server/fallback-service.h>
 #include <workerd/server/workerd-debug-port-client.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/strong-bool.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/use-perfetto-categories.h>
 
@@ -548,11 +549,16 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
   });
 }
 
+// Whether the binding being constructed is an inner binding of a wrapped binding. Those are
+// placed on the private `env` of a `cloudflare-internal:` module, not on the worker's own `env`.
+WD_STRONG_BOOL(IsInternalBinding);
+
 static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     const WorkerdApi::Global& global,
     CompatibilityFlags::Reader featureFlags,
     uint32_t ownerId,
-    api::MemoryCacheProvider& memoryCacheProvider) {
+    api::MemoryCacheProvider& memoryCacheProvider,
+    IsInternalBinding isInternal) {
   TRACE_EVENT("workerd", "WorkerdApi::createBindingValue()");
   using Global = WorkerdApi::Global;
   auto context = lock.v8Context();
@@ -579,11 +585,14 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     }
 
     KJ_CASE_ONEOF(pipeline, Global::Fetcher) {
-      value = lock.wrap(context,
-          lock.alloc<api::Fetcher>(pipeline.channel,
-              pipeline.requiresHost ? api::Fetcher::RequiresHostAndProtocol::YES
-                                    : api::Fetcher::RequiresHostAndProtocol::NO,
-              pipeline.isInHouse));
+      auto fetcher = lock.alloc<api::Fetcher>(pipeline.channel,
+          pipeline.requiresHost ? api::Fetcher::RequiresHostAndProtocol::YES
+                                : api::Fetcher::RequiresHostAndProtocol::NO,
+          pipeline.isInHouse);
+      if (isInternal) {
+        fetcher->bypassRpcCompatGate();
+      }
+      value = lock.wrap(context, kj::mv(fetcher));
     }
 
     KJ_CASE_ONEOF(loopback, Global::LoopbackServiceStub) {
@@ -686,7 +695,8 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
         auto env = v8::Object::New(lock.v8Isolate);
         for (const auto& innerBinding: wrapped.innerBindings) {
           lock.v8Set(env, innerBinding.name,
-              createBindingValue(lock, innerBinding, featureFlags, ownerId, memoryCacheProvider));
+              createBindingValue(lock, innerBinding, featureFlags, ownerId, memoryCacheProvider,
+                  IsInternalBinding::YES));
         }
 
         // obtain exported function to call
@@ -744,8 +754,8 @@ void WorkerdApi::compileGlobals(jsg::Lock& lockParam,
     for (auto& global: globals) {
       lockParam.withinHandleScope([&] {
         // Don't use String's usual TypeHandler here because we want to intern the string.
-        auto value =
-            createBindingValue(lock, global, featureFlags, ownerId, impl->memoryCacheProvider);
+        auto value = createBindingValue(
+            lock, global, featureFlags, ownerId, impl->memoryCacheProvider, IsInternalBinding::NO);
         KJ_ASSERT(!value.IsEmpty(), "global did not produce v8::Value");
         lockParam.v8Set(target, global.name, value);
       });

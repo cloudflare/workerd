@@ -111,6 +111,11 @@ export default class WorkflowsMock extends WorkerEntrypoint {
     return deleteBatchInstances(options);
   }
 
+  // deleteInstance, not delete: the binding cannot reach a `delete` RPC method, because
+  // Fetcher.delete(url) still exists on compatibility dates before `fetcher_no_get_put_delete`.
+
+  async deleteInstance(_id) {}
+
   async pause(_id) {}
 
   async resume(_id) {}
