@@ -22,6 +22,7 @@
 #include <v8-locker.h>
 #include <v8-profiler.h>
 #include <v8-regexp.h>
+#include <v8-snapshot.h>
 
 #include <capnp/schema-loader.h>
 #include <kj/debug.h>
@@ -51,6 +52,23 @@ kj::String KJ_STRINGIFY(v8::Local<T> value) {
 }  // namespace v8
 
 namespace workerd::jsg {
+
+enum class SnapshotMode {
+  PRODUCE,
+  CONSUME,
+};
+
+// Everything needed to create a new isolate from a V8 startup snapshot:
+// * `blob` is the serialized snapshot data, allocated with `new[]` by v8::SnapshotCreator.
+// * `externalReferences` is the list of addresses of all C++ functions and objects referenced
+//   from the snapshot. The producer and the consumer of a snapshot must register exactly the
+//   same references, in the same order, or deserialization will fail.
+// * `mode` indicates whether this worker produces the snapshot or consumes it.
+struct SnapshotArtifact {
+  v8::StartupData blob{nullptr, 0};
+  kj::Array<intptr_t> externalReferences;
+  SnapshotMode mode;
+};
 
 // =======================================================================================
 // Macros for declaring type glue.
@@ -3160,6 +3178,10 @@ class Lock {
 
   // Request an extra microtask checkpoint after the current one completes.
   void requestExtraMicrotaskCheckpoint();
+
+  // True when the underlying isolate was created in the corresponding snapshot mode.
+  bool isPreparingSnapshot() const;
+  bool isStartingFromSnapshot() const;
 
   // Sets the terminate-execution flag on the isolate so that the next time code tries to run, it
   // will be terminated. (But note that V8 only checks the flag at certain times, so it's possible
