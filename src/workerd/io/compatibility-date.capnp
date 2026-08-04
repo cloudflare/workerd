@@ -1572,8 +1572,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonWorkers20260610 @179 :Bool
       $compatEnableFlag("python_workers_20260610")
       $compatDisableFlag("no_python_workers_20260610")
-      $pythonSnapshotRelease
-      $experimental;
+      $pythonSnapshotRelease;
   # Enables Python Workers using Pyodide 314.0.3 (CPython 3.14.2, Emscripten 5.0.3).
 
   enableNodeJsInspectorLocalDev @180 :Bool
