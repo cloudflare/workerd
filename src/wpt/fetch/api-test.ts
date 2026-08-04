@@ -202,6 +202,21 @@ export default {
   'body/cloned-any.js': {},
   'body/formdata.any.js': {},
   'body/mime-type.any.js': {},
+  'body/textstream.any.js': {
+    comment: 'textStream() is not implemented',
+    expectedFailures: [
+      'textStream method existence',
+      'Response.textStream() basic functionality',
+      'Request.textStream() basic functionality',
+      'textStream() handles chunked byte stream input',
+      'Response.textStream() with null body',
+      'Request.textStream() with null body',
+      'Response.textStream() with empty body',
+      'Response.textStream() ignores Content-Type charset (UTF-16LE)',
+      'Request.textStream() ignores Content-Type charset (UTF-16LE)',
+      'Response.textStream() ignores invalid Content-Type charset (invalid-charset)',
+    ],
+  },
 
   'cors/cors-basic.any.js': {
     comment: 'CORS is not implemented',
@@ -388,6 +403,11 @@ export default {
       'Check headers append with an invalid value invalidĀ',
     ],
   },
+  'headers/headers-forbidden-override.any.js': {
+    comment:
+      "Enforcing the fetch spec's forbidden header names is not workerd's responsibility",
+    omittedTests: true,
+  },
   'headers/headers-no-cors.any.js': {
     comment: 'Request.mode is not relevant',
     disabledTests: true,
@@ -525,7 +545,11 @@ export default {
     comment: "We don't support detached realms",
     omittedTests: true,
   },
-  'request/request-bad-port.any.js': {},
+  'request/request-bad-port.any.js': {
+    comment:
+      "Filtering the fetch spec's blocked port list is not workerd's responsibility",
+    omittedTests: true,
+  },
   'request/request-cache-default-conditional.any.js': {
     comment: 'Unsupported cache mode: default',
     expectedFailures: [
@@ -662,6 +686,11 @@ export default {
     ],
   },
   'request/request-cache.js': {},
+  'request/request-clone-readable-stream-body.any.js': {
+    comment:
+      'TODO(soon): new Request() drops a ReadableStream body taken from clone()',
+    expectedFailures: true,
+  },
   'request/request-constructor-init-body-override.any.js': {},
   'request/request-consume-empty.any.js': {
     comment:

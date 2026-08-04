@@ -115,30 +115,20 @@ export default {
   'readable-streams/default-reader.any.js': {},
   'readable-streams/floating-point-total-queue-size.any.js': {},
   'readable-streams/from.any.js': {
-    comment:
-      'Intentional divergence: we treat strings as single chunks, not code-point iterables',
+    comment: 'see inline comments',
     expectedFailures: [
       // INTENTIONAL SPEC DIVERGENCE: The spec iterates strings code-point-
       // by-code-point, but that is surprising to users and has terrible
       // performance. We treat strings as single chunks instead.
-      'ReadableStream.from accepts a string',
+      'ReadableStream.from throws on invalid iterables; specifically a string',
+      // TODO(soon): "The iterator method must return an object". The C++ streams
+      // implementation passes both of these.
+      'ReadableStream.from accepts a sync iterable with a function iterator',
+      'ReadableStream.from accepts an async iterable with a function iterator',
     ],
   },
   'readable-streams/garbage-collection.any.js': {},
   'readable-streams/general.any.js': {},
-  'readable-streams/owning-type-message-port.any.js': {
-    comment:
-      'Enable once MessageChannel/MessagePort is implemented and owning type is implemented',
-    disabledTests: true,
-  },
-  'readable-streams/owning-type-video-frame.any.js': {
-    comment: 'VideoFrame is not implemented',
-    disabledTests: true,
-  },
-  'readable-streams/owning-type.any.js': {
-    comment: "Type 'owning' is not part of the spec yet — not implemented",
-    disabledTests: true,
-  },
   'readable-streams/patched-global.any.js': {
     runInGlobalScope: true,
   },

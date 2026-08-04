@@ -20,7 +20,6 @@
       "file_regex": "^buildifier-linux-arm64$",
       "file_type": "executable",
       "freeze_version": "v8.2.1"
-
     },
     {
       "name": "buildifier-darwin-amd64",
@@ -114,7 +113,7 @@
       "repo": "workerd-tools",
       "file_regex": "wpt-.*.tar.gz",
       "build_file": "@workerd//:build/BUILD.wpt",
-      "freeze_version": "wpt-8b139c3a3",
+      "freeze_version": "wpt-1985b47aa",
       "patches": [
         "//:patches/wpt/0001-disable-virtualenv-for-serve-command.patch"
       ]

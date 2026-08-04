@@ -92,10 +92,7 @@ KJ_TEST("Invalid Urls") {
     {"http://GOO 　goo.com"_kj, kj::Maybe("http://other.com/"_kj)},
     {"http://﷐zyx.com"_kj, kj::Maybe("http://other.com/"_kj)},
     {"http://%ef%b7%90zyx.com"_kj, kj::Maybe("http://other.com/"_kj)}, {"https://�"_kj},
-    {"https://%EF%BF%BD"_kj}, {"http://a.b.c.xn--pokxncvks"_kj}, {"http://10.0.0.xn--pokxncvks"_kj},
-    {"http://a.b.c.XN--pokxncvks"_kj}, {"http://a.b.c.Xn--pokxncvks"_kj},
-    {"http://10.0.0.XN--pokxncvks"_kj}, {"http://10.0.0.xN--pokxncvks"_kj},
-    {"http://％４１.com"_kj, kj::Maybe("http://other.com/"_kj)},
+    {"https://%EF%BF%BD"_kj}, {"http://％４１.com"_kj, kj::Maybe("http://other.com/"_kj)},
     {"http://%ef%bc%85%ef%bc%94%ef%bc%91.com"_kj, kj::Maybe("http://other.com/"_kj)},
     {"http://％００.com"_kj, kj::Maybe("http://other.com/"_kj)},
     {"http://%ef%bc%85%ef%bc%90%ef%bc%90.com"_kj, kj::Maybe("http://other.com/"_kj)},
@@ -159,7 +156,7 @@ KJ_TEST("Invalid Urls") {
     {"http://f:340282366920938463463374607431768211537/c"_kj, kj::Maybe("http://example.org/"_kj)},
     {"non-special://[:80/"_kj}, {"http://[::127.0.0.0.1]"_kj}, {"a"_kj}, {"a/"_kj}, {"a//"_kj},
     {"test-a-colon.html"_kj, kj::Maybe("a:"_kj)}, {"test-a-colon-b.html"_kj, kj::Maybe("a:b"_kj)},
-    {"file://­/p"_kj}, {"file://%C2%AD/p"_kj}, {"file://xn--/p"_kj}, {"#"_kj}, {"?"_kj},
+    {"file://­/p"_kj}, {"file://%C2%AD/p"_kj}, {"#"_kj}, {"?"_kj},
     {"http://1.2.3.4.5"_kj, kj::Maybe("http://other.com/"_kj)},
     {"http://1.2.3.4.5."_kj, kj::Maybe("http://other.com/"_kj)}, {"http://0..0x300/"_kj},
     {"http://0..0x300./"_kj}, {"http://256.256.256.256.256"_kj, kj::Maybe("http://other.com/"_kj)},
@@ -172,9 +169,9 @@ KJ_TEST("Invalid Urls") {
     {"http://foo.0x4"_kj}, {"http://foo.0x4."_kj}, {"http://0999999999999999999/"_kj},
     {"http://foo.0x"_kj}, {"http://foo.0XFfFfFfFfFfFfFfFfFfAcE123"_kj}, {"http://💩.123/"_kj},
     {"https://\0y"_kj}, {"https://￿y"_kj}, {""_kj}, {"https://­/"_kj}, {"https://%C2%AD/"_kj},
-    {"https://xn--/"_kj}, {"data://:443"_kj}, {"data://test:test"_kj}, {"data://[:1]"_kj},
-    {"javascript://:443"_kj}, {"javascript://test:test"_kj}, {"javascript://[:1]"_kj},
-    {"mailto://:443"_kj}, {"mailto://test:test"_kj}, {"mailto://[:1]"_kj}, {"intent://:443"_kj},
+    {"data://:443"_kj}, {"data://test:test"_kj}, {"data://[:1]"_kj}, {"javascript://:443"_kj},
+    {"javascript://test:test"_kj}, {"javascript://[:1]"_kj}, {"mailto://:443"_kj},
+    {"mailto://test:test"_kj}, {"mailto://[:1]"_kj}, {"intent://:443"_kj},
     {"intent://test:test"_kj}, {"intent://[:1]"_kj}, {"urn://:443"_kj}, {"urn://test:test"_kj},
     {"urn://[:1]"_kj}, {"turn://:443"_kj}, {"turn://test:test"_kj}, {"turn://[:1]"_kj},
     {"stun://:443"_kj}, {"stun://test:test"_kj}, {"stun://[:1]"_kj}};
@@ -829,7 +826,18 @@ KJ_TEST("Valid Urls") {
       "stun://example.com:8080/pathname?search#hash"_kj},
     {"stun:///test"_kj, kj::none, "stun:///test"_kj},
     {"stun://test/a/../b"_kj, kj::none, "stun://test/b"_kj}, {"w://x:0"_kj, kj::none, "w://x:0"_kj},
-    {"west://x:0"_kj, kj::none, "west://x:0"_kj}};
+    {"west://x:0"_kj, kj::none, "west://x:0"_kj},
+    // ASCII labels are accepted without validating their Punycode payload, even when they start
+    // with "xn--". For example, xn--pokxncvks decodes to ㉓㋎㋍㋓㋕㋘, a form disallowed under UTS46
+    // validity checks. The ASCII form is preserved apart from lowercasing the "xn--" prefix.
+    {"file://xn--/p"_kj, kj::none, "file://xn--/p"_kj},
+    {"https://xn--/"_kj, kj::none, "https://xn--/"_kj},
+    {"http://a.b.c.xn--pokxncvks"_kj, kj::none, "http://a.b.c.xn--pokxncvks/"_kj},
+    {"http://10.0.0.xn--pokxncvks"_kj, kj::none, "http://10.0.0.xn--pokxncvks/"_kj},
+    {"http://a.b.c.XN--pokxncvks"_kj, kj::none, "http://a.b.c.xn--pokxncvks/"_kj},
+    {"http://a.b.c.Xn--pokxncvks"_kj, kj::none, "http://a.b.c.xn--pokxncvks/"_kj},
+    {"http://10.0.0.XN--pokxncvks"_kj, kj::none, "http://10.0.0.xn--pokxncvks/"_kj},
+    {"http://10.0.0.xN--pokxncvks"_kj, kj::none, "http://10.0.0.xn--pokxncvks/"_kj}};
 
   for (auto& testCase: TESTS) {
     test(testCase.input, testCase.base, testCase.result);

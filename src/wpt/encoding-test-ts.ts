@@ -87,7 +87,11 @@ export default {
       'replacement - empty input decodes to empty output.',
     ],
   },
-  'single-byte-decoder.window.js': {
+  'single-byte-decoder-iframe.window.js': {
+    comment: 'document is not supported',
+    disabledTests: true,
+  },
+  'single-byte-decoder.any.js': {
     comment: 'document and XMLHttpRequest are not supported',
     disabledTests: true,
   },

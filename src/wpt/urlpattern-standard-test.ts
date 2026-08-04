@@ -5,6 +5,7 @@
 import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
+  'urlpattern-constructor.any.js': {},
   'urlpattern-hasregexpgroups.any.js': {},
   'urlpattern.any.js': {},
   'urlpattern.https.any.js': {
