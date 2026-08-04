@@ -98,6 +98,13 @@ const unitTests :Workerd.Config = (
           # Unicode characters in the path should be handled as UTF-8 and supported.
           (name = "部品", esModule = "export default 1;"),
 
+          # Non-ASCII source text is decoded as UTF-8. latin1-src exercises the
+          # Latin-1-representable tier (all code points <= U+00FF, including the
+          # non-ASCII identifier); unicode-src exercises the UTF-16 tier (CJK and
+          # a non-BMP emoji) plus template literals.
+          (name = "latin1-src", esModule = "const naïve = 'à la carte'; export default naïve;"),
+          (name = "unicode-src", esModule = "const café = 'café 部品 🎉'; export default café; export const tpl = `→${café}←`;"),
+
           (name = "tla", esModule = "export default await import('text')"),
 
           # An ESM that statically imports a module that does not exist. Importing

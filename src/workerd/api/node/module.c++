@@ -26,10 +26,7 @@ jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
     return jsg::JsValue(js.wrapReturningFunction(js.v8Context(),
         [referrer = parsed.clone()](jsg::Lock& js,
             const v8::FunctionCallbackInfo<v8::Value>& args) -> v8::Local<v8::Value> {
-      // Use the one-byte-aware conversion so require() and import() treat
-      // non-ASCII specifiers identically (avoids double-encoding).
-      auto specifier =
-          jsg::modules::specifierToString(js, jsg::check(args[0]->ToString(js.v8Context())));
+      auto specifier = js.toString(jsg::check(args[0]->ToString(js.v8Context())));
       if (jsg::isNodeJsCompatEnabled(js)) {
         KJ_IF_SOME(nodeSpec, jsg::checkNodeSpecifier(specifier)) {
           specifier = kj::mv(nodeSpec);

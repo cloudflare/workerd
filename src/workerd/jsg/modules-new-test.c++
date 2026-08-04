@@ -1461,6 +1461,58 @@ KJ_TEST("Throwing an exception inside a CJS-style eval module works as expected"
 
 // ======================================================================================
 
+KJ_TEST("Module source is decoded as UTF-8 across all encoding tiers") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+
+    // Tier 1: pure-ASCII source (zero-copy external one-byte string).
+    auto ascii = kj::str("export default 'plain';");
+    bundleBuilder.addEsmModule("ascii", ascii);
+
+    // Tier 2: non-ASCII source whose code points all fit in Latin-1. The
+    // identifier and the literal both contain é (U+00E9, UTF-8 c3 a9); under a
+    // Latin-1 misread the identifier would be a SyntaxError (a UTF-8
+    // continuation byte is not a valid identifier char) and the literal would
+    // be mojibake.
+    auto latin1 = kj::str("const caf\xc3\xa9 = 'caf\xc3\xa9'; export default caf\xc3\xa9;");
+    bundleBuilder.addEsmModule("latin1", latin1);
+
+    // Tier 3: source requiring UTF-16 (CJK + non-BMP emoji).
+    auto utf16 = kj::str("export default '\xe9\x83\xa8\xe5\x93\x81 \xf0\x9f\x8e\x89';");
+    bundleBuilder.addEsmModule("utf16", utf16);
+
+    // Invalid UTF-8: a lone 0xE9 byte inside a literal. Malformed sequences are
+    // replaced with U+FFFD (UTF-8 ef bf bd), matching v8::String::NewFromUtf8's
+    // tolerance rather than rejecting the module.
+    auto invalid = kj::str("export default 'caf\xe9';");
+    bundleBuilder.addEsmModule("invalid", invalid);
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    JSG_TRY(js) {
+      auto plain = ModuleRegistry::resolve(js, "file:///ascii");
+      KJ_ASSERT(kj::str(plain) == "plain");
+
+      auto cafe = ModuleRegistry::resolve(js, "file:///latin1");
+      KJ_ASSERT(kj::str(cafe) == "caf\xc3\xa9", kj::str(cafe));
+
+      auto cjk = ModuleRegistry::resolve(js, "file:///utf16");
+      KJ_ASSERT(kj::str(cjk) == "\xe9\x83\xa8\xe5\x93\x81 \xf0\x9f\x8e\x89", kj::str(cjk));
+
+      auto replaced = ModuleRegistry::resolve(js, "file:///invalid");
+      KJ_ASSERT(kj::str(replaced) == "caf\xef\xbf\xbd", kj::str(replaced));
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
+  });
+}
+
+// ======================================================================================
+
 KJ_TEST("Dynamic import from within a CJS-style eval module works") {
   PREAMBLE([&](Lock& js) {
     ResolveObserverImpl observer;
@@ -2261,7 +2313,12 @@ KJ_TEST("Using a registry from multiple threads works") {
   kj::AsyncIoContext io = kj::setupAsyncIo();
 
   ModuleBundle::BundleBuilder bundleBuilder(BASE);
-  static const auto foo = "export default 123; for (let n = 0; n < 100000; n++) {}"_kjc;
+  // The non-ASCII literal forces the shared UTF-8 -> Latin-1 source transcode,
+  // so this test also exercises its cross-thread once-init: all five isolates
+  // race on the same kj::Lazy encoding and the same compile cache
+  // (cacheGenerated == 1 below).
+  static const auto foo =
+      "export default 123; const s = 'caf\xc3\xa9'; for (let n = 0; n < 100000; n++) {}"_kjc;
   bundleBuilder.addEsmModule("foo", foo);
 
   auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();

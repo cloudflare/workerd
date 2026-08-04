@@ -8,6 +8,9 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/util.h>
 
+#include <simdutf.h>
+
+#include <kj/encoding.h>
 #include <kj/mutex.h>
 #include <kj/table.h>
 
@@ -22,27 +25,6 @@ namespace {
 // this can be removed.
 ResolveObserver noopResolveObserver;
 }  // namespace
-
-kj::String specifierToString(jsg::Lock& js, v8::Local<v8::String> spec) {
-  // Source files in workers end up being converted to UTF-8 bytes, so if the specifier
-  // string contains non-ASCII unicode characters, those will be directly encoded as UTF-8
-  // bytes, which unfortunately end up double-encoded if we try to read them using the
-  // regular js.toString() method. Doh! Fortunately they come through as one-byte strings,
-  // so we can detect that case and handle those correctly here.
-  if (spec->ContainsOnlyOneByte()) {
-    auto buf = kj::heapArray<char>(spec->Length() + 1);
-#if V8_MAJOR_VERSION >= 15
-    spec->WriteOneByte(js.v8Isolate, 0, spec->Length(), buf.asBytes().begin(),
-        v8::String::WriteFlags::kNullTerminate);
-#else
-    spec->WriteOneByteV2(js.v8Isolate, 0, spec->Length(), buf.asBytes().begin(),
-        v8::String::WriteFlags::kNullTerminate);
-#endif
-    KJ_ASSERT(buf[buf.size() - 1] == '\0');
-    return kj::String(kj::mv(buf));
-  }
-  return js.toString(spec);
-}
 
 namespace {
 // Returns kj::none if this given module is incapable of resolving the given
@@ -122,6 +104,69 @@ kj::Array<kj::String> normalizeNamedExports(kj::Array<kj::String> namedExports) 
   return normalized.releaseAsArray();
 }
 
+// The source text of an ES module in the representation handed to V8 for
+// compilation. V8 has no internal UTF-8 string representation — strings are
+// either one-byte (Latin-1) or two-byte (UTF-16), and external source strings
+// must be one of those two encodings. Worker bundle sources arrive as UTF-8
+// bytes, so each module's source is encoded once, lazily, on first compile,
+// and the result is shared by every isolate that compiles the module:
+//
+//  * Pure-ASCII source (the overwhelmingly common case — bundlers typically
+//    escape non-ASCII): the original buffer directly backs a one-byte external
+//    string. Zero copies.
+//  * Non-ASCII source whose code points all fit in Latin-1: transcoded once to
+//    a one-byte buffer, matching the representation V8 itself would choose for
+//    the same text.
+//  * Anything else (CJK, emoji, ...): transcoded once to UTF-16.
+//
+// Invalid UTF-8 sequences are replaced with U+FFFD, matching the tolerance of
+// v8::String::NewFromUtf8, which the legacy module registry uses for bundle
+// sources. Since the encoding choice is a pure function of the source bytes,
+// every isolate replica sharing the registry agrees on it, keeping the shared
+// compile cache consistent.
+struct EncodedSource {
+  kj::OneOf<kj::ArrayPtr<const char>,  // pure-ASCII: borrows the original buffer
+      kj::Array<const char>,           // owned Latin-1 transcode
+      kj::Array<const uint16_t>>       // owned UTF-16 transcode
+      repr;
+};
+
+EncodedSource encodeSource(kj::ArrayPtr<const char> source) {
+  if (simdutf::validate_ascii(source.begin(), source.size())) {
+    // ASCII is a subset of Latin-1, so the raw bytes can back a one-byte
+    // external string directly.
+    return {.repr = source};
+  }
+
+  if (simdutf::validate_utf8(source.begin(), source.size())) {
+    // Valid UTF-8. Prefer the half-size Latin-1 representation when every code
+    // point permits it. The buffer is sized exactly, so with already-validated
+    // input a zero return can only mean some code point exceeds U+00FF.
+    auto latin1 =
+        kj::heapArray<char>(simdutf::latin1_length_from_utf8(source.begin(), source.size()));
+    if (simdutf::convert_utf8_to_latin1(source.begin(), source.size(), latin1.begin()) != 0) {
+      return {.repr = kj::Array<const char>(kj::mv(latin1))};
+    }
+
+    auto utf16 =
+        kj::heapArray<uint16_t>(simdutf::utf16_length_from_utf8(source.begin(), source.size()));
+    // simdutf writes char16_t; uint16_t is layout-identical and is the element
+    // type the external two-byte string API accepts.
+    size_t written = simdutf::convert_utf8_to_utf16le(
+        source.begin(), source.size(), reinterpret_cast<char16_t*>(utf16.begin()));
+    KJ_ASSERT(written == utf16.size());
+    return {.repr = kj::Array<const uint16_t>(kj::mv(utf16))};
+  }
+
+  // Invalid UTF-8: take the (rare) lenient path, which substitutes U+FFFD for
+  // malformed sequences. U+FFFD itself is outside Latin-1, so the result is
+  // always UTF-16.
+  auto utf16 = kj::encodeUtf16(source);
+  auto owned = kj::heapArray<uint16_t>(utf16.size());
+  memcpy(owned.begin(), utf16.begin(), utf16.size() * sizeof(uint16_t));
+  return {.repr = kj::Array<const uint16_t>(kj::mv(owned))};
+}
+
 // The implementation of Module for ESM.
 class EsModule final: public Module {
  public:
@@ -176,9 +221,28 @@ class EsModule final: public Module {
         }
       }
 
+      // Encode the UTF-8 source into a V8-compatible external representation,
+      // once, shared across all isolates compiling this module. See
+      // EncodedSource for the tiering. kj::Lazy handles cross-thread once-init.
+      const auto& encoded = encodedSource.get([this](kj::SpaceFor<EncodedSource>& space) {
+        return space.construct(encodeSource(this->source));
+      });
+      v8::Local<v8::String> contentStr;
+      KJ_SWITCH_ONEOF(encoded.repr) {
+        KJ_CASE_ONEOF(ascii, kj::ArrayPtr<const char>) {
+          contentStr = js.strExtern(ascii);
+        }
+        KJ_CASE_ONEOF(latin1, kj::Array<const char>) {
+          contentStr = js.strExtern(latin1);
+        }
+        KJ_CASE_ONEOF(utf16, kj::Array<const uint16_t>) {
+          contentStr = js.strExtern(utf16);
+        }
+      }
+
       // Note that the Source takes ownership of the CachedData pointer that we pass in.
       // (but not the actual buffer it holds). Do not use data after this point.
-      v8::ScriptCompiler::Source source(js.strExtern(this->source), origin, data);
+      v8::ScriptCompiler::Source source(contentStr, origin, data);
 
       auto maybeCached = source.GetCachedData();
       if (maybeCached != nullptr) {
@@ -272,6 +336,10 @@ class EsModule final: public Module {
   }
 
   kj::ArrayPtr<const char> source;
+
+  // The source encoded into a V8-compatible external-string representation
+  // (see EncodedSource). Computed on first compile, shared across isolates.
+  kj::Lazy<EncodedSource> encodedSource;
 
   // The cachedData holds the cached compilation data for this module, if any. It is
   // generated on-demand the first time the module is compiled, if possible.
@@ -1148,7 +1216,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportModuleCallback(v8::Local<v8::Context> c
   auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
   KJ_TRY {
     return js.tryCatch([&]() -> v8::MaybeLocal<v8::Promise> {
-      auto spec = specifierToString(js, specifier);
+      auto spec = js.toString(specifier);
 
       // Parse import attributes. Throws for unrecognized attribute keys.
       // Returns the "type" value if specified, or kj::none.
@@ -1254,7 +1322,7 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
   auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
 
   return js.tryCatch([&]() -> v8::MaybeLocal<ReturnType> {
-    auto spec = specifierToString(js, specifier);
+    auto spec = js.toString(specifier);
 
     // The proposed specification for import attributes strongly recommends that
     // embedders reject import attributes and types they do not understand/implement.
