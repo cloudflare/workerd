@@ -2687,9 +2687,22 @@ jsg::Promise<void> ReadableStreamJsController::cancel(
     // than applied under us.
     state.beginOperation();
     KJ_DEFER({
-      // endOperation() applies a queued transition, which for a close is equivalent to doClose().
-      // If nothing was queued, close the stream here. Either way it ends up Closed.
-      if (!state.endOperation()) {
+      // endOperation() applies a queued transition if there is one. Whoever applies it owes the
+      // lock the matching notification, since doClose()/doError() skip it when they defer.
+      if (state.endOperation()) {
+        // Skip callbacks if execution is being terminated (e.g. CPU time limit) since we can't
+        // safely execute JavaScript in that state.
+        if (!js.v8Isolate->IsExecutionTerminating()) {
+          if (state.is<StreamStates::Closed>()) {
+            lock.onClose(js);
+          } else if (state.is<StreamStates::Errored>()) {
+            KJ_IF_SOME(err, state.tryGetUnsafe<StreamStates::Errored>()) {
+              lock.onError(js, err.getHandle(js));
+            }
+          }
+        }
+      } else {
+        // Nothing was queued, so close the stream here.
         doClose(js);
       }
     });
