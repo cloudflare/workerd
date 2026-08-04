@@ -268,9 +268,9 @@ impl DnsUtil {
     ///
     /// ```
     /// let record = parse_caa_record("\\# 15 00 05 69 73 73 75 65 70 6b 69 2e 67 6f 6f 67");
-    /// assert_eq!(record.critical, false);
-    /// assert_eq!(record.field, "issue")
-    /// assert_eq!(record.value, "pki.goog")
+    /// assert_eq!(record.critical, 0);
+    /// assert_eq!(record.field, "issue");
+    /// assert_eq!(record.value, "pki.goog");
     /// ```
     /// # Errors
     /// `DnsParserError::InvalidHexString`
@@ -508,8 +508,8 @@ mod tests {
     }
 
     // =========================================================================
-    // Presentation-format RDATA. Cloudflare DNS serves CAA and NAPTR as either
-    // RFC 3597 generic hex RDATA or presentation format; both must parse.
+    // Presentation-format RDATA. Cloudflare DNS serves CAA and NAPTR either as
+    // RFC 3597 generic hex RDATA or in presentation format; both must parse.
     // =========================================================================
 
     #[test]
@@ -525,7 +525,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_caa_record_presentation_critical_flags() {
+    fn test_parse_caa_record_presentation_critical() {
         let dns_util = DnsUtil {};
         let record = dns_util
             .parse_caa_record("128 iodef \"mailto:security@example.com\"".to_owned())
@@ -550,22 +550,29 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_caa_record_presentation_rejects_bad_input() {
+    fn test_parse_caa_record_presentation_invalid_field() {
         let dns_util = DnsUtil {};
-        // Unknown tag.
         assert!(
             dns_util
                 .parse_caa_record("0 contactemail \"admin@example.com\"".to_owned())
                 .is_err()
         );
-        // Wrong field count.
+    }
+
+    #[test]
+    fn test_parse_caa_record_presentation_wrong_field_count() {
+        let dns_util = DnsUtil {};
         assert!(dns_util.parse_caa_record("0 issue".to_owned()).is_err());
         assert!(
             dns_util
                 .parse_caa_record("0 issue \"pki.goog\" extra".to_owned())
                 .is_err()
         );
-        // Unterminated quote.
+    }
+
+    #[test]
+    fn test_parse_caa_record_presentation_unterminated_quote() {
+        let dns_util = DnsUtil {};
         assert!(
             dns_util
                 .parse_caa_record("0 issue \"pki.goog".to_owned())
@@ -597,6 +604,8 @@ mod tests {
             )
             .unwrap();
 
+        assert_eq!(record.order, 100);
+        assert_eq!(record.preference, 10);
         assert_eq!(record.flags, "u");
         assert_eq!(record.service, "E2U+sip");
         assert_eq!(record.regexp, "!^.*$!sip:info@example.com !");
@@ -604,7 +613,17 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_naptr_record_presentation_rejects_bad_input() {
+    fn test_parse_naptr_record_presentation_escaped_quote() {
+        let dns_util = DnsUtil {};
+        let record = dns_util
+            .parse_naptr_record("1 2 \"u\" \"E2U+sip\" \"a\\\"b\" .".to_owned())
+            .unwrap();
+
+        assert_eq!(record.regexp, "a\"b");
+    }
+
+    #[test]
+    fn test_parse_naptr_record_presentation_wrong_field_count() {
         let dns_util = DnsUtil {};
         assert!(
             dns_util
@@ -625,23 +644,47 @@ mod tests {
     }
 
     #[test]
-    fn test_split_rdata_fields_escapes() {
-        // RFC 1035 §5.1: `\DDD` names an octet, `\X` is a literal X.
+    fn test_split_rdata_fields_decimal_escapes() {
+        // `\DDD` names an octet: \065 is 'A', \032 is a space.
         assert_eq!(split_rdata_fields("a\\065b").unwrap(), vec!["aAb"]);
         assert_eq!(split_rdata_fields("\"a\\065b\"").unwrap(), vec!["aAb"]);
+
+        // Escaped whitespace does not terminate an unquoted field.
+        assert_eq!(split_rdata_fields("x;\\032y z").unwrap(), vec!["x; y", "z"]);
+
+        // The full octet range maps to the character with the same value, as
+        // decode_hex does for generic-format RDATA.
         assert_eq!(
             split_rdata_fields("\\000\\255").unwrap(),
             vec!["\u{0}\u{ff}"]
         );
-        assert!(split_rdata_fields("\\256").is_err());
 
+        // Out of octet range.
+        assert!(split_rdata_fields("\\256").is_err());
+    }
+
+    #[test]
+    fn test_split_rdata_fields_literal_escapes() {
         // Fewer than three digits is the literal form, not an octet.
         assert_eq!(split_rdata_fields("a\\6b").unwrap(), vec!["a6b"]);
+        assert_eq!(split_rdata_fields("a\\65").unwrap(), vec!["a65"]);
+
         assert_eq!(split_rdata_fields("a\\\\b").unwrap(), vec!["a\\b"]);
         assert_eq!(split_rdata_fields("\"a\\\"b\"").unwrap(), vec!["a\"b"]);
 
-        // Escaped whitespace does not terminate a field.
-        assert_eq!(split_rdata_fields("x;\\032y z").unwrap(), vec!["x; y", "z"]);
+        // An escaped space is literal, so it does not split the field.
+        assert_eq!(split_rdata_fields("a\\ b").unwrap(), vec!["a b"]);
+    }
+
+    #[test]
+    fn test_parse_caa_record_presentation_escaped_space() {
+        let dns_util = DnsUtil {};
+        let record = dns_util
+            .parse_caa_record("0 issue ca.example.net;\\032account=1".to_owned())
+            .unwrap();
+
+        assert_eq!(record.field, "issue");
+        assert_eq!(record.value, "ca.example.net; account=1");
     }
 
     // =========================================================================
