@@ -1442,8 +1442,8 @@ KJ_TEST("Throwing an exception inside a CJS-style eval module works as expected"
 
     kj::String source = kj::str("exports.foo = 123; throw new Error('bar');");
 
-    bundleBuilder.addSyntheticModule("foo",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source, "foo"_kj));
+    bundleBuilder.addSyntheticModule(
+        "foo", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source));
 
     auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
 
@@ -1456,6 +1456,80 @@ KJ_TEST("Throwing an exception inside a CJS-style eval module works as expected"
       auto str = kj::str(exception.getHandle(js));
       KJ_ASSERT(str == "Error: bar");
     });
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("Dynamic import from within a CJS-style eval module works") {
+  PREAMBLE([&](Lock& js) {
+    ResolveObserverImpl observer;
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+
+    // The CJS-style module performs a dynamic import. The compiled eval function's
+    // script origin is the module's canonical URL, which is what lets the dynamic
+    // import callback identify this module as the referrer and resolve the
+    // specifier relative to it.
+    kj::String source = kj::str("exports.p = import('dep');");
+    bundleBuilder.addSyntheticModule(
+        "cjs-dyn", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source));
+
+    auto dep = kj::str("export default 123;");
+    bundleBuilder.addEsmModule("dep", dep);
+
+    // The ESM entry point awaits the promise exported by the CJS module.
+    auto entry = kj::str("import cjs from 'cjs-dyn'; export default (await cjs.p).default;");
+    bundleBuilder.addEsmModule("entry", entry);
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    JSG_TRY(js) {
+      auto value = ModuleRegistry::resolve(js, "file:///entry", "default"_kjc);
+      KJ_ASSERT(value.isNumber());
+      KJ_ASSERT(kj::str(value) == "123");
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("Dynamic import from a script with a non-URL origin fails cleanly") {
+  PREAMBLE([&](Lock& js) {
+    ResolveObserverImpl observer;
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+    auto dep = kj::str("export default 123;");
+    bundleBuilder.addEsmModule("dep", dep);
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    // Scripts that are not modules (e.g. service-worker mains or eval'd code) can
+    // carry arbitrary, non-URL ScriptOrigin names. A dynamic import from such a
+    // script cannot identify a referring module; it must reject cleanly rather
+    // than trip an internal assertion.
+    JSG_TRY(js) {
+      auto fn = Module::compileEvalFunction(js,
+          "globalThis.result = import('dep'); globalThis.result.catch(() => {});"_kj,
+          "plain-script-name"_kj, kj::none, compilationObserver);
+      fn(js);
+      js.runMicrotasks();
+      auto result = JsObject(js.v8Context()->Global()).get(js, "result");
+      auto promise = v8::Local<v8::Value>(result).As<v8::Promise>();
+      KJ_ASSERT(promise->State() == v8::Promise::kRejected);
+      auto err = kj::str(JsValue(promise->Result()));
+      KJ_ASSERT(err == "TypeError: Referring module not found in the registry: file:///", err);
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
   });
 }
 
@@ -1521,8 +1595,8 @@ KJ_TEST("Recursive import works or fails as expected") {
     auto source = kj::str("require('bar')");
 
     // A CommonJS-style module, however, does not allow recursive evaluation.
-    bundleBuilder.addSyntheticModule("bar",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source, "bar"_kj));
+    bundleBuilder.addSyntheticModule(
+        "bar", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source));
 
     auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
 
@@ -1559,11 +1633,11 @@ KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (d
     auto source1 = kj::str("exports = require('foo');");
     auto source2 = kj::str("require('baz'); exports = require('bar');");
 
-    bundleBuilder.addSyntheticModule("baz",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source1, "baz"_kj));
+    bundleBuilder.addSyntheticModule(
+        "baz", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source1));
 
-    bundleBuilder.addSyntheticModule("foo",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source2, "foo"_kj));
+    bundleBuilder.addSyntheticModule(
+        "foo", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source2));
 
     auto bar = kj::str("export default {}; await import('foo');");
     bundleBuilder.addEsmModule("bar", bar);
@@ -1602,11 +1676,11 @@ KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (s
     auto source1 = kj::str("exports = require('foo');");
     auto source2 = kj::str("require('baz'); exports = require('bar');");
 
-    bundleBuilder.addSyntheticModule("baz",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source1, "baz"_kj));
+    bundleBuilder.addSyntheticModule(
+        "baz", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source1));
 
-    bundleBuilder.addSyntheticModule("foo",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source2, "foo"_kj));
+    bundleBuilder.addSyntheticModule(
+        "foo", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source2));
 
     auto bar = kj::str("export default {}; import bar from 'foo';");
     bundleBuilder.addEsmModule("bar", bar);
@@ -1647,7 +1721,7 @@ KJ_TEST("ESM -> CJS -> require(ESM) -> static import CJS circular dependency fai
     // b (CJS) -> require('c') which is an ESM that imports b back
     auto bSource = kj::str("exports = require('c');");
     bundleBuilder.addSyntheticModule(
-        "b", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(bSource, "b"_kj));
+        "b", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(bSource));
 
     // c.js (ESM) -> imports b (CJS) — creates the circular dependency
     auto c = kj::str("import b from 'b'; export default b;");
@@ -1710,13 +1784,12 @@ KJ_TEST("Nested require() that pumps microtasks does not crash a sibling TLA mod
     // pump (CJS): its evaluation performs a nested require(), which pumps the
     // microtask queue while entry is still kEvaluating.
     auto pumpSrc = kj::str("require('trivial');\n");
-    bundleBuilder.addSyntheticModule("pump",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(pumpSrc, "pump"_kj));
+    bundleBuilder.addSyntheticModule(
+        "pump", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(pumpSrc));
 
     auto trivialSrc = kj::str("// nothing; require()-ing this pumps the microtask queue\n");
-    bundleBuilder.addSyntheticModule("trivial",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(
-            trivialSrc, "trivial"_kj));
+    bundleBuilder.addSyntheticModule(
+        "trivial", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(trivialSrc));
 
     auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
     auto attached = registry->attachToIsolate(js, compilationObserver);
@@ -2366,16 +2439,16 @@ KJ_TEST("Fallback service can return a module with a different specifier") {
 
 // ======================================================================================
 
-KJ_TEST("Fallback service CommonJS module name outlives the resolve callback") {
-  // newCjsStyleModuleHandler retains both the source and the module name as non-owning
-  // kj::StringPtr, and does not read either until the module is first evaluated -- which
-  // happens on the resolve below, long after the resolve callback has returned. A
-  // callback that builds a module from storage it owns locally must therefore attach that
-  // storage to the Module, as WorkerdApi's fallback callback does for a CommonJS module
-  // returned by a fallback service.
+KJ_TEST("Fallback service CommonJS module source outlives the resolve callback") {
+  // newCjsStyleModuleHandler retains the source as a non-owning kj::StringPtr, and does
+  // not read it until the module is first evaluated -- which happens on the resolve
+  // below, long after the resolve callback has returned. A callback that builds a module
+  // from storage it owns locally must therefore attach that storage to the Module, as
+  // WorkerdApi's fallback callback does for a CommonJS module returned by a fallback
+  // service.
   //
-  // Both buffers below are freed when the callback returns unless they are attached, so
-  // dropping either attachment makes this a heap-use-after-free. Only ASAN observes that;
+  // The buffer below is freed when the callback returns unless it is attached, so
+  // dropping the attachment makes this a heap-use-after-free. Only ASAN observes that;
   // the assertions themselves just confirm the module still evaluates.
   PREAMBLE([&](Lock& js) {
     CompilationObserver compilationObserver;
@@ -2384,16 +2457,13 @@ KJ_TEST("Fallback service CommonJS module name outlives the resolve callback") {
 
     builder.add(ModuleBundle::newFallbackBundle(
         [](const ResolveContext& context) -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
-      auto ownedName = kj::str("fallback-cjs");
       auto ownedSource = kj::str("exports.ok = 123;");
-      auto namePtr = ownedName.asPtr();
       auto sourcePtr = ownedSource.asPtr();
 
-      kj::Own<Module> mod = Module::newSynthetic(context.normalizedSpecifier.clone(),
-          Module::Type::FALLBACK,
-          Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(sourcePtr, namePtr));
-      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(
-          mod.attach(kj::mv(ownedName), kj::mv(ownedSource)));
+      kj::Own<Module> mod =
+          Module::newSynthetic(context.normalizedSpecifier.clone(), Module::Type::FALLBACK,
+              Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(sourcePtr));
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(mod.attach(kj::mv(ownedSource)));
     }));
 
     auto registry = builder.finish();

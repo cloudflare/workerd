@@ -197,7 +197,7 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           }
           bundleBuilder.addSyntheticModule(def.name,
               jsg::modules::Module::newCjsStyleModuleHandler<api::CommonJsModuleContext,
-                  TypeWrapper>(content.body, def.name),
+                  TypeWrapper>(content.body),
               KJ_MAP(name, named) { return kj::str(name); });
           break;
         }

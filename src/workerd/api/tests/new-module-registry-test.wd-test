@@ -46,6 +46,12 @@ const unitTests :Workerd.Config = (
            commonJsModule = "module.exports = { foo: 1 }"),
           (name = "cjs2", commonJsModule = "module.exports = require('cjs1')"),
           (name = "cjs3", commonJsModule = "throw new Error('boom')"),
+          # Dynamic import() from within a CommonJS module. The relative specifier
+          # resolves against the CJS module's own canonical URL; the bare node
+          # builtin resolves normally.
+          (name = "cjs-dyn",
+           namedExports = ["relative", "builtin"],
+           commonJsModule = "exports.relative = import('bar'); exports.builtin = import('node:assert');"),
           # Intentional circular dependency
           (name = "cjs4", commonJsModule = "module.exports = require('cjs5')"),
           (name = "cjs5", commonJsModule = "module.exports = require('cjs4')"),

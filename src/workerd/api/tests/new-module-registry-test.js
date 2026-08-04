@@ -163,6 +163,18 @@ import { default as cjs5 } from 'cjs5';
 deepStrictEqual(cjs4, {});
 deepStrictEqual(cjs5, {});
 
+// Dynamic import() works from within a CommonJS module, resolving the
+// specifier relative to the CJS module itself (its script origin is the
+// module's canonical URL).
+import { default as cjsDyn } from 'cjs-dyn';
+{
+  const ns = await cjsDyn.relative;
+  strictEqual(ns.foo, 1);
+  strictEqual(ns.default, 2);
+  const nodeNs = await cjsDyn.builtin;
+  strictEqual(typeof nodeNs.default.ok, 'function');
+}
+
 // These dynamics imports can be top-level awaited because they
 // are immediately rejected with errors.
 await rejects(import('invalid-json'), {

@@ -436,15 +436,22 @@ class Module {
   // synthetic module. All methods and properties exposed by the template
   // type T are exposed as additional globals within the executed scope.
   template <typename T, typename TypeWrapper>
-  static EvaluateCallback newCjsStyleModuleHandler(
-      kj::StringPtr source, kj::StringPtr name) KJ_WARN_UNUSED_RESULT {
-    return [source, name](Lock& js, const Url& id, const Module::ModuleNamespace& ns,
+  static EvaluateCallback newCjsStyleModuleHandler(kj::StringPtr source) KJ_WARN_UNUSED_RESULT {
+    return [source](Lock& js, const Url& id, const Module::ModuleNamespace& ns,
                const CompilationObserver& observer) mutable -> bool {
       return js.tryCatch([&] {
         auto& wrapper = TypeWrapper::from(js.v8Isolate);
         auto ext = js.alloc<T>(js, id);
         ns.setDefault(js, ext->getExports(js));
-        auto fn = Module::compileEvalFunction(js, source, name,
+        // The module's canonical URL is used as the compiled script's origin name.
+        // V8 reports the origin name as the referrer for dynamic import() performed
+        // by the script, and dynamicImportModuleCallback() identifies the referring
+        // module in the registry's lookup cache by that URL — a non-URL origin
+        // would make dynamic import from this module unable to resolve anything.
+        // This also keeps CJS stack-trace filenames consistent with ESM modules,
+        // whose origins are always their canonical URLs.
+        auto href = kj::str(id.getHref());
+        auto fn = Module::compileEvalFunction(js, source, href,
             JsObject(wrapper.wrap(js, js.v8Context(), kj::none, ext.addRef())), observer);
         fn(js);
         // If there are named exports specified for the module namespace,

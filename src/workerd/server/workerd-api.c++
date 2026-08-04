@@ -1089,8 +1089,6 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                   KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
                     auto ownedData = kj::str(content.body);
                     auto ptr = ownedData.asPtr();
-                    auto ownedName = kj::str(mod.name);
-                    auto namePtr = ownedName.asPtr();
                     kj::ArrayPtr<const kj::StringPtr> named;
                     KJ_IF_SOME(n, content.namedExports) {
                       named = n;
@@ -1099,11 +1097,10 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                         jsg::modules::Module::newSynthetic(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
                             jsg::modules::Module::newCjsStyleModuleHandler<
-                                api::CommonJsModuleContext, JsgWorkerdIsolate_TypeWrapper>(
-                                ptr, namePtr),
+                                api::CommonJsModuleContext, JsgWorkerdIsolate_TypeWrapper>(ptr),
               KJ_MAP(name, named) {
                       return kj::str(name);
-                    }).attach(kj::mv(ownedData), kj::mv(ownedName)));
+                    }).attach(kj::mv(ownedData)));
                   }
                   KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
                     // Python modules are not supported.in fallback

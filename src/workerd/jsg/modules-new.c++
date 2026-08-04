@@ -1159,7 +1159,16 @@ v8::MaybeLocal<v8::Promise> dynamicImportModuleCallback(v8::Local<v8::Context> c
           return registry.getBundleBase().clone();
         }
         auto str = js.toString(resource_name);
-        return KJ_ASSERT_NONNULL(Url::tryParse(str.asPtr()));
+        KJ_IF_SOME(parsed, Url::tryParse(str.asPtr())) {
+          return kj::mv(parsed);
+        }
+        // The referring script's origin name is not a URL. Modules created by this
+        // registry always use their canonical URL as the origin, so the referrer is
+        // some other kind of script (e.g. a service-worker main script or eval'd
+        // code). Fall back to the bundle base — the same treatment as an empty
+        // resource name — so the referrer lookup below fails with a clear
+        // "Referring module not found" error rather than an assertion here.
+        return registry.getBundleBase().clone();
       })();
 
       // If Node.js Compat v2 mode is enable, we have to check to see if the specifier
