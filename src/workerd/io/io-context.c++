@@ -160,6 +160,7 @@ IoContext::IoContext(ThreadContext& thread,
       id(nextId()),
       threadId(getThreadId()),
       deleteQueue(kj::arc<DeleteQueue>()),
+      reverseIoOwnValidity(kj::arc<ReverseIoOwnValidity>()),
       cachePutSerializer(kj::READY_NOW),
       timeoutManager(kj::heap<TimeoutManagerImpl>()),
       waitUntilTasks(*this),
@@ -712,6 +713,9 @@ IoContext::~IoContext() noexcept(false) {
   KJ_IF_SOME(pe, pendingEvent) {
     pe.maybeContext = kj::none;
   }
+
+  // Invalidate ReverseIoOwn instances before destroying their backing OwnedObjects.
+  reverseIoOwnValidity->invalidate();
 
   // Kill the sentinel so that no weak references can refer to this IoContext anymore.
   selfRef->invalidate();

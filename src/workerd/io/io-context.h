@@ -1140,6 +1140,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Maybe<InputGate::Lock> currentInputLock;
 
   DeleteQueuePtr deleteQueue;
+  kj::Arc<ReverseIoOwnValidity> reverseIoOwnValidity;
 
   kj::Maybe<kj::Exception> abortException;
   kj::Own<kj::PromiseFulfiller<void>> abortFulfiller;
@@ -1763,7 +1764,8 @@ template <typename T>
 inline ReverseIoOwn<T> IoContext::addObjectReverse(kj::Own<T> obj) {
   // We intentionally don't requireCurrent() -- the only requirement is that the caller is in the
   // same thread.
-  return deleteQueue.queue->addObjectReverse(getWeakRef(), kj::mv(obj), ownedObjects);
+  return deleteQueue.queue->addObjectReverse(
+      reverseIoOwnValidity.addRef(), kj::mv(obj), ownedObjects);
 }
 
 template <typename Func>
