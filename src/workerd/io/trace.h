@@ -1163,6 +1163,10 @@ class SpanParent {
   kj::Maybe<kj::Own<SpanObserver>> observer;
 };
 
+// Whether the span tag is a custom tag added using the user tracing binding, we do not log for
+// overwritten tags in that case.
+WD_STRONG_BOOL(IsCustomTag);
+
 // Interface for writing a span. Essentially, this is a mutable interface to a `Span` object,
 // given only to the code which is meant to create the span, whereas code that merely collects
 // and reports spans gets the `Span` type.
@@ -1235,7 +1239,7 @@ class SpanBuilder {
       double,
       int64_t>;
 
-  void setTag(kj::ConstString key, TagInitValue value);
+  void setTag(kj::ConstString key, TagInitValue value, IsCustomTag isCustom = IsCustomTag::NO);
 
   // `key` must point to memory that will remain valid all the way until this span's data is
   // serialized.
