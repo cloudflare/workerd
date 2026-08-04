@@ -217,8 +217,7 @@ class Worker: public kj::AtomicRefcounted {
   kj::Promise<AsyncLock> takeAsyncLockWhenActorCacheReady(
       kj::Date now, Actor& actor, RequestObserver& request) const;
 
-  static void setupContext(
-      jsg::Lock& lock, v8::Local<v8::Context> context, const LoggingOptions& loggingOptions);
+  static void setupContext(jsg::Lock& lock, v8::Local<v8::Context> context);
 
   static void setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context> context);
 
@@ -242,12 +241,6 @@ class Worker: public kj::AtomicRefcounted {
   class InspectorClient;
   class AsyncWaiter;
   friend constexpr bool _kj_internal_isPolymorphic(AsyncWaiter*);
-
-  static void handleLog(jsg::Lock& js,
-      const LoggingOptions& loggingOptions,
-      LogLevel level,
-      const v8::Global<v8::Function>& original,
-      const v8::FunctionCallbackInfo<v8::Value>& info);
 
   void processEntrypointClass(jsg::Lock& js,
       EntrypointClass cls,
@@ -516,6 +509,14 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   inline kj::StringPtr getStderrPrefix() const {
     return loggingOptions.stderrPrefix;
+  }
+
+  // Used by the console decorators (see Worker::setupContext) to read the logging options on
+  // every console.* call, rather than capturing them at context-setup time.
+  // The decorator is a plain static callback with no captured state so it can be embedded in a V8
+  // snapshot, so it has to recover the options from the isolate at call time.
+  inline const LoggingOptions& getLoggingOptions() const {
+    return loggingOptions;
   }
 
   // Represents a weak reference back to the isolate that code within the isolate can use as an
