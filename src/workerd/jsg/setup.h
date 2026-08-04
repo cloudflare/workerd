@@ -440,6 +440,24 @@ class IsolateBase {
     return false;
   }
 
+  // Pins `data` into the snapshot of `context` and returns its index, which the restored context
+  // later passes to extractOnceFromSnapshot(). Indices are assigned in call order.
+  // Only valid while preparing a snapshot; the caller is inside a handle scope.
+  size_t pinIntoSnapshot(v8::Local<v8::Context> context, v8::Local<v8::Data> data) {
+    return getSnapshotCreator()->AddData(context, data);
+  }
+
+  // Returns the object pinned into the snapshot of `context` under `index` by pinIntoSnapshot().
+  // V8 hands each pinned value out exactly once; asking for the same index again, or for an index
+  // nothing was pinned under, is a fatal error. Only valid when starting from a snapshot; the
+  // caller is inside a handle scope.
+  v8::Local<v8::Object> extractOnceFromSnapshot(v8::Local<v8::Context> context, size_t index) {
+    v8::Local<v8::Object> value;
+    KJ_REQUIRE(context->GetDataFromSnapshotOnce<v8::Object>(index).ToLocal(&value),
+        "no object pinned into the snapshot under this index", index);
+    return value;
+  }
+
   SnapshotArtifact& mutableSnapshotArtifact() {
     return *KJ_REQUIRE_NONNULL(snapshotConfig).get<MutableSnapshot>().artifact;
   }
@@ -486,6 +504,10 @@ class IsolateBase {
  private:
   template <typename TypeWrapper>
   friend class Isolate;
+
+  v8::SnapshotCreator* getSnapshotCreator() {
+    return KJ_ASSERT_NONNULL(snapshotCreator).get();
+  }
 
   static void buildEmbedderGraph(v8::Isolate* isolate, v8::EmbedderGraph* graph, void* data);
 
