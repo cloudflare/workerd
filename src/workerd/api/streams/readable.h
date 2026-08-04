@@ -16,11 +16,11 @@ class ReadableStreamBYOBReader;
 
 class ReaderImpl final {
 public:
-  ReaderImpl(ReadableStreamController::Reader& reader);
+  ReaderImpl(kj::Ptr<ReadableStreamController::Reader> reader);
 
   ~ReaderImpl() noexcept(false);
 
-  void attach(ReadableStreamController& controller, jsg::Promise<void> closedPromise);
+  void attach(jsg::Ref<ReadableStream> stream, jsg::Promise<void> closedPromise);
 
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason);
 
@@ -81,7 +81,7 @@ private:
       Released>;
 
   kj::Maybe<IoContext::Id> ioContext;
-  ReadableStreamController::Reader& reader;
+  kj::Ptr<ReadableStreamController::Reader> reader;
 
   ReaderState state;
 
@@ -126,7 +126,7 @@ public:
 
   // Internal API
 
-  void attach(ReadableStreamController& controller, jsg::Promise<void> closedPromise) override;
+  void attach(jsg::Ref<ReadableStream> stream, jsg::Promise<void> closedPromise) override;
 
   void detach() override;
 
@@ -201,7 +201,7 @@ public:
   // Internal API
 
   void attach(
-      ReadableStreamController& controller,
+      jsg::Ref<ReadableStream> stream,
       jsg::Promise<void> closedPromise) override;
 
   void detach() override;
@@ -247,11 +247,13 @@ class DrainingReader: public ReadableStreamController::Reader {
   bool isAttached() const;
 
   // ReadableStreamController::Reader interface
-  void attach(ReadableStreamController& controller, jsg::Promise<void> closedPromise) override;
+  void attach(jsg::Ref<ReadableStream> stream, jsg::Promise<void> closedPromise) override;
   void detach() override;
   bool isByteOriented() const override { return false; }
 
   void visitForGc(jsg::GcVisitor& visitor);
+
+  kj::Ptr<ReadableStreamController::Reader> getPtr() { return addPtrToThis(); }
 
  private:
   struct Initial {};

@@ -14,7 +14,6 @@ use jsg::Lock;
 use jsg::v8;
 use jsg::v8::ToLocalValue;
 use kj_rs::KjMaybe;
-use nix::libc;
 
 #[cxx::bridge(namespace = "workerd::rust::node_exceptions")]
 mod ffi {

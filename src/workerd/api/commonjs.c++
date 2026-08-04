@@ -7,6 +7,25 @@
 
 namespace workerd::api {
 
+namespace {
+// Renders a URL's pathname as a relative path suitable for kj::Path::parse(), which rejects
+// absolute paths. Not every pathname has a leading "/" to drop: a URL with an opaque path has
+// its opaque path as the pathname, so "opaque:foo" gives "foo" and "opaque:" gives "". Slicing
+// unconditionally would drop a meaningful character in the first case and, in the second,
+// underflow the length to SIZE_MAX
+//
+// TODO(soon): kj::Path::parse() requires a kj::StringPtr but the pathname is a
+// kj::ArrayPtr<const char>. We can avoid this copy by updating kj::Path::parse to also accept
+// a kj::ArrayPtr<const char>.
+kj::String pathnameAsRelativePath(const jsg::Url& url) {
+  auto pathname = url.getPathname();
+  if (pathname.size() > 0 && pathname.front() == '/') {
+    pathname = pathname.slice(1);
+  }
+  return kj::str(pathname);
+}
+}  // namespace
+
 CommonJsModuleContext::CommonJsModuleContext(jsg::Lock& js, kj::Path path)
     : module(js.alloc<CommonJsModuleObject>(js, path.toString(true))),
       pathOrSpecifier(kj::mv(path)),
@@ -95,11 +114,7 @@ kj::String CommonJsModuleContext::getFilename() const {
     KJ_CASE_ONEOF(specifier, jsg::Url) {
       // The specifier is a URL. We want to parse it as a path and
       // return just the filename portion.
-      // TODO(soon): kj::Path::parse() requires a kj::StringPtr but
-      // the path name here is a kj::ArrayPtr<const char>. We can
-      // avoid an extraneous copy here by updating kj::Path::parse
-      // to also accept a kj::ArrayPtr<const char>.
-      auto path = kj::str(specifier.getPathname().slice(1));
+      auto path = pathnameAsRelativePath(specifier);
       auto filename = kj::Path::parse(path).basename();
       return filename.toString(false);
     }
@@ -115,7 +130,7 @@ kj::String CommonJsModuleContext::getDirname() const {
     KJ_CASE_ONEOF(specifier, jsg::Url) {
       // The specifier is a URL. We want to parse it as a path and
       // return just the directory portion.
-      auto path = kj::str(specifier.getPathname().slice(1));
+      auto path = pathnameAsRelativePath(specifier);
       auto pathObj = kj::Path::parse(path);
       return pathObj.parent().toString(true);
     }

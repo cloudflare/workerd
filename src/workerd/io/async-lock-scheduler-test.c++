@@ -10,13 +10,13 @@
 
 #include <workerd/io/async-lock-scheduler.h>
 
-#include <time.h>
-
 #include <kj/test.h>
 #include <kj/thread.h>
 #include <kj/vector.h>
 
 #include <atomic>
+#include <chrono>
+#include <thread>
 
 namespace workerd {
 namespace {
@@ -73,10 +73,7 @@ class RecordingHooks final: public Queue::Hooks {
 void waitForLoad(const FakeResource& resource, uint target) {
   for (uint i = 0; i < 100000; ++i) {
     if (resource.getCurrentLoad() >= target) return;
-    struct timespec ts {
-      0, 100'000
-    };  // 100us
-    nanosleep(&ts, nullptr);
+    std::this_thread::sleep_for(std::chrono::microseconds(100));
   }
   KJ_FAIL_ASSERT(
       "timed out waiting for queue to reach expected load", target, resource.getCurrentLoad());

@@ -551,8 +551,8 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
   auto stdoutMode = getExecOutputMode(kj::mv(options.$stdout), "stdout");
   kj::String stderrMode;
   if (ptyEnabled) {
-    KJ_IF_SOME(stderr, options.$stderr) {
-      stderrMode = kj::mv(stderr);
+    KJ_IF_SOME(mode, options.$stderr) {
+      stderrMode = kj::mv(mode);
     } else {
       stderrMode = kj::str("combined");
     }

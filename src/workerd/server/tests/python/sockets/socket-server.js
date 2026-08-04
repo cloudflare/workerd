@@ -62,7 +62,17 @@ Zq+ggAjGTjKLo/tR37gabSUA20BKrpf5mqkMkoMRuBQ+aFdJmSNMZBR3z842nyE3
 -----END CERTIFICATE-----`,
 };
 
+function logSocketErrors(socket, label) {
+  // A client may close abruptly, but it's not an error we need to handle or a test failure
+  // just log it.
+  socket.on('error', (err) => {
+    console.log(`${label} socket error: ${err.code ?? err.message}`);
+  });
+}
+
 const server = net.createServer((socket) => {
+  logSocketErrors(socket, 'plain');
+
   let buffer = Buffer.alloc(0);
   let pendingCount = null;
 
@@ -140,6 +150,8 @@ server.listen(0, process.env.SIDECAR_HOSTNAME, () => {
 });
 
 const tlsServer = tls.createServer(tlsOptions, (socket) => {
+  logSocketErrors(socket, 'tls');
+
   let buffer = Buffer.alloc(0);
 
   socket.on('data', (data) => {
@@ -166,6 +178,8 @@ tlsServer.listen(0, TLS_HOSTNAME, () => {
 });
 
 const startTlsServer = net.createServer((socket) => {
+  logSocketErrors(socket, 'starttls');
+
   socket.write('HELLO\n');
 
   socket.once('data', (data) => {
@@ -180,6 +194,7 @@ const startTlsServer = net.createServer((socket) => {
         secureContext: tls.createSecureContext(tlsOptions),
         requestCert: false,
       });
+      logSocketErrors(tlsSocket, 'starttls-tls');
 
       let buffer = Buffer.alloc(0);
       tlsSocket.on('data', (tlsData) => {

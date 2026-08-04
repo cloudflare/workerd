@@ -92,9 +92,9 @@ class ReadableStreamInternalController: public ReadableStreamController {
     return !readState.is<Unlocked>();
   }
 
-  bool lockReader(jsg::Lock& js, Reader& reader) override;
+  bool lockReader(jsg::Lock& js, kj::Ptr<Reader> reader) override;
 
-  void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
+  void releaseReader(kj::Ptr<Reader> reader, kj::Maybe<jsg::Lock&> maybeJs) override;
   // See the comment for releaseReader in common.h for details on the use of maybeJs
 
   kj::Maybe<PipeController&> tryPipeLock() override;

@@ -721,6 +721,12 @@ wd_test(
 )
 
 wd_test(
+    src = "autovuln-131-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-131-test.js"],
+)
+
+wd_test(
     src = "streams-no-auto-allocate-test.wd-test",
     args = ["--experimental"],
     data = ["streams-no-auto-allocate-test.js"],

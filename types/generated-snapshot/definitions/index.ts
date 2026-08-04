@@ -3911,18 +3911,25 @@ export interface ContainerExecOptions {
   env?: Record<string, string>;
   user?: string;
   signal?: AbortSignal;
+  pty?: boolean | ContainerExecPtyOptions;
   stdin?: ReadableStream | "pipe";
   stdout?: "pipe" | "ignore";
   stderr?: "pipe" | "ignore" | "combined";
+}
+export interface ContainerExecPtyOptions {
+  cols?: number;
+  rows?: number;
 }
 export interface ExecProcess {
   readonly stdin: WritableStream | null;
   readonly stdout: ReadableStream | null;
   readonly stderr: ReadableStream | null;
   readonly pid: number;
+  readonly isPty: boolean;
   readonly exitCode: Promise<number>;
   output(): Promise<ExecOutput>;
   kill(signal?: number): void;
+  resize(cols: number, rows: number): void;
 }
 export interface Container {
   get running(): boolean;
@@ -4487,6 +4494,7 @@ export interface Tracing {
     callback: (span: Span, ...args: A) => T,
     ...args: A
   ): T;
+  startSpan(name: string): Span;
   Span: typeof Span;
 }
 export declare abstract class Span {
@@ -16827,7 +16835,25 @@ export declare abstract class Workflow<PARAMS = unknown> {
   public createBatch(
     batch: WorkflowInstanceCreateOptions<PARAMS>[],
   ): Promise<WorkflowInstance[]>;
+  /**
+   * Delete a batch of Workflow instances and their stored state.
+   * `deleteBatch` is limited to 100 instances at a time. Duplicate IDs are deleted once.
+   * The result contains one entry for each input position; IDs that do not exist are returned as per-instance errors.
+   * @param instanceIds IDs of the Workflow instances to delete
+   * @returns A promise that resolves with the successfully deleted instances and any per-instance errors.
+   */
+  public deleteBatch(instanceIds: string[]): Promise<WorkflowBatchDeleteResult>;
 }
+export type WorkflowBatchDeleteResult = {
+  deleted: {
+    id: string;
+  }[];
+  errors: {
+    id: string;
+    code: number;
+    message: string;
+  }[];
+};
 export type WorkflowDurationLabel =
   | "second"
   | "minute"
@@ -16928,6 +16954,10 @@ export declare abstract class WorkflowInstance {
    * @param options Options for the restart, including an optional step to restart from.
    */
   public restart(options?: WorkflowInstanceRestartOptions): Promise<void>;
+  /**
+   * Delete the instance and its stored state.
+   */
+  public delete(): Promise<void>;
   /**
    * Returns the current status of the instance.
    */
