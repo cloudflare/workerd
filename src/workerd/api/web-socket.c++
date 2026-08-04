@@ -843,7 +843,14 @@ void LegacyWebSocketAdapter::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::
         break;
       }
       KJ_CASE_ONEOF(data, kj::Array<byte>) {
-        return kj::mv(data);
+        // `data` aliases the V8 BackingStore, which lives inside the V8
+        // sandbox, which may be MPK protected. The message is queued here and
+        // only framed and written by pump() on the kj event loop, without the
+        // MPK, which we get with the isolate lock. Copy while we still hold
+        // the lock. This also decouples the queued message from the
+        // BackingStore, so detaching the buffer after send() cannot change
+        // what gets sent.
+        return kj::heapArray(data.asPtr());
         break;
       }
     }
