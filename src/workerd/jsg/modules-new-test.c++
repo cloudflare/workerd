@@ -1868,6 +1868,85 @@ KJ_TEST("UNWRAP_DEFAULT returns namespace for bundle ESM, default for others") {
   });
 }
 
+KJ_TEST("REQUIRE_ESM rejects non-ESM entry points before evaluation") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+
+    auto esm = kj::str("export default 42;");
+    bundleBuilder.addEsmModule("main", esm);
+
+    auto json = kj::str("{\"key\": \"value\"}");
+    bundleBuilder.addSyntheticModule(
+        "data.json", Module::newJsonModuleHandler(json.first(json.size())));
+
+    // A CJS-style synthetic module whose evaluation would throw. REQUIRE_ESM must
+    // reject it before evaluation, so the throw must never run.
+    bool cjsEvaluated = false;
+    bundleBuilder.addSyntheticModule("cjs-boom",
+        [&cjsEvaluated](Lock& js, const jsg::Url& id, const Module::ModuleNamespace& ns,
+            const CompilationObserver&) -> bool {
+      cjsEvaluated = true;
+      js.v8Isolate->ThrowError(js.str("boom"_kj));
+      return false;
+    });
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    // An ESM entry point resolves normally with RequireEsm::YES.
+    JSG_TRY(js) {
+      auto val = KJ_ASSERT_NONNULL(ModuleRegistry::tryResolveModuleNamespace(js, "file:///main",
+          ResolveContext::Type::BUNDLE, ResolveContext::Source::INTERNAL, kj::none,
+          modules::UnwrapDefault::NO, RequireEsm::YES));
+      auto ns = KJ_ASSERT_NONNULL(val.tryCast<JsObject>());
+      KJ_ASSERT(!ns.get(js, "default").isUndefined());
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
+
+    // A synthetic (JSON) entry point is rejected with the same TypeError the legacy
+    // registry produces ("Main module must be an ES module.").
+    JSG_TRY(js) {
+      ModuleRegistry::tryResolveModuleNamespace(js, "file:///data.json",
+          ResolveContext::Type::BUNDLE, ResolveContext::Source::INTERNAL, kj::none,
+          modules::UnwrapDefault::NO, RequireEsm::YES);
+      KJ_FAIL_ASSERT("resolving a JSON module with RequireEsm::YES should have thrown");
+    }
+    JSG_CATCH(exception) {
+      auto str = kj::str(JsValue(exception.getHandle(js)));
+      KJ_ASSERT(str == "TypeError: Main module must be an ES module.", str);
+    }
+
+    // The rejection happens before evaluation: the CJS module's evaluation
+    // callback must not have run.
+    JSG_TRY(js) {
+      ModuleRegistry::tryResolveModuleNamespace(js, "file:///cjs-boom",
+          ResolveContext::Type::BUNDLE, ResolveContext::Source::INTERNAL, kj::none,
+          modules::UnwrapDefault::NO, RequireEsm::YES);
+      KJ_FAIL_ASSERT("resolving a CJS module with RequireEsm::YES should have thrown");
+    }
+    JSG_CATCH(exception) {
+      auto str = kj::str(JsValue(exception.getHandle(js)));
+      KJ_ASSERT(str == "TypeError: Main module must be an ES module.", str);
+    }
+    KJ_ASSERT(!cjsEvaluated);
+
+    // Without RequireEsm, the same synthetic module resolves normally.
+    JSG_TRY(js) {
+      auto val = KJ_ASSERT_NONNULL(ModuleRegistry::tryResolveModuleNamespace(
+          js, "file:///data.json", ResolveContext::Type::BUNDLE));
+      auto ns = KJ_ASSERT_NONNULL(val.tryCast<JsObject>());
+      KJ_ASSERT(!ns.get(js, "default").isUndefined());
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
+  });
+}
+
 // ======================================================================================
 KJ_TEST("Resolution occurs relative to the referrer") {
 

@@ -435,8 +435,9 @@ kj::Maybe<JsObject> Lock::resolvePublicBuiltinModule(kj::StringPtr specifier) {
 kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier, RequireEsm requireEsm) {
   auto& isolate = IsolateBase::from(v8Isolate);
   if (isolate.isUsingNewModuleRegistry()) {
-    return jsg::modules::ModuleRegistry::tryResolveModuleNamespace(
-        *this, specifier, jsg::modules::ResolveContext::Type::BUNDLE)
+    return jsg::modules::ModuleRegistry::tryResolveModuleNamespace(*this, specifier,
+        jsg::modules::ResolveContext::Type::BUNDLE, jsg::modules::ResolveContext::Source::INTERNAL,
+        kj::none, jsg::modules::UnwrapDefault::NO, requireEsm)
         .map([](JsValue val) { return KJ_ASSERT_NONNULL(val.tryCast<JsObject>()); });
   }
 

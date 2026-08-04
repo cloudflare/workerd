@@ -128,19 +128,18 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
     }
 
     jsg::modules::ModuleBundle::BundleBuilder bundleBuilder(bundleBase);
-    bool firstEsm = true;
     using namespace workerd::api::pyodide;
 
     for (auto& def: source.modules) {
       KJ_SWITCH_ONEOF(def.content) {
         KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
           jsg::modules::Module::Flags flags = jsg::modules::Module::Flags::ESM;
-          // Only the first ESM module we encounter is the main module.
-          // This should also be the first module in the list but we're
-          // not enforcing that here.
-          if (firstEsm) {
+          // The configured entry-point module gets the MAIN flag (import.meta.main).
+          // Entry points are required to be ESM (enforced at resolution via
+          // RequireOption::REQUIRE_ESM), so a non-ESM main module never receives
+          // the flag here; the worker fails at startup instead.
+          if (def.name == source.mainModule) {
             flags = flags | jsg::modules::Module::Flags::MAIN;
-            firstEsm = false;
           }
           if (content.ownBody != kj::none) {
             // When the source is owned (e.g. transpiled TypeScript), we must

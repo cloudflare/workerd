@@ -679,6 +679,12 @@ class IsolateModuleRegistry final {
     // default export (module.exports for CJS, default export for ESM builtins,
     // parsed value for JSON, etc.).
     UNWRAP_DEFAULT = 1 << 2,
+    // When set, the resolved module must be an ECMAScript module; anything else
+    // (CommonJS, JSON, text, wasm, and other synthetic modules) is rejected with
+    // a TypeError before evaluation. Used for worker entry-point modules, which
+    // must always be ESM. The error type and message match the legacy registry's
+    // check so behavior does not fork between the two implementations.
+    REQUIRE_ESM = 1 << 3,
   };
 
   friend constexpr RequireOption operator|(RequireOption a, RequireOption b) {
@@ -739,6 +745,13 @@ class IsolateModuleRegistry final {
         [](Lock& js, v8::Local<v8::Module> module, const Module& moduleDef, const Url& id,
             const CompilationObserver& observer, const Module::Evaluator& maybeEvaluate,
             RequireOption option) -> v8::MaybeLocal<v8::Value> {
+      // Entry-point modules must be ESM. Checked before any evaluation (and before
+      // propagating a prior evaluation error) because it reflects a static property
+      // of the module, matching the legacy registry's ordering and exact error.
+      if ((option & RequireOption::REQUIRE_ESM) == RequireOption::REQUIRE_ESM) {
+        JSG_REQUIRE(moduleDef.isEsm(), TypeError, "Main module must be an ES module.");
+      }
+
       auto status = module->GetStatus();
 
       // If status is kErrored, that means a prior attempt to evaluate the module
@@ -1968,7 +1981,8 @@ kj::Maybe<JsValue> ModuleRegistry::tryResolveModuleNamespace(Lock& js,
     ResolveContext::Type type,
     ResolveContext::Source source,
     kj::Maybe<const Url&> maybeReferrer,
-    UnwrapDefault unwrapDefault) {
+    UnwrapDefault unwrapDefault,
+    RequireEsm requireEsm) {
   auto& bound = IsolateModuleRegistry::from(js.v8Isolate);
   const Url& base = maybeReferrer.orDefault(bound.getBundleBase());
   // The specifier arrives straight from user code on the require() paths (CommonJS
@@ -2000,6 +2014,9 @@ kj::Maybe<JsValue> ModuleRegistry::tryResolveModuleNamespace(Lock& js,
   }
   if (unwrapDefault == UnwrapDefault::YES) {
     option = option | IsolateModuleRegistry::RequireOption::UNWRAP_DEFAULT;
+  }
+  if (requireEsm == RequireEsm::YES) {
+    option = option | IsolateModuleRegistry::RequireOption::REQUIRE_ESM;
   }
 
   auto ns = bound.require(js, context, option);

@@ -733,12 +733,16 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
   // JsExceptionThrown exception if an error occurs while the module is being evaluated.
   // Modules resolved with this method must be capable of fully evaluating within one
   // drain of the microtask queue.
+  // When requireEsm is YES, a resolved module that is not an ECMAScript module is
+  // rejected with a TypeError before evaluation. This is used for worker entry-point
+  // modules, which must always be ESM.
   static kj::Maybe<JsValue> tryResolveModuleNamespace(Lock& js,
       kj::StringPtr specifier,
       ResolveContext::Type type = ResolveContext::Type::BUNDLE,
       ResolveContext::Source source = ResolveContext::Source::INTERNAL,
       kj::Maybe<const Url&> maybeReferrer = kj::none,
-      UnwrapDefault unwrapDefault = UnwrapDefault::NO);
+      UnwrapDefault unwrapDefault = UnwrapDefault::NO,
+      RequireEsm requireEsm = RequireEsm::NO);
 
   // The constructor is public because kj::heap requires is to be. Do not
   // use the constructor directly. Use the ModuleRegistry::Builder
