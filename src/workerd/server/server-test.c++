@@ -7319,5 +7319,290 @@ KJ_TEST("Server: DO facet abort during pending startup") {
   conn.recvHttp200("caught: aborted during startup");
 }
 
+KJ_TEST("Server: ctx.access from accessBlobHeader on Worker") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          accessBlobHeader = "MF-Access-Blob",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    if (!ctx.access) return new Response("no-access");
+                `    const identity = await ctx.access.getIdentity();
+                `    return new Response(JSON.stringify({
+                `      aud: ctx.access.aud,
+                `      identity: identity,
+                `    }));
+                `  }
+                `}
+            )
+          ],
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello",
+        http = ()
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+
+  // Request with access blob header — ctx.access should be populated.
+  conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"app_aud":"test-aud-12345","jwt_claims":{"email":"test@example.com"}}
+
+)"_kj);
+  conn.recvHttp200(R"({"aud":"test-aud-12345"})");
+
+  // Request without the header — ctx.access should be undefined.
+  conn.httpGet200("/", "no-access");
+}
+
+KJ_TEST("Server: ctx.access.getIdentity() dispatches to accessBindingService") {
+  // Exercises the full channel-based identity dispatch path with two workers:
+  //   - main-worker: has accessBlobHeader + accessBindingService configured
+  //   - access-binding: implements getIdentity via WorkerEntrypoint, reads ctx.props
+  //
+  // The request flow is: AccessHeaderExtractor parses the blob header into BlobAccessInfo,
+  // getIdentity() dispatches via Fetcher(channel), startSubrequest() intercepts the access
+  // binding channel and injects per-request props via forProps({aud, jwtClaims}), and the
+  // binding worker returns an identity object derived from ctx.props.
+  TestServer test(R"((
+    services = [
+      ( name = "main-worker",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          compatibilityFlags = ["experimental"],
+          accessBlobHeader = "MF-Access-Blob",
+          accessBindingService = (name = "access-binding", entrypoint = "AccessBinding"),
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    if (!ctx.access) return new Response("no-access");
+                `    const identity = await ctx.access.getIdentity();
+                `    return new Response(JSON.stringify({
+                `      aud: ctx.access.aud,
+                `      identity: identity,
+                `    }));
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+      ( name = "access-binding",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import {WorkerEntrypoint} from "cloudflare:workers";
+                `export default {
+                `  async fetch(request) {
+                `    return new Response("not used");
+                `  }
+                `}
+                `export class AccessBinding extends WorkerEntrypoint {
+                `  async getIdentity() {
+                `    return {
+                `      email: this.ctx.props.jwtClaims?.email ?? "unknown",
+                `      aud: this.ctx.props.aud,
+                `    };
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "main-worker",
+        http = ()
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+
+  // Request with access blob header + jwt_claims — getIdentity should return the identity.
+  conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"app_aud":"test-aud-99","jwt_claims":{"email":"user@example.com"}}
+
+)"_kj);
+  conn.recvHttp200(R"({"aud":"test-aud-99","identity":{"email":"user@example.com","aud":"test-aud-99"}})");
+
+  // Request with access blob header but no jwt_claims — getIdentity should still work,
+  // jwtClaims will be undefined in the binding worker's ctx.props.
+  conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"app_aud":"test-aud-42"}
+
+)"_kj);
+  conn.recvHttp200(R"({"aud":"test-aud-42","identity":{"email":"unknown","aud":"test-aud-42"}})");
+
+  // Request without the header — ctx.access should be undefined.
+  conn.httpGet200("/", "no-access");
+}
+
+KJ_TEST("Server: ctx.access is undefined without accessBlobHeader config") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2025-08-01",
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `export default {
+          `  async fetch(request, env, ctx) {
+          `    return new Response(String(ctx.access));
+          `  }
+          `}
+      )
+    ],
+  ))"_kj));
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "undefined");
+}
+
+KJ_TEST("Server: accessBlobHeader rejects malformed blobs") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          accessBlobHeader = "MF-Access-Blob",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    return new Response("should not reach here");
+                `  }
+                `}
+            )
+          ],
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello",
+        http = ()
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  // Each malformed blob should result in a 500 with Connection: close,
+  // so a new connection is needed for each case.
+
+  // Case 1: Invalid JSON syntax.
+  {
+    KJ_EXPECT_LOG(ERROR, "Uncaught exception");
+    auto conn = test.connect("test-addr");
+    conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: not-valid-json
+
+)"_kj);
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
+
+  // Case 2: Valid JSON but not an object.
+  {
+    KJ_EXPECT_LOG(ERROR, "accessBlobHeader value must be a JSON object");
+    auto conn = test.connect("test-addr");
+    conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: "just-a-string"
+
+)"_kj);
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
+
+  // Case 3: app_aud field is not a string.
+  {
+    KJ_EXPECT_LOG(ERROR, "access blob `app_aud` must be a string");
+    auto conn = test.connect("test-addr");
+    conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"app_aud":123}
+
+)"_kj);
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
+
+  // Case 4: Missing app_aud field entirely.
+  {
+    KJ_EXPECT_LOG(ERROR, "accessBlobHeader JSON must contain an `app_aud` field");
+    auto conn = test.connect("test-addr");
+    conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"jwt_claims":{"email":"test@example.com"}}
+
+)"_kj);
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
+
+  // Case 5: jwt_claims field is not an object.
+  {
+    KJ_EXPECT_LOG(ERROR, "access blob `jwt_claims` must be a JSON object");
+    auto conn = test.connect("test-addr");
+    conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"app_aud":"valid-aud","jwt_claims":"not-an-object"}
+
+)"_kj);
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
+}
+
 }  // namespace
 }  // namespace workerd::server
