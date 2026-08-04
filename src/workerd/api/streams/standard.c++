@@ -2695,10 +2695,8 @@ jsg::Promise<void> ReadableStreamJsController::cancel(
         if (!js.v8Isolate->IsExecutionTerminating()) {
           if (state.is<StreamStates::Closed>()) {
             lock.onClose(js);
-          } else if (state.is<StreamStates::Errored>()) {
-            KJ_IF_SOME(err, state.tryGetUnsafe<StreamStates::Errored>()) {
-              lock.onError(js, err.getHandle(js));
-            }
+          } else if (state.isErrored()) {
+            lock.onError(js, state.getErrorUnsafe().getHandle(js));
           }
         }
       } else {
