@@ -1200,9 +1200,11 @@ namespace {
 void compileGlobals(jsg::Lock& lock,
     const Worker::Api& api,
     kj::ArrayPtr<const uint64_t> words,
-    v8::Local<v8::Object> target) {
+    v8::Local<v8::Object> target,
+    ApplySnapshotFilter applySnapshotFilter = ApplySnapshotFilter::YES) {
   capnp::FlatArrayMessageReader reader(asWords(words), CONFIG_READER_OPTIONS);
-  WorkerdApi::from(api).compileGlobals(lock, reader.getRoot<Globals>().getGlobals(), target);
+  WorkerdApi::from(api).compileGlobals(
+      lock, reader.getRoot<Globals>().getGlobals(), target, applySnapshotFilter);
 }
 
 }  // namespace
@@ -1759,8 +1761,11 @@ void worker_set_ctx_exports(const CompiledWorker& worker, ::rust::Slice<const ui
       Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) {
     KJ_IF_SOME(handle, impl.ctxExportsHandle) {
       JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
+        // ctx.exports are fresh loopback entrypoint stubs built for the real Worker; they are
+        // never part of the zygote snapshot, so opt out of the snapshot binding filter (which
+        // would otherwise strip all non-deferred bindings in START_FROM_SNAPSHOT mode).
         compileGlobals(lock, impl.getWorker().getIsolate().getApi(), kj::from<Rust>(globals),
-            handle.getHandle(js));
+            handle.getHandle(js), ApplySnapshotFilter::NO);
       });
     }
     // The handle is dropped now, under the lock.
