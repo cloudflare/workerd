@@ -450,7 +450,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadataImp
 
     if (typeName == "stream") {
       result = js.resolvedPromise(
-          KvNamespace::GetResult(js.alloc<ReadableStream>(context, kj::mv(stream))));
+          KvNamespace::GetResult(JsReadableStream::create(js, context, kj::mv(stream))));
     } else if (typeName == "text") {
       // NOTE: In theory we should be using awaitIoLegacy() here since ReadableStreamSource is
       //   supposed to handle pending events on its own, but we also know that the HTTP client
@@ -651,8 +651,8 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
         expectedBodySize = static_cast<uint64_t>(data.size());
         traceContext.setTag("cloudflare.kv.query.value_type"_kjc, "ArrayBuffer"_kjc);
       }
-      KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
-        expectedBodySize = stream->tryGetLength(StreamEncoding::IDENTITY);
+      KJ_CASE_ONEOF(stream, JsReadableStream) {
+        expectedBodySize = stream.tryGetLength(js, StreamEncoding::IDENTITY);
         traceContext.setTag("cloudflare.kv.query.value_type"_kjc, "ReadableStream"_kjc);
       }
     }
@@ -680,12 +680,12 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
         KJ_CASE_ONEOF(data, kj::Array<byte>) {
           writePromise = req.body->write(data).attach(kj::mv(data));
         }
-        KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
+        KJ_CASE_ONEOF(stream, JsReadableStream) {
           writePromise = context.run(
               [dest = newSystemStream(kj::mv(req.body), StreamEncoding::IDENTITY, context),
                   stream = kj::mv(stream)](jsg::Lock& js) mutable {
             return IoContext::current().waitForDeferredProxy(
-                stream->pumpTo(js, kj::mv(dest), true));
+                stream.pumpTo(js, kj::mv(dest), EndStream::YES));
           });
         }
       }

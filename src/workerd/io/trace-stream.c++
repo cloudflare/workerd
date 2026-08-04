@@ -40,6 +40,7 @@ namespace {
   V(EMAIL, "email")                                                                                \
   V(ENTRYPOINT, "entrypoint")                                                                      \
   V(ERROR, "error")                                                                                \
+  V(ERRORINFO, "errorInfo")                                                                        \
   V(EVENT, "event")                                                                                \
   V(EXCEEDEDCPU, "exceededCpu")                                                                    \
   V(EXCEEDEDMEMORY, "exceededMemory")                                                              \
@@ -522,6 +523,24 @@ jsg::JsValue ToJs(jsg::Lock& js, const Log& log, StringCache& cache) {
   obj.set(js, LEVEL_STR, ToJs(js, log.logLevel, cache));
   // TODO(o11y): Check that we are always returning an object here
   obj.set(js, MESSAGE_STR, jsg::JsValue(js.parseJson(log.message).getHandle(js)));
+  KJ_IF_SOME(slots, log.errorInfo) {
+    // Emit as a positional JS array: each slot is either { name, message, stack? }
+    // for arguments that were native Errors, or `null` for non-Error arguments.
+    auto arr = js.arr(
+        slots.asPtr(), [&cache](jsg::Lock& js, const kj::Maybe<ErrorInfo>& slot) -> jsg::JsValue {
+      KJ_IF_SOME(info, slot) {
+        auto errObj = js.obj();
+        errObj.set(js, NAME_STR, cache.get(js, info.name));
+        errObj.set(js, MESSAGE_STR, js.str(info.message));
+        KJ_IF_SOME(stack, info.stack) {
+          errObj.set(js, STACK_STR, js.str(stack));
+        }
+        return errObj;
+      }
+      return js.null();
+    });
+    obj.set(js, ERRORINFO_STR, arr);
+  }
   return obj;
 }
 
@@ -670,8 +689,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     // we throw a DISCONNECTED exception: this keeps it out of Sentry (see isInterestingException())
     // and lets the source side treat it as the peer simply going away.
     IoContext& ioContext = ([&]() -> IoContext& {
-      KJ_IF_SOME(ctx, weakIoContext->tryGet()) {
-        return ctx;
+      KJ_IF_SOME(ctx, weakIoContext) {
+        return *ctx;
       }
       kj::throwFatalException(KJ_EXCEPTION(DISCONNECTED,
           "The destination object for this tail session no longer exists.", doneReceiving));
@@ -684,9 +703,10 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     // exception handler.
     auto sharedResults = kj::rc<SharedResults>(reportContext.initResults());
 
-    auto promise = ioContext.run([this, &ioContext, sharedResults = sharedResults.addRef(),
-                                     reportContext, ownReportContext = ownReportContext->addRef()](
-                                     Worker::Lock& lock) mutable -> kj::Promise<void> {
+    auto promise =
+        ioContext.run([this, sharedResults = sharedResults.addRef(), reportContext,
+                          ownReportContext = ownReportContext->addRef()](
+                          Worker::Lock& lock, IoContext& ioContext) mutable -> kj::Promise<void> {
       auto params = reportContext.getParams();
       KJ_ASSERT(params.hasEvents(), "Events are required.");
       auto eventReaders = params.getEvents();
@@ -711,8 +731,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       })();
 
       if (ioContext.hasOutputGate()) {
-        return result.then([weakIoContext = weakIoContext->addRef()]() mutable {
-          return KJ_REQUIRE_NONNULL(weakIoContext->tryGet()).waitForOutputLocks();
+        return result.then([weakIoContext = weakIoContext.addRef()]() mutable {
+          return KJ_REQUIRE_NONNULL(weakIoContext)->waitForOutputLocks();
         });
       } else {
         return kj::mv(result);
@@ -977,7 +997,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     return kj::READY_NOW;
   }
 
-  kj::Own<IoContext::WeakRef> weakIoContext;
+  kj::WeakRc<IoContext> weakIoContext;
   kj::Maybe<kj::StringPtr> entrypointNamePtr;
   kj::Maybe<Worker::VersionInfo> versionInfo;
   Frankenvalue props;

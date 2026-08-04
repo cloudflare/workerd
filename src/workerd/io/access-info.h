@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <kj/async.h>
+#include <kj/common.h>
 #include <kj/refcount.h>
 #include <kj/string.h>
 
@@ -31,10 +31,18 @@ class AccessInfo: public kj::Refcounted {
   // The audience claim from the Access JWT. Stable for the lifetime of the request.
   virtual kj::StringPtr getAudience() = 0;
 
-  // Fetches the full identity information for the authenticated user, equivalent to calling
-  // /cdn-cgi/access/get-identity. The returned string is a JSON document; `kj::none` indicates
-  // no identity is available (e.g. service-token authentication).
-  virtual kj::Promise<kj::Maybe<kj::String>> getIdentity() = 0;
+  // Returns the subrequest channel index for the Access "binding worker", on which workerd invokes
+  // the `getIdentity` JS-RPC method (via a `Fetcher`) to fetch the authenticated user's full
+  // identity (equivalent to calling /cdn-cgi/access/get-identity).
+  //
+  // Returns `kj::none` when no identity service is available for this request (e.g. service-token
+  // authentication, or the embedder has no channel configured), in which case
+  // `ctx.access.getIdentity()` resolves to `undefined`.
+  //
+  // This boundary is deliberately narrow: the embedder is responsible only for *routing* a channel
+  // to the Access binding worker (e.g. via a per-request channel token), while workerd owns the
+  // JS-RPC dispatch and result handling.
+  virtual kj::Maybe<kj::uint> getIdentityServiceChannel() = 0;
 };
 
 }  // namespace workerd

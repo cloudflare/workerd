@@ -38,10 +38,10 @@ index 7a0838bb84d985467fd495e5b5fd10764bf82bf0..25f1d670094ec2f43739c992314fc474
    indexed_interceptor: InterceptorInfo;
  }
 diff --git a/src/objects/map.h b/src/objects/map.h
-index 6b2c8e6acf7c1aa4f428af0ffce7cbb0da95c71d..0750c476a422034da005a2f65fd31f2c8aadfb38 100644
+index b907c3ddc112618f40480e06b314213587b90e1c..9eb229400c8d29e84e1b599c14ffa6224aaa7b40 100644
 --- a/src/objects/map.h
 +++ b/src/objects/map.h
-@@ -1285,7 +1285,8 @@ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
+@@ -1290,7 +1290,8 @@ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
    static const int kStartOfStrongExtendedFieldsOffset;
  
    std::atomic<uint8_t> bit_field_ex_;
@@ -52,10 +52,10 @@ index 6b2c8e6acf7c1aa4f428af0ffce7cbb0da95c71d..0750c476a422034da005a2f65fd31f2c
  
  constexpr int ExtendedMapSizeForKind(ExtendedMapKind kind);
 diff --git a/src/objects/map.tq b/src/objects/map.tq
-index a32cb5bdc32ecfe48a0b885b900acefcf763767c..e34b51ae8b01e6683fd7d599001b1baf81f8c95b 100644
+index cb85e7788e6a38116fc690341ca51f6288869247..687c95966d88c31b48ff3cb045c452762b2af237 100644
 --- a/src/objects/map.tq
 +++ b/src/objects/map.tq
-@@ -113,7 +113,9 @@ bitfield struct ExtendedMapBitFields extends uint8 {
+@@ -116,7 +116,9 @@ bitfield struct ExtendedMapBitFields extends uint8 {
  @doNotGenerateCast
  extern class ExtendedMap extends Map {
    bit_field_ex: ExtendedMapBitFields;

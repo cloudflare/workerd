@@ -12,6 +12,7 @@ import {
   RpcTarget,
   ServiceStub,
 } from 'cloudflare:workers';
+import { connect } from 'cloudflare:sockets';
 
 try {
   waitUntil(null);
@@ -572,6 +573,10 @@ export class MyActor extends DurableObject {
   async increment(amount) {
     this.#counter += amount;
     return this.#counter;
+  }
+
+  async throwingMethod() {
+    throw new Error('ACTOR METHOD THREW');
   }
 
   async doCallbackBlockingConcurrency() {
@@ -1819,6 +1824,28 @@ export let testExceptionProperties = {
   },
 };
 
+export let testDurableObjectExceptionProperties = {
+  async test(controller, env, ctx) {
+    let id = env.MyActor.idFromName('exception-properties');
+    try {
+      await env.MyActor.get(id).throwingMethod();
+      assert.fail('expected actor RPC to throw');
+    } catch (e) {
+      assert.strictEqual(e.remote, true);
+      assert.strictEqual(e.message, 'ACTOR METHOD THREW');
+      assert.strictEqual(e.durableObjectId, id.toString());
+    }
+
+    try {
+      await env.MyService.throwingMethod();
+      assert.fail('expected service RPC to throw');
+    } catch (e) {
+      assert.strictEqual(e.remote, true);
+      assert.strictEqual(e.durableObjectId, undefined);
+    }
+  },
+};
+
 // Test that get(), put(), and delete() are valid RPC method names, not hijacked by Fetcher.
 export let canUseGetPutDelete = {
   async test(controller, env, ctx) {
@@ -2134,6 +2161,16 @@ export class Greeter extends WorkerEntrypoint {
   async greet(name) {
     return `${this.ctx.props.greeting}, ${name}!`;
   }
+  // Expose ctx.mapVirtualHost to callers so we can test it on fetchers received over RPC.
+  async mapVirtualHost(fetcher, port) {
+    return this.ctx.mapVirtualHost(fetcher, port);
+  }
+
+  // Make an RPC call through the provided fetcher to verify it still works after being mapped
+  // (or after being received over RPC).
+  async greetThrough(fetcher) {
+    return await fetcher.greet('foo');
+  }
 }
 
 export class GreeterFactory extends WorkerEntrypoint {
@@ -2200,7 +2237,7 @@ export let eOrderTest = {
 // Unbounded JsRpcProperty parent chain causes native stack overflow
 // (SIGSEGV) on destruction. Building a deep chain of pipelined
 // property accesses must be rejected once the depth exceeds
-// MAX_PROPERTY_DEPTH (5120).
+// MAX_PROPERTY_DEPTH (64).
 export let stubDepthLimitTest = {
   async test() {
     // Create a local RPC stub wrapping a plain object.
@@ -2210,12 +2247,12 @@ export let stubDepthLimitTest = {
     // this would create an unbounded linked list of native
     // JsRpcProperty objects whose recursive destruction overflows
     // the native stack. After the fix, getProperty() throws a
-    // TypeError once depth >= 5120.
+    // TypeError once depth >= 64.
     let p = stub;
     let threw = false;
     let depthReached = 0;
     try {
-      for (let i = 0; i < 10000; i++) {
+      for (let i = 0; i < 100; i++) {
         p = p.x;
         depthReached = i + 1;
       }
@@ -2236,16 +2273,69 @@ export let stubDepthLimitTest = {
       'Expected TypeError to be thrown at depth limit, ' +
         `but reached depth ${depthReached} without error`
     );
-    // The depth limit is 5120, so we should have reached at least 5120
+    // The depth limit is 64, so we should have reached at least 64
     // before the throw.
     assert.ok(
-      depthReached >= 5120,
-      `Expected to reach at least depth 5120, only reached ${depthReached}`
+      depthReached >= 64,
+      `Expected to reach at least depth 64, only reached ${depthReached}`
     );
-    // And we should NOT have reached 10000 (the full loop).
+    // And we should NOT have reached 100 (the full loop).
     assert.ok(
-      depthReached < 10000,
-      'Should not have reached depth 10000 without error'
+      depthReached < 100,
+      'Should not have reached depth 100 without error'
     );
+  },
+};
+
+// Test connection string override via mapVirtualHost().
+export let mapVirtualHostIdempotent = {
+  async test(controller, env, ctx) {
+    let host1 = ctx.mapVirtualHost(env.MyService, 5432);
+    assert.ok(typeof host1 === 'string');
+    // Overrides that are first created using mapVirtualHost() always use .workers.alt.
+    assert.match(host1, /^[0-9a-f]{32}\.workers\.alt:5432$/);
+
+    // Once the override is installed, it doesn't change in future calls.
+    let host2 = ctx.mapVirtualHost(env.MyService, 1234);
+    assert.strictEqual(host1, host2);
+
+    // Different fetchers should be assigned distinct virtual hosts.
+    let host3 = ctx.mapVirtualHost(env.self, 5432);
+    assert.notStrictEqual(host1, host3);
+  },
+};
+
+export let mapVirtualHostConnect = {
+  async test(controller, env, ctx) {
+    // Test that we can connect to the magic host obtained via mapVirtualHost().
+    let magicHost = ctx.mapVirtualHost(env.MyService, 5432);
+    assert.ok(typeof magicHost === 'string');
+    assert.match(magicHost, /^[0-9a-f]{32}\.workers\.alt:5432$/);
+
+    let socket = await connect(magicHost);
+    await socket.opened;
+    const dec = new TextDecoder();
+    let result = '';
+    for await (const chunk of socket.readable) {
+      result += dec.decode(chunk, { stream: true });
+    }
+    result += dec.decode();
+    assert.strictEqual(result, 'hello');
+    await socket.closed;
+  },
+};
+
+export let mapVirtualHostSerialization = {
+  async test(controller, env, ctx) {
+    // A fetcher with a connection-string override can still be serialized over RPC and remains
+    // usable for RPC on the other side.
+    let greeter = await env.GreeterFactory.makeGreeter('Yo');
+    let magicHost = ctx.mapVirtualHost(greeter, 5432);
+    assert.strictEqual(await greeter.greetThrough(greeter), 'Yo, foo!');
+
+    // A fetcher that was serialized and passed over jsRpc does not remember the magic host it was
+    // set up with before
+    let magicHostSerial = await greeter.mapVirtualHost(greeter, 5432);
+    assert.notStrictEqual(magicHost, magicHostSerial);
   },
 };

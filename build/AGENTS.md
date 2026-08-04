@@ -74,7 +74,7 @@ supports this:
 
 1. Add the check to `.clang-tidy` Checks list
 2. Add an entry to `CHECK_PATH_FILTERS` with an empty list (runs nowhere)
-3. Add packages as they are cleaned up
+3. Add file paths as they are cleaned up
 4. Remove the entry once fully rolled out (runs everywhere)
 
 Example:
@@ -82,14 +82,14 @@ Example:
 ```python
 CHECK_PATH_FILTERS = {
     "workerd-unsafe-continuation-capture": [
-        "//src/workerd/io",
-        "//src/workerd/api",
+        "src/workerd/io",
+        "src/workerd/api",
     ],
 }
 ```
 
-Package prefixes match themselves and all subpackages (`//src/workerd/io`
-matches `//src/workerd/io:*` and `//src/workerd/io/subdir:*`).
+Path prefixes match all files under that directory (`src/workerd/io`
+matches `src/workerd/io/foo.c++` and `src/workerd/io/subdir/bar.c++`).
 
 To run a filtered check everywhere during development:
 

@@ -166,7 +166,7 @@ class EncodedAsyncOutputStream final: public WritableStreamSink {
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override;
 
   kj::Maybe<kj::Promise<DeferredProxy<void>>> tryPumpFrom(
-      ReadableStreamSource& input, bool end) override;
+      kj::Ptr<ReadableStreamSource> input, bool end) override;
 
   kj::Promise<void> end() override;
 
@@ -224,7 +224,7 @@ kj::Promise<void> EncodedAsyncOutputStream::write(
 }
 
 kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFrom(
-    ReadableStreamSource& input, bool end) {
+    kj::Ptr<ReadableStreamSource> input, bool end) {
 
   // If this output stream has already been ended, then there's nothing more to
   // pump into it, just return an immediately resolved promise. Alternatively
@@ -233,7 +233,7 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
     return kj::Promise<DeferredProxy<void>>(DeferredProxy<void>{kj::READY_NOW});
   }
 
-  KJ_IF_SOME(nativeInput, kj::dynamicDowncastIfAvailable<EncodedAsyncInputStream>(input)) {
+  KJ_IF_SOME(nativeInput, kj::dynamicDowncastIfAvailable<EncodedAsyncInputStream>(*input.get())) {
     // We can avoid putting our inner streams into identity encoding if the input and output both
     // have the same encoding. Since ReadableStreamSource/WritableStreamSink always pump everything
     // (there is no `amount` parameter like in the KJ equivalents), we can assume that we will

@@ -44,6 +44,10 @@ enum class AutogateKey {
   // Gate for the Durable Object fetch-retries feature, scoped to DO `fetch()`. Enables the
   // retry-token claim machinery.
   DURABLE_OBJECT_RETRIES_FETCH,
+  // When enabled, the native `node-internal:url` module is provided by the Rust
+  // implementation (api::node UrlUtil ported to src/rust/api) instead of the
+  // C++ implementation. The C++ implementation is retained for rollback.
+  NODEJS_URL_RUST,
   NumOfKeys  // Reserved for iteration.
 };
 

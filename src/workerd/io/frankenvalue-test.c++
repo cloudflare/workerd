@@ -190,6 +190,57 @@ KJ_TEST("Frankenvalue capability value") {
   });
 }
 
+KJ_TEST("Frankenvalue bytes value") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+
+  e.run([&](auto& lock) {
+    jsg::Lock& js = lock;
+
+    static constexpr kj::byte kBytes[] = {0x01, 0x02, 0x03, 0x04, 0xff};
+    auto bytesPtr = kj::arrayPtr(kBytes);
+
+    // Construct a Frankenvalue via fromBytes(), then round-trip it through capnp and clone(),
+    // exercising the Bytes variant on the toCapnp / fromCapnp / clone paths.
+    auto value = Frankenvalue::fromBytes(kj::heapArray(bytesPtr));
+    KJ_EXPECT(value.estimateSize() == bytesPtr.size());
+
+    // estimateSize() includes stitched-in properties.
+    value.setProperty(kj::str("nested"), Frankenvalue::fromBytes(kj::heapArray(bytesPtr)));
+    KJ_EXPECT(value.estimateSize() == 2 * bytesPtr.size() + "nested"_kjc.size());
+
+    // Round-trip through capnp.
+    {
+      capnp::MallocMessageBuilder message;
+      auto builder = message.initRoot<rpc::Frankenvalue>();
+      value.toCapnp(builder);
+
+      // Sanity-check the on-wire representation: root and nested are both arrayBuffer variants.
+      auto reader = builder.asReader();
+      KJ_EXPECT(reader.which() == rpc::Frankenvalue::ARRAY_BUFFER);
+      KJ_EXPECT(reader.getArrayBuffer().asChars() == bytesPtr.asChars());
+      KJ_EXPECT(reader.getProperties().size() == 1);
+      KJ_EXPECT(reader.getProperties()[0].which() == rpc::Frankenvalue::ARRAY_BUFFER);
+
+      value = Frankenvalue::fromCapnp(reader);
+    }
+
+    // Exercise clone().
+    value = value.clone();
+
+    // toJs() produces an ArrayBuffer holding the original bytes; the nested property is an
+    // ArrayBuffer on `nested`.
+    auto jsValue = value.toJs(js);
+    v8::Local<v8::Value> v8Value = jsValue;
+    KJ_ASSERT(v8Value->IsObject());
+    auto obj = v8Value.As<v8::Object>();
+    auto nested = jsg::check(obj->Get(js.v8Context(), js.str("nested"_kj)));
+    KJ_ASSERT(nested->IsArrayBuffer());
+    auto nestedBuf = nested.As<v8::ArrayBuffer>();
+    KJ_EXPECT(nestedBuf->ByteLength() == bytesPtr.size());
+    KJ_EXPECT(memcmp(nestedBuf->Data(), bytesPtr.begin(), bytesPtr.size()) == 0);
+  });
+}
+
 KJ_TEST("Frankenvalue fromCapnp rejects capability index out of range") {
   // Security: a `capability` value must not reference a cap table index beyond this node's base
   // caps, or toJs() would read out of bounds.

@@ -227,7 +227,7 @@ class Rewriter final: public WritableStreamSink {
   // Implementation for `Element::onEndTag` to avoid exposing private details of Rewriter.
   void onEndTag(lol_html_element_t* element, ElementCallbackFunction&& callback);
 
-  lol_html_streaming_handler_t registerReplacer(jsg::Ref<ReadableStream> content, bool isHtml);
+  lol_html_streaming_handler_t registerReplacer(JsReadableStream content, bool isHtml);
 
   ~Rewriter() {
     KJ_ASSERT(registeredReplacers.size() == 0, "Some replacers were leaked by lol-html");
@@ -272,7 +272,7 @@ class Rewriter final: public WritableStreamSink {
    public:
     Rewriter& rewriter;
     bool isHtml;
-    jsg::Ref<ReadableStream> stream;
+    JsReadableStream stream;
   };
 
   struct RegisteredHandler {
@@ -621,8 +621,7 @@ kj::Promise<void> Rewriter::thunkPromise(CType* content, RegisteredHandler& regi
   });
 }
 
-lol_html_streaming_handler_t Rewriter::registerReplacer(
-    jsg::Ref<ReadableStream> content, bool isHtml) {
+lol_html_streaming_handler_t Rewriter::registerReplacer(JsReadableStream content, bool isHtml) {
   auto replacer = kj::heap<RegisteredReplacer>(*this, isHtml, kj::mv(content));
   auto userData = replacer.get();
   registeredReplacers.insert(userData, kj::mv(replacer));
@@ -727,7 +726,7 @@ kj::Promise<void> Rewriter::replacerThunkPromise(
 
     auto streamSink = kj::heap<ReplacerStreamSink>(sink, registration.isHtml);
     return ioContext.waitForDeferredProxy(
-        registration.stream->pumpTo(lock, kj::mv(streamSink), true));
+        registration.stream.pumpTo(lock, kj::mv(streamSink), EndStream::YES));
   });
 }
 
@@ -782,7 +781,7 @@ HTMLRewriter::Token::ImplBase<CType>::~ImplBase() noexcept(false) {}
 template <typename CType>
 template <auto Func, auto StreamingFunc>
 void HTMLRewriter::Token::ImplBase<CType>::rewriteContentGeneric(
-    Content content, jsg::Optional<ContentOptions> options) {
+    jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options) {
   auto isHtml = options.orDefault({}).html.orDefault(false);
 
   KJ_SWITCH_ONEOF(content) {
@@ -790,13 +789,13 @@ void HTMLRewriter::Token::ImplBase<CType>::rewriteContentGeneric(
       check(Func(&element, stringContent.cStr(), stringContent.size(), isHtml));
     }
 
-    KJ_CASE_ONEOF(streamContent, jsg::Ref<ReadableStream>) {
+    KJ_CASE_ONEOF(streamContent, JsReadableStream) {
       auto handler = rewriter.registerReplacer(kj::mv(streamContent), isHtml);
       check(StreamingFunc(&element, &handler));
     }
 
     KJ_CASE_ONEOF(responseContent, jsg::Ref<Response>) {
-      KJ_IF_SOME(body, responseContent->getBody()) {
+      KJ_IF_SOME(body, responseContent->getBody(js)) {
         auto handler = rewriter.registerReplacer(kj::mv(body), isHtml);
         check(StreamingFunc(&element, &handler));
       }
@@ -898,44 +897,50 @@ kj::String unwrapContent(Content content) {
 }
 }  // namespace
 
-jsg::Ref<Element> Element::before(Content content, jsg::Optional<ContentOptions> options) {
+jsg::Ref<Element> Element::before(
+    jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options) {
   checkToken(impl)
       .rewriteContentGeneric<lol_html_element_before, lol_html_element_streaming_before>(
-          kj::mv(content), options);
+          js, kj::mv(content), options);
   return JSG_THIS;
 }
 
-jsg::Ref<Element> Element::after(Content content, jsg::Optional<ContentOptions> options) {
+jsg::Ref<Element> Element::after(
+    jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options) {
   checkToken(impl).rewriteContentGeneric<lol_html_element_after, lol_html_element_streaming_after>(
-      kj::mv(content), options);
+      js, kj::mv(content), options);
   return JSG_THIS;
 }
 
-jsg::Ref<Element> Element::prepend(Content content, jsg::Optional<ContentOptions> options) {
+jsg::Ref<Element> Element::prepend(
+    jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options) {
   checkToken(impl)
       .rewriteContentGeneric<lol_html_element_prepend, lol_html_element_streaming_prepend>(
-          kj::mv(content), options);
+          js, kj::mv(content), options);
   return JSG_THIS;
 }
 
-jsg::Ref<Element> Element::append(Content content, jsg::Optional<ContentOptions> options) {
+jsg::Ref<Element> Element::append(
+    jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options) {
   checkToken(impl)
       .rewriteContentGeneric<lol_html_element_append, lol_html_element_streaming_append>(
-          kj::mv(content), options);
+          js, kj::mv(content), options);
   return JSG_THIS;
 }
 
-jsg::Ref<Element> Element::replace(Content content, jsg::Optional<ContentOptions> options) {
+jsg::Ref<Element> Element::replace(
+    jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options) {
   checkToken(impl)
       .rewriteContentGeneric<lol_html_element_replace, lol_html_element_streaming_replace>(
-          kj::mv(content), options);
+          js, kj::mv(content), options);
   return JSG_THIS;
 }
 
-jsg::Ref<Element> Element::setInnerContent(Content content, jsg::Optional<ContentOptions> options) {
+jsg::Ref<Element> Element::setInnerContent(
+    jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options) {
   checkToken(impl)
       .rewriteContentGeneric<lol_html_element_set_inner_content,
-          lol_html_element_streaming_set_inner_content>(kj::mv(content), options);
+          lol_html_element_streaming_set_inner_content>(js, kj::mv(content), options);
   return JSG_THIS;
 }
 
@@ -971,16 +976,18 @@ void EndTag::setName(kj::String text) {
   check(lol_html_end_tag_name_set(&checkToken(impl).element, text.cStr(), text.size()));
 }
 
-jsg::Ref<EndTag> EndTag::before(Content content, jsg::Optional<ContentOptions> options) {
+jsg::Ref<EndTag> EndTag::before(
+    jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options) {
   checkToken(impl)
       .rewriteContentGeneric<lol_html_end_tag_before, lol_html_end_tag_streaming_before>(
-          kj::mv(content), kj::mv(options));
+          js, kj::mv(content), kj::mv(options));
   return JSG_THIS;
 }
 
-jsg::Ref<EndTag> EndTag::after(Content content, jsg::Optional<ContentOptions> options) {
+jsg::Ref<EndTag> EndTag::after(
+    jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options) {
   checkToken(impl).rewriteContentGeneric<lol_html_end_tag_after, lol_html_end_tag_streaming_after>(
-      kj::mv(content), kj::mv(options));
+      js, kj::mv(content), kj::mv(options));
   return JSG_THIS;
 }
 
@@ -1125,24 +1132,25 @@ bool Text::getRemoved() {
   return lol_html_text_chunk_is_removed(&checkToken(impl).element);
 }
 
-jsg::Ref<Text> Text::before(Content content, jsg::Optional<ContentOptions> options) {
+jsg::Ref<Text> Text::before(jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options) {
   checkToken(impl)
       .rewriteContentGeneric<lol_html_text_chunk_before, lol_html_text_chunk_streaming_before>(
-          kj::mv(content), kj::mv(options));
+          js, kj::mv(content), kj::mv(options));
   return JSG_THIS;
 }
 
-jsg::Ref<Text> Text::after(Content content, jsg::Optional<ContentOptions> options) {
+jsg::Ref<Text> Text::after(jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options) {
   checkToken(impl)
       .rewriteContentGeneric<lol_html_text_chunk_after, lol_html_text_chunk_streaming_after>(
-          kj::mv(content), kj::mv(options));
+          js, kj::mv(content), kj::mv(options));
   return JSG_THIS;
 }
 
-jsg::Ref<Text> Text::replace(Content content, jsg::Optional<ContentOptions> options) {
+jsg::Ref<Text> Text::replace(
+    jsg::Lock& js, Content content, jsg::Optional<ContentOptions> options) {
   checkToken(impl)
       .rewriteContentGeneric<lol_html_text_chunk_replace, lol_html_text_chunk_streaming_replace>(
-          kj::mv(content), kj::mv(options));
+          js, kj::mv(content), kj::mv(options));
   return JSG_THIS;
 }
 
@@ -1262,7 +1270,7 @@ jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> res
   JSG_REQUIRE(response->getType() != "error"_kj, TypeError,
       "HTMLRewriter cannot transform an error response");
 
-  auto maybeInput = response->getBody();
+  auto maybeInput = response->getBody(js);
 
   if (maybeInput == kj::none) {
     // That was easy!
@@ -1272,8 +1280,9 @@ jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> res
   auto& ioContext = IoContext::current();
 
   auto pipe = newIdentityPipe();
-  response = Response::constructor(
-      js, kj::Maybe(js.alloc<ReadableStream>(ioContext, kj::mv(pipe.in))), kj::mv(response));
+  response = Response::constructor(js,
+      kj::Maybe(Body::Initializer(JsReadableStream::create(js, ioContext, kj::mv(pipe.in)))),
+      kj::mv(response));
 
   kj::String ownContentType;
   kj::String encoding = kj::str("utf-8");
@@ -1296,7 +1305,8 @@ jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> res
   // Drive and flush the parser asynchronously.
   ioContext.addTask(
       ioContext
-          .waitForDeferredProxy(KJ_ASSERT_NONNULL(maybeInput)->pumpTo(js, kj::mv(rewriter), true))
+          .waitForDeferredProxy(
+              KJ_ASSERT_NONNULL(maybeInput).pumpTo(js, kj::mv(rewriter), EndStream::YES))
           .catch_([](kj::Exception&& e) {
     // Errors in pumpTo() are already propagated to the destination stream. We don't want to
     // throw them from here since it'll cause an uncaught exception to be reported via taskFailed(),

@@ -11,10 +11,10 @@ own toolchain that includes libc++.
 Author: Workerd Maintainers <workers-dev@cloudflare.com>
 
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index cfdc3e38ff98e7ff956a05f1b2afba95282c4285..7e29f81545f97b10b2064f5fae2179646ed0f80f 100644
+index 540594124b0e518965caf1e55b211843a8b3283a..32978e22e3c51cdc5bd4fe0bc196cf8b852bd437 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
-@@ -97,7 +97,7 @@ v8_config = rule(
+@@ -106,7 +106,7 @@ v8_config = rule(
  
  def _default_args():
      return struct(

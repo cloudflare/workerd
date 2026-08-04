@@ -13,7 +13,6 @@ filegroup(
         "basics.c++",
         "blob.c++",
         "cache.c++",
-        "cf-property.c++",
         "container.c++",
         "events.c++",
         "eventsource.c++",
@@ -25,6 +24,8 @@ filegroup(
         "hibernatable-adapter.c++",
         "hibernatable-web-socket.c++",
         "http.c++",
+        "js-readable-stream.c++",
+        "js-writable-stream.c++",
         "messagechannel.c++",
         "performance.c++",
         "queue.c++",
@@ -63,7 +64,6 @@ filegroup(
         "basics.h",
         "blob.h",
         "cache.h",
-        "cf-property.h",
         "container.h",
         "events.h",
         "eventsource.h",
@@ -75,6 +75,8 @@ filegroup(
         "hibernatable-adapter.h",
         "hibernatable-web-socket.h",
         "http.h",
+        "js-readable-stream.h",
+        "js-writable-stream.h",
         "messagechannel.h",
         "performance.h",
         "queue.h",
@@ -177,6 +179,20 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "cf-property",
+    srcs = ["cf-property.c++"],
+    hdrs = ["cf-property.h"],
+    implementation_deps = [
+        "//src/workerd/io:features",
+        "//src/workerd/util:own-util",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
+    ],
+)
+
+wd_cc_library(
     name = "commonjs",
     srcs = [
         "commonjs.c++",
@@ -235,6 +251,11 @@ wd_cc_library(
 
 # for using EW_STREAMS_ISOLATE_TYPES with workerd-api etc. To use the different streams APIs,
 # include the headers you need directly.
+#
+# Note: JsReadableStream and JsWritableStream live in js-readable-stream.{h,c++} and
+# js-writable-stream.{h,c++}, which are folded into //src/workerd/io (via the :srcs/:hdrs
+# filegroups) because io-target headers (http.h, sockets.h, container.h) depend on them. This
+# target re-exports them via streams.h.
 wd_cc_library(
     name = "streams",
     hdrs = ["streams.h"],
@@ -455,7 +476,6 @@ wd_cc_library(
     srcs = ["data-url.c++"],
     hdrs = ["data-url.h"],
     implementation_deps = [
-        ":encoding",
         "//src/workerd/util:strings",
     ],
     visibility = ["//visibility:public"],
@@ -463,6 +483,7 @@ wd_cc_library(
         "//src/workerd/jsg:url",
         "//src/workerd/util:mimetype",
         "@capnp-cpp//src/kj",
+        "@simdutf",
     ],
 )
 
@@ -604,6 +625,22 @@ kj_test(
 )
 
 kj_test(
+    src = "js-readable-stream-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "js-writable-stream-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "system-streams-test.c++",
     deps = [
         "//src/workerd/io",
@@ -613,6 +650,14 @@ kj_test(
 
 kj_test(
     src = "actor-state-iocontext-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "container-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",

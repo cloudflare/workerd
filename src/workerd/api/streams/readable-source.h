@@ -4,6 +4,7 @@
 #include <workerd/util/strong-bool.h>
 
 #include <kj/debug.h>
+#include <kj/refcount.h>
 
 namespace kj {
 class AsyncInputStream;
@@ -198,7 +199,7 @@ kj::Own<ReadableSource> newReadableSourceFromBytes(
 
 // Creates a ReadableSource that wraps the given source and prevents deferred proxying.
 kj::Own<ReadableSource> newIoContextWrappedReadableSource(
-    IoContext& ioctx, kj::Own<ReadableSource> inner);
+    kj::WeakRc<IoContext> ioctx, kj::Own<ReadableSource> inner);
 
 // Creates a ReadableSource that calls the given producer function to produce data
 // on each read (useful primarily for testing).

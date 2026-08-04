@@ -81,7 +81,7 @@ BENCHMARK_F(Response, arrayBufferBody)(benchmark::State& state) {
       auto view = bytes.asPtr();
       auto rs = api::streams::newMemorySource(view, kj::heap(kj::mv(bytes)));
       auto body =
-          api::Body::Initializer(env.js.alloc<api::ReadableStream>(env.context, kj::mv(rs)));
+          api::Body::Initializer(api::JsReadableStream::create(js, env.context, kj::mv(rs)));
       benchmark::DoNotOptimize(api::Response::constructor(js, kj::mv(body), kj::none));
     }
   });

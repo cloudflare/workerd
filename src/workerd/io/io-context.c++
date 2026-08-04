@@ -584,6 +584,9 @@ kj::Promise<T> IoContext::IncomingRequest::maybeAddGcPassForTest(kj::Promise<T> 
 // Mark ourselves so we know that we made a best effort attempt to wait for waitUntilTasks.
 void IoContext::IncomingRequest::drain(
     kj::TaskSet& waitUntilTasks, kj::Own<IoContext_IncomingRequest>&& self) {
+  // Passing by rvalue reference keeps the call-site evaluation order safe, but does not itself
+  // consume the caller's owner. Move immediately so early returns still drop the request.
+  auto ownedSelf = kj::mv(self);
   waitedForWaitUntil = true;
 
   if (&context->incomingRequests.front() != this) {
@@ -618,7 +621,7 @@ void IoContext::IncomingRequest::drain(
                     .exclusiveJoin(kj::mv(timeoutPromise))
                     .exclusiveJoin(context->onAbort());
 
-  result = result.attach(kj::mv(self));
+  result = result.attach(kj::mv(ownedSelf));
 
   KJ_IF_SOME(a, context->actor) {
     // Make sure the drain is canceled and the IncomingRequest dropped on actor abort.
@@ -698,8 +701,8 @@ IoContext::~IoContext() noexcept(false) {
     pe.maybeContext = kj::none;
   }
 
-  // Kill the sentinel so that no weak references can refer to this IoContext anymore.
-  selfRef->invalidate();
+  // Note: Any outstanding kj::WeakRc<IoContext> references are automatically invalidated as the
+  // last strong reference is dropped (before this destructor runs), so there's nothing to do here.
 }
 
 IoContext::PendingEvent::~PendingEvent() noexcept(false) {
@@ -826,7 +829,7 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
   //   the timer, so we don't want to addTask() it, which awaitIo() does implicitly.
   auto promise =
       paf.promise.then([this, &context, it, cs = context.getCriticalSection()]() mutable {
-    return context.run([this, &context, it](Worker::Lock& lock) mutable {
+    return context.run([this, it](Worker::Lock& lock, IoContext& context) mutable {
       auto& state = it->second;
 
       auto stateGuard = kj::defer([&] {
@@ -891,16 +894,20 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
   // to be removed when the promise completes.
   TimeoutTime timeoutTimesKey{when, timeoutTimesTiebreakerCounter++};
   timeoutTimes.insert(timeoutTimesKey, kj::mv(paf.fulfiller));
-  auto deferredTimeoutTimeRemoval = kj::defer([this, &context, timeoutTimesKey]() {
+  auto deferredTimeoutTimeRemoval =
+      kj::defer([this, weakContext = context.getWeakRef(), timeoutTimesKey]() {
     // If the promise is being destroyed due to IoContext teardown then IoChannelFactory may
     // no longer be available, but we can just skip starting a new timer in that case as it'd be
-    // canceled anyway. Similarly we should skip rescheduling if the context has been aborted since
-    // there's no way the events can run anyway (and we'll cause trouble if `cancelAll()` is being
-    // called in ~IoContext_IncomingRequest).
-    if (context.selfRef->isValid() && context.abortException == kj::none) {
-      bool isNext = timeoutTimes.begin()->key == timeoutTimesKey;
-      timeoutTimes.erase(timeoutTimesKey);
-      if (isNext) resetTimerTask(context.getIoChannelFactory().getTimer());
+    // canceled anyway. The weak reference upgrade fails once the IoContext is being torn down.
+    // Similarly we should skip rescheduling if the context has been aborted since there's no way
+    // the events can run anyway (and we'll cause trouble if `cancelAll()` is being called in
+    // ~IoContext_IncomingRequest).
+    KJ_IF_SOME(context, weakContext) {
+      if (context->abortException == kj::none) {
+        bool isNext = timeoutTimes.begin()->key == timeoutTimesKey;
+        timeoutTimes.erase(timeoutTimesKey);
+        if (isNext) resetTimerTask(context->getIoChannelFactory().getTimer());
+      }
     }
   });
 
@@ -1522,11 +1529,11 @@ kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> IoContext::getSelfTokenFa
   return kj::none;
 }
 
-auto IoContext::tryGetWeakRefForCurrent() -> kj::Maybe<kj::Own<WeakRef>> {
+kj::WeakRc<IoContext> IoContext::tryGetWeakRefForCurrent() {
   KJ_IF_SOME(ioContext, tryCurrent()) {
     return ioContext.getWeakRef();
   } else {
-    return kj::none;
+    return nullptr;
   }
 }
 
@@ -1614,9 +1621,9 @@ void IoContext::requireCurrentOrThrowJs() {
   }
 }
 
-void IoContext::requireCurrentOrThrowJs(WeakRef& weak) {
-  KJ_IF_SOME(ctx, weak.tryGet()) {
-    if (ctx.isCurrent()) {
+void IoContext::requireCurrentOrThrowJs(kj::WeakRc<IoContext>& weak) {
+  KJ_IF_SOME(ctx, weak) {
+    if (ctx->isCurrent()) {
       return;
     }
   }

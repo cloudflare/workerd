@@ -56,7 +56,7 @@
       "owner": "fastfloat",
       "repo": "fast_float",
       "branch": "main",
-      "freeze_commit": "05087a303dad9c98768b33c829d398223a649bc6",
+      "freeze_commit": "34164f547b7df3f5d794ff67e9f885c36819ebfc",
       "build_file_content": "cc_library(name = 'fast_float', hdrs = glob(['include/fast_float/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/fast_float/src')",
       "use_module_bazel_from_bcr": "8.0.2"
     },
@@ -67,7 +67,7 @@
       "use_bazel_dep": true,
       "owner": "Maratyszcza",
       "repo": "FP16",
-      "freeze_commit": "3d2de1816307bac63c16a297e8c4dc501b4076df",
+      "freeze_commit": "782eea126dc5c755827be751a099eb01826175cf",
       "build_file_content": "exports_files(glob(['**']))",
       "use_module_bazel_from_bcr": "0.0.0-20210320-0a92994"
     },

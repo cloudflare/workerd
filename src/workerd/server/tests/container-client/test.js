@@ -305,6 +305,30 @@ export class DurableObjectExample extends DurableObject {
       await container.exec(['cat']).then((p) => p.output());
     }
 
+    // 13. An already-aborted signal causes exec() to throw synchronously.
+    {
+      const ac = new AbortController();
+      ac.abort();
+      assert.throws(
+        () => container.exec(['echo', 'hello'], { signal: ac.signal }),
+        {
+          name: 'AbortError',
+        }
+      );
+    }
+
+    // 14. Aborting the signal while the process is running kills it (SIGKILL).
+    {
+      const ac = new AbortController();
+      const proc = await container.exec(['sh', '-lc', 'sleep 60'], {
+        signal: ac.signal,
+        stdout: 'ignore',
+      });
+      ac.abort();
+      // A process killed by SIGKILL (9) reports exit code 128 + 9 = 137.
+      assert.strictEqual(await proc.exitCode, 137);
+    }
+
     await container.destroy();
     await monitor;
     assert.strictEqual(container.running, false);

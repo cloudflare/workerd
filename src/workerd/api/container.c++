@@ -78,27 +78,55 @@ jsg::JsArrayBuffer ExecOutput::getStderr(jsg::Lock& js) {
   return jsg::JsArrayBuffer::create(js, stderrBytes);
 }
 
-ExecProcess::ExecProcess(jsg::Optional<jsg::Ref<WritableStream>> stdinStream,
-    jsg::Optional<jsg::Ref<ReadableStream>> stdoutStream,
-    jsg::Optional<jsg::Ref<ReadableStream>> stderrStream,
+ExecProcess::ExecProcess(jsg::Lock& js,
+    IoContext& ioContext,
+    jsg::Optional<JsWritableStream> stdinStream,
+    jsg::Optional<JsReadableStream> stdoutStream,
+    jsg::Optional<JsReadableStream> stderrStream,
     int pid,
-    rpc::Container::ProcessHandle::Client handle)
+    rpc::Container::ProcessHandle::Client handle,
+    kj::Maybe<jsg::Ref<AbortSignal>> abortSignal)
     : stdinStream(kj::mv(stdinStream)),
       stdoutStream(kj::mv(stdoutStream)),
       stderrStream(kj::mv(stderrStream)),
       pid(pid),
-      handle(IoContext::current().addObject(kj::heap(kj::mv(handle)))) {}
+      handle(ioContext.addObject(kj::heap(kj::mv(handle)))) {
+  KJ_IF_SOME(signal, abortSignal) {
+    constexpr int kSigKill = 9;
 
-jsg::Optional<jsg::Ref<WritableStream>> ExecProcess::getStdin() {
-  return stdinStream.map([](jsg::Ref<WritableStream>& stream) { return stream.addRef(); });
+    auto& canceler = signal->getCanceler();
+
+    // exec() calls throwIfAborted() before sending the RPC, but the signal can still fire while the
+    // RPC is in flight, i.e. before this constructor runs in the RPC's continuation. If that
+    // happened, kill the freshly-started process immediately; there's no point registering a
+    // listener.
+    if (canceler.isCanceled()) {
+      sendKill(kSigKill);
+    } else {
+      // Hold a strong reference to the canceler so it outlives the AbortSignal's own IoOwn, then register
+      // a listener that kills the process when the signal is later triggered.
+      auto own = kj::addRef(canceler);
+      auto& ref = *own;
+      abortCanceler = ioContext.addObject(kj::mv(own));
+      abortListener.emplace(ref, [self = JSG_THIS_WEAK(js)]() {
+        KJ_IF_SOME(process, self.tryGet()) {
+          process.sendKill(kSigKill);
+        }
+      });
+    }
+  }
 }
 
-jsg::Optional<jsg::Ref<ReadableStream>> ExecProcess::getStdout() {
-  return stdoutStream.map([](jsg::Ref<ReadableStream>& stream) { return stream.addRef(); });
+jsg::Optional<JsWritableStream> ExecProcess::getStdin(jsg::Lock& js) {
+  return stdinStream.map([&](JsWritableStream& stream) { return stream.addRef(js); });
 }
 
-jsg::Optional<jsg::Ref<ReadableStream>> ExecProcess::getStderr() {
-  return stderrStream.map([](jsg::Ref<ReadableStream>& stream) { return stream.addRef(); });
+jsg::Optional<JsReadableStream> ExecProcess::getStdout(jsg::Lock& js) {
+  return stdoutStream.map([&](JsReadableStream& stream) { return stream.addRef(js); });
+}
+
+jsg::Optional<JsReadableStream> ExecProcess::getStderr(jsg::Lock& js) {
+  return stderrStream.map([&](JsReadableStream& stream) { return stream.addRef(js); });
 }
 
 void ExecProcess::ensureExitCodePromise(jsg::Lock& js) {
@@ -149,11 +177,10 @@ jsg::Promise<jsg::Ref<ExecOutput>> ExecProcess::output(jsg::Lock& js) {
 
   auto stdoutPromise = js.resolvedPromise(emptyByteArray());
   KJ_IF_SOME(stream, stdoutStream) {
-    JSG_REQUIRE(!stream->isDisturbed(), TypeError,
+    JSG_REQUIRE(!stream.isDisturbed(js), TypeError,
         "Cannot call output() after stdout has started being consumed.");
     stdoutPromise =
-        stream->getController()
-            .readAllBytes(js, IoContext::current().getLimitEnforcer().getBufferingLimit())
+        stream.arrayBuffer(js, IoContext::current().getLimitEnforcer().getBufferingLimit())
             .then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> bytes) {
       return bytes.getHandle(js).copy();
     });
@@ -161,10 +188,9 @@ jsg::Promise<jsg::Ref<ExecOutput>> ExecProcess::output(jsg::Lock& js) {
 
   auto stderrPromise = js.resolvedPromise(emptyByteArray());
   KJ_IF_SOME(stream, stderrStream) {
-    JSG_REQUIRE(!stream->isDisturbed(), TypeError,
+    JSG_REQUIRE(!stream.isDisturbed(js), TypeError,
         "Cannot call output() after stderr has started being consumed.");
-    stderrPromise = stream->getController()
-                        .readAllBytes(js, kj::maxValue)
+    stderrPromise = stream.arrayBuffer(js, kj::maxValue)
                         .then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> bytes) {
       return bytes.getHandle(js).copy();
     });
@@ -192,10 +218,15 @@ jsg::Promise<jsg::Ref<ExecOutput>> ExecProcess::output(jsg::Lock& js) {
 void ExecProcess::kill(jsg::Lock& js, jsg::Optional<int> signal) {
   auto signo = signal.orDefault(15);
   JSG_REQUIRE(signo > 0 && signo <= 64, RangeError, "Invalid signal number.");
+  sendKill(signo);
+}
 
+void ExecProcess::sendKill(int signo) {
+  // Grab the IoContext first so we fail fast if there is no active IoContext.
+  auto& ioContext = IoContext::current();
   auto req = handle->killRequest(capnp::MessageSize{4, 0});
   req.setSigno(signo);
-  IoContext::current().addTask(req.sendIgnoringResult());
+  ioContext.addTask(req.sendIgnoringResult());
 }
 // =======================================================================================
 // Basic lifecycle methods
@@ -319,6 +350,9 @@ jsg::Promise<Container::DirectorySnapshot> Container::snapshotDirectory(
       "snapshotDirectory() requires an absolute directory path (starting with '/').");
 
   auto req = rpcClient->snapshotDirectoryRequest();
+  KJ_IF_SOME(spanContext, IoContext::current().getCurrentTraceSpan().toSpanContext()) {
+    spanContext.toCapnp(req.initSpanContext());
+  }
   req.setDir(options.dir);
 
   KJ_IF_SOME(name, options.name) {
@@ -349,6 +383,9 @@ jsg::Promise<Container::Snapshot> Container::snapshotContainer(
       running, Error, "snapshotContainer() cannot be called on a container that is not running.");
 
   auto req = rpcClient->snapshotContainerRequest();
+  KJ_IF_SOME(spanContext, IoContext::current().getCurrentTraceSpan().toSpanContext()) {
+    spanContext.toCapnp(req.initSpanContext());
+  }
 
   KJ_IF_SOME(name, options.name) {
     req.setName(name);
@@ -459,6 +496,11 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
   JSG_REQUIRE(!combinedOutput || stdoutMode == "pipe", TypeError,
       "stderr: \"combined\" requires stdout to be \"pipe\".");
 
+  // If an already-aborted signal is provided, fail fast before spawning anything.
+  KJ_IF_SOME(signal, options.signal) {
+    signal->throwIfAborted(js);
+  }
+
   auto& ioContext = IoContext::current();
   auto& byteStreamFactory = ioContext.getByteStreamFactory();
 
@@ -522,20 +564,20 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
     auto pid = process.getPid();
 
     // Init the ReadableStreams (stdout/stderr)
-    jsg::Optional<jsg::Ref<ReadableStream>> stdoutStream = kj::none;
+    jsg::Optional<JsReadableStream> stdoutStream = kj::none;
     KJ_IF_SOME(input, stdoutInput) {
       auto source = newSystemStream(kj::mv(input), StreamEncoding::IDENTITY, ioContext);
-      stdoutStream = js.alloc<ReadableStream>(ioContext, kj::mv(source));
+      stdoutStream = JsReadableStream::create(js, ioContext, kj::mv(source));
     }
 
     // stderrInput is only set if using "pipe" on stderr and not "combined"
-    jsg::Optional<jsg::Ref<ReadableStream>> stderrStream = kj::none;
+    jsg::Optional<JsReadableStream> stderrStream = kj::none;
     KJ_IF_SOME(input, stderrInput) {
       auto source = newSystemStream(kj::mv(input), StreamEncoding::IDENTITY, ioContext);
-      stderrStream = js.alloc<ReadableStream>(ioContext, kj::mv(source));
+      stderrStream = JsReadableStream::create(js, ioContext, kj::mv(source));
     }
 
-    jsg::Optional<jsg::Ref<WritableStream>> stdinStream = kj::none;
+    jsg::Optional<JsWritableStream> stdinStream = kj::none;
 
     // If stdin is undefined, the JS API promises immediate EOF. We still use the pipelined stdin()
     // capability so exec() doesn't wait on an extra round-trip.
@@ -548,18 +590,18 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
 
       KJ_SWITCH_ONEOF(stdinOption) {
         // user sets ReadableStream...
-        KJ_CASE_ONEOF(readable, jsg::Ref<ReadableStream>) {
+        KJ_CASE_ONEOF(readable, JsReadableStream) {
           auto sink = newSystemStream(kj::mv(stdinWriter), StreamEncoding::IDENTITY, ioContext);
           auto pipePromise =
-              (ioContext.waitForDeferredProxy(readable->pumpTo(js, kj::mv(sink), true)));
-          ioContext.addTask(pipePromise.attach(readable.addRef()));
+              (ioContext.waitForDeferredProxy(readable.pumpTo(js, kj::mv(sink), EndStream::YES)));
+          ioContext.addTask(pipePromise.attach(readable.addRef(js)));
         }
         // user sets "pipe"... they want to consume the API with the stdin WritableStream
         KJ_CASE_ONEOF(mode, kj::String) {
           JSG_REQUIRE(
               mode == "pipe", TypeError, "stdin must be a ReadableStream or the string \"pipe\".");
           auto sink = newSystemStream(kj::mv(stdinWriter), StreamEncoding::IDENTITY, ioContext);
-          auto writable = js.alloc<WritableStream>(ioContext, kj::mv(sink),
+          auto writable = JsWritableStream::create(js, ioContext, kj::mv(sink),
               ioContext.getMetrics().tryCreateWritableByteStreamObserver());
           stdinStream = kj::mv(writable);
         }
@@ -574,8 +616,8 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
     }
 
     // return the instance to the process after getting pipeline of the process handle
-    return js.alloc<ExecProcess>(
-        kj::mv(stdinStream), kj::mv(stdoutStream), kj::mv(stderrStream), pid, kj::mv(handle));
+    return js.alloc<ExecProcess>(js, ioContext, kj::mv(stdinStream), kj::mv(stdoutStream),
+        kj::mv(stderrStream), pid, kj::mv(handle), kj::mv(options.signal));
   });
 }
 
@@ -609,13 +651,13 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
       // Note: `self` (jsg::Ref) is captured to prevent GC from collecting this object while
       // the promise continuation is pending. Without it, the bare `this` pointer dangles.
       .then(js,
-          [this, self = JSG_THIS](
-              jsg::Lock& js, capnp::Response<rpc::Container::MonitorResults> results) {
-    running = false;
+          [self = JSG_THIS](
+              jsg::Lock& js, capnp::Response<rpc::Container::MonitorResults> results) mutable {
+    self->running = false;
     auto exitCode = results.getExitCode();
-    KJ_IF_SOME(d, destroyReason) {
+    KJ_IF_SOME(d, self->destroyReason) {
       jsg::Value error = kj::mv(d);
-      destroyReason = kj::none;
+      self->destroyReason = kj::none;
       js.throwException(kj::mv(error));
     }
 
@@ -625,9 +667,9 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
       js.throwException(err);
     }
   },
-          [this, self = JSG_THIS](jsg::Lock& js, jsg::Value&& error) {
-    running = false;
-    destroyReason = kj::none;
+          [self = JSG_THIS](jsg::Lock& js, jsg::Value&& error) mutable {
+    self->running = false;
+    self->destroyReason = kj::none;
     js.throwException(kj::mv(error));
   });
 }

@@ -60,9 +60,15 @@ kj::Array<const char> normalizePathEncoding(kj::ArrayPtr<const char> pathname) {
   // re-encode the pieces and then join them back together with %2F.
 
   static constexpr auto findNext = [](std::string_view input) -> kj::Maybe<size_t> {
-    size_t pos = input.find("%2", 0);
-    if (pos != std::string_view::npos) {
-      if (input[pos + 2] == 'f' || input[pos + 2] == 'F') {
+    // Scan for the next "%2f"/"%2F". We must keep looking past any "%2X" that is
+    // not an encoded slash (e.g. "%25", "%20", "%2E"): stopping at the first
+    // "%2" occurrence would leave a later "%2f" to be percent-decoded into a
+    // real '/', silently turning an in-segment encoded slash into a path
+    // separator. Also guard against reading past the end when the input ends in
+    // a bare "%2" (no third character).
+    for (size_t pos = input.find("%2", 0); pos != std::string_view::npos;
+         pos = input.find("%2", pos + 2)) {
+      if (pos + 2 < input.size() && (input[pos + 2] == 'f' || input[pos + 2] == 'F')) {
         return pos;
       }
     }

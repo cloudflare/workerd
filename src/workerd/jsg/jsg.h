@@ -31,6 +31,8 @@
 #include <kj/string.h>
 #include <kj/time.h>
 
+#include <span>
+
 using kj::byte;
 using kj::uint;
 
@@ -720,7 +722,7 @@ concept HasStructTypeScriptDefine = requires { T::_JSG_STRUCT_TS_DEFINE_DO_NOT_U
     JSG_FOR_EACH(JSG_STRUCT_FIELD_COL, , __VA_ARGS__);                                             \
     auto namesPtr = names.asPtr().asConst();                                                       \
     return v8::DictionaryTemplate::New(                                                            \
-        isolate, v8::MemorySpan<const std::string_view>(namesPtr.begin(), namesPtr.size()));       \
+        isolate, std::span<const std::string_view>(namesPtr.begin(), namesPtr.size()));            \
   }                                                                                                \
   template <typename Registry, typename Self, typename Config>                                     \
   static void registerMembersInternal(Registry& registry, Config arg) {                            \

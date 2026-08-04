@@ -90,9 +90,8 @@ struct TestFixture {
       waitScope = &KJ_REQUIRE_NONNULL(io).waitScope;
     }
 
-    auto& context = request->getContext();
-    return context
-        .run([&](Worker::Lock& lock) {
+    return request->getContext()
+        .run([&](Worker::Lock& lock, IoContext& context) {
       // auto features = workerBundle.getFeatureFlags();
       auto& js = jsg::Lock::from(lock.getIsolate());
       Environment env = {{.isolate = lock.getIsolate()}, context, lock, js};
@@ -135,9 +134,8 @@ struct TestFixture {
   // IncomingRequest.
   template <typename Callback>
   void enterContext(IoContext::IncomingRequest& request, Callback&& callback) {
-    auto& context = request.getContext();
-    context
-        .run([&](Worker::Lock& lock) {
+    request.getContext()
+        .run([&](Worker::Lock& lock, IoContext& context) {
       auto& js = jsg::Lock::from(lock.getIsolate());
       Environment env = {{.isolate = lock.getIsolate()}, context, lock, js};
       callback(env);

@@ -10,6 +10,8 @@
 
 #include <kj/mutex.h>
 
+#include <span>
+
 namespace workerd::jsg {
 
 namespace {
@@ -400,7 +402,7 @@ v8::Local<v8::Module> createSyntheticModule(
     }
   }
   return v8::Module::CreateSyntheticModule(js.v8Isolate, v8StrIntern(js.v8Isolate, name),
-      v8::MemorySpan<const v8::Local<v8::String>>(exportNames.data(), exportNames.size()),
+      std::span<const v8::Local<v8::String>>(exportNames.data(), exportNames.size()),
       &evaluateSyntheticModuleCallback);
 }
 }  // namespace
@@ -443,7 +445,7 @@ v8::Local<v8::WasmModuleObject> compileWasmModule(
   auto compilationObserver = observer.onWasmCompilationStart(js.v8Isolate, code.size());
 
   return jsg::check(v8::WasmModuleObject::Compile(
-      js.v8Isolate, v8::MemorySpan<const uint8_t>(code.begin(), code.size())));
+      js.v8Isolate, std::span<const uint8_t>(code.begin(), code.size())));
 }
 
 // ======================================================================================

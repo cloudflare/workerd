@@ -196,6 +196,19 @@ wd_test(
     ],
 )
 
+# Tests for WO-1390: structured errorInfo on TraceLog entries from console.*(Error, ...).
+# Covers both batched tail (`tail(events)`) and streaming tail (`tailStream`) surfaces.
+wd_test(
+    src = "errorinfo-tail-test.wd-test",
+    data = ["errorinfo-tail-test.js"],
+)
+
+wd_test(
+    src = "errorinfo-stw-test.wd-test",
+    args = ["--experimental"],
+    data = ["errorinfo-stw-test.js"],
+)
+
 wd_test(
     src = "analytics-engine-test.wd-test",
     args = ["--experimental"],
@@ -502,6 +515,15 @@ wd_test(
     data = [
         "warnings-tail.js",
         "warnings-test.js",
+    ],
+)
+
+wd_test(
+    src = "diagnostics-channel-tail-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "diagnostics-channel-tail.js",
+        "diagnostics-channel-tail-trigger.js",
     ],
 )
 
@@ -1131,6 +1153,18 @@ wd_test(
 wd_test(
     src = "htmlrewriter-transform-cancel-test.wd-test",
     data = ["htmlrewriter-transform-cancel-test.js"],
+)
+
+wd_test(
+    src = "ts-webstreams-test.wd-test",
+    args = ["--experimental"],
+    data = ["ts-webstreams-test.js"],
+)
+
+wd_test(
+    src = "ts-identity-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["ts-identity-streams-test.js"],
 )
 
 sh_test(

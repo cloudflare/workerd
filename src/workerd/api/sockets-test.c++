@@ -120,7 +120,7 @@ KJ_TEST("socket writes are blocked by output gate") {
     // Prepare write data and lock gate BEFORE any co_await (Worker lock still held).
     auto paf = kj::newPromiseAndFulfiller<void>();
     auto blocker = actor.getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
-    auto writable = socket->getWritable();
+    auto writable = socket->getWritable(env.js).getUnderlyingForTest(env.js);
     jsg::JsValue jsBuffer = jsg::JsUint8Array::create(env.js, "hi"_kjb);
     writable->getController().write(env.js, jsBuffer).markAsHandled(env.js);
 

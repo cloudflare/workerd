@@ -167,25 +167,17 @@ void sendExceptionToInspector(jsg::Lock& js,
   jsg::sendExceptionToInspector(js, inspector, kj::str(source), exception, message);
 }
 
-void addExceptionToTrace(jsg::Lock& js,
-    IoContext& ioContext,
-    BaseTracer& tracer,
-    UncaughtExceptionSource source,
+// Extracts {name, message, stack} from a JS value into a tracing::ErrorInfo. This is the single
+// source of truth for how an error is represented in traces, shared by the uncaught-exception
+// path (addExceptionToTrace) and the console.* logging path (Worker::handleLog), so that an error
+// reported either way produces an identical representation.
+//
+// `name` defaults to "Error" when absent; `message` falls back to stringifying the whole value;
+// and the redundant leading "Name: message" prefix is stripped off `stack` (since name and message
+// are stored as separate fields).
+tracing::ErrorInfo getErrorInfoForTrace(jsg::Lock& js,
     const jsg::JsValue& exception,
     const jsg::TypeHandler<Worker::Api::ErrorInterface>& errorTypeHandler) {
-  if (source == UncaughtExceptionSource::INTERNAL ||
-      source == UncaughtExceptionSource::INTERNAL_ASYNC) {
-    // Skip redundant intermediate JS->C++ exception reporting.  See: IoContext::runImpl(),
-    // PromiseWrapper::tryUnwrap()
-    //
-    // TODO(someday): Arguably it could make sense to store these exceptions off to the side and
-    //   report them only if they don't end up being duplicates of a later exception that has a more
-    //   specific context. This would cover cases where the C++ code that eventually received the
-    //   exception never ended up reporting it.
-    return;
-  }
-
-  auto timestamp = ioContext.now();
   Worker::Api::ErrorInterface error;
 
   if (exception.isObject()) {
@@ -243,8 +235,32 @@ void addExceptionToTrace(jsg::Lock& js,
     }
   }
 
-  tracer.addException(ioContext.getInvocationSpanContext(), timestamp, kj::mv(name),
-      kj::mv(message), kj::mv(stack));
+  return tracing::ErrorInfo(kj::mv(name), kj::mv(message), kj::mv(stack));
+}
+
+void addExceptionToTrace(jsg::Lock& js,
+    IoContext& ioContext,
+    BaseTracer& tracer,
+    UncaughtExceptionSource source,
+    const jsg::JsValue& exception,
+    const jsg::TypeHandler<Worker::Api::ErrorInterface>& errorTypeHandler) {
+  if (source == UncaughtExceptionSource::INTERNAL ||
+      source == UncaughtExceptionSource::INTERNAL_ASYNC) {
+    // Skip redundant intermediate JS->C++ exception reporting.  See: IoContext::runImpl(),
+    // PromiseWrapper::tryUnwrap()
+    //
+    // TODO(someday): Arguably it could make sense to store these exceptions off to the side and
+    //   report them only if they don't end up being duplicates of a later exception that has a more
+    //   specific context. This would cover cases where the C++ code that eventually received the
+    //   exception never ended up reporting it.
+    return;
+  }
+
+  auto timestamp = ioContext.now();
+  auto errorInfo = getErrorInfoForTrace(js, exception, errorTypeHandler);
+
+  tracer.addException(ioContext.getInvocationSpanContext(), timestamp, kj::mv(errorInfo.name),
+      kj::mv(errorInfo.message), kj::mv(errorInfo.stack));
 }
 
 void reportStartupError(kj::StringPtr id,
@@ -2181,6 +2197,7 @@ void Worker::handleLog(jsg::Lock& js,
   // terminating, usually as a result of an infinite loop. We need to perform the initialization
   // here because `message` is called multiple times.
   v8::TryCatch tryCatch(js.v8Isolate);
+
   auto message = [&]() {
     int length = info.Length();
     kj::Vector<kj::String> stringified(length);
@@ -2256,7 +2273,59 @@ void Worker::handleLog(jsg::Lock& js,
   KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
       auto timestamp = ioContext.now();
-      tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, level, message());
+
+      // Scan all arguments for native Errors and build a positional ErrorInfo array: slot `i`
+      // holds the extracted {name, message, stack} for arg `i` if it was a native Error, otherwise
+      // kj::none. If no argument was a native Error, the whole array is left absent (kj::none) to
+      // keep the common case cheap on the wire. We extract via the same helper used for uncaught
+      // exceptions (getErrorInfoForTrace) so that `console.error(err)` and a thrown `err` produce
+      // an identical representation in traces.
+      tracing::LogErrorInfo capturedErrors;
+      {
+        auto& errorTypeHandler =
+            ioContext.getWorker().getIsolate().getApi().getErrorInterfaceTypeHandler(js);
+        kj::Array<kj::Maybe<tracing::ErrorInfo>> slots;
+        bool anyError = false;
+        for (auto i: kj::zeroTo(length)) {
+          if (!tryCatch.CanContinue()) break;
+          auto arg = info[i];
+          if (!arg->IsNativeError()) continue;
+
+          // Reading the error's properties may throw an application-level JS exception (e.g. user
+          // code defines `stack`/`message` as a throwing getter). JSG_CATCH still rethrows
+          // automatically if the isolate is terminating, so only recoverable JS exceptions land in
+          // the handler below.
+          kj::Maybe<tracing::ErrorInfo> extracted;
+          JSG_TRY(js) {
+            // Fresh handle scope so the temporary handles created while reading the error's
+            // properties are released each iteration rather than accumulating across the loop.
+            v8::HandleScope handleScope(js.v8Isolate);
+            extracted = getErrorInfoForTrace(js, jsg::JsValue(arg), errorTypeHandler);
+          }
+          JSG_CATCH(_) {
+            // Deliberately swallow the exception because:
+            //   - console.* must not throw
+            //   - errorInfo is purely additive/best-effort. If it fails to parse,
+            //     the argument is still stringified
+            //   - We don't log the failure to mirror the silent fallback
+            //     in getErrorInfoForTrace's stringify path.
+          }
+
+          KJ_IF_SOME(e, extracted) {
+            if (!anyError) {
+              slots = kj::heapArray<kj::Maybe<tracing::ErrorInfo>>(length);
+              anyError = true;
+            }
+            slots[i] = kj::mv(e);
+          }
+        }
+        if (anyError) {
+          capturedErrors = kj::mv(slots);
+        }
+      }
+
+      tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, level, message(),
+          kj::mv(capturedErrors));
     }
   }
 
@@ -2734,6 +2803,14 @@ Worker::Isolate::AsyncWaiterList::~AsyncWaiterList() noexcept {
   // dangling pointers.
   KJ_ASSERT(head == kj::none, "destroying non-empty waiter list?");
   KJ_ASSERT(tail == &head, "tail pointer corrupted?");
+}
+
+void Worker::Isolate::runInLockScope(
+    LockType lockType, kj::FunctionParam<void(jsg::Lock&)> callback) const {
+  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    Isolate::Impl::Lock recordedLock(*this, lockType, stackScope);
+    callback(*recordedLock.lock);
+  });
 }
 
 kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockWithoutRequest(
@@ -3984,7 +4061,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       containerRunning = status.getRunning();
     }
 
-    co_await context.run([this, &context, &info, containerRunning](Worker::Lock& lock) {
+    co_await context.run([this, &info, containerRunning](Worker::Lock& lock, IoContext& context) {
       jsg::Lock& js = lock;
 
       kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;

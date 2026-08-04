@@ -3,6 +3,7 @@
 #include <workerd/io/worker-interface.capnp.h>
 
 #include <kj/debug.h>
+#include <kj/refcount.h>
 
 namespace kj {
 class AsyncOutputStream;
@@ -136,7 +137,7 @@ kj::Own<WritableSink> newEncodedWritableSink(
 // Wraps a WritableSink such that each write()/end() call on the returned sink will
 // register as a pending event on the IoContext.
 kj::Own<WritableSink> newIoContextWrappedWritableSink(
-    IoContext& ioContext, kj::Own<WritableSink> inner);
+    kj::WeakRc<IoContext> ioContext, kj::Own<WritableSink> inner);
 
 }  // namespace api::streams
 }  // namespace workerd

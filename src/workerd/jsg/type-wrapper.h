@@ -229,6 +229,11 @@ class UnimplementedWrapper {
 //           v8::Local<v8::Value> handle,
 //           kj::Maybe<v8::Local<v8::Object>> parentObject);
 //     };
+//
+// If a SelfConvertible type appears in JSG-visible signatures (method parameters or return
+// types, JSG_STRUCT fields, etc.), it also needs an RTTI representation for TypeScript type
+// generation. Declare `using JsgRttiDelegate = ...;` to describe the type to RTTI as some
+// existing type; see the delegated-RTTI support in rtti.h.
 template <typename T>
 concept SelfConvertible = requires(Lock& js,
     v8::Local<v8::Context> ctx,

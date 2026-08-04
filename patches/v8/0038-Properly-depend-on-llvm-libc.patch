@@ -6,10 +6,10 @@ Subject: Properly depend on llvm-libc
 Change-Id: I9858b147d027e67704c6ca84e0c42fab39a5c97a
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 20f28d46fb9d9ce396455eca12409f2a8cf15c5b..983c7e2e8a0d6605dcb420adfafaccde9b1c05ce 100644
+index 7f40324dfedb267cbb4c0bb3529b79ad2460324e..3a4f48806cd0018a70cfa9cda0c192c2e55ffaa1 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4600,13 +4600,6 @@ cc_library(
+@@ -4629,13 +4629,6 @@ cc_library(
      strip_include_prefix = "noicu",
  )
  
@@ -23,7 +23,7 @@ index 20f28d46fb9d9ce396455eca12409f2a8cf15c5b..983c7e2e8a0d6605dcb420adfafaccde
  v8_library(
      name = "v8_libbase",
      srcs = [
-@@ -4615,7 +4608,7 @@ v8_library(
+@@ -4644,7 +4637,7 @@ v8_library(
      ],
      copts = ["-Wno-implicit-fallthrough"],
      deps = [
