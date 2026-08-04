@@ -30,6 +30,33 @@ AsymmetricKeyCryptoKeyImpl::AsymmetricKeyCryptoKeyImpl(AsymmetricKeyData&& key, 
   KJ_DASSERT(keyType != KeyType::SECRET);
 }
 
+kj::Own<CryptoKey::Impl> AsymmetricKeyCryptoKeyImpl::getPublicKey(
+    jsg::Lock& js, CryptoKeyUsageSet usages) const {
+  JSG_REQUIRE(
+      keyType == KeyType::PRIVATE, DOMInvalidAccessError, "getPublicKey requires a private key.");
+
+  // Extract the public key by serializing/deserializing through SPKI DER.
+  uint8_t* der = nullptr;
+  KJ_DEFER(if (der != nullptr) { OPENSSL_free(der); });
+  size_t derLen;
+  bssl::ScopedCBB cbb;
+  JSG_REQUIRE(CBB_init(cbb.get(), 0) && EVP_marshal_public_key(cbb.get(), keyData.get()) &&
+          CBB_finish(cbb.get(), &der, &derLen),
+      InternalDOMOperationError, "Failed to extract public key.");
+
+  CBS cbs;
+  CBS_init(&cbs, der, derLen);
+  auto publicEvpPkey = OSSLCALL_OWN(EVP_PKEY, EVP_parse_public_key(&cbs), InternalDOMOperationError,
+      "Failed to parse extracted public key.");
+
+  return cloneAsPublicKey(js,
+      {
+        .evpPkey = kj::mv(publicEvpPkey),
+        .keyType = KeyType::PUBLIC,
+        .usages = usages,
+      });
+}
+
 jsg::JsArrayBuffer AsymmetricKeyCryptoKeyImpl::signatureSslToWebCrypto(
     jsg::Lock& js, kj::ArrayPtr<kj::byte> signature) const {
   return jsg::JsArrayBuffer::create(js, signature);
@@ -74,7 +101,7 @@ SubtleCrypto::ExportKeyData AsymmetricKeyCryptoKeyImpl::exportKey(
     jwk.ext = true;
     jwk.key_ops = getUsages().map([](auto usage) { return kj::str(usage.name()); });
     return jwk;
-  } else if (format == "raw"_kj) {
+  } else if (format == "raw"_kj || format == "raw-public"_kj) {
     return exportRaw(js).addRef(js);
   } else {
     JSG_FAIL_REQUIRE(DOMInvalidAccessError, "Cannot export \"", getAlgorithmName(), "\" in \"",

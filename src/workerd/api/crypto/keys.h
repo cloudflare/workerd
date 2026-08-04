@@ -117,6 +117,12 @@ class AsymmetricKeyCryptoKeyImpl: public CryptoKey::Impl {
   bool verifyX509Public(const X509* cert) const override;
   bool verifyX509Private(const X509* cert) const override;
 
+  kj::Own<CryptoKey::Impl> getPublicKey(jsg::Lock& js, CryptoKeyUsageSet usages) const override;
+
+ protected:
+  virtual kj::Own<CryptoKey::Impl> cloneAsPublicKey(
+      jsg::Lock& js, AsymmetricKeyData publicKeyData) const = 0;
+
  private:
   virtual SubtleCrypto::JsonWebKey exportJwk() const = 0;
   virtual jsg::JsArrayBuffer exportRaw(jsg::Lock& js) const = 0;
