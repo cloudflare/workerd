@@ -98,6 +98,11 @@ const unitTests :Workerd.Config = (
           # Unicode characters in the path should be handled as UTF-8 and supported.
           (name = "部品", esModule = "export default 1;"),
 
+          # Node's require(esm) convention: a string-named 'module.exports'
+          # export controls what require() returns for an ES module.
+          (name = "esm-module-exports",
+           esModule = "const impl = { hello: 'world' }; export { impl as 'module.exports' }; export default 'not-this';"),
+
           # Non-ASCII source text is decoded as UTF-8. latin1-src exercises the
           # Latin-1-representable tier (all code points <= U+00FF, including the
           # non-ASCII identifier); unicode-src exercises the UTF-16 tier (CJK and

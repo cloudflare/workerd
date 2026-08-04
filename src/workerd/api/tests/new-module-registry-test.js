@@ -150,6 +150,11 @@ strictEqual(customRequireCjs.bar, cjs1bar);
 const customRequireCjs2 = myRequire(import.meta.resolve('cjs2'));
 strictEqual(customRequireCjs2.foo, cjs2.foo);
 
+// Node's require(esm) convention: a string-named 'module.exports' export
+// controls what require() returns for an ES module. Without it, require(esm)
+// returns the module namespace.
+deepStrictEqual(myRequire('esm-module-exports'), { hello: 'world' });
+
 // When the module being imported throws an error during evaluation,
 // the error is propagated correctly.
 await rejects(import('file:///bundle/cjs3'), {

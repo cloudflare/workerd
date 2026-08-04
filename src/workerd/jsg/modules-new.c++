@@ -768,40 +768,67 @@ class IsolateModuleRegistry final {
   // exception has been scheduled.
   v8::MaybeLocal<v8::Value> require(
       Lock& js, const ResolveContext& context, RequireOption option = RequireOption::DEFAULT) {
-    // Returns either the module namespace or, when UNWRAP_DEFAULT is set and
-    // the module is not ESM, the default export from the namespace. This matches
-    // Node.js require() semantics: require('esm') returns the namespace,
-    // require('data.json') returns the parsed value.
-    // When UNWRAP_DEFAULT is set, returns the default export for all module types
-    // except user bundle ESM, which returns the namespace (matching Node.js require(esm)
-    // behavior). Builtin ESM returns default because workerd wraps CJS-style APIs in
-    // ESM default exports. Synthetic modules (CJS, JSON, Text, etc.) return default
-    // because that's where their value lives.
+    // Computes the value require() produces for a resolved module. Without
+    // UNWRAP_DEFAULT this is always the module namespace. With UNWRAP_DEFAULT:
+    //
+    //  * Any ESM with a truthy __cjsUnwrapDefault export (an ecosystem bundler
+    //    convention that predates Node's require(esm) support) yields its
+    //    default export. Checked first, matching the legacy registry's order.
+    //  * Any ESM that defines the string-named export 'module.exports' —
+    //    Node.js' official mechanism for an ES module to control its require()
+    //    result — yields that export's value.
+    //  * User ESM (worker bundle and fallback modules) otherwise yields the
+    //    full namespace, matching Node.js require(esm).
+    //  * Builtin ESM yields its default export (workerd builtins wrap
+    //    CJS-style APIs in ESM default exports), falling back to the namespace
+    //    when a builtin defines no default export: require() must never
+    //    produce undefined for a resolvable module.
+    //  * Synthetic modules (CJS, JSON, text, etc.) yield the default export,
+    //    which is where their value lives and may be a primitive (e.g. a text
+    //    module's string).
+    //
+    // The require_returns_default_export and export_commonjs_default compat
+    // flags describe legacy-registry behavior only and are deliberately not
+    // consulted here.
     static constexpr auto maybeUnwrapDefault =
         [](Lock& js, v8::Local<v8::Module> module, const Module& moduleDef,
             RequireOption option) -> v8::MaybeLocal<v8::Value> {
       auto ns = module->GetModuleNamespace().As<v8::Object>();
-      if ((option & RequireOption::UNWRAP_DEFAULT) == RequireOption::UNWRAP_DEFAULT) {
-        // User bundle ESM returns the full namespace, matching Node.js require(esm),
-        // unless the module has __cjsUnwrapDefault set (a convention used by bundlers
-        // like esbuild when transpiling CJS to ESM), in which case we return the
-        // default export.
-        if (moduleDef.type() == Module::Type::BUNDLE && moduleDef.isEsm()) {
-          auto unwrap = ns->Get(js.v8Context(), js.strIntern("__cjsUnwrapDefault"_kj));
-          v8::Local<v8::Value> unwrapValue;
-          if (unwrap.ToLocal(&unwrapValue) && unwrapValue->BooleanValue(js.v8Isolate)) {
-            return check(ns->Get(js.v8Context(), js.strIntern("default"_kj)));
-          }
+      if ((option & RequireOption::UNWRAP_DEFAULT) != RequireOption::UNWRAP_DEFAULT) {
+        return ns;
+      }
+
+      auto context = js.v8Context();
+      if (moduleDef.isEsm()) {
+        auto unwrap = ns->Get(context, js.strIntern("__cjsUnwrapDefault"_kj));
+        v8::Local<v8::Value> unwrapValue;
+        if (unwrap.ToLocal(&unwrapValue) && unwrapValue->BooleanValue(js.v8Isolate)) {
+          return check(ns->Get(context, js.strIntern("default"_kj)));
+        }
+
+        bool hasModuleExports = false;
+        if (!ns->Has(context, js.strIntern("module.exports"_kj)).To(&hasModuleExports)) {
+          return {};
+        }
+        if (hasModuleExports) {
+          return check(ns->Get(context, js.strIntern("module.exports"_kj)));
+        }
+
+        if (moduleDef.type() == Module::Type::BUNDLE ||
+            moduleDef.type() == Module::Type::FALLBACK) {
           return ns;
         }
-        // Everything else (builtins, synthetic modules) returns the default export.
-        // Note: The default export may be a primitive (e.g. Text module returns a string).
-        // We cast to v8::Object here because require() returns MaybeLocal<Object>, but
-        // callers immediately convert to JsValue. The cast is safe because v8::Local is
-        // just a pointer wrapper.
-        return check(ns->Get(js.v8Context(), js.strIntern("default"_kj)));
+
+        bool hasDefault = false;
+        if (!ns->Has(context, js.strIntern("default"_kj)).To(&hasDefault)) {
+          return {};
+        }
+        if (!hasDefault) {
+          return ns;
+        }
       }
-      return ns;
+
+      return check(ns->Get(context, js.strIntern("default"_kj)));
     };
 
     // Note: This lambda takes v8::Local<v8::Module> and const Module& directly

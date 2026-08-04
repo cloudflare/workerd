@@ -1993,6 +1993,90 @@ KJ_TEST("UNWRAP_DEFAULT returns namespace for bundle ESM, default for others") {
   });
 }
 
+KJ_TEST("UNWRAP_DEFAULT honors module.exports, marker order, and builtin fallback") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+
+    // Node's official require(esm) mechanism: a string-named 'module.exports'
+    // export controls the require() result.
+    auto modExports = kj::str("const impl = { hello: 1 };\n"
+                              "export { impl as 'module.exports' };\n"
+                              "export default 'not-this';\n");
+    bundleBuilder.addEsmModule("mod-exports", modExports);
+
+    // When both markers are present, __cjsUnwrapDefault wins (matching the
+    // legacy registry's check order).
+    auto bothMarkers = kj::str("export const __cjsUnwrapDefault = true;\n"
+                               "const impl = 'module-exports-value';\n"
+                               "export { impl as 'module.exports' };\n"
+                               "export default 'default-value';\n");
+    bundleBuilder.addEsmModule("both-markers", bothMarkers);
+
+    // Builtin ESM with and without a default export.
+    ModuleBundle::BuiltinBuilder builtinBuilder(ModuleBundle::BuiltinBuilder::Type::BUILTIN);
+    static const auto kWithDefault = "test:with-default"_url;
+    static const auto kNoDefault = "test:no-default"_url;
+    auto withDefault = kj::str("export default 'builtin-default'; export const extra = 1;");
+    auto noDefault = kj::str("export const onlyNamed = 42;");
+    builtinBuilder.addEsm(kWithDefault, withDefault);
+    builtinBuilder.addEsm(kNoDefault, noDefault);
+
+    // Fallback-service ESM serves user code and behaves like bundle ESM.
+    auto fallback = ModuleBundle::newFallbackBundle(
+        [](const ResolveContext& context) -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+      auto source = kj::heapArray<const char>(
+          "export default 'fb-default'; export const named = 'fb';"_kj.asArray());
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(Module::newEsm(
+          context.normalizedSpecifier.clone(), Module::Type::FALLBACK, kj::mv(source)));
+    });
+
+    auto registry = ModuleRegistry::Builder(BASE, ModuleRegistry::Builder::Options::ALLOW_FALLBACK)
+                        .add(bundleBuilder.finish())
+                        .add(builtinBuilder.finish())
+                        .add(kj::mv(fallback))
+                        .finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    static constexpr auto req = [](Lock& js, kj::StringPtr spec) {
+      return KJ_ASSERT_NONNULL(
+          ModuleRegistry::tryResolveModuleNamespace(js, spec, ResolveContext::Type::BUNDLE,
+              ResolveContext::Source::REQUIRE, kj::none, modules::UnwrapDefault::YES));
+    };
+
+    JSG_TRY(js) {
+      // The 'module.exports' named export controls the result.
+      JsValue me = req(js, "file:///mod-exports");
+      auto meObj = KJ_ASSERT_NONNULL(me.tryCast<JsObject>());
+      KJ_ASSERT(kj::str(meObj.get(js, "hello")) == "1");
+
+      // __cjsUnwrapDefault wins over 'module.exports'.
+      KJ_ASSERT(kj::str(req(js, "file:///both-markers")) == "default-value");
+
+      // Builtin ESM with a default export unwraps it.
+      KJ_ASSERT(kj::str(req(js, "test:with-default")) == "builtin-default");
+
+      // Builtin ESM without a default export falls back to the namespace
+      // rather than producing undefined.
+      JsValue nd = req(js, "test:no-default");
+      auto ndObj = KJ_ASSERT_NONNULL(nd.tryCast<JsObject>());
+      KJ_ASSERT(kj::str(ndObj.get(js, "onlyNamed")) == "42");
+
+      // Fallback-service ESM yields the namespace, like bundle ESM.
+      JsValue fb = req(js, "file:///fb-esm");
+      auto fbObj = KJ_ASSERT_NONNULL(fb.tryCast<JsObject>());
+      KJ_ASSERT(kj::str(fbObj.get(js, "named")) == "fb");
+      KJ_ASSERT(kj::str(fbObj.get(js, "default")) == "fb-default");
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
+  });
+}
+
+// ======================================================================================
+
 KJ_TEST("REQUIRE_ESM rejects non-ESM entry points before evaluation") {
   PREAMBLE([&](Lock& js) {
     CompilationObserver compilationObserver;
