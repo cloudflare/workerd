@@ -95,6 +95,17 @@ jsg::Promise<ReadResult> ReaderImpl::read(
 
     // Both read() and readAtLeast() pass atLeast in element count.
     // Convert to bytes before validation and forwarding to the controller.
+    //
+    // Reject on the raw element count first. An element occupies at least one byte, so a count
+    // that already exceeds the buffer can never be satisfied, and rejecting here bounds atLeast by
+    // the buffer size. That keeps the multiplication below from overflowing however large buffers
+    // are allowed to get, and it catches a negative minElements, which reaches this point
+    // sign-extended to a huge size_t.
+    if (atLeast > options.byteLength) {
+      return js.rejectedPromise<ReadResult>(js.typeError(kj::str("Minimum bytes to read (", atLeast,
+          ") exceeds size of buffer (", options.byteLength, ").")));
+    }
+
     jsg::JsArrayBufferView source(options.bufferView.getHandle(js));
     auto elementSize = source.getElementSize();
     atLeast = atLeast * elementSize;

@@ -516,12 +516,13 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
             js.typeError("Unable to allocate memory for read"_kj));
       }
 
-      // The destination for the read below is derived from byteOffset/byteLength, which the BYOB
-      // path copies out of the in-cage v8::ArrayBufferView metadata. Were that metadata corrupted,
-      // the destination would land outside the allocation, so bound it against the BackingStore's
-      // length, which lives outside the V8 sandbox. The comparison is arranged to avoid overflowing
-      // when both values are attacker-chosen. For a resizable buffer this length is the maximum
-      // reservation rather than the live size; the branch below narrows it to the live size.
+      // byteOffset/byteLength are copied out of the in-cage v8::ArrayBufferView metadata on the
+      // BYOB path, so a corrupted view could place the destination outside the allocation. Bound
+      // them against the BackingStore's length, which lives outside the V8 sandbox and so is not
+      // reachable from an in-cage write. Testing byteOffset first keeps the subtraction from
+      // underflowing and avoids summing two untrusted lengths; that stays correct no matter how
+      // large the sandbox, and hence the maximum buffer size, becomes. For a resizable buffer this
+      // length is the maximum reservation rather than the live size; the branch below narrows it.
       auto backingSize = theStore->GetBackingStore()->ByteLength();
       if (byteOffset > backingSize || byteLength > backingSize - byteOffset) {
         readPending = false;
@@ -629,7 +630,11 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
           });
         }
 
-        if (byteOffset + amount > handle->ByteLength()) {
+        // Re-derive the deliverable length from the size the buffer has now. byteOffset and amount
+        // are compared against it without being summed, for the same reason as the bounds check at
+        // read time.
+        auto liveLength = handle->ByteLength();
+        if (byteOffset > liveLength || amount > liveLength - byteOffset) {
           // If the buffer was resized smaller, we return a truncated result.
 
           IoContext::current().logWarningOnce(
@@ -640,20 +645,20 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
               "streams_byob_reader_detaches_buffer compatibility flag, to prevent this from "
               "happening."_kj);
 
-          if (byteOffset >= handle->ByteLength()) {
+          if (byteOffset >= liveLength) {
             auto u8 = v8::Uint8Array::New(store.getHandle(js), 0, 0);
             return js.resolvedPromise(ReadResult{
               .value = jsg::JsValue(u8).addRef(js),
               .done = false,
             });
           }
-          amount = handle->ByteLength() - byteOffset;
+          amount = liveLength - byteOffset;
         }
 
         // Deliver the bytes from the temporary into the caller's BackingStore. The checks above
-        // guarantee the buffer is still attached and that byteOffset + amount fits within its live
-        // length, and `amount <= byteLength == tempBuffer.size()`.
-        KJ_ASSERT(byteOffset + amount <= handle->ByteLength());
+        // guarantee the buffer is still attached and that [byteOffset, byteOffset + amount) lies
+        // within its live length, and `amount <= byteLength == tempBuffer.size()`.
+        KJ_ASSERT(byteOffset <= liveLength && amount <= liveLength - byteOffset);
         auto destPtr = static_cast<kj::byte*>(handle->GetBackingStore()->Data());
         memcpy(destPtr + byteOffset, tempBuffer.begin(), amount);
 
