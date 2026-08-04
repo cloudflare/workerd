@@ -111,6 +111,8 @@ export default class WorkflowsMock extends WorkerEntrypoint {
     return deleteBatchInstances(options);
   }
 
+  async deleteInstance(_id) {}
+
   async pause(_id) {}
 
   async resume(_id) {}

@@ -2071,7 +2071,7 @@ kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethod(jsg::Lock& js, kj::Stri
   // each time the method is called (handled by `getClientForOneCall()`, below).
 
   auto flags = FeatureFlags::get(js);
-  if (!flags.getFetcherRpc() && !flags.getWorkerdExperimental()) {
+  if (!rpcCompatGateBypassed && !flags.getFetcherRpc() && !flags.getWorkerdExperimental()) {
     // We need to pretend that we haven't implemented a wildcard property, as unfortunately it
     // breaks some workers in the wild. We would, however, like to warn users who are trying to use
     // RPC so they understand why it isn't working.
