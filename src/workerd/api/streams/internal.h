@@ -5,6 +5,7 @@
 #pragma once
 
 #include "common.h"
+#include "readable.h"
 #include "writable.h"
 
 #include <workerd/io/io-context.h>
@@ -172,7 +173,10 @@ class ReadableStreamInternalController: public ReadableStreamController, public 
   //   Unlocked -> ReaderLocked (lockReader() called)
   //   Unlocked -> PipeLocked (tryPipeLock() called)
   //   ReaderLocked -> Unlocked (releaseReader() called)
-  //   PipeLocked -> Unlocked (release() or doClose/doError called)
+  //   PipeLocked -> Unlocked (releasePipeLock() called)
+  //     Only the pipe machinery performs this transition, after dropping the
+  //     kj::Ptr it holds to the PipeLocked state's PipeController. doClose() and
+  //     doError() deliberately leave the pipe lock in place.
   //   Locked -> (remains until stream is done)
   using ReadLockState = StateMachine<Unlocked, Locked, PipeLocked, ReaderLocked>;
   ReadLockState readState = ReadLockState::create<Unlocked>();
@@ -318,7 +322,9 @@ class WritableStreamInternalController: public WritableStreamController {
   //   Unlocked -> PipeLocked (tryPipeFrom() called)
   //   WriterLocked -> Unlocked (releaseWriter() called)
   //   WriterLocked -> Locked (doClose/doError called - stream closed but writer still attached)
-  //   PipeLocked -> Unlocked (pipe completes)
+  //   PipeLocked -> Unlocked (pipe completes, or doClose/doError/drain during an
+  //     active pipe; the source's pipe lock is released separately, by the pipe
+  //     machinery's queue-teardown paths via Pipe::releaseSource())
   using WriteLockState = StateMachine<Unlocked, Locked, PipeLocked, WriterLocked>;
   WriteLockState writeState = WriteLockState::create<Unlocked>();
 

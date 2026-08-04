@@ -229,7 +229,9 @@ class WritableLockImpl {
   //   Unlocked -> WriterLocked (lockWriter() called)
   //   Unlocked -> PipeLocked (pipeLock() called)
   //   WriterLocked -> Unlocked (releaseWriter() called)
-  //   PipeLocked -> Unlocked (releasePipeLock() called)
+  //   PipeLocked -> Unlocked (releasePipeLock() called, or doClose/doError when the
+  //     controller reaches a terminal state mid-pipe; those release the source's pipe
+  //     lock via PipeLocked::releaseSource() first)
   using LockState = StateMachine<Unlocked, Locked, WriterLocked, PipeLocked>;
   LockState state = LockState::template create<Unlocked>();
 
@@ -3880,8 +3882,22 @@ void WritableStreamJsController::doClose(jsg::Lock& js) {
   KJ_IF_SOME(locked, lock.state.tryGetUnsafe<WriterLocked>()) {
     maybeResolvePromise(js, locked.getClosedFulfiller());
     maybeResolvePromise(js, locked.getReadyFulfiller());
-  } else {
-    (void)lock.state.transitionFromTo<WritableLockImpl::PipeLocked, Unlocked>();
+  } else KJ_IF_SOME(pipeLocked, lock.state.tryGetUnsafe<WritableLockImpl::PipeLocked>()) {
+    // The destination closed while a pipe holds the lock. This happens when a close was
+    // already queued or in flight when the pipe started (the pipe loop's own close only
+    // completes after the loop has released both locks). We must release the source's
+    // pipe lock here; nothing else will: the pipe loop bails out as soon as the
+    // write-side lock state is gone, and doError() never runs for a stream that reached
+    // Closed. Closing propagates backward per the spec, so cancel the source unless
+    // preventCancel. releaseSource() is idempotent, making this safe when the pipe's
+    // write-failure path already released the source (a write rejected by the queued
+    // close).
+    if (!pipeLocked.flags.preventCancel) {
+      pipeLocked.releaseSource(js, js.typeError("This destination writable stream is closed."_kj));
+    } else {
+      pipeLocked.releaseSource(js);
+    }
+    lock.state.transitionTo<Unlocked>();
   }
 }
 
