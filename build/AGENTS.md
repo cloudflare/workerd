@@ -36,7 +36,7 @@ that adds workerd-specific static checks:
 
 - `jsg-visit-for-gc`: flags JSG resource types whose visitable fields
   (`jsg::Ref`, `jsg::JsRef`, `jsg::V8Ref`, `jsg::Function`, `jsg::Promise`,
-  `jsg::BufferSource`, `jsg::Value`, etc., plus `kj::Maybe`/`Array`/`Vector`/
+  `jsg::Value`, etc., plus `kj::Maybe`/`Array`/`Vector`/
   `OneOf` and `jsg::Optional` wrappers thereof) are missing from `visitForGc()`.
 - `workerd-consume`: flags calls to methods annotated with `WD_CONSUME` when
   the call is made directly through `kj::Ptr` instead of through
@@ -74,7 +74,7 @@ supports this:
 
 1. Add the check to `.clang-tidy` Checks list
 2. Add an entry to `CHECK_PATH_FILTERS` with an empty list (runs nowhere)
-3. Add packages as they are cleaned up
+3. Add file paths as they are cleaned up
 4. Remove the entry once fully rolled out (runs everywhere)
 
 Example:
@@ -82,14 +82,14 @@ Example:
 ```python
 CHECK_PATH_FILTERS = {
     "workerd-unsafe-continuation-capture": [
-        "//src/workerd/io",
-        "//src/workerd/api",
+        "src/workerd/io",
+        "src/workerd/api",
     ],
 }
 ```
 
-Package prefixes match themselves and all subpackages (`//src/workerd/io`
-matches `//src/workerd/io:*` and `//src/workerd/io/subdir:*`).
+Path prefixes match all files under that directory (`src/workerd/io`
+matches `src/workerd/io/foo.c++` and `src/workerd/io/subdir/bar.c++`).
 
 To run a filtered check everywhere during development:
 

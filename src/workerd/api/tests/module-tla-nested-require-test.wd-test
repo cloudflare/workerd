@@ -1,0 +1,65 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "module-tla-nested-require-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "module-tla-nested-require-test.js"),
+
+          # Regression coverage for a V8 fatal CHECK (status() >= kEvaluatingAsync). "entry"
+          # statically imports a top-level-await module ("leaf") and then a CommonJS module
+          # ("pump"). leaf suspends and becomes an async child while entry is still
+          # kEvaluating; pump's nested require('trivial') then drained the microtask queue,
+          # running leaf's fulfillment callback too early and aborting the process in
+          # GatherAvailableAncestors -> GetCycleRoot.
+          (name = "entry",
+           esModule = "import { v } from 'leaf';\nimport 'pump';\nexport default v;\n"),
+          (name = "leaf",
+           esModule = "await Promise.resolve();\nexport const v = 1;\n"),
+          (name = "pump", commonJsModule = "require('trivial'); exports.ok = true;"),
+          (name = "trivial", commonJsModule = "exports.ok = true;"),
+
+          # Same crash, reached through an inline nested dynamic import instead of require().
+          # dyn-entry statically imports the TLA leaf (giving leaf an async-parent link to the
+          # still-kEvaluating dyn-entry) and then dyn-pump, whose top level dynamically imports
+          # a TLA module. With no active IoContext that instantiation runs inline at non-zero
+          # evaluation depth, so it must not drain either.
+          (name = "dyn-entry",
+           esModule = "import { v } from 'dyn-leaf';\nimport 'dyn-pump';\nexport default v;\n"),
+          # A dedicated leaf: once a leaf is kEvaluated it can no longer form the
+          # async-child-of-a-still-kEvaluating-parent link, so sharing one would leave only the
+          # first graph able to reproduce the crash.
+          (name = "dyn-leaf", esModule = "await Promise.resolve();\nexport const v = 1;\n"),
+          (name = "dyn-pump", esModule = "import('dyn-tla');\nexport const ok = 1;\n"),
+          (name = "dyn-tla",
+           esModule = "await Promise.resolve();\nexport const d = 1;\n"),
+
+          # Dynamic import runs at evaluation depth 0, so the drain that settles this
+          # top-level await must still happen.
+          (name = "dynamic-tla",
+           esModule = "await Promise.resolve();\nexport const value = 42;\n"),
+
+          # Top-level await that never settles.
+          (name = "never-settles",
+           esModule = "await new Promise(() => {});\nexport const nope = 1;\n"),
+
+          # Throws during evaluation; proves the RAII depth scope does not leak.
+          # A nested require() of a module whose top-level await never settles cannot be
+          # chained on (require is synchronous), so it must report the unsettled top-level
+          # await rather than hand back a half-evaluated namespace.
+          (name = "req-entry", esModule = "import 'req-pump';\nexport default 1;\n"),
+          # Deliberately a separate module from never-settles: a failed instantiation leaves
+          # the module kEvaluating, and instantiateModule() early-returns for that status, so
+          # sharing it would mask the other test's expected failure.
+          (name = "req-pump", commonJsModule = "module.exports = require('req-never-settles');"),
+          (name = "req-never-settles",
+           esModule = "await new Promise(() => {});\nexport const x = 1;\n"),
+
+          (name = "boom", esModule = "throw new Error('boom');\n"),
+        ],
+        compatibilityFlags = ["nodejs_compat"]
+      )
+    ),
+  ],
+);

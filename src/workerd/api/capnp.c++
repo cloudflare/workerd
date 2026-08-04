@@ -568,8 +568,8 @@ kj::Promise<void> CapnpServer::call(capnp::InterfaceSchema::Method method,
   kj::Promise<void> result = nullptr;
 
   bool live = ioContext->runIfAlive([&](IoContext& rc) {
-    result =
-        rc.run([this, method, rpcContext, &rc](Worker::Lock& lock) mutable -> kj::Promise<void> {
+    result = rc.run(
+        [this, method, rpcContext](Worker::Lock& lock, IoContext& rc) mutable -> kj::Promise<void> {
       jsg::Lock& js = lock;
       auto handle = object.getHandle(js);
       auto methodName = method.getProto().getName();

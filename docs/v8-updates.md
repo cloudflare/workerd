@@ -70,7 +70,8 @@ from the V8 directory.
     where `<tarball_filename>` is the file available at
     `https://github.com/v8/v8/archive/refs/tags/<new_version>.tar.gz`
 
-10. Update V8's dependencies in `v8.MODULE.bazel` and `deps.MODULE.bazel`.
+10. Update V8's dependencies in `deps.jsonc`, then regenerate `deps.MODULE.bazel` by
+    running `update-deps.py`.
 
     You can find the commit versions for V8's dependencies under `<path_to_v8>/DEPS`.
 
@@ -86,3 +87,64 @@ from the V8 directory.
      ```
 
 12. Commit your workerd changes and push them for review.
+
+## Update Helper
+
+`ci/v8_update.py` provides an alternative workflow for automating the
+mechanical parts of steps 1 through 10. It has not been thoroughly tested, so review its
+changes carefully and fall back to the manual workflow above if it fails.
+
+Check whether Chrome Beta uses a newer V8 version:
+
+```sh
+python3 ci/v8_update.py check-update
+```
+
+The command prints `<current_version> -> <new_version>` and exits with status 1 when an
+update is available. It prints nothing and exits successfully when workerd is current.
+Pass `--machine-readable` to print only the new version.
+
+Run the update using the reported version:
+
+```sh
+python3 ci/v8_update.py update <new_version>
+```
+
+The helper creates a shallow V8 checkout at `/tmp/workerd-v8/v8`, applies and
+rebases the patches, regenerates `patches/v8/*.patch`, and updates:
+
+- V8's `VERSION`, `INTEGRITY`, patch list, and ICU commit in
+  `build/deps/v8.MODULE.bazel`;
+- the `dragonbox`, `fast_float`, `fp16`, and `highway` commits in
+  `build/deps/deps.jsonc`.
+
+If the rebase stops because of conflicts, resolve and continue it in the temporary
+checkout:
+
+```sh
+cd /tmp/workerd-v8/v8
+git status
+# Resolve the conflicts and stage the files.
+git rebase --continue
+```
+
+Repeat until the rebase completes. Patch conflicts require human review to ensure that
+workerd-specific behavior is preserved. Then return to the workerd checkout and finish
+the update:
+
+```sh
+python3 ci/v8_update.py finish <new_version>
+```
+
+Do not run `finish` until the rebase has completed. It regenerates the patches and
+updates the pins listed above.
+
+The helper does not run `update-deps.py`. Compare the old and new V8 `DEPS` files for
+changes to `dragonbox`, `fast_float`, `fp16`, `highway`, `perfetto`, and `simdutf`, then
+run the dependency updater for each changed revision:
+
+```sh
+python3 build/deps/update-deps.py <dependency>
+```
+
+Complete steps 11 and 12 from the manual workflow after reviewing the generated changes.

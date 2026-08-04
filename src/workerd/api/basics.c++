@@ -17,6 +17,7 @@
 namespace workerd::api {
 
 namespace {
+constexpr kj::StringPtr kAbortEvent = "abort"_kj;
 // "Special" events are the global addEventListener(...) events that the runtime itself
 // will emit for various things (e.g. the "fetch" event). When using module syntax, these
 // are not emitted as events and instead should be registered as functions on the exported
@@ -159,7 +160,7 @@ uint EventTarget::EventHandlerHashCallbacks::hashCode(const EventHandler::Handle
 
 jsg::Ref<Event> Event::constructor(jsg::Lock& js, kj::String type, jsg::Optional<Init> init) {
   static const Init defaultInit;
-  return js.alloc<Event>(kj::mv(type), init.orDefault(defaultInit), false /* not trusted */);
+  return js.alloc<Event>(kj::mv(type), init.orDefault(defaultInit), Trusted::NO);
 }
 
 kj::StringPtr Event::getType() {
@@ -303,7 +304,7 @@ void EventTarget::addEventListener(jsg::Lock& js,
                   removeEventListener(js, kj::mv(type), kj::mv(handler), kj::none);
                 });
 
-        return signal->newNativeHandler(js, kj::str("abort"), kj::mv(func), true);
+        return signal->newNativeHandler(js, kj::str(kAbortEvent), kj::mv(func), true);
       });
 
       auto eventHandler = kj::heap<EventHandler>(
@@ -719,7 +720,7 @@ jsg::Ref<AbortSignal> AbortSignal::any(jsg::Lock& js,
       .unwrapped = JSG_REQUIRE_NONNULL(handler.tryUnwrap(js, fn.As<v8::Value>()), TypeError,
           "Unable to create AbortSignal.any handler")};
 
-    sig->addEventListener(js, kj::str("abort"), kj::mv(identified),
+    sig->addEventListener(js, kj::str(kAbortEvent), kj::mv(identified),
         AddEventListenerOptions{// Once the abort is triggered, this handler should remove itself.
           .once = true,
           // Each of the followed signals will maintain a strong reference to this new
@@ -782,7 +783,7 @@ void AbortSignal::triggerAbort(
   // of the spec here should be just fine.
   KJ_DEFER(removeAllHandlers());
 
-  dispatchEventImpl(js, js.alloc<Event>(kj::str("abort")));
+  dispatchEventImpl(js, js.alloc<Event>(kAbortEvent));
 }
 
 void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
@@ -925,9 +926,9 @@ void AbortSignal::subscribeToRpcAbort(jsg::Lock& js) {
   // though, we don't want to awaitIo() since it blocks hibernation in actors.
 
   KJ_IF_SOME(promise, rpcAbortPromise) {
-    IoContext::current().awaitIo(js, kj::mv(*promise), [this, self = JSG_THIS](jsg::Lock& js) {
-      KJ_IF_SOME(r, deserializePendingReason(js)) {
-        triggerAbort(js, r);
+    IoContext::current().awaitIo(js, kj::mv(*promise), [self = JSG_THIS](jsg::Lock& js) mutable {
+      KJ_IF_SOME(r, self->deserializePendingReason(js)) {
+        self->triggerAbort(js, r);
       }
     });
 

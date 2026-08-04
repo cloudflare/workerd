@@ -180,13 +180,18 @@ namespace workerd::jsg::modules {
 //   closer to a symbolic link or a redirect than a true alias but "alias" is
 //   the term we've used historically with the fallback service in the original
 //   implementation so we're sticking with it for now.
-// * Import attributes are not currently implemented but will be in a future
-//   iteration. For now, if any import attributes are specified an error will
-//   be thrown.
+// * Import attributes support type: "json" for JSON modules. Unsupported
+//   attribute keys are rejected, and the "text" and "bytes" types are
+//   recognized but not yet supported.
 // * ES modules all support the compile cache. When the ModuleRegistry is
 //   shared across multiple replicas of a Worker, the compile cache will speed
 //   up module compilation since the same compile cache can be used across all
 //   replicas.
+
+// Converts a V8 specifier string to a kj::String, handling one-byte strings
+// (which carry raw UTF-8 bytes) without double-encoding. Used by every
+// resolution path so require() and import() treat specifiers identically.
+kj::String specifierToString(jsg::Lock& js, v8::Local<v8::String> spec);
 
 // The ResolveContext identifies the module that is being resolved along with
 // other key bits of information that may be used to resolve the module.
@@ -680,9 +685,7 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
       // checked. The fallback service should only be used for local dev.
       ALLOW_FALLBACK = 1 << 0,
     };
-    Builder(const ResolveObserver& observer,
-        const jsg::Url& bundleBase,
-        Options options = Options::NONE);
+    Builder(const jsg::Url& bundleBase, Options options = Options::NONE);
     KJ_DISALLOW_COPY_AND_MOVE(Builder);
 
     Builder& add(kj::Own<ModuleBundle> bundle) KJ_LIFETIMEBOUND;
@@ -699,7 +702,6 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
     bool allowsFallback() const;
 
     // One slot for each of ModuleBundle::Type
-    const ResolveObserver& observer;
     const jsg::Url& bundleBase;
     const Options options;
     kj::FixedArray<kj::Vector<kj::Own<ModuleBundle>>, ModuleRegistry::kBundleCount> bundles_;
@@ -708,8 +710,8 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
     friend class ModuleRegistry;
   };
 
-  kj::Maybe<const Module&> lookup(
-      const ResolveContext& context) const KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
+  kj::Maybe<const Module&> lookup(const ResolveContext& context,
+      const ResolveObserver& observer) const KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
 
   // Attaches the ModuleRegistry to the given isolate by creating an IsolateModuleRegistry
   // and linking that to the isolate.
@@ -763,8 +765,7 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
     Impl(kj::ArrayPtr<kj::Vector<kj::Own<ModuleBundle>>> bundles);
   };
 
-  const ResolveObserver& observer;
-  const jsg::Url& bundleBase;
+  jsg::Url bundleBase;
   kj::MutexGuarded<Impl> impl;
   // Marked mutable because kj::Function::operator() is non-const, but the eval
   // callback is conceptually const — it is only ever invoked while holding the

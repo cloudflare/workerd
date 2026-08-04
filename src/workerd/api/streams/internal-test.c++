@@ -947,6 +947,80 @@ KJ_TEST("ReadableStreamBYOBReader rejects read after releaseLock") {
   });
 }
 
+// ======================================================================================
+// BYOB read destination bounds validation
+//
+// ReadableStreamInternalController::read() derives the tryRead() destination from the
+// byteOffset/byteLength in ByobOptions, which are copied out of the in-cage
+// v8::ArrayBufferView metadata. If those values disagree with the backing store's real
+// extent, the destination lands outside the allocation and tryRead() writes there. The
+// controller must reject the read rather than issue it.
+//
+// ReadableStreamBYOBReader always derives the pair from a live view, so these
+// combinations cannot be produced through it. The tests drive the controller directly.
+
+// Records the destination it is handed without writing to it, so that an unvalidated read
+// is observable without performing the out-of-bounds write it would otherwise do.
+class RecordingSource final: public ReadableStreamSource {
+ public:
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    called = true;
+    return static_cast<size_t>(0);
+  }
+
+  bool called = false;
+};
+
+void expectByobReadOutOfBoundsRejected(size_t byteOffset, size_t byteLength) {
+  static constexpr size_t kBufferSize = 64;
+
+  auto fixture = makeStreamTestFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto source = kj::heap<RecordingSource>();
+    auto& sourceRef = *source;
+    auto rs = env.js.alloc<ReadableStream>(env.context, kj::mv(source));
+
+    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, kBufferSize);
+    auto view = v8::Uint8Array::New(buffer, 0, kBufferSize);
+
+    auto options = ReadableStreamController::ByobOptions{
+      .bufferView = env.js.v8Ref(view.As<v8::ArrayBufferView>()),
+      .byteOffset = byteOffset,
+      .byteLength = byteLength,
+      .atLeast = 1,
+      .detachBuffer = false,
+    };
+
+    auto maybePromise = rs->getController().read(env.js, kj::mv(options));
+    auto promise = kj::mv(KJ_ASSERT_NONNULL(maybePromise));
+
+    bool rejected = false;
+    kj::mv(promise).catch_(env.js, [&](jsg::Lock& js, jsg::Value reason) -> ReadResult {
+      rejected = true;
+      auto ex = js.exceptionToKj(kj::mv(reason));
+      KJ_ASSERT(ex.getDescription().contains("exceeds backing buffer bounds"), ex);
+      return {.done = true};
+    });
+    env.js.runMicrotasks();
+
+    KJ_ASSERT(!sourceRef.called, "read was issued with a destination outside the backing store",
+        byteOffset, byteLength, kBufferSize);
+    KJ_ASSERT(rejected, "expected out-of-bounds BYOB read to be rejected", byteOffset, byteLength);
+  });
+}
+
+KJ_TEST("BYOB read rejects byteOffset past the end of the backing store") {
+  expectByobReadOutOfBoundsRejected(64, 64);
+}
+
+KJ_TEST("BYOB read rejects byteLength extending past the backing store") {
+  expectByobReadOutOfBoundsRejected(0, 4096);
+}
+
+KJ_TEST("BYOB read rejects byteOffset plus byteLength overflowing size_t") {
+  expectByobReadOutOfBoundsRejected(kj::maxValue, 64);
+}
+
 KJ_TEST("Writing strings works") {
   auto fixture = makeStreamTestFixture();
   fixture.runInIoContext([&](const TestFixture::Environment& env) {

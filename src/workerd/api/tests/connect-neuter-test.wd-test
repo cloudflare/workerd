@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "connect-neuter-test.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
+        compatibilityFlags = ["nodejs_compat_v2"],
         bindings = [
           (name = "SELF", service = "connect-neuter-test"),
         ],

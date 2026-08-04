@@ -272,3 +272,43 @@ export const byobAutoAllocateSizes = {
     }
   },
 };
+
+// A partial BYOB response that does not yet satisfy `atLeast` leaves the read request's
+// fill offset at a byte count that is not a multiple of the view's element size, and the
+// byobRequest view is rebuilt from that offset. Reading one byte at a time into a
+// Uint16Array via readAtLeast() exercises that misaligned rebuild.
+export const byobPartialRespondMisalignsFillOffset = {
+  async test() {
+    let responds = 0;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      pull(controller) {
+        const view = controller.byobRequest.view;
+        new Uint8Array(view.buffer, view.byteOffset, 1)[0] = ++responds;
+        controller.byobRequest.respond(1);
+      },
+    });
+
+    const reader = rs.getReader({ mode: 'byob' });
+    // atLeast is 2 elements == 4 bytes, so this needs four single-byte responses, three
+    // of which land on an odd (misaligned) fill offset.
+    const { value, done } = await reader.readAtLeast(2, new Uint16Array(3));
+
+    ok(!done);
+    ok(value instanceof Uint16Array);
+    strictEqual(value.length, 2);
+    strictEqual(responds, 4);
+
+    const asBytes = new Uint8Array(
+      value.buffer,
+      value.byteOffset,
+      value.byteLength
+    );
+    strictEqual(asBytes[0], 1);
+    strictEqual(asBytes[1], 2);
+    strictEqual(asBytes[2], 3);
+    strictEqual(asBytes[3], 4);
+
+    reader.releaseLock();
+  },
+};

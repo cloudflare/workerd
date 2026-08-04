@@ -29,6 +29,18 @@ const unitTests :Workerd.Config = (
         streamingTails = ["log"],
       )
     ),
+    ( name = "large-log",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "stw-large-log-subject.js")
+        ],
+        bindings = [
+          (name = "SERVICE", service = "large-log"),
+        ],
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        streamingTails = ["log"],
+      )
+    ),
     (name = "alarms", worker = .alarmsWorker),
     (name = "hiber", worker = .hiberWorker),
     (name = "js-rpc-test", worker = .jsRpcWorker),
@@ -43,7 +55,7 @@ const unitTests :Workerd.Config = (
             name = "connect-handler-test-local-address-endpoint",
             entrypoint = "LocalAddressEndpoint")),
         ],
-        streamingTails = ["log"],
+        streamingTails = ["log", "tail-worker-throwing"],
       )
     ),
     ( name = "connect-handler-test-local-address-endpoint",
@@ -51,7 +63,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
+        compatibilityFlags = ["nodejs_compat_v2"],
       )
     ),
     ( name = "connect-handler-test-proxy",
@@ -59,7 +71,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
+        compatibilityFlags = ["nodejs_compat_v2"],
       )
     ),
     ( name = "connect-handler-test-endpoint",
@@ -67,7 +79,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
+        compatibilityFlags = ["nodejs_compat_v2"],
       )
     ),
     ( name = "internet", network = ( allow = ["private"] ) ),
@@ -96,7 +108,16 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "tail-worker-test-no-op.js")
         ],
       ),
-    )
+    ),
+    ( name = "tail-worker-throwing",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "tail-worker-test-throw.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat_v2"],
+        streamingTails = ["log"],
+      )
+    ),
   ],
   sockets = [
     (name = "tcp", address = "*:8081", tcp = (), service = "connect-handler-test"),

@@ -257,9 +257,19 @@ inline void LegacyHibernationManagerImpl::removeFromAllWs(HibernatableWebSocket&
 
 kj::Promise<void> LegacyHibernationManagerImpl::handleSocketTermination(
     HibernatableWebSocket& hib, kj::Maybe<kj::Exception>& maybeError) {
+  // A failed termination event must not leave a disconnected socket in either registry.
+  kj::String eventWebSocketId;
+  KJ_DEFER({
+    if (eventWebSocketId.size() > 0) {
+      webSocketsForEventHandler.erase(eventWebSocketId);
+    }
+    dropHibernatableWebSocket(hib);
+  });
+
   kj::Maybe<kj::Promise<void>> event;
   KJ_IF_SOME(error, maybeError) {
     auto websocketId = randomUUID(kj::none);
+    eventWebSocketId = kj::str(websocketId);
     webSocketsForEventHandler.insert(kj::str(websocketId), &hib);
     kj::Maybe<api::HibernatableSocketParams> params;
     if (!hib.hasDispatchedClose && (error.getType() == kj::Exception::Type::DISCONNECTED)) {
@@ -283,8 +293,9 @@ kj::Promise<void> LegacyHibernationManagerImpl::handleSocketTermination(
       .userSpanParent = kj::mv(userSpanParent),
     });
     event = workerInterface
-                ->customEvent(kj::heap<api::HibernatableWebSocketCustomEvent>(
-                    hibernationEventType, kj::mv(KJ_REQUIRE_NONNULL(params)), *this))
+                ->customEvent(kj::rc<api::HibernatableWebSocketCustomEvent>(
+                    hibernationEventType, kj::mv(KJ_REQUIRE_NONNULL(params)), *this)
+                                  .toOwn())
                 .ignoreResult()
                 .attach(kj::mv(workerInterface));
   }
@@ -294,8 +305,6 @@ kj::Promise<void> LegacyHibernationManagerImpl::handleSocketTermination(
   KJ_IF_SOME(promise, event) {
     co_await promise;
   }
-
-  dropHibernatableWebSocket(hib);
 }
 
 kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
@@ -372,7 +381,9 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
     }
 
     auto websocketId = randomUUID(kj::none);
+    auto eventWebSocketId = kj::str(websocketId);
     webSocketsForEventHandler.insert(kj::str(websocketId), &hib);
+    KJ_DEFER(webSocketsForEventHandler.erase(eventWebSocketId));
 
     // Build the event params depending on what type of message we got.
     kj::Maybe<api::HibernatableSocketParams> maybeParams;
@@ -402,8 +413,9 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
     auto workerInterface = loopback->getWorker({
       .userSpanParent = kj::mv(userSpanParent),
     });
-    co_await workerInterface->customEvent(kj::heap<api::HibernatableWebSocketCustomEvent>(
-        hibernationEventType, kj::mv(params), *this));
+    co_await workerInterface->customEvent(
+        kj::rc<api::HibernatableWebSocketCustomEvent>(hibernationEventType, kj::mv(params), *this)
+            .toOwn());
     if (isClose) {
       co_return;
     }

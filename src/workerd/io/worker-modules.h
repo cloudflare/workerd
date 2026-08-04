@@ -84,14 +84,13 @@ jsg::ModuleRegistry::ModuleInfo addCapnpModule(
 // on the TypeWrapper specific to each project.
 template <typename TypeWrapper>
 static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
-    const jsg::ResolveObserver& resolveObserver,
     kj::Maybe<const Worker::Script::ModulesSource&> maybeSource,
     const CompatibilityFlags::Reader& featureFlags,
     const jsg::Url& bundleBase,
     auto setupForApi,
     jsg::modules::ModuleRegistry::Builder::Options options =
         jsg::modules::ModuleRegistry::Builder::Options::NONE) {
-  jsg::modules::ModuleRegistry::Builder builder(resolveObserver, bundleBase, options);
+  jsg::modules::ModuleRegistry::Builder builder(bundleBase, options);
 
   // This callback is used when a module is being loaded to arrange evaluating the
   // module outside of the current IoContext.
@@ -149,45 +148,44 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
             // may not outlive the registry.
             bundleBuilder.addEsmModule(def.name, kj::heapArray<const char>(content.body), flags);
           } else {
-            // The content.body points into process-lifetime capnp message
-            // buffers. We can safely pass a non-owning reference.
+            // The content.body points into memory that outlives the module
+            // registry. In workerd this is a process-lifetime capnp message
+            // buffer; in edgeworker, it is the disowned script-fetcher response
+            // owned by the VirtualFileSystem (which is a sibling of the registry
+            // in Worker::Script::Impl). In edgeworker, the copy is ensured by
+            // shouldCopyScriptFetcherResponse() including the NMR flag.
             bundleBuilder.addEsmModule(def.name, content.body, flags);
           }
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
-          // The content.body is memory-resident and is expected to outlive the
-          // module registry. We can safely pass a reference to the module handler.
-          // It will not be copied into a JS string until the module is actually
-          // evaluated.
+          // The content.body resides in memory that outlives the module registry
+          // (see the ESM comment above for the ownership details). It will not be
+          // copied into a JS string until the module is actually evaluated.
           bundleBuilder.addSyntheticModule(def.name,
               jsg::modules::Module::newTextModuleHandler(content.body), nullptr,
               jsg::modules::Module::ContentType::TEXT);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
-          // The content.body is memory-resident and is expected to outlive the
-          // module registry. We can safely pass a reference to the module handler.
-          // It will not be copied into a JS string until the module is actually
-          // evaluated.
+          // The content.body resides in memory that outlives the module registry
+          // (see the ESM comment above for the ownership details). It will not be
+          // copied into a JS array buffer until the module is actually evaluated.
           bundleBuilder.addSyntheticModule(def.name,
               jsg::modules::Module::newDataModuleHandler(content.body), nullptr,
               jsg::modules::Module::ContentType::DATA);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
-          // The content.body is memory-resident and is expected to outlive the
-          // module registry. We can safely pass a reference to the module handler.
-          // It will not be copied into a JS string until the module is actually
-          // evaluated.
+          // The content.body resides in memory that outlives the module registry
+          // (see the ESM comment above for the ownership details).
           bundleBuilder.addWasmModule(def.name, content.body);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
-          // The content.body is memory-resident and is expected to outlive the
-          // module registry. We can safely pass a reference to the module handler.
-          // It will not be copied into a JS string until the module is actually
-          // evaluated.
+          // The content.body resides in memory that outlives the module registry
+          // (see the ESM comment above for the ownership details). It will not be
+          // parsed into a JS value until the module is actually evaluated.
           bundleBuilder.addSyntheticModule(def.name,
               jsg::modules::Module::newJsonModuleHandler(content.body), nullptr,
               jsg::modules::Module::ContentType::JSON);

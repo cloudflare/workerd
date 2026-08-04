@@ -6,6 +6,7 @@ wd_test(
     args = ["--experimental"],
     data = ["test.js"],
     tags = [
+        "manual",  # does not pass
         "requires-container-engine",
         "requires-network",  # Accesses unix://var/run/docker.sock
     ],

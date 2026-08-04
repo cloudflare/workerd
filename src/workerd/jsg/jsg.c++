@@ -365,6 +365,18 @@ void Lock::requestExtraMicrotaskCheckpoint() {
   IsolateBase::from(v8Isolate).requestExtraMicrotaskCheckpoint({});
 }
 
+bool Lock::isEvaluatingModule() {
+  return IsolateBase::from(v8Isolate).isEvaluatingModule();
+}
+
+Lock::ModuleEvaluationScope::ModuleEvaluationScope(Lock& js): js(js) {
+  IsolateBase::from(js.v8Isolate).enterModuleEvaluation({});
+}
+
+Lock::ModuleEvaluationScope::~ModuleEvaluationScope() noexcept(false) {
+  IsolateBase::from(js.v8Isolate).leaveModuleEvaluation({});
+}
+
 void Lock::terminateNextExecution() {
   v8Isolate->TerminateExecution();
 }
@@ -400,7 +412,7 @@ kj::Maybe<JsObject> Lock::resolveInternalModule(kj::StringPtr specifier) {
   auto& isolate = IsolateBase::from(v8Isolate);
   if (isolate.isUsingNewModuleRegistry()) {
     return jsg::modules::ModuleRegistry::tryResolveModuleNamespace(
-        *this, specifier, jsg::modules::ResolveContext::Type::BUILTIN)
+        *this, specifier, jsg::modules::ResolveContext::Type::BUILTIN_ONLY)
         .map([](JsValue val) { return KJ_ASSERT_NONNULL(val.tryCast<JsObject>()); });
   }
 

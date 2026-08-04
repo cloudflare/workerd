@@ -13,13 +13,13 @@
 //! Current limitations:
 //! - most parameters are opaque c++ types
 
+pub mod cxx_worker;
 pub mod error;
 pub mod exception;
 pub mod ffi;
 pub mod kill_switch;
 pub mod ok;
 
-use std::pin::Pin;
 use std::time::SystemTime;
 
 use cxx::KjError;
@@ -33,10 +33,13 @@ pub use kj::http::Service;
 pub use kj::http::ServiceResponse;
 pub use kj::io::AsyncInputStream;
 pub use kj::io::AsyncIoStream;
+pub use kj_rs::KjOwn;
 use outcome_capnp::EventOutcome;
 
+pub use crate::cxx_worker::CxxWorkerInterface;
 pub use crate::ffi::Wrapper;
 pub use crate::ffi::bridge::CustomEvent;
+pub use crate::ffi::bridge::WorkerInterface;
 
 pub type Result<T> = std::result::Result<T, KjError>;
 
@@ -90,7 +93,7 @@ pub trait Interface: kj::http::Service {
     /// immediately; if its callbacks have not run yet, they will not run at all. So, a `CustomEvent`
     /// implementation can hold references to objects it doesn't own as long as the returned promise
     /// will be canceled before those objects go away.
-    async fn custom_event(&mut self, event: Pin<&mut CustomEvent>) -> Result<CustomEventResult>;
+    async fn custom_event(&mut self, event: KjOwn<CustomEvent>) -> Result<CustomEventResult>;
 
     /// Convert `self` into the structure suitable for passing to C++ through FFI layer
     /// To obtain `workerd::WorkerInterface` on C++ side finish wrapping with `fromRust()`

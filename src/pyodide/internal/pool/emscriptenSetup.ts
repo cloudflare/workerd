@@ -45,6 +45,9 @@ function computeVersionTuple(Module: Module): [number, number, number] {
     return [pymajor, pyminor, micro];
   }
   const versionInt = Module.HEAPU32[Module._Py_Version >>> 2];
+  if (versionInt === undefined) {
+    throw new Error('Failed to read Python version');
+  }
   const major = (versionInt >>> 24) & 0xff;
   const minor = (versionInt >>> 16) & 0xff;
   const micro = (versionInt >>> 8) & 0xff;
@@ -253,7 +256,7 @@ export async function instantiateEmscriptenModule(
   for (const _ of featureDetectionMonkeyPatchesContextManager()) {
     // Ignore the returned promise, it won't resolve until we're done preloading dynamic
     // libraries.
-    const _promise = _createPyodideModule(emscriptenSettings).catch((e) =>
+    void _createPyodideModule(emscriptenSettings).catch((e) =>
       emscriptenSettings.rejectReadyPromise(e)
     );
   }

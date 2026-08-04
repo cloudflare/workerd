@@ -13,31 +13,27 @@ namespace {
 // current AsyncContextFrame is storing values that are bound to that
 // IoContext. In that case, we want to protect against the case where
 // the returned snapshot function is called from a different IoContext.
-// To do this we will capture a weak reference to the current IoContext
-// and check it against the current IoContext where the snapshot function
-// is invoked.
+// To do this we capture the current IoContext's unique id and compare it
+// against the current IoContext where the snapshot function is invoked.
+// Capturing the id (rather than a weak reference) is cheaper and avoids
+// keeping any state tied to the IoContext alive after it is destroyed:
+// because ids are never reused, a stale id can never match a later context.
 jsg::Function<void()> getValidator(jsg::Lock& js) {
-  kj::Maybe<kj::Own<IoContext::WeakRef>> maybeIoContext;
+  kj::Maybe<IoContext::Id> maybeIoContextId;
   if (FeatureFlags::get(js).getBindAsyncLocalStorageSnapshot() && IoContext::hasCurrent()) {
-    // We use a weak reference to the IoContext because the current IoContext
-    // may be destroyed before the snapshot function is called.
-    maybeIoContext = IoContext::current().getWeakRef();
+    maybeIoContextId = IoContext::current().getId();
   }
 
   static constexpr auto kErrorMessage =
       "Cannot call this AsyncLocalStorage bound function outside of the "
       "request in which it was created."_kj;
 
-  return [maybeIoContext = kj::mv(maybeIoContext)](jsg::Lock&) {
-    KJ_IF_SOME(originIoContext, maybeIoContext) {
-      // We had an IoContext when we created the snapshot function.
-      // If it is not the current IoContext, or if there is no current
-      // IoContext, or if the captured IoContext has been destroyed,
-      // we throw an error.
-      JSG_REQUIRE(IoContext::hasCurrent() && originIoContext->isValid(), Error, kErrorMessage);
-      originIoContext->runIfAlive([&](IoContext& otherContext) {
-        JSG_REQUIRE(&otherContext == &IoContext::current(), Error, kErrorMessage);
-      });
+  return [maybeIoContextId](jsg::Lock&) {
+    KJ_IF_SOME(originIoContextId, maybeIoContextId) {
+      // We had an IoContext when we created the snapshot function. If it is not the current
+      // IoContext (because there is none, or it is a different one than when the snapshot was
+      // created), we throw an error.
+      JSG_REQUIRE(originIoContextId.isCurrent(), Error, kErrorMessage);
     }
   };
 }

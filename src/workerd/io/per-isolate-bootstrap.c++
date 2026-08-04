@@ -93,6 +93,7 @@ struct BootstrapState {
 #define VALUE_METHOD_MAP(V)                                                                        \
   V(ArrayBuffer)                                                                                   \
   V(ArrayBufferView)                                                                               \
+  V(DataView)                                                                                      \
   V(Promise)                                                                                       \
   V(SharedArrayBuffer)                                                                             \
   V(Uint8Array)
@@ -375,10 +376,9 @@ jsg::JsRef<jsg::JsObject> buildCompatFlagsObject(jsg::Lock& js, CompatibilityFla
 jsg::JsRef<jsg::JsObject> buildAutogatesObject(jsg::Lock& js) {
   auto obj = js.obj();
 
-  for (auto i = util::AutogateKey(0); i < util::AutogateKey::NumOfKeys;
-       i = util::AutogateKey(static_cast<int>(i) + 1)) {
-    if (util::Autogate::isEnabled(i)) {
-      auto name = kj::str(i);
+  for (util::AutogateKey key: util::getAutogateKeys()) {
+    if (util::Autogate::isEnabled(key)) {
+      auto name = kj::str(key);
       obj.set(js, name, js.boolean(true));
     }
   }
@@ -459,6 +459,18 @@ void cleanupPerIsolateBootstrap(jsg::Lock& js, v8::Local<v8::Context> context) {
     jsg::setAlignedPointerInEmbedderData(
         context, jsg::ContextPointerSlot::BOOTSTRAP_STATE, nullptr);
   }
+}
+
+kj::Maybe<jsg::JsValue> tryGetBootstrapExport(jsg::Lock& js, kj::StringPtr specifier) {
+  auto& state = getBootstrapState(js);
+  auto normalized = normalizeSpecifier(specifier);
+
+  // The cache is populated by require() calls during bootstrap. If the module
+  // was never required, it won't be in the cache and we return none.
+  KJ_IF_SOME(cached, state.cache.find(normalized)) {
+    return cached.getHandle(js);
+  }
+  return kj::none;
 }
 
 }  // namespace workerd

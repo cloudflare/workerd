@@ -75,7 +75,6 @@ wd_cc_library(
     name = "jsg-core",
     srcs = [
         "async-context.c++",
-        "buffersource.c++",
         "dom-exception.c++",
         "jsg.c++",
         "jsvalue.c++",
@@ -91,12 +90,12 @@ wd_cc_library(
     ],
     hdrs = [
         "async-context.h",
-        "buffersource.h",
         "dom-exception.h",
         "fast-api.h",
         "function.h",
         "jsg.h",
         "jsvalue.h",
+        "jsvalue-defs.h",
         "modules.h",
         "modules-new.h",
         "promise.h",
@@ -176,11 +175,21 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "jsvalue-defs",
+    hdrs = ["jsvalue-defs.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
     name = "memory-tracker",
     srcs = ["memory.c++"],
     hdrs = ["memory.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":jsvalue-defs",
         "@capnp-cpp//src/kj",
         "@workerd-v8//:v8",
     ],

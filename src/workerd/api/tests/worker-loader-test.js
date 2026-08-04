@@ -878,23 +878,6 @@ export let noMixedJsPythonModules = {
     let worker = env.loader.get('noMixedJsPythonModules', () => {
       return {
         ...mixedModules,
-        mainModule: 'foo.py',
-      };
-    });
-
-    await assert.rejects(worker.getEntrypoint().greet('Alice'), {
-      name: 'TypeError',
-      message:
-        'Module "foo.js" is a JS module, but the main module is a Python module.',
-    });
-  },
-};
-
-export let noMixedJsPythonModules2 = {
-  async test(ctrl, env, ctx) {
-    let worker = env.loader.get('noMixedJsPythonModules2', () => {
-      return {
-        ...mixedModules,
         mainModule: 'foo.js',
       };
     });

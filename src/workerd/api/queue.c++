@@ -259,14 +259,19 @@ jsg::Promise<WorkerQueue::SendResponse> WorkerQueue::send(jsg::Lock& js,
   }
 
   auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_send"_kjc);
-  auto req = client->request(
-      kj::HttpMethod::POST, "https://fake-host/message"_kjc, headers, serialized.data.size());
-
   const auto& headerIds = context.getHeaderIds();
   const auto exposeErrorCodes = workerd::FeatureFlags::get(js).getQueueExposeErrorCodes();
 
-  static constexpr auto handleSend = [](auto req, auto serialized, auto client, auto& headerIds,
+  static constexpr auto handleSend = [](auto outputLock, auto headers, auto serialized, auto client,
+                                         auto& headerIds,
                                          bool exposeErrorCodes) -> kj::Promise<kj::String> {
+    KJ_IF_SOME(lock, outputLock) {
+      // For Durable Objects, defer the send until the output gate is open so we never emit a
+      // message before confirmed storage writes.
+      co_await lock;
+    }
+    auto req = client->request(
+        kj::HttpMethod::POST, "https://fake-host/message"_kjc, headers, serialized.data.size());
     co_await req.body->write(serialized.data);
     auto response = co_await req.response;
 
@@ -281,8 +286,8 @@ jsg::Promise<WorkerQueue::SendResponse> WorkerQueue::send(jsg::Lock& js,
     co_return kj::str(responseBody.asChars());
   };
 
-  auto promise =
-      handleSend(kj::mv(req), kj::mv(serialized), kj::mv(client), headerIds, exposeErrorCodes);
+  auto promise = handleSend(context.waitForOutputLocksIfNecessary(), kj::mv(headers),
+      kj::mv(serialized), kj::mv(client), headerIds, exposeErrorCodes);
 
   return context.awaitIo(js, kj::mv(promise),
       parseQueueResponse(responseHandler, "Failed to parse queue send response"_kj,
@@ -398,13 +403,18 @@ jsg::Promise<WorkerQueue::SendBatchResponse> WorkerQueue::sendBatch(jsg::Lock& j
     }
   }
 
-  auto req =
-      client->request(kj::HttpMethod::POST, "https://fake-host/batch"_kjc, headers, body.size());
-
   const auto& headerIds = context.getHeaderIds();
   const auto exposeErrorCodes = workerd::FeatureFlags::get(js).getQueueExposeErrorCodes();
-  static constexpr auto handleWrite = [](auto req, auto body, auto client, auto& headerIds,
+  static constexpr auto handleWrite = [](auto outputLock, auto headers, auto body, auto client,
+                                          auto& headerIds,
                                           bool exposeErrorCodes) -> kj::Promise<kj::String> {
+    KJ_IF_SOME(lock, outputLock) {
+      // For Durable Objects, defer the send until the output gate is open so we never emit a
+      // message before confirmed storage writes.
+      co_await lock;
+    }
+    auto req =
+        client->request(kj::HttpMethod::POST, "https://fake-host/batch"_kjc, headers, body.size());
     co_await req.body->write(body.asBytes());
     auto response = co_await req.response;
 
@@ -419,8 +429,8 @@ jsg::Promise<WorkerQueue::SendBatchResponse> WorkerQueue::sendBatch(jsg::Lock& j
     co_return kj::str(responseBody.asChars());
   };
 
-  auto promise =
-      handleWrite(kj::mv(req), kj::mv(body), kj::mv(client), headerIds, exposeErrorCodes);
+  auto promise = handleWrite(context.waitForOutputLocksIfNecessary(), kj::mv(headers), kj::mv(body),
+      kj::mv(client), headerIds, exposeErrorCodes);
 
   return context.awaitIo(js, kj::mv(promise),
       parseQueueResponse(responseHandler, "Failed to parse queue send response"_kj,
@@ -685,10 +695,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
 
   // 2. This is where we call into the worker's queue event handler
   auto runProm = context.run(
-      [this, entrypointName = entrypointName, &context, queueEvent = kj::addRef(*queueEventHolder),
+      [this, entrypointName = entrypointName, queueEvent = kj::addRef(*queueEventHolder),
           &metrics = incomingRequest->getMetrics(), versionInfo = kj::mv(versionInfo),
           props = kj::mv(props),
-          isDynamicDispatch](Worker::Lock& lock) mutable -> kj::Promise<void> {
+          isDynamicDispatch](Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
@@ -728,8 +738,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
     // all waitUntil'ed promises.
     auto outcome = co_await runProm
                        .then([]() mutable -> kj::Promise<EventOutcome> { return EventOutcome::OK; })
-                       .catch_([](kj::Exception&& e) {
+                       .catch_([weakIoctx = context.getWeakRef()](kj::Exception&& e) {
       // If any exceptions were thrown, mark the outcome accordingly.
+      weakIoctx->runIfAlive([&e](IoContext& context) { context.getMetrics().reportFailure(e); });
       return EventOutcome::EXCEPTION;
     })
                        .exclusiveJoin(timeoutPromise.then([] {
@@ -739,8 +750,13 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
       // Also handle anything that might cause the worker to get aborted.
       // This is a change from the outcome we returned on abort before the compat flag, but better
       // matches the behavior of fetch() handlers and the semantics of what's actually happening.
+      // abortFulfiller should only ever be rejected instead of being fulfilled, return an
+      // internalError outcome if it does happen
+      return EventOutcome::INTERNAL_ERROR;
+    }, [weakIoctx = context.getWeakRef()](kj::Exception&& e) {
+      weakIoctx->runIfAlive([&e](IoContext& context) { context.getMetrics().reportFailure(e); });
       return EventOutcome::EXCEPTION;
-    }, [](kj::Exception&&) { return EventOutcome::EXCEPTION; }));
+    }));
 
     if (outcome == EventOutcome::OK && queueEventHolder->isServiceWorkerHandler) {
       // HACK: For service-worker syntax, we effectively ignore the compatibility flag and wait

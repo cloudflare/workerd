@@ -80,7 +80,7 @@ private:
       Closed,
       Released>;
 
-  kj::Maybe<IoContext&> ioContext;
+  kj::Maybe<IoContext::Id> ioContext;
   ReadableStreamController::Reader& reader;
 
   ReaderState state;
@@ -258,16 +258,16 @@ class DrainingReader: public ReadableStreamController::Reader {
   using Attached = jsg::Ref<ReadableStream>;
   struct Released {};
 
-  kj::Maybe<IoContext&> ioContext;
+  kj::Maybe<IoContext::Id> ioContext;
   kj::OneOf<Initial, Attached, StreamStates::Closed, Released> state = Initial();
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
 };
 
-class ReadableStream: public jsg::Object {
+class ReadableStream: public kj::PtrTarget, public jsg::Object {
 private:
 
   struct AsyncIteratorState {
-    kj::Maybe<IoContext&> ioContext;
+    kj::Maybe<IoContext::Id> ioContext;
     jsg::Ref<ReadableStreamDefaultReader> reader;
     bool preventCancel;
   };
@@ -477,7 +477,7 @@ public:
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
-  kj::Maybe<IoContext&> ioContext;
+  kj::Maybe<IoContext::Id> ioContext;
   kj::Own<ReadableStreamController> controller;
 
   // Used to signal when this ReadableStream reads EOF. This signal is required for TCP sockets.
@@ -554,5 +554,12 @@ private:
 
   QueuingStrategyInit init;
 };
+
+// Wraps a ReadableStreamSource so that pumpTo() is never deferred past the IoContext's lifetime.
+// Needed for RPC/session-bound sources (e.g. a Socket transferred over RPC), whose backing stream
+// disconnects when the IoContext is destroyed (the JsRpcCustomEvent is canceled). See the
+// implementation in readable.c++ for details.
+kj::Own<ReadableStreamSource> newNoDeferredProxyReadableStream(
+    IoContext& context, kj::Own<ReadableStreamSource> inner);
 
 }  // namespace workerd::api

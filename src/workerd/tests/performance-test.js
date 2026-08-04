@@ -14,15 +14,6 @@ if (globalThis.performance.now() !== 0.0) {
   throw new Error('performance.now() is not 0.0');
 }
 
-if ('addEventListener' in globalThis.performance) {
-  throw new Error('performance.addEventListener should not be defined');
-}
-
-// Performance class should not be available.
-if (typeof globalThis.Performance !== 'undefined') {
-  throw new Error('Performance should not be defined');
-}
-
 export const test = {
   async test(_ctrl, _env, _ctx) {
     const start = performance.now();

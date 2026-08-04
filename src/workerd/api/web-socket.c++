@@ -27,6 +27,19 @@
 
 namespace workerd::api {
 
+namespace {
+
+// Emits a perf-counter mark for a WebSocket event from the current in-scope point (the JS send()
+// call or the readLoop message dispatch). No-op when not in an IoContext. The IsolateLimitEnforcer
+// implementation captures the timestamp, so this side stays time-agnostic and works on every
+// platform workerd builds for.
+void markWebSocketPerfEvent(kj::LiteralStringConst name) {
+  if (!IoContext::hasCurrent()) return;
+  IoContext::current().getWorker().getIsolate().getLimitEnforcer().markPerfEvent(name);
+}
+
+}  // namespace
+
 kj::StringPtr KJ_STRINGIFY(const LegacyWebSocketAdapter::NativeState& state) {
   // TODO(someday) We might care more about this `OneOf` than its which, that probably means
   // returning a kj::String instead.
@@ -87,6 +100,10 @@ void WebSocket::accept(jsg::Lock& js, jsg::Optional<WebSocket::AcceptOptions> op
 }
 
 void WebSocket::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> message) {
+  // Mark the send here, at the in-scope JS call, rather than in the async output pump where the
+  // observer's sentMessage() fires -- the pump runs outside a perf-counter monitor scope, so a
+  // mark there would be dropped. "now" at the send() call is the send-initiation time.
+  markWebSocketPerfEvent("ws_sent"_kjc);
   impl->send(js, kj::mv(message));
 }
 
@@ -479,8 +496,13 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
   }
 
   auto client = context.getHttpClient(0, false, kj::none, "websocket_open"_kjc);
-  auto prom =
-      ([](auto& context, auto connUrl, auto headers, auto client) -> kj::Promise<PackedWebSocket> {
+  auto prom = ([](auto& context, auto outputLock, auto connUrl, auto headers,
+                   auto client) -> kj::Promise<PackedWebSocket> {
+    KJ_IF_SOME(lock, outputLock) {
+      // For Durable Objects, defer the handshake until the output gate is open so we never open a
+      // connection before confirmed storage writes.
+      co_await lock;
+    }
     auto response = co_await client->openWebSocket(connUrl, headers);
 
     JSG_REQUIRE(response.statusCode == 101, TypeError,
@@ -514,7 +536,8 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
       }
     }
     KJ_UNREACHABLE
-  })(context, kj::mv(connUrl), kj::mv(headers), kj::mv(client));
+  })(context, context.waitForOutputLocksIfNecessary(), kj::mv(connUrl), kj::mv(headers),
+      kj::mv(client));
 
   ws->impl->initConnection(js, kj::mv(prom));
 
@@ -1027,7 +1050,8 @@ kj::Maybe<kj::Date> LegacyWebSocketAdapter::getAutoResponseTimestamp() {
 }
 
 void LegacyWebSocketAdapter::dispatchOpen(jsg::Lock& js) {
-  shell.dispatchEventImpl(js, js.alloc<Event>("open"));
+  constexpr kj::StringPtr kOpenEvent = "open"_kj;
+  shell.dispatchEventImpl(js, js.alloc<Event>(kOpenEvent));
 }
 
 void LegacyWebSocketAdapter::ensurePumping(jsg::Lock& js) {
@@ -1197,6 +1221,22 @@ kj::Promise<void> LegacyWebSocketAdapter::pump(IoContext& context,
         co_await promise;
       }
 
+      // If a DO constructor throws after sending data to a websocket, the `kj::WebSocket& ws` may already
+      // have been freed by the hibernation manager, so we must stop the pump loop and not touch `ws`.
+      //
+      // A constructor failure aborts the IoContext, so we use that as an early-return condition.
+      // Message sent from constructor always wait for an output gate, so by the time that await
+      // returns, this is the first line that runs after the constructor completes, regardless of its
+      // outcome.
+      //
+      // Note that `ws` can be freed during the pump loop only when the constructor throws. In all other
+      // cases the coroutine is canceled normally — for example, when we call send from
+      // `blockConcurrencyWhile()` inside the constructor, which then throws, or when the DO waits on
+      // `ws.send()` to deliver the data while another event handler calls `ctx.abort()`.
+      if (context.getAbortReason() != kj::none) {
+        co_return;
+      }
+
       auto size = countBytesFromMessage(gatedMessage.message);
 
       while (gatedMessage.pendingAutoResponses > 0) {
@@ -1303,6 +1343,9 @@ kj::Promise<kj::Maybe<kj::Exception>> LegacyWebSocketAdapter::readLoop(
       auto result = co_await context.run([this, message = kj::mv(message)](auto& wLock) mutable {
         auto& native = *farNative;
         jsg::Lock& js = wLock;
+        // Emit the mark here, in-scope, so it isn't dropped for want of a perf-counter monitor
+        // scope. The limiter stamps the time (dispatch time, ~= receive time).
+        markWebSocketPerfEvent("ws_received"_kjc);
         KJ_SWITCH_ONEOF(message) {
           KJ_CASE_ONEOF(text, kj::String) {
             shell.dispatchEventImpl(js, js.alloc<MessageEvent>(js, js.str(text)));

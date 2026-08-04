@@ -542,10 +542,11 @@ pub mod ffi {
         pub unsafe fn fci_set_return_value(args: *mut FunctionCallbackInfo, value: Local);
 
         // Errors
-        pub unsafe fn exception_create(
+        pub unsafe fn exception_create_from_bytes(
             isolate: *mut Isolate,
             exception_type: ExceptionType,
-            message: &str,
+            data: *const u8,
+            length: i32,
         ) -> Local;
 
         // Isolate
