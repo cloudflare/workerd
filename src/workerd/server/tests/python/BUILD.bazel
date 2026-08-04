@@ -83,6 +83,7 @@ py_wd_test(
     sidecar = ":socket-server",
     sidecar_port_bindings = [
         "PYTHON_SOCKET_SERVER_PORT",
+        "PYTHON_HOSTNAME_SOCKET_SERVER_PORT",
         "PYTHON_STARTTLS_SOCKET_SERVER_PORT",
         "PYTHON_TLS_SOCKET_SERVER_PORT",
     ],

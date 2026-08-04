@@ -297,6 +297,19 @@ class Default(WorkerEntrypoint):
         assert await reader.read() == b""
         writer.close()
 
+    async def test_asyncio_open_connection_hostname(self):
+        # Checks if the hostname is properly resolved when using asyncio.open_connection
+        reader, writer = await asyncio.open_connection(
+            "localhost",
+            int(self.env.PYTHON_HOSTNAME_SOCKET_SERVER_PORT),
+            family=socket.AF_INET,
+        )
+        writer.write(b"BASIC hostname\n")
+        await writer.drain()
+        assert await reader.readline() == b"echo: hostname\n"
+        assert await reader.read() == b""
+        writer.close()
+
     async def test_asyncio_concurrent_connections(self):
         async def echo(message):
             reader, writer = await asyncio.open_connection(
@@ -335,4 +348,5 @@ class Default(WorkerEntrypoint):
         await self.test_asyncio_sock_connect_recv_sendall()
         await self.test_asyncio_sock_recv_into()
         await self.test_asyncio_open_connection()
+        await self.test_asyncio_open_connection_hostname()
         await self.test_asyncio_concurrent_connections()
