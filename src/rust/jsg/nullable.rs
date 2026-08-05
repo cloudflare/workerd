@@ -85,23 +85,23 @@ impl<T> Nullable<T> {
     #[track_caller]
     pub fn unwrap(self) -> T {
         match self {
-            Nullable::Some(v) => v,
-            Nullable::Null => panic!("called `Nullable::unwrap()` on a `Null` value"),
-            Nullable::Undefined => panic!("called `Nullable::unwrap()` on an `Undefined` value"),
+            Self::Some(v) => v,
+            Self::Null => panic!("called `Nullable::unwrap()` on a `Null` value"),
+            Self::Undefined => panic!("called `Nullable::unwrap()` on an `Undefined` value"),
         }
     }
 
     /// Returns the contained [`Some`] value or the provided default.
     ///
-    /// Arguments passed to unwrap_or are eagerly evaluated; if you are passing the result of
+    /// Arguments passed to `unwrap_or` are eagerly evaluated; if you are passing the result of
     /// a function call, it is recommended to use [`unwrap_or_else`], which is lazily evaluated.
     ///
     /// [`Some`]: Nullable::Some
     /// [`unwrap_or_else`]: Nullable::unwrap_or_else
     pub fn unwrap_or(self, default: T) -> T {
         match self {
-            Nullable::Some(v) => v,
-            Nullable::Null | Nullable::Undefined => default,
+            Self::Some(v) => v,
+            Self::Null | Self::Undefined => default,
         }
     }
 
@@ -113,8 +113,8 @@ impl<T> Nullable<T> {
         F: FnOnce() -> T,
     {
         match self {
-            Nullable::Some(v) => v,
-            Nullable::Null | Nullable::Undefined => f(),
+            Self::Some(v) => v,
+            Self::Null | Self::Undefined => f(),
         }
     }
 
@@ -127,9 +127,9 @@ impl<T> Nullable<T> {
         F: FnOnce(T) -> U,
     {
         match self {
-            Nullable::Some(t) => Nullable::Some(f(t)),
-            Nullable::Null => Nullable::Null,
-            Nullable::Undefined => Nullable::Undefined,
+            Self::Some(t) => Nullable::Some(f(t)),
+            Self::Null => Nullable::Null,
+            Self::Undefined => Nullable::Undefined,
         }
     }
 }

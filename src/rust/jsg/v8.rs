@@ -3090,9 +3090,9 @@ impl ToLocalValue for Number {
 impl<T: ToLocalValue> ToLocalValue for Nullable<T> {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
         match self {
-            Nullable::Some(v) => v.to_local(lock),
-            Nullable::Null => Local::<Value>::null(lock),
-            Nullable::Undefined => Local::<Value>::undefined(lock),
+            Self::Some(v) => v.to_local(lock),
+            Self::Null => Local::<Value>::null(lock),
+            Self::Undefined => Local::<Value>::undefined(lock),
         }
     }
 }
