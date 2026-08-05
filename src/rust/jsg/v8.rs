@@ -2273,7 +2273,7 @@ macro_rules! impl_typed_array_from_js {
 
             fn from_js(_lock: &mut crate::Lock, value: Local<Value>) -> Result<Self, crate::Error> {
                 if !value.$check() {
-                    return Err(crate::Error::new_type_error(format!(
+                    return Err(crate::Error::new_type_mismatch_error(format!(
                         "expected {}, got {}",
                         $name,
                         value.type_of()

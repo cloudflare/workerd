@@ -8,8 +8,8 @@
 //! that the `#[jsg_resource]` macro generates for resource types:
 //!
 //! - `ToJS`: allocates a `Rc<R>` and wraps it as a JS object (alloc + wrap)
-//! - `FromJS`: unwraps a JS object back to a `Rc<R>`, returning a `TypeError`
-//!   for non-matching values
+//! - `FromJS`: unwraps a JS object back to a `Rc<R>`, returning a `TypeMismatchError`
+//!   for non-matching values (translated to `TypeError` when used through `#[jsg_method]`)
 
 use jsg::FromJS;
 use jsg::Number;
@@ -174,67 +174,67 @@ fn from_js_ref_keeps_resource_alive() {
     });
 }
 
-/// `FromJS` returns a `TypeError` for a plain JS object.
+/// `FromJS` returns a `TypeMismatchError` for a plain JS object.
 #[test]
 fn from_js_rejects_plain_object() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let js_val = ctx.eval_raw("({})").unwrap();
         let err = Greeter::from_js(lock, js_val).unwrap_err();
-        assert_eq!(err.name, jsg::ExceptionType::TypeError);
+        assert_eq!(err.name, jsg::ExceptionType::TypeMismatchError);
         assert_eq!(err.message, "expected Greeter, got object");
         Ok(())
     });
 }
 
-/// `FromJS` returns a `TypeError` for a string.
+/// `FromJS` returns a `TypeMismatchError` for a string.
 #[test]
 fn from_js_rejects_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let js_val = ctx.eval_raw("'not a resource'").unwrap();
         let err = Greeter::from_js(lock, js_val).unwrap_err();
-        assert_eq!(err.name, jsg::ExceptionType::TypeError);
+        assert_eq!(err.name, jsg::ExceptionType::TypeMismatchError);
         assert_eq!(err.message, "expected Greeter, got string");
         Ok(())
     });
 }
 
-/// `FromJS` returns a `TypeError` for a number.
+/// `FromJS` returns a `TypeMismatchError` for a number.
 #[test]
 fn from_js_rejects_number() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let js_val = ctx.eval_raw("42").unwrap();
         let err = Greeter::from_js(lock, js_val).unwrap_err();
-        assert_eq!(err.name, jsg::ExceptionType::TypeError);
+        assert_eq!(err.name, jsg::ExceptionType::TypeMismatchError);
         assert_eq!(err.message, "expected Greeter, got number");
         Ok(())
     });
 }
 
-/// `FromJS` returns a `TypeError` for null.
+/// `FromJS` returns a `TypeMismatchError` for null.
 #[test]
 fn from_js_rejects_null() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let js_val = ctx.eval_raw("null").unwrap();
         let err = Greeter::from_js(lock, js_val).unwrap_err();
-        assert_eq!(err.name, jsg::ExceptionType::TypeError);
+        assert_eq!(err.name, jsg::ExceptionType::TypeMismatchError);
         // typeof null === "object" in JavaScript
         assert_eq!(err.message, "expected Greeter, got object");
         Ok(())
     });
 }
 
-/// `FromJS` returns a `TypeError` for undefined.
+/// `FromJS` returns a `TypeMismatchError` for undefined.
 #[test]
 fn from_js_rejects_undefined() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let js_val = ctx.eval_raw("undefined").unwrap();
         let err = Greeter::from_js(lock, js_val).unwrap_err();
-        assert_eq!(err.name, jsg::ExceptionType::TypeError);
+        assert_eq!(err.name, jsg::ExceptionType::TypeMismatchError);
         assert_eq!(err.message, "expected Greeter, got undefined");
         Ok(())
     });
@@ -319,14 +319,14 @@ fn eval_raw_returns_ref_via_from_js() {
     });
 }
 
-/// `FromJS` on a non-resource value returns a `TypeError`.
+/// `FromJS` on a non-resource value returns a `TypeMismatchError`.
 #[test]
-fn eval_raw_with_wrong_type_gives_type_error() {
+fn eval_raw_with_wrong_type_gives_type_mismatch_error() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let js_val = ctx.eval_raw("42").unwrap();
         let err = Greeter::from_js(lock, js_val).unwrap_err();
-        assert_eq!(err.name, jsg::ExceptionType::TypeError);
+        assert_eq!(err.name, jsg::ExceptionType::TypeMismatchError);
         assert_eq!(err.message, "expected Greeter, got number");
         Ok(())
     });

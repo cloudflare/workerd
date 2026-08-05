@@ -7,6 +7,7 @@ use std::num::ParseIntError;
 use std::ops::Deref;
 
 pub mod feature_flags;
+pub mod lenient;
 pub mod macros;
 pub mod modules;
 pub mod nullable;
@@ -15,6 +16,7 @@ pub mod v8;
 mod wrappable;
 
 pub use feature_flags::FeatureFlags;
+pub use lenient::Lenient;
 pub use nullable::Nullable;
 pub use resource::Rc;
 pub use resource::Resource;
@@ -110,7 +112,12 @@ impl std::fmt::Display for Error {
 }
 
 /// Generates constructor methods for each `ExceptionType` variant.
-/// e.g., `new_type_error("message")` creates an Error with `ExceptionType::TypeError`
+/// e.g., `new_type_error("message")` creates an Error with `ExceptionType::TypeError`.
+///
+/// Note: `new_type_mismatch_error` is a "soft" signal meaning "value is not of
+/// type T" — used by `FromJS` impls to report type mismatches that `Lenient`
+/// swallows and macros translate to `TypeError`. Do NOT use it for genuine
+/// errors (use `new_type_error` instead).
 macro_rules! impl_error_constructors {
     ($($variant:ident => $fn_name:ident),* $(,)?) => {
         impl Error {
