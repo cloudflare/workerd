@@ -739,6 +739,12 @@ wd_test(
 )
 
 wd_test(
+    src = "autovuln-60-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-60-test.js"],
+)
+
+wd_test(
     src = "streams-iocontext-test.wd-test",
     args = ["--experimental"],
     data = ["streams-iocontext-test.js"],

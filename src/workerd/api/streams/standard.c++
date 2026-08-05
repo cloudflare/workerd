@@ -2681,7 +2681,29 @@ jsg::Promise<void> ReadableStreamJsController::cancel(
 
   const auto doCancel = [&](auto& consumer) {
     auto reason = maybeReason.orDefault([&] { return js.undefined(); });
-    KJ_DEFER(doClose(js));
+    // consumer->cancel() invokes the user's cancel callback synchronously, and that callback can
+    // reach any API that closes this stream — notably tee(). Closing destroys the consumer whose
+    // cancel() is on the stack, so run this as an operation: state transitions are queued rather
+    // than applied under us.
+    state.beginOperation();
+    KJ_DEFER({
+      // endOperation() applies a queued transition if there is one. Whoever applies it owes the
+      // lock the matching notification, since doClose()/doError() skip it when they defer.
+      if (state.endOperation()) {
+        // Skip callbacks if execution is being terminated (e.g. CPU time limit) since we can't
+        // safely execute JavaScript in that state.
+        if (!js.v8Isolate->IsExecutionTerminating()) {
+          if (state.is<StreamStates::Closed>()) {
+            lock.onClose(js);
+          } else if (state.isErrored()) {
+            lock.onError(js, state.getErrorUnsafe().getHandle(js));
+          }
+        }
+      } else {
+        // Nothing was queued, so close the stream here.
+        doClose(js);
+      }
+    });
     return consumer->cancel(js, reason);
   };
 
