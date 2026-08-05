@@ -8,8 +8,10 @@
 
 #include <v8-snapshot.h>
 
+#include <kj/array.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>
+#include <kj/vector.h>
 
 namespace workerd::jsg {
 
@@ -25,10 +27,19 @@ constexpr size_t MAIN_MODULE_NAMESPACE_SNAPSHOT_INDEX = 1;
 //   from the snapshot. The producer and the consumer of a snapshot must register exactly the
 //   same references, in the same order, or deserialization will fail.
 // * `externalReferenceCursor` is the next free slot in `externalReferences`.
+// * `constructorTemplateIndices` is the snapshot index of every resource type's
+//   constructor-template slot (memoizedConstructor, then contextConstructor, per JSG_RESOURCE
+//   type), in iterateResourceTypeTemplates order. The enumeration order is
+//   fixed at compile time and the producer and the consumer of a snapshot are the same binary,
+//   the same invariant `externalReferences` relies on.
+// * `kNoConstructorTemplate` marks slots that were empty when the snapshot was prepared.
 struct SnapshotArtifact: public kj::AtomicRefcounted {
   v8::StartupData blob{nullptr, 0};
   kj::Array<intptr_t> externalReferences;
   size_t externalReferenceCursor = 0;
+
+  static constexpr uint32_t kNoConstructorTemplate = kj::maxValue;
+  kj::Vector<uint32_t> constructorTemplateIndices;
 
   ~SnapshotArtifact() noexcept(false) {
     // v8::SnapshotCreator::CreateBlob() allocates the data with `new[]` and hands over ownership.

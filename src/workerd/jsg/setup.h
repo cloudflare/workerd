@@ -447,6 +447,14 @@ class IsolateBase {
     return getSnapshotCreator()->AddData(context, data);
   }
 
+  // Isolate-level counterpart: pins `data` into the isolate's own snapshot data rather than a
+  // context's, so the restored isolate can read it back with
+  // v8::Isolate::GetDataFromSnapshotOnce() before any context exists.
+  // Same preconditions as above.
+  size_t pinIntoIsolateSnapshot(v8::Local<v8::Data> data) {
+    return getSnapshotCreator()->AddData(data);
+  }
+
   // Returns the object pinned into the snapshot of `context` under `index` by pinIntoSnapshot().
   // V8 hands each pinned value out exactly once; asking for the same index again, or for an index
   // nothing was pinned under, is a fatal error. Only valid when starting from a snapshot; the
@@ -508,6 +516,16 @@ class IsolateBase {
   v8::SnapshotCreator* getSnapshotCreator() {
     return KJ_ASSERT_NONNULL(snapshotCreator).get();
   }
+
+  // Bakes every materialized JSG_RESOURCE-type constructor template
+  // into the snapshot and records one index per slot, in enumeration order, in
+  // SnapshotArtifact, so the loading isolate pairs slots by position alone.
+  // Resets each slot in the same pass.
+  void bakeConstructorTemplatesIntoSnapshot();
+
+  // Restore previously baked (by bakeConstructorTemplatesIntoSnapshot)
+  // constructor templates from the snapshot artifact.
+  void restoreConstructorTemplatesFromSnapshot();
 
   static void buildEmbedderGraph(v8::Isolate* isolate, v8::EmbedderGraph* graph, void* data);
 
@@ -877,6 +895,7 @@ class Isolate: public IsolateBase {
     registerTypeHandlers();
     if (instantiateTypeWrapper) {
       instantiateDefaultWrapper(kj::fwd<MetaConfiguration>(configuration));
+      restoreConstructorTemplatesFromSnapshot();
     }
   }
 
@@ -899,6 +918,7 @@ class Isolate: public IsolateBase {
     registerTypeHandlers();
     if (instantiateTypeWrapper) {
       instantiateDefaultWrapper(kj::fwd<MetaConfiguration>(configuration));
+      restoreConstructorTemplatesFromSnapshot();
     }
   }
 
