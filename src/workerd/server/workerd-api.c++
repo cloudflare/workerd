@@ -46,6 +46,7 @@
 #include <workerd/api/worker-rpc.h>
 #include <workerd/api/workers-module.h>
 #include <workerd/io/compatibility-date.h>
+#include <workerd/io/features.h>
 #include <workerd/io/promise-wrapper.h>
 #include <workerd/io/worker-modules.h>
 #include <workerd/jsg/jsg.h>
@@ -60,6 +61,7 @@
 #include <workerd/server/fallback-service.h>
 #include <workerd/server/workerd-debug-port-client.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/strong-bool.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/use-perfetto-categories.h>
 
@@ -264,7 +266,7 @@ struct WorkerdApi::Impl final {
         memoryCacheProvider(memoryCacheProvider),
         pythonConfig(pythonConfig) {
     jsgIsolate.runInLockScope([&](JsgWorkerdIsolate::Lock& lock) {
-      if (featuresParam.getNewModuleRegistry()) {
+      if (isNewModuleRegistryEnabled(featuresParam)) {
         jsgIsolate.setUsingNewModuleRegistry();
       }
 
@@ -548,11 +550,16 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
   });
 }
 
+// Whether the binding being constructed is an inner binding of a wrapped binding. Those are
+// placed on the private `env` of a `cloudflare-internal:` module, not on the worker's own `env`.
+WD_STRONG_BOOL(IsInternalBinding);
+
 static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     const WorkerdApi::Global& global,
     CompatibilityFlags::Reader featureFlags,
     uint32_t ownerId,
-    api::MemoryCacheProvider& memoryCacheProvider) {
+    api::MemoryCacheProvider& memoryCacheProvider,
+    IsInternalBinding isInternal) {
   TRACE_EVENT("workerd", "WorkerdApi::createBindingValue()");
   using Global = WorkerdApi::Global;
   auto context = lock.v8Context();
@@ -583,7 +590,7 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
           lock.alloc<api::Fetcher>(pipeline.channel,
               pipeline.requiresHost ? api::Fetcher::RequiresHostAndProtocol::YES
                                     : api::Fetcher::RequiresHostAndProtocol::NO,
-              pipeline.isInHouse));
+              pipeline.isInHouse, api::RpcCompatGateBypassed(isInternal.toBool())));
     }
 
     KJ_CASE_ONEOF(loopback, Global::LoopbackServiceStub) {
@@ -686,7 +693,8 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
         auto env = v8::Object::New(lock.v8Isolate);
         for (const auto& innerBinding: wrapped.innerBindings) {
           lock.v8Set(env, innerBinding.name,
-              createBindingValue(lock, innerBinding, featureFlags, ownerId, memoryCacheProvider));
+              createBindingValue(lock, innerBinding, featureFlags, ownerId, memoryCacheProvider,
+                  IsInternalBinding::YES));
         }
 
         // obtain exported function to call
@@ -744,8 +752,8 @@ void WorkerdApi::compileGlobals(jsg::Lock& lockParam,
     for (auto& global: globals) {
       lockParam.withinHandleScope([&] {
         // Don't use String's usual TypeHandler here because we want to intern the string.
-        auto value =
-            createBindingValue(lock, global, featureFlags, ownerId, impl->memoryCacheProvider);
+        auto value = createBindingValue(
+            lock, global, featureFlags, ownerId, impl->memoryCacheProvider, IsInternalBinding::NO);
         KJ_ASSERT(!value.IsEmpty(), "global did not produce v8::Value");
         lockParam.v8Set(target, global.name, value);
       });
@@ -1009,10 +1017,17 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
           -> kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>> {
         auto normalizedSpecifier = kj::str(context.normalizedSpecifier.getHref());
         auto referrer = kj::str(context.referrerNormalizedSpecifier.getHref());
+        // The V2 fallback service protocol transmits import attributes as a map.
+        // Reconstruct it from the canonical importType value; "type" is the only
+        // attribute key that can survive import attribute parsing.
+        kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
+        KJ_IF_SOME(type, context.importType) {
+          attributes.insert("type"_kj, type);
+        }
         KJ_IF_SOME(resolved,
             client->tryResolve(workerd::fallback::Version::V2, sourceToImportType(context.source),
                 normalizedSpecifier, context.rawSpecifier.orDefault(nullptr), referrer,
-                context.attributes)) {
+                attributes)) {
           KJ_SWITCH_ONEOF(resolved) {
             KJ_CASE_ONEOF(str, kj::String) {
               // The fallback service returned an alternative specifier.
@@ -1082,8 +1097,6 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                   KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
                     auto ownedData = kj::str(content.body);
                     auto ptr = ownedData.asPtr();
-                    auto ownedName = kj::str(mod.name);
-                    auto namePtr = ownedName.asPtr();
                     kj::ArrayPtr<const kj::StringPtr> named;
                     KJ_IF_SOME(n, content.namedExports) {
                       named = n;
@@ -1092,11 +1105,10 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                         jsg::modules::Module::newSynthetic(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
                             jsg::modules::Module::newCjsStyleModuleHandler<
-                                api::CommonJsModuleContext, JsgWorkerdIsolate_TypeWrapper>(
-                                ptr, namePtr),
+                                api::CommonJsModuleContext, JsgWorkerdIsolate_TypeWrapper>(ptr),
               KJ_MAP(name, named) {
                       return kj::str(name);
-                    }).attach(kj::mv(ownedData), kj::mv(ownedName)));
+                    }).attach(kj::mv(ownedData)));
                   }
                   KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
                     // Python modules are not supported.in fallback

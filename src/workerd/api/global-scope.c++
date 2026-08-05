@@ -112,16 +112,17 @@ kj::StringPtr AccessContext::getAud() {
 jsg::Promise<jsg::Value> AccessContext::getIdentity(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
     const jsg::TypeHandler<jsg::Function<jsg::Value()>>& getIdentityFnHandler) {
-  // Invoke the `getIdentity` JS-RPC method on the Access binding worker via a Fetcher bound to the
-  // embedder-supplied subrequest channel. If no identity service channel is available for this
-  // request (e.g. service-token auth), there is no identity to fetch, so resolve to `undefined`.
-  // Otherwise the binding worker's result (or error) propagates to the caller unchanged.
+  // Dispatch `getIdentity` JS-RPC on the Access binding worker's subrequest channel.
+  // Per-request props are injected by the IoChannelFactory at dispatch time.
+  // Resolves to `undefined` when no identity service channel is configured.
   auto& context = IoContext::current();
   auto span = context.makeTraceSpan("access_get_identity"_kjc);
+
   KJ_IF_SOME(channel, info->getIdentityServiceChannel()) {
     span.setTag("access.has_identity_service"_kjc, true);
     auto fetcher =
         js.alloc<Fetcher>(channel, Fetcher::RequiresHostAndProtocol::NO, true /* isInHouse */);
+
     auto rpcProp = JSG_REQUIRE_NONNULL(fetcher->getRpcMethodInternal(js, kj::str("getIdentity")),
         Error, "Access binding worker is missing the getIdentity method");
 
@@ -135,13 +136,13 @@ jsg::Promise<jsg::Value> AccessContext::getIdentity(jsg::Lock& js,
     paf.resolver.resolve(js, getIdentityFn(js));
     return context.attachSpans(js, kj::mv(paf.promise), kj::mv(span));
   }
+
   span.setTag("access.has_identity_service"_kjc, false);
   return js.resolvedPromise(jsg::Value(js.v8Isolate, v8::Undefined(js.v8Isolate)));
 }
 
 jsg::Optional<jsg::Ref<AccessContext>> ExecutionContext::getAccess(jsg::Lock& js) {
-  // Pull the per-request AccessInfo (if any) off the current IncomingRequest. Standalone workerd
-  // never supplies one; production embedders construct one before calling newWorkerEntrypoint().
+  // Pull the per-request AccessInfo (if any) off the current IncomingRequest.
   if (!IoContext::hasCurrent()) return kj::none;
   auto& ioctx = IoContext::current();
   KJ_IF_SOME(info, ioctx.getAccessInfo()) {

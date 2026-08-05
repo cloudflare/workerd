@@ -54,10 +54,10 @@ class ReadableLockImpl {
     return !state.template is<Unlocked>();
   }
 
-  bool lockReader(jsg::Lock& js, Controller& self, Reader& reader);
+  bool lockReader(jsg::Lock& js, Controller& self, kj::Ptr<Reader> reader);
 
   // See the comment for releaseReader in common.h for details on the use of maybeJs
-  void releaseReader(Controller& self, Reader& reader, kj::Maybe<jsg::Lock&> maybeJs);
+  void releaseReader(Controller& self, kj::Ptr<Reader> reader, kj::Maybe<jsg::Lock&> maybeJs);
 
   bool lock();
 
@@ -239,7 +239,8 @@ bool ReadableLockImpl<Controller>::lock() {
 }
 
 template <typename Controller>
-bool ReadableLockImpl<Controller>::lockReader(jsg::Lock& js, Controller& self, Reader& reader) {
+bool ReadableLockImpl<Controller>::lockReader(
+    jsg::Lock& js, Controller& self, kj::Ptr<Reader> reader) {
   if (isLockedToReader()) {
     return false;
   }
@@ -256,16 +257,14 @@ bool ReadableLockImpl<Controller>::lockReader(jsg::Lock& js, Controller& self, R
   }
 
   state.template transitionTo<ReaderLocked>(kj::mv(lock));
-  reader.attach(self, kj::mv(prp.promise));
+  reader->attach(self.addRef(), kj::mv(prp.promise));
   return true;
 }
 
 template <typename Controller>
 void ReadableLockImpl<Controller>::releaseReader(
-    Controller& self, Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) {
+    Controller& self, kj::Ptr<Reader> reader, kj::Maybe<jsg::Lock&> maybeJs) {
   KJ_IF_SOME(locked, state.template tryGetUnsafe<ReaderLocked>()) {
-    KJ_ASSERT(&locked.getReader() == &reader);
-
     KJ_IF_SOME(js, maybeJs) {
       auto reason = js.typeError("This ReadableStream reader has been released."_kj);
       KJ_SWITCH_ONEOF(self.state) {
@@ -771,7 +770,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
 
   bool isLockedToReader() const override;
 
-  bool lockReader(jsg::Lock& js, Reader& reader) override;
+  bool lockReader(jsg::Lock& js, kj::Ptr<Reader> reader) override;
 
   kj::Maybe<jsg::JsValue> isErrored(jsg::Lock& js);
 
@@ -790,7 +789,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
       jsg::Lock& js, size_t maxRead = kj::maxValue) override;
 
   // See the comment for releaseReader in common.h for details on the use of maybeJs
-  void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
+  void releaseReader(kj::Ptr<Reader> reader, kj::Maybe<jsg::Lock&> maybeJs) override;
 
   void setOwnerRef(kj::Weak<ReadableStream> stream) override;
 
@@ -2682,7 +2681,29 @@ jsg::Promise<void> ReadableStreamJsController::cancel(
 
   const auto doCancel = [&](auto& consumer) {
     auto reason = maybeReason.orDefault([&] { return js.undefined(); });
-    KJ_DEFER(doClose(js));
+    // consumer->cancel() invokes the user's cancel callback synchronously, and that callback can
+    // reach any API that closes this stream — notably tee(). Closing destroys the consumer whose
+    // cancel() is on the stack, so run this as an operation: state transitions are queued rather
+    // than applied under us.
+    state.beginOperation();
+    KJ_DEFER({
+      // endOperation() applies a queued transition if there is one. Whoever applies it owes the
+      // lock the matching notification, since doClose()/doError() skip it when they defer.
+      if (state.endOperation()) {
+        // Skip callbacks if execution is being terminated (e.g. CPU time limit) since we can't
+        // safely execute JavaScript in that state.
+        if (!js.v8Isolate->IsExecutionTerminating()) {
+          if (state.is<StreamStates::Closed>()) {
+            lock.onClose(js);
+          } else if (state.isErrored()) {
+            lock.onError(js, state.getErrorUnsafe().getHandle(js));
+          }
+        }
+      } else {
+        // Nothing was queued, so close the stream here.
+        doClose(js);
+      }
+    });
     return consumer->cancel(js, reason);
   };
 
@@ -2781,7 +2802,7 @@ bool ReadableStreamJsController::isLockedToReader() const {
   return lock.isLockedToReader();
 }
 
-bool ReadableStreamJsController::lockReader(jsg::Lock& js, Reader& reader) {
+bool ReadableStreamJsController::lockReader(jsg::Lock& js, kj::Ptr<Reader> reader) {
   return lock.lockReader(js, *this, reader);
 }
 
@@ -2976,8 +2997,9 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
   KJ_UNREACHABLE;
 }
 
-void ReadableStreamJsController::releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) {
-  lock.releaseReader(*this, reader, maybeJs);
+void ReadableStreamJsController::releaseReader(
+    kj::Ptr<Reader> reader, kj::Maybe<jsg::Lock&> maybeJs) {
+  lock.releaseReader(*this, kj::mv(reader), maybeJs);
 }
 
 ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
@@ -3032,7 +3054,11 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
       };
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
-      KJ_DEFER(state.transitionTo<StreamStates::Closed>());
+      // Closing this stream destroys the consumer. tee() is reachable re-entrantly from a user
+      // pull() callback invoked while a read is in progress, and that consumer is then still on
+      // the stack in onConsumerWantsData(). deferTransitionTo() queues the transition until the
+      // enclosing operation ends; with no operation in progress it transitions immediately.
+      KJ_DEFER((void)state.deferTransitionTo<StreamStates::Closed>());
       // We create two additional streams that clone this stream's consumer state,
       // then close this stream's consumer.
       return Tee{
@@ -3041,7 +3067,8 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
       };
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
-      KJ_DEFER(state.transitionTo<StreamStates::Closed>());
+      // Same rationale as the ValueReadable case above.
+      KJ_DEFER((void)state.deferTransitionTo<StreamStates::Closed>());
       // We create two additional streams that clone this stream's consumer state,
       // then close this stream's consumer.
       return Tee{

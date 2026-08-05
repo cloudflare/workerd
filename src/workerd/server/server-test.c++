@@ -660,19 +660,46 @@ KJ_TEST("Server: serve Service Worker using the new module registry") {
   conn.httpGet200("/service-worker", "NMR: http://foo/service-worker");
 }
 
-KJ_TEST("Server: Python workers reject the new module registry") {
+// Note: Python workers ignore the new_module_registry flag entirely — they
+// always use the original module registry. That decision is centralized in
+// isNewModuleRegistryEnabled() (io/features.h) and unit-tested in
+// compatibility-date-test.c++; it cannot be exercised end-to-end here because
+// starting a python_workers-flagged worker requires the Pyodide bundle, which
+// server-test cannot fetch.
+
+KJ_TEST("Server: wrapped bindings work under the new module registry") {
+  // Wrapped bindings resolve their module through jsg::Lock::resolveInternalModule, which
+  // dispatches on which module registry the isolate is using. Both registries store their
+  // own type in the same MODULE_REGISTRY context slot, and the slot is read back with an
+  // unchecked reinterpret_cast whose V8 embedder type tag is derived from the slot rather
+  // than the type -- so reaching the wrong registry's accessor from here would type-confuse
+  // rather than fail. Exercise the binding end to end under new_module_registry so that
+  // any regression to a registry-specific lookup shows up as a test failure.
   TestServer test(singleWorker(R"((
-    compatibilityDate = "2022-08-17",
-    compatibilityFlags = ["python_workers", "new_module_registry"],
-    serviceWorkerScript =
-        `addEventListener("fetch", event => {
-        `  event.respondWith(new Response("unused"));
-        `})
+    compatibilityDate = "2024-10-01",
+    compatibilityFlags = ["new_module_registry", "experimental"],
+    modules = [
+      ( name = "worker",
+        esModule =
+          `export default {
+          `  fetch(req, env) { return new Response("wrapped: " + typeof env.wrapped); }
+          `}
+      )
+    ],
+    bindings = [
+      ( name = "wrapped",
+        wrapped = (
+          moduleName = "cloudflare-internal:d1-api"
+        )
+      )
+    ]
   ))"_kj));
 
   test.server.allowExperimental();
-  KJ_EXPECT_THROW_MESSAGE("Python workers do not currently support the new ModuleRegistry",
-      test.server.run(v8System, *test.config).wait(test.ws));
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "wrapped: object");
 }
 
 KJ_TEST("Server: use service name as Service Worker origin") {
@@ -6411,10 +6438,15 @@ KJ_TEST("Server: structured logging with console methods") {
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
     KJ_ASSERT(logline.contains(R"("level":"error")"), logline);
+    // Stack frames name the module differently between module registries: the
+    // original registry uses the bare module name ("main.js"), the new module
+    // registry uses the canonical URL ("file:///bundle/main.js"). Match the
+    // parts common to both.
     KJ_ASSERT(
         logline.contains(
-            R"_("message":"Error: Test exception for structured logging\n    at Object.fetch (main.js:18:13)")_"),
+            R"_("message":"Error: Test exception for structured logging\n    at Object.fetch ()_"),
         logline);
+    KJ_ASSERT(logline.contains(R"_(main.js:18:13)")_"), logline);
   });
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
@@ -7282,6 +7314,292 @@ KJ_TEST("Server: DO facet abort during pending startup") {
   // The response should contain the caught abort error message, proving the request
   // was rejected cleanly rather than crashing with a UAF.
   conn.recvHttp200("caught: aborted during startup");
+}
+
+KJ_TEST("Server: ctx.access from accessBlobHeader on Worker") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          accessBlobHeader = "MF-Access-Blob",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    if (!ctx.access) return new Response("no-access");
+                `    const identity = await ctx.access.getIdentity();
+                `    return new Response(JSON.stringify({
+                `      aud: ctx.access.aud,
+                `      identity: identity,
+                `    }));
+                `  }
+                `}
+            )
+          ],
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello",
+        http = ()
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+
+  // Request with access blob header — ctx.access should be populated.
+  conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"app_aud":"test-aud-12345","jwt_claims":{"email":"test@example.com"}}
+
+)"_kj);
+  conn.recvHttp200(R"({"aud":"test-aud-12345"})");
+
+  // Request without the header — ctx.access should be undefined.
+  conn.httpGet200("/", "no-access");
+}
+
+KJ_TEST("Server: ctx.access.getIdentity() dispatches to accessBindingService") {
+  // Exercises the full channel-based identity dispatch path with two workers:
+  //   - main-worker: has accessBlobHeader + accessBindingService configured
+  //   - access-binding: implements getIdentity via WorkerEntrypoint, reads ctx.props
+  //
+  // The request flow is: AccessHeaderExtractor parses the blob header into BlobAccessInfo,
+  // getIdentity() dispatches via Fetcher(channel), startSubrequest() intercepts the access
+  // binding channel and injects per-request props via forProps({aud, jwtClaims}), and the
+  // binding worker returns an identity object derived from ctx.props.
+  TestServer test(R"((
+    services = [
+      ( name = "main-worker",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          compatibilityFlags = ["experimental"],
+          accessBlobHeader = "MF-Access-Blob",
+          accessBindingService = (name = "access-binding", entrypoint = "AccessBinding"),
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    if (!ctx.access) return new Response("no-access");
+                `    const identity = await ctx.access.getIdentity();
+                `    return new Response(JSON.stringify({
+                `      aud: ctx.access.aud,
+                `      identity: identity,
+                `    }));
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+      ( name = "access-binding",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import {WorkerEntrypoint} from "cloudflare:workers";
+                `export default {
+                `  async fetch(request) {
+                `    return new Response("not used");
+                `  }
+                `}
+                `export class AccessBinding extends WorkerEntrypoint {
+                `  async getIdentity() {
+                `    return {
+                `      email: this.ctx.props.jwtClaims?.email ?? "unknown",
+                `      aud: this.ctx.props.aud,
+                `    };
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "main-worker",
+        http = ()
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+
+  // Request with access blob header + jwt_claims — getIdentity should return the identity.
+  conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"app_aud":"test-aud-99","jwt_claims":{"email":"user@example.com"}}
+
+)"_kj);
+  conn.recvHttp200(
+      R"({"aud":"test-aud-99","identity":{"email":"user@example.com","aud":"test-aud-99"}})");
+
+  // Request with access blob header but no jwt_claims — getIdentity should still work,
+  // jwtClaims will be undefined in the binding worker's ctx.props.
+  conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"app_aud":"test-aud-42"}
+
+)"_kj);
+  conn.recvHttp200(R"({"aud":"test-aud-42","identity":{"email":"unknown","aud":"test-aud-42"}})");
+
+  // Request without the header — ctx.access should be undefined.
+  conn.httpGet200("/", "no-access");
+}
+
+KJ_TEST("Server: ctx.access is undefined without accessBlobHeader config") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2025-08-01",
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `export default {
+          `  async fetch(request, env, ctx) {
+          `    return new Response(String(ctx.access));
+          `  }
+          `}
+      )
+    ],
+  ))"_kj));
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "undefined");
+}
+
+KJ_TEST("Server: accessBlobHeader rejects malformed blobs") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          accessBlobHeader = "MF-Access-Blob",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    return new Response("should not reach here");
+                `  }
+                `}
+            )
+          ],
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello",
+        http = ()
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  // Each malformed blob should result in a 500 with Connection: close,
+  // so a new connection is needed for each case.
+
+  // Case 1: Invalid JSON syntax.
+  {
+    KJ_EXPECT_LOG(ERROR, "Uncaught exception");
+    auto conn = test.connect("test-addr");
+    conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: not-valid-json
+
+)"_kj);
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
+
+  // Case 2: Valid JSON but not an object.
+  {
+    KJ_EXPECT_LOG(ERROR, "accessBlobHeader value must be a JSON object");
+    auto conn = test.connect("test-addr");
+    conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: "just-a-string"
+
+)"_kj);
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
+
+  // Case 3: app_aud field is not a string.
+  {
+    KJ_EXPECT_LOG(ERROR, "access blob `app_aud` must be a string");
+    auto conn = test.connect("test-addr");
+    conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"app_aud":123}
+
+)"_kj);
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
+
+  // Case 4: Missing app_aud field entirely.
+  {
+    KJ_EXPECT_LOG(ERROR, "accessBlobHeader JSON must contain an `app_aud` field");
+    auto conn = test.connect("test-addr");
+    conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"jwt_claims":{"email":"test@example.com"}}
+
+)"_kj);
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
+
+  // Case 5: jwt_claims field is not an object.
+  {
+    KJ_EXPECT_LOG(ERROR, "access blob `jwt_claims` must be a JSON object");
+    auto conn = test.connect("test-addr");
+    conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"app_aud":"valid-aud","jwt_claims":"not-an-object"}
+
+)"_kj);
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
 }
 
 }  // namespace

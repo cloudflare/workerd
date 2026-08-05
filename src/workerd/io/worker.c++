@@ -904,7 +904,7 @@ struct Worker::Script::Impl {
     // module registry handles dynamic imports via dynamicImportModuleCallback() in
     // modules-new.c++, which resolves synchronously within the V8 callback and relies
     // on the ambient request/startup CPU budget rather than enterDynamicImportJs().
-    KJ_ASSERT(!FeatureFlags::get(js).getNewModuleRegistry(),
+    KJ_ASSERT(!isNewModuleRegistryEnabled(FeatureFlags::get(js)),
         "legacy dynamic imports must not be used with the new module registry");
     static auto constexpr handleDynamicImport =
         [](kj::Own<const Worker> worker, DynamicImportHandler handler,
@@ -1102,8 +1102,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(api->getFeatureFlags()))),
       impl(kj::heap<Impl>(*api, *metrics, *limitEnforcer, inspectorPolicy)),
       weakIsolateRef(WeakIsolateRef::wrap(this)),
-      traceAsyncContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()),
-      userTraceAsyncContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
+      traceAsyncContextKey(kj::arc<jsg::AsyncContextFrame::StorageKey>()),
+      userTraceAsyncContextKey(kj::arc<jsg::AsyncContextFrame::StorageKey>()) {
   api->setIsolateObserver(*metrics);
   metrics->created();
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
@@ -1506,7 +1506,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   }
                 }
 
-                if (!isolate->getApi().getFeatureFlags().getNewModuleRegistry()) {
+                if (!isNewModuleRegistryEnabled(isolate->getApi().getFeatureFlags())) {
                   kj::Own<void> limitScope;
                   if (modulesSource.isPython) {
                     limitScope =
@@ -1814,7 +1814,7 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
   // synchronously accessing those globals. Resolving them here ensures that they are
   // ready to go before we begin evaluating the main module.
   auto featureFlags = FeatureFlags::get(js);
-  if (featureFlags.getNodeJsCompatV2() && featureFlags.getNewModuleRegistry()) {
+  if (featureFlags.getNodeJsCompatV2() && isNewModuleRegistryEnabled(featureFlags)) {
     JSG_REQUIRE_NONNULL(js.resolveModule("node:process", jsg::RequireEsm::YES), Error,
         "Failed to initialize node:process module");
     JSG_REQUIRE_NONNULL(js.resolveModule("node:buffer", jsg::RequireEsm::YES), Error,
@@ -2487,16 +2487,12 @@ TimeoutId::Generator& Worker::Lock::getTimeoutIdGenerator() {
   return getGlobalScope().timeoutIdGenerator;
 }
 
-jsg::AsyncContextFrame::StorageKey& Worker::Lock::getTraceAsyncContextKey() {
-  // const_cast OK because we are a lock on this isolate.
-  auto& isolate = const_cast<Isolate&>(worker.getIsolate());
-  return *(isolate.traceAsyncContextKey);
+kj::Arc<jsg::AsyncContextFrame::StorageKey> Worker::Lock::getTraceAsyncContextKey() {
+  return worker.getIsolate().traceAsyncContextKey.addRef();
 }
 
-jsg::AsyncContextFrame::StorageKey& Worker::Lock::getUserTraceAsyncContextKey() {
-  // const_cast OK because we are a lock on this isolate.
-  auto& isolate = const_cast<Isolate&>(worker.getIsolate());
-  return *(isolate.userTraceAsyncContextKey);
+kj::Arc<jsg::AsyncContextFrame::StorageKey> Worker::Lock::getUserTraceAsyncContextKey() {
+  return worker.getIsolate().userTraceAsyncContextKey.addRef();
 }
 
 bool Worker::Lock::isInspectorEnabled() {

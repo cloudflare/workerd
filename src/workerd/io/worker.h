@@ -574,8 +574,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   class LimitedBodyWrapper;
 
   size_t nextRequestId = 0;
-  kj::Own<jsg::AsyncContextFrame::StorageKey> traceAsyncContextKey;
-  kj::Own<jsg::AsyncContextFrame::StorageKey> userTraceAsyncContextKey;
+  kj::Arc<jsg::AsyncContextFrame::StorageKey> traceAsyncContextKey;
+  kj::Arc<jsg::AsyncContextFrame::StorageKey> userTraceAsyncContextKey;
 
   friend class Worker;
 };
@@ -781,10 +781,10 @@ class Worker::Lock {
   TimeoutId::Generator& getTimeoutIdGenerator();
 
   // Get the opaque storage key to use for recording trace information in async contexts.
-  jsg::AsyncContextFrame::StorageKey& getTraceAsyncContextKey();
+  kj::Arc<jsg::AsyncContextFrame::StorageKey> getTraceAsyncContextKey();
 
   // Get the opaque storage key to use for recording user trace information in async contexts.
-  jsg::AsyncContextFrame::StorageKey& getUserTraceAsyncContextKey();
+  kj::Arc<jsg::AsyncContextFrame::StorageKey> getUserTraceAsyncContextKey();
 
  private:
   explicit Lock(const Worker& worker, LockType lockType, jsg::V8StackScope&);

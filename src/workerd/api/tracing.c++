@@ -92,13 +92,13 @@ void SpanImpl::setAttribute(kj::String key, kj::Maybe<TagValue> maybeValue) {
     }
     KJ_SWITCH_ONEOF(value) {
       KJ_CASE_ONEOF(b, bool) {
-        builder.setTag(kj::ConstString(kj::mv(key)), b);
+        builder.setTag(kj::ConstString(kj::mv(key)), b, IsCustomTag::YES);
       }
       KJ_CASE_ONEOF(d, double) {
-        builder.setTag(kj::ConstString(kj::mv(key)), d);
+        builder.setTag(kj::ConstString(kj::mv(key)), d, IsCustomTag::YES);
       }
       KJ_CASE_ONEOF(s, kj::String) {
-        builder.setTag(kj::ConstString(kj::mv(key)), kj::mv(s));
+        builder.setTag(kj::ConstString(kj::mv(key)), kj::mv(s), IsCustomTag::YES);
       }
     }
   }
