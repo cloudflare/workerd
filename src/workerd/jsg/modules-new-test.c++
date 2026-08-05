@@ -1513,6 +1513,45 @@ KJ_TEST("Module source is decoded as UTF-8 across all encoding tiers") {
 
 // ======================================================================================
 
+KJ_TEST("Owned ESM source outlives its release points across encoding tiers") {
+  // The kj::Array-taking addEsmModule overload hands ownership of the UTF-8
+  // source buffer to the module. Non-ASCII sources are transcoded to an owned
+  // V8-compatible representation on first compile, after which the UTF-8
+  // original is released; pure-ASCII owned sources must be retained because
+  // the raw buffer directly backs the external one-byte string. This test
+  // asserts correctness across repeated resolution; a buffer released too
+  // early (or read after release) is observed by ASAN builds.
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+    bundleBuilder.addEsmModule(
+        "latin1-owned", kj::heapArray<const char>("export default 'caf\xc3\xa9';"_kj.asArray()));
+    bundleBuilder.addEsmModule(
+        "ascii-owned", kj::heapArray<const char>("export default 'plain';"_kj.asArray()));
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    JSG_TRY(js) {
+      // First compile transcodes and releases the owned UTF-8 for the
+      // non-ASCII module.
+      KJ_ASSERT(kj::str(ModuleRegistry::resolve(js, "file:///latin1-owned")) == "caf\xc3\xa9");
+      // ASCII stays on the zero-copy path over the owned buffer.
+      KJ_ASSERT(kj::str(ModuleRegistry::resolve(js, "file:///ascii-owned")) == "plain");
+      // Re-resolution works from the caches; nothing re-reads the released
+      // buffer.
+      KJ_ASSERT(kj::str(ModuleRegistry::resolve(js, "file:///latin1-owned")) == "caf\xc3\xa9");
+      KJ_ASSERT(kj::str(ModuleRegistry::resolve(js, "file:///ascii-owned")) == "plain");
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
+  });
+}
+
+// ======================================================================================
+
 KJ_TEST("Dynamic import from within a CJS-style eval module works") {
   PREAMBLE([&](Lock& js) {
     ResolveObserverImpl observer;

@@ -170,10 +170,24 @@ EncodedSource encodeSource(kj::ArrayPtr<const char> source) {
 // The implementation of Module for ESM.
 class EsModule final: public Module {
  public:
+  // Source borrowed from memory that outlives this module (e.g. the worker's
+  // capnp config buffer or compiled-in builtin source).
   explicit EsModule(Url id, Type type, Flags flags, kj::ArrayPtr<const char> source)
       : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
         source(source),
         cachedData(kj::none) {
+    KJ_DASSERT(isEsm());
+  }
+  // Source owned by this module (e.g. transpiled TypeScript or fallback-service
+  // responses, where the original buffer is transient).
+  explicit EsModule(Url id, Type type, Flags flags, kj::Array<const char> code)
+      : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
+        ownedSource(kj::mv(code)),
+        cachedData(kj::none) {
+    // The view is taken from the owning member (after member initialization)
+    // rather than from the constructor parameter, so it cannot be mistaken for
+    // a borrow of the parameter's stack storage.
+    source = KJ_ASSERT_NONNULL(ownedSource).asPtr();
     KJ_DASSERT(isEsm());
   }
   KJ_DISALLOW_COPY_AND_MOVE(EsModule);
@@ -225,7 +239,21 @@ class EsModule final: public Module {
       // once, shared across all isolates compiling this module. See
       // EncodedSource for the tiering. kj::Lazy handles cross-thread once-init.
       const auto& encoded = encodedSource.get([this](kj::SpaceFor<EncodedSource>& space) {
-        return space.construct(encodeSource(this->source));
+        auto result = space.construct(encodeSource(this->source));
+        if (!result->repr.is<kj::ArrayPtr<const char>>()) {
+          // The encoded representation is an owned transcode that does not
+          // borrow from the UTF-8 original, which now has no remaining readers:
+          // V8 re-reads source text (lazy compilation, toString) from the
+          // external string backed by the transcoded buffer, compile-cache
+          // generation reads the compiled script, and the /bundle virtual file
+          // system keeps its own copy of module bodies. If this module owns its
+          // source, release it. Mutating these members is safe here because
+          // this initializer runs exactly once, under kj::Lazy's internal lock,
+          // before the encoded result is published to any reader.
+          source = nullptr;
+          ownedSource = kj::none;
+        }
+        return result;
       });
       v8::Local<v8::String> contentStr;
       KJ_SWITCH_ONEOF(encoded.repr) {
@@ -335,7 +363,13 @@ class EsModule final: public Module {
     return actuallyEvaluate(js, module, observer);
   }
 
-  kj::ArrayPtr<const char> source;
+  // The UTF-8 source text, and — when this module owns its source — the owning
+  // buffer. Both are mutable so the encoding initializer can release the UTF-8
+  // original once an owned transcode replaces it (see getDescriptor()); after
+  // that point `source` is null and must not be read, which holds because its
+  // only reader is the encoding initializer itself.
+  mutable kj::ArrayPtr<const char> source;
+  mutable kj::Maybe<kj::Array<const char>> ownedSource;
 
   // The source encoded into a V8-compatible external-string representation
   // (see EncodedSource). Computed on first compile, shared across isolates.
@@ -2287,7 +2321,10 @@ kj::Own<Module> Module::newSynthetic(Url id,
 }
 
 kj::Own<Module> Module::newEsm(Url id, Type type, kj::Array<const char> code, Flags flags) {
-  return kj::heap<EsModule>(kj::mv(id), type, flags, code).attach(kj::mv(code));
+  // The module owns the source buffer (rather than having it attached to the
+  // kj::Own) so that it can release the UTF-8 original once an owned transcoded
+  // representation replaces it on first compile.
+  return kj::heap<EsModule>(kj::mv(id), type, flags, kj::mv(code));
 }
 
 kj::Own<Module> Module::newEsm(Url id, Type type, kj::ArrayPtr<const char> code) {
