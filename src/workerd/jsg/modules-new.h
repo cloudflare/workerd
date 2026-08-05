@@ -194,7 +194,9 @@ struct ResolveContext final {
   using Source = ResolveObserver::Source;
   using Type = ResolveObserver::Context;
 
-  // The type of module being resolved (one of BUNDLE, BUILTIN, or BUILTIN_ONLY)
+  // The type of module being resolved (one of BUNDLE, BUILTIN, BUILTIN_ONLY,
+  // or PUBLIC_BUILTIN — the last resolves only user-importable built-ins, e.g.
+  // for process.getBuiltinModule()).
   Type type;
 
   // The source of the module resolution (e.g. import, dynamic import, require, etc);
@@ -210,8 +212,14 @@ struct ResolveContext final {
   // before it was normalized into the specifier URL.
   kj::Maybe<kj::StringPtr> rawSpecifier = kj::none;
 
-  // Per the standard, import attributes are considered to be part of the
-  // specifier key when the module is resolved and cached.
+  // Import attributes for the resolution. These are validated against the
+  // resolved module's content type (e.g. `with { type: 'json' }` requires a
+  // JSON module) but are deliberately NOT part of the module cache key: the
+  // standard treats attributes as part of the key, and this deviation is
+  // benign while `type: 'json'` is the only supported attribute since the
+  // validation is performed on every import. Revisit if attribute types that
+  // change module *interpretation* are added (see the TODO in
+  // Module::evaluateContext).
   kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
 };
 
@@ -774,8 +782,11 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
   jsg::Url bundleBase;
   kj::MutexGuarded<Impl> impl;
   // Marked mutable because kj::Function::operator() is non-const, but the eval
-  // callback is conceptually const — it is only ever invoked while holding the
-  // isolate lock, so concurrent mutation is not a concern.
+  // callback is conceptually const. Note that a shared registry serves multiple
+  // isolates, each with its own lock, so the callback may be invoked
+  // concurrently from different threads: implementations must be thread-safe
+  // and must not rely on captured mutable state (the workerd callback captures
+  // nothing).
   mutable kj::Maybe<EvalCallback> maybeEvalCallback = kj::none;
   kj::Own<capnp::SchemaLoader> schemaLoader;
 

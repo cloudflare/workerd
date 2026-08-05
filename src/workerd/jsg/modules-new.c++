@@ -426,8 +426,10 @@ class SyntheticModule final: public Module {
 
   // Marked mutable because kj::Function::operator() is non-const, but evaluation
   // callbacks are conceptually const — they produce new JS objects each time without
-  // modifying the module's logical state. The callback is only ever invoked while
-  // holding the isolate lock, so concurrent mutation is not a concern.
+  // modifying the module's logical state. A shared registry serves multiple isolates,
+  // each with its own lock, so the callback may be invoked concurrently from different
+  // threads: callbacks must be thread-safe and idempotent (e.g. the wasm handler guards
+  // its compiled-module cache with a mutex).
   mutable ModuleBundle::BundleBuilder::EvaluateCallback callback;
   kj::Array<kj::String> namedExports;
 };
@@ -1043,7 +1045,7 @@ class IsolateModuleRegistry final {
         return {};
       }
       JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", context.normalizedSpecifier.getHref()));
-    }, [&](Value exception) -> v8::MaybeLocal<v8::Object> {
+    }, [&](Value exception) -> v8::MaybeLocal<v8::Value> {
       // Use the isolate to rethrow the exception here instead of using the lock.
       js.v8Isolate->ThrowException(exception.getHandle(js));
       return {};
