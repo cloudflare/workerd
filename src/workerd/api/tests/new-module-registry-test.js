@@ -127,7 +127,9 @@ await Promise.resolve();
 import { default as cjs2 } from 'cjs2';
 strictEqual(cjs2.foo, 1);
 strictEqual(cjs2.bar, 2);
-strictEqual(cjs2.filename, 'cjs1');
+// __filename is the absolute path of the module file, matching Node.js
+// (path.dirname(__filename) === __dirname).
+strictEqual(cjs2.filename, '/bundle/cjs1');
 strictEqual(cjs2.dirname, '/bundle');
 strictEqual(cjs2.assert, assert);
 
@@ -538,7 +540,7 @@ export const dynamicImportAttributes = {
 export const commonJsOpaquePathSpecifier = {
   async test() {
     const foo = await import('opaque:foo');
-    strictEqual(foo.default.filename(), 'foo');
+    strictEqual(foo.default.filename(), '/foo');
     strictEqual(foo.default.dirname(), '/');
 
     // An empty opaque path has neither a filename nor a directory.
