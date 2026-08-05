@@ -327,12 +327,12 @@ class IsolateBase {
     return externalMemoryTarget->getAdjustment(amount);
   }
 
-  AsyncContextFrame::StorageKey& getEnvAsyncContextKey() {
-    return *envAsyncContextKey;
+  kj::Arc<AsyncContextFrame::StorageKey> getEnvAsyncContextKey() {
+    return envAsyncContextKey.addRef();
   }
 
-  AsyncContextFrame::StorageKey& getExportsAsyncContextKey() {
-    return *exportsAsyncContextKey;
+  kj::Arc<AsyncContextFrame::StorageKey> getExportsAsyncContextKey() {
+    return exportsAsyncContextKey.addRef();
   }
 
   void setUsingNewModuleRegistry() {
@@ -502,10 +502,10 @@ class IsolateBase {
   kj::Arc<const ExternalMemoryTarget> externalMemoryTarget;
 
   // A shared async context key for accessing env
-  kj::Own<AsyncContextFrame::StorageKey> envAsyncContextKey;
+  kj::Arc<AsyncContextFrame::StorageKey> envAsyncContextKey;
 
   // A shared async context key for accessing exports
-  kj::Own<AsyncContextFrame::StorageKey> exportsAsyncContextKey;
+  kj::Arc<AsyncContextFrame::StorageKey> exportsAsyncContextKey;
 
   // We expect queues to remain relatively small -- 8 is the largest size I have observed from local
   // testing.

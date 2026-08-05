@@ -7,6 +7,8 @@
 
 #include <v8.h>
 
+#include <atomic>
+
 namespace workerd::jsg {
 
 #ifndef V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
@@ -68,11 +70,14 @@ namespace workerd::jsg {
 class AsyncContextFrame final: public Wrappable {
  public:
   // An opaque key that identifies an async-local storage cell within the frame.
-  class StorageKey: public kj::Refcounted {
+  class StorageKey: public kj::AtomicRefcounted {
    public:
     StorageKey(): hash(kj::hashCode(this)) {}
     KJ_DISALLOW_COPY_AND_MOVE(StorageKey);
 
+    // Storage keys are retained by frames captured for asynchronous work. Those frames can be
+    // handed to another worker thread while the key owner drops its reference on the original
+    // thread, so the key's references must be asynchronously refcounted.
     // The owner of the key should reset it when it goes away.
     // The StorageKey is typically owned by an instance of AsyncLocalStorage (see
     // the api/node/async-hooks.h). When the ALS instance is garbage collected, it
@@ -81,14 +86,14 @@ class AsyncContextFrame final: public Wrappable {
     // the frame lazily. The lazy cleanup does mean that values may persist in
     // memory a bit longer so if it proves to be problematic we can make the cleanup
     // a bit more proactive.
-    void reset() {
-      dead = true;
+    void reset() const {
+      dead.store(true, std::memory_order_relaxed);
     }
     // TODO(later): We should also evaluate the relatively unlikely case where an
     // ALS is capturing a reference to itself and therefore can never be cleaned up.
 
     bool isDead() const {
-      return dead;
+      return dead.load(std::memory_order_relaxed);
     }
     inline uint hashCode() const {
       return hash;
@@ -96,18 +101,17 @@ class AsyncContextFrame final: public Wrappable {
     inline bool operator==(const StorageKey& other) const {
       return this == &other;
     }
-
     JSG_MEMORY_INFO(StorageKey) {}
 
    private:
     uint hash;
-    bool dead = false;
+    mutable std::atomic<bool> dead = false;
   };
 
   struct StorageEntry {
-    kj::Own<StorageKey> key;
+    kj::Arc<StorageKey> key;
     Value value;
-    StorageEntry(kj::Own<StorageKey> key, Value value);
+    StorageEntry(kj::Arc<StorageKey> key, Value value);
     StorageEntry clone(Lock& js);
 
     JSG_MEMORY_INFO(StorageEntry) {
@@ -180,7 +184,7 @@ class AsyncContextFrame final: public Wrappable {
   };
 
   // Retrieves the value that is associated with the given key.
-  kj::Maybe<Value&> get(StorageKey& key);
+  kj::Maybe<Value&> get(const StorageKey& key);
 
   // Gets an opaque JavaScript Object wrapper object for this frame. If a wrapper
   // does not currently exist, one is created.
@@ -199,7 +203,7 @@ class AsyncContextFrame final: public Wrappable {
     // is important that these member fields stay in the correct cleanup order.
     Scope scope;
 
-    StorageScope(Lock& js, StorageKey& key, Value store);
+    StorageScope(Lock& js, kj::Arc<StorageKey> key, Value store);
     KJ_DISALLOW_COPY(StorageScope);
   };
 
@@ -216,15 +220,15 @@ class AsyncContextFrame final: public Wrappable {
 
  private:
   struct StorageEntryCallbacks {
-    StorageKey& keyForRow(StorageEntry& entry) const {
+    const StorageKey& keyForRow(const StorageEntry& entry) const {
       return *entry.key;
     }
 
-    bool matches(const StorageEntry& entry, StorageKey& key) const {
+    bool matches(const StorageEntry& entry, const StorageKey& key) const {
       return entry.key.get() == &key;
     }
 
-    uint hashCode(StorageKey& key) const {
+    uint hashCode(const StorageKey& key) const {
       return key.hashCode();
     }
   };

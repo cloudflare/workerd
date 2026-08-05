@@ -17,6 +17,7 @@
 #include <kj/exception.h>
 #include <kj/hash.h>
 #include <kj/map.h>
+#include <kj/refcount.h>
 #include <kj/string.h>
 #include <kj/table.h>
 
@@ -183,6 +184,11 @@ class MemoryTracker final {
   template <MemoryRetainer T>
   inline void trackField(kj::StringPtr edgeName,
       const kj::Own<T>& value,
+      kj::Maybe<kj::StringPtr> nodeName = kj::none);
+
+  template <MemoryRetainer T>
+  inline void trackField(kj::StringPtr edgeName,
+      const kj::Arc<T>& value,
       kj::Maybe<kj::StringPtr> nodeName = kj::none);
 
   template <MemoryRetainer T, typename D>
@@ -379,6 +385,14 @@ void MemoryTracker::trackField(
 template <MemoryRetainer T>
 void MemoryTracker::trackField(
     kj::StringPtr edgeName, const kj::Own<T>& value, kj::Maybe<kj::StringPtr> nodeName) {
+  if (value.get() != nullptr) {
+    trackField(edgeName, value.get(), nodeName);
+  }
+}
+
+template <MemoryRetainer T>
+void MemoryTracker::trackField(
+    kj::StringPtr edgeName, const kj::Arc<T>& value, kj::Maybe<kj::StringPtr> nodeName) {
   if (value.get() != nullptr) {
     trackField(edgeName, value.get(), nodeName);
   }
