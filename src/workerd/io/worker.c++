@@ -2382,8 +2382,11 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                   KJ_REQUIRE(idx == jsg::BINDINGS_SCOPE_SNAPSHOT_INDEX,
                       "the bindings scope was pinned at an unexpected index", idx);
                 }
-                KJ_IF_SOME(ns,
-                    tryResolveMainModule(lock, mainModule, *jsContext, *script, limitErrorOrTime)) {
+                kj::Maybe<jsg::JsObject> maybeNs = lock.isStartingFromSnapshot()
+                    ? jsg::JsObject(isolateBase.extractOnceFromSnapshot(
+                          context, jsg::MAIN_MODULE_NAMESPACE_SNAPSHOT_INDEX))
+                    : tryResolveMainModule(lock, mainModule, *jsContext, *script, limitErrorOrTime);
+                KJ_IF_SOME(ns, maybeNs) {
                   // To avoid resetting Worker-level C++ handles before snapshotting, we simply do not
                   // create them eagerly. This is safe because the top-level code has already executed,
                   // and the zygote worker will not handle any requests.
@@ -2393,6 +2396,11 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                   //     impl->ctxExports == IsolateBase::workerExportsObj.
                   // A real Worker repopulates these handles in START_FROM_SNAPSHOT mode.
                   if (lock.isPreparingSnapshot()) {
+                    if (script->isModular()) {
+                      auto idx = isolateBase.pinIntoSnapshot(context, v8::Local<v8::Object>(ns));
+                      KJ_REQUIRE(idx == jsg::MAIN_MODULE_NAMESPACE_SNAPSHOT_INDEX,
+                          "the main module namespace was pinned at an unexpected index", idx);
+                    }
                     break;
                   }
                   impl->env = lock.v8Ref(bindingsScope.As<v8::Value>());
