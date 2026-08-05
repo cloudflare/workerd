@@ -19,6 +19,7 @@
 //! | `Number` | `number` |
 //! | `Option<T>` | `T` or `undefined` |
 //! | `Nullable<T>` | `T`, `null`, or `undefined` |
+//! | `Lenient<T>` | `T`, `null`, or `undefined` (type mismatches silently become `undefined` via `TypeMismatchError`) |
 //! | `Result<T, E>` | `T` or throws |
 //! | `NonCoercible<T>` | `T` (strict type checking) |
 //! | `T: Struct` | `object` |
@@ -65,6 +66,8 @@
 //! For strict validation, wrap parameters in `NonCoercible<T>` or validate manually.
 
 use crate::Error;
+use crate::ExceptionType;
+use crate::Lenient;
 use crate::Lock;
 use crate::NonCoercible;
 use crate::Nullable;
@@ -146,6 +149,17 @@ impl_traced_noop!(
 impl<T: Traced> Traced for Option<T> {
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         if let Some(inner) = self {
+            inner.trace(visitor);
+        }
+    }
+}
+
+impl<T: Traced> Traced for Lenient<T> {
+    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
+        if let Self::Some(inner) = self {
+            inner.trace(visitor);
+        }
+        if let Self::Unconvertable(inner) = self {
             inner.trace(visitor);
         }
     }
@@ -252,8 +266,18 @@ pub trait ToJS: Sized {
 
 /// Trait for converting JavaScript values to Rust.
 ///
-/// Provides JS → Rust conversion. The `try_unwrap` method is used by macros
-/// to unwrap function parameters with proper error handling.
+/// Provides JS → Rust conversion. Implementations should return:
+/// - `Ok(value)` on successful conversion.
+/// - `Err(TypeMismatchError)` when the JS value is not of the expected type
+///   (a "soft" mismatch signal that [`Lenient`] swallows and `#[jsg_method]`
+///   translates to `TypeError`).
+/// - `Err(other)` for genuine conversion errors (coercion failures, etc.)
+///   that should propagate as hard errors.
+///
+/// The `TypeMismatchError` convention is critical: `Lenient<T>::from_js`
+/// intercepts it to produce `Lenient::Unconvertable`, and `#[jsg_method]`/
+/// `#[jsg_constructor]` translate it to a user-facing `TypeError`. Do NOT
+/// use `TypeMismatchError` for anything other than "value is not of type T".
 pub trait FromJS: Sized {
     type ResultType;
 
@@ -496,6 +520,19 @@ impl<T: ToJS> ToJS for Nullable<T> {
     }
 }
 
+impl<T: ToJS> ToJS for Lenient<T> {
+    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+    where
+        'b: 'a,
+    {
+        match self {
+            Self::Some(value) => value.to_js(lock),
+            Self::Null => v8::Local::<v8::Value>::null(lock),
+            Self::Undefined | Self::Unconvertable(_) => v8::Local::<v8::Value>::undefined(lock),
+        }
+    }
+}
+
 impl<T: Type + FromJS> FromJS for Option<T> {
     type ResultType = Option<T::ResultType>;
 
@@ -541,6 +578,29 @@ impl<T: FromJS> FromJS for Nullable<T> {
     }
 }
 
+impl<T: FromJS> FromJS for Lenient<T> {
+    type ResultType = Lenient<T::ResultType>;
+
+    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+        if value.is_null() {
+            Ok(Lenient::Null)
+        } else if value.is_undefined() {
+            Ok(Lenient::Undefined)
+        } else {
+            match T::from_js(lock, value.clone()) {
+                Ok(v) => Ok(Lenient::Some(v)),
+                // TypeMismatchError signals "not this type" (analogous to C++ tryUnwrap
+                // returning kj::none). Other errors (exceptions from coercion, etc.)
+                // propagate as hard errors, matching C++ LenientOptional behavior.
+                Err(err) if err.name == ExceptionType::TypeMismatchError => {
+                    Ok(Lenient::Unconvertable(value.into()))
+                }
+                Err(err) => Err(err),
+            }
+        }
+    }
+}
+
 // =============================================================================
 // Array type implementations (Vec<T>)
 // =============================================================================
@@ -573,9 +633,9 @@ impl<T: Type + FromJS<ResultType = T>> FromJS for Vec<T> {
 
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
         let type_name = value.type_of();
-        let array = value
-            .try_as::<v8::Array>()
-            .ok_or_else(|| Error::new_type_error(format!("Expected Array but got {type_name}")))?;
+        let array = value.try_as::<v8::Array>().ok_or_else(|| {
+            Error::new_type_mismatch_error(format!("Expected Array but got {type_name}"))
+        })?;
 
         let globals = array.iterate()?;
         let mut result = Self::with_capacity(globals.len());
@@ -658,7 +718,7 @@ macro_rules! impl_typed_array {
 
             fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self, Error> {
                 if !value.$is_check() {
-                    return Err(Error::new_type_error(format!(
+                    return Err(Error::new_type_mismatch_error(format!(
                         "Expected {} but got {}",
                         stringify!($marker),
                         value.type_of()
