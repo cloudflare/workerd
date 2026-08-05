@@ -279,21 +279,18 @@ class D1DatabaseSession {
     statements: D1PreparedStatement[]
   ): Promise<D1Result<T>[]> {
     return withSpan('d1_batch', async (span) => {
-      span.setAttribute('db.system.name', 'cloudflare-d1');
-      span.setAttribute('db.operation.name', 'batch');
-      span.setAttribute(
-        'db.query.text',
-        // TODO: Joining all the statement without truncating it can lead to truncated
-        // span tags. We should find out if that's the case and where is the limit, and
-        // then decide if we need to truncate it ourselves.
-        statements.map((s) => s.statement).join('\n')
-      );
-      span.setAttribute('db.operation.batch.size', statements.length);
-      span.setAttribute('cloudflare.binding.type', 'D1');
-      span.setAttribute(
-        'cloudflare.d1.query.bookmark',
-        this.getBookmark() ?? undefined
-      );
+      span.setAttributes({
+        'db.system.name': 'cloudflare-d1',
+        'db.operation.name': 'batch',
+        'db.query.text':
+          // TODO: Joining all the statement without truncating it can lead to truncated
+          // span tags. We should find out if that's the case and where is the limit, and
+          // then decide if we need to truncate it ourselves.
+          statements.map((s) => s.statement).join('\n'),
+        'db.operation.batch.size': statements.length,
+        'cloudflare.binding.type': 'D1',
+        'cloudflare.d1.query.bookmark': this.getBookmark() ?? undefined,
+      });
 
       const exec = (
         d1BindingJsrpc
@@ -315,10 +312,9 @@ class D1DatabaseSession {
             )
       ) as D1UpstreamSuccess<T>[];
 
-      span.setAttribute(
-        'cloudflare.d1.response.bookmark',
-        this.getBookmark() ?? undefined
-      );
+      span.setAttributes({
+        'cloudflare.d1.response.bookmark': this.getBookmark() ?? undefined,
+      });
       addAggregatedD1MetaToSpan(
         span,
         exec.map((e) => e.meta)
@@ -532,10 +528,12 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
 
   async exec(query: string): Promise<D1ExecResult> {
     return withSpan('d1_exec', async (span) => {
-      span.setAttribute('db.system.name', 'cloudflare-d1');
-      span.setAttribute('db.operation.name', 'exec');
-      span.setAttribute('db.query.text', query);
-      span.setAttribute('cloudflare.binding.type', 'D1');
+      span.setAttributes({
+        'db.system.name': 'cloudflare-d1',
+        'db.operation.name': 'exec',
+        'db.query.text': query,
+        'cloudflare.binding.type': 'D1',
+      });
 
       // TODO: splitting by lines is overly simplification because a single line
       // can contain multiple statements (ex: `select 1; select 2;`).
@@ -686,14 +684,14 @@ class D1PreparedStatement {
     colName?: string
   ): Promise<Record<string, T> | T | null> {
     return withSpan('d1_first', async (span) => {
-      span.setAttribute('db.system.name', 'cloudflare-d1');
-      span.setAttribute('db.operation.name', 'first');
-      span.setAttribute('db.query.text', this.statement);
-      span.setAttribute('cloudflare.binding.type', 'D1');
-      span.setAttribute(
-        'cloudflare.d1.query.bookmark',
-        this.dbSession.getBookmark() ?? undefined
-      );
+      span.setAttributes({
+        'db.system.name': 'cloudflare-d1',
+        'db.operation.name': 'first',
+        'db.query.text': this.statement,
+        'cloudflare.binding.type': 'D1',
+        'cloudflare.d1.query.bookmark':
+          this.dbSession.getBookmark() ?? undefined,
+      });
 
       const info = firstIfArray(
         d1BindingJsrpc
@@ -710,10 +708,10 @@ class D1PreparedStatement {
             )
       );
 
-      span.setAttribute(
-        'cloudflare.d1.response.bookmark',
-        this.dbSession.getBookmark() ?? undefined
-      );
+      span.setAttributes({
+        'cloudflare.d1.response.bookmark':
+          this.dbSession.getBookmark() ?? undefined,
+      });
       addD1MetaToSpan(span, info.meta);
 
       const results = toArrayOfObjects<Record<string, T>>(info).results;
@@ -740,14 +738,14 @@ class D1PreparedStatement {
   /* eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters */
   async run<T = Record<string, unknown>>(): Promise<D1Response> {
     return withSpan('d1_run', async (span) => {
-      span.setAttribute('db.system.name', 'cloudflare-d1');
-      span.setAttribute('db.operation.name', 'run');
-      span.setAttribute('db.query.text', this.statement);
-      span.setAttribute('cloudflare.binding.type', 'D1');
-      span.setAttribute(
-        'cloudflare.d1.query.bookmark',
-        this.dbSession.getBookmark() ?? undefined
-      );
+      span.setAttributes({
+        'db.system.name': 'cloudflare-d1',
+        'db.operation.name': 'run',
+        'db.query.text': this.statement,
+        'cloudflare.binding.type': 'D1',
+        'cloudflare.d1.query.bookmark':
+          this.dbSession.getBookmark() ?? undefined,
+      });
 
       const result = firstIfArray(
         d1BindingJsrpc
@@ -764,10 +762,10 @@ class D1PreparedStatement {
             )
       );
 
-      span.setAttribute(
-        'cloudflare.d1.response.bookmark',
-        this.dbSession.getBookmark() ?? undefined
-      );
+      span.setAttributes({
+        'cloudflare.d1.response.bookmark':
+          this.dbSession.getBookmark() ?? undefined,
+      });
       addD1MetaToSpan(span, result.meta);
       return d1BindingJsrpc ? toArrayOfObjects(result) : result;
     });
@@ -775,14 +773,14 @@ class D1PreparedStatement {
 
   async all<T = Record<string, unknown>>(): Promise<D1Result<T[]>> {
     return withSpan('d1_all', async (span) => {
-      span.setAttribute('db.system.name', 'cloudflare-d1');
-      span.setAttribute('db.operation.name', 'all');
-      span.setAttribute('db.query.text', this.statement);
-      span.setAttribute('cloudflare.binding.type', 'D1');
-      span.setAttribute(
-        'cloudflare.d1.query.bookmark',
-        this.dbSession.getBookmark() ?? undefined
-      );
+      span.setAttributes({
+        'db.system.name': 'cloudflare-d1',
+        'db.operation.name': 'all',
+        'db.query.text': this.statement,
+        'cloudflare.binding.type': 'D1',
+        'cloudflare.d1.query.bookmark':
+          this.dbSession.getBookmark() ?? undefined,
+      });
 
       const result = firstIfArray(
         d1BindingJsrpc
@@ -799,10 +797,10 @@ class D1PreparedStatement {
             )
       );
 
-      span.setAttribute(
-        'cloudflare.d1.response.bookmark',
-        this.dbSession.getBookmark() ?? undefined
-      );
+      span.setAttributes({
+        'cloudflare.d1.response.bookmark':
+          this.dbSession.getBookmark() ?? undefined,
+      });
       addD1MetaToSpan(span, result.meta);
 
       return toArrayOfObjects(result);
@@ -811,14 +809,14 @@ class D1PreparedStatement {
 
   async raw<T = unknown[]>(options?: D1RawOptions): Promise<T[]> {
     return withSpan('d1_all', async (span) => {
-      span.setAttribute('db.system.name', 'cloudflare-d1');
-      span.setAttribute('db.operation.name', 'raw');
-      span.setAttribute('db.query.text', this.statement);
-      span.setAttribute('cloudflare.binding.type', 'D1');
-      span.setAttribute(
-        'cloudflare.d1.query.bookmark',
-        this.dbSession.getBookmark() ?? undefined
-      );
+      span.setAttributes({
+        'db.system.name': 'cloudflare-d1',
+        'db.operation.name': 'raw',
+        'db.query.text': this.statement,
+        'cloudflare.binding.type': 'D1',
+        'cloudflare.d1.query.bookmark':
+          this.dbSession.getBookmark() ?? undefined,
+      });
 
       if (d1BindingJsrpc) {
         const s = firstIfArray(
@@ -828,10 +826,10 @@ class D1PreparedStatement {
           )
         );
 
-        span.setAttribute(
-          'cloudflare.d1.response.bookmark',
-          this.dbSession.getBookmark() ?? undefined
-        );
+        span.setAttributes({
+          'cloudflare.d1.response.bookmark':
+            this.dbSession.getBookmark() ?? undefined,
+        });
         addD1MetaToSpan(span, s.meta);
 
         return [
@@ -850,10 +848,10 @@ class D1PreparedStatement {
         )
       );
 
-      span.setAttribute(
-        'cloudflare.d1.response.bookmark',
-        this.dbSession.getBookmark() ?? undefined
-      );
+      span.setAttributes({
+        'cloudflare.d1.response.bookmark':
+          this.dbSession.getBookmark() ?? undefined,
+      });
       addD1MetaToSpan(span, s.meta);
 
       // If no results returned, return empty array
@@ -981,32 +979,20 @@ function addAggregatedD1MetaToSpan(span: Span, metas: PartialD1Meta[]): void {
 }
 
 function addD1MetaToSpan(span: Span, meta: D1Meta): void {
-  span.setAttribute('cloudflare.d1.response.size_after', meta.size_after);
-  span.setAttribute('cloudflare.d1.response.rows_read', meta.rows_read);
-  span.setAttribute('cloudflare.d1.response.rows_written', meta.rows_written);
-  span.setAttribute('cloudflare.d1.response.last_row_id', meta.last_row_id);
-  span.setAttribute('cloudflare.d1.response.changed_db', meta.changed_db);
-  span.setAttribute('cloudflare.d1.response.changes', meta.changes);
-  span.setAttribute(
-    'cloudflare.d1.response.served_by_region',
-    meta.served_by_region
-  );
-  span.setAttribute(
-    'cloudflare.d1.response.served_by_colo',
-    meta.served_by_colo
-  );
-  span.setAttribute(
-    'cloudflare.d1.response.served_by_primary',
-    meta.served_by_primary
-  );
-  span.setAttribute(
-    'cloudflare.d1.response.sql_duration_ms',
-    meta.timings?.sql_duration_ms ?? undefined
-  );
-  span.setAttribute(
-    'cloudflare.d1.response.total_attempts',
-    meta.total_attempts
-  );
+  span.setAttributes({
+    'cloudflare.d1.response.size_after': meta.size_after,
+    'cloudflare.d1.response.rows_read': meta.rows_read,
+    'cloudflare.d1.response.rows_written': meta.rows_written,
+    'cloudflare.d1.response.last_row_id': meta.last_row_id,
+    'cloudflare.d1.response.changed_db': meta.changed_db,
+    'cloudflare.d1.response.changes': meta.changes,
+    'cloudflare.d1.response.served_by_region': meta.served_by_region,
+    'cloudflare.d1.response.served_by_colo': meta.served_by_colo,
+    'cloudflare.d1.response.served_by_primary': meta.served_by_primary,
+    'cloudflare.d1.response.sql_duration_ms':
+      meta.timings?.sql_duration_ms ?? undefined,
+    'cloudflare.d1.response.total_attempts': meta.total_attempts,
+  });
 }
 
 // When a query is executing multiple statements, and we receive a D1Meta

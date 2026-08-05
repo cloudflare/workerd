@@ -139,7 +139,7 @@ bool Span::getIsTraced() {
   KJ_UNREACHABLE;
 }
 
-void Span::setAttribute(jsg::Lock& js, kj::String key, jsg::Optional<TagValue> value) {
+jsg::Ref<Span> Span::setAttribute(jsg::Lock& js, kj::String key, jsg::Optional<TagValue> value) {
   kj::Maybe<TagValue> maybeValue;
   KJ_IF_SOME(v, value) {
     maybeValue = kj::mv(v);
@@ -152,6 +152,14 @@ void Span::setAttribute(jsg::Lock& js, kj::String key, jsg::Optional<TagValue> v
       s->setAttribute(kj::mv(key), kj::mv(maybeValue));
     }
   }
+  return JSG_THIS;
+}
+
+jsg::Ref<Span> Span::setAttributes(jsg::Lock& js, jsg::Dict<jsg::Optional<TagValue>> attributes) {
+  for (auto& field: attributes.fields) {
+    setAttribute(js, kj::mv(field.name), kj::mv(field.value));
+  }
+  return JSG_THIS;
 }
 
 void Span::end() {
