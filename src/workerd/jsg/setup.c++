@@ -549,6 +549,19 @@ void IsolateBase::setSnapshotDefaultContext(v8::Local<v8::Context> defaultContex
   KJ_ASSERT_NONNULL(snapshotCreator)->SetDefaultContext(defaultContext);
 }
 
+void IsolateBase::bakeConstructorTemplatesIntoSnapshot() {
+  auto& artifact = mutableSnapshotArtifact();
+  v8::HandleScope scope(ptr);
+  iterateResourceTypeTemplates([&](v8::Global<v8::FunctionTemplate>& slot) {
+    if (slot.IsEmpty()) {
+      artifact.constructorTemplateIndices.add(SnapshotArtifact::kNoConstructorTemplate);
+      return;
+    }
+    artifact.constructorTemplateIndices.add(pinIntoIsolateSnapshot(slot.Get(ptr)));
+    slot.Reset();
+  });
+}
+
 void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
     kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles) {
   KJ_REQUIRE(isPreparingSnapshot());
@@ -591,9 +604,9 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
     h.Reset();
   }
 
-  // 3. Reset resource-type constructor templates: the memoized and context slot per
-  // JSG_RESOURCE type, owned by the TypeWrapper machinery.
-  iterateResourceTypeTemplates([&](v8::Global<v8::FunctionTemplate>& h) { h.Reset(); });
+  // 3. Bake every materialized resource-type constructor template into the snapshot, resetting
+  // each slot in the same pass.
+  bakeConstructorTemplatesIntoSnapshot();
 
   // 4. Reset struct-type handles: dictionary template + field-name handles per JSG_STRUCT.
   visitStructTypeHandles([](v8::Global<v8::Name>& h) { h.Reset(); },
@@ -606,6 +619,34 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
 
   artifact.blob = KJ_ASSERT_NONNULL(snapshotCreator)
                       ->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
+}
+
+void IsolateBase::restoreConstructorTemplatesFromSnapshot() {
+  if (!isStartingFromSnapshot()) return;
+  auto& indices = finalizedSnapshotArtifact().constructorTemplateIndices;
+  if (indices.size() == 0) return;
+  jsg::runInV8Stack([&](jsg::V8StackScope&) {
+    v8::Isolate::Scope isolateScope(ptr);
+    v8::HandleScope handleScope(ptr);
+    // Slots are enumerated in the same fixed order as at PREPARE_SNAPSHOT (same binary, same
+    // TypeWrapper), so each slot pairs with the next recorded index by position.
+    size_t cursor = 0;
+    iterateResourceTypeTemplates([&](v8::Global<v8::FunctionTemplate>& slot) {
+      KJ_REQUIRE(cursor < indices.size(),
+          "START_FROM_SNAPSHOT: more template slots than recorded at PREPARE_SNAPSHOT");
+      uint32_t snapshotIndex = indices[cursor++];
+      if (snapshotIndex == SnapshotArtifact::kNoConstructorTemplate) return;
+      v8::Local<v8::FunctionTemplate> functionTemplate;
+      KJ_REQUIRE(ptr->GetDataFromSnapshotOnce<v8::FunctionTemplate>(snapshotIndex)
+                     .ToLocal(&functionTemplate),
+          "START_FROM_SNAPSHOT: constructor template missing from snapshot", snapshotIndex,
+          cursor - 1);
+      slot.Reset(ptr, functionTemplate);
+    });
+    KJ_REQUIRE(cursor == indices.size(),
+        "START_FROM_SNAPSHOT: template slot enumeration drifted vs PREPARE_SNAPSHOT", cursor,
+        indices.size());
+  });
 }
 
 IsolateBase::~IsolateBase() noexcept(false) {
