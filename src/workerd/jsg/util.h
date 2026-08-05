@@ -108,6 +108,12 @@ constexpr kj::Exception::DetailTypeId REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID =
 // boundary. The payload is a zero-length array (marker only).
 constexpr kj::Exception::DetailTypeId REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID = 0x7f6e0bece261e8eeull;
 
+// Set when an actor invocation is rejected before user code because its retry token could not be
+// claimed. This distinguishes a claim rejection from other delivery failures so a caller can avoid
+// retrying it. The payload is a zero-length array (marker only).
+constexpr kj::Exception::DetailTypeId ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID =
+    0x6fb3a97323600af2ull;
+
 // Detail type for Durable Object metadata on exceptions propagated out of actor execution.
 constexpr kj::Exception::DetailTypeId DURABLE_OBJECT_EXCEPTION_METADATA_DETAIL_ID =
     0xb6e3c4156a4f9d22ull;
