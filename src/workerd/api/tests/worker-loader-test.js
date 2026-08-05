@@ -188,6 +188,34 @@ class Default(WorkerEntrypoint):
   },
 };
 
+// A dynamic Worker whose main module is Python gets `python_workers` enabled
+// automatically, so the caller never has to name it. That injection has to
+// happen *before* the compatibility flags are compiled because `python_workers`
+// gates a chain of `impliedByAfterDate` flags.
+export let pythonImplicitFlagsRespectCompatDate = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('pythonImplicitFlagsRespectCompatDate', () => {
+      return {
+        compatibilityDate: '2026-05-15',
+        mainModule: 'foo.py',
+        modules: {
+          'foo.py': `
+import sys
+from workers import WorkerEntrypoint
+class Default(WorkerEntrypoint):
+  async def python_version(self):
+    return "%d.%d" % sys.version_info[:2]
+          `,
+        },
+      };
+    });
+
+    // The Pyodide release gated on bare `python_workers` ships Python 3.12; the one implied by
+    // this compat date (via `python_workers_20250116`) ships 3.13.
+    assert.strictEqual(await worker.getEntrypoint().python_version(), '3.13');
+  },
+};
+
 // Test supplying a basic `env` object.
 export let passEnv = {
   async test(ctrl, env, ctx) {
