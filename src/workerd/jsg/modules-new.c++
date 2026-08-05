@@ -531,6 +531,17 @@ class IsolateModuleRegistry final {
         isolate->GetCurrentContext(), jsg::ContextPointerSlot::MODULE_REGISTRY));
   }
 
+  // A lightweight, non-owning key for probing the resolutions map without
+  // cloning the URL. Hash/equality must remain consistent with
+  // SpecifierContext.
+  struct SpecifierContextRef {
+    ResolveContext::Type type;
+    const Url& id;
+    uint hashCode() const {
+      return kj::hashCode(type, id);
+    }
+  };
+
   struct SpecifierContext final {
     ResolveContext::Type type;
     Url id;
@@ -540,14 +551,36 @@ class IsolateModuleRegistry final {
     bool operator==(const SpecifierContext& other) const {
       return type == other.type && id == other.id;
     }
+    bool operator==(const SpecifierContextRef& other) const {
+      return type == other.type && id == other.id;
+    }
     uint hashCode() const {
       return kj::hashCode(type, id);
     }
   };
 
+  // One v8::Module instantiation of an underlying Module definition. A
+  // definition is instantiated at most once per (specifier URL, definition)
+  // pair, which encodes the module-identity rules this registry guarantees:
+  //
+  //  * Query/fragment-distinct specifiers produce distinct instances, each
+  //    with its own import.meta.url, per the HTML module-map model
+  //    (import('./foo?a') !== import('./foo?b')).
+  //  * The same specifier resolved through different context types shares one
+  //    instance when it resolves to the same definition — e.g.
+  //    process.getBuiltinModule('cloudflare:sockets') must be reference-equal
+  //    to the namespace obtained via import(), and a builtin imported by both
+  //    user code and other builtins must remain a per-isolate singleton
+  //    (module-level state must not be duplicated).
+  //  * The same specifier resolved through different context types yields
+  //    *distinct* instances when it resolves to different definitions — e.g. a
+  //    worker-bundle module shadowing a builtin name coexists with the real
+  //    builtin, and PUBLIC_BUILTIN resolution must never observe the shadow.
   struct Entry final {
     HashableV8Ref<v8::Module> key;
-    SpecifierContext context;
+    // The specifier URL for this instantiation, including any query/fragment.
+    // This is the instance's import.meta.url.
+    Url id;
     const Module& module;
   };
 
@@ -560,7 +593,7 @@ class IsolateModuleRegistry final {
   // an exception has been scheduled with the isolate.
   v8::MaybeLocal<v8::Module> resolve(Lock& js, const ResolveContext& context) {
     // Do we already have a cached module for this context?
-    KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
+    KJ_IF_SOME(found, findResolved(context)) {
       return found.key.getHandle(js);
     }
     // No? That's OK, let's look it up.
@@ -585,7 +618,7 @@ class IsolateModuleRegistry final {
         .referrerNormalizedSpecifier = context.referrerNormalizedSpecifier,
         .rawSpecifier = processSpec.asPtr(),
       };
-      KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(processContext)) {
+      KJ_IF_SOME(found, findResolved(processContext)) {
         return found.key.getHandle(js);
       }
       KJ_IF_SOME(found, resolveWithCaching(js, processContext)) {
@@ -621,10 +654,31 @@ class IsolateModuleRegistry final {
     };
 
     return js.wrapSimplePromise(js.tryCatch([&] -> Promise<Value> {
-      // The referrer should absolutely already be known to the registry
-      // or something bad happened.
-      auto& referring = JSG_REQUIRE_NONNULL(lookupCache.find<kj::HashIndex<UrlCallbacks>>(referrer),
-          TypeError, kj::str("Referring module not found in the registry: ", referrer.getHref()));
+      // The host callback identifies the referring script only by its origin URL,
+      // so probe the lookup cache for that URL across the context types in
+      // resolution-priority order. The same URL can legitimately have entries
+      // under multiple types — e.g. a worker-bundle module shadowing a builtin
+      // name coexists with the real builtin — and V8 gives us only the URL
+      // string, so this is inherently a policy choice: user-facing semantics
+      // favor treating the referrer as the bundle module.
+      //
+      // The referrer should absolutely already be known to the registry (it is
+      // currently executing) or something bad happened.
+      static constexpr ResolveContext::Type kReferrerProbeOrder[] = {
+        ResolveContext::Type::BUNDLE,
+        ResolveContext::Type::BUILTIN,
+        ResolveContext::Type::BUILTIN_ONLY,
+        ResolveContext::Type::PUBLIC_BUILTIN,
+      };
+      kj::Maybe<Entry&> maybeReferring;
+      for (auto type: kReferrerProbeOrder) {
+        KJ_IF_SOME(found, findResolved(type, referrer)) {
+          maybeReferring = found;
+          break;
+        }
+      }
+      auto& referring = JSG_REQUIRE_NONNULL(maybeReferring, TypeError,
+          kj::str("Referring module not found in the registry: ", referrer.getHref()));
 
       // Now that we know the referrer module, we can set the context for the
       // next resolve. The "type" of the context is determined by the type of
@@ -694,7 +748,7 @@ class IsolateModuleRegistry final {
       };
 
       // Do we already have a cached module for this context?
-      KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
+      KJ_IF_SOME(found, findResolved(context)) {
         return handleFoundModule(found);
       }
 
@@ -720,7 +774,7 @@ class IsolateModuleRegistry final {
           .referrerNormalizedSpecifier = referrer,
           .rawSpecifier = processSpec.asPtr(),
         };
-        KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(processContext)) {
+        KJ_IF_SOME(found, findResolved(processContext)) {
           return handleFoundModule(found);
         }
         KJ_IF_SOME(found, resolveWithCaching(js, processContext)) {
@@ -950,7 +1004,7 @@ class IsolateModuleRegistry final {
 
     return js.tryCatch([&]() -> v8::MaybeLocal<v8::Value> {
       // Do we already have a cached module for this context?
-      KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
+      KJ_IF_SOME(found, findResolved(context)) {
         // Extract module handle and Module& before calling evaluate, since
         // evaluate may trigger table rehashing that invalidates the Entry&.
         auto foundModule = found.key.getHandle(js);
@@ -998,7 +1052,7 @@ class IsolateModuleRegistry final {
 
   // Lookup a module that may have already been previously resolved and cached.
   kj::Maybe<Entry&> lookup(Lock& js, v8::Local<v8::Module> module) {
-    return lookupCache
+    return instantiations
         .find<kj::HashIndex<EntryCallbacks>>(HashableV8Ref<v8::Module>(js.v8Isolate, module))
         .map([](Entry& entry) -> Entry& { return entry; });
   }
@@ -1027,29 +1081,37 @@ class IsolateModuleRegistry final {
     }
   };
 
-  struct ContextCallbacks final {
-    const SpecifierContext& keyForRow(const Entry& entry) const {
-      return entry.context;
+  struct InstanceCallbacks final {
+    const Entry& keyForRow(const Entry& entry) const {
+      return entry;
     }
-    bool matches(const Entry& entry, const SpecifierContext& context) const {
-      return entry.context == context;
+    bool matches(const Entry& entry, const Url& id, const Module* def) const {
+      return &entry.module == def && entry.id == id;
     }
-    uint hashCode(const SpecifierContext& context) const {
-      return context.hashCode();
+    bool matches(const Entry& entry, const Entry& other) const {
+      return &entry.module == &other.module && entry.id == other.id;
+    }
+    uint hashCode(const Url& id, const Module* def) const {
+      return kj::hashCode(id, def);
+    }
+    uint hashCode(const Entry& entry) const {
+      return kj::hashCode(entry.id, &entry.module);
     }
   };
 
-  struct UrlCallbacks final {
-    const Url& keyForRow(const Entry& entry) const {
-      return entry.context.id;
+  // Finds the instantiation previously produced for a (context type, specifier)
+  // pair, if any.
+  kj::Maybe<Entry&> findResolved(const ResolveContext& context) KJ_WARN_UNUSED_RESULT {
+    return findResolved(context.type, context.normalizedSpecifier);
+  }
+
+  kj::Maybe<Entry&> findResolved(ResolveContext::Type type, const Url& id) KJ_WARN_UNUSED_RESULT {
+    KJ_IF_SOME(def, resolutions.find(SpecifierContextRef{type, id})) {
+      // The resolutions entry always has a matching instantiation.
+      return KJ_ASSERT_NONNULL(instantiations.find<kj::HashIndex<InstanceCallbacks>>(id, def));
     }
-    bool matches(const Entry& entry, const Url& id) const {
-      return entry.context.id == id;
-    }
-    uint hashCode(const Url& id) const {
-      return id.hashCode();
-    }
-  };
+    return kj::none;
+  }
 
   // Resolves the module from the inner ModuleRegistry, caching the results.
   kj::Maybe<Entry&> resolveWithCaching(
@@ -1077,27 +1139,43 @@ class IsolateModuleRegistry final {
     };
 
     KJ_IF_SOME(found, inner.lookup(innerContext, noopResolveObserver)) {
-      return kj::Maybe<Entry&>(lookupCache.upsert(
-          Entry{
-            .key = HashableV8Ref<v8::Module>(
-                js.v8Isolate, check(found.getDescriptor(js, getObserver()))),
-            // Note that we cache specifically with the passed in context and not the
-            // innerContext that was created. This is because we want to use the original
-            // specifier URL (with query parameters and fragments) as part of the key for
-            // the lookup cache.
-            .context = context,
-            .module = found,
-          },
-          [](auto&, auto&&) {}));
+      // Record the resolution under the full specifier (with query/fragment):
+      // it is part of the module-identity key (see Entry).
+      resolutions.upsert(SpecifierContext(context), &found,
+          [](const Module*& existing, const Module* replacement) {
+        // Deterministic: re-resolving the same (type, specifier) always finds
+        // the same definition — the inner registry is immutable and caching.
+        KJ_ASSERT(existing == replacement);
+      });
+
+      // Reuse the existing instantiation for this (specifier, definition) if
+      // one exists (e.g. the same builtin already resolved through a different
+      // context type); otherwise instantiate now.
+      KJ_IF_SOME(entry,
+          instantiations.find<kj::HashIndex<InstanceCallbacks>>(
+              context.normalizedSpecifier, &found)) {
+        return kj::Maybe<Entry&>(entry);
+      }
+      return kj::Maybe<Entry&>(instantiations.insert(Entry{
+        .key =
+            HashableV8Ref<v8::Module>(js.v8Isolate, check(found.getDescriptor(js, getObserver()))),
+        .id = context.normalizedSpecifier.clone(),
+        .module = found,
+      }));
     }
     return kj::none;
   }
 
-  kj::Table<Entry,
-      kj::HashIndex<EntryCallbacks>,
-      kj::HashIndex<ContextCallbacks>,
-      kj::HashIndex<UrlCallbacks>>
-      lookupCache;
+  // The instantiation table: one row per live v8::Module, keyed by handle
+  // (EntryCallbacks) and by (specifier URL, definition) (InstanceCallbacks).
+  kj::Table<Entry, kj::HashIndex<EntryCallbacks>, kj::HashIndex<InstanceCallbacks>> instantiations;
+
+  // The resolution cache: (context type, specifier URL) → the definition it
+  // resolves to. Multiple resolutions may map to one instantiation (same
+  // specifier + definition through different context types); resolutions with
+  // the same specifier but different definitions (bundle shadow vs builtin)
+  // map to distinct instantiations.
+  kj::HashMap<SpecifierContext, const Module*> resolutions;
   friend class SyntheticModule;
 };
 
@@ -1128,7 +1206,7 @@ void importMeta(
   try {
     js.tryCatch([&] {
       KJ_IF_SOME(found, registry.lookup(js, module)) {
-        auto href = found.context.id.getHref();
+        auto href = found.id.getHref();
 
         // V8's documentation says that the host should set the properties
         // using CreateDataProperty.
@@ -1327,7 +1405,7 @@ IsolateModuleRegistry::IsolateModuleRegistry(
     Lock& js, const ModuleRegistry& registry, const CompilationObserver& observer)
     : inner(registry),
       observer(observer),
-      lookupCache(EntryCallbacks{}, ContextCallbacks{}, UrlCallbacks{}) {
+      instantiations(EntryCallbacks{}, InstanceCallbacks{}) {
   auto isolate = js.v8Isolate;
   auto context = isolate->GetCurrentContext();
   KJ_ASSERT(!context.IsEmpty());
@@ -1369,7 +1447,7 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
     Url referrerUrl = registry.lookup(js, referrer)
                           .map([&](IsolateModuleRegistry::Entry& entry) -> Url {
       type = moduleTypeToResolveContextType(entry.module.type());
-      return entry.context.id.clone();
+      return entry.id.clone();
     }).orDefault(registry.getBundleBase().clone());
 
     // If Node.js Compat v2 mode is enable, we have to check to see if the specifier

@@ -2077,6 +2077,85 @@ KJ_TEST("UNWRAP_DEFAULT honors module.exports, marker order, and builtin fallbac
 
 // ======================================================================================
 
+KJ_TEST("A URL can hold distinct modules per context type (bundle shadow vs builtin)") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    // A worker-bundle module that shadows a builtin name. It also performs a
+    // dynamic import so the referrer probe is exercised for a URL that has
+    // entries under multiple context types.
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+    auto shadow = kj::str("export default 'shadow'; export const p = import('file:///dep');");
+    bundleBuilder.addEsmModule("test:thing", shadow);
+    auto dep = kj::str("export default 'dep';");
+    bundleBuilder.addEsmModule("dep", dep);
+
+    // ...and the real builtin registered under the very same URL.
+    ModuleBundle::BuiltinBuilder builtinBuilder(ModuleBundle::BuiltinBuilder::Type::BUILTIN);
+    static const auto kThing = "test:thing"_url;
+    auto builtin = kj::str("export default 'builtin';");
+    builtinBuilder.addEsm(kThing, builtin);
+
+    // An unshadowed builtin, for the shared-instantiation direction.
+    static const auto kShared = "test:shared"_url;
+    auto shared = kj::str("export default 'shared';");
+    builtinBuilder.addEsm(kShared, shared);
+
+    auto registry = ModuleRegistry::Builder(BASE)
+                        .add(bundleBuilder.finish())
+                        .add(builtinBuilder.finish())
+                        .finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    JSG_TRY(js) {
+      // BUNDLE context resolves the shadow (bundle wins user-facing resolution).
+      auto fromBundle =
+          ModuleRegistry::resolve(js, "test:thing", "default"_kjc, ResolveContext::Type::BUNDLE);
+      KJ_ASSERT(kj::str(fromBundle) == "shadow");
+
+      // PUBLIC_BUILTIN context resolves the real builtin, even though the
+      // shadow's entry for the same URL is already cached. (This is the
+      // process.getBuiltinModule() path: it must never return a user module.)
+      auto fromBuiltin = ModuleRegistry::resolve(
+          js, "test:thing", "default"_kjc, ResolveContext::Type::PUBLIC_BUILTIN);
+      KJ_ASSERT(kj::str(fromBuiltin) == "builtin");
+
+      // Both entries coexist stably; repeated resolution stays correct in both
+      // directions.
+      KJ_ASSERT(kj::str(ModuleRegistry::resolve(
+                    js, "test:thing", "default"_kjc, ResolveContext::Type::BUNDLE)) == "shadow");
+      KJ_ASSERT(kj::str(ModuleRegistry::resolve(js, "test:thing", "default"_kjc,
+                    ResolveContext::Type::PUBLIC_BUILTIN)) == "builtin");
+
+      // The shadow's dynamic import resolved: the referrer probe identified the
+      // bundle-typed entry for the shared URL.
+      auto p = ModuleRegistry::resolve(js, "test:thing", "p"_kjc, ResolveContext::Type::BUNDLE);
+      auto promise = v8::Local<v8::Value>(p).As<v8::Promise>();
+      js.runMicrotasks();
+      KJ_ASSERT(promise->State() == v8::Promise::kFulfilled);
+      auto ns = JsObject(promise->Result().As<v8::Object>());
+      KJ_ASSERT(kj::str(ns.get(js, "default")) == "dep");
+
+      // Conversely, when the same specifier resolves to the same definition
+      // through different context types, the instantiation is shared: BUNDLE
+      // and PUBLIC_BUILTIN resolution of an unshadowed builtin yield the very
+      // same namespace object. This is the process.getBuiltinModule() identity
+      // guarantee, and it also keeps builtins per-isolate singletons (their
+      // module-level state must not be duplicated).
+      JsValue sharedViaBundle = KJ_ASSERT_NONNULL(ModuleRegistry::tryResolveModuleNamespace(
+          js, "test:shared", ResolveContext::Type::BUNDLE));
+      JsValue sharedViaBuiltin = KJ_ASSERT_NONNULL(ModuleRegistry::tryResolveModuleNamespace(
+          js, "test:shared", ResolveContext::Type::PUBLIC_BUILTIN));
+      KJ_ASSERT(sharedViaBundle == sharedViaBuiltin);
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
+  });
+}
+
+// ======================================================================================
+
 KJ_TEST("REQUIRE_ESM rejects non-ESM entry points before evaluation") {
   PREAMBLE([&](Lock& js) {
     CompilationObserver compilationObserver;

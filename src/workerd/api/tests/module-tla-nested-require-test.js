@@ -38,9 +38,25 @@ export const dynamicImportStillSettlesTopLevelAwait = {
 
 export const unsettledTopLevelAwaitStillThrows = {
   async test() {
-    await rejects(import('never-settles'), {
-      message: 'Top-level await in module is unsettled.',
-    });
+    if (Cloudflare.compatibilityFlags.new_module_registry) {
+      // Standard ESM semantics: the import() promise reflects the module's
+      // never-settling evaluation promise, so it stays pending indefinitely
+      // (subject to normal request hang detection). The eager "unsettled"
+      // error below is a legacy-registry deviation from the standard, tied to
+      // its evaluate-within-one-drain model.
+      const result = await Promise.race([
+        import('never-settles').then(
+          () => 'settled',
+          () => 'settled'
+        ),
+        scheduler.wait(50).then(() => 'pending'),
+      ]);
+      strictEqual(result, 'pending');
+    } else {
+      await rejects(import('never-settles'), {
+        message: 'Top-level await in module is unsettled.',
+      });
+    }
   },
 };
 
@@ -48,10 +64,15 @@ export const nestedRequireOfUnsettledModuleThrows = {
   async test() {
     // require() is synchronous, so unlike a nested dynamic import this cannot be deferred to
     // the depth-0 drain. It must throw rather than expose a half-evaluated namespace. The
-    // message differs by compat flag: without disable_top_level_await_in_require the
-    // evaluation is attempted and reported unsettled, with it the async graph is rejected up
-    // front as "not permitted".
-    await rejects(import('req-entry'), /Top-level await in module/);
+    // exact message varies: under the legacy registry it depends on the
+    // disable_top_level_await_in_require flag (evaluation attempted and reported unsettled
+    // vs. async graph rejected up front as "not permitted"); the new module registry always
+    // rejects async graphs in require() ("is not supported in this context", per Node's
+    // require(esm) semantics).
+    await rejects(
+      import('req-entry'),
+      /Top-level await (in module|is not supported in this context)/
+    );
   },
 };
 
