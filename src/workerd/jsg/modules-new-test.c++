@@ -2934,7 +2934,7 @@ KJ_TEST("Reserved protocols cannot be used in bundle module names") {
 
 // ======================================================================================
 
-KJ_TEST("Module resolution currently ignores import attributes in its cache key") {
+KJ_TEST("Import attributes are deliberately not part of the module cache key") {
   const auto id = "file:///data.json"_url;
   auto module =
       Module::newSynthetic(id.clone(), Module::Type::BUNDLE, Module::newDataModuleHandler(nullptr),
@@ -2951,11 +2951,14 @@ KJ_TEST("Module resolution currently ignores import attributes in its cache key"
     .source = ResolveContext::Source::INTERNAL,
     .normalizedSpecifier = id,
     .referrerNormalizedSpecifier = BASE,
+    .importType = "json"_kj,
   };
-  withAttributes.attributes.insert("type"_kjc, "json"_kjc);
 
-  // Module::evaluateContext() intentionally ignores attributes until its TODO(soon) is resolved,
-  // despite ResolveContext documenting attributes as part of the cache key.
+  // The import type is deliberately not part of module identity: the same
+  // specifier with and without a type attribute matches the same evaluation
+  // context and resolves to the same definition. The type is instead validated
+  // against the resolved module's content type on every import (see
+  // validateImportType); instance identity is keyed by (URL, definition).
   KJ_ASSERT(module->evaluateContext(withoutAttributes));
   KJ_ASSERT(module->evaluateContext(withAttributes));
 
@@ -3206,8 +3209,8 @@ KJ_TEST("Fallback receives rawSpecifier and source through V8 static import reso
     KJ_ASSERT(context.rawSpecifier == "./missing"_kjc);
     // A static import should have source == STATIC_IMPORT.
     KJ_ASSERT(context.source == ResolveContext::Source::STATIC_IMPORT);
-    KJ_ASSERT(context.attributes.size() == 1);
-    KJ_ASSERT(KJ_ASSERT_NONNULL(context.attributes.find("type"_kj)) == "json"_kj);
+    // The type import attribute must survive through to the fallback.
+    KJ_ASSERT(KJ_ASSERT_NONNULL(context.importType) == "json"_kj);
     // Return a synthetic module to satisfy the import.
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(
         Module::newSynthetic(context.normalizedSpecifier.clone(), Module::Type::FALLBACK,

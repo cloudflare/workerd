@@ -719,17 +719,13 @@ class IsolateModuleRegistry final {
       // Now that we know the referrer module, we can set the context for the
       // next resolve. The "type" of the context is determined by the type of
       // the referring module.
-      kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
-      KJ_IF_SOME(type, importType) {
-        attributes.insert("type"_kj, type);
-      }
       ResolveContext context = {
         .type = moduleTypeToResolveContextType(referring.module.type()),
         .source = ResolveContext::Source::DYNAMIC_IMPORT,
         .normalizedSpecifier = normalizedSpecifier,
         .referrerNormalizedSpecifier = referrer,
         .rawSpecifier = rawSpecifier,
-        .attributes = kj::mv(attributes),
+        .importType = importType,
       };
 
       auto handleFoundModule = [&](Entry& found) -> Promise<Value> {
@@ -1152,11 +1148,6 @@ class IsolateModuleRegistry final {
   // Resolves the module from the inner ModuleRegistry, caching the results.
   kj::Maybe<Entry&> resolveWithCaching(
       Lock& js, const ResolveContext& context) KJ_WARN_UNUSED_RESULT {
-    // Clone attributes so the fallback bundle callback can see them.
-    kj::HashMap<kj::StringPtr, kj::StringPtr> clonedAttrs;
-    for (const auto& [key, value]: context.attributes) {
-      clonedAttrs.insert(key, value);
-    }
     ResolveContext innerContext{
       // The type identifies the resolution context as a bundle, builtin, or builtin-only.
       .type = context.type,
@@ -1168,10 +1159,10 @@ class IsolateModuleRegistry final {
           Url::EquivalenceOption::IGNORE_FRAGMENTS | Url::EquivalenceOption::IGNORE_SEARCH),
       // The referrer is passed along for informational purposes only.
       .referrerNormalizedSpecifier = context.referrerNormalizedSpecifier,
-      // The raw specifier and attributes are passed along for informational purposes
+      // The raw specifier and import type are passed along for informational purposes
       // (used by the fallback service protocol).
       .rawSpecifier = context.rawSpecifier,
-      .attributes = kj::mv(clonedAttrs),
+      .importType = context.importType,
     };
 
     KJ_IF_SOME(found, inner.lookup(innerContext, noopResolveObserver)) {
@@ -1503,17 +1494,13 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
     KJ_IF_SOME(url, referrerUrl.tryResolve(spec)) {
       // Make sure that percent-encoding in the path is normalized so we can match correctly.
       auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
-      kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
-      KJ_IF_SOME(attributeType, importType) {
-        attributes.insert("type"_kj, attributeType);
-      }
       ResolveContext resolveContext = {
         .type = type,
         .source = ResolveContext::Source::STATIC_IMPORT,
         .normalizedSpecifier = normalized,
         .referrerNormalizedSpecifier = referrerUrl,
         .rawSpecifier = spec.asPtr(),
-        .attributes = kj::mv(attributes),
+        .importType = importType,
       };
 
       auto maybeResolved = registry.resolve(js, resolveContext);
@@ -2118,10 +2105,6 @@ kj::Maybe<const Module&> ModuleRegistry::lookupImpl(
         if (recursed) { /* avoid recursing indefinitely */                                         \
           return kj::none;                                                                         \
         }                                                                                          \
-        kj::HashMap<kj::StringPtr, kj::StringPtr> clonedAttrs;                                     \
-        for (const auto& [key, value]: context.attributes) {                                       \
-          clonedAttrs.insert(key, value);                                                          \
-        }                                                                                          \
         ResolveContext ctx{                                                                        \
           .type = context.type,                                                                    \
           .source = context.source,                                                                \
@@ -2129,7 +2112,7 @@ kj::Maybe<const Module&> ModuleRegistry::lookupImpl(
           .referrerNormalizedSpecifier = context.referrerNormalizedSpecifier,                      \
           .rawSpecifier =                                                                          \
               context.rawSpecifier.map([](auto& str) -> kj::StringPtr { return str; }),            \
-          .attributes = kj::mv(clonedAttrs),                                                       \
+          .importType = context.importType,                                                        \
         };                                                                                         \
         return lookupImpl(impl, ctx, true);                                                        \
       }                                                                                            \
@@ -2305,9 +2288,11 @@ bool Module::isWasm() const {
 }
 
 bool Module::evaluateContext(const ResolveContext& context) const {
-  if (context.normalizedSpecifier != id()) return false;
-  // TODO(soon): Check the import attributes in the context.
-  return true;
+  // The import type attribute is deliberately not consulted here: attribute
+  // checking happens per-import in the resolve paths (see validateImportType),
+  // and instance identity is keyed by (URL, definition) alone. See the
+  // ResolveContext::importType comment for the cache-key rationale.
+  return context.normalizedSpecifier == id();
 }
 
 kj::Own<Module> Module::newSynthetic(Url id,

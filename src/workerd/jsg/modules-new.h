@@ -212,15 +212,19 @@ struct ResolveContext final {
   // before it was normalized into the specifier URL.
   kj::Maybe<kj::StringPtr> rawSpecifier = kj::none;
 
-  // Import attributes for the resolution. These are validated against the
-  // resolved module's content type (e.g. `with { type: 'json' }` requires a
-  // JSON module) but are deliberately NOT part of the module cache key: the
-  // standard treats attributes as part of the key, and this deviation is
-  // benign while `type: 'json'` is the only supported attribute since the
-  // validation is performed on every import. Revisit if attribute types that
-  // change module *interpretation* are added (see the TODO in
-  // Module::evaluateContext).
-  kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
+  // The value of the "type" import attribute for this resolution, if any
+  // (e.g. `with { type: 'json' }`). The value is always one of the canonical
+  // static-lifetime literals "json", "text", or "bytes": parseImportAttributes
+  // rejects every other attribute key and type value before resolution begins,
+  // so "type" is the only attribute that can reach a ResolveContext. The type
+  // is validated against the resolved module's content type on every import
+  // (including resolution cache hits) but is deliberately NOT part of the
+  // module cache key: the standard treats attributes as part of the key, and
+  // this deviation is benign precisely because the validation is per-import.
+  // Revisit if attribute types that change module *interpretation* are added.
+  // The value is also forwarded to the module fallback service (when
+  // configured) as the "type" attribute of the V2 protocol.
+  kj::Maybe<kj::StringPtr> importType = kj::none;
 };
 
 class ModuleRegistry;

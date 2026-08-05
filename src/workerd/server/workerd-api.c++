@@ -1017,10 +1017,17 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
           -> kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>> {
         auto normalizedSpecifier = kj::str(context.normalizedSpecifier.getHref());
         auto referrer = kj::str(context.referrerNormalizedSpecifier.getHref());
+        // The V2 fallback service protocol transmits import attributes as a map.
+        // Reconstruct it from the canonical importType value; "type" is the only
+        // attribute key that can survive import attribute parsing.
+        kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
+        KJ_IF_SOME(type, context.importType) {
+          attributes.insert("type"_kj, type);
+        }
         KJ_IF_SOME(resolved,
             client->tryResolve(workerd::fallback::Version::V2, sourceToImportType(context.source),
                 normalizedSpecifier, context.rawSpecifier.orDefault(nullptr), referrer,
-                context.attributes)) {
+                attributes)) {
           KJ_SWITCH_ONEOF(resolved) {
             KJ_CASE_ONEOF(str, kj::String) {
               // The fallback service returned an alternative specifier.
