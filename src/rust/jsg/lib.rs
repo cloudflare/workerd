@@ -9,11 +9,13 @@ use std::ops::Deref;
 pub mod feature_flags;
 pub mod macros;
 pub mod modules;
+pub mod nullable;
 pub mod resource;
 pub mod v8;
 mod wrappable;
 
 pub use feature_flags::FeatureFlags;
+pub use nullable::Nullable;
 pub use resource::Rc;
 pub use resource::Resource;
 pub use resource::Weak;
@@ -412,88 +414,6 @@ impl From<u32> for Number {
 impl std::fmt::Display for Number {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.value)
-    }
-}
-
-/// A wrapper type that accepts `null`, `undefined`, or a value of type `T`.
-///
-/// `Nullable<T>` is similar to `Option<T>` but also accepts `undefined` as a null-ish value.
-/// This is useful for JavaScript APIs where both `null` and `undefined` represent
-/// the absence of a value.
-///
-/// # Behavior
-///
-/// - `null` → `Nullable::Null`
-/// - `undefined` → `Nullable::Undefined`
-/// - `T` → `Nullable::Some(T)`
-///
-/// # Example
-///
-/// ```ignore
-/// use jsg::Nullable;
-///
-/// #[jsg_method]
-/// pub fn process(&self, value: Nullable<String>) -> Result<(), Error> {
-///     match value {
-///         Nullable::Some(s) => println!("Got value: {}", s),
-///         Nullable::Null => println!("Got null"),
-///         Nullable::Undefined => println!("Got undefined"),
-///     }
-///     Ok(())
-/// }
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Nullable<T> {
-    Some(T),
-    Null,
-    Undefined,
-}
-
-impl<T> Nullable<T> {
-    /// Returns `true` if the nullable contains a value.
-    pub fn is_some(&self) -> bool {
-        matches!(self, Self::Some(_))
-    }
-
-    /// Returns `true` if the nullable is `Null`.
-    pub fn is_null(&self) -> bool {
-        matches!(self, Self::Null)
-    }
-
-    /// Returns `true` if the nullable is `Undefined`.
-    pub fn is_undefined(&self) -> bool {
-        matches!(self, Self::Undefined)
-    }
-
-    /// Returns `true` if the nullable is `Null` or `Undefined`.
-    pub fn is_null_or_undefined(&self) -> bool {
-        matches!(self, Self::Null | Self::Undefined)
-    }
-
-    /// Returns a reference to the contained value, or `None` if null or undefined.
-    pub fn as_ref(&self) -> Option<&T> {
-        match self {
-            Self::Some(v) => Some(v),
-            Self::Null | Self::Undefined => None,
-        }
-    }
-}
-
-impl<T> From<Option<T>> for Nullable<T> {
-    fn from(opt: Option<T>) -> Self {
-        match opt {
-            Some(v) => Self::Some(v),
-            None => Self::Null,
-        }
-    }
-}
-
-impl<T> From<Nullable<T>> for Option<T> {
-    fn from(nullable: Nullable<T>) -> Self {
-        match nullable {
-            Nullable::Some(v) => Some(v),
-            Nullable::Null | Nullable::Undefined => None,
-        }
     }
 }
 
