@@ -39,10 +39,24 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = ["nodejs_compat_v2"],
       )
     ),
-    ( name = "internet", network = ( allow = ["private"] ) )
+    ( name = "internet", network = ( allow = ["private"],
+        tlsOptions = (
+          trustedCertificates = [
+            embed "starttls-server.pem",
+          ],
+        ),
+      )
+    )
   ],
   sockets = [
-    (name = "tcp", address = "*:8081", tcp = (), service = "connect-handler-test"),
+    (name = "tcp", address = "*:8081", tcp = (
+      tlsOptions = (
+        keypair = (
+          privateKey = embed "starttls-server.key",
+          certificateChain = embed "starttls-server.pem",
+        ),
+      ),
+    ), service = "connect-handler-test"),
     (name = "tcp", address = "*:8082", tcp = (), service = (name = "connect-handler-test-proxy", entrypoint = "ConnectProxy")),
     (name = "tcp", address = "*:8083", tcp = (), service = (name = "connect-handler-test-endpoint", entrypoint = "ConnectEndpoint"))
   ]

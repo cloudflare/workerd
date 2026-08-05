@@ -853,6 +853,8 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
       secureTransport != SecureTransportKind::ON, TypeError, "Cannot startTls on a TLS socket.");
   JSG_REQUIRE(connectionData != kj::none, TypeError,
       "The connection was closed before startTls could be started.");
+  // TODO: Error message is misleading in connect handler itself as the socket is passed in and no
+  // starttls option can be set there – provide more descriptive error message.
   auto invalidOptKindMsg =
       "The `secureTransport` socket option must be set to 'starttls' for startTls to be used.";
   JSG_REQUIRE(secureTransport == SecureTransportKind::STARTTLS, TypeError, invalidOptKindMsg);

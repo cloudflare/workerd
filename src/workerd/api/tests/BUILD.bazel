@@ -132,6 +132,8 @@ wd_test(
     data = [
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
+        "starttls-server.key",
+        "starttls-server.pem",
     ],
     tags = SOCKET_TEST_TAGS,
 )
