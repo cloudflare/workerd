@@ -40,6 +40,7 @@ use crate::listen::BoundSocket;
 use crate::listen::HttpSocket;
 use crate::listen::ListenContext;
 use crate::listen::StreamListener;
+use crate::listen::TcpTls;
 use crate::log;
 use crate::services::network::tls_options;
 use crate::services::rewriter::HttpRewriter;
@@ -253,8 +254,11 @@ fn listener(
             )?
         }
         (Ok(socket::Which::Tcp(tcp)), BoundSocket::Stream(listener)) => {
+            // A TCP socket's TLS options let its connect() handler accept a startTls() upgrade.
             let tls = if tcp.has_tls_options() {
-                Some(tls(tcp.get_tls_options().map_err(capnp_error)?)?)
+                Some(TcpTls::StartTls(tls(
+                    tcp.get_tls_options().map_err(capnp_error)?,
+                )?))
             } else {
                 None
             };

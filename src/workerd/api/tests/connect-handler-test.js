@@ -7,11 +7,12 @@ import { ok, strictEqual } from 'assert';
 export const connectHandler = {
   async test() {
     // Check that the connect handler can send a message through a socket
-    const socket = connect('localhost:8081');
+    const socket = connect('localhost:8081', { secureTransport: 'starttls' });
     await socket.opened;
+    const tlsSock = socket.startTls();
     const dec = new TextDecoder();
     let result = '';
-    for await (const chunk of socket.readable) {
+    for await (const chunk of tlsSock.readable) {
       result += dec.decode(chunk, { stream: true });
     }
     result += dec.decode();
@@ -28,7 +29,7 @@ export const connectHandler = {
       `Unexpected remote address: ${remoteAddress}`
     );
 
-    await socket.closed;
+    await tlsSock.closed;
   },
 };
 
@@ -80,7 +81,9 @@ export default {
   async connect(socket) {
     const { remoteAddress } = await socket.opened;
     const enc = new TextEncoder();
-    let writer = socket.writable.getWriter();
+    strictEqual(socket.secureTransport, 'starttls');
+    const tlsSock = socket.startTls();
+    const writer = tlsSock.writable.getWriter();
     await writer.write(enc.encode(`hello:${remoteAddress}`));
     await writer.close();
   },
