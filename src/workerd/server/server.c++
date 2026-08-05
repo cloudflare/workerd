@@ -38,6 +38,7 @@
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
+#include <workerd/util/strings.h>
 #include <workerd/util/use-perfetto-categories.h>
 #include <workerd/util/uuid.h>
 #include <workerd/util/websocket-error-handler.h>
@@ -3695,7 +3696,7 @@ class Server::WorkerService final: public Service,
         kj::HttpService::Response& response) override {
       kj::Maybe<kj::String> blobJson;
       headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
-        if (strcasecmp(name.cStr(), accessBlobHeaderName.cStr()) == 0) {
+        if (workerd::strcaseeq(name, accessBlobHeaderName)) {
           blobJson = kj::str(value);
         }
       });
