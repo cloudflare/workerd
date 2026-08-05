@@ -16,6 +16,9 @@ namespace workerd::jsg {
 // Index of the bindings scope (the `env` object).
 constexpr size_t BINDINGS_SCOPE_SNAPSHOT_INDEX = 0;
 
+// Index of the main module's namespace object.
+constexpr size_t MAIN_MODULE_NAMESPACE_SNAPSHOT_INDEX = 1;
+
 // Everything needed to create a new isolate from a V8 startup snapshot:
 // * `blob` is the serialized snapshot data, allocated with `new[]` by v8::SnapshotCreator.
 // * `externalReferences` is the list of addresses of all C++ functions and objects referenced
