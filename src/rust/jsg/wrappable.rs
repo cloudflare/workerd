@@ -527,7 +527,7 @@ impl<T: Type + FromJS> FromJS for NonCoercible<T> {
     }
 }
 
-impl<T: Type + FromJS> FromJS for Nullable<T> {
+impl<T: FromJS> FromJS for Nullable<T> {
     type ResultType = Nullable<T::ResultType>;
 
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
