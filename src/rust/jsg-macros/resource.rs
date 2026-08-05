@@ -119,6 +119,13 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
             ) -> Result<Self::ResultType, jsg::Error> {
                 <jsg::Rc<Self> as jsg::FromJS>::from_js(lock, value)
             }
+
+            fn try_from_js(
+                lock: &mut jsg::Lock,
+                value: jsg::v8::Local<jsg::v8::Value>,
+            ) -> Result<Option<Self::ResultType>, jsg::Error> {
+                <jsg::Rc<Self> as jsg::FromJS>::try_from_js(lock, value)
+            }
         }
 
         #traced_impl
@@ -306,8 +313,8 @@ fn extract_constructor_params(
             let unwrap = quote! {
                 let #var = match <#ty as jsg::FromJS>::from_js(&mut lock, args.get(#js_index)) {
                     Ok(v) => v,
-                    Err(e) => {
-                        lock.throw_exception(&e);
+                    Err(err) => {
+                        lock.throw_exception(&err);
                         return;
                     }
                 };
