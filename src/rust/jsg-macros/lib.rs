@@ -136,6 +136,13 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #(#field_extractions)*
                 Ok(Self { #(#field_names),* })
             }
+
+            fn try_from_js(lock: &mut jsg::Lock, value: jsg::v8::Local<jsg::v8::Value>) -> Result<Option<Self::ResultType>, jsg::Error> {
+                if !value.is_object() {
+                    return Ok(None);
+                }
+                Self::from_js(lock, value).map(Some)
+            }
         }
 
         impl jsg::Struct for #name {}
@@ -459,7 +466,7 @@ pub fn jsg_oneof(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .map(|(variant_name, inner_type)| {
             quote! {
                 if let Some(result) = <#inner_type as jsg::FromJS>::try_from_js_exact(lock, &value) {
-                    return result.map(Self::#variant_name);
+                    return result.map(|value| Some(Self::#variant_name(value)));
                 }
             }
         })
@@ -477,12 +484,11 @@ pub fn jsg_oneof(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let error_msg = quote! {
         let expected: Vec<&str> = vec![#(#type_names),*];
-        let msg = format!(
+        format!(
             "Expected one of [{}] but got {}",
             expected.join(", "),
-            value.type_of()
-        );
-        Err(jsg::Error::new_type_error(msg))
+            type_name
+        )
     };
 
     quote! {
@@ -504,8 +510,15 @@ pub fn jsg_oneof(_attr: TokenStream, item: TokenStream) -> TokenStream {
             type ResultType = Self;
 
             fn from_js(lock: &mut jsg::Lock, value: jsg::v8::Local<jsg::v8::Value>) -> Result<Self::ResultType, jsg::Error> {
+                let type_name = value.type_of();
+                Self::try_from_js(lock, value)?.ok_or_else(|| {
+                    jsg::Error::new_type_error({ #error_msg })
+                })
+            }
+
+            fn try_from_js(lock: &mut jsg::Lock, value: jsg::v8::Local<jsg::v8::Value>) -> Result<Option<Self::ResultType>, jsg::Error> {
                 #(#type_checks)*
-                #error_msg
+                Ok(None)
             }
         }
     }

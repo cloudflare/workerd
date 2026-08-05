@@ -172,16 +172,19 @@ impl<R: Resource + 'static> FromJS for Rc<R> {
     type ResultType = Self;
 
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self, Error> {
-        // Capture the JS type name before consuming the value, for error messages.
         let type_name = value.type_of();
-
-        let mut wrappable = v8::WrappableRc::from_js(lock.isolate(), value).ok_or_else(|| {
+        Self::try_from_js(lock, value)?.ok_or_else(|| {
             Error::new_type_error(format!("expected {}, got {type_name}", R::class_name()))
-        })?;
+        })
+    }
 
-        let resource_ptr = wrappable.resolve_resource::<R>().ok_or_else(|| {
-            Error::new_type_error(format!("expected {}, got {type_name}", R::class_name()))
-        })?;
+    fn try_from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Option<Self>, Error> {
+        let Some(mut wrappable) = v8::WrappableRc::from_js(lock.isolate(), value) else {
+            return Ok(None);
+        };
+        let Some(resource_ptr) = wrappable.resolve_resource::<R>() else {
+            return Ok(None);
+        };
 
         // SAFETY: The pointer came from std::rc::Rc::into_raw in Rc::new(), and the
         // Wrappable being alive guarantees the Rc allocation is still valid.
@@ -193,12 +196,12 @@ impl<R: Resource + 'static> FromJS for Rc<R> {
         };
 
         wrappable.add_strong_ref();
-        Ok(Self {
+        Ok(Some(Self {
             handle,
             wrappable,
             parent: Cell::new(None),
             strong: Cell::new(true),
-        })
+        }))
     }
 }
 

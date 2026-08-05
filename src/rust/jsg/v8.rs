@@ -2018,13 +2018,8 @@ macro_rules! impl_typed_array {
             }
 
             /// Returns the element at `index`.
-            ///
-            /// # Panics
-            ///
-            /// Panics if `index >= self.len()`.
             #[inline]
             pub fn get(&self, index: usize) -> $elem {
-                debug_assert!(index < self.len(), "index out of bounds");
                 // SAFETY: handle is valid within the current HandleScope.
                 unsafe { ffi::$get_fn(self.isolate.as_ffi(), &self.handle, index) }
             }
@@ -2282,6 +2277,20 @@ macro_rules! impl_typed_array_from_js {
                 // SAFETY: type check passed; V8 handles share the same pointer
                 // representation across subtypes within the same HandleScope.
                 Ok(unsafe { Self::from_ffi(value.isolate, value.into_ffi()) })
+            }
+
+            fn try_from_js(
+                _lock: &mut crate::Lock,
+                value: Local<Value>,
+            ) -> Result<Option<Self>, crate::Error> {
+                if !value.$check() {
+                    return Ok(None);
+                }
+                // SAFETY: type check passed; V8 handles share the same pointer
+                // representation across subtypes within the same HandleScope.
+                Ok(Some(unsafe {
+                    Self::from_ffi(value.isolate, value.into_ffi())
+                }))
             }
         }
     };
@@ -3147,7 +3156,6 @@ impl<'a> FunctionCallbackInfo<'a> {
     }
 
     pub fn get(&self, index: usize) -> Local<'a, Value> {
-        debug_assert!(index < self.len(), "index out of bounds");
         // SAFETY: self.0 is a valid FunctionCallbackInfo pointer (guaranteed by constructor).
         unsafe { Local::from_ffi(self.isolate(), ffi::fci_get_arg(self.0, index)) }
     }
