@@ -1627,4 +1627,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # C++ bridge (Content-Length integration for FixedLengthStream). This
   # flag is intended for internal testing only and may never have its
   # experimental annotation removed.
+
+  workflowsEnableFastEngineCreation @185 :Bool
+      $compatEnableFlag("workflows_enable_fast_engine_creation")
+      $compatDisableFlag("workflows_disable_fast_engine_creation")
+      $compatEnableDate("2026-08-11");
+  # Enables fast Workflow engine creation by generating instance IDs with the Durable Object
+  # namespace's `newUniqueId()` method instead of UUIDs.
 }
