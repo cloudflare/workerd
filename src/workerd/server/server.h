@@ -319,8 +319,10 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       kj::StringPtr physicalProtocol,
       kj::Own<HttpRewriter> rewriter);
 
-  kj::Promise<void> listenTcp(
-      kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::String authority);
+  kj::Promise<void> listenTcp(kj::Own<kj::ConnectionReceiver> listener,
+      kj::Own<Service> service,
+      kj::String authority,
+      kj::Maybe<kj::Own<kj::TlsContext>> tlsContext);
 
   kj::Promise<void> listenDebugPort(kj::Own<kj::ConnectionReceiver> listener);
   rpc::WorkerdDebugPort::Client makeWorkerdDebugPortClient();

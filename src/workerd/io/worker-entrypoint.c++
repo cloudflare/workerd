@@ -739,13 +739,13 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       context
           .run([this, &headers, &connection, &response, entrypointName = entrypointName.clone(),
                    versionInfo = kj::mv(versionInfo), host = kj::str(host),
-                   clientAddress = kj::mv(clientAddress)](
-                   Worker::Lock& lock, IoContext& context) mutable {
+                   clientAddress = kj::mv(clientAddress),
+                   settings = kj::mv(settings)](Worker::Lock& lock, IoContext& context) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
     return lock.getGlobalScope().connect(kj::mv(host), kj::mv(clientAddress), headers, connection,
-        response, lock,
+        response, kj::mv(settings), lock,
         lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props),
             context.getActor(), isDynamicDispatch));
   })

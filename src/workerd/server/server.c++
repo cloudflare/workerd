@@ -6654,12 +6654,14 @@ class Server::TcpListener final: public kj::Refcounted {
       kj::Own<kj::ConnectionReceiver> listener,
       kj::Own<Service> service,
       kj::HttpHeaderTable& headerTable,
-      kj::String authority)
+      kj::String authority,
+      kj::Maybe<kj::Own<kj::TlsContext>> tlsContext)
       : owner(owner),
         listener(kj::mv(listener)),
         service(kj::mv(service)),
         headerTable(headerTable),
-        authority(kj::mv(authority)) {}
+        authority(kj::mv(authority)),
+        tlsContext(kj::mv(tlsContext)) {}
 
   kj::Promise<void> run() {
     TRACE_EVENT("workerd", "TcpListener::run");
@@ -6681,10 +6683,34 @@ class Server::TcpListener final: public kj::Refcounted {
 
       auto req = service->startRequest(kj::mv(metadata));
       auto response = kj::heap<ResponseWrapper>();
+
+      auto tlsStarter = kj::heap<kj::TlsStarterCallback>();
+      kj::HttpConnectSettings settings{.useTls = false, .tlsStarter = *tlsStarter};
+
+      // TODO: Add comments for this.
+      kj::Own<kj::AsyncIoStream> conn = kj::mv(stream.stream);
+      KJ_IF_SOME(tls, tlsContext) {
+        kj::Rc<kj::PausableReadAsyncIoStream> pausable(
+            kj::heap<kj::PausableReadAsyncIoStream>(kj::mv(conn)));
+        *tlsStarter = [&tls = *tls, ref = pausable.addRef()](
+                          kj::StringPtr ignoredHostname) mutable -> kj::Promise<void> {
+          // The hostname is a client-side concept (peer verification); as the server we just
+          // wrap.
+          ref->pause();
+          KJ_ON_SCOPE_FAILURE(ref->reject(KJ_EXCEPTION(FAILED, "startTls failed")));
+          KJ_ASSERT(!ref->getCurrentlyReading() && !ref->getCurrentlyWriting(),
+              "cannot startTls while reads/writes are outstanding");
+          ref->replaceStream(kj::newPromisedStream(tls.wrapServer(ref->takeStream())));
+          ref->unpause();
+          return kj::READY_NOW;
+        };
+        conn = pausable.addRef().toOwn();
+      }
+
       kj::HttpHeaders headers(headerTable);
-      owner.tasks.add(req->connect(authority, headers, *stream.stream, *response, {})
-                          .attach(kj::mv(stream.stream), kj::mv(response))
-                          .attach(kj::mv(req)));
+      owner.tasks.add(req->connect(authority, headers, *conn, *response, kj::mv(settings))
+                          .attach(kj::mv(conn), kj::mv(tlsStarter), kj::mv(response), kj::mv(req),
+                              kj::addRef(*this)));
     }
   }
 
@@ -6694,6 +6720,8 @@ class Server::TcpListener final: public kj::Refcounted {
   kj::Own<Service> service;
   kj::HttpHeaderTable& headerTable;
   kj::String authority;
+  kj::StringPtr addrStr;
+  kj::Maybe<kj::Own<kj::TlsContext>> tlsContext;
 
   struct ResponseWrapper final: public kj::HttpService::ConnectResponse {
     void accept(
@@ -6720,10 +6748,12 @@ kj::Promise<void> Server::listenHttp(kj::Own<kj::ConnectionReceiver> listener,
   co_return co_await obj->run();
 }
 
-kj::Promise<void> Server::listenTcp(
-    kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::String authority) {
-  auto obj = kj::refcounted<TcpListener>(
-      *this, kj::mv(listener), kj::mv(service), globalContext->headerTable, kj::mv(authority));
+kj::Promise<void> Server::listenTcp(kj::Own<kj::ConnectionReceiver> listener,
+    kj::Own<Service> service,
+    kj::String authority,
+    kj::Maybe<kj::Own<kj::TlsContext>> tlsContext) {
+  auto obj = kj::refcounted<TcpListener>(*this, kj::mv(listener), kj::mv(service),
+      globalContext->headerTable, kj::mv(authority), kj::mv(tlsContext));
   co_return co_await obj->run();
 }
 
@@ -7264,7 +7294,12 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
     if (maybeSocketConfig == kj::none) continue;
     auto& socketConfig = KJ_ASSERT_NONNULL(maybeSocketConfig);
 
-    KJ_IF_SOME(t, socketConfig.tls) {
+    kj::Maybe<kj::Own<kj::TlsContext>> tcpTlsContext;
+    if (sock.which() == config::Socket::TCP) {
+      // TODO: Does this force socket to be startTls? Should be configurable whether this is used
+      // for startTls or always using TLS.
+      tcpTlsContext = kj::mv(socketConfig.tls);
+    } else KJ_IF_SOME(t, socketConfig.tls) {
       listener = t->wrapPort(kj::mv(listener)).attach(kj::mv(t));
     }
 
@@ -7272,11 +7307,13 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
     // be available later.
     auto rewriter = kj::heap<HttpRewriter>(socketConfig.httpOptions, headerTableBuilder);
 
-    auto handle =
-        kj::coCapture([this, service = kj::mv(service), rewriter = kj::mv(rewriter),
-                          physicalProtocol = socketConfig.physicalProtocol, name = kj::mv(name),
-                          isHttp = sock.which() != config::Socket::TCP, addrStr = kj::mv(addrStr)](
-                          kj::Own<kj::ConnectionReceiver> listener) mutable -> kj::Promise<void> {
+    auto handle = kj::coCapture(
+        [this, tcpTlsContext = kj::mv(tcpTlsContext), service = kj::mv(service),
+            rewriter = kj::mv(rewriter), physicalProtocol = socketConfig.physicalProtocol,
+            name = kj::mv(name), isHttp = sock.which() != config::Socket::TCP,
+            addrStr = kj::mv(addrStr)](
+            //kj::Promise<kj::Own<kj::ConnectionReceiver>> promise) mutable -> kj::Promise<void> {
+            kj::Own<kj::ConnectionReceiver> listener) mutable -> kj::Promise<void> {
       if (isHttp) {
         TRACE_EVENT("workerd", "setup listenHttp");
       } else {
@@ -7299,7 +7336,8 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
         // The authority handed to the connect() handler is the endpoint as bound, so it is
         // truthful for a configured port of 0.
         auto authority = kj::str(hostOfAddress(addrStr), ":", listener->getPort());
-        co_await listenTcp(kj::mv(listener), kj::mv(service), kj::mv(authority));
+        co_await listenTcp(
+            kj::mv(listener), kj::mv(service), kj::mv(authority), kj::mv(tcpTlsContext));
       }
     });
     tasks.add(handle(kj::mv(listener)).exclusiveJoin(forkedDrainWhen.addBranch()));

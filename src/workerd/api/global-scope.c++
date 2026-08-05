@@ -222,6 +222,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     const kj::HttpHeaders& headers,
     kj::AsyncIoStream& connection,
     kj::HttpService::ConnectResponse& response,
+    kj::HttpConnectSettings settings,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler) {
   ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
@@ -243,19 +244,28 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     auto& ioContext = IoContext::current();
     jsg::Lock& js = lock;
 
-    // TLS support is not implemented so far. Note that setupSocket() expects the domain parameter
-    // to be set to the expected host name using startTLS, so that it can be provided to the TLS
-    // callback, so we'd need to change that or figure out a way to get the host domain.
-    auto nullTlsStarter = kj::heap<kj::TlsStarterCallback>();
+    // Support startTls if a tlsStarter is available. Note that setupSocket() expects the domain
+    // parameter to be set to the expected host name using startTLS so that it can be provided to
+    // the TLS callback, so we'd need to change that or figure out a way to get the host domain.
+    auto tlsStarter = kj::heap<kj::TlsStarterCallback>();
+    auto secureTransport = SecureTransportKind::OFF;
+    KJ_IF_SOME(starter, settings.tlsStarter) {
+      if (starter != kj::none) {
+        *tlsStarter = kj::mv(KJ_ASSERT_NONNULL(starter));
+        secureTransport = SecureTransportKind::STARTTLS;
+      }
+    }
+
     // We set isDefaultFetchPort to false here – sockets.c++ sets it for ports 443 and 8080 to
     // provide a more descriptive error message for HTTP, but this is not relevant on the TCP server
     // side.
     // The handler is the server side of this connection: the peer half-closing means it has
     // finished sending, not that the reply is over, so the write side stays open until the handler
     // closes it or returns.
+    // TODO: Need to have proper domain parameter to support startTls? host is distinct from domain?
     jsg::Ref<Socket> jsSocket = setupSocket(js, ownConnection.addRef().toOwn(),
-        kj::mv(clientAddress), kj::mv(host), SocketOptions{.allowHalfOpen = true},
-        kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::none, false, kj::none);
+        kj::mv(clientAddress), kj::str(host), SocketOptions{.allowHalfOpen = true},
+        kj::mv(tlsStarter), secureTransport, kj::str(host) /* domain */, false, kj::none);
     // handleProxyStatus() is required to indicate that the socket was opened properly. Since the
     // connection is already open at this point, exception handling is not required.
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
