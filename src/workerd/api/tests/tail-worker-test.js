@@ -90,12 +90,21 @@ export default {
 //   - Subrequests: parentSpanId is the caller's user span ID (sequential, from spanOpen)
 //   - Hibernation: parentSpanId is the caller's invocation root span ID (from fromEntropy)
 // Scoping by traceId avoids false matches from sequential span IDs that reset per invocation.
+// Stack frames in trace events name modules differently between the module
+// registries: the original registry uses the bare module name ('worker'),
+// while the new module registry uses the module's canonical URL
+// ('file:///bundle/worker'). Normalize to the bare form so the expectations
+// below hold under both.
+function normalizeStackFilenames(events) {
+  return events.replaceAll('file:///bundle/worker', 'worker');
+}
+
 function buildTree(invocations) {
   // First pass: create nodes and group by traceId.
   const byTraceId = new Map();
   const nodes = [];
   for (const inv of invocations) {
-    const node = { events: inv.events, children: [] };
+    const node = { events: normalizeStackFilenames(inv.events), children: [] };
     nodes.push({ inv, node });
     if (!byTraceId.has(inv.traceId)) {
       byTraceId.set(inv.traceId, []);

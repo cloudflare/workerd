@@ -6446,10 +6446,15 @@ KJ_TEST("Server: structured logging with console methods") {
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
     KJ_ASSERT(logline.contains(R"("level":"error")"), logline);
+    // Stack frames name the module differently between module registries: the
+    // original registry uses the bare module name ("main.js"), the new module
+    // registry uses the canonical URL ("file:///bundle/main.js"). Match the
+    // parts common to both.
     KJ_ASSERT(
         logline.contains(
-            R"_("message":"Error: Test exception for structured logging\n    at Object.fetch (main.js:18:13)")_"),
+            R"_("message":"Error: Test exception for structured logging\n    at Object.fetch ()_"),
         logline);
+    KJ_ASSERT(logline.contains(R"_(main.js:18:13)")_"), logline);
   });
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
@@ -7448,7 +7453,8 @@ Host: foo
 MF-Access-Blob: {"app_aud":"test-aud-99","jwt_claims":{"email":"user@example.com"}}
 
 )"_kj);
-  conn.recvHttp200(R"({"aud":"test-aud-99","identity":{"email":"user@example.com","aud":"test-aud-99"}})");
+  conn.recvHttp200(
+      R"({"aud":"test-aud-99","identity":{"email":"user@example.com","aud":"test-aud-99"}})");
 
   // Request with access blob header but no jwt_claims — getIdentity should still work,
   // jwtClaims will be undefined in the binding worker's ctx.props.

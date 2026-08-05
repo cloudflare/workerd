@@ -18,9 +18,22 @@ jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
   // file path string. To be compliant, we will convert whatever specifier
   // is into a File URL if possible, then take the path as the actual
   // specifier to use.
-  auto parsed = JSG_REQUIRE_NONNULL(jsg::Url::tryParse(path.asPtr(), "file:///"_kj), TypeError,
-      "The argument must be a file URL object, "
-      "a file URL string, or an absolute path string.");
+  static constexpr auto kInvalidArg = "The argument must be a file URL object, "
+                                      "a file URL string, or an absolute path string."_kj;
+
+  // Matching Node.js: only a file: URL (object or string) or an absolute path
+  // is accepted. Anything else — a relative path, a bare name, or a URL with a
+  // non-file scheme — is rejected. Parsing against the file:/// base alone
+  // would accept nearly any string, so absolute-URL inputs are checked for the
+  // file: scheme and everything else must start with '/'.
+  KJ_IF_SOME(absolute, jsg::Url::tryParse(path.asPtr())) {
+    JSG_REQUIRE(absolute.getProtocol() == "file:"_kj, TypeError, kInvalidArg);
+  } else {
+    JSG_REQUIRE(path.startsWith("/"), TypeError, kInvalidArg);
+  }
+
+  auto parsed =
+      JSG_REQUIRE_NONNULL(jsg::Url::tryParse(path.asPtr(), "file:///"_kj), TypeError, kInvalidArg);
 
   if (FeatureFlags::get(js).getNewModuleRegistry()) {
     return jsg::JsValue(js.wrapReturningFunction(js.v8Context(),

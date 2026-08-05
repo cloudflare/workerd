@@ -6,10 +6,19 @@ const unitTests :Workerd.Config = (
       worker = (
         modules = [
           (name = "worker", esModule = embed "module-imports-test.js"),
+          # Both shadows are deliberately unloadable: they exist to prove that
+          # worker-bundle code cannot reach node-internal:* modules, whether via
+          # dynamic import (node:crypto, with top-level await) or static import
+          # (node:path). node:path is used for the static case rather than
+          # node:buffer because, under the new module registry with
+          # nodejs_compat_v2, node:process and node:buffer are eagerly resolved
+          # at worker startup to back the process/Buffer globals — an unloadable
+          # shadow of either fails startup by design (fail-fast), which would
+          # keep this test's lazy-rejection assertions from ever running.
           (name = "node:crypto",
            esModule = "export const test = await import('node-internal:internal_buffer');"),
-          (name = "node:buffer",
-           esModule = "import * as buf from 'node-internal:internal_buffer'; export default buf;"),
+          (name = "node:path",
+           esModule = "import * as internal from 'node-internal:internal_buffer'; export default internal;"),
           (name = "wasm", wasm = embed "test.wasm"),
         ],
         compatibilityFlags = [
