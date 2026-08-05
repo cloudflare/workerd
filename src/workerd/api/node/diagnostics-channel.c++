@@ -112,16 +112,16 @@ v8::Local<v8::Value> Channel::runStores(jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> maybeReceiver,
     jsg::Arguments<jsg::Value> args) {
   struct StoreSnapshot {
-    kj::Own<jsg::AsyncContextFrame::StorageKey> key;
+    kj::Arc<jsg::AsyncContextFrame::StorageKey> key;
     TransformCallback transform;
   };
   auto snapshot = KJ_MAP(store, stores) -> StoreSnapshot {
-    return {kj::addRef(*store.key), store.transform.addRef(js)};
+    return {store.key.addRef(), store.transform.addRef(js)};
   };
   kj::Vector<kj::Own<jsg::AsyncContextFrame::StorageScope>> storageScopes;
   for (auto& entry: snapshot) {
     storageScopes.add(kj::heap<jsg::AsyncContextFrame::StorageScope>(
-        js, *entry.key, entry.transform(js, message.addRef(js))));
+        js, entry.key.addRef(), entry.transform(js, message.addRef(js))));
   }
 
   publish(js, message.addRef(js));

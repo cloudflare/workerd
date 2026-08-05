@@ -50,7 +50,7 @@ v8::Local<v8::Value> AsyncLocalStorage::run(jsg::Lock& js,
     jsg::Function<v8::Local<v8::Value>(jsg::Arguments<jsg::Value>)> callback,
     jsg::Arguments<jsg::Value> args) {
   callback.setReceiver(js.v8Ref<v8::Value>(js.v8Context()->Global()));
-  jsg::AsyncContextFrame::StorageScope scope(js, *key, js.v8Ref(store));
+  jsg::AsyncContextFrame::StorageScope scope(js, key.addRef(), js.v8Ref(store));
   return callback(js, kj::mv(args));
 }
 
@@ -165,8 +165,8 @@ v8::Local<v8::Value> AsyncResource::runInAsyncScope(jsg::Lock& js,
   return fn(js, kj::mv(args));
 }
 
-kj::Own<jsg::AsyncContextFrame::StorageKey> AsyncLocalStorage::getKey() {
-  return kj::addRef(*key);
+kj::Arc<jsg::AsyncContextFrame::StorageKey> AsyncLocalStorage::getKey() {
+  return key.addRef();
 }
 
 }  // namespace workerd::api::node

@@ -1206,7 +1206,7 @@ SpanParent IoContext::getCurrentTraceSpan() {
   // If called while lock is held, try to use the trace info stored in the async context.
   KJ_IF_SOME(lock, currentLock) {
     KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(lock)) {
-      KJ_IF_SOME(value, frame.get(lock.getTraceAsyncContextKey())) {
+      KJ_IF_SOME(value, frame.get(*lock.getTraceAsyncContextKey())) {
         auto handle = value.getHandle(lock);
         jsg::Lock& js = lock;
         auto& spanParent = jsg::unwrapOpaqueRef<IoOwn<SpanParent>>(js.v8Isolate, handle);
@@ -1234,7 +1234,7 @@ SpanParent IoContext::getCurrentUserTraceSpan() {
   // If called while lock is held, try to use the trace info stored in the async context.
   KJ_IF_SOME(lock, currentLock) {
     KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(lock)) {
-      KJ_IF_SOME(value, frame.get(lock.getUserTraceAsyncContextKey())) {
+      KJ_IF_SOME(value, frame.get(*lock.getUserTraceAsyncContextKey())) {
         auto handle = value.getHandle(lock);
         jsg::Lock& js = lock;
         auto& userSpan = jsg::unwrapOpaqueRef<IoOwn<SpanParent>>(js.v8Isolate, handle);
