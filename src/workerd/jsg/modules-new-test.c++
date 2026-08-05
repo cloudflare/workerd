@@ -1442,8 +1442,8 @@ KJ_TEST("Throwing an exception inside a CJS-style eval module works as expected"
 
     kj::String source = kj::str("exports.foo = 123; throw new Error('bar');");
 
-    bundleBuilder.addSyntheticModule("foo",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source, "foo"_kj));
+    bundleBuilder.addSyntheticModule(
+        "foo", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source));
 
     auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
 
@@ -1456,6 +1456,171 @@ KJ_TEST("Throwing an exception inside a CJS-style eval module works as expected"
       auto str = kj::str(exception.getHandle(js));
       KJ_ASSERT(str == "Error: bar");
     });
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("Module source is decoded as UTF-8 across all encoding tiers") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+
+    // Tier 1: pure-ASCII source (zero-copy external one-byte string).
+    auto ascii = kj::str("export default 'plain';");
+    bundleBuilder.addEsmModule("ascii", ascii);
+
+    // Tier 2: non-ASCII source whose code points all fit in Latin-1. The
+    // identifier and the literal both contain é (U+00E9, UTF-8 c3 a9); under a
+    // Latin-1 misread the identifier would be a SyntaxError (a UTF-8
+    // continuation byte is not a valid identifier char) and the literal would
+    // be mojibake.
+    auto latin1 = kj::str("const caf\xc3\xa9 = 'caf\xc3\xa9'; export default caf\xc3\xa9;");
+    bundleBuilder.addEsmModule("latin1", latin1);
+
+    // Tier 3: source requiring UTF-16 (CJK + non-BMP emoji).
+    auto utf16 = kj::str("export default '\xe9\x83\xa8\xe5\x93\x81 \xf0\x9f\x8e\x89';");
+    bundleBuilder.addEsmModule("utf16", utf16);
+
+    // Invalid UTF-8: a lone 0xE9 byte inside a literal. Malformed sequences are
+    // replaced with U+FFFD (UTF-8 ef bf bd), matching v8::String::NewFromUtf8's
+    // tolerance rather than rejecting the module.
+    auto invalid = kj::str("export default 'caf\xe9';");
+    bundleBuilder.addEsmModule("invalid", invalid);
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    JSG_TRY(js) {
+      auto plain = ModuleRegistry::resolve(js, "file:///ascii");
+      KJ_ASSERT(kj::str(plain) == "plain");
+
+      auto cafe = ModuleRegistry::resolve(js, "file:///latin1");
+      KJ_ASSERT(kj::str(cafe) == "caf\xc3\xa9", kj::str(cafe));
+
+      auto cjk = ModuleRegistry::resolve(js, "file:///utf16");
+      KJ_ASSERT(kj::str(cjk) == "\xe9\x83\xa8\xe5\x93\x81 \xf0\x9f\x8e\x89", kj::str(cjk));
+
+      auto replaced = ModuleRegistry::resolve(js, "file:///invalid");
+      KJ_ASSERT(kj::str(replaced) == "caf\xef\xbf\xbd", kj::str(replaced));
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("Owned ESM source outlives its release points across encoding tiers") {
+  // The kj::Array-taking addEsmModule overload hands ownership of the UTF-8
+  // source buffer to the module. Non-ASCII sources are transcoded to an owned
+  // V8-compatible representation on first compile, after which the UTF-8
+  // original is released; pure-ASCII owned sources must be retained because
+  // the raw buffer directly backs the external one-byte string. This test
+  // asserts correctness across repeated resolution; a buffer released too
+  // early (or read after release) is observed by ASAN builds.
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+    bundleBuilder.addEsmModule(
+        "latin1-owned", kj::heapArray<const char>("export default 'caf\xc3\xa9';"_kj.asArray()));
+    bundleBuilder.addEsmModule(
+        "ascii-owned", kj::heapArray<const char>("export default 'plain';"_kj.asArray()));
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    JSG_TRY(js) {
+      // First compile transcodes and releases the owned UTF-8 for the
+      // non-ASCII module.
+      KJ_ASSERT(kj::str(ModuleRegistry::resolve(js, "file:///latin1-owned")) == "caf\xc3\xa9");
+      // ASCII stays on the zero-copy path over the owned buffer.
+      KJ_ASSERT(kj::str(ModuleRegistry::resolve(js, "file:///ascii-owned")) == "plain");
+      // Re-resolution works from the caches; nothing re-reads the released
+      // buffer.
+      KJ_ASSERT(kj::str(ModuleRegistry::resolve(js, "file:///latin1-owned")) == "caf\xc3\xa9");
+      KJ_ASSERT(kj::str(ModuleRegistry::resolve(js, "file:///ascii-owned")) == "plain");
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("Dynamic import from within a CJS-style eval module works") {
+  PREAMBLE([&](Lock& js) {
+    ResolveObserverImpl observer;
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+
+    // The CJS-style module performs a dynamic import. The compiled eval function's
+    // script origin is the module's canonical URL, which is what lets the dynamic
+    // import callback identify this module as the referrer and resolve the
+    // specifier relative to it.
+    kj::String source = kj::str("exports.p = import('dep');");
+    bundleBuilder.addSyntheticModule(
+        "cjs-dyn", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source));
+
+    auto dep = kj::str("export default 123;");
+    bundleBuilder.addEsmModule("dep", dep);
+
+    // The ESM entry point awaits the promise exported by the CJS module.
+    auto entry = kj::str("import cjs from 'cjs-dyn'; export default (await cjs.p).default;");
+    bundleBuilder.addEsmModule("entry", entry);
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    JSG_TRY(js) {
+      auto value = ModuleRegistry::resolve(js, "file:///entry", "default"_kjc);
+      KJ_ASSERT(value.isNumber());
+      KJ_ASSERT(kj::str(value) == "123");
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("Dynamic import from a script with a non-URL origin fails cleanly") {
+  PREAMBLE([&](Lock& js) {
+    ResolveObserverImpl observer;
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+    auto dep = kj::str("export default 123;");
+    bundleBuilder.addEsmModule("dep", dep);
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    // Scripts that are not modules (e.g. service-worker mains or eval'd code) can
+    // carry arbitrary, non-URL ScriptOrigin names. A dynamic import from such a
+    // script cannot identify a referring module; it must reject cleanly rather
+    // than trip an internal assertion.
+    JSG_TRY(js) {
+      auto fn = Module::compileEvalFunction(js,
+          "globalThis.result = import('dep'); globalThis.result.catch(() => {});"_kj,
+          "plain-script-name"_kj, kj::none, compilationObserver);
+      fn(js);
+      js.runMicrotasks();
+      auto result = JsObject(js.v8Context()->Global()).get(js, "result");
+      auto promise = v8::Local<v8::Value>(result).As<v8::Promise>();
+      KJ_ASSERT(promise->State() == v8::Promise::kRejected);
+      auto err = kj::str(JsValue(promise->Result()));
+      KJ_ASSERT(err == "TypeError: Referring module not found in the registry: file:///", err);
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
   });
 }
 
@@ -1521,8 +1686,8 @@ KJ_TEST("Recursive import works or fails as expected") {
     auto source = kj::str("require('bar')");
 
     // A CommonJS-style module, however, does not allow recursive evaluation.
-    bundleBuilder.addSyntheticModule("bar",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source, "bar"_kj));
+    bundleBuilder.addSyntheticModule(
+        "bar", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source));
 
     auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
 
@@ -1559,11 +1724,11 @@ KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (d
     auto source1 = kj::str("exports = require('foo');");
     auto source2 = kj::str("require('baz'); exports = require('bar');");
 
-    bundleBuilder.addSyntheticModule("baz",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source1, "baz"_kj));
+    bundleBuilder.addSyntheticModule(
+        "baz", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source1));
 
-    bundleBuilder.addSyntheticModule("foo",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source2, "foo"_kj));
+    bundleBuilder.addSyntheticModule(
+        "foo", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source2));
 
     auto bar = kj::str("export default {}; await import('foo');");
     bundleBuilder.addEsmModule("bar", bar);
@@ -1602,11 +1767,11 @@ KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (s
     auto source1 = kj::str("exports = require('foo');");
     auto source2 = kj::str("require('baz'); exports = require('bar');");
 
-    bundleBuilder.addSyntheticModule("baz",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source1, "baz"_kj));
+    bundleBuilder.addSyntheticModule(
+        "baz", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source1));
 
-    bundleBuilder.addSyntheticModule("foo",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source2, "foo"_kj));
+    bundleBuilder.addSyntheticModule(
+        "foo", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source2));
 
     auto bar = kj::str("export default {}; import bar from 'foo';");
     bundleBuilder.addEsmModule("bar", bar);
@@ -1647,7 +1812,7 @@ KJ_TEST("ESM -> CJS -> require(ESM) -> static import CJS circular dependency fai
     // b (CJS) -> require('c') which is an ESM that imports b back
     auto bSource = kj::str("exports = require('c');");
     bundleBuilder.addSyntheticModule(
-        "b", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(bSource, "b"_kj));
+        "b", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(bSource));
 
     // c.js (ESM) -> imports b (CJS) — creates the circular dependency
     auto c = kj::str("import b from 'b'; export default b;");
@@ -1710,13 +1875,12 @@ KJ_TEST("Nested require() that pumps microtasks does not crash a sibling TLA mod
     // pump (CJS): its evaluation performs a nested require(), which pumps the
     // microtask queue while entry is still kEvaluating.
     auto pumpSrc = kj::str("require('trivial');\n");
-    bundleBuilder.addSyntheticModule("pump",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(pumpSrc, "pump"_kj));
+    bundleBuilder.addSyntheticModule(
+        "pump", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(pumpSrc));
 
     auto trivialSrc = kj::str("// nothing; require()-ing this pumps the microtask queue\n");
-    bundleBuilder.addSyntheticModule("trivial",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(
-            trivialSrc, "trivial"_kj));
+    bundleBuilder.addSyntheticModule(
+        "trivial", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(trivialSrc));
 
     auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
     auto attached = registry->attachToIsolate(js, compilationObserver);
@@ -1865,6 +2029,248 @@ KJ_TEST("UNWRAP_DEFAULT returns namespace for bundle ESM, default for others") {
       // Should have a "default" property (it's the namespace).
       KJ_ASSERT(!ns.get(js, "default").isUndefined());
     }, [&](Value exception) { js.throwException(kj::mv(exception)); });
+  });
+}
+
+KJ_TEST("UNWRAP_DEFAULT honors module.exports, marker order, and builtin fallback") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+
+    // Node's official require(esm) mechanism: a string-named 'module.exports'
+    // export controls the require() result.
+    auto modExports = kj::str("const impl = { hello: 1 };\n"
+                              "export { impl as 'module.exports' };\n"
+                              "export default 'not-this';\n");
+    bundleBuilder.addEsmModule("mod-exports", modExports);
+
+    // When both markers are present, __cjsUnwrapDefault wins (matching the
+    // legacy registry's check order).
+    auto bothMarkers = kj::str("export const __cjsUnwrapDefault = true;\n"
+                               "const impl = 'module-exports-value';\n"
+                               "export { impl as 'module.exports' };\n"
+                               "export default 'default-value';\n");
+    bundleBuilder.addEsmModule("both-markers", bothMarkers);
+
+    // Builtin ESM with and without a default export.
+    ModuleBundle::BuiltinBuilder builtinBuilder(ModuleBundle::BuiltinBuilder::Type::BUILTIN);
+    static const auto kWithDefault = "test:with-default"_url;
+    static const auto kNoDefault = "test:no-default"_url;
+    auto withDefault = kj::str("export default 'builtin-default'; export const extra = 1;");
+    auto noDefault = kj::str("export const onlyNamed = 42;");
+    builtinBuilder.addEsm(kWithDefault, withDefault);
+    builtinBuilder.addEsm(kNoDefault, noDefault);
+
+    // Fallback-service ESM serves user code and behaves like bundle ESM.
+    auto fallback = ModuleBundle::newFallbackBundle(
+        [](const ResolveContext& context) -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+      auto source = kj::heapArray<const char>(
+          "export default 'fb-default'; export const named = 'fb';"_kj.asArray());
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(Module::newEsm(
+          context.normalizedSpecifier.clone(), Module::Type::FALLBACK, kj::mv(source)));
+    });
+
+    auto registry = ModuleRegistry::Builder(BASE, ModuleRegistry::Builder::Options::ALLOW_FALLBACK)
+                        .add(bundleBuilder.finish())
+                        .add(builtinBuilder.finish())
+                        .add(kj::mv(fallback))
+                        .finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    static constexpr auto req = [](Lock& js, kj::StringPtr spec) {
+      return KJ_ASSERT_NONNULL(
+          ModuleRegistry::tryResolveModuleNamespace(js, spec, ResolveContext::Type::BUNDLE,
+              ResolveContext::Source::REQUIRE, kj::none, modules::UnwrapDefault::YES));
+    };
+
+    JSG_TRY(js) {
+      // The 'module.exports' named export controls the result.
+      JsValue me = req(js, "file:///mod-exports");
+      auto meObj = KJ_ASSERT_NONNULL(me.tryCast<JsObject>());
+      KJ_ASSERT(kj::str(meObj.get(js, "hello")) == "1");
+
+      // __cjsUnwrapDefault wins over 'module.exports'.
+      KJ_ASSERT(kj::str(req(js, "file:///both-markers")) == "default-value");
+
+      // Builtin ESM with a default export unwraps it.
+      KJ_ASSERT(kj::str(req(js, "test:with-default")) == "builtin-default");
+
+      // Builtin ESM without a default export falls back to the namespace
+      // rather than producing undefined.
+      JsValue nd = req(js, "test:no-default");
+      auto ndObj = KJ_ASSERT_NONNULL(nd.tryCast<JsObject>());
+      KJ_ASSERT(kj::str(ndObj.get(js, "onlyNamed")) == "42");
+
+      // Fallback-service ESM yields the namespace, like bundle ESM.
+      JsValue fb = req(js, "file:///fb-esm");
+      auto fbObj = KJ_ASSERT_NONNULL(fb.tryCast<JsObject>());
+      KJ_ASSERT(kj::str(fbObj.get(js, "named")) == "fb");
+      KJ_ASSERT(kj::str(fbObj.get(js, "default")) == "fb-default");
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("A URL can hold distinct modules per context type (bundle shadow vs builtin)") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    // A worker-bundle module that shadows a builtin name. It also performs a
+    // dynamic import so the referrer probe is exercised for a URL that has
+    // entries under multiple context types.
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+    auto shadow = kj::str("export default 'shadow'; export const p = import('file:///dep');");
+    bundleBuilder.addEsmModule("test:thing", shadow);
+    auto dep = kj::str("export default 'dep';");
+    bundleBuilder.addEsmModule("dep", dep);
+
+    // ...and the real builtin registered under the very same URL.
+    ModuleBundle::BuiltinBuilder builtinBuilder(ModuleBundle::BuiltinBuilder::Type::BUILTIN);
+    static const auto kThing = "test:thing"_url;
+    auto builtin = kj::str("export default 'builtin';");
+    builtinBuilder.addEsm(kThing, builtin);
+
+    // An unshadowed builtin, for the shared-instantiation direction.
+    static const auto kShared = "test:shared"_url;
+    auto shared = kj::str("export default 'shared';");
+    builtinBuilder.addEsm(kShared, shared);
+
+    auto registry = ModuleRegistry::Builder(BASE)
+                        .add(bundleBuilder.finish())
+                        .add(builtinBuilder.finish())
+                        .finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    JSG_TRY(js) {
+      // BUNDLE context resolves the shadow (bundle wins user-facing resolution).
+      auto fromBundle =
+          ModuleRegistry::resolve(js, "test:thing", "default"_kjc, ResolveContext::Type::BUNDLE);
+      KJ_ASSERT(kj::str(fromBundle) == "shadow");
+
+      // PUBLIC_BUILTIN context resolves the real builtin, even though the
+      // shadow's entry for the same URL is already cached. (This is the
+      // process.getBuiltinModule() path: it must never return a user module.)
+      auto fromBuiltin = ModuleRegistry::resolve(
+          js, "test:thing", "default"_kjc, ResolveContext::Type::PUBLIC_BUILTIN);
+      KJ_ASSERT(kj::str(fromBuiltin) == "builtin");
+
+      // Both entries coexist stably; repeated resolution stays correct in both
+      // directions.
+      KJ_ASSERT(kj::str(ModuleRegistry::resolve(
+                    js, "test:thing", "default"_kjc, ResolveContext::Type::BUNDLE)) == "shadow");
+      KJ_ASSERT(kj::str(ModuleRegistry::resolve(js, "test:thing", "default"_kjc,
+                    ResolveContext::Type::PUBLIC_BUILTIN)) == "builtin");
+
+      // The shadow's dynamic import resolved: the referrer probe identified the
+      // bundle-typed entry for the shared URL.
+      auto p = ModuleRegistry::resolve(js, "test:thing", "p"_kjc, ResolveContext::Type::BUNDLE);
+      auto promise = v8::Local<v8::Value>(p).As<v8::Promise>();
+      js.runMicrotasks();
+      KJ_ASSERT(promise->State() == v8::Promise::kFulfilled);
+      auto ns = JsObject(promise->Result().As<v8::Object>());
+      KJ_ASSERT(kj::str(ns.get(js, "default")) == "dep");
+
+      // Conversely, when the same specifier resolves to the same definition
+      // through different context types, the instantiation is shared: BUNDLE
+      // and PUBLIC_BUILTIN resolution of an unshadowed builtin yield the very
+      // same namespace object. This is the process.getBuiltinModule() identity
+      // guarantee, and it also keeps builtins per-isolate singletons (their
+      // module-level state must not be duplicated).
+      JsValue sharedViaBundle = KJ_ASSERT_NONNULL(ModuleRegistry::tryResolveModuleNamespace(
+          js, "test:shared", ResolveContext::Type::BUNDLE));
+      JsValue sharedViaBuiltin = KJ_ASSERT_NONNULL(ModuleRegistry::tryResolveModuleNamespace(
+          js, "test:shared", ResolveContext::Type::PUBLIC_BUILTIN));
+      KJ_ASSERT(sharedViaBundle == sharedViaBuiltin);
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("REQUIRE_ESM rejects non-ESM entry points before evaluation") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+
+    auto esm = kj::str("export default 42;");
+    bundleBuilder.addEsmModule("main", esm);
+
+    auto json = kj::str("{\"key\": \"value\"}");
+    bundleBuilder.addSyntheticModule(
+        "data.json", Module::newJsonModuleHandler(json.first(json.size())));
+
+    // A CJS-style synthetic module whose evaluation would throw. REQUIRE_ESM must
+    // reject it before evaluation, so the throw must never run.
+    bool cjsEvaluated = false;
+    bundleBuilder.addSyntheticModule("cjs-boom",
+        [&cjsEvaluated](Lock& js, const jsg::Url& id, const Module::ModuleNamespace& ns,
+            const CompilationObserver&) -> bool {
+      cjsEvaluated = true;
+      js.v8Isolate->ThrowError(js.str("boom"_kj));
+      return false;
+    });
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    // An ESM entry point resolves normally with RequireEsm::YES.
+    JSG_TRY(js) {
+      auto val = KJ_ASSERT_NONNULL(ModuleRegistry::tryResolveModuleNamespace(js, "file:///main",
+          ResolveContext::Type::BUNDLE, ResolveContext::Source::INTERNAL, kj::none,
+          modules::UnwrapDefault::NO, RequireEsm::YES));
+      auto ns = KJ_ASSERT_NONNULL(val.tryCast<JsObject>());
+      KJ_ASSERT(!ns.get(js, "default").isUndefined());
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
+
+    // A synthetic (JSON) entry point is rejected with the same TypeError the legacy
+    // registry produces ("Main module must be an ES module.").
+    JSG_TRY(js) {
+      ModuleRegistry::tryResolveModuleNamespace(js, "file:///data.json",
+          ResolveContext::Type::BUNDLE, ResolveContext::Source::INTERNAL, kj::none,
+          modules::UnwrapDefault::NO, RequireEsm::YES);
+      KJ_FAIL_ASSERT("resolving a JSON module with RequireEsm::YES should have thrown");
+    }
+    JSG_CATCH(exception) {
+      auto str = kj::str(JsValue(exception.getHandle(js)));
+      KJ_ASSERT(str == "TypeError: Main module must be an ES module.", str);
+    }
+
+    // The rejection happens before evaluation: the CJS module's evaluation
+    // callback must not have run.
+    JSG_TRY(js) {
+      ModuleRegistry::tryResolveModuleNamespace(js, "file:///cjs-boom",
+          ResolveContext::Type::BUNDLE, ResolveContext::Source::INTERNAL, kj::none,
+          modules::UnwrapDefault::NO, RequireEsm::YES);
+      KJ_FAIL_ASSERT("resolving a CJS module with RequireEsm::YES should have thrown");
+    }
+    JSG_CATCH(exception) {
+      auto str = kj::str(JsValue(exception.getHandle(js)));
+      KJ_ASSERT(str == "TypeError: Main module must be an ES module.", str);
+    }
+    KJ_ASSERT(!cjsEvaluated);
+
+    // Without RequireEsm, the same synthetic module resolves normally.
+    JSG_TRY(js) {
+      auto val = KJ_ASSERT_NONNULL(ModuleRegistry::tryResolveModuleNamespace(
+          js, "file:///data.json", ResolveContext::Type::BUNDLE));
+      auto ns = KJ_ASSERT_NONNULL(val.tryCast<JsObject>());
+      KJ_ASSERT(!ns.get(js, "default").isUndefined());
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
   });
 }
 
@@ -2109,7 +2515,12 @@ KJ_TEST("Using a registry from multiple threads works") {
   kj::AsyncIoContext io = kj::setupAsyncIo();
 
   ModuleBundle::BundleBuilder bundleBuilder(BASE);
-  static const auto foo = "export default 123; for (let n = 0; n < 100000; n++) {}"_kjc;
+  // The non-ASCII literal forces the shared UTF-8 -> Latin-1 source transcode,
+  // so this test also exercises its cross-thread once-init: all five isolates
+  // race on the same kj::Lazy encoding and the same compile cache
+  // (cacheGenerated == 1 below).
+  static const auto foo =
+      "export default 123; const s = 'caf\xc3\xa9'; for (let n = 0; n < 100000; n++) {}"_kjc;
   bundleBuilder.addEsmModule("foo", foo);
 
   auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
@@ -2287,16 +2698,16 @@ KJ_TEST("Fallback service can return a module with a different specifier") {
 
 // ======================================================================================
 
-KJ_TEST("Fallback service CommonJS module name outlives the resolve callback") {
-  // newCjsStyleModuleHandler retains both the source and the module name as non-owning
-  // kj::StringPtr, and does not read either until the module is first evaluated -- which
-  // happens on the resolve below, long after the resolve callback has returned. A
-  // callback that builds a module from storage it owns locally must therefore attach that
-  // storage to the Module, as WorkerdApi's fallback callback does for a CommonJS module
-  // returned by a fallback service.
+KJ_TEST("Fallback service CommonJS module source outlives the resolve callback") {
+  // newCjsStyleModuleHandler retains the source as a non-owning kj::StringPtr, and does
+  // not read it until the module is first evaluated -- which happens on the resolve
+  // below, long after the resolve callback has returned. A callback that builds a module
+  // from storage it owns locally must therefore attach that storage to the Module, as
+  // WorkerdApi's fallback callback does for a CommonJS module returned by a fallback
+  // service.
   //
-  // Both buffers below are freed when the callback returns unless they are attached, so
-  // dropping either attachment makes this a heap-use-after-free. Only ASAN observes that;
+  // The buffer below is freed when the callback returns unless it is attached, so
+  // dropping the attachment makes this a heap-use-after-free. Only ASAN observes that;
   // the assertions themselves just confirm the module still evaluates.
   PREAMBLE([&](Lock& js) {
     CompilationObserver compilationObserver;
@@ -2305,16 +2716,13 @@ KJ_TEST("Fallback service CommonJS module name outlives the resolve callback") {
 
     builder.add(ModuleBundle::newFallbackBundle(
         [](const ResolveContext& context) -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
-      auto ownedName = kj::str("fallback-cjs");
       auto ownedSource = kj::str("exports.ok = 123;");
-      auto namePtr = ownedName.asPtr();
       auto sourcePtr = ownedSource.asPtr();
 
-      kj::Own<Module> mod = Module::newSynthetic(context.normalizedSpecifier.clone(),
-          Module::Type::FALLBACK,
-          Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(sourcePtr, namePtr));
-      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(
-          mod.attach(kj::mv(ownedName), kj::mv(ownedSource)));
+      kj::Own<Module> mod =
+          Module::newSynthetic(context.normalizedSpecifier.clone(), Module::Type::FALLBACK,
+              Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(sourcePtr));
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(mod.attach(kj::mv(ownedSource)));
     }));
 
     auto registry = builder.finish();
@@ -2526,7 +2934,7 @@ KJ_TEST("Reserved protocols cannot be used in bundle module names") {
 
 // ======================================================================================
 
-KJ_TEST("Module resolution currently ignores import attributes in its cache key") {
+KJ_TEST("Import attributes are deliberately not part of the module cache key") {
   const auto id = "file:///data.json"_url;
   auto module =
       Module::newSynthetic(id.clone(), Module::Type::BUNDLE, Module::newDataModuleHandler(nullptr),
@@ -2543,11 +2951,14 @@ KJ_TEST("Module resolution currently ignores import attributes in its cache key"
     .source = ResolveContext::Source::INTERNAL,
     .normalizedSpecifier = id,
     .referrerNormalizedSpecifier = BASE,
+    .importType = "json"_kj,
   };
-  withAttributes.attributes.insert("type"_kjc, "json"_kjc);
 
-  // Module::evaluateContext() intentionally ignores attributes until its TODO(soon) is resolved,
-  // despite ResolveContext documenting attributes as part of the cache key.
+  // The import type is deliberately not part of module identity: the same
+  // specifier with and without a type attribute matches the same evaluation
+  // context and resolves to the same definition. The type is instead validated
+  // against the resolved module's content type on every import (see
+  // validateImportType); instance identity is keyed by (URL, definition).
   KJ_ASSERT(module->evaluateContext(withoutAttributes));
   KJ_ASSERT(module->evaluateContext(withAttributes));
 
@@ -2798,8 +3209,8 @@ KJ_TEST("Fallback receives rawSpecifier and source through V8 static import reso
     KJ_ASSERT(context.rawSpecifier == "./missing"_kjc);
     // A static import should have source == STATIC_IMPORT.
     KJ_ASSERT(context.source == ResolveContext::Source::STATIC_IMPORT);
-    KJ_ASSERT(context.attributes.size() == 1);
-    KJ_ASSERT(KJ_ASSERT_NONNULL(context.attributes.find("type"_kj)) == "json"_kj);
+    // The type import attribute must survive through to the fallback.
+    KJ_ASSERT(KJ_ASSERT_NONNULL(context.importType) == "json"_kj);
     // Return a synthetic module to satisfy the import.
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(
         Module::newSynthetic(context.normalizedSpecifier.clone(), Module::Type::FALLBACK,

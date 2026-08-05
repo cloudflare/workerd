@@ -660,20 +660,12 @@ KJ_TEST("Server: serve Service Worker using the new module registry") {
   conn.httpGet200("/service-worker", "NMR: http://foo/service-worker");
 }
 
-KJ_TEST("Server: Python workers reject the new module registry") {
-  TestServer test(singleWorker(R"((
-    compatibilityDate = "2022-08-17",
-    compatibilityFlags = ["python_workers", "new_module_registry"],
-    serviceWorkerScript =
-        `addEventListener("fetch", event => {
-        `  event.respondWith(new Response("unused"));
-        `})
-  ))"_kj));
-
-  test.server.allowExperimental();
-  KJ_EXPECT_THROW_MESSAGE("Python workers do not currently support the new ModuleRegistry",
-      test.server.run(v8System, *test.config).wait(test.ws));
-}
+// Note: Python workers ignore the new_module_registry flag entirely — they
+// always use the original module registry. That decision is centralized in
+// isNewModuleRegistryEnabled() (io/features.h) and unit-tested in
+// compatibility-date-test.c++; it cannot be exercised end-to-end here because
+// starting a python_workers-flagged worker requires the Pyodide bundle, which
+// server-test cannot fetch.
 
 KJ_TEST("Server: wrapped bindings work under the new module registry") {
   // Wrapped bindings resolve their module through jsg::Lock::resolveInternalModule, which
@@ -6446,10 +6438,15 @@ KJ_TEST("Server: structured logging with console methods") {
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
     KJ_ASSERT(logline.contains(R"("level":"error")"), logline);
+    // Stack frames name the module differently between module registries: the
+    // original registry uses the bare module name ("main.js"), the new module
+    // registry uses the canonical URL ("file:///bundle/main.js"). Match the
+    // parts common to both.
     KJ_ASSERT(
         logline.contains(
-            R"_("message":"Error: Test exception for structured logging\n    at Object.fetch (main.js:18:13)")_"),
+            R"_("message":"Error: Test exception for structured logging\n    at Object.fetch ()_"),
         logline);
+    KJ_ASSERT(logline.contains(R"_(main.js:18:13)")_"), logline);
   });
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
@@ -7448,7 +7445,8 @@ Host: foo
 MF-Access-Blob: {"app_aud":"test-aud-99","jwt_claims":{"email":"user@example.com"}}
 
 )"_kj);
-  conn.recvHttp200(R"({"aud":"test-aud-99","identity":{"email":"user@example.com","aud":"test-aud-99"}})");
+  conn.recvHttp200(
+      R"({"aud":"test-aud-99","identity":{"email":"user@example.com","aud":"test-aud-99"}})");
 
   // Request with access blob header but no jwt_claims — getIdentity should still work,
   // jwtClaims will be undefined in the binding worker's ctx.props.

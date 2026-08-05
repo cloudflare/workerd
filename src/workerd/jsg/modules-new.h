@@ -188,18 +188,15 @@ namespace workerd::jsg::modules {
 //   up module compilation since the same compile cache can be used across all
 //   replicas.
 
-// Converts a V8 specifier string to a kj::String, handling one-byte strings
-// (which carry raw UTF-8 bytes) without double-encoding. Used by every
-// resolution path so require() and import() treat specifiers identically.
-kj::String specifierToString(jsg::Lock& js, v8::Local<v8::String> spec);
-
 // The ResolveContext identifies the module that is being resolved along with
 // other key bits of information that may be used to resolve the module.
 struct ResolveContext final {
   using Source = ResolveObserver::Source;
   using Type = ResolveObserver::Context;
 
-  // The type of module being resolved (one of BUNDLE, BUILTIN, or BUILTIN_ONLY)
+  // The type of module being resolved (one of BUNDLE, BUILTIN, BUILTIN_ONLY,
+  // or PUBLIC_BUILTIN — the last resolves only user-importable built-ins, e.g.
+  // for process.getBuiltinModule()).
   Type type;
 
   // The source of the module resolution (e.g. import, dynamic import, require, etc);
@@ -215,9 +212,19 @@ struct ResolveContext final {
   // before it was normalized into the specifier URL.
   kj::Maybe<kj::StringPtr> rawSpecifier = kj::none;
 
-  // Per the standard, import attributes are considered to be part of the
-  // specifier key when the module is resolved and cached.
-  kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
+  // The value of the "type" import attribute for this resolution, if any
+  // (e.g. `with { type: 'json' }`). The value is always one of the canonical
+  // static-lifetime literals "json", "text", or "bytes": parseImportAttributes
+  // rejects every other attribute key and type value before resolution begins,
+  // so "type" is the only attribute that can reach a ResolveContext. The type
+  // is validated against the resolved module's content type on every import
+  // (including resolution cache hits) but is deliberately NOT part of the
+  // module cache key: the standard treats attributes as part of the key, and
+  // this deviation is benign precisely because the validation is per-import.
+  // Revisit if attribute types that change module *interpretation* are added.
+  // The value is also forwarded to the module fallback service (when
+  // configured) as the "type" attribute of the V2 protocol.
+  kj::Maybe<kj::StringPtr> importType = kj::none;
 };
 
 class ModuleRegistry;
@@ -436,15 +443,22 @@ class Module {
   // synthetic module. All methods and properties exposed by the template
   // type T are exposed as additional globals within the executed scope.
   template <typename T, typename TypeWrapper>
-  static EvaluateCallback newCjsStyleModuleHandler(
-      kj::StringPtr source, kj::StringPtr name) KJ_WARN_UNUSED_RESULT {
-    return [source, name](Lock& js, const Url& id, const Module::ModuleNamespace& ns,
+  static EvaluateCallback newCjsStyleModuleHandler(kj::StringPtr source) KJ_WARN_UNUSED_RESULT {
+    return [source](Lock& js, const Url& id, const Module::ModuleNamespace& ns,
                const CompilationObserver& observer) mutable -> bool {
       return js.tryCatch([&] {
         auto& wrapper = TypeWrapper::from(js.v8Isolate);
         auto ext = js.alloc<T>(js, id);
         ns.setDefault(js, ext->getExports(js));
-        auto fn = Module::compileEvalFunction(js, source, name,
+        // The module's canonical URL is used as the compiled script's origin name.
+        // V8 reports the origin name as the referrer for dynamic import() performed
+        // by the script, and dynamicImportModuleCallback() identifies the referring
+        // module in the registry's lookup cache by that URL — a non-URL origin
+        // would make dynamic import from this module unable to resolve anything.
+        // This also keeps CJS stack-trace filenames consistent with ESM modules,
+        // whose origins are always their canonical URLs.
+        auto href = kj::str(id.getHref());
+        auto fn = Module::compileEvalFunction(js, source, href,
             JsObject(wrapper.wrap(js, js.v8Context(), kj::none, ext.addRef())), observer);
         fn(js);
         // If there are named exports specified for the module namespace,
@@ -733,12 +747,16 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
   // JsExceptionThrown exception if an error occurs while the module is being evaluated.
   // Modules resolved with this method must be capable of fully evaluating within one
   // drain of the microtask queue.
+  // When requireEsm is YES, a resolved module that is not an ECMAScript module is
+  // rejected with a TypeError before evaluation. This is used for worker entry-point
+  // modules, which must always be ESM.
   static kj::Maybe<JsValue> tryResolveModuleNamespace(Lock& js,
       kj::StringPtr specifier,
       ResolveContext::Type type = ResolveContext::Type::BUNDLE,
       ResolveContext::Source source = ResolveContext::Source::INTERNAL,
       kj::Maybe<const Url&> maybeReferrer = kj::none,
-      UnwrapDefault unwrapDefault = UnwrapDefault::NO);
+      UnwrapDefault unwrapDefault = UnwrapDefault::NO,
+      RequireEsm requireEsm = RequireEsm::NO);
 
   // The constructor is public because kj::heap requires is to be. Do not
   // use the constructor directly. Use the ModuleRegistry::Builder
@@ -768,8 +786,11 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
   jsg::Url bundleBase;
   kj::MutexGuarded<Impl> impl;
   // Marked mutable because kj::Function::operator() is non-const, but the eval
-  // callback is conceptually const — it is only ever invoked while holding the
-  // isolate lock, so concurrent mutation is not a concern.
+  // callback is conceptually const. Note that a shared registry serves multiple
+  // isolates, each with its own lock, so the callback may be invoked
+  // concurrently from different threads: implementations must be thread-safe
+  // and must not rely on captured mutable state (the workerd callback captures
+  // nothing).
   mutable kj::Maybe<EvalCallback> maybeEvalCallback = kj::none;
   kj::Own<capnp::SchemaLoader> schemaLoader;
 

@@ -4494,6 +4494,12 @@ export const utilInspectError = {
   // message/util_inspect_error.js
   async test(ctrl, env, ctx) {
     const err = new Error('foo\nbar');
+    // util.inspect embeds the stack, and stack-frame filenames differ between
+    // the module registries ('worker' vs 'file:///bundle/worker'); the longer
+    // form also changes inspect's line-wrapping decisions, breaking the
+    // whitespace-sensitive patterns below. Pin a deterministic single-frame
+    // stack so the formatting assertions are registry-independent.
+    err.stack = 'Error: foo\nbar\n    at Object.test (worker:1:1)';
 
     assert.match(
       util.inspect({ err, nested: { err } }, { compact: true }),
@@ -4568,7 +4574,14 @@ export const getCallSitesTest = {
     assert.strictEqual(callSites.length, 1);
     const [stack] = callSites;
     assert.strictEqual(stack.functionName, 'test');
-    assert.strictEqual(stack.scriptName, 'worker');
+    // The script name is the module's origin, which the two module registries
+    // name differently: bare module name vs canonical URL.
+    assert.strictEqual(
+      stack.scriptName,
+      Cloudflare.compatibilityFlags.new_module_registry
+        ? 'file:///bundle/worker'
+        : 'worker'
+    );
     assert.strictEqual(typeof stack.lineNumber, 'number');
     assert.strictEqual(typeof stack.columnNumber, 'number');
     assert.strictEqual(typeof stack.column, 'number');

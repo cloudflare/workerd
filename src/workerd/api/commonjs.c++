@@ -43,7 +43,7 @@ jsg::JsValue CommonJsModuleContext::require(jsg::Lock& js, kj::String specifier)
     }
   }
 
-  if (FeatureFlags::get(js).getNewModuleRegistry()) {
+  if (isNewModuleRegistryEnabled(FeatureFlags::get(js))) {
     auto& referrer = KJ_ASSERT_NONNULL(pathOrSpecifier.tryGet<jsg::Url>());
     KJ_IF_SOME(ns,
         jsg::modules::ModuleRegistry::tryResolveModuleNamespace(js, specifier,
@@ -112,11 +112,14 @@ kj::String CommonJsModuleContext::getFilename() const {
       return path.toString(true);
     }
     KJ_CASE_ONEOF(specifier, jsg::Url) {
-      // The specifier is a URL. We want to parse it as a path and
-      // return just the filename portion.
+      // Node's __filename is the absolute path of the module file, so render
+      // the URL's full pathname in absolute form: path.dirname(__filename)
+      // must equal __dirname. An opaque specifier with an empty path (e.g.
+      // "opaque:") has no filename; that throws, matching getDirname().
       auto path = pathnameAsRelativePath(specifier);
-      auto filename = kj::Path::parse(path).basename();
-      return filename.toString(false);
+      auto pathObj = kj::Path::parse(path);
+      JSG_REQUIRE(pathObj.size() > 0, Error, "Module specifier has no filename");
+      return pathObj.toString(true);
     }
   }
   KJ_UNREACHABLE;

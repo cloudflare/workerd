@@ -8,6 +8,9 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/util.h>
 
+#include <simdutf.h>
+
+#include <kj/encoding.h>
 #include <kj/mutex.h>
 #include <kj/table.h>
 
@@ -22,27 +25,6 @@ namespace {
 // this can be removed.
 ResolveObserver noopResolveObserver;
 }  // namespace
-
-kj::String specifierToString(jsg::Lock& js, v8::Local<v8::String> spec) {
-  // Source files in workers end up being converted to UTF-8 bytes, so if the specifier
-  // string contains non-ASCII unicode characters, those will be directly encoded as UTF-8
-  // bytes, which unfortunately end up double-encoded if we try to read them using the
-  // regular js.toString() method. Doh! Fortunately they come through as one-byte strings,
-  // so we can detect that case and handle those correctly here.
-  if (spec->ContainsOnlyOneByte()) {
-    auto buf = kj::heapArray<char>(spec->Length() + 1);
-#if V8_MAJOR_VERSION >= 15
-    spec->WriteOneByte(js.v8Isolate, 0, spec->Length(), buf.asBytes().begin(),
-        v8::String::WriteFlags::kNullTerminate);
-#else
-    spec->WriteOneByteV2(js.v8Isolate, 0, spec->Length(), buf.asBytes().begin(),
-        v8::String::WriteFlags::kNullTerminate);
-#endif
-    KJ_ASSERT(buf[buf.size() - 1] == '\0');
-    return kj::String(kj::mv(buf));
-  }
-  return js.toString(spec);
-}
 
 namespace {
 // Returns kj::none if this given module is incapable of resolving the given
@@ -122,13 +104,90 @@ kj::Array<kj::String> normalizeNamedExports(kj::Array<kj::String> namedExports) 
   return normalized.releaseAsArray();
 }
 
+// The source text of an ES module in the representation handed to V8 for
+// compilation. V8 has no internal UTF-8 string representation — strings are
+// either one-byte (Latin-1) or two-byte (UTF-16), and external source strings
+// must be one of those two encodings. Worker bundle sources arrive as UTF-8
+// bytes, so each module's source is encoded once, lazily, on first compile,
+// and the result is shared by every isolate that compiles the module:
+//
+//  * Pure-ASCII source (the overwhelmingly common case — bundlers typically
+//    escape non-ASCII): the original buffer directly backs a one-byte external
+//    string. Zero copies.
+//  * Non-ASCII source whose code points all fit in Latin-1: transcoded once to
+//    a one-byte buffer, matching the representation V8 itself would choose for
+//    the same text.
+//  * Anything else (CJK, emoji, ...): transcoded once to UTF-16.
+//
+// Invalid UTF-8 sequences are replaced with U+FFFD, matching the tolerance of
+// v8::String::NewFromUtf8, which the legacy module registry uses for bundle
+// sources. Since the encoding choice is a pure function of the source bytes,
+// every isolate replica sharing the registry agrees on it, keeping the shared
+// compile cache consistent.
+struct EncodedSource {
+  kj::OneOf<kj::ArrayPtr<const char>,  // pure-ASCII: borrows the original buffer
+      kj::Array<const char>,           // owned Latin-1 transcode
+      kj::Array<const uint16_t>>       // owned UTF-16 transcode
+      repr;
+};
+
+EncodedSource encodeSource(kj::ArrayPtr<const char> source) {
+  if (simdutf::validate_ascii(source.begin(), source.size())) {
+    // ASCII is a subset of Latin-1, so the raw bytes can back a one-byte
+    // external string directly.
+    return {.repr = source};
+  }
+
+  if (simdutf::validate_utf8(source.begin(), source.size())) {
+    // Valid UTF-8. Prefer the half-size Latin-1 representation when every code
+    // point permits it. The buffer is sized exactly, so with already-validated
+    // input a zero return can only mean some code point exceeds U+00FF.
+    auto latin1 =
+        kj::heapArray<char>(simdutf::latin1_length_from_utf8(source.begin(), source.size()));
+    if (simdutf::convert_utf8_to_latin1(source.begin(), source.size(), latin1.begin()) != 0) {
+      return {.repr = kj::Array<const char>(kj::mv(latin1))};
+    }
+
+    auto utf16 =
+        kj::heapArray<uint16_t>(simdutf::utf16_length_from_utf8(source.begin(), source.size()));
+    // simdutf writes char16_t; uint16_t is layout-identical and is the element
+    // type the external two-byte string API accepts.
+    size_t written = simdutf::convert_utf8_to_utf16le(
+        source.begin(), source.size(), reinterpret_cast<char16_t*>(utf16.begin()));
+    KJ_ASSERT(written == utf16.size());
+    return {.repr = kj::Array<const uint16_t>(kj::mv(utf16))};
+  }
+
+  // Invalid UTF-8: take the (rare) lenient path, which substitutes U+FFFD for
+  // malformed sequences. U+FFFD itself is outside Latin-1, so the result is
+  // always UTF-16.
+  auto utf16 = kj::encodeUtf16(source);
+  auto owned = kj::heapArray<uint16_t>(utf16.size());
+  memcpy(owned.begin(), utf16.begin(), utf16.size() * sizeof(uint16_t));
+  return {.repr = kj::Array<const uint16_t>(kj::mv(owned))};
+}
+
 // The implementation of Module for ESM.
 class EsModule final: public Module {
  public:
+  // Source borrowed from memory that outlives this module (e.g. the worker's
+  // capnp config buffer or compiled-in builtin source).
   explicit EsModule(Url id, Type type, Flags flags, kj::ArrayPtr<const char> source)
       : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
         source(source),
         cachedData(kj::none) {
+    KJ_DASSERT(isEsm());
+  }
+  // Source owned by this module (e.g. transpiled TypeScript or fallback-service
+  // responses, where the original buffer is transient).
+  explicit EsModule(Url id, Type type, Flags flags, kj::Array<const char> code)
+      : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
+        ownedSource(kj::mv(code)),
+        cachedData(kj::none) {
+    // The view is taken from the owning member (after member initialization)
+    // rather than from the constructor parameter, so it cannot be mistaken for
+    // a borrow of the parameter's stack storage.
+    source = KJ_ASSERT_NONNULL(ownedSource).asPtr();
     KJ_DASSERT(isEsm());
   }
   KJ_DISALLOW_COPY_AND_MOVE(EsModule);
@@ -176,9 +235,42 @@ class EsModule final: public Module {
         }
       }
 
+      // Encode the UTF-8 source into a V8-compatible external representation,
+      // once, shared across all isolates compiling this module. See
+      // EncodedSource for the tiering. kj::Lazy handles cross-thread once-init.
+      const auto& encoded = encodedSource.get([this](kj::SpaceFor<EncodedSource>& space) {
+        auto result = space.construct(encodeSource(this->source));
+        if (!result->repr.is<kj::ArrayPtr<const char>>()) {
+          // The encoded representation is an owned transcode that does not
+          // borrow from the UTF-8 original, which now has no remaining readers:
+          // V8 re-reads source text (lazy compilation, toString) from the
+          // external string backed by the transcoded buffer, compile-cache
+          // generation reads the compiled script, and the /bundle virtual file
+          // system keeps its own copy of module bodies. If this module owns its
+          // source, release it. Mutating these members is safe here because
+          // this initializer runs exactly once, under kj::Lazy's internal lock,
+          // before the encoded result is published to any reader.
+          source = nullptr;
+          ownedSource = kj::none;
+        }
+        return result;
+      });
+      v8::Local<v8::String> contentStr;
+      KJ_SWITCH_ONEOF(encoded.repr) {
+        KJ_CASE_ONEOF(ascii, kj::ArrayPtr<const char>) {
+          contentStr = js.strExtern(ascii);
+        }
+        KJ_CASE_ONEOF(latin1, kj::Array<const char>) {
+          contentStr = js.strExtern(latin1);
+        }
+        KJ_CASE_ONEOF(utf16, kj::Array<const uint16_t>) {
+          contentStr = js.strExtern(utf16);
+        }
+      }
+
       // Note that the Source takes ownership of the CachedData pointer that we pass in.
       // (but not the actual buffer it holds). Do not use data after this point.
-      v8::ScriptCompiler::Source source(js.strExtern(this->source), origin, data);
+      v8::ScriptCompiler::Source source(contentStr, origin, data);
 
       auto maybeCached = source.GetCachedData();
       if (maybeCached != nullptr) {
@@ -271,7 +363,17 @@ class EsModule final: public Module {
     return actuallyEvaluate(js, module, observer);
   }
 
-  kj::ArrayPtr<const char> source;
+  // The UTF-8 source text, and — when this module owns its source — the owning
+  // buffer. Both are mutable so the encoding initializer can release the UTF-8
+  // original once an owned transcode replaces it (see getDescriptor()); after
+  // that point `source` is null and must not be read, which holds because its
+  // only reader is the encoding initializer itself.
+  mutable kj::ArrayPtr<const char> source;
+  mutable kj::Maybe<kj::Array<const char>> ownedSource;
+
+  // The source encoded into a V8-compatible external-string representation
+  // (see EncodedSource). Computed on first compile, shared across isolates.
+  kj::Lazy<EncodedSource> encodedSource;
 
   // The cachedData holds the cached compilation data for this module, if any. It is
   // generated on-demand the first time the module is compiled, if possible.
@@ -358,8 +460,10 @@ class SyntheticModule final: public Module {
 
   // Marked mutable because kj::Function::operator() is non-const, but evaluation
   // callbacks are conceptually const — they produce new JS objects each time without
-  // modifying the module's logical state. The callback is only ever invoked while
-  // holding the isolate lock, so concurrent mutation is not a concern.
+  // modifying the module's logical state. A shared registry serves multiple isolates,
+  // each with its own lock, so the callback may be invoked concurrently from different
+  // threads: callbacks must be thread-safe and idempotent (e.g. the wasm handler guards
+  // its compiled-module cache with a mutex).
   mutable ModuleBundle::BundleBuilder::EvaluateCallback callback;
   kj::Array<kj::String> namedExports;
 };
@@ -463,6 +567,17 @@ class IsolateModuleRegistry final {
         isolate->GetCurrentContext(), jsg::ContextPointerSlot::MODULE_REGISTRY));
   }
 
+  // A lightweight, non-owning key for probing the resolutions map without
+  // cloning the URL. Hash/equality must remain consistent with
+  // SpecifierContext.
+  struct SpecifierContextRef {
+    ResolveContext::Type type;
+    const Url& id;
+    uint hashCode() const {
+      return kj::hashCode(type, id);
+    }
+  };
+
   struct SpecifierContext final {
     ResolveContext::Type type;
     Url id;
@@ -472,14 +587,36 @@ class IsolateModuleRegistry final {
     bool operator==(const SpecifierContext& other) const {
       return type == other.type && id == other.id;
     }
+    bool operator==(const SpecifierContextRef& other) const {
+      return type == other.type && id == other.id;
+    }
     uint hashCode() const {
       return kj::hashCode(type, id);
     }
   };
 
+  // One v8::Module instantiation of an underlying Module definition. A
+  // definition is instantiated at most once per (specifier URL, definition)
+  // pair, which encodes the module-identity rules this registry guarantees:
+  //
+  //  * Query/fragment-distinct specifiers produce distinct instances, each
+  //    with its own import.meta.url, per the HTML module-map model
+  //    (import('./foo?a') !== import('./foo?b')).
+  //  * The same specifier resolved through different context types shares one
+  //    instance when it resolves to the same definition — e.g.
+  //    process.getBuiltinModule('cloudflare:sockets') must be reference-equal
+  //    to the namespace obtained via import(), and a builtin imported by both
+  //    user code and other builtins must remain a per-isolate singleton
+  //    (module-level state must not be duplicated).
+  //  * The same specifier resolved through different context types yields
+  //    *distinct* instances when it resolves to different definitions — e.g. a
+  //    worker-bundle module shadowing a builtin name coexists with the real
+  //    builtin, and PUBLIC_BUILTIN resolution must never observe the shadow.
   struct Entry final {
     HashableV8Ref<v8::Module> key;
-    SpecifierContext context;
+    // The specifier URL for this instantiation, including any query/fragment.
+    // This is the instance's import.meta.url.
+    Url id;
     const Module& module;
   };
 
@@ -492,7 +629,7 @@ class IsolateModuleRegistry final {
   // an exception has been scheduled with the isolate.
   v8::MaybeLocal<v8::Module> resolve(Lock& js, const ResolveContext& context) {
     // Do we already have a cached module for this context?
-    KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
+    KJ_IF_SOME(found, findResolved(context)) {
       return found.key.getHandle(js);
     }
     // No? That's OK, let's look it up.
@@ -517,7 +654,7 @@ class IsolateModuleRegistry final {
         .referrerNormalizedSpecifier = context.referrerNormalizedSpecifier,
         .rawSpecifier = processSpec.asPtr(),
       };
-      KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(processContext)) {
+      KJ_IF_SOME(found, findResolved(processContext)) {
         return found.key.getHandle(js);
       }
       KJ_IF_SOME(found, resolveWithCaching(js, processContext)) {
@@ -553,25 +690,42 @@ class IsolateModuleRegistry final {
     };
 
     return js.wrapSimplePromise(js.tryCatch([&] -> Promise<Value> {
-      // The referrer should absolutely already be known to the registry
-      // or something bad happened.
-      auto& referring = JSG_REQUIRE_NONNULL(lookupCache.find<kj::HashIndex<UrlCallbacks>>(referrer),
-          TypeError, kj::str("Referring module not found in the registry: ", referrer.getHref()));
+      // The host callback identifies the referring script only by its origin URL,
+      // so probe the lookup cache for that URL across the context types in
+      // resolution-priority order. The same URL can legitimately have entries
+      // under multiple types — e.g. a worker-bundle module shadowing a builtin
+      // name coexists with the real builtin — and V8 gives us only the URL
+      // string, so this is inherently a policy choice: user-facing semantics
+      // favor treating the referrer as the bundle module.
+      //
+      // The referrer should absolutely already be known to the registry (it is
+      // currently executing) or something bad happened.
+      static constexpr ResolveContext::Type kReferrerProbeOrder[] = {
+        ResolveContext::Type::BUNDLE,
+        ResolveContext::Type::BUILTIN,
+        ResolveContext::Type::BUILTIN_ONLY,
+        ResolveContext::Type::PUBLIC_BUILTIN,
+      };
+      kj::Maybe<Entry&> maybeReferring;
+      for (auto type: kReferrerProbeOrder) {
+        KJ_IF_SOME(found, findResolved(type, referrer)) {
+          maybeReferring = found;
+          break;
+        }
+      }
+      auto& referring = JSG_REQUIRE_NONNULL(maybeReferring, TypeError,
+          kj::str("Referring module not found in the registry: ", referrer.getHref()));
 
       // Now that we know the referrer module, we can set the context for the
       // next resolve. The "type" of the context is determined by the type of
       // the referring module.
-      kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
-      KJ_IF_SOME(type, importType) {
-        attributes.insert("type"_kj, type);
-      }
       ResolveContext context = {
         .type = moduleTypeToResolveContextType(referring.module.type()),
         .source = ResolveContext::Source::DYNAMIC_IMPORT,
         .normalizedSpecifier = normalizedSpecifier,
         .referrerNormalizedSpecifier = referrer,
         .rawSpecifier = rawSpecifier,
-        .attributes = kj::mv(attributes),
+        .importType = importType,
       };
 
       auto handleFoundModule = [&](Entry& found) -> Promise<Value> {
@@ -626,7 +780,7 @@ class IsolateModuleRegistry final {
       };
 
       // Do we already have a cached module for this context?
-      KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
+      KJ_IF_SOME(found, findResolved(context)) {
         return handleFoundModule(found);
       }
 
@@ -652,7 +806,7 @@ class IsolateModuleRegistry final {
           .referrerNormalizedSpecifier = referrer,
           .rawSpecifier = processSpec.asPtr(),
         };
-        KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(processContext)) {
+        KJ_IF_SOME(found, findResolved(processContext)) {
           return handleFoundModule(found);
         }
         KJ_IF_SOME(found, resolveWithCaching(js, processContext)) {
@@ -679,6 +833,12 @@ class IsolateModuleRegistry final {
     // default export (module.exports for CJS, default export for ESM builtins,
     // parsed value for JSON, etc.).
     UNWRAP_DEFAULT = 1 << 2,
+    // When set, the resolved module must be an ECMAScript module; anything else
+    // (CommonJS, JSON, text, wasm, and other synthetic modules) is rejected with
+    // a TypeError before evaluation. Used for worker entry-point modules, which
+    // must always be ESM. The error type and message match the legacy registry's
+    // check so behavior does not fork between the two implementations.
+    REQUIRE_ESM = 1 << 3,
   };
 
   friend constexpr RequireOption operator|(RequireOption a, RequireOption b) {
@@ -694,40 +854,67 @@ class IsolateModuleRegistry final {
   // exception has been scheduled.
   v8::MaybeLocal<v8::Value> require(
       Lock& js, const ResolveContext& context, RequireOption option = RequireOption::DEFAULT) {
-    // Returns either the module namespace or, when UNWRAP_DEFAULT is set and
-    // the module is not ESM, the default export from the namespace. This matches
-    // Node.js require() semantics: require('esm') returns the namespace,
-    // require('data.json') returns the parsed value.
-    // When UNWRAP_DEFAULT is set, returns the default export for all module types
-    // except user bundle ESM, which returns the namespace (matching Node.js require(esm)
-    // behavior). Builtin ESM returns default because workerd wraps CJS-style APIs in
-    // ESM default exports. Synthetic modules (CJS, JSON, Text, etc.) return default
-    // because that's where their value lives.
+    // Computes the value require() produces for a resolved module. Without
+    // UNWRAP_DEFAULT this is always the module namespace. With UNWRAP_DEFAULT:
+    //
+    //  * Any ESM with a truthy __cjsUnwrapDefault export (an ecosystem bundler
+    //    convention that predates Node's require(esm) support) yields its
+    //    default export. Checked first, matching the legacy registry's order.
+    //  * Any ESM that defines the string-named export 'module.exports' —
+    //    Node.js' official mechanism for an ES module to control its require()
+    //    result — yields that export's value.
+    //  * User ESM (worker bundle and fallback modules) otherwise yields the
+    //    full namespace, matching Node.js require(esm).
+    //  * Builtin ESM yields its default export (workerd builtins wrap
+    //    CJS-style APIs in ESM default exports), falling back to the namespace
+    //    when a builtin defines no default export: require() must never
+    //    produce undefined for a resolvable module.
+    //  * Synthetic modules (CJS, JSON, text, etc.) yield the default export,
+    //    which is where their value lives and may be a primitive (e.g. a text
+    //    module's string).
+    //
+    // The require_returns_default_export and export_commonjs_default compat
+    // flags describe legacy-registry behavior only and are deliberately not
+    // consulted here.
     static constexpr auto maybeUnwrapDefault =
         [](Lock& js, v8::Local<v8::Module> module, const Module& moduleDef,
             RequireOption option) -> v8::MaybeLocal<v8::Value> {
       auto ns = module->GetModuleNamespace().As<v8::Object>();
-      if ((option & RequireOption::UNWRAP_DEFAULT) == RequireOption::UNWRAP_DEFAULT) {
-        // User bundle ESM returns the full namespace, matching Node.js require(esm),
-        // unless the module has __cjsUnwrapDefault set (a convention used by bundlers
-        // like esbuild when transpiling CJS to ESM), in which case we return the
-        // default export.
-        if (moduleDef.type() == Module::Type::BUNDLE && moduleDef.isEsm()) {
-          auto unwrap = ns->Get(js.v8Context(), js.strIntern("__cjsUnwrapDefault"_kj));
-          v8::Local<v8::Value> unwrapValue;
-          if (unwrap.ToLocal(&unwrapValue) && unwrapValue->BooleanValue(js.v8Isolate)) {
-            return check(ns->Get(js.v8Context(), js.strIntern("default"_kj)));
-          }
+      if ((option & RequireOption::UNWRAP_DEFAULT) != RequireOption::UNWRAP_DEFAULT) {
+        return ns;
+      }
+
+      auto context = js.v8Context();
+      if (moduleDef.isEsm()) {
+        auto unwrap = ns->Get(context, js.strIntern("__cjsUnwrapDefault"_kj));
+        v8::Local<v8::Value> unwrapValue;
+        if (unwrap.ToLocal(&unwrapValue) && unwrapValue->BooleanValue(js.v8Isolate)) {
+          return check(ns->Get(context, js.strIntern("default"_kj)));
+        }
+
+        bool hasModuleExports = false;
+        if (!ns->Has(context, js.strIntern("module.exports"_kj)).To(&hasModuleExports)) {
+          return {};
+        }
+        if (hasModuleExports) {
+          return check(ns->Get(context, js.strIntern("module.exports"_kj)));
+        }
+
+        if (moduleDef.type() == Module::Type::BUNDLE ||
+            moduleDef.type() == Module::Type::FALLBACK) {
           return ns;
         }
-        // Everything else (builtins, synthetic modules) returns the default export.
-        // Note: The default export may be a primitive (e.g. Text module returns a string).
-        // We cast to v8::Object here because require() returns MaybeLocal<Object>, but
-        // callers immediately convert to JsValue. The cast is safe because v8::Local is
-        // just a pointer wrapper.
-        return check(ns->Get(js.v8Context(), js.strIntern("default"_kj)));
+
+        bool hasDefault = false;
+        if (!ns->Has(context, js.strIntern("default"_kj)).To(&hasDefault)) {
+          return {};
+        }
+        if (!hasDefault) {
+          return ns;
+        }
       }
-      return ns;
+
+      return check(ns->Get(context, js.strIntern("default"_kj)));
     };
 
     // Note: This lambda takes v8::Local<v8::Module> and const Module& directly
@@ -739,6 +926,13 @@ class IsolateModuleRegistry final {
         [](Lock& js, v8::Local<v8::Module> module, const Module& moduleDef, const Url& id,
             const CompilationObserver& observer, const Module::Evaluator& maybeEvaluate,
             RequireOption option) -> v8::MaybeLocal<v8::Value> {
+      // Entry-point modules must be ESM. Checked before any evaluation (and before
+      // propagating a prior evaluation error) because it reflects a static property
+      // of the module, matching the legacy registry's ordering and exact error.
+      if ((option & RequireOption::REQUIRE_ESM) == RequireOption::REQUIRE_ESM) {
+        JSG_REQUIRE(moduleDef.isEsm(), TypeError, "Main module must be an ES module.");
+      }
+
       auto status = module->GetStatus();
 
       // If status is kErrored, that means a prior attempt to evaluate the module
@@ -842,7 +1036,7 @@ class IsolateModuleRegistry final {
 
     return js.tryCatch([&]() -> v8::MaybeLocal<v8::Value> {
       // Do we already have a cached module for this context?
-      KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
+      KJ_IF_SOME(found, findResolved(context)) {
         // Extract module handle and Module& before calling evaluate, since
         // evaluate may trigger table rehashing that invalidates the Entry&.
         auto foundModule = found.key.getHandle(js);
@@ -881,7 +1075,7 @@ class IsolateModuleRegistry final {
         return {};
       }
       JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", context.normalizedSpecifier.getHref()));
-    }, [&](Value exception) -> v8::MaybeLocal<v8::Object> {
+    }, [&](Value exception) -> v8::MaybeLocal<v8::Value> {
       // Use the isolate to rethrow the exception here instead of using the lock.
       js.v8Isolate->ThrowException(exception.getHandle(js));
       return {};
@@ -890,7 +1084,7 @@ class IsolateModuleRegistry final {
 
   // Lookup a module that may have already been previously resolved and cached.
   kj::Maybe<Entry&> lookup(Lock& js, v8::Local<v8::Module> module) {
-    return lookupCache
+    return instantiations
         .find<kj::HashIndex<EntryCallbacks>>(HashableV8Ref<v8::Module>(js.v8Isolate, module))
         .map([](Entry& entry) -> Entry& { return entry; });
   }
@@ -919,38 +1113,41 @@ class IsolateModuleRegistry final {
     }
   };
 
-  struct ContextCallbacks final {
-    const SpecifierContext& keyForRow(const Entry& entry) const {
-      return entry.context;
+  struct InstanceCallbacks final {
+    const Entry& keyForRow(const Entry& entry) const {
+      return entry;
     }
-    bool matches(const Entry& entry, const SpecifierContext& context) const {
-      return entry.context == context;
+    bool matches(const Entry& entry, const Url& id, const Module* def) const {
+      return &entry.module == def && entry.id == id;
     }
-    uint hashCode(const SpecifierContext& context) const {
-      return context.hashCode();
+    bool matches(const Entry& entry, const Entry& other) const {
+      return &entry.module == &other.module && entry.id == other.id;
+    }
+    uint hashCode(const Url& id, const Module* def) const {
+      return kj::hashCode(id, def);
+    }
+    uint hashCode(const Entry& entry) const {
+      return kj::hashCode(entry.id, &entry.module);
     }
   };
 
-  struct UrlCallbacks final {
-    const Url& keyForRow(const Entry& entry) const {
-      return entry.context.id;
+  // Finds the instantiation previously produced for a (context type, specifier)
+  // pair, if any.
+  kj::Maybe<Entry&> findResolved(const ResolveContext& context) KJ_WARN_UNUSED_RESULT {
+    return findResolved(context.type, context.normalizedSpecifier);
+  }
+
+  kj::Maybe<Entry&> findResolved(ResolveContext::Type type, const Url& id) KJ_WARN_UNUSED_RESULT {
+    KJ_IF_SOME(def, resolutions.find(SpecifierContextRef{type, id})) {
+      // The resolutions entry always has a matching instantiation.
+      return KJ_ASSERT_NONNULL(instantiations.find<kj::HashIndex<InstanceCallbacks>>(id, def));
     }
-    bool matches(const Entry& entry, const Url& id) const {
-      return entry.context.id == id;
-    }
-    uint hashCode(const Url& id) const {
-      return id.hashCode();
-    }
-  };
+    return kj::none;
+  }
 
   // Resolves the module from the inner ModuleRegistry, caching the results.
   kj::Maybe<Entry&> resolveWithCaching(
       Lock& js, const ResolveContext& context) KJ_WARN_UNUSED_RESULT {
-    // Clone attributes so the fallback bundle callback can see them.
-    kj::HashMap<kj::StringPtr, kj::StringPtr> clonedAttrs;
-    for (const auto& [key, value]: context.attributes) {
-      clonedAttrs.insert(key, value);
-    }
     ResolveContext innerContext{
       // The type identifies the resolution context as a bundle, builtin, or builtin-only.
       .type = context.type,
@@ -962,34 +1159,50 @@ class IsolateModuleRegistry final {
           Url::EquivalenceOption::IGNORE_FRAGMENTS | Url::EquivalenceOption::IGNORE_SEARCH),
       // The referrer is passed along for informational purposes only.
       .referrerNormalizedSpecifier = context.referrerNormalizedSpecifier,
-      // The raw specifier and attributes are passed along for informational purposes
+      // The raw specifier and import type are passed along for informational purposes
       // (used by the fallback service protocol).
       .rawSpecifier = context.rawSpecifier,
-      .attributes = kj::mv(clonedAttrs),
+      .importType = context.importType,
     };
 
     KJ_IF_SOME(found, inner.lookup(innerContext, noopResolveObserver)) {
-      return kj::Maybe<Entry&>(lookupCache.upsert(
-          Entry{
-            .key = HashableV8Ref<v8::Module>(
-                js.v8Isolate, check(found.getDescriptor(js, getObserver()))),
-            // Note that we cache specifically with the passed in context and not the
-            // innerContext that was created. This is because we want to use the original
-            // specifier URL (with query parameters and fragments) as part of the key for
-            // the lookup cache.
-            .context = context,
-            .module = found,
-          },
-          [](auto&, auto&&) {}));
+      // Record the resolution under the full specifier (with query/fragment):
+      // it is part of the module-identity key (see Entry).
+      resolutions.upsert(SpecifierContext(context), &found,
+          [](const Module*& existing, const Module* replacement) {
+        // Deterministic: re-resolving the same (type, specifier) always finds
+        // the same definition — the inner registry is immutable and caching.
+        KJ_ASSERT(existing == replacement);
+      });
+
+      // Reuse the existing instantiation for this (specifier, definition) if
+      // one exists (e.g. the same builtin already resolved through a different
+      // context type); otherwise instantiate now.
+      KJ_IF_SOME(entry,
+          instantiations.find<kj::HashIndex<InstanceCallbacks>>(
+              context.normalizedSpecifier, &found)) {
+        return kj::Maybe<Entry&>(entry);
+      }
+      return kj::Maybe<Entry&>(instantiations.insert(Entry{
+        .key =
+            HashableV8Ref<v8::Module>(js.v8Isolate, check(found.getDescriptor(js, getObserver()))),
+        .id = context.normalizedSpecifier.clone(),
+        .module = found,
+      }));
     }
     return kj::none;
   }
 
-  kj::Table<Entry,
-      kj::HashIndex<EntryCallbacks>,
-      kj::HashIndex<ContextCallbacks>,
-      kj::HashIndex<UrlCallbacks>>
-      lookupCache;
+  // The instantiation table: one row per live v8::Module, keyed by handle
+  // (EntryCallbacks) and by (specifier URL, definition) (InstanceCallbacks).
+  kj::Table<Entry, kj::HashIndex<EntryCallbacks>, kj::HashIndex<InstanceCallbacks>> instantiations;
+
+  // The resolution cache: (context type, specifier URL) → the definition it
+  // resolves to. Multiple resolutions may map to one instantiation (same
+  // specifier + definition through different context types); resolutions with
+  // the same specifier but different definitions (bundle shadow vs builtin)
+  // map to distinct instantiations.
+  kj::HashMap<SpecifierContext, const Module*> resolutions;
   friend class SyntheticModule;
 };
 
@@ -1020,7 +1233,7 @@ void importMeta(
   try {
     js.tryCatch([&] {
       KJ_IF_SOME(found, registry.lookup(js, module)) {
-        auto href = found.context.id.getHref();
+        auto href = found.id.getHref();
 
         // V8's documentation says that the host should set the properties
         // using CreateDataProperty.
@@ -1135,7 +1348,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportModuleCallback(v8::Local<v8::Context> c
   auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
   KJ_TRY {
     return js.tryCatch([&]() -> v8::MaybeLocal<v8::Promise> {
-      auto spec = specifierToString(js, specifier);
+      auto spec = js.toString(specifier);
 
       // Parse import attributes. Throws for unrecognized attribute keys.
       // Returns the "type" value if specified, or kj::none.
@@ -1146,7 +1359,16 @@ v8::MaybeLocal<v8::Promise> dynamicImportModuleCallback(v8::Local<v8::Context> c
           return registry.getBundleBase().clone();
         }
         auto str = js.toString(resource_name);
-        return KJ_ASSERT_NONNULL(Url::tryParse(str.asPtr()));
+        KJ_IF_SOME(parsed, Url::tryParse(str.asPtr())) {
+          return kj::mv(parsed);
+        }
+        // The referring script's origin name is not a URL. Modules created by this
+        // registry always use their canonical URL as the origin, so the referrer is
+        // some other kind of script (e.g. a service-worker main script or eval'd
+        // code). Fall back to the bundle base — the same treatment as an empty
+        // resource name — so the referrer lookup below fails with a clear
+        // "Referring module not found" error rather than an assertion here.
+        return registry.getBundleBase().clone();
       })();
 
       // If Node.js Compat v2 mode is enable, we have to check to see if the specifier
@@ -1210,7 +1432,7 @@ IsolateModuleRegistry::IsolateModuleRegistry(
     Lock& js, const ModuleRegistry& registry, const CompilationObserver& observer)
     : inner(registry),
       observer(observer),
-      lookupCache(EntryCallbacks{}, ContextCallbacks{}, UrlCallbacks{}) {
+      instantiations(EntryCallbacks{}, InstanceCallbacks{}) {
   auto isolate = js.v8Isolate;
   auto context = isolate->GetCurrentContext();
   KJ_ASSERT(!context.IsEmpty());
@@ -1232,7 +1454,7 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
   auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
 
   return js.tryCatch([&]() -> v8::MaybeLocal<ReturnType> {
-    auto spec = specifierToString(js, specifier);
+    auto spec = js.toString(specifier);
 
     // The proposed specification for import attributes strongly recommends that
     // embedders reject import attributes and types they do not understand/implement.
@@ -1252,7 +1474,7 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
     Url referrerUrl = registry.lookup(js, referrer)
                           .map([&](IsolateModuleRegistry::Entry& entry) -> Url {
       type = moduleTypeToResolveContextType(entry.module.type());
-      return entry.context.id.clone();
+      return entry.id.clone();
     }).orDefault(registry.getBundleBase().clone());
 
     // If Node.js Compat v2 mode is enable, we have to check to see if the specifier
@@ -1272,17 +1494,13 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
     KJ_IF_SOME(url, referrerUrl.tryResolve(spec)) {
       // Make sure that percent-encoding in the path is normalized so we can match correctly.
       auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
-      kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
-      KJ_IF_SOME(attributeType, importType) {
-        attributes.insert("type"_kj, attributeType);
-      }
       ResolveContext resolveContext = {
         .type = type,
         .source = ResolveContext::Source::STATIC_IMPORT,
         .normalizedSpecifier = normalized,
         .referrerNormalizedSpecifier = referrerUrl,
         .rawSpecifier = spec.asPtr(),
-        .attributes = kj::mv(attributes),
+        .importType = importType,
       };
 
       auto maybeResolved = registry.resolve(js, resolveContext);
@@ -1887,10 +2105,6 @@ kj::Maybe<const Module&> ModuleRegistry::lookupImpl(
         if (recursed) { /* avoid recursing indefinitely */                                         \
           return kj::none;                                                                         \
         }                                                                                          \
-        kj::HashMap<kj::StringPtr, kj::StringPtr> clonedAttrs;                                     \
-        for (const auto& [key, value]: context.attributes) {                                       \
-          clonedAttrs.insert(key, value);                                                          \
-        }                                                                                          \
         ResolveContext ctx{                                                                        \
           .type = context.type,                                                                    \
           .source = context.source,                                                                \
@@ -1898,7 +2112,7 @@ kj::Maybe<const Module&> ModuleRegistry::lookupImpl(
           .referrerNormalizedSpecifier = context.referrerNormalizedSpecifier,                      \
           .rawSpecifier =                                                                          \
               context.rawSpecifier.map([](auto& str) -> kj::StringPtr { return str; }),            \
-          .attributes = kj::mv(clonedAttrs),                                                       \
+          .importType = context.importType,                                                        \
         };                                                                                         \
         return lookupImpl(impl, ctx, true);                                                        \
       }                                                                                            \
@@ -1968,7 +2182,8 @@ kj::Maybe<JsValue> ModuleRegistry::tryResolveModuleNamespace(Lock& js,
     ResolveContext::Type type,
     ResolveContext::Source source,
     kj::Maybe<const Url&> maybeReferrer,
-    UnwrapDefault unwrapDefault) {
+    UnwrapDefault unwrapDefault,
+    RequireEsm requireEsm) {
   auto& bound = IsolateModuleRegistry::from(js.v8Isolate);
   const Url& base = maybeReferrer.orDefault(bound.getBundleBase());
   // The specifier arrives straight from user code on the require() paths (CommonJS
@@ -2000,6 +2215,9 @@ kj::Maybe<JsValue> ModuleRegistry::tryResolveModuleNamespace(Lock& js,
   }
   if (unwrapDefault == UnwrapDefault::YES) {
     option = option | IsolateModuleRegistry::RequireOption::UNWRAP_DEFAULT;
+  }
+  if (requireEsm == RequireEsm::YES) {
+    option = option | IsolateModuleRegistry::RequireOption::REQUIRE_ESM;
   }
 
   auto ns = bound.require(js, context, option);
@@ -2070,9 +2288,11 @@ bool Module::isWasm() const {
 }
 
 bool Module::evaluateContext(const ResolveContext& context) const {
-  if (context.normalizedSpecifier != id()) return false;
-  // TODO(soon): Check the import attributes in the context.
-  return true;
+  // The import type attribute is deliberately not consulted here: attribute
+  // checking happens per-import in the resolve paths (see validateImportType),
+  // and instance identity is keyed by (URL, definition) alone. See the
+  // ResolveContext::importType comment for the cache-key rationale.
+  return context.normalizedSpecifier == id();
 }
 
 kj::Own<Module> Module::newSynthetic(Url id,
@@ -2086,7 +2306,10 @@ kj::Own<Module> Module::newSynthetic(Url id,
 }
 
 kj::Own<Module> Module::newEsm(Url id, Type type, kj::Array<const char> code, Flags flags) {
-  return kj::heap<EsModule>(kj::mv(id), type, flags, code).attach(kj::mv(code));
+  // The module owns the source buffer (rather than having it attached to the
+  // kj::Own) so that it can release the UTF-8 original once an owned transcoded
+  // representation replaces it on first compile.
+  return kj::heap<EsModule>(kj::mv(id), type, flags, kj::mv(code));
 }
 
 kj::Own<Module> Module::newEsm(Url id, Type type, kj::ArrayPtr<const char> code) {

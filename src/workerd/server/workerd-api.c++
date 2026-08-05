@@ -46,6 +46,7 @@
 #include <workerd/api/worker-rpc.h>
 #include <workerd/api/workers-module.h>
 #include <workerd/io/compatibility-date.h>
+#include <workerd/io/features.h>
 #include <workerd/io/promise-wrapper.h>
 #include <workerd/io/worker-modules.h>
 #include <workerd/jsg/jsg.h>
@@ -265,7 +266,7 @@ struct WorkerdApi::Impl final {
         memoryCacheProvider(memoryCacheProvider),
         pythonConfig(pythonConfig) {
     jsgIsolate.runInLockScope([&](JsgWorkerdIsolate::Lock& lock) {
-      if (featuresParam.getNewModuleRegistry()) {
+      if (isNewModuleRegistryEnabled(featuresParam)) {
         jsgIsolate.setUsingNewModuleRegistry();
       }
 
@@ -1016,10 +1017,17 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
           -> kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>> {
         auto normalizedSpecifier = kj::str(context.normalizedSpecifier.getHref());
         auto referrer = kj::str(context.referrerNormalizedSpecifier.getHref());
+        // The V2 fallback service protocol transmits import attributes as a map.
+        // Reconstruct it from the canonical importType value; "type" is the only
+        // attribute key that can survive import attribute parsing.
+        kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
+        KJ_IF_SOME(type, context.importType) {
+          attributes.insert("type"_kj, type);
+        }
         KJ_IF_SOME(resolved,
             client->tryResolve(workerd::fallback::Version::V2, sourceToImportType(context.source),
                 normalizedSpecifier, context.rawSpecifier.orDefault(nullptr), referrer,
-                context.attributes)) {
+                attributes)) {
           KJ_SWITCH_ONEOF(resolved) {
             KJ_CASE_ONEOF(str, kj::String) {
               // The fallback service returned an alternative specifier.
@@ -1089,8 +1097,6 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                   KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
                     auto ownedData = kj::str(content.body);
                     auto ptr = ownedData.asPtr();
-                    auto ownedName = kj::str(mod.name);
-                    auto namePtr = ownedName.asPtr();
                     kj::ArrayPtr<const kj::StringPtr> named;
                     KJ_IF_SOME(n, content.namedExports) {
                       named = n;
@@ -1099,11 +1105,10 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                         jsg::modules::Module::newSynthetic(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
                             jsg::modules::Module::newCjsStyleModuleHandler<
-                                api::CommonJsModuleContext, JsgWorkerdIsolate_TypeWrapper>(
-                                ptr, namePtr),
+                                api::CommonJsModuleContext, JsgWorkerdIsolate_TypeWrapper>(ptr),
               KJ_MAP(name, named) {
                       return kj::str(name);
-                    }).attach(kj::mv(ownedData), kj::mv(ownedName)));
+                    }).attach(kj::mv(ownedData)));
                   }
                   KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
                     // Python modules are not supported.in fallback

@@ -515,7 +515,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("new_module_registry")
       $compatDisableFlag("legacy_module_registry")
       $experimental;
-  # Enables of the new module registry implementation.
+  # Enables the new module registry implementation, which handles module
+  # specifiers as URLs, implements import.meta (url/main/resolve), supports
+  # import attributes, and allows a registry to be shared across isolate
+  # replicas. Behavioral differences from the original registry are documented
+  # with the flag's public documentation. Several flags describe
+  # legacy-registry behavior only and are not consulted by the new registry:
+  # exportCommonJsDefaultNamespace, requireReturnsDefaultExport,
+  # throwOnUnrecognizedImportAssertion, and disableTopLevelAwaitInRequire.
 
   cacheOptionEnabled @53 :Bool
     $compatEnableFlag("cache_option_enabled")

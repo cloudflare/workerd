@@ -127,7 +127,9 @@ await Promise.resolve();
 import { default as cjs2 } from 'cjs2';
 strictEqual(cjs2.foo, 1);
 strictEqual(cjs2.bar, 2);
-strictEqual(cjs2.filename, 'cjs1');
+// __filename is the absolute path of the module file, matching Node.js
+// (path.dirname(__filename) === __dirname).
+strictEqual(cjs2.filename, '/bundle/cjs1');
 strictEqual(cjs2.dirname, '/bundle');
 strictEqual(cjs2.assert, assert);
 
@@ -150,6 +152,11 @@ strictEqual(customRequireCjs.bar, cjs1bar);
 const customRequireCjs2 = myRequire(import.meta.resolve('cjs2'));
 strictEqual(customRequireCjs2.foo, cjs2.foo);
 
+// Node's require(esm) convention: a string-named 'module.exports' export
+// controls what require() returns for an ES module. Without it, require(esm)
+// returns the module namespace.
+deepStrictEqual(myRequire('esm-module-exports'), { hello: 'world' });
+
 // When the module being imported throws an error during evaluation,
 // the error is propagated correctly.
 await rejects(import('file:///bundle/cjs3'), {
@@ -162,6 +169,18 @@ import { default as cjs4 } from 'cjs4';
 import { default as cjs5 } from 'cjs5';
 deepStrictEqual(cjs4, {});
 deepStrictEqual(cjs5, {});
+
+// Dynamic import() works from within a CommonJS module, resolving the
+// specifier relative to the CJS module itself (its script origin is the
+// module's canonical URL).
+import { default as cjsDyn } from 'cjs-dyn';
+{
+  const ns = await cjsDyn.relative;
+  strictEqual(ns.foo, 1);
+  strictEqual(ns.default, 2);
+  const nodeNs = await cjsDyn.builtin;
+  strictEqual(typeof nodeNs.default.ok, 'function');
+}
 
 // These dynamics imports can be top-level awaited because they
 // are immediately rejected with errors.
@@ -196,28 +215,43 @@ strictEqual(mod2.default, 1);
 
 // UTF-8 percent-encoded of 部品 (Japanese for "component")
 const mod3 = await import('%E9%83%A8%E5%93%81');
-const mod4 = await import('部品'); // Get's converted into UTF-8 bytes in source
-const mod5 = await import('\u90e8\u54c1'); // Specifically UTF-16 code units in source
-const mod6 = await import('\xE9\x83\xA8\xE5\x93\x81');
+// Non-ASCII specifiers resolve identically whether written as raw characters
+// in the source text or as escape sequences.
+const mod4 = await import('部品');
+const mod5 = await import('\u90e8\u54c1');
 import { default as mod7 } from '部品';
 import { default as mod8 } from '\u90e8\u54c1';
-import { default as mod9 } from '\xE9\x83\xA8\xE5\x93\x81';
 import { default as mod10 } from '%E9%83%A8%E5%93%81';
 
 strictEqual(mod3.default, 1);
 strictEqual(mod4.default, 1);
 strictEqual(mod5.default, 1);
-strictEqual(mod6.default, 1);
 strictEqual(mod7, 1);
 strictEqual(mod8, 1);
-strictEqual(mod9, 1);
 strictEqual(mod10, 1);
 
-// require() must resolve the same specifier forms as import(); a one-byte
-// (raw-byte UTF-8) specifier must not be double-encoded on the require path.
+// A Latin-1 string of the UTF-8 *bytes* of 部品 is not the same specifier as
+// 部品: each char is its own code point and percent-encodes individually
+// (%C3%A9%C2%83... rather than %E9%83%A8...), matching Node.js and browsers.
+await rejects(import('\xE9\x83\xA8\xE5\x93\x81'), {
+  message: /Module not found/,
+});
+
+// require() must resolve the same specifier forms as import().
 strictEqual(myRequire('部品').default, 1);
-strictEqual(myRequire('\xE9\x83\xA8\xE5\x93\x81').default, 1);
 strictEqual(myRequire('%E9%83%A8%E5%93%81').default, 1);
+throws(() => myRequire('\xE9\x83\xA8\xE5\x93\x81'), {
+  message: /Module not found/,
+});
+
+// Source text is decoded as UTF-8: non-ASCII string literals, identifiers, and
+// template literals round-trip exactly, both for Latin-1-representable text
+// and for text requiring UTF-16.
+const latin1Src = await import('latin1-src');
+strictEqual(latin1Src.default, 'à la carte');
+const unicodeSrc = await import('unicode-src');
+strictEqual(unicodeSrc.default, 'café 部品 🎉');
+strictEqual(unicodeSrc.tpl, '→café 部品 🎉←');
 
 // The percent-encoded UTF-16 form of 部品 should not work.
 await rejects(import('%E8%90%C1%54'), {
@@ -506,7 +540,7 @@ export const dynamicImportAttributes = {
 export const commonJsOpaquePathSpecifier = {
   async test() {
     const foo = await import('opaque:foo');
-    strictEqual(foo.default.filename(), 'foo');
+    strictEqual(foo.default.filename(), '/foo');
     strictEqual(foo.default.dirname(), '/');
 
     // An empty opaque path has neither a filename nor a directory.
