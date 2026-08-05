@@ -21,6 +21,7 @@
 #include <workerd/io/bundle-fs.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/container.capnp.h>
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/legacy-hibernation-manager.h>
 #include <workerd/io/limit-enforcer.h>
@@ -127,7 +128,7 @@ static kj::Maybe<AccessBlobFields> parseAccessBlob(kj::Maybe<kj::String> blobJso
     kj::Maybe<kj::String> appAud;
     kj::Maybe<kj::String> jwtClaimsJson;
 
-    for (auto field : fields) {
+    for (auto field: fields) {
       auto name = field.getName();
       if (name == "app_aud") {
         KJ_REQUIRE(field.getValue().isString(), "access blob `app_aud` must be a string");
@@ -138,8 +139,8 @@ static kj::Maybe<AccessBlobFields> parseAccessBlob(kj::Maybe<kj::String> blobJso
       }
     }
 
-    auto audience = KJ_REQUIRE_NONNULL(kj::mv(appAud),
-        "accessBlobHeader JSON must contain an `app_aud` field");
+    auto audience =
+        KJ_REQUIRE_NONNULL(kj::mv(appAud), "accessBlobHeader JSON must contain an `app_aud` field");
     return AccessBlobFields{kj::mv(audience), kj::mv(jwtClaimsJson)};
   }
   return kj::none;
@@ -3707,8 +3708,7 @@ class Server::WorkerService final: public Service,
 
       KJ_ASSERT(cachedInner == kj::none, "request() called more than once");
       cachedInner = factory(kj::mv(accessInfo));
-      co_await KJ_ASSERT_NONNULL(cachedInner)->request(
-          method, url, headers, requestBody, response);
+      co_await KJ_ASSERT_NONNULL(cachedInner)->request(method, url, headers, requestBody, response);
     }
 
     kj::Promise<void> connect(kj::StringPtr host,
@@ -3724,8 +3724,7 @@ class Server::WorkerService final: public Service,
       co_await getOrCreateInner()->prewarm(url);
     }
 
-    kj::Promise<ScheduledResult> runScheduled(
-        kj::Date scheduledTime, kj::StringPtr cron) override {
+    kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
       co_return co_await getOrCreateInner()->runScheduled(scheduledTime, cron);
     }
 
@@ -3774,11 +3773,10 @@ class Server::WorkerService final: public Service,
       // constructed.
       return kj::heap<AccessHeaderExtractor>(kj::str(headerName), accessBindingServiceChannel,
           [this, metadata = kj::mv(metadata), entrypointName, props = kj::mv(props),
-              actor = kj::mv(actor), isTracer]
-          (kj::Maybe<kj::Own<AccessInfo>> accessInfo) mutable -> kj::Own<WorkerInterface> {
-        return createEntrypoint(
-            kj::mv(metadata), entrypointName, kj::mv(props), kj::mv(actor), isTracer,
-            kj::mv(accessInfo));
+              actor = kj::mv(actor), isTracer](
+              kj::Maybe<kj::Own<AccessInfo>> accessInfo) mutable -> kj::Own<WorkerInterface> {
+        return createEntrypoint(kj::mv(metadata), entrypointName, kj::mv(props), kj::mv(actor),
+            isTracer, kj::mv(accessInfo));
       });
     }
 
@@ -3797,8 +3795,8 @@ class Server::WorkerService final: public Service,
     kj::Vector<kj::Own<WorkerInterface>> bufferedTailWorkers(channels.tails.size());
     kj::Vector<kj::Own<WorkerInterface>> streamingTailWorkers(channels.streamingTails.size());
     auto addWorkerIfNotRecursiveTracer = [this, isTracer](
-                                              kj::Vector<kj::Own<WorkerInterface>>& workers,
-                                              IoChannelFactory::SubrequestChannel& channel) {
+                                             kj::Vector<kj::Own<WorkerInterface>>& workers,
+                                             IoChannelFactory::SubrequestChannel& channel) {
       // Caution here... if the tail worker ends up having a circular dependency
       // on the worker we'll end up with an infinite loop trying to initialize.
       // We can test this directly but it's more difficult to test indirect
@@ -3920,9 +3918,8 @@ class Server::WorkerService final: public Service,
         kj::mv(metadata.cfBlobJson),
         kj::none,  // versionInfo
         kj::mv(triggerContext),
-        false,     // isDynamicDispatch
-        kj::mv(accessInfo),
-        kj::mv(metadata.restoredSelfTokenFactory), metadata.fromPersistentStub);
+        false,  // isDynamicDispatch
+        kj::mv(accessInfo), kj::mv(metadata.restoredSelfTokenFactory), metadata.fromPersistentStub);
   }
 
  private:
@@ -4203,8 +4200,7 @@ class Server::WorkerService final: public Service,
             propsJson = kj::str("{\"aud\":", escapedAud, "}");
           }
           SubrequestChannel& channelRef = *channels.subrequest[channel];
-          auto& service = KJ_REQUIRE_NONNULL(
-              kj::tryDowncast<Service>(channelRef),
+          auto& service = KJ_REQUIRE_NONNULL(kj::tryDowncast<Service>(channelRef),
               "access binding service channel is not a Service");
           return service.forProps(Frankenvalue::fromJson(kj::mv(propsJson)), Persistent::NO)
               ->startRequest(kj::mv(metadata));
@@ -5586,20 +5582,20 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
     // clang-format on
 
     .accessBlobHeaderName = [&]() -> kj::Maybe<kj::String> {
-      if (!conf.hasAccessBlobHeader()) return kj::none;
-      if (!experimental) {
-        errorReporter.addError(kj::str(
-            "Worker \"", name, "\" has accessBlobHeader configured but this is an experimental "
-            "feature. You must run workerd with `--experimental` to use this feature."));
-        return kj::none;
-      }
-      return kj::str(conf.getAccessBlobHeader());
-    }(),
+    if (!conf.hasAccessBlobHeader()) return kj::none;
+    if (!experimental) {
+      errorReporter.addError(kj::str("Worker \"", name,
+          "\" has accessBlobHeader configured but this is an experimental "
+          "feature. You must run workerd with `--experimental` to use this feature."));
+      return kj::none;
+    }
+    return kj::str(conf.getAccessBlobHeader());
+  }(),
 
     .accessBindingServiceDesignator = [&]() -> kj::Maybe<config::ServiceDesignator::Reader> {
-      if (!conf.hasAccessBindingService()) return kj::none;
-      return conf.getAccessBindingService();
-    }(),
+    if (!conf.hasAccessBindingService()) return kj::none;
+    return conf.getAccessBindingService();
+  }(),
   };
 
   co_return co_await makeWorkerImpl(name, kj::mv(def), extensions, errorReporter);
@@ -5609,15 +5605,6 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     WorkerDef def,
     capnp::List<config::Extension>::Reader extensions,
     ErrorReporter& errorReporter) {
-  // TODO(soon): Either make python workers support the new module registry before
-  // NMR is defaulted on, or disable NMR by default when python workers are enabled.
-  // While NMR is experimental, we'll just throw an error if both are enabled.
-  if (def.featureFlags.getPythonWorkers()) {
-    KJ_REQUIRE(!def.featureFlags.getNewModuleRegistry(),
-        "Python workers do not currently support the new ModuleRegistry implementation. "
-        "Please disable the new ModuleRegistry feature flag to use Python workers.");
-  }
-
   // Load Python artifacts if this is a Python worker.
   co_await preloadPython(name, def, errorReporter);
 
@@ -5632,9 +5619,11 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   // config. So for now this just uses the defaults.
   auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(def.source));
 
-  bool usingNewModuleRegistry = def.featureFlags.getNewModuleRegistry();
+  // Note: Python workers do not support the new module registry;
+  // isNewModuleRegistryEnabled() returns false for them regardless of the
+  // new_module_registry flag, so they always take the legacy path below.
+  bool usingNewModuleRegistry = isNewModuleRegistryEnabled(def.featureFlags);
   kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> newModuleRegistry;
-  // TODO(soon): Python workers do not currently support the new module registry.
   if (usingNewModuleRegistry) {
     KJ_REQUIRE(experimental,
         "The new ModuleRegistry implementation is an experimental feature. "
@@ -5845,8 +5834,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     bool hasAccessBinding = def.accessBindingServiceDesignator != kj::none;
     auto services = kj::heapArrayBuilder<kj::Own<IoChannelFactory::SubrequestChannel>>(
         def.subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT +
-        entrypointNames.size() + workerService.hasDefaultEntrypoint() +
-        (hasAccessBinding ? 1 : 0));
+        entrypointNames.size() + workerService.hasDefaultEntrypoint() + (hasAccessBinding ? 1 : 0));
 
     auto globalService = kj::mv(def.globalOutbound).lookup(*this);
 
@@ -5886,12 +5874,12 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
           services.add(worker.getLoopbackEntrypoint(epName));
           workerService.setAccessBindingServiceChannel(channelIndex);
         } else {
-          reportConfigError(kj::str("Worker accessBindingService refers to service \"",
-              targetName, "\", but it is not a Worker."));
+          reportConfigError(kj::str("Worker accessBindingService refers to service \"", targetName,
+              "\", but it is not a Worker."));
         }
       } else {
-        reportConfigError(kj::str("Worker accessBindingService refers to a service \"",
-            targetName, "\", but no such service is defined."));
+        reportConfigError(kj::str("Worker accessBindingService refers to a service \"", targetName,
+            "\", but no such service is defined."));
       }
     }
 
@@ -6015,14 +6003,13 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   kj::Maybe<kj::StringPtr> serviceName;
   if (!def.isDynamic) serviceName = name;
 
-  auto result =
-      kj::refcounted<WorkerService>(channelTokenHandler, serviceName, globalContext->threadContext,
-          monotonicClock, kj::mv(worker), kj::mv(errorReporter.defaultEntrypoint),
-          kj::mv(errorReporter.namedEntrypoints), kj::mv(errorReporter.actorClasses),
-          kj::mv(linkCallback), KJ_BIND_METHOD(*this, abortAllActors),
-          KJ_BIND_METHOD(*this, deleteAllActors), kj::mv(dockerPath),
-          kj::mv(containerEgressInterceptorImage), def.isDynamic, kj::mv(abortIsolateCallback),
-          kj::mv(accessBlobHeaderName));
+  auto result = kj::refcounted<WorkerService>(channelTokenHandler, serviceName,
+      globalContext->threadContext, monotonicClock, kj::mv(worker),
+      kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
+      kj::mv(errorReporter.actorClasses), kj::mv(linkCallback),
+      KJ_BIND_METHOD(*this, abortAllActors), KJ_BIND_METHOD(*this, deleteAllActors),
+      kj::mv(dockerPath), kj::mv(containerEgressInterceptorImage), def.isDynamic,
+      kj::mv(abortIsolateCallback), kj::mv(accessBlobHeaderName));
   result->initActorNamespaces(def.localActorConfigs, actorNamespacesByUniqueKey, network);
   co_return result;
 }
@@ -6507,7 +6494,7 @@ class Server::HttpListener final: public kj::Refcounted {
 
       if (parent.rewriter->needsRewriteRequest() || cfBlobJson != kj::none) {
         auto rewrite = KJ_UNWRAP_OR(parent.rewriter->rewriteIncomingRequest(
-                                         url, parent.physicalProtocol, headers, metadata.cfBlobJson),
+                                        url, parent.physicalProtocol, headers, metadata.cfBlobJson),
             { co_return co_await response.sendError(400, "Bad Request", parent.headerTable); });
         auto worker = parent.service->startRequest(kj::mv(metadata));
         co_return co_await worker->request(

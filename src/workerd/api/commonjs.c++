@@ -43,7 +43,7 @@ jsg::JsValue CommonJsModuleContext::require(jsg::Lock& js, kj::String specifier)
     }
   }
 
-  if (FeatureFlags::get(js).getNewModuleRegistry()) {
+  if (isNewModuleRegistryEnabled(FeatureFlags::get(js))) {
     auto& referrer = KJ_ASSERT_NONNULL(pathOrSpecifier.tryGet<jsg::Url>());
     KJ_IF_SOME(ns,
         jsg::modules::ModuleRegistry::tryResolveModuleNamespace(js, specifier,

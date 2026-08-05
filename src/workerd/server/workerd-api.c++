@@ -46,6 +46,7 @@
 #include <workerd/api/worker-rpc.h>
 #include <workerd/api/workers-module.h>
 #include <workerd/io/compatibility-date.h>
+#include <workerd/io/features.h>
 #include <workerd/io/promise-wrapper.h>
 #include <workerd/io/worker-modules.h>
 #include <workerd/jsg/jsg.h>
@@ -265,7 +266,7 @@ struct WorkerdApi::Impl final {
         memoryCacheProvider(memoryCacheProvider),
         pythonConfig(pythonConfig) {
     jsgIsolate.runInLockScope([&](JsgWorkerdIsolate::Lock& lock) {
-      if (featuresParam.getNewModuleRegistry()) {
+      if (isNewModuleRegistryEnabled(featuresParam)) {
         jsgIsolate.setUsingNewModuleRegistry();
       }
 

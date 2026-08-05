@@ -35,7 +35,7 @@ jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
   auto parsed =
       JSG_REQUIRE_NONNULL(jsg::Url::tryParse(path.asPtr(), "file:///"_kj), TypeError, kInvalidArg);
 
-  if (FeatureFlags::get(js).getNewModuleRegistry()) {
+  if (isNewModuleRegistryEnabled(FeatureFlags::get(js))) {
     return jsg::JsValue(js.wrapReturningFunction(js.v8Context(),
         [referrer = parsed.clone()](jsg::Lock& js,
             const v8::FunctionCallbackInfo<v8::Value>& args) -> v8::Local<v8::Value> {

@@ -660,20 +660,12 @@ KJ_TEST("Server: serve Service Worker using the new module registry") {
   conn.httpGet200("/service-worker", "NMR: http://foo/service-worker");
 }
 
-KJ_TEST("Server: Python workers reject the new module registry") {
-  TestServer test(singleWorker(R"((
-    compatibilityDate = "2022-08-17",
-    compatibilityFlags = ["python_workers", "new_module_registry"],
-    serviceWorkerScript =
-        `addEventListener("fetch", event => {
-        `  event.respondWith(new Response("unused"));
-        `})
-  ))"_kj));
-
-  test.server.allowExperimental();
-  KJ_EXPECT_THROW_MESSAGE("Python workers do not currently support the new ModuleRegistry",
-      test.server.run(v8System, *test.config).wait(test.ws));
-}
+// Note: Python workers ignore the new_module_registry flag entirely — they
+// always use the original module registry. That decision is centralized in
+// isNewModuleRegistryEnabled() (io/features.h) and unit-tested in
+// compatibility-date-test.c++; it cannot be exercised end-to-end here because
+// starting a python_workers-flagged worker requires the Pyodide bundle, which
+// server-test cannot fetch.
 
 KJ_TEST("Server: wrapped bindings work under the new module registry") {
   // Wrapped bindings resolve their module through jsg::Lock::resolveInternalModule, which
