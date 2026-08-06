@@ -1,0 +1,27 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Pins stack-trace fidelity under the new module registry: error stack frames
+# identify modules by their canonical URLs (which is what source-map tooling
+# keys off of), for ESM and CommonJS bundle modules, in synchronously thrown
+# errors and in lazy dynamic-import evaluation failures.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "new-module-registry-stack-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "new-module-registry-stack-test.js"),
+
+          # The bodies below are single- or fixed-line so the asserted line
+          # numbers are stable.
+          (name = "thrower", esModule = "export function boom() {\n  throw new Error('esm-boom');\n}"),
+          (name = "cjs-thrower", commonJsModule = "exports.boom = function boom() { throw new Error('cjs-boom'); };"),
+          (name = "lazy-thrower", esModule = "throw new Error('lazy-boom');"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat_v2",
+          "new_module_registry",
+        ],
+      )
+    ),
+  ],
+);
