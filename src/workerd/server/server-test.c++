@@ -702,6 +702,65 @@ KJ_TEST("Server: wrapped bindings work under the new module registry") {
   conn.httpGet200("/", "wrapped: object");
 }
 
+KJ_TEST("Server: duplicate module names are reported as config errors (new module registry)") {
+  // Errors thrown while building the new module registry (which happens
+  // before the Worker::Script is constructed) must be reported as config
+  // errors rather than escaping and aborting server startup.
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-10-01",
+    compatibilityFlags = ["new_module_registry"],
+    modules = [
+      ( name = "worker",
+        esModule =
+          `export default {}
+      ),
+      ( name = "dup",
+        esModule =
+          `export default 1
+      ),
+      ( name = "dup",
+        esModule =
+          `export default 2
+      )
+    ]
+  ))"_kj));
+
+  test.server.allowExperimental();
+  // The second error is a consequence of the first: after reporting the
+  // registry error, worker construction proceeds with an inert empty script,
+  // which registers no handlers.
+  test.expectErrors(R"(
+    service hello: Module "file:///bundle/dup" already added to bundle
+    service hello: No event handlers were registered. This script does nothing.
+  )"_blockquote);
+}
+
+KJ_TEST("Server: python modules without python_workers flag (new module registry)") {
+  // Python modules in a bundle without the python_workers compatibility flag
+  // are a config error. Under the new module registry this is detected while
+  // building the registry; it must be reported like any other config error
+  // (with the same message the legacy registry path reports).
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-10-01",
+    compatibilityFlags = ["new_module_registry"],
+    modules = [
+      ( name = "worker.py",
+        pythonModule =
+          `def x(): pass
+      )
+    ]
+  ))"_kj));
+
+  test.server.allowExperimental();
+  // The second error is a consequence of the first: after reporting the
+  // registry error, worker construction proceeds with an inert empty script,
+  // which registers no handlers.
+  test.expectErrors(R"(
+    service hello: The python_workers compatibility flag is required to use Python.
+    service hello: No event handlers were registered. This script does nothing.
+  )"_blockquote);
+}
+
 KJ_TEST("Server: use service name as Service Worker origin") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
