@@ -1642,4 +1642,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2026-08-11");
   # Enables fast Workflow engine creation by generating instance IDs with the Durable Object
   # namespace's `newUniqueId()` method instead of UUIDs.
+
+  temporal @186 :Bool
+      $compatEnableFlag("temporal")
+      $compatDisableFlag("no_temporal")
+      $compatEnableDate("2026-09-08");
+  # Exposes the Temporal date/time API: the `Temporal` global and
+  # `Date.prototype.toTemporalInstant`. Without the flag both are deleted from the
+  # context before user code runs.
 }
