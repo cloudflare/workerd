@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 import assert from 'node:assert';
 import { Buffer } from 'node:buffer';
+import { randomBytes } from 'node:crypto';
 import zlib from 'node:zlib';
 
 // Basic sync compress/decompress test
@@ -99,6 +100,20 @@ export const zstdLargeDataTest = {
 
     const decompressed = zlib.zstdDecompressSync(compressed);
     assert(input.equals(decompressed), 'Large data round-trip should match');
+
+    // workerd routes randomBytes() through getRandomValues(), which is capped at 64KiB per call.
+    const randomInput = Buffer.concat([
+      randomBytes(64 * 1024),
+      randomBytes(36 * 1024),
+    ]);
+    const randomCompressed = zlib.zstdCompressSync(randomInput);
+    assert(Buffer.isBuffer(randomCompressed), 'Random compressed output should be a buffer');
+
+    const randomDecompressed = zlib.zstdDecompressSync(randomCompressed);
+    assert(
+      randomInput.equals(randomDecompressed),
+      'Large random data round-trip should match'
+    );
   },
 };
 
