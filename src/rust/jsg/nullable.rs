@@ -25,7 +25,7 @@
 ///     Ok(())
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Nullable<T> {
     Some(T),
     Null,
@@ -50,10 +50,11 @@ impl<T> Nullable<T> {
 
     /// Returns `true` if the nullable is `Null` or `Undefined`.
     pub fn is_null_or_undefined(&self) -> bool {
-        matches!(self, Self::Null | Self::Undefined)
+        !self.is_some()
     }
 
-    /// Returns a reference to the contained value, or `None` if null or undefined.
+    /// Returns a reference to the contained value in `Some` if `Some`, and returns
+    /// the respective empty vaue if empty.
     pub fn as_ref(&self) -> Nullable<&T> {
         match self {
             Self::Some(v) => Nullable::Some(v),
@@ -62,7 +63,8 @@ impl<T> Nullable<T> {
         }
     }
 
-    /// Returns an exclusive reference to the contained value, or `None` if null or undefined.
+    /// Returns an exclusive reference to the contained value in `Some` if `Some`, and
+    /// returns the respective empty vaue if empty.
     pub fn as_mut(&mut self) -> Nullable<&mut T> {
         match self {
             Self::Some(v) => Nullable::Some(v),
@@ -73,7 +75,7 @@ impl<T> Nullable<T> {
 
     /// Returns the contained [`Some`] value, consuming `self`.
     ///
-    /// This function panics on `!matches!(self, Nullable::Some)`, making it unsuitable
+    /// This function panics on `!self.is_some()`, making it unsuitable
     /// for general use. Outside of testing, prefer pattern matching, or a non-panicing
     /// variant.
     ///
