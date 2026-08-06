@@ -82,6 +82,12 @@ wd_cc_benchmark(
 )
 
 wd_cc_benchmark(
+    name = "bench-form-data",
+    srcs = ["bench-form-data.c++"],
+    deps = [":test-fixture"],
+)
+
+wd_cc_benchmark(
     name = "bench-global-scope",
     srcs = ["bench-global-scope.c++"],
     deps = [":test-fixture"],
