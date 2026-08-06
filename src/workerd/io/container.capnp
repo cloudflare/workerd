@@ -52,10 +52,37 @@ interface Container @0x9aaceefc06523bca {
     directorySnapshots @6 :List(DirectorySnapshotRestoreParams);
     # Directory snapshots to restore before the container starts.
 
-    containerSnapshotId @7 :Text;
-    # Id of the full container snapshot to restore before the container starts.
+    source :union {
+      containerSnapshotId @7 :Text;
+      # Id of the full container snapshot to restore before the container starts.
+
+      image @9 :Text;
+      # Image reference to use for this start.
+    }
 
     spanContext @8 :SpanContext;
+
+    instance @10 :StartInstance;
+    # Optional instance shape for this start. Named shapes are resolved by the runtime; custom
+    # shapes carry explicit CPU, memory, and disk resources.
+  }
+
+  struct StartInstance {
+    union {
+      named @0 :Text;
+      custom @1 :StartResources;
+    }
+  }
+
+  struct StartResources {
+    vcpu @0 :Float64;
+    # Fractional CPU cores to allocate.
+
+    memoryMib @1 :UInt64;
+    # Memory size, in MiB (2^20 bytes).
+
+    diskMb @2 :UInt64;
+    # Disk size, in MB (10^6 bytes).
   }
 
   struct Label {

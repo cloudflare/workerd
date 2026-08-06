@@ -175,6 +175,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   struct ImageInspectResponse {
     kj::String id;
     uint64_t size;
+    kj::String parent;
   };
 
   struct ExecInspectResponse {

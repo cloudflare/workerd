@@ -30,7 +30,7 @@ export class DurableObjectExample extends DurableObject {
   async testExitCode() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -42,7 +42,7 @@ export class DurableObjectExample extends DurableObject {
         entrypoint: ['node', 'nonexistant.js'],
       });
 
-      let exitCode = undefined;
+      let exitCode;
       await container.monitor().catch((err) => {
         exitCode = err.exitCode;
       });
@@ -57,7 +57,7 @@ export class DurableObjectExample extends DurableObject {
 
       await scheduler.wait(500);
 
-      let exitCode = undefined;
+      let exitCode;
       const monitor = container.monitor().catch((err) => {
         exitCode = err.exitCode;
       });
@@ -72,7 +72,7 @@ export class DurableObjectExample extends DurableObject {
   async testBasics() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
 
       await container.destroy();
       await monitor;
@@ -301,9 +301,7 @@ export class DurableObjectExample extends DurableObject {
     }
 
     // 12. Make sure Stdin EOF's by default if not set
-    {
-      await container.exec(['cat']).then((p) => p.output());
-    }
+    await container.exec(['cat']).then((p) => p.output());
 
     // 13. An already-aborted signal causes exec() to throw synchronously.
     {
@@ -372,7 +370,7 @@ export class DurableObjectExample extends DurableObject {
   async testSetInactivityTimeout(timeout) {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -605,7 +603,7 @@ export class DurableObjectExample extends DurableObject {
   async testLabels() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -641,10 +639,99 @@ export class DurableObjectExample extends DurableObject {
     assert.strictEqual(container.running, false);
   }
 
+  async testImageValidation() {
+    const container = this.ctx.container;
+
+    for (const image of ['bad\nimage', 'bad image', 'bad\u0080image']) {
+      assert.throws(() => container.start({ image }), {
+        message:
+          /Container image reference must contain only non-space printable ASCII characters/,
+      });
+    }
+    assert.throws(() => container.start({ image: 'x'.repeat(4097) }), {
+      message: /Container image reference cannot exceed 4096 bytes/,
+    });
+  }
+
+  async testImageOverride() {
+    const container = this.ctx.container;
+    const image = 'cloudflare/workerd/container-client-test:override';
+
+    container.start({ enableInternet: true, image });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    const info = await container.inspect();
+    assert.match(info.image, /container-client-test:override$/);
+
+    const snapshot = await container.snapshotContainer({});
+    await container.destroy();
+    await monitor;
+
+    assert.throws(
+      () => container.start({ image, containerSnapshot: snapshot }),
+      {
+        message: /`image` and `containerSnapshot` are mutually exclusive/,
+      }
+    );
+
+    container.start({ enableInternet: true, containerSnapshot: snapshot });
+    const restoreMonitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+    await container.destroy();
+    await restoreMonitor;
+  }
+
+  async testInstanceTypeValidation() {
+    const container = this.ctx.container;
+
+    assert.throws(() => container.start({ instance: 'invalid' }), {
+      message: /Invalid container instance type/,
+    });
+
+    const custom = { vcpu: 1, memoryMib: 4096, diskMb: 20000 };
+
+    for (const vcpu of [0, -1, Infinity, NaN]) {
+      assert.throws(() => container.start({ instance: { ...custom, vcpu } }), {
+        message:
+          /Container resource vcpu must be a finite number greater than 0/,
+      });
+    }
+
+    for (const field of ['memoryMib', 'diskMb']) {
+      for (const value of [0, -1, Infinity, NaN]) {
+        assert.throws(
+          () => container.start({ instance: { ...custom, [field]: value } }),
+          {
+            message: new RegExp(
+              `Container resource ${field} must be a finite number greater than 0`
+            ),
+          }
+        );
+      }
+
+      assert.throws(
+        () => container.start({ instance: { ...custom, [field]: 0.5 } }),
+        {
+          message: new RegExp(`Container resource ${field} must be an integer`),
+        }
+      );
+
+      assert.throws(
+        () => container.start({ instance: { ...custom, [field]: 2 ** 53 } }),
+        {
+          message: new RegExp(
+            `Container resource ${field} exceeds Number.MAX_SAFE_INTEGER`
+          ),
+        }
+      );
+    }
+  }
+
   async testInspectBeforeStart() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -658,7 +745,7 @@ export class DurableObjectExample extends DurableObject {
   async testInspectEmptyLabels() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -679,7 +766,7 @@ export class DurableObjectExample extends DurableObject {
   async testInspectAfterDestroy() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -702,7 +789,7 @@ export class DurableObjectExample extends DurableObject {
   async testLabelValidation() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -966,7 +1053,7 @@ export class DurableObjectExample extends DurableObject {
   async testPidNamespace() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -999,7 +1086,7 @@ export class DurableObjectExample extends DurableObject {
   async testSetEgressHttpWithInternet() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -2685,9 +2772,7 @@ export class TestService extends WorkerEntrypoint {
     }
 
     // Regular HTTP request
-    return new Response(
-      'hello binding: ' + this.ctx.props.id + ' ' + request.url
-    );
+    return new Response(`hello binding: ${this.ctx.props.id} ${request.url}`);
   }
 
   // Handle raw TCP connections forwarded by interceptOutboundTcp.
@@ -2917,6 +3002,36 @@ export const testLabelValidation = {
   },
 };
 
+export const testImageValidation = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testImageValidation')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testImageValidation();
+  },
+};
+
+export const testImageOverride = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testImageOverride')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testImageOverride();
+  },
+};
+
+export const testInstanceTypeValidation = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testInstanceTypeValidation')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testInstanceTypeValidation();
+  },
+};
+
 export const testInspectBeforeStart = {
   async test(_ctrl, env) {
     const id = env.MY_CONTAINER.idFromName(
@@ -3055,7 +3170,7 @@ export const testSetEgressHttpWithInternet = {
     const id = env.MY_CONTAINER.idFromName(
       getRandomDurableObjectName('testSetEgressHttpWithInternet')
     );
-    let stub = env.MY_CONTAINER.get(id);
+    const stub = env.MY_CONTAINER.get(id);
     await stub.testSetEgressHttpWithInternet();
   },
 };
@@ -3066,7 +3181,7 @@ export const testSetEgressHttpNoInternet = {
     const id = env.MY_CONTAINER.idFromName(
       getRandomDurableObjectName('testSetEgressHttpNoInternet')
     );
-    let stub = env.MY_CONTAINER.get(id);
+    const stub = env.MY_CONTAINER.get(id);
     await stub.testSetEgressHttpNoInternet();
   },
 };

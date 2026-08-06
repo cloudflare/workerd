@@ -57,6 +57,7 @@ constexpr kj::StringPtr SNAPSHOT_VOLUME_PREFIX = "workerd-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_CLONE_VOLUME_PREFIX = "workerd-snap-clone-"_kj;
 constexpr kj::StringPtr CONTAINER_SNAPSHOT_IMAGE_PREFIX = "workerd-container-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_VOLUME_CREATED_AT_LABEL = "dev.workerd.snapshot-created-at"_kj;
+constexpr size_t MAX_SNAPSHOT_IMAGE_ANCESTRY_DEPTH = 128;
 
 constexpr auto SNAPSHOT_STALE_AGE = 30 * kj::DAYS;
 
@@ -2177,7 +2178,7 @@ kj::Promise<ContainerClient::ImageInspectResponse> ContainerClient::inspectImage
 
   auto message = decodeJsonResponse<docker_api::Docker::ImageInspectResponse>(response.body);
   auto root = message->getRoot<docker_api::Docker::ImageInspectResponse>();
-  co_return ImageInspectResponse{kj::str(root.getId()), root.getSize()};
+  co_return ImageInspectResponse{kj::str(root.getId()), root.getSize(), kj::str(root.getParent())};
 }
 
 kj::Promise<void> ContainerClient::deleteImage(kj::String imageRef) {
@@ -2405,11 +2406,31 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
     }
   }
 
-  kj::String effectiveImage = kj::str(imageName);
-  if (params.hasContainerSnapshotId()) {
-    auto snapshotId = parseSnapshotId(params.getContainerSnapshotId());
-    effectiveImage = kj::str(CONTAINER_SNAPSHOT_IMAGE_PREFIX, snapshotId);
-    co_await inspectImage(effectiveImage);
+  kj::String snapshotImageRef;
+  kj::StringPtr effectiveImage = imageName;
+  auto source = params.getSource();
+  switch (source.which()) {
+    case rpc::Container::StartParams::Source::IMAGE:
+      effectiveImage = source.getImage();
+      break;
+    case rpc::Container::StartParams::Source::CONTAINER_SNAPSHOT_ID: {
+      if (!source.hasContainerSnapshotId()) break;
+
+      auto selectedImage = co_await inspectImage(effectiveImage);
+      auto snapshotId = parseSnapshotId(source.getContainerSnapshotId());
+      snapshotImageRef = kj::str(CONTAINER_SNAPSHOT_IMAGE_PREFIX, snapshotId);
+      auto snapshotImage = co_await inspectImage(snapshotImageRef);
+      for (size_t depth = 0;
+           snapshotImage.id != selectedImage.id && snapshotImage.parent.size() > 0; ++depth) {
+        JSG_REQUIRE(depth < MAX_SNAPSHOT_IMAGE_ANCESTRY_DEPTH, Error,
+            "Container snapshot image ancestry is too deep");
+        snapshotImage = co_await inspectImage(snapshotImage.parent);
+      }
+      JSG_REQUIRE(snapshotImage.id == selectedImage.id, Error,
+          "Container snapshot does not match the requested image");
+      effectiveImage = snapshotImageRef;
+      break;
+    }
   }
 
   // If startup fails after we clone any snapshot volumes, tear down the app container first and
