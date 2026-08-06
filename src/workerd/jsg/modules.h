@@ -307,8 +307,11 @@ class ModuleRegistryImpl final: public ModuleRegistry {
           // src/workerd/server/workerd-api.c++.
           addBuiltinModule(specifier,
               [specifier, module, this](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
-            lock.setAllowEval(true);
-            KJ_DEFER(lock.setAllowEval(false));
+            // Wasm compilation requires code-generation permission. The scope
+            // restores the prior setting on exit: builtin modules resolve
+            // lazily, potentially inside a window where eval is already
+            // permitted, and that permission must survive the compilation.
+            Lock::AllowEvalScope allowEvalScope(lock, true);
 
             // Allow Wasm compilation to spawn a background thread for tier-up, i.e.
             // recompiling Wasm with optimizations in the background. Otherwise Wasm startup

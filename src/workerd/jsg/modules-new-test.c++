@@ -1127,6 +1127,36 @@ KJ_TEST("Source phase imports work for bundled and fallback Wasm modules") {
 
 // ======================================================================================
 
+KJ_TEST("Lazy Wasm compilation preserves the ambient allow-eval setting") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    auto wasm = makeTestWasm();
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+    bundleBuilder.addWasmModule("wasm", wasm);
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    // Wasm compiles lazily at evaluation time. When that happens inside a
+    // window where eval is already permitted (e.g. worker startup with the
+    // allow_eval_during_startup compat flag), the permission must survive the
+    // compilation rather than being reset to false.
+    js.setAllowEval(true);
+    KJ_DEFER(js.setAllowEval(false));
+
+    KJ_ASSERT(ModuleRegistry::resolve(js, "file:///wasm").isWasmModuleObject());
+    KJ_ASSERT(js.isEvalAllowed());
+
+    // The permission is effective in practice too: eval() still works.
+    auto script = check(v8::Script::Compile(js.v8Context(), js.str("eval('6 * 7')"_kj)));
+    auto result = JsValue(check(script->Run(js.v8Context())));
+    KJ_ASSERT(kj::str(result) == "42");
+  });
+}
+
+// ======================================================================================
+
 KJ_TEST("compileEvalFunction in synthetic module works") {
   PREAMBLE([&](Lock& js) {
     CompilationObserver compilationObserver;

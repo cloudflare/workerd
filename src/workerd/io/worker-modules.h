@@ -294,8 +294,11 @@ template <typename JsgIsolate>
 static v8::Local<v8::WasmModuleObject> compileWasmGlobal(typename JsgIsolate::Lock& lock,
     ::capnp::Data::Reader reader,
     const jsg::CompilationObserver& observer) {
-  lock.setAllowEval(true);
-  KJ_DEFER(lock.setAllowEval(false));
+  // Wasm compilation requires code-generation permission. The scope restores
+  // the prior setting on exit: this helper also runs lazily (e.g. for modules
+  // served by the fallback service), potentially inside a window where eval is
+  // already permitted, and that permission must survive the compilation.
+  jsg::Lock::AllowEvalScope allowEvalScope(lock, true);
 
   // Allow Wasm compilation to spawn a background thread for tier-up, i.e. recompiling
   // Wasm with optimizations in the background. Otherwise Wasm startup is way too slow.

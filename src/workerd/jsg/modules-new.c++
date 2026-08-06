@@ -2406,8 +2406,12 @@ Module::EvaluateCallback Module::newWasmModuleHandler(kj::ArrayPtr<const kj::byt
   return [data, cache = kj::heap<Cache>()](Lock& js, const Url& id, const ModuleNamespace& ns,
              const CompilationObserver& observer) mutable -> bool {
     return js.tryCatch([&]() -> bool {
-      js.setAllowEval(true);
-      KJ_DEFER(js.setAllowEval(false));
+      // Wasm compilation requires code-generation permission. The scope
+      // restores the prior setting on exit: compilation happens lazily at
+      // evaluation time, which can be nested inside a window where eval is
+      // already permitted (e.g. worker startup with allow_eval_during_startup),
+      // and that permission must survive the compilation.
+      Lock::AllowEvalScope allowEvalScope(js, true);
 
       // Allow Wasm compilation to spawn a background thread for tier-up, i.e. recompiling
       // Wasm with optimizations in the background. Otherwise Wasm startup is way too slow.
