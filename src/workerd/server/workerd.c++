@@ -1403,7 +1403,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   }
 
   template <typename Func>
-  void serveImpl(Func&& func) noexcept {
+  void serveImpl(Func&& func) {
     if (hadErrors) {
       // Can't start, stuff is broken.
       KJ_IF_SOME(w, watcher) {
@@ -1438,6 +1438,12 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       WorkerdPlatform v8Platform(*platform);
       jsg::V8System v8System(v8Platform,
           KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; }, platform.get());
+
+      // Server maintains a reference to the V8 platform, which is a local in this scope, so the
+      // server has to go first. This must hold even when we leave the scope by throwing, e.g.
+      // because a fatal task failed.
+      KJ_DEFER(server = nullptr);
+
       auto promise = func(v8System, config);
       KJ_IF_SOME(w, watcher) {
         promise = promise.exclusiveJoin(waitForChanges(w).then([this]() {
@@ -1456,13 +1462,10 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       if (getenv("KJ_CLEAN_SHUTDOWN") == nullptr) {
         context.exit();
       }
-
-      // Server maintains a reference to the v8 platform. Clean up before destroying the platform.
-      server = nullptr;
     }
   }
 
-  void serve() noexcept {
+  void serve() {
     serveImpl([&](jsg::V8System& v8System, config::Config::Reader config) {
 #if _WIN32
       return server->run(v8System, config);

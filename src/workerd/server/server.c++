@@ -5778,6 +5778,11 @@ kj::Promise<kj::Own<Server::Service>> Server::makeService(config::Service::Reade
 }
 
 void Server::taskFailed(kj::Exception&& exception) {
+  // Every task in this set is essential to the server's operation, so a failure here shuts the
+  // server down. Log before rejecting: `fatalFulfiller`'s rejection propagates out of `run()` to
+  // the top level, and not every platform's `std::terminate()` implementation is able to report
+  // the in-flight exception, so this log is the only guaranteed record of why we died.
+  KJ_LOG(ERROR, "fatal task failure, shutting down", exception);
   fatalFulfiller->reject(kj::mv(exception));
 }
 
