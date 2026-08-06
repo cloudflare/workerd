@@ -27,6 +27,13 @@ namespace workerd::api {
 
 WD_STRONG_BOOL(IsHyperdrive);
 
+// Whether a Fetcher is exempt from the `fetcher_rpc` compatibility gate that Fetcher::getRpcMethod
+// applies, so its JSRPC wildcard resolves regardless of the worker's compatibility date.
+
+// For fetchers a `cloudflare-internal:` wrapper module keeps private. An ungated wildcard makes
+// every otherwise-missing property resolve to an RPC method, which user code can observe.
+WD_STRONG_BOOL(RpcCompatGateBypassed);
+
 // Base class for Request and Response. In JavaScript, this class is a mixin, meaning no one will
 // be instantiating objects of this type -- it exists solely to house body-related functionality
 // common to both Requests and Responses.
@@ -193,10 +200,17 @@ class Fetcher: public JsRpcClientProvider {
   // URL that has no protocol or host.
   //
   // See pipeline.capnp or request-context.h for an explanation of `isInHouse`.
-  explicit Fetcher(uint channel, RequiresHostAndProtocol requiresHost, bool isInHouse = false)
+  //
+  // See RpcCompatGateBypassed for an explanation of `rpcCompatGateBypassed`. It is fixed at
+  // construction so that a fetcher cannot be ungated after user code can already reach it.
+  explicit Fetcher(uint channel,
+      RequiresHostAndProtocol requiresHost,
+      bool isInHouse = false,
+      RpcCompatGateBypassed rpcCompatGateBypassed = RpcCompatGateBypassed::NO)
       : channelOrClientFactory(channel),
         requiresHost(requiresHost),
-        isInHouse(isInHouse) {}
+        isInHouse(isInHouse),
+        rpcCompatGateBypassed(rpcCompatGateBypassed) {}
 
   // Create a Fetcher bound to an IoChannelFactory::SubrequestChannel object rather than a numeric
   // channel. This Fetcher will inherently be bound to the current I/O context.
@@ -362,6 +376,7 @@ class Fetcher: public JsRpcClientProvider {
   jsg::Promise<ScheduledResult> scheduled(jsg::Lock& js, jsg::Optional<ScheduledOptions> options);
 
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethod(jsg::Lock& js, kj::String name);
+
   // Internal method for use from bindings code. It skips compatibility flags checks.
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethodInternal(jsg::Lock& js, kj::String name);
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethodForTestOnly(jsg::Lock& js, kj::String name) {
@@ -480,6 +495,10 @@ class Fetcher: public JsRpcClientProvider {
       channelOrClientFactory;
   RequiresHostAndProtocol requiresHost;
   bool isInHouse;
+
+  // Defaulted so the constructors that no binding path uses need not name it. Deliberately not
+  // serialized: a stub deserialized elsewhere is subject to that isolate's own compat flags.
+  const RpcCompatGateBypassed rpcCompatGateBypassed = RpcCompatGateBypassed::NO;
 };
 
 // Extended fetcher type that makes the getters for host/port available using the JSG API. Allows
@@ -490,8 +509,9 @@ class ExtendedFetcher final: public Fetcher {
       RequiresHostAndProtocol requiresHost,
       uint16_t connectionStringOverridePort,
       IsHyperdrive isHyperdrive,
-      bool isInHouse = false)
-      : Fetcher(channel, requiresHost, isInHouse),
+      bool isInHouse = false,
+      RpcCompatGateBypassed rpcCompatGateBypassed = RpcCompatGateBypassed::NO)
+      : Fetcher(channel, requiresHost, isInHouse, rpcCompatGateBypassed),
         isHyperdrive(isHyperdrive) {
     port = connectionStringOverridePort;
   }

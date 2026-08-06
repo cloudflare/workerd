@@ -7,7 +7,10 @@
 import net from 'node:net';
 import tls from 'node:tls';
 
-const TLS_HOSTNAME = '127.0.0.1';
+// Servers that need a hostname bind here: `localhost` resolves to this address and the
+// certificate below covers it. SIDECAR_HOSTNAME is a randomized 127.x.x.x address with no
+// hostname, so it can only be reached by IP.
+const LOOPBACK_ADDRESS = '127.0.0.1';
 
 const tlsOptions = {
   key: `-----BEGIN PRIVATE KEY-----
@@ -70,7 +73,7 @@ function logSocketErrors(socket, label) {
   });
 }
 
-const server = net.createServer((socket) => {
+function handlePlainConnection(socket) {
   logSocketErrors(socket, 'plain');
 
   let buffer = Buffer.alloc(0);
@@ -143,10 +146,20 @@ const server = net.createServer((socket) => {
       return;
     }
   });
-});
+}
+
+const server = net.createServer(handlePlainConnection);
 
 server.listen(0, process.env.SIDECAR_HOSTNAME, () => {
   console.log(`PYTHON_SOCKET_SERVER_PORT=${server.address().port}`);
+});
+
+const hostnameServer = net.createServer(handlePlainConnection);
+
+hostnameServer.listen(0, LOOPBACK_ADDRESS, () => {
+  console.log(
+    `PYTHON_HOSTNAME_SOCKET_SERVER_PORT=${hostnameServer.address().port}`
+  );
 });
 
 const tlsServer = tls.createServer(tlsOptions, (socket) => {
@@ -173,7 +186,7 @@ const tlsServer = tls.createServer(tlsOptions, (socket) => {
   });
 });
 
-tlsServer.listen(0, TLS_HOSTNAME, () => {
+tlsServer.listen(0, LOOPBACK_ADDRESS, () => {
   console.log(`PYTHON_TLS_SOCKET_SERVER_PORT=${tlsServer.address().port}`);
 });
 
@@ -218,7 +231,7 @@ const startTlsServer = net.createServer((socket) => {
   });
 });
 
-startTlsServer.listen(0, TLS_HOSTNAME, () => {
+startTlsServer.listen(0, LOOPBACK_ADDRESS, () => {
   console.log(
     `PYTHON_STARTTLS_SOCKET_SERVER_PORT=${startTlsServer.address().port}`
   );

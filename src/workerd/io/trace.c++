@@ -1840,7 +1840,7 @@ void SpanBuilder::setOperationName(kj::ConstString operationName) {
   }
 }
 
-void SpanBuilder::setTag(kj::ConstString key, TagInitValue value) {
+void SpanBuilder::setTag(kj::ConstString key, TagInitValue value, IsCustomTag isCustom) {
   KJ_IF_SOME(s, span) {
     // We allow passing a LiteralStringConst or StringPtr so that we don't have to allocate memory
     // if we're not being observed.
@@ -1872,18 +1872,23 @@ void SpanBuilder::setTag(kj::ConstString key, TagInitValue value) {
     }(kj::mv(value));
 
     auto keyPtr = key.asPtr();
-    s.tags.upsert(kj::mv(key), kj::mv(v), [keyPtr](TagValue& existingValue, TagValue&& newValue) {
+    s.tags.upsert(
+        kj::mv(key), kj::mv(v), [keyPtr, isCustom](TagValue& existingValue, TagValue&& newValue) {
       // This is a programming error, but not a serious one. We could alternatively just emit
       // duplicate tags and leave the Jaeger UI in charge of warning about them.
-      [[maybe_unused]] static auto logged = [keyPtr]() {
-        if (isPredictableModeForTest()) {
-          // Logging in ERROR level to have this fail loudly during testing.
-          KJ_LOG(ERROR, "overwriting previous tag", keyPtr);
-        } else {
-          KJ_LOG(WARNING, "overwriting previous tag", keyPtr);
-        }
-        return true;
-      }();
+      // Do not log for custom tags set using the worker binding so that misconfigured workers do
+      // not result in internal warnings.
+      if (isCustom == IsCustomTag::NO) {
+        [[maybe_unused]] static auto logged = [keyPtr]() {
+          if (isPredictableModeForTest()) {
+            // Logging in ERROR level to have this fail loudly during testing.
+            KJ_LOG(ERROR, "overwriting previous tag", keyPtr);
+          } else {
+            KJ_LOG(WARNING, "overwriting previous tag", keyPtr);
+          }
+          return true;
+        }();
+      }
       existingValue = kj::mv(newValue);
     });
   }

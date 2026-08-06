@@ -235,6 +235,10 @@ const unitTests :Workerd.Config = (
       worker = (
         modules = [(name = "legacy-main.js", esModule = embed "legacy-main.js")],
         compatibilityDate = "2026-07-01",
+        # This worker exists to exercise the original module registry's fallback
+        # protocol (V1); pin it explicitly so it keeps doing that even once
+        # new_module_registry becomes default-on by date.
+        compatibilityFlags = ["legacy_module_registry"],
         moduleFallback = "127.0.0.1:${address.port}",
       ),
     ),

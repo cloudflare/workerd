@@ -61,6 +61,10 @@ include:
       runOnBranches: false
       USE_COORDINATOR: true
       OPENCODE_MODEL: "cloudflare-ai-gateway/anthropic/claude-opus-5"
+      # Auto reviewer assignment is off for now due to developers getting assigned to an excessive
+      # amount of PRs
+      # Docs: https://backstage.cfdata.org/docs/default/component/ai-code-reviewer/reviewer-assignment/
+      ASSIGN_REVIEWERS: false
 
   - component: $CI_SERVER_FQDN/cloudflare/ci/python/run@~latest
     inputs:

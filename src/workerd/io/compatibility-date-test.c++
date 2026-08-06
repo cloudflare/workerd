@@ -4,6 +4,7 @@
 
 #include "compatibility-date.h"
 
+#include <workerd/io/features.h>
 #include <workerd/io/maximum-compatibility-date.embed.h>
 #include <workerd/io/worker.h>
 
@@ -627,6 +628,24 @@ KJ_TEST("compatibility dates must be Tuesday, Wednesday, or Thursday") {
   if (!violations.empty()) {
     KJ_FAIL_ASSERT("Compatibility date violations found:\n", kj::strArray(violations, "\n"));
   }
+}
+
+KJ_TEST("isNewModuleRegistryEnabled ignores the flag for Python workers") {
+  const auto check = [](bool newModuleRegistry, bool pythonWorkers) {
+    capnp::MallocMessageBuilder message;
+    auto flags = message.initRoot<CompatibilityFlags>();
+    flags.setNewModuleRegistry(newModuleRegistry);
+    flags.setPythonWorkers(pythonWorkers);
+    return isNewModuleRegistryEnabled(flags.asReader());
+  };
+
+  KJ_EXPECT(!check(false, false));
+  KJ_EXPECT(check(true, false));
+  // Python workers always use the original module registry: the
+  // new_module_registry flag is ignored for them, whether set explicitly or
+  // (once the flag has a default-on date) implied by the compatibility date.
+  KJ_EXPECT(!check(true, true));
+  KJ_EXPECT(!check(false, true));
 }
 
 }  // namespace

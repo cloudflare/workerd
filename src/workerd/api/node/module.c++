@@ -18,18 +18,28 @@ jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
   // file path string. To be compliant, we will convert whatever specifier
   // is into a File URL if possible, then take the path as the actual
   // specifier to use.
-  auto parsed = JSG_REQUIRE_NONNULL(jsg::Url::tryParse(path.asPtr(), "file:///"_kj), TypeError,
-      "The argument must be a file URL object, "
-      "a file URL string, or an absolute path string.");
+  static constexpr auto kInvalidArg = "The argument must be a file URL object, "
+                                      "a file URL string, or an absolute path string."_kj;
 
-  if (FeatureFlags::get(js).getNewModuleRegistry()) {
+  // Matching Node.js: only a file: URL (object or string) or an absolute path
+  // is accepted. Anything else — a relative path, a bare name, or a URL with a
+  // non-file scheme — is rejected. Parsing against the file:/// base alone
+  // would accept nearly any string, so absolute-URL inputs are checked for the
+  // file: scheme and everything else must start with '/'.
+  KJ_IF_SOME(absolute, jsg::Url::tryParse(path.asPtr())) {
+    JSG_REQUIRE(absolute.getProtocol() == "file:"_kj, TypeError, kInvalidArg);
+  } else {
+    JSG_REQUIRE(path.startsWith("/"), TypeError, kInvalidArg);
+  }
+
+  auto parsed =
+      JSG_REQUIRE_NONNULL(jsg::Url::tryParse(path.asPtr(), "file:///"_kj), TypeError, kInvalidArg);
+
+  if (isNewModuleRegistryEnabled(FeatureFlags::get(js))) {
     return jsg::JsValue(js.wrapReturningFunction(js.v8Context(),
         [referrer = parsed.clone()](jsg::Lock& js,
             const v8::FunctionCallbackInfo<v8::Value>& args) -> v8::Local<v8::Value> {
-      // Use the one-byte-aware conversion so require() and import() treat
-      // non-ASCII specifiers identically (avoids double-encoding).
-      auto specifier =
-          jsg::modules::specifierToString(js, jsg::check(args[0]->ToString(js.v8Context())));
+      auto specifier = js.toString(jsg::check(args[0]->ToString(js.v8Context())));
       if (jsg::isNodeJsCompatEnabled(js)) {
         KJ_IF_SOME(nodeSpec, jsg::checkNodeSpecifier(specifier)) {
           specifier = kj::mv(nodeSpec);

@@ -1973,12 +1973,12 @@ auto maybeAsyncContext = jsg::AsyncContextFrame::current(js);
 ### StorageScope (independent of Node.js API)
 
 ```cpp
-kj::Own<AsyncContextFrame::StorageKey> key =
-    kj::refcounted<AsyncContextFrame::StorageKey>();
+kj::Arc<AsyncContextFrame::StorageKey> key =
+    kj::arc<AsyncContextFrame::StorageKey>();
 KJ_DEFER(key->reset());  // Clear when done
 
 {
-  jsg::AsyncContextFrame::StorageScope(js, *key, value);
+  jsg::AsyncContextFrame::StorageScope(js, key.addRef(), value);
   // code runs with this storage context
 }
 // Automatically reset to previous context
