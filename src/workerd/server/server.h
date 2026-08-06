@@ -296,6 +296,11 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
           kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props)>
           callback);
 
+  // Wrap a listener so that a failed accept() is retried rather than bringing down the server. A
+  // dead pending connection is not a reason to stop listening; see the implementation for detail.
+  kj::Own<kj::ConnectionReceiver> tolerateTransientAcceptFailures(
+      kj::Own<kj::ConnectionReceiver> listener);
+
   kj::Promise<void> listenHttp(kj::Own<kj::ConnectionReceiver> listener,
       kj::Own<Service> service,
       kj::StringPtr physicalProtocol,

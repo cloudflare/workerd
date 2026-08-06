@@ -6331,20 +6331,113 @@ class Server::TcpListener final: public kj::Refcounted {
   };
 };
 
+namespace {
+
+// A ConnectionReceiver that retries a failed accept() instead of propagating the failure.
+//
+// A failed accept() usually says nothing about the health of the listening socket. The common case
+// is a client that completes the TCP handshake and then resets the connection before we get around
+// to accepting it; the pending connection is already dead by the time we ask for it. KJ's Unix
+// implementation absorbs the errno values that mean this and accepts the next connection instead,
+// but its Windows implementation reports them as exceptions, which would otherwise escape the
+// accept loop and take down a server that is in fact perfectly healthy.
+//
+// Retries are delayed, with the delay growing after each consecutive failure, and give up after
+// MAX_CONSECUTIVE_FAILURES. A listener that is genuinely broken fails every time, so it exhausts
+// the retries and reports the failure promptly rather than spinning forever.
+class TolerantConnectionReceiver final: public kj::ConnectionReceiver {
+ public:
+  TolerantConnectionReceiver(kj::Timer& timer, kj::Own<kj::ConnectionReceiver> inner)
+      : timer(timer),
+        inner(kj::mv(inner)) {}
+
+  kj::Promise<kj::Own<kj::AsyncIoStream>> accept() override {
+    for (;;) {
+      kj::Maybe<kj::Exception> failure;
+      try {
+        auto result = co_await inner->accept();
+        consecutiveFailures = 0;
+        co_return kj::mv(result);
+      } catch (...) {
+        failure = kj::getCaughtExceptionAsKj();
+      }
+      co_await retryAfterFailure(kj::mv(KJ_ASSERT_NONNULL(failure)));
+    }
+  }
+
+  kj::Promise<kj::AuthenticatedStream> acceptAuthenticated() override {
+    for (;;) {
+      kj::Maybe<kj::Exception> failure;
+      try {
+        auto result = co_await inner->acceptAuthenticated();
+        consecutiveFailures = 0;
+        co_return kj::mv(result);
+      } catch (...) {
+        failure = kj::getCaughtExceptionAsKj();
+      }
+      co_await retryAfterFailure(kj::mv(KJ_ASSERT_NONNULL(failure)));
+    }
+  }
+
+  uint getPort() override {
+    return inner->getPort();
+  }
+  void getsockopt(int level, int option, void* value, uint* length) override {
+    inner->getsockopt(level, option, value, length);
+  }
+  void setsockopt(int level, int option, const void* value, uint length) override {
+    inner->setsockopt(level, option, value, length);
+  }
+  void getsockname(struct sockaddr* addr, uint* length) override {
+    inner->getsockname(addr, length);
+  }
+
+ private:
+  static constexpr uint MAX_CONSECUTIVE_FAILURES = 8;
+
+  kj::Timer& timer;
+  kj::Own<kj::ConnectionReceiver> inner;
+  uint consecutiveFailures = 0;
+
+  // Wait for the current retry delay, or rethrow if we've run out of retries.
+  kj::Promise<void> retryAfterFailure(kj::Exception&& exception) {
+    if (++consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+      kj::throwFatalException(kj::mv(exception));
+    }
+
+    KJ_LOG(WARNING, "accept() failed, retrying", consecutiveFailures, exception);
+    co_await timer.afterDelay(retryDelay());
+  }
+
+  // Zero for the first failure, so that a connection lost to the usual race doesn't delay the next
+  // one, then 10ms doubling to 320ms. Seven retries therefore span a little over half a second.
+  kj::Duration retryDelay() const {
+    if (consecutiveFailures <= 1) return 0 * kj::MILLISECONDS;
+    return (1u << (consecutiveFailures - 2)) * 10 * kj::MILLISECONDS;
+  }
+};
+
+}  // namespace
+
+kj::Own<kj::ConnectionReceiver> Server::tolerateTransientAcceptFailures(
+    kj::Own<kj::ConnectionReceiver> listener) {
+  return kj::heap<TolerantConnectionReceiver>(timer, kj::mv(listener));
+}
+
 kj::Promise<void> Server::listenHttp(kj::Own<kj::ConnectionReceiver> listener,
     kj::Own<Service> service,
     kj::StringPtr physicalProtocol,
     kj::Own<HttpRewriter> rewriter) {
-  auto obj =
-      kj::refcounted<HttpListener>(*this, kj::mv(listener), kj::mv(service), physicalProtocol,
-          kj::mv(rewriter), globalContext->headerTable, timer, globalContext->httpOverCapnpFactory);
+  auto obj = kj::refcounted<HttpListener>(*this, tolerateTransientAcceptFailures(kj::mv(listener)),
+      kj::mv(service), physicalProtocol, kj::mv(rewriter), globalContext->headerTable, timer,
+      globalContext->httpOverCapnpFactory);
   co_return co_await obj->run();
 }
 
 kj::Promise<void> Server::listenTcp(
     kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::StringPtr addrStr) {
-  auto obj = kj::refcounted<TcpListener>(
-      *this, kj::mv(listener), kj::mv(service), globalContext->headerTable, addrStr);
+  auto obj = kj::refcounted<TcpListener>(*this, tolerateTransientAcceptFailures(kj::mv(listener)),
+      kj::mv(service), globalContext->headerTable, addrStr);
   co_return co_await obj->run();
 }
 
@@ -6479,7 +6572,8 @@ class Server::DebugPortListener {
 };
 
 kj::Promise<void> Server::listenDebugPort(kj::Own<kj::ConnectionReceiver> listener) {
-  DebugPortListener obj(*this, kj::mv(listener), globalContext->httpOverCapnpFactory);
+  DebugPortListener obj(*this, tolerateTransientAcceptFailures(kj::mv(listener)),
+      globalContext->httpOverCapnpFactory);
   co_return co_await obj.run();
 }
 

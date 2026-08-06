@@ -3958,6 +3958,119 @@ KJ_TEST("Server: drain incoming HTTP connections") {
 }
 
 // =======================================================================================
+// Tolerating accept() failures
+
+// A listener whose accept() fails a given number of times before handing out the connections the
+// test has queued on it.
+class FlakyConnectionReceiver final: public kj::ConnectionReceiver {
+ public:
+  explicit FlakyConnectionReceiver(uint failuresRemaining): failuresRemaining(failuresRemaining) {}
+
+  void queueConnection(kj::Own<kj::AsyncIoStream> stream) {
+    pending = kj::mv(stream);
+  }
+
+  kj::Promise<kj::Own<kj::AsyncIoStream>> accept() override {
+    if (failuresRemaining > 0) {
+      --failuresRemaining;
+      return KJ_EXCEPTION(FAILED, "simulated accept() failure");
+    }
+
+    KJ_IF_SOME(stream, pending) {
+      auto result = kj::mv(stream);
+      pending = kj::none;
+      return kj::mv(result);
+    }
+
+    return kj::NEVER_DONE;
+  }
+
+  uint getPort() override {
+    return 0;
+  }
+
+ private:
+  uint failuresRemaining;
+  kj::Maybe<kj::Own<kj::AsyncIoStream>> pending;
+};
+
+// Swallows the warnings logged for each retried accept() and counts them, so that a test can assert
+// on how many retries happened without the messages cluttering the test output.
+class AcceptRetryCounter final: public kj::ExceptionCallback {
+ public:
+  uint count = 0;
+
+  void logMessage(kj::LogSeverity severity,
+      const char* file,
+      int line,
+      int contextDepth,
+      kj::String&& text) override {
+    if (severity == kj::LogSeverity::WARNING && text.contains("accept() failed, retrying"_kj)) {
+      ++count;
+      return;
+    }
+    kj::ExceptionCallback::logMessage(severity, file, line, contextDepth, kj::mv(text));
+  }
+};
+
+constexpr kj::StringPtr HELLO_WORKER = R"((
+  compatibilityDate = "2022-08-17",
+  serviceWorkerScript =
+      `addEventListener("fetch", event => {
+      `  event.respondWith(new Response("hello"));
+      `})
+))"_kj;
+
+KJ_TEST("Server: transient accept() failures are retried") {
+  TestServer test(singleWorker(HELLO_WORKER));
+
+  auto receiver = kj::heap<FlakyConnectionReceiver>(3);
+  auto& receiverRef = *receiver;
+  test.server.overrideSocket(kj::str("main"), kj::mv(receiver));
+
+  // Queue a connection for the listener to hand over once it stops failing.
+  auto pipe = kj::newTwoWayPipe();
+  receiverRef.queueConnection(kj::mv(pipe.ends[0]));
+
+  AcceptRetryCounter retries;
+
+  test.start();
+
+  // Let the retry delays elapse.
+  test.wait(1);
+
+  KJ_EXPECT(retries.count == 3);
+
+  // The listener recovered, so the queued connection is served as usual.
+  TestStream conn(test.getWaitScope(), kj::mv(pipe.ends[1]));
+  conn.httpGet200("/", "hello");
+}
+
+KJ_TEST("Server: an accept() that never succeeds shuts the server down") {
+  TestServer test(singleWorker(HELLO_WORKER));
+
+  test.server.overrideSocket(kj::str("main"), kj::heap<FlakyConnectionReceiver>(kj::maxValue));
+
+  // Drive `run()` directly: TestServer::start() treats its failure as a test failure, which is the
+  // very thing we're asserting on here.
+  auto task = test.server.run(v8System, *test.config);
+
+  {
+    AcceptRetryCounter retries;
+    KJ_EXPECT_LOG(ERROR, "fatal task failure, shutting down");
+
+    // Advance through every retry delay.
+    test.wait(1);
+
+    // Retries are finite, so the failure is eventually reported rather than being retried forever.
+    KJ_EXPECT(retries.count > 0);
+  }
+
+  KJ_EXPECT(task.poll(test.ws));
+  KJ_EXPECT_THROW_MESSAGE("simulated accept() failure", task.wait(test.ws));
+}
+
+// =======================================================================================
 // Test alternate service types
 //
 // We're going to stop using JavaScript here because it's not really helping. We can directly
