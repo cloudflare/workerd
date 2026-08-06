@@ -43,6 +43,10 @@ public:
   // Make a copy of this Headers object, and preserve the guard.
   jsg::Ref<Headers> clone(jsg::Lock& js) const;
 
+  // Deep copy for workers started from a snapshot. Header state is plain C++ data
+  // (no V8 handles), so it can be copied without an isolate lock.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+
   // Fill in the given HttpHeaders with these headers. Note that strings are inserted by
   // reference, so the output must be consumed immediately.
   void shallowCopyTo(kj::HttpHeaders& out);

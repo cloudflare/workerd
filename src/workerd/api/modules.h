@@ -26,6 +26,11 @@ class EnvModule final: public jsg::Object {
   EnvModule() = default;
   EnvModule(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<EnvModule>());
+  }
+
   kj::Maybe<jsg::JsObject> getCurrentEnv(jsg::Lock& js);
   kj::Maybe<jsg::JsObject> getCurrentExports(jsg::Lock& js);
 

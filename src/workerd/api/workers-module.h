@@ -79,6 +79,11 @@ class EntrypointsModule: public jsg::Object {
   EntrypointsModule() = default;
   EntrypointsModule(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<EntrypointsModule>());
+  }
+
   void waitUntil(kj::Promise<void> promise);
 
   // Returns the current request's CacheContext (ctx.cache), or kj::none if there is no active
