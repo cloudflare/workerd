@@ -275,6 +275,21 @@ KJ_TEST("Frankenvalue fromCapnp rejects capability node with no caps") {
       Frankenvalue::fromCapnp(builder.asReader(), kj::mv(capTable)));
 }
 
+KJ_TEST("Frankenvalue fromCapnp rejects oversized wrapped binding module name") {
+  capnp::MallocMessageBuilder message;
+  auto builder = message.initRoot<rpc::Frankenvalue>();
+  auto capability = builder.initCapability();
+  capability.setCapIndex(0);
+  capability.setTag(static_cast<uint16_t>(TestSerializationTag::TEST_SERIALIZABLE));
+  capability.setWrapperModule(kj::str(kj::repeat('x', 4097)));
+
+  kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> capTable;
+  capTable.add(kj::heap<TestCapEntry>(123));
+
+  KJ_EXPECT_THROW_MESSAGE("wrapped binding module name exceeds size limit",
+      Frankenvalue::fromCapnp(builder.asReader(), kj::mv(capTable)));
+}
+
 KJ_TEST("Frankenvalue fromCapnp rejects capTableSize uint32 overflow") {
   // Regression test for AUTOVULN-EW-EDGEWORKER-15: fromCapnpImpl() accumulated per-node
   // UInt32 capTableSize fields into a 32-bit uint capCount with no overflow check. An attacker

@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { withSpan } from 'cloudflare-internal:tracing-helpers';
+import wrappedBinding from 'cloudflare-internal:wrapped-binding';
 import type { Span } from './tracing';
 
 const d1BindingJsrpc = !!Cloudflare.compatibilityFlags['d1_binding_jsrpc'];
@@ -154,13 +155,14 @@ const D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED = 'first-unconstrained';
 // TODO Rename this to `x-cf-d1-session-bookmark`, with coordination with the D1 internal API.
 const D1_SESSION_COMMIT_TOKEN_HTTP_HEADER = 'x-cf-d1-session-commit-token';
 
-class D1Database {
+class D1Database extends wrappedBinding.WrappedBinding {
   // TODO(soon): Can we use the # syntax here?
   // eslint-disable-next-line no-restricted-syntax
   private readonly alwaysPrimarySession: D1DatabaseSessionAlwaysPrimary;
   protected readonly fetcher: Fetcher;
 
   constructor(fetcher: Fetcher) {
+    super(fetcher);
     this.fetcher = fetcher;
     this.alwaysPrimarySession = new D1DatabaseSessionAlwaysPrimary(
       this.fetcher
