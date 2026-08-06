@@ -15,6 +15,11 @@ class BufferUtil final: public jsg::Object {
   BufferUtil() = default;
   BufferUtil(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<BufferUtil>());
+  }
+
   uint32_t byteLength(jsg::Lock& js, jsg::JsString str);
 
   struct CompareOptions {

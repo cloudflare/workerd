@@ -347,6 +347,11 @@ struct CryptoKeyPair {
 
 class SubtleCrypto: public jsg::Object {
  public:
+  // Stateless object, safe to recreate for a worker started from a snapshot.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<SubtleCrypto>());
+  }
+
   // Algorithm dictionaries
   //
   // Every method of SubtleCrypto except `exportKey()` takes an `algorithm` parameter, usually as the
@@ -992,6 +997,15 @@ class Crypto: public jsg::Object {
  public:
   Crypto(jsg::Lock& js): subtle(js.alloc<SubtleCrypto>()) {}
 
+  // Both Crypto and SubtleCrypto are stateless, so the clone just allocates a fresh pair.
+  // Note that the clone's `subtle` is a different object from the snapshot-restored wrapper
+  // of the original SubtleCrypto (if one was reachable): identity across the snapshot is not
+  // preserved, but both are functionally equivalent.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(
+        kj::refcounted<Crypto>(jsg::Ref<SubtleCrypto>(kj::refcounted<SubtleCrypto>())));
+  }
+
   jsg::JsArrayBufferView getRandomValues(jsg::JsArrayBufferView buffer);
 
   kj::String randomUUID();
@@ -1035,7 +1049,13 @@ class Crypto: public jsg::Object {
   }
 
  private:
+  // Used by snapshotClone() to build a fresh instance without an isolate lock.
+  explicit Crypto(jsg::Ref<SubtleCrypto> subtle): subtle(kj::mv(subtle)) {}
+
   jsg::Ref<SubtleCrypto> subtle;
+
+  template <typename T, typename... Params>
+  friend kj::Own<T> kj::refcounted(Params&&... params);
 };
 
 #define EW_CRYPTO_ISOLATE_TYPES                                                                    \

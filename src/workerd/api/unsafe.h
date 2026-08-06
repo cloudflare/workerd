@@ -27,6 +27,11 @@ class UnsafeEval: public jsg::Object {
   UnsafeEval() = default;
   UnsafeEval(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless binding object, safe to recreate for a worker started from a snapshot.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<UnsafeEval>());
+  }
+
   // A non-capturing eval. Compile and evaluates the given script, returning whatever
   // value is returned by the script. This version of eval intentionally does not
   // capture any part of the outer scope other than globalThis and globally scoped
@@ -100,6 +105,11 @@ class UnsafeModule: public jsg::Object {
  public:
   UnsafeModule() = default;
   UnsafeModule(jsg::Lock&, const jsg::Url&) {}
+
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<UnsafeModule>());
+  }
   jsg::Promise<void> abortAllDurableObjects(jsg::Lock& js);
 
   // Like abortAllDurableObjects(), but also deletes storage and cancels alarms so DOs
