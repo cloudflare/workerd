@@ -1370,6 +1370,19 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       impl(kj::heap<Impl>(kj::mv(vfs), kj::mv(maybeNewModuleRegistry))),
       dynamicEnvBuilder(source.dynamicEnvBuilder.map(
           [](const auto& inst) -> kj::Arc<DynamicEnvBuilder> { return inst.addRef(); })) {
+  // The caller must pass a module registry instance if and only if the
+  // worker's configuration enables the new module registry: which registry a
+  // worker uses is decided by isNewModuleRegistryEnabled() (io/features.h),
+  // and the isolate, the context, and this Script must all agree on it. A
+  // mismatch would silently split the worker across the two registries --
+  // module resolution would dispatch on the isolate's new-module-registry bit
+  // while the context has the other registry installed in the (untyped)
+  // module registry context slot, type-confusing the first resolution.
+  KJ_REQUIRE(isNewModuleRegistryEnabled(isolate->getApi().getFeatureFlags()) ==
+          (impl->maybeNewModuleRegistry != kj::none),
+      "a module registry instance must be passed to Worker::Script if and only if the worker's "
+      "compatibility flags enable the new module registry");
+
   auto parseMetrics = isolate->metrics->parse(startType);
   // TODO(perf): It could make sense to take an async lock when constructing a script if we
   //   co-locate multiple scripts in the same isolate. As of this writing, we do not, except in
