@@ -935,6 +935,39 @@ wd_test(
 )
 
 wd_test(
+    src = "new-module-registry-do-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "new-module-registry-do-test.js",
+    ],
+)
+
+wd_test(
+    src = "new-module-registry-stack-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "new-module-registry-stack-test.js",
+    ],
+)
+
+wd_test(
+    src = "new-module-registry-startup-eval-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "new-module-registry-startup-eval-test.js",
+        "test.wasm",
+    ],
+)
+
+wd_test(
+    src = "new-module-registry-workerd-modules-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "new-module-registry-workerd-modules-test.js",
+    ],
+)
+
+wd_test(
     src = "new-module-registry-ts-test.wd-test",
     args = ["--experimental"],
     data = [

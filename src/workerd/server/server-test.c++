@@ -702,6 +702,136 @@ KJ_TEST("Server: wrapped bindings work under the new module registry") {
   conn.httpGet200("/", "wrapped: object");
 }
 
+KJ_TEST("Server: duplicate module names are reported as config errors (legacy registry)") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-10-01",
+    modules = [
+      ( name = "worker",
+        esModule =
+          `export default {}
+      ),
+      ( name = "dup",
+        esModule =
+          `export default 1
+      ),
+      ( name = "dup",
+        esModule =
+          `export default 2
+      )
+    ]
+  ))"_kj));
+
+  test.expectErrors(R"(
+    service hello: Uncaught Error: Module "dup" already added to bundle
+  )"_blockquote);
+}
+
+KJ_TEST("Server: duplicate module names are reported as config errors (new module registry)") {
+  // Errors thrown while building the new module registry (which happens
+  // before the Worker::Script is constructed) must be reported as config
+  // errors rather than escaping and aborting server startup.
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-10-01",
+    compatibilityFlags = ["new_module_registry"],
+    modules = [
+      ( name = "worker",
+        esModule =
+          `export default {}
+      ),
+      ( name = "dup",
+        esModule =
+          `export default 1
+      ),
+      ( name = "dup",
+        esModule =
+          `export default 2
+      )
+    ]
+  ))"_kj));
+
+  test.server.allowExperimental();
+  // The second error is a consequence of the first: after reporting the
+  // registry error, worker construction proceeds with an inert empty script,
+  // which registers no handlers.
+  test.expectErrors(R"(
+    service hello: Module "file:///bundle/dup" already added to bundle
+    service hello: No event handlers were registered. This script does nothing.
+  )"_blockquote);
+}
+
+KJ_TEST("Server: extension modules with non-URL names are config errors (new module registry)") {
+  // The new module registry identifies extension modules by URL. An extension
+  // module whose name does not parse as an absolute URL must be reported as a
+  // config error rather than being silently dropped (which would otherwise
+  // surface as a confusing "Module not found" error at import time).
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-10-01",
+          compatibilityFlags = ["new_module_registry"],
+          modules = [
+            ( name = "worker",
+              esModule =
+                `export default {}
+            )
+          ]
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ],
+    extensions = [
+      ( modules = [
+          ( name = "not-a-url",
+            esModule =
+              `export default 1
+          )
+        ]
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  // The second error is a consequence of the first: after reporting the
+  // registry error, worker construction proceeds with an inert empty script,
+  // which registers no handlers.
+  test.expectErrors(R"(
+    service hello: Invalid extension module name "not-a-url": when the new_module_registry compatibility flag is enabled, extension module names must be fully-qualified URLs (e.g. "my-extension:module").
+    service hello: No event handlers were registered. This script does nothing.
+  )"_blockquote);
+}
+
+KJ_TEST("Server: python modules without python_workers flag (new module registry)") {
+  // Python modules in a bundle without the python_workers compatibility flag
+  // are a config error. Under the new module registry this is detected while
+  // building the registry; it must be reported like any other config error
+  // (with the same message the legacy registry path reports).
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-10-01",
+    compatibilityFlags = ["new_module_registry"],
+    modules = [
+      ( name = "worker.py",
+        pythonModule =
+          `def x(): pass
+      )
+    ]
+  ))"_kj));
+
+  test.server.allowExperimental();
+  // The second error is a consequence of the first: after reporting the
+  // registry error, worker construction proceeds with an inert empty script,
+  // which registers no handlers.
+  test.expectErrors(R"(
+    service hello: The python_workers compatibility flag is required to use Python.
+    service hello: No event handlers were registered. This script does nothing.
+  )"_blockquote);
+}
+
 KJ_TEST("Server: use service name as Service Worker origin") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",

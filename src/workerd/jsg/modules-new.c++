@@ -226,10 +226,16 @@ class EsModule final: public Module {
             c->data, c->length, v8::ScriptCompiler::CachedData::BufferPolicy::BufferNotOwned);
         auto check = data->CompatibilityCheck(js.v8Isolate);
         if (check != v8::ScriptCompiler::CachedData::kSuccess) {
-          // The cached data is not compatible with the current isolate. Let's
-          // not try using it.
+          // The cached data is not compatible with the current isolate. Treat
+          // this like a rejection: don't consume it, and flag it so that the
+          // stale entry is cleared and regenerated below. Without the flag the
+          // stale entry would sit in the slot forever, failing the
+          // compatibility check again on every future compile of this module.
           delete data;
           data = nullptr;
+          LOG_WARNING_ONCE("NOSENTRY Cached data for an ESM module failed its compatibility check");
+          observer.onCompileCacheRejected(js.v8Isolate);
+          cacheWasRejected = true;
         } else {
           observer.onCompileCacheFound(js.v8Isolate);
         }
@@ -774,7 +780,11 @@ class IsolateModuleRegistry final {
                       normalizedSpecifier.getHref())))));
             });
           }
-          return js.rejectedPromise<Value>(js.v8Ref(v8::Exception::SyntaxError(js.strIntern(kj::str(
+          // Note: js.str, not js.strIntern. Interned strings live for the
+          // isolate's lifetime, and this message embeds a caller-controlled
+          // specifier (query/fragment variants are unbounded), so interning
+          // it would accumulate permanent per-specifier strings.
+          return js.rejectedPromise<Value>(js.v8Ref(v8::Exception::SyntaxError(js.str(kj::str(
               "Source phase import not available for module: ", normalizedSpecifier.getHref())))));
         }
       };
@@ -1139,7 +1149,9 @@ class IsolateModuleRegistry final {
 
   kj::Maybe<Entry&> findResolved(ResolveContext::Type type, const Url& id) KJ_WARN_UNUSED_RESULT {
     KJ_IF_SOME(def, resolutions.find(SpecifierContextRef{type, id})) {
-      // The resolutions entry always has a matching instantiation.
+      // The resolutions entry always has a matching instantiation:
+      // resolveWithCaching() records the resolution only after the
+      // instantiation row has been inserted.
       return KJ_ASSERT_NONNULL(instantiations.find<kj::HashIndex<InstanceCallbacks>>(id, def));
     }
     return kj::none;
@@ -1166,8 +1178,30 @@ class IsolateModuleRegistry final {
     };
 
     KJ_IF_SOME(found, inner.lookup(innerContext, noopResolveObserver)) {
+      // Reuse the existing instantiation for this (specifier, definition) if
+      // one exists (e.g. the same builtin already resolved through a different
+      // context type); otherwise instantiate now. Instantiation can fail —
+      // most commonly when a lazily-compiled ES module has a syntax error, in
+      // which case check() throws and nothing is recorded, so a later attempt
+      // reports the same compile error again.
+      Entry& entry = ([&]() -> Entry& {
+        KJ_IF_SOME(existing,
+            instantiations.find<kj::HashIndex<InstanceCallbacks>>(
+                context.normalizedSpecifier, &found)) {
+          return existing;
+        }
+        return instantiations.insert(Entry{
+          .key = HashableV8Ref<v8::Module>(
+              js.v8Isolate, check(found.getDescriptor(js, getObserver()))),
+          .id = context.normalizedSpecifier.clone(),
+          .module = found,
+        });
+      })();
+
       // Record the resolution under the full specifier (with query/fragment):
-      // it is part of the module-identity key (see Entry).
+      // it is part of the module-identity key (see Entry). This is recorded
+      // only after the instantiation row above exists: findResolved() asserts
+      // that every resolutions entry has a matching instantiation.
       resolutions.upsert(SpecifierContext(context), &found,
           [](const Module*& existing, const Module* replacement) {
         // Deterministic: re-resolving the same (type, specifier) always finds
@@ -1175,20 +1209,7 @@ class IsolateModuleRegistry final {
         KJ_ASSERT(existing == replacement);
       });
 
-      // Reuse the existing instantiation for this (specifier, definition) if
-      // one exists (e.g. the same builtin already resolved through a different
-      // context type); otherwise instantiate now.
-      KJ_IF_SOME(entry,
-          instantiations.find<kj::HashIndex<InstanceCallbacks>>(
-              context.normalizedSpecifier, &found)) {
-        return kj::Maybe<Entry&>(entry);
-      }
-      return kj::Maybe<Entry&>(instantiations.insert(Entry{
-        .key =
-            HashableV8Ref<v8::Module>(js.v8Isolate, check(found.getDescriptor(js, getObserver()))),
-        .id = context.normalizedSpecifier.clone(),
-        .module = found,
-      }));
+      return kj::Maybe<Entry&>(entry);
     }
     return kj::none;
   }
@@ -1627,13 +1648,20 @@ class FallbackModuleBundle final: public ModuleBundle {
           };
         }
         KJ_CASE_ONEOF(resolved, kj::Own<Module>) {
-          auto& module = *resolved;
-          // If the fallback service returned a module with a specifier that
-          // already exists in storage, ignore it and return kj::none. We can't
-          // have two different modules with the same specifier in the bundle.
-          if (storage.find(module.id()) != kj::none) {
-            return kj::none;
+          // The fallback service can return a module whose canonical id
+          // differs from the requested specifier, including an id that was
+          // already stored by an earlier resolution. In that case reuse the
+          // stored module -- two definitions with the same id must not
+          // coexist -- and record the requested specifier as an alias of it
+          // so later lookups short-circuit. (The requested specifier cannot
+          // itself be in storage or aliases: those were checked above.)
+          KJ_IF_SOME(existing, storage.find(resolved->id())) {
+            aliases.insert(context.normalizedSpecifier.clone(), kj::str(existing->id().getHref()));
+            return Resolved{
+              .module = *existing,
+            };
           }
+          auto& module = *resolved;
           storage.insert(module.id().clone(), kj::mv(resolved));
           if (context.normalizedSpecifier != module.id()) {
             // We checked for the existence of the specifier alias above so this
@@ -2097,14 +2125,20 @@ kj::Maybe<ModuleRegistry::ModuleOrRedirect> ModuleRegistry::tryFindInBundleGroup
 }
 
 kj::Maybe<const Module&> ModuleRegistry::lookupImpl(
-    Impl& impl, const ResolveContext& context, bool recursed) const {
+    Impl& impl, const ResolveContext& context, kj::Vector<Url>& seen) const {
 #define MODULE_LOOKUP(context, bundle)                                                             \
   KJ_IF_SOME(found, tryFindInBundleGroup(context, impl.bundles[bundle])) {                         \
     KJ_SWITCH_ONEOF(found) {                                                                       \
       KJ_CASE_ONEOF(url, Url) {                                                                    \
-        if (recursed) { /* avoid recursing indefinitely */                                         \
-          return kj::none;                                                                         \
+        /* A redirect to another specifier: restart the resolution with it,   */                   \
+        /* unless this resolution has already visited that specifier, which   */                   \
+        /* means the redirects form a cycle and the module cannot resolve.    */                   \
+        for (const auto& visited: seen) {                                                          \
+          if (visited == url) {                                                                    \
+            return kj::none;                                                                       \
+          }                                                                                        \
         }                                                                                          \
+        seen.add(url.clone());                                                                     \
         ResolveContext ctx{                                                                        \
           .type = context.type,                                                                    \
           .source = context.source,                                                                \
@@ -2114,7 +2148,7 @@ kj::Maybe<const Module&> ModuleRegistry::lookupImpl(
               context.rawSpecifier.map([](auto& str) -> kj::StringPtr { return str; }),            \
           .importType = context.importType,                                                        \
         };                                                                                         \
-        return lookupImpl(impl, ctx, true);                                                        \
+        return lookupImpl(impl, ctx, seen);                                                        \
       }                                                                                            \
       KJ_CASE_ONEOF(mod, ModuleRef) {                                                              \
         return mod.module;                                                                         \
@@ -2168,7 +2202,13 @@ kj::Maybe<const Module&> ModuleRegistry::lookup(
   // state (e.g. caching) so we lock here. Fortunately, module resolution should be
   // fast, especially with caching, so this lock should be held only briefly.
   auto lock = impl.lockExclusive();
-  KJ_IF_SOME(found, lookupImpl(*lock, context, false)) {
+
+  // Tracks the specifiers this resolution has visited so that redirect chains
+  // of any length can be followed while redirect cycles are detected. Seeded
+  // with the original specifier so a chain leading back to it is a cycle too.
+  kj::Vector<Url> seen;
+  seen.add(context.normalizedSpecifier.clone());
+  KJ_IF_SOME(found, lookupImpl(*lock, context, seen)) {
     metrics->found();
     return found;
   }
@@ -2395,8 +2435,12 @@ Module::EvaluateCallback Module::newWasmModuleHandler(kj::ArrayPtr<const kj::byt
   return [data, cache = kj::heap<Cache>()](Lock& js, const Url& id, const ModuleNamespace& ns,
              const CompilationObserver& observer) mutable -> bool {
     return js.tryCatch([&]() -> bool {
-      js.setAllowEval(true);
-      KJ_DEFER(js.setAllowEval(false));
+      // Wasm compilation requires code-generation permission. The scope
+      // restores the prior setting on exit: compilation happens lazily at
+      // evaluation time, which can be nested inside a window where eval is
+      // already permitted (e.g. worker startup with allow_eval_during_startup),
+      // and that permission must survive the compilation.
+      Lock::AllowEvalScope allowEvalScope(js, true);
 
       // Allow Wasm compilation to spawn a background thread for tier-up, i.e. recompiling
       // Wasm with optimizations in the background. Otherwise Wasm startup is way too slow.

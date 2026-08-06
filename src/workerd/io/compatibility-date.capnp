@@ -522,7 +522,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # with the flag's public documentation. Several flags describe
   # legacy-registry behavior only and are not consulted by the new registry:
   # exportCommonJsDefaultNamespace, requireReturnsDefaultExport,
-  # throwOnUnrecognizedImportAssertion, and disableTopLevelAwaitInRequire.
+  # throwOnUnrecognizedImportAssertion, and noTopLevelAwaitInRequire.
 
   cacheOptionEnabled @53 :Bool
     $compatEnableFlag("cache_option_enabled")
