@@ -207,35 +207,173 @@ impl From<cxx::KjException> for Error {
 }
 
 impl Error {
-    /// Parses a `jsg.<Type>: <message>` (or `jsg.DOMException(<Name>): <message>`)
-    /// KJ exception description. Unrecognized prefixes default to `TypeError`.
+    /// Delimiter C++ `KJ_REQUIRE`/`KJ_ASSERT` insert between a failed condition (or
+    /// `annotateBroken()` reason) and the actual message.
+    const ERROR_PREFIX_DELIM: &'static str = "; ";
+    /// Repeated when an error is tunneled over RPC (see `annotateBroken()`).
+    const ERROR_REMOTE_PREFIX: &'static str = "remote.";
+
+    /// Parses a KJ exception description for a JSG tunneling prefix, mirroring the
+    /// peeling algorithm in C++ `jsg::tunneledErrorType()`
+    /// (`src/workerd/jsg/exception.c++`). Unrecognized descriptions default to
+    /// `TypeError`.
+    ///
+    /// A tunneled JSG error is `jsg.<Type>: <message>` or
+    /// `jsg.DOMException(<Name>): <message>` (or `jsg-internal.` instead of `jsg.`),
+    /// anchored at the start of the description -- but the description is very often
+    /// wrapped first. In particular, `JSG_REQUIRE`/`JSG_ASSERT` (the common way JSG
+    /// code throws tunneled errors) go through `KJ_REQUIRE`, which prepends
+    /// `expected <cond>; ` ahead of the message. Failing to peel that (and the other
+    /// wrapper prefixes below) off first means the tunneling tag is never found and
+    /// every such error gets rethrown as a generic, untyped error instead of its real
+    /// JS error type.
     fn from_kj_description(description: &str) -> Self {
-        let body = description
+        let mut msg = description;
+
+        // The error may have been tunneled over RPC one or more times.
+        while let Some(rest) = msg.strip_prefix("remote exception: ") {
+            msg = rest;
+        }
+        while let Some(rest) = msg.strip_prefix(Self::ERROR_REMOTE_PREFIX) {
+            msg = rest;
+        }
+
+        if msg.starts_with("expected ") {
+            // A failed KJ_REQUIRE/KJ_ASSERT condition. Peel away "<cond>; " segments
+            // (there can be more than one, e.g. from nested requires) until we find a
+            // tunneled error or run out of delimiters.
+            let mut rest = msg;
+            while let Some(idx) = rest.find(Self::ERROR_PREFIX_DELIM) {
+                rest = &rest[idx + Self::ERROR_PREFIX_DELIM.len()..];
+                if let Some(err) = Self::try_extract_tunneled(rest) {
+                    return err;
+                }
+            }
+            return Self::new_type_error(description.to_owned());
+        }
+
+        // Trim any number of "broken.<reason>; " prefixes (from `annotateBroken()`).
+        while msg.starts_with("broken.") {
+            match msg.find(Self::ERROR_PREFIX_DELIM) {
+                Some(idx) => msg = &msg[idx + Self::ERROR_PREFIX_DELIM.len()..],
+                None => break,
+            }
+        }
+
+        Self::try_extract_tunneled(msg)
+            .unwrap_or_else(|| Self::new_type_error(description.to_owned()))
+    }
+
+    /// Tries to parse `msg` as a `jsg.<Type>: <message>` or
+    /// `jsg.DOMException(<Name>): <message>` tunneled error body (also accepting the
+    /// `jsg-internal.` prefix). Returns `None` if `msg` doesn't start with a
+    /// recognized tunneling tag.
+    fn try_extract_tunneled(msg: &str) -> Option<Self> {
+        let body = msg
             .strip_prefix("jsg.")
-            .or_else(|| description.strip_prefix("jsg-internal."))
-            .unwrap_or(description);
+            .or_else(|| msg.strip_prefix("jsg-internal."))?;
 
         if let Some(rest) = body.strip_prefix("DOMException(")
             && let Some((name, message)) = rest.split_once("): ")
         {
-            return Self {
+            return Some(Self {
                 name: ExceptionType::from(name),
                 message: message.to_owned(),
-            };
+            });
         }
 
-        // `<Type>: <message>`, but only if the prefix is a known error type;
-        // otherwise fall through to a TypeError carrying the full description.
-        if let Some((ty, message)) = body.split_once(": ")
-            && (!matches!(ExceptionType::from(ty), ExceptionType::Error) || ty == "Error")
-        {
-            return Self {
-                name: ExceptionType::from(ty),
-                message: message.to_owned(),
-            };
-        }
+        let (ty, message) = body.split_once(": ")?;
+        Some(Self {
+            name: ExceptionType::from(ty),
+            message: message.to_owned(),
+        })
+    }
+}
 
-        Self::new_type_error(description.to_owned())
+#[cfg(test)]
+mod tunneled_error_tests {
+    use super::*;
+
+    fn from_description(description: &str) -> Error {
+        Error::from_kj_description(description)
+    }
+
+    #[test]
+    fn plain_jsg_prefix() {
+        let err = from_description("jsg.TypeError: boom");
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert_eq!(err.message, "boom");
+    }
+
+    #[test]
+    fn jsg_require_wraps_with_expected_prefix() {
+        // What JSG_REQUIRE(cond, TypeError, "boom") actually produces via KJ_REQUIRE.
+        let err = from_description("expected someCondition; jsg.TypeError: boom");
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert_eq!(err.message, "boom");
+    }
+
+    #[test]
+    fn nested_expected_prefixes() {
+        let err = from_description("expected a; expected b; jsg.RangeError: boom");
+        assert_eq!(err.name, ExceptionType::RangeError);
+        assert_eq!(err.message, "boom");
+    }
+
+    #[test]
+    fn broken_prefix() {
+        let err = from_description("broken.inputGateBroken; jsg.Error: boom");
+        assert_eq!(err.name, ExceptionType::Error);
+        assert_eq!(err.message, "boom");
+    }
+
+    #[test]
+    fn remote_prefix() {
+        let err = from_description("remote.jsg.AbortError: boom");
+        assert_eq!(err.name, ExceptionType::AbortError);
+        assert_eq!(err.message, "boom");
+    }
+
+    #[test]
+    fn remote_exception_prefix() {
+        let err = from_description("remote exception: jsg.TypeError: boom");
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert_eq!(err.message, "boom");
+    }
+
+    #[test]
+    fn dom_exception() {
+        let err = from_description("jsg.DOMException(AbortError): boom");
+        assert_eq!(err.name, ExceptionType::AbortError);
+        assert_eq!(err.message, "boom");
+    }
+
+    #[test]
+    fn dom_exception_with_expected_prefix() {
+        let err = from_description("expected someCondition; jsg.DOMException(AbortError): boom");
+        assert_eq!(err.name, ExceptionType::AbortError);
+        assert_eq!(err.message, "boom");
+    }
+
+    #[test]
+    fn jsg_internal_prefix() {
+        let err = from_description("jsg-internal.TypeError: boom");
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert_eq!(err.message, "boom");
+    }
+
+    #[test]
+    fn unrecognized_description_falls_back_to_type_error() {
+        let err = from_description("some unrelated kj exception");
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert_eq!(err.message, "some unrelated kj exception");
+    }
+
+    #[test]
+    fn expected_prefix_without_tunneling_tag_falls_back_to_type_error() {
+        let err = from_description("expected someCondition; some message");
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert_eq!(err.message, "expected someCondition; some message");
     }
 }
 
