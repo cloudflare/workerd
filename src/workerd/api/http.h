@@ -234,6 +234,14 @@ class Fetcher: public JsRpcClientProvider {
    public:
     virtual kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) = 0;
 
+    // Factories that can carry actor retry metadata override this method. The default rejects the
+    // metadata rather than silently starting a new logical call.
+    virtual kj::Own<WorkerInterface> newSingleUseClientWithActorRetryMetadata(
+        kj::Maybe<kj::String> cfStr,
+        kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) {
+      KJ_FAIL_REQUIRE("actor retry metadata supplied to an unsupported Fetcher");
+    }
+
     // Get a `SubrequestChannel` representing this Fetcher. This is used especially when the
     // Fetcher is being passed to another isolate.
     virtual kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() {
@@ -289,8 +297,10 @@ class Fetcher: public JsRpcClientProvider {
   };
 
   // Get client and optionally create trace context, all in one call
-  ClientWithTracing getClientWithTracing(
-      IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
+  ClientWithTracing getClientWithTracing(IoContext& ioContext,
+      kj::Maybe<kj::String> cfStr,
+      kj::ConstString operationName,
+      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata);
 
   // Get a SubrequestChannel representing this Fetcher.
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);

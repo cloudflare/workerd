@@ -1506,7 +1506,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       SubrequestBodyRewindable(jsRequest->canRewindBody()));
 
   // Get client and trace context (if needed) in one clean call
-  auto clientWithTracing = fetcher->getClientWithTracing(ioContext, jsRequest->serializeCfBlobJson(js), "fetch"_kjc);
+  auto clientWithTracing = fetcher->getClientWithTracing(ioContext,
+      jsRequest->serializeCfBlobJson(js), "fetch"_kjc, kj::none /* actorRetryRequestMetadata */);
   auto traceContext = kj::mv(clientWithTracing.traceContext);
 
   // TODO(cleanup): Don't convert to HttpClient. Use the HttpService interface instead. This
@@ -2460,12 +2461,25 @@ jsg::Promise<Fetcher::ScheduledResult> Fetcher::scheduled(
 
 kj::Own<WorkerInterface> Fetcher::getClient(
     IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName) {
-  auto clientWithTracing = getClientWithTracing(ioContext, kj::mv(cfStr), kj::mv(operationName));
+  auto clientWithTracing = getClientWithTracing(
+      ioContext, kj::mv(cfStr), kj::mv(operationName), kj::none /* actorRetryRequestMetadata */);
   return clientWithTracing.client.attach(kj::mv(clientWithTracing.traceContext));
 }
 
 Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
-    IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName) {
+    IoContext& ioContext,
+    kj::Maybe<kj::String> cfStr,
+    kj::ConstString operationName,
+    kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) {
+  KJ_IF_SOME(metadata, actorRetryRequestMetadata) {
+    auto& outgoingFactory = KJ_REQUIRE_NONNULL(
+        channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>(),
+        "actor retry metadata supplied to an unsupported Fetcher");
+    auto client = outgoingFactory->newSingleUseClientWithActorRetryMetadata(
+        kj::mv(cfStr), kj::mv(metadata));
+    return ClientWithTracing{kj::mv(client), kj::none};
+  }
+
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
       // For channels, create trace context
