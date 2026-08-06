@@ -935,6 +935,14 @@ wd_test(
 )
 
 wd_test(
+    src = "new-module-registry-do-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "new-module-registry-do-test.js",
+    ],
+)
+
+wd_test(
     src = "new-module-registry-startup-eval-test.wd-test",
     args = ["--experimental"],
     data = [
