@@ -650,10 +650,11 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
 template <typename T, typename Func>
 static v8::Local<T> unwrapCoerce(v8::Isolate* isolate, Func&& fn) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
-  return js.tryCatch([&]() -> v8::Local<T> { return ::workerd::jsg::check(fn()); },
-      [&](::workerd::jsg::Value error) -> v8::Local<T> {
+  JSG_TRY(js) {
+    return ::workerd::jsg::check(fn());
+  } JSG_CATCH(error) {
     kj::throwFatalException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
-  });
+  };
 }
 
 ::rust::String unwrap_string(Isolate* isolate, Local value) {
