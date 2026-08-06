@@ -397,7 +397,9 @@ pub mod ffi {
             index: u32,
             value: Local,
         );
-        // Fallible: KJ_REQUIREs the value is an array. See "Unwrappers" below.
+        // Fallible: KJ_REQUIREs the value is an array, and tunnels any JS exception
+        // thrown by a proxy trap/getter encountered while iterating elements. See
+        // "Unwrappers" below.
         pub unsafe fn local_array_iterate(
             isolate: *mut Isolate,
             value: Local,
@@ -1620,7 +1622,8 @@ impl Local<'_, Array> {
 
     /// Iterates over array elements using V8's native `Array::Iterate()`.
     /// Returns Global handles because Local handles get reused during iteration.
-    /// Errs (rather than aborting) if the value is not an array.
+    /// Errs (rather than aborting) if the value is not an array, or if a proxy
+    /// trap/getter throws while an element is being read during iteration.
     pub fn iterate(self) -> crate::Result<Vec<Global<Value>>> {
         // SAFETY: handle is valid within the current HandleScope.
         let globals = unsafe { ffi::local_array_iterate(self.isolate.as_ffi(), self.into_ffi()) }?;

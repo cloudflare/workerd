@@ -3,8 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 //! Regression tests for the Rust JSG `unwrap_*` boundary: hostile JS values
-//! (coercion failures, lone surrogates, wrong types) must yield a catchable
-//! `Err`, not abort the process (SIGABRT) as they previously did.
+//! must not abort the process (SIGABRT) as they previously did. Specifically:
+//! coercion failures and wrong types must yield a catchable `Err`, while lone
+//! surrogates are a deliberate exception -- they decode *lossily* to U+FFFD
+//! (`Ok`), rather than erroring.
 //!
 //! `unwrap_string`/`unwrap_number` call V8's `ToString`/`ToNumber`, which run
 //! arbitrary JS whenever the value isn't already a primitive of the right
@@ -139,6 +141,41 @@ fn typed_array_from_wrong_type_returns_err() {
                 "Vec::<u8>::from_js({expr}) should be Err, got {result:?}"
             );
         }
+        Ok(())
+    });
+}
+
+/// An accessor property that throws while `Vec<T>::from_js`'s underlying
+/// `Array::Iterate()` reads an element must surface as a catchable error
+/// carrying the original JS exception, not a generic KJ failure message, and
+/// must not leave a JS exception pending on the isolate.
+#[test]
+fn array_iterate_throwing_element_getter_returns_err() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let value = ctx
+            .eval_raw(
+                "(() => { \
+                     const arr = [1, 2, 3]; \
+                     Object.defineProperty(arr, 1, { get() { throw new RangeError('trap'); } }); \
+                     return arr; \
+                 })()",
+            )
+            .expect("expression should evaluate");
+
+        let err = <Vec<String> as FromJS>::from_js(lock, value)
+            .expect_err("throwing element getter should be an Err");
+        assert_eq!(err.name, ExceptionType::RangeError);
+        assert!(
+            err.message.contains("trap"),
+            "message should preserve the original JS exception, got {:?}",
+            err.message
+        );
+
+        // The isolate must still be usable afterwards.
+        let ok = ctx.eval_raw("'still fine'").expect("should evaluate");
+        let s = <String as FromJS>::from_js(lock, ok).expect("should coerce cleanly");
+        assert_eq!(s, "still fine");
         Ok(())
     });
 }

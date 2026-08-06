@@ -652,7 +652,8 @@ static v8::Local<T> unwrapCoerce(v8::Isolate* isolate, Func&& fn) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
   JSG_TRY(js) {
     return ::workerd::jsg::check(fn());
-  } JSG_CATCH(error) {
+  }
+  JSG_CATCH(error) {
     kj::throwFatalException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
   };
 }
@@ -728,6 +729,12 @@ DEFINE_TYPED_ARRAY_UNWRAP(biguint64_array, BigUint64Array, uint64_t)
 
 // Uses V8's Array::Iterate() which is faster than indexed access.
 // Returns Global handles because Local handles get reused during iteration.
+//
+// Iterate() can fail with a *pending* V8 exception rather than a KJ one -- e.g. a
+// throwing Proxy trap or getter on one of the array's elements. That must be tunneled
+// through the same `jsg.<Type>:`-prefixed kj::Exception mechanism as `unwrapCoerce`
+// uses (see above), rather than discarded in favor of a generic KJ_REQUIRE failure,
+// or the real error is lost and the pending exception is left dangling on the isolate.
 ::rust::Vec<Global> local_array_iterate(Isolate* isolate, Local value) {
   auto context = isolate->GetCurrentContext();
   auto v8Val = local_from_ffi<v8::Value>(kj::mv(value));
@@ -743,16 +750,27 @@ DEFINE_TYPED_ARRAY_UNWRAP(biguint64_array, BigUint64Array, uint64_t)
   ::rust::Vec<Global> result;
   Data data{isolate, &result};
 
-  auto iterateResult = arr->Iterate(context,
-      [](uint32_t index, v8::Local<v8::Value> element,
-          void* userData) -> v8::Array::CallbackResult {
-    auto* d = static_cast<Data*>(userData);
-    d->result->push_back(to_ffi(v8::Global<v8::Value>(d->isolate, element)));
-    return v8::Array::CallbackResult::kContinue;
-  },
-      &data);
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  JSG_TRY(js) {
+    auto iterateResult = arr->Iterate(context,
+        [](uint32_t index, v8::Local<v8::Value> element,
+            void* userData) -> v8::Array::CallbackResult {
+      auto* d = static_cast<Data*>(userData);
+      d->result->push_back(to_ffi(v8::Global<v8::Value>(d->isolate, element)));
+      return v8::Array::CallbackResult::kContinue;
+    },
+        &data);
+    // iterateResult is a v8::Maybe<void>, so the v8::Maybe<T> overload of
+    // jsg::check() (which needs a default-constructible T to write into) doesn't
+    // apply; throw JsExceptionThrown() directly, same as check() does internally.
+    if (iterateResult.IsNothing()) {
+      throw ::workerd::jsg::JsExceptionThrown();
+    }
+  }
+  JSG_CATCH(error) {
+    kj::throwFatalException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
+  };
 
-  KJ_REQUIRE(iterateResult.IsJust(), "Iteration failed");
   return result;
 }
 
