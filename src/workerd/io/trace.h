@@ -683,8 +683,13 @@ struct Log final {
 
 // Describes an exception event
 struct Exception final {
-  explicit Exception(
-      kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack);
+  using Code = kj::OneOf<kj::String, double>;
+
+  explicit Exception(kj::Date timestamp,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack,
+      kj::Maybe<Code> code = kj::none);
   Exception(rpc::Trace::Exception::Reader reader);
   Exception(Exception&&) noexcept = default;
   KJ_DISALLOW_COPY(Exception);
@@ -697,6 +702,7 @@ struct Exception final {
   kj::String message;
 
   kj::Maybe<kj::String> stack;
+  kj::Maybe<Code> code;
 
   void copyTo(rpc::Trace::Exception::Builder builder) const;
   Exception clone() const;
@@ -1257,7 +1263,10 @@ class SpanBuilder {
   void addLog(kj::Date timestamp, kj::ConstString key, TagValue value);
 
   // Records an exception associated with this span. Calls after end() are ignored.
-  void recordException(kj::String name, kj::String message, kj::Maybe<kj::String> stack);
+  void recordException(kj::Maybe<tracing::Exception::Code> code,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack);
 
  private:
   kj::Rc<SpanObserver> observer;
@@ -1297,8 +1306,11 @@ class SpanObserver: public kj::Refcounted {
   // the observer takes ownership.
   virtual void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) = 0;
 
-  virtual void onException(
-      kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack) {}
+  virtual void onException(kj::Date timestamp,
+      kj::Maybe<tracing::Exception::Code> code,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) {}
 
   // Called when the operation name is changed after the span was opened (via
   // SpanBuilder::setOperationName()). Observers that eagerly stream the open event should handle

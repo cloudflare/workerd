@@ -3217,6 +3217,7 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
 
   void submitSpanException(tracing::SpanId spanId,
       kj::Date timestamp,
+      kj::Maybe<tracing::Exception::Code> code,
       kj::String name,
       kj::String message,
       kj::Maybe<kj::String> stack) override {
@@ -3224,7 +3225,8 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
       if (isPredictableModeForTest()) {
         timestamp = kj::UNIX_EPOCH;
       }
-      tracer.addSpanException(spanId, timestamp, kj::mv(name), kj::mv(message), kj::mv(stack));
+      tracer.addSpanException(
+          spanId, timestamp, kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
     });
   }
 

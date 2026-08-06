@@ -471,12 +471,29 @@ KJ_TEST("Read/Write Exception works") {
   KJ_ASSERT(info2.name == "foo"_kj);
   KJ_ASSERT(info2.message == "bar"_kj);
   KJ_ASSERT(info2.stack == kj::none);
+  KJ_ASSERT(info2.code == kj::none);
 
   Exception info3 = info.clone();
   KJ_ASSERT(info.timestamp == info3.timestamp);
   KJ_ASSERT(info3.name == "foo"_kj);
   KJ_ASSERT(info3.message == "bar"_kj);
   KJ_ASSERT(info3.stack == kj::none);
+  KJ_ASSERT(info3.code == kj::none);
+
+  capnp::MallocMessageBuilder stringCodeBuilder;
+  auto stringCodeRoot = stringCodeBuilder.initRoot<rpc::Trace::Exception>();
+  kj::Maybe<Exception::Code> stringCode = Exception::Code(kj::str("ERR_TEST"));
+  Exception stringCodeInfo(
+      kj::UNIX_EPOCH, kj::str("foo"), kj::str("bar"), kj::none, kj::mv(stringCode));
+  stringCodeInfo.copyTo(stringCodeRoot);
+  Exception stringCodeRoundTrip(stringCodeRoot.asReader());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(stringCodeRoundTrip.code).get<kj::String>() == "ERR_TEST"_kj);
+
+  kj::Maybe<Exception::Code> numericCode = Exception::Code(42.0);
+  Exception numericCodeInfo(
+      kj::UNIX_EPOCH, kj::str("foo"), kj::str("bar"), kj::none, kj::mv(numericCode));
+  Exception numericCodeClone = numericCodeInfo.clone();
+  KJ_ASSERT(KJ_ASSERT_NONNULL(numericCodeClone.code).get<double>() == 42.0);
 }
 
 KJ_TEST("Read/Write StreamDiagnosticsEvent works") {

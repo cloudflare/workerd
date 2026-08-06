@@ -142,6 +142,7 @@ interface DiagnosticChannelEvent {
 
 interface Exception {
   readonly type: "exception";
+  readonly code?: string | number;
   readonly name: string;
   readonly message: string;
   readonly stack?: string;

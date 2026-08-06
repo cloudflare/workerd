@@ -29,6 +29,8 @@ constexpr size_t MAX_USER_OPERATION_NAME_BYTES = 64;
 using TagValue = kj::OneOf<bool, double, kj::String>;
 
 struct ExceptionData {
+  // JSG dictionaries cannot express "at least one field is required". recordException()
+  // validates the OpenTelemetry Exception union after conversion.
   jsg::Optional<kj::OneOf<kj::String, double>> code;
   jsg::Optional<kj::String> name;
   jsg::Optional<kj::String> message;
@@ -57,14 +59,19 @@ class SpanState: public kj::Refcounted {
   // Sets a single attribute on the span. If value is kj::none, the attribute is not set.
   void setAttribute(kj::String key, kj::Maybe<TagValue> maybeValue);
 
-  void recordException(kj::String name, kj::String message, kj::Maybe<kj::String> stack);
+  void recordException(kj::Maybe<tracing::Exception::Code> code,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack);
 
  protected:
   SpanState() = default;
   virtual bool canRecordAttributes() = 0;
   virtual void recordAttribute(kj::String key, TagValue value) = 0;
-  virtual void recordExceptionImpl(
-      kj::String name, kj::String message, kj::Maybe<kj::String> stack) = 0;
+  virtual void recordExceptionImpl(kj::Maybe<tracing::Exception::Code> code,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) = 0;
   virtual void recordSpanDataLimitError(
       kj::StringPtr itemKind, kj::StringPtr name, size_t valueSize) {}
  private:
