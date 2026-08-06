@@ -54,7 +54,7 @@ impl<T> Nullable<T> {
     }
 
     /// Returns a reference to the contained value in `Some` if `Some`, and returns
-    /// the respective empty vaue if empty.
+    /// the respective empty value if empty.
     pub fn as_ref(&self) -> Nullable<&T> {
         match self {
             Self::Some(v) => Nullable::Some(v),
@@ -64,7 +64,7 @@ impl<T> Nullable<T> {
     }
 
     /// Returns an exclusive reference to the contained value in `Some` if `Some`, and
-    /// returns the respective empty vaue if empty.
+    /// returns the respective empty value if empty.
     pub fn as_mut(&mut self) -> Nullable<&mut T> {
         match self {
             Self::Some(v) => Nullable::Some(v),
@@ -76,7 +76,7 @@ impl<T> Nullable<T> {
     /// Returns the contained [`Some`] value, consuming `self`.
     ///
     /// This function panics on `!self.is_some()`, making it unsuitable
-    /// for general use. Outside of testing, prefer pattern matching, or a non-panicing
+    /// for general use. Outside of testing, prefer pattern matching, or a non-panicking
     /// variant.
     ///
     /// # Panics
@@ -121,7 +121,7 @@ impl<T> Nullable<T> {
     }
 
     /// Maps a [`Nullable<T>`] to a [`Nullable<U>`] by applying the passed function if [`Some`], or
-    /// nothing otherwise.
+    /// the respective empty type otherwise.
     ///
     /// [`Some`]: Nullable::Some
     pub fn map<U, F>(self, f: F) -> Nullable<U>
