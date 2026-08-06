@@ -106,7 +106,8 @@ class Span: public jsg::Object {
   void recordException(
       jsg::Lock& js, jsg::Value exception, const jsg::TypeHandler<ExceptionData>& exceptionHandler);
 
-  // Ends the span and submits its content to the tracing system. Idempotent.
+  // Ends the span and submits its content to the tracing system. Idempotent. This is a no-op for
+  // the invocation span returned by getActiveSpan(), whose lifecycle is owned by the runtime.
   void end();
 
   JSG_RESOURCE_TYPE(Span) {
@@ -184,10 +185,17 @@ class Tracing: public jsg::Object {
   // must call span.end() explicitly. If no IoContext is available, returns a no-op span.
   jsg::Ref<user_tracing::Span> startSpan(jsg::Lock& js, kj::String operationName);
 
+  // Returns the span associated with the current async context, or the invocation span when no
+  // user-created span is active. Returns undefined outside an invocation or when execution is
+  // detached into the root async context.
+  jsg::Optional<jsg::Ref<user_tracing::Span>> getActiveSpan(
+      jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
+
   JSG_RESOURCE_TYPE(Tracing) {
     JSG_METHOD(enterSpan);
     JSG_METHOD(startActiveSpan);
     JSG_METHOD(startSpan);
+    JSG_METHOD(getActiveSpan);
 
     // Use the _NAMED variant so the property ends up as `tracing.Span` rather than
     // `tracing["user_tracing::Span"]`.
@@ -209,6 +217,7 @@ class Tracing: public jsg::Object {
         ...args: A
       ): T;
       startSpan(name: string): Span;
+      getActiveSpan(): Span | undefined;
     });
   }
 };

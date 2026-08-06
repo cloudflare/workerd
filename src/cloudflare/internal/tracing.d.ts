@@ -48,7 +48,8 @@ declare class Span {
   // Records an exception event on the span. Calls after the span has ended are ignored.
   recordException(exception: Exception): void;
 
-  // Ends the span and submits its attributes to the tracing system. Idempotent.
+  // Ends the span and submits its attributes to the tracing system. Idempotent. This is a no-op
+  // for the invocation span returned by getActiveSpan(), whose lifecycle is owned by the runtime.
   end(): void;
 }
 
@@ -81,6 +82,11 @@ declare const tracing: {
   // Creates a span as a child of the current active user tracing span without making it active.
   // Callers must invoke `span.end()` explicitly.
   startSpan(name: string): Span;
+
+  // Returns the span associated with the current async context, or the invocation span when no
+  // user-created span is active. Returns undefined outside an invocation or when execution is
+  // detached into the root async context.
+  getActiveSpan(): Span | undefined;
 
   // The `Span` class is exposed as a nested type so callers can reference the type via
   // `InstanceType<typeof tracing.Span>` (see `tracing-helpers.ts`).

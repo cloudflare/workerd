@@ -3,7 +3,14 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { tracing as publicTracing } from 'cloudflare:workers';
+
+assert.strictEqual(publicTracing.getActiveSpan(), undefined);
+const getActiveSpanOutsideInvocationContext = AsyncLocalStorage.bind(() => [
+  publicTracing.getActiveSpan(),
+  publicTracing.getActiveSpan(),
+]);
 
 export const syncFunction = {
   async test(ctrl, env, ctx) {
@@ -248,6 +255,33 @@ export const publicImportStartSpan = {
     assert.strictEqual(span.isTraced, true);
     span.end();
     assert.strictEqual(span.isTraced, false);
+  },
+};
+
+export const getActiveSpan = {
+  async test(ctrl, env, ctx) {
+    const invocationSpan = publicTracing.getActiveSpan();
+    assert.ok(invocationSpan);
+    assert.strictEqual(publicTracing.getActiveSpan(), invocationSpan);
+    assert.strictEqual(ctx.tracing.getActiveSpan(), invocationSpan);
+    assert.deepStrictEqual(getActiveSpanOutsideInvocationContext(), [
+      undefined,
+      undefined,
+    ]);
+    assert.strictEqual(invocationSpan.isTraced, true);
+    invocationSpan.end();
+    assert.strictEqual(invocationSpan.isTraced, true);
+    invocationSpan.setAttribute('test', 'getActiveSpanInvocation');
+
+    await ctx.tracing.startActiveSpan('get-active-span-op', async (span) => {
+      assert.strictEqual(publicTracing.getActiveSpan(), span);
+      await Promise.resolve();
+      assert.strictEqual(publicTracing.getActiveSpan(), span);
+      span.setAttribute('test', 'getActiveSpan');
+      span.end();
+    });
+
+    assert.strictEqual(publicTracing.getActiveSpan(), invocationSpan);
   },
 };
 

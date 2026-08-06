@@ -603,6 +603,31 @@ void WorkerTracer::setWorkerAttribute(kj::ConstString key, Span::TagValue value)
   attributes.add(tracing::Attribute{kj::mv(key), kj::mv(value)});
 }
 
+void WorkerTracer::addSpanAttribute(const tracing::InvocationSpanContext& context,
+    kj::ConstString key,
+    tracing::Attribute::Value value) {
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    return;
+  }
+
+  auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
+  size_t size = key.size();
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(string, kj::ConstString) {
+      size += string.size();
+    }
+    KJ_CASE_ONEOF_DEFAULT {
+      size += sizeof(double);
+    }
+  }
+  if (size > MAX_TRACE_BYTES) {
+    return;
+  }
+
+  tracing::CustomInfo attributes = kj::arr(tracing::Attribute(kj::mv(key), kj::mv(value)));
+  tailStreamWriter->report(context, kj::mv(attributes), getTime(), size);
+}
+
 SpanParent BaseTracer::makeUserRequestSpan(
     tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
   KJ_IF_SOME(func, makeUserRequestSpanFunc) {

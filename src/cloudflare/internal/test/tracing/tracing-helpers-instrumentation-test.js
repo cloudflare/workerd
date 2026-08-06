@@ -10,7 +10,23 @@ import {
 
 // Create the collector and export it for the tail worker
 const collector = createTailStreamCollector();
-export default collector;
+const rootAttributes = [];
+export default {
+  ...collector,
+  tailStream(onset, env, ctx) {
+    const handleEvent = collector.tailStream(onset, env, ctx);
+    return (event) => {
+      if (
+        event.event.type === 'attributes' &&
+        event.spanContext.spanId === onset.event.spanId
+      ) {
+        rootAttributes.push(...event.event.info);
+        return;
+      }
+      return handleEvent(event);
+    };
+  },
+};
 
 // After all tests complete, validate the spans
 export const validateSpans = {
@@ -44,6 +60,7 @@ export const validateSpans = {
         test: 'publicImportStartSpan',
         expectedSpan: 'public-start-span-op',
       },
+      { test: 'getActiveSpan', expectedSpan: 'get-active-span-op' },
       { test: 'ctxTracing', expectedSpan: 'ctx-tracing-op' },
       {
         test: 'detachedSpanEndsAfterStreamDrain',
@@ -119,6 +136,11 @@ export const validateSpans = {
       assert.strictEqual(span['after.throw'], true);
       assert(span.closed, 'Manual throw span should be explicitly closed');
     }
+
+    assert.deepStrictEqual(
+      rootAttributes.find(({ name }) => name === 'test'),
+      { name: 'test', value: 'getActiveSpanInvocation' }
+    );
 
     // setAttributes should record each supported value and ignore undefined values.
     {
