@@ -51,33 +51,10 @@ kj::LiteralStringConst spanWarningTypeName(SpanWarningType type) {
 }  // namespace
 
 // ======================================================================================
-// SpanImpl
+// SpanState
 
-SpanImpl::SpanImpl(kj::Rc<workerd::SpanObserver> observer, kj::ConstString operationName)
-    : builder(kj::mv(observer), kj::mv(operationName)) {}
-
-SpanImpl::SpanImpl(decltype(nullptr)): builder(nullptr) {}
-
-SpanImpl::~SpanImpl() noexcept(false) {
-  end();
-}
-
-void SpanImpl::end() {
-  // Move-assigning a null builder ends the old one (submitting via onClose) and drops the
-  // observer reference so subsequent setTag/isObserved calls no-op.
-  builder = workerd::SpanBuilder(nullptr);
-}
-
-bool SpanImpl::getIsTraced() {
-  return builder.isObserved();
-}
-
-workerd::SpanParent SpanImpl::makeSpanParent() {
-  return workerd::SpanParent(builder);
-}
-
-void SpanImpl::setAttribute(kj::String key, kj::Maybe<TagValue> maybeValue) {
-  if (!builder.isObserved()) {
+void SpanState::setAttribute(kj::String key, kj::Maybe<TagValue> maybeValue) {
+  if (!canRecordAttributes()) {
     return;
   }
   KJ_IF_SOME(value, maybeValue) {
@@ -87,9 +64,43 @@ void SpanImpl::setAttribute(kj::String key, kj::Maybe<TagValue> maybeValue) {
     size_t valueSize = estimateTagValueSize(value);
     bytesUsed += key.size() + valueSize;
     if (bytesUsed > MAX_SPAN_BYTES) {
-      setSpanDataLimitError("attribute", key, valueSize);
+      recordSpanDataLimitError("attribute", key, valueSize);
       return;
     }
+    recordAttribute(kj::mv(key), kj::mv(value));
+  }
+  // If value is kj::none the attribute is left unset (undefined on the JS side).
+}
+
+class UserSpanState final: public SpanState {
+ public:
+  UserSpanState(kj::Rc<workerd::SpanObserver> observer, kj::ConstString operationName)
+      : builder(kj::mv(observer), kj::mv(operationName)) {}
+
+  ~UserSpanState() noexcept(false) override {
+    end();
+  }
+
+  void end() override {
+    // Move-assigning a null builder ends the old one (submitting via onClose) and drops the
+    // observer reference so subsequent setTag/isObserved calls no-op.
+    builder = workerd::SpanBuilder(nullptr);
+  }
+
+  bool getIsTraced() override {
+    return builder.isObserved();
+  }
+
+  workerd::SpanParent makeSpanParent() override {
+    return workerd::SpanParent(builder);
+  }
+
+ protected:
+  bool canRecordAttributes() override {
+    return builder.isObserved();
+  }
+
+  void recordAttribute(kj::String key, TagValue value) override {
     KJ_SWITCH_ONEOF(value) {
       KJ_CASE_ONEOF(b, bool) {
         builder.setTag(kj::ConstString(kj::mv(key)), b, IsCustomTag::YES);
@@ -102,37 +113,60 @@ void SpanImpl::setAttribute(kj::String key, kj::Maybe<TagValue> maybeValue) {
       }
     }
   }
-  // If value is kj::none the attribute is left unset (undefined on the JS side).
-}
 
-void SpanImpl::setSpanDataLimitError(kj::StringPtr itemKind, kj::StringPtr name, size_t valueSize) {
-  if (!builder.isObserved()) {
-    return;
+  void recordSpanDataLimitError(
+      kj::StringPtr itemKind, kj::StringPtr name, size_t valueSize) override {
+    if (!builder.isObserved()) {
+      return;
+    }
+    kj::String shortName;
+    if (name.size() > 64) {
+      shortName = kj::str("\"", name.slice(0, 64), "...\" (key length ", name.size(), ")");
+    } else {
+      shortName = kj::str("\"", name, "\"");
+    }
+    auto message = kj::ConstString(kj::str("exceeded span data limit while trying to record ",
+        itemKind, " ", shortName, " of size ", valueSize));
+    builder.setTag("cloudflare.warning.type"_kjc,
+        spanWarningTypeName(SpanWarningType::SPAN_DATA_LIMIT_EXCEEDED));
+    builder.setTag("cloudflare.warning.message"_kjc, kj::mv(message));
   }
-  kj::String shortName;
-  if (name.size() > 64) {
-    shortName = kj::str("\"", name.slice(0, 64), "...\" (key length ", name.size(), ")");
-  } else {
-    shortName = kj::str("\"", name, "\"");
+
+ private:
+  workerd::SpanBuilder builder;
+};
+
+class NoopSpanState final: public SpanState {
+ public:
+  void end() override {}
+
+  bool getIsTraced() override {
+    return false;
   }
-  auto message = kj::ConstString(kj::str("exceeded span data limit while trying to record ",
-      itemKind, " ", shortName, " of size ", valueSize));
-  builder.setTag("cloudflare.warning.type"_kjc,
-      spanWarningTypeName(SpanWarningType::SPAN_DATA_LIMIT_EXCEEDED));
-  builder.setTag("cloudflare.warning.message"_kjc, kj::mv(message));
-}
+
+  workerd::SpanParent makeSpanParent() override {
+    return workerd::SpanParent(nullptr);
+  }
+
+ protected:
+  bool canRecordAttributes() override {
+    return false;
+  }
+
+  void recordAttribute(kj::String, TagValue) override {}
+};
 
 // ======================================================================================
 // Span
 
-Span::Span(kj::OneOf<kj::Own<SpanImpl>, IoOwn<SpanImpl>> impl): impl(kj::mv(impl)) {}
+Span::Span(kj::OneOf<kj::Own<SpanState>, IoOwn<SpanState>> state): state(kj::mv(state)) {}
 
 bool Span::getIsTraced() {
-  KJ_SWITCH_ONEOF(impl) {
-    KJ_CASE_ONEOF(s, kj::Own<SpanImpl>) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(s, kj::Own<SpanState>) {
       return s->getIsTraced();
     }
-    KJ_CASE_ONEOF(s, IoOwn<SpanImpl>) {
+    KJ_CASE_ONEOF(s, IoOwn<SpanState>) {
       return s->getIsTraced();
     }
   }
@@ -144,11 +178,11 @@ jsg::Ref<Span> Span::setAttribute(jsg::Lock& js, kj::String key, jsg::Optional<T
   KJ_IF_SOME(v, value) {
     maybeValue = kj::mv(v);
   }
-  KJ_SWITCH_ONEOF(impl) {
-    KJ_CASE_ONEOF(s, kj::Own<SpanImpl>) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(s, kj::Own<SpanState>) {
       s->setAttribute(kj::mv(key), kj::mv(maybeValue));
     }
-    KJ_CASE_ONEOF(s, IoOwn<SpanImpl>) {
+    KJ_CASE_ONEOF(s, IoOwn<SpanState>) {
       s->setAttribute(kj::mv(key), kj::mv(maybeValue));
     }
   }
@@ -163,11 +197,11 @@ jsg::Ref<Span> Span::setAttributes(jsg::Lock& js, jsg::Dict<jsg::Optional<TagVal
 }
 
 void Span::end() {
-  KJ_SWITCH_ONEOF(impl) {
-    KJ_CASE_ONEOF(s, kj::Own<SpanImpl>) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(s, kj::Own<SpanState>) {
       s->end();
     }
-    KJ_CASE_ONEOF(s, IoOwn<SpanImpl>) {
+    KJ_CASE_ONEOF(s, IoOwn<SpanState>) {
       s->end();
     }
   }
@@ -190,7 +224,7 @@ struct CreatedSpan {
 };
 
 CreatedSpan createSpan(jsg::Lock& js, kj::String operationName) {
-  // We use qualified `user_tracing::Span` / `user_tracing::SpanImpl` throughout because an
+  // We use qualified `user_tracing::Span` / `user_tracing::SpanState` throughout because an
   // unqualified `Span` in this namespace resolves to workerd::Span (the runtime span struct),
   // which is a different type.
 
@@ -200,7 +234,7 @@ CreatedSpan createSpan(jsg::Lock& js, kj::String operationName) {
     operationName = kj::str(operationName.first(user_tracing::MAX_USER_OPERATION_NAME_BYTES));
   }
 
-  kj::Own<user_tracing::SpanImpl> impl;
+  kj::Own<user_tracing::SpanState> state;
   kj::Maybe<SpanParent> childSpanForAsyncContext;
   bool hasIoContext = IoContext::hasCurrent();
 
@@ -213,32 +247,32 @@ CreatedSpan createSpan(jsg::Lock& js, kj::String operationName) {
         // newChildFromUserCode (vs newChild) signals user-origin to the submitter so it can
         // skip the operation-name allowlist that gates runtime spans.
         auto childObserver = observer.newChildFromUserCode();
-        impl = kj::refcounted<user_tracing::SpanImpl>(
+        state = kj::refcounted<user_tracing::UserSpanState>(
             kj::mv(childObserver), kj::ConstString(kj::heapString(operationName)));
         // Capture a SpanParent for the child so startActiveSpan() / enterSpan() can push it onto
         // the AsyncContextFrame. Safe to carry across the request boundary thanks to
         // BaseTracer::WeakRef in the submitter - stale parents cannot pin the tracer.
-        childSpanForAsyncContext = impl->makeSpanParent();
+        childSpanForAsyncContext = state->makeSpanParent();
       } else {
-        impl = kj::refcounted<user_tracing::SpanImpl>(nullptr);
+        state = kj::refcounted<user_tracing::NoopSpanState>();
       }
     } else {
-      impl = kj::refcounted<user_tracing::SpanImpl>(nullptr);
+      state = kj::refcounted<user_tracing::NoopSpanState>();
     }
   } else {
     // No IoContext: create a no-op span.
-    impl = kj::refcounted<user_tracing::SpanImpl>(nullptr);
+    state = kj::refcounted<user_tracing::NoopSpanState>();
   }
 
-  // Wrap impl in IoOwn (when inside an IoContext) so destruction funnels through the
+  // Wrap state in IoOwn (when inside an IoContext) so destruction funnels through the
   // IoContext's delete queue and cannot cross threads. Outside an IoContext, fall back to
   // kj::Own; tracing without an IoContext is a no-op tracing-wise.
   auto span = [&]() -> jsg::Ref<user_tracing::Span> {
     if (hasIoContext) {
-      auto ownedImpl = IoContext::current().addObject(kj::mv(impl));
-      return js.alloc<user_tracing::Span>(kj::mv(ownedImpl));
+      auto ownedState = IoContext::current().addObject(kj::mv(state));
+      return js.alloc<user_tracing::Span>(kj::mv(ownedState));
     }
-    return js.alloc<user_tracing::Span>(kj::mv(impl));
+    return js.alloc<user_tracing::Span>(kj::mv(state));
   }();
 
   return CreatedSpan{
@@ -288,7 +322,7 @@ v8::Local<v8::Value> runSpan(jsg::Lock& js,
           js.throwException(kj::mv(exception));
         });
         // If the promise never settles, the span will still be submitted when the IoOwn is
-        // destroyed (via ~SpanImpl calling end()), though this is a corner case and should
+        // destroyed (via ~SpanState calling end()), though this is a corner case and should
         // generally be avoided by users.
         return valuePromiseHandler->wrap(js, kj::mv(promise));
       } else {

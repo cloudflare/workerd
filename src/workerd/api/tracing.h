@@ -28,55 +28,48 @@ constexpr size_t MAX_USER_OPERATION_NAME_BYTES = 64;
 // The types allowed for tag and log values from JavaScript.
 using TagValue = kj::OneOf<bool, double, kj::String>;
 
-// Refcounted wrapper around workerd::SpanBuilder, exposing the JS Span surface: bytes-used
-// limit enforcement and JS-side TagValue forwarding. Span lifecycle (onOpen/onClose) is
-// delegated to SpanBuilder.
-class SpanImpl final: public kj::Refcounted {
+// Polymorphic state behind the JS Span wrapper. Concrete states represent recording user spans and
+// no-op spans, while sharing JS-side attribute byte-limit enforcement.
+class SpanState: public kj::Refcounted {
  public:
-  // Construct an observed span. The builder drives the observer's onOpen immediately.
-  SpanImpl(kj::Rc<workerd::SpanObserver> observer, kj::ConstString operationName);
-
-  // Construct a no-op span (not recording). Used when there is no current user trace span
-  // (e.g., running outside a traced request) or when we are in a context where we cannot
-  // safely observe spans.
-  explicit SpanImpl(decltype(nullptr));
-
-  KJ_DISALLOW_COPY_AND_MOVE(SpanImpl);
-
-  ~SpanImpl() noexcept(false);
+  virtual ~SpanState() noexcept(false) = default;
+  KJ_DISALLOW_COPY_AND_MOVE(SpanState);
 
   // Submits the span and marks it as no longer traced. Idempotent; the destructor calls
   // end() as well.
-  void end();
+  virtual void end() = 0;
 
-  bool getIsTraced();
+  virtual bool getIsTraced() = 0;
 
   // Returns a SpanParent wrapping this span's observer, or a null SpanParent if the span has
   // ended or has no observer. Used by Tracing methods to push onto the AsyncContextFrame.
-  workerd::SpanParent makeSpanParent();
+  virtual workerd::SpanParent makeSpanParent() = 0;
 
   // Sets a single attribute on the span. If value is kj::none, the attribute is not set.
   void setAttribute(kj::String key, kj::Maybe<TagValue> maybeValue);
 
+ protected:
+  SpanState() = default;
+  virtual bool canRecordAttributes() = 0;
+  virtual void recordAttribute(kj::String key, TagValue value) = 0;
+  virtual void recordSpanDataLimitError(
+      kj::StringPtr itemKind, kj::StringPtr name, size_t valueSize) {}
+
  private:
-  workerd::SpanBuilder builder;
-
   size_t bytesUsed = 0;
-
-  void setSpanDataLimitError(kj::StringPtr itemKind, kj::StringPtr name, size_t valueSize);
 };
 
 // JavaScript-accessible tracing span (exposed as `Span`). From the user's perspective this
-// is the only kind of span there is; internal C++ plumbing lives on SpanImpl. Kept in the
+// is the only kind of span there is; internal C++ plumbing lives on SpanState. Kept in the
 // workerd::api::user_tracing namespace (not workerd::api) to avoid collision with the
 // runtime's own workerd::Span type.
 //
-// The impl is wrapped in IoOwn when an IoContext exists, so that destruction is funneled
+// The state is wrapped in IoOwn when an IoContext exists, so that destruction is funneled
 // through the IoContext's delete queue and cannot cross threads. When no IoContext is
 // available (unusual for user tracing - typically startup paths), a plain kj::Own is used.
 class Span: public jsg::Object {
  public:
-  explicit Span(kj::OneOf<kj::Own<SpanImpl>, IoOwn<SpanImpl>> impl);
+  explicit Span(kj::OneOf<kj::Own<SpanState>, IoOwn<SpanState>> state);
 
   // Returns true if this span will be recorded. False when the current async context is not
   // being traced, or when the span has already been submitted (which happens automatically
@@ -109,7 +102,7 @@ class Span: public jsg::Object {
   }
 
  private:
-  kj::OneOf<kj::Own<SpanImpl>, IoOwn<SpanImpl>> impl;
+  kj::OneOf<kj::Own<SpanState>, IoOwn<SpanState>> state;
 
   friend class ::workerd::api::Tracing;
 };
@@ -152,7 +145,7 @@ class Tracing: public jsg::Object {
   // Creates a new child span, pushes it onto the AsyncContextFrame while invoking
   // callback(span, ...args), and returns the callback result without ending the span.
   // The caller must call span.end() explicitly; forgotten spans are still ended by
-  // SpanImpl's destructor when the request-owned span object is destroyed.
+  // SpanState's destructor when the request-owned span object is destroyed.
   v8::Local<v8::Value> startActiveSpan(jsg::Lock& js,
       kj::String operationName,
       v8::Local<v8::Function> callback,
