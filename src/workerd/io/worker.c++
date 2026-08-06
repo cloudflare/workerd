@@ -977,7 +977,13 @@ struct Worker::Script::Impl {
     });
   }
 
-  kj::Maybe<const workerd::jsg::modules::ModuleRegistry&> getNewModuleRegistry() const {
+  // Returns the (new) module registry instance held by this script, if any.
+  // Deliberately not named getNewModuleRegistry(): that name belongs to the
+  // capnp compatibility-flag getter, which must never be read directly
+  // (registry selection always goes through isNewModuleRegistryEnabled() in
+  // io/features.h), and keeping the names distinct keeps audits for the flag
+  // getter greppable.
+  kj::Maybe<const workerd::jsg::modules::ModuleRegistry&> tryGetNewModuleRegistry() const {
     return maybeNewModuleRegistry.map(
         [](auto& r) -> const workerd::jsg::modules::ModuleRegistry& { return *r; });
   }
@@ -1414,7 +1420,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         // Modules can't be compiled for multiple contexts. We need to create the real context now.
         auto& mContext = impl->moduleContext.emplace(isolate->getApi().newContext(lock,
             {
-              .newModuleRegistry = impl->getNewModuleRegistry(),
+              .newModuleRegistry = impl->tryGetNewModuleRegistry(),
               .schemaLoader = getSchemaLoader(),
             }));
         mContext->enableWarningOnSpecialEvents();
@@ -1903,7 +1909,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         // Create a new context.
         jsContext = &this->impl->context.emplace(script->isolate->getApi().newContext(lock,
             {
-              .newModuleRegistry = script->impl->getNewModuleRegistry(),
+              .newModuleRegistry = script->impl->tryGetNewModuleRegistry(),
               .schemaLoader = script->getSchemaLoader(),
             }));
         freshContext = true;
