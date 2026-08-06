@@ -1433,6 +1433,40 @@ KJ_TEST("Syntax error in ESM module is properly reported") {
 
 // ======================================================================================
 
+KJ_TEST("Syntax error in ESM module is reported consistently on repeated resolution") {
+  PREAMBLE([&](Lock& js) {
+    ResolveObserverImpl observer;
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+
+    auto foo = kj::str("export default 123; syntax error");
+    bundleBuilder.addEsmModule("foo", foo);
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    // A failed compilation must not leave stale resolution-cache state behind:
+    // every attempt reports the original compile error rather than the second
+    // and subsequent attempts failing with an internal error.
+    for (int attempt: {1, 2, 3}) {
+      bool threw = false;
+      JSG_TRY(js) {
+        ModuleRegistry::resolve(js, "file:///foo", "default"_kjc);
+      }
+      JSG_CATCH(exception) {
+        threw = true;
+        auto str = kj::str(exception.getHandle(js));
+        KJ_ASSERT(str == "SyntaxError: Unexpected identifier 'error'", str, attempt);
+      }
+      KJ_ASSERT(threw, attempt);
+    }
+  });
+}
+
+// ======================================================================================
+
 KJ_TEST("Throwing an exception inside a CJS-style eval module works as expected") {
   PREAMBLE([&](Lock& js) {
     ResolveObserverImpl observer;

@@ -1139,7 +1139,9 @@ class IsolateModuleRegistry final {
 
   kj::Maybe<Entry&> findResolved(ResolveContext::Type type, const Url& id) KJ_WARN_UNUSED_RESULT {
     KJ_IF_SOME(def, resolutions.find(SpecifierContextRef{type, id})) {
-      // The resolutions entry always has a matching instantiation.
+      // The resolutions entry always has a matching instantiation:
+      // resolveWithCaching() records the resolution only after the
+      // instantiation row has been inserted.
       return KJ_ASSERT_NONNULL(instantiations.find<kj::HashIndex<InstanceCallbacks>>(id, def));
     }
     return kj::none;
@@ -1166,8 +1168,30 @@ class IsolateModuleRegistry final {
     };
 
     KJ_IF_SOME(found, inner.lookup(innerContext, noopResolveObserver)) {
+      // Reuse the existing instantiation for this (specifier, definition) if
+      // one exists (e.g. the same builtin already resolved through a different
+      // context type); otherwise instantiate now. Instantiation can fail —
+      // most commonly when a lazily-compiled ES module has a syntax error, in
+      // which case check() throws and nothing is recorded, so a later attempt
+      // reports the same compile error again.
+      Entry& entry = ([&]() -> Entry& {
+        KJ_IF_SOME(existing,
+            instantiations.find<kj::HashIndex<InstanceCallbacks>>(
+                context.normalizedSpecifier, &found)) {
+          return existing;
+        }
+        return instantiations.insert(Entry{
+          .key = HashableV8Ref<v8::Module>(
+              js.v8Isolate, check(found.getDescriptor(js, getObserver()))),
+          .id = context.normalizedSpecifier.clone(),
+          .module = found,
+        });
+      })();
+
       // Record the resolution under the full specifier (with query/fragment):
-      // it is part of the module-identity key (see Entry).
+      // it is part of the module-identity key (see Entry). This is recorded
+      // only after the instantiation row above exists: findResolved() asserts
+      // that every resolutions entry has a matching instantiation.
       resolutions.upsert(SpecifierContext(context), &found,
           [](const Module*& existing, const Module* replacement) {
         // Deterministic: re-resolving the same (type, specifier) always finds
@@ -1175,20 +1199,7 @@ class IsolateModuleRegistry final {
         KJ_ASSERT(existing == replacement);
       });
 
-      // Reuse the existing instantiation for this (specifier, definition) if
-      // one exists (e.g. the same builtin already resolved through a different
-      // context type); otherwise instantiate now.
-      KJ_IF_SOME(entry,
-          instantiations.find<kj::HashIndex<InstanceCallbacks>>(
-              context.normalizedSpecifier, &found)) {
-        return kj::Maybe<Entry&>(entry);
-      }
-      return kj::Maybe<Entry&>(instantiations.insert(Entry{
-        .key =
-            HashableV8Ref<v8::Module>(js.v8Isolate, check(found.getDescriptor(js, getObserver()))),
-        .id = context.normalizedSpecifier.clone(),
-        .module = found,
-      }));
+      return kj::Maybe<Entry&>(entry);
     }
     return kj::none;
   }
