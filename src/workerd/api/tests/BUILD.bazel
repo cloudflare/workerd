@@ -952,6 +952,14 @@ wd_test(
 )
 
 wd_test(
+    src = "new-module-registry-workerd-modules-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "new-module-registry-workerd-modules-test.js",
+    ],
+)
+
+wd_test(
     src = "new-module-registry-ts-test.wd-test",
     args = ["--experimental"],
     data = [
