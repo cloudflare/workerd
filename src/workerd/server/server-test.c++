@@ -735,6 +735,53 @@ KJ_TEST("Server: duplicate module names are reported as config errors (new modul
   )"_blockquote);
 }
 
+KJ_TEST("Server: extension modules with non-URL names are config errors (new module registry)") {
+  // The new module registry identifies extension modules by URL. An extension
+  // module whose name does not parse as an absolute URL must be reported as a
+  // config error rather than being silently dropped (which would otherwise
+  // surface as a confusing "Module not found" error at import time).
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-10-01",
+          compatibilityFlags = ["new_module_registry"],
+          modules = [
+            ( name = "worker",
+              esModule =
+                `export default {}
+            )
+          ]
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ],
+    extensions = [
+      ( modules = [
+          ( name = "not-a-url",
+            esModule =
+              `export default 1
+          )
+        ]
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  // The second error is a consequence of the first: after reporting the
+  // registry error, worker construction proceeds with an inert empty script,
+  // which registers no handlers.
+  test.expectErrors(R"(
+    service hello: Invalid extension module name "not-a-url": when the new_module_registry compatibility flag is enabled, extension module names must be fully-qualified URLs (e.g. "my-extension:module").
+    service hello: No event handlers were registered. This script does nothing.
+  )"_blockquote);
+}
+
 KJ_TEST("Server: python modules without python_workers flag (new module registry)") {
   // Python modules in a bundle without the python_workers compatibility flag
   // are a config error. Under the new module registry this is detected while
