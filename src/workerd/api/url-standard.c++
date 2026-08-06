@@ -50,6 +50,12 @@ URL::~URL() noexcept(false) {
   }
 }
 
+kj::Maybe<kj::Own<jsg::Wrappable>> URL::snapshotClone() const {
+  // maybeSearchParams is deliberately not cloned: URLSearchParams holds a back-reference
+  // to *this* URL, which would dangle in the clone. getSearchParams() lazily recreates it.
+  return ownAsWrappable(kj::refcounted<URL>(inner.clone()));
+}
+
 bool URL::canParse(jsg::USVString url, jsg::Optional<jsg::USVString> maybeBase) {
   return jsg::Url::canParse(url, maybeBase.map([](jsg::USVString& str) { return str.asPtr(); }));
 }
