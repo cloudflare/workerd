@@ -581,7 +581,10 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   auto& artifact = mutableSnapshotArtifact();
   KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
 
-  wrappablesMetadata->cloneAndRecordLiveWrappables(heapTracer, artifact);
+  // Record the native side of every live wrapper while it still exists: a stateless type by
+  // its tag alone, a stateful one as a clone.
+  wrappablesMetadata->recordLiveWrappables(heapTracer, artifact,
+      [this](v8::CppHeapPointerTag tag) { return snapshotRecreateFnFor(tag) != kj::none; });
 
   // We need to reset all C++ handles that point to JavaScript objects before creating
   // the snapshot blob, because V8 does not know how to serialize them.
@@ -671,9 +674,38 @@ void IsolateBase::restoreConstructorTemplatesFromSnapshot() {
   });
 }
 
-void IsolateBase::prepareWrappableDeserializeMetadata(WrappableDeserializeMetadata& metadata) {
+void IsolateBase::prepareWrappableDeserializeMetadata(
+    Lock& js, WrappableDeserializeMetadata& metadata) {
   KJ_REQUIRE(isStartingFromSnapshot());
-  metadata.preallocateCppgcShims(ptr, heapTracer, finalizedSnapshotArtifact());
+  auto& artifact = finalizedSnapshotArtifact();
+
+  // Resolve every slot into the object its restored wrapper is attached to: a stateless type's
+  // fresh instance (its recreate function), or a clone of a stateful type's stored clone. The
+  // artifact is shared by every worker started from it, so the instances live in this worker's
+  // own array; a dropped slot stays null. Nothing on this path catches an exception from a
+  // recreate function or a snapshotClone(): it propagates out of newContext() and the Worker
+  // fails to start, which is why the contracts on Object::jsgSnapshotStateless and
+  // Wrappable::snapshotClone() forbid throwing.
+  auto instances = kj::heapArrayBuilder<kj::Own<Wrappable>>(artifact.liveWrappables.size());
+  for (auto& stored: artifact.liveWrappables) {
+    kj::Own<Wrappable> instance;
+    if (stored.transfer != nullptr) {
+      KJ_SWITCH_ONEOF(stored.transfer) {
+        KJ_CASE_ONEOF(stateless, SnapshotArtifact::LiveWrappable::Stateless) {
+          auto recreate = KJ_ASSERT_NONNULL(snapshotRecreateFnFor(stored.tag),
+              "a stateless slot's tag has no snapshot recreate function",
+              static_cast<uint16_t>(stored.tag));
+          instance = recreate(js);
+        }
+        KJ_CASE_ONEOF(clone, kj::Own<Wrappable>) {
+          instance = KJ_ASSERT_NONNULL(clone->snapshotClone(),
+              "snapshot clone failed to clone again", clone->jsgGetMemoryName());
+        }
+      }
+    }
+    instances.add(kj::mv(instance));
+  }
+  metadata.preallocateCppgcShims(ptr, heapTracer, artifact, instances.finish());
 }
 
 void IsolateBase::finishWrappableDeserializeMetadata(WrappableDeserializeMetadata& metadata) {

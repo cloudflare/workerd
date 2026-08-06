@@ -359,6 +359,9 @@ struct CryptoKeyPair {
 
 class SubtleCrypto: public jsg::Object {
  public:
+  // Stateless object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   // Algorithm dictionaries
   //
   // Every method of SubtleCrypto except `exportKey()` takes an `algorithm` parameter, usually as the
@@ -1000,6 +1003,12 @@ class DigestStream: public WritableStream {
 class Crypto: public jsg::Object {
  public:
   Crypto(jsg::Lock& js): subtle(js.alloc<SubtleCrypto>()) {}
+
+  // Both Crypto and SubtleCrypto are stateless, so a worker started from a snapshot gets a fresh
+  // pair from the constructor above. Its `subtle` is a different object from the snapshot-restored
+  // wrapper of the original SubtleCrypto (if one was reachable): identity across the snapshot is
+  // not preserved, but both are functionally equivalent.
+  static constexpr bool jsgSnapshotStateless = true;
 
   jsg::JsArrayBufferView getRandomValues(jsg::JsArrayBufferView buffer);
 
