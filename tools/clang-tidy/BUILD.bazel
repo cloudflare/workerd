@@ -8,6 +8,10 @@
     different directories to use angled brackets
   - `workerd-consume`: validates that calls to methods annotated with
     WD_CONSUME are made through consume() when invoked on kj::Ptr.
+  - `workerd-promise-ignore-result` - warns on superfluous `ignoreResult()`
+    calls: on promises that are immediately `co_await`ed, and on
+    `capnp::Request::send()` results, which should use `sendIgnoringResult()`
+    instead
   - `workerd-unsafe-continuation-capture`: flags lambdas passed to async
     sinks (e.g. kj::Promise::then) that capture bare references, raw
     pointers, or non-owning views.
@@ -29,6 +33,7 @@ filegroup(
     srcs = [
         "angled-includes.c++",
         "consume.c++",
+        "promise-ignore-result.c++",
         "unsafe-continuation-capture.c++",
         "visit-for-gc.c++",
         "workerd-lint.c++",
@@ -41,6 +46,7 @@ filegroup(
     srcs = [
         "angled-includes.h",
         "consume.h",
+        "promise-ignore-result.h",
         "unsafe-continuation-capture.h",
         "visit-for-gc.h",
     ],
