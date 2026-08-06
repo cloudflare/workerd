@@ -6,9 +6,9 @@
 
 #include "r2-bucket.h"
 #include "r2-rpc.h"
-#include "workerd/jsg/jsg.h"
 
 #include <workerd/api/r2-api.capnp.h>
+#include <workerd/jsg/jsg.h>
 #include <workerd/util/http-util.h>
 
 #include <capnp/compat/json.h>
