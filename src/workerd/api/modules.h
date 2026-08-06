@@ -88,6 +88,9 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto
   if (featureFlags.getUnsafeModule()) {
     builder.add(getExternalUnsafeModuleBundle<TypeWrapper>(featureFlags));
   }
+#ifdef WORKERD_FUZZILLI
+  builder.add(getExternalFuzzilliModuleBundle<TypeWrapper>(featureFlags));
+#endif
 
   if (featureFlags.getRttiApi()) {
     builder.add(getExternalRttiModuleBundle<TypeWrapper>(featureFlags));
