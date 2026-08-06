@@ -787,6 +787,30 @@ wd_test(
 )
 
 wd_test(
+    src = "autovuln-95-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-95-test.js"],
+)
+
+wd_test(
+    src = "autovuln-96-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-96-test.js"],
+)
+
+wd_test(
+    src = "autovuln-198-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-198-test.js"],
+)
+
+wd_test(
+    src = "autovuln-319-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-319-test.js"],
+)
+
+wd_test(
     src = "unsafe-test.wd-test",
     args = ["--experimental"],
     data = ["unsafe-test.js"],
