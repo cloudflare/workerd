@@ -226,10 +226,16 @@ class EsModule final: public Module {
             c->data, c->length, v8::ScriptCompiler::CachedData::BufferPolicy::BufferNotOwned);
         auto check = data->CompatibilityCheck(js.v8Isolate);
         if (check != v8::ScriptCompiler::CachedData::kSuccess) {
-          // The cached data is not compatible with the current isolate. Let's
-          // not try using it.
+          // The cached data is not compatible with the current isolate. Treat
+          // this like a rejection: don't consume it, and flag it so that the
+          // stale entry is cleared and regenerated below. Without the flag the
+          // stale entry would sit in the slot forever, failing the
+          // compatibility check again on every future compile of this module.
           delete data;
           data = nullptr;
+          LOG_WARNING_ONCE("NOSENTRY Cached data for an ESM module failed its compatibility check");
+          observer.onCompileCacheRejected(js.v8Isolate);
+          cacheWasRejected = true;
         } else {
           observer.onCompileCacheFound(js.v8Isolate);
         }
