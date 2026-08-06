@@ -41,23 +41,38 @@ tracing::Attribute::Value cloneAttributeValue(const tracing::Attribute::Value& v
 void reportExceptionToTailStream(tracing::TailStreamWriter& writer,
     const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
+    kj::Maybe<tracing::Exception::Code> code,
     kj::StringPtr name,
     kj::StringPtr message,
     kj::Maybe<kj::StringPtr> stack) {
-  auto truncatedName = name.first(kj::min(name.size(), MAX_TRACE_BYTES));
+  kj::Maybe<tracing::Exception::Code> truncatedCode;
+  size_t codeSize = 0;
+  KJ_IF_SOME(c, code) {
+    KJ_SWITCH_ONEOF(c) {
+      KJ_CASE_ONEOF(text, kj::String) {
+        codeSize = kj::min(text.size(), MAX_TRACE_BYTES);
+        truncatedCode = kj::str(text.first(codeSize));
+      }
+      KJ_CASE_ONEOF(number, double) {
+        codeSize = sizeof(double);
+        truncatedCode = number;
+      }
+    }
+  }
+  auto truncatedName = name.first(kj::min(name.size(), MAX_TRACE_BYTES - codeSize));
   auto truncatedMessage =
-      message.first(kj::min(message.size(), MAX_TRACE_BYTES - truncatedName.size()));
+      message.first(kj::min(message.size(), MAX_TRACE_BYTES - codeSize - truncatedName.size()));
   kj::Maybe<kj::String> truncatedStack;
   size_t truncatedStackSize = 0;
   KJ_IF_SOME(s, stack) {
-    truncatedStackSize =
-        kj::min(s.size(), MAX_TRACE_BYTES - truncatedName.size() - truncatedMessage.size());
+    truncatedStackSize = kj::min(
+        s.size(), MAX_TRACE_BYTES - codeSize - truncatedName.size() - truncatedMessage.size());
     truncatedStack = kj::heapString(s.first(truncatedStackSize));
   }
   writer.report(context,
-      {tracing::Exception(
-          timestamp, kj::str(truncatedName), kj::str(truncatedMessage), kj::mv(truncatedStack))},
-      timestamp, truncatedName.size() + truncatedMessage.size() + truncatedStackSize);
+      {tracing::Exception(timestamp, kj::str(truncatedName), kj::str(truncatedMessage),
+          kj::mv(truncatedStack), kj::mv(truncatedCode))},
+      timestamp, codeSize + truncatedName.size() + truncatedMessage.size() + truncatedStackSize);
 }
 }  // namespace
 
@@ -281,7 +296,7 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
     KJ_IF_SOME(s, stack) {
       stackPtr = s;
     }
-    reportExceptionToTailStream(*writer, context, timestamp, name, message, stackPtr);
+    reportExceptionToTailStream(*writer, context, timestamp, kj::none, name, message, stackPtr);
   }
 
   if (trace->exceededExceptionLimit) {
@@ -301,6 +316,7 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
 
 void WorkerTracer::addSpanException(tracing::SpanId spanId,
     kj::Date timestamp,
+    kj::Maybe<tracing::Exception::Code> code,
     kj::String name,
     kj::String message,
     kj::Maybe<kj::String> stack) {
@@ -317,7 +333,7 @@ void WorkerTracer::addSpanException(tracing::SpanId spanId,
   KJ_IF_SOME(s, stack) {
     stackPtr = s;
   }
-  reportExceptionToTailStream(*writer, context, timestamp, name, message, stackPtr);
+  reportExceptionToTailStream(*writer, context, timestamp, kj::mv(code), name, message, stackPtr);
 }
 
 void WorkerTracer::addDiagnosticChannelEvent(const tracing::InvocationSpanContext& context,
@@ -654,10 +670,14 @@ void UserSpanObserver::onOpen(kj::ConstString operationName, kj::Date startTime)
   }
 }
 
-void UserSpanObserver::onException(
-    kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack) {
+void UserSpanObserver::onException(kj::Date timestamp,
+    kj::Maybe<tracing::Exception::Code> code,
+    kj::String name,
+    kj::String message,
+    kj::Maybe<kj::String> stack) {
   if (wasAccepted) {
-    submitter->submitSpanException(spanId, timestamp, kj::mv(name), kj::mv(message), kj::mv(stack));
+    submitter->submitSpanException(
+        spanId, timestamp, kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
   }
 }
 
