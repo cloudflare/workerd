@@ -151,6 +151,9 @@ class TextEncoder final: public jsg::Object {
     return "utf-8";
   }
 
+  // TextEncoder is stateless, so a fresh instance is indistinguishable from the original.
+  static constexpr bool jsgSnapshotStateless = true;
+
   JSG_RESOURCE_TYPE(TextEncoder, CompatibilityFlags::Reader flags) {
     JSG_METHOD(encode);
     JSG_METHOD(encodeInto);
