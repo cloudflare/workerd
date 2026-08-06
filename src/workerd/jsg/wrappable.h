@@ -144,6 +144,7 @@ using kj::uint;
 
 class GcVisitor;
 class HeapTracer;
+class Lock;
 class Object;
 class Wrappable;  // Forward declaration for WeakRefAnchor.
 
@@ -412,15 +413,21 @@ class Wrappable: public kj::Refcounted {
   static Wrappable* unwrapFromShimInRangeOrAbort(
       v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange);
 
-  // Override in subclasses that want to survive a V8 startup snapshot. Must return a deep,
+  // Override in subclasses with state that must survive a V8 startup snapshot. Must return a deep,
   // isolate-independent copy: no V8 handles, no jsg::Ref<T> members, no IoContext/IO refs. A
   // kj::none result marks the type as not transferable; a snapshot whose context reaches such a
-  // wrapper is rejected (see IsolateBase::createSnapshotBlob()).
+  // wrapper is rejected (see IsolateBase::createSnapshotBlob()). Stateless types do not override
+  // this: they set Object::jsgSnapshotStateless instead, and the snapshot records only their tag.
   //
   // Called twice per transferred object: once in the zygote, on the live original (under the
   // isolate lock, with its wrapper still attached), to produce the copy stored in the
   // SnapshotArtifact; then once per worker started from that snapshot, on the stored copy, to
   // produce the object attached to the restored wrapper.
+  //
+  // Must not throw. In the zygote an exception only fails the snapshot, and the Worker starts
+  // without one. In a worker started from the snapshot the second call runs inside
+  // jsg::Isolate::newContext(), outside the Worker constructor's error handling, so an exception
+  // fails the Worker's startup instead.
   virtual kj::Maybe<kj::Own<Wrappable>> snapshotClone() const {
     return kj::none;
   }
@@ -510,6 +517,12 @@ class Wrappable: public kj::Refcounted {
   friend class Ref;
 };
 
+// Builds the instance a restored wrapper of a stateless type is attached to when a worker starts
+// from a V8 startup snapshot: the type's `Lock&` constructor when it has one, otherwise its default
+// constructor. Runs under the isolate lock before the context exists; see
+// Object::jsgSnapshotStateless and TypeWrapper::snapshotRecreateFnFor().
+using SnapshotRecreateFn = kj::Own<Wrappable> (*)(Lock&);
+
 // For historical reasons, this is actually implemented in setup.c++.
 class HeapTracer: public v8::EmbedderRootsHandler {
  public:
@@ -538,6 +551,17 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   }
   void clearWrappers();
 
+  // Calls `fn` for every Wrappable in `wrappers`, i.e. every one that currently has a V8 wrapper
+  // in this isolate, with its CppgcShim and the shim's CppHeapPointerTag. Startup-snapshot
+  // preparation only: the one caller is WrappablesSerializeMetadata::recordLiveWrappables().
+  //
+  // The caller holds the isolate lock. The references are valid only for the duration of the
+  // call: `fn` must not attach or detach wrappers (the list is being iterated) and must not
+  // allocate on the V8 or cppgc heap, since a GC drops collected wrappers from the list. What
+  // `fn` may keep past the call is the shim's address: on snapshot preparation
+  // destroyLiveWrappableInstances() retires shims instead of freelisting them, so the address
+  // stays unique until the isolate is torn down and serves as the key under which V8 later
+  // reports the wrapper to the API-wrapper serializer.
   void forEachLiveWrapper(
       kj::FunctionParam<void(Wrappable&, v8::Object::Wrappable& shim, v8::CppHeapPointerTag tag)>
           fn);
@@ -552,12 +576,14 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   Wrappable::CppgcShim* allocateShim(Wrappable& wrappable, v8::CppHeapPointerTag tag);
   void clearFreelistedShims();
 
-  // Startup-snapshot load. Allocates the CppgcShim that will back `clone`'s restored wrapper ahead
-  // of Context::New(): the deserializer callback that links wrapper and shim runs under V8's
-  // DisallowGarbageCollection and must not allocate. The shim owns `clone` from here on, and the
-  // returned Persistent is the only root keeping it alive until linkRestoredWrapper().
+  // Startup-snapshot load. Allocates the CppgcShim that will back `instance`'s restored wrapper
+  // ahead of Context::New(): the deserializer callback that links wrapper and shim runs under V8's
+  // DisallowGarbageCollection and must not allocate. `instance` is a fresh, never-wrapped object
+  // built from the SnapshotArtifact (a stateless type's default construction or a stateful type's
+  // snapshotClone()). The shim owns it from here on, and the returned Persistent is the only root
+  // keeping it alive until linkRestoredWrapper().
   cppgc::Persistent<v8::Object::Wrappable> allocateShimForSnapshotRestore(
-      kj::Own<Wrappable> clone, v8::CppHeapPointerTag tag);
+      kj::Own<Wrappable> instance, v8::CppHeapPointerTag tag);
 
   // Links a deserialized wrapper object to a shim from allocateShimForSnapshotRestore(): writes the
   // CppHeap pointer, creates the traced handle and completes the Wrappable's attach bookkeeping.
