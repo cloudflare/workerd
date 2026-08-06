@@ -87,8 +87,6 @@ Functions returning `Result<T>` in `extern "Rust"` blocks translate to C++ funct
 - **`std::io::Error`**: Acceptable for purely I/O-related errors.
 - **`cxx::KjError`**: Use `KjError::new(KjExceptionType::Failed, message)` when you need direct control over the KJ exception type.
 
-**Hard rule for the reverse direction:** a bare-`T` `extern "C++"` shim is `nounwind`, so a throwing C++ body (`jsg::check`, building `rust::String`/`rust::Vec` from V8 data, or `KJ_REQUIRE`) unwinds into `abort()` (SIGABRT). Such shims MUST return `-> Result<T>` — workerd-cxx then catches the throw in C++ and returns `Err(cxx::KjException)`. See `src/rust/jsg/README.md` §Fallible FFI shims and `jsg::v8::ffi::unwrap_string`.
-
 ## CXX BRIDGE: BUILD WIRING
 
 `wd_rust_crate` (and `wd_rust_binary`) generate, for each `cxx_bridge_src` / `cxx_bridge_srcs` entry, a companion `:<bridge>@cxx` cc_library — the C++ side of the bridge: the cxx-generated `<bridge>.rs.{h,cc}` plus every `**/*.h` in the package (globbed into its `hdrs`). C++ consumers `#include <workerd/rust/<pkg>/<bridge>.rs.h>` and depend on the crate (`//src/rust/<pkg>`); depend on `:<bridge>@cxx` alone if you only need the header. The header include prefix is `workerd/` + the package path with `src/` stripped. Any crate with a bridge auto-gets `@workerd-cxx//:cxx` and `@workerd-cxx//kj-rs`.
