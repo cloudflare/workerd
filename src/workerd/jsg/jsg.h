@@ -1424,6 +1424,12 @@ class Object: private Wrappable {
   template <typename T>
   WeakRef<T> getWeakRefToThis(Lock& js);
 
+  template <typename T>
+  static kj::Own<Wrappable> ownAsWrappable(kj::Own<T> obj) {
+    Wrappable& wrappable = *static_cast<Object*>(obj.get());
+    return kj::addRef(wrappable);
+  }
+
  private:
   inline void visitForMemoryInfo(MemoryTracker& tracker) const {}
   inline void visitForGc(GcVisitor& visitor) {}
