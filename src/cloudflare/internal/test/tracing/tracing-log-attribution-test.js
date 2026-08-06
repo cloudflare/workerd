@@ -97,6 +97,8 @@ export const recordExceptionUsesReceiverSpan = {
         name: 'FallbackError',
         message: 'recorded-zero-code',
       });
+      detached.recordException({ code: 'CODE_ONLY' });
+      detached.recordException({ stack: 'ignored-stack-only' });
       detached.end();
     });
   },

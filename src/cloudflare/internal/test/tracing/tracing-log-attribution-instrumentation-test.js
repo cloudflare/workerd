@@ -87,6 +87,7 @@ export default {
           break;
         case 'exception':
           inv.exceptions.push({
+            code: event.event.code,
             name: event.event.name,
             message: event.event.message,
             spanContextSpanId: currentSpanId,
@@ -172,6 +173,16 @@ function findException(inv, message) {
     matches.length,
     1,
     `Expected exactly one exception with message "${message}" in invocation ${inv.invocationId}, got ${matches.length}`
+  );
+  return matches[0];
+}
+
+function findExceptionByCode(inv, code) {
+  const matches = inv.exceptions.filter((e) => e.code === code);
+  assert.strictEqual(
+    matches.length,
+    1,
+    `Expected exactly one exception with code "${code}" in invocation ${inv.invocationId}, got ${matches.length}`
   );
   return matches[0];
 }
@@ -311,7 +322,8 @@ export const validate = {
       assert.notStrictEqual(error.spanContextSpanId, active.spanId);
 
       const coded = findException(inv, 'recorded-code');
-      assert.strictEqual(coded.name, '42');
+      assert.strictEqual(coded.code, 42);
+      assert.strictEqual(coded.name, '');
       assert.strictEqual(coded.spanContextSpanId, receiver.spanId);
 
       const string = findException(inv, 'recorded-string');
@@ -323,8 +335,20 @@ export const validate = {
       assert.strictEqual(messageOnly.spanContextSpanId, receiver.spanId);
 
       const zeroCode = findException(inv, 'recorded-zero-code');
+      assert.strictEqual(zeroCode.code, 0);
       assert.strictEqual(zeroCode.name, 'FallbackError');
       assert.strictEqual(zeroCode.spanContextSpanId, receiver.spanId);
+
+      const codeOnly = findExceptionByCode(inv, 'CODE_ONLY');
+      assert.strictEqual(codeOnly.name, '');
+      assert.strictEqual(codeOnly.message, '');
+      assert.strictEqual(codeOnly.spanContextSpanId, receiver.spanId);
+
+      assert.strictEqual(
+        inv.exceptions.length,
+        6,
+        'stack-only objects do not satisfy the Exception union'
+      );
     }
 
     // Calls after end() must not emit an exception event.

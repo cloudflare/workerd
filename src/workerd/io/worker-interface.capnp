@@ -125,6 +125,11 @@ struct Trace @0x8e8d911203762d34 {
     name @1 :Text;
     message @2 :Text;
     stack @3 :Text;
+    code :union {
+      none @4 :Void;
+      text @5 :Text;
+      number @6 :Float64;
+    }
   }
 
   outcome @2 :EventOutcome;
