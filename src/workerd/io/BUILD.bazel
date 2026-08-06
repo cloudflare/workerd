@@ -469,6 +469,13 @@ kj_test(
 )
 
 kj_test(
+    src = "worker-source-test.c++",
+    deps = [
+        ":worker-source",
+    ],
+)
+
+kj_test(
     src = "async-lock-scheduler-test.c++",
     deps = [
         ":async-lock-scheduler",
