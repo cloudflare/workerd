@@ -294,6 +294,14 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   }
 
   void add(kj::Path& specifier, ModuleInfo&& info) {
+    // Report duplicates as a JS-visible error rather than letting the table
+    // insert below throw: a raw table exception surfaces to the user as an
+    // opaque "internal error" while this is a worker configuration mistake.
+    // (This matches the error the new module registry reports for the same
+    // mistake, which phrases the specifier as a URL rather than a path.)
+    using Key = Entry::Key;
+    JSG_REQUIRE(entries.find(Key(specifier, Type::BUNDLE)) == kj::none, Error, "Module \"",
+        specifier.toString(false), "\" already added to bundle");
     entries.insert(kj::heap<Entry>(specifier, Type::BUNDLE, kj::fwd<ModuleInfo>(info)));
   }
 

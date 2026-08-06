@@ -702,6 +702,30 @@ KJ_TEST("Server: wrapped bindings work under the new module registry") {
   conn.httpGet200("/", "wrapped: object");
 }
 
+KJ_TEST("Server: duplicate module names are reported as config errors (legacy registry)") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-10-01",
+    modules = [
+      ( name = "worker",
+        esModule =
+          `export default {}
+      ),
+      ( name = "dup",
+        esModule =
+          `export default 1
+      ),
+      ( name = "dup",
+        esModule =
+          `export default 2
+      )
+    ]
+  ))"_kj));
+
+  test.expectErrors(R"(
+    service hello: Uncaught Error: Module "dup" already added to bundle
+  )"_blockquote);
+}
+
 KJ_TEST("Server: duplicate module names are reported as config errors (new module registry)") {
   // Errors thrown while building the new module registry (which happens
   // before the Worker::Script is constructed) must be reported as config
