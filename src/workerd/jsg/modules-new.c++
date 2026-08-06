@@ -780,7 +780,11 @@ class IsolateModuleRegistry final {
                       normalizedSpecifier.getHref())))));
             });
           }
-          return js.rejectedPromise<Value>(js.v8Ref(v8::Exception::SyntaxError(js.strIntern(kj::str(
+          // Note: js.str, not js.strIntern. Interned strings live for the
+          // isolate's lifetime, and this message embeds a caller-controlled
+          // specifier (query/fragment variants are unbounded), so interning
+          // it would accumulate permanent per-specifier strings.
+          return js.rejectedPromise<Value>(js.v8Ref(v8::Exception::SyntaxError(js.str(kj::str(
               "Source phase import not available for module: ", normalizedSpecifier.getHref())))));
         }
       };
