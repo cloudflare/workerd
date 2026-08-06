@@ -537,8 +537,8 @@ class IsolateBase {
 
   // Serializes the isolate into the SnapshotArtifact passed at isolate creation.
   // `badTagFieldsCount` and `wrappablesMetadata` are the objects given to
-  // setSnapshotDefaultContext(); the metadata is filled with the live wrappers' clones right
-  // before CreateBlob() and both are checked afterwards.
+  // setSnapshotDefaultContext(); the metadata records the live wrappers right before CreateBlob()
+  // and both are checked afterwards.
   // `extraTemplateHandles` carries template handles drained from embedder-side caches that this
   // class cannot enumerate itself.
   void createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
@@ -546,7 +546,13 @@ class IsolateBase {
       const uint32_t* badTagFieldsCount,
       WrappablesSerializeMetadata* wrappablesMetadata);
 
-  void prepareWrappableDeserializeMetadata(WrappableDeserializeMetadata& metadata);
+  // Start from snapshot, before Context::New(): builds the instance each serialized wrapper slot
+  // is restored to (a stateless type's recreate function or a stored clone's snapshotClone()) and
+  // pre-allocates its CppgcShim; see WrappableDeserializeMetadata. Throws only if one of those
+  // does, which their contracts forbid: nothing on this path catches it and the Worker fails to
+  // start.
+  void prepareWrappableDeserializeMetadata(Lock& js, WrappableDeserializeMetadata& metadata);
+  // After Context::New(): WrappableDeserializeMetadata::releaseSlotsWithChecks().
   void finishWrappableDeserializeMetadata(WrappableDeserializeMetadata& metadata);
 
   void registerExternalReference(intptr_t addr) {
@@ -566,6 +572,14 @@ class IsolateBase {
   // Isolate<TypeWrapper> to fan out over its type wrapper; the base implementation is a no-op.
   virtual void iterateResourceTypeTemplates(
       kj::FunctionParam<void(v8::Global<v8::FunctionTemplate>&)> cb) {}
+
+  // The snapshot recreate function of the resource type tagged `tag`, or none.
+  // PREPARE_SNAPSHOT consults it to record stateless
+  // wrappers by tag alone and START_FROM_SNAPSHOT to rebuild them, so the producer and the
+  // consumer of a snapshot must be the same binary.
+  virtual kj::Maybe<SnapshotRecreateFn> snapshotRecreateFnFor(v8::CppHeapPointerTag tag) const {
+    return kj::none;
+  }
 
   // Visits every struct type's persistent handles (dictionary template + field-name handles).
   virtual void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
@@ -1035,6 +1049,11 @@ class Isolate: public IsolateBase {
     }
   }
 
+  kj::Maybe<SnapshotRecreateFn> snapshotRecreateFnFor(v8::CppHeapPointerTag tag) const override {
+    // Static on the wrapper type: every wrapper in `wrappers` is a TypeWrapper, with one numbering.
+    return TypeWrapper::snapshotRecreateFnFor(tag);
+  }
+
   void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
       kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictTmpl) override {
     if (!hasExtraWrappers) {
@@ -1224,7 +1243,7 @@ class Isolate: public IsolateBase {
       uint32_t badTagFieldsCount = 0;
       WrappableDeserializeMetadata metadata;
       if (jsgIsolate.isStartingFromSnapshot()) {
-        jsgIsolate.prepareWrappableDeserializeMetadata(metadata);
+        jsgIsolate.prepareWrappableDeserializeMetadata(*this, metadata);
         options.internalFieldsDeserializer =
             v8::DeserializeInternalFieldsCallback(&deserializeInternalFields, &badTagFieldsCount);
         options.apiWrapperDeserializer =

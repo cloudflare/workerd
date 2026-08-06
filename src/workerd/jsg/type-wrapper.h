@@ -991,6 +991,33 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
         static_cast<v8::CppHeapPointerTag>(first), static_cast<v8::CppHeapPointerTag>(last));
   }
 
+  // For every resource type with Object::jsgSnapshotStateless set, the function that builds the
+  // instance a restored wrapper is attached to, indexed by the type's tag bucket.
+  // Null for every other tag.
+  static constexpr auto kSnapshotRecreateByTag = []() {
+    kj::FixedArray<SnapshotRecreateFn, kMaxWrappableTags> table{};
+    ([&]<typename U>() {
+      if constexpr (U::JSG_KIND == JsgKind::RESOURCE && requires { U::jsgSnapshotStateless; }) {
+        if constexpr (U::jsgSnapshotStateless) {
+          static_assert(requires(Lock& lock) { U(lock); } || requires { U(); },
+              "a jsgSnapshotStateless type must be constructible from jsg::Lock& or default "
+              "constructible: its snapshot recreate function calls one of those constructors");
+          table[wrappableTagBucketIndex(static_cast<uint16_t>(wrappableTag<U>()))] =
+              &Object::jsgRecreateForSnapshot<U>;
+        }
+      }
+    }.template operator()<T>(), ...);
+    return table;
+  }();
+
+  // The snapshot recreate function of the resource type tagged `tag`, or none when that type is
+  // not stateless (or `tag` is not a resource type's tag at all).
+  static kj::Maybe<SnapshotRecreateFn> snapshotRecreateFnFor(v8::CppHeapPointerTag tag) {
+    auto bucket = wrappableTagBucketIndex(static_cast<uint16_t>(tag));
+    if (bucket >= kMaxWrappableTags || kSnapshotRecreateByTag[bucket] == nullptr) return kj::none;
+    return kSnapshotRecreateByTag[bucket];
+  }
+
  private:
   const JsgConfig config;
 

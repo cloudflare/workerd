@@ -12,16 +12,27 @@ namespace workerd::jsg {
 
 constexpr size_t internalFieldTagSizeInBytes = sizeof(Wrappable::WORKERD_WRAPPABLE_TAG);
 
-void WrappablesSerializeMetadata::cloneAndRecordLiveWrappables(
-    HeapTracer& tracer, SnapshotArtifact& artifact) {
-  tracer.forEachLiveWrapper([&artifact, this](Wrappable& wrappable, v8::Object::Wrappable& shim,
-                                v8::CppHeapPointerTag tag) {
+// The zygote's half of the live-wrappable transfer, under the isolate lock and before
+// destroyLiveWrappableInstances(). A snapshotClone() that throws propagates out of
+// IsolateBase::createSnapshotBlob() and fails the zygote; the Worker then starts without a
+// snapshot.
+void WrappablesSerializeMetadata::recordLiveWrappables(HeapTracer& tracer,
+    SnapshotArtifact& artifact,
+    kj::FunctionParam<bool(v8::CppHeapPointerTag)> isStateless) {
+  using LiveWrappable = SnapshotArtifact::LiveWrappable;
+  tracer.forEachLiveWrapper([&artifact, &isStateless, this](Wrappable& wrappable,
+                                v8::Object::Wrappable& shim, v8::CppHeapPointerTag tag) {
     kj::Maybe<uint32_t> index;
     if (static_cast<uint16_t>(tag) != kContextGlobalWrappableTag) {
-      auto maybeClone = wrappable.snapshotClone();
-      KJ_IF_SOME(clone, maybeClone) {
+      LiveWrappable::Transfer transfer;
+      if (isStateless(tag)) {
+        transfer = LiveWrappable::Stateless{};
+      } else KJ_IF_SOME(clone, wrappable.snapshotClone()) {
+        transfer = kj::mv(clone);
+      }
+      if (transfer != nullptr) {
         index = static_cast<uint32_t>(artifact.liveWrappables.size());
-        artifact.liveWrappables.add(SnapshotArtifact::LiveWrappable{kj::mv(clone), tag});
+        artifact.liveWrappables.add(LiveWrappable{kj::mv(transfer), tag});
       }
     }
     entries.insert(&shim,
@@ -37,32 +48,33 @@ void WrappablesSerializeMetadata::verify(SnapshotArtifact& artifact) {
       unknownWrappersCount);
 
   KJ_REQUIRE(unclonable.empty(),
-      "PREPARE_SNAPSHOT: live wrapper types without a snapshotClone() implementation "
-      "were reachable from the context; these types cannot be transferred through the "
-      "startup snapshot",
+      "PREPARE_SNAPSHOT: live wrapper types that neither set jsgSnapshotStateless nor implement "
+      "snapshotClone() were reachable from the context; these types cannot be transferred "
+      "through the startup snapshot",
       kj::strArray(unclonable, ", "));
 
-  // Drop the clones of wrappers that were not reachable during snapshot creation: their indices never
-  // reached the blob. The slots stay so the serialized indices remain valid.
+  // Drop the transfers of wrappers that were not reachable during snapshot creation: their
+  // indices never reached the blob. The slots stay so the serialized indices remain valid.
   for (auto& entry: entries) {
     KJ_IF_SOME(index, entry.value.index) {
       if (!entry.value.serialized) {
-        artifact.liveWrappables[index].clone = nullptr;
+        artifact.liveWrappables[index].transfer = SnapshotArtifact::LiveWrappable::Transfer();
       }
     }
   }
 }
 
-void WrappableDeserializeMetadata::preallocateCppgcShims(
-    v8::Isolate* v8Isolate, HeapTracer& tracer, const SnapshotArtifact& artifact) {
+void WrappableDeserializeMetadata::preallocateCppgcShims(v8::Isolate* v8Isolate,
+    HeapTracer& tracer,
+    const SnapshotArtifact& artifact,
+    kj::Array<kj::Own<Wrappable>> instances) {
+  KJ_REQUIRE(instances.size() == artifact.liveWrappables.size());
   isolate = v8Isolate;
-  slots = kj::heapArray<Slot>(artifact.liveWrappables.size());
-  for (auto i: kj::indices(artifact.liveWrappables)) {
-    auto& stored = artifact.liveWrappables[i];
-    if (stored.clone.get() == nullptr) continue;
-    auto fresh = KJ_ASSERT_NONNULL(stored.clone->snapshotClone(),
-        "snapshot clone failed to clone again", stored.clone->jsgGetMemoryName());
-    slots[i].shim = tracer.allocateShimForSnapshotRestore(kj::mv(fresh), stored.tag);
+  slots = kj::heapArray<Slot>(instances.size());
+  for (auto i: kj::indices(instances)) {
+    if (instances[i].get() == nullptr) continue;
+    slots[i].shim =
+        tracer.allocateShimForSnapshotRestore(kj::mv(instances[i]), artifact.liveWrappables[i].tag);
   }
 }
 

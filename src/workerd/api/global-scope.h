@@ -92,6 +92,9 @@ using DOMException = jsg::DOMException;
 // A subset of the standard Navigator API.
 class Navigator: public jsg::Object {
  public:
+  // Stateless object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   kj::StringPtr getUserAgent() {
     return "Cloudflare-Workers"_kj;
   }
@@ -149,6 +152,10 @@ class Cloudflare: public jsg::Object {
  public:
   // Return an object containing the state of all compatibility flags known to the runtime.
   jsg::JsObject getCompatibilityFlags(jsg::Lock& js);
+
+  // Stateless (compatibilityFlags is a lazy property materialized on the JS object),
+  // safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
 
   JSG_RESOURCE_TYPE(Cloudflare) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(compatibilityFlags, getCompatibilityFlags);

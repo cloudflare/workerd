@@ -12,6 +12,7 @@
 #include <v8-snapshot.h>
 
 #include <kj/array.h>
+#include <kj/function.h>
 #include <kj/map.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>
@@ -41,11 +42,11 @@ class Wrappable;
 //   fixed at compile time and the producer and the consumer of a snapshot are the same binary,
 //   the same invariant `externalReferences` relies on.
 // * `kNoConstructorTemplate` marks slots that were empty when the snapshot was prepared.
-// * `liveWrappables` is the native backing state of the wrappers serialized into `blob`, indexed
-//   by the uint32 payload the API-wrapper serializer wrote for each of them. Each entry holds a
-//   snapshotClone() of the zygote's original plus the CppHeapPointerTag the original's wrapper carried.
-//   A worker started from this artifact clones the stored clone once more per restored wrapper
-//   and attaches it with the same tag. Slots whose index never reached the blob hold a null clone.
+// * `liveWrappables` is the native side of the wrappers serialized into `blob`, indexed by the
+//   uint32 payload the API-wrapper serializer wrote for each of them. Each entry carries the
+//   CppHeapPointerTag the original's wrapper had and, for a stateful type, a snapshotClone() of
+//   the zygote's original. A stateless type (Object::jsgSnapshotStateless) is recorded by its tag
+//   alone. Slots whose index never reached the blob hold no transfer.
 struct SnapshotArtifact: public kj::AtomicRefcounted {
   v8::StartupData blob{nullptr, 0};
   kj::Array<intptr_t> externalReferences;
@@ -55,7 +56,11 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
   kj::Vector<size_t> constructorTemplateIndices;
 
   struct LiveWrappable {
-    kj::Own<Wrappable> clone;
+    // A type recorded by its tag alone.
+    struct Stateless {};
+    // Empty (== nullptr) once verify() dropped the slot.
+    using Transfer = kj::OneOf<Stateless, kj::Own<Wrappable>>;
+    Transfer transfer;
     v8::CppHeapPointerTag tag;
   };
   kj::Vector<LiveWrappable> liveWrappables;
@@ -79,13 +84,15 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
 v8::StartupData serializeInternalFields(v8::Local<v8::Object> holder, int index, void* data);
 
 // Metadata needed to serialize live wrappable instances.
-// First, every live Wrappable is cloned and the clones are placed in the snapshot artifact.
-// Then a map from cppgc shim pointer to index within the snapshot artifact is built, so that the
-// connection between the C++ Wrappable, its JS wrapper and the cppgc shim can be restored later.
+// First, every live Wrappable is recorded in the snapshot artifact: by its tag alone for a
+// stateless type, as a clone otherwise. Then a map from cppgc shim pointer to index within the
+// snapshot artifact is built, so that the connection between the C++ Wrappable, its JS wrapper and
+// the cppgc shim can be restored later.
 struct WrappablesSerializeMetadata {
   struct Entry {
-    // Slot in SnapshotArtifact::liveWrappables, or none for a type without snapshotClone() and
-    // for the context global (rebuilt by newContext() on load, never transferred).
+    // Slot in SnapshotArtifact::liveWrappables, or none for a type that is neither stateless nor
+    // has snapshotClone(), and for the context global (rebuilt by newContext() on load, never
+    // transferred).
     kj::Maybe<uint32_t> index;
     v8::CppHeapPointerTag tag;
 
@@ -107,13 +114,16 @@ struct WrappablesSerializeMetadata {
   kj::Vector<kj::String> unclonable;
   uint32_t unknownWrappersCount = 0;
 
-  // Clone the native side of every live Wrappable while it still exists into the snapshot artifact,
-  // and build a map from each one's cppgc pointer to its index in the snapshot artifact to serialize
-  // the connection: JS Wrapper -> cppgc shim -> C++ Wrappable.
-  void cloneAndRecordLiveWrappables(HeapTracer& tracer, SnapshotArtifact& artifact);
+  // Record the native side of every live Wrappable while it still exists into the snapshot
+  // artifact (by tag alone when `isStateless(tag)`, as a snapshotClone() otherwise), and build a
+  // map from each one's cppgc pointer to its index in the snapshot artifact to serialize the
+  // connection: JS Wrapper -> cppgc shim -> C++ Wrappable.
+  void recordLiveWrappables(HeapTracer& tracer,
+      SnapshotArtifact& artifact,
+      kj::FunctionParam<bool(v8::CppHeapPointerTag)> isStateless);
 
   // Raises the findings the serializer callback accumulated, then drops the
-  // clones of wrappers whose index never reached the blob.
+  // transfers of wrappers whose index never reached the blob.
   void verify(SnapshotArtifact& artifact);
 };
 
@@ -130,7 +140,7 @@ v8::StartupData serializeApiWrapperCallback(
 // (2) Recreate the link between each C++ Wrappable, its preallocated cppgc shim and its JS wrapper
 //     inside the deserialization callback.
 struct WrappableDeserializeMetadata {
-  // The shim pre-allocated for this slot's clone, or empty for a slot whose clone is null.
+  // The shim pre-allocated for this slot's instance, or empty for a dropped slot.
   struct Slot {
     cppgc::Persistent<v8::Object::Wrappable> shim;
     bool linked = false;
@@ -145,11 +155,14 @@ struct WrappableDeserializeMetadata {
   uint32_t badPayloadsCount = 0;     // API-wrapper payload with a bad size, index or slot
   uint32_t duplicateLinksCount = 0;  // one slot referenced by more than one holder
 
-  // Before creating a context: clones every transferable wrapper's stored clone once more and
-  // pre-allocates the CppgcShim that will back it, so that the deserializer callback only needs
-  // to link holder and shim.
-  void preallocateCppgcShims(
-      v8::Isolate* isolate, HeapTracer& tracer, const SnapshotArtifact& artifact);
+  // Before creating a context: pre-allocates the CppgcShim that will back each restored wrapper,
+  // so that the deserializer callback only needs to link holder and shim. `instances` is parallel
+  // to `artifact.liveWrappables`: the object each slot's restored wrapper is attached to (see
+  // IsolateBase::prepareWrappableDeserializeMetadata()), null for a dropped slot.
+  void preallocateCppgcShims(v8::Isolate* isolate,
+      HeapTracer& tracer,
+      const SnapshotArtifact& artifact,
+      kj::Array<kj::Own<Wrappable>> instances);
 
   // After creating a context: verifies that every serialized slot was linked exactly once and that
   // the callback reported nothing else, then releases the roots that kept unlinked shims alive.
