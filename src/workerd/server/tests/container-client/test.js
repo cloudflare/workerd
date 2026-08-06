@@ -642,9 +642,12 @@ export class DurableObjectExample extends DurableObject {
   async testImageValidation() {
     const container = this.ctx.container;
 
-    assert.throws(() => container.start({ image: 'bad\nimage' }), {
-      message: /Container image reference cannot contain control characters/,
-    });
+    for (const image of ['bad\nimage', 'bad image', 'bad\u0080image']) {
+      assert.throws(() => container.start({ image }), {
+        message:
+          /Container image reference must contain only non-space printable ASCII characters/,
+      });
+    }
     assert.throws(() => container.start({ image: 'x'.repeat(4097) }), {
       message: /Container image reference cannot exceed 4096 bytes/,
     });

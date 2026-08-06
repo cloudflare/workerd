@@ -31,6 +31,8 @@ namespace {
 constexpr size_t MAX_CACHED_TCP_PORTS = 4;
 
 constexpr size_t MAX_IMAGE_REFERENCE_SIZE = 4096;
+constexpr kj::StringPtr VALID_CONTAINER_INSTANCE_TYPES[] = {
+  "lite"_kj, "standard-1"_kj, "standard-2"_kj, "standard-3"_kj, "standard-4"_kj};
 
 // JS numbers are doubles, but the wire format is UInt64.
 uint64_t requireResourceAmount(double value, kj::StringPtr name) {
@@ -346,17 +348,18 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
       JSG_REQUIRE(image.size() <= MAX_IMAGE_REFERENCE_SIZE, TypeError,
           "Container image reference cannot exceed ", MAX_IMAGE_REFERENCE_SIZE, " bytes.");
       for (auto c: image) {
-        JSG_REQUIRE(static_cast<kj::byte>(c) >= 0x20 && c != 0x7f, TypeError,
-            "Container image reference cannot contain control characters.");
+        auto byte = static_cast<kj::byte>(c);
+        JSG_REQUIRE(byte > 0x20 && byte < 0x7f, TypeError,
+            "Container image reference must contain only non-space printable ASCII characters.");
       }
-      req.setImage(image);
+      req.getSource().setImage(image);
     }
     KJ_IF_SOME(instance, options.instance) {
       auto instanceBuilder = req.initInstance();
       KJ_SWITCH_ONEOF(instance) {
         KJ_CASE_ONEOF(named, kj::String) {
-          JSG_REQUIRE(named == "lite" || named == "standard-1" || named == "standard-2" ||
-                  named == "standard-3" || named == "standard-4",
+          JSG_REQUIRE(
+              kj::arrayPtr(VALID_CONTAINER_INSTANCE_TYPES).findFirst(named.asPtr()) != kj::none,
               TypeError, "Invalid container instance type.");
           instanceBuilder.setNamed(named);
         }
@@ -404,7 +407,7 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   }
 
   KJ_IF_SOME(containerSnapshot, options.containerSnapshot) {
-    req.setContainerSnapshotId(containerSnapshot.id);
+    req.getSource().setContainerSnapshotId(containerSnapshot.id);
   }
 
   req.setCompatibilityFlags(flags);

@@ -2408,23 +2408,29 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
 
   kj::String snapshotImageRef;
   kj::StringPtr effectiveImage = imageName;
-  if (params.hasImage()) {
-    effectiveImage = params.getImage();
-  }
-  if (params.hasContainerSnapshotId()) {
-    auto selectedImage = co_await inspectImage(effectiveImage);
-    auto snapshotId = parseSnapshotId(params.getContainerSnapshotId());
-    snapshotImageRef = kj::str(CONTAINER_SNAPSHOT_IMAGE_PREFIX, snapshotId);
-    auto snapshotImage = co_await inspectImage(snapshotImageRef);
-    for (size_t depth = 0; snapshotImage.id != selectedImage.id && snapshotImage.parent.size() > 0;
-         ++depth) {
-      JSG_REQUIRE(depth < MAX_SNAPSHOT_IMAGE_ANCESTRY_DEPTH, Error,
-          "Container snapshot image ancestry is too deep");
-      snapshotImage = co_await inspectImage(snapshotImage.parent);
+  auto source = params.getSource();
+  switch (source.which()) {
+    case rpc::Container::StartParams::Source::IMAGE:
+      effectiveImage = source.getImage();
+      break;
+    case rpc::Container::StartParams::Source::CONTAINER_SNAPSHOT_ID: {
+      if (!source.hasContainerSnapshotId()) break;
+
+      auto selectedImage = co_await inspectImage(effectiveImage);
+      auto snapshotId = parseSnapshotId(source.getContainerSnapshotId());
+      snapshotImageRef = kj::str(CONTAINER_SNAPSHOT_IMAGE_PREFIX, snapshotId);
+      auto snapshotImage = co_await inspectImage(snapshotImageRef);
+      for (size_t depth = 0;
+           snapshotImage.id != selectedImage.id && snapshotImage.parent.size() > 0; ++depth) {
+        JSG_REQUIRE(depth < MAX_SNAPSHOT_IMAGE_ANCESTRY_DEPTH, Error,
+            "Container snapshot image ancestry is too deep");
+        snapshotImage = co_await inspectImage(snapshotImage.parent);
+      }
+      JSG_REQUIRE(snapshotImage.id == selectedImage.id, Error,
+          "Container snapshot does not match the requested image");
+      effectiveImage = snapshotImageRef;
+      break;
     }
-    JSG_REQUIRE(snapshotImage.id == selectedImage.id, Error,
-        "Container snapshot does not match the requested image");
-    effectiveImage = snapshotImageRef;
   }
 
   // If startup fails after we clone any snapshot volumes, tear down the app container first and
