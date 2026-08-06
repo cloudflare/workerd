@@ -150,7 +150,7 @@ class Wrappable::CppgcShim final: public v8::Object::Wrappable {
       KJ_CASE_ONEOF(d, Dead) {}
       KJ_CASE_ONEOF(restoring, Restoring) {
         // Only reachable when a snapshot restore was abandoned before linkRestoredWrapper(): the
-        // clone was never attached to anything, so dropping it is all there is to do.
+        // instance was never attached to anything, so dropping it is all there is to do.
       }
     }
   }
@@ -169,8 +169,8 @@ class Wrappable::CppgcShim final: public v8::Object::Wrappable {
       }
       KJ_CASE_ONEOF(d, Dead) {}
       KJ_CASE_ONEOF(restoring, Restoring) {
-        // Not linked yet, and the clone holds no V8 handles (snapshotClone() contract): nothing
-        // to trace.
+        // Not linked yet, and the instance holds no V8 handles (allocateShimForSnapshotRestore()
+        // contract): nothing to trace.
       }
     }
   }
@@ -195,10 +195,10 @@ class Wrappable::CppgcShim final: public v8::Object::Wrappable {
   struct Dead {};
 
   // Allocated ahead of a startup-snapshot context deserialization (see
-  // HeapTracer::allocateShimForSnapshotRestore()), owning the clone that the API-wrapper
+  // HeapTracer::allocateShimForSnapshotRestore()), owning the instance that the API-wrapper
   // deserializer will link to its restored wrapper. Until linkRestoredWrapper() moves the shim to
-  // Active, a cppgc::Persistent held by the restore state is its only root, and the clone has no
-  // wrapper, no isolate and no handles.
+  // Active, a cppgc::Persistent held by the restore state is its only root, and the instance has
+  // no wrapper, no isolate and no handles.
   struct Restoring {
     kj::Own<JSGWrappable> wrappable;
   };
@@ -301,16 +301,18 @@ JSGWrappable::CppgcShim* HeapTracer::allocateShim(
 }
 
 cppgc::Persistent<v8::Object::Wrappable> HeapTracer::allocateShimForSnapshotRestore(
-    kj::Own<JSGWrappable> clone, v8::CppHeapPointerTag tag) {
-  KJ_REQUIRE(!clone->hasWrapper() && clone->isolate == nullptr && clone->getStrongRefcount() == 0,
-      "a snapshot clone must be a fresh, never-wrapped object that no jsg::Ref holds");
+    kj::Own<JSGWrappable> instance, v8::CppHeapPointerTag tag) {
+  KJ_REQUIRE(
+      !instance->hasWrapper() && instance->isolate == nullptr && instance->getStrongRefcount() == 0,
+      "an instance restored from a snapshot must be a fresh, never-wrapped object that no "
+      "jsg::Ref holds");
   KJ_REQUIRE(static_cast<uint16_t>(tag) != kContextGlobalWrappableTag,
       "the context global is rebuilt by newContext(), never restored from the artifact");
   // Always a fresh allocation rather than a freelisted shim: the freelist hands out shims that
   // become Active around a live Wrappable, whereas this one starts in Restoring.
   auto& cppgcAllocHandle = isolate->GetCppHeap()->GetAllocationHandle();
   auto* shim =
-      cppgc::MakeGarbageCollected<JSGWrappable::CppgcShim>(cppgcAllocHandle, kj::mv(clone), tag);
+      cppgc::MakeGarbageCollected<JSGWrappable::CppgcShim>(cppgcAllocHandle, kj::mv(instance), tag);
   return cppgc::Persistent<v8::Object::Wrappable>(shim);
 }
 

@@ -15,6 +15,9 @@ class ProcessModule final: public jsg::Object {
   ProcessModule() = default;
   ProcessModule(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   jsg::JsValue getBuiltinModule(jsg::Lock& js, kj::String specifier);
 
 // This process.platform implementation is always gated behind the
