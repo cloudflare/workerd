@@ -339,6 +339,10 @@ class IsolateBase {
     return exportsAsyncContextKey.addRef();
   }
 
+  kj::Arc<AsyncContextFrame::StorageKey> getActiveSpanAsyncContextKey() {
+    return activeSpanAsyncContextKey.addRef();
+  }
+
   void setUsingNewModuleRegistry() {
     usingNewModuleRegistry = true;
   }
@@ -510,6 +514,9 @@ class IsolateBase {
 
   // A shared async context key for accessing exports
   kj::Arc<AsyncContextFrame::StorageKey> exportsAsyncContextKey;
+
+  // A shared async context key for accessing the active user tracing span.
+  kj::Arc<AsyncContextFrame::StorageKey> activeSpanAsyncContextKey;
 
   // We expect queues to remain relatively small -- 8 is the largest size I have observed from local
   // testing.

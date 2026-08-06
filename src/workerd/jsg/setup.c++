@@ -395,6 +395,7 @@ IsolateBase::IsolateBase(V8System& system,
       externalMemoryTarget(kj::arc<ExternalMemoryTarget>(ptr)),
       envAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
       exportsAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
+      activeSpanAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
       observer(kj::mv(observer)),
       externalStringAllocator(kj::mv(externalStringAllocator)) {

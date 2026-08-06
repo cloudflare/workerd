@@ -55,6 +55,9 @@ class BaseTracer: public kj::Refcounted {
       kj::Date startTime) = 0;
   // Add a span close event.
   virtual void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) = 0;
+  virtual void addSpanAttribute(const tracing::InvocationSpanContext& context,
+      kj::ConstString key,
+      tracing::Attribute::Value value) = 0;
 
   virtual void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -168,6 +171,14 @@ class WorkerTracer final: public BaseTracer {
       kj::ConstString operationName,
       kj::Date startTime) override;
   void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) override;
+  void addSpanAttribute(const tracing::InvocationSpanContext& context,
+      kj::ConstString key,
+      tracing::Attribute::Value value) override;
+  // Variant for RPC-based tracing, where the caller supplies the timestamp from its IoContext.
+  void addSpanAttributeInternal(const tracing::InvocationSpanContext& context,
+      kj::ConstString key,
+      tracing::Attribute::Value value,
+      kj::Date timestamp);
   void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       kj::String name,
