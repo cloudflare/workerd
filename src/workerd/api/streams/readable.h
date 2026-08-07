@@ -255,6 +255,9 @@ class DrainingReader: public ReadableStreamController::Reader {
 
   kj::Ptr<ReadableStreamController::Reader> getPtr() { return addPtrToThis(); }
 
+  // A pointer for holders that may outlive the reader and must notice when they have.
+  kj::Weak<DrainingReader> getWeak() { return addWeakToThis(); }
+
  private:
   struct Initial {};
   using Attached = jsg::Ref<ReadableStream>;
