@@ -639,6 +639,20 @@ export const testCheckServerIdentity = {
         host: 'xn--bcher-kva.example.com',
         cert: { subject: { CN: '*.example.com' } },
       },
+      {
+        host: 'b\u00fccher.example.com',
+        cert: { subject: { CN: 'xn--bcher-kva.example.com' } },
+      },
+      {
+        host: 'foo\u3002bar.example.com',
+        cert: {
+          subjectaltname: 'DNS:*.example.com',
+          subject: {},
+        },
+        error:
+          "Host: foo\u3002bar.example.com. is not in the cert's altnames: " +
+          'DNS:*.example.com',
+      },
       // RFC 6125, section 6.4.3: "[...] the client SHOULD NOT attempt to match
       // a presented identifier where the wildcard character is embedded within
       // an A-label [...]"

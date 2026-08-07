@@ -152,6 +152,11 @@ export function checkServerIdentity(
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-conversion
   hostname = '' + hostname;
+  const hostnameASCII = urlUtil.domainToASCII(hostname);
+
+  // Remove trailing dot for error messages and matching.
+  hostname = unfqdn(hostname);
+  const hostnameASCIIWithoutFQDN = unfqdn(hostnameASCII);
 
   if (altNames) {
     const splitAltNames = altNames.includes('"')
@@ -169,14 +174,12 @@ export function checkServerIdentity(
   let valid = false;
   let reason = 'Unknown reason';
 
-  hostname = unfqdn(hostname); // Remove trailing dot for error messages.
-
-  if (isIP(hostname)) {
-    valid = ips.includes(urlUtil.canonicalizeIp(hostname));
+  if (isIP(hostnameASCIIWithoutFQDN)) {
+    valid = ips.includes(urlUtil.canonicalizeIp(hostnameASCIIWithoutFQDN));
     if (!valid)
       reason = `IP: ${hostname} is not in the cert's list: ` + ips.join(', ');
   } else if (dnsNames.length > 0 || subject?.CN) {
-    const hostParts = splitHost(hostname);
+    const hostParts = splitHost(hostnameASCIIWithoutFQDN);
     const wildcard = (pattern: string): boolean =>
       check(hostParts, pattern, true);
 
