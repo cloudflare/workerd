@@ -769,6 +769,12 @@ wd_test(
 )
 
 wd_test(
+    src = "autovuln-148-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-148-test.js"],
+)
+
+wd_test(
     src = "streams-byob-concurrent-readatleast-test.wd-test",
     args = ["--experimental"],
     data = ["streams-byob-concurrent-readatleast-test.js"],
@@ -784,6 +790,12 @@ wd_test(
     src = "streams-async-iterator-test.wd-test",
     args = ["--experimental"],
     data = ["streams-async-iterator-test.js"],
+)
+
+wd_test(
+    src = "autovuln-319-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-319-test.js"],
 )
 
 wd_test(
