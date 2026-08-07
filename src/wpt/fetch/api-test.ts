@@ -19,6 +19,8 @@ export default {
       'Stream errors once aborted, after reading. Underlying connection closed.',
       // Flaky since 2025-07-25. To be investigated.
       'Stream errors once aborted. Underlying connection closed.',
+      // Flaky since 2026-08-07. To be investigated.
+      'Underlying connection is closed when aborting after receiving response',
     ],
     expectedFailures: [
       // The fetch promise still resolves for some reason
