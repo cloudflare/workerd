@@ -4,7 +4,9 @@
 
 #pragma once
 
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include "r2-bucket.h"
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include "r2-multipart.h"
 
 namespace workerd::api::public_beta {

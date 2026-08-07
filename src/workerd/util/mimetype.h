@@ -4,7 +4,6 @@
 #pragma once
 
 #include <workerd/jsg/memory.h>
-#include <workerd/util/strings.h>
 
 #include <kj/common.h>
 #include <kj/map.h>

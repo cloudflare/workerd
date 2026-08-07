@@ -1140,7 +1140,7 @@ class IsolateModuleRegistry final {
   };
 
   struct InstanceCallbacks final {
-    const Entry& keyForRow(const Entry& entry) const {
+    const Entry& keyForRow(const Entry& entry KJ_LIFETIMEBOUND) const {
       return entry;
     }
     bool matches(const Entry& entry, const Url& id, const Module* def) const {

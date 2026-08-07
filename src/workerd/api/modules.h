@@ -8,7 +8,6 @@
 #include <workerd/api/filesystem.h>
 #include <workerd/api/messagechannel.h>
 #include <workerd/api/node/node.h>
-#include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/rtti.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/tracing.h>

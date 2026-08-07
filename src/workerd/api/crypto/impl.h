@@ -9,6 +9,8 @@
 
 #include "crypto.h"
 
+// For fastEncodeBase64Url, widely used in crypto implementation
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include <workerd/api/util.h>
 #include <workerd/jsg/jsvalue.h>
 

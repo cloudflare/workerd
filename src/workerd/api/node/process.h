@@ -3,9 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
-#include <workerd/api/node/i18n.h>
-#include <workerd/api/node/node-version.h>
-#include <workerd/io/worker-fs.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api::node {

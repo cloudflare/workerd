@@ -7,7 +7,6 @@
 #include "common.h"
 
 #include <workerd/util/state-machine.h>
-#include <workerd/util/weak-refs.h>
 
 namespace workerd::api {
 

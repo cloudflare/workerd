@@ -7,8 +7,6 @@
 #include <workerd/api/streams/transform.h>
 #include <workerd/jsg/jsg.h>
 
-#include <zlib.h>
-
 namespace workerd::api {
 
 // A custom allocator to be used by the zlib and brotli libraries.
@@ -19,7 +17,7 @@ class CompressionAllocator final {
  public:
   CompressionAllocator(kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget);
 
-  static void* AllocForZlib(void* data, uInt items, uInt size);
+  static void* AllocForZlib(void* data, uint items, uint size);
   static void* AllocForBrotli(void* data, size_t size);
   static void FreeForZlib(void* data, void* pointer);
 

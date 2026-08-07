@@ -29,6 +29,7 @@ Checks: >
   google-readability-casting,
   misc-confusable-identifiers,
   misc-header-include-cycle,
+  misc-include-cleaner,
   misc-redundant-expression,
   misc-throw-by-value-catch-by-reference,
   misc-unused-alias-decls,
@@ -96,6 +97,11 @@ CheckOptions:
     value: "jsg/jsg.h|jsg/dom-exception.h"
   - key: cppcoreguidelines-missing-std-forward.ForwardFunction
     value: "kj::fwd"
+  - key: misc-include-cleaner.MissingIncludes
+    value: False
+  # Ignore KJ headers (too many to clean up for now) and some JSG headers where misc-include-cleaner reports false positives
+  - key: misc-include-cleaner.IgnoreHeaders
+    value: "jsg.h|function.h|kj/.*"
 
 ####
 # Custom checks.

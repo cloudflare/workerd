@@ -5,6 +5,7 @@
 #pragma once
 
 #include "basics.h"
+#include "events.h"
 #include "filesystem.h"
 #include "http.h"
 #include "messagechannel.h"

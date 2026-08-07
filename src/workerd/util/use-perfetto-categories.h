@@ -1,5 +1,7 @@
 #pragma once
 
+// This file is widely used to enable perfetto
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include <workerd/util/perfetto-tracing.h>
 
 // This header is to be imported by any translation unit (c++ file) that

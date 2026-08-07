@@ -78,7 +78,7 @@ static v8::Local<v8::String> makeInternedStr(v8::Isolate* isolate, const Name& n
 }
 
 // Wrappable implementation - calls into Rust via CXX bridge
-Wrappable::~Wrappable() {
+Wrappable::~Wrappable() noexcept(false) {
   wrappable_invoke_drop(*this);
 }
 

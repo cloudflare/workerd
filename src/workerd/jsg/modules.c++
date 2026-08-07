@@ -8,8 +8,6 @@
 
 #include <v8-wasm.h>
 
-#include <kj/mutex.h>
-
 #include <span>
 
 namespace workerd::jsg {

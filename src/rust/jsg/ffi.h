@@ -4,12 +4,10 @@
 
 #pragma once
 
-#include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/wrappable.h>
 
-#include <kj-rs/kj-rs.h>
 #include <rust/cxx.h>
-#include <v8.h>
+#include <v8-isolate.h>
 
 #include <kj/function.h>
 #include <kj/memory.h>
@@ -56,7 +54,7 @@ struct TraitObjectPtr {
 // and destruction without knowing the concrete type at compile time.
 class Wrappable: public ::workerd::jsg::Wrappable {
  public:
-  ~Wrappable();
+  ~Wrappable() noexcept(false);
   void jsgVisitForGc(::workerd::jsg::GcVisitor& visitor) override;
   kj::StringPtr jsgGetMemoryName() const override;
   size_t jsgGetMemorySelfSize() const override;

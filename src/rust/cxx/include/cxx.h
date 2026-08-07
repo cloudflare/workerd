@@ -8,12 +8,10 @@
 #include <initializer_list>
 #include <iosfwd>
 #include <iterator>
-#include <new>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
-#include <vector>
 #ifdef _WIN32
 #include <basetsd.h>
 #else

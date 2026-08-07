@@ -5,11 +5,9 @@
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/jsg/modules-new.h>
 #include <workerd/util/strong-bool.h>
 
 #include <pyodide/generated/pyodide_extra.capnp.h>
-#include <pyodide/pyodide_static.capnp.h>
 #include <pyodide/python_packages.capnp.h>
 
 #include <capnp/serialize.h>

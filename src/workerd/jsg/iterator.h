@@ -6,6 +6,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/memory.h>
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include <workerd/jsg/struct.h>
 #include <workerd/util/weak-refs.h>
 

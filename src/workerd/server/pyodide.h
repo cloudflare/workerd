@@ -4,7 +4,6 @@
 #pragma once
 
 #include <workerd/api/pyodide/pyodide.h>
-#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
 
 #include <kj/array.h>

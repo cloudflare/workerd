@@ -7,13 +7,15 @@ load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES")
 load("@rules_cc//cc:find_cc_toolchain.bzl", "find_cc_toolchain")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
-load("//build/tools/clang_tidy:check_path_filters.bzl", "CHECK_PATH_FILTERS")
+load("//build/tools/clang_tidy:check_path_filters.bzl", "CHECK_PATH_FILTERS", "HEADER_ONLY_CHECKS")
 
 def _get_disabled_checks_for_file(file_path):
     """Returns checks that should be disabled for this file.
 
     Checks listed in CHECK_PATH_FILTERS are only enabled for files under their
     allowed paths. For files not under any allowed path, the check is disabled.
+    Checks listed in HEADER_ONLY_CHECKS are only enabled for header files and
+    disabled otherwise.
     """
     disabled = []
     for check, allowed_paths in CHECK_PATH_FILTERS.items():
@@ -30,6 +32,11 @@ def _get_disabled_checks_for_file(file_path):
                 break
         if not enabled:
             disabled.append(check)
+
+    for check in HEADER_ONLY_CHECKS:
+        if not file_path.endswith(".h"):
+            disabled.append(check)
+
     return disabled
 
 def _clang_tidy_aspect_impl(target, ctx):
@@ -60,6 +67,12 @@ def _clang_tidy_aspect_impl(target, ctx):
     # we use $location in our copts, expand it
     rule_copts = [ctx.expand_location(opt) for opt in rule_copts]
 
+    # disable clang tidy if no-clang-tidy tag is defined. For no-clang-tidy-
+    # headers, we only disable it on header files.
+    # todo: figure out a better way to control clang tidy on a per-target basis.
+    if "no-clang-tidy" in ctx.rule.attr.tags:
+        return []
+
     srcs = []
     if hasattr(ctx.rule.attr, "srcs"):
         for src in ctx.rule.attr.srcs:
@@ -68,7 +81,7 @@ def _clang_tidy_aspect_impl(target, ctx):
                 for src in src.files.to_list()
                 if src.is_source and src.short_path.endswith((".c++", ".c", ".h"))
             ]
-    if hasattr(ctx.rule.attr, "hdrs"):
+    if hasattr(ctx.rule.attr, "hdrs") and not "no-clang-tidy-headers" in ctx.rule.attr.tags:
         for src in ctx.rule.attr.hdrs:
             srcs += [
                 src
@@ -83,11 +96,6 @@ def _clang_tidy_aspect_impl(target, ctx):
     system_includes = compilation_context.system_includes.to_list()
     external_includes = compilation_context.external_includes.to_list()
     headers = compilation_context.headers
-
-    # disable clang tidy if no-clang-tidy tag is defined.
-    # todo: figure out a better way to control clang tidy on a per-target basis.
-    if "no-clang-tidy" in ctx.rule.attr.tags:
-        return []
 
     # bazel doesn't expose implementation deps through compilation context
     # https://github.com/bazelbuild/bazel/issues/19663
