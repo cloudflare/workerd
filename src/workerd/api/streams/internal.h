@@ -246,9 +246,9 @@ class WritableStreamInternalController: public WritableStreamController {
     return !writeState.is<Unlocked>();
   }
 
-  bool lockWriter(jsg::Lock& js, Writer& writer) override;
+  bool lockWriter(jsg::Lock& js, kj::Ptr<Writer> writer) override;
 
-  void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) override;
+  void releaseWriter(kj::Ptr<Writer> writer, kj::Maybe<jsg::Lock&> maybeJs) override;
   // See the comment for releaseWriter in common.h for details on the use of maybeJs
 
   kj::Maybe<jsg::JsValue> isErroring(jsg::Lock& js) override {

@@ -66,7 +66,7 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
   // Internal API
 
   void attach(jsg::Lock& js,
-      WritableStreamController& controller,
+      jsg::Ref<WritableStream> stream,
       jsg::Promise<void> closedPromise,
       jsg::Promise<void> readyPromise) override;
 
