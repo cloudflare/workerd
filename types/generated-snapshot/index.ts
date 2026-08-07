@@ -507,6 +507,7 @@ export interface ExecutionContext<Props = unknown> {
   cache?: CacheContext;
   readonly access?: CloudflareAccessContext;
   tracing: Tracing;
+  abort(reason?: any): void;
 }
 export type ExportedHandlerFetchHandler<
   Env = unknown,

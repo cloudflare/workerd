@@ -629,3 +629,11 @@ kj_test(
         "//src/workerd/tests:test-fixture",
     ],
 )
+
+kj_test(
+    src = "io-context-abort-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
