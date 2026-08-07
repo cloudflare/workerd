@@ -36,7 +36,12 @@ oci_image(
 oci_load(
     name = "load",
     image = ":image",
-    repo_tags = ["cloudflare/workerd/container-client-test:latest"],
+    repo_tags = [
+        "cloudflare/workerd/container-client-test:latest",
+        # Re-tag the image so we can use it in image override tests without
+        # building a separate image.
+        "cloudflare/workerd/container-client-test:override",
+    ],
     visibility = ["//visibility:public"],
 )
 

@@ -45,6 +45,7 @@
 #include <workerd/api/worker-loader.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/api/workers-module.h>
+#include <workerd/api/wrapped-binding.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
 #include <workerd/io/promise-wrapper.h>
@@ -144,6 +145,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_PERFORMANCE_ISOLATE_TYPES,
     EW_TRACING_ISOLATE_TYPES,
     EW_WORKERD_DEBUG_PORT_CLIENT_ISOLATE_TYPES,
+    EW_WRAPPED_BINDING_ISOLATE_TYPES,
     workerd::api::EnvModule,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
@@ -704,6 +706,14 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
         // invoke the function, its result will be binding value
         v8::Local<v8::Value> arg = env.As<v8::Value>();
         value = jsg::check(v8::Function::Cast(*fn)->Call(context, context->Global(), 1, &arg));
+        if (wrapped.entrypoint == "default"_kj && wrapped.innerBindings.size() == 1 &&
+            wrapped.innerBindings[0].name == api::WRAPPED_BINDING_INNER_NAME &&
+            wrapped.innerBindings[0].value.is<Global::Fetcher>()) {
+          KJ_IF_SOME(binding,
+              lock.getTypeHandler<jsg::Ref<api::WrappedBinding>>().tryUnwrap(lock, value)) {
+            binding->setWrapperModule(kj::str(wrapped.moduleName));
+          }
+        }
       } else {
         KJ_FAIL_REQUIRE(
             "wrapped binding module can't be resolved (internal modules only)", wrapped.moduleName);
@@ -979,7 +989,15 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
             publicExtensionsBuilder.addEsm(url, module.getEsModule().asArray());
           }
         } else {
-          KJ_LOG(WARNING, "Ignoring extension module with invalid name", module.getName());
+          // The new module registry identifies extension modules by URL, so
+          // the name must parse as an absolute URL (the legacy registry
+          // accepts any path-like name). Silently dropping the module would
+          // surface later as a confusing "Module not found" error at import
+          // time, so fail registry construction with an actionable error
+          // instead; makeWorkerImpl() reports it as a worker config error.
+          KJ_FAIL_REQUIRE(kj::str("Invalid extension module name \"", module.getName(),
+              "\": when the new_module_registry compatibility flag is enabled, extension "
+              "module names must be fully-qualified URLs (e.g. \"my-extension:module\")."));
         }
       }
     }

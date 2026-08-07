@@ -192,6 +192,10 @@ class IsolateBase {
     evalAllowed = allow;
   }
 
+  inline bool isEvalAllowed(kj::Badge<Lock>) const {
+    return evalAllowed;
+  }
+
   inline void setDisallowJavascriptExecution(kj::Badge<Lock>, bool allow) {
     if (allow) {
       javascriptExecutionDisallowed++;

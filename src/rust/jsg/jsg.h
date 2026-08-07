@@ -78,8 +78,26 @@ struct RustBuiltinModuleAdapter: public ::workerd::rust::jsg::ModuleRegistry {
 
   void addBuiltinModule(
       ::rust::Str specifier, ModuleCallback moduleCallback, ModuleType moduleType) override {
-    // Convert ::rust::Str to kj::ArrayPtr<const char> for URL parsing.
     auto specifierPtr = kj::ArrayPtr<const char>(specifier.data(), specifier.size());
+
+    // A BuiltinBuilder can only represent builtin modules.
+    KJ_REQUIRE(moduleType != ModuleType::Bundle,
+        "Bundle-typed Rust modules cannot be registered through a BuiltinBuilder", specifierPtr);
+
+    // Register the module only when its declared visibility matches the
+    // builder this adapter wraps. The registration functions are invoked once
+    // per bundle -- user-importable (BUILTIN) and internal-only (BUILTIN_ONLY)
+    // -- and the adapter wrapping the matching builder performs the
+    // registration. Ignoring the declared type here would silently give the
+    // module a different visibility under the new module registry than the
+    // RustModuleRegistry adapter above gives it under the original registry.
+    auto accepted = builder.type() == ::workerd::jsg::modules::ModuleBundle::Type::BUILTIN
+        ? ModuleType::Builtin
+        : ModuleType::Internal;
+    if (moduleType != accepted) {
+      return;
+    }
+
     KJ_IF_SOME(url, ::workerd::jsg::Url::tryParse(specifierPtr)) {
       builder.addSynthetic(url,
           [callback = kj::mv(moduleCallback)](::workerd::jsg::Lock& js, const ::workerd::jsg::Url&,

@@ -258,7 +258,10 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":frankenvalue_capnp",
+        ":worker-interface_capnp",
         "//src/workerd/jsg",
+        "//src/workerd/util:own-util",
+        "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp:capnpc",
     ],
 )
@@ -463,6 +466,13 @@ kj_test(
     src = "io-gate-test.c++",
     deps = [
         ":io-gate",
+    ],
+)
+
+kj_test(
+    src = "worker-source-test.c++",
+    deps = [
+        ":worker-source",
     ],
 )
 

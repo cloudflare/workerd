@@ -3970,6 +3970,11 @@ interface ContainerStartupOptions {
   directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
   containerSnapshot?: ContainerSnapshot;
 }
+interface ContainerStartResources {
+  vcpu: number;
+  memoryMib: number;
+  diskMb: number;
+}
 /**
  * The **`MessagePort`** interface of the Channel Messaging API represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.
  *
@@ -4489,7 +4494,10 @@ interface Tracing {
 }
 declare abstract class Span {
   get isTraced(): boolean;
-  setAttribute(key: string, value?: boolean | number | string): void;
+  setAttribute(key: string, value: boolean | number | string): this;
+  setAttributes(
+    attributes: Record<string, boolean | number | string | undefined>,
+  ): this;
   end(): void;
 }
 /**

@@ -16,6 +16,8 @@
 #include <kj/filesystem.h>
 #include <kj/refcount.h>
 
+#include <cmath>
+
 namespace workerd::api {
 
 namespace {
@@ -27,6 +29,21 @@ namespace {
 //   and/or a debug log or metric when the cap is hit, so ports beyond the cap are not silently and
 //   permanently relegated to the slower path.
 constexpr size_t MAX_CACHED_TCP_PORTS = 4;
+
+constexpr size_t MAX_IMAGE_REFERENCE_SIZE = 4096;
+constexpr kj::StringPtr VALID_CONTAINER_INSTANCE_TYPES[] = {
+  "lite"_kj, "standard-1"_kj, "standard-2"_kj, "standard-3"_kj, "standard-4"_kj};
+
+// JS numbers are doubles, but the wire format is UInt64.
+uint64_t requireResourceAmount(double value, kj::StringPtr name) {
+  JSG_REQUIRE(std::isfinite(value) && value > 0, RangeError, "Container resource ", name,
+      " must be a finite number greater than 0.");
+  JSG_REQUIRE(
+      value == std::floor(value), RangeError, "Container resource ", name, " must be an integer.");
+  JSG_REQUIRE(value <= static_cast<double>(jsg::MAX_SAFE_INTEGER), RangeError,
+      "Container resource ", name, " exceeds Number.MAX_SAFE_INTEGER.");
+  return static_cast<uint64_t>(value);
+}
 
 kj::Maybe<kj::Path> parseRestorePath(kj::StringPtr path) {
   JSG_REQUIRE(path.size() > 0 && path[0] == '/', TypeError,
@@ -62,6 +79,31 @@ kj::String getExecOutputMode(jsg::Optional<kj::String> maybeMode, kj::StringPtr 
 
 kj::Array<kj::byte> emptyByteArray() {
   return kj::heapArray<kj::byte>(0);
+}
+
+constexpr size_t MAX_CONTAINER_LABELS = 10;
+constexpr size_t MAX_CONTAINER_LABEL_NAME_BYTES = 16;
+constexpr size_t MAX_CONTAINER_LABEL_VALUE_BYTES = 64;
+
+void requireValidLabels(const jsg::Dict<kj::String>& labels) {
+  JSG_REQUIRE(labels.fields.size() <= MAX_CONTAINER_LABELS, Error, "Cannot specify more than ",
+      MAX_CONTAINER_LABELS, " container labels");
+  for (auto i: kj::indices(labels.fields)) {
+    const auto& field = labels.fields[i];
+    JSG_REQUIRE(field.name.size() > 0, Error, "Label names cannot be empty");
+    JSG_REQUIRE(field.name.size() <= MAX_CONTAINER_LABEL_NAME_BYTES, Error,
+        "Label names cannot exceed ", MAX_CONTAINER_LABEL_NAME_BYTES, " bytes (index ", i, ")");
+    JSG_REQUIRE(field.value.size() <= MAX_CONTAINER_LABEL_VALUE_BYTES, Error,
+        "Label values cannot exceed ", MAX_CONTAINER_LABEL_VALUE_BYTES, " bytes (index ", i, ")");
+    for (auto c: field.name) {
+      JSG_REQUIRE(static_cast<kj::byte>(c) >= 0x20, Error,
+          "Label names cannot contain control characters (index ", i, ")");
+    }
+    for (auto c: field.value) {
+      JSG_REQUIRE(static_cast<kj::byte>(c) >= 0x20, Error,
+          "Label values cannot contain control characters (index ", i, ")");
+    }
+  }
 }
 
 capnp::ByteStream::Client makeExecPipe(
@@ -296,25 +338,50 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   }
 
   if (flags.getWorkerdExperimental()) {
+    JSG_REQUIRE(options.image == kj::none || options.containerSnapshot == kj::none, TypeError,
+        "`image` and `containerSnapshot` are mutually exclusive.");
     KJ_IF_SOME(hardTimeoutMs, options.hardTimeout) {
       JSG_REQUIRE(hardTimeoutMs > 0, RangeError, "Hard timeout must be greater than 0");
       req.setHardTimeoutMs(hardTimeoutMs);
     }
+    KJ_IF_SOME(image, options.image) {
+      JSG_REQUIRE(image.size() <= MAX_IMAGE_REFERENCE_SIZE, TypeError,
+          "Container image reference cannot exceed ", MAX_IMAGE_REFERENCE_SIZE, " bytes.");
+      for (auto c: image) {
+        auto byte = static_cast<kj::byte>(c);
+        JSG_REQUIRE(byte > 0x20 && byte < 0x7f, TypeError,
+            "Container image reference must contain only non-space printable ASCII characters.");
+      }
+      req.getSource().setImage(image);
+    }
+    KJ_IF_SOME(instance, options.instance) {
+      auto instanceBuilder = req.initInstance();
+      KJ_SWITCH_ONEOF(instance) {
+        KJ_CASE_ONEOF(named, kj::String) {
+          JSG_REQUIRE(
+              kj::arrayPtr(VALID_CONTAINER_INSTANCE_TYPES).findFirst(named.asPtr()) != kj::none,
+              TypeError, "Invalid container instance type.");
+          instanceBuilder.setNamed(named);
+        }
+        KJ_CASE_ONEOF(custom, StartResources) {
+          JSG_REQUIRE(std::isfinite(custom.vcpu) && custom.vcpu > 0, RangeError,
+              "Container resource vcpu must be a finite number greater than 0.");
+          auto memoryMib = requireResourceAmount(custom.memoryMib, "memoryMib"_kj);
+          auto diskMb = requireResourceAmount(custom.diskMb, "diskMb"_kj);
+          auto resources = instanceBuilder.initCustom();
+          resources.setVcpu(custom.vcpu);
+          resources.setMemoryMib(memoryMib);
+          resources.setDiskMb(diskMb);
+        }
+      }
+    }
   }
 
   KJ_IF_SOME(labels, options.labels) {
+    requireValidLabels(labels);
     auto list = req.initLabels(labels.fields.size());
     for (auto i: kj::indices(labels.fields)) {
       auto& field = labels.fields[i];
-      JSG_REQUIRE(field.name.size() > 0, Error, "Label names cannot be empty");
-      for (auto c: field.name) {
-        JSG_REQUIRE(static_cast<kj::byte>(c) >= 0x20, Error,
-            "Label names cannot contain control characters (index ", i, ")");
-      }
-      for (auto c: field.value) {
-        JSG_REQUIRE(static_cast<kj::byte>(c) >= 0x20, Error,
-            "Label values cannot contain control characters (index ", i, ")");
-      }
       list[i].setName(field.name);
       list[i].setValue(field.value);
     }
@@ -340,7 +407,7 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   }
 
   KJ_IF_SOME(containerSnapshot, options.containerSnapshot) {
-    req.setContainerSnapshotId(containerSnapshot.id);
+    req.getSource().setContainerSnapshotId(containerSnapshot.id);
   }
 
   req.setCompatibilityFlags(flags);
@@ -348,6 +415,24 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   IoContext::current().addTask(req.sendIgnoringResult());
 
   running = true;
+}
+
+jsg::Promise<void> Container::setLabels(jsg::Lock& js, jsg::Dict<kj::String> labels) {
+  JSG_REQUIRE(running, Error, "setLabels() cannot be called on a container that is not running.");
+
+  auto& ioContext = IoContext::current();
+
+  requireValidLabels(labels);
+
+  auto req = rpcClient->setLabelsRequest();
+  auto list = req.initLabels(labels.fields.size());
+  for (auto i: kj::indices(labels.fields)) {
+    auto& field = labels.fields[i];
+    list[i].setName(field.name);
+    list[i].setValue(field.value);
+  }
+
+  return ioContext.awaitIo(js, req.sendIgnoringResult());
 }
 
 jsg::Promise<kj::Maybe<Container::Info>> Container::inspect(jsg::Lock& js) {
@@ -469,7 +554,7 @@ kj::Promise<void> Container::interceptOutboundHttpImpl(rpc::Container::Client rp
   auto req = rpcClient.setEgressHttpRequest();
   req.setHostPort(addr);
   req.setChannelToken(token);
-  co_await req.send();
+  co_await req.sendIgnoringResult();
 }
 
 jsg::Promise<void> Container::interceptAllOutboundHttp(jsg::Lock& js, jsg::Ref<Fetcher> binding) {
@@ -513,7 +598,7 @@ kj::Promise<void> Container::interceptOutboundHttpsImpl(rpc::Container::Client r
   req.setHostPort(addr);
   req.setChannelToken(token);
 
-  co_await req.send();
+  co_await req.sendIgnoringResult();
 }
 
 jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
@@ -719,7 +804,7 @@ kj::Promise<void> Container::interceptOutboundTcpImpl(rpc::Container::Client rpc
   auto req = rpcClient.setEgressTcpRequest();
   req.setHostPort(addr);
   req.setChannelToken(token);
-  co_await req.send();
+  co_await req.sendIgnoringResult();
 }
 
 jsg::Promise<void> Container::monitor(jsg::Lock& js) {

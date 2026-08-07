@@ -522,7 +522,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # with the flag's public documentation. Several flags describe
   # legacy-registry behavior only and are not consulted by the new registry:
   # exportCommonJsDefaultNamespace, requireReturnsDefaultExport,
-  # throwOnUnrecognizedImportAssertion, and disableTopLevelAwaitInRequire.
+  # throwOnUnrecognizedImportAssertion, and noTopLevelAwaitInRequire.
 
   cacheOptionEnabled @53 :Bool
     $compatEnableFlag("cache_option_enabled")
@@ -1579,8 +1579,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonWorkers20260610 @179 :Bool
       $compatEnableFlag("python_workers_20260610")
       $compatDisableFlag("no_python_workers_20260610")
+      $impliedByAfterDate(name = "pythonWorkers", date = "2026-08-25")
       $pythonSnapshotRelease;
-  # Enables Python Workers using Pyodide 314.0.3 (CPython 3.14.2, Emscripten 5.0.3).
+  # Enables Python Workers using Pyodide 314.0.4 (CPython 3.14.2, Emscripten 5.0.3).
 
   enableNodeJsInspectorLocalDev @180 :Bool
       $compatEnableFlag("enable_nodejs_inspector_local_dev")

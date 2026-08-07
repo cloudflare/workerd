@@ -1081,7 +1081,11 @@ struct Extension {
     # A module extending workerd functionality.
 
     name @0 :Text;
-    # Full js module name.
+    # Full js module name. Must be a fully-qualified URL with a non-file: scheme,
+    # e.g. "my-extension:module". Workers using the new_module_registry
+    # compatibility flag reject extensions whose module names are not valid URLs;
+    # the original module registry tolerates any path-like name, but new
+    # extensions should always use the URL form.
 
     internal @1 :Bool = false;
     # Internal modules can be imported by other extension modules only and not the user code.

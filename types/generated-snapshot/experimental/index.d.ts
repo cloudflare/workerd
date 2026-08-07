@@ -4029,6 +4029,7 @@ interface Container {
   exec(cmd: string[], options?: ContainerExecOptions): Promise<ExecProcess>;
   interceptOutboundTcp(addr: string, binding: Fetcher): Promise<void>;
   inspect(): Promise<ContainerInfo | null>;
+  setLabels(labels: Record<string, string>): Promise<void>;
 }
 interface ContainerDirectorySnapshot {
   id: string;
@@ -4052,18 +4053,38 @@ interface ContainerSnapshot {
 interface ContainerSnapshotOptions {
   name?: string;
 }
-interface ContainerStartupOptions {
+type ContainerStartupOptions = {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
   hardTimeout?: number | bigint;
+  instance?:
+    | "lite"
+    | "standard-1"
+    | "standard-2"
+    | "standard-3"
+    | "standard-4"
+    | ContainerStartResources;
   labels?: Record<string, string>;
   directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
-  containerSnapshot?: ContainerSnapshot;
-}
+} & (
+  | {
+      image: string;
+      containerSnapshot?: never;
+    }
+  | {
+      image?: never;
+      containerSnapshot?: ContainerSnapshot;
+    }
+);
 interface ContainerInfo {
   labels: Record<string, string>;
   image: string;
+}
+interface ContainerStartResources {
+  vcpu: number;
+  memoryMib: number;
+  diskMb: number;
 }
 /**
  * The **`FileSystemHandle`** interface of the File System API is an object which represents a file or directory entry.
@@ -4764,7 +4785,10 @@ interface Tracing {
 }
 declare abstract class Span {
   get isTraced(): boolean;
-  setAttribute(key: string, value?: boolean | number | string): void;
+  setAttribute(key: string, value: boolean | number | string): this;
+  setAttributes(
+    attributes: Record<string, boolean | number | string | undefined>,
+  ): this;
   end(): void;
 }
 /**

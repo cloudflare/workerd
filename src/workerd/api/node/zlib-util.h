@@ -412,7 +412,6 @@ class ZlibUtil final: public jsg::Object {
     static jsg::Ref<CompressionStream> constructor(jsg::Lock& js, ZlibModeValue mode);
 
     void close();
-    bool checkError(jsg::Lock& js);
     void emitError(jsg::Lock& js, const CompressionError& error);
     template <bool async>
     void writeStream(
@@ -421,7 +420,7 @@ class ZlibUtil final: public jsg::Object {
       errorHandler = kj::mv(handler);
     }
 
-    void updateWriteResult(jsg::Lock& js);
+    void updateWriteResult(jsg::Lock& js, uint32_t availIn, uint32_t availOut);
 
     template <bool async>
     void write(jsg::Lock& js,

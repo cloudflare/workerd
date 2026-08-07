@@ -403,6 +403,9 @@ class Worker::Isolate: public kj::AtomicRefcounted {
       bool logNewScript = false,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
       kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none,
+      // Must be provided if and only if the worker's compatibility flags
+      // enable the new module registry (see isNewModuleRegistryEnabled() in
+      // io/features.h); the Script constructor enforces this.
       kj::Maybe<kj::Arc<workerd::jsg::modules::ModuleRegistry>> maybeNewModuleRegistry =
           kj::none) const;
 

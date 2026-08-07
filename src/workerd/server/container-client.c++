@@ -57,11 +57,8 @@ constexpr kj::StringPtr SNAPSHOT_VOLUME_PREFIX = "workerd-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_CLONE_VOLUME_PREFIX = "workerd-snap-clone-"_kj;
 constexpr kj::StringPtr CONTAINER_SNAPSHOT_IMAGE_PREFIX = "workerd-container-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_VOLUME_CREATED_AT_LABEL = "dev.workerd.snapshot-created-at"_kj;
+constexpr size_t MAX_SNAPSHOT_IMAGE_ANCESTRY_DEPTH = 128;
 
-// Prefix applied to user-supplied labels when writing them to the Docker container, and
-// stripped back out when reading them via inspect(). Lets us distinguish labels the worker
-// set via start() from labels that came from the image (via Dockerfile LABEL) or engine.
-constexpr kj::StringPtr WORKERD_LABEL_PREFIX = "workerd-"_kj;
 constexpr auto SNAPSHOT_STALE_AGE = 30 * kj::DAYS;
 
 // Maximum size of a snapshot tar archive held in memory during snapshot create/restore.
@@ -1655,23 +1652,6 @@ kj::Promise<kj::Maybe<ContainerClient::InspectResponse>> ContainerClient::inspec
   // so that start() correctly refuses to start a duplicate and destroy() can clean it up.
   bool running = status == "running" || status == "restarting";
 
-  kj::Vector<Label> labels;
-  if (jsonRoot.hasConfig() && jsonRoot.getConfig().hasLabels()) {
-    auto labelsJson = jsonRoot.getConfig().getLabels();
-    if (labelsJson.isObject()) {
-      for (auto field: labelsJson.getObject()) {
-        kj::StringPtr name = field.getName();
-        if (!name.startsWith(WORKERD_LABEL_PREFIX)) continue;
-        auto value = field.getValue();
-        JSG_REQUIRE(value.isString(), Error, "Malformed ContainerInspect label value");
-        labels.add(Label{
-          .name = kj::str(name.slice(WORKERD_LABEL_PREFIX.size())),
-          .value = kj::str(value.getString()),
-        });
-      }
-    }
-  }
-
   kj::String image;
   if (jsonRoot.hasConfig() && jsonRoot.getConfig().hasImage()) {
     image = kj::str(jsonRoot.getConfig().getImage());
@@ -1679,7 +1659,6 @@ kj::Promise<kj::Maybe<ContainerClient::InspectResponse>> ContainerClient::inspec
 
   co_return InspectResponse{
     .isRunning = running,
-    .labels = labels.releaseAsArray(),
     .image = kj::mv(image),
   };
 }
@@ -1804,17 +1783,6 @@ kj::Promise<void> ContainerClient::createContainer(kj::StringPtr effectiveImage,
 
   for (uint32_t i: kj::zeroTo(kj::size(defaultEnv))) {
     jsonEnv.set(envSize + i, defaultEnv[i]);
-  }
-
-  // Pass user-supplied labels as Docker object labels, prefixed so we can distinguish
-  // them from image/engine labels when reading back via inspect().
-  if (params.hasLabels()) {
-    auto lbls = params.getLabels();
-    auto labelsObj = jsonRoot.initLabels().initObject(lbls.size());
-    for (auto i: kj::zeroTo(lbls.size())) {
-      labelsObj[i].setName(kj::str(WORKERD_LABEL_PREFIX, lbls[i].getName()));
-      labelsObj[i].initValue().setString(lbls[i].getValue());
-    }
   }
 
   auto hostConfig = jsonRoot.initHostConfig();
@@ -2210,7 +2178,7 @@ kj::Promise<ContainerClient::ImageInspectResponse> ContainerClient::inspectImage
 
   auto message = decodeJsonResponse<docker_api::Docker::ImageInspectResponse>(response.body);
   auto root = message->getRoot<docker_api::Docker::ImageInspectResponse>();
-  co_return ImageInspectResponse{kj::str(root.getId()), root.getSize()};
+  co_return ImageInspectResponse{kj::str(root.getId()), root.getSize(), kj::str(root.getParent())};
 }
 
 kj::Promise<void> ContainerClient::deleteImage(kj::String imageRef) {
@@ -2343,6 +2311,9 @@ kj::Promise<void> ContainerClient::status(StatusContext context) {
     isRunning = info.isRunning;
   }
   containerStarted.store(isRunning, std::memory_order_release);
+  if (!isRunning) {
+    labels.clear();
+  }
   containerSidecarStarted.store(false, std::memory_order_release);
   this->sidecarIngressHostPort = kj::none;
 
@@ -2362,16 +2333,41 @@ kj::Promise<void> ContainerClient::status(StatusContext context) {
   context.getResults().setRunning(isRunning);
 }
 
+kj::Promise<void> ContainerClient::setLabels(SetLabelsContext context) {
+  auto [ready, done] = getRpcTurn();
+  co_await ready;
+  KJ_DEFER(done->fulfill());
+
+  JSG_REQUIRE(containerStarted.load(std::memory_order_acquire), Error,
+      "setLabels() requires a running container.");
+
+  auto params = context.getParams();
+  auto newLabels = params.getLabels();
+  labels.clear();
+  labels.reserve(newLabels.size());
+  for (auto i: kj::zeroTo(newLabels.size())) {
+    labels.insert(kj::str(newLabels[i].getName()), kj::str(newLabels[i].getValue()));
+  }
+
+  co_return;
+}
+
 kj::Promise<void> ContainerClient::inspect(InspectContext context) {
+  auto [ready, done] = getRpcTurn();
+  co_await ready;
+  KJ_DEFER(done->fulfill());
+
   auto maybeResp = co_await inspectContainer();
   auto info = context.getResults().initInfo();
   KJ_IF_SOME(resp, maybeResp) {
     if (resp.isRunning) {
       auto started = info.initStarted();
-      auto list = started.initLabels(resp.labels.size());
-      for (auto i: kj::indices(resp.labels)) {
-        list[i].setName(resp.labels[i].name);
-        list[i].setValue(resp.labels[i].value);
+      auto list = started.initLabels(labels.size());
+      uint i = 0;
+      for (auto& entry: labels) {
+        list[i].setName(entry.key);
+        list[i].setValue(entry.value);
+        ++i;
       }
       started.setImage(resp.image);
       co_return;
@@ -2401,11 +2397,40 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
 
   internetEnabled = params.getEnableInternet();
 
-  kj::String effectiveImage = kj::str(imageName);
-  if (params.hasContainerSnapshotId()) {
-    auto snapshotId = parseSnapshotId(params.getContainerSnapshotId());
-    effectiveImage = kj::str(CONTAINER_SNAPSHOT_IMAGE_PREFIX, snapshotId);
-    co_await inspectImage(effectiveImage);
+  labels.clear();
+  if (params.hasLabels()) {
+    auto lbls = params.getLabels();
+    labels.reserve(lbls.size());
+    for (auto i: kj::zeroTo(lbls.size())) {
+      labels.insert(kj::str(lbls[i].getName()), kj::str(lbls[i].getValue()));
+    }
+  }
+
+  kj::String snapshotImageRef;
+  kj::StringPtr effectiveImage = imageName;
+  auto source = params.getSource();
+  switch (source.which()) {
+    case rpc::Container::StartParams::Source::IMAGE:
+      effectiveImage = source.getImage();
+      break;
+    case rpc::Container::StartParams::Source::CONTAINER_SNAPSHOT_ID: {
+      if (!source.hasContainerSnapshotId()) break;
+
+      auto selectedImage = co_await inspectImage(effectiveImage);
+      auto snapshotId = parseSnapshotId(source.getContainerSnapshotId());
+      snapshotImageRef = kj::str(CONTAINER_SNAPSHOT_IMAGE_PREFIX, snapshotId);
+      auto snapshotImage = co_await inspectImage(snapshotImageRef);
+      for (size_t depth = 0;
+           snapshotImage.id != selectedImage.id && snapshotImage.parent.size() > 0; ++depth) {
+        JSG_REQUIRE(depth < MAX_SNAPSHOT_IMAGE_ANCESTRY_DEPTH, Error,
+            "Container snapshot image ancestry is too deep");
+        snapshotImage = co_await inspectImage(snapshotImage.parent);
+      }
+      JSG_REQUIRE(snapshotImage.id == selectedImage.id, Error,
+          "Container snapshot does not match the requested image");
+      effectiveImage = snapshotImageRef;
+      break;
+    }
   }
 
   // If startup fails after we clone any snapshot volumes, tear down the app container first and
@@ -2482,18 +2507,39 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
   JSG_REQUIRE(containerStarted.load(std::memory_order_acquire), Error, "Container failed to start");
 
   auto results = context.getResults();
-  KJ_DEFER(containerStarted.store(false, std::memory_order_release));
 
-  auto endpoint = kj::str("/containers/", containerName, "/wait");
-  auto response = co_await dockerApiRequest(
-      network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint));
+  kj::Maybe<int32_t> maybeExitCode;
+  kj::Maybe<kj::Exception> maybeError;
 
-  JSG_REQUIRE(response.statusCode == 200, Error,
-      "Monitoring container failed with: ", response.statusCode, " ", response.body);
+  try {
+    auto endpoint = kj::str("/containers/", containerName, "/wait");
+    auto response = co_await dockerApiRequest(
+        network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint));
 
-  auto message = decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(response.body);
-  auto jsonRoot = message->getRoot<docker_api::Docker::ContainerMonitorResponse>();
-  results.setExitCode(jsonRoot.getStatusCode());
+    JSG_REQUIRE(response.statusCode == 200, Error,
+        "Monitoring container failed with: ", response.statusCode, " ", response.body);
+
+    auto message = decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(response.body);
+    auto jsonRoot = message->getRoot<docker_api::Docker::ContainerMonitorResponse>();
+    maybeExitCode = jsonRoot.getStatusCode();
+  } catch (...) {
+    maybeError = kj::getCaughtExceptionAsKj();
+  }
+
+  {
+    auto [ready, done] = getRpcTurn();
+    co_await ready;
+    KJ_DEFER(done->fulfill());
+
+    containerStarted.store(false, std::memory_order_release);
+    labels.clear();
+  }
+
+  KJ_IF_SOME(exception, maybeError) {
+    kj::throwFatalException(kj::mv(exception));
+  }
+
+  results.setExitCode(KJ_REQUIRE_NONNULL(maybeExitCode));
 }
 
 kj::Promise<void> ContainerClient::destroy(DestroyContext context) {
@@ -2511,6 +2557,8 @@ kj::Promise<void> ContainerClient::destroy(DestroyContext context) {
   // in the destructor), or on the next start() if state is inconsistent (e.g. workerd
   // restart left an orphaned sidecar; status() recovery handles that case).
   co_await destroyContainer();
+  containerStarted.store(false, std::memory_order_release);
+  labels.clear();
 }
 
 kj::Promise<void> ContainerClient::signal(SignalContext context) {
