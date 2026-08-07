@@ -3897,7 +3897,7 @@ void WritableStreamJsController::doClose(jsg::Lock& js) {
     } else {
       pipeLocked.releaseSource(js);
     }
-    lock.state.transitionTo<Unlocked>();
+    (void)lock.state.transitionFromTo<WritableLockImpl::PipeLocked, Unlocked>();
   }
 }
 
@@ -3923,7 +3923,7 @@ void WritableStreamJsController::doError(jsg::Lock& js, jsg::JsValue reason) {
     } else {
       pipeLocked.releaseSource(js);
     }
-    lock.state.transitionTo<Unlocked>();
+    (void)lock.state.transitionFromTo<WritableLockImpl::PipeLocked, Unlocked>();
   }
 }
 

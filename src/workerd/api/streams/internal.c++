@@ -1346,13 +1346,14 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
   // preventCancel is false, error the source (Propagate error backward). The errored destination
   // will be unlocked immediately.
   KJ_IF_SOME(errored, state.tryGetUnsafe<StreamStates::Errored>()) {
+    auto reason = errored.getHandle(js);
     writeState.transitionTo<Unlocked>();
     if (!preventCancel) {
-      releaseSourceLock(js, errored.getHandle(js));
+      releaseSourceLock(js, reason);
     } else {
       releaseSourceLock(js, kj::none);
     }
-    return rejectedMaybeHandledPromise<void>(js, errored.getHandle(js), pipeThrough);
+    return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
   }
 
   // If the source has closed, the spec requires us to close the destination if preventClose
