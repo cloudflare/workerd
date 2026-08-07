@@ -288,6 +288,16 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 
 - Strong backwards compatibility commitment - features cannot be removed or changed once deployed
 - We use compatibility-date.capnp to introduce feature flags when we need to change the behavior
+- Review additions to the standard API surface exposed to Workers, including
+  those introduced by V8 updates. Record the compatibility decision in the
+  commit message: use a compatibility flag or explicitly accept the risk.
+- Autogates support gradual rollout and fast rollback, but do not preserve
+  existing Workers' API surface. Compatibility failures may be invisible to
+  runtime metrics or reported late by customers, so a quiet rollout alone
+  does not establish safety.
+- When changing V8 flags in `src/workerd/jsg/setup.c++`, deleting a flag does
+  not disable a feature V8 enables by default; negate the flag instead (for
+  example, `--nojs-float16array`), unless V8 has removed it.
 
 ## Development Workflow
 
@@ -313,6 +323,8 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 See [docs/v8-updates.md](docs/v8-updates.md) for instructions on updating the V8 engine version used by workerd. These steps include syncing the V8 source, applying workerd patches, rebasing onto the new version, regenerating patches, and updating dependency versions in Bazel files.
 
 When updating V8, ensure that all tests pass. Look for new deprecations when building and flag those for users if necessary.
+
+V8 updates can enable globals through changed defaults; apply the [compatibility rules](#backward-compatibility).
 
 If asked to help with a V8 update, ask for the specific target V8 version to update to and ask clarifying questions about any specific patches or customizations that need to be preserved before proceeding. Merge conflicts are common during V8 updates, so be prepared to resolve those carefully. These almost always require human judgment to ensure that workerd-specific changes are preserved while still applying the upstream V8 changes correctly. Do not attempt to resolve merge conflicts automatically without human review.
 
