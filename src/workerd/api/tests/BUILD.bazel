@@ -128,6 +128,15 @@ wd_test(
 )
 
 wd_test(
+    src = "socket-closed-test.wd-test",
+    args = ["--experimental"],
+    data = ["socket-closed-test.js"],
+    # Test uses TCP socket on port 8084 and may fail when running concurrently with other
+    # tests that do so.
+    tags = ["exclusive"],
+)
+
+wd_test(
     src = "actor-alarms-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-test.js"],
