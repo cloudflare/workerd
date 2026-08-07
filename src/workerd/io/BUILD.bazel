@@ -448,6 +448,14 @@ wd_capnp_library(src = "trace.capnp")
 
 wd_capnp_library(src = "compatibility-date.capnp")
 
+# The schema itself, for build rules that need the flag names as text rather than
+# as compiled code. wd_capnp_library only exposes the compiled library, and the
+# annotations that carry the flag names are not recoverable from that.
+exports_files(
+    ["compatibility-date.capnp"],
+    visibility = ["//visibility:public"],
+)
+
 wd_capnp_library(src = "features.capnp")
 
 wd_capnp_library(src = "frankenvalue.capnp")
