@@ -805,6 +805,15 @@ wd_test(
 )
 
 wd_test(
+    src = "autovuln-187-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "autovuln-187-echo.js",
+        "autovuln-187-test.js",
+    ],
+)
+
+wd_test(
     src = "unsafe-test.wd-test",
     args = ["--experimental"],
     data = ["unsafe-test.js"],
