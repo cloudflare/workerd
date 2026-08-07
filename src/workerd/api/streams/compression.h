@@ -8,8 +8,6 @@
 #include <workerd/api/streams/transform.h>
 #include <workerd/jsg/jsg.h>
 
-#include <zlib.h>
-
 namespace workerd::api {
 
 class CompressionStream: public TransformStream {

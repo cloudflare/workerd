@@ -404,10 +404,11 @@ wd_cc_library(
     name = "async-trace-perfetto",
     srcs = ["async-trace-perfetto.c++"],
     hdrs = ["async-trace-perfetto.h"],
+    implementation_deps = ["//src/workerd/util:perfetto"],
     visibility = ["//visibility:public"],
     deps = [
-        ":async-trace",
-        "//src/workerd/util:perfetto",
+        "//src/rust/async-trace",
+        "@capnp-cpp//src/kj",
     ],
 )
 

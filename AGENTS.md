@@ -223,6 +223,11 @@ This project generally follows the [KJ Style Guide](https://github.com/capnproto
   `HEAD~`
 - **Pre-commit hook**: `githooks/pre-commit`, enabled with `git config core.hooksPath githooks`;
   blocks `KJ_DBG` in staged code and runs a format check (see `docs/development.md`)
+- **Includes**: Don't include headers that a file doesn't use. clang-tidy enforces this for
+  headers with `misc-include-cleaner` (see `HEADER_ONLY_CHECKS` in
+  `build/tools/clang_tidy/check_path_filters.bzl`), which ignores KJ headers and doesn't
+  report missing includes. Remove unused includes from `.c++` files too, though nothing
+  enforces it there.
 - **Commit discipline**: Split PRs into small commits; each must compile + pass tests; no fixup commits
 - **TypeScript**: Strict mode, `exactOptionalPropertyTypes`, private `#` syntax enforced, explicit return types
 

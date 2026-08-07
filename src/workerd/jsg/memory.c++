@@ -2,6 +2,7 @@
 
 #include <v8-array-buffer.h>
 
+#include <kj/debug.h>
 #include <kj/one-of.h>
 
 namespace workerd::jsg {
