@@ -219,7 +219,18 @@ type BrowserRunLinksOptions = BrowserRunCommonOptions & {
   excludeExternalLinks?: boolean;
 };
 
+type BrowserRunSnapshotFormat =
+  | 'content'
+  | 'screenshot'
+  | 'markdown'
+  | 'accessibilityTree';
+
 type BrowserRunSnapshotOptions = BrowserRunCommonOptions & {
+  /** Which representations of the page to return. At least two formats are
+   * required; request a single format from its dedicated action instead.
+   * @default ["content","screenshot"]
+   */
+  formats?: BrowserRunSnapshotFormat[];
   /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
   screenshotOptions?: Omit<BrowserRunPuppeteerScreenshotOptions, 'encoding'>;
 };
@@ -378,14 +389,22 @@ type BrowserRunScrapeSuccessResponse = {
   }>;
 };
 
-/** Success response for `snapshot` action. */
+/** Success response for `snapshot` action. Each field is present only when the
+ * corresponding entry was requested in `formats`.
+ */
 type BrowserRunSnapshotSuccessResponse = {
   success: true;
-  result: {
+  result?: {
     /** HTML content of the page. */
-    content: string;
+    content?: string;
     /** Base64-encoded screenshot image. */
-    screenshot: string;
+    screenshot?: string;
+    /** Markdown content. Prefixed with YAML frontmatter (e.g. `title`) when the
+     * page provides that metadata.
+     */
+    markdown?: string;
+    /** Root of the page's accessibility tree. */
+    accessibilityTree?: BrowserRunSerializedAXNode;
   };
   meta: BrowserRunResponseMeta;
 };
@@ -537,9 +556,10 @@ declare abstract class BrowserRun {
   ): Promise<Response>;
 
   /**
-   * Get both the HTML content and a base64-encoded screenshot of a web page.
+   * Get several representations of a web page in one request.
    * @param action - Must be `'snapshot'`.
-   * @param options - Snapshot options including screenshot settings (encoding is always base64).
+   * @param options - Snapshot options including the `formats` to return and
+   * screenshot settings (encoding is always base64).
    * @returns A `Response` containing one of:
    *
    * **Success (HTTP 200):**
