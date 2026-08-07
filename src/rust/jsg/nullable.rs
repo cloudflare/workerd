@@ -1,3 +1,10 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+use crate::Error;
+use crate::Lenient;
+
 /// A wrapper type that accepts `null`, `undefined`, or a value of type `T`.
 ///
 /// `Nullable<T>` is similar to `Option<T>` but also accepts `undefined` as a null-ish value.
@@ -151,5 +158,55 @@ impl<T> From<Nullable<T>> for Option<T> {
             Nullable::Some(v) => Some(v),
             Nullable::Null | Nullable::Undefined => None,
         }
+    }
+}
+
+/// A version of [`Nullable<T>`] that cannot be [`Nullable::Null`]
+/// The internal value is private, and a [`NonNull`] can only be created
+/// from `FromJS` and [`NonNull::from`]
+pub struct NonNull<T>(T);
+
+impl<T> TryFrom<Nullable<T>> for NonNull<Nullable<T>> {
+    type Error = Error;
+
+    fn try_from(value: Nullable<T>) -> Result<Self, Self::Error> {
+        match value {
+            Nullable::Null => Err(Error::new_type_error("Expected T or undefined, got null")),
+            other => Ok(Self(other)),
+        }
+    }
+}
+
+impl<T> NonNull<Nullable<T>> {
+    pub fn inner(self) -> Nullable<T> {
+        // Sanity check, type system should guarantee this is impossible
+        debug_assert!(!self.0.is_null());
+        self.0
+    }
+}
+
+impl<T> TryFrom<Lenient<T>> for NonNull<Lenient<T>> {
+    type Error = Error;
+
+    fn try_from(value: Lenient<T>) -> Result<Self, Self::Error> {
+        match value {
+            Lenient::Null => Err(Error::new_type_error("Expected T or undefined, got null")),
+            other => Ok(Self(other)),
+        }
+    }
+}
+
+impl<T> NonNull<Lenient<T>> {
+    pub fn parts(nullable: Lenient<T>) -> Option<Self> {
+        match nullable {
+            Lenient::Null => None,
+            other => Some(Self(other)),
+        }
+    }
+
+    pub fn inner(self) -> Lenient<T> {
+        // Sanity check, type system should guarantee this is impossible
+        debug_assert!(!self.0.is_null());
+        self.0
     }
 }
