@@ -34,6 +34,7 @@ export const validateSpans = {
         test: 'setAttributeUndefined',
         expectedSpan: 'undefined-attr-op',
       },
+      { test: 'setAttributes', expectedSpan: 'set-attributes-op' },
       { test: 'publicImportTracing', expectedSpan: 'public-import-op' },
       {
         test: 'publicImportStartActiveSpan',
@@ -117,6 +118,21 @@ export const validateSpans = {
       assert(span, 'startActiveSpanSyncThrow: span present');
       assert.strictEqual(span['after.throw'], true);
       assert(span.closed, 'Manual throw span should be explicitly closed');
+    }
+
+    // setAttributes should record each supported value and ignore undefined values.
+    {
+      const span = (spansByTest.get('setAttributes') || []).find(
+        (s) => s.name === 'set-attributes-op'
+      );
+      assert(span, 'setAttributes: span present');
+      assert.strictEqual(span.stringValue, 'value');
+      assert.strictEqual(span.numberValue, 42);
+      assert.strictEqual(span.booleanValue, true);
+      assert(
+        !('skipped' in span),
+        'setAttributes should ignore undefined values'
+      );
     }
 
     // Nested spans: verify both outer and inner spans exist and both are closed.

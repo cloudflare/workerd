@@ -5,15 +5,21 @@
 // A value acceptable as an attribute on a span.
 type SpanValue = string | number | boolean;
 
+interface SpanAttributes {
+  [key: string]: SpanValue | undefined;
+}
+
 declare class Span {
   // Returns true if this span will be recorded to the tracing system. False when the
   // current async context is not being traced, or when the span has already been submitted.
   // Callers can gate expensive attribute-computation code on this.
   readonly isTraced: boolean;
 
-  // Sets a single attribute on the span. If `value` is undefined, the attribute is not set,
-  // which is convenient for optional fields.
-  setAttribute(key: string, value: SpanValue | undefined): void;
+  // Sets a single attribute on the span.
+  setAttribute(key: string, value: SpanValue): this;
+
+  // Sets multiple attributes on the span. Attributes with undefined values are ignored.
+  setAttributes(attributes: SpanAttributes): this;
 
   // Ends the span and submits its attributes to the tracing system. Idempotent.
   end(): void;

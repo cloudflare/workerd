@@ -4039,6 +4039,7 @@ export interface Container {
   exec(cmd: string[], options?: ContainerExecOptions): Promise<ExecProcess>;
   interceptOutboundTcp(addr: string, binding: Fetcher): Promise<void>;
   inspect(): Promise<ContainerInfo | null>;
+  setLabels(labels: Record<string, string>): Promise<void>;
 }
 export interface ContainerDirectorySnapshot {
   id: string;
@@ -4062,18 +4063,38 @@ export interface ContainerSnapshot {
 export interface ContainerSnapshotOptions {
   name?: string;
 }
-export interface ContainerStartupOptions {
+export type ContainerStartupOptions = {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
   hardTimeout?: number | bigint;
+  instance?:
+    | "lite"
+    | "standard-1"
+    | "standard-2"
+    | "standard-3"
+    | "standard-4"
+    | ContainerStartResources;
   labels?: Record<string, string>;
   directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
-  containerSnapshot?: ContainerSnapshot;
-}
+} & (
+  | {
+      image: string;
+      containerSnapshot?: never;
+    }
+  | {
+      image?: never;
+      containerSnapshot?: ContainerSnapshot;
+    }
+);
 export interface ContainerInfo {
   labels: Record<string, string>;
   image: string;
+}
+export interface ContainerStartResources {
+  vcpu: number;
+  memoryMib: number;
+  diskMb: number;
 }
 /**
  * The **`FileSystemHandle`** interface of the File System API is an object which represents a file or directory entry.

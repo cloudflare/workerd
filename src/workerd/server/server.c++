@@ -5645,11 +5645,29 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     }
 
     using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
-    auto artifactBundler = ArtifactBundler::makeDisabledBundler();
 
-    newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(
-        def.source.variant.tryGet<Worker::Script::ModulesSource>(), def.featureFlags, pythonConfig,
-        bundleBase, extensions, kj::mv(maybeFallbackService), kj::mv(artifactBundler));
+    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+      newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(
+          def.source.variant.tryGet<Worker::Script::ModulesSource>(), def.featureFlags,
+          pythonConfig, bundleBase, extensions, kj::mv(maybeFallbackService),
+          ArtifactBundler::makeDisabledBundler());
+    })) {
+      // Building the module registry from the worker's source failed. This is
+      // a worker configuration problem (e.g. duplicate or invalid module
+      // names, or python modules without the python_workers flag), so report
+      // it through the error reporter like any other config error rather than
+      // letting the exception abort server startup. To let worker
+      // construction proceed far enough for the error to be the one that is
+      // reported, substitute an inert empty script and a registry containing
+      // only the built-in modules -- the same stub extractSource() substitutes
+      // for source-level config errors. The worker never runs: config errors
+      // prevent the server from serving.
+      errorReporter.addError(kj::str(exception.getDescription()));
+      def.source = WorkerSource(Worker::Script::ScriptSource{""_kj, name, nullptr});
+      newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(kj::none, def.featureFlags,
+          pythonConfig, bundleBase, capnp::List<config::Extension>::Reader{}, kj::none,
+          ArtifactBundler::makeDisabledBundler());
+    }
   }
 
   auto isolateGroup = v8::IsolateGroup::GetDefault();

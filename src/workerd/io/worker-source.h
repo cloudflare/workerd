@@ -3,6 +3,7 @@
 #include <rust/cxx.h>
 
 #include <capnp/schema.capnp.h>
+#include <kj/debug.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>
 #include <kj/string.h>
@@ -31,7 +32,10 @@ struct WorkerSource {
   // module types.
   struct EsModule {
     kj::ArrayPtr<const char> body;
-    // Owns the body text in case it was transpiled during the load.
+    // Owns the body text in case it was transpiled during the load. When this
+    // is non-none, `body` is a view over exactly this buffer's full contents;
+    // Module::clone() relies on that invariant to re-point the cloned view at
+    // the cloned buffer.
     kj::Maybe<::rust::String> ownBody;
   };
   struct CommonJsModule {
@@ -92,7 +96,18 @@ struct WorkerSource {
       // TODO(cleanup): kj::OneOf should have a clone() method.
       KJ_SWITCH_ONEOF(content) {
         KJ_CASE_ONEOF(content, EsModule) {
-          result.content = content;
+          KJ_IF_SOME(own, content.ownBody) {
+            // The module owns its body (e.g. transpiled TypeScript). Copy the
+            // owned buffer and point the clone's `body` view at the copy: a
+            // plain copy of the view would keep pointing into this module's
+            // buffer, which the clone may outlive.
+            KJ_DASSERT(content.body.begin() == own.data() && content.body.size() == own.size());
+            ::rust::String ownCopy(own);
+            kj::ArrayPtr<const char> bodyView(ownCopy.data(), ownCopy.size());
+            result.content = EsModule{.body = bodyView, .ownBody = kj::mv(ownCopy)};
+          } else {
+            result.content = content;
+          }
         }
         KJ_CASE_ONEOF(content, TextModule) {
           result.content = content;

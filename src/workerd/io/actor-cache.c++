@@ -2861,7 +2861,7 @@ kj::Promise<void> ActorCache::flushImplAlarmOnly(DirtyAlarm dirty) {
         // need to send a request.
       }
     } else {
-      co_await req.send();
+      co_await req.sendIgnoringResult();
     }
   }
 }

@@ -112,6 +112,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> snapshotDirectory(SnapshotDirectoryContext context) override;
   kj::Promise<void> snapshotContainer(SnapshotContainerContext context) override;
   kj::Promise<void> inspect(InspectContext context) override;
+  kj::Promise<void> setLabels(SetLabelsContext context) override;
 
   kj::Own<ContainerClient> addRef();
 
@@ -151,14 +152,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   // EgressHttpService handles CONNECT requests from proxy-anything sidecar
   friend class EgressHttpService;
 
-  struct Label {
-    kj::String name;
-    kj::String value;
-  };
-
   struct InspectResponse {
     bool isRunning;
-    kj::Array<Label> labels;
     kj::String image;
   };
 
@@ -180,6 +175,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   struct ImageInspectResponse {
     kj::String id;
     uint64_t size;
+    kj::String parent;
   };
 
   struct ExecInspectResponse {
@@ -275,6 +271,9 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   std::atomic_bool containerSidecarStarted = false;
   std::atomic_bool egressListenerStarted = false;
   std::atomic_bool caCertInjected = false;
+
+  // Volatile in-memory label set for this container.
+  kj::HashMap<kj::String, kj::String> labels;
 
   // Writable clone volumes currently owned by the app container, or by an in-flight start()
   // that still needs failure cleanup.

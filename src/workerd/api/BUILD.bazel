@@ -42,6 +42,7 @@ filegroup(
         "url-standard.c++",
         "web-socket.c++",
         "worker-rpc.c++",
+        "wrapped-binding.c++",
     ] + glob(
         [
             "crypto/*.c++",
@@ -93,6 +94,7 @@ filegroup(
         "url-standard.h",
         "web-socket.h",
         "worker-rpc.h",
+        "wrapped-binding.h",
     ] + glob(
         [
             "crypto/*.h",

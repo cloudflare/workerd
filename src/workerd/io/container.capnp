@@ -52,10 +52,37 @@ interface Container @0x9aaceefc06523bca {
     directorySnapshots @6 :List(DirectorySnapshotRestoreParams);
     # Directory snapshots to restore before the container starts.
 
-    containerSnapshotId @7 :Text;
-    # Id of the full container snapshot to restore before the container starts.
+    source :union {
+      containerSnapshotId @7 :Text;
+      # Id of the full container snapshot to restore before the container starts.
+
+      image @9 :Text;
+      # Image reference to use for this start.
+    }
 
     spanContext @8 :SpanContext;
+
+    instance @10 :StartInstance;
+    # Optional instance shape for this start. Named shapes are resolved by the runtime; custom
+    # shapes carry explicit CPU, memory, and disk resources.
+  }
+
+  struct StartInstance {
+    union {
+      named @0 :Text;
+      custom @1 :StartResources;
+    }
+  }
+
+  struct StartResources {
+    vcpu @0 :Float64;
+    # Fractional CPU cores to allocate.
+
+    memoryMib @1 :UInt64;
+    # Memory size, in MiB (2^20 bytes).
+
+    diskMb @2 :UInt64;
+    # Disk size, in MB (10^6 bytes).
   }
 
   struct Label {
@@ -280,12 +307,16 @@ interface Container @0x9aaceefc06523bca {
   inspect @14 () -> (info :InspectInfo);
   # Returns information about the container, or `none` if the container has not been started.
 
+  setLabels @15 (labels :List(Label));
+  # Replaces the container's current label set with the provided list.
+
   struct InspectInfo {
     union {
       none @0 :Void;
       started :group {
         labels @1 :List(Label);
-        # Echo of StartParams.labels. Empty list means start() was called with no labels.
+        # Current label set. Initially populated from StartParams.labels and replaced by
+        # setLabels(). Empty list means the current set is empty.
 
         image @2 :Text;
         # The container's image registry reference, e.g.

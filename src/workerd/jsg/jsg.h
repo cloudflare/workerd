@@ -7,7 +7,6 @@
 //
 // Any files declaring an API to export to JavaScript will need to include this header.
 
-#include "kj/common.h"
 #include "util.h"
 #include "wrappable.h"
 
@@ -3008,6 +3007,26 @@ class Lock {
 
   // Use to enable/disable dynamic code evaluation (via eval(), new Function(), or WebAssembly).
   void setAllowEval(bool allow);
+  bool isEvalAllowed();
+
+  // RAII scope that temporarily sets whether dynamic code evaluation (eval(),
+  // new Function(), WebAssembly compilation) is permitted, restoring the
+  // previous setting on destruction. Prefer this over paired setAllowEval()
+  // calls with a hard-coded restore value: such a restore revokes permission
+  // granted by an enclosing scope. For example, Wasm modules compile lazily at
+  // evaluation time, which can be nested inside the worker-startup window
+  // where the allow_eval_during_startup compat flag has already permitted
+  // eval; that permission must survive the compilation.
+  class AllowEvalScope {
+   public:
+    AllowEvalScope(Lock& js, bool allow);
+    ~AllowEvalScope() noexcept(false);
+    KJ_DISALLOW_COPY_AND_MOVE(AllowEvalScope);
+
+   private:
+    Lock& js;
+    bool previous;
+  };
 
   // Tracks whether JavaScript execution is currently disallowed so that conversions in unwrap()
   // can choose a safe, non-JS-invoking path. Prefer the RAII `DisallowJavaScriptScope` (which

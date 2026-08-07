@@ -531,6 +531,11 @@ enum SerializationTag {
   # A transferred Socket. Serialized as socket metadata (see External.socket) followed by its
   # readable and writable streams, which are emitted as separate readableStream/writableStream
   # externals.
+
+  wrappedBinding @17;
+  # A "wrapped binding": an application-level object (e.g. a D1Database) implemented in TypeScript
+  # inside the runtime that wraps a single inner service stub. Serializes as the inner stub's
+  # payload (per `serviceStub`) followed by the wrapper module name. See api/wrapped-binding.{h,c++}.
 }
 
 enum StreamEncoding {

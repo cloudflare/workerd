@@ -294,6 +294,14 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   }
 
   void add(kj::Path& specifier, ModuleInfo&& info) {
+    // Report duplicates as a JS-visible error rather than letting the table
+    // insert below throw: a raw table exception surfaces to the user as an
+    // opaque "internal error" while this is a worker configuration mistake.
+    // (This matches the error the new module registry reports for the same
+    // mistake, which phrases the specifier as a URL rather than a path.)
+    using Key = Entry::Key;
+    JSG_REQUIRE(entries.find(Key(specifier, Type::BUNDLE)) == kj::none, Error, "Module \"",
+        specifier.toString(false), "\" already added to bundle");
     entries.insert(kj::heap<Entry>(specifier, Type::BUNDLE, kj::fwd<ModuleInfo>(info)));
   }
 
@@ -307,8 +315,11 @@ class ModuleRegistryImpl final: public ModuleRegistry {
           // src/workerd/server/workerd-api.c++.
           addBuiltinModule(specifier,
               [specifier, module, this](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
-            lock.setAllowEval(true);
-            KJ_DEFER(lock.setAllowEval(false));
+            // Wasm compilation requires code-generation permission. The scope
+            // restores the prior setting on exit: builtin modules resolve
+            // lazily, potentially inside a window where eval is already
+            // permitted, and that permission must survive the compilation.
+            Lock::AllowEvalScope allowEvalScope(lock, true);
 
             // Allow Wasm compilation to spawn a background thread for tier-up, i.e.
             // recompiling Wasm with optimizations in the background. Otherwise Wasm startup
