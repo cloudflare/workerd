@@ -288,6 +288,9 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 
 - Strong backwards compatibility commitment - features cannot be removed or changed once deployed
 - We use compatibility-date.capnp to introduce feature flags when we need to change the behavior
+- Making a new API reachable is a compatibility decision, not a detail. A commit that adds or enables a standard API (ECMA-262, WHATWG, W3C, WinterCG) **MUST** either gate it behind a compatibility flag or say why shipping it ungated is low risk. Scripts read the global scope to decide whether to install a polyfill, so a new global switches such a script onto our implementation with no action by its author.
+- This applies to a change that names no API at all, such as adding or dropping a V8 flag. `src/workerd/jsg/setup.c++` sets `--js-float16array` and `--js-explicit-resource-management`, and between them those put `Float16Array`, `DisposableStack`, `AsyncDisposableStack` and the `Symbol.dispose` protocol in the global scope of every Worker. Note that such a flag is not disabled merely by not being passed: once V8 turns it on by default, deleting the line changes nothing, so prefer inverting it (`--nojs-float16array`) to deleting it, unless V8 has removed the flag outright.
+- Our internal codebase carries a golden file test over the set of names a Worker can reach. It fails when that set changes, and sets its own bar for updating the expected names. It runs after the roll rather than in workerd CI, so it catches this late; deciding it here is cheaper.
 
 ## Development Workflow
 
@@ -313,6 +316,8 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 See [docs/v8-updates.md](docs/v8-updates.md) for instructions on updating the V8 engine version used by workerd. These steps include syncing the V8 source, applying workerd patches, rebasing onto the new version, regenerating patches, and updating dependency versions in Bazel files.
 
 When updating V8, ensure that all tests pass. Look for new deprecations when building and flag those for users if necessary.
+
+A V8 update can change the set of globals a Worker can reach, since V8 turns its own flags on by default over time. That is a compatibility decision; see [Backward Compatibility](#backward-compatibility).
 
 If asked to help with a V8 update, ask for the specific target V8 version to update to and ask clarifying questions about any specific patches or customizations that need to be preserved before proceeding. Merge conflicts are common during V8 updates, so be prepared to resolve those carefully. These almost always require human judgment to ensure that workerd-specific changes are preserved while still applying the upstream V8 changes correctly. Do not attempt to resolve merge conflicts automatically without human review.
 
