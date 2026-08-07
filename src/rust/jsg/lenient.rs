@@ -9,9 +9,9 @@ use crate::v8::Value;
 /// [`Lenient<T>`] is an alternative to [`Nullable<T>`].
 ///
 /// [`Lenient`] is to be used where [`FromJS`] conversion coerces to undefined when `T::from_js`
-/// fails with a type error. It is intentionally left minimal in order to keep [`Nullable<T>`]
-/// as the canonical optional type for JavaScript ffi optional type, and allows easy conversion
-/// to and from [`Nullable<T>`] for crossing the ffi boundary
+/// fails with a type mismatch error. It is intentionally left minimal in order to keep [`Nullable<T>`]
+/// as the canonical optional type for Rust<->JavaScript ffi optional type, and allows easy conversion
+/// to and from [`Nullable<T>`] for crossing the ffi boundary.
 pub enum Lenient<T> {
     Some(T),
     Unconvertable(Global<Value>),

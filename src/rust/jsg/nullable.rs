@@ -4,6 +4,7 @@
 
 use crate::Error;
 use crate::Lenient;
+use crate::Traced;
 
 /// A wrapper type that accepts `null`, `undefined`, or a value of type `T`.
 ///
@@ -161,9 +162,14 @@ impl<T> From<Nullable<T>> for Option<T> {
     }
 }
 
-/// A version of [`Nullable<T>`] that cannot be [`Nullable::Null`]
+/// A version wrapper around [`Nullable<T>`] that ensures it cannot be [`Nullable::Null`].
+/// Compatiable with [`Lenient<T>`] as well.
+///
 /// The internal value is private, and a [`NonNull`] can only be created
-/// from `FromJS` and [`NonNull::from`]
+/// from `FromJS` and the the `TryFrom` implementations on `Nullable` and `Lenient`.
+///
+/// Attempts to pass `null` to a rust `NonNull` will result in a type mismatch error,
+/// and passing `Null` to [`NonNull::try_from`] results in a `None`.
 pub struct NonNull<T>(T);
 
 impl<T> TryFrom<Nullable<T>> for NonNull<Nullable<T>> {
@@ -171,7 +177,9 @@ impl<T> TryFrom<Nullable<T>> for NonNull<Nullable<T>> {
 
     fn try_from(value: Nullable<T>) -> Result<Self, Self::Error> {
         match value {
-            Nullable::Null => Err(Error::new_type_error("Expected T or undefined, got null")),
+            Nullable::Null => Err(Error::new_type_mismatch_error(
+                "Expected T or undefined, got null",
+            )),
             other => Ok(Self(other)),
         }
     }
@@ -190,23 +198,25 @@ impl<T> TryFrom<Lenient<T>> for NonNull<Lenient<T>> {
 
     fn try_from(value: Lenient<T>) -> Result<Self, Self::Error> {
         match value {
-            Lenient::Null => Err(Error::new_type_error("Expected T or undefined, got null")),
+            Lenient::Null => Err(Error::new_type_mismatch_error(
+                "Expected T or undefined, got null",
+            )),
             other => Ok(Self(other)),
         }
     }
 }
 
 impl<T> NonNull<Lenient<T>> {
-    pub fn parts(nullable: Lenient<T>) -> Option<Self> {
-        match nullable {
-            Lenient::Null => None,
-            other => Some(Self(other)),
-        }
-    }
-
     pub fn inner(self) -> Lenient<T> {
         // Sanity check, type system should guarantee this is impossible
         debug_assert!(!self.0.is_null());
         self.0
+    }
+}
+
+// Implemented here because the internal field is private
+impl<T: Traced> Traced for NonNull<T> {
+    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
+        self.0.trace(visitor);
     }
 }

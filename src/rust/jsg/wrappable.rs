@@ -19,12 +19,15 @@
 //! | `Number` | `number` |
 //! | `Option<T>` | `T` or `undefined` |
 //! | `Nullable<T>` | `T`, `null`, or `undefined` |
-//! | `Lenient<T>` | `T`, `null`, or `undefined` (type errors convert into `undefined`) |
+//! | `Lenient<T>` | `T`, `null`, or `undefined` (type mismatches convert into `undefined`) |
 //! | `Result<T, E>` | `T` or throws |
 //! | `NonCoercible<T>` | `T` (strict type checking) |
 //! | `T: Struct` | `object` |
 //! | `Vec<T>` | `Array<T>` |
 //! | `&[T]` | `Array<T>` (parameter only) |
+//!
+//! Both `Lenient<T>` and `Nullable<T>` support the `jsg::NonNull` wrapper, where
+//! `NonNull<Nullable<T>>` specifies that inner `Nullable` is never the `Null` variant.
 //!
 //! ## `TypedArray` Types
 //!
