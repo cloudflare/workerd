@@ -16,6 +16,7 @@ using import "/workerd/io/outcome.capnp".EventOutcome;
 using import "/workerd/io/script-version.capnp".ScriptVersion;
 using import "/workerd/io/trace.capnp".TagValue;
 using import "/workerd/io/trace.capnp".UserSpanData;
+using import "/workerd/io/trace.capnp".SpanStatus;
 using import "/workerd/io/frankenvalue.capnp".Frankenvalue;
 
 # A 128-bit trace ID used to identify traces.
@@ -310,6 +311,7 @@ struct Trace @0x8e8d911203762d34 {
     # Once emitted, no further mark events should occur within the closed
     # span.
     outcome @0 :EventOutcome;
+    status @1 :SpanStatus;
   }
 
   struct Onset {

@@ -272,7 +272,9 @@ void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date>
     };
     tailStreamWriter->report(spanComponentContext, kj::mv(attr), span.endTime, spanTagsSize);
   }
-  tailStreamWriter->report(spanComponentContext, tracing::SpanClose(), span.endTime, 0);
+  auto statusSize = span.status.size();
+  tailStreamWriter->report(spanComponentContext,
+      tracing::SpanClose(EventOutcome::OK, kj::mv(span.status)), span.endTime, statusSize);
 }
 
 void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
@@ -690,12 +692,14 @@ kj::Maybe<tracing::SpanContext> UserSpanObserver::toSpanContext() {
   return tracing::SpanContext(traceId, spanId, traceFlags);
 }
 
-void UserSpanObserver::onClose(
-    kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) {
+void UserSpanObserver::onClose(kj::Date endTime,
+    tracing::SpanStatus&& status,
+    Span::TagMap&& tags,
+    kj::Vector<Span::Log>&& logs) {
   // span logs are not supported in user tracing.
   (void)logs;
   if (wasAccepted) {
-    submitter->submitSpanClose(spanId, startTime, endTime, kj::mv(tags));
+    submitter->submitSpanClose(spanId, startTime, endTime, kj::mv(status), kj::mv(tags));
   }
 }
 

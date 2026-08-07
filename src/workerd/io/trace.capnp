@@ -28,6 +28,20 @@ struct Tag {
   value @1 :TagValue;
 }
 
+enum SpanStatusCode {
+  unset @0;
+  ok @1;
+  error @2;
+}
+
+struct SpanStatus {
+  code @0 :SpanStatusCode;
+  message :union {
+    none @1 :Void;
+    text @2 :Text;
+  }
+}
+
 struct UserSpanData {
   # Representation of a completed user span
   operationName @0 :Text;
@@ -63,4 +77,5 @@ struct SpanEndData {
   # List of span attributes
   tags @1 :List(Tag);
   spanId @2 :UInt64;
+  status @3 :SpanStatus;
 }

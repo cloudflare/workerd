@@ -87,6 +87,7 @@ namespace {
   V(TRACEFLAGS, "traceFlags")                                                                      \
   V(SPANOPEN, "spanOpen")                                                                          \
   V(STACK, "stack")                                                                                \
+  V(STATUS, "status")                                                                              \
   V(STATUSCODE, "statusCode")                                                                      \
   V(SLUG, "slug")                                                                                  \
   V(STREAMDIAGEVENT, "streamDiagEvent")                                                            \
@@ -98,6 +99,7 @@ namespace {
   V(TRACES, "traces")                                                                              \
   V(TRUNCATED, "truncated")                                                                        \
   V(TYPE, "type")                                                                                  \
+  V(UNSET, "unset")                                                                                \
   V(UNKNOWN, "unknown")                                                                            \
   V(URL, "url")                                                                                    \
   V(VALUE, "value")                                                                                \
@@ -438,6 +440,28 @@ jsg::JsValue ToJs(jsg::Lock& js, const Onset& onset, StringCache& cache) {
   return obj;
 }
 
+jsg::JsValue ToJs(jsg::Lock& js, const SpanStatus& status, StringCache& cache) {
+  auto obj = js.obj();
+  switch (status.code) {
+    case SpanStatusCode::UNSET:
+      obj.set(js, CODE_STR, cache.get(js, UNSET_STR));
+      break;
+    case SpanStatusCode::OK:
+      obj.set(js, CODE_STR, cache.get(js, OK_STR));
+      break;
+    case SpanStatusCode::ERROR:
+      obj.set(js, CODE_STR, cache.get(js, ERROR_STR));
+      break;
+    default:
+      obj.set(js, CODE_STR, cache.get(js, UNSET_STR));
+      break;
+  }
+  KJ_IF_SOME(message, status.message) {
+    obj.set(js, MESSAGE_STR, js.str(message));
+  }
+  return obj;
+}
+
 jsg::JsValue ToJs(jsg::Lock& js, const Outcome& outcome, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, OUTCOME_STR));
@@ -479,6 +503,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const SpanClose& spanClose, StringCache& cache)
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SPANCLOSE_STR));
   obj.set(js, OUTCOME_STR, ToJs(js, spanClose.outcome, cache));
+  if (spanClose.status.code != SpanStatusCode::UNSET) {
+    obj.set(js, STATUS_STR, ToJs(js, spanClose.status, cache));
+  }
   return obj;
 }
 

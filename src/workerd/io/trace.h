@@ -38,6 +38,27 @@ class Trace;
 namespace tracing {
 WD_STRONG_BOOL(LogTruncated);
 
+using SpanStatusCode = rpc::SpanStatusCode;
+
+struct SpanStatus {
+  SpanStatus() = default;
+  explicit SpanStatus(SpanStatusCode code, kj::Maybe<kj::ConstString> message = kj::none)
+      : code(code),
+        message(kj::mv(message)) {}
+  SpanStatus(rpc::SpanStatus::Reader reader);
+  SpanStatus(SpanStatus&&) noexcept = default;
+  SpanStatus& operator=(SpanStatus&&) = default;
+  KJ_DISALLOW_COPY(SpanStatus);
+
+  SpanStatusCode code = SpanStatusCode::UNSET;
+  kj::Maybe<kj::ConstString> message;
+
+  void update(SpanStatus&& status);
+  void copyTo(rpc::SpanStatus::Builder builder) const;
+  SpanStatus clone() const;
+  size_t size() const;
+};
+
 // A 128-bit globally unique trace identifier. This will be used for both
 // external and internal tracing. Specifically, for internal tracing, this
 // is used to represent tracing IDs for jaeger traces. For external tracing,
@@ -780,6 +801,7 @@ struct SpanEndData {
   tracing::SpanId spanId;
 
   kj::Date endTime;
+  SpanStatus status;
   // Should be Span::TagMap, but we can't forward-declare that.
   kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags;
 
@@ -788,9 +810,11 @@ struct SpanEndData {
   explicit SpanEndData(tracing::SpanId spanId,
       kj::Date endTime,
       kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags =
-          kj::HashMap<kj::ConstString, tracing::Attribute::Value>())
+          kj::HashMap<kj::ConstString, tracing::Attribute::Value>(),
+      SpanStatus status = {})
       : spanId(spanId),
         endTime(endTime),
+        status(kj::mv(status)),
         tags(kj::mv(tags)) {}
 };
 
@@ -840,13 +864,14 @@ struct SpanOpen final {
 // Once emitted, no further mark events should occur within the closed
 // span.
 struct SpanClose final {
-  explicit SpanClose(EventOutcome outcome = EventOutcome::OK);
+  explicit SpanClose(EventOutcome outcome = EventOutcome::OK, SpanStatus status = {});
   SpanClose(rpc::Trace::SpanClose::Reader reader);
   SpanClose(SpanClose&&) noexcept = default;
   SpanClose& operator=(SpanClose&&) = default;
   KJ_DISALLOW_COPY(SpanClose);
 
   EventOutcome outcome = EventOutcome::OK;
+  SpanStatus status;
 
   void copyTo(rpc::Trace::SpanClose::Builder builder) const;
   SpanClose clone() const;
@@ -1091,6 +1116,7 @@ struct Span {
   kj::ConstString operationName;
   kj::Date startTime;
   kj::Date endTime;
+  tracing::SpanStatus status;
   TagMap tags;
   kj::Vector<Log> logs;
 
@@ -1233,6 +1259,8 @@ class SpanBuilder {
   // `operationName` should be a string literal with infinite lifetime.
   void setOperationName(kj::ConstString operationName);
 
+  void setStatus(tracing::SpanStatus status);
+
   using TagValue = Span::TagValue;
   // `key` must point to memory that will remain valid all the way until this span's data is
   // serialized.
@@ -1298,7 +1326,10 @@ class SpanObserver: public kj::Refcounted {
   // Called when the span is closed. Delivers the end time, tags, and logs.
   // Called exactly once per observer, after onOpen(). Tags and logs are moved from the span;
   // the observer takes ownership.
-  virtual void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) = 0;
+  virtual void onClose(kj::Date endTime,
+      tracing::SpanStatus&& status,
+      Span::TagMap&& tags,
+      kj::Vector<Span::Log>&& logs) = 0;
 
   virtual void onException(kj::Date timestamp,
       kj::Maybe<tracing::Exception::Code> code,
@@ -1343,7 +1374,7 @@ class NonRecordingSpanObserver final: public SpanObserver {
     return {};
   }
   void onOpen(kj::ConstString, kj::Date) override {}
-  void onClose(kj::Date, Span::TagMap&&, kj::Vector<Span::Log>&&) override {}
+  void onClose(kj::Date, tracing::SpanStatus&&, Span::TagMap&&, kj::Vector<Span::Log>&&) override {}
   kj::Maybe<tracing::SpanContext> toSpanContext() override {
     return tracing::SpanContext::clone(context);
   }

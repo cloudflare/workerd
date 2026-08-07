@@ -121,6 +121,13 @@ interface Outcome {
   readonly wallTime: number;
 }
 
+type SpanStatusCode = "unset" | "ok" | "error";
+
+interface SpanStatus {
+  readonly code: SpanStatusCode;
+  readonly message?: string;
+}
+
 interface SpanOpen {
   readonly type: "spanOpen";
   readonly name: string;
@@ -132,6 +139,7 @@ interface SpanOpen {
 interface SpanClose {
   readonly type: "spanClose";
   readonly outcome: EventOutcome;
+  readonly status?: SpanStatus;
 }
 
 interface DiagnosticChannelEvent {

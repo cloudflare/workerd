@@ -224,7 +224,6 @@ class WorkerTracer final: public BaseTracer {
   // for trace events. This should no longer be needed after merging the existing span ID and
   // InvocationSpanContext interfaces.
   kj::Maybe<tracing::InvocationSpanContext> topLevelInvocationSpanContext;
-
   // When true, the destructor will not log a warning about missing Onset event.
   // Set via markUnused() when a tracer is intentionally not used (e.g., duplicate alarm requests).
   bool markedUnused = false;
@@ -257,8 +256,11 @@ class SpanSubmitter: public kj::Refcounted {
   }
 
   // Called when a span is closed. Together with the open data, provides all span information.
-  virtual void submitSpanClose(
-      tracing::SpanId spanId, kj::Date startTime, kj::Date endTime, Span::TagMap&& tags) = 0;
+  virtual void submitSpanClose(tracing::SpanId spanId,
+      kj::Date startTime,
+      kj::Date endTime,
+      tracing::SpanStatus status,
+      Span::TagMap&& tags) = 0;
 
   virtual void submitSpanException(tracing::SpanId spanId,
       kj::Date timestamp,
@@ -307,7 +309,10 @@ class UserSpanObserver final: public SpanObserver {
   kj::Rc<SpanObserver> newChild() override;
   kj::Rc<SpanObserver> newChildFromUserCode() override;
   void onOpen(kj::ConstString operationName, kj::Date startTime) override;
-  void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) override;
+  void onClose(kj::Date endTime,
+      tracing::SpanStatus&& status,
+      Span::TagMap&& tags,
+      kj::Vector<Span::Log>&& logs) override;
   void onException(kj::Date timestamp,
       kj::Maybe<tracing::Exception::Code> code,
       kj::String name,

@@ -82,6 +82,7 @@ export function createTailStreamHandler(state) {
         case 'spanClose': {
           let span = state.spans.get(spanKey);
           span['closed'] = true;
+          if (event.event.status) span['status'] = event.event.status;
           state.spans.set(spanKey, span);
           break;
         }
@@ -151,6 +152,7 @@ export function createHierarchyAwareCollector() {
           const span = state.spans.get(spanKey);
           if (!span) break;
           span.closed = true;
+          if (event.event.status) span.status = event.event.status;
           break;
         }
         case 'outcome':

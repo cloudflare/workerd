@@ -61,6 +61,51 @@ void addBigEndianBytes(kj::Vector<byte>& out, uint64_t v) {
 };
 }  // namespace
 
+SpanStatus::SpanStatus(rpc::SpanStatus::Reader reader) {
+  switch (reader.getCode()) {
+    case SpanStatusCode::UNSET:
+      break;
+    case SpanStatusCode::OK:
+      code = SpanStatusCode::OK;
+      break;
+    case SpanStatusCode::ERROR: {
+      code = SpanStatusCode::ERROR;
+      auto message = reader.getMessage();
+      if (message.isText()) {
+        this->message = kj::ConstString(kj::heapString(message.getText()));
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+void SpanStatus::update(SpanStatus&& status) {
+  if (status.code == SpanStatusCode::UNSET || code == SpanStatusCode::OK) {
+    return;
+  }
+  code = status.code;
+  message = status.code == SpanStatusCode::ERROR ? kj::mv(status.message) : kj::none;
+}
+
+void SpanStatus::copyTo(rpc::SpanStatus::Builder builder) const {
+  builder.setCode(code);
+  auto messageBuilder = builder.initMessage();
+  KJ_IF_SOME(value, message) {
+    messageBuilder.setText(value.asPtr());
+  }
+}
+
+SpanStatus SpanStatus::clone() const {
+  return SpanStatus(code, message.map([](const kj::ConstString& value) { return value.clone(); }));
+}
+
+size_t SpanStatus::size() const {
+  return sizeof(code) +
+      message.map([](const kj::ConstString& value) { return value.size(); }).orDefault(0);
+}
+
 // Reference: https://github.com/jaegertracing/jaeger/blob/e46f8737/model/ids.go#L58
 kj::Maybe<TraceId> TraceId::fromGoString(kj::ArrayPtr<const char> s) {
   auto n = s.size();
@@ -1363,16 +1408,21 @@ kj::String SpanOpen::toString() const {
   return kj::str("SpanOpen:", operationName, ", ", info);
 }
 
-SpanClose::SpanClose(EventOutcome outcome): outcome(outcome) {}
+SpanClose::SpanClose(EventOutcome outcome, SpanStatus status)
+    : outcome(outcome),
+      status(kj::mv(status)) {}
 
-SpanClose::SpanClose(rpc::Trace::SpanClose::Reader reader): outcome(reader.getOutcome()) {}
+SpanClose::SpanClose(rpc::Trace::SpanClose::Reader reader)
+    : outcome(reader.getOutcome()),
+      status(reader.getStatus()) {}
 
 void SpanClose::copyTo(rpc::Trace::SpanClose::Builder builder) const {
   builder.setOutcome(outcome);
+  status.copyTo(builder.initStatus());
 }
 
 SpanClose SpanClose::clone() const {
-  return SpanClose(outcome);
+  return SpanClose(outcome, status.clone());
 }
 
 kj::String SpanClose::toString() const {
@@ -1822,7 +1872,8 @@ void SpanOpenData::copyTo(rpc::SpanOpenData::Builder builder) const {
 
 SpanEndData::SpanEndData(rpc::SpanEndData::Reader reader)
     : spanId(reader.getSpanId()),
-      endTime(kj::UNIX_EPOCH + reader.getEndTimeNs() * kj::NANOSECONDS) {
+      endTime(kj::UNIX_EPOCH + reader.getEndTimeNs() * kj::NANOSECONDS),
+      status(reader.getStatus()) {
   auto tagsParam = reader.getTags();
   tags.reserve(tagsParam.size());
   for (auto tagParam: tagsParam) {
@@ -1834,6 +1885,7 @@ SpanEndData::SpanEndData(rpc::SpanEndData::Reader reader)
 void SpanEndData::copyTo(rpc::SpanEndData::Builder builder) const {
   builder.setEndTimeNs((endTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setSpanId(spanId);
+  status.copyTo(builder.initStatus());
 
   auto tagsParam = builder.initTags(tags.size());
   auto i = 0;
@@ -1877,7 +1929,7 @@ void SpanBuilder::end() {
       // TODO(performance): Fold this timer call if we are using I/O time, where we will look up
       // I/O time later.
       s.endTime = kj::systemPreciseCalendarClock().now();
-      observer->onClose(s.endTime, kj::mv(s.tags), kj::mv(s.logs));
+      observer->onClose(s.endTime, kj::mv(s.status), kj::mv(s.tags), kj::mv(s.logs));
       span = kj::none;
     }
   }
@@ -1889,6 +1941,12 @@ void SpanBuilder::setOperationName(kj::ConstString operationName) {
       observer->onUpdateName(operationName.clone());
     }
     s.operationName = kj::mv(operationName);
+  }
+}
+
+void SpanBuilder::setStatus(tracing::SpanStatus status) {
+  KJ_IF_SOME(s, span) {
+    s.status.update(kj::mv(status));
   }
 }
 

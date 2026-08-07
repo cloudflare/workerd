@@ -564,16 +564,44 @@ KJ_TEST("Read/Write SpanClose works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::SpanClose>();
 
-  SpanClose info(EventOutcome::EXCEPTION);
+  SpanClose info(EventOutcome::EXCEPTION,
+      SpanStatus(SpanStatusCode::ERROR, kj::ConstString(kj::str("failed"))));
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
 
   SpanClose info2(reader);
   KJ_ASSERT(info2.outcome == EventOutcome::EXCEPTION);
+  KJ_ASSERT(info2.status.code == SpanStatusCode::ERROR);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info2.status.message) == "failed");
 
   SpanClose info3 = info.clone();
   KJ_ASSERT(info3.outcome == EventOutcome::EXCEPTION);
+  KJ_ASSERT(info3.status.code == SpanStatusCode::ERROR);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info3.status.message) == "failed");
+}
+
+KJ_TEST("Span status defaults to unset when absent") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::Trace::SpanClose>();
+  infoBuilder.setOutcome(EventOutcome::OK);
+
+  SpanClose info(infoBuilder.asReader());
+  KJ_ASSERT(info.status.code == SpanStatusCode::UNSET);
+  KJ_ASSERT(info.status.message == kj::none);
+}
+
+KJ_TEST("Read/Write SpanEndData status works") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::SpanEndData>();
+  SpanEndData info(SpanId(42), kj::UNIX_EPOCH,
+      kj::HashMap<kj::ConstString, tracing::Attribute::Value>(),
+      SpanStatus(SpanStatusCode::ERROR, kj::ConstString(kj::str("failed"))));
+  info.copyTo(infoBuilder);
+
+  SpanEndData info2(infoBuilder.asReader());
+  KJ_ASSERT(info2.status.code == SpanStatusCode::ERROR);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info2.status.message) == "failed");
 }
 
 KJ_TEST("Read/Write Onset works") {

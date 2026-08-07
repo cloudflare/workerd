@@ -224,6 +224,28 @@ export const setAttributes = {
   },
 };
 
+export const setStatus = {
+  async test(ctrl, env, ctx) {
+    const errorSpan = publicTracing.startSpan('status-error-op');
+    errorSpan.setAttribute('test', 'setStatus');
+    assert.strictEqual(
+      errorSpan.setStatus({ code: 'error', message: 'first error' }),
+      errorSpan
+    );
+    errorSpan.setStatus({ code: 'error', message: 'second error' });
+    errorSpan.setStatus({ code: 'unset' });
+    errorSpan.end();
+    errorSpan.setStatus({ code: 'ok' });
+
+    const okSpan = publicTracing.startSpan('status-ok-op');
+    okSpan.setAttribute('test', 'setStatus');
+    okSpan.setStatus({ code: 'error', message: 'temporary error' });
+    okSpan.setStatus({ code: 'ok', message: 'ignored' });
+    okSpan.setStatus({ code: 'error', message: 'also ignored' });
+    okSpan.end();
+  },
+};
+
 // Verify that nested withSpan calls produce correctly nested spans. This exercises the
 // AsyncContextFrame push path in enterSpan: the inner span should be parented on the
 // outer span.

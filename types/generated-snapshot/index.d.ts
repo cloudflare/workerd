@@ -4600,10 +4600,16 @@ declare abstract class Span {
           code?: string | number;
           name?: string;
           message: string;
-          stack?: string;
-        },
+      stack?: string;
+    },
   ): void;
+  setStatus(status: TracingSpanStatus): this;
   end(): void;
+}
+type TracingSpanStatusCode = "unset" | "ok" | "error";
+interface TracingSpanStatus {
+  code: TracingSpanStatusCode;
+  message?: string;
 }
 /**
  * Represents the identity of a user authenticated via Cloudflare Access.
@@ -17064,6 +17070,12 @@ declare namespace TailStream {
     readonly outcome: EventOutcome;
     readonly cpuTime: number;
     readonly wallTime: number;
+    readonly status?: SpanStatus;
+  }
+  type SpanStatusCode = "unset" | "ok" | "error";
+  interface SpanStatus {
+    readonly code: SpanStatusCode;
+    readonly message?: string;
   }
   interface SpanOpen {
     readonly type: "spanOpen";
@@ -17075,6 +17087,7 @@ declare namespace TailStream {
   interface SpanClose {
     readonly type: "spanClose";
     readonly outcome: EventOutcome;
+    readonly status?: SpanStatus;
   }
   interface DiagnosticChannelEvent {
     readonly type: "diagnosticChannel";

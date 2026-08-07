@@ -39,6 +39,7 @@ export const validateSpans = {
         expectedSpan: 'undefined-attr-op',
       },
       { test: 'setAttributes', expectedSpan: 'set-attributes-op' },
+      { test: 'setStatus', expectedSpan: 'status-error-op' },
       { test: 'publicImportTracing', expectedSpan: 'public-import-op' },
       {
         test: 'publicImportStartActiveSpan',
@@ -64,6 +65,17 @@ export const validateSpans = {
 
       assert(span, `${test}: Should have created span '${expectedSpan}'`);
       assert(span.closed, `${test}: Span '${expectedSpan}' should be closed`);
+    }
+
+    {
+      const statusSpans = spansByTest.get('setStatus') || [];
+      const errorSpan = statusSpans.find((s) => s.name === 'status-error-op');
+      const okSpan = statusSpans.find((s) => s.name === 'status-ok-op');
+      assert.deepStrictEqual(errorSpan.status, {
+        code: 'error',
+        message: 'second error',
+      });
+      assert.deepStrictEqual(okSpan.status, { code: 'ok' });
     }
 
     // setAttributeUndefined should NOT have a 'skipped' attribute recorded.
