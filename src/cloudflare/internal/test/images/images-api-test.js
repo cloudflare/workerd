@@ -130,6 +130,79 @@ export const test_images_transform = {
   },
 };
 
+export const test_images_response_default_headers = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .input(inputStream(['png']))
+      .output({ format: 'image/avif' });
+
+    const response = result.response();
+
+    assert.strictEqual(
+      response.headers.get('content-type'),
+      'application/json'
+    );
+    assert.strictEqual(response.headers.get('cache-control'), null);
+  },
+};
+
+export const test_images_response_custom_headers = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .input(inputStream(['png']))
+      .output({ format: 'image/avif' });
+
+    const response = result.response({
+      headers: {
+        'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+        'Cache-Tag': 'my-tag',
+      },
+    });
+
+    assert.strictEqual(
+      response.headers.get('cache-control'),
+      'public, max-age=3600, stale-while-revalidate=86400'
+    );
+    assert.strictEqual(response.headers.get('cache-tag'), 'my-tag');
+    // content-type still reflects the transformed image
+    assert.strictEqual(
+      response.headers.get('content-type'),
+      'application/json'
+    );
+  },
+};
+
+export const test_images_response_content_type_not_overridable = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .input(inputStream(['png']))
+      .output({ format: 'image/avif' });
+
+    // Attempting to set a conflicting content-type
+    // the transformed image's actual content type always wins.
+    const response = result.response({
+      headers: { 'Content-Type': 'text/plain' },
+    });
+
+    assert.strictEqual(
+      response.headers.get('content-type'),
+      'application/json'
+    );
+  },
+};
+
 export const test_images_nested_draw = {
   /**
    * @param {unknown} _

@@ -60,12 +60,11 @@ class TransformationResultImpl implements ImageTransformationResult {
       : stream;
   }
 
-  response(): Response {
-    return new Response(this.image(), {
-      headers: {
-        'content-type': this.contentType(),
-      },
-    });
+  response(options?: ImageTransformationResponseOptions): Response {
+    const headers = new Headers(options?.headers);
+    headers.set('content-type', this.contentType());
+
+    return new Response(this.image(), { headers });
   }
 }
 
