@@ -452,6 +452,10 @@ wd_capnp_library(src = "trace.capnp")
 
 wd_capnp_library(src = "compatibility-date.capnp")
 
+# The schema source lets text-based build rules read compatibility flag names
+# without a compiled helper to inspect the schema annotations.
+exports_files(["compatibility-date.capnp"])
+
 wd_capnp_library(src = "features.capnp")
 
 wd_capnp_library(src = "frankenvalue.capnp")
