@@ -19,11 +19,15 @@
 //! | `Number` | `number` |
 //! | `Option<T>` | `T` or `undefined` |
 //! | `Nullable<T>` | `T`, `null`, or `undefined` |
+//! | `Lenient<T>` | `T`, `null`, or `undefined` (type mismatches convert into `undefined`) |
 //! | `Result<T, E>` | `T` or throws |
 //! | `NonCoercible<T>` | `T` (strict type checking) |
 //! | `T: Struct` | `object` |
 //! | `Vec<T>` | `Array<T>` |
 //! | `&[T]` | `Array<T>` (parameter only) |
+//!
+//! Both `Lenient<T>` and `Nullable<T>` support the `jsg::NonNull` wrapper, where
+//! `NonNull<Nullable<T>>` specifies that inner `Nullable` is never the `Null` variant.
 //!
 //! ## `TypedArray` Types
 //!
@@ -65,11 +69,14 @@
 //! For strict validation, wrap parameters in `NonCoercible<T>` or validate manually.
 
 use crate::Error;
+use crate::ExceptionType;
+use crate::Lenient;
 use crate::Lock;
 use crate::NonCoercible;
 use crate::Nullable;
 use crate::Number;
 use crate::Type;
+use crate::nullable::NonNull;
 use crate::v8;
 use crate::v8::ToLocalValue;
 
@@ -146,6 +153,17 @@ impl_traced_noop!(
 impl<T: Traced> Traced for Option<T> {
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         if let Some(inner) = self {
+            inner.trace(visitor);
+        }
+    }
+}
+
+impl<T: Traced> Traced for Lenient<T> {
+    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
+        if let Self::Some(inner) = self {
+            inner.trace(visitor);
+        }
+        if let Self::Unconvertable(inner) = self {
             inner.trace(visitor);
         }
     }
@@ -475,6 +493,51 @@ impl<T: ToJS> ToJS for Nullable<T> {
     }
 }
 
+impl<T: ToJS> ToJS for NonNull<Nullable<T>> {
+    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+    where
+        'b: 'a,
+    {
+        match self.inner() {
+            Nullable::Some(value) => value.to_js(lock),
+            Nullable::Undefined => v8::Local::<v8::Value>::undefined(lock),
+            // `FromJS` errors if null and `NonNull::from` returns `None`. These
+            // are the only ways to construct a `NonNull`
+            Nullable::Null => unreachable!("Type system guarantees this is impossible"),
+        }
+    }
+}
+
+impl<T: ToJS> ToJS for Lenient<T> {
+    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+    where
+        'b: 'a,
+    {
+        match self {
+            Self::Some(value) => value.to_js(lock),
+            Self::Null => v8::Local::<v8::Value>::null(lock),
+            Self::Undefined | Self::Unconvertable(_) => v8::Local::<v8::Value>::undefined(lock),
+        }
+    }
+}
+
+impl<T: ToJS> ToJS for NonNull<Lenient<T>> {
+    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+    where
+        'b: 'a,
+    {
+        match self.inner() {
+            Lenient::Some(value) => value.to_js(lock),
+            Lenient::Undefined | Lenient::Unconvertable(_) => {
+                v8::Local::<v8::Value>::undefined(lock)
+            }
+            // `FromJS` errors if null and `TryInto` fails. These are the only ways to
+            // construct a `NonNull`.
+            Lenient::Null => unreachable!("Type system guarantees this is impossible"),
+        }
+    }
+}
+
 impl<T: Type + FromJS> FromJS for Option<T> {
     type ResultType = Option<T::ResultType>;
 
@@ -506,7 +569,7 @@ impl<T: Type + FromJS> FromJS for NonCoercible<T> {
     }
 }
 
-impl<T: Type + FromJS> FromJS for Nullable<T> {
+impl<T: FromJS> FromJS for Nullable<T> {
     type ResultType = Nullable<T::ResultType>;
 
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
@@ -517,6 +580,45 @@ impl<T: Type + FromJS> FromJS for Nullable<T> {
         } else {
             Ok(Nullable::Some(T::from_js(lock, value)?))
         }
+    }
+}
+
+impl<T: FromJS> FromJS for NonNull<Nullable<T>> {
+    type ResultType = NonNull<Nullable<T::ResultType>>;
+
+    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+        let nullable = Nullable::<T>::from_js(lock, value)?;
+        nullable.try_into()
+    }
+}
+
+impl<T: FromJS> FromJS for Lenient<T> {
+    type ResultType = Lenient<T::ResultType>;
+
+    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+        if value.is_null() {
+            Ok(Lenient::Null)
+        } else if value.is_undefined() {
+            Ok(Lenient::Undefined)
+        } else {
+            match T::from_js(lock, value.clone()) {
+                Ok(v) => Ok(Lenient::Some(v)),
+                Err(Error {
+                    name: ExceptionType::TypeMismatchError,
+                    message: _,
+                }) => Ok(Lenient::Unconvertable(value.into())),
+                Err(err) => Err(err),
+            }
+        }
+    }
+}
+
+impl<T: FromJS> FromJS for NonNull<Lenient<T>> {
+    type ResultType = NonNull<Lenient<T::ResultType>>;
+
+    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+        let lenient = Lenient::<T>::from_js(lock, value)?;
+        lenient.try_into()
     }
 }
 
