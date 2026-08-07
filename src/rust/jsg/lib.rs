@@ -17,6 +17,7 @@ mod wrappable;
 
 pub use feature_flags::FeatureFlags;
 pub use lenient::Lenient;
+pub use nullable::NonNull;
 pub use nullable::Nullable;
 pub use resource::Rc;
 pub use resource::Resource;
