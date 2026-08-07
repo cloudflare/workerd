@@ -242,11 +242,21 @@ class Container: public jsg::Object {
     JSG_STRUCT(labels, image);
   };
 
+  struct StartResources {
+    double vcpu;
+    double memoryMib;  // Memory size, in MiB (2^20 bytes).
+    double diskMb;     // Disk size, in MB (10^6 bytes).
+
+    JSG_STRUCT(vcpu, memoryMib, diskMb);
+  };
+
   struct StartupOptions {
     jsg::Optional<kj::Array<kj::String>> entrypoint;
     bool enableInternet = false;
     jsg::Optional<jsg::Dict<kj::String>> env;
     jsg::Optional<int64_t> hardTimeout;
+    jsg::Optional<kj::String> image;
+    jsg::Optional<kj::OneOf<kj::String, StartResources>> instance;
     jsg::Optional<jsg::Dict<kj::String>> labels;
     jsg::Optional<kj::Array<DirectorySnapshotRestoreParams>> directorySnapshots;
     jsg::Optional<Snapshot> containerSnapshot;
@@ -257,26 +267,41 @@ class Container: public jsg::Object {
         enableInternet,
         env,
         hardTimeout,
+        image,
+        instance,
         labels,
         directorySnapshots,
         containerSnapshot);
     JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
       if (flags.getWorkerdExperimental()) {
-        JSG_TS_OVERRIDE(ContainerStartupOptions {
+        JSG_TS_OVERRIDE(type ContainerStartupOptions = {
           entrypoint?: string[];
           enableInternet: boolean;
           env?: Record<string, string>;
           hardTimeout?: number | bigint;
+          instance?: "lite" | "standard-1" | "standard-2" | "standard-3" | "standard-4" | ContainerStartResources;
           labels?: Record<string, string>;
           directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
-          containerSnapshot?: ContainerSnapshot;
-        });
+        } & (
+          | {
+              /** Cannot be used with `containerSnapshot`. */
+              image: string;
+              containerSnapshot?: never;
+            }
+          | {
+              image?: never;
+              /** Cannot be used with `image`. */
+              containerSnapshot?: ContainerSnapshot;
+            }
+        ));
       } else {
         JSG_TS_OVERRIDE(ContainerStartupOptions {
           entrypoint?: string[];
           enableInternet: boolean;
           env?: Record<string, string>;
           hardTimeout?: never;
+          image?: never;
+          instance?: never;
           labels?: Record<string, string>;
           directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
           containerSnapshot?: ContainerSnapshot;
@@ -381,6 +406,7 @@ class Container: public jsg::Object {
   api::ExecOutput, api::ExecOptions, api::ExecPtyOptions, api::ExecProcess, api::Container,        \
       api::Container::DirectorySnapshot, api::Container::DirectorySnapshotOptions,                 \
       api::Container::DirectorySnapshotRestoreParams, api::Container::Snapshot,                    \
-      api::Container::SnapshotOptions, api::Container::StartupOptions, api::Container::Info
+      api::Container::SnapshotOptions, api::Container::StartupOptions, api::Container::Info,       \
+      api::Container::StartResources
 
 }  // namespace workerd::api

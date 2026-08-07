@@ -341,7 +341,8 @@ User code: import { foo } from './bar.js'
       ii.  Call inner.lookup(innerContext)  [acquires MutexGuarded exclusive lock]
       iii. ModuleRegistry::lookupImpl searches bundles in priority order
       iv.  Each bundle's lookup() checks aliases, cache, then resolve callbacks
-      v.   If redirect (alias): recurse once with new specifier (max depth 1)
+      v.   If redirect (alias): restart with the new specifier (chains followed
+           to any depth, cycles detected via a visited-specifier set)
       vi.  Record (type, URL) -> definition in the resolutions map
       vii. If an instantiation already exists for (URL, definition) — e.g. the
            same builtin resolved through another context type — reuse its
@@ -740,12 +741,14 @@ This means:
 
 ### Alias Handling
 
-Aliases are single-level redirects. When a bundle lookup returns a string
-(redirect) instead of a `Module`:
+Aliases are redirects. When a bundle lookup returns a string (redirect)
+instead of a `Module`:
 
 1. The string is parsed as a URL (relative to `bundleBase` if needed).
-2. `lookupImpl` recurses with the new specifier, but with a `recursed=true`
-   flag that prevents further recursion. Only one level of aliasing is supported.
+2. `lookupImpl` recurses with the new specifier. Chains of aliases are
+   followed to any depth; each resolution tracks the specifiers it has
+   visited, and a redirect to an already-visited specifier (a cycle) resolves
+   to "module not found".
 
 ### Error Propagation for Errored Dependencies
 

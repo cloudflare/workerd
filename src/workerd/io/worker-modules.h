@@ -202,14 +202,20 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
-          KJ_FAIL_ASSERT("Python modules are not currently supported with the new module registry");
-          // KJ_REQUIRE(featureFlags.getPythonWorkers(),
-          //     "The python_workers compatibility flag is required to use Python.");
-          // firstEsm = false;
+          // Python workers always use the original module registry:
+          // isNewModuleRegistryEnabled() returns false whenever python_workers
+          // is set. Python modules can therefore only reach this point when
+          // the bundle contains python modules without the python_workers
+          // compatibility flag, which is a user configuration error (matching
+          // the error the legacy path reports for the same mistake).
+          if (!featureFlags.getPythonWorkers()) {
+            KJ_FAIL_REQUIRE("The python_workers compatibility flag is required to use Python.");
+          }
+          KJ_FAIL_REQUIRE("Python modules are not supported with the new module registry");
+          // TODO(later): When the new module registry supports python workers,
+          // the entrypoint module is registered here:
           // hasPythonModules = true;
-          // kj::StringPtr entry = PYTHON_ENTRYPOINT;
-          // bundleBuilder.addEsmModule(def.name, entry);
-          // break;
+          // bundleBuilder.addEsmModule(def.name, kj::StringPtr(PYTHON_ENTRYPOINT));
         }
         KJ_CASE_ONEOF(content, Worker::Script::ObsoletePythonRequirement) {
           // Handled separately
@@ -294,8 +300,11 @@ template <typename JsgIsolate>
 static v8::Local<v8::WasmModuleObject> compileWasmGlobal(typename JsgIsolate::Lock& lock,
     ::capnp::Data::Reader reader,
     const jsg::CompilationObserver& observer) {
-  lock.setAllowEval(true);
-  KJ_DEFER(lock.setAllowEval(false));
+  // Wasm compilation requires code-generation permission. The scope restores
+  // the prior setting on exit: this helper also runs lazily (e.g. for modules
+  // served by the fallback service), potentially inside a window where eval is
+  // already permitted, and that permission must survive the compilation.
+  jsg::Lock::AllowEvalScope allowEvalScope(lock, true);
 
   // Allow Wasm compilation to spawn a background thread for tier-up, i.e. recompiling
   // Wasm with optimizations in the background. Otherwise Wasm startup is way too slow.

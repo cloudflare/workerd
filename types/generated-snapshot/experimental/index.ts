@@ -4063,18 +4063,38 @@ export interface ContainerSnapshot {
 export interface ContainerSnapshotOptions {
   name?: string;
 }
-export interface ContainerStartupOptions {
+export type ContainerStartupOptions = {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
   hardTimeout?: number | bigint;
+  instance?:
+    | "lite"
+    | "standard-1"
+    | "standard-2"
+    | "standard-3"
+    | "standard-4"
+    | ContainerStartResources;
   labels?: Record<string, string>;
   directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
-  containerSnapshot?: ContainerSnapshot;
-}
+} & (
+  | {
+      image: string;
+      containerSnapshot?: never;
+    }
+  | {
+      image?: never;
+      containerSnapshot?: ContainerSnapshot;
+    }
+);
 export interface ContainerInfo {
   labels: Record<string, string>;
   image: string;
+}
+export interface ContainerStartResources {
+  vcpu: number;
+  memoryMib: number;
+  diskMb: number;
 }
 /**
  * The **`FileSystemHandle`** interface of the File System API is an object which represents a file or directory entry.
@@ -4775,7 +4795,10 @@ export interface Tracing {
 }
 export declare abstract class Span {
   get isTraced(): boolean;
-  setAttribute(key: string, value?: boolean | number | string): void;
+  setAttribute(key: string, value: boolean | number | string): this;
+  setAttributes(
+    attributes: Record<string, boolean | number | string | undefined>,
+  ): this;
   end(): void;
 }
 /**
@@ -16566,23 +16589,25 @@ export declare namespace TailStream {
     readonly message: string;
     readonly stack?: string;
   }
-  interface Log {
-    readonly type: "log";
-    readonly level: "debug" | "error" | "info" | "log" | "warn";
-    readonly message: object;
-    /**
-     * Per-argument structured Error fields for the originating `console.*` call.
-     * The array is positional: index `i` corresponds to the i-th argument. Indices
-     * whose argument was not a native Error are `null`. The whole property is
-     * absent (undefined) when none of the arguments was a native Error.
-     */
-    readonly errorInfo?: readonly (TailStreamErrorInfo | null)[];
-  }
   interface TailStreamErrorInfo {
     readonly name: string;
     readonly message: string;
     readonly stack?: string;
   }
+  type Log = {
+    readonly type: "log";
+    readonly level: "debug" | "error" | "info" | "log" | "warn";
+    readonly errorInfo?: readonly (TailStreamErrorInfo | null)[];
+  } & (
+    | {
+        readonly message: object;
+        readonly truncated?: false;
+      }
+    | {
+        readonly message: string;
+        readonly truncated: true;
+      }
+  );
   interface DroppedEventsDiagnostic {
     readonly diagnosticsType: "droppedEvents";
     readonly count: number;

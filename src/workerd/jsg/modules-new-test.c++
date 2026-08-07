@@ -1127,6 +1127,36 @@ KJ_TEST("Source phase imports work for bundled and fallback Wasm modules") {
 
 // ======================================================================================
 
+KJ_TEST("Lazy Wasm compilation preserves the ambient allow-eval setting") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    auto wasm = makeTestWasm();
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+    bundleBuilder.addWasmModule("wasm", wasm);
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    // Wasm compiles lazily at evaluation time. When that happens inside a
+    // window where eval is already permitted (e.g. worker startup with the
+    // allow_eval_during_startup compat flag), the permission must survive the
+    // compilation rather than being reset to false.
+    js.setAllowEval(true);
+    KJ_DEFER(js.setAllowEval(false));
+
+    KJ_ASSERT(ModuleRegistry::resolve(js, "file:///wasm").isWasmModuleObject());
+    KJ_ASSERT(js.isEvalAllowed());
+
+    // The permission is effective in practice too: eval() still works.
+    auto script = check(v8::Script::Compile(js.v8Context(), js.str("eval('6 * 7')"_kj)));
+    auto result = JsValue(check(script->Run(js.v8Context())));
+    KJ_ASSERT(kj::str(result) == "42");
+  });
+}
+
+// ======================================================================================
+
 KJ_TEST("compileEvalFunction in synthetic module works") {
   PREAMBLE([&](Lock& js) {
     CompilationObserver compilationObserver;
@@ -1428,6 +1458,40 @@ KJ_TEST("Syntax error in ESM module is properly reported") {
       auto str = kj::str(exception.getHandle(js));
       KJ_ASSERT(str == "SyntaxError: Unexpected identifier 'error'");
     });
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("Syntax error in ESM module is reported consistently on repeated resolution") {
+  PREAMBLE([&](Lock& js) {
+    ResolveObserverImpl observer;
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+
+    auto foo = kj::str("export default 123; syntax error");
+    bundleBuilder.addEsmModule("foo", foo);
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    // A failed compilation must not leave stale resolution-cache state behind:
+    // every attempt reports the original compile error rather than the second
+    // and subsequent attempts failing with an internal error.
+    for (int attempt: {1, 2, 3}) {
+      bool threw = false;
+      JSG_TRY(js) {
+        ModuleRegistry::resolve(js, "file:///foo", "default"_kjc);
+      }
+      JSG_CATCH(exception) {
+        threw = true;
+        auto str = kj::str(exception.getHandle(js));
+        KJ_ASSERT(str == "SyntaxError: Unexpected identifier 'error'", str, attempt);
+      }
+      KJ_ASSERT(threw, attempt);
+    }
   });
 }
 
@@ -2771,7 +2835,7 @@ KJ_TEST("Fallback redirect restarts module resolution") {
 
 // ======================================================================================
 
-KJ_TEST("Fallback redirect loops stop after one redirect") {
+KJ_TEST("Fallback redirect cycles resolve to module-not-found") {
   const auto first = "file:///first"_url;
   const auto second = "file:///second"_url;
   uint calls = 0;
@@ -2800,7 +2864,110 @@ KJ_TEST("Fallback redirect loops stop after one redirect") {
     .referrerNormalizedSpecifier = BASE,
   };
 
+  // first -> second -> first is a redirect cycle: the resolution visits each
+  // specifier once and then fails cleanly instead of recursing forever.
   KJ_ASSERT(registry->lookup(context, noopResolveObserver) == kj::none);
+  KJ_ASSERT(calls == 2);
+}
+
+// ======================================================================================
+
+KJ_TEST("Fallback redirect chains are followed to the final module") {
+  const auto a = "file:///a"_url;
+  const auto b = "file:///b"_url;
+  const auto c = "file:///c"_url;
+  uint calls = 0;
+
+  auto fallback = ModuleBundle::newFallbackBundle(
+      [&](const ResolveContext& context) -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+    ++calls;
+    if (context.normalizedSpecifier == a) {
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(
+          kj::OneOf<kj::String, kj::Own<Module>>(kj::str(b.getHref())));
+    }
+    if (context.normalizedSpecifier == b) {
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(
+          kj::OneOf<kj::String, kj::Own<Module>>(kj::str(c.getHref())));
+    }
+    if (context.normalizedSpecifier == c) {
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(Module::newSynthetic(
+          c.clone(), Module::Type::FALLBACK, Module::newDataModuleHandler(nullptr)));
+    }
+    return kj::none;
+  });
+
+  auto registry = ModuleRegistry::Builder(BASE, ModuleRegistry::Builder::Options::ALLOW_FALLBACK)
+                      .add(kj::mv(fallback))
+                      .finish();
+  ResolveContext context{
+    .type = ResolveContext::Type::BUNDLE,
+    .source = ResolveContext::Source::INTERNAL,
+    .normalizedSpecifier = a,
+    .referrerNormalizedSpecifier = BASE,
+  };
+
+  // a -> b -> c -> module: the whole chain is followed.
+  auto& module = KJ_ASSERT_NONNULL(registry->lookup(context, noopResolveObserver));
+  KJ_ASSERT(module.id() == c);
+  KJ_ASSERT(calls == 3);
+
+  // The chain was cached as aliases, so resolving the entry specifier again
+  // walks the cached aliases without consulting the fallback service again.
+  auto& again = KJ_ASSERT_NONNULL(registry->lookup(context, noopResolveObserver));
+  KJ_ASSERT(&again == &module);
+  KJ_ASSERT(calls == 3);
+}
+
+// ======================================================================================
+
+KJ_TEST("Fallback specifiers resolving to an already-stored module id are aliased") {
+  const auto a = "file:///a"_url;
+  const auto b = "file:///b"_url;
+  const auto real = "file:///real"_url;
+  uint calls = 0;
+
+  // The fallback service returns, for two different specifiers, a module
+  // whose canonical id is the same (e.g. two paths mapping to one file).
+  auto fallback = ModuleBundle::newFallbackBundle(
+      [&](const ResolveContext& context) -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+    ++calls;
+    if (context.normalizedSpecifier == a || context.normalizedSpecifier == b) {
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(Module::newSynthetic(
+          real.clone(), Module::Type::FALLBACK, Module::newDataModuleHandler(nullptr)));
+    }
+    return kj::none;
+  });
+
+  auto registry = ModuleRegistry::Builder(BASE, ModuleRegistry::Builder::Options::ALLOW_FALLBACK)
+                      .add(kj::mv(fallback))
+                      .finish();
+  ResolveContext contextA{
+    .type = ResolveContext::Type::BUNDLE,
+    .source = ResolveContext::Source::INTERNAL,
+    .normalizedSpecifier = a,
+    .referrerNormalizedSpecifier = BASE,
+  };
+  ResolveContext contextB{
+    .type = ResolveContext::Type::BUNDLE,
+    .source = ResolveContext::Source::INTERNAL,
+    .normalizedSpecifier = b,
+    .referrerNormalizedSpecifier = BASE,
+  };
+
+  auto& moduleA = KJ_ASSERT_NONNULL(registry->lookup(contextA, noopResolveObserver));
+  KJ_ASSERT(moduleA.id() == real);
+  KJ_ASSERT(calls == 1);
+
+  // The second specifier resolves to a module whose id is already stored:
+  // the stored module is reused (not rejected, and not duplicated).
+  auto& moduleB = KJ_ASSERT_NONNULL(registry->lookup(contextB, noopResolveObserver));
+  KJ_ASSERT(&moduleB == &moduleA);
+  KJ_ASSERT(calls == 2);
+
+  // And the alias recorded for the second specifier makes later lookups
+  // resolve without consulting the fallback service again.
+  auto& moduleB2 = KJ_ASSERT_NONNULL(registry->lookup(contextB, noopResolveObserver));
+  KJ_ASSERT(&moduleB2 == &moduleA);
   KJ_ASSERT(calls == 2);
 }
 

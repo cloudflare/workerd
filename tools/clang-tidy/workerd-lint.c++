@@ -15,6 +15,7 @@
 
 #include "angled-includes.h"
 #include "consume.h"
+#include "promise-ignore-result.h"
 #include "unsafe-continuation-capture.h"
 #include "visit-for-gc.h"
 
@@ -27,6 +28,7 @@ class WorkerdLintModule : public clang::tidy::ClangTidyModule {
     CheckFactories.registerCheck<AngledIncludesCheck>("workerd-angled-includes");
     CheckFactories.registerCheck<VisitForGcCheck>("jsg-visit-for-gc");
     CheckFactories.registerCheck<ConsumeCheck>("workerd-consume");
+    CheckFactories.registerCheck<PromiseIgnoreResultCheck>("workerd-promise-ignore-result");
     CheckFactories.registerCheck<UnsafeContinuationCaptureCheck>(
         "workerd-unsafe-continuation-capture");
   }

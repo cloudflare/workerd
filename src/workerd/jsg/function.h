@@ -168,7 +168,14 @@ class Function<Ret(Args...)> {
   Ret operator()(jsg::Lock& jsl, Args... args) {
     KJ_SWITCH_ONEOF(impl) {
       KJ_CASE_ONEOF(native, Ref<NativeFunction>) {
-        return (*native)(jsl, kj::fwd<Args>(args)...);
+        // Hold our own reference for the duration of the call. A native function can run
+        // arbitrary JS (e.g. TextEncoderStream's transform algorithm coerces its chunk with
+        // ToString, which may invoke a user-defined toString()), and that JS can drop what
+        // would otherwise be the last reference to this jsg::Function -- for streams, via
+        // Algorithms::clear(). Without this, the WrappableFunctionImpl, along with any state
+        // captured by the lambda, is freed while the lambda is still executing.
+        auto ref = native.addRef();
+        return (*ref)(jsl, kj::fwd<Args>(args)...);
       }
       KJ_CASE_ONEOF(js, JsImpl) {
         return (*js.wrapper)(

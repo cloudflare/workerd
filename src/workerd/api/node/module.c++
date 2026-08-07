@@ -69,10 +69,10 @@ jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
   return jsg::JsValue(js.wrapReturningFunction(js.v8Context(),
       [referrer = kj::str(parsed.getPathname())](
           jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) -> v8::Local<v8::Value> {
+    // This closure services the original module registry only; when the new
+    // module registry is enabled, createRequire() returned a different
+    // implementation above.
     auto registry = jsg::ModuleRegistry::from(js);
-
-    // TODO(soon): This will need to be updated to support the new module registry
-    // when that is fully implemented.
     JSG_REQUIRE(registry != nullptr, Error, "Module registry not available.");
 
     auto ref = ([&] {

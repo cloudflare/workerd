@@ -173,10 +173,10 @@ namespace workerd::jsg::modules {
 //
 // Other details:
 //
-// * Module specifiers can be aliases for other specifiers, but only one
-//   level of aliasing is supported. That is, an alias cannot point to another
-//   alias. When a specifier resolves to an alias, the resolution starts over
-//   and the aliased module can be located in any ModuleBundle. This is really
+// * Module specifiers can be aliases for other specifiers. When a specifier
+//   resolves to an alias, the resolution starts over and the aliased module
+//   can be located in any ModuleBundle. Chains of aliases are followed to any
+//   depth; a cycle of aliases resolves to "module not found". This is really
 //   closer to a symbolic link or a redirect than a true alias but "alias" is
 //   the term we've used historically with the fallback service in the original
 //   implementation so we're sticking with it for now.
@@ -799,9 +799,14 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
   };
   using ModuleOrRedirect = kj::OneOf<ModuleRef, Url>;
 
+  // Performs one resolution pass over the bundles for the context's type,
+  // restarting with the target specifier whenever a bundle returns a redirect.
+  // `seen` accumulates every specifier this resolution has visited (the caller
+  // seeds it with the original specifier); a redirect to a specifier already
+  // in `seen` is a cycle and resolves to kj::none.
   kj::Maybe<const Module&> lookupImpl(Impl& impl,
       const ResolveContext& context,
-      bool recursed) const KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
+      kj::Vector<Url>& seen) const KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
 
   kj::Maybe<ModuleOrRedirect> tryFindInBundleGroup(const ResolveContext& context,
       kj::ArrayPtr<kj::Own<ModuleBundle>> bundles) const KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;

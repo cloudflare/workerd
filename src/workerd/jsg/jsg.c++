@@ -223,6 +223,18 @@ void Lock::setAllowEval(bool allow) {
   IsolateBase::from(v8Isolate).setAllowEval({}, allow);
 }
 
+bool Lock::isEvalAllowed() {
+  return IsolateBase::from(v8Isolate).isEvalAllowed({});
+}
+
+Lock::AllowEvalScope::AllowEvalScope(Lock& js, bool allow): js(js), previous(js.isEvalAllowed()) {
+  js.setAllowEval(allow);
+}
+
+Lock::AllowEvalScope::~AllowEvalScope() noexcept(false) {
+  js.setAllowEval(previous);
+}
+
 void Lock::setDisallowJavascriptExecution(bool allow) {
   IsolateBase::from(v8Isolate).setDisallowJavascriptExecution({}, allow);
 }

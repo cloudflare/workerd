@@ -258,8 +258,11 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(auto fea
 
   jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE);
 
-  // Register Rust-implemented Node.js modules using the reusable adapter
-  // that bridges Rust ModuleCallback into BuiltinBuilder::addSynthetic.
+  // Register Rust-implemented Node.js modules that declare Internal
+  // visibility. The adapter registers only the modules whose declared type
+  // matches this internal-only builder; Builtin-typed modules are picked up
+  // by the same registration functions run in
+  // getExternalNodeJsCompatModuleBundle().
   {
     ::workerd::rust::jsg::RustBuiltinModuleAdapter adapter(builder);
     ::workerd::rust::api::register_nodejs_modules(adapter);
@@ -360,6 +363,23 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(auto fea
         auto specifier = KJ_ASSERT_NONNULL(jsg::Url::tryParse(module.getName()));
         builder.addEsm(specifier, module.getSrc().asChars());
       }
+    }
+  }
+
+  // Register Rust-implemented Node.js modules that declare Builtin
+  // (user-importable) visibility. The registration functions run once per
+  // bundle and the adapter registers only the modules whose declared type
+  // matches the builder it wraps, so the same functions run here and in
+  // getInternalNodeJsCompatModuleBundle(). Currently every Rust module is
+  // Internal, so this adds nothing; it exists so that a future Builtin-typed
+  // Rust module gets the same visibility under both module registries (the
+  // legacy path registers Rust modules unconditionally with their declared
+  // type).
+  {
+    ::workerd::rust::jsg::RustBuiltinModuleAdapter adapter(builder);
+    ::workerd::rust::api::register_nodejs_modules(adapter);
+    if (util::Autogate::isEnabled(util::AutogateKey::NODEJS_URL_RUST)) {
+      ::workerd::rust::api::register_nodejs_url_module(adapter);
     }
   }
   return builder.finish();

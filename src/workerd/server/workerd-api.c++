@@ -989,7 +989,15 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
             publicExtensionsBuilder.addEsm(url, module.getEsModule().asArray());
           }
         } else {
-          KJ_LOG(WARNING, "Ignoring extension module with invalid name", module.getName());
+          // The new module registry identifies extension modules by URL, so
+          // the name must parse as an absolute URL (the legacy registry
+          // accepts any path-like name). Silently dropping the module would
+          // surface later as a confusing "Module not found" error at import
+          // time, so fail registry construction with an actionable error
+          // instead; makeWorkerImpl() reports it as a worker config error.
+          KJ_FAIL_REQUIRE(kj::str("Invalid extension module name \"", module.getName(),
+              "\": when the new_module_registry compatibility flag is enabled, extension "
+              "module names must be fully-qualified URLs (e.g. \"my-extension:module\")."));
         }
       }
     }

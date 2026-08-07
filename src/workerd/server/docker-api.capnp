@@ -283,6 +283,7 @@ struct Docker {
   struct ImageInspectResponse {
     id @0 :Text $Json.name("Id");
     size @1 :UInt64 $Json.name("Size");
+    parent @2 :Text $Json.name("Parent");
   }
 
   struct ExecCreateRequest {
