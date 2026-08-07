@@ -721,6 +721,12 @@ wd_test(
 )
 
 wd_test(
+    src = "autovuln-88-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-88-test.js"],
+)
+
+wd_test(
     src = "streams-respond-test.wd-test",
     args = ["--experimental"],
     data = ["streams-respond-test.js"],
