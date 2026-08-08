@@ -345,7 +345,7 @@ export const tests = {
     }
 
     {
-      // Test websocket option with basic inputs
+      // Test websocket option with basic inputs (Workers AI model)
       const resp = await env.ai.run(
         '@cf/test/websocket',
         { encoding: 'utf8' },
@@ -361,6 +361,28 @@ export const tests = {
         headers: {
           'cf-consn-sdk-version': '2.0.0',
           'cf-consn-model-id': '@cf/test/websocket',
+          upgrade: 'websocket',
+        },
+      });
+    }
+
+    {
+      // Test websocket option with AI Gateway model (inputs as query params)
+      const resp = await env.ai.run(
+        'xai/grok-voice',
+        { text: 'hello', voice: 'alloy' },
+        { websocket: true }
+      );
+      assert.deepStrictEqual(resp instanceof Response, true);
+      const respData = await resp.json();
+      assert.deepStrictEqual(respData, {
+        inputs: { text: 'hello', voice: 'alloy' },
+        options: { websocket: true },
+        requestUrl:
+          'https://workers-binding.ai/run?model=xai%2Fgrok-voice&text=hello&voice=alloy',
+        headers: {
+          'cf-consn-sdk-version': '2.0.0',
+          'cf-consn-model-id': 'xai/grok-voice',
           upgrade: 'websocket',
         },
       });
