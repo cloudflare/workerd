@@ -330,8 +330,10 @@ void Wrappable::traceFromV8(cppgc::Visitor& cppgcVisitor) {
   jsgVisitForGc(visitor);
 }
 
-void Wrappable::attachWrapper(
-    v8::Isolate* isolate, v8::Local<v8::Object> object, bool needsGcTracing) {
+void Wrappable::attachWrapper(v8::Isolate* isolate,
+    v8::Local<v8::Object> object,
+    bool needsGcTracing,
+    IsContextGlobal isContextGlobal) {
   auto& tracer = HeapTracer::getTracer(isolate);
 
   KJ_REQUIRE(wrapper == kj::none);
@@ -382,7 +384,17 @@ void Wrappable::attachWrapper(
   object->SetAlignedPointerInInternalField(WRAPPED_OBJECT_FIELD_INDEX, this,
       static_cast<v8::EmbedderDataTypeTag>(WRAPPED_OBJECT_FIELD_INDEX));
 
-  v8::Object::Wrap<WRAPPABLE_TAG>(isolate, object, tracer.allocateShim(*this));
+  auto* shim = tracer.allocateShim(*this);
+  if (isContextGlobal) {
+    // Sets the CppHeapPointer on both the JSGlobalProxy (`object`) and its hidden prototype
+    // (the JSGlobalObject), so unwrapping works whichever of the two V8 hands us as a
+    // receiver. CHECK-fails inside V8 if `object` is not a JSGlobalProxy.
+    v8::Object::WrapGlobal(isolate, object, shim, GLOBAL_WRAPPABLE_TAG);
+    KJ_DASSERT(v8::Object::CheckGlobalWrappable(
+        isolate, object, v8::CppHeapPointerTagRange(GLOBAL_WRAPPABLE_TAG, GLOBAL_WRAPPABLE_TAG)));
+  } else {
+    v8::Object::Wrap<WRAPPABLE_TAG>(isolate, object, shim);
+  }
 
   if (strongRefcount > 0) {
     strongWrapper.Reset(isolate, object);
@@ -410,6 +422,20 @@ v8::Local<v8::Object> Wrappable::attachOpaqueWrapper(
   jsg::check(object->SetPrototype(context, v8::Null(isolate)));
   attachWrapper(isolate, object, needsGcTracing);
   return object;
+}
+
+kj::Maybe<Wrappable&> Wrappable::tryUnwrapGlobalReceiver(
+    v8::Isolate* isolate, v8::Local<v8::Object> object) {
+  // In V8 fast API calls the nominal Local<Object> receiver may actually hold undefined.
+  if (object.IsEmpty() || !object.As<v8::Value>()->IsObject()) return kj::none;
+
+  auto* shimBase = v8::Object::Unwrap<GLOBAL_WRAPPABLE_TAG, v8::Object::Wrappable>(isolate, object);
+  if (shimBase == nullptr) return kj::none;
+  auto* shim = static_cast<Wrappable::CppgcShim*>(shimBase);
+  KJ_IF_SOME(active, shim->state.tryGet<CppgcShim::Active>()) {
+    return *active.wrappable;
+  }
+  return kj::none;
 }
 
 kj::Maybe<Wrappable&> Wrappable::tryUnwrapOpaque(
