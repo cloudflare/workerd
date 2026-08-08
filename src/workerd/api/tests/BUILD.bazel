@@ -905,6 +905,7 @@ wd_test(
     sidecar_port_bindings = [
         "BIG_MESSAGE_SERVER_PORT",
     ],
+    tags = ["resources:socket:1"],
 )
 
 js_binary(
@@ -926,6 +927,7 @@ wd_test(
         "STARTTLS_SOCKET",
         "FLUSH_HELLO_SOCKET",
     ],
+    tags = ["resources:socket:1"],
 )
 
 wd_test(
@@ -1165,6 +1167,7 @@ wd_test(
     sidecar_port_bindings = [
         "STARTTLS_CA_PORT",
     ],
+    tags = ["resources:socket:1"],
 )
 
 wd_test(
