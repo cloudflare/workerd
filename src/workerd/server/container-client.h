@@ -196,7 +196,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<kj::String> createExec(capnp::List<capnp::Text>::Reader cmd,
       rpc::Container::ExecOptions::Reader params,
       bool attachStdout,
-      bool attachStderr);
+      bool attachStderr,
+      kj::StringPtr killToken);
   kj::Promise<kj::Own<kj::AsyncIoStream>> startExec(
       kj::String execId, bool tty, uint16_t cols, uint16_t rows);
   kj::Promise<ExecInspectResponse> inspectExec(kj::StringPtr execId);
