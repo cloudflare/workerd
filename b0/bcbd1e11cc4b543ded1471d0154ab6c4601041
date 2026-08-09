@@ -1,5 +1,5 @@
 src/workerd/io/observer.h
-  s_2192e8a6d105f9::t_053d8b74c0ec61 129-136
+  s_ab4e43acd62623::t_ae8ba8c5cb0965 129-136
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -7,10 +7,10 @@ src/workerd/io/observer.h
   "base_commit_sha": "b0bcbd1e11cc4b543ded1471d0154ab6c4601041",
   "prompts": {},
   "sessions": {
-    "s_2192e8a6d105f9": {
+    "s_ab4e43acd62623": {
       "agent_id": {
         "tool": "opencode",
-        "id": "ses_0949d7839ffe3PH73618sV9aBi",
+        "id": "ses_0dd95e56cffeOLXlCNwX9ixaK3",
         "model": "claude-opus-4-8"
       },
       "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
