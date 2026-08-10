@@ -301,8 +301,7 @@ class IdentityTransformStream {
       writableStrategy = internalWritableStrategy;
     } else {
       writableStrategy = writableStrategyOrInternal as
-        | QueuingStrategy<unknown>
-        | undefined;
+        QueuingStrategy<unknown> | undefined;
     }
     writableStrategy ??= {} as QueuingStrategy<unknown>;
 

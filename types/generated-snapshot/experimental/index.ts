@@ -16,26 +16,26 @@ and limitations under the License.
 // noinspection JSUnusedGlobalSymbols
 export declare var onmessage: never;
 /**
- * The **`DOMException`** interface represents an abnormal event (called an **exception**) that occurs as a result of calling a method or accessing a property of a web API.
+ * The **`DOMException`** interface represents an abnormal event (called an exception) that occurs as a result of calling a method or accessing a property of a web API. This is how error conditions are described in web APIs.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException)
  */
 export declare class DOMException extends Error {
   constructor(message?: string, name?: string);
   /**
-   * The **`message`** read-only property of the a message or description associated with the given error name.
+   * The **`message`** read-only property of the DOMException interface returns a string representing a message or description associated with the given error name.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/message)
    */
   readonly message: string;
   /**
-   * The **`name`** read-only property of the one of the strings associated with an error name.
+   * The **`name`** read-only property of the DOMException interface returns a string that contains one of the strings associated with an error name.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/name)
    */
   readonly name: string;
   /**
-   * The **`code`** read-only property of the DOMException interface returns one of the legacy error code constants, or `0` if none match.
+   * The **`code`** read-only property of the DOMException interface returns one of the legacy error code constants, or 0 if none match.
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/code)
@@ -85,7 +85,7 @@ export declare abstract class WorkerGlobalScope extends EventTarget<WorkerGlobal
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console)
  */
 export interface Console {
-  "assert"(condition?: boolean, ...data: any[]): void;
+  assert(condition?: boolean, ...data: any[]): void;
   /**
    * The **`console.clear()`** static method clears the console if possible.
    *
@@ -93,61 +93,61 @@ export interface Console {
    */
   clear(): void;
   /**
-   * The **`console.count()`** static method logs the number of times that this particular call to `count()` has been called.
+   * The **`console.count()`** static method logs the number of times that this particular call to count() has been called.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/count_static)
    */
   count(label?: string): void;
   /**
-   * The **`console.countReset()`** static method resets counter used with console/count_static.
+   * The **`console.countReset()`** static method resets counter used with console.count().
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/countReset_static)
    */
   countReset(label?: string): void;
   /**
-   * The **`console.debug()`** static method outputs a message to the console at the 'debug' log level.
+   * The **`console.debug()`** static method outputs a message to the console at the "debug" log level. The message is only displayed to the user if the console is configured to display debug output. In most cases, the log level is configured within the console UI. This log level might correspond to the Debug or Verbose log level.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/debug_static)
    */
   debug(...data: any[]): void;
   /**
-   * The **`console.dir()`** static method displays a list of the properties of the specified JavaScript object.
+   * The **`console.dir()`** static method displays a list of the properties of the specified JavaScript object. In browser consoles, the output is presented as a hierarchical listing with disclosure triangles that let you see the contents of child objects.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/dir_static)
    */
   dir(item?: any, options?: any): void;
   /**
-   * The **`console.dirxml()`** static method displays an interactive tree of the descendant elements of the specified XML/HTML element.
+   * The **`console.dirxml()`** static method displays an interactive tree of the descendant elements of the specified XML/HTML element. If it is not possible to display as an element the JavaScript Object view is shown instead. The output is presented as a hierarchical listing of expandable nodes that let you see the contents of child nodes.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/dirxml_static)
    */
   dirxml(...data: any[]): void;
   /**
-   * The **`console.error()`** static method outputs a message to the console at the 'error' log level.
+   * The **`console.error()`** static method outputs a message to the console at the "error" log level. The message is only displayed to the user if the console is configured to display error output. In most cases, the log level is configured within the console UI. The message may be formatted as an error, with red colors and call stack information.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/error_static)
    */
   error(...data: any[]): void;
   /**
-   * The **`console.group()`** static method creates a new inline group in the Web console log, causing any subsequent console messages to be indented by an additional level, until console/groupEnd_static is called.
+   * The **`console.group()`** static method creates a new inline group in the Web console log, causing any subsequent console messages to be indented by an additional level, until console.groupEnd() is called.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/group_static)
    */
   group(...data: any[]): void;
   /**
-   * The **`console.groupCollapsed()`** static method creates a new inline group in the console.
+   * The **`console.groupCollapsed()`** static method creates a new inline group in the console. Unlike console.group(), however, the new group is created collapsed. The user will need to use the disclosure button next to it to expand it, revealing the entries created in the group.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupCollapsed_static)
    */
   groupCollapsed(...data: any[]): void;
   /**
-   * The **`console.groupEnd()`** static method exits the current inline group in the console.
+   * The **`console.groupEnd()`** static method exits the current inline group in the console. See Using groups in the console in the console documentation for details and examples.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupEnd_static)
    */
   groupEnd(): void;
   /**
-   * The **`console.info()`** static method outputs a message to the console at the 'info' log level.
+   * The **`console.info()`** static method outputs a message to the console at the "info" log level. The message is only displayed to the user if the console is configured to display info output. In most cases, the log level is configured within the console UI. The message may receive special formatting, such as a small "i" icon next to it.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/info_static)
    */
@@ -165,23 +165,24 @@ export interface Console {
    */
   table(tabularData?: any, properties?: string[]): void;
   /**
-   * The **`console.time()`** static method starts a timer you can use to track how long an operation takes.
+   * The **`console.time()`** static method starts a timer you can use to track how long an operation takes. You give each timer a unique name, and may have up to 10,000 timers running on a given page. When you call console.timeEnd() with the same name, the browser will output the time, in milliseconds, that elapsed since the timer was started.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/time_static)
    */
   time(label?: string): void;
   /**
-   * The **`console.timeEnd()`** static method stops a timer that was previously started by calling console/time_static.
+   * The **`console.timeEnd()`** static method stops a timer that was previously started by calling console.time().
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timeEnd_static)
    */
   timeEnd(label?: string): void;
   /**
-   * The **`console.timeLog()`** static method logs the current value of a timer that was previously started by calling console/time_static.
+   * The **`console.timeLog()`** static method logs the current value of a timer that was previously started by calling console.time().
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timeLog_static)
    */
   timeLog(label?: string, ...data: any[]): void;
+  /* The **`console.timeStamp()`** static method adds a single marker to the browser's Performance tool (Firefox bug 1387528, Chrome). This lets you correlate a point in your code with the other events recorded in the timeline, such as layout and paint events. */
   timeStamp(label?: string): void;
   /**
    * The **`console.trace()`** static method outputs a stack trace to the console.
@@ -190,7 +191,7 @@ export interface Console {
    */
   trace(...data: any[]): void;
   /**
-   * The **`console.warn()`** static method outputs a warning message to the console at the 'warning' log level.
+   * The **`console.warn()`** static method outputs a warning message to the console at the "warning" log level. The message is only displayed to the user if the console is configured to display warning output. In most cases, the log level is configured within the console UI. The message may receive special formatting, such as yellow colors and a warning icon.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/warn_static)
    */
@@ -218,13 +219,7 @@ export declare namespace WebAssembly {
     constructor(message?: string);
   }
   type ValueType =
-    | "anyfunc"
-    | "externref"
-    | "f32"
-    | "f64"
-    | "i32"
-    | "i64"
-    | "v128";
+    "anyfunc" | "externref" | "f32" | "f64" | "i32" | "i64" | "v128";
   interface GlobalDescriptor {
     value: ValueType;
     mutable?: boolean;
@@ -410,7 +405,7 @@ export declare function removeEventListener<
   options?: EventTargetEventListenerOptions | boolean,
 ): void;
 /**
- * The **`dispatchEvent()`** method of the EventTarget sends an Event to the object, (synchronously) invoking the affected event listeners in the appropriate order.
+ * The **`dispatchEvent()`** method of the EventTarget sends an Event to the object, (synchronously) invoking the affected event listeners in the appropriate order. The normal event processing rules (including the capturing and optional bubbling phase) also apply to events dispatched manually with dispatchEvent().
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventTarget/dispatchEvent)
  */
@@ -477,6 +472,7 @@ export declare const crypto: Crypto;
  * [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/cache/)
  */
 export declare const caches: CacheStorage;
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/scheduler) */
 export declare const scheduler: Scheduler;
 /**
  * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
@@ -672,10 +668,7 @@ export declare abstract class DurableObjectNamespace<
   ): DurableObjectNamespace<T>;
 }
 export type DurableObjectJurisdiction =
-  | "eu"
-  | "fedramp"
-  | "fedramp-high"
-  | "us";
+  "eu" | "fedramp" | "fedramp-high" | "us";
 export interface DurableObjectNamespaceNewUniqueIdOptions {
   jurisdiction?: DurableObjectJurisdiction;
 }
@@ -847,8 +840,7 @@ export interface DurableObjectFacets {
   get<T extends Rpc.DurableObjectBranded | undefined = undefined>(
     name: string,
     getStartupOptions: () =>
-      | FacetStartupOptions<T>
-      | Promise<FacetStartupOptions<T>>,
+      FacetStartupOptions<T> | Promise<FacetStartupOptions<T>>,
   ): Fetcher<T>;
   abort(name: string, reason: any): void;
   delete(name: string): void;
@@ -872,26 +864,26 @@ export interface AnalyticsEngineDataPoint {
   blobs?: ((ArrayBuffer | string) | null)[];
 }
 /**
- * The **`Event`** interface represents an event which takes place on an `EventTarget`.
+ * The **`Event`** interface represents an event which takes place on an EventTarget.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event)
  */
 export declare class Event {
   constructor(type: string, init?: EventInit);
   /**
-   * The **`type`** read-only property of the Event interface returns a string containing the event's type.
+   * The **`type`** read-only property of the Event interface returns a string containing the event's type. It is set when the event is constructed and is the name commonly used to refer to the specific event, such as click, load, or error.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/type)
    */
   get type(): string;
   /**
-   * The **`eventPhase`** read-only property of the being evaluated.
+   * The **`eventPhase`** read-only property of the Event interface indicates which phase of the event flow is currently being evaluated.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/eventPhase)
    */
   get eventPhase(): number;
   /**
-   * The read-only **`composed`** property of the or not the event will propagate across the shadow DOM boundary into the standard DOM.
+   * The read-only **`composed`** property of the Event interface returns a boolean value which indicates whether or not the event will propagate across the shadow DOM boundary into the standard DOM.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/composed)
    */
@@ -928,13 +920,13 @@ export declare class Event {
    */
   get currentTarget(): EventTarget | null;
   /**
-   * The read-only **`target`** property of the dispatched.
+   * The read-only **`target`** property of the Event interface is a reference to the object onto which the event was dispatched. It is different from Event.currentTarget when the event handler is called during the bubbling or capturing phase of the event.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/target)
    */
   get target(): EventTarget | undefined;
   /**
-   * The deprecated **`Event.srcElement`** is an alias for the Event.target property.
+   * The deprecated **`Event.srcElement`** is an alias for the Event.target property. Use Event.target instead.
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/srcElement)
@@ -947,45 +939,45 @@ export declare class Event {
    */
   get timeStamp(): number;
   /**
-   * The **`isTrusted`** read-only property of the when the event was generated by the user agent (including via user actions and programmatic methods such as HTMLElement.focus()), and `false` when the event was dispatched via The only exception is the `click` event, which initializes the `isTrusted` property to `false` in user agents.
+   * The **`isTrusted`** read-only property of the Event interface is a boolean value that is true when the event was generated by the user agent (including via user actions and programmatic methods such as HTMLElement.focus()), and false when the event was dispatched via EventTarget.dispatchEvent(). The only exception is the click event, which initializes the isTrusted property to false in user agents.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/isTrusted)
    */
   readonly isTrusted: boolean;
   /**
-   * The **`cancelBubble`** property of the Event interface is deprecated.
+   * The **`cancelBubble`** property of the Event interface is deprecated. Use Event.stopPropagation() instead. Setting its value to true before returning from an event handler prevents propagation of the event. In later implementations, setting this to false does nothing. See Browser compatibility for details.
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/cancelBubble)
    */
   get cancelBubble(): boolean;
   /**
-   * The **`cancelBubble`** property of the Event interface is deprecated.
+   * The **`cancelBubble`** property of the Event interface is deprecated. Use Event.stopPropagation() instead. Setting its value to true before returning from an event handler prevents propagation of the event. In later implementations, setting this to false does nothing. See Browser compatibility for details.
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/cancelBubble)
    */
   set cancelBubble(value: boolean);
   /**
-   * The **`stopImmediatePropagation()`** method of the If several listeners are attached to the same element for the same event type, they are called in the order in which they were added.
+   * The **`stopImmediatePropagation()`** method of the Event interface prevents other listeners of the same event from being called.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/stopImmediatePropagation)
    */
   stopImmediatePropagation(): void;
   /**
-   * The **`preventDefault()`** method of the Event interface tells the user agent that if the event does not get explicitly handled, its default action should not be taken as it normally would be.
+   * The **`preventDefault()`** method of the Event interface tells the user agent that the event is being explicitly handled, so its default action, such as page scrolling, link navigation, or pasting text, should not be taken.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/preventDefault)
    */
   preventDefault(): void;
   /**
-   * The **`stopPropagation()`** method of the Event interface prevents further propagation of the current event in the capturing and bubbling phases.
+   * The **`stopPropagation()`** method of the Event interface prevents further propagation of the current event in the capturing and bubbling phases. It does not, however, prevent any default behaviors from occurring; for instance, clicks on links are still processed. If you want to stop those behaviors, see the preventDefault() method. It also does not prevent propagation to other event-handlers of the current element. If you want to stop those, see stopImmediatePropagation().
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/stopPropagation)
    */
   stopPropagation(): void;
   /**
-   * The **`composedPath()`** method of the Event interface returns the event's path which is an array of the objects on which listeners will be invoked.
+   * The **`composedPath()`** method of the Event interface returns the event's path which is an array of the objects on which listeners will be invoked. This does not include nodes in shadow trees if the shadow root was created with its ShadowRoot.mode closed.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/composedPath)
    */
@@ -1010,7 +1002,7 @@ export type EventListenerOrEventListenerObject<
   EventType extends Event = Event,
 > = EventListener<EventType> | EventListenerObject<EventType>;
 /**
- * The **`EventTarget`** interface is implemented by objects that can receive events and may have listeners for them.
+ * The **`EventTarget`** interface is implemented by objects that can receive events and may have listeners for them. In other words, any target of events implements the three methods associated with this interface.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventTarget)
  */
@@ -1029,7 +1021,7 @@ export declare class EventTarget<
     options?: EventTargetAddEventListenerOptions | boolean,
   ): void;
   /**
-   * The **`removeEventListener()`** method of the EventTarget interface removes an event listener previously registered with EventTarget.addEventListener() from the target.
+   * The **`removeEventListener()`** method of the EventTarget interface removes an event listener previously registered with EventTarget.addEventListener() from the target. The event listener to be removed is identified using a combination of the event type, the event listener function itself, and various optional options that may affect the matching process; see Matching event listeners for removal.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventTarget/removeEventListener)
    */
@@ -1039,7 +1031,7 @@ export declare class EventTarget<
     options?: EventTargetEventListenerOptions | boolean,
   ): void;
   /**
-   * The **`dispatchEvent()`** method of the EventTarget sends an Event to the object, (synchronously) invoking the affected event listeners in the appropriate order.
+   * The **`dispatchEvent()`** method of the EventTarget sends an Event to the object, (synchronously) invoking the affected event listeners in the appropriate order. The normal event processing rules (including the capturing and optional bubbling phase) also apply to events dispatched manually with dispatchEvent().
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventTarget/dispatchEvent)
    */
@@ -1071,7 +1063,7 @@ export declare class AbortController {
    */
   get signal(): AbortSignal;
   /**
-   * The **`abort()`** method of the AbortController interface aborts an asynchronous operation before it has completed.
+   * The **`abort()`** method of the AbortController interface aborts an asynchronous operation before it has completed. This is able to abort fetch requests, the consumption of any response bodies, or streams.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortController/abort)
    */
@@ -1084,7 +1076,7 @@ export declare class AbortController {
  */
 export declare abstract class AbortSignal extends EventTarget {
   /**
-   * The **`AbortSignal.abort()`** static method returns an AbortSignal that is already set as aborted (and which does not trigger an AbortSignal/abort_event event).
+   * The **`AbortSignal.abort()`** static method returns an AbortSignal that is already set as aborted (and which does not trigger an abort event).
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/abort_static)
    */
@@ -1096,13 +1088,13 @@ export declare abstract class AbortSignal extends EventTarget {
    */
   static timeout(delay: number): AbortSignal;
   /**
-   * The **`AbortSignal.any()`** static method takes an iterable of abort signals and returns an AbortSignal.
+   * The **`AbortSignal.any()`** static method takes an iterable of abort signals and returns an AbortSignal. The returned abort signal is aborted when any of the input iterable abort signals are aborted. The abort reason will be set to the reason of the first signal that is aborted. If any of the given abort signals are already aborted then so will be the returned AbortSignal.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/any_static)
    */
   static any(signals: AbortSignal[]): AbortSignal;
   /**
-   * The **`aborted`** read-only property returns a value that indicates whether the asynchronous operations the signal is communicating with are aborted (`true`) or not (`false`).
+   * The **`aborted`** read-only property returns a value that indicates whether the asynchronous operations the signal is communicating with are aborted (true) or not (false).
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/aborted)
    */
@@ -1118,12 +1110,17 @@ export declare abstract class AbortSignal extends EventTarget {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/abort_event) */
   set onabort(value: any | null);
   /**
-   * The **`throwIfAborted()`** method throws the signal's abort AbortSignal.reason if the signal has been aborted; otherwise it does nothing.
+   * The **`throwIfAborted()`** method throws the signal's abort reason if the signal has been aborted; otherwise it does nothing.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/throwIfAborted)
    */
   throwIfAborted(): void;
 }
+/**
+ * The **`Scheduler`** interface of the Prioritized Task Scheduling API provides methods for scheduling prioritized tasks.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Scheduler)
+ */
 export interface Scheduler {
   wait(delay: number, maybeOptions?: SchedulerWaitOptions): Promise<void>;
 }
@@ -1131,20 +1128,20 @@ export interface SchedulerWaitOptions {
   signal?: AbortSignal;
 }
 /**
- * The **`ExtendableEvent`** interface extends the lifetime of the `install` and `activate` events dispatched on the global scope as part of the service worker lifecycle.
+ * The **`ExtendableEvent`** interface extends the lifetime of the install and activate events dispatched on the global scope as part of the service worker lifecycle. This ensures that any functional events (like FetchEvent) are not dispatched until it upgrades database schemas and deletes the outdated cache entries.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ExtendableEvent)
  */
 export declare abstract class ExtendableEvent extends Event {
   /**
-   * The **`ExtendableEvent.waitUntil()`** method tells the event dispatcher that work is ongoing.
+   * The **`ExtendableEvent.waitUntil()`** method tells the event dispatcher that work is ongoing. It can also be used to detect whether that work was successful. In service workers, waitUntil() tells the browser that work is ongoing until the promise settles, and it shouldn't terminate the service worker if it wants that work to complete.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ExtendableEvent/waitUntil)
    */
   waitUntil(promise: Promise<any>): void;
 }
 /**
- * The **`CustomEvent`** interface represents events initialized by an application for any purpose.
+ * The **`CustomEvent`** interface can be used to attach custom data to an event generated by an application.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CustomEvent)
  */
@@ -1186,7 +1183,7 @@ export declare class Blob {
    */
   get type(): string;
   /**
-   * The **`slice()`** method of the Blob interface creates and returns a new `Blob` object which contains data from a subset of the blob on which it's called.
+   * The **`slice()`** method of the Blob interface creates and returns a new Blob object which contains data from a subset of the blob on which it's called.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/slice)
    */
@@ -1204,13 +1201,13 @@ export declare class Blob {
    */
   bytes(): Promise<Uint8Array>;
   /**
-   * The **`text()`** method of the string containing the contents of the blob, interpreted as UTF-8.
+   * The **`text()`** method of the Blob interface returns a Promise that resolves with a string containing the contents of the blob, interpreted as UTF-8.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/text)
    */
   text(): Promise<string>;
   /**
-   * The **`stream()`** method of the Blob interface returns a ReadableStream which upon reading returns the data contained within the `Blob`.
+   * The **`stream()`** method of the Blob interface returns a ReadableStream which upon reading returns the data contained within the Blob.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/stream)
    */
@@ -1231,13 +1228,13 @@ export declare class File extends Blob {
     options?: FileOptions,
   );
   /**
-   * The **`name`** read-only property of the File interface returns the name of the file represented by a File object.
+   * The **`name`** read-only property of the File interface returns the name of the file represented by a File object. For security reasons, the path is excluded from this property.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/File/name)
    */
   get name(): string;
   /**
-   * The **`lastModified`** read-only property of the File interface provides the last modified date of the file as the number of milliseconds since the Unix epoch (January 1, 1970 at midnight).
+   * The **`lastModified`** read-only property of the File interface provides the last modified date of the file as the number of milliseconds since the Unix epoch (January 1, 1970 at midnight). Files without a known last modified date return the current date.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/File/lastModified)
    */
@@ -1254,7 +1251,7 @@ export interface FileOptions {
  */
 export declare abstract class CacheStorage {
   /**
-   * The **`open()`** method of the the Cache object matching the `cacheName`.
+   * The **`open()`** method of the CacheStorage interface returns a Promise that resolves to the Cache object matching the cacheName.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CacheStorage/open)
    */
@@ -1293,14 +1290,14 @@ export interface CacheQueryOptions {
  */
 export declare abstract class Crypto {
   /**
-   * The **`Crypto.subtle`** read-only property returns a cryptographic operations.
+   * The **`Crypto.subtle`** read-only property returns a SubtleCrypto which can then be used to perform low-level cryptographic operations.
    * Available only in secure contexts.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Crypto/subtle)
    */
   get subtle(): SubtleCrypto;
   /**
-   * The **`Crypto.getRandomValues()`** method lets you get cryptographically strong random values.
+   * The **`Crypto.getRandomValues()`** method lets you get cryptographically strong random values. The array given as the parameter is filled with random numbers (random in its cryptographic meaning).
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Crypto/getRandomValues)
    */
@@ -1342,7 +1339,7 @@ export declare abstract class SubtleCrypto {
     plainText: ArrayBuffer | ArrayBufferView,
   ): Promise<ArrayBuffer>;
   /**
-   * The **`decrypt()`** method of the SubtleCrypto interface decrypts some encrypted data.
+   * The **`decrypt()`** method of the SubtleCrypto interface decrypts some encrypted data. It takes as arguments a key to decrypt with, some optional extra parameters, and the data to decrypt (also known as "ciphertext"). It returns a Promise which will be fulfilled with the decrypted data (also known as "plaintext").
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/decrypt)
    */
@@ -1373,7 +1370,7 @@ export declare abstract class SubtleCrypto {
     data: ArrayBuffer | ArrayBufferView,
   ): Promise<boolean>;
   /**
-   * The **`digest()`** method of the SubtleCrypto interface generates a _digest_ of the given data, using the specified hash function.
+   * The **`digest()`** method of the SubtleCrypto interface generates a digest of the given data, using the specified hash function. A digest is a short fixed-length value derived from some variable-length input. Cryptographic digests should exhibit collision-resistance, meaning that it's hard to come up with two different inputs that have the same digest value.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/digest)
    */
@@ -1404,7 +1401,7 @@ export declare abstract class SubtleCrypto {
     keyUsages: string[],
   ): Promise<CryptoKey>;
   /**
-   * The **`deriveBits()`** method of the key.
+   * The **`deriveBits()`** method of the SubtleCrypto interface can be used to derive an array of bits from a base key.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/deriveBits)
    */
@@ -1432,7 +1429,7 @@ export declare abstract class SubtleCrypto {
    */
   exportKey(format: string, key: CryptoKey): Promise<ArrayBuffer | JsonWebKey>;
   /**
-   * The **`wrapKey()`** method of the SubtleCrypto interface 'wraps' a key.
+   * The **`wrapKey()`** method of the SubtleCrypto interface "wraps" a key. This means that it exports the key in an external, portable format, then encrypts the exported key. Wrapping a key helps protect it in untrusted environments, such as inside an otherwise unprotected data store or in transmission over an unprotected network.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/wrapKey)
    */
@@ -1443,7 +1440,7 @@ export declare abstract class SubtleCrypto {
     wrapAlgorithm: string | SubtleCryptoEncryptAlgorithm,
   ): Promise<ArrayBuffer>;
   /**
-   * The **`unwrapKey()`** method of the SubtleCrypto interface 'unwraps' a key.
+   * The **`unwrapKey()`** method of the SubtleCrypto interface "unwraps" a key. This means that it takes as its input a key that has been exported and then encrypted (also called "wrapped"). It decrypts the key and then imports it, returning a CryptoKey object that can be used in the Web Crypto API.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/unwrapKey)
    */
@@ -1462,20 +1459,20 @@ export declare abstract class SubtleCrypto {
   ): boolean;
 }
 /**
- * The **`CryptoKey`** interface of the Web Crypto API represents a cryptographic key obtained from one of the SubtleCrypto methods SubtleCrypto.generateKey, SubtleCrypto.deriveKey, SubtleCrypto.importKey, or SubtleCrypto.unwrapKey.
+ * The **`CryptoKey`** interface of the Web Crypto API represents a cryptographic key obtained from one of the SubtleCrypto methods generateKey(), deriveKey(), importKey(), or unwrapKey().
  * Available only in secure contexts.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CryptoKey)
  */
 export declare abstract class CryptoKey {
   /**
-   * The read-only **`type`** property of the CryptoKey interface indicates which kind of key is represented by the object.
+   * The read-only **`type`** property of the CryptoKey interface indicates which kind of key is represented by the object. It can have the following values:
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CryptoKey/type)
    */
   readonly type: string;
   /**
-   * The read-only **`extractable`** property of the CryptoKey interface indicates whether or not the key may be extracted using `SubtleCrypto.exportKey()` or `SubtleCrypto.wrapKey()`.
+   * The read-only **`extractable`** property of the CryptoKey interface indicates whether or not the key may be extracted using SubtleCrypto.exportKey() or SubtleCrypto.wrapKey().
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CryptoKey/extractable)
    */
@@ -1605,7 +1602,7 @@ export declare class DigestStream extends WritableStream<
   get bytesWritten(): number | bigint;
 }
 /**
- * The **`TextDecoder`** interface represents a decoder for a specific text encoding, such as `UTF-8`, `ISO-8859-2`, `KOI8-R`, `GBK`, etc.
+ * The **`TextDecoder`** interface represents a decoder for a specific text encoding, such as UTF-8, ISO-8859-2, or GBK. A decoder takes an array of bytes as input and returns a JavaScript string.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextDecoder)
  */
@@ -1625,20 +1622,20 @@ export declare class TextDecoder {
   get ignoreBOM(): boolean;
 }
 /**
- * The **`TextEncoder`** interface takes a stream of code points as input and emits a stream of UTF-8 bytes.
+ * The **`TextEncoder`** interface enables you to encode a JavaScript string using UTF-8.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextEncoder)
  */
 export declare class TextEncoder {
   constructor();
   /**
-   * The **`TextEncoder.encode()`** method takes a string as input, and returns a Global_Objects/Uint8Array containing the text given in parameters encoded with the specific method for that TextEncoder object.
+   * The **`TextEncoder.encode()`** method takes a string as input, and returns a Uint8Array containing the string encoded using UTF-8.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextEncoder/encode)
    */
   encode(input?: string): Uint8Array;
   /**
-   * The **`TextEncoder.encodeInto()`** method takes a string to encode and a destination Uint8Array to put resulting UTF-8 encoded text into, and returns a dictionary object indicating the progress of the encoding.
+   * The **`TextEncoder.encodeInto()`** method takes a string to encode and a destination Uint8Array to put resulting UTF-8 encoded text into, and returns an object indicating the progress of the encoding. This is potentially more performant than the encode() method — especially when the target buffer is a view into a Wasm heap.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextEncoder/encodeInto)
    */
@@ -1709,31 +1706,31 @@ export interface ErrorEventErrorEventInit {
 export declare class MessageEvent extends Event {
   constructor(type: string, initializer: MessageEventInit);
   /**
-   * The **`data`** read-only property of the The data sent by the message emitter; this can be any data type, depending on what originated this event.
+   * The **`data`** read-only property of the MessageEvent interface represents the data sent by the message emitter.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/data)
    */
   readonly data: any;
   /**
-   * The **`origin`** read-only property of the origin of the message emitter.
+   * The **`origin`** read-only property of the MessageEvent interface is a string representing the origin of the message emitter.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/origin)
    */
   readonly origin: string | null;
   /**
-   * The **`lastEventId`** read-only property of the unique ID for the event.
+   * The **`lastEventId`** read-only property of the MessageEvent interface is a string representing a unique ID for the event.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/lastEventId)
    */
   readonly lastEventId: string;
   /**
-   * The **`source`** read-only property of the a WindowProxy, MessagePort, or a `MessageEventSource` (which can be a WindowProxy, message emitter.
+   * The **`source`** read-only property of the MessageEvent interface is a MessageEventSource (which can be a WindowProxy, MessagePort, or ServiceWorker object) representing the message emitter.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/source)
    */
   readonly source: MessagePort | null;
   /**
-   * The **`ports`** read-only property of the containing all MessagePort objects sent with the message, in order.
+   * The **`ports`** read-only property of the MessageEvent interface is an array of MessagePort objects containing all MessagePort objects sent with the message, in order.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/ports)
    */
@@ -1743,96 +1740,93 @@ export interface MessageEventInit {
   data: ArrayBuffer | string;
 }
 /**
- * The **`PromiseRejectionEvent`** interface represents events which are sent to the global script context when JavaScript Promises are rejected.
+ * The **`PromiseRejectionEvent`** interface represents events which are sent to the global script context when JavaScript Promises are rejected. These events are particularly useful for telemetry and debugging purposes.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent)
  */
 export declare abstract class PromiseRejectionEvent extends Event {
   /**
-   * The PromiseRejectionEvent interface's **`promise`** read-only property indicates the JavaScript rejected.
+   * The PromiseRejectionEvent interface's **`promise`** read-only property indicates the JavaScript Promise which was rejected. You can examine the event's PromiseRejectionEvent.reason property to learn why the promise was rejected.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent/promise)
    */
   readonly promise: Promise<any>;
   /**
-   * The PromiseRejectionEvent **`reason`** read-only property is any JavaScript value or Object which provides the reason passed into Promise.reject().
+   * The PromiseRejectionEvent **`reason`** read-only property is any JavaScript value or Object which provides the reason passed into Promise.reject(). This in theory provides information about why the promise was rejected.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent/reason)
    */
   readonly reason: any;
 }
 /**
- * The **`FormData`** interface provides a way to construct a set of key/value pairs representing form fields and their values, which can be sent using the Window/fetch, XMLHttpRequest.send() or navigator.sendBeacon() methods.
+ * The **`FormData`** interface provides a way to construct a set of key/value pairs representing form fields and their values, which can be sent using the fetch(), XMLHttpRequest.send() or navigator.sendBeacon() methods. It uses the same format a form would use if the encoding type were set to "multipart/form-data".
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData)
  */
 export declare class FormData {
   constructor();
   /**
-   * The **`append()`** method of the FormData interface appends a new value onto an existing key inside a `FormData` object, or adds the key if it does not already exist.
+   * The **`append()`** method of the FormData interface appends a new value onto an existing key inside a FormData object, or adds the key if it does not already exist.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/append)
    */
   append(name: string, value: string | Blob): void;
   /**
-   * The **`append()`** method of the FormData interface appends a new value onto an existing key inside a `FormData` object, or adds the key if it does not already exist.
+   * The **`append()`** method of the FormData interface appends a new value onto an existing key inside a FormData object, or adds the key if it does not already exist.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/append)
    */
   append(name: string, value: string): void;
   /**
-   * The **`append()`** method of the FormData interface appends a new value onto an existing key inside a `FormData` object, or adds the key if it does not already exist.
+   * The **`append()`** method of the FormData interface appends a new value onto an existing key inside a FormData object, or adds the key if it does not already exist.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/append)
    */
   append(name: string, value: Blob, filename?: string): void;
   /**
-   * The **`delete()`** method of the FormData interface deletes a key and its value(s) from a `FormData` object.
+   * The **`delete()`** method of the FormData interface deletes a key and its value(s) from a FormData object.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/delete)
    */
   delete(name: string): void;
   /**
-   * The **`get()`** method of the FormData interface returns the first value associated with a given key from within a `FormData` object.
+   * The **`get()`** method of the FormData interface returns the first value associated with a given key from within a FormData object. If you expect multiple values and want all of them, use the getAll() method instead.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/get)
    */
   get(name: string): (File | string) | null;
   /**
-   * The **`getAll()`** method of the FormData interface returns all the values associated with a given key from within a `FormData` object.
+   * The **`getAll()`** method of the FormData interface returns all the values associated with a given key from within a FormData object.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/getAll)
    */
   getAll(name: string): (File | string)[];
   /**
-   * The **`has()`** method of the FormData interface returns whether a `FormData` object contains a certain key.
+   * The **`has()`** method of the FormData interface returns whether a FormData object contains a certain key.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/has)
    */
   has(name: string): boolean;
   /**
-   * The **`set()`** method of the FormData interface sets a new value for an existing key inside a `FormData` object, or adds the key/value if it does not already exist.
+   * The **`set()`** method of the FormData interface sets a new value for an existing key inside a FormData object, or adds the key/value if it does not already exist.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/set)
    */
   set(name: string, value: string | Blob): void;
   /**
-   * The **`set()`** method of the FormData interface sets a new value for an existing key inside a `FormData` object, or adds the key/value if it does not already exist.
+   * The **`set()`** method of the FormData interface sets a new value for an existing key inside a FormData object, or adds the key/value if it does not already exist.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/set)
    */
   set(name: string, value: string): void;
   /**
-   * The **`set()`** method of the FormData interface sets a new value for an existing key inside a `FormData` object, or adds the key/value if it does not already exist.
+   * The **`set()`** method of the FormData interface sets a new value for an existing key inside a FormData object, or adds the key/value if it does not already exist.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/set)
    */
   set(name: string, value: Blob, filename?: string): void;
-  /* Returns an array of key, value pairs for every entry in the list. */
   entries(): IterableIterator<[key: string, value: File | string]>;
-  /* Returns a list of keys in the list. */
   keys(): IterableIterator<string>;
-  /* Returns a list of values in the list. */
   values(): IterableIterator<File | string>;
   forEach<This = unknown>(
     callback: (
@@ -1952,19 +1946,19 @@ export interface DocumentEnd {
   append(content: string, options?: ContentOptions): DocumentEnd;
 }
 /**
- * This is the event type for `fetch` events dispatched on the ServiceWorkerGlobalScope.
+ * This is the event type for fetch events dispatched on the service worker global scope. It contains information about the fetch, including the request and how the receiver will treat the response. It provides the event.respondWith() method, which allows us to provide a response to this fetch.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FetchEvent)
  */
 export declare abstract class FetchEvent extends ExtendableEvent {
   /**
-   * The **`request`** read-only property of the the event handler.
+   * The **`request`** read-only property of the FetchEvent interface returns the Request that triggered the event handler.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FetchEvent/request)
    */
   readonly request: Request;
   /**
-   * The **`respondWith()`** method of allows you to provide a promise for a Response yourself.
+   * The **`respondWith()`** method of FetchEvent prevents the browser's default fetch handling, and allows you to provide a promise for a Response yourself.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FetchEvent/respondWith)
    */
@@ -1972,49 +1966,47 @@ export declare abstract class FetchEvent extends ExtendableEvent {
   passThroughOnException(): void;
 }
 export type HeadersInit =
-  | Headers
-  | Iterable<Iterable<string>>
-  | Record<string, string>;
+  Headers | Iterable<Iterable<string>> | Record<string, string>;
 /**
- * The **`Headers`** interface of the Fetch API allows you to perform various actions on HTTP request and response headers.
+ * The **`Headers`** interface of the Fetch API allows you to perform various actions on HTTP request and response headers. These actions include retrieving, setting, adding to, and removing headers from the list of the request's headers.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers)
  */
 export declare class Headers {
   constructor(init?: HeadersInit);
   /**
-   * The **`get()`** method of the Headers interface returns a byte string of all the values of a header within a `Headers` object with a given name.
+   * The **`get()`** method of the Headers interface returns a byte string of all the values of a header within a Headers object with a given name. If the requested header doesn't exist in the Headers object, it returns null.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/get)
    */
   get(name: string): string | null;
   getAll(name: string): string[];
   /**
-   * The **`getSetCookie()`** method of the Headers interface returns an array containing the values of all Set-Cookie headers associated with a response.
+   * The **`getSetCookie()`** method of the Headers interface returns an array containing the values of all Set-Cookie headers associated with a response. This allows Headers objects to handle having multiple Set-Cookie headers, which wasn't possible prior to its implementation.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/getSetCookie)
    */
   getSetCookie(): string[];
   /**
-   * The **`has()`** method of the Headers interface returns a boolean stating whether a `Headers` object contains a certain header.
+   * The **`has()`** method of the Headers interface returns a boolean stating whether a Headers object contains a certain header.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/has)
    */
   has(name: string): boolean;
   /**
-   * The **`set()`** method of the Headers interface sets a new value for an existing header inside a `Headers` object, or adds the header if it does not already exist.
+   * The **`set()`** method of the Headers interface sets a new value for an existing header inside a Headers object, or adds the header if it does not already exist.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/set)
    */
   set(name: string, value: string): void;
   /**
-   * The **`append()`** method of the Headers interface appends a new value onto an existing header inside a `Headers` object, or adds the header if it does not already exist.
+   * The **`append()`** method of the Headers interface appends a new value onto an existing header inside a Headers object, or adds the header if it does not already exist.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/append)
    */
   append(name: string, value: string): void;
   /**
-   * The **`delete()`** method of the Headers interface deletes a header from the current `Headers` object.
+   * The **`delete()`** method of the Headers interface deletes a header from the current Headers object.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/delete)
    */
@@ -2023,11 +2015,8 @@ export declare class Headers {
     callback: (this: This, value: string, key: string, parent: Headers) => void,
     thisArg?: This,
   ): void;
-  /* Returns an iterator allowing to go through all key/value pairs contained in this object. */
   entries(): IterableIterator<[key: string, value: string]>;
-  /* Returns an iterator allowing to go through all keys of the key/value pairs contained in this object. */
   keys(): IterableIterator<string>;
-  /* Returns an iterator allowing to go through all values of the key/value pairs contained in this object. */
   values(): IterableIterator<string>;
   [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
 }
@@ -2096,7 +2085,7 @@ export interface Response extends Body {
    */
   statusText: string;
   /**
-   * The **`headers`** read-only property of the with the response.
+   * The **`headers`** read-only property of the Response interface contains the Headers object associated with the response.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/headers)
    */
@@ -2114,7 +2103,7 @@ export interface Response extends Body {
    */
   redirected: boolean;
   /**
-   * The **`url`** read-only property of the Response interface contains the URL of the response.
+   * The **`url`** read-only property of the Response interface contains the URL of the response. The value of the url property will be the final URL obtained after any redirects.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/url)
    */
@@ -2122,7 +2111,7 @@ export interface Response extends Body {
   webSocket: WebSocket | null;
   cf: any | undefined;
   /**
-   * The **`type`** read-only property of the Response interface contains the type of the response.
+   * The **`type`** read-only property of the Response interface contains the type of the response. The type determines whether scripts are able to access the response body and headers.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/type)
    */
@@ -2162,13 +2151,13 @@ export interface Request<
   Cf = CfProperties<CfHostMetadata>,
 > extends Body {
   /**
-   * The **`clone()`** method of the Request interface creates a copy of the current `Request` object.
+   * The **`clone()`** method of the Request interface creates a copy of the current Request object.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/clone)
    */
   clone(): Request<CfHostMetadata, Cf>;
   /**
-   * The **`method`** read-only property of the `POST`, etc.) A String indicating the method of the request.
+   * The **`method`** read-only property of the Request interface contains the request's method (GET, POST, etc.)
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/method)
    */
@@ -2180,7 +2169,7 @@ export interface Request<
    */
   url: string;
   /**
-   * The **`headers`** read-only property of the with the request.
+   * The **`headers`** read-only property of the Request interface contains the Headers object associated with the request.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/headers)
    */
@@ -2206,13 +2195,13 @@ export interface Request<
    */
   integrity: string;
   /**
-   * The **`keepalive`** read-only property of the Request interface contains the request's `keepalive` setting (`true` or `false`), which indicates whether the browser will keep the associated request alive if the page that initiated it is unloaded before the request is complete.
+   * The **`keepalive`** read-only property of the Request interface contains the request's keepalive setting (true or false), which indicates whether the browser will keep the associated request alive if the page that initiated it is unloaded before the request is complete.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/keepalive)
    */
   keepalive: boolean;
   /**
-   * The **`cache`** read-only property of the Request interface contains the cache mode of the request.
+   * The **`cache`** read-only property of the Request interface contains the cache mode of the request. It controls how the request will interact with the browser's HTTP cache.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/cache)
    */
@@ -2560,12 +2549,7 @@ export interface R2Bucket {
   put(
     key: string,
     value:
-      | ReadableStream
-      | ArrayBuffer
-      | ArrayBufferView
-      | string
-      | null
-      | Blob,
+      ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob,
     options?: R2PutOptions & {
       onlyIf: R2Conditional | Headers;
     },
@@ -2573,12 +2557,7 @@ export interface R2Bucket {
   put(
     key: string,
     value:
-      | ReadableStream
-      | ArrayBuffer
-      | ArrayBufferView
-      | string
-      | null
-      | Blob,
+      ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob,
     options?: R2PutOptions,
   ): Promise<R2Object>;
   createMultipartUpload(
@@ -2809,7 +2788,7 @@ export type ReadableStreamReadResult<R = any> =
       value?: undefined;
     };
 /**
- * The `ReadableStream` interface of the Streams API represents a readable stream of byte data.
+ * The **`ReadableStream`** interface of the Streams API represents a readable stream of byte data. The Fetch API offers a concrete instance of a ReadableStream through the body property of a Response object.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream)
  */
@@ -2827,13 +2806,13 @@ export interface ReadableStream<R = any> {
    */
   cancel(reason?: any): Promise<void>;
   /**
-   * The **`getReader()`** method of the ReadableStream interface creates a reader and locks the stream to it.
+   * The **`getReader()`** method of the ReadableStream interface creates a reader and locks the stream to it. While the stream is locked, no other reader can be acquired until this one is released.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/getReader)
    */
   getReader(): ReadableStreamDefaultReader<R>;
   /**
-   * The **`getReader()`** method of the ReadableStream interface creates a reader and locks the stream to it.
+   * The **`getReader()`** method of the ReadableStream interface creates a reader and locks the stream to it. While the stream is locked, no other reader can be acquired until this one is released.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/getReader)
    */
@@ -2848,7 +2827,7 @@ export interface ReadableStream<R = any> {
     options?: StreamPipeOptions,
   ): ReadableStream<T>;
   /**
-   * The **`pipeTo()`** method of the ReadableStream interface pipes the current `ReadableStream` to a given WritableStream and returns a Promise that fulfills when the piping process completes successfully, or rejects if any errors were encountered.
+   * The **`pipeTo()`** method of the ReadableStream interface pipes the current ReadableStream to a given WritableStream and returns a Promise that fulfills when the piping process completes successfully, or rejects if any errors were encountered.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/pipeTo)
    */
@@ -2857,7 +2836,7 @@ export interface ReadableStream<R = any> {
     options?: StreamPipeOptions,
   ): Promise<void>;
   /**
-   * The **`tee()`** method of the two-element array containing the two resulting branches as new ReadableStream instances.
+   * The **`tee()`** method of the ReadableStream interface tees the current readable stream, returning a two-element array containing the two resulting branches as new ReadableStream instances.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/tee)
    */
@@ -2868,7 +2847,7 @@ export interface ReadableStream<R = any> {
   ): AsyncIterableIterator<R>;
 }
 /**
- * The `ReadableStream` interface of the Streams API represents a readable stream of byte data.
+ * The **`ReadableStream`** interface of the Streams API represents a readable stream of byte data. The Fetch API offers a concrete instance of a ReadableStream through the body property of a Response object.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream)
  */
@@ -2906,7 +2885,7 @@ export declare class ReadableStreamDefaultReader<R = any> {
   releaseLock(): void;
 }
 /**
- * The `ReadableStreamBYOBReader` interface of the Streams API defines a reader for a ReadableStream that supports zero-copy reading from an underlying byte source.
+ * The **`ReadableStreamBYOBReader`** interface of the Streams API defines a reader for a ReadableStream that supports zero-copy reading from an underlying byte source. It is used for efficient copying from underlying sources where the data is delivered as an "anonymous" sequence of bytes, such as files.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBReader)
  */
@@ -2915,7 +2894,7 @@ export declare class ReadableStreamBYOBReader {
   get closed(): Promise<void>;
   cancel(reason?: any): Promise<void>;
   /**
-   * The **`read()`** method of the ReadableStreamBYOBReader interface is used to read data into a view on a user-supplied buffer from an associated readable byte stream.
+   * The **`read()`** method of the ReadableStreamBYOBReader interface is used to read data into a view on a user-supplied buffer from an associated readable byte stream. A request for data will be satisfied from the stream's internal queues if there is any data present. If the stream queues are empty, the request may be supplied as a zero-copy transfer from the underlying byte source.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBReader/read)
    */
@@ -2923,7 +2902,7 @@ export declare class ReadableStreamBYOBReader {
     view: T,
   ): Promise<ReadableStreamReadResult<T>>;
   /**
-   * The **`releaseLock()`** method of the ReadableStreamBYOBReader interface releases the reader's lock on the stream.
+   * The **`releaseLock()`** method of the ReadableStreamBYOBReader interface releases the reader's lock on the stream. After the lock is released, the reader is no longer active.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBReader/releaseLock)
    */
@@ -2945,7 +2924,7 @@ export interface ReadableStreamGetReaderOptions {
   mode: "byob";
 }
 /**
- * The **`ReadableStreamBYOBRequest`** interface of the Streams API represents a 'pull request' for data from an underlying source that will made as a zero-copy transfer to a consumer (bypassing the stream's internal queues).
+ * The **`ReadableStreamBYOBRequest`** interface of the Streams API represents a "pull request" for data from an underlying source that will made as a zero-copy transfer to a consumer (bypassing the stream's internal queues).
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest)
  */
@@ -2971,13 +2950,13 @@ export declare abstract class ReadableStreamBYOBRequest {
   get atLeast(): number | null;
 }
 /**
- * The **`ReadableStreamDefaultController`** interface of the Streams API represents a controller allowing control of a ReadableStream's state and internal queue.
+ * The **`ReadableStreamDefaultController`** interface of the Streams API represents a controller allowing control of a ReadableStream's state and internal queue. Default controllers are for streams that are not byte streams.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController)
  */
 export declare abstract class ReadableStreamDefaultController<R = any> {
   /**
-   * The **`desiredSize`** read-only property of the required to fill the stream's internal queue.
+   * The **`desiredSize`** read-only property of the ReadableStreamDefaultController interface returns the desired size required to fill the stream's internal queue.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController/desiredSize)
    */
@@ -2989,32 +2968,32 @@ export declare abstract class ReadableStreamDefaultController<R = any> {
    */
   close(): void;
   /**
-   * The **`enqueue()`** method of the ```js-nolint enqueue(chunk) ``` - `chunk` - : The chunk to enqueue.
+   * The **`enqueue()`** method of the ReadableStreamDefaultController interface enqueues a given chunk in the associated stream.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController/enqueue)
    */
   enqueue(chunk?: R): void;
   /**
-   * The **`error()`** method of the with the associated stream to error.
+   * The **`error()`** method of the ReadableStreamDefaultController interface causes any future interactions with the associated stream to error.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController/error)
    */
   error(reason: any): void;
 }
 /**
- * The **`ReadableByteStreamController`** interface of the Streams API represents a controller for a readable byte stream.
+ * The **`ReadableByteStreamController`** interface of the Streams API represents a controller for a readable byte stream. It allows control of the state and internal queue of a ReadableStream with an underlying byte source, and enables efficient zero-copy transfer of data from the underlying source to a consumer when the stream's internal queue is empty.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController)
  */
 export declare abstract class ReadableByteStreamController {
   /**
-   * The **`byobRequest`** read-only property of the ReadableByteStreamController interface returns the current BYOB request, or `null` if there are no pending requests.
+   * The **`byobRequest`** read-only property of the ReadableByteStreamController interface returns the current BYOB request, or null if there are no pending requests.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/byobRequest)
    */
   get byobRequest(): ReadableStreamBYOBRequest | null;
   /**
-   * The **`desiredSize`** read-only property of the ReadableByteStreamController interface returns the number of bytes required to fill the stream's internal queue to its 'desired size'.
+   * The **`desiredSize`** read-only property of the ReadableByteStreamController interface returns the number of bytes required to fill the stream's internal queue to its "desired size".
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/desiredSize)
    */
@@ -3026,7 +3005,7 @@ export declare abstract class ReadableByteStreamController {
    */
   close(): void;
   /**
-   * The **`enqueue()`** method of the ReadableByteStreamController interface enqueues a given chunk on the associated readable byte stream (the chunk is copied into the stream's internal queues).
+   * The **`enqueue()`** method of the ReadableByteStreamController interface enqueues a given chunk on the associated readable byte stream (the chunk is transferred into the stream's internal queues).
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/enqueue)
    */
@@ -3039,7 +3018,7 @@ export declare abstract class ReadableByteStreamController {
   error(reason: any): void;
 }
 /**
- * The **`WritableStreamDefaultController`** interface of the Streams API represents a controller allowing control of a WritableStream's state.
+ * The **`WritableStreamDefaultController`** interface of the Streams API represents a controller allowing control of a WritableStream's state. When constructing a WritableStream, the underlying sink is given a corresponding WritableStreamDefaultController instance to manipulate.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController)
  */
@@ -3051,7 +3030,7 @@ export declare abstract class WritableStreamDefaultController {
    */
   get signal(): AbortSignal;
   /**
-   * The **`error()`** method of the with the associated stream to error.
+   * The **`error()`** method of the WritableStreamDefaultController interface causes any future interactions with the associated stream to error.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController/error)
    */
@@ -3076,7 +3055,7 @@ export declare abstract class TransformStreamDefaultController<O = any> {
    */
   enqueue(chunk?: O): void;
   /**
-   * The **`error()`** method of the TransformStreamDefaultController interface errors both sides of the stream.
+   * The **`error()`** method of the TransformStreamDefaultController interface errors both sides of the stream. Any further interactions with it will fail with the given error message, and any chunks in the queue will be discarded.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController/error)
    */
@@ -3098,7 +3077,7 @@ export interface ReadableWritablePair<R = any, W = any> {
   writable: WritableStream<W>;
 }
 /**
- * The **`WritableStream`** interface of the Streams API provides a standard abstraction for writing streaming data to a destination, known as a sink.
+ * The **`WritableStream`** interface of the Streams API provides a standard abstraction for writing streaming data to a destination, known as a sink. This object comes with built-in backpressure and queuing.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStream)
  */
@@ -3108,7 +3087,7 @@ export declare class WritableStream<W = any> {
     queuingStrategy?: QueuingStrategy,
   );
   /**
-   * The **`locked`** read-only property of the WritableStream interface returns a boolean indicating whether the `WritableStream` is locked to a writer.
+   * The **`locked`** read-only property of the WritableStream interface returns a boolean indicating whether the WritableStream is locked to a writer.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStream/locked)
    */
@@ -3120,70 +3099,70 @@ export declare class WritableStream<W = any> {
    */
   abort(reason?: any): Promise<void>;
   /**
-   * The **`close()`** method of the WritableStream interface closes the associated stream.
+   * The **`close()`** method of the WritableStream interface closes the associated stream. All chunks written before this method is called are sent before the returned promise is fulfilled.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStream/close)
    */
   close(): Promise<void>;
   /**
-   * The **`getWriter()`** method of the WritableStream interface returns a new instance of WritableStreamDefaultWriter and locks the stream to that instance.
+   * The **`getWriter()`** method of the WritableStream interface returns a new instance of WritableStreamDefaultWriter and locks the stream to that instance. While the stream is locked, no other writer can be acquired until this one is released.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStream/getWriter)
    */
   getWriter(): WritableStreamDefaultWriter<W>;
 }
 /**
- * The **`WritableStreamDefaultWriter`** interface of the Streams API is the object returned by WritableStream.getWriter() and once created locks the writer to the `WritableStream` ensuring that no other streams can write to the underlying sink.
+ * The **`WritableStreamDefaultWriter`** interface of the Streams API is the object returned by WritableStream.getWriter() and once created locks the writer to the WritableStream ensuring that no other streams can write to the underlying sink.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter)
  */
 export declare class WritableStreamDefaultWriter<W = any> {
   constructor(stream: WritableStream);
   /**
-   * The **`closed`** read-only property of the the stream errors or the writer's lock is released.
+   * The **`closed`** read-only property of the WritableStreamDefaultWriter interface returns a Promise that fulfills if the stream becomes closed, or rejects if the stream errors or the writer's lock is released.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/closed)
    */
   get closed(): Promise<void>;
   /**
-   * The **`ready`** read-only property of the that resolves when the desired size of the stream's internal queue transitions from non-positive to positive, signaling that it is no longer applying backpressure.
+   * The **`ready`** read-only property of the WritableStreamDefaultWriter interface returns a Promise that resolves when the desired size of the stream's internal queue transitions from non-positive to positive, signaling that it is no longer applying backpressure.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/ready)
    */
   get ready(): Promise<void>;
   /**
-   * The **`desiredSize`** read-only property of the to fill the stream's internal queue.
+   * The **`desiredSize`** read-only property of the WritableStreamDefaultWriter interface returns the desired size required to fill the stream's internal queue.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/desiredSize)
    */
   get desiredSize(): number | null;
   /**
-   * The **`abort()`** method of the the producer can no longer successfully write to the stream and it is to be immediately moved to an error state, with any queued writes discarded.
+   * The **`abort()`** method of the WritableStreamDefaultWriter interface aborts the stream, signaling that the producer can no longer successfully write to the stream and it is to be immediately moved to an error state, with any queued writes discarded.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/abort)
    */
   abort(reason?: any): Promise<void>;
   /**
-   * The **`close()`** method of the stream.
+   * The **`close()`** method of the WritableStreamDefaultWriter interface closes the associated writable stream.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/close)
    */
   close(): Promise<void>;
   /**
-   * The **`write()`** method of the operation.
+   * The **`write()`** method of the WritableStreamDefaultWriter interface writes a passed chunk of data to a WritableStream and its underlying sink, then returns a Promise that resolves to indicate the success or failure of the write operation.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/write)
    */
   write(chunk?: W): Promise<void>;
   /**
-   * The **`releaseLock()`** method of the corresponding stream.
+   * The **`releaseLock()`** method of the WritableStreamDefaultWriter interface releases the writer's lock on the corresponding stream. After the lock is released, the writer is no longer active. If the associated stream is errored when the lock is released, the writer will appear errored in the same way from now on; otherwise, the writer will appear closed.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/releaseLock)
    */
   releaseLock(): void;
 }
 /**
- * The **`TransformStream`** interface of the Streams API represents a concrete implementation of the pipe chain _transform stream_ concept.
+ * The **`TransformStream`** interface of the Streams API represents a concrete implementation of the pipe chain transform stream concept.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStream)
  */
@@ -3194,13 +3173,13 @@ export declare class TransformStream<I = any, O = any> {
     readableStrategy?: QueuingStrategy<O>,
   );
   /**
-   * The **`readable`** read-only property of the TransformStream interface returns the ReadableStream instance controlled by this `TransformStream`.
+   * The **`readable`** read-only property of the TransformStream interface returns the ReadableStream instance controlled by this TransformStream. This stream emits the transformed output data.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStream/readable)
    */
   get readable(): ReadableStream<O>;
   /**
-   * The **`writable`** read-only property of the TransformStream interface returns the WritableStream instance controlled by this `TransformStream`.
+   * The **`writable`** read-only property of the TransformStream interface returns the WritableStream instance controlled by this TransformStream. This stream accepts input data that will be transformed and emitted to the readable stream.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStream/writable)
    */
@@ -3225,7 +3204,7 @@ export interface ReadableStreamValuesOptions {
   preventCancel?: boolean;
 }
 /**
- * The **`CompressionStream`** interface of the Compression Streams API is an API for compressing a stream of data.
+ * The **`CompressionStream`** interface of the Compression Streams API compresses a stream of data. It implements the same shape as a TransformStream, allowing it to be used in ReadableStream.pipeThrough() and similar methods.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CompressionStream)
  */
@@ -3236,7 +3215,7 @@ export declare class CompressionStream extends TransformStream<
   constructor(format: "gzip" | "deflate" | "deflate-raw");
 }
 /**
- * The **`DecompressionStream`** interface of the Compression Streams API is an API for decompressing a stream of data.
+ * The **`DecompressionStream`** interface of the Compression Streams API decompresses a stream of data. It implements the same shape as a TransformStream, allowing it to be used in ReadableStream.pipeThrough() and similar methods.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DecompressionStream)
  */
@@ -3247,7 +3226,7 @@ export declare class DecompressionStream extends TransformStream<
   constructor(format: "gzip" | "deflate" | "deflate-raw");
 }
 /**
- * The **`TextEncoderStream`** interface of the Encoding API converts a stream of strings into bytes in the UTF-8 encoding.
+ * The **`TextEncoderStream`** interface of the Encoding API converts a stream of strings into bytes in the UTF-8 encoding. It is the streaming equivalent of TextEncoder. It implements the same shape as a TransformStream, allowing it to be used in ReadableStream.pipeThrough() and similar methods.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextEncoderStream)
  */
@@ -3259,7 +3238,7 @@ export declare class TextEncoderStream extends TransformStream<
   get encoding(): string;
 }
 /**
- * The **`TextDecoderStream`** interface of the Encoding API converts a stream of text in a binary encoding, such as UTF-8 etc., to a stream of strings.
+ * The **`TextDecoderStream`** interface of the Encoding API converts a stream of text in a binary encoding, such as UTF-8 etc., to a stream of strings. It is the streaming equivalent of TextDecoder. It implements the same shape as a TransformStream, allowing it to be used in ReadableStream.pipeThrough() and similar methods.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextDecoderStream)
  */
@@ -3451,7 +3430,7 @@ export interface UnsafeTraceMetrics {
   fromTrace(item: TraceItem): TraceMetrics;
 }
 /**
- * The **`URL`** interface is used to parse, construct, normalize, and encode URL.
+ * The **`URL`** interface is used to parse, construct, normalize, and encode URLs. It works by providing properties which allow you to easily read and modify the components of a URL.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL)
  */
@@ -3476,121 +3455,121 @@ export declare class URL {
    */
   set href(value: string);
   /**
-   * The **`protocol`** property of the URL interface is a string containing the protocol or scheme of the URL, including the final `':'`.
+   * The **`protocol`** property of the URL interface is a string containing the protocol or scheme of the URL, including the final ":".
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/protocol)
    */
   get protocol(): string;
   /**
-   * The **`protocol`** property of the URL interface is a string containing the protocol or scheme of the URL, including the final `':'`.
+   * The **`protocol`** property of the URL interface is a string containing the protocol or scheme of the URL, including the final ":".
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/protocol)
    */
   set protocol(value: string);
   /**
-   * The **`username`** property of the URL interface is a string containing the username component of the URL.
+   * The **`username`** property of the URL interface is a string containing the username component of the URL. If the URL does not have a username, this property contains an empty string, "".
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/username)
    */
   get username(): string;
   /**
-   * The **`username`** property of the URL interface is a string containing the username component of the URL.
+   * The **`username`** property of the URL interface is a string containing the username component of the URL. If the URL does not have a username, this property contains an empty string, "".
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/username)
    */
   set username(value: string);
   /**
-   * The **`password`** property of the URL interface is a string containing the password component of the URL.
+   * The **`password`** property of the URL interface is a string containing the password component of the URL. If the URL does not have a password, this property contains an empty string, "".
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/password)
    */
   get password(): string;
   /**
-   * The **`password`** property of the URL interface is a string containing the password component of the URL.
+   * The **`password`** property of the URL interface is a string containing the password component of the URL. If the URL does not have a password, this property contains an empty string, "".
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/password)
    */
   set password(value: string);
   /**
-   * The **`host`** property of the URL interface is a string containing the host, which is the URL.hostname, and then, if the port of the URL is nonempty, a `':'`, followed by the URL.port of the URL.
+   * The **`host`** property of the URL interface is a string containing the host, which is the hostname, and then, if the port of the URL is nonempty, a ":", followed by the port of the URL. If the URL does not have a hostname, this property contains an empty string, "".
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/host)
    */
   get host(): string;
   /**
-   * The **`host`** property of the URL interface is a string containing the host, which is the URL.hostname, and then, if the port of the URL is nonempty, a `':'`, followed by the URL.port of the URL.
+   * The **`host`** property of the URL interface is a string containing the host, which is the hostname, and then, if the port of the URL is nonempty, a ":", followed by the port of the URL. If the URL does not have a hostname, this property contains an empty string, "".
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/host)
    */
   set host(value: string);
   /**
-   * The **`hostname`** property of the URL interface is a string containing either the domain name or IP address of the URL.
+   * The **`hostname`** property of the URL interface is a string containing either the domain name or IP address of the URL. If the URL does not have a hostname, this property contains an empty string, "". IPv4 and IPv6 addresses are normalized, such as stripping leading zeros, and domain names are converted to IDN.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hostname)
    */
   get hostname(): string;
   /**
-   * The **`hostname`** property of the URL interface is a string containing either the domain name or IP address of the URL.
+   * The **`hostname`** property of the URL interface is a string containing either the domain name or IP address of the URL. If the URL does not have a hostname, this property contains an empty string, "". IPv4 and IPv6 addresses are normalized, such as stripping leading zeros, and domain names are converted to IDN.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hostname)
    */
   set hostname(value: string);
   /**
-   * The **`port`** property of the URL interface is a string containing the port number of the URL.
+   * The **`port`** property of the URL interface is a string containing the port number of the URL. If the port is the default for the protocol (80 for ws: and http:, 443 for wss: and https:, and 21 for ftp:), this property contains an empty string, "".
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/port)
    */
   get port(): string;
   /**
-   * The **`port`** property of the URL interface is a string containing the port number of the URL.
+   * The **`port`** property of the URL interface is a string containing the port number of the URL. If the port is the default for the protocol (80 for ws: and http:, 443 for wss: and https:, and 21 for ftp:), this property contains an empty string, "".
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/port)
    */
   set port(value: string);
   /**
-   * The **`pathname`** property of the URL interface represents a location in a hierarchical structure.
+   * The **`pathname`** property of the URL interface represents a location in a hierarchical structure. It is a string constructed from a list of path segments, each of which is prefixed by a / character.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/pathname)
    */
   get pathname(): string;
   /**
-   * The **`pathname`** property of the URL interface represents a location in a hierarchical structure.
+   * The **`pathname`** property of the URL interface represents a location in a hierarchical structure. It is a string constructed from a list of path segments, each of which is prefixed by a / character.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/pathname)
    */
   set pathname(value: string);
   /**
-   * The **`search`** property of the URL interface is a search string, also called a _query string_, that is a string containing a `'?'` followed by the parameters of the URL.
+   * The **`search`** property of the URL interface is a search string, also called a query string, that is a string containing a "?" followed by the parameters of the URL. If the URL does not have a search query, this property contains an empty string, "".
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/search)
    */
   get search(): string;
   /**
-   * The **`search`** property of the URL interface is a search string, also called a _query string_, that is a string containing a `'?'` followed by the parameters of the URL.
+   * The **`search`** property of the URL interface is a search string, also called a query string, that is a string containing a "?" followed by the parameters of the URL. If the URL does not have a search query, this property contains an empty string, "".
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/search)
    */
   set search(value: string);
   /**
-   * The **`hash`** property of the URL interface is a string containing a `'#'` followed by the fragment identifier of the URL.
+   * The **`hash`** property of the URL interface is a string containing a "#" followed by the fragment identifier of the URL. If the URL does not have a fragment identifier, this property contains an empty string, "".
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash)
    */
   get hash(): string;
   /**
-   * The **`hash`** property of the URL interface is a string containing a `'#'` followed by the fragment identifier of the URL.
+   * The **`hash`** property of the URL interface is a string containing a "#" followed by the fragment identifier of the URL. If the URL does not have a fragment identifier, this property contains an empty string, "".
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash)
    */
   set hash(value: string);
   /**
-   * The **`searchParams`** read-only property of the access to the [MISSING: httpmethod('GET')] decoded query arguments contained in the URL.
+   * The **`searchParams`** read-only property of the URL interface returns a URLSearchParams object allowing access to the GET decoded query arguments contained in the URL.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/searchParams)
    */
   get searchParams(): URLSearchParams;
   /**
-   * The **`toJSON()`** method of the URL interface returns a string containing a serialized version of the URL, although in practice it seems to have the same effect as ```js-nolint toJSON() ``` None.
+   * The **`toJSON()`** method of the URL interface returns a string containing a serialized version of the URL, although in practice it seems to have the same effect as URL.toString().
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/toJSON)
    */
@@ -3610,13 +3589,13 @@ export declare class URL {
    */
   static parse(url: string, base?: string): URL | null;
   /**
-   * The **`createObjectURL()`** static method of the URL interface creates a string containing a URL representing the object given in the parameter.
+   * The **`createObjectURL()`** static method of the URL interface creates a string containing a blob URL pointing to the object given in the parameter.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/createObjectURL_static)
    */
   static createObjectURL(object: File | Blob): string;
   /**
-   * The **`revokeObjectURL()`** static method of the URL interface releases an existing object URL which was previously created by calling Call this method when you've finished using an object URL to let the browser know not to keep the reference to the file any longer.
+   * The **`revokeObjectURL()`** static method of the URL interface releases an existing object URL which was previously created by calling URL.createObjectURL().
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/revokeObjectURL_static)
    */
@@ -3668,22 +3647,19 @@ export declare class URLSearchParams {
    */
   has(name: string, value?: string): boolean;
   /**
-   * The **`set()`** method of the URLSearchParams interface sets the value associated with a given search parameter to the given value.
+   * The **`set()`** method of the URLSearchParams interface sets the value associated with a given search parameter to the given value. If there were several matching values, this method deletes the others. If the search parameter doesn't exist, this method creates it.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/set)
    */
   set(name: string, value: string): void;
   /**
-   * The **`URLSearchParams.sort()`** method sorts all key/value pairs contained in this object in place and returns `undefined`.
+   * The **`URLSearchParams.sort()`** method sorts all key/value pairs contained in this object in place and returns undefined. Key/value pairs are sorted by the values of the UTF-16 code units of the keys. This method uses a stable sorting algorithm (i.e., the relative order between key/value pairs with equal keys will be preserved).
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/sort)
    */
   sort(): void;
-  /* Returns an array of key, value pairs for every entry in the search params. */
   entries(): IterableIterator<[key: string, value: string]>;
-  /* Returns a list of keys in the search params. */
   keys(): IterableIterator<string>;
-  /* Returns a list of values in the search params. */
   values(): IterableIterator<string>;
   forEach<This = unknown>(
     callback: (
@@ -3698,22 +3674,82 @@ export declare class URLSearchParams {
   toString(): string;
   [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
 }
+/**
+ * The **`URLPattern`** interface of the URL Pattern API matches URLs or parts of URLs against a pattern. The pattern can contain capturing groups that extract parts of the matched URL.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern)
+ */
 export declare class URLPattern {
   constructor(
     input?: string | URLPatternInit,
     baseURL?: string | URLPatternOptions,
     patternOptions?: URLPatternOptions,
   );
+  /**
+   * The **`protocol`** read-only property of the URLPattern interface is a string containing the pattern used to match the protocol part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/protocol)
+   */
   get protocol(): string;
+  /**
+   * The **`username`** read-only property of the URLPattern interface is a string containing the pattern used to match the username part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/username)
+   */
   get username(): string;
+  /**
+   * The **`password`** read-only property of the URLPattern interface is a string containing the pattern used to match the password part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/password)
+   */
   get password(): string;
+  /**
+   * The **`hostname`** read-only property of the URLPattern interface is a string containing the pattern used to match the hostname part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/hostname)
+   */
   get hostname(): string;
+  /**
+   * The **`port`** read-only property of the URLPattern interface is a string containing the pattern used to match the port part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/port)
+   */
   get port(): string;
+  /**
+   * The **`pathname`** read-only property of the URLPattern interface is a string containing the pattern used to match the pathname part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/pathname)
+   */
   get pathname(): string;
+  /**
+   * The **`search`** read-only property of the URLPattern interface is a string containing the pattern used to match the search part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/search)
+   */
   get search(): string;
+  /**
+   * The **`hash`** read-only property of the URLPattern interface is a string containing the pattern used to match the fragment part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/hash)
+   */
   get hash(): string;
+  /**
+   * The **`hasRegExpGroups`** read-only property of the URLPattern interface is a boolean indicating whether or not any of the URLPattern components contain regular expression capturing groups.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/hasRegExpGroups)
+   */
   get hasRegExpGroups(): boolean;
+  /**
+   * The **`test()`** method of the URLPattern interface takes a URL string or object of URL parts, and returns a boolean indicating if the given input matches the current pattern.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/test)
+   */
   test(input?: string | URLPatternInit, baseURL?: string): boolean;
+  /**
+   * The **`exec()`** method of the URLPattern interface takes a URL or object of URL parts, and returns either an object containing the results of matching the URL to the pattern, or null if the URL does not match the pattern.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/exec)
+   */
   exec(
     input?: string | URLPatternInit,
     baseURL?: string,
@@ -3749,7 +3785,7 @@ export interface URLPatternOptions {
   ignoreCase?: boolean;
 }
 /**
- * A `CloseEvent` is sent to clients using WebSockets when the connection is closed.
+ * A **`CloseEvent`** is sent to clients using WebSockets when the connection is closed. This is delivered to the listener indicated by the WebSocket object's onclose attribute.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CloseEvent)
  */
@@ -3768,7 +3804,7 @@ export declare class CloseEvent extends Event {
    */
   readonly reason: string;
   /**
-   * The **`wasClean`** read-only property of the CloseEvent interface returns `true` if the connection closed cleanly.
+   * The **`wasClean`** read-only property of the CloseEvent interface returns true if the connection closed cleanly.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CloseEvent/wasClean)
    */
@@ -3786,7 +3822,7 @@ export type WebSocketEventMap = {
   error: ErrorEvent;
 };
 /**
- * The `WebSocket` object provides the API for creating and managing a WebSocket connection to a server, as well as for sending and receiving data on the connection.
+ * The **`WebSocket`** object provides the API for creating and managing a WebSocket connection to a server, as well as for sending and receiving data on the connection.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket)
  */
@@ -3803,20 +3839,20 @@ export declare var WebSocket: {
   readonly CLOSED: number;
 };
 /**
- * The `WebSocket` object provides the API for creating and managing a WebSocket connection to a server, as well as for sending and receiving data on the connection.
+ * The **`WebSocket`** object provides the API for creating and managing a WebSocket connection to a server, as well as for sending and receiving data on the connection.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket)
  */
 export interface WebSocket extends EventTarget<WebSocketEventMap> {
   accept(options?: WebSocketAcceptOptions): void;
   /**
-   * The **`WebSocket.send()`** method enqueues the specified data to be transmitted to the server over the WebSocket connection, increasing the value of `bufferedAmount` by the number of bytes needed to contain the data.
+   * The **`WebSocket.send()`** method enqueues the specified data to be transmitted to the server over the WebSocket connection, increasing the value of bufferedAmount by the number of bytes needed to contain the data. If the data can't be sent (for example, because it needs to be buffered but the buffer is full), the socket is closed automatically. The browser will throw an exception if you call send() when the connection is in the CONNECTING state. If you call send() when the connection is in the CLOSING or CLOSED states, the browser will silently discard the data.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/send)
    */
   send(message: (ArrayBuffer | ArrayBufferView) | string): void;
   /**
-   * The **`WebSocket.close()`** method closes the already `CLOSED`, this method does nothing.
+   * The **`WebSocket.close()`** method closes the WebSocket connection or connection attempt, if any. If the connection is already CLOSED, this method does nothing.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/close)
    */
@@ -3836,13 +3872,13 @@ export interface WebSocket extends EventTarget<WebSocketEventMap> {
    */
   url: string | null;
   /**
-   * The **`WebSocket.protocol`** read-only property returns the name of the sub-protocol the server selected; this will be one of the strings specified in the `protocols` parameter when creating the WebSocket object, or the empty string if no connection is established.
+   * The **`WebSocket.protocol`** read-only property returns the name of the sub-protocol the server selected; this will be one of the strings specified in the protocols parameter when creating the WebSocket object, or the empty string if no connection is established.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/protocol)
    */
   protocol: string | null;
   /**
-   * The **`WebSocket.extensions`** read-only property returns the extensions selected by the server.
+   * The **`WebSocket.extensions`** read-only property returns the extensions selected by the server. This is currently only the empty string or a list of extensions as negotiated by the connection.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/extensions)
    */
@@ -3945,25 +3981,25 @@ export interface SocketInfo {
 export declare class EventSource extends EventTarget {
   constructor(url: string, init?: EventSourceEventSourceInit);
   /**
-   * The **`close()`** method of the EventSource interface closes the connection, if one is made, and sets the ```js-nolint close() ``` None.
+   * The **`close()`** method of the EventSource interface closes the connection, if one is made, and sets the EventSource.readyState attribute to 2 (closed).
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/close)
    */
   close(): void;
   /**
-   * The **`url`** read-only property of the URL of the source.
+   * The **`url`** read-only property of the EventSource interface returns a string representing the URL of the source.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/url)
    */
   get url(): string;
   /**
-   * The **`withCredentials`** read-only property of the the `EventSource` object was instantiated with CORS credentials set.
+   * The **`withCredentials`** read-only property of the EventSource interface returns a boolean value indicating whether the EventSource object was instantiated with CORS credentials set.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/withCredentials)
    */
   get withCredentials(): boolean;
   /**
-   * The **`readyState`** read-only property of the connection.
+   * The **`readyState`** read-only property of the EventSource interface returns a number representing the state of the connection.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/readyState)
    */
@@ -4097,26 +4133,26 @@ export interface ContainerStartResources {
   diskMb: number;
 }
 /**
- * The **`FileSystemHandle`** interface of the File System API is an object which represents a file or directory entry.
+ * The **`FileSystemHandle`** interface of the File System API is an object which represents a file or directory entry. Multiple handles can represent the same entry. For the most part you do not work with FileSystemHandle directly but rather its child interfaces FileSystemFileHandle and FileSystemDirectoryHandle.
  * Available only in secure contexts.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemHandle)
  */
 export declare abstract class FileSystemHandle {
   /**
-   * The **`kind`** read-only property of the `'file'` if the associated entry is a file or `'directory'`.
+   * The **`kind`** read-only property of the FileSystemHandle interface returns the type of entry. This is 'file' if the associated entry is a file or 'directory'. It is used to distinguish files from directories when iterating over the contents of a directory.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemHandle/kind)
    */
   get kind(): string;
   /**
-   * The **`name`** read-only property of the handle.
+   * The **`name`** read-only property of the FileSystemHandle interface returns the name of the entry represented by handle.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemHandle/name)
    */
   get name(): string;
   /**
-   * The **`isSameEntry()`** method of the ```js-nolint isSameEntry(fileSystemHandle) ``` - FileSystemHandle - : The `FileSystemHandle` to match against the handle on which the method is invoked.
+   * The **`isSameEntry()`** method of the FileSystemHandle interface compares two handles to see if the associated entries (either a file or directory) match.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemHandle/isSameEntry)
    */
@@ -4125,20 +4161,20 @@ export declare abstract class FileSystemHandle {
   remove(options?: FileSystemHandleRemoveOptions): Promise<void>;
 }
 /**
- * The **`FileSystemFileHandle`** interface of the File System API represents a handle to a file system entry.
+ * The **`FileSystemFileHandle`** interface of the File System API represents a handle to a file system entry. The interface is accessed through the window.showOpenFilePicker() method.
  * Available only in secure contexts.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemFileHandle)
  */
 export declare abstract class FileSystemFileHandle extends FileSystemHandle {
   /**
-   * The **`getFile()`** method of the If the file on disk changes or is removed after this method is called, the returned ```js-nolint getFile() ``` None.
+   * The **`getFile()`** method of the FileSystemFileHandle interface returns a Promise which resolves to a File object representing the state on disk of the entry represented by the handle.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemFileHandle/getFile)
    */
   getFile(): Promise<File>;
   /**
-   * The **`createWritable()`** method of the FileSystemFileHandle interface creates a FileSystemWritableFileStream that can be used to write to a file.
+   * The **`createWritable()`** method of the FileSystemFileHandle interface creates a FileSystemWritableFileStream that can be used to write to a file. The method returns a Promise which resolves to this created stream.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemFileHandle/createWritable)
    */
@@ -4154,7 +4190,7 @@ export declare abstract class FileSystemFileHandle extends FileSystemHandle {
  */
 export declare abstract class FileSystemDirectoryHandle extends FileSystemHandle {
   /**
-   * The **`getFileHandle()`** method of the directory the method is called.
+   * The **`getFileHandle()`** method of the FileSystemDirectoryHandle interface returns a FileSystemFileHandle for a file with the specified name, within the directory the method is called.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemDirectoryHandle/getFileHandle)
    */
@@ -4163,7 +4199,7 @@ export declare abstract class FileSystemDirectoryHandle extends FileSystemHandle
     options?: FileSystemDirectoryHandleFileSystemGetFileOptions,
   ): Promise<FileSystemFileHandle>;
   /**
-   * The **`getDirectoryHandle()`** method of the within the directory handle on which the method is called.
+   * The **`getDirectoryHandle()`** method of the FileSystemDirectoryHandle interface returns a FileSystemDirectoryHandle for a subdirectory with the specified name within the directory handle on which the method is called.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemDirectoryHandle/getDirectoryHandle)
    */
@@ -4172,7 +4208,7 @@ export declare abstract class FileSystemDirectoryHandle extends FileSystemHandle
     options?: FileSystemDirectoryHandleFileSystemGetDirectoryOptions,
   ): Promise<FileSystemDirectoryHandle>;
   /**
-   * The **`removeEntry()`** method of the directory handle contains a file or directory called the name specified.
+   * The **`removeEntry()`** method of the FileSystemDirectoryHandle interface attempts to remove an entry if the directory handle contains a file or directory called the name specified.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemDirectoryHandle/removeEntry)
    */
@@ -4181,7 +4217,7 @@ export declare abstract class FileSystemDirectoryHandle extends FileSystemHandle
     options?: FileSystemDirectoryHandleFileSystemRemoveOptions,
   ): Promise<void>;
   /**
-   * The **`resolve()`** method of the directory names from the parent handle to the specified child entry, with the name of the child entry as the last array item.
+   * The **`resolve()`** method of the FileSystemDirectoryHandle interface returns an Array of directory names from the parent handle to the specified child entry, with the name of the child entry as the last array item.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemDirectoryHandle/resolve)
    */
@@ -4200,7 +4236,7 @@ export declare abstract class FileSystemDirectoryHandle extends FileSystemHandle
   [Symbol.asyncIterator](): AsyncIterableIterator<[string, FileSystemHandle]>;
 }
 /**
- * The **`FileSystemWritableFileStream`** interface of the File System API is a WritableStream object with additional convenience methods, which operates on a single file on disk.
+ * The **`FileSystemWritableFileStream`** interface of the File System API is a WritableStream object with additional convenience methods, which operates on a single file on disk. The interface is accessed through the FileSystemFileHandle.createWritable() method.
  * Available only in secure contexts.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemWritableFileStream)
@@ -4232,7 +4268,7 @@ export declare abstract class FileSystemWritableFileStream extends WritableStrea
   truncate(size: number): Promise<void>;
 }
 /**
- * The **`StorageManager`** interface of the Storage API provides an interface for managing persistence permissions and estimating available storage.
+ * The **`StorageManager`** interface of the Storage API provides an interface for managing persistence permissions and estimating available storage. You can get a reference to this interface using either navigator.storage or WorkerNavigator.storage.
  * Available only in secure contexts.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/StorageManager)
@@ -4273,7 +4309,7 @@ export interface FileSystemHandleRemoveOptions {
  */
 export declare abstract class MessagePort extends EventTarget {
   /**
-   * The **`postMessage()`** method of the transfers ownership of objects to other browsing contexts.
+   * The **`postMessage()`** method of the MessagePort interface sends a message from the port, and optionally, transfers ownership of objects to other browsing contexts.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/postMessage)
    */
@@ -4282,13 +4318,13 @@ export declare abstract class MessagePort extends EventTarget {
     options?: any[] | MessagePortPostMessageOptions,
   ): void;
   /**
-   * The **`close()`** method of the MessagePort interface disconnects the port, so it is no longer active.
+   * The **`close()`** method of the MessagePort interface disconnects the port, so it is no longer active. This stops the flow of messages to that port.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/close)
    */
   close(): void;
   /**
-   * The **`start()`** method of the MessagePort interface starts the sending of messages queued on the port.
+   * The **`start()`** method of the MessagePort interface starts the sending of messages queued on the port. This method is only needed when using EventTarget.addEventListener; it is implied when using onmessage.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/start)
    */
@@ -4304,13 +4340,13 @@ export declare abstract class MessagePort extends EventTarget {
 export declare class MessageChannel {
   constructor();
   /**
-   * The **`port1`** read-only property of the the port attached to the context that originated the channel.
+   * The **`port1`** read-only property of the MessageChannel interface returns the first port of the message channel — the port attached to the context that originated the channel.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port1)
    */
   readonly port1: MessagePort;
   /**
-   * The **`port2`** read-only property of the the port attached to the context at the other end of the channel, which the message is initially sent to.
+   * The **`port2`** read-only property of the MessageChannel interface returns the second port of the message channel — the port attached to the context at the other end of the channel, which the message is initially sent to.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port2)
    */
@@ -4440,7 +4476,7 @@ export declare abstract class Performance extends EventTarget {
    */
   clearMeasures(name?: string): void;
   /**
-   * The **`clearResourceTimings()`** method removes all performance entries with an PerformanceEntry.entryType of `'resource'` from the browser's performance timeline and sets the size of the performance resource data buffer to zero.
+   * The **`clearResourceTimings()`** method removes all performance entries with an entryType of "resource" from the browser's performance timeline and sets the size of the performance resource data buffer to zero.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/clearResourceTimings)
    */
@@ -4452,13 +4488,13 @@ export declare abstract class Performance extends EventTarget {
    */
   getEntries(): PerformanceEntry[];
   /**
-   * The **`getEntriesByName()`** method returns an array of PerformanceEntry objects currently present in the performance timeline with the given _name_ and _type_.
+   * The **`getEntriesByName()`** method returns an array of PerformanceEntry objects currently present in the performance timeline with the given name and type.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/getEntriesByName)
    */
   getEntriesByName(name: string, type?: string): PerformanceEntry[];
   /**
-   * The **`getEntriesByType()`** method returns an array of PerformanceEntry objects currently present in the performance timeline for a given _type_.
+   * The **`getEntriesByType()`** method returns an array of PerformanceEntry objects currently present in the performance timeline for a given type.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/getEntriesByType)
    */
@@ -4480,13 +4516,13 @@ export declare abstract class Performance extends EventTarget {
     maybeEndMark?: string,
   ): PerformanceMeasure;
   /**
-   * The **`setResourceTimingBufferSize()`** method sets the desired size of the browser's resource timing buffer which stores the `'resource'` performance entries.
+   * The **`setResourceTimingBufferSize()`** method sets the desired size of the browser's resource timing buffer which stores the "resource" performance entries.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/setResourceTimingBufferSize)
    */
   setResourceTimingBufferSize(size: number): void;
   /**
-   * The **`toJSON()`** method of the Performance interface is a Serialization; it returns a JSON representation of the Performance object.
+   * The **`toJSON()`** method of the Performance interface is a serializer; it returns a JSON representation of the Performance object.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/toJSON)
    */
@@ -4518,14 +4554,14 @@ export interface UvMetricsInfo {
   eventsWaiting: number;
 }
 /**
- * **`PerformanceMark`** is an interface for PerformanceEntry objects with an PerformanceEntry.entryType of `'mark'`.
+ * **`PerformanceMark`** is an interface for PerformanceEntry objects with an entryType of "mark".
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMark)
  */
 export declare class PerformanceMark extends PerformanceEntry {
   constructor(name: string, maybeOptions?: PerformanceMarkOptions);
   /**
-   * The read-only **`detail`** property returns arbitrary metadata that was included in the mark upon construction (either when using Performance.mark or the PerformanceMark.PerformanceMark constructor).
+   * The read-only **`detail`** property returns arbitrary metadata that was included in the mark upon construction (either when using performance.mark() or the PerformanceMark() constructor).
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMark/detail)
    */
@@ -4533,13 +4569,13 @@ export declare class PerformanceMark extends PerformanceEntry {
   toJSON(): object;
 }
 /**
- * **`PerformanceMeasure`** is an _abstract_ interface for PerformanceEntry objects with an PerformanceEntry.entryType of `'measure'`.
+ * **`PerformanceMeasure`** is an abstract interface for PerformanceEntry objects with an entryType of "measure". Entries of this type are created by calling performance.measure() to add a named DOMHighResTimeStamp (the measure) between two marks to the browser's performance timeline.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMeasure)
  */
 export declare abstract class PerformanceMeasure extends PerformanceEntry {
   /**
-   * The read-only **`detail`** property returns arbitrary metadata that was included in the mark upon construction (when using Performance.measure.
+   * The read-only **`detail`** property returns arbitrary metadata that was included in the mark upon construction (when using performance.measure().
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMeasure/detail)
    */
@@ -4557,25 +4593,25 @@ export interface PerformanceMeasureOptions {
   end?: number;
 }
 /**
- * The **`PerformanceObserverEntryList`** interface is a list of PerformanceEntry that were explicitly observed via the PerformanceObserver.observe method.
+ * The **`PerformanceObserverEntryList`** interface is a list of performance events that were explicitly observed via the observe() method.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList)
  */
 export declare abstract class PerformanceObserverEntryList {
   /**
-   * The **`getEntries()`** method of the PerformanceObserverEntryList interface returns a list of explicitly observed PerformanceEntry objects.
+   * The **`getEntries()`** method of the PerformanceObserverEntryList interface returns a list of explicitly observed performance entry objects. The list's members are determined by the set of entry types specified in the call to the observe() method. The list is available in the observer's callback function (as the first parameter in the callback).
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList/getEntries)
    */
   getEntries(): PerformanceEntry[];
   /**
-   * The **`getEntriesByType()`** method of the PerformanceObserverEntryList returns a list of explicitly _observed_ PerformanceEntry objects for a given PerformanceEntry.entryType.
+   * The **`getEntriesByType()`** method of the PerformanceObserverEntryList returns a list of explicitly observed performance entry objects for a given performance entry type. The list's members are determined by the set of entry types specified in the call to the observe() method. The list is available in the observer's callback function (as the first parameter in the callback).
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList/getEntriesByType)
    */
   getEntriesByType(type: string): PerformanceEntry[];
   /**
-   * The **`getEntriesByName()`** method of the PerformanceObserverEntryList interface returns a list of explicitly observed PerformanceEntry objects for a given PerformanceEntry.name and PerformanceEntry.entryType.
+   * The **`getEntriesByName()`** method of the PerformanceObserverEntryList interface returns a list of explicitly observed PerformanceEntry objects for a given name and entryType. The list's members are determined by the set of entry types specified in the call to the observe() method. The list is available in the observer's callback function (as the first parameter in the callback).
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList/getEntriesByName)
    */
@@ -4588,7 +4624,7 @@ export declare abstract class PerformanceObserverEntryList {
  */
 export declare abstract class PerformanceEntry {
   /**
-   * The read-only **`name`** property of the PerformanceEntry interface is a string representing the name for a performance entry.
+   * The read-only **`name`** property of the PerformanceEntry interface is a string representing the name for a performance entry. It acts as an identifier, but it does not have to be unique. The value depends on the subclass.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/name)
    */
@@ -4600,68 +4636,68 @@ export declare abstract class PerformanceEntry {
    */
   get entryType(): string;
   /**
-   * The read-only **`startTime`** property returns the first DOMHighResTimeStamp recorded for this PerformanceEntry.
+   * The read-only **`startTime`** property returns the first timestamp recorded for this PerformanceEntry. The meaning of this property depends on the value of this entry's entryType.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/startTime)
    */
   get startTime(): number;
   /**
-   * The read-only **`duration`** property returns a DOMHighResTimeStamp that is the duration of the PerformanceEntry.
+   * The read-only **`duration`** property returns a timestamp that is the duration of the performance entry. The meaning of this property depends on the value of this entry's entryType.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/duration)
    */
   get duration(): number;
   /**
-   * The **`toJSON()`** method is a Serialization; it returns a JSON representation of the PerformanceEntry object.
+   * The **`toJSON()`** method is a serializer; it returns a JSON representation of the PerformanceEntry object.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/toJSON)
    */
   toJSON(): object;
 }
 /**
- * The **`PerformanceResourceTiming`** interface enables retrieval and analysis of detailed network timing data regarding the loading of an application's resources.
+ * The **`PerformanceResourceTiming`** interface enables retrieval and analysis of detailed network timing data regarding the loading of an application's resources. An application can use the timing metrics to determine, for example, the length of time it takes to fetch a specific resource, such as an XMLHttpRequest, <SVG>, image, or script.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming)
  */
 export declare abstract class PerformanceResourceTiming extends PerformanceEntry {
   /**
-   * The **`connectEnd`** read-only property returns the DOMHighResTimeStamp immediately after the browser finishes establishing the connection to the server to retrieve the resource.
+   * The **`connectEnd`** read-only property returns the timestamp immediately after the browser finishes establishing the connection to the server to retrieve the resource. The timestamp value includes the time interval to establish the transport connection, as well as other time intervals such as TLS handshake and SOCKS authentication.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/connectEnd)
    */
   get connectEnd(): number;
   /**
-   * The **`connectStart`** read-only property returns the DOMHighResTimeStamp immediately before the user agent starts establishing the connection to the server to retrieve the resource.
+   * The **`connectStart`** read-only property returns the timestamp immediately before the user agent starts establishing the connection to the server to retrieve the resource.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/connectStart)
    */
   get connectStart(): number;
   /**
-   * The **`decodedBodySize`** read-only property returns the size (in octets) received from the fetch (HTTP or cache) of the message body after removing any applied content encoding (like gzip or Brotli).
+   * The **`decodedBodySize`** read-only property returns the size (in octets) received from the fetch (HTTP or cache) of the message body after removing any applied content encoding (like gzip or Brotli). If the resource is retrieved from an application cache or local resources, it returns the size of the payload after removing any applied content encoding.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/decodedBodySize)
    */
   get decodedBodySize(): number;
   /**
-   * The **`domainLookupEnd`** read-only property returns the DOMHighResTimeStamp immediately after the browser finishes the domain-name lookup for the resource.
+   * The **`domainLookupEnd`** read-only property returns the timestamp immediately after the browser finishes the domain-name lookup for the resource.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/domainLookupEnd)
    */
   get domainLookupEnd(): number;
   /**
-   * The **`domainLookupStart`** read-only property returns the DOMHighResTimeStamp immediately before the browser starts the domain name lookup for the resource.
+   * The **`domainLookupStart`** read-only property returns the timestamp immediately before the browser starts the domain name lookup for the resource.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/domainLookupStart)
    */
   get domainLookupStart(): number;
   /**
-   * The **`encodedBodySize`** read-only property represents the size (in octets) received from the fetch (HTTP or cache) of the payload body before removing any applied content encodings (like gzip or Brotli).
+   * The **`encodedBodySize`** read-only property represents the size (in octets) received from the fetch (HTTP or cache) of the payload body before removing any applied content encodings (like gzip or Brotli). If the resource is retrieved from an application cache or a local resource, it must return the size of the payload body before removing any applied content encoding.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/encodedBodySize)
    */
   get encodedBodySize(): number;
   /**
-   * The **`fetchStart`** read-only property represents a DOMHighResTimeStamp immediately before the browser starts to fetch the resource.
+   * The **`fetchStart`** read-only property represents a timestamp immediately before the browser starts to fetch the resource.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/fetchStart)
    */
@@ -4679,31 +4715,31 @@ export declare abstract class PerformanceResourceTiming extends PerformanceEntry
    */
   get nextHopProtocol(): string;
   /**
-   * The **`redirectEnd`** read-only property returns a DOMHighResTimeStamp immediately after receiving the last byte of the response of the last redirect.
+   * The **`redirectEnd`** read-only property returns a timestamp immediately after receiving the last byte of the response of the last redirect.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/redirectEnd)
    */
   get redirectEnd(): number;
   /**
-   * The **`redirectStart`** read-only property returns a DOMHighResTimeStamp representing the start time of the fetch which that initiates the redirect.
+   * The **`redirectStart`** read-only property returns a timestamp representing the start time of the fetch which that initiates the redirect.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/redirectStart)
    */
   get redirectStart(): number;
   /**
-   * The **`requestStart`** read-only property returns a DOMHighResTimeStamp of the time immediately before the browser starts requesting the resource from the server, cache, or local resource.
+   * The **`requestStart`** read-only property returns a timestamp of the time immediately before the browser starts requesting the resource from the server, cache, or local resource. If the transport connection fails and the browser retries the request, the value returned will be the start of the retry request.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/requestStart)
    */
   get requestStart(): number;
   /**
-   * The **`responseEnd`** read-only property returns a DOMHighResTimeStamp immediately after the browser receives the last byte of the resource or immediately before the transport connection is closed, whichever comes first.
+   * The **`responseEnd`** read-only property returns a timestamp immediately after the browser receives the last byte of the resource or immediately before the transport connection is closed, whichever comes first.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/responseEnd)
    */
   get responseEnd(): number;
   /**
-   * The **`responseStart`** read-only property returns a DOMHighResTimeStamp immediately after the browser receives the first byte of the response from the server, cache, or local resource.
+   * The **`responseStart`** read-only property returns a timestamp immediately after the browser receives the first byte of the response from the server, cache, or local resource.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/responseStart)
    */
@@ -4715,39 +4751,39 @@ export declare abstract class PerformanceResourceTiming extends PerformanceEntry
    */
   get responseStatus(): number;
   /**
-   * The **`secureConnectionStart`** read-only property returns a DOMHighResTimeStamp immediately before the browser starts the handshake process to secure the current connection.
+   * The **`secureConnectionStart`** read-only property returns a timestamp immediately before the browser starts the handshake process to secure the current connection. If a secure connection is not used, the property returns zero.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/secureConnectionStart)
    */
   get secureConnectionStart(): number | undefined;
   /**
-   * The **`transferSize`** read-only property represents the size (in octets) of the fetched resource.
+   * The **`transferSize`** read-only property represents the size (in octets) of the fetched resource. The size includes the response header fields plus the response payload body (as defined by RFC7230).
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/transferSize)
    */
   get transferSize(): number;
   /**
-   * The **`workerStart`** read-only property of the PerformanceResourceTiming interface returns a The `workerStart` property can have the following values: - A DOMHighResTimeStamp.
+   * The **`workerStart`** read-only property of the PerformanceResourceTiming interface returns a DOMHighResTimeStamp immediately before dispatching the FetchEvent if a Service Worker thread is already running, or immediately before starting the Service Worker thread if it is not already running. If the resource is not intercepted by a Service Worker the property will always return 0.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/workerStart)
    */
   get workerStart(): number;
 }
 /**
- * The **`PerformanceObserver`** interface is used to observe performance measurement events and be notified of new PerformanceEntry as they are recorded in the browser's _performance timeline_.
+ * The **`PerformanceObserver`** interface is used to observe performance measurement events and be notified of new performance entries as they are recorded in the browser's performance timeline.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver)
  */
 export declare class PerformanceObserver {
   constructor(callback: any);
   /**
-   * The **`disconnect()`** method of the PerformanceObserver interface is used to stop the performance observer from receiving any PerformanceEntry events.
+   * The **`disconnect()`** method of the PerformanceObserver interface is used to stop the performance observer from receiving any performance entry events.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver/disconnect)
    */
   disconnect(): void;
   /**
-   * The **`observe()`** method of the **PerformanceObserver** interface is used to specify the set of performance entry types to observe.
+   * The **`observe()`** method of the PerformanceObserver interface is used to specify the set of performance entry types to observe.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver/observe)
    */
@@ -5335,10 +5371,7 @@ export type AiSearchInstanceInfo = {
   max_num_results?: number;
   cache?: boolean;
   cache_threshold?:
-    | "super_strict_match"
-    | "close_enough"
-    | "flexible_friend"
-    | "anything_goes";
+    "super_strict_match" | "close_enough" | "flexible_friend" | "anything_goes";
   custom_metadata?: Array<{
     field_name: string;
     data_type: "text" | "number" | "boolean" | "datetime";
@@ -5416,10 +5449,7 @@ export type AiSearchConfig = {
   cache?: boolean;
   /** Similarity threshold for cache hits. Stricter = fewer cache hits but higher relevance. */
   cache_threshold?:
-    | "super_strict_match"
-    | "close_enough"
-    | "flexible_friend"
-    | "anything_goes";
+    "super_strict_match" | "close_enough" | "flexible_friend" | "anything_goes";
   custom_metadata?: Array<{
     field_name: string;
     data_type: "text" | "number" | "boolean" | "datetime";
@@ -5465,12 +5495,7 @@ export type AiSearchListItemsParams = {
   sort_by?: "status" | "modified_at";
   /** Filter items by processing status. */
   status?:
-    | "queued"
-    | "running"
-    | "completed"
-    | "error"
-    | "skipped"
-    | "outdated";
+    "queued" | "running" | "completed" | "error" | "skipped" | "outdated";
   /** Filter items by source (e.g. "builtin" or "web-crawler:https://example.com"). */
   source?: string;
   /** JSON-encoded Vectorize filter for metadata filtering. */
@@ -6015,11 +6040,7 @@ export declare abstract class BaseAiTextEmbeddings {
 }
 export type RoleScopedChatInput = {
   role:
-    | "user"
-    | "assistant"
-    | "system"
-    | "tool"
-    | (string & NonNullable<unknown>);
+    "user" | "assistant" | "system" | "tool" | (string & NonNullable<unknown>);
   content: string;
   name?: string;
 };
@@ -6214,8 +6235,7 @@ export type ChatCompletionCustomToolTextFormat = {
   type: "text";
 };
 export type ChatCompletionCustomToolFormat =
-  | ChatCompletionCustomToolTextFormat
-  | ChatCompletionCustomToolGrammarFormat;
+  ChatCompletionCustomToolTextFormat | ChatCompletionCustomToolGrammarFormat;
 export type ChatCompletionCustomTool = {
   type: "custom";
   custom: {
@@ -6225,8 +6245,7 @@ export type ChatCompletionCustomTool = {
   };
 };
 export type ChatCompletionTool =
-  | ChatCompletionFunctionTool
-  | ChatCompletionCustomTool;
+  ChatCompletionFunctionTool | ChatCompletionCustomTool;
 export type ChatCompletionMessageFunctionToolCall = {
   id: string;
   type: "function";
@@ -6245,8 +6264,7 @@ export type ChatCompletionMessageCustomToolCall = {
   };
 };
 export type ChatCompletionMessageToolCall =
-  | ChatCompletionMessageFunctionToolCall
-  | ChatCompletionMessageCustomToolCall;
+  ChatCompletionMessageFunctionToolCall | ChatCompletionMessageCustomToolCall;
 export type ChatCompletionToolChoiceFunction = {
   type: "function";
   function: {
@@ -6525,11 +6543,7 @@ export type ChatCompletionChoice = {
   index: number;
   message: ChatCompletionResponseMessage;
   finish_reason:
-    | "stop"
-    | "length"
-    | "tool_calls"
-    | "content_filter"
-    | "function_call";
+    "stop" | "length" | "tool_calls" | "content_filter" | "function_call";
   logprobs: ChatCompletionLogprobs | null;
 };
 export type ChatCompletionsMessagesInput = {
@@ -6724,8 +6738,7 @@ export type ResponseFunctionCallArgumentsDoneEvent = {
   type: "response.function_call_arguments.done";
 };
 export type ResponseFunctionCallOutputItem =
-  | ResponseInputTextContent
-  | ResponseInputImageContent;
+  ResponseInputTextContent | ResponseInputImageContent;
 export type ResponseFunctionCallOutputItemList =
   Array<ResponseFunctionCallOutputItem>;
 export type ResponseFunctionToolCall = {
@@ -6747,8 +6760,7 @@ export type ResponseFunctionToolCallOutputItem = {
   status?: "in_progress" | "completed" | "incomplete";
 };
 export type ResponseIncludable =
-  | "message.input_image.image_url"
-  | "message.output_text.logprobs";
+  "message.input_image.image_url" | "message.output_text.logprobs";
 export type ResponseIncompleteEvent = {
   response: Response;
   sequence_number: number;
@@ -6814,9 +6826,7 @@ export type ResponseItem =
   | ResponseFunctionToolCallItem
   | ResponseFunctionToolCallOutputItem;
 export type ResponseOutputItem =
-  | ResponseOutputMessage
-  | ResponseFunctionToolCall
-  | ResponseReasoningItem;
+  ResponseOutputMessage | ResponseFunctionToolCall | ResponseReasoningItem;
 export type ResponseOutputItemAddedEvent = {
   item: ResponseOutputItem;
   output_index: number;
@@ -8450,8 +8460,7 @@ export declare abstract class Base_Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct {
   postProcessedOutputs: Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Output;
 }
 export type Ai_Cf_Qwen_Qwq_32B_Input =
-  | Ai_Cf_Qwen_Qwq_32B_Prompt
-  | Ai_Cf_Qwen_Qwq_32B_Messages;
+  Ai_Cf_Qwen_Qwq_32B_Prompt | Ai_Cf_Qwen_Qwq_32B_Messages;
 export interface Ai_Cf_Qwen_Qwq_32B_Prompt {
   /**
    * The input text prompt for the model to generate a response.
@@ -8998,8 +9007,7 @@ export declare abstract class Base_Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruc
   postProcessedOutputs: Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Output;
 }
 export type Ai_Cf_Google_Gemma_3_12B_It_Input =
-  | Ai_Cf_Google_Gemma_3_12B_It_Prompt
-  | Ai_Cf_Google_Gemma_3_12B_It_Messages;
+  Ai_Cf_Google_Gemma_3_12B_It_Prompt | Ai_Cf_Google_Gemma_3_12B_It_Messages;
 export interface Ai_Cf_Google_Gemma_3_12B_It_Prompt {
   /**
    * The input text prompt for the model to generate a response.
@@ -11538,11 +11546,7 @@ export interface Ai_Cf_Deepgram_Flux_Output {
    * The type of event being reported.
    */
   event?:
-    | "Update"
-    | "StartOfTurn"
-    | "EagerEndOfTurn"
-    | "TurnResumed"
-    | "EndOfTurn";
+    "Update" | "StartOfTurn" | "EagerEndOfTurn" | "TurnResumed" | "EndOfTurn";
   /**
    * The index of the current turn
    */
@@ -12078,8 +12082,7 @@ export type AIGatewayProviders =
   | "adobe-firefly";
 export type AIGatewayHeaders = {
   "cf-aig-metadata":
-    | Record<string, number | string | boolean | null | bigint>
-    | string;
+    Record<string, number | string | boolean | null | bigint> | string;
   "cf-aig-custom-cost":
     | {
         per_token_in?: number;
@@ -12502,10 +12505,7 @@ export declare abstract class AutoRAG {
   ): Promise<AutoRagAiSearchResponse | Response>;
 }
 export type BrowserRunLifecycleEvent =
-  | "load"
-  | "domcontentloaded"
-  | "networkidle0"
-  | "networkidle2";
+  "load" | "domcontentloaded" | "networkidle0" | "networkidle2";
 export type BrowserRunResourceType =
   | "document"
   | "stylesheet"
@@ -13128,9 +13128,7 @@ export interface RequestInitCfProperties extends Record<string, unknown> {
  *   response header.
  */
 export type RequestInitCfPropertiesVaryAction =
-  | "normalize"
-  | "passthrough"
-  | "bypass";
+  "normalize" | "passthrough" | "bypass";
 /** Configuration for Workers Standard Vary support. */
 export interface RequestInitCfPropertiesVary {
   /** The fallback action for varied request headers not listed in `headers`. */
@@ -13407,7 +13405,8 @@ export interface RequestInitCfPropertiesImageDraw extends BasicImageTransformati
   /**
    * How to combine the foreground and backdrop pixels to create the result
    */
-  composite?: /** Foreground drawn on top of backdrop (default) */
+  composite?:
+    /** Foreground drawn on top of backdrop (default) */
     | "over"
     /** Foreground shown only where backdrop is opaque */
     | "in"
@@ -14218,16 +14217,9 @@ export declare type Iso3166Alpha2Code =
   | "ZW";
 /** The 2-letter continent codes Cloudflare uses */
 export declare type ContinentCode =
-  | "AF"
-  | "AN"
-  | "AS"
-  | "EU"
-  | "NA"
-  | "OC"
-  | "SA";
+  "AF" | "AN" | "AS" | "EU" | "NA" | "OC" | "SA";
 export type CfProperties<HostMetadata = unknown> =
-  | IncomingRequestCfProperties<HostMetadata>
-  | RequestInitCfProperties;
+  IncomingRequestCfProperties<HostMetadata> | RequestInitCfProperties;
 export interface D1Meta {
   duration: number;
   size_after: number;
@@ -15169,9 +15161,7 @@ export declare namespace Rpc {
     [__WORKFLOW_ENTRYPOINT_BRAND]: never;
   }
   export type EntrypointBranded =
-    | WorkerEntrypointBranded
-    | DurableObjectBranded
-    | WorkflowEntrypointBranded;
+    WorkerEntrypointBranded | DurableObjectBranded | WorkflowEntrypointBranded;
   // Types that can be used through `Stub`s
   export type Stubable = RpcTargetBranded | ((...args: any[]) => any);
   // Types that can be passed over RPC
@@ -15413,16 +15403,9 @@ export declare namespace CloudflareWorkersModule {
     webSocketError?(ws: WebSocket, error: unknown): void | Promise<void>;
   }
   export type WorkflowDurationLabel =
-    | "second"
-    | "minute"
-    | "hour"
-    | "day"
-    | "week"
-    | "month"
-    | "year";
+    "second" | "minute" | "hour" | "day" | "week" | "month" | "year";
   export type WorkflowSleepDuration =
-    | `${number} ${WorkflowDurationLabel}${"s" | ""}`
-    | number;
+    `${number} ${WorkflowDurationLabel}${"s" | ""}` | number;
   export type WorkflowDelayDuration = WorkflowSleepDuration;
   export type WorkflowDynamicDelayContext = {
     ctx: WorkflowStepContext<WorkflowDelayFunction>;
@@ -16219,11 +16202,7 @@ export type StreamDownloadGetResponse = {
   default?: StreamDownload;
 };
 export type StreamWatermarkPosition =
-  | "upperRight"
-  | "upperLeft"
-  | "lowerLeft"
-  | "lowerRight"
-  | "center";
+  "upperRight" | "upperLeft" | "lowerLeft" | "lowerRight" | "center";
 export type StreamWatermark = {
   /**
    * The unique identifier for a watermark profile.
@@ -16707,8 +16686,7 @@ export type VectorizeVectorMetadataValue = string | number | boolean | string[];
  * Additional information to associate with a vector.
  */
 export type VectorizeVectorMetadata =
-  | VectorizeVectorMetadataValue
-  | Record<string, VectorizeVectorMetadataValue>;
+  VectorizeVectorMetadataValue | Record<string, VectorizeVectorMetadataValue>;
 export type VectorFloatArray = Float32Array | Float64Array;
 export interface VectorizeError {
   code?: number;
@@ -16720,12 +16698,7 @@ export interface VectorizeError {
  * This list is expected to grow as support for more operations are released.
  */
 export type VectorizeVectorMetadataFilterOp =
-  | "$eq"
-  | "$ne"
-  | "$lt"
-  | "$lte"
-  | "$gt"
-  | "$gte";
+  "$eq" | "$ne" | "$lt" | "$lte" | "$gt" | "$gte";
 export type VectorizeVectorMetadataFilterCollectionOp = "$in" | "$nin";
 /**
  * Filter criteria for vector metadata used to limit the retrieved query result set.
@@ -17154,16 +17127,9 @@ export type WorkflowBatchDeleteResult = {
   }[];
 };
 export type WorkflowDurationLabel =
-  | "second"
-  | "minute"
-  | "hour"
-  | "day"
-  | "week"
-  | "month"
-  | "year";
+  "second" | "minute" | "hour" | "day" | "week" | "month" | "year";
 export type WorkflowSleepDuration =
-  | `${number} ${WorkflowDurationLabel}${"s" | ""}`
-  | number;
+  `${number} ${WorkflowDurationLabel}${"s" | ""}` | number;
 export type WorkflowRetentionDuration = WorkflowSleepDuration;
 export interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**

@@ -170,8 +170,7 @@ const kExtractNativeSink: symbol = utils.getApiSymbol('kExtractNativeSink');
 
 function isNativeUnderlyingSink(sink: object): boolean {
   const desc = ObjectGetOwnPropertyDescriptor(sink, kNativeSink) as
-    | PropertyDescriptor
-    | undefined;
+    PropertyDescriptor | undefined;
   const value = desc?.value as unknown;
   if (value === undefined) return false;
   if (value !== kNativeSink) {
@@ -207,8 +206,7 @@ function isActualObject(value: unknown): value is object {
 // invoked (we read desc.value; accessor-defined markers are ignored).
 function isNativeUnderlyingSource(source: object): boolean {
   const desc = ObjectGetOwnPropertyDescriptor(source, kNativeSource) as
-    | PropertyDescriptor
-    | undefined;
+    PropertyDescriptor | undefined;
   const value = desc?.value as unknown;
   if (value === undefined) return false;
   if (value !== kNativeSource) {

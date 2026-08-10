@@ -15,6 +15,8 @@ const unitTests :Workerd.Config = (
           "enable_nodejs_os_module",
           "enable_nodejs_vm_module",
           "enable_nodejs_http_modules",
+          "enable_nodejs_inspector_module",
+          "enable_nodejs_process_v2",
           "streams_enable_constructors",
           "transformstream_enable_standard_constructor",
         ],

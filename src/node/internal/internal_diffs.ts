@@ -67,18 +67,18 @@ export function diff<T>(A: T[], B: T[]): Array<DiffResult<T>> {
   if (!M && !N && !suffixCommon.length && !prefixCommon.length) return [];
   if (!N) {
     return [
-      ...prefixCommon.map(
-        (c): DiffResult<typeof c> => ({ type: DiffType.common, value: c })
-      ),
-      ...A.map(
-        (a): DiffResult<typeof a> => ({
-          type: swapped ? DiffType.added : DiffType.removed,
-          value: a,
-        })
-      ),
-      ...suffixCommon.map(
-        (c): DiffResult<typeof c> => ({ type: DiffType.common, value: c })
-      ),
+      ...prefixCommon.map((c): DiffResult<typeof c> => ({
+        type: DiffType.common,
+        value: c,
+      })),
+      ...A.map((a): DiffResult<typeof a> => ({
+        type: swapped ? DiffType.added : DiffType.removed,
+        value: a,
+      })),
+      ...suffixCommon.map((c): DiffResult<typeof c> => ({
+        type: DiffType.common,
+        value: c,
+      })),
     ];
   }
   const offset = N;
@@ -233,14 +233,16 @@ export function diff<T>(A: T[], B: T[]): Array<DiffResult<T>> {
     );
   }
   return [
-    ...prefixCommon.map(
-      (c): DiffResult<typeof c> => ({ type: DiffType.common, value: c })
-    ),
+    ...prefixCommon.map((c): DiffResult<typeof c> => ({
+      type: DiffType.common,
+      value: c,
+    })),
     // @ts-ignore
     ...backTrace(A, B, fp[delta + offset], swapped),
-    ...suffixCommon.map(
-      (c): DiffResult<typeof c> => ({ type: DiffType.common, value: c })
-    ),
+    ...suffixCommon.map((c): DiffResult<typeof c> => ({
+      type: DiffType.common,
+      value: c,
+    })),
   ];
 }
 

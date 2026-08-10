@@ -11463,7 +11463,7 @@ export const testDuplexPair = {
       serverSide.uncork();
       let characters = '';
       clientSide.on('readable', function () {
-        for (let segment; (segment = this.read()) !== null; )
+        for (let segment; (segment = this.read()) !== null;)
           characters += segment;
       });
       clientSide.on('end', function () {
@@ -11485,7 +11485,7 @@ export const testDuplexPair = {
       serverSide.end('\n');
       let characters = '';
       clientSide.on('readable', function () {
-        for (let segment; (segment = this.read()) !== null; )
+        for (let segment; (segment = this.read()) !== null;)
           characters += segment;
       });
       clientSide.on('end', function () {

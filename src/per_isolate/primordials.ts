@@ -108,13 +108,9 @@ class SafePromise<T> extends PromiseCtor<T> {
   }
   override then<TResult1 = T, TResult2 = never>(
     onfulfilled?:
-      | ((value: T) => TResult1 | PromiseLike<TResult1>)
-      | undefined
-      | null,
+      ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null,
     onrejected?:
-      | ((reason: any) => TResult2 | PromiseLike<TResult2>)
-      | undefined
-      | null
+      ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null
   ): SafePromise<TResult1 | TResult2> {
     // The captured PromisePrototypeThen calls the original
     // Promise.prototype.then, which uses SpeciesConstructor to create the
@@ -126,9 +122,7 @@ class SafePromise<T> extends PromiseCtor<T> {
   }
   override catch<TResult = never>(
     onrejected?:
-      | ((reason: any) => TResult | PromiseLike<TResult>)
-      | undefined
-      | null
+      ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null
   ): SafePromise<T | TResult> {
     return PromisePrototypeCatch(this, onrejected) as SafePromise<T | TResult>;
   }
