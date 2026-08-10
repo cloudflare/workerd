@@ -117,7 +117,7 @@
       "use_bazel_dep": true,
       "owner": "google",
       "repo": "perfetto",
-      "freeze_version": "v54.0",
+      "freeze_version": "v56.1",
       "patches": [
         "//:patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch",
         "//:patches/perfetto/0002-disable-info-level-logging-re2.patch"
