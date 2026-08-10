@@ -516,8 +516,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
         // them against the BackingStore's length, which lives outside the V8 sandbox and so is not
         // reachable from an in-cage write. Testing byteOffset first keeps the subtraction from
         // underflowing and avoids summing two untrusted lengths; that stays correct no matter how
-        // large the sandbox, and hence the maximum buffer size, becomes. For a resizable buffer this
-        // length is the maximum reservation rather than the live size; the branch below narrows it.
+        // large the sandbox, and hence the maximum buffer size, becomes.
         size_t byteLength = store.size();
         size_t byteOffset = store.getOffset();
         auto backingSize = store.getBuffer().backingStoreSize();
