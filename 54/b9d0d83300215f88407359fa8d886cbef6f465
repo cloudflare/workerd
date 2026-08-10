@@ -1,0 +1,19 @@
+src/workerd/io/container.capnp
+  s_07ee96660158b7::t_d3c60b8e1a5e7a 291
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "54b9d0d83300215f88407359fa8d886cbef6f465",
+  "prompts": {},
+  "sessions": {
+    "s_07ee96660158b7": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_02cf6ca2affezXv8UuTdVPo29D",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Andrew Martinez <amartinez@cloudflare.com>"
+    }
+  }
+}
