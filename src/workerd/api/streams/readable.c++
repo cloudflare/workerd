@@ -82,8 +82,17 @@ jsg::Promise<ReadResult> ReaderImpl::read(
   KJ_IF_SOME(options, byobOptions) {
     // Per the spec, we must perform these checks before disturbing the stream.
     size_t atLeast = options.atLeast.orDefault(1);
+    auto byobView = options.bufferView.getHandle(js);
 
-    if (options.byteLength == 0) {
+    if (byobView.isImmutable()) {
+      return js.rejectedPromise<ReadResult>(
+          js.typeError("Cannot call read() with an immutable ArrayBuffer."_kj));
+    }
+
+    size_t byteLength = byobView.size();
+    auto elementSize = byobView.getElementSize();
+
+    if (byteLength == 0) {
       return js.rejectedPromise<ReadResult>(
           js.typeError("You must call read() on a \"byob\" reader with a positive-sized "
                        "TypedArray object."_kj));
@@ -101,18 +110,16 @@ jsg::Promise<ReadResult> ReaderImpl::read(
     // the buffer size. That keeps the multiplication below from overflowing however large buffers
     // are allowed to get, and it catches a negative minElements, which reaches this point
     // sign-extended to a huge size_t.
-    if (atLeast > options.byteLength) {
-      return js.rejectedPromise<ReadResult>(js.typeError(kj::str("Minimum bytes to read (", atLeast,
-          ") exceeds size of buffer (", options.byteLength, ").")));
+    if (atLeast > byteLength) {
+      return js.rejectedPromise<ReadResult>(js.typeError(kj::str(
+          "Minimum bytes to read (", atLeast, ") exceeds size of buffer (", byteLength, ").")));
     }
 
-    jsg::JsArrayBufferView source(options.bufferView.getHandle(js));
-    auto elementSize = source.getElementSize();
     atLeast = atLeast * elementSize;
 
-    if (atLeast > options.byteLength) {
-      return js.rejectedPromise<ReadResult>(js.typeError(kj::str("Minimum bytes to read (", atLeast,
-          ") exceeds size of buffer (", options.byteLength, ").")));
+    if (atLeast > byteLength) {
+      return js.rejectedPromise<ReadResult>(js.typeError(kj::str(
+          "Minimum bytes to read (", atLeast, ") exceeds size of buffer (", byteLength, ").")));
     }
 
     options.atLeast = atLeast;
@@ -239,13 +246,11 @@ void ReadableStreamBYOBReader::lockToStream(jsg::Lock& js, ReadableStream& strea
 }
 
 jsg::Promise<ReadResult> ReadableStreamBYOBReader::read(jsg::Lock& js,
-    v8::Local<v8::ArrayBufferView> byobBuffer,
+    jsg::JsArrayBufferView byobBuffer,
     jsg::Optional<ReadableStreamBYOBReaderReadOptions> maybeOptions) {
   static const ReadableStreamBYOBReaderReadOptions defaultOptions{};
   auto options = ReadableStreamController::ByobOptions{
-    .bufferView = js.v8Ref(byobBuffer),
-    .byteOffset = byobBuffer->ByteOffset(),
-    .byteLength = byobBuffer->ByteLength(),
+    .bufferView = byobBuffer.addRef(js),
     .atLeast = maybeOptions.orDefault(defaultOptions).min.orDefault(1),
     .detachBuffer = FeatureFlags::get(js).getStreamsByobReaderDetachesBuffer(),
   };
@@ -253,11 +258,9 @@ jsg::Promise<ReadResult> ReadableStreamBYOBReader::read(jsg::Lock& js,
 }
 
 jsg::Promise<ReadResult> ReadableStreamBYOBReader::readAtLeast(
-    jsg::Lock& js, int minElements, v8::Local<v8::ArrayBufferView> byobBuffer) {
+    jsg::Lock& js, int minElements, jsg::JsArrayBufferView byobBuffer) {
   auto options = ReadableStreamController::ByobOptions{
-    .bufferView = js.v8Ref(byobBuffer),
-    .byteOffset = byobBuffer->ByteOffset(),
-    .byteLength = byobBuffer->ByteLength(),
+    .bufferView = byobBuffer.addRef(js),
     .atLeast = minElements,
     .detachBuffer = true,
   };
