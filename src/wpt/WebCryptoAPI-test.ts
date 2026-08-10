@@ -331,6 +331,58 @@ export default {
 
   'randomUUID.https.any.js': {},
 
+  // CryptoKey has no structured clone implementation, so every test in these
+  // files fails with DataCloneError.
+  'serialization/aes-cbc.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/aes-ctr.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/aes-gcm.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/aes-kw.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/ecdh.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/ecdsa.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/ed25519.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/hmac.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/rsa-oaep.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/rsa-pss.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/rsassa-pkcs1-v1_5.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/serialization.js': {},
+  'serialization/x25519.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+
   'sign_verify/ecdsa.https.any.js': {},
   'sign_verify/ecdsa.js': {},
   'sign_verify/ecdsa_vectors.js': {},

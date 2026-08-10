@@ -38,7 +38,7 @@ export default {
       /brotli .* data should be reinflated back to its origin/,
     ],
   },
-  'compression-with-detach.window.js': {},
+  'compression-with-detach.any.js': {},
   'decompression-bad-chunks.any.js': {
     comment: 'brotli compression is not supported',
     expectedFailures: [/brotli/],
@@ -83,7 +83,7 @@ export default {
       'decompressing brotli output should give Uint8Array chunks',
     ],
   },
-  'decompression-with-detach.window.js': {
+  'decompression-with-detach.any.js': {
     comment: 'Detach test fails - needs investigation',
     expectedFailures: [
       'data should be correctly decompressed even if input is detached partway',
