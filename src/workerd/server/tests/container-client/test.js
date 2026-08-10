@@ -16,6 +16,23 @@ function getRandomDurableObjectName(name) {
   return `${name}-${crypto.randomUUID()}`;
 }
 
+// Asserts that invoking `fn` produces `expected` either as a synchronous throw
+// or as a rejected promise. Container methods that return a promise surface
+// validation errors synchronously when `capture_async_api_throws` is disabled
+// and as a rejection when it is enabled, so the assertion must accept both.
+async function assertThrowsOrRejects(fn, expected) {
+  let promise;
+  try {
+    promise = fn();
+  } catch (err) {
+    assert.throws(() => {
+      throw err;
+    }, expected);
+    return;
+  }
+  await assert.rejects(promise, expected);
+}
+
 // **IMPORTANT NOTE**
 //
 // When writing a test, don't forget to call waitUntilContainerIsHealthy
@@ -293,7 +310,7 @@ export class DurableObjectExample extends DurableObject {
     {
       const proc = await container.exec(['echo', 'hello']);
       await proc.stdout.getReader().read();
-      assert.rejects(() => proc.output(), {
+      await assertThrowsOrRejects(() => proc.output(), {
         name: 'TypeError',
         message:
           'Cannot call output() after stdout has started being consumed.',
@@ -303,11 +320,11 @@ export class DurableObjectExample extends DurableObject {
     // 12. Make sure Stdin EOF's by default if not set
     await container.exec(['cat']).then((p) => p.output());
 
-    // 13. An already-aborted signal causes exec() to throw synchronously.
+    // 13. An already-aborted signal causes exec() to fail fast.
     {
       const ac = new AbortController();
       ac.abort();
-      assert.throws(
+      await assertThrowsOrRejects(
         () => container.exec(['echo', 'hello'], { signal: ac.signal }),
         {
           name: 'AbortError',
@@ -915,7 +932,7 @@ export class DurableObjectExample extends DurableObject {
 
     assert.strictEqual(container.running, false);
 
-    assert.throws(() => container.setLabels({ k: 'v' }), {
+    await assertThrowsOrRejects(() => container.setLabels({ k: 'v' }), {
       message:
         /setLabels\(\) cannot be called on a container that is not running/,
     });
@@ -938,7 +955,7 @@ export class DurableObjectExample extends DurableObject {
     await monitor;
 
     assert.strictEqual(container.running, false);
-    assert.throws(() => container.setLabels({ k: 'v' }), {
+    await assertThrowsOrRejects(() => container.setLabels({ k: 'v' }), {
       message:
         /setLabels\(\) cannot be called on a container that is not running/,
     });
@@ -983,12 +1000,12 @@ export class DurableObjectExample extends DurableObject {
     await this.waitUntilContainerIsHealthy();
 
     // Empty label name
-    assert.throws(() => container.setLabels({ '': 'value' }), {
+    await assertThrowsOrRejects(() => container.setLabels({ '': 'value' }), {
       message: /Label names cannot be empty/,
     });
 
     // Too many labels
-    assert.throws(
+    await assertThrowsOrRejects(
       () =>
         container.setLabels(
           Object.fromEntries(
@@ -999,24 +1016,36 @@ export class DurableObjectExample extends DurableObject {
     );
 
     // Label name over 16 bytes
-    assert.throws(() => container.setLabels({ ['n'.repeat(17)]: 'value' }), {
-      message: /Label names cannot exceed 16 bytes \(index 0\)/,
-    });
+    await assertThrowsOrRejects(
+      () => container.setLabels({ ['n'.repeat(17)]: 'value' }),
+      {
+        message: /Label names cannot exceed 16 bytes \(index 0\)/,
+      }
+    );
 
     // Label value over 64 bytes
-    assert.throws(() => container.setLabels({ name: 'v'.repeat(65) }), {
-      message: /Label values cannot exceed 64 bytes \(index 0\)/,
-    });
+    await assertThrowsOrRejects(
+      () => container.setLabels({ name: 'v'.repeat(65) }),
+      {
+        message: /Label values cannot exceed 64 bytes \(index 0\)/,
+      }
+    );
 
     // Label name with control character
-    assert.throws(() => container.setLabels({ 'bad\x01name': 'value' }), {
-      message: /Label names cannot contain control characters \(index 0\)/,
-    });
+    await assertThrowsOrRejects(
+      () => container.setLabels({ 'bad\x01name': 'value' }),
+      {
+        message: /Label names cannot contain control characters \(index 0\)/,
+      }
+    );
 
     // Label value with control character
-    assert.throws(() => container.setLabels({ name: 'bad\x01value' }), {
-      message: /Label values cannot contain control characters \(index 0\)/,
-    });
+    await assertThrowsOrRejects(
+      () => container.setLabels({ name: 'bad\x01value' }),
+      {
+        message: /Label values cannot contain control characters \(index 0\)/,
+      }
+    );
 
     await container.destroy();
     await monitor;
