@@ -852,8 +852,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // handling...
       return ioContext.awaitJs(js,
           js.toPromise(result).then(js,
-              ioContext.addFunctor([this, results = results.addRef(), &ioContext](
-                                       jsg::Lock& js, jsg::Value value) mutable {
+              ioContext.addFunctor([this, results = results.addRef()](jsg::Lock& js,
+                                       IoContext& ioContext, jsg::Value value) mutable {
         // The value here can be one of a function, an object, or undefined.
         // Any value other than these will result in a warning but will otherwise
         // be treated like undefined.

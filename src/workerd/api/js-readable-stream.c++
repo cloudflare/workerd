@@ -380,9 +380,9 @@ jsg::Promise<void> queuedPumpStep(jsg::Lock& js,
   auto readPromise = KJ_REQUIRE_NONNULL(readResult.tryCast<jsg::JsPromise>());
   return js.toPromise(readPromise)
       .then(js,
-          context.addFunctor([reader = kj::mv(reader), sink = kj::mv(sink), end](
-                                 jsg::Lock& js, jsg::Value value) mutable -> jsg::Promise<void> {
-    auto& context = IoContext::current();
+          context.addFunctor(
+              [reader = kj::mv(reader), sink = kj::mv(sink), end](jsg::Lock& js, IoContext& context,
+                  jsg::Value value) mutable -> jsg::Promise<void> {
     auto result = KJ_REQUIRE_NONNULL(jsg::JsValue(value.getHandle(js)).tryCast<jsg::JsObject>());
     bool done = result.get(js, "done"_kj).isTrue();
     auto chunks = KJ_REQUIRE_NONNULL(result.get(js, "chunks"_kj).tryCast<jsg::JsArray>());
