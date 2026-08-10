@@ -1144,6 +1144,9 @@ struct JsValueWrapper {
   V(Value)                                                                                         \
   JS_TYPE_CLASSES(V)
 
+  // Fallback for JsValueType types that have no corresponding V8 type, and so can only name
+  // themselves. The `TYPES_TO_WRAP` overloads below take precedence for the types they cover,
+  // being non-templates.
   template <JsValueType T>
   static constexpr const std::type_info& getName(T*) {
     return typeid(T);
@@ -1154,7 +1157,28 @@ struct JsValueWrapper {
     return typeid(T);
   }
 
+  // `BufferSource` is a Web IDL type with no V8 equivalent, so name it explicitly rather than
+  // falling through to the templates above, which would name the C++ class.
+  static constexpr kj::LiteralStringConst getName(JsBufferSource*) {
+    return "BufferSource"_kjc;
+  }
+
+  static constexpr kj::LiteralStringConst getName(JsRef<JsBufferSource>*) {
+    return "BufferSource"_kjc;
+  }
+
+  // `getName()` supplies the type name that appears in the TypeError thrown when unwrapping a
+  // parameter fails. Name the V8 type rather than the C++ wrapper class, so that a `JsArrayBuffer`
+  // parameter is reported as 'ArrayBuffer' -- the name the script author wrote -- and not as
+  // 'JsArrayBuffer', which means nothing outside this codebase. `typeName()` strips the `v8::`
+  // namespace qualifier.
 #define V(Name)                                                                                    \
+  static constexpr const std::type_info& getName(Js##Name*) {                                      \
+    return typeid(v8::Name);                                                                       \
+  }                                                                                                \
+  static constexpr const std::type_info& getName(JsRef<Js##Name>*) {                               \
+    return typeid(v8::Name);                                                                       \
+  }                                                                                                \
   v8::Local<v8::Name> wrap(jsg::Lock& js, v8::Local<v8::Context> context,                          \
       kj::Maybe<v8::Local<v8::Object>> creator, Js##Name value) {                                  \
     return value;                                                                                  \
