@@ -757,10 +757,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <typename T>
   IoOwn<T> addObject(kj::Rc<T> obj);
 
-  // Like addObject() but takes a functor, returning a functor with the same signature but which
-  // holds the original functor under a `IoOwn`, and so will stop working if the IoContext
-  // is no longer valid. This is particularly useful for passing to `jsg::Promise::then()` when
-  // you need the continuation to run in the correct context.
+  // Like addObject() but takes a functor, returning a functor which holds the original functor
+  // under an `IoOwn`, and so will stop working if the IoContext is no longer valid. This is
+  // particularly useful for passing to `jsg::Promise::then()` when you need the continuation to
+  // run in the correct context.
+  //
+  // The original functor may optionally accept `IoContext&` immediately after `jsg::Lock&`. The
+  // wrapper injects the current context after the `IoOwn` has verified that it is the context that
+  // owns the functor. Callers therefore do not need to capture an IoContext reference themselves.
   template <typename Func>
   auto addFunctor(Func&& func);
 
@@ -1754,14 +1758,54 @@ inline IoOwn<T> IoContext::addObject(kj::Rc<T> obj) {
   return addObject(obj.toOwn());
 }
 
+namespace _ {
+template <typename R, typename C, typename First, typename Second, typename... Rest>
+constexpr bool functorTakesIoContext(R (C::*)(First, Second, Rest...)) {
+  return kj::isSameType<Second, IoContext&>();
+}
+
+template <typename R, typename C, typename First, typename Second, typename... Rest>
+constexpr bool functorTakesIoContext(R (C::*)(First, Second, Rest...) const) {
+  return kj::isSameType<Second, IoContext&>();
+}
+
+constexpr bool functorTakesIoContext(...) {
+  return false;
+}
+
+template <typename Func>
+constexpr bool functorTakesIoContext() {
+  if constexpr (requires { &Func::operator(); }) {
+    return functorTakesIoContext(&Func::operator());
+  } else {
+    return false;
+  }
+}
+}  // namespace _
+
 template <typename Func>
 auto IoContext::addFunctor(Func&& func) {
+  constexpr bool injectIoContext = _::functorTakesIoContext<kj::Decay<Func>>();
+
   if constexpr (kj::isReference<Func>()) {
-    return [func = addObject(func)](
-               auto&&... params) mutable { return (*func)(kj::fwd<decltype(params)>(params)...); };
+    return [func = addObject(func)](jsg::Lock& js, auto&&... params) mutable -> decltype(auto) {
+      auto& inner = *func;
+      if constexpr (injectIoContext) {
+        return inner(js, IoContext::current(), kj::fwd<decltype(params)>(params)...);
+      } else {
+        return inner(js, kj::fwd<decltype(params)>(params)...);
+      }
+    };
   } else {
     return [func = addObject(kj::heap(kj::mv(func)))](
-               auto&&... params) mutable { return (*func)(kj::fwd<decltype(params)>(params)...); };
+               jsg::Lock& js, auto&&... params) mutable -> decltype(auto) {
+      auto& inner = *func;
+      if constexpr (injectIoContext) {
+        return inner(js, IoContext::current(), kj::fwd<decltype(params)>(params)...);
+      } else {
+        return inner(js, kj::fwd<decltype(params)>(params)...);
+      }
+    };
   }
 }
 
