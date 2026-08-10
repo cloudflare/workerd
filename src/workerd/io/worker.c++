@@ -3974,6 +3974,8 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       context.setEntrypointHandler(js, jsg::JsObject(handler.self.getHandle(js)));
 
       impl->classInstance = kj::mv(handler);
+
+      impl->metrics->constructorCompleted();
     }, inputLock.addRef(context.getCurrentTraceSpan()));
     // We addRef() the inputLock above rather than kj::mv() it so that the lock remains held
     // through the catch block below, if an exception is thrown. This is important since we
