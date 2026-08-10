@@ -3314,6 +3314,10 @@ class Lock {
 
   bool isEvaluatingModule();
 
+  // Permanently enables WebAssembly code generation for this isolate without enabling string
+  // code generation.
+  void allowWasmCodeGeneration();
+
   class ModuleEvaluationScope {
    public:
     explicit ModuleEvaluationScope(Lock& js);

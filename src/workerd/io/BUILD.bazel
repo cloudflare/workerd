@@ -110,6 +110,7 @@ wd_cc_library(
         ":release-version",
         ":trace",
         ":tracked-wasm-instance",
+        ":wasm-codegen-shim",
         ":wasm-instantiate-shim",
         ":worker-interface",
         ":worker-source",
@@ -501,6 +502,12 @@ wd_cc_embed(
     name = "maximum-compatibility-date",
     src = ":trimmed-maximum-compatibility-date.txt",
     base_name = "maximum-compatibility-date",
+)
+
+wd_cc_embed(
+    name = "wasm-codegen-shim",
+    src = "wasm-codegen-shim.js",
+    base_name = "wasm-codegen-shim",
 )
 
 wd_cc_embed(

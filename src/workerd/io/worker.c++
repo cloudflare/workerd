@@ -23,6 +23,7 @@
 #include <workerd/io/tracer.h>
 #include <workerd/io/tracked-wasm-instance.h>
 #include <workerd/io/validation.h>
+#include <workerd/io/wasm-codegen-shim.embed.h>
 #include <workerd/io/wasm-instantiate-shim.embed.h>
 #include <workerd/io/worker-source-stats.h>
 #include <workerd/io/worker.h>
@@ -2262,6 +2263,78 @@ void Worker::setupContext(jsg::Lock& lock, v8::Local<v8::Context> context) {
   }
 }
 
+// Installs wrappers that retain request-time WebAssembly bytes before compilation.
+void shimWebAssemblyCodeGeneration(jsg::Lock& lock, v8::Local<v8::Context> context) {
+  lock.allowWasmCodeGeneration();
+
+  static constexpr size_t MAX_REQUEST_TIME_WASM_SIZE = 64 * 1024 * 1024;
+  v8::Context::Scope contextScope(context);
+
+  // Snapshot a BufferSource and start recording it before V8 sees the bytes. Promise-based APIs
+  // receive [snapshot, uploadPromise]. WebAssembly.Module receives the snapshot after the embedder
+  // has retained the upload as a background task.
+  auto prepareCb = [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+    auto& js = jsg::Lock::from(info.GetIsolate());
+    js.withinHandleScope([&] {
+      KJ_IF_SOME(e, kj::runCatchingExceptions([&] {
+        auto maybeIoContext = IoContext::tryCurrent();
+        if (maybeIoContext == kj::none) {
+          JSG_REQUIRE(js.isEvalAllowed(), Error,
+              "WebAssembly compilation only allowed during startup or while handling a request.");
+        }
+
+        JSG_REQUIRE(info.Length() >= 1, TypeError, "WebAssembly source must be a BufferSource");
+        auto source = JSG_REQUIRE_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsBufferSource>(),
+            TypeError, "WebAssembly source must be a BufferSource");
+        KJ_IF_SOME(_, maybeIoContext) {
+          JSG_REQUIRE(source.size() <= MAX_REQUEST_TIME_WASM_SIZE, RangeError,
+              "WebAssembly source exceeds the maximum request-time compilation size");
+        }
+        auto bytes = source.copy();
+        auto snapshot = jsg::JsArrayBuffer::create(js, bytes);
+
+        auto returnAsyncResult = [&](jsg::Promise<void> upload) {
+          auto result = v8::Array::New(js.v8Isolate, 2);
+          jsg::check(result->Set(js.v8Context(), 0, snapshot));
+          jsg::check(result->Set(js.v8Context(), 1, upload.consumeHandle(js)));
+          info.GetReturnValue().Set(result);
+        };
+
+        KJ_IF_SOME(ioContext, maybeIoContext) {
+          JSG_REQUIRE(ioContext.getMetrics().recordLoadedWasmModule(bytes), Error,
+              "Too many unique WebAssembly modules loaded in a single request");
+          if (info.Data()->IsTrue()) {
+            ioContext.getIoChannelFactory().queueWasmUploadForCodeGeneration(
+                kj::mv(bytes), ioContext.getCurrentTraceSpan());
+            info.GetReturnValue().Set(static_cast<v8::Local<v8::ArrayBuffer>>(snapshot));
+          } else {
+            returnAsyncResult(ioContext.awaitIo(js,
+                ioContext.getIoChannelFactory().uploadWasmForCodeGeneration(
+                    kj::mv(bytes), ioContext.getCurrentTraceSpan())));
+          }
+        } else {
+          if (info.Data()->IsTrue()) {
+            info.GetReturnValue().Set(static_cast<v8::Local<v8::ArrayBuffer>>(snapshot));
+          } else {
+            returnAsyncResult(js.resolvedPromise());
+          }
+        }
+      })) {
+        js.v8Isolate->ThrowException(js.exceptionToJs(kj::mv(e)).getHandle(js));
+      }
+    });
+  };
+  auto prepareFn = jsg::check(v8::Function::New(context, prepareCb, v8::False(lock.v8Isolate)));
+  auto prepareBackgroundFn =
+      jsg::check(v8::Function::New(context, prepareCb, v8::True(lock.v8Isolate)));
+
+  auto shimScript =
+      jsg::NonModuleScript::compile(lock, WASM_CODEGEN_SHIM, "wasm-codegen-shim.js"_kj);
+  auto shimFn = KJ_ASSERT_NONNULL(shimScript.runAndReturn(lock).tryCast<jsg::JsFunction>());
+  shimFn.call(
+      lock, lock.global(), jsg::JsFunction(prepareFn), jsg::JsFunction(prepareBackgroundFn));
+}
+
 void Worker::setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context> context) {
   // The zygote has no `WebAssembly` global to shim: V8's bootstrapper skips
   // InstallSpecialObjects() in a SnapshotCreator isolate, and IsolateBase installs the name as a
@@ -2291,6 +2364,14 @@ void Worker::setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context>
 
   // Shim WebAssembly.instantiate to detect modules exporting "__instance_signal".
   shimWebAssemblyInstantiate(lock, context);
+
+  // Retain request-time WebAssembly bytes before compiling them.
+  if (Worker::Isolate::from(lock)
+          .getApi()
+          .getFeatureFlags()
+          .getRequestTimeWebAssemblyCompilation()) {
+    shimWebAssemblyCodeGeneration(lock, context);
+  }
 }
 // =======================================================================================
 
