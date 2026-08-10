@@ -226,8 +226,8 @@ type BrowserRunSnapshotFormat =
   | 'accessibilityTree';
 
 type BrowserRunSnapshotOptions = BrowserRunCommonOptions & {
-  /** Which representations of the page to return. At least two formats are
-   * required; request a single format from its dedicated action instead.
+  /** Which representations of the page to return. At least two distinct formats
+   * are required; request a single format from its dedicated action instead.
    * @default ["content","screenshot"]
    */
   formats?: BrowserRunSnapshotFormat[];
@@ -394,7 +394,7 @@ type BrowserRunScrapeSuccessResponse = {
  */
 type BrowserRunSnapshotSuccessResponse = {
   success: true;
-  result?: {
+  result: {
     /** HTML content of the page. */
     content?: string;
     /** Base64-encoded screenshot image. */
