@@ -2,8 +2,27 @@
 
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
+#include <workerd/util/entropy.h>
+
+#include <random>
 
 namespace workerd {
+
+IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(kj::Date createdAt) {
+  // Seed a per-thread PRNG once from secure entropy so each request avoids an entropy-system call
+  // while retaining independent 64-bit nonce streams across threads and processes.
+  static thread_local auto generator = [] {
+    uint64_t seed;
+    getEntropy(kj::arrayPtr(reinterpret_cast<kj::byte*>(&seed), sizeof(seed)));
+    return std::mt19937_64(seed);
+  }();
+
+  return IoChannelFactory::ActorRetryRequestMetadata{
+    .nonce = generator(),
+    .createdAt = createdAt,
+    .isRetry = IsActorRetry::NO,
+  };
+}
 
 kj::Promise<kj::Array<byte>> IoChannelFactory::TokenizableChannel::getToken(
     ChannelTokenUsage usage) {
