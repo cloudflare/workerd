@@ -40,7 +40,9 @@
     // Node.js
     {
       "name": "aspect_rules_esbuild",
-      "type": "bazel_dep"
+      "type": "bazel_dep",
+      // Newer versions appear to break due to lack of sandboxing on Windows
+      "freeze_version": "0.26.0"
     },
     {
       "name": "aspect_rules_js",
