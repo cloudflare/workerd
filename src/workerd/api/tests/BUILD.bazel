@@ -1077,7 +1077,10 @@ wd_test(
 wd_test(
     src = "worker-test.wd-test",
     args = ["--experimental"],
-    data = ["worker-test.js"],
+    data = [
+        "worker-test.js",
+        "worker-wasm-disabled-test.js",
+    ],
 )
 
 wd_test(

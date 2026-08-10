@@ -188,6 +188,15 @@ class IoChannelFactory: public virtual kj::Refcounted {
   // may implement Spectre mitigations.
   virtual TimerChannel& getTimer() = 0;
 
+  // Records WebAssembly bytes before request-time compilation. Production embedders can override
+  // this to durably retain the bytes; the standalone runtime permits compilation without upload.
+  virtual kj::Promise<void> uploadWasmForCodeGeneration(
+      kj::Array<kj::byte> module, SpanParent parentSpan) = 0;
+
+  // Retains an upload for a synchronous WebAssembly.Module constructor.
+  virtual void queueWasmUploadForCodeGeneration(
+      kj::Array<kj::byte> module, SpanParent parentSpan) = 0;
+
   // Write a log message to a logfwdr channel. Each log binding has its own channel number.
   //
   // The IoChannelFactory already knows which member of the overall message union is expected to

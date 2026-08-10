@@ -1125,7 +1125,12 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
           module: string;
           name: string;
         }
-        abstract class Module {
+        interface CompileOptions {
+          builtins?: string[];
+          importedStringConstants?: string;
+        }
+        class Module {
+          constructor(bytes: BufferSource, options?: CompileOptions);
           static customSections(module: Module, sectionName: string): ArrayBuffer[];
           static exports(module: Module): ModuleExportDescriptor[];
           static imports(module: Module): ModuleImportDescriptor[];
@@ -1145,13 +1150,25 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
           set(index: number, value?: any): void;
         }
 
-        function instantiate(module: Module, imports?: Imports): Promise<Instance>;
+        interface WebAssemblyInstantiatedSource {
+          instance: Instance;
+          module: Module;
+        }
+        function compile(bytes: BufferSource, options?: CompileOptions): Promise<Module>;
+        function instantiate(
+          bytes: BufferSource,
+          imports?: Imports,
+          options?: CompileOptions
+        ): Promise<WebAssemblyInstantiatedSource>;
+        function instantiate(
+          module: Module,
+          imports?: Imports
+        ): Promise<Instance>;
         function validate(bytes: BufferSource): boolean;
       }
     )");
-    // workerd disables dynamic WebAssembly compilation, so `compile()`, `compileStreaming()`, the
-    // `instantiate()` override taking a `BufferSource` and `instantiateStreaming()` are omitted.
-    // `Module` is also declared `abstract` to disable its `BufferSource` constructor.
+    // Streaming compilation remains unavailable because it cannot pass through request-time byte
+    // recording before compilation.
 
     JSG_TS_OVERRIDE({
       setTimeout(callback: (...args: any[]) => void, msDelay?: number): number;

@@ -12,7 +12,14 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = [
           "nodejs_compat",
           "allow_eval_during_startup",
+          "experimental",
+          "request_time_webassembly_compilation",
         ]
+      )
+    ),
+    ( name = "worker-wasm-disabled-test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "worker-wasm-disabled-test.js")],
       )
     ),
   ],

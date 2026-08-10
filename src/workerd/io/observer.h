@@ -152,6 +152,11 @@ class RequestObserver: public kj::Refcounted {
   // Used to record when a worker has used a dynamic dispatch binding.
   virtual void setHasDispatched() {};
 
+  // Called before request-time WebAssembly bytes are uploaded or compiled.
+  virtual bool recordLoadedWasmModule(kj::ArrayPtr<const kj::byte> module) {
+    return true;
+  }
+
   virtual SpanParent getSpan() {
     return nullptr;
   }

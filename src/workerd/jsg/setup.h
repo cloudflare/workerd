@@ -196,6 +196,10 @@ class IsolateBase {
     return evalAllowed;
   }
 
+  inline void allowWasmCodeGeneration(kj::Badge<Lock>) {
+    wasmCodeGenerationAllowed = true;
+  }
+
   inline void setDisallowJavascriptExecution(kj::Badge<Lock>, bool allow) {
     if (allow) {
       javascriptExecutionDisallowed++;
@@ -435,6 +439,7 @@ class IsolateBase {
   // When true, evalAllowed is true and switching it to false is a no-op.
   bool alwaysAllowEval = false;
   bool evalAllowed = false;
+  bool wasmCodeGenerationAllowed = false;
 
   // When > 0, we take the "safe" path in unwrap() to avoid calling Get() which can invoke
   // user-defined getters, triggering the `DisallowJavascriptExecution` scope constructed

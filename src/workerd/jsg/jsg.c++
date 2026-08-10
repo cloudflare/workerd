@@ -381,6 +381,10 @@ bool Lock::isEvaluatingModule() {
   return IsolateBase::from(v8Isolate).isEvaluatingModule();
 }
 
+void Lock::allowWasmCodeGeneration() {
+  IsolateBase::from(v8Isolate).allowWasmCodeGeneration({});
+}
+
 Lock::ModuleEvaluationScope::ModuleEvaluationScope(Lock& js): js(js) {
   IsolateBase::from(js.v8Isolate).enterModuleEvaluation({});
 }
