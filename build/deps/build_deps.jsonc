@@ -49,7 +49,9 @@
     },
     {
       "name": "aspect_rules_ts",
-      "type": "bazel_dep"
+      "type": "bazel_dep",
+      // Newer versions appear to break due to lack of sandboxing on Windows
+      "freeze_version": "3.8.11"
     },
     {
       "name": "rules_nodejs",
