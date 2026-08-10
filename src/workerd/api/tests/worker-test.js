@@ -14,6 +14,9 @@ const StartupFunction2 = new Function('return 2+2');
 strictEqual(StartupFunction2(), 4); // should still work
 strictEqual((await import('module-does-eval')).default, 2); // should work
 
+const startupWasmBytes = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]);
+const startupWasmModule = new WebAssembly.Module(startupWasmBytes);
+
 export const testStartupEval = {
   async test() {
     throws(() => eval('console.log("This should not work")'), {
@@ -53,6 +56,41 @@ export const testStartupEval = {
     class Foo extends Function {}
     const foo = new Foo();
     strictEqual(typeof foo, 'function');
+
+    strictEqual(startupWasmModule instanceof WebAssembly.Module, true);
+
+    const wasmBytes = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]);
+    const module = new WebAssembly.Module(wasmBytes);
+    strictEqual(module instanceof WebAssembly.Module, true);
+    strictEqual(module.constructor, WebAssembly.Module);
+    strictEqual(WebAssembly.Module.length, 1);
+    strictEqual(WebAssembly.compile.length, 1);
+    strictEqual(WebAssembly.instantiate.length, 1);
+    throws(() => WebAssembly.Module(wasmBytes), TypeError);
+    throws(() => new WebAssembly.compile(wasmBytes), TypeError);
+    strictEqual(
+      Object.getOwnPropertyDescriptor(WebAssembly.Module, 'prototype').writable,
+      false
+    );
+
+    let optionsRead = false;
+    const compilePromise = WebAssembly.compile(wasmBytes, {
+      get builtins() {
+        optionsRead = true;
+        return [];
+      },
+    });
+    strictEqual(optionsRead, true);
+    const compiled = await compilePromise;
+    strictEqual(compiled instanceof WebAssembly.Module, true);
+    const instantiatedBytes = await WebAssembly.instantiate(wasmBytes);
+    strictEqual(instantiatedBytes.module instanceof WebAssembly.Module, true);
+    strictEqual(
+      instantiatedBytes.instance instanceof WebAssembly.Instance,
+      true
+    );
+    const instantiatedModule = await WebAssembly.instantiate(module);
+    strictEqual(instantiatedModule instanceof WebAssembly.Instance, true);
   },
 };
 

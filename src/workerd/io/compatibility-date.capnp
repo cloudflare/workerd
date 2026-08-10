@@ -1676,4 +1676,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("durable_object_io_tasks_prevent_eviction");
   # Allows the runtime to track actor IoContext wait-until tasks to prevent Durable Object eviction.
   # The runtime limits how long each task provides eviction protection.
+
+  requestTimeWebAssemblyCompilation @191 :Bool
+      $compatEnableFlag("request_time_webassembly_compilation")
+      $experimental;
+  # Enables request-time WebAssembly compilation after retaining the exact input bytes.
 }
