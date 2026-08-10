@@ -58,6 +58,21 @@ type WorkflowSleepDuration =
 
 type WorkflowRetentionDuration = WorkflowSleepDuration;
 
+/** Geographic regions supported when creating a Workflow instance.
+ * Location hints are best-effort placement preferences. */
+type WorkflowInstanceLocationHint =
+  | 'wnam'
+  | 'enam'
+  | 'sam'
+  | 'weur'
+  | 'eeur'
+  | 'apac'
+  | 'apac-ne'
+  | 'apac-se'
+  | 'oc'
+  | 'afr'
+  | 'me';
+
 interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
    * An id for your Workflow instance. Must be unique within the Workflow.
@@ -76,6 +91,9 @@ interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
     successRetention?: WorkflowRetentionDuration;
     errorRetention?: WorkflowRetentionDuration;
   };
+  /** A best-effort geographic placement preference for the Workflow instance.
+   * See `WorkflowInstanceLocationHint` for supported regions. */
+  locationHint?: WorkflowInstanceLocationHint;
 }
 
 type InstanceStatus = {
