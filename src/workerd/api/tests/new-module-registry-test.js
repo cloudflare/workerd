@@ -43,6 +43,11 @@ strictEqual(import.meta.url, 'file:///bundle/worker');
 // Verify that import.meta.main is true here.
 ok(import.meta.main);
 
+// Verify that import.meta.filename and import.meta.dirname are correct
+// for file: URLs (WinterCG import.meta path helpers).
+strictEqual(import.meta.filename, '/bundle/worker');
+strictEqual(import.meta.dirname, '/bundle');
+
 // When running in nodejs_compat_v2 mode, the globalThis.Buffer
 // and globalThis.process properties are resolved from the module
 // registry. Let's make sure we get good values here.
@@ -602,6 +607,23 @@ export const complexModuleTest = {
 
     const { default: abc2 } = await import('abc');
     strictEqual(abc2, 'file:///bundle/abc');
+  },
+};
+
+// Verify import.meta.filename and import.meta.dirname (WinterCG path helpers)
+// work correctly for modules in subdirectories and are absent for non-file URLs.
+export const importMetaPathHelpers = {
+  async test() {
+    // Module in a subdirectory should have correct dirname/filename.
+    const { filename, dirname } = await import('sub/dir/meta-test');
+    strictEqual(filename, '/bundle/sub/dir/meta-test');
+    strictEqual(dirname, '/bundle/sub/dir');
+
+    // Non-file URL modules should not have filename/dirname.
+    const mod = await import('https://example.com/mod');
+    strictEqual(mod.default, 'example');
+    strictEqual(mod.filename, undefined);
+    strictEqual(mod.dirname, undefined);
   },
 };
 

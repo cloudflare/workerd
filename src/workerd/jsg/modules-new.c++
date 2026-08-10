@@ -1273,6 +1273,33 @@ void importMeta(
           return;
         }
 
+        // import.meta.filename and import.meta.dirname are only available for
+        // modules loaded from the vfs (file: URLs)
+        if (found.id.getSchemeType() == Url::SchemeType::FILE) {
+          auto pathname = found.id.getPathname();
+
+          // import.meta.filename is the full absolute filesystem path to the
+          // current module, equivalent to fileURLToPath(import.meta.url).
+          if (meta->CreateDataProperty(js.v8Context(),
+                      v8::Local<v8::String>(js.strIntern("filename"_kj)), js.str(pathname))
+                  .IsNothing()) {
+            return;
+          }
+
+          // import.meta.dirname is the directory containing the current module,
+          // without a trailing slash (unless it is the root "/").
+          // File URL pathnames always start with '/', so findLast is guaranteed
+          // to succeed (same reasoning as url.c++:374).
+          auto lastSlash = KJ_ASSERT_NONNULL(pathname.findLast('/'));
+          auto dirname = lastSlash > 0 ? pathname.first(lastSlash) : pathname.first(1);
+
+          if (meta->CreateDataProperty(js.v8Context(),
+                      v8::Local<v8::String>(js.strIntern("dirname"_kj)), js.str(dirname))
+                  .IsNothing()) {
+            return;
+          }
+        }
+
         // The import.meta.resolve(...) function is effectively a shortcut for
         // new URL(specifier, import.meta.url).href. The idea is that it allows
         // resolving import specifiers relative to the current modules base URL.

@@ -1225,6 +1225,16 @@ KJ_TEST("import.meta works as expected") {
 
       KJ_ASSERT(url.toString(js) == "file:///foo"_kj);
 
+      // import.meta.filename is the pathname of the file: URL.
+      JsValue filename = obj.get(js, "filename");
+      KJ_ASSERT(filename.isString());
+      KJ_ASSERT(filename.toString(js) == "/foo"_kj);
+
+      // import.meta.dirname is the parent directory of the pathname.
+      JsValue dirname = obj.get(js, "dirname");
+      KJ_ASSERT(dirname.isString());
+      KJ_ASSERT(dirname.toString(js) == "/"_kj);
+
       auto mainVal = KJ_ASSERT_NONNULL(main.tryCast<JsBoolean>());
       KJ_ASSERT(!mainVal.value(js));
 
@@ -1250,6 +1260,16 @@ KJ_TEST("import.meta works as expected") {
       KJ_ASSERT(res.isFunction());
 
       KJ_ASSERT(url.toString(js) == "file:///foo/bar"_kj);
+
+      // import.meta.filename for file:///foo/bar should be /foo/bar.
+      JsValue filename = obj.get(js, "filename");
+      KJ_ASSERT(filename.isString());
+      KJ_ASSERT(filename.toString(js) == "/foo/bar"_kj);
+
+      // import.meta.dirname for file:///foo/bar should be /foo.
+      JsValue dirname = obj.get(js, "dirname");
+      KJ_ASSERT(dirname.isString());
+      KJ_ASSERT(dirname.toString(js) == "/foo"_kj);
 
       auto mainVal = KJ_ASSERT_NONNULL(main.tryCast<JsBoolean>());
       KJ_ASSERT(mainVal.value(js));
@@ -1297,6 +1317,16 @@ KJ_TEST("import specifiers with query params and hash fragments work") {
       KJ_ASSERT(url.isString());
       // The import.meta.url should include the query param and hash fragment
       KJ_ASSERT(url.toString(js) == "file:///foo?1"_kj);
+
+      // import.meta.filename and dirname should reflect the pathname without
+      // query params or hash fragments.
+      auto filename = obj.get(js, "filename");
+      KJ_ASSERT(filename.isString());
+      KJ_ASSERT(filename.toString(js) == "/foo"_kj);
+
+      auto dirname = obj.get(js, "dirname");
+      KJ_ASSERT(dirname.isString());
+      KJ_ASSERT(dirname.toString(js) == "/"_kj);
     }, [&](Value exception) { js.throwException(kj::mv(exception)); });
   });
 }
