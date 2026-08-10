@@ -43,7 +43,13 @@ IoChannelFactory::ActorChannel& LocalActorOutgoingFactory::getOrCreateActorChann
 }
 
 kj::Own<WorkerInterface> LocalActorOutgoingFactory::newSingleUseClient(
-    kj::Maybe<kj::String> cfStr) {
+    kj::Maybe<kj::String> cfStr,
+    ActorRetryEligibility actorRetryEligibility,
+    kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) {
+  KJ_REQUIRE(actorRetryEligibility == ActorRetryEligibility::INELIGIBLE,
+      "retry eligibility supplied to a retry-ineligible actor");
+  KJ_REQUIRE(actorRetryRequestMetadata == kj::none,
+      "actor retry metadata supplied to a retry-ineligible actor");
   auto& context = IoContext::current();
 
   return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
@@ -92,7 +98,12 @@ IoChannelFactory::ActorChannel& GlobalActorOutgoingFactory::getOrCreateActorChan
 }
 
 kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClient(
-    kj::Maybe<kj::String> cfStr) {
+    kj::Maybe<kj::String> cfStr,
+    ActorRetryEligibility actorRetryEligibility,
+    kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) {
+  KJ_REQUIRE(actorRetryEligibility == ActorRetryEligibility::ELIGIBLE ||
+          actorRetryRequestMetadata == kj::none,
+      "retry-ineligible actor request must not carry retry metadata");
   auto& context = IoContext::current();
 
   return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
@@ -102,7 +113,9 @@ kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClient(
     return getOrCreateActorChannel(context, tracing.getInternalSpanParent())
         .startRequest({.cfBlobJson = kj::mv(cfStr),
           .parentSpan = tracing.getInternalSpanParent(),
-          .userSpanParent = tracing.getUserSpanParent()});
+          .userSpanParent = tracing.getUserSpanParent(),
+          .actorRetryEligibility = actorRetryEligibility,
+          .actorRetryRequestMetadata = kj::mv(actorRetryRequestMetadata)});
   },
       {.inHouse = true,
         .wrapMetrics = true,
@@ -115,7 +128,13 @@ kj::Own<IoChannelFactory::SubrequestChannel> GlobalActorOutgoingFactory::getSubr
 }
 
 kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClient(
-    kj::Maybe<kj::String> cfStr) {
+    kj::Maybe<kj::String> cfStr,
+    ActorRetryEligibility actorRetryEligibility,
+    kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) {
+  KJ_REQUIRE(actorRetryEligibility == ActorRetryEligibility::INELIGIBLE,
+      "retry eligibility supplied to a retry-ineligible actor");
+  KJ_REQUIRE(actorRetryRequestMetadata == kj::none,
+      "actor retry metadata supplied to a retry-ineligible actor");
   auto& context = IoContext::current();
 
   return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
@@ -148,8 +167,8 @@ jsg::Ref<Fetcher> ColoLocalActorNamespace::get(jsg::Lock& js, kj::String actorId
   auto outgoingFactory = context.addObject(kj::mv(factory));
 
   bool isInHouse = true;
-  return js.alloc<Fetcher>(
-      kj::mv(outgoingFactory), Fetcher::RequiresHostAndProtocol::YES, isInHouse);
+  return js.alloc<Fetcher>(kj::mv(outgoingFactory), Fetcher::RequiresHostAndProtocol::YES,
+      ActorRetryEligibility::INELIGIBLE, isInHouse);
 }
 
 // =======================================================================================
@@ -234,7 +253,8 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
       ? Fetcher::RequiresHostAndProtocol::YES
       : Fetcher::RequiresHostAndProtocol::NO;
   return js.alloc<DurableObject>(
-      kj::mv(id), context.addObject(kj::mv(outgoingFactory)), requiresHost);
+      kj::mv(id), context.addObject(kj::mv(outgoingFactory)), requiresHost,
+      ActorRetryEligibility::ELIGIBLE);
 }
 
 jsg::Ref<DurableObjectNamespace> DurableObjectNamespace::jurisdiction(

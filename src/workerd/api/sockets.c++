@@ -1060,7 +1060,9 @@ class StreamOutgoingFactory final: public Fetcher::OutgoingFactory, public kj::R
         httpClient(
             kj::newHttpClient(headerTable, *this->stream, {.entropySource = entropySource})) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
+  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr,
+      ActorRetryEligibility actorRetryEligibility,
+      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) override;
 
  private:
   kj::Own<kj::AsyncIoStream> stream;
@@ -1125,7 +1127,13 @@ class StreamWorkerInterface final: public WorkerInterface {
   kj::Own<StreamOutgoingFactory> factory;
 };
 
-kj::Own<WorkerInterface> StreamOutgoingFactory::newSingleUseClient(kj::Maybe<kj::String> cfStr) {
+kj::Own<WorkerInterface> StreamOutgoingFactory::newSingleUseClient(kj::Maybe<kj::String> cfStr,
+    ActorRetryEligibility actorRetryEligibility,
+    kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) {
+  KJ_REQUIRE(actorRetryEligibility == ActorRetryEligibility::INELIGIBLE,
+      "actor retry eligibility supplied to an unsupported Fetcher");
+  KJ_REQUIRE(actorRetryRequestMetadata == kj::none,
+      "actor retry metadata supplied to an unsupported Fetcher");
   JSG_ASSERT(stream.get() != nullptr, Error,
       "Fetcher created from internalNewHttpClient can only be used once");
   // Create a WorkerInterface that wraps the stream, routing through getSubrequestNoChecks to apply
@@ -1152,8 +1160,8 @@ jsg::Promise<jsg::Ref<Fetcher>> SocketsModule::internalNewHttpClient(
             socket->takeConnectionStream(js), ioctx.getEntropySource(), ioctx.getHeaderTable());
 
         // Create a Fetcher that uses our custom factory
-        auto fetcher = js.alloc<Fetcher>(
-            ioctx.addObject(kj::mv(outgoingFactory)), Fetcher::RequiresHostAndProtocol::YES);
+        auto fetcher = js.alloc<Fetcher>(ioctx.addObject(kj::mv(outgoingFactory)),
+            Fetcher::RequiresHostAndProtocol::YES, ActorRetryEligibility::INELIGIBLE);
 
         return kj::mv(fetcher);
       }));

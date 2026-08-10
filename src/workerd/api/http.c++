@@ -1503,11 +1503,20 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   // (Durable Object), to classify retry eligibility for disconnected calls; for other fetches the
   // value is simply overwritten by the next call and never read. The set->getClientWithTracing->
   // wrap*SubrequestClient sequence is synchronous, so there is no stale-attribution risk.
-  ioContext.getMetrics().setNextSubrequestBodyRewindable(
-      SubrequestBodyRewindable(jsRequest->canRewindBody()));
+  bool bodyRewindable = jsRequest->canRewindBody();
+  ioContext.getMetrics().setNextSubrequestBodyRewindable(SubrequestBodyRewindable(bodyRewindable));
+
+  auto actorRetryEligibility = bodyRewindable ? fetcher->getActorRetryEligibility()
+                                              : ActorRetryEligibility::INELIGIBLE;
+  kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata;
+  if (actorRetryEligibility == ActorRetryEligibility::ELIGIBLE) {
+    actorRetryRequestMetadata = generateActorRetryRequestMetadata(ioContext.now());
+  }
 
   // Get client and trace context (if needed) in one clean call
-  auto clientWithTracing = fetcher->getClientWithTracing(ioContext, jsRequest->serializeCfBlobJson(js), "fetch"_kjc);
+  auto clientWithTracing = fetcher->getClientWithTracing(ioContext,
+      jsRequest->serializeCfBlobJson(js), "fetch"_kjc, actorRetryEligibility,
+      kj::mv(actorRetryRequestMetadata));
   auto traceContext = kj::mv(clientWithTracing.traceContext);
 
   // TODO(cleanup): Don't convert to HttpClient. Use the HttpService interface instead. This
@@ -2461,12 +2470,33 @@ jsg::Promise<Fetcher::ScheduledResult> Fetcher::scheduled(
 
 kj::Own<WorkerInterface> Fetcher::getClient(
     IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName) {
-  auto clientWithTracing = getClientWithTracing(ioContext, kj::mv(cfStr), kj::mv(operationName));
+  auto clientWithTracing = getClientWithTracing(
+      ioContext, kj::mv(cfStr), kj::mv(operationName), ActorRetryEligibility::INELIGIBLE,
+      kj::none /* actorRetryRequestMetadata */);
   return clientWithTracing.client.attach(kj::mv(clientWithTracing.traceContext));
 }
 
 Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
-    IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName) {
+    IoContext& ioContext,
+    kj::Maybe<kj::String> cfStr,
+    kj::ConstString operationName,
+    ActorRetryEligibility actorRetryEligibility,
+    kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) {
+  KJ_REQUIRE(actorRetryEligibility == ActorRetryEligibility::INELIGIBLE ||
+          getActorRetryEligibility() == ActorRetryEligibility::ELIGIBLE,
+      "actor retry eligibility supplied to a retry-ineligible Fetcher");
+  KJ_REQUIRE(actorRetryEligibility == ActorRetryEligibility::ELIGIBLE ||
+          actorRetryRequestMetadata == kj::none,
+      "retry-ineligible actor request must not carry retry metadata");
+  if (actorRetryRequestMetadata != kj::none) {
+    KJ_REQUIRE(channelOrClientFactory.is<IoOwn<OutgoingFactory>>(),
+        "actor retry metadata supplied to an unsupported Fetcher");
+  }
+  if (actorRetryEligibility == ActorRetryEligibility::ELIGIBLE) {
+    KJ_REQUIRE(channelOrClientFactory.is<IoOwn<OutgoingFactory>>(),
+        "actor retry eligibility supplied to an unsupported Fetcher");
+  }
+
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
       // For channels, create trace context
@@ -2492,7 +2522,8 @@ Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
       // Outgoing factories are responsible for routing through getSubrequestNoChecks() (or
       // getSubrequest()) internally if they create HTTP connections, to ensure external memory
       // adjustment and other subrequest accounting are applied.
-      auto client = outgoingFactory->newSingleUseClient(kj::mv(cfStr));
+      auto client = outgoingFactory->newSingleUseClient(
+          kj::mv(cfStr), actorRetryEligibility, kj::mv(actorRetryRequestMetadata));
       return ClientWithTracing{kj::mv(client), kj::none};
     }
     KJ_CASE_ONEOF(outgoingFactory, kj::Own<CrossContextOutgoingFactory>) {

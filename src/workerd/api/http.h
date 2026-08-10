@@ -209,6 +209,7 @@ class Fetcher: public JsRpcClientProvider {
       RpcCompatGateBypassed rpcCompatGateBypassed = RpcCompatGateBypassed::NO)
       : channelOrClientFactory(channel),
         requiresHost(requiresHost),
+        actorRetryEligibility(ActorRetryEligibility::INELIGIBLE),
         isInHouse(isInHouse),
         rpcCompatGateBypassed(rpcCompatGateBypassed) {}
 
@@ -219,6 +220,7 @@ class Fetcher: public JsRpcClientProvider {
       bool isInHouse = false)
       : channelOrClientFactory(kj::mv(subrequestChannel)),
         requiresHost(requiresHost),
+        actorRetryEligibility(ActorRetryEligibility::INELIGIBLE),
         isInHouse(isInHouse) {}
 
   // Used by Fetchers that use ad-hoc, single-use WorkerInterface instances, such as ones
@@ -232,7 +234,11 @@ class Fetcher: public JsRpcClientProvider {
   //   is almost the same thing.
   class OutgoingFactory {
    public:
-    virtual kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) = 0;
+    // Factories must preserve the explicit eligibility classification. Retry-ineligible factories
+    // reject eligible classifications and present retry metadata rather than silently ignoring them.
+    virtual kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr,
+        ActorRetryEligibility actorRetryEligibility,
+        kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) = 0;
 
     // Get a `SubrequestChannel` representing this Fetcher. This is used especially when the
     // Fetcher is being passed to another isolate.
@@ -263,9 +269,11 @@ class Fetcher: public JsRpcClientProvider {
   // created for Actors.
   Fetcher(IoOwn<OutgoingFactory> outgoingFactory,
       RequiresHostAndProtocol requiresHost,
+      ActorRetryEligibility actorRetryEligibility,
       bool isInHouse = false)
       : channelOrClientFactory(kj::mv(outgoingFactory)),
         requiresHost(requiresHost),
+        actorRetryEligibility(actorRetryEligibility),
         isInHouse(isInHouse) {}
 
   // `outgoingFactory` is used for Fetchers that use ad-hoc WorkerInterface instances, but doesn't
@@ -275,6 +283,7 @@ class Fetcher: public JsRpcClientProvider {
       bool isInHouse = false)
       : channelOrClientFactory(kj::mv(outgoingFactory)),
         requiresHost(requiresHost),
+        actorRetryEligibility(ActorRetryEligibility::INELIGIBLE),
         isInHouse(isInHouse) {}
 
   // Returns an `WorkerInterface` that is only valid for the lifetime of the current
@@ -289,8 +298,13 @@ class Fetcher: public JsRpcClientProvider {
   };
 
   // Get client and optionally create trace context, all in one call
-  ClientWithTracing getClientWithTracing(
-      IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
+  ClientWithTracing getClientWithTracing(IoContext& ioContext,
+      kj::Maybe<kj::String> cfStr,
+      kj::ConstString operationName,
+      ActorRetryEligibility actorRetryEligibility,
+      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata);
+
+  ActorRetryEligibility getActorRetryEligibility() const { return actorRetryEligibility; }
 
   // Get a SubrequestChannel representing this Fetcher.
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);
@@ -494,6 +508,7 @@ class Fetcher: public JsRpcClientProvider {
       IoOwn<OutgoingFactory>>
       channelOrClientFactory;
   RequiresHostAndProtocol requiresHost;
+  ActorRetryEligibility actorRetryEligibility;
   bool isInHouse;
 
   // Defaulted so the constructors that no binding path uses need not name it. Deliberately not

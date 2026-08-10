@@ -242,7 +242,8 @@ DurableObjectStorage::DurableObjectStorage(jsg::Lock& js,
       : Fetcher::RequiresHostAndProtocol::NO;
 
   this->maybePrimary = js.alloc<DurableObject>(
-      js.alloc<DurableObjectId>(kj::mv(primaryActorId)), kj::mv(outgoingFactory), requiresHost);
+      js.alloc<DurableObjectId>(kj::mv(primaryActorId)), kj::mv(outgoingFactory), requiresHost,
+      ActorRetryEligibility::INELIGIBLE);
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::get(jsg::Lock& js,
@@ -986,7 +987,13 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
         name(kj::mv(name)),
         getStartInfo(kj::mv(getStartInfo)) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
+  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr,
+      ActorRetryEligibility actorRetryEligibility,
+      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) override {
+    KJ_REQUIRE(actorRetryEligibility == ActorRetryEligibility::INELIGIBLE,
+        "retry eligibility supplied to a retry-ineligible actor");
+    KJ_REQUIRE(actorRetryRequestMetadata == kj::none,
+        "actor retry metadata supplied to a retry-ineligible actor");
     auto& context = IoContext::current();
 
     return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
@@ -1096,7 +1103,8 @@ jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js,
 
   // We return a plain Fetcher, not a DurableObject, because we don't want the stub to have
   // `name` or `id` properties.
-  return js.alloc<Fetcher>(ioCtx.addObject(kj::mv(factory)), requiresHost, true /* isInHouse */);
+  return js.alloc<Fetcher>(ioCtx.addObject(kj::mv(factory)), requiresHost,
+      ActorRetryEligibility::INELIGIBLE, true /* isInHouse */);
 }
 
 void DurableObjectFacets::abort(jsg::Lock& js, kj::String name, jsg::JsValue reason) {

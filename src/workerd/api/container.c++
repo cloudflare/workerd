@@ -1347,7 +1347,13 @@ class Container::TcpPortOutgoingFactory final: public Fetcher::OutgoingFactory {
         headerTable(headerTable),
         portState(kj::mv(portState)) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
+  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr,
+      ActorRetryEligibility actorRetryEligibility,
+      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) override {
+    KJ_REQUIRE(actorRetryEligibility == ActorRetryEligibility::INELIGIBLE,
+        "actor retry eligibility supplied to an unsupported Fetcher");
+    KJ_REQUIRE(actorRetryRequestMetadata == kj::none,
+        "actor retry metadata supplied to an unsupported Fetcher");
     // At present we have no use for `cfStr`.
     return IoContext::current().getSubrequestNoChecks(
         [&](auto& tracing, auto& channelFactory) -> kj::Own<WorkerInterface> {
@@ -1406,8 +1412,8 @@ jsg::Ref<Fetcher> Container::getTcpPort(jsg::Lock& js, int port) {
   kj::Own<Fetcher::OutgoingFactory> factory = kj::heap<TcpPortOutgoingFactory>(
       ioctx.getEntropySource(), ioctx.getHeaderTable(), kj::mv(portState));
 
-  return js.alloc<Fetcher>(
-      ioctx.addObject(kj::mv(factory)), Fetcher::RequiresHostAndProtocol::YES, true);
+  return js.alloc<Fetcher>(ioctx.addObject(kj::mv(factory)),
+      Fetcher::RequiresHostAndProtocol::YES, ActorRetryEligibility::INELIGIBLE, true);
 }
 
 }  // namespace workerd::api

@@ -228,7 +228,13 @@ class DirectWorkerInterface final: public WorkerInterface {
 class DirectOutgoingFactory final: public Fetcher::OutgoingFactory {
  public:
   explicit DirectOutgoingFactory(kj::HttpClient& client): client(client) {}
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
+  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr,
+      ActorRetryEligibility actorRetryEligibility,
+      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) override {
+    KJ_REQUIRE(actorRetryEligibility == ActorRetryEligibility::INELIGIBLE,
+        "actor retry eligibility supplied to an unsupported Fetcher");
+    KJ_REQUIRE(actorRetryRequestMetadata == kj::none,
+        "actor retry metadata supplied to an unsupported Fetcher");
     return IoContext::current().getSubrequestNoChecks([this](auto& tracing, auto& channelFactory) {
       return kj::heap<DirectWorkerInterface>(client);
     }, {.inHouse = false, .wrapMetrics = false});
@@ -365,8 +371,8 @@ void FetchDirect(benchmark::State& state) {
   jsg::Ref<Fetcher> fetcher = nullptr;
   fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
     kj::Own<Fetcher::OutgoingFactory> factory = kj::heap<DirectOutgoingFactory>(*client);
-    fetcher = env.js.alloc<Fetcher>(
-        env.context.addObject(kj::mv(factory)), Fetcher::RequiresHostAndProtocol::YES, true);
+    fetcher = env.js.alloc<Fetcher>(env.context.addObject(kj::mv(factory)),
+        Fetcher::RequiresHostAndProtocol::YES, ActorRetryEligibility::INELIGIBLE, true);
   });
 
   auto& headerTable = ioContext->getHeaderTable();
