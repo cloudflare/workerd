@@ -104,6 +104,14 @@ void checkSql(SqliteDatabase& db) {
   }
 }
 
+class DefaultRegulatorForTest: public SqliteDatabase::Regulator {
+ public:
+  bool isAllowedName(kj::StringPtr name) const override {
+    return !name.startsWith("_cf_");
+  }
+};
+static constexpr DefaultRegulatorForTest DEFAULT_REGULATOR_FOR_TEST;
+
 KJ_TEST("SQLite backed by in-memory directory") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
@@ -1782,14 +1790,7 @@ KJ_TEST("SQLite Regulator blocks RENAME TO reserved name") {
   SqliteDatabase::Vfs vfs(*dir);
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 
-  // Regulator that blocks names starting with _cf_ (mirrors SqlStorageRegulator).
-  class CfRegulator: public SqliteDatabase::Regulator {
-   public:
-    bool isAllowedName(kj::StringPtr name) const override {
-      return !name.startsWith("_cf_");
-    }
-  };
-  static CfRegulator reg;
+  auto& reg = DEFAULT_REGULATOR_FOR_TEST;
 
   // Create a user table and populate it.
   db.run("CREATE TABLE user_data (key TEXT PRIMARY KEY, value BLOB)");
@@ -1805,6 +1806,53 @@ KJ_TEST("SQLite Regulator blocks RENAME TO reserved name") {
 
   // Verify the table was NOT renamed — it should still be other_data.
   KJ_EXPECT(db.prepare(reg, "SELECT value FROM other_data").run().getBlob(0).size() == 4);
+}
+
+KJ_TEST("SQLite R*Tree extension is enabled") {
+  // Regression test to ensure that the SQLite R*Tree extension is enabled and usable.
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  auto& regulator = DEFAULT_REGULATOR_FOR_TEST;
+
+  db.run({.regulator = regulator}, R"(
+    CREATE VIRTUAL TABLE demo_index USING rtree(
+      id,
+      minX, maxX,
+      minY, maxY
+    );
+  )");
+
+  db.run({.regulator = regulator}, R"(
+    INSERT INTO demo_index VALUES
+      (1, -1.0, 1.0, -1.0, 1.0),
+      (2, 10.0, 12.0, 10.0, 12.0),
+      (3, -5.0, -3.0, -5.0, -3.0);
+  )");
+
+  {
+    auto query = db.run({.regulator = regulator}, R"(
+      SELECT id FROM demo_index
+      WHERE minX <= 2.0 AND maxX >= -2.0
+        AND minY <= 2.0 AND maxY >= -2.0
+      ORDER BY id;
+    )");
+
+    KJ_ASSERT(!query.isDone());
+    KJ_EXPECT(query.getInt(0) == 1);
+    query.nextRow();
+    KJ_EXPECT(query.isDone());
+  }
+
+  {
+    auto query = db.run({.regulator = regulator}, R"(
+      SELECT rtreecheck('demo_index');
+    )");
+
+    KJ_ASSERT(!query.isDone());
+    KJ_EXPECT(query.getText(0) == "ok"_kj);
+  }
 }
 
 // NOTE: This test sets a process-global SQLite hard_heap_limit that is never reset.

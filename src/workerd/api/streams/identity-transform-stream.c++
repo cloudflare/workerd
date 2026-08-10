@@ -125,7 +125,7 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
     return promise;
   }
 
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
+  kj::Promise<DeferredProxy<void>> pumpTo(kj::Ptr<WritableStreamSink> output, bool end) override {
 #ifdef KJ_NO_RTTI
     // Yes, I'm paranoid.
     static_assert(!KJ_NO_RTTI, "Need RTTI for correctness");
@@ -136,7 +136,7 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
     JSG_REQUIRE(!isIdentityTransformStream(output), TypeError,
         "Inter-TransformStream ReadableStream.pipeTo() is not implemented.");
 
-    return ReadableStreamSource::pumpTo(output, end);
+    return ReadableStreamSource::pumpTo(kj::mv(output), end);
   }
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
@@ -391,8 +391,8 @@ OneWayPipe newIdentityPipe(kj::Maybe<uint64_t> expectedLength) {
   return OneWayPipe{.in = kj::mv(pair.readable), .out = kj::mv(pair.writable)};
 }
 
-bool isIdentityTransformStream(WritableStreamSink& sink) {
-  return kj::dynamicDowncastIfAvailable<IdentityTransformStreamImpl>(sink) != kj::none;
+bool isIdentityTransformStream(kj::Ptr<WritableStreamSink> sink) {
+  return kj::dynamicDowncastIfAvailable<IdentityTransformStreamImpl>(sink.asRef()) != kj::none;
 }
 
 }  // namespace workerd::api

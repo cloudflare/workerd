@@ -7,6 +7,7 @@ import {
   createBase64EncoderTransformStream,
 } from 'cloudflare-internal:streaming-base64';
 import { withSpan, type Span } from 'cloudflare-internal:tracing-helpers';
+import wrappedBinding from 'cloudflare-internal:wrapped-binding';
 
 type Fetcher = {
   fetch: typeof fetch;
@@ -275,11 +276,15 @@ class HostedImagesBindingImpl implements HostedImagesBinding {
   }
 }
 
-class ImagesBindingImpl implements ImagesBinding {
+class ImagesBindingImpl
+  extends wrappedBinding.WrappedBinding
+  implements ImagesBinding
+{
   readonly #fetcher: Fetcher & ServiceEntrypointStub;
   readonly #hosted: HostedImagesBinding;
 
   constructor(fetcher: Fetcher & ServiceEntrypointStub) {
+    super(fetcher);
     this.#fetcher = fetcher;
     this.#hosted = new HostedImagesBindingImpl(fetcher);
   }

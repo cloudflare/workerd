@@ -35,7 +35,7 @@ class AsyncLocalStorage final: public jsg::Object {
   };
 
   AsyncLocalStorage(jsg::Optional<AsyncLocalStorageOptions> options = kj::none)
-      : key(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
+      : key(kj::arc<jsg::AsyncContextFrame::StorageKey>()) {
     KJ_IF_SOME(opt, options) {
       defaultValue = kj::mv(opt.defaultValue);
       name = kj::mv(opt.name);
@@ -102,10 +102,10 @@ class AsyncLocalStorage final: public jsg::Object {
     });
   }
 
-  kj::Own<jsg::AsyncContextFrame::StorageKey> getKey();
+  kj::Arc<jsg::AsyncContextFrame::StorageKey> getKey();
 
  private:
-  kj::Own<jsg::AsyncContextFrame::StorageKey> key;
+  kj::Arc<jsg::AsyncContextFrame::StorageKey> key;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> defaultValue;
   kj::Maybe<kj::String> name;
 

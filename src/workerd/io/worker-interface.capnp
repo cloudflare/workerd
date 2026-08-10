@@ -81,6 +81,39 @@ struct Trace @0x8e8d911203762d34 {
     }
 
     message @2 :Text;
+
+    errorInfo @3 :List(ErrorInfoSlot);
+    # Per-argument structured Error fields for the console call that produced this
+    # log. The list is positional: slot `i` corresponds to the i-th argument of the
+    # originating `console.*` call. Slots whose argument was not a native Error are
+    # encoded as `none`. The field is absent entirely (zero-length list on the wire)
+    # when none of the arguments was a native Error.
+    #
+    # The stringified form of the arguments remains in `message` unchanged for
+    # backwards compatibility.
+
+    truncated @4 :Bool;
+    # True if `message` was truncated because it exceeded the maximum trace size. When set, the
+    # streaming tail worker receives `message` as a raw string rather than parsed JSON, since a
+    # truncated payload is no longer valid JSON.
+  }
+
+  struct ErrorInfo {
+    # Mirrors the shape of `Exception` below, but is attached to a Log entry rather
+    # than being a standalone trace item. No timestamp: the containing Log already
+    # carries `timestampNs`.
+    name @0 :Text;
+    message @1 :Text;
+    stack @2 :Text;
+  }
+
+  struct ErrorInfoSlot {
+    # One slot in the per-argument errorInfo list. `info` is set when the
+    # corresponding console argument was a native Error; `none` otherwise.
+    union {
+      none @0 :Void;
+      info @1 :ErrorInfo;
+    }
   }
 
   obsolete26 @26 :List(UserSpanData);
@@ -493,6 +526,16 @@ enum SerializationTag {
 
   blob @15;
   # A Blob, serialized as its MIME type followed by its raw bytes.
+
+  socket @16;
+  # A transferred Socket. Serialized as socket metadata (see External.socket) followed by its
+  # readable and writable streams, which are emitted as separate readableStream/writableStream
+  # externals.
+
+  wrappedBinding @17;
+  # A "wrapped binding": an application-level object (e.g. a D1Database) implemented in TypeScript
+  # inside the runtime that wraps a single inner service stub. Serializes as the inner stub's
+  # payload (per `serviceStub`) followed by the wrapper module name. See api/wrapped-binding.{h,c++}.
 }
 
 enum StreamEncoding {
@@ -524,6 +567,13 @@ struct JsValue {
   # (We could also call these "capabilities", but that word is pretty overloaded already.)
 
   struct External {
+    enum SecureTransport {
+      # Security transport mode for a transferred Socket. Mirrors api::SecureTransportKind.
+      off @0;
+      starttls @1;
+      on @2;
+    }
+
     union {
       invalid @0 :Void;
       # Invalid default value to reduce confusion if an External wasn't initialized properly.
@@ -590,6 +640,27 @@ struct JsValue {
       # token. We do not want to delay sending the RPC (especially as this could violate ordering
       # guarantees), so instead we send it with a placeholder representing the token to be provided
       # later.
+
+      socket :group {
+        # A Socket. Like ReadableStream, this requires bi-directional stream communication.
+        remoteAddress @16 :Text;
+        # The remote address this socket is connected to.
+
+        secureTransport @17 :SecureTransport;
+        # Security transport mode.
+
+        isDefaultFetchPort @18 :Bool;
+        # Indicates whether the socket is connected to port 443 or 80.
+
+        localAddress @19 :Text;
+        # The local address of the socket, if known (e.g. the CONNECT authority for inbound
+        # sockets). Empty for outbound sockets where no useful local address exists.
+
+        allowHalfOpen @20 :Bool;
+        # Whether the socket allows the read and write sides to close independently. When false, the
+        # runtime auto-closes the write side once the read side reaches EOF, so this must be carried
+        # across transfer to preserve the origin socket's half-open semantics.
+      }
 
       # TODO(soon): WebSocket, Request, Response
     }

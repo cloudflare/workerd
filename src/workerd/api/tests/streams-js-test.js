@@ -686,6 +686,50 @@ export const readableStreamByteRespondWithNewView = {
   },
 };
 
+export const readableStreamByteRespondWithNewViewUsesNewElementSize = {
+  async test() {
+    const rs = new ReadableStream({
+      type: 'bytes',
+      pull(controller) {
+        const request = controller.byobRequest;
+        const replacement = new Uint16Array(
+          request.view.buffer,
+          request.view.byteOffset,
+          3
+        );
+
+        new Uint8Array(
+          replacement.buffer,
+          replacement.byteOffset,
+          replacement.byteLength
+        ).set([1, 2, 3, 4, 5, 6]);
+
+        request.respondWithNewView(replacement);
+        controller.close();
+      },
+    });
+
+    const reader = rs.getReader({ mode: 'byob' });
+    const { value, done } = await reader.read(new Uint32Array(2));
+
+    ok(!done);
+    strictEqual(value.byteLength, 6);
+
+    const bytes = new Uint8Array(
+      value.buffer,
+      value.byteOffset,
+      value.byteLength
+    );
+    for (let i = 0; i < bytes.length; i++) {
+      strictEqual(bytes[i], i + 1);
+    }
+
+    // Ensure no bytes were incorrectly shaved off and queued.
+    const end = await reader.read(new Uint8Array(1));
+    ok(end.done);
+  },
+};
+
 // Test ReadableStream JS controllers allow for multiple pending reads
 export const readableStreamMultiplePendingReads = {
   async test() {

@@ -20,7 +20,7 @@ Custom Bazel rules (`wd_*` macros) for C++, TypeScript, Rust, Cap'n Proto, and t
 | `wd_capnp_library.bzl`                     | Cap'n Proto schema compilation                                                                    |
 | `wd_rust_crate.bzl` / `wd_rust_binary.bzl` | Rust build rules                                                                                  |
 | `lint_test.bzl`                            | ESLint integration                                                                                |
-| `//tools/clang-tidy:workerd-lint`          | Custom clang-tidy plugin (source: `tools/clang-tidy/workerd-lint.c++`); ships the `jsg-visit-for-gc`, `workerd-consume`, and `workerd-unsafe-continuation-capture` checks |
+| `//tools/clang-tidy:workerd-lint`          | Custom clang-tidy plugin (source: `tools/clang-tidy/workerd-lint.c++`); ships several custom checks |
 
 **Conventions:**
 
@@ -36,11 +36,16 @@ that adds workerd-specific static checks:
 
 - `jsg-visit-for-gc`: flags JSG resource types whose visitable fields
   (`jsg::Ref`, `jsg::JsRef`, `jsg::V8Ref`, `jsg::Function`, `jsg::Promise`,
-  `jsg::BufferSource`, `jsg::Value`, etc., plus `kj::Maybe`/`Array`/`Vector`/
+  `jsg::Value`, etc., plus `kj::Maybe`/`Array`/`Vector`/
   `OneOf` and `jsg::Optional` wrappers thereof) are missing from `visitForGc()`.
+- `workerd-angled-includes` - requires includes of workers/capnproto code from
+    different directories to use angled brackets
 - `workerd-consume`: flags calls to methods annotated with `WD_CONSUME` when
   the call is made directly through `kj::Ptr` instead of through
   `consume(kj::mv(ptr))->method(...)`.
+- `workerd-promise-ignore-result` - warns on superfluous `ignoreResult()` calls:
+  on promises that are immediately `co_await`ed, and on `capnp::Request::send()`
+  results, which should use `sendIgnoringResult()` instead
 - `workerd-unsafe-continuation-capture`: flags lambdas passed to async sinks
   (e.g. `kj::Promise::then`) that capture bare references, raw pointers, or
   non-owning views.
@@ -74,7 +79,7 @@ supports this:
 
 1. Add the check to `.clang-tidy` Checks list
 2. Add an entry to `CHECK_PATH_FILTERS` with an empty list (runs nowhere)
-3. Add packages as they are cleaned up
+3. Add file paths as they are cleaned up
 4. Remove the entry once fully rolled out (runs everywhere)
 
 Example:
@@ -82,14 +87,14 @@ Example:
 ```python
 CHECK_PATH_FILTERS = {
     "workerd-unsafe-continuation-capture": [
-        "//src/workerd/io",
-        "//src/workerd/api",
+        "src/workerd/io",
+        "src/workerd/api",
     ],
 }
 ```
 
-Package prefixes match themselves and all subpackages (`//src/workerd/io`
-matches `//src/workerd/io:*` and `//src/workerd/io/subdir:*`).
+Path prefixes match all files under that directory (`src/workerd/io`
+matches `src/workerd/io/foo.c++` and `src/workerd/io/subdir/bar.c++`).
 
 To run a filtered check everywhere during development:
 

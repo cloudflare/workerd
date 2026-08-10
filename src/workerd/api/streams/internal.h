@@ -5,6 +5,7 @@
 #pragma once
 
 #include "common.h"
+#include "readable.h"
 #include "writable.h"
 
 #include <workerd/io/io-context.h>
@@ -37,7 +38,7 @@ namespace workerd::api {
 
 class WritableStreamInternalController;
 
-class ReadableStreamInternalController: public ReadableStreamController {
+class ReadableStreamInternalController: public ReadableStreamController, public kj::PtrTarget {
  public:
   using Readable = IoOwn<ReadableStreamSource>;
 
@@ -52,9 +53,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
 
   ~ReadableStreamInternalController() noexcept(false) override;
 
-  void setOwnerRef(ReadableStream& stream) override {
-    owner = stream;
-  }
+  void setOwnerRef(kj::Weak<ReadableStream> stream) override;
 
   jsg::Ref<ReadableStream> addRef() override;
 
@@ -94,12 +93,14 @@ class ReadableStreamInternalController: public ReadableStreamController {
     return !readState.is<Unlocked>();
   }
 
-  bool lockReader(jsg::Lock& js, Reader& reader) override;
+  bool lockReader(jsg::Lock& js, kj::Ptr<Reader> reader) override;
 
-  void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
+  void releaseReader(kj::Ptr<Reader> reader, kj::Maybe<jsg::Lock&> maybeJs) override;
   // See the comment for releaseReader in common.h for details on the use of maybeJs
 
-  kj::Maybe<PipeController&> tryPipeLock() override;
+  kj::Maybe<kj::Ptr<PipeController>> tryPipeLock() override;
+
+  void releasePipeLock(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) override;
 
   void visitForGc(jsg::GcVisitor& visitor) override;
 
@@ -131,29 +132,29 @@ class ReadableStreamInternalController: public ReadableStreamController {
   class PipeLocked: public PipeController {
    public:
     static constexpr kj::StringPtr NAME KJ_UNUSED = "pipe-locked"_kj;
-    PipeLocked(ReadableStreamInternalController& inner): inner(inner) {}
+    PipeLocked(kj::Ptr<ReadableStreamInternalController> inner): inner(kj::mv(inner)) {}
 
     bool isClosed() override;
 
     kj::Maybe<jsg::JsValue> tryGetErrored(jsg::Lock& js) override;
 
-    void cancel(jsg::Lock& js, jsg::JsValue reason) override;
-
     void close(jsg::Lock& js) override;
 
     void error(jsg::Lock& js, jsg::JsValue reason) override;
 
-    void release(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) override;
-
-    kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) override;
+    kj::Maybe<kj::Promise<void>> tryPumpTo(kj::Ptr<WritableStreamSink> sink, bool end) override;
 
     jsg::Promise<ReadResult> read(jsg::Lock& js) override;
 
+    kj::Ptr<PipeController> getPtr() override {
+      return addPtrToThis();
+    }
+
    private:
-    ReadableStreamInternalController& inner;
+    kj::Ptr<ReadableStreamInternalController> inner;
   };
 
-  kj::Maybe<ReadableStream&> owner;
+  kj::Weak<ReadableStream> owner;
 
   // State machine for ReadableStreamInternalController:
   // Closed is terminal, Errored is implicitly terminal via ErrorState.
@@ -172,7 +173,10 @@ class ReadableStreamInternalController: public ReadableStreamController {
   //   Unlocked -> ReaderLocked (lockReader() called)
   //   Unlocked -> PipeLocked (tryPipeLock() called)
   //   ReaderLocked -> Unlocked (releaseReader() called)
-  //   PipeLocked -> Unlocked (release() or doClose/doError called)
+  //   PipeLocked -> Unlocked (releasePipeLock() called)
+  //     Only the pipe machinery performs this transition, after dropping the
+  //     kj::Ptr it holds to the PipeLocked state's PipeController. doClose() and
+  //     doError() deliberately leave the pipe lock in place.
   //   Locked -> (remains until stream is done)
   using ReadLockState = StateMachine<Unlocked, Locked, PipeLocked, ReaderLocked>;
   ReadLockState readState = ReadLockState::create<Unlocked>();
@@ -216,8 +220,8 @@ class WritableStreamInternalController: public WritableStreamController {
 
   ~WritableStreamInternalController() noexcept(false) override;
 
-  void setOwnerRef(WritableStream& stream) override {
-    owner = stream;
+  void setOwnerRef(kj::Weak<WritableStream> stream) override {
+    owner = kj::mv(stream);
   }
 
   jsg::Ref<WritableStream> addRef() override;
@@ -242,9 +246,9 @@ class WritableStreamInternalController: public WritableStreamController {
     return !writeState.is<Unlocked>();
   }
 
-  bool lockWriter(jsg::Lock& js, Writer& writer) override;
+  bool lockWriter(jsg::Lock& js, kj::Ptr<Writer> writer) override;
 
-  void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) override;
+  void releaseWriter(kj::Ptr<Writer> writer, kj::Maybe<jsg::Lock&> maybeJs) override;
   // See the comment for releaseWriter in common.h for details on the use of maybeJs
 
   kj::Maybe<jsg::JsValue> isErroring(jsg::Lock& js) override {
@@ -298,7 +302,7 @@ class WritableStreamInternalController: public WritableStreamController {
     ReadableStream& ref;
   };
 
-  kj::Maybe<WritableStream&> owner;
+  kj::Weak<WritableStream> owner;
 
   // State machine for WritableStreamInternalController:
   // Closed is terminal, Errored is implicitly terminal via ErrorState.
@@ -318,7 +322,9 @@ class WritableStreamInternalController: public WritableStreamController {
   //   Unlocked -> PipeLocked (tryPipeFrom() called)
   //   WriterLocked -> Unlocked (releaseWriter() called)
   //   WriterLocked -> Locked (doClose/doError called - stream closed but writer still attached)
-  //   PipeLocked -> Unlocked (pipe completes)
+  //   PipeLocked -> Unlocked (pipe completes, or doClose/doError/drain during an
+  //     active pipe; the source's pipe lock is released separately, by the pipe
+  //     machinery's queue-teardown paths via Pipe::releaseSource())
   using WriteLockState = StateMachine<Unlocked, Locked, PipeLocked, WriterLocked>;
   WriteLockState writeState = WriteLockState::create<Unlocked>();
 
@@ -371,17 +377,27 @@ class WritableStreamInternalController: public WritableStreamController {
       tracker.trackField("promise", promise);
     }
   };
-  struct Pipe {
+  struct Pipe: kj::PtrTarget {
+    // Shared handle used by the pipe loop's promise continuations. The Weak<Pipe>
+    // detects whether the Pipe (a queue event owned by the destination controller) is
+    // still alive.
+    //
+    // NOTE: The wrapper methods below must not hold a strong kj::Ptr<Pipe> across the
+    // delegated call: several of the delegated methods can destroy the Pipe (e.g.
+    // checkSignal() drains the destination queue, and any releaseSource() with a
+    // cancel reason can run user JS that does the same). They use weakRef.tryGet() to
+    // obtain a plain reference instead — the Weak protects against *entering* a dead
+    // Pipe, and nothing touches the Pipe after the delegated call returns.
     struct State: public kj::Refcounted {
       jsg::Ref<WritableStream> owner;
-      kj::Rc<workerd::WeakRef<Pipe>> weakRef;
+      kj::Weak<Pipe> weakRef;
 
-      State(jsg::Ref<WritableStream> owner, kj::Rc<workerd::WeakRef<Pipe>> weakRef)
+      State(jsg::Ref<WritableStream> owner, kj::Weak<Pipe> weakRef)
           : owner(kj::mv(owner)),
             weakRef(kj::mv(weakRef)) {}
 
       inline bool isAborted() const {
-        return !weakRef->isValid();
+        return weakRef == nullptr;
       }
       bool checkSignal(jsg::Lock& js);
       jsg::Promise<void> pipeLoop(jsg::Lock& js);
@@ -395,7 +411,13 @@ class WritableStreamInternalController: public WritableStreamController {
     };
 
     WritableStreamInternalController& parent;
-    kj::Maybe<ReadableStreamController::PipeController&> source;
+    // Keeps the source ReadableStream (and therefore the PipeController that lives in
+    // its lock state) alive for the duration of the pipe, and provides the handle
+    // through which releaseSource() releases the source's pipe lock. Declared before
+    // `source` so that the kj::Ptr is destroyed first: the PipeController must not be
+    // destroyed (by the readable's death) while our pointer to it remains.
+    jsg::Ref<ReadableStream> readable;
+    kj::Maybe<kj::Ptr<ReadableStreamController::PipeController>> source;
     kj::Maybe<jsg::Promise<void>::Resolver> promise;
     struct Flags {
       uint8_t preventAbort : 1;
@@ -405,55 +427,35 @@ class WritableStreamInternalController: public WritableStreamController {
     Flags flags{};
     kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
     kj::Maybe<jsg::JsRef<jsg::JsValue>> capturedSourceError;
-    kj::Maybe<kj::Rc<workerd::WeakRef<Pipe>>> selfRef;
 
     Pipe(WritableStreamInternalController& parent,
-        ReadableStreamController::PipeController& source,
+        jsg::Ref<ReadableStream> readable,
+        kj::Ptr<ReadableStreamController::PipeController> source,
         jsg::Promise<void>::Resolver promise,
         bool preventAbort,
         bool preventClose,
         bool preventCancel,
         kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal)
         : parent(parent),
-          source(source),
+          readable(kj::mv(readable)),
+          source(kj::mv(source)),
           promise(kj::mv(promise)),
-          maybeSignal(kj::mv(maybeSignal)),
-          selfRef(kj::rc<workerd::WeakRef<Pipe>>(kj::Badge<Pipe>(), *this)) {
+          maybeSignal(kj::mv(maybeSignal)) {
       flags.preventAbort = preventAbort;
       flags.preventClose = preventClose;
       flags.preventCancel = preventCancel;
     }
 
-    Pipe(Pipe&& other) noexcept(false)
-        : parent(other.parent),
-          source(kj::mv(other.source)),
-          promise(kj::mv(other.promise)),
-          flags(other.flags),
-          maybeSignal(kj::mv(other.maybeSignal)),
-          capturedSourceError(kj::mv(other.capturedSourceError)),
-          selfRef(kj::rc<workerd::WeakRef<Pipe>>(kj::Badge<Pipe>(), *this)) {
-      // Invalidate the old Pipe's weak ref — any State objects pointing to it
-      // will see isAborted() = true.
-      KJ_IF_SOME(ref, other.selfRef) {
-        ref->invalidate();
-        other.selfRef = kj::none;
-      }
-    }
+    ~Pipe() noexcept(false) {}
 
-    ~Pipe() noexcept(false) {
-      KJ_IF_SOME(ref, selfRef) {
-        ref->invalidate();
-      }
-    }
-
-    KJ_DISALLOW_COPY(Pipe);
+    KJ_DISALLOW_COPY_AND_MOVE(Pipe);
 
     kj::Rc<State> getState() {
-      return kj::rc<State>(parent.addRef(), KJ_ASSERT_NONNULL(selfRef).addRef());
+      return kj::rc<State>(parent.addRef(), addWeakToThis());
     }
 
     void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(promise, maybeSignal, capturedSourceError);
+      visitor.visit(readable, promise, maybeSignal, capturedSourceError);
     }
 
     void releaseSource(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none);
@@ -471,22 +473,23 @@ class WritableStreamInternalController: public WritableStreamController {
       return kj::mv(promise);
     }
 
-    JSG_MEMORY_INFO(Pipe) {
-      tracker.trackField("promise", promise);
-      tracker.trackField("signal", maybeSignal);
-      tracker.trackField("capturedSourceError", capturedSourceError);
-    }
+    // Memory info methods are defined out-of-line (in internal.c++) because tracking
+    // the `readable` field requires ReadableStream to be a complete type, and this
+    // header only sees its forward declaration.
+    kj::StringPtr jsgGetMemoryName() const;
+    size_t jsgGetMemorySelfSize() const;
+    void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
   };
   struct WriteEvent {
     kj::Maybe<IoOwn<kj::Promise<void>>> outputLock;  // must wait for this before actually writing
-    kj::OneOf<Write, Pipe, Close, Flush> event;
+    kj::OneOf<Write, kj::Own<Pipe>, Close, Flush> event;
 
     bool isCloseOrFlush() const {
       return event.is<Close>() || event.is<Flush>();
     }
 
     bool isPipe() const {
-      return event.is<Pipe>();
+      return event.is<kj::Own<Pipe>>();
     }
 
     JSG_MEMORY_INFO(WriteEvent) {
@@ -497,8 +500,8 @@ class WritableStreamInternalController: public WritableStreamController {
         KJ_CASE_ONEOF(w, Write) {
           tracker.trackField("inner", w);
         }
-        KJ_CASE_ONEOF(p, Pipe) {
-          tracker.trackField("inner", p);
+        KJ_CASE_ONEOF(p, kj::Own<Pipe>) {
+          tracker.trackField("inner", *p);
         }
         KJ_CASE_ONEOF(c, Close) {
           tracker.trackField("inner", c);

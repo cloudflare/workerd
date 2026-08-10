@@ -643,6 +643,195 @@ KJ_TEST("Server: serve basic Service Worker") {
     Bad Request)"_blockquote);
 }
 
+KJ_TEST("Server: serve Service Worker using the new module registry") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    compatibilityFlags = ["new_module_registry"],
+    serviceWorkerScript =
+        `addEventListener("fetch", event => {
+        `  event.respondWith(new Response("NMR: " + event.request.url));
+        `})
+  ))"_kj));
+
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/service-worker", "NMR: http://foo/service-worker");
+}
+
+// Note: Python workers ignore the new_module_registry flag entirely — they
+// always use the original module registry. That decision is centralized in
+// isNewModuleRegistryEnabled() (io/features.h) and unit-tested in
+// compatibility-date-test.c++; it cannot be exercised end-to-end here because
+// starting a python_workers-flagged worker requires the Pyodide bundle, which
+// server-test cannot fetch.
+
+KJ_TEST("Server: wrapped bindings work under the new module registry") {
+  // Wrapped bindings resolve their module through jsg::Lock::resolveInternalModule, which
+  // dispatches on which module registry the isolate is using. Both registries store their
+  // own type in the same MODULE_REGISTRY context slot, and the slot is read back with an
+  // unchecked reinterpret_cast whose V8 embedder type tag is derived from the slot rather
+  // than the type -- so reaching the wrong registry's accessor from here would type-confuse
+  // rather than fail. Exercise the binding end to end under new_module_registry so that
+  // any regression to a registry-specific lookup shows up as a test failure.
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-10-01",
+    compatibilityFlags = ["new_module_registry", "experimental"],
+    modules = [
+      ( name = "worker",
+        esModule =
+          `export default {
+          `  fetch(req, env) { return new Response("wrapped: " + typeof env.wrapped); }
+          `}
+      )
+    ],
+    bindings = [
+      ( name = "wrapped",
+        wrapped = (
+          moduleName = "cloudflare-internal:d1-api"
+        )
+      )
+    ]
+  ))"_kj));
+
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "wrapped: object");
+}
+
+KJ_TEST("Server: duplicate module names are reported as config errors (legacy registry)") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-10-01",
+    modules = [
+      ( name = "worker",
+        esModule =
+          `export default {}
+      ),
+      ( name = "dup",
+        esModule =
+          `export default 1
+      ),
+      ( name = "dup",
+        esModule =
+          `export default 2
+      )
+    ]
+  ))"_kj));
+
+  test.expectErrors(R"(
+    service hello: Uncaught Error: Module "dup" already added to bundle
+  )"_blockquote);
+}
+
+KJ_TEST("Server: duplicate module names are reported as config errors (new module registry)") {
+  // Errors thrown while building the new module registry (which happens
+  // before the Worker::Script is constructed) must be reported as config
+  // errors rather than escaping and aborting server startup.
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-10-01",
+    compatibilityFlags = ["new_module_registry"],
+    modules = [
+      ( name = "worker",
+        esModule =
+          `export default {}
+      ),
+      ( name = "dup",
+        esModule =
+          `export default 1
+      ),
+      ( name = "dup",
+        esModule =
+          `export default 2
+      )
+    ]
+  ))"_kj));
+
+  test.server.allowExperimental();
+  // The second error is a consequence of the first: after reporting the
+  // registry error, worker construction proceeds with an inert empty script,
+  // which registers no handlers.
+  test.expectErrors(R"(
+    service hello: Module "file:///bundle/dup" already added to bundle
+    service hello: No event handlers were registered. This script does nothing.
+  )"_blockquote);
+}
+
+KJ_TEST("Server: extension modules with non-URL names are config errors (new module registry)") {
+  // The new module registry identifies extension modules by URL. An extension
+  // module whose name does not parse as an absolute URL must be reported as a
+  // config error rather than being silently dropped (which would otherwise
+  // surface as a confusing "Module not found" error at import time).
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-10-01",
+          compatibilityFlags = ["new_module_registry"],
+          modules = [
+            ( name = "worker",
+              esModule =
+                `export default {}
+            )
+          ]
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ],
+    extensions = [
+      ( modules = [
+          ( name = "not-a-url",
+            esModule =
+              `export default 1
+          )
+        ]
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  // The second error is a consequence of the first: after reporting the
+  // registry error, worker construction proceeds with an inert empty script,
+  // which registers no handlers.
+  test.expectErrors(R"(
+    service hello: Invalid extension module name "not-a-url": when the new_module_registry compatibility flag is enabled, extension module names must be fully-qualified URLs (e.g. "my-extension:module").
+    service hello: No event handlers were registered. This script does nothing.
+  )"_blockquote);
+}
+
+KJ_TEST("Server: python modules without python_workers flag (new module registry)") {
+  // Python modules in a bundle without the python_workers compatibility flag
+  // are a config error. Under the new module registry this is detected while
+  // building the registry; it must be reported like any other config error
+  // (with the same message the legacy registry path reports).
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-10-01",
+    compatibilityFlags = ["new_module_registry"],
+    modules = [
+      ( name = "worker.py",
+        pythonModule =
+          `def x(): pass
+      )
+    ]
+  ))"_kj));
+
+  test.server.allowExperimental();
+  // The second error is a consequence of the first: after reporting the
+  // registry error, worker construction proceeds with an inert empty script,
+  // which registers no handlers.
+  test.expectErrors(R"(
+    service hello: The python_workers compatibility flag is required to use Python.
+    service hello: No event handlers were registered. This script does nothing.
+  )"_blockquote);
+}
+
 KJ_TEST("Server: use service name as Service Worker origin") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
@@ -1208,14 +1397,9 @@ KJ_TEST("Server: connect() with Worker as outbound, no connect_pass_though") {
                 `
                 `export default {
                 `  async fetch(request, env) {
-                `    // TODO(bug): At present this throws synchronously, which seems like a bug in
-                `    //   the implementation of connect(): errors coming from the destination
-                `    //   service really ought to be async (in prod, they always will be), showing
-                `    //   up on the first read or write. At present, though, I'm not looking to
-                `    //   fix this bug.
-                `    assert.throws(() => connect("subhost:123"), {
-                `      name: "TypeError",
-                `      message: "Incoming CONNECT on a worker not supported",
+                `    await assert.rejects(async () => { await connect("subhost:123").opened; }, {
+                `       name: "Error",
+                `       message: "proxy request failed, cannot connect to the specified address",
                 `    });
                 `
                 `    return new Response("OK");
@@ -1249,6 +1433,7 @@ KJ_TEST("Server: connect() with Worker as outbound, no connect_pass_though") {
     ]
   ))"_kj);
 
+  KJ_EXPECT_LOG(ERROR, "Handler does not export a connect() function");
   test.server.allowExperimental();
   test.start();
   auto conn = test.connect("test-addr");
@@ -1481,6 +1666,255 @@ KJ_TEST("Server: capability bindings") {
     Hello from Queue
     Hello from Hyperdrive(test-user)
   )"_blockquote);
+}
+
+KJ_TEST("Server: Hyperdrive connect via synthetic IP") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { connect } from 'cloudflare:sockets';
+                `export default {
+                `  async fetch(request, env) {
+                `    const ip = env.hyperdrive.ip;
+                `    if (!/^240\.0\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+                `      throw new Error(`unexpected hyperdrive ip: ${ip}`);
+                `    }
+                `    const connection = connect(`${ip}:5432`);
+                `    const encoded = new TextEncoder().encode("hyperdrive-ip-test");
+                `    await connection.writable.getWriter().write(new Uint8Array(encoded));
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "hyperdrive",
+              hyperdrive = (
+                designator = "hyperdrive-outbound",
+                database = "test-db",
+                user = "test-user",
+                password = "test-password",
+                scheme = "postgresql"
+              )
+            )
+          ]
+        )
+      ),
+      ( name = "hyperdrive-outbound", external = (
+        address = "hyperdrive-host",
+        tcp = ()
+      ))
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  {
+    auto subreq = test.receiveSubrequest("hyperdrive-host");
+    subreq.recv("hyperdrive-ip-test");
+  }
+  conn.recvHttp200("OK");
+}
+
+KJ_TEST("Server: Hyperdrive host resolves via node:dns to synthetic IP") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          compatibilityFlags = ["nodejs_compat"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { connect } from 'cloudflare:sockets';
+                `import { promises as dns } from 'node:dns';
+                `export default {
+                `  async fetch(request, env) {
+                `    // Reading host primes the connect/dns overrides.
+                `    const host = env.hyperdrive.host;
+                `    const { address, family } = await dns.lookup(host);
+                `    if (family !== 4 || !/^240\.0\.\d{1,3}\.\d{1,3}$/.test(address)) {
+                `      throw new Error(`unexpected lookup result: ${address}/${family}`);
+                `    }
+                `    const connection = connect(`${address}:5432`);
+                `    const encoded = new TextEncoder().encode("hyperdrive-dns-test");
+                `    await connection.writable.getWriter().write(new Uint8Array(encoded));
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "hyperdrive",
+              hyperdrive = (
+                designator = "hyperdrive-outbound",
+                database = "test-db",
+                user = "test-user",
+                password = "test-password",
+                scheme = "postgresql"
+              )
+            )
+          ]
+        )
+      ),
+      ( name = "hyperdrive-outbound", external = (
+        address = "hyperdrive-host",
+        tcp = ()
+      ))
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  {
+    auto subreq = test.receiveSubrequest("hyperdrive-host");
+    subreq.recv("hyperdrive-dns-test");
+  }
+  conn.recvHttp200("OK");
+}
+
+KJ_TEST("Server: Hyperdrive host resolves via node:dns resolve4 to synthetic IP") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          compatibilityFlags = ["nodejs_compat"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { connect } from 'cloudflare:sockets';
+                `import { promises as dns } from 'node:dns';
+                `export default {
+                `  async fetch(request, env) {
+                `    // Reading host primes the connect/dns overrides.
+                `    const host = env.hyperdrive.host;
+                `    const [address] = await dns.resolve4(host);
+                `    if (!/^240\.0\.\d{1,3}\.\d{1,3}$/.test(address)) {
+                `      throw new Error(`unexpected resolve4 result: ${address}`);
+                `    }
+                `    const connection = connect(`${address}:5432`);
+                `    const encoded = new TextEncoder().encode("hyperdrive-resolve4-test");
+                `    await connection.writable.getWriter().write(new Uint8Array(encoded));
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "hyperdrive",
+              hyperdrive = (
+                designator = "hyperdrive-outbound",
+                database = "test-db",
+                user = "test-user",
+                password = "test-password",
+                scheme = "postgresql"
+              )
+            )
+          ]
+        )
+      ),
+      ( name = "hyperdrive-outbound", external = (
+        address = "hyperdrive-host",
+        tcp = ()
+      ))
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  {
+    auto subreq = test.receiveSubrequest("hyperdrive-host");
+    subreq.recv("hyperdrive-resolve4-test");
+  }
+  conn.recvHttp200("OK");
+}
+
+KJ_TEST("Server: Hyperdrive connect via IPv4-mapped IPv6") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { connect } from 'cloudflare:sockets';
+                `export default {
+                `  async fetch(request, env) {
+                `    // The IPv4-mapped IPv6 spelling must route to the same override as the IPv4.
+                `    const connection = connect(`[::ffff:${env.hyperdrive.ip}]:5432`);
+                `    const encoded = new TextEncoder().encode("hyperdrive-mapped-test");
+                `    await connection.writable.getWriter().write(new Uint8Array(encoded));
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "hyperdrive",
+              hyperdrive = (
+                designator = "hyperdrive-outbound",
+                database = "test-db",
+                user = "test-user",
+                password = "test-password",
+                scheme = "postgresql"
+              )
+            )
+          ]
+        )
+      ),
+      ( name = "hyperdrive-outbound", external = (
+        address = "hyperdrive-host",
+        tcp = ()
+      ))
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  {
+    auto subreq = test.receiveSubrequest("hyperdrive-host");
+    subreq.recv("hyperdrive-mapped-test");
+  }
+  conn.recvHttp200("OK");
 }
 
 KJ_TEST("Server: cyclic bindings") {
@@ -3159,6 +3593,160 @@ KJ_TEST("Server: Durable Objects websocket hibernation") {
   KJ_EXPECT(wsConn.isEof());
 }
 
+KJ_TEST("Server: Durable Objects websocket constructor throws after send") {
+  // This is a regression test for https://jira.cfdata.org/browse/VULN-146323,
+  // It should be run under ASAN.
+  TestServer test(R"((
+    services = [(
+      name = "main",
+      worker = (
+        compatibilityDate = "2026-07-01",
+        modules = [(
+          name = "main.js",
+          esModule =
+            `export default {
+            `  fetch(request, env) {
+            `    return env.ns.getByName("repro").fetch(request);
+            `  }
+            `};
+            `
+            `export class VulnerableActor {
+            `  constructor(ctx) {
+            `    this.ctx = ctx;
+            `    const sockets = ctx.getWebSockets();
+            `    if (sockets.length > 0) {
+            `      sockets[0].send("pending");
+            `      throw new Error("constructor failed after send");
+            `    }
+            `  }
+            `
+            `  fetch() {
+            `    const [client, server] = Object.values(new WebSocketPair());
+            `    this.ctx.acceptWebSocket(server);
+            `    return new Response(null, {status: 101, webSocket: client});
+            `  }
+            `}
+        )],
+        bindings = [(name = "ns", durableObjectNamespace = "VulnerableActor")],
+        durableObjectNamespaces = [(
+          className = "VulnerableActor",
+          uniqueKey = "repro-key",
+        )],
+        durableObjectStorage = (inMemory = void),
+      ),
+    )],
+    sockets = [(name = "main", address = "test-addr", service = "main")],
+  ))"_kj);
+
+  test.start();
+  auto wsConn = test.connect("test-addr");
+  wsConn.upgradeToWebSocket();
+
+  // Force hibernation by waiting 10 seconds.
+  test.wait(10);
+
+  // Send a close event. The event reconstructs an actor whose constructor starts a send pump and then throws.
+  // Before the fix, `ws.send` inside `LegacyWebSocketAdapter::pump` was called on the freed
+  // `kj::WebSocket& ws`, which caused a UAF.
+  wsConn.send(kj::str("\x88\x02\x03\xe8"));
+  // Wait for a pump loop to finish.
+  test.wait(1);
+  // Nothing was sent from the DO, ws is closed now.
+  KJ_ASSERT(wsConn.isEof());
+}
+
+KJ_TEST("Server: Durable Objects websocket constructor blockConcurrencyWhile throws after send") {
+  // Calling `blockConcurrencyWhile()` from the constructor lets us do two things:
+  // 1. Make the websocket suspend on send before we throw an exception.
+  // 2. Observe the "normal" behavior when `LegacyWebSocketAdapter::pump` is canceled after `ctx.abort()`.
+  // This test showcases that the only situation in which `ws` can be freed during the pump loop is when
+  // we throw from the constructor.
+  TestServer test(R"((
+    services = [(
+      name = "main",
+      worker = (
+        compatibilityDate = "2026-07-01",
+        modules = [(
+          name = "main.js",
+          esModule =
+            `export default {
+            `  fetch(request, env) {
+            `    return env.ns.getByName("repro").fetch(request);
+            `  }
+            `};
+            `
+            `export class VulnerableActor {
+            `  constructor(ctx) {
+            `    this.ctx = ctx;
+            `    const sockets = ctx.getWebSockets();
+            `    if (sockets.length > 0) {
+            `      ctx.blockConcurrencyWhile(async () => {
+            `        sockets[0].send("pending");
+            `        // we use fetch to yield from JS to IO event loop
+            `        const resp = await fetch("http://subhost/foo");
+            `        const text = await resp.text();
+            `        // at that moment we expect `sockets[0]` to suspend on `ws.send`
+            `        // in `LegacyWebSocketAdapter::pump` loop, because we haven't read from this websocket yet
+            `        throw new Error("constructor failed after send");
+            `      });
+            `    }
+            `  }
+            `
+            `  fetch() {
+            `    const [client, server] = Object.values(new WebSocketPair());
+            `    this.ctx.acceptWebSocket(server);
+            `    return new Response(null, {status: 101, webSocket: client});
+            `  }
+            `}
+        )],
+        bindings = [(name = "ns", durableObjectNamespace = "VulnerableActor")],
+        durableObjectNamespaces = [(
+          className = "VulnerableActor",
+          uniqueKey = "repro-key",
+        )],
+        durableObjectStorage = (inMemory = void),
+      ),
+    )],
+    sockets = [(name = "main", address = "test-addr", service = "main")],
+  ))"_kj);
+
+  test.start();
+  auto wsConn = test.connect("test-addr");
+  wsConn.upgradeToWebSocket();
+
+  // Force hibernation by waiting 10 seconds.
+  test.wait(10);
+
+  // Send a close event. The event reconstructs an actor whose constructor enters a `blockConcurrencyWhile` block,
+  // starts a send pump and then throws.
+  wsConn.send(kj::str("\x88\x02\x03\xe8"));
+
+  // The reconstructed actor's constructor makes an outbound fetch to yield from JS to IO event loop,
+  // we need wait for it.
+  auto subreq = test.receiveInternetSubrequest("subhost");
+  subreq.recv(R"(
+    GET /foo HTTP/1.1
+    Host: subhost
+
+  )"_blockquote);
+  subreq.send(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 11
+
+    hello world
+  )"_blockquote);
+
+  // The only way I can find to check that the `LegacyWebSocketAdapter::pump` was canceled is to
+  // assert on the disconnection exception that gets logged when the WebSocketPipe is torn down:
+  //   exception = kj/compat/http.c++:4362: disconnected: other end of WebSocketPipe was destroyed
+  KJ_EXPECT_LOG(INFO, "other end of WebSocketPipe was destroyed");
+
+  // Wait for a pump loop to finish.
+  test.wait(1);
+  // Nothing was sent from the DO, ws is closed now.
+  KJ_ASSERT(wsConn.isEof());
+}
+
 KJ_TEST("Server: tail workers") {
   TestServer test(R"((
     services = [
@@ -4351,6 +4939,88 @@ KJ_TEST("Server: cached response") {
     CF-Cache-Status: HIT
 
     cached)"_blockquote);
+}
+
+KJ_TEST("Server: re-put of raw cache.match() body resolves") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          cacheApiOutbound = "cache-outbound",
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    const cache = caches.default;
+                `    const cached = await cache.match(request);
+                `    if (cached === undefined) return new Response('MISS');
+                `    const put = cache.put(request, new Response(cached.body, cached));
+                `    const result = await Promise.race([
+                `      put.then(() => 'RESOLVED', (e) => 'REJECTED: ' + e),
+                `      scheduler.wait(5000).then(() => 'HUNG'),
+                `    ]);
+                `    return new Response(result);
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "cache-outbound", external = "cache-host" ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  auto getSubreq = test.receiveSubrequest("cache-host");
+  getSubreq.recv(R"(
+    GET / HTTP/1.1
+    Host: foo
+    Cache-Control: only-if-cached
+
+  )"_blockquote);
+  getSubreq.send(R"(
+    HTTP/1.1 200 OK
+    CF-Cache-Status: HIT
+    Cache-Control: max-age=300
+    Content-Length: 4
+
+    seed)"_blockquote);
+
+  {
+    auto putSubreq = test.receiveSubrequest("cache-host");
+    putSubreq.recv(R"(
+      PUT / HTTP/1.1
+      Content-Length: 92
+      Host: foo
+
+      HTTP/1.1 200 OK
+      Content-Length: 4
+      Cache-Control: max-age=300
+      CF-Cache-Status: HIT
+
+      seed)"_blockquote);
+    putSubreq.send(R"(
+      HTTP/1.1 204 No Content
+      Content-Length: 0
+
+    )"_blockquote);
+  }
+
+  // Advance past the 5-second hang-detection race in the worker.
+  test.wait(6);
+
+  conn.recvHttp200("RESOLVED");
 }
 
 KJ_TEST("Server: cache name is passed through to service") {
@@ -5898,10 +6568,15 @@ KJ_TEST("Server: structured logging with console methods") {
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
     KJ_ASSERT(logline.contains(R"("level":"error")"), logline);
+    // Stack frames name the module differently between module registries: the
+    // original registry uses the bare module name ("main.js"), the new module
+    // registry uses the canonical URL ("file:///bundle/main.js"). Match the
+    // parts common to both.
     KJ_ASSERT(
         logline.contains(
-            R"_("message":"Error: Test exception for structured logging\n    at Object.fetch (main.js:18:13)")_"),
+            R"_("message":"Error: Test exception for structured logging\n    at Object.fetch ()_"),
         logline);
+    KJ_ASSERT(logline.contains(R"_(main.js:18:13)")_"), logline);
   });
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
@@ -6769,6 +7444,292 @@ KJ_TEST("Server: DO facet abort during pending startup") {
   // The response should contain the caught abort error message, proving the request
   // was rejected cleanly rather than crashing with a UAF.
   conn.recvHttp200("caught: aborted during startup");
+}
+
+KJ_TEST("Server: ctx.access from accessBlobHeader on Worker") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          accessBlobHeader = "MF-Access-Blob",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    if (!ctx.access) return new Response("no-access");
+                `    const identity = await ctx.access.getIdentity();
+                `    return new Response(JSON.stringify({
+                `      aud: ctx.access.aud,
+                `      identity: identity,
+                `    }));
+                `  }
+                `}
+            )
+          ],
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello",
+        http = ()
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+
+  // Request with access blob header — ctx.access should be populated.
+  conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"app_aud":"test-aud-12345","jwt_claims":{"email":"test@example.com"}}
+
+)"_kj);
+  conn.recvHttp200(R"({"aud":"test-aud-12345"})");
+
+  // Request without the header — ctx.access should be undefined.
+  conn.httpGet200("/", "no-access");
+}
+
+KJ_TEST("Server: ctx.access.getIdentity() dispatches to accessBindingService") {
+  // Exercises the full channel-based identity dispatch path with two workers:
+  //   - main-worker: has accessBlobHeader + accessBindingService configured
+  //   - access-binding: implements getIdentity via WorkerEntrypoint, reads ctx.props
+  //
+  // The request flow is: AccessHeaderExtractor parses the blob header into BlobAccessInfo,
+  // getIdentity() dispatches via Fetcher(channel), startSubrequest() intercepts the access
+  // binding channel and injects per-request props via forProps({aud, jwtClaims}), and the
+  // binding worker returns an identity object derived from ctx.props.
+  TestServer test(R"((
+    services = [
+      ( name = "main-worker",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          compatibilityFlags = ["experimental"],
+          accessBlobHeader = "MF-Access-Blob",
+          accessBindingService = (name = "access-binding", entrypoint = "AccessBinding"),
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    if (!ctx.access) return new Response("no-access");
+                `    const identity = await ctx.access.getIdentity();
+                `    return new Response(JSON.stringify({
+                `      aud: ctx.access.aud,
+                `      identity: identity,
+                `    }));
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+      ( name = "access-binding",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import {WorkerEntrypoint} from "cloudflare:workers";
+                `export default {
+                `  async fetch(request) {
+                `    return new Response("not used");
+                `  }
+                `}
+                `export class AccessBinding extends WorkerEntrypoint {
+                `  async getIdentity() {
+                `    return {
+                `      email: this.ctx.props.jwtClaims?.email ?? "unknown",
+                `      aud: this.ctx.props.aud,
+                `    };
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "main-worker",
+        http = ()
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+
+  // Request with access blob header + jwt_claims — getIdentity should return the identity.
+  conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"app_aud":"test-aud-99","jwt_claims":{"email":"user@example.com"}}
+
+)"_kj);
+  conn.recvHttp200(
+      R"({"aud":"test-aud-99","identity":{"email":"user@example.com","aud":"test-aud-99"}})");
+
+  // Request with access blob header but no jwt_claims — getIdentity should still work,
+  // jwtClaims will be undefined in the binding worker's ctx.props.
+  conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"app_aud":"test-aud-42"}
+
+)"_kj);
+  conn.recvHttp200(R"({"aud":"test-aud-42","identity":{"email":"unknown","aud":"test-aud-42"}})");
+
+  // Request without the header — ctx.access should be undefined.
+  conn.httpGet200("/", "no-access");
+}
+
+KJ_TEST("Server: ctx.access is undefined without accessBlobHeader config") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2025-08-01",
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `export default {
+          `  async fetch(request, env, ctx) {
+          `    return new Response(String(ctx.access));
+          `  }
+          `}
+      )
+    ],
+  ))"_kj));
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "undefined");
+}
+
+KJ_TEST("Server: accessBlobHeader rejects malformed blobs") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          accessBlobHeader = "MF-Access-Blob",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    return new Response("should not reach here");
+                `  }
+                `}
+            )
+          ],
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello",
+        http = ()
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  // Each malformed blob should result in a 500 with Connection: close,
+  // so a new connection is needed for each case.
+
+  // Case 1: Invalid JSON syntax.
+  {
+    KJ_EXPECT_LOG(ERROR, "Uncaught exception");
+    auto conn = test.connect("test-addr");
+    conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: not-valid-json
+
+)"_kj);
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
+
+  // Case 2: Valid JSON but not an object.
+  {
+    KJ_EXPECT_LOG(ERROR, "accessBlobHeader value must be a JSON object");
+    auto conn = test.connect("test-addr");
+    conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: "just-a-string"
+
+)"_kj);
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
+
+  // Case 3: app_aud field is not a string.
+  {
+    KJ_EXPECT_LOG(ERROR, "access blob `app_aud` must be a string");
+    auto conn = test.connect("test-addr");
+    conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"app_aud":123}
+
+)"_kj);
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
+
+  // Case 4: Missing app_aud field entirely.
+  {
+    KJ_EXPECT_LOG(ERROR, "accessBlobHeader JSON must contain an `app_aud` field");
+    auto conn = test.connect("test-addr");
+    conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"jwt_claims":{"email":"test@example.com"}}
+
+)"_kj);
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
+
+  // Case 5: jwt_claims field is not an object.
+  {
+    KJ_EXPECT_LOG(ERROR, "access blob `jwt_claims` must be a JSON object");
+    auto conn = test.connect("test-addr");
+    conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"app_aud":"valid-aud","jwt_claims":"not-an-object"}
+
+)"_kj);
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
 }
 
 }  // namespace

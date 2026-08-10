@@ -102,7 +102,10 @@ impl Interface for Worker {
         })
     }
 
-    async fn custom_event(&mut self, _event: Pin<&mut CustomEvent>) -> Result<CustomEventResult> {
+    async fn custom_event(
+        &mut self,
+        _event: crate::KjOwn<CustomEvent>,
+    ) -> Result<CustomEventResult> {
         Ok(CustomEventResult {
             outcome: EventOutcome::KillSwitch,
         })

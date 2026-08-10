@@ -90,12 +90,21 @@ export default {
 //   - Subrequests: parentSpanId is the caller's user span ID (sequential, from spanOpen)
 //   - Hibernation: parentSpanId is the caller's invocation root span ID (from fromEntropy)
 // Scoping by traceId avoids false matches from sequential span IDs that reset per invocation.
+// Stack frames in trace events name modules differently between the module
+// registries: the original registry uses the bare module name ('worker'),
+// while the new module registry uses the module's canonical URL
+// ('file:///bundle/worker'). Normalize to the bare form so the expectations
+// below hold under both.
+function normalizeStackFilenames(events) {
+  return events.replaceAll('file:///bundle/worker', 'worker');
+}
+
 function buildTree(invocations) {
   // First pass: create nodes and group by traceId.
   const byTraceId = new Map();
   const nodes = [];
   for (const inv of invocations) {
-    const node = { events: inv.events, children: [] };
+    const node = { events: normalizeStackFilenames(inv.events), children: [] };
     nodes.push({ inv, node });
     if (!byTraceId.has(inv.traceId)) {
       byTraceId.set(inv.traceId, []);
@@ -161,6 +170,70 @@ function n(events, children = []) {
   return { events, children };
 }
 
+// Regression check (WO-1436) for the "large-log" subject worker, which is tailed by this same
+// "log" streaming tail worker. The point of the regression is that an oversized log / span attribute must
+// NOT tear down the stream.
+function isLargeLogInvocation(inv) {
+  return inv.events.includes('subject/big-');
+}
+
+function assertLargeLogRegression(invocations) {
+  assert.ok(
+    invocations.length > 0,
+    'expected the large-log subject to be tailed by the shared "log" tail worker'
+  );
+
+  const events = invocations.map((inv) => inv.events).join('');
+
+  // --- Oversized console.log ---
+  assert.ok(
+    events.includes('"type":"outcome"'),
+    'the outcome event was not delivered after the oversized log (stream torn down?)'
+  );
+  assert.ok(
+    events.includes('marker-after-big-log'),
+    'the log after the oversized log was not delivered (stream torn down?)'
+  );
+  // The oversized log is delivered as a raw truncated prefix.
+  assert.ok(
+    events.includes(
+      '"type":"log","level":"log","message":"[\\"AAAAAAAAAAAAAAAAAAAA'
+    ),
+    'the oversized log was not delivered as a raw serialized prefix'
+  );
+  assert.ok(
+    events.includes('"truncated":true'),
+    'the oversized log was not marked as truncated'
+  );
+  assert.ok(
+    events.includes('"message":["marker-after-big-log"]'),
+    'the normal log after the oversized log was not parsed normally'
+  );
+
+  // --- Oversized span attribute ---
+  assert.ok(
+    events.includes('big-attribute-span'),
+    'the custom span was not delivered'
+  );
+  assert.ok(
+    events.includes(
+      '"name":"cloudflare.warning.type","value":"span_data_limit_exceeded"'
+    ),
+    'the oversized attribute did not degrade into a cloudflare.warning.type tag'
+  );
+  assert.ok(
+    events.includes('"name":"cloudflare.warning.message"'),
+    'the oversized attribute did not produce a cloudflare.warning.message tag'
+  );
+
+  // The complete oversized payload must not be shipped. A bounded prefix is retained for the
+  // truncated log, while the oversized span attribute is dropped entirely.
+  assert.ok(
+    !events.includes('A'.repeat(300 * 1024)),
+    'the complete oversized payload leaked into the tail stream'
+  );
+}
+
 // Event strings shared between both expected trees (sorted alphabetically within each group).
 const E = {
   // actor-alarms-test.js
@@ -178,6 +251,8 @@ const E = {
     '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"DurableObjectExample","durableObjectId":"DO_ID","scriptTags":[],"info":{"type":"hibernatableWebSocket","info":{"type":"message"}}}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
   wsClose:
     '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"DurableObjectExample","durableObjectId":"DO_ID","scriptTags":[],"info":{"type":"hibernatableWebSocket","info":{"type":"close","code":1000,"wasClean":true}}}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  wsThrow:
+    '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"DurableObjectExample","durableObjectId":"DO_ID","scriptTags":[],"info":{"type":"fetch","method":"GET","url":"http://example.com/throw","headers":[{"name":"upgrade","value":"websocket"}]}}{"type":"exception","name":"Error","message":"boom","stack":"    at DurableObjectExample.fetch (worker:25:13)"}{"type":"outcome","outcome":"exception","cpuTime":0,"wallTime":0}',
 
   // jsrpc
   myActorJsrpc:
@@ -188,6 +263,24 @@ const E = {
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"attributes","info":[{"name":"jsrpc.method","value":"getCounter"}]}{"type":"log","level":"log","message":["bar"]}{"type":"log","level":"log","message":["getCounter called"]}{"type":"return"}{"type":"log","level":"log","message":["increment called on transient"]}{"type":"log","level":"log","message":["getValue called on transient"]}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
   jsrpcDoSubrequest:
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000001"}{"type":"spanOpen","name":"durable_object_subrequest","spanId":"0000000000000002"}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000003"}{"type":"attributes","info":[{"name":"objectId","value":"af6dd8b6678e07bac992dae1bbbb3f385af19ebae7e5ea8c66d6341b246d3328"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanClose","outcome":"ok"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  jsrpcDisposal:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"disposal","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000002"}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000003"}{"type":"spanClose","outcome":"ok"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  jsrpcNamedServiceBinding:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"namedServiceBinding","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  jsrpcPortAbortCall:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"portAbortCall","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"durable_object_subrequest","spanId":"0000000000000001"}{"type":"attributes","info":[{"name":"objectId","value":"000000000000000000000000000000002aae183609eb9745ae9a5bb18ffb4793"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"durable_object_subrequest","spanId":"0000000000000002"}{"type":"attributes","info":[{"name":"objectId","value":"0100000000000000000000000000000067d1138346e9d456110d9e5cdfb6d564"}]}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  jsrpcTestDispose:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"attributes","info":[{"name":"jsrpc.method","value":"leak"}]}{"type":"log","level":"log","message":["bar"]}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  jsrpcExceptionI:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"attributes","info":[{"name":"jsrpc.method","value":"neverReturn"}]}{"type":"log","level":"log","message":["bar"]}{"type":"exception","name":"Error","message":"The Workers runtime canceled this request because it detected that your Worker\'s code had hung and would never generate a response. Refer to: https://developers.cloudflare.com/workers/observability/errors/"}{"type":"outcome","outcome":"exception","cpuTime":0,"wallTime":0}',
+  jsrpcExceptionII:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"attributes","info":[{"name":"jsrpc.method","value":"leakButReturnPlainObject"}]}{"type":"log","level":"log","message":["bar"]}{"type":"return"}{"type":"exception","name":"Error","message":"The Workers runtime canceled this request because it detected that your Worker\'s code had hung and would never generate a response. Refer to: https://developers.cloudflare.com/workers/observability/errors/"}{"type":"outcome","outcome":"exception","cpuTime":0,"wallTime":0}',
+  jsrpcExceptionIII:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"attributes","info":[{"name":"jsrpc.method","value":"testDispose"}]}{"type":"log","level":"log","message":["bar"]}{"type":"return"}{"type":"exception","name":"Error","message":"The Workers runtime canceled this request because it detected that your Worker\'s code had hung and would never generate a response. Refer to: https://developers.cloudflare.com/workers/observability/errors/"}{"type":"outcome","outcome":"exception","cpuTime":0,"wallTime":0}',
+  jsrpcExceptionIV:
+    '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"MyActor","durableObjectId":"DO_ID","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"log","level":"log","message":["baz"]}{"type":"attributes","info":[{"name":"jsrpc.method","value":"makePostAbortCallTester"}]}{"type":"return"}{"type":"exception","name":"Error","message":"test aborted by abort()"}{"type":"outcome","outcome":"exception","cpuTime":0,"wallTime":0}',
+  jsrpcExceptionV:
+    '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"MyActor","durableObjectId":"DO_ID","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"log","level":"log","message":["baz"]}{"type":"attributes","info":[{"name":"jsrpc.method","value":"makePostAbortCallTester"}]}{"type":"return"}{"type":"exception","name":"Error","message":"test broken critical section","stack":"    at worker:144:13"}{"type":"exception","name":"Error","message":"test broken critical section","stack":"    at worker:144:13"}{"type":"outcome","outcome":"exception","cpuTime":0,"wallTime":0}',
 
   // cacheMode
   cacheMode:
@@ -205,7 +298,7 @@ const E = {
 
   // http-test.js: main test() handler with fetches + scheduled
   httpTest:
-    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"fetch","spanId":"0000000000000001"}{"type":"attributes","info":[{"name":"network.protocol.name","value":"http"},{"name":"network.protocol.version","value":"HTTP/1.1"},{"name":"http.request.method","value":"POST"},{"name":"url.full","value":"http://placeholder/body-length"},{"name":"http.request.body.size","value":"3"},{"name":"http.response.status_code","value":"200"},{"name":"http.response.body.size","value":"22"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"fetch","spanId":"0000000000000002"}{"type":"attributes","info":[{"name":"network.protocol.name","value":"http"},{"name":"network.protocol.version","value":"HTTP/1.1"},{"name":"http.request.method","value":"POST"},{"name":"url.full","value":"http://placeholder/body-length"},{"name":"http.response.status_code","value":"200"},{"name":"http.response.body.size","value":"31"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"fetch","spanId":"0000000000000003"}{"type":"spanOpen","name":"scheduled","spanId":"0000000000000004"}{"type":"attributes","info":[{"name":"network.protocol.name","value":"http"},{"name":"network.protocol.version","value":"HTTP/1.1"},{"name":"http.request.method","value":"GET"},{"name":"url.full","value":"http://placeholder/ray-id"},{"name":"http.response.status_code","value":"200"},{"name":"http.response.body.size","value":"0"},{"name":"cloudflare.ray_id","value":"test-ray-id-123"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"scheduled","spanId":"0000000000000005"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"fetch","spanId":"0000000000000001"}{"type":"attributes","info":[{"name":"network.protocol.name","value":"http"},{"name":"network.protocol.version","value":"HTTP/1.1"},{"name":"http.request.method","value":"POST"},{"name":"url.full","value":"http://placeholder/body-length"},{"name":"http.request.body.size","value":"3"},{"name":"http.response.status_code","value":"200"},{"name":"http.response.body.size","value":"22"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"fetch","spanId":"0000000000000002"}{"type":"attributes","info":[{"name":"network.protocol.name","value":"http"},{"name":"network.protocol.version","value":"HTTP/1.1"},{"name":"http.request.method","value":"POST"},{"name":"url.full","value":"http://placeholder/body-length"},{"name":"http.response.status_code","value":"200"},{"name":"http.response.body.size","value":"31"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"fetch","spanId":"0000000000000003"}{"type":"spanOpen","name":"scheduled","spanId":"0000000000000004"}{"type":"attributes","info":[{"name":"network.protocol.name","value":"http"},{"name":"network.protocol.version","value":"HTTP/1.1"},{"name":"http.request.method","value":"GET"},{"name":"url.full","value":"http://placeholder/ray-id"},{"name":"http.response.status_code","value":"200"},{"name":"http.response.body.size","value":"0"},{"name":"cloudflare.ray_id","value":"test-ray-id-123"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"scheduled","spanId":"0000000000000005"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"scheduled","spanId":"0000000000000006"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
 
   // http-test subrequest handlers
   fetchBodyLength:
@@ -222,6 +315,8 @@ const E = {
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"scheduled","scheduledTime":"1970-01-01T00:00:00.000Z","cron":""}}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
   scheduledCron:
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"scheduled","scheduledTime":"1970-01-01T00:00:00.000Z","cron":"* * * * 30"}}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  scheduledException:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"scheduled","scheduledTime":"1970-01-01T00:00:00.000Z","cron":"* * * * *"}}{"type":"exception","name":"Error","message":"boom","stack":"    at Object.scheduled (worker:39:42)"}{"type":"outcome","outcome":"exception","cpuTime":0,"wallTime":0}',
 
   // queue-test.js
   queueTest:
@@ -242,6 +337,8 @@ const E = {
   // buffered tail worker traces
   trace:
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"trace","traces":[""]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  traceThrow:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"trace","traces":[]}}{"type":"exception","name":"Error","message":"boom","stack":"    at Function.<anonymous> (worker:11:13)"}{"type":"return"}{"type":"outcome","outcome":"exception","cpuTime":0,"wallTime":0}',
 };
 
 // Subrequest callees are children of their callers.
@@ -257,6 +354,7 @@ const expected = [
   // wsMessage and wsClose are children of wsHibernation because the trace context
   // was captured at acceptWebSocket() time and restored when the DO was woken up.
   n(E.wsHibernation, [n(E.wsMessage), n(E.wsClose)]),
+  n(E.wsThrow),
 
   // cacheMode: standalone
   n(E.cacheMode),
@@ -274,6 +372,13 @@ const expected = [
     n(E.jsrpcGetCounter),
     n(E.jsrpcNonFunction),
   ]),
+  n(E.jsrpcNamedServiceBinding, [n(E.jsrpcExceptionI)]),
+  n(E.jsrpcDisposal, [
+    n(E.jsrpcExceptionII),
+    n(E.jsrpcExceptionIII),
+    n(E.jsrpcTestDispose),
+  ]),
+  n(E.jsrpcPortAbortCall, [n(E.jsrpcExceptionIV), n(E.jsrpcExceptionV)]),
 
   // http-test: main test handler with subrequest children
   n(E.httpTest, [
@@ -282,6 +387,7 @@ const expected = [
     n(E.fetchBodyLength),
     n(E.scheduledEmpty),
     n(E.scheduledCron),
+    n(E.scheduledException),
   ]),
 
   // http-test: standalone fetch handlers that are NOT subrequests of the main test
@@ -303,6 +409,12 @@ const expected = [
   // buffered tail worker traces
   n(E.trace),
   n(E.trace),
+
+  // traces of throwing tail worker
+  n(E.traceThrow),
+  n(E.traceThrow),
+  n(E.traceThrow),
+  n(E.traceThrow),
 ].sort((a, b) => a.events.localeCompare(b.events));
 
 // Sort children in expected trees to match buildTree's sort order.
@@ -321,6 +433,12 @@ export const test = {
     await scheduler.wait(50);
 
     verifyTraceIds(allInvocations);
-    assert.deepStrictEqual(buildTree(allInvocations), expected);
+
+    const largeLog = allInvocations.filter(isLargeLogInvocation);
+    const rest = allInvocations.filter((inv) => !isLargeLogInvocation(inv));
+
+    assertLargeLogRegression(largeLog);
+
+    assert.deepStrictEqual(buildTree(rest), expected);
   },
 };

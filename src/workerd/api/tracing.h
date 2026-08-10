@@ -84,9 +84,11 @@ class Span: public jsg::Object {
   // code on this.
   bool getIsTraced();
 
-  // Sets a single attribute. If `value` is undefined, the attribute is not set - useful for
-  // optional fields.
-  void setAttribute(jsg::Lock& js, kj::String key, jsg::Optional<TagValue> value);
+  // Sets a single attribute. If `value` is undefined, the attribute is not set.
+  jsg::Ref<Span> setAttribute(jsg::Lock& js, kj::String key, jsg::Optional<TagValue> value);
+
+  // Sets each attribute in `attributes` as if by calling setAttribute().
+  jsg::Ref<Span> setAttributes(jsg::Lock& js, jsg::Dict<jsg::Optional<TagValue>> attributes);
 
   // Ends the span and submits its content to the tracing system. Idempotent.
   void end();
@@ -95,7 +97,15 @@ class Span: public jsg::Object {
     JSG_READONLY_PROTOTYPE_PROPERTY(isTraced, getIsTraced);
 
     JSG_METHOD(setAttribute);
+    JSG_METHOD(setAttributes);
     JSG_METHOD(end);
+
+    JSG_TS_OVERRIDE({
+      setAttribute(key: string, value: boolean | number | string): this;
+      setAttributes(
+        attributes: Record<string, boolean | number | string | undefined>
+      ): this;
+    });
   }
 
  private:
@@ -149,9 +159,14 @@ class Tracing: public jsg::Object {
       jsg::Arguments<jsg::Value> args,
       const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
 
+  // Creates a child span of the current user tracing span without making it active. The caller
+  // must call span.end() explicitly. If no IoContext is available, returns a no-op span.
+  jsg::Ref<user_tracing::Span> startSpan(jsg::Lock& js, kj::String operationName);
+
   JSG_RESOURCE_TYPE(Tracing) {
     JSG_METHOD(enterSpan);
     JSG_METHOD(startActiveSpan);
+    JSG_METHOD(startSpan);
 
     // Use the _NAMED variant so the property ends up as `tracing.Span` rather than
     // `tracing["user_tracing::Span"]`.
@@ -172,6 +187,7 @@ class Tracing: public jsg::Object {
         callback: (span: Span, ...args: A) => T,
         ...args: A
       ): T;
+      startSpan(name: string): Span;
     });
   }
 };

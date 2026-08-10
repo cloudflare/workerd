@@ -327,6 +327,29 @@ impl.controller->runIfAlive(
     [](ReadableByteStreamController& controller) { controller.maybeByobRequest = kj::none; });
 ```
 
+### Pattern: Weak Owner Link
+
+- **When**: A controller or controller implementation needs to reach back to its owning
+  stream (`ReadableStreamController::setOwnerRef()`, `WritableImpl::tryGetOwner()`)
+- **Why**: The owner holds the controller, so a strong back-reference can create a GC
+  tracing cycle or keep the stream alive only through its own controller. A raw
+  back-reference can also outlive the owner when async cleanup crosses ownership
+  boundaries.
+- **How**: Store a weak owner reference during stream construction, then re-acquire
+  the owner only at the point of use. This is an internal owner back-link pattern,
+  distinct from weak refs used for handles exposed to user code.
+
+```cpp
+ReadableStream::ReadableStream(kj::Own<ReadableStreamController> controller)
+    : controller(kj::mv(controller)) {
+  getController().setOwnerRef(addWeakToThis());
+}
+
+jsg::Ref<ReadableStream> ReadableStreamJsController::addRef() {
+  return owner.assertLive().addRef();
+}
+```
+
 ### Pattern: `Rc<Entry>` for Shared Queue Data
 
 - **When**: Queue entries shared across teed stream consumers
@@ -355,6 +378,30 @@ auto onSuccess = [this, ref = addRef(), ...](...) mutable {
     // Now safe to use pipeLock
 };
 ```
+
+### Pattern: Pipe-Lock Lifetime
+
+- **When**: A `ReadableStream` is piped to a `WritableStream` (`pipeTo`/`pipeThrough`),
+  putting the source's lock state machine into `PipeLocked`
+- **Why**: The destination's pipe machinery holds a `kj::Ptr<PipeController>` that points
+  into the source's `PipeLocked` lock state. `kj::Ptr` tracks liveness (asserting in
+  debug builds): the `PipeLocked` state must not be destroyed while any pointer to its
+  `PipeController` remains.
+- **Rule**: The source stays `PipeLocked` for the entire lifetime of the pipe. ONLY the
+  destination's pipe machinery may release the lock, and only via
+  `ReadableStreamController::releasePipeLock()` *after* dropping every
+  `kj::Ptr<PipeController>` it holds (`Pipe::releaseSource()` /
+  `WritableLockImpl::PipeLocked::releaseSource()` encapsulate this ordering). No
+  `PipeController` operation releases the lock, and the *source's* `doClose`/`doError`/
+  `onClose`/`onError` MUST NOT unlock it — they signal the loop, which then releases
+  the lock itself. On the destination, every teardown path that destroys the
+  write-side pipe lock state (the loop's terminal branches, `drain()`, and the
+  controllers' `doClose`/`doError` when they fire mid-pipe) calls `releaseSource()`
+  first.
+- **Keep-alive**: The holder of the `kj::Ptr` also holds a GC-visited
+  `jsg::Ref<ReadableStream>` to the source (declared *before* the `kj::Ptr` so the Ptr
+  is destroyed first), guaranteeing the `PipeController` outlives the pointer even if
+  user code drops the source stream mid-pipe.
 
 ### Pattern: StateListener Self-Destruction Guard
 

@@ -13,6 +13,7 @@
 #include <capnp/compat/json.h>
 #include <capnp/list.h>
 #include <capnp/message.h>
+#include <kj/array.h>
 #include <kj/async-io.h>
 #include <kj/async.h>
 #include <kj/compat/http.h>
@@ -24,6 +25,22 @@
 #include <atomic>
 
 namespace workerd::server {
+
+struct ContainerPrivileges {
+  struct Device {
+    kj::String pathOnHost;
+    kj::String pathInContainer;
+    kj::String cgroupPermissions;
+  };
+
+  kj::Array<kj::String> capabilities;
+  kj::Array<Device> devices;
+  kj::Array<kj::String> securityOpt;
+
+  bool isEmpty() const {
+    return capabilities.size() == 0 && devices.size() == 0 && securityOpt.size() == 0;
+  }
+};
 
 // Distinguishes how an egress mapping should proxy matched connections.
 enum class EgressProtocol : uint8_t {
@@ -48,6 +65,12 @@ kj::Own<capnp::MallocMessageBuilder> decodeJsonResponse(kj::StringPtr response) 
   return message;
 }
 
+// Declared here solely so the unit test can call it directly; production callers reach it via
+// createContainer() in the .c++ file.
+void configureContainerPrivileges(
+    docker_api::Docker::ContainerCreateRequest::HostConfig::Builder hostConfig,
+    const ContainerPrivileges& privileges);
+
 // Docker-based implementation that implements the rpc::Container::Server interface
 // so it can be used as a rpc::Container::Client via kj::heap<ContainerClient>().
 // This allows the Container JSG class to use Docker directly without knowing
@@ -68,7 +91,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       kj::TaskSet& waitUntilTasks,
       kj::Promise<void> pendingCleanup,
       kj::Function<void(kj::Promise<void>)> cleanupCallback,
-      ChannelTokenHandler& channelTokenHandler);
+      ChannelTokenHandler& channelTokenHandler,
+      ContainerPrivileges privileges);
 
   ~ContainerClient() noexcept(false);
 
@@ -88,6 +112,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> snapshotDirectory(SnapshotDirectoryContext context) override;
   kj::Promise<void> snapshotContainer(SnapshotContainerContext context) override;
   kj::Promise<void> inspect(InspectContext context) override;
+  kj::Promise<void> setLabels(SetLabelsContext context) override;
 
   kj::Own<ContainerClient> addRef();
 
@@ -103,6 +128,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   // Container egress interceptor image name (sidecar for egress proxy)
   kj::String containerEgressInterceptorImage;
+
+  ContainerPrivileges privileges;
 
   kj::TaskSet& waitUntilTasks;
 
@@ -125,14 +152,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   // EgressHttpService handles CONNECT requests from proxy-anything sidecar
   friend class EgressHttpService;
 
-  struct Label {
-    kj::String name;
-    kj::String value;
-  };
-
   struct InspectResponse {
     bool isRunning;
-    kj::Array<Label> labels;
     kj::String image;
   };
 
@@ -154,6 +175,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   struct ImageInspectResponse {
     kj::String id;
     uint64_t size;
+    kj::String parent;
   };
 
   struct ExecInspectResponse {
@@ -175,8 +197,11 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       rpc::Container::ExecOptions::Reader params,
       bool attachStdout,
       bool attachStderr);
-  kj::Promise<kj::Own<kj::AsyncIoStream>> startExec(kj::String execId);
+  kj::Promise<kj::Own<kj::AsyncIoStream>> startExec(
+      kj::String execId, bool tty, uint16_t cols, uint16_t rows);
   kj::Promise<ExecInspectResponse> inspectExec(kj::StringPtr execId);
+  // Resizes the TTY of a running PTY exec to the given dimensions via Docker's resize endpoint.
+  kj::Promise<void> resizeExec(kj::StringPtr execId, uint16_t cols, uint16_t rows);
   kj::Promise<void> runSimpleExec(kj::ArrayPtr<const kj::String> cmd);
   kj::Promise<void> startContainer();
   kj::Promise<void> stopContainer();
@@ -246,6 +271,9 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   std::atomic_bool containerSidecarStarted = false;
   std::atomic_bool egressListenerStarted = false;
   std::atomic_bool caCertInjected = false;
+
+  // Volatile in-memory label set for this container.
+  kj::HashMap<kj::String, kj::String> labels;
 
   // Writable clone volumes currently owned by the app container, or by an in-flight start()
   // that still needs failure cleanup.

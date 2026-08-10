@@ -84,14 +84,13 @@ jsg::ModuleRegistry::ModuleInfo addCapnpModule(
 // on the TypeWrapper specific to each project.
 template <typename TypeWrapper>
 static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
-    const jsg::ResolveObserver& resolveObserver,
     kj::Maybe<const Worker::Script::ModulesSource&> maybeSource,
     const CompatibilityFlags::Reader& featureFlags,
     const jsg::Url& bundleBase,
     auto setupForApi,
     jsg::modules::ModuleRegistry::Builder::Options options =
         jsg::modules::ModuleRegistry::Builder::Options::NONE) {
-  jsg::modules::ModuleRegistry::Builder builder(resolveObserver, bundleBase, options);
+  jsg::modules::ModuleRegistry::Builder builder(bundleBase, options);
 
   // This callback is used when a module is being loaded to arrange evaluating the
   // module outside of the current IoContext.
@@ -129,19 +128,18 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
     }
 
     jsg::modules::ModuleBundle::BundleBuilder bundleBuilder(bundleBase);
-    bool firstEsm = true;
     using namespace workerd::api::pyodide;
 
     for (auto& def: source.modules) {
       KJ_SWITCH_ONEOF(def.content) {
         KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
           jsg::modules::Module::Flags flags = jsg::modules::Module::Flags::ESM;
-          // Only the first ESM module we encounter is the main module.
-          // This should also be the first module in the list but we're
-          // not enforcing that here.
-          if (firstEsm) {
+          // The configured entry-point module gets the MAIN flag (import.meta.main).
+          // Entry points are required to be ESM (enforced at resolution via
+          // RequireOption::REQUIRE_ESM), so a non-ESM main module never receives
+          // the flag here; the worker fails at startup instead.
+          if (def.name == source.mainModule) {
             flags = flags | jsg::modules::Module::Flags::MAIN;
-            firstEsm = false;
           }
           if (content.ownBody != kj::none) {
             // When the source is owned (e.g. transpiled TypeScript), we must
@@ -149,45 +147,44 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
             // may not outlive the registry.
             bundleBuilder.addEsmModule(def.name, kj::heapArray<const char>(content.body), flags);
           } else {
-            // The content.body points into process-lifetime capnp message
-            // buffers. We can safely pass a non-owning reference.
+            // The content.body points into memory that outlives the module
+            // registry. In workerd this is a process-lifetime capnp message
+            // buffer; in edgeworker, it is the disowned script-fetcher response
+            // owned by the VirtualFileSystem (which is a sibling of the registry
+            // in Worker::Script::Impl). In edgeworker, the copy is ensured by
+            // shouldCopyScriptFetcherResponse() including the NMR flag.
             bundleBuilder.addEsmModule(def.name, content.body, flags);
           }
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
-          // The content.body is memory-resident and is expected to outlive the
-          // module registry. We can safely pass a reference to the module handler.
-          // It will not be copied into a JS string until the module is actually
-          // evaluated.
+          // The content.body resides in memory that outlives the module registry
+          // (see the ESM comment above for the ownership details). It will not be
+          // copied into a JS string until the module is actually evaluated.
           bundleBuilder.addSyntheticModule(def.name,
               jsg::modules::Module::newTextModuleHandler(content.body), nullptr,
               jsg::modules::Module::ContentType::TEXT);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
-          // The content.body is memory-resident and is expected to outlive the
-          // module registry. We can safely pass a reference to the module handler.
-          // It will not be copied into a JS string until the module is actually
-          // evaluated.
+          // The content.body resides in memory that outlives the module registry
+          // (see the ESM comment above for the ownership details). It will not be
+          // copied into a JS array buffer until the module is actually evaluated.
           bundleBuilder.addSyntheticModule(def.name,
               jsg::modules::Module::newDataModuleHandler(content.body), nullptr,
               jsg::modules::Module::ContentType::DATA);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
-          // The content.body is memory-resident and is expected to outlive the
-          // module registry. We can safely pass a reference to the module handler.
-          // It will not be copied into a JS string until the module is actually
-          // evaluated.
+          // The content.body resides in memory that outlives the module registry
+          // (see the ESM comment above for the ownership details).
           bundleBuilder.addWasmModule(def.name, content.body);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
-          // The content.body is memory-resident and is expected to outlive the
-          // module registry. We can safely pass a reference to the module handler.
-          // It will not be copied into a JS string until the module is actually
-          // evaluated.
+          // The content.body resides in memory that outlives the module registry
+          // (see the ESM comment above for the ownership details). It will not be
+          // parsed into a JS value until the module is actually evaluated.
           bundleBuilder.addSyntheticModule(def.name,
               jsg::modules::Module::newJsonModuleHandler(content.body), nullptr,
               jsg::modules::Module::ContentType::JSON);
@@ -200,19 +197,25 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           }
           bundleBuilder.addSyntheticModule(def.name,
               jsg::modules::Module::newCjsStyleModuleHandler<api::CommonJsModuleContext,
-                  TypeWrapper>(content.body, def.name),
+                  TypeWrapper>(content.body),
               KJ_MAP(name, named) { return kj::str(name); });
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
-          KJ_FAIL_ASSERT("Python modules are not currently supported with the new module registry");
-          // KJ_REQUIRE(featureFlags.getPythonWorkers(),
-          //     "The python_workers compatibility flag is required to use Python.");
-          // firstEsm = false;
+          // Python workers always use the original module registry:
+          // isNewModuleRegistryEnabled() returns false whenever python_workers
+          // is set. Python modules can therefore only reach this point when
+          // the bundle contains python modules without the python_workers
+          // compatibility flag, which is a user configuration error (matching
+          // the error the legacy path reports for the same mistake).
+          if (!featureFlags.getPythonWorkers()) {
+            KJ_FAIL_REQUIRE("The python_workers compatibility flag is required to use Python.");
+          }
+          KJ_FAIL_REQUIRE("Python modules are not supported with the new module registry");
+          // TODO(later): When the new module registry supports python workers,
+          // the entrypoint module is registered here:
           // hasPythonModules = true;
-          // kj::StringPtr entry = PYTHON_ENTRYPOINT;
-          // bundleBuilder.addEsmModule(def.name, entry);
-          // break;
+          // bundleBuilder.addEsmModule(def.name, kj::StringPtr(PYTHON_ENTRYPOINT));
         }
         KJ_CASE_ONEOF(content, Worker::Script::ObsoletePythonRequirement) {
           // Handled separately
@@ -297,8 +300,11 @@ template <typename JsgIsolate>
 static v8::Local<v8::WasmModuleObject> compileWasmGlobal(typename JsgIsolate::Lock& lock,
     ::capnp::Data::Reader reader,
     const jsg::CompilationObserver& observer) {
-  lock.setAllowEval(true);
-  KJ_DEFER(lock.setAllowEval(false));
+  // Wasm compilation requires code-generation permission. The scope restores
+  // the prior setting on exit: this helper also runs lazily (e.g. for modules
+  // served by the fallback service), potentially inside a window where eval is
+  // already permitted, and that permission must survive the compilation.
+  jsg::Lock::AllowEvalScope allowEvalScope(lock, true);
 
   // Allow Wasm compilation to spawn a background thread for tier-up, i.e. recompiling
   // Wasm with optimizations in the background. Otherwise Wasm startup is way too slow.

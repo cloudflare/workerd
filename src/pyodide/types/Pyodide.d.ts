@@ -26,6 +26,7 @@ interface PyModule {
 
 interface Pyodide {
   _module: Module;
+  _api: API;
   runPython: (
     code: string,
     opts?: { globals?: PyDict; filename?: string }

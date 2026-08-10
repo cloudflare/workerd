@@ -187,6 +187,18 @@
               },
               "repo_name": {
                 "type": "string"
+              },
+              "patch_cmds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "patch_cmds_win": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "required": [

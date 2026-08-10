@@ -1,0 +1,27 @@
+using Workerd = import "/workerd/workerd.capnp";
+using TestExtension = import "extension.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "main",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "wrapped-binding-serialization-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "rpc", "experimental", "enable_ctx_exports"],
+        bindings = [
+          ( name = "DOOR",
+            wrapped = (
+              moduleName = "test:wrapper",
+              innerBindings = [
+                (name = "fetcher", service = (name = "main", entrypoint = "backend"))
+              ],
+            )
+          ),
+          ( name = "RECEIVER", service = (name = "main", entrypoint = "Receiver") ),
+        ],
+      )
+    ),
+  ],
+  extensions = [ TestExtension.extension ],
+);

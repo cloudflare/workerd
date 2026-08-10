@@ -34,10 +34,15 @@ export const validateSpans = {
         test: 'setAttributeUndefined',
         expectedSpan: 'undefined-attr-op',
       },
+      { test: 'setAttributes', expectedSpan: 'set-attributes-op' },
       { test: 'publicImportTracing', expectedSpan: 'public-import-op' },
       {
         test: 'publicImportStartActiveSpan',
         expectedSpan: 'public-start-active-op',
+      },
+      {
+        test: 'publicImportStartSpan',
+        expectedSpan: 'public-start-span-op',
       },
       { test: 'ctxTracing', expectedSpan: 'ctx-tracing-op' },
       {
@@ -89,6 +94,15 @@ export const validateSpans = {
     }
 
     {
+      const span = (spansByTest.get('publicImportStartSpan') || []).find(
+        (s) => s.name === 'public-start-span-op'
+      );
+      assert(span, 'publicImportStartSpan: span present');
+      assert.strictEqual(span.path, 'import-from-cloudflare-workers');
+      assert(span.closed, 'Public startSpan span should be closed');
+    }
+
+    {
       const span = (spansByTest.get('helperStartActiveSpan') || []).find(
         (s) => s.name === 'helper-detached-op'
       );
@@ -104,6 +118,21 @@ export const validateSpans = {
       assert(span, 'startActiveSpanSyncThrow: span present');
       assert.strictEqual(span['after.throw'], true);
       assert(span.closed, 'Manual throw span should be explicitly closed');
+    }
+
+    // setAttributes should record each supported value and ignore undefined values.
+    {
+      const span = (spansByTest.get('setAttributes') || []).find(
+        (s) => s.name === 'set-attributes-op'
+      );
+      assert(span, 'setAttributes: span present');
+      assert.strictEqual(span.stringValue, 'value');
+      assert.strictEqual(span.numberValue, 42);
+      assert.strictEqual(span.booleanValue, true);
+      assert(
+        !('skipped' in span),
+        'setAttributes should ignore undefined values'
+      );
     }
 
     // Nested spans: verify both outer and inner spans exist and both are closed.

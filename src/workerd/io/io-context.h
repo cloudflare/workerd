@@ -74,7 +74,7 @@ class IoContext;
 class IoContext_IncomingRequest final {
  public:
   IoContext_IncomingRequest(kj::Own<IoContext> context,
-      kj::Own<IoChannelFactory> ioChannelFactory,
+      kj::Rc<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::Own<BaseTracer>> workerTracer,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
@@ -139,6 +139,15 @@ class IoContext_IncomingRequest final {
   // based on setTimeout() when needed.
   kj::Date now(kj::Maybe<kj::Date> nextTimeout = kj::none);
 
+  // Read the time for trace onset information, which is recorded ahead of delivered().
+  //
+  // Side effect: for actors this forces a clock resync (syncTime()) before reading. Actors reuse
+  // an IoContext across requests, so between requests their Spectre-coarsened clock is frozen at
+  // whatever value the previous request left it at. delivered() normally resyncs it, but the onset
+  // timestamp is read before delivered() runs, so without this the onset would be stale (and could
+  // predate its own parent span). This is NOT a cheap read; prefer now() everywhere else.
+  kj::Date nowForTraceOnset();
+
   RequestObserver& getMetrics() {
     return *metrics;
   }
@@ -167,7 +176,7 @@ class IoContext_IncomingRequest final {
   kj::Own<IoContext> context;
   kj::Own<RequestObserver> metrics;
   kj::Maybe<kj::Own<BaseTracer>> workerTracer;
-  kj::Own<IoChannelFactory> ioChannelFactory;
+  kj::Rc<IoChannelFactory> ioChannelFactory;
   kj::Maybe<kj::Own<AccessInfo>> accessInfo;
   kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory;
 
@@ -440,18 +449,45 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     }
   }
 
-  // Returns the current IoContext for the thread.
+  // Returns the current IoContext for the V8 isolate entered on this thread.
   // Throws an exception if there is no current context (see hasCurrent() below).
   static IoContext& current();
 
   // Like current(), but returns kj::none if there is no current context.
   static kj::Maybe<IoContext&> tryCurrent();
 
-  // True if there is a current IoContext for the thread (current() will not throw).
+  // True if there is a current IoContext for the V8 isolate entered on this thread (current() will
+  // not throw).
   static bool hasCurrent();
 
-  // True if this is the IoContext for the current thread (same as `hasCurrent() && tcx == current()`).
+  // True if this is the IoContext for the V8 isolate entered on the current thread (same as
+  // `hasCurrent() && tcx == current()`).
   bool isCurrent();
+
+  // A process-unique identifier assigned to each IoContext at construction. IDs are monotonically
+  // increasing and never reused, so a captured Id can be compared against the current IoContext's
+  // Id to determine whether execution is happening in the same context -- without retaining a
+  // (possibly dangling) reference to the IoContext. Prefer this over holding a WeakRef when all
+  // that's needed is a "same IoContext" identity check.
+  class Id final {
+   public:
+    // Returns true if this Id identifies the IoContext that is current on this thread. This is
+    // false if there is no current IoContext, or if the current IoContext is a different one (e.g.
+    // because the IoContext this Id was taken from has since been destroyed -- ids are never
+    // reused, so a stale id can never alias a live context).
+    bool isCurrent() const;
+
+    bool operator==(const Id& other) const = default;
+
+   private:
+    constexpr explicit Id(uint64_t value): value(value) {}
+    uint64_t value;
+    friend class IoContext;
+  };
+
+  Id getId() const {
+    return id;
+  }
 
   void setEntrypointHandler(jsg::Lock& js, jsg::JsObject handler);
   jsg::JsObject getEntrypointHandler(jsg::Lock& js);
@@ -495,8 +531,15 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // If there is a current IoContext, return its WeakRef.
   static kj::Maybe<kj::Own<WeakRef>> tryGetWeakRefForCurrent();
 
-  // Like requireCurrentOrThrowJs() but works on a WeakRef.
-  static void requireCurrentOrThrowJs(WeakRef& weak);
+  // If there is a current IoContext, return its Id. Use this when the caller only needs to
+  // determine later whether it is running in the same IoContext, rather than access the context.
+  // Unlike a WeakRef, an Id is safe to retain in objects that may be destroyed on another thread.
+  static kj::Maybe<Id> tryGetCurrentId();
+
+  // Like requireCurrentOrThrowJs() but checks whether the IoContext identified by `id` is the
+  // current one. Takes an Id rather than a WeakRef so callers need not retain a reference to the
+  // (possibly destroyed) IoContext.
+  static void requireCurrentOrThrowJs(Id id);
 
   // Just throw the error that requireCurrentOrThrowJs() would throw on failure.
   [[noreturn]] static void throwNotCurrentJsError(
@@ -617,9 +660,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // `func` is a function with a signature similar to:
   //
   //     template <typename... Params, typename Result>
-  //     jsg::Promise<Result> func(jsg::Lock& js, Params&&... params);
+  //     jsg::Promise<Result> func(jsg::Lock& js, IoContext& ctx, Params&&... params);
   //
   // (Optionally, the `jsg::Promise<Result>` can just be `Result` instead.)
+  //
+  // Like `ctx.run()`, the callback is passed a reference to the re-entered `IoContext`, so callers
+  // do not need to capture a (weak) reference to the context themselves. Capturing the context
+  // manually is error-prone: if the returned callback is destroyed on another thread (e.g. during
+  // isolate eviction), a captured `WeakRef` would race with the owning thread on its refcount.
   //
   // The returned lambda will a signature like:
   //
@@ -683,14 +731,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // one corresponding to the exception type.
   EventOutcome waitUntilStatus() const {
     return waitUntilStatusValue;
-  }
-
-  // DO NOT USE, use `addWaitUntil()` instead.
-  kj::TaskSet& getWaitUntilTasks() {
-    // TODO(cleanup): This is only needed for use with RpcWorkerInterface, but we can eliminate
-    //   that class's need for waitUntilTasks if we change the signature of sendTraces() to return
-    //   a promise, I think.
-    return waitUntilTasks;
   }
 
   // Wraps a reference in a wrapper which:
@@ -806,6 +846,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // comes to Spectre mitigations.
   kj::Promise<void> afterLimitTimeout(kj::Duration t) {
     return getIoChannelFactory().getTimer().afterLimitTimeout(t);
+  }
+
+  // Access the unmitigated event-loop timer for internal housekeeping whose timing is not exposed
+  // to JavaScript, such as connection-pool eviction. Do not use this for application-visible
+  // clocks or timers -- those must go through the Spectre-mitigated path (now(), atTime(),
+  // afterLimitTimeout()), which this deliberately bypasses.
+  kj::Timer& getUnsafeTimer() {
+    return thread.getUnsafeTimer();
   }
 
   // Provide access to the system CSPRNG.
@@ -1076,6 +1124,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   bool failOpen = false;
 
+  // Allocates the next process-unique IoContext Id. See getId().
+  static Id nextId();
+
+  // Process-unique identifier for this IoContext. See getId().
+  const Id id;
+
   // For debug checks.
   void* threadId;
 
@@ -1086,6 +1140,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Maybe<InputGate::Lock> currentInputLock;
 
   DeleteQueuePtr deleteQueue;
+  kj::Arc<ReverseIoOwnValidity> reverseIoOwnValidity;
 
   kj::Maybe<kj::Exception> abortException;
   kj::Own<kj::PromiseFulfiller<void>> abortFulfiller;
@@ -1310,6 +1365,11 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
 
   return asyncLockPromise.then([this, inputLock = kj::mv(inputLock), func = kj::fwd<Func>(func)](
                                    Worker::AsyncLock lock) mutable {
+    // Re-check if context was aborted while we waited for the lock.
+    KJ_IF_SOME(ex, abortException) {
+      kj::throwFatalException(ex.clone());
+    }
+
     using Result = decltype(func(kj::instance<Worker::Lock&>()));
 
     if constexpr (kj::isSameType<Result, void>()) {
@@ -1659,20 +1719,18 @@ auto IoContext::makeReentryCallbackImpl(Func func, kj::Own<void> attachment) {
     }
 
     return ctx.canceler.wrap(ctx.run(
-        [&ctx, &ioFunc, ... params = kj::fwd<decltype(params)>(params)](
-            Worker::Lock& lock) mutable {
-      using ResultType = kj::Decay<decltype(func(lock, kj::fwd<decltype(params)>(params)...))>;
+        [&ioFunc, ... params = kj::fwd<decltype(params)>(params)](
+            Worker::Lock& lock, IoContext& ctx) mutable {
+      using ResultType = kj::Decay<decltype(func(lock, ctx, kj::fwd<decltype(params)>(params)...))>;
 
       auto& func = *ioFunc;
 
       if constexpr (kj::isSameType<ResultType, void>()) {
-        (void)ctx;
-        func(lock, kj::fwd<decltype(params)>(params)...);
+        func(lock, ctx, kj::fwd<decltype(params)>(params)...);
       } else if constexpr (jsg::isPromise<ResultType>()) {
-        return ctx.awaitJs(lock, func(lock, kj::fwd<decltype(params)>(params)...));
+        return ctx.awaitJs(lock, func(lock, ctx, kj::fwd<decltype(params)>(params)...));
       } else {
-        (void)ctx;
-        return func(lock, kj::fwd<decltype(params)>(params)...);
+        return func(lock, ctx, kj::fwd<decltype(params)>(params)...);
       }
     },
         kj::mv(cs)));
@@ -1711,7 +1769,8 @@ template <typename T>
 inline ReverseIoOwn<T> IoContext::addObjectReverse(kj::Own<T> obj) {
   // We intentionally don't requireCurrent() -- the only requirement is that the caller is in the
   // same thread.
-  return deleteQueue.queue->addObjectReverse(getWeakRef(), kj::mv(obj), ownedObjects);
+  return deleteQueue.queue->addObjectReverse(
+      reverseIoOwnValidity.addRef(), kj::mv(obj), ownedObjects);
 }
 
 template <typename Func>

@@ -62,6 +62,10 @@ class Frankenvalue {
   // then JSON-stringifying from there.)
   static Frankenvalue fromJson(kj::String json);
 
+  // Construct a Frankenvalue whose value is an `ArrayBuffer` wrapping `data`, without going
+  // through V8 serialization. For placing binary data into `ctx.props` where no JS context exists.
+  static Frankenvalue fromBytes(kj::Array<byte> data);
+
   // Construct a Frankenvalue whose value is a single capability (cap table entry), without going
   // through V8 serialization. When converted to JS, the capability is materialized using the
   // deserializer registered for `tag` (a `workerd::rpc::SerializationTag` value, e.g.
@@ -69,6 +73,13 @@ class Frankenvalue {
   // JavaScript context, e.g. to place a service binding (Fetcher) into `ctx.props` from config or a
   // control plane.
   static Frankenvalue fromCapability(uint16_t tag, kj::Own<CapTableEntry> entry);
+
+  // Like fromCapability(), but the materialized capability is the inner of a *wrapped binding*
+  // (e.g. a D1Database wrapping a service stub). `wrapperModule`'s `default` export is invoked
+  // with an env containing the capability under the fixed name "fetcher" to produce the final JS
+  // value. See api/wrapped-binding.{h,c++}.
+  static Frankenvalue fromWrappedCapability(
+      uint16_t innerTag, kj::Own<CapTableEntry> entry, kj::String wrapperModule);
 
   // Add a property to the value, represented as another Frankenvalue. This is how you "stitch
   // together" values!
@@ -184,6 +195,9 @@ class Frankenvalue {
   struct V8Serialized {
     kj::Array<byte> data;
   };
+  struct Bytes {
+    kj::Array<byte> data;
+  };
   struct Capability {
     // Index into this value's base cap table (the caps referenced by the union, before property
     // caps).
@@ -191,10 +205,15 @@ class Frankenvalue {
 
     // The `workerd::rpc::SerializationTag` value describing how to materialize the capability into
     // a JS value (e.g. `serviceStub` for a Fetcher). Stored as a raw integer so that this header
-    // need not depend on the `SerializationTag` schema.
+    // need not depend on the `SerializationTag` schema. When `wrapperModule` is set, this describes
+    // the *inner* binding.
     uint16_t tag;
+
+    // If set, the materialized capability is the inner binding of a wrapped binding, and this is the
+    // wrapper module to instantiate around it (see Frankenvalue::fromWrappedCapability()).
+    kj::Maybe<kj::String> wrapperModule;
   };
-  kj::OneOf<EmptyObject, Json, V8Serialized, Capability> value;
+  kj::OneOf<EmptyObject, Json, V8Serialized, Bytes, Capability> value;
 
   struct Property;
   kj::Vector<Property> properties;

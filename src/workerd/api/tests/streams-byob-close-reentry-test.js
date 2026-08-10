@@ -42,6 +42,7 @@ export const byobCloseReentryViaThen = {
     controller.enqueue(new Uint8Array([1, 2, 3, 4, 5]));
 
     let armed = true;
+    let thenFired = false;
     const noopThen = function (resolve, reject) {
       /* never settle — prevents further thenable chaining */
     };
@@ -57,6 +58,7 @@ export const byobCloseReentryViaThen = {
       get() {
         if (armed) {
           armed = false;
+          thenFired = true;
           try {
             reader.cancel();
           } catch {
@@ -85,11 +87,14 @@ export const byobCloseReentryViaThen = {
     armed = false;
     delete Object.prototype.then;
 
-    // If we get here without SIGSEGV / UAF, the fix works.
-    strictEqual(
-      true,
-      true,
-      'survived re-entrant cancel during BYOB close drain'
-    );
+    // Reaching here without SIGSEGV / UAF means the liveness guards hold.
+    //
+    // The getter must also never have run at all. jsg's opaque wrappers are
+    // given a null prototype (Wrappable::attachOpaqueWrapper), so the
+    // Get(resolution, "then") thenable check cannot reach Object.prototype and
+    // therefore cannot reach a user getter. That hardening, not the liveness
+    // guards, is the primary defence; assert it directly so that losing it is
+    // caught here rather than silently falling back to the guards.
+    strictEqual(thenFired, false, 'thenable getter must not have fired');
   },
 };

@@ -116,6 +116,17 @@ class IsolateBase {
   virtual kj::Maybe<v8::Local<v8::Object>> deserialize(
       Lock& js, uint tag, Deserializer& deserializer) = 0;
 
+  // Registers the TypeHandler singleton for a type registered with this isolate, keyed by
+  // typeid(TypeHandler<T>). Called during isolate construction (see jsg::Isolate's
+  // constructors); the handler pointer must have static storage duration (the instances
+  // are the TypeWrapper's static constexpr TYPE_HANDLER_INSTANCE singletons). Backs
+  // Lock::tryGetTypeHandler().
+  void registerTypeHandler(const std::type_info& type, const void* handler);
+
+  // Type-erased lookup for Lock::tryGetTypeHandler(): returns the handler registered for
+  // the given typeid(TypeHandler<T>), if any.
+  kj::Maybe<const void*> tryGetTypeHandlerErased(const std::type_info& type) const;
+
   // Immediately cancels JavaScript execution in this isolate, causing an uncatchable exception to
   // be thrown. Safe to call across threads, without holding the lock.
   void terminateExecution() const;
@@ -160,9 +171,29 @@ class IsolateBase {
     return requested;
   }
 
+  // Counts v8::Module::Evaluate() calls on the stack. Non-zero means some module is
+  // kEvaluating, which makes draining the microtask queue unsafe; the module registries
+  // check this before settling a pending top-level await.
+  inline void enterModuleEvaluation(kj::Badge<Lock>) {
+    ++moduleEvaluationDepth;
+  }
+
+  inline void leaveModuleEvaluation(kj::Badge<Lock>) {
+    KJ_ASSERT(moduleEvaluationDepth > 0);
+    --moduleEvaluationDepth;
+  }
+
+  inline bool isEvaluatingModule() const {
+    return moduleEvaluationDepth > 0;
+  }
+
   inline void setAllowEval(kj::Badge<Lock>, bool allow) {
     if (alwaysAllowEval) return;
     evalAllowed = allow;
+  }
+
+  inline bool isEvalAllowed(kj::Badge<Lock>) const {
+    return evalAllowed;
   }
 
   inline void setDisallowJavascriptExecution(kj::Badge<Lock>, bool allow) {
@@ -300,12 +331,12 @@ class IsolateBase {
     return externalMemoryTarget->getAdjustment(amount);
   }
 
-  AsyncContextFrame::StorageKey& getEnvAsyncContextKey() {
-    return *envAsyncContextKey;
+  kj::Arc<AsyncContextFrame::StorageKey> getEnvAsyncContextKey() {
+    return envAsyncContextKey.addRef();
   }
 
-  AsyncContextFrame::StorageKey& getExportsAsyncContextKey() {
-    return *exportsAsyncContextKey;
+  kj::Arc<AsyncContextFrame::StorageKey> getExportsAsyncContextKey() {
+    return exportsAsyncContextKey.addRef();
   }
 
   void setUsingNewModuleRegistry() {
@@ -430,12 +461,33 @@ class IsolateBase {
   bool usingFastJsgStruct = false;
   bool extraMicrotaskCheckpointRequested = false;
 
+  uint moduleEvaluationDepth = 0;
+
   // Only used when the original module registry is used.
   bool throwOnUnrecognizedImportAssertion = false;
 
   kj::Maybe<kj::Function<Logger>> maybeLogger;
   kj::Maybe<kj::Function<ErrorReporter>> maybeErrorReporter;
   kj::Maybe<kj::Function<ModuleFallbackCallback>> maybeModuleFallbackCallback;
+
+  // Registry backing Lock::tryGetTypeHandler(), keyed by typeid(TypeHandler<T>) and
+  // populated at isolate construction (see registerTypeHandler()). The values point at
+  // the TypeWrapper's static constexpr TYPE_HANDLER_INSTANCE singletons, so no ownership
+  // or lifetime management is needed. Read-only after construction.
+  //
+  // The key wraps a std::type_info pointer but compares and hashes via the type_info's
+  // own equality/hash so that distinct typeinfo object addresses across shared library
+  // boundaries still compare equal.
+  struct TypeHandlerKey {
+    const std::type_info* type;
+    inline bool operator==(const TypeHandlerKey& other) const {
+      return *type == *other.type;
+    }
+    inline auto hashCode() const {
+      return kj::hashCode(type->hash_code());
+    }
+  };
+  kj::HashMap<TypeHandlerKey, const void*> typeHandlerRegistry;
 
   // FunctionTemplate used by Wrappable::attachOpaqueWrapper(). Just a constructor for an empty
   // object with 2 internal fields.
@@ -454,10 +506,10 @@ class IsolateBase {
   kj::Arc<const ExternalMemoryTarget> externalMemoryTarget;
 
   // A shared async context key for accessing env
-  kj::Own<AsyncContextFrame::StorageKey> envAsyncContextKey;
+  kj::Arc<AsyncContextFrame::StorageKey> envAsyncContextKey;
 
   // A shared async context key for accessing exports
-  kj::Own<AsyncContextFrame::StorageKey> exportsAsyncContextKey;
+  kj::Arc<AsyncContextFrame::StorageKey> exportsAsyncContextKey;
 
   // We expect queues to remain relatively small -- 8 is the largest size I have observed from local
   // testing.
@@ -664,6 +716,7 @@ class Isolate: public IsolateBase {
             kj::mv(externalStringAllocator),
             group) {
     wrappers.resize(1);
+    registerTypeHandlers();
     if (instantiateTypeWrapper) {
       instantiateDefaultWrapper(kj::fwd<MetaConfiguration>(configuration));
     }
@@ -683,6 +736,7 @@ class Isolate: public IsolateBase {
             defaultExternalStringAllocator(),
             v8::IsolateGroup::Create()) {
     wrappers.resize(1);
+    registerTypeHandlers();
     if (instantiateTypeWrapper) {
       instantiateDefaultWrapper(kj::fwd<MetaConfiguration>(configuration));
     }
@@ -705,6 +759,16 @@ class Isolate: public IsolateBase {
     auto wrapper = wrapperSpace.construct(ptr, kj::fwd<MetaConfiguration>(configuration));
     wrapper->initTypeWrapper();
     wrappers[0] = kj::mv(wrapper);
+  }
+
+  // Populates the IsolateBase type handler registry (see Lock::tryGetTypeHandler()) with
+  // the TypeHandler singletons for every type registered with this isolate's TypeWrapper.
+  // The singletons are static constexpr, so this does not depend on any wrapper instance
+  // (wrappers are per-context) and only needs to run once, at isolate construction.
+  void registerTypeHandlers() {
+    TypeWrapper::forEachTypeHandler([this](const std::type_info& type, const auto* handler) {
+      registerTypeHandler(type, handler);
+    });
   }
 
   ~Isolate() noexcept(false) {
@@ -875,6 +939,10 @@ class Isolate: public IsolateBase {
     }
     jsg::Promise<jsg::Value> toPromise(v8::Local<v8::Value> promise) override {
       return jsgIsolate.getWrapperByContext(*this)->template unwrap<jsg::Promise<jsg::Value>>(
+          *this, v8Isolate->GetCurrentContext(), promise, jsg::TypeErrorContext::other());
+    }
+    jsg::Promise<void> toVoidPromise(v8::Local<v8::Value> promise) override {
+      return jsgIsolate.getWrapperByContext(*this)->template unwrap<jsg::Promise<void>>(
           *this, v8Isolate->GetCurrentContext(), promise, jsg::TypeErrorContext::other());
     }
 

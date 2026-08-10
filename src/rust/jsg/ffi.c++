@@ -591,8 +591,6 @@ bool local_array_buffer_is_shared(const Local& value) {
 }
 
 // TypedArray creation functions
-// TODO(perf): These macros duplicate patterns in buffersource.h — unify when the
-// Rust FFI stabilises.
 DEFINE_TYPED_ARRAY_NEW(uint8_array, Uint8Array, uint8_t)
 DEFINE_TYPED_ARRAY_NEW(uint16_array, Uint16Array, uint16_t)
 DEFINE_TYPED_ARRAY_NEW(uint32_array, Uint32Array, uint32_t)
@@ -1052,9 +1050,8 @@ Realm* realm_from_isolate(Isolate* isolate) {
 }
 
 // Errors
-Local exception_create(Isolate* isolate, ExceptionType exception_type, ::rust::Str description) {
-  auto message = ::workerd::jsg::check(v8::String::NewFromUtf8(
-      isolate, description.data(), v8::NewStringType::kInternalized, description.size()));
+namespace {
+Local exceptionCreateFromMessage(ExceptionType exception_type, v8::Local<v8::String> message) {
   switch (exception_type) {
     case ExceptionType::RangeError:
       return to_ffi(v8::Exception::RangeError(message));
@@ -1070,6 +1067,19 @@ Local exception_create(Isolate* isolate, ExceptionType exception_type, ::rust::S
       return to_ffi(v8::Exception::Error(message));
   }
 }
+}  // namespace
+
+Local exception_create_from_bytes(
+    Isolate* isolate, ExceptionType exception_type, const uint8_t* data, int32_t length) {
+  // kNormal (not kInternalized): error messages are arbitrary, potentially
+  // non-UTF-8 byte strings (e.g. filesystem paths) and should not pollute the
+  // internalized string table (which is never GC'd). NewFromUtf8 replaces
+  // invalid sequences with U+FFFD, matching the legacy jsg::Lock::error() /
+  // js.str() behavior.
+  auto message = ::workerd::jsg::check(v8::String::NewFromUtf8(
+      isolate, reinterpret_cast<const char*>(data), v8::NewStringType::kNormal, length));
+  return exceptionCreateFromMessage(exception_type, message);
+}
 
 // Isolate
 void isolate_throw_exception(Isolate* isolate, Local exception) {
@@ -1077,8 +1087,11 @@ void isolate_throw_exception(Isolate* isolate, Local exception) {
 }
 
 void isolate_throw_error(Isolate* isolate, ::rust::Str description) {
+  // kNormal (not kInternalized): error messages are arbitrary caller-supplied
+  // strings and should not pollute the internalized string table (which is never
+  // GC'd), matching C++ jsg::Lock::v8Error() / v8Str() behavior.
   auto message = ::workerd::jsg::check(v8::String::NewFromUtf8(
-      isolate, description.data(), v8::NewStringType::kInternalized, description.size()));
+      isolate, description.data(), v8::NewStringType::kNormal, description.size()));
   isolate->ThrowError(message);
 }
 

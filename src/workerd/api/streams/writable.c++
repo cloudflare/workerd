@@ -11,12 +11,12 @@
 namespace workerd::api {
 
 WritableStreamDefaultWriter::WritableStreamDefaultWriter()
-    : ioContext(tryGetIoContext()),
+    : ioContext(tryGetIoContextId()),
       state(WriterState::create<Initial>()) {}
 
 WritableStreamDefaultWriter::~WritableStreamDefaultWriter() noexcept(false) {
   KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
-    attached.stream->getController().releaseWriter(*this, kj::none);
+    attached.stream->getController().releaseWriter(addPtrToThis(), kj::none);
   }
 }
 
@@ -49,11 +49,11 @@ jsg::Promise<void> WritableStreamDefaultWriter::abort(
 }
 
 void WritableStreamDefaultWriter::attach(jsg::Lock& js,
-    WritableStreamController& controller,
+    jsg::Ref<WritableStream> stream,
     jsg::Promise<void> closedPromise,
     jsg::Promise<void> readyPromise) {
   KJ_ASSERT(state.is<Initial>());
-  state.transitionTo<Attached>(controller.addRef());
+  state.transitionTo<Attached>(kj::mv(stream));
   this->closedPromise = kj::mv(closedPromise);
   replaceReadyPromise(js, kj::mv(readyPromise));
 }
@@ -110,7 +110,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamDefaultWriter::isReady(jsg::Lock& js
 
 void WritableStreamDefaultWriter::lockToStream(jsg::Lock& js, WritableStream& stream) {
   KJ_ASSERT(!stream.isLocked());
-  KJ_ASSERT(stream.getController().lockWriter(js, *this));
+  KJ_ASSERT(stream.getController().lockWriter(js, addPtrToThis()));
 }
 
 void WritableStreamDefaultWriter::releaseLock(jsg::Lock& js) {
@@ -123,7 +123,7 @@ void WritableStreamDefaultWriter::releaseLock(jsg::Lock& js) {
     // strong reference to be cleared, so let's make sure we keep a reference
     // to the stream at least until the call to releaseLock completes.
     auto ref = attached.stream.addRef();
-    attached.stream->getController().releaseWriter(*this, js);
+    attached.stream->getController().releaseWriter(addPtrToThis(), js);
     state.transitionTo<Released>();
   }
 }
@@ -185,9 +185,9 @@ WritableStream::WritableStream(IoContext& ioContext,
           kj::mv(maybeClosureWaitable))) {}
 
 WritableStream::WritableStream(kj::Own<WritableStreamController> controller)
-    : ioContext(tryGetIoContext()),
+    : ioContext(tryGetIoContextId()),
       controller(kj::mv(controller)) {
-  getController().setOwnerRef(*this);
+  getController().setOwnerRef(PtrTarget::addWeakToThis());
 }
 
 jsg::Ref<WritableStream> WritableStream::addRef() {
@@ -288,10 +288,10 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
-    return canceler.wrap(getInner().write(buffer));
+    return canceler.wrap(getInner()->write(buffer));
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-    return canceler.wrap(getInner().write(pieces));
+    return canceler.wrap(getInner()->write(pieces));
   }
 
   // TODO(perf): We can't properly implement tryPumpFrom(), which means that Cap'n Proto will
@@ -305,7 +305,7 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
   }
 
   kj::Promise<void> end() override {
-    return canceler.wrap(getInner().end());
+    return canceler.wrap(getInner()->end());
   }
 
  private:
@@ -316,8 +316,8 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
       kj::refcounted<WeakRef<WritableStreamRpcAdapter>>(
           kj::Badge<WritableStreamRpcAdapter>(), *this);
 
-  WritableStreamSink& getInner() {
-    return *KJ_UNWRAP_OR(inner, { kj::throwFatalException(cancellationException()); });
+  kj::Ptr<WritableStreamSink> getInner() {
+    return KJ_UNWRAP_OR(inner, { kj::throwFatalException(cancellationException()); })->getPtr();
   }
 
   static kj::Exception cancellationException() {

@@ -16,8 +16,8 @@ Macro-driven C++/V8 binding layer: declares C++ types as JS-visible resources/st
 | `struct.h`       | `JSG_STRUCT` value-type mapping: deep-copies C++ structs to/from JS objects                                                 |
 | `wrappable.h`    | GC integration: `Wrappable` base class, CppGC visitor hooks, ref marking, weak pointers                                     |
 | `promise.h`      | `jsg::Promise<T>` wrapping KJ promises ↔ JS promises; resolver pairs, coroutine integration                                |
-| `modules.h`      | `ModuleRegistry`: ESM/CJS module resolution, evaluation, top-level await handling                                           |
-| `modules-new.h`  | Replacement module system (new design)                                                                                      |
+| `modules.h`      | Legacy `ModuleRegistry`: ESM/CJS module resolution, evaluation, top-level await handling                                    |
+| `modules-new.h`  | New module registry (`jsg::modules::ModuleRegistry`): URL-based specifiers, shareable across isolate replicas, gated by the `new_module_registry` compat flag via `workerd::isNewModuleRegistryEnabled()`. Full reference: `docs/reference/detail/new-module-registry.md` |
 | `setup.h`        | `V8System`, `IsolateBase`, `JsgConfig`; process-level V8 init; `JSG_DECLARE_ISOLATE_TYPE`                                   |
 | `function.h`     | `jsg::Function<Sig>` wrapping C++ callables ↔ JS functions                                                                 |
 | `memory.h`       | `MemoryTracker`, `JSG_MEMORY_INFO` macro; heap snapshot support                                                             |
@@ -78,7 +78,7 @@ class MyType: public jsg::Object {
 These rules MUST be followed when writing or modifying JSG code:
 
 1. **MUST implement `visitForGc()`** on any Resource Type holding `Ref<T>`, `V8Ref<T>`,
-   `JsRef<T>`, `Function<T>`, `Promise<T>`, `Promise<T>::Resolver`, `BufferSource`, or
+   `JsRef<T>`, `Function<T>`, `Promise<T>`, `Promise<T>::Resolver`, or
    `Name` — see `README.md` §GC-Visitable Types for the complete list
 2. **MUST visit ALL GC-visitable fields** — missing one causes GC corruption
 3. **MUST NOT store `v8::Local<T>` or `JsValue` types as class members** — use `V8Ref<T>`
@@ -98,6 +98,18 @@ These rules MUST be followed when writing or modifying JSG code:
     unreachable from JS, or a type visited via a different mechanism), suppress the
     `jsg-visit-for-gc` clang-tidy diagnostic with a `// NOLINT(jsg-visit-for-gc)`
     comment and a brief explanation of *why* it's safe to skip.
+
+12. **Module evaluation MUST NOT drain the microtask queue while nested.** Draining
+    while an ancestor module is still `kEvaluating` can run an async module's
+    fulfillment callback early and trip a fatal V8 CHECK
+    (`status() >= kEvaluatingAsync`). Evaluation depth is tracked by the RAII
+    `Lock::ModuleEvaluationScope`, queried via `js.isEvaluatingModule()`; both module
+    registries check it before settling a pending top-level await. Any code path that
+    calls `v8::Module::Evaluate()` MUST hold a `ModuleEvaluationScope`, including
+    embedder-supplied evaluation callbacks (`ModuleRegistry::Builder::setEvalCallback`),
+    or the guard is silently bypassed. Callers that can return a promise to their own
+    caller may pass `InstantiateModuleOptions::ALLOW_PENDING_EVALUATION` to receive the
+    pending evaluation promise instead of an error.
 
 The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
 automatically detects missing `visitForGc` implementations and unvisited fields

@@ -18,8 +18,6 @@ namespace {
 // want this number to be big enough to be useful for tracing, but small enough to make it hard to
 // DoS the C++ heap -- keeping in mind we can record a trace per handler run during a request. For
 // streaming tail worker, this is the maximum size per tail event.
-// TODO(streaming-tail): Add a clear indicator for events being truncated based on MAX_TRACE_BYTES
-// so that developers can understand why this happens.
 static constexpr size_t MAX_TRACE_BYTES = 256 * 1024;
 
 tracing::Attribute::Value cloneAttributeValue(const tracing::Attribute::Value& value) {
@@ -122,27 +120,47 @@ constexpr kj::LiteralStringConst logSizeExceeded =
 void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     LogLevel logLevel,
-    kj::String message) {
+    kj::String message,
+    tracing::LogErrorInfo errorInfo) {
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
+  }
+
+  // Compute the heap size of errorInfo once for both the streaming and buffered paths.
+  size_t errorInfoSize = 0;
+  KJ_IF_SOME(infos, errorInfo) {
+    for (const auto& entry: infos) {
+      KJ_IF_SOME(info, entry) {
+        errorInfoSize += info.name.size() + info.message.size();
+        KJ_IF_SOME(s, info.stack) {
+          errorInfoSize += s.size();
+        }
+      }
+    }
   }
 
   // TODO(streaming-tail): Here we add the log to the trace object and the tail stream writer, if
   // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
   // to the buffered trace object is not needed; this will be addressed in a future refactor.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    // If message is too big on its own, truncate it.
+    // If message is too big on its own, truncate it. A truncated message is no longer valid JSON,
+    // so signal truncation to the receiver, which then exposes it as a raw string.
     size_t messageSize = kj::min(message.size(), MAX_TRACE_BYTES);
+    auto truncated =
+        message.size() > MAX_TRACE_BYTES ? tracing::LogTruncated::YES : tracing::LogTruncated::NO;
+    // Clone errorInfo for the STW path because the batched-tail path below also needs it.
+    auto streamErrorInfo = tracing::cloneLogErrorInfo(errorInfo);
     writer->report(context,
-        {tracing::Log(timestamp, logLevel, kj::str(message.first(messageSize)))}, timestamp,
-        messageSize);
+        {tracing::Log(timestamp, logLevel, kj::str(message.first(messageSize)),
+            kj::mv(streamErrorInfo), truncated)},
+        timestamp, messageSize + errorInfoSize);
   }
 
   if (trace->exceededLogLimit) {
     return;
   }
 
-  size_t messageSize = sizeof(tracing::Log) + message.size();
+  size_t messageSize = sizeof(tracing::Log) + message.size() + errorInfoSize;
   if (trace->bytesUsed + messageSize > MAX_TRACE_BYTES) {
     // We use a JSON encoded array/string to match other console.log() recordings:
     trace->logs.add(timestamp, LogLevel::WARN, kj::str(logSizeExceeded));
@@ -150,7 +168,7 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     trace->truncated = true;
   } else {
     trace->bytesUsed += messageSize;
-    trace->logs.add(timestamp, logLevel, kj::mv(message));
+    trace->logs.add(timestamp, logLevel, kj::mv(message), kj::mv(errorInfo));
   }
 }
 
@@ -310,7 +328,7 @@ void WorkerTracer::setEventInfo(
   KJ_ASSERT(weakIoContext == kj::none, "tracer can only be used for a single event");
   weakIoContext = incomingRequest.getContext().getWeakRef();
   setEventInfoInternal(
-      incomingRequest.getInvocationSpanContext(), incomingRequest.now(), kj::mv(info));
+      incomingRequest.getInvocationSpanContext(), incomingRequest.nowForTraceOnset(), kj::mv(info));
 }
 
 void WorkerTracer::setEventInfoInternal(
@@ -399,6 +417,16 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
   trace->outcome = outcome;
   trace->cpuTime = cpuTime;
   trace->wallTime = wallTime;
+
+  if (outcome == EventOutcome::EXCEPTION && pipelineLogLevel != PipelineLogLevel::NONE &&
+      !trace->exceededExceptionLimit && trace->exceptions.empty()) {
+    LOG_PERIODICALLY(WARNING,
+        "NOSENTRY reporting trace with exception outcome, but no actual exceptions",
+        trace->eventInfo);
+  } else if (outcome != EventOutcome::EXCEPTION && !trace->exceptions.empty()) {
+    LOG_PERIODICALLY(WARNING, "NOSENTRY reporting trace with exceptions, but no exception outcome",
+        trace->eventInfo);
+  }
 
   // Defer reporting the actual outcome event to the WorkerTracer destructor: The outcome is
   // reported when the metrics request is deallocated, but with ctx.waitUntil() there might be spans

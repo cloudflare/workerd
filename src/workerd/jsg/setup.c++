@@ -217,6 +217,24 @@ IsolateBase& IsolateBase::from(v8::Isolate* isolate) {
   return *static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
 }
 
+void IsolateBase::registerTypeHandler(const std::type_info& type, const void* handler) {
+  typeHandlerRegistry.upsert(
+      TypeHandlerKey{.type = &type}, handler, [](const void*& existing, const void*&& replacement) {
+    // Re-registration can only ever supply the same singleton again (the instances are
+    // static constexpr, one per handler type).
+    existing = replacement;
+  });
+}
+
+kj::Maybe<const void*> IsolateBase::tryGetTypeHandlerErased(const std::type_info& type) const {
+  return typeHandlerRegistry.find(TypeHandlerKey{.type = &type})
+      .map([](const void* const& handler) { return handler; });
+}
+
+kj::Maybe<const void*> tryGetTypeHandlerErased(v8::Isolate* isolate, const std::type_info& type) {
+  return IsolateBase::from(isolate).tryGetTypeHandlerErased(type);
+}
+
 void IsolateBase::buildEmbedderGraph(v8::Isolate* isolate, v8::EmbedderGraph* graph, void* data) {
   try {
     const auto base = static_cast<IsolateBase*>(data);
@@ -393,8 +411,8 @@ IsolateBase::IsolateBase(V8System& system,
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(system.platformWrapper.get()))),
       ptr(newIsolate(kj::mv(createParams), cppHeap.release(), group)),
       externalMemoryTarget(kj::arc<ExternalMemoryTarget>(ptr)),
-      envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
-      exportsAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
+      envAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
+      exportsAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
       observer(kj::mv(observer)),
       externalStringAllocator(kj::mv(externalStringAllocator)) {

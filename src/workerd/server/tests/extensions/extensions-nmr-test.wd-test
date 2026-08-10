@@ -1,0 +1,33 @@
+using Workerd = import "/workerd/workerd.capnp";
+using TestExtension = import "extension.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "extensions-nmr-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "extensions-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "new_module_registry"],
+        bindings = [
+          (
+            name = "door",
+            wrapped = (
+              moduleName = "test:binding",
+              innerBindings = [ (name = "secret", text = "open sesame") ],
+            )
+          ),
+          (
+            name = "customDoor",
+            wrapped = (
+              moduleName = "test:binding",
+              entrypoint = "wrap",
+              innerBindings = [ (name = "secret", text = "custom open sesame") ],
+            )
+          )
+        ],
+      )
+    ),
+  ],
+  extensions = [ TestExtension.extension ],
+);

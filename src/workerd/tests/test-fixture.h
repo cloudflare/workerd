@@ -6,6 +6,7 @@
 
 #include <workerd/api/memory-cache.h>
 #include <workerd/io/io-context.h>
+#include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/server/workerd.capnp.h>
@@ -32,6 +33,9 @@ struct TestFixture {
     // waitScope of outer IO loop. New IO will be set up if missing.
     kj::Maybe<kj::WaitScope&> waitScope;
     kj::Maybe<CompatibilityFlags::Reader> featureFlags;
+    // If set, the named autogates (bare names, without the "workerd-autogate-" prefix)
+    // are enabled for the test. Otherwise autogates are initialized empty.
+    kj::Maybe<kj::Array<kj::StringPtr>> autogates;
     kj::Maybe<kj::StringPtr> mainModuleSource;
     // If set, make a stub of an Actor with the given id.
     kj::Maybe<Worker::Actor::Id> actorId;
@@ -40,7 +44,7 @@ struct TestFixture {
     bool useRealTimers;
     // If set, used instead of the default DummyIoChannelFactory when creating incoming requests.
     // The factory receives the TimerChannel reference.
-    kj::Maybe<kj::Function<kj::Own<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
+    kj::Maybe<kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
     // If set, used as the actor's Loopback (only meaningful when actorId is set). Defaults to a
     // MockActorLoopback that throws on getWorker(). Tests that need to intercept hibernation
     // event dispatch can supply a custom Loopback here, then later retrieve it (or a fresh ref
@@ -90,9 +94,8 @@ struct TestFixture {
       waitScope = &KJ_REQUIRE_NONNULL(io).waitScope;
     }
 
-    auto& context = request->getContext();
-    return context
-        .run([&](Worker::Lock& lock) {
+    return request->getContext()
+        .run([&](Worker::Lock& lock, IoContext& context) {
       // auto features = workerBundle.getFeatureFlags();
       auto& js = jsg::Lock::from(lock.getIsolate());
       Environment env = {{.isolate = lock.getIsolate()}, context, lock, js};
@@ -129,15 +132,19 @@ struct TestFixture {
   // outlive the returned IncomingRequest.
   kj::Own<IoContext::IncomingRequest> newIncomingRequest(IoContext& context);
 
+  // Like newIncomingRequest(IoContext&), but leaves delivery to the caller. This models code paths
+  // that report trace onset immediately before delivered().
+  kj::Own<IoContext::IncomingRequest> newUndeliveredIncomingRequest(
+      IoContext& context, kj::Maybe<kj::Own<BaseTracer>> workerTracer = kj::none);
+
   // Enter an IoContext. Callback receives Environment& and must return void (NOT a
   // Promise — the Worker::Lock is only valid for the synchronous duration of the
   // callback). The context is NOT destroyed afterwards — the caller still owns the
   // IncomingRequest.
   template <typename Callback>
   void enterContext(IoContext::IncomingRequest& request, Callback&& callback) {
-    auto& context = request.getContext();
-    context
-        .run([&](Worker::Lock& lock) {
+    request.getContext()
+        .run([&](Worker::Lock& lock, IoContext& context) {
       auto& js = jsg::Lock::from(lock.getIsolate());
       Environment env = {{.isolate = lock.getIsolate()}, context, lock, js};
       callback(env);
@@ -150,6 +157,13 @@ struct TestFixture {
   void enterWorkerLock(Callback&& callback) {
     auto asyncLock = worker->takeAsyncLockWithoutRequest(nullptr).wait(getWaitScope());
     worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) { callback(lock); });
+  }
+
+  // Acquire a Worker::Lock synchronously without an IoContext.
+  template <typename Callback>
+  void enterWorkerLockSynchronously(Callback&& callback) {
+    worker->runInLockScope(
+        Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) { callback(lock); });
   }
 
   kj::WaitScope& getWaitScope() {
@@ -252,7 +266,7 @@ struct TestFixture {
   kj::Own<kj::TaskSet::ErrorHandler> errorHandler;
   kj::TaskSet waitUntilTasks;
   kj::Own<kj::HttpHeaderTable> headerTable;
-  kj::Maybe<kj::Function<kj::Own<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
+  kj::Maybe<kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
   kj::Maybe<kj::Function<kj::Own<RequestObserver>()>> requestObserverFactory;
 
   // Construct a fresh Worker::Actor with the given id, using the saved Loopback.
@@ -308,10 +322,6 @@ struct TestFixture {
     kj::Own<ActorChannel> getColoLocalActor(
         uint channel, kj::StringPtr id, SpanParent parentSpan) override {
       KJ_FAIL_REQUIRE("no actor channels");
-    }
-
-    kj::Own<void> addRef() override {
-      KJ_FAIL_REQUIRE("not used");
     }
 
     TimerChannel& timer;

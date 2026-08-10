@@ -115,6 +115,8 @@ If a C++ library already depends on your crate (C++ → Rust) and you also add a
 
 cxx also supports **reusing a binding type across bridges** ([docs](https://cxx.rs/extern-c++.html#reusing-existing-binding-types)): the `worker` crate's `error.rs` / `ok.rs` / `kill_switch.rs` bridges reuse `ffi.rs`'s types by depending on `:ffi.rs@cxx`. Still, keep a struct that only crosses FFI within one crate in that crate's bridge.
 
+**V8 handles must always cross the FFI as the shared `jsg::v8::ffi` types, never as a bare `usize`.** When another crate's bridge passes a V8 `Local`/`Global`, reuse the jsg shared struct via a type alias (`type Local = jsg::v8::ffi::Local;`) plus `include!("workerd/rust/jsg/v8.rs.h")`, and depend on `//src/rust/jsg` (which supplies the generated header transitively). Do not smuggle the handle word through a `usize` — the shared type keeps both sides in one canonical, cxx-verified definition. See `node-exceptions/lib.rs`.
+
 ### Testing crates that cross the FFI
 
 A `rust_test` exercising code that calls into heavy C++ (V8, etc.) must link those impl symbols itself via `test_deps` — the production binary already links them, so only the standalone test binary needs them. Symptom if missing: undefined C++ symbols at test link.

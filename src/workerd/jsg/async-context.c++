@@ -44,12 +44,12 @@ AsyncContextFrame::AsyncContextFrame(Lock& js, StorageEntry storageEntry) {
   });
 }
 
-AsyncContextFrame::StorageEntry::StorageEntry(kj::Own<StorageKey> key, Value value)
+AsyncContextFrame::StorageEntry::StorageEntry(kj::Arc<StorageKey> key, Value value)
     : key(kj::mv(key)),
       value(kj::mv(value)) {}
 
 AsyncContextFrame::StorageEntry AsyncContextFrame::StorageEntry::clone(Lock& js) {
-  return StorageEntry(kj::addRef(*key), value.addRef(js));
+  return StorageEntry(key.addRef(), value.addRef(js));
 }
 
 kj::Maybe<AsyncContextFrame&> AsyncContextFrame::current(Lock& js) {
@@ -147,7 +147,7 @@ v8::Local<v8::Function> AsyncContextFrame::wrapRoot(
           }));
 }
 
-kj::Maybe<Value&> AsyncContextFrame::get(StorageKey& key) {
+kj::Maybe<Value&> AsyncContextFrame::get(const StorageKey& key) {
   KJ_ASSERT(!key.isDead());
   storage.eraseAll([](const auto& entry) { return entry.key->isDead(); });
   return storage.find(key).map([](auto& entry) -> Value& { return entry.value; });
@@ -171,8 +171,8 @@ AsyncContextFrame::Scope::~Scope() noexcept(false) {
   maybeSetV8ContinuationContext(isolate, prior);
 }
 
-AsyncContextFrame::StorageScope::StorageScope(Lock& js, StorageKey& key, Value store)
-    : frame(AsyncContextFrame::create(js, StorageEntry(kj::addRef(key), kj::mv(store)))),
+AsyncContextFrame::StorageScope::StorageScope(Lock& js, kj::Arc<StorageKey> key, Value store)
+    : frame(AsyncContextFrame::create(js, StorageEntry(kj::mv(key), kj::mv(store)))),
       scope(js, *frame) {}
 
 v8::Local<v8::Object> AsyncContextFrame::getJSWrapper(v8::Isolate* isolate) {

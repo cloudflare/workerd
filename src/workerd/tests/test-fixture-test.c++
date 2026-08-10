@@ -25,6 +25,20 @@ KJ_TEST("setup/destroy") {
   TestFixture fixture;
 }
 
+KJ_TEST("feature flags enabling the new module registry are rejected") {
+  // TestFixture never constructs a (new) module registry, so feature flags
+  // that enable it would split the worker across the two registries.
+  // Worker::Script's consistency check must reject the combination up front
+  // with a clear error rather than letting the mismatch surface as type
+  // confusion at the first module resolution.
+  capnp::MallocMessageBuilder arena;
+  auto flags = arena.initRoot<CompatibilityFlags>();
+  flags.setNewModuleRegistry(true);
+
+  KJ_EXPECT_THROW_MESSAGE("a module registry instance must be passed to Worker::Script",
+      TestFixture({.featureFlags = flags.asReader()}));
+}
+
 KJ_TEST("single void runInIoContext run") {
   TestFixture fixture;
   uint runCount = 0;

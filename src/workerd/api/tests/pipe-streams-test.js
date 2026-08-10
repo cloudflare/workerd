@@ -745,6 +745,325 @@ export const pipeToJsToNativeCancel = {
   },
 };
 
+// Test pipeTo aborted while a read is pending (JS source to internal writable).
+//
+// This exercises the internal pipe loop's abort path: the read continuation observes
+// the aborted signal (Pipe::State::checkSignal -> Pipe::checkSignal), which cancels
+// and releases the source (running this test's cancel algorithm synchronously) and
+// then drains the destination queue — destroying the Pipe itself mid-call. Regression
+// test for the pipe teardown hardening: in debug builds, holding a strong kj::Ptr to
+// the Pipe across that call trips the PtrTarget liveness assert.
+export const pipeToJsToInternalAbortMidRead = {
+  async test() {
+    const ac = new AbortController();
+    const reason = new Error('boom');
+    const cancelFn = mock.fn();
+
+    let rc;
+    const rs = new ReadableStream({
+      start(c) {
+        rc = c;
+      },
+      cancel: cancelFn,
+    });
+
+    const ts = new IdentityTransformStream();
+    const pipePromise = rs.pipeTo(ts.writable, { signal: ac.signal });
+
+    // Let the pipe loop start and issue a read (which remains pending since
+    // nothing has been enqueued yet).
+    await scheduler.wait(0);
+
+    // Abort while the read is pending, then satisfy the read so the pipe loop's
+    // read continuation runs and observes the aborted signal.
+    ac.abort(reason);
+    rc.enqueue(new TextEncoder().encode('hello'));
+
+    await rejects(pipePromise, { message: 'boom' });
+
+    // The source was canceled with the abort reason, exactly once (the release is
+    // idempotent even though multiple cleanup paths run).
+    strictEqual(cancelFn.mock.callCount(), 1);
+    strictEqual(cancelFn.mock.calls[0].arguments[0], reason);
+
+    // The source's pipe lock was released.
+    strictEqual(rs.locked, false);
+
+    // The destination was aborted: its readable side errors.
+    await rejects(ts.readable.getReader().read(), { message: 'boom' });
+  },
+};
+
+// Same as above with preventCancel: the source must not be canceled, but its pipe
+// lock is still released (the pipe is over), so the stream remains usable.
+export const pipeToJsToInternalAbortPreventCancel = {
+  async test() {
+    const ac = new AbortController();
+    const reason = new Error('boom');
+    const cancelFn = mock.fn();
+
+    let rc;
+    const rs = new ReadableStream({
+      start(c) {
+        rc = c;
+      },
+      cancel: cancelFn,
+    });
+
+    const ts = new IdentityTransformStream();
+    const pipePromise = rs.pipeTo(ts.writable, {
+      signal: ac.signal,
+      preventCancel: true,
+    });
+
+    await scheduler.wait(0);
+    ac.abort(reason);
+    rc.enqueue(new TextEncoder().encode('hello'));
+
+    await rejects(pipePromise, { message: 'boom' });
+
+    strictEqual(cancelFn.mock.callCount(), 0);
+
+    // The source lock was released even though the source was not canceled; the
+    // stream must be lockable again.
+    strictEqual(rs.locked, false);
+    rs.getReader();
+  },
+};
+
+// Same abort scenario with preventAbort: the destination is not aborted and remains
+// usable after the pipe rejects. This exercises the non-drain teardown branch of the
+// internal pipe loop's signal handling.
+export const pipeToJsToInternalAbortPreventAbort = {
+  async test() {
+    const ac = new AbortController();
+    const reason = new Error('boom');
+    const cancelFn = mock.fn();
+
+    let rc;
+    const rs = new ReadableStream({
+      start(c) {
+        rc = c;
+      },
+      cancel: cancelFn,
+    });
+
+    const ts = new IdentityTransformStream();
+    const pipePromise = rs.pipeTo(ts.writable, {
+      signal: ac.signal,
+      preventAbort: true,
+    });
+
+    await scheduler.wait(0);
+    ac.abort(reason);
+    rc.enqueue(new TextEncoder().encode('hello'));
+
+    await rejects(pipePromise, { message: 'boom' });
+
+    // The source was still canceled (preventCancel was not set).
+    strictEqual(cancelFn.mock.callCount(), 1);
+    strictEqual(rs.locked, false);
+
+    // The destination was NOT aborted: it is unlocked and still writable. Prove it
+    // by pushing a chunk through the identity transform.
+    const writer = ts.writable.getWriter();
+    const readerPromise = ts.readable.getReader().read();
+    await writer.write(new TextEncoder().encode('after'));
+    const { value, done } = await readerPromise;
+    strictEqual(done, false);
+    strictEqual(new TextDecoder().decode(value), 'after');
+  },
+};
+
+// Test pipeTo aborted while a read is pending (JS source to JS writable).
+//
+// This exercises the standard pipe loop's abort path
+// (WritableLockImpl::PipeLocked::checkSignal): the source is canceled and released
+// (running this test's cancel algorithm synchronously while the write-side pipe lock
+// still exists), the destination's abort algorithm runs with the reason, and the
+// abort continuation settles the pipe promise after the write-side pipe lock has
+// already been released — the continuation must not touch the destroyed lock state.
+export const pipeToJsToJsAbortMidRead = {
+  async test() {
+    const ac = new AbortController();
+    const reason = new Error('boom');
+    const cancelFn = mock.fn();
+    const abortFn = mock.fn();
+
+    let rc;
+    const rs = new ReadableStream({
+      start(c) {
+        rc = c;
+      },
+      cancel: cancelFn,
+    });
+    const ws = new WritableStream({ abort: abortFn });
+
+    const pipePromise = rs.pipeTo(ws, { signal: ac.signal });
+
+    await scheduler.wait(0);
+    ac.abort(reason);
+    rc.enqueue('hello');
+
+    await rejects(pipePromise, { message: 'boom' });
+
+    strictEqual(cancelFn.mock.callCount(), 1);
+    strictEqual(cancelFn.mock.calls[0].arguments[0], reason);
+
+    strictEqual(abortFn.mock.callCount(), 1);
+    strictEqual(abortFn.mock.calls[0].arguments[0], reason);
+
+    // Both locks were released.
+    strictEqual(rs.locked, false);
+    strictEqual(ws.locked, false);
+  },
+};
+
+// Same as above with preventCancel: the source must not be canceled but is unlocked;
+// the destination is still aborted.
+export const pipeToJsToJsAbortPreventCancel = {
+  async test() {
+    const ac = new AbortController();
+    const reason = new Error('boom');
+    const cancelFn = mock.fn();
+    const abortFn = mock.fn();
+
+    let rc;
+    const rs = new ReadableStream({
+      start(c) {
+        rc = c;
+      },
+      cancel: cancelFn,
+    });
+    const ws = new WritableStream({ abort: abortFn });
+
+    const pipePromise = rs.pipeTo(ws, {
+      signal: ac.signal,
+      preventCancel: true,
+    });
+
+    await scheduler.wait(0);
+    ac.abort(reason);
+    rc.enqueue('hello');
+
+    await rejects(pipePromise, { message: 'boom' });
+
+    strictEqual(cancelFn.mock.callCount(), 0);
+    strictEqual(abortFn.mock.callCount(), 1);
+    strictEqual(abortFn.mock.calls[0].arguments[0], reason);
+
+    strictEqual(rs.locked, false);
+    rs.getReader();
+  },
+};
+
+// Test pipeTo into a JS destination whose close was already queued when the pipe
+// started (JS source to JS writable).
+//
+// The pipe loop only checks for a fully-Closed destination at the top of each
+// iteration, so a close that is merely queued or in flight does not stop the pipe
+// from starting and issuing a read. When the close algorithm then completes
+// mid-pipe, WritableStreamJsController::doClose finds the write-side pipe lock
+// still held. Regression test: doClose must release the source's pipe lock (and
+// cancel the source, since closing propagates backward) rather than tearing down
+// the write-side lock alone — which left the source permanently locked.
+export const pipeToJsToJsCloseQueuedDestination = {
+  async test() {
+    const cancelFn = mock.fn();
+    let resolveClose;
+    const closePromise = new Promise((resolve) => (resolveClose = resolve));
+
+    const rs = new ReadableStream({
+      pull() {
+        // Never enqueue anything; the pipe's first read stays pending.
+      },
+      cancel: cancelFn,
+    });
+    const ws = new WritableStream({
+      close() {
+        return closePromise;
+      },
+    });
+
+    // Queue the close before the pipe starts. The stream is not locked yet, so
+    // this is allowed; the close algorithm holds the close in flight.
+    const closed = ws.close();
+    const pipePromise = rs.pipeTo(ws);
+
+    // Let the pipe loop start and issue its read. The pipe holds both locks
+    // while the close is still in flight.
+    await scheduler.wait(0);
+    strictEqual(rs.locked, true);
+    strictEqual(ws.locked, true);
+
+    // Complete the close mid-pipe.
+    resolveClose();
+    await closed;
+
+    // The source was canceled with the backward-propagated close error and its
+    // pipe lock was released.
+    strictEqual(cancelFn.mock.callCount(), 1);
+    const reason = cancelFn.mock.calls[0].arguments[0];
+    ok(reason instanceof TypeError);
+    strictEqual(reason.message, 'This destination writable stream is closed.');
+    strictEqual(rs.locked, false);
+
+    // The destination was unlocked too and remains usable as a closed stream.
+    strictEqual(ws.locked, false);
+    const writer = ws.getWriter();
+    await writer.closed;
+
+    // TODO(conform): The spec's "closing must be propagated backward" would have
+    // rejected the pipe promise with the TypeError above. The pipe loop bails out
+    // once the pipe lock is gone, so the promise currently resolves instead.
+    await pipePromise;
+  },
+};
+
+// Same as above with preventCancel: the source must not be canceled, but its pipe
+// lock is still released (the pipe is over), so the stream remains usable.
+export const pipeToJsToJsCloseQueuedDestinationPreventCancel = {
+  async test() {
+    const cancelFn = mock.fn();
+    let resolveClose;
+    const closePromise = new Promise((resolve) => (resolveClose = resolve));
+
+    let rc;
+    const rs = new ReadableStream({
+      start(c) {
+        rc = c;
+      },
+      cancel: cancelFn,
+    });
+    const ws = new WritableStream({
+      close() {
+        return closePromise;
+      },
+    });
+
+    const closed = ws.close();
+    const pipePromise = rs.pipeTo(ws, { preventCancel: true });
+
+    await scheduler.wait(0);
+    strictEqual(rs.locked, true);
+
+    resolveClose();
+    await closed;
+
+    // The source lock was released even though the source was not canceled; the
+    // stream must be lockable again.
+    strictEqual(cancelFn.mock.callCount(), 0);
+    strictEqual(rs.locked, false);
+    const reader = rs.getReader();
+
+    // Close the source to settle the pipe's still-pending read, which lets the
+    // pipe promise settle.
+    rc.close();
+    await reader.closed;
+    await pipePromise;
+  },
+};
+
 // Default fetch handler for service binding requests
 export default {
   async fetch(request) {

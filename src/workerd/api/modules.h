@@ -14,6 +14,7 @@
 #include <workerd/api/tracing.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/workers-module.h>
+#include <workerd/api/wrapped-binding.h>
 #include <workerd/jsg/modules-new.h>
 
 #include <cloudflare/cloudflare.capnp.h>
@@ -65,6 +66,7 @@ void registerModules(Registry& registry, auto featureFlags) {
   registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);
   registerWorkersModule(registry, featureFlags);
   registerTracingModule(registry, featureFlags);
+  registerWrappedBindingModule(registry, featureFlags);
   registry.template addBuiltinModule<EnvModule>(
       "cloudflare-internal:env", workerd::jsg::ModuleRegistry::Type::INTERNAL);
   registry.template addBuiltinModule<FileSystemModule>(
@@ -82,9 +84,13 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto
 
   builder.add(getInternalUnsafeModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalTracingModuleBundle<TypeWrapper>(featureFlags));
+  builder.add(getInternalWrappedBindingModuleBundle<TypeWrapper>(featureFlags));
   if (featureFlags.getUnsafeModule()) {
     builder.add(getExternalUnsafeModuleBundle<TypeWrapper>(featureFlags));
   }
+#ifdef WORKERD_FUZZILLI
+  builder.add(getExternalFuzzilliModuleBundle<TypeWrapper>(featureFlags));
+#endif
 
   if (featureFlags.getRttiApi()) {
     builder.add(getExternalRttiModuleBundle<TypeWrapper>(featureFlags));

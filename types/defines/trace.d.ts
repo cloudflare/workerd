@@ -147,11 +147,20 @@ interface Exception {
   readonly stack?: string;
 }
 
-interface Log {
+interface TailStreamErrorInfo {
+  readonly name: string;
+  readonly message: string;
+  readonly stack?: string;
+}
+
+type Log = {
   readonly type: "log";
   readonly level: "debug" | "error" | "info" | "log" | "warn";
-  readonly message: object;
-}
+  readonly errorInfo?: readonly (TailStreamErrorInfo | null)[];
+} & (
+  | { readonly message: object; readonly truncated?: false }
+  | { readonly message: string; readonly truncated: true }
+);
 
 interface DroppedEventsDiagnostic {
   readonly diagnosticsType: "droppedEvents";

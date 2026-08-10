@@ -14,12 +14,14 @@
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/trace.h>
 #include <workerd/api/worker-rpc.h>
+#include <workerd/io/access-info.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-id.h>
 #include <workerd/io/actor-sqlite.h>
 #include <workerd/io/bundle-fs.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/container.capnp.h>
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/legacy-hibernation-manager.h>
 #include <workerd/io/limit-enforcer.h>
@@ -36,6 +38,7 @@
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
+#include <workerd/util/strings.h>
 #include <workerd/util/use-perfetto-categories.h>
 #include <workerd/util/uuid.h>
 #include <workerd/util/websocket-error-handler.h>
@@ -58,6 +61,91 @@
 #include <ctime>
 
 namespace workerd::server {
+
+// Escape a string value for embedding in a JSON string literal. Returns the escaped text
+// wrapped in double quotes, e.g. `"hello \"world\""`.
+static kj::String escapeJsonString(kj::StringPtr text) {
+  static const char HEXDIGITS[] = "0123456789abcdef";
+  kj::Vector<char> escaped(text.size() + 1);
+
+  for (char c: text) {
+    switch (c) {
+      case '"':
+        escaped.addAll("\\\""_kj);
+        break;
+      case '\\':
+        escaped.addAll("\\\\"_kj);
+        break;
+      case '\b':
+        escaped.addAll("\\b"_kj);
+        break;
+      case '\f':
+        escaped.addAll("\\f"_kj);
+        break;
+      case '\n':
+        escaped.addAll("\\n"_kj);
+        break;
+      case '\r':
+        escaped.addAll("\\r"_kj);
+        break;
+      case '\t':
+        escaped.addAll("\\t"_kj);
+        break;
+      default:
+        if (static_cast<uint8_t>(c) < 0x20) {
+          escaped.addAll("\\u00"_kj);
+          uint8_t c2 = c;
+          escaped.add(HEXDIGITS[c2 / 16]);
+          escaped.add(HEXDIGITS[c2 % 16]);
+        } else {
+          escaped.add(c);
+        }
+        break;
+    }
+  }
+
+  return kj::str("\"", escaped.releaseAsArray(), "\"");
+}
+
+// Parsed fields from an access blob header value.
+struct AccessBlobFields {
+  kj::String appAud;
+  kj::Maybe<kj::String> jwtClaimsJson;
+};
+
+// Parses a JSON access blob (from the accessBlobHeader HTTP header).
+// Expected format: {"app_aud": "...", "jwt_claims": {...}}. Returns kj::none when the input
+// Maybe is empty (i.e. the header was absent). A present but malformed value throws.
+static kj::Maybe<AccessBlobFields> parseAccessBlob(kj::Maybe<kj::String> blobJson) {
+  KJ_IF_SOME(json, blobJson) {
+    capnp::JsonCodec jsonCodec;
+    capnp::MallocMessageBuilder arena;
+    auto root = arena.initRoot<capnp::JsonValue>();
+    jsonCodec.decodeRaw(json, root);
+
+    KJ_REQUIRE(root.isObject(), "accessBlobHeader value must be a JSON object");
+    auto fields = root.getObject();
+
+    kj::Maybe<kj::String> appAud;
+    kj::Maybe<kj::String> jwtClaimsJson;
+
+    for (auto field: fields) {
+      auto name = field.getName();
+      if (name == "app_aud") {
+        KJ_REQUIRE(field.getValue().isString(), "access blob `app_aud` must be a string");
+        appAud = kj::str(field.getValue().getString());
+      } else if (name == "jwt_claims") {
+        KJ_REQUIRE(field.getValue().isObject(), "access blob `jwt_claims` must be a JSON object");
+        jwtClaimsJson = jsonCodec.encodeRaw(field.getValue());
+      }
+    }
+
+    auto audience =
+        KJ_REQUIRE_NONNULL(kj::mv(appAud), "accessBlobHeader JSON must contain an `app_aud` field");
+    return AccessBlobFields{kj::mv(audience), kj::mv(jwtClaimsJson)};
+  }
+  return kj::none;
+}
 
 namespace {
 
@@ -114,49 +202,6 @@ static kj::String httpTime(kj::Date date) {
   size_t n = strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S GMT", &tm);
   KJ_ASSERT(n > 0);
   return kj::heapString(buf, n);
-}
-
-static kj::String escapeJsonString(kj::StringPtr text) {
-  static const char HEXDIGITS[] = "0123456789abcdef";
-  kj::Vector<char> escaped(text.size() + 1);
-
-  for (char c: text) {
-    switch (c) {
-      case '"':
-        escaped.addAll("\\\""_kj);
-        break;
-      case '\\':
-        escaped.addAll("\\\\"_kj);
-        break;
-      case '\b':
-        escaped.addAll("\\b"_kj);
-        break;
-      case '\f':
-        escaped.addAll("\\f"_kj);
-        break;
-      case '\n':
-        escaped.addAll("\\n"_kj);
-        break;
-      case '\r':
-        escaped.addAll("\\r"_kj);
-        break;
-      case '\t':
-        escaped.addAll("\\t"_kj);
-        break;
-      default:
-        if (static_cast<uint8_t>(c) < 0x20) {
-          escaped.addAll("\\u00"_kj);
-          uint8_t c2 = c;
-          escaped.add(HEXDIGITS[c2 / 16]);
-          escaped.add(HEXDIGITS[c2 % 16]);
-        } else {
-          escaped.add(c);
-        }
-        break;
-    }
-  }
-
-  return kj::str("\"", escaped.releaseAsArray(), "\"");
 }
 
 template <typename T>
@@ -1276,6 +1321,31 @@ class Server::ActorNamespace final {
       KJ_IF_SOME(config, containerOptions) {
         KJ_ASSERT(config.hasImageName(), "Image name is required");
         auto imageName = config.getImageName();
+        auto privilegeConfig = config.getPrivileges();
+        auto capabilities =
+            kj::heapArrayBuilder<kj::String>(privilegeConfig.getCapabilities().size());
+        for (auto capability: privilegeConfig.getCapabilities()) {
+          capabilities.add(kj::str(capability));
+        }
+        auto devices =
+            kj::heapArrayBuilder<ContainerPrivileges::Device>(privilegeConfig.getDevices().size());
+        for (auto device: privilegeConfig.getDevices()) {
+          devices.add(ContainerPrivileges::Device{
+            .pathOnHost = kj::str(device.getPathOnHost()),
+            .pathInContainer = kj::str(device.getPathInContainer()),
+            .cgroupPermissions = kj::str(device.getCgroupPermissions()),
+          });
+        }
+        auto securityOpt =
+            kj::heapArrayBuilder<kj::String>(privilegeConfig.getSecurityOpt().size());
+        for (auto option: privilegeConfig.getSecurityOpt()) {
+          securityOpt.add(kj::str(option));
+        }
+        ContainerPrivileges privileges{
+          .capabilities = capabilities.finish(),
+          .devices = devices.finish(),
+          .securityOpt = securityOpt.finish(),
+        };
         kj::String containerId;
         KJ_SWITCH_ONEOF(id) {
           KJ_CASE_ONEOF(globalId, kj::Own<ActorIdFactory::ActorId>) {
@@ -1287,7 +1357,8 @@ class Server::ActorNamespace final {
         }
 
         container = ns.getContainerClient(
-            kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId), imageName);
+            kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId), imageName,
+            kj::mv(privileges));
       }
 
       auto actor =
@@ -1342,7 +1413,8 @@ class Server::ActorNamespace final {
     })->addRef();
   }
 
-  kj::Own<ContainerClient> getContainerClient(kj::StringPtr containerId, kj::StringPtr imageName) {
+  kj::Own<ContainerClient> getContainerClient(
+      kj::StringPtr containerId, kj::StringPtr imageName, ContainerPrivileges privileges) {
     KJ_IF_SOME(existingClient, containerClients.find(containerId)) {
       return existingClient->addRef();
     }
@@ -1400,7 +1472,8 @@ class Server::ActorNamespace final {
         kj::str(dockerPathRef), kj::str(containerId), kj::str(imageName),
         kj::str(KJ_ASSERT_NONNULL(containerEgressInterceptorImage,
             "containerEgressInterceptorImage must be configured for containers.")),
-        waitUntilTasks, kj::mv(previousCleanup), kj::mv(cleanupCallback), channelTokenHandler);
+        waitUntilTasks, kj::mv(previousCleanup), kj::mv(cleanupCallback), channelTokenHandler,
+        kj::mv(privileges));
 
     // Store raw pointer in map (does not own)
     containerClients.insert(kj::str(containerId), client.get());
@@ -2996,11 +3069,9 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   void reportFailure(
       const kj::Exception& exception, FailureSource source = FailureSource::OTHER) override {
-    outcome = RequestObserver::outcomeFromException(exception, source);
-  }
-
-  void setOutcome(EventOutcome newOutcome) override {
-    outcome = newOutcome;
+    if (outcome == EventOutcome::OK) {
+      outcome = RequestObserver::outcomeFromException(exception, source);
+    }
   }
 
   // WorkerInterface
@@ -3045,7 +3116,13 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
     try {
-      co_return co_await KJ_ASSERT_NONNULL(inner).runScheduled(scheduledTime, cron);
+      WorkerInterface::ScheduledResult result =
+          co_await KJ_ASSERT_NONNULL(inner).runScheduled(scheduledTime, cron);
+      if (outcome == EventOutcome::OK) {
+        // Haven't set an outcome yet from `reportFailure()` or some other pathway.
+        outcome = result.outcome;
+      }
+      co_return result;
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception);
@@ -3055,7 +3132,13 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
     try {
-      co_return co_await KJ_ASSERT_NONNULL(inner).runAlarm(scheduledTime, retryCount);
+      WorkerInterface::AlarmResult result =
+          co_await KJ_ASSERT_NONNULL(inner).runAlarm(scheduledTime, retryCount);
+      if (outcome == EventOutcome::OK) {
+        // Haven't set an outcome yet from `reportFailure()` or some other pathway.
+        outcome = result.outcome;
+      }
+      co_return result;
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception);
@@ -3075,7 +3158,13 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     try {
-      co_return co_await KJ_ASSERT_NONNULL(inner).customEvent(kj::mv(event));
+      WorkerInterface::CustomEvent::Result result =
+          co_await KJ_ASSERT_NONNULL(inner).customEvent(kj::mv(event));
+      if (outcome == EventOutcome::OK) {
+        // Haven't set an outcome yet from `reportFailure()` or some other pathway.
+        outcome = result.outcome;
+      }
+      co_return result;
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception);
@@ -3282,7 +3371,7 @@ struct Server::DynamicErrorReporter final: public ErrorReporter {
 
 class Server::WorkerService final: public Service,
                                    private kj::TaskSet::ErrorHandler,
-                                   private IoChannelFactory,
+                                   public IoChannelFactory,
                                    private TimerChannel,
                                    private LimitEnforcer {
  public:
@@ -3318,7 +3407,8 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::String> dockerPathParam,
       kj::Maybe<kj::String> containerEgressInterceptorImageParam,
       bool isDynamic,
-      kj::Maybe<kj::Function<void()>> abortIsolateCallback = kj::none)
+      kj::Maybe<kj::Function<void()>> abortIsolateCallback = kj::none,
+      kj::Maybe<kj::String> accessBlobHeaderNameParam = kj::none)
       : channelTokenHandler(channelTokenHandler),
         serviceName(serviceName),
         threadContext(threadContext),
@@ -3334,7 +3424,8 @@ class Server::WorkerService final: public Service,
         dockerPath(kj::mv(dockerPathParam)),
         containerEgressInterceptorImage(kj::mv(containerEgressInterceptorImageParam)),
         isDynamic(isDynamic),
-        abortIsolateCallback(kj::mv(abortIsolateCallback)) {}
+        abortIsolateCallback(kj::mv(abortIsolateCallback)),
+        accessBlobHeaderName(kj::mv(accessBlobHeaderNameParam)) {}
 
   // Call immediately after the constructor to set up `actorNamespaces`. This can't happen during
   // the constructor itself since it sets up cyclic references, which will throw an exception if
@@ -3473,6 +3564,10 @@ class Server::WorkerService final: public Service,
     return defaultEntrypointHandlers != kj::none;
   }
 
+  void setAccessBindingServiceChannel(kj::uint channel) {
+    accessBindingServiceChannel = channel;
+  }
+
   kj::Array<kj::StringPtr> getEntrypointNames() {
     return KJ_MAP(e, namedEntrypoints) -> kj::StringPtr { return e.key; };
   }
@@ -3541,6 +3636,130 @@ class Server::WorkerService final: public Service,
     }
   }
 
+  // AccessInfo constructed from a per-request JSON blob extracted from the accessBlobHeader HTTP
+  // header. The blob matches the production Access struct:
+  //   { "app_aud": "...", "jwt_claims": {...} }
+  //
+  // Holds the subrequest channel index for the access binding worker (if configured). Per-request
+  // props (aud, jwtClaims) are injected by startSubrequest() when the channel is dispatched,
+  // mirroring the production channel-token mechanism.
+  class BlobAccessInfo final: public AccessInfo {
+   public:
+    BlobAccessInfo(kj::String audience,
+        kj::Maybe<kj::String> jwtClaimsJson,
+        kj::Maybe<kj::uint> identityServiceChannel)
+        : audience(kj::mv(audience)),
+          jwtClaimsJson(kj::mv(jwtClaimsJson)),
+          identityServiceChannel(identityServiceChannel) {}
+
+    kj::StringPtr getAudience() override {
+      return audience;
+    }
+
+    kj::Maybe<kj::uint> getIdentityServiceChannel() override {
+      return identityServiceChannel;
+    }
+
+    // The per-request JWT claims JSON, used by startSubrequest() to build the props
+    // Frankenvalue for the access binding worker.
+    kj::Maybe<kj::StringPtr> getJwtClaimsJson() {
+      return jwtClaimsJson.map([](kj::String& s) -> kj::StringPtr { return s; });
+    }
+
+   private:
+    kj::String audience;
+    kj::Maybe<kj::String> jwtClaimsJson;
+    kj::Maybe<kj::uint> identityServiceChannel;
+  };
+
+  // Wraps a lazily-created WorkerInterface to extract the Cloudflare Access blob header from
+  // incoming HTTP requests before the real entrypoint is constructed. This allows the parsed
+  // AccessInfo to be passed into newWorkerEntrypoint() at construction time (where it flows
+  // into IncomingRequest), rather than requiring post-hoc mutation.
+  //
+  // Only the `request()` path inspects headers; all other WorkerInterface methods (connect,
+  // prewarm, scheduled, alarm, test, customEvent) create the inner entrypoint without access
+  // info.
+  class AccessHeaderExtractor final: public WorkerInterface {
+   public:
+    AccessHeaderExtractor(kj::String accessBlobHeaderName,
+        kj::Maybe<kj::uint> identityServiceChannel,
+        kj::Function<kj::Own<WorkerInterface>(kj::Maybe<kj::Own<AccessInfo>>)> factory)
+        : accessBlobHeaderName(kj::mv(accessBlobHeaderName)),
+          identityServiceChannel(identityServiceChannel),
+          factory(kj::mv(factory)) {}
+
+    kj::Promise<void> request(kj::HttpMethod method,
+        kj::StringPtr url,
+        const kj::HttpHeaders& headers,
+        kj::AsyncInputStream& requestBody,
+        kj::HttpService::Response& response) override {
+      kj::Maybe<kj::String> blobJson;
+      headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
+        if (workerd::strcaseeq(name, accessBlobHeaderName)) {
+          blobJson = kj::str(value);
+        }
+      });
+
+      kj::Maybe<kj::Own<AccessInfo>> accessInfo;
+      KJ_IF_SOME(fields, parseAccessBlob(kj::mv(blobJson))) {
+        accessInfo = kj::refcounted<BlobAccessInfo>(
+            kj::mv(fields.appAud), kj::mv(fields.jwtClaimsJson), identityServiceChannel);
+      }
+
+      KJ_ASSERT(cachedInner == kj::none, "request() called more than once");
+      cachedInner = factory(kj::mv(accessInfo));
+      co_await KJ_ASSERT_NONNULL(cachedInner)->request(method, url, headers, requestBody, response);
+    }
+
+    kj::Promise<void> connect(kj::StringPtr host,
+        const kj::HttpHeaders& headers,
+        kj::AsyncIoStream& connection,
+        ConnectResponse& response,
+        kj::HttpConnectSettings settings) override {
+      auto inner = getOrCreateInner();
+      co_await inner->connect(host, headers, connection, response, kj::mv(settings));
+    }
+
+    kj::Promise<void> prewarm(kj::StringPtr url) override {
+      co_await getOrCreateInner()->prewarm(url);
+    }
+
+    kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
+      co_return co_await getOrCreateInner()->runScheduled(scheduledTime, cron);
+    }
+
+    kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
+      co_return co_await getOrCreateInner()->runAlarm(scheduledTime, retryCount);
+    }
+
+    kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+      co_return co_await getOrCreateInner()->abandonAlarm(scheduledTime);
+    }
+
+    kj::Promise<bool> test() override {
+      co_return co_await getOrCreateInner()->test();
+    }
+
+    kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+      co_return co_await getOrCreateInner()->customEvent(kj::mv(event));
+    }
+
+   private:
+    kj::String accessBlobHeaderName;
+    kj::Maybe<kj::uint> identityServiceChannel;
+    kj::Function<kj::Own<WorkerInterface>(kj::Maybe<kj::Own<AccessInfo>>)> factory;
+    kj::Maybe<kj::Own<WorkerInterface>> cachedInner;
+
+    WorkerInterface* getOrCreateInner() {
+      KJ_IF_SOME(w, cachedInner) {
+        return w.get();
+      }
+      cachedInner = factory(kj::none);
+      return KJ_ASSERT_NONNULL(cachedInner).get();
+    }
+  };
+
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata,
       kj::Maybe<kj::StringPtr> entrypointName,
       Frankenvalue props,
@@ -3548,6 +3767,30 @@ class Server::WorkerService final: public Service,
       bool isTracer = false) {
     TRACE_EVENT("workerd", "Server::WorkerService::startRequest()");
 
+    KJ_IF_SOME(headerName, accessBlobHeaderName) {
+      // This worker has an accessBlobHeader configured. Defer entrypoint creation until
+      // request() is called, so the access blob header can be extracted from the HTTP headers
+      // and parsed into an AccessInfo before the entrypoint (and its IncomingRequest) is
+      // constructed.
+      return kj::heap<AccessHeaderExtractor>(kj::str(headerName), accessBindingServiceChannel,
+          [this, metadata = kj::mv(metadata), entrypointName, props = kj::mv(props),
+              actor = kj::mv(actor), isTracer](
+              kj::Maybe<kj::Own<AccessInfo>> accessInfo) mutable -> kj::Own<WorkerInterface> {
+        return createEntrypoint(kj::mv(metadata), entrypointName, kj::mv(props), kj::mv(actor),
+            isTracer, kj::mv(accessInfo));
+      });
+    }
+
+    return createEntrypoint(
+        kj::mv(metadata), entrypointName, kj::mv(props), kj::mv(actor), isTracer, kj::none);
+  }
+
+  kj::Own<WorkerInterface> createEntrypoint(IoChannelFactory::SubrequestMetadata metadata,
+      kj::Maybe<kj::StringPtr> entrypointName,
+      Frankenvalue props,
+      kj::Maybe<kj::Own<Worker::Actor>> actor,
+      bool isTracer,
+      kj::Maybe<kj::Own<AccessInfo>> accessInfo) {
     auto& channels = KJ_ASSERT_NONNULL(ioChannels.tryGet<LinkedIoChannels>());
 
     kj::Vector<kj::Own<WorkerInterface>> bufferedTailWorkers(channels.tails.size());
@@ -3670,16 +3913,14 @@ class Server::WorkerService final: public Service,
         kj::mv(props), kj::mv(actor),
         kj::attachRef(static_cast<LimitEnforcer&>(*this), kj::addRef(*this)),
         {},  // ioContextDependency
-        kj::attachRef(static_cast<IoChannelFactory&>(*this), kj::addRef(*this)), kj::mv(observer),
-        waitUntilTasks,
+        addRefToThis(), kj::mv(observer), waitUntilTasks,
         true,                  // tunnelExceptions
         kj::mv(workerTracer),  // workerTracer
         kj::mv(metadata.cfBlobJson),
         kj::none,  // versionInfo
         kj::mv(triggerContext),
-        false,     // isDynamicDispatch
-        kj::none,  // accessInfo
-        kj::mv(metadata.restoredSelfTokenFactory), metadata.fromPersistentStub);
+        false,  // isDynamicDispatch
+        kj::mv(accessInfo), kj::mv(metadata.restoredSelfTokenFactory), metadata.fromPersistentStub);
   }
 
  private:
@@ -3925,6 +4166,8 @@ class Server::WorkerService final: public Service,
   kj::Maybe<kj::String> containerEgressInterceptorImage;
   bool isDynamic;
   kj::Maybe<kj::Function<void()>> abortIsolateCallback;
+  kj::Maybe<kj::String> accessBlobHeaderName;
+  kj::Maybe<kj::uint> accessBindingServiceChannel;
 
   // ---------------------------------------------------------------------------
   // implements kj::TaskSet::ErrorHandler
@@ -3941,6 +4184,31 @@ class Server::WorkerService final: public Service,
         KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
 
     KJ_REQUIRE(channel < channels.subrequest.size(), "invalid subrequest channel number");
+
+    // Intercept the access binding channel: inject per-request props (aud, jwtClaims) from
+    // the current request's AccessInfo via forProps(), mirroring what the production embedder
+    // does with channel tokens in its IoChannelFactory.
+    KJ_IF_SOME(abChannel, accessBindingServiceChannel) {
+      if (channel == abChannel) {
+        auto& context = IoContext::current();
+        KJ_IF_SOME(info, context.getAccessInfo()) {
+          auto& blobInfo = kj::downcast<BlobAccessInfo>(info);
+          auto escapedAud = escapeJsonString(blobInfo.getAudience());
+          kj::String propsJson;
+          KJ_IF_SOME(claims, blobInfo.getJwtClaimsJson()) {
+            propsJson = kj::str("{\"aud\":", escapedAud, ",\"jwtClaims\":", claims, "}");
+          } else {
+            propsJson = kj::str("{\"aud\":", escapedAud, "}");
+          }
+          SubrequestChannel& channelRef = *channels.subrequest[channel];
+          auto& service = KJ_REQUIRE_NONNULL(kj::tryDowncast<Service>(channelRef),
+              "access binding service channel is not a Service");
+          return service.forProps(Frankenvalue::fromJson(kj::mv(propsJson)), Persistent::NO)
+              ->startRequest(kj::mv(metadata));
+        }
+      }
+    }
+
     return channels.subrequest[channel]->startRequest(kj::mv(metadata));
   }
 
@@ -4222,10 +4490,6 @@ class Server::WorkerService final: public Service,
       Persistent persistent) override {
     return channelTokenHandler.makeRestoredRpcChannel(
         kj::mv(selfTokenFactory), kj::mv(restoreParams), persistent);
-  }
-
-  kj::Own<void> addRef() override {
-    return kj::addRef(*this);
   }
 
   // ---------------------------------------------------------------------------
@@ -4783,6 +5047,13 @@ struct Server::WorkerDef {
   // Callback invoked when abortIsolate() is called. Used by dynamic workers to remove
   // themselves from the loader's isolate map.
   kj::Maybe<kj::Function<void()>> abortIsolateCallback;
+
+  // HTTP header name from which to extract the per-request Cloudflare Access JSON blob.
+  // Set from Worker.accessBlobHeader in the config; kj::none for most workers.
+  kj::Maybe<kj::String> accessBlobHeaderName;
+
+  // ServiceDesignator for the access binding worker. Resolved during linkCallback.
+  kj::Maybe<config::ServiceDesignator::Reader> accessBindingServiceDesignator;
 };
 
 class Server::WorkerLoaderNamespace: public kj::Refcounted, private kj::TaskSet::ErrorHandler {
@@ -5310,6 +5581,22 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
       return WorkerdApi::from(api).compileGlobals(lock, globals, target, 1);
     },
     // clang-format on
+
+    .accessBlobHeaderName = [&]() -> kj::Maybe<kj::String> {
+    if (!conf.hasAccessBlobHeader()) return kj::none;
+    if (!experimental) {
+      errorReporter.addError(kj::str("Worker \"", name,
+          "\" has accessBlobHeader configured but this is an experimental "
+          "feature. You must run workerd with `--experimental` to use this feature."));
+      return kj::none;
+    }
+    return kj::str(conf.getAccessBlobHeader());
+  }(),
+
+    .accessBindingServiceDesignator = [&]() -> kj::Maybe<config::ServiceDesignator::Reader> {
+    if (!conf.hasAccessBindingService()) return kj::none;
+    return conf.getAccessBindingService();
+  }(),
   };
 
   co_return co_await makeWorkerImpl(name, kj::mv(def), extensions, errorReporter);
@@ -5319,7 +5606,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     WorkerDef def,
     capnp::List<config::Extension>::Reader extensions,
     ErrorReporter& errorReporter) {
-  // Load Python artifacts if this is a Python worker
+  // Load Python artifacts if this is a Python worker.
   co_await preloadPython(name, def, errorReporter);
 
   auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
@@ -5333,18 +5620,11 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   // config. So for now this just uses the defaults.
   auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(def.source));
 
-  // TODO(soon): Either make python workers support the new module registry before
-  // NMR is defaulted on, or disable NMR by default when python workers are enabled.
-  // While NMR is experimental, we'll just throw an error if both are enabled.
-  if (def.featureFlags.getPythonWorkers()) {
-    KJ_REQUIRE(!def.featureFlags.getNewModuleRegistry(),
-        "Python workers do not currently support the new ModuleRegistry implementation. "
-        "Please disable the new ModuleRegistry feature flag to use Python workers.");
-  }
-
-  bool usingNewModuleRegistry = def.featureFlags.getNewModuleRegistry();
+  // Note: Python workers do not support the new module registry;
+  // isNewModuleRegistryEnabled() returns false for them regardless of the
+  // new_module_registry flag, so they always take the legacy path below.
+  bool usingNewModuleRegistry = isNewModuleRegistryEnabled(def.featureFlags);
   kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> newModuleRegistry;
-  // TODO(soon): Python workers do not currently support the new module registry.
   if (usingNewModuleRegistry) {
     KJ_REQUIRE(experimental,
         "The new ModuleRegistry implementation is an experimental feature. "
@@ -5365,11 +5645,29 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     }
 
     using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
-    auto artifactBundler = ArtifactBundler::makeDisabledBundler();
 
-    newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(*jsgobserver,
-        def.source.variant.tryGet<Worker::Script::ModulesSource>(), def.featureFlags, pythonConfig,
-        bundleBase, extensions, kj::mv(maybeFallbackService), kj::mv(artifactBundler));
+    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+      newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(
+          def.source.variant.tryGet<Worker::Script::ModulesSource>(), def.featureFlags,
+          pythonConfig, bundleBase, extensions, kj::mv(maybeFallbackService),
+          ArtifactBundler::makeDisabledBundler());
+    })) {
+      // Building the module registry from the worker's source failed. This is
+      // a worker configuration problem (e.g. duplicate or invalid module
+      // names, or python modules without the python_workers flag), so report
+      // it through the error reporter like any other config error rather than
+      // letting the exception abort server startup. To let worker
+      // construction proceed far enough for the error to be the one that is
+      // reported, substitute an inert empty script and a registry containing
+      // only the built-in modules -- the same stub extractSource() substitutes
+      // for source-level config errors. The worker never runs: config errors
+      // prevent the server from serving.
+      errorReporter.addError(kj::str(exception.getDescription()));
+      def.source = WorkerSource(Worker::Script::ScriptSource{""_kj, name, nullptr});
+      newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(kj::none, def.featureFlags,
+          pythonConfig, bundleBase, capnp::List<config::Extension>::Reader{}, kj::none,
+          ArtifactBundler::makeDisabledBundler());
+    }
   }
 
   auto isolateGroup = v8::IsolateGroup::GetDefault();
@@ -5540,8 +5838,10 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     { auto drop = kj::mv(ctxExportsHandle); }
   });
 
-  // Extract abortIsolateCallback before moving def into linkCallback lambda
+  // These fields are needed after def is moved into the linkCallback lambda, so they must be
+  // extracted beforehand.
   auto abortIsolateCallback = kj::mv(def.abortIsolateCallback);
+  auto accessBlobHeaderName = kj::mv(def.accessBlobHeaderName);
 
   auto linkCallback = [this, def = kj::mv(def), totalActorChannels](WorkerService& workerService,
                           Worker::ValidationErrorReporter& errorReporter) mutable {
@@ -5550,9 +5850,10 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     auto entrypointNames = workerService.getEntrypointNames();
     auto actorClassNames = workerService.getActorClassNames();
 
+    bool hasAccessBinding = def.accessBindingServiceDesignator != kj::none;
     auto services = kj::heapArrayBuilder<kj::Own<IoChannelFactory::SubrequestChannel>>(
         def.subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT +
-        entrypointNames.size() + workerService.hasDefaultEntrypoint());
+        entrypointNames.size() + workerService.hasDefaultEntrypoint() + (hasAccessBinding ? 1 : 0));
 
     auto globalService = kj::mv(def.globalOutbound).lookup(*this);
 
@@ -5574,6 +5875,31 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     }
     for (auto& ep: entrypointNames) {
       services.add(workerService.getLoopbackEntrypoint(ep));
+    }
+
+    // Add the access binding service as a subrequest channel slot. Per-request props (aud,
+    // jwtClaims) are injected by startSubrequest() at dispatch time, mirroring the production
+    // channel-token mechanism. getLoopbackEntrypoint() creates an un-specialized EntrypointService
+    // (props = kj::none) that supports per-request forProps() calls.
+    KJ_IF_SOME(designator, def.accessBindingServiceDesignator) {
+      kj::StringPtr targetName = designator.getName();
+      KJ_IF_SOME(svc, this->services.find(targetName)) {
+        KJ_IF_SOME(worker, kj::tryDowncast<WorkerService>(*svc)) {
+          kj::Maybe<kj::StringPtr> epName;
+          if (designator.hasEntrypoint()) {
+            epName = designator.getEntrypoint();
+          }
+          auto channelIndex = static_cast<kj::uint>(services.size());
+          services.add(worker.getLoopbackEntrypoint(epName));
+          workerService.setAccessBindingServiceChannel(channelIndex);
+        } else {
+          reportConfigError(kj::str("Worker accessBindingService refers to service \"", targetName,
+              "\", but it is not a Worker."));
+        }
+      } else {
+        reportConfigError(kj::str("Worker accessBindingService refers to a service \"", targetName,
+            "\", but no such service is defined."));
+      }
     }
 
     result.subrequest = services.finish();
@@ -5696,13 +6022,13 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   kj::Maybe<kj::StringPtr> serviceName;
   if (!def.isDynamic) serviceName = name;
 
-  auto result =
-      kj::refcounted<WorkerService>(channelTokenHandler, serviceName, globalContext->threadContext,
-          monotonicClock, kj::mv(worker), kj::mv(errorReporter.defaultEntrypoint),
-          kj::mv(errorReporter.namedEntrypoints), kj::mv(errorReporter.actorClasses),
-          kj::mv(linkCallback), KJ_BIND_METHOD(*this, abortAllActors),
-          KJ_BIND_METHOD(*this, deleteAllActors), kj::mv(dockerPath),
-          kj::mv(containerEgressInterceptorImage), def.isDynamic, kj::mv(abortIsolateCallback));
+  auto result = kj::refcounted<WorkerService>(channelTokenHandler, serviceName,
+      globalContext->threadContext, monotonicClock, kj::mv(worker),
+      kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
+      kj::mv(errorReporter.actorClasses), kj::mv(linkCallback),
+      KJ_BIND_METHOD(*this, abortAllActors), KJ_BIND_METHOD(*this, deleteAllActors),
+      kj::mv(dockerPath), kj::mv(containerEgressInterceptorImage), def.isDynamic,
+      kj::mv(abortIsolateCallback), kj::mv(accessBlobHeaderName));
   result->initActorNamespaces(def.localActorConfigs, actorNamespacesByUniqueKey, network);
   co_return result;
 }

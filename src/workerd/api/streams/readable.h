@@ -16,11 +16,11 @@ class ReadableStreamBYOBReader;
 
 class ReaderImpl final {
 public:
-  ReaderImpl(ReadableStreamController::Reader& reader);
+  ReaderImpl(kj::Ptr<ReadableStreamController::Reader> reader);
 
   ~ReaderImpl() noexcept(false);
 
-  void attach(ReadableStreamController& controller, jsg::Promise<void> closedPromise);
+  void attach(jsg::Ref<ReadableStream> stream, jsg::Promise<void> closedPromise);
 
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason);
 
@@ -80,8 +80,8 @@ private:
       Closed,
       Released>;
 
-  kj::Maybe<IoContext&> ioContext;
-  ReadableStreamController::Reader& reader;
+  kj::Maybe<IoContext::Id> ioContext;
+  kj::Ptr<ReadableStreamController::Reader> reader;
 
   ReaderState state;
 
@@ -126,7 +126,7 @@ public:
 
   // Internal API
 
-  void attach(ReadableStreamController& controller, jsg::Promise<void> closedPromise) override;
+  void attach(jsg::Ref<ReadableStream> stream, jsg::Promise<void> closedPromise) override;
 
   void detach() override;
 
@@ -201,7 +201,7 @@ public:
   // Internal API
 
   void attach(
-      ReadableStreamController& controller,
+      jsg::Ref<ReadableStream> stream,
       jsg::Promise<void> closedPromise) override;
 
   void detach() override;
@@ -247,27 +247,32 @@ class DrainingReader: public ReadableStreamController::Reader {
   bool isAttached() const;
 
   // ReadableStreamController::Reader interface
-  void attach(ReadableStreamController& controller, jsg::Promise<void> closedPromise) override;
+  void attach(jsg::Ref<ReadableStream> stream, jsg::Promise<void> closedPromise) override;
   void detach() override;
   bool isByteOriented() const override { return false; }
 
   void visitForGc(jsg::GcVisitor& visitor);
+
+  kj::Ptr<ReadableStreamController::Reader> getPtr() { return addPtrToThis(); }
+
+  // A pointer for holders that may outlive the reader and must notice when they have.
+  kj::Weak<DrainingReader> getWeak() { return addWeakToThis(); }
 
  private:
   struct Initial {};
   using Attached = jsg::Ref<ReadableStream>;
   struct Released {};
 
-  kj::Maybe<IoContext&> ioContext;
+  kj::Maybe<IoContext::Id> ioContext;
   kj::OneOf<Initial, Attached, StreamStates::Closed, Released> state = Initial();
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
 };
 
-class ReadableStream: public jsg::Object {
+class ReadableStream: public kj::PtrTarget, public jsg::Object {
 private:
 
   struct AsyncIteratorState {
-    kj::Maybe<IoContext&> ioContext;
+    kj::Maybe<IoContext::Id> ioContext;
     jsg::Ref<ReadableStreamDefaultReader> reader;
     bool preventCancel;
   };
@@ -477,7 +482,7 @@ public:
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
-  kj::Maybe<IoContext&> ioContext;
+  kj::Maybe<IoContext::Id> ioContext;
   kj::Own<ReadableStreamController> controller;
 
   // Used to signal when this ReadableStream reads EOF. This signal is required for TCP sockets.
@@ -554,5 +559,12 @@ private:
 
   QueuingStrategyInit init;
 };
+
+// Wraps a ReadableStreamSource so that pumpTo() is never deferred past the IoContext's lifetime.
+// Needed for RPC/session-bound sources (e.g. a Socket transferred over RPC), whose backing stream
+// disconnects when the IoContext is destroyed (the JsRpcCustomEvent is canceled). See the
+// implementation in readable.c++ for details.
+kj::Own<ReadableStreamSource> newNoDeferredProxyReadableStream(
+    IoContext& context, kj::Own<ReadableStreamSource> inner);
 
 }  // namespace workerd::api

@@ -463,7 +463,7 @@ Web IDL defines nine distinguishable type categories. JSG maps these to C++ conc
 | String            | `StringType`           | `kj::String`, `USVString`, `DOMString`, `JsString` |
 | Object            | `ObjectType`           | `v8::Local<v8::Object>`, `v8::Global<v8::Object>`  |
 | Symbol            | `SymbolType`           | (not yet implemented)                              |
-| Interface-like    | `InterfaceLikeType`    | `JSG_RESOURCE` types, `BufferSource`               |
+| Interface-like    | `InterfaceLikeType`    | `JSG_RESOURCE` types                               |
 | Callback function | `CallbackFunctionType` | `kj::Function<T>`, `Constructor<T>`                |
 | Dictionary-like   | `DictionaryLikeType`   | `JSG_STRUCT` types, `Dict<V, K>`                   |
 | Sequence-like     | `SequenceLikeType`     | `kj::Array<T>`, `Sequence<T>`                      |
@@ -605,7 +605,7 @@ At the time of this writing, the only supported values of `T` are `kj::String`, 
 `jsg::LenientOptional<T>` is like `jsg::Optional<T>` but instead of throwing a type error
 for incorrect values, it ignores them and passes `undefined` instead.
 
-### TypedArrays (`kj::Array<kj::byte>` and `jsg::BufferSource`)
+### TypedArrays (`kj::Array<kj::byte>` and `jsg::JsBufferSource`)
 
 In V8, `TypedArray`s and `ArrayBuffer`s are backed by a `v8::BackingStore` instance. JSG
 provides two type mappings.
@@ -643,13 +643,12 @@ the same underlying allocation:
                ...
 ```
 
-**`jsg::BufferSource`** — A more nuanced mapping that wraps the v8 handle of a given
+**`jsg::JsBufferSource`** — A more nuanced mapping that wraps the v8 handle of a given
 `TypedArray` or `ArrayBuffer` and remembers its type. When passed back out to JavaScript, it
 maps to exactly the same kind of object that was passed in (e.g. `Uint16Array` → `Uint16Array`).
-The same `std::shared_ptr<v8::BackingStore>` is maintained. Also supports detaching the
-backing store, which is important for ownership transfer. See the
-[BackingStore & BufferSource](#21-backingstore-and-buffersource) advanced section for the
-full API.
+The same `std::shared_ptr<v8::BackingStore>` is maintained by holding the same handle. Also
+supports detaching the backing store, which is important for ownership transfer. See the
+[BufferSources](#21-buffersources) advanced section for the full API.
 
 ### Functions (`jsg::Function<Ret(Args...)>`)
 
@@ -1974,12 +1973,12 @@ auto maybeAsyncContext = jsg::AsyncContextFrame::current(js);
 ### StorageScope (independent of Node.js API)
 
 ```cpp
-kj::Own<AsyncContextFrame::StorageKey> key =
-    kj::refcounted<AsyncContextFrame::StorageKey>();
+kj::Arc<AsyncContextFrame::StorageKey> key =
+    kj::arc<AsyncContextFrame::StorageKey>();
 KJ_DEFER(key->reset());  // Clear when done
 
 {
-  jsg::AsyncContextFrame::StorageScope(js, *key, value);
+  jsg::AsyncContextFrame::StorageScope(js, key.addRef(), value);
   // code runs with this storage context
 }
 // Automatically reset to previous context
@@ -2331,138 +2330,42 @@ void reportInternalException(const kj::Exception& exception, Detail detail) over
 
 ---
 
-## 21. BackingStore and BufferSource
+## 21. BufferSources
 
-### `jsg::BackingStore`
-
-Wraps `v8::BackingStore` with type information. Once allocated, can be safely used outside
-the isolate lock.
-
-#### Creating
-
-```cpp
-// From kj::Array (takes ownership)
-auto backing = jsg::BackingStore::from<v8::Uint8Array>(js, kj::mv(data));
-
-// Allocate new zero-initialized buffer
-auto backing = jsg::BackingStore::alloc<v8::Uint8Array>(js, 1024);
-
-// Wrap external data with custom disposer
-auto backing = jsg::BackingStore::wrap<v8::Uint8Array>(
-    externalData, 1024,
-    [](void* data, size_t len, void* ctx) { free(data); },
-    nullptr);
-```
-
-Template parameter specifies TypedArray type for JavaScript conversion.
-
-#### Accessing Data
-
-```cpp
-kj::ArrayPtr<kj::byte> bytes = backing.asArrayPtr();
-kj::ArrayPtr<uint32_t> u32s = backing.asArrayPtr<uint32_t>();
-size_t size = backing.size();
-size_t offset = backing.getOffset();
-size_t elemSize = backing.getElementSize();
-bool isInt = backing.isIntegerType();
-```
-
-#### Manipulating Views
-
-```cpp
-auto uint16View = backing.getTypedView<v8::Uint16Array>();
-auto slice = backing.getTypedViewSlice<v8::Uint8Array>(10, 100);
-backing.consume(10);  // Skip first 10 bytes
-backing.trim(10);     // Remove last 10 bytes
-backing.limit(100);   // Cap at 100 bytes
-auto cloned = backing.clone();  // Shares buffer
-auto copied = backing.copy<v8::Uint8Array>(js);  // New buffer
-```
-
-#### Converting Back to JavaScript
-
-```cpp
-v8::Local<v8::Value> handle = backing.createHandle(js);
-```
-
-### `jsg::BufferSource`
-
-** Deprecated: Do not use.** The `jsg::BufferSource` and `jsg::BackingStore` APIs are in the
-process of being replaced by the `jsg::JsBufferSource`, `jsg::JsArrayBuffer`, and related APIs
-in `jsvalue.h`. The `jsg::BufferSource` and `jsg::BackingStore` will be removed once all of the
-replacements are fully applied.
-
-Wraps a JavaScript ArrayBuffer or ArrayBufferView, retaining the original reference and
-supporting detachment.
+Wraps a JavaScript ArrayBuffer or ArrayBufferView, retaining the original
+reference and supporting detachment.
 
 ```cpp
 class MyApi: public jsg::Object {
 public:
-  jsg::BufferSource processData(jsg::Lock& js, jsg::BufferSource source) {
-    jsg::BackingStore backing = source.detach(js);
-    // Process backing data...
-    return jsg::BufferSource(js, kj::mv(backing));
+  jsg::JsBufferSource processData(jsg::Lock& js, jsg::JsBufferSource source) {
+    return source.detachAndTake(js);
   }
 };
 ```
 
-#### Creating
+### Creating
+
+The `jsg::JsBufferSource` is just a wrapper around a `jsg::JsArrayBufferView`,
+`jsg::JsArrayBuffer`, or `jsg::JsSharedArrayBuffer`.
 
 ```cpp
-jsg::BufferSource source1(js, kj::mv(backing));     // From BackingStore
-jsg::BufferSource source2(js, jsValue);              // From JS handle
-KJ_IF_SOME(s, jsg::BufferSource::tryAlloc(js, 1024)) { /* ... */ }
-jsg::BufferSource source5 = js.arrayBuffer(kj::mv(data));  // From kj::Array
+auto u8 = jsg::JsUint8Array::create(js, 100);
+auto source1 = jsg::JsBufferSource(u8);
 ```
 
-#### Detaching
+### Detaching
 
 ```cpp
-if (!source.isDetached() && source.canDetach(js)) {
-  jsg::BackingStore backing = source.detach(js);
-  // Original JS ArrayBuffer is now neutered (zero-length)
-}
+auto detached = source.detachAndTake(js);
 ```
 
-Detach keys for security:
-
-```cpp
-v8::Local<v8::Value> key = js.str("secret-key");
-source.setDetachKey(js, key);
-jsg::BackingStore backing = source.detach(js, key);
-```
-
-#### Other Operations
-
-```cpp
-void otherOps(jsg::Lock& js, jsg::BufferSource& source) {
-  v8::Local<v8::Value> handle = source.getHandle(js);
-
-  // Query properties
-  size_t size = source.size();
-  size_t offset = source.getOffset();
-  size_t elemSize = source.getElementSize();
-  bool isInt = source.isIntegerType();
-
-  // Get underlying ArrayBuffer size (if not detached)
-  KJ_IF_SOME(bufSize, source.underlyingArrayBufferSize(js)) {
-    // bufSize is the total ArrayBuffer size, not the view size
-  }
-
-  source.trim(js, 10);  // Remove last 10 bytes
-  jsg::BufferSource cloned = source.clone(js);   // Shares backing, new JS handle
-  jsg::BufferSource copied = source.copy<v8::Uint8Array>(js);  // New backing + handle
-  jsg::BufferSource slice = source.getTypedViewSlice<v8::Uint8Array>(js, 0, 100);
-  source.setToZero();
-}
-```
-
-#### GC Visitation
+### GC Visitation
 
 ```cpp
 class MyClass: public jsg::Object {
 private:
-  kj::Maybe<jsg::BufferSource> buffer;
+  kj::Maybe<jsg::JsRef<jsg::JsBufferSource>> buffer;
   void visitForGc(jsg::GcVisitor& visitor) {
     KJ_IF_SOME(b, buffer) {
       visitor.visit(b);
@@ -2470,14 +2373,6 @@ private:
   }
 };
 ```
-
-### V8 Sandbox Considerations
-
-When V8 sandboxing is enabled:
-
-- `BackingStore::from()` copies data if the source is outside the sandbox
-- `BackingStore::alloc()` always allocates inside the sandbox
-- A `BackingStore` cannot be passed to another isolate unless both are in the same `IsolateGroup`
 
 ---
 
