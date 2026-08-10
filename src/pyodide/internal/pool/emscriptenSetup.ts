@@ -229,9 +229,18 @@ function* featureDetectionMonkeyPatchesContextManager(): Generator<void> {
   // Make Emscripten think we're not in a worker
   global.importScripts = 1;
   global.WorkerGlobalScope = undefined;
+  // Make Emscripten think we're not in Node.js.
+  const hadProcess = 'process' in global;
+  const process = global.process;
+  global.process = undefined;
   try {
     yield;
   } finally {
+    if (hadProcess) {
+      global.process = process;
+    } else {
+      delete global.process;
+    }
     delete global.window;
     delete global.document;
     delete global.sessionStorage;
