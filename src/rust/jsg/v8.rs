@@ -466,10 +466,6 @@ pub mod ffi {
         pub unsafe fn global_to_local(isolate: *mut Isolate, value: &Global) -> Local;
 
         // Wrappable - data access
-        #[expect(
-            clippy::needless_lifetimes,
-            reason = "CXX bridge requires explicit lifetimes on return references"
-        )]
         pub unsafe fn wrappable_get_trait_object<'a>(
             wrappable: &'a Wrappable,
         ) -> &'a TraitObjectPtr;
