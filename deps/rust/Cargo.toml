@@ -29,7 +29,7 @@ syn = { version = "2", features = ["full"] }
 # it off we skip compiling the crate's vendored copy of ada and instead link
 # workerd's existing C++ `@ada-url`, avoiding a duplicate copy of ada in the
 # binary.
-ada-url = { version = "3", default-features = false, features = ["std"] }
+ada-url = { version = "4", default-features = false, features = ["std"] }
 anyhow = "1"
 async-trait = { version = "0", default-features = false }
 capnp = "0"
