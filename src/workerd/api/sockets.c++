@@ -753,12 +753,12 @@ void Socket::wireClosedToDisconnect(jsg::Lock& js, kj::Promise<bool> disconnecte
     // Silently ignore the canceled case (the Socket was GC'd before disconnect) without resolving
     // anything.
     if (canceled) return;
-    KJ_IF_SOME(socket, self.tryGet()) {
-      socket.closedResolver.resolve(js);
+    KJ_IF_SOME(socket, self.tryAddRef(js)) {
+      socket->closedResolver.resolve(js);
     }
   }, [self = JSG_THIS_WEAK(js)](jsg::Lock& js, jsg::Value exception) mutable {
-    KJ_IF_SOME(socket, self.tryGet()) {
-      socket.closedResolver.reject(js, exception.getHandle(js));
+    KJ_IF_SOME(socket, self.tryAddRef(js)) {
+      socket->closedResolver.reject(js, exception.getHandle(js));
     }
   }).markAsHandled(js);
 }

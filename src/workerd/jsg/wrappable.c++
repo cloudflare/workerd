@@ -250,6 +250,14 @@ kj::Own<JSGWrappable> JSGWrappable::detachWrapper(bool shouldFreelistShim) {
     wrapper = kj::none;
     cppgcShim = kj::none;
     strongWrapper.Reset();
+    // Note: weak refs are deliberately NOT invalidated here. Detaching the wrapper does not
+    // imply the object is dying: this method also runs when V8 drops an unmodified droppable
+    // wrapper via ResetRoot() (the object stays alive through C++ refs and the wrapper is
+    // recreated on demand the next time it is passed to JS) and at isolate shutdown via
+    // clearWrappers() (objects like hibernatable WebSockets outlive the isolate). A
+    // jsg::WeakRef tracks the object's lifetime, not the wrapper's; invalidation happens in
+    // ~Wrappable(), or eagerly in WeakRef::tryAddRef() when a zapped wrapper proves the
+    // object is condemned.
     tracer.removeWrapper({}, *this);
     if (strongRefcount > 0) {
       // Need to visit child references in order to convert them to strong references, since we
@@ -325,6 +333,7 @@ void Wrappable::maybeDeferDestruction(bool strong, kj::Own<void> ownSelf, Wrappa
 }
 
 void Wrappable::traceFromV8(cppgc::Visitor& cppgcVisitor) {
+  tracedEpoch.store(HeapTracer::getTracer(isolate).getActiveGcEpoch(), std::memory_order_relaxed);
   cppgcVisitor.Trace(KJ_ASSERT_NONNULL(wrapper));
   GcVisitor visitor(*this, cppgcVisitor);
   jsgVisitForGc(visitor);
@@ -366,6 +375,14 @@ void Wrappable::attachWrapper(
   // that a recreated wrapper would no longer be equivalent.
   wrapper.emplace(isolate, object, v8::TracedReference<v8::Object>::IsDroppable());
   this->isolate = isolate;
+  // Stamp the last *completed* GC epoch so that wasTracedInLastGc() returns true for newly
+  // attached wrappers (otherwise a wrapper attached after any completed major GC would read as
+  // dead). Deliberately NOT the active epoch: creating a TracedReference is an initializing
+  // store, which V8 does not black-allocate, so a wrapper attached during an in-flight marking
+  // cycle whose JS object dies before the atomic pause is zapped by that same cycle. Stamping
+  // the completed epoch keeps such wrappers detectable as dead; if the wrapper instead survives
+  // the in-flight cycle, traceFromV8() re-stamps it with the active epoch during the pause.
+  tracedEpoch.store(tracer.getCompletedGcEpoch(), std::memory_order_relaxed);
 
   // Add to list of objects to force-clean at isolate shutdown.
   tracer.addWrapper({}, *this);
