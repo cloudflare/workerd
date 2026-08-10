@@ -17,7 +17,7 @@ bazel_dep(name = "aspect_rules_esbuild", version = "0.27.0")
 bazel_dep(name = "aspect_rules_js", version = "3.1.1")
 
 # aspect_rules_ts
-bazel_dep(name = "aspect_rules_ts", version = "3.10.0")
+bazel_dep(name = "aspect_rules_ts", version = "3.8.11")
 
 # bazel_lib
 bazel_dep(name = "bazel_lib", version = "3.7.1")
