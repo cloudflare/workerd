@@ -43,6 +43,7 @@ jobs:
         with:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
           show-progress: false
+          persist-credentials: false
 
       # Fail the workflow if checkout failed (PR isn't mergeable)
       - name: Fail if PR isn't mergeable
