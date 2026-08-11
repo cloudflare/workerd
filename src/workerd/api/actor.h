@@ -100,30 +100,52 @@ class DurableObject final: public Fetcher {
     return id->getName();
   }
 
-  JSG_RESOURCE_TYPE(DurableObject) {
+  JSG_RESOURCE_TYPE(DurableObject, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(Fetcher);
 
     JSG_READONLY_INSTANCE_PROPERTY(id, getId);
     JSG_READONLY_INSTANCE_PROPERTY(name, getName);
 
-    JSG_TS_DEFINE(interface DurableObject {
-      fetch(request: Request): Response | Promise<Response>;
-      connect?(socket: Socket): void | Promise<void>;
-      alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
-      webSocketMessage?(ws: WebSocket, message: string | ArrayBuffer): void | Promise<void>;
-      webSocketClose?(ws: WebSocket, code: number, reason: string, wasClean: boolean): void | Promise<void>;
-      webSocketError?(ws: WebSocket, error: unknown): void | Promise<void>;
-    });
-    JSG_TS_OVERRIDE(
-      type DurableObjectStub<T extends Rpc.DurableObjectBranded | undefined = undefined> =
-        Fetcher<T, "alarm" | "connect" | "webSocketMessage" | "webSocketClose" | "webSocketError">
-        & {
-          readonly id: DurableObjectId;
-          readonly name?: string;
-        }
-    );
-    // Rename this resource type to DurableObjectStub, and make DurableObject
-    // the interface implemented by users' Durable Object classes.
+    // The JSG_TS_OVERRIDE renames this resource type to DurableObjectStub, and makes DurableObject
+    // the interface implemented by users' Durable Object classes. `preShutdown` is only reserved
+    // (and invoked by the runtime) when the `durable_object_pre_shutdown` compatibility flag is
+    // enabled, so it is only excluded from the stub's RPC surface under that flag.
+    if (flags.getDurableObjectPreShutdown()) {
+      JSG_TS_DEFINE(interface DurableObject {
+        fetch(request: Request): Response | Promise<Response>;
+        connect?(socket: Socket): void | Promise<void>;
+        alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
+        preShutdown?(info: PreShutdownInfo): void | Promise<void>;
+        webSocketMessage?(ws: WebSocket, message: string | ArrayBuffer): void | Promise<void>;
+        webSocketClose?(ws: WebSocket, code: number, reason: string, wasClean: boolean): void | Promise<void>;
+        webSocketError?(ws: WebSocket, error: unknown): void | Promise<void>;
+      });
+      JSG_TS_OVERRIDE(
+        type DurableObjectStub<T extends Rpc.DurableObjectBranded | undefined = undefined> =
+          Fetcher<T, "alarm" | "connect" | "preShutdown" | "webSocketMessage" | "webSocketClose" | "webSocketError">
+          & {
+            readonly id: DurableObjectId;
+            readonly name?: string;
+          }
+      );
+    } else {
+      JSG_TS_DEFINE(interface DurableObject {
+        fetch(request: Request): Response | Promise<Response>;
+        connect?(socket: Socket): void | Promise<void>;
+        alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
+        webSocketMessage?(ws: WebSocket, message: string | ArrayBuffer): void | Promise<void>;
+        webSocketClose?(ws: WebSocket, code: number, reason: string, wasClean: boolean): void | Promise<void>;
+        webSocketError?(ws: WebSocket, error: unknown): void | Promise<void>;
+      });
+      JSG_TS_OVERRIDE(
+        type DurableObjectStub<T extends Rpc.DurableObjectBranded | undefined = undefined> =
+          Fetcher<T, "alarm" | "connect" | "webSocketMessage" | "webSocketClose" | "webSocketError">
+          & {
+            readonly id: DurableObjectId;
+            readonly name?: string;
+          }
+      );
+    }
   }
 
   // Even though it ought to be inherited, we have to declare this explicitly or the serialization

@@ -1642,4 +1642,17 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2026-08-11");
   # Enables fast Workflow engine creation by generating instance IDs with the Durable Object
   # namespace's `newUniqueId()` method instead of UUIDs.
+
+  durableObjectPreShutdown @186 :Bool
+      $compatEnableFlag("durable_object_pre_shutdown")
+      $experimental;
+  # Enables the `preShutdown()` lifecycle hook on Durable Object classes. When enabled, the
+  # runtime invokes a Durable Object's `preShutdown(info)` method (if defined) on a best-effort
+  # basis before planned, storage-healthy shutdowns, giving the object a bounded window to
+  # checkpoint state. Currently the hook fires on idle eviction or code update
+  # only, and only for root objects (not facets), but new reasons will be added over time.
+  # When enabled, `preShutdown` joins the RPC reserved-name list for every
+  # entrypoint (reserved names are entrypoint-wide, like `fetch` or `alarm`),
+  # so stubs cannot invoke `preShutdown()` remotely. The flag exists because
+  # existing classes may already define an RPC method with this name.
 }
