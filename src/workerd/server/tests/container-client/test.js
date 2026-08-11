@@ -308,7 +308,9 @@ export class DurableObjectExample extends DurableObject {
       const ac = new AbortController();
       ac.abort();
       await assert.rejects(
-        Promise.try(() => container.exec(['echo', 'hello'], { signal: ac.signal })),
+        Promise.try(() =>
+          container.exec(['echo', 'hello'], { signal: ac.signal })
+        ),
         {
           name: 'AbortError',
         }
@@ -915,10 +917,13 @@ export class DurableObjectExample extends DurableObject {
 
     assert.strictEqual(container.running, false);
 
-    await assert.rejects(Promise.try(() => container.setLabels({ k: 'v' })), {
-      message:
-        /setLabels\(\) cannot be called on a container that is not running/,
-    });
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ k: 'v' })),
+      {
+        message:
+          /setLabels\(\) cannot be called on a container that is not running/,
+      }
+    );
   }
 
   async testSetLabelsAfterDestroy() {
@@ -938,10 +943,13 @@ export class DurableObjectExample extends DurableObject {
     await monitor;
 
     assert.strictEqual(container.running, false);
-    await assert.rejects(Promise.try(() => container.setLabels({ k: 'v' })), {
-      message:
-        /setLabels\(\) cannot be called on a container that is not running/,
-    });
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ k: 'v' })),
+      {
+        message:
+          /setLabels\(\) cannot be called on a container that is not running/,
+      }
+    );
   }
 
   async testSetLabelsAfterDestroyWithoutMonitor() {
@@ -983,9 +991,12 @@ export class DurableObjectExample extends DurableObject {
     await this.waitUntilContainerIsHealthy();
 
     // Empty label name
-    await assert.rejects(Promise.try(() => container.setLabels({ '': 'value' })), {
-      message: /Label names cannot be empty/,
-    });
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ '': 'value' })),
+      {
+        message: /Label names cannot be empty/,
+      }
+    );
 
     // Too many labels
     await assert.rejects(
