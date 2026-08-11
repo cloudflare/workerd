@@ -134,6 +134,19 @@ class IoContext_IncomingRequest final {
   kj::Promise<WorkerInterface::ScheduledResult> finishScheduled(
       kj::Own<IoContext_IncomingRequest>&& self);
 
+  // Indicates that any waitUntil tasks this request spawned are intentionally being abandoned
+  // because the actor is about to be torn down, so the destructor should not warn that drain()
+  // was never called. Used by teardown-sequence events like the Durable Object preShutdown()
+  // lifecycle hook: such an event cannot use the normal drain path, because for actors drain()
+  // only completes on shutdown, which happens after the teardown-sequence event finishes.
+  // Additionally, the IncomingRequest must be destroyed *before* the actor (IoContext::actor is
+  // a bare reference which normal requests keep alive by attaching a strong actor reference,
+  // which teardown-sequence events must not hold), so its destruction cannot be deferred to a
+  // background drain task at all.
+  void abandonTasksForActorShutdown() {
+    waitedForWaitUntil = true;
+  }
+
   // Access the event loop's current time point. This will remain constant between ticks. This is
   // used to implement IoContext::now(), which should be preferred so that time can be adjusted
   // based on setTimeout() when needed.

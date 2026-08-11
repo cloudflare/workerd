@@ -174,6 +174,13 @@ class LimitEnforcer {
   // Like limitDrain() and limitScheduled() but applies a time limit to alarm event processing.
   virtual kj::Duration getAlarmLimit() = 0;
 
+  // Wall-clock time budget for a Durable Object's preShutdown() lifecycle handler. Unlike the
+  // other limits, this has a default implementation so that embedders which don't need a
+  // configurable value get the standard budget.
+  virtual kj::Duration getPreShutdownLimit() {
+    return 10 * kj::SECONDS;
+  }
+
   // Gets a byte size limit to apply to operations that will buffer a possibly large amount of
   // data in C++ memory, such as reading an entire HTTP response into an `ArrayBuffer`.
   virtual size_t getBufferingLimit() = 0;

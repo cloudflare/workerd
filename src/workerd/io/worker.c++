@@ -4406,6 +4406,90 @@ kj::Own<Worker::Actor> Worker::Actor::addRef() {
   }
 }
 
+kj::Maybe<kj::Promise<api::PreShutdownOutcome>> Worker::Actor::runPreShutdown(
+    api::PreShutdownReason reason,
+    kj::Rc<IoChannelFactory> ioChannelFactory,
+    kj::Own<RequestObserver> observer,
+    kj::Maybe<kj::Own<BaseTracer>> workerTracer) {
+  // Bail out synchronously if there can't be a handler, so that such actors' shutdown paths
+  // don't suspend at all. These checks read plain C++ state without the isolate lock, which is
+  // safe here: the actor is quiescent (that's why it is being shut down), so nothing is
+  // concurrently mutating `classInstance`.
+  if (!worker->getIsolate().getApi().getFeatureFlags().getDurableObjectPreShutdown()) {
+    return kj::none;
+  }
+  KJ_IF_SOME(handler, impl->classInstance.tryGet<api::ExportedHandler>()) {
+    if (handler.preShutdown == kj::none) {
+      return kj::none;
+    }
+  } else {
+    // The class instance was never constructed (or this isn't a class-based actor, or the
+    // constructor threw). There is no handler to run, and we must not construct the instance
+    // just to tear it down.
+    return kj::none;
+  }
+
+  return runPreShutdownImpl(
+      reason, kj::mv(ioChannelFactory), kj::mv(observer), kj::mv(workerTracer));
+}
+
+kj::Promise<api::PreShutdownOutcome> Worker::Actor::runPreShutdownImpl(
+    api::PreShutdownReason reason,
+    kj::Rc<IoChannelFactory> ioChannelFactory,
+    kj::Own<RequestObserver> observer,
+    kj::Maybe<kj::Own<BaseTracer>> workerTracer) {
+  // A constructed class instance implies an IoContext was created; if it's already gone, the
+  // actor is past the point of running JS.
+  IoContext& context = KJ_UNWRAP_OR(getIoContext(), co_return api::PreShutdownOutcome::FAILED);
+
+  // Set up a lightweight IncomingRequest so that the IoContext has a current request while the
+  // handler runs (required for timers, subrequests, and metrics attribution). Note that
+  // delivered() also tops up the actor's CPU allowance, like any other event.
+  auto incomingRequest =
+      kj::heap<IoContext::IncomingRequest>(kj::addRef(context), kj::mv(ioChannelFactory),
+          kj::mv(observer), kj::mv(workerTracer), kj::none /* maybeTriggerInvocationSpan */);
+  incomingRequest->delivered();
+
+  api::PreShutdownOutcome outcome;
+  try {
+    outcome = co_await context.run(
+        [reason](Worker::Lock& lock, IoContext& context) -> kj::Promise<api::PreShutdownOutcome> {
+      auto timeout = context.getLimitEnforcer().getPreShutdownLimit();
+      auto handler = KJ_ASSERT_NONNULL(context.getActor()).getHandler();
+      return lock.getGlobalScope().runPreShutdown(reason, timeout, lock, handler);
+    });
+  } catch (...) {
+    // We couldn't run the handler at all, e.g. the IoContext was aborted concurrently (say, by
+    // resource-limit condemnation racing with the shutdown path). Teardown proceeds; the hook is
+    // best-effort.
+    auto exception = kj::getCaughtExceptionAsKj();
+    LOG_NOSENTRY(WARNING, "failed to deliver preShutdown() to actor", exception);
+    outcome = api::PreShutdownOutcome::FAILED;
+  }
+
+  // Regardless of the handler's outcome (including timeout), drain any storage writes it managed
+  // to issue: they must be durably flushed before the caller tears the actor down and a successor
+  // can be created. This wait is already bounded by the storage-hang timeout, which breaks the
+  // output gate; a broken gate rejects this promise, in which case teardown just proceeds.
+  KJ_IF_SOME(persistent, getPersistent()) {
+    KJ_IF_SOME(flush, persistent.onNoPendingFlush(SpanParent(nullptr))) {
+      co_await flush.catch_([](kj::Exception&&) {});
+    }
+  }
+
+  // The hook's event is complete. We must not use the normal drain path: for actors, drain()
+  // waits on onShutdown(), which only fires once our caller proceeds with the shutdown after this
+  // method returns -- and the resulting background task would keep the IncomingRequest alive past
+  // the actor's destruction, leaving IoContext::actor dangling in the IncomingRequest destructor.
+  // Instead, destroy the IncomingRequest synchronously, now, while the actor is still alive. Any
+  // waitUntil tasks the handler spawned are intentionally abandoned: the teardown that is about
+  // to happen would cancel them anyway (returning from the hook means "I'm done").
+  incomingRequest->abandonTasksForActorShutdown();
+  incomingRequest = nullptr;
+
+  co_return outcome;
+}
+
 // =======================================================================================
 
 uint Worker::Isolate::getCurrentLoad() const {

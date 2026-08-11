@@ -773,6 +773,61 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
   KJ_UNREACHABLE;
 }
 
+kj::Promise<PreShutdownOutcome> ServiceWorkerGlobalScope::runPreShutdown(PreShutdownReason reason,
+    kj::Duration timeout,
+    Worker::Lock& lock,
+    kj::Maybe<ExportedHandler&> exportedHandler) {
+  auto& context = IoContext::current();
+
+  if (!FeatureFlags::get(lock).getDurableObjectPreShutdown()) {
+    // Handler present but compat flag off: not invoked.
+    return PreShutdownOutcome::NO_HANDLER;
+  }
+
+  auto& handler = KJ_UNWRAP_OR(exportedHandler, return PreShutdownOutcome::NO_HANDLER);
+  auto& preShutdown = KJ_UNWRAP_OR(handler.preShutdown, {
+    // A class without the method must incur no overhead and no log noise.
+    return PreShutdownOutcome::NO_HANDLER;
+  });
+
+  return context
+      .run([&preShutdown, reason, timeout](
+               Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<PreShutdownOutcome> {
+    // The hook deliberately runs with no per-request AsyncLocalStorage context: per-request ALS
+    // values (e.g. application tracing) do not survive into the hook.
+    jsg::AsyncContextFrame::Scope asyncScope(lock, kj::none);
+    jsg::Lock& js = lock;
+
+    auto timeoutPromise =
+        context.afterLimitTimeout(timeout).then([]() -> kj::Promise<PreShutdownOutcome> {
+      // Unlike the alarm timeout, we do NOT abort the IoContext: teardown is already committed
+      // and proceeding, and the caller still drains storage writes the handler managed to issue.
+      // We just stop waiting for the handler. The abandoned handler continuation may keep running
+      // until the IoContext is torn down; its storage calls will start rejecting once the actor
+      // cache shuts down, but our awaitJs reaction remains attached to the handler's promise, so
+      // those rejections don't become unhandled-rejection noise.
+      //
+      // We intentionally don't take the isolate lock here to emit a user-visible warning: a
+      // handler spinning the CPU would delay teardown past the budget. Timeouts are surfaced
+      // via the outcome (metrics) instead.
+      LOG_NOSENTRY(WARNING, "preShutdown() handler exceeded its allowed execution time");
+      return PreShutdownOutcome::TIMED_OUT;
+    });
+
+    return preShutdown(lock, js.alloc<PreShutdownInfo>(reason))
+        .then([]() -> kj::Promise<PreShutdownOutcome> {
+      return PreShutdownOutcome::COMPLETED;
+    }).exclusiveJoin(kj::mv(timeoutPromise));
+  }).catch_([&context](kj::Exception&& e) -> PreShutdownOutcome {
+    // The handler threw or rejected. Per the contract this is benign: log to the *user's*
+    // observability (like other handler errors -- not our Sentry) and proceed with teardown.
+    // The shutdown keeps its original classification (e.g. broken.dropped), not an error-class
+    // reset.
+    context.logUncaughtExceptionAsync(UncaughtExceptionSource::PRE_SHUTDOWN_HANDLER, kj::mv(e));
+    return PreShutdownOutcome::THREW;
+  });
+}
+
 jsg::Promise<void> ServiceWorkerGlobalScope::test(
     Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler) {
   // TODO(someday): For Service Workers syntax, do we want addEventListener("test")? Not supporting

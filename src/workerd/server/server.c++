@@ -11,6 +11,7 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/analytics-engine.capnp.h>
+#include <workerd/api/global-scope.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/trace.h>
 #include <workerd/api/worker-rpc.h>
@@ -321,6 +322,14 @@ class Server::ActorClass: public IoChannelFactory::ActorClassChannel {
   // Start a request on the actor. (The actor must have been created using newActor().)
   virtual kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) = 0;
+
+  // Runs the actor's preShutdown() lifecycle hook (if any) followed by a storage flush wait; see
+  // Worker::Actor::runPreShutdown(). Called from planned eviction paths before shutting the actor
+  // down; returns kj::none synchronously when the actor has no applicable handler, so that such
+  // paths don't suspend at all. Note that `actor` is a bare reference, not a strong reference:
+  // taking a strong reference would create an ActiveRequest that cancels the pending shutdown.
+  virtual kj::Maybe<kj::Promise<api::PreShutdownOutcome>> runPreShutdown(
+      Worker::Actor& actor, api::PreShutdownReason reason) = 0;
 
   virtual kj::Own<ActorClass> forProps(Frankenvalue props, Persistent persistent) {
     KJ_FAIL_REQUIRE("can't override props for this actor class");
@@ -1053,6 +1062,23 @@ class Server::ActorNamespace final {
 
           co_return;
         }
+
+        // Run the actor's preShutdown() lifecycle hook (if the class defines one and its compat
+        // flags enable it). This runs before hibernateWebSockets() so that a final ws.send() from
+        // the handler still works, and it waits for the handler's storage writes to flush before
+        // we proceed with teardown.
+        //
+        // Note that if a new request arrives while the hook is running, active() cancels this
+        // whole task mid-hook and the actor stays alive to serve the request. That differs from
+        // production, where destruction is committed once the hook starts; for local dev,
+        // reviving the actor is the friendlier behavior for the racing request.
+        KJ_IF_SOME(resolved, classAndId.tryGet<ClassAndId>()) {
+          KJ_IF_SOME(promise,
+              resolved.actorClass->runPreShutdown(*a, api::PreShutdownReason::INACTIVE)) {
+            co_await promise;
+          }
+        }
+
         KJ_IF_SOME(m, manager) {
           auto& worker = a->getWorker();
           auto workerStrongRef = kj::atomicAddRef(worker);
@@ -1093,6 +1119,16 @@ class Server::ActorNamespace final {
       KJ_IF_SOME(a, actor) {
         if (a->isShared()) {
           co_return false;
+        }
+
+        // Run the actor's preShutdown() lifecycle hook, mirroring the inactivity-timer path
+        // (handleShutdown). This must happen before we take the async lock below, since the hook
+        // acquires its own lock internally.
+        KJ_IF_SOME(resolved, classAndId.tryGet<ClassAndId>()) {
+          KJ_IF_SOME(promise,
+              resolved.actorClass->runPreShutdown(*a, api::PreShutdownReason::INACTIVE)) {
+            co_await promise;
+          }
         }
 
         if (manager != kj::none &&
@@ -2015,6 +2051,12 @@ class Server::InvalidConfigActorClass final: public ActorClass {
   kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) override {
     // Can't get here because creating the actor would have required calling the other method.
+    KJ_UNREACHABLE;
+  }
+
+  kj::Maybe<kj::Promise<api::PreShutdownOutcome>> runPreShutdown(
+      Worker::Actor& actor, api::PreShutdownReason reason) override {
+    // Can't get here because creating the actor would have required calling newActor().
     KJ_UNREACHABLE;
   }
 };
@@ -3923,6 +3965,18 @@ class Server::WorkerService final: public Service,
         kj::mv(accessInfo), kj::mv(metadata.restoredSelfTokenFactory), metadata.fromPersistentStub);
   }
 
+  // Runs `actor`'s preShutdown() lifecycle hook, providing the pieces of request infrastructure
+  // the hook's event needs (this service is the IoChannelFactory, so the handler can make
+  // subrequests). See Worker::Actor::runPreShutdown().
+  kj::Maybe<kj::Promise<api::PreShutdownOutcome>> runActorPreShutdown(
+      Worker::Actor& actor, api::PreShutdownReason reason) {
+    // TODO(someday): Wire up tail workers (like createEntrypoint() does) so handler exceptions
+    //   reach tail workers in local dev. For now they are still reported to the inspector.
+    kj::Own<RequestObserver> observer =
+        kj::refcounted<RequestObserverWithTracer>(kj::none, waitUntilTasks);
+    return actor.runPreShutdown(reason, addRefToThis(), kj::mv(observer), kj::none);
+  }
+
  private:
   class EntrypointService;
 
@@ -4112,6 +4166,11 @@ class Server::WorkerService final: public Service,
       // The `props` parameter is empty here because props are not passed per-request, they are
       // passed at Actor construction time.
       return service->startRequest(kj::mv(metadata), className, {}, kj::mv(actor));
+    }
+
+    kj::Maybe<kj::Promise<api::PreShutdownOutcome>> runPreShutdown(
+        Worker::Actor& actor, api::PreShutdownReason reason) override {
+      return service->runActorPreShutdown(actor, reason);
     }
 
     kj::Own<ActorClass> forProps(Frankenvalue props, Persistent persistent) override {
@@ -5447,6 +5506,11 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted, private kj::TaskSet:
       kj::Own<WorkerInterface> startRequest(
           IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) override {
         return getInner().startRequest(kj::mv(metadata), kj::mv(actor));
+      }
+
+      kj::Maybe<kj::Promise<api::PreShutdownOutcome>> runPreShutdown(
+          Worker::Actor& actor, api::PreShutdownReason reason) override {
+        return getInner().runPreShutdown(actor, reason);
       }
 
      private:
