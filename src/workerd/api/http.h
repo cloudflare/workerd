@@ -236,6 +236,10 @@ class Fetcher: public JsRpcClientProvider {
    public:
     virtual kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) = 0;
 
+    virtual bool supportsActorRetryMetadata() const {
+      return false;
+    }
+
     // Factories that can carry actor retry metadata override this method. The default rejects the
     // metadata rather than silently starting a new logical call.
     virtual kj::Own<WorkerInterface> newSingleUseClientWithActorRetryMetadata(
@@ -303,6 +307,8 @@ class Fetcher: public JsRpcClientProvider {
       kj::Maybe<kj::String> cfStr,
       kj::ConstString operationName,
       kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata);
+
+  bool supportsActorRetryMetadata();
 
   // Get a SubrequestChannel representing this Fetcher.
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);

@@ -66,14 +66,27 @@ class MockFetchTarget final: public WorkerInterface {
   }
 };
 
+class TestStreamSource final: public ReadableStreamSource {
+ public:
+  kj::Promise<size_t> tryRead(void*, size_t, size_t) override {
+    return static_cast<size_t>(0);
+  }
+};
+
 class RetryMetadataOutgoingFactory final: public Fetcher::OutgoingFactory {
  public:
-  RetryMetadataOutgoingFactory(
+  RetryMetadataOutgoingFactory(bool& ordinaryDispatchCalled,
       kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata>& capturedMetadata)
-      : capturedMetadata(capturedMetadata) {}
+      : ordinaryDispatchCalled(ordinaryDispatchCalled),
+        capturedMetadata(capturedMetadata) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String>) override {
+    ordinaryDispatchCalled = true;
     return kj::heap<MockFetchTarget>();
+  }
+
+  bool supportsActorRetryMetadata() const override {
+    return true;
   }
 
   kj::Own<WorkerInterface> newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String>,
@@ -83,6 +96,7 @@ class RetryMetadataOutgoingFactory final: public Fetcher::OutgoingFactory {
   }
 
  private:
+  bool& ordinaryDispatchCalled;
   kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata>& capturedMetadata;
 };
 
@@ -222,15 +236,83 @@ KJ_TEST("fetch reports each outgoing body's rewindability per-call without stale
       "streamed request body should not be rewindable (no carryover)");
 }
 
-// Isolate Fetcher's dispatch decision from actor routing: a metadata-aware factory must receive the
-// caller's logical-call metadata unchanged.
-KJ_TEST("Fetcher dispatches actor retry metadata through the metadata-aware factory hook") {
+KJ_TEST("fetch generates actor retry metadata for a supported outgoing factory") {
+  bool ordinaryDispatchCalled = false;
+  kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> capturedMetadata;
+  kj::Date beforeFetch = kj::UNIX_EPOCH;
+  kj::Date afterFetch = kj::UNIX_EPOCH;
+  TestFixture fixture;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto fetcher = env.js.alloc<Fetcher>(
+        env.context.addObject<Fetcher::OutgoingFactory>(
+            kj::heap<RetryMetadataOutgoingFactory>(ordinaryDispatchCalled, capturedMetadata)),
+        Fetcher::RequiresHostAndProtocol::YES);
+    beforeFetch = kj::systemCoarseCalendarClock().now();
+    auto promise = fetcher->fetch(env.js, kj::str("http://example.com"), kj::none);
+    afterFetch = kj::systemCoarseCalendarClock().now();
+    return env.context.awaitJs(env.js, kj::mv(promise)).ignoreResult().attach(kj::mv(fetcher));
+  });
+
+  KJ_EXPECT(!ordinaryDispatchCalled);
+  KJ_IF_SOME(metadata, capturedMetadata) {
+    KJ_EXPECT(metadata.createdAt >= beforeFetch);
+    KJ_EXPECT(metadata.createdAt <= afterFetch);
+    KJ_EXPECT(metadata.isRetry == IsActorRetry::NO);
+  } else {
+    KJ_FAIL_EXPECT("supported fetch did not generate actor retry metadata");
+  }
+}
+
+KJ_TEST("fetch omits actor retry metadata for a supported factory with a streaming body") {
+  bool ordinaryDispatchCalled = false;
   kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> capturedMetadata;
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    Fetcher fetcher(env.context.addObject<Fetcher::OutgoingFactory>(
-                        kj::heap<RetryMetadataOutgoingFactory>(capturedMetadata)),
+    auto fetcher = env.js.alloc<Fetcher>(
+        env.context.addObject<Fetcher::OutgoingFactory>(
+            kj::heap<RetryMetadataOutgoingFactory>(ordinaryDispatchCalled, capturedMetadata)),
+        Fetcher::RequiresHostAndProtocol::YES);
+    RequestInitializerDict init;
+    init.method = kj::str("POST");
+    init.body = kj::Maybe<Body::Initializer>(
+        JsReadableStream::create(env.js, env.context, kj::heap<TestStreamSource>()));
+    auto promise = fetcher->fetch(env.js, kj::str("http://example.com"), kj::mv(init));
+    return env.context.awaitJs(env.js, kj::mv(promise)).ignoreResult().attach(kj::mv(fetcher));
+  });
+
+  KJ_EXPECT(ordinaryDispatchCalled);
+  KJ_EXPECT(capturedMetadata == kj::none);
+}
+
+KJ_TEST("fetch omits actor retry metadata for an unsupported outgoing factory") {
+  bool ordinaryDispatchCalled = false;
+  TestFixture fixture;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto fetcher =
+        env.js.alloc<Fetcher>(env.context.addObject<Fetcher::OutgoingFactory>(
+                                  kj::heap<UnsupportedOutgoingFactory>(ordinaryDispatchCalled)),
+            Fetcher::RequiresHostAndProtocol::YES);
+    auto promise = fetcher->fetch(env.js, kj::str("http://example.com"), kj::none);
+    return env.context.awaitJs(env.js, kj::mv(promise)).ignoreResult().attach(kj::mv(fetcher));
+  });
+
+  KJ_EXPECT(ordinaryDispatchCalled);
+}
+
+// Isolate Fetcher's dispatch decision from actor routing: a metadata-aware factory must receive the
+// caller's logical-call metadata unchanged.
+KJ_TEST("Fetcher dispatches actor retry metadata through the metadata-aware factory hook") {
+  bool ordinaryDispatchCalled = false;
+  kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> capturedMetadata;
+  TestFixture fixture;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    Fetcher fetcher(
+        env.context.addObject<Fetcher::OutgoingFactory>(
+            kj::heap<RetryMetadataOutgoingFactory>(ordinaryDispatchCalled, capturedMetadata)),
         Fetcher::RequiresHostAndProtocol::YES);
 
     auto client = fetcher.getClientWithTracing(env.context, kj::none, "fetch"_kjc,
@@ -307,6 +389,33 @@ KJ_TEST("GlobalActorOutgoingFactory places actor retry metadata on the actor sub
         GlobalActorOutgoingFactory::ChannelIdOrFactory(static_cast<uint>(1)),
         env.js.alloc<DurableObjectId>(kj::heap<MockActorId>()), kj::none,
         ActorGetMode::GET_OR_CREATE, false, ActorRoutingMode::DEFAULT, kj::none, Persistent::NO);
+    KJ_EXPECT(factory.supportsActorRetryMetadata());
+
+    auto client = factory.newSingleUseClientWithActorRetryMetadata(kj::none,
+        IoChannelFactory::ActorRetryRequestMetadata{
+          .nonce = 0x123456789abcdef0,
+          .createdAt = kj::UNIX_EPOCH + 123 * kj::MILLISECONDS,
+          .isRetry = IsActorRetry::YES,
+        });
+
+    KJ_IF_SOME(metadata, capturedMetadata) {
+      KJ_EXPECT(metadata.nonce == 0x123456789abcdef0);
+      KJ_EXPECT(metadata.createdAt == kj::UNIX_EPOCH + 123 * kj::MILLISECONDS);
+      KJ_EXPECT(metadata.isRetry == IsActorRetry::YES);
+    } else {
+      KJ_FAIL_EXPECT("actor retry metadata was not forwarded to the actor channel");
+    }
+  });
+}
+
+KJ_TEST("ReplicaActorOutgoingFactory places actor retry metadata on the actor subrequest") {
+  kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> capturedMetadata;
+  TestFixture fixture;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    ReplicaActorOutgoingFactory factory(
+        kj::refcounted<RecordingActorChannel>(capturedMetadata), kj::str("actor-id"));
+    KJ_EXPECT(factory.supportsActorRetryMetadata());
 
     auto client = factory.newSingleUseClientWithActorRetryMetadata(kj::none,
         IoChannelFactory::ActorRetryRequestMetadata{
