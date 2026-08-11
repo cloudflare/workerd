@@ -390,6 +390,18 @@ class TestAlarmObject extends DurableObject {
   }
 }
 
+class TestPreShutdownObject extends DurableObject {
+  // Can declare a preShutdown method consuming the info parameter
+  async preShutdown(info: PreShutdownInfo) {
+    const _reason: 'inactive' | 'codeUpdated' = info.reason;
+  }
+
+  // User code can invoke preShutdown() directly, if desired.
+  async runPreShutdown(): Promise<void> {
+    return await this.preShutdown({ reason: 'inactive' });
+  }
+}
+
 class TestNaughtyEntrypoint extends WorkerEntrypoint {
   // Check incorrectly typed methods
   // @ts-expect-error
@@ -417,6 +429,8 @@ class TestNaughtyObject extends DurableObject {
   // @ts-expect-error
   async alarm(_x: boolean) {}
   // @ts-expect-error
+  async preShutdown(_x: boolean) {}
+  // @ts-expect-error
   webSocketMessage(_x: boolean) {}
   // @ts-expect-error
   async webSocketClose(_x: boolean) {}
@@ -435,6 +449,7 @@ interface Env {
   REGULAR_OBJECT: DurableObjectNamespace;
   RPC_OBJECT: DurableObjectNamespace<TestObject>;
   ALARM_OBJECT: DurableObjectNamespace<TestAlarmObject>;
+  PRE_SHUTDOWN_OBJECT: DurableObjectNamespace<TestPreShutdownObject>;
   NAUGHTY_OBJECT: DurableObjectNamespace<TestNaughtyObject>;
   // @ts-expect-error `BoringClass` isn't an RPC capable type
   __INVALID_OBJECT_1: DurableObjectNamespace<BoringClass>;
@@ -494,6 +509,15 @@ export default <ExportedHandler<Env>>{
       expectTypeOf(stub.connect).toEqualTypeOf<
         (address: SocketAddress | string, options?: SocketOptions) => Socket
       >();
+    }
+
+    // Check lifecycle hooks reserved by the runtime are not callable over RPC
+    {
+      const stub = env.PRE_SHUTDOWN_OBJECT.get(
+        env.PRE_SHUTDOWN_OBJECT.newUniqueId()
+      );
+      // @ts-expect-error `preShutdown` is reserved and cannot be called over RPC
+      stub.preShutdown;
     }
 
     // Check cannot access `env` and `ctx` over RPC

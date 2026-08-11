@@ -1098,8 +1098,9 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
   kj::Rc<ExternalPusherImpl> externalPusher;
 
-  // Returns true if the given name cannot be used as a method on this type.
-  virtual bool isReservedName(kj::StringPtr name) = 0;
+  // Returns true if the given name cannot be used as a method on this type. `js` is the target
+  // worker's isolate lock, so implementations can consult the target's compatibility flags.
+  virtual bool isReservedName(jsg::Lock& js, kj::StringPtr name) = 0;
 
   kj::Promise<void> callImpl(Worker::Lock& lock, IoContext& ctx, CallContext callContext) {
     jsg::Lock& js = lock;
@@ -1311,7 +1312,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
     // Get the named property of `object`.
     auto getProperty = [&](kj::StringPtr kjName) {
-      JSG_REQUIRE(!isReservedName(kjName), TypeError,
+      JSG_REQUIRE(!isReservedName(js, kjName), TypeError,
           kj::str("'", kjName, "' is a reserved method and cannot be called over RPC."));
 
       jsg::JsValue jsName = js.strIntern(kjName);
@@ -1646,7 +1647,7 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
 
   bool allowInstanceProperties;
 
-  bool isReservedName(kj::StringPtr name) override {
+  bool isReservedName(jsg::Lock& js, kj::StringPtr name) override {
     if (  // dup() is reserved to duplicate the stub itself, pointing to the same object.
         name == "dup" ||
 
@@ -2092,7 +2093,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   kj::Maybe<kj::Own<BaseTracer>> tracer;
   bool isDynamicDispatch;
 
-  bool isReservedName(kj::StringPtr name) override {
+  bool isReservedName(jsg::Lock& js, kj::StringPtr name) override {
     if (  // "fetch" and "connect" are treated specially on entrypoints.
         name == "fetch" || name == "connect" ||
 
@@ -2109,6 +2110,14 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
         name == "constructor") {
       return true;
     }
+
+    // preShutdown is reserved by the Durable Objects implementation, but only when the target
+    // worker has opted in via the compatibility flag, since existing classes may already export
+    // an RPC method with this name.
+    if (name == "preShutdown" && FeatureFlags::get(js).getDurableObjectPreShutdown()) {
+      return true;
+    }
+
     return false;
   }
 

@@ -487,6 +487,43 @@ class AlarmInvocationInfo: public jsg::Object {
   uint32_t retryCount = 0;
 };
 
+// PreShutdownInfo is a jsg::Object passed to a Durable Object's preShutdown() lifecycle handler
+// describing why the object is being shut down.
+class PreShutdownInfo final: public jsg::Object {
+ public:
+  // Why the Durable Object is being shut down. This list may grow over time; handlers must
+  // tolerate reason strings they don't recognize.
+  enum class Reason {
+    // The object is being evicted because it has been idle for too long.
+    INACTIVE,
+    // The object is being reset because its code was updated.
+    CODE_UPDATED,
+  };
+
+  PreShutdownInfo(Reason reason): reason(reason) {}
+
+  kj::StringPtr getReason() {
+    switch (reason) {
+      case Reason::INACTIVE:
+        return "inactive"_kj;
+      case Reason::CODE_UPDATED:
+        return "codeUpdated"_kj;
+    }
+    KJ_UNREACHABLE;
+  }
+
+  JSG_RESOURCE_TYPE(PreShutdownInfo) {
+    JSG_READONLY_INSTANCE_PROPERTY(reason, getReason);
+
+    JSG_TS_OVERRIDE({
+      readonly reason: "inactive" | "codeUpdated";
+    });
+  }
+
+ private:
+  Reason reason;
+};
+
 // Type signature for handlers exported from the root module.
 //
 // We define each handler method as a LenientOptional rather than as a plain Optional in order to
@@ -521,6 +558,11 @@ struct ExportedHandler {
   // Alarms are only exported on DOs, which receive env bindings from the constructor
   jsg::LenientOptional<jsg::Function<AlarmHandler>> alarm;
 
+  using PreShutdownHandler = kj::Promise<void>(jsg::Ref<PreShutdownInfo> info);
+  // preShutdown is only exported on DOs, which receive env bindings from the constructor. It is
+  // only invoked when the `durable_object_pre_shutdown` compatibility flag is enabled.
+  jsg::LenientOptional<jsg::Function<PreShutdownHandler>> preShutdown;
+
   using TestHandler = jsg::Promise<void>(jsg::Ref<TestController> controller,
       jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
@@ -547,6 +589,7 @@ struct ExportedHandler {
       tailStream,
       scheduled,
       alarm,
+      preShutdown,
       test,
       webSocketMessage,
       webSocketClose,
@@ -576,6 +619,7 @@ struct ExportedHandler {
     tailStream?: ExportedHandlerTailStreamHandler<Env, Props>;
     scheduled?: ExportedHandlerScheduledHandler<Env, Props>;
     alarm: never;
+    preShutdown: never;
     webSocketMessage: never;
     webSocketClose: never;
     webSocketError: never;
@@ -1194,7 +1238,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
       api::ExecutionContext, api::ExportedHandler,                                                 \
       api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
-      api::AlarmInvocationInfo, api::Immediate, api::Cloudflare, api::CachePurgeError,             \
-      api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext, api::AccessContext
+      api::AlarmInvocationInfo, api::PreShutdownInfo, api::Immediate, api::Cloudflare,             \
+      api::CachePurgeError, api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext,      \
+      api::AccessContext
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

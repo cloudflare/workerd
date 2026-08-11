@@ -262,6 +262,12 @@ declare namespace CloudflareWorkersModule {
     alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
     fetch?(request: Request): Response | Promise<Response>;
     connect?(socket: Socket): void | Promise<void>;
+    /**
+     * Best-effort lifecycle hook invoked before planned, storage-healthy shutdowns (idle
+     * eviction and code-update resets). Only invoked when the `durable_object_pre_shutdown`
+     * compatibility flag is enabled.
+     */
+    preShutdown?(info: PreShutdownInfo): void | Promise<void>;
     webSocketMessage?(
       ws: WebSocket,
       message: string | ArrayBuffer
