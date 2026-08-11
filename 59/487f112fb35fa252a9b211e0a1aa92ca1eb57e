@@ -12,12 +12,14 @@ src/workerd/api/actor-state.c++
   s_ab4e43acd62623::t_8f9cd42fb7a21c 989-990,998-1001,1005
 src/workerd/api/actor.c++
   s_ab4e43acd62623::t_8f9cd42fb7a21c 46,54-57,62,102,119-122,142,150-153,159
+  s_ab4e43acd62623::t_79bfc40d826cde 103-104,110-111,127
 src/workerd/api/tests/BUILD.bazel
   s_ab4e43acd62623::t_741464a1cc4870 193-194
   s_ab4e43acd62623::t_5b837390f8ed34 195-204
 src/workerd/api/http.c++
   s_ab4e43acd62623::t_22182b26b0e061 2123-2130,2149-2151,2548-2549,2553-2554,2561-2615
   s_ab4e43acd62623::t_0be4d69c446bfd 2616-2618
+  s_ab4e43acd62623::t_79bfc40d826cde 2495-2502
 src/workerd/api/worker-rpc.c++
   s_ab4e43acd62623::t_86432ba3169780 457-459
   s_ab4e43acd62623::t_33ec40097881e4 1250-1259
@@ -37,6 +39,7 @@ src/workerd/api/tests/jsrpc-pipelined-trace-test.js
   s_ab4e43acd62623::t_459ec3060e0ab4 1-4,7-10,12-46
 src/workerd/api/actor.h
   s_ab4e43acd62623::t_8f9cd42fb7a21c 349-350,387-388,413-414
+  s_ab4e43acd62623::t_79bfc40d826cde 352-353
 src/workerd/io/io-context.c++
   s_ab4e43acd62623::t_acec3ea57e3164 1102-1118,1139-1144,1148
 src/workerd/api/worker-rpc.h
@@ -53,6 +56,9 @@ src/workerd/api/http.h
   s_ab4e43acd62623::t_acec3ea57e3164 193-195,251-252,282-284,528-531
   s_ab4e43acd62623::t_3feaea9e391656 241-242,279-280
   s_ab4e43acd62623::t_86432ba3169780 190-192
+  s_ab4e43acd62623::t_79bfc40d826cde 258-259
+src/workerd/api/fetch-body-rewindable-test.c++
+  s_ab4e43acd62623::t_79bfc40d826cde 75-76,81-82,95-96,319-320
 ---
 {
   "schema_version": "authorship/3.0.0",
