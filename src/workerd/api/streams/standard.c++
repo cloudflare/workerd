@@ -217,6 +217,11 @@ class WritableLockImpl {
     };
     Flags flags{};
 
+    // Completes a signal-aborted pipe.  Deliberately static: releasing the
+    // pipe lock destroys the PipeLocked, so there is no longer a `this`.
+    static jsg::Promise<void> finishAbortedPipe(
+        jsg::Lock& js, Controller& self, jsg::JsValue reason, Flags flags);
+
     JSG_MEMORY_INFO(PipeLocked) {
       tracker.trackField("readableStreamRef", readableStreamRef);
       tracker.trackField("signal", maybeSignal);
@@ -550,33 +555,36 @@ void WritableLockImpl<Controller>::visitForGc(jsg::GcVisitor& visitor) {
 }
 
 template <typename Controller>
+jsg::Promise<void> WritableLockImpl<Controller>::PipeLocked::finishAbortedPipe(
+    jsg::Lock& js, Controller& self, jsg::JsValue reason, Flags flags) {
+  if (!flags.preventAbort) {
+    return self.abort(js, reason)
+        .then(js, [reason = reason.addRef(js), flags, ref = self.addRef()](jsg::Lock& js) {
+      return rejectedMaybeHandledPromise<void>(js, reason.getHandle(js), flags.pipeThrough);
+    });
+  }
+  return rejectedMaybeHandledPromise<void>(js, reason, flags.pipeThrough);
+}
+
+template <typename Controller>
 kj::Maybe<jsg::Promise<void>> WritableLockImpl<Controller>::PipeLocked::checkSignal(
     jsg::Lock& js, Controller& self) {
   KJ_IF_SOME(signal, maybeSignal) {
     if (signal->getAborted(js)) {
       auto reason = signal->getReason(js);
-      // Copy the flags needed below before calling releaseSource(): with a cancel
-      // reason it runs the source's cancel algorithm (arbitrary user JS)
-      // synchronously, and that JS may re-enter the controller and release the
-      // write-side pipe lock, destroying *this. For the same reason the abort
-      // continuation must not capture `this`: it runs after the caller has already
-      // released the pipe lock.
-      auto preventCancel = flags.preventCancel;
-      auto preventAbort = flags.preventAbort;
-      auto pipeThrough = flags.pipeThrough;
-      if (!preventCancel) {
+      // Copy the flags before calling releaseSource(): with a cancel reason it runs the
+      // source's cancel algorithm (arbitrary user JS) synchronously, and that JS may
+      // re-enter the controller and release the write-side pipe lock, destroying *this.
+      auto flagsCopy = flags;
+      if (!flagsCopy.preventCancel) {
         releaseSource(js, reason);
       } else {
         releaseSource(js);
       }
-      if (!preventAbort) {
-        return self.abort(js, reason)
-            .then(
-                js, [pipeThrough, reason = reason.addRef(js), ref = self.addRef()](jsg::Lock& js) {
-          return rejectedMaybeHandledPromise<void>(js, reason.getHandle(js), pipeThrough);
-        });
-      }
-      return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
+      // *this may already have been destroyed by user JS run from releaseSource(). The rest
+      // of the work is done by a static method so the compiler enforces that we do not
+      // touch it.
+      return finishAbortedPipe(js, self, reason, flagsCopy);
     }
   }
   return kj::none;
