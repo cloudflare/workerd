@@ -595,6 +595,28 @@ void IsolateBase::bakeConstructorTemplatesIntoSnapshot() {
   });
 }
 
+void IsolateBase::bakeModuleRegistryIntoSnapshot(v8::Global<v8::Context>& contextHandle) {
+  KJ_REQUIRE(!usingNewModuleRegistry, "snapshot not yet supported with the new module registry");
+  auto& artifact = mutableSnapshotArtifact();
+  v8::HandleScope scope(ptr);
+  auto context = contextHandle.Get(ptr);
+  auto& moduleRegistry = KJ_ASSERT_NONNULL(getAlignedPointerFromEmbedderData<ModuleRegistry>(
+      context, ContextPointerSlot::MODULE_REGISTRY));
+  moduleRegistry.visitEntriesForSnapshot([&](ModuleRegistry::SnapshotHandleRef ref) {
+    bool pin = ref.kind != ModuleRegistry::SnapshotHandleKind::INTERNAL_ONLY &&
+        ref.status != v8::Module::kUninstantiated && !ref.handle.IsEmpty();
+    if (pin) {
+      artifact.moduleRecords.add(SnapshotArtifact::ModuleRecord{
+        .specifier = ref.specifier.toString(false),
+        .moduleType = static_cast<uint8_t>(ref.type),
+        .handleKind = static_cast<uint8_t>(ref.kind),
+        .dataIndex = pinIntoSnapshot(context, ref.handle.Get(ptr)),
+      });
+    }
+    ref.handle.Reset();
+  });
+}
+
 void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
     kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles,
     const uint32_t* badTagFieldsCount,
@@ -603,15 +625,25 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   auto& artifact = mutableSnapshotArtifact();
   KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
 
-  // Record the native side of every live wrapper while it still exists: a stateless type by
-  // its tag alone, a stateful one as a clone.
-  wrappablesMetadata->recordLiveWrappables(heapTracer, artifact,
-      [this](v8::CppHeapPointerTag tag) { return snapshotRecreateFnFor(tag) != kj::none; });
-
   // We need to reset all C++ handles that point to JavaScript objects before creating
   // the snapshot blob, because V8 does not know how to serialize them.
 
-  // 1. Destroy every live Wrappable.
+  // TODO(later): Remove the legacy-registry snapshot support once new_module_registry
+  // is the default.
+  //
+  // 1. Pin every materialized module-registry handle into the snapshot and record
+  // (specifier, type, kind) -> index so the START_FROM_SNAPSHOT worker can build its entries
+  // around the baked instances. Reset every handle in the same pass.
+  bakeModuleRegistryIntoSnapshot(defaultContextHandle);
+
+  // 2. Record the native side of every live wrapper while it still exists: a stateless type by
+  // its tag alone, a stateful one as a clone. The Wrappables themselves are destroyed in step 3,
+  // before CreateBlob() checks that no V8 handles are left; by the time the serializer callbacks
+  // run, the shim pointer V8 reports is all that remains of a wrapper's native side.
+  wrappablesMetadata->recordLiveWrappables(heapTracer, artifact,
+      [this](v8::CppHeapPointerTag tag) { return snapshotRecreateFnFor(tag) != kj::none; });
+
+  // 3. Destroy every live Wrappable.
   heapTracer.destroyLiveWrappableInstances();
 
   // Destructors under the isolate lock release their handles synchronously; drain the
@@ -619,7 +651,7 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   // lock, after CreateBlob().
   applyDeferredActions();
 
-  // 1b. Settle the FinalizationRegistry cleanups that destroying the graph leaves behind.
+  // 3b. Settle the FinalizationRegistry cleanups that destroying the graph leaves behind.
   // CreateBlob() runs a full GC of its own before serializing: every registry whose targets die
   // in that GC lands on the heap's dirty list with a cleanup task posted to the foreground task
   // runner, and the startup serializer then rejects the isolate
@@ -633,26 +665,26 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
     ptr->ClearKeptObjects();
   }
 
-  // 2. Reset isolate level handles.
+  // 4. Reset isolate level handles.
   opaqueTemplate.Reset();
   workerEnvObj.Reset();
   workerExportsObj.Reset();
 
-  // 2b. Reset template handles drained from embedder-side caches (e.g. Rust JSG resource
+  // 4b. Reset template handles drained from embedder-side caches (e.g. Rust JSG resource
   // templates such as node-internal:dns).
   for (auto& h: extraTemplateHandles) {
     h.Reset();
   }
 
-  // 3. Bake every materialized resource-type constructor template into the snapshot, resetting
+  // 5. Bake every materialized resource-type constructor template into the snapshot, resetting
   // each slot in the same pass.
   bakeConstructorTemplatesIntoSnapshot();
 
-  // 4. Reset struct-type handles: dictionary template + field-name handles per JSG_STRUCT.
+  // 6. Reset struct-type handles: dictionary template + field-name handles per JSG_STRUCT.
   visitStructTypeHandles([](v8::Global<v8::Name>& h) { h.Reset(); },
       [](v8::Global<v8::DictionaryTemplate>& h) { h.Reset(); });
 
-  // 5. Reset the Global holding the default context, extracted from the script's module
+  // 7. Reset the Global holding the default context, extracted from the script's module
   // context. The SnapshotCreator keeps its own handle on the default context until CreateBlob()
   // consumes it.
   defaultContextHandle.Reset();
