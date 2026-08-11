@@ -216,13 +216,17 @@ kj::Own<ReadableSource> newEncodedReadableSource(
 kj::Own<kj::AsyncInputStream> wrapTeeBranch(kj::Own<kj::AsyncInputStream> branch);
 
 // A ReadableStreamSource backed by in-memory data. Unlike newSystemStream() wrapping a
-// newMemoryInputStream(), this implementation does NOT support deferred proxying. This is
-// important when the backing memory has V8 heap provenance (e.g., ArrayBuffer, Blob data,
-// kj::Array<kj::byte> with a v8::BackingStore attached, etc)
-// since the memory could be freed by GC after the IoContext completes.
+// newMemoryInputStream(), this implementation does NOT support deferred proxying, so the data
+// is always consumed before the IoContext goes away and `backing` can be something whose
+// lifetime is tied to the IoContext.
 //
 // The `backing` parameter keeps the underlying memory alive for the lifetime of the stream.
 // If not provided, the bytes are copied.
+//
+// Reads and pumps run on the kj event loop without the isolate lock, so `bytes` MUST be
+// readable there.  When MPK protects isolate memory, that rules out anything inside the V8
+// sandbox -- ArrayBuffer and Blob contents in particular.  Callers holding such data must
+// omit `backing` and let this function copy, or copy it themselves beforehand.
 //
 // TODO(soon): Update to implement ReadableSource instead of ReadableStreamSource.
 // For now this is a ReadableStreamSource for compat with existing code. Once internal.h/c++

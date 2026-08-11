@@ -453,14 +453,18 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdangling-field"
 JsReadableStream::Buffer::Buffer(kj::Array<const kj::byte> data): view(data), owned(kj::mv(data)) {}
-
-JsReadableStream::Buffer::Buffer(jsg::Ref<Blob> data): view(data->getData()), owned(kj::mv(data)) {}
 #pragma clang diagnostic pop
+
+// Blob contents live in a V8 ArrayBuffer.  The streams built from this Buffer are read on the
+// kj event loop, where the isolate's MPK-protected sandbox pages are unreadable, so take a
+// kj-heap copy.  It is shared by every stream derived from this Buffer -- rewinds and tee
+// branches alike.
+JsReadableStream::Buffer::Buffer(jsg::Ref<Blob> data): Buffer(kj::heapArray(data->getData())) {}
 
 JsReadableStream::Impl JsReadableStream::bufferBackedImpl(jsg::Lock& js, kj::Rc<Buffer> buffer) {
   // Use streams::newMemorySource() rather than newSystemStream() wrapping a memory input stream:
-  // buffer-backed bodies may have V8 heap provenance and therefore must NOT be deferred-proxied.
-  // The data must be consumed and destroyed while under the isolate lock.
+  // it reads the Buffer's bytes in place, so every stream derived from this Buffer -- rewinds
+  // and tee branches alike -- shares the one allocation.
   //
   // TODO(streams-ts): Like create(), the stream construction here must dispatch on the
   // worker's configuration once the TypeScript implementation lands.

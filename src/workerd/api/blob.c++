@@ -277,8 +277,10 @@ jsg::Promise<jsg::JsRef<jsg::JsString>> Blob::text(jsg::Lock& js) {
 
 JsReadableStream Blob::stream(jsg::Lock& js) {
   FeatureObserver::maybeRecordUse(FeatureObserver::Feature::BLOB_AS_STREAM);
-  return JsReadableStream::create(
-      js, IoContext::current(), streams::newMemorySource(data, kj::heap(JSG_THIS)));
+  // Pass no backing so that newMemorySource copies: our data is a V8 ArrayBuffer, and the
+  // stream is read from the kj event loop where the isolate's MPK-protected sandbox pages
+  // are unreadable.
+  return JsReadableStream::create(js, IoContext::current(), streams::newMemorySource(data));
 }
 
 // =======================================================================================
