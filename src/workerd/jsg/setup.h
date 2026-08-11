@@ -685,6 +685,16 @@ class IsolateBase {
     return KJ_ASSERT_NONNULL(snapshotCreator).get();
   }
 
+  // Pins every materialized handle of the context's (legacy) module registry into the snapshot
+  // and records (specifier, type, kind) -> index in SnapshotArtifact::moduleRecords, so the
+  // loading Worker can build its entries around the baked instances instead of compiling them
+  // again; otherwise the baked main-module graph and runtime import()/require() would produce
+  // two module graphs (e.g. two Buffer.prototype identities). Resets each handle in the same pass,
+  // including paired TracedReferences. Entries never instantiated in the zygote leaked no identity into the
+  // baked heap, so they are not pinned and are recompiled fresh at LOAD. The registry is owned
+  // by the context global's Wrappable.
+  void bakeModuleRegistryIntoSnapshot(v8::Global<v8::Context>& contextHandle);
+
   // Bakes every materialized JSG_RESOURCE-type constructor template
   // into the snapshot and records one index per slot, in enumeration order, in
   // SnapshotArtifact, so the loading isolate pairs slots by position alone.

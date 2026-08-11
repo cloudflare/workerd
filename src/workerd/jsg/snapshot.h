@@ -57,6 +57,13 @@ class Wrappable;
 //   zygote's top level left of the properties V8 adds to a context only on restore
 //   (see setup.h), pinned right before CreateBlob. None until the zygote has run
 //   removeRestoreTimeGlobalsBeforeSnapshot().
+// * `moduleRecords` are the module-registry handles pinned into the snapshot at
+//   PREPARE_SNAPSHOT, one (specifier, type, kind) -> context-level AddData index per handle,
+//   so the loading worker can build its entries around the baked module instances instead of
+//   compiling them again (preserving identity between the baked main-module graph and runtime
+//   import()/require()). Field types are raw ints to avoid coupling this header to modules.h:
+//   `moduleType` is a jsg::ModuleRegistry::Type (capnp ModuleType), `handleKind` a
+//   jsg::ModuleRegistry::SnapshotHandleKind.
 struct SnapshotArtifact: public kj::AtomicRefcounted {
   v8::StartupData blob{nullptr, 0};
   kj::Array<intptr_t> externalReferences;
@@ -78,6 +85,14 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
   kj::Maybe<size_t> bootstrapStateIndex;
 
   kj::Maybe<size_t> restoreTimeGlobalsIndex;
+
+  struct ModuleRecord {
+    kj::String specifier;
+    uint8_t moduleType;
+    uint8_t handleKind;
+    size_t dataIndex;
+  };
+  kj::Vector<ModuleRecord> moduleRecords;
 
   ~SnapshotArtifact() noexcept(false) {
     // v8::SnapshotCreator::CreateBlob() allocates the data with `new[]` and hands over ownership.

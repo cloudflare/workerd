@@ -429,6 +429,17 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 
     for (auto& module: source.modules) {
       auto path = kj::Path::parse(module.name);
+      // TODO(later): Remove the legacy-registry snapshot support once new_module_registry
+      // is the default.
+      //
+      // A bundle ES module the zygote instantiated is registered around its baked instance
+      // instead of being compiled again (see the Script constructor in io/worker.c++).
+      if (module.content.is<Worker::Script::EsModule>()) {
+        KJ_IF_SOME(baked, modules->tryTakeSnapshotModule(lockParam, path)) {
+          modules->add(path, jsg::ModuleRegistry::ModuleInfo(lockParam, baked));
+          continue;
+        }
+      }
       auto maybeInfo = tryCompileLegacyModule(
           lockParam, module.name, module.content, modules->getObserver(), featureFlags);
       KJ_IF_SOME(info, maybeInfo) {
