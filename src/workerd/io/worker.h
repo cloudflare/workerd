@@ -880,6 +880,22 @@ class Worker::Actor final: public kj::Refcounted {
     virtual kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) = 0;
 
     virtual kj::Own<Loopback> addRef() = 0;
+
+    // Runs `actor`'s preShutdown() lifecycle hook by supplying the embedder's request
+    // infrastructure (IoChannelFactory, RequestObserver, tracer) to
+    // Worker::Actor::runPreShutdown(). The loopback is a natural home for this because, like
+    // hibernatable WebSocket events, the hook must be deliverable when no inbound request
+    // exists, and the loopback is the object that captures whatever embedder context that
+    // requires. `actor` is passed explicitly (rather than the loopback remembering it) because
+    // the loopback can outlive the Worker::Actor.
+    //
+    // Returns kj::none if the actor has no applicable handler or if this embedder does not
+    // deliver the hook through the loopback (workerd's local server triggers it through its own
+    // service objects instead; see Server::ActorClass::runPreShutdown()).
+    virtual kj::Maybe<kj::Promise<api::PreShutdownOutcome>> runPreShutdown(
+        Worker::Actor& actor, api::PreShutdownReason reason) {
+      return kj::none;
+    }
   };
 
   // The HibernationManager class manages HibernatableWebSockets created by an actor.
