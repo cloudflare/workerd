@@ -45,10 +45,12 @@ class JsReadableStream final {
   // The underlying stream.
   using StreamImpl = kj::OneOf<jsg::Ref<ReadableStream>, jsg::JsRef<jsg::JsObject>>;
 
-  // Holds the in-memory data backing a buffer-backed (rewindable) JsReadableStream.
+  // Holds the in-memory data backing a buffer-backed (rewindable) JsReadableStream.  `owned`
+  // is always kj-heap memory: the streams built from it are read on the kj event loop without
+  // the isolate lock, so the bytes must not sit in the V8 sandbox.
   struct Buffer {
     kj::ArrayPtr<const kj::byte> view;
-    kj::OneOf<kj::Array<const kj::byte>, jsg::Ref<Blob>> owned;
+    kj::Array<const kj::byte> owned;
 
     explicit Buffer(kj::Array<const kj::byte> data);
     explicit Buffer(jsg::Ref<Blob> data);
