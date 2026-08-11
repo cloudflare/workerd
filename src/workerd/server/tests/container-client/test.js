@@ -308,7 +308,7 @@ export class DurableObjectExample extends DurableObject {
       const ac = new AbortController();
       ac.abort();
       await assert.rejects(
-        Promise.try(container.exec(['echo', 'hello'], { signal: ac.signal })),
+        Promise.try(() => container.exec(['echo', 'hello'], { signal: ac.signal })),
         {
           name: 'AbortError',
         }
@@ -915,7 +915,7 @@ export class DurableObjectExample extends DurableObject {
 
     assert.strictEqual(container.running, false);
 
-    await assert.rejects(Promise.try(container.setLabels({ k: 'v' })), {
+    await assert.rejects(Promise.try(() => container.setLabels({ k: 'v' })), {
       message:
         /setLabels\(\) cannot be called on a container that is not running/,
     });
@@ -938,7 +938,7 @@ export class DurableObjectExample extends DurableObject {
     await monitor;
 
     assert.strictEqual(container.running, false);
-    await assert.rejects(Promise.try(container.setLabels({ k: 'v' })), {
+    await assert.rejects(Promise.try(() => container.setLabels({ k: 'v' })), {
       message:
         /setLabels\(\) cannot be called on a container that is not running/,
     });
@@ -983,13 +983,13 @@ export class DurableObjectExample extends DurableObject {
     await this.waitUntilContainerIsHealthy();
 
     // Empty label name
-    await assert.rejects(Promise.try(container.setLabels({ '': 'value' })), {
+    await assert.rejects(Promise.try(() => container.setLabels({ '': 'value' })), {
       message: /Label names cannot be empty/,
     });
 
     // Too many labels
     await assert.rejects(
-      Promise.try(
+      Promise.try(() =>
         container.setLabels(
           Object.fromEntries(
             Array.from({ length: 11 }, (_, i) => [`l${i}`, 'v'])
@@ -1001,7 +1001,7 @@ export class DurableObjectExample extends DurableObject {
 
     // Label name over 16 bytes
     await assert.rejects(
-      Promise.try(container.setLabels({ ['n'.repeat(17)]: 'value' })),
+      Promise.try(() => container.setLabels({ ['n'.repeat(17)]: 'value' })),
       {
         message: /Label names cannot exceed 16 bytes \(index 0\)/,
       }
@@ -1009,7 +1009,7 @@ export class DurableObjectExample extends DurableObject {
 
     // Label value over 64 bytes
     await assert.rejects(
-      Promise.try(container.setLabels({ name: 'v'.repeat(65) })),
+      Promise.try(() => container.setLabels({ name: 'v'.repeat(65) })),
       {
         message: /Label values cannot exceed 64 bytes \(index 0\)/,
       }
@@ -1017,7 +1017,7 @@ export class DurableObjectExample extends DurableObject {
 
     // Label name with control character
     await assert.rejects(
-      Promise.try(container.setLabels({ 'bad\x01name': 'value' })),
+      Promise.try(() => container.setLabels({ 'bad\x01name': 'value' })),
       {
         message: /Label names cannot contain control characters \(index 0\)/,
       }
@@ -1025,7 +1025,7 @@ export class DurableObjectExample extends DurableObject {
 
     // Label value with control character
     await assert.rejects(
-      Promise.try(container.setLabels({ name: 'bad\x01value' })),
+      Promise.try(() => container.setLabels({ name: 'bad\x01value' })),
       {
         message: /Label values cannot contain control characters \(index 0\)/,
       }
