@@ -306,11 +306,14 @@ void ExecProcess::resize(jsg::Lock& js, int cols, int rows) {
 
 Container::Container(rpc::Container::Client rpcClient, bool running)
     : rpcClient(IoContext::current().addObject(kj::heap(kj::mv(rpcClient)))),
-      running(running) {}
+      monitorState(kj::rc<MonitorState>(running)) {
+  if (running) startMonitor();
+}
 
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
   auto flags = FeatureFlags::get(js);
-  JSG_REQUIRE(!running, Error, "start() cannot be called on a container that is already running.");
+  JSG_REQUIRE(
+      !getRunning(), Error, "start() cannot be called on a container that is already running.");
   invalidateTcpPortStates();
 
   StartupOptions options = kj::mv(maybeOptions).orDefault({});
@@ -414,11 +417,34 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
 
   IoContext::current().addTask(req.sendIgnoringResult());
 
-  running = true;
+  backgroundMonitor = kj::none;
+  monitorPromise = kj::none;
+  monitorState = kj::rc<MonitorState>(true);
+  startMonitor();
+}
+
+void Container::startMonitor() {
+  KJ_ASSERT(getRunning());
+  KJ_ASSERT(monitorPromise == kj::none);
+
+  auto monitor = rpcClient->monitorRequest(capnp::MessageSize{4, 0})
+                     .send()
+                     .then([](capnp::Response<rpc::Container::MonitorResults> results) {
+    return results.getExitCode();
+  }).fork();
+
+  auto background = monitor.addBranch().then([state = monitorState.addRef()](int32_t) {
+    state->running = false;
+  }, [state = monitorState.addRef()](kj::Exception&&) { state->running = false; });
+
+  auto& ioContext = IoContext::current();
+  monitorPromise = ioContext.addObject(kj::heap(kj::mv(monitor)));
+  backgroundMonitor = ioContext.addObject(kj::heap(kj::mv(background).eagerlyEvaluate(nullptr)));
 }
 
 jsg::Promise<void> Container::setLabels(jsg::Lock& js, jsg::Dict<kj::String> labels) {
-  JSG_REQUIRE(running, Error, "setLabels() cannot be called on a container that is not running.");
+  JSG_REQUIRE(
+      getRunning(), Error, "setLabels() cannot be called on a container that is not running.");
 
   auto& ioContext = IoContext::current();
 
@@ -461,8 +487,8 @@ jsg::Promise<kj::Maybe<Container::Info>> Container::inspect(jsg::Lock& js) {
 
 jsg::Promise<Container::DirectorySnapshot> Container::snapshotDirectory(
     jsg::Lock& js, DirectorySnapshotOptions options) {
-  JSG_REQUIRE(
-      running, Error, "snapshotDirectory() cannot be called on a container that is not running.");
+  JSG_REQUIRE(getRunning(), Error,
+      "snapshotDirectory() cannot be called on a container that is not running.");
   JSG_REQUIRE(options.dir.size() > 0 && options.dir.startsWith("/"), TypeError,
       "snapshotDirectory() requires an absolute directory path (starting with '/').");
 
@@ -496,8 +522,8 @@ jsg::Promise<Container::DirectorySnapshot> Container::snapshotDirectory(
 
 jsg::Promise<Container::Snapshot> Container::snapshotContainer(
     jsg::Lock& js, SnapshotOptions options) {
-  JSG_REQUIRE(
-      running, Error, "snapshotContainer() cannot be called on a container that is not running.");
+  JSG_REQUIRE(getRunning(), Error,
+      "snapshotContainer() cannot be called on a container that is not running.");
 
   auto req = rpcClient->snapshotContainerRequest();
   KJ_IF_SOME(spanContext, IoContext::current().getCurrentTraceSpan().toSpanContext()) {
@@ -603,7 +629,7 @@ kj::Promise<void> Container::interceptOutboundHttpsImpl(rpc::Container::Client r
 
 jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
     jsg::Lock& js, kj::Array<kj::String> cmd, jsg::Optional<ExecOptions> maybeOptions) {
-  JSG_REQUIRE(running, Error, "exec() cannot be called on a container that is not running.");
+  JSG_REQUIRE(getRunning(), Error, "exec() cannot be called on a container that is not running.");
   JSG_REQUIRE(cmd.size() > 0, TypeError, "exec() requires a non-empty command array.");
 
   auto options = kj::mv(maybeOptions).orDefault({});
@@ -808,18 +834,16 @@ kj::Promise<void> Container::interceptOutboundTcpImpl(rpc::Container::Client rpc
 }
 
 jsg::Promise<void> Container::monitor(jsg::Lock& js) {
-  JSG_REQUIRE(running, Error, "monitor() cannot be called on a container that is not running.");
+  JSG_REQUIRE(monitorPromise != kj::none, Error,
+      "monitor() cannot be called on a container that is not running.");
 
   return IoContext::current()
-      .awaitIo(js, rpcClient->monitorRequest(capnp::MessageSize{4, 0}).send())
+      .awaitIo(js, KJ_ASSERT_NONNULL(monitorPromise)->addBranch())
       // Note: `self` (jsg::Ref) is captured to prevent GC from collecting this object while
       // the promise continuation is pending. Without it, the bare `this` pointer dangles.
-      .then(js,
-          [self = JSG_THIS](
-              jsg::Lock& js, capnp::Response<rpc::Container::MonitorResults> results) mutable {
-    self->running = false;
+      .then(js, [self = JSG_THIS](jsg::Lock& js, int32_t exitCode) mutable {
+    self->monitorState->running = false;
     self->invalidateTcpPortStates();
-    auto exitCode = results.getExitCode();
     KJ_IF_SOME(d, self->destroyReason) {
       jsg::Value error = kj::mv(d);
       self->destroyReason = kj::none;
@@ -831,9 +855,8 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
       KJ_ASSERT_NONNULL(err.tryCast<jsg::JsObject>()).set(js, "exitCode", js.num(exitCode));
       js.throwException(err);
     }
-  },
-          [self = JSG_THIS](jsg::Lock& js, jsg::Value&& error) mutable {
-    self->running = false;
+  }, [self = JSG_THIS](jsg::Lock& js, jsg::Value&& error) mutable {
+    self->monitorState->running = false;
     self->invalidateTcpPortStates();
     self->destroyReason = kj::none;
     js.throwException(kj::mv(error));
@@ -841,7 +864,7 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
 }
 
 jsg::Promise<void> Container::destroy(jsg::Lock& js, jsg::Optional<jsg::Value> error) {
-  if (!running) return js.resolvedPromise();
+  if (!getRunning()) return js.resolvedPromise();
   invalidateTcpPortStates();
 
   if (destroyReason == kj::none) {
@@ -854,7 +877,7 @@ jsg::Promise<void> Container::destroy(jsg::Lock& js, jsg::Optional<jsg::Value> e
 
 void Container::signal(jsg::Lock& js, int signo) {
   JSG_REQUIRE(signo > 0 && signo <= 64, RangeError, "Invalid signal number.");
-  JSG_REQUIRE(running, Error, "signal() cannot be called on a container that is not running.");
+  JSG_REQUIRE(getRunning(), Error, "signal() cannot be called on a container that is not running.");
 
   auto req = rpcClient->signalRequest(capnp::MessageSize{4, 0});
   req.setSigno(signo);

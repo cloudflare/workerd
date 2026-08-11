@@ -72,6 +72,10 @@ class MockContainerServer final: public rpc::Container::Server {
     return kj::READY_NOW;
   }
 
+  kj::Promise<void> monitor(MonitorContext context) override {
+    return kj::NEVER_DONE;
+  }
+
   kj::Promise<void> snapshotDirectory(SnapshotDirectoryContext context) override {
     auto params = context.getParams();
     KJ_EXPECT(params.hasSpanContext());
@@ -162,6 +166,10 @@ class MockExecContainerServer final: public rpc::Container::Server {
       : byteStreamFactory(byteStreamFactory),
         observations(observations),
         resizeFulfiller(kj::mv(resizeFulfiller)) {}
+
+  kj::Promise<void> monitor(MonitorContext context) override {
+    return kj::NEVER_DONE;
+  }
 
   kj::Promise<void> exec(ExecContext context) override {
     observations.execCalled = true;
@@ -420,6 +428,10 @@ class TestContainerServer final: public rpc::Container::Server {
     return kj::READY_NOW;
   }
 
+  kj::Promise<void> monitor(MonitorContext context) override {
+    return kj::NEVER_DONE;
+  }
+
   kj::Promise<void> getTcpPort(GetTcpPortContext context) override {
     context.getResults().setPort(kj::heap<TestPort>(
         byteStreamFactory, mode, connectCount, closeFulfiller, upEndedUncleanly, deferConnect));
@@ -528,6 +540,39 @@ TestFixture makeFixture() {
     .useRealTimers = false,
     .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
         []() -> kj::Own<RequestObserver> { return kj::refcounted<TracingRequestObserver>(); }),
+  });
+}
+
+KJ_TEST("Container::start monitors a container that exits immediately") {
+  class ImmediateExitContainerServer final: public rpc::Container::Server {
+   public:
+    kj::Promise<void> start(StartContext context) override {
+      started = true;
+      return kj::READY_NOW;
+    }
+
+    kj::Promise<void> monitor(MonitorContext context) override {
+      KJ_EXPECT(started);
+      context.getResults().setExitCode(0);
+      return kj::READY_NOW;
+    }
+
+    bool started = false;
+  };
+
+  auto fixture = makeFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto container = kj::heap<Container>(
+        rpc::Container::Client(kj::heap<ImmediateExitContainerServer>()), false);
+
+    container->start(env.js, kj::none);
+    KJ_EXPECT(container->getRunning());
+
+    for (auto i = 0; i < 10 && container->getRunning(); ++i) {
+      co_await kj::evalLater([]() {});
+    }
+
+    KJ_EXPECT(!container->getRunning());
   });
 }
 

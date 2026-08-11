@@ -311,7 +311,7 @@ class Container: public jsg::Object {
   };
 
   bool getRunning() const {
-    return running;
+    return monitorState->running;
   }
 
   // Methods correspond closely to the RPC interface in `container.capnp`.
@@ -367,8 +367,19 @@ class Container: public jsg::Object {
   }
 
  private:
+  struct MonitorState final: public kj::Refcounted {
+    explicit MonitorState(bool running): running(running) {}
+
+    bool running;
+  };
+
   IoOwn<rpc::Container::Client> rpcClient;
-  bool running;
+  kj::Rc<MonitorState> monitorState;
+
+  // A single monitor RPC is shared by the background state update and any explicit monitor()
+  // calls. The eager branch lets the Durable Object hibernate while the RPC remains pending.
+  kj::Maybe<IoOwn<kj::ForkedPromise<int32_t>>> monitorPromise;
+  kj::Maybe<IoOwn<kj::Promise<void>>> backgroundMonitor;
 
   kj::Maybe<jsg::Value> destroyReason;
 
@@ -386,6 +397,7 @@ class Container: public jsg::Object {
   kj::Maybe<IoOwn<kj::HashMap<int, kj::Rc<TcpPortState>>>> tcpPortStates;
 
   void invalidateTcpPortStates();
+  void startMonitor();
 
   // These helpers are static since they will leave the IoContext on the first co_await, so we
   // don't want them trying to access `rpcClient` via the `IoOwn`.

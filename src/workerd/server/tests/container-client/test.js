@@ -21,11 +21,6 @@ function getRandomDurableObjectName(name) {
 // When writing a test, don't forget to call waitUntilContainerIsHealthy
 // before testing the behaviour with your container.
 //
-// Don't forget to call monitor() after calling start(), as there
-// is an issue with not calling monitor() in Durable Objects where
-// we might lose track of the container lifetime.
-//
-
 export class DurableObjectExample extends DurableObject {
   async testExitCode() {
     const container = this.ctx.container;
@@ -67,6 +62,23 @@ export class DurableObjectExample extends DurableObject {
       assert.strictEqual(typeof exitCode, 'number');
       assert.equal(137, exitCode);
     }
+  }
+
+  async testRunningAfterImmediateExit() {
+    const container = this.ctx.container;
+    if (container.running) {
+      const monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    container.start({ entrypoint: ['/bin/sh', '-c', 'exit 0'] });
+
+    for (let i = 0; i < 100 && container.running; ++i) {
+      await scheduler.wait(100);
+    }
+
+    assert.strictEqual(container.running, false);
   }
 
   async testBasics() {
@@ -2850,6 +2862,16 @@ export const testExitCode = {
     );
     const stub = env.MY_CONTAINER.get(id);
     await stub.testExitCode();
+  },
+};
+
+export const testRunningAfterImmediateExit = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testRunningAfterImmediateExit')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testRunningAfterImmediateExit();
   },
 };
 
