@@ -293,11 +293,14 @@ export class DurableObjectExample extends DurableObject {
     {
       const proc = await container.exec(['echo', 'hello']);
       await proc.stdout.getReader().read();
-      await assert.rejects(Promise.try(() => proc.output()), {
-        name: 'TypeError',
-        message:
-          'Cannot call output() after stdout has started being consumed.',
-      });
+      await assert.rejects(
+        Promise.try(() => proc.output()),
+        {
+          name: 'TypeError',
+          message:
+            'Cannot call output() after stdout has started being consumed.',
+        }
+      );
     }
 
     // 12. Make sure Stdin EOF's by default if not set
