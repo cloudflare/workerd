@@ -851,9 +851,7 @@ export function writevSync(
 export function globSync(
   pattern: string | readonly string[],
   options:
-    | GlobOptions
-    | GlobOptionsWithFileTypes
-    | GlobOptionsWithoutFileTypes = {}
+    GlobOptions | GlobOptionsWithFileTypes | GlobOptionsWithoutFileTypes = {}
 ): string[] | Dirent[] {
   // Normalize pattern to array
   const patterns: string[] =

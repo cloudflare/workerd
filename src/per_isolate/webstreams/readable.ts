@@ -701,8 +701,7 @@ function defaultReaderReadInternal<R>(
   }
   if (!useAsyncPath) {
     const syncResult = consumer.tryReadSync(reader) as
-      | ReadableStreamReadResult<R>
-      | undefined;
+      ReadableStreamReadResult<R> | undefined;
     if (syncResult !== undefined) {
       // Spec PullSteps ordering: pull trigger, then drain-then-close,
       // then fulfill the read request — all synchronous.
@@ -1322,8 +1321,7 @@ class ReadableStreamDefaultController<
     // This must be checked BEFORE size() to avoid reentrant reads from
     // inside size() being fulfilled eagerly by the queue notification.
     const cursor = getReadableStreamConsumer(this.#stream) as
-      | QueueCursorType<R, R>
-      | undefined;
+      QueueCursorType<R, R> | undefined;
     if (
       cursor !== undefined &&
       cursor.hasPendingRead &&
@@ -1419,8 +1417,7 @@ class ReadableStreamDefaultController<
     for (let i = 0; i < owners.length; i++) {
       const owner = owners[i] as ReadableStream<R>;
       const cursor = getReadableStreamConsumer(owner) as
-        | QueueCursorType<R, R>
-        | undefined;
+        QueueCursorType<R, R> | undefined;
       if (cursor === undefined) continue;
       if (this.#queue.getEntry(cursor.position) === CLOSE_SENTINEL) {
         readableStreamClose(owner);
@@ -1430,8 +1427,7 @@ class ReadableStreamDefaultController<
     }
     // Also check the parent stream itself (pre-tee path: only one consumer).
     const parentCursor = getReadableStreamConsumer(this.#stream) as
-      | QueueCursorType<R, R>
-      | undefined;
+      QueueCursorType<R, R> | undefined;
     if (parentCursor !== undefined) {
       if (this.#queue.getEntry(parentCursor.position) === CLOSE_SENTINEL) {
         readableStreamClose(this.#stream);
@@ -1825,8 +1821,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       // set). Otherwise the source must fall back to enqueue(). The
       // request object is cached for identity until invalidated.
       const cursor = this.#queue.singleCursor as
-        | ByteStreamCursorType
-        | undefined;
+        ByteStreamCursorType | undefined;
       if (cursor === undefined) return null;
       const view = cursor.pendingPullIntoView;
       const head = cursor.headPullInto;
@@ -1866,8 +1861,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     // one over the updated remainder is minted on next access).
     this.#invalidateByobRequest();
     const drainCursor = this.#queue.singleCursor as
-      | ByteStreamCursorType
-      | undefined;
+      ByteStreamCursorType | undefined;
     if (drainCursor !== undefined) {
       const head = drainCursor.headPullInto;
       if (head !== undefined) {
@@ -2110,8 +2104,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     for (let i = 0; i < owners.length; i++) {
       const owner = owners[i] as ReadableStream<unknown>;
       const cursor = getReadableStreamConsumer(owner) as
-        | QueueCursorType<ByteQueueEntry, Uint8Array>
-        | undefined;
+        QueueCursorType<ByteQueueEntry, Uint8Array> | undefined;
       if (cursor === undefined) continue;
       if (this.#queue.getEntry(cursor.position) === CLOSE_SENTINEL) {
         readableStreamClose(owner);
@@ -2120,8 +2113,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       }
     }
     const parentCursor = getReadableStreamConsumer(this.#stream) as
-      | QueueCursorType<ByteQueueEntry, Uint8Array>
-      | undefined;
+      QueueCursorType<ByteQueueEntry, Uint8Array> | undefined;
     if (parentCursor !== undefined) {
       if (this.#queue.getEntry(parentCursor.position) === CLOSE_SENTINEL) {
         readableStreamClose(this.#stream);

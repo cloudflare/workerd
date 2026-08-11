@@ -533,9 +533,7 @@ export function lstat(
 export function mkdir(
   path: FilePath,
   optionsOrCallback:
-    | number
-    | SingleArgCallback<string | undefined>
-    | MakeDirectoryOptions,
+    number | SingleArgCallback<string | undefined> | MakeDirectoryOptions,
   callback?: SingleArgCallback<string | undefined>
 ): void {
   let options: number | MakeDirectoryOptions;
@@ -555,9 +553,7 @@ export function mkdir(
 export function mkdtemp(
   prefix: FilePath,
   optionsOrCallback:
-    | SingleArgCallback<string>
-    | MkdirTempSyncOptions
-    | ValidEncoding,
+    SingleArgCallback<string> | MkdirTempSyncOptions | ValidEncoding,
   callback?: SingleArgCallback<string>
 ): void {
   let options: MkdirTempSyncOptions | ValidEncoding;
@@ -658,13 +654,9 @@ export function opendir(
 export function read<T extends NodeJS.ArrayBufferView>(
   fd: number,
   bufferOptionsOrCallback:
-    | T
-    | ReadOptionsWithBuffer<T>
-    | DoubleArgCallback<number, T>,
+    T | ReadOptionsWithBuffer<T> | DoubleArgCallback<number, T>,
   offsetOptionsOrCallback?:
-    | ReadOptionsWithBuffer<T>
-    | number
-    | DoubleArgCallback<number, T>,
+    ReadOptionsWithBuffer<T> | number | DoubleArgCallback<number, T>,
   lengthOrCallback?: null | number | DoubleArgCallback<number, T>,
   position?: Position,
   callback?: DoubleArgCallback<number, T>
@@ -921,9 +913,7 @@ export function read<T extends NodeJS.ArrayBufferView>(
 export function readdir(
   path: FilePath,
   optionsOrCallback:
-    | SingleArgCallback<ReadDirResult>
-    | ReadDirOptions
-    | ValidEncoding,
+    SingleArgCallback<ReadDirResult> | ReadDirOptions | ValidEncoding,
   callback?: SingleArgCallback<ReadDirResult>
 ): void {
   let options: ReadDirOptions | ValidEncoding;
@@ -955,9 +945,7 @@ export function readdir(
 export function readFile(
   path: FilePath,
   optionsOrCallback:
-    | SingleArgCallback<string | Buffer>
-    | ValidEncoding
-    | ReadFileSyncOptions,
+    SingleArgCallback<string | Buffer> | ValidEncoding | ReadFileSyncOptions,
   callback?: SingleArgCallback<string | Buffer>
 ): void {
   let options: ValidEncoding | ReadFileSyncOptions;
@@ -987,9 +975,7 @@ export function readFile(
 export function readlink(
   path: FilePath,
   optionsOrCallback:
-    | SingleArgCallback<string | Buffer>
-    | ValidEncoding
-    | ReadLinkSyncOptions,
+    SingleArgCallback<string | Buffer> | ValidEncoding | ReadLinkSyncOptions,
   callback?: SingleArgCallback<string | Buffer>
 ): void {
   let options: ValidEncoding | ReadLinkSyncOptions;
@@ -1049,9 +1035,7 @@ export function readv<T extends NodeJS.ArrayBufferView>(
 export function realpath(
   path: FilePath,
   optionsOrCallback:
-    | SingleArgCallback<string | Buffer>
-    | ValidEncoding
-    | ReadLinkSyncOptions,
+    SingleArgCallback<string | Buffer> | ValidEncoding | ReadLinkSyncOptions,
   callback?: SingleArgCallback<string | Buffer>
 ): void {
   let options: ValidEncoding | ReadLinkSyncOptions;
@@ -1264,13 +1248,9 @@ export function write<T extends NodeJS.ArrayBufferView>(
   fd: number,
   buffer: T | string,
   offsetOptionsPositionOrCallback?:
-    | WriteSyncOptions
-    | Position
-    | DoubleArgCallback<number, T>,
+    WriteSyncOptions | Position | DoubleArgCallback<number, T>,
   encodingLengthOrCallback?:
-    | number
-    | ValidEncoding
-    | DoubleArgCallback<number, T>,
+    number | ValidEncoding | DoubleArgCallback<number, T>,
   positionOrCallback?: Position | DoubleArgCallback<number, T>,
   callback?: DoubleArgCallback<number, T>
 ): void {
@@ -1425,9 +1405,7 @@ export function glob(
   callback?: SingleArgCallback<string[] | Dirent[]>
 ): void {
   let options:
-    | GlobOptions
-    | GlobOptionsWithFileTypes
-    | GlobOptionsWithoutFileTypes;
+    GlobOptions | GlobOptionsWithFileTypes | GlobOptionsWithoutFileTypes;
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = {};

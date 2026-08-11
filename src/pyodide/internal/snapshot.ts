@@ -557,9 +557,10 @@ async function importJsModulesFromSnapshot(
   }
   return Object.fromEntries(
     await Promise.all(
-      jsModuleNames.map(
-        async (x): Promise<[string, any]> => [x, await doImport(x)]
-      )
+      jsModuleNames.map(async (x): Promise<[string, any]> => [
+        x,
+        await doImport(x),
+      ])
     )
   );
 }

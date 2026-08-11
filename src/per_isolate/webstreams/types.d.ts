@@ -25,8 +25,7 @@ export declare class ReadableStreamDefaultController<R = unknown> {
 }
 
 export type UnderlyingSource<R = unknown> =
-  | UnderlyingDefaultSource<R>
-  | UnderlyingByteSource;
+  UnderlyingDefaultSource<R> | UnderlyingByteSource;
 
 export interface UnderlyingDefaultSource<R = unknown> {
   start?: (
@@ -85,8 +84,7 @@ export interface ReadableStreamBYOBReader {
 }
 
 export type ReadableStreamReader<R> =
-  | ReadableStreamDefaultReader<R>
-  | ReadableStreamBYOBReader;
+  ReadableStreamDefaultReader<R> | ReadableStreamBYOBReader;
 
 // NOTE: done: true usually carries no value, but it is NOT always
 // valueless: a BYOB read committed when the stream closes resolves with the
@@ -98,8 +96,7 @@ export type ReadableStreamReader<R> =
 // explicit `| undefined` keeps `{ done: true, value: undefined }`
 // assignable under exactOptionalPropertyTypes.
 export type ReadableStreamReadResult<T> =
-  | { done: false; value: T }
-  | { done: true; value?: T | undefined };
+  { done: false; value: T } | { done: true; value?: T | undefined };
 
 export interface StreamPipeOptions {
   preventClose?: boolean;

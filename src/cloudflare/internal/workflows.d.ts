@@ -51,17 +51,10 @@ declare abstract class Workflow<PARAMS = unknown> {
 }
 
 type WorkflowDurationLabel =
-  | 'second'
-  | 'minute'
-  | 'hour'
-  | 'day'
-  | 'week'
-  | 'month'
-  | 'year';
+  'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year';
 
 type WorkflowSleepDuration =
-  | `${number} ${WorkflowDurationLabel}${'s' | ''}`
-  | number;
+  `${number} ${WorkflowDurationLabel}${'s' | ''}` | number;
 
 type WorkflowRetentionDuration = WorkflowSleepDuration;
 
