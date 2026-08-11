@@ -145,13 +145,6 @@
       "patches": [
         "//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch"
       ]
-    },
-    {
-      "name": "workerd-cxx",
-      "type": "github_tarball",
-      "owner": "cloudflare",
-      "repo": "workerd-cxx",
-      "branch": "master"
     }
   ]
 }

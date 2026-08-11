@@ -9,7 +9,7 @@ publish = false
 path = "fake.rs"
 
 [dependencies]
-# dependencies from workerd-cxx
+# dependencies from src/rust/cxx
 cc = "1"
 # clap also includes features needed by workerd
 clap = { version = "4", default-features = false, features = ["derive", "error-context", "help", "std", "usage"] }
