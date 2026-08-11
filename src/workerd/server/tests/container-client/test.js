@@ -994,7 +994,8 @@ export class DurableObjectExample extends DurableObject {
           Object.fromEntries(
             Array.from({ length: 11 }, (_, i) => [`l${i}`, 'v'])
           )
-        )),
+        )
+      ),
       { message: /Cannot specify more than 10 container labels/ }
     );
 
