@@ -4507,6 +4507,7 @@ kj::Promise<EventOutcome> Worker::Actor::runPreShutdown(api::PreShutdownReason r
   incomingRequest->abandonTasksForActorShutdown();
   incomingRequest = nullptr;
 
+  impl->metrics->preShutdownFinished(outcome);
   co_return outcome;
 }
 

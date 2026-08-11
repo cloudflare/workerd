@@ -7,6 +7,7 @@
 // e.g. to collect logs and metrics.
 
 #include <workerd/io/features.capnp.h>
+#include <workerd/io/outcome.capnp.h>
 #include <workerd/io/trace.h>
 #include <workerd/jsg/observer.h>
 #include <workerd/util/sqlite.h>
@@ -103,6 +104,15 @@ class RequestObserver: public kj::Refcounted {
   // exception, e.g. because it has been replaced with an HTTP error response or because it
   // occurred asynchronously.
   virtual void reportFailure(const kj::Exception& e, FailureSource source = FailureSource::OTHER) {}
+
+  // Reports the settled outcome of a Durable Object preShutdown() lifecycle hook delivery
+  // observed by this observer. The hook is dispatched internally (see
+  // Worker::Actor::runPreShutdown()) rather than through a WorkerInterface method, so no wrapper
+  // ever sees its result; this is the only way an observer learns it. Called before the hook's
+  // IncomingRequest is destroyed. Failure outcomes carry no exception object: the handler's
+  // exception was already consumed and logged by the dispatch path (see
+  // ServiceWorkerGlobalScope::runPreShutdown()).
+  virtual void reportPreShutdownOutcome(EventOutcome outcome) {}
 
   static EventOutcome outcomeFromException(
       const kj::Exception& e, FailureSource source = FailureSource::OTHER);
@@ -323,6 +333,11 @@ class ActorObserver: public kj::Refcounted, public SqliteObserver {
   // Called when the actor's JavaScript class constructor has run to completion successfully.
   // Not called for actors that have no class, nor when the constructor throws.
   virtual void constructorCompleted() {}
+
+  // Called when an attempt to run the actor's preShutdown() lifecycle handler has finished, with
+  // the given outcome. Not called for shutdowns that skip the hook because the actor has no
+  // applicable handler (see Worker::Actor::runPreShutdown()).
+  virtual void preShutdownFinished(EventOutcome outcome) {}
 
   virtual void webSocketAccepted() {}
   virtual void webSocketClosed() {}

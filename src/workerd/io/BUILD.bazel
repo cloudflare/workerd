@@ -300,6 +300,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":features_capnp",
+        ":outcome_capnp",
         ":trace",
         "//src/workerd/jsg:observer",
         "//src/workerd/util:sqlite",
