@@ -21,11 +21,6 @@ function getRandomDurableObjectName(name) {
 // When writing a test, don't forget to call waitUntilContainerIsHealthy
 // before testing the behaviour with your container.
 //
-// Don't forget to call monitor() after calling start(), as there
-// is an issue with not calling monitor() in Durable Objects where
-// we might lose track of the container lifetime.
-//
-
 export class DurableObjectExample extends DurableObject {
   async testExitCode() {
     const container = this.ctx.container;
@@ -67,6 +62,39 @@ export class DurableObjectExample extends DurableObject {
       assert.strictEqual(typeof exitCode, 'number');
       assert.equal(137, exitCode);
     }
+  }
+
+  async testRunningAfterImmediateExit() {
+    const container = this.ctx.container;
+    if (container.running) {
+      const monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    container.start({ entrypoint: ['/bin/sh', '-c', 'exit 0'] });
+
+    for (let i = 0; i < 100 && container.running; ++i) {
+      await scheduler.wait(100);
+    }
+
+    assert.strictEqual(container.running, false);
+  }
+
+  async testRestartAfterDestroy() {
+    const container = this.ctx.container;
+    if (container.running) {
+      await container.destroy();
+    }
+
+    container.start();
+    await this.waitUntilContainerIsHealthy();
+    await container.destroy(new Error('first lifecycle'));
+    assert.strictEqual(container.running, false);
+
+    container.start({ entrypoint: ['/bin/sh', '-c', 'exit 0'] });
+    await container.monitor();
+    assert.strictEqual(container.running, false);
   }
 
   async testBasics() {
@@ -969,13 +997,13 @@ export class DurableObjectExample extends DurableObject {
     await this.waitUntilContainerIsHealthy();
 
     await container.destroy();
-    await assert.rejects(() => container.setLabels({ k: 'v' }), {
-      message: /setLabels\(\) requires a running container/,
-    });
-
-    // Clear the JS wrapper's running state after intentionally skipping monitor()
-    // before the setLabels() assertion above.
-    await container.monitor().catch((_err) => {});
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ k: 'v' })),
+      {
+        message:
+          /setLabels\(\) cannot be called on a container that is not running/,
+      }
+    );
     assert.strictEqual(container.running, false);
   }
 
@@ -2877,6 +2905,26 @@ export const testExitCode = {
     );
     const stub = env.MY_CONTAINER.get(id);
     await stub.testExitCode();
+  },
+};
+
+export const testRunningAfterImmediateExit = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testRunningAfterImmediateExit')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testRunningAfterImmediateExit();
+  },
+};
+
+export const testRestartAfterDestroy = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testRestartAfterDestroy')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testRestartAfterDestroy();
   },
 };
 
