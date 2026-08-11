@@ -283,6 +283,22 @@ export const cancelableListener = {
   },
 };
 
+export const cancelableListenerWithSelfSignal = {
+  test() {
+    const controller = new AbortController();
+    const { signal } = controller;
+    const noop = () => {};
+
+    // Fill typeMap so registering the native abort handler below grows it.
+    signal.addEventListener('one', noop);
+    signal.addEventListener('two', noop);
+    signal.addEventListener('three', noop);
+
+    signal.addEventListener('victim', noop, { signal });
+    controller.abort();
+  },
+};
+
 export const cancelableListenerAbortPropagation = {
   test() {
     // TODO(bug): Cancelable event listeners should be removed by signal even when
