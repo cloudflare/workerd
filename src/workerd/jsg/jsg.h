@@ -927,6 +927,15 @@ class Data {
   }
   Data addRef(Lock& js);
 
+  // Call fn with the underlying v8::Global<v8::Data> handle.
+  // Also resets tracedHandle, which V8 would otherwise report as an unserialized eternal handle
+  // during snapshot creation (TracedReferences are stored alongside eternal handles internally).
+  template <typename Fn>
+  void visitHandle(Fn&& fn) {
+    fn(handle);
+    tracedHandle = kj::none;
+  }
+
   inline bool operator==(const Data& other) const {
     return handle == other.handle;
   }
@@ -1034,6 +1043,8 @@ class V8Ref: private Data {
 
   template <typename U>
   V8Ref<U> cast(jsg::Lock& js);
+
+  using Data::visitHandle;
 
   // Create a weak reference to the held V8 value. The weak reference does not prevent the
   // value from being garbage collected and is not traced by GC.
