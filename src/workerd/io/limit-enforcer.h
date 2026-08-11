@@ -177,6 +177,13 @@ class LimitEnforcer {
   // Wall-clock time budget for a Durable Object's preShutdown() lifecycle handler. Unlike the
   // other limits, this has a default implementation so that embedders which don't need a
   // configurable value get the standard budget.
+  //
+  // This budget is not preemptive: it is enforced by a timer promise, which only fires when the
+  // isolate yields to the event loop. It bounds handlers that await too long, not handlers that
+  // spin the CPU; those are bounded by the embedder's CPU enforcement (which aborts the
+  // IoContext), like any other event. Embedders without CPU enforcement (e.g. workerd's local
+  // server) can hang on a CPU-bound handler here, just as they can on any other CPU-bound
+  // handler.
   virtual kj::Duration getPreShutdownLimit() {
     return 10 * kj::SECONDS;
   }

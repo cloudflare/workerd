@@ -71,6 +71,29 @@ export class NoHookObject extends DurableObject {
   }
 }
 
+// Used by the racing-request test below: the hook advertises that it has started via a shared
+// module global (test and object run in the same isolate), then stalls so the test can get a
+// request in flight before the hook finishes.
+export class RacingHookObject extends DurableObject {
+  #bumps = 0;
+
+  async bump() {
+    return ++this.#bumps;
+  }
+
+  // Increments, then stays in flight well past the end of the hook's stall.
+  async slowBump() {
+    ++this.#bumps;
+    await scheduler.wait(1000);
+    return this.#bumps;
+  }
+
+  async preShutdown() {
+    globalThis.racingHookStarted = true;
+    await scheduler.wait(500);
+  }
+}
+
 // The flagship agent pattern: the hook schedules an alarm, and the alarm later resurrects the
 // actor.
 export class AlarmHookObject extends DurableObject {
@@ -143,6 +166,29 @@ export default {
       // (there is no way to be notified of the alarm without touching the actor).
       await scheduler.wait(2000);
       assert.strictEqual(await stub.getAlarmRan(), true);
+    }
+
+    // A request that arrives while the hook is running (on the test-eviction path) revives the
+    // actor: the eviction is called off and the request is served by the same instance. This is
+    // the local-dev divergence from production, where destruction is committed once the hook
+    // starts; here, reviving the actor is the friendlier behavior for the racing request.
+    {
+      const stub = env.RACING_HOOK.get(env.RACING_HOOK.idFromName('a'));
+      assert.strictEqual(await stub.bump(), 1);
+      globalThis.racingHookStarted = false;
+      const evictPromise = unsafe.evict(stub);
+      while (!globalThis.racingHookStarted) {
+        await scheduler.wait(10);
+      }
+      // The hook is now stalling. Get a request in flight that outlives the hook, so the actor
+      // still has an active request when the eviction path re-checks after the hook completes.
+      // It must be served by the same instance (bumps continue from 1), not torn down under a
+      // live request.
+      assert.strictEqual(await stub.slowBump(), 2);
+      // Once the actor goes idle again, the eviction retries (running the hook a second time)
+      // and succeeds.
+      await evictPromise;
+      assert.strictEqual(await stub.bump(), 1);
     }
 
     // A worker without the compat flag: handler present but never invoked.

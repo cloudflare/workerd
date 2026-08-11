@@ -1128,6 +1128,19 @@ class Server::ActorNamespace final {
           KJ_IF_SOME(promise,
               resolved.actorClass->runPreShutdown(*a, api::PreShutdownReason::INACTIVE)) {
             co_await promise;
+
+            // Re-check the actor slot now that we've awaited the hook: this path is not
+            // cancelled by active(), so a request may have arrived (and grabbed a strong
+            // reference) while the hook ran. Consistent with local dev semantics elsewhere,
+            // the racing request revives the actor and the eviction is called off.
+            KJ_IF_SOME(current, actor) {
+              if (&*current != &*a || current->isShared()) {
+                co_return false;
+              }
+            } else {
+              // Another path already tore the actor down.
+              co_return false;
+            }
           }
         }
 

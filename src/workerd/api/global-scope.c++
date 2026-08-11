@@ -810,6 +810,11 @@ kj::Promise<PreShutdownOutcome> ServiceWorkerGlobalScope::runPreShutdown(PreShut
       // We intentionally don't take the isolate lock here to emit a user-visible warning: a
       // handler spinning the CPU would delay teardown past the budget. Timeouts are surfaced
       // via the outcome (metrics) instead.
+      //
+      // Note that this timeout is not preemptive: like any timer, it only fires once the isolate
+      // yields to the event loop, so it bounds handlers that await too long, not handlers that
+      // spin the CPU. CPU-bound handlers are bounded by the embedder's CPU enforcement instead;
+      // see LimitEnforcer::getPreShutdownLimit().
       LOG_NOSENTRY(WARNING, "preShutdown() handler exceeded its allowed execution time");
       return PreShutdownOutcome::TIMED_OUT;
     });

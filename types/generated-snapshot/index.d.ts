@@ -588,7 +588,7 @@ interface AlarmInvocationInfo {
   readonly scheduledTime: number;
 }
 interface PreShutdownInfo {
-  readonly reason: "inactive" | "codeUpdated";
+  readonly reason: "inactive" | "codeUpdated" | (string & {});
 }
 interface Immediate {
   ref(): void;

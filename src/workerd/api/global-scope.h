@@ -535,8 +535,11 @@ class PreShutdownInfo final: public jsg::Object {
   JSG_RESOURCE_TYPE(PreShutdownInfo) {
     JSG_READONLY_INSTANCE_PROPERTY(reason, getReason);
 
+    // The `(string & {})` arm keeps the type open: the reason list may grow over time, and
+    // handlers must tolerate reason strings they don't recognize. The known literals are still
+    // listed so editors can autocomplete them.
     JSG_TS_OVERRIDE({
-      readonly reason: "inactive" | "codeUpdated";
+      readonly reason: "inactive" | "codeUpdated" | (string & {});
     });
   }
 

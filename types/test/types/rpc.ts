@@ -393,7 +393,11 @@ class TestAlarmObject extends DurableObject {
 class TestPreShutdownObject extends DurableObject {
   // Can declare a preShutdown method consuming the info parameter
   async preShutdown(info: PreShutdownInfo) {
-    const _reason: 'inactive' | 'codeUpdated' = info.reason;
+    // The reason type is open: the list of reasons may grow over time, so handlers must accept
+    // reason strings they don't recognize...
+    const _reason: string = info.reason;
+    // ...while the known literals stay assignable (and autocomplete in editors).
+    const _known: PreShutdownInfo['reason'] = 'inactive';
   }
 
   // User code can invoke preShutdown() directly, if desired.

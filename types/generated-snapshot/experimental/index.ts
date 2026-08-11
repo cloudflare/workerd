@@ -591,7 +591,7 @@ export interface AlarmInvocationInfo {
   readonly scheduledTime: number;
 }
 export interface PreShutdownInfo {
-  readonly reason: "inactive" | "codeUpdated";
+  readonly reason: "inactive" | "codeUpdated" | (string & {});
 }
 export interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;
