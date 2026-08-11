@@ -1,0 +1,28 @@
+types/generated-snapshot/experimental/index.ts
+  s_89cf167df5318a::t_2e528f92c26603 875,1013
+types/generated-snapshot/index.d.ts
+  s_89cf167df5318a::t_2e528f92c26603 844,982
+types/generated-snapshot/index.ts
+  s_89cf167df5318a::t_2e528f92c26603 850,988
+types/test/index.spec.ts
+  s_89cf167df5318a::t_f5617c84fd4a4f 145
+  s_89cf167df5318a::t_44d9f6a53b33cf 152
+types/generated-snapshot/experimental/index.d.ts
+  s_89cf167df5318a::t_2e528f92c26603 869,1007
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "80e86f25927d5745df87b7c03dc3dfc06b234fe3",
+  "prompts": {},
+  "sessions": {
+    "s_89cf167df5318a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_01301d38fffeWoHoPSEzS9t7G2",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Felix Hanau <felix@cloudflare.com>"
+    }
+  }
+}
