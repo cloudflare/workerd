@@ -48,6 +48,8 @@ class DurableObjectState;
 class DurableObjectStorage;
 class ServiceWorkerGlobalScope;
 struct ExportedHandler;
+enum class PreShutdownReason : uint8_t;
+enum class PreShutdownOutcome : uint8_t;
 struct CryptoAlgorithm;
 struct QueueExportedHandler;
 class WebSocket;
@@ -60,6 +62,7 @@ KJ_DECLARE_NON_POLYMORPHIC(ArtifactBundler_State);
 }  // namespace pyodide
 }  // namespace api
 
+class BaseTracer;
 class IsolateLimitEnforcer;
 enum class UncaughtExceptionSource;
 class VirtualFileSystem;
@@ -1063,7 +1066,43 @@ class Worker::Actor final: public kj::Refcounted {
 
   kj::Own<Worker::Actor> addRef();
 
+  // Runs the actor's preShutdown() lifecycle handler, if any, and then waits for any storage
+  // writes the handler issued to be durably flushed. Intended to be invoked from planned,
+  // storage-healthy shutdown paths, *before* calling shutdown(). Today only idle eviction does
+  // so; further planned reasons (e.g. code-update resets) are expected to be added.
+  //
+  // Returns kj::none (synchronously, with no side effects) if the actor's compatibility flags
+  // don't enable the hook, the class instance was never constructed, or the class doesn't define
+  // a preShutdown() method. Returning kj::none rather than an immediately-ready promise matters:
+  // it lets callers skip suspending entirely, so shutdown paths of actors without the hook keep
+  // exactly their prior timing. (Even a ready promise costs event-loop turns to await, widening
+  // the window in which a racing request can cancel an in-flight eviction.)
+  //
+  // This deliberately does not call addRef(): taking a normal strong reference would create a
+  // RequestTracker::ActiveRequest, and the resulting active() callback would cancel the very
+  // shutdown that triggered the hook. Instead the hook runs on a lightweight IncomingRequest
+  // constructed from the caller-provided pieces, which is destroyed (without the normal drain
+  // path) before the promise resolves.
+  //
+  // The returned promise never rejects; failures are reported through the outcome (and logged).
+  kj::Maybe<kj::Promise<api::PreShutdownOutcome>> runPreShutdown(api::PreShutdownReason reason,
+      kj::Rc<IoChannelFactory> ioChannelFactory,
+      kj::Own<RequestObserver> observer,
+      kj::Maybe<kj::Own<BaseTracer>> workerTracer);
+
+  // Whether the actor currently has a preShutdown() lifecycle handler that runPreShutdown()
+  // would run: the compat flag is on, the class instance was constructed, and the class defines
+  // the method. Useful for embedders that want to count shutdowns which skip a defined handler
+  // (e.g. because hook delivery is disabled). Like runPreShutdown(), this may only be called
+  // when the actor is quiescent, since it reads state that running requests mutate.
+  bool hasPreShutdownHandler();
+
  private:
+  kj::Promise<api::PreShutdownOutcome> runPreShutdownImpl(api::PreShutdownReason reason,
+      kj::Rc<IoChannelFactory> ioChannelFactory,
+      kj::Own<RequestObserver> observer,
+      kj::Maybe<kj::Own<BaseTracer>> workerTracer);
+
   kj::Promise<WorkerInterface::ScheduleAlarmResult> handleAlarm(kj::Date scheduledTime);
 
   kj::Own<const Worker> worker;

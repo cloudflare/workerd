@@ -14,6 +14,7 @@ enum class UncaughtExceptionSource {
   REQUEST_HANDLER,
   TRACE_HANDLER,
   ALARM_HANDLER,
+  PRE_SHUTDOWN_HANDLER,
 };
 
 inline kj::StringPtr KJ_STRINGIFY(UncaughtExceptionSource value) {
@@ -30,6 +31,8 @@ inline kj::StringPtr KJ_STRINGIFY(UncaughtExceptionSource value) {
       return "Uncaught (in trace)"_kj;
     case UncaughtExceptionSource::ALARM_HANDLER:
       return "Uncaught (in alarm)"_kj;
+    case UncaughtExceptionSource::PRE_SHUTDOWN_HANDLER:
+      return "Uncaught (in preShutdown)"_kj;
   };
   KJ_UNREACHABLE;
 }

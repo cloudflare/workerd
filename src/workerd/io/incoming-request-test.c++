@@ -123,6 +123,43 @@ KJ_TEST("IoContext::IncomingRequest::drain() releases a superseded (non-front) r
   fixture.drainAndDestroy(kj::mv(second));
 }
 
+// abandonTasksForActorShutdown() is what the preShutdown() hook uses instead of drain(): it
+// must cancel leftover I/O while the request is still installed, so nothing resumes on an
+// IoContext with no current request (that path Sentry-reports via taskFailed). When a second
+// IncomingRequest is already live -- workerd's local-dev racing-request revival -- leftover
+// work belongs to that request and must not be canceled.
+KJ_TEST("abandonTasksForActorShutdown() cancels leftover work only as the last request") {
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("abandon-test"))});
+
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+
+  bool lastRequestCanceled = false;
+  context->addWaitUntil(kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&lastRequestCanceled]() {
+    lastRequestCanceled = true;
+  })));
+
+  request->abandonTasksForActorShutdown();
+  request = nullptr;
+  KJ_EXPECT(lastRequestCanceled, "sole request's leftover waitUntil must be canceled");
+
+  auto first = fixture.newIncomingRequest(*context);
+  auto second = fixture.newIncomingRequest(*context);
+
+  bool racingRequestCanceled = false;
+  auto paf = kj::newPromiseAndFulfiller<void>();
+  context->addWaitUntil(
+      paf.promise.attach(kj::defer([&racingRequestCanceled]() { racingRequestCanceled = true; })));
+
+  first->abandonTasksForActorShutdown();
+  first = nullptr;
+  KJ_EXPECT(
+      !racingRequestCanceled, "must not cancel leftover work while another IncomingRequest is live");
+
+  paf.fulfiller->fulfill();
+  fixture.drainAndDestroy(kj::mv(second));
+}
+
 KJ_TEST("ambient IoContext is hidden while another V8 isolate is entered") {
   auto io = kj::setupAsyncIo();
   TestFixture outer({.waitScope = io.waitScope, .useRealTimers = false});
