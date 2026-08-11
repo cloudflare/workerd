@@ -2614,6 +2614,11 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
     ignoredHandlers.insert("alarm"_kj);
     ignoredHandlers.insert("unhandledrejection"_kj);
     ignoredHandlers.insert("rejectionhandled"_kj);
+    if (FeatureFlags::get(js).getDurableObjectPreShutdown()) {
+      // With the flag enabled, preShutdown is a Durable Object lifecycle hook (like alarm), not
+      // an event handler or RPC method.
+      ignoredHandlers.insert("preShutdown"_kj);
+    }
 
     // Helper function to collect methods from a prototype chain
     auto collectMethodsFromPrototypeChain = [&](jsg::JsValue startProto,

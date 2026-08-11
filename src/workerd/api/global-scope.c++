@@ -190,6 +190,7 @@ ExportedHandler ExportedHandler::clone(jsg::Lock& js) {
     .tailStream{mapAddRef(js, tailStream)},
     .scheduled{mapAddRef(js, scheduled)},
     .alarm{mapAddRef(js, alarm)},
+    .preShutdown{mapAddRef(js, preShutdown)},
     .test{mapAddRef(js, test)},
     .webSocketMessage{mapAddRef(js, webSocketMessage)},
     .webSocketClose{mapAddRef(js, webSocketClose)},

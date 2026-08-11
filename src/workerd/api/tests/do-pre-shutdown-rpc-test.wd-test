@@ -1,0 +1,34 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "do-pre-shutdown-rpc-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "do-pre-shutdown-rpc-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+          "durable_object_pre_shutdown",
+        ],
+        bindings = [
+          (name = "HookActor", durableObjectNamespace = "HookActor"),
+          (name = "FlagOnEntrypoint", service = (name = "do-pre-shutdown-rpc-test", entrypoint = "FlagOnEntrypoint")),
+          (name = "FlagOff", service = (name = "flag-off", entrypoint = "PlainEntrypoint")),
+        ],
+        durableObjectNamespaces = [
+          (className = "HookActor", uniqueKey = "hook"),
+        ],
+        durableObjectStorage = (inMemory = void),
+      )
+    ),
+    ( name = "flag-off",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "do-pre-shutdown-rpc-flag-off.js")
+        ],
+      )
+    ),
+  ],
+);

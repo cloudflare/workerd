@@ -586,6 +586,9 @@ export interface AlarmInvocationInfo {
   readonly retryCount: number;
   readonly scheduledTime: number;
 }
+export interface PreShutdownInfo {
+  readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
+}
 export interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;
 }
@@ -616,6 +619,7 @@ export interface DurableObject {
   fetch(request: Request): Response | Promise<Response>;
   connect?(socket: Socket): void | Promise<void>;
   alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
+  preShutdown?(info: PreShutdownInfo): void | Promise<void>;
   webSocketMessage?(
     ws: WebSocket,
     message: string | ArrayBuffer,
@@ -632,7 +636,12 @@ export type DurableObjectStub<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
 > = Fetcher<
   T,
-  "alarm" | "connect" | "webSocketMessage" | "webSocketClose" | "webSocketError"
+  | "alarm"
+  | "connect"
+  | "preShutdown"
+  | "webSocketMessage"
+  | "webSocketClose"
+  | "webSocketError"
 > & {
   readonly id: DurableObjectId;
   readonly name?: string;
@@ -15596,6 +15605,14 @@ export declare namespace CloudflareWorkersModule {
     alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
     fetch?(request: Request): Response | Promise<Response>;
     connect?(socket: Socket): void | Promise<void>;
+    /**
+     * Best-effort lifecycle hook invoked before planned, storage-healthy shutdowns. Currently
+     * invoked on idle eviction and code update only, and only for root objects (not facets).
+     * `info.reason` is an open set so that further planned-shutdown reasons (such as code-update
+     * resets) can be delivered later. Only invoked when the `durable_object_pre_shutdown`
+     * compatibility flag is enabled.
+     */
+    preShutdown?(info: PreShutdownInfo): void | Promise<void>;
     webSocketMessage?(
       ws: WebSocket,
       message: string | ArrayBuffer,

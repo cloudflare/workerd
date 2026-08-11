@@ -1657,4 +1657,15 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental
       $pythonSnapshotRelease;
   # Enables Python Workers using Pyodide 314.0.5.
+
+  durableObjectPreShutdown @188 :Bool
+      $compatEnableFlag("durable_object_pre_shutdown")
+      $experimental;
+  # Enables the `preShutdown()` lifecycle hook on Durable Object classes. When enabled, the
+  # runtime invokes a Durable Object's `preShutdown(info)` method (if defined) on a best-effort
+  # basis before planned, storage-healthy shutdowns, giving the object a bounded window to
+  # checkpoint state. When enabled, `preShutdown` joins the RPC reserved-name
+  # list for every entrypoint, so stubs cannot invoke `preShutdown()` remotely.
+  # The flag exists because existing classes may already define an RPC method
+  # with this name.
 }
