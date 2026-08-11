@@ -583,8 +583,9 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
             .then(js,
                 ioContext.addFunctor(
                     [ref = addRef(), store = store.addRef(js), byteOffset, byteLength,
-                        isByob = maybeByobOptions != kj::none, tempBuffer = kj::mv(tempBuffer)](
-                        jsg::Lock& js, size_t amount) mutable -> jsg::Promise<ReadResult> {
+                        isByob = maybeByobOptions != kj::none,
+                        tempBuffer = kj::mv(tempBuffer)](jsg::Lock& js, IoContext& ioContext,
+                        size_t amount) mutable -> jsg::Promise<ReadResult> {
           auto& controller = static_cast<ReadableStreamInternalController&>(ref->getController());
           auto view = store.getHandle(js);
           controller.readPending = false;
@@ -614,7 +615,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
             // The bytes that were read are lost, but this is a valid result.
 
             // Silly user, trix are for kids.
-            IoContext::current().logWarningOnce(
+            ioContext.logWarningOnce(
                 "A buffer that was being used for a read operation on a ReadableStream was detached "
                 "while the read was pending. The read completed with a zero-length buffer and the "
                 "data that was read is lost. Avoid detaching buffers that are being used for active "
@@ -634,7 +635,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
           if (byteOffset > liveLength || amount > liveLength - byteOffset) {
             // If the buffer was resized smaller, we return a truncated result.
 
-            IoContext::current().logWarningOnce(
+            ioContext.logWarningOnce(
                 "A buffer that was being used for a read operation on a ReadableStream was resized "
                 "smaller while the read was pending. The read completed with a truncated buffer "
                 "containing only the bytes that fit within the new size. Avoid resizing buffers "
@@ -1726,8 +1727,9 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       // That's a larger refactor, though.
       return ioContext.awaitIoLegacy(js, kj::mv(promise))
           .then(js,
-              ioContext.addFunctor([self = addRef(), check, maybeAbort, amountToWrite](
-                                       jsg::Lock& js) mutable -> jsg::Promise<void> {
+              ioContext.addFunctor(
+                  [self = addRef(), check, maybeAbort, amountToWrite](
+                      jsg::Lock& js, IoContext& ioContext) mutable -> jsg::Promise<void> {
         auto& controller = static_cast<WritableStreamInternalController&>(self->getController());
         // Under some conditions, the clean up has already happened.
         if (controller.queue.empty()) return js.resolvedPromise();
@@ -1740,7 +1742,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         }
         controller.queue.pop_front();
         maybeAbort(js, controller);
-        return controller.writeLoop(js, IoContext::current());
+        return controller.writeLoop(js, ioContext);
       }),
               ioContext.addFunctor(
                   [self = addRef(), check, maybeAbort, amountToWrite](
