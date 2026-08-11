@@ -487,7 +487,6 @@ class AlarmInvocationInfo: public jsg::Object {
   uint32_t retryCount = 0;
 };
 
-||||||| parent of 062dd423e (fixup! Add preShutdown Durable Object lifecycle handler API surface)
 // Why a Durable Object is being shut down, as reported to its preShutdown() lifecycle handler.
 // This list may grow over time; handlers must tolerate reason strings they don't recognize.
 //
@@ -507,22 +506,13 @@ enum class PreShutdownReason : uint8_t {
 // describing why the object is being shut down.
 class PreShutdownInfo final: public jsg::Object {
  public:
-  // Why the Durable Object is being shut down. This list may grow over time; handlers must
-  // tolerate reason strings they don't recognize.
-  enum class Reason {
-    // The object is being evicted because it has been idle for too long.
-    INACTIVE,
-    // The object is being reset because its code was updated.
-    CODE_UPDATED,
-  };
-
-  PreShutdownInfo(Reason reason): reason(reason) {}
+  PreShutdownInfo(PreShutdownReason reason): reason(reason) {}
 
   kj::StringPtr getReason() {
     switch (reason) {
-      case Reason::INACTIVE:
+      case PreShutdownReason::INACTIVE:
         return "inactive"_kj;
-      case Reason::CODE_UPDATED:
+      case PreShutdownReason::CODE_UPDATED:
         return "codeUpdated"_kj;
       case PreShutdownReason::SYSTEM:
         return "system"_kj;
@@ -542,7 +532,7 @@ class PreShutdownInfo final: public jsg::Object {
   }
 
  private:
-  Reason reason;
+  PreShutdownReason reason;
 };
 
 // Type signature for handlers exported from the root module.
@@ -778,6 +768,17 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   kj::Promise<WorkerInterface::AlarmResult> runAlarm(kj::Date scheduledTime,
       kj::Duration timeout,
       uint32_t retryCount,
+      Worker::Lock& lock,
+      kj::Maybe<ExportedHandler&> exportedHandler);
+
+  // Runs a Durable Object's preShutdown() lifecycle handler (called from C++, not JS; the usual
+  // entry point is Worker::Actor::runPreShutdown()). Awaits the handler's returned promise, racing
+  // it against `timeout`. On timeout the IoContext is NOT aborted (unlike the alarm timeout): the
+  // runtime stops waiting, but JS the handler already started (and storage writes it already
+  // issued) may still complete until teardown. Handler exceptions are logged to the user's
+  // observability and reported in the outcome; this method never throws due to handler failure.
+  kj::Promise<EventOutcome> runPreShutdown(PreShutdownReason reason,
+      kj::Duration timeout,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 

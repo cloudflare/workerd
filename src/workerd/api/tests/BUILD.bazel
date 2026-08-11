@@ -607,6 +607,15 @@ wd_test(
 )
 
 wd_test(
+    src = "do-pre-shutdown-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "do-pre-shutdown-flag-off.js",
+        "do-pre-shutdown-test.js",
+    ],
+)
+
+wd_test(
     src = "js-rpc-flag.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-flag.js"],
