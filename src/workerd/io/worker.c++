@@ -4440,7 +4440,10 @@ kj::Promise<api::PreShutdownOutcome> Worker::Actor::runPreShutdownImpl(
     kj::Maybe<kj::Own<BaseTracer>> workerTracer) {
   // A constructed class instance implies an IoContext was created; if it's already gone, the
   // actor is past the point of running JS.
-  IoContext& context = KJ_UNWRAP_OR(getIoContext(), co_return api::PreShutdownOutcome::FAILED);
+  IoContext& context = KJ_UNWRAP_OR(getIoContext(), {
+    impl->metrics->preShutdownFinished(api::PreShutdownOutcome::FAILED);
+    co_return api::PreShutdownOutcome::FAILED;
+  });
 
   // Set up a lightweight IncomingRequest so that the IoContext has a current request while the
   // handler runs (required for timers, subrequests, and metrics attribution). Note that
@@ -4487,6 +4490,7 @@ kj::Promise<api::PreShutdownOutcome> Worker::Actor::runPreShutdownImpl(
   incomingRequest->abandonTasksForActorShutdown();
   incomingRequest = nullptr;
 
+  impl->metrics->preShutdownFinished(outcome);
   co_return outcome;
 }
 
