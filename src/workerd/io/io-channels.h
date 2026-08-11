@@ -32,6 +32,9 @@ class WorkerInterface;
 // A `Persistent::YES` channel/token may be stored in long-term storage; `Persistent::NO` may not.
 WD_STRONG_BOOL(Persistent);
 
+// Whether an actor request is a retry of an earlier attempt.
+WD_STRONG_BOOL(IsActorRetry);
+
 // Interface for talking to the Cache API. Needs to be declared here so that IoContext can
 // contain it.
 class CacheClient {
@@ -125,6 +128,13 @@ class IoChannelFactory: public virtual kj::Refcounted {
   // surface only when the token is genuinely required.
   class SelfTokenFactory: public kj::Refcounted {};
 
+  // The sender-selected retry token and retry flag for one logical actor call attempt.
+  struct ActorRetryRequestMetadata {
+    uint64_t nonce;
+    kj::Date createdAt;
+    IsActorRetry isRetry;
+  };
+
   // Contains metadata attached to an outgoing subrequest from a worker, independent of the type
   // of request.
   struct SubrequestMetadata {
@@ -152,6 +162,10 @@ class IoChannelFactory: public virtual kj::Refcounted {
     // appropriate to pass down to the IoContext as the `selfTokenFactory`, for use by the
     // implementation of `ctx.restore()`, so that it can determine its own base token.
     kj::Maybe<kj::Own<SelfTokenFactory>> restoredSelfTokenFactory;
+
+    // Present when a global actor request belongs to a logical call whose retry token was selected
+    // by the caller. Actor channels generate a fresh first-attempt token when this is absent.
+    kj::Maybe<ActorRetryRequestMetadata> actorRetryRequestMetadata;
 
     // True if this request was started on a channel that was reconstructed from a stored
     // ("persistent") stub. The target worker re-verifies that it still has the
