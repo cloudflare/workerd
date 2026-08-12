@@ -4,7 +4,7 @@
 
 A dozen or so Rust crates — mostly libraries, plus the `gen-compile-cache` binary — linked into workerd via CXX FFI. No Cargo workspace — entirely Bazel-driven (`wd_rust_crate.bzl` / `wd_rust_binary.bzl`). Clippy pedantic+nursery enabled; `allow-unwrap-in-tests`.
 
-> **The "CXX FFI" above is [workerd-cxx](https://github.com/cloudflare/workerd-cxx), Cloudflare's heavily modified fork of [cxx-rs](https://cxx.rs)** — not stock cxx-rs. It adds deep KJ interoperability upstream lacks: `async` fns become `kj::Promise<T>`, you can return/hold `kj::Own<T>`, `Result<T>` throws `kj::Exception`, and other KJ types cross the boundary (see CXX BRIDGE below). cxx-rs is well represented in LLM training data, so it is easy to "recall" an API that is wrong here — prefer the prior art in these crates and the workerd-cxx sources (especially its `kj-rs` crate) over upstream cxx-rs docs or memory.
+> **The "CXX FFI" above is the in-tree `src/rust/cxx` fork of [cxx-rs](https://cxx.rs/)** — not stock cxx-rs. It adds deep KJ interoperability upstream lacks: `async` fns become `kj::Promise<T>`, you can return/hold `kj::Own<T>`, `Result<T>` throws `kj::Exception`, and other KJ types cross the boundary (see CXX BRIDGE below). cxx-rs is well represented in LLM training data, so it is easy to "recall" an API that is wrong here — prefer the prior art in these crates and the in-tree CXX sources (especially its `kj-rs` crate) over upstream cxx-rs docs or memory.
 
 ## CRATES
 
@@ -91,7 +91,7 @@ The reverse direction has a stricter, non-optional rule: any `extern "C++"` shim
 
 ## CXX BRIDGE: BUILD WIRING
 
-`wd_rust_crate` (and `wd_rust_binary`) generate, for each `cxx_bridge_src` / `cxx_bridge_srcs` entry, a companion `:<bridge>@cxx` cc_library — the C++ side of the bridge: the cxx-generated `<bridge>.rs.{h,cc}` plus every `**/*.h` in the package (globbed into its `hdrs`). C++ consumers `#include <workerd/rust/<pkg>/<bridge>.rs.h>` and depend on the crate (`//src/rust/<pkg>`); depend on `:<bridge>@cxx` alone if you only need the header. The header include prefix is `workerd/` + the package path with `src/` stripped. Any crate with a bridge auto-gets `@workerd-cxx//:cxx` and `@workerd-cxx//kj-rs`.
+`wd_rust_crate` (and `wd_rust_binary`) generate, for each `cxx_bridge_src` / `cxx_bridge_srcs` entry, a companion `:<bridge>@cxx` cc_library — the C++ side of the bridge: the cxx-generated `<bridge>.rs.{h,cc}` plus every `**/*.h` in the package (globbed into its `hdrs`). C++ consumers `#include <workerd/rust/<pkg>/<bridge>.rs.h>` and depend on the crate (`//src/rust/<pkg>`); depend on `:<bridge>@cxx` alone if you only need the header. The header include prefix is `workerd/` + the package path with `src/` stripped. Any crate with a bridge auto-gets `//src/rust/cxx:cxx` and `//src/rust/cxx/kj-rs`.
 
 ### Rust → C++ (calling a C++ function from Rust)
 

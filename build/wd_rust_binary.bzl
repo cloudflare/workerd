@@ -40,11 +40,11 @@ def wd_rust_binary(
             # Not applying visibility here – if you import the cxxbridge header, you will likely
             # also need the rust library itself to avoid linker errors.
             deps = cxx_bridge_deps + [
-                "@workerd-cxx//:core",
+                "//src/rust/cxx:core",
             ],
         )
 
-        deps.append("@workerd-cxx//:cxx")
+        deps.append("//src/rust/cxx:cxx")
         link_deps = link_deps + [name + "@cxx"]
 
     rust_binary(

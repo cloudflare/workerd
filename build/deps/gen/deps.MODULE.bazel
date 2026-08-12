@@ -147,16 +147,6 @@ use_repo(http, "simdutf")
 # tcmalloc
 bazel_dep(name = "tcmalloc", version = "0.0.0-20250927-12f2552")
 
-# workerd-cxx
-http.archive(
-    name = "workerd-cxx",
-    sha256 = "87d749550d97dbd3b11c7999dfc848efa0c4a9061e8ac812721079ea9c356118",
-    strip_prefix = "cloudflare-workerd-cxx-56e8b7d",
-    type = "tgz",
-    url = "https://github.com/cloudflare/workerd-cxx/tarball/56e8b7d751394d79b490ccad9d885576ada36589",
-)
-use_repo(http, "workerd-cxx")
-
 # zlib
 bazel_dep(name = "zlib")
 git_override(

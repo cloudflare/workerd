@@ -44,14 +44,6 @@ new_local_repository(
     path = "empty",
 )
 
-# workerd-cxx
-http = use_extension("@//:build/exts/http.bzl", "http")
-
-inject_repo(
-    http,
-    **{"crates.io": "crates_vendor"}
-)
-
 crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
 crate.annotation(
     crate = "lol_html_c_api",

@@ -464,13 +464,13 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":util",
+        "//src/rust/cxx/kj-rs",
         "//src/rust/encoding",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/io:features",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
         "@simdutf",
-        "@workerd-cxx//kj-rs",
     ],
 )
 

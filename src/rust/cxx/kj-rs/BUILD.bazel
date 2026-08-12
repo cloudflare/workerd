@@ -1,0 +1,66 @@
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
+
+wd_cc_library(
+    name = "kj-rs-lib",
+    srcs = glob(["*.c++"]),
+    hdrs = glob(["*.h"]),
+    include_prefix = "kj-rs",
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    visibility = ["//src/rust/cxx/tests:__pkg__"],
+    deps = [
+        ":bridge",
+    ],
+)
+
+rust_library(
+    name = "kj-rs",
+    srcs = glob(["*.rs"]),
+    compile_data = glob(["*.h"]),
+    edition = "2024",
+    link_deps = [
+        ":bridge",
+        ":kj-rs-lib",
+    ],
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/cxx",
+        "@crates_vendor//:static_assertions",
+    ],
+)
+
+rust_test(
+    name = "kj-rs_test",
+    crate = "kj-rs",
+    edition = "2024",
+    experimental_use_cc_common_link = select({
+        "@platforms//os:windows": 0,
+        "//conditions:default": 1,
+    }),
+    malloc = "//src/workerd/server:malloc",
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+rust_cxx_bridge(
+    name = "bridge",
+    src = "lib.rs",
+    hdrs = glob(["*.h"]),
+    include_prefix = "kj-rs",
+    visibility = ["//src/rust/cxx/tests:__pkg__"],
+    deps = [
+        "//src/rust/cxx:core",
+        "@capnp-cpp//src/kj:kj",
+        "@capnp-cpp//src/kj:kj-async",
+    ],
+)
