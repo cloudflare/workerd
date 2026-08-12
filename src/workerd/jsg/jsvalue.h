@@ -1159,12 +1159,12 @@ struct JsValueWrapper {
 
   // `BufferSource` is a Web IDL type with no V8 equivalent, so name it explicitly rather than
   // falling through to the templates above, which would name the C++ class.
-  static constexpr kj::LiteralStringConst getName(JsBufferSource*) {
-    return "BufferSource"_kjc;
+  static constexpr const char* getName(JsBufferSource*) {
+    return "BufferSource";
   }
 
-  static constexpr kj::LiteralStringConst getName(JsRef<JsBufferSource>*) {
-    return "BufferSource"_kjc;
+  static constexpr const char* getName(JsRef<JsBufferSource>*) {
+    return "BufferSource";
   }
 
   // `getName()` supplies the type name that appears in the TypeError thrown when unwrapping a
