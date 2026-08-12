@@ -1,0 +1,37 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# C++ shim exposing the ICU `ucnv_*` primitives and the simdutf conversion
+# functions that `workerd::api::node::i18n::transcode` uses, so the Rust
+# implementation of `transcode` (in `lib.rs` and friends) calls the exact same
+# codecs as the C++ path in `src/workerd/api/node/i18n.c++` instead of
+# reimplementing them. Declares its codec dependencies explicitly rather than
+# relying on them arriving transitively through V8.
+wd_cc_library(
+    name = "shim",
+    srcs = ["shim.c++"],
+    hdrs = ["shim.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/cxx:core",
+        "@capnp-cpp//src/kj",
+        "@com_googlesource_chromium_icu//:icu",
+        "@simdutf",
+    ],
+)
+
+wd_rust_crate(
+    name = "i18n",
+    cxx_bridge_deps = [
+        ":shim",
+        "//src/rust/jsg",
+    ],
+    cxx_bridge_src = "lib.rs",
+    link_deps = [":shim"],
+    test_deps = ["//src/rust/jsg-test"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/jsg",
+        "@crates_vendor//:thiserror",
+    ],
+)
