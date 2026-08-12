@@ -1122,9 +1122,20 @@ wd_test(
 wd_test(
     size = "large",
     src = "worker-loader-test.wd-test",
-    args = ["--experimental"],
-    data = ["worker-loader-test.js"],
-    tags = ["requires-network"],
+    args = [
+        "--experimental",
+        # The Python subtests load dynamic workers with compat dates 2025-01-01 (Pyodide
+        # 0.26.0a2 bundle) and 2026-05-15 (Pyodide 0.28.2 bundle). Point workerd at a disk
+        # cache pre-populated from the bazel-managed bundle downloads so the test never
+        # fetches from the network at runtime.
+        "--pyodide-bundle-disk-cache-dir",
+        "$(location //src/workerd/server/tests/python:pyodide_0.28.2_2025-01-16_15.capnp.bin@rule)/..",
+    ],
+    data = [
+        "worker-loader-test.js",
+        "//src/workerd/server/tests/python:pyodide_0.26.0a2_2024-03-01_84.capnp.bin@rule",
+        "//src/workerd/server/tests/python:pyodide_0.28.2_2025-01-16_15.capnp.bin@rule",
+    ],
 )
 
 wd_test(
