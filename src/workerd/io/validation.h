@@ -16,6 +16,16 @@ class ValidationErrorReporter {
  public:
   virtual void addError(kj::String error) = 0;
 
+  // Report a non-fatal problem with the Worker's configuration: something the developer ought to
+  // clean up, but which does not prevent the Worker from running.
+  //
+  // The default implementation forwards to `addError()`. An implementation that has not decided
+  // how to surface warnings therefore keeps rejecting the configuration rather than silently
+  // accepting it; treating a warning as non-fatal is an explicit opt-in.
+  virtual void addWarning(kj::String warning) {
+    addError(kj::mv(warning));
+  }
+
   // Report that the Worker implements a stateless entrypoint (e.g. WorkerEntrypoint or plain
   // object export) with the given export name and methods.
   virtual void addEntrypoint(

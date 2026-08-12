@@ -227,13 +227,15 @@ Server::Server(kj::Filesystem& fs,
     kj::Network& network,
     kj::EntropySource& entropySource,
     Worker::LoggingOptions loggingOptions,
-    kj::Function<void(kj::String)> reportConfigError)
+    kj::Function<void(kj::String)> reportConfigError,
+    kj::Function<void(kj::String)> reportConfigWarning)
     : fs(fs),
       timer(timer),
       monotonicClock(monotonicClock),
       network(network),
       entropySource(entropySource),
       reportConfigError(kj::mv(reportConfigError)),
+      reportConfigWarning(kj::mv(reportConfigWarning)),
       loggingOptions(loggingOptions),
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(timer)),
       channelTokenHandler(*this),
@@ -3351,6 +3353,10 @@ struct Server::ConfigErrorReporter final: public ErrorReporter {
   void addError(kj::String error) override {
     server.handleReportConfigError(kj::str("service ", name, ": ", error));
   }
+
+  void addWarning(kj::String warning) override {
+    server.handleReportConfigWarning(kj::str("service ", name, ": ", warning));
+  }
 };
 
 // Implementation of ErrorReporter for dynamically-loaded Workers. We'll collect the errors and
@@ -3360,6 +3366,12 @@ struct Server::DynamicErrorReporter final: public ErrorReporter {
 
   void addError(kj::String error) override {
     errors.add(kj::mv(error));
+  }
+
+  void addWarning(kj::String warning) override {
+    // A dynamically-loaded Worker has no configuration file to point the developer at, and the
+    // Worker still starts, so the process log is the only place left to say anything.
+    KJ_LOG(WARNING, warning);
   }
 
   void throwIfErrors() {

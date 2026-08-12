@@ -75,7 +75,8 @@ KJ_TEST("compatibility flag parsing") {
           kj::StringPtr expectedOutput, kj::ArrayPtr<const kj::StringPtr> expectedErrors = nullptr,
           CompatibilityDateValidation dateValidation = CompatibilityDateValidation::FUTURE_FOR_TEST,
           bool r2InternalBetaApiSet = false, bool experimental = false,
-          kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags = nullptr) {
+          kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags = nullptr,
+          kj::ArrayPtr<const kj::StringPtr> expectedWarnings = nullptr) {
     capnp::MallocMessageBuilder message;
     auto orphanage = message.getOrphanage();
 
@@ -106,6 +107,7 @@ KJ_TEST("compatibility flag parsing") {
       KJ_EXPECT(kj::str(output) == kj::str(parsedExpectedOutput.getReader()));
     }
     KJ_EXPECT(kj::strArray(errorReporter.errors, "\n") == kj::strArray(expectedErrors, "\n"));
+    KJ_EXPECT(kj::strArray(errorReporter.warnings, "\n") == kj::strArray(expectedWarnings, "\n"));
   };
 
   expectCompileCompatibilityFlags("2021-05-17", {}, "()");
@@ -138,13 +140,33 @@ KJ_TEST("compatibility flag parsing") {
       "(formDataParserSupportsFiles = true)",
       {"Compatibility flags are mutually contradictory: "
        "formdata_parser_supports_files vs formdata_parser_converts_files_to_strings"});
-  expectCompileCompatibilityFlags("2021-11-04", {"formdata_parser_supports_files"_kj},
-      "(formDataParserSupportsFiles = true)",
-      {"The compatibility flag formdata_parser_supports_files became the default as of "
-       "2021-11-03 so does not need to be specified anymore."},
-      CompatibilityDateValidation::CURRENT_DATE_FOR_CLOUDFLARE);
   expectCompileCompatibilityFlags(
       "2021-05-17", {"unknown_feature"_kj}, "()", {"No such compatibility flag: unknown_feature"});
+
+  // Naming a flag the compatibility date already enables is only a warning, and the flag set is
+  // compiled as if the flag had not been named at all.
+  expectCompileCompatibilityFlags("2021-11-04", {"formdata_parser_supports_files"_kj},
+      "(formDataParserSupportsFiles = true)", {},
+      CompatibilityDateValidation::CURRENT_DATE_FOR_CLOUDFLARE, false, false, {},
+      {"The compatibility flag formdata_parser_supports_files became the default as of "
+       "2021-11-03 so does not need to be specified anymore."});
+  expectCompileCompatibilityFlags("2021-11-04", {"formdata_parser_supports_files"_kj},
+      "(formDataParserSupportsFiles = true)", {}, CompatibilityDateValidation::CODE_VERSION, false,
+      false, {},
+      {"The compatibility flag formdata_parser_supports_files became the default as of "
+       "2021-11-03 so does not need to be specified anymore."});
+
+  // A flag enabled for all dates has no date to name in the warning.
+  expectCompileCompatibilityFlags("2021-05-17", {"r2_public_beta_bindings"_kj}, "()", {},
+      CompatibilityDateValidation::CODE_VERSION, false, false, {},
+      {"The compatibility flag r2_public_beta_bindings is the default, so does not need to be "
+       "specified anymore."});
+
+  // FUTURE_FOR_TEST stays silent about redundant flags. Tests name flags explicitly so that they
+  // run against the oldest compatibility date, and the same test also runs against the newest
+  // date, where every flag is on by default.
+  expectCompileCompatibilityFlags("2021-11-04", {"formdata_parser_supports_files"_kj},
+      "(formDataParserSupportsFiles = true)", {}, CompatibilityDateValidation::FUTURE_FOR_TEST);
 
   expectCompileCompatibilityFlags("2252-04-01", {}, "()",
       {"Can't set compatibility date in the future: 2252-04-01"},
