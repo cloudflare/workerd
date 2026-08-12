@@ -91,6 +91,7 @@ wd_cc_library(
         "sqlite.h",
     ],
     implementation_deps = [
+        "//src/rust/i18n",
         "@nbytes",
         "@simdutf",
     ],
