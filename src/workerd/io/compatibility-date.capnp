@@ -1648,8 +1648,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # Enables the `preShutdown()` lifecycle hook on Durable Object classes. When enabled, the
   # runtime invokes a Durable Object's `preShutdown(info)` method (if defined) on a best-effort
-  # basis before planned, storage-healthy shutdowns (idle eviction and code-update resets),
-  # giving the object a bounded window to checkpoint state. The name also joins the RPC
-  # reserved-name list, so stubs cannot invoke `preShutdown()` remotely. The flag exists because
-  # existing classes may already define an RPC method with this name.
+  # basis before planned, storage-healthy shutdowns, giving the object a bounded window to
+  # checkpoint state. Currently the hook fires on idle eviction only, and only for root objects
+  # (not facets); `info.reason` is an open set so that further planned-shutdown reasons (such as
+  # code-update resets, for which `codeUpdated` is already reserved) can be delivered later
+  # without another flag. The name also joins the RPC reserved-name list for every entrypoint
+  # (reserved names are entrypoint-wide, like `fetch` or `alarm`), so stubs cannot invoke
+  # `preShutdown()` remotely. The flag exists because existing classes may already define an RPC
+  # method with this name.
 }

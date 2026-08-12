@@ -263,9 +263,11 @@ declare namespace CloudflareWorkersModule {
     fetch?(request: Request): Response | Promise<Response>;
     connect?(socket: Socket): void | Promise<void>;
     /**
-     * Best-effort lifecycle hook invoked before planned, storage-healthy shutdowns (idle
-     * eviction and code-update resets). Only invoked when the `durable_object_pre_shutdown`
-     * compatibility flag is enabled.
+     * Best-effort lifecycle hook invoked before planned, storage-healthy shutdowns. Currently
+     * invoked on idle eviction only, and only for root objects (not facets); `info.reason` is
+     * an open set so that further planned-shutdown reasons (such as code-update resets) can be
+     * delivered later. Only invoked when the `durable_object_pre_shutdown` compatibility flag
+     * is enabled.
      */
     preShutdown?(info: PreShutdownInfo): void | Promise<void>;
     webSocketMessage?(

@@ -824,12 +824,22 @@ kj::Promise<PreShutdownOutcome> ServiceWorkerGlobalScope::runPreShutdown(PreShut
       return PreShutdownOutcome::COMPLETED;
     }).exclusiveJoin(kj::mv(timeoutPromise));
   }).catch_([&context](kj::Exception&& e) -> PreShutdownOutcome {
-    // The handler threw or rejected. Per the contract this is benign: log to the *user's*
-    // observability (like other handler errors -- not our Sentry) and proceed with teardown.
-    // The shutdown keeps its original classification (e.g. broken.dropped), not an error-class
-    // reset.
-    context.logUncaughtExceptionAsync(UncaughtExceptionSource::PRE_SHUTDOWN_HANDLER, kj::mv(e));
-    return PreShutdownOutcome::THREW;
+    if (jsg::isTunneledException(e.getDescription()) ||
+        e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none) {
+      // The handler threw or rejected (or otherwise failed with an error attributable to the
+      // user, e.g. the handler hard-aborted its own actor). Per the contract this is benign:
+      // log to the *user's* observability (like other handler errors -- not our Sentry) and
+      // proceed with teardown. The shutdown keeps its original classification (e.g.
+      // broken.dropped), not an error-class reset.
+      context.logUncaughtExceptionAsync(UncaughtExceptionSource::PRE_SHUTDOWN_HANDLER, kj::mv(e));
+      return PreShutdownOutcome::THREW;
+    }
+    // An internal failure interrupted the handler, e.g. the IoContext was aborted mid-hook by
+    // a brokenness path racing with this shutdown. That is not the handler's exception, so
+    // don't report it into the user's observability as one; classify it like the
+    // couldn't-run-at-all case (see Worker::Actor::runPreShutdownImpl()).
+    LOG_NOSENTRY(WARNING, "preShutdown() handler was interrupted by a non-user error", e);
+    return PreShutdownOutcome::FAILED;
   });
 }
 

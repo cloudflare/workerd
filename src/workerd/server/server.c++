@@ -842,10 +842,6 @@ class Server::ActorNamespace final {
     kj::Timer& timer;
     kj::TimePoint lastAccess;
     kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager;
-    kj::Maybe<kj::Promise<void>> shutdownTask;
-    kj::Maybe<kj::Promise<void>> onBrokenTask;
-    kj::Maybe<kj::Exception> brokenReason;
-    kj::Vector<kj::Own<kj::PromiseFulfiller<void>>> inactiveFulfillers;
 
     // True while a graceful teardown (handleShutdown() or tryEvict()) is running. Since the
     // preShutdown() hook makes these paths suspend mid-teardown, concurrent attempts are
@@ -853,7 +849,16 @@ class Server::ActorNamespace final {
     // bound to it, and the inactivity timer can fire while a test eviction runs. A second
     // attempt must not proceed, or it would tear the actor down while the first attempt's hook
     // is still running against it.
+    //
+    // Declared before the teardown tasks below: their cancellation (including from
+    // ~ActorContainer) runs a KJ_DEFER that writes this flag, which is only well-defined while
+    // the flag is still within its lifetime.
     bool teardownInProgress = false;
+
+    kj::Maybe<kj::Promise<void>> shutdownTask;
+    kj::Maybe<kj::Promise<void>> onBrokenTask;
+    kj::Maybe<kj::Exception> brokenReason;
+    kj::Vector<kj::Own<kj::PromiseFulfiller<void>>> inactiveFulfillers;
 
     // Reference to the ContainerClient (if container is enabled for this actor)
     kj::Maybe<kj::Own<ContainerClient>> containerClient;
@@ -1071,9 +1076,6 @@ class Server::ActorNamespace final {
       teardownInProgress = true;
       KJ_DEFER(teardownInProgress = false);
 
-      // Cancel the onBroken promise, since we're about to destroy the actor anyways and don't
-      // want to trigger it.
-      onBrokenTask = kj::none;
       KJ_IF_SOME(a, actor) {
         if (a->isShared()) {
           // Our ActiveRequest refcounting has broken somewhere. This is likely because we're
@@ -1102,30 +1104,86 @@ class Server::ActorNamespace final {
         // whole task mid-hook and the actor stays alive to serve the request. That differs from
         // production, where destruction is committed once the hook starts; for local dev,
         // reviving the actor is the friendlier behavior for the racing request.
+        //
+        // onBrokenTask stays armed while the hook runs (we only cancel it below, once we're the
+        // ones breaking the actor): a handler that breaks its own actor, e.g. via ctx.abort(),
+        // is then handled by the normal brokenness path (monitorOnBroken) rather than leaving a
+        // broken actor installed with no broken-detection. That path erases this container,
+        // cancelling this coroutine -- unless the container is pinned (e.g. by a concurrently
+        // retrying test eviction), in which case it merely hollows the container and this
+        // coroutine keeps running; the re-checks after every suspension below handle that.
         if (parent == kj::none) {
           KJ_IF_SOME(resolved, classAndId.tryGet<ClassAndId>()) {
             KJ_IF_SOME(promise,
                 resolved.actorClass->runPreShutdown(*a, api::PreShutdownReason::INACTIVE)) {
+              // Capture the raw pointer for the re-check below before suspending, mirroring
+              // tryEvict(): if the brokenness path clears the `actor` slot while the hook runs,
+              // `a` (a reference into the Maybe) is no longer safe to touch, not even to
+              // compare.
+              Worker::Actor* expected = a.get();
               co_await promise;
+
+              // Re-check the actor slot now that we've awaited the hook. A racing request
+              // cancels this whole task via active(), so unlike tryEvict() this re-check is
+              // only about the brokenness path: the hook may have broken the actor, and
+              // monitorOnBroken may have already cleared the slot (it may equally run after
+              // us, in which case we proceed and tear the broken actor down ourselves, which
+              // is equivalent). Deliberately no isShared() re-check, here or after the lock
+              // await below: unlike tryEvict(), this path has no caller retry loop, so bailing
+              // on a transient untracked reference would disarm inactivity eviction until the
+              // next request arrives, while a tracked reference implies active() has already
+              // cancelled us.
+              KJ_IF_SOME(current, actor) {
+                if (current.get() != expected) {
+                  co_return;
+                }
+              } else {
+                co_return;
+              }
             }
           }
         }
 
-        KJ_IF_SOME(m, manager) {
+        if (manager != kj::none) {
           auto& worker = a->getWorker();
           auto workerStrongRef = kj::atomicAddRef(worker);
           // Take an async lock, we can't use `takeAsyncLock(RequestObserver&)` since we don't
           // have an `IncomingRequest` at this point.
           //
-          // Note that we do not have a race here because this is part of the `shutdownTask`
-          // promise. If a new request comes in while we're waiting to get the lock then we will
-          // cancel this promise.
+          // A new request arriving while we wait cancels this whole task via active(). But
+          // with onBrokenTask armed, monitorOnBroken can run during this suspension too (e.g.
+          // the hook's flush failure broke the output gate and the abort lands now), and if
+          // the container is pinned it hollows the container -- destroying the actor and the
+          // hibernation manager -- without cancelling us. So capture the raw actor pointer and
+          // re-check both Maybes after the await, mirroring tryEvict(); `a` is only safe to
+          // keep using because pointer equality proves the slot was never cleared.
+          Worker::Actor* expected = a.get();
           Worker::AsyncLock asyncLock = co_await worker.takeAsyncLockWithoutRequest(nullptr);
-          workerStrongRef->runInLockScope(
-              asyncLock, [&](Worker::Lock& lock) { m->hibernateWebSockets(lock); });
+
+          KJ_IF_SOME(current, actor) {
+            if (current.get() != expected) {
+              co_return;
+            }
+          } else {
+            // monitorOnBroken hollowed the container while we waited; teardown is its job.
+            co_return;
+          }
+
+          KJ_IF_SOME(m, manager) {
+            workerStrongRef->runInLockScope(
+                asyncLock, [&](Worker::Lock& lock) { m->hibernateWebSockets(lock); });
+          }
         }
         a->shutdown(0, KJ_EXCEPTION(DISCONNECTED, "broken.dropped; Actor freed due to inactivity"));
       }
+
+      // Cancel the onBroken promise: the shutdown above broke the actor deliberately, and we
+      // don't want to trigger the brokenness path. Mirroring tryEvict(), this happens only now
+      // that teardown has fully succeeded; if anything above had failed and broken the actor
+      // (including the hook or hibernation), the still-armed monitorOnBroken would erase this
+      // container rather than leave a broken actor installed with no broken-detection.
+      onBrokenTask = kj::none;
+
       // Destroy the last strong Worker::Actor reference.
       actor = kj::none;
 

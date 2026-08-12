@@ -1084,8 +1084,8 @@ class Worker::Actor final: public kj::Refcounted {
 
   // Runs the actor's preShutdown() lifecycle handler, if any, and then waits for any storage
   // writes the handler issued to be durably flushed. Intended to be invoked from planned,
-  // storage-healthy shutdown paths (idle eviction and code-update resets), *before* calling
-  // shutdown().
+  // storage-healthy shutdown paths, *before* calling shutdown(). Today only idle eviction does
+  // so; further planned reasons (e.g. code-update resets) are expected to be added.
   //
   // Returns kj::none (synchronously, with no side effects) if the actor's compatibility flags
   // don't enable the hook, the class instance was never constructed, or the class doesn't define

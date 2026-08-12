@@ -507,12 +507,14 @@ enum class PreShutdownOutcome : uint8_t {
   NO_HANDLER,
   // The handler ran and its returned promise resolved within the time budget.
   COMPLETED,
-  // The handler threw or its returned promise rejected.
+  // The handler threw, its returned promise rejected, or it was cut short by an error
+  // attributable to the user (e.g. it hard-aborted its own actor).
   THREW,
   // The handler did not settle within the time budget. Unlike the alarm timeout, this does not
   // abort the IoContext; the runtime merely stops waiting.
   TIMED_OUT,
-  // The handler could not be run at all, e.g. because the IoContext was aborted concurrently.
+  // The handler could not be run at all, or was interrupted by an internal (non-user) failure,
+  // e.g. because the IoContext was aborted concurrently.
   FAILED,
 };
 
