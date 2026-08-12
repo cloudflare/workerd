@@ -1615,10 +1615,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   workflowsBindingsRpc @182 :Bool
     $compatEnableFlag("workflows_bindings_rpc")
     $experimental;
-  # When enabled, the `env.WORKFLOW` binding (cloudflare-internal:workflows-api)
-  # dispatches its methods as JSRPC calls on the inner fetcher instead of HTTP
-  # requests against the binding-shim worker. Without the flag the legacy HTTP
-  # transport is used.
+  # Obsolete flag. Has no effect: the `env.WORKFLOW` binding always dispatches its methods as
+  # JSRPC calls on the inner fetcher. Still accepted so configs which set it keep validating.
 
   typeScriptImplementedStreams @183 :Bool
       $compatEnableFlag("typescript_implemented_streams")
