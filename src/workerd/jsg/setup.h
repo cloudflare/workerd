@@ -119,8 +119,7 @@ class IsolateBase {
   // Registers the TypeHandler singleton for a type registered with this isolate, keyed by
   // typeid(TypeHandler<T>). Called during isolate construction (see jsg::Isolate's
   // constructors); the handler pointer must have static storage duration (the instances
-  // are the TypeWrapper's static constexpr TYPE_HANDLER_INSTANCE singletons). Backs
-  // Lock::tryGetTypeHandler().
+  // are the constexpr TYPE_HANDLER_INSTANCE singletons). Backs Lock::tryGetTypeHandler().
   void registerTypeHandler(const std::type_info& type, const void* handler);
 
   // Type-erased lookup for Lock::tryGetTypeHandler(): returns the handler registered for
@@ -472,8 +471,8 @@ class IsolateBase {
 
   // Registry backing Lock::tryGetTypeHandler(), keyed by typeid(TypeHandler<T>) and
   // populated at isolate construction (see registerTypeHandler()). The values point at
-  // the TypeWrapper's static constexpr TYPE_HANDLER_INSTANCE singletons, so no ownership
-  // or lifetime management is needed. Read-only after construction.
+  // the constexpr TYPE_HANDLER_INSTANCE singletons, so no ownership or lifetime
+  // management is needed. Read-only after construction.
   //
   // The key wraps a std::type_info pointer but compares and hashes via the type_info's
   // own equality/hash so that distinct typeinfo object addresses across shared library

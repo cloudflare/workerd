@@ -1431,6 +1431,8 @@ class Object: private Wrappable {
   friend class GcVisitor;
   template <typename, typename...>
   friend class TypeWrapper;
+  template <typename>
+  friend class TypeWrapperOps;
   template <typename, typename>
   friend class ResourceWrapper;
   template <typename>
@@ -2339,6 +2341,8 @@ class PropertyReflection {
 
   template <typename, typename...>
   friend class TypeWrapper;
+  template <typename>
+  friend class TypeWrapperOps;
 };
 
 template <typename T>
