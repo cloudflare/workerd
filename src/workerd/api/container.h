@@ -310,9 +310,7 @@ class Container: public jsg::Object {
     }
   };
 
-  bool getRunning() const {
-    return running;
-  }
+  bool getRunning();
 
   // Methods correspond closely to the RPC interface in `container.capnp`.
   void start(jsg::Lock& js, jsg::Optional<StartupOptions> options);
@@ -368,7 +366,35 @@ class Container: public jsg::Object {
 
  private:
   IoOwn<rpc::Container::Client> rpcClient;
-  bool running;
+
+  struct Monitor final {
+    Monitor(kj::ForkedPromise<int32_t> promise, uint64_t generation);
+
+    bool running = true;
+
+    // Identifies callbacks belonging to this lifecycle.
+    // Callers can use this to compare with the current generation.
+    uint64_t generation;
+
+    // Shares the container exit result with explicit monitor() calls.
+    kj::ForkedPromise<int32_t> promise;
+
+    // Resolves after running has been set to false.
+    // It is useful for things like destroy() needing to await on
+    // running becoming false.
+    kj::ForkedPromise<void> stopped;
+
+    // Drives stopped even when nothing is explicitly waiting on it.
+    // Eagerly evaluated from `stopped`.
+    kj::Promise<void> background;
+
+   private:
+    static kj::Promise<void> observe(kj::ForkedPromise<int32_t>& promise, bool& running);
+  };
+
+  // Shares one monitor RPC between the background state update and explicit monitor() calls.
+  kj::Maybe<IoOwn<Monitor>> currentMonitor;
+  uint64_t nextMonitorGeneration = 0;
 
   kj::Maybe<jsg::Value> destroyReason;
 
@@ -386,6 +412,8 @@ class Container: public jsg::Object {
   kj::Maybe<IoOwn<kj::HashMap<int, kj::Rc<TcpPortState>>>> tcpPortStates;
 
   void invalidateTcpPortStates();
+  void startMonitor();
+  bool isCurrentMonitor(uint64_t generation);
 
   // These helpers are static since they will leave the IoContext on the first co_await, so we
   // don't want them trying to access `rpcClient` via the `IoOwn`.

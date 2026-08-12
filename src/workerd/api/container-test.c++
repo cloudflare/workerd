@@ -72,6 +72,10 @@ class MockContainerServer final: public rpc::Container::Server {
     return kj::READY_NOW;
   }
 
+  kj::Promise<void> monitor(MonitorContext context) override {
+    return kj::NEVER_DONE;
+  }
+
   kj::Promise<void> snapshotDirectory(SnapshotDirectoryContext context) override {
     auto params = context.getParams();
     KJ_EXPECT(params.hasSpanContext());
@@ -106,6 +110,38 @@ class MockContainerServer final: public rpc::Container::Server {
   kj::Maybe<kj::Own<kj::PromiseFulfiller<CapturedInstance>>> startFulfiller;
   kj::Maybe<bool&> directoryCalled;
   kj::Maybe<bool&> containerCalled;
+};
+
+class RestartContainerServer final: public rpc::Container::Server {
+ public:
+  kj::Promise<void> start(StartContext context) override {
+    ++startCount;
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> monitor(MonitorContext context) override {
+    if (startCount > 1) {
+      context.getResults().setExitCode(0);
+      return kj::READY_NOW;
+    }
+
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    pendingMonitor = kj::mv(context);
+    monitorFulfiller = kj::mv(paf.fulfiller);
+    return kj::mv(paf.promise);
+  }
+
+  kj::Promise<void> destroy(DestroyContext context) override {
+    KJ_REQUIRE(startCount == 1);
+    KJ_REQUIRE_NONNULL(pendingMonitor).getResults().setExitCode(0);
+    KJ_REQUIRE_NONNULL(monitorFulfiller)->fulfill();
+    return kj::READY_NOW;
+  }
+
+ private:
+  uint startCount = 0;
+  kj::Maybe<MonitorContext> pendingMonitor;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> monitorFulfiller;
 };
 
 // Records the arguments passed to exec()/resize() so tests can assert the pty option is piped
@@ -162,6 +198,10 @@ class MockExecContainerServer final: public rpc::Container::Server {
       : byteStreamFactory(byteStreamFactory),
         observations(observations),
         resizeFulfiller(kj::mv(resizeFulfiller)) {}
+
+  kj::Promise<void> monitor(MonitorContext context) override {
+    return kj::NEVER_DONE;
+  }
 
   kj::Promise<void> exec(ExecContext context) override {
     observations.execCalled = true;
@@ -420,6 +460,10 @@ class TestContainerServer final: public rpc::Container::Server {
     return kj::READY_NOW;
   }
 
+  kj::Promise<void> monitor(MonitorContext context) override {
+    return kj::NEVER_DONE;
+  }
+
   kj::Promise<void> getTcpPort(GetTcpPortContext context) override {
     context.getResults().setPort(kj::heap<TestPort>(
         byteStreamFactory, mode, connectCount, closeFulfiller, upEndedUncleanly, deferConnect));
@@ -528,6 +572,63 @@ TestFixture makeFixture() {
     .useRealTimers = false,
     .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
         []() -> kj::Own<RequestObserver> { return kj::refcounted<TracingRequestObserver>(); }),
+  });
+}
+
+KJ_TEST("Container::start monitors a container that exits immediately") {
+  class ImmediateExitContainerServer final: public rpc::Container::Server {
+   public:
+    kj::Promise<void> start(StartContext context) override {
+      started = true;
+      return kj::READY_NOW;
+    }
+
+    kj::Promise<void> monitor(MonitorContext context) override {
+      KJ_EXPECT(started);
+      context.getResults().setExitCode(0);
+      return kj::READY_NOW;
+    }
+
+    bool started = false;
+  };
+
+  auto fixture = makeFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto weakContext = env.context.getWeakRef();
+    auto container = kj::heap<Container>(
+        rpc::Container::Client(kj::heap<ImmediateExitContainerServer>()), false);
+
+    container->start(env.js, kj::none);
+    KJ_EXPECT(container->getRunning());
+
+    // Give the queued start and monitor RPCs bounded time to run.
+    for (auto i = 0; i < 10; ++i) {
+      co_await kj::evalLater([]() {});
+    }
+
+    auto& context = KJ_ASSERT_NONNULL(weakContext->tryGet());
+    co_await context.run([container = kj::mv(container)](
+                             Worker::Lock&) mutable { KJ_EXPECT(!container->getRunning()); });
+  });
+}
+
+KJ_TEST("Container::destroy updates running before restart and clears the old reason") {
+  auto fixture = makeFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto container =
+        env.js.alloc<Container>(rpc::Container::Client(kj::heap<RestartContainerServer>()), false);
+    container->start(env.js, kj::none);
+
+    auto lifecycle =
+        container->destroy(env.js, jsg::Value(env.js.v8Isolate, env.js.error("first lifecycle")))
+            .then(env.js, [container = container.addRef()](jsg::Lock& js) mutable {
+      KJ_EXPECT(!container->getRunning());
+      container->start(js, kj::none);
+      KJ_EXPECT(container->getRunning());
+      return container->monitor(js);
+    });
+
+    return env.context.awaitJs(env.js, kj::mv(lifecycle));
   });
 }
 
