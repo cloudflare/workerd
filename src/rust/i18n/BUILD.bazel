@@ -15,7 +15,7 @@ wd_cc_library(
     deps = [
         "//src/rust/cxx:core",
         "@capnp-cpp//src/kj",
-        "@com_googlesource_chromium_icu//:icu",
+        "@com_googlesource_chromium_icu//:icuuc",
         "@simdutf",
     ],
 )
