@@ -847,6 +847,14 @@ class Server::ActorNamespace final {
     kj::Maybe<kj::Exception> brokenReason;
     kj::Vector<kj::Own<kj::PromiseFulfiller<void>>> inactiveFulfillers;
 
+    // True while a graceful teardown (handleShutdown() or tryEvict()) is running. Since the
+    // preShutdown() hook makes these paths suspend mid-teardown, concurrent attempts are
+    // possible -- e.g. evictAllDurableObjects() reaches the same namespace once per channel
+    // bound to it, and the inactivity timer can fire while a test eviction runs. A second
+    // attempt must not proceed, or it would tear the actor down while the first attempt's hook
+    // is still running against it.
+    bool teardownInProgress = false;
+
     // Reference to the ContainerClient (if container is enabled for this actor)
     kj::Maybe<kj::Own<ContainerClient>> containerClient;
 
@@ -1045,6 +1053,24 @@ class Server::ActorNamespace final {
       // JS WebSockets.
       // TODO(someday): We could make this timeout configurable to make testing less burdensome.
       co_await timer.afterDelay(10 * kj::SECONDS);
+
+      while (teardownInProgress) {
+        // A test-only eviction (tryEvict()) is already tearing the actor down. It normally
+        // finishes the job (and cancels this task), but it can also back off because a request
+        // raced in, or be canceled by its caller mid-teardown -- and an idle actor gets no new
+        // active()/inactive() transition to re-arm this task. So rather than abandoning the
+        // inactivity path, wait for the other teardown to settle, then re-check whose job the
+        // teardown is. If a request revives the actor while we wait, active() cancels this task
+        // as usual.
+        co_await timer.afterDelay(10 * kj::MILLISECONDS);
+      }
+      if (actor == kj::none) {
+        // The other teardown finished the job.
+        co_return;
+      }
+      teardownInProgress = true;
+      KJ_DEFER(teardownInProgress = false);
+
       // Cancel the onBroken promise, since we're about to destroy the actor anyways and don't
       // want to trigger it.
       onBrokenTask = kj::none;
@@ -1068,14 +1094,20 @@ class Server::ActorNamespace final {
         // the handler still works, and it waits for the handler's storage writes to flush before
         // we proceed with teardown.
         //
+        // Only the root actor gets the hook in v1, matching production: facets would otherwise
+        // accidentally acquire per-facet ordering and independent timeout semantics that haven't
+        // been designed (see the spec's open questions).
+        //
         // Note that if a new request arrives while the hook is running, active() cancels this
         // whole task mid-hook and the actor stays alive to serve the request. That differs from
         // production, where destruction is committed once the hook starts; for local dev,
         // reviving the actor is the friendlier behavior for the racing request.
-        KJ_IF_SOME(resolved, classAndId.tryGet<ClassAndId>()) {
-          KJ_IF_SOME(promise,
-              resolved.actorClass->runPreShutdown(*a, api::PreShutdownReason::INACTIVE)) {
-            co_await promise;
+        if (parent == kj::none) {
+          KJ_IF_SOME(resolved, classAndId.tryGet<ClassAndId>()) {
+            KJ_IF_SOME(promise,
+                resolved.actorClass->runPreShutdown(*a, api::PreShutdownReason::INACTIVE)) {
+              co_await promise;
+            }
           }
         }
 
@@ -1116,30 +1148,47 @@ class Server::ActorNamespace final {
     // otherwise an early `false` return would leave the actor running with no broken-detection.
     kj::Promise<bool> tryEvict(
         kj::StringPtr reason, IoChannelFactory::EvictWebSocketMode webSocketMode) {
+      if (teardownInProgress) {
+        // Another teardown attempt is already running its course, possibly suspended in the
+        // preShutdown() hook. Tearing the actor down out from under it would leave that hook
+        // running against a destroyed actor, so just report "not evicted yet"; the caller's
+        // retry loop re-checks once the other attempt finishes.
+        co_return false;
+      }
+      teardownInProgress = true;
+      KJ_DEFER(teardownInProgress = false);
+
       KJ_IF_SOME(a, actor) {
         if (a->isShared()) {
           co_return false;
         }
 
         // Run the actor's preShutdown() lifecycle hook, mirroring the inactivity-timer path
-        // (handleShutdown). This must happen before we take the async lock below, since the hook
-        // acquires its own lock internally.
-        KJ_IF_SOME(resolved, classAndId.tryGet<ClassAndId>()) {
-          KJ_IF_SOME(promise,
-              resolved.actorClass->runPreShutdown(*a, api::PreShutdownReason::INACTIVE)) {
-            co_await promise;
+        // (handleShutdown), including its root-only restriction. This must happen before we
+        // take the async lock below, since the hook acquires its own lock internally.
+        if (parent == kj::none) {
+          KJ_IF_SOME(resolved, classAndId.tryGet<ClassAndId>()) {
+            KJ_IF_SOME(promise,
+                resolved.actorClass->runPreShutdown(*a, api::PreShutdownReason::INACTIVE)) {
+              // Capture the raw pointer for the re-check below before suspending: if a hard
+              // abort clears the `actor` slot while the hook runs, `a` (a reference into the
+              // Maybe) is no longer safe to touch, not even to compare.
+              Worker::Actor* expected = a.get();
+              co_await promise;
 
-            // Re-check the actor slot now that we've awaited the hook: this path is not
-            // cancelled by active(), so a request may have arrived (and grabbed a strong
-            // reference) while the hook ran. Consistent with local dev semantics elsewhere,
-            // the racing request revives the actor and the eviction is called off.
-            KJ_IF_SOME(current, actor) {
-              if (&*current != &*a || current->isShared()) {
+              // Re-check the actor slot now that we've awaited the hook: this path is not
+              // cancelled by active(), so a request may have arrived (and grabbed a strong
+              // reference) while the hook ran, or a hard abort may have torn the actor down.
+              // Consistent with local dev semantics elsewhere, a racing request revives the
+              // actor and the eviction is called off; the retry loop handles the abort case.
+              KJ_IF_SOME(current, actor) {
+                if (current.get() != expected || current->isShared()) {
+                  co_return false;
+                }
+              } else {
+                // A hard abort already tore the actor down.
                 co_return false;
               }
-            } else {
-              // Another path already tore the actor down.
-              co_return false;
             }
           }
         }

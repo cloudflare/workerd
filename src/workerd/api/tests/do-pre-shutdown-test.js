@@ -94,6 +94,46 @@ export class RacingHookObject extends DurableObject {
   }
 }
 
+// Hard-aborts its own actor from inside the hook. Used to verify that a hard abort racing the
+// hook (which drops the container's owning reference to the actor) is memory-safe: the hook is
+// cut short, teardown settles, and the object rebuilds on next use.
+export class AbortingHookObject extends DurableObject {
+  async ping() {
+    return 'pong';
+  }
+
+  async preShutdown() {
+    this.ctx.abort(new Error('aborted from preShutdown (expected by test)'));
+  }
+}
+
+// Root/facet pair used to verify that only the root actor gets the hook (v1 excludes facets).
+// The hooks record that they ran in module-level globals, which the test can read because it
+// runs in the same isolate as the objects.
+export class FacetHookChild extends DurableObject {
+  async ping() {
+    return 'pong';
+  }
+
+  async preShutdown() {
+    // Must never run: facets don't get the hook in v1.
+    globalThis.facetHookRan = true;
+  }
+}
+
+export class FacetHookRoot extends DurableObject {
+  async prime() {
+    const child = this.ctx.facets.get('child', () => ({
+      class: this.ctx.exports.FacetHookChild({}),
+    }));
+    return await child.ping();
+  }
+
+  async preShutdown() {
+    globalThis.rootHookRan = true;
+  }
+}
+
 // The flagship agent pattern: the hook schedules an alarm, and the alarm later resurrects the
 // actor.
 export class AlarmHookObject extends DurableObject {
@@ -197,6 +237,32 @@ export default {
       assert.strictEqual(await stub.ping(), 'pong');
       await unsafe.evict(stub);
       assert.strictEqual(await stub.getHookRan(), false);
+    }
+
+    // A hook that hard-aborts its own actor: the abort drops the container's owning reference
+    // mid-hook, which must be memory-safe (the hook pins the actor for its own duration). The
+    // eviction settles -- possibly with an error, since the actor is now broken -- and the
+    // object rebuilds on next use.
+    {
+      const stub = env.ABORTING_HOOK.get(env.ABORTING_HOOK.idFromName('a'));
+      assert.strictEqual(await stub.ping(), 'pong');
+      await unsafe.evict(stub).catch(() => {});
+      const stub2 = env.ABORTING_HOOK.get(env.ABORTING_HOOK.idFromName('a'));
+      assert.strictEqual(await stub2.ping(), 'pong');
+    }
+
+    // Only the root actor's hook runs when an actor tree is torn down; its facets' hooks do
+    // not (v1 excludes facets). evictAllDurableObjects() is the only test-only eviction that
+    // walks facet trees. This runs last so that evicting every other running actor doesn't
+    // disturb the earlier cases.
+    {
+      const stub = env.FACET_HOOK_ROOT.get(env.FACET_HOOK_ROOT.idFromName('a'));
+      assert.strictEqual(await stub.prime(), 'pong');
+      globalThis.rootHookRan = false;
+      globalThis.facetHookRan = false;
+      await unsafe.evictAllDurableObjects();
+      assert.strictEqual(globalThis.rootHookRan, true);
+      assert.strictEqual(globalThis.facetHookRan, false);
     }
   },
 };

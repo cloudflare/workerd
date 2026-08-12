@@ -4406,26 +4406,30 @@ kj::Own<Worker::Actor> Worker::Actor::addRef() {
   }
 }
 
+bool Worker::Actor::hasPreShutdownHandler() {
+  // These checks read plain C++ state without the isolate lock, which is safe because callers
+  // only use this on shutdown paths, where the actor is quiescent, so nothing is concurrently
+  // mutating `classInstance`.
+  if (!worker->getIsolate().getApi().getFeatureFlags().getDurableObjectPreShutdown()) {
+    return false;
+  }
+  KJ_IF_SOME(handler, impl->classInstance.tryGet<api::ExportedHandler>()) {
+    return handler.preShutdown != kj::none;
+  }
+  // The class instance was never constructed (or this isn't a class-based actor, or the
+  // constructor threw). There is no handler to run, and we must not construct the instance
+  // just to tear it down.
+  return false;
+}
+
 kj::Maybe<kj::Promise<api::PreShutdownOutcome>> Worker::Actor::runPreShutdown(
     api::PreShutdownReason reason,
     kj::Rc<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> observer,
     kj::Maybe<kj::Own<BaseTracer>> workerTracer) {
-  // Bail out synchronously if there can't be a handler, so that such actors' shutdown paths
-  // don't suspend at all. These checks read plain C++ state without the isolate lock, which is
-  // safe here: the actor is quiescent (that's why it is being shut down), so nothing is
-  // concurrently mutating `classInstance`.
-  if (!worker->getIsolate().getApi().getFeatureFlags().getDurableObjectPreShutdown()) {
-    return kj::none;
-  }
-  KJ_IF_SOME(handler, impl->classInstance.tryGet<api::ExportedHandler>()) {
-    if (handler.preShutdown == kj::none) {
-      return kj::none;
-    }
-  } else {
-    // The class instance was never constructed (or this isn't a class-based actor, or the
-    // constructor threw). There is no handler to run, and we must not construct the instance
-    // just to tear it down.
+  // Bail out synchronously if there is no handler, so that such actors' shutdown paths don't
+  // suspend at all.
+  if (!hasPreShutdownHandler()) {
     return kj::none;
   }
 
@@ -4438,6 +4442,17 @@ kj::Promise<api::PreShutdownOutcome> Worker::Actor::runPreShutdownImpl(
     kj::Rc<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> observer,
     kj::Maybe<kj::Own<BaseTracer>> workerTracer) {
+  // Pin the actor for the duration of this coroutine: a hard abort (e.g.
+  // abortAllDurableObjects(), ctx.abort(), or a brokenness path) can drop the embedder's owning
+  // reference while we are suspended, and this coroutine must not run against a destroyed
+  // actor. This is deliberately a plain kj::addRef() rather than Actor::addRef(): the latter
+  // creates a RequestTracker::ActiveRequest, whose active() callback would cancel the very
+  // shutdown that triggered this hook. The pin is released when the coroutine completes, before
+  // the caller's continuation resumes, so callers' isShared() re-checks are not affected. Note
+  // that an abort still cuts the hook short (the IoContext rejects, yielding outcome FAILED);
+  // the pin only guarantees that doing so is memory-safe.
+  auto self = kj::addRef(*this);
+
   // A constructed class instance implies an IoContext was created; if it's already gone, the
   // actor is past the point of running JS.
   IoContext& context = KJ_UNWRAP_OR(getIoContext(), {

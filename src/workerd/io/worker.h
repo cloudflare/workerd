@@ -1106,6 +1106,13 @@ class Worker::Actor final: public kj::Refcounted {
       kj::Own<RequestObserver> observer,
       kj::Maybe<kj::Own<BaseTracer>> workerTracer);
 
+  // Whether the actor currently has a preShutdown() lifecycle handler that runPreShutdown()
+  // would run: the compat flag is on, the class instance was constructed, and the class defines
+  // the method. Useful for embedders that want to count shutdowns which skip a defined handler
+  // (e.g. because hook delivery is disabled). Like runPreShutdown(), this may only be called
+  // when the actor is quiescent, since it reads state that running requests mutate.
+  bool hasPreShutdownHandler();
+
  private:
   kj::Promise<api::PreShutdownOutcome> runPreShutdownImpl(api::PreShutdownReason reason,
       kj::Rc<IoChannelFactory> ioChannelFactory,

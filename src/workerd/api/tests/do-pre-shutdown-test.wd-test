@@ -12,6 +12,7 @@ const unitTests :Workerd.Config = (
           "nodejs_compat",
           "experimental",
           "unsafe_module",
+          "enable_ctx_exports",
           "durable_object_pre_shutdown",
         ],
         durableObjectNamespaces = [
@@ -21,6 +22,8 @@ const unitTests :Workerd.Config = (
           (className = "NoHookObject", uniqueKey = "no-hook"),
           (className = "RacingHookObject", uniqueKey = "racing-hook"),
           (className = "AlarmHookObject", uniqueKey = "alarm-hook"),
+          (className = "AbortingHookObject", uniqueKey = "aborting-hook"),
+          (className = "FacetHookRoot", uniqueKey = "facet-hook-root"),
         ],
         durableObjectStorage = (localDisk = "TEST_TMPDIR"),
         bindings = [
@@ -30,6 +33,8 @@ const unitTests :Workerd.Config = (
           (name = "NO_HOOK", durableObjectNamespace = "NoHookObject"),
           (name = "RACING_HOOK", durableObjectNamespace = "RacingHookObject"),
           (name = "ALARM_HOOK", durableObjectNamespace = "AlarmHookObject"),
+          (name = "ABORTING_HOOK", durableObjectNamespace = "AbortingHookObject"),
+          (name = "FACET_HOOK_ROOT", durableObjectNamespace = "FacetHookRoot"),
           (name = "FLAG_OFF", durableObjectNamespace = (className = "FlagOffObject", serviceName = "flag-off")),
         ],
       )
