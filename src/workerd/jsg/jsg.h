@@ -744,17 +744,10 @@ concept HasStructTypeScriptDefine = requires { T::_JSG_STRUCT_TS_DEFINE_DO_NOT_U
 #define JSG_STRUCT(...)                                                                            \
   static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = ::workerd::jsg::JsgKind::STRUCT;   \
   static constexpr char JSG_FOR_EACH(JSG_STRUCT_FIELD_NAME, , __VA_ARGS__);                        \
-  template <typename TypeWrapper, typename Self>                                                   \
-  using JsgFieldWrappers =                                                                         \
-      ::workerd::jsg::TypeTuple<JSG_FOR_EACH(JSG_STRUCT_FIELD, , __VA_ARGS__)>;                    \
+  static constexpr ::kj::StringPtr jsgFieldNames[] KJ_UNUSED = {                                   \
+    JSG_FOR_EACH(JSG_STRUCT_FIELD_EXPORTED_NAME, , __VA_ARGS__)};                                  \
   template <typename Self>                                                                         \
-  static v8::Local<v8::DictionaryTemplate> jsgGetTemplate(v8::Isolate* isolate) {                  \
-    kj::Vector<std::string_view> names;                                                            \
-    JSG_FOR_EACH(JSG_STRUCT_FIELD_COL, , __VA_ARGS__);                                             \
-    auto namesPtr = names.asPtr().asConst();                                                       \
-    return v8::DictionaryTemplate::New(                                                            \
-        isolate, std::span<const std::string_view>(namesPtr.begin(), namesPtr.size()));            \
-  }                                                                                                \
+  using JsgFields = ::workerd::jsg::StructFields<JSG_FOR_EACH(JSG_STRUCT_FIELD, , __VA_ARGS__)>;   \
   template <typename Registry, typename Self, typename Config>                                     \
   static void registerMembersInternal(Registry& registry, Config arg) {                            \
     JSG_FOR_EACH(JSG_STRUCT_REGISTER_MEMBER, , __VA_ARGS__);                                       \
@@ -792,20 +785,23 @@ inline consteval size_t prefixLengthToStrip(const char (&s)[N]) {
   return s[0] == '$' ? 1 : 0;
 }
 
+// The name a JSG_STRUCT field is exported to JavaScript under: its C++ name minus the `$` prefix
+// that lets a field be named after a JavaScript keyword.
+template <size_t N>
+inline consteval kj::StringPtr exportedFieldName(const char (&s)[N]) {
+  return kj::StringPtr(s + prefixLengthToStrip(s), N - 1 - prefixLengthToStrip(s));
+}
+
 // This string may not be what's actually exported to v8. For example, if it starts with a `$`, then
-// this value will still contain the `$` even though the `FieldWrapper` template argument will have
-// it stripped.
+// this value will still contain the `$` even though `jsgFieldNames` will have it stripped.
 #define JSG_STRUCT_FIELD_NAME(_, name) name##_JSG_NAME_DO_NOT_USE_DIRECTLY[] = #name
 
-#define JSG_STRUCT_FIELD_COL(_, name)                                                              \
-  ::workerd::jsg::jsgAddToStructNames<decltype(::kj::instance<Self>().name),                       \
-      name##_JSG_NAME_DO_NOT_USE_DIRECTLY + ::workerd::jsg::prefixLengthToStrip(#name)>(names)
+// (Internal implementation details for JSG_STRUCT.)
+#define JSG_STRUCT_FIELD_EXPORTED_NAME(_, name)                                                    \
+  ::workerd::jsg::exportedFieldName(name##_JSG_NAME_DO_NOT_USE_DIRECTLY)
 
 // (Internal implementation details for JSG_STRUCT.)
-#define JSG_STRUCT_FIELD(_, name)                                                                  \
-  ::workerd::jsg::FieldWrapper<TypeWrapper, Self, decltype(::kj::instance<Self>().name),           \
-      &Self::name,                                                                                 \
-      name##_JSG_NAME_DO_NOT_USE_DIRECTLY + ::workerd::jsg::prefixLengthToStrip(#name)>
+#define JSG_STRUCT_FIELD(_, name) &Self::name
 // (Internal implementation details for JSG_STRUCT.)
 #define JSG_STRUCT_REGISTER_MEMBER(_, name)                                                        \
   registry.template registerStructProperty<decltype(::kj::instance<Self>().name), &Self::name>(    \
@@ -1275,11 +1271,6 @@ class SelfRef: public V8Ref<v8::Object> {
 template <typename U>
 static constexpr bool isUsableStructField = !kj::isSameType<U, SelfRef>() &&
     !kj::isSameType<U, Unimplemented>() && !kj::isSameType<U, WontImplement>();
-
-template <typename T, const char* exportedName>
-void jsgAddToStructNames(auto& names) {
-  if constexpr (isUsableStructField<T>) names.add(exportedName);
-}
 
 // A USVString has the exact same representation as a kj::String, but we guarantee that it meets
 // the WHATWG definition of a "scalar value string". Particularly, a USVString will never contain

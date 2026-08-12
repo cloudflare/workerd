@@ -352,7 +352,7 @@ class TypeWrapperBase<Self, T, JsgKind::RESOURCE>: public ResourceWrapper<Self, 
 // Specialization of TypeWrapperBase for types that have a JSG_STRUCT block.
 template <typename Self, typename T>
 class TypeWrapperBase<Self, T, JsgKind::STRUCT>
-    : public StructWrapper<Self, T, typename T::template JsgFieldWrappers<Self, T>> {
+    : public StructWrapper<Self, T, typename T::template JsgFields<T>> {
  public:
   template <typename MetaConfiguration>
   TypeWrapperBase(MetaConfiguration& config) {}
