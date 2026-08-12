@@ -375,6 +375,35 @@ class TeeBranch final: public ReadableStreamSource {
 
   kj::Own<kj::AsyncInputStream> inner;
 };
+
+// The outcome of a tryRead() into a temporary buffer: the number of bytes read, plus the buffer
+// they landed in.
+//
+// The buffer travels with the kj promise rather than being captured by the JavaScript
+// continuation that consumes it, so that the read owns its own destination for exactly as long
+// as it can write to it. KJ's convention is that the caller must keep a read destination valid
+// until the promise completes or is canceled, and a JavaScript continuation cannot make that
+// guarantee: the kj read lives in the IoContext's task set (awaitIoImpl() hands it to addTask())
+// independently of the JavaScript promise chain, while the continuation itself is owned by a
+// garbage-collected jsg wrapper. A collection that reclaims the continuation would free the
+// destination out from under an in-flight tryRead(), which then writes into freed memory.
+//
+// Attaching the buffer to the read promise is not sufficient on its own, because the kj promise
+// is destroyed before the JavaScript continuation runs. Passing it through as part of the result
+// hands ownership over at completion instead, and kj destroys a `then()`'s dependency before its
+// continuation, so the read is always torn down before the buffer it was writing into.
+struct CompletedRead {
+  size_t amount;
+  kj::Array<kj::byte> buffer;
+};
+
+// Transfers ownership of `buffer` to the result of `promise`, which must be a read into `buffer`.
+kj::Promise<CompletedRead> keepBufferUntilRead(
+    kj::Promise<size_t> promise, kj::Array<kj::byte> buffer) {
+  return promise.then([buffer = kj::mv(buffer)](size_t amount) mutable {
+    return CompletedRead{.amount = amount, .buffer = kj::mv(buffer)};
+  });
+}
 }  // namespace
 
 // =======================================================================================
@@ -569,6 +598,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
         KJ_IF_SOME(readerLock, readState.tryGetUnsafe<ReaderLocked>()) {
           promise = KJ_ASSERT_NONNULL(readerLock.getCanceler())->wrap(kj::mv(promise));
         }
+        auto readPromise = keepBufferUntilRead(kj::mv(promise), kj::mv(tempBuffer));
 
         // TODO(soon): We use awaitIoLegacy() here because if the stream terminates in JavaScript
         // in this same isolate, then the promise may actually be waiting on JavaScript to do
@@ -579,14 +609,16 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
         // no need to drop the isolate lock and take it again every time some data is read/written.
         // That's a larger refactor, though.
         auto& ioContext = IoContext::current();
-        return ioContext.awaitIoLegacy(js, kj::mv(promise))
+        return ioContext.awaitIoLegacy(js, kj::mv(readPromise))
             .then(js,
                 ioContext.addFunctor(
                     [ref = addRef(), store = store.addRef(js), byteOffset, byteLength,
-                        isByob = maybeByobOptions != kj::none, tempBuffer = kj::mv(tempBuffer)](
-                        jsg::Lock& js, size_t amount) mutable -> jsg::Promise<ReadResult> {
+                        isByob = maybeByobOptions != kj::none](
+                        jsg::Lock& js, CompletedRead read) mutable -> jsg::Promise<ReadResult> {
           auto& controller = static_cast<ReadableStreamInternalController&>(ref->getController());
           auto view = store.getHandle(js);
+          auto& tempBuffer = read.buffer;
+          auto amount = read.amount;
           controller.readPending = false;
           KJ_ASSERT(amount <= byteLength);
           if (amount == 0) {
@@ -751,13 +783,17 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::dr
       KJ_IF_SOME(readerLock, readState.tryGetUnsafe<ReaderLocked>()) {
         promise = KJ_ASSERT_NONNULL(readerLock.getCanceler())->wrap(kj::mv(promise));
       }
+      auto readPromise = keepBufferUntilRead(kj::mv(promise), kj::mv(store));
 
       auto& ioContext = IoContext::current();
-      return ioContext.awaitIoLegacy(js, kj::mv(promise))
+      return ioContext.awaitIoLegacy(js, kj::mv(readPromise))
           .then(js,
-              ioContext.addFunctor([ref = addRef(), store = kj::mv(store)](jsg::Lock& js,
-                                       size_t amount) mutable -> jsg::Promise<DrainingReadResult> {
+              ioContext.addFunctor(
+                  [ref = addRef()](jsg::Lock& js,
+                      CompletedRead read) mutable -> jsg::Promise<DrainingReadResult> {
         auto& controller = static_cast<ReadableStreamInternalController&>(ref->getController());
+        auto store = kj::mv(read.buffer);
+        auto amount = read.amount;
         controller.readPending = false;
         KJ_ASSERT(amount <= store.size());
         if (amount == 0) {
