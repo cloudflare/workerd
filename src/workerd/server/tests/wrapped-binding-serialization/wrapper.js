@@ -24,6 +24,10 @@ class Door extends wrappedBinding.WrappedBinding {
     const resp = await this.#fetcher.fetch('http://placeholder/ping');
     return await resp.text();
   }
+
+  async rpcPing() {
+    return await this.#fetcher.rpcPing(null);
+  }
 }
 
 export default function makeDoor(env) {
