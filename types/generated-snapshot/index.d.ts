@@ -14377,6 +14377,27 @@ type ImageInfoResponse =
       width: number;
       height: number;
     };
+/**
+ * Parameters for rasterizing text into an image.
+ */
+type TextRasterize = {
+  /** The text content to render */
+  content: string;
+  /** rasterization options for the text **/
+  options: TextOptions;
+};
+type TextOptions = {
+  /** Font configuration */
+  font: {
+    /** URL to a font file in TrueType (.ttf), OpenType (.otf), WOFF (.woff), or WOFF2 (.woff2) format */
+    url: string;
+  };
+  /** Font size in points (pt) */
+  size?: number;
+  /** Text color in CSS format: hex (#RRGGBB or #RRGGBBAA), rgb(r,g,b), rgba(r,g,b,a), or named colors */
+  color?: string;
+};
+type ImageSource = ReadableStream<Uint8Array> | TextRasterize;
 type ImageTransform = {
   width?: number;
   height?: number;
@@ -14488,6 +14509,9 @@ interface ImageUploadOptions {
   requireSignedURLs?: boolean;
   metadata?: Record<string, unknown>;
   creator?: string;
+  /**
+   * If 'base64', the input data will be decoded from base64 before processing
+   */
   encoding?: "base64";
 }
 interface ImageUpdateOptions {
@@ -14575,6 +14599,13 @@ interface ImagesBinding {
     stream: ReadableStream<Uint8Array>,
     options?: ImageInputOptions,
   ): ImageTransformer;
+  /**
+   * Begin applying a series of transformations to text
+   * @param content string to be rendered
+   * @param options font, optional color and size to use in rendering text
+   * @returns A transform handle
+   */
+  text(content: string, options: TextOptions): ImageTransformer;
   /**
    * Access hosted images CRUD operations
    */
