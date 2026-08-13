@@ -1,3 +1,7 @@
+// Production code must not panic; test code is exempt via clippy.toml allow-*-in-tests.
+#![deny(clippy::expect_used, clippy::panic, clippy::unreachable)]
+#![deny(clippy::todo, clippy::unimplemented)]
+
 use std::collections::HashSet;
 
 use ruff_python_ast::Stmt;
