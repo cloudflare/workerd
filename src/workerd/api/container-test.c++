@@ -39,6 +39,7 @@ class TracingRequestObserver final: public RequestObserver {
 struct CapturedInstance {
   bool isCustom = false;
   kj::String named;
+  kj::String image;
   double vcpu = 0;
   uint64_t memoryMib = 0;
   uint64_t diskMb = 0;
@@ -53,8 +54,13 @@ class MockContainerServer final: public rpc::Container::Server {
         containerCalled(containerCalled) {}
 
   kj::Promise<void> start(StartContext context) override {
-    auto instance = context.getParams().getInstance();
+    auto params = context.getParams();
+    auto instance = params.getInstance();
     CapturedInstance captured;
+    auto source = params.getSource();
+    if (source.which() == rpc::Container::StartParams::Source::IMAGE) {
+      captured.image = kj::str(source.getImage());
+    }
     switch (instance.which()) {
       case rpc::Container::StartInstance::NAMED:
         captured.named = kj::str(instance.getNamed());
@@ -633,10 +639,7 @@ KJ_TEST("Container::destroy updates running before restart and clears the old re
 }
 
 KJ_TEST("Container::start forwards a named instance type") {
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setWorkerdExperimental(true);
-  auto fixture = TestFixture({.featureFlags = flags.asReader(), .useRealTimers = false});
+  auto fixture = makeFixture();
   auto paf = kj::newPromiseAndFulfiller<CapturedInstance>();
   auto promise = kj::mv(paf.promise);
 
@@ -657,10 +660,7 @@ KJ_TEST("Container::start forwards a named instance type") {
 }
 
 KJ_TEST("Container::start forwards custom instance resources") {
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setWorkerdExperimental(true);
-  auto fixture = TestFixture({.featureFlags = flags.asReader(), .useRealTimers = false});
+  auto fixture = makeFixture();
   auto paf = kj::newPromiseAndFulfiller<CapturedInstance>();
   auto promise = kj::mv(paf.promise);
 
@@ -683,6 +683,26 @@ KJ_TEST("Container::start forwards custom instance resources") {
       KJ_EXPECT(captured.vcpu == 0.5);
       KJ_EXPECT(captured.memoryMib == 4096);
       KJ_EXPECT(captured.diskMb == 20000);
+    }).attach(kj::mv(container));
+  });
+}
+
+KJ_TEST("Container::start forwards an image") {
+  auto fixture = makeFixture();
+  auto paf = kj::newPromiseAndFulfiller<CapturedInstance>();
+  auto promise = kj::mv(paf.promise);
+
+  fixture.runInIoContext([promise = kj::mv(promise), fulfiller = kj::mv(paf.fulfiller)](
+                             const TestFixture::Environment& env) mutable {
+    auto container = kj::rc<Container>(
+        rpc::Container::Client(kj::heap<MockContainerServer>(kj::mv(fulfiller))), false);
+    container->start(env.js,
+        Container::StartupOptions{
+          .image = kj::str("registry.example.com/image:tag"),
+        });
+    return kj::mv(promise)
+        .then([](CapturedInstance captured) {
+      KJ_EXPECT(captured.image == "registry.example.com/image:tag");
     }).attach(kj::mv(container));
   });
 }

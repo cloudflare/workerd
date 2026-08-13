@@ -4012,14 +4012,29 @@ export interface ContainerSnapshotRestoreParams {
 export interface ContainerSnapshotOptions {
   name?: string;
 }
-export interface ContainerStartupOptions {
+export type ContainerStartupOptions = {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
+  instance?:
+    | "lite"
+    | "standard-1"
+    | "standard-2"
+    | "standard-3"
+    | "standard-4"
+    | ContainerStartResources;
   labels?: Record<string, string>;
   directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
-  containerSnapshot?: ContainerSnapshotRestoreParams;
-}
+} & (
+  | {
+      image: string;
+      containerSnapshot?: never;
+    }
+  | {
+      image?: never;
+      containerSnapshot?: ContainerSnapshotRestoreParams;
+    }
+);
 export interface ContainerStartResources {
   vcpu: number;
   memoryMib: number;
