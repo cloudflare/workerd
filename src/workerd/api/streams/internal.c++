@@ -559,13 +559,24 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
         // after re-validating that it is still attached and large enough. Routing through a temporary
         // also means a buffer detached mid-read never receives a late write, which would otherwise
         // corrupt whatever now owns the transferred BackingStore.
-        auto tempBuffer = kj::heapArray<kj::byte>(byteLength);
-        auto bytes = tempBuffer.asPtr();
+        //
+        // The buffer is owned by the kj promise chain, and the bytes that were read are handed to
+        // the continuation below as a value. Ownership must not rest with the continuation
+        // instead: that is held by a JS heap object, which the garbage collector may reclaim while
+        // the read is still in flight, whereas the kj chain is torn down only when the read
+        // completes or is cancelled, and cancellation destroys the read before what it is reading
+        // into.
+        KJ_ASSERT(atLeast <= byteLength, "minBytes must not exceed maxBytes in tryRead");
 
-        KJ_ASSERT(atLeast <= bytes.size(), "minBytes must not exceed maxBytes in tryRead");
-
-        auto promise =
-            kj::evalNow([&] { return readable->tryRead(bytes.begin(), atLeast, bytes.size()); });
+        auto promise = kj::evalNow([&]() -> kj::Promise<kj::Array<kj::byte>> {
+          auto tempBuffer = kj::heapArray<kj::byte>(byteLength);
+          auto bytes = tempBuffer.asPtr();
+          return readable->tryRead(bytes.begin(), atLeast, bytes.size())
+              .then([tempBuffer = kj::mv(tempBuffer)](size_t amount) mutable {
+            KJ_ASSERT(amount <= tempBuffer.size());
+            return tempBuffer.first(amount).attach(kj::mv(tempBuffer));
+          });
+        });
         KJ_IF_SOME(readerLock, readState.tryGetUnsafe<ReaderLocked>()) {
           promise = KJ_ASSERT_NONNULL(readerLock.getCanceler())->wrap(kj::mv(promise));
         }
@@ -583,12 +594,12 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
             .then(js,
                 ioContext.addFunctor(
                     [ref = addRef(), store = store.addRef(js), byteOffset, byteLength,
-                        isByob = maybeByobOptions != kj::none,
-                        tempBuffer = kj::mv(tempBuffer)](jsg::Lock& js, IoContext& ioContext,
-                        size_t amount) mutable -> jsg::Promise<ReadResult> {
+                        isByob = maybeByobOptions != kj::none](jsg::Lock& js, IoContext& ioContext,
+                        kj::Array<kj::byte> tempBuffer) mutable -> jsg::Promise<ReadResult> {
           auto& controller = static_cast<ReadableStreamInternalController&>(ref->getController());
           auto view = store.getHandle(js);
           controller.readPending = false;
+          size_t amount = tempBuffer.size();
           KJ_ASSERT(amount <= byteLength);
           if (amount == 0) {
             if (!controller.state.is<StreamStates::Errored>()) {
@@ -656,7 +667,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
 
           // Deliver the bytes from the temporary into the caller's BackingStore. The checks above
           // guarantee the buffer is still attached and that [byteOffset, byteOffset + amount) lies
-          // within its live length, and `amount <= byteLength == tempBuffer.size()`.
+          // within its live length, and `amount <= tempBuffer.size()`.
           KJ_ASSERT(byteOffset <= liveLength && amount <= liveLength - byteOffset);
           view.getBuffer()
               .asArrayPtr()
@@ -745,10 +756,17 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::dr
         });
       }
 
-      auto store = kj::heapArray<kj::byte>(maxRead);
-
-      auto promise =
-          kj::evalNow([&] { return readable->tryRead(store.begin(), kAtLeast, store.size()); });
+      // The buffer is owned by the kj promise chain rather than by the continuation below. See the
+      // corresponding comment in read().
+      auto promise = kj::evalNow([&]() -> kj::Promise<kj::Array<kj::byte>> {
+        auto store = kj::heapArray<kj::byte>(maxRead);
+        auto bytes = store.asPtr();
+        return readable->tryRead(bytes.begin(), kAtLeast, bytes.size())
+            .then([store = kj::mv(store)](size_t amount) mutable {
+          KJ_ASSERT(amount <= store.size());
+          return store.first(amount).attach(kj::mv(store));
+        });
+      });
       KJ_IF_SOME(readerLock, readState.tryGetUnsafe<ReaderLocked>()) {
         promise = KJ_ASSERT_NONNULL(readerLock.getCanceler())->wrap(kj::mv(promise));
       }
@@ -756,12 +774,12 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::dr
       auto& ioContext = IoContext::current();
       return ioContext.awaitIoLegacy(js, kj::mv(promise))
           .then(js,
-              ioContext.addFunctor([ref = addRef(), store = kj::mv(store)](jsg::Lock& js,
-                                       size_t amount) mutable -> jsg::Promise<DrainingReadResult> {
+              ioContext.addFunctor(
+                  [ref = addRef()](jsg::Lock& js,
+                      kj::Array<kj::byte> store) mutable -> jsg::Promise<DrainingReadResult> {
         auto& controller = static_cast<ReadableStreamInternalController&>(ref->getController());
         controller.readPending = false;
-        KJ_ASSERT(amount <= store.size());
-        if (amount == 0) {
+        if (store.size() == 0) {
           if (!controller.state.is<StreamStates::Errored>()) {
             controller.doClose(js);
           }
@@ -770,9 +788,9 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::dr
           }
           return js.resolvedPromise(DrainingReadResult{.done = true});
         }
-        // Return a slice so the script can see how many bytes were read.
-        return js.resolvedPromise(DrainingReadResult{
-          .chunks = kj::arr(store.slice(0, amount).attach(kj::mv(store))), .done = false});
+        // Return the bytes that were read so the script can see how many there were.
+        return js.resolvedPromise(
+            DrainingReadResult{.chunks = kj::arr(kj::mv(store)), .done = false});
       }),
               ioContext.addFunctor(
                   [ref = addRef()](jsg::Lock& js,

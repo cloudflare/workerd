@@ -67,6 +67,12 @@ wd_test(
 )
 
 wd_test(
+    src = "streams-internal-read-buffer-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-internal-read-buffer-gc-test.js"],
+)
+
+wd_test(
     src = "error-deser-prototype-setter-test.wd-test",
     args = ["--experimental"],
     data = ["error-deser-prototype-setter-test.js"],
