@@ -9,7 +9,6 @@
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/release-version.embed.h>
 #include <workerd/jsg/setup.h>
-#include <workerd/rust/cxx-integration/lib.rs.h>
 #include <workerd/server/cpp-capnp-schema.embed.h>
 #include <workerd/server/json-logger.h>
 #include <workerd/server/v8-platform-impl.h>
@@ -1760,7 +1759,6 @@ int main(int argc, char* argv[]) {
 #if !_WIN32
   kj::UnixEventPort::captureSignal(SIGTERM);
 #endif
-  workerd::rust::cxx_integration::init();
   workerd::server::CliMain mainObject(context, argv);
 
 #if defined(WORKERD_FUZZILLI) && defined(__linux__)

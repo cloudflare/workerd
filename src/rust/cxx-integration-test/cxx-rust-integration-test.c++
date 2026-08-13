@@ -16,11 +16,6 @@ using namespace kj_rs;
 
 namespace workerd::rust {
 
-KJ_TEST("init cxx_integration") {
-  // this tests initializes cxx integration for the rest of the tests
-  rust::cxx_integration::init();
-}
-
 KJ_TEST("panic results in abort") {
   KJ_EXPECT_SIGNAL(SIGABRT, rust::cxx_integration::trigger_panic("foobar"));
 }
@@ -185,32 +180,6 @@ KJ_TEST("rust::str test") {
   KJ_EXPECT(expected == kj::str(s));
   KJ_EXPECT(expected == kj::toCharSequence(s));
   KJ_EXPECT(kj::hashCode(expected) == kj::hashCode(s));
-}
-
-KJ_TEST("test async immediate future") {
-  kj::EventLoop loop;
-  kj::WaitScope waitScope(loop);
-
-  auto pair = kj::newPromiseAndCrossThreadFulfiller<size_t>();
-
-  rust::test::UsizeCallback callback = [&](size_t a) { pair.fulfiller->fulfill(kj::mv(a)); };
-  rust::test::async_immediate(callback);
-
-  auto result = pair.promise.wait(waitScope);
-  KJ_EXPECT(result == 42);
-}
-
-KJ_TEST("test async delay") {
-  kj::EventLoop loop;
-  kj::WaitScope waitScope(loop);
-
-  auto pair = kj::newPromiseAndCrossThreadFulfiller<size_t>();
-
-  rust::test::UsizeCallback callback = [&](size_t a) { pair.fulfiller->fulfill(kj::mv(a)); };
-  rust::test::async_sleep(callback);
-
-  auto result = pair.promise.wait(waitScope);
-  KJ_EXPECT(result == 42);
 }
 
 KJ_TEST("array/slice convertions") {
