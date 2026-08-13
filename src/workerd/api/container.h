@@ -229,6 +229,12 @@ class Container: public jsg::Object {
     JSG_STRUCT(id, size, name);
   };
 
+  struct SnapshotRestoreParams {
+    kj::String id;
+
+    JSG_STRUCT(id);
+  };
+
   struct SnapshotOptions {
     jsg::Optional<kj::String> name;
 
@@ -259,7 +265,7 @@ class Container: public jsg::Object {
     jsg::Optional<kj::OneOf<kj::String, StartResources>> instance;
     jsg::Optional<jsg::Dict<kj::String>> labels;
     jsg::Optional<kj::Array<DirectorySnapshotRestoreParams>> directorySnapshots;
-    jsg::Optional<Snapshot> containerSnapshot;
+    jsg::Optional<SnapshotRestoreParams> containerSnapshot;
 
     // TODO(containers): Allow intercepting stdin/stdout/stderr by specifying streams here.
 
@@ -291,7 +297,7 @@ class Container: public jsg::Object {
           | {
               image?: never;
               /** Cannot be used with `image`. */
-              containerSnapshot?: ContainerSnapshot;
+              containerSnapshot?: ContainerSnapshotRestoreParams;
             }
         ));
       } else {
@@ -304,7 +310,7 @@ class Container: public jsg::Object {
           instance?: never;
           labels?: Record<string, string>;
           directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
-          containerSnapshot?: ContainerSnapshot;
+          containerSnapshot?: ContainerSnapshotRestoreParams;
         });
       }
     }
@@ -434,7 +440,7 @@ class Container: public jsg::Object {
   api::ExecOutput, api::ExecOptions, api::ExecPtyOptions, api::ExecProcess, api::Container,        \
       api::Container::DirectorySnapshot, api::Container::DirectorySnapshotOptions,                 \
       api::Container::DirectorySnapshotRestoreParams, api::Container::Snapshot,                    \
-      api::Container::SnapshotOptions, api::Container::StartupOptions, api::Container::Info,       \
-      api::Container::StartResources
+      api::Container::SnapshotRestoreParams, api::Container::SnapshotOptions,                      \
+      api::Container::StartupOptions, api::Container::Info, api::Container::StartResources
 
 }  // namespace workerd::api

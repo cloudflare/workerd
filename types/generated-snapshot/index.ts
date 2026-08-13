@@ -4006,6 +4006,9 @@ export interface ContainerSnapshot {
   size: number;
   name?: string;
 }
+export interface ContainerSnapshotRestoreParams {
+  id: string;
+}
 export interface ContainerSnapshotOptions {
   name?: string;
 }
@@ -4015,7 +4018,7 @@ export interface ContainerStartupOptions {
   env?: Record<string, string>;
   labels?: Record<string, string>;
   directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
-  containerSnapshot?: ContainerSnapshot;
+  containerSnapshot?: ContainerSnapshotRestoreParams;
 }
 export interface ContainerStartResources {
   vcpu: number;

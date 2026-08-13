@@ -4096,6 +4096,9 @@ export interface ContainerSnapshot {
   size: number;
   name?: string;
 }
+export interface ContainerSnapshotRestoreParams {
+  id: string;
+}
 export interface ContainerSnapshotOptions {
   name?: string;
 }
@@ -4120,7 +4123,7 @@ export type ContainerStartupOptions = {
     }
   | {
       image?: never;
-      containerSnapshot?: ContainerSnapshot;
+      containerSnapshot?: ContainerSnapshotRestoreParams;
     }
 );
 export interface ContainerInfo {

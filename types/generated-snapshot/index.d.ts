@@ -3997,6 +3997,9 @@ interface ContainerSnapshot {
   size: number;
   name?: string;
 }
+interface ContainerSnapshotRestoreParams {
+  id: string;
+}
 interface ContainerSnapshotOptions {
   name?: string;
 }
@@ -4006,7 +4009,7 @@ interface ContainerStartupOptions {
   env?: Record<string, string>;
   labels?: Record<string, string>;
   directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
-  containerSnapshot?: ContainerSnapshot;
+  containerSnapshot?: ContainerSnapshotRestoreParams;
 }
 interface ContainerStartResources {
   vcpu: number;
