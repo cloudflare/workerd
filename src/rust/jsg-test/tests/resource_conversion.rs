@@ -7,8 +7,8 @@
 //! These tests verify the automatically derived `ToJS` and `FromJS` implementations
 //! that the `#[jsg_resource]` macro generates for resource types:
 //!
-//! - `ToJS`: allocates a `Ref<R>` and wraps it as a JS object (alloc + wrap)
-//! - `FromJS`: unwraps a JS object back to a `Ref<R>`, returning a `TypeError`
+//! - `ToJS`: allocates a `Rc<R>` and wraps it as a JS object (alloc + wrap)
+//! - `FromJS`: unwraps a JS object back to a `Rc<R>`, returning a `TypeError`
 //!   for non-matching values
 
 use jsg::FromJS;
@@ -111,7 +111,7 @@ fn to_js_creates_distinct_objects() {
 // FromJS tests
 // =============================================================================
 
-/// `FromJS` unwraps a JS-wrapped resource back to a `Ref<R>`.
+/// `FromJS` unwraps a JS-wrapped resource back to a `Rc<R>`.
 #[test]
 fn from_js_unwraps_resource() {
     let harness = crate::Harness::new();
@@ -129,7 +129,7 @@ fn from_js_unwraps_resource() {
     });
 }
 
-/// `FromJS` returns a `Ref<R>` that keeps the resource alive.
+/// `FromJS` returns a `Rc<R>` that keeps the resource alive.
 #[test]
 fn from_js_ref_keeps_resource_alive() {
     use std::sync::atomic::AtomicUsize;
@@ -302,7 +302,7 @@ fn round_trip_preserves_js_identity() {
 // FromJS via eval_raw (integration with test harness)
 // =============================================================================
 
-/// Evaluating a global that holds a resource and calling `FromJS` returns a `Ref<R>`.
+/// Evaluating a global that holds a resource and calling `FromJS` returns a `Rc<R>`.
 #[test]
 fn eval_raw_returns_ref_via_from_js() {
     let harness = crate::Harness::new();

@@ -24,8 +24,8 @@
 //! `dyn GarbageCollected` — the data part is the `Rc::into_raw` pointer (pointing to `R`
 //! inside the `Rc` allocation) and the vtable part carries `R`'s `GarbageCollected` impl.
 //! On destruction, `wrappable_invoke_drop` reconstructs the `Rc` via `Rc::from_raw` and
-//! drops it, which may drop the resource. The Rust `Ref<R>` smart pointer holds its own
-//! `Rc<R>` plus a `WrappableRc` (`KjRc<Wrappable>`) for reference-counted ownership. On
+//! drops it, which may drop the resource. The Rust `jsg::Rc<R>` smart pointer holds its own
+//! `std::Rc<R>` plus a `WrappableRc` (`KjRc<Wrappable>`) for reference-counted ownership. On
 //! drop, `wrappable_remove_strong_ref()` handles GC cleanup via `maybeDeferDestruction()`,
 //! then the `WrappableRc` drop decrements the `kj::Rc` refcount.
 
@@ -3495,7 +3495,7 @@ impl IsolatePtr {
 ///
 /// `Clone` / `Drop` only affect the `KjRc` refcount (`kj::Rc` reference counting).
 /// GC strong-ref tracking (`addStrongRef` / `removeStrongRef`) is handled by
-/// `Ref<R>`, not here.
+/// `Rc<R>`, not here.
 #[derive(Clone)]
 pub struct WrappableRc {
     handle: kj_rs::KjRc<ffi::Wrappable>,
@@ -3627,7 +3627,7 @@ impl WrappableRc {
 
     /// Increments the strong reference count on the underlying Wrappable.
     ///
-    /// Called when a new `Ref<R>` is created (clone, unwrap) to inform the GC
+    /// Called when a new `Rc<R>` is created (clone, unwrap) to inform the GC
     /// that this Wrappable has an additional strong reference from Rust.
     pub(crate) fn add_strong_ref(&mut self) {
         // SAFETY: wrappable is valid (guaranteed by KjRc lifetime).
@@ -3636,7 +3636,7 @@ impl WrappableRc {
 
     /// Decrements the strong reference count and potentially defers destruction.
     ///
-    /// Called when a `Ref<R>` is dropped. Calls `maybeDeferDestruction` on
+    /// Called when a `Rc<R>` is dropped. Calls `maybeDeferDestruction` on
     /// the C++ side with the ref's current `strong` flag. If `is_strong` is
     /// true, `~RefToDelete` will call `removeStrongRef()`; if false (the ref
     /// was already weakened by GC tracing), it skips the decrement.
