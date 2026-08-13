@@ -1716,17 +1716,119 @@ kj::Promise<void> IoContext::startDeleteQueueSignalTask(IoContext* context) {
   // is fulfilled, we will run an empty task to prompt the IoContext to drain
   // the DeleteQueue.
   try {
+    bool deferredToHangAbort = false;
     for (;;) {
-      co_await context->deleteQueue.queue->resetCrossThreadSignal();
-      co_await context->run([](auto& lock) {
-        auto& context = IoContext::current();
-        auto l = context.deleteQueue.queue->crossThreadDeleteQueue.lockExclusive();
-        auto& state = KJ_ASSERT_NONNULL(*l);
-        for (auto& action: state.actions) {
-          action(lock);
+      // If the previous iteration stood down in favor of a pending hang-detector abort (below),
+      // don't let leftover queued deletions immediately re-fire the fresh signal: that would
+      // spin (wake -> stand down -> reset -> re-fire -> wake ...) at 100% CPU while the abort's
+      // own would-sleep waiter starves behind ours. Actions always re-fire. Instead, also wake
+      // when the context aborts: abort() alone does not destroy the OwnedObjectList (that
+      // happens at ~IoContext, which may be arbitrarily later while references keep the context
+      // alive), so once the hang abort we deferred to has landed, we must come back and drain
+      // the deletions ourselves. If the hang abort is instead *canceled* by new work
+      // (registerPendingEvent), the now-active context's natural scope entries drain the queue,
+      // and any later deletion or action re-fires the signal normally.
+      auto signal = context->deleteQueue.queue->resetCrossThreadSignal(
+          /* refireForDeletions = */ !deferredToHangAbort);
+      if (deferredToHangAbort) {
+        signal = signal.exclusiveJoin(context->onAbort().catch_([](kj::Exception&&) {}));
+      }
+      co_await signal;
+      deferredToHangAbort = false;
+
+      // The signal fires for two kinds of work (see DeleteQueue::State): actions, which must go
+      // through run() (proper input locks and metrics, and they execute JS), and deletions,
+      // which runInContextScope() drains on entry. Check which we have.
+      bool hasActions;
+      {
+        auto l = context->deleteQueue.queue->crossThreadDeleteQueue.lockExclusive();
+        hasActions = KJ_ASSERT_NONNULL(*l).actions.size() > 0;
+      }
+
+      if (hasActions) {
+        co_await context->run([](auto& lock) {
+          auto& context = IoContext::current();
+          auto l = context.deleteQueue.queue->crossThreadDeleteQueue.lockExclusive();
+          auto& state = KJ_ASSERT_NONNULL(*l);
+          for (auto& action: state.actions) {
+            action(lock);
+          }
+          state.actions.clear();
+        });
+      } else {
+        // Deletion-only wakeup (see DeleteQueue::scheduleDeletion). Unlike actions, deletions
+        // must NOT be processed by entering the context scope (or otherwise taking the isolate
+        // lock):
+        //
+        //  - run() requires a current IncomingRequest (for metrics), which a long-lived context
+        //    -- an actor between requests -- does not have, and aborting the context over that
+        //    (the catch below) would turn a mere cross-thread object drop into a request
+        //    failure.
+        //
+        //  - More subtly, merely *taking the isolate lock* here (even via
+        //    takeAsyncLockWithoutRequest with a no-op scope) flushes jsg's deferred-destruction
+        //    queue, releasing capabilities (jsg::Ref drops from GC or bare-loop continuations)
+        //    at a point in the event-loop schedule where, historically, no lock entry existed.
+        //    That reorders peer-observable teardown events. Draining deletions doesn't need the
+        //    lock at all: unlink just runs C++ destructors, exactly like scheduleDeletion's
+        //    same-context branch and like ~IoContext's teardown of the same list; any JS
+        //    handles inside IoOwn'd objects already use jsg's deferred destruction for the
+        //    lock-less case. Deletions are also deliberately not input-gated (dropping an IoOwn
+        //    while the context is current unlinks immediately regardless of input locks), so
+        //    draining here introduces no ordering the same-thread path doesn't already allow.
+        //
+        // Wait until the loop would otherwise sleep: the wakeup exists to unpin objects on a
+        // *genuinely idle* context (drops arriving from an RPC engine's threads, or on the KJ
+        // thread outside any context scope, would otherwise sit here until context teardown,
+        // pinning the object and stalling the peer). A busy context loses nothing -- every
+        // runInContextScope() entry drains the queue anyway -- so deferring keeps the drain's
+        // side effects (destructors can release capnp capabilities, sending Release messages)
+        // from preempting already-runnable work, matching the historical drain points.
+        //
+        // If an action arrives while we wait, its fulfill() is a no-op on the already-fulfilled
+        // signal, but resetCrossThreadSignal() re-fires for leftover work, so the next
+        // iteration takes the run() branch.
+        co_await kj::yieldUntilWouldSleep();
+
+        if (context->abortFromHangTask != kj::none && context->abortException == kj::none) {
+          // A hang-detector abort is already scheduled for this context (the last PendingEvent
+          // dropped; see ~PendingEvent). Stand down and let it win the idle moment:
+          //
+          //  - Its whenThreadIdle() waiter was armed before ours, but kj's would-sleep queue
+          //    fires newest-first, so without this check we would preempt it. Draining first
+          //    releases capabilities (e.g. an RPC callee's imports of the caller's exports)
+          //    *before* the abort's completion cascade runs, letting the caller's disposer JS
+          //    observe teardown effects ahead of the aborted session's own completion --
+          //    historically impossible, since queued deletions only drained at the context's
+          //    next natural scope entry, which during this window is the abort itself.
+          //
+          //  - The drain is also redundant here: if the abort runs, context teardown destroys
+          //    the whole OwnedObjectList (subsuming the queued deletions); if it is canceled by
+          //    a new event (registerPendingEvent), the context is active again and natural
+          //    scope entries drain the queue. Either way nothing is pinned: any later deletion
+          //    or action re-fires the signal and we re-evaluate.
+          deferredToHangAbort = true;
+          continue;
         }
-        state.actions.clear();
-      });
+
+        // Move the queued deletions out before unlinking: a destructor may itself drop an
+        // IoOwn belonging to this same context, re-entering scheduleDeletion, which takes the
+        // queue mutex (we are not the current context, so it cannot take the same-thread
+        // branch). Such nested deletions re-fulfill the signal and are drained on the next
+        // iteration. (The lambda keeps AllowAsyncDestructorsScope on the real stack; a
+        // coroutine frame lives on the heap, which that scope's debug check rejects.)
+        [context]() {
+          kj::Vector<OwnedObject*> toDelete;
+          {
+            auto l = context->deleteQueue.queue->crossThreadDeleteQueue.lockExclusive();
+            toDelete = kj::mv(KJ_ASSERT_NONNULL(*l).queue);
+          }
+          kj::AllowAsyncDestructorsScope scope;
+          for (auto& object: toDelete) {
+            OwnedObjectList::unlink(*object);
+          }
+        }();
+      }
     }
   } catch (...) {
     context->abort(kj::getCaughtExceptionAsKj());

@@ -15,6 +15,31 @@ void DeleteQueue::scheduleDeletion(OwnedObject* object) const {
     auto lock = crossThreadDeleteQueue.lockExclusive();
     KJ_IF_SOME(state, *lock) {
       state.queue.add(object);
+
+      // Wake the owning IoContext so it actually drains the queue, the same way
+      // scheduleAction() does. Historically deletions did not wake the context and were only
+      // drained at its next runInContextScope() entry; on a genuinely idle context (e.g. an
+      // open RPC session receiving drops from other threads) that pins the object -- and any
+      // peer waiting on its destructor's side effects -- until context teardown.
+      //
+      // Batching is preserved: fulfill() is idempotent until the signal task drains the queue
+      // and resets the fulfiller, so a burst of deletions costs one wakeup. See
+      // startDeleteQueueSignalTask in io-context.c++ for why the drain is deliberately lazy
+      // and lock-free.
+      //
+      // The fulfiller can only be missing during IoContext construction (the signal task that
+      // arms it starts after the queue member is initialized), before the queue could have
+      // been shared; tolerate that instead of throwing since we are called from destructors.
+      KJ_IF_SOME(fulfiller, state.crossThreadFulfiller) {
+        // We are often called during GC of a JS heap object holding an IoOwn, with jsg's
+        // DISALLOW_KJ_IO_DESTRUCTORS_SCOPE active. fulfill() can destroy an async object in
+        // one edge case -- if the owning context is concurrently tearing down, the waiting
+        // side has canceled the cross-thread promise, and fulfill() then deletes the orphaned
+        // promise node. That destruction is safe (nothing else references the node), so allow
+        // it explicitly, just like the same-thread branch above allows the deletion itself.
+        kj::AllowAsyncDestructorsScope scope;
+        fulfiller->fulfill();
+      }
     }
   }
 }
@@ -63,15 +88,28 @@ void ReverseIoOwnValidity::checkValid() const {
       isValid(), Error, "Couldn't complete operation because the execution context has ended.");
 }
 
-kj::Promise<void> DeleteQueue::resetCrossThreadSignal() const {
+kj::Promise<void> DeleteQueue::resetCrossThreadSignal(bool refireForDeletions) const {
   auto lock = crossThreadDeleteQueue.lockExclusive();
   KJ_IF_SOME(state, *lock) {
-    KJ_IF_SOME(fulfiller, state.crossThreadFulfiller) {
-      // We should only reset the signal if it has been fulfilled.
-      KJ_ASSERT(!fulfiller->isWaiting());
-    }
+    // Note: the previous fulfiller may still be waiting here. The signal task usually consumes
+    // the signal before resetting, but when it has deferred queued deletions to a pending
+    // hang-detector abort it awaits the signal joined with onAbort() (see
+    // startDeleteQueueSignalTask), and an abort wake abandons the armed signal: its promise
+    // side is canceled, so the old fulfiller can never be observed again and must be replaced
+    // for future wakeups to work.
     auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
     state.crossThreadFulfiller = kj::mv(paf.fulfiller);
+    if (state.actions.size() > 0 || (refireForDeletions && state.queue.size() > 0)) {
+      // Work arrived between the last drain and this reset. Its scheduleDeletion()/
+      // scheduleAction() fulfilled the *previous* fulfiller (a no-op, it had already fired), so
+      // nothing would ever fulfill the fresh one on that work's behalf; fire it now so the
+      // signal task processes the work instead of sleeping on it.
+      //
+      // The caller passes refireForDeletions = false when it just deliberately declined to
+      // drain the queue in favor of a pending hang-detector abort (see
+      // startDeleteQueueSignalTask); re-firing for those same deletions would spin.
+      KJ_ASSERT_NONNULL(state.crossThreadFulfiller)->fulfill();
+    }
     return kj::mv(paf.promise);
   } else {
     return kj::NEVER_DONE;

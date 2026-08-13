@@ -128,7 +128,7 @@ class DeleteQueue: public kj::AtomicRefcounted {
   template <typename T>
   SpecificOwnedObject<T>* addObjectImpl(kj::Own<T> obj, OwnedObjectList& ownedObjects) const;
 
-  kj::Promise<void> resetCrossThreadSignal() const;
+  kj::Promise<void> resetCrossThreadSignal(bool refireForDeletions) const;
 
   friend class IoContext;
 };

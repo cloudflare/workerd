@@ -148,5 +148,41 @@ KJ_TEST("ambient IoContext is hidden while another V8 isolate is entered") {
   });
 }
 
+// Regression test for DeleteQueue::scheduleDeletion's cross-thread branch: dropping an IoOwn
+// while its IoContext is not current (another request's context, the KJ event loop outside any
+// context scope, or another thread) must wake the owning context to drain the deletion, the
+// same way scheduleAction() wakes it; historically it was only drained when the context
+// happened to run again for some other reason, pinning the object on an idle context.
+KJ_TEST("dropping an IoOwn outside the IoContext promptly wakes the context to delete it") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+
+  struct Tracked {
+    bool& destroyed;
+    Tracked(bool& destroyed): destroyed(destroyed) {}
+    ~Tracked() {
+      destroyed = true;
+    }
+  };
+
+  bool destroyed = false;
+  kj::Maybe<IoOwn<Tracked>> obj;
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    obj = env.context.addObject(kj::heap<Tracked>(destroyed));
+  });
+
+  // Drop the IoOwn with no IoContext current. This takes scheduleDeletion's cross-thread
+  // branch, which enqueues the deletion on the context's cross-thread delete queue.
+  obj = kj::none;
+  KJ_EXPECT(!destroyed);
+
+  // The queued deletion must be drained by the delete queue's signal task alone -- no further
+  // request activity happens on this context.
+  fixture.pollEventLoop();
+  KJ_EXPECT(destroyed, "cross-thread deletion did not wake the owning IoContext");
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
 }  // namespace
 }  // namespace workerd
