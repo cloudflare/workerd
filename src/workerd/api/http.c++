@@ -2205,8 +2205,21 @@ void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   JSG_FAIL_REQUIRE(DOMDataCloneError, "ServiceStub cannot be serialized in this context.");
 }
 
-jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
-    rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+jsg::Ref<Fetcher> Fetcher::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  return deserializeImpl(js, tag, deserializer, RpcCompatGateBypassed::NO);
+}
+
+jsg::Ref<Fetcher> Fetcher::deserializeForWrappedBinding(
+    jsg::Lock& js, jsg::Deserializer& deserializer) {
+  return deserializeImpl(js, rpc::SerializationTag::SERVICE_STUB, deserializer,
+      RpcCompatGateBypassed::YES);
+}
+
+jsg::Ref<Fetcher> Fetcher::deserializeImpl(jsg::Lock& js,
+    rpc::SerializationTag tag,
+    jsg::Deserializer& deserializer,
+    RpcCompatGateBypassed rpcCompatGateBypassed) {
   KJ_IF_SOME(handler, deserializer.getExternalHandler()) {
     KJ_IF_SOME(frankenvalueHandler, kj::tryDowncast<Frankenvalue::CapTableReader>(handler)) {
       // Decoding a Frankenvalue (e.g. for dynamic loopback props or dynamic isolate env).
@@ -2215,12 +2228,13 @@ jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
 
       KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(cap)) {
         // Probably decoding dynamic ctx.props.
-        return js.alloc<Fetcher>(IoContext::current().addObject(kj::addRef(channel)));
+        return js.alloc<Fetcher>(IoContext::current().addObject(kj::addRef(channel)),
+            RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
       } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
         // Probably decoding dynamic isolate env.
         return js.alloc<Fetcher>(
             channel.getChannelNumber(IoChannelCapTableEntry::Type::SUBREQUEST),
-            RequiresHostAndProtocol::YES, /*isInHouse=*/false);
+            RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
       } else {
         KJ_FAIL_REQUIRE("ServiceStub capability in Frankenvalue is not a SubrequestChannel?");
       }
@@ -2242,7 +2256,8 @@ jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
         KJ_FAIL_REQUIRE("wrong external type for Fetcher", external.which());
       }
 
-      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
+      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)),
+          RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
     } else KJ_IF_SOME(storedHandler,
         kj::tryDowncast<StoredExternalHandler::Deserializer>(handler)) {
       // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This
@@ -2260,7 +2275,8 @@ jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
         // Token stored out-of-line as an external.
         channel = storedHandler.readSubrequestChannel(ioctx.getIoChannelFactory());
       }
-      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
+      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)),
+          RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
     }
   }
 

@@ -19,6 +19,19 @@ const unitTests :Workerd.Config = (
             )
           ),
           ( name = "RECEIVER", service = (name = "main", entrypoint = "Receiver") ),
+          ( name = "RPC_GATED_RECEIVER",
+            service = (name = "rpc-gated-receiver", entrypoint = "RpcGatedReceiver") ),
+        ],
+      )
+    ),
+    ( name = "rpc-gated-receiver",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "rpc-gated-receiver.js")
+        ],
+        compatibilityFlags = ["no_rpc"],
+        bindings = [
+          ( name = "PEER", service = (name = "main", entrypoint = "backend") )
         ],
       )
     ),
