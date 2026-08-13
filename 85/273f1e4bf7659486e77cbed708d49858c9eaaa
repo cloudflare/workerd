@@ -85,8 +85,10 @@ src/workerd/util/BUILD.bazel
   s_b5100e8818a1d4::t_ff1591724afe03 90,138,223
   s_b5100e8818a1d4::t_b63e50c9293387 468
   s_b5100e8818a1d4::t_ed82a8fe9ba746 489
+  s_b5100e8818a1d4::t_a7eff61ddf567a 90,138,223,468-473,475-488,489,492-495
 src/workerd/server/cli-io-backend.c++
   s_b5100e8818a1d4::t_dfd963e3d399ca 1-319
+  s_b5100e8818a1d4::t_c7abc82bfb9812 1-264,266-319
 src/workerd/api/tests/BUILD.bazel
   s_b5100e8818a1d4::t_29b89ecb0c48fb 1038-1052
 src/workerd/server/workerd-debug-port-client.c++
@@ -94,6 +96,7 @@ src/workerd/server/workerd-debug-port-client.c++
   s_b5100e8818a1d4::t_1c9ea8c38a0915 21,23,31-32,34-35,42-45,57,59-61
 src/workerd/server/cli-io-backend.h
   s_b5100e8818a1d4::t_e3baf51f8e6116 1-68
+  s_b5100e8818a1d4::t_07a4c75cbeb89f 1-28,30-68
 .plan-notes/prof.sh
   s_b5100e8818a1d4::t_0ca260f5defe74 1-28
 .plan-notes/upstreaming-plan.md
@@ -119,6 +122,7 @@ src/workerd/server/fallback-service.c++
   s_b5100e8818a1d4::t_a1e1c02c54298b 1-34,36-142,144-170,173-184
 src/workerd/server/tls-network.h
   s_b5100e8818a1d4::t_0b376da567690b 1,4,6-10,12,14-16,18,20-25,27-33,35
+  s_b5100e8818a1d4::t_e00e80119b57f8 1-7,9-35
 src/workerd/server/workerd.c++
   s_b5100e8818a1d4::t_76b118dbff5ba5 1545-1548
   s_b5100e8818a1d4::t_b95056d8b584ce 12
@@ -149,6 +153,7 @@ src/workerd/server/cappy-generated/regen/codegen.rs
   s_b5100e8818a1d4::t_6be1eb6af3cc1c 34
   s_b5100e8818a1d4::t_1e67ddb5e63d02 36-38
   s_b5100e8818a1d4::t_0597550049bbca 4
+  s_b5100e8818a1d4::t_6260becc0419cf 1,3-5,7-21,23-60
 src/rust/python-parser/lib.rs
   s_b5100e8818a1d4::t_bd2caaf6781bb7 4-5,24
   s_b5100e8818a1d4::t_a2deea15daf0ba 7-23
@@ -236,6 +241,7 @@ build/deps/rust.MODULE.bazel
   s_b5100e8818a1d4::t_93dc8aa8b7540b 55-58,64-65,118-121,126-127
   s_b5100e8818a1d4::t_bf0e49d1021b21 94-98
   s_b5100e8818a1d4::t_0328d4a4ec0adf 99-114,122-125
+  s_b5100e8818a1d4::t_957e8bf2ab32a0 48-49,62-63,66,68,80-82,90-92,97-98,115-121,126-127,137-153
 src/rust/jsg-macros/lib.rs
   s_b5100e8818a1d4::t_8a8196302d250b 22-23
   s_b5100e8818a1d4::t_2d5e73347c0798 245-263,265-269
@@ -261,6 +267,7 @@ src/workerd/io/io-own.c++
 build/exts/local.bzl
   s_b5100e8818a1d4::t_4ab90578ebfe8d 1,4-8,20-22,83-86,96-99,108-115
   s_b5100e8818a1d4::t_a5ef0aa776b7df 2-3,9-19,23-82,87-95,100-107
+  s_b5100e8818a1d4::t_7c39db283df802 1-6,8-115
 src/workerd/server/cappy-generated/regen/emit.rs
   s_b5100e8818a1d4::t_356eeeb795c141 4-6
   s_b5100e8818a1d4::t_39d1d222496707 1-3,7-41
@@ -291,6 +298,7 @@ src/workerd/server/http-client-backend.h
   s_b5100e8818a1d4::t_17bc7281399c4d 83-85
   s_b5100e8818a1d4::t_4672d77d119fae 1-82,86-128,130-133,135,138-145,147-166,168-172
   s_b5100e8818a1d4::t_85a74f6031fbff 146
+  s_b5100e8818a1d4::t_847c2573095163 1-9,11-172
 build/rust_io_backend.bzl
   s_b5100e8818a1d4::t_3a196cc99bfcc2 51
   s_b5100e8818a1d4::t_3684c83e0a99c7 39-50,52
@@ -304,6 +312,7 @@ build/rust_io_backend.bzl
   s_b5100e8818a1d4::t_a64426b53752a7 65-72
   s_b5100e8818a1d4::t_0efd0ca1bfd56b 88-94
   s_b5100e8818a1d4::t_9ddb2d0fef9416 1-16,18-30,32-38,53-64,73-74,81,96-190,192-230
+  s_b5100e8818a1d4::t_9a766126aceb86 1-30,32-38,50-68,70-88,96-230
 src/rust/api/dns.rs
   s_b5100e8818a1d4::t_ae6ba16c58a9fb 594,610-612
   s_b5100e8818a1d4::t_595bc6d1741e7a 543-593,595-609,613-644
@@ -418,6 +427,7 @@ src/workerd/server/cappy-generated/lib.rs
   s_b5100e8818a1d4::t_db781d5ced09f0 67-71
   s_b5100e8818a1d4::t_e5b6edf75136d1 8,15-16,18-26
   s_b5100e8818a1d4::t_6ad49879cf38f0 1-5,17,27-66,72-73
+  s_b5100e8818a1d4::t_7919d02b8a57cf 1-7,9-15,17-23,26-67,69-73
 .plan-notes/perf-syscall-counts.txt
   s_b5100e8818a1d4::t_70b1d723782423 1-18
 .plan-notes/safety-audit-rust-panics.md
@@ -441,6 +451,7 @@ src/workerd/server/tls-network.c++
   s_b5100e8818a1d4::t_b8bc42a5a72fba 1-128,136,139,142-307,309-327
   s_b5100e8818a1d4::t_45414a30a389b3 129-135,137-138,140-141
   s_b5100e8818a1d4::t_8e3bead9d92037 308
+  s_b5100e8818a1d4::t_b1bc5e0c3be820 1-21,23-327
 src/workerd/server/capnp-session-backend.c++
   s_b5100e8818a1d4::t_2d32e9e806a2fe 382,386
   s_b5100e8818a1d4::t_207b0716c26fa5 866
@@ -496,6 +507,7 @@ src/workerd/server/capnp-session-backend.c++
   s_b5100e8818a1d4::t_261eee6821512c 715-716
   s_b5100e8818a1d4::t_9018e043a40219 367-372
   s_b5100e8818a1d4::t_8bc1dc3e3b2ac0 43
+  s_b5100e8818a1d4::t_ab53da7d3882d0 1-155,157-1365
 src/workerd/server/pyodide.c++
   s_b5100e8818a1d4::t_75bdf5e736dbec 6-7
   s_b5100e8818a1d4::t_fcc57a4406b634 78-81
@@ -616,6 +628,7 @@ src/workerd/server/http-client-backend.c++
   s_b5100e8818a1d4::t_98eeb9be2bc25c 71-83
   s_b5100e8818a1d4::t_14c85383af6a88 278-282
   s_b5100e8818a1d4::t_8e3bead9d92037 407-409,513,714-717
+  s_b5100e8818a1d4::t_b025198775e61b 1-144,146-433,435-769
 src/workerd/server/cappy-generated/regen/snapshot_test.rs
   s_b5100e8818a1d4::t_8a11f801f62237 1,3-4,15,17-22
   s_b5100e8818a1d4::t_144a06e57a6449 2,10-14,23
@@ -628,6 +641,7 @@ patches/rust/httparse-kj-lenient-header-values.patch
 src/workerd/util/setup-async-io-tokio.c++
   s_b5100e8818a1d4::t_2577d01b299d3e 39
   s_b5100e8818a1d4::t_c85921542eb0cf 1-38,40-97
+  s_b5100e8818a1d4::t_a3ca8edcc78c26 1-8,10,12-24,26-97
 .plan-notes/analyze.py
   s_b5100e8818a1d4::t_cfcc4e2caa37b8 1-64
   s_b5100e8818a1d4::t_80d0a0778018d5 65-67
@@ -649,6 +663,7 @@ src/workerd/server/cappy-generated/BUILD.bazel
   s_b5100e8818a1d4::t_7bfd65fda094ca 1-5,12,19,41-54,59-66,68-95,97-101,104-109,149,151-154,156-157,164-167,172
   s_b5100e8818a1d4::t_bb56e474cebebe 18
   s_b5100e8818a1d4::t_ff1591724afe03 96
+  s_b5100e8818a1d4::t_9d01ca8bfd189d 1-5,7,9-10,12-63,65,67-71,73-92,95-96,98-102,104-115,116,118-172
 src/workerd/server/BUILD.bazel
   s_b5100e8818a1d4::t_cf5d945da58c45 121-122
   s_b5100e8818a1d4::t_b697496c6d4242 297-298
@@ -672,6 +687,7 @@ src/workerd/server/BUILD.bazel
   s_b5100e8818a1d4::t_92c7527d6fae5d 172,174,177,179-183,192-197,248-251
   s_b5100e8818a1d4::t_ffe32993e30310 444-445
   s_b5100e8818a1d4::t_79426a8e465edf 520-526,530-533
+  s_b5100e8818a1d4::t_3673001dbb437d 5,71,79-82,89-107,108,111-133,147,171-194,196-202,204-231,233-237,248-251,256,261-293,295,297-298,300-317,328-333,408-416,420-425,431-434,440-443,455-464,507,520-526,530-533,535
 deps/rust/Cargo.toml
   s_b5100e8818a1d4::t_b8a467612c04b8 102-121
   s_b5100e8818a1d4::t_efdeb76a60dee3 86
@@ -686,8 +702,11 @@ deps/rust/Cargo.toml
   s_b5100e8818a1d4::t_92fb48e1475d8a 38
   s_b5100e8818a1d4::t_d1a0347e3132b8 65-76
   s_b5100e8818a1d4::t_de165c042f312a 77-83
+  s_b5100e8818a1d4::t_47f4feff081ee7 35-38,44-48,50-57,61-62,65-83,86-88,91-98,102-120
+  s_b5100e8818a1d4::t_b924135d5ba2d7 121
 deps/rust/Cargo.lock
   s_b5100e8818a1d4::t_5c61f712e4a60a 61-66,81,92-110,144-166,181,215-234,324-332,372,392-401,430-431,433,435-444,449-456,458,460,493-527,561,565-577,597-602,607,611-612,616,618-623,627,630,633-636,641-642,646,649,651,662,713-722,742,767-776,841,968-1047,1130-1135,1182,1200-1248,1353,1419-1424,1517,1530,1587-1617,1707-1720,1798-1879,1892-1909,1922-1944,2003,2045-2054,2061-2076,2119,2142,2145-2156,2229,2282,2424,2435,2498-2508,2517,2552,2586,2590,2592-2614,2636,2658-2663,2691-2696,2703-2708,2731-2736,2777-2795,2843,2856-2864,2871,2880-2888,2898-2961,3002,3023,3043,3047-3052,3083,3086-3091
+  s_b5100e8818a1d4::t_45203f21edff31 61-66,95-112,144-163,165-166,181,215-225,227,229-231,233-234,324-332,392-401,429-453,496-515,517-526,528-529,561,566-577,597,599-602,607,611-612,616,618-623,627,630,633-636,642,649,651,713-722,742,770-778,968-989,991,993-1012,1013-1047,1130-1135,1200-1226,1228-1245,1247-1248,1353,1419-1424,1587-1593,1595-1617,1707-1720,1798-1870,1872,1874-1879,1892-1909,1922-1944,2031,2033-2034,2045-2054,2061-2076,2119,2145-2156,2586,2590,2592-2614,2658-2663,2691-2696,2703-2708,2731-2736,2777-2795,2856-2864,2871,2880-2888,2898-2961,3047-3052,3086-3087,3089,3091
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -716,6 +735,22 @@ deps/rust/Cargo.lock
         "tool": "claude",
         "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
         "model": "claude-fable-5"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    },
+    "s_ba931897e2c563": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad153582a5f96a5a9",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    },
+    "s_fcad81a77b93d0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a201289762ff96132",
+        "model": "unknown"
       },
       "human_author": "Dan Lapid <dan.lapid@gmail.com>"
     }
