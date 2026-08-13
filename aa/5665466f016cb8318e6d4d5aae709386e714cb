@@ -1,0 +1,19 @@
+src/workerd/io/worker.h
+  s_0f868da28cf400::t_2437d99c53ceb7 883-898
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "aa5665466f016cb8318e6d4d5aae709386e714cb",
+  "prompts": {},
+  "sessions": {
+    "s_0f868da28cf400": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_012591357ffeA7cXF67TJsjeKU",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    }
+  }
+}
