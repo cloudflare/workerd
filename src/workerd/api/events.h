@@ -16,42 +16,60 @@ class MessageEvent final: public Event {
       const jsg::JsValue& data,
       kj::String lastEventId = kj::String(),
       kj::Maybe<jsg::Ref<MessagePort>> source = kj::none,
-      kj::Maybe<jsg::Url&> urlForOrigin = kj::none);
+      kj::Maybe<kj::String> origin = kj::none,
+      Event::Init init = {});
 
   MessageEvent(jsg::Lock& js,
       jsg::JsRef<jsg::JsValue> data,
       kj::String lastEventId = kj::String(),
       kj::Maybe<jsg::Ref<MessagePort>> source = kj::none,
-      kj::Maybe<jsg::Url&> urlForOrigin = kj::none);
+      kj::Maybe<kj::String> origin = kj::none,
+      Event::Init init = {});
 
   MessageEvent(jsg::Lock& js,
       kj::String type,
       const jsg::JsValue& data,
       kj::String lastEventId = kj::String(),
       kj::Maybe<jsg::Ref<MessagePort>> source = kj::none,
-      kj::Maybe<jsg::Url&> urlForOrigin = kj::none);
+      kj::Maybe<kj::String> origin = kj::none,
+      Event::Init init = {});
 
   MessageEvent(jsg::Lock& js,
       kj::String type,
       kj::OneOf<jsg::JsRef<jsg::JsValue>, jsg::Ref<Blob>> data,
       kj::String lastEventId = kj::String(),
       kj::Maybe<jsg::Ref<MessagePort>> source = kj::none,
-      kj::Maybe<jsg::Url&> urlForOrigin = kj::none);
+      kj::Maybe<kj::String> origin = kj::none,
+      Event::Init init = {});
 
   struct Initializer {
-    jsg::JsRef<jsg::JsValue> data;
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> data;
+    jsg::Optional<jsg::USVString> origin;
+    jsg::Optional<kj::String> lastEventId;
+    jsg::Optional<jsg::Ref<MessagePort>> source;
 
-    JSG_STRUCT(data);
+    // Per the spec, MessageEventInit inherits from EventInit. JSG_STRUCT has no
+    // notion of dictionary inheritance, so EventInit's members are repeated here
+    // and forwarded on to the Event base class.
+    jsg::Optional<bool> bubbles;
+    jsg::Optional<bool> cancelable;
+    jsg::Optional<bool> composed;
+
+    // Note that the spec also defines a `ports` member. We do not support
+    // transferring MessagePorts in a MessageEvent (see getPorts() below), so it
+    // is intentionally omitted here rather than being silently ignored.
+
+    JSG_STRUCT(data, origin, lastEventId, source, bubbles, cancelable, composed);
     JSG_STRUCT_TS_OVERRIDE(MessageEventInit {
-      data: ArrayBuffer | string;
+      data?: any;
     });
   };
   static jsg::Ref<MessageEvent> constructor(
-      jsg::Lock& js, kj::String type, Initializer initializer);
+      jsg::Lock& js, kj::String type, jsg::Optional<Initializer> initializer);
 
   kj::OneOf<jsg::JsValue, jsg::Ref<Blob>> getData(jsg::Lock& js);
 
-  kj::Maybe<kj::ArrayPtr<const char>> getOrigin();
+  kj::Maybe<kj::StringPtr> getOrigin();
 
   kj::StringPtr getLastEventId();
 
@@ -82,7 +100,7 @@ class MessageEvent final: public Event {
   kj::OneOf<jsg::JsRef<jsg::JsValue>, jsg::Ref<Blob>> data;
   kj::String lastEventId;
   kj::Maybe<jsg::Ref<MessagePort>> maybeSource;
-  kj::Maybe<kj::Array<const char>> maybeOrigin;
+  kj::Maybe<kj::String> maybeOrigin;
 
   void visitForGc(jsg::GcVisitor& visitor);
 };
