@@ -37,7 +37,7 @@ reportError('boom');
 throws(() => reportError(), {
   message:
     "Failed to execute 'reportError' on 'ServiceWorkerGlobalScope': " +
-    "parameter 1 is not of type 'JsValue'.",
+    "parameter 1 is not of type 'Value'.",
 });
 
 export const reportErrorTest = {
