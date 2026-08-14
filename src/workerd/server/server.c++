@@ -6645,7 +6645,8 @@ kj::Promise<void> Server::listenTcp(
 
 class Server::WorkerdDebugPortImpl final: public rpc::WorkerdDebugPort::Server {
  public:
-  WorkerdDebugPortImpl(Server& srv, capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
+  WorkerdDebugPortImpl(
+      workerd::server::Server& srv, capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
       : srv(srv),
         httpOverCapnpFactory(httpOverCapnpFactory) {}
 
@@ -6743,18 +6744,15 @@ class Server::WorkerdDebugPortImpl final: public rpc::WorkerdDebugPort::Server {
   }
 
  private:
-  Server& srv;
+  workerd::server::Server& srv;
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
 };
 
 class Server::DebugPortListener {
  public:
-  DebugPortListener(Server& owner,
-      kj::Own<kj::ConnectionReceiver> listener,
-      capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
+  DebugPortListener(Server& owner, kj::Own<kj::ConnectionReceiver> listener)
       : owner(owner),
-        listener(kj::mv(listener)),
-        httpOverCapnpFactory(httpOverCapnpFactory) {}
+        listener(kj::mv(listener)) {}
 
   kj::Promise<void> run() {
     capnp::TwoPartyServer server(owner.makeWorkerdDebugPortClient());
@@ -6764,7 +6762,6 @@ class Server::DebugPortListener {
  private:
   Server& owner;
   kj::Own<kj::ConnectionReceiver> listener;
-  capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
 };
 
 rpc::WorkerdDebugPort::Client Server::makeWorkerdDebugPortClient() {
@@ -6773,7 +6770,7 @@ rpc::WorkerdDebugPort::Client Server::makeWorkerdDebugPortClient() {
 }
 
 kj::Promise<void> Server::listenDebugPort(kj::Own<kj::ConnectionReceiver> listener) {
-  DebugPortListener obj(*this, kj::mv(listener), globalContext->httpOverCapnpFactory);
+  DebugPortListener obj(*this, kj::mv(listener));
   co_return co_await obj.run();
 }
 
