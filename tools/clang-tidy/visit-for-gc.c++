@@ -35,36 +35,26 @@ bool endsWithQualified(llvm::StringRef qualifiedName, llvm::StringRef suffix) {
   return qualifiedName[sep - 1] == ':' && qualifiedName[sep - 2] == ':';
 }
 
-// Visitable leaf templates: each holds a GC root, has a public visitForGc,
-// and must be visited.
-//
-// jsg::AsyncGenerator is deliberately absent: unlike jsg::Generator it has no
-// visitForGc at all, so a holder cannot visit one — its handles are strong
-// roots for the holder's lifetime.
+// Visitable leaf templates: each holds a GC root and has a public visitForGc.
+// jsg::AsyncGenerator is absent: it has no visitForGc, so holders cannot
+// visit one; its handles are strong roots.
 const llvm::StringRef kVisitableLeafTemplates[] = {
     "jsg::Ref",      "jsg::V8Ref",   "jsg::JsRef",
     "jsg::Function", "jsg::Promise", "jsg::HashableV8Ref",
     "jsg::MemoizedIdentity", "jsg::Generator",
 };
 
-// Non-template visitable leaf types.
-//
-// jsg::Name is deliberately absent: its visitForGc is private (friend-only),
-// so GcVisitor::visit(name) does not compile and no holder can satisfy a
-// demand to visit it. A Name field's symbol handle is simply held as a strong
-// root for the holder's lifetime; a v8::Symbol holds only its description and
-// cannot participate in a JS<->C++ reference cycle, so visitation is never
-// required for collectability either.
+// Non-template visitable leaf types. jsg::Name is deliberately absent: its
+// visitForGc is private (friend-only), so no holder can visit one; the symbol
+// handle is a strong root, and a v8::Symbol cannot form a JS<->C++ cycle, so
+// visitation is never required.
 const llvm::StringRef kVisitableLeafTypes[] = {
     "jsg::Value",
     "jsg::Data",
 };
 
-// jsg::Promise<T>::Resolver has a public visitForGc (it traces the underlying
-// V8Ref<v8::Promise::Resolver>). It is a non-template class nested inside the
-// Promise template, so its printed qualified name embeds the specialization
-// arguments ("jsg::Promise<int>::Resolver"); match the parent's template
-// name instead of suffix-matching the full string.
+// jsg::Promise<T>::Resolver's printed qualified name embeds the
+// specialization arguments, so match the parent record's template instead.
 bool isPromiseResolver(const clang::CXXRecordDecl *rd) {
   if (rd->getName() != "Resolver") return false;
   const auto *parent = llvm::dyn_cast<clang::CXXRecordDecl>(rd->getDeclContext());
@@ -84,9 +74,8 @@ bool isPromiseResolver(const clang::CXXRecordDecl *rd) {
 // (variants) are visitable if any element type is.
 enum class ContainerKind { None, FirstArg, AnyArg };
 
-// jsg::Sequence<T> is a kj::Array<T> subclass with no visitForGc of its own;
-// like the other containers it is visitable iff its element type is (via
-// GcVisitor::visitAll).
+// jsg::Sequence is a kj::Array subclass without its own visitForGc: visitable
+// iff its element type is (via visitAll).
 const llvm::StringRef kFirstArgContainers[] = {
     "kj::Maybe",  "kj::Array",       "kj::Vector",
     "jsg::Optional", "jsg::LenientOptional", "jsg::Sequence",

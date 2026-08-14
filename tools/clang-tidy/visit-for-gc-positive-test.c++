@@ -2,9 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Positive fixtures for the jsg-visit-for-gc check: every case below must
-// produce exactly one diagnostic, and visit-for-gc-test.sh asserts the exact
-// total. Self-contained stubs mirror the qualified names the check keys on.
+// Positive fixtures for jsg-visit-for-gc: each case must produce exactly one
+// diagnostic; visit-for-gc-test.sh asserts the exact total.
 
 namespace workerd::jsg {
 
@@ -80,8 +79,8 @@ struct MissedRefField: public jsg::Object {
   }
 };
 
-// Case P2: resource type with no visitForGc of its own; the framework
-// dispatches to jsg::Object's empty default and misses the field.
+// Case P2: no visitForGc of its own; jsg::Object's empty default misses the
+// field.
 struct NoVisitMethod: public jsg::Object {
   jsg::Ref<Widget> orphaned;
 };
@@ -101,9 +100,7 @@ struct MissedOneOf: public jsg::Object {
   void visitForGc(jsg::GcVisitor& visitor) {}
 };
 
-// Case P6: unvisited jsg::Promise<T>::Resolver field. Resolver has a public
-// visitForGc tracing the underlying V8Ref; leaving it unvisited pins the
-// promise and its reaction closures.
+// Case P6: unvisited jsg::Promise<T>::Resolver field.
 struct MissedResolver: public jsg::Object {
   jsg::Promise<int>::Resolver resolver;
 
@@ -117,16 +114,14 @@ struct MissedMaybeResolver: public jsg::Object {
   void visitForGc(jsg::GcVisitor& visitor) {}
 };
 
-// Case P8: unvisited jsg::Generator<T> field (public visitForGc, traces the
-// generator's underlying object handle).
+// Case P8: unvisited jsg::Generator<T> field.
 struct MissedGenerator: public jsg::Object {
   jsg::Generator<int> gen;
 
   void visitForGc(jsg::GcVisitor& visitor) {}
 };
 
-// Case P9: unvisited jsg::Sequence with a visitable element type (visited via
-// GcVisitor::visitAll in real code).
+// Case P9: unvisited jsg::Sequence with a visitable element type.
 struct MissedSequence: public jsg::Object {
   jsg::Sequence<jsg::Ref<Widget>> seq;
 

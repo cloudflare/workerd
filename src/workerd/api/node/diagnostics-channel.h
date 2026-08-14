@@ -73,9 +73,8 @@ class Channel: public jsg::Object {
     }
   };
 
-  // Not GC-visited: jsg::Name's visitForGc is private, so holders cannot
-  // visit it. The symbol handle (if any) is held as a strong root for the
-  // Channel's lifetime, which is bounded by the module's channel map.
+  // Not GC-visited: jsg::Name's visitForGc is private. The symbol handle (if
+  // any) is a strong root for the Channel's lifetime.
   jsg::Name name;
   kj::HashMap<jsg::HashableV8Ref<v8::Object>, MessageCallback> subscribers;
   kj::Table<StoreEntry, kj::HashIndex<StoreCallbacks>> stores;

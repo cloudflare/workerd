@@ -2,9 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Negative fixtures for the jsg-visit-for-gc check: nothing below may produce
-// a diagnostic. Self-contained stubs mirror the qualified names the check
-// keys on.
+// Negative fixtures for jsg-visit-for-gc: nothing below may produce a
+// diagnostic.
 
 namespace workerd::jsg {
 
@@ -16,8 +15,7 @@ class Ref {
   void visitForGc(GcVisitor& visitor) {}
 };
 
-// Mirrors the real jsg::Name: visitForGc is private (friend-only), so no
-// holder can visit a Name.
+// Mirrors the real jsg::Name: visitForGc is private.
 class Name {
  private:
   void visitForGc(GcVisitor& visitor) {}
@@ -40,8 +38,7 @@ class Generator {
   void visitForGc(GcVisitor& visitor) {}
 };
 
-// Mirrors the real jsg::AsyncGenerator: no visitForGc, so holders cannot
-// visit one.
+// Mirrors the real jsg::AsyncGenerator: no visitForGc.
 template <typename T>
 class AsyncGenerator {};
 
@@ -103,8 +100,8 @@ struct NestedState {
   jsg::Ref<Widget> func;
 };
 
-// Case N2: a parent's visitForGc reaches into a directly-held nested struct
-// member; the nested struct needs no visitForGc of its own.
+// Case N2: a parent's visitForGc may reach into a directly-held nested
+// struct member.
 struct ParentReachesNested: public jsg::Object {
   NestedState state;
 
@@ -113,26 +110,21 @@ struct ParentReachesNested: public jsg::Object {
   }
 };
 
-// Case N3: a plain standalone holder (no jsg::Object base, no visitForGc, not
-// used as a field of any record in this TU) is not demanded against.
+// Case N3: a plain standalone holder is not demanded against.
 struct StandalonePlainHolder {
   jsg::Ref<Widget> strongRoot;
 };
 
-// Case N4: jsg::Name is not a demanded type. Its visitForGc is private
-// (friend-only), so no holder can visit it; the symbol handle is held as a
-// strong root for the holder's lifetime, and a v8::Symbol cannot form a
-// JS<->C++ cycle, so visitation is never required.
+// Case N4: jsg::Name is not demanded; its private visitForGc makes visiting
+// impossible, and the symbol handle is a strong root.
 struct UnvisitedNameField: public jsg::Object {
   jsg::Name name;
 
   void visitForGc(jsg::GcVisitor& visitor) {}
 };
 
-// Case N5: KNOWN BLIND SPOT, locked as current behavior. Any MemberExpr
-// naming the field inside the visitForGc body counts as a "visit" — including
-// a mere comparison. The check does not verify the field is an argument of
-// GcVisitor::visit.
+// Case N5: KNOWN BLIND SPOT, locked as current behavior: any mention of the
+// field inside the body counts as a visit, even a comparison.
 struct MentionOnlyCountsAsVisit: public jsg::Object {
   kj::Maybe<jsg::Ref<Widget>> mentioned;
 
@@ -153,8 +145,8 @@ struct VisitedResolver: public jsg::Object {
   }
 };
 
-// Case N7: visited Generator, Sequence of non-visitable elements, Sequence
-// visited via visitAll, and AsyncGenerator (not visitable, held strong).
+// Case N7: visited Generator; Sequence via visitAll; non-visitable element
+// Sequence and AsyncGenerator held strong.
 struct GeneratorAndSequence: public jsg::Object {
   jsg::Generator<int> gen;
   jsg::Sequence<int> plainSeq;

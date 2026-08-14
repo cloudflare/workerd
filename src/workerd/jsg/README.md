@@ -248,13 +248,11 @@ This is intentionally weak and does NOT keep its target alive during GC.
 Attempting to `visitor.visit()` a weak ref field is a compile error — the correct
 signal that weak references should not be traced. Do not include them in `visitForGc()`.
 
-`jsg::Name` is also not visitable: its `visitForGc` is private (friend-only), so
-holders cannot visit it. A `Name` field's symbol handle is held as a strong root
-for the holder's lifetime; a `v8::Symbol` cannot participate in a JS↔C++
-reference cycle, so this cannot leak cycles — only pin the symbol wrapper.
+`jsg::Name` is also not visitable (private `visitForGc`): its symbol handle is
+a strong root, and a `v8::Symbol` cannot form a JS↔C++ cycle.
 
-`jsg::AsyncGenerator<T>` is likewise not visitable (it has no `visitForGc`,
-unlike `jsg::Generator<T>`); a holder keeps its handles as strong roots.
+`jsg::AsyncGenerator<T>` is likewise not visitable (no `visitForGc`); holders
+keep its handles as strong roots.
 
 ## Weak References
 
