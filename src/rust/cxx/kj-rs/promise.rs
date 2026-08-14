@@ -1,3 +1,8 @@
+//! FFI island (see crate-root `#![deny(unsafe_code)]`): `OwnPromiseNode`/`PromiseFuture` bridge —
+//! `unsafe impl ExternType`, `unsafe extern "C"` unwrap callbacks, and `Pin` projection. A genuine
+//! unsafe seam.
+#![allow(unsafe_code)]
+
 use std::ffi::c_void;
 use std::future::Future;
 use std::marker::PhantomData;
@@ -20,16 +25,11 @@ pub struct OwnPromiseNode(*mut c_void /* kj::_::PromiseNode* */);
 // It is forgotten using `MaybeUninit` and its ownership passed over to c++ in `unwrap`.
 impl Drop for OwnPromiseNode {
     fn drop(&mut self) {
-        // Safety:
-        // 1. Pointer to self is non-null, and obviously points to valid memory.
-        // 2. We do not read or write to the OwnPromiseNode's memory, so there are no atomicity nor
-        //    interleaved pointer/reference access concerns.
-        //
-        // https://doc.rust-lang.org/std/ptr/index.html#safety
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-        unsafe {
-            crate::ffi::own_promise_node_drop_in_place(self);
-        }
+        // `own_promise_node_drop_in_place` placement-destructs the node behind `self`. The
+        // borrow is valid for the call; the value is only logically dead afterwards, inside
+        // this `drop`, and the inner `*mut c_void` has no drop glue, so there is no
+        // use-after-free or double-free. Expressed as a `&mut` binding, so no `unsafe` needed.
+        crate::ffi::own_promise_node_drop_in_place(self);
     }
 }
 
@@ -141,12 +141,36 @@ impl<T> KjPromise for CallbacksFuture<T> {
         // unwrap will take over node ownership
         let node = ManuallyDrop::new(node);
 
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+        // SAFETY: `node.0` is a live `OwnPromiseNode` whose ownership the callback takes over
+        // (wrapped in `ManuallyDrop` so we don't also drop it); `ret` is valid, suitably-aligned
+        // uninitialized storage for `Output`, which the callback initializes on the success path.
         unsafe { (callbacks.unwrap)(node.0, ret.as_mut_ptr().cast::<c_void>()).into_result() }?;
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+        // SAFETY: the `?` above propagated any error, so on this path the callback reported
+        // success and therefore initialized `ret`.
         Ok(unsafe { ret.assume_init() })
     }
 }
 
-// Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-unsafe impl<T: Send> Send for CallbacksFuture<T> {}
+// No `unsafe impl Send for CallbacksFuture<T>`, deliberately.
+//
+// `CallbacksFuture` is only ever wrapped in `PromiseFuture<Self>`, whose `PromiseAwaiter` holds an
+// `Option<OwnPromiseNode>` (a raw pointer, hence `!Send`), so the composed future is `!Send`
+// regardless. The bridged async machinery is confined to the KJ event-loop thread and `spawn` is
+// `spawn_local`-backed (no `Send` requirement), so nothing needs a `Send` impl. Asserting the
+// wrapper stays `!Send` locks that in.
+#[cfg(test)]
+mod send_guards {
+    use static_assertions::assert_not_impl_any;
+
+    use super::CallbacksFuture;
+    use super::PromiseFuture;
+
+    // The raw `*mut c_void` node makes this `!Send`/`!Sync` on its own; guard against a future
+    // hand-written impl silently introducing cross-thread transfer of a KJ promise node.
+    assert_not_impl_any!(CallbacksFuture<u32>: Send, Sync);
+
+    // After its first poll, `PromiseFuture`'s embedded awaiter memory is self-referential and
+    // event-loop-linked (see `PromiseAwaiter::_pinned`); it must stay `!Unpin` so safe code
+    // cannot move it between polls (`&mut`-based awaits require `Unpin`).
+    assert_not_impl_any!(PromiseFuture<CallbacksFuture<u32>>: Unpin);
+}

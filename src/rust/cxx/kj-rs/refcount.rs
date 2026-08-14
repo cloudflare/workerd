@@ -1,4 +1,8 @@
 //! Module for both [`KjRc`] and [`KjArc`], since they're nearly identical types
+//!
+//! FFI island (see crate-root `#![deny(unsafe_code)]`): `KjRc`/`KjArc` mirror `kj::Rc`/`kj::Arc` —
+//! `unsafe impl Send/Sync`, `extern "C"` refcount ops, and `Pin` projection. A genuine unsafe seam.
+#![allow(unsafe_code)]
 
 use static_assertions::assert_eq_align;
 use static_assertions::assert_eq_size;
@@ -30,10 +34,26 @@ pub mod repr {
         ptr: NonNull<T>,
     }
 
-    // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-    unsafe impl<T> Send for KjArc<T> where T: Send {}
-    // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-    unsafe impl<T> Sync for KjArc<T> where T: Sync {}
+    // Safety: `KjArc<T>` mirrors `std::sync::Arc<T>`'s thread-safety contract, and therefore
+    // requires the same `T: Send + Sync` bound for both `Send` and `Sync`:
+    //
+    // - `T: Sync` is required because clones can be sent to other threads, giving multiple
+    //   threads concurrent `&T` access to the same pointee.
+    // - `T: Send` is required because the last `KjArc` to drop destroys the pointee on
+    //   whichever thread it happens to live on, effectively transferring ownership of `T`
+    //   to that thread. (Likewise, `get_mut()` can hand out exclusive access on any thread.)
+    //
+    // The reference count itself is managed on the C++ side by `kj::AtomicRefcounted`
+    // (atomic increments/decrements; the bridge's clone/drop shims require the pointee to be
+    // atomic-refcounted), so concurrent clone/drop of separate handles is safe once `T`
+    // satisfies the bounds above.
+    //
+    // A weaker `Send where T: Send` bound would be unsound: with `T: Send + !Sync`, cloning and
+    // sending a clone yields concurrent `&T` on two threads, so both impls require `T: Send + Sync`.
+    unsafe impl<T> Send for KjArc<T> where T: Send + Sync {}
+    // SAFETY: see the `Send` impl above — `KjArc` mirrors `std::sync::Arc`'s `T: Send + Sync`
+    // contract for `Sync` for the same reasons.
+    unsafe impl<T> Sync for KjArc<T> where T: Send + Sync {}
 
     impl<T> KjRc<T> {
         #[must_use]
@@ -43,7 +63,8 @@ pub mod repr {
                 fn __is_shared(this: *const c_void) -> bool;
             }
 
-            // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+            // SAFETY: `self` is a live `KjRc` (`&self`), so its `*const c_void` refcounted
+            // pointer is valid for the C++ `is_shared` query.
             unsafe { __is_shared(std::ptr::from_ref(self).cast::<c_void>()) }
         }
 
@@ -73,7 +94,8 @@ pub mod repr {
                 fn __drop(this: *mut c_void);
             }
 
-            // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+            // SAFETY: `self` is a live `KjRc` being dropped exactly once; the C++ `drop` shim
+            // releases its refcount handle.
             unsafe {
                 __drop(std::ptr::from_mut(self).cast::<c_void>());
             }
@@ -88,7 +110,8 @@ pub mod repr {
                 fn __is_shared(this: *const c_void) -> bool;
             }
 
-            // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+            // SAFETY: `self` is a live `KjArc` (`&self`), so its `*const c_void` refcounted
+            // pointer is valid for the C++ `is_shared` query.
             unsafe { __is_shared(std::ptr::from_ref(self).cast::<c_void>()) }
         }
 
@@ -140,7 +163,8 @@ pub mod repr {
             }
 
             let mut ret = std::mem::MaybeUninit::<Self>::uninit();
-            // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+            // SAFETY: `self` is a live `KjRc`; the C++ `clone` shim bumps the refcount and
+            // initializes `ret` with a valid `KjRc`, so `assume_init` is sound afterwards.
             unsafe {
                 __clone(
                     std::ptr::from_ref(self).cast::<c_void>(),
@@ -159,7 +183,8 @@ pub mod repr {
             }
 
             let mut ret = std::mem::MaybeUninit::<Self>::uninit();
-            // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+            // SAFETY: `self` is a live `KjArc`; the C++ `clone` shim bumps the atomic refcount
+            // and initializes `ret` with a valid `KjArc`, so `assume_init` is sound afterwards.
             unsafe {
                 __clone(
                     std::ptr::from_ref(self).cast::<c_void>(),
@@ -177,7 +202,8 @@ pub mod repr {
                 fn __drop(this: *mut c_void);
             }
 
-            // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+            // SAFETY: `self` is a live `KjArc` being dropped exactly once; the C++ `drop` shim
+            // releases its refcount handle.
             unsafe {
                 __drop(std::ptr::from_mut(self).cast::<c_void>());
             }
