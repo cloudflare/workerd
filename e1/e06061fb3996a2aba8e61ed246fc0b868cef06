@@ -2,6 +2,121 @@ build/deps/gen/deps.MODULE.bazel
   s_b5100e8818a1d4::t_31fc0d7f4f5242 30-31,33
 build/deps/deps.jsonc
   s_b5100e8818a1d4::t_fb965561a9771c 39-41
+deps/rust/Cargo.lock
+  s_b5100e8818a1d4::t_16b10bd0c82d87 447,471,540-546,548-549,1063,1065,1547-1556,2050,2054,2056,2058-2070
+src/workerd/io/BUILD.bazel
+  s_b5100e8818a1d4::t_6c6d941c5f0776 127,159,250,316,328
+  s_b5100e8818a1d4::t_5d56c79cc1fd73 622
+src/workerd/server/workerd-debug-port-client.c++
+  s_b5100e8818a1d4::t_7c54d75f159185 87,92-93
+src/workerd/server/server-test.c++
+  s_b5100e8818a1d4::t_812200dc5c9c68 6997
+BUILD.bazel
+  s_b5100e8818a1d4::t_3762957121fb4a 4,131-133,144-168
+src/workerd/server/pyodide.c++
+  s_b5100e8818a1d4::t_86477351af3beb 74
+deps/rust/Cargo.toml
+  s_b5100e8818a1d4::t_931a17179c5daa 35,52,54
+src/workerd/server/server.c++
+  s_b5100e8818a1d4::t_6e5a696e4b245f 2156,6756
+build/rust_io_backend.bzl
+  s_b5100e8818a1d4::t_058b77cb289773 24-41
+  s_b5100e8818a1d4::t_a529d4536f48ef 15-17
+  s_b5100e8818a1d4::t_3407a147b33d40 42-44
+  s_b5100e8818a1d4::t_a97be9f8403340 1-14,45-165
+src/workerd/server/BUILD.bazel
+  s_b5100e8818a1d4::t_b5db449baf571e 86-111,113-126,140,178,338,354,356
+  s_b5100e8818a1d4::t_3c6a01528c9f85 5,71
+build/kj_test.bzl
+  s_b5100e8818a1d4::t_4d48469cd4c0ae 3,11,23-27
+src/rust/cxx/AGENTS.md
+  s_b5100e8818a1d4::t_78317e820356c2 36-42,46-58
+src/rust/cxx/kj-rs-io/BUILD.bazel
+  s_b5100e8818a1d4::t_b59d05626ba506 1-79
+src/rust/cxx/kj-rs-io/async-io.c++
+  s_b5100e8818a1d4::t_2e4bb0cd15d6b2 1-446
+src/rust/cxx/kj-rs-io/async-io.h
+  s_b5100e8818a1d4::t_60da7787d8b5c7 1-260
+src/rust/cxx/kj-rs-io/error.rs
+  s_b5100e8818a1d4::t_8ae5b1109ce8ce 1-130
+src/rust/cxx/kj-rs-io/ffi.rs
+  s_b5100e8818a1d4::t_5700b10107308d 1-817
+src/rust/cxx/kj-rs-io/lib.rs
+  s_b5100e8818a1d4::t_9ff24166ea026a 1-75
+src/rust/cxx/kj-rs-io/net.rs
+  s_b5100e8818a1d4::t_efed3845f1dc64 1-638
+src/rust/cxx/kj-rs-io/peer-filter.h
+  s_b5100e8818a1d4::t_2f8ce6cd6af832 1-54
+src/rust/cxx/kj-rs-io/runtime.rs
+  s_b5100e8818a1d4::t_2f76379a13c1dd 1-50
+src/rust/cxx/kj-rs-io/serve.rs
+  s_b5100e8818a1d4::t_e1f9fd048309ac 1-422
+src/rust/cxx/kj-rs-io/signal.rs
+  s_b5100e8818a1d4::t_b25e967c96c6f0 1-111
+src/rust/cxx/kj-rs-io/stream.rs
+  s_b5100e8818a1d4::t_215e7a9abbeebd 1-558
+src/rust/cxx/kj-rs-io/tests/lib.rs
+  s_b5100e8818a1d4::t_82aeee8677a326 1-84
+src/rust/cxx/kj-rs-io/tests/serve-test.c++
+  s_b5100e8818a1d4::t_ee9ff1d5d4cefd 1-284
+src/rust/cxx/kj-rs-io/tests/serve_helpers.rs
+  s_b5100e8818a1d4::t_1ec07e535ca438 1-109
+src/rust/cxx/kj-rs-io/unwrap.h
+  s_b5100e8818a1d4::t_152fb60ac32b81 1-78
+src/rust/cxx/kj-rs-tokio/BUILD.bazel
+  s_b5100e8818a1d4::t_c3ed6b4edd7cee 1-71
+src/rust/cxx/kj-rs-tokio/port.rs
+  s_b5100e8818a1d4::t_c468c249d5b165 1-641
+src/rust/cxx/kj-rs-tokio/tokio-event-port.h
+  s_b5100e8818a1d4::t_8de2a708cd92bb 1-109
+src/rust/cxx/kj-rs/awaiter.c++
+  s_b5100e8818a1d4::t_7e2a2bd29ba2cd 3,31-34,38-53,61,64,87,101,104,113,115,124-157,177-189,193-196,198-199,211,213
+src/rust/cxx/kj-rs/awaiter.h
+  s_b5100e8818a1d4::t_307f433520f728 4,8,15-17,50-55,60,88-92,99-110,132-136,154-157,162-164,167,178-202,204,214,267,269
+src/rust/cxx/kj-rs/awaiter.rs
+  s_b5100e8818a1d4::t_b11b93b0671edb 1-5,15,25-34,45,64-69,89,106-115,122-124
+src/rust/cxx/kj-rs/executor-guarded.h
+  s_b5100e8818a1d4::t_c9ff5e0814ce76 7-8,13-20,31-34,44,53,64-72
+src/rust/cxx/kj-rs/ffi.rs
+  s_b5100e8818a1d4::t_87a6817f268167 1-112
+src/rust/cxx/kj-rs/future.h
+  s_b5100e8818a1d4::t_96e1239a3c888d 70,82-96,99-106,126,128
+src/rust/cxx/kj-rs/future.rs
+  s_b5100e8818a1d4::t_d4064a4b29a437 1-5,41-89,91,93,127-138,141,144-145,147-148,150-156,160-161,170-172,176-186,188-189,191,193,195-197,202-208,211,214-215,217,219-225,229-231,235-239,241-242,244,246,248-253,261-262,273-274
+src/rust/cxx/kj-rs/lib.rs
+  s_b5100e8818a1d4::t_2aced7ceeb1769 1-35,50-51,55
+src/rust/cxx/kj-rs/maybe.rs
+  s_b5100e8818a1d4::t_908c4692302343 1-5,39-40,43-44,54,57,67,70-71,82,85,121-122,134-136,173-175,213-214,249-251,278-280,407-409,430-433
+src/rust/cxx/kj-rs/own.rs
+  s_b5100e8818a1d4::t_18b08b28911cfb 2-5,28-31,36-37,124-136,220-221
+src/rust/cxx/kj-rs/promise.rs
+  s_b5100e8818a1d4::t_49af7aa6b156d3 1-5,28-32,144-146,148-149,154-176
+src/rust/cxx/kj-rs/refcount.rs
+  s_b5100e8818a1d4::t_49e0151bb1fea5 2-5,37-56,66-67,97-98,113-114,166-167,186-187,205-206
+src/rust/cxx/kj-rs/tests/awaitables-cc-test.c++
+  s_b5100e8818a1d4::t_f5f3a99f894cc3 11-20,174-224,245,247-249,258-264,268-320,322,335-336,340-344
+src/rust/cxx/kj-rs/tests/lib.rs
+  s_b5100e8818a1d4::t_7cef1a8d3bde73 16,24-26,32,38,40,267-269,277-282,291-299,338-351,395-421
+src/rust/cxx/kj-rs/tests/neutralize-waker-test.c++
+  s_b5100e8818a1d4::t_89f8b2ab4afbb2 1-144
+src/rust/cxx/kj-rs/tests/test_futures.rs
+  s_b5100e8818a1d4::t_87b023fd416420 28-75,96,146-154,157-158,161-164,167,170,173-175,181-191,266-285,330-366
+src/rust/cxx/kj-rs/waker.c++
+  s_b5100e8818a1d4::t_72e76000a28592 3,7-9,12-28,32-38,41-43,45
+src/rust/cxx/kj-rs/waker.h
+  s_b5100e8818a1d4::t_12a83a91feb03e 3,10,12-18,20-21,23-37,39-43,45,47-51,53-65,67-72,74-80,83-87,91,93-95,97-104,106-110,112-113,115-119,121-123,126-129
+src/rust/cxx/kj-rs/waker.rs
+  s_b5100e8818a1d4::t_daae4c5d218a75 1-7,12-14,16-23,25-34,36-39,43-107,111-113,117-123,127,130-136,140-149,153-160,164-168,171-180,182
+src/workerd/jsg/BUILD.bazel
+  s_b5100e8818a1d4::t_0baea70f614072 316,324-336
+src/workerd/server/workerd.c++
+  s_b5100e8818a1d4::t_bd9f69c96d4bf0 12,946,1001-1002,1195,1224,1252-1253,1348,1542
+src/workerd/tests/BUILD.bazel
+  s_b5100e8818a1d4::t_5446c2e65e72ea 42
+src/workerd/util/BUILD.bazel
+  s_b5100e8818a1d4::t_20854786c4b5ca 4,91,139,224,469-498
+src/workerd/util/setup-async-io-tokio.c++
+  s_b5100e8818a1d4::t_1d7837a90babfc 1-114
 ---
 {
   "schema_version": "authorship/3.0.0",
