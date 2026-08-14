@@ -1,0 +1,80 @@
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
+
+wd_cc_library(
+    name = "kj-rs-io-lib",
+    srcs = glob(["*.c++"]),
+    hdrs = glob(["*.h"]),
+    include_prefix = "kj-rs-io",
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    strip_include_prefix = "/src/rust/cxx/kj-rs-io",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":bridge",
+        "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
+    ],
+)
+
+rust_library(
+    name = "kj-rs-io",
+    srcs = glob(["*.rs"]),
+    compile_data = glob(["*.h"]),
+    edition = "2024",
+    link_deps = [
+        ":bridge",
+        ":kj-rs-io-lib",
+    ],
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/cxx",
+        "//src/rust/cxx/kj-rs",
+        "//src/rust/cxx/kj-rs-tokio",
+        "@crates_vendor//:bytes",
+        "@crates_vendor//:libc",
+        "@crates_vendor//:socket2",
+        "@crates_vendor//:static_assertions",
+        "@crates_vendor//:tokio",
+    ],
+)
+
+rust_test(
+    name = "kj-rs-io_test",
+    crate = "kj-rs-io",
+    edition = "2024",
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+rust_cxx_bridge(
+    name = "bridge",
+    src = "ffi.rs",
+    hdrs = ["unwrap.h"],
+    include_prefix = "kj-rs-io",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/cxx/kj-rs",
+        "@capnp-cpp//src/kj:kj",
+        # kj-rs-io IS the kj-side implementation of the rust I/O backend: it derives from the
+        # abstract kj::AsyncIoStream / kj::Network / kj::LowLevelAsyncIoProvider interfaces and
+        # reuses portable helpers (kj::newOneWayPipe, kj::CidrRange, the AsyncInputStream /
+        # AsyncOutputStream default-method vtable slots). Those live in the ABSTRACT layers
+        # :kj-async-core (Promise machinery) + :kj-async-io (abstract streams / Network / CIDR;
+        # no event loop). It does NOT call kj::setupAsyncIo / kj::UnixEventPort, so it never
+        # needs :kj-async-os (the concrete OS event loop) -- the tokio-backed EventPort
+        # (kj-rs-tokio) replaces it. A stray setupAsyncIo would be an undefined-symbol link
+        # error, the intended backstop.
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
+        "//src/rust/cxx:core",
+    ],
+)
