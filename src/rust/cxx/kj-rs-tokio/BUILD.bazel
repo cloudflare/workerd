@@ -1,0 +1,68 @@
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
+
+wd_cc_library(
+    name = "kj-rs-tokio-lib",
+    srcs = glob(["*.c++"]),
+    hdrs = glob(["*.h"]),
+    include_prefix = "kj-rs-tokio",
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    strip_include_prefix = "/src/rust/cxx/kj-rs-tokio",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":bridge",
+    ],
+)
+
+rust_library(
+    name = "kj-rs-tokio",
+    srcs = glob(["*.rs"]),
+    compile_data = glob(["*.h"]),
+    edition = "2024",
+    link_deps = [
+        ":bridge",
+        ":kj-rs-tokio-lib",
+    ],
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/cxx",
+        "@crates_vendor//:tokio",
+    ],
+)
+
+rust_test(
+    name = "kj-rs-tokio_test",
+    crate = "kj-rs-tokio",
+    edition = "2024",
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+rust_cxx_bridge(
+    name = "bridge",
+    src = "ffi.rs",
+    hdrs = glob(["*.h"]),
+    include_prefix = "kj-rs-tokio",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj:kj",
+        # kj-rs-tokio only needs the abstract async core (Promise / EventLoop / EventPort /
+        # Timer) to build the tokio-backed EventPort; it uses neither the abstract kj streams
+        # (:kj-async-io) nor the OS event loop (setupAsyncIo / UnixEventPort). Depending on
+        # :kj-async-core (not the :kj-async umbrella) keeps the tokio event loop off the
+        # concrete kj OS I/O layer (:kj-async-os), which the workerd rust-io hermeticity aspect
+        # forbids.
+        "@capnp-cpp//src/kj:kj-async-core",
+        "//src/rust/cxx:core",
+    ],
+)
