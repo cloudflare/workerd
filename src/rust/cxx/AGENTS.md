@@ -36,6 +36,10 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
 - `kj-rs-tokio/` — `TokioEventPort`: a `kj::EventPort` backed by a per-thread tokio
   `current_thread` runtime, plus `setupTokioAsyncIo()` (no I/O providers) and
   `kj_rs_tokio::spawn()`
+- `kj-rs-io/` — KJ async I/O interfaces over tokio (`kj::AsyncIoStream`, listeners,
+  `kj::Network`, providers, signals, file watching), `kj_rs_io::setupTokioAsyncIo()` as the
+  drop-in `kj::setupAsyncIo()` replacement, the stream unwrap fast path, and
+  `serve_kj_stream()` for Rust servers consuming KJ streams
 - `tests/` and `kj-rs/tests/` — Rust and C++ bridge integration tests
 - `tools/bazel/` — Bazel bridge-generation macro used by this component's tests
 
