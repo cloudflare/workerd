@@ -23,7 +23,8 @@ def kj_test(
             "//conditions:default": 1,
         }),
         data = data,
-        tags = tags,
+        # Tag with cpu:4 since this target depends on linkopts_default.
+        tags = tags + ["cpu:4"],
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
