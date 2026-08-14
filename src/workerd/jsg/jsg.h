@@ -1849,6 +1849,8 @@ class Name final {
 
   kj::String toString(jsg::Lock& js);
 
+  void visitForGc(GcVisitor& visitor);
+
   JSG_MEMORY_INFO(Name) {
     KJ_SWITCH_ONEOF(inner) {
       KJ_CASE_ONEOF(str, kj::String) {
@@ -1867,9 +1869,6 @@ class Name final {
   kj::OneOf<kj::StringPtr, v8::Local<v8::Symbol>> getUnwrapped(v8::Isolate* isolate);
 
   friend class NameWrapper;
-
-  void visitForGc(GcVisitor& visitor);
-
   friend class MemoryTracker;
 };
 
