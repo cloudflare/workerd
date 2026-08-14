@@ -1099,23 +1099,6 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
       });
 }
 
-kj::Own<WorkerInterface> IoContext::getSubrequestChannel(uint channel,
-    bool isInHouse,
-    kj::Maybe<kj::String> cfBlobJson,
-    TraceContext& traceContext,
-    SpanParent userSpanParent) {
-  return getSubrequest(
-      [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
-    return getSubrequestChannelImpl(
-        channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory, kj::mv(userSpanParent));
-  },
-      SubrequestOptions{
-        .inHouse = isInHouse,
-        .wrapMetrics = !isInHouse,
-        .existingTraceContext = traceContext,
-      });
-}
-
 kj::Own<WorkerInterface> IoContext::getSubrequestChannelNoChecks(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
@@ -1136,16 +1119,11 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
     TraceContext& tracing,
-    IoChannelFactory& channelFactory,
-    kj::Maybe<SpanParent> userSpanParent) {
-  auto propagatedUserSpanParent = tracing.getUserSpanParent();
-  KJ_IF_SOME(parent, userSpanParent) {
-    propagatedUserSpanParent = kj::mv(parent);
-  }
+    IoChannelFactory& channelFactory) {
   IoChannelFactory::SubrequestMetadata metadata{
     .cfBlobJson = kj::mv(cfBlobJson),
     .parentSpan = tracing.getInternalSpanParent(),
-    .userSpanParent = kj::mv(propagatedUserSpanParent),
+    .userSpanParent = tracing.getUserSpanParent(),
     .featureFlagsForFl = mapCopyString(worker->getIsolate().getFeatureFlagsForFl()),
   };
 
