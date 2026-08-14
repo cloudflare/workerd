@@ -1,0 +1,53 @@
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("@rules_rust//rust:defs.bzl", "rust_library")
+load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
+
+rust_library(
+    name = "tests",
+    srcs = glob(["*.rs"]),
+    edition = "2024",
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":bridge",
+        "//src/rust/cxx",
+        "//src/rust/cxx/kj-rs",
+        "//src/rust/cxx/kj-rs-tokio",
+        "@crates_vendor//:tokio",
+    ],
+)
+
+rust_cxx_bridge(
+    name = "bridge",
+    src = "lib.rs",
+    hdrs = ["test-helpers.h"],
+    include_prefix = "kj-rs-tokio-test",
+    deps = [
+        "//src/rust/cxx/kj-rs",
+    ],
+)
+
+cc_test(
+    name = "tokio-event-port-test",
+    size = "medium",
+    srcs = [
+        "tokio-event-port-test.c++",
+    ],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":bridge",
+        ":tests",
+        "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/kj:kj-test",
+    ],
+)

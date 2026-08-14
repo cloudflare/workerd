@@ -33,6 +33,9 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
 - `src/` and `include/` — cxx Rust and C++ runtimes
 - `syntax/`, `gen/`, and `macro/` — bridge parser and code generators
 - `kj-rs/` — KJ promises/futures, exceptions, ownership, refcounting, dates, and `Maybe`
+- `kj-rs-tokio/` — `TokioEventPort`: a `kj::EventPort` backed by a per-thread tokio
+  `current_thread` runtime, plus `setupTokioAsyncIo()` (no I/O providers) and
+  `kj_rs_tokio::spawn()`
 - `tests/` and `kj-rs/tests/` — Rust and C++ bridge integration tests
 - `tools/bazel/` — Bazel bridge-generation macro used by this component's tests
 
