@@ -791,5 +791,40 @@ KJ_TEST("SpanContext::tryFromTraceparent rejects invalid inputs") {
   KJ_EXPECT(KJ_ASSERT_NONNULL(unsampled.getTraceFlags()) == 0x00);
 }
 
+KJ_TEST("SpanContext::toTraceparent round-trips") {
+  // Includes a flags byte beyond the sampled bit, which must survive verbatim.
+  for (auto tp: {"00-11223344556677889900aabbccddeeff-a1b2c3d4e5f60718-01"_kj,
+         "00-11223344556677889900aabbccddeeff-a1b2c3d4e5f60718-00"_kj,
+         "00-11223344556677889900aabbccddeeff-a1b2c3d4e5f60718-03"_kj}) {
+    auto ctx = KJ_ASSERT_NONNULL(SpanContext::tryFromTraceparent(tp));
+    KJ_EXPECT(KJ_ASSERT_NONNULL(ctx.toTraceparent()) == tp);
+  }
+}
+
+KJ_TEST("SpanContext::toTraceparent zero-pads all fields") {
+  SpanContext ctx(TraceId(0x1, 0), SpanId(0x1), TraceFlags(0x00));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(ctx.toTraceparent()) ==
+      "00-00000000000000000000000000000001-0000000000000001-00"_kj);
+}
+
+KJ_TEST("SpanContext::toTraceparent is none without traceFlags") {
+  SpanContext ctx(TraceId(0x9900aabbccddeeff, 0x1122334455667788), SpanId(0xa1b2c3d4e5f60718));
+  KJ_EXPECT(ctx.toTraceparent() == kj::none);
+}
+
+KJ_TEST("SpanContext::toTraceparent is none without a spanId") {
+  SpanContext ctx(TraceId(0x9900aabbccddeeff, 0x1122334455667788), kj::none, TraceFlags(0x01));
+  KJ_EXPECT(ctx.toTraceparent() == kj::none);
+}
+
+KJ_TEST("SpanContext::toTraceparent is none for zero ids") {
+  SpanContext zeroTrace(TraceId::nullId, SpanId(0xa1b2c3d4e5f60718), TraceFlags(0x01));
+  KJ_EXPECT(zeroTrace.toTraceparent() == kj::none);
+
+  SpanContext zeroSpan(
+      TraceId(0x9900aabbccddeeff, 0x1122334455667788), SpanId::nullId, TraceFlags(0x01));
+  KJ_EXPECT(zeroSpan.toTraceparent() == kj::none);
+}
+
 }  // namespace
 }  // namespace workerd::tracing
