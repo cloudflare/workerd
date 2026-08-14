@@ -222,6 +222,14 @@ void tryCallDisposeMethod(jsg::Lock& js, jsg::JsValue value) {
   });
 }
 
+kj::Maybe<IoOwn<TraceContextParent>> ownOriginatingCall(
+    kj::Maybe<TraceContextParent> originatingCall) {
+  KJ_IF_SOME(call, originatingCall) {
+    return IoContext::current().addObject(kj::heap(kj::mv(call)));
+  }
+  return kj::none;
+}
+
 }  // namespace
 
 JsRpcPromise::JsRpcPromise(jsg::JsRef<jsg::JsPromise> inner,
@@ -230,7 +238,7 @@ JsRpcPromise::JsRpcPromise(jsg::JsRef<jsg::JsPromise> inner,
     kj::Maybe<TraceContextParent> originatingCall)
     : inner(kj::mv(inner)),
       weakRef(kj::mv(weakRefParam)),
-      originatingCall(kj::mv(originatingCall)),
+      originatingCall(ownOriginatingCall(kj::mv(originatingCall))),
       state(Pending{kj::mv(pipeline)}) {
   KJ_REQUIRE(weakRef->ref == kj::none);
   weakRef->ref = *this;
@@ -268,7 +276,8 @@ static rpc::JsRpcTarget::Client makeJsRpcTargetForSingleLoopbackCall(
 JsRpcClientProvider::ClientForOneCall JsRpcPromise::getClientForOneCall(
     jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
   // (Don't extend `path` because we're the root.)
-  auto callSpanParents = originatingCall.map([](TraceContextParent& p) { return p.addRef(); });
+  auto callSpanParents =
+      originatingCall.map([](IoOwn<TraceContextParent>& p) { return p->addRef(); });
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(pending, Pending) {
       return {
@@ -687,7 +696,7 @@ JsRpcStub::JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
     : capnpClient(kj::mv(capnpClient)),
       disposalGroup(disposalGroup),
       externalMemoryAdjustment(kj::mv(externalMemoryAdjustment)),
-      originatingCall(kj::mv(originatingCall)) {
+      originatingCall(ownOriginatingCall(kj::mv(originatingCall))) {
   disposalGroup.list.add(*this);
 }
 
@@ -700,7 +709,7 @@ JsRpcStub::JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
       rpcChannel(kj::mv(rpcChannel)),
       disposalGroup(disposalGroup),
       externalMemoryAdjustment(kj::mv(externalMemoryAdjustment)),
-      originatingCall(kj::mv(originatingCall)) {
+      originatingCall(ownOriginatingCall(kj::mv(originatingCall))) {
   disposalGroup.list.add(*this);
 }
 
@@ -819,7 +828,8 @@ JsRpcClientProvider::ClientForOneCall JsRpcStub::getClientForOneCall(
   // (Don't extend `path` because we're the root.)
   return {
     .client = getClient(),
-    .callSpanParents = originatingCall.map([](TraceContextParent& p) { return p.addRef(); }),
+    .callSpanParents =
+        originatingCall.map([](IoOwn<TraceContextParent>& p) { return p->addRef(); }),
   };
 }
 

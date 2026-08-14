@@ -264,9 +264,7 @@ class JsRpcPromise: public JsRpcClientProvider {
 
   // The jsRpcCall of the call that produced this promise, used to parent follow-up calls
   // pipelined on the promise under it (mirrors JsRpcStub::originatingCall). Only set when traced.
-  // See the note there on why the parent span remains valid for newChild() even after it has been
-  // reported closed.
-  kj::Maybe<TraceContextParent> originatingCall;
+  kj::Maybe<IoOwn<TraceContextParent>> originatingCall;
 
   struct Pending {
     IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline;
@@ -475,8 +473,7 @@ class JsRpcStub: public JsRpcClientProvider {
   // The jsRpcCall of the call that returned this stub (set on stubs received via
   // deserialization), used to parent follow-up calls on the stub under it. Only set when the
   // originating call was traced; kj::none otherwise, so untraced stubs retain no span state. When
-  // set, it holds a refcount on the originating SpanObserver until this stub is GC'd, same as the
-  // stub's other per-request state.
+  // set, it holds a refcount on the originating SpanObserver through the request's IoContext.
   //
   // Note: the originating jsRpcCall span is normally already closed by the time we open
   // a child here (the originating SpanBuilder is destroyed when the awaitIo callback that
@@ -484,7 +481,7 @@ class JsRpcStub: public JsRpcClientProvider {
   // refcounted SpanObserver, so the parent identity remains valid for newChild() even after
   // the parent has been reported closed. Observers must tolerate children opening after
   // their parent's onClose().
-  kj::Maybe<TraceContextParent> originatingCall;
+  kj::Maybe<IoOwn<TraceContextParent>> originatingCall;
 
   friend class RpcStubDisposalGroup;
 };
