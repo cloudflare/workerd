@@ -225,6 +225,27 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
   };
 
  private:
+  // Tracks what became of a single fallback created by prepareFallback(). It is shared between the
+  // callback that carries the fallback and, while a hand-off to a waiter is in flight, the
+  // handleFallbackFailure() call performing that hand-off. AtomicRefcounted is used since the
+  // callback may be destroyed by the thread that receives it.
+  struct FallbackStatus: public kj::AtomicRefcounted {
+    // Whether the fallback has produced a value or already reported its failure.
+    bool hasSettled = false;
+
+    // The two flags below are guarded by SharedMemoryCache::data's lock.
+
+    // Set while handleFallbackFailure() is handing this fallback to a waiter and
+    // is still prepared to take it back.
+    bool handoffInFlight = false;
+
+    // Set when the fallback was destroyed without settling while
+    // `handoffInFlight` was true, which means the waiter it was handed to no
+    // longer exists. It tells handleFallbackFailure() to continue with the next
+    // waiter itself, instead of the fallback re-entering it.
+    bool handoffFailed = false;
+  };
+
   struct InProgress {
     const kj::String key;
 
@@ -296,7 +317,7 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
   void removeIfExistsWhileLocked(ThreadUnsafeData& data, const kj::String& key) const;
 
   static Use::FallbackDoneCallback prepareFallback(
-      const SharedMemoryCache& cache, InProgress& inProgress);
+      const SharedMemoryCache& cache, InProgress& inProgress, kj::Own<FallbackStatus> status);
   static void handleFallbackFailure(const SharedMemoryCache& cache, InProgress& inProgress);
 
   // Callbacks for a HashIndex that allow locating cache entries based on the

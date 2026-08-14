@@ -352,7 +352,8 @@ SharedMemoryCache::Use::getWithFallback(const kj::String& key, SpanBuilder& read
 
 SharedMemoryCache::Use::FallbackDoneCallback SharedMemoryCache::Use::prepareFallback(
     InProgress& inProgress) const {
-  return SharedMemoryCache::prepareFallback(*cache, inProgress);
+  return SharedMemoryCache::prepareFallback(
+      *cache, inProgress, kj::atomicRefcounted<FallbackStatus>());
 }
 
 void SharedMemoryCache::Use::handleFallbackFailure(InProgress& inProgress) const {
@@ -361,45 +362,77 @@ void SharedMemoryCache::Use::handleFallbackFailure(InProgress& inProgress) const
 
 void SharedMemoryCache::handleFallbackFailure(
     const SharedMemoryCache& cache, InProgress& inProgress) {
-  kj::Own<kj::CrossThreadPromiseFulfiller<Use::GetWithFallbackOutcome>> nextFulfiller;
+  // Each iteration offers the fallback to one queued waiter. If the waiter can't take it, the
+  // fallback comes back to us (see prepareFallback()) and we offer it to the next waiter.
+  for (;;) {
+    auto status = kj::atomicRefcounted<FallbackStatus>();
+    kj::Own<kj::CrossThreadPromiseFulfiller<Use::GetWithFallbackOutcome>> nextFulfiller;
 
-  // If there is another queued fallback, retrieve it and remove it from the
-  // queue. Otherwise, just delete the queue entirely.
-  {
-    auto data = cache.data.lockExclusive();
+    // If there is another queued fallback, retrieve it and remove it from the
+    // queue. Otherwise, just delete the queue entirely.
+    {
+      auto data = cache.data.lockExclusive();
 
-    KJ_IF_SOME(next, inProgress.waiting.pop()) {
-      nextFulfiller = kj::mv(next.fulfiller);
-    } else {
-      data->inProgress.eraseMatch(inProgress.key);
+      KJ_IF_SOME(next, inProgress.waiting.pop()) {
+        nextFulfiller = kj::mv(next.fulfiller);
+      } else {
+        data->inProgress.eraseMatch(inProgress.key);
+        return;
+      }
+
+      status->handoffInFlight = true;
     }
-  }
 
-  // fulfill() might destroy the Promise returned by prepareFallback(). In
-  // particular, that will happen if the I/O context that the fulfiller was
-  // created for has been canceled or destroyed, in which case the promise
-  // associated with the fulfiller has been destroyed. When the promise returned
-  // by prepareFallback() is destroyed without having settled, it will recover
-  // from that, but it will lock the cache while doing so. That is why it is
-  // important that the cache is not already locked when we call fulfill().
-  if (nextFulfiller) {
-    nextFulfiller->fulfill(SharedMemoryCache::prepareFallback(cache, inProgress));
+    // fulfill() might destroy the Promise returned by prepareFallback(). In
+    // particular, that will happen if the I/O context that the fulfiller was
+    // created for has been canceled or destroyed, in which case the promise
+    // associated with the fulfiller has been destroyed. When the promise returned
+    // by prepareFallback() is destroyed without having settled, it will recover
+    // from that, but it will lock the cache while doing so. That is why it is
+    // important that the cache is not already locked when we call fulfill().
+    nextFulfiller->fulfill(
+        SharedMemoryCache::prepareFallback(cache, inProgress, kj::atomicAddRef(*status)));
+
+    // Clearing the flag and reading the result must happen in one critical section so that a
+    // fallback dropped concurrently by the receiving thread either reports back to us or starts
+    // its own call.
+    {
+      auto data = cache.data.lockExclusive();
+      status->handoffInFlight = false;
+      if (!status->handoffFailed) {
+        // The waiter took the fallback. Should it fail later, it will call us
+        // again on a fresh stack.
+        return;
+      }
+    }
+
+    // `inProgress` is still ours to walk: the fallback we just created was the
+    // only one that could have retired it, and it was destroyed unsettled.
   }
 }
 
 SharedMemoryCache::Use::FallbackDoneCallback SharedMemoryCache::prepareFallback(
-    const SharedMemoryCache& cacheArg, InProgress& inProgress) {
-  struct FallbackStatus {
-    bool hasSettled = false;
-  };
-  auto status = kj::heap<FallbackStatus>();
+    const SharedMemoryCache& cacheArg, InProgress& inProgress, kj::Own<FallbackStatus> status) {
   auto& statusRef = *status;
 
   auto deferredCancel = kj::defer(
       [cache = kj::atomicAddRef(cacheArg), status = kj::mv(status), &inProgress]() mutable {
-    if (!status->hasSettled) {
-      SharedMemoryCache::handleFallbackFailure(*cache, inProgress);
+    if (status->hasSettled) {
+      return;
     }
+
+    {
+      auto data = cache->data.lockExclusive();
+      if (status->handoffInFlight) {
+        // We are being destroyed inside the hand-off that created us, because
+        // the waiter we were offered to is gone. The hand-off is watching for
+        // this and will continue with the next waiter itself.
+        status->handoffFailed = true;
+        return;
+      }
+    }
+
+    SharedMemoryCache::handleFallbackFailure(*cache, inProgress);
   });
 
   return [cache = kj::atomicAddRef(cacheArg), &inProgress, &status = statusRef,
