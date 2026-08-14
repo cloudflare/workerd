@@ -912,6 +912,23 @@ wd_test(
 )
 
 js_binary(
+    name = "websocket-origin-sidecar",
+    entry_point = "websocket-origin-sidecar.js",
+)
+
+wd_test(
+    src = "websocket-origin-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "websocket-origin-test.js",
+    ],
+    sidecar = "websocket-origin-sidecar",
+    sidecar_port_bindings = [
+        "ORIGIN_SERVER_PORT",
+    ],
+)
+
+js_binary(
     name = "websocket-client-error-sidecar",
     entry_point = "websocket-client-error-sidecar.js",
 )

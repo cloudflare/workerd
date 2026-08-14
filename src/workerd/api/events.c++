@@ -3,6 +3,8 @@
 #include "blob.h"
 #include "messagechannel.h"
 
+#include <workerd/io/features.h>
+
 namespace workerd::api {
 
 namespace {
@@ -75,8 +77,20 @@ kj::OneOf<jsg::JsValue, jsg::Ref<Blob>> MessageEvent::getData(jsg::Lock& js) {
   KJ_UNREACHABLE;
 }
 
-kj::Maybe<kj::ArrayPtr<const char>> MessageEvent::getOrigin() {
-  return maybeOrigin.map([](auto& a) -> kj::ArrayPtr<const char> { return a.asPtr(); });
+kj::Maybe<kj::ArrayPtr<const char>> MessageEvent::getOrigin(jsg::Lock& js) {
+  KJ_IF_SOME(origin, maybeOrigin) {
+    return origin.asPtr();
+  }
+
+  // The origin is internally nullable and the standard's getter reports the empty string for the
+  // null case. Callers that have a URL to take an origin from (EventSource, and a WebSocket
+  // opened from a URL) supply one; a MessagePort message or a WebSocketPair endpoint has none.
+  KJ_IF_SOME(flags, FeatureFlags::tryGet(js)) {
+    if (flags.getSpecCompliantMessageEventOrigin()) {
+      return ""_kj.asArray();
+    }
+  }
+  return kj::none;
 }
 
 kj::StringPtr MessageEvent::getLastEventId() {

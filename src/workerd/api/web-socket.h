@@ -10,6 +10,7 @@
 #include <workerd/io/io-gate.h>
 #include <workerd/io/observer.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/url.h>
 #include <workerd/util/checked-queue.h>
 #include <workerd/util/strong-bool.h>
 
@@ -850,6 +851,12 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   WebSocket& shell;
 
   kj::Maybe<kj::String> url;
+
+  // `url` parsed, so message events can report its origin as the WebSocket standard requires.
+  // None for a socket that has no URL: a WebSocketPair endpoint, or one taken from an upgraded
+  // fetch() response. Set by the constructors that receive a URL.
+  kj::Maybe<jsg::Url> urlForOrigin;
+
   kj::Maybe<kj::String> protocol = kj::String();
   kj::Maybe<kj::String> extensions = kj::String();
   // The binaryType attribute per the WHATWG WebSocket spec. Defaults to "blob" when the

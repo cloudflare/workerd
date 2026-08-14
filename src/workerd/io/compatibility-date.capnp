@@ -1673,4 +1673,22 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # the global object, which is a breaking change in its own right. That is left for a separate
   # change; the lookup is skipped for any type that does have an event handler attribute, so such
   # a change can be made incrementally without double-firing handlers.
+
+  specCompliantMessageEventOrigin @187 :Bool
+      $compatEnableFlag("spec_compliant_message_event_origin")
+      $compatDisableFlag("no_spec_compliant_message_event_origin");
+  # Makes `MessageEvent.origin` report what the standards say it should. Two things change.
+  #
+  # First, an absent origin reports the empty string rather than null. A MessageEvent's origin is
+  # internally nullable and the standard's getter returns the empty string for the null case:
+  # https://html.spec.whatwg.org/multipage/comms.html#dom-messageevent-origin
+  # (`MessageEventInit`'s `""` default for the member is a separate supporting rule.) We returned
+  # null instead. This is what a `MessagePort` message, or a message from a `WebSocketPair`
+  # endpoint, now reports, since neither has a URL to take an origin from.
+  #
+  # Second, a `WebSocket` opened from a URL reports the serialized origin of that URL, which the
+  # WebSocket standard requires and we did not do:
+  # https://websockets.spec.whatwg.org/#feedback-from-the-protocol
+  # So `new WebSocket("wss://example.com/chat")` now delivers messages with an origin of
+  # "wss://example.com". `EventSource` already reported the origin of its event stream.
 }

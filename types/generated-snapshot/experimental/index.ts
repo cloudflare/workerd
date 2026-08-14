@@ -1716,7 +1716,7 @@ export declare class MessageEvent extends Event {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/origin)
    */
-  readonly origin: string | null;
+  readonly origin: string;
   /**
    * The **`lastEventId`** read-only property of the MessageEvent interface is a string representing a unique ID for the event.
    *
