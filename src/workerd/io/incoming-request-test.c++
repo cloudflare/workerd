@@ -23,6 +23,66 @@ class ErrorHandlerImpl: public kj::TaskSet::ErrorHandler {
   }
 };
 
+class SpanWarningCapture final: public kj::ExceptionCallback {
+ public:
+  void logMessage(kj::LogSeverity severity,
+      const char* file,
+      int line,
+      int contextDepth,
+      kj::String&& text) override {
+    if (severity == kj::LogSeverity::WARNING &&
+        text.contains("reported span without current request"_kj)) {
+      sawWarning = true;
+      return;
+    }
+    kj::ExceptionCallback::logMessage(severity, file, line, contextDepth, kj::mv(text));
+  }
+
+  bool sawWarning = false;
+};
+
+class RecordingTracer final: public BaseTracer {
+ public:
+  void setContext(IoContext& context) {
+    weakIoContext = context.getWeakRef();
+  }
+
+  kj::Date getSpanEndTime() {
+    return KJ_ASSERT_NONNULL(spanEndTime);
+  }
+
+  void addLog(const tracing::InvocationSpanContext&,
+      kj::Date,
+      LogLevel,
+      kj::String,
+      tracing::LogErrorInfo) override {}
+  void addSpanOpen(tracing::SpanId, tracing::SpanId, kj::ConstString, kj::Date) override {}
+  void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) override {
+    adjustSpanTime(span, maybeStartTime);
+    spanEndTime = span.endTime;
+  }
+  void addException(const tracing::InvocationSpanContext&,
+      kj::Date,
+      kj::String,
+      kj::String,
+      kj::Maybe<kj::String>) override {}
+  void addDiagnosticChannelEvent(
+      const tracing::InvocationSpanContext&, kj::Date, kj::String, kj::Array<kj::byte>) override {}
+  void setEventInfo(IoContext::IncomingRequest& request, tracing::EventInfo&&) override {
+    setContext(request.getContext());
+  }
+  void setReturn(kj::Maybe<kj::Date>, kj::Maybe<tracing::FetchResponseInfo>) override {}
+  void setOutcome(EventOutcome, kj::Duration, kj::Duration) override {}
+  void recordTimestamp(kj::Date timestamp) override {
+    completeTime = timestamp;
+  }
+  void setJsRpcInfo(
+      const tracing::InvocationSpanContext&, kj::Date, const kj::ConstString&) override {}
+
+ private:
+  kj::Maybe<kj::Date> spanEndTime;
+};
+
 class FrozenTimerChannel final: public TimerChannel {
  public:
   void syncTime() override {
@@ -85,6 +145,60 @@ KJ_TEST("trace onset synchronizes an idle actor's clock before reading it") {
 
   request->delivered();
   fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("span close uses the current request or the recorded completion time") {
+  FrozenTimerChannel timer;
+  kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)> makeChannelFactory =
+      [&timer](TimerChannel&) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<TestFixture::DummyIoChannelFactory>(timer);
+  };
+  TestFixture fixture({
+    .actorId = Worker::Actor::Id(kj::str("trace-timing-test")),
+    .useRealTimers = false,
+    .ioChannelFactory = kj::mv(makeChannelFactory),
+  });
+
+  auto tracer = kj::refcounted<RecordingTracer>();
+  auto tracerRef = kj::addRef(*tracer);
+
+  auto context = fixture.newIoContext();
+  auto request = fixture.newUndeliveredIncomingRequest(*context, kj::mv(tracer));
+  timer.advance(1 * kj::SECONDS);
+  tracerRef->setEventInfo(*request, tracing::CustomEventInfo());
+  request->delivered();
+  request = nullptr;
+
+  SpanWarningCapture warningCapture;
+  tracerRef->addSpanClose(
+      tracing::SpanEndData(tracing::SpanId(1), kj::UNIX_EPOCH + 10 * kj::SECONDS),
+      kj::UNIX_EPOCH + 500 * kj::MILLISECONDS);
+  KJ_EXPECT(tracerRef->getSpanEndTime() == timer.getWallTime());
+  KJ_EXPECT(!warningCapture.sawWarning);
+
+  timer.advance(1 * kj::SECONDS);
+  auto replacementRequest = fixture.newIncomingRequest(*context);
+  tracerRef->addSpanClose(
+      tracing::SpanEndData(tracing::SpanId(1), kj::UNIX_EPOCH + 10 * kj::SECONDS),
+      kj::UNIX_EPOCH + 1500 * kj::MILLISECONDS);
+  KJ_EXPECT(tracerRef->getSpanEndTime() == timer.getWallTime());
+  KJ_EXPECT(!warningCapture.sawWarning);
+
+  fixture.drainAndDestroy(kj::mv(replacementRequest));
+}
+
+KJ_TEST("span close without a current request or completion time still warns") {
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("trace-timing-test"))});
+  auto context = fixture.newIoContext();
+  auto tracer = kj::refcounted<RecordingTracer>();
+  tracer->setContext(*context);
+
+  SpanWarningCapture warningCapture;
+  auto startTime = kj::UNIX_EPOCH + 1 * kj::SECONDS;
+  tracer->addSpanClose(
+      tracing::SpanEndData(tracing::SpanId(1), kj::UNIX_EPOCH + 2 * kj::SECONDS), startTime);
+  KJ_EXPECT(tracer->getSpanEndTime() == startTime);
+  KJ_EXPECT(warningCapture.sawWarning);
 }
 
 // Regression test: two IncomingRequests share a single actor IoContext, as happens when a Durable

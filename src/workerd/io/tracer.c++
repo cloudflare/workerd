@@ -479,20 +479,17 @@ void BaseTracer::adjustSpanTime(tracing::SpanEndData& span, kj::Maybe<kj::Date> 
       if (context.hasCurrentIncomingRequest()) {
         span.endTime = context.now();
       } else {
-        // We have an IOContext, but there's no current IncomingRequest. Always log a warning here,
-        // this should not be happening. Still report completeTime as a useful timestamp if
-        // available.
-        bool hasCompleteTime = false;
+        // Tasks can finish after their IncomingRequest has been destroyed. Use the timestamp
+        // recorded during request teardown when it is available.
         if (completeTime != kj::UNIX_EPOCH) {
           span.endTime = completeTime;
-          hasCompleteTime = true;
         } else {
           span.endTime = startTime;
-        }
-        if (isPredictableModeForTest()) {
-          KJ_FAIL_ASSERT("reported span without current request", hasCompleteTime);
-        } else {
-          LOG_WARNING_PERIODICALLY("reported span without current request");
+          if (isPredictableModeForTest()) {
+            KJ_FAIL_ASSERT("reported span without current request or completeTime");
+          } else {
+            LOG_WARNING_PERIODICALLY("reported span without current request or completeTime");
+          }
         }
       }
     });
