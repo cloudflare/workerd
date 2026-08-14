@@ -341,6 +341,9 @@ build:linux --copt="-fdata-sections" --host_copt="-fdata-sections"
 
 # On Linux, use clang lld.
 build:linux --linkopt="-fuse-ld=lld"
+# Improve link performance by limiting the link stage to 8 threads – LLD link times see little if
+# any improvement beyond 8 threads (see https://reviews.llvm.org/D147493).
+build:linux --linkopt="-Wl,--threads=8"
 
 #
 # Windows

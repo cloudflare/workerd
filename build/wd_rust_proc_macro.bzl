@@ -46,7 +46,8 @@ def wd_rust_proc_macro(
             "RUST_TEST_THREADS": "1",
         } | test_env,
         experimental_use_cc_common_link = 1,
-        tags = test_tags + ["no-coverage"],
+        # Tag with cpu:4 since this target depends on linkopts_default.
+        tags = test_tags + ["no-coverage", "cpu:4"],
         deps = test_deps,
         link_deps = ["@@//deps:rust_runtime", "//build/deps:linkopts_default"],
         target_compatible_with = select({
