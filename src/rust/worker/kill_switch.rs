@@ -5,7 +5,6 @@
 use std::pin::Pin;
 use std::time::SystemTime;
 
-use cxx::KjError;
 use kj::http::ConnectResponse;
 use kj::http::ConnectSettings;
 use kj::http::HeadersRef;
@@ -42,12 +41,9 @@ pub struct Worker {}
 
 impl Worker {
     fn error(file: &str, line: u32) -> Result<()> {
-        Err(KjError::new(
-            cxx::KjExceptionType::Failed,
-            "jsg.Error: This script has been killed.".to_owned(),
-        )
-        .with_details(vec![(SCRIPT_KILLED_DETAIL_ID, vec![])])
-        .with_location(file.to_owned(), line))
+        Err(kj::failed!("jsg.Error: This script has been killed.")
+            .with_details(vec![(SCRIPT_KILLED_DETAIL_ID, vec![])])
+            .with_location(file.to_owned(), line))
     }
 }
 

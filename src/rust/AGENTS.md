@@ -85,7 +85,7 @@ Functions returning `Result<T>` in `extern "Rust"` blocks translate to C++ funct
 
 - **`thiserror` enums**: Define a crate-level `Error` enum for structured errors. This is the preferred pattern for crates with multiple error cases.
 - **`std::io::Error`**: Acceptable for purely I/O-related errors.
-- **`cxx::KjError`**: Use `KjError::new(KjExceptionType::Failed, message)` when you need direct control over the KJ exception type.
+- **`cxx::KjError`**: Use the `kj` crate's error macros (`kj::failed!`, `kj::overloaded!`, `kj::disconnected!`, `kj::not_implemented!` to construct a value; `kj::fail_require!`, `kj::overloaded_require!`, `kj::disconnected_require!`, `kj::not_implemented_require!` to early-return `Err(...)`) when you need direct control over the KJ exception type. These mirror C++'s `KJ_EXCEPTION`/`KJ_FAIL_REQUIRE`/`KJ_UNIMPLEMENTED` macros from `kj/debug.h`; see `src/rust/kj/macros.rs`.
 
 ## CXX BRIDGE: BUILD WIRING
 
