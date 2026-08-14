@@ -215,6 +215,11 @@ wd_test(
 )
 
 wd_test(
+    src = "tail-cf-gc-test.wd-test",
+    data = ["tail-cf-gc-test.js"],
+)
+
+wd_test(
     src = "errorinfo-stw-test.wd-test",
     args = ["--experimental"],
     data = ["errorinfo-stw-test.js"],
