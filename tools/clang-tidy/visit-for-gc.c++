@@ -55,6 +55,25 @@ const llvm::StringRef kVisitableLeafTypes[] = {
     "jsg::Data",
 };
 
+// jsg::Promise<T>::Resolver has a public visitForGc (it traces the underlying
+// V8Ref<v8::Promise::Resolver>). It is a non-template class nested inside the
+// Promise template, so its printed qualified name embeds the specialization
+// arguments ("jsg::Promise<int>::Resolver"); match the parent's template
+// name instead of suffix-matching the full string.
+bool isPromiseResolver(const clang::CXXRecordDecl *rd) {
+  if (rd->getName() != "Resolver") return false;
+  const auto *parent = llvm::dyn_cast<clang::CXXRecordDecl>(rd->getDeclContext());
+  if (parent == nullptr) return false;
+  std::string fqn;
+  if (const auto *spec =
+          llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(parent)) {
+    fqn = spec->getSpecializedTemplate()->getQualifiedNameAsString();
+  } else {
+    fqn = parent->getQualifiedNameAsString();
+  }
+  return endsWithQualified(fqn, "jsg::Promise");
+}
+
 // Container templates whose visitability is determined by their type
 // arguments. `FirstArg` containers visit one element; `AnyArg` containers
 // (variants) are visitable if any element type is.
@@ -98,6 +117,9 @@ bool isVisitableType(clang::QualType qt) {
     auto fqn = rt->getDecl()->getQualifiedNameAsString();
     for (auto suffix : kVisitableLeafTypes) {
       if (endsWithQualified(fqn, suffix)) return true;
+    }
+    if (const auto *rd = llvm::dyn_cast<clang::CXXRecordDecl>(rt->getDecl())) {
+      if (isPromiseResolver(rd)) return true;
     }
   }
 

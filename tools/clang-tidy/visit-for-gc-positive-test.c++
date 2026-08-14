@@ -16,6 +16,17 @@ class Ref {
   void visitForGc(GcVisitor& visitor) {}
 };
 
+template <typename T>
+class Promise {
+ public:
+  class Resolver {
+   public:
+    void visitForGc(GcVisitor& visitor) {}
+  };
+
+  void visitForGc(GcVisitor& visitor) {}
+};
+
 class GcVisitor {
  public:
   template <typename... Args>
@@ -77,6 +88,22 @@ struct MissedMaybeRef: public jsg::Object {
 // container).
 struct MissedOneOf: public jsg::Object {
   kj::OneOf<int, jsg::Ref<Widget>> stateful;
+
+  void visitForGc(jsg::GcVisitor& visitor) {}
+};
+
+// Case P6: unvisited jsg::Promise<T>::Resolver field. Resolver has a public
+// visitForGc tracing the underlying V8Ref; leaving it unvisited pins the
+// promise and its reaction closures.
+struct MissedResolver: public jsg::Object {
+  jsg::Promise<int>::Resolver resolver;
+
+  void visitForGc(jsg::GcVisitor& visitor) {}
+};
+
+// Case P7: unvisited kj::Maybe<jsg::Promise<T>::Resolver> field.
+struct MissedMaybeResolver: public jsg::Object {
+  kj::Maybe<jsg::Promise<int>::Resolver> maybeResolver;
 
   void visitForGc(jsg::GcVisitor& visitor) {}
 };

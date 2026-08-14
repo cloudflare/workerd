@@ -23,6 +23,17 @@ class Name {
   void visitForGc(GcVisitor& visitor) {}
 };
 
+template <typename T>
+class Promise {
+ public:
+  class Resolver {
+   public:
+    void visitForGc(GcVisitor& visitor) {}
+  };
+
+  void visitForGc(GcVisitor& visitor) {}
+};
+
 class GcVisitor {
  public:
   template <typename... Args>
@@ -115,5 +126,15 @@ struct MentionOnlyCountsAsVisit: public jsg::Object {
     if (mentioned == nullptr) {
       return;
     }
+  }
+};
+
+// Case N6: visited resolver fields are accepted.
+struct VisitedResolver: public jsg::Object {
+  jsg::Promise<int>::Resolver resolver;
+  kj::Maybe<jsg::Promise<int>::Resolver> maybeResolver;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(resolver, maybeResolver);
   }
 };
