@@ -93,6 +93,15 @@ class DeleteQueue: public kj::AtomicRefcounted {
   void scheduleDeletion(OwnedObject* object) const;
   void scheduleAction(jsg::Lock& js, kj::Function<void(jsg::Lock&)>&& action) const;
 
+  // Moves the queued actions out of the queue so the caller can run them. The caller must not hold
+  // the queue's lock while running them, because an action may itself schedule another action.
+  kj::Array<kj::Function<void(jsg::Lock&)>> takeActions() const;
+
+  // Installs a fresh cross-thread signal, returning a promise that resolves once an action is
+  // scheduled. Only one signal is outstanding at a time, so a caller that consumes one must re-arm
+  // to keep hearing about later actions.
+  kj::Promise<void> resetCrossThreadSignal() const;
+
   struct State {
     kj::Vector<OwnedObject*> queue;
     // Actions that some other IoContext has requested be executed in this IoContext. When
@@ -127,8 +136,6 @@ class DeleteQueue: public kj::AtomicRefcounted {
  private:
   template <typename T>
   SpecificOwnedObject<T>* addObjectImpl(kj::Own<T> obj, OwnedObjectList& ownedObjects) const;
-
-  kj::Promise<void> resetCrossThreadSignal() const;
 
   friend class IoContext;
 };

@@ -54,6 +54,14 @@ void DeleteQueue::scheduleAction(jsg::Lock& js, kj::Function<void(jsg::Lock&)>&&
   }
 }
 
+kj::Array<kj::Function<void(jsg::Lock&)>> DeleteQueue::takeActions() const {
+  auto lock = crossThreadDeleteQueue.lockExclusive();
+  KJ_IF_SOME(state, *lock) {
+    return state.actions.releaseAsArray();
+  }
+  return nullptr;
+}
+
 void DeleteQueue::checkFarGet(const DeleteQueue& deleteQueue, const std::type_info& type) {
   IoContext::current().checkFarGet(deleteQueue, type);
 }

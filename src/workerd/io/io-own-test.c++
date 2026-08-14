@@ -92,5 +92,66 @@ KJ_TEST("ReverseIoOwn remains safe after its IoContext is destroyed") {
   }
 }
 
+// Schedules `action` on `queue`, which requires a jsg::Lock but not an IoContext.
+void scheduleAction(
+    TestFixture& fixture, const DeleteQueue& queue, kj::Function<void(jsg::Lock&)>&& action) {
+  fixture.enterWorkerLockSynchronously(
+      [&](Worker::Lock& lock) { queue.scheduleAction(lock, kj::mv(action)); });
+}
+
+// Runs everything currently queued on `queue`.
+uint runActions(TestFixture& fixture, const DeleteQueue& queue) {
+  auto actions = queue.takeActions();
+  fixture.enterWorkerLockSynchronously([&](Worker::Lock& lock) {
+    for (auto& action: actions) {
+      action(lock);
+    }
+  });
+  return actions.size();
+}
+
+KJ_TEST("DeleteQueue actions are taken out of the queue before they run") {
+  TestFixture fixture;
+  auto queue = kj::arc<DeleteQueue>();
+  auto signal = queue->resetCrossThreadSignal();
+
+  // Settling a promise can run application JavaScript, which is free to settle another promise
+  // belonging to this same queue. That would deadlock if the queue's lock were still held while
+  // running actions.
+  uint ran = 0;
+  scheduleAction(fixture, *queue, [&queue, &ran](jsg::Lock& js) {
+    ++ran;
+    queue->scheduleAction(js, [&ran](jsg::Lock&) { ++ran; });
+  });
+
+  KJ_EXPECT(runActions(fixture, *queue) == 1);
+  KJ_EXPECT(ran == 1);
+
+  KJ_EXPECT(runActions(fixture, *queue) == 1);
+  KJ_EXPECT(ran == 2);
+
+  KJ_EXPECT(runActions(fixture, *queue) == 0);
+}
+
+KJ_TEST("DeleteQueue signals its owner for actions scheduled while it is draining") {
+  TestFixture fixture;
+  auto queue = kj::arc<DeleteQueue>();
+
+  auto signal = queue->resetCrossThreadSignal();
+  KJ_EXPECT(!signal.poll(fixture.getWaitScope()));
+
+  scheduleAction(fixture, *queue, [](jsg::Lock&) {});
+  KJ_EXPECT(signal.poll(fixture.getWaitScope()));
+
+  // Re-arming installs a new signal, so an action scheduled after the previous one was consumed
+  // fulfills the new signal rather than being left queued with none outstanding.
+  signal = queue->resetCrossThreadSignal();
+  KJ_EXPECT(!signal.poll(fixture.getWaitScope()));
+
+  scheduleAction(fixture, *queue, [](jsg::Lock&) {});
+  KJ_EXPECT(signal.poll(fixture.getWaitScope()));
+  KJ_EXPECT(runActions(fixture, *queue) == 2);
+}
+
 }  // namespace
 }  // namespace workerd
