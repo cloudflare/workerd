@@ -11,8 +11,8 @@ namespace kj_rs {
 static_assert(sizeof(OwnPromiseNode) == sizeof(uint64_t) * 1, "OwnPromiseNode size changed");
 static_assert(alignof(OwnPromiseNode) == alignof(uint64_t) * 1, "OwnPromiseNode alignment changed");
 
-void own_promise_node_drop_in_place(OwnPromiseNode* node) {
-  kj::dtor(*node);
+void own_promise_node_drop_in_place(OwnPromiseNode& node) {
+  kj::dtor(node);
 }
 
 }  // namespace kj_rs

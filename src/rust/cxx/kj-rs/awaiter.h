@@ -1,33 +1,34 @@
 #pragma once
 
 #include "kj-rs/executor-guarded.h"
-#include "kj-rs/linked-group.h"
+#include "kj-rs/promise.h"
 #include "kj-rs/waker.h"
 
+#include <rust/cxx.h>
+
 #include <kj/debug.h>
+#include <kj/list.h>
+#include <kj/memory.h>
 
 namespace kj_rs {
 
 // =======================================================================================
 // Opaque Rust types
 //
-// The following types are defined in lib.rs, and thus in lib.rs.h. lib.rs.h depends on our C++
-// headers, including awaiter.h (the file you're currently reading), so we forward-declare some types
-// here for use in the C++ headers.
+// The following types are defined in the cxx bridge (ffi.rs), and thus in ffi.rs.h. ffi.rs.h
+// depends on our C++ headers, including awaiter.h (the file you're currently reading), so we
+// forward-declare some types here for use in the C++ headers.
 
 // Wrapper around an `&std::task::Waker`, passed to `RustPromiseAwaiter::poll()`. This indirection
 // is required because cxx-rs does not permit us to expose opaque Rust types to C++ defined outside
 // of our own crate, like `std::task::Waker`.
 struct WakerRef;
 
-// Wrapper around an `Option<std::task::Waker>`. RustPromiseAwaiter calls `set()` with the WakerRef
-// passed to `poll()` if RustPromiseAwaiter is unable to find an optimized path for awaiting its
-// Promise. Later on, when its Promise becomes ready, RustPromiseAwaiter will use OptionWaker to
-// call wake the wrapped Waker.
-//
-// Otherwise, if RustPromiseAwaiter finds an optimized path for awaiting its Promise, it calls
-// `set_none()` on the OptionWaker to ensure it's empty.
-struct OptionWaker;
+// An owned clone of a `std::task::Waker` (see awaiter.rs), held by RustPromiseAwaiter as a
+// `rust::Box<RustWaker>`: move-only, dropped automatically, woken via its `wake()` method. The
+// full (cxx-generated) definition lives in ffi.rs.h; this forward declaration is all the member
+// declaration below needs.
+struct RustWaker;
 
 // =======================================================================================
 // RustPromiseAwaiter
@@ -46,25 +47,19 @@ struct OptionWaker;
 // alignment using bindgen. See inside awaiter.c++ for a static_assert to remind us to re-run
 // bindgen.
 //
-// RustPromiseAwaiter has two base classes: KJ Event, and a LinkedObject template instantiation. We
-// use the Event to discover when our wrapped Promise is ready. Our Event fire() implementation
-// records the fact that we are done, then wakes our Waker or arms the FuturePollEvent, if we
-// have one. We access the FuturePollEvent via our LinkedObject base class mixin. It gives us the
-// ability to store a weak reference to the FuturePollEvent, if we were last polled by one.
+// RustPromiseAwaiter has one base class: KJ Event. We use the Event, via the native
+// `node->onReady(this)` mechanism, to discover when our wrapped Promise is ready (exactly as a KJ
+// coroutine registers its own Event on the promise it `co_await`s). Our Event fire() implementation
+// records the fact that we are done, then wakes our Waker or arms the FuturePollEvent, if we have
+// one. We hold a weak reference to the FuturePollEvent that last polled us (see maybePollEvent
+// below), so a fired Promise can arm that poll event directly.
 //
 // Cancellation: Dropping the RustPromiseAwaiter destroys its OwnPromiseNode, cancelling the
 // wrapped KJ promise. If the RustPromiseAwaiter was never constructed, Rust's OwnPromiseNode::drop()
 // cancels the promise directly.
-class RustPromiseAwaiter final: public kj::_::Event,
-                                public LinkedObject<FuturePollEvent, RustPromiseAwaiter> {
+class RustPromiseAwaiter final: public kj::_::Event {
  public:
-  // The Rust code which constructs RustPromiseAwaiter passes us a pointer to a OptionWaker, which can
-  // be thought of as a Rust-native component RustPromiseAwaiter. Its job is to hold a clone of
-  // of any non-KJ Waker that we are polled with, and forward calls to `wake()`. Ideally, we could
-  // store the clone of the Waker ourselves (it's just two pointers) on the C++ side, so the
-  // lifetime safety is more obvious. But, storing a reference works for now.
-  RustPromiseAwaiter(
-      OptionWaker& optionWaker, OwnPromiseNode node, kj::SourceLocation location = {});
+  RustPromiseAwaiter(OwnPromiseNode node, kj::SourceLocation location = {});
   ~RustPromiseAwaiter() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(RustPromiseAwaiter);
 
@@ -84,27 +79,48 @@ class RustPromiseAwaiter final: public kj::_::Event,
 
   // Poll this Promise for readiness.
   //
-  // If the Waker is a KjWaker, you may pass the KjWaker pointer as a second parameter. This may
-  // allow the implementation of `poll()` to optimize the wake by arming a KJ Event directly when
-  // the wrapped Promise becomes ready.
-  //
-  // If the Waker is not a KjWaker, the `maybeKjWaker` pointer argument must be nullptr.
-  bool poll(const WakerRef& waker, const KjWaker* maybeKjWaker);
+  // The two-argument overload is for polls driven by a PollWaker (i.e. a `co_await`ed Future's
+  // poll): it may optimize the wake by arming a KJ Event directly when the wrapped Promise
+  // becomes ready. Polls driven by any other Waker use the one-argument overload.
+  bool poll(const WakerRef& waker);
+  bool poll(const WakerRef& waker, const PollWaker& pollWaker);
 
   // Release ownership of the OwnPromiseNode. Asserts if called before the Promise is ready; that
   // is, `poll()` must have returned true prior to calling `take_own_promise_node()`.
   OwnPromiseNode take_own_promise_node();
 
  private:
-  // The Rust code which instantiates RustPromiseAwaiter does so with a OptionWaker object right
-  // next to the RustPromiseAwaiter, such that it is dropped after RustPromiseAwaiter. Thus, our
-  // reference to our OptionWaker is stable. We use the OptionWaker to (optionally) store a clone of
-  // the Waker with which we were last polled.
+  // Weak link to the FuturePollEvent that last polled us (see the object-relationship overview in
+  // promise.rs); `link` is the intrusive-list hook by which the FuturePollEvent tracks us in its
+  // `leaves` list (kj::List, same idiom kj itself uses for Event/PromiseNode bookkeeping) —
+  // "leaves" because we are the leaf promises of the future the event is polling, and any of us
+  // becoming ready must arm that one shared event.
   //
-  // When we wake our enclosing Future, either with the FuturePollEvent or with OptionWaker, we
-  // nullify this Maybe. Therefore, this Maybe being kj::none means our OwnPromiseNode is ready, and
-  // it is safe to call `node->get()` on it.
-  kj::Maybe<OptionWaker&> maybeOptionWaker;
+  // The two sides are maintained together: `weakPollEvent` is live if and only if this awaiter
+  // sits in that event's `leaves` list. Both mutations happen only in setPollEvent()/
+  // clearPollEvent(), and both destructors sever — ~RustPromiseAwaiter calls clearPollEvent()
+  // (removing itself from the list), while ~FuturePollEvent invalidates all weak references to
+  // itself and unlinks its `leaves`. Even if that invariant were ever broken, `kj::Weak` expires
+  // when the event is destroyed (and `kj::ListLink`'s destructor asserts it is unlinked), so a
+  // fired Promise can never arm, and tracing can never touch, a destroyed FuturePollEvent. A
+  // RustPromiseAwaiter may outlive the FuturePollEvent that first polled it (e.g. a stashed
+  // PromiseFuture) and later re-link to a different one.
+  friend class FuturePollEvent;
+  void setPollEvent(FuturePollEvent& futurePollEvent);
+  void clearPollEvent();
+
+  kj::Weak<FuturePollEvent> weakPollEvent;
+  kj::ListLink<RustPromiseAwaiter> link;
+
+  // The generic wake path: OUR OWN clone of the Waker we were last polled with, owned as an
+  // ordinary RAII handle (rust::Box drops the Rust-side clone automatically) and woken by fire()
+  // via its wake() method. Exactly one wake path is active at a time — the optimized path (a live
+  // `weakPollEvent` link) drops any stored clone, and the generic path clears the link.
+  kj::Maybe<::rust::Box<RustWaker>> storedWaker;
+
+  // Set (permanently) by fire(): our Promise is ready, poll() must return true, and
+  // take_own_promise_node() / `node->get()` are safe.
+  bool done = false;
 
   kj::UnwindDetector unwindDetector;
   OwnPromiseNode node;
@@ -117,16 +133,18 @@ struct GuardedRustPromiseAwaiter: ExecutorGuarded<RustPromiseAwaiter> {
   // We need to inherit constructors or else placement-new will try to aggregate-initialize us.
   using ExecutorGuarded<RustPromiseAwaiter>::ExecutorGuarded;
 
-  bool poll(const WakerRef& waker, const KjWaker* maybeKjWaker) {
-    return get().poll(waker, maybeKjWaker);
+  bool poll(const WakerRef& waker) {
+    return get().poll(waker);
+  }
+  bool pollWithPollWaker(const WakerRef& waker, const PollWaker& pollWaker) {
+    return get().poll(waker, pollWaker);
   }
   OwnPromiseNode take_own_promise_node() {
     return get().take_own_promise_node();
   }
 };
 
-void guarded_rust_promise_awaiter_new_in_place(
-    GuardedRustPromiseAwaiter*, OptionWaker*, OwnPromiseNode);
+void guarded_rust_promise_awaiter_new_in_place(GuardedRustPromiseAwaiter*, OwnPromiseNode);
 void guarded_rust_promise_awaiter_drop_in_place(GuardedRustPromiseAwaiter*);
 
 // =======================================================================================
@@ -136,20 +154,24 @@ void guarded_rust_promise_awaiter_drop_in_place(GuardedRustPromiseAwaiter*);
 // `Event::fire()` override which actually polls the Future; this class implements all other base
 // class virtual functions.
 //
-// A FuturePollEvent contains an optional ArcWakerPromiseAwaiter and a list of zero or more
-// RustPromiseAwaiters. These "sub-Promise awaiters" all wrap a KJ Promise of some sort, and arrange
-// to arm the FuturePollEvent when their Promises become ready.
+// A FuturePollEvent owns an optional FutureWakerCell (handed out to Rust by PollWaker::cloneCell())
+// and a list of zero or more RustPromiseAwaiters. These "sub-Promise awaiters" all wrap a KJ
+// Promise of some sort, and arrange to arm the FuturePollEvent when their Promises become ready; a
+// woken FutureWakerCell arms it the same way.
 //
 // The PromiseNode base class is a hack to implement async tracing. That is, we only implement the
 // `tracePromise()` function, and decide which Promise to trace into if/when the coroutine calls our
 // `tracePromise()` implementation. This primarily makes the lifetimes easier to manage: our
-// RustPromiseAwaiter LinkedObjects have independent lifetimes from the FuturePollEvent, so we
-// mustn't leave references to them, or their members, lying around in the Coroutine class.
-class FuturePollEvent: public kj::_::PromiseNode,
-                       public kj::_::Event,
-                       public LinkedGroup<FuturePollEvent, RustPromiseAwaiter> {
+// weakly-linked RustPromiseAwaiter leaves have independent lifetimes from the FuturePollEvent, so
+// we mustn't leave references to them, or their members, lying around in the Coroutine class.
+//
+// The PtrTarget base class lets everything that needs to point back at this event hold a
+// `kj::Weak<FuturePollEvent>` — expired automatically on destruction — instead of a bare
+// reference: the RustPromiseAwaiter leaves do.
+class FuturePollEvent: public kj::_::PromiseNode, public kj::_::Event, public kj::PtrTarget {
  public:
-  FuturePollEvent(kj::SourceLocation location = {}): Event(location) {}
+  FuturePollEvent(kj::SourceLocation location = {});
+  ~FuturePollEvent() noexcept(false);
 
   // -------------------------------------------------------
   // PromiseNode API
@@ -159,42 +181,42 @@ class FuturePollEvent: public kj::_::PromiseNode,
 
   void tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent) override;
 
- protected:
-  // PollScope is a LazyArcWaker which is associated with a specific FuturePollEvent, allowing
-  // optimized Promise `.await`s. Additionally, PollScope's destructor arranges to await any
-  // ArcWaker promise which was lazily created.
-  //
-  // Used by FutureAwaiter<T>, our derived class.
-  class PollScope;
-
  private:
-  // Private API for PollScope.
-  void enterPollScope() noexcept;
-  void exitPollScope(kj::Maybe<kj::Promise<void>> maybeLazyArcWakerPromise);
+  // Hand out a new strong reference to this event's FutureWakerCell. Used by
+  // PollWaker::cloneCell(). The cell is created eagerly with this event (so even the borrowed
+  // per-poll waker can be cloned or woken from any thread) and lives until both this event and
+  // every Rust reference are gone; ~FuturePollEvent neutralizes it so late wakes no-op.
+  friend class PollWaker;
+  kj::Arc<FutureWakerCell> cloneWakerCell();
 
-  kj::Maybe<OwnPromiseNode> arcWakerPromise;
-};
+  // Hand out a weak reference to this event (expired automatically on destruction). PtrTarget's
+  // addWeakToThis() is protected; this forwards it to our friends (RustPromiseAwaiter's leaf
+  // link).
+  kj::Weak<FuturePollEvent> addWeakRef() {
+    return addWeakToThis();
+  }
 
-class FuturePollEvent::PollScope: public LazyArcWaker {
- public:
-  // `futurePollEvent` is the FuturePollEvent responsible for calling `Future::poll()`, and must
-  // outlive this PollScope.
-  PollScope(FuturePollEvent& futurePollEvent);
-  ~PollScope() noexcept(false);
-  KJ_DISALLOW_COPY_AND_MOVE(PollScope);
+  // Weakly-linked list of the RustPromiseAwaiters ("leaves") this Future is currently `.await`ing
+  // and which may arm this poll event when their Promises become ready. The reverse direction of
+  // each leaf's `weakPollEvent`: the list is unlinked on either side's destruction (and
+  // kj::ListLink's destructor asserts unlinked-ness), while the leaves' weak references expire
+  // automatically via PtrTarget.
+  friend class RustPromiseAwaiter;
+  kj::List<RustPromiseAwaiter, &RustPromiseAwaiter::link> leaves;
 
-  // The Event which is using this PollScope to poll() a Future. Waking this FuturePollEvent's
-  // PollScope arms this Event (possibly via a cross-thread promise fulfiller). We also arm the
-  // Event directly in the RustPromiseAwaiter class, to more optimally `.await` KJ Promises from
-  // within Rust. If the current thread's kj::Executor is not the same as the one which owns the
-  // FuturePollEvent, this function returns kj::none.
-  kj::Maybe<FuturePollEvent&> tryGetFuturePollEvent() const override;
-
- private:
-  struct FuturePollEventHolder {
-    FuturePollEvent& futurePollEvent;
+  // The FutureWakerCell handed out by cloneWakerCell(). We hold one strong reference through
+  // this guard, whose destructor neutralizes the cell (nulling its weak Event link so retained
+  // Rust references become safe no-ops) before releasing it — the invalidation is tied to this
+  // event's destruction structurally, not by a destructor body remembering to call it.
+  struct NeutralizeGuard {
+    kj::Arc<FutureWakerCell> cell;
+    ~NeutralizeGuard() noexcept(false) {
+      if (cell.get() != nullptr) {
+        cell->neutralize();
+      }
+    }
   };
-  ExecutorGuarded<FuturePollEventHolder> holder;
+  NeutralizeGuard wakerCell;
 };
 
 // =======================================================================================
@@ -204,7 +226,7 @@ template <typename F>
 concept Future = requires(F f) {
   typename F::Output;
   {
-    f.poll(kj::instance<const KjWaker&>(),
+    f.poll(kj::instance<const PollWaker&>(),
         kj::instance<typename ::kj::_::ExceptionOr<typename F::Output>&>())
   } -> std::same_as<void>;
 };
@@ -256,15 +278,10 @@ class FutureAwaiter final: public FuturePollEvent {
   void poll() {
     if (isDone()) return;
 
-    // TODO(perf): Check if we already have an ArcWaker from a previous suspension and give it to
-    //   LazyArcWaker for cloning if we have the last reference to it at this point. This could save
-    //   memory allocations, but would depend on making XThreadFulfiller and XThreadPaf resettable
-    //   to really benefit.
-
     {
-      PollScope pollScope(*this);
+      PollWaker pollWaker(*this);
 
-      future.poll(pollScope, result);
+      future.poll(pollWaker, result);
       if (isDone()) {
         onReadyEvent.arm();
       }

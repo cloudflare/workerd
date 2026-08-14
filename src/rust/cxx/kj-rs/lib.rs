@@ -1,6 +1,39 @@
-use awaiter::OptionWaker;
+// Safety & panic enforcement walls. Inherent-FFI crate: unsafe is
+// concentrated at the bridge and every op must sit in an explicit, documented unsafe
+// block; prod code returns Result/KjError rather than panicking (a panic on the async
+// poll path is a process abort). Test code is exempted below.
+#![deny(unsafe_op_in_unsafe_fn)]
+// Quarantine unsafe into named FFI islands: deny unsafe crate-wide, then re-allow it only on the
+// modules that genuinely need it (each carries its own `#![allow(unsafe_code)]`). Any module
+// without that opt-in — and any newly-added module — is compiler-proven unsafe-free, and no future
+// edit can smuggle unsafe into non-island code without tripping this deny.
+#![deny(unsafe_code)]
+#![deny(clippy::undocumented_unsafe_blocks)]
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    clippy::todo,
+    clippy::unimplemented
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::todo,
+        clippy::unimplemented
+    )
+)]
+
+// The cxx bridge expands vocabulary builtins (KjRc, KjMaybe, ...) to `::kj_rs::...` paths; make
+// that path resolve inside this crate itself, since ffi.rs's bridge uses them too.
+extern crate self as kj_rs;
+
 pub use awaiter::PromiseAwaiter;
-use awaiter::WakerRef;
 pub use date::KjDate;
 pub use future::FuturePollStatus;
 pub use future::map_err;
@@ -14,10 +47,12 @@ pub use promise::new_callbacks_promise_future;
 pub use refcount::repr::KjArc;
 pub use refcount::repr::KjRc;
 
-pub use crate::ffi::KjWaker;
+pub use crate::ffi::FutureWakerCell;
+pub use crate::ffi::PollWaker;
 
 mod awaiter;
 mod date;
+mod ffi;
 mod future;
 pub mod maybe;
 mod own;
@@ -36,80 +71,3 @@ pub type Result<T> = std::io::Result<T>;
 pub type Error = std::io::Error;
 
 pub trait JsgStruct {}
-
-#[cxx::bridge(namespace = "kj_rs")]
-mod ffi {
-
-    /// Representation of a `GuardedRustPromiseAwaiter` in C++. The size of the blob should match.
-    #[derive(Debug)]
-    pub struct GuardedRustPromiseAwaiterRepr {
-        _bindgen_opaque_blob: [u64; 13usize],
-    }
-
-    extern "Rust" {
-        type WakerRef<'a>;
-    }
-
-    extern "Rust" {
-        // We expose the Rust Waker type to C++ through this OptionWaker reference wrapper. cxx-rs
-        // does not allow us to export types defined outside this crate, such as Waker, directly.
-        //
-        // `LazyRustPromiseAwaiter` (the implementation of `.await` syntax/the IntoFuture trait),
-        // stores a OptionWaker immediately after `GuardedRustPromiseAwaiter` in declaration order.
-        // pass the Waker to the `RustPromiseAwaiter` class, which is implemented in C++
-        type OptionWaker;
-        fn set(&mut self, waker: &WakerRef);
-        fn set_none(&mut self);
-        fn wake_if_some(&mut self);
-    }
-
-    unsafe extern "C++" {
-        include!("kj-rs/waker.h");
-
-        // Match the definition of the abstract virtual class in the C++ header.
-        type KjWaker;
-        #[cxx_name = "clone"]
-        fn clone_kj_waker(&self) -> *const KjWaker;
-        fn wake(&self);
-        fn wake_by_ref(&self);
-        fn drop(&self);
-    }
-
-    unsafe extern "C++" {
-        include!("kj-rs/promise.h");
-
-        type OwnPromiseNode = crate::OwnPromiseNode;
-
-        /// # Safety
-        /// `node` must point to a live `OwnPromiseNode`.
-        unsafe fn own_promise_node_drop_in_place(node: *mut OwnPromiseNode);
-    }
-
-    unsafe extern "C++" {
-        include!("kj-rs/awaiter.h");
-
-        type GuardedRustPromiseAwaiter;
-
-        /// # Safety
-        /// The pointers must identify valid storage and a live waker for the awaiter's lifetime.
-        unsafe fn guarded_rust_promise_awaiter_new_in_place(
-            ptr: *mut GuardedRustPromiseAwaiter,
-            rust_waker_ptr: *mut OptionWaker,
-            node: OwnPromiseNode,
-        );
-        /// # Safety
-        /// `ptr` must point to an initialized guarded awaiter.
-        unsafe fn guarded_rust_promise_awaiter_drop_in_place(ptr: *mut GuardedRustPromiseAwaiter);
-
-        /// # Safety
-        /// `maybe_kj_waker`, when non-null, must point to a live `KjWaker`.
-        unsafe fn poll(
-            self: Pin<&mut GuardedRustPromiseAwaiter>,
-            waker: &WakerRef,
-            maybe_kj_waker: *const KjWaker,
-        ) -> bool;
-
-        #[must_use]
-        fn take_own_promise_node(self: Pin<&mut GuardedRustPromiseAwaiter>) -> OwnPromiseNode;
-    }
-}
