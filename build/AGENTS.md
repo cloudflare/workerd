@@ -35,9 +35,13 @@ Custom Bazel rules (`wd_*` macros) for C++, TypeScript, Rust, Cap'n Proto, and t
 that adds workerd-specific static checks:
 
 - `jsg-visit-for-gc`: flags JSG resource types whose visitable fields
-  (`jsg::Ref`, `jsg::JsRef`, `jsg::V8Ref`, `jsg::Function`, `jsg::Promise`,
-  `jsg::Value`, etc., plus `kj::Maybe`/`Array`/`Vector`/
+  (`jsg::Ref`, `jsg::JsRef`, `jsg::V8Ref`, `jsg::Name`, `jsg::Function`,
+  `jsg::Promise`, `jsg::Value`, etc., plus `kj::Maybe`/`Array`/`Vector`/
   `OneOf` and `jsg::Optional` wrappers thereof) are missing from `visitForGc()`.
+  `kj::Own`/`kj::Rc`/`kj::Arc` are ownership barriers: fields behind them are
+  held as strong roots, never visited, and the check rejects visitation that
+  reaches through a barrier (`visitor.visit(*owned)`,
+  `visitor.visit(owned->field)`, `owned->visitForGc(visitor)`).
 - `workerd-angled-includes` - requires includes of workers/capnproto code from
     different directories to use angled brackets
 - `workerd-consume`: flags calls to methods annotated with `WD_CONSUME` when
@@ -68,8 +72,8 @@ Usage:
   plugin via `--load=`.
 - Suppress an intentional non-visit with `// NOLINT(jsg-visit-for-gc)` plus a
   comment explaining why the field is safe to skip (see `src/workerd/api/streams/queue.h`
-  for `ByteQueue::Entry::store` and `src/workerd/api/node/diagnostics-channel.h`
-  for `Channel::name`).
+  for `ValueQueue::Entry::value` and `ByteQueue::Entry::store`, which sit behind
+  kj::Rc ownership barriers).
 
 ### Incremental check rollout
 

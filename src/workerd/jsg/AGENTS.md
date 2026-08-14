@@ -94,12 +94,21 @@ These rules MUST be followed when writing or modifying JSG code:
 10. **Prefer `JSG_PROTOTYPE_PROPERTY`** over `JSG_INSTANCE_PROPERTY` unless there's a
     specific reason — instance properties break GC optimization
 11. **Use `// NOLINT(jsg-visit-for-gc)` to document intentional non-visits.** When a
-    GC-visitable field intentionally is not visited (e.g., a `kj::Rc`-owned object
-    unreachable from JS, or a type visited via a different mechanism), suppress the
-    `jsg-visit-for-gc` clang-tidy diagnostic with a `// NOLINT(jsg-visit-for-gc)`
-    comment and a brief explanation of *why* it's safe to skip.
+    GC-visitable field intentionally is not visited (e.g., a field of a `kj::Rc`-shared
+    object held as a strong root), suppress the `jsg-visit-for-gc` clang-tidy
+    diagnostic with a `// NOLINT(jsg-visit-for-gc)` comment and a brief explanation
+    of *why* it's safe to skip.
 
-12. **Module evaluation MUST NOT drain the microtask queue while nested.** Draining
+12. **`kj::Own`/`kj::Rc`/`kj::Arc` are GC traversal barriers.** An object behind an
+    owning pointer is not reliably re-visited after the owner moves, so a handle it
+    holds that was visited (marked weak) can be collected while the object is still
+    alive. Never trace through a barrier (`visitor.visit(*owned)`,
+    `visitor.visit(owned->field)`, `owned->visitForGc(visitor)`); JSG handles behind
+    a barrier stay strong until their owner drops them. This trades collectability
+    for correctness: a JS-visible cycle through a barrier-held object will not be
+    collected, so keep such ownership chains cycle-free.
+
+13. **Module evaluation MUST NOT drain the microtask queue while nested.** Draining
     while an ancestor module is still `kEvaluating` can run an async module's
     fulfillment callback early and trip a fatal V8 CHECK
     (`status() >= kEvaluatingAsync`). Evaluation depth is tracked by the RAII
@@ -112,8 +121,9 @@ These rules MUST be followed when writing or modifying JSG code:
     pending evaluation promise instead of an error.
 
 The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
-automatically detects missing `visitForGc` implementations and unvisited fields
-across the codebase, enforcing invariants 1 and 2 at build time.
+automatically detects missing `visitForGc` implementations, unvisited fields, and
+visitation that reaches through an ownership barrier, enforcing invariants 1, 2,
+and 12 at build time.
 
 ## CODE REVIEW RULE
 

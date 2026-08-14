@@ -14,12 +14,22 @@ namespace clang_tidy {
 
 // Clang-tidy check that validates JSG resource types correctly visit their
 // GC roots. Flags fields of visitable types (jsg::Ref, jsg::V8Ref, jsg::JsRef,
-// jsg::Function, jsg::Promise, jsg::Value, etc., plus
+// jsg::Name, jsg::Function, jsg::Promise, jsg::Value, etc., plus
 // kj::Maybe/Array/Vector/OneOf and jsg::Optional wrappers thereof) that are
 // not visited in the class's visitForGc() method.
 //
+// kj::Own, kj::Rc, and kj::Arc are ownership barriers: an object behind one
+// is not reliably re-visited after the owning pointer moves, so a handle it
+// holds that was visited (marked weak) can be collected while the object is
+// still alive. JSG handles behind a barrier must be held as strong
+// (unvisited) roots. Fields of barrier types are therefore never visitable,
+// and visitForGc bodies that reach through a barrier (`visitor.visit(*owned)`,
+// `visitor.visit(owned->field)`, `visitor.visit(rc.get()->field)`) are
+// diagnosed.
+//
 // This check helps prevent GC-related bugs where JavaScript objects are
-// prematurely collected because the C++ side failed to mark them as reachable.
+// prematurely collected because the C++ side failed to mark them as reachable
+// (or marked them reachable through an unstable ownership path).
 class VisitForGcCheck : public clang::tidy::ClangTidyCheck {
  public:
   VisitForGcCheck(clang::StringRef Name, clang::tidy::ClangTidyContext *Context)
@@ -59,6 +69,11 @@ class VisitForGcCheck : public clang::tidy::ClangTidyCheck {
   void checkRecord(const clang::CXXRecordDecl *record);
   void collectVisitedFields(const clang::Stmt *stmt,
                             llvm::DenseSet<const clang::FieldDecl *> &visitedFields);
+
+  // Walks a visitForGc body and diagnoses GcVisitor::visit/visitAll arguments
+  // that reach through an ownership barrier (kj::Own/kj::Rc/kj::Arc).
+  void flagBarrierCrossings(const clang::Stmt *stmt);
+  void flagBarrierDerefsIn(const clang::Stmt *stmt);
 
   // True if `record` declares its own visitForGc method or transitively
   // inherits one.

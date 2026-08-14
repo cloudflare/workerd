@@ -250,6 +250,15 @@ This is intentionally weak and does NOT keep its target alive during GC.
 Attempting to `visitor.visit()` a weak ref field is a compile error — the correct
 signal that weak references should not be traced. Do not include them in `visitForGc()`.
 
+**Ownership barriers**: `kj::Own<T>`, `kj::Rc<T>`, and `kj::Arc<T>`.
+An object behind an owning pointer is not reliably re-visited after the owner
+moves, so a handle it holds that was visited (marked weak) can be collected while
+the object is still alive. Never trace through a barrier
+(`visitor.visit(*owned)`, `visitor.visit(owned->field)`,
+`owned->visitForGc(visitor)`); JSG handles behind a barrier are held as strong
+roots until their owner drops them. The `jsg-visit-for-gc` clang-tidy check
+enforces this.
+
 ## Weak References
 
 `jsg::WeakRef<T>` provides a non-owning, automatically-invalidated reference

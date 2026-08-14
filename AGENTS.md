@@ -253,8 +253,10 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 - `JSG_RESOURCE_TYPE` for reference types, `JSG_STRUCT` for value types
 - `js.alloc<T>()` for resource allocation
 - The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
-  validates that GC-visitable fields are traced in `visitForGc()`. Run via
-  `just clang-tidy <target>`. See `build/AGENTS.md` for details.
+  validates that GC-visitable fields are traced in `visitForGc()` and that
+  visitation never reaches through the `kj::Own`/`kj::Rc`/`kj::Arc` ownership
+  barriers (such handles stay strong roots). Run via `just clang-tidy <target>`.
+  See `build/AGENTS.md` for details.
 - The `workerd-unsafe-continuation-capture` clang-tidy check flags lambdas
   passed to async sinks (`kj/jsg::Promise::then`, `IoContext::run/awaitIo/...`,
   `kj::evalLater`, ...) that capture bare references, `[this]`, or non-owning

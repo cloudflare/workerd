@@ -63,6 +63,80 @@ const llvm::StringRef kAnyArgContainers[] = {
     "kj::OneOf",
 };
 
+// Ownership templates that act as GC traversal barriers. An object behind
+// kj::Own/kj::Rc/kj::Arc is not reliably re-visited after the owning pointer
+// moves: a handle it holds that was visited (and therefore marked weak) can be
+// collected while the object is still alive. JSG handles behind an ownership
+// barrier must be held as strong roots — fields of these types are never
+// visitable, and visitForGc bodies must not reach through them.
+const llvm::StringRef kBarrierTemplates[] = {
+    "kj::Own",
+    "kj::Rc",
+    "kj::Arc",
+};
+
+// Returns the matched barrier template name ("kj::Own" etc.) if `qt` is an
+// ownership barrier type; otherwise an empty StringRef.
+llvm::StringRef getBarrierTypeName(clang::QualType qt) {
+  if (qt.isNull()) return {};
+  qt = qt.getNonReferenceType().getUnqualifiedType();
+  const auto *rd = qt.getTypePtr()->getAsCXXRecordDecl();
+  if (!rd) return {};
+  auto fqn = rd->getQualifiedNameAsString();
+  for (auto suffix : kBarrierTemplates) {
+    if (endsWithQualified(fqn, suffix)) return suffix;
+  }
+  return {};
+}
+
+// Returns the barrier template name if `expr` unwraps an ownership barrier:
+// operator*/operator-> on a barrier type, or a .get() call on one.
+llvm::StringRef getBarrierDeref(const clang::Expr *expr) {
+  if (const auto *opCall = llvm::dyn_cast<clang::CXXOperatorCallExpr>(expr)) {
+    auto op = opCall->getOperator();
+    if ((op == clang::OO_Star || op == clang::OO_Arrow) && opCall->getNumArgs() >= 1) {
+      return getBarrierTypeName(opCall->getArg(0)->getType());
+    }
+    return {};
+  }
+  if (const auto *memberCall = llvm::dyn_cast<clang::CXXMemberCallExpr>(expr)) {
+    if (const auto *method = memberCall->getMethodDecl()) {
+      if (method->getNameAsString() == "get") {
+        return getBarrierTypeName(memberCall->getImplicitObjectArgument()->getType());
+      }
+    }
+  }
+  return {};
+}
+
+// True if the member-access chain leading to `memberExpr` reaches through an
+// ownership barrier (e.g. `owned->field`, `(*owned).field`,
+// `owned.get()->field`). Such an access must not count as GC coverage of the
+// field: the barrier diagnostic fires instead.
+bool baseCrossesBarrier(const clang::MemberExpr *memberExpr) {
+  const clang::Expr *e = memberExpr->getBase();
+  while (e != nullptr) {
+    e = e->IgnoreParenImpCasts();
+    if (const auto *inner = llvm::dyn_cast<clang::MemberExpr>(e)) {
+      e = inner->getBase();
+      continue;
+    }
+    return !getBarrierDeref(e).empty();
+  }
+  return false;
+}
+
+// True if `call` invokes jsg::GcVisitor::visit or ::visitAll.
+bool isGcVisitorVisitCall(const clang::CXXMemberCallExpr *call) {
+  const auto *method = call->getMethodDecl();
+  if (method == nullptr) return false;
+  auto name = method->getNameAsString();
+  if (name != "visit" && name != "visitAll") return false;
+  const auto *parent = method->getParent();
+  if (parent == nullptr) return false;
+  return endsWithQualified(parent->getQualifiedNameAsString(), "jsg::GcVisitor");
+}
+
 ContainerKind getContainerKind(llvm::StringRef qualifiedName) {
   for (auto suffix : kFirstArgContainers) {
     if (endsWithQualified(qualifiedName, suffix)) return ContainerKind::FirstArg;
@@ -98,6 +172,11 @@ bool isVisitableType(clang::QualType qt) {
   // Template specialization: dispatch on outer template name.
   std::string tmpl = getTemplateQualifiedName(qt);
   if (tmpl.empty()) return false;
+
+  // Ownership barriers stop the walk: handles behind them are strong roots.
+  for (auto suffix : kBarrierTemplates) {
+    if (endsWithQualified(tmpl, suffix)) return false;
+  }
 
   for (auto suffix : kVisitableLeafTemplates) {
     if (endsWithQualified(tmpl, suffix)) return true;
@@ -196,7 +275,8 @@ void VisitForGcCheck::onEndOfTranslationUnit() {
   if (!mainFile || !isImplFile(mainFile->getName())) return;
 
   // First pass: walk every visible visitForGc body to populate
-  // transitivelyVisitedFields_ and holderVisitForGcVisible_. This lets us
+  // transitivelyVisitedFields_ and holderVisitForGcVisible_, and to flag
+  // visits that reach through ownership barriers. This lets us
   // (a) recognize when a parent's visitForGc reaches into a nested struct
   // field, and (b) restrict "used-as-field" diagnostics to TUs where some
   // holder's body is actually parseable here.
@@ -211,6 +291,7 @@ void VisitForGcCheck::onEndOfTranslationUnit() {
       if (!method->isDefined(defn) || defn == nullptr) continue;
       llvm::DenseSet<const clang::FieldDecl *> unused;
       collectVisitedFields(defn->getBody(), unused);
+      flagBarrierCrossings(defn->getBody());
     }
   }
 
@@ -361,7 +442,10 @@ void VisitForGcCheck::collectVisitedFields(
 
   if (auto *memberExpr = llvm::dyn_cast<clang::MemberExpr>(stmt)) {
     auto *memberDecl = memberExpr->getMemberDecl();
-    if (auto *fieldDecl = llvm::dyn_cast<clang::FieldDecl>(memberDecl)) {
+    auto *fieldDecl = llvm::dyn_cast<clang::FieldDecl>(memberDecl);
+    // Accesses that reach through an ownership barrier do not count as GC
+    // coverage; flagBarrierCrossings diagnoses them instead.
+    if (fieldDecl != nullptr && !baseCrossesBarrier(memberExpr)) {
       if (isVisitableType(fieldDecl->getType())) {
         visitedFields.insert(fieldDecl->getCanonicalDecl());
       }
@@ -385,6 +469,48 @@ void VisitForGcCheck::collectVisitedFields(
 
   for (const auto *child : stmt->children()) {
     collectVisitedFields(child, visitedFields);
+  }
+}
+
+void VisitForGcCheck::flagBarrierCrossings(const clang::Stmt *stmt) {
+  if (!stmt) return;
+
+  if (const auto *call = llvm::dyn_cast<clang::CXXMemberCallExpr>(stmt)) {
+    if (isGcVisitorVisitCall(call)) {
+      for (const auto *arg : call->arguments()) {
+        flagBarrierDerefsIn(arg);
+      }
+    } else if (const auto *method = call->getMethodDecl();
+               method != nullptr && method->getNameAsString() == "visitForGc") {
+      // Direct `owned->visitForGc(visitor)` calls cross the barrier just the
+      // same as `visitor.visit(*owned)`.
+      flagBarrierDerefsIn(call->getImplicitObjectArgument());
+    }
+  }
+
+  for (const auto *child : stmt->children()) {
+    flagBarrierCrossings(child);
+  }
+}
+
+void VisitForGcCheck::flagBarrierDerefsIn(const clang::Stmt *stmt) {
+  if (!stmt) return;
+
+  if (const auto *expr = llvm::dyn_cast<clang::Expr>(stmt)) {
+    auto barrier = getBarrierDeref(expr);
+    if (!barrier.empty()) {
+      diag(expr->getExprLoc(),
+           "GC visitation reaches through ownership barrier '%0'; JSG handles "
+           "behind kj::Own/kj::Rc/kj::Arc must be held as strong roots, not "
+           "visited: the owned object is not re-visited after the owner moves, "
+           "so a visited handle can be left weak and collected while still in "
+           "use")
+          << barrier;
+    }
+  }
+
+  for (const auto *child : stmt->children()) {
+    flagBarrierDerefsIn(child);
   }
 }
 
