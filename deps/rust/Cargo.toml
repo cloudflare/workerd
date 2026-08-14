@@ -50,7 +50,7 @@ serde_json = { version = "1", features = ["unbounded_depth"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 # tokio is huge, let's enable only features when we actually need them.
-tokio = { version = "1", default-features = false, features = ["net", "rt", "rt-multi-thread", "time"] }
+tokio = { version = "1", default-features = false, features = ["net", "rt", "rt-multi-thread", "sync", "time"] }
 tracing = { version = "0", default-features = false, features = ["std"] }
 swc_common = "25"
 swc_ts_fast_strip = "57"
