@@ -43,8 +43,14 @@ const llvm::StringRef kVisitableLeafTemplates[] = {
 };
 
 // Non-template visitable leaf types.
+//
+// jsg::Name is deliberately absent: its visitForGc is private (friend-only),
+// so GcVisitor::visit(name) does not compile and no holder can satisfy a
+// demand to visit it. A Name field's symbol handle is simply held as a strong
+// root for the holder's lifetime; a v8::Symbol holds only its description and
+// cannot participate in a JS<->C++ reference cycle, so visitation is never
+// required for collectability either.
 const llvm::StringRef kVisitableLeafTypes[] = {
-    "jsg::Name",
     "jsg::Value",
     "jsg::Data",
 };

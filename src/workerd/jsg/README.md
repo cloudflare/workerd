@@ -235,7 +235,6 @@ All types that must be visited in `visitForGc()` if held as Resource Type member
 | `jsg::JsRef<T>`             | Persistent ref to JsValue type   |
 | `jsg::Optional<T>`          | When `T` is GC-visitable         |
 | `jsg::LenientOptional<T>`   | When `T` is GC-visitable         |
-| `jsg::Name`                 | Property name (string or symbol) |
 | `jsg::Function<Sig>`        | Wrapped JS/C++ function          |
 | `jsg::Promise<T>`           | JS promise wrapper               |
 | `jsg::Promise<T>::Resolver` | Promise resolver                 |
@@ -249,6 +248,11 @@ All types that must be visited in `visitForGc()` if held as Resource Type member
 This is intentionally weak and does NOT keep its target alive during GC.
 Attempting to `visitor.visit()` a weak ref field is a compile error — the correct
 signal that weak references should not be traced. Do not include them in `visitForGc()`.
+
+`jsg::Name` is also not visitable: its `visitForGc` is private (friend-only), so
+holders cannot visit it. A `Name` field's symbol handle is held as a strong root
+for the holder's lifetime; a `v8::Symbol` cannot participate in a JS↔C++
+reference cycle, so this cannot leak cycles — only pin the symbol wrapper.
 
 ## Weak References
 

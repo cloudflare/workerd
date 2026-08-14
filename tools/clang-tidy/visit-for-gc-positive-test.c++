@@ -16,11 +16,6 @@ class Ref {
   void visitForGc(GcVisitor& visitor) {}
 };
 
-class Name {
- public:
-  void visitForGc(GcVisitor& visitor) {}
-};
-
 class GcVisitor {
  public:
   template <typename... Args>
@@ -69,14 +64,6 @@ struct MissedRefField: public jsg::Object {
 // dispatches to jsg::Object's empty default and misses the field.
 struct NoVisitMethod: public jsg::Object {
   jsg::Ref<Widget> orphaned;
-};
-
-// Case P3: unvisited jsg::Name field. This locks CURRENT behavior: the check
-// lists jsg::Name as a visitable leaf type.
-struct MissedNameField: public jsg::Object {
-  jsg::Name name;
-
-  void visitForGc(jsg::GcVisitor& visitor) {}
 };
 
 // Case P4: unvisited kj::Maybe<jsg::Ref<T>> field (FirstArg container).

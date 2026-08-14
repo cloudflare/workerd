@@ -39,12 +39,11 @@ expect_diag "field 'missed' of visitable type" "P1: unvisited jsg::Ref field"
 expect_diag \
   "field 'orphaned' of visitable type 'jsg::Ref<Widget>' is not visited in visitForGc (class has no visitForGc method)" \
   "P2: resource with no visitForGc"
-expect_diag "field 'name' of visitable type" "P3: unvisited jsg::Name field"
 expect_diag "field 'maybeRef' of visitable type" "P4: unvisited kj::Maybe<jsg::Ref>"
 expect_diag "field 'stateful' of visitable type" "P5: unvisited kj::OneOf alternative"
 
 # Exact-count lock: one diagnostic per positive case, no more, no fewer.
-expected_count=5
+expected_count=4
 actual_count=$(grep -c "\[jsg-visit-for-gc" <<<"${positive_output}" || true)
 if [[ "${actual_count}" -ne "${expected_count}" ]]; then
   printf 'Expected exactly %s jsg-visit-for-gc diagnostics, got %s\n' \

@@ -16,8 +16,10 @@ class Ref {
   void visitForGc(GcVisitor& visitor) {}
 };
 
+// Mirrors the real jsg::Name: visitForGc is private (friend-only), so no
+// holder can visit a Name.
 class Name {
- public:
+ private:
   void visitForGc(GcVisitor& visitor) {}
 };
 
@@ -66,10 +68,9 @@ struct AllVisited: public jsg::Object {
   jsg::Ref<Widget> ref;
   kj::Maybe<jsg::Ref<Widget>> maybeRef;
   kj::OneOf<int, jsg::Ref<Widget>> stateful;
-  jsg::Name name;
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(ref, maybeRef, stateful, name);
+    visitor.visit(ref, maybeRef, stateful);
   }
 };
 
@@ -93,7 +94,17 @@ struct StandalonePlainHolder {
   jsg::Ref<Widget> strongRoot;
 };
 
-// Case N4: KNOWN BLIND SPOT, locked as current behavior. Any MemberExpr
+// Case N4: jsg::Name is not a demanded type. Its visitForGc is private
+// (friend-only), so no holder can visit it; the symbol handle is held as a
+// strong root for the holder's lifetime, and a v8::Symbol cannot form a
+// JS<->C++ cycle, so visitation is never required.
+struct UnvisitedNameField: public jsg::Object {
+  jsg::Name name;
+
+  void visitForGc(jsg::GcVisitor& visitor) {}
+};
+
+// Case N5: KNOWN BLIND SPOT, locked as current behavior. Any MemberExpr
 // naming the field inside the visitForGc body counts as a "visit" — including
 // a mere comparison. The check does not verify the field is an argument of
 // GcVisitor::visit.
