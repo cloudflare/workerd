@@ -13,6 +13,7 @@ mod test_own;
 mod test_refcount;
 
 use kj_rs::KjOwn;
+use test_futures::get_side_effect_counter;
 use test_futures::new_drop_cancellable_promise_without_polling;
 use test_futures::new_error_handling_future_void_infallible;
 use test_futures::new_errored_future_void;
@@ -20,17 +21,23 @@ use test_futures::new_future_awaiting_cancellable_promise;
 use test_futures::new_kj_errored_future_void;
 use test_futures::new_layered_ready_future_void;
 use test_futures::new_naive_select_future_void;
+use test_futures::new_panicking_after_await_future_void;
+use test_futures::new_panicking_future_void;
+use test_futures::new_panicking_infallible_future_void;
 use test_futures::new_pending_future_void;
 use test_futures::new_promise_i32_awaiting_future_void;
 use test_futures::new_ready_future_i32;
 use test_futures::new_ready_future_void;
 use test_futures::new_select_with_cancellation;
+use test_futures::new_side_effect_future_void;
 use test_futures::new_threaded_delay_future_void;
 use test_futures::new_two_step_cancellable_future;
 use test_futures::new_waking_future_void;
 use test_futures::new_wrapped_waker_future_void;
 use test_futures::poll_and_stash_promise_future;
+use test_futures::reset_side_effect_counter;
 use test_futures::unstash_and_await_promise_future;
+use test_futures::wake_delayed_future;
 use test_maybe::take_maybe_own;
 use test_maybe::take_maybe_own_ret;
 use test_maybe::take_maybe_ref;
@@ -241,16 +248,13 @@ pub mod ffi {
     enum CloningAction {
         None,
         CloneSameThread,
-        CloneBackgroundThread,
         WakeByRefThenCloneSameThread,
     }
 
     enum WakingAction {
         None,
         WakeByRefSameThread,
-        WakeByRefBackgroundThread,
         WakeSameThread,
-        WakeBackgroundThread,
     }
 
     // Helper functions to create BoxFutureVoids for testing purposes.
@@ -260,12 +264,21 @@ pub mod ffi {
         async fn new_ready_future_shared_type() -> Shared;
         async fn new_waking_future_void(cloning_action: CloningAction, waking_action: WakingAction);
         async fn new_threaded_delay_future_void();
+        // Wakes the waker stashed by `new_threaded_delay_future_void`'s future, on the loop thread,
+        // to drive an asynchronous same-thread wake after poll() has returned.
+        fn wake_delayed_future();
         async fn new_layered_ready_future_void() -> Result<()>;
 
         async fn new_naive_select_future_void() -> Result<()>;
         async fn new_wrapped_waker_future_void() -> Result<()>;
 
         async fn new_errored_future_void() -> Result<()>;
+
+        // Unwind protection (kj-rs/future.rs): panics escaping a bridged future's poll()
+        // must become rejected promises (kj::Exception), not process aborts.
+        async fn new_panicking_future_void() -> Result<()>;
+        async fn new_panicking_infallible_future_void();
+        async fn new_panicking_after_await_future_void() -> Result<()>;
 
         async fn new_kj_errored_future_void() -> Result<()>;
 
@@ -275,7 +288,17 @@ pub mod ffi {
         async fn new_ready_future_i32(value: i32) -> Result<i32>;
         async fn new_pass_through_feature_shared() -> Shared;
 
-        async unsafe fn work_before_poll<'a>(target: &'a mut u64) -> Result<()>;
+        // Eager-by-default test helpers. The bridge's conversion polls the future
+        // synchronously to its first suspension at promise creation. The cold-promise
+        // (`RustFuture::lazily()`) counterparts bypass the bridge: they hand C++ the raw
+        // `RustFuture` through plain `extern "C"` helpers (see `test_futures.rs`).
+        #[expect(clippy::allow_attributes)] // Only called from C++ tests; #[expect(dead_code)] fails in builds where the lint does not fire
+        #[allow(dead_code)]
+        fn reset_side_effect_counter();
+        #[expect(clippy::allow_attributes)] // Only called from C++ tests; #[expect(dead_code)] fails in builds where the lint does not fire
+        #[allow(dead_code)]
+        fn get_side_effect_counter() -> u64;
+        async fn new_side_effect_future_void();
 
         // Cancellation test helpers.
         async fn new_future_awaiting_cancellable_promise() -> Result<()>;
@@ -313,6 +336,20 @@ async fn pass_struct_with_maybe(_x: ffi::StructWithMaybe) -> Result<()> {
 unsafe impl Send for ffi::OpaqueAtomicRefcountedClass {}
 // Safety: the test type follows the thread-safety contract of its C++ implementation.
 unsafe impl Sync for ffi::OpaqueAtomicRefcountedClass {}
+
+// Compile-time thread-safety contracts (kj-rs/own.rs, kj-rs/refcount.rs):
+//
+// KjOwn is never Send/Sync: its type-erased kj disposer (kj::Rc, arena, ...) may not be
+// thread-safe, regardless of T.
+static_assertions::assert_not_impl_any!(KjOwn<u64>: Send, Sync);
+static_assertions::assert_not_impl_any!(KjOwn<ffi::OpaqueCxxClass>: Send, Sync);
+// KjArc matches std::sync::Arc: Send/Sync require T: Send + Sync...
+static_assertions::assert_impl_all!(kj_rs::KjArc<ffi::OpaqueAtomicRefcountedClass>: Send, Sync);
+// ...so a Send + !Sync payload (Cell) must make KjArc neither Send nor Sync (clones would
+// otherwise hand concurrent &T to multiple threads).
+static_assertions::assert_not_impl_any!(kj_rs::KjArc<std::cell::Cell<u64>>: Send, Sync);
+// KjRc (non-atomic refcount) must never be Send or Sync.
+static_assertions::assert_not_impl_any!(kj_rs::KjRc<ffi::OpaqueRefcountedClass>: Send, Sync);
 
 pub fn modify_own_return(mut own: KjOwn<ffi::OpaqueCxxClass>) -> KjOwn<ffi::OpaqueCxxClass> {
     own.pin_mut().set_data(72);
@@ -355,6 +392,33 @@ fn work_before_poll(target: &mut u64) -> impl Future<Output = Result<()>> {
     async move {
         unimplemented!("not expected to be polled");
     }
+}
+
+/// Hands C++ the raw, not-yet-converted future from [`work_before_poll`].
+///
+/// The returned future must never be polled (its body panics), so it cannot go through a
+/// bridged `async fn` shim: those always apply `RustFuture`'s eager-by-default
+/// `kj::Promise` conversion, which polls at creation. The C++ test converts it with
+/// `RustFuture::lazily()` instead (see `awaitables-cc-test.c++`).
+///
+/// # Safety
+///
+/// `target` must be a valid, exclusive `u64` pointer that outlives the future; `out` must
+/// point to uninitialized storage for one `::kj_rs::repr::RustFuture` (future.h), which the
+/// caller takes ownership of.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kj_rs_demo_work_before_poll<'a>(
+    target: &'a mut u64,
+    out: *mut kj_rs::repr::RustFuture<'a, ()>,
+) {
+    let fut = kj_rs::repr::future(Box::pin(kj_rs::map_err(
+        work_before_poll(target),
+        file!(),
+        line!(),
+    )));
+    // SAFETY: `out` points to uninitialized storage for one RustFuture, per this fn's
+    // `# Safety` contract.
+    unsafe { out.write(fut) };
 }
 
 #[cfg(test)]

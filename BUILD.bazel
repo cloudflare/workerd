@@ -1,7 +1,7 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_js//npm:defs.bzl", "npm_link_package")
 load("@bazel_skylib//lib:selects.bzl", "selects")
-load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "string_flag")
 load("@npm//:capnp-es/package_json.bzl", capnp_es_bins = "bin")
 load("@npm//:defs.bzl", "npm_link_all_packages")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
@@ -126,6 +126,44 @@ config_setting(
 bool_flag(
     name = "dead_strip",
     build_setting_default = True,
+)
+
+# =============================================================================
+# I/O backend selection: a build/compile/link-time hermeticity guarantee.
+#
+#   --//:io_backend=rust  (default) -- the rust I/O layer: the process event loop is tokio
+#                         (kj-rs-tokio) and every socket/stream is tokio-backed (kj-rs-io); the
+#                         C++ layers above the streams (kj-http, kj-tls, capnp-rpc) are unchanged
+#                         and run over those tokio streams. In this config the forbidden concrete
+#                         C++ OS-I/O target must be ABSENT from the link, enforced by the
+#                         build-graph aspect in //build:rust_io_backend.bzl (whose forbidden
+#                         set grows as later migration stages move more of the stack to rust).
+#   --//:io_backend=cxx   -- workerd's I/O is the concrete C++ stack end to end, including the
+#                         kj OS event loop and sockets. Byte-identical to the pre-migration
+#                         build.
+#
+# Code that must differ per backend keys off the WORKERD_RUST_IO_BACKEND define (see
+# //src/workerd/util:setup-async-io) or off the config_settings below in a select().
+string_flag(
+    name = "io_backend",
+    build_setting_default = "rust",
+    values = [
+        "cxx",
+        "rust",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "io_backend_rust",
+    flag_values = {":io_backend": "rust"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "io_backend_cxx",
+    flag_values = {":io_backend": "cxx"},
+    visibility = ["//visibility:public"],
 )
 
 config_setting(

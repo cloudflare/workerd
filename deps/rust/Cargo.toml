@@ -32,6 +32,7 @@ syn = { version = "2", features = ["full"] }
 ada-url = { version = "4", default-features = false, features = ["std"] }
 anyhow = "1"
 async-trait = { version = "0", default-features = false }
+bytes = "1"
 capnp = "0"
 capnpc = "0"
 capnp-rpc = "0"
@@ -48,9 +49,9 @@ ruff_python_parser = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1"
 # param_extractor depends on unbounded_depth feature
 serde_json = { version = "1", features = ["unbounded_depth"] }
 serde = { version = "1", features = ["derive"] }
+socket2 = "0.6"
 thiserror = "2"
-# tokio is huge, let's enable only features when we actually need them.
-tokio = { version = "1", default-features = false, features = ["net", "rt", "rt-multi-thread", "time"] }
+tokio = { version = "1", default-features = false, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = { version = "0", default-features = false, features = ["std"] }
 swc_common = "25"
 swc_ts_fast_strip = "57"

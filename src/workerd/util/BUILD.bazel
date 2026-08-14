@@ -1,6 +1,7 @@
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("//:build/kj_test.bzl", "kj_test")
+load("//:build/rust_io_backend.bzl", "rust_io_backend_local_defines")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
 bool_flag(
@@ -87,7 +88,7 @@ wd_cc_library(
     deps = [
         ":duration-exceeded-logger",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
         # TODO(cleanup): Only for abortable.h, factor out
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
@@ -135,7 +136,7 @@ wd_cc_library(
         ":strings",
         "//src/workerd/jsg:memory-tracker",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
     ],
 )
 
@@ -220,7 +221,7 @@ wd_cc_library(
         ":account-limits",
         ":sentry",
         ":sqlite-metering",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
     ],
 )
 
@@ -464,4 +465,34 @@ wd_cc_library(
 kj_test(
     src = "state-machine-test.c++",
     deps = [":state-machine"],
+)
+
+# The kj::setupAsyncIo() "seam": supplies that single symbol appropriately for each I/O backend,
+# so call sites depend on this target and call kj::setupAsyncIo() unchanged in both configs (no
+# #if at the call site, and kj/async-io.h itself is untouched).
+#   * default (cxx): setup-async-io-tokio.c++ compiles to an empty TU; native kj::setupAsyncIo()
+#     comes from the :kj-async umbrella. Byte-identical to depending on :kj-async directly.
+#   * --//:io_backend=rust: kj-async-os (the OS event loop) is NOT linked; the .c++ (gated on
+#     WORKERD_RUST_IO_BACKEND_RUST) defines a tokio-backed kj::setupAsyncIo() plus an inert
+#     kj::UnixEventPort (whose real defs live in the unlinked async-unix.c++). //deps:rust_runtime
+#     supplies the Rust allocator shims.
+wd_cc_library(
+    name = "setup-async-io",
+    srcs = ["setup-async-io-tokio.c++"],
+    local_defines = rust_io_backend_local_defines(),
+    visibility = ["//visibility:public"],
+    deps = select({
+        "//:io_backend_rust": [
+            "//deps:rust_runtime",
+            # The abstract async I/O layer (kj/async-io.h: AsyncIoStream / Network / AsyncIoContext)
+            # the shim's setupAsyncIo() is written against...
+            "@capnp-cpp//src/kj:kj-async-io",
+            # ...plus the declaration-only view of the OS event port (kj/async-unix.h), whose
+            # out-of-line member definitions the shim supplies instead of :kj-async-os.
+            "@capnp-cpp//src/kj:kj-async-os-hdrs",
+            "//src/rust/cxx/kj-rs-io",
+            "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        ],
+        "//conditions:default": ["@capnp-cpp//src/kj:kj-async"],
+    }),
 )

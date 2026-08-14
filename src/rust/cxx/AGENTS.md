@@ -33,8 +33,28 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
 - `src/` and `include/` — cxx Rust and C++ runtimes
 - `syntax/`, `gen/`, and `macro/` — bridge parser and code generators
 - `kj-rs/` — KJ promises/futures, exceptions, ownership, refcounting, dates, and `Maybe`
+- `kj-rs-tokio/` — `TokioEventPort`: a `kj::EventPort` backed by a per-thread tokio
+  `current_thread` runtime, plus `setupTokioAsyncIo()` (no I/O providers) and
+  `kj_rs_tokio::spawn()`
+- `kj-rs-io/` — KJ async I/O interfaces over tokio (`kj::AsyncIoStream`, listeners,
+  `kj::Network`, providers, signals, file watching), `kj_rs_io::setupTokioAsyncIo()` as the
+  drop-in `kj::setupAsyncIo()` replacement, the stream unwrap fast path, and
+  `serve_kj_stream()` for Rust servers consuming KJ streams
 - `tests/` and `kj-rs/tests/` — Rust and C++ bridge integration tests
 - `tools/bazel/` — Bazel bridge-generation macro used by this component's tests
+
+## Async bridge semantics
+
+- Marking a fn `async` in `extern "Rust"` yields a `kj::Promise<T>` in C++; `async` in
+  `extern "C++"` yields an `impl Future` in Rust.
+- Bridged `kj::Promise<T>`s are **eager by default**: the Rust future is polled to its first
+  suspension point at the call (KJ code assumes hot promises), so callers never need
+  `.eagerlyEvaluate(nullptr)`. `RustFuture::lazily()` (kj-rs/future.h) is the C++-side
+  escape hatch for the rare cold case.
+- The waker bridge is single-threaded: a Rust `.await` of a KJ promise links to the
+  `FuturePollEvent` via an intrusive weak link (`RustPromiseAwaiter::link` /
+  `FuturePollEvent::leaves`), and a cloned waker is a same-thread `FutureWakerCell` that arms
+  the `FuturePollEvent` directly (no atomics, no cross-thread fulfiller).
 
 ## Conventions
 

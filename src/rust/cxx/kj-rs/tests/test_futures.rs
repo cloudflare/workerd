@@ -25,6 +25,54 @@ pub async fn new_ready_future_void() {
     std::future::ready(()).await
 }
 
+// Eager-by-default vs `RustFuture::lazily()` test helpers: they record when their body ran
+// so the C++ driver can observe eager promises running at creation and `.lazily()` ones only
+// when awaited. The bridge's generated shims always apply the eager conversion, so the
+// `.lazily()` tests receive the raw `RustFuture` through the plain `extern "C"` helpers
+// below instead of bridged `async fn` declarations.
+
+static SIDE_EFFECT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn reset_side_effect_counter() {
+    SIDE_EFFECT_COUNTER.store(0, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn get_side_effect_counter() -> u64 {
+    SIDE_EFFECT_COUNTER.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Increments the side-effect counter when its body runs (first poll), then completes.
+pub async fn new_side_effect_future_void() {
+    SIDE_EFFECT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Same body as [`new_side_effect_future_void`], but handed to C++ as a raw `RustFuture`
+/// (via [`kj_rs_demo_lazy_side_effect_future`]) and converted with `RustFuture::lazily()`:
+/// the C++ promise is cold, so the counter only moves once the promise is first awaited.
+pub async fn new_lazy_side_effect_future_void() {
+    SIDE_EFFECT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Hands C++ the raw, not-yet-converted [`new_lazy_side_effect_future_void`] future.
+///
+/// `awaitables-cc-test.c++` converts it with `RustFuture::lazily()` (future.h). Plain
+/// `extern "C"` because the bridge's generated `async fn` shims always apply the
+/// eager-by-default `kj::Promise` conversion before C++ ever sees the future.
+///
+/// # Safety
+///
+/// `out` must point to uninitialized storage for one `::kj_rs::repr::RustFuture`
+/// (future.h), which the caller takes ownership of.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kj_rs_demo_lazy_side_effect_future(
+    out: *mut kj_rs::repr::RustInfallibleFuture<'static, ()>,
+) {
+    let fut = kj_rs::repr::infallible_future(Box::pin(new_lazy_side_effect_future_void()));
+    // SAFETY: `out` points to uninitialized storage for one RustFuture, per this fn's
+    // `# Safety` contract.
+    unsafe { out.write(fut) };
+}
+
 struct WakingFuture {
     done: bool,
     cloning_action: CloningAction,
@@ -45,8 +93,7 @@ fn do_no_clone_wake(waker: &Waker, waking_action: WakingAction) {
     match waking_action {
         WakingAction::None => {}
         WakingAction::WakeByRefSameThread => waker.wake_by_ref(),
-        WakingAction::WakeByRefBackgroundThread => on_background_thread(|| waker.wake_by_ref()),
-        WakingAction::WakeSameThread | WakingAction::WakeBackgroundThread => {
+        WakingAction::WakeSameThread => {
             panic!("cannot wake() without cloning");
         }
         _ => panic!("invalid WakingAction"),
@@ -57,9 +104,7 @@ fn do_cloned_wake(waker: Waker, waking_action: WakingAction) {
     match waking_action {
         WakingAction::None => {}
         WakingAction::WakeByRefSameThread => waker.wake_by_ref(),
-        WakingAction::WakeByRefBackgroundThread => on_background_thread(|| waker.wake_by_ref()),
         WakingAction::WakeSameThread => waker.wake(),
-        WakingAction::WakeBackgroundThread => on_background_thread(move || waker.wake()),
         _ => panic!("invalid WakingAction"),
     }
 }
@@ -81,10 +126,6 @@ impl Future for WakingFuture {
                 let waker = waker.clone();
                 do_cloned_wake(waker, self.waking_action);
             }
-            CloningAction::CloneBackgroundThread => {
-                let waker = on_background_thread(|| waker.clone());
-                do_cloned_wake(waker, self.waking_action);
-            }
             CloningAction::WakeByRefThenCloneSameThread => {
                 waker.wake_by_ref();
                 let waker = waker.clone();
@@ -102,44 +143,52 @@ pub async fn new_waking_future_void(cloning_action: CloningAction, waking_action
     WakingFuture::new(cloning_action, waking_action).await
 }
 
-struct ThreadedDelayFuture {
-    handle: Option<std::thread::JoinHandle<()>>,
+// A future that, on its first poll, stashes a clone of its waker and returns Pending WITHOUT
+// waking; a later call to `wake_delayed_future()` — made by the C++ driver on the event loop's own
+// thread, after poll() has already returned — wakes the stashed clone, arming the FuturePollEvent
+// so the next poll completes. This exercises an *asynchronous* wake (one that arrives after poll()
+// returned, via a cloned waker) entirely on the loop thread, which is all the single-thread bridge
+// supports.
+
+thread_local! {
+    static DELAYED_WAKER: std::cell::RefCell<Option<Waker>> = const { std::cell::RefCell::new(None) };
 }
 
-impl ThreadedDelayFuture {
+struct DelayedWakeFuture {
+    done: bool,
+}
+
+impl DelayedWakeFuture {
     fn new() -> Self {
-        Self { handle: None }
+        Self { done: false }
     }
 }
 
-/// Run a function, `f`, on a thread in the background and return its result.
-fn on_background_thread<T: Send>(f: impl FnOnce() -> T + Send) -> T {
-    std::thread::scope(|scope| match scope.spawn(f).join() {
-        Ok(value) => value,
-        Err(payload) => std::panic::resume_unwind(payload),
-    })
-}
-
-impl Future for ThreadedDelayFuture {
+impl Future for DelayedWakeFuture {
     type Output = ();
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<()> {
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
+        if self.done {
             return Poll::Ready(());
         }
-
-        let waker = cx.waker();
-        let waker = on_background_thread(|| waker.clone());
-        self.handle = Some(std::thread::spawn(|| {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            waker.wake();
-        }));
+        // Stash a clone of the waker for the C++ driver to wake later, on this same thread.
+        DELAYED_WAKER.with(|w| *w.borrow_mut() = Some(cx.waker().clone()));
+        self.done = true;
         Poll::Pending
     }
 }
 
 pub async fn new_threaded_delay_future_void() {
-    ThreadedDelayFuture::new().await
+    DelayedWakeFuture::new().await
+}
+
+/// Wake the waker stashed by [`DelayedWakeFuture`]. Called by the C++ test driver on the event
+/// loop thread, after the future's first poll has returned Pending.
+pub fn wake_delayed_future() {
+    DELAYED_WAKER.with(|w| {
+        if let Some(waker) = w.borrow_mut().take() {
+            waker.wake();
+        }
+    });
 }
 
 pub async fn new_layered_ready_future_void() -> Result<()> {
@@ -214,6 +263,26 @@ pub async fn new_errored_future_void() -> Result<()> {
     Err(std::io::Error::other("test error"))
 }
 
+// Unwind-protection helpers (kj-rs/future.rs vtable): a panic escaping a bridged future's
+// poll() must surface to C++ as a rejected kj::Promise carrying a kj::Exception, not a
+// process abort. These panic at different points to cover both the fallible and infallible
+// vtables and both the first-poll and event-loop-driven poll paths.
+
+pub async fn new_panicking_future_void() -> Result<()> {
+    panic!("bridged future panicked on purpose");
+}
+
+pub async fn new_panicking_infallible_future_void() {
+    panic!("bridged infallible future panicked on purpose");
+}
+
+pub async fn new_panicking_after_await_future_void() -> Result<()> {
+    crate::ffi::new_ready_promise_void()
+        .await
+        .expect("should not throw");
+    panic!("bridged future panicked after a suspension point");
+}
+
 pub async fn new_kj_errored_future_void() -> std::result::Result<(), cxx::KjError> {
     Err(cxx::KjError::new(
         cxx::KjExceptionType::Overloaded,
@@ -256,6 +325,43 @@ pub async fn new_future_awaiting_cancellable_promise() -> Result<()> {
         .await
         .map_err(Error::other)?;
     Ok(())
+}
+
+/// Like [`new_future_awaiting_cancellable_promise`], but handed to C++ as a raw
+/// `RustFuture` (via [`kj_rs_demo_lazy_future_awaiting_cancellable_promise`]) and converted
+/// with `RustFuture::lazily()`, so the C++ promise really is never polled unless awaited —
+/// the only way to exercise the "drop a never-polled future" path now that bridged promises
+/// are eager by default.
+pub async fn new_lazy_future_awaiting_cancellable_promise() -> Result<()> {
+    crate::ffi::new_cancellation_detecting_promise_void()
+        .await
+        .map_err(Error::other)?;
+    Ok(())
+}
+
+/// Hands C++ the raw, not-yet-converted [`new_lazy_future_awaiting_cancellable_promise`]
+/// future.
+///
+/// `awaitables-cc-test.c++` converts it with `RustFuture::lazily()` (future.h). Plain
+/// `extern "C"` because the bridge's generated `async fn` shims always apply the
+/// eager-by-default `kj::Promise` conversion before C++ ever sees the future.
+///
+/// # Safety
+///
+/// `out` must point to uninitialized storage for one `::kj_rs::repr::RustFuture`
+/// (future.h), which the caller takes ownership of.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kj_rs_demo_lazy_future_awaiting_cancellable_promise(
+    out: *mut kj_rs::repr::RustFuture<'static, ()>,
+) {
+    let fut = kj_rs::repr::future(Box::pin(kj_rs::map_err(
+        new_lazy_future_awaiting_cancellable_promise(),
+        file!(),
+        line!(),
+    )));
+    // SAFETY: `out` points to uninitialized storage for one RustFuture, per this fn's
+    // `# Safety` contract.
+    unsafe { out.write(fut) };
 }
 
 /// Two-step future: the first step completes normally, and the second step awaits a
