@@ -60,6 +60,8 @@ def wd_rust_binary(
         data = data,
         experimental_use_cc_common_link = 1,
         proc_macro_deps = proc_macro_deps,
+        # Tag with cpu:4 since this target depends on linkopts_default.
+        tags = tags + ["cpu:4"],
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
@@ -83,5 +85,6 @@ def wd_rust_binary(
         experimental_use_cc_common_link = 1,
         link_deps = ["//build/deps:linkopts_default", "@@//deps:rust_runtime"],
         size = test_size,
-        tags = ["no-coverage"],
+        # Tag with cpu:4 since this target depends on linkopts_default.
+        tags = ["no-coverage", "cpu:4"],
     )

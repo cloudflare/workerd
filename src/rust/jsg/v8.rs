@@ -42,6 +42,7 @@ use crate::Error;
 use crate::FromJS;
 use crate::GarbageCollected;
 use crate::Lock;
+use crate::Nullable;
 use crate::Number;
 use crate::Resource;
 #[expect(clippy::missing_safety_doc)]
@@ -3099,6 +3100,16 @@ impl ToLocalValue for Number {
                 lock.isolate(),
                 ffi::local_new_number(lock.isolate().as_ffi(), self.value()),
             )
+        }
+    }
+}
+
+impl<T: ToLocalValue> ToLocalValue for Nullable<T> {
+    fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
+        match self {
+            Self::Some(v) => v.to_local(lock),
+            Self::Null => Local::<Value>::null(lock),
+            Self::Undefined => Local::<Value>::undefined(lock),
         }
     }
 }
