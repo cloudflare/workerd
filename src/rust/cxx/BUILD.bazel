@@ -8,6 +8,7 @@ rust_library(
     link_deps = [
         ":core",
         "//src/rust/cxx/third-party:runtime",
+        "@@//deps:rust_runtime",
     ],
     proc_macro_deps = [
         ":cxxbridge-macro",
@@ -86,6 +87,7 @@ rust_binary(
         "@//build/config:no_build": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
+    link_deps = ["@@//deps:rust_runtime"],
     deps = [
         ":gen",
         ":syntax",
