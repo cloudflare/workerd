@@ -6,6 +6,7 @@ def wd_cc_binary(
         name,
         visibility = None,
         deps = [],
+        tags = [],
         target_compatible_with = [],
         **kwargs):
     """Wrapper for cc_binary that sets common attributes
@@ -17,6 +18,8 @@ def wd_cc_binary(
             "//conditions:default": [],
         }) + target_compatible_with,
         visibility = visibility,
+        # Tag with cpu:8 since this target depends on linkopts_tool.
+        tags = tags + ["cpu:8"],
         deps = deps + ["//build/deps:linkopts_tool"],
         **kwargs
     )
