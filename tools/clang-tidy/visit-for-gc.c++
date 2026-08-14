@@ -35,11 +35,16 @@ bool endsWithQualified(llvm::StringRef qualifiedName, llvm::StringRef suffix) {
   return qualifiedName[sep - 1] == ':' && qualifiedName[sep - 2] == ':';
 }
 
-// Visitable leaf templates: each holds a GC root and must be visited.
+// Visitable leaf templates: each holds a GC root, has a public visitForGc,
+// and must be visited.
+//
+// jsg::AsyncGenerator is deliberately absent: unlike jsg::Generator it has no
+// visitForGc at all, so a holder cannot visit one — its handles are strong
+// roots for the holder's lifetime.
 const llvm::StringRef kVisitableLeafTemplates[] = {
     "jsg::Ref",      "jsg::V8Ref",   "jsg::JsRef",
     "jsg::Function", "jsg::Promise", "jsg::HashableV8Ref",
-    "jsg::MemoizedIdentity",
+    "jsg::MemoizedIdentity", "jsg::Generator",
 };
 
 // Non-template visitable leaf types.
@@ -79,9 +84,12 @@ bool isPromiseResolver(const clang::CXXRecordDecl *rd) {
 // (variants) are visitable if any element type is.
 enum class ContainerKind { None, FirstArg, AnyArg };
 
+// jsg::Sequence<T> is a kj::Array<T> subclass with no visitForGc of its own;
+// like the other containers it is visitable iff its element type is (via
+// GcVisitor::visitAll).
 const llvm::StringRef kFirstArgContainers[] = {
     "kj::Maybe",  "kj::Array",       "kj::Vector",
-    "jsg::Optional", "jsg::LenientOptional",
+    "jsg::Optional", "jsg::LenientOptional", "jsg::Sequence",
 };
 
 const llvm::StringRef kAnyArgContainers[] = {

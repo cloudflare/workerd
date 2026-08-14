@@ -27,6 +27,15 @@ class Promise {
   void visitForGc(GcVisitor& visitor) {}
 };
 
+template <typename T>
+class Generator {
+ public:
+  void visitForGc(GcVisitor& visitor) {}
+};
+
+template <typename T>
+class Sequence {};
+
 class GcVisitor {
  public:
   template <typename... Args>
@@ -104,6 +113,22 @@ struct MissedResolver: public jsg::Object {
 // Case P7: unvisited kj::Maybe<jsg::Promise<T>::Resolver> field.
 struct MissedMaybeResolver: public jsg::Object {
   kj::Maybe<jsg::Promise<int>::Resolver> maybeResolver;
+
+  void visitForGc(jsg::GcVisitor& visitor) {}
+};
+
+// Case P8: unvisited jsg::Generator<T> field (public visitForGc, traces the
+// generator's underlying object handle).
+struct MissedGenerator: public jsg::Object {
+  jsg::Generator<int> gen;
+
+  void visitForGc(jsg::GcVisitor& visitor) {}
+};
+
+// Case P9: unvisited jsg::Sequence with a visitable element type (visited via
+// GcVisitor::visitAll in real code).
+struct MissedSequence: public jsg::Object {
+  jsg::Sequence<jsg::Ref<Widget>> seq;
 
   void visitForGc(jsg::GcVisitor& visitor) {}
 };

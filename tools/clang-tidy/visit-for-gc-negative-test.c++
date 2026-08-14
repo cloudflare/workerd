@@ -34,6 +34,20 @@ class Promise {
   void visitForGc(GcVisitor& visitor) {}
 };
 
+template <typename T>
+class Generator {
+ public:
+  void visitForGc(GcVisitor& visitor) {}
+};
+
+// Mirrors the real jsg::AsyncGenerator: no visitForGc, so holders cannot
+// visit one.
+template <typename T>
+class AsyncGenerator {};
+
+template <typename T>
+class Sequence {};
+
 class GcVisitor {
  public:
   template <typename... Args>
@@ -136,5 +150,19 @@ struct VisitedResolver: public jsg::Object {
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(resolver, maybeResolver);
+  }
+};
+
+// Case N7: visited Generator, Sequence of non-visitable elements, Sequence
+// visited via visitAll, and AsyncGenerator (not visitable, held strong).
+struct GeneratorAndSequence: public jsg::Object {
+  jsg::Generator<int> gen;
+  jsg::Sequence<int> plainSeq;
+  jsg::Sequence<jsg::Ref<Widget>> refSeq;
+  jsg::AsyncGenerator<int> asyncGen;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(gen);
+    visitor.visitAll(refSeq);
   }
 };
