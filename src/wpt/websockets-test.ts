@@ -312,30 +312,14 @@ export default {
     comment: 'Cookie support helper, not an actual test',
     omittedTests: true,
   },
-  'eventhandlers.any.js': {
-    comment: 'TreatNonCallableAsNull behavior differs from spec',
-    expectedFailures: [
-      'Event handler for open should have [TreatNonCallableAsNull]',
-      'Event handler for error should have [TreatNonCallableAsNull]',
-      'Event handler for close should have [TreatNonCallableAsNull]',
-      'Event handler for message should have [TreatNonCallableAsNull]',
-    ],
-  },
+  'eventhandlers.any.js': {},
   'idlharness.any.js': {
     comment:
-      'Some interface/attribute tests still fail due to event handler and inherited property checks',
+      'Some interface/attribute tests still fail due to inherited property checks',
     expectedFailures: [
       'WebSocket interface: existence and properties of interface object',
       'WebSocket interface: attribute bufferedAmount',
-      'WebSocket interface: attribute onopen',
-      'WebSocket interface: attribute onerror',
-      'WebSocket interface: attribute onclose',
-      'WebSocket interface: attribute onmessage',
       'WebSocket interface: new WebSocket("ws://invalid") must inherit property "bufferedAmount" with the proper type',
-      'WebSocket interface: new WebSocket("ws://invalid") must inherit property "onopen" with the proper type',
-      'WebSocket interface: new WebSocket("ws://invalid") must inherit property "onerror" with the proper type',
-      'WebSocket interface: new WebSocket("ws://invalid") must inherit property "onclose" with the proper type',
-      'WebSocket interface: new WebSocket("ws://invalid") must inherit property "onmessage" with the proper type',
       'CloseEvent interface: existence and properties of interface object',
       'CloseEvent interface: attribute wasClean',
       'CloseEvent interface: attribute code',

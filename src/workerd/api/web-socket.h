@@ -343,6 +343,15 @@ class WebSocket: public EventTarget {
   kj::StringPtr getBinaryType();
   void setBinaryType(kj::String value);
 
+  // The event handler attributes the WebSocket standard defines. These are only registered
+  // when the specCompliantEventHandlerAttributes compat flag is enabled; without it, assigning
+  // `onmessage` and friends just sets an ordinary property that EventTarget's legacy
+  // `on<type>` lookup finds at dispatch time.
+  WD_EVENT_HANDLER_ATTRIBUTE(Open, "open");
+  WD_EVENT_HANDLER_ATTRIBUTE(Message, "message");
+  WD_EVENT_HANDLER_ATTRIBUTE(Close, "close");
+  WD_EVENT_HANDLER_ATTRIBUTE(Error, "error");
+
   JSG_RESOURCE_TYPE(WebSocket, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
     JSG_METHOD(accept);
@@ -379,6 +388,13 @@ class WebSocket: public EventTarget {
       JSG_READONLY_INSTANCE_PROPERTY(protocol, getProtocol);
       JSG_READONLY_INSTANCE_PROPERTY(extensions, getExtensions);
       JSG_INSTANCE_PROPERTY(binaryType, getBinaryType, setBinaryType);
+    }
+
+    if (flags.getSpecCompliantEventHandlerAttributes()) {
+      JSG_PROTOTYPE_PROPERTY(onopen, getOnOpen, setOnOpen);
+      JSG_PROTOTYPE_PROPERTY(onmessage, getOnMessage, setOnMessage);
+      JSG_PROTOTYPE_PROPERTY(onclose, getOnClose, setOnClose);
+      JSG_PROTOTYPE_PROPERTY(onerror, getOnError, setOnError);
     }
 
     JSG_TS_DEFINE(type WebSocketEventMap = {

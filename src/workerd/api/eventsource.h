@@ -68,37 +68,22 @@ class EventSource: public EventTarget {
   static jsg::Ref<EventSource> from(jsg::Lock& js, JsReadableStream stream);
 
   kj::Maybe<jsg::JsValue> getOnOpen(jsg::Lock& js) {
-    return onopenValue.map(
-        [&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue { return ref.getHandle(js); });
+    return getEventHandlerAttribute(js, "open"_kj);
   }
-  void setOnOpen(jsg::Lock& js, jsg::JsValue value) {
-    if (!value.isObject() && !value.isFunction()) {
-      onopenValue = kj::none;
-    } else {
-      onopenValue = jsg::JsRef<jsg::JsValue>(js, value);
-    }
+  void setOnOpen(jsg::Lock& js, jsg::Optional<EventHandlerAttributeValue> value) {
+    setEventHandlerAttribute(js, "open"_kj, kj::mv(value));
   }
   kj::Maybe<jsg::JsValue> getOnMessage(jsg::Lock& js) {
-    return onmessageValue.map(
-        [&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue { return ref.getHandle(js); });
+    return getEventHandlerAttribute(js, "message"_kj);
   }
-  void setOnMessage(jsg::Lock& js, jsg::JsValue value) {
-    if (!value.isObject() && !value.isFunction()) {
-      onmessageValue = kj::none;
-    } else {
-      onmessageValue = jsg::JsRef<jsg::JsValue>(js, value);
-    }
+  void setOnMessage(jsg::Lock& js, jsg::Optional<EventHandlerAttributeValue> value) {
+    setEventHandlerAttribute(js, "message"_kj, kj::mv(value));
   }
   kj::Maybe<jsg::JsValue> getOnError(jsg::Lock& js) {
-    return onerrorValue.map(
-        [&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue { return ref.getHandle(js); });
+    return getEventHandlerAttribute(js, "error"_kj);
   }
-  void setOnError(jsg::Lock& js, jsg::JsValue value) {
-    if (!value.isObject() && !value.isFunction()) {
-      onerrorValue = kj::none;
-    } else {
-      onerrorValue = jsg::JsRef<jsg::JsValue>(js, value);
-    }
+  void setOnError(jsg::Lock& js, jsg::Optional<EventHandlerAttributeValue> value) {
+    setEventHandlerAttribute(js, "error"_kj, kj::mv(value));
   }
 
   JSG_RESOURCE_TYPE(EventSource) {
@@ -169,12 +154,6 @@ class EventSource: public EventTarget {
 
   // Indicates that the close method has been previously called.
   bool closeCalled = false;
-
-  // The EventSource spec defines onopen, onmessage, and onerror as prototype
-  // properties on the class.
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> onopenValue;
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> onmessageValue;
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> onerrorValue;
 
   // The default reconnection wait time. This is fairly arbitrary and is left
   // entirely up to the implementation. The event stream can provide a new value.

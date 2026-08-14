@@ -1,0 +1,28 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "event-handler-attributes-spec-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "event-handler-attributes-test.js")
+        ],
+        bindings = [
+          (name = "MODE", text = "spec")
+        ],
+        compatibilityFlags = ["nodejs_compat", "spec_compliant_event_handler_attributes"],
+      )
+    ),
+    ( name = "event-handler-attributes-legacy-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "event-handler-attributes-test.js")
+        ],
+        bindings = [
+          (name = "MODE", text = "legacy")
+        ],
+        compatibilityFlags = ["nodejs_compat", "no_spec_compliant_event_handler_attributes"],
+      )
+    ),
+  ],
+);

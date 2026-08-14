@@ -1642,4 +1642,35 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2026-08-11");
   # Enables fast Workflow engine creation by generating instance IDs with the Durable Object
   # namespace's `newUniqueId()` method instead of UUIDs.
+
+  specCompliantEventHandlerAttributes @186 :Bool
+      $compatEnableFlag("spec_compliant_event_handler_attributes")
+      $compatDisableFlag("no_spec_compliant_event_handler_attributes");
+  # Makes `on<type>` event handler attributes behave the way the DOM and HTML standards
+  # describe them.
+  #
+  # Historically our `EventTarget` implementation looked for an `on<type>` property on the
+  # target itself every time an event was dispatched, and invoked it before any listener
+  # registered with `addEventListener()`. That behavior is not in any standard and it has
+  # two visible problems: `on<type>` handlers always run first instead of in registration
+  # order, and anything that subclasses `EventTarget` and implements `on<type>` properly
+  # (by registering a listener) gets its handler invoked twice per event.
+  #
+  # With this flag, `EventTarget` no longer looks for `on<type>` properties. Instead, the
+  # interfaces that the standards say have event handler attributes (`AbortSignal`,
+  # `WebSocket`, `MessagePort`, `EventSource`) implement them as accessors that register a
+  # regular listener, so they fire in registration order and only once. Assigning a new
+  # handler keeps the position of the original registration, and assigning null removes it.
+  #
+  # The global scope is deliberately excluded and keeps the property lookup for every event
+  # type, so `onfetch`, `onscheduled` and friends in service-worker syntax are unchanged. This is
+  # a remaining deviation rather than a fully spec-aligned surface: `WorkerGlobalScope` and
+  # `ServiceWorkerGlobalScope` do define event handler attributes (`onerror`,
+  # `onunhandledrejection`, `onrejectionhandled`, `onfetch`, ...), but the global also dispatches
+  # workerd-specific events (`scheduled`, `tail`, `trace`, `alarm`, `queue`) that no standard
+  # covers, and `onerror` is an `OnErrorEventHandler`, which has its own arguments and return
+  # value handling. Turning the standardized subset into real accessors also adds properties to
+  # the global object, which is a breaking change in its own right. That is left for a separate
+  # change; the lookup is skipped for any type that does have an event handler attribute, so such
+  # a change can be made incrementally without double-firing handlers.
 }

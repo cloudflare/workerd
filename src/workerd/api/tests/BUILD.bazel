@@ -497,6 +497,12 @@ wd_test(
 )
 
 wd_test(
+    src = "event-handler-attributes-test.wd-test",
+    args = ["--experimental"],
+    data = ["event-handler-attributes-test.js"],
+)
+
+wd_test(
     src = "events-test.wd-test",
     args = ["--experimental"],
     data = ["events-test.js"],

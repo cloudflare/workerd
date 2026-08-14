@@ -155,6 +155,16 @@ class Cloudflare: public jsg::Object {
 
 class WorkerGlobalScope: public EventTarget, public jsg::ContextGlobal {
  public:
+  WorkerGlobalScope() {
+    // The global scope keeps EventTarget's `on<type>` property lookup even when
+    // specCompliantEventHandlerAttributes is enabled, so `onfetch`, `onscheduled` and the like
+    // keep working the way they always have. Note that this leaves the global as a deviation:
+    // some of those handlers are standardized (`onerror`, `onunhandledrejection` and
+    // `onrejectionhandled` here, `onfetch` on ServiceWorkerGlobalScope) and some are
+    // workerd-specific. See enableLegacyOnPropertyLookup().
+    enableLegacyOnPropertyLookup();
+  }
+
   jsg::Unimplemented importScripts(kj::String s) {
     return {};
   };

@@ -84,14 +84,26 @@ class MessagePort final: public EventTarget {
   // separately. That's a kind of a weird rule but ok. To support
   // that we need to define an onmessage getter/setter pair.
   kj::Maybe<jsg::JsValue> getOnMessage(jsg::Lock& js);
-  void setOnMessage(jsg::Lock& js, jsg::JsValue value);
+  void setOnMessage(jsg::Lock& js, jsg::Optional<EventHandlerAttributeValue> value);
 
-  JSG_RESOURCE_TYPE(MessagePort) {
+  WD_EVENT_HANDLER_ATTRIBUTE(MessageError, "messageerror");
+
+  // The spec puts `onclose` on MessagePort itself, and `onmessage`/`onmessageerror` on the
+  // MessageEventTarget mixin that MessagePort includes.
+  WD_EVENT_HANDLER_ATTRIBUTE(Close, "close");
+
+  JSG_RESOURCE_TYPE(MessagePort, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
     JSG_METHOD(postMessage);
     JSG_METHOD(close);
     JSG_METHOD(start);
     JSG_PROTOTYPE_PROPERTY(onmessage, getOnMessage, setOnMessage);
+    if (flags.getSpecCompliantEventHandlerAttributes()) {
+      // Without the flag these are handled by EventTarget's `on<type>` property lookup, so
+      // defining accessors for them would be a no-op at best.
+      JSG_PROTOTYPE_PROPERTY(onmessageerror, getOnMessageError, setOnMessageError);
+      JSG_PROTOTYPE_PROPERTY(onclose, getOnClose, setOnClose);
+    }
   }
 
   jsg::Ref<MessagePort> addRef() {
@@ -129,13 +141,11 @@ class MessagePort final: public EventTarget {
   // To keep them both alive, maintain strong references to both
   // ports!
   kj::Maybe<jsg::WeakRef<MessagePort>> other;
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> onmessageValue;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     KJ_IF_SOME(pending, state.tryGet<Pending>()) {
       visitor.visitAll(pending);
     }
-    visitor.visit(onmessageValue);
   }
 };
 

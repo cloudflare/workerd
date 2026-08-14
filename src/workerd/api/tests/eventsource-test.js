@@ -230,7 +230,9 @@ export const eventTest = {
     });
     const { promise, resolve } = Promise.withResolvers();
     let count = 0;
-    eventsource.ontest = (event) => {
+    // EventSource only defines onopen/onmessage/onerror. Named events like this one have to be
+    // observed with addEventListener().
+    eventsource.addEventListener('test', (event) => {
       switch (count++) {
         case 0: {
           strictEqual(event.data, 'first');
@@ -243,7 +245,7 @@ export const eventTest = {
           break;
         }
       }
-    };
+    });
     await promise;
   },
 };

@@ -3880,6 +3880,14 @@ interface WebSocket extends EventTarget<WebSocketEventMap> {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/binaryType)
    */
   binaryType: "blob" | "arraybuffer";
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/open_event) */
+  onopen: any | null;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/message_event) */
+  onmessage: any | null;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/close_event) */
+  onclose: any | null;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/error_event) */
+  onerror: any | null;
 }
 interface WebSocketAcceptOptions {
   /**
@@ -4325,6 +4333,10 @@ declare abstract class MessagePort extends EventTarget {
   start(): void;
   get onmessage(): any | null;
   set onmessage(value: any | null);
+  get onmessageerror(): any | null;
+  set onmessageerror(value: any | null);
+  get onclose(): any | null;
+  set onclose(value: any | null);
 }
 /**
  * The **`MessageChannel`** interface of the Channel Messaging API allows us to create a new message channel and send data through it via its two MessagePort properties.
