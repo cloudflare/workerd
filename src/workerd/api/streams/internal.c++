@@ -2332,19 +2332,26 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
 
       if (handle.isArrayBuffer() || handle.isSharedArrayBuffer() || handle.isArrayBufferView() ||
           handle.isString()) {
+        // addFunctor so the Rc<State> (whose `owner` ref strongly pins the
+        // destination stream) is dropped at IoContext teardown even if the
+        // write promise never settles; a bare capture would otherwise retain
+        // both streams on the isolate heap until isolate death.
+        auto& ioContext = IoContext::current();
         return state->write(js, handle)
             .then(js,
-                [state = state.addRef()](
-                    jsg::Lock& js) mutable -> jsg::Promise<void> { return state->pipeLoop(js); },
-                [state = state.addRef()](
-                    jsg::Lock& js, jsg::Value reason) mutable -> jsg::Promise<void> {
+                ioContext.addFunctor(
+                    [state = state.addRef()](jsg::Lock& js) mutable -> jsg::Promise<void> {
+          return state->pipeLoop(js);
+        }),
+                ioContext.addFunctor([state = state.addRef()](jsg::Lock& js,
+                                         jsg::Value reason) mutable -> jsg::Promise<void> {
           if (state->isAborted() || state->isSourceReleased()) {
             return js.resolvedPromise();
           }
           auto error = jsg::JsValue(reason.getHandle(js));
           state->tryErrorParent(js, error);
           return state->pipeLoop(js);
-        });
+        }));
       }
     }
     // Undefined and null are perfectly valid values to pass through a ReadableStream,
