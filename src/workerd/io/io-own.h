@@ -106,10 +106,14 @@ class DeleteQueue: public kj::AtomicRefcounted {
     kj::Vector<OwnedObject*> queue;
     // Actions that some other IoContext has requested be executed in this IoContext. When
     // adding an action to this list, crossThreadFulfiller should be fulfilled, signaling the
-    // target IoContext to wake up and run actions. After draining the actions queue, the target
-    // IoContext should replace crossThreadFulfiller with a new one which will wake it up again.
+    // target IoContext to wake up and run actions.
     //
     // In particular, these actions are used to implement cross-context promise resolution.
+    //
+    // Running an action settles a promise owned by the target IoContext, which can run arbitrary
+    // JavaScript, so it requires a fully-formed request context. The target IoContext therefore
+    // only takes actions from this list while it has a current IncomingRequest; an actor sitting
+    // idle between events leaves them queued for its next event to run.
     //
     // Keep in mind the IoContext could be destroyed before the cross-thread signal runs, in
     // which case the actions will never run.

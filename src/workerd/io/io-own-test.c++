@@ -153,5 +153,38 @@ KJ_TEST("DeleteQueue signals its owner for actions scheduled while it is drainin
   KJ_EXPECT(runActions(fixture, *queue) == 2);
 }
 
+// Returns the handle another IoContext uses to push work onto `context`'s delete queue. This is the
+// same object the promise cross-context resolve callback unwraps from a promise's context tag.
+IoCrossContextExecutor& getCrossContextExecutor(jsg::Lock& js, IoContext& context) {
+  return *jsg::unwrapOpaqueRef<kj::Own<IoCrossContextExecutor>>(
+      js.v8Isolate, context.getPromiseContextTag(js));
+}
+
+KJ_TEST("cross-context actions scheduled during a drain still wake the IoContext") {
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("drain-rearm-test"))});
+
+  auto context = fixture.newIoContext();
+  // Draining runs application JavaScript, so it needs a request to run under.
+  auto request = fixture.newIncomingRequest(*context);
+
+  uint ran = 0;
+  fixture.enterContext(*request, [&](TestFixture::Environment& env) {
+    // runImpl() already drained the queue on the way in, so this action stays queued until the
+    // signal task picks it up.
+    getCrossContextExecutor(env.js, *context).execute(env.js, [&context, &ran](jsg::Lock& js) {
+      ++ran;
+      // Schedule a second action from within the first, modelling another IoContext scheduling work
+      // while this drain is already in progress. Consuming the signal without installing a fresh
+      // one first would leave this action queued with nothing outstanding to wake the context.
+      getCrossContextExecutor(js, *context).execute(js, [&ran](jsg::Lock&) { ++ran; });
+    });
+  });
+
+  for (uint i = 0; i < 100 && ran < 2; ++i) {
+    fixture.pollEventLoop();
+  }
+  KJ_EXPECT(ran == 2, ran);
+}
+
 }  // namespace
 }  // namespace workerd
