@@ -1857,11 +1857,8 @@ struct ValueReadable final: public kj::PtrTarget,
     }
   }
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    KJ_IF_SOME(s, state) {
-      visitor.visit(s.controller, *s.consumer);
-    }
-  }
+  // No visitForGc: ValueReadable lives behind a kj::Own (an ownership
+  // barrier), so its controller ref and consumer handles are strong roots.
 
   ValueReadable(DefaultController controller, ReadableStreamJsController& owner)
       : state(State(kj::mv(controller), addWeakToThis(), owner)) {}
@@ -2053,11 +2050,8 @@ struct ByteReadable final: public kj::PtrTarget,
     }
   }
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    KJ_IF_SOME(s, state) {
-      visitor.visit(s.controller, *s.consumer);
-    }
-  }
+  // No visitForGc: ByteReadable lives behind a kj::Own (an ownership
+  // barrier), so its controller ref and consumer handles are strong roots.
 
   ByteReadable(ByobController controller,
       ReadableStreamJsController& owner,
@@ -3218,21 +3212,17 @@ void ReadableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(pendingError);
   }
 
-  // Note: We cannot use state.visitForGc(visitor) here because the state machine's
-  // visitForGc passes kj::Own<T>& to visitor.visit(), but GcVisitor expects T& for
-  // types with visitForGc methods. We must dereference kj::Own manually.
+  // The kj::Own<ValueReadable>/kj::Own<ByteReadable> states are intentionally
+  // not visited: kj::Own is an ownership barrier, so the readable's JSG
+  // handles are held as strong roots until the state is dropped.
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(initial, Initial) {}
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
     KJ_CASE_ONEOF(error, StreamStates::Errored) {
       visitor.visit(error);
     }
-    KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
-      visitor.visit(*consumer);
-    }
-    KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
-      visitor.visit(*consumer);
-    }
+    KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {}
+    KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {}
   }
   visitor.visit(lock);
 }

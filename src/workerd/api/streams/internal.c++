@@ -2461,7 +2461,10 @@ void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
         visitor.visit(flush.promise);
       }
       KJ_CASE_ONEOF(pipe, kj::Own<Pipe>) {
-        pipe->visitForGc(visitor);
+        // Not traced: Pipe sits behind a kj::Own (an ownership barrier) and is
+        // shared with pipeLoop() continuations (via Pipe::State) that don't
+        // GC-trace, so tracing risks collection while a continuation still
+        // uses its handles. They are held as strong roots.
       }
     }
   }

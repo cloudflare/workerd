@@ -588,9 +588,10 @@ class FileSystemWritableFileStream final: public WritableStream {
  private:
   kj::Rc<State> sharedState;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(sharedState->file);
-  }
+  // sharedState->file is not traced: State sits behind a kj::Rc (an ownership
+  // barrier) shared with sink write/abort/close callbacks that don't GC-trace,
+  // so tracing risks collection while a callback still uses it. Strong root.
+  void visitForGc(jsg::GcVisitor& visitor) {}
 };
 
 class StorageManager final: public jsg::Object {

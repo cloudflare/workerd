@@ -454,9 +454,8 @@ class WritableStreamInternalController: public WritableStreamController {
       return kj::rc<State>(parent.addRef(), addWeakToThis());
     }
 
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(readable, promise, maybeSignal, capturedSourceError);
-    }
+    // No visitForGc: Pipe lives behind a kj::Own (an ownership barrier), so
+    // readable, promise, maybeSignal, and capturedSourceError are strong roots.
 
     void releaseSource(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none);
     bool checkSignal(jsg::Lock& js);
