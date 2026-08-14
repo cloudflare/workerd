@@ -1,24 +1,18 @@
-pub mod tokio;
+// Production code must not panic; test code is exempt via clippy.toml allow-*-in-tests.
+#![deny(clippy::expect_used, clippy::panic, clippy::unreachable)]
+#![deny(clippy::todo, clippy::unimplemented)]
 
 #[cxx::bridge(namespace = "workerd::rust::cxx_integration")]
 mod ffi {
     extern "Rust" {
-        fn init();
-
         fn trigger_panic(msg: &str);
     }
 }
 
-pub fn init() {
-    init_tokio(None);
-}
-
-/// Initialize tokio runtime.
-/// Should not be called directly but as a part of a downstream cxx-integration init.
-pub fn init_tokio(worker_threads: Option<usize>) {
-    tokio::init(worker_threads);
-}
-
+#[expect(
+    clippy::panic,
+    reason = "intentional test hook exposed to C++ to exercise the panic -> kj::Exception conversion at the cxx bridge boundary"
+)]
 fn trigger_panic(msg: &str) {
     panic!("{}", msg)
 }

@@ -2,6 +2,10 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+// Production code must not panic; test code is exempt via clippy.toml allow-*-in-tests.
+#![deny(clippy::expect_used, clippy::panic, clippy::unreachable)]
+#![deny(clippy::todo, clippy::unimplemented)]
+
 use std::pin::Pin;
 
 use jsg::ToJS;

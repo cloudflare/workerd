@@ -4087,6 +4087,9 @@ interface ContainerSnapshot {
   size: number;
   name?: string;
 }
+interface ContainerSnapshotRestoreParams {
+  id: string;
+}
 interface ContainerSnapshotOptions {
   name?: string;
 }
@@ -4111,7 +4114,7 @@ type ContainerStartupOptions = {
     }
   | {
       image?: never;
-      containerSnapshot?: ContainerSnapshot;
+      containerSnapshot?: ContainerSnapshotRestoreParams;
     }
 );
 interface ContainerInfo {

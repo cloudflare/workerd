@@ -40,7 +40,7 @@ jsg::Ref<WrappedBinding> WrappedBinding::deserialize(jsg::Lock& js,
     jsg::Deserializer& deserializer,
     const jsg::TypeHandler<jsg::Ref<Fetcher>>& innerHandler,
     const jsg::TypeHandler<jsg::Ref<WrappedBinding>>& selfHandler) {
-  auto inner = Fetcher::deserialize(js, rpc::SerializationTag::SERVICE_STUB, deserializer);
+  auto inner = Fetcher::deserializeForWrappedBinding(js, deserializer);
   auto wrapperModule = deserializer.readLengthDelimitedString();
   auto env = js.obj();
   env.createDataProperty(

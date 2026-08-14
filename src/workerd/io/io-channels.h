@@ -163,8 +163,8 @@ class IoChannelFactory: public virtual kj::Refcounted {
     // implementation of `ctx.restore()`, so that it can determine its own base token.
     kj::Maybe<kj::Own<SelfTokenFactory>> restoredSelfTokenFactory;
 
-    // Present when a global actor request belongs to a logical call whose retry token was selected
-    // by the caller. Actor channels generate a fresh first-attempt token when this is absent.
+    // Present when the caller classified this as a retry-eligible actor request and selected its
+    // logical-call token.
     kj::Maybe<ActorRetryRequestMetadata> actorRetryRequestMetadata;
 
     // True if this request was started on a channel that was reconstructed from a stored
@@ -645,5 +645,8 @@ kj::Own<IoChannelFactory::ActorClassChannel> newPromisedChannel<
 template <>
 kj::Own<IoChannelFactory::RpcChannel> newPromisedChannel<IoChannelFactory::RpcChannel>(
     kj::Promise<kj::Own<IoChannelFactory::RpcChannel>> promise);
+
+// Creates caller-owned metadata for the first attempt of a retry-eligible actor invocation.
+IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(kj::Date createdAt);
 
 }  // namespace workerd

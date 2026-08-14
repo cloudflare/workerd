@@ -1502,12 +1502,19 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   // (Durable Object), to classify retry eligibility for disconnected calls; for other fetches the
   // value is simply overwritten by the next call and never read. The set->getClientWithTracing->
   // wrap*SubrequestClient sequence is synchronous, so there is no stale-attribution risk.
-  ioContext.getMetrics().setNextSubrequestBodyRewindable(
-      SubrequestBodyRewindable(jsRequest->canRewindBody()));
+  bool bodyRewindable = jsRequest->canRewindBody();
+  ioContext.getMetrics().setNextSubrequestBodyRewindable(SubrequestBodyRewindable(bodyRewindable));
+
+  kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata;
+  if (bodyRewindable && fetcher->supportsActorRetryMetadata()) {
+    actorRetryRequestMetadata =
+        generateActorRetryRequestMetadata(kj::systemCoarseCalendarClock().now());
+  }
 
   // Get client and trace context (if needed) in one clean call
   auto clientWithTracing = fetcher->getClientWithTracing(ioContext,
-      jsRequest->serializeCfBlobJson(js), "fetch"_kjc, kj::none /* actorRetryRequestMetadata */);
+      jsRequest->serializeCfBlobJson(js), "fetch"_kjc,
+      kj::mv(actorRetryRequestMetadata));
   auto traceContext = kj::mv(clientWithTracing.traceContext);
 
   // TODO(cleanup): Don't convert to HttpClient. Use the HttpService interface instead. This
@@ -2205,8 +2212,21 @@ void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   JSG_FAIL_REQUIRE(DOMDataCloneError, "ServiceStub cannot be serialized in this context.");
 }
 
-jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
-    rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+jsg::Ref<Fetcher> Fetcher::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  return deserializeImpl(js, tag, deserializer, RpcCompatGateBypassed::NO);
+}
+
+jsg::Ref<Fetcher> Fetcher::deserializeForWrappedBinding(
+    jsg::Lock& js, jsg::Deserializer& deserializer) {
+  return deserializeImpl(js, rpc::SerializationTag::SERVICE_STUB, deserializer,
+      RpcCompatGateBypassed::YES);
+}
+
+jsg::Ref<Fetcher> Fetcher::deserializeImpl(jsg::Lock& js,
+    rpc::SerializationTag tag,
+    jsg::Deserializer& deserializer,
+    RpcCompatGateBypassed rpcCompatGateBypassed) {
   KJ_IF_SOME(handler, deserializer.getExternalHandler()) {
     KJ_IF_SOME(frankenvalueHandler, kj::tryDowncast<Frankenvalue::CapTableReader>(handler)) {
       // Decoding a Frankenvalue (e.g. for dynamic loopback props or dynamic isolate env).
@@ -2215,12 +2235,13 @@ jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
 
       KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(cap)) {
         // Probably decoding dynamic ctx.props.
-        return js.alloc<Fetcher>(IoContext::current().addObject(kj::addRef(channel)));
+        return js.alloc<Fetcher>(IoContext::current().addObject(kj::addRef(channel)),
+            RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
       } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
         // Probably decoding dynamic isolate env.
         return js.alloc<Fetcher>(
             channel.getChannelNumber(IoChannelCapTableEntry::Type::SUBREQUEST),
-            RequiresHostAndProtocol::YES, /*isInHouse=*/false);
+            RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
       } else {
         KJ_FAIL_REQUIRE("ServiceStub capability in Frankenvalue is not a SubrequestChannel?");
       }
@@ -2242,7 +2263,8 @@ jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
         KJ_FAIL_REQUIRE("wrong external type for Fetcher", external.which());
       }
 
-      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
+      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)),
+          RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
     } else KJ_IF_SOME(storedHandler,
         kj::tryDowncast<StoredExternalHandler::Deserializer>(handler)) {
       // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This
@@ -2260,7 +2282,8 @@ jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
         // Token stored out-of-line as an external.
         channel = storedHandler.readSubrequestChannel(ioctx.getIoChannelFactory());
       }
-      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
+      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)),
+          RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
     }
   }
 
@@ -2462,7 +2485,7 @@ jsg::Promise<Fetcher::ScheduledResult> Fetcher::scheduled(
 kj::Own<WorkerInterface> Fetcher::getClient(
     IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName) {
   auto clientWithTracing = getClientWithTracing(
-      ioContext, kj::mv(cfStr), kj::mv(operationName), kj::none /* actorRetryRequestMetadata */);
+      ioContext, kj::mv(cfStr), kj::mv(operationName), kj::none);
   return clientWithTracing.client.attach(kj::mv(clientWithTracing.traceContext));
 }
 
@@ -2474,6 +2497,8 @@ Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
   KJ_IF_SOME(metadata, actorRetryRequestMetadata) {
     auto& outgoingFactory = KJ_REQUIRE_NONNULL(
         channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>(),
+        "actor retry metadata supplied to an unsupported Fetcher");
+    KJ_REQUIRE(outgoingFactory->supportsActorRetryMetadata(),
         "actor retry metadata supplied to an unsupported Fetcher");
     auto client = outgoingFactory->newSingleUseClientWithActorRetryMetadata(
         kj::mv(cfStr), kj::mv(metadata));
@@ -2516,6 +2541,13 @@ Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
     }
   }
   KJ_UNREACHABLE;
+}
+
+bool Fetcher::supportsActorRetryMetadata() {
+  KJ_IF_SOME(outgoingFactory, channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>()) {
+    return outgoingFactory->supportsActorRetryMetadata();
+  }
+  return false;
 }
 
 kj::Own<IoChannelFactory::SubrequestChannel> Fetcher::getSubrequestChannel(IoContext& ioContext) {

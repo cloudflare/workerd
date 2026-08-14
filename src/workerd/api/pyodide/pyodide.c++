@@ -18,7 +18,6 @@
 #include <kj/array.h>
 #include <kj/common.h>
 #include <kj/compat/gzip.h>
-#include <kj/compat/tls.h>
 #include <kj/debug.h>
 #include <kj/encoding.h>
 #include <kj/string.h>
