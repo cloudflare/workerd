@@ -19,7 +19,7 @@ MessageEvent::MessageEvent(jsg::Lock& js,
     const jsg::JsValue& data,
     kj::String lastEventId,
     kj::Maybe<jsg::Ref<MessagePort>> source,
-    kj::Maybe<kj::String> origin,
+    kj::Maybe<kj::Array<const char>> origin,
     Event::Init init)
     : Event(kMessageEventName, kj::mv(init)),
       data(jsg::JsRef(js, data)),
@@ -30,7 +30,7 @@ MessageEvent::MessageEvent(jsg::Lock& js,
     jsg::JsRef<jsg::JsValue> data,
     kj::String lastEventId,
     kj::Maybe<jsg::Ref<MessagePort>> source,
-    kj::Maybe<kj::String> origin,
+    kj::Maybe<kj::Array<const char>> origin,
     Event::Init init)
     : Event(kMessageEventName, kj::mv(init)),
       data(kj::mv(data)),
@@ -42,7 +42,7 @@ MessageEvent::MessageEvent(jsg::Lock& js,
     const jsg::JsValue& data,
     kj::String lastEventId,
     kj::Maybe<jsg::Ref<MessagePort>> source,
-    kj::Maybe<kj::String> origin,
+    kj::Maybe<kj::Array<const char>> origin,
     Event::Init init)
     : Event(kj::mv(type), kj::mv(init)),
       data(jsg::JsRef(js, kj::mv(data))),
@@ -54,7 +54,7 @@ MessageEvent::MessageEvent(jsg::Lock& js,
     kj::OneOf<jsg::JsRef<jsg::JsValue>, jsg::Ref<Blob>> data,
     kj::String lastEventId,
     kj::Maybe<jsg::Ref<MessagePort>> source,
-    kj::Maybe<kj::String> origin,
+    kj::Maybe<kj::Array<const char>> origin,
     Event::Init init)
     : Event(kj::mv(type), kj::mv(init)),
       data(kj::mv(data)),
@@ -73,9 +73,12 @@ jsg::Ref<MessageEvent> MessageEvent::constructor(
     data = kj::mv(d);
   }
 
-  kj::Maybe<kj::String> origin;
+  // A MessageEvent's origin is "an origin, a string, or null". The origin getter only
+  // serializes when it holds an actual origin; a string is returned as given. The
+  // initializer's origin is a USVString, so it is stored verbatim and never parsed.
+  kj::Maybe<kj::Array<const char>> origin;
   KJ_IF_SOME(o, initializer.origin) {
-    origin = kj::String(kj::mv(o));
+    origin = kj::Array<const char>(kj::heapArray<char>(o.asPtr()));
   }
 
   return js.alloc<MessageEvent>(js, kj::mv(type), kj::mv(data),
@@ -100,8 +103,11 @@ kj::OneOf<jsg::JsValue, jsg::Ref<Blob>> MessageEvent::getData(jsg::Lock& js) {
   KJ_UNREACHABLE;
 }
 
-kj::Maybe<kj::StringPtr> MessageEvent::getOrigin() {
-  return maybeOrigin.map([](kj::String& origin) -> kj::StringPtr { return origin; });
+kj::ArrayPtr<const char> MessageEvent::getOrigin() {
+  // Per the spec, an origin that was never set is reported as the empty string, not null.
+  return maybeOrigin.map([](auto& a) -> kj::ArrayPtr<const char> {
+    return a.asPtr();
+  }).orDefault(nullptr);
 }
 
 kj::StringPtr MessageEvent::getLastEventId() {

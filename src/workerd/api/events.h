@@ -16,14 +16,14 @@ class MessageEvent final: public Event {
       const jsg::JsValue& data,
       kj::String lastEventId = kj::String(),
       kj::Maybe<jsg::Ref<MessagePort>> source = kj::none,
-      kj::Maybe<kj::String> origin = kj::none,
+      kj::Maybe<kj::Array<const char>> origin = kj::none,
       Event::Init init = {});
 
   MessageEvent(jsg::Lock& js,
       jsg::JsRef<jsg::JsValue> data,
       kj::String lastEventId = kj::String(),
       kj::Maybe<jsg::Ref<MessagePort>> source = kj::none,
-      kj::Maybe<kj::String> origin = kj::none,
+      kj::Maybe<kj::Array<const char>> origin = kj::none,
       Event::Init init = {});
 
   MessageEvent(jsg::Lock& js,
@@ -31,7 +31,7 @@ class MessageEvent final: public Event {
       const jsg::JsValue& data,
       kj::String lastEventId = kj::String(),
       kj::Maybe<jsg::Ref<MessagePort>> source = kj::none,
-      kj::Maybe<kj::String> origin = kj::none,
+      kj::Maybe<kj::Array<const char>> origin = kj::none,
       Event::Init init = {});
 
   MessageEvent(jsg::Lock& js,
@@ -39,7 +39,7 @@ class MessageEvent final: public Event {
       kj::OneOf<jsg::JsRef<jsg::JsValue>, jsg::Ref<Blob>> data,
       kj::String lastEventId = kj::String(),
       kj::Maybe<jsg::Ref<MessagePort>> source = kj::none,
-      kj::Maybe<kj::String> origin = kj::none,
+      kj::Maybe<kj::Array<const char>> origin = kj::none,
       Event::Init init = {});
 
   struct Initializer {
@@ -55,9 +55,10 @@ class MessageEvent final: public Event {
     jsg::Optional<bool> cancelable;
     jsg::Optional<bool> composed;
 
-    // Note that the spec also defines a `ports` member. We do not support
-    // transferring MessagePorts in a MessageEvent (see getPorts() below), so it
-    // is intentionally omitted here rather than being silently ignored.
+    // Note that the spec also defines a `ports` member. We do not support transferring
+    // MessagePorts in a MessageEvent (see getPorts() below), so it is omitted here and,
+    // like any other unrecognized member, is dropped. `ports` therefore always reads
+    // back as an empty array even when one was supplied.
 
     JSG_STRUCT(data, origin, lastEventId, source, bubbles, cancelable, composed);
     JSG_STRUCT_TS_OVERRIDE(MessageEventInit {
@@ -69,7 +70,7 @@ class MessageEvent final: public Event {
 
   kj::OneOf<jsg::JsValue, jsg::Ref<Blob>> getData(jsg::Lock& js);
 
-  kj::Maybe<kj::StringPtr> getOrigin();
+  kj::ArrayPtr<const char> getOrigin();
 
   kj::StringPtr getLastEventId();
 
@@ -100,7 +101,7 @@ class MessageEvent final: public Event {
   kj::OneOf<jsg::JsRef<jsg::JsValue>, jsg::Ref<Blob>> data;
   kj::String lastEventId;
   kj::Maybe<jsg::Ref<MessagePort>> maybeSource;
-  kj::Maybe<kj::String> maybeOrigin;
+  kj::Maybe<kj::Array<const char>> maybeOrigin;
 
   void visitForGc(jsg::GcVisitor& visitor);
 };

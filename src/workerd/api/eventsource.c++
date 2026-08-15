@@ -310,8 +310,7 @@ void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messag
       kj::String type = kj::mv(message.event).orDefault([]() { return kj::str("message"); });
       dispatchEventImpl(js,
           js.alloc<MessageEvent>(js, kj::mv(type), js.str(data), kj::mv(message.id),
-              kj::none /** source **/,
-              impl.map([](FetchImpl& i) { return kj::str(i.url.getOrigin()); })));
+              kj::none /** source **/, impl.map([](FetchImpl& i) { return i.url.getOrigin(); })));
     }
   }, [&](jsg::Value exception) {
     // If we end up with an exception being thrown in one of the event handlers, we will
