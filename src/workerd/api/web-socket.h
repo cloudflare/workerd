@@ -54,8 +54,10 @@ class CloseEvent: public Event {
   static jsg::Ref<CloseEvent> constructor(
       jsg::Lock& js, kj::String type, jsg::Optional<Initializer> initializer) {
     Initializer init = kj::mv(initializer).orDefault({});
-    return js.alloc<CloseEvent>(kj::mv(type), init.code.orDefault(0),
+    auto event = js.alloc<CloseEvent>(kj::mv(type), init.code.orDefault(0),
         kj::mv(init.reason).orDefault(jsg::USVString(kj::str())), init.wasClean.orDefault(false));
+    event->markConstructedFromJs();
+    return event;
   }
 
   int getCode() {

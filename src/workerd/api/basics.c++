@@ -1144,7 +1144,9 @@ CustomEvent::CustomEvent(kj::String ownType, CustomEventInit init)
 
 jsg::Ref<CustomEvent> CustomEvent::constructor(
     jsg::Lock& js, kj::String type, jsg::Optional<CustomEventInit> init) {
-  return js.alloc<CustomEvent>(kj::mv(type), kj::mv(init).orDefault({}));
+  auto event = js.alloc<CustomEvent>(kj::mv(type), kj::mv(init).orDefault({}));
+  event->markConstructedFromJs();
+  return event;
 }
 
 jsg::Optional<jsg::JsValue> CustomEvent::getDetail(jsg::Lock& js) {

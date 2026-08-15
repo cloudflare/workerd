@@ -476,3 +476,19 @@ export const messageEventOrigin = {
     strictEqual(event.origin, specCompliant ? '' : null);
   },
 };
+
+export const eventIsTrusted = {
+  test() {
+    // Per the standard, an event's "is trusted" flag is only set when the runtime creates and
+    // dispatches the event, so anything constructed here is untrusted.
+    for (const event of [
+      new Event('foo'),
+      new MessageEvent('message', { data: null }),
+      new CustomEvent('foo'),
+      new ErrorEvent('error'),
+      new CloseEvent('close'),
+    ]) {
+      strictEqual(event.isTrusted, false, event.type);
+    }
+  },
+};

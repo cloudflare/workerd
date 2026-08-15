@@ -62,7 +62,9 @@ MessageEvent::MessageEvent(jsg::Lock& js,
 
 jsg::Ref<MessageEvent> MessageEvent::constructor(
     jsg::Lock& js, kj::String type, Initializer initializer) {
-  return js.alloc<MessageEvent>(js, kj::mv(type), kj::mv(initializer.data));
+  auto event = js.alloc<MessageEvent>(js, kj::mv(type), kj::mv(initializer.data));
+  event->markConstructedFromJs();
+  return event;
 }
 
 kj::OneOf<jsg::JsValue, jsg::Ref<Blob>> MessageEvent::getData(jsg::Lock& js) {
@@ -146,7 +148,9 @@ ErrorEvent::ErrorEvent(jsg::Lock& js, jsg::JsValue error)
 
 jsg::Ref<ErrorEvent> ErrorEvent::constructor(
     jsg::Lock& js, kj::String type, jsg::Optional<ErrorEventInit> init) {
-  return js.alloc<ErrorEvent>(kj::mv(type), kj::mv(init).orDefault({}));
+  auto event = js.alloc<ErrorEvent>(kj::mv(type), kj::mv(init).orDefault({}));
+  event->markConstructedFromJs();
+  return event;
 }
 
 kj::StringPtr ErrorEvent::getFilename() {

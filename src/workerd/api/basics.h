@@ -221,6 +221,15 @@ class Event: public jsg::Object {
     tracker.trackField("target", target);
   }
 
+ protected:
+  // Per the standard, an event's "is trusted" flag is only set when the runtime itself creates
+  // and dispatches the event, so an event constructed from JS is never trusted. Subclasses share
+  // their C++ constructors with internal callers that do produce trusted events, so their JS
+  // `constructor()` calls this to clear the flag.
+  inline void markConstructedFromJs() {
+    flags.trusted = false;
+  }
+
  private:
   // listing ownType first so type can be initialized with it in constructor
   kj::String ownType;
