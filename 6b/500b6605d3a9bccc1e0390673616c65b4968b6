@@ -1,0 +1,72 @@
+src/workerd/io/worker.c++
+  s_bd300c870eb4a1::t_c6a9c59287d139 3982-3983
+  s_0f868da28cf400::t_e417e2c4d93b5b 2617-2621
+src/workerd/io/observer.h
+  s_bd300c870eb4a1::t_9ec947a594abf4 323-326
+src/workerd/api/tests/do-pre-shutdown-rpc-flag-off.js
+  s_0f868da28cf400::t_affb419fb3152e 1-12
+src/workerd/api/tests/BUILD.bazel
+  s_0f868da28cf400::t_45084ea593a96e 569-576
+  s_0f868da28cf400::t_88e1c2df2ee1ff 568
+types/generated-snapshot/experimental/index.ts
+  s_0f868da28cf400::t_2d5b27ec6e8c24 593-595,626,643-648,15412-15417
+src/workerd/io/compatibility-date.capnp
+  s_0f868da28cf400::t_5c90d8a23db4d5 1645-1654
+types/generated-snapshot/index.d.ts
+  s_0f868da28cf400::t_18eba82f0a398a 590-592,15138-15143
+src/workerd/api/tests/do-pre-shutdown-rpc-test.js
+  s_0f868da28cf400::t_ed903abb50d526 1-60
+src/workerd/api/actor.h
+  s_0f868da28cf400::t_128289a67ad2f7 103,109-148
+src/workerd/api/global-scope.h
+  s_0f868da28cf400::t_a6d6da78fb7ec8 1242-1243
+  s_0f868da28cf400::t_52b868e706714f 490-526
+  s_0f868da28cf400::t_82d1dd3b7bc971 1241
+  s_0f868da28cf400::t_b68b0d7dc12697 622
+  s_0f868da28cf400::t_4785b5efa530e2 561-565
+  s_0f868da28cf400::t_b9dffe9ccfa2a9 592
+types/generated-snapshot/experimental/index.d.ts
+  s_0f868da28cf400::t_2d5b27ec6e8c24 591-593,624,641-646,15434-15439
+types/defines/rpc.d.ts
+  s_0f868da28cf400::t_b52e8de0082008 265-270
+types/generated-snapshot/index.ts
+  s_0f868da28cf400::t_18eba82f0a398a 592-594,15116-15121
+src/workerd/api/worker-rpc.c++
+  s_0f868da28cf400::t_3b206303d4d358 1650
+  s_0f868da28cf400::t_12e36b514600a6 1315
+  s_0f868da28cf400::t_3e094263934785 2096,2113-2120
+  s_0f868da28cf400::t_8ca02c29ba8166 1101-1103
+src/workerd/api/global-scope.c++
+  s_0f868da28cf400::t_67bc285c55ce90 193
+src/workerd/api/tests/do-pre-shutdown-rpc-test.wd-test
+  s_0f868da28cf400::t_73f6e3bd0f4a8c 1-34
+types/test/types/rpc.ts
+  s_0f868da28cf400::t_e37dc8534cb833 432-433
+  s_0f868da28cf400::t_1daf37d2d2a2bc 514-522
+  s_0f868da28cf400::t_46d4e5c2918217 452
+  s_0f868da28cf400::t_bde558edffb9f9 393-404
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6b500b6605d3a9bccc1e0390673616c65b4968b6",
+  "prompts": {},
+  "sessions": {
+    "s_0f868da28cf400": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_012591357ffeA7cXF67TJsjeKU",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    },
+    "s_bd300c870eb4a1": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_02778efb7ffeB2SSkVfS3x8QGj",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    }
+  }
+}
