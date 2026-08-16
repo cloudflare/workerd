@@ -11,6 +11,9 @@ EXPECTED=$3
 
 # Bazel creates a fresh, writable $TEST_TMPDIR for each test and cleans it up after the test finishes.
 CAPNP_BINARY=$TEST_TMPDIR/compiled-workerd
+# `workerd compile` preserves workerd's $ORIGIN-relative RUNPATH. Add a workerd.runfiles
+# link next to the generated executable so it can load debug shared libraries.
+ln -s "$TEST_SRCDIR" "$TEST_TMPDIR/workerd.runfiles"
 PORT_FILE=$TEST_TMPDIR/port
 
 # Compile the app
