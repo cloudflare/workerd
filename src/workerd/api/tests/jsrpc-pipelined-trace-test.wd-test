@@ -1,0 +1,31 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Test for JSRPC tracing: the callee invocation is parented to the caller's first per-call jsRpcCall
+# span, and every callee call links to its corresponding caller span. Multiple calls share one
+# session (and hence one callee invocation), so both forms of attribution are needed.
+# Asserted in the tail worker's test() handler.
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "jsrpc-pipelined-trace-test", worker = .mainWorker),
+    (name = "tail", worker = .tailWorker),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "jsrpc-pipelined-trace-test.js")
+  ],
+  compatibilityFlags = ["nodejs_compat", "experimental", "rpc"],
+  bindings = [
+    (name = "CounterService", service = (name = "jsrpc-pipelined-trace-test", entrypoint = "CounterService")),
+  ],
+  streamingTails = ["tail"],
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "jsrpc-pipelined-trace-test-tail.js")
+  ],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+);
