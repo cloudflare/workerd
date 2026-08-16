@@ -16,4 +16,8 @@ sh_test(
         "//src/workerd/server:workerd",
     ],
     tags = ["no-qemu"],
+    target_compatible_with = select({
+        "//:not_dbg_build": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
 )
