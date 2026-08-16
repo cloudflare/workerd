@@ -16,4 +16,5 @@ sh_test(
         "//src/workerd/server:workerd",
     ],
     tags = ["no-qemu"],
+    target_compatible_with = ["@//build/platforms:compilation_mode_release"],
 )

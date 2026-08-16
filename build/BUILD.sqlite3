@@ -42,10 +42,17 @@ GENERATED_SOURCES = []
 # We have not set SQLITE_SMALL_STACK, so this Bazel-build file does
 # not bother with tool/vdbe-compress.tcl.
 
+# The build tools below are C only, so they opt out of the extra library that the build links into
+# every binary (V8's libc++, in the edgeworker build). This is load bearing for mksourceid:
+# `sqlite3_h` copies it out of bazel-out before running it, which leaves an $ORIGIN-relative RUNPATH
+# pointing at nothing, so it must not acquire a dynamic dependency on a C++ runtime.
+LINK_EXTRA_LIB_NONE = "@bazel_tools//tools/cpp:empty_lib"
+
 cc_binary(
     name = "lemon",
     srcs = ["tool/lemon.c"],
     copts = ["-w"],
+    link_extra_lib = LINK_EXTRA_LIB_NONE,
 )
 
 # ========================================================================
@@ -199,6 +206,7 @@ cc_binary(
     name = "mkkeywordhash",
     srcs = ["tool/mkkeywordhash.c"],
     copts = ["-w"],
+    link_extra_lib = LINK_EXTRA_LIB_NONE,
 )
 
 genrule(
@@ -217,6 +225,7 @@ cc_binary(
     name = "mksourceid",
     srcs = ["tool/mksourceid.c"],
     copts = ["-w"],
+    link_extra_lib = LINK_EXTRA_LIB_NONE,
 )
 
 genrule(
