@@ -41,9 +41,6 @@ namespace {
 // This is critical when the backing memory may have V8 heap provenance - if we allowed
 // deferred proxying, the IoContext could complete and V8 GC could free the memory while
 // the deferred pump is still running, causing a use-after-free.
-//
-// TODO(soon): The expectation is that this will be update to implement ReadableSource instead
-// of ReadableStreamSource as we continue the transition.
 class MemoryInputStream final: public ReadableStreamSource {
  public:
   MemoryInputStream(kj::ArrayPtr<const kj::byte> bytes, kj::Maybe<kj::Own<void>> backing)

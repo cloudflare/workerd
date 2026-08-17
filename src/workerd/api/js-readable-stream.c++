@@ -1332,7 +1332,7 @@ kj::Array<jsg::Ref<ReadableStreamNativeSource>> ReadableStreamNativeSource::tee(
     }
     // Generic fallback (mirroring the legacy internal controller's tee): pull the source
     // out of its IoOwn and run it through kj::newTee, with each branch wrapped back into
-    // a ReadableStreamSource. streams::wrapTeeBranch applies the same tee error
+    // a ReadableStreamSource. wrapTeeBranch applies the same tee error
     // translation the legacy path uses.
     auto tee = kj::newTee(
         kj::heap<TeeInputAdapter>(kj::Own<ReadableStreamSource>(kj::mv(active.source))), limit);

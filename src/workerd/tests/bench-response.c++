@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/api/http.h>
-#include <workerd/api/streams/readable-source.h>
 #include <workerd/tests/bench-tools.h>
 #include <workerd/tests/test-fixture.h>
 

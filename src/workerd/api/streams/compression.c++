@@ -528,11 +528,6 @@ class CompressionStreamImpl final: public CompressionStreamBase<mode> {
 
 // Adapter to bridge CompressionStreamImpl (which implements AsyncInputStream and
 // ExplicitEndOutputStream) to the ReadableStreamSource/WritableStreamSink interfaces.
-// TODO(soon): This class is intended to be replaced by the new ReadableSource/WritableSink
-// interfaces once fully implemented. We will need an adapter that knows how to handle both
-// sides of the stream once fully implemented. The current implementation in system-streams.c++
-// implements separate adapters for each side that are not aware of each other, making it
-// unsuitable for this specific case.
 template <Context::Mode mode>
 class CompressionStreamAdapter final: public kj::Refcounted,
                                       public ReadableStreamSource,

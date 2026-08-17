@@ -1007,10 +1007,6 @@ inline kj::Maybe<IoContext::Id> tryGetIoContextId() {
 // sandbox -- ArrayBuffer and Blob contents in particular.  Callers holding such data must
 // omit `backing` and let this function copy, or copy it themselves beforehand.
 //
-// TODO(soon): Update to implement ReadableSource instead of ReadableStreamSource.
-// For now this is a ReadableStreamSource for compat with existing code. Once internal.h/c++
-// is updated to use ReadableSource, we will change this also.
-//
 // TODO(cleanup): It would be nice to eventually have some sort of stronger guarantee when
 // deferred proxying can or cannot be used with a stream. Right now it's a bit ad hoc and
 // error-prone. It requires the stream impl to keep track of whether it can be deferred-proxied
@@ -1021,7 +1017,7 @@ kj::Own<ReadableStreamSource> newMemorySource(
 
 // Wraps a kj::AsyncInputStream returned from a tee() call to ensure that it translates
 // errors into equivalent JS exceptions. Typically this is used when customizing tee() on
-// a ReadableSource implementation.
+// a ReadableStreamSource implementation.
 kj::Own<kj::AsyncInputStream> wrapTeeBranch(kj::Own<kj::AsyncInputStream> branch);
 
 }  // namespace workerd::api
