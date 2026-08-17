@@ -52,6 +52,9 @@ wpt_test(
 
 wpt_test(
     name = "dom/events",
+    compat_flags = [
+        "spec_compliant_event_handler_attributes",
+    ],
     config = "dom/events-test.ts",
     wpt_directory = "@wpt//:dom/events@module",
 )
@@ -157,6 +160,7 @@ wpt_test(
     compat_flags = [
         "websocket_standard_binary_type",
         "web_socket_auto_reply_to_close",
+        "spec_compliant_event_handler_attributes",
     ],
     config = "websockets-test.ts",
     start_server = True,

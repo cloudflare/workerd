@@ -221,6 +221,15 @@ class Event: public jsg::Object {
     tracker.trackField("target", target);
   }
 
+ protected:
+  // Per the standard, an event's "is trusted" flag is only set when the runtime itself creates
+  // and dispatches the event, so an event constructed from JS is never trusted. Subclasses share
+  // their C++ constructors with internal callers that do produce trusted events, so their JS
+  // `constructor()` calls this to clear the flag.
+  inline void markConstructedFromJs() {
+    flags.trusted = false;
+  }
+
  private:
   // listing ownType first so type can be initialized with it in constructor
   kj::String ownType;
@@ -329,6 +338,21 @@ class EventTarget: public jsg::Object {
     flags.warnOnSpecialEvents = true;
   }
 
+  // Opts this EventTarget into the legacy behavior where dispatching an event looks for an
+  // `on<type>` property on the object and invokes it before any registered listener, even when
+  // the specCompliantEventHandlerAttributes compat flag is enabled.
+  //
+  // This exists for the global scope only. Some of the global's `on<type>` handlers are
+  // standardized (`onerror`, `onunhandledrejection` and `onrejectionhandled` on
+  // WorkerGlobalScope, `onfetch` on ServiceWorkerGlobalScope) and some are workerd-specific
+  // (`onscheduled`, `ontail`, `ontrace`, `onalarm`, `onqueue`), so aligning the global with the
+  // standard means picking those apart and adding accessors to the global object. That is left
+  // for a separate change. The lookup is skipped for any type that has an active event handler
+  // attribute, so accessors can be introduced a few at a time without double-firing.
+  inline void enableLegacyOnPropertyLookup() {
+    flags.legacyOnPropertyLookup = true;
+  }
+
   // The EventListenerCallback, if given, is called whenever addEventListener
   // or removeEventListener is invoked to report the number of registered
   // handlers for the event.
@@ -423,6 +447,39 @@ class EventTarget: public jsg::Object {
  protected:
   void setEventListenerCallback(EventListenerCallback&& callback) {
     maybeListenerCallback = kj::mv(callback);
+  }
+
+  // The value an `on<type>` accessor accepts. A callable is unwrapped into a handler we can
+  // invoke (keeping the identity around so the getter can hand the original value back), while
+  // anything else is retained as-is and never invoked.
+  using EventHandlerAttributeValue = kj::OneOf<jsg::Identified<HandlerFunction>, jsg::JsValue>;
+
+  // Implements an event handler IDL attribute -- an `on<type>` accessor -- as described by the
+  // HTML standard. Subclasses that expose `on<type>` accessors should delegate to these.
+  //
+  // Assigning a handler registers an ordinary event listener, so the handler is invoked in
+  // registration order along with listeners added via addEventListener(). Assigning a different
+  // handler replaces the value without moving that registration, and assigning null (or any
+  // other non-object) removes it.
+  //
+  // When the specCompliantEventHandlerAttributes compat flag is disabled these only store the
+  // value; dispatchEventImpl() finds it by looking up the `on<type>` property instead, which is
+  // what produces the non-standard ordering the flag fixes.
+  kj::Maybe<jsg::JsValue> getEventHandlerAttribute(jsg::Lock& js, kj::StringPtr type);
+  void setEventHandlerAttribute(
+      jsg::Lock& js, kj::StringPtr type, jsg::Optional<EventHandlerAttributeValue> value);
+  bool hasEventHandlerAttribute(kj::StringPtr type) const {
+    return eventHandlerAttributes.find(type) != kj::none;
+  }
+
+  // True if an `on<type>` accessor is holding a handler for this type *and* has a listener
+  // registered for it, meaning dispatch will reach the handler through the listener list rather
+  // than through the legacy `on<type>` property lookup.
+  bool hasActiveEventHandlerAttribute(kj::StringPtr type) const {
+    KJ_IF_SOME(attribute, eventHandlerAttributes.find(type)) {
+      return attribute.listener != kj::none;
+    }
+    return false;
   }
 
  private:
@@ -546,9 +603,54 @@ class EventTarget: public jsg::Object {
 
   EventHandlerSet& getOrCreate(kj::StringPtr str) KJ_LIFETIMEBOUND;
 
+  // How the value returned by an event handler is interpreted.
+  enum class HandlerReturn {
+    // Returning true cancels the event. Listeners are not supposed to return anything at all,
+    // but we have honored this since long before there was a compat flag to gate it on, so it
+    // stays the rule for anything registered with addEventListener().
+    TRUE_CANCELS,
+
+    // Returning false cancels the event and any other value is ignored, per the standard's event
+    // handler processing algorithm:
+    // https://html.spec.whatwg.org/multipage/webappapis.html#the-event-handler-processing-algorithm
+    FALSE_CANCELS,
+  };
+
+  // Runs a JavaScript event listener or event handler, applying `returnMode` to the value it
+  // returns.
+  void invokeJavaScriptHandler(
+      jsg::Lock& js, HandlerFunction& callback, jsg::Ref<Event> event, HandlerReturn returnMode);
+
+  // Invokes the `on<type>` handler for the given type, if it is set and callable. Called by the
+  // listener that setEventHandlerAttribute() registers.
+  void invokeEventHandlerAttribute(jsg::Lock& js, kj::StringPtr type, jsg::Ref<Event> event);
+
+  // The state backing a single `on<type>` accessor. See setEventHandlerAttribute().
+  struct EventHandlerAttribute {
+    // The value that was assigned, handed back as-is by the getter.
+    jsg::JsRef<jsg::JsValue> value;
+
+    // None if `value` is not callable, in which case the handler is never invoked.
+    kj::Maybe<HandlerFunction> callback;
+
+    // The listener registration that invokes this handler, held for as long as the handler is
+    // set. Dropping it unregisters the listener, which is what lets the handler keep its place
+    // in the listener list while it is merely being reassigned. None when the
+    // specCompliantEventHandlerAttributes compat flag is disabled, since in that case the
+    // handler is invoked by dispatchEventImpl()'s `on<type>` property lookup instead.
+    kj::Maybe<kj::Own<void>> listener;
+
+    void visitForGc(jsg::GcVisitor& visitor) {
+      visitor.visit(value, callback);
+    }
+  };
+
   jsg::PropertyReflection<kj::OneOf<HandlerFunction, jsg::Value>> onEvents;
 
   kj::HashMap<kj::String, EventHandlerSet> typeMap;
+
+  // Keyed by event type, not by property name, so "abort" rather than "onabort".
+  kj::HashMap<kj::String, EventHandlerAttribute> eventHandlerAttributes;
 
   kj::Maybe<EventListenerCallback> maybeListenerCallback;
 
@@ -561,6 +663,8 @@ class EventTarget: public jsg::Object {
     // Event handlers are not supposed to return values. The first time one does, we'll
     // emit a warning to help users debug things but we'll otherwise ignore it.
     uint8_t warnOnHandlerReturn : 1 = 1;
+    // See enableLegacyOnPropertyLookup().
+    uint8_t legacyOnPropertyLookup : 1 = 0;
   };
   Flags flags;
 
@@ -568,6 +672,21 @@ class EventTarget: public jsg::Object {
 
   friend class NativeHandler;
 };
+
+// Defines the getter/setter pair backing an `on<type>` event handler attribute on an
+// EventTarget subclass, e.g. WD_EVENT_HANDLER_ATTRIBUTE(Message, "message") defines
+// getOnMessage()/setOnMessage() for the "message" event. Register the property itself with
+// JSG_PROTOTYPE_PROPERTY(onmessage, getOnMessage, setOnMessage).
+//
+// See EventTarget::setEventHandlerAttribute() for what the accessors do.
+#define WD_EVENT_HANDLER_ATTRIBUTE(name, eventType)                                                \
+  kj::Maybe<jsg::JsValue> getOn##name(jsg::Lock& js) {                                             \
+    return getEventHandlerAttribute(js, eventType##_kj);                                           \
+  }                                                                                                \
+  void setOn##name(jsg::Lock& js, jsg::Optional<EventHandlerAttributeValue> value) {               \
+    setEventHandlerAttribute(js, eventType##_kj, kj::mv(value));                                   \
+  }                                                                                                \
+  static_assert(true, "require a trailing semicolon")
 
 // An implementation of the Web Platform Standard AbortSignal API
 class AbortTriggerRpcClient;
@@ -614,12 +733,11 @@ class AbortSignal final: public EventTarget {
       const jsg::TypeHandler<EventTarget::HandlerFunction>& handler,
       const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler);
 
-  // While AbortSignal extends EventTarget, and our EventTarget implementation will
-  // automatically support onabort being set as an own property, the spec defines
-  // onabort as a prototype property on the AbortSignal prototype. Therefore, we
-  // need to explicitly set it as a prototype property here.
+  // The spec defines onabort as a prototype property on the AbortSignal prototype, so we
+  // define it explicitly rather than relying on EventTarget's legacy `on<type>` property
+  // lookup.
   kj::Maybe<jsg::JsValue> getOnAbort(jsg::Lock& js);
-  void setOnAbort(jsg::Lock& js, jsg::Optional<jsg::JsValue> handler);
+  void setOnAbort(jsg::Lock& js, jsg::Optional<EventHandlerAttributeValue> handler);
 
   void addEventListener(jsg::Lock& js,
       kj::String type,
@@ -698,7 +816,6 @@ class AbortSignal final: public EventTarget {
   Flag flag;
 
   kj::Maybe<jsg::JsRef<jsg::JsValue>> reason;
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> onAbortHandler;
 
   static kj::Exception abortException(
       jsg::Lock& js, const jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>>& reason);

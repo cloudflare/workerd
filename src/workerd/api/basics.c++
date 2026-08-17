@@ -32,6 +32,15 @@ constexpr bool isSpecialEventType(kj::StringPtr type) {
   return type == "fetch" || type == "scheduled" || type == "tail" || type == "trace" ||
       type == "alarm";
 }
+
+// Tests may exercise EventTarget without a fully initialized JS environment, in which case no
+// compatibility flags are available. Fall back to the legacy behavior there.
+bool specCompliantEventHandlerAttributes(jsg::Lock& js) {
+  KJ_IF_SOME(flags, FeatureFlags::tryGet(js)) {
+    return flags.getSpecCompliantEventHandlerAttributes();
+  }
+  return false;
+}
 }  // namespace
 
 EventTarget::NativeHandler::NativeHandler(
@@ -375,6 +384,132 @@ EventTarget::EventHandlerSet& EventTarget::getOrCreate(kj::StringPtr type) {
   return typeMap.upsert(kj::str(type), EventHandlerSet(), [&](auto&&...) {}).value;
 }
 
+kj::Maybe<jsg::JsValue> EventTarget::getEventHandlerAttribute(jsg::Lock& js, kj::StringPtr type) {
+  return eventHandlerAttributes.find(type).map(
+      [&](EventHandlerAttribute& attribute) { return attribute.value.getHandle(js); });
+}
+
+void EventTarget::setEventHandlerAttribute(
+    jsg::Lock& js, kj::StringPtr type, jsg::Optional<EventHandlerAttributeValue> maybeValue) {
+  kj::Maybe<jsg::JsValue> value;
+  kj::Maybe<HandlerFunction> callback;
+
+  KJ_IF_SOME(v, maybeValue) {
+    KJ_SWITCH_ONEOF(v) {
+      KJ_CASE_ONEOF(fn, jsg::Identified<HandlerFunction>) {
+        // Per the standard, `this` within an event handler attribute is the object the handler
+        // is set on.
+        auto& handler = callback.emplace(kj::mv(fn.unwrapped));
+        KJ_IF_SOME(self, JSG_THIS.tryGetHandle(js)) {
+          handler.setReceiver(js.v8Ref(self.As<v8::Value>()));
+        }
+        value = jsg::JsValue(fn.identity.getHandle(js));
+      }
+      KJ_CASE_ONEOF(other, jsg::JsValue) {
+        // A non-callable object is retained but never invoked. Anything else -- null, undefined,
+        // or a primitive -- clears the handler.
+        if (other.isObject()) {
+          value = other;
+        }
+      }
+    }
+  }
+
+  KJ_IF_SOME(v, value) {
+    KJ_IF_SOME(existing, eventHandlerAttributes.find(type)) {
+      // Only the value changes. Holding on to the existing registration is what keeps the
+      // handler in its original position in the listener list.
+      existing.value = jsg::JsRef(js, v);
+      existing.callback = kj::mv(callback);
+      return;
+    }
+
+    kj::Maybe<kj::Own<void>> listener;
+    if (specCompliantEventHandlerAttributes(js)) {
+      listener = newNativeHandler(
+          js, kj::str(type), [this, type = kj::str(type)](jsg::Lock& js, jsg::Ref<Event> event) {
+        invokeEventHandlerAttribute(js, type, kj::mv(event));
+      });
+    }
+
+    eventHandlerAttributes.insert(kj::str(type),
+        EventHandlerAttribute{
+          .value = jsg::JsRef(js, v),
+          .callback = kj::mv(callback),
+          .listener = kj::mv(listener),
+        });
+  } else {
+    // Dropping the entry drops the listener registration with it.
+    eventHandlerAttributes.erase(type);
+  }
+}
+
+void EventTarget::invokeEventHandlerAttribute(
+    jsg::Lock& js, kj::StringPtr type, jsg::Ref<Event> event) {
+  KJ_IF_SOME(attribute, eventHandlerAttributes.find(type)) {
+    KJ_IF_SOME(callback, attribute.callback) {
+      invokeJavaScriptHandler(js, callback, kj::mv(event), HandlerReturn::FALSE_CANCELS);
+    }
+  }
+}
+
+void EventTarget::invokeJavaScriptHandler(
+    jsg::Lock& js, HandlerFunction& callback, jsg::Ref<Event> event, HandlerReturn returnMode) {
+  // Per the standard, the event listener is not supposed to return any value, and if it
+  // does, that value is ignored. That can be somewhat problematic if the user passes an
+  // async function as the event handler. Doing so counts as undefined behavior and can
+  // introduce subtle and difficult to diagnose bugs. Here, if the handler does return a
+  // value, we're going to emit a warning but otherwise ignore it. The warning will only
+  // be emitted at most once per EventEmitter instance.
+  auto ret = callback(js, event.addRef());
+  // Note: We used to run each handler in its own v8::TryCatch. However, due to a
+  //   misunderstanding of the V8 API, we incorrectly believed that TryCatch mishandled
+  //   termination (or maybe it actually did at the time), so we changed things such that
+  //   we don't catch exceptions so the first handler to throw an exception terminates the
+  //   loop, and the exception flows out of dispatchEvent(). In theory if multiple
+  //   handlers were registered then maybe we ought to be running all of them even if one
+  //   fails. This isn't entirely clear, though: in the case of 'fetch' handlers, in
+  //   fail-closed mode, an exception from any handler should make the whole request fail,
+  //   but then who cares if the remaining handlers run? Meanwhile, in fail-open mode, for
+  //   consistency, we should probably trigger fallback behavior if any handler throws, so
+  //   again it doesn't matter. For other types of handlers, e.g. WebSocket 'message', it's
+  //   not clear why one would ever register multiple handlers.
+  KJ_IF_SOME(r, ret) {
+    auto handle = r.getHandle(js);
+    switch (returnMode) {
+      case HandlerReturn::TRUE_CANCELS: {
+        if (handle->IsTrue()) {
+          event->preventDefault();
+        }
+        break;
+      }
+      case HandlerReturn::FALSE_CANCELS: {
+        // Note that the standard's "cancel the event" step sets the canceled flag, which is a
+        // no-op on an event that is not cancelable. Our preventDefault() does not check that
+        // itself, and dispatchEvent()'s return value reads the flag without masking it with
+        // cancelable, so check here rather than changing either of those for every caller.
+        if (handle->IsFalse() && event->getCancelable()) {
+          event->preventDefault();
+        }
+        break;
+      }
+    }
+    if (flags.warnOnHandlerReturn && !handle->IsBoolean()) {
+      flags.warnOnHandlerReturn = false;
+      // To help make debugging easier, let's tailor the warning a bit if it was a promise.
+      if (handle->IsPromise()) {
+        js.logWarning(
+            kj::str("An event handler returned a promise that will be ignored. Event handlers "
+                    "should not have a return value and should not be async functions."));
+      } else {
+        js.logWarning(
+            kj::str("An event handler returned a value of type \"", handle->TypeOf(js.v8Isolate),
+                "\" that will be ignored. Event handlers should not have a return value."));
+      }
+    }
+  }
+}
+
 bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
   event->beginDispatch(JSG_THIS);
   KJ_DEFER(event->endDispatch());
@@ -395,17 +530,25 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
 
     // Check if there is an `on<event>` property on this object. If so, we treat that as an event
     // handler, in addition to the ones registered with addEventListener().
-    KJ_IF_SOME(onProp, onEvents.get(js, kj::str("on", event->getType()))) {
-      // If the on-event is not a function, we silently ignore it rather than raise an error.
-      KJ_IF_SOME(cb, onProp.tryGet<HandlerFunction>()) {
-        callbacks.add(Callback{
-          .handler =
-              EventHandler::JavaScriptHandler{
-                .identity = nullptr,  // won't be used below if oldStyle is true and once is false
-                .callback = kj::mv(cb),
-              },
-          .oldStyle = true,
-        });
+    //
+    // This is not a standard behavior: only certain interfaces define `on<type>` handlers, and
+    // where they do, the handler is a regular listener that fires in registration order rather
+    // than ahead of everything else. With specCompliantEventHandlerAttributes the lookup goes
+    // away and those interfaces implement `on<type>` via setEventHandlerAttribute() instead.
+    if ((flags.legacyOnPropertyLookup || !specCompliantEventHandlerAttributes(js)) &&
+        !hasActiveEventHandlerAttribute(event->getType())) {
+      KJ_IF_SOME(onProp, onEvents.get(js, kj::str("on", event->getType()))) {
+        // If the on-event is not a function, we silently ignore it rather than raise an error.
+        KJ_IF_SOME(cb, onProp.tryGet<HandlerFunction>()) {
+          callbacks.add(Callback{
+            .handler =
+                EventHandler::JavaScriptHandler{
+                  .identity = nullptr,  // won't be used below if oldStyle is true and once is false
+                  .callback = kj::mv(cb),
+                },
+            .oldStyle = true,
+          });
+        }
       }
     }
 
@@ -480,45 +623,7 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
 
       KJ_SWITCH_ONEOF(callback.handler) {
         KJ_CASE_ONEOF(jsh, EventHandler::JavaScriptHandler) {
-          // Per the standard, the event listener is not supposed to return any value, and if it
-          // does, that value is ignored. That can be somewhat problematic if the user passes an
-          // async function as the event handler. Doing so counts as undefined behavior and can
-          // introduce subtle and difficult to diagnose bugs. Here, if the handler does return a
-          // value, we're going to emit a warning but otherwise ignore it. The warning will only
-          // be emitted at most once per EventEmitter instance.
-          auto ret = jsh.callback(js, event.addRef());
-          // Note: We used to run each handler in its own v8::TryCatch. However, due to a
-          //   misunderstanding of the V8 API, we incorrectly believed that TryCatch mishandled
-          //   termination (or maybe it actually did at the time), so we changed things such that
-          //   we don't catch exceptions so the first handler to throw an exception terminates the
-          //   loop, and the exception flows out of dispatchEvent(). In theory if multiple
-          //   handlers were registered then maybe we ought to be running all of them even if one
-          //   fails. This isn't entirely clear, though: in the case of 'fetch' handlers, in
-          //   fail-closed mode, an exception from any handler should make the whole request fail,
-          //   but then who cares if the remaining handlers run? Meanwhile, in fail-open mode, for
-          //   consistency, we should probably trigger fallback behavior if any handler throws, so
-          //   again it doesn't matter. For other types of handlers, e.g. WebSocket 'message', it's
-          //   not clear why one would ever register multiple handlers.
-          KJ_IF_SOME(r, ret) {
-            auto handle = r.getHandle(js);
-            // Returning true is the same as calling preventDefault() on the event.
-            if (handle->IsTrue()) {
-              event->preventDefault();
-            }
-            if (flags.warnOnHandlerReturn && !handle->IsBoolean()) {
-              flags.warnOnHandlerReturn = false;
-              // To help make debugging easier, let's tailor the warning a bit if it was a promise.
-              if (handle->IsPromise()) {
-                js.logWarning(kj::str(
-                    "An event handler returned a promise that will be ignored. Event handlers "
-                    "should not have a return value and should not be async functions."));
-              } else {
-                js.logWarning(kj::str("An event handler returned a value of type \"",
-                    handle->TypeOf(js.v8Isolate),
-                    "\" that will be ignored. Event handlers should not have a return value."));
-              }
-            }
-          }
+          invokeJavaScriptHandler(js, jsh.callback, event.addRef(), HandlerReturn::TRUE_CANCELS);
         }
         KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
           native.handler(js, event.addRef());
@@ -580,21 +685,14 @@ AbortSignal::AbortSignal(kj::Maybe<kj::Exception> exception,
       reason(kj::mv(maybeReason)) {}
 
 kj::Maybe<jsg::JsValue> AbortSignal::getOnAbort(jsg::Lock& js) {
-  return onAbortHandler.map(
-      [&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue { return ref.getHandle(js); });
+  return getEventHandlerAttribute(js, kAbortEvent);
 }
 
-void AbortSignal::setOnAbort(jsg::Lock& js, jsg::Optional<jsg::JsValue> handler) {
-  // We only want to accept the handler if it's a valid handler... For anything
-  // else, set it to null.
-  KJ_IF_SOME(h, handler) {
-    if (h.isFunction() || h.isObject()) {
-      onAbortHandler = jsg::JsRef(js, h);
-      subscribeToRpcAbort(js);
-      return;
-    }
+void AbortSignal::setOnAbort(jsg::Lock& js, jsg::Optional<EventHandlerAttributeValue> handler) {
+  setEventHandlerAttribute(js, kAbortEvent, kj::mv(handler));
+  if (hasEventHandlerAttribute(kAbortEvent)) {
+    subscribeToRpcAbort(js);
   }
-  onAbortHandler = kj::none;
 }
 
 void AbortSignal::addEventListener(jsg::Lock& js,
@@ -730,7 +828,7 @@ jsg::Ref<AbortSignal> AbortSignal::any(jsg::Lock& js,
 }
 
 void AbortSignal::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(reason, onAbortHandler);
+  visitor.visit(reason);
 }
 
 RefcountedCanceler& AbortSignal::getCanceler() {
@@ -950,6 +1048,9 @@ void AbortController::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReas
 
 void EventTarget::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(maybeListenerCallback);
+  for (auto& entry: eventHandlerAttributes) {
+    visitor.visit(entry.value);
+  }
   for (auto& entry: typeMap) {
     for (auto& handler: entry.value.handlers) {
       KJ_SWITCH_ONEOF(handler->handler) {
@@ -1043,7 +1144,9 @@ CustomEvent::CustomEvent(kj::String ownType, CustomEventInit init)
 
 jsg::Ref<CustomEvent> CustomEvent::constructor(
     jsg::Lock& js, kj::String type, jsg::Optional<CustomEventInit> init) {
-  return js.alloc<CustomEvent>(kj::mv(type), kj::mv(init).orDefault({}));
+  auto event = js.alloc<CustomEvent>(kj::mv(type), kj::mv(init).orDefault({}));
+  event->markConstructedFromJs();
+  return event;
 }
 
 jsg::Optional<jsg::JsValue> CustomEvent::getDetail(jsg::Lock& js) {
@@ -1099,6 +1202,9 @@ void EventTarget::EventHandlerSet::jsgGetMemoryInfo(jsg::MemoryTracker& tracker)
 
 void EventTarget::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("typeMap", typeMap);
+  for (const auto& entry: eventHandlerAttributes) {
+    tracker.trackField("eventHandlerAttribute", entry.value.value);
+  }
 }
 
 }  // namespace workerd::api

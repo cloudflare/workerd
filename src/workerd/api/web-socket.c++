@@ -262,6 +262,17 @@ IoOwn<LegacyWebSocketAdapter::Native> LegacyWebSocketAdapter::initNative(IoConte
   return ioContext.addObject(kj::mv(nativeObj));
 }
 
+namespace {
+// A message event's origin is the serialized origin of the WebSocket's URL, so keep the URL parsed
+// for as long as the socket lives. Sockets with no URL have no origin to report.
+kj::Maybe<jsg::Url> parseUrlForOrigin(kj::Maybe<kj::String>& url) {
+  KJ_IF_SOME(u, url) {
+    return jsg::Url::tryParse(u.asPtr());
+  }
+  return kj::none;
+}
+}  // namespace
+
 LegacyWebSocketAdapter::LegacyWebSocketAdapter(jsg::Lock& js,
     WebSocket& shell,
     IoContext& ioContext,
@@ -279,7 +290,9 @@ LegacyWebSocketAdapter::LegacyWebSocketAdapter(jsg::Lock& js,
           ws,
           kj::mv(KJ_REQUIRE_NONNULL(package.maybeTags)),
           package.closedOutgoingConnection)),
-      outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())) {}
+      outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())) {
+  urlForOrigin = parseUrlForOrigin(this->url);
+}
 // This constructor is used when reinstantiating a websocket that had been hibernating, which is
 // why we can go straight to the Accepted state. However, note that we are actually in the
 // `Hibernatable` "sub-state"!
@@ -306,6 +319,7 @@ LegacyWebSocketAdapter::LegacyWebSocketAdapter(jsg::Lock& js, WebSocket& shell, 
       allowHalfOpen(!FeatureFlags::get(js).getWebSocketAutoReplyToClose()),
       farNative(nullptr),
       outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())) {
+  urlForOrigin = parseUrlForOrigin(this->url);
   auto nativeObj = kj::heap<Native>();
   nativeObj->state.init<AwaitingConnection>();
   farNative = IoContext::current().addObject(kj::mv(nativeObj));
@@ -1353,20 +1367,30 @@ kj::Promise<kj::Maybe<kj::Exception>> LegacyWebSocketAdapter::readLoop(
         // Emit the mark here, in-scope, so it isn't dropped for want of a perf-counter monitor
         // scope. The limiter stamps the time (dispatch time, ~= receive time).
         markWebSocketPerfEvent("ws_received"_kjc);
+        // Per the WebSocket standard, the message event's origin is the serialized origin of the
+        // socket's URL. Without specCompliantMessageEventOrigin we report no origin at all, which
+        // MessageEvent surfaces as null.
+        kj::Maybe<jsg::Url&> origin;
+        if (FeatureFlags::get(js).getSpecCompliantMessageEventOrigin()) {
+          origin = urlForOrigin;
+        }
         KJ_SWITCH_ONEOF(message) {
           KJ_CASE_ONEOF(text, kj::String) {
-            shell.dispatchEventImpl(js, js.alloc<MessageEvent>(js, js.str(text)));
+            shell.dispatchEventImpl(
+                js, js.alloc<MessageEvent>(js, js.str(text), kj::String(), kj::none, origin));
           }
           KJ_CASE_ONEOF(data, kj::Array<byte>) {
             if (binaryType_ == BinaryType::BLOB) {
               // Per the WHATWG spec, deliver binary messages as Blob when binaryType is "blob".
               auto ab = jsg::JsArrayBuffer::create(js, data);
               auto blob = js.alloc<Blob>(js, jsg::JsBufferSource(ab), kj::str());
-              shell.dispatchEventImpl(
-                  js, js.alloc<MessageEvent>(js, kj::str("message"), kj::mv(blob)));
+              shell.dispatchEventImpl(js,
+                  js.alloc<MessageEvent>(
+                      js, kj::str("message"), kj::mv(blob), kj::String(), kj::none, origin));
             } else {
               jsg::JsValue ab = jsg::JsArrayBuffer::create(js, data);
-              shell.dispatchEventImpl(js, js.alloc<MessageEvent>(js, ab));
+              shell.dispatchEventImpl(
+                  js, js.alloc<MessageEvent>(js, ab, kj::String(), kj::none, origin));
             }
           }
           KJ_CASE_ONEOF(close, kj::WebSocket::Close) {

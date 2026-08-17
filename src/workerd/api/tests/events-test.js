@@ -463,3 +463,32 @@ export const handlerThis = {
     strictEqual(handlerObject.handleEvent.mock.callCount(), 1);
   },
 };
+
+export const messageEventOrigin = {
+  test() {
+    // Per the spec, MessageEventInit's `origin` member is a USVString defaulting to the empty
+    // string, so `origin` is never null. Without the
+    // spec_compliant_message_event_origin compat flag we report null when there is no
+    // URL to derive an origin from.
+    const specCompliant =
+      Cloudflare.compatibilityFlags.spec_compliant_message_event_origin;
+    const event = new MessageEvent('message', { data: null });
+    strictEqual(event.origin, specCompliant ? '' : null);
+  },
+};
+
+export const eventIsTrusted = {
+  test() {
+    // Per the standard, an event's "is trusted" flag is only set when the runtime creates and
+    // dispatches the event, so anything constructed here is untrusted.
+    for (const event of [
+      new Event('foo'),
+      new MessageEvent('message', { data: null }),
+      new CustomEvent('foo'),
+      new ErrorEvent('error'),
+      new CloseEvent('close'),
+    ]) {
+      strictEqual(event.isTrusted, false, event.type);
+    }
+  },
+};

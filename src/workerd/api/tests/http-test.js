@@ -248,7 +248,15 @@ export const test = {
     assert.notStrictEqual(webSocket, null);
     // The server-side WebSocketPair socket's binaryType depends on the compat flag.
     const bt = new WebSocketPair()[0].binaryType;
-    const wsStr = `WebSocket {\n    readyState: 1,\n    url: null,\n    protocol: '',\n    extensions: '',\n    binaryType: '${bt}'\n  }`;
+    // The `on<type>` event handler attributes only exist with the
+    // spec_compliant_event_handler_attributes compat flag, and `origin` is only the empty
+    // string with the spec_compliant_message_event_origin one.
+    const flags = Cloudflare.compatibilityFlags;
+    const onProps = flags.spec_compliant_event_handler_attributes
+      ? `,\n    onopen: null,\n    onmessage: null,\n    onclose: null,\n    onerror: null`
+      : '';
+    const origin = flags.spec_compliant_message_event_origin ? "''" : 'null';
+    const wsStr = `WebSocket {\n    readyState: 1,\n    url: null,\n    protocol: '',\n    extensions: '',\n    binaryType: '${bt}'${onProps}\n  }`;
     const messagePromise = new Promise((resolve) => {
       webSocket.addEventListener('message', (event) => {
         assert.strictEqual(
@@ -257,7 +265,7 @@ export const test = {
   ports: [ [length]: 0 ],
   source: null,
   lastEventId: '',
-  origin: null,
+  origin: ${origin},
   data: 'data',
   type: 'message',
   eventPhase: 2,

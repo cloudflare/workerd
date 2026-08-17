@@ -19,13 +19,13 @@ MessagePort::MessagePort(): state(Pending()) {
           // supports. Specifically, adding a new message listener using the
           // addEventListener method is *technically* not supposed to start
           // the port but we're going to do what Node.js does.
-          if (count > 0 || onmessageValue != kj::none) {
+          if (count > 0 || hasEventHandlerAttribute("message"_kj)) {
             start(js);
           }
         }
         KJ_CASE_ONEOF(started, Started) {
           // If we are in the started state, stop the port if there are no listeners.
-          if (count == 0 && onmessageValue == kj::none) {
+          if (count == 0 && !hasEventHandlerAttribute("message"_kj)) {
             state = Pending();
           }
         }
@@ -192,22 +192,17 @@ void MessagePort::start(jsg::Lock& js) {
 }
 
 kj::Maybe<jsg::JsValue> MessagePort::getOnMessage(jsg::Lock& js) {
-  return onmessageValue.map(
-      [&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue { return ref.getHandle(js); });
+  return getEventHandlerAttribute(js, "message"_kj);
 }
 
-void MessagePort::setOnMessage(jsg::Lock& js, jsg::JsValue value) {
-  if (!value.isObject() && !value.isFunction()) {
-    onmessageValue = kj::none;
-    // If we have no handlers and no onmessage ...
-    if (getHandlerCount("message"_kj) == 0 && onmessageValue == kj::none) {
-      // ...Put the port back into a pending state where messages
-      // will be enqueued until another listener is attached.
-      state = Pending();
-    }
-  } else {
-    onmessageValue = jsg::JsRef<jsg::JsValue>(js, value);
+void MessagePort::setOnMessage(jsg::Lock& js, jsg::Optional<EventHandlerAttributeValue> value) {
+  setEventHandlerAttribute(js, "message"_kj, kj::mv(value));
+  if (hasEventHandlerAttribute("message"_kj)) {
     start(js);
+  } else if (getHandlerCount("message"_kj) == 0 && !state.is<Closed>()) {
+    // We have no handlers and no onmessage, so put the port back into a pending state where
+    // messages will be enqueued until another listener is attached.
+    state = Pending();
   }
 }
 

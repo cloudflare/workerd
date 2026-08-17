@@ -51,7 +51,7 @@ class MessageEvent final: public Event {
 
   kj::OneOf<jsg::JsValue, jsg::Ref<Blob>> getData(jsg::Lock& js);
 
-  kj::Maybe<kj::ArrayPtr<const char>> getOrigin();
+  kj::Maybe<kj::ArrayPtr<const char>> getOrigin(jsg::Lock& js);
 
   kj::StringPtr getLastEventId();
 
@@ -62,7 +62,7 @@ class MessageEvent final: public Event {
 
   kj::ArrayPtr<jsg::Ref<MessagePort>> getPorts();
 
-  JSG_RESOURCE_TYPE(MessageEvent) {
+  JSG_RESOURCE_TYPE(MessageEvent, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(Event);
 
     JSG_READONLY_INSTANCE_PROPERTY(data, getData);
@@ -72,7 +72,13 @@ class MessageEvent final: public Event {
     JSG_READONLY_INSTANCE_PROPERTY(ports, getPorts);
 
     JSG_TS_ROOT();
-    JSG_TS_OVERRIDE({ readonly data: any; });
+    if (flags.getSpecCompliantMessageEventOrigin()) {
+      // getOrigin() still returns a kj::Maybe, which maps to `string | null`, but with the flag
+      // the none case reports the empty string, so `origin` is never actually null.
+      JSG_TS_OVERRIDE({ readonly data: any; readonly origin: string; });
+    } else {
+      JSG_TS_OVERRIDE({ readonly data: any; });
+    }
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;

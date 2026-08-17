@@ -10,6 +10,7 @@
 #include <workerd/io/io-gate.h>
 #include <workerd/io/observer.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/url.h>
 #include <workerd/util/checked-queue.h>
 #include <workerd/util/strong-bool.h>
 
@@ -53,8 +54,10 @@ class CloseEvent: public Event {
   static jsg::Ref<CloseEvent> constructor(
       jsg::Lock& js, kj::String type, jsg::Optional<Initializer> initializer) {
     Initializer init = kj::mv(initializer).orDefault({});
-    return js.alloc<CloseEvent>(kj::mv(type), init.code.orDefault(0),
+    auto event = js.alloc<CloseEvent>(kj::mv(type), init.code.orDefault(0),
         kj::mv(init.reason).orDefault(jsg::USVString(kj::str())), init.wasClean.orDefault(false));
+    event->markConstructedFromJs();
+    return event;
   }
 
   int getCode() {
@@ -343,6 +346,15 @@ class WebSocket: public EventTarget {
   kj::StringPtr getBinaryType();
   void setBinaryType(kj::String value);
 
+  // The event handler attributes the WebSocket standard defines. These are only registered
+  // when the specCompliantEventHandlerAttributes compat flag is enabled; without it, assigning
+  // `onmessage` and friends just sets an ordinary property that EventTarget's legacy
+  // `on<type>` lookup finds at dispatch time.
+  WD_EVENT_HANDLER_ATTRIBUTE(Open, "open");
+  WD_EVENT_HANDLER_ATTRIBUTE(Message, "message");
+  WD_EVENT_HANDLER_ATTRIBUTE(Close, "close");
+  WD_EVENT_HANDLER_ATTRIBUTE(Error, "error");
+
   JSG_RESOURCE_TYPE(WebSocket, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
     JSG_METHOD(accept);
@@ -379,6 +391,13 @@ class WebSocket: public EventTarget {
       JSG_READONLY_INSTANCE_PROPERTY(protocol, getProtocol);
       JSG_READONLY_INSTANCE_PROPERTY(extensions, getExtensions);
       JSG_INSTANCE_PROPERTY(binaryType, getBinaryType, setBinaryType);
+    }
+
+    if (flags.getSpecCompliantEventHandlerAttributes()) {
+      JSG_PROTOTYPE_PROPERTY(onopen, getOnOpen, setOnOpen);
+      JSG_PROTOTYPE_PROPERTY(onmessage, getOnMessage, setOnMessage);
+      JSG_PROTOTYPE_PROPERTY(onclose, getOnClose, setOnClose);
+      JSG_PROTOTYPE_PROPERTY(onerror, getOnError, setOnError);
     }
 
     JSG_TS_DEFINE(type WebSocketEventMap = {
@@ -834,6 +853,12 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   WebSocket& shell;
 
   kj::Maybe<kj::String> url;
+
+  // `url` parsed, so message events can report its origin as the WebSocket standard requires.
+  // None for a socket that has no URL: a WebSocketPair endpoint, or one taken from an upgraded
+  // fetch() response. Set by the constructors that receive a URL.
+  kj::Maybe<jsg::Url> urlForOrigin;
+
   kj::Maybe<kj::String> protocol = kj::String();
   kj::Maybe<kj::String> extensions = kj::String();
   // The binaryType attribute per the WHATWG WebSocket spec. Defaults to "blob" when the

@@ -1,0 +1,33 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "websocket-origin-spec-test", worker = .specWorker),
+    (name = "websocket-origin-legacy-test", worker = .legacyWorker),
+    (name = "internet", network = (allow = ["private"])),
+  ],
+);
+
+const specWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "websocket-origin-test.js"),
+  ],
+  bindings = [
+    (name = "MODE", text = "spec"),
+    (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+    (name = "ORIGIN_SERVER_PORT", fromEnvironment = "ORIGIN_SERVER_PORT"),
+  ],
+  compatibilityFlags = ["nodejs_compat", "spec_compliant_message_event_origin"],
+);
+
+const legacyWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "websocket-origin-test.js"),
+  ],
+  bindings = [
+    (name = "MODE", text = "legacy"),
+    (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+    (name = "ORIGIN_SERVER_PORT", fromEnvironment = "ORIGIN_SERVER_PORT"),
+  ],
+  compatibilityFlags = ["nodejs_compat", "no_spec_compliant_message_event_origin"],
+);

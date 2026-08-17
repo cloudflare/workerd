@@ -1642,4 +1642,53 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2026-08-11");
   # Enables fast Workflow engine creation by generating instance IDs with the Durable Object
   # namespace's `newUniqueId()` method instead of UUIDs.
+
+  specCompliantEventHandlerAttributes @186 :Bool
+      $compatEnableFlag("spec_compliant_event_handler_attributes")
+      $compatDisableFlag("no_spec_compliant_event_handler_attributes");
+  # Makes `on<type>` event handler attributes behave the way the DOM and HTML standards
+  # describe them.
+  #
+  # Historically our `EventTarget` implementation looked for an `on<type>` property on the
+  # target itself every time an event was dispatched, and invoked it before any listener
+  # registered with `addEventListener()`. That behavior is not in any standard and it has
+  # two visible problems: `on<type>` handlers always run first instead of in registration
+  # order, and anything that subclasses `EventTarget` and implements `on<type>` properly
+  # (by registering a listener) gets its handler invoked twice per event.
+  #
+  # With this flag, `EventTarget` no longer looks for `on<type>` properties. Instead, the
+  # interfaces that the standards say have event handler attributes (`AbortSignal`,
+  # `WebSocket`, `MessagePort`, `EventSource`) implement them as accessors that register a
+  # regular listener, so they fire in registration order and only once. Assigning a new
+  # handler keeps the position of the original registration, and assigning null removes it.
+  #
+  # The global scope is deliberately excluded and keeps the property lookup for every event
+  # type, so `onfetch`, `onscheduled` and friends in service-worker syntax are unchanged. This is
+  # a remaining deviation rather than a fully spec-aligned surface: `WorkerGlobalScope` and
+  # `ServiceWorkerGlobalScope` do define event handler attributes (`onerror`,
+  # `onunhandledrejection`, `onrejectionhandled`, `onfetch`, ...), but the global also dispatches
+  # workerd-specific events (`scheduled`, `tail`, `trace`, `alarm`, `queue`) that no standard
+  # covers, and `onerror` is an `OnErrorEventHandler`, which has its own arguments and return
+  # value handling. Turning the standardized subset into real accessors also adds properties to
+  # the global object, which is a breaking change in its own right. That is left for a separate
+  # change; the lookup is skipped for any type that does have an event handler attribute, so such
+  # a change can be made incrementally without double-firing handlers.
+
+  specCompliantMessageEventOrigin @187 :Bool
+      $compatEnableFlag("spec_compliant_message_event_origin")
+      $compatDisableFlag("no_spec_compliant_message_event_origin");
+  # Makes `MessageEvent.origin` report what the standards say it should. Two things change.
+  #
+  # First, an absent origin reports the empty string rather than null. A MessageEvent's origin is
+  # internally nullable and the standard's getter returns the empty string for the null case:
+  # https://html.spec.whatwg.org/multipage/comms.html#dom-messageevent-origin
+  # (`MessageEventInit`'s `""` default for the member is a separate supporting rule.) We returned
+  # null instead. This is what a `MessagePort` message, or a message from a `WebSocketPair`
+  # endpoint, now reports, since neither has a URL to take an origin from.
+  #
+  # Second, a `WebSocket` opened from a URL reports the serialized origin of that URL, which the
+  # WebSocket standard requires and we did not do:
+  # https://websockets.spec.whatwg.org/#feedback-from-the-protocol
+  # So `new WebSocket("wss://example.com/chat")` now delivers messages with an origin of
+  # "wss://example.com". `EventSource` already reported the origin of its event stream.
 }

@@ -10,5 +10,16 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = ["nodejs_compat", "set_event_target_this", "workers_api_getters_setters_on_prototype", "dont_substitute_null_on_type_error"]
       )
     ),
+    # The same tests again with spec_compliant_message_event_origin enabled. The tests that care
+    # read Cloudflare.compatibilityFlags, so both behaviors are covered without depending on the
+    # flag having an enable date.
+    ( name = "events-spec-compliance-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "events-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "set_event_target_this", "workers_api_getters_setters_on_prototype", "dont_substitute_null_on_type_error", "spec_compliant_message_event_origin"]
+      )
+    ),
   ],
 );

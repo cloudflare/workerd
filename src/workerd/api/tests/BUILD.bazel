@@ -510,6 +510,12 @@ wd_test(
 )
 
 wd_test(
+    src = "event-handler-attributes-test.wd-test",
+    args = ["--experimental"],
+    data = ["event-handler-attributes-test.js"],
+)
+
+wd_test(
     src = "events-test.wd-test",
     args = ["--experimental"],
     data = ["events-test.js"],
@@ -916,6 +922,23 @@ wd_test(
     src = "websocket-hibernation.wd-test",
     args = ["--experimental"],
     data = ["websocket-hibernation.js"],
+)
+
+js_binary(
+    name = "websocket-origin-sidecar",
+    entry_point = "websocket-origin-sidecar.js",
+)
+
+wd_test(
+    src = "websocket-origin-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "websocket-origin-test.js",
+    ],
+    sidecar = "websocket-origin-sidecar",
+    sidecar_port_bindings = [
+        "ORIGIN_SERVER_PORT",
+    ],
 )
 
 js_binary(
