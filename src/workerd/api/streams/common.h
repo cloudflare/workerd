@@ -994,4 +994,34 @@ inline kj::Maybe<IoContext::Id> tryGetIoContextId() {
   return IoContext::tryGetCurrentId();
 }
 
+// A ReadableStreamSource backed by in-memory data. Unlike newSystemStream() wrapping a
+// newMemoryInputStream(), this implementation does NOT support deferred proxying, so the data
+// is always consumed before the IoContext goes away and `backing` can be something whose
+// lifetime is tied to the IoContext.
+//
+// The `backing` parameter keeps the underlying memory alive for the lifetime of the stream.
+// If not provided, the bytes are copied.
+//
+// Reads and pumps run on the kj event loop without the isolate lock, so `bytes` MUST be
+// readable there.  When MPK protects isolate memory, that rules out anything inside the V8
+// sandbox -- ArrayBuffer and Blob contents in particular.  Callers holding such data must
+// omit `backing` and let this function copy, or copy it themselves beforehand.
+//
+// TODO(soon): Update to implement ReadableSource instead of ReadableStreamSource.
+// For now this is a ReadableStreamSource for compat with existing code. Once internal.h/c++
+// is updated to use ReadableSource, we will change this also.
+//
+// TODO(cleanup): It would be nice to eventually have some sort of stronger guarantee when
+// deferred proxying can or cannot be used with a stream. Right now it's a bit ad hoc and
+// error-prone. It requires the stream impl to keep track of whether it can be deferred-proxied
+// or not, but in this case, that may be entirely opaque behind the details of the backing memory
+// as is the case with kj::Array<kj::byte> instances that come from the type wrapper system.
+kj::Own<ReadableStreamSource> newMemorySource(
+    kj::ArrayPtr<const kj::byte> bytes, kj::Maybe<kj::Own<void>> backing = kj::none);
+
+// Wraps a kj::AsyncInputStream returned from a tee() call to ensure that it translates
+// errors into equivalent JS exceptions. Typically this is used when customizing tee() on
+// a ReadableSource implementation.
+kj::Own<kj::AsyncInputStream> wrapTeeBranch(kj::Own<kj::AsyncInputStream> branch);
+
 }  // namespace workerd::api

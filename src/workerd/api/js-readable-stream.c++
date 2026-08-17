@@ -5,7 +5,7 @@
 #include <workerd/api/blob.h>
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-writable-stream.h>
-#include <workerd/api/streams/readable-source.h>
+#include <workerd/api/streams/common.h>
 #include <workerd/api/url-standard.h>
 #include <workerd/api/url.h>
 #include <workerd/io/features.h>
@@ -462,14 +462,14 @@ JsReadableStream::Buffer::Buffer(kj::Array<const kj::byte> data): view(data), ow
 JsReadableStream::Buffer::Buffer(jsg::Ref<Blob> data): Buffer(kj::heapArray(data->getData())) {}
 
 JsReadableStream::Impl JsReadableStream::bufferBackedImpl(jsg::Lock& js, kj::Rc<Buffer> buffer) {
-  // Use streams::newMemorySource() rather than newSystemStream() wrapping a memory input stream:
+  // Use newMemorySource() rather than newSystemStream() wrapping a memory input stream:
   // it reads the Buffer's bytes in place, so every stream derived from this Buffer -- rewinds
   // and tee branches alike -- shares the one allocation.
   //
   // TODO(streams-ts): Like create(), the stream construction here must dispatch on the
   // worker's configuration once the TypeScript implementation lands.
   auto view = buffer->view;
-  auto source = streams::newMemorySource(view, buffer.addRef().toOwn());
+  auto source = newMemorySource(view, buffer.addRef().toOwn());
   return Impl{
     .stream = StreamImpl(js.alloc<ReadableStream>(IoContext::current(), kj::mv(source))),
     .maybeOwnedBuffer = kj::mv(buffer),
@@ -1337,8 +1337,8 @@ kj::Array<jsg::Ref<ReadableStreamNativeSource>> ReadableStreamNativeSource::tee(
     auto tee = kj::newTee(
         kj::heap<TeeInputAdapter>(kj::Own<ReadableStreamSource>(kj::mv(active.source))), limit);
     return ReadableStreamSource::Tee{
-      .branches = {kj::heap<TeeBranchSource>(streams::wrapTeeBranch(kj::mv(tee.branches[0]))),
-        kj::heap<TeeBranchSource>(streams::wrapTeeBranch(kj::mv(tee.branches[1])))},
+      .branches = {kj::heap<TeeBranchSource>(wrapTeeBranch(kj::mv(tee.branches[0]))),
+        kj::heap<TeeBranchSource>(wrapTeeBranch(kj::mv(tee.branches[1])))},
     };
   }();
 
