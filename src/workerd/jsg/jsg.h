@@ -21,6 +21,7 @@
 #include <v8-locker.h>
 #include <v8-profiler.h>
 #include <v8-regexp.h>
+#include <v8-snapshot.h>
 
 #include <capnp/schema-loader.h>
 #include <kj/debug.h>
@@ -53,6 +54,19 @@ kj::String KJ_STRINGIFY(v8::Local<T> value) {
 }  // namespace v8
 
 namespace workerd::jsg {
+
+// Everything needed to create a new isolate from a V8 startup snapshot:
+// * `blob` is the serialized snapshot data, allocated with `new[]` by v8::SnapshotCreator.
+// * `mode` indicates whether this worker produces the snapshot or consumes it.
+struct SnapshotArtifact {
+  enum class Mode {
+    PRODUCE,
+    CONSUME,
+  };
+
+  v8::StartupData blob{nullptr, 0};
+  Mode mode;
+};
 
 // =======================================================================================
 // Macros for declaring type glue.
@@ -3210,6 +3224,10 @@ class Lock {
    private:
     Lock& js;
   };
+
+  // True when the underlying isolate was created in the corresponding snapshot mode.
+  bool isPreparingSnapshot() const;
+  bool isStartingFromSnapshot() const;
 
   // Sets the terminate-execution flag on the isolate so that the next time code tries to run, it
   // will be terminated. (But note that V8 only checks the flag at certain times, so it's possible

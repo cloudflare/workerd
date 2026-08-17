@@ -5602,6 +5602,56 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   co_return co_await makeWorkerImpl(name, kj::mv(def), extensions, errorReporter);
 }
 
+jsg::SnapshotArtifact& Server::makeSnapshot(kj::StringPtr name,
+    WorkerDef& def,
+    capnp::List<config::Extension>::Reader extensions,
+    ErrorReporter& errorReporter) {
+  // Build a throwaway zygote Worker in PREPARE_SNAPSHOT mode just to extract a V8 startup
+  // snapshot; the caller then builds the real Worker in START_FROM_SNAPSHOT mode using it.
+  KJ_REQUIRE(!def.featureFlags.getPythonWorkers(), "snapshot PoC: no Python workers");
+  KJ_REQUIRE(!def.featureFlags.getNewModuleRegistry(), "snapshot PoC: no new module registry");
+  KJ_REQUIRE(!def.source.variant.is<WorkerSource::ScriptSource>(), "snapshot PoC: ESM only");
+
+  static jsg::SnapshotArtifact indestructibleSnapshotArtifacts;
+  indestructibleSnapshotArtifacts.mode = jsg::SnapshotArtifact::Mode::PRODUCE;
+
+  auto isolateGroup = v8::IsolateGroup::GetDefault();
+
+  auto zygoteJsgObserver = kj::atomicRefcounted<JsgIsolateObserver>();
+  auto zygoteObserver = kj::atomicRefcounted<IsolateObserver>();
+  auto zygoteLimitEnforcer = kj::refcounted<NullIsolateLimitEnforcer>();
+  auto zygoteWorkerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(def.source));
+
+  auto zygoteApi = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
+      zygoteLimitEnforcer->getCreateParams(), isolateGroup, kj::mv(zygoteJsgObserver),
+      *memoryCacheProvider, pythonConfig, indestructibleSnapshotArtifacts);
+
+  Worker::LoggingOptions zygoteLoggingOptions = loggingOptions;
+  auto zygoteIsolate = kj::atomicRefcounted<Worker::Isolate>(kj::mv(zygoteApi),
+      kj::mv(zygoteObserver), kj::str(name, "-snapshot"), kj::mv(zygoteLimitEnforcer),
+      Worker::Isolate::InspectorPolicy::DISALLOW, kj::mv(zygoteLoggingOptions));
+
+  auto zygoteArtifactBundler = workerd::api::pyodide::ArtifactBundler::makeDisabledBundler();
+
+  auto zygoteScript = zygoteIsolate->newScript(name, def.source, IsolateObserver::StartType::COLD,
+      SpanParent(nullptr), kj::mv(zygoteWorkerFs), false, errorReporter,
+      kj::mv(zygoteArtifactBundler),
+      /*newModuleRegistry=*/kj::none);
+
+  // Use the same binding-compilation logic as the real Worker (no snapshot filtering).
+  auto zygoteCompileBindings =
+      [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
+          v8::Local<v8::Object> /*ctxExports*/) { def.compileBindings(lock, api, target); };
+
+  auto zygoteWorker =
+      kj::atomicRefcounted<Worker>(kj::mv(zygoteScript), kj::atomicRefcounted<WorkerObserver>(),
+          kj::mv(zygoteCompileBindings), IsolateObserver::StartType::COLD, SpanParent(nullptr),
+          Worker::Lock::TakeSynchronously(kj::none), errorReporter);
+
+  indestructibleSnapshotArtifacts.mode = jsg::SnapshotArtifact::Mode::CONSUME;
+  return indestructibleSnapshotArtifacts;
+}
+
 kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr name,
     WorkerDef def,
     capnp::List<config::Extension>::Reader extensions,
@@ -5671,9 +5721,14 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   }
 
   auto isolateGroup = v8::IsolateGroup::GetDefault();
+
+  kj::Maybe<jsg::SnapshotArtifact&> snapshotArtifact = kj::none;
+  if (def.featureFlags.getStartupSnapshot()) {
+    snapshotArtifact = makeSnapshot(name, def, extensions, errorReporter);
+  }
   auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
       limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver), *memoryCacheProvider,
-      pythonConfig);
+      pythonConfig, snapshotArtifact);
 
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
