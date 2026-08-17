@@ -9,7 +9,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^25.9.5",
-    "capnp-es": "0.0.14",
+    "capnp-es": "0.0.16",
     "chrome-remote-interface": "^0.34.0",
     "esbuild": "^0.27.7",
     "eslint": "^10.8.1",
