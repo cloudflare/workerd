@@ -140,6 +140,16 @@ wd_test(
 )
 
 wd_test(
+    src = "temporal-test.wd-test",
+    data = ["temporal-test.js"],
+)
+
+wd_test(
+    src = "temporal-disabled-test.wd-test",
+    data = ["temporal-disabled-test.js"],
+)
+
+wd_test(
     src = "tail-worker-test.wd-test",
     args = [
         "--experimental",
