@@ -79,7 +79,7 @@ bazel_dep(name = "rules_nodejs", version = "6.7.5")
 bazel_dep(name = "rules_oci", version = "2.3.0")
 
 # rules_python
-bazel_dep(name = "rules_python", version = "2.2.0")
+bazel_dep(name = "rules_python", version = "2.3.1")
 
 # rules_rust
 bazel_dep(name = "rules_rust", version = "0.73.0")
