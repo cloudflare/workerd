@@ -595,8 +595,8 @@ KJ_TEST("Container::start monitors a container that exits immediately") {
   auto fixture = makeFixture();
   fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto weakContext = env.context.getWeakRef();
-    auto container = kj::heap<Container>(
-        rpc::Container::Client(kj::heap<ImmediateExitContainerServer>()), false);
+    auto container =
+        kj::rc<Container>(rpc::Container::Client(kj::heap<ImmediateExitContainerServer>()), false);
 
     container->start(env.js, kj::none);
     KJ_EXPECT(container->getRunning());
@@ -642,7 +642,7 @@ KJ_TEST("Container::start forwards a named instance type") {
 
   fixture.runInIoContext([promise = kj::mv(promise), fulfiller = kj::mv(paf.fulfiller)](
                              const TestFixture::Environment& env) mutable {
-    auto container = kj::heap<Container>(
+    auto container = kj::rc<Container>(
         rpc::Container::Client(kj::heap<MockContainerServer>(kj::mv(fulfiller))), false);
     container->start(env.js,
         Container::StartupOptions{
@@ -666,7 +666,7 @@ KJ_TEST("Container::start forwards custom instance resources") {
 
   fixture.runInIoContext([promise = kj::mv(promise), fulfiller = kj::mv(paf.fulfiller)](
                              const TestFixture::Environment& env) mutable {
-    auto container = kj::heap<Container>(
+    auto container = kj::rc<Container>(
         rpc::Container::Client(kj::heap<MockContainerServer>(kj::mv(fulfiller))), false);
     container->start(env.js,
         Container::StartupOptions{
@@ -693,7 +693,7 @@ KJ_TEST("Container::snapshotDirectory propagates the current span context") {
   auto fixture = makeFixture();
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto container = kj::heap<Container>(
+    auto container = kj::rc<Container>(
         rpc::Container::Client(kj::heap<MockContainerServer>(directoryCalled, containerCalled)),
         true);
     auto promise = container->snapshotDirectory(env.js,
@@ -714,7 +714,7 @@ KJ_TEST("Container::snapshotContainer propagates the current span context") {
   auto fixture = makeFixture();
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto container = kj::heap<Container>(
+    auto container = kj::rc<Container>(
         rpc::Container::Client(kj::heap<MockContainerServer>(directoryCalled, containerCalled)),
         true);
     auto promise = container->snapshotContainer(env.js,
@@ -735,7 +735,7 @@ KJ_TEST("Container::exec forwards pty options and resize() sends a resize RPC") 
   auto paf = kj::newPromiseAndFulfiller<void>();
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
-    auto container = kj::heap<Container>(
+    auto container = kj::rc<Container>(
         rpc::Container::Client(kj::heap<MockExecContainerServer>(
             env.context.getByteStreamFactory(), observations, kj::mv(paf.fulfiller))),
         true);
@@ -770,8 +770,8 @@ KJ_TEST("Container::exec without pty leaves the process non-pty and rejects resi
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto container =
-        kj::heap<Container>(rpc::Container::Client(kj::heap<MockExecContainerServer>(
-                                env.context.getByteStreamFactory(), observations, kj::none)),
+        kj::rc<Container>(rpc::Container::Client(kj::heap<MockExecContainerServer>(
+                              env.context.getByteStreamFactory(), observations, kj::none)),
             true);
 
     auto jsPromise = container->exec(env.js, kj::arr(kj::str("/bin/sh")), kj::none)
@@ -801,8 +801,8 @@ KJ_TEST("Container::exec with pty: true boolean shorthand enables PTY with defau
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto container =
-        kj::heap<Container>(rpc::Container::Client(kj::heap<MockExecContainerServer>(
-                                env.context.getByteStreamFactory(), observations, kj::none)),
+        kj::rc<Container>(rpc::Container::Client(kj::heap<MockExecContainerServer>(
+                              env.context.getByteStreamFactory(), observations, kj::none)),
             true);
 
     ExecOptions options;
@@ -829,8 +829,8 @@ KJ_TEST("Container::exec with pty: {} empty object enables PTY with server defau
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto container =
-        kj::heap<Container>(rpc::Container::Client(kj::heap<MockExecContainerServer>(
-                                env.context.getByteStreamFactory(), observations, kj::none)),
+        kj::rc<Container>(rpc::Container::Client(kj::heap<MockExecContainerServer>(
+                              env.context.getByteStreamFactory(), observations, kj::none)),
             true);
 
     ExecOptions options;
@@ -857,8 +857,8 @@ KJ_TEST("Container::exec with pty rejects explicit stderr: \"pipe\"") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto container =
-        kj::heap<Container>(rpc::Container::Client(kj::heap<MockExecContainerServer>(
-                                env.context.getByteStreamFactory(), observations, kj::none)),
+        kj::rc<Container>(rpc::Container::Client(kj::heap<MockExecContainerServer>(
+                              env.context.getByteStreamFactory(), observations, kj::none)),
             true);
 
     ExecOptions options;
@@ -884,8 +884,8 @@ KJ_TEST("Container::exec resize() rejects zero dimensions") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto container =
-        kj::heap<Container>(rpc::Container::Client(kj::heap<MockExecContainerServer>(
-                                env.context.getByteStreamFactory(), observations, kj::none)),
+        kj::rc<Container>(rpc::Container::Client(kj::heap<MockExecContainerServer>(
+                              env.context.getByteStreamFactory(), observations, kj::none)),
             true);
 
     ExecOptions options;
@@ -924,8 +924,8 @@ KJ_TEST("Container::exec resize() rejects out-of-range dimensions") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto container =
-        kj::heap<Container>(rpc::Container::Client(kj::heap<MockExecContainerServer>(
-                                env.context.getByteStreamFactory(), observations, kj::none)),
+        kj::rc<Container>(rpc::Container::Client(kj::heap<MockExecContainerServer>(
+                              env.context.getByteStreamFactory(), observations, kj::none)),
             true);
 
     ExecOptions options;
@@ -1249,8 +1249,8 @@ KJ_TEST("Container TCP port fetcher keeps pooled state alive") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto container =
-        kj::heap<Container>(rpc::Container::Client(kj::heap<TestContainerServer>(
-                                byteStreamFactory, ResponseMode::KEEP_ALIVE, connectCount)),
+        kj::rc<Container>(rpc::Container::Client(kj::heap<TestContainerServer>(
+                              byteStreamFactory, ResponseMode::KEEP_ALIVE, connectCount)),
             true);
     auto fetcher = container->getTcpPort(env.js, 8080);
     container = nullptr;
