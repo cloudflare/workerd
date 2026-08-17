@@ -1323,7 +1323,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
   auto sourceLock = KJ_ASSERT_NONNULL(source->getController().tryPipeLock());
 
   // Let's also acquire the destination pipe lock.
-  writeState.transitionTo<PipeLocked>(*source);
+  writeState.transitionTo<PipeLocked>(source.getWeakRef(js));
 
   // In the early-exit paths below we must release the source's pipe lock. The lock is
   // released through the source's controller, never through sourceLock itself, and our
@@ -2041,7 +2041,7 @@ bool WritableStreamInternalController::Pipe::checkSignal(jsg::Lock& js) {
       auto readableRef = [&]() -> kj::Maybe<jsg::Ref<ReadableStream>> {
         kj::Maybe<jsg::Ref<ReadableStream>> maybeRef;
         parentRef.writeState.whenState<PipeLocked>(
-            [&](PipeLocked& locked) { maybeRef = locked.ref.addRef(); });
+            [&](PipeLocked& locked) { maybeRef = locked.ref.tryAddRef(js); });
         return kj::mv(maybeRef);
       }();
 
@@ -2259,7 +2259,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
   auto getReadableRef = [&]() -> kj::Maybe<jsg::Ref<ReadableStream>> {
     kj::Maybe<jsg::Ref<ReadableStream>> maybeRef;
     parentRef.writeState.whenState<PipeLocked>(
-        [&](PipeLocked& locked) { maybeRef = locked.ref.addRef(); });
+        [&](PipeLocked& locked) { maybeRef = locked.ref.tryAddRef(js); });
     return kj::mv(maybeRef);
   };
 
