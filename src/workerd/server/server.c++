@@ -3368,12 +3368,6 @@ struct Server::DynamicErrorReporter final: public ErrorReporter {
     errors.add(kj::mv(error));
   }
 
-  void addWarning(kj::String warning) override {
-    // A dynamically-loaded Worker has no configuration file to point the developer at, and the
-    // Worker still starts, so the process log is the only place left to say anything.
-    KJ_LOG(WARNING, warning);
-  }
-
   void throwIfErrors() {
     if (!errors.empty()) {
       JSG_FAIL_REQUIRE(Error, "Failed to start Worker:\n", kj::strArray(errors, "\n"));

@@ -404,12 +404,6 @@ kj::Own<CompatibilityFlags::Reader> WorkerLoader::extractCompatFlags(
     JSG_FAIL_REQUIRE(Error, errorReporter.errors.front());
   }
 
-  // A dynamically-loaded Worker has no configuration file to point the developer at, so the
-  // process log is the only place left to say anything.
-  for (auto& warning: errorReporter.warnings) {
-    KJ_LOG(WARNING, warning);
-  }
-
   return capnp::clone(compatFlagsBuilder.asReader());
 }
 

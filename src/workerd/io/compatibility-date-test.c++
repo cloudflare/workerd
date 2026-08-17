@@ -360,6 +360,43 @@ KJ_TEST("compatibility flag parsing") {
       {}, CompatibilityDateValidation::FUTURE_FOR_TEST, false, false);
 }
 
+KJ_TEST("a reporter that ignores warnings accepts a redundant compatibility flag") {
+  // A reporter that leaves `addWarning()` at its default -- as deploy-time validation does, since
+  // it distinguishes only valid configurations from invalid ones -- must not see a redundant flag
+  // as an error. The configuration compiles to exactly the same flag set either way.
+  struct ErrorOnlyReporter final: public ValidationErrorReporter {
+    kj::Vector<kj::String> errors;
+
+    void addError(kj::String error) override {
+      errors.add(kj::mv(error));
+    }
+    void addEntrypoint(
+        kj::Maybe<kj::StringPtr> exportName, kj::Array<kj::String> methods) override {
+      KJ_UNREACHABLE;
+    }
+    void addActorClass(kj::StringPtr exportName) override {
+      KJ_UNREACHABLE;
+    }
+    void addWorkflowClass(kj::StringPtr exportName, kj::Array<kj::String> methods) override {
+      KJ_UNREACHABLE;
+    }
+  };
+
+  auto flags = kj::heapArrayBuilder<kj::String>(1);
+  flags.add(kj::str("formdata_parser_supports_files"));
+  auto flagArray = flags.finish();
+
+  capnp::MallocMessageBuilder message;
+  auto output = message.initRoot<CompatibilityFlags>();
+
+  ErrorOnlyReporter errorReporter;
+  compileCompatibilityFlags("2021-11-04", flagArray.asPtr(), output, errorReporter, false,
+      CompatibilityDateValidation::CODE_VERSION, nullptr);
+
+  KJ_EXPECT(errorReporter.errors.empty(), kj::strArray(errorReporter.errors, "\n"));
+  KJ_EXPECT(output.getFormDataParserSupportsFiles());
+}
+
 KJ_TEST("encode to flag list for FL") {
   capnp::MallocMessageBuilder message;
   auto orphanage = message.getOrphanage();
