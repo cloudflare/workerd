@@ -42,7 +42,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_AI_GATEWAY_TOKEN }}
         with:
           oidc_base_url: https://ask-bonk.cloudflare-exponent.workers.dev/auth
-          model: 'cloudflare-ai-gateway/anthropic/claude-opus-4-6'
+          model: 'anthropic/claude-opus-4.6'
           forks: 'false'
           permissions: write
           opencode_version: "1.18.16"
