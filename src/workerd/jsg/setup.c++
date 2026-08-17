@@ -124,6 +124,9 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
 
   v8::V8::SetDcheckErrorHandler(&v8DcheckError);
   v8::V8::SetFatalErrorHandler(&v8DcheckError);
+  // Sandbox allocation can fail when there is no current isolate, so also install the global OOM
+  // handler rather than relying only on Isolate::SetOOMErrorHandler().
+  v8::V8::SetFatalMemoryErrorCallback(&IsolateBase::oomError);
 
   // Note that v8::V8::SetFlagsFromString() simply ignores flags it doesn't recognize, which means
   // typos don't generate any error. SetFlagsFromCommandLine() has the `remove_flags` option which
@@ -421,11 +424,6 @@ IsolateBase::IsolateBase(V8System& system,
 
     ptr->SetFatalErrorHandler(&fatalError);
     ptr->SetOOMErrorHandler(&oomError);
-    // We also set the global OOM error handler.  This is a bit of
-    // a hack: Later in the run the allocation of a sandbox may fail
-    // due to OOM.  In that case we want our handler to be called
-    // even though there is no current isolate.
-    v8::V8::SetFatalMemoryErrorCallback(&oomError);
 
     ptr->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
     ptr->SetData(SET_DATA_ISOLATE_BASE, this);

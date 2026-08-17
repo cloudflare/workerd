@@ -273,7 +273,9 @@ pub mod tests {
                     let value = thread_id * items_per_thread + i;
                     own.pin_mut().set_data(value);
 
-                    // Send the Own across thread boundary
+                    // Rust's standard library is not TSan-instrumented, so describe the channel
+                    // handoff to TSan explicitly.
+                    ffi::tsan_release_opaque(&own);
                     tx_clone.send(own).unwrap();
                 }
             });
@@ -283,6 +285,7 @@ pub mod tests {
         // Collect all Owns from all threads
         let mut received_owns = Vec::new();
         while let Ok(own) = rx.recv() {
+            ffi::tsan_acquire_opaque(&own);
             received_owns.push(own);
         }
 

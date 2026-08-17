@@ -388,6 +388,7 @@ class IsolateBase {
  private:
   template <typename TypeWrapper>
   friend class Isolate;
+  friend class V8System;
 
   static void buildEmbedderGraph(v8::Isolate* isolate, v8::EmbedderGraph* graph, void* data);
 

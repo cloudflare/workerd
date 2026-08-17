@@ -2,6 +2,10 @@
 
 #include <rust/cxx.h>
 
+#if (defined(__has_feature) && __has_feature(thread_sanitizer)) || defined(__SANITIZE_THREAD__)
+#include <sanitizer/tsan_interface.h>
+#endif
+
 #include <kj/debug.h>
 #include <kj/memory.h>
 
@@ -23,6 +27,18 @@ class OpaqueCxxClass {
  private:
   uint64_t data;
 };
+
+inline void tsanReleaseOpaque(const OpaqueCxxClass& value) {
+#if (defined(__has_feature) && __has_feature(thread_sanitizer)) || defined(__SANITIZE_THREAD__)
+  __tsan_release(const_cast<OpaqueCxxClass*>(&value));
+#endif
+}
+
+inline void tsanAcquireOpaque(const OpaqueCxxClass& value) {
+#if (defined(__has_feature) && __has_feature(thread_sanitizer)) || defined(__SANITIZE_THREAD__)
+  __tsan_acquire(const_cast<OpaqueCxxClass*>(&value));
+#endif
+}
 
 // Forward declaration for Rust function, including the lib.rs.h caused problems
 kj::Own<OpaqueCxxClass> modify_own_return(kj::Own<OpaqueCxxClass> cpp_own);

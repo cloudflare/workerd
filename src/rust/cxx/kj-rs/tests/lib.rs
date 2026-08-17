@@ -80,6 +80,10 @@ pub mod ffi {
         fn get_data(&self) -> u64;
         #[cxx_name = "setData"]
         fn set_data(self: Pin<&mut OpaqueCxxClass>, val: u64);
+        #[cxx_name = "tsanReleaseOpaque"]
+        fn tsan_release_opaque(value: &OpaqueCxxClass);
+        #[cxx_name = "tsanAcquireOpaque"]
+        fn tsan_acquire_opaque(value: &OpaqueCxxClass);
 
         fn cxx_kj_own() -> KjOwn<OpaqueCxxClass>;
         fn null_kj_own() -> KjOwn<OpaqueCxxClass>;

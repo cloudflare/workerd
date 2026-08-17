@@ -2673,27 +2673,29 @@ KJ_TEST("Using a registry from multiple threads works") {
           kj::mv(registry), compilationObserver, successfulResolutions, kj::mv(paf.fulfiller))};
   };
 
-  auto [paf1, task1] =
-      makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
-  kj::Thread(kj::mv(task1)).detach();
-  auto [paf2, task2] =
-      makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
-  kj::Thread(kj::mv(task2)).detach();
-  auto [paf3, task3] =
-      makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
-  kj::Thread(kj::mv(task3)).detach();
-  auto [paf4, task4] =
-      makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
-  kj::Thread(kj::mv(task4)).detach();
-  auto [paf5, task5] =
-      makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
-  kj::Thread(kj::mv(task5)).detach();
+  {
+    auto [paf1, task1] =
+        makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
+    kj::Thread thread1(kj::mv(task1));
+    auto [paf2, task2] =
+        makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
+    kj::Thread thread2(kj::mv(task2));
+    auto [paf3, task3] =
+        makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
+    kj::Thread thread3(kj::mv(task3));
+    auto [paf4, task4] =
+        makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
+    kj::Thread thread4(kj::mv(task4));
+    auto [paf5, task5] =
+        makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
+    kj::Thread thread5(kj::mv(task5));
 
-  tasks.add(kj::mv(paf1));
-  tasks.add(kj::mv(paf2));
-  tasks.add(kj::mv(paf3));
-  tasks.add(kj::mv(paf4));
-  tasks.add(kj::mv(paf5));
+    tasks.add(kj::mv(paf1));
+    tasks.add(kj::mv(paf2));
+    tasks.add(kj::mv(paf3));
+    tasks.add(kj::mv(paf4));
+    tasks.add(kj::mv(paf5));
+  }
   tasks.onEmpty().wait(io.waitScope);
   KJ_IF_SOME(exception, errorHandler.error) {
     kj::throwRecoverableException(kj::mv(exception));

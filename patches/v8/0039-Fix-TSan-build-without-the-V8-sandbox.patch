@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Cloudflare Workers Team <workers@cloudflare.com>
+Date: Mon, 10 Aug 2026 18:00:00 +0000
+Subject: Fix TSan build without the V8 sandbox
+
+The TSan store helpers reference ExposedTrustedObject's indirect pointer
+field, which only exists when the V8 sandbox is enabled. Workerd builds V8
+without the sandbox, so compile the indirect-pointer handling only when the
+field is present.
+
+diff --git a/src/compiler/backend/x64/code-generator-x64.cc b/src/compiler/backend/x64/code-generator-x64.cc
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/src/compiler/backend/x64/code-generator-x64.cc
++++ b/src/compiler/backend/x64/code-generator-x64.cc
+@@ -814,6 +814,7 @@ Register GetTSANValueRegister(MacroAssembler* masm, Register value,
+     masm->movq(value_reg, value);
+     masm->EncodeSandboxedPointer(value_reg);
+     return value_reg;
++#if V8_ENABLE_SANDBOX
+   } else if (rep == MachineRepresentation::kIndirectPointer) {
+     // Indirect pointer fields contain an index to a pointer table entry, which
+     // is obtained from the referenced object.
+@@ -823,6 +824,7 @@ Register GetTSANValueRegister(MacroAssembler* masm, Register value,
+                FieldOperand(value, offsetof(ExposedTrustedObject,
+                                             self_indirect_pointer_)));
+     return value_reg;
++#endif  // V8_ENABLE_SANDBOX
+   }
+   return value;
+ }
+@@ -839,5 +841,6 @@ Register GetTSANValueRegister<std::memory_order_relaxed>(
+     // SandboxedPointers need to be encoded.
+     masm->EncodeSandboxedPointer(value_reg);
++#if V8_ENABLE_SANDBOX
+   } else if (rep == MachineRepresentation::kIndirectPointer) {
+     // Indirect pointer fields contain an index to a pointer table entry, which
+     // is obtained from the referenced object.
+@@ -848,5 +851,6 @@ Register GetTSANValueRegister<std::memory_order_relaxed>(
+                FieldOperand(value_reg, offsetof(ExposedTrustedObject,
+                                                 self_indirect_pointer_)));
++#endif  // V8_ENABLE_SANDBOX
+   }
+   return value_reg;
+ }
