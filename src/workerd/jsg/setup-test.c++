@@ -35,6 +35,10 @@ KJ_TEST("eval() is blocked") {
   e.expectEval("new Function('a', 'b', undefined)", "throws",
       "EvalError: Code generation from strings disallowed for this context");
 
+  e.expectEval("new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])) instanceof "
+               "WebAssembly.Module",
+      "throws", "CompileError: WebAssembly.Module(): Wasm code generation disallowed by embedder");
+
   // Extending Function with super() and no arguments is also allowed.
   e.expectEval("class Foo extends Function { constructor() { super(); } }; typeof new Foo()",
       "string", "function");
@@ -43,6 +47,9 @@ KJ_TEST("eval() is blocked") {
 
   e.expectEval("eval('123')", "number", "123");
   e.expectEval("new Function('a', 'b', 'return a + b;')(123, 321)", "number", "444");
+  e.expectEval("new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])) instanceof "
+               "WebAssembly.Module",
+      "boolean", "true");
 
   e.getIsolate().runInLockScope([&](EvalIsolate::Lock& lock) { lock.setAllowEval(false); });
 
@@ -50,10 +57,6 @@ KJ_TEST("eval() is blocked") {
       "EvalError: Code generation from strings disallowed for this context");
   e.expectEval("new Function('a', 'b', 'return a + b;')(123, 321)", "throws",
       "EvalError: Code generation from strings disallowed for this context");
-
-  // Note: It would be nice to test as well that WebAssembly is blocked, but that requires
-  //   setting up an event loop since the WebAssembly calls are all async. We'll test this
-  //   elsewhere.
 }
 
 // ========================================================================================

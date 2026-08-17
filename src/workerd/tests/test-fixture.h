@@ -304,6 +304,10 @@ struct TestFixture {
     TimerChannel& getTimer() override {
       return timer;
     }
+    kj::Promise<void> uploadWasmForCodeGeneration(kj::Array<kj::byte>, SpanParent) override {
+      return kj::READY_NOW;
+    }
+    void queueWasmUploadForCodeGeneration(kj::Array<kj::byte>, SpanParent) override {}
     kj::Promise<void> writeLogfwdr(
         uint channel, kj::FunctionParam<void(capnp::AnyPointer::Builder)> buildMessage) override {
       KJ_FAIL_ASSERT("no log channels");

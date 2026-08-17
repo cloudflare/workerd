@@ -595,10 +595,9 @@ v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
 }
 
 bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source) {
-  // Don't allow WASM unless arbitrary eval() is allowed.
   IsolateBase* self =
       static_cast<IsolateBase*>(v8::Isolate::GetCurrent()->GetData(SET_DATA_ISOLATE_BASE));
-  return self->evalAllowed;
+  return self->evalAllowed || self->wasmCodeGenerationAllowed;
 }
 
 void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {

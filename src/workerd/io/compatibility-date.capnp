@@ -1642,4 +1642,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2026-08-11");
   # Enables fast Workflow engine creation by generating instance IDs with the Durable Object
   # namespace's `newUniqueId()` method instead of UUIDs.
+
+  requestTimeWebAssemblyCompilation @186 :Bool
+      $compatEnableFlag("request_time_webassembly_compilation")
+      $experimental;
+  # Enables request-time WebAssembly compilation after retaining the exact input bytes.
 }

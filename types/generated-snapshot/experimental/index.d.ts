@@ -258,7 +258,12 @@ declare namespace WebAssembly {
     module: string;
     name: string;
   }
-  abstract class Module {
+  interface CompileOptions {
+    builtins?: string[];
+    importedStringConstants?: string;
+  }
+  class Module {
+    constructor(bytes: BufferSource, options?: CompileOptions);
     static customSections(module: Module, sectionName: string): ArrayBuffer[];
     static exports(module: Module): ModuleExportDescriptor[];
     static imports(module: Module): ModuleImportDescriptor[];
@@ -276,6 +281,19 @@ declare namespace WebAssembly {
     grow(delta: number, value?: any): number;
     set(index: number, value?: any): void;
   }
+  interface WebAssemblyInstantiatedSource {
+    instance: Instance;
+    module: Module;
+  }
+  function compile(
+    bytes: BufferSource,
+    options?: CompileOptions,
+  ): Promise<Module>;
+  function instantiate(
+    bytes: BufferSource,
+    imports?: Imports,
+    options?: CompileOptions,
+  ): Promise<WebAssemblyInstantiatedSource>;
   function instantiate(module: Module, imports?: Imports): Promise<Instance>;
   function validate(bytes: BufferSource): boolean;
 }
