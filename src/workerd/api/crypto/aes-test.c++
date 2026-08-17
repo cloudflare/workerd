@@ -105,7 +105,7 @@ KJ_TEST("AES-CTR key wrap") {
 
   static constexpr kj::ArrayPtr<const kj::byte> KEY_DATA(RAW_KEY_DATA, 32);
 
-  SubtleCrypto subtle;
+  auto subtle = kj::rc<SubtleCrypto>();
 
   static constexpr auto getWrappingKey = [](jsg::Lock& js, SubtleCrypto& subtle) {
     auto keyData = jsg::JsBufferSource(jsg::JsUint8Array::create(js, KEY_DATA));
@@ -139,23 +139,23 @@ KJ_TEST("AES-CTR key wrap") {
   e.getIsolate().runInLockScope([&](CryptoIsolate::Lock& isolateLock) {
     JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
         isolateLock.newContext<CryptoContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
-      auto wrappingKey = getWrappingKey(js, subtle);
+      auto wrappingKey = getWrappingKey(js, *subtle);
       auto keyData = jsg::JsBufferSource(jsg::JsUint8Array::create(js, KEY_DATA));
       subtle
-          .importKey(js, kj::str("raw"), keyData.addRef(js), getImportKeyAlg(), true,
+          ->importKey(js, kj::str("raw"), keyData.addRef(js), getImportKeyAlg(), true,
               kj::arr(kj::str("decrypt")))
           .then(js,
               [&](jsg::Lock&, jsg::Ref<CryptoKey> toWrap) {
-        return subtle.wrapKey(js, kj::str("raw"), *toWrap, *wrappingKey, getEnc(js), *jwkHandler);
+        return subtle->wrapKey(js, kj::str("raw"), *toWrap, *wrappingKey, getEnc(js), *jwkHandler);
       })
           .then(js,
               [&](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> wrapped) {
         auto data = jsg::JsBufferSource(wrapped.getHandle(js));
-        return subtle.unwrapKey(js, kj::str("raw"), data, *wrappingKey, getEnc(js),
+        return subtle->unwrapKey(js, kj::str("raw"), data, *wrappingKey, getEnc(js),
             getImportKeyAlg(), true, kj::arr(kj::str("encrypt")), *jwkHandler);
       })
           .then(js, [&](jsg::Lock& js, jsg::Ref<CryptoKey> unwrapped) {
-        return subtle.exportKey(js, kj::str("raw"), *unwrapped);
+        return subtle->exportKey(js, kj::str("raw"), *unwrapped);
       }).then(js, [&](jsg::Lock& js, api::SubtleCrypto::ExportKeyData roundTrippedKeyMaterial) {
         auto& buf = roundTrippedKeyMaterial.get<jsg::JsRef<jsg::JsArrayBuffer>>();
         KJ_ASSERT(buf.getHandle(js).asArrayPtr() == KEY_DATA);

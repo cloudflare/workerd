@@ -636,7 +636,7 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
           lock.unwrap<kj::OneOf<kj::String, api::SubtleCrypto::ImportKeyAlgorithm>>(context, algo);
 
       jsg::Ref<api::CryptoKey> importedKey =
-          api::SubtleCrypto().importKeySync(lock, key.format, kj::mv(keyData),
+          lock.alloc<api::SubtleCrypto>()->importKeySync(lock, key.format, kj::mv(keyData),
               api::interpretAlgorithmParam(kj::mv(importKeyAlgo)), key.extractable, key.usages);
 
       value = lock.wrap(context, kj::mv(importedKey));

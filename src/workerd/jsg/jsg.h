@@ -1437,6 +1437,10 @@ class Object: private Wrappable {
   friend kj::Own<T> kj::addRef(T& object);
   template <typename T, typename... Params>
   friend kj::Own<T> kj::refcounted(Params&&... params);
+  template <typename T, typename... Params>
+  friend kj::Rc<T> kj::rc(Params&&... params);
+  template <typename T, typename U>
+  friend constexpr bool kj::canConvert();
   friend class GcVisitor;
   template <typename, typename...>
   friend class TypeWrapper;
