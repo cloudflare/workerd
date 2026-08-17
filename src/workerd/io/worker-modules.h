@@ -177,8 +177,10 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
         }
         KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
           // The content.body resides in memory that outlives the module registry
-          // (see the ESM comment above for the ownership details).
-          bundleBuilder.addWasmModule(def.name, content.body);
+          // (see the ESM comment above for the ownership details). If the module was
+          // already compiled in another isolate, the compiled code is passed along to
+          // avoid recompilation.
+          bundleBuilder.addWasmModule(def.name, content.body, content.compiledModule);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
@@ -342,8 +344,15 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
               js, modules::legacy::compileDataGlobal<JsgIsolate>(lock, content.body)));
     }
     KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
-      auto wasmModule =
-          modules::legacy::compileWasmGlobal<JsgIsolate>(lock, content.body, observer);
+      v8::Local<v8::WasmModuleObject> wasmModule;
+      KJ_IF_SOME(compiled, content.compiledModule) {
+        // The module was already compiled in another isolate; share the compiled code rather
+        // than recompiling the wire bytes.
+        auto metrics = observer.onWasmCompilationFromCacheStart(js.v8Isolate);
+        wasmModule = jsg::check(v8::WasmModuleObject::FromCompiledModule(js.v8Isolate, compiled));
+      } else {
+        wasmModule = modules::legacy::compileWasmGlobal<JsgIsolate>(lock, content.body, observer);
+      }
       auto moduleInfo = jsg::ModuleRegistry::ModuleInfo(
           js, name, kj::none, jsg::ModuleRegistry::WasmModuleInfo(js, wasmModule));
       moduleInfo.setModuleSourceObject(lock, wasmModule.template As<v8::Object>());
