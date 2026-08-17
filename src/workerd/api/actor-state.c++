@@ -986,28 +986,20 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
         name(kj::mv(name)),
         getStartInfo(kj::mv(getStartInfo)) {}
 
-  Result newSingleUseClient(
-      kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override {
+  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
     auto& context = IoContext::current();
 
-    kj::Maybe<TraceContextParent> spanParents;
-    auto client = context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
+    return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
         [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
       tracing.setTag("facet_name"_kjc, name.asPtr());
-      spanParents = tracing.getSpanParents();
-      auto userSpanParent = tracing.getUserSpanParent();
-      KJ_IF_SOME(parent, makeUserSpanParent(tracing)) {
-        userSpanParent = kj::mv(parent);
-      }
 
       return getOrCreateActorChannel().startRequest({.cfBlobJson = kj::mv(cfStr),
         .parentSpan = tracing.getInternalSpanParent(),
-        .userSpanParent = kj::mv(userSpanParent)});
+        .userSpanParent = tracing.getUserSpanParent()});
     },
         {.inHouse = true,
           .wrapMetrics = true,
           .operationName = kj::ConstString("facet_subrequest"_kjc)}));
-    return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
   }
 
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override {

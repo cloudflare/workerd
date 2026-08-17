@@ -161,7 +161,6 @@ IoContext::IoContext(ThreadContext& thread,
       threadId(getThreadId()),
       deleteQueue(kj::arc<DeleteQueue>()),
       reverseIoOwnValidity(kj::arc<ReverseIoOwnValidity>()),
-      cachePutSerializer(kj::READY_NOW),
       timeoutManager(kj::heap<TimeoutManagerImpl>()),
       waitUntilTasks(*this),
       tasks(*this),
@@ -1099,23 +1098,6 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
       });
 }
 
-kj::Own<WorkerInterface> IoContext::getSubrequestChannel(uint channel,
-    bool isInHouse,
-    kj::Maybe<kj::String> cfBlobJson,
-    TraceContext& traceContext,
-    SpanParent userSpanParent) {
-  return getSubrequest(
-      [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
-    return getSubrequestChannelImpl(
-        channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory, kj::mv(userSpanParent));
-  },
-      SubrequestOptions{
-        .inHouse = isInHouse,
-        .wrapMetrics = !isInHouse,
-        .existingTraceContext = traceContext,
-      });
-}
-
 kj::Own<WorkerInterface> IoContext::getSubrequestChannelNoChecks(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
@@ -1136,16 +1118,11 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
     TraceContext& tracing,
-    IoChannelFactory& channelFactory,
-    kj::Maybe<SpanParent> userSpanParent) {
-  auto propagatedUserSpanParent = tracing.getUserSpanParent();
-  KJ_IF_SOME(parent, userSpanParent) {
-    propagatedUserSpanParent = kj::mv(parent);
-  }
+    IoChannelFactory& channelFactory) {
   IoChannelFactory::SubrequestMetadata metadata{
     .cfBlobJson = kj::mv(cfBlobJson),
     .parentSpan = tracing.getInternalSpanParent(),
-    .userSpanParent = kj::mv(propagatedUserSpanParent),
+    .userSpanParent = tracing.getUserSpanParent(),
     .featureFlagsForFl = mapCopyString(worker->getIsolate().getFeatureFlagsForFl()),
   };
 
@@ -1614,64 +1591,6 @@ void IoContext::abortFromHang(Worker::AsyncLock& asyncLock) {
         "had hung and would never generate a response. Refer to: "
         "https://developers.cloudflare.com/workers/observability/errors/"));
   }
-}
-
-namespace {
-
-class CacheSerializedInputStream final: public kj::AsyncInputStream {
- public:
-  CacheSerializedInputStream(
-      kj::Own<kj::AsyncInputStream> inner, kj::Own<kj::PromiseFulfiller<void>> fulfiller)
-      : inner(kj::mv(inner)),
-        fulfiller(kj::mv(fulfiller)) {}
-
-  ~CacheSerializedInputStream() noexcept(false) {
-    fulfiller->fulfill();
-  }
-
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return inner->tryRead(buffer, minBytes, maxBytes);
-  }
-
-  kj::Maybe<uint64_t> tryGetLength() override {
-    return inner->tryGetLength();
-  }
-
-  kj::Promise<uint64_t> pumpTo(kj::AsyncOutputStream& output, uint64_t amount) override {
-    return inner->pumpTo(output, amount);
-  }
-
- private:
-  kj::Own<kj::AsyncInputStream> inner;
-  kj::Own<kj::PromiseFulfiller<void>> fulfiller;
-};
-
-}  // namespace
-
-jsg::Promise<IoOwn<kj::AsyncInputStream>> IoContext::makeCachePutStream(
-    jsg::Lock& js, kj::Own<kj::AsyncInputStream> stream) {
-  auto paf = kj::newPromiseAndFulfiller<void>();
-
-  KJ_DEFER(cachePutSerializer = kj::mv(paf.promise));
-
-  return awaitIo(js,
-      cachePutSerializer.then(
-          [fulfiller = kj::mv(paf.fulfiller),
-              stream = kj::mv(stream)]() mutable -> kj::Own<kj::AsyncInputStream> {
-    if (stream->tryGetLength() != kj::none) {
-      // PUT with Content-Length. We can just return immediately, allowing the next PUT to start.
-      KJ_DEFER(fulfiller->fulfill());
-      return kj::mv(stream);
-    } else {
-      // TODO(later): With Cache streams no longer having a size limit enforced by the runtime,
-      // explore if we can clean up stream serialization too.
-      // PUT with Transfer-Encoding: chunked. We have no idea how big this request body is going to
-      // be, so wrap the stream that only unblocks the next PUT after this one is complete.
-      return kj::heap<CacheSerializedInputStream>(kj::mv(stream), kj::mv(fulfiller));
-    }
-  }),
-      [this](
-          jsg::Lock&, kj::Own<kj::AsyncInputStream> result) { return addObject(kj::mv(result)); });
 }
 
 void IoContext::writeLogfwdr(
