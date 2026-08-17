@@ -1490,3 +1490,15 @@ void MemoryTracker::trackField(
 }
 
 }  // namespace workerd::jsg
+
+// Convenience macros for JsValue::tryCast<T>() at call sites where the jsg:: qualification
+// would otherwise dominate the expression. Each expands to a kj::Maybe of the target Js type,
+// suitable for KJ_IF_SOME / KJ_REQUIRE_NONNULL / JSG_REQUIRE_NONNULL. The named forms cover
+// the commonly-checked types; use the base form for anything else, e.g.
+// JSG_TRY_CAST(value, JsBigInt).
+#define JSG_TRY_CAST(val, type) (val).tryCast<jsg::type>()
+#define JSG_TRY_CAST_OBJECT(val) JSG_TRY_CAST(val, JsObject)
+#define JSG_TRY_CAST_FUNCTION(val) JSG_TRY_CAST(val, JsFunction)
+#define JSG_TRY_CAST_PROMISE(val) JSG_TRY_CAST(val, JsPromise)
+#define JSG_TRY_CAST_ARRAYBUFFER(val) JSG_TRY_CAST(val, JsArrayBuffer)
+#define JSG_TRY_CAST_UINT8ARRAY(val) JSG_TRY_CAST(val, JsUint8Array)
