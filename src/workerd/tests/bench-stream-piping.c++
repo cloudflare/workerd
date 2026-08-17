@@ -2,15 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Benchmark to compare stream piping entry points:
-// 1. ReadableStream::pumpTo() - standard stream controller path.
-// 2. ReadableSourceKjAdapter::pumpTo() - kj adapter path.
-//
 // Run with: bazel run --config=opt //src/workerd/tests:bench-stream-piping
 
-#include <workerd/api/streams/readable-source-adapter.h>
 #include <workerd/api/streams/standard.h>
-#include <workerd/api/streams/writable-sink.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/tests/bench-tools.h>
 #include <workerd/tests/test-fixture.h>
@@ -117,7 +111,6 @@ struct LatencySink final: public kj::AsyncOutputStream {
 };
 
 // Creates a JS-backed ReadableStream with the specified configuration.
-// Uses a counter pointer similar to the unit tests in readable-source-adapter-test.c++.
 static size_t benchChunkCounterStatic = 0;
 
 jsg::Ref<ReadableStream> createValueStream(
@@ -386,50 +379,6 @@ jsg::Ref<ReadableStream> createConfiguredStream(
 }
 
 // =============================================================================
-// Benchmark: ReadableSourceKjAdapter::pumpTo
-// =============================================================================
-
-static void benchNewApproachPumpTo(
-    benchmark::State& state, size_t chunkSize, size_t numChunks, const StreamConfig& config) {
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setStreamsJavaScriptControllers(true);
-  // Always enable spec-compliant autoAllocateChunkSize behavior for the "New" approach.
-  // This is the behavior we're adopting going forward. When enabled, byte streams without
-  // explicit autoAllocateChunkSize will use DEFAULT reads (16KB buffer, no ByobRequest)
-  // instead of the legacy BYOB reads (4KB buffer, ByobRequest available).
-  // The "Existing" benchmarks keep the legacy behavior for comparison.
-  flags.setNoAutoAllocateChunkSize(true);
-  // Enable real timers for streams that need actual timer functionality (e.g., TIMED_VALUE).
-  bool needsRealTimers = config.type == StreamType::TIMED_VALUE;
-  TestFixture fixture({.featureFlags = flags.asReader(), .useRealTimers = needsRealTimers});
-
-  DiscardingSink sink;
-  size_t expectedBytes = chunkSize * numChunks;
-
-  for (auto _: state) {
-    sink.reset();
-    kj::Own<kj::AsyncOutputStream> fakeOwn(&sink, kj::NullDisposer::instance);
-    auto writableSink = newWritableSink(kj::mv(fakeOwn));
-
-    fixture.runInIoContext([&](const TestFixture::Environment& env) {
-      auto stream = createConfiguredStream(env.js, chunkSize, numChunks, config);
-      auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
-      return adapter->pumpTo(*writableSink, EndAfterPump::YES).attach(kj::mv(adapter));
-    });
-
-    // Verify all expected bytes were written
-    KJ_ASSERT(sink.bytesWritten == expectedBytes, "Adapter path: expected", expectedBytes,
-        "bytes but got", sink.bytesWritten);
-  }
-
-  state.SetBytesProcessed(
-      state.iterations() * static_cast<int64_t>(chunkSize) * static_cast<int64_t>(numChunks));
-  state.counters["WriteOps"] =
-      benchmark::Counter(sink.writeCount, benchmark::Counter::kAvgIterations);
-}
-
-// =============================================================================
 // Benchmark: ReadableStream::pumpTo
 // =============================================================================
 
@@ -595,52 +544,28 @@ static constexpr size_t LARGE_NUM_CHUNKS = 16;
 // =============================================================================
 
 // Value stream, default HWM
-static void New_Tiny_Value(benchmark::State& state) {
-  benchNewApproachPumpTo(state, TINY_CHUNK_SIZE, TINY_NUM_CHUNKS, VALUE_DEFAULT);
-}
 static void Existing_Tiny_Value(benchmark::State& state) {
   benchExistingApproachPumpTo(state, TINY_CHUNK_SIZE, TINY_NUM_CHUNKS, VALUE_DEFAULT);
-}
-static void New_Small_Value(benchmark::State& state) {
-  benchNewApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, VALUE_DEFAULT);
 }
 static void Existing_Small_Value(benchmark::State& state) {
   benchExistingApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, VALUE_DEFAULT);
 }
-static void New_Medium_Value(benchmark::State& state) {
-  benchNewApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, VALUE_DEFAULT);
-}
 static void Existing_Medium_Value(benchmark::State& state) {
   benchExistingApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, VALUE_DEFAULT);
-}
-static void New_Large_Value(benchmark::State& state) {
-  benchNewApproachPumpTo(state, LARGE_CHUNK_SIZE, LARGE_NUM_CHUNKS, VALUE_DEFAULT);
 }
 static void Existing_Large_Value(benchmark::State& state) {
   benchExistingApproachPumpTo(state, LARGE_CHUNK_SIZE, LARGE_NUM_CHUNKS, VALUE_DEFAULT);
 }
 
 // Value stream, 16KB HWM
-static void New_Tiny_Value_HWM16K(benchmark::State& state) {
-  benchNewApproachPumpTo(state, TINY_CHUNK_SIZE, TINY_NUM_CHUNKS, VALUE_HWM_16K);
-}
 static void Existing_Tiny_Value_HWM16K(benchmark::State& state) {
   benchExistingApproachPumpTo(state, TINY_CHUNK_SIZE, TINY_NUM_CHUNKS, VALUE_HWM_16K);
-}
-static void New_Small_Value_HWM16K(benchmark::State& state) {
-  benchNewApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, VALUE_HWM_16K);
 }
 static void Existing_Small_Value_HWM16K(benchmark::State& state) {
   benchExistingApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, VALUE_HWM_16K);
 }
-static void New_Medium_Value_HWM16K(benchmark::State& state) {
-  benchNewApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, VALUE_HWM_16K);
-}
 static void Existing_Medium_Value_HWM16K(benchmark::State& state) {
   benchExistingApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, VALUE_HWM_16K);
-}
-static void New_Large_Value_HWM16K(benchmark::State& state) {
-  benchNewApproachPumpTo(state, LARGE_CHUNK_SIZE, LARGE_NUM_CHUNKS, VALUE_HWM_16K);
 }
 static void Existing_Large_Value_HWM16K(benchmark::State& state) {
   benchExistingApproachPumpTo(state, LARGE_CHUNK_SIZE, LARGE_NUM_CHUNKS, VALUE_HWM_16K);
@@ -651,52 +576,28 @@ static void Existing_Large_Value_HWM16K(benchmark::State& state) {
 // =============================================================================
 
 // Byte stream, default HWM, no autoAllocate
-static void New_Tiny_Byte(benchmark::State& state) {
-  benchNewApproachPumpTo(state, TINY_CHUNK_SIZE, TINY_NUM_CHUNKS, BYTE_DEFAULT);
-}
 static void Existing_Tiny_Byte(benchmark::State& state) {
   benchExistingApproachPumpTo(state, TINY_CHUNK_SIZE, TINY_NUM_CHUNKS, BYTE_DEFAULT);
-}
-static void New_Small_Byte(benchmark::State& state) {
-  benchNewApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, BYTE_DEFAULT);
 }
 static void Existing_Small_Byte(benchmark::State& state) {
   benchExistingApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, BYTE_DEFAULT);
 }
-static void New_Medium_Byte(benchmark::State& state) {
-  benchNewApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, BYTE_DEFAULT);
-}
 static void Existing_Medium_Byte(benchmark::State& state) {
   benchExistingApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, BYTE_DEFAULT);
-}
-static void New_Large_Byte(benchmark::State& state) {
-  benchNewApproachPumpTo(state, LARGE_CHUNK_SIZE, LARGE_NUM_CHUNKS, BYTE_DEFAULT);
 }
 static void Existing_Large_Byte(benchmark::State& state) {
   benchExistingApproachPumpTo(state, LARGE_CHUNK_SIZE, LARGE_NUM_CHUNKS, BYTE_DEFAULT);
 }
 
 // Byte stream, 16KB HWM, no autoAllocate
-static void New_Tiny_Byte_HWM16K(benchmark::State& state) {
-  benchNewApproachPumpTo(state, TINY_CHUNK_SIZE, TINY_NUM_CHUNKS, BYTE_HWM_16K);
-}
 static void Existing_Tiny_Byte_HWM16K(benchmark::State& state) {
   benchExistingApproachPumpTo(state, TINY_CHUNK_SIZE, TINY_NUM_CHUNKS, BYTE_HWM_16K);
-}
-static void New_Small_Byte_HWM16K(benchmark::State& state) {
-  benchNewApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, BYTE_HWM_16K);
 }
 static void Existing_Small_Byte_HWM16K(benchmark::State& state) {
   benchExistingApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, BYTE_HWM_16K);
 }
-static void New_Medium_Byte_HWM16K(benchmark::State& state) {
-  benchNewApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, BYTE_HWM_16K);
-}
 static void Existing_Medium_Byte_HWM16K(benchmark::State& state) {
   benchExistingApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, BYTE_HWM_16K);
-}
-static void New_Large_Byte_HWM16K(benchmark::State& state) {
-  benchNewApproachPumpTo(state, LARGE_CHUNK_SIZE, LARGE_NUM_CHUNKS, BYTE_HWM_16K);
 }
 static void Existing_Large_Byte_HWM16K(benchmark::State& state) {
   benchExistingApproachPumpTo(state, LARGE_CHUNK_SIZE, LARGE_NUM_CHUNKS, BYTE_HWM_16K);
@@ -707,52 +608,28 @@ static void Existing_Large_Byte_HWM16K(benchmark::State& state) {
 // =============================================================================
 
 // Byte stream, default HWM, autoAllocate=64KB
-static void New_Tiny_Byte_Auto64K(benchmark::State& state) {
-  benchNewApproachPumpTo(state, TINY_CHUNK_SIZE, TINY_NUM_CHUNKS, BYTE_AUTO_64K);
-}
 static void Existing_Tiny_Byte_Auto64K(benchmark::State& state) {
   benchExistingApproachPumpTo(state, TINY_CHUNK_SIZE, TINY_NUM_CHUNKS, BYTE_AUTO_64K);
-}
-static void New_Small_Byte_Auto64K(benchmark::State& state) {
-  benchNewApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, BYTE_AUTO_64K);
 }
 static void Existing_Small_Byte_Auto64K(benchmark::State& state) {
   benchExistingApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, BYTE_AUTO_64K);
 }
-static void New_Medium_Byte_Auto64K(benchmark::State& state) {
-  benchNewApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, BYTE_AUTO_64K);
-}
 static void Existing_Medium_Byte_Auto64K(benchmark::State& state) {
   benchExistingApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, BYTE_AUTO_64K);
-}
-static void New_Large_Byte_Auto64K(benchmark::State& state) {
-  benchNewApproachPumpTo(state, LARGE_CHUNK_SIZE, LARGE_NUM_CHUNKS, BYTE_AUTO_64K);
 }
 static void Existing_Large_Byte_Auto64K(benchmark::State& state) {
   benchExistingApproachPumpTo(state, LARGE_CHUNK_SIZE, LARGE_NUM_CHUNKS, BYTE_AUTO_64K);
 }
 
 // Byte stream, 16KB HWM, autoAllocate=64KB
-static void New_Tiny_Byte_Auto64K_HWM16K(benchmark::State& state) {
-  benchNewApproachPumpTo(state, TINY_CHUNK_SIZE, TINY_NUM_CHUNKS, BYTE_AUTO_64K_HWM_16K);
-}
 static void Existing_Tiny_Byte_Auto64K_HWM16K(benchmark::State& state) {
   benchExistingApproachPumpTo(state, TINY_CHUNK_SIZE, TINY_NUM_CHUNKS, BYTE_AUTO_64K_HWM_16K);
-}
-static void New_Small_Byte_Auto64K_HWM16K(benchmark::State& state) {
-  benchNewApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, BYTE_AUTO_64K_HWM_16K);
 }
 static void Existing_Small_Byte_Auto64K_HWM16K(benchmark::State& state) {
   benchExistingApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, BYTE_AUTO_64K_HWM_16K);
 }
-static void New_Medium_Byte_Auto64K_HWM16K(benchmark::State& state) {
-  benchNewApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, BYTE_AUTO_64K_HWM_16K);
-}
 static void Existing_Medium_Byte_Auto64K_HWM16K(benchmark::State& state) {
   benchExistingApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, BYTE_AUTO_64K_HWM_16K);
-}
-static void New_Large_Byte_Auto64K_HWM16K(benchmark::State& state) {
-  benchNewApproachPumpTo(state, LARGE_CHUNK_SIZE, LARGE_NUM_CHUNKS, BYTE_AUTO_64K_HWM_16K);
 }
 static void Existing_Large_Byte_Auto64K_HWM16K(benchmark::State& state) {
   benchExistingApproachPumpTo(state, LARGE_CHUNK_SIZE, LARGE_NUM_CHUNKS, BYTE_AUTO_64K_HWM_16K);
@@ -766,14 +643,8 @@ static void Existing_Large_Byte_Auto64K_HWM16K(benchmark::State& state) {
 // Note: This does NOT trigger the adaptive read policy because microtask delays don't
 // cause early returns from pumpReadImpl. The policy would only activate with real I/O
 // latency that blocks the KJ event loop. See PUMP_PERFORMANCE_ANALYSIS.md section 9.
-static void New_Small_SlowValue(benchmark::State& state) {
-  benchNewApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, SLOW_VALUE_DEFAULT);
-}
 static void Existing_Small_SlowValue(benchmark::State& state) {
   benchExistingApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, SLOW_VALUE_DEFAULT);
-}
-static void New_Medium_SlowValue(benchmark::State& state) {
-  benchNewApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, SLOW_VALUE_DEFAULT);
 }
 static void Existing_Medium_SlowValue(benchmark::State& state) {
   benchExistingApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, SLOW_VALUE_DEFAULT);
@@ -793,41 +664,23 @@ static void Existing_Medium_SlowValue(benchmark::State& state) {
 // - Adaptive policy may switch to IMMEDIATE mode after observing small reads
 
 // I/O latency value streams
-static void New_Small_IoLatencyValue(benchmark::State& state) {
-  benchNewApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, IO_LATENCY_VALUE_DEFAULT);
-}
 static void Existing_Small_IoLatencyValue(benchmark::State& state) {
   benchExistingApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, IO_LATENCY_VALUE_DEFAULT);
-}
-static void New_Medium_IoLatencyValue(benchmark::State& state) {
-  benchNewApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, IO_LATENCY_VALUE_DEFAULT);
 }
 static void Existing_Medium_IoLatencyValue(benchmark::State& state) {
   benchExistingApproachPumpTo(
       state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, IO_LATENCY_VALUE_DEFAULT);
-}
-static void New_Large_IoLatencyValue(benchmark::State& state) {
-  benchNewApproachPumpTo(state, LARGE_CHUNK_SIZE, LARGE_NUM_CHUNKS, IO_LATENCY_VALUE_DEFAULT);
 }
 static void Existing_Large_IoLatencyValue(benchmark::State& state) {
   benchExistingApproachPumpTo(state, LARGE_CHUNK_SIZE, LARGE_NUM_CHUNKS, IO_LATENCY_VALUE_DEFAULT);
 }
 
 // I/O latency byte streams
-static void New_Small_IoLatencyByte(benchmark::State& state) {
-  benchNewApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, IO_LATENCY_BYTE_DEFAULT);
-}
 static void Existing_Small_IoLatencyByte(benchmark::State& state) {
   benchExistingApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, IO_LATENCY_BYTE_DEFAULT);
 }
-static void New_Medium_IoLatencyByte(benchmark::State& state) {
-  benchNewApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, IO_LATENCY_BYTE_DEFAULT);
-}
 static void Existing_Medium_IoLatencyByte(benchmark::State& state) {
   benchExistingApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, IO_LATENCY_BYTE_DEFAULT);
-}
-static void New_Large_IoLatencyByte(benchmark::State& state) {
-  benchNewApproachPumpTo(state, LARGE_CHUNK_SIZE, LARGE_NUM_CHUNKS, IO_LATENCY_BYTE_DEFAULT);
 }
 static void Existing_Large_IoLatencyByte(benchmark::State& state) {
   benchExistingApproachPumpTo(state, LARGE_CHUNK_SIZE, LARGE_NUM_CHUNKS, IO_LATENCY_BYTE_DEFAULT);
@@ -842,33 +695,21 @@ static void Existing_Large_IoLatencyByte(benchmark::State& state) {
 // We test with small chunks to see how latency affects batching behavior.
 
 // 10μs delay per chunk (1ms total for 100 chunks)
-static void New_Small_Timed10us(benchmark::State& state) {
-  benchNewApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, TIMED_VALUE_10US);
-}
 static void Existing_Small_Timed10us(benchmark::State& state) {
   benchExistingApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, TIMED_VALUE_10US);
 }
 
 // 100μs delay per chunk (10ms total for 100 chunks)
-static void New_Small_Timed100us(benchmark::State& state) {
-  benchNewApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, TIMED_VALUE_100US);
-}
 static void Existing_Small_Timed100us(benchmark::State& state) {
   benchExistingApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, TIMED_VALUE_100US);
 }
 
 // 1ms delay per chunk (100ms total for 100 chunks) - very slow, representative of slow network
-static void New_Small_Timed1ms(benchmark::State& state) {
-  benchNewApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, TIMED_VALUE_1MS);
-}
 static void Existing_Small_Timed1ms(benchmark::State& state) {
   benchExistingApproachPumpTo(state, SMALL_CHUNK_SIZE, SMALL_NUM_CHUNKS, TIMED_VALUE_1MS);
 }
 
 // Medium chunks with 100μs delay - tests larger chunk batching with latency
-static void New_Medium_Timed100us(benchmark::State& state) {
-  benchNewApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, TIMED_VALUE_100US);
-}
 static void Existing_Medium_Timed100us(benchmark::State& state) {
   benchExistingApproachPumpTo(state, MEDIUM_CHUNK_SIZE, MEDIUM_NUM_CHUNKS, TIMED_VALUE_100US);
 }
@@ -878,91 +719,55 @@ static void Existing_Medium_Timed100us(benchmark::State& state) {
 // =============================================================================
 
 // Tiny chunks - all configurations
-WD_BENCHMARK(New_Tiny_Value);
 WD_BENCHMARK(Existing_Tiny_Value);
-WD_BENCHMARK(New_Tiny_Value_HWM16K);
 WD_BENCHMARK(Existing_Tiny_Value_HWM16K);
-WD_BENCHMARK(New_Tiny_Byte);
 WD_BENCHMARK(Existing_Tiny_Byte);
-WD_BENCHMARK(New_Tiny_Byte_HWM16K);
 WD_BENCHMARK(Existing_Tiny_Byte_HWM16K);
-WD_BENCHMARK(New_Tiny_Byte_Auto64K);
 WD_BENCHMARK(Existing_Tiny_Byte_Auto64K);
-WD_BENCHMARK(New_Tiny_Byte_Auto64K_HWM16K);
 WD_BENCHMARK(Existing_Tiny_Byte_Auto64K_HWM16K);
 
 // Small chunks - all configurations
-WD_BENCHMARK(New_Small_Value);
 WD_BENCHMARK(Existing_Small_Value);
-WD_BENCHMARK(New_Small_Value_HWM16K);
 WD_BENCHMARK(Existing_Small_Value_HWM16K);
-WD_BENCHMARK(New_Small_Byte);
 WD_BENCHMARK(Existing_Small_Byte);
-WD_BENCHMARK(New_Small_Byte_HWM16K);
 WD_BENCHMARK(Existing_Small_Byte_HWM16K);
-WD_BENCHMARK(New_Small_Byte_Auto64K);
 WD_BENCHMARK(Existing_Small_Byte_Auto64K);
-WD_BENCHMARK(New_Small_Byte_Auto64K_HWM16K);
 WD_BENCHMARK(Existing_Small_Byte_Auto64K_HWM16K);
 
 // Medium chunks - all configurations
-WD_BENCHMARK(New_Medium_Value);
 WD_BENCHMARK(Existing_Medium_Value);
-WD_BENCHMARK(New_Medium_Value_HWM16K);
 WD_BENCHMARK(Existing_Medium_Value_HWM16K);
-WD_BENCHMARK(New_Medium_Byte);
 WD_BENCHMARK(Existing_Medium_Byte);
-WD_BENCHMARK(New_Medium_Byte_HWM16K);
 WD_BENCHMARK(Existing_Medium_Byte_HWM16K);
-WD_BENCHMARK(New_Medium_Byte_Auto64K);
 WD_BENCHMARK(Existing_Medium_Byte_Auto64K);
-WD_BENCHMARK(New_Medium_Byte_Auto64K_HWM16K);
 WD_BENCHMARK(Existing_Medium_Byte_Auto64K_HWM16K);
 
 // Large chunks - all configurations
-WD_BENCHMARK(New_Large_Value);
 WD_BENCHMARK(Existing_Large_Value);
-WD_BENCHMARK(New_Large_Value_HWM16K);
 WD_BENCHMARK(Existing_Large_Value_HWM16K);
-WD_BENCHMARK(New_Large_Byte);
 WD_BENCHMARK(Existing_Large_Byte);
-WD_BENCHMARK(New_Large_Byte_HWM16K);
 WD_BENCHMARK(Existing_Large_Byte_HWM16K);
-WD_BENCHMARK(New_Large_Byte_Auto64K);
 WD_BENCHMARK(Existing_Large_Byte_Auto64K);
-WD_BENCHMARK(New_Large_Byte_Auto64K_HWM16K);
 WD_BENCHMARK(Existing_Large_Byte_Auto64K_HWM16K);
 
 // Slow value stream - async streams with microtask delays (tests batching overhead)
-WD_BENCHMARK(New_Small_SlowValue);
 WD_BENCHMARK(Existing_Small_SlowValue);
-WD_BENCHMARK(New_Medium_SlowValue);
 WD_BENCHMARK(Existing_Medium_SlowValue);
 
 // I/O latency streams - real KJ event loop yields (simulates network I/O)
 // These test how the adaptive read policy behaves with actual I/O latency
-WD_BENCHMARK(New_Small_IoLatencyValue);
 WD_BENCHMARK(Existing_Small_IoLatencyValue);
-WD_BENCHMARK(New_Medium_IoLatencyValue);
 WD_BENCHMARK(Existing_Medium_IoLatencyValue);
-WD_BENCHMARK(New_Large_IoLatencyValue);
 WD_BENCHMARK(Existing_Large_IoLatencyValue);
-WD_BENCHMARK(New_Small_IoLatencyByte);
 WD_BENCHMARK(Existing_Small_IoLatencyByte);
-WD_BENCHMARK(New_Medium_IoLatencyByte);
 WD_BENCHMARK(Existing_Medium_IoLatencyByte);
-WD_BENCHMARK(New_Large_IoLatencyByte);
 WD_BENCHMARK(Existing_Large_IoLatencyByte);
 
 // Timed stream benchmarks - uses real timers via useRealTimers=true in SetupParams.
 // These simulate actual blocking I/O with timer delays between chunks.
-WD_BENCHMARK(New_Small_Timed10us);
 WD_BENCHMARK(Existing_Small_Timed10us);
-WD_BENCHMARK(New_Small_Timed100us);
 WD_BENCHMARK(Existing_Small_Timed100us);
-WD_BENCHMARK(New_Small_Timed1ms);
 WD_BENCHMARK(Existing_Small_Timed1ms);
-WD_BENCHMARK(New_Medium_Timed100us);
 WD_BENCHMARK(Existing_Medium_Timed100us);
 
 // =============================================================================
@@ -989,10 +794,6 @@ static const StreamConfig LARGE_VALUE_STREAM{
   .highWaterMark = 0,
 };
 
-// Benchmark using ReadableSourceKjAdapter::pumpTo with large streams (unlimited maxRead).
-static void New_LargeStream_Value(benchmark::State& state) {
-  benchNewApproachPumpTo(state, LARGE_STREAM_CHUNK_SIZE, LARGE_STREAM_CHUNKS, LARGE_VALUE_STREAM);
-}
 static void Existing_LargeStream_Value(benchmark::State& state) {
   benchExistingApproachPumpTo(
       state, LARGE_STREAM_CHUNK_SIZE, LARGE_STREAM_CHUNKS, LARGE_VALUE_STREAM);
@@ -1148,7 +949,6 @@ static void DrainingRead_Large_MaxRead_Unlimited(benchmark::State& state) {
 }
 
 // Register large stream benchmarks
-WD_BENCHMARK(New_LargeStream_Value);
 WD_BENCHMARK(Existing_LargeStream_Value);
 
 // Register maxRead limit benchmarks - value streams (1MB total, sync)

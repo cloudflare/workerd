@@ -8,7 +8,6 @@
 #include "headers.h"
 #include "queue.h"
 #include "sockets.h"
-#include "streams/readable-source.h"
 #include "system-streams.h"
 #include "util.h"
 #include "worker-rpc.h"
@@ -1991,7 +1990,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       // and the Fetch spec doesn't allow users to create Requests with CONNECT methods.
       if (jsRequest->getMethodEnum() == kj::HttpMethod::GET) {
         auto view = dataUrl.getData();
-        auto rs = streams::newMemorySource(view, kj::heap(kj::mv(dataUrl)));
+        auto rs = newMemorySource(view, kj::heap(kj::mv(dataUrl)));
         maybeResponseBody.emplace(
             JsReadableStream::create(js, IoContext::current(), kj::mv(rs)));
       }
