@@ -420,17 +420,25 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
     for (auto i: kj::indices(directorySnapshots)) {
       auto entry = list[i];
       auto& restore = directorySnapshots[i];
-      auto& snap = restore.snapshot;
-      auto effectiveRestorePath = snap.dir.asPtr();
+
+      kj::Maybe<kj::StringPtr> effectiveRestorePath;
+      KJ_IF_SOME(snap, restore.snapshot) {
+        effectiveRestorePath = snap.dir.asPtr();
+      }
       KJ_IF_SOME(mp, restore.mountPoint) {
         effectiveRestorePath = mp.asPtr();
       }
 
-      JSG_REQUIRE_NONNULL(parseRestorePath(effectiveRestorePath), Error,
+      auto restorePath = JSG_REQUIRE_NONNULL(effectiveRestorePath, Error,
+          "Directory snapshot restore requires a mountPoint when no snapshot is given.");
+
+      JSG_REQUIRE_NONNULL(parseRestorePath(restorePath), Error,
           "Directory snapshot cannot be restored to root directory.");
 
-      entry.setSnapshotId(snap.id);
-      entry.setRestorePath(effectiveRestorePath);
+      KJ_IF_SOME(snap, restore.snapshot) {
+        entry.setSnapshotId(snap.id);
+      }
+      entry.setRestorePath(restorePath);
     }
   }
 
