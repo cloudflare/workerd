@@ -709,7 +709,7 @@ export interface DurableObjectState<Props = unknown> {
   setHibernatableWebSocketEventTimeout(timeoutMs?: number): void;
   getHibernatableWebSocketEventTimeout(): number | null;
   getTags(ws: WebSocket): string[];
-  abort(reason?: string): void;
+  abort(reason?: string, options?: DurableObjectAbortOptions): void;
 }
 export interface DurableObjectTransaction {
   get<T = unknown>(
@@ -782,6 +782,9 @@ export interface DurableObjectStorage {
   getCurrentBookmark(): Promise<string>;
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
   onNextSessionRestoreBookmark(bookmark: string): Promise<string>;
+}
+export interface DurableObjectAbortOptions {
+  retryAlarm?: boolean;
 }
 export interface DurableObjectListOptions {
   start?: string;
@@ -16427,7 +16430,8 @@ export declare namespace TailStream {
     | "responseStreamDisconnected"
     | "scriptNotFound"
     | "internalError"
-    | "exceededWallTime";
+    | "exceededWallTime"
+    | "aborted";
   interface ScriptVersion {
     readonly id: string;
     readonly tag?: string;

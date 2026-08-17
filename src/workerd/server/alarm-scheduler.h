@@ -115,17 +115,11 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
 
   kj::HashMap<ActorKey, ScheduledAlarm> alarms;
 
-  struct RetryInfo {
-    bool retry;
-    bool retryCountsAgainstLimit;
-  };
-  kj::Promise<RetryInfo> runAlarm(
-      const ActorKey& actor, kj::Date scheduledTime, uint32_t retryCount);
-
   ScheduledAlarm scheduleAlarm(kj::Date now, kj::Own<ActorKey> actor, kj::Date scheduledTime);
 
   kj::Promise<void> makeAlarmTask(
       kj::Duration delay, const ActorKey& actor, kj::Date scheduledTime);
+  kj::Promise<void> abandonAlarm(kj::Own<ActorKey> actor, kj::Date scheduledTime);
 
   kj::Promise<void> checkTimestamp(kj::Duration delay, kj::Date scheduledTime);
 

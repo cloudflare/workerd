@@ -16,6 +16,7 @@ namespace workerd::tracing {
 namespace {
 
 #define STRS(V)                                                                                    \
+  V(ABORTED, "aborted")                                                                            \
   V(ALARM, "alarm")                                                                                \
   V(ATTRIBUTES, "attributes")                                                                      \
   V(BATCHSIZE, "batchSize")                                                                        \
@@ -343,6 +344,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const EventOutcome& outcome, StringCache& cache
       return cache.get(js, INTERNALERROR_STR);
     case EventOutcome::EXCEEDED_WALL_TIME:
       return cache.get(js, EXCEEDEDWALLTIME_STR);
+    case EventOutcome::ABORTED:
+      return cache.get(js, ABORTED_STR);
     case EventOutcome::UNKNOWN:
       return cache.get(js, UNKNOWN_STR);
   }
