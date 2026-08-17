@@ -73,10 +73,9 @@ class Channel: public jsg::Object {
     }
   };
 
-  // jsg::Name has a private visitForGc and is visited through NameWrapper
-  // rather than through the GcVisitor::visit() overload set, so we cannot
-  // and do not visit it from Channel::visitForGc.
-  jsg::Name name;  // NOLINT(jsg-visit-for-gc)
+  // Not GC-visited: jsg::Name's visitForGc is private. The symbol handle (if
+  // any) is a strong root for the Channel's lifetime.
+  jsg::Name name;
   kj::HashMap<jsg::HashableV8Ref<v8::Object>, MessageCallback> subscribers;
   kj::Table<StoreEntry, kj::HashIndex<StoreCallbacks>> stores;
 
