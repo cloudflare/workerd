@@ -127,4 +127,33 @@ class TokioNetworkAddress final: public kj::NetworkAddress {
   PeerFilter &filter;
 };
 
+// The tokio-backed kj::Network. Supports the KJ address grammar subset workerd uses; see
+// net.rs for the exact forms and documented deviations (no named services, no unix-abstract,
+// no IPv6 scope IDs).
+//
+// restrictPeers() uses PeerFilter, a faithful port of KJ's NetworkFilter (semantics identical to
+// kj::setupAsyncIo()'s networks). The returned network references this one's filter chain, so
+// a network must outlive any networks derived from it via restrictPeers() (same constraint as
+// KJ). Enforcement points: per-address connect()-time checks and accept()-time peer checks;
+// parse-time DNS-result dropping is NOT implemented (blocked addresses fail at connect
+// instead) -- see TokioNetworkAddress.
+class TokioNetwork final: public kj::Network {
+ public:
+  TokioNetwork() = default;
+  TokioNetwork(TokioNetwork &parent,
+      kj::ArrayPtr<const kj::StringPtr> allow,
+      kj::ArrayPtr<const kj::StringPtr> deny)
+      : filter(allow, deny, parent.filter) {}
+
+  kj::Promise<kj::Own<kj::NetworkAddress>> parseAddress(
+      kj::StringPtr addr, kj::uint portHint) override;
+  kj::Own<kj::NetworkAddress> getSockaddr(const void *sockaddr, kj::uint len) override;
+  kj::Own<kj::Network> restrictPeers(
+      kj::ArrayPtr<const kj::StringPtr> allow, kj::ArrayPtr<const kj::StringPtr> deny) override;
+
+ private:
+  // Default-constructed = allow everything (matches KJ's root networks).
+  PeerFilter filter;
+};
+
 }  // namespace kj_rs_io
