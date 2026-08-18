@@ -160,7 +160,7 @@ unsafe fn cell_waker_clone(data: *const ()) -> RawWaker {
 unsafe fn cell_waker_wake_by_ref(data: *const ()) {
     // Safety: forwarded from this fn's `# Safety` contract.
     if let Some(cell) = unsafe { cell_deref(data) } {
-        cell.cell_wake_by_ref();
+        cell.wake_by_ref();
     }
 }
 
@@ -242,7 +242,7 @@ unsafe fn poll_waker_clone(data: *const ()) -> RawWaker {
 unsafe fn poll_waker_wake_by_ref(data: *const ()) {
     // Safety: forwarded from this fn's `# Safety` contract.
     let waker = unsafe { &*data.cast::<PollWaker>() };
-    waker.poll_waker_wake_by_ref();
+    waker.wake_by_ref();
 }
 
 /// # Safety

@@ -25,11 +25,8 @@ pub struct OwnPromiseNode(*mut c_void /* kj::_::PromiseNode* */);
 // It is forgotten using `MaybeUninit` and its ownership passed over to c++ in `unwrap`.
 impl Drop for OwnPromiseNode {
     fn drop(&mut self) {
-        // SAFETY: `self` points to this live `OwnPromiseNode` being dropped exactly once; the
-        // C++ shim placement-destructs it, after which the inner pointer has no Rust drop glue.
-        unsafe {
-            crate::ffi::own_promise_node_drop_in_place(self);
-        }
+        // The bridge takes a live mutable reference and placement-destructs the C++ node.
+        crate::ffi::own_promise_node_drop_in_place(self);
     }
 }
 

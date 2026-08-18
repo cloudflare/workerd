@@ -57,13 +57,13 @@ rust_test(
 
 rust_cxx_bridge(
     name = "bridge",
-    src = "lib.rs",
+    src = "ffi.rs",
     hdrs = glob(["*.h"]),
     include_prefix = "kj-rs",
     visibility = ["//src/rust/cxx/tests:__pkg__"],
     deps = [
         "//src/rust/cxx:core",
         "@capnp-cpp//src/kj:kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
     ],
 )

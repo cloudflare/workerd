@@ -21,6 +21,7 @@ pub use crate::ffi::KjWaker;
 
 mod awaiter;
 mod date;
+mod ffi;
 mod future;
 pub mod maybe;
 mod own;
@@ -40,8 +41,9 @@ pub type Error = std::io::Error;
 
 pub trait JsgStruct {}
 
+#[cfg(any())]
 #[cxx::bridge(namespace = "kj_rs")]
-mod ffi {
+mod legacy_ffi {
 
     /// Representation of a `GuardedRustPromiseAwaiter` in C++. The size of the blob should match.
     #[derive(Debug)]
