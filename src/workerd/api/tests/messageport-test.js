@@ -215,3 +215,75 @@ export const onmessageNonCallableStartsPort = {
     strictEqual(await promise, 'kept');
   },
 };
+
+// Adding a 'message' listener via addEventListener starts the port, the same as assigning
+// onmessage (Node.js behavior; per spec only the onmessage attribute enables the queue).
+export const addEventListenerStartsPort = {
+  async test() {
+    const { port1, port2 } = new MessageChannel();
+    const { promise, resolve } = Promise.withResolvers();
+    port2.addEventListener('message', (event) => resolve(event.data));
+    port1.postMessage('hello');
+    strictEqual(await promise, 'hello');
+  },
+};
+
+// Removing the last 'message' listener returns the port to the pending state: messages
+// queue (rather than being dropped) until another listener is attached.
+export const removingLastListenerRequeues = {
+  async test() {
+    const { port1, port2 } = new MessageChannel();
+    const first = Promise.withResolvers();
+    const handler = (event) => first.resolve(event.data);
+    port2.addEventListener('message', handler);
+    port1.postMessage('one');
+    strictEqual(await first.promise, 'one');
+
+    port2.removeEventListener('message', handler);
+    port1.postMessage('two');
+    await scheduler.wait(10);
+
+    const second = Promise.withResolvers();
+    port2.addEventListener('message', (event) => second.resolve(event.data));
+    strictEqual(await second.promise, 'two');
+  },
+};
+
+// A once-listener starts the port; its removal after the first message returns the port
+// to pending, so later messages queue until a new listener arrives.
+export const onceListenerReturnsPortToPending = {
+  async test() {
+    const { port1, port2 } = new MessageChannel();
+    const first = Promise.withResolvers();
+    port2.addEventListener('message', (event) => first.resolve(event.data), {
+      once: true,
+    });
+    port1.postMessage('one');
+    strictEqual(await first.promise, 'one');
+
+    port1.postMessage('two');
+    await scheduler.wait(10);
+
+    const second = Promise.withResolvers();
+    port2.addEventListener('message', (event) => second.resolve(event.data));
+    strictEqual(await second.promise, 'two');
+  },
+};
+
+// A closed port is terminal: attaching listeners or manipulating onmessage afterwards
+// never restarts it, and no messages are delivered.
+export const closedPortIsTerminal = {
+  async test() {
+    const { port1, port2 } = new MessageChannel();
+    port1.postMessage('queued');
+    port2.close();
+
+    const handler = mock.fn();
+    port2.onmessage = null;
+    port2.onmessage = handler;
+    port2.addEventListener('message', handler);
+    port1.postMessage('late');
+    await scheduler.wait(10);
+    strictEqual(handler.mock.callCount(), 0);
+  },
+};

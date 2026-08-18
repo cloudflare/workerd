@@ -339,16 +339,16 @@ class EventTarget: public jsg::Object {
 
   inline void removeAllHandlers() {
     typeMap.clear();
+    // Any activated event handler attribute trampolines were just dropped along with the
+    // listener list; clear their identities so a later assignment activates afresh.
+    for (auto& entry: eventHandlerAttributes) {
+      entry.value.listenerIdentity = kj::none;
+    }
   }
 
   inline void enableWarningOnSpecialEvents() {
     flags.warnOnSpecialEvents = true;
   }
-
-  // The EventListenerCallback, if given, is called whenever addEventListener
-  // or removeEventListener is invoked to report the number of registered
-  // handlers for the event.
-  using EventListenerCallback = jsg::Function<void(kj::StringPtr, size_t)>;
 
   // ---------------------------------------------------------------------------
   // JS API
@@ -421,9 +421,12 @@ class EventTarget: public jsg::Object {
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  protected:
-  void setEventListenerCallback(EventListenerCallback&& callback) {
-    maybeListenerCallback = kj::mv(callback);
-  }
+  // Invoked whenever the number of registered listeners for `type` changes: on
+  // addEventListener() and removeEventListener() — including once-listener removal during
+  // dispatch and {signal}-triggered removals — and on managed event handler attribute
+  // activation and deactivation, whose trampoline occupies a regular listener slot.
+  // removeAllHandlers() does not notify: it is only used for wholesale teardown.
+  virtual void listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) {}
 
   // The result of a setEventHandlerAttribute() assignment: cleared, or activated with a
   // non-callable object, or activated with a callable handler.
@@ -536,8 +539,6 @@ class EventTarget: public jsg::Object {
   // registered (an already-active handler keeps its position across reassignment).
   void activateEventHandlerAttribute(
       jsg::Lock& js, kj::StringPtr type, EventHandlerAttribute& attribute);
-
-  kj::Maybe<EventListenerCallback> maybeListenerCallback;
 
   struct Flags {
     // When using module syntax, the "fetch", "scheduled", "trace", etc.

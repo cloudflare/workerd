@@ -5,36 +5,33 @@
 #include <workerd/jsg/ser.h>
 
 namespace workerd::api {
-MessagePort::MessagePort(): state(Pending()) {
-  // We set a callback on the underlying EventTarget to be notified when
-  // a listener for the message event is added or removed. When there
-  // are no listeners, we move back to the Pending state, otherwise we
-  // will switch to the Started state if necessary.
-  setEventListenerCallback([&](jsg::Lock& js, kj::StringPtr name, size_t count) {
-    if (name == "message"_kj) {
-      KJ_SWITCH_ONEOF(state) {
-        KJ_CASE_ONEOF(pending, Pending) {
-          // If we are in the pending state, start the port if we have listeners.
-          // This is technically not spec compliant, but it is what Node.js
-          // supports. Specifically, adding a new message listener using the
-          // addEventListener method is *technically* not supposed to start
-          // the port but we're going to do what Node.js does.
-          if (count > 0) {
-            start(js);
-          }
-        }
-        KJ_CASE_ONEOF(started, Started) {
-          // If we are in the started state, stop the port if there are no listeners.
-          if (count == 0) {
-            state = Pending();
-          }
-        }
-        KJ_CASE_ONEOF(_, Closed) {
-          // Nothing to do. We're already closed so we don't care.
-        }
+MessagePort::MessagePort(): state(Pending()) {}
+
+// Tracks 'message' listener registrations — both addEventListener() listeners and the
+// onmessage attribute's trampoline — to transition the port between states: the first
+// listener starts the port (delivering any queued messages), and removing the last one
+// returns it to pending (queueing messages again). Counting every listener is technically
+// not spec compliant (per spec only assigning onmessage enables the message queue), but it
+// is what Node.js does.
+void MessagePort::listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) {
+  if (type != "message"_kj) {
+    return;
+  }
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(pending, Pending) {
+      if (count > 0) {
+        start(js);
       }
     }
-  });
+    KJ_CASE_ONEOF(started, Started) {
+      if (count == 0) {
+        state = Pending();
+      }
+    }
+    KJ_CASE_ONEOF(_, Closed) {
+      // Closed is terminal: listener changes never restart the port.
+    }
+  }
 }
 
 void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
@@ -203,23 +200,9 @@ kj::Maybe<jsg::JsValue> MessagePort::getOnMessage(jsg::Lock& js) {
 
 void MessagePort::setOnMessage(
     jsg::Lock& js, jsg::Optional<kj::OneOf<EventTarget::HandlerFunction, jsg::JsValue>> handler) {
-  switch (setEventHandlerAttribute(js, "message"_kj, kj::mv(handler))) {
-    case EventHandlerAssignment::CALLABLE:
-    case EventHandlerAssignment::OBJECT:
-      // Assigning onmessage enables the port's message queue (HTML: "the first time a
-      // MessagePort's onmessage IDL attribute is set, the port's port message queue must be
-      // enabled").
-      start(js);
-      break;
-    case EventHandlerAssignment::CLEARED:
-      // If we have no message listeners left...
-      if (getHandlerCount("message"_kj) == 0) {
-        // ...put the port back into a pending state where messages
-        // will be enqueued until another listener is attached.
-        state = Pending();
-      }
-      break;
-  }
+  // The attribute's trampoline registration and removal flow through
+  // listenerCountChanged(), which starts and stops the port; nothing else to do here.
+  setEventHandlerAttribute(js, "message"_kj, kj::mv(handler));
 }
 
 jsg::Ref<MessageChannel> MessageChannel::constructor(jsg::Lock& js) {
