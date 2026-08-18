@@ -287,3 +287,53 @@ export const closedPortIsTerminal = {
     strictEqual(handler.mock.callCount(), 0);
   },
 };
+
+// A throwing 'message' listener has its exception reported (and the remaining listeners
+// still run), and the port additionally dispatches a 'messageerror' event carrying the
+// exception. The port itself keeps working.
+export const throwingMessageListener = {
+  async test() {
+    const order = [];
+    const boom = new Error('port boom');
+    const { port1, port2 } = new MessageChannel();
+    const globalHandler = () => {
+      order.push('global-error');
+      // Injecting a message mid-report cannot jump the queue: delivery is always deferred
+      // to a later microtask, so it arrives after the current event's remaining listeners,
+      // after the synthesized messageerror, and after any messages queued before it.
+      port1.postMessage('injected');
+    };
+    globalThis.addEventListener('error', globalHandler);
+    try {
+      const done = Promise.withResolvers();
+      port2.addEventListener('message', (event) => {
+        order.push(`l1:${event.data}`);
+        if (event.data === 'bad') throw boom;
+        if (event.data === 'injected') done.resolve();
+      });
+      port2.addEventListener('message', (event) =>
+        order.push(`l2:${event.data}`)
+      );
+      port2.addEventListener('messageerror', (event) => {
+        order.push('messageerror');
+        strictEqual(event.data, boom);
+      });
+
+      port1.postMessage('bad');
+      port1.postMessage('after');
+      await done.promise;
+      deepStrictEqual(order, [
+        'l1:bad',
+        'global-error',
+        'l2:bad',
+        'messageerror',
+        'l1:after',
+        'l2:after',
+        'l1:injected',
+        'l2:injected',
+      ]);
+    } finally {
+      globalThis.removeEventListener('error', globalHandler);
+    }
+  },
+};

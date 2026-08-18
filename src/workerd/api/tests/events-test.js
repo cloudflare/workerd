@@ -544,3 +544,151 @@ export const isTrustedDefaults = {
     }
   },
 };
+
+// Under the REPORT dispatch policy, a listener exception is reported to the global scope's
+// 'error' event synchronously, between the throwing listener and the next one.
+export const reportedListenerErrorInterleaving = {
+  test() {
+    const order = [];
+    const boom = new Error('boom');
+    const globalHandler = (event) => {
+      order.push('global-error');
+      strictEqual(event.error, boom);
+    };
+    addEventListener('error', globalHandler);
+    try {
+      const target = new EventTarget();
+      target.addEventListener('foo', () => {
+        order.push('l1');
+        throw boom;
+      });
+      target.addEventListener('foo', () => order.push('l2'));
+      // dispatchEvent() itself must not throw.
+      target.dispatchEvent(new Event('foo'));
+      deepStrictEqual(order, ['l1', 'global-error', 'l2']);
+    } finally {
+      removeEventListener('error', globalHandler);
+    }
+  },
+};
+
+// A throwing global 'error' listener must not break the REPORT no-throw contract: the
+// nested report is routed to the console (HTML's "in error reporting mode" guard) instead
+// of propagating or recursing.
+export const throwingGlobalErrorListener = {
+  test() {
+    const order = [];
+    const globalHandler = () => {
+      order.push('global-error');
+      throw new Error('error handler boom');
+    };
+    addEventListener('error', globalHandler);
+    try {
+      // Via a REPORT dispatch on an EventTarget.
+      const target = new EventTarget();
+      target.addEventListener('foo', () => {
+        order.push('l1');
+        throw new Error('boom');
+      });
+      target.addEventListener('foo', () => order.push('l2'));
+      target.dispatchEvent(new Event('foo'));
+      deepStrictEqual(order, ['l1', 'global-error', 'l2']);
+
+      // Via AbortController.abort(), which the spec forbids from throwing.
+      order.length = 0;
+      const ac = new AbortController();
+      ac.signal.addEventListener('abort', () => {
+        order.push('abort1');
+        throw new Error('abort boom');
+      });
+      ac.signal.addEventListener('abort', () => order.push('abort2'));
+      ac.abort();
+      deepStrictEqual(order, ['abort1', 'global-error', 'abort2']);
+
+      // Via reportError() directly.
+      reportError(new Error('reported boom'));
+    } finally {
+      removeEventListener('error', globalHandler);
+    }
+  },
+};
+
+// User code running during the mid-dispatch report can mutate the original listener list;
+// removals are honored for listeners that have not run yet.
+export const midReportListenerRemoval = {
+  test() {
+    const order = [];
+    const target = new EventTarget();
+    const l2 = () => order.push('l2');
+    const globalHandler = () => {
+      order.push('global-error');
+      target.removeEventListener('foo', l2);
+    };
+    addEventListener('error', globalHandler);
+    try {
+      target.addEventListener('foo', () => {
+        order.push('l1');
+        throw new Error('boom');
+      });
+      target.addEventListener('foo', l2);
+      target.dispatchEvent(new Event('foo'));
+      deepStrictEqual(order, ['l1', 'global-error']);
+    } finally {
+      removeEventListener('error', globalHandler);
+    }
+  },
+};
+
+// A throwing WebSocket 'message' listener has its exception reported and the remaining
+// listeners still run, but the WebSocket is still errored out afterwards (fail-fast).
+export const webSocketThrowingMessageListener = {
+  async test() {
+    const order = [];
+    const boom = new Error('ws boom');
+    const globalHandler = () => order.push('global-error');
+    addEventListener('error', globalHandler);
+    try {
+      const { 0: client, 1: server } = new WebSocketPair();
+      client.accept();
+      server.accept();
+
+      const errorPromise = new Promise((resolve) => {
+        client.addEventListener('error', (event) => resolve(event.error));
+      });
+      const l2Promise = new Promise((resolve) => {
+        client.addEventListener('message', () => {
+          order.push('l1');
+          throw boom;
+        });
+        client.addEventListener('message', () => {
+          // The fail-fast teardown happens strictly after the dispatch completes: this
+          // listener still observes a live, usable WebSocket even though the previous
+          // listener threw.
+          order.push(`l2:readyState=${client.readyState}`);
+          client.send('still-works');
+          resolve();
+        });
+      });
+
+      const serverReceived = new Promise((resolve) => {
+        server.addEventListener('message', (event) => resolve(event.data));
+      });
+
+      server.send('hello');
+      await l2Promise;
+      deepStrictEqual(order, [
+        'l1',
+        'global-error',
+        `l2:readyState=${WebSocket.READY_STATE_OPEN}`,
+      ]);
+      // The send() from the second listener made it out before the teardown.
+      strictEqual(await serverReceived, 'still-works');
+      // The fail-fast reaction still errors the WebSocket with the listener's exception.
+      // The exception crosses the JS/KJ boundary in the read loop and is reconstructed, so
+      // only the message survives (as before this dispatch used REPORT).
+      ok(String(await errorPromise).includes('ws boom'));
+    } finally {
+      removeEventListener('error', globalHandler);
+    }
+  },
+};

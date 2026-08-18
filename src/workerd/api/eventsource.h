@@ -9,8 +9,11 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/url.h>
+#include <workerd/util/strong-bool.h>
 
 namespace workerd::api {
+
+WD_STRONG_BOOL(AlreadyReported);
 
 using kj::uint;
 class Fetcher;
@@ -172,7 +175,13 @@ class EventSource: public EventTarget {
   kj::Duration reconnectionTime = DEFAULT_RECONNECTION_TIME;
 
   void notifyOpen(jsg::Lock& js);
-  void notifyError(jsg::Lock& js, const jsg::JsValue& error, bool reconnecting = false);
+  // AlreadyReported::YES indicates the error was already delivered to the global scope's
+  // report-an-exception machinery (a reported listener exception), so notifyError() must
+  // not log it again.
+  void notifyError(jsg::Lock& js,
+      const jsg::JsValue& error,
+      bool reconnecting = false,
+      AlreadyReported alreadyReported = AlreadyReported::NO);
   void notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messages);
 
   // The run() method handles the actual processing of the stream.

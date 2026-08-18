@@ -394,7 +394,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     }
   } else {
     // Fire off the handlers.
-    useDefaultHandling = dispatchEventImpl(lock, event.addRef());
+    useDefaultHandling = dispatchEventImpl(lock, event.addRef()).result;
   }
 
   if (useDefaultHandling) {
@@ -1134,13 +1134,7 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
   // Per the spec, we are going to first emit an error event on the global object.
   // If that event is not prevented, we will log the error to the console. Note
   // that we do not throw the error at all.
-  auto message = v8::Exception::CreateMessage(js.v8Isolate, error);
-  auto event = js.alloc<ErrorEvent>(ErrorEvent::ErrorEventInit{.message = kj::str(message->Get()),
-    .filename = kj::str(message->GetScriptResourceName()),
-    .lineno = jsg::check(message->GetLineNumber(js.v8Context())),
-    .colno = jsg::check(message->GetStartColumn(js.v8Context())),
-    .error = jsg::JsRef(js, error)});
-  if (dispatchEventImpl(js, kj::mv(event))) {
+  const auto logError = [&](const jsg::JsValue& error) {
     // If the value is an object that has a stack property, log that so we get
     // the stack trace if it is an exception.
     KJ_IF_SOME(obj, error.tryCast<jsg::JsObject>()) {
@@ -1152,6 +1146,29 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
     }
     // Otherwise just log the stringified value generically.
     js.reportError(error);
+  };
+
+  // Per HTML's "report an exception" re-entrancy guard (the global's "in error reporting
+  // mode" flag): an exception reported while the 'error' event is being dispatched — e.g.
+  // an 'error' listener that itself throws, which the REPORT dispatch policy routes right
+  // back here — skips the event and goes straight to the console. Without this, a throwing
+  // 'error' listener would either propagate out of whatever REPORT dispatch triggered the
+  // report (violating its no-throw contract) or recurse indefinitely.
+  if (inErrorReportingMode) {
+    logError(error);
+    return;
+  }
+  inErrorReportingMode = true;
+  KJ_DEFER(inErrorReportingMode = false);
+
+  auto message = v8::Exception::CreateMessage(js.v8Isolate, error);
+  auto event = js.alloc<ErrorEvent>(ErrorEvent::ErrorEventInit{.message = kj::str(message->Get()),
+    .filename = kj::str(message->GetScriptResourceName()),
+    .lineno = jsg::check(message->GetLineNumber(js.v8Context())),
+    .colno = jsg::check(message->GetStartColumn(js.v8Context())),
+    .error = jsg::JsRef(js, error)});
+  if (dispatchEventImpl(js, kj::mv(event), DispatchExceptionPolicy::REPORT).result) {
+    logError(error);
   }
 }
 
