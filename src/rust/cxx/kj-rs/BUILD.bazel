@@ -11,7 +11,10 @@ wd_cc_library(
         "@platforms//os:windows": True,
         "//conditions:default": False,
     }),
-    visibility = ["//src/rust/cxx/tests:__pkg__"],
+    visibility = [
+        "//src/rust/cxx/kj-rs-tokio:__pkg__",
+        "//src/rust/cxx/tests:__pkg__",
+    ],
     deps = [
         ":bridge",
     ],
