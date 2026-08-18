@@ -1,9 +1,7 @@
 // Let cxx vocabulary types resolve this crate by its generated `::kj_rs` path.
 extern crate self as kj_rs;
 
-use awaiter::OptionWaker;
 pub use awaiter::PromiseAwaiter;
-use awaiter::WakerRef;
 pub use date::KjDate;
 pub use future::FuturePollStatus;
 pub use future::map_err;
@@ -16,8 +14,6 @@ pub use promise::PromiseFuture;
 pub use promise::new_callbacks_promise_future;
 pub use refcount::repr::KjArc;
 pub use refcount::repr::KjRc;
-
-pub use crate::ffi::KjWaker;
 
 mod awaiter;
 mod date;

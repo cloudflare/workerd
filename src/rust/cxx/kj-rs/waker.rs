@@ -11,7 +11,6 @@ use std::task::Waker;
 
 use crate::KjRc;
 use crate::ffi::FutureWakerCell;
-use crate::ffi::KjWaker;
 use crate::ffi::PollWaker;
 
 // Owned-cell vtable: retained Wakers holding a strong reference to a FutureWakerCell
