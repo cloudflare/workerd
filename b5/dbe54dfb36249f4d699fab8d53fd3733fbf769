@@ -1,0 +1,19 @@
+build/deps/v8.MODULE.bazel
+  s_dad5d2fecd1c00::t_c077d26945c6d7 61-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b5dbe54dfb36249f4d699fab8d53fd3733fbf769",
+  "prompts": {},
+  "sessions": {
+    "s_dad5d2fecd1c00": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fede7c76fffe9yZ4V13wrSsm61",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Felix Hanau <felix@cloudflare.com>"
+    }
+  }
+}
