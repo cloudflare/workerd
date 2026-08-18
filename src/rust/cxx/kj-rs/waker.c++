@@ -4,6 +4,9 @@
 
 namespace kj_rs {
 
+// Optional wake hook for event ports integrating another scheduler.
+thread_local void (*futurePollArmNudge)() = nullptr;
+
 // =======================================================================================
 // ArcWakerPromiseNode
 
