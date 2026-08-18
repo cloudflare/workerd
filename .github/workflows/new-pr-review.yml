@@ -2,7 +2,7 @@ name: New PR Review
 
 on:
   pull_request:
-    types: [opened]
+    types: [opened, synchronize]
 
 jobs:
   review:
@@ -40,6 +40,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_AI_GATEWAY_ACCOUNT_ID }}
           CLOUDFLARE_GATEWAY_ID: ${{ secrets.CF_AI_GATEWAY_NAME }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_AI_GATEWAY_TOKEN }}
+          OPENCODE_CONFIG_CONTENT: '{"permission":{"external_directory":{"/home/runner/work/**":"allow"},"edit":"deny","question":"deny","doom_loop":"deny"}}'
         with:
           oidc_base_url: https://ask-bonk.cloudflare-exponent.workers.dev/auth
           model: 'cloudflare-ai-gateway/openai/gpt-5.6-terra'
