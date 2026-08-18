@@ -42,3 +42,57 @@ const POLL_YIELD_BUDGET: u32 = 16;
 /// error is proportionally small, so long sleeps stay on the plain tokio path.
 #[cfg(unix)]
 const HIRES_TIMEOUT_THRESHOLD: Duration = Duration::from_millis(2);
+thread_local! {
+    /// Handle to the `TokioPort` runtime driving the KJ event loop on this thread, if any.
+    /// Registered by `TokioPort::new` and cleared on drop. Used by code (e.g. kj-rs-io) that
+    /// needs to *enter* the runtime context so tokio resources can register with its I/O driver
+    /// and timers.
+    static LOOP_RUNTIME_HANDLE: RefCell<Option<Handle>> = const { RefCell::new(None) };
+
+    /// The `LocalSet` onto which [`spawn`] enqueues tasks, and which `wait_*`/`poll` drive. Held
+    /// behind an `Rc` so `spawn` (which has no `&TokioPort`) can reach it while the port keeps
+    /// driving it. The `LocalSet` is `!Send`/`!Sync` and lives entirely on the loop thread, which
+    /// is why `TokioPort` itself does NOT hold it (it must stay `Send + Sync` for cross-thread
+    /// `wake()`); ownership lives here and is dropped in `TokioPort::drop`.
+    static LOOP_LOCAL_SET: RefCell<Option<Rc<LocalSet>>> = const { RefCell::new(None) };
+}
+
+/// Returns a handle to this thread's KJ-loop tokio runtime, if a `TokioEventPort` exists on this
+/// thread.
+#[must_use]
+pub fn current_handle() -> Option<Handle> {
+    LOOP_RUNTIME_HANDLE.with(|h| h.borrow().clone())
+}
+
+/// Returns this thread's KJ-loop `LocalSet`, if a `TokioEventPort` exists on this thread.
+fn current_local_set() -> Option<Rc<LocalSet>> {
+    LOOP_LOCAL_SET.with(|l| l.borrow().clone())
+}
+
+/// Spawns a future onto this thread's KJ-loop tokio runtime.
+///
+/// The task runs whenever the KJ event loop sleeps (i.e. whenever C++ is blocked in
+/// `promise.wait(waitScope)` or pumping via `poll()`), driven by the port's [`LocalSet`].
+///
+/// The future is spawned with [`LocalSet::spawn_local`], so it is pinned to this (the loop)
+/// thread and does **not** need to be `Send`: the per-thread `current_thread` runtime never
+/// migrates a task to another thread. This is what lets bridged futures that hold `!Send` KJ
+/// handles (`OwnPromiseNode`, `kj::Own`, ...) be spawned directly. `JoinHandle`/drop-cancels
+/// semantics are the same as `tokio::spawn`.
+///
+/// # Panics
+///
+/// Panics if no `TokioEventPort` has been created on this thread.
+pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
+where
+    F: Future + 'static,
+    F::Output: 'static,
+{
+    #[expect(
+        clippy::expect_used,
+        reason = "documented `# Panics` on this public API: calling spawn() without first creating a TokioEventPort on this thread is a caller-contract violation, not a recoverable runtime path"
+    )]
+    let local = current_local_set()
+        .expect("no kj-rs-tokio runtime on this thread; create a TokioEventPort first");
+    local.spawn_local(future)
+}
