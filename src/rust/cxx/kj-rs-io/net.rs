@@ -497,3 +497,47 @@ pub fn listener_local_addr(listener: &TokioListener) -> Result<Vec<u8>> {
 // handle" — a Unix fd or a win32 SOCKET (the C++ side normalizes KJ's TAKE_OWNERSHIP /
 // ALREADY_CLOEXEC / ALREADY_NONBLOCK flags, dup'ing when not taking ownership). The platform
 // split lives entirely in `ffi::own_socket_from_raw` (the one conversion point); everything
+
+// ======================================================================================
+// Socket-handle wrapping. All handles arrive owned and non-blocking as an `i64` "raw socket
+// handle" — a Unix fd or a win32 SOCKET (the C++ side normalizes KJ's TAKE_OWNERSHIP /
+// ALREADY_CLOEXEC / ALREADY_NONBLOCK flags, dup'ing when not taking ownership). The platform
+// split lives entirely in `ffi::own_socket_from_raw` (the one conversion point); everything
+// here operates on the uniform `socket2::Socket` / std / tokio types.
+
+#[cfg(any(unix, windows))]
+fn socket_from_raw(handle: i64) -> socket2::Socket {
+    crate::ffi::own_socket_from_raw(handle)
+}
+
+#[cfg(any(unix, windows))]
+fn sockaddr_from_bytes(bytes: &[u8]) -> Result<socket2::SockAddr> {
+    crate::ffi::sockaddr_from_bytes(bytes)
+}
+
+/// The handle tier of [`crate::take_kj_socket`] (unix only; see that function's docs): wraps
+/// an *owned*, connected stream-socket fd (TCP or Unix domain, detected automatically) as a
+/// [`crate::serve::ServeIo`]. Unlike [`wrap_socket_fd`] the fd is a fresh dup of a kj stream's
+/// socket, so non-blocking mode is forced rather than assumed (the original may have come from
+/// anywhere).
+#[cfg(unix)]
+pub fn serve_io_from_owned_fd(fd: std::os::fd::OwnedFd) -> Result<crate::serve::ServeIo> {
+    let socket = socket2::Socket::from(fd);
+    socket.set_nonblocking(true).map_err(op("fcntl()"))?;
+    let local = socket.local_addr().map_err(op("getsockname()"))?;
+    let _guard = runtime_handle()?.enter();
+    match local.domain() {
+        socket2::Domain::IPV4 | socket2::Domain::IPV6 => {
+            let stream = TcpStream::from_std(socket.into()).map_err(op("takeKjSocket"))?;
+            Ok(crate::serve::ServeIo::Tcp(stream))
+        }
+        socket2::Domain::UNIX => {
+            let stream = UnixStream::from_std(socket.into()).map_err(op("takeKjSocket"))?;
+            Ok(crate::serve::ServeIo::Unix(stream))
+        }
+        _ => Err(KjIoError::other(
+            "takeKjSocket",
+            "unsupported socket family",
+        )),
+    }
+}
