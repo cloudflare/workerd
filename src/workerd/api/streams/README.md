@@ -277,8 +277,6 @@ When `pumpTo()` is called on the adapter:
 2. Runs read->write promise loop
 3. Ends when data exhausted or stream errors
 
-Implemented in `readable-source-adapter.{h,c++}`.
-
 ## Safety Pattern Catalog
 
 ### Pattern: State Machine (`StateMachine<>`)

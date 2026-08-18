@@ -33,6 +33,16 @@ wd_test(
 )
 
 wd_test(
+    src = "wasm-memory-discard-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "wasm-memory-discard.wasm",
+        "wasm-memory-discard-disabled-test.js",
+        "wasm-memory-discard-test.js",
+    ],
+)
+
+wd_test(
     src = "urlpattern-regex-search-oob-test.wd-test",
     args = ["--experimental"],
     data = ["urlpattern-regex-search-oob-test.js"],
@@ -215,6 +225,11 @@ wd_test(
 )
 
 wd_test(
+    src = "tail-cf-gc-test.wd-test",
+    data = ["tail-cf-gc-test.js"],
+)
+
+wd_test(
     src = "errorinfo-stw-test.wd-test",
     args = ["--experimental"],
     data = ["errorinfo-stw-test.js"],
@@ -261,6 +276,14 @@ wd_test(
         "cache-mock.js",
         "cache-operations-test.js",
         "instrumentation-tail-worker.js",
+    ],
+)
+
+wd_test(
+    src = "cache-put-stream-test.wd-test",
+    data = [
+        "cache-mock.js",
+        "cache-put-stream-test.js",
     ],
 )
 

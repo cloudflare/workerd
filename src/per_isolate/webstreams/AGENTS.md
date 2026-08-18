@@ -47,6 +47,3 @@ private-brand dispatch, no `instanceof`) apply here — see
 
 - **NEVER** expose internals on user-visible exports (the temporary
   `kNativeSource` exception is tracked for removal).
-- **NEVER** rely on `readable-source-adapter.h` as a reference for the
-  native streams contract — it belongs to the original (non-enabled)
-  implementation; `native.ts` is authoritative.

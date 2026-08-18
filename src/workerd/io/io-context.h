@@ -1076,15 +1076,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // available in internal tracing.
   [[nodiscard]] TraceContext makeUserTraceSpan(kj::ConstString operationName);
 
-  // Implement per-IoContext rate limiting for Cache.put(). Pass the body of a Cache API PUT
-  // request and get a possibly wrapped stream back.
-  //
-  // If the stream has an unknown length, you will get a wrapped stream back that is used to
-  // serialize PUT requests.
-  jsg::Promise<IoOwn<kj::AsyncInputStream>> makeCachePutStream(
-      jsg::Lock& js, kj::Own<kj::AsyncInputStream> stream);
-  // TODO(cleanup): Factor this into getCacheClient() somehow so it's not opt-in.
-
   // Gets a CapabilityServerSet representing the capnp capabilities hosted by this request or
   // actor context. This allows us to implement the CapnpCapability::unwrap() method on
   // capabilities which allows the application to get at the underlying server object, when the
@@ -1161,11 +1152,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   OwnedObjectList ownedObjects;
 
   kj::Maybe<kj::Rc<ExternalPusherImpl>> externalPusher;
-
-  // Implementation detail of makeCachePutStream().
-
-  // TODO: Used for Cache PUT serialization.
-  kj::Promise<void> cachePutSerializer;
 
   // The timeout manager needs to live below `deleteQueue` because the promises may refer to
   // objects in the queue.

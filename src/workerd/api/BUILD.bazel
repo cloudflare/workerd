@@ -26,6 +26,7 @@ filegroup(
         "hibernatable-web-socket.c++",
         "http.c++",
         "js-readable-stream.c++",
+        "js-streams-bridge.c++",
         "js-writable-stream.c++",
         "messagechannel.c++",
         "performance.c++",
@@ -78,6 +79,7 @@ filegroup(
         "hibernatable-web-socket.h",
         "http.h",
         "js-readable-stream.h",
+        "js-streams-bridge.h",
         "js-writable-stream.h",
         "messagechannel.h",
         "performance.h",
@@ -258,7 +260,9 @@ wd_cc_library(
 # Note: JsReadableStream and JsWritableStream live in js-readable-stream.{h,c++} and
 # js-writable-stream.{h,c++}, which are folded into //src/workerd/io (via the :srcs/:hdrs
 # filegroups) because io-target headers (http.h, sockets.h, container.h) depend on them. This
-# target re-exports them via streams.h.
+# target re-exports them via streams.h. Their shared TypeScript-bridge plumbing lives in
+# js-streams-bridge.{h,c++} (same filegroup folding); it is internal and deliberately NOT
+# re-exported via streams.h.
 wd_cc_library(
     name = "streams",
     hdrs = ["streams.h"],
@@ -757,42 +761,6 @@ kj_test(
     src = "fetch-retry-claim-hook-test.c++",
     deps = [
         "//src/workerd/io",
-        "//src/workerd/tests:test-fixture",
-    ],
-)
-
-kj_test(
-    src = "streams/writable-sink-test.c++",
-    deps = [
-        "//src/workerd/io",
-        "//src/workerd/jsg",
-        "//src/workerd/tests:test-fixture",
-    ],
-)
-
-kj_test(
-    src = "streams/readable-source-test.c++",
-    deps = [
-        "//src/workerd/io",
-        "//src/workerd/jsg",
-        "//src/workerd/tests:test-fixture",
-    ],
-)
-
-kj_test(
-    src = "streams/writable-sink-adapter-test.c++",
-    deps = [
-        "//src/workerd/io",
-        "//src/workerd/jsg",
-        "//src/workerd/tests:test-fixture",
-    ],
-)
-
-kj_test(
-    src = "streams/readable-source-adapter-test.c++",
-    deps = [
-        "//src/workerd/io",
-        "//src/workerd/jsg",
         "//src/workerd/tests:test-fixture",
     ],
 )

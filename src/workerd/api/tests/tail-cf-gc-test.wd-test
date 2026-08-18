@@ -1,0 +1,21 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
+  services = [
+    (name = "tail-cf-gc-test", worker = .tailCfGcWorker),
+  ],
+);
+
+const tailCfGcWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "tail-cf-gc-test.js")
+  ],
+  bindings = [
+    (name = "SERVICE", service = "tail-cf-gc-test"),
+  ],
+  compatibilityFlags = ["nodejs_compat", "enable_weak_ref"],
+  # Self-tail: the fetch handler's trace events are delivered to the tail
+  # handler in this same module.
+  tails = ["tail-cf-gc-test"],
+);

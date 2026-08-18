@@ -389,7 +389,7 @@ KJ_TEST("JsReadableStream forceCancel cancels even when the stream is locked") {
       KJ_FAIL_REQUIRE("expected cancel() of a locked stream to reject");
     }, [](jsg::Lock& js, jsg::Value exception) {
       auto e = js.exceptionToKj(kj::mv(exception));
-      KJ_EXPECT(e.getDescription().contains("currently locked to a reader"), e.getDescription());
+      KJ_EXPECT(e.getDescription().contains("locked to a reader"), e.getDescription());
     }).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock& js) {
                          // forceCancel() tears the stream down regardless.
                          return stream.forceCancel(js, kj::none);

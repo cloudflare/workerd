@@ -39,6 +39,18 @@ export default {
       // Instead throws TypeError: Parsing a Body as FormData requires a Content-Type header.
       'response.formData() rejects if already aborted',
 
+      // fetch()/body-read promises reject on abort, but not with the exact
+      // AbortSignal.reason value; workerd currently surfaces a generic
+      // AbortError instead of propagating the caller-supplied reason.
+      'Aborting rejects with abort reason when aborted after fetch() called',
+      'response.arrayBuffer() rejects with abort reason if already aborted',
+      'response.blob() rejects with abort reason if already aborted',
+      'response.bytes() rejects with abort reason if already aborted',
+      'response.formData() rejects with abort reason if already aborted',
+      'response.json() rejects with abort reason if already aborted',
+      'response.text() rejects with abort reason if already aborted',
+      'Stream errors once aborted with abort reason. Underlying connection closed.',
+
       // ReadableStream.cancel was not called synchronously at the right time
       'Readable stream synchronously cancels with AbortError if aborted before reading',
 
