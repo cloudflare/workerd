@@ -529,3 +529,41 @@ pub async fn input_fd_try_read(
         ))
     }
 }
+
+pub async fn output_fd_write(stream: &TokioOutputFd, buf: &[u8]) -> Result<()> {
+    #[cfg(unix)]
+    {
+        with_runtime(async move {
+            let mut written = 0;
+            while written < buf.len() {
+                let mut guard = stream
+                    .inner
+                    .ready(Interest::WRITABLE)
+                    .await
+                    .map_err(op("poll()"))?;
+                match guard.try_io(|inner| {
+                    let mut file: &std::fs::File = inner.get_ref();
+                    file.write(&buf[written..])
+                }) {
+                    Ok(Ok(0)) => {
+                        return Err(KjIoError::other("write()", "wrote zero bytes"));
+                    }
+                    Ok(Ok(n)) => written += n,
+                    Ok(Err(e)) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                    Ok(Err(e)) => return Err(op("write()")(e)),
+                    Err(_would_block) => {}
+                }
+            }
+            Ok(())
+        })
+        .await
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (stream, buf);
+        Err(KjIoError::other(
+            "write()",
+            "not implemented on this platform",
+        ))
+    }
+}
