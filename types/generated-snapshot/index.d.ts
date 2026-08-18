@@ -4003,14 +4003,29 @@ interface ContainerSnapshotRestoreParams {
 interface ContainerSnapshotOptions {
   name?: string;
 }
-interface ContainerStartupOptions {
+type ContainerStartupOptions = {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
+  instance?:
+    | "lite"
+    | "standard-1"
+    | "standard-2"
+    | "standard-3"
+    | "standard-4"
+    | ContainerStartResources;
   labels?: Record<string, string>;
   directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
-  containerSnapshot?: ContainerSnapshotRestoreParams;
-}
+} & (
+  | {
+      image: string;
+      containerSnapshot?: never;
+    }
+  | {
+      image?: never;
+      containerSnapshot?: ContainerSnapshotRestoreParams;
+    }
+);
 interface ContainerStartResources {
   vcpu: number;
   memoryMib: number;
