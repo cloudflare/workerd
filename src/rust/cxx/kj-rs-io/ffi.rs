@@ -277,4 +277,46 @@ mod bridge {
         /// Unix only.
         async fn wait_fd_readable(fd: i32) -> Result<()>;
     }
+
+    unsafe extern "C++" {
+        include!("kj-rs-io/unwrap.h");
+
+        /// `kj::AsyncIoStream`, opaque. Used by [`unwrap_kj_stream`].
+        #[namespace = "kj"]
+        #[cxx_name = "AsyncIoStream"]
+        type KjAsyncIoStream;
+
+        /// Implemented in `async-io.c++`: downcasts to the kj-rs-io wrapper and moves the native
+        /// stream out. Throws (surfaced as `Err`) for foreign streams.
+        #[cxx_name = "unwrapTokioStream"]
+        fn unwrap_tokio_stream(stream: Pin<&mut KjAsyncIoStream>) -> Result<Box<TokioStream>>;
+
+        // Bridged operations on a foreign `kj::AsyncIoStream`, backing `serve_kj_stream`'s
+        // duplex-pump fallback (serve.rs). Shared receivers (`&KjAsyncIoStream`, const_cast
+        // shims in unwrap.h): a kj two-way stream supports one concurrent read and one write,
+        // which the pump models as concurrent shared borrows of the stream it owns. All
+        // returned futures must be polled on the KJ event-loop thread owning the stream.
+
+        /// Corresponds to `kj::AsyncIoStream::tryRead(buffer, min_bytes, buffer.len())`.
+        #[cxx_name = "kjStreamTryRead"]
+        async fn kj_stream_try_read(
+            stream: &KjAsyncIoStream,
+            buffer: &mut [u8],
+            min_bytes: usize,
+        ) -> Result<usize>;
+
+        /// Corresponds to `kj::AsyncIoStream::write(buffer)` (write-all semantics).
+        #[cxx_name = "kjStreamWrite"]
+        async fn kj_stream_write(stream: &KjAsyncIoStream, buffer: &[u8]) -> Result<()>;
+
+        /// Corresponds to `kj::AsyncIoStream::shutdownWrite()`.
+        #[cxx_name = "kjStreamShutdownWrite"]
+        fn kj_stream_shutdown_write(stream: &KjAsyncIoStream);
+
+        /// The stream's underlying raw OS socket handle (fd on unix, `SOCKET` on windows;
+        /// `kj::AsyncIoStream::getFd()` / `getWin32Handle()`) as an `i64`, or -1 if it exposes
+        /// none. Backs the handle tier of [`take_kj_socket`].
+        #[cxx_name = "kjStreamGetHandle"]
+        fn kj_stream_get_handle(stream: &KjAsyncIoStream) -> i64;
+    }
 }
