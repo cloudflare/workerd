@@ -150,3 +150,62 @@ struct HiResRequest {
     generation: u64,
     shutdown: bool,
 }
+impl HiResTimer {
+    fn new(port: Arc<SharedState>) -> Self {
+        Self {
+            shared: Arc::new(HiResShared {
+                port,
+                request: Mutex::new(HiResRequest {
+                    deadline: None,
+                    generation: 0,
+                    shutdown: false,
+                }),
+                condvar: Condvar::new(),
+            }),
+            thread: Mutex::new(None),
+        }
+    }
+
+    /// Requests a `notify` on the port at `deadline`. Called on the loop thread right before it
+    /// parks in `block_on`.
+    fn arm(&self, deadline: Instant) {
+        {
+            let mut req = self
+                .shared
+                .request
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            req.deadline = Some(deadline);
+            req.generation += 1;
+        }
+        self.shared.condvar.notify_one();
+        // Lazily start the thread on first use, so loops that never schedule sub-millisecond
+        // timers never pay for it.
+        let mut thread = self.thread.lock().unwrap_or_else(PoisonError::into_inner);
+        if thread.is_none() {
+            let shared = Arc::clone(&self.shared);
+            #[expect(
+                clippy::expect_used,
+                reason = "OS thread spawn only fails under resource exhaustion; the hi-res timer thread is required for sub-millisecond KJ timer precision and there is no recovery at this site (fail-fast). Graceful degradation to tokio-wheel-only timing is tracked as a design debt."
+            )]
+            let thread_handle = std::thread::Builder::new()
+                .name("kj-rs-hires-timer".into())
+                .spawn(move || hires_timer_main(&shared))
+                .expect("failed to spawn kj-rs hires timer thread");
+            *thread = Some(thread_handle);
+        }
+    }
+
+    /// Cancels any armed request. An in-flight precise sleep cannot be interrupted, but the
+    /// generation bump turns its delivery into a no-op; worst case it delays the *next* arm's
+    /// wakeup by up to the threshold, which the tokio backstop bounds.
+    fn disarm(&self) {
+        let mut req = self
+            .shared
+            .request
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        req.deadline = None;
+        req.generation += 1;
+    }
+}
