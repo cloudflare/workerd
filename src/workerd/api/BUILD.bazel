@@ -757,7 +757,7 @@ kj_test(
 )
 
 kj_test(
-    src = "fetch-body-rewindable-test.c++",
+    src = "actor-fetch-retry-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/io:worker-interface",
@@ -766,7 +766,7 @@ kj_test(
 )
 
 kj_test(
-    src = "actor-fetch-retry-test.c++",
+    src = "fetch-body-rewindable-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/io:worker-interface",
