@@ -143,28 +143,6 @@ class FutureWakerCell final: public kj::Refcounted {
 };
 
 // =======================================================================================
-// ArcWakerPromiseNode
-
-class ArcWaker;
-
-class ArcWakerPromiseNode: public kj::_::PromiseNode {
- public:
-  ArcWakerPromiseNode(kj::Promise<void> promise);
-  KJ_DISALLOW_COPY_AND_MOVE(ArcWakerPromiseNode);
-
-  void destroy() noexcept override;
-  void onReady(kj::_::Event* event) noexcept override;
-  void get(kj::_::ExceptionOrValue& output) noexcept override;
-  void tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent) override;
-
- private:
-  kj::Arc<const ArcWaker> owner = nullptr;
-  OwnPromiseNode node;
-
-  friend class ArcWaker;
-};
-
-// =======================================================================================
 // ArcWaker
 
 class ArcWaker;
