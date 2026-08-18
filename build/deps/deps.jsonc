@@ -36,7 +36,9 @@
       "type": "github_tarball",
       "owner": "capnproto",
       "repo": "capnproto",
-      "branch": "v2",
+      // Interim: v2 plus kj::Rc::disown()/reown() (mirror of kj::Arc's), needed by the Rust
+      // I/O bridge's waker. Switch back to "v2" once the upstream PR merges.
+      "branch": "dlapid/RcdisReOwn",
       "extra_strip_prefix": "/c++"
     },
     // We want to avoid version skew with v8, so we use identical versions. Keep this
