@@ -96,3 +96,57 @@ where
         .expect("no kj-rs-tokio runtime on this thread; create a TokioEventPort first");
     local.spawn_local(future)
 }
+/// State shared with `wake()` callers on other threads.
+struct SharedState {
+    /// Unblocks the `block_on(...)` inside `wait_*` when `wake()` or `notify_runnable()` fires.
+    notify: Notify,
+
+    /// The `kj::EventPort::wake()` latch: set by `wake()`, consumed (swapped to `false`) by the
+    /// return value of `wait_*`/`poll`. The KJ event loop uses a `true` return to know it must
+    /// drain cross-thread events (`kj::Executor`, `CrossThreadPromiseFulfiller`).
+    woken: AtomicBool,
+
+    /// True while the loop thread is parked inside `wait_*`'s `block_on`. Only mutated from the
+    /// loop thread; read by `notify_runnable` (also loop-thread-only, but kept atomic so the
+    /// whole struct is `Sync` and the flag is safe if that ever changes).
+    sleeping: AtomicBool,
+}
+
+/// A lazily-started dedicated thread delivering high-resolution wakeups for short
+/// `wait_timeout_ns` sleeps (see [`HIRES_TIMEOUT_THRESHOLD`]).
+///
+/// For a short timeout, `wait_impl` arms this timer with an absolute deadline before parking in
+/// `block_on`; the thread performs a precise absolute sleep (`mach_wait_until` on macOS,
+/// `clock_nanosleep(TIMER_ABSTIME)` on Linux) and then pokes the port's `Notify`. This composes
+/// with every other wake-up source because it *is* the same mechanism (`wake()` and
+/// `notify_runnable()` hit the same `Notify`); the tokio-side `timeout` stays armed as a coarse
+/// backstop, so a lost or late high-res wakeup only degrades to the wheel's ~1 ms behavior,
+/// never a hang. While unused the thread parks on a condvar (zero CPU); joined on drop.
+#[cfg(unix)]
+struct HiResTimer {
+    shared: Arc<HiResShared>,
+    /// Lazily spawned by the first `arm()`; joined on drop. Only the loop thread arms, but the
+    /// handle sits behind a mutex so the struct is `Sync` without further reasoning.
+    thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+#[cfg(unix)]
+struct HiResShared {
+    /// The port state whose `notify` the timer thread pokes when a deadline is reached.
+    port: Arc<SharedState>,
+    request: Mutex<HiResRequest>,
+    condvar: Condvar,
+}
+
+#[cfg(unix)]
+struct HiResRequest {
+    /// Absolute deadline of the currently armed request, if any.
+    deadline: Option<Instant>,
+    /// Bumped by `arm()` and `disarm()`. A wakeup is only delivered if the generation still
+    /// matches once the sleep finishes, so a canceled request (the wait was woken early by
+    /// `wake()`/`notify_runnable()`) does not leak a stale `Notify` permit into a later wait.
+    /// A lost race here is harmless: spurious early returns are explicitly allowed by the
+    /// `kj::EventPort::wait()` contract.
+    generation: u64,
+    shutdown: bool,
+}
