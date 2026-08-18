@@ -67,3 +67,49 @@ fn exception_type(error: &std::io::Error) -> KjExceptionType {
         _ => KjExceptionType::Failed,
     }
 }
+/// Exact mirror of KJ's `typeOfErrno()` (kj/debug.c++), so `kj::Exception::Type` matches the
+/// native `kj::setupAsyncIo()` backend errno-for-errno.
+#[cfg(unix)]
+fn errno_exception_type(errno: i32) -> KjExceptionType {
+    // Errnos that are `#ifdef`-conditional in KJ's table for platform reasons, mirrored here
+    // with `cfg`: ENONET exists only on Linux; EOPNOTSUPP aliases ENOTSUP on Linux (KJ compiles
+    // its case only `#if EOPNOTSUPP != ENOTSUP` — an or-pattern with both would be an
+    // unreachable pattern there).
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    if errno == libc::ENONET {
+        return KjExceptionType::Disconnected;
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    if errno == libc::EOPNOTSUPP {
+        return KjExceptionType::Unimplemented;
+    }
+    match errno {
+        // OVERLOADED: the call failed because of a temporary lack of resources.
+        libc::EDQUOT
+        | libc::EMFILE
+        | libc::ENFILE
+        | libc::ENOBUFS
+        | libc::ENOLCK
+        | libc::ENOMEM
+        | libc::ENOSPC
+        | libc::ETIMEDOUT
+        | libc::EUSERS => KjExceptionType::Overloaded,
+        // DISCONNECTED: communication over a connection that has been lost.
+        libc::ENOTCONN
+        | libc::ECONNABORTED
+        | libc::ECONNREFUSED
+        | libc::ECONNRESET
+        | libc::EHOSTDOWN
+        | libc::EHOSTUNREACH
+        | libc::ENETDOWN
+        | libc::ENETRESET
+        | libc::ENETUNREACH
+        | libc::EPIPE => KjExceptionType::Disconnected,
+        // UNIMPLEMENTED: the "not supported" family (ENOTSOCK is really "syscall not
+        // implemented for non-sockets", per KJ's own comment).
+        libc::ENOSYS | libc::ENOTSUP | libc::ENOPROTOOPT | libc::ENOTSOCK => {
+            KjExceptionType::Unimplemented
+        }
+        _ => KjExceptionType::Failed,
+    }
+}
