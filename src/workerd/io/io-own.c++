@@ -20,13 +20,8 @@ void DeleteQueue::scheduleDeletion(OwnedObject* object) const {
 }
 
 void DeleteQueue::scheduleAction(jsg::Lock& js, kj::Function<void(jsg::Lock&)>&& action) const {
-  {
-    auto lock = crossThreadDeleteQueue.lockExclusive();
-    KJ_IF_SOME(state, *lock) {
-      state.actions.add(kj::mv(action));
-      KJ_REQUIRE_NONNULL(state.crossThreadFulfiller)->fulfill();
-      return;
-    }
+  if (tryScheduleAction(kj::mv(action))) {
+    return;
   }
 
   // The queue was deleted, likely because the IoContext was destroyed and the
@@ -52,6 +47,26 @@ void DeleteQueue::scheduleAction(jsg::Lock& js, kj::Function<void(jsg::Lock&)>&&
     // Safe to mutate here since we have the exclusive lock on the queue above.
     ioContext.logWarning(kj::str(stack));
   }
+}
+
+bool DeleteQueue::tryScheduleAction(kj::Function<void(jsg::Lock&)>&& action) const {
+  auto lock = crossThreadDeleteQueue.lockExclusive();
+  KJ_IF_SOME(state, *lock) {
+    state.actions.add(kj::mv(action));
+    KJ_REQUIRE_NONNULL(state.crossThreadFulfiller)->fulfill();
+    return true;
+  }
+  // The queue was deleted, likely because the IoContext was destroyed and the DeleteQueuePtr
+  // was invalidated. The action is dropped on the floor.
+  return false;
+}
+
+bool DeleteQueue::isCurrentIoContext() const {
+  return IoContext::hasCurrent() && IoContext::current().deleteQueue.queue.get() == this;
+}
+
+bool DeleteQueue::isDefunct() const {
+  return *crossThreadDeleteQueue.lockShared() == kj::none;
 }
 
 void DeleteQueue::checkFarGet(const DeleteQueue& deleteQueue, const std::type_info& type) {
@@ -108,6 +123,18 @@ void OwnedObjectList::link(kj::Own<OwnedObject> object) {
 
 void IoCrossContextExecutor::execute(jsg::Lock& js, kj::Function<void(jsg::Lock&)>&& func) {
   deleteQueue->scheduleAction(js, kj::mv(func));
+}
+
+bool IoCrossContextExecutor::isCurrent() const {
+  return deleteQueue->isCurrentIoContext();
+}
+
+bool IoCrossContextExecutor::tryExecute(kj::Function<void(jsg::Lock&)>&& func) const {
+  return deleteQueue->tryScheduleAction(kj::mv(func));
+}
+
+bool IoCrossContextExecutor::isTargetDestroyed() const {
+  return deleteQueue->isDefunct();
 }
 
 }  // namespace workerd
