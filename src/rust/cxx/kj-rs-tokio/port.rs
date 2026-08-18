@@ -297,3 +297,62 @@ const _: () = {
 pub fn new_tokio_port() -> Box<TokioPort> {
     Box::new(TokioPort::new())
 }
+impl TokioPort {
+    /// # Panics
+    ///
+    /// Panics if the tokio runtime cannot be built.
+    #[must_use]
+    pub fn new() -> Self {
+        #[expect(
+            clippy::expect_used,
+            reason = "startup-only: building the per-thread current_thread runtime fails only under resource exhaustion, at which point fail-fast at port construction is the correct behavior"
+        )]
+        let runtime = Builder::new_current_thread()
+            .enable_time()
+            // The I/O driver dispatches readiness for tokio sockets (used by kj-rs-io's
+            // tokio-backed KJ streams). It is only *driven* while this runtime is inside
+            // `block_on` (i.e. in `wait_*`/`poll`), which is exactly when the KJ loop sleeps.
+            .enable_io()
+            .build()
+            .expect("failed to build current_thread tokio runtime");
+        LOOP_RUNTIME_HANDLE.with(|h| {
+            let mut slot = h.borrow_mut();
+            assert!(
+                slot.is_none(),
+                "a kj-rs-tokio runtime already exists on this thread (one KJ event loop per \
+                 thread, hence one TokioEventPort per thread)"
+            );
+            *slot = Some(runtime.handle().clone());
+        });
+        // The `LocalSet` that `spawn()` enqueues onto and `wait_*`/`poll` drive. Owned by the
+        // thread-local (not by `TokioPort`, which must stay `Send + Sync`); dropped in `drop()`.
+        LOOP_LOCAL_SET.with(|l| {
+            *l.borrow_mut() = Some(Rc::new(LocalSet::new()));
+        });
+        let state = Arc::new(SharedState {
+            notify: Notify::new(),
+            woken: AtomicBool::new(false),
+            sleeping: AtomicBool::new(false),
+        });
+        Self {
+            runtime,
+            #[cfg(unix)]
+            hires: HiResTimer::new(Arc::clone(&state)),
+            state,
+        }
+    }
+
+    /// Handle to this port's runtime, usable to spawn tasks from any thread.
+    #[must_use]
+    pub fn handle(&self) -> Handle {
+        self.runtime.handle().clone()
+    }
+
+    pub(crate) fn wait_forever(&self) -> bool {
+        self.wait_impl(None)
+    }
+
+    pub(crate) fn wait_timeout_ns(&self, timeout_ns: u64) -> bool {
+        self.wait_impl(Some(Duration::from_nanos(timeout_ns)))
+    }
+}
