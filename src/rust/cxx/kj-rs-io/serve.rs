@@ -364,3 +364,68 @@ pub fn serve_kj_stream(stream: KjOwn<KjAsyncIoStream>) -> ServedKjStream {
 fn is_disconnected(exception: &KjException) -> bool {
     exception.r#type() == KjExceptionType::Disconnected
 }
+
+/// The duplex pump: bridges the owned `stream` (via bridged `kj::io` promises, on the calling
+/// KJ thread) to `kj_end`, the pump-side end of the consumer's duplex. Owns the stream: it is
+/// destroyed when this future settles or is dropped.
+///
+/// Unsafe-free and compiler-checked end to end: the stream is split into typed read/write
+/// halves ([`split_kj_stream`]), so the borrow checker enforces kj's stream contract — at most
+/// one read and one write in flight, nothing else touching the stream while the halves live —
+/// and proves the owner outlives every in-flight bridged promise.
+pub(crate) async fn pump_kj_stream(
+    mut stream: KjOwn<KjAsyncIoStream>,
+    kj_end: DuplexStream,
+) -> Result<(), KjError> {
+    let (mut rd, mut wr) = split_kj_stream(&mut stream);
+    let (mut from_consumer, mut to_consumer) = tokio::io::split(kj_end);
+
+    // kj stream -> consumer. Ends (shutting down the duplex write half, i.e. EOF to the
+    // consumer) at kj-side EOF — or when the peer disconnects abruptly (DISCONNECTED read
+    // failures are normal client behavior, treated as EOF).
+    let kj_to_consumer = async {
+        let mut buf = vec![0u8; PUMP_BUF];
+        loop {
+            let n = match rd.try_read(&mut buf, 1).await {
+                Ok(n) => n,
+                Err(e) if is_disconnected(&e) => 0,
+                Err(e) => return Err(KjError::from(e)),
+            };
+            if n == 0 {
+                let _ = to_consumer.shutdown().await;
+                return Ok::<(), KjError>(());
+            }
+            if to_consumer.write_all(&buf[..n]).await.is_err() {
+                // The consumer dropped its duplex end: the connection was abandoned
+                // deliberately; nothing more to deliver in this direction.
+                return Ok(());
+            }
+        }
+    };
+
+    // consumer -> kj stream. Ends (with a kj-side shutdownWrite) when the consumer shuts
+    // down or drops its end — or, without an error, when the kj peer already went away (a
+    // DISCONNECTED write failure: the consumer's remaining output has nowhere to go).
+    let consumer_to_kj = async {
+        let mut buf = vec![0u8; PUMP_BUF];
+        loop {
+            let n = match from_consumer.read(&mut buf).await {
+                // Duplex reads only fail if the consumer end vanished ungracefully; either
+                // way this direction is over.
+                Ok(0) | Err(_) => 0,
+                Ok(n) => n,
+            };
+            if n == 0 {
+                wr.shutdown_write();
+                return Ok::<(), KjError>(());
+            }
+            match wr.write(&buf[..n]).await {
+                Ok(()) => {}
+                Err(e) if is_disconnected(&e) => return Ok(()),
+                Err(e) => return Err(KjError::from(e)),
+            }
+        }
+    };
+
+    tokio::try_join!(kj_to_consumer, consumer_to_kj).map(|((), ())| ())
+}
