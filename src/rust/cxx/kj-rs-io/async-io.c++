@@ -344,4 +344,67 @@ kj::Own<kj::Network> TokioNetwork::restrictPeers(
   return kj::heap<TokioNetwork>(*this, allow, deny);
 }
 
+// =======================================================================================
+// TokioLowLevelAsyncIoProvider
+
+namespace {
+
+#if _WIN32
+// Normalizes KJ's fd-wrapping flags so Rust always receives a SOCKET it owns, in non-blocking
+// mode: the windows arm of prepareFd, mirroring the unix arm below in *effect*, not mechanism.
+// kj's own win32 provider (capnproto async-io-win32.c++: OwnedFd, NEW_FD_FLAGS) never dups a
+// borrowed socket -- it merely skips closesocket() on destruction when TAKE_OWNERSHIP is
+// absent -- ignores ALREADY_CLOEXEC entirely (there is no CLOEXEC on Windows; handle
+// inheritance is the analogue), and never toggles non-blocking mode (it uses overlapped I/O,
+// not readiness). Rust's OwnedSocket has no "don't close" mode, so a borrowed socket is
+// duplicated (WSADuplicateSocketW + WSASocketW, non-inheritable) into a handle Rust can own;
+// and tokio/mio's readiness model requires non-blocking sockets, so FIONBIO is set unless the
+// caller declared ALREADY_NONBLOCK (the duplicate shares the underlying socket state, so this
+// is observed through the caller's handle too, matching the unix dup()+O_NONBLOCK behavior).
+// Validated by Windows CI.
+uintptr_t prepareFd(uintptr_t fd, kj::uint flags) {
+  SOCKET sock = static_cast<SOCKET>(fd);
+  if ((flags & kj::LowLevelAsyncIoProvider::TAKE_OWNERSHIP) == 0) {
+    WSAPROTOCOL_INFOW info;
+    KJ_WINSOCK(WSADuplicateSocketW(sock, GetCurrentProcessId(), &info));
+    SOCKET duped = WSASocketW(FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO, &info, 0,
+        WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+    if (duped == INVALID_SOCKET) {
+      KJ_FAIL_WIN32("WSASocketW()", WSAGetLastError());
+    }
+    sock = duped;
+  }
+  // ALREADY_NONBLOCK does not exist on Windows (kj declares it under #if !_WIN32), so callers
+  // cannot assert pre-set non-blocking mode; always enable it (idempotent).
+  u_long mode = 1;
+  KJ_WINSOCK(ioctlsocket(sock, FIONBIO, &mode));
+  return static_cast<uintptr_t>(sock);
+}
+#else
+// Normalizes KJ's fd-wrapping flags so Rust always receives an fd it owns, with CLOEXEC set and
+// in non-blocking mode.
+int prepareFd(int fd, kj::uint flags) {
+  if ((flags & kj::LowLevelAsyncIoProvider::TAKE_OWNERSHIP) == 0) {
+    // dup() shares the open file description — the O_NONBLOCK set below is observed through the
+    // caller's fd too, matching KJ (which sets O_NONBLOCK on the caller's fd directly) — while
+    // giving Rust a descriptor it can own and close.
+    int duped;
+    KJ_SYSCALL(duped = ::dup(fd));
+    fd = duped;
+    KJ_SYSCALL(fcntl(fd, F_SETFD, FD_CLOEXEC));
+  } else if ((flags & kj::LowLevelAsyncIoProvider::ALREADY_CLOEXEC) == 0) {
+    KJ_SYSCALL(fcntl(fd, F_SETFD, FD_CLOEXEC));
+  }
+  if ((flags & kj::LowLevelAsyncIoProvider::ALREADY_NONBLOCK) == 0) {
+    int fl;
+    KJ_SYSCALL(fl = fcntl(fd, F_GETFL));
+    if ((fl & O_NONBLOCK) == 0) {
+      KJ_SYSCALL(fcntl(fd, F_SETFL, fl | O_NONBLOCK));
+    }
+  }
+  return fd;
+}
+
+}  // namespace
+
 }  // namespace kj_rs_io
