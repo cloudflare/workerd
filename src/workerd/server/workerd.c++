@@ -179,24 +179,6 @@ constexpr capnp::ReaderOptions CONFIG_READER_OPTIONS = {
 
 #else
 
-// Dummy LegacyFileWatcher implementation for operating systems that aren't supported yet.
-class LegacyFileWatcher {
- public:
-  LegacyFileWatcher(kj::UnixEventPort& port) {}
-
-  bool isSupported() {
-    return false;
-  }
-
-  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) {}
-
-  kj::Promise<void> onChange() {
-    return kj::NEVER_DONE;
-  }
-
- private:
-};
-
 #endif  // #__linux__, #else
 
 // =======================================================================================
