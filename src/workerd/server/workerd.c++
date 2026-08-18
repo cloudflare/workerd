@@ -173,9 +173,9 @@ constexpr capnp::ReaderOptions CONFIG_READER_OPTIONS = {
 #if __linux__
 
 // Class which uses inotify to watch a set of files and alert when they change.
-class FileWatcher {
+class LegacyFileWatcher {
  public:
-  FileWatcher(kj::UnixEventPort& port)
+  LegacyFileWatcher(kj::UnixEventPort& port)
       : inotifyFd(makeInotify()),
         observer(port, inotifyFd, kj::UnixEventPort::FdObserver::OBSERVE_READ) {}
 
@@ -260,9 +260,9 @@ class FileWatcher {
 //
 // Apple provides the FSEvents API as an alternative, but it seems way more complicated and I
 // can't tell if it would provide a real advantage. Plus, kqueue works on BSD systems.
-class FileWatcher {
+class LegacyFileWatcher {
  public:
-  FileWatcher(kj::UnixEventPort& port)
+  LegacyFileWatcher(kj::UnixEventPort& port)
       : kqueueFd(makeKqueue()),
         observer(port, kqueueFd, kj::UnixEventPort::FdObserver::OBSERVE_READ) {}
 
@@ -334,9 +334,9 @@ class FileWatcher {
 
 #elif _WIN32
 
-class FileWatcher {
+class LegacyFileWatcher {
  public:
-  FileWatcher(kj::Win32EventPort& port) {}
+  LegacyFileWatcher(kj::Win32EventPort& port) {}
 
   bool isSupported() {
     return false;
@@ -353,10 +353,10 @@ class FileWatcher {
 
 #else
 
-// Dummy FileWatcher implementation for operating systems that aren't supported yet.
-class FileWatcher {
+// Dummy LegacyFileWatcher implementation for operating systems that aren't supported yet.
+class LegacyFileWatcher {
  public:
-  FileWatcher(kj::UnixEventPort& port) {}
+  LegacyFileWatcher(kj::UnixEventPort& port) {}
 
   bool isSupported() {
     return false;
@@ -396,7 +396,7 @@ class SchemaFileImpl final: public capnp::SchemaFile {
       kj::PathPtr basePath,
       kj::ArrayPtr<const kj::Path> importPath,
       kj::Own<const kj::ReadableFile> fileParam,
-      kj::Maybe<FileWatcher&> watcher,
+      kj::Maybe<LegacyFileWatcher&> watcher,
       ErrorReporter& errorReporter)
       : root(root),
         current(current),
@@ -494,7 +494,7 @@ class SchemaFileImpl final: public capnp::SchemaFile {
   // Mutable because the SchemaParser interface forces us to make all our methods `const` so that
   // parsing can happen on multiple threads, but we do not actually use multiple threads for
   // parsing, so we're good.
-  mutable kj::Maybe<FileWatcher&> watcher;
+  mutable kj::Maybe<LegacyFileWatcher&> watcher;
 
   ErrorReporter& errorReporter;
 };
@@ -1563,7 +1563,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   bool gcStress = false;
   bool allAutogates = false;
   kj::Maybe<kj::String> testCompatDate;
-  kj::Maybe<FileWatcher> watcher;
+  kj::Maybe<LegacyFileWatcher> watcher;
 
   kj::Own<kj::Filesystem> fs = kj::newDiskFilesystem();
   kj::AsyncIoContext io = kj::setupAsyncIo();
@@ -1710,13 +1710,13 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   }
 
 #if _WIN32
-  kj::Promise<void> waitForChanges(FileWatcher& watcher) {
+  kj::Promise<void> waitForChanges(LegacyFileWatcher& watcher) {
     KJ_UNIMPLEMENTED("Watching is not yet implemented on Windows");
   }
 #else
-  // Wait for the FileWatcher to report a change, and then wait a moment for changes to settle
+  // Wait for the LegacyFileWatcher to report a change, and then wait a moment for changes to settle
   // down, in case there's a bunch of changes all at once.
-  kj::Promise<void> waitForChanges(FileWatcher& watcher) {
+  kj::Promise<void> waitForChanges(LegacyFileWatcher& watcher) {
     co_await watcher.onChange();
 
     // Saw our first change!
