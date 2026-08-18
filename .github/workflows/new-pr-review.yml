@@ -2,7 +2,7 @@ name: New PR Review
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened]
 
 jobs:
   review:
