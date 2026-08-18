@@ -94,7 +94,7 @@ using InertEventPort = InertWin32EventPort;
 // On epoll platforms UnixEventPort holds a `Maybe<Own<ChildSet>>` whose type is only
 // forward-declared in async-unix.h; the real definition lives in the unlinked async-unix.c++.
 // Defining ~UnixEventPort() below requires the type to be complete. The inert port never
-
+// constructs one (the Maybe stays none), so an empty definition satisfies the compiler and the
 // dispose path is never reached.
 struct UnixEventPort::ChildSet {};
 #endif
