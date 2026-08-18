@@ -162,13 +162,16 @@ pub mod repr {
         }
 
         pub(crate) unsafe extern "C" fn drop_in_place(fut: *mut c_void) {
-            // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+            // SAFETY: per this fn's `# Safety` contract, `fut` is the `fut` field of a live
+            // `RustFuture<T>` not used again, so we may read the pointer, reclaim the box, and pin.
             let fut = unsafe { *(fut.cast::<FuturePtr<T>>()) };
-            // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+            // SAFETY: `fut` was produced by `Box::into_raw` in [`future`]; reclaim ownership once.
             let fut = unsafe { Box::from_raw(fut) };
-            // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+            // SAFETY: the box is never moved out of its allocation, so pinning it is sound.
             let fut = unsafe { Pin::new_unchecked(fut) };
-            drop(fut);
+            cxx::private::prevent_unwind("kj_rs::repr::RustFuture::drop_in_place", move || {
+                drop(fut);
+            });
         }
     }
 
