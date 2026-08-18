@@ -75,6 +75,8 @@ kj::Own<IoChannelFactory::SubrequestChannel> LocalActorOutgoingFactory::getSubre
 IoChannelFactory::ActorChannel& GlobalActorOutgoingFactory::getOrCreateActorChannel(
     IoContext& context, SpanParent parentSpan) {
   if (actorChannel == kj::none) {
+    auto locationHint = this->locationHint.map([](kj::String& hint) { return kj::str(hint); });
+    auto version = this->version.map([](ActorVersion& version) { return version.clone(); });
     KJ_SWITCH_ONEOF(channelIdOrFactory) {
       KJ_CASE_ONEOF(channelId, uint) {
         actorChannel =
@@ -96,6 +98,13 @@ IoChannelFactory::ActorChannel& GlobalActorOutgoingFactory::getOrCreateActorChan
   }
 
   return *KJ_REQUIRE_NONNULL(actorChannel);
+}
+
+void GlobalActorOutgoingFactory::onActorFetchRetry() {
+  // The cached channel may contain the disconnected routing pipeline. Clear it so the retry
+  // resolves a fresh route instead of reusing that pipeline.
+  actorChannel = kj::none;
+  channelMemoryAdjustment = kj::none;
 }
 
 Fetcher::OutgoingFactory::Result GlobalActorOutgoingFactory::newSingleUseClient(

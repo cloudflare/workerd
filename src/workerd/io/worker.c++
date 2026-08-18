@@ -3971,9 +3971,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       auto ctx = js.alloc<api::DurableObjectState>(js, cloneId(),
           jsg::JsValue(KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).getHandle(js)),
           impl->props.toJs(js), kj::mv(storage), kj::mv(impl->container), containerRunning,
-          impl->facetManager, impl->version.map([](ActorVersion& v) {
-        return ActorVersion{.cohort = v.cohort.map([](kj::String& s) { return kj::str(s); })};
-      }));
+          impl->facetManager, impl->version.map([](ActorVersion& v) { return v.clone(); }));
 
       auto handler =
           info.cls(lock, ctx.addRef(), KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));

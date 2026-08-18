@@ -169,24 +169,42 @@ struct FetchTargetIoChannelFactory final: public TestFixture::DummyIoChannelFact
 };
 
 struct ActorIoChannelFactory final: public TestFixture::DummyIoChannelFactory {
-  ActorIoChannelFactory(
-      TimerChannel& timer, kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata>& capturedMetadata)
+  ActorIoChannelFactory(TimerChannel& timer,
+      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata>& capturedMetadata,
+      uint& channelCount,
+      kj::Vector<kj::String>& locationHints,
+      kj::Vector<kj::String>& cohorts)
       : DummyIoChannelFactory(timer),
-        capturedMetadata(capturedMetadata) {}
+        capturedMetadata(capturedMetadata),
+        channelCount(channelCount),
+        locationHints(locationHints),
+        cohorts(cohorts) {}
 
   kj::Own<ActorChannel> getGlobalActor(uint,
       const ActorIdFactory::ActorId&,
-      kj::Maybe<kj::String>,
+      kj::Maybe<kj::String> locationHint,
       ActorGetMode,
       bool,
       ActorRoutingMode,
       SpanParent,
-      kj::Maybe<ActorVersion>,
+      kj::Maybe<ActorVersion> version,
       Persistent) override {
+    ++channelCount;
+    KJ_IF_SOME(hint, locationHint) {
+      locationHints.add(kj::mv(hint));
+    }
+    KJ_IF_SOME(v, version) {
+      KJ_IF_SOME(cohort, v.cohort) {
+        cohorts.add(kj::mv(cohort));
+      }
+    }
     return kj::refcounted<RecordingActorChannel>(capturedMetadata);
   }
 
   kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata>& capturedMetadata;
+  uint& channelCount;
+  kj::Vector<kj::String>& locationHints;
+  kj::Vector<kj::String>& cohorts;
 };
 
 // fetchImplNoOutputLock forwards Request::canRewindBody() to RequestObserver so that, downstream,
@@ -374,23 +392,27 @@ KJ_TEST("Fetcher rejects actor retry metadata before numeric subrequest-channel 
   });
 }
 
-// Exercise the real implementation of the hook tested above: global actor factories must place the
-// caller's metadata on the subrequest sent through the actor channel.
+// Global actor factories must place the caller's metadata on the actor subrequest.
 KJ_TEST("GlobalActorOutgoingFactory places actor retry metadata on the actor subrequest") {
   kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> capturedMetadata;
+  uint channelCount = 0;
+  kj::Vector<kj::String> locationHints;
+  kj::Vector<kj::String> cohorts;
   TestFixture fixture(TestFixture::SetupParams{
     .useRealTimers = false,
     .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
         [&](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
-    return kj::rc<ActorIoChannelFactory>(timer, capturedMetadata);
+    return kj::rc<ActorIoChannelFactory>(
+        timer, capturedMetadata, channelCount, locationHints, cohorts);
   }),
   });
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     GlobalActorOutgoingFactory factory(
         GlobalActorOutgoingFactory::ChannelIdOrFactory(static_cast<uint>(1)),
-        env.js.alloc<DurableObjectId>(kj::heap<MockActorId>()), kj::none,
-        ActorGetMode::GET_OR_CREATE, false, ActorRoutingMode::DEFAULT, kj::none, Persistent::NO);
+        env.js.alloc<DurableObjectId>(kj::heap<MockActorId>()), kj::str("location"),
+        ActorGetMode::GET_OR_CREATE, false, ActorRoutingMode::DEFAULT,
+        ActorVersion{.cohort = kj::str("cohort")}, Persistent::NO);
     KJ_EXPECT(factory.supportsActorFetchRetries());
 
     auto client = factory.newSingleUseClientWithActorRetryMetadata(kj::none,
@@ -408,6 +430,21 @@ KJ_TEST("GlobalActorOutgoingFactory places actor retry metadata on the actor sub
     } else {
       KJ_FAIL_EXPECT("actor retry metadata was not forwarded to the actor channel");
     }
+
+    factory.onActorFetchRetry();
+    auto retryClient = factory.newSingleUseClientWithActorRetryMetadata(kj::none,
+        IoChannelFactory::ActorRetryRequestMetadata{
+          .nonce = 0xfedcba9876543210,
+          .createdAt = kj::UNIX_EPOCH + 456 * kj::MILLISECONDS,
+          .isRetry = IsActorRetry::YES,
+        });
+    KJ_EXPECT(channelCount == 2);
+    KJ_ASSERT(locationHints.size() == 2);
+    KJ_EXPECT(locationHints[0] == "location");
+    KJ_EXPECT(locationHints[1] == "location");
+    KJ_ASSERT(cohorts.size() == 2);
+    KJ_EXPECT(cohorts[0] == "cohort");
+    KJ_EXPECT(cohorts[1] == "cohort");
   });
 }
 
@@ -434,6 +471,19 @@ KJ_TEST("ReplicaActorOutgoingFactory places actor retry metadata on the actor su
       KJ_EXPECT(metadata.isRetry == IsActorRetry::YES);
     } else {
       KJ_FAIL_EXPECT("actor retry metadata was not forwarded to the actor channel");
+    }
+
+    factory.onActorFetchRetry();
+    auto retryClient = factory.newSingleUseClientWithActorRetryMetadata(kj::none,
+        IoChannelFactory::ActorRetryRequestMetadata{
+          .nonce = 0xfedcba9876543210,
+          .createdAt = kj::UNIX_EPOCH + 456 * kj::MILLISECONDS,
+          .isRetry = IsActorRetry::YES,
+        });
+    KJ_IF_SOME(metadata, capturedMetadata) {
+      KJ_EXPECT(metadata.nonce == 0xfedcba9876543210);
+    } else {
+      KJ_FAIL_EXPECT("actor retry metadata was not forwarded through the existing channel");
     }
   });
 }

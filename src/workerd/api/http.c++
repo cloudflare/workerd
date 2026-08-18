@@ -2669,6 +2669,15 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
   KJ_UNREACHABLE;
 }
 
+void Fetcher::onActorFetchRetry() {
+  auto& outgoingFactory = KJ_REQUIRE_NONNULL(
+      channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>(),
+      "actor fetch retry requested from an unsupported Fetcher");
+  KJ_REQUIRE(outgoingFactory->supportsActorFetchRetries(),
+      "actor fetch retry requested from an unsupported Fetcher");
+  outgoingFactory->onActorFetchRetry();
+}
+
 kj::Own<IoChannelFactory::SubrequestChannel> Fetcher::getSubrequestChannel(IoContext& ioContext) {
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {

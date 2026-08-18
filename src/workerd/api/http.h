@@ -257,6 +257,10 @@ class Fetcher: public JsRpcClientProvider {
       return false;
     }
 
+    virtual void onActorFetchRetry() {
+      KJ_FAIL_REQUIRE("actor fetch retry requested from an unsupported Fetcher");
+    }
+
     // Factories that can carry actor retry metadata override this method. The default rejects the
     // metadata rather than silently starting a new logical call.
     virtual Result newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
@@ -329,6 +333,7 @@ class Fetcher: public JsRpcClientProvider {
       kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata);
 
   bool supportsActorFetchRetries();
+  void onActorFetchRetry();
 
   // Get a SubrequestChannel representing this Fetcher.
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);
