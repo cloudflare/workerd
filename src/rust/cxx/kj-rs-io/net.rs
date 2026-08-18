@@ -362,3 +362,53 @@ impl TokioListener {
         ))
     }
 }
+
+// Bridge entry points (see lib.rs).
+
+/// Resolves a hostname via blocking `getaddrinfo` on tokio's blocking pool — purely in Rust and
+/// same-thread. A tokio *runtime* task owns the blocking `JoinHandle`, so the blocking-pool
+/// completion wakes tokio's own (`Send + Sync`) scheduler waker — which unparks this loop —
+/// rather than the bridged future's kj waker. The task then runs on the loop thread and hands the
+/// result back over a oneshot, waking the awaiting future same-thread. No cross-thread rust waker
+/// is involved (that is the whole reason we do not use `tokio::net::lookup_host`, whose
+/// `JoinHandle` wake lands on the caller's waker cross-thread). Same blocking `getaddrinfo` call
+/// and NSS/`/etc/hosts` parity as `lookup_host`.
+async fn resolve_host(host: &str, port: u16) -> Result<Vec<SocketAddr>> {
+    let host = host.to_owned();
+    let (tx, rx) = tokio::sync::oneshot::channel::<std::io::Result<Vec<SocketAddr>>>();
+
+    // The runtime task's waker is tokio's own scheduler waker (Send + Sync), so the cross-thread
+    // completion from the blocking pool terminates inside tokio's scheduler (unparking this loop),
+    // never at a rust cross-thread waker. The task forwards the result on the loop thread, waking
+    // the awaiting future same-thread.
+    let task = tokio::spawn(async move {
+        let resolved = match tokio::task::spawn_blocking(move || {
+            (host.as_str(), port)
+                .to_socket_addrs()
+                .map(std::iter::Iterator::collect::<Vec<SocketAddr>>)
+        })
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(std::io::Error::other("getaddrinfo task failed")),
+        };
+        let _ = tx.send(resolved);
+    });
+    // If this future is dropped (KJ promise cancelled), abort the forwarding task rather than
+    // leaving it to run to completion for nobody. The blocking getaddrinfo call itself cannot be
+    // interrupted once started (an OS limitation shared with KJ's own resolver and tokio's
+    // `lookup_host`), so its blocking-pool slot is reclaimed only when the syscall returns.
+    let _abort_guard = crate::runtime::AbortOnDrop(task);
+
+    match rx.await {
+        Ok(result) => result.map_err(op("getaddrinfo()")),
+        Err(_) => Err(KjIoError::other(
+            "getaddrinfo()",
+            "DNS resolver task dropped",
+        )),
+    }
+}
+
+pub async fn network_parse_address(addr: String, port_hint: u16) -> Result<Box<TokioAddress>> {
+    with_runtime(async move { Ok(Box::new(TokioAddress::parse(&addr, port_hint).await?)) }).await
+}
