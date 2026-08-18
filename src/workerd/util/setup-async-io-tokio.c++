@@ -95,4 +95,44 @@ using InertEventPort = InertWin32EventPort;
 // forward-declared in async-unix.h; the real definition lives in the unlinked async-unix.c++.
 // Defining ~UnixEventPort() below requires the type to be complete. The inert port never
 
+// dispose path is never reached.
+struct UnixEventPort::ChildSet {};
+#endif
+
+UnixEventPort::UnixEventPort(): clock(systemPreciseMonotonicClock()), timerImpl(clock.now()) {}
+
+UnixEventPort::~UnixEventPort() noexcept(false) {}
+
+bool UnixEventPort::wait() {
+  KJ_UNIMPLEMENTED("UnixEventPort is inert under --//:io_backend=rust (tokio drives the loop)");
+}
+
+bool UnixEventPort::poll() {
+  KJ_UNIMPLEMENTED("UnixEventPort is inert under --//:io_backend=rust (tokio drives the loop)");
+}
+
+void UnixEventPort::wake() const {
+  KJ_UNIMPLEMENTED("UnixEventPort is inert under --//:io_backend=rust (tokio drives the loop)");
+}
+
+#if KJ_USE_EPOLL
+// This guard mirrors kj/async-unix.h, which declares UnixEventPort::setRunnable only under
+// KJ_USE_EPOLL. On kqueue platforms the member does not exist (defining it would not compile);
+// there UnixEventPort inherits kj::EventPort::setRunnable, whose default is a no-op — harmless,
+// since this inert port is never installed as an EventLoop's port.
+void UnixEventPort::setRunnable(bool runnable) {
+  KJ_UNIMPLEMENTED("UnixEventPort is inert under --//:io_backend=rust (tokio drives the loop)");
+}
+#endif
+
+void UnixEventPort::updateNextTimerEvent(kj::Maybe<TimePoint> time) {}
+
+kj::TimePoint UnixEventPort::getTimeWhileSleeping() {
+  KJ_UNIMPLEMENTED("UnixEventPort is inert under --//:io_backend=rust (tokio drives the loop)");
+}
+
+using InertEventPort = UnixEventPort;
+
+#endif  // _WIN32, !_WIN32
+
 }  // namespace kj
