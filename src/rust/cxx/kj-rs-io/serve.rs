@@ -116,3 +116,18 @@ impl ServeIo {
         }
     }
 }
+
+impl AsyncRead for ServeIo {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Self::Tcp(s) => Pin::new(s).poll_read(cx, buf),
+            #[cfg(unix)]
+            Self::Unix(s) => Pin::new(s).poll_read(cx, buf),
+            Self::Duplex(s) => Pin::new(s).poll_read(cx, buf),
+        }
+    }
+}
