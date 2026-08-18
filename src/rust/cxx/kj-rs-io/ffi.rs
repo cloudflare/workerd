@@ -651,3 +651,53 @@ fn setsockopt_raw(
     }
     Ok(())
 }
+
+pub fn stream_getsockopt(
+    stream: &TokioStream,
+    level: i32,
+    option: i32,
+    value: &mut [u8],
+) -> Result<usize> {
+    #[cfg(unix)]
+    {
+        getsockopt_raw(stream.as_borrowed_fd()?, level, option, value)
+    }
+    // Validated by Windows CI; mirrors the unix arm.
+    #[cfg(windows)]
+    {
+        getsockopt_raw(stream.as_borrowed_socket()?, level, option, value)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (stream, level, option, value);
+        Err(crate::error::KjIoError::other(
+            "getsockopt",
+            "not implemented by kj-rs-io on this platform",
+        ))
+    }
+}
+
+pub fn stream_setsockopt(
+    stream: &TokioStream,
+    level: i32,
+    option: i32,
+    value: &[u8],
+) -> Result<()> {
+    #[cfg(unix)]
+    {
+        setsockopt_raw(stream.as_borrowed_fd()?, level, option, value)
+    }
+    // Validated by Windows CI; mirrors the unix arm.
+    #[cfg(windows)]
+    {
+        setsockopt_raw(stream.as_borrowed_socket()?, level, option, value)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (stream, level, option, value);
+        Err(crate::error::KjIoError::other(
+            "setsockopt",
+            "not implemented by kj-rs-io on this platform",
+        ))
+    }
+}
