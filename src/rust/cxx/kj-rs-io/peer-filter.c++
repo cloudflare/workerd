@@ -144,4 +144,58 @@ PeerFilter::PeerFilter(kj::ArrayPtr<const kj::StringPtr> allow,
   }
 }
 
+bool PeerFilter::shouldAllow(const struct sockaddr *addr, kj::uint addrlen) {
+  KJ_REQUIRE(addrlen >= sizeof(addr->sa_family));
+
+#if !_WIN32
+  if (addr->sa_family == AF_UNIX) {
+    auto path = safeUnixPath(reinterpret_cast<const struct sockaddr_un *>(addr), addrlen);
+    if (path.size() > 0 && path[0] == '\0') {
+      return allowAbstractUnix;
+    } else {
+      return allowUnix;
+    }
+  }
+#endif
+
+  bool allowed = false;
+  kj::uint allowSpecificity = 0;
+
+  if (allowPublic) {
+    if ((addr->sa_family == AF_INET || addr->sa_family == AF_INET6) &&
+        !matchesAny(privateCidrs(), addr) && !matchesAny(localCidrs(), addr) &&
+        !matchesAny(reservedCidrs(), addr)) {
+      allowed = true;
+      // Don't adjust allowSpecificity as this match has an effective specificity of zero.
+    }
+  }
+
+  if (allowNetwork) {
+    if ((addr->sa_family == AF_INET || addr->sa_family == AF_INET6) &&
+        !matchesAny(localCidrs(), addr) && !matchesAny(reservedCidrs(), addr)) {
+      allowed = true;
+      // Don't adjust allowSpecificity as this match has an effective specificity of zero.
+    }
+  }
+
+  for (auto &cidr: allowCidrs) {
+    if (cidr.matches(addr)) {
+      allowSpecificity = kj::max(allowSpecificity, cidr.getSpecificity());
+      allowed = true;
+    }
+  }
+  if (!allowed) return false;
+  for (auto &cidr: denyCidrs) {
+    if (cidr.matches(addr)) {
+      if (cidr.getSpecificity() >= allowSpecificity) return false;
+    }
+  }
+
+  KJ_IF_SOME(n, next) {
+    return n.shouldAllow(addr, addrlen);
+  } else {
+    return true;
+  }
+}
+
 }  // namespace kj_rs_io
