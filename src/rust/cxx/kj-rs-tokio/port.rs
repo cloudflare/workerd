@@ -150,6 +150,8 @@ struct HiResRequest {
     generation: u64,
     shutdown: bool,
 }
+
+#[cfg(unix)]
 impl HiResTimer {
     fn new(port: Arc<SharedState>) -> Self {
         Self {
