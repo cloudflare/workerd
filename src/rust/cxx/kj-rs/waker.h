@@ -142,40 +142,6 @@ class FutureWakerCell final: public kj::Refcounted {
   kj::Maybe<kj::_::Event&> event;
 };
 
-// KjWaker is an abstract base class which defines an interface mirroring Rust's RawWakerVTable
-// struct. Rust has four trampoline functions, defined in waker.rs, which translate Waker::clone(),
-// Waker::wake(), etc. calls to the virtual member functions on this class.
-//
-// Rust requires Wakers to be Send and Sync, meaning all of the functions defined here may be called
-// concurrently by any thread. Derived class implementations of these functions must handle this,
-// which is why all of the virtual member functions are `const`-qualified.
-class KjWaker {
- public:
-  // Return a pointer to a new strong ref to a KjWaker. Note that `clone()` may return nullptr,
-  // in which case the Rust implementation in waker.rs will treat it as a no-op Waker. Rust
-  // immediately wraps this pointer in its own Waker object, which is responsible for later
-  // releasing the strong reference.
-  //
-  // TODO(cleanup): Build kj::Arc<T> into cxx-rs so we can return one instead of a raw pointer.
-  virtual const KjWaker* clone() const = 0;
-
-  // Wake and drop this waker.
-  virtual void wake() const = 0;
-
-  // Wake this waker, but do not drop it.
-  virtual void wake_by_ref() const = 0;
-
-  // Drop this waker.
-  virtual void drop() const = 0;
-
-  // If this KjWaker implementation has an associated FuturePollEvent, C++ code can request access
-  // to it here. The RustPromiseAwaiter class (which helps Rust `.await` KJ Promises) uses this to
-  // optimize awaits, when possible.
-  virtual kj::Maybe<FuturePollEvent&> tryGetFuturePollEvent() const {
-    return kj::none;
-  }
-};
-
 // =======================================================================================
 // ArcWakerPromiseNode
 
