@@ -350,6 +350,7 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
   bool supportsActorFetchRetries() const override {
     return true;
   }
+  void onActorFetchRetry() override;
   kj::Own<WorkerInterface> newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
       kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) override;
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
@@ -411,11 +412,6 @@ class ReplicaActorOutgoingFactory final: public Fetcher::OutgoingFactory {
         actorId(kj::mv(actorId)) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
-  bool supportsActorFetchRetries() const override {
-    return true;
-  }
-  kj::Own<WorkerInterface> newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
-      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) override;
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
 
  private:
