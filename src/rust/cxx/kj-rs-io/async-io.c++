@@ -114,4 +114,74 @@ kj::Maybe<void *> TokioAsyncIoStream::getWin32Handle() const {
   KJ_FAIL_REQUIRE("stream is not a kj-rs-io tokio-backed stream; cannot unwrap");
 }
 
+// =======================================================================================
+// TokioConnectionReceiver
+
+namespace {
+
+// Builds the accepted connection's kj::PeerIdentity, mirroring KJ's SocketAddress::getIdentity()
+// (kj/async-io-unix.c++): NetworkPeerIdentity wrapping the peer's address for TCP peers (its
+// toString() is "ip:port" / "[v6]:port", byte-identical to KJ's format -- workerd's HTTP
+// listener puts this string in the cf blob's clientIp), LocalPeerIdentity with the peer's
+// process credentials for unix sockets, UnknownPeerIdentity otherwise.
+kj::Own<kj::PeerIdentity> peerIdentityFromSockaddr(
+    struct sockaddr *sa, kj::uint addrlen, [[maybe_unused]] kj::AsyncIoStream &stream) {
+  switch (sa->sa_family) {
+    case AF_INET:
+    case AF_INET6: {
+      // The identity's NetworkAddress uses an allow-all filter (not the listener's): it exists
+      // for toString()/getAddress(); restrictPeers enforcement on this listener already happened
+      // in the accept loop. (KJ instead threads the listener's filter through, which only
+      // matters if a caller connect()s back through the identity address -- see PeerFilter's
+      // immobility note for why we don't hold a reference to a possibly-narrower filter here.)
+      static PeerFilter allowAll;
+      auto address = network_get_sockaddr(
+          ::rust::Slice<const uint8_t>(reinterpret_cast<const uint8_t *>(sa), addrlen));
+      return kj::NetworkPeerIdentity::newInstance(
+          kj::heap<TokioNetworkAddress>(kj::mv(address), allowAll));
+    }
+#if !_WIN32
+    case AF_UNIX: {
+      // Same credential sources and invalid-value handling as KJ (SO_PEERCRED on Linux,
+      // LOCAL_PEERCRED/LOCAL_PEERPID on BSDs/macOS; OpenBSD defines SO_PEERCRED but with a
+      // different interface, so it uses the LOCAL_PEERCRED arm).
+      kj::LocalPeerIdentity::Credentials result;
+#if defined(SO_PEERCRED) && !__OpenBSD__
+      struct ucred creds;
+      kj::uint length = sizeof(creds);
+      stream.getsockopt(SOL_SOCKET, SO_PEERCRED, &creds, &length);
+      if (creds.pid > 0) {
+        result.pid = creds.pid;
+      }
+      if (creds.uid != static_cast<uid_t>(-1)) {
+        result.uid = creds.uid;
+      }
+#elifdef LOCAL_PEERCRED
+      struct xucred creds;
+      kj::uint length = sizeof(creds);
+      stream.getsockopt(SOL_LOCAL, LOCAL_PEERCRED, &creds, &length);
+      KJ_ASSERT(length == sizeof(creds));
+      if (creds.cr_uid != static_cast<uid_t>(-1)) {
+        result.uid = creds.cr_uid;
+      }
+#ifdef LOCAL_PEERPID
+      pid_t pid;
+      length = sizeof(pid);
+      stream.getsockopt(SOL_LOCAL, LOCAL_PEERPID, &pid, &length);
+      KJ_ASSERT(length == sizeof(pid));
+      if (pid > 0) {
+        result.pid = pid;
+      }
+#endif
+#endif
+      return kj::LocalPeerIdentity::newInstance(result);
+    }
+#endif  // !_WIN32
+    default:
+      return kj::UnknownPeerIdentity::newInstance();
+  }
+}
+
+}  // namespace
+
 }  // namespace kj_rs_io
