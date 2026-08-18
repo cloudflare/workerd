@@ -382,3 +382,43 @@ impl TokioStream {
         Ok(Box::new(Self { inner: Some(inner) }))
     }
 }
+
+// ======================================================================================
+// Bridge entry points (see lib.rs). Every async fn wraps its body in `with_runtime` so tokio
+// resources created while polling on the KJ thread can reach the loop runtime's I/O driver.
+
+pub async fn stream_try_read(
+    stream: &TokioStream,
+    buf: &mut [u8],
+    min_bytes: usize,
+) -> Result<usize> {
+    with_runtime(stream.try_read_min(buf, min_bytes)).await
+}
+
+pub async fn stream_write(stream: &TokioStream, buf: &[u8]) -> Result<()> {
+    with_runtime(stream.write_all(buf)).await
+}
+
+pub async fn stream_when_write_disconnected(stream: &TokioStream) -> Result<()> {
+    with_runtime(stream.when_write_disconnected()).await
+}
+
+pub fn stream_shutdown_write(stream: &TokioStream) -> Result<()> {
+    stream.shutdown_write()
+}
+
+pub fn stream_raw_handle(stream: &TokioStream) -> Result<i64> {
+    stream.raw_handle()
+}
+
+pub fn stream_local_addr(stream: &TokioStream) -> Result<Vec<u8>> {
+    stream.local_addr_bytes()
+}
+
+pub fn stream_peer_addr(stream: &TokioStream) -> Result<Vec<u8>> {
+    stream.peer_addr_bytes()
+}
+
+pub fn stream_take(stream: &mut TokioStream) -> Result<Box<TokioStream>> {
+    stream.take()
+}
