@@ -1,0 +1,21 @@
+src/workerd/io/actor-id.h
+  s_68959d5fe8e08d::t_2134bd57ce491c 29-34
+src/workerd/io/worker.c++
+  s_68959d5fe8e08d::t_ff8402b0b2c2d5 3962
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "09696006317dff121b4539fe354efd32911bc961",
+  "prompts": {},
+  "sessions": {
+    "s_68959d5fe8e08d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ff07ec157ffeC7x2Y13Ir1AaVS",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
