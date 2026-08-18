@@ -403,4 +403,42 @@ impl TokioPort {
         state.sleeping.store(false, Ordering::SeqCst);
         self.take_wake_latch()
     }
+    pub(crate) fn poll(&self) -> bool {
+        // Bounded, non-blocking pump: the main future is always immediately ready to run again
+        // after `yield_now`, so the scheduler never parks; it just interleaves any ready spawned
+        // tasks (LocalSet + runtime) with our yields until the budget is spent.
+        #[expect(
+            clippy::expect_used,
+            reason = "TokioPort::new registers this thread's LocalSet; poll() only runs while this port drives its own thread, so the LocalSet is always present — absence is an unreachable internal invariant"
+        )]
+        let local =
+            current_local_set().expect("TokioPort is driving without a registered LocalSet");
+        local.block_on(&self.runtime, async {
+            for _ in 0..POLL_YIELD_BUDGET {
+                tokio::task::yield_now().await;
+            }
+        });
+        self.take_wake_latch()
+    }
+
+    pub(crate) fn wake(&self) {
+        self.state.woken.store(true, Ordering::SeqCst);
+        self.state.notify.notify_one();
+    }
+
+    pub(crate) fn notify_runnable(&self) {
+        // Only meaningful while parked in `wait_impl`; `setRunnable(true)` is only ever called on
+        // the loop thread, so if `sleeping` is set we are inside `block_on` and the caller is a
+        // tokio task that re-entered C++ and armed a KJ event. Without this nudge the loop would
+        // keep sleeping until the next timer/wake even though it has work queued.
+        if self.state.sleeping.load(Ordering::SeqCst) {
+            self.state.notify.notify_one();
+        }
+    }
+
+    /// Consumes the wake latch: returns `true` iff `wake()` was called since the last `true`
+    /// return from `wait_*`/`poll`.
+    fn take_wake_latch(&self) -> bool {
+        self.state.woken.swap(false, Ordering::SeqCst)
+    }
 }
