@@ -557,3 +557,53 @@ fn setsockopt_raw(
     }
     Ok(())
 }
+
+/// Raw ws2_32 `getsockopt` on a borrowed `SOCKET`. Same socklen in/out semantics as the unix
+/// arm above: `value.len()` is passed as the in `optlen`, and the reported out `optlen` is
+/// returned verbatim.
+// Validated by Windows CI; mirrors the unix arm.
+#[cfg(windows)]
+fn getsockopt_raw(
+    sock: std::os::windows::io::BorrowedSocket<'_>,
+    level: i32,
+    option: i32,
+    value: &mut [u8],
+) -> Result<usize> {
+    use core::ffi::c_char;
+    use core::ffi::c_int;
+    use std::os::windows::io::AsRawSocket;
+    use std::os::windows::io::RawSocket;
+    #[link(name = "ws2_32")]
+    unsafe extern "system" {
+        fn getsockopt(
+            s: RawSocket,
+            level: c_int,
+            optname: c_int,
+            optval: *mut c_char,
+            optlen: *mut c_int,
+        ) -> c_int;
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+    let mut optlen = value.len() as c_int;
+    // Safety: simple syscall wrapper. `sock` is a live `SOCKET` (borrowed from the tokio object
+    // for the duration of the call); `value.as_mut_ptr()` with in-`optlen == value.len()`
+    // delimits writable caller memory winsock fills (never past `optlen`); `&raw mut optlen` is
+    // a valid in/out pointer for the call.
+    let rc = unsafe {
+        getsockopt(
+            sock.as_raw_socket(),
+            level,
+            option,
+            value.as_mut_ptr().cast::<c_char>(),
+            &raw mut optlen,
+        )
+    };
+    if rc != 0 {
+        // rc is SOCKET_ERROR (-1); `last_os_error()` reads `WSAGetLastError()` on Windows.
+        return Err(op("getsockopt()")(std::io::Error::last_os_error()));
+    }
+    // The out-length winsock reports is non-negative (and bounded by the in-length).
+    #[allow(clippy::cast_sign_loss)]
+    let reported = optlen as usize;
+    Ok(reported)
+}
