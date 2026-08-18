@@ -648,13 +648,26 @@ class AbortSignal final: public EventTarget {
     }
   }
 
-  // Allows this AbortSignal to also serve as a kj::Canceler
+  // Allows this AbortSignal to also serve as a kj::Canceler: the returned promise is
+  // canceled (rejected with a kj::Exception derived from the abort reason) if this signal
+  // is aborted. If the signal is ALREADY aborted, the returned promise is immediately
+  // rejected the same way, indistinguishable from an abort arriving right after wrapping.
+  // The cancellation runs in the calling IoContext; if the abort is triggered from a
+  // different request (or outside any request), it is delivered to the calling context the
+  // next time it runs. Requires an active IoContext.
   template <typename T>
   kj::Promise<T> wrap(jsg::Lock& js, kj::Promise<T> promise) {
-    subscribeToRpcAbort(js);
+    if (getNeverAborts()) {
+      // This signal can never abort, so there is nothing to hook up.
+      return kj::mv(promise);
+    }
 
-    JSG_REQUIRE(!canceler->isCanceled(), TypeError, "The AbortSignal has already been triggered");
-    return canceler->wrap(kj::mv(promise));
+    // The wrapped promise carries the Cancellation — the (sole-owner) canceler and its
+    // registration, whose declaration order guarantees the registration unhooks before the
+    // canceler dies.
+    auto cancellation = newCanceler(js);
+    auto wrapped = cancellation.canceler->wrap(kj::mv(promise));
+    return wrapped.attach(kj::mv(cancellation));
   }
 
   template <typename T>
@@ -667,13 +680,50 @@ class AbortSignal final: public EventTarget {
     }
   }
 
-  RefcountedCanceler& getCanceler();
+  // A canceler hooked up to this signal, plus the RAII registration keeping the hook alive.
+  // Returned by newCanceler() for native consumers that need more than promise wrapping
+  // (e.g. ReleasingCanceler::Listener callbacks).
+  struct Cancellation {
+    // Sole owner of the canceler. The signal's registration reaches it only by reference.
+    kj::Own<ReleasingCanceler> canceler;
+
+    // Keeps the canceler hooked to the signal; dropping it (from any thread) unhooks.
+    //
+    // WARNING: The registration's reference to the canceler is valid only while this handle
+    // is registered, so the holder MUST destroy this handle before (or together with, but
+    // ordered before) the canceler — i.e. declare it after the canceler member — and must
+    // keep both on the creating request's thread, as consumer objects owned by the request
+    // naturally are.
+    kj::Own<void> registration;
+  };
+
+  // Creates a new canceler that is canceled — with a kj::Exception derived from the abort
+  // reason — when this signal aborts, following the same ownership and cross-request rules
+  // as wrap(). If the signal is already aborted (or can never abort), the returned canceler
+  // is pre-canceled (or inert) and no registration is made. Requires an active IoContext.
+  Cancellation newCanceler(jsg::Lock& js);
+
+  // Registers a native callback to be invoked with the abort exception if/when this signal
+  // aborts. The callback runs under the isolate lock in the IoContext that is current at
+  // registration time: synchronously when the abort is triggered within that context,
+  // otherwise delivered on that context's next turn, and dropped entirely (never invoked)
+  // once that context has been destroyed. If the signal can never abort, the callback is
+  // never invoked and no registration is made.
+  //
+  // Dropping the returned handle (safe from any thread) unregisters the callback: once the
+  // handle is destroyed, the callback is guaranteed to never (again) be invoked, so it may
+  // capture references whose validity the holder ties to the handle's lifetime (see
+  // Cancellation::registration).
+  //
+  // Requires an active IoContext. The caller is expected to have checked getAborted() first.
+  kj::Own<void> addAbortAction(
+      jsg::Lock& js, kj::Function<void(jsg::Lock&, const kj::Exception&)> action);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     EventTarget::visitForMemoryInfo(tracker);
-    tracker.trackInlineFieldWithSize(
-        "IoOwn<RefcountedCanceler>", sizeof(IoOwn<RefcountedCanceler>));
     tracker.trackField("reason", reason);
+    tracker.trackFieldWithSize(
+        "nativeRegistrations", nativeRegistrations.size() * sizeof(kj::Arc<RegistrationCell>));
   }
 
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
@@ -694,11 +744,54 @@ class AbortSignal final: public EventTarget {
   bool isIgnoredForSubrequests(jsg::Lock& js) const;
 
  private:
-  IoOwn<RefcountedCanceler> canceler;
   Flag flag;
+
+  // Set iff this signal has been aborted; the source of truth for getAborted(). Also the
+  // exception native cancellations reject with. Plain data, safe on the JS heap: no
+  // IoContext is required to create or read a signal's abort state.
+  kj::Maybe<kj::Exception> maybeAbortException;
 
   kj::Maybe<jsg::JsRef<jsg::JsValue>> reason;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> onAbortHandler;
+
+  // One native abort action, shared between this signal and one consumer. The action is
+  // invoked at most once, only ever in its owning IoContext (synchronously if the abort is
+  // triggered there; otherwise on that context's next turn), always under the isolate lock,
+  // and never again after the consumer's RAII handle clears the slot. Because the handle is
+  // held by (or attached to) objects the owning request destroys, an IoContext teardown
+  // reclaims the action without ever touching the signal; the signal side retains only this
+  // trivial shell until swept.
+  //
+  // The action slot is taken under the mutex and invoked after unlocking. A cross-context
+  // abort does not take the slot; it schedules a task in the owning context that re-takes it
+  // on arrival — so a consumer that goes away in the meantime reliably turns the delivery
+  // into a no-op.
+  struct RegistrationCell final: public kj::AtomicRefcounted {
+    RegistrationCell(
+        IoCrossContextExecutor executor, kj::Function<void(jsg::Lock&, const kj::Exception&)> fn)
+        : executor(kj::mv(executor)) {
+      *action.lockExclusive() = kj::mv(fn);
+    }
+
+    // Routes the action into the owning IoContext and answers "is that context current /
+    // still alive?". Immutable, so it is also usable for sweeping after the slot is cleared.
+    const IoCrossContextExecutor executor;
+
+    kj::MutexGuarded<kj::Maybe<kj::Function<void(jsg::Lock&, const kj::Exception&)>>> action;
+  };
+
+  // Cells are appended on registration and taken wholesale when the signal aborts. Cells
+  // whose action has been cleared (consumer done, or its IoContext torn down) or whose
+  // owning context is gone are swept on the next registration; this bounds growth for
+  // long-lived signals used across many requests. Holds no JS heap references (weak refs at
+  // most), so no GC visitation is needed.
+  kj::Vector<kj::Arc<RegistrationCell>> nativeRegistrations;
+
+  // Registers an abort action that cancels `canceler` with the abort exception when this
+  // signal aborts. The reference remains valid because the returned RAII handle guarantees
+  // the action never runs after the handle is destroyed, and the holder destroys the handle
+  // before the canceler (see Cancellation::registration).
+  kj::Own<void> registerPendingCancellation(jsg::Lock& js, ReleasingCanceler& canceler);
 
   static kj::Exception abortException(
       jsg::Lock& js, const jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>>& reason);
@@ -710,15 +803,33 @@ class AbortSignal final: public EventTarget {
   // -------------------------------------------------------------
   // RPC client functionality. Used if this signal was serialized.
 
-  // A collection of rpcClients, which will be notified if this signal is triggered and when this
-  // signal is destroyed.
-  kj::Vector<IoOwn<AbortTriggerRpcClient>> rpcClients;
+  // One serialized clone of this signal, to be notified when the signal is triggered. The
+  // client is owned by the IoContext in which the signal was serialized — a signal shared
+  // across requests may hold registrations from several — and abort delivery is routed into
+  // that context like a native registration, re-taking the slot on arrival. There is no
+  // consumer-side RAII handle: the slot is reclaimed when the signal aborts, when a sweep
+  // finds the owning context destroyed, or when the signal itself is destroyed (either way
+  // the client's own destructor tells the peer that no abort is coming).
+  struct RpcRegistration final: public kj::AtomicRefcounted {
+    RpcRegistration(IoCrossContextExecutor executor, IoOwn<AbortTriggerRpcClient> client)
+        : executor(kj::mv(executor)) {
+      *this->client.lockExclusive() = kj::mv(client);
+    }
 
-  // Trigger an abort on all associated clients
-  kj::Promise<void> sendToRpc(kj::Array<kj::byte>&& reason);
+    const IoCrossContextExecutor executor;
+    kj::MutexGuarded<kj::Maybe<IoOwn<AbortTriggerRpcClient>>> client;
+  };
+  kj::Vector<kj::Arc<RpcRegistration>> rpcRegistrations;
 
   // ---------------------------------------------------------------
   // RPC server functionality. Used if this signal was deserialized.
+
+  // Identifies the IoContext that deserialized this signal, which owns rpcAbortPromise and
+  // pendingReason below. Accesses from any other context treat the pending RPC state as
+  // absent: the signal still converges everywhere once the owning context observes the
+  // abort and triggers it, since that updates the JS-heap abort state above.
+  kj::Maybe<IoCrossContextExecutor> rpcReceiverContext;
+  bool isRpcReceiverContextCurrent();
 
   // A promise that is fulfilled if an abort() message is received over RPC.
   kj::Maybe<IoOwn<kj::Promise<void>>> rpcAbortPromise;
