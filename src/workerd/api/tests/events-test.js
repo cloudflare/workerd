@@ -407,6 +407,32 @@ export const errorInHandler = {
   },
 };
 
+export const listenersAddedDuringDispatch = {
+  test() {
+    // Listeners added while an event is being dispatched do not run for the in-flight
+    // event, but do run for subsequent dispatches — including when many are added at once
+    // (which historically stressed handler storage mutation during iteration).
+    const target = new EventTarget();
+    let outer = 0;
+    let added = 0;
+    target.addEventListener('foo', () => {
+      outer++;
+      for (let i = 0; i < 16; i++) {
+        target.addEventListener('foo', () => added++);
+      }
+    });
+    target.addEventListener('foo', () => outer++);
+
+    target.dispatchEvent(new Event('foo'));
+    strictEqual(outer, 2);
+    strictEqual(added, 0);
+
+    target.dispatchEvent(new Event('foo'));
+    strictEqual(outer, 4);
+    strictEqual(added, 16);
+  },
+};
+
 export const stopImmediatePropagation = {
   test() {
     const event = new Event('foo');
