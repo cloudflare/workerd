@@ -258,3 +258,58 @@ impl TokioStream {
         }
     }
 }
+
+impl TokioStream {
+    /// Borrows the live tokio socket's fd (tokio streams implement `AsFd`), for dup-based
+    /// operations that must not conjure a raw fd out of an integer. Errs if the wrapper is
+    /// hollow.
+    #[cfg(unix)]
+    pub(crate) fn as_borrowed_fd(&self) -> Result<std::os::fd::BorrowedFd<'_>> {
+        use std::os::fd::AsFd;
+        Ok(match self.inner()? {
+            Inner::Tcp(s) => s.as_fd(),
+            Inner::Unix(s) => s.as_fd(),
+        })
+    }
+
+    /// Borrows the live tokio socket's `SOCKET` (tokio's `TcpStream` implements `AsSocket`):
+    /// the Windows counterpart of [`TokioStream::as_borrowed_fd`]. Errs if the wrapper is
+    /// hollow. On Windows only the Tcp variant of `Inner` exists.
+    // Validated by Windows CI; mirrors the unix arm.
+    #[cfg(windows)]
+    pub(crate) fn as_borrowed_socket(&self) -> Result<std::os::windows::io::BorrowedSocket<'_>> {
+        use std::os::windows::io::AsSocket;
+        Ok(match self.inner()? {
+            Inner::Tcp(s) => s.as_socket(),
+        })
+    }
+
+    /// Runs `f` on a `socket2::SockRef` borrowing the live socket — the shared body of the
+    /// `getsockname()`/`getpeername()` passthroughs; only the socket borrow is per-platform.
+    fn with_sock_ref<T>(
+        &self,
+        op_name: &'static str,
+        f: impl FnOnce(&socket2::SockRef<'_>) -> std::io::Result<T>,
+    ) -> Result<T> {
+        #[cfg(unix)]
+        {
+            let fd = self.as_borrowed_fd()?;
+            f(&socket2::SockRef::from(&fd)).map_err(op(op_name))
+        }
+        // Validated by Windows CI; mirrors the unix arm.
+        #[cfg(windows)]
+        {
+            let sock = self.as_borrowed_socket()?;
+            f(&socket2::SockRef::from(&sock)).map_err(op(op_name))
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = f;
+            self.inner()?;
+            Err(KjIoError::other(
+                op_name,
+                "not implemented by kj-rs-io on this platform",
+            ))
+        }
+    }
+}
