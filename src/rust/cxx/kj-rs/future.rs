@@ -40,9 +40,57 @@ pub mod repr {
     use super::FuturePollStatus;
     use crate::ffi::PollWaker;
 
-    type PollCallback = unsafe extern "C" fn(
+    /// Converts a panic payload (from `std::panic::catch_unwind`) escaping a bridged future
+    /// into a heap-allocated `kj::Exception` written to the poll callback's output parameter,
+    /// so C++ observes a rejected promise instead of a process abort.
+    ///
+    /// This mirrors the sync bridge path (`cxx::private::try_unwind`/`catch_unwind` in
+    /// src/unwind.rs), which converts panics in `extern "Rust"` functions into
+    /// `kj::Exception`s. One divergence: a `cxx::CanceledException` payload (produced when an
+    /// infallible `extern "C++"` call throws `kj::CanceledException`) cannot be propagated as
+    /// a distinct "canceled" state here, because `FuturePollStatus` has no Canceled arm; it is
+    /// reported as a regular `kj::Exception` describing the cancellation instead.
+    ///
+    /// # Safety
+    ///
+    /// `ret` must point to storage valid for holding a `kj::Exception*` (the C++
+    /// `FuturePoller<T>` union guarantees this for the Error arm).
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "takes ownership of the panic payload, mirroring std::panic::catch_unwind's Err arm"
+    )]
+    unsafe fn write_panic_as_exception(
+        ret: *mut c_void,
+        err: Box<dyn std::any::Any + Send>,
+    ) -> FuturePollStatus {
+        let msg = if let Some(s) = err.downcast_ref::<&'static str>() {
+            format!("panic in bridged future poll: {s}")
+        } else if let Some(s) = err.downcast_ref::<String>() {
+            format!("panic in bridged future poll: {s}")
+        } else if err.downcast_ref::<cxx::CanceledException>().is_some() {
+            "panic in bridged future poll: kj::CanceledException".to_owned()
+        } else {
+            "panic in bridged future poll".to_owned()
+        };
+        let exception = cxx::IntoKjException::into_kj_exception(
+            cxx::KjError::new(cxx::KjExceptionType::Failed, msg),
+            file!(),
+            line!(),
+        );
+        // SAFETY: `ret` points to storage valid for a `kj::Exception*` per this fn's
+        // `# Safety` contract (the C++ `FuturePoller<T>` Error arm).
+        unsafe {
+            std::ptr::write(
+                ret.cast::<*mut c_void>(),
+                exception.into_raw().as_ptr().cast(),
+            );
+        }
+        FuturePollStatus::ERROR
+    }
+
+    type PollCallback = for<'a> unsafe extern "C" fn(
         fut: *mut c_void,
-        waker: &PollWaker,
+        waker: &'a PollWaker,
         ret: *mut c_void,
     ) -> FuturePollStatus;
 
