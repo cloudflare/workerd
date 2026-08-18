@@ -2,17 +2,15 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+//! The error type reported by [`crate::dispatch`], and its adapter for the
+//! trip across the CXX bridge.
+
 use thiserror::Error;
 
-/// Errors from the Rust `i18n::transcode` implementation ([`crate::dispatch`]).
+/// A failed transcode.
 ///
-/// Every message matches the corresponding `JSG_REQUIRE` / `JSG_FAIL_REQUIRE`
-/// string in `workerd::api::node::i18n::transcode`
-/// (`src/workerd/api/node/i18n.c++`) verbatim, so gate-on and gate-off are
-/// indistinguishable to JavaScript. `"Invalid encoding passed to transcode"`
-/// is not a variant here: it is raised by the C++ `fromImpl` conversion before
-/// the Rust entry point is ever called (see `i18n.c++`), since the bridge
-/// `Encoding` enum can only represent the four transcodable encodings.
+/// Every message is the text of the JavaScript `Error` that reaches the
+/// caller of `node:buffer`'s `transcode()`.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum TranscodeError {
     #[error("Source buffer is too large to transcode")]
@@ -31,12 +29,26 @@ pub enum TranscodeError {
     Utf8LengthMismatch,
     #[error("Unable to transcode buffer")]
     UnableToTranscode,
+    #[error("Invalid encoding passed to transcode")]
+    InvalidEncoding,
+    #[error("Failed to initialize converter")]
+    ConverterOpenFailed,
+    #[error("Setting ICU substitute characters failed")]
+    SetSubstituteCharsFailed,
+    #[error("Destination buffer size does not match the prepared transcode")]
+    DestinationSizeMismatch,
 }
 
-impl From<TranscodeError> for jsg::Error {
-    fn from(value: TranscodeError) -> Self {
-        // All of these are plain JS `Error`s, matching the `JSG_REQUIRE(..., Error, ...)`
-        // calls they replace.
-        Self::new_error(value.to_string())
-    }
-}
+/// A [`TranscodeError`] on its way out through the CXX bridge.
+///
+/// `cxx` converts a returned `Err` into a `kj::Exception` whose description is
+/// the error's `Display` output. A description that begins with
+/// `jsg.<ErrorType>: ` tells JSG to throw that JavaScript error type using the
+/// remaining text as the message (see `tunneledErrorType` in
+/// `src/workerd/jsg/exception.c++`); this is the same encoding
+/// `JSG_REQUIRE(..., Error, ...)` produces. Emitting the prefix here is
+/// therefore what turns a [`TranscodeError`] into a JavaScript `Error` whose
+/// `message` is the variant's text.
+#[derive(Debug, Error)]
+#[error("jsg.Error: {0}")]
+pub struct JsError(#[from] TranscodeError);
