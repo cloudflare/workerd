@@ -132,3 +132,66 @@ pub fn sleep_until(deadline: Instant) {
         let _ = mach_wait_until(mach_absolute_time().saturating_add(ticks));
     }
 }
+/// Sleeps until `deadline` using `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME)`, which
+/// is backed by hrtimers (microsecond-level precision, subject only to the default ~50 µs
+/// timer slack).
+#[cfg(target_os = "linux")]
+pub fn sleep_until(deadline: Instant) {
+    use core::ffi::c_int;
+    use core::ffi::c_long;
+
+    // Layout of glibc/musl `struct timespec` on the 64-bit targets workerd builds for.
+    #[repr(C)]
+    struct Timespec {
+        tv_sec: c_long,
+        tv_nsec: c_long,
+    }
+    const CLOCK_MONOTONIC: c_int = 1;
+    const TIMER_ABSTIME: c_int = 1;
+    const EINTR: c_int = 4;
+    unsafe extern "C" {
+        fn clock_gettime(clockid: c_int, tp: *mut Timespec) -> c_int;
+        fn clock_nanosleep(
+            clockid: c_int,
+            flags: c_int,
+            request: *const Timespec,
+            remain: *mut Timespec,
+        ) -> c_int;
+    }
+
+    let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+        return;
+    };
+    let mut ts = Timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // Safety: `ts` is a valid out-pointer for the duration of the call.
+    if unsafe { clock_gettime(CLOCK_MONOTONIC, &raw mut ts) } != 0 {
+        return;
+    }
+    ts.tv_sec = ts
+        .tv_sec
+        .saturating_add(c_long::try_from(remaining.as_secs()).unwrap_or(c_long::MAX));
+    ts.tv_nsec += c_long::from(remaining.subsec_nanos());
+    if ts.tv_nsec >= 1_000_000_000 {
+        ts.tv_sec += 1;
+        ts.tv_nsec -= 1_000_000_000;
+    }
+    loop {
+        // Safety: `ts` is a valid, initialized timespec; `remain` may be null with
+        // TIMER_ABSTIME (the absolute deadline makes restart-after-signal lossless).
+        let rc = unsafe {
+            clock_nanosleep(
+                CLOCK_MONOTONIC,
+                TIMER_ABSTIME,
+                &raw const ts,
+                std::ptr::null_mut(),
+            )
+        };
+        // clock_nanosleep returns the error number directly (not via errno).
+        if rc != EINTR {
+            break;
+        }
+    }
+}
