@@ -26,7 +26,7 @@ MessageEvent::MessageEvent(jsg::Lock& js,
       data(jsg::JsRef(js, data)),
       lastEventId(kj::mv(lastEventId)),
       maybeSource(kj::mv(source)),
-      maybeOrigin(urlForOrigin.map([](auto& url) { return url.getOrigin(); })) {}
+      maybeOrigin(urlForOrigin.map([](auto& url) { return kj::str(url.getOrigin()); })) {}
 MessageEvent::MessageEvent(jsg::Lock& js,
     jsg::JsRef<jsg::JsValue> data,
     kj::String lastEventId,
@@ -37,7 +37,7 @@ MessageEvent::MessageEvent(jsg::Lock& js,
       data(kj::mv(data)),
       lastEventId(kj::mv(lastEventId)),
       maybeSource(kj::mv(source)),
-      maybeOrigin(urlForOrigin.map([](auto& url) { return url.getOrigin(); })) {}
+      maybeOrigin(urlForOrigin.map([](auto& url) { return kj::str(url.getOrigin()); })) {}
 MessageEvent::MessageEvent(jsg::Lock& js,
     kj::String type,
     const jsg::JsValue& data,
@@ -49,7 +49,7 @@ MessageEvent::MessageEvent(jsg::Lock& js,
       data(jsg::JsRef(js, kj::mv(data))),
       lastEventId(kj::mv(lastEventId)),
       maybeSource(kj::mv(source)),
-      maybeOrigin(urlForOrigin.map([](auto& url) { return url.getOrigin(); })) {}
+      maybeOrigin(urlForOrigin.map([](auto& url) { return kj::str(url.getOrigin()); })) {}
 MessageEvent::MessageEvent(jsg::Lock& js,
     kj::String type,
     kj::OneOf<jsg::JsRef<jsg::JsValue>, jsg::Ref<Blob>> data,
@@ -61,11 +61,28 @@ MessageEvent::MessageEvent(jsg::Lock& js,
       data(kj::mv(data)),
       lastEventId(kj::mv(lastEventId)),
       maybeSource(kj::mv(source)),
-      maybeOrigin(urlForOrigin.map([](auto& url) { return url.getOrigin(); })) {}
+      maybeOrigin(urlForOrigin.map([](auto& url) { return kj::str(url.getOrigin()); })) {}
+
+MessageEvent::MessageEvent(jsg::Lock& js, kj::String type, Initializer initializer)
+    : Event(kj::mv(type),
+          Event::Init{
+            .bubbles = initializer.bubbles,
+            .cancelable = initializer.cancelable,
+            .composed = initializer.composed,
+          }),
+      data(kj::mv(initializer.data).orDefault([&] { return jsg::JsRef(js, js.null()); })),
+      lastEventId(kj::mv(initializer.lastEventId).orDefault(kj::String())),
+      maybeSource(kj::mv(initializer.source)),
+      // Per the spec, origin defaults to the empty string for user-constructed events.
+      maybeOrigin(kj::mv(initializer.origin)
+                      .map([](jsg::USVString&& origin) -> kj::String { return kj::mv(origin); })
+                      .orDefault(kj::String())),
+      ports(
+          kj::mv(initializer.ports).orDefault([] { return kj::Array<jsg::Ref<MessagePort>>(); })) {}
 
 jsg::Ref<MessageEvent> MessageEvent::constructor(
-    jsg::Lock& js, kj::String type, Initializer initializer) {
-  return js.alloc<MessageEvent>(js, kj::mv(type), kj::mv(initializer.data));
+    jsg::Lock& js, kj::String type, jsg::Optional<Initializer> initializer) {
+  return js.alloc<MessageEvent>(js, kj::mv(type), kj::mv(initializer).orDefault({}));
 }
 
 kj::OneOf<jsg::JsValue, jsg::Ref<Blob>> MessageEvent::getData(jsg::Lock& js) {
@@ -80,8 +97,8 @@ kj::OneOf<jsg::JsValue, jsg::Ref<Blob>> MessageEvent::getData(jsg::Lock& js) {
   KJ_UNREACHABLE;
 }
 
-kj::Maybe<kj::ArrayPtr<const char>> MessageEvent::getOrigin() {
-  return maybeOrigin.map([](auto& a) -> kj::ArrayPtr<const char> { return a.asPtr(); });
+kj::Maybe<kj::StringPtr> MessageEvent::getOrigin() {
+  return maybeOrigin.map([](kj::String& origin) -> kj::StringPtr { return origin; });
 }
 
 kj::StringPtr MessageEvent::getLastEventId() {
@@ -94,11 +111,10 @@ kj::StringPtr MessageEvent::getLastEventId() {
 kj::Maybe<jsg::Ref<MessagePort>> MessageEvent::getSource() {
   return maybeSource.map([](auto& port) mutable -> jsg::Ref<MessagePort> { return port.addRef(); });
 }
-kj::ArrayPtr<jsg::Ref<MessagePort>> MessageEvent::getPorts() {
-  // We don't support transferring MessagePorts in MessageEvent
-  // for now, so we return an empty array. Later we might support
-  // this.
-  return nullptr;
+kj::Array<jsg::Ref<MessagePort>> MessageEvent::getPorts() {
+  // The runtime never attaches ports (we don't support transferring MessagePorts), so this
+  // is empty except for user-constructed events that passed ports in their init.
+  return KJ_MAP(port, ports) -> jsg::Ref<MessagePort> { return port.addRef(); };
 }
 
 void MessageEvent::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -111,6 +127,9 @@ void MessageEvent::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     }
   }
   tracker.trackField("source", maybeSource);
+  for (auto& port: ports) {
+    tracker.trackField("port", port);
+  }
 }
 
 void MessageEvent::visitForGc(jsg::GcVisitor& visitor) {
@@ -123,6 +142,7 @@ void MessageEvent::visitForGc(jsg::GcVisitor& visitor) {
     }
   }
   visitor.visit(maybeSource);
+  visitor.visitAll(ports);
 }
 
 // ======================================================================================
@@ -132,7 +152,12 @@ ErrorEvent::ErrorEvent(ErrorEventInit init)
       init(kj::mv(init)) {}
 
 ErrorEvent::ErrorEvent(kj::String type, ErrorEventInit init)
-    : Event(kj::mv(type)),
+    : Event(kj::mv(type),
+          Event::Init{
+            .bubbles = init.bubbles,
+            .cancelable = init.cancelable,
+            .composed = init.composed,
+          }),
       init(kj::mv(init)) {}
 
 ErrorEvent::ErrorEvent(jsg::Lock& js, jsg::JsValue error)

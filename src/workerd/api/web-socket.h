@@ -37,25 +37,33 @@ class CloseEvent: public Event {
         code(code),
         reason(kj::mv(reason)),
         clean(clean) {}
-  CloseEvent(kj::String type, int code, kj::String reason, bool clean)
-      : Event(kj::mv(type)),
+  CloseEvent(kj::String type, int code, kj::String reason, bool clean, Init init = {})
+      : Event(kj::mv(type), kj::mv(init)),
         code(code),
         reason(kj::mv(reason)),
         clean(clean) {}
 
   struct Initializer {
+    jsg::Optional<bool> bubbles;
+    jsg::Optional<bool> cancelable;
+    jsg::Optional<bool> composed;
     jsg::Optional<int> code;
     jsg::Optional<jsg::USVString> reason;
     jsg::Optional<bool> wasClean;
 
-    JSG_STRUCT(code, reason, wasClean);
+    JSG_STRUCT(bubbles, cancelable, composed, code, reason, wasClean);
     JSG_STRUCT_TS_OVERRIDE(CloseEventInit);
   };
   static jsg::Ref<CloseEvent> constructor(
       jsg::Lock& js, kj::String type, jsg::Optional<Initializer> initializer) {
     Initializer init = kj::mv(initializer).orDefault({});
     return js.alloc<CloseEvent>(kj::mv(type), init.code.orDefault(0),
-        kj::mv(init.reason).orDefault(jsg::USVString(kj::str())), init.wasClean.orDefault(false));
+        kj::mv(init.reason).orDefault(jsg::USVString(kj::str())), init.wasClean.orDefault(false),
+        Event::Init{
+          .bubbles = init.bubbles,
+          .cancelable = init.cancelable,
+          .composed = init.composed,
+        });
   }
 
   int getCode() {

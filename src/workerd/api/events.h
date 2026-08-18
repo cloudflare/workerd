@@ -42,20 +42,34 @@ class MessageEvent final: public Event {
       kj::Maybe<jsg::Url&> urlForOrigin = kj::none,
       Trusted trusted = Trusted::NO);
 
+  // The spec's MessageEventInit dictionary. Only `data` is ever meaningful to the runtime
+  // itself; the remaining members exist so that user-constructed events reflect the
+  // standard surface.
   struct Initializer {
-    jsg::JsRef<jsg::JsValue> data;
+    jsg::Optional<bool> bubbles;
+    jsg::Optional<bool> cancelable;
+    jsg::Optional<bool> composed;
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> data;
+    jsg::Optional<jsg::USVString> origin;
+    jsg::Optional<kj::String> lastEventId;
+    jsg::Optional<jsg::Ref<MessagePort>> source;
+    jsg::Optional<kj::Array<jsg::Ref<MessagePort>>> ports;
 
-    JSG_STRUCT(data);
+    JSG_STRUCT(bubbles, cancelable, composed, data, origin, lastEventId, source, ports);
     JSG_STRUCT_TS_OVERRIDE(MessageEventInit {
-      data: ArrayBuffer | string;
+      data?: any;
     });
   };
+
+  // For user-constructed events (the JS constructor path).
+  MessageEvent(jsg::Lock& js, kj::String type, Initializer initializer);
+
   static jsg::Ref<MessageEvent> constructor(
-      jsg::Lock& js, kj::String type, Initializer initializer);
+      jsg::Lock& js, kj::String type, jsg::Optional<Initializer> initializer);
 
   kj::OneOf<jsg::JsValue, jsg::Ref<Blob>> getData(jsg::Lock& js);
 
-  kj::Maybe<kj::ArrayPtr<const char>> getOrigin();
+  kj::Maybe<kj::StringPtr> getOrigin();
 
   kj::StringPtr getLastEventId();
 
@@ -64,7 +78,7 @@ class MessageEvent final: public Event {
   // support is MessagePort, return that if its set or null if not.
   kj::Maybe<jsg::Ref<MessagePort>> getSource();
 
-  kj::ArrayPtr<jsg::Ref<MessagePort>> getPorts();
+  kj::Array<jsg::Ref<MessagePort>> getPorts();
 
   JSG_RESOURCE_TYPE(MessageEvent) {
     JSG_INHERIT(Event);
@@ -86,7 +100,11 @@ class MessageEvent final: public Event {
   kj::OneOf<jsg::JsRef<jsg::JsValue>, jsg::Ref<Blob>> data;
   kj::String lastEventId;
   kj::Maybe<jsg::Ref<MessagePort>> maybeSource;
-  kj::Maybe<kj::Array<const char>> maybeOrigin;
+  kj::Maybe<kj::String> maybeOrigin;
+
+  // The runtime never attaches ports (we do not support transferring MessagePorts);
+  // user-constructed events reflect the ports passed in their init.
+  kj::Array<jsg::Ref<MessagePort>> ports;
 
   void visitForGc(jsg::GcVisitor& visitor);
 };
@@ -103,12 +121,15 @@ class OpenEvent final: public Event {
 class ErrorEvent final: public Event {
  public:
   struct ErrorEventInit {
+    jsg::Optional<bool> bubbles;
+    jsg::Optional<bool> cancelable;
+    jsg::Optional<bool> composed;
     jsg::Optional<kj::String> message;
     jsg::Optional<kj::String> filename;
     jsg::Optional<int32_t> lineno;
     jsg::Optional<int32_t> colno;
     jsg::Optional<jsg::JsRef<jsg::JsValue>> error;
-    JSG_STRUCT(message, filename, lineno, colno, error);
+    JSG_STRUCT(bubbles, cancelable, composed, message, filename, lineno, colno, error);
   };
 
   ErrorEvent(ErrorEventInit init);

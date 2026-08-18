@@ -692,3 +692,98 @@ export const webSocketThrowingMessageListener = {
     }
   },
 };
+
+// The standard MessageEventInit members are all supported (and optional) for
+// user-constructed events, with spec defaults.
+export const messageEventSpecInit = {
+  test() {
+    const defaults = new MessageEvent('message');
+    strictEqual(defaults.data, null);
+    strictEqual(defaults.origin, '');
+    strictEqual(defaults.lastEventId, '');
+    strictEqual(defaults.source, null);
+    deepStrictEqual(defaults.ports, []);
+    strictEqual(defaults.bubbles, false);
+    strictEqual(defaults.cancelable, false);
+    strictEqual(defaults.composed, false);
+
+    const data = { hello: 'world' };
+    const event = new MessageEvent('message', {
+      data,
+      origin: 'https://example.org',
+      lastEventId: '42',
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    });
+    strictEqual(event.data, data);
+    strictEqual(event.origin, 'https://example.org');
+    strictEqual(event.lastEventId, '42');
+    strictEqual(event.bubbles, true);
+    strictEqual(event.cancelable, true);
+    strictEqual(event.composed, true);
+    event.preventDefault();
+    strictEqual(event.defaultPrevented, true);
+  },
+};
+
+// CloseEventInit supports the common EventInit members.
+export const closeEventSpecInit = {
+  test() {
+    const defaults = new CloseEvent('close');
+    strictEqual(defaults.code, 0);
+    strictEqual(defaults.reason, '');
+    strictEqual(defaults.wasClean, false);
+    strictEqual(defaults.bubbles, false);
+    strictEqual(defaults.cancelable, false);
+    strictEqual(defaults.composed, false);
+
+    const event = new CloseEvent('close', {
+      code: 1000,
+      reason: 'done',
+      wasClean: true,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    });
+    strictEqual(event.code, 1000);
+    strictEqual(event.reason, 'done');
+    strictEqual(event.wasClean, true);
+    strictEqual(event.bubbles, true);
+    strictEqual(event.cancelable, true);
+    strictEqual(event.composed, true);
+  },
+};
+
+// ErrorEventInit supports the common EventInit members.
+export const errorEventSpecInit = {
+  test() {
+    const defaults = new ErrorEvent('error');
+    strictEqual(defaults.message, '');
+    strictEqual(defaults.bubbles, false);
+    strictEqual(defaults.cancelable, false);
+    strictEqual(defaults.composed, false);
+
+    const err = new Error('boom');
+    const event = new ErrorEvent('error', {
+      message: 'boom',
+      filename: 'test.js',
+      lineno: 1,
+      colno: 2,
+      error: err,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    });
+    strictEqual(event.message, 'boom');
+    strictEqual(event.filename, 'test.js');
+    strictEqual(event.lineno, 1);
+    strictEqual(event.colno, 2);
+    strictEqual(event.error, err);
+    strictEqual(event.bubbles, true);
+    strictEqual(event.cancelable, true);
+    strictEqual(event.composed, true);
+    event.preventDefault();
+    strictEqual(event.defaultPrevented, true);
+  },
+};
