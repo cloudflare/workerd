@@ -43,7 +43,7 @@ mod ffi {
     /// Representation of a `GuardedRustPromiseAwaiter` in C++. The size of the blob should match.
     #[derive(Debug)]
     pub struct GuardedRustPromiseAwaiterRepr {
-        _bindgen_opaque_blob: [u64; 13usize],
+        _bindgen_opaque_blob: [u64; 14usize],
     }
 
     extern "Rust" {
