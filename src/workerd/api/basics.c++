@@ -189,7 +189,12 @@ void EventTarget::addEventListener(jsg::Lock& js,
         .abortHandler = kj::mv(maybeAbortHandler),
       });
 
-      getOrCreate(type).handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
+      auto& handlerSet = getOrCreate(type);
+      auto sizeBefore = handlerSet.handlers.size();
+      handlerSet.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
+      if (handlerSet.handlers.size() != sizeBefore) {
+        listenerCountChanged(js, type, handlerSet.handlers.size());
+      }
     });
   }
 }
@@ -213,7 +218,9 @@ void EventTarget::removeEventListener(jsg::Lock& js,
   KJ_IF_SOME(handler, maybeHandler) {
     js.withinHandleScope([&] {
       KJ_IF_SOME(handlerSet, typeMap.find(type)) {
-        handlerSet.handlers.eraseMatch(handler);
+        if (handlerSet.handlers.eraseMatch(handler)) {
+          listenerCountChanged(js, type, handlerSet.handlers.size());
+        }
       }
     });
   }
@@ -231,7 +238,12 @@ void EventTarget::addEventHandlerListener(jsg::Lock& js,
     .identity = kj::mv(identity),
     .callback = kj::mv(callback),
   });
-  getOrCreate(type).handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
+  auto& handlerSet = getOrCreate(type);
+  auto sizeBefore = handlerSet.handlers.size();
+  handlerSet.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
+  if (handlerSet.handlers.size() != sizeBefore) {
+    listenerCountChanged(js, type, handlerSet.handlers.size());
+  }
 }
 
 kj::Maybe<jsg::JsValue> EventTarget::getEventHandlerAttribute(jsg::Lock& js, kj::StringPtr type) {
@@ -1237,7 +1249,6 @@ void AbortController::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReas
 }
 
 void EventTarget::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(maybeListenerCallback);
   for (auto& entry: typeMap) {
     for (auto& handler: entry.value.handlers) {
       visitor.visit(*handler);

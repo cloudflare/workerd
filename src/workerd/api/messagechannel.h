@@ -78,11 +78,8 @@ class MessagePort final: public EventTarget {
   void close(jsg::Lock& js);
   void start(jsg::Lock& js);
 
-  // Support the onmessage getter and setter. Per the spec, when
-  // onmessage is set, the MessagePort is automatically started,
-  // but when addEventListener is set, start must be called
-  // separately. That's a kind of a weird rule but ok. To support
-  // that we need to define an onmessage getter/setter pair.
+  // The onmessage event handler IDL attribute
+  // (see EventTarget::setEventHandlerAttribute).
   kj::Maybe<jsg::JsValue> getOnMessage(jsg::Lock& js);
   void setOnMessage(
       jsg::Lock& js, jsg::Optional<kj::OneOf<EventTarget::HandlerFunction, jsg::JsValue>> handler);
@@ -130,6 +127,8 @@ class MessagePort final: public EventTarget {
   // To keep them both alive, maintain strong references to both
   // ports!
   kj::Maybe<jsg::WeakRef<MessagePort>> other;
+
+  void listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) override;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     KJ_IF_SOME(pending, state.tryGet<Pending>()) {
