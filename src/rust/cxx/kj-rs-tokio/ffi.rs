@@ -195,3 +195,11 @@ pub fn sleep_until(deadline: Instant) {
         }
     }
 }
+/// Portable fallback for other unixes: plain relative sleep (coarser, but still typically
+/// far better than a ~1 ms timer wheel).
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
+pub fn sleep_until(deadline: Instant) {
+    if let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+        std::thread::sleep(remaining);
+    }
+}
