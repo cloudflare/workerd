@@ -36,6 +36,7 @@ enum Inner {
 }
 
 impl TokioStream {
+    #[must_use]
     pub fn from_tcp(stream: TcpStream) -> Self {
         Self {
             inner: Some(Inner::Tcp(stream)),
@@ -108,9 +109,8 @@ impl TokioStream {
             Inner::Unix(s) => s.try_write(buf),
         }
     }
-}
 
-impl TokioStream {
+    /// KJ `tryRead` semantics: loop until at least `min_bytes` (or EOF), up to `buf.len()`.
     async fn try_read_min(&self, buf: &mut [u8], min_bytes: usize) -> Result<usize> {
         self.inner()?;
         let min_bytes = min_bytes.min(buf.len());
@@ -153,9 +153,7 @@ impl TokioStream {
         }
         Ok(())
     }
-}
 
-impl TokioStream {
     /// Resolves once new writes are doomed to fail (peer reset / hangup observed).
     ///
     /// tokio has no direct primitive for this, so we register a *duplicate* of the socket fd
@@ -218,9 +216,7 @@ impl TokioStream {
             "not implemented by kj-rs-io on this platform",
         ))
     }
-}
 
-impl TokioStream {
     fn shutdown_write(&self) -> Result<()> {
         #[cfg(unix)]
         {
@@ -257,9 +253,7 @@ impl TokioStream {
             ))
         }
     }
-}
 
-impl TokioStream {
     /// Borrows the live tokio socket's fd (tokio streams implement `AsFd`), for dup-based
     /// operations that must not conjure a raw fd out of an integer. Errs if the wrapper is
     /// hollow.
@@ -312,9 +306,7 @@ impl TokioStream {
             ))
         }
     }
-}
 
-impl TokioStream {
     /// Raw `struct sockaddr` bytes of the socket's locally-bound address (the `getsockname()`
     /// passthrough behind `kj::AsyncIoStream::getsockname`).
     fn local_addr_bytes(&self) -> Result<Vec<u8>> {
@@ -362,9 +354,7 @@ impl TokioStream {
             ))
         }
     }
-}
 
-impl TokioStream {
     /// Recovers whichever native tokio object this is, as a [`crate::serve::ServeIo`]
     /// (the unwrap fast path of [`crate::serve_kj_stream`]). `None` if hollow.
     pub(crate) fn into_serve_io(self) -> Option<crate::serve::ServeIo> {
