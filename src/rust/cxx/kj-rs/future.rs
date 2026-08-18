@@ -124,6 +124,18 @@ pub mod repr {
     assert_eq_size!(RustInfallibleFuture<()>, [*mut c_void; 4]);
 
     impl<T: Unpin> RustFuture<'_, T> {
+        /// # Safety
+        ///
+        /// C++ `RustFuture` vtable protocol (future.h): `fut` must be the `fut` field of a
+        /// live, not-yet-dropped `RustFuture<T>` created by [`future`]; `ret` must point to
+        /// storage suitable for a `T`
+        /// (Complete) or a `kj::Exception*` (Error), per `FuturePoller<T>`'s union.
+        ///
+        /// Unwind safety: any panic escaping the wrapped future's `poll` (or the waker
+        /// machinery) is caught here and converted into an errored completion, because
+        /// unwinding out of an `extern "C"` fn is instant process abort (Rust >= 1.81).
+        /// This makes a panicking bridged `async fn` surface to C++ as a rejected
+        /// `kj::Promise` carrying a `kj::Exception`, matching the sync bridge path.
         pub(crate) unsafe extern "C" fn poll(
             fut: *mut c_void,
             waker: &PollWaker,
@@ -161,6 +173,17 @@ pub mod repr {
             }
         }
 
+        /// # Safety
+        ///
+        /// C++ `RustFuture` vtable protocol (future.h): `fut` must be the `fut` field of a
+        /// live `RustFuture<T>` created by [`future`], and must not be used again afterwards
+        /// (drop-exactly-once, enforced by `Impl`'s move semantics on the C++ side).
+        ///
+        /// Unwind safety: a panic in the future's destructor has no error channel (this is
+        /// called from C++ destructors/cancellation paths), so it is converted into a
+        /// deterministic, labeled abort via `cxx::private::prevent_unwind` — the same
+        /// semantics the sync bridge uses for panics that cannot be reported (rather than
+        /// the unlabeled langdef abort of unwinding out of `extern "C"`).
         pub(crate) unsafe extern "C" fn drop_in_place(fut: *mut c_void) {
             // SAFETY: per this fn's `# Safety` contract, `fut` is the `fut` field of a live
             // `RustFuture<T>` not used again, so we may read the pointer, reclaim the box, and pin.
@@ -176,6 +199,13 @@ pub mod repr {
     }
 
     impl<T: Unpin> RustInfallibleFuture<'_, T> {
+        /// # Safety
+        ///
+        /// Same contract as [`RustFuture::poll`], with `fut` created by [`infallible_future`].
+        /// Although the future itself cannot return an error, a panic escaping its `poll` is
+        /// still converted into an errored completion (`FuturePollStatus::ERROR` writing a
+        /// `kj::Exception*`): the C++ `FuturePoller<T>` handles the Error arm identically for
+        /// infallible futures, and `kj::Promise<T>` can always carry an exception.
         pub(crate) unsafe extern "C" fn poll(
             fut: *mut c_void,
             waker: &PollWaker,
@@ -202,6 +232,11 @@ pub mod repr {
             }
         }
 
+        /// # Safety
+        ///
+        /// Same contract as [`RustFuture::drop_in_place`], with `fut` created by
+        /// [`infallible_future`]. A panic in the destructor aborts deterministically with a
+        /// label (see there for rationale).
         pub(crate) unsafe extern "C" fn drop_in_place(fut: *mut c_void) {
             // SAFETY: per this fn's `# Safety` contract, `fut` is the `fut` field of a live
             // `RustInfallibleFuture<T>` not used again; read the pointer, reclaim the box, and pin.
@@ -223,7 +258,8 @@ pub mod repr {
     pub fn future<'a, T: Unpin>(
         fut: Pin<Box<dyn Future<Output = Result<T, cxx::KjException>> + 'a>>,
     ) -> RustFuture<'a, T> {
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+        // SAFETY: the box is immediately re-boxed via `Box::into_raw` and only ever reconstituted
+        // (and re-pinned) in `drop_in_place`, so the pinned future is never moved.
         let fut = Box::into_raw(unsafe { Pin::into_inner_unchecked(fut) });
         let poll = RustFuture::<T>::poll;
         let drop = RustFuture::<T>::drop_in_place;
@@ -234,7 +270,8 @@ pub mod repr {
     pub fn infallible_future<'a, T: Unpin>(
         fut: Pin<Box<dyn Future<Output = T> + 'a>>,
     ) -> RustInfallibleFuture<'a, T> {
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+        // SAFETY: the box is immediately re-boxed via `Box::into_raw` and only ever reconstituted
+        // (and re-pinned) in `drop_in_place`, so the pinned future is never moved.
         let fut = Box::into_raw(unsafe { Pin::into_inner_unchecked(fut) });
         let poll = RustInfallibleFuture::<T>::poll;
         let drop = RustInfallibleFuture::<T>::drop_in_place;
