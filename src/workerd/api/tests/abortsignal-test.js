@@ -1,7 +1,7 @@
 // Copyright (c) 2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { strictEqual, ok, throws, rejects } from 'node:assert';
+import { strictEqual, ok, throws, rejects, match } from 'node:assert';
 import { WorkerEntrypoint, RpcTarget } from 'cloudflare:workers';
 
 // Test for the AbortSignal and AbortController standard Web API implementations.
@@ -22,7 +22,16 @@ class WrappedAbortSignal extends RpcTarget {
   }
 }
 
+// Creating AbortController/AbortSignal (and objects that allocate one, such as a Request's
+// lazily-created signal) does not require an active IoContext: module-scope creation works.
+// These are exercised by the globalScopeCreation and crossRequest* tests below.
+const moduleScopeController = new AbortController();
+const moduleScopePreAborted = AbortSignal.abort('module-scope');
+const moduleScopeRequestSignal = new Request('http://example.org').signal;
+const moduleScopeChurnController = new AbortController();
+
 let globalAbortController;
+let globalWaitController;
 export class RpcRemoteEnd extends WorkerEntrypoint {
   async echo(signal) {
     return signal;
@@ -78,13 +87,60 @@ export class RpcRemoteEnd extends WorkerEntrypoint {
     if (globalAbortController === undefined) {
       globalAbortController = new AbortController();
       await this.env.RpcRemoteEnd.echo(globalAbortController.signal); // send the signal over
+      return 'created';
     } else {
       globalAbortController.abort(new Error('boom?'));
+      return {
+        aborted: globalAbortController.signal.aborted,
+        reason: globalAbortController.signal.reason.message,
+      };
     }
   }
 
   async getWrappedSignal() {
     return new WrappedAbortSignal();
+  }
+
+  // Starts a long native wait hooked to a module-scope signal. The wait's cancellation hook
+  // is owned by this request's IoContext; a later abort from a different request must be
+  // delivered into this context, rejecting the wait long before its timeout.
+  async startAbortableWait() {
+    globalWaitController = new AbortController();
+    try {
+      await scheduler.wait(10_000, { signal: globalWaitController.signal });
+      return 'completed';
+    } catch (err) {
+      return `aborted:${err.message}`;
+    }
+  }
+
+  // Aborts the wait started by startAbortableWait() from a different request's context.
+  async abortGlobalWait() {
+    globalWaitController.abort(new Error('cross-request'));
+    return globalWaitController.signal.aborted;
+  }
+
+  // Waits on a native timer wrapped with a signal received over RPC. The wrap's abort action
+  // is what arms the RPC abort subscription, so a remote abort must cancel the wait.
+  async waitOnReceivedSignal(signal) {
+    try {
+      await scheduler.wait(10_000, { signal });
+      return 'completed';
+    } catch (err) {
+      return `aborted:${err.message}`;
+    }
+  }
+
+  // One short signal-wrapped wait against a module-scope controller. Each RPC call runs in
+  // its own request, so repeated calls register and release one native cancellation hook per
+  // request on the same long-lived signal.
+  async churnWait() {
+    await scheduler.wait(1, { signal: moduleScopeChurnController.signal });
+    return 'ok';
+  }
+
+  async abortChurnController() {
+    moduleScopeChurnController.abort(new Error('churn-done'));
   }
 }
 
@@ -525,20 +581,94 @@ export const rpcRequestSignal = {
   },
 };
 
+export const globalScopeCreation = {
+  test() {
+    // The module-scope objects above were created during module evaluation, with no active
+    // IoContext. Verify they are fully functional.
+    strictEqual(moduleScopePreAborted.aborted, true);
+    strictEqual(moduleScopePreAborted.reason, 'module-scope');
+    strictEqual(moduleScopeRequestSignal.aborted, false);
+
+    strictEqual(moduleScopeController.signal.aborted, false);
+    let fired = false;
+    moduleScopeController.signal.addEventListener(
+      'abort',
+      () => (fired = true)
+    );
+    moduleScopeController.abort('done');
+    strictEqual(fired, true);
+    strictEqual(moduleScopeController.signal.aborted, true);
+    strictEqual(moduleScopeController.signal.reason, 'done');
+  },
+};
+
+export const crossRequestNativeAbort = {
+  async test(ctrl, env, ctx) {
+    // Request A wraps a long native timer with a signal held in the remote end's global
+    // scope; request B then aborts it. The cancellation is delivered into A's context on its
+    // next turn, so A's wait rejects with the abort reason long before its 10s timeout.
+    const start = Date.now();
+    const pending = env.RpcRemoteEnd.startAbortableWait();
+    await scheduler.wait(100);
+    strictEqual(await env.RpcRemoteEnd.abortGlobalWait(), true);
+    const result = await pending;
+    match(result, /^aborted:/);
+    match(result, /cross-request/);
+    ok(Date.now() - start < 5000);
+
+    // Aborting again is a no-op (and must not throw).
+    strictEqual(await env.RpcRemoteEnd.abortGlobalWait(), true);
+  },
+};
+
+export const rpcSignalCancelsNativeWait = {
+  async test(ctrl, env, ctx) {
+    // The remote end wraps a long native wait with a signal it received over RPC; wrapping
+    // must arm the RPC abort subscription, so aborting our local controller cancels the
+    // remote wait long before its 10s timeout.
+    const start = Date.now();
+    const ac = new AbortController();
+    const pending = env.RpcRemoteEnd.waitOnReceivedSignal(ac.signal);
+    await scheduler.wait(100);
+    ac.abort(new Error('rpc-native-cancel'));
+    const result = await pending;
+    match(result, /^aborted:/);
+    match(result, /rpc-native-cancel/);
+    ok(Date.now() - start < 5000);
+  },
+};
+
+export const crossRequestRegistrationChurn = {
+  async test(ctrl, env, ctx) {
+    // Many short signal-wrapped waits against one module-scope signal, each from its own
+    // request. Completed registrations are released with their requests and swept by later
+    // ones; none of this may disturb subsequent use of the signal.
+    for (let i = 0; i < 20; i++) {
+      strictEqual(await env.RpcRemoteEnd.churnWait(), 'ok');
+    }
+
+    // The signal is still fully functional after all that churn: aborting it works, and
+    // further attempts to use it reject with the abort reason.
+    await env.RpcRemoteEnd.abortChurnController();
+    await rejects(env.RpcRemoteEnd.churnWait(), { message: /churn-done/ });
+  },
+};
+
 export const rpcCrossRequestSignal = {
   async test(ctrl, env, ctx) {
-    // Save an AbortController in the global scope
-    await env.RpcRemoteEnd.tryUsingGlobalAbortController();
-
-    // Try to use it again
-    await rejects(
-      async () => env.RpcRemoteEnd.tryUsingGlobalAbortController(),
-      {
-        name: 'Error',
-        message:
-          "Cannot perform I/O on behalf of a different request. I/O objects (such as streams, request/response bodies, and others) created in the context of one request handler cannot be accessed from a different request's handler. This is a limitation of Cloudflare Workers which allows us to improve overall performance. (I/O type: RefcountedCanceler)",
-      }
+    // Save an AbortController in the global scope of the remote end. Serializing its signal
+    // over RPC binds an RPC registration to that first request's context.
+    strictEqual(
+      await env.RpcRemoteEnd.tryUsingGlobalAbortController(),
+      'created'
     );
+
+    // Abort it from a different request. The abort updates the signal's JS-visible state and
+    // fires its events; the first request's RPC registration died with that request and is
+    // dropped silently.
+    const res = await env.RpcRemoteEnd.tryUsingGlobalAbortController();
+    strictEqual(res.aborted, true);
+    strictEqual(res.reason, 'boom?');
   },
 };
 
