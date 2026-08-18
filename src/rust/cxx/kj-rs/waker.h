@@ -143,43 +143,6 @@ class FutureWakerCell final: public kj::Refcounted {
 };
 
 // =======================================================================================
-// ArcWaker
-
-class ArcWaker;
-
-struct PromiseArcWakerPair {
-  kj::Promise<void> promise;
-  kj::Arc<const ArcWaker> waker;
-};
-
-// ArcWaker is an atomic-refcounted wrapper around a `CrossThreadPromiseFulfiller<void>`.
-// The atomic-refcounted aspect makes it safe to call `clone()` and `drop()` concurrently, while the
-// `CrossThreadPromiseFulfiller` aspect makes it safe to call `wake_by_ref()` concurrently. Finally,
-// `wake()` is implemented in terms of `wake_by_ref()` and `drop()`.
-//
-// This class is mostly an implementation detail of LazyArcWaker.
-class ArcWaker: public kj::AtomicRefcounted, public KjWaker {
- public:
-  // Construct a new promise and ArcWaker promise pair, with the Promise to be scheduled on the
-  // event loop associated with `executor`.
-  static PromiseArcWakerPair create(const kj::Executor& executor);
-
-  ArcWaker(kj::Badge<ArcWaker>, kj::PromiseCrossThreadFulfillerPair<void> paf);
-  KJ_DISALLOW_COPY_AND_MOVE(ArcWaker);
-
-  const KjWaker* clone() const override;
-  void wake() const override;
-  void wake_by_ref() const override;
-  void drop() const override;
-
- private:
-  kj::Promise<void> getPromise();
-
-  ArcWakerPromiseNode node;
-  kj::Own<const kj::CrossThreadPromiseFulfiller<void>> fulfiller;
-};
-
-// =======================================================================================
 // LazyArcWaker
 
 // LazyArcWaker is intended to live locally on the stack or in a coroutine frame. Trying to
