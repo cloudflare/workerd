@@ -1603,7 +1603,9 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
             if (s->getAborted(js)) {
               return js.rejectedPromise<jsg::Ref<Response>>(s->getReason(js));
             }
-            webSocket = kj::refcounted<AbortableWebSocket>(kj::mv(webSocket), s->getCanceler());
+            auto cancellation = s->newCanceler(js);
+            webSocket = kj::refcounted<AbortableWebSocket>(kj::mv(webSocket),
+                kj::mv(cancellation.canceler), kj::mv(cancellation.registration));
           }
           return js.resolvedPromise(makeHttpResponse(js, jsRequest->getMethodEnum(),
               kj::mv(urlList), response.statusCode, response.statusText, *response.headers,
@@ -1730,7 +1732,9 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
     if (s->getAborted(js)) {
       return js.rejectedPromise<jsg::Ref<Response>>(s->getReason(js));
     }
-    response.body = kj::refcounted<AbortableInputStream>(kj::mv(response.body), s->getCanceler());
+    auto cancellation = s->newCanceler(js);
+    response.body = kj::refcounted<AbortableInputStream>(
+        kj::mv(response.body), kj::mv(cancellation.canceler), kj::mv(cancellation.registration));
   }
 
   if (isRedirectStatusCode(response.statusCode) &&
