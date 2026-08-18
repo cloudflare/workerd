@@ -1,0 +1,124 @@
+src/workerd/api/tests/BUILD.bazel
+  s_0f868da28cf400::t_88e1c2df2ee1ff 568
+  s_0f868da28cf400::t_45084ea593a96e 569-576
+  s_0f868da28cf400::t_5f176d5c231fbe 578-585
+  s_0f868da28cf400::t_5c150a8922dbac 577
+src/workerd/api/global-scope.c++
+  s_0f868da28cf400::t_67bc285c55ce90 193
+  s_0f868da28cf400::t_f36742d6b636e9 794-795,827
+  s_0f868da28cf400::t_57055d601987e3 776-793,796-804,810-813,819-826,844-846
+src/workerd/api/global-scope.h
+  s_0f868da28cf400::t_256dfffad72bbf 530
+  s_0f868da28cf400::t_52b868e706714f 521-524,526-528,530,532-539,533-541,543,545-548,550-551
+  s_0f868da28cf400::t_cf96fd25a1efea 532
+  s_0f868da28cf400::t_50178626f39f03 542-544
+  s_0f868da28cf400::t_a6d6da78fb7ec8 1281-1282
+  s_0f868da28cf400::t_82d1dd3b7bc971 1280
+  s_0f868da28cf400::t_b68b0d7dc12697 647
+  s_0f868da28cf400::t_4785b5efa530e2 586-590
+  s_0f868da28cf400::t_b9dffe9ccfa2a9 617
+  s_0f868da28cf400::t_8ac0c417572457 490-494,496-503,505-509,512-515,518-520,525,529,531,549
+  s_0f868da28cf400::t_f36742d6b636e9 495,504
+  s_0f868da28cf400::t_668beb1ff72b07 788-801
+src/workerd/io/worker.c++
+  s_0f868da28cf400::t_e417e2c4d93b5b 2617-2621
+  s_bd300c870eb4a1::t_c6a9c59287d139 3982-3983
+  s_0f868da28cf400::t_5103dd4211e5fd 4429
+  s_0f868da28cf400::t_7d05caa6be712b 4427-4428,4434-4435,4456-4457,4459-4462,4466-4494,4506-4509
+  s_0f868da28cf400::t_f3ce2a2875b5f7 4425-4426,4433,4436-4444
+  s_0f868da28cf400::t_f36742d6b636e9 4458,4463-4465
+  s_0f868da28cf400::t_60c2d0cc7d8797 4495-4499,4504-4505
+src/workerd/io/observer.h
+  s_bd300c870eb4a1::t_9ec947a594abf4 323-326
+src/workerd/api/tests/do-pre-shutdown-rpc-flag-off.js
+  s_0f868da28cf400::t_affb419fb3152e 1-12
+types/generated-snapshot/experimental/index.ts
+  s_0f868da28cf400::t_2d5b27ec6e8c24 593,595,626,643-648,15412,15418-15419
+src/workerd/io/compatibility-date.capnp
+  s_0f868da28cf400::t_5c90d8a23db4d5 1645-1650
+types/generated-snapshot/index.d.ts
+  s_0f868da28cf400::t_18eba82f0a398a 590,592,15138,15144-15145
+src/workerd/api/tests/do-pre-shutdown-rpc-test.js
+  s_0f868da28cf400::t_ed903abb50d526 1-60
+src/workerd/api/actor.h
+  s_0f868da28cf400::t_128289a67ad2f7 103,109-148
+types/generated-snapshot/experimental/index.d.ts
+  s_0f868da28cf400::t_2d5b27ec6e8c24 591,593,624,641-646,15434,15440-15441
+types/defines/rpc.d.ts
+  s_0f868da28cf400::t_b52e8de0082008 265,271-272
+types/generated-snapshot/index.ts
+  s_0f868da28cf400::t_18eba82f0a398a 592,594,15116,15122-15123
+src/workerd/api/worker-rpc.c++
+  s_0f868da28cf400::t_3b206303d4d358 1650
+  s_0f868da28cf400::t_12e36b514600a6 1315
+  s_0f868da28cf400::t_3e094263934785 2096,2113-2120
+  s_0f868da28cf400::t_8ca02c29ba8166 1101-1103
+src/workerd/api/tests/do-pre-shutdown-rpc-test.wd-test
+  s_0f868da28cf400::t_73f6e3bd0f4a8c 1-34
+types/test/types/rpc.ts
+  s_0f868da28cf400::t_e37dc8534cb833 436-437
+  s_0f868da28cf400::t_1daf37d2d2a2bc 518-526
+  s_0f868da28cf400::t_46d4e5c2918217 456
+  s_0f868da28cf400::t_bde558edffb9f9 393-395,401-408
+src/workerd/api/tests/do-pre-shutdown-test.wd-test
+  s_0f868da28cf400::t_2dc7da48d57f5c 1-14,16-22,24,27-33,35,38-56
+src/workerd/io/worker.h
+  s_0f868da28cf400::t_b7082638bfda10 65
+  s_0f868da28cf400::t_537f947a7fedfa 1100,1107
+  s_0f868da28cf400::t_9d337ab3b018e2 1085-1086,1089,1091,1096-1099,1102,1105-1106,1108
+  s_0f868da28cf400::t_0393c55a7ae113 1090,1092-1095,1101,1103-1104,1117-1121
+  s_0f868da28cf400::t_9bb7a824743da8 51-52
+  s_0f868da28cf400::t_2437d99c53ceb7 883-898
+src/workerd/io/io-context.h
+  s_0f868da28cf400::t_8cee6602aab1c8 147
+src/workerd/api/tests/do-pre-shutdown-test.js
+  s_0f868da28cf400::t_cef6d64bcfae2e 1-73,137-210,234-240,267-268
+src/workerd/util/uncaught-exception-source.h
+  s_0f868da28cf400::t_402ead3569f49e 17
+  s_0f868da28cf400::t_fffe46564219dd 34-35
+src/workerd/server/server.c++
+  s_0f868da28cf400::t_7d511f7231b811 5636-5639
+  s_0f868da28cf400::t_b709edfc5a527a 1093-1098,1103-1106,1145-1146
+  s_0f868da28cf400::t_a2fc6b5effd5cf 14
+  s_0f868da28cf400::t_9fb5f8e72d08bd 4101
+  s_0f868da28cf400::t_7a425cd7bcfe54 5635
+  s_0f868da28cf400::t_29806540f589b4 1144
+  s_0f868da28cf400::t_a2730906de7358 2181
+  s_0f868da28cf400::t_3fb2e56ead4b47 4095
+  s_0f868da28cf400::t_113663c0a8f1df 4092-4094,4096-4100,4102-4103
+  s_0f868da28cf400::t_e164b526d0a1af 326-327,332-333
+  s_0f868da28cf400::t_748fd5d62792ef 4295
+  s_0f868da28cf400::t_2dcc3ae7673c76 1229,1253-1254
+  s_0f868da28cf400::t_a5547fa6f19d26 328-331
+  s_0f868da28cf400::t_dd9a9224051717 1252
+  s_0f868da28cf400::t_7356a6f8299543 4296-4299
+  s_0f868da28cf400::t_f74375bfa6bd31 2180,2182-2185
+src/workerd/io/limit-enforcer.h
+  s_0f868da28cf400::t_389de9b5bb0afb 177-179,187-190
+src/workerd/api/tests/do-pre-shutdown-flag-off.js
+  s_0f868da28cf400::t_1e88bda3bc6351 1-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0a189bd21589b8d8618e92f3d52b6eae56b38f96",
+  "prompts": {},
+  "sessions": {
+    "s_0f868da28cf400": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_012591357ffeA7cXF67TJsjeKU",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    },
+    "s_bd300c870eb4a1": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_02778efb7ffeB2SSkVfS3x8QGj",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    }
+  }
+}
