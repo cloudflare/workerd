@@ -285,4 +285,36 @@ class TokioFileWatcher final: public FileWatcher {
  private:
   kj_rs_io::FileWatcher inner;
 
+#endif  // WORKERD_RUST_IO_BACKEND_RUST
+
+  kj::Own<FileWatcher> makeFileWatcher([[maybe_unused]] kj::AsyncIoContext& io) {
+#if WORKERD_RUST_IO_BACKEND_RUST
+    // No UnixEventPort exists on the tokio loop; use the AsyncFd-backed watcher instead.
+    return kj::heap<TokioFileWatcher>();
+#elif _WIN32
+  return kj::heap<KjFileWatcher>(io.win32EventPort);
+#else
+  return kj::heap<KjFileWatcher>(io.unixEventPort);
+#endif
+  }
+
+#if !_WIN32
+  void captureSigterm() {
+#if !WORKERD_RUST_IO_BACKEND_RUST
+    kj::UnixEventPort::captureSignal(SIGTERM);
+#endif
+    // Under --//:io_backend=rust this is a no-op: tokio's signal driver watches SIGTERM instead, and
+    // capturing it here would block the signal in the thread's mask and prevent the tokio handler
+    // from ever being invoked (there is no UnixEventPort under that backend anyway).
+  }
+
+  kj::Promise<void> onSigterm([[maybe_unused]] kj::AsyncIoContext& io) {
+#if WORKERD_RUST_IO_BACKEND_RUST
+    return kj_rs_io::onSignal(SIGTERM);
+#else
+    return io.unixEventPort.onSignal(SIGTERM).ignoreResult();
+#endif
+  }
+#endif  // !_WIN32
+
 }  // namespace workerd::server
