@@ -405,6 +405,7 @@ int prepareFd(int fd, kj::uint flags) {
   return fd;
 }
 
+// kj::AsyncInputStream over an arbitrary readable fd (pipe, socket, character device).
 class TokioInputStreamFd final: public kj::AsyncInputStream {
  public:
   explicit TokioInputStreamFd(::rust::Box<TokioInputFd> inner): inner(kj::mv(inner)) {}
