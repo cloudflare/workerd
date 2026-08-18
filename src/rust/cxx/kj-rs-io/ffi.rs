@@ -215,4 +215,47 @@ mod bridge {
             value: &[u8],
         ) -> Result<()>;
     }
+
+    extern "Rust" {
+        // ==================================================================================
+        // Socket-handle wrapping (kj::LowLevelAsyncIoProvider).
+        //
+        // The `i64` is a raw OS socket handle: a Unix fd or a win32 `SOCKET` (`i64` fits both
+        // losslessly, with `-1` ≡ `INVALID_SOCKET` as the shared sentinel). All of these take
+        // ownership of the handle. The C++ side normalizes
+        // TAKE_OWNERSHIP/ALREADY_CLOEXEC/ALREADY_NONBLOCK flags (dup'ing when not taking
+        // ownership) before calling in; [`own_socket_from_raw`] is the single point where the
+        // raw handle becomes an owned socket.
+
+        /// Wraps a connected stream socket handle (TCP or Unix domain, detected automatically).
+        fn wrap_socket_fd(handle: i64) -> Result<Box<TokioStream>>;
+
+        /// Wraps a bound+listening socket handle (TCP or Unix domain, detected automatically).
+        fn wrap_listen_fd(handle: i64) -> Result<Box<TokioListener>>;
+
+        /// Wraps an unconnected TCP socket handle and connects it to `sockaddr` (a raw
+        /// `struct sockaddr`, AF_INET/AF_INET6 only; owned copy, since the caller's pointer
+        /// need not outlive the call).
+        async fn wrap_connecting_socket_fd(
+            handle: i64,
+            sockaddr: Vec<u8>,
+        ) -> Result<Box<TokioStream>>;
+
+        /// Wraps a readable fd (pipe, character device, socket). Regular files are rejected by
+        /// the OS readiness API (same as KJ's epoll-based provider). Unix only (the pipe tier
+        /// keeps `i32` fds).
+        fn wrap_input_fd(fd: i32) -> Result<Box<TokioInputFd>>;
+
+        async unsafe fn input_fd_try_read<'a>(
+            stream: &'a TokioInputFd,
+            buf: &'a mut [u8],
+            min_bytes: usize,
+        ) -> Result<usize>;
+
+        /// Wraps a writable fd (pipe, character device, socket).
+        fn wrap_output_fd(fd: i32) -> Result<Box<TokioOutputFd>>;
+
+        async unsafe fn output_fd_write<'a>(stream: &'a TokioOutputFd, buf: &'a [u8])
+        -> Result<()>;
+    }
 }
