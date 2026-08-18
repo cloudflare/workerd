@@ -1,0 +1,95 @@
+// Port of KJ's kj::_::NetworkFilter (kj/async-io.c++, MIT-licensed, Sandstorm Development
+// Group and contributors) — see peer-filter.h for why this is a port rather than a reuse.
+// Behavior must be kept in lockstep with upstream KJ.
+
+#include "kj-rs-io/peer-filter.h"
+
+#include <kj/debug.h>
+
+#if _WIN32
+#include <winsock2.h>
+#else
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#endif
+
+namespace kj_rs_io {
+namespace {
+
+using kj::CidrRange;
+
+kj::ArrayPtr<const CidrRange> localCidrs() {
+  static const CidrRange result[] = {
+    // localhost
+    "127.0.0.0/8"_kj,
+    "::1/128"_kj,
+
+    // Trying to *connect* to 0.0.0.0 on many systems is equivalent to connecting to
+    // localhost. (wat)
+    "0.0.0.0/32"_kj,
+    "::/128"_kj,
+  };
+  return kj::arrayPtr(result, kj::size(result));
+}
+
+kj::ArrayPtr<const CidrRange> privateCidrs() {
+  static const CidrRange result[] = {
+    "10.0.0.0/8"_kj,      // RFC1918 reserved for internal network
+    "100.64.0.0/10"_kj,   // RFC6598 "shared address space" for carrier-grade NAT
+    "169.254.0.0/16"_kj,  // RFC3927 "link local" (auto-configured LAN in absence of DHCP)
+    "172.16.0.0/12"_kj,   // RFC1918 reserved for internal network
+    "192.168.0.0/16"_kj,  // RFC1918 reserved for internal network
+
+    "fc00::/7"_kj,   // RFC4193 unique private network
+    "fe80::/10"_kj,  // RFC4291 "link local" (auto-configured LAN in absence of DHCP)
+  };
+  return kj::arrayPtr(result, kj::size(result));
+}
+
+kj::ArrayPtr<const CidrRange> reservedCidrs() {
+  // Address ranges reserved by RFCs for specific alternative protocols. These are not
+  // considered part of "public", "private", "network", nor "local". But, we will allow apps to
+  // explicitly allowlist CIDRs in this range if they really want, because some people actually
+  // use these ranges as if they were private ranges.
+  static const CidrRange result[] = {
+    "192.0.0.0/24"_kj,        // RFC6890 reserved for special protocols
+    "224.0.0.0/4"_kj,         // RFC1112 multicast
+    "240.0.0.0/4"_kj,         // RFC1112 multicast / reserved for future use
+    "255.255.255.255/32"_kj,  // RFC0919 broadcast address
+
+    "2001::/23"_kj,  // RFC2928 reserved for special protocols
+    "ff00::/8"_kj,   // RFC4291 multicast
+  };
+  return kj::arrayPtr(result, kj::size(result));
+}
+
+bool matchesAny(kj::ArrayPtr<const CidrRange> cidrs, const struct sockaddr *addr) {
+  for (auto &cidr: cidrs) {
+    if (cidr.matches(addr)) return true;
+  }
+  return false;
+}
+
+#if !_WIN32
+// sockaddr_un::sun_path is not required to have a NUL terminator, so it must be read carefully.
+kj::ArrayPtr<const char> safeUnixPath(const struct sockaddr_un *addr, kj::uint addrlen) {
+  KJ_REQUIRE(addr->sun_family == AF_UNIX, "not a unix address");
+  KJ_REQUIRE(addrlen >= offsetof(sockaddr_un, sun_path), "invalid unix address");
+
+  size_t maxPathlen = addrlen - offsetof(sockaddr_un, sun_path);
+
+  size_t pathlen;
+  if (maxPathlen > 0 && addr->sun_path[0] == '\0') {
+    // Linux "abstract" unix address
+    pathlen = strnlen(addr->sun_path + 1, maxPathlen - 1) + 1;
+  } else {
+    pathlen = strnlen(addr->sun_path, maxPathlen);
+  }
+  return kj::arrayPtr(addr->sun_path, pathlen);
+}
+#endif  // !_WIN32
+
+}  // namespace
+
+}  // namespace kj_rs_io
