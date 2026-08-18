@@ -513,8 +513,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   newModuleRegistry @52 :Bool
       $compatEnableFlag("new_module_registry")
-      $compatDisableFlag("legacy_module_registry")
-      $experimental;
+      $compatDisableFlag("legacy_module_registry");
   # Enables the new module registry implementation, which handles module
   # specifiers as URLs, implements import.meta (url/main/resolve), supports
   # import attributes, and allows a registry to be shared across isolate
