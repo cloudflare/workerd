@@ -197,45 +197,6 @@ kj::Rc<FutureWakerCell> FuturePollEvent::cloneWakerCell() {
   return wakerCell.cell->addRef();
 }
 
-void FuturePollEvent::exitPollScope(kj::Maybe<kj::Promise<void>> maybePromise) {
-  // Await any LazyArcWaker promise that got created during the call to `poll()`. Note that if a
-  // Future returns Ready _and_ synchronously wakes its Waker, the work done to await the
-  // LazyArcWaker promise is wasted, since we will immediately tear the entire BoxFutureAwaiter<T>
-  // down. However, that's an unlikely case, and this work here isn't likely to be a significant
-  // source of overhead.
-  KJ_IF_SOME(promise, maybePromise) {
-    auto& node = arcWakerPromise.emplace(kj::_::PromiseNode::from(kj::mv(promise)));
-    node->setSelfPointer(&node);
-    node->onReady(this);
-  }
-}
-
-void FuturePollEvent::enterPollScope() noexcept {
-  // Clear out any previous LazyArcWaker promise the FuturePollEvent was holding onto. Note that
-  // since there is no code path which rejects this Promise, this is not strictly required for
-  // correctness, but nevertheless serves as a useful assertion.
-  KJ_IF_SOME(node, arcWakerPromise) {
-    kj::_::ExceptionOr<kj::_::Void> output;
-
-    node->get(output);
-    KJ_IF_SOME(exception, kj::runCatchingExceptions([this]() { arcWakerPromise = kj::none; })) {
-      output.addException(kj::mv(exception));
-    }
-
-    // NOTE: `node` is now dangling.
-
-    KJ_IF_SOME(exception, output.exception) {
-      // We should only ever receive a WakeInstruction, never an exception. If we do receive an
-      // exception, it would be because our ArcWaker implementation allowed its cross-thread promise
-      // fulfiller to be destroyed without being fulfilled, or because we foolishly added an
-      // explicit call to the fulfiller's reject() function. Either way, it is a programming error,
-      // so we abort the process here by re-throwing across a noexcept boundary. This avoids having
-      // implement the ability to "reject" the Future poll() Event.
-      kj::throwFatalException(kj::mv(exception));
-    }
-  }
-}
-
 void FuturePollEvent::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent) {
   if (stopAtNextEvent) return;
 
@@ -255,22 +216,6 @@ void FuturePollEvent::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNext
     if (node.get() != nullptr) {
       node->tracePromise(builder, false);
     }
-  }
-}
-
-FuturePollEvent::PollScope::PollScope(FuturePollEvent& futurePollEvent): holder(futurePollEvent) {
-  futurePollEvent.enterPollScope();
-}
-
-FuturePollEvent::PollScope::~PollScope() noexcept(false) {
-  holder.get().futurePollEvent.exitPollScope(reset());
-}
-
-kj::Maybe<FuturePollEvent&> FuturePollEvent::PollScope::tryGetFuturePollEvent() const {
-  KJ_IF_SOME(h, holder.tryGet()) {
-    return h.futurePollEvent;
-  } else {
-    return kj::none;
   }
 }
 
