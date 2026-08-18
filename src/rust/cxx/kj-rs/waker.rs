@@ -13,6 +13,77 @@ use crate::KjRc;
 use crate::ffi::FutureWakerCell;
 use crate::ffi::PollWaker;
 
+// Thread-safety: `std::task::Waker` documents that the vtable functions must be thread-safe.
+// The bridge is single-threaded — no waker is ever woken, cloned, or dropped from another thread
+// (cross-thread producers interpose a same-thread forwarding task instead; see kj-rs-io's
+// `resolve_host`) — so these vtables uphold that contract degenerately: every call happens on the
+// owning event loop's thread.
+
+// =======================================================================================
+// Borrowed vtable: Wakers lending out the PollWaker C++ passes to `Future::poll()`
+//
+// `data` is the `&PollWaker` the Waker was built from — borrowed, never null, and alive for the
+// duration of the poll (the Waker is created and dropped inside the poll bridge in future.rs).
+// Dropping such a Waker frees nothing; cloning it takes a real strong reference to the event's
+// FutureWakerCell and switches to the owned-cell vtable below.
+
+impl From<&PollWaker> for Waker {
+    fn from(waker: &PollWaker) -> Self {
+        let raw = RawWaker::new(
+            std::ptr::from_ref::<PollWaker>(waker).cast::<()>(),
+            &POLL_WAKER_VTABLE,
+        );
+        // Safety: the vtable functions below uphold the RawWaker contract (see the thread-safety
+        // note above); `data` outlives the Waker because future.rs drops the Waker before poll
+        // returns.
+        unsafe { Self::from_raw(raw) }
+    }
+}
+
+/// # Safety
+///
+/// `data` must be the pointer a [`From<&PollWaker>`] conversion was made with, still live per the
+/// `RawWaker` contract (upheld because these Wakers only exist within a single `poll` call).
+unsafe fn poll_waker_clone(data: *const ()) -> RawWaker {
+    // Safety: forwarded from this fn's `# Safety` contract.
+    let waker = unsafe { &*data.cast::<PollWaker>() };
+    let cell: Option<KjRc<FutureWakerCell>> = waker.clone_cell().into();
+    RawWaker::new(
+        cell.map_or(std::ptr::null(), cell_into_raw).cast::<()>(),
+        &CELL_WAKER_VTABLE,
+    )
+}
+
+/// # Safety
+///
+/// Same contract as [`poll_waker_clone`].
+unsafe fn poll_waker_wake_by_ref(data: *const ()) {
+    // Safety: forwarded from this fn's `# Safety` contract.
+    let waker = unsafe { &*data.cast::<PollWaker>() };
+    waker.wake_by_ref();
+}
+
+/// # Safety
+///
+/// Same contract as [`poll_waker_clone`]. Consuming a borrowed Waker owns nothing, so `wake` is
+/// just `wake_by_ref` (the paired drop is a no-op).
+unsafe fn poll_waker_wake(data: *const ()) {
+    // Safety: forwarded from this fn's `# Safety` contract.
+    unsafe { poll_waker_wake_by_ref(data) }
+}
+
+fn poll_waker_drop(_data: *const ()) {
+    // No-op: the PollWaker is stack-owned by the C++ poll scope; this Waker only borrowed it.
+}
+
+static POLL_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
+    poll_waker_clone,
+    poll_waker_wake,
+    poll_waker_wake_by_ref,
+    poll_waker_drop,
+);
+
+// =======================================================================================
 // Owned-cell vtable: retained Wakers holding a strong reference to a FutureWakerCell
 //
 // `data` carries one strong reference (a disowned `KjRc<FutureWakerCell>`), or is null for the
@@ -111,6 +182,7 @@ static CELL_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
 // Dropping such a Waker frees nothing; cloning it takes a real strong reference to the event's
 // FutureWakerCell and switches to the owned-cell vtable below.
 
+#[cfg(any())]
 impl From<&PollWaker> for Waker {
     fn from(waker: &PollWaker) -> Self {
         let raw = RawWaker::new(
@@ -128,6 +200,7 @@ impl From<&PollWaker> for Waker {
 ///
 /// `data` must be the pointer a [`From<&PollWaker>`] conversion was made with, still live per the
 /// `RawWaker` contract (upheld because these Wakers only exist within a single `poll` call).
+#[cfg(any())]
 unsafe fn poll_waker_clone(data: *const ()) -> RawWaker {
     // Safety: forwarded from this fn's `# Safety` contract.
     let waker = unsafe { &*data.cast::<PollWaker>() };
@@ -141,6 +214,7 @@ unsafe fn poll_waker_clone(data: *const ()) -> RawWaker {
 /// # Safety
 ///
 /// Same contract as [`poll_waker_clone`].
+#[cfg(any())]
 unsafe fn poll_waker_wake_by_ref(data: *const ()) {
     // Safety: forwarded from this fn's `# Safety` contract.
     let waker = unsafe { &*data.cast::<PollWaker>() };
@@ -151,15 +225,18 @@ unsafe fn poll_waker_wake_by_ref(data: *const ()) {
 ///
 /// Same contract as [`poll_waker_clone`]. Consuming a borrowed Waker owns nothing, so `wake` is
 /// just `wake_by_ref` (the paired drop is a no-op).
+#[cfg(any())]
 unsafe fn poll_waker_wake(data: *const ()) {
     // Safety: forwarded from this fn's `# Safety` contract.
     unsafe { poll_waker_wake_by_ref(data) }
 }
 
+#[cfg(any())]
 fn poll_waker_drop(_data: *const ()) {
     // No-op: the PollWaker is stack-owned by the C++ poll scope; this Waker only borrowed it.
 }
 
+#[cfg(any())]
 static POLL_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
     poll_waker_clone,
     poll_waker_wake,
