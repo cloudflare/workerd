@@ -75,4 +75,17 @@ mod bridge {
         /// without incrementing the count. Dropping the returned handle releases the reference.
         unsafe fn reown(self: &FutureWakerCell) -> KjRc<FutureWakerCell>;
     }
+
+    unsafe extern "C++" {
+        include!("kj-rs/promise.h");
+
+        type OwnPromiseNode = crate::OwnPromiseNode;
+
+        // Takes `&mut` (not a raw pointer): this is a placement-destruct of a live
+        // `OwnPromiseNode` whose backing memory is owned by Rust and only reached through the
+        // `&mut self` in `OwnPromiseNode`'s `Drop`. The reference is valid for the call; the
+        // value is logically dead only after, inside `drop`, so no use-after-free is possible.
+        // Expressing it as a borrow lets cxx generate a safe-to-call binding.
+        fn own_promise_node_drop_in_place(node: &mut OwnPromiseNode);
+    }
 }
