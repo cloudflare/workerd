@@ -145,3 +145,21 @@ def _rust_io_hermeticity_impl(ctx):
         )
     ctx.actions.write(report, summary + "\n")
     return [DefaultInfo(files = depset([report]))]
+
+rust_io_hermeticity = rule(
+    implementation = _rust_io_hermeticity_impl,
+    doc = "Fails analysis (when enforced) if `target` transitively depends on a forbidden " +
+          "concrete C++ I/O library, naming the offending edge.",
+    attrs = {
+        "target": attr.label(
+            mandatory = True,
+            aspects = [rust_io_forbidden_aspect],
+            doc = "The target whose transitive deps are checked (e.g. the workerd binary).",
+        ),
+        "enforce": attr.bool(
+            default = False,
+            doc = "Whether reaching a forbidden target fails analysis. Set from a " +
+                  "select() on //:io_backend_rust at the instantiation site.",
+        ),
+    },
+)
