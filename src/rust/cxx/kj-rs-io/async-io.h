@@ -156,4 +156,31 @@ class TokioNetwork final: public kj::Network {
   PeerFilter filter;
 };
 
+// The tokio-backed kj::LowLevelAsyncIoProvider. Implements the socket-wrapping entry points on
+// Unix and Windows (each wrap*Fd normalizes KJ's TAKE_OWNERSHIP/ALREADY_CLOEXEC/ALREADY_NONBLOCK
+// flags, then hands an owned, non-blocking raw socket handle -- a Unix fd or a win32 SOCKET,
+// widened to int64 -- to Rust). The pipe tier (wrapInputFd/wrapOutputFd) is Unix-only for now.
+// wrapUnixSocketFd (capability streams) and wrapDatagramSocketFd keep their default-throwing
+// implementations.
+class TokioLowLevelAsyncIoProvider final: public kj::LowLevelAsyncIoProvider {
+ public:
+  explicit TokioLowLevelAsyncIoProvider(kj::Timer &timer): timer(timer) {}
+
+  kj::Own<kj::AsyncInputStream> wrapInputFd(Fd fd, kj::uint flags) override;
+  kj::Own<kj::AsyncOutputStream> wrapOutputFd(Fd fd, kj::uint flags) override;
+  kj::Own<kj::AsyncIoStream> wrapSocketFd(Fd fd, kj::uint flags) override;
+  kj::Promise<kj::Own<kj::AsyncIoStream>> wrapConnectingSocketFd(
+      Fd fd, const struct sockaddr *addr, kj::uint addrlen, kj::uint flags) override;
+  // `filter` applies to accepted connections (disallowed peers are dropped and the accept
+  // loop continues, like KJ); it must outlive the returned receiver.
+  kj::Own<kj::ConnectionReceiver> wrapListenSocketFd(
+      Fd fd, NetworkFilter &filter, kj::uint flags) override;
+  kj::Timer &getTimer() override {
+    return timer;
+  }
+
+ private:
+  kj::Timer &timer;
+};
+
 }  // namespace kj_rs_io
