@@ -526,7 +526,7 @@ class AbortSignal final: public EventTarget {
       jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason = kj::none,
       Flag flag = Flag::NONE);
 
-  using PendingReason = ExternalPusherImpl::PendingAbortReason;
+  using PendingReason = ExternalPusherImpl::PendingAbortReasonBox;
 
   // The AbortSignal explicitly does not expose a constructor(). It is
   // illegal for user code to create an AbortSignal directly.
@@ -592,7 +592,11 @@ class AbortSignal final: public EventTarget {
 
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(skipReleaseForTest);
-      JSG_TS_OVERRIDE({ skipReleaseForTest: never });
+      JSG_METHOD(getNativeRegistrationCountForTest);
+      JSG_TS_OVERRIDE({
+        skipReleaseForTest: never;
+        getNativeRegistrationCountForTest: never;
+      });
     }
   }
 
@@ -692,6 +696,11 @@ class AbortSignal final: public EventTarget {
   // To test what happens if a capability is dropped before invoking release on the cloned abort
   // signal, this method will tell every rpcClient to skip this step before destruction.
   void skipReleaseForTest();
+
+  // Test-only introspection: the number of native registration cells (live or empty awaiting
+  // a sweep) plus RPC registrations currently held by this signal. Lets tests assert that
+  // completed registrations are reclaimed rather than accumulating on long-lived signals.
+  int getNativeRegistrationCountForTest();
 
   static jsg::Ref<AbortSignal> deserialize(
       jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
@@ -844,21 +853,21 @@ class AbortSignal final: public EventTarget {
   // ---------------------------------------------------------------
   // RPC server functionality. Used if this signal was deserialized.
 
-  // Identifies the IoContext that deserialized this signal, which owns rpcAbortPromise and
-  // pendingReason below. Accesses from any other context treat the pending RPC state as
-  // absent: the signal still converges everywhere once the owning context observes the
-  // abort and triggers it, since that updates the JS-heap abort state above.
+  // Identifies the IoContext that deserialized this signal, which owns rpcAbortPromise
+  // below. Only that context can arm the RPC subscription (subscribeToRpcAbort); attempts
+  // from other contexts are no-ops.
   kj::Maybe<IoCrossContextExecutor> rpcReceiverContext;
   bool isRpcReceiverContextCurrent();
 
   // A promise that is fulfilled if an abort() message is received over RPC.
   kj::Maybe<IoOwn<kj::Promise<void>>> rpcAbortPromise;
 
-  // A refcounted object used to receive a serialized abort reason.
-  // The abort reason is required in asynchronous event handlers as well as synchronous methods
-  // like getReason(). As a result, we can't pass the abort reason in the above promise, and both
-  // sync and async methods will need to check this value.
-  kj::Maybe<IoOwn<PendingReason>> pendingReason;
+  // The box through which a serialized abort reason arrives. The abort reason is required in
+  // asynchronous event handlers as well as synchronous methods like getReason(), so both sync
+  // and async paths check this value. It is written by the receiving request's RPC machinery
+  // but readable — under its mutex — from any context, so a deserialized signal that has
+  // crossed request boundaries still reports getAborted()/getReason() correctly everywhere.
+  kj::Maybe<kj::Arc<PendingReason>> pendingReason;
 
   // Synchronously check if an abort reason was sent over RPC
   bool hasPendingReason();

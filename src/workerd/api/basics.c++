@@ -1038,11 +1038,10 @@ void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
   serializer.writeRawUint32(static_cast<uint>(getAborted(js)));
   serializer.writeRawUint32(static_cast<uint>(flag));
-  KJ_IF_SOME(r, reason) {
-    serializer.write(js, r.getHandle(js));
-  } else {
-    serializer.write(js, js.undefined());
-  }
+  // getReason() falls back to a pending (RPC-received but not yet triggered) reason, so a
+  // deserialized signal re-serialized before its receiving request processed the abort still
+  // carries the reason along; it returns undefined when there is none.
+  serializer.write(js, getReason(js));
 
   if (getAborted(js) || getNeverAborts()) {
     // This AbortSignal cannot be triggered in the future. No stream is needed.
@@ -1106,9 +1105,13 @@ jsg::Ref<AbortSignal> AbortSignal::deserialize(
 
   signal->rpcReceiverContext = ioctx.getCrossContextExecutor();
   signal->rpcAbortPromise = ioctx.addObject(kj::heap(kj::mv(resolvedSignal.signal)));
-  signal->pendingReason = ioctx.addObject(kj::mv(resolvedSignal.reason));
+  signal->pendingReason = kj::mv(resolvedSignal.reason);
 
   return signal;
+}
+
+int AbortSignal::getNativeRegistrationCountForTest() {
+  return static_cast<int>(nativeRegistrations.size() + rpcRegistrations.size());
 }
 
 void AbortSignal::skipReleaseForTest() {
@@ -1129,41 +1132,46 @@ bool AbortSignal::isRpcReceiverContextCurrent() {
 }
 
 bool AbortSignal::hasPendingReason() {
-  // The pending RPC state is owned by the IoContext that deserialized this signal; from any
-  // other context, treat it as absent. The signal converges everywhere once that context
-  // observes the abort and calls triggerAbort(), which updates the JS-heap abort state.
-  if (!isRpcReceiverContextCurrent()) {
-    return false;
-  }
-
   KJ_IF_SOME(pr, pendingReason) {
-    return *pr != nullptr;
+    return *pr->value.lockShared() != nullptr;
   }
 
   return false;
 }
 
 kj::Maybe<jsg::JsValue> AbortSignal::deserializePendingReason(jsg::Lock& js) {
-  // See hasPendingReason() regarding the owner check.
-  if (!isRpcReceiverContextCurrent()) {
-    return kj::none;
-  }
-
   KJ_IF_SOME(pr, pendingReason) {
-    if (*pr == nullptr) {
-      // pendingReason not initialized. This means abort wasn't yet triggered
-      return kj::none;
-    }
-
-    KJ_SWITCH_ONEOF(*pr) {
-      KJ_CASE_ONEOF(v8Serialized, kj::Array<kj::byte>) {
-        jsg::Deserializer des(js, v8Serialized);
-        return kj::some(des.readValue(js));
+    // Copy the pending state out under the mutex; the JS work below then runs without
+    // holding it. (The box is written at most once, by the receiving request; it may be read
+    // from any context.)
+    auto pending = [&]() -> kj::Maybe<ExternalPusherImpl::PendingAbortReason> {
+      auto lock = pr->value.lockShared();
+      if (*lock == nullptr) {
+        // pendingReason not initialized. This means abort wasn't yet triggered.
+        return kj::none;
       }
-
-      KJ_CASE_ONEOF(exception, kj::Exception) {
-        return kj::some(js.exceptionToJsValue(exception.clone()).getHandle(js));
+      KJ_SWITCH_ONEOF(*lock) {
+        KJ_CASE_ONEOF(v8Serialized, kj::Array<kj::byte>) {
+          return ExternalPusherImpl::PendingAbortReason(kj::heapArray<kj::byte>(v8Serialized));
+        }
+        KJ_CASE_ONEOF(exception, kj::Exception) {
+          return ExternalPusherImpl::PendingAbortReason(exception.clone());
+        }
       }
+      KJ_UNREACHABLE;
+    }();
+
+    KJ_IF_SOME(p, pending) {
+      KJ_SWITCH_ONEOF(p) {
+        KJ_CASE_ONEOF(v8Serialized, kj::Array<kj::byte>) {
+          jsg::Deserializer des(js, v8Serialized);
+          return kj::some(des.readValue(js));
+        }
+        KJ_CASE_ONEOF(exception, kj::Exception) {
+          return kj::some(js.exceptionToJsValue(kj::mv(exception)).getHandle(js));
+        }
+      }
+      KJ_UNREACHABLE;
     }
   }
 
