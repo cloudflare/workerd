@@ -2,6 +2,7 @@ load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("//:build/kj_test.bzl", "kj_test")
+load("//:build/rust_io_backend.bzl", "rust_io_backend_local_defines")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
@@ -67,6 +68,7 @@ wd_cc_binary(
     malloc = ":malloc",
     visibility = ["//visibility:public"],
     deps = [
+        ":cli-io-backend",
         ":cpp-capnp-schema",
         ":json-logger",
         ":server",
@@ -74,11 +76,35 @@ wd_cc_binary(
         ":workerd-capnp-schema",
         ":workerd_capnp",
         "//src/pyodide:pyodide_extra_capnp",
-        "//src/rust/cxx-integration",
         "//src/workerd/util:autogate",
         "//src/workerd/util:perfetto",
+        "//src/workerd/util:setup-async-io",
         "@capnp-cpp//src/capnp:capnpc",
     ],
+)
+
+# The CLI main()'s two backend-divergent I/O paths -- the --watch file watcher and the SIGTERM
+# graceful drain -- behind backend-agnostic entry points (workerd::server::makeFileWatcher /
+# captureSigterm / onSigterm), so workerd.c++ links them unchanged in both configs. The single
+# WORKERD_RUST_IO_BACKEND_RUST #if selecting the native kj loop vs the tokio loop lives entirely in
+# cli-io-backend.c++, mirroring //src/workerd/util:setup-async-io. Under --//:io_backend=rust this
+# supplies the tokio (kj-rs-io) backends; in the default cxx build it uses the native
+# kj::UnixEventPort watcher + signal handling.
+wd_cc_library(
+    name = "cli-io-backend",
+    srcs = ["cli-io-backend.c++"],
+    hdrs = ["cli-io-backend.h"],
+    local_defines = rust_io_backend_local_defines(),
+    visibility = ["//visibility:public"],
+    deps = select({
+        "//:io_backend_rust": [
+            "//deps:rust_runtime",
+            "//src/rust/cxx/kj-rs-io",
+            "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+            "@capnp-cpp//src/kj:kj-async-core",
+        ],
+        "//conditions:default": ["@capnp-cpp//src/kj:kj-async"],
+    }),
 )
 
 wd_cc_library(

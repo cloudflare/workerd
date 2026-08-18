@@ -144,7 +144,7 @@ class KjFileWatcher final: public FileWatcher {
 //
 // This version uses kqueue to watch for changes in files. kqueue typically doesn't scale well
 // to watching whole directory trees, since it must keep a file descriptor open for each watched
-
+// file. However, for our use case, we don't really want to watch a directory tree anyway, we
 // want to watch the specific set of files which were opened while parsing the config. This is
 // not so bad, probably.
 //
@@ -218,6 +218,7 @@ class KjFileWatcher final: public FileWatcher {
     change.flags = EV_ADD | EV_CLEAR;
     change.fflags = NOTE_WRITE | NOTE_EXTEND | NOTE_DELETE | NOTE_RENAME;
     KJ_SYSCALL(kevent(kqueueFd, &change, 1, nullptr, 0, nullptr));
+    filesWatched.add(kj::mv(fd));
   }
 };
 
@@ -238,6 +239,7 @@ class KjFileWatcher final: public FileWatcher {
   }
 
  private:
+};
 
 #else
 
@@ -257,6 +259,7 @@ class KjFileWatcher final: public FileWatcher {
   }
 
  private:
+};
 
 #endif  // #__linux__, #else
 
@@ -284,37 +287,37 @@ class TokioFileWatcher final: public FileWatcher {
 
  private:
   kj_rs_io::FileWatcher inner;
-
+};
 #endif  // WORKERD_RUST_IO_BACKEND_RUST
 
-  kj::Own<FileWatcher> makeFileWatcher([[maybe_unused]] kj::AsyncIoContext& io) {
+kj::Own<FileWatcher> makeFileWatcher([[maybe_unused]] kj::AsyncIoContext& io) {
 #if WORKERD_RUST_IO_BACKEND_RUST
-    // No UnixEventPort exists on the tokio loop; use the AsyncFd-backed watcher instead.
-    return kj::heap<TokioFileWatcher>();
+  // No UnixEventPort exists on the tokio loop; use the AsyncFd-backed watcher instead.
+  return kj::heap<TokioFileWatcher>();
 #elif _WIN32
   return kj::heap<KjFileWatcher>(io.win32EventPort);
 #else
   return kj::heap<KjFileWatcher>(io.unixEventPort);
 #endif
-  }
+}
 
 #if !_WIN32
-  void captureSigterm() {
+void captureSigterm() {
 #if !WORKERD_RUST_IO_BACKEND_RUST
-    kj::UnixEventPort::captureSignal(SIGTERM);
+  kj::UnixEventPort::captureSignal(SIGTERM);
 #endif
-    // Under --//:io_backend=rust this is a no-op: tokio's signal driver watches SIGTERM instead, and
-    // capturing it here would block the signal in the thread's mask and prevent the tokio handler
-    // from ever being invoked (there is no UnixEventPort under that backend anyway).
-  }
+  // Under --//:io_backend=rust this is a no-op: tokio's signal driver watches SIGTERM instead, and
+  // capturing it here would block the signal in the thread's mask and prevent the tokio handler
+  // from ever being invoked (there is no UnixEventPort under that backend anyway).
+}
 
-  kj::Promise<void> onSigterm([[maybe_unused]] kj::AsyncIoContext& io) {
+kj::Promise<void> onSigterm([[maybe_unused]] kj::AsyncIoContext& io) {
 #if WORKERD_RUST_IO_BACKEND_RUST
-    return kj_rs_io::onSignal(SIGTERM);
+  return kj_rs_io::onSignal(SIGTERM);
 #else
-    return io.unixEventPort.onSignal(SIGTERM).ignoreResult();
+  return io.unixEventPort.onSignal(SIGTERM).ignoreResult();
 #endif
-  }
+}
 #endif  // !_WIN32
 
 }  // namespace workerd::server
