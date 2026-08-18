@@ -178,19 +178,24 @@ pub mod repr {
             waker: &PollWaker,
             ret: *mut c_void,
         ) -> FuturePollStatus {
-            // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+            // SAFETY: per this fn's `# Safety` contract, `fut` is the `fut` field of a live
+            // `RustInfallibleFuture<T>`, i.e. a valid `*mut InfallibleFuturePtr<T>` to read+pin.
             let fut = unsafe { *(fut.cast::<InfallibleFuturePtr<T>>()) };
-            // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+            // SAFETY: the boxed future is never moved out of its allocation, so pinning is sound.
             let fut = unsafe { Pin::new_unchecked(&mut *fut) };
-            let waker = Waker::from(waker);
-            let mut context = Context::from_waker(&waker);
-            match fut.poll(&mut context) {
-                Poll::Ready(value) => {
-                    // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let waker = Waker::from(waker);
+                let mut context = Context::from_waker(&waker);
+                fut.poll(&mut context)
+            })) {
+                Ok(Poll::Ready(value)) => {
+                    // SAFETY: `ret` points to storage suitable for a `T` (Complete arm).
                     unsafe { std::ptr::write(ret.cast::<T>(), value) };
                     FuturePollStatus::COMPLETE
                 }
-                Poll::Pending => FuturePollStatus::PENDING,
+                Ok(Poll::Pending) => FuturePollStatus::PENDING,
+                // SAFETY: `ret` is the Error-arm storage; forwarded to `write_panic_as_exception`.
+                Err(panic_payload) => unsafe { write_panic_as_exception(ret, panic_payload) },
             }
         }
 
