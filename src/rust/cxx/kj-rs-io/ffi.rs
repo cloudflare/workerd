@@ -320,3 +320,100 @@ mod bridge {
         fn kj_stream_get_handle(stream: &KjAsyncIoStream) -> i64;
     }
 }
+
+// ======================================================================================
+// Raw socket handles / file descriptors.
+
+/// Materializes an owned file descriptor from a raw `i32` that arrived across the FFI bridge
+/// (the unix-only pipe tier — `wrap_input_fd`/`wrap_output_fd`; sockets go through
+/// [`own_socket_from_raw`]).
+///
+/// Callable from safe code: the invariant it relies on (`fd` is open and its ownership has been
+/// transferred to us) is structurally upheld by the cxx bridge — the C++ side normalizes KJ's
+/// `TAKE_OWNERSHIP` / `ALREADY_CLOEXEC` flags and dup's the fd when the caller is not handing
+/// over ownership. The returned `OwnedFd` becomes the sole owner and closes it on drop.
+#[cfg(unix)]
+#[must_use]
+pub fn own_fd_from_raw(fd: i32) -> std::os::fd::OwnedFd {
+    use std::os::fd::FromRawFd;
+    // `OwnedFd`'s invariant is "an open fd, never -1" (-1 is its niche), so a negative value
+    // here would be library-level UB rather than an error. C++ callers normalize through
+    // prepareFd, but its all-flags-set path (TAKE_OWNERSHIP|ALREADY_CLOEXEC|ALREADY_NONBLOCK)
+    // performs no syscall that would catch a bad fd — enforce the contract at THE conversion
+    // point instead of inheriting the UB.
+    assert!(fd >= 0, "invalid fd crossed the FFI bridge: {fd}");
+    // Safety: per the bridge contract `fd` is open and owned by us from this point on.
+    unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) }
+}
+
+/// Materializes an owned socket from a raw OS socket handle that arrived across the FFI bridge
+/// as an `i64`: a Unix fd here, a win32 `SOCKET` in the `cfg(windows)` twin below. This is THE
+/// one platform conversion point — behind it everything is a uniform `socket2::Socket` /
+/// std/tokio socket type.
+///
+/// Callable from safe code: the invariant it relies on (`handle` is an open socket whose
+/// ownership has been transferred to us) is structurally upheld by the cxx bridge — the C++
+/// side normalizes KJ's fd-wrapping flags, dup'ing when the caller is not handing over
+/// ownership. The returned socket becomes the sole owner and closes it on drop.
+#[cfg(unix)]
+#[must_use]
+pub fn own_socket_from_raw(handle: i64) -> socket2::Socket {
+    // A unix fd is a non-negative int: the bridge widened it losslessly to i64, so the
+    // narrowing back to i32 cannot truncate for any legitimate handle. Enforce that (rejecting
+    // -1/garbage) here at THE conversion point rather than inheriting `OwnedFd`'s niche UB.
+    assert!(
+        (0..=i64::from(i32::MAX)).contains(&handle),
+        "invalid socket fd crossed the FFI bridge: {handle}"
+    );
+    #[expect(clippy::cast_possible_truncation)]
+    let fd = handle as i32;
+    socket2::Socket::from(own_fd_from_raw(fd))
+}
+
+/// The `cfg(windows)` twin of [`own_socket_from_raw`]: the raw handle is a winsock `SOCKET`
+/// (`u64`-shaped `RawSocket`; a live SOCKET fits in an `i64` without colliding with the -1
+/// sentinel, which is `INVALID_SOCKET` and never crosses the bridge as an owned handle).
+// Validated by Windows CI; mirrors the unix arm.
+#[cfg(windows)]
+#[must_use]
+pub fn own_socket_from_raw(handle: i64) -> socket2::Socket {
+    use std::os::windows::io::FromRawSocket;
+    use std::os::windows::io::OwnedSocket;
+    use std::os::windows::io::RawSocket;
+    // Live SOCKET values are non-negative in i64 (the -1 sentinel is INVALID_SOCKET, which
+    // `OwnedSocket` forbids as its niche and which must never cross the bridge as an owned
+    // handle) — enforce at THE conversion point rather than inheriting the niche UB.
+    assert!(
+        handle >= 0,
+        "invalid SOCKET crossed the FFI bridge: {handle}"
+    );
+    // The bridge carries the SOCKET's bits verbatim.
+    #[allow(clippy::cast_sign_loss)]
+    let raw = handle as RawSocket;
+    // Safety: per the bridge contract `handle` is an open SOCKET owned by us from this point on.
+    let owned = unsafe { OwnedSocket::from_raw_socket(raw) };
+    socket2::Socket::from(owned)
+}
+
+/// Duplicates a *borrowed* raw fd into an independently-owned fd (`F_DUPFD_CLOEXEC`), for the
+/// handle tier of [`take_kj_socket`]: the kj stream keeps its own fd, we get a fresh dup.
+///
+/// Unix only, deliberately: no windows twin is needed. The handle tier only fires for *foreign*
+/// handle-backed kj streams, and under the all-rust mode on Windows every socket-backed stream
+/// originates in kj-rs-io (tier-1 unwrap); the other in-process dup users don't dup on windows
+/// either (`when_write_disconnected` is unix-only — never-resolving on windows, KJ parity — and
+/// windows `shutdown_write` borrows via `SockRef` instead of dup'ing). If a windows twin is
+/// ever needed, `std::os::windows::io::BorrowedSocket::try_clone_to_owned`
+/// (`WSADuplicateSocketW`) is the same-process equivalent.
+///
+/// # Errors
+///
+/// Returns the `dup()` `io::Error` (mapped to a `kj::Exception`) if the syscall fails.
+#[cfg(unix)]
+pub fn dup_raw_fd(fd: i32) -> Result<std::os::fd::OwnedFd> {
+    // Safety: the caller (take_kj_socket) holds the kj stream, which keeps `fd` open for the
+    // duration of the call; we immediately dup it into an independently-owned fd.
+    unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) }
+        .try_clone_to_owned()
+        .map_err(op("dup()"))
+}
