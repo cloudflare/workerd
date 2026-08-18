@@ -1,3 +1,8 @@
+//! FFI island (see crate-root `#![deny(unsafe_code)]`): placement bridge for the C++
+//! `GuardedRustPromiseAwaiter` and the `.await` poll glue — Pin projection and placement
+//! new/drop over Rust-owned memory. A genuine unsafe seam.
+#![allow(unsafe_code)]
+
 use std::mem::MaybeUninit;
 use std::pin::Pin;
 use std::task::Context;

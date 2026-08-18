@@ -1,3 +1,10 @@
+//! FFI island (see crate-root `#![deny(unsafe_code)]`): the two `RawWakerVTable`s bridging the
+//! C++ wakers into `std::task::Waker`. `std`'s vtable ABI is four raw-pointer functions, so this
+//! file is where ownership must round-trip through a raw `RawWaker` data slot — everywhere else
+//! (including the whole C++ interface) waker ownership is a real `kj::Rc` handle. A genuine unsafe
+//! seam.
+#![allow(unsafe_code)]
+
 use std::task::RawWaker;
 use std::task::RawWakerVTable;
 use std::task::Waker;

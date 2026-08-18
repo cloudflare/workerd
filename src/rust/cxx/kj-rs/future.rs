@@ -1,3 +1,8 @@
+//! FFI island (see crate-root `#![deny(unsafe_code)]`): the `RustFuture` C-ABI vtable that drives
+//! all bridged async — `unsafe extern "C"` poll/drop callbacks, raw-pointer result writes, and
+//! `Pin`/`Box` raw conversions. A genuine unsafe seam.
+#![allow(unsafe_code)]
+
 // This file contains boilerplate which must occur once per crate, rather than once per type.
 
 use std::pin::Pin;
