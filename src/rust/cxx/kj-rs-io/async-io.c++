@@ -446,4 +446,85 @@ class TokioOutputStreamFd final: public kj::AsyncOutputStream {
 
 }  // namespace
 
+kj::Own<kj::AsyncInputStream> TokioLowLevelAsyncIoProvider::wrapInputFd(Fd fd, kj::uint flags) {
+#if _WIN32
+  // KJ parity: on win32, LowLevelAsyncIoProvider::Fd is documented as a SOCKET (async-io.h:
+  // "On Windows, the `fd` parameter to each of these methods must be a SOCKET"), and kj's own
+  // win32 provider implements wrapInputFd/wrapOutputFd *identically* to wrapSocketFd
+  // (async-io-win32.c++: all three wrap the SOCKET in AsyncStreamFd) -- even kj's "pipes" on
+  // Windows are loopback-TCP socketpairs (newOsSocketpair). So there is no pipe-HANDLE tier to
+  // implement; delegate to the tested socket path. Validated by Windows CI.
+  return kj::heap<TokioAsyncIoStream>(wrap_socket_fd(static_cast<int64_t>(prepareFd(fd, flags))));
+#else
+  return kj::heap<TokioInputStreamFd>(wrap_input_fd(prepareFd(fd, flags)));
+#endif
+}
+
+kj::Own<kj::AsyncOutputStream> TokioLowLevelAsyncIoProvider::wrapOutputFd(Fd fd, kj::uint flags) {
+#if _WIN32
+  // See wrapInputFd above: win32 Fd is a SOCKET and kj's win32 wrapOutputFd == wrapSocketFd.
+  // Validated by Windows CI.
+  return kj::heap<TokioAsyncIoStream>(wrap_socket_fd(static_cast<int64_t>(prepareFd(fd, flags))));
+#else
+  return kj::heap<TokioOutputStreamFd>(wrap_output_fd(prepareFd(fd, flags)));
+#endif
+}
+
+kj::Own<kj::AsyncIoStream> TokioLowLevelAsyncIoProvider::wrapSocketFd(Fd fd, kj::uint flags) {
+  // `Fd` is int on unix and uintptr_t (SOCKET) on win32; the bridge carries it widened to
+  // int64 (a "raw socket handle") either way, with -1 == INVALID_SOCKET as the one sentinel.
+  return kj::heap<TokioAsyncIoStream>(wrap_socket_fd(static_cast<int64_t>(prepareFd(fd, flags))));
+}
+
+kj::Promise<kj::Own<kj::AsyncIoStream>> TokioLowLevelAsyncIoProvider::wrapConnectingSocketFd(
+    Fd fd, const struct sockaddr *addr, kj::uint addrlen, kj::uint flags) {
+  int64_t prepared = static_cast<int64_t>(prepareFd(fd, flags));
+  // The Rust side takes an owned copy of the sockaddr: the caller's pointer need not outlive
+  // this call (KJ's own implementation copies too).
+  ::rust::Vec<uint8_t> addrCopy;
+  addrCopy.reserve(addrlen);
+  const uint8_t *addrBytes = reinterpret_cast<const uint8_t *>(addr);
+  for (kj::uint i = 0; i < addrlen; i++) {
+    addrCopy.push_back(addrBytes[i]);
+  }
+  return wrap_connecting_socket_fd(prepared, kj::mv(addrCopy))
+      .then([](::rust::Box<TokioStream> stream) -> kj::Own<kj::AsyncIoStream> {
+    return kj::heap<TokioAsyncIoStream>(kj::mv(stream));
+  });
+}
+
+kj::Own<kj::ConnectionReceiver> TokioLowLevelAsyncIoProvider::wrapListenSocketFd(
+    Fd fd, NetworkFilter &filter, kj::uint flags) {
+  // `filter` applies to accepted connections (KJ parity); it must outlive the receiver.
+  return kj::heap<TokioConnectionReceiver>(
+      wrap_listen_fd(static_cast<int64_t>(prepareFd(fd, flags))), filter);
+}
+
+// =======================================================================================
+// TokioAsyncIoProvider / setup
+
+kj::AsyncIoProvider::PipeThread TokioAsyncIoProvider::newPipeThread(
+    kj::Function<void(kj::AsyncIoProvider &, kj::AsyncIoStream &, kj::WaitScope &)> startFunc) {
+  KJ_UNIMPLEMENTED("kj-rs-io does not implement newPipeThread() (workerd does not use it)");
+}
+
+TokioAsyncIoContext setupTokioAsyncIo() {
+  auto port = kj::heap<kj_rs_tokio::TokioEventPort>();
+  auto loop = kj::heap<kj::EventLoop>(*port);
+  auto waitScope = kj::heap<kj::WaitScope>(*loop);
+  auto lowLevelProvider = kj::heap<TokioLowLevelAsyncIoProvider>(port->getTimer());
+  auto provider = kj::heap<TokioAsyncIoProvider>(port->getTimer());
+  return TokioAsyncIoContext{
+    kj::mv(port), kj::mv(loop), kj::mv(waitScope), kj::mv(lowLevelProvider), kj::mv(provider)};
+}
+
+// =======================================================================================
+// Signals
+
+kj::Promise<void> onSignal(int signum) {
+  // The bridged future is eager-by-default, so the tokio signal handler is registered as soon
+  // as the event loop runs, even if the caller parks the promise without awaiting it immediately.
+  return wait_for_signal(signum);
+}
+
 }  // namespace kj_rs_io
