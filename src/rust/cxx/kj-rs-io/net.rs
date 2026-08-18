@@ -219,3 +219,61 @@ impl TokioAddress {
         Ok(crate::ffi::sockaddr_to_bytes(&sockaddr))
     }
 }
+
+impl TokioAddress {
+    fn listen(&self) -> Result<Box<TokioListener>> {
+        let handle = runtime_handle()?;
+        match &self.spec {
+            Spec::Ip { addrs, wildcard } => {
+                let addr = *addrs
+                    .first()
+                    .ok_or_else(|| KjIoError::other("listen()", "no addresses to bind"))?;
+                let domain = socket2::Domain::for_address(addr);
+                let socket = socket2::Socket::new(domain, socket2::Type::STREAM, None)
+                    .map_err(op("socket()"))?;
+                // KJ parity: SO_REUSEADDR on listeners; wildcard sockets accept both address
+                // families (IPV6_V6ONLY off).
+                socket.set_reuse_address(true).map_err(op("setsockopt()"))?;
+                if *wildcard {
+                    socket.set_only_v6(false).map_err(op("setsockopt()"))?;
+                }
+                socket.bind(&addr.into()).map_err(op("bind()"))?;
+                socket.listen(LISTEN_BACKLOG).map_err(op("listen()"))?;
+                socket.set_nonblocking(true).map_err(op("fcntl()"))?;
+                // Registering with the I/O driver requires the runtime context.
+                let _guard = handle.enter();
+                let listener = TcpListener::from_std(socket.into()).map_err(op("wrap listener"))?;
+                Ok(Box::new(TokioListener {
+                    inner: ListenerInner::Tcp(listener),
+                }))
+            }
+            #[cfg(unix)]
+            Spec::Unix { path } => {
+                // Like KJ, no unlink(): binding an existing path fails.
+                let listener =
+                    std::os::unix::net::UnixListener::bind(path).map_err(op("bind()"))?;
+                listener.set_nonblocking(true).map_err(op("fcntl()"))?;
+                let _guard = handle.enter();
+                let listener = UnixListener::from_std(listener).map_err(op("wrap listener"))?;
+                Ok(Box::new(TokioListener {
+                    inner: ListenerInner::Unix(listener),
+                }))
+            }
+        }
+    }
+
+    fn to_display_string(&self) -> String {
+        match &self.spec {
+            Spec::Ip { addrs, wildcard } => {
+                if *wildcard {
+                    format!("*:{}", addrs[0].port())
+                } else {
+                    let parts: Vec<String> = addrs.iter().map(ToString::to_string).collect();
+                    parts.join(",")
+                }
+            }
+            #[cfg(unix)]
+            Spec::Unix { path } => format!("unix:{}", path.display()),
+        }
+    }
+}
