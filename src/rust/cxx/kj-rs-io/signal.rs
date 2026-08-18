@@ -72,7 +72,6 @@ pub async fn wait_for_signal(signum: i32) -> Result<()> {
         })
         .await
     }
-
     // Validated by Windows CI.
     //
     // Same forwarding-task pattern as the unix arm, for the Windows flavor of the same hazard:
@@ -134,7 +133,6 @@ pub async fn wait_for_signal(signum: i32) -> Result<()> {
         })
         .await
     }
-
     #[cfg(not(any(unix, windows)))]
     {
         let _ = signum;
