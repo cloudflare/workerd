@@ -56,3 +56,37 @@ def _forbidden_suffix(label_str):
         if label_str.endswith(suffix):
             return suffix
     return None
+
+def _rust_io_forbidden_aspect_impl(target, ctx):
+    label_str = str(target.label)
+    paths = {}
+
+    hit = _forbidden_suffix(label_str)
+    if hit != None:
+        paths[hit] = [label_str]
+
+    # Scan ctx.rule.attr generically (attr_aspects = ["*"]) rather than enumerating
+    # deps/implementation_deps/etc. per rule kind.
+    for attr_name in dir(ctx.rule.attr):
+        value = getattr(ctx.rule.attr, attr_name)
+        dep_targets = []
+        if type(value) == "list":
+            for item in value:
+                if type(item) == "Target":
+                    dep_targets.append(item)
+        elif type(value) == "Target":
+            dep_targets.append(value)
+
+        for dep in dep_targets:
+            if RustIoForbiddenInfo in dep:
+                for forbidden, subpath in dep[RustIoForbiddenInfo].paths.items():
+                    if forbidden not in paths:
+                        paths[forbidden] = [label_str] + subpath
+
+    return [RustIoForbiddenInfo(paths = paths)]
+
+rust_io_forbidden_aspect = aspect(
+    implementation = _rust_io_forbidden_aspect_impl,
+    attr_aspects = ["*"],
+    doc = "Propagates RustIoForbiddenInfo up the dependency graph.",
+)
