@@ -177,4 +177,21 @@ struct FileWatcher::Impl {
 
 #else
 
+// isSupported() returns false, which workerd surfaces as a clean CLI error for --watch
+// ("File watching is not yet implemented on your OS") rather than a crash. A real Windows
+// backend (e.g. ReadDirectoryChangesW, perhaps via the notify crate) is a potential follow-up.
+struct FileWatcher::Impl {
+  bool isSupported() {
+    return false;
+  }
+
+  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile &> file) {}
+
+  kj::Promise<void> onChange() {
+    return kj::NEVER_DONE;
+  }
+};
+
+#endif
+
 }  // namespace kj_rs_io
