@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { ok, strictEqual, throws } from 'node:assert';
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert';
 
 import { mock } from 'node:test';
 
@@ -150,3 +150,68 @@ export const postMessageRpcTarget = {
 // and we might not ever. Need to investigate this further but it's not blocking us
 // right now.
 // * https://github.com/web-platform-tests/wpt/blob/master/webmessaging/message-channels/close-event/garbage-collected.tentative.any.js
+
+// The onmessage handler occupies a normal position in the listener list based on when it
+// was first assigned, per HTML's event handler semantics.
+export const onmessagePositionalOrdering = {
+  async test() {
+    const { port1, port2 } = new MessageChannel();
+    const order = [];
+    const { promise, resolve } = Promise.withResolvers();
+
+    port2.addEventListener('message', () => order.push('a'));
+    const b1 = () => order.push('b1');
+    port2.onmessage = b1;
+    strictEqual(port2.onmessage, b1);
+    port2.addEventListener('message', () => order.push('c'));
+
+    // Reassignment keeps the original position.
+    port2.onmessage = () => order.push('b2');
+
+    port2.addEventListener('message', () => resolve());
+    port1.postMessage('hello');
+    await promise;
+    deepStrictEqual(order, ['a', 'b2', 'c']);
+  },
+};
+
+// Clearing onmessage and assigning it again takes a fresh position at the end of the
+// listener list.
+export const onmessageClearedTakesFreshPosition = {
+  async test() {
+    const { port1, port2 } = new MessageChannel();
+    const order = [];
+    const { promise, resolve } = Promise.withResolvers();
+
+    port2.onmessage = () => order.push('handler1');
+    port2.addEventListener('message', () => order.push('listener'));
+
+    port2.onmessage = null;
+    strictEqual(port2.onmessage, null);
+    port2.onmessage = () => order.push('handler2');
+
+    port2.addEventListener('message', () => resolve());
+    port1.postMessage('hello');
+    await promise;
+    deepStrictEqual(order, ['listener', 'handler2']);
+  },
+};
+
+// Assigning a non-callable object to onmessage retains it as the attribute value and
+// enables the port's message queue, but the object is never invoked: messages delivered
+// while it is assigned are consumed and dropped.
+export const onmessageNonCallableStartsPort = {
+  async test() {
+    const { port1, port2 } = new MessageChannel();
+    const obj = {};
+    port2.onmessage = obj;
+    strictEqual(port2.onmessage, obj);
+    port1.postMessage('lost');
+    await scheduler.wait(10);
+
+    const { promise, resolve } = Promise.withResolvers();
+    port2.onmessage = (event) => resolve(event.data);
+    port1.postMessage('kept');
+    strictEqual(await promise, 'kept');
+  },
+};

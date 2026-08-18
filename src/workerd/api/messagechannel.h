@@ -84,7 +84,8 @@ class MessagePort final: public EventTarget {
   // separately. That's a kind of a weird rule but ok. To support
   // that we need to define an onmessage getter/setter pair.
   kj::Maybe<jsg::JsValue> getOnMessage(jsg::Lock& js);
-  void setOnMessage(jsg::Lock& js, jsg::JsValue value);
+  void setOnMessage(
+      jsg::Lock& js, jsg::Optional<kj::OneOf<EventTarget::HandlerFunction, jsg::JsValue>> handler);
 
   JSG_RESOURCE_TYPE(MessagePort) {
     JSG_INHERIT(EventTarget);
@@ -129,13 +130,11 @@ class MessagePort final: public EventTarget {
   // To keep them both alive, maintain strong references to both
   // ports!
   kj::Maybe<jsg::WeakRef<MessagePort>> other;
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> onmessageValue;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     KJ_IF_SOME(pending, state.tryGet<Pending>()) {
       visitor.visitAll(pending);
     }
-    visitor.visit(onmessageValue);
   }
 };
 
