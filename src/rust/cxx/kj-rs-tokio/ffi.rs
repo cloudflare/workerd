@@ -55,6 +55,7 @@ mod bridge {
         fn notify_runnable(&self);
     }
 }
+
 /// Opts the timer thread out of OS timer-coalescing slop as far as an unprivileged process
 /// can. On macOS, default-QoS threads get proportional timer leeway (~25-30% observed:
 /// a 500 µs `mach_wait_until` overshoots by ~150 µs); `QOS_CLASS_USER_INTERACTIVE` shrinks
@@ -93,6 +94,7 @@ pub fn boost_current_thread_priority() {
 
 #[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
 pub fn boost_current_thread_priority() {}
+
 /// Sleeps until `deadline` using `mach_wait_until`, which takes an *absolute* time in mach
 /// tick units and honors it with microsecond-level precision (relative `nanosleep` on macOS
 /// is subject to aggressive timer coalescing).
@@ -132,6 +134,7 @@ pub fn sleep_until(deadline: Instant) {
         let _ = mach_wait_until(mach_absolute_time().saturating_add(ticks));
     }
 }
+
 /// Sleeps until `deadline` using `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME)`, which
 /// is backed by hrtimers (microsecond-level precision, subject only to the default ~50 µs
 /// timer slack).
@@ -195,6 +198,7 @@ pub fn sleep_until(deadline: Instant) {
         }
     }
 }
+
 /// Portable fallback for other unixes: plain relative sleep (coarser, but still typically
 /// far better than a ~1 ms timer wheel).
 #[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
