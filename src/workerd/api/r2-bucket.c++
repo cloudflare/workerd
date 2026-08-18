@@ -25,22 +25,6 @@
 #include <regex>
 
 namespace workerd::api::public_beta {
-kj::Own<kj::HttpClient> r2GetClient(
-    IoContext& context, uint subrequestChannel, R2UserTracing user) {
-  TraceContext traceContext = context.makeUserTraceSpan(user.op);
-  traceContext.setTag("rpc.service"_kjc, "r2"_kjc);
-  traceContext.setTag(user.method.key, user.method.value);
-  KJ_IF_SOME(b, user.bucket) {
-    traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
-  }
-  KJ_IF_SOME(tag, user.extraTag) {
-    traceContext.setTag(tag.key, tag.value);
-  }
-
-  // TODO(o11y): Attach trace context to awaitIo call to match operation lifetime better?
-  return context.getHttpClient(subrequestChannel, true, kj::none, traceContext)
-      .attach(kj::mv(traceContext));
-}
 
 kj::Own<kj::HttpClient> R2Bucket::getHttpClient(IoContext& context, TraceContext& traceContext) {
   KJ_SWITCH_ONEOF(clientChannel) {

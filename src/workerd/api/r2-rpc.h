@@ -106,7 +106,6 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js,
     kj::Own<kj::HttpClient> client,
     kj::Maybe<R2PutValue> value,
     kj::Maybe<uint64_t> streamSize,
-    // Deprecated. For internal beta API only.
     kj::String metadataPayload,
     kj::ArrayPtr<kj::StringPtr> path,
     kj::Maybe<kj::StringPtr> jwt);
