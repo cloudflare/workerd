@@ -405,6 +405,45 @@ int prepareFd(int fd, kj::uint flags) {
   return fd;
 }
 
+class TokioInputStreamFd final: public kj::AsyncInputStream {
+ public:
+  explicit TokioInputStreamFd(::rust::Box<TokioInputFd> inner): inner(kj::mv(inner)) {}
+
+  kj::Promise<size_t> tryRead(void *buffer, size_t minBytes, size_t maxBytes) override {
+    return input_fd_try_read(
+        *inner, ::rust::Slice<uint8_t>(reinterpret_cast<uint8_t *>(buffer), maxBytes), minBytes);
+  }
+
+ private:
+  ::rust::Box<TokioInputFd> inner;
+};
+
+// kj::AsyncOutputStream over an arbitrary writable fd.
+class TokioOutputStreamFd final: public kj::AsyncOutputStream {
+ public:
+  explicit TokioOutputStreamFd(::rust::Box<TokioOutputFd> inner): inner(kj::mv(inner)) {}
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    return output_fd_write(*inner, ::rust::Slice<const uint8_t>(buffer.begin(), buffer.size()));
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    for (auto piece: pieces) {
+      co_await write(piece);
+    }
+  }
+
+  // Pipes/arbitrary fds have no portable disconnect detection here; KJ allows a never-resolving
+  // promise for such streams.
+  kj::Promise<void> whenWriteDisconnected() override {
+    return kj::NEVER_DONE;
+  }
+
+ private:
+  ::rust::Box<TokioOutputFd> inner;
+};
+#endif  // _WIN32 (prepareFd platform arms; the pipe-fd stream classes above are unix-only)
+
 }  // namespace
 
 }  // namespace kj_rs_io
