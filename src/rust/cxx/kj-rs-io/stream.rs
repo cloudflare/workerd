@@ -154,3 +154,68 @@ impl TokioStream {
         Ok(())
     }
 }
+
+impl TokioStream {
+    /// Resolves once new writes are doomed to fail (peer reset / hangup observed).
+    ///
+    /// tokio has no direct primitive for this, so we register a *duplicate* of the socket fd
+    /// with the I/O driver for WRITABLE interest and wait — explicitly clearing plain-writable
+    /// readiness — until the OS reports write-closed (kqueue: `EV_EOF` on the write filter;
+    /// epoll: `EPOLLHUP`/`EPOLLERR`) or an error. Like KJ's own implementation this does *not*
+    /// fire on a mere half-close (peer FIN / `EPOLLRDHUP`): reads hitting EOF must not count as
+    /// write-disconnect.
+    ///
+    /// Windows behavior (see the arm below): a never-resolving future, which IS KJ
+    /// parity — KJ's *current* Windows behavior (`whenWriteDisconnected` returns `NEVER_DONE`).
+    /// Win32 has no documented primitive for detecting disconnect without a read/write; KJ's own
+    /// TODO points at the undocumented-but-stable `IOCTL_AFD_POLL` ioctl (capnproto
+    /// `async-io-win32.c++:289` — the mechanism `select()` itself is built on). An AFD-poll
+    /// implementation remains an optional upgrade over this documented parity behavior.
+    #[cfg(unix)]
+    async fn when_write_disconnected(&self) -> Result<()> {
+        use std::os::fd::AsRawFd;
+
+        // Borrow the live socket's fd directly (tokio streams implement `AsFd`) and dup it, so
+        // no raw fd is ever materialized without an owner.
+        let borrowed = self.as_borrowed_fd()?;
+        let owned = borrowed.try_clone_to_owned().map_err(op("dup()"))?;
+        debug_assert_ne!(owned.as_raw_fd(), borrowed.as_raw_fd());
+        // The dup shares the underlying open socket (and its O_NONBLOCK status), but has its own
+        // registration with the I/O driver, so clearing readiness here never disturbs reads or
+        // writes on the primary registration.
+        let async_fd = tokio::io::unix::AsyncFd::with_interest(owned, Interest::WRITABLE)
+            .map_err(op("whenWriteDisconnected"))?;
+        loop {
+            let mut guard = async_fd
+                .ready(Interest::WRITABLE)
+                .await
+                .map_err(op("whenWriteDisconnected"))?;
+            let ready = guard.ready();
+            if ready.is_write_closed() || ready.is_error() {
+                return Ok(());
+            }
+            // Plain "writable": clear it so the next wait sleeps until an actual state-change
+            // event (edge-triggered), rather than spinning on an always-writable socket.
+            guard.clear_ready();
+        }
+    }
+
+    /// Never resolves: KJ parity, not a gap — capnproto's win32 `whenWriteDisconnected` returns
+    /// `NEVER_DONE` today (its `IOCTL_AFD_POLL` idea is only a TODO; see the Windows-behavior note
+    /// on the unix arm above). Validated by Windows CI.
+    #[cfg(windows)]
+    async fn when_write_disconnected(&self) -> Result<()> {
+        self.inner()?;
+        std::future::pending::<()>().await;
+        unreachable!()
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    async fn when_write_disconnected(&self) -> Result<()> {
+        self.inner()?;
+        Err(KjIoError::other(
+            "whenWriteDisconnected",
+            "not implemented by kj-rs-io on this platform",
+        ))
+    }
+}
