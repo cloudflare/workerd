@@ -231,3 +231,40 @@ impl Drop for HiResTimer {
         }
     }
 }
+#[cfg(unix)]
+fn hires_timer_main(shared: &HiResShared) {
+    ffi::boost_current_thread_priority();
+    let mut req = shared
+        .request
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    loop {
+        if req.shutdown {
+            return;
+        }
+        if let Some(deadline) = req.deadline.take() {
+            let generation = req.generation;
+            drop(req);
+            ffi::sleep_until(deadline);
+            req = shared
+                .request
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if req.shutdown {
+                return;
+            }
+            if req.generation == generation {
+                // Still the request we were armed with: unblock the loop thread. `Notify`
+                // stores a permit if the loop has not reached `notified()` yet, so this wakeup
+                // cannot be lost.
+                shared.port.notify.notify_one();
+            }
+        } else {
+            // Nothing armed: park until the next arm() or shutdown. Zero CPU while idle.
+            req = shared
+                .condvar
+                .wait(req)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+}
