@@ -93,3 +93,42 @@ pub fn boost_current_thread_priority() {
 
 #[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
 pub fn boost_current_thread_priority() {}
+/// Sleeps until `deadline` using `mach_wait_until`, which takes an *absolute* time in mach
+/// tick units and honors it with microsecond-level precision (relative `nanosleep` on macOS
+/// is subject to aggressive timer coalescing).
+#[cfg(target_os = "macos")]
+pub fn sleep_until(deadline: Instant) {
+    use core::ffi::c_int;
+    use std::sync::OnceLock;
+
+    #[repr(C)]
+    struct MachTimebaseInfo {
+        numer: u32,
+        denom: u32,
+    }
+    unsafe extern "C" {
+        fn mach_absolute_time() -> u64;
+        fn mach_timebase_info(info: *mut MachTimebaseInfo) -> c_int;
+        fn mach_wait_until(deadline: u64) -> c_int;
+    }
+    static TIMEBASE: OnceLock<(u64, u64)> = OnceLock::new();
+
+    let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+        return;
+    };
+    let &(numer, denom) = TIMEBASE.get_or_init(|| {
+        let mut info = MachTimebaseInfo { numer: 0, denom: 0 };
+        // Safety: `info` is a valid out-pointer for the duration of the call.
+        let rc = unsafe { mach_timebase_info(&raw mut info) };
+        assert_eq!(rc, 0, "mach_timebase_info failed");
+        (u64::from(info.numer), u64::from(info.denom))
+    });
+    // mach ticks -> ns is `ticks * numer / denom`, so ns -> ticks is `ns * denom / numer`.
+    let nanos = u64::try_from(remaining.as_nanos()).unwrap_or(u64::MAX);
+    let ticks = u64::try_from(u128::from(nanos) * u128::from(denom) / u128::from(numer))
+        .unwrap_or(u64::MAX);
+    // Safety: no memory crosses the boundary; both calls are simple syscall wrappers.
+    unsafe {
+        let _ = mach_wait_until(mach_absolute_time().saturating_add(ticks));
+    }
+}
