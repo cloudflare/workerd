@@ -64,6 +64,10 @@ rust_cxx_bridge(
     deps = [
         "//src/rust/cxx:core",
         "@capnp-cpp//src/kj:kj",
+        # kj-rs is the base cxx<->rust Promise/Future bridge: it uses only the abstract async
+        # core (kj::Promise / kj::EventLoop via async.h), no kj OS I/O. Depending on
+        # :kj-async-core (not the :kj-async umbrella) keeps the whole kj-rs stack -- and thus
+        # kj-rs-io / kj-rs-tokio built on it -- off the concrete kj OS event loop (:kj-async-os).
         "@capnp-cpp//src/kj:kj-async-core",
     ],
 )
