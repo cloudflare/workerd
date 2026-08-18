@@ -219,3 +219,42 @@ impl TokioStream {
         ))
     }
 }
+
+impl TokioStream {
+    fn shutdown_write(&self) -> Result<()> {
+        #[cfg(unix)]
+        {
+            let dup = self
+                .as_borrowed_fd()?
+                .try_clone_to_owned()
+                .map_err(op("dup()"))?;
+            // shutdown() acts on the socket itself, so performing it through a dup'd fd
+            // affects the shared socket, and dropping the dup only closes the duplicate.
+            let result = match self.inner()? {
+                Inner::Tcp(_) => std::net::TcpStream::from(dup).shutdown(std::net::Shutdown::Write),
+                Inner::Unix(_) => {
+                    std::os::unix::net::UnixStream::from(dup).shutdown(std::net::Shutdown::Write)
+                }
+            };
+            result.map_err(op("shutdown(SHUT_WR)"))
+        }
+        // Validated by Windows CI; mirrors the unix arm. No dup: `with_sock_ref` borrows the
+        // live socket (`SockRef`), and winsock `shutdown` acts on the underlying socket either
+        // way — the unix arm dups only because std's `shutdown` is a method on owning types,
+        // whereas the windows `BorrowedSocket::try_clone_to_owned` equivalent
+        // (WSADuplicateSocketW) would be strictly heavier than the borrow.
+        #[cfg(windows)]
+        {
+            self.with_sock_ref("shutdown(SD_SEND)", |sock| {
+                sock.shutdown(std::net::Shutdown::Write)
+            })
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            Err(KjIoError::other(
+                "shutdownWrite",
+                "not implemented on this platform",
+            ))
+        }
+    }
+}
