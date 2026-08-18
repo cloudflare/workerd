@@ -34,128 +34,19 @@ constexpr bool isSpecialEventType(kj::StringPtr type) {
 }
 }  // namespace
 
-EventTarget::NativeHandler::NativeHandler(
-    jsg::Lock& js, EventTarget& target, kj::String type, jsg::Function<Signature> func, bool once)
-    : type(kj::mv(type)),
-      state(State{
-        .target = target,
-        .func = kj::mv(func),
-      }),
-      once(once) {
-  target.addNativeListener(js, *this);
-}
-
-EventTarget::NativeHandler::~NativeHandler() noexcept(false) {
-  detach();
-}
-
-void EventTarget::NativeHandler::operator()(jsg::Lock& js, jsg::Ref<Event> event) {
-  KJ_IF_SOME(s, state) {
-    if (once) {
-      auto fn = kj::mv(s.func);
-      detach();
-      fn(js, kj::mv(event));
-      // Note that the function may have detached itself and caused the NativeHandler
-      // to be destroyed. Let's be careful not to touch it after this point.
-    } else {
-      s.func(js, kj::mv(event));
-    }
-    return;
-  }
-}
-
-uint EventTarget::NativeHandler::hashCode() const {
-  return kj::hashCode(this);
-}
-
-void EventTarget::NativeHandler::visitForGc(jsg::GcVisitor& visitor) {
-  KJ_IF_SOME(s, state) {
-    visitor.visit(s.func);
-  }
-}
-
-void EventTarget::NativeHandler::detach() {
-  KJ_IF_SOME(s, state) {
-    s.target.removeNativeListener(*this);
-    state = kj::none;
-  }
-}
-
-kj::Own<void> EventTarget::newNativeHandler(
-    jsg::Lock& js, kj::String type, jsg::Function<void(jsg::Ref<Event>)> func, bool once) {
-  return kj::heap<EventTarget::NativeHandler>(js, *this, kj::mv(type), kj::mv(func), once);
-}
-
-const EventTarget::EventHandler::Handler& EventTarget::EventHandlerHashCallbacks::keyForRow(
+const jsg::HashableV8Ref<v8::Object>& EventTarget::EventHandlerHashCallbacks::keyForRow(
     const kj::Own<EventHandler>& row) const {
-  // The key for each EventHandler struct is the handler, which is a kj::OneOf
-  // of either a JavaScriptHandler or NativeHandler.
-  return row->handler;
+  return row->identity;
 }
 
 bool EventTarget::EventHandlerHashCallbacks::matches(
     const kj::Own<EventHandler>& a, const jsg::HashableV8Ref<v8::Object>& b) const {
-  KJ_IF_SOME(jsA, a->handler.tryGet<EventHandler::JavaScriptHandler>()) {
-    return jsA.identity == b;
-  }
-  return false;
-}
-
-bool EventTarget::EventHandlerHashCallbacks::matches(
-    const kj::Own<EventHandler>& a, const NativeHandler& b) const {
-  KJ_IF_SOME(ref, a->handler.tryGet<EventHandler::NativeHandlerRef>()) {
-    return &ref.handler == &b;
-  }
-  return false;
-}
-
-bool EventTarget::EventHandlerHashCallbacks::matches(
-    const kj::Own<EventHandler>& a, const EventHandler::NativeHandlerRef& b) const {
-  return matches(a, b.handler);
-}
-
-bool EventTarget::EventHandlerHashCallbacks::matches(
-    const kj::Own<EventHandler>& a, const EventHandler::Handler& b) const {
-  KJ_SWITCH_ONEOF(b) {
-    KJ_CASE_ONEOF(jsB, EventHandler::JavaScriptHandler) {
-      return matches(a, jsB.identity);
-    }
-    KJ_CASE_ONEOF(nativeB, EventHandler::NativeHandlerRef) {
-      return matches(a, nativeB);
-    }
-  }
-  KJ_UNREACHABLE;
+  return a->identity == b;
 }
 
 uint EventTarget::EventHandlerHashCallbacks::hashCode(
     const jsg::HashableV8Ref<v8::Object>& obj) const {
   return obj.hashCode();
-}
-
-uint EventTarget::EventHandlerHashCallbacks::hashCode(const NativeHandler& handler) const {
-  return handler.hashCode();
-}
-
-uint EventTarget::EventHandlerHashCallbacks::hashCode(
-    const EventHandler::NativeHandlerRef& handler) const {
-  return hashCode(handler.handler);
-}
-
-uint EventTarget::EventHandlerHashCallbacks::hashCode(
-    const EventHandler::JavaScriptHandler& handler) const {
-  return hashCode(handler.identity);
-}
-
-uint EventTarget::EventHandlerHashCallbacks::hashCode(const EventHandler::Handler& handler) const {
-  KJ_SWITCH_ONEOF(handler) {
-    KJ_CASE_ONEOF(js, EventHandler::JavaScriptHandler) {
-      return hashCode(js);
-    }
-    KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
-      return hashCode(native);
-    }
-  }
-  KJ_UNREACHABLE;
 }
 
 jsg::Ref<Event> Event::constructor(jsg::Lock& js, kj::String type, jsg::Optional<Init> init) {
@@ -196,19 +87,6 @@ void Event::beginDispatch(jsg::Ref<EventTarget> target) {
 
 jsg::Ref<EventTarget> EventTarget::constructor(jsg::Lock& js) {
   return js.alloc<EventTarget>();
-}
-
-EventTarget::~EventTarget() noexcept(false) {
-  for (auto& entry: typeMap) {
-    for (auto& handler: entry.value.handlers) {
-      KJ_IF_SOME(native, handler->handler.tryGet<EventHandler::NativeHandlerRef>()) {
-        // Note: Can't call `detach()` here because it would loop back and call
-        // `removeNativeListener()` on us, invalidating the `typeMap` iterator. We'll directly
-        // null out the state.
-        native.handler.state = kj::none;
-      }
-    }
-  }
 }
 
 size_t EventTarget::getHandlerCount(kj::StringPtr type) const {
@@ -304,13 +182,12 @@ void EventTarget::addEventListener(jsg::Lock& js,
         return signal->addAbortAlgorithm(js, kj::mv(func));
       });
 
-      auto eventHandler = kj::heap<EventHandler>(
-          EventHandler::JavaScriptHandler{
-            .identity = kj::mv(handler.identity),
-            .callback = kj::mv(handlerFn),
-            .abortHandler = kj::mv(maybeAbortHandler),
-          },
-          once);
+      auto eventHandler = kj::heap<EventHandler>(EventHandler{
+        .identity = kj::mv(handler.identity),
+        .callback = kj::mv(handlerFn),
+        .once = once,
+        .abortHandler = kj::mv(maybeAbortHandler),
+      });
 
       getOrCreate(type).handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
     });
@@ -342,25 +219,6 @@ void EventTarget::removeEventListener(jsg::Lock& js,
   }
 }
 
-void EventTarget::addNativeListener(jsg::Lock& js, NativeHandler& handler) {
-  auto& set = getOrCreate(handler.type);
-
-  auto eventHandler = kj::heap<EventHandler>(
-      EventHandler::NativeHandlerRef{
-        .handler = handler,
-      },
-      handler.once);
-
-  set.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
-}
-
-bool EventTarget::removeNativeListener(EventTarget::NativeHandler& handler) {
-  KJ_IF_SOME(handlerSet, typeMap.find(handler.type)) {
-    return handlerSet.handlers.eraseMatch(handler);
-  }
-  return false;
-}
-
 EventTarget::EventHandlerSet& EventTarget::getOrCreate(kj::StringPtr type) {
   return typeMap.upsert(kj::str(type), EventHandlerSet(), [&](auto&&...) {}).value;
 }
@@ -369,12 +227,10 @@ void EventTarget::addEventHandlerListener(jsg::Lock& js,
     kj::StringPtr type,
     jsg::HashableV8Ref<v8::Object> identity,
     HandlerFunction callback) {
-  auto eventHandler = kj::heap<EventHandler>(
-      EventHandler::JavaScriptHandler{
-        .identity = kj::mv(identity),
-        .callback = kj::mv(callback),
-      },
-      false);
+  auto eventHandler = kj::heap<EventHandler>(EventHandler{
+    .identity = kj::mv(identity),
+    .callback = kj::mv(callback),
+  });
   getOrCreate(type).handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
 }
 
@@ -408,9 +264,12 @@ bool EventTarget::dispatchEventImpl(
 
   return js.withinHandleScope([&] {
     struct Callback {
-      EventHandler::Handler handler;
+      // The listener's identity, used to check whether it was removed by an earlier handler
+      // and to remove it when `once` is set. Old-style on<event> handlers (found via
+      // property reflection rather than the listener list) have none.
+      kj::Maybe<jsg::HashableV8Ref<v8::Object>> identity;
+      HandlerFunction callback;
       bool once = false;
-      bool oldStyle = false;
     };
 
     kj::Vector<Callback> callbacks;
@@ -424,12 +283,8 @@ bool EventTarget::dispatchEventImpl(
         // If the on-event is not a function, we silently ignore it rather than raise an error.
         KJ_IF_SOME(cb, onProp.tryGet<HandlerFunction>()) {
           callbacks.add(Callback{
-            .handler =
-                EventHandler::JavaScriptHandler{
-                  .identity = nullptr,  // won't be used below if oldStyle is true and once is false
-                  .callback = kj::mv(cb),
-                },
-            .oldStyle = true,
+            .identity = kj::none,
+            .callback = kj::mv(cb),
           });
         }
       }
@@ -438,47 +293,24 @@ bool EventTarget::dispatchEventImpl(
     KJ_IF_SOME(handlerSet, typeMap.find(event->getType())) {
       callbacks.reserve(handlerSet.handlers.size());
       for (auto& handler: handlerSet.handlers.ordered<kj::InsertionOrderIndex>()) {
-        KJ_SWITCH_ONEOF(handler->handler) {
-          KJ_CASE_ONEOF(jsh, EventHandler::JavaScriptHandler) {
-            callbacks.add(Callback{
-              .handler = EventHandler::JavaScriptHandler{.identity = jsh.identity.addRef(js),
-                .callback = jsh.callback.addRef(js)},
-              .once = handler->once,
-            });
-          }
-          KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
-            callbacks.add(Callback{
-              .handler =
-                  EventHandler::NativeHandlerRef{
-                    .handler = native.handler,
-                  },
-              .once = handler->once,
-            });
-          }
-        }
+        callbacks.add(Callback{
+          .identity = handler->identity.addRef(js),
+          .callback = handler->callback.addRef(js),
+          .once = handler->once,
+        });
       }
     }
 
-    const auto isRemoved = [&](auto& handler) {
+    const auto isRemoved = [&](jsg::HashableV8Ref<v8::Object>& identity) {
       // This is not the most efficient way to do this but it's what works right now.
       // Instead of capturing direct references to the handler structs, we copy those
       // into the Callbacks vector, which means we need to look up the actual handler
       // again to see if it still exists in the list. The entire way the storage of the
       // handlers is done here can be improved to make this more efficient.
-
       KJ_IF_SOME(handlerSet, typeMap.find(event->getType())) {
-        KJ_SWITCH_ONEOF(handler) {
-          KJ_CASE_ONEOF(js, EventHandler::JavaScriptHandler) {
-            return handlerSet.handlers.find(js.identity) == kj::none;
-          }
-          KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
-            return handlerSet.handlers.find(native.handler) == kj::none;
-          }
-        }
-      } else {
-        return true;
+        return handlerSet.handlers.find(identity) == kj::none;
       }
-      KJ_UNREACHABLE;
+      return true;
     };
 
     for (auto& callback: callbacks) {
@@ -487,79 +319,68 @@ bool EventTarget::dispatchEventImpl(
         break;
       }
 
-      // If the handler gets removed by an earlier run handler, then we need to
-      // make sure we don't run it. Skip over and continue.
-      if (!callback.oldStyle && isRemoved(callback.handler)) {
-        continue;
-      }
+      KJ_IF_SOME(identity, callback.identity) {
+        // If the handler was removed by an earlier-run handler, then we need to
+        // make sure we don't run it. Skip over and continue.
+        if (isRemoved(identity)) {
+          continue;
+        }
 
-      if (callback.once) {
-        KJ_SWITCH_ONEOF(callback.handler) {
-          KJ_CASE_ONEOF(jsh, EventHandler::JavaScriptHandler) {
-            removeEventListener(js, kj::str(event->getType()), jsh.identity.addRef(js), kj::none);
-          }
-          KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
-            // The native handler will handle detaching itself when invoked
-          }
+        // Per spec ("inner invoke" step 5), once-listeners are removed before invocation.
+        if (callback.once) {
+          removeEventListener(js, kj::str(event->getType()), identity.addRef(js), kj::none);
         }
       }
 
-      KJ_SWITCH_ONEOF(callback.handler) {
-        KJ_CASE_ONEOF(jsh, EventHandler::JavaScriptHandler) {
-          const auto invoke = [&]() {
-            // Per the standard, the event listener is not supposed to return any value, and
-            // if it does, that value is ignored. That can be somewhat problematic if the user
-            // passes an async function as the event handler. Doing so counts as undefined
-            // behavior and can introduce subtle and difficult to diagnose bugs. Here, if the
-            // handler does return a value, we're going to emit a warning but otherwise ignore
-            // it. The warning will only be emitted at most once per EventTarget instance.
-            auto ret = jsh.callback(js, event.addRef());
-            KJ_IF_SOME(r, ret) {
-              auto handle = r.getHandle(js);
-              // Returning true is the same as calling preventDefault() on the event.
-              if (handle->IsTrue()) {
-                event->preventDefault();
-              }
-              if (flags.warnOnHandlerReturn && !handle->IsBoolean()) {
-                flags.warnOnHandlerReturn = false;
-                // To help make debugging easier, let's tailor the warning a bit if it was a
-                // promise.
-                if (handle->IsPromise()) {
-                  js.logWarning(kj::str(
-                      "An event handler returned a promise that will be ignored. Event handlers "
-                      "should not have a return value and should not be async functions."));
-                } else {
-                  js.logWarning(kj::str("An event handler returned a value of type \"",
-                      handle->TypeOf(js.v8Isolate),
-                      "\" that will be ignored. Event handlers should not have a return value."));
-                }
-              }
+      const auto invoke = [&]() {
+        // Per the standard, the event listener is not supposed to return any value, and
+        // if it does, that value is ignored. That can be somewhat problematic if the user
+        // passes an async function as the event handler. Doing so counts as undefined
+        // behavior and can introduce subtle and difficult to diagnose bugs. Here, if the
+        // handler does return a value, we're going to emit a warning but otherwise ignore
+        // it. The warning will only be emitted at most once per EventTarget instance.
+        auto ret = callback.callback(js, event.addRef());
+        KJ_IF_SOME(r, ret) {
+          auto handle = r.getHandle(js);
+          // Returning true is the same as calling preventDefault() on the event.
+          if (handle->IsTrue()) {
+            event->preventDefault();
+          }
+          if (flags.warnOnHandlerReturn && !handle->IsBoolean()) {
+            flags.warnOnHandlerReturn = false;
+            // To help make debugging easier, let's tailor the warning a bit if it was a
+            // promise.
+            if (handle->IsPromise()) {
+              js.logWarning(kj::str(
+                  "An event handler returned a promise that will be ignored. Event handlers "
+                  "should not have a return value and should not be async functions."));
+            } else {
+              js.logWarning(kj::str("An event handler returned a value of type \"",
+                  handle->TypeOf(js.v8Isolate),
+                  "\" that will be ignored. Event handlers should not have a return value."));
             }
-          };
-
-          switch (exceptionPolicy) {
-            case DispatchExceptionPolicy::PROPAGATE:
-              // The first handler to throw ends the dispatch and the exception flows out of
-              // dispatchEventImpl(). The runtime's top-level event delivery depends on this:
-              // for example, a throwing 'fetch' handler must fail the request (fail-closed)
-              // or trigger fallback (fail-open) rather than let other handlers respond.
-              invoke();
-              break;
-            case DispatchExceptionPolicy::REPORT:
-              // Spec "inner invoke" step 11: report the exception and continue with the next
-              // listener.
-              JSG_TRY(js) {
-                invoke();
-              }
-              JSG_CATCH(exception) {
-                reportListenerError(js, kj::mv(exception));
-              }
-              break;
           }
         }
-        KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
-          native.handler(js, event.addRef());
-        }
+      };
+
+      switch (exceptionPolicy) {
+        case DispatchExceptionPolicy::PROPAGATE:
+          // The first handler to throw ends the dispatch and the exception flows out of
+          // dispatchEventImpl(). The runtime's top-level event delivery depends on this:
+          // for example, a throwing 'fetch' handler must fail the request (fail-closed)
+          // or trigger fallback (fail-open) rather than let other handlers respond.
+          invoke();
+          break;
+        case DispatchExceptionPolicy::REPORT:
+          // Spec "inner invoke" step 11: report the exception and continue with the next
+          // listener.
+          JSG_TRY(js) {
+            invoke();
+          }
+          JSG_CATCH(exception) {
+            reportListenerError(js, kj::mv(exception));
+          }
+          break;
       }
     }
 
@@ -1389,32 +1210,7 @@ void EventTarget::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(maybeListenerCallback);
   for (auto& entry: typeMap) {
     for (auto& handler: entry.value.handlers) {
-      KJ_SWITCH_ONEOF(handler->handler) {
-        KJ_CASE_ONEOF(js, EventHandler::JavaScriptHandler) {
-          visitor.visit(js);
-        }
-        KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
-          // Note that even though `native.handler` is a non-owned reference, we still need to
-          // visit it. This is because we are the ones that will invoke the handles contained
-          // in the native handler if it ever fires. The actual owner of the C++ NativeHandler
-          // object doesn't ever access the JS objects it contains; the ownership relationship
-          // exists only for RAII reasons, so that the NativeHandler is automatically unregistered
-          // if the owner is destroyed.
-          //
-          // You might say: "Well, it's fine if the owner is responsible for visiting it, because
-          // if the owner is no longer reachable then it will be destroyed and it will unregister
-          // itself from here!" That doesn't quite work: V8's GC doesn't necessarily destroy
-          // objects immediately when they become unreachable. However, it is no longer safe to
-          // access an object once it is unreachable. Therefore, if we left it to the
-          // NativeHandler's owner to visit the object, it's possible that the object becomes
-          // poison some time before it is actually unregistered.
-          //
-          // Put another way, this is a very weird case where the C++ ownership and the JavaScript
-          // ownership are different. We need GC visitation to follow the JavaScript ownership
-          // graph.
-          visitor.visit(native.handler);
-        }
-      }
+      visitor.visit(*handler);
     }
   }
 }
@@ -1495,32 +1291,15 @@ CustomEvent::CustomEventInit::operator Event::Init() {
   };
 }
 
-size_t EventTarget::EventHandler::JavaScriptHandler::jsgGetMemorySelfSize() const {
-  return sizeof(JavaScriptHandler);
-}
-
-void EventTarget::EventHandler::JavaScriptHandler::jsgGetMemoryInfo(
-    jsg::MemoryTracker& tracker) const {
-  tracker.trackField("identity", identity);
-  tracker.trackField("callback", callback);
-  if (abortHandler != kj::none) {
-    tracker.trackFieldWithSize(
-        "abortHandler", sizeof(kj::Own<NativeHandler>) + sizeof(NativeHandler));
-  }
-}
-
 size_t EventTarget::EventHandler::jsgGetMemorySelfSize() const {
   return sizeof(EventHandler);
 }
 
 void EventTarget::EventHandler::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  KJ_SWITCH_ONEOF(handler) {
-    KJ_CASE_ONEOF(js, JavaScriptHandler) {
-      tracker.trackField("js", js);
-    }
-    KJ_CASE_ONEOF(native, NativeHandlerRef) {
-      tracker.trackFieldWithSize("native", sizeof(NativeHandlerRef));
-    }
+  tracker.trackField("identity", identity);
+  tracker.trackField("callback", callback);
+  if (abortHandler != kj::none) {
+    tracker.trackFieldWithSize("abortHandler", sizeof(kj::Own<void>));
   }
 }
 

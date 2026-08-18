@@ -313,8 +313,6 @@ class CustomEvent: public Event {
 // An implementation of the Web Platform Standard EventTarget API
 class EventTarget: public jsg::Object {
  public:
-  ~EventTarget() noexcept(false);
-
   size_t getHandlerCount(kj::StringPtr type) const;
 
   kj::Array<kj::StringPtr> getHandlerNames() const;
@@ -418,16 +416,6 @@ class EventTarget: public jsg::Object {
 
   static jsg::Ref<EventTarget> constructor(jsg::Lock& js);
 
-  // Registers a lambda that will be called when the given event type is emitted.
-  // The handler will be registered for as long as the returned kj::Own<void>
-  // handle is held. If the EventTarget is destroyed while the native handler handle
-  // is held, it will be automatically detached.
-  //
-  // The caller must not do anything with the returned Own<void> except drop it. This is why it
-  // is Own<void> and not Own<NativeHandler>.
-  kj::Own<void> newNativeHandler(
-      jsg::Lock& js, kj::String type, jsg::Function<void(jsg::Ref<Event>)> func, bool once = false);
-
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  protected:
@@ -452,86 +440,29 @@ class EventTarget: public jsg::Object {
       HandlerFunction callback);
 
  private:
-  // RAII-style listener that can be attached to an EventTarget.
-  class NativeHandler {
-   public:
-    using Signature = void(jsg::Ref<Event>);
-    NativeHandler(jsg::Lock& js,
-        EventTarget& target,
-        kj::String type,
-        jsg::Function<Signature> func,
-        bool once = false);
-    ~NativeHandler() noexcept(false);
-    KJ_DISALLOW_COPY_AND_MOVE(NativeHandler);
-
-    void operator()(jsg::Lock& js, jsg::Ref<Event> event);
-
-    uint hashCode() const;
-
-    void visitForGc(jsg::GcVisitor& visitor);
-
-   private:
-    void detach();
-
-    kj::String type;
-    struct State {
-      // target's destructor will null out `state`, so this is OK to be a bare reference.
-      EventTarget& target;
-
-      jsg::Function<Signature> func;
-    };
-
-    kj::Maybe<State> state;
-    bool once;
-
-    friend class EventTarget;
-  };
-
-  void addNativeListener(jsg::Lock& js, NativeHandler& handler);
-  bool removeNativeListener(NativeHandler& handler);
-
   struct EventHandler {
-    struct JavaScriptHandler {
-      jsg::HashableV8Ref<v8::Object> identity;
-      HandlerFunction callback;
-
-      // If the event handler is registered with an AbortSignal (the {signal} option), this
-      // holds the RAII registration for the signal's abort algorithm that removes this
-      // listener, so that if this entry goes away before the signal aborts, the algorithm is
-      // unregistered. The handle is opaque: the only thing to do with it is drop it.
-      kj::Maybe<kj::Own<void>> abortHandler;
-
-      void visitForGc(jsg::GcVisitor& visitor) {
-        visitor.visit(identity, callback);
-
-        // Note that we intentionally do NOT visit `abortHandler`. It holds no JS references
-        // of its own; the algorithm it registers is owned — and GC-visited — by the
-        // AbortSignal it was registered with.
-      }
-
-      kj::StringPtr jsgGetMemoryName() const {
-        return "JavaScriptHandler"_kjc;
-      }
-      size_t jsgGetMemorySelfSize() const;
-      void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
-    };
-
-    struct NativeHandlerRef {
-      NativeHandler& handler;
-    };
-
-    // An EventHandler can be backed by either a JavaScript Handler (which is either a
-    // function or an object) or a native handler. The insertion order matters here so
-    // we maintain a single table.
-    using Handler = kj::OneOf<JavaScriptHandler, NativeHandlerRef>;
-
-    Handler handler;
+    // The listener's identity (the function or object passed to addEventListener, or a
+    // synthesized object for internally-registered listeners), used for removeEventListener
+    // matching.
+    jsg::HashableV8Ref<v8::Object> identity;
+    HandlerFunction callback;
 
     // When once is true, the handler will be removed after it is invoked one time.
     bool once = false;
 
-    EventHandler(Handler handler, bool once): handler(kj::mv(handler)), once(once) {}
-    KJ_DISALLOW_COPY_AND_MOVE(EventHandler);
+    // If the event handler is registered with an AbortSignal (the {signal} option), this
+    // holds the RAII registration for the signal's abort algorithm that removes this
+    // listener, so that if this entry goes away before the signal aborts, the algorithm is
+    // unregistered. The handle is opaque: the only thing to do with it is drop it.
+    kj::Maybe<kj::Own<void>> abortHandler;
+
+    void visitForGc(jsg::GcVisitor& visitor) {
+      visitor.visit(identity, callback);
+
+      // Note that we intentionally do NOT visit `abortHandler`. It holds no JS references
+      // of its own; the algorithm it registers is owned — and GC-visited — by the
+      // AbortSignal it was registered with.
+    }
 
     kj::StringPtr jsgGetMemoryName() const {
       return "EventHandler"_kjc;
@@ -541,16 +472,9 @@ class EventTarget: public jsg::Object {
   };
 
   struct EventHandlerHashCallbacks {
-    const EventHandler::Handler& keyForRow(const kj::Own<EventHandler>& row) const;
+    const jsg::HashableV8Ref<v8::Object>& keyForRow(const kj::Own<EventHandler>& row) const;
     bool matches(const kj::Own<EventHandler>& a, const jsg::HashableV8Ref<v8::Object>& b) const;
-    bool matches(const kj::Own<EventHandler>& a, const NativeHandler& b) const;
-    bool matches(const kj::Own<EventHandler>& a, const EventHandler::NativeHandlerRef& b) const;
-    bool matches(const kj::Own<EventHandler>& a, const EventHandler::Handler& b) const;
     uint hashCode(const jsg::HashableV8Ref<v8::Object>& obj) const;
-    uint hashCode(const NativeHandler& handler) const;
-    uint hashCode(const EventHandler::NativeHandlerRef& handler) const;
-    uint hashCode(const EventHandler::JavaScriptHandler& handler) const;
-    uint hashCode(const EventHandler::Handler& handler) const;
   };
 
   struct EventHandlerSet {
@@ -589,8 +513,6 @@ class EventTarget: public jsg::Object {
   Flags flags;
 
   void visitForGc(jsg::GcVisitor& visitor);
-
-  friend class NativeHandler;
 };
 
 // An implementation of the Web Platform Standard AbortSignal API
