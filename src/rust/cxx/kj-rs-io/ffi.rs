@@ -73,6 +73,7 @@ use crate::stream::stream_when_write_disconnected;
 use crate::stream::stream_write;
 use crate::stream::wrap_input_fd;
 use crate::stream::wrap_output_fd;
+
 #[cxx::bridge(namespace = "kj_rs_io")]
 // FFI island: the cxx bridge macro generates the `unsafe` extern shims, and this module declares
 // the hand-written `unsafe extern "C++"` / `async unsafe fn` bridge surface.
@@ -146,9 +147,7 @@ mod bridge {
         /// Moves the native stream out, leaving `stream` hollow (all further ops error).
         /// Unsafe contract: no I/O futures may currently borrow `stream`.
         fn stream_take(stream: &mut TokioStream) -> Result<Box<TokioStream>>;
-    }
 
-    extern "Rust" {
         // ==================================================================================
         // Network addresses (kj::Network::parseAddress grammar subset)
 
@@ -181,9 +180,7 @@ mod bridge {
 
         fn address_clone(addr: &TokioAddress) -> Box<TokioAddress>;
         fn address_to_string(addr: &TokioAddress) -> String;
-    }
 
-    extern "Rust" {
         // ==================================================================================
         // Listeners (kj::ConnectionReceiver)
 
@@ -214,9 +211,7 @@ mod bridge {
             option: i32,
             value: &[u8],
         ) -> Result<()>;
-    }
 
-    extern "Rust" {
         // ==================================================================================
         // Socket-handle wrapping (kj::LowLevelAsyncIoProvider).
         //
@@ -257,9 +252,7 @@ mod bridge {
 
         async unsafe fn output_fd_write<'a>(stream: &'a TokioOutputFd, buf: &'a [u8])
         -> Result<()>;
-    }
 
-    extern "Rust" {
         // ==================================================================================
         // Signals (kj::UnixEventPort::onSignal replacement; see signal.rs for semantics)
 
