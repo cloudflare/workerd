@@ -751,3 +751,63 @@ pub fn listener_setsockopt(
         ))
     }
 }
+
+// ======================================================================================
+// Typed read/write halves of a pumped `kj::AsyncIoStream`.
+//
+// kj's stream contract — at most one read and one write may be in flight at once — is prose in
+// kj; these halves make the borrow checker enforce it. Each half's operations take `&mut self`,
+// so an in-flight operation's future exclusively borrows its half (a second overlapping read is
+// a compile error), and `split_kj_stream` takes the owner's `&mut`, so while the halves live
+// nothing else (an unwrap, another split) can touch the stream. The bridged operations behind
+// them are not re-exported: the halves are the only way to drive a foreign stream.
+
+/// The read direction of a pumped stream. See the module comment above.
+pub struct KjStreamReadHalf<'a>(&'a KjAsyncIoStream);
+
+/// The write direction of a pumped stream (writes and the write-side shutdown). See the module
+/// comment above.
+pub struct KjStreamWriteHalf<'a>(&'a KjAsyncIoStream);
+
+/// Splits the owned stream into its two directions. Holding the owner's `&mut` for the halves'
+/// lifetime proves exactly one pair exists and reserves the stream for them.
+// The unused `&mut` is the point (see the doc comment): it reserves the stream for the halves.
+#[expect(clippy::needless_pass_by_ref_mut)]
+pub fn split_kj_stream(
+    stream: &mut KjOwn<KjAsyncIoStream>,
+) -> (KjStreamReadHalf<'_>, KjStreamWriteHalf<'_>) {
+    let stream = &**stream;
+    (KjStreamReadHalf(stream), KjStreamWriteHalf(stream))
+}
+
+impl KjStreamReadHalf<'_> {
+    /// `kj::AsyncIoStream::tryRead(buffer, min_bytes, buffer.len())`.
+    // The unused `&mut self` is the point: an in-flight read's future exclusively borrows the
+    // read half (kj's one-read-in-flight contract), see the section comment above.
+    #[expect(clippy::needless_pass_by_ref_mut)]
+    pub(crate) async fn try_read(
+        &mut self,
+        buf: &mut [u8],
+        min_bytes: usize,
+    ) -> std::result::Result<usize, KjException> {
+        bridge::kj_stream_try_read(self.0, buf, min_bytes).await
+    }
+}
+
+impl KjStreamWriteHalf<'_> {
+    /// `kj::AsyncIoStream::write(buffer)` (write-all semantics).
+    // The unused `&mut self` is the point: an in-flight write's future exclusively borrows the
+    // write half (kj's one-write-in-flight contract), see the section comment above.
+    #[expect(clippy::needless_pass_by_ref_mut)]
+    pub(crate) async fn write(&mut self, buf: &[u8]) -> std::result::Result<(), KjException> {
+        bridge::kj_stream_write(self.0, buf).await
+    }
+
+    /// `kj::AsyncIoStream::shutdownWrite()`.
+    // The unused `&mut self` is the point: an exclusive borrow of the write half serializes
+    // write-side operations (kj's one-write-in-flight contract), see the section comment above.
+    #[expect(clippy::needless_pass_by_ref_mut)]
+    pub(crate) fn shutdown_write(&mut self) {
+        bridge::kj_stream_shutdown_write(self.0);
+    }
+}
