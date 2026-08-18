@@ -37,7 +37,11 @@ class Converter {
 
   size_t max_char_size() const;
   size_t min_char_size() const;
-  void set_subst_chars(::rust::Str substitute) const;
+
+  // Sets the byte sequence ICU substitutes for characters that cannot be
+  // represented in this converter's encoding. Returns false if `substitute` is
+  // too long, or if ICU rejects it for this encoding.
+  bool set_subst_chars(::rust::Str substitute) const;
 
  private:
   UConverter* conv_;
@@ -50,7 +54,8 @@ class Converter {
       const Converter& to, ::rust::Slice<const uint8_t> source, ::rust::Slice<uint8_t> target);
 };
 
-// Opens an ICU converter for `name` (an ICU encoding name, e.g. "us-ascii").
+// Opens an ICU converter for `name` (an ICU encoding name, e.g. "us-ascii"),
+// or returns null if ICU does not recognize `name`.
 std::unique_ptr<Converter> open_converter(::rust::Str name);
 
 // `ucnv_convertEx()`-based conversion between two ICU converters, mirroring
@@ -69,10 +74,13 @@ int64_t convert_ex(const Converter& to,
 int64_t from_uchars(
     const Converter& to, ::rust::Slice<const uint8_t> source, ::rust::Slice<uint8_t> target);
 
-// simdutf wrappers, mirroring the four `simdutf::*` calls in `i18n.c++`.
-// Buffers holding UTF-16LE code units are passed as raw bytes and cast to
-// `char16_t*` internally, exactly as the C++ path does via
-// `JsUint8Array::asArrayPtr<char16_t>()`.
+// simdutf wrappers. Buffers holding UTF-16LE code units are passed as raw
+// bytes and cast to `char16_t*` internally.
+//
+// `target` must be aligned for `char16_t`. Callers satisfy this by passing a
+// JavaScript `ArrayBuffer`'s backing store, whose base address V8 aligns well
+// past two bytes. `source` carries no such guarantee: it is caller-supplied
+// buffer contents, which a `Uint8Array` can expose at an odd `byteOffset`.
 
 size_t convert_latin1_to_utf16(::rust::Slice<const uint8_t> source, ::rust::Slice<uint8_t> target);
 size_t utf16_length_from_utf8(::rust::Slice<const uint8_t> source);
