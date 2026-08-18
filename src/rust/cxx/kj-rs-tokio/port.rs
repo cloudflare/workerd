@@ -355,4 +355,52 @@ impl TokioPort {
     pub(crate) fn wait_timeout_ns(&self, timeout_ns: u64) -> bool {
         self.wait_impl(Some(Duration::from_nanos(timeout_ns)))
     }
+    fn wait_impl(&self, timeout: Option<Duration>) -> bool {
+        let state = &self.state;
+        state.sleeping.store(true, Ordering::SeqCst);
+
+        // Sub-millisecond deadlines cannot be met by tokio's ~1 ms timer wheel: hand them to
+        // the high-resolution timer thread (see HiResTimer).
+        #[cfg(unix)]
+        let hires_armed = match timeout {
+            Some(t) if !t.is_zero() && t < HIRES_TIMEOUT_THRESHOLD => {
+                self.hires.arm(Instant::now() + t);
+                true
+            }
+            _ => false,
+        };
+
+        // This `block_on` is where tokio owns the thread: it drives *all* tasks — those spawned
+        // onto the port's `LocalSet` via `spawn()` (driven by `LocalSet::block_on`'s `run_until`)
+        // as well as any `tokio::spawn`ed tasks on the current_thread runtime — not just the
+        // future passed to it. Wake-up sources: `wake()` from another thread (with the `woken`
+        // latch set), `notify_runnable()` (a task inside this very `block_on` re-entered C++ and
+        // armed a KJ event), and the next KJ timer deadline — via the tokio wheel for long
+        // sleeps, via the high-res timer thread (same `notify`) for sub-millisecond ones.
+        // `Notify` stores a permit if `notify_one()` arrives before `notified()` is polled, so
+        // there is no lost-wakeup window; spurious early returns are explicitly allowed by the
+        // `kj::EventPort::wait()` contract.
+        #[expect(
+            clippy::expect_used,
+            reason = "TokioPort::new registers this thread's LocalSet; wait() only runs while this port drives its own thread, so the LocalSet is always present — absence is an unreachable internal invariant"
+        )]
+        let local =
+            current_local_set().expect("TokioPort is driving without a registered LocalSet");
+        local.block_on(&self.runtime, async {
+            match timeout {
+                Some(t) => {
+                    let _ = tokio::time::timeout(t, state.notify.notified()).await;
+                }
+                None => state.notify.notified().await,
+            }
+        });
+
+        #[cfg(unix)]
+        if hires_armed {
+            self.hires.disarm();
+        }
+
+        state.sleeping.store(false, Ordering::SeqCst);
+        self.take_wake_latch()
+    }
 }
