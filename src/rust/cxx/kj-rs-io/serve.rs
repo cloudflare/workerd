@@ -328,3 +328,39 @@ pub fn take_kj_socket(
         ),
     })
 }
+
+/// Yields the best-available tokio-side stream for the owned `stream`.
+///
+/// That is the native tokio object when `stream` originated in kj-rs-io, else an in-memory
+/// duplex bridged by a pump future that owns the stream. Never extracts a foreign stream's fd
+/// — kj wrappers forward `getFd()` to their transport socket, so a byte-transforming wrapper's
+/// fd carries the wrong bytes (TLS ciphertext); callers that can assert a plain socket should
+/// prefer [`take_kj_socket`].
+///
+/// On the native path the hollow wrapper is destroyed before returning; on the pump path the
+/// stream lives inside the pump and is destroyed when the pump settles or is dropped. The pump
+/// must only be polled from the KJ event-loop thread owning the stream. As with destroying any
+/// kj stream, no I/O promises may be outstanding on it when ownership is handed over.
+#[must_use]
+pub fn serve_kj_stream(stream: KjOwn<KjAsyncIoStream>) -> ServedKjStream {
+    let mut stream = stream;
+    if let Some(io) = unwrap_native(&mut stream) {
+        // Native path: the wrapper is hollow; destroy it now.
+        drop(stream);
+        return ServedKjStream { io, pump: None };
+    }
+
+    // Foreign stream (or, pathologically, an already-hollow wrapper, whose pump reads will
+    // surface the "already unwrapped" error): bridge through a duplex pump owning the stream.
+    let (consumer_end, kj_end) = tokio::io::duplex(DUPLEX_CAPACITY);
+    let pump = Box::pin(pump_kj_stream(stream, kj_end));
+    ServedKjStream {
+        io: ServeIo::Duplex(consumer_end),
+        pump: Some(pump),
+    }
+}
+
+/// Whether a bridged kj exception is peer-teardown-shaped (treated as EOF by the pump).
+fn is_disconnected(exception: &KjException) -> bool {
+    exception.r#type() == KjExceptionType::Disconnected
+}
