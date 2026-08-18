@@ -147,4 +147,39 @@ mod bridge {
         /// Unsafe contract: no I/O futures may currently borrow `stream`.
         fn stream_take(stream: &mut TokioStream) -> Result<Box<TokioStream>>;
     }
+
+    extern "Rust" {
+        // ==================================================================================
+        // Network addresses (kj::Network::parseAddress grammar subset)
+
+        /// Parses a KJ address string ("1.2.3.4:80", "[::1]:80", "host:80", "*", "*:80",
+        /// "unix:/path"), resolving hostnames via DNS. `port_hint` fills in a missing port.
+        /// (Owned `String`: the future must not borrow the caller's buffer across the DNS
+        /// suspension.)
+        async fn network_parse_address(addr: String, port_hint: u16) -> Result<Box<TokioAddress>>;
+
+        /// Builds an address from a raw `struct sockaddr` (AF_INET / AF_INET6 / AF_UNIX).
+        fn network_get_sockaddr(sockaddr: &[u8]) -> Result<Box<TokioAddress>>;
+
+        /// Connects to exactly the `index`th resolved address (no fallback). The C++ side
+        /// drives the try-each-address loop so it can apply restrictPeers() filtering per
+        /// address (KJ parity).
+        async unsafe fn address_connect_index<'a>(
+            addr: &'a TokioAddress,
+            index: usize,
+        ) -> Result<Box<TokioStream>>;
+
+        /// Number of resolved socket addresses behind this address (>= 1).
+        fn address_count(addr: &TokioAddress) -> usize;
+
+        /// Raw `struct sockaddr` bytes of the `index`th resolved address, for C++-side
+        /// kj::_::NetworkFilter (restrictPeers) checks.
+        fn address_raw_sockaddr(addr: &TokioAddress, index: usize) -> Result<Vec<u8>>;
+
+        /// Binds + listens on the (first) address. Wildcard addresses bind dual-stack.
+        fn address_listen(addr: &TokioAddress) -> Result<Box<TokioListener>>;
+
+        fn address_clone(addr: &TokioAddress) -> Box<TokioAddress>;
+        fn address_to_string(addr: &TokioAddress) -> String;
+    }
 }
