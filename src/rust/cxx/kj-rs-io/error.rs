@@ -34,3 +34,36 @@ impl KjIoError {
 pub fn op(name: &'static str) -> impl Fn(std::io::Error) -> KjIoError {
     move |inner| KjIoError { op: name, inner }
 }
+fn exception_type(error: &std::io::Error) -> KjExceptionType {
+    use std::io::ErrorKind;
+    // Primary classification: by raw errno, mirroring KJ's own table (`typeOfErrno()` in
+    // kj/debug.c++) errno-for-errno. Consumers (kj-http, capnp-rpc) change behavior on the
+    // exception type, so the classes must match `kj::setupAsyncIo()` exactly — e.g. ETIMEDOUT
+    // is OVERLOADED in KJ (retry-later), NOT DISCONNECTED (clean peer hangup), and std's
+    // `ErrorKind` buckets have no stable kinds at all for KJ's fd/memory-exhaustion OVERLOADED
+    // set (EMFILE/ENFILE/ENOBUFS/...), hence the raw match.
+    #[cfg(unix)]
+    if let Some(errno) = error.raw_os_error() {
+        return errno_exception_type(errno);
+    }
+    // Fallback for synthetic (non-OS) errors — and all errors on Windows, where
+    // `raw_os_error()` is a Win32/WSA code, not an errno (KJ classifies those in
+    // `typeOfWin32Error()`; the buckets below agree with it for the kinds tokio surfaces).
+    match error.kind() {
+        // KJ's DISCONNECTED class: connection teardown, treated as a clean peer hangup.
+        ErrorKind::ConnectionRefused
+        | ErrorKind::ConnectionReset
+        | ErrorKind::ConnectionAborted
+        | ErrorKind::BrokenPipe
+        | ErrorKind::NotConnected
+        | ErrorKind::UnexpectedEof
+        | ErrorKind::HostUnreachable
+        | ErrorKind::NetworkUnreachable
+        | ErrorKind::NetworkDown => KjExceptionType::Disconnected,
+        // KJ's OVERLOADED class: temporary lack of resources (ETIMEDOUT/WSAETIMEDOUT and
+        // ENOMEM land here in KJ's tables).
+        ErrorKind::TimedOut | ErrorKind::OutOfMemory => KjExceptionType::Overloaded,
+        ErrorKind::Unsupported => KjExceptionType::Unimplemented,
+        _ => KjExceptionType::Failed,
+    }
+}
