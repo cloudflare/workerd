@@ -412,3 +412,88 @@ async fn resolve_host(host: &str, port: u16) -> Result<Vec<SocketAddr>> {
 pub async fn network_parse_address(addr: String, port_hint: u16) -> Result<Box<TokioAddress>> {
     with_runtime(async move { Ok(Box::new(TokioAddress::parse(&addr, port_hint).await?)) }).await
 }
+
+pub fn network_get_sockaddr(sockaddr: &[u8]) -> Result<Box<TokioAddress>> {
+    #[cfg(any(unix, windows))]
+    {
+        let addr = sockaddr_from_bytes(sockaddr)?;
+        if let Some(socket_addr) = addr.as_socket() {
+            return Ok(Box::new(TokioAddress {
+                spec: Spec::Ip {
+                    addrs: vec![socket_addr],
+                    wildcard: false,
+                },
+            }));
+        }
+        #[cfg(unix)]
+        if let Some(path) = addr.as_pathname() {
+            return Ok(Box::new(TokioAddress {
+                spec: Spec::Unix { path: path.into() },
+            }));
+        }
+        Err(KjIoError::other(
+            "getSockaddr",
+            "unsupported sockaddr family",
+        ))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = sockaddr;
+        Err(KjIoError::other(
+            "getSockaddr",
+            "not implemented on this platform",
+        ))
+    }
+}
+
+/// Connects to exactly the `index`th resolved address (no fallback). The C++ side drives the
+/// try-each-address loop itself so it can apply `restrictPeers()` filtering per address before
+/// initiating each connection attempt (KJ parity: a blocked address contributes a
+/// "`connect()` blocked by `restrictPeers()`" failure; only the last address's error propagates).
+pub async fn address_connect_index(addr: &TokioAddress, index: usize) -> Result<Box<TokioStream>> {
+    with_runtime(addr.connect_index(index)).await
+}
+
+/// Number of resolved socket addresses behind this address (>= 1).
+pub fn address_count(addr: &TokioAddress) -> usize {
+    addr.count()
+}
+
+/// Raw `struct sockaddr` bytes of the `index`th resolved address, for the C++ side's
+/// `kj::_::NetworkFilter` (restrictPeers) checks.
+pub fn address_raw_sockaddr(addr: &TokioAddress, index: usize) -> Result<Vec<u8>> {
+    addr.raw_sockaddr(index)
+}
+
+pub fn address_listen(addr: &TokioAddress) -> Result<Box<TokioListener>> {
+    addr.listen()
+}
+
+#[expect(clippy::unnecessary_box_returns)] // Opaque cxx types must cross the bridge boxed.
+pub fn address_clone(addr: &TokioAddress) -> Box<TokioAddress> {
+    Box::new(TokioAddress {
+        spec: addr.spec.clone(),
+    })
+}
+
+pub fn address_to_string(addr: &TokioAddress) -> String {
+    addr.to_display_string()
+}
+
+pub async fn listener_accept(listener: &TokioListener) -> Result<Box<TokioStream>> {
+    with_runtime(listener.accept()).await
+}
+
+pub fn listener_port(listener: &TokioListener) -> Result<u16> {
+    listener.port()
+}
+
+pub fn listener_local_addr(listener: &TokioListener) -> Result<Vec<u8>> {
+    listener.local_addr_bytes()
+}
+
+// ======================================================================================
+// Socket-handle wrapping. All handles arrive owned and non-blocking as an `i64` "raw socket
+// handle" — a Unix fd or a win32 SOCKET (the C++ side normalizes KJ's TAKE_OWNERSHIP /
+// ALREADY_CLOEXEC / ALREADY_NONBLOCK flags, dup'ing when not taking ownership). The platform
+// split lives entirely in `ffi::own_socket_from_raw` (the one conversion point); everything
