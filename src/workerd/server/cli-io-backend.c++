@@ -219,4 +219,25 @@ class KjFileWatcher final: public FileWatcher {
     change.fflags = NOTE_WRITE | NOTE_EXTEND | NOTE_DELETE | NOTE_RENAME;
     KJ_SYSCALL(kevent(kqueueFd, &change, 1, nullptr, 0, nullptr));
 
+}
+};
+
+#elif _WIN32
+
+class KjFileWatcher final: public FileWatcher {
+ public:
+  KjFileWatcher(kj::Win32EventPort& port) {}
+
+  bool isSupported() override {
+    return false;
+  }
+
+  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) override {}
+
+  kj::Promise<void> onChange() override {
+    return kj::NEVER_DONE;
+  }
+
+ private:
+
 }  // namespace workerd::server
