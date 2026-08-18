@@ -264,3 +264,67 @@ fn unwrap_native(stream: &mut KjOwn<KjAsyncIoStream>) -> Option<ServeIo> {
         .ok()
         .and_then(|native| native.into_serve_io())
 }
+
+/// Takes the stream's socket natively (tiers 1 + 2).
+///
+/// Tier 1 moves the native tokio object out of a kj-rs-io stream; tier 2 — unix only —
+/// duplicates the stream's OS fd (`F_DUPFD_CLOEXEC`, forced non-blocking) into a fresh tokio
+/// socket. Either way the result is an owned, KJ-independent [`ServeIo`] (never
+/// [`ServeIo::Duplex`]) and the consumed kj stream is destroyed before returning.
+///
+/// The handle tier (tier 2) is `cfg(unix)`: under the all-rust mode on Windows every
+/// socket-backed stream originates in kj-rs-io, so tier 1 always applies and a windows dup arm
+/// would be dead code (see `dup_raw_fd`'s docs for the analysis and the
+/// `BorrowedSocket::try_clone_to_owned` escape hatch should that ever change).
+///
+/// The caller asserts the stream is a **plain stream socket**: if it exposes an fd, that fd
+/// carries the stream's own bytes. Byte-transforming wrappers (TLS — `kj::TlsConnection`
+/// forwards `getFd()` to the ciphertext transport socket) violate this and must go through
+/// [`serve_kj_stream`] instead. As with destroying any kj stream, no I/O promises may be
+/// outstanding on it when ownership is handed over.
+///
+/// # Errors
+///
+/// Errors when the stream is neither kj-rs-io native nor fd-backed (in-memory pipes, promised
+/// streams, non-Unix platforms' foreign streams): such transports can only be served through
+/// [`serve_kj_stream`]'s pump tier — the error hands the stream back for exactly that
+/// fallback. Also errors if the dup or tokio registration fails.
+pub fn take_kj_socket(
+    stream: KjOwn<KjAsyncIoStream>,
+) -> std::result::Result<ServeIo, TakeSocketError> {
+    let mut stream = stream;
+    if let Some(io) = unwrap_native(&mut stream) {
+        // Tier 1: the wrapper is hollow; destroy it now.
+        drop(stream);
+        return Ok(io);
+    }
+    #[cfg(unix)]
+    {
+        let handle = kj_stream_get_handle(&stream);
+        if handle >= 0 {
+            // A unix fd is a non-negative int, widened losslessly to i64 by the bridge.
+            #[expect(clippy::cast_possible_truncation)]
+            let fd = handle as i32;
+            let result = dup_raw_fd(fd)
+                .map_err(KjError::from)
+                .and_then(|owned| crate::net::serve_io_from_owned_fd(owned).map_err(KjError::from));
+            return match result {
+                Ok(io) => {
+                    // Tier 2: the dup is independent; the original stream (and its fd) can go.
+                    drop(stream);
+                    Ok(io)
+                }
+                Err(error) => Err(TakeSocketError { stream, error }),
+            };
+        }
+    }
+    Err(TakeSocketError {
+        stream,
+        error: KjError::new(
+            KjExceptionType::Failed,
+            "cannot take the stream's socket natively: not a kj-rs-io stream and no underlying \
+             OS fd (foreign non-socket transport; serve it through serve_kj_stream's pump instead)"
+                .to_owned(),
+        ),
+    })
+}
