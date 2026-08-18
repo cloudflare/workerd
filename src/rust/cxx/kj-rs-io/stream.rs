@@ -363,3 +363,22 @@ impl TokioStream {
         }
     }
 }
+
+impl TokioStream {
+    /// Recovers whichever native tokio object this is, as a [`crate::serve::ServeIo`]
+    /// (the unwrap fast path of [`crate::serve_kj_stream`]). `None` if hollow.
+    pub(crate) fn into_serve_io(self) -> Option<crate::serve::ServeIo> {
+        match self.inner? {
+            Inner::Tcp(stream) => Some(crate::serve::ServeIo::Tcp(stream)),
+            #[cfg(unix)]
+            Inner::Unix(stream) => Some(crate::serve::ServeIo::Unix(stream)),
+        }
+    }
+
+    fn take(&mut self) -> Result<Box<Self>> {
+        let inner = self.inner.take().ok_or_else(|| {
+            KjIoError::other("kj_rs_io", "stream was already unwrapped (hollow wrapper)")
+        })?;
+        Ok(Box::new(Self { inner: Some(inner) }))
+    }
+}
