@@ -182,4 +182,37 @@ mod bridge {
         fn address_clone(addr: &TokioAddress) -> Box<TokioAddress>;
         fn address_to_string(addr: &TokioAddress) -> String;
     }
+
+    extern "Rust" {
+        // ==================================================================================
+        // Listeners (kj::ConnectionReceiver)
+
+        async unsafe fn listener_accept<'a>(
+            listener: &'a TokioListener,
+        ) -> Result<Box<TokioStream>>;
+
+        /// The locally-bound port (0 for Unix domain sockets, mirroring KJ).
+        fn listener_port(listener: &TokioListener) -> Result<u16>;
+
+        /// Raw `struct sockaddr` bytes of the listener's bound address (the `getsockname()`
+        /// passthrough).
+        fn listener_local_addr(listener: &TokioListener) -> Result<Vec<u8>>;
+
+        /// `getsockopt(2)` on the listening socket; same length semantics as
+        /// `stream_getsockopt`.
+        fn listener_getsockopt(
+            listener: &TokioListener,
+            level: i32,
+            option: i32,
+            value: &mut [u8],
+        ) -> Result<usize>;
+
+        /// `setsockopt(2)` on the listening socket.
+        fn listener_setsockopt(
+            listener: &TokioListener,
+            level: i32,
+            option: i32,
+            value: &[u8],
+        ) -> Result<()>;
+    }
 }
