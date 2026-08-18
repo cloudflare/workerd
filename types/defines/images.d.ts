@@ -137,6 +137,25 @@ interface ImageUpdateOptions {
   creator?: string;
 }
 
+interface DirectUploadOptions {
+  id?: string;
+  requireSignedURLs?: boolean;
+  metadata?: Record<string, unknown>;
+  creator?: string;
+  expiresAt?: Date;
+}
+
+interface DirectUploadResult {
+  /**
+   * The ID of the image that will be created once it is uploaded
+   */
+  id: string;
+  /**
+   * The one-time URL that a creator can upload an image to
+   */
+  uploadURL: string;
+}
+
 interface ImageListOptions {
   limit?: number;
   cursor?: string;
@@ -197,6 +216,16 @@ interface HostedImagesBinding {
     image: ReadableStream<Uint8Array> | ArrayBuffer,
     options?: ImageUploadOptions
   ): Promise<ImageMetadata>;
+
+  /**
+   * Create a one-time authenticated URL that a creator can upload an image to
+   * directly, without exposing your API token.
+   * @see https://developers.cloudflare.com/images/storage/upload-images/direct-creator-upload/
+   * @param options Direct upload configuration
+   * @returns The upload URL and the ID the uploaded image will be given
+   * @throws {@link ImagesError} if the URL cannot be created
+   */
+  directUploadUrl(options?: DirectUploadOptions): Promise<DirectUploadResult>;
 
   /**
    * List hosted images with pagination
