@@ -177,6 +177,7 @@ struct FileWatcher::Impl {
 
 #else
 
+// Dummy backend for platforms without an implementation (Windows, ...), mirroring workerd's:
 // isSupported() returns false, which workerd surfaces as a clean CLI error for --watch
 // ("File watching is not yet implemented on your OS") rather than a crash. A real Windows
 // backend (e.g. ReadDirectoryChangesW, perhaps via the notify crate) is a potential follow-up.
