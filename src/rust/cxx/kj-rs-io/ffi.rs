@@ -417,3 +417,51 @@ pub fn dup_raw_fd(fd: i32) -> Result<std::os::fd::OwnedFd> {
         .try_clone_to_owned()
         .map_err(op("dup()"))
 }
+
+// ======================================================================================
+// `struct sockaddr` <-> bytes.
+
+/// Copies a `socket2::SockAddr`'s initialized `struct sockaddr` bytes into an owned `Vec`, to
+/// hand across the bridge for the C++ side's `kj::_::NetworkFilter` (restrictPeers) checks.
+#[must_use]
+pub fn sockaddr_to_bytes(sockaddr: &socket2::SockAddr) -> Vec<u8> {
+    // Safety: as_ptr()/len() delimit an initialized sockaddr owned by `sockaddr`.
+    let bytes = unsafe {
+        std::slice::from_raw_parts(sockaddr.as_ptr().cast::<u8>(), sockaddr.len() as usize)
+    };
+    bytes.to_vec()
+}
+
+/// Decodes raw `struct sockaddr` bytes (arriving from C++) into a `socket2::SockAddr`.
+///
+/// # Errors
+///
+/// Errors if the byte length is zero or exceeds `sockaddr_storage`.
+#[cfg(any(unix, windows))]
+pub fn sockaddr_from_bytes(bytes: &[u8]) -> Result<socket2::SockAddr> {
+    use crate::error::KjIoError;
+
+    let mut storage = socket2::SockAddrStorage::zeroed();
+    let storage_size = std::mem::size_of::<socket2::SockAddrStorage>();
+    if bytes.is_empty() || bytes.len() > storage_size {
+        return Err(KjIoError::other("sockaddr", "invalid sockaddr length"));
+    }
+    // Safety: SockAddrStorage is plain-old-data large enough for any sockaddr; we copy
+    // `bytes.len() <= size_of::<SockAddrStorage>()` bytes into it.
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            bytes.as_ptr(),
+            std::ptr::from_mut(&mut storage).cast::<u8>(),
+            bytes.len(),
+        );
+    }
+    #[expect(clippy::cast_possible_truncation)]
+    let len = bytes.len() as socket2::socklen_t;
+    // Safety: `storage` is a zeroed sockaddr_storage with the caller's `len` bytes copied in,
+    // satisfying SockAddr::new's layout/length requirements. The address *family* is NOT
+    // validated here: for families socket2 does not understand (e.g. AF_NETLINK), accessors
+    // like `as_socket()`/`as_pathname()` return `None`, and callers must surface that as an
+    // "unsupported sockaddr family" error (see `net.rs::network_get_sockaddr`) rather than
+    // assume a known family.
+    Ok(unsafe { socket2::SockAddr::new(storage, len) })
+}
