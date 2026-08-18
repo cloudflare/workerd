@@ -442,3 +442,30 @@ impl TokioPort {
         self.state.woken.swap(false, Ordering::SeqCst)
     }
 }
+impl Default for TokioPort {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for TokioPort {
+    fn drop(&mut self) {
+        // `try_with`, not `with`: a port owned by an object destroyed during thread/process
+        // teardown (e.g. under KJ_CLEAN_SHUTDOWN) can be dropped after this thread's Rust TLS
+        // destructors have already run, where `with` panics with an AccessError. If the TLS is
+        // gone, its values (including the LocalSet) were already dropped with it, so there is
+        // nothing left to clear.
+        let _ = LOOP_RUNTIME_HANDLE.try_with(|h| {
+            *h.borrow_mut() = None;
+        });
+        // Drop the LocalSet, canceling all still-pending spawned tasks. This runs on the loop
+        // thread (the only thread that may drop a `!Send` LocalSet), after
+        // `kj::WaitScope`/`kj::EventLoop` destruction (see `TokioAsyncIoContext` member order),
+        // so canceled tasks must not touch KJ objects from their `Drop` impls.
+        let _ = LOOP_LOCAL_SET.try_with(|l| {
+            *l.borrow_mut() = None;
+        });
+        // Dropping `self.runtime` cancels any tasks spawned via `tokio::spawn` (as opposed to the
+        // LocalSet). Same threading/ordering constraints as above.
+    }
+}
