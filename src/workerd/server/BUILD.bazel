@@ -2,7 +2,7 @@ load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("//:build/kj_test.bzl", "kj_test")
-load("//:build/rust_io_backend.bzl", "rust_io_backend_local_defines")
+load("//:build/rust_io_backend.bzl", "rust_io_backend_local_defines", "rust_io_hermeticity")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
@@ -107,6 +107,23 @@ wd_cc_library(
     }),
 )
 
+# Build-graph hermeticity gate for the Rust I/O backend. `bazel build` this with
+# --//:io_backend=rust to FAIL ANALYSIS if the workerd binary's transitive deps reach a
+# forbidden concrete C++ I/O target (v1: the kj OS event loop / socket layer, kj-async-os),
+# naming the offending dependency edge. In the default (cxx) config it only reports (those
+# targets are the legitimate C++ backend there). This is the real compile/analysis-time
+# replacement for the deleted grep gate; see //build:rust_io_backend.bzl.
+rust_io_hermeticity(
+    name = "rust-io-hermeticity",
+    enforce = select({
+        "//:io_backend_rust": True,
+        "//conditions:default": False,
+    }),
+    tags = ["manual"],
+    target = ":workerd",
+    visibility = ["//visibility:public"],
+)
+
 wd_cc_library(
     name = "alarm-scheduler",
     srcs = [
@@ -120,7 +137,7 @@ wd_cc_library(
         "//src/workerd/io",
         "//src/workerd/util:sqlite",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
     ],
 )
 
@@ -158,7 +175,7 @@ wd_cc_library(
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-tls",
     ],
@@ -175,6 +192,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io",
+        "@capnp-cpp//src/capnp:capnp-rpc",
     ],
 )
 
@@ -269,7 +287,9 @@ wd_cc_library(
         "//src/workerd/io:worker-entrypoint",
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",
+        "//src/workerd/util:setup-async-io",
         "//src/workerd/util:websocket-error-handler",
+        "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-tls",
     ],
@@ -315,7 +335,7 @@ wd_cc_library(
         "@ada-url",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
@@ -331,8 +351,9 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":workerd_capnp",
+        "//src/workerd/util:setup-async-io",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
@@ -441,9 +462,9 @@ kj_test(
     deps = [
         ":fallback-service",
         ":workerd_capnp",
+        "//src/workerd/util:setup-async-io",
         "@capnp-cpp//src/capnp/compat:json",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
