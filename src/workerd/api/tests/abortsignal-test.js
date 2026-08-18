@@ -784,12 +784,25 @@ export const crossRequestRegistrationChurn = {
     // ones; none of this may disturb subsequent use of the signal.
     for (let i = 0; i < 20; i++) {
       strictEqual(await env.RpcRemoteEnd.churnWait(), 'ok');
+      // Reclamation (rather than per-request accumulation) is observable in the
+      // registration count staying bounded: each completed wait's registration is cleared
+      // when its promise settles, and empty cells are swept by the next registration. (The
+      // RpcRemoteEnd entrypoint is this same worker, so the module-scope controller here is
+      // the very signal being wrapped remotely.)
+      ok(
+        moduleScopeChurnController.signal.getNativeRegistrationCountForTest() <=
+          2
+      );
     }
 
     // The signal is still fully functional after all that churn: aborting it works, and
     // further attempts to use it reject with the abort reason.
     await env.RpcRemoteEnd.abortChurnController();
     await rejects(env.RpcRemoteEnd.churnWait(), { message: /churn-done/ });
+    strictEqual(
+      moduleScopeChurnController.signal.getNativeRegistrationCountForTest(),
+      0
+    );
   },
 };
 

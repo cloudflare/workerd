@@ -38,6 +38,11 @@ MessagePort::MessagePort(): state(Pending()) {
 }
 
 void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
+  // TODO(soon): Per spec these dispatches should use
+  // EventTarget::DispatchExceptionPolicy::REPORT (report the listener exception and continue
+  // with the remaining listeners). Note the interplay with the JSG_TRY below, which converts
+  // a throwing dispatch into a 'messageerror' event: under REPORT, dispatch no longer
+  // throws, so that conversion would need to be reconsidered rather than simply removed.
   JSG_TRY(js) {
     auto message = js.alloc<MessageEvent>(js, value, kj::String(), JSG_THIS);
     dispatchEventImpl(js, kj::mv(message));
@@ -196,6 +201,10 @@ kj::Maybe<jsg::JsValue> MessagePort::getOnMessage(jsg::Lock& js) {
       [&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue { return ref.getHandle(js); });
 }
 
+// TODO(soon): onmessage should follow HTML's positioned event-handler semantics the way
+// AbortSignal::setOnAbort now does (activate a trampoline listener at assignment position and
+// suppress the legacy on<type> reflection via managesEventHandlerAttribute()), rather than
+// always firing before addEventListener() listeners.
 void MessagePort::setOnMessage(jsg::Lock& js, jsg::JsValue value) {
   if (!value.isObject() && !value.isFunction()) {
     onmessageValue = kj::none;

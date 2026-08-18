@@ -289,6 +289,9 @@ void EventSource::notifyError(jsg::Lock& js, const jsg::JsValue& error, bool rec
     readyState = State::CONNECTING;
 
   // Dispatch the error event.
+  // TODO(soon): EventSource's UA-fired events (here and the 'open'/'message' dispatches
+  // below) should use EventTarget::DispatchExceptionPolicy::REPORT per spec (report the
+  // listener exception and continue) rather than the default PROPAGATE.
   dispatchEventImpl(js, js.alloc<ErrorEvent>(js, error));
 
   // Log the error as an uncaught exception for debugging purposes.

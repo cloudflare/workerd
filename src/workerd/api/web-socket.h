@@ -176,6 +176,11 @@ class WebSocketPair: public jsg::Object {
 
 class WebSocketAdapter;
 
+// TODO(soon): WebSocket's UA-fired events ('open', 'message', 'close', 'error') are
+// dispatched with the default PROPAGATE exception policy; per spec they should use
+// EventTarget::DispatchExceptionPolicy::REPORT (report the listener exception and continue
+// with the remaining listeners). Migrate per dispatch site once each failure path's
+// implications are reviewed.
 class WebSocket: public EventTarget {
  public:
   // WebSocket ready states.
