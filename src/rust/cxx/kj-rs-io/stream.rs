@@ -313,3 +313,53 @@ impl TokioStream {
         }
     }
 }
+
+impl TokioStream {
+    /// Raw `struct sockaddr` bytes of the socket's locally-bound address (the `getsockname()`
+    /// passthrough behind `kj::AsyncIoStream::getsockname`).
+    fn local_addr_bytes(&self) -> Result<Vec<u8>> {
+        let addr = self.with_sock_ref("getsockname()", |sock| sock.local_addr())?;
+        Ok(crate::ffi::sockaddr_to_bytes(&addr))
+    }
+
+    /// Raw `struct sockaddr` bytes of the connected peer's address (the `getpeername()`
+    /// passthrough behind `kj::AsyncIoStream::getpeername` and the accept-loop peer-filter
+    /// check).
+    fn peer_addr_bytes(&self) -> Result<Vec<u8>> {
+        let addr = self.with_sock_ref("getpeername()", |sock| sock.peer_addr())?;
+        Ok(crate::ffi::sockaddr_to_bytes(&addr))
+    }
+
+    /// The underlying raw OS socket handle, widened to `i64`: a Unix fd
+    /// (`kj::AsyncIoStream::getFd()`) or a win32 `SOCKET` (`getWin32Handle()`).
+    fn raw_handle(&self) -> Result<i64> {
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            Ok(i64::from(match self.inner()? {
+                Inner::Tcp(s) => s.as_raw_fd(),
+                Inner::Unix(s) => s.as_raw_fd(),
+            }))
+        }
+        // Validated by Windows CI; mirrors the unix arm.
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawSocket;
+            let raw = match self.inner()? {
+                Inner::Tcp(s) => s.as_raw_socket(),
+            };
+            // A live SOCKET fits in i64 (Windows handles fit in 32 bits); the bridge carries
+            // its bits verbatim.
+            #[allow(clippy::cast_possible_wrap)]
+            Ok(raw as i64)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            self.inner()?;
+            Err(KjIoError::other(
+                "getFd",
+                "file descriptors are not available on this platform",
+            ))
+        }
+    }
+}
