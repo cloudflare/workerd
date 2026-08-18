@@ -194,4 +194,19 @@ struct FileWatcher::Impl {
 
 #endif
 
+FileWatcher::FileWatcher(): impl(kj::heap<Impl>()) {}
+FileWatcher::~FileWatcher() noexcept(false) = default;
+
+bool FileWatcher::isSupported() {
+  return impl->isSupported();
+}
+
+void FileWatcher::watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile &> file) {
+  impl->watch(path, file);
+}
+
+kj::Promise<void> FileWatcher::onChange() {
+  return impl->onChange();
+}
+
 }  // namespace kj_rs_io
