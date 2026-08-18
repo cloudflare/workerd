@@ -14,36 +14,6 @@ use crate::ffi::FutureWakerCell;
 use crate::ffi::KjWaker;
 use crate::ffi::PollWaker;
 
-// Safety: We use the type system to express the Sync nature of KjWaker in the cxx-rs FFI boundary.
-// Specifically, we only allow invocations on const KjWakers, and in KJ C++, use of const-qualified
-// functions is thread-safe by convention. Our implementations of KjWakers in C++ respect this
-// convention.
-//
-// Note: Implementing these traits does not seem to be required for building, but the Waker
-// documentation makes it clear Send and Sync are a requirement of the pointed-to type.
-//
-// https://doc.rust-lang.org/std/task/struct.RawWaker.html
-// https://doc.rust-lang.org/std/task/struct.RawWakerVTable.html
-// Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-unsafe impl Send for KjWaker {}
-// Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-unsafe impl Sync for KjWaker {}
-
-impl From<&KjWaker> for Waker {
-    fn from(waker: &KjWaker) -> Self {
-        let waker = RawWaker::new(
-            std::ptr::from_ref::<KjWaker>(waker).cast::<()>(),
-            &KJ_WAKER_VTABLE,
-        );
-        // Safety: KjWaker's Rust-exposed interface is Send and Sync and its RawWakerVTable
-        // implementation functions are all thread-safe.
-        //
-        // https://doc.rust-lang.org/std/task/struct.Waker.html#safety-1
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-        unsafe { Self::from_raw(waker) }
-    }
-}
-
 // Helper function for use in KjWaker's RawWakerVTable implementation to factor out a tedious null
 // pointer check.
 fn deref_kj_waker<'a>(data: *const ()) -> Option<&'a KjWaker> {
