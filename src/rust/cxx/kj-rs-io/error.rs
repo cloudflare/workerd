@@ -34,6 +34,7 @@ impl KjIoError {
 pub fn op(name: &'static str) -> impl Fn(std::io::Error) -> KjIoError {
     move |inner| KjIoError { op: name, inner }
 }
+
 fn exception_type(error: &std::io::Error) -> KjExceptionType {
     use std::io::ErrorKind;
     // Primary classification: by raw errno, mirroring KJ's own table (`typeOfErrno()` in
@@ -67,6 +68,7 @@ fn exception_type(error: &std::io::Error) -> KjExceptionType {
         _ => KjExceptionType::Failed,
     }
 }
+
 /// Exact mirror of KJ's `typeOfErrno()` (kj/debug.c++), so `kj::Exception::Type` matches the
 /// native `kj::setupAsyncIo()` backend errno-for-errno.
 #[cfg(unix)]
@@ -113,6 +115,7 @@ fn errno_exception_type(errno: i32) -> KjExceptionType {
         _ => KjExceptionType::Failed,
     }
 }
+
 impl From<KjIoError> for KjError {
     fn from(error: KjIoError) -> Self {
         let description = format!("{}: {}", error.op, error.inner);
