@@ -151,6 +151,15 @@ void guarded_rust_promise_awaiter_drop_in_place(GuardedRustPromiseAwaiter* ptr) 
 // =======================================================================================
 // FuturePollEvent
 
+FuturePollEvent::~FuturePollEvent() noexcept(false) {}
+
+kj::Rc<FutureWakerCell> FuturePollEvent::cloneWakerCell() {
+  if (wakerCell.cell == nullptr) {
+    wakerCell.cell = kj::rc<FutureWakerCell>(static_cast<kj::_::Event&>(*this));
+  }
+  return wakerCell.cell->addRef();
+}
+
 void FuturePollEvent::exitPollScope(kj::Maybe<kj::Promise<void>> maybePromise) {
   // Await any LazyArcWaker promise that got created during the call to `poll()`. Note that if a
   // Future returns Ready _and_ synchronously wakes its Waker, the work done to await the

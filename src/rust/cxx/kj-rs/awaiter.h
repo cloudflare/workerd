@@ -150,6 +150,7 @@ class FuturePollEvent: public kj::_::PromiseNode,
                        public LinkedGroup<FuturePollEvent, RustPromiseAwaiter> {
  public:
   FuturePollEvent(kj::SourceLocation location = {}): Event(location) {}
+  ~FuturePollEvent() noexcept(false);
 
   // -------------------------------------------------------
   // PromiseNode API
@@ -171,6 +172,19 @@ class FuturePollEvent: public kj::_::PromiseNode,
   // Private API for PollScope.
   void enterPollScope() noexcept;
   void exitPollScope(kj::Maybe<kj::Promise<void>> maybeLazyArcWakerPromise);
+
+  friend class PollWaker;
+  kj::Rc<FutureWakerCell> cloneWakerCell();
+
+  struct NeutralizeGuard {
+    kj::Rc<FutureWakerCell> cell;
+    ~NeutralizeGuard() noexcept(false) {
+      if (cell != nullptr) {
+        cell->neutralize();
+      }
+    }
+  };
+  NeutralizeGuard wakerCell;
 
   kj::Maybe<OwnPromiseNode> arcWakerPromise;
 };
