@@ -25,7 +25,10 @@ pub struct OwnPromiseNode(*mut c_void /* kj::_::PromiseNode* */);
 // It is forgotten using `MaybeUninit` and its ownership passed over to c++ in `unwrap`.
 impl Drop for OwnPromiseNode {
     fn drop(&mut self) {
-        // The bridge takes a live mutable reference and placement-destructs the C++ node.
+        // `own_promise_node_drop_in_place` placement-destructs the node behind `self`. The
+        // borrow is valid for the call; the value is only logically dead afterwards, inside
+        // this `drop`, and the inner `*mut c_void` has no drop glue, so there is no
+        // use-after-free or double-free. Expressed as a `&mut` binding, so no `unsafe` needed.
         crate::ffi::own_promise_node_drop_in_place(self);
     }
 }
@@ -160,7 +163,14 @@ mod send_guards {
     use static_assertions::assert_not_impl_any;
 
     use super::CallbacksFuture;
+    use super::PromiseFuture;
+
     // The raw `*mut c_void` node makes this `!Send`/`!Sync` on its own; guard against a future
     // hand-written impl silently introducing cross-thread transfer of a KJ promise node.
     assert_not_impl_any!(CallbacksFuture<u32>: Send, Sync);
+
+    // After its first poll, `PromiseFuture`'s embedded awaiter memory is self-referential and
+    // event-loop-linked (see `PromiseAwaiter::_pinned`); it must stay `!Unpin` so safe code
+    // cannot move it between polls (`&mut`-based awaits require `Unpin`).
+    assert_not_impl_any!(PromiseFuture<CallbacksFuture<u32>>: Unpin);
 }
