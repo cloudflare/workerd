@@ -24,6 +24,7 @@ use crate::awaiter::WakerRef;
 // satisfied by documentation here.
 #[expect(clippy::missing_safety_doc)]
 mod bridge {
+
     /// Representation of a `GuardedRustPromiseAwaiter` in C++. The size of the blob should match.
     #[derive(Debug)]
     pub struct GuardedRustPromiseAwaiterRepr {
