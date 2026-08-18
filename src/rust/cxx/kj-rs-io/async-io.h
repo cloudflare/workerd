@@ -183,4 +183,32 @@ class TokioLowLevelAsyncIoProvider final: public kj::LowLevelAsyncIoProvider {
   kj::Timer &timer;
 };
 
+// The tokio-backed kj::AsyncIoProvider. Pipes are KJ's in-memory pipes (port-agnostic, like
+// kj::newOneWayPipe/newTwoWayPipe themselves); newPipeThread throws UNIMPLEMENTED (workerd does
+// not use it); newCapabilityPipe keeps its default-throwing implementation.
+class TokioAsyncIoProvider final: public kj::AsyncIoProvider {
+ public:
+  explicit TokioAsyncIoProvider(kj::Timer &timer): timer(timer) {}
+
+  kj::OneWayPipe newOneWayPipe() override {
+    return kj::newOneWayPipe();
+  }
+  kj::TwoWayPipe newTwoWayPipe() override {
+    return kj::newTwoWayPipe();
+  }
+  kj::Network &getNetwork() override {
+    return network;
+  }
+  PipeThread newPipeThread(
+      kj::Function<void(kj::AsyncIoProvider &, kj::AsyncIoStream &, kj::WaitScope &)> startFunc)
+      override;
+  kj::Timer &getTimer() override {
+    return timer;
+  }
+
+ private:
+  TokioNetwork network;
+  kj::Timer &timer;
+};
+
 }  // namespace kj_rs_io
