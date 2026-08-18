@@ -236,7 +236,7 @@ class Fetcher: public JsRpcClientProvider {
    public:
     virtual kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) = 0;
 
-    virtual bool supportsActorRetryMetadata() const {
+    virtual bool supportsActorFetchRetries() const {
       return false;
     }
 
@@ -308,7 +308,7 @@ class Fetcher: public JsRpcClientProvider {
       kj::ConstString operationName,
       kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata);
 
-  bool supportsActorRetryMetadata();
+  bool supportsActorFetchRetries();
 
   // Get a SubrequestChannel representing this Fetcher.
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);

@@ -347,7 +347,7 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
         persistent(persistent) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
-  bool supportsActorRetryMetadata() const override {
+  bool supportsActorFetchRetries() const override {
     return true;
   }
   kj::Own<WorkerInterface> newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
@@ -411,7 +411,7 @@ class ReplicaActorOutgoingFactory final: public Fetcher::OutgoingFactory {
         actorId(kj::mv(actorId)) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
-  bool supportsActorRetryMetadata() const override {
+  bool supportsActorFetchRetries() const override {
     return true;
   }
   kj::Own<WorkerInterface> newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
