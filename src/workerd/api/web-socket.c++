@@ -31,8 +31,8 @@ namespace {
 
 // Dispatches a UA-fired WebSocket event with spec semantics (listener exceptions are
 // reported and the remaining listeners still run), then rethrows the first listener
-// exception, if any, so the caller's pre-existing fail-fast error path still engages: the
-// WebSocket ends up errored out just as it did when the exception propagated directly.
+// exception, if any, so the caller's fail-fast error path engages and errors out the
+// WebSocket.
 void dispatchWithFailFast(jsg::Lock& js, WebSocket& shell, jsg::Ref<Event> event) {
   auto result =
       shell.dispatchEventImpl(js, kj::mv(event), EventTarget::DispatchExceptionPolicy::REPORT);

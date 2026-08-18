@@ -683,9 +683,9 @@ export const webSocketThrowingMessageListener = {
       ]);
       // The send() from the second listener made it out before the teardown.
       strictEqual(await serverReceived, 'still-works');
-      // The fail-fast reaction still errors the WebSocket with the listener's exception.
-      // The exception crosses the JS/KJ boundary in the read loop and is reconstructed, so
-      // only the message survives (as before this dispatch used REPORT).
+      // The fail-fast reaction errors the WebSocket with the listener's exception. The
+      // exception crosses the JS/KJ boundary in the read loop and is reconstructed, so
+      // only the message survives.
       ok(String(await errorPromise).includes('ws boom'));
     } finally {
       removeEventListener('error', globalHandler);

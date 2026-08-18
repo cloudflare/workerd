@@ -31,10 +31,12 @@ namespace workerd::api {
 //   spec — additionally dispatches a `messageerror` event on this port carrying
 //   the exception as its data, which the spec does not do.
 // - We intentionally do not implement the "port message queue" semantics exactly
-//   as they are described in the spec. When a MessagePort has an onmessage listener,
-//   the message delivery is flowing, when there is no onmessage listener, the
-//   messages are queued up until the port is started. Because we are storing
-//   these as JS values, we don't worry about extra memory accounting for the queue.
+//   as they are described in the spec. While the port has any 'message' listener —
+//   whether assigned to onmessage or added with addEventListener(), which per spec
+//   would not enable the queue but does in Node.js — message delivery is flowing;
+//   when the last one is removed, messages are queued until another is attached or
+//   start() is called. Because we are storing these as JS values, we don't worry
+//   about extra memory accounting for the queue.
 // - We do not emit the close event on entangled ports when one of them is GC'd.
 // - We do not check to see if a MessagePort is entangled with another when we
 //   call entangle because there's only one way to entangle them currently and
