@@ -16,27 +16,31 @@ class MessageEvent final: public Event {
       const jsg::JsValue& data,
       kj::String lastEventId = kj::String(),
       kj::Maybe<jsg::Ref<MessagePort>> source = kj::none,
-      kj::Maybe<jsg::Url&> urlForOrigin = kj::none);
+      kj::Maybe<jsg::Url&> urlForOrigin = kj::none,
+      Trusted trusted = Trusted::NO);
 
   MessageEvent(jsg::Lock& js,
       jsg::JsRef<jsg::JsValue> data,
       kj::String lastEventId = kj::String(),
       kj::Maybe<jsg::Ref<MessagePort>> source = kj::none,
-      kj::Maybe<jsg::Url&> urlForOrigin = kj::none);
+      kj::Maybe<jsg::Url&> urlForOrigin = kj::none,
+      Trusted trusted = Trusted::NO);
 
   MessageEvent(jsg::Lock& js,
       kj::String type,
       const jsg::JsValue& data,
       kj::String lastEventId = kj::String(),
       kj::Maybe<jsg::Ref<MessagePort>> source = kj::none,
-      kj::Maybe<jsg::Url&> urlForOrigin = kj::none);
+      kj::Maybe<jsg::Url&> urlForOrigin = kj::none,
+      Trusted trusted = Trusted::NO);
 
   MessageEvent(jsg::Lock& js,
       kj::String type,
       kj::OneOf<jsg::JsRef<jsg::JsValue>, jsg::Ref<Blob>> data,
       kj::String lastEventId = kj::String(),
       kj::Maybe<jsg::Ref<MessagePort>> source = kj::none,
-      kj::Maybe<jsg::Url&> urlForOrigin = kj::none);
+      kj::Maybe<jsg::Url&> urlForOrigin = kj::none,
+      Trusted trusted = Trusted::NO);
 
   struct Initializer {
     jsg::JsRef<jsg::JsValue> data;

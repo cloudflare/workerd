@@ -13,14 +13,16 @@ constexpr kj::StringPtr kRejectionHandledEventName = "rejectionhandled"_kj;
 constexpr kj::StringPtr kUnhandledRejectionEventName = "unhandledrejection"_kj;
 }  // namespace
 
-OpenEvent::OpenEvent(): Event(kOpenEventName) {}
+// Runtime-only; always trusted.
+OpenEvent::OpenEvent(): Event(kOpenEventName, {}, Trusted::YES) {}
 
 MessageEvent::MessageEvent(jsg::Lock& js,
     const jsg::JsValue& data,
     kj::String lastEventId,
     kj::Maybe<jsg::Ref<MessagePort>> source,
-    kj::Maybe<jsg::Url&> urlForOrigin)
-    : Event(kMessageEventName),
+    kj::Maybe<jsg::Url&> urlForOrigin,
+    Trusted trusted)
+    : Event(kMessageEventName, {}, trusted),
       data(jsg::JsRef(js, data)),
       lastEventId(kj::mv(lastEventId)),
       maybeSource(kj::mv(source)),
@@ -29,8 +31,9 @@ MessageEvent::MessageEvent(jsg::Lock& js,
     jsg::JsRef<jsg::JsValue> data,
     kj::String lastEventId,
     kj::Maybe<jsg::Ref<MessagePort>> source,
-    kj::Maybe<jsg::Url&> urlForOrigin)
-    : Event(kMessageEventName),
+    kj::Maybe<jsg::Url&> urlForOrigin,
+    Trusted trusted)
+    : Event(kMessageEventName, {}, trusted),
       data(kj::mv(data)),
       lastEventId(kj::mv(lastEventId)),
       maybeSource(kj::mv(source)),
@@ -40,8 +43,9 @@ MessageEvent::MessageEvent(jsg::Lock& js,
     const jsg::JsValue& data,
     kj::String lastEventId,
     kj::Maybe<jsg::Ref<MessagePort>> source,
-    kj::Maybe<jsg::Url&> urlForOrigin)
-    : Event(kj::mv(type)),
+    kj::Maybe<jsg::Url&> urlForOrigin,
+    Trusted trusted)
+    : Event(kj::mv(type), {}, trusted),
       data(jsg::JsRef(js, kj::mv(data))),
       lastEventId(kj::mv(lastEventId)),
       maybeSource(kj::mv(source)),
@@ -51,8 +55,9 @@ MessageEvent::MessageEvent(jsg::Lock& js,
     kj::OneOf<jsg::JsRef<jsg::JsValue>, jsg::Ref<Blob>> data,
     kj::String lastEventId,
     kj::Maybe<jsg::Ref<MessagePort>> source,
-    kj::Maybe<jsg::Url&> urlForOrigin)
-    : Event(kj::mv(type)),
+    kj::Maybe<jsg::Url&> urlForOrigin,
+    Trusted trusted)
+    : Event(kj::mv(type), {}, trusted),
       data(kj::mv(data)),
       lastEventId(kj::mv(lastEventId)),
       maybeSource(kj::mv(source)),
@@ -121,7 +126,10 @@ void MessageEvent::visitForGc(jsg::GcVisitor& visitor) {
 }
 
 // ======================================================================================
-ErrorEvent::ErrorEvent(ErrorEventInit init): Event(kDefaultErrorEventName), init(kj::mv(init)) {}
+// Runtime-only (the JS constructor uses the (type, init) overload); always trusted.
+ErrorEvent::ErrorEvent(ErrorEventInit init)
+    : Event(kDefaultErrorEventName, {}, Trusted::YES),
+      init(kj::mv(init)) {}
 
 ErrorEvent::ErrorEvent(kj::String type, ErrorEventInit init)
     : Event(kj::mv(type)),
@@ -187,7 +195,8 @@ constexpr kj::StringPtr getPromiseRejectionEventName(v8::PromiseRejectEvent type
 
 PromiseRejectionEvent::PromiseRejectionEvent(
     v8::PromiseRejectEvent type, jsg::V8Ref<v8::Promise> promise, jsg::Value reason)
-    : Event(getPromiseRejectionEventName(type)),
+    // Runtime-only; always trusted.
+    : Event(getPromiseRejectionEventName(type), {}, Trusted::YES),
       promise(kj::mv(promise)),
       reason(kj::mv(reason)) {}
 

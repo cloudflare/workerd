@@ -31,8 +31,9 @@ struct DeferredProxy;
 
 class CloseEvent: public Event {
  public:
+  // Runtime-only (the JS constructor uses the (type, ...) overload); always trusted.
   CloseEvent(uint code, kj::String reason, bool clean)
-      : Event("close"),
+      : Event("close", {}, Trusted::YES),
         code(code),
         reason(kj::mv(reason)),
         clean(clean) {}

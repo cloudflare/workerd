@@ -18,6 +18,7 @@ const workerdGlobals = {
   CustomEvent: 'readonly',
   DecompressionStream: 'readonly',
   DOMException: 'readonly',
+  ErrorEvent: 'readonly',
   Event: 'readonly',
   EventSource: 'readonly',
   EventTarget: 'readonly',

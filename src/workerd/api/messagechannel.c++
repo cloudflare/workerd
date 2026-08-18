@@ -44,14 +44,15 @@ void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
   // a throwing dispatch into a 'messageerror' event: under REPORT, dispatch no longer
   // throws, so that conversion would need to be reconsidered rather than simply removed.
   JSG_TRY(js) {
-    auto message = js.alloc<MessageEvent>(js, value, kj::String(), JSG_THIS);
+    auto message =
+        js.alloc<MessageEvent>(js, value, kj::String(), JSG_THIS, kj::none, Trusted::YES);
     dispatchEventImpl(js, kj::mv(message));
   }
   JSG_CATCH(exception) {
     // There was an error dispatching the message event.
     // We will dispatch a messageerror event instead.
-    auto message =
-        js.alloc<MessageEvent>(js, jsg::JsValue(exception.getHandle(js)), kj::String(), JSG_THIS);
+    auto message = js.alloc<MessageEvent>(
+        js, jsg::JsValue(exception.getHandle(js)), kj::String(), JSG_THIS, kj::none, Trusted::YES);
     dispatchEventImpl(js, kj::mv(message));
     // Now, if this dispatchEventImpl throws, we just blow up. Don't try to catch it.
   }
@@ -168,7 +169,7 @@ void MessagePort::close(jsg::Lock& js) {
     }
     other = kj::none;
   }
-  auto closeEvent = js.alloc<Event>(name, Event::Init{});
+  auto closeEvent = js.alloc<Event>(name, Event::Init{}, Trusted::YES);
   dispatchEventImpl(js, kj::mv(closeEvent));
 }
 

@@ -1058,7 +1058,7 @@ kj::Maybe<kj::Date> LegacyWebSocketAdapter::getAutoResponseTimestamp() {
 
 void LegacyWebSocketAdapter::dispatchOpen(jsg::Lock& js) {
   constexpr kj::StringPtr kOpenEvent = "open"_kj;
-  shell.dispatchEventImpl(js, js.alloc<Event>(kOpenEvent));
+  shell.dispatchEventImpl(js, js.alloc<Event>(kOpenEvent, Event::Init{}, Trusted::YES));
 }
 
 void LegacyWebSocketAdapter::ensurePumping(jsg::Lock& js) {
@@ -1355,18 +1355,22 @@ kj::Promise<kj::Maybe<kj::Exception>> LegacyWebSocketAdapter::readLoop(
         markWebSocketPerfEvent("ws_received"_kjc);
         KJ_SWITCH_ONEOF(message) {
           KJ_CASE_ONEOF(text, kj::String) {
-            shell.dispatchEventImpl(js, js.alloc<MessageEvent>(js, js.str(text)));
+            shell.dispatchEventImpl(js,
+                js.alloc<MessageEvent>(
+                    js, js.str(text), kj::String(), kj::none, kj::none, Trusted::YES));
           }
           KJ_CASE_ONEOF(data, kj::Array<byte>) {
             if (binaryType_ == BinaryType::BLOB) {
               // Per the WHATWG spec, deliver binary messages as Blob when binaryType is "blob".
               auto ab = jsg::JsArrayBuffer::create(js, data);
               auto blob = js.alloc<Blob>(js, jsg::JsBufferSource(ab), kj::str());
-              shell.dispatchEventImpl(
-                  js, js.alloc<MessageEvent>(js, kj::str("message"), kj::mv(blob)));
+              shell.dispatchEventImpl(js,
+                  js.alloc<MessageEvent>(js, kj::str("message"), kj::mv(blob), kj::String(),
+                      kj::none, kj::none, Trusted::YES));
             } else {
               jsg::JsValue ab = jsg::JsArrayBuffer::create(js, data);
-              shell.dispatchEventImpl(js, js.alloc<MessageEvent>(js, ab));
+              shell.dispatchEventImpl(js,
+                  js.alloc<MessageEvent>(js, ab, kj::String(), kj::none, kj::none, Trusted::YES));
             }
           }
           KJ_CASE_ONEOF(close, kj::WebSocket::Close) {

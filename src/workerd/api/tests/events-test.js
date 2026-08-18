@@ -500,3 +500,47 @@ export const handlerThis = {
     strictEqual(handlerObject.handleEvent.mock.callCount(), 1);
   },
 };
+
+export const isTrustedDefaults = {
+  async test() {
+    // User-constructed events are never trusted...
+    const userEvents = [
+      new Event('foo'),
+      new CustomEvent('foo'),
+      new MessageEvent('foo', { data: 'bar' }),
+      new ErrorEvent('foo'),
+      new CloseEvent('foo'),
+    ];
+    for (const event of userEvents) {
+      strictEqual(event.isTrusted, false);
+      // ...including when observed by a listener during dispatch.
+      const target = new EventTarget();
+      let trusted;
+      target.addEventListener('foo', (e) => {
+        trusted = e.isTrusted;
+      });
+      target.dispatchEvent(event);
+      strictEqual(trusted, false);
+    }
+
+    // Events constructed and dispatched by the runtime are trusted.
+    {
+      const ac = new AbortController();
+      let trusted;
+      ac.signal.addEventListener('abort', (e) => {
+        trusted = e.isTrusted;
+      });
+      ac.abort();
+      strictEqual(trusted, true);
+    }
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      const handler = (e) => resolve(e.isTrusted);
+      addEventListener('unhandledrejection', handler);
+      Promise.reject(new Error('boom'));
+      strictEqual(await promise, true);
+      removeEventListener('unhandledrejection', handler);
+    }
+  },
+};
