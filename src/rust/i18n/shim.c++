@@ -8,9 +8,7 @@
 
 #include <unicode/ucnv.h>
 
-#include <kj/debug.h>
-
-#include <string>
+#include <kj/string.h>
 
 namespace workerd::rust::i18n {
 
@@ -28,24 +26,23 @@ size_t Converter::min_char_size() const {
   return static_cast<size_t>(ucnv_getMinCharSize(conv_));
 }
 
-void Converter::set_subst_chars(::rust::Str substitute) const {
-  if (substitute.size() == 0) return;
+bool Converter::set_subst_chars(::rust::Str substitute) const {
+  if (substitute.empty()) return true;
+  // `ucnv_setSubstChars` takes the length as an `int8_t`, and reads a negative
+  // length as "NUL-terminated", which `rust::Str` is not. Reject anything that
+  // would not survive the narrowing; ICU's own limit is far lower still.
+  if (substitute.size() > INT8_MAX) return false;
   UErrorCode status = U_ZERO_ERROR;
   ucnv_setSubstChars(conv_, substitute.data(), static_cast<int8_t>(substitute.size()), &status);
-  // Unreachable in practice: the substitute strings this module sets are always
-  // short, valid ASCII ('?' repeated `minCharSize()` times), so ICU never
-  // rejects them for any of the four transcodable encodings.
-  KJ_REQUIRE(U_SUCCESS(status), "Setting ICU substitute characters failed");
+  return U_SUCCESS(status);
 }
 
 std::unique_ptr<Converter> open_converter(::rust::Str name) {
   UErrorCode status = U_ZERO_ERROR;
-  std::string nameStr(name.data(), name.size());
-  auto* conv = ucnv_open(nameStr.c_str(), &status);
-  // Unreachable in practice: this module only ever opens converters for the
-  // four fixed, always-valid ICU encoding names ("us-ascii", "iso8859-1",
-  // "utf-8", "utf16le").
-  KJ_REQUIRE(U_SUCCESS(status), "Failed to initialize converter");
+  // `ucnv_open` needs a NUL-terminated name, which `rust::Str` is not.
+  auto nameStr = kj::str(kj::ArrayPtr<const char>(name.data(), name.size()));
+  auto* conv = ucnv_open(nameStr.cStr(), &status);
+  if (U_FAILURE(status)) return nullptr;
   return std::make_unique<Converter>(conv);
 }
 
