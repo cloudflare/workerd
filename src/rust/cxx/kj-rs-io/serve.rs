@@ -186,3 +186,40 @@ impl AsyncWrite for ServeIo {
         }
     }
 }
+
+/// The KJ-side pump future of the fallback path.
+///
+/// Not `Send`: it awaits bridged `kj::Promise`s and must be polled on the KJ event-loop thread
+/// owning the stream. Resolves when both directions are done; dropping it aborts the
+/// connection bridge (see the module docs).
+pub type StreamPump = Pin<Box<dyn Future<Output = Result<(), KjError>>>>;
+
+/// The result of [`serve_kj_stream`].
+pub struct ServedKjStream {
+    /// The tokio-side stream.
+    ///
+    /// Thread affinity (load-bearing, not advisory): the NATIVE variants (`Tcp`/`Unix`) may be
+    /// handed to a connection task on any runtime -- they stay registered with the I/O driver
+    /// that created them (for kj-rs-io streams, this thread's KJ-loop runtime) and wake their
+    /// consumer via tokio's own `Send + Sync` task waker. The [`ServeIo::Duplex`] variant must
+    /// be driven ONLY on the KJ event-loop thread: its peer end lives inside `pump`, which is
+    /// polled as a bridged future, so the waker parked in the duplex's internal waker slots is
+    /// a `kj_rs` `FutureWakerCell` clone -- non-atomic and loop-thread-only by design. A
+    /// read/write/drop of the duplex from any other thread wakes that cell cross-thread: a data
+    /// race on its refcount plus a cross-thread `Event::armDepthFirst()` on the KJ event loop
+    /// (undefined behavior, not merely a logic error). The type is `Send` solely for the native
+    /// variants' sake; check [`ServedKjStream::path`] before moving it to another thread.
+    pub io: ServeIo,
+    /// Present iff `io` is [`ServeIo::Duplex`]: the pump that actually moves the bytes, owning
+    /// the kj stream it bridges. The caller must poll it on the KJ event-loop thread until it
+    /// settles or is dropped; dropping it destroys the stream (see the module docs).
+    pub pump: Option<StreamPump>,
+}
+
+impl ServedKjStream {
+    /// Which transport path was taken (see [`ServePath`]).
+    #[must_use]
+    pub fn path(&self) -> ServePath {
+        self.io.path()
+    }
+}
