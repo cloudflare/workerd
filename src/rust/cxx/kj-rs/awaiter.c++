@@ -35,6 +35,22 @@ RustPromiseAwaiter::~RustPromiseAwaiter() noexcept(false) {
   unwindDetector.catchExceptionsIfUnwinding([this]() { node = nullptr; });
 }
 
+void RustPromiseAwaiter::setPollEvent(FuturePollEvent& futurePollEvent) {
+  KJ_IF_SOME(old, maybePollEvent) {
+    if (&old == &futurePollEvent) return;
+    old.leaves.remove(*this);
+  }
+  futurePollEvent.leaves.add(*this);
+  maybePollEvent = futurePollEvent;
+}
+
+void RustPromiseAwaiter::clearPollEvent() {
+  KJ_IF_SOME(old, maybePollEvent) {
+    old.leaves.remove(*this);
+    maybePollEvent = kj::none;
+  }
+}
+
 void RustPromiseAwaiter::fire() {
   // Safety: Our Event can only fire on the event loop which was active when our Event base class
   // was constructed. Therefore, we don't need to check that we're on the correct event loop.

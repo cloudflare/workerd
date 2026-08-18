@@ -5,6 +5,7 @@
 #include "kj-rs/waker.h"
 
 #include <kj/debug.h>
+#include <kj/list.h>
 
 namespace kj_rs {
 
@@ -102,6 +103,13 @@ class RustPromiseAwaiter final: public kj::_::Event,
   OwnPromiseNode take_own_promise_node();
 
  private:
+  friend class FuturePollEvent;
+  void setPollEvent(FuturePollEvent& futurePollEvent);
+  void clearPollEvent();
+
+  kj::Maybe<FuturePollEvent&> maybePollEvent;
+  kj::ListLink<RustPromiseAwaiter> link;
+
   // The Rust code which instantiates RustPromiseAwaiter does so with a OptionWaker object right
   // next to the RustPromiseAwaiter, such that it is dropped after RustPromiseAwaiter. Thus, our
   // reference to our OptionWaker is stable. We use the OptionWaker to (optionally) store a clone of
@@ -187,6 +195,9 @@ class FuturePollEvent: public kj::_::PromiseNode,
 
   friend class PollWaker;
   kj::Rc<FutureWakerCell> cloneWakerCell();
+
+  friend class RustPromiseAwaiter;
+  kj::List<RustPromiseAwaiter, &RustPromiseAwaiter::link> leaves;
 
   struct NeutralizeGuard {
     kj::Rc<FutureWakerCell> cell;
