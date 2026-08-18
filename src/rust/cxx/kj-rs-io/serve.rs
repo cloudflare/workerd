@@ -223,3 +223,44 @@ impl ServedKjStream {
         self.io.path()
     }
 }
+
+// =======================================================================================
+// Entry points
+
+/// [`take_kj_socket`]'s error: the failure, plus the untouched stream handed back so the
+/// caller can fall back to [`serve_kj_stream`]'s pump tier (or destroy it).
+pub struct TakeSocketError {
+    /// The stream `take_kj_socket` consumed, returned untouched.
+    pub stream: KjOwn<KjAsyncIoStream>,
+    /// Why the socket could not be taken natively.
+    pub error: KjError,
+}
+
+impl std::fmt::Debug for TakeSocketError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TakeSocketError")
+            .field("error", &self.error)
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Display for TakeSocketError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.error)
+    }
+}
+
+/// Drops the handed-back stream (on the current — KJ event-loop — thread) and keeps the error.
+impl From<TakeSocketError> for KjError {
+    fn from(e: TakeSocketError) -> Self {
+        e.error
+    }
+}
+
+/// Tier-1 unwrap: if the owned stream is kj-rs-io-originated, moves its native tokio socket
+/// out (leaving the C++ wrapper hollow) and returns it. `None` for a foreign stream.
+fn unwrap_native(stream: &mut KjOwn<KjAsyncIoStream>) -> Option<ServeIo> {
+    unwrap_tokio_stream(stream.as_mut())
+        .ok()
+        .and_then(|native| native.into_serve_io())
+}
