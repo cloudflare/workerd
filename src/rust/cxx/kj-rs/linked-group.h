@@ -25,15 +25,10 @@ class LinkedObject {
   KJ_DISALLOW_COPY_AND_MOVE(LinkedObject);
 
  private:
-  // We'll refer to the `LinkedGroup<G, O>` type quite a bit below, so we shadow the class template
-  // with our own convenience typedef. But, we need to give LinkedGroup friend access to us first.
   friend class LinkedGroup<G, O>;
   using LinkedGroup = LinkedGroup<G, O>;
 
  protected:
-  // A proxy class representing this LinkedObject's LinkedGroup, if any. Instead of exposing
-  // multiple functions on LinkedObject, we expose one: `linkedGroup()`, and that function returns
-  // an object of this proxy class (or the similar ConstLinkedGroupProxy class below).
   class LinkedGroupProxy {
    public:
     LinkedGroupProxy(LinkedObject& self): self(self) {}
@@ -51,7 +46,6 @@ class LinkedObject {
     LinkedObject& self;
   };
 
-  // Const version of LinkedGroupProxy, exposing only `tryGet()`.
   class ConstLinkedGroupProxy {
    public:
     ConstLinkedGroupProxy(const LinkedObject& self): self(self) {}
@@ -63,7 +57,6 @@ class LinkedObject {
     const LinkedObject& self;
   };
 
-  // Provide access to this Object's LinkedGroup, if any.
   LinkedGroupProxy linkedGroup() {
     return *this;
   }
@@ -73,10 +66,7 @@ class LinkedObject {
 
  private:
   void setGroup(LinkedGroup& newGroup) {
-    // Invalidate our current group membership, if any.
     KJ_IF_SOME(oldGroup, maybeGroup) {
-      // If we're already a member of `newGroup`, we're done. Otherwise, we must remove ourselves
-      // from the old group.
       if (&newGroup == &oldGroup) {
         return;
       } else {
@@ -86,7 +76,6 @@ class LinkedObject {
       KJ_IREQUIRE(!link.isLinked());
     }
 
-    // Add ourselves to the new group.
     newGroup.list.add(*this);
     maybeGroup = newGroup;
   }
@@ -119,7 +108,6 @@ class LinkedObject {
     }
   }
 
-  // Helper for `setGroup()`, `invalidateGroup()`, and `~LinkedGroup()`.
   void removeFromGroup(LinkedGroup& group) {
     KJ_IREQUIRE(link.isLinked());
     group.list.remove(*this);
