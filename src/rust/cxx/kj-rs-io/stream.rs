@@ -109,3 +109,48 @@ impl TokioStream {
         }
     }
 }
+
+impl TokioStream {
+    async fn try_read_min(&self, buf: &mut [u8], min_bytes: usize) -> Result<usize> {
+        self.inner()?;
+        let min_bytes = min_bytes.min(buf.len());
+        let mut total = 0;
+        while total < min_bytes {
+            match self.try_read(&mut buf[total..]) {
+                Ok(0) => break, // EOF: return what we have (< min_bytes signals EOF to KJ).
+                Ok(n) => total += n,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    self.ready(Interest::READABLE).await?;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(op("read()")(e)),
+            }
+        }
+        Ok(total)
+    }
+
+    /// Write-all semantics.
+    async fn write_all(&self, buf: &[u8]) -> Result<()> {
+        self.inner()?;
+        let mut written = 0;
+        while written < buf.len() {
+            match self.try_write(&buf[written..]) {
+                Ok(0) => {
+                    // try_write on a socket signals "would block" via Err(WouldBlock), so a
+                    // zero-byte result for a non-empty buffer means the connection is gone.
+                    return Err(KjIoError::other(
+                        "write()",
+                        "wrote zero bytes (connection closed)",
+                    ));
+                }
+                Ok(n) => written += n,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    self.ready(Interest::WRITABLE).await?;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(op("write()")(e)),
+            }
+        }
+        Ok(())
+    }
+}
