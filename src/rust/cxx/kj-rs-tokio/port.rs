@@ -469,3 +469,173 @@ impl Drop for TokioPort {
         // LocalSet). Same threading/ordering constraints as above.
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wake_latch_semantics() {
+        let port = TokioPort::new();
+        // No wake: a timed-out wait reports false.
+        assert!(!port.wait_timeout_ns(1_000_000));
+        // Wake before wait: latch is reported exactly once.
+        port.wake();
+        assert!(port.wait_timeout_ns(1_000_000));
+        assert!(!port.wait_timeout_ns(1_000_000));
+        // Wake is also consumed by poll().
+        port.wake();
+        assert!(port.poll());
+        assert!(!port.poll());
+    }
+
+    #[test]
+    fn wake_from_other_thread_unblocks_wait_forever() {
+        let port = Arc::new(TokioPort::new());
+        let port2 = Arc::clone(&port);
+        let thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(10));
+            port2.wake();
+        });
+        assert!(port.wait_forever());
+        thread.join().unwrap();
+    }
+
+    #[test]
+    fn spawned_tasks_run_during_wait() {
+        let port = TokioPort::new();
+        let (tx, mut rx) = tokio::sync::oneshot::channel::<u32>();
+        let mut jh = spawn(async move {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            tx.send(42).unwrap();
+        });
+        // The task only runs inside wait_impl's block_on.
+        let mut done = false;
+        for _ in 0..100 {
+            let _ = port.wait_timeout_ns(20_000_000);
+            if let Ok(v) = rx.try_recv() {
+                assert_eq!(v, 42);
+                done = true;
+                break;
+            }
+        }
+        assert!(done);
+        // The JoinHandle should complete promptly now.
+        port.runtime.block_on(&mut jh).unwrap();
+    }
+
+    #[test]
+    fn poll_never_sleeps() {
+        let port = TokioPort::new();
+        // A pending spawned task must not make poll() block.
+        let _jh = spawn(std::future::pending::<()>());
+        let start = std::time::Instant::now();
+        assert!(!port.poll());
+        assert!(start.elapsed() < Duration::from_millis(100));
+    }
+
+    /// `spawn` accepts `!Send` futures because it is backed by `LocalSet::spawn_local`. This
+    /// future holds an `Rc` — which is `!Send` — across an await point, exercising that path,
+    /// and proves such a task actually runs to completion on the loop thread.
+    #[test]
+    fn spawn_accepts_non_send_futures() {
+        use std::cell::Cell;
+        let port = TokioPort::new();
+        let counter = Rc::new(Cell::new(0u32));
+        let task_counter = Rc::clone(&counter);
+        // Detached on purpose; the `Rc` capture makes the future `!Send`.
+        let _jh = spawn(async move {
+            for _ in 0..3 {
+                tokio::task::yield_now().await;
+            }
+            task_counter.set(task_counter.get() + 1);
+        });
+        let mut done = false;
+        for _ in 0..100 {
+            let _ = port.wait_timeout_ns(1_000_000);
+            if counter.get() == 1 {
+                done = true;
+                break;
+            }
+        }
+        assert!(done, "non-Send spawned task did not run to completion");
+    }
+
+    /// The high-res short-sleep path: a 100 µs timeout must not be quantized to tokio's ~1 ms
+    /// timer wheel.
+    ///
+    /// The wheel failure mode is a FLOOR — under quantization every sample takes >= ~1 ms —
+    /// while CI load only inflates some samples (loaded macOS CI VMs push the MEDIAN past
+    /// 500 µs). So assert on the minimum of 31 samples: load can't push all of them up, the
+    /// wheel floor pushes every one of them past the bound.
+    #[cfg(unix)]
+    #[test]
+    fn short_timeouts_are_sub_millisecond() {
+        let port = TokioPort::new();
+        // Warm-up: lazily spawns the hires timer thread and faults in the block_on paths.
+        let _ = port.wait_timeout_ns(100_000);
+
+        let mut samples: Vec<Duration> = (0..31)
+            .map(|_| {
+                let start = std::time::Instant::now();
+                let _ = port.wait_timeout_ns(100_000);
+                start.elapsed()
+            })
+            .collect();
+        samples.sort();
+        let fastest = samples[0];
+        assert!(
+            fastest >= Duration::from_micros(100),
+            "woke before the deadline: fastest {fastest:?}"
+        );
+        assert!(
+            fastest < Duration::from_micros(500),
+            "100us timeout quantized: fastest {fastest:?}"
+        );
+    }
+
+    /// Long sleeps stay on the plain tokio path and remain accurate (and, by construction,
+    /// never touch the hires thread — see `HIRES_TIMEOUT_THRESHOLD`).
+    #[test]
+    fn long_timeouts_still_accurate() {
+        let port = TokioPort::new();
+        let start = std::time::Instant::now();
+        let _ = port.wait_timeout_ns(20_000_000);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(19),
+            "woke early: {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "woke far too late: {elapsed:?}"
+        );
+    }
+
+    /// `wake()` must still interrupt a wait that has the high-res timer armed, and the stale
+    /// hires wakeup for the canceled deadline must not corrupt the latch of later waits.
+    #[cfg(unix)]
+    #[test]
+    fn wake_interrupts_short_timeout_wait() {
+        let port = Arc::new(TokioPort::new());
+        // Arm the hires machinery once so the thread exists.
+        let _ = port.wait_timeout_ns(100_000);
+
+        let port2 = Arc::clone(&port);
+        let thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(2));
+            port2.wake();
+        });
+        // A chain of short waits; one of them must observe the wake latch.
+        let mut woken = false;
+        for _ in 0..1000 {
+            if port.wait_timeout_ns(500_000) {
+                woken = true;
+                break;
+            }
+        }
+        assert!(woken);
+        thread.join().unwrap();
+        // The latch was consumed; subsequent short waits time out normally with latch false.
+        assert!(!port.wait_timeout_ns(100_000));
+    }
+}
