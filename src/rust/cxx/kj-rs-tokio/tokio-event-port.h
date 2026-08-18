@@ -80,4 +80,30 @@ class TokioEventPort final: public kj::EventPort {
   bool runnable = false;
 };
 
+// Mirrors the shape of kj::setupAsyncIo() (see kj/async-io.h) for the tokio-backed loop. Owns
+// the event port (and thus the per-thread tokio runtime), the kj::EventLoop constructed with
+// that port, and the kj::WaitScope.
+struct TokioAsyncIoContext {
+  // Destroyed in reverse declaration order: waitScope, then loop (asserts its queue is empty),
+  // then port (dropping the tokio runtime, which cancels still-pending spawned tasks). Keep it
+  // this way: the loop must still exist while promises/timers are cancelled, and the runtime
+  // must outlive the loop because bridged Rust futures are cancelled through KJ promise
+  // destruction during loop teardown.
+  kj::Own<TokioEventPort> port;
+  kj::Own<kj::EventLoop> loop;
+  kj::Own<kj::WaitScope> waitScope;
+
+  TokioEventPort &getPort() {
+    return *port;
+  }
+  kj::WaitScope &getWaitScope() {
+    return *waitScope;
+  }
+  kj::Timer &getTimer() {
+    return port->getTimer();
+  }
+};
+
+TokioAsyncIoContext setupTokioAsyncIo();
+
 }  // namespace kj_rs_tokio
