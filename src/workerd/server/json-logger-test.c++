@@ -2,25 +2,47 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#if __linux__
 #include "json-logger.h"
 
 #include <workerd/server/log-schema.capnp.h>
 
+#if __linux__
 #include <fcntl.h>
 #include <unistd.h>
 
-#include <capnp/compat/json.h>
-#include <capnp/message.h>
 #include <kj/async-unix.h>
 #include <kj/io.h>
 
 #include <cstdio>
 #endif  // __linux__
+#include <capnp/compat/json.h>
+#include <capnp/message.h>
 #include <kj/test.h>
 
 namespace workerd::server {
 namespace {
+
+// The level names are a contract with consumers of workerd's structured output, so pin the encoded
+// strings rather than round-tripping them through the codec that produced them.
+KJ_TEST("JSON log level names") {
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<log_schema::LogEntry>();
+
+  auto expectLevelName = [&](log_schema::LogEntry::LogLevel level, kj::StringPtr expected) {
+    capnp::MallocMessageBuilder message;
+    auto entry = message.initRoot<log_schema::LogEntry>();
+    entry.setLevel(level);
+    auto json = codec.encode(entry);
+    KJ_EXPECT(json.contains(kj::str("\"level\":\"", expected, "\"")), json, expected);
+  };
+
+  expectLevelName(log_schema::LogEntry::LogLevel::DEBUG_, "debug");
+  expectLevelName(log_schema::LogEntry::LogLevel::INFO, "info");
+  expectLevelName(log_schema::LogEntry::LogLevel::WARNING, "warn");
+  expectLevelName(log_schema::LogEntry::LogLevel::ERROR, "error");
+  expectLevelName(log_schema::LogEntry::LogLevel::FATAL, "fatal");
+}
+
 #if __linux__
 // This test uses pipe2 and dup2 to capture stdout which is far easier on linux.
 
@@ -153,6 +175,7 @@ KJ_TEST("StructuredLoggingProcessContext - structured logging mode") {
   auto jsonEntry = KJ_ASSERT_NONNULL(findJsonEntryContaining(output, "Test structured warning"));
   validateJsonLogEntry(
       jsonEntry, log_schema::LogEntry::LogLevel::WARNING, "Test structured warning");
+  KJ_EXPECT(jsonEntry.contains("\"level\":\"warn\""), jsonEntry);
 }
 
 KJ_TEST("StructuredLoggingProcessContext - error handling in structured mode") {
@@ -168,8 +191,6 @@ KJ_TEST("StructuredLoggingProcessContext - error handling in structured mode") {
 }
 
 #endif  // __linux__
-
-KJ_TEST("Blank test because KJ fails when 0 tests are enabled") {}
 
 }  // namespace
 }  // namespace workerd::server
