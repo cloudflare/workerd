@@ -37,7 +37,8 @@ class Event: public jsg::Object {
     JSG_STRUCT(bubbles, cancelable, composed);
   };
 
-  inline explicit Event(kj::String ownType, Init init = {}, Trusted trusted = Trusted::YES)
+  // Only events constructed by the runtime itself may pass Trusted::YES.
+  inline explicit Event(kj::String ownType, Init init = {}, Trusted trusted = Trusted::NO)
       : ownType(kj::mv(ownType)),
         type(this->ownType) {
     flags.trusted = trusted == Trusted::YES;
@@ -46,7 +47,7 @@ class Event: public jsg::Object {
     flags.composed = init.composed.orDefault(false);
   }
 
-  inline explicit Event(kj::StringPtr type, Init init = {}, Trusted trusted = Trusted::YES)
+  inline explicit Event(kj::StringPtr type, Init init = {}, Trusted trusted = Trusted::NO)
       : type(type) {
     flags.trusted = trusted == Trusted::YES;
     flags.bubbles = init.bubbles.orDefault(false);
@@ -246,7 +247,8 @@ class Event: public jsg::Object {
 
 class ExtendableEvent: public Event {
  public:
-  using Event::Event;
+  // Runtime-only (the JS constructor is deleted); always trusted.
+  explicit ExtendableEvent(kj::StringPtr type): Event(type, {}, Trusted::YES) {}
 
   // While ExtendableEvent is defined by the spec to be constructable, there's really not a
   // lot of reason currently to do so, especially with the restriction that waitUntil can

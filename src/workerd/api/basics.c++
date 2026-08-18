@@ -1022,7 +1022,8 @@ void AbortSignal::runAbortSteps(jsg::Lock& js) {
 
   // Per spec, "signal abort" cannot throw: listener exceptions are reported, and the
   // remaining listeners (and, for a source signal, the dependents' abort steps) still run.
-  dispatchEventImpl(js, js.alloc<Event>(kAbortEvent), DispatchExceptionPolicy::REPORT);
+  dispatchEventImpl(js, js.alloc<Event>(kAbortEvent, Event::Init{}, Trusted::YES),
+      DispatchExceptionPolicy::REPORT);
 }
 
 void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
