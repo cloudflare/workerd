@@ -4,61 +4,6 @@
 
 namespace kj_rs {
 
-// `LinkedGroup<G, O>` and `LinkedObject<G, O>` are CRTP mixins which allow derived classes G and O
-// to weakly refer to each other in a one-to-many relationship.
-//
-// For example, say you have two classes, Group and Object. There exists a natural one-to-many
-// relationship between the two. Given a Group, you would like to be able to dererefence its
-// Objects, and, given an Object, you would like be able to dereference its Group. Further suppose
-// the objects have independent lifetimes: Objects may be destroyed before their Groups, and Groups
-// may be destroyed before their Objects.
-//
-// If you are operating in a single-threaded context (or can provide sufficient synchronization),
-// and if Group and Object are both immobile (non-copyable, non-moveable) classes, then
-// `LinkedGroup<Group, Object>` and `LinkedObject<Group, Object>` can be used to implement the above
-// scenario safely. To do so, first:
-//
-//  - Your Group class must publicly inherit from `LinkedGroup<Group, Object>`.
-//  - Your Object class must publicly inherit from `LinkedObject<Group, Object>`.
-//
-// This will add one protected member function to each of your derived classes:
-// `Object::linkedGroup()`, and `Group::linkedObjects()`. They are protected so that they are not
-// part of your type's public API unless you explicitly want them to be, e.g., with a public `using`
-// statement like `using LinkedGroup::linkedObjects`.
-//
-// You can use `Object::linkedGroup()` to manage Group membership and dereference Groups from
-// Objects:
-//
-//  - `object.linkedGroup().set(group)` adds an Object to a Group.
-//    This function implicitly removes the Object from its current Group, if any.
-//  - `object.linkedGroup().set(kj::none)` removes an Object from its current Group, if any.
-//  - `object.linkedGroup().tryGet()` dereferences the Object's current Group, if any.
-//
-// You can use `Group::linkedObjects()` to iterate over the list of currently linked Objects.
-//
-//  - `group.linkedObjects().begin()` obtains an iterator to the beginning of the list of Objects.
-//  - `group.linkedObjects().end()` obtains an iterator to the end of the list of Objets.
-//  - `group.linkedObjects().front()` dereferences the front of the list of Objects.
-//    Calling `front()` on an empty list (`begin() == end()`) is undefined behavior.
-//  - `group.linkedObjects().empty()` is true if there are no Objects in the list.
-//
-// Finally, destroying either the Group or its Object safely severs their relationship(s).
-//
-//  - Destroying an Object implicitly calls `object.linkedGroup().set(kj::none)` on itself.
-//  - Destroying a Group implicitly calls `object.linkedGroup().set(kj::none)` on all its objects.
-//
-// Considerations:
-//
-//   - Your Group object's destructor will contain a _O(n)_ algorithm inside it, with _n_ being the
-//     number of linked objects at destruction time. If Groups frequently outlive large sets of
-//     Objects, this may be an issue to consider.
-//   - It is valid to remove the front Object in a `Group::linkedObjects()` list while iterating
-//     over the list. Removing an Object in any other position in the list will invalidate all
-//     existing iterators.
-//
-// TODO(someday): Multiple inheritance if an object must join multiple groups, or a group must
-//   have multiple linked object types? Can we write something like `linkedGroup<G>()` in the
-//   LinkedObject derived class, and `linkedObjects<O>()` in the LinkedGroup derived class?
 template <typename G, typename O>
 class LinkedGroup;
 template <typename G, typename O>
