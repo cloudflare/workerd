@@ -82,4 +82,69 @@ use crate::stream::wrap_output_fd;
 // items are publicly re-exported, so an `#[expect]` could go unfulfilled.
 #[expect(clippy::allow_attributes)]
 #[allow(clippy::missing_safety_doc)]
-mod bridge {}
+mod bridge {
+    extern "Rust" {
+        type TokioStream;
+        type TokioListener;
+        type TokioAddress;
+        type TokioInputFd;
+        type TokioOutputFd;
+
+        // ==================================================================================
+        // Streams (TCP or Unix domain, behind kj::AsyncIoStream)
+
+        /// Reads until at least `min_bytes` are available (or EOF), up to `buf.len()`. Returns
+        /// the number of bytes read; fewer than `min_bytes` indicates EOF. The kj `tryRead`
+        /// contract.
+        async unsafe fn stream_try_read<'a>(
+            stream: &'a TokioStream,
+            buf: &'a mut [u8],
+            min_bytes: usize,
+        ) -> Result<usize>;
+
+        /// Writes the entire buffer (write-all semantics).
+        async unsafe fn stream_write<'a>(stream: &'a TokioStream, buf: &'a [u8]) -> Result<()>;
+
+        /// Resolves when the stream has become disconnected such that new writes will fail.
+        /// See `TokioStream::when_write_disconnected` for the mechanism and platform caveats.
+        async unsafe fn stream_when_write_disconnected<'a>(stream: &'a TokioStream) -> Result<()>;
+
+        /// `shutdown(SHUT_WR)`: cleanly shut down the write end, keeping the read end open.
+        fn stream_shutdown_write(stream: &TokioStream) -> Result<()>;
+
+        /// The underlying raw OS socket handle (fd on unix, `SOCKET` on windows) as an `i64`,
+        /// backing `kj::AsyncIoStream::getFd()` / `getWin32Handle()`.
+        fn stream_raw_handle(stream: &TokioStream) -> Result<i64>;
+
+        /// Raw `struct sockaddr` bytes of the socket's locally-bound address (the
+        /// `getsockname()` passthrough).
+        fn stream_local_addr(stream: &TokioStream) -> Result<Vec<u8>>;
+
+        /// Raw `struct sockaddr` bytes of the connected peer's address (the `getpeername()`
+        /// passthrough, also used by the accept-loop peer-filter check).
+        fn stream_peer_addr(stream: &TokioStream) -> Result<Vec<u8>>;
+
+        /// `getsockopt(2)` on the underlying socket. `value.len()` is the caller's in-length
+        /// (the kernel truncates the option value to it); returns the syscall's reported
+        /// out-length, which the caller must mirror back exactly (raw socklen in/out
+        /// semantics).
+        fn stream_getsockopt(
+            stream: &TokioStream,
+            level: i32,
+            option: i32,
+            value: &mut [u8],
+        ) -> Result<usize>;
+
+        /// `setsockopt(2)` on the underlying socket.
+        fn stream_setsockopt(
+            stream: &TokioStream,
+            level: i32,
+            option: i32,
+            value: &[u8],
+        ) -> Result<()>;
+
+        /// Moves the native stream out, leaving `stream` hollow (all further ops error).
+        /// Unsafe contract: no I/O futures may currently borrow `stream`.
+        fn stream_take(stream: &mut TokioStream) -> Result<Box<TokioStream>>;
+    }
+}
