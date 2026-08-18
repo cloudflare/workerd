@@ -234,6 +234,96 @@ void EventTarget::addEventHandlerListener(jsg::Lock& js,
   getOrCreate(type).handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
 }
 
+kj::Maybe<jsg::JsValue> EventTarget::getEventHandlerAttribute(jsg::Lock& js, kj::StringPtr type) {
+  KJ_IF_SOME(attribute, eventHandlerAttributes.find(type)) {
+    KJ_IF_SOME(handler, attribute.handler) {
+      return handler.value.getHandle(js);
+    }
+  }
+  return kj::none;
+}
+
+EventTarget::EventHandlerAssignment EventTarget::setEventHandlerAttribute(jsg::Lock& js,
+    kj::StringPtr type,
+    jsg::Optional<kj::OneOf<HandlerFunction, jsg::JsValue>> handler) {
+  const auto getOrCreateAttribute = [&]() -> EventHandlerAttribute& {
+    return eventHandlerAttributes.findOrCreate(
+        type, [&] { return decltype(eventHandlerAttributes)::Entry{kj::str(type), {}}; });
+  };
+
+  // Per HTML's event handler semantics: callables (unwrapped as HandlerFunction) become the
+  // active handler; non-callable objects are retained as the attribute value but are never
+  // invoked; anything else deactivates the handler (treated as null).
+  KJ_IF_SOME(h, handler) {
+    KJ_SWITCH_ONEOF(h) {
+      KJ_CASE_ONEOF(fn, HandlerFunction) {
+        auto value = jsg::JsValue(
+            KJ_ASSERT_NONNULL(fn.tryGetHandle(js.v8Isolate), "handler function has no wrapper"));
+        auto& attribute = getOrCreateAttribute();
+        attribute.handler = EventHandlerAttribute::Handler{
+          .value = jsg::JsRef(js, value),
+          .fn = kj::mv(fn),
+        };
+        activateEventHandlerAttribute(js, type, attribute);
+        return EventHandlerAssignment::CALLABLE;
+      }
+      KJ_CASE_ONEOF(value, jsg::JsValue) {
+        if (value.isObject()) {
+          auto& attribute = getOrCreateAttribute();
+          attribute.handler = EventHandlerAttribute::Handler{
+            .value = jsg::JsRef(js, value),
+            .fn = kj::none,
+          };
+          activateEventHandlerAttribute(js, type, attribute);
+          return EventHandlerAssignment::OBJECT;
+        }
+      }
+    }
+  }
+
+  // Deactivate: clear the value and remove the trampoline listener, so a later reassignment
+  // takes a fresh position in the listener list. The map entry is kept: its presence is what
+  // marks the type as managed.
+  KJ_IF_SOME(attribute, eventHandlerAttributes.find(type)) {
+    attribute.handler = kj::none;
+    KJ_IF_SOME(identity, attribute.listenerIdentity) {
+      removeEventListener(js, kj::str(type), identity.addRef(js), kj::none);
+    }
+    attribute.listenerIdentity = kj::none;
+  }
+  return EventHandlerAssignment::CLEARED;
+}
+
+void EventTarget::activateEventHandlerAttribute(
+    jsg::Lock& js, kj::StringPtr type, EventHandlerAttribute& attribute) {
+  // HTML "activate an event handler": if the trampoline listener already exists, the handler
+  // keeps its current position in the listener list.
+  if (attribute.listenerIdentity != kj::none) {
+    return;
+  }
+
+  auto identity = jsg::HashableV8Ref<v8::Object>(js.v8Isolate, v8::Object::New(js.v8Isolate));
+  attribute.listenerIdentity = identity.addRef(js);
+
+  // The trampoline is deliberately not the handler itself: it invokes whatever value the
+  // attribute holds at dispatch time, so reassignment need not (and must not) move it.
+  auto trampoline = JSG_VISITABLE_LAMBDA((self = JSG_THIS_WEAK(js), type = kj::str(type)), (),
+      (jsg::Lock & js, jsg::Ref<Event> event)->jsg::Optional<jsg::Value> {
+        KJ_IF_SOME(target, self.tryGet()) {
+        KJ_IF_SOME(attribute, target.eventHandlerAttributes.find(type)) {
+        KJ_IF_SOME(handler, attribute.handler) {
+        KJ_IF_SOME(fn, handler.fn) {
+        return fn(js, kj::mv(event));
+        }
+        }
+        }
+        }
+        return kj::none;
+      });
+
+  addEventHandlerListener(js, type, kj::mv(identity), kj::mv(trampoline));
+}
+
 namespace {
 
 // Implements the reporting half of the spec's "inner invoke" step 11 for listener exceptions
@@ -462,75 +552,15 @@ AbortSignal::AbortSignal(kj::Maybe<kj::Exception> exception,
       reason(kj::mv(maybeReason)) {}
 
 kj::Maybe<jsg::JsValue> AbortSignal::getOnAbort(jsg::Lock& js) {
-  return onAbortHandler.map(
-      [&](OnAbortHandler& handler) -> jsg::JsValue { return handler.value.getHandle(js); });
+  return getEventHandlerAttribute(js, kAbortEvent);
 }
 
 void AbortSignal::setOnAbort(
     jsg::Lock& js, jsg::Optional<kj::OneOf<EventTarget::HandlerFunction, jsg::JsValue>> handler) {
-  // Per HTML's event handler semantics: callables (unwrapped as HandlerFunction) become the
-  // active handler; non-callable objects are retained as the attribute value but are never
-  // invoked; anything else deactivates the handler (treated as null).
-  KJ_IF_SOME(h, handler) {
-    KJ_SWITCH_ONEOF(h) {
-      KJ_CASE_ONEOF(fn, EventTarget::HandlerFunction) {
-        auto value = jsg::JsValue(
-            KJ_ASSERT_NONNULL(fn.tryGetHandle(js.v8Isolate), "handler function has no wrapper"));
-        onAbortHandler = OnAbortHandler{
-          .value = jsg::JsRef(js, value),
-          .fn = kj::mv(fn),
-        };
-        activateOnAbort(js);
-        subscribeToRpcAbort(js);
-        return;
-      }
-      KJ_CASE_ONEOF(value, jsg::JsValue) {
-        if (value.isObject()) {
-          onAbortHandler = OnAbortHandler{
-            .value = jsg::JsRef(js, value),
-            .fn = kj::none,
-          };
-          activateOnAbort(js);
-          return;
-        }
-      }
-    }
+  if (setEventHandlerAttribute(js, kAbortEvent, kj::mv(handler)) ==
+      EventHandlerAssignment::CALLABLE) {
+    subscribeToRpcAbort(js);
   }
-
-  // Deactivate: clear the value and remove the trampoline listener, so a later reassignment
-  // takes a fresh position in the listener list.
-  onAbortHandler = kj::none;
-  KJ_IF_SOME(identity, onAbortListenerIdentity) {
-    removeEventListener(js, kj::str(kAbortEvent), identity.addRef(js), kj::none);
-  }
-  onAbortListenerIdentity = kj::none;
-}
-
-void AbortSignal::activateOnAbort(jsg::Lock& js) {
-  // HTML "activate an event handler": if the trampoline listener already exists, the handler
-  // keeps its current position in the listener list.
-  if (onAbortListenerIdentity != kj::none) {
-    return;
-  }
-
-  auto identity = jsg::HashableV8Ref<v8::Object>(js.v8Isolate, v8::Object::New(js.v8Isolate));
-  onAbortListenerIdentity = identity.addRef(js);
-
-  // The trampoline is deliberately not the handler itself: it invokes whatever value the
-  // attribute holds at dispatch time, so reassignment need not (and must not) move it.
-  auto trampoline = JSG_VISITABLE_LAMBDA((self = JSG_THIS_WEAK(js)), (),
-      (jsg::Lock & js, jsg::Ref<Event> event)->jsg::Optional<jsg::Value> {
-        KJ_IF_SOME(signal, self.tryGet()) {
-        KJ_IF_SOME(handler, signal.onAbortHandler) {
-        KJ_IF_SOME(fn, handler.fn) {
-        return fn(js, kj::mv(event));
-        }
-        }
-        }
-        return kj::none;
-      });
-
-  addEventHandlerListener(js, kAbortEvent, kj::mv(identity), kj::mv(trampoline));
 }
 
 void AbortSignal::addEventListener(jsg::Lock& js,
@@ -674,15 +704,6 @@ jsg::Ref<AbortSignal> AbortSignal::any(jsg::Lock& js, kj::Array<jsg::Ref<AbortSi
 
 void AbortSignal::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(reason);
-  KJ_IF_SOME(handler, onAbortHandler) {
-    visitor.visit(handler.value);
-    KJ_IF_SOME(fn, handler.fn) {
-      visitor.visit(fn);
-    }
-  }
-  KJ_IF_SOME(identity, onAbortListenerIdentity) {
-    visitor.visit(identity);
-  }
   for (auto& algorithm: abortAlgorithms) {
     visitor.visit(algorithm.fn);
   }
@@ -1222,6 +1243,17 @@ void EventTarget::visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(*handler);
     }
   }
+  for (auto& entry: eventHandlerAttributes) {
+    KJ_IF_SOME(handler, entry.value.handler) {
+      visitor.visit(handler.value);
+      KJ_IF_SOME(fn, handler.fn) {
+        visitor.visit(fn);
+      }
+    }
+    KJ_IF_SOME(identity, entry.value.listenerIdentity) {
+      visitor.visit(identity);
+    }
+  }
 }
 
 kj::Promise<void> Scheduler::wait(
@@ -1324,6 +1356,8 @@ void EventTarget::EventHandlerSet::jsgGetMemoryInfo(jsg::MemoryTracker& tracker)
 
 void EventTarget::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("typeMap", typeMap);
+  tracker.trackFieldWithSize("eventHandlerAttributes",
+      eventHandlerAttributes.size() * sizeof(decltype(eventHandlerAttributes)::Entry));
 }
 
 }  // namespace workerd::api

@@ -19,13 +19,13 @@ MessagePort::MessagePort(): state(Pending()) {
           // supports. Specifically, adding a new message listener using the
           // addEventListener method is *technically* not supposed to start
           // the port but we're going to do what Node.js does.
-          if (count > 0 || onmessageValue != kj::none) {
+          if (count > 0) {
             start(js);
           }
         }
         KJ_CASE_ONEOF(started, Started) {
           // If we are in the started state, stop the port if there are no listeners.
-          if (count == 0 && onmessageValue == kj::none) {
+          if (count == 0) {
             state = Pending();
           }
         }
@@ -198,26 +198,27 @@ void MessagePort::start(jsg::Lock& js) {
 }
 
 kj::Maybe<jsg::JsValue> MessagePort::getOnMessage(jsg::Lock& js) {
-  return onmessageValue.map(
-      [&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue { return ref.getHandle(js); });
+  return getEventHandlerAttribute(js, "message"_kj);
 }
 
-// TODO(soon): onmessage should follow HTML's positioned event-handler semantics the way
-// AbortSignal::setOnAbort now does (activate a trampoline listener at assignment position and
-// suppress the legacy on<type> reflection via managesEventHandlerAttribute()), rather than
-// always firing before addEventListener() listeners.
-void MessagePort::setOnMessage(jsg::Lock& js, jsg::JsValue value) {
-  if (!value.isObject() && !value.isFunction()) {
-    onmessageValue = kj::none;
-    // If we have no handlers and no onmessage ...
-    if (getHandlerCount("message"_kj) == 0 && onmessageValue == kj::none) {
-      // ...Put the port back into a pending state where messages
-      // will be enqueued until another listener is attached.
-      state = Pending();
-    }
-  } else {
-    onmessageValue = jsg::JsRef<jsg::JsValue>(js, value);
-    start(js);
+void MessagePort::setOnMessage(
+    jsg::Lock& js, jsg::Optional<kj::OneOf<EventTarget::HandlerFunction, jsg::JsValue>> handler) {
+  switch (setEventHandlerAttribute(js, "message"_kj, kj::mv(handler))) {
+    case EventHandlerAssignment::CALLABLE:
+    case EventHandlerAssignment::OBJECT:
+      // Assigning onmessage enables the port's message queue (HTML: "the first time a
+      // MessagePort's onmessage IDL attribute is set, the port's port message queue must be
+      // enabled").
+      start(js);
+      break;
+    case EventHandlerAssignment::CLEARED:
+      // If we have no message listeners left...
+      if (getHandlerCount("message"_kj) == 0) {
+        // ...put the port back into a pending state where messages
+        // will be enqueued until another listener is attached.
+        state = Pending();
+      }
+      break;
   }
 }
 

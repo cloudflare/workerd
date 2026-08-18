@@ -425,17 +425,24 @@ class EventTarget: public jsg::Object {
     maybeListenerCallback = kj::mv(callback);
   }
 
-  // True if the subclass manages the on<type> event handler attribute as a positioned
-  // listener (HTML event handler semantics; see AbortSignal::setOnAbort), in which case
-  // dispatch must not additionally consult the legacy on<type> property reflection for that
-  // event type.
-  virtual bool managesEventHandlerAttribute(kj::StringPtr type) const {
-    return false;
-  }
+  // The result of a setEventHandlerAttribute() assignment: cleared, or activated with a
+  // non-callable object, or activated with a callable handler.
+  enum class EventHandlerAssignment { CLEARED, OBJECT, CALLABLE };
 
-  // Registers an internal listener occupying a normal position in the listener list, for
-  // subclasses implementing HTML event handler IDL attributes. The identity may later be
-  // passed to removeEventListener() to deactivate it.
+  // Implement HTML's event handler IDL attribute semantics for an on<type> attribute (e.g.
+  // AbortSignal's onabort): assigning any object activates a trampoline listener that
+  // occupies a normal position in the listener list (kept across reassignment; a fresh
+  // position after deactivation), and assigning anything else deactivates it. Only callable
+  // values are ever invoked: the trampoline invokes whatever callable the attribute holds at
+  // dispatch time. Dispatch does not additionally consult the legacy on<type> property
+  // reflection for a managed type. The getter returns the exact value assigned.
+  kj::Maybe<jsg::JsValue> getEventHandlerAttribute(jsg::Lock& js, kj::StringPtr type);
+  EventHandlerAssignment setEventHandlerAttribute(jsg::Lock& js,
+      kj::StringPtr type,
+      jsg::Optional<kj::OneOf<HandlerFunction, jsg::JsValue>> handler);
+
+  // Registers an internal listener occupying a normal position in the listener list. The
+  // identity may later be passed to removeEventListener() to deactivate it.
   void addEventHandlerListener(jsg::Lock& js,
       kj::StringPtr type,
       jsg::HashableV8Ref<v8::Object> identity,
@@ -500,6 +507,36 @@ class EventTarget: public jsg::Object {
 
   kj::HashMap<kj::String, EventHandlerSet> typeMap;
 
+  // State for one managed on<type> event handler IDL attribute (HTML: an "event handler").
+  struct EventHandlerAttribute {
+    struct Handler {
+      // The exact value assigned, returned by the getter.
+      jsg::JsRef<jsg::JsValue> value;
+      // The invocable form, present iff the assigned value was callable. A non-callable
+      // object is retained as the attribute value but never invoked.
+      kj::Maybe<HandlerFunction> fn;
+    };
+    kj::Maybe<Handler> handler;
+
+    // While activated, the identity of the trampoline listener entry occupying the
+    // attribute's position in the listener list.
+    kj::Maybe<jsg::HashableV8Ref<v8::Object>> listenerIdentity;
+  };
+
+  // Keyed by event type. An entry's presence marks on<type> as managed: dispatch must not
+  // additionally consult the legacy on<type> property reflection for that type, which would
+  // fire the handler twice.
+  kj::HashMap<kj::String, EventHandlerAttribute> eventHandlerAttributes;
+
+  bool managesEventHandlerAttribute(kj::StringPtr type) const {
+    return eventHandlerAttributes.find(type) != kj::none;
+  }
+
+  // HTML "activate an event handler": registers the trampoline listener if it is not already
+  // registered (an already-active handler keeps its position across reassignment).
+  void activateEventHandlerAttribute(
+      jsg::Lock& js, kj::StringPtr type, EventHandlerAttribute& attribute);
+
   kj::Maybe<EventListenerCallback> maybeListenerCallback;
 
   struct Flags {
@@ -561,12 +598,8 @@ class AbortSignal final: public EventTarget {
   // when any of the given signals abort, carrying the first aborter's reason.
   static jsg::Ref<AbortSignal> any(jsg::Lock& js, kj::Array<jsg::Ref<AbortSignal>> signals);
 
-  // The onabort event handler IDL attribute, implemented per HTML's event handler
-  // semantics: assigning a callable activates a trampoline listener that occupies a normal
-  // position in the listener list (kept across reassignment; a fresh position after
-  // deactivation), and assigning null — or any non-object, which is treated as null —
-  // deactivates it. The trampoline invokes whatever value the attribute holds at dispatch
-  // time.
+  // The onabort event handler IDL attribute (see EventTarget::setEventHandlerAttribute).
+  // Assigning a callable also subscribes RPC-backed signals to remote abort notifications.
   kj::Maybe<jsg::JsValue> getOnAbort(jsg::Lock& js);
   void setOnAbort(
       jsg::Lock& js, jsg::Optional<kj::OneOf<EventTarget::HandlerFunction, jsg::JsValue>> handler);
@@ -724,28 +757,6 @@ class AbortSignal final: public EventTarget {
   kj::Maybe<kj::Exception> maybeAbortException;
 
   kj::Maybe<jsg::JsRef<jsg::JsValue>> reason;
-
-  // The onabort event handler attribute's state (HTML: an "event handler" struct).
-  struct OnAbortHandler {
-    // The exact value assigned, returned by the getter.
-    jsg::JsRef<jsg::JsValue> value;
-    // The invocable form, present iff the assigned value was callable. A non-callable object
-    // is retained as the attribute value but never invoked.
-    kj::Maybe<EventTarget::HandlerFunction> fn;
-  };
-  kj::Maybe<OnAbortHandler> onAbortHandler;
-
-  // While activated, the identity of the trampoline listener entry occupying onabort's
-  // position in the listener list.
-  kj::Maybe<jsg::HashableV8Ref<v8::Object>> onAbortListenerIdentity;
-
-  // HTML "activate an event handler": registers the trampoline listener if it is not already
-  // registered (an already-active handler keeps its position across reassignment).
-  void activateOnAbort(jsg::Lock& js);
-
-  bool managesEventHandlerAttribute(kj::StringPtr type) const override {
-    return type == "abort"_kj;
-  }
 
   // One native abort action, shared between this signal and one consumer. The action is
   // invoked at most once, only ever in its owning IoContext (synchronously if the abort is
