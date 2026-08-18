@@ -131,3 +131,58 @@ impl AsyncRead for ServeIo {
         }
     }
 }
+
+impl AsyncWrite for ServeIo {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            Self::Tcp(s) => Pin::new(s).poll_write(cx, buf),
+            #[cfg(unix)]
+            Self::Unix(s) => Pin::new(s).poll_write(cx, buf),
+            Self::Duplex(s) => Pin::new(s).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Self::Tcp(s) => Pin::new(s).poll_flush(cx),
+            #[cfg(unix)]
+            Self::Unix(s) => Pin::new(s).poll_flush(cx),
+            Self::Duplex(s) => Pin::new(s).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Self::Tcp(s) => Pin::new(s).poll_shutdown(cx),
+            #[cfg(unix)]
+            Self::Unix(s) => Pin::new(s).poll_shutdown(cx),
+            Self::Duplex(s) => Pin::new(s).poll_shutdown(cx),
+        }
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[std::io::IoSlice<'_>],
+    ) -> Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            Self::Tcp(s) => Pin::new(s).poll_write_vectored(cx, bufs),
+            #[cfg(unix)]
+            Self::Unix(s) => Pin::new(s).poll_write_vectored(cx, bufs),
+            Self::Duplex(s) => Pin::new(s).poll_write_vectored(cx, bufs),
+        }
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        match self {
+            Self::Tcp(s) => s.is_write_vectored(),
+            #[cfg(unix)]
+            Self::Unix(s) => s.is_write_vectored(),
+            Self::Duplex(s) => s.is_write_vectored(),
+        }
+    }
+}
