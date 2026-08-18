@@ -135,4 +135,37 @@ using InertEventPort = UnixEventPort;
 
 #endif  // _WIN32, !_WIN32
 
+// ---- The tokio-backed kj::setupAsyncIo() ------------------------------------------------------
+
+AsyncIoContext setupAsyncIo(kj::Maybe<EventLoopObserver&> observer) {
+  // The observer hook is a native-EventLoop concept the tokio loop does not surface; callers
+  // under --//:io_backend=rust pass kj::none.
+  struct Holder {
+    kj_rs_io::TokioAsyncIoContext tokio;
+    InertEventPort inertPort;
+    Holder(): tokio(kj_rs_io::setupTokioAsyncIo()) {}
+  };
+  auto holder = kj::heap<Holder>();
+
+  auto& lowLevel = holder->tokio.getLowLevelProvider();
+  auto& provider = holder->tokio.getProvider();
+  auto& waitScope = holder->tokio.getWaitScope();
+  auto& inertPort = holder->inertPort;
+
+  // Non-owning handles into the heap Holder; the Holder is attached to the lowLevelProvider handle
+  // so it (and thus the tokio context + inert port) is torn down exactly once when the returned
+  // AsyncIoContext's lowLevelProvider is destroyed. The provider handle uses NullDisposer so
+  // AsyncIoContext's earlier destruction of `provider` is a no-op.
+  //
+  // Lifetime of the returned references: the Holder lives inside AsyncIoContext::lowLevelProvider,
+  // so `waitScope` and `unixEventPort` (bound to holder->inertPort) remain valid for the full
+  // lifetime of the AsyncIoContext. They dangle only once the AsyncIoContext itself is destroyed,
+  // same as with the native kj::setupAsyncIo().
+  kj::Own<LowLevelAsyncIoProvider> lowLevelOwn(&lowLevel, kj::NullDisposer::instance);
+  kj::Own<AsyncIoProvider> providerOwn(&provider, kj::NullDisposer::instance);
+  lowLevelOwn = lowLevelOwn.attach(kj::mv(holder));
+
+  return AsyncIoContext{kj::mv(lowLevelOwn), kj::mv(providerOwn), waitScope, inertPort};
+}
+
 }  // namespace kj
