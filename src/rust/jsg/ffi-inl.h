@@ -50,12 +50,6 @@ inline MaybeLocal maybe_local_to_ffi(v8::MaybeLocal<T> value) {
   return MaybeLocal{result};
 }
 
-template <typename T>
-inline v8::MaybeLocal<T> maybe_local_from_ffi(MaybeLocal&& value) {
-  auto ptr_void = reinterpret_cast<void*>(&value.ptr);
-  return *reinterpret_cast<v8::MaybeLocal<T>*>(ptr_void);
-}
-
 // Global<T>
 //
 // ffi::Global stores only the strong v8::Global<v8::Value> in `ptr`.

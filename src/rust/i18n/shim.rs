@@ -8,56 +8,63 @@
 //! this module only adapts the shim's C-ish sentinel-value return conventions
 //! (`-1` for ICU failure, `0` for simdutf failure) into idiomatic `Option`s.
 
+use crate::error::TranscodeError;
 use crate::ffi;
 
 /// An open ICU converter for one of the four transcodable encodings.
 ///
 /// Wraps a `cxx::UniquePtr<ffi::Converter>`: the underlying `UConverter*` and
 /// its `ucnv_close()` teardown are owned entirely by the C++ shim, so the
-/// converter is torn down correctly even if Rust code holding it panics --
-/// unlike a raw `UConverter*` smuggled across the FFI boundary, which a panic
-/// could leak.
+/// converter is torn down correctly even if Rust code holding it panics.
 pub struct Converter(cxx::UniquePtr<ffi::Converter>);
 
-/// Returns the ICU converter name for a transcodable encoding, matching
-/// `getEncodingName()` in `i18n.c++`.
-fn icu_name(encoding: ffi::Encoding) -> &'static str {
+/// Returns the ICU converter name for a transcodable encoding.
+///
+/// The bridge `Encoding` enum is a `cxx` shared enum, which is a `u8` newtype
+/// rather than a real Rust enum, so a value outside the four declared variants
+/// is representable. It can only arise if the C++ and Rust halves of the
+/// bridge disagree, and is reported as an error rather than a panic because a
+/// panic crossing the bridge aborts the process.
+fn icu_name(encoding: ffi::Encoding) -> Result<&'static str, TranscodeError> {
     match encoding {
-        ffi::Encoding::Ascii => "us-ascii",
-        ffi::Encoding::Latin1 => "iso8859-1",
-        ffi::Encoding::Utf16Le => "utf16le",
-        ffi::Encoding::Utf8 => "utf-8",
-        // The bridge `Encoding` enum has exactly these four variants (R4); any
-        // other discriminant would mean the C++/Rust enum definitions have
-        // drifted out of sync.
-        _ => unreachable!("Encoding has exactly four variants"),
+        ffi::Encoding::Ascii => Ok("us-ascii"),
+        ffi::Encoding::Latin1 => Ok("iso8859-1"),
+        ffi::Encoding::Utf16Le => Ok("utf16le"),
+        ffi::Encoding::Utf8 => Ok("utf-8"),
+        _ => Err(TranscodeError::InvalidEncoding),
     }
 }
 
 impl Converter {
     /// Opens an ICU converter for `encoding`.
-    ///
-    /// Never fails in practice -- the four encoding names above are always
-    /// valid ICU converter names -- so a shim-side open failure (see
-    /// `shim.c++`) is treated as an unrecoverable invariant violation rather
-    /// than a catchable error, matching how unreachable `KJ_ASSERT`-style
-    /// conditions are handled elsewhere in this codebase.
-    pub fn open(encoding: ffi::Encoding) -> Self {
-        Self(ffi::open_converter(icu_name(encoding)))
+    pub fn open(encoding: ffi::Encoding) -> Result<Self, TranscodeError> {
+        let conv = ffi::open_converter(icu_name(encoding)?);
+        if conv.is_null() {
+            return Err(TranscodeError::ConverterOpenFailed);
+        }
+        Ok(Self(conv))
     }
 
+    /// Returns the largest number of bytes a single character occupies in this
+    /// converter's encoding.
     pub fn max_char_size(&self) -> usize {
         self.0.max_char_size()
     }
 
+    /// Returns the smallest number of bytes a single character occupies in this
+    /// converter's encoding.
     pub fn min_char_size(&self) -> usize {
         self.0.min_char_size()
     }
 
     /// Sets the converter's substitute character sequence, used in place of
     /// unmappable characters during conversion.
-    pub fn set_subst_chars(&self, substitute: &str) {
-        self.0.set_subst_chars(substitute);
+    pub fn set_subst_chars(&self, substitute: &str) -> Result<(), TranscodeError> {
+        if self.0.set_subst_chars(substitute) {
+            Ok(())
+        } else {
+            Err(TranscodeError::SetSubstituteCharsFailed)
+        }
     }
 }
 

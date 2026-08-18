@@ -9,7 +9,6 @@
 
 #include <workerd/jsg/exception.h>
 #include <workerd/rust/i18n/lib.rs.h>
-#include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/util/autogate.h>
 
 #include <kj-rs/convert.h>
@@ -24,19 +23,17 @@ namespace workerd::api::node {
 
 namespace rust_i18n = ::workerd::rust::i18n;
 
-// Maps the C++ Encoding to the Rust bridge enum, following the kj-rs
-// convert.h idiom (see `NODEJS_EXCEPTIONS_RUST`'s equivalent in
-// exceptions.c++), so callers use `kj::from<rust_i18n::Encoding>(value)`. It
-// is `static` (rather than in an anonymous namespace) because Clang's ADL
-// does not consider unnamed-namespace functions, and ADL is how
-// `kj::from<Target>` locates this overload. The switch has no `default:` arm
-// so that enum drift between the two `Encoding` types is a compile error.
+// Maps the C++ Encoding to the Rust bridge enum, so callers can write
+// `kj::from<rust_i18n::Encoding>(value)`; see `kj-rs/convert.h` for the
+// `fromImpl` convention, and `exceptions.c++` for another instance of it. The
+// switch has no `default:` arm so that enum drift between the two `Encoding`
+// types is a compile error.
 //
 // `BASE64`, `BASE64URL`, and `HEX` are not transcodable (see
-// `i18n::canBeTranscoded`); rejecting them here, for both `fromEncoding` and
-// `toEncoding`, is a deliberate divergence from the C++ dispatch below, which
-// only checks `fromEncoding` and would reach `KJ_UNREACHABLE` for a
-// non-transcodable `toEncoding`. Neither is reachable from JavaScript because
+// `i18n::canBeTranscoded`). Rejecting them here covers `toEncoding` as well as
+// `fromEncoding`, unlike the C++ dispatch below, which checks only
+// `fromEncoding` and reaches `KJ_UNREACHABLE` for a non-transcodable
+// `toEncoding`. Neither is reachable from JavaScript because
 // `BufferUtil::transcode` validates both encodings first.
 static rust_i18n::Encoding fromImpl(rust_i18n::Encoding*, Encoding encoding) {
   switch (encoding) {
@@ -279,13 +276,18 @@ void Converter::setSubstituteChars(kj::StringPtr sub) {
 jsg::JsUint8Array transcode(
     jsg::Lock& js, kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding) {
   if (util::Autogate::isEnabled(util::AutogateKey::NODEJS_I18N_RUST)) {
-    auto rustFrom = kj::from<rust_i18n::Encoding>(fromEncoding);
-    auto rustTo = kj::from<rust_i18n::Encoding>(toEncoding);
-    auto maybeLocal =
-        rust_i18n::transcode(js.v8Isolate, source.as<kj_rs::Rust>(), rustFrom, rustTo);
-    auto local =
-        jsg::check(::workerd::rust::jsg::maybe_local_from_ffi<v8::Uint8Array>(kj::mv(maybeLocal)));
-    return jsg::JsUint8Array(local);
+    auto rustSource = source.as<kj_rs::Rust>();
+    auto transcoder = rust_i18n::new_transcoder(rustSource,
+        kj::from<rust_i18n::Encoding>(fromEncoding), kj::from<rust_i18n::Encoding>(toEncoding));
+
+    // The destination is sized for the worst case, so the conversion often
+    // writes less than it was given; narrow the result to what was written.
+    auto out = jsg::JsUint8Array::create(js, transcoder->dest_len());
+    auto written = transcoder->run(rustSource, out.asArrayPtr().as<kj_rs::RustMutable>());
+    if (written < out.size()) {
+      return out.slice(js, written);
+    }
+    return out;
   }
 
   TranscodeImpl transcode_function = &TranscodeDefault;
