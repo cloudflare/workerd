@@ -1,5 +1,6 @@
 #pragma once
 
+#include "kj-rs/executor-guarded.h"
 #include "promise.h"
 
 #include <kj/async.h>
@@ -12,6 +13,51 @@
 namespace kj_rs {
 
 using kj::uint;
+
+class FuturePollEvent;
+class FutureWakerCell;
+
+// =======================================================================================
+// PollWaker
+
+// PollWaker is the waker C++ passes to `Future::poll()`. It lives on the stack / in a coroutine
+// frame for the duration of a single poll, and Rust only ever borrows it (waker.rs wraps it in a
+// Waker whose drop is a no-op).
+//
+//   - wakeByRef() is a synchronous same-turn wake: it arms the FuturePollEvent directly. Arming
+//     during poll() (whether poll was reached via onReady() or fire()) is idempotent and causes
+//     an immediate re-poll.
+//   - cloneCell() is how Rust retains a waker past the poll: it hands out a strong reference to
+//     the event's FutureWakerCell, so a later wake arms the same event.
+//   - tryGetFuturePollEvent() lets RustPromiseAwaiter (which helps Rust `.await` KJ Promises)
+//     arm the event directly instead of going through a waker, when possible.
+class PollWaker final {
+ public:
+  // `futurePollEvent` is the FuturePollEvent responsible for calling `Future::poll()`, and must
+  // outlive this PollWaker.
+  explicit PollWaker(FuturePollEvent& futurePollEvent);
+  ~PollWaker() noexcept(false);
+  KJ_DISALLOW_COPY_AND_MOVE(PollWaker);
+
+  // Synchronous same-turn wake: arm the associated FuturePollEvent so it re-polls.
+  void wakeByRef() const;
+
+  // Get-or-create the event's FutureWakerCell and hand out a new strong reference to it, for Rust
+  // to retain and wake later. Returns kj::none if the current thread's kj::Executor is not the
+  // one which owns the FuturePollEvent (cannot normally happen in the single-thread world); Rust
+  // then mints a no-op waker.
+  kj::Maybe<kj::Rc<FutureWakerCell>> cloneCell() const;
+
+  // The FuturePollEvent whose poll() this waker was created for, if the current thread's
+  // kj::Executor is the one which owns it.
+  kj::Maybe<FuturePollEvent&> tryGetFuturePollEvent() const;
+
+ private:
+  struct FuturePollEventHolder {
+    FuturePollEvent& futurePollEvent;
+  };
+  ExecutorGuarded<FuturePollEventHolder> holder;
+};
 
 // =======================================================================================
 // KjWaker
