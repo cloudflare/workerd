@@ -188,8 +188,8 @@ class WebSocketAdapter;
 // WebSocket's UA-fired events ('open', 'message', 'close', 'error') are dispatched with
 // spec semantics (DispatchExceptionPolicy::REPORT: listener exceptions are reported and the
 // remaining listeners still run), but a throwing listener additionally errors out the
-// WebSocket afterwards — the same fail-fast reaction as if the exception had propagated —
-// via DispatchResult::firstException. See dispatchWithFailFast() in web-socket.c++.
+// WebSocket after the dispatch completes (fail-fast), via DispatchResult::firstException.
+// See dispatchWithFailFast() in web-socket.c++.
 class WebSocket: public EventTarget {
  public:
   // WebSocket ready states.

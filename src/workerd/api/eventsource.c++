@@ -306,7 +306,7 @@ void EventSource::notifyOpen(jsg::Lock& js) {
   auto result = dispatchEventImpl(js, js.alloc<OpenEvent>(), DispatchExceptionPolicy::REPORT);
   KJ_IF_SOME(exception, result.firstException) {
     // An 'open' listener threw. Its exception was reported (and the remaining listeners
-    // still ran); preserve the fail-fast reaction by erroring out the EventSource.
+    // still ran); fail fast by erroring out the EventSource.
     notifyError(js, exception.getHandle(js), false, AlreadyReported::YES);
   }
 }
@@ -324,8 +324,8 @@ void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messag
         DispatchExceptionPolicy::REPORT);
     KJ_IF_SOME(exception, result.firstException) {
       // A listener threw. Its exception was reported (and the remaining listeners for this
-      // event still ran); preserve the fail-fast reaction: error out the EventSource and
-      // drop the remaining messages in this batch.
+      // event still ran); fail fast: error out the EventSource and drop the remaining
+      // messages in this batch.
       notifyError(js, exception.getHandle(js), false, AlreadyReported::YES);
       return;
     }

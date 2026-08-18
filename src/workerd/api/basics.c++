@@ -326,9 +326,13 @@ void EventTarget::activateEventHandlerAttribute(
         KJ_IF_SOME(handler, attribute.handler) {
         KJ_IF_SOME(fn, handler.fn) {
         return fn(js, kj::mv(event));
+        } else {
+        }  // Empty elses to squash compiler warnings
+        } else {
         }
+        } else {
         }
-        }
+        } else {
         }
         return kj::none;
       });
@@ -379,8 +383,9 @@ EventTarget::DispatchResult EventTarget::dispatchEventImpl(
 
     // Check if there is an `on<event>` property on this object. If so, we treat that as an event
     // handler, in addition to the ones registered with addEventListener(). This is skipped
-    // for event types whose handler attribute the subclass manages as a positioned listener
-    // (e.g. AbortSignal's onabort), which would otherwise fire twice.
+    // for event types managed as event handler IDL attributes (see
+    // setEventHandlerAttribute(), e.g. AbortSignal's onabort), whose handlers occupy a
+    // positioned trampoline listener instead and would otherwise fire twice.
     if (!managesEventHandlerAttribute(event->getType())) {
       KJ_IF_SOME(onProp, onEvents.get(js, kj::str("on", event->getType()))) {
         // If the on-event is not a function, we silently ignore it rather than raise an error.

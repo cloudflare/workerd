@@ -131,9 +131,9 @@ class Event: public jsg::Object {
     return 0.0;
   }
 
-  // What makes an Event trusted? It's pretty simple... any Event created
-  // by EW internally is Trusted, any Event created using new Event() in JS
-  // is not trusted.
+  // Per the spec, an event is trusted iff it was constructed and dispatched by the runtime
+  // itself. The Event constructor defaults to untrusted; runtime construction sites (and
+  // runtime-only subclass constructors) opt in by passing Trusted::YES explicitly.
   inline bool getIsTrusted() const {
     return flags.trusted;
   }
@@ -328,9 +328,12 @@ class EventTarget: public jsg::Object {
   //
   // REPORT is the behavior the spec requires of the JS-observable surfaces ("inner invoke"
   // step 11: report the exception and continue with the next listener): the exception is
-  // delivered to the global scope's report-an-exception machinery (the cancelable 'error'
-  // event, then console fallback) and the dispatch continues. Used by the JS-exposed
-  // dispatchEvent() and by AbortSignal aborts, which the spec forbids from throwing.
+  // delivered to the global scope's report-an-exception machinery (the global 'error'
+  // event, then console logging) and the dispatch continues. Used by the JS-exposed
+  // dispatchEvent(), by AbortSignal aborts (which the spec forbids from throwing), by the
+  // global scope's own reportError(), and by the UA-fired dispatches of WebSocket,
+  // EventSource, and MessagePort — the latter additionally apply a fail-fast reaction via
+  // DispatchResult::firstException.
   enum class DispatchExceptionPolicy { PROPAGATE, REPORT };
 
   // The result of a dispatchEventImpl() call.
