@@ -33,11 +33,11 @@ pub mod repr {
     use static_assertions::assert_eq_size;
 
     use super::FuturePollStatus;
-    use crate::KjWaker;
+    use crate::ffi::PollWaker;
 
     type PollCallback = unsafe extern "C" fn(
         fut: *mut c_void,
-        waker: *const c_void,
+        waker: &PollWaker,
         ret: *mut c_void,
     ) -> FuturePollStatus;
 
@@ -73,15 +73,13 @@ pub mod repr {
     impl<T: Unpin> RustFuture<'_, T> {
         pub(crate) unsafe extern "C" fn poll(
             fut: *mut c_void,
-            waker: *const c_void,
+            waker: &PollWaker,
             ret: *mut c_void,
         ) -> FuturePollStatus {
             // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
             let fut = unsafe { *(fut.cast::<FuturePtr<T>>()) };
             // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
             let fut = unsafe { Pin::new_unchecked(&mut *fut) };
-            // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-            let waker = unsafe { &*waker.cast::<KjWaker>() };
             let waker = Waker::from(waker);
             let mut context = Context::from_waker(&waker);
             match fut.poll(&mut context) {
@@ -118,15 +116,13 @@ pub mod repr {
     impl<T: Unpin> RustInfallibleFuture<'_, T> {
         pub(crate) unsafe extern "C" fn poll(
             fut: *mut c_void,
-            waker: *const c_void,
+            waker: &PollWaker,
             ret: *mut c_void,
         ) -> FuturePollStatus {
             // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
             let fut = unsafe { *(fut.cast::<InfallibleFuturePtr<T>>()) };
             // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
             let fut = unsafe { Pin::new_unchecked(&mut *fut) };
-            // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-            let waker = unsafe { &*waker.cast::<KjWaker>() };
             let waker = Waker::from(waker);
             let mut context = Context::from_waker(&waker);
             match fut.poll(&mut context) {

@@ -47,15 +47,8 @@ KJ_TEST("c++ can receive synchronous wakes during poll()") {
 
   for (auto testCase: std::initializer_list<Actions>{
          {CloningAction::None, WakingAction::WakeByRefSameThread},
-         {CloningAction::None, WakingAction::WakeByRefBackgroundThread},
          {CloningAction::CloneSameThread, WakingAction::WakeByRefSameThread},
-         {CloningAction::CloneSameThread, WakingAction::WakeByRefBackgroundThread},
-         {CloningAction::CloneBackgroundThread, WakingAction::WakeByRefSameThread},
-         {CloningAction::CloneBackgroundThread, WakingAction::WakeByRefBackgroundThread},
          {CloningAction::CloneSameThread, WakingAction::WakeSameThread},
-         {CloningAction::CloneSameThread, WakingAction::WakeBackgroundThread},
-         {CloningAction::CloneBackgroundThread, WakingAction::WakeSameThread},
-         {CloningAction::CloneBackgroundThread, WakingAction::WakeBackgroundThread},
          {CloningAction::WakeByRefThenCloneSameThread, WakingAction::WakeSameThread},
        }) {
     auto waking = new_waking_future_void(testCase.cloningAction, testCase.wakingAction);

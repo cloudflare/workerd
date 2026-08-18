@@ -218,7 +218,7 @@ template <typename F>
 concept Future = requires(F f) {
   typename F::Output;
   {
-    f.poll(kj::instance<const KjWaker&>(),
+    f.poll(kj::instance<const PollWaker&>(),
         kj::instance<typename ::kj::_::ExceptionOr<typename F::Output>&>())
   } -> std::same_as<void>;
 };
@@ -276,9 +276,9 @@ class FutureAwaiter final: public FuturePollEvent {
     //   to really benefit.
 
     {
-      PollScope pollScope(*this);
+      PollWaker pollWaker(*this);
 
-      future.poll(pollScope, result);
+      future.poll(pollWaker, result);
       if (isDone()) {
         onReadyEvent.arm();
       }

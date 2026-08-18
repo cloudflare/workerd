@@ -67,7 +67,7 @@ namespace repr {
 
 // ::kj_rs::repr::PollCallback
 using PollCallback = kj_rs::FuturePollStatus (*)(
-    void /* RustFuture::fut */* fut, const void* waker, void /* T */* ret);
+    void /* RustFuture::fut */* fut, const ::kj_rs::PollWaker& waker, void /* T */* ret);
 
 // ::kj_rs::repr::DropCallback
 using DropCallback = void (*)(void /* RustFuture::fut */* fut);
@@ -100,10 +100,9 @@ struct RustFuture {
 
       KJ_DISALLOW_COPY(Impl);
 
-      void poll(const ::kj_rs::KjWaker& waker, ExceptionOrValue& output) noexcept {
+      void poll(const ::kj_rs::PollWaker& waker, ExceptionOrValue& output) noexcept {
         ::kj_rs::FuturePoller<Output> poller;
-        poller.poll(
-            [this, &waker](void* result) { return fut.poll(&fut, &waker, result); }, output);
+        poller.poll([this, &waker](void* result) { return fut.poll(&fut, waker, result); }, output);
       }
 
       RustFuture fut;
