@@ -90,7 +90,6 @@ class RustPromiseAwaiter final: public kj::_::Event,
   // the wrapped Promise becomes ready.
   //
   // If the Waker is not a KjWaker, the `maybeKjWaker` pointer argument must be nullptr.
-  bool poll(const WakerRef& waker, const KjWaker* maybeKjWaker);
   bool poll(const WakerRef& waker);
   bool poll(const WakerRef& waker, const PollWaker& pollWaker);
 
@@ -127,9 +126,6 @@ struct GuardedRustPromiseAwaiter: ExecutorGuarded<RustPromiseAwaiter> {
   // We need to inherit constructors or else placement-new will try to aggregate-initialize us.
   using ExecutorGuarded<RustPromiseAwaiter>::ExecutorGuarded;
 
-  bool poll(const WakerRef& waker, const KjWaker* maybeKjWaker) {
-    return get().poll(waker, maybeKjWaker);
-  }
   bool poll(const WakerRef& waker) {
     return get().poll(waker);
   }
