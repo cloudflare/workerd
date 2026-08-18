@@ -206,16 +206,9 @@ void FuturePollEvent::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNext
   // When tracing, we can only pick one branch to follow. Arbitrarily, I'm following the first
   // RustPromiseAwaiter branch, similar to how ExclusiveJoinPromiseNode chooses its left branch. In
   // the common case, this will be whatever OwnPromiseNode our Rust Future is currently `.await`ing.
-  auto rustPromiseAwaiters = linkedObjects();
-  if (rustPromiseAwaiters.begin() != rustPromiseAwaiters.end()) {
+  if (!leaves.empty()) {
     // Our Rust Future is awaiting an OwnPromiseNode. We'll pick the first one in our list.
-    rustPromiseAwaiters.front().tracePromise(builder, false);
-  } else KJ_IF_SOME(node, arcWakerPromise) {
-    // Our Rust Future is not awaiting any OwnPromiseNode, and instead cloned our Waker. We'll trace
-    // our ArcWaker Promise instead.
-    if (node.get() != nullptr) {
-      node->tracePromise(builder, false);
-    }
+    leaves.front().tracePromise(builder, false);
   }
 }
 
