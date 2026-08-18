@@ -517,3 +517,43 @@ fn getsockopt_raw(
     }
     Ok(optlen as usize)
 }
+
+/// Raw `setsockopt(2)` on a borrowed socket fd.
+#[cfg(unix)]
+fn setsockopt_raw(
+    fd: std::os::fd::BorrowedFd<'_>,
+    level: i32,
+    option: i32,
+    value: &[u8],
+) -> Result<()> {
+    use core::ffi::c_int;
+    use core::ffi::c_void;
+    use std::os::fd::AsRawFd;
+    unsafe extern "C" {
+        fn setsockopt(
+            sockfd: c_int,
+            level: c_int,
+            optname: c_int,
+            optval: *const c_void,
+            optlen: socket2::socklen_t,
+        ) -> c_int;
+    }
+    #[expect(clippy::cast_possible_truncation)]
+    let optlen = value.len() as socket2::socklen_t;
+    // Safety: simple syscall wrapper. `fd` is a live socket fd (borrowed from the tokio object
+    // for the duration of the call); `value.as_ptr()` with `optlen == value.len()` delimits
+    // readable caller memory the kernel only reads.
+    let rc = unsafe {
+        setsockopt(
+            fd.as_raw_fd(),
+            level,
+            option,
+            value.as_ptr().cast::<c_void>(),
+            optlen,
+        )
+    };
+    if rc != 0 {
+        return Err(op("setsockopt()")(std::io::Error::last_os_error()));
+    }
+    Ok(())
+}
