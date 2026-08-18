@@ -573,3 +573,41 @@ pub fn wrap_socket_fd(handle: i64) -> Result<Box<TokioStream>> {
         ))
     }
 }
+
+pub fn wrap_listen_fd(handle: i64) -> Result<Box<TokioListener>> {
+    #[cfg(any(unix, windows))]
+    {
+        let socket = socket_from_raw(handle);
+        let local = socket.local_addr().map_err(op("getsockname()"))?;
+        let _guard = runtime_handle()?.enter();
+        match local.domain() {
+            socket2::Domain::IPV4 | socket2::Domain::IPV6 => {
+                let listener =
+                    TcpListener::from_std(socket.into()).map_err(op("wrapListenSocketFd"))?;
+                Ok(Box::new(TokioListener {
+                    inner: ListenerInner::Tcp(listener),
+                }))
+            }
+            #[cfg(unix)]
+            socket2::Domain::UNIX => {
+                let listener =
+                    UnixListener::from_std(socket.into()).map_err(op("wrapListenSocketFd"))?;
+                Ok(Box::new(TokioListener {
+                    inner: ListenerInner::Unix(listener),
+                }))
+            }
+            _ => Err(KjIoError::other(
+                "wrapListenSocketFd",
+                "unsupported socket family",
+            )),
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = handle;
+        Err(KjIoError::other(
+            "wrapListenSocketFd",
+            "not implemented on this platform",
+        ))
+    }
+}
