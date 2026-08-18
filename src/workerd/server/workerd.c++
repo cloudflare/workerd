@@ -49,17 +49,6 @@
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <unistd.h>
-
-#include <kj/async-unix.h>
-#endif
-
-#if __linux__
-#include <sys/inotify.h>
-#elif __APPLE__ || __FreeBSD__ || __OpenBSD__ || __NetBSD__ || __DragonFly__
-#define WORKERD_USE_KQUEUE_FOR_FILE_WATCHER 1
-#include <sys/event.h>
-#include <sys/time.h>
-#include <sys/types.h>
 #endif
 
 #ifdef __GLIBC__
@@ -168,18 +157,6 @@ constexpr capnp::ReaderOptions CONFIG_READER_OPTIONS = {
   // Configs can legitimately be very large and are not malicious, so use an effectively-infinite
   // traversal limit.
 };
-
-// =======================================================================================
-
-#if __linux__
-
-#elif WORKERD_USE_KQUEUE_FOR_FILE_WATCHER
-
-#elif _WIN32
-
-#else
-
-#endif  // #__linux__, #else
 
 // =======================================================================================
 
@@ -1519,7 +1496,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     KJ_UNIMPLEMENTED("Watching is not yet implemented on Windows");
   }
 #else
-  // Wait for the LegacyFileWatcher to report a change, and then wait a moment for changes to settle
+  // Wait for the FileWatcher to report a change, and then wait a moment for changes to settle
   // down, in case there's a bunch of changes all at once.
   kj::Promise<void> waitForChanges(FileWatcher& watcher) {
     co_await watcher.onChange();
