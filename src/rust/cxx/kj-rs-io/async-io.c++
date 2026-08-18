@@ -184,4 +184,75 @@ kj::Own<kj::PeerIdentity> peerIdentityFromSockaddr(
 
 }  // namespace
 
+kj::Promise<kj::Own<kj::AsyncIoStream>> TokioConnectionReceiver::accept() {
+  return acceptImpl(false).then(
+      [](kj::AuthenticatedStream authenticated) { return kj::mv(authenticated.stream); });
+}
+
+kj::Promise<kj::AuthenticatedStream> TokioConnectionReceiver::acceptAuthenticated() {
+  return acceptImpl(true);
+}
+
+kj::Promise<kj::AuthenticatedStream> TokioConnectionReceiver::acceptImpl(bool authenticated) {
+  for (;;) {
+    auto stream = co_await listener_accept(*inner);
+    // restrictPeers / NetworkFilter enforcement, mirroring KJ: a connection from a disallowed
+    // peer is silently dropped and we keep accepting.
+    struct sockaddr_storage addr;
+    memset(&addr, 0, sizeof(addr));
+    kj::uint addrlen = 0;
+    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+      auto bytes = stream_peer_addr(*stream);
+      KJ_ASSERT(bytes.size() <= sizeof(addr), "sockaddr too large");
+      memcpy(&addr, bytes.data(), bytes.size());
+      addrlen = bytes.size();
+    })) {
+      // The peer can reset the connection between tokio's accept() and this call, in which
+      // case getpeername fails (EINVAL on macOS, ENOTCONN elsewhere). The connection is dead;
+      // drop it and keep accepting. This must NOT throw: an exception here propagates out of
+      // the server's accept loop and takes down the whole process (observed as a fatal
+      // uncaught kj::Exception under client abort storms). Unlike KJ's native accept path,
+      // which gets the peer address atomically from accept4(), we re-derive it and so must
+      // tolerate the race. Log at INFO (off by default) for observability under abort storms.
+      KJ_LOG(INFO, "dropping accepted connection; could not read peer address", exception);
+      continue;
+    }
+    if (!filter.shouldAllow(reinterpret_cast<struct sockaddr *>(&addr), addrlen)) {
+      // Drop the disallowed connection and wait for the next one.
+      continue;
+    }
+    kj::AuthenticatedStream result;
+    result.stream = kj::heap<TokioAsyncIoStream>(kj::mv(stream));
+    if (authenticated) {
+      result.peerIdentity = peerIdentityFromSockaddr(
+          reinterpret_cast<struct sockaddr *>(&addr), addrlen, *result.stream);
+    } else {
+      result.peerIdentity = kj::UnknownPeerIdentity::newInstance();
+    }
+    co_return kj::mv(result);
+  }
+}
+
+kj::uint TokioConnectionReceiver::getPort() {
+  return listener_port(*inner);
+}
+
+void TokioConnectionReceiver::getsockopt(int level, int option, void *value, kj::uint *length) {
+  *length = listener_getsockopt(
+      *inner, level, option, ::rust::Slice<uint8_t>(reinterpret_cast<uint8_t *>(value), *length));
+}
+
+void TokioConnectionReceiver::setsockopt(
+    int level, int option, const void *value, kj::uint length) {
+  listener_setsockopt(*inner, level, option,
+      ::rust::Slice<const uint8_t>(reinterpret_cast<const uint8_t *>(value), length));
+}
+
+void TokioConnectionReceiver::getsockname(struct sockaddr *addr, kj::uint *length) {
+  auto bytes = listener_local_addr(*inner);
+  // Mirror the raw syscall's truncation semantics (see TokioAsyncIoStream::getsockname).
+  memcpy(addr, bytes.data(), kj::min(bytes.size(), *length));
+  *length = bytes.size();
+}
+
 }  // namespace kj_rs_io
