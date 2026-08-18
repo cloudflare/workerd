@@ -337,3 +337,31 @@ export const throwingMessageListener = {
     }
   },
 };
+
+// User-constructed MessageEvents reflect the source and ports passed in their init.
+// (The runtime itself never attaches either: ports are not transferable here.)
+export const messageEventSourceAndPorts = {
+  test() {
+    const { port1, port2 } = new MessageChannel();
+    const event = new MessageEvent('message', {
+      data: 'x',
+      source: port1,
+      ports: [port1, port2],
+    });
+    strictEqual(event.source, port1);
+    const ports = event.ports;
+    strictEqual(ports.length, 2);
+    strictEqual(ports[0], port1);
+    strictEqual(ports[1], port2);
+
+    // Runtime-delivered message events carry the entangled port as source and no ports.
+    const { promise, resolve } = Promise.withResolvers();
+    port2.onmessage = (e) => resolve(e);
+    port1.postMessage('hi');
+    return promise.then((e) => {
+      strictEqual(e.source, port2);
+      strictEqual(e.ports.length, 0);
+      strictEqual(e.origin, null);
+    });
+  },
+};
