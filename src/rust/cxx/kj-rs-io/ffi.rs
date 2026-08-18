@@ -607,3 +607,47 @@ fn getsockopt_raw(
     let reported = optlen as usize;
     Ok(reported)
 }
+
+/// Raw ws2_32 `setsockopt` on a borrowed `SOCKET`.
+// Validated by Windows CI; mirrors the unix arm.
+#[cfg(windows)]
+fn setsockopt_raw(
+    sock: std::os::windows::io::BorrowedSocket<'_>,
+    level: i32,
+    option: i32,
+    value: &[u8],
+) -> Result<()> {
+    use core::ffi::c_char;
+    use core::ffi::c_int;
+    use std::os::windows::io::AsRawSocket;
+    use std::os::windows::io::RawSocket;
+    #[link(name = "ws2_32")]
+    unsafe extern "system" {
+        fn setsockopt(
+            s: RawSocket,
+            level: c_int,
+            optname: c_int,
+            optval: *const c_char,
+            optlen: c_int,
+        ) -> c_int;
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+    let optlen = value.len() as c_int;
+    // Safety: simple syscall wrapper. `sock` is a live `SOCKET` (borrowed from the tokio object
+    // for the duration of the call); `value.as_ptr()` with `optlen == value.len()` delimits
+    // readable caller memory winsock only reads.
+    let rc = unsafe {
+        setsockopt(
+            sock.as_raw_socket(),
+            level,
+            option,
+            value.as_ptr().cast::<c_char>(),
+            optlen,
+        )
+    };
+    if rc != 0 {
+        // rc is SOCKET_ERROR (-1); `last_os_error()` reads `WSAGetLastError()` on Windows.
+        return Err(op("setsockopt()")(std::io::Error::last_os_error()));
+    }
+    Ok(())
+}
