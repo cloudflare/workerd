@@ -268,3 +268,32 @@ fn hires_timer_main(shared: &HiResShared) {
         }
     }
 }
+/// The Rust backing of one `kj_rs_tokio::TokioEventPort` (C++). Owns the per-thread
+/// `current_thread` tokio runtime.
+///
+/// One instance per KJ event loop, created on (and driven by) that loop's thread. Only `wake()`
+/// may be called from other threads.
+pub struct TokioPort {
+    runtime: Runtime,
+    state: Arc<SharedState>,
+    /// High-resolution wakeup source for sub-millisecond `wait_timeout_ns` sleeps; see
+    /// [`HIRES_TIMEOUT_THRESHOLD`]. On non-unix targets short sleeps stay on the tokio wheel.
+    #[cfg(unix)]
+    hires: HiResTimer,
+}
+
+// `wake()` is called through a `&TokioPort` shared with arbitrary threads, so the type must be
+// `Sync` (`Runtime`, `Notify` and the atomics all are).
+const _: () = {
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<TokioPort>();
+};
+
+// Opaque cxx types must cross the bridge boxed. The lint's firing is platform-dependent (it has
+// a size threshold and `TokioPort`'s size differs by target), so `#[expect]` would be unfulfilled
+// on some targets.
+#[expect(clippy::allow_attributes)]
+#[allow(clippy::unnecessary_box_returns)]
+pub fn new_tokio_port() -> Box<TokioPort> {
+    Box::new(TokioPort::new())
+}
