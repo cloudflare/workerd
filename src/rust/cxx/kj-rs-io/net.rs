@@ -78,12 +78,6 @@ impl TokioAddress {
             ));
         }
 
-        Self::parse_inet(text, port_hint).await
-    }
-}
-
-impl TokioAddress {
-    async fn parse_inet(text: &str, port_hint: u16) -> Result<Self> {
         // Split into address and port parts, exactly like KJ's SocketAddress::parse.
         let (addr_part, port_part) = if let Some(rest) = text.strip_prefix('[') {
             // Bracketed IPv6, optionally "[..]:port".
@@ -165,9 +159,7 @@ impl TokioAddress {
             },
         })
     }
-}
 
-impl TokioAddress {
     async fn connect_index(&self, index: usize) -> Result<Box<TokioStream>> {
         match &self.spec {
             Spec::Ip { addrs, wildcard } => {
@@ -218,9 +210,7 @@ impl TokioAddress {
         };
         Ok(crate::ffi::sockaddr_to_bytes(&sockaddr))
     }
-}
 
-impl TokioAddress {
     fn listen(&self) -> Result<Box<TokioListener>> {
         let handle = runtime_handle()?;
         match &self.spec {
@@ -363,6 +353,7 @@ impl TokioListener {
     }
 }
 
+// ======================================================================================
 // Bridge entry points (see lib.rs).
 
 /// Resolves a hostname via blocking `getaddrinfo` on tokio's blocking pool — purely in Rust and
@@ -491,12 +482,6 @@ pub fn listener_port(listener: &TokioListener) -> Result<u16> {
 pub fn listener_local_addr(listener: &TokioListener) -> Result<Vec<u8>> {
     listener.local_addr_bytes()
 }
-
-// ======================================================================================
-// Socket-handle wrapping. All handles arrive owned and non-blocking as an `i64` "raw socket
-// handle" — a Unix fd or a win32 SOCKET (the C++ side normalizes KJ's TAKE_OWNERSHIP /
-// ALREADY_CLOEXEC / ALREADY_NONBLOCK flags, dup'ing when not taking ownership). The platform
-// split lives entirely in `ffi::own_socket_from_raw` (the one conversion point); everything
 
 // ======================================================================================
 // Socket-handle wrapping. All handles arrive owned and non-blocking as an `i64` "raw socket
