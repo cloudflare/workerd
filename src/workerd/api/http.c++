@@ -1506,7 +1506,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   ioContext.getMetrics().setNextSubrequestBodyRewindable(SubrequestBodyRewindable(bodyRewindable));
 
   kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata;
-  if (bodyRewindable && fetcher->supportsActorRetryMetadata()) {
+  if (bodyRewindable && fetcher->supportsActorFetchRetries()) {
     actorRetryRequestMetadata =
         generateActorRetryRequestMetadata(kj::systemCoarseCalendarClock().now());
   }
@@ -2527,7 +2527,7 @@ Fetcher::ClientWithTracing Fetcher::getClientWithTracing(IoContext& ioContext,
     auto& outgoingFactory = KJ_REQUIRE_NONNULL(
         channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>(),
         "actor retry metadata supplied to an unsupported Fetcher");
-    KJ_REQUIRE(outgoingFactory->supportsActorRetryMetadata(),
+    KJ_REQUIRE(outgoingFactory->supportsActorFetchRetries(),
         "actor retry metadata supplied to an unsupported Fetcher");
     if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
       auto result = outgoingFactory->newSingleUseClientWithActorRetryMetadata(kj::mv(cfStr),
@@ -2603,9 +2603,9 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
   KJ_UNREACHABLE;
 }
 
-bool Fetcher::supportsActorRetryMetadata() {
+bool Fetcher::supportsActorFetchRetries() {
   KJ_IF_SOME(outgoingFactory, channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>()) {
-    return outgoingFactory->supportsActorRetryMetadata();
+    return outgoingFactory->supportsActorFetchRetries();
   }
   return false;
 }

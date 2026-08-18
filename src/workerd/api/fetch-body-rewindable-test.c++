@@ -85,7 +85,7 @@ class RetryMetadataOutgoingFactory final: public Fetcher::OutgoingFactory {
     return {.client = kj::heap<MockFetchTarget>(), .spanParents = kj::none};
   }
 
-  bool supportsActorRetryMetadata() const override {
+  bool supportsActorFetchRetries() const override {
     return true;
   }
 
@@ -391,7 +391,7 @@ KJ_TEST("GlobalActorOutgoingFactory places actor retry metadata on the actor sub
         GlobalActorOutgoingFactory::ChannelIdOrFactory(static_cast<uint>(1)),
         env.js.alloc<DurableObjectId>(kj::heap<MockActorId>()), kj::none,
         ActorGetMode::GET_OR_CREATE, false, ActorRoutingMode::DEFAULT, kj::none, Persistent::NO);
-    KJ_EXPECT(factory.supportsActorRetryMetadata());
+    KJ_EXPECT(factory.supportsActorFetchRetries());
 
     auto client = factory.newSingleUseClientWithActorRetryMetadata(kj::none,
         IoChannelFactory::ActorRetryRequestMetadata{
@@ -418,7 +418,7 @@ KJ_TEST("ReplicaActorOutgoingFactory places actor retry metadata on the actor su
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     ReplicaActorOutgoingFactory factory(
         kj::refcounted<RecordingActorChannel>(capturedMetadata), kj::str("actor-id"));
-    KJ_EXPECT(factory.supportsActorRetryMetadata());
+    KJ_EXPECT(factory.supportsActorFetchRetries());
 
     auto client = factory.newSingleUseClientWithActorRetryMetadata(kj::none,
         IoChannelFactory::ActorRetryRequestMetadata{
