@@ -646,3 +646,53 @@ export const onmessagePositionalOrdering = {
     deepStrictEqual(order, ['a', 'b2', 'c']);
   },
 };
+
+// A throwing 'message' listener has its exception reported (and the remaining listeners
+// for that event still run), then the EventSource is errored out (fail-fast): the 'error'
+// event fires, the stream closes, and the remaining messages in the batch are dropped.
+export const throwingMessageListener = {
+  async test() {
+    const order = [];
+    const boom = new Error('es boom');
+    const globalHandler = () => order.push('global-error');
+    addEventListener('error', globalHandler);
+    try {
+      const enc = new TextEncoder();
+      const rs = new ReadableStream({
+        pull(c) {
+          // Both messages arrive in a single batch.
+          c.enqueue(enc.encode('data: first\n\ndata: second\n\n'));
+          c.close();
+        },
+      });
+      const eventsource = EventSource.from(rs);
+      const errorPromise = new Promise((resolve) => {
+        eventsource.addEventListener('error', (event) => {
+          order.push('es-error');
+          resolve(event.error);
+        });
+      });
+      eventsource.addEventListener('message', (event) => {
+        order.push(`l1:${event.data}`);
+        throw boom;
+      });
+      eventsource.addEventListener('message', (event) => {
+        // The fail-fast error happens strictly after the dispatch completes: this listener
+        // still observes an open EventSource even though the previous listener threw.
+        order.push(`l2:${event.data}:readyState=${eventsource.readyState}`);
+      });
+
+      strictEqual(await errorPromise, boom);
+      strictEqual(eventsource.readyState, EventSource.CLOSED);
+      // 'second' was dropped along with the rest of the batch.
+      deepStrictEqual(order, [
+        'l1:first',
+        'global-error',
+        `l2:first:readyState=${EventSource.OPEN}`,
+        'es-error',
+      ]);
+    } finally {
+      removeEventListener('error', globalHandler);
+    }
+  },
+};

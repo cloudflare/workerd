@@ -343,28 +343,29 @@ namespace {
 // report-an-exception machinery (which fires the cancelable 'error' event, then falls back
 // to the console). Outside of a request (e.g. unit-test contexts without a
 // ServiceWorkerGlobalScope), fall back to plain console/inspector reporting.
-void reportListenerError(jsg::Lock& js, jsg::Value&& exception) {
-  auto handle = jsg::JsValue(exception.getHandle(js));
+void reportListenerError(jsg::Lock& js, const jsg::JsValue& exception) {
   if (IoContext::hasCurrent()) {
-    IoContext::current().getCurrentLock().getGlobalScope().reportError(js, handle);
+    IoContext::current().getCurrentLock().getGlobalScope().reportError(js, exception);
   } else {
-    js.reportError(handle);
+    js.reportError(exception);
   }
 }
 
 }  // namespace
 
-bool EventTarget::dispatchEventImpl(
+EventTarget::DispatchResult EventTarget::dispatchEventImpl(
     jsg::Lock& js, jsg::Ref<Event> event, DispatchExceptionPolicy exceptionPolicy) {
   event->beginDispatch(JSG_THIS);
   KJ_DEFER(event->endDispatch());
 
   event->clearPreventDefault();
 
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> firstException;
+
   // First, gather all the function handles that we plan to call. This is important to ensure that
   // the callback can add or remove listeners without affecting the current event's processing.
 
-  return js.withinHandleScope([&] {
+  bool result = js.withinHandleScope([&] {
     struct Callback {
       // The listener's identity, used to check whether it was removed by an earlier handler
       // and to remove it when `once` is set. Old-style on<event> handlers (found via
@@ -480,7 +481,11 @@ bool EventTarget::dispatchEventImpl(
             invoke();
           }
           JSG_CATCH(exception) {
-            reportListenerError(js, kj::mv(exception));
+            auto handle = jsg::JsValue(exception.getHandle(js));
+            if (firstException == kj::none) {
+              firstException = jsg::JsRef(js, handle);
+            }
+            reportListenerError(js, handle);
           }
           break;
       }
@@ -488,12 +493,14 @@ bool EventTarget::dispatchEventImpl(
 
     return !event->isPreventDefault();
   });
+
+  return DispatchResult{.result = result, .firstException = kj::mv(firstException)};
 }
 
 bool EventTarget::dispatchEvent(jsg::Lock& js, jsg::Ref<Event> event) {
   // The JS-exposed dispatchEvent() is a spec surface: listener exceptions are reported and
   // do not interrupt the dispatch (nor propagate to the dispatchEvent() caller).
-  return dispatchEventImpl(js, kj::mv(event), DispatchExceptionPolicy::REPORT);
+  return dispatchEventImpl(js, kj::mv(event), DispatchExceptionPolicy::REPORT).result;
 }
 
 // A wrapper for the AbortTrigger jsrpc client, that automatically sends a release() message once

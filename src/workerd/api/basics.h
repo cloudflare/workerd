@@ -333,7 +333,20 @@ class EventTarget: public jsg::Object {
   // dispatchEvent() and by AbortSignal aborts, which the spec forbids from throwing.
   enum class DispatchExceptionPolicy { PROPAGATE, REPORT };
 
-  bool dispatchEventImpl(jsg::Lock& js,
+  // The result of a dispatchEventImpl() call.
+  struct DispatchResult {
+    // Per the spec's dispatch algorithm: false iff the event is cancelable and a listener
+    // called preventDefault().
+    bool result;
+
+    // Under DispatchExceptionPolicy::REPORT, the first listener exception, if any listener
+    // threw. It has already been reported; it is surfaced here for native callers that
+    // additionally apply a fail-fast reaction on top of the spec's report-and-continue
+    // dispatch (e.g. erroring out a WebSocket whose listener threw).
+    kj::Maybe<jsg::JsRef<jsg::JsValue>> firstException;
+  };
+
+  DispatchResult dispatchEventImpl(jsg::Lock& js,
       jsg::Ref<Event> event,
       DispatchExceptionPolicy exceptionPolicy = DispatchExceptionPolicy::PROPAGATE);
 

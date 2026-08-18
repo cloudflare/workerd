@@ -21,13 +21,15 @@ namespace workerd::api {
 //   list semantics, but we do validate the transfer list input to an extent.
 // - It does not support serialization/deserialization. It's not possible to
 //   send a MessagePort anywhere currently.
-// - The `messageerror` event is only partially implemented. Currently, if a
-//   message data cannot be serialized/deserialized it will throw an error
-//   synchronously when posted rather than dispatching the `messageerror` event
-//   on the receiving port, this is just easiest to implement for now and makes
-//   the most sense for our current use case since the MessagePort only ever
-//   passes messages around within the same isolate (that is, we're not sending
-//   the serialized data off anywhere, we're just cloning it and dispatching it.)
+// - The `messageerror` event diverges from the spec. If message data cannot be
+//   serialized it throws synchronously from postMessage() rather than dispatching
+//   `messageerror` on the receiving port; this is easiest for now and makes the
+//   most sense for our current use case since the MessagePort only ever passes
+//   messages around within the same isolate (that is, we're not sending the
+//   serialized data off anywhere, we're just cloning it and dispatching it.)
+//   Instead, a throwing 'message' listener — whose exception is reported per
+//   spec — additionally dispatches a `messageerror` event on this port carrying
+//   the exception as its data, which the spec does not do.
 // - We intentionally do not implement the "port message queue" semantics exactly
 //   as they are described in the spec. When a MessagePort has an onmessage listener,
 //   the message delivery is flowing, when there is no onmessage listener, the

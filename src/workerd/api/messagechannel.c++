@@ -1,5 +1,6 @@
 #include "messagechannel.h"
 
+#include "blob.h"
 #include "events.h"
 
 #include <workerd/jsg/ser.h>
@@ -35,23 +36,18 @@ void MessagePort::listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t
 }
 
 void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
-  // TODO(soon): Per spec these dispatches should use
-  // EventTarget::DispatchExceptionPolicy::REPORT (report the listener exception and continue
-  // with the remaining listeners). Note the interplay with the JSG_TRY below, which converts
-  // a throwing dispatch into a 'messageerror' event: under REPORT, dispatch no longer
-  // throws, so that conversion would need to be reconsidered rather than simply removed.
-  JSG_TRY(js) {
-    auto message =
-        js.alloc<MessageEvent>(js, value, kj::String(), JSG_THIS, kj::none, Trusted::YES);
-    dispatchEventImpl(js, kj::mv(message));
-  }
-  JSG_CATCH(exception) {
-    // There was an error dispatching the message event.
-    // We will dispatch a messageerror event instead.
-    auto message = js.alloc<MessageEvent>(
-        js, jsg::JsValue(exception.getHandle(js)), kj::String(), JSG_THIS, kj::none, Trusted::YES);
-    dispatchEventImpl(js, kj::mv(message));
-    // Now, if this dispatchEventImpl throws, we just blow up. Don't try to catch it.
+  auto result = dispatchEventImpl(js,
+      js.alloc<MessageEvent>(js, value, kj::String(), JSG_THIS, kj::none, Trusted::YES),
+      DispatchExceptionPolicy::REPORT);
+  KJ_IF_SOME(exception, result.firstException) {
+    // A 'message' listener threw. Its exception was reported (and the remaining 'message'
+    // listeners still ran); additionally surface it as a 'messageerror' event on this port,
+    // carrying the exception as the event's data. The 'messageerror' dispatch itself is
+    // report-only: a throwing 'messageerror' listener triggers no further reaction.
+    dispatchEventImpl(js,
+        js.alloc<MessageEvent>(js, kj::str("messageerror"), exception.addRef(js), kj::String(),
+            JSG_THIS, kj::none, Trusted::YES),
+        DispatchExceptionPolicy::REPORT);
   }
 }
 
