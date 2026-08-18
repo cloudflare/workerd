@@ -104,4 +104,77 @@ struct FileWatcher::Impl {
 
 #elif KJ_RS_IO_USE_KQUEUE_FOR_FILE_WATCHER
 
+// kqueue backend. One EVFILT_VNODE registration per watched file (dup of the already-open
+// config fd when available, else opened by path -- so the path must exist). NOTE_DELETE /
+// NOTE_RENAME on the old inode cover atomic-rename saves. kqueue doesn't scale to whole
+// directory trees, but we only watch the specific files opened while parsing the config.
+struct FileWatcher::Impl {
+  kj::OwnFd kqueueFd;
+  kj::Vector<kj::OwnFd> filesWatched;
+
+  Impl(): kqueueFd(makeKqueue()) {}
+
+  bool isSupported() {
+    return true;
+  }
+
+  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile &> file) {
+    KJ_IF_SOME(f, file) {
+      KJ_IF_SOME(fd, f.getFd()) {
+        // We need to duplicate the fd because the original will probably be closed later, and
+        // closing the fd unregisters it from kqueue.
+        watchFd(KJ_SYSCALL_FD(dup(fd)));
+        return;
+      }
+    }
+
+    // No existing file, open from disk.
+    watchFd(KJ_SYSCALL_FD(open(path.toNativeString(true).cStr(), O_RDONLY)));
+  }
+
+  kj::Promise<void> onChange() {
+    for (;;) {
+      struct kevent event;
+      struct timespec timeout;
+      memset(&event, 0, sizeof(event));
+      memset(&timeout, 0, sizeof(timeout));
+
+      int n;
+      KJ_SYSCALL(n = kevent(kqueueFd, nullptr, 0, &event, 1, &timeout));
+
+      if (n == 0) {
+        // No events: wait for the kqueue fd to become readable, indicating an event has been
+        // delivered.
+        co_await wait_fd_readable(kqueueFd.get());
+        continue;
+      } else {
+        // We only registered for events that indicate changes in the first place, so there's
+        // no need to examine the event: it definitely means something changed.
+        co_return;
+      }
+    }
+  }
+
+  static kj::OwnFd makeKqueue() {
+    auto fd = KJ_SYSCALL_FD(kqueue());
+    KJ_SYSCALL(fcntl(fd, F_SETFD, FD_CLOEXEC));
+    return kj::mv(fd);
+  }
+
+  void watchFd(kj::OwnFd fd) {
+    KJ_SYSCALL(fcntl(fd, F_SETFD, FD_CLOEXEC));
+
+    struct kevent change;
+    memset(&change, 0, sizeof(change));
+    change.ident = fd.get();
+    change.filter = EVFILT_VNODE;
+    change.flags = EV_ADD | EV_CLEAR;
+    change.fflags = NOTE_WRITE | NOTE_EXTEND | NOTE_DELETE | NOTE_RENAME;
+    KJ_SYSCALL(kevent(kqueueFd, &change, 1, nullptr, 0, nullptr));
+    filesWatched.add(kj::mv(fd));
+  }
+};
+
+#else
+
 }  // namespace kj_rs_io
