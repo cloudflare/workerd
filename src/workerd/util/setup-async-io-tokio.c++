@@ -169,3 +169,5 @@ AsyncIoContext setupAsyncIo(kj::Maybe<EventLoopObserver&> observer) {
 }
 
 }  // namespace kj
+
+#endif  // WORKERD_RUST_IO_BACKEND_RUST
