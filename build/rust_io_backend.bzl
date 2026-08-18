@@ -90,3 +90,58 @@ rust_io_forbidden_aspect = aspect(
     attr_aspects = ["*"],
     doc = "Propagates RustIoForbiddenInfo up the dependency graph.",
 )
+
+def _rust_io_hermeticity_impl(ctx):
+    info = ctx.attr.target[RustIoForbiddenInfo]
+    paths = info.paths
+
+    report = ctx.actions.declare_file(ctx.label.name + ".txt")
+
+    if ctx.attr.enforce and len(paths) > 0:
+        lines = [
+            "",
+            "Rust-I/O hermeticity FAILED for {} in the rust I/O config.".format(
+                str(ctx.attr.target.label),
+            ),
+            "",
+            "Its transitive dependency graph reaches {} forbidden concrete C++ ".format(len(paths)) +
+            "I/O target(s) that the rust I/O layer (the tokio event loop + tokio",
+            "sockets) is meant to keep off the build. Each is a real migration item; the",
+            "example dependency edge shows one path that pulls it in:",
+            "",
+        ]
+        for forbidden in sorted(paths.keys()):
+            path = paths[forbidden]
+            lines.append("  [FORBIDDEN] {}".format(forbidden))
+            lines.append("    reached via:")
+            for i, hop in enumerate(path):
+                lines.append("      {}{}".format("  " * i, hop))
+            lines.append("")
+        lines.append(
+            "Fix by removing the offending edge (migrate the code to the tokio-backed I/O layer,",
+        )
+        lines.append(
+            "or drop the forbidden dep from that target's deps under select(io_backend_rust)),",
+        )
+        lines.append(
+            "or -- if this is a deliberate remaining kj-mode/in-process site -- adjust the",
+        )
+        lines.append(
+            "forbidden set in build/rust_io_backend.bzl (a reviewable change).",
+        )
+        fail("\n".join(lines))
+
+    # Not enforcing (cxx config), or clean: emit a report artifact and a summary.
+    if len(paths) == 0:
+        summary = "rust-io-hermeticity: OK -- {} reaches 0 forbidden C++ I/O targets.".format(
+            str(ctx.attr.target.label),
+        )
+    else:
+        summary = ("rust-io-hermeticity: {} reaches {} forbidden C++ I/O target(s) " +
+                   "(NOT enforced in this config; --//:io_backend=rust would fail): {}").format(
+            str(ctx.attr.target.label),
+            len(paths),
+            ", ".join(sorted(paths.keys())),
+        )
+    ctx.actions.write(report, summary + "\n")
+    return [DefaultInfo(files = depset([report]))]
