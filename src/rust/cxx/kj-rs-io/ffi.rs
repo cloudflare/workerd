@@ -73,3 +73,13 @@ use crate::stream::stream_when_write_disconnected;
 use crate::stream::stream_write;
 use crate::stream::wrap_input_fd;
 use crate::stream::wrap_output_fd;
+#[cxx::bridge(namespace = "kj_rs_io")]
+// FFI island: the cxx bridge macro generates the `unsafe` extern shims, and this module declares
+// the hand-written `unsafe extern "C++"` / `async unsafe fn` bridge surface.
+// unnecessary_box_returns: returning an opaque Rust type to C++ as `Box<T>` is the cxx idiom.
+#[expect(clippy::unnecessary_box_returns)]
+// missing_safety_doc fires (or not) deep inside the macro expansion depending on which bridge
+// items are publicly re-exported, so an `#[expect]` could go unfulfilled.
+#[expect(clippy::allow_attributes)]
+#[allow(clippy::missing_safety_doc)]
+mod bridge {}
