@@ -55,3 +55,41 @@ mod bridge {
         fn notify_runnable(&self);
     }
 }
+/// Opts the timer thread out of OS timer-coalescing slop as far as an unprivileged process
+/// can. On macOS, default-QoS threads get proportional timer leeway (~25-30% observed:
+/// a 500 µs `mach_wait_until` overshoots by ~150 µs); `QOS_CLASS_USER_INTERACTIVE` shrinks
+/// it substantially. Called once at timer-thread startup; best-effort.
+#[cfg(target_os = "macos")]
+pub fn boost_current_thread_priority() {
+    use core::ffi::c_int;
+    use core::ffi::c_uint;
+    const QOS_CLASS_USER_INTERACTIVE: c_uint = 0x21;
+    unsafe extern "C" {
+        fn pthread_set_qos_class_self_np(qos_class: c_uint, relative_priority: c_int) -> c_int;
+    }
+    // Safety: simple syscall wrapper acting on the calling thread; no memory crosses.
+    let _ = unsafe { pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) };
+}
+
+/// On Linux the equivalent knob is the per-thread hrtimer slack (default ~50 µs); shrink it
+/// to 1 ns for this thread only. Best-effort.
+#[cfg(target_os = "linux")]
+pub fn boost_current_thread_priority() {
+    use core::ffi::c_int;
+    use core::ffi::c_ulong;
+    const PR_SET_TIMERSLACK: c_int = 29;
+    unsafe extern "C" {
+        fn prctl(
+            option: c_int,
+            arg2: c_ulong,
+            arg3: c_ulong,
+            arg4: c_ulong,
+            arg5: c_ulong,
+        ) -> c_int;
+    }
+    // Safety: simple syscall wrapper acting on the calling thread; no memory crosses.
+    let _ = unsafe { prctl(PR_SET_TIMERSLACK, 1, 0, 0, 0) };
+}
+
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
+pub fn boost_current_thread_priority() {}
