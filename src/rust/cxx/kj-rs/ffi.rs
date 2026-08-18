@@ -46,4 +46,33 @@ mod bridge {
         fn set_none(&mut self);
         fn wake_if_some(&mut self);
     }
+
+    unsafe extern "C++" {
+        include!("kj-rs/waker.h");
+
+        /// The stack-owned waker C++ passes to `Future::poll()`. Rust only ever borrows it; the
+        /// `Waker` built from it (waker.rs) has a no-op drop and clones by taking a real strong
+        /// reference to the event's `FutureWakerCell` via `clone_cell()`.
+        type PollWaker;
+        #[cxx_name = "wakeByRef"]
+        fn wake_by_ref(self: &PollWaker);
+        #[cxx_name = "cloneCell"]
+        fn clone_cell(self: &PollWaker) -> KjMaybe<KjRc<FutureWakerCell>>;
+
+        /// The refcounted cell behind every retained waker; waking it arms the owning
+        /// FuturePollEvent (a safe no-op after that event is destroyed).
+        type FutureWakerCell;
+        #[cxx_name = "wakeByRef"]
+        fn wake_by_ref(self: &FutureWakerCell);
+        #[cxx_name = "addRef"]
+        fn add_ref(self: &FutureWakerCell) -> KjRc<FutureWakerCell>;
+        /// Re-own a strong reference previously disowned into a `RawWaker` data slot (waker.rs's
+        /// owned-cell vtable).
+        ///
+        /// # Safety
+        ///
+        /// `self` must carry exactly such a surrendered reference — this mints an owned handle
+        /// without incrementing the count. Dropping the returned handle releases the reference.
+        unsafe fn reown(self: &FutureWakerCell) -> KjRc<FutureWakerCell>;
+    }
 }
