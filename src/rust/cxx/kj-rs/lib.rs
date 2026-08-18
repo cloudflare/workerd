@@ -67,14 +67,4 @@ mod legacy_ffi {
         fn set_none(&mut self);
         fn wake_if_some(&mut self);
     }
-
-    unsafe extern "C++" {
-        include!("kj-rs/promise.h");
-
-        type OwnPromiseNode = crate::OwnPromiseNode;
-
-        /// # Safety
-        /// `node` must point to a live `OwnPromiseNode`.
-        unsafe fn own_promise_node_drop_in_place(node: *mut OwnPromiseNode);
-    }
 }
