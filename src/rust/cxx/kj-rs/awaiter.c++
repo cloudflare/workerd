@@ -191,10 +191,12 @@ FuturePollEvent::~FuturePollEvent() noexcept(false) {
 }
 
 kj::Rc<FutureWakerCell> FuturePollEvent::cloneWakerCell() {
+  // Lazily create the cell, bound to this event.
   if (wakerCell.cell == nullptr) {
-    wakerCell.cell = kj::rc<FutureWakerCell>(static_cast<kj::_::Event&>(*this));
+    wakerCell.cell = kj::rc<FutureWakerCell>(*this);
   }
-  return wakerCell.cell->addRef();
+  // Hand out a new strong reference for Rust to retain.
+  return wakerCell.cell.addRef();
 }
 
 void FuturePollEvent::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent) {
