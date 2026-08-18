@@ -92,4 +92,56 @@ kj::ArrayPtr<const char> safeUnixPath(const struct sockaddr_un *addr, kj::uint a
 
 }  // namespace
 
+PeerFilter::PeerFilter(): allowUnix(true), allowAbstractUnix(true) {
+  allowCidrs.add(CidrRange::inet4({0, 0, 0, 0}, 0));
+  allowCidrs.add(CidrRange::inet6({}, {}, 0));
+}
+
+PeerFilter::PeerFilter(kj::ArrayPtr<const kj::StringPtr> allow,
+    kj::ArrayPtr<const kj::StringPtr> deny,
+    PeerFilter &next)
+    : allowUnix(false),
+      allowAbstractUnix(false),
+      next(next) {
+  for (auto rule: allow) {
+    if (rule == "local") {
+      allowCidrs.addAll(localCidrs());
+    } else if (rule == "network") {
+      // Can't be represented as a simple union of CIDRs, so we handle in shouldAllow().
+      allowNetwork = true;
+    } else if (rule == "private") {
+      allowCidrs.addAll(privateCidrs());
+      allowCidrs.addAll(localCidrs());
+    } else if (rule == "public") {
+      // Can't be represented as a simple union of CIDRs, so we handle in shouldAllow().
+      allowPublic = true;
+    } else if (rule == "unix") {
+      allowUnix = true;
+    } else if (rule == "unix-abstract") {
+      allowAbstractUnix = true;
+    } else {
+      allowCidrs.add(CidrRange(rule));
+    }
+  }
+
+  for (auto rule: deny) {
+    if (rule == "local") {
+      denyCidrs.addAll(localCidrs());
+    } else if (rule == "network") {
+      KJ_FAIL_REQUIRE("don't deny 'network', allow 'local' instead");
+    } else if (rule == "private") {
+      denyCidrs.addAll(privateCidrs());
+    } else if (rule == "public") {
+      // Tricky: What if we allow 'network' and deny 'public'?
+      KJ_FAIL_REQUIRE("don't deny 'public', allow 'private' instead");
+    } else if (rule == "unix") {
+      allowUnix = false;
+    } else if (rule == "unix-abstract") {
+      allowAbstractUnix = false;
+    } else {
+      denyCidrs.add(CidrRange(rule));
+    }
+  }
+}
+
 }  // namespace kj_rs_io
