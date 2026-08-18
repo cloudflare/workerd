@@ -79,14 +79,29 @@ using DropCallback = void (*)(void /* RustFuture::fut */* fut);
 // which drops the Rust Future and transitively cancels any KJ sub-promises it was .await'ing.
 struct RustFuture {
 
-  // Bridged async functions are eager like KJ coroutines: poll synchronously to the first
-  // suspension point and keep making progress even if the caller stores the promise.
+  // Eager-by-default conversion: the returned promise starts running immediately, without
+  // being awaited — the future is polled synchronously up to its first suspension point
+  // (exactly like calling a KJ coroutine, which runs to its first co_await), and continues
+  // on the event loop from there. KJ code universally assumes promises are "hot" (a stored
+  // promise still makes progress), so this is the right default for every bridged
+  // `async fn`; before this conversion was eager, every consumer had to remember a manual
+  // `.eagerlyEvaluate(nullptr)`.
+  //
+  // Requires a current kj::EventLoop on this thread (same requirement as awaiting the
+  // promise, just enforced at creation). Cancellation is unchanged: dropping the promise
+  // still synchronously cancels the Rust future and everything it is awaiting.
+  //
+  // The rare consumer that genuinely wants a cold future can call `lazily()` below on the
+  // raw RustFuture instead of going through this conversion (the bridge's generated shims
+  // always convert eagerly, so that consumer must obtain the RustFuture itself).
   template <typename T>
   operator kj::Promise<T>() {
     return lazily<T>().eagerlyEvaluate(nullptr);
   }
 
-  // Escape hatch for callers that explicitly need a cold Rust future.
+  // Lazy (cold) conversion: nothing runs until the returned promise is first awaited.
+  // This is the raw adapter the eager conversion above builds on, and the C++-side escape
+  // hatch for code that genuinely needs a cold promise.
   template <typename T>
   kj::Promise<T> lazily() {
     struct Impl {
