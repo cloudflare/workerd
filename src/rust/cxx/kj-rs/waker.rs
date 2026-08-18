@@ -2,7 +2,10 @@ use std::task::RawWaker;
 use std::task::RawWakerVTable;
 use std::task::Waker;
 
+use crate::KjRc;
+use crate::ffi::FutureWakerCell;
 use crate::ffi::KjWaker;
+use crate::ffi::PollWaker;
 
 // Safety: We use the type system to express the Sync nature of KjWaker in the cxx-rs FFI boundary.
 // Specifically, we only allow invocations on const KjWakers, and in KJ C++, use of const-qualified
@@ -100,3 +103,87 @@ pub fn try_into_kj_waker_ptr(waker: &Waker) -> *const KjWaker {
         std::ptr::null()
     }
 }
+
+// Owned-cell vtable: retained Wakers holding a strong reference to a FutureWakerCell
+//
+// `data` carries one strong reference (a disowned `KjRc<FutureWakerCell>`), or is null for the
+// no-op Waker minted when `clone_cell()` had no event to bind (cannot normally happen in the
+// single-thread world). Clone takes another reference; drop re-owns and releases the carried one.
+
+/// Surrender the handle's strong reference into a bare pointer for a `RawWaker` data slot.
+/// Reversed by `FutureWakerCell::reown` in [`cell_waker_drop`].
+fn cell_into_raw(cell: KjRc<FutureWakerCell>) -> *const FutureWakerCell {
+    let ptr = cell.get();
+    std::mem::forget(cell);
+    ptr
+}
+
+/// # Safety
+///
+/// `data` must be either null or a pointer produced by [`cell_into_raw`] whose strong reference
+/// is still carried by this `RawWaker` (upheld by the `Waker`/`RawWaker` contract: these vtable
+/// entries are only installed alongside such pointers, by [`poll_waker_clone`] and the functions
+/// below).
+unsafe fn cell_deref<'a>(data: *const ()) -> Option<&'a FutureWakerCell> {
+    if data.is_null() {
+        None
+    } else {
+        // Safety: non-null per the check; live per this fn's `# Safety` contract (the carried
+        // strong reference keeps the cell alive).
+        Some(unsafe { &*data.cast::<FutureWakerCell>() })
+    }
+}
+
+/// # Safety
+///
+/// Same contract as [`cell_deref`].
+unsafe fn cell_waker_clone(data: *const ()) -> RawWaker {
+    // Safety: forwarded from this fn's `# Safety` contract.
+    let new_data = if let Some(cell) = unsafe { cell_deref(data) } {
+        cell_into_raw(cell.add_ref())
+    } else {
+        std::ptr::null()
+    };
+    RawWaker::new(new_data.cast::<()>(), &CELL_WAKER_VTABLE)
+}
+
+/// # Safety
+///
+/// Same contract as [`cell_deref`].
+unsafe fn cell_waker_wake_by_ref(data: *const ()) {
+    // Safety: forwarded from this fn's `# Safety` contract.
+    if let Some(cell) = unsafe { cell_deref(data) } {
+        cell.cell_wake_by_ref();
+    }
+}
+
+/// # Safety
+///
+/// Same contract as [`cell_deref`], and the carried strong reference is released (the `RawWaker`
+/// must not be used again — guaranteed by the `Waker` contract for `drop`).
+unsafe fn cell_waker_drop(data: *const ()) {
+    // Safety: forwarded from this fn's `# Safety` contract.
+    if let Some(cell) = unsafe { cell_deref(data) } {
+        // Safety: `data` carries a strong reference per this fn's `# Safety` contract; re-own it
+        // and let the handle fall, releasing the reference.
+        let _cell = unsafe { cell.reown() };
+    }
+}
+
+/// # Safety
+///
+/// Same contract as [`cell_waker_drop`].
+unsafe fn cell_waker_wake(data: *const ()) {
+    // Safety: forwarded from this fn's `# Safety` contract; wake-then-release.
+    unsafe {
+        cell_waker_wake_by_ref(data);
+        cell_waker_drop(data);
+    }
+}
+
+static CELL_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
+    cell_waker_clone,
+    cell_waker_wake,
+    cell_waker_wake_by_ref,
+    cell_waker_drop,
+);
