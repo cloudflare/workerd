@@ -88,4 +88,47 @@ mod bridge {
         // Expressing it as a borrow lets cxx generate a safe-to-call binding.
         fn own_promise_node_drop_in_place(node: &mut OwnPromiseNode);
     }
+
+    unsafe extern "C++" {
+        include!("kj-rs/awaiter.h");
+
+        type GuardedRustPromiseAwaiter;
+
+        /// Placement-new of the C++ awaiter into Rust-owned storage.
+        ///
+        /// # Safety
+        ///
+        /// - `ptr` must point to uninitialized storage of (at least) the size and alignment of
+        ///   `GuardedRustPromiseAwaiterRepr`, valid for writes, and must stay pinned for the
+        ///   awaiter's lifetime.
+        /// - `rust_waker_ptr` must point to a valid `OptionWaker` that outlives the awaiter (the
+        ///   C++ side stores and dereferences this pointer on later `poll()`s).
+        /// - The awaiter must eventually be destroyed exactly once via
+        ///   `guarded_rust_promise_awaiter_drop_in_place`.
+        unsafe fn guarded_rust_promise_awaiter_new_in_place(
+            ptr: *mut GuardedRustPromiseAwaiter,
+            rust_waker_ptr: *mut OptionWaker,
+            node: OwnPromiseNode,
+        );
+        /// Placement-destruct of the awaiter constructed by
+        /// `guarded_rust_promise_awaiter_new_in_place`.
+        ///
+        /// # Safety
+        ///
+        /// `ptr` must point to a live awaiter previously constructed in that storage by
+        /// `guarded_rust_promise_awaiter_new_in_place`, and the awaiter must not be used again
+        /// afterwards (at most one drop per construction).
+        unsafe fn guarded_rust_promise_awaiter_drop_in_place(ptr: *mut GuardedRustPromiseAwaiter);
+
+        fn poll(self: Pin<&mut GuardedRustPromiseAwaiter>, waker: &WakerRef) -> bool;
+        #[cxx_name = "pollWithPollWaker"]
+        fn poll_with_poll_waker(
+            self: Pin<&mut GuardedRustPromiseAwaiter>,
+            waker: &WakerRef,
+            poll_waker: &PollWaker,
+        ) -> bool;
+
+        #[must_use]
+        fn take_own_promise_node(self: Pin<&mut GuardedRustPromiseAwaiter>) -> OwnPromiseNode;
+    }
 }
