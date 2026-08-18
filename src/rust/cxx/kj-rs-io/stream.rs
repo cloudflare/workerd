@@ -422,3 +422,69 @@ pub fn stream_peer_addr(stream: &TokioStream) -> Result<Vec<u8>> {
 pub fn stream_take(stream: &mut TokioStream) -> Result<Box<TokioStream>> {
     stream.take()
 }
+
+// ======================================================================================
+// Arbitrary readable/writable fds (kj::LowLevelAsyncIoProvider::wrapInputFd/wrapOutputFd).
+// Unix only: implemented over AsyncFd, which supports pipes, character devices and sockets
+// (regular files are rejected by epoll/kqueue, matching KJ's fd-observer-based provider).
+// Deliberately no windows arm: kj's win32 LowLevelAsyncIoProvider has no pipe-fd tier — its
+// `Fd` is documented as a SOCKET (capnproto async-io.h) and its wrapInputFd/wrapOutputFd are
+// implemented identically to wrapSocketFd (async-io-win32.c++) — so the C++ side
+// (async-io.c++) routes win32 wrapInputFd/wrapOutputFd through the tested socket path
+// (`wrap_socket_fd`) and never calls these entry points there; the `not(unix)` arms below are
+// totality backstops only.
+
+#[cfg(unix)]
+type FdIo = tokio::io::unix::AsyncFd<std::fs::File>;
+
+pub struct TokioInputFd {
+    #[cfg(unix)]
+    inner: FdIo,
+}
+
+pub struct TokioOutputFd {
+    #[cfg(unix)]
+    inner: FdIo,
+}
+
+#[cfg(unix)]
+fn fd_io_from_raw(fd: i32, interest: Interest) -> Result<FdIo> {
+    let owned = crate::ffi::own_fd_from_raw(fd);
+    let _guard = crate::runtime::runtime_handle()?.enter();
+    tokio::io::unix::AsyncFd::with_interest(std::fs::File::from(owned), interest)
+        .map_err(op("wrapFd"))
+}
+
+pub fn wrap_input_fd(fd: i32) -> Result<Box<TokioInputFd>> {
+    #[cfg(unix)]
+    {
+        Ok(Box::new(TokioInputFd {
+            inner: fd_io_from_raw(fd, Interest::READABLE)?,
+        }))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = fd;
+        Err(KjIoError::other(
+            "wrapInputFd",
+            "not implemented on this platform",
+        ))
+    }
+}
+
+pub fn wrap_output_fd(fd: i32) -> Result<Box<TokioOutputFd>> {
+    #[cfg(unix)]
+    {
+        Ok(Box::new(TokioOutputFd {
+            inner: fd_io_from_raw(fd, Interest::WRITABLE)?,
+        }))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = fd;
+        Err(KjIoError::other(
+            "wrapOutputFd",
+            "not implemented on this platform",
+        ))
+    }
+}
