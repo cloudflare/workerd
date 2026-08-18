@@ -113,3 +113,15 @@ fn errno_exception_type(errno: i32) -> KjExceptionType {
         _ => KjExceptionType::Failed,
     }
 }
+impl From<KjIoError> for KjError {
+    fn from(error: KjIoError) -> Self {
+        let description = format!("{}: {}", error.op, error.inner);
+        Self::new(exception_type(&error.inner), description)
+    }
+}
+
+impl IntoKjException for KjIoError {
+    fn into_kj_exception(self, file: &str, line: u32) -> KjException {
+        KjError::from(self).into_kj_exception(file, line)
+    }
+}
