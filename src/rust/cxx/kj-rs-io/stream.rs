@@ -488,3 +488,44 @@ pub fn wrap_output_fd(fd: i32) -> Result<Box<TokioOutputFd>> {
         ))
     }
 }
+
+pub async fn input_fd_try_read(
+    stream: &TokioInputFd,
+    buf: &mut [u8],
+    min_bytes: usize,
+) -> Result<usize> {
+    #[cfg(unix)]
+    {
+        with_runtime(async move {
+            let min_bytes = min_bytes.min(buf.len());
+            let mut total = 0;
+            while total < min_bytes {
+                let mut guard = stream
+                    .inner
+                    .ready(Interest::READABLE)
+                    .await
+                    .map_err(op("poll()"))?;
+                match guard.try_io(|inner| {
+                    let mut file: &std::fs::File = inner.get_ref();
+                    file.read(&mut buf[total..])
+                }) {
+                    Ok(Ok(0)) => break, // EOF
+                    Ok(Ok(n)) => total += n,
+                    Ok(Err(e)) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                    Ok(Err(e)) => return Err(op("read()")(e)),
+                    Err(_would_block) => {}
+                }
+            }
+            Ok(total)
+        })
+        .await
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (stream, buf, min_bytes);
+        Err(KjIoError::other(
+            "read()",
+            "not implemented on this platform",
+        ))
+    }
+}
