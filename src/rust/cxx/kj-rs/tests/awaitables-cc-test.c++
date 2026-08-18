@@ -8,6 +8,16 @@
 
 #include <kj/test.h>
 
+// Raw-RustFuture test helpers, defined in tests/lib.rs and tests/test_futures.rs. The
+// bridge's generated `async fn` shims always apply RustFuture's eager-by-default
+// kj::Promise conversion, so tests that need a *cold* promise receive the not-yet-converted
+// RustFuture through these and call `.lazily()` (kj-rs/future.h) themselves.
+extern "C" {
+void kj_rs_demo_lazy_side_effect_future(::kj_rs::repr::RustFuture* out);
+void kj_rs_demo_lazy_future_awaiting_cancellable_promise(::kj_rs::repr::RustFuture* out);
+void kj_rs_demo_work_before_poll(uint64_t* target, ::kj_rs::repr::RustFuture* out);
+}
+
 namespace kj_rs_demo {
 namespace {
 
@@ -161,6 +171,57 @@ KJ_TEST(".awaiting a Promise<T> from Rust can produce an Err Result") {
            waitScope);
 }
 
+KJ_TEST("a panicking bridged async fn surfaces as a catchable kj::Exception, not an abort") {
+  // Unwind protection in the RustFuture vtable (kj-rs/future.rs): panics escaping poll() are
+  // converted into errored completions, mirroring the sync bridge's panic -> kj::Exception
+  // conversion. Before that protection, any of these would abort the process (unwinding out
+  // of an extern "C" fn).
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  {
+    // Fallible future, panic on first poll.
+    auto exception = KJ_ASSERT_NONNULL(
+        kj::runCatchingExceptions([&]() { new_panicking_future_void().wait(waitScope); }));
+    KJ_EXPECT(exception.getDescription().contains("bridged future panicked on purpose"),
+        exception.getDescription());
+  }
+
+  {
+    // Infallible future: the promise can still reject (kj::Promise<T> always carries an
+    // exception channel even when the Rust signature is infallible).
+    auto exception = KJ_ASSERT_NONNULL(kj::runCatchingExceptions(
+        [&]() { new_panicking_infallible_future_void().wait(waitScope); }));
+    KJ_EXPECT(exception.getDescription().contains("bridged infallible future panicked on purpose"),
+        exception.getDescription());
+  }
+
+  {
+    // Panic after a suspension point: exercises the event-loop-driven poll path (not the
+    // eager creation-time poll).
+    auto exception = KJ_ASSERT_NONNULL(kj::runCatchingExceptions(
+        [&]() { new_panicking_after_await_future_void().wait(waitScope); }));
+    KJ_EXPECT(exception.getDescription().contains("panicked after a suspension point"),
+        exception.getDescription());
+  }
+
+  // A panicking bridged future can also be caught from a KJ coroutine.
+  []() -> kj::Promise<void> {
+    kj::Maybe<kj::Exception> maybeException;
+    try {
+      co_await new_panicking_future_void();
+    } catch (...) {
+      maybeException = kj::getCaughtExceptionAsKj();
+    }
+    auto& exception = KJ_ASSERT_NONNULL(maybeException, "should have thrown");
+    KJ_EXPECT(exception.getDescription().contains("bridged future panicked on purpose"),
+        exception.getDescription());
+  }().wait(waitScope);
+
+  // The loop is still healthy after the panics: run a normal future to completion.
+  []() -> kj::Promise<void> { co_await new_ready_future_void(); }().wait(waitScope);
+}
+
 KJ_TEST("Rust can await Promise<int32_t>") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
@@ -181,9 +242,11 @@ KJ_TEST("C++ can receive asynchronous wakes after poll()") {
   kj::WaitScope waitScope(loop);
 
   auto promise = new_threaded_delay_future_void();
-  // It's not ready yet.
+  // It's not ready yet: the future stashed a clone of its waker and returned Pending.
   KJ_EXPECT(!promise.poll(waitScope));
-  // But later it is.
+  // Wake the stashed waker on the loop thread; this arms the FuturePollEvent so the next poll
+  // completes. Exercises a cloned-waker wake that arrives after poll() has already returned.
+  wake_delayed_future();
   promise.wait(waitScope);
 }
 
@@ -192,14 +255,71 @@ KJ_TEST("Work before poll") {
   kj::WaitScope waitScope(loop);
 
   uint64_t val = 0;
-  // It should be possible for rust function to do work before returning the future
-  // even if we don't poll or cancel it.
-  auto promise = work_before_poll(val);
+  // It should be possible for a Rust function to do work before returning the future
+  // even if we don't poll or cancel it. The future panics if polled, so it is converted
+  // with RustFuture::lazily() (the eager-by-default conversion polls at creation); this
+  // also proves cold promises really are never polled unawaited.
+  ::kj_rs::repr::RustFuture fut;
+  kj_rs_demo_work_before_poll(&val, &fut);
+  auto promise = fut.lazily<void>();
   KJ_EXPECT(val == 42);
 }
 
+// =======================================================================================
+// Eager-by-default vs RustFuture::lazily(): bridged async fns surface as *eager*
+// kj::Promises (polled to their first suspension at creation, like a KJ coroutine);
+// `.lazily()` is the C++-side escape hatch that restores the cold future.
+
+KJ_TEST("bridged async fns are eager by default: the body runs at promise creation") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  reset_side_effect_counter();
+  {
+    auto promise = new_side_effect_future_void();
+    // No suspension points, so it ran to completion synchronously at creation, before any
+    // await or event-loop turn.
+    KJ_EXPECT(get_side_effect_counter() == 1);
+  }
+  KJ_EXPECT(get_side_effect_counter() == 1);
+}
+
+KJ_TEST("RustFuture::lazily() opts out: nothing runs until the promise is first awaited") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  reset_side_effect_counter();
+  ::kj_rs::repr::RustFuture fut;
+  kj_rs_demo_lazy_side_effect_future(&fut);
+  auto promise = fut.lazily<void>();
+  KJ_EXPECT(get_side_effect_counter() == 0);
+
+  // Turning the event loop without awaiting the promise doesn't run it either.
+  kj::evalLater([]() {}).wait(waitScope);
+  KJ_EXPECT(get_side_effect_counter() == 0);
+
+  promise.wait(waitScope);
+  KJ_EXPECT(get_side_effect_counter() == 1);
+}
+
+KJ_TEST("eager promises still cancel on drop (never explicitly polled by the caller)") {
+  // Cancellation semantics are unchanged by eager evaluation: dropping the promise
+  // synchronously cancels the Rust future and the KJ promise it is awaiting. Here the
+  // caller never polls or awaits — creation alone started the future (suspending it at its
+  // .await), and destruction alone cancels it.
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  reset_cancellation_counter();
+  {
+    auto promise = new_future_awaiting_cancellable_promise();
+    KJ_EXPECT(get_cancellation_counter() == 0);
+  }
+  KJ_EXPECT(get_cancellation_counter() == 1);
+}
+
 // TODO(someday): More test cases.
-//   - Standalone ArcWaker tests. Ensure Rust calls ArcWaker destructor when we expect.
+//   - Standalone FutureWakerCell tests. Ensure Rust drops cloned waker cells when we expect.
 //   - Throwing an exception from PromiseNode functions, including destructor.
 
 // =======================================================================================
@@ -212,11 +332,16 @@ KJ_TEST("Work before poll") {
 KJ_TEST("Cancellation: drop never-polled Rust future") {
   // Dropping a kj::Promise wrapping a Rust future that was never polled should not crash. Since the
   // future was never polled, the Rust async function body was never entered, so no sub-promises
-  // exist to cancel.
+  // exist to cancel. Uses a raw RustFuture converted with `.lazily()`: eager-by-default promises
+  // are always polled at least once (at creation), so only a cold promise can reach this path.
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  { auto promise = new_future_awaiting_cancellable_promise(); }
+  {
+    ::kj_rs::repr::RustFuture fut;
+    kj_rs_demo_lazy_future_awaiting_cancellable_promise(&fut);
+    auto promise = fut.lazily<void>();
+  }
 }
 
 KJ_TEST("Cancellation: C++ dropping promise cancels Rust future's awaited KJ promise") {
