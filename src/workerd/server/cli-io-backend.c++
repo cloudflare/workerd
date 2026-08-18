@@ -240,4 +240,23 @@ class KjFileWatcher final: public FileWatcher {
 
  private:
 
+#else
+
+// Dummy KjFileWatcher implementation for operating systems that aren't supported yet.
+class KjFileWatcher final: public FileWatcher {
+ public:
+  KjFileWatcher(kj::UnixEventPort& port) {}
+
+  bool isSupported() override {
+    return false;
+  }
+
+  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) override {}
+
+  kj::Promise<void> onChange() override {
+    return kj::NEVER_DONE;
+  }
+
+ private:
+
 }  // namespace workerd::server
