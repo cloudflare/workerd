@@ -166,3 +166,56 @@ impl TokioAddress {
         })
     }
 }
+
+impl TokioAddress {
+    async fn connect_index(&self, index: usize) -> Result<Box<TokioStream>> {
+        match &self.spec {
+            Spec::Ip { addrs, wildcard } => {
+                if *wildcard {
+                    return Err(KjIoError::other(
+                        "connect()",
+                        "cannot connect() to a wildcard address",
+                    ));
+                }
+                let addr = addrs
+                    .get(index)
+                    .ok_or_else(|| KjIoError::other("connect()", "address index out of range"))?;
+                let stream = TcpStream::connect(addr).await.map_err(op("connect()"))?;
+                Ok(Box::new(TokioStream::from_tcp(stream)))
+            }
+            #[cfg(unix)]
+            Spec::Unix { path } => {
+                if index != 0 {
+                    return Err(KjIoError::other("connect()", "address index out of range"));
+                }
+                let stream = UnixStream::connect(path).await.map_err(op("connect()"))?;
+                Ok(Box::new(TokioStream::from_unix(stream)))
+            }
+        }
+    }
+
+    fn count(&self) -> usize {
+        match &self.spec {
+            Spec::Ip { addrs, .. } => addrs.len(),
+            #[cfg(unix)]
+            Spec::Unix { .. } => 1,
+        }
+    }
+
+    fn raw_sockaddr(&self, index: usize) -> Result<Vec<u8>> {
+        let sockaddr: socket2::SockAddr = match &self.spec {
+            Spec::Ip { addrs, .. } => (*addrs
+                .get(index)
+                .ok_or_else(|| KjIoError::other("sockaddr", "address index out of range"))?)
+            .into(),
+            #[cfg(unix)]
+            Spec::Unix { path } => {
+                if index != 0 {
+                    return Err(KjIoError::other("sockaddr", "address index out of range"));
+                }
+                socket2::SockAddr::unix(path).map_err(op("sockaddr"))?
+            }
+        };
+        Ok(crate::ffi::sockaddr_to_bytes(&sockaddr))
+    }
+}
