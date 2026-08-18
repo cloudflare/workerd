@@ -811,3 +811,29 @@ impl KjStreamWriteHalf<'_> {
         bridge::kj_stream_shutdown_write(self.0);
     }
 }
+
+// ======================================================================================
+// Pub `unsafe fn` FFI entry point (`Pin<&mut kj::AsyncIoStream>`).
+//
+// The owning native-serve entry points (`take_kj_socket`, `serve_kj_stream`) are safe fns in
+// [`crate::serve`] — ownership arrives as a `KjOwn` and no raw pointer crosses the crate's
+// public surface. Only the borrow-based unwrap remains here: C++ keeps the (hollow) wrapper,
+// so its "no I/O in flight" precondition cannot be expressed structurally.
+
+/// Recovers the native [`TokioStream`] out of a `kj::AsyncIoStream` that was created by
+/// kj-rs-io, leaving the C++ wrapper hollow (any further I/O through it fails).
+///
+/// # Errors
+///
+/// Returns an error if the stream is not a kj-rs-io tokio-backed stream, or was already
+/// unwrapped.
+///
+/// # Safety
+///
+/// No I/O operations (reads, writes, `whenWriteDisconnected`) may be in flight on the stream:
+/// their futures borrow the same native object this function moves out.
+pub unsafe fn unwrap_kj_stream(
+    stream: Pin<&mut KjAsyncIoStream>,
+) -> std::result::Result<Box<TokioStream>, KjException> {
+    bridge::unwrap_tokio_stream(stream)
+}
