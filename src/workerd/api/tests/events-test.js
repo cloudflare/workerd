@@ -375,8 +375,9 @@ export const globalIsEventTarget = {
 
 export const errorInHandler = {
   test() {
-    // TODO(bug): Erroring in one event handler should not prevent others from being
-    // run but we currently do not implement this correctly.
+    // A throwing event handler must not prevent the remaining handlers from running, nor
+    // propagate out of dispatchEvent(); the exception is reported to the global scope via
+    // the (cancelable) 'error' event.
     const event = new Event('foo');
     const target = new EventTarget();
     let dispatchCount = 0;
@@ -388,11 +389,21 @@ export const errorInHandler = {
       dispatchCount++;
     });
 
-    throws(() => target.dispatchEvent(event));
+    let reported = null;
+    const errorHandler = (errEvent) => {
+      reported = errEvent.error;
+      // The report is handled; suppress the console fallback.
+      errEvent.preventDefault();
+    };
+    globalThis.addEventListener('error', errorHandler);
+    try {
+      strictEqual(target.dispatchEvent(event), true);
+    } finally {
+      globalThis.removeEventListener('error', errorHandler);
+    }
 
-    // The dispatchCount here should be 2, but with the current bug, it's only 1
-    // strictEqual(dispatchCount, 2);
-    strictEqual(dispatchCount, 1);
+    strictEqual(dispatchCount, 2);
+    strictEqual(reported?.message, 'boom');
   },
 };
 

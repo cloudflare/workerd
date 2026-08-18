@@ -1,7 +1,14 @@
 // Copyright (c) 2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { strictEqual, ok, throws, rejects, match } from 'node:assert';
+import {
+  strictEqual,
+  deepStrictEqual,
+  ok,
+  throws,
+  rejects,
+  match,
+} from 'node:assert';
 import { WorkerEntrypoint, RpcTarget } from 'cloudflare:workers';
 
 // Test for the AbortSignal and AbortController standard Web API implementations.
@@ -578,6 +585,138 @@ export const rpcRequestSignal = {
 
     // Make sure an event was dispatched on the remote side
     ok(res.onAbortWasFired);
+  },
+};
+
+export const abortAlgorithmOrdering = {
+  test() {
+    // The {signal} option registers an abort *algorithm*, which runs before any 'abort'
+    // listeners fire: by the time abort listeners run, a {signal}-registered listener is
+    // already removed, even if the abort listener was registered first.
+    const ac = new AbortController();
+    const target = new EventTarget();
+    let fired = false;
+    ac.signal.addEventListener('abort', () => {
+      target.dispatchEvent(new Event('foo'));
+    });
+    target.addEventListener(
+      'foo',
+      () => {
+        fired = true;
+      },
+      { signal: ac.signal }
+    );
+    ac.abort();
+    strictEqual(fired, false);
+    // And it stays removed afterward.
+    target.dispatchEvent(new Event('foo'));
+    strictEqual(fired, false);
+  },
+};
+
+export const syntheticAbortDispatch = {
+  test() {
+    // A synthetic dispatchEvent('abort') fires listeners but runs none of the internal
+    // abort plumbing: the signal does not become aborted, {signal}-registered listeners
+    // survive, and dependent signals do not abort.
+    const ac = new AbortController();
+    const dependent = AbortSignal.any([ac.signal]);
+    const target = new EventTarget();
+    let fooCount = 0;
+    let abortCount = 0;
+    target.addEventListener('foo', () => fooCount++, { signal: ac.signal });
+    ac.signal.addEventListener('abort', () => abortCount++);
+
+    ac.signal.dispatchEvent(new Event('abort'));
+    strictEqual(abortCount, 1);
+    strictEqual(ac.signal.aborted, false);
+    strictEqual(dependent.aborted, false);
+    target.dispatchEvent(new Event('foo'));
+    strictEqual(fooCount, 1); // the listener is still registered
+
+    // A real abort still works after the synthetic one.
+    ac.abort();
+    strictEqual(abortCount, 2);
+    strictEqual(ac.signal.aborted, true);
+    strictEqual(dependent.aborted, true);
+    target.dispatchEvent(new Event('foo'));
+    strictEqual(fooCount, 1); // now removed by the real abort's algorithm
+  },
+};
+
+export const onabortPosition = {
+  test() {
+    // onabort occupies the position in the listener list where it was first activated, and
+    // reassignment keeps that position (HTML event handler semantics).
+    const ac = new AbortController();
+    const order = [];
+    ac.signal.addEventListener('abort', () => order.push('L1'));
+    ac.signal.onabort = () => order.push('H-replaced');
+    ac.signal.onabort = () => order.push('H');
+    ac.signal.addEventListener('abort', () => order.push('L2'));
+    ac.abort();
+    deepStrictEqual(order, ['L1', 'H', 'L2']);
+  },
+};
+
+export const onabortReposition = {
+  test() {
+    // Deactivating (assigning null) and reassigning takes a fresh position.
+    const ac = new AbortController();
+    const order = [];
+    ac.signal.onabort = () => order.push('H-deactivated');
+    ac.signal.addEventListener('abort', () => order.push('L1'));
+    ac.signal.onabort = null;
+    ac.signal.onabort = () => order.push('H');
+    ac.abort();
+    deepStrictEqual(order, ['L1', 'H']);
+  },
+};
+
+export const onabortNonCallable = {
+  test() {
+    // Per [LegacyTreatNonObjectAsNull]: a non-callable object is retained as the attribute
+    // value but never invoked; a non-object assignment is treated as null.
+    const ac = new AbortController();
+    const obj = {
+      handleEvent() {
+        throw new Error('must not be called');
+      },
+    };
+    ac.signal.onabort = obj;
+    strictEqual(ac.signal.onabort, obj);
+    ac.signal.onabort = 'nope';
+    strictEqual(ac.signal.onabort, null);
+    ac.abort();
+  },
+};
+
+export const throwingAbortListener = {
+  test() {
+    // Per spec, "signal abort" cannot throw: a throwing listener's exception is reported to
+    // the global scope (via the cancelable 'error' event) and the remaining listeners run.
+    const ac = new AbortController();
+    const order = [];
+    let reported = null;
+    const errorHandler = (ev) => {
+      reported = ev.error;
+      ev.preventDefault();
+    };
+    globalThis.addEventListener('error', errorHandler);
+    try {
+      ac.signal.addEventListener('abort', () => {
+        order.push('L1');
+        throw new Error('boom');
+      });
+      ac.signal.onabort = () => order.push('H');
+      ac.signal.addEventListener('abort', () => order.push('L2'));
+      ac.abort();
+    } finally {
+      globalThis.removeEventListener('error', errorHandler);
+    }
+    deepStrictEqual(order, ['L1', 'H', 'L2']);
+    strictEqual(ac.signal.aborted, true);
+    strictEqual(reported?.message, 'boom');
   },
 };
 
