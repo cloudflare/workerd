@@ -258,4 +258,23 @@ mod bridge {
         async unsafe fn output_fd_write<'a>(stream: &'a TokioOutputFd, buf: &'a [u8])
         -> Result<()>;
     }
+
+    extern "Rust" {
+        // ==================================================================================
+        // Signals (kj::UnixEventPort::onSignal replacement; see signal.rs for semantics)
+
+        /// Resolves when the process receives signal `signum` (on Windows: the mapped
+        /// SIGTERM/SIGINT console control event).
+        async fn wait_for_signal(signum: i32) -> Result<()>;
+
+        // ==================================================================================
+        // Fd readiness (kj::UnixEventPort::FdObserver::whenBecomesReadable replacement,
+        // backing kj_rs_io::FileWatcher in file-watcher.h; see readiness.rs for semantics)
+
+        /// Resolves when `fd` becomes readable (readiness already pending at call time is
+        /// reported immediately). The caller must keep `fd` open until the returned promise
+        /// resolves or is dropped, and must not watch the same fd twice concurrently.
+        /// Unix only.
+        async fn wait_fd_readable(fd: i32) -> Result<()>;
+    }
 }
