@@ -97,4 +97,34 @@ class TokioConnectionReceiver final: public kj::ConnectionReceiver {
   kj::LowLevelAsyncIoProvider::NetworkFilter &filter;
 };
 
+// A kj::NetworkAddress holding pre-resolved socket addresses (DNS happens at parseAddress time,
+// like KJ). connect() tries each address in order; listen() binds the first.
+//
+// connect() honors KJ's lifetime contract (NetworkAddressImpl::connect() in
+// kj/async-io-unix.c++): the returned promise is a coroutine whose frame owns a copy of the
+// resolved address list, so the caller may drop this NetworkAddress while the connect is still
+// pending.
+//
+// `filter` is the restrictPeers filter of the kj::Network this address came from (allow-all
+// for an unrestricted network) and must outlive this address and any promises it returns
+// (in KJ the filter equally lives in the long-lived provider, so this matches upstream).
+// Filtering is enforced at connect() time per address ("connect() blocked by
+// restrictPeers()", KJ parity) and at accept() time on listeners; unlike KJ, disallowed DNS
+// results are not already dropped at parse time (they fail at connect instead).
+class TokioNetworkAddress final: public kj::NetworkAddress {
+ public:
+  TokioNetworkAddress(::rust::Box<TokioAddress> inner, PeerFilter &filter)
+      : inner(kj::mv(inner)),
+        filter(filter) {}
+
+  kj::Promise<kj::Own<kj::AsyncIoStream>> connect() override;
+  kj::Own<kj::ConnectionReceiver> listen() override;
+  kj::Own<kj::NetworkAddress> clone() override;
+  kj::String toString() override;
+
+ private:
+  ::rust::Box<TokioAddress> inner;
+  PeerFilter &filter;
+};
+
 }  // namespace kj_rs_io
