@@ -53,6 +53,14 @@ mod bridge {
         /// The stack-owned waker C++ passes to `Future::poll()`. Rust only ever borrows it; the
         /// `Waker` built from it (waker.rs) has a no-op drop and clones by taking a real strong
         /// reference to the event's `FutureWakerCell` via `clone_cell()`.
+        // Transitional legacy waker API; removed after all futures use PollWaker.
+        type KjWaker;
+        #[cxx_name = "clone"]
+        fn clone_kj_waker(self: &KjWaker) -> *const KjWaker;
+        fn wake(self: &KjWaker);
+        fn wake_by_ref(self: &KjWaker);
+        fn drop(self: &KjWaker);
+
         type PollWaker;
         #[cxx_name = "wakeByRef"]
         fn wake_by_ref(self: &PollWaker);
