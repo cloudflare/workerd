@@ -541,3 +541,35 @@ pub fn serve_io_from_owned_fd(fd: std::os::fd::OwnedFd) -> Result<crate::serve::
         )),
     }
 }
+
+pub fn wrap_socket_fd(handle: i64) -> Result<Box<TokioStream>> {
+    #[cfg(any(unix, windows))]
+    {
+        let socket = socket_from_raw(handle);
+        let local = socket.local_addr().map_err(op("getsockname()"))?;
+        let _guard = runtime_handle()?.enter();
+        match local.domain() {
+            socket2::Domain::IPV4 | socket2::Domain::IPV6 => {
+                let stream = TcpStream::from_std(socket.into()).map_err(op("wrapSocketFd"))?;
+                Ok(Box::new(TokioStream::from_tcp(stream)))
+            }
+            #[cfg(unix)]
+            socket2::Domain::UNIX => {
+                let stream = UnixStream::from_std(socket.into()).map_err(op("wrapSocketFd"))?;
+                Ok(Box::new(TokioStream::from_unix(stream)))
+            }
+            _ => Err(KjIoError::other(
+                "wrapSocketFd",
+                "unsupported socket family",
+            )),
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = handle;
+        Err(KjIoError::other(
+            "wrapSocketFd",
+            "not implemented on this platform",
+        ))
+    }
+}
