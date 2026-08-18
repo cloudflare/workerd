@@ -465,3 +465,55 @@ pub fn sockaddr_from_bytes(bytes: &[u8]) -> Result<socket2::SockAddr> {
     // assume a known family.
     Ok(unsafe { socket2::SockAddr::new(storage, len) })
 }
+
+// ======================================================================================
+// Raw `getsockopt(2)` / `setsockopt(2)`.
+//
+// The socket-option passthrough behind `kj::AsyncIoStream::get/setsockopt` and
+// `kj::ConnectionReceiver::get/setsockopt`. The option buffer is caller-owned opaque bytes with
+// raw socklen in/out semantics (the caller's buffer may be smaller than the option value, and the
+// syscall's reported length must be surfaced verbatim), which no safe std/socket2 API expresses —
+// so the raw syscalls are declared and called here, in the unsafe island.
+
+/// Raw `getsockopt(2)` on a borrowed socket fd. `value.len()` is passed as the in `optlen` (the
+/// kernel truncates the option value to it); the syscall's reported out `optlen` is returned so
+/// the C++ caller can mirror `*length = socklen` exactly as `KJ_SYSCALL(::getsockopt(...))` did.
+#[cfg(unix)]
+fn getsockopt_raw(
+    fd: std::os::fd::BorrowedFd<'_>,
+    level: i32,
+    option: i32,
+    value: &mut [u8],
+) -> Result<usize> {
+    use core::ffi::c_int;
+    use core::ffi::c_void;
+    use std::os::fd::AsRawFd;
+    unsafe extern "C" {
+        fn getsockopt(
+            sockfd: c_int,
+            level: c_int,
+            optname: c_int,
+            optval: *mut c_void,
+            optlen: *mut socket2::socklen_t,
+        ) -> c_int;
+    }
+    #[expect(clippy::cast_possible_truncation)]
+    let mut optlen = value.len() as socket2::socklen_t;
+    // Safety: simple syscall wrapper. `fd` is a live socket fd (borrowed from the tokio object
+    // for the duration of the call); `value.as_mut_ptr()` with in-`optlen == value.len()`
+    // delimits writable caller memory the kernel fills (never past `optlen`); `&raw mut optlen`
+    // is a valid in/out pointer for the call.
+    let rc = unsafe {
+        getsockopt(
+            fd.as_raw_fd(),
+            level,
+            option,
+            value.as_mut_ptr().cast::<c_void>(),
+            &raw mut optlen,
+        )
+    };
+    if rc != 0 {
+        return Err(op("getsockopt()")(std::io::Error::last_os_error()));
+    }
+    Ok(optlen as usize)
+}
