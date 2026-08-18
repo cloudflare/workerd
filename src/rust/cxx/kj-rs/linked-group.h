@@ -28,42 +28,6 @@ class LinkedObject {
   friend class LinkedGroup<G, O>;
   using LinkedGroup = LinkedGroup<G, O>;
 
- protected:
-  class LinkedGroupProxy {
-   public:
-    LinkedGroupProxy(LinkedObject& self): self(self) {}
-    void set(LinkedGroup& newGroup) {
-      self.setGroup(newGroup);
-    }
-    void set(kj::None) {
-      self.invalidateGroup();
-    }
-    kj::Maybe<G&> tryGet() {
-      return self.tryGetGroup();
-    }
-
-   private:
-    LinkedObject& self;
-  };
-
-  class ConstLinkedGroupProxy {
-   public:
-    ConstLinkedGroupProxy(const LinkedObject& self): self(self) {}
-    kj::Maybe<const G&> tryGet() const {
-      return self.tryGetGroup();
-    }
-
-   private:
-    const LinkedObject& self;
-  };
-
-  LinkedGroupProxy linkedGroup() {
-    return *this;
-  }
-  ConstLinkedGroupProxy linkedGroup() const {
-    return *this;
-  }
-
  private:
   void setGroup(LinkedGroup& newGroup) {
     KJ_IF_SOME(oldGroup, maybeGroup) {
