@@ -103,32 +103,4 @@ mod legacy_ffi {
         /// `node` must point to a live `OwnPromiseNode`.
         unsafe fn own_promise_node_drop_in_place(node: *mut OwnPromiseNode);
     }
-
-    unsafe extern "C++" {
-        include!("kj-rs/awaiter.h");
-
-        type GuardedRustPromiseAwaiter;
-
-        /// # Safety
-        /// The pointers must identify valid storage and a live waker for the awaiter's lifetime.
-        unsafe fn guarded_rust_promise_awaiter_new_in_place(
-            ptr: *mut GuardedRustPromiseAwaiter,
-            rust_waker_ptr: *mut OptionWaker,
-            node: OwnPromiseNode,
-        );
-        /// # Safety
-        /// `ptr` must point to an initialized guarded awaiter.
-        unsafe fn guarded_rust_promise_awaiter_drop_in_place(ptr: *mut GuardedRustPromiseAwaiter);
-
-        /// # Safety
-        /// `maybe_kj_waker`, when non-null, must point to a live `KjWaker`.
-        unsafe fn poll(
-            self: Pin<&mut GuardedRustPromiseAwaiter>,
-            waker: &WakerRef,
-            maybe_kj_waker: *const KjWaker,
-        ) -> bool;
-
-        #[must_use]
-        fn take_own_promise_node(self: Pin<&mut GuardedRustPromiseAwaiter>) -> OwnPromiseNode;
-    }
 }
