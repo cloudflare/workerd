@@ -218,8 +218,7 @@ class KjFileWatcher final: public FileWatcher {
     change.flags = EV_ADD | EV_CLEAR;
     change.fflags = NOTE_WRITE | NOTE_EXTEND | NOTE_DELETE | NOTE_RENAME;
     KJ_SYSCALL(kevent(kqueueFd, &change, 1, nullptr, 0, nullptr));
-
-}
+  }
 };
 
 #elif _WIN32
@@ -258,5 +257,32 @@ class KjFileWatcher final: public FileWatcher {
   }
 
  private:
+
+#endif  // #__linux__, #else
+
+#endif  // !WORKERD_RUST_IO_BACKEND_RUST
+
+// FileWatcher for --//:io_backend=rust: the same inotify/kqueue backends as the native watcher
+// (line-for-line ports living in src/rust/cxx/kj-rs-io), but fd readiness is awaited through
+// tokio's AsyncFd instead of kj::UnixEventPort::FdObserver, which doesn't exist on the tokio
+// loop. All fds it creates are CLOEXEC, so reloadFromConfigChange()'s execve() doesn't leak
+// them (the deliberately-inherited sockets get FIONCLEX'd there explicitly).
+#if WORKERD_RUST_IO_BACKEND_RUST
+class TokioFileWatcher final: public FileWatcher {
+ public:
+  bool isSupported() override {
+    return inner.isSupported();
+  }
+
+  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) override {
+    inner.watch(path, file);
+  }
+
+  kj::Promise<void> onChange() override {
+    return inner.onChange();
+  }
+
+ private:
+  kj_rs_io::FileWatcher inner;
 
 }  // namespace workerd::server
