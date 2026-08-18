@@ -211,4 +211,52 @@ class TokioAsyncIoProvider final: public kj::AsyncIoProvider {
   kj::Timer &timer;
 };
 
+// Mirror of kj::AsyncIoContext (kj/async-io.h) for the tokio-backed loop: a drop-in replacement
+// for kj::setupAsyncIo() at workerd.c++:1570. Additionally owns the event port / loop /
+// WaitScope (which kj::setupAsyncIo keeps in thread-locals).
+struct TokioAsyncIoContext {
+  // Destroyed in reverse declaration order: providers first (their rust::Boxes drop while the
+  // runtime still exists), then waitScope, then loop (asserts its queue is empty), then port
+  // (dropping the tokio runtime, canceling still-pending spawned tasks). I/O objects created
+  // *through* the providers (streams, listeners, addresses) must be destroyed before the
+  // context, as with kj::setupAsyncIo().
+  kj::Own<kj_rs_tokio::TokioEventPort> port;
+  kj::Own<kj::EventLoop> loop;
+  kj::Own<kj::WaitScope> waitScope;
+  kj::Own<TokioLowLevelAsyncIoProvider> lowLevelProvider;
+  kj::Own<TokioAsyncIoProvider> provider;
+
+  kj_rs_tokio::TokioEventPort &getPort() {
+    return *port;
+  }
+  kj::WaitScope &getWaitScope() {
+    return *waitScope;
+  }
+  kj::Timer &getTimer() {
+    return port->getTimer();
+  }
+  kj::Network &getNetwork() {
+    return provider->getNetwork();
+  }
+  kj::AsyncIoProvider &getProvider() {
+    return *provider;
+  }
+  kj::LowLevelAsyncIoProvider &getLowLevelProvider() {
+    return *lowLevelProvider;
+  }
+};
+
+// Sets up the current thread with a tokio-driven KJ event loop plus tokio-backed I/O providers:
+// the kj::setupAsyncIo() equivalent for the tokio loop. One per thread.
+TokioAsyncIoContext setupTokioAsyncIo();
+
+// Resolves when the process receives signal `signum`: the tokio-loop replacement for
+// kj::UnixEventPort::onSignal() (workerd's SIGTERM graceful drain). Must be awaited on the
+// thread owning the TokioEventPort. Unlike UnixEventPort, KJ does not block/capture the signal
+// beforehand: the tokio handler is registered when the promise is first polled, so a signal
+// delivered before the event loop first runs takes its default disposition (see signal.rs).
+// On Windows, SIGTERM/SIGINT are mapped to the ctrl_shutdown/ctrl_c console control events;
+// the promise rejects for other signums.
+kj::Promise<void> onSignal(int signum);
+
 }  // namespace kj_rs_io
