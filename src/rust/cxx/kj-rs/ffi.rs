@@ -23,4 +23,27 @@ use crate::awaiter::WakerRef;
 // macro does not forward doc comments to the generated unsafe shim, so the lint cannot be
 // satisfied by documentation here.
 #[expect(clippy::missing_safety_doc)]
-mod bridge {}
+mod bridge {
+    /// Representation of a `GuardedRustPromiseAwaiter` in C++. The size of the blob should match.
+    #[derive(Debug)]
+    pub struct GuardedRustPromiseAwaiterRepr {
+        _bindgen_opaque_blob: [u64; 14usize],
+    }
+
+    extern "Rust" {
+        type WakerRef<'a>;
+    }
+
+    extern "Rust" {
+        // We expose the Rust Waker type to C++ through this OptionWaker reference wrapper. cxx-rs
+        // does not allow us to export types defined outside this crate, such as Waker, directly.
+        //
+        // `LazyRustPromiseAwaiter` (the implementation of `.await` syntax/the IntoFuture trait),
+        // stores a OptionWaker immediately after `GuardedRustPromiseAwaiter` in declaration order.
+        // pass the Waker to the `RustPromiseAwaiter` class, which is implemented in C++
+        type OptionWaker;
+        fn set(&mut self, waker: &WakerRef);
+        fn set_none(&mut self);
+        fn wake_if_some(&mut self);
+    }
+}
