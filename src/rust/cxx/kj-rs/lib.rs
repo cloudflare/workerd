@@ -69,32 +69,6 @@ mod legacy_ffi {
     }
 
     unsafe extern "C++" {
-        include!("kj-rs/waker.h");
-
-        // Match the definition of the abstract virtual class in the C++ header.
-        type KjWaker;
-        #[cxx_name = "clone"]
-        fn clone_kj_waker(self: &KjWaker) -> *const KjWaker;
-        fn wake(self: &KjWaker);
-        fn wake_by_ref(self: &KjWaker);
-        fn drop(self: &KjWaker);
-
-        type PollWaker;
-        #[cxx_name = "wakeByRef"]
-        fn poll_waker_wake_by_ref(self: &PollWaker);
-        #[cxx_name = "cloneCell"]
-        fn clone_cell(self: &PollWaker) -> KjMaybe<KjRc<FutureWakerCell>>;
-
-        type FutureWakerCell;
-        #[cxx_name = "wakeByRef"]
-        fn cell_wake_by_ref(self: &FutureWakerCell);
-        #[cxx_name = "addRef"]
-        fn add_ref(self: &FutureWakerCell) -> KjRc<FutureWakerCell>;
-        /// Reclaims a strong reference previously surrendered to a raw waker data pointer.
-        unsafe fn reown(self: &FutureWakerCell) -> KjRc<FutureWakerCell>;
-    }
-
-    unsafe extern "C++" {
         include!("kj-rs/promise.h");
 
         type OwnPromiseNode = crate::OwnPromiseNode;
