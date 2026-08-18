@@ -31,7 +31,47 @@ use crate::runtime::with_runtime;
 /// conventionally mapped to it). Errors immediately for unmapped signums / other platforms.
 pub async fn wait_for_signal(signum: i32) -> Result<()> {
     #[cfg(unix)]
-    return Err(KjIoError::other("signal", "TODO: Unix signal support"));
+    {
+        use crate::error::op;
+        with_runtime(async move {
+            let kind = tokio::signal::unix::SignalKind::from_raw(signum);
+            // Create the stream here (inside the runtime context, at first poll of the bridged
+            // future) so the process-global handler registration happens as early as possible.
+            let mut sig = tokio::signal::unix::signal(kind).map_err(op("signal"))?;
+
+            // Do NOT `sig.recv().await` directly from this (bridged) future. tokio's signal
+            // registry is process-global: when several tokio runtimes exist in the process (one
+            // per KJ event loop thread — e.g. workerd's main loop plus the inspector thread's
+            // loop), the runtime whose driver consumes the signal's wake byte performs the
+            // broadcast, so the stored waker can be woken FROM THAT OTHER THREAD. A directly
+            // parked waker here would be the bridged future's loop-thread-only, non-atomic
+            // `kj_rs` `FutureWakerCell`: waking it cross-thread is UB under the bridge's
+            // single-thread waker axiom, and in practice loses the wakeup (observed as workerd
+            // ignoring SIGTERM whenever the inspector thread's runtime won the race). So, like
+            // `net.rs::resolve_host` (the model citizen for this pattern), a tokio *runtime*
+            // task owns the `recv()`: the cross-thread broadcast terminates at tokio's own
+            // `Send + Sync` scheduler waker (which unparks this loop), the task then runs on the
+            // loop thread and hands the result back over a oneshot, waking the bridged future
+            // same-thread.
+            let (tx, rx) = tokio::sync::oneshot::channel::<Result<()>>();
+            let task = tokio::spawn(async move {
+                let result = sig
+                    .recv()
+                    .await
+                    .ok_or_else(|| KjIoError::other("signal", "signal stream closed unexpectedly"));
+                let _ = tx.send(result);
+            });
+            // If this future is dropped (KJ promise cancelled), abort the watcher task so its
+            // signal-stream registration is torn down instead of lingering for the process
+            // lifetime.
+            let _abort_guard = crate::runtime::AbortOnDrop(task);
+            match rx.await {
+                Ok(result) => result,
+                Err(_) => Err(KjIoError::other("signal", "signal watcher task dropped")),
+            }
+        })
+        .await
+    }
 
     #[cfg(windows)]
     return Err(KjIoError::other("signal", "TODO: Windows signal support"));
