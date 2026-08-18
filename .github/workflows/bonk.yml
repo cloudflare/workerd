@@ -36,10 +36,13 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_AI_GATEWAY_TOKEN }}
         with:
           oidc_base_url: https://ask-bonk.cloudflare-exponent.workers.dev/auth
-          model: 'cloudflare-ai-gateway/anthropic/claude-opus-4-6'
+          model: 'cloudflare-ai-gateway/anthropic/claude-opus-4.6'
           mentions: '/bonk,@ask-bonk'
           permissions: write
-          opencode_version: "1.18.18"
+          # OpenCode 1.18.x forwards the Cloudflare gateway token as the
+          # upstream Anthropic key. Stay on the known-working release until
+          # the native Cloudflare AI Gateway passthrough fix is released.
+          opencode_version: "1.15.13"
           # token_permissions defaults to WRITE (i.e. Bonk can push commits).
           # We intentionally leave it that way here because users may ask Bonk
           # to update their PR via /bonk.
