@@ -177,23 +177,6 @@ constexpr capnp::ReaderOptions CONFIG_READER_OPTIONS = {
 
 #elif _WIN32
 
-class LegacyFileWatcher {
- public:
-  LegacyFileWatcher(kj::Win32EventPort& port) {}
-
-  bool isSupported() {
-    return false;
-  }
-
-  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) {}
-
-  kj::Promise<void> onChange() {
-    return kj::NEVER_DONE;
-  }
-
- private:
-};
-
 #else
 
 // Dummy LegacyFileWatcher implementation for operating systems that aren't supported yet.
