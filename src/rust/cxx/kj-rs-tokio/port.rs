@@ -209,3 +209,25 @@ impl HiResTimer {
         req.generation += 1;
     }
 }
+#[cfg(unix)]
+impl Drop for HiResTimer {
+    fn drop(&mut self) {
+        {
+            let mut req = self
+                .shared
+                .request
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            req.shutdown = true;
+        }
+        self.shared.condvar.notify_one();
+        let handle = self
+            .thread
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(handle) = handle {
+            let _ = handle.join();
+        }
+    }
+}
