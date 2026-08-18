@@ -42,6 +42,7 @@ const POLL_YIELD_BUDGET: u32 = 16;
 /// error is proportionally small, so long sleeps stay on the plain tokio path.
 #[cfg(unix)]
 const HIRES_TIMEOUT_THRESHOLD: Duration = Duration::from_millis(2);
+
 thread_local! {
     /// Handle to the `TokioPort` runtime driving the KJ event loop on this thread, if any.
     /// Registered by `TokioPort::new` and cleared on drop. Used by code (e.g. kj-rs-io) that
@@ -96,6 +97,7 @@ where
         .expect("no kj-rs-tokio runtime on this thread; create a TokioEventPort first");
     local.spawn_local(future)
 }
+
 /// State shared with `wake()` callers on other threads.
 struct SharedState {
     /// Unblocks the `block_on(...)` inside `wait_*` when `wake()` or `notify_runnable()` fires.
@@ -211,6 +213,7 @@ impl HiResTimer {
         req.generation += 1;
     }
 }
+
 #[cfg(unix)]
 impl Drop for HiResTimer {
     fn drop(&mut self) {
@@ -233,6 +236,7 @@ impl Drop for HiResTimer {
         }
     }
 }
+
 #[cfg(unix)]
 fn hires_timer_main(shared: &HiResShared) {
     ffi::boost_current_thread_priority();
@@ -270,6 +274,7 @@ fn hires_timer_main(shared: &HiResShared) {
         }
     }
 }
+
 /// The Rust backing of one `kj_rs_tokio::TokioEventPort` (C++). Owns the per-thread
 /// `current_thread` tokio runtime.
 ///
@@ -299,6 +304,7 @@ const _: () = {
 pub fn new_tokio_port() -> Box<TokioPort> {
     Box::new(TokioPort::new())
 }
+
 impl TokioPort {
     /// # Panics
     ///
@@ -357,6 +363,7 @@ impl TokioPort {
     pub(crate) fn wait_timeout_ns(&self, timeout_ns: u64) -> bool {
         self.wait_impl(Some(Duration::from_nanos(timeout_ns)))
     }
+
     fn wait_impl(&self, timeout: Option<Duration>) -> bool {
         let state = &self.state;
         state.sleeping.store(true, Ordering::SeqCst);
@@ -405,6 +412,7 @@ impl TokioPort {
         state.sleeping.store(false, Ordering::SeqCst);
         self.take_wake_latch()
     }
+
     pub(crate) fn poll(&self) -> bool {
         // Bounded, non-blocking pump: the main future is always immediately ready to run again
         // after `yield_now`, so the scheduler never parks; it just interleaves any ready spawned
@@ -444,6 +452,7 @@ impl TokioPort {
         self.state.woken.swap(false, Ordering::SeqCst)
     }
 }
+
 impl Default for TokioPort {
     fn default() -> Self {
         Self::new()
@@ -471,6 +480,7 @@ impl Drop for TokioPort {
         // LocalSet). Same threading/ordering constraints as above.
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
