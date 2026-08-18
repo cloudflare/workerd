@@ -611,3 +611,36 @@ pub fn wrap_listen_fd(handle: i64) -> Result<Box<TokioListener>> {
         ))
     }
 }
+
+pub async fn wrap_connecting_socket_fd(handle: i64, sockaddr: Vec<u8>) -> Result<Box<TokioStream>> {
+    #[cfg(any(unix, windows))]
+    {
+        with_runtime(async move {
+            let addr = sockaddr_from_bytes(&sockaddr)?;
+            let socket_addr = addr.as_socket().ok_or_else(|| {
+                KjIoError::other(
+                    "wrapConnectingSocketFd",
+                    "only AF_INET/AF_INET6 sockaddrs are supported",
+                )
+            })?;
+            let socket = socket_from_raw(handle);
+            // TcpSocket::connect handles the nonblocking connect dance (EINPROGRESS, wait for
+            // writability, check SO_ERROR) and registers with the I/O driver.
+            let tcp_socket = tokio::net::TcpSocket::from_std_stream(socket.into());
+            let stream = tcp_socket
+                .connect(socket_addr)
+                .await
+                .map_err(op("connect()"))?;
+            Ok(Box::new(TokioStream::from_tcp(stream)))
+        })
+        .await
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (handle, sockaddr);
+        Err(KjIoError::other(
+            "wrapConnectingSocketFd",
+            "not implemented on this platform",
+        ))
+    }
+}
