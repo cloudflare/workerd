@@ -255,4 +255,93 @@ void TokioConnectionReceiver::getsockname(struct sockaddr *addr, kj::uint *lengt
   *length = bytes.size();
 }
 
+// =======================================================================================
+// TokioNetworkAddress / TokioNetwork
+
+kj::Promise<kj::Own<kj::AsyncIoStream>> TokioNetworkAddress::connect() {
+  // KJ contract (NetworkAddressImpl::connect() in kj/async-io-unix.c++): callers may drop the
+  // NetworkAddress while the returned promise is still pending. We honor this by cloning the
+  // resolved address list into a coroutine frame local: the frame owns the copy, so it
+  // survives every co_await and is dropped on completion/cancellation. connect() may be called
+  // repeatedly on the same address, so we clone rather than move `*inner` out of `this`.
+  // `filter` is the network's filter (provider-owned, shared) and must outlive the promise,
+  // per KJ (where it lives in the long-lived provider).
+  auto addr = address_clone(*inner);
+  size_t count = address_count(*addr);
+  KJ_REQUIRE(count > 0, "no addresses to connect to");
+
+  // Try each resolved address in order; a filter block or connect error falls through to the
+  // next one, and the last address's exception propagates (KJ parity).
+  kj::Maybe<kj::Exception> lastException;
+  for (size_t i = 0; i < count; i++) {
+    kj::Maybe<kj::Own<kj::AsyncIoStream>> stream;
+    try {
+      auto raw = address_raw_sockaddr(*addr, i);
+      // Copy into sockaddr_storage for alignment (rust::Vec<u8> data is 1-aligned).
+      struct sockaddr_storage storage;
+      memset(&storage, 0, sizeof(storage));
+      KJ_REQUIRE(raw.size() <= sizeof(storage), "sockaddr too large");
+      memcpy(&storage, raw.data(), raw.size());
+      if (!filter.shouldAllow(reinterpret_cast<struct sockaddr *>(&storage), raw.size())) {
+        // Exact KJ error text; error-string parity matters to callers.
+        lastException = KJ_EXCEPTION(FAILED, "connect() blocked by restrictPeers()");
+      } else {
+        stream = kj::heap<TokioAsyncIoStream>(co_await address_connect_index(*addr, i));
+      }
+    } catch (...) {
+      // Note: getCaughtExceptionAsKj() rethrows kj::CanceledException, so cancellation still
+      // propagates out of this coroutine instead of being folded into lastException.
+      lastException = kj::getCaughtExceptionAsKj();
+    }
+    KJ_IF_SOME(s, stream) {
+      co_return kj::mv(s);
+    }
+  }
+
+  kj::throwFatalException(kj::mv(KJ_ASSERT_NONNULL(lastException)));
+}
+
+kj::Own<kj::ConnectionReceiver> TokioNetworkAddress::listen() {
+  return kj::heap<TokioConnectionReceiver>(address_listen(*inner), filter);
+}
+
+kj::Own<kj::NetworkAddress> TokioNetworkAddress::clone() {
+  return kj::heap<TokioNetworkAddress>(address_clone(*inner), filter);
+}
+
+kj::String TokioNetworkAddress::toString() {
+  auto text = address_to_string(*inner);
+  return kj::heapString(text.data(), text.size());
+}
+
+kj::Promise<kj::Own<kj::NetworkAddress>> TokioNetwork::parseAddress(
+    kj::StringPtr addr, kj::uint portHint) {
+  KJ_REQUIRE(portHint < 65536, "port hint too large", portHint);
+  // The Rust side takes an owned copy: the caller's buffer need not outlive this call.
+  //
+  // Note: unlike KJ, disallowed (restrictPeers) DNS results are not dropped here; they are
+  // rejected at connect()/accept() time instead. See TokioNetworkAddress.
+  return network_parse_address(
+      ::rust::String(addr.begin(), addr.size()), static_cast<uint16_t>(portHint))
+      .then([this](::rust::Box<TokioAddress> address) -> kj::Own<kj::NetworkAddress> {
+    return kj::heap<TokioNetworkAddress>(kj::mv(address), filter);
+  });
+}
+
+kj::Own<kj::NetworkAddress> TokioNetwork::getSockaddr(const void *sockaddr, kj::uint len) {
+  // KJ parity: getSockaddr() rejects filtered addresses eagerly (same error text as KJ).
+  KJ_REQUIRE(filter.shouldAllow(reinterpret_cast<const struct sockaddr *>(sockaddr), len),
+      "address blocked by restrictPeers()");
+  return kj::heap<TokioNetworkAddress>(network_get_sockaddr(::rust::Slice<const uint8_t>(
+                                           reinterpret_cast<const uint8_t *>(sockaddr), len)),
+      filter);
+}
+
+kj::Own<kj::Network> TokioNetwork::restrictPeers(
+    kj::ArrayPtr<const kj::StringPtr> allow, kj::ArrayPtr<const kj::StringPtr> deny) {
+  // The child references this network's filter chain: this network must outlive the returned
+  // one (same constraint as KJ's networks).
+  return kj::heap<TokioNetwork>(*this, allow, deny);
+}
+
 }  // namespace kj_rs_io
