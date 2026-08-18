@@ -73,4 +73,28 @@ class TokioAsyncIoStream final: public kj::AsyncIoStream {
   ::rust::Box<TokioStream> inner;
 };
 
+// A kj::ConnectionReceiver backed by a native tokio TcpListener or UnixListener. Incoming
+// connections from peers disallowed by `filter` (restrictPeers) are silently dropped and the
+// accept loop continues, mirroring KJ. `filter` must outlive this receiver.
+class TokioConnectionReceiver final: public kj::ConnectionReceiver {
+ public:
+  TokioConnectionReceiver(
+      ::rust::Box<TokioListener> inner, kj::LowLevelAsyncIoProvider::NetworkFilter &filter)
+      : inner(kj::mv(inner)),
+        filter(filter) {}
+
+  kj::Promise<kj::Own<kj::AsyncIoStream>> accept() override;
+  kj::Promise<kj::AuthenticatedStream> acceptAuthenticated() override;
+  kj::uint getPort() override;
+  void getsockopt(int level, int option, void *value, kj::uint *length) override;
+  void setsockopt(int level, int option, const void *value, kj::uint length) override;
+  void getsockname(struct sockaddr *addr, kj::uint *length) override;
+
+ private:
+  kj::Promise<kj::AuthenticatedStream> acceptImpl(bool authenticated);
+
+  ::rust::Box<TokioListener> inner;
+  kj::LowLevelAsyncIoProvider::NetworkFilter &filter;
+};
+
 }  // namespace kj_rs_io
