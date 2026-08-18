@@ -75,3 +75,44 @@ impl std::fmt::Display for ServePath {
         })
     }
 }
+
+/// The tokio-side byte stream for a served kj stream: a native socket or the consumer end of
+/// the pump's duplex.
+///
+/// Implements `AsyncRead + AsyncWrite`, so it drops into any tokio
+/// consumer -- but see [`ServedKjStream::io`] for the thread-affinity contract: only the
+/// native variants may be driven off the KJ event-loop thread; `Duplex` is loop-thread-only.
+pub enum ServeIo {
+    Tcp(TcpStream),
+    #[cfg(unix)]
+    Unix(UnixStream),
+    Duplex(DuplexStream),
+}
+
+impl ServeIo {
+    /// Which transport path this stream is on (see [`ServePath`]).
+    #[must_use]
+    pub fn path(&self) -> ServePath {
+        match self {
+            Self::Tcp(_) => ServePath::Native,
+            #[cfg(unix)]
+            Self::Unix(_) => ServePath::Native,
+            Self::Duplex(_) => ServePath::Pumped,
+        }
+    }
+
+    /// Sets `TCP_NODELAY` on the underlying socket where applicable (a no-op for Unix-domain
+    /// and duplex transports, which have no Nagle to disable).
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying `std::io::Error` if setting the socket option fails.
+    pub fn set_nodelay(&self, nodelay: bool) -> std::io::Result<()> {
+        match self {
+            Self::Tcp(s) => s.set_nodelay(nodelay),
+            #[cfg(unix)]
+            Self::Unix(_) => Ok(()),
+            Self::Duplex(_) => Ok(()),
+        }
+    }
+}
