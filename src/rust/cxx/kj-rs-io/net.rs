@@ -277,3 +277,88 @@ impl TokioAddress {
         }
     }
 }
+
+/// A listening socket (`kj::ConnectionReceiver` backend).
+pub struct TokioListener {
+    inner: ListenerInner,
+}
+
+enum ListenerInner {
+    Tcp(TcpListener),
+    #[cfg(unix)]
+    Unix(UnixListener),
+}
+
+impl TokioListener {
+    async fn accept(&self) -> Result<Box<TokioStream>> {
+        match &self.inner {
+            ListenerInner::Tcp(listener) => {
+                let (stream, _peer) = listener.accept().await.map_err(op("accept()"))?;
+                let _ = stream.set_nodelay(true);
+                Ok(Box::new(TokioStream::from_tcp(stream)))
+            }
+            #[cfg(unix)]
+            ListenerInner::Unix(listener) => {
+                let (stream, _peer) = listener.accept().await.map_err(op("accept()"))?;
+                Ok(Box::new(TokioStream::from_unix(stream)))
+            }
+        }
+    }
+
+    fn port(&self) -> Result<u16> {
+        match &self.inner {
+            ListenerInner::Tcp(listener) => {
+                Ok(listener.local_addr().map_err(op("getsockname()"))?.port())
+            }
+            // KJ returns 0 for non-IP listeners.
+            #[cfg(unix)]
+            ListenerInner::Unix(_) => Ok(0),
+        }
+    }
+
+    /// Borrows the live listener socket's fd (tokio listeners implement `AsFd`), for the
+    /// sockopt/sockname passthrough behind `kj::ConnectionReceiver`.
+    #[cfg(unix)]
+    pub(crate) fn as_borrowed_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        use std::os::fd::AsFd;
+        match &self.inner {
+            ListenerInner::Tcp(listener) => listener.as_fd(),
+            ListenerInner::Unix(listener) => listener.as_fd(),
+        }
+    }
+
+    /// Borrows the live listener socket's `SOCKET` (tokio's `TcpListener` implements
+    /// `AsSocket`): the Windows counterpart of [`TokioListener::as_borrowed_fd`]. On Windows
+    /// only the Tcp variant of `ListenerInner` exists.
+    // Validated by Windows CI; mirrors the unix arm.
+    #[cfg(windows)]
+    pub(crate) fn as_borrowed_socket(&self) -> std::os::windows::io::BorrowedSocket<'_> {
+        use std::os::windows::io::AsSocket;
+        match &self.inner {
+            ListenerInner::Tcp(listener) => listener.as_socket(),
+        }
+    }
+
+    /// Raw `struct sockaddr` bytes of the listener's bound address (the `getsockname()`
+    /// passthrough behind `kj::ConnectionReceiver::getsockname`).
+    #[cfg(any(unix, windows))]
+    fn local_addr_bytes(&self) -> Result<Vec<u8>> {
+        #[cfg(unix)]
+        let sock = self.as_borrowed_fd();
+        // Validated by Windows CI; mirrors the unix arm.
+        #[cfg(windows)]
+        let sock = self.as_borrowed_socket();
+        let addr = socket2::SockRef::from(&sock)
+            .local_addr()
+            .map_err(op("getsockname()"))?;
+        Ok(crate::ffi::sockaddr_to_bytes(&addr))
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    fn local_addr_bytes(&self) -> Result<Vec<u8>> {
+        Err(KjIoError::other(
+            "getsockname",
+            "not implemented by kj-rs-io on this platform",
+        ))
+    }
+}
