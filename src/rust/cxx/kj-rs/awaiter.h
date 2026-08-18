@@ -90,6 +90,12 @@ class RustPromiseAwaiter final: public kj::_::Event,
   //
   // If the Waker is not a KjWaker, the `maybeKjWaker` pointer argument must be nullptr.
   bool poll(const WakerRef& waker, const KjWaker* maybeKjWaker);
+  bool poll(const WakerRef& waker) {
+    return poll(waker, nullptr);
+  }
+  bool poll(const WakerRef& waker, const PollWaker&) {
+    return poll(waker, nullptr);
+  }
 
   // Release ownership of the OwnPromiseNode. Asserts if called before the Promise is ready; that
   // is, `poll()` must have returned true prior to calling `take_own_promise_node()`.
@@ -119,6 +125,12 @@ struct GuardedRustPromiseAwaiter: ExecutorGuarded<RustPromiseAwaiter> {
 
   bool poll(const WakerRef& waker, const KjWaker* maybeKjWaker) {
     return get().poll(waker, maybeKjWaker);
+  }
+  bool poll(const WakerRef& waker) {
+    return get().poll(waker);
+  }
+  bool pollWithPollWaker(const WakerRef& waker, const PollWaker& pollWaker) {
+    return get().poll(waker, pollWaker);
   }
   OwnPromiseNode take_own_promise_node() {
     return get().take_own_promise_node();
