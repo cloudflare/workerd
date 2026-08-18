@@ -81,3 +81,88 @@ impl TokioAddress {
         Self::parse_inet(text, port_hint).await
     }
 }
+
+impl TokioAddress {
+    async fn parse_inet(text: &str, port_hint: u16) -> Result<Self> {
+        // Split into address and port parts, exactly like KJ's SocketAddress::parse.
+        let (addr_part, port_part) = if let Some(rest) = text.strip_prefix('[') {
+            // Bracketed IPv6, optionally "[..]:port".
+            let close = rest.rfind(']').ok_or_else(|| {
+                KjIoError::other("parseAddress", format!("Unclosed '[' in address: {text}"))
+            })?;
+            let addr = &rest[..close];
+            let tail = &rest[close + 1..];
+            if tail.is_empty() {
+                (addr, None)
+            } else if let Some(port) = tail.strip_prefix(':') {
+                (addr, Some(port))
+            } else {
+                return Err(KjIoError::other(
+                    "parseAddress",
+                    format!("Expected port suffix after ']': {text}"),
+                ));
+            }
+        } else if let Some(colon) = text.find(':') {
+            if text[colon + 1..].contains(':') {
+                // Two or more colons, no brackets: a bare IPv6 address with no port.
+                (text, None)
+            } else {
+                // Exactly one colon: ip4/hostname with port.
+                (&text[..colon], Some(&text[colon + 1..]))
+            }
+        } else {
+            (text, None)
+        };
+
+        let port = match port_part {
+            Some(port_text) => port_text.parse::<u16>().map_err(|_| {
+                // KJ falls back to getaddrinfo service-name resolution here; tokio's resolver
+                // only accepts numeric ports.
+                KjIoError::other(
+                    "parseAddress",
+                    format!("invalid port (named services are not supported): {port_text}"),
+                )
+            })?,
+            None => port_hint,
+        };
+
+        if addr_part == "*" {
+            return Ok(Self {
+                spec: Spec::Ip {
+                    addrs: vec![SocketAddr::new(
+                        IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+                        port,
+                    )],
+                    wildcard: true,
+                },
+            });
+        }
+
+        if let Ok(ip) = addr_part.parse::<IpAddr>() {
+            return Ok(Self {
+                spec: Spec::Ip {
+                    addrs: vec![SocketAddr::new(ip, port)],
+                    wildcard: false,
+                },
+            });
+        }
+
+        // Not a literal: resolve the hostname via getaddrinfo. To honor kj-rs's single-thread
+        // axiom, the blocking getaddrinfo runs on tokio's blocking pool but its completion is
+        // absorbed by tokio's own scheduler (via a runtime task) and forwarded on the loop thread,
+        // so this await resumes same-thread (never cross-thread). See `resolve_host`.
+        let addrs: Vec<SocketAddr> = resolve_host(addr_part, port).await?;
+        if addrs.is_empty() {
+            return Err(KjIoError::other(
+                "getaddrinfo()",
+                format!("no addresses found for host: {addr_part}"),
+            ));
+        }
+        Ok(Self {
+            spec: Spec::Ip {
+                addrs,
+                wildcard: false,
+            },
+        })
+    }
+}
