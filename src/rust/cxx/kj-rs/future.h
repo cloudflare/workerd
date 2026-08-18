@@ -79,8 +79,16 @@ using DropCallback = void (*)(void /* RustFuture::fut */* fut);
 // which drops the Rust Future and transitively cancels any KJ sub-promises it was .await'ing.
 struct RustFuture {
 
+  // Bridged async functions are eager like KJ coroutines: poll synchronously to the first
+  // suspension point and keep making progress even if the caller stores the promise.
   template <typename T>
   operator kj::Promise<T>() {
+    return lazily<T>().eagerlyEvaluate(nullptr);
+  }
+
+  // Escape hatch for callers that explicitly need a cold Rust future.
+  template <typename T>
+  kj::Promise<T> lazily() {
     struct Impl {
       using ExceptionOrValue = ::kj::_::ExceptionOr<::kj::_::FixVoid<T>>;
       using Output = ::kj::_::FixVoid<T>;
