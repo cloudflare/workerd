@@ -294,6 +294,9 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
         } else if (object->IsFunction()) {
           eh.serializeFunction(js, *this, object.As<v8::Function>());
           return v8::Just(true);
+        } else if (eh.trySerializeClassInstance(js, *this, object)) {
+          // The handler recognized this class instance (e.g. by brand check) and serialized it.
+          return v8::Just(true);
         }
       }
 
