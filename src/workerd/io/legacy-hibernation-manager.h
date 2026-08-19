@@ -139,9 +139,9 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     // Stores the last received autoResponseRequest timestamp.
     kj::Maybe<kj::Date> autoResponseTimestamp;
 
-    // Keeps track of the currently ongoing websocket auto-response send promise. This promise may
-    // be moved to api::websocket if an hibernating websocket unhibernates.
-    kj::Promise<void> autoResponsePromise = kj::READY_NOW;
+    // Keeps track of the currently ongoing websocket auto-response send promise. A revived
+    // api::WebSocket receives a branch so the manager can retain this across repeated hibernation.
+    kj::Maybe<kj::ForkedPromise<void>> maybeAutoResponsePromise;
 
     friend LegacyHibernationManagerImpl;
   };
