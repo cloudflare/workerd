@@ -24,11 +24,11 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":exception-type",
+        "//src/rust/cxx/kj-rs",
         "//src/rust/jsg:ffi",
         "//src/rust/node-exceptions",
         "//src/workerd/jsg",
         "//src/workerd/util:autogate",
-        "@workerd-cxx//kj-rs",
     ],
 )
 

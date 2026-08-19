@@ -216,10 +216,12 @@ class Fetcher: public JsRpcClientProvider {
   // channel. This Fetcher will inherently be bound to the current I/O context.
   explicit Fetcher(IoOwn<IoChannelFactory::SubrequestChannel> subrequestChannel,
       RequiresHostAndProtocol requiresHost = RequiresHostAndProtocol::YES,
-      bool isInHouse = false)
+      bool isInHouse = false,
+      RpcCompatGateBypassed rpcCompatGateBypassed = RpcCompatGateBypassed::NO)
       : channelOrClientFactory(kj::mv(subrequestChannel)),
         requiresHost(requiresHost),
-        isInHouse(isInHouse) {}
+        isInHouse(isInHouse),
+        rpcCompatGateBypassed(rpcCompatGateBypassed) {}
 
   // Used by Fetchers that use ad-hoc, single-use WorkerInterface instances, such as ones
   // created for Actors.
@@ -233,6 +235,18 @@ class Fetcher: public JsRpcClientProvider {
   class OutgoingFactory {
    public:
     virtual kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) = 0;
+
+    virtual bool supportsActorRetryMetadata() const {
+      return false;
+    }
+
+    // Factories that can carry actor retry metadata override this method. The default rejects the
+    // metadata rather than silently starting a new logical call.
+    virtual kj::Own<WorkerInterface> newSingleUseClientWithActorRetryMetadata(
+        kj::Maybe<kj::String> cfStr,
+        kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) {
+      KJ_FAIL_REQUIRE("actor retry metadata supplied to an unsupported Fetcher");
+    }
 
     // Get a `SubrequestChannel` representing this Fetcher. This is used especially when the
     // Fetcher is being passed to another isolate.
@@ -289,8 +303,12 @@ class Fetcher: public JsRpcClientProvider {
   };
 
   // Get client and optionally create trace context, all in one call
-  ClientWithTracing getClientWithTracing(
-      IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
+  ClientWithTracing getClientWithTracing(IoContext& ioContext,
+      kj::Maybe<kj::String> cfStr,
+      kj::ConstString operationName,
+      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata);
+
+  bool supportsActorRetryMetadata();
 
   // Get a SubrequestChannel representing this Fetcher.
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);
@@ -463,6 +481,11 @@ class Fetcher: public JsRpcClientProvider {
   static jsg::Ref<Fetcher> deserialize(
       jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
 
+  // Rebuilds a wrapped binding's private fetcher without applying the receiving isolate's RPC
+  // compatibility gate.
+  static jsg::Ref<Fetcher> deserializeForWrappedBinding(
+      jsg::Lock& js, jsg::Deserializer& deserializer);
+
   JSG_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
 
   // Set up a connection string override for a random host and the given port. isHyperdrive
@@ -488,6 +511,11 @@ class Fetcher: public JsRpcClientProvider {
   kj::Maybe<uint16_t> port;
 
  private:
+  static jsg::Ref<Fetcher> deserializeImpl(jsg::Lock& js,
+      rpc::SerializationTag tag,
+      jsg::Deserializer& deserializer,
+      RpcCompatGateBypassed rpcCompatGateBypassed);
+
   kj::OneOf<uint,
       IoOwn<IoChannelFactory::SubrequestChannel>,
       kj::Own<CrossContextOutgoingFactory>,
@@ -496,8 +524,8 @@ class Fetcher: public JsRpcClientProvider {
   RequiresHostAndProtocol requiresHost;
   bool isInHouse;
 
-  // Defaulted so the constructors that no binding path uses need not name it. Deliberately not
-  // serialized: a stub deserialized elsewhere is subject to that isolate's own compat flags.
+  // Generic stubs use the receiving isolate's compat flags. Wrapped bindings explicitly bypass
+  // the gate while rebuilding their private inner fetcher.
   const RpcCompatGateBypassed rpcCompatGateBypassed = RpcCompatGateBypassed::NO;
 };
 

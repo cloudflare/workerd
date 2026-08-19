@@ -19,6 +19,8 @@
 //!
 //! See [`jsg/README.md`](../jsg/README.md) for full usage documentation.
 
+#![forbid(unsafe_code)]
+
 mod resource;
 mod trace;
 mod utils;
@@ -240,24 +242,31 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let invocation = if has_self {
         quote! {
             let this = args.this();
-            // SAFETY: `v8::Signature` (passed to `FunctionTemplate::New` in
-            // `create_resource_template`) enforces that V8 only dispatches this
-            // callback when `this` is an instance of the resource's own
-            // `FunctionTemplate`. If the caller destructures the method and calls
-            // it with a wrong receiver (e.g. `const {abort} = ac; abort()`), V8
-            // throws a `TypeError: Illegal invocation` *before* reaching this
-            // code. Given that guarantee, `from_js` / `resolve_resource` perform
-            // a belt-and-suspenders `TypeId` check; the `.expect` panics
-            // (aborting the isolate) rather than triggering UB on a mismatch.
-            // The `&mut` is sound because V8 is single-threaded and no other
-            // Rust code can alias the resource during the callback.
-            let self_: &mut Self = unsafe {
-                let wrappable = jsg::v8::WrappableRc::from_js(lock.isolate(), this)
-                    .expect("receiver is not a Rust-wrapped resource");
-                &mut *wrappable.resolve_resource::<Self>()
-                    .expect("type mismatch in resource callback")
-                    .as_ptr()
+            // For instance methods, `v8::Signature` (applied in
+            // `create_resource_template`, ffi.c++) makes V8 throw
+            // `TypeError: Illegal invocation` *before* this callback runs on a
+            // wrong receiver, so the mismatch below is unreachable for them.
+            // Property getters/setters (`#[jsg_property]` /
+            // `#[jsg_inspect_property]`) reuse this same code but are registered
+            // WITHOUT a signature, so a wrong receiver (e.g.
+            // `Object.getOwnPropertyDescriptor(proto, p).get.call({})`) *can*
+            // reach here. Surface that as a JS `TypeError` — matching V8's own
+            // "Illegal invocation" — instead of panicking (a panic here is
+            // caught by `catch_panic`, but as an *internal* error + execution
+            // termination, which is the wrong shape for tenant-triggerable input).
+            let Some(wrappable) = jsg::v8::WrappableRc::from_js(lock.isolate(), this) else {
+                lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
+                return;
             };
+            let Some(resource) = wrappable.resolve_resource::<Self>() else {
+                lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
+                return;
+            };
+            // SAFETY: `resource` points at a live `Self` owned by the V8-wrapped
+            // resource whose method is being invoked; the `&mut` is sound because
+            // V8 is single-threaded and no other Rust code can alias the resource
+            // during the callback.
+            let self_: &mut Self = unsafe { &mut *resource.as_ptr() };
             let result = self_.#fn_name(#(#arg_exprs),*);
         }
     } else {

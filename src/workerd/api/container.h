@@ -229,6 +229,12 @@ class Container: public jsg::Object {
     JSG_STRUCT(id, size, name);
   };
 
+  struct SnapshotRestoreParams {
+    kj::String id;
+
+    JSG_STRUCT(id);
+  };
+
   struct SnapshotOptions {
     jsg::Optional<kj::String> name;
 
@@ -259,7 +265,7 @@ class Container: public jsg::Object {
     jsg::Optional<kj::OneOf<kj::String, StartResources>> instance;
     jsg::Optional<jsg::Dict<kj::String>> labels;
     jsg::Optional<kj::Array<DirectorySnapshotRestoreParams>> directorySnapshots;
-    jsg::Optional<Snapshot> containerSnapshot;
+    jsg::Optional<SnapshotRestoreParams> containerSnapshot;
 
     // TODO(containers): Allow intercepting stdin/stdout/stderr by specifying streams here.
 
@@ -291,28 +297,34 @@ class Container: public jsg::Object {
           | {
               image?: never;
               /** Cannot be used with `image`. */
-              containerSnapshot?: ContainerSnapshot;
+              containerSnapshot?: ContainerSnapshotRestoreParams;
             }
         ));
       } else {
-        JSG_TS_OVERRIDE(ContainerStartupOptions {
+        JSG_TS_OVERRIDE(type ContainerStartupOptions = {
           entrypoint?: string[];
           enableInternet: boolean;
           env?: Record<string, string>;
-          hardTimeout?: never;
-          image?: never;
-          instance?: never;
+          instance?: "lite" | "standard-1" | "standard-2" | "standard-3" | "standard-4" | ContainerStartResources;
           labels?: Record<string, string>;
           directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
-          containerSnapshot?: ContainerSnapshot;
-        });
+        } & (
+          | {
+              /** Cannot be used with `containerSnapshot`. */
+              image: string;
+              containerSnapshot?: never;
+            }
+          | {
+              image?: never;
+              /** Cannot be used with `image`. */
+              containerSnapshot?: ContainerSnapshotRestoreParams;
+            }
+        ));
       }
     }
   };
 
-  bool getRunning() const {
-    return running;
-  }
+  bool getRunning();
 
   // Methods correspond closely to the RPC interface in `container.capnp`.
   void start(jsg::Lock& js, jsg::Optional<StartupOptions> options);
@@ -368,7 +380,35 @@ class Container: public jsg::Object {
 
  private:
   IoOwn<rpc::Container::Client> rpcClient;
-  bool running;
+
+  struct Monitor final {
+    Monitor(kj::ForkedPromise<int32_t> promise, uint64_t generation);
+
+    bool running = true;
+
+    // Identifies callbacks belonging to this lifecycle.
+    // Callers can use this to compare with the current generation.
+    uint64_t generation;
+
+    // Shares the container exit result with explicit monitor() calls.
+    kj::ForkedPromise<int32_t> promise;
+
+    // Resolves after running has been set to false.
+    // It is useful for things like destroy() needing to await on
+    // running becoming false.
+    kj::ForkedPromise<void> stopped;
+
+    // Drives stopped even when nothing is explicitly waiting on it.
+    // Eagerly evaluated from `stopped`.
+    kj::Promise<void> background;
+
+   private:
+    static kj::Promise<void> observe(kj::ForkedPromise<int32_t>& promise, bool& running);
+  };
+
+  // Shares one monitor RPC between the background state update and explicit monitor() calls.
+  kj::Maybe<IoOwn<Monitor>> currentMonitor;
+  uint64_t nextMonitorGeneration = 0;
 
   kj::Maybe<jsg::Value> destroyReason;
 
@@ -386,6 +426,8 @@ class Container: public jsg::Object {
   kj::Maybe<IoOwn<kj::HashMap<int, kj::Rc<TcpPortState>>>> tcpPortStates;
 
   void invalidateTcpPortStates();
+  void startMonitor();
+  bool isCurrentMonitor(uint64_t generation);
 
   // These helpers are static since they will leave the IoContext on the first co_await, so we
   // don't want them trying to access `rpcClient` via the `IoOwn`.
@@ -406,7 +448,7 @@ class Container: public jsg::Object {
   api::ExecOutput, api::ExecOptions, api::ExecPtyOptions, api::ExecProcess, api::Container,        \
       api::Container::DirectorySnapshot, api::Container::DirectorySnapshotOptions,                 \
       api::Container::DirectorySnapshotRestoreParams, api::Container::Snapshot,                    \
-      api::Container::SnapshotOptions, api::Container::StartupOptions, api::Container::Info,       \
-      api::Container::StartResources
+      api::Container::SnapshotRestoreParams, api::Container::SnapshotOptions,                      \
+      api::Container::StartupOptions, api::Container::Info, api::Container::StartResources
 
 }  // namespace workerd::api

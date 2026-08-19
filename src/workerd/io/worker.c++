@@ -3567,9 +3567,17 @@ void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
       capnp::JsonCodec json;
       auto jsonDescription = kj::str("[", json.encode(capnp::Text::Reader(description)), "]");
 
-      auto timestamp = ioContext.now();
-      tracer.addLog(
-          ioContext.getInvocationSpanContext(), timestamp, LogLevel::WARN, kj::mv(jsonDescription));
+      // The wrapped call needs a HandleScope on the stack, because
+      // `getInvocationSpanContext()` probes the current async context for the
+      // active user span, which creates V8 handles. Our callers are not
+      // required to have a HandleScope and eg. the GC destructors in
+      // worker-rpc.c++ reach here without one.  We establish one here.
+      jsg::Lock& js = lock;
+      js.withinHandleScope([&] {
+        auto timestamp = ioContext.now();
+        tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, LogLevel::WARN,
+            kj::mv(jsonDescription));
+      });
     }
   }
 }
@@ -3974,6 +3982,8 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       context.setEntrypointHandler(js, jsg::JsObject(handler.self.getHandle(js)));
 
       impl->classInstance = kj::mv(handler);
+
+      impl->metrics->constructorCompleted();
     }, inputLock.addRef(context.getCurrentTraceSpan()));
     // We addRef() the inputLock above rather than kj::mv() it so that the lock remains held
     // through the catch block below, if an exception is thrown. This is important since we

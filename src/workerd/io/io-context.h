@@ -757,10 +757,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <typename T>
   IoOwn<T> addObject(kj::Rc<T> obj);
 
-  // Like addObject() but takes a functor, returning a functor with the same signature but which
-  // holds the original functor under a `IoOwn`, and so will stop working if the IoContext
-  // is no longer valid. This is particularly useful for passing to `jsg::Promise::then()` when
-  // you need the continuation to run in the correct context.
+  // Like addObject() but takes a functor, returning a functor which holds the original functor
+  // under an `IoOwn`, and so will stop working if the IoContext is no longer valid. This is
+  // particularly useful for passing to `jsg::Promise::then()` when you need the continuation to
+  // run in the correct context.
+  //
+  // The original functor may optionally accept `IoContext&` immediately after `jsg::Lock&`. The
+  // wrapper injects the current context after the `IoOwn` has verified that it is the context that
+  // owns the functor. Callers therefore do not need to capture an IoContext reference themselves.
   template <typename Func>
   auto addFunctor(Func&& func);
 
@@ -1072,15 +1076,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // available in internal tracing.
   [[nodiscard]] TraceContext makeUserTraceSpan(kj::ConstString operationName);
 
-  // Implement per-IoContext rate limiting for Cache.put(). Pass the body of a Cache API PUT
-  // request and get a possibly wrapped stream back.
-  //
-  // If the stream has an unknown length, you will get a wrapped stream back that is used to
-  // serialize PUT requests.
-  jsg::Promise<IoOwn<kj::AsyncInputStream>> makeCachePutStream(
-      jsg::Lock& js, kj::Own<kj::AsyncInputStream> stream);
-  // TODO(cleanup): Factor this into getCacheClient() somehow so it's not opt-in.
-
   // Gets a CapabilityServerSet representing the capnp capabilities hosted by this request or
   // actor context. This allows us to implement the CapnpCapability::unwrap() method on
   // capabilities which allows the application to get at the underlying server object, when the
@@ -1157,11 +1152,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   OwnedObjectList ownedObjects;
 
   kj::Maybe<kj::Rc<ExternalPusherImpl>> externalPusher;
-
-  // Implementation detail of makeCachePutStream().
-
-  // TODO: Used for Cache PUT serialization.
-  kj::Promise<void> cachePutSerializer;
 
   // The timeout manager needs to live below `deleteQueue` because the promises may refer to
   // objects in the queue.
@@ -1365,6 +1355,11 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
 
   return asyncLockPromise.then([this, inputLock = kj::mv(inputLock), func = kj::fwd<Func>(func)](
                                    Worker::AsyncLock lock) mutable {
+    // Re-check if context was aborted while we waited for the lock.
+    KJ_IF_SOME(ex, abortException) {
+      kj::throwFatalException(ex.clone());
+    }
+
     using Result = decltype(func(kj::instance<Worker::Lock&>()));
 
     if constexpr (kj::isSameType<Result, void>()) {
@@ -1749,14 +1744,54 @@ inline IoOwn<T> IoContext::addObject(kj::Rc<T> obj) {
   return addObject(obj.toOwn());
 }
 
+namespace _ {
+template <typename R, typename C, typename First, typename Second, typename... Rest>
+constexpr bool functorTakesIoContext(R (C::*)(First, Second, Rest...)) {
+  return kj::isSameType<Second, IoContext&>();
+}
+
+template <typename R, typename C, typename First, typename Second, typename... Rest>
+constexpr bool functorTakesIoContext(R (C::*)(First, Second, Rest...) const) {
+  return kj::isSameType<Second, IoContext&>();
+}
+
+constexpr bool functorTakesIoContext(...) {
+  return false;
+}
+
+template <typename Func>
+constexpr bool functorTakesIoContext() {
+  if constexpr (requires { &Func::operator(); }) {
+    return functorTakesIoContext(&Func::operator());
+  } else {
+    return false;
+  }
+}
+}  // namespace _
+
 template <typename Func>
 auto IoContext::addFunctor(Func&& func) {
+  constexpr bool injectIoContext = _::functorTakesIoContext<kj::Decay<Func>>();
+
   if constexpr (kj::isReference<Func>()) {
-    return [func = addObject(func)](
-               auto&&... params) mutable { return (*func)(kj::fwd<decltype(params)>(params)...); };
+    return [func = addObject(func)](jsg::Lock& js, auto&&... params) mutable -> decltype(auto) {
+      auto& inner = *func;
+      if constexpr (injectIoContext) {
+        return inner(js, IoContext::current(), kj::fwd<decltype(params)>(params)...);
+      } else {
+        return inner(js, kj::fwd<decltype(params)>(params)...);
+      }
+    };
   } else {
     return [func = addObject(kj::heap(kj::mv(func)))](
-               auto&&... params) mutable { return (*func)(kj::fwd<decltype(params)>(params)...); };
+               jsg::Lock& js, auto&&... params) mutable -> decltype(auto) {
+      auto& inner = *func;
+      if constexpr (injectIoContext) {
+        return inner(js, IoContext::current(), kj::fwd<decltype(params)>(params)...);
+      } else {
+        return inner(js, kj::fwd<decltype(params)>(params)...);
+      }
+    };
   }
 }
 

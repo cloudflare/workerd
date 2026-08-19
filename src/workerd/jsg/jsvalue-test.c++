@@ -139,7 +139,7 @@ KJ_TEST("simple") {
   e.expectEval("setRef('foo'); getRef('foo')", "string", "foo");
   e.expectEval("takeJsObject(undefined)", "throws",
       "TypeError: Failed to execute 'takeJsObject' on 'JsValueContext': parameter 1 "
-      "is not of type 'JsObject'.");
+      "is not of type 'Object'.");
   e.expectEval("getDate() instanceof Date", "boolean", "true");
   e.expectEval(
       "checkProxyPrototype(new Proxy(class extends Foo{}, {})) === Foo", "boolean", "true");

@@ -960,8 +960,7 @@ class ByteStreamCursor
     // byobRequest is null by the time any resolve fires (which may trigger
     // user-observable code via Object.prototype.then interception).
     let filledPullIntos:
-      | Array<{ desc: PullIntoDescriptor; view: ArrayBufferView }>
-      | undefined;
+      Array<{ desc: PullIntoDescriptor; view: ArrayBufferView }> | undefined;
     while (this.#pendingPullIntos.length > 0) {
       const slot = this.queue.getEntry(this.position);
       if (slot === undefined) break;

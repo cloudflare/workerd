@@ -462,6 +462,7 @@ wd_capnp_library(
 )
 
 kj_test(
+    size = "large",
     src = "io-gate-test.c++",
     deps = [
         ":io-gate",
@@ -623,6 +624,14 @@ kj_test(
 
 kj_test(
     src = "io-own-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "io-context-abort-test.c++",
     deps = [
         ":io",
         "//src/workerd/tests:test-fixture",

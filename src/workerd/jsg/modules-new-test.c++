@@ -1225,6 +1225,16 @@ KJ_TEST("import.meta works as expected") {
 
       KJ_ASSERT(url.toString(js) == "file:///foo"_kj);
 
+      // import.meta.filename is the pathname of the file: URL.
+      JsValue filename = obj.get(js, "filename");
+      KJ_ASSERT(filename.isString());
+      KJ_ASSERT(filename.toString(js) == "/foo"_kj);
+
+      // import.meta.dirname is the parent directory of the pathname.
+      JsValue dirname = obj.get(js, "dirname");
+      KJ_ASSERT(dirname.isString());
+      KJ_ASSERT(dirname.toString(js) == "/"_kj);
+
       auto mainVal = KJ_ASSERT_NONNULL(main.tryCast<JsBoolean>());
       KJ_ASSERT(!mainVal.value(js));
 
@@ -1250,6 +1260,16 @@ KJ_TEST("import.meta works as expected") {
       KJ_ASSERT(res.isFunction());
 
       KJ_ASSERT(url.toString(js) == "file:///foo/bar"_kj);
+
+      // import.meta.filename for file:///foo/bar should be /foo/bar.
+      JsValue filename = obj.get(js, "filename");
+      KJ_ASSERT(filename.isString());
+      KJ_ASSERT(filename.toString(js) == "/foo/bar"_kj);
+
+      // import.meta.dirname for file:///foo/bar should be /foo.
+      JsValue dirname = obj.get(js, "dirname");
+      KJ_ASSERT(dirname.isString());
+      KJ_ASSERT(dirname.toString(js) == "/foo"_kj);
 
       auto mainVal = KJ_ASSERT_NONNULL(main.tryCast<JsBoolean>());
       KJ_ASSERT(mainVal.value(js));
@@ -1297,6 +1317,16 @@ KJ_TEST("import specifiers with query params and hash fragments work") {
       KJ_ASSERT(url.isString());
       // The import.meta.url should include the query param and hash fragment
       KJ_ASSERT(url.toString(js) == "file:///foo?1"_kj);
+
+      // import.meta.filename and dirname should reflect the pathname without
+      // query params or hash fragments.
+      auto filename = obj.get(js, "filename");
+      KJ_ASSERT(filename.isString());
+      KJ_ASSERT(filename.toString(js) == "/foo"_kj);
+
+      auto dirname = obj.get(js, "dirname");
+      KJ_ASSERT(dirname.isString());
+      KJ_ASSERT(dirname.toString(js) == "/"_kj);
     }, [&](Value exception) { js.throwException(kj::mv(exception)); });
   });
 }
@@ -3442,6 +3472,76 @@ KJ_TEST("Fallback receives REQUIRE source through require() resolution") {
   });
 
   KJ_ASSERT(fallbackCalled);
+}
+
+// ======================================================================================
+
+KJ_TEST("Dynamic import from a redirected fallback module works") {
+  // Reproduces the bug where a module loaded via a fallback redirect fails to
+  // perform a dynamic import because V8's script origin (the module's canonical
+  // URL) does not match the import specifier stored in the registry's
+  // instantiation table.
+  //
+  // The fallback simulates a bare-specifier redirect:
+  //   file:///pkg  -->  301 to file:///canonical/pkg/index.mjs
+  //   file:///canonical/pkg/index.mjs  -->  ESM with `import("./dep.mjs")`
+  //   file:///canonical/pkg/dep.mjs    -->  ESM exporting a value
+  //
+  // Without the fix, the dynamic import fails with "Referring module not found
+  // in the registry: file:///canonical/pkg/index.mjs".
+
+  const auto pkg = "file:///pkg"_url;
+  const auto canonical = "file:///canonical/pkg/index.mjs"_url;
+  const auto dep = "file:///canonical/pkg/dep.mjs"_url;
+
+  // Source strings must outlive the Module objects that reference them
+  // (the ArrayPtr<const char> overload of newEsm does not take ownership).
+  auto pkgSource = kj::str("export async function load() { return await import('./dep.mjs'); }");
+  auto depSource = kj::str("export const value = 'ok';");
+
+  auto fallback = ModuleBundle::newFallbackBundle(
+      [&](const ResolveContext& context) -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+    if (context.normalizedSpecifier == pkg) {
+      // Redirect bare specifier to canonical URL.
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::str(canonical.getHref()));
+    }
+    if (context.normalizedSpecifier == canonical) {
+      // The package entry point: dynamically imports a sibling module.
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(
+          Module::newEsm(canonical.clone(), Module::Type::FALLBACK, pkgSource.asPtr()));
+    }
+    if (context.normalizedSpecifier == dep) {
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(
+          Module::newEsm(dep.clone(), Module::Type::FALLBACK, depSource.asPtr()));
+    }
+    return kj::none;
+  });
+
+  CompilationObserver compilationObserver;
+
+  // An entry module that imports the bare specifier and calls load().
+  ModuleBundle::BundleBuilder bundleBuilder(BASE);
+  auto entry = kj::str("import { load } from 'pkg';\n"
+                       "const m = await load();\n"
+                       "export default m.value;\n");
+  bundleBuilder.addEsmModule("entry", entry);
+
+  auto registry = ModuleRegistry::Builder(BASE, ModuleRegistry::Builder::Options::ALLOW_FALLBACK)
+                      .add(bundleBuilder.finish())
+                      .add(kj::mv(fallback))
+                      .finish();
+
+  PREAMBLE([&](Lock& js) {
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    JSG_TRY(js) {
+      auto value = ModuleRegistry::resolve(js, "file:///entry", "default"_kjc);
+      KJ_ASSERT(kj::str(value) == "ok");
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
+  });
 }
 
 }  // namespace

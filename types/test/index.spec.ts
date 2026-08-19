@@ -142,14 +142,14 @@ and limitations under the License.
 // noinspection JSUnusedGlobalSymbols
 declare var onmessage: never;
 /**
- * The **\`Event\`** interface represents an event which takes place on an \`EventTarget\`.
+ * The **\`Event\`** interface represents an event which takes place on an EventTarget.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event)
  */
 interface Event {
 }
 /**
- * The **\`EventTarget\`** interface is implemented by objects that can receive events and may have listeners for them.
+ * The **\`EventTarget\`** interface is implemented by objects that can receive events and may have listeners for them. In other words, any target of events implements the three methods associated with this interface.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventTarget)
  */

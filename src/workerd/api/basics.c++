@@ -284,8 +284,6 @@ void EventTarget::addEventListener(jsg::Lock& js,
         }
       }
 
-      auto& set = getOrCreate(type);
-
       auto maybeAbortHandler = maybeSignal.map([&](jsg::Ref<AbortSignal>& signal) {
         // The returned native handler captures a bare reference to signal and
         // will be held by this EventTarget. The signal is the only thing that
@@ -298,7 +296,7 @@ void EventTarget::addEventListener(jsg::Lock& js,
         // likely keeping the signal in memory longer if it can otherwise be
         // gc'd but that's ok, the impact should be minimal.
         auto func =
-            JSG_VISITABLE_LAMBDA((this, type = kj::mv(type), handler = handler.identity.addRef(js),
+            JSG_VISITABLE_LAMBDA((this, type = type.clone(), handler = handler.identity.addRef(js),
                                      signal = signal.addRef()),
                 (handler, signal), (jsg::Lock& js, jsg::Ref<Event>) {
                   removeEventListener(js, kj::mv(type), kj::mv(handler), kj::none);
@@ -324,7 +322,7 @@ void EventTarget::addEventListener(jsg::Lock& js,
         eventHandler = eventHandler.attach(kj::mv(following));
       }
 
-      set.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
+      getOrCreate(type).handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
     });
   }
 }

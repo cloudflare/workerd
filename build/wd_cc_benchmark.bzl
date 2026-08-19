@@ -30,7 +30,8 @@ def wd_cc_benchmark(
         ],
         # use the same malloc we use for server
         malloc = "//src/workerd/server:malloc",
-        tags = ["workerd-benchmark", "google_benchmark"] + tags,
+        # Tag with cpu:4 since this target depends on linkopts_default.
+        tags = ["workerd-benchmark", "google_benchmark", "cpu:4"] + tags,
         size = "large",
         **kwargs
     )

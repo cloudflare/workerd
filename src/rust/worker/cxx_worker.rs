@@ -184,10 +184,17 @@ impl From<bridge::EventOutcome> for EventOutcome {
             bridge::EventOutcome::InternalError => Self::InternalError,
             bridge::EventOutcome::ExceededWallTime => Self::ExceededWallTime,
             other => {
-                unreachable!(
+                // CXX shared enums are open (`#[repr]` value, not a closed set), so this
+                // catch-all is reachable only on discriminant drift — a variant added on the
+                // C++ side without a matching arm here. Since `From` cannot fail, map it to the
+                // enum's own catch-all outcome instead of aborting the process; the
+                // `debug_assert` trips loudly in debug/test builds so the drift is caught.
+                debug_assert!(
+                    false,
                     "unknown WorkerInterface::EventOutcome discriminant: {}",
                     other.repr
-                )
+                );
+                Self::InternalError
             }
         }
     }

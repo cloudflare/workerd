@@ -83,19 +83,14 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
   auto reenterAndGetCode = ioctx.makeReentryCallbackWeak(
       [getCode = kj::mv(getCode), compatDateValidation = compatDateValidation](
           jsg::Lock& js, IoContext& ioctx) mutable {
-    // Note: We reference the original context (the one that initiated the load) via a weak ref
-    // rather than `IoContext::current()`. `getCode` is application-provided and may resolve its
-    // promise from a *different* context, in which case `IoContext::current()` inside this
-    // continuation would not be the context we want. Unlike the outer callback's captures, this
-    // weak ref is created (and destroyed) on the context's own thread as part of the promise
-    // chain, so it does not participate in the cross-thread destruction race.
+    // getCode() is application-provided and may resolve its promise from a different context.
+    // Binding the continuation to this context ensures that it either runs here or throws before
+    // accessing the context.
     return getCode(js).then(js,
-        [weakIoctx = ioctx.getWeakRef(), compatDateValidation](
-            jsg::Lock& js, WorkerCode code) -> DynamicWorkerSource {
-      auto& ioctx = JSG_REQUIRE_NONNULL(weakIoctx->tryGet(), Error,
-          "The request which initiated this dynamic worker load has already completed.");
+        ioctx.addFunctor([compatDateValidation](jsg::Lock& js, IoContext& ioctx,
+                             WorkerCode code) -> DynamicWorkerSource {
       return toDynamicWorkerSource(js, ioctx, compatDateValidation, kj::mv(code));
-    });
+    }));
   });
 
   auto isolateChannel =

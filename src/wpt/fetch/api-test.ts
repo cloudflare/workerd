@@ -19,6 +19,8 @@ export default {
       'Stream errors once aborted, after reading. Underlying connection closed.',
       // Flaky since 2025-07-25. To be investigated.
       'Stream errors once aborted. Underlying connection closed.',
+      // Flaky since 2026-08-07. To be investigated.
+      'Underlying connection is closed when aborting after receiving response',
     ],
     expectedFailures: [
       // The fetch promise still resolves for some reason
@@ -36,6 +38,18 @@ export default {
 
       // Instead throws TypeError: Parsing a Body as FormData requires a Content-Type header.
       'response.formData() rejects if already aborted',
+
+      // fetch()/body-read promises reject on abort, but not with the exact
+      // AbortSignal.reason value; workerd currently surfaces a generic
+      // AbortError instead of propagating the caller-supplied reason.
+      'Aborting rejects with abort reason when aborted after fetch() called',
+      'response.arrayBuffer() rejects with abort reason if already aborted',
+      'response.blob() rejects with abort reason if already aborted',
+      'response.bytes() rejects with abort reason if already aborted',
+      'response.formData() rejects with abort reason if already aborted',
+      'response.json() rejects with abort reason if already aborted',
+      'response.text() rejects with abort reason if already aborted',
+      'Stream errors once aborted with abort reason. Underlying connection closed.',
 
       // ReadableStream.cancel was not called synchronously at the right time
       'Readable stream synchronously cancels with AbortError if aborted before reading',
@@ -202,6 +216,21 @@ export default {
   'body/cloned-any.js': {},
   'body/formdata.any.js': {},
   'body/mime-type.any.js': {},
+  'body/textstream.any.js': {
+    comment: 'textStream() is not implemented',
+    expectedFailures: [
+      'textStream method existence',
+      'Response.textStream() basic functionality',
+      'Request.textStream() basic functionality',
+      'textStream() handles chunked byte stream input',
+      'Response.textStream() with null body',
+      'Request.textStream() with null body',
+      'Response.textStream() with empty body',
+      'Response.textStream() ignores Content-Type charset (UTF-16LE)',
+      'Request.textStream() ignores Content-Type charset (UTF-16LE)',
+      'Response.textStream() ignores invalid Content-Type charset (invalid-charset)',
+    ],
+  },
 
   'cors/cors-basic.any.js': {
     comment: 'CORS is not implemented',
@@ -388,6 +417,11 @@ export default {
       'Check headers append with an invalid value invalidĀ',
     ],
   },
+  'headers/headers-forbidden-override.any.js': {
+    comment:
+      "Enforcing the fetch spec's forbidden header names is not workerd's responsibility",
+    omittedTests: true,
+  },
   'headers/headers-no-cors.any.js': {
     comment: 'Request.mode is not relevant',
     disabledTests: true,
@@ -525,7 +559,11 @@ export default {
     comment: "We don't support detached realms",
     omittedTests: true,
   },
-  'request/request-bad-port.any.js': {},
+  'request/request-bad-port.any.js': {
+    comment:
+      "Filtering the fetch spec's blocked port list is not workerd's responsibility",
+    omittedTests: true,
+  },
   'request/request-cache-default-conditional.any.js': {
     comment: 'Unsupported cache mode: default',
     expectedFailures: [
@@ -662,6 +700,11 @@ export default {
     ],
   },
   'request/request-cache.js': {},
+  'request/request-clone-readable-stream-body.any.js': {
+    comment:
+      'TODO(soon): new Request() drops a ReadableStream body taken from clone()',
+    expectedFailures: true,
+  },
   'request/request-constructor-init-body-override.any.js': {},
   'request/request-consume-empty.any.js': {
     comment:

@@ -33,6 +33,16 @@ wd_test(
 )
 
 wd_test(
+    src = "wasm-memory-discard-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "wasm-memory-discard.wasm",
+        "wasm-memory-discard-disabled-test.js",
+        "wasm-memory-discard-test.js",
+    ],
+)
+
+wd_test(
     src = "urlpattern-regex-search-oob-test.wd-test",
     args = ["--experimental"],
     data = ["urlpattern-regex-search-oob-test.js"],
@@ -165,6 +175,15 @@ wd_test(
     tags = ["resources:socket:1"],
 )
 
+wd_test(
+    src = "rpc-stub-gc-warning-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "rpc-stub-gc-warning-test.js",
+        "tail-worker-test-no-op.js",
+    ],
+)
+
 # Test to validate timing semantics for JSRPC streaming responses.
 # This test verifies that Return events occur when the handler returns,
 # NOT when the stream is fully consumed.
@@ -203,6 +222,11 @@ wd_test(
 wd_test(
     src = "errorinfo-tail-test.wd-test",
     data = ["errorinfo-tail-test.js"],
+)
+
+wd_test(
+    src = "tail-cf-gc-test.wd-test",
+    data = ["tail-cf-gc-test.js"],
 )
 
 wd_test(
@@ -252,6 +276,14 @@ wd_test(
         "cache-mock.js",
         "cache-operations-test.js",
         "instrumentation-tail-worker.js",
+    ],
+)
+
+wd_test(
+    src = "cache-put-stream-test.wd-test",
+    data = [
+        "cache-mock.js",
+        "cache-put-stream-test.js",
     ],
 )
 
@@ -721,6 +753,12 @@ wd_test(
 )
 
 wd_test(
+    src = "autovuln-88-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-88-test.js"],
+)
+
+wd_test(
     src = "streams-respond-test.wd-test",
     args = ["--experimental"],
     data = ["streams-respond-test.js"],
@@ -802,6 +840,15 @@ wd_test(
     src = "autovuln-319-test.wd-test",
     args = ["--experimental"],
     data = ["autovuln-319-test.js"],
+)
+
+wd_test(
+    src = "autovuln-187-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "autovuln-187-echo.js",
+        "autovuln-187-test.js",
+    ],
 )
 
 wd_test(

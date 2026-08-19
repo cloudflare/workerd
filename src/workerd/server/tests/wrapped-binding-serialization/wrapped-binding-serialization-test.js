@@ -10,6 +10,10 @@ export const backend = {
   async fetch(req) {
     return new Response('pong');
   },
+
+  async rpcPing(_arg) {
+    return 'rpc-pong';
+  },
 };
 
 // An RPC entrypoint used to verify that a wrapped binding survives being:
@@ -66,6 +70,16 @@ export const test_rpc_argument = {
   async test(ctrl, env, ctx) {
     const result = await env.RECEIVER.useDoor(env.DOOR);
     assert.strictEqual(result, 'wrapped-door:pong');
+  },
+};
+
+// Reconstruct the binding in an RPC-gated worker, then call an RPC method on its private inner
+// fetcher. The wrapper's fetcher must bypass the receiving worker's compatibility gate.
+export const test_rpc_argument_gated_receiver = {
+  async test(ctrl, env, ctx) {
+    const result = await env.RPC_GATED_RECEIVER.useDoor(env.DOOR);
+    assert.strictEqual(result.ordinaryFetcherRpcGated, true);
+    assert.strictEqual(result.value, 'wrapped-door:rpc-pong');
   },
 };
 

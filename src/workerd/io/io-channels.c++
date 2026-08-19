@@ -2,8 +2,26 @@
 
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
+#include <workerd/util/entropy.h>
+
+#include <random>
 
 namespace workerd {
+
+IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(kj::Date createdAt) {
+  static thread_local auto generator = [] {
+    uint64_t seed;
+    getEntropy(kj::asBytes(seed));
+    return std::mt19937_64(seed);
+  }();
+  std::uniform_int_distribution<uint64_t> distribution(0, UINT64_MAX);
+
+  return IoChannelFactory::ActorRetryRequestMetadata{
+    .nonce = distribution(generator),
+    .createdAt = createdAt,
+    .isRetry = IsActorRetry::NO,
+  };
+}
 
 kj::Promise<kj::Array<byte>> IoChannelFactory::TokenizableChannel::getToken(
     ChannelTokenUsage usage) {

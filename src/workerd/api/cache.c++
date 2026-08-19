@@ -342,27 +342,25 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
       traceContext.setTag("cache.request.payload.size"_kjc, static_cast<int64_t>(length));
     }
 
-    // Wait for output locks and cache put quota, trying to avoid returning to the KJ event loop
-    // in the common case where no waits are needed.
-    // TODO(later): With Cache streams no longer having a size limit enforced by the runtime,
-    // explore if we can clean up stream serialization too.
+    // Wait for output locks, trying to avoid returning to the KJ event loop in the common case
+    // where no waits are needed.
     jsg::Promise<IoOwn<kj::AsyncInputStream>> startStreamPromise = nullptr;
-    auto makeCachePutStream = [&context, stream = kj::mv(payload.stream)](jsg::Lock& js) mutable {
-      return context.makeCachePutStream(js, kj::mv(stream));
-    };
     KJ_IF_SOME(p, context.waitForOutputLocksIfNecessary()) {
-      startStreamPromise = context.awaitIo(js, kj::mv(p), kj::mv(makeCachePutStream));
+      startStreamPromise = context.awaitIo(
+          js, kj::mv(p), [&context, stream = kj::mv(payload.stream)](jsg::Lock&) mutable {
+        return context.addObject(kj::mv(stream));
+      });
     } else {
-      startStreamPromise = makeCachePutStream(js);
+      startStreamPromise = js.resolvedPromise(context.addObject(kj::mv(payload.stream)));
     }
 
     return startStreamPromise.then(js,
         context.addFunctor(
-            [this, &context, jsRequest = kj::mv(jsRequest), cacheControl = kj::mv(cacheControl),
+            [this, jsRequest = kj::mv(jsRequest), cacheControl = kj::mv(cacheControl),
                 serializePromise = kj::mv(serializePromise),
                 writePayloadHeadersPromise = kj::mv(payload.writeHeadersPromise),
                 enableCompatFlags = flags.getCacheApiCompatFlags(),
-                traceContext = kj::mv(traceContext)](jsg::Lock& js,
+                traceContext = kj::mv(traceContext)](jsg::Lock& js, IoContext& context,
                 IoOwn<kj::AsyncInputStream> payloadStream) mutable -> jsg::Promise<void> {
       // Make the PUT request to cache.
       auto httpClient = getHttpClient(

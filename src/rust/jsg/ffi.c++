@@ -41,7 +41,7 @@ namespace workerd::rust::jsg {
 #define DEFINE_TYPED_ARRAY_UNWRAP(name, v8_type, elem_type)                                        \
   ::rust::Vec<elem_type> unwrap_##name(Isolate* isolate, Local value) {                            \
     auto v8Val = local_from_ffi<v8::Value>(kj::mv(value));                                         \
-    KJ_REQUIRE(v8Val->Is##v8_type());                                                              \
+    KJ_REQUIRE(v8Val->Is##v8_type(), "Expected a " #v8_type);                                      \
     auto typed = v8Val.As<v8::v8_type>();                                                          \
     ::rust::Vec<elem_type> result;                                                                 \
     result.reserve(typed->Length());                                                               \
@@ -641,12 +641,38 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
 }
 
 // Unwrappers
+
+// Runs `fn` (returning a v8::MaybeLocal<T>) and, on failure, converts the pending
+// JS exception into a `jsg.<Type>:`-prefixed kj::Exception and throws it, so
+// workerd-cxx's Result::run catches it in C++ and hands Rust a catchable error
+// instead of aborting. Termination exceptions are re-thrown unchanged. The
+// TryCatch and termination handling are delegated to jsg::Lock::tryCatch.
+template <typename T, typename Func>
+static v8::Local<T> unwrapCoerce(v8::Isolate* isolate, Func&& fn) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  JSG_TRY(js) {
+    return ::workerd::jsg::check(fn());
+  }
+  JSG_CATCH(error) {
+    kj::throwFatalException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
+  };
+}
+
 ::rust::String unwrap_string(Isolate* isolate, Local value) {
-  v8::Local<v8::String> v8Str = ::workerd::jsg::check(
-      local_from_ffi<v8::Value>(kj::mv(value))->ToString(isolate->GetCurrentContext()));
+  auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
+  // Fast path: a string primitive needs no coercion and can't throw, so skip
+  // the TryCatch/ToString machinery. (String wrapper objects are not IsString.)
+  v8::Local<v8::String> v8Str;
+  if (v8Value->IsString()) {
+    v8Str = v8Value.As<v8::String>();
+  } else {
+    auto context = isolate->GetCurrentContext();
+    v8Str = unwrapCoerce<v8::String>(isolate, [&] { return v8Value->ToString(context); });
+  }
   v8::String::ValueView view(isolate, v8Str);
   if (!view.is_one_byte()) {
-    return ::rust::String(reinterpret_cast<const char16_t*>(view.data16()), view.length());
+    // lossy(): lone surrogates become U+FFFD instead of throwing (which aborts).
+    return ::rust::String::lossy(reinterpret_cast<const char16_t*>(view.data16()), view.length());
   }
   return ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
 }
@@ -656,9 +682,15 @@ bool unwrap_boolean(Isolate* isolate, Local value) {
 }
 
 double unwrap_number(Isolate* isolate, Local value) {
-  return ::workerd::jsg::check(
-      local_from_ffi<v8::Value>(kj::mv(value))->ToNumber(isolate->GetCurrentContext()))
-      ->Value();
+  auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
+  // Fast path: a number primitive needs no coercion and can't throw.
+  if (v8Value->IsNumber()) {
+    return v8Value.As<v8::Number>()->Value();
+  }
+  auto context = isolate->GetCurrentContext();
+  v8::Local<v8::Number> number =
+      unwrapCoerce<v8::Number>(isolate, [&] { return v8Value->ToNumber(context); });
+  return number->Value();
 }
 
 kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value) {
@@ -697,6 +729,12 @@ DEFINE_TYPED_ARRAY_UNWRAP(biguint64_array, BigUint64Array, uint64_t)
 
 // Uses V8's Array::Iterate() which is faster than indexed access.
 // Returns Global handles because Local handles get reused during iteration.
+//
+// Iterate() can fail with a *pending* V8 exception rather than a KJ one -- e.g. a
+// throwing Proxy trap or getter on one of the array's elements. That must be tunneled
+// through the same `jsg.<Type>:`-prefixed kj::Exception mechanism as `unwrapCoerce`
+// uses (see above), rather than discarded in favor of a generic KJ_REQUIRE failure,
+// or the real error is lost and the pending exception is left dangling on the isolate.
 ::rust::Vec<Global> local_array_iterate(Isolate* isolate, Local value) {
   auto context = isolate->GetCurrentContext();
   auto v8Val = local_from_ffi<v8::Value>(kj::mv(value));
@@ -712,16 +750,27 @@ DEFINE_TYPED_ARRAY_UNWRAP(biguint64_array, BigUint64Array, uint64_t)
   ::rust::Vec<Global> result;
   Data data{isolate, &result};
 
-  auto iterateResult = arr->Iterate(context,
-      [](uint32_t index, v8::Local<v8::Value> element,
-          void* userData) -> v8::Array::CallbackResult {
-    auto* d = static_cast<Data*>(userData);
-    d->result->push_back(to_ffi(v8::Global<v8::Value>(d->isolate, element)));
-    return v8::Array::CallbackResult::kContinue;
-  },
-      &data);
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  JSG_TRY(js) {
+    auto iterateResult = arr->Iterate(context,
+        [](uint32_t index, v8::Local<v8::Value> element,
+            void* userData) -> v8::Array::CallbackResult {
+      auto* d = static_cast<Data*>(userData);
+      d->result->push_back(to_ffi(v8::Global<v8::Value>(d->isolate, element)));
+      return v8::Array::CallbackResult::kContinue;
+    },
+        &data);
+    // iterateResult is a v8::Maybe<void>, so the v8::Maybe<T> overload of
+    // jsg::check() (which needs a default-constructible T to write into) doesn't
+    // apply; throw JsExceptionThrown() directly, same as check() does internally.
+    if (iterateResult.IsNothing()) {
+      throw ::workerd::jsg::JsExceptionThrown();
+    }
+  }
+  JSG_CATCH(error) {
+    kj::throwFatalException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
+  };
 
-  KJ_REQUIRE(iterateResult.IsJust(), "Iteration failed");
   return result;
 }
 

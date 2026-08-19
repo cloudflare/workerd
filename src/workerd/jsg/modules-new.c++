@@ -719,6 +719,22 @@ class IsolateModuleRegistry final {
           break;
         }
       }
+
+      // When a module was loaded via a fallback redirect, V8's script origin
+      // is the module's canonical URL (Module::id()), but the instantiation
+      // is stored under the original import specifier. Fall back to the
+      // redirect mapping to find the entry.
+      if (maybeReferring == kj::none) {
+        KJ_IF_SOME(originalSpecifier, redirectedCanonicalIds.find(referrer)) {
+          for (auto type: kReferrerProbeOrder) {
+            KJ_IF_SOME(found, findResolved(type, originalSpecifier)) {
+              maybeReferring = found;
+              break;
+            }
+          }
+        }
+      }
+
       auto& referring = JSG_REQUIRE_NONNULL(maybeReferring, TypeError,
           kj::str("Referring module not found in the registry: ", referrer.getHref()));
 
@@ -1209,6 +1225,20 @@ class IsolateModuleRegistry final {
         KJ_ASSERT(existing == replacement);
       });
 
+      // When the module's canonical id differs from the import specifier
+      // (i.e. a fallback redirect was followed), record a mapping from the
+      // canonical URL back to the import specifier. V8 sets the compiled
+      // module's script origin to the canonical URL (Module::id()), so
+      // dynamicResolve() needs this mapping to find the entry when V8
+      // reports the canonical URL as the referrer for a dynamic import().
+      if (context.normalizedSpecifier != found.id()) {
+        redirectedCanonicalIds.upsert(found.id().clone(), context.normalizedSpecifier.clone(),
+            [](Url& existing, Url&& replacement) {
+          // Multiple import aliases can redirect to the same canonical id;
+          // the first one recorded is sufficient for the referrer lookup.
+        });
+      }
+
       return kj::Maybe<Entry&>(entry);
     }
     return kj::none;
@@ -1224,6 +1254,16 @@ class IsolateModuleRegistry final {
   // the same specifier but different definitions (bundle shadow vs builtin)
   // map to distinct instantiations.
   kj::HashMap<SpecifierContext, const Module*> resolutions;
+
+  // Reverse mapping from a module's canonical URL (Module::id()) to the
+  // import specifier stored as Entry.id in the instantiations table.
+  // Populated when a fallback redirect resolves an import specifier to a
+  // module whose canonical id differs (e.g. "file:///bundle/foo" redirects
+  // to "file:///project/node_modules/foo/index.mjs"). Used by
+  // dynamicResolve() as a fallback when the V8 script origin (the canonical
+  // URL) does not directly appear in the resolutions cache.
+  kj::HashMap<Url, Url> redirectedCanonicalIds;
+
   friend class SyntheticModule;
 };
 
@@ -1271,6 +1311,33 @@ void importMeta(
                     js.v8Context(), v8::Local<v8::String>(js.strIntern("url"_kj)), js.str(href))
                 .IsNothing()) {
           return;
+        }
+
+        // import.meta.filename and import.meta.dirname are only available for
+        // modules loaded from the vfs (file: URLs)
+        if (found.id.getSchemeType() == Url::SchemeType::FILE) {
+          auto pathname = found.id.getPathname();
+
+          // import.meta.filename is the full absolute filesystem path to the
+          // current module, equivalent to fileURLToPath(import.meta.url).
+          if (meta->CreateDataProperty(js.v8Context(),
+                      v8::Local<v8::String>(js.strIntern("filename"_kj)), js.str(pathname))
+                  .IsNothing()) {
+            return;
+          }
+
+          // import.meta.dirname is the directory containing the current module,
+          // without a trailing slash (unless it is the root "/").
+          // File URL pathnames always start with '/', so findLast is guaranteed
+          // to succeed (same reasoning as url.c++:374).
+          auto lastSlash = KJ_ASSERT_NONNULL(pathname.findLast('/'));
+          auto dirname = lastSlash > 0 ? pathname.first(lastSlash) : pathname.first(1);
+
+          if (meta->CreateDataProperty(js.v8Context(),
+                      v8::Local<v8::String>(js.strIntern("dirname"_kj)), js.str(dirname))
+                  .IsNothing()) {
+            return;
+          }
         }
 
         // The import.meta.resolve(...) function is effectively a shortcut for

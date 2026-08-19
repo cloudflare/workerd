@@ -40,11 +40,11 @@ def wd_rust_binary(
             # Not applying visibility here – if you import the cxxbridge header, you will likely
             # also need the rust library itself to avoid linker errors.
             deps = cxx_bridge_deps + [
-                "@workerd-cxx//:core",
+                "//src/rust/cxx:core",
             ],
         )
 
-        deps.append("@workerd-cxx//:cxx")
+        deps.append("//src/rust/cxx:cxx")
         link_deps = link_deps + [name + "@cxx"]
 
     rust_binary(
@@ -60,6 +60,8 @@ def wd_rust_binary(
         data = data,
         experimental_use_cc_common_link = 1,
         proc_macro_deps = proc_macro_deps,
+        # Tag with cpu:4 since this target depends on linkopts_default.
+        tags = tags + ["cpu:4"],
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
@@ -83,5 +85,6 @@ def wd_rust_binary(
         experimental_use_cc_common_link = 1,
         link_deps = ["//build/deps:linkopts_default", "@@//deps:rust_runtime"],
         size = test_size,
-        tags = ["no-coverage"],
+        # Tag with cpu:4 since this target depends on linkopts_default.
+        tags = ["no-coverage", "cpu:4"],
     )

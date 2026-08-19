@@ -398,9 +398,7 @@ class ReadableStreamController {
   struct ByobOptions {
     static constexpr size_t DEFAULT_AT_LEAST = 1;
 
-    jsg::V8Ref<v8::ArrayBufferView> bufferView;
-    size_t byteOffset = 0;
-    size_t byteLength;
+    jsg::JsRef<jsg::JsArrayBufferView> bufferView;
 
     // The minimum number of elements that should be read. When not specified, the default
     // is DEFAULT_AT_LEAST. This is a non-standard, Workers-specific extension to
@@ -675,16 +673,16 @@ class WritableStreamController {
   // implementations and is used solely as a means of attaching a Writer implementation to
   // the internal state of the controller. See the WritableStream::*Writer classes for the
   // full Writer API.
-  class Writer {
+  class Writer: public virtual kj::PtrTarget {
    public:
     // When a Writer is locked to a controller, the controller will attach itself to the writer,
     // passing along the closed and ready promises that will be used to communicate state to the
     // user code.
     //
-    // The controller is guaranteed to either outlive the Writer or will detach the Writer so the
-    // WritableStreamController& reference should always remain valid.
+    // The Writer will hold a reference to the stream that will be cleared when the writer
+    // is released or destroyed.
     virtual void attach(jsg::Lock& js,
-        WritableStreamController& controller,
+        jsg::Ref<WritableStream> stream,
         jsg::Promise<void> closedPromise,
         jsg::Promise<void> readyPromise) = 0;
 
@@ -785,12 +783,12 @@ class WritableStreamController {
 
   // Locks this controller to the given writer, returning true if the lock was successful, or false
   // if the controller was already locked.
-  virtual bool lockWriter(jsg::Lock& js, Writer& writer) = 0;
+  virtual bool lockWriter(jsg::Lock& js, kj::Ptr<Writer> writer) = 0;
 
   // Removes the lock and releases the writer from this controller.
   // maybeJs will be nullptr when the isolate lock is not available.
   // If maybeJs is set, the writer's closed and ready promises will be resolved.
-  virtual void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) = 0;
+  virtual void releaseWriter(kj::Ptr<Writer> writer, kj::Maybe<jsg::Lock&> maybeJs) = 0;
 
   virtual kj::Maybe<jsg::JsValue> isErroring(jsg::Lock& js) = 0;
 
@@ -888,17 +886,17 @@ class ReaderLocked {
 class WriterLocked {
  public:
   static constexpr kj::StringPtr NAME KJ_UNUSED = "writer-locked"_kj;
-  WriterLocked(WritableStreamController::Writer& writer,
+  WriterLocked(kj::Ptr<WritableStreamController::Writer> writer,
       jsg::Promise<void>::Resolver closedFulfiller,
       kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller = kj::none)
-      : writer(writer),
+      : writer(kj::mv(writer)),
         closedFulfiller(kj::mv(closedFulfiller)),
         readyFulfiller(kj::mv(readyFulfiller)) {}
 
   WriterLocked(WriterLocked&&) = default;
   ~WriterLocked() noexcept(false) {
     KJ_IF_SOME(w, writer) {
-      w.detach();
+      w->detach();
     }
   }
 
@@ -906,7 +904,7 @@ class WriterLocked {
     visitor.visit(closedFulfiller, readyFulfiller);
   }
 
-  WritableStreamController::Writer& getWriter() {
+  kj::Ptr<WritableStreamController::Writer> getWriter() {
     return KJ_ASSERT_NONNULL(writer);
   }
 
@@ -921,7 +919,7 @@ class WriterLocked {
   void setReadyFulfiller(jsg::Lock& js, jsg::PromiseResolverPair<void>& pair) {
     KJ_IF_SOME(w, writer) {
       readyFulfiller = kj::mv(pair.resolver);
-      w.replaceReadyPromise(js, kj::mv(pair.promise));
+      w->replaceReadyPromise(js, kj::mv(pair.promise));
     }
   }
 
@@ -937,7 +935,7 @@ class WriterLocked {
   }
 
  private:
-  kj::Maybe<WritableStreamController::Writer&> writer;
+  kj::Maybe<kj::Ptr<WritableStreamController::Writer>> writer;
   kj::Maybe<jsg::Promise<void>::Resolver> closedFulfiller;
   kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller;
 };
@@ -995,5 +993,31 @@ jsg::Promise<T> rejectedMaybeHandledPromise(jsg::Lock& js, jsg::JsValue reason, 
 inline kj::Maybe<IoContext::Id> tryGetIoContextId() {
   return IoContext::tryGetCurrentId();
 }
+
+// A ReadableStreamSource backed by in-memory data. Unlike newSystemStream() wrapping a
+// newMemoryInputStream(), this implementation does NOT support deferred proxying, so the data
+// is always consumed before the IoContext goes away and `backing` can be something whose
+// lifetime is tied to the IoContext.
+//
+// The `backing` parameter keeps the underlying memory alive for the lifetime of the stream.
+// If not provided, the bytes are copied.
+//
+// Reads and pumps run on the kj event loop without the isolate lock, so `bytes` MUST be
+// readable there.  When MPK protects isolate memory, that rules out anything inside the V8
+// sandbox -- ArrayBuffer and Blob contents in particular.  Callers holding such data must
+// omit `backing` and let this function copy, or copy it themselves beforehand.
+//
+// TODO(cleanup): It would be nice to eventually have some sort of stronger guarantee when
+// deferred proxying can or cannot be used with a stream. Right now it's a bit ad hoc and
+// error-prone. It requires the stream impl to keep track of whether it can be deferred-proxied
+// or not, but in this case, that may be entirely opaque behind the details of the backing memory
+// as is the case with kj::Array<kj::byte> instances that come from the type wrapper system.
+kj::Own<ReadableStreamSource> newMemorySource(
+    kj::ArrayPtr<const kj::byte> bytes, kj::Maybe<kj::Own<void>> backing = kj::none);
+
+// Wraps a kj::AsyncInputStream returned from a tee() call to ensure that it translates
+// errors into equivalent JS exceptions. Typically this is used when customizing tee() on
+// a ReadableStreamSource implementation.
+kj::Own<kj::AsyncInputStream> wrapTeeBranch(kj::Own<kj::AsyncInputStream> branch);
 
 }  // namespace workerd::api

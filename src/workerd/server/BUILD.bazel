@@ -427,5 +427,6 @@ kj_test(
     deps = [
         ":json-logger",
         "@capnp-cpp//src/capnp/compat:json",
+        "@capnp-cpp//src/kj:kj-async",
     ],
 )

@@ -21,11 +21,6 @@ function getRandomDurableObjectName(name) {
 // When writing a test, don't forget to call waitUntilContainerIsHealthy
 // before testing the behaviour with your container.
 //
-// Don't forget to call monitor() after calling start(), as there
-// is an issue with not calling monitor() in Durable Objects where
-// we might lose track of the container lifetime.
-//
-
 export class DurableObjectExample extends DurableObject {
   async testExitCode() {
     const container = this.ctx.container;
@@ -67,6 +62,39 @@ export class DurableObjectExample extends DurableObject {
       assert.strictEqual(typeof exitCode, 'number');
       assert.equal(137, exitCode);
     }
+  }
+
+  async testRunningAfterImmediateExit() {
+    const container = this.ctx.container;
+    if (container.running) {
+      const monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    container.start({ entrypoint: ['/bin/sh', '-c', 'exit 0'] });
+
+    for (let i = 0; i < 100 && container.running; ++i) {
+      await scheduler.wait(100);
+    }
+
+    assert.strictEqual(container.running, false);
+  }
+
+  async testRestartAfterDestroy() {
+    const container = this.ctx.container;
+    if (container.running) {
+      await container.destroy();
+    }
+
+    container.start();
+    await this.waitUntilContainerIsHealthy();
+    await container.destroy(new Error('first lifecycle'));
+    assert.strictEqual(container.running, false);
+
+    container.start({ entrypoint: ['/bin/sh', '-c', 'exit 0'] });
+    await container.monitor();
+    assert.strictEqual(container.running, false);
   }
 
   async testBasics() {
@@ -293,22 +321,27 @@ export class DurableObjectExample extends DurableObject {
     {
       const proc = await container.exec(['echo', 'hello']);
       await proc.stdout.getReader().read();
-      assert.rejects(() => proc.output(), {
-        name: 'TypeError',
-        message:
-          'Cannot call output() after stdout has started being consumed.',
-      });
+      await assert.rejects(
+        Promise.try(() => proc.output()),
+        {
+          name: 'TypeError',
+          message:
+            'Cannot call output() after stdout has started being consumed.',
+        }
+      );
     }
 
     // 12. Make sure Stdin EOF's by default if not set
     await container.exec(['cat']).then((p) => p.output());
 
-    // 13. An already-aborted signal causes exec() to throw synchronously.
+    // 13. An already-aborted signal causes exec() to fail fast.
     {
       const ac = new AbortController();
       ac.abort();
-      assert.throws(
-        () => container.exec(['echo', 'hello'], { signal: ac.signal }),
+      await assert.rejects(
+        Promise.try(() =>
+          container.exec(['echo', 'hello'], { signal: ac.signal })
+        ),
         {
           name: 'AbortError',
         }
@@ -915,10 +948,13 @@ export class DurableObjectExample extends DurableObject {
 
     assert.strictEqual(container.running, false);
 
-    assert.throws(() => container.setLabels({ k: 'v' }), {
-      message:
-        /setLabels\(\) cannot be called on a container that is not running/,
-    });
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ k: 'v' })),
+      {
+        message:
+          /setLabels\(\) cannot be called on a container that is not running/,
+      }
+    );
   }
 
   async testSetLabelsAfterDestroy() {
@@ -938,10 +974,13 @@ export class DurableObjectExample extends DurableObject {
     await monitor;
 
     assert.strictEqual(container.running, false);
-    assert.throws(() => container.setLabels({ k: 'v' }), {
-      message:
-        /setLabels\(\) cannot be called on a container that is not running/,
-    });
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ k: 'v' })),
+      {
+        message:
+          /setLabels\(\) cannot be called on a container that is not running/,
+      }
+    );
   }
 
   async testSetLabelsAfterDestroyWithoutMonitor() {
@@ -958,13 +997,13 @@ export class DurableObjectExample extends DurableObject {
     await this.waitUntilContainerIsHealthy();
 
     await container.destroy();
-    await assert.rejects(() => container.setLabels({ k: 'v' }), {
-      message: /setLabels\(\) requires a running container/,
-    });
-
-    // Clear the JS wrapper's running state after intentionally skipping monitor()
-    // before the setLabels() assertion above.
-    await container.monitor().catch((_err) => {});
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ k: 'v' })),
+      {
+        message:
+          /setLabels\(\) cannot be called on a container that is not running/,
+      }
+    );
     assert.strictEqual(container.running, false);
   }
 
@@ -983,40 +1022,56 @@ export class DurableObjectExample extends DurableObject {
     await this.waitUntilContainerIsHealthy();
 
     // Empty label name
-    assert.throws(() => container.setLabels({ '': 'value' }), {
-      message: /Label names cannot be empty/,
-    });
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ '': 'value' })),
+      {
+        message: /Label names cannot be empty/,
+      }
+    );
 
     // Too many labels
-    assert.throws(
-      () =>
+    await assert.rejects(
+      Promise.try(() =>
         container.setLabels(
           Object.fromEntries(
             Array.from({ length: 11 }, (_, i) => [`l${i}`, 'v'])
           )
-        ),
+        )
+      ),
       { message: /Cannot specify more than 10 container labels/ }
     );
 
     // Label name over 16 bytes
-    assert.throws(() => container.setLabels({ ['n'.repeat(17)]: 'value' }), {
-      message: /Label names cannot exceed 16 bytes \(index 0\)/,
-    });
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ ['n'.repeat(17)]: 'value' })),
+      {
+        message: /Label names cannot exceed 16 bytes \(index 0\)/,
+      }
+    );
 
     // Label value over 64 bytes
-    assert.throws(() => container.setLabels({ name: 'v'.repeat(65) }), {
-      message: /Label values cannot exceed 64 bytes \(index 0\)/,
-    });
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ name: 'v'.repeat(65) })),
+      {
+        message: /Label values cannot exceed 64 bytes \(index 0\)/,
+      }
+    );
 
     // Label name with control character
-    assert.throws(() => container.setLabels({ 'bad\x01name': 'value' }), {
-      message: /Label names cannot contain control characters \(index 0\)/,
-    });
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ 'bad\x01name': 'value' })),
+      {
+        message: /Label names cannot contain control characters \(index 0\)/,
+      }
+    );
 
     // Label value with control character
-    assert.throws(() => container.setLabels({ name: 'bad\x01value' }), {
-      message: /Label values cannot contain control characters \(index 0\)/,
-    });
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ name: 'bad\x01value' })),
+      {
+        message: /Label values cannot contain control characters \(index 0\)/,
+      }
+    );
 
     await container.destroy();
     await monitor;
@@ -2850,6 +2905,26 @@ export const testExitCode = {
     );
     const stub = env.MY_CONTAINER.get(id);
     await stub.testExitCode();
+  },
+};
+
+export const testRunningAfterImmediateExit = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testRunningAfterImmediateExit')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testRunningAfterImmediateExit();
+  },
+};
+
+export const testRestartAfterDestroy = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testRestartAfterDestroy')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testRestartAfterDestroy();
   },
 };
 

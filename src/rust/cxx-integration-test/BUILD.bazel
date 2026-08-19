@@ -12,8 +12,6 @@ wd_rust_crate(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "//src/rust/cxx-integration",
-        "@crates_vendor//:tokio",
         "@crates_vendor//:tracing",
     ],
 )
@@ -23,7 +21,7 @@ kj_test(
     deps = [
         ":cxx-integration-test",
         "//src/rust/cxx-integration",
+        "//src/rust/cxx/kj-rs",
         "@capnp-cpp//src/kj:kj-async",
-        "@workerd-cxx//kj-rs",
     ],
 )

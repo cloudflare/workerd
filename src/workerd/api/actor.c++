@@ -93,6 +93,12 @@ IoChannelFactory::ActorChannel& GlobalActorOutgoingFactory::getOrCreateActorChan
 
 kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClient(
     kj::Maybe<kj::String> cfStr) {
+  return newSingleUseClientWithActorRetryMetadata(kj::mv(cfStr), kj::none);
+}
+
+kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClientWithActorRetryMetadata(
+    kj::Maybe<kj::String> cfStr,
+    kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) {
   auto& context = IoContext::current();
 
   return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
@@ -102,7 +108,8 @@ kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClient(
     return getOrCreateActorChannel(context, tracing.getInternalSpanParent())
         .startRequest({.cfBlobJson = kj::mv(cfStr),
           .parentSpan = tracing.getInternalSpanParent(),
-          .userSpanParent = tracing.getUserSpanParent()});
+          .userSpanParent = tracing.getUserSpanParent(),
+          .actorRetryRequestMetadata = kj::mv(actorRetryRequestMetadata)});
   },
       {.inHouse = true,
         .wrapMetrics = true,
@@ -116,6 +123,12 @@ kj::Own<IoChannelFactory::SubrequestChannel> GlobalActorOutgoingFactory::getSubr
 
 kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClient(
     kj::Maybe<kj::String> cfStr) {
+  return newSingleUseClientWithActorRetryMetadata(kj::mv(cfStr), kj::none);
+}
+
+kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClientWithActorRetryMetadata(
+    kj::Maybe<kj::String> cfStr,
+    kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) {
   auto& context = IoContext::current();
 
   return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
@@ -126,7 +139,8 @@ kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClient(
     // already open prior to this DO starting up.
     return actorChannel->startRequest({.cfBlobJson = kj::mv(cfStr),
       .parentSpan = tracing.getInternalSpanParent(),
-      .userSpanParent = tracing.getUserSpanParent()});
+      .userSpanParent = tracing.getUserSpanParent(),
+      .actorRetryRequestMetadata = kj::mv(actorRetryRequestMetadata)});
   },
       {.inHouse = true,
         .wrapMetrics = true,

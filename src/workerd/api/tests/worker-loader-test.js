@@ -1103,23 +1103,16 @@ export let abortIsolateDynamic = {
   },
 };
 
-// Regression test for AUTOVULN-CLOUDFLARE-WORKERD-256: the inner .then()
-// continuation in WorkerLoader::get() previously captured IoContext by raw C++
-// reference (&ioctx). If the originating IoContext was destroyed before the
-// user's getCode() promise resolved, and the promise was later resolved from a
-// different IoContext, the lambda would dereference freed memory (heap UAF).
+// Regression test for AUTOVULN-CLOUDFLARE-WORKERD-256: the getCode() promise can be resolved
+// after its originating IoContext has been destroyed, and it can be resolved from a different
+// IoContext. The continuation must reject rather than accessing the destroyed context. This test:
+//   1. Makes a sub-request (IoContext B) that calls env.loader.get() with a pending getCode
+//      promise, saving the resolve function globally.
+//   2. Returns from the sub-request so IoContext B drains and is destroyed.
+//   3. Resolves the saved promise from the test's IoContext A.
 //
-// The fix replaces the raw reference with a WeakRef. This test exercises the
-// patched code path by:
-//   1. Making a sub-request (IoContext B) that calls env.loader.get() with a
-//      pending getCode promise, saving the resolve function globally.
-//   2. Returning from the sub-request so IoContext B drains and is destroyed.
-//   3. Resolving the saved promise from the test's IoContext A.
-//
-// Pre-patch: the .then() continuation dereferences freed IoContext B → UAF/crash.
-// Post-patch: the WeakRef check detects the dead IoContext and throws a clean
-// JS error ("The request which initiated this dynamic worker load has already
-// completed."), which surfaces as a rejected promise on the WorkerStub.
+// The continuation is bound to IoContext B using IoContext::addFunctor(), so calling it from
+// IoContext A throws before it can access IoContext B.
 
 // Entrypoint for the sub-request that sets up the pending loader promise.
 export class SetupLoaderUaf extends WorkerEntrypoint {
@@ -1128,7 +1121,7 @@ export class SetupLoaderUaf extends WorkerEntrypoint {
     globalThis.savedLoaderResolve = resolve;
 
     // Call env.loader.get() with a getCode that returns the pending promise.
-    // This installs a .then() continuation capturing the IoContext reference.
+    // This installs a .then() continuation bound to this request's IoContext.
     this.env.loader.get(null, () => promise);
 
     // Let the reentry callback run and chain .then() onto the promise.
@@ -1150,8 +1143,8 @@ export let regressionDeadIoContextGetCode = {
     // Step 2: IoContext B has drained. Give the runtime a moment to clean up.
     await scheduler.wait(50);
 
-    // Step 3: resolve the saved promise from IoContext A. Post-patch, the inner
-    // .then() continuation detects the dead IoContext via WeakRef and throws.
+    // Step 3: resolve the saved promise from IoContext A. The inner .then() continuation throws
+    // when its IoOwn detects that IoContext B is not current.
     assert.notStrictEqual(
       globalThis.savedLoaderResolve,
       undefined,

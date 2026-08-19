@@ -436,42 +436,43 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
         js.typeError("This ReadableStream belongs to an object that is closing."_kj));
   }
 
-  v8::Local<v8::ArrayBuffer> store;
-  size_t byteLength = 0;
-  size_t byteOffset = 0;
+  // It's worth mentioning the fact that the implementation here has always
+  // been non-standard. The spec requires that the read() return the same
+  // kind of TypedArray as was passed in, but this implementation has always
+  // instead returned a Uint8Array over the same backing memory. This is
+  // non-conformant but cannot be changed without a compat flag and there's
+  // never been a strong motivation to do so.
+
+  kj::Maybe<jsg::JsArrayBufferView> maybeBufferView;
   size_t atLeast = 1;
 
   KJ_IF_SOME(byobOptions, maybeByobOptions) {
-    store = byobOptions.bufferView.getHandle(js)->Buffer();
-    byteOffset = byobOptions.byteOffset;
-    byteLength = byobOptions.byteLength;
+    auto view = byobOptions.bufferView.getHandle(js);
     atLeast = byobOptions.atLeast.orDefault(atLeast);
     if (byobOptions.detachBuffer) {
-      if (!store->IsDetachable()) {
+      if (!view.isDetachable()) {
         return js.rejectedPromise<ReadResult>(
             js.typeError("Unable to use non-detachable ArrayBuffer"_kj));
       }
-      auto backing = store->GetBackingStore();
-      jsg::check(store->Detach(v8::Local<v8::Value>()));
-      store = v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backing));
+      view = view.detachAndTake(js);
     }
+    maybeBufferView = view;
   }
 
-  auto getOrInitStore = [&](bool errorCase = false) {
-    if (store.IsEmpty()) {
-      if (errorCase) {
-        byteLength = 0;
-      } else if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE)) {
-        byteLength = UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE_2;
-      } else {
-        byteLength = UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE;
-      }
-
-      if (!v8::ArrayBuffer::MaybeNew(js.v8Isolate, byteLength).ToLocal(&store)) {
-        return v8::Local<v8::ArrayBuffer>();
-      }
+  auto getOrInitStore = [&](bool errorCase = false) -> kj::Maybe<jsg::JsArrayBufferView> {
+    KJ_IF_SOME(byobView, maybeBufferView) {
+      return byobView;
     }
-    return store;
+
+    if (errorCase) {
+      return jsg::JsUint8Array::tryCreate(js, 0).map(
+          [](auto& u8) { return jsg::JsArrayBufferView(u8); });
+    } else if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE)) {
+      return jsg::JsUint8Array::tryCreate(js, UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE_2)
+          .map([](auto& u8) { return jsg::JsArrayBufferView(u8); });
+    }
+    return jsg::JsUint8Array::tryCreate(js, UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE)
+        .map([](auto& u8) { return jsg::JsArrayBufferView(u8); });
   };
 
   disturbed = true;
@@ -481,16 +482,15 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       if (maybeByobOptions != kj::none && FeatureFlags::get(js).getInternalStreamByobReturn()) {
         // When using the BYOB reader, we must return a sized-0 Uint8Array that is backed
         // by the ArrayBuffer passed in the options.
-        auto theStore = getOrInitStore(true);
-        if (theStore.IsEmpty()) {
+        KJ_IF_SOME(store, getOrInitStore(true)) {
+          return js.resolvedPromise(ReadResult{
+            .value = jsg::JsValue(store.getBuffer().newUint8View(0, 0)).addRef(js),
+            .done = true,
+          });
+        } else {
           return js.rejectedPromise<ReadResult>(
               js.typeError("Unable to allocate memory for read"_kj));
         }
-        auto u8 = v8::Uint8Array::New(theStore, 0, 0);
-        return js.resolvedPromise(ReadResult{
-          .value = jsg::JsValue(u8).addRef(js),
-          .done = true,
-        });
       }
       return js.resolvedPromise(ReadResult{.done = true});
     }
@@ -510,175 +510,183 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       }
       readPending = true;
 
-      auto theStore = getOrInitStore();
-      if (theStore.IsEmpty()) {
-        return js.rejectedPromise<ReadResult>(
-            js.typeError("Unable to allocate memory for read"_kj));
-      }
-
-      // byteOffset/byteLength are copied out of the in-cage v8::ArrayBufferView metadata on the
-      // BYOB path, so a corrupted view could place the destination outside the allocation. Bound
-      // them against the BackingStore's length, which lives outside the V8 sandbox and so is not
-      // reachable from an in-cage write. Testing byteOffset first keeps the subtraction from
-      // underflowing and avoids summing two untrusted lengths; that stays correct no matter how
-      // large the sandbox, and hence the maximum buffer size, becomes. For a resizable buffer this
-      // length is the maximum reservation rather than the live size; the branch below narrows it.
-      auto backingSize = theStore->GetBackingStore()->ByteLength();
-      if (byteOffset > backingSize || byteLength > backingSize - byteOffset) {
-        readPending = false;
-        return js.rejectedPromise<ReadResult>(
-            js.typeError("BYOB read destination view exceeds backing buffer bounds."_kj));
-      }
-
-      // A resizable ArrayBuffer may shrink while the read is pending, so narrow the request to the
-      // live size now. The continuation below re-validates against the size at completion time.
-      if (theStore->IsResizableByUserJavaScript()) {
-        auto currentByteLength = theStore->ByteLength();
-        if (byteOffset >= currentByteLength) {
+      KJ_IF_SOME(store, getOrInitStore()) {
+        // byteOffset/byteLength are copied out of the in-cage v8::ArrayBufferView metadata on the
+        // BYOB path, so a corrupted view could place the destination outside the allocation. Bound
+        // them against the BackingStore's length, which lives outside the V8 sandbox and so is not
+        // reachable from an in-cage write. Testing byteOffset first keeps the subtraction from
+        // underflowing and avoids summing two untrusted lengths; that stays correct no matter how
+        // large the sandbox, and hence the maximum buffer size, becomes.
+        size_t byteLength = store.size();
+        size_t byteOffset = store.getOffset();
+        auto backingSize = store.getBuffer().backingStoreSize();
+        if (byteOffset > backingSize || byteLength > backingSize - byteOffset) {
           readPending = false;
-          auto u8 = v8::Uint8Array::New(theStore, 0, 0);
-          return js.resolvedPromise(ReadResult{
-            .value = jsg::JsValue(u8).addRef(js),
-            .done = false,
-          });
+          return js.rejectedPromise<ReadResult>(
+              js.typeError("BYOB read destination view exceeds backing buffer bounds."_kj));
         }
-        if (byteOffset + byteLength > currentByteLength) {
-          byteLength = currentByteLength - byteOffset;
-          if (atLeast > byteLength) {
-            atLeast = byteLength > 0 ? byteLength : 1;
-          }
-        }
-      }
 
-      // Reads land in a kj-heap buffer outside the V8 sandbox rather than directly in the
-      // BackingStore. tryRead() completes on the kj event loop without the isolate lock, and when
-      // MPK protects isolate memory the sandbox pages carry the isolate's protection key, so a
-      // write from that context faults: SIGSEGV for a memcpy, or EFAULT for a write the kernel
-      // performs on our behalf. The continuation below copies into the BackingStore under the lock,
-      // after re-validating that it is still attached and large enough. Routing through a temporary
-      // also means a buffer detached mid-read never receives a late write, which would otherwise
-      // corrupt whatever now owns the transferred BackingStore.
-      auto tempBuffer = kj::heapArray<kj::byte>(byteLength);
-      auto bytes = tempBuffer.asPtr();
-
-      KJ_ASSERT(atLeast <= bytes.size(), "minBytes must not exceed maxBytes in tryRead");
-
-      auto promise =
-          kj::evalNow([&] { return readable->tryRead(bytes.begin(), atLeast, bytes.size()); });
-      KJ_IF_SOME(readerLock, readState.tryGetUnsafe<ReaderLocked>()) {
-        promise = KJ_ASSERT_NONNULL(readerLock.getCanceler())->wrap(kj::mv(promise));
-      }
-
-      // TODO(soon): We use awaitIoLegacy() here because if the stream terminates in JavaScript in
-      // this same isolate, then the promise may actually be waiting on JavaScript to do something,
-      // and so should not be considered waiting on external I/O. We will need to use
-      // registerPendingEvent() manually when reading from an external stream. Ideally, we would
-      // refactor the implementation so that when waiting on a JavaScript stream, we strictly use
-      // jsg::Promises and not kj::Promises, so that it doesn't look like I/O at all, and there's
-      // no need to drop the isolate lock and take it again every time some data is read/written.
-      // That's a larger refactor, though.
-      auto& ioContext = IoContext::current();
-      return ioContext.awaitIoLegacy(js, kj::mv(promise))
-          .then(js,
-              ioContext.addFunctor(
-                  [ref = addRef(), store = js.v8Ref(store), byteOffset, byteLength,
-                      isByob = maybeByobOptions != kj::none, tempBuffer = kj::mv(tempBuffer)](
-                      jsg::Lock& js, size_t amount) mutable -> jsg::Promise<ReadResult> {
-        auto& controller = static_cast<ReadableStreamInternalController&>(ref->getController());
-        controller.readPending = false;
-        KJ_ASSERT(amount <= byteLength);
-        if (amount == 0) {
-          if (!controller.state.is<StreamStates::Errored>()) {
-            controller.doClose(js);
-          }
-          KJ_IF_SOME(o, controller.owner) {
-            o->signalEof(js);
-          }
-          if (isByob && FeatureFlags::get(js).getInternalStreamByobReturn()) {
-            // When using the BYOB reader, we must return a sized-0 Uint8Array that is backed
-            // by the ArrayBuffer passed in the options.
-            auto u8 = v8::Uint8Array::New(store.getHandle(js), 0, 0);
+        // A resizable ArrayBuffer may shrink while the read is pending, so narrow the request to
+        // the live size now. The continuation below re-validates against the size at completion
+        // time.
+        if (store.isResizable()) {
+          // Note that we measure against the buffer's live size, not the view's: a
+          // fixed-length view over a shrunken buffer reports itself fully out-of-bounds
+          // (size 0) even when part of its range is still backed by live buffer memory.
+          auto currentByteLength = store.getBuffer().size();
+          if (byteOffset >= currentByteLength) {
+            readPending = false;
+            // The view's own offset may extend beyond the shrunken buffer, so the
+            // zero-length result view is created at offset 0 instead.
             return js.resolvedPromise(ReadResult{
-              .value = jsg::JsValue(u8).addRef(js),
-              .done = true,
-            });
-          }
-          return js.resolvedPromise(ReadResult{.done = true});
-        }
-        // Return a slice so the script can see how many bytes were read.
-
-        // We have to check to see if the store was detached or resized while we were waiting
-        // for the read to complete.
-        auto handle = store.getHandle(js);
-        if (handle->WasDetached()) {
-          // If the buffer was detached, we resolve with a new zero-length ArrayBuffer.
-          // The bytes that were read are lost, but this is a valid result.
-
-          // Silly user, trix are for kids.
-          IoContext::current().logWarningOnce(
-              "A buffer that was being used for a read operation on a ReadableStream was detached "
-              "while the read was pending. The read completed with a zero-length buffer and the data "
-              "that was read is lost. Avoid detaching buffers that are being used for active read "
-              "operations on streams, or use the streams_byob_reader_detaches_buffer compatibility "
-              "flag, to prevent this from happening."_kj);
-
-          auto buffer = v8::ArrayBuffer::New(js.v8Isolate, 0);
-          auto u8 = v8::Uint8Array::New(buffer, 0, 0);
-          return js.resolvedPromise(ReadResult{
-            .value = jsg::JsValue(u8).addRef(js),
-            .done = false,
-          });
-        }
-
-        // Re-derive the deliverable length from the size the buffer has now. byteOffset and amount
-        // are compared against it without being summed, for the same reason as the bounds check at
-        // read time.
-        auto liveLength = handle->ByteLength();
-        if (byteOffset > liveLength || amount > liveLength - byteOffset) {
-          // If the buffer was resized smaller, we return a truncated result.
-
-          IoContext::current().logWarningOnce(
-              "A buffer that was being used for a read operation on a ReadableStream was resized "
-              "smaller while the read was pending. The read completed with a truncated buffer "
-              "containing only the bytes that fit within the new size. Avoid resizing buffers that "
-              "are being used for active read operations on streams, or use the "
-              "streams_byob_reader_detaches_buffer compatibility flag, to prevent this from "
-              "happening."_kj);
-
-          if (byteOffset >= liveLength) {
-            auto u8 = v8::Uint8Array::New(store.getHandle(js), 0, 0);
-            return js.resolvedPromise(ReadResult{
-              .value = jsg::JsValue(u8).addRef(js),
+              .value = jsg::JsValue(store.getBuffer().newUint8View(0, 0)).addRef(js),
               .done = false,
             });
           }
-          amount = liveLength - byteOffset;
+          if (byteOffset + byteLength > currentByteLength) {
+            byteLength = currentByteLength - byteOffset;
+            if (atLeast > byteLength) {
+              atLeast = byteLength > 0 ? byteLength : 1;
+            }
+          }
         }
 
-        // Deliver the bytes from the temporary into the caller's BackingStore. The checks above
-        // guarantee the buffer is still attached and that [byteOffset, byteOffset + amount) lies
-        // within its live length, and `amount <= byteLength == tempBuffer.size()`.
-        KJ_ASSERT(byteOffset <= liveLength && amount <= liveLength - byteOffset);
-        auto destPtr = static_cast<kj::byte*>(handle->GetBackingStore()->Data());
-        memcpy(destPtr + byteOffset, tempBuffer.begin(), amount);
+        // Reads land in a kj-heap buffer outside the V8 sandbox rather than directly in the
+        // BackingStore. tryRead() completes on the kj event loop without the isolate lock, and when
+        // MPK protects isolate memory the sandbox pages carry the isolate's protection key, so a
+        // write from that context faults: SIGSEGV for a memcpy, or EFAULT for a write the kernel
+        // performs on our behalf. The continuation below copies into the BackingStore under the lock,
+        // after re-validating that it is still attached and large enough. Routing through a temporary
+        // also means a buffer detached mid-read never receives a late write, which would otherwise
+        // corrupt whatever now owns the transferred BackingStore.
+        auto tempBuffer = kj::heapArray<kj::byte>(byteLength);
+        auto bytes = tempBuffer.asPtr();
 
-        auto u8 = v8::Uint8Array::New(store.getHandle(js), byteOffset, amount);
-        return js.resolvedPromise(ReadResult{
-          .value = jsg::JsValue(u8).addRef(js),
-          .done = false,
-        });
-      }),
-              ioContext.addFunctor([ref = addRef()](jsg::Lock& js,
-                                       jsg::Value reason) mutable -> jsg::Promise<ReadResult> {
-        auto& controller = static_cast<ReadableStreamInternalController&>(ref->getController());
-        controller.readPending = false;
-        auto error = jsg::JsValue(reason.getHandle(js));
-        if (!controller.state.is<StreamStates::Errored>()) {
-          controller.doError(js, error);
+        KJ_ASSERT(atLeast <= bytes.size(), "minBytes must not exceed maxBytes in tryRead");
+
+        auto promise =
+            kj::evalNow([&] { return readable->tryRead(bytes.begin(), atLeast, bytes.size()); });
+        KJ_IF_SOME(readerLock, readState.tryGetUnsafe<ReaderLocked>()) {
+          promise = KJ_ASSERT_NONNULL(readerLock.getCanceler())->wrap(kj::mv(promise));
         }
 
-        return js.rejectedPromise<ReadResult>(error);
-      }));
+        // TODO(soon): We use awaitIoLegacy() here because if the stream terminates in JavaScript
+        // in this same isolate, then the promise may actually be waiting on JavaScript to do
+        // something, and so should not be considered waiting on external I/O. We will need to use
+        // registerPendingEvent() manually when reading from an external stream. Ideally, we would
+        // refactor the implementation so that when waiting on a JavaScript stream, we strictly use
+        // jsg::Promises and not kj::Promises, so that it doesn't look like I/O at all, and there's
+        // no need to drop the isolate lock and take it again every time some data is read/written.
+        // That's a larger refactor, though.
+        auto& ioContext = IoContext::current();
+        return ioContext.awaitIoLegacy(js, kj::mv(promise))
+            .then(js,
+                ioContext.addFunctor(
+                    [ref = addRef(), store = store.addRef(js), byteOffset, byteLength,
+                        isByob = maybeByobOptions != kj::none,
+                        tempBuffer = kj::mv(tempBuffer)](jsg::Lock& js, IoContext& ioContext,
+                        size_t amount) mutable -> jsg::Promise<ReadResult> {
+          auto& controller = static_cast<ReadableStreamInternalController&>(ref->getController());
+          auto view = store.getHandle(js);
+          controller.readPending = false;
+          KJ_ASSERT(amount <= byteLength);
+          if (amount == 0) {
+            if (!controller.state.is<StreamStates::Errored>()) {
+              controller.doClose(js);
+            }
+            KJ_IF_SOME(o, controller.owner) {
+              o->signalEof(js);
+            }
+            if (isByob && FeatureFlags::get(js).getInternalStreamByobReturn()) {
+              // When using the BYOB reader, we must return a sized-0 Uint8Array that is backed
+              // by the ArrayBuffer passed in the options.
+              return js.resolvedPromise(ReadResult{
+                .value = jsg::JsValue(view.getBuffer().newUint8View(0, 0)).addRef(js),
+                .done = true,
+              });
+            }
+            return js.resolvedPromise(ReadResult{.done = true});
+          }
+
+          // We have to check to see if the store was detached or resized while we were waiting
+          // for the read to complete.
+          if (view.isDetached()) {
+            // If the buffer was detached, we resolve with a new zero-length ArrayBuffer.
+            // The bytes that were read are lost, but this is a valid result.
+
+            // Silly user, trix are for kids.
+            ioContext.logWarningOnce(
+                "A buffer that was being used for a read operation on a ReadableStream was detached "
+                "while the read was pending. The read completed with a zero-length buffer and the "
+                "data that was read is lost. Avoid detaching buffers that are being used for active "
+                "read operations on streams, or use the streams_byob_reader_detaches_buffer "
+                "compatibility flag, to prevent this from happening."_kj);
+
+            return js.resolvedPromise(ReadResult{
+              .value = jsg::JsValue(jsg::JsUint8Array::create(js, 0)).addRef(js),
+              .done = false,
+            });
+          }
+
+          // Re-derive the deliverable length from the size the buffer has now. byteOffset and
+          // amount are compared against it without being summed, for the same reason as the bounds
+          // check at read time.
+          auto liveLength = view.getBuffer().size();
+          if (byteOffset > liveLength || amount > liveLength - byteOffset) {
+            // If the buffer was resized smaller, we return a truncated result.
+
+            ioContext.logWarningOnce(
+                "A buffer that was being used for a read operation on a ReadableStream was resized "
+                "smaller while the read was pending. The read completed with a truncated buffer "
+                "containing only the bytes that fit within the new size. Avoid resizing buffers "
+                "that are being used for active read operations on streams, or use the "
+                "streams_byob_reader_detaches_buffer compatibility flag, to prevent this from "
+                "happening."_kj);
+
+            if (byteOffset >= liveLength) {
+              // The view's own offset extends beyond the shrunken buffer, so the
+              // zero-length result view is created at offset 0 instead.
+              return js.resolvedPromise(ReadResult{
+                .value = jsg::JsValue(view.getBuffer().newUint8View(0, 0)).addRef(js),
+                .done = false,
+              });
+            }
+            amount = liveLength - byteOffset;
+          }
+
+          // Deliver the bytes from the temporary into the caller's BackingStore. The checks above
+          // guarantee the buffer is still attached and that [byteOffset, byteOffset + amount) lies
+          // within its live length, and `amount <= byteLength == tempBuffer.size()`.
+          KJ_ASSERT(byteOffset <= liveLength && amount <= liveLength - byteOffset);
+          view.getBuffer()
+              .asArrayPtr()
+              .slice(byteOffset, byteOffset + amount)
+              .copyFrom(tempBuffer.first(amount));
+
+          // Return a Uint8Array over the bytes that were read so the script can see how
+          // many bytes were read. Reads always resolve with a Uint8Array over the same
+          // buffer that backed the read, regardless of the view type provided in the
+          // read options.
+          return js.resolvedPromise(ReadResult{
+            .value = jsg::JsValue(view.getBuffer().newUint8View(byteOffset, amount)).addRef(js),
+            .done = false,
+          });
+        }),
+                ioContext.addFunctor([ref = addRef()](jsg::Lock& js,
+                                         jsg::Value reason) mutable -> jsg::Promise<ReadResult> {
+          auto& controller = static_cast<ReadableStreamInternalController&>(ref->getController());
+          controller.readPending = false;
+          auto error = jsg::JsValue(reason.getHandle(js));
+          if (!controller.state.is<StreamStates::Errored>()) {
+            controller.doError(js, error);
+          }
+
+          return js.rejectedPromise<ReadResult>(error);
+        }));
+      } else {
+        return js.rejectedPromise<ReadResult>(
+            js.typeError("Unable to allocate memory for read"_kj));
+      }
     }
   }
   KJ_UNREACHABLE;
@@ -1315,7 +1323,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
   auto sourceLock = KJ_ASSERT_NONNULL(source->getController().tryPipeLock());
 
   // Let's also acquire the destination pipe lock.
-  writeState.transitionTo<PipeLocked>(*source);
+  writeState.transitionTo<PipeLocked>(source.getWeakRef(js));
 
   // In the early-exit paths below we must release the source's pipe lock. The lock is
   // released through the source's controller, never through sourceLock itself, and our
@@ -1478,7 +1486,7 @@ kj::Maybe<int> WritableStreamInternalController::getDesiredSize() {
   KJ_UNREACHABLE;
 }
 
-bool WritableStreamInternalController::lockWriter(jsg::Lock& js, Writer& writer) {
+bool WritableStreamInternalController::lockWriter(jsg::Lock& js, kj::Ptr<Writer> writer) {
   if (isLockedToWriter()) {
     return false;
   }
@@ -1506,14 +1514,13 @@ bool WritableStreamInternalController::lockWriter(jsg::Lock& js, Writer& writer)
   }
 
   writeState.transitionTo<WriterLocked>(kj::mv(lock));
-  writer.attach(js, *this, kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
+  writer->attach(js, addRef(), kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
   return true;
 }
 
 void WritableStreamInternalController::releaseWriter(
-    Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) {
+    kj::Ptr<Writer> writer, kj::Maybe<jsg::Lock&> maybeJs) {
   KJ_IF_SOME(locked, writeState.tryGetUnsafe<WriterLocked>()) {
-    KJ_ASSERT(&locked.getWriter() == &writer);
     KJ_IF_SOME(js, maybeJs) {
       maybeRejectPromise<void>(js, locked.getClosedFulfiller(),
           js.typeError("This WritableStream writer has been released."_kj));
@@ -1720,8 +1727,9 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       // That's a larger refactor, though.
       return ioContext.awaitIoLegacy(js, kj::mv(promise))
           .then(js,
-              ioContext.addFunctor([self = addRef(), check, maybeAbort, amountToWrite](
-                                       jsg::Lock& js) mutable -> jsg::Promise<void> {
+              ioContext.addFunctor(
+                  [self = addRef(), check, maybeAbort, amountToWrite](
+                      jsg::Lock& js, IoContext& ioContext) mutable -> jsg::Promise<void> {
         auto& controller = static_cast<WritableStreamInternalController&>(self->getController());
         // Under some conditions, the clean up has already happened.
         if (controller.queue.empty()) return js.resolvedPromise();
@@ -1734,7 +1742,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         }
         controller.queue.pop_front();
         maybeAbort(js, controller);
-        return controller.writeLoop(js, IoContext::current());
+        return controller.writeLoop(js, ioContext);
       }),
               ioContext.addFunctor(
                   [self = addRef(), check, maybeAbort, amountToWrite](
@@ -2033,7 +2041,7 @@ bool WritableStreamInternalController::Pipe::checkSignal(jsg::Lock& js) {
       auto readableRef = [&]() -> kj::Maybe<jsg::Ref<ReadableStream>> {
         kj::Maybe<jsg::Ref<ReadableStream>> maybeRef;
         parentRef.writeState.whenState<PipeLocked>(
-            [&](PipeLocked& locked) { maybeRef = locked.ref.addRef(); });
+            [&](PipeLocked& locked) { maybeRef = locked.ref.tryAddRef(js); });
         return kj::mv(maybeRef);
       }();
 
@@ -2251,7 +2259,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
   auto getReadableRef = [&]() -> kj::Maybe<jsg::Ref<ReadableStream>> {
     kj::Maybe<jsg::Ref<ReadableStream>> maybeRef;
     parentRef.writeState.whenState<PipeLocked>(
-        [&](PipeLocked& locked) { maybeRef = locked.ref.addRef(); });
+        [&](PipeLocked& locked) { maybeRef = locked.ref.tryAddRef(js); });
     return kj::mv(maybeRef);
   };
 
@@ -2324,19 +2332,26 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
 
       if (handle.isArrayBuffer() || handle.isSharedArrayBuffer() || handle.isArrayBufferView() ||
           handle.isString()) {
+        // addFunctor so the Rc<State> (whose `owner` ref strongly pins the
+        // destination stream) is dropped at IoContext teardown even if the
+        // write promise never settles; a bare capture would otherwise retain
+        // both streams on the isolate heap until isolate death.
+        auto& ioContext = IoContext::current();
         return state->write(js, handle)
             .then(js,
-                [state = state.addRef()](
-                    jsg::Lock& js) mutable -> jsg::Promise<void> { return state->pipeLoop(js); },
-                [state = state.addRef()](
-                    jsg::Lock& js, jsg::Value reason) mutable -> jsg::Promise<void> {
+                ioContext.addFunctor(
+                    [state = state.addRef()](jsg::Lock& js) mutable -> jsg::Promise<void> {
+          return state->pipeLoop(js);
+        }),
+                ioContext.addFunctor([state = state.addRef()](jsg::Lock& js,
+                                         jsg::Value reason) mutable -> jsg::Promise<void> {
           if (state->isAborted() || state->isSourceReleased()) {
             return js.resolvedPromise();
           }
           auto error = jsg::JsValue(reason.getHandle(js));
           state->tryErrorParent(js, error);
           return state->pipeLoop(js);
-        });
+        }));
       }
     }
     // Undefined and null are perfectly valid values to pass through a ReadableStream,

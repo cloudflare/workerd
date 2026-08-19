@@ -19,8 +19,8 @@ def rust_cxx_bridge(
             src + ".h",
             src + ".cc",
         ],
-        cmd = "$(location @workerd-cxx//:codegen) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
-        tools = ["@workerd-cxx//:codegen"],
+        cmd = "$(location //src/rust/cxx:codegen) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
+        tools = ["//src/rust/cxx:codegen"],
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
@@ -105,8 +105,8 @@ def wd_rust_crate(
     # Add cxx dependency if there are any cxx bridges
     if len(cxx_bridge_srcs) > 0:
         deps = deps + [
-            "@workerd-cxx//kj-rs",
-            "@workerd-cxx//:cxx",
+            "//src/rust/cxx/kj-rs",
+            "//src/rust/cxx:cxx",
         ]
 
     include_prefix = "workerd/" + native.package_name().removeprefix("src/")
@@ -122,8 +122,8 @@ def wd_rust_crate(
             # Not applying visibility here – if you import the cxxbridge header, you will likely
             # also need the rust library itself to avoid linker errors.
             deps = cxx_bridge_deps.get(bridge_src, []) + [
-                "@workerd-cxx//kj-rs",
-                "@workerd-cxx//:cxx",
+                "//src/rust/cxx/kj-rs",
+                "//src/rust/cxx:cxx",
             ],
             tags = cxx_bridge_tags,
             local_defines = cxx_bridge_local_defines,
@@ -162,7 +162,8 @@ def wd_rust_crate(
             "RUST_TEST_THREADS": "1",
         } | test_env,
         size = test_size,
-        tags = test_tags + ["no-coverage"],
+        # Tag with cpu:4 since this target depends on linkopts_default.
+        tags = test_tags + ["no-coverage", "cpu:4"],
         experimental_use_cc_common_link = 1,
         crate_features = crate_features,
         deps = test_deps,

@@ -47,8 +47,7 @@ type QuerySqlResult = {
 };
 
 type RpcResponse<T = unknown> =
-  | { success: true; results: T }
-  | { success: false; error: Error };
+  { success: true; results: T } | { success: false; error: Error };
 
 type D1Meta = {
   /**
@@ -123,9 +122,7 @@ type D1RowsColumns<T = unknown> = D1Response & {
 };
 
 type D1UpstreamSuccess<T = unknown> =
-  | D1Result<T>
-  | D1Response
-  | D1RowsColumns<T>;
+  D1Result<T> | D1Response | D1RowsColumns<T>;
 
 type D1UpstreamResponse<T = unknown> = D1UpstreamSuccess<T> | D1UpstreamFailure;
 

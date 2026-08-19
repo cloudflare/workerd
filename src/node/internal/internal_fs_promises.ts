@@ -665,9 +665,7 @@ export function writeFile(
 export async function* glob(
   pattern: string | readonly string[],
   options:
-    | GlobOptions
-    | GlobOptionsWithFileTypes
-    | GlobOptionsWithoutFileTypes = {}
+    GlobOptions | GlobOptionsWithFileTypes | GlobOptionsWithoutFileTypes = {}
 ): AsyncGenerator<string | Dirent> {
   const results = await Promise.resolve(fssync.globSync(pattern, options));
   for (const result of results) {

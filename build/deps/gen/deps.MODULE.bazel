@@ -5,7 +5,7 @@ http = use_extension("@//:build/exts/http.bzl", "http")
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
 # ada-url
-bazel_dep(name = "ada-url", version = "3.4.4")
+bazel_dep(name = "ada-url", version = "4.0.0")
 
 # boringssl
 bazel_dep(name = "boringssl", repo_name = "ssl")
@@ -27,10 +27,10 @@ bazel_dep(name = "brotli", version = "1.2.0.bcr.1")
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
-    sha256 = "1641652ba06af389b48ec63f8c264f6a48dbcf93758624abe51d63efeeb537fc",
-    strip_prefix = "capnproto-capnproto-f849818/c++",
+    sha256 = "b7b6ec882c84cc513b271acb20ef7df70228f94d6b32679ec639706f886aee59",
+    strip_prefix = "capnproto-capnproto-59cc025/c++",
     type = "tgz",
-    url = "https://github.com/capnproto/capnproto/tarball/f8498184d20664406fc61bb91411a0d86e726e71",
+    url = "https://github.com/capnproto/capnproto/tarball/59cc025fa0c04d083aafb57604a28e72eb506037",
 )
 use_repo(http, "capnp-cpp")
 
@@ -147,22 +147,12 @@ use_repo(http, "simdutf")
 # tcmalloc
 bazel_dep(name = "tcmalloc", version = "0.0.0-20250927-12f2552")
 
-# workerd-cxx
-http.archive(
-    name = "workerd-cxx",
-    sha256 = "4288efaacfb85730e4710d284fc4b4790c0453e47cd4d85cde9a4ecffd277b3b",
-    strip_prefix = "cloudflare-workerd-cxx-96c032f",
-    type = "tgz",
-    url = "https://github.com/cloudflare/workerd-cxx/tarball/96c032f14ad1b0a0caba952b8ed42a9e781d852f",
-)
-use_repo(http, "workerd-cxx")
-
 # zlib
 bazel_dep(name = "zlib")
 git_override(
     module_name = "zlib",
     build_file = "//:build/BUILD.zlib",
-    commit = "8b3aa8a1cd7585c0c4c67351481227b046a662a0",
+    commit = "8002e91cea296dfc8cd377bda4988a9ce9d89b13",
     patch_strip = 1,
     patches = [
         "//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch",

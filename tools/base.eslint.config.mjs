@@ -161,6 +161,12 @@ export function baseConfig() {
               "Use private field syntax (#) instead of 'private' keyword for constructor parameters",
           },
         ],
+        // TODO(cleanup): Newly added incompatible checks. Fix and enable.
+        '@typescript-eslint/no-unnecessary-type-assertion': [ 'off' ],
+        '@typescript-eslint/no-useless-default-assignment': [ 'off' ],
+        'no-unassigned-vars': [ 'off' ],
+        'no-useless-assignment': [ 'off' ],
+        'preserve-caught-error': [ 'off' ],
       },
     },
     {

@@ -64,7 +64,7 @@ class ReadableLockImpl {
   void onClose(jsg::Lock& js);
   void onError(jsg::Lock& js, jsg::JsValue reason);
 
-  kj::Maybe<kj::Ptr<PipeController>> tryPipeLock(Controller& self);
+  kj::Maybe<kj::Ptr<PipeController>> tryPipeLock(kj::Ptr<Controller> self);
 
   // Releases the pipe lock acquired via tryPipeLock(), destroying the PipeController.
   // The caller must have dropped every kj::Ptr to the PipeController first. A no-op if
@@ -95,25 +95,25 @@ class ReadableLockImpl {
   class PipeLocked final: public PipeController {
    public:
     static constexpr kj::StringPtr NAME KJ_UNUSED = "pipe-locked"_kj;
-    explicit PipeLocked(Controller& inner): inner(inner) {}
+    explicit PipeLocked(kj::Ptr<Controller> inner): inner(kj::mv(inner)) {}
 
     bool isClosed() override {
-      return inner.state.template is<StreamStates::Closed>();
+      return inner->state.template is<StreamStates::Closed>();
     }
 
     kj::Maybe<jsg::JsValue> tryGetErrored(jsg::Lock& js) override {
-      KJ_IF_SOME(errored, inner.state.template tryGetUnsafe<StreamStates::Errored>()) {
+      KJ_IF_SOME(errored, inner->state.template tryGetUnsafe<StreamStates::Errored>()) {
         return errored.getHandle(js);
       }
       return kj::none;
     }
 
     void close(jsg::Lock& js) override {
-      inner.doClose(js);
+      inner->doClose(js);
     }
 
     void error(jsg::Lock& js, jsg::JsValue reason) override {
-      inner.doError(js, reason);
+      inner->doError(js, reason);
     }
 
     kj::Maybe<kj::Promise<void>> tryPumpTo(kj::Ptr<WritableStreamSink> sink, bool end) override;
@@ -125,7 +125,9 @@ class ReadableLockImpl {
     }
 
    private:
-    Controller& inner;
+    // The enclosing controller: this PipeLocked lives in the controller's own lock
+    // state machine, so the pointer is always valid.
+    kj::Ptr<Controller> inner;
 
     friend Controller;
   };
@@ -155,10 +157,10 @@ class WritableLockImpl {
 
   bool isLockedToWriter() const;
 
-  bool lockWriter(jsg::Lock& js, Controller& self, Writer& writer);
+  bool lockWriter(jsg::Lock& js, Controller& self, kj::Ptr<Writer> writer);
 
   // See the comment for releaseWriter in common.h for details on the use of maybeJs
-  void releaseWriter(Controller& self, Writer& writer, kj::Maybe<jsg::Lock&> maybeJs);
+  void releaseWriter(Controller& self, kj::Ptr<Writer> writer, kj::Maybe<jsg::Lock&> maybeJs);
 
   void visitForGc(jsg::GcVisitor& visitor);
 
@@ -216,6 +218,11 @@ class WritableLockImpl {
       uint8_t pipeThrough : 1 = 0;
     };
     Flags flags{};
+
+    // Completes a signal-aborted pipe.  Deliberately static: releasing the
+    // pipe lock destroys the PipeLocked, so there is no longer a `this`.
+    static jsg::Promise<void> finishAbortedPipe(
+        jsg::Lock& js, Controller& self, jsg::JsValue reason, Flags flags);
 
     JSG_MEMORY_INFO(PipeLocked) {
       tracker.trackField("readableStreamRef", readableStreamRef);
@@ -318,11 +325,11 @@ void ReadableLockImpl<Controller>::releaseReader(
 
 template <typename Controller>
 kj::Maybe<kj::Ptr<ReadableStreamController::PipeController>> ReadableLockImpl<
-    Controller>::tryPipeLock(Controller& self) {
+    Controller>::tryPipeLock(kj::Ptr<Controller> self) {
   if (isLockedToReader()) {
     return kj::none;
   }
-  return state.template transitionTo<PipeLocked>(self).getPtr();
+  return state.template transitionTo<PipeLocked>(kj::mv(self)).getPtr();
 }
 
 template <typename Controller>
@@ -400,7 +407,7 @@ kj::Maybe<kj::Promise<void>> ReadableLockImpl<Controller>::PipeLocked::tryPumpTo
 
 template <typename Controller>
 jsg::Promise<ReadResult> ReadableLockImpl<Controller>::PipeLocked::read(jsg::Lock& js) {
-  return KJ_ASSERT_NONNULL(inner.read(js, kj::none));
+  return KJ_ASSERT_NONNULL(inner->read(js, kj::none));
 }
 
 // ======================================================================================
@@ -411,7 +418,8 @@ bool WritableLockImpl<Controller>::isLockedToWriter() const {
 }
 
 template <typename Controller>
-bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js, Controller& self, Writer& writer) {
+bool WritableLockImpl<Controller>::lockWriter(
+    jsg::Lock& js, Controller& self, kj::Ptr<Writer> writer) {
   if (isLockedToWriter()) {
     return false;
   }
@@ -448,15 +456,14 @@ bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js, Controller& self, W
   }
 
   state.template transitionTo<WriterLocked>(kj::mv(lock));
-  writer.attach(js, self, kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
+  writer->attach(js, self.addRef(), kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
   return true;
 }
 
 template <typename Controller>
 void WritableLockImpl<Controller>::releaseWriter(
-    Controller& self, Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) {
+    Controller& self, kj::Ptr<Writer> writer, kj::Maybe<jsg::Lock&> maybeJs) {
   KJ_IF_SOME(locked, state.template tryGetUnsafe<WriterLocked>()) {
-    KJ_ASSERT(&locked.getWriter() == &writer);
     KJ_IF_SOME(js, maybeJs) {
       KJ_SWITCH_ONEOF(self.state) {
         KJ_CASE_ONEOF(initial, typename Controller::Initial) {}
@@ -550,33 +557,36 @@ void WritableLockImpl<Controller>::visitForGc(jsg::GcVisitor& visitor) {
 }
 
 template <typename Controller>
+jsg::Promise<void> WritableLockImpl<Controller>::PipeLocked::finishAbortedPipe(
+    jsg::Lock& js, Controller& self, jsg::JsValue reason, Flags flags) {
+  if (!flags.preventAbort) {
+    return self.abort(js, reason)
+        .then(js, [reason = reason.addRef(js), flags, ref = self.addRef()](jsg::Lock& js) {
+      return rejectedMaybeHandledPromise<void>(js, reason.getHandle(js), flags.pipeThrough);
+    });
+  }
+  return rejectedMaybeHandledPromise<void>(js, reason, flags.pipeThrough);
+}
+
+template <typename Controller>
 kj::Maybe<jsg::Promise<void>> WritableLockImpl<Controller>::PipeLocked::checkSignal(
     jsg::Lock& js, Controller& self) {
   KJ_IF_SOME(signal, maybeSignal) {
     if (signal->getAborted(js)) {
       auto reason = signal->getReason(js);
-      // Copy the flags needed below before calling releaseSource(): with a cancel
-      // reason it runs the source's cancel algorithm (arbitrary user JS)
-      // synchronously, and that JS may re-enter the controller and release the
-      // write-side pipe lock, destroying *this. For the same reason the abort
-      // continuation must not capture `this`: it runs after the caller has already
-      // released the pipe lock.
-      auto preventCancel = flags.preventCancel;
-      auto preventAbort = flags.preventAbort;
-      auto pipeThrough = flags.pipeThrough;
-      if (!preventCancel) {
+      // Copy the flags before calling releaseSource(): with a cancel reason it runs the
+      // source's cancel algorithm (arbitrary user JS) synchronously, and that JS may
+      // re-enter the controller and release the write-side pipe lock, destroying *this.
+      auto flagsCopy = flags;
+      if (!flagsCopy.preventCancel) {
         releaseSource(js, reason);
       } else {
         releaseSource(js);
       }
-      if (!preventAbort) {
-        return self.abort(js, reason)
-            .then(
-                js, [pipeThrough, reason = reason.addRef(js), ref = self.addRef()](jsg::Lock& js) {
-          return rejectedMaybeHandledPromise<void>(js, reason.getHandle(js), pipeThrough);
-        });
-      }
-      return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
+      // *this may already have been destroyed by user JS run from releaseSource(). The rest
+      // of the work is done by a static method so the compiler enforces that we do not
+      // touch it.
+      return finishAbortedPipe(js, self, reason, flagsCopy);
     }
   }
   return kj::none;
@@ -771,7 +781,7 @@ jsg::Promise<ReadResult> deferControllerStateChange(jsg::Lock& js,
 // jsg::Ref<ReadableStreamDefaultController> or jsg::Ref<ReadableByteStreamController>.
 // These are the objects that are actually passed on to the user-code's Underlying Source
 // implementation.
-class ReadableStreamJsController final: public ReadableStreamController {
+class ReadableStreamJsController final: public ReadableStreamController, public kj::PtrTarget {
  public:
   using ReadableLockImpl = ReadableLockImpl<ReadableStreamJsController>;
 
@@ -973,14 +983,14 @@ class WritableStreamJsController final: public WritableStreamController {
     return state.isActive();
   }
 
-  bool lockWriter(jsg::Lock& js, Writer& writer) override;
+  bool lockWriter(jsg::Lock& js, kj::Ptr<Writer> writer) override;
 
   void maybeRejectReadyPromise(jsg::Lock& js, jsg::JsValue reason);
 
   void maybeResolveReadyPromise(jsg::Lock& js);
 
   // See the comment for releaseWriter in common.h for details on the use of maybeJs
-  void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) override;
+  void releaseWriter(kj::Ptr<Writer> writer, kj::Maybe<jsg::Lock&> maybeJs) override;
 
   kj::Maybe<kj::Own<WritableStreamSink>> removeSink(jsg::Lock& js) override;
   void detach(jsg::Lock& js) override;
@@ -1814,24 +1824,27 @@ template <typename Controller, typename Queue>
 struct ReadableState {
   Controller controller;
   kj::Own<typename Queue::Consumer> consumer;
-  ReadableStreamJsController& owner;
+  // The ReadableStreamJsController that owns the ValueReadable/ByteReadable holding
+  // this state, so the pointer is always valid while this state exists.
+  kj::Ptr<ReadableStreamJsController> owner;
 
   ReadableState(Controller controller,
       kj::Own<typename Queue::Consumer> consumer,
-      ReadableStreamJsController& owner)
+      kj::Ptr<ReadableStreamJsController> owner)
       : controller(kj::mv(controller)),
         consumer(kj::mv(consumer)),
-        owner(owner) {}
+        owner(kj::mv(owner)) {}
 
   ReadableState(Controller controller,
       kj::Weak<typename Queue::ConsumerImpl::StateListener> listener,
-      ReadableStreamJsController& owner)
-      : ReadableState(controller.addRef(), controller->getConsumer(kj::mv(listener)), owner) {}
+      kj::Ptr<ReadableStreamJsController> owner)
+      : ReadableState(
+            controller.addRef(), controller->getConsumer(kj::mv(listener)), kj::mv(owner)) {}
 
   ReadableState clone(jsg::Lock& js,
       kj::Weak<typename Queue::ConsumerImpl::StateListener> listener,
-      ReadableStreamJsController& owner) {
-    return ReadableState(controller.addRef(), consumer->clone(js, kj::mv(listener)), owner);
+      kj::Ptr<ReadableStreamJsController> owner) {
+    return ReadableState(controller.addRef(), consumer->clone(js, kj::mv(listener)), kj::mv(owner));
   }
 };
 
@@ -1855,11 +1868,11 @@ struct ValueReadable final: public kj::PtrTarget,
     }
   }
 
-  ValueReadable(DefaultController controller, ReadableStreamJsController& owner)
-      : state(State(kj::mv(controller), addWeakToThis(), owner)) {}
+  ValueReadable(DefaultController controller, kj::Ptr<ReadableStreamJsController> owner)
+      : state(State(kj::mv(controller), addWeakToThis(), kj::mv(owner))) {}
 
-  ValueReadable(jsg::Lock& js, ReadableStreamJsController& owner, ValueReadable& other)
-      : state(KJ_ASSERT_NONNULL(other.state).clone(js, addWeakToThis(), owner)) {}
+  ValueReadable(jsg::Lock& js, kj::Ptr<ReadableStreamJsController> owner, ValueReadable& other)
+      : state(KJ_ASSERT_NONNULL(other.state).clone(js, addWeakToThis(), kj::mv(owner))) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ValueReadable);
 
@@ -1869,13 +1882,13 @@ struct ValueReadable final: public kj::PtrTarget,
     }
   }
 
-  kj::Own<ValueReadable> clone(jsg::Lock& js, ReadableStreamJsController& owner) {
+  kj::Own<ValueReadable> clone(jsg::Lock& js, kj::Ptr<ReadableStreamJsController> owner) {
     // A single ReadableStreamDefaultController can have multiple consumers.
     // When the ValueReadable constructor is used, the new consumer is added
     // and starts to receive new data that becomes enqueued. When clone
     // is used, any state currently held by this consumer is copied to the
     // new consumer.
-    return kj::heap<ValueReadable>(js, owner, *this);
+    return kj::heap<ValueReadable>(js, kj::mv(owner), *this);
   }
 
   jsg::Promise<ReadResult> read(jsg::Lock& js) {
@@ -1955,7 +1968,7 @@ struct ValueReadable final: public kj::PtrTarget,
     // readable in doClose so it is not safe to access anything on this
     // after calling doClose.
     KJ_IF_SOME(s, state) {
-      s.owner.doClose(js);
+      s.owner->doClose(js);
     }
   }
 
@@ -1965,7 +1978,7 @@ struct ValueReadable final: public kj::PtrTarget,
     // readable in doClose so it is not safe to access anything on this
     // after calling doError.
     KJ_IF_SOME(s, state) {
-      s.owner.doError(js, reason);
+      s.owner->doError(js, reason);
     }
   }
 
@@ -1976,12 +1989,13 @@ struct ValueReadable final: public kj::PtrTarget,
     // Returns true if the pull completed synchronously (meaning more pumping
     // might yield additional synchronous data), false otherwise.
     KJ_IF_SOME(s, state) {
-      // Save a reference to the owner before calling pull. The pull callback
-      // may trigger close/error which could destroy this ValueReadable. By
-      // using beginOperation(), we ensure doClose/doError defers the
-      // actual destruction until after we return.
-      ReadableStreamJsController& owner = s.owner;
-      owner.state.beginOperation();
+      // Save a COPY of the owner Ptr before calling pull — not a reference to the
+      // member, which dies with `this`. The pull callback may trigger close/error
+      // which could destroy this ValueReadable. By using beginOperation(), we ensure
+      // doClose/doError defers the actual destruction until after we return. The
+      // owner itself outlives us: only the owner can drop this ValueReadable.
+      auto owner = s.owner;
+      owner->state.beginOperation();
 
       // For draining reads, use forcePull to bypass backpressure checks.
       // This ensures we pull all available data regardless of highWaterMark.
@@ -1997,13 +2011,13 @@ struct ValueReadable final: public kj::PtrTarget,
           state.map([](State& s2) { return !s2.controller->isPulling(); }).orDefault(false);
 
       // Process any deferred close/error. This may destroy this ValueReadable.
-      if (owner.state.endOperation()) {
+      if (owner->state.endOperation()) {
         // A pending state was applied. Call the appropriate callback.
-        if (owner.state.template is<StreamStates::Closed>()) {
-          owner.lock.onClose(js);
-        } else if (owner.state.template is<StreamStates::Errored>()) {
-          KJ_IF_SOME(err, owner.state.template tryGetUnsafe<StreamStates::Errored>()) {
-            owner.lock.onError(js, err.getHandle(js));
+        if (owner->state.template is<StreamStates::Closed>()) {
+          owner->lock.onClose(js);
+        } else if (owner->state.template is<StreamStates::Errored>()) {
+          KJ_IF_SOME(err, owner->state.template tryGetUnsafe<StreamStates::Errored>()) {
+            owner->lock.onError(js, err.getHandle(js));
           }
         }
       }
@@ -2052,13 +2066,13 @@ struct ByteReadable final: public kj::PtrTarget,
   }
 
   ByteReadable(ByobController controller,
-      ReadableStreamJsController& owner,
+      kj::Ptr<ReadableStreamJsController> owner,
       kj::Maybe<int> autoAllocateChunkSize)
-      : state(State(kj::mv(controller), addWeakToThis(), owner)),
+      : state(State(kj::mv(controller), addWeakToThis(), kj::mv(owner))),
         autoAllocateChunkSize(autoAllocateChunkSize) {}
 
-  ByteReadable(jsg::Lock& js, ReadableStreamJsController& owner, ByteReadable& other)
-      : state(KJ_ASSERT_NONNULL(other.state).clone(js, addWeakToThis(), owner)),
+  ByteReadable(jsg::Lock& js, kj::Ptr<ReadableStreamJsController> owner, ByteReadable& other)
+      : state(KJ_ASSERT_NONNULL(other.state).clone(js, addWeakToThis(), kj::mv(owner))),
         autoAllocateChunkSize(other.autoAllocateChunkSize) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ByteReadable);
@@ -2074,8 +2088,8 @@ struct ByteReadable final: public kj::PtrTarget,
   // and starts to receive new data that becomes enqueued. When clone
   // is used, any state currently held by this consumer is copied to the
   // new consumer.
-  kj::Own<ByteReadable> clone(jsg::Lock& js, ReadableStreamJsController& owner) {
-    return kj::heap<ByteReadable>(js, owner, *this);
+  kj::Own<ByteReadable> clone(jsg::Lock& js, kj::Ptr<ReadableStreamJsController> owner) {
+    return kj::heap<ByteReadable>(js, kj::mv(owner), *this);
   }
 
   jsg::Promise<ReadResult> read(
@@ -2091,7 +2105,7 @@ struct ByteReadable final: public kj::PtrTarget,
       reading = true;
       KJ_DEFER(reading = false);
       KJ_IF_SOME(byob, byobOptions) {
-        jsg::JsArrayBufferView view = jsg::JsArrayBufferView(byob.bufferView.getHandle(js));
+        auto view = byob.bufferView.getHandle(js);
         view = view.detachAndTake(js);
         size_t elementSize = view.getElementSize();
         // If atLeast is not given, then by default it is the element size of the view
@@ -2219,7 +2233,7 @@ struct ByteReadable final: public kj::PtrTarget,
     // Note that the owner may drop this readable in doClose so it
     // is not safe to access anything on this after calling doClose.
     KJ_IF_SOME(s, state) {
-      s.owner.doClose(js);
+      s.owner->doClose(js);
     }
   }
 
@@ -2227,7 +2241,7 @@ struct ByteReadable final: public kj::PtrTarget,
     // Note that the owner may drop this readable in doClose so it
     // is not safe to access anything on this after calling doError.
     KJ_IF_SOME(s, state) {
-      s.owner.doError(js, reason);
+      s.owner->doError(js, reason);
     };
   }
 
@@ -2238,12 +2252,13 @@ struct ByteReadable final: public kj::PtrTarget,
   // might yield additional synchronous data), false otherwise.
   bool onConsumerWantsData(jsg::Lock& js) override {
     KJ_IF_SOME(s, state) {
-      // Save a reference to the owner before calling pull. The pull callback
-      // may trigger close/error which could destroy this ByteReadable. By
-      // using beginOperation(), we ensure doClose/doError defers the
-      // actual destruction until after we return.
-      ReadableStreamJsController& owner = s.owner;
-      owner.state.beginOperation();
+      // Save a COPY of the owner Ptr before calling pull — not a reference to the
+      // member, which dies with `this`. The pull callback may trigger close/error
+      // which could destroy this ByteReadable. By using beginOperation(), we ensure
+      // doClose/doError defers the actual destruction until after we return. The
+      // owner itself outlives us: only the owner can drop this ByteReadable.
+      auto owner = s.owner;
+      owner->state.beginOperation();
 
       // For draining reads, use forcePull to bypass backpressure checks.
       // This ensures we pull all available data regardless of highWaterMark.
@@ -2259,13 +2274,13 @@ struct ByteReadable final: public kj::PtrTarget,
           state.map([](State& s2) { return !s2.controller->isPulling(); }).orDefault(false);
 
       // Process any deferred close/error. This may destroy this ByteReadable.
-      if (owner.state.endOperation()) {
+      if (owner->state.endOperation()) {
         // A pending state was applied. Call the appropriate callback.
-        if (owner.state.template is<StreamStates::Closed>()) {
-          owner.lock.onClose(js);
-        } else if (owner.state.template is<StreamStates::Errored>()) {
-          KJ_IF_SOME(err, owner.state.template tryGetUnsafe<StreamStates::Errored>()) {
-            owner.lock.onError(js, err.getHandle(js));
+        if (owner->state.template is<StreamStates::Closed>()) {
+          owner->lock.onClose(js);
+        } else if (owner->state.template is<StreamStates::Errored>()) {
+          KJ_IF_SOME(err, owner->state.template tryGetUnsafe<StreamStates::Errored>()) {
+            owner->lock.onError(js, err.getHandle(js));
           }
         }
       }
@@ -2710,12 +2725,12 @@ ReadableStreamJsController::ReadableStreamJsController(StreamStates::Errored err
 
 ReadableStreamJsController::ReadableStreamJsController(jsg::Lock& js, ValueReadable& consumer)
     : ioContext(tryGetIoContextId()) {
-  state.transitionTo<kj::Own<ValueReadable>>(consumer.clone(js, *this));
+  state.transitionTo<kj::Own<ValueReadable>>(consumer.clone(js, addPtrToThis()));
 }
 
 ReadableStreamJsController::ReadableStreamJsController(jsg::Lock& js, ByteReadable& consumer)
     : ioContext(tryGetIoContextId()) {
-  state.transitionTo<kj::Own<ByteReadable>>(consumer.clone(js, *this));
+  state.transitionTo<kj::Own<ByteReadable>>(consumer.clone(js, addPtrToThis()));
 }
 
 jsg::Ref<ReadableStream> ReadableStreamJsController::addRef() {
@@ -2874,12 +2889,12 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
   KJ_IF_SOME(byobOptions, maybeByobOptions) {
     byobOptions.detachBuffer = true;
     auto view = byobOptions.bufferView.getHandle(js);
-    if (!view->Buffer()->IsDetachable()) {
+    if (!view.isDetachable()) {
       return js.rejectedPromise<ReadResult>(
           js.typeError("Unabled to use non-detachable ArrayBuffer."_kj));
     }
 
-    if (view->ByteLength() == 0 || view->Buffer()->ByteLength() == 0) {
+    if (view.size() == 0) {
       return js.rejectedPromise<ReadResult>(
           js.typeError("Unable to use a zero-length ArrayBuffer."_kj));
     }
@@ -2893,10 +2908,9 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
       // If it is a BYOB read, then the spec requires that we return an empty
       // view of the same type provided, that uses the same backing memory
       // as that provided, but with zero-length.
-      auto source = jsg::JsArrayBufferView(byobOptions.bufferView.getHandle(js));
-      source = source.detachAndTake(js).slice(js, 0, 0);
+      view = view.detachAndTake(js).slice(js, 0, 0);
       return js.resolvedPromise(ReadResult{
-        .value = jsg::JsValue(source).addRef(js),
+        .value = jsg::JsValue(view).addRef(js),
         .done = true,
       });
     }
@@ -3178,7 +3192,7 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
     // their lifetimes are identical (in practice) and memory accounting itself has a memory
     // overhead. The same applies to ValueReadable below.
     state.transitionTo<kj::Own<ByteReadable>>(
-        kj::heap<ByteReadable>(controller.addRef(), *this, autoAllocateChunkSize)
+        kj::heap<ByteReadable>(controller.addRef(), addPtrToThis(), autoAllocateChunkSize)
             .attach(js.getExternalMemoryAdjustment(
                 sizeof(ByteReadable) + sizeof(ReadableByteStreamController))));
     controller->start(js);
@@ -3188,7 +3202,7 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
     auto controller = js.alloc<ReadableStreamDefaultController>(
         kj::mv(underlyingSource), kj::mv(queuingStrategy));
     state.transitionTo<kj::Own<ValueReadable>>(
-        kj::heap<ValueReadable>(controller.addRef(), *this)
+        kj::heap<ValueReadable>(controller.addRef(), addPtrToThis())
             .attach(js.getExternalMemoryAdjustment(
                 sizeof(ValueReadable) + sizeof(ReadableStreamDefaultController))));
     controller->start(js);
@@ -3197,7 +3211,7 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
 
 kj::Maybe<kj::Ptr<ReadableStreamController::PipeController>> ReadableStreamJsController::
     tryPipeLock() {
-  return lock.tryPipeLock(*this);
+  return lock.tryPipeLock(addPtrToThis());
 }
 
 void ReadableStreamJsController::releasePipeLock(
@@ -3479,6 +3493,25 @@ class AllReader {
   }
 };
 
+// Hands `promise` off to a holder that outlives the caller, reporting its outcome
+// through `fulfiller`. Fulfilling or rejecting a fulfiller whose promise is already
+// gone is a no-op, so the caller is free to stop listening at any point.
+template <typename T>
+kj::Promise<void> forwardToFulfiller(
+    kj::Promise<T> promise, kj::Own<kj::PromiseFulfiller<T>> fulfiller) {
+  KJ_TRY {
+    if constexpr (jsg::isVoid<T>()) {
+      co_await promise;
+      fulfiller->fulfill();
+    } else {
+      fulfiller->fulfill(co_await promise);
+    }
+  }
+  KJ_CATCH(exception) {
+    fulfiller->reject(kj::mv(exception));
+  }
+}
+
 // pumpToImpl uses a DrainingReader to efficiently pull all synchronously available
 // data from the stream in each iteration, then writes it to the sink using vectored
 // I/O. This minimizes isolate lock acquisitions by batching: each time the lock is
@@ -3487,11 +3520,23 @@ class AllReader {
 //
 // The pump loop is a kj coroutine. Dropping the returned kj::Promise drops the
 // coroutine frame, which destroys the DrainingReader (releasing the stream lock)
-// and the sink. No WeakRef/IoOwn dance is needed because ownership is clear.
+// and the sink.
 // The coroutine that implements the pump loop takes ownership of the DrainingReader
 // and sink. The jsg::Ref<ReadableStream> is not passed into the coroutine because
 // jsg::Ref is disallowed in coroutine parameters; instead, the DrainingReader holds
 // a reference to the stream internally.
+//
+// Neither isolate-lock round trip below is awaited directly. A draining read runs
+// the stream's pull() callback, and pull() can abort the request, which drops the
+// pump promise from inside the very event that is delivering the read's result.
+// Destroying an event while it is firing trips "Promise callback destroyed itself".
+// Each run() is therefore handed to the IoContext's task set, and the pump awaits an
+// unrelated fulfiller. Dropping the pump then destroys only that await; the firing
+// event stays owned by the task set, which unwinds it once it is safe to.
+//
+// The consequence is that those tasks outlive the coroutine frame, so they must not
+// name anything the frame owns. The DrainingReader is reached through a kj::Weak,
+// which reports the frame's destruction rather than dangling into it.
 kj::Promise<void> pumpToImpl(IoContext& ioContext,
     kj::Own<DrainingReader> reader,
     kj::Own<WritableStreamSink> sink,
@@ -3503,13 +3548,22 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
     while (true) {
       // Perform a draining read to get all synchronously available data if possible
       // or fall back to a regular read if not.
-      DrainingReadResult result = co_await ioContext.run([&reader](jsg::Lock& js) mutable {
+      auto prp = kj::newPromiseAndFulfiller<DrainingReadResult>();
+      auto promise = ioContext.run([weakReader = reader->getWeak()](
+                                       jsg::Lock& js) mutable -> kj::Promise<DrainingReadResult> {
         auto& ioContext = IoContext::current();
-        // Use a 256KB limit to allow periodic yielding to the event loop,
-        // preventing a fast producer from monopolizing the thread.
-        constexpr size_t kMaxReadPerCycle = 256 * 1024;
-        return ioContext.awaitJs(js, reader->read(js, kMaxReadPerCycle));
+        KJ_IF_SOME(reader, weakReader.tryGet()) {
+          // Use a 256KB limit to allow periodic yielding to the event loop,
+          // preventing a fast producer from monopolizing the thread.
+          constexpr size_t kMaxReadPerCycle = 256 * 1024;
+          return ioContext.awaitJs(js, reader.read(js, kMaxReadPerCycle));
+        } else {
+          return KJ_EXCEPTION(DISCONNECTED, "The pump was canceled.");
+        }
       });
+      ioContext.addTask(forwardToFulfiller(kj::mv(promise), kj::mv(prp.fulfiller)));
+
+      DrainingReadResult result = co_await prp.promise;
 
       // Write all the chunks we received using vectored write for efficiency.
       if (result.chunks.size() > 0) {
@@ -3534,11 +3588,20 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
       sink->abort(exception.clone());
     }
 
-    co_await ioContext.run([&reader, ex = exception.clone()](jsg::Lock& js) mutable {
+    auto prp = kj::newPromiseAndFulfiller<void>();
+    auto promise = ioContext.run([weakReader = reader->getWeak(), ex = exception.clone()](
+                                     jsg::Lock& js) mutable -> kj::Promise<void> {
       auto& ioContext = IoContext::current();
-      auto error = js.exceptionToJsValue(kj::mv(ex));
-      return ioContext.awaitJs(js, reader->cancel(js, error.getHandle(js)));
+      KJ_IF_SOME(reader, weakReader.tryGet()) {
+        auto error = js.exceptionToJsValue(kj::mv(ex));
+        return ioContext.awaitJs(js, reader.cancel(js, error.getHandle(js)));
+      } else {
+        return KJ_EXCEPTION(DISCONNECTED, "The pump was canceled.");
+      }
     });
+    ioContext.addTask(forwardToFulfiller(kj::mv(promise), kj::mv(prp.fulfiller)));
+
+    co_await prp.promise;
     kj::throwFatalException(kj::mv(exception));
   }
 }
@@ -3656,13 +3719,15 @@ kj::Own<ReadableStreamController> ReadableStreamJsController::detach(
     }
     KJ_CASE_ONEOF(readable, kj::Own<ValueReadable>) {
       KJ_ASSERT(lock.lock());
-      controller->state.transitionTo<kj::Own<ValueReadable>>(readable->clone(js, *controller));
+      controller->state.transitionTo<kj::Own<ValueReadable>>(
+          readable->clone(js, controller->addPtrToThis()));
       state.transitionTo<StreamStates::Closed>();
       lock.onClose(js);
     }
     KJ_CASE_ONEOF(readable, kj::Own<ByteReadable>) {
       KJ_ASSERT(lock.lock());
-      controller->state.transitionTo<kj::Own<ByteReadable>>(readable->clone(js, *controller));
+      controller->state.transitionTo<kj::Own<ByteReadable>>(
+          readable->clone(js, controller->addPtrToThis()));
       state.transitionTo<StreamStates::Closed>();
       lock.onClose(js);
     }
@@ -4006,8 +4071,8 @@ bool WritableStreamJsController::isLockedToWriter() const {
   return !lock.state.is<Unlocked>();
 }
 
-bool WritableStreamJsController::lockWriter(jsg::Lock& js, Writer& writer) {
-  return lock.lockWriter(js, *this, writer);
+bool WritableStreamJsController::lockWriter(jsg::Lock& js, kj::Ptr<Writer> writer) {
+  return lock.lockWriter(js, *this, kj::mv(writer));
 }
 
 void WritableStreamJsController::maybeRejectReadyPromise(jsg::Lock& js, jsg::JsValue reason) {
@@ -4029,8 +4094,9 @@ void WritableStreamJsController::maybeResolveReadyPromise(jsg::Lock& js) {
   }
 }
 
-void WritableStreamJsController::releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) {
-  lock.releaseWriter(*this, writer, maybeJs);
+void WritableStreamJsController::releaseWriter(
+    kj::Ptr<Writer> writer, kj::Maybe<jsg::Lock&> maybeJs) {
+  lock.releaseWriter(*this, kj::mv(writer), maybeJs);
 }
 
 kj::Maybe<kj::Own<WritableStreamSink>> WritableStreamJsController::removeSink(jsg::Lock& js) {

@@ -404,9 +404,7 @@ export interface InnerPrivateKeyExportOptions {
 }
 
 export type ExportOptions =
-  | SecretKeyExportOptions
-  | PublicKeyExportOptions
-  | PrivateKeyExportOptions;
+  SecretKeyExportOptions | PublicKeyExportOptions | PrivateKeyExportOptions;
 
 export type InnerExportOptions =
   | SecretKeyExportOptions

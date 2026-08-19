@@ -34,10 +34,6 @@ Key deps: `util/state-machine.h` (stream state FSM), `util/weak-refs.h`, `util/r
 | `identity-transform-stream.{h,c++}` | Internal identity transform (byte-only, 1:1 read↔write)                                             |
 | `internal.{h,c++}`                  | `ReadableStreamInternalController`, `WritableStreamInternalController`                              |
 | `standard.{h,c++}`                  | `ReadableStreamJsController`, `WritableStreamJsController` — main complexity (~5400 lines combined) |
-| `readable-source.{h,c++}`           | `ReadableStreamSource` — kj `AsyncInputStream` adapter                                              |
-| `writable-sink.{h,c++}`             | `WritableStreamSink` — kj `AsyncOutputStream` adapter                                               |
-| `readable-source-adapter.{h,c++}`   | Standard→Internal bridge (wraps JS controller as `ReadableStreamSource`)                            |
-| `writable-sink-adapter.{h,c++}`     | Standard→Internal bridge (wraps JS controller as `WritableStreamSink`)                              |
 | `common.{h,c++}`                    | Shared types: `ReadResult`, `StreamStates`, controller interfaces                                   |
 | `queue.{h,c++}`                     | `ValueQueue`/`ByteQueue` for Standard stream backpressure                                           |
 | `compression.{h,c++}`               | `CompressionStream`/`DecompressionStream` (zlib transforms)                                         |

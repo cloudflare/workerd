@@ -752,6 +752,11 @@ size_t JsArrayBuffer::size() const {
   return inner->ByteLength();
 }
 
+size_t JsArrayBuffer::backingStoreSize() const {
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return inner->GetBackingStore()->ByteLength();
+}
+
 kj::Array<kj::byte> JsArrayBuffer::copy() {
   auto ptr = asArrayPtr();
   return kj::heapArray(ptr);

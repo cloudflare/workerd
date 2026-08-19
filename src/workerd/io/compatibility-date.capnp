@@ -513,8 +513,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   newModuleRegistry @52 :Bool
       $compatEnableFlag("new_module_registry")
-      $compatDisableFlag("legacy_module_registry")
-      $experimental;
+      $compatDisableFlag("legacy_module_registry");
   # Enables the new module registry implementation, which handles module
   # specifiers as URLs, implements import.meta (url/main/resolve), supports
   # import attributes, and allows a registry to be shared across isolate
@@ -1642,4 +1641,16 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2026-08-11");
   # Enables fast Workflow engine creation by generating instance IDs with the Durable Object
   # namespace's `newUniqueId()` method instead of UUIDs.
+
+  wasmMemoryDiscard @186 :Bool
+      $compatEnableFlag("wasm_memory_discard")
+      $experimental;
+  # Enables the experimental WebAssembly memory.discard proposal, exposing
+  # `WebAssembly.Memory.prototype.discard(byteOffset, byteLength)` and the
+  # `memory.discard` opcode. Both zero the given wasm-page-aligned region and
+  # release its physical pages back to the operating system. Shared memories
+  # are not supported, and unaligned or out-of-bounds ranges throw a
+  # RangeError (JS API) or trap (wasm opcode).
+  # WARNING: Do not remove the `$experimental` marker before
+  # the v8 change becomes part of chrome's default config.
 }

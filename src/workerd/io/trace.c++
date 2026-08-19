@@ -10,6 +10,7 @@
 #include <capnp/schema.h>
 #include <kj/compat/http.h>
 #include <kj/debug.h>
+#include <kj/encoding.h>
 #include <kj/time.h>
 
 #include <atomic>
@@ -374,6 +375,21 @@ kj::Maybe<SpanContext> SpanContext::tryFromTraceparent(kj::StringPtr tp) {
   if (version != 0 || (traceHigh == 0 && traceLow == 0) || parentId == 0) return kj::none;
 
   return SpanContext(TraceId(traceLow, traceHigh), SpanId(parentId), TraceFlags(flags));
+}
+
+kj::String formatW3CTraceparent(const TraceId& traceId, SpanId spanId, TraceFlags traceFlags) {
+  // encodeHex over the single flags byte pads to the two digits the format requires; kj::hex
+  // would drop a leading zero.
+  kj::byte flags = traceFlags;
+  return kj::str("00-", traceId.toW3C(), "-", spanId, "-", kj::encodeHex(kj::arrayPtr(flags)));
+}
+
+kj::Maybe<kj::String> SpanContext::toTraceparent() const {
+  auto sid = KJ_UNWRAP_OR_RETURN(spanId, kj::none);
+  auto flags = KJ_UNWRAP_OR_RETURN(traceFlags, kj::none);
+  // A zero trace id or a zero span id is invalid; tryFromTraceparent() rejects both.
+  if (traceId == nullptr || sid == nullptr) return kj::none;
+  return formatW3CTraceparent(traceId, sid, flags);
 }
 
 kj::String KJ_STRINGIFY(const SpanContext& context) {

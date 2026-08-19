@@ -121,6 +121,8 @@ export default {
   'Create-non-absolute-url.any.js': {
     comment: 'workerd throws SyntaxError for non-absolute URLs',
     expectedFailures: [
+      // Trailing space is significant: the subtest name interpolates the input, which is ''.
+      'Create WebSocket - Pass a non absolute URL: ',
       'Create WebSocket - Pass a non absolute URL: test',
       'Create WebSocket - Pass a non absolute URL: ?',
       'Create WebSocket - Pass a non absolute URL: null',

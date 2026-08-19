@@ -45,10 +45,12 @@ class JsReadableStream final {
   // The underlying stream.
   using StreamImpl = kj::OneOf<jsg::Ref<ReadableStream>, jsg::JsRef<jsg::JsObject>>;
 
-  // Holds the in-memory data backing a buffer-backed (rewindable) JsReadableStream.
+  // Holds the in-memory data backing a buffer-backed (rewindable) JsReadableStream.  `owned`
+  // is always kj-heap memory: the streams built from it are read on the kj event loop without
+  // the isolate lock, so the bytes must not sit in the V8 sandbox.
   struct Buffer {
     kj::ArrayPtr<const kj::byte> view;
-    kj::OneOf<kj::Array<const kj::byte>, jsg::Ref<Blob>> owned;
+    kj::Array<const kj::byte> owned;
 
     explicit Buffer(kj::Array<const kj::byte> data);
     explicit Buffer(jsg::Ref<Blob> data);
@@ -100,10 +102,10 @@ class JsReadableStream final {
   // stream is constructed by the TypeScript implementation; otherwise the legacy C++
   // ReadableStream is used.
   //
-  // TODO(streams-ts): A few JsReadableStream operations still have unimplemented
-  // TypeScript arms (detach, pipe dispatch cells), so under the (experimental) flag,
-  // consumers exercising those paths will fail until the remaining arms are
-  // implemented. (pumpTo, unwrap, and tee have landed.)
+  // TODO(streams-ts): detach() is the one JsReadableStream operation still lacking a
+  // TypeScript arm, so under the (experimental) flag, consumers exercising that path
+  // will fail until it is implemented. (pumpTo, unwrap, tee, and the pipe dispatch
+  // cells have landed.)
   static JsReadableStream create(
       jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source);
 
@@ -379,22 +381,16 @@ class ReadableStreamNativeSource final: public jsg::Object {
       jsg::Ref<AbortSignal> signal,
       Active& active);
 
-  struct Released {
-    kj::Own<ReadableStreamSource> source;
-
-    // Bytes already consumed from the source but never delivered (the stash), which the
-    // pump must emit before anything the source produces. Only reachable when a
-    // tee-seeded branch is extracted before being read.
-    kj::Array<kj::byte> prefix;
-  };
-
-  // Releases the underlying source (plus any stashed bytes) for a C++-driven pump.
-  // Called by JsReadableStream::pumpTo()'s TypeScript arm after the TypeScript-side
-  // extractor (kExtractNativeSource) has already detached the stream, validated it
-  // unlocked/undisturbed, and returned this object. If the source already completed (EOF
-  // or cancel released it), returns an always-EOF source: extraction of closed streams is
-  // legal per the contract, and the pump simply finishes.
-  Released releaseForPump(jsg::Lock& js);
+  // Releases the underlying source for a C++-driven pump. Any bytes already consumed from
+  // the source but never delivered (the stash -- only reachable when a tee-seeded branch is
+  // extracted before being read) are folded in ahead of it as a prefix, so the returned
+  // source produces exactly the stream's remaining content. Called by
+  // JsReadableStream::pumpTo()'s TypeScript arm and WritableStreamNativeSink::pipeFrom()
+  // after the TypeScript-side extractor (kExtractNativeSource) has already detached the
+  // stream, validated it unlocked/undisturbed, and returned this object. If the source
+  // already completed (EOF or cancel released it), returns an always-EOF source: extraction
+  // of closed streams is legal per the contract, and the pump simply finishes.
+  kj::Own<ReadableStreamSource> releaseForPump(jsg::Lock& js);
 
   // Ensure the scratch buffer can hold at least `capacity` bytes. Only called at the start
   // of a pull, when the scratch buffer holds no live data, so growing may discard previous
@@ -428,8 +424,11 @@ class ReadableStreamNativeSource final: public jsg::Object {
 
   static constexpr size_t kScratchSize = 32 * 1024;
 
-  // JsReadableStream::pumpTo()'s TypeScript arm extracts the source for C++-driven pumps.
+  // JsReadableStream::pumpTo()'s TypeScript arm extracts the source for C++-driven pumps,
+  // and WritableStreamNativeSink::pipeFrom() (the native+native pipe fast path) does the
+  // same on behalf of the TS pipeTo.
   friend class JsReadableStream;
+  friend class WritableStreamNativeSink;
 };
 
 }  // namespace workerd::api

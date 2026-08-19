@@ -163,7 +163,7 @@ public:
     JSG_STRUCT(min);
   };
 
-  jsg::Promise<ReadResult> read(jsg::Lock& js, v8::Local<v8::ArrayBufferView> byobBuffer,
+  jsg::Promise<ReadResult> read(jsg::Lock& js, jsg::JsArrayBufferView byobBuffer,
       jsg::Optional<ReadableStreamBYOBReaderReadOptions> options = kj::none);
 
   // Non-standard extension so that reads can specify a minimum number of elements to read. It's a
@@ -175,7 +175,7 @@ public:
   // TODO(soon): Like fetch() and Cache.match(), readAtLeast() returns a promise for a V8 object.
   jsg::Promise<ReadResult> readAtLeast(jsg::Lock& js,
                                         int minElements,
-                                        v8::Local<v8::ArrayBufferView> byobBuffer);
+                                        jsg::JsArrayBufferView byobBuffer);
 
   void releaseLock(jsg::Lock& js);
 
@@ -254,6 +254,9 @@ class DrainingReader: public ReadableStreamController::Reader {
   void visitForGc(jsg::GcVisitor& visitor);
 
   kj::Ptr<ReadableStreamController::Reader> getPtr() { return addPtrToThis(); }
+
+  // A pointer for holders that may outlive the reader and must notice when they have.
+  kj::Weak<DrainingReader> getWeak() { return addWeakToThis(); }
 
  private:
   struct Initial {};

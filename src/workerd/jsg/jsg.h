@@ -1437,6 +1437,10 @@ class Object: private Wrappable {
   friend kj::Own<T> kj::addRef(T& object);
   template <typename T, typename... Params>
   friend kj::Own<T> kj::refcounted(Params&&... params);
+  template <typename T, typename... Params>
+  friend kj::Rc<T> kj::rc(Params&&... params);
+  template <typename T, typename U>
+  friend constexpr bool kj::canConvert();
   friend class GcVisitor;
   template <typename, typename...>
   friend class TypeWrapper;
@@ -3027,6 +3031,11 @@ class Lock {
     Lock& js;
     bool previous;
   };
+
+  // Enable the experimental WebAssembly memory.discard proposal on the current context, installing
+  // `WebAssembly.Memory.prototype.discard` and allowing the `memory.discard` opcode. Gated by a
+  // compatibility flag.
+  void installWasmMemoryDiscard();
 
   // Tracks whether JavaScript execution is currently disallowed so that conversions in unwrap()
   // can choose a safe, non-JS-invoking path. Prefer the RAII `DisallowJavaScriptScope` (which

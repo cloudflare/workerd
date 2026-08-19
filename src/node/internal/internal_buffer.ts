@@ -95,10 +95,7 @@ export type StringLike =
   | { [Symbol.toPrimitive](hint: 'string'): string };
 type ArrayBufferLike = WithImplicitCoercion<ArrayBuffer | SharedArrayBuffer>;
 type BufferSource =
-  | StringLike
-  | ArrayBufferLike
-  | Uint8Array
-  | ReadonlyArray<number>;
+  StringLike | ArrayBufferLike | Uint8Array | ReadonlyArray<number>;
 
 export interface Buffer extends Uint8Array {
   readonly buffer: ArrayBuffer;

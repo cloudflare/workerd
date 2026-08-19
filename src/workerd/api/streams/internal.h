@@ -246,9 +246,9 @@ class WritableStreamInternalController: public WritableStreamController {
     return !writeState.is<Unlocked>();
   }
 
-  bool lockWriter(jsg::Lock& js, Writer& writer) override;
+  bool lockWriter(jsg::Lock& js, kj::Ptr<Writer> writer) override;
 
-  void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) override;
+  void releaseWriter(kj::Ptr<Writer> writer, kj::Maybe<jsg::Lock&> maybeJs) override;
   // See the comment for releaseWriter in common.h for details on the use of maybeJs
 
   kj::Maybe<jsg::JsValue> isErroring(jsg::Lock& js) override {
@@ -299,7 +299,11 @@ class WritableStreamInternalController: public WritableStreamController {
 
   struct PipeLocked {
     static constexpr kj::StringPtr NAME KJ_UNUSED = "pipe-locked"_kj;
-    ReadableStream& ref;
+    // The source ReadableStream this writable is being piped from. Weak because the
+    // stream's lifetime belongs to JS/GC: the Pipe queue event holds the strong
+    // (GC-visited) reference for the duration of the pipe, while this lock state can
+    // briefly exist without it. Consumers must go through tryAddRef().
+    jsg::WeakRef<ReadableStream> ref;
   };
 
   kj::Weak<WritableStream> owner;

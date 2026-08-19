@@ -944,6 +944,12 @@ kj::Maybe<uint16_t> tryParsePublishedHostPort(capnp::json::Value::Reader portMap
   KJ_FAIL_REQUIRE("Malformed ContainerInspect port binding response: missing HostPort");
 }
 
+// Path, inside the container, of the file where an exec's wrapper shell records its own
+// container-namespaced PID. Keyed by a per-exec random token so concurrent execs don't collide.
+kj::String killTokenPidFile(kj::StringPtr killToken) {
+  return kj::str("/tmp/.workerd-exec-", killToken, ".pid");
+}
+
 }  // namespace
 
 void configureContainerPrivileges(
@@ -1145,6 +1151,7 @@ class ContainerClient::DockerProcessHandle final: public rpc::Container::Process
  public:
   DockerProcessHandle(ContainerClient& containerClient,
       kj::String execId,
+      kj::String killToken,
       kj::Own<kj::AsyncIoStream> connection,
       kj::Maybe<capnp::ByteStream::Client> stdoutWriter,
       kj::Maybe<capnp::ByteStream::Client> stderrWriter,
@@ -1152,6 +1159,7 @@ class ContainerClient::DockerProcessHandle final: public rpc::Container::Process
       Pty pty)
       : containerClient(containerClient.addRef()),
         execId(kj::mv(execId)),
+        killToken(kj::mv(killToken)),
         pty(pty),
         sharedConnection(kj::refcounted<SharedExecConnection>(kj::mv(connection))) {
     kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> stdoutStream = kj::none;
@@ -1224,10 +1232,12 @@ class ContainerClient::DockerProcessHandle final: public rpc::Container::Process
   }
 
   kj::Promise<void> kill(KillContext context) override {
-    auto inspect = co_await containerClient->inspectExec(execId);
-    JSG_REQUIRE(inspect.pid > 0, Error, "Exec process does not have a visible pid to signal.");
-
-    auto killCmd = kj::str("kill -", context.getParams().getSigno(), " ", inspect.pid);
+    // The exec's wrapper shell records its container-namespaced PID to a file keyed by killToken
+    // (see createExec). Read that PID inside the container and signal it. This works regardless of
+    // whether the container shares the host PID namespace, unlike signalling by the host PID that
+    // Docker's exec-inspect reports.
+    auto pidFile = killTokenPidFile(killToken);
+    auto killCmd = kj::str("kill -", context.getParams().getSigno(), " \"$(cat ", pidFile, ")\"");
     auto cmd = kj::arr(kj::str("/bin/sh"), kj::str("-c"), kj::mv(killCmd));
     co_await containerClient->runSimpleExec(cmd.asPtr());
   }
@@ -1242,6 +1252,7 @@ class ContainerClient::DockerProcessHandle final: public rpc::Container::Process
  private:
   kj::Own<ContainerClient> containerClient;
   kj::String execId;
+  kj::String killToken;
   Pty pty;
   kj::Own<SharedExecConnection> sharedConnection;
   bool waitStarted = false;
@@ -1853,7 +1864,8 @@ kj::Promise<void> ContainerClient::createContainer(kj::StringPtr effectiveImage,
 kj::Promise<kj::String> ContainerClient::createExec(capnp::List<capnp::Text>::Reader cmd,
     rpc::Container::ExecOptions::Reader params,
     bool attachStdout,
-    bool attachStderr) {
+    bool attachStderr,
+    kj::StringPtr killToken) {
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ExecCreateRequest>();
 
@@ -1864,9 +1876,23 @@ kj::Promise<kj::String> ContainerClient::createExec(capnp::List<capnp::Text>::Re
   request.setAttachStderr(attachStderr);
   request.setTty(params.hasPty());
 
-  auto jsonCmd = request.initCmd(cmd.size());
+  // Wrap the user command in a small shell prologue that records the process's own
+  // container-namespaced PID before exec'ing the real command. Docker's exec-inspect only reports
+  // the process PID in the daemon's (host) PID namespace, which is not addressable from inside the
+  // container when it runs in its own PID namespace, so kill() reads this recorded PID instead.
+  // The `exec "$@"` replaces the shell in place, so the recorded PID ($$) is exactly the PID the
+  // user command runs as, and argv is preserved unchanged.
+  auto pidFile = killTokenPidFile(killToken);
+  auto prologue = kj::str("echo $$ > ", pidFile, "; exec \"$@\"");
+
+  auto jsonCmd = request.initCmd(cmd.size() + 4);
+  jsonCmd.set(0, "/bin/sh"_kj);
+  jsonCmd.set(1, "-c"_kj);
+  jsonCmd.set(2, prologue);
+  // A conventional argv[0] for the wrapper shell; "$@" starts at the next argument.
+  jsonCmd.set(3, "sh"_kj);
   for (auto i: kj::zeroTo(cmd.size())) {
-    jsonCmd.set(i, cmd[i]);
+    jsonCmd.set(i + 4, cmd[i]);
   }
 
   if (params.hasEnv()) {
@@ -2593,7 +2619,11 @@ kj::Promise<void> ContainerClient::exec(ExecContext context) {
     ptyRows = execParams.getPty().getRows();
   }
 
-  auto execId = co_await createExec(request.getCmd(), execParams, attachStdout, attachStderr);
+  // A per-exec random token names the file in which the wrapper shell records the process's
+  // container-namespaced PID, so that kill() can signal it (see createExec / kill).
+  auto killToken = randomUUID(kj::none);
+  auto execId =
+      co_await createExec(request.getCmd(), execParams, attachStdout, attachStderr, killToken);
   kj::Own<kj::AsyncIoStream> execConnection =
       co_await startExec(kj::str(execId), pty, ptyCols, ptyRows);
   kj::Maybe<capnp::ByteStream::Client> stdoutWriter = kj::none;
@@ -2621,9 +2651,9 @@ kj::Promise<void> ContainerClient::exec(ExecContext context) {
 
   auto process = context.getResults().initProcess();
   process.setPid(static_cast<int32_t>(inspect.pid));
-  process.setHandle(kj::heap<DockerProcessHandle>(*this, kj::mv(execId), kj::mv(execConnection),
-      kj::mv(stdoutWriter), kj::mv(stderrWriter), CombinedOutput(execParams.getCombinedOutput()),
-      Pty(pty)));
+  process.setHandle(kj::heap<DockerProcessHandle>(*this, kj::mv(execId), kj::mv(killToken),
+      kj::mv(execConnection), kj::mv(stdoutWriter), kj::mv(stderrWriter),
+      CombinedOutput(execParams.getCombinedOutput()), Pty(pty)));
 }
 
 kj::Promise<void> ContainerClient::setInactivityTimeout(SetInactivityTimeoutContext context) {
