@@ -44,6 +44,22 @@ private-brand dispatch, no `instanceof`) apply here — see
   and the C++ bridge via the API-symbol registry. The C++ mocks in
   `js-readable-stream-test.c++` construct real `ReadableStreamNativeSource`
   objects; no JS-visible marker export exists.
+- Every stream instance carries an own, non-enumerable api-symbol brand
+  (`kReadableStreamBrand` / `kWritableStreamBrand`), stamped at the very
+  top of the constructor (before any early return). The C++ bridge's
+  `tryUnwrapTs` recognizes streams by probing it — an own-data-property
+  read that executes no JS. That constraint is load-bearing: recognition
+  runs during RPC deserialization, inside V8's no-JS-execution scope. Any
+  new construction path MUST go through the constructors (or stamp the
+  brand itself).
+- The C++ bridge MUST NOT dispatch into the TypeScript implementation
+  while JS execution is disallowed (`js.isJavascriptExecutionDisallowed()`,
+  set during RPC value deserialization): `getCppExport`/`dispatchCall`/
+  `invokeMethod` assert this. Bridge operations reachable in that scope
+  either answer from C++-side knowledge (state probes return the
+  hydration-fresh answers; see `JsReadableStream::isDisturbed`) or happen
+  before the scope entirely (stream construction via
+  `RpcDeserializerExternalHandler::prepare()`'s externals hydration).
 
 ## ANTI-PATTERNS
 
