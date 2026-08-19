@@ -119,6 +119,23 @@ KJ_TEST("JsWritableStream create wraps a native sink; forceClose ends it") {
   KJ_EXPECT(!state.aborted);
 }
 
+KJ_TEST("JsWritableStream writeForTest drives a write through the legacy backend") {
+  TestFixture testFixture;
+  SinkState state;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto stream = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
+    auto promise =
+        stream.writeForTest(js, jsg::JsValue(jsg::JsUint8Array::create(js, "hi"_kjb))).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock & js) mutable {
+          return stream.forceClose(js);
+        }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(state.written.asPtr() == "hi"_kjb);
+  KJ_EXPECT(state.ended);
+}
+
 KJ_TEST("JsWritableStream forceAbort aborts the sink") {
   TestFixture testFixture;
   SinkState state;
@@ -525,6 +542,20 @@ TestFixture makeTsStreamsFixture() {
   });
 }
 
+// Like makeTsStreamsFixture(), but with an actor, so the Durable Object output gate is in
+// play (used by the output-gate tests below).
+TestFixture makeTsStreamsActorFixture(kj::StringPtr actorName) {
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setTypeScriptImplementedStreams(true);
+  Worker::Actor::Id actorId = kj::str(actorName);
+  return TestFixture({
+    .featureFlags = flags.asReader(),
+    .autogates = kj::arr("per-isolate-javascript-bootstrap"_kj),
+    .actorId = kj::mv(actorId),
+  });
+}
+
 // A ReadableStreamSource serving fixed content with a known length (for pipe tests).
 class ContentSource final: public ReadableStreamSource {
  public:
@@ -928,6 +959,115 @@ KJ_TEST("JsWritableStream addRef shares a TypeScript-backed stream") {
     return env.context.awaitJs(js, kj::mv(promise));
   });
   KJ_EXPECT(state.ended);
+}
+
+KJ_TEST("JsWritableStream writeForTest drives a write through the TypeScript backend") {
+  auto fixture = makeTsStreamsFixture();
+  SinkState state;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto stream = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
+    auto promise =
+        stream.writeForTest(js, jsg::JsValue(jsg::JsUint8Array::create(js, "hi"_kjb))).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock & js) mutable {
+          // The writer used internally was released: the stream is usable afterwards.
+          KJ_EXPECT(!stream.isLocked(js));
+          return stream.forceClose(js);
+        }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(state.written.asPtr() == "hi"_kjb);
+  KJ_EXPECT(state.ended);
+}
+
+// Turn-based settling: resolves after n event loop turns (mirrors sockets-test.c++).
+kj::Promise<void> settleTurns(int n) {
+  for (int i = 0; i < n; i++) {
+    co_await kj::evalLater([]() {});
+  }
+}
+
+constexpr kj::StringPtr kActorErrorsToIgnore[] = {
+  "failed to invoke drain()"_kj,
+  "no subrequests"_kj,
+};
+
+KJ_TEST("WritableStreamNativeSink write waits for the actor output gate") {
+  auto fixture = makeTsStreamsActorFixture("test-actor-ts-write-gate");
+  SinkState state;
+  fixture.runInIoContext(kj::Function<kj::Promise<void>(const TestFixture::Environment&)>(
+                             [&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& actor = env.context.getActorOrThrow();
+
+    // Lock the output gate, then enqueue a write. While the gate is locked, the write's
+    // bytes must not reach the sink.
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    auto blocker = actor.getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
+    auto stream = JsWritableStream::create(env.js, env.context, state.makeSink(), kj::none);
+    stream.writeForTest(env.js, jsg::JsValue(jsg::JsUint8Array::create(env.js, "hi"_kjb)))
+        .markAsHandled(env.js);
+
+    co_await settleTurns(20);
+    KJ_EXPECT(state.written.size() == 0, "write must not reach the sink while gated");
+
+    paf.fulfiller->fulfill();
+    co_await settleTurns(20);
+    KJ_EXPECT(state.written.asPtr() == "hi"_kjb);
+  }),
+      kActorErrorsToIgnore);
+}
+
+KJ_TEST("WritableStreamNativeSink close waits for the actor output gate") {
+  auto fixture = makeTsStreamsActorFixture("test-actor-ts-close-gate");
+  SinkState state;
+  fixture.runInIoContext(kj::Function<kj::Promise<void>(const TestFixture::Environment&)>(
+                             [&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& actor = env.context.getActorOrThrow();
+
+    // Close-only (no preceding write, so the close is not vicariously blocked behind a
+    // gated write): the end itself must wait for the gate.
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    auto blocker = actor.getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
+    auto stream = JsWritableStream::create(env.js, env.context, state.makeSink(), kj::none);
+    stream.forceClose(env.js).markAsHandled(env.js);
+
+    co_await settleTurns(20);
+    KJ_EXPECT(!state.ended, "close must not reach the sink while gated");
+
+    paf.fulfiller->fulfill();
+    co_await settleTurns(20);
+    KJ_EXPECT(state.ended);
+  }),
+      kActorErrorsToIgnore);
+}
+
+KJ_TEST("WritableStreamNativeSink pipeFrom waits for the actor output gate") {
+  auto fixture = makeTsStreamsActorFixture("test-actor-ts-pipe-gate");
+  SinkState state;
+  fixture.runInIoContext(kj::Function<kj::Promise<void>(const TestFixture::Environment&)>(
+                             [&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& actor = env.context.getActorOrThrow();
+
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    auto blocker = actor.getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
+
+    // A native+native pipe routes through the pipeFrom fast path: the C++ pump must not
+    // start while the gate is locked.
+    auto source =
+        JsReadableStream::create(env.js, env.context, kj::heap<ContentSource>("hello world"_kj));
+    auto destination = JsWritableStream::create(env.js, env.context, state.makeSink(), kj::none);
+    source.pipeTo(env.js, destination).markAsHandled(env.js);
+
+    co_await settleTurns(20);
+    KJ_EXPECT(state.written.size() == 0, "the pump must not run while gated");
+    KJ_EXPECT(!state.ended);
+
+    paf.fulfiller->fulfill();
+    co_await settleTurns(20);
+    KJ_EXPECT(state.written.asPtr() == "hello world"_kj.asBytes());
+    KJ_EXPECT(state.ended);
+  }),
+      kActorErrorsToIgnore);
 }
 
 KJ_TEST("JsWritableStream setPendingClosure gates writes but not the teardown operations") {

@@ -328,16 +328,25 @@ void JsWritableStream::detach(jsg::Lock& js) {
   }
 }
 
-jsg::Ref<WritableStream> JsWritableStream::getUnderlyingForTest(jsg::Lock& js) {
-  auto& i = KJ_ASSERT_NONNULL(impl, "getUnderlyingForTest() called on a null JsWritableStream");
+jsg::Promise<void> JsWritableStream::writeForTest(jsg::Lock& js, jsg::JsValue chunk) {
+  auto& i = KJ_ASSERT_NONNULL(impl, "writeForTest() called on a null JsWritableStream");
   KJ_SWITCH_ONEOF(i.stream) {
     KJ_CASE_ONEOF(stream, jsg::Ref<WritableStream>) {
-      return stream.addRef();
+      return stream->getController().write(js, chunk);
     }
     KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-      // TODO(streams-ts): tests that need to drive writes against a TS-backed stream need a
-      // backend-neutral mechanism (or per-backend variants); see the header comment.
-      KJ_UNIMPLEMENTED("getUnderlyingForTest() is not available for TypeScript-backed streams");
+      // Drive the write through the ordinary writer machinery: acquire, write, release.
+      // Releasing with the write still in flight is fine -- in-flight writes proceed to
+      // the sink regardless (only the writer's own promises detach).
+      auto handle = obj.getHandle(js);
+      auto writer = KJ_REQUIRE_NONNULL(
+          JSG_TRY_CAST_OBJECT(webstreams::invokeMethod(js, handle, "getWriter"_kj)),
+          "getWriter() did not return an object");
+      auto writeResult = webstreams::invokeMethod(js, writer, "write"_kj, chunk);
+      auto promise = js.toPromise(v8::Local<v8::Value>(KJ_REQUIRE_NONNULL(
+          JSG_TRY_CAST_PROMISE(writeResult), "write() did not return a promise")));
+      webstreams::invokeMethod(js, writer, "releaseLock"_kj);
+      return promise.then(js, [](jsg::Lock& js, jsg::Value) {});
     }
   }
   KJ_UNREACHABLE;
@@ -469,8 +478,21 @@ jsg::Promise<void> WritableStreamNativeSink::write(
       }
       writeInFlight = true;
       auto& ioContext = IoContext::current();
-      // The write's I/O runs outside the isolate lock; the copied bytes ride the promise.
-      auto promise = active.sink->write(data.asPtr()).attach(kj::mv(data));
+      // Durable Object output gate: the write's bytes must not become externally
+      // observable while an output lock is pending, exactly like the legacy internal
+      // controller, which stores an output lock with every queued write event and awaits
+      // it before touching the sink. The sink reference taken here stays valid for the
+      // whole wait+write window: writeInFlight defers any abort()/detach() release to the
+      // write's settlement. The write's I/O runs outside the isolate lock; the copied
+      // bytes ride the promise.
+      kj::Promise<void> promise = nullptr;
+      KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
+        promise = lock.then([&sink = *active.sink, data = kj::mv(data)]() mutable {
+          return sink.write(data.asPtr()).attach(kj::mv(data));
+        });
+      } else {
+        promise = active.sink->write(data.asPtr()).attach(kj::mv(data));
+      }
       return ioContext
           .awaitIo(js, kj::mv(promise), [self = JSG_THIS, len](jsg::Lock& js) mutable {
         self->writeInFlight = false;
@@ -530,8 +552,18 @@ jsg::Promise<void> WritableStreamNativeSink::close(jsg::Lock& js) {
 jsg::Promise<void> WritableStreamNativeSink::closeImpl(jsg::Lock& js) {
   KJ_IF_SOME(active, state) {
     auto& ioContext = IoContext::current();
+    // Durable Object output gate: like the legacy controller's queued Close event, the
+    // sink must not be ended while an output lock is pending. The sink reference stays
+    // valid across the wait: the TS machinery serializes sink operations, and abort()
+    // only releases the sink itself.
+    kj::Promise<void> endPromise = nullptr;
+    KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
+      endPromise = lock.then([&sink = *active.sink]() { return sink.end(); });
+    } else {
+      endPromise = active.sink->end();
+    }
     return ioContext
-        .awaitIo(js, active.sink->end(), [self = JSG_THIS](jsg::Lock& js) mutable {
+        .awaitIo(js, kj::mv(endPromise), [self = JSG_THIS](jsg::Lock& js) mutable {
       self->state = kj::none;
     }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
       // The end failed; the sink is no longer usable either way.
@@ -633,8 +665,20 @@ jsg::Promise<void> WritableStreamNativeSink::pipeFrom(
   }
 
   auto pipeState = kj::rc<PipeFromState>(kj::mv(sink), kj::mv(releasedSource));
-  kj::Promise<void> pump =
-      pipeFromPump(pipeState.addRef(), preventClose ? EndStream::NO : EndStream::YES);
+  // Durable Object output gate: like the legacy controller's queued Pipe event, the pump
+  // must not start while an output lock is pending. The lock is consulted once, at pipe
+  // start, matching the legacy event's single wait. The pump coroutine must be CREATED
+  // inside the continuation -- KJ coroutines run eagerly, so a pre-created pump would
+  // progress regardless of what its promise is chained behind.
+  auto end = preventClose ? EndStream::NO : EndStream::YES;
+  kj::Promise<void> pump = nullptr;
+  KJ_IF_SOME(lock, IoContext::current().waitForOutputLocksIfNecessary()) {
+    pump = lock.then([pipeState = pipeState.addRef(), end]() mutable {
+      return pipeFromPump(kj::mv(pipeState), end);
+    });
+  } else {
+    pump = pipeFromPump(pipeState.addRef(), end);
+  }
   KJ_IF_SOME(signal, maybeSignal) {
     // The canceler destroys the pump at its suspension point when the signal fires; the
     // shutdown continuation below is attached OUTSIDE the wrap, so it still runs and

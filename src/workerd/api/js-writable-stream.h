@@ -138,15 +138,14 @@ class JsWritableStream final {
   // Precondition: !isNull().
   void detach(jsg::Lock& js);
 
-  // Returns the underlying legacy C++ WritableStream. FOR TESTS ONLY: this exists so that tests
-  // of consumers (e.g. sockets-test.c++'s output-gate test) can drive operations the deliberately
-  // narrow production API does not expose, such as enqueueing writes through the standard write
-  // machinery. Production code must never call this -- it would break the moment the stream is
-  // backed by the TypeScript implementation. Precondition: !isNull() and legacy-backed.
-  //
-  // TODO(streams-ts): Revisit once the TypeScript arm is wired up -- tests that need to drive
-  // writes will need a backend-neutral mechanism (or per-backend test variants).
-  jsg::Ref<WritableStream> getUnderlyingForTest(jsg::Lock& js);
+  // Enqueue a write through the stream's standard write machinery, returning a promise that
+  // settles when the write's I/O completes. FOR TESTS ONLY: this exists so that tests of
+  // consumers (e.g. sockets-test.c++'s output-gate tests) can drive writes without reaching
+  // into a backend-specific controller. The legacy arm writes through the controller
+  // directly; the TypeScript arm acquires the writer, writes, and releases it, so the
+  // stream must not be locked. Production code must never call this. Precondition:
+  // !isNull().
+  jsg::Promise<void> writeForTest(jsg::Lock& js, jsg::JsValue chunk);
 
   // Serialize the stream for RPC transfer, exactly like WritableStream::serialize(): the peer's
   // ByteStream is adopted as the stream's sink and an external table entry describing it is written
