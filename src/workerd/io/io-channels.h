@@ -452,6 +452,11 @@ class IoChannelFactory: public virtual kj::Refcounted {
     JSG_FAIL_REQUIRE(Error, "WorkerdDebugPort bindings are not supported by this runtime.");
   }
 
+  // Get direct access to the current workerd process's debug port interface.
+  virtual rpc::WorkerdDebugPort::Client getWorkerdDebugPort() {
+    JSG_FAIL_REQUIRE(Error, "WorkerdDebugPort bindings are not supported by this runtime.");
+  }
+
   // Converts a token created with {SubrequestChannel,ActorClassChannel}::getToken() back into a
   // live channel. Default implementations throw.
   virtual kj::Own<SubrequestChannel> subrequestChannelFromToken(

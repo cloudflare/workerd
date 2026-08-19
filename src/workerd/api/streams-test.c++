@@ -33,8 +33,8 @@ KJ_TEST("Streams tee stack overflow regression") {
   TestFixture testFixture;
   testFixture.runInIoContext([](const TestFixture::Environment& env) {
     auto& js = jsg::Lock::from(env.isolate);
-    ReadableStream s(env.context, kj::heap<FakeStreamSource>(10 * 1024 * 1024));
-    auto readableStreams = s.tee(js);
+    auto s = js.alloc<ReadableStream>(env.context, kj::heap<FakeStreamSource>(10 * 1024 * 1024));
+    auto readableStreams = s->tee(js);
     for (size_t i = 0; i < teeDepth; i++) {
       readableStreams = readableStreams[0]->tee(js);
     }

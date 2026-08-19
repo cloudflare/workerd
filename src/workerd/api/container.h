@@ -301,17 +301,25 @@ class Container: public jsg::Object {
             }
         ));
       } else {
-        JSG_TS_OVERRIDE(ContainerStartupOptions {
+        JSG_TS_OVERRIDE(type ContainerStartupOptions = {
           entrypoint?: string[];
           enableInternet: boolean;
           env?: Record<string, string>;
-          hardTimeout?: never;
-          image?: never;
-          instance?: never;
+          instance?: "lite" | "standard-1" | "standard-2" | "standard-3" | "standard-4" | ContainerStartResources;
           labels?: Record<string, string>;
           directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
-          containerSnapshot?: ContainerSnapshotRestoreParams;
-        });
+        } & (
+          | {
+              /** Cannot be used with `containerSnapshot`. */
+              image: string;
+              containerSnapshot?: never;
+            }
+          | {
+              image?: never;
+              /** Cannot be used with `image`. */
+              containerSnapshot?: ContainerSnapshotRestoreParams;
+            }
+        ));
       }
     }
   };

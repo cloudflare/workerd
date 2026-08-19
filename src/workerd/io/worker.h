@@ -1125,11 +1125,14 @@ inline const Worker::Isolate& Worker::getIsolate() const {
   return *script->isolate;
 }
 
-// An implementation of Worker::ValidationErrorReporter that collects errors into
-// a kj::Vector<kj::String>.
+// An implementation of Worker::ValidationErrorReporter that collects errors and warnings into
+// kj::Vector<kj::String>s.
 struct SimpleWorkerErrorReporter final: public Worker::ValidationErrorReporter {
   void addError(kj::String error) override {
     errors.add(kj::mv(error));
+  }
+  void addWarning(kj::String warning) override {
+    warnings.add(kj::mv(warning));
   }
   void addEntrypoint(kj::Maybe<kj::StringPtr> exportName, kj::Array<kj::String> methods) override {
     KJ_UNREACHABLE;
@@ -1145,6 +1148,7 @@ struct SimpleWorkerErrorReporter final: public Worker::ValidationErrorReporter {
   SimpleWorkerErrorReporter() = default;
   KJ_DISALLOW_COPY_AND_MOVE(SimpleWorkerErrorReporter);
   kj::Vector<kj::String> errors;
+  kj::Vector<kj::String> warnings;
 };
 
 }  // namespace workerd

@@ -573,7 +573,7 @@ class SubtleCrypto: public jsg::Object {
       kj::Array<kj::String> keyUsages);
 
   // NOT VISIBLE TO JS: like importKey() but return the key, not a promise.
-  jsg::Ref<CryptoKey> importKeySync(jsg::Lock& js,
+  static jsg::Ref<CryptoKey> importKeySync(jsg::Lock& js,
       kj::StringPtr format,
       ImportKeyData keyData,
       ImportKeyAlgorithm algorithm,

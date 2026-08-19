@@ -365,42 +365,42 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
     }
   }
 
+  JSG_REQUIRE(options.image == kj::none || options.containerSnapshot == kj::none, TypeError,
+      "`image` and `containerSnapshot` are mutually exclusive.");
   if (flags.getWorkerdExperimental()) {
-    JSG_REQUIRE(options.image == kj::none || options.containerSnapshot == kj::none, TypeError,
-        "`image` and `containerSnapshot` are mutually exclusive.");
     KJ_IF_SOME(hardTimeoutMs, options.hardTimeout) {
       JSG_REQUIRE(hardTimeoutMs > 0, RangeError, "Hard timeout must be greater than 0");
       req.setHardTimeoutMs(hardTimeoutMs);
     }
-    KJ_IF_SOME(image, options.image) {
-      JSG_REQUIRE(image.size() <= MAX_IMAGE_REFERENCE_SIZE, TypeError,
-          "Container image reference cannot exceed ", MAX_IMAGE_REFERENCE_SIZE, " bytes.");
-      for (auto c: image) {
-        auto byte = static_cast<kj::byte>(c);
-        JSG_REQUIRE(byte > 0x20 && byte < 0x7f, TypeError,
-            "Container image reference must contain only non-space printable ASCII characters.");
-      }
-      req.getSource().setImage(image);
+  }
+  KJ_IF_SOME(image, options.image) {
+    JSG_REQUIRE(image.size() <= MAX_IMAGE_REFERENCE_SIZE, TypeError,
+        "Container image reference cannot exceed ", MAX_IMAGE_REFERENCE_SIZE, " bytes.");
+    for (auto c: image) {
+      auto byte = static_cast<kj::byte>(c);
+      JSG_REQUIRE(byte > 0x20 && byte < 0x7f, TypeError,
+          "Container image reference must contain only non-space printable ASCII characters.");
     }
-    KJ_IF_SOME(instance, options.instance) {
-      auto instanceBuilder = req.initInstance();
-      KJ_SWITCH_ONEOF(instance) {
-        KJ_CASE_ONEOF(named, kj::String) {
-          JSG_REQUIRE(
-              kj::arrayPtr(VALID_CONTAINER_INSTANCE_TYPES).findFirst(named.asPtr()) != kj::none,
-              TypeError, "Invalid container instance type.");
-          instanceBuilder.setNamed(named);
-        }
-        KJ_CASE_ONEOF(custom, StartResources) {
-          JSG_REQUIRE(std::isfinite(custom.vcpu) && custom.vcpu > 0, RangeError,
-              "Container resource vcpu must be a finite number greater than 0.");
-          auto memoryMib = requireResourceAmount(custom.memoryMib, "memoryMib"_kj);
-          auto diskMb = requireResourceAmount(custom.diskMb, "diskMb"_kj);
-          auto resources = instanceBuilder.initCustom();
-          resources.setVcpu(custom.vcpu);
-          resources.setMemoryMib(memoryMib);
-          resources.setDiskMb(diskMb);
-        }
+    req.getSource().setImage(image);
+  }
+  KJ_IF_SOME(instance, options.instance) {
+    auto instanceBuilder = req.initInstance();
+    KJ_SWITCH_ONEOF(instance) {
+      KJ_CASE_ONEOF(named, kj::String) {
+        JSG_REQUIRE(
+            kj::arrayPtr(VALID_CONTAINER_INSTANCE_TYPES).findFirst(named.asPtr()) != kj::none,
+            TypeError, "Invalid container instance type.");
+        instanceBuilder.setNamed(named);
+      }
+      KJ_CASE_ONEOF(custom, StartResources) {
+        JSG_REQUIRE(std::isfinite(custom.vcpu) && custom.vcpu > 0, RangeError,
+            "Container resource vcpu must be a finite number greater than 0.");
+        auto memoryMib = requireResourceAmount(custom.memoryMib, "memoryMib"_kj);
+        auto diskMb = requireResourceAmount(custom.diskMb, "diskMb"_kj);
+        auto resources = instanceBuilder.initCustom();
+        resources.setVcpu(custom.vcpu);
+        resources.setMemoryMib(memoryMib);
+        resources.setDiskMb(diskMb);
       }
     }
   }

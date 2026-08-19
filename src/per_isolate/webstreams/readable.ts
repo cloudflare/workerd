@@ -231,6 +231,11 @@ let readableStreamPipeThroughTo: <R>(
   destination: WritableStreamType<R>,
   options?: StreamPipeOptions
 ) => Promise<void>;
+let readableStreamPipeTo: <R>(
+  source: ReadableStream<R>,
+  destination: WritableStreamType<R>,
+  options?: StreamPipeOptions
+) => Promise<void>;
 let readableStreamTee: <R>(
   stream: ReadableStream<R>
 ) => [ReadableStream<R>, ReadableStream<R>];
@@ -2377,10 +2382,18 @@ function pipeToInternal<R>(
   const preventClose = !!options.preventClose;
   const signal = options.signal;
   if (signal !== undefined) {
-    // Brand check: the captured getter throws for non-AbortSignal objects.
+    // Brand check. Under the modern JSG layout the captured `aborted` getter
+    // throws for non-AbortSignal receivers; under the instance-property
+    // layout (old compat dates) the capture is a plain read that cannot
+    // brand-check, so additionally require the boolean a genuine signal's
+    // own data property carries.
+    let aborted: unknown;
     try {
-      AbortSignalAbortedGet(signal);
+      aborted = AbortSignalAbortedGet(signal);
     } catch {
+      throw new TypeError('options.signal must be an AbortSignal');
+    }
+    if (typeof aborted !== 'boolean') {
       throw new TypeError('options.signal must be an AbortSignal');
     }
   }
@@ -2849,6 +2862,131 @@ class ReadableStream<R> {
       options?: StreamPipeOptions
     ) => {
       return pipeToInternal(source, destination, options);
+    };
+
+    // The shared pipeTo implementation, used by both the prototype method
+    // and the C++ bridge entry point (JsReadableStream::pipeTo dispatches
+    // here via cppExports rather than through the user-patchable pipeTo
+    // property -- the same captured-call discipline as cancel/tee). The
+    // brand assert lives in the prototype method; the C++ arm passes
+    // genuine handles by construction.
+    readableStreamPipeTo = <R>(
+      source: ReadableStream<R>,
+      destination: WritableStreamType<R>,
+      options: StreamPipeOptions = {}
+    ): Promise<void> => {
+      try {
+        if (isReadableStreamLocked(source)) {
+          throw new TypeError('Cannot pipe a stream that is locked');
+        }
+        if (writableInternals.isWritableStreamLocked(destination)) {
+          throw new TypeError('Cannot pipe to a locked writable stream');
+        }
+        // WebIDL: null coerces to {} for optional dictionaries.
+        if (options === null) options = {} as StreamPipeOptions;
+        if (!isActualObject(options)) {
+          throw new TypeError('Pipe options must be an object');
+        }
+        // Convert the options ONCE, before any extraction: the fast path
+        // below permanently consumes both endpoints, so validation (and
+        // the user-observable getter side effects, in the spec-mandated
+        // §4.9.1 order) must happen while both streams are still
+        // untouched. Both paths below receive the converted values as
+        // plain data properties; neither re-reads the user's options
+        // object.
+        const preventAbort = !!options.preventAbort;
+        const preventCancel = !!options.preventCancel;
+        const preventClose = !!options.preventClose;
+        const signal = options.signal;
+        if (signal !== undefined) {
+          // Brand check (same check and error text as the JS pump). Under
+          // the modern JSG layout the captured `aborted` getter throws for
+          // non-AbortSignal receivers; under the instance-property layout
+          // (old compat dates) the capture is a plain read that cannot
+          // brand-check, so additionally require the boolean a genuine
+          // signal's own data property carries. (A deliberately forged
+          // {aborted: boolean} object can slip through under old dates
+          // only; the fast path's C++ typed unwrap still rejects it.)
+          let aborted: unknown;
+          try {
+            aborted = AbortSignalAbortedGet(signal);
+          } catch {
+            throw new TypeError('options.signal must be an AbortSignal');
+          }
+          if (typeof aborted !== 'boolean') {
+            throw new TypeError('options.signal must be an AbortSignal');
+          }
+        }
+        const converted = {
+          preventAbort,
+          preventCancel,
+          preventClose,
+          signal,
+        } as StreamPipeOptions;
+
+        // PIPE DISPATCH: if both source and dest are native-backed, take
+        // the fast path -- extract both and let the sink's pipeFrom hook
+        // arrange the pipe entirely at the C++ layer. Both markers are
+        // own-property reads (non-destructive); extraction happens only
+        // after both are confirmed. If both are native, pipeFrom MUST
+        // exist (invariant -- its absence is a contract violation, not a
+        // fallback trigger).
+        //
+        // Because extraction permanently consumes both endpoints, the fast
+        // path is additionally gated on (a) no prevent* option -- the
+        // legacy internal pipe leaves the un-prevented endpoint unlocked
+        // and usable after the pipe settles (e.g. the socket-concatenation
+        // pattern: body1.pipeTo(sock.writable, {preventClose: true})
+        // followed by body2.pipeTo(sock.writable)), which extraction
+        // cannot honor -- and (b) both endpoints in their normal flowing
+        // states, so pipes involving closed/errored endpoints reject with
+        // the spec-mandated stored errors. The JS pump handles all of
+        // those cases (it releases both locks in its finalize).
+        // TODO(streams-ts): revisit extending the fast path to the
+        // prevent* options (e.g. reversible extraction) so those pipes can
+        // also run entirely at the C++ layer.
+        // Brand-check the destination before probing for native markers so
+        // a Proxy's getOwnPropertyDescriptor trap cannot observe the symbol.
+        const sourceExtractor = ObjectGetOwnPropertyDescriptor(
+          source,
+          kExtractNativeSource
+        )?.value as ((this: ReadableStream<R>) => object) | undefined;
+        const sinkExtractor = writableInternals.isWritableStream(destination)
+          ? (ObjectGetOwnPropertyDescriptor(destination, kExtractNativeSink)
+              ?.value as ((this: object) => object) | undefined)
+          : undefined;
+        if (
+          sourceExtractor !== undefined &&
+          sinkExtractor !== undefined &&
+          !preventAbort &&
+          !preventCancel &&
+          !preventClose &&
+          !source.#disturbed &&
+          source.#state === 'readable' &&
+          writableInternals.getState(destination) === 'writable'
+        ) {
+          // Captured-call discipline: Function.prototype.call is patchable,
+          // so re-bind both extractors and the hook through uncurryThis
+          // (captured Reflect machinery) instead of .call().
+          const nativeSource = uncurryThis(sourceExtractor)(source);
+          const nativeSink = uncurryThis(sinkExtractor)(destination) as Record<
+            string,
+            unknown
+          >;
+          const pipeFrom = nativeSink.pipeFrom as
+            | ((source: object, opts: StreamPipeOptions) => Promise<void>)
+            | undefined;
+          if (pipeFrom === undefined) {
+            throw new TypeError(
+              'Native sink is missing the required pipeFrom hook'
+            );
+          }
+          return uncurryThis(pipeFrom)(nativeSink, nativeSource, converted);
+        }
+        return readableStreamPipeThroughTo(source, destination, converted);
+      } catch (e) {
+        return PromiseReject(e) as Promise<void>;
+      }
     };
 
     // BACKEND-DISPATCH: tee is one of the five sanctioned dispatch points
@@ -3410,55 +3548,12 @@ class ReadableStream<R> {
   ): Promise<void> {
     try {
       assertIsReadableStream(this);
-      if (isReadableStreamLocked(this)) {
-        throw new TypeError('Cannot pipe a stream that is locked');
-      }
-      if (destination.locked) {
-        throw new TypeError('Cannot pipe to a locked writable stream');
-      }
-      // WebIDL: null coerces to {} for optional dictionaries.
-      if (options === null) options = {} as StreamPipeOptions;
-      if (!isActualObject(options)) {
-        throw new TypeError('Pipe options must be an object');
-      }
-      // PIPE DISPATCH: if both source and dest are native-backed, take
-      // the fast path — extract both and let the sink's pipeFrom hook
-      // arrange the pipe entirely at the C++ layer. Both markers are
-      // own-property reads (non-destructive); extraction happens only
-      // after both are confirmed. If both are native, pipeFrom MUST
-      // exist (invariant — its absence is a contract violation, not a
-      // fallback trigger).
-      const sourceExtractor = ObjectGetOwnPropertyDescriptor(
-        this,
-        kExtractNativeSource
-      )?.value as ((this: ReadableStream<R>) => object) | undefined;
-      const sinkExtractor = ObjectGetOwnPropertyDescriptor(
-        destination,
-        kExtractNativeSink
-      )?.value as ((this: object) => object) | undefined;
-      if (sourceExtractor !== undefined && sinkExtractor !== undefined) {
-        // Captured-call discipline: Function.prototype.call is patchable,
-        // so re-bind both extractors and the hook through uncurryThis
-        // (captured Reflect machinery) instead of .call().
-        const nativeSource = uncurryThis(sourceExtractor)(this);
-        const nativeSink = uncurryThis(sinkExtractor)(destination) as Record<
-          string,
-          unknown
-        >;
-        const pipeFrom = nativeSink.pipeFrom as
-          | ((source: object, opts: StreamPipeOptions) => Promise<void>)
-          | undefined;
-        if (pipeFrom === undefined) {
-          throw new TypeError(
-            'Native sink is missing the required pipeFrom hook'
-          );
-        }
-        return uncurryThis(pipeFrom)(nativeSink, nativeSource, options);
-      }
-      return readableStreamPipeThroughTo(this, destination, options);
     } catch (e) {
       return PromiseReject(e) as Promise<void>;
     }
+    // The shared implementation (also the C++ bridge entry point) carries
+    // the locked/options preconditions and the pipe dispatch.
+    return readableStreamPipeTo(this, destination, options);
   }
 
   tee(): [ReadableStream<R>, ReadableStream<R>] {
@@ -3867,6 +3962,7 @@ const cppExports = ObjectFreeze({
   isReadableStream,
   isReadableStreamLocked,
   readableStreamCancel,
+  readableStreamPipeTo,
   readableStreamTee,
   setReadableStreamPendingClosure,
 });

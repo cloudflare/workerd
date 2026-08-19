@@ -1369,13 +1369,9 @@ void SqliteDatabase::setupSecurity(sqlite3* db) {
   SQLITE_CALL_NODB(sqlite3_db_config(db, SQLITE_DBCONFIG_DEFENSIVE, 1, nullptr));
 
   // 2. Reduce limits
-  // We use the suggested limits from the web site. Note that sqlite3_limit() does NOT return an
-  // error code; it returns the old limit.
-
-  // This limit is set higher than what is suggested on sqlite.org/security.html
-  // because we want to allow storing values of 1MiB, and we added some extra
-  // padding on top of that
-  sqlite3_limit(db, SQLITE_LIMIT_LENGTH, 2200000);
+  // We use most of the suggested limits from sqlite.org/security.html. Note that sqlite3_limit()
+  // does NOT return an error code; it returns the old limit.
+  sqlite3_limit(db, SQLITE_LIMIT_LENGTH, 4 * 1024 * 1024);
   sqlite3_limit(db, SQLITE_LIMIT_SQL_LENGTH, 100000);
   sqlite3_limit(db, SQLITE_LIMIT_COLUMN, 100);
   sqlite3_limit(db, SQLITE_LIMIT_EXPR_DEPTH, 100);

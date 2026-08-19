@@ -2,6 +2,18 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+/*****************************
+ *
+ * !!! WARNING !!!
+ * Changes should be made in `types/defines/images.d.ts`
+ * and then synced back here.
+ *
+ * This file is copy & pasted from the types/ folder
+ * because when bazel runs it doesn't have access to that directly (and thusly is sad).
+ * TODO: come up with a better system for this.
+ *
+ ******************************/
+
 type ImageInfoResponse =
   | { format: 'image/svg+xml' }
   | {
@@ -10,6 +22,30 @@ type ImageInfoResponse =
       width: number;
       height: number;
     };
+
+/**
+ * Parameters for rasterizing text into an image.
+ */
+type TextRasterize = {
+  /** The text content to render */
+  content: string;
+  /** rasterization options for the text **/
+  options: TextOptions;
+};
+
+type TextOptions = {
+  /** Font configuration */
+  font: {
+    /** URL to a font file in TrueType (.ttf), OpenType (.otf), WOFF (.woff), or WOFF2 (.woff2) format */
+    url: string;
+  };
+  /** Font size in points (pt) */
+  size?: number;
+  /** Text color in CSS format: hex (#RRGGBB or #RRGGBBAA), rgb(r,g,b), rgba(r,g,b,a), or named colors */
+  color?: string;
+};
+
+type ImageSource = ReadableStream<Uint8Array> | TextRasterize;
 
 type ImageTransform = {
   width?: number;
@@ -140,11 +176,47 @@ interface ImageUpdateOptions {
   creator?: string;
 }
 
+type ImageMetadataFilterOperators = {
+  eq?: string | number | boolean;
+  in?: string[] | number[];
+  gt?: number;
+  gte?: number;
+  lt?: number;
+  lte?: number;
+};
+
+type ImageMetadataFilterValue =
+  string | number | boolean | ImageMetadataFilterOperators;
+
+interface ImageListFilter {
+  metadata?: Record<string, ImageMetadataFilterValue>;
+}
+
 interface ImageListOptions {
   limit?: number;
   cursor?: string;
   sortOrder?: 'asc' | 'desc';
   creator?: string;
+  filter?: ImageListFilter;
+}
+
+interface ImageSignedUrlOptions {
+  variant: string;
+  expiresIn?: number;
+  keyName?: string;
+}
+
+interface ImageDirectUploadOptions {
+  id?: string;
+  requireSignedURLs?: boolean;
+  metadata?: Record<string, unknown>;
+  creator?: string;
+  expiresIn?: number;
+}
+
+interface ImageDirectUploadResult {
+  id: string;
+  uploadURL: string;
 }
 
 interface ImageList {
@@ -165,6 +237,14 @@ interface ImageHandle {
    * @returns ReadableStream of image bytes, or null if not found
    */
   bytes(): Promise<ReadableStream<Uint8Array> | null>;
+
+  /**
+   * Generate a signed delivery URL for this hosted image.
+   * @param options Signing configuration
+   * @returns A signed image delivery URL
+   * @throws {@link ImagesError} if signing fails
+   */
+  signedUrl(options: ImageSignedUrlOptions): Promise<string>;
 
   /**
    * Update hosted image metadata
@@ -208,6 +288,17 @@ interface HostedImagesBinding {
    * @throws {@link ImagesError} if list fails
    */
   list(options?: ImageListOptions): Promise<ImageList>;
+
+  /**
+   * Create a Direct Creator Upload link, letting an end user upload an
+   * image straight to Cloudflare without exposing an API token
+   * @param options Upload link configuration
+   * @returns The new image ID and the upload URL to hand to the end user
+   * @throws {@link ImagesError} if creation fails
+   */
+  createDirectUpload(
+    options?: ImageDirectUploadOptions
+  ): Promise<ImageDirectUploadResult>;
 }
 
 interface ImagesBinding {
@@ -229,7 +320,13 @@ interface ImagesBinding {
     stream: ReadableStream<Uint8Array>,
     options?: ImageInputOptions
   ): ImageTransformer;
-
+  /**
+   * Begin applying a series of transformations to text
+   * @param content string to be rendered
+   * @param options font, optional color and size to use in rendering text
+   * @returns A transform handle
+   */
+  text(content: string, options: TextOptions): ImageTransformer;
   /**
    * Access hosted images CRUD operations
    */
@@ -267,11 +364,16 @@ type ImageTransformationOutputOptions = {
   encoding?: 'base64';
 };
 
+type ImageTransformationResponseOptions = {
+  headers?: HeadersInit;
+};
+
 interface ImageTransformationResult {
   /**
    * The image as a response, ready to store in cache or return to users
+   * @param options Options that apply to the returned response, e.g. additional headers
    */
-  response(): Response;
+  response(options?: ImageTransformationResponseOptions): Response;
   /**
    * The content type of the returned image
    */

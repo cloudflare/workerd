@@ -43,11 +43,7 @@ impl Worker {
     }
 
     fn error(&self, file: &str, line: u32) -> KjError {
-        KjError::new(
-            cxx::KjExceptionType::Failed,
-            format!("jsg.Error: {}", self.message),
-        )
-        .with_location(file.to_owned(), line)
+        kj::failed!("jsg.Error: {}", self.message).with_location(file.to_owned(), line)
     }
 }
 
