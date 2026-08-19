@@ -94,7 +94,7 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       return ExtractedBody(js, kj::mv(stream));
     }
     KJ_CASE_ONEOF(gen, jsg::AsyncGeneratorIgnoringStrings<jsg::Value>) {
-      return ExtractedBody(js, ReadableStream::from(js, gen.release()));
+      return ExtractedBody(js, JsReadableStream::from(js, gen.release()));
     }
     KJ_CASE_ONEOF(text, kj::String) {
       auto contentType = kj::str(MimeType::PLAINTEXT_STRING);

@@ -21,7 +21,7 @@ const {
   TextDecoderStream,
 } = globalThis;
 
-import { doesNotMatch, ok, strictEqual, throws } from 'node:assert';
+import { doesNotMatch, ok, rejects, strictEqual, throws } from 'node:assert';
 
 export const existenceTest = {
   test() {
@@ -198,6 +198,102 @@ export const bufferBackedEmptyBody = {
     const response = new Response('');
     ok(response.body instanceof ReadableStream);
     strictEqual(await response.text(), '');
+  },
+};
+
+// ======================================================================================
+// Iterable/AsyncIterable bodies (the fetch_iterable_type_support BodyInit extension) go
+// through JsReadableStream::from(), which under the flag constructs a TypeScript stream
+// over a C++-built underlying source driving the (already-unwrapped) generator with
+// ReadableStream.from() semantics: demand-driven pulls, promise-typed values awaited,
+// close on completion, cancel forwarded to the iterator's return().
+
+export const iterableBodiesAreTsStreams = {
+  async test() {
+    const encoder = new TextEncoder();
+
+    // Async generator.
+    async function* agen() {
+      yield encoder.encode('hello ');
+      yield encoder.encode('world');
+    }
+    let response = new Response(agen());
+    ok(response.body instanceof ReadableStream);
+    strictEqual(await response.text(), 'hello world');
+
+    // Sync iterable object.
+    response = new Response({
+      *[Symbol.iterator]() {
+        yield encoder.encode('hello ');
+        yield encoder.encode('world');
+      },
+    });
+    ok(response.body instanceof ReadableStream);
+    strictEqual(await response.text(), 'hello world');
+
+    // Promise-typed values are awaited before being enqueued (async-from-sync
+    // semantics, matching the legacy implementation).
+    response = new Response({
+      *[Symbol.iterator]() {
+        yield Promise.resolve(encoder.encode('hello '));
+        yield Promise.resolve(encoder.encode('world'));
+      },
+    });
+    strictEqual(await response.text(), 'hello world');
+  },
+};
+
+export const iterableBodyReaderRead = {
+  async test() {
+    // Reading the iterable-backed body from JavaScript drives the TS reader machinery:
+    // one generator value per read, EOF after completion.
+    async function* agen() {
+      yield new TextEncoder().encode('hello world');
+    }
+    const response = new Response(agen());
+    const reader = response.body.getReader();
+    const first = await reader.read();
+    strictEqual(first.done, false);
+    strictEqual(new TextDecoder().decode(first.value), 'hello world');
+    const eof = await reader.read();
+    strictEqual(eof.done, true);
+  },
+};
+
+export const iterableBodyCancelCallsReturn = {
+  async test() {
+    // Canceling the body forwards to the iterator's return() hook.
+    let returned = false;
+    const response = new Response({
+      [Symbol.asyncIterator]() {
+        return {
+          next() {
+            return Promise.resolve({
+              value: new TextEncoder().encode('x'),
+              done: false,
+            });
+          },
+          return() {
+            returned = true;
+            return Promise.resolve({ done: true });
+          },
+        };
+      },
+    });
+    await response.body.cancel('no longer interested');
+    ok(returned);
+  },
+};
+
+export const iterableBodyErrorPropagates = {
+  async test() {
+    // A generator throw rejects the pull, which errors the stream and the consumption.
+    async function* agen() {
+      yield new TextEncoder().encode('x');
+      throw new Error('boom');
+    }
+    const response = new Response(agen());
+    await rejects(response.text(), /boom/);
   },
 };
 

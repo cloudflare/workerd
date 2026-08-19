@@ -110,6 +110,22 @@ class JsReadableStream final {
   static JsReadableStream create(
       jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source);
 
+  // Create a stream-backed JsReadableStream that reads the values produced by the given
+  // async generator, following the ReadableStream.from() algorithm: demand-driven pulls
+  // (highWaterMark 0), one generator.next() per pull with promise-typed values awaited
+  // before enqueue, close on generator completion, and cancel forwarding to the
+  // generator's return(). This backs the Iterable/AsyncIterable BodyInit extension
+  // (Body::extractBody's generator arm), whose generator arrives pre-consumed from the
+  // OneOf unwrap: the iterable's iterator method has already been invoked and the
+  // iterator's next/return captured, so this takes the generator rather than the original
+  // iterable object.
+  //
+  // Like create(), this is a compatibility-flag dispatch point: under
+  // typescript_implemented_streams the TypeScript stream is constructed over a
+  // C++-built JS underlying source driving the generator; otherwise this delegates to the
+  // legacy ReadableStream::from().
+  static JsReadableStream from(jsg::Lock& js, jsg::AsyncGenerator<jsg::Value> generator);
+
   // Returns a new JsReadableStream sharing this one's underlying stream (and retransmit
   // buffer, if any). Both instances observe the same underlying stream state (e.g. the stream
   // becoming disturbed through one is visible through the other), and passing either through
