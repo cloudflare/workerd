@@ -499,6 +499,12 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
 
 }  // namespace
 
+WritableStreamRpcWrapper newWritableStreamRpcAdapter(kj::Own<WritableStreamSink> inner) {
+  auto wrapper = kj::heap<WritableStreamRpcAdapter>(kj::mv(inner));
+  auto completionOrRevoke = wrapper->waitForCompletionOrRevoke();
+  return WritableStreamRpcWrapper{kj::mv(wrapper), kj::mv(completionOrRevoke)};
+}
+
 void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // Serialize by effectively creating a `JsRpcStub` around this object and serializing that.
   // Except we don't actually want to do _exactly_ that, because we do not want to actually create
@@ -520,12 +526,12 @@ void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
     // NOTE: We're counting on `removeSink()`, to check that the stream is not locked and other
     //   common checks. It's important we don't modify the WritableStream before this call.
     auto encoding = sink->disownEncodingResponsibility();
-    auto wrapper = kj::heap<WritableStreamRpcAdapter>(kj::mv(sink));
+    auto wrapper = newWritableStreamRpcAdapter(kj::mv(sink));
 
     // Make sure this stream will be revoked if the IoContext ends.
-    ioctx.addTask(wrapper->waitForCompletionOrRevoke().attach(ioctx.registerPendingEvent()));
+    ioctx.addTask(wrapper.completionOrRevoke.attach(ioctx.registerPendingEvent()));
 
-    auto capnpStream = ioctx.getByteStreamFactory().kjToCapnp(kj::mv(wrapper));
+    auto capnpStream = ioctx.getByteStreamFactory().kjToCapnp(kj::mv(wrapper.stream));
 
     externalHandler->write([capnpStream = kj::mv(capnpStream), encoding](
                                rpc::JsValue::External::Builder builder) mutable {

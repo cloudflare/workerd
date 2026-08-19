@@ -1264,6 +1264,28 @@ KJ_TEST("JsWritableStream create TS arm: closure waitable rejection skips the si
   KJ_EXPECT(!state.aborted);
 }
 
+KJ_TEST("JsWritableStream serialize of a TypeScript-backed stream requires an RPC serializer") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    auto constructor =
+        KJ_ASSERT_NONNULL(exportsObj.get(js, "WritableStream"_kj).tryCast<jsg::JsFunction>());
+    auto streamObj = constructor.newInstance(js, jsg::JsValue(js.obj()));
+    auto stream = KJ_ASSERT_NONNULL(JsWritableStream::tryUnwrapTs(js, jsg::JsValue(streamObj)));
+
+    // Parity with WritableStream::serialize(): a serializer without an RPC external handler
+    // must be rejected with DOMDataCloneError before the stream is touched -- in particular,
+    // before getWriter() locks it.
+    jsg::Serializer serializer(js);
+    KJ_EXPECT_THROW_MESSAGE(
+        "WritableStream can only be serialized for RPC", stream.serialize(js, serializer));
+    KJ_EXPECT(!stream.isLocked(js));
+  });
+}
+
 KJ_TEST("JsWritableStream::tryUnwrapTs adopts TypeScript streams and rejects impostors") {
   auto fixture = makeTsStreamsFixture();
   SinkState state;

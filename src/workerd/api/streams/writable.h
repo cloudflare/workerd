@@ -9,6 +9,10 @@
 #include <workerd/util/state-machine.h>
 #include <workerd/util/weak-refs.h>
 
+namespace capnp {
+class ExplicitEndOutputStream;
+}
+
 namespace workerd::api {
 
 class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamController::Writer {
@@ -215,5 +219,21 @@ class WritableStream: public jsg::Object, public kj::PtrTarget {
   template <typename T>
   friend class WritableImpl;
 };
+
+// The pieces of a WritableStreamSink wrapped for transfer over capnp RPC (the sending side of
+// a WritableStream serialization): `stream` is the capnp-compatible wrapper to hand to the
+// ByteStreamFactory, and `completionOrRevoke` must be added as a task on the IoContext (with a
+// pending event registered). The promise resolves when the peer drops the stream; if it is
+// canceled first (the IoContext ends), the wrapped stream is revoked: pending operations are
+// canceled and the sink is dropped.
+struct WritableStreamRpcWrapper {
+  kj::Own<capnp::ExplicitEndOutputStream> stream;
+  kj::Promise<void> completionOrRevoke;
+};
+
+// Wrap the given sink for transfer over capnp RPC. Shared by WritableStream::serialize()'s
+// native-sink arm and JsWritableStream's TypeScript arm (whose sink dispatches into the
+// isolate to drive the TypeScript writer).
+WritableStreamRpcWrapper newWritableStreamRpcAdapter(kj::Own<WritableStreamSink> inner);
 
 }  // namespace workerd::api
