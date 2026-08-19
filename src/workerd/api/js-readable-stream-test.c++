@@ -1715,6 +1715,52 @@ KJ_TEST("JsReadableStream detach of a closed TypeScript-backed stream yields a c
   KJ_EXPECT(ended);
 }
 
+KJ_TEST("JsReadableStream cancel of a locked TypeScript-backed stream rejects") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    auto constructor =
+        KJ_ASSERT_NONNULL(exportsObj.get(js, "ReadableStream"_kj).tryCast<jsg::JsFunction>());
+    auto streamObj = constructor.newInstance(js, jsg::JsValue(js.obj()));
+    auto stream = JsReadableStream(js, streamObj.addRef(js));
+
+    auto reader KJ_UNUSED = webstreams::invokeMethod(js, streamObj, "getReader"_kj);
+    KJ_EXPECT(stream.isLocked(js));
+
+    auto promise = stream.cancel(js, kj::none)
+                       .then(js, [](jsg::Lock& js) -> void {
+      KJ_FAIL_REQUIRE("expected cancel() of a locked stream to reject");
+    }, [](jsg::Lock& js, jsg::Value exception) -> void {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("currently locked to a reader"), e.getDescription());
+    }).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock & js) mutable {
+                         // forceCancel bypasses the lock check (forcible teardown semantics) and leaves the
+                         // stream disturbed.
+                         auto forced = stream.forceCancel(js, kj::none);
+                         KJ_EXPECT(stream.isDisturbed(js));
+                         return kj::mv(forced);
+                       }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream cancel of an unlocked TypeScript-backed stream disturbs it") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    KJ_EXPECT(!stream.isDisturbed(js));
+    auto promise = stream.cancel(js, jsg::JsValue(js.str("no longer interested"_kj))).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock& js) {
+      KJ_EXPECT(stream.isDisturbed(js));
+    }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
 KJ_TEST("JsReadableStream detach of a tee branch carries the composite cancel hook") {
   auto fixture = makeTsStreamsFixture();
   bool sourceCanceled = false;

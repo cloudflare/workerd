@@ -650,9 +650,17 @@ jsg::Promise<void> JsReadableStream::cancel(jsg::Lock& js, jsg::Optional<jsg::Js
         return stream->cancel(js, kj::mv(reason));
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        // TODO(streams-ts): This bypasses the locked check. We need a variant
-        // that rejects if the stream is locked.
-        return readableStreamCancel(js, obj.getHandle(js), reason);
+        // Reject-if-locked precondition (parity with ReadableStream::cancel, including the
+        // rejection text), then the lock-blind internal cancel; the check-then-act pair is
+        // atomic under the isolate lock. Composed here from cppExports operations rather
+        // than invoking the prototype method, which user code can patch. forceCancel() is
+        // the variant that skips the lock check.
+        auto handle = obj.getHandle(js);
+        if (getReadableStreamIsLocked(js, handle)) {
+          return js.rejectedPromise<void>(
+              js.typeError("This ReadableStream is currently locked to a reader."_kj));
+        }
+        return readableStreamCancel(js, handle, reason);
       }
     }
     KJ_UNREACHABLE;
