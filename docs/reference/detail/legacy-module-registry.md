@@ -216,7 +216,7 @@ Flow:
 9. On not-found: retry with absolute path for `node:`/`cloudflare:` prefixed specifiers.
 10. Final fallback: throw `"No such module"` error.
 
-Errors are handled via `js.tryCatch`: exceptions are caught, and
+Errors are handled via `JSG_TRY/JSG_CATCH`: exceptions are caught, and
 `js.v8Isolate->ThrowException()` is called to schedule them on the isolate
 (V8 requires exceptions to be scheduled, not thrown as C++ exceptions, during
 resolve callbacks).
