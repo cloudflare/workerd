@@ -1816,6 +1816,121 @@ KJ_TEST("JsReadableStream cancel of an unlocked TypeScript-backed stream disturb
   });
 }
 
+// =======================================================================================
+// onEof of TypeScript-backed streams (S1 semantics: fires when the native source's EOF is
+// observed through the conduit; never on cancel, error, extraction, or queued streams)
+
+KJ_TEST("JsReadableStream onEof fires when a native TypeScript stream is read to EOF") {
+  auto fixture = makeTsStreamsFixture();
+  bool fired = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    auto constructor =
+        KJ_ASSERT_NONNULL(exportsObj.get(js, "ReadableStream"_kj).tryCast<jsg::JsFunction>());
+    auto streamObj = constructor.newInstance(js, jsg::JsValue(handler.wrap(js, kj::mv(source))));
+    auto stream = JsReadableStream(js, streamObj.addRef(js));
+
+    stream.onEof(js).then(js, [&fired](jsg::Lock&) { fired = true; }).markAsHandled(js);
+
+    // Drive reader-driven reads through the real JS reader machinery: the first read
+    // delivers the content, the second observes EOF.
+    auto reader = KJ_ASSERT_NONNULL(
+        JSG_TRY_CAST_OBJECT(webstreams::invokeMethod(js, streamObj, "getReader"_kj)));
+    auto read1 = js.toPromise(v8::Local<v8::Value>(
+        KJ_ASSERT_NONNULL(JSG_TRY_CAST_PROMISE(webstreams::invokeMethod(js, reader, "read"_kj)))));
+    auto promise =
+        read1
+            .then(js,
+                JSG_VISITABLE_LAMBDA((reader = jsg::JsRef(js, reader)), (reader),
+                    (jsg::Lock & js, jsg::Value) mutable {
+                      return js.toPromise(
+                          v8::Local<v8::Value>(KJ_ASSERT_NONNULL(JSG_TRY_CAST_PROMISE(
+                              webstreams::invokeMethod(js, reader.getHandle(js), "read"_kj)))));
+                    }))
+            .then(js, [](jsg::Lock& js, jsg::Value) {});
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(fired);
+}
+
+KJ_TEST("JsReadableStream onEof fires for DrainingReader consumption of a native stream") {
+  auto fixture = makeTsStreamsFixture();
+  bool fired = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // S1 semantics: C++ consumption reads through the conduit rather than detaching the
+    // source, so the EOF signal fires. (Deliberate divergence from the legacy arm, whose
+    // readAllBytes detaches the source before EOF; see the plan's decision log.)
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    stream.onEof(js).then(js, [&fired](jsg::Lock&) { fired = true; }).markAsHandled(js);
+
+    auto promise = stream.text(js, kLimit).then(js, [](jsg::Lock& js, kj::String text) {
+      KJ_EXPECT(text == kData);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(fired);
+}
+
+KJ_TEST("JsReadableStream onEof does not fire on cancel") {
+  auto fixture = makeTsStreamsFixture();
+  bool fired = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    stream.onEof(js).then(js, [&fired](jsg::Lock&) { fired = true; }).markAsHandled(js);
+
+    return env.context.awaitJs(js, stream.cancel(js, kj::none));
+  });
+  KJ_EXPECT(!fired);
+}
+
+KJ_TEST("JsReadableStream onEof does not fire for an extraction-based pump") {
+  auto fixture = makeTsStreamsFixture();
+  bool fired = false;
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // pumpTo extracts the source out of the conduit; its EOF happens at the KJ layer,
+    // beyond the conduit's observation (legacy pumpTo parity).
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    stream.onEof(js).then(js, [&fired](jsg::Lock&) { fired = true; }).markAsHandled(js);
+
+    return stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
+        .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+  });
+  KJ_EXPECT(collected.asPtr() == kData.asBytes());
+  KJ_EXPECT(!fired);
+}
+
+KJ_TEST("JsReadableStream onEof never fires for a queued TypeScript stream") {
+  auto fixture = makeTsStreamsFixture();
+  bool fired = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // Legacy parity: the JS controller never signals EOF, so queued (JS-backed) streams
+    // never resolve onEof, even when read all the way to EOF.
+    auto stream = makeTsStream(js, makeQueuedByteSource(js));
+    stream.onEof(js).then(js, [&fired](jsg::Lock&) { fired = true; }).markAsHandled(js);
+
+    auto promise = stream.text(js, kLimit).then(js, [](jsg::Lock& js, kj::String text) {
+      KJ_EXPECT(text == kData);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(!fired);
+}
+
 KJ_TEST("JsReadableStream detach of a tee branch carries the composite cancel hook") {
   auto fixture = makeTsStreamsFixture();
   bool sourceCanceled = false;

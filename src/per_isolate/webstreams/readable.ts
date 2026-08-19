@@ -2772,6 +2772,14 @@ class ReadableStream<R> {
   // implement this but we provide for the signal (detach carries it to the
   // detached stream; nothing consults it yet).
   #pendingClosure: boolean = false;
+  // The C++ bridge's EOF-signal resolver (JsReadableStream::onEof), armed by
+  // getReadableStreamOnEof and fired by the native backend's source-driven
+  // close hook (see the closeStream wiring in the constructor's native
+  // branch). Only native-backed streams ever fire it: the legacy JS
+  // controller never signals EOF, and the queued backend matches that.
+  // Not carried by detach(): the husk's subscription stays dormant, like the
+  // legacy eofResolverPair, which remains with the husk after a detach.
+  #onEofResolver?: (() => void) | undefined;
 
   static {
     isReadableStream = (value: unknown) => {
@@ -2786,10 +2794,18 @@ class ReadableStream<R> {
       stream.#pendingClosure = true;
     };
 
-    getReadableStreamOnEof = <R>(_stream: ReadableStream<R>) => {
-      // TODO(streams-ts): implement this for the sockets API. For now, just return a non-resolving promise
-      const { promise } =
+    getReadableStreamOnEof = <R>(stream: ReadableStream<R>) => {
+      // The EOF signal for the sockets API (allowHalfOpen: false teardown):
+      // resolves when a native source's EOF is observed through the conduit
+      // (see the closeStream hook wiring in the constructor's native
+      // branch). At most one subscription per stream (the C++ caller's
+      // precondition); arming after the stream already closed never
+      // resolves, matching the legacy signalEof/eofResolverPair behavior.
+      // Queued streams never fire it (the legacy JS controller never
+      // signals EOF).
+      const { promise, resolve } =
         PromiseWithResolvers() as PromiseWithResolversType<void>;
+      stream.#onEofResolver = resolve;
       return promise;
     };
 
@@ -3513,7 +3529,21 @@ class ReadableStream<R> {
           // fence. Both helpers are state-guarded, so redundant calls
           // (e.g. the reader layer's done-result close racing the
           // conduit's hook) are harmless.
-          closeStream: () => readableStreamClose(this),
+          closeStream: () => {
+            readableStreamClose(this);
+            // The C++ bridge's EOF signal (JsReadableStream::onEof): the
+            // conduit calls this hook only for SOURCE-driven closes, i.e.
+            // whenever the native source's EOF is observed through the
+            // conduit -- reader reads, async iteration, and DrainingReader
+            // consumption alike. Cancel and error take other paths, and
+            // extraction-based pumps detach the source before its EOF could
+            // be observed here, so none of those fire the signal.
+            const resolveEof = this.#onEofResolver;
+            if (resolveEof !== undefined) {
+              this.#onEofResolver = undefined;
+              resolveEof();
+            }
+          },
           errorStream: (reason: unknown) => readableStreamError(this, reason),
         }
       );
