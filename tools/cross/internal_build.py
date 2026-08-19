@@ -17,6 +17,7 @@ def parse_args():
     parser.add_argument("client_id", help="CF Access client id")
     parser.add_argument("secret", help="CF Access client secret")
 
+    
     return parser.parse_args()
 
 
