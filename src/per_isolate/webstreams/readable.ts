@@ -199,6 +199,16 @@ function isActualObject(value: unknown) {
   return value != null && typeof value === 'object';
 }
 
+// The spec's "Type(x) is Object", which INCLUDES callables -- used for the iterator
+// protocol's object checks in from() (GetIterator/IteratorNext accept function-valued
+// iterators and results). Distinct from isActualObject, which deliberately excludes
+// functions for option-bag validation.
+function isObjectLike(value: unknown) {
+  return (
+    value !== null && (typeof value === 'object' || typeof value === 'function')
+  );
+}
+
 function assertPrivateSymbol(symbol: symbol) {
   if (symbol !== kPrivateSymbol) {
     throw new TypeError('Illegal constructor');
@@ -3801,7 +3811,7 @@ class ReadableStream<R> {
       if (asyncMethod != null) {
         const asyncIterator: AsyncIterator<R> =
           uncurryThis(asyncMethod)(iterable);
-        if (!isActualObject(asyncIterator)) {
+        if (!isObjectLike(asyncIterator)) {
           throw new TypeError('The iterator method must return an object');
         }
         // HWM 0: the iterator's next() must only be called in response
@@ -3812,7 +3822,7 @@ class ReadableStream<R> {
             async pull(controller: ReadableStreamDefaultControllerType) {
               // If the pull method throws, the stream will error.
               const next = await asyncIterator.next();
-              if (!isActualObject(next)) {
+              if (!isObjectLike(next)) {
                 throw new TypeError('The result of next() must be an object');
               }
               if (next.done) {
@@ -3833,7 +3843,7 @@ class ReadableStream<R> {
                 asyncIterator,
                 reason
               );
-              if (!isActualObject(ret)) {
+              if (!isObjectLike(ret)) {
                 throw new TypeError('The return method must return an object');
               }
             },
@@ -3845,7 +3855,7 @@ class ReadableStream<R> {
       if (SymbolIterator in iterable) {
         const method = (iterable as Iterable<R>)[primordials.SymbolIterator];
         const syncIterator: Iterator<R> = uncurryThis(method)(iterable);
-        if (!isActualObject(syncIterator)) {
+        if (!isObjectLike(syncIterator)) {
           throw new TypeError('The iterator method must return an object');
         }
         // HWM 0: same rationale as the async path above — next() must
@@ -3860,7 +3870,7 @@ class ReadableStream<R> {
             async pull(controller: ReadableStreamDefaultControllerType) {
               // If the pull method throws, the stream will error.
               const next = syncIterator.next();
-              if (!isActualObject(next)) {
+              if (!isObjectLike(next)) {
                 throw new TypeError('The result of next() must be an object');
               }
               // Await the value: the async-from-sync iterator wrapper
@@ -3880,7 +3890,7 @@ class ReadableStream<R> {
                 throw new TypeError('Iterator return() is not a function');
               }
               const ret = uncurryThis(returnMethod)(syncIterator, reason);
-              if (!isActualObject(ret)) {
+              if (!isObjectLike(ret)) {
                 throw new TypeError('The return method must return an object');
               }
             },

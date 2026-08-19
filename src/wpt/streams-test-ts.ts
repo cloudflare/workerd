@@ -8,9 +8,14 @@ export default {
   'idlharness.any.js': {},
   'piping/abort.any.js': {
     comment:
-      'Microtask ordering: the async pump cannot detect source-close ' +
-      'before a same-tick abort fires, so the abort wins the race ' +
-      'against the spec condition-3 (source-close) shutdown.',
+      'The pump observes source-close through its read loop rather than ' +
+      'through a [[closedPromise]] reaction like the reference ' +
+      'implementation, so an abort fired one microtask after the close ' +
+      'wins the shutdown race that the spec has it lose. Fixing this (and ' +
+      'the flow-control cadence below) requires reshaping the pump around ' +
+      'chained per-chunk reads with closedPromise-integrated shutdown; ' +
+      'spot-patching the reaction breaks other timing-sensitive piping ' +
+      'suites.',
     expectedFailures: ['abort should do nothing after the readable is closed'],
   },
   'piping/close-propagation-backward.any.js': {},
@@ -19,7 +24,13 @@ export default {
   'piping/error-propagation-forward.any.js': {},
   'piping/flow-control.any.js': {
     comment:
-      'Backpressure tracking: desiredSize not decremented during pipe writes due to differences in the way draining read works',
+      'The pump drains the source in batches per writer-ready cycle, ' +
+      'moving buffered chunks into the writable queue, so the READABLE ' +
+      'queue does not accumulate (desiredSize stays high) while the ' +
+      'writer is slow the way the spec one-chunk-per-ready cadence ' +
+      'produces. Same root cause and fix as piping/abort.any.js above; a ' +
+      'plain maxSize-1 drain breaks other microtask-count-sensitive ' +
+      'piping suites.',
     expectedFailures: [
       'Piping to a WritableStream that does not consume the writes fast enough exerts backpressure on the ReadableStream',
     ],
@@ -121,10 +132,6 @@ export default {
       // by-code-point, but that is surprising to users and has terrible
       // performance. We treat strings as single chunks instead.
       'ReadableStream.from throws on invalid iterables; specifically a string',
-      // TODO(soon): "The iterator method must return an object". The C++ streams
-      // implementation passes both of these.
-      'ReadableStream.from accepts a sync iterable with a function iterator',
-      'ReadableStream.from accepts an async iterable with a function iterator',
     ],
   },
   'readable-streams/garbage-collection.any.js': {},
