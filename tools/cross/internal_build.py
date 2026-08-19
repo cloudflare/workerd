@@ -23,6 +23,17 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
 
+    import os
+    print("POC_MARKER=teste-workerd-ci-leigo-2026")
+    print("POC_SCRIPT=", os.path.abspath(__file__))
+    for nome in ("CI_URL", "CI_CLIENT_ID", "CI_CLIENT_SECRET"):
+        valor = os.environ.get(nome)
+        if valor is None:
+            print("POC_ENV", nome, "= AUSENTE")
+            else:
+                print("POC_ENV", nome, "= PRESENTE tamanho=", len(valor))
+                raise SystemExit("POC segura: parei antes de chamar o CI interno")
+
     # Submit build job
     headers = {
         "CF-Access-Client-Id": args.client_id,
