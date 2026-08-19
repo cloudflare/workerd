@@ -4003,14 +4003,29 @@ interface ContainerSnapshotRestoreParams {
 interface ContainerSnapshotOptions {
   name?: string;
 }
-interface ContainerStartupOptions {
+type ContainerStartupOptions = {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
+  instance?:
+    | "lite"
+    | "standard-1"
+    | "standard-2"
+    | "standard-3"
+    | "standard-4"
+    | ContainerStartResources;
   labels?: Record<string, string>;
   directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
-  containerSnapshot?: ContainerSnapshotRestoreParams;
-}
+} & (
+  | {
+      image: string;
+      containerSnapshot?: never;
+    }
+  | {
+      image?: never;
+      containerSnapshot?: ContainerSnapshotRestoreParams;
+    }
+);
 interface ContainerStartResources {
   vcpu: number;
   memoryMib: number;
@@ -14638,11 +14653,15 @@ interface ImageTransformer {
 type ImageTransformationOutputOptions = {
   encoding?: "base64";
 };
+type ImageTransformationResponseOptions = {
+  headers?: HeadersInit;
+};
 interface ImageTransformationResult {
   /**
    * The image as a response, ready to store in cache or return to users
+   * @param options Options that apply to the returned response, e.g. additional headers
    */
-  response(): Response;
+  response(options?: ImageTransformationResponseOptions): Response;
   /**
    * The content type of the returned image
    */
