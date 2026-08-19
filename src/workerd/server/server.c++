@@ -227,13 +227,15 @@ Server::Server(kj::Filesystem& fs,
     kj::Network& network,
     kj::EntropySource& entropySource,
     Worker::LoggingOptions loggingOptions,
-    kj::Function<void(kj::String)> reportConfigError)
+    kj::Function<void(kj::String)> reportConfigError,
+    kj::Function<void(kj::String)> reportConfigWarning)
     : fs(fs),
       timer(timer),
       monotonicClock(monotonicClock),
       network(network),
       entropySource(entropySource),
       reportConfigError(kj::mv(reportConfigError)),
+      reportConfigWarning(kj::mv(reportConfigWarning)),
       loggingOptions(loggingOptions),
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(timer)),
       channelTokenHandler(*this),
@@ -3350,6 +3352,10 @@ struct Server::ConfigErrorReporter final: public ErrorReporter {
 
   void addError(kj::String error) override {
     server.handleReportConfigError(kj::str("service ", name, ": ", error));
+  }
+
+  void addWarning(kj::String warning) override {
+    server.handleReportConfigWarning(kj::str("service ", name, ": ", warning));
   }
 };
 

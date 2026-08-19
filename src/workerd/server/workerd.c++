@@ -701,7 +701,8 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
                 hadErrors = true;
                 context.error(error);
               }
-            })) {
+            },
+            [&](kj::String warning) { context.warning(warning); })) {
     KJ_IF_SOME(e, exeInfo) {
       auto& exe = *e.file;
       auto size = exe.stat().size;
