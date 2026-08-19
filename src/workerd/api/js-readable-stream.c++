@@ -205,10 +205,6 @@ class NullSource final: public ReadableStreamSource {
 
 // Serves the given prefix bytes, then delegates to the inner source. Used for the rare
 // pump-with-stashed-bytes case (a tee-seeded branch extracted before being read).
-// Deliberately does NOT override pumpTo(): the generic pump loop is used, at the cost of
-// deferred proxying, which only this rare path pays.
-// TODO(streams-ts): Since the prefix is a kj::Array, this actually can implement
-// pumpTo and support deferred proxying.
 class PrefixedSource final: public ReadableStreamSource {
  public:
   PrefixedSource(kj::Array<kj::byte> prefix, kj::Own<ReadableStreamSource> inner)
@@ -242,6 +238,22 @@ class PrefixedSource final: public ReadableStreamSource {
       }
     }
     co_return co_await inner->tryRead(buffer, minBytes, maxBytes);
+  }
+
+  kj::Promise<DeferredProxy<void>> pumpTo(kj::Ptr<WritableStreamSink> output, bool end) override {
+    // Write the (kj-heap) prefix bytes in the pre-proxy phase, then delegate to the inner
+    // source's own pump so its deferred-proxy classification passes through: once the
+    // inner pump's outer promise resolves, this pump enters deferred proxying itself and
+    // rides the inner proxy task.
+    KJ_IF_SOME(prefix, maybePrefix) {
+      if (prefix.view != nullptr) {
+        co_await output->write(prefix.view);
+      }
+      maybePrefix = kj::none;
+    }
+    auto deferred = co_await inner->pumpTo(kj::mv(output), end);
+    KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING;
+    co_await deferred.proxyTask;
   }
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {

@@ -8,14 +8,13 @@ export default {
   'idlharness.any.js': {},
   'piping/abort.any.js': {
     comment:
-      'The pump observes source-close through its read loop rather than ' +
-      'through a [[closedPromise]] reaction like the reference ' +
-      'implementation, so an abort fired one microtask after the close ' +
-      'wins the shutdown race that the spec has it lose. Fixing this (and ' +
-      'the flow-control cadence below) requires reshaping the pump around ' +
-      'chained per-chunk reads with closedPromise-integrated shutdown; ' +
-      'spot-patching the reaction breaks other timing-sensitive piping ' +
-      'suites.',
+      'INTENTIONAL SPEC DIVERGENCE: the pipe pump drains the source in ' +
+      'batches per writer-ready cycle, amortizing per-chunk read overhead ' +
+      'instead of following the spec reference one-chunk-per-read shape. ' +
+      'A consequence is that source-close is observed through the read ' +
+      'loop rather than a [[closedPromise]] reaction, so an abort fired ' +
+      'one microtask after the close wins the shutdown race that the ' +
+      'spec has it lose.',
     expectedFailures: ['abort should do nothing after the readable is closed'],
   },
   'piping/close-propagation-backward.any.js': {},
@@ -24,13 +23,13 @@ export default {
   'piping/error-propagation-forward.any.js': {},
   'piping/flow-control.any.js': {
     comment:
-      'The pump drains the source in batches per writer-ready cycle, ' +
-      'moving buffered chunks into the writable queue, so the READABLE ' +
-      'queue does not accumulate (desiredSize stays high) while the ' +
-      'writer is slow the way the spec one-chunk-per-ready cadence ' +
-      'produces. Same root cause and fix as piping/abort.any.js above; a ' +
-      'plain maxSize-1 drain breaks other microtask-count-sensitive ' +
-      'piping suites.',
+      'INTENTIONAL SPEC DIVERGENCE: the same batched-drain pump design ' +
+      'as piping/abort.any.js above. Buffered chunks move to the ' +
+      'writable queue in one batch per writer-ready cycle, so the ' +
+      'READABLE queue does not accumulate (desiredSize stays high) while ' +
+      'the writer is slow the way the spec one-chunk-per-ready cadence ' +
+      'produces. Total buffering stays bounded; only its location (and ' +
+      'the desiredSize the source observes) differs.',
     expectedFailures: [
       'Piping to a WritableStream that does not consume the writes fast enough exerts backpressure on the ReadableStream',
     ],

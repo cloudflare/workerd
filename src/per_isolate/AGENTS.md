@@ -18,8 +18,10 @@ at context creation, before any user code. Gated by the
   acyclic (e.g., `webstreams/native` is a deliberate leaf).
 - TypeScript `import type` / `export type` are used freely for type
   plumbing (fully erased; the loader only sees `module.exports`).
-- `main.ts` installs the (TEMPORARY, dev-only) lazy `globalThis.streams`
-  surface.
+- `main.ts` installs the real stream globals (ReadableStream et al.) when
+  the `typescript_implemented_streams` compat flag is enabled, plus the
+  internal-testing `ReadableStreamDrainingReader` under
+  `expose_draining_reader`.
 - Files are auto-discovered (`BUILD.bazel` and `tsconfig.json` both glob
   `**/*.ts`). No registration needed for new files.
 - Local convention: no copyright headers in this directory's bootstrap

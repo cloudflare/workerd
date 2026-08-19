@@ -18,7 +18,7 @@ private-brand dispatch, no `instanceof`) apply here — see
 | `writable.ts` / `transform.ts` / `strategies.ts` | WHATWG writable/transform/strategies                                     |
 | `identity.ts` | IdentityTransformStream and FixedLengthStream (byte-capable identity transforms)             |
 | `encoding.ts` | TextEncoderStream and TextDecoderStream (pure JS codec transforms)                           |
-| `streams.ts`  | Module aggregator and temporary native-source exports                                        |
+| `streams.ts`  | Module aggregator (user-visible classes + the flag-gated DrainingReader)                     |
 | `types.d.ts`  | TypeScript type definitions for the streams API                                              |
 
 ## KEY RULES
@@ -39,11 +39,15 @@ private-brand dispatch, no `instanceof`) apply here — see
   argument — the source checks `signal.aborted` before delivery and stashes
   bytes for redelivery if aborted (race buffering lives source-side; the JS
   conduit is uniformly bufferless).
-- `kNativeSource` is TEMPORARILY re-exported via `streams.ts` for tests;
-  the real C++ handshake has landed, so this removal is now due
-  (follow-up; requires migrating the JS-mock tests off it).
+- `nativeStreamInternals` (markers, extraction symbols, conduit
+  construction) is module-private, consumed only by readable.ts/writable.ts
+  and the C++ bridge via the API-symbol registry. The C++ mocks in
+  `js-readable-stream-test.c++` construct real `ReadableStreamNativeSource`
+  objects; no JS-visible marker export exists.
 
 ## ANTI-PATTERNS
 
-- **NEVER** expose internals on user-visible exports (the temporary
-  `kNativeSource` exception is tracked for removal).
+- **NEVER** expose internals on user-visible exports. `streams.ts` exports
+  exactly the user-visible classes plus `ReadableStreamDrainingReader`,
+  which `main.ts` installs only under the internal-testing
+  `expose_draining_reader` flag.

@@ -99,9 +99,7 @@
 //     settles without delivering, closing, or erroring while requests
 //     are still pending errors the stream. Aborted pulls are exempt.
 //
-// Nothing in this module is ever exposed to user code, with one TEMPORARY
-// exception: streams.ts re-exports kNativeSource so mock native sources
-// can be constructed from tests before the real C++ integration exists.
+// Nothing in this module is ever exposed to user code.
 
 import type {
   ByteStreamConsumer as ByteStreamConsumerType,
@@ -186,9 +184,9 @@ function isNativeUnderlyingSink(sink: object): boolean {
 // stream: present -> extract the native source for a pure C++ data
 // path; absent -> acquire a DrainingReader instead. The marker is KEPT
 // after extraction (presence means "native-backed", not "extractable");
-// the extractor's locked/disturbed preconditions make it one-shot.
-// Bootstrap phase: regular symbol (temporarily exposed via streams.ts).
-// Final implementation: runtime-provided private API symbol.
+// the extractor's locked/disturbed preconditions make it one-shot. The
+// symbol comes from the runtime's API-symbol registry, unreachable from
+// user code.
 const kExtractNativeSource: symbol = utils.getApiSymbol('kExtractNativeSource');
 
 function isActualObject(value: unknown): value is object {
@@ -200,10 +198,10 @@ function isActualObject(value: unknown): value is object {
 // present at all, this is a contract violation on the native/mock side,
 // never a user-input condition.
 //
-// Hardening: OWN-property read via descriptor — a (temporarily exposed)
-// symbol planted on Object.prototype must not convert every plain source
-// into a native one, and a hostile accessor at the marker is never
-// invoked (we read desc.value; accessor-defined markers are ignored).
+// Hardening: OWN-property read via descriptor — a marker symbol planted
+// on Object.prototype must not convert every plain source into a native
+// one, and a hostile accessor at the marker is never invoked (we read
+// desc.value; accessor-defined markers are ignored).
 function isNativeUnderlyingSource(source: object): boolean {
   const desc = ObjectGetOwnPropertyDescriptor(source, kNativeSource) as
     PropertyDescriptor | undefined;
@@ -1359,9 +1357,7 @@ function nativeControllerPeekSource(
   return getControllerConduit(controller).peekSource();
 }
 
-// Internal namespace, never re-exported to users (kNativeSource and
-// kExtractNativeSource excepted, TEMPORARILY, via streams.ts — see the
-// module header).
+// Internal namespace, never re-exported to users.
 const nativeStreamInternals = {
   kNativeSource,
   kExtractNativeSource,
