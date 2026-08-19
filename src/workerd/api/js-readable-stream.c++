@@ -414,17 +414,37 @@ JsReadableStream::Buffer::Buffer(kj::Array<const kj::byte> data): view(data), ow
 // branches alike.
 JsReadableStream::Buffer::Buffer(jsg::Ref<Blob> data): Buffer(kj::heapArray(data->getData())) {}
 
+namespace {
+
+// Constructs the stream backing a JsReadableStream over the given native data source. This
+// is the compatibility-flag dispatch point shared by create() and bufferBackedImpl(): when
+// the typescript_implemented_streams compat flag is enabled, the source is wrapped in a
+// ReadableStreamNativeSource -- whose instances are born carrying the kNativeSource marker
+// (JSG_PRIVATE_SYMBOL) that the TypeScript ReadableStream constructor detects -- and the
+// TypeScript stream is constructed over it via the constructor exposed through the
+// bootstrap's cpp_exports module. Otherwise the legacy C++ ReadableStream is used.
+JsReadableStream::StreamImpl newBackingStream(
+    jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source) {
+  if (FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+    auto sourceObj = jsg::JsValue(
+        handler.wrap(js, js.alloc<ReadableStreamNativeSource>(ioContext, kj::mv(source))));
+    auto constructor = webstreams::getCppExport(js, "ReadableStream");
+    return JsReadableStream::StreamImpl(constructor.newInstance(js, sourceObj).addRef(js));
+  }
+  return JsReadableStream::StreamImpl(js.alloc<ReadableStream>(ioContext, kj::mv(source)));
+}
+
+}  // namespace
+
 JsReadableStream::Impl JsReadableStream::bufferBackedImpl(jsg::Lock& js, kj::Rc<Buffer> buffer) {
   // Use newMemorySource() rather than newSystemStream() wrapping a memory input stream:
   // it reads the Buffer's bytes in place, so every stream derived from this Buffer -- rewinds
   // and tee branches alike -- shares the one allocation.
-  //
-  // TODO(streams-ts): Like create(), the stream construction here must dispatch on the
-  // worker's configuration once the TypeScript implementation lands.
   auto view = buffer->view;
   auto source = newMemorySource(view, buffer.addRef().toOwn());
   return Impl{
-    .stream = StreamImpl(js.alloc<ReadableStream>(IoContext::current(), kj::mv(source))),
+    .stream = newBackingStream(js, IoContext::current(), kj::mv(source)),
     .maybeOwnedBuffer = kj::mv(buffer),
   };
 }
@@ -461,19 +481,7 @@ JsReadableStream::JsReadableStream(
 
 JsReadableStream JsReadableStream::create(
     jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source) {
-  if (FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
-    // TypeScript-implemented streams: wrap the native source in a
-    // ReadableStreamNativeSource -- whose instances are born carrying the kNativeSource
-    // marker (JSG_PRIVATE_SYMBOL) that the TypeScript ReadableStream constructor detects
-    // -- and construct the TypeScript stream over it via the constructor exposed through
-    // the bootstrap's cpp_exports module.
-    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
-    auto sourceObj = jsg::JsValue(
-        handler.wrap(js, js.alloc<ReadableStreamNativeSource>(ioContext, kj::mv(source))));
-    auto constructor = webstreams::getCppExport(js, "ReadableStream");
-    return JsReadableStream(js, constructor.newInstance(js, sourceObj).addRef(js));
-  }
-  return JsReadableStream(js.alloc<ReadableStream>(ioContext, kj::mv(source)));
+  return JsReadableStream(Impl{.stream = newBackingStream(js, ioContext, kj::mv(source))});
 }
 
 kj::Maybe<JsReadableStream> JsReadableStream::tryUnwrapTs(

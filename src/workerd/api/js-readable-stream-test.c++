@@ -1408,5 +1408,114 @@ KJ_TEST("JsReadableStream::tee of a locked TypeScript-backed stream throws") {
   });
 }
 
+// =======================================================================================
+// buffer-backed streams under the TypeScript implementation
+
+// A stand-in for the JSG type wrapper accepted by JsReadableStream::jsgWrap. Wrapping a
+// TypeScript-backed stream never consults the wrapper (the TS object IS the handle), so
+// reaching the legacy arm -- the only jsgWrap path that calls wrap() -- means the stream
+// was legacy-backed: fail loudly.
+struct RequireTsBackedWrapper {
+  v8::Local<v8::Value> wrap(jsg::Lock&,
+      v8::Local<v8::Context>,
+      kj::Maybe<v8::Local<v8::Object>>,
+      jsg::Ref<ReadableStream>) {
+    KJ_FAIL_ASSERT("expected a TypeScript-backed stream, got a legacy-backed one");
+  }
+};
+
+KJ_TEST("JsReadableStream buffer-backed streams are TypeScript-backed under the flag") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    JsReadableStream stream(js, kj::str(kData));
+    KJ_EXPECT(stream.isBufferBacked());
+    KJ_EXPECT(KJ_ASSERT_NONNULL(stream.tryGetLength(js)) == kData.size());
+
+    // The constructed stream is the TypeScript implementation's object: wrapping yields
+    // the TS handle without consulting the type wrapper, and the handle carries the TS
+    // private brand (tryUnwrapTs adopts it).
+    RequireTsBackedWrapper wrapper;
+    auto handle =
+        JsReadableStream::jsgWrap(wrapper, js, js.v8Context(), kj::none, stream.addRef(js));
+    KJ_EXPECT(JsReadableStream::tryUnwrapTs(js, handle) != kj::none);
+
+    // Consumption drains the buffer contents through the TS conduit.
+    auto promise = stream.text(js, kLimit).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock& js, kj::String text) {
+      KJ_EXPECT(text == kData);
+      KJ_EXPECT(stream.isDisturbed(js));
+      // Consumption leaves the wrapper buffer-backed and therefore
+      // rewindable.
+      KJ_EXPECT(stream.isBufferBacked());
+    }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream tryClone rewinds a TypeScript-backed buffer stream") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    JsReadableStream stream(js, kj::str(kData));
+    auto promise = stream.text(js, kLimit)
+                       .then(js,
+                           JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream),
+                               (jsg::Lock& js, kj::String) {
+                                 KJ_EXPECT(stream.isDisturbed(js));
+                                 // The clone is a fresh, independent, rewindable TypeScript-backed stream
+                                 // over the same bytes, even though the original has been consumed. This
+                                 // is the property fetch() redirect handling relies upon.
+                                 auto clone = KJ_ASSERT_NONNULL(stream.tryClone(js));
+                                 KJ_EXPECT(clone.isBufferBacked());
+                                 KJ_EXPECT(!clone.isDisturbed(js));
+                                 return clone.text(js, kLimit);
+                               }))
+                       .then(js, [](jsg::Lock& js, kj::String text) { KJ_EXPECT(text == kData); });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream tee of a TypeScript-backed buffer stream carries the buffer") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    JsReadableStream stream(js, kj::str(kData));
+    auto tee = stream.tee(js);
+    KJ_EXPECT(stream.isNull());
+    KJ_EXPECT(tee.branch1.isBufferBacked());
+    KJ_EXPECT(tee.branch2.isBufferBacked());
+
+    auto promise = tee.branch1.text(js, kLimit)
+                       .then(js,
+                           JSG_VISITABLE_LAMBDA((branch2 = kj::mv(tee.branch2)), (branch2),
+                               (jsg::Lock& js, kj::String text) {
+                                 KJ_EXPECT(text == kData);
+                                 return branch2.text(js, kLimit);
+                               }))
+                       .then(js, [](jsg::Lock& js, kj::String text) { KJ_EXPECT(text == kData); });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream pumpTo drains a TypeScript-backed buffer stream") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // Buffer-backed streams under the flag are native-backed TypeScript streams over the
+    // shared in-memory source: pumpTo extracts the source and pumps at the C++ layer.
+    JsReadableStream stream(js, kj::str(kData));
+    return stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
+        .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+  });
+  KJ_EXPECT(collected.asPtr() == kData.asBytes());
+  KJ_EXPECT(ended);
+}
+
 }  // namespace
 }  // namespace workerd::api

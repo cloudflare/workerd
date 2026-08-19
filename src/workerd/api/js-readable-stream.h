@@ -97,10 +97,11 @@ class JsReadableStream final {
   // source. This is the canonical way for C++ code to mint a new ReadableStream to hand to
   // JavaScript.
   //
-  // This is the compatibility-flag dispatch point: when the typescript_implemented_streams
+  // This is a compatibility-flag dispatch point: when the typescript_implemented_streams
   // compat flag is enabled, the source is wrapped in a ReadableStreamNativeSource and the
   // stream is constructed by the TypeScript implementation; otherwise the legacy C++
-  // ReadableStream is used.
+  // ReadableStream is used. Buffer-backed construction (the data constructors above)
+  // dispatches the same way; see bufferBackedImpl().
   //
   // TODO(streams-ts): detach() is the one JsReadableStream operation still lacking a
   // TypeScript arm, so under the (experimental) flag, consumers exercising that path
@@ -288,9 +289,11 @@ class JsReadableStream final {
  private:
   explicit JsReadableStream(Impl impl): impl(kj::mv(impl)) {}
 
-  // Build a buffer-backed Impl: wraps the buffer's bytes in an in-memory ReadableStream (which does
-  // NOT support deferred proxying, since the bytes may have V8 heap provenance) and retains the
-  // buffer for retransmission.
+  // Build a buffer-backed Impl: wraps the buffer's bytes in an in-memory source (which does not
+  // support deferred proxying) and retains the buffer for retransmission. The stream over the
+  // source is constructed through the same compatibility-flag dispatch as create(), so under the
+  // typescript_implemented_streams flag buffer-backed streams are TypeScript-backed like every
+  // other stream.
   static Impl bufferBackedImpl(jsg::Lock& js, kj::Rc<Buffer> buffer);
 
   kj::Maybe<Impl> impl;

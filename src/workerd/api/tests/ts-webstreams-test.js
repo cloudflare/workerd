@@ -129,6 +129,78 @@ export const nativeBackedCancel = {
   },
 };
 
+// ======================================================================================
+// Buffer-backed bodies (Body::extractBody's in-memory arms: strings, ArrayBuffers,
+// typed arrays, Blobs, URLSearchParams) construct their streams through the same
+// compat-flag dispatch as every other C++-minted stream, so under the flag
+// request/response bodies are TypeScript-implemented streams over the shared in-memory
+// buffer.
+
+export const bufferBackedBodiesAreTsStreams = {
+  async test() {
+    const bodies = [
+      'hello world',
+      new TextEncoder().encode('hello world'),
+      new TextEncoder().encode('hello world').buffer,
+      new Blob(['hello world']),
+    ];
+    for (const body of bodies) {
+      const response = new Response(body);
+      // The body stream is an instance of the TypeScript-implemented class (a legacy
+      // C++ stream would fail this brand check)...
+      ok(response.body instanceof ReadableStream);
+      // ...and the C++ consumption helpers drain it through the TS conduit.
+      strictEqual(await response.text(), 'hello world');
+    }
+  },
+};
+
+export const bufferBackedRequestBody = {
+  async test() {
+    const request = new Request('http://example.org/', {
+      method: 'POST',
+      body: 'hello world',
+    });
+    ok(request.body instanceof ReadableStream);
+    strictEqual(await request.text(), 'hello world');
+  },
+};
+
+export const bufferBackedBodyReaderRead = {
+  async test() {
+    // Reading a buffer-backed body from JavaScript drives the TS reader machinery over
+    // the native in-memory source.
+    const response = new Response('hello world');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    strictEqual(text, 'hello world');
+  },
+};
+
+export const bufferBackedUrlSearchParamsBody = {
+  async test() {
+    const response = new Response(new URLSearchParams({ a: '1', b: '2' }));
+    ok(response.body instanceof ReadableStream);
+    strictEqual(await response.text(), 'a=1&b=2');
+  },
+};
+
+export const bufferBackedEmptyBody = {
+  async test() {
+    // An empty buffer-backed body closes immediately (expectedLength 0).
+    const response = new Response('');
+    ok(response.body instanceof ReadableStream);
+    strictEqual(await response.text(), '');
+  },
+};
+
 // Serves the fetch handlers backing the pumpTo and unwrap tests below. `/plain` responds
 // with a buffer-backed body; `/proxy` forwards the fetched Response object UNMODIFIED, so
 // its body -- a C++-created, TypeScript-backed stream held internally -- gets pumped by
