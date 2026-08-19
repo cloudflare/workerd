@@ -74,7 +74,7 @@ KJ_TEST("compatibility flag parsing") {
       [](kj::StringPtr compatDate, kj::ArrayPtr<const kj::StringPtr> featureFlags,
           kj::StringPtr expectedOutput, kj::ArrayPtr<const kj::StringPtr> expectedErrors = nullptr,
           CompatibilityDateValidation dateValidation = CompatibilityDateValidation::FUTURE_FOR_TEST,
-          bool r2InternalBetaApiSet = false, bool experimental = false,
+          bool r2InternalBetaBindingsSet = false, bool experimental = false,
           kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags = nullptr) {
     capnp::MallocMessageBuilder message;
     auto orphanage = message.getOrphanage();
@@ -95,10 +95,10 @@ KJ_TEST("compatibility flag parsing") {
     capnp::TextCodec codec;
     auto parsedExpectedOutput = codec.decode<CompatibilityFlags>(expectedOutput, orphanage);
 
-    if (!r2InternalBetaApiSet) {
-      // The r2PublicBetaApi is always expected by default regardless of compat date unless
-      // explicitly disabled.
-      parsedExpectedOutput.get().setR2PublicBetaApi(true);
+    if (!r2InternalBetaBindingsSet) {
+      // obsolete13 is always expected by default regardless of compat date unless explicitly
+      // disabled with r2_internal_beta_bindings.
+      parsedExpectedOutput.get().setObsolete13(true);
     }
 
     // If errors are expected, then the output is irrelevant.
@@ -230,7 +230,7 @@ KJ_TEST("compatibility flag parsing") {
       " specCompliantUrl = true,"
       " globalNavigator = true,"
       " captureThrowsAsRejections = true,"
-      " r2PublicBetaApi = true,"
+      " obsolete13 = true,"
       " obsolete14 = false,"
       " noSubstituteNull = true,"
       " transformStreamJavaScriptControllers = true,"
@@ -288,7 +288,7 @@ KJ_TEST("compatibility flag parsing") {
       " specCompliantUrl = true,"
       " globalNavigator = true,"
       " captureThrowsAsRejections = true,"
-      " r2PublicBetaApi = true,"
+      " obsolete13 = true,"
       " obsolete14 = false,"
       " noSubstituteNull = true,"
       " transformStreamJavaScriptControllers = true,"

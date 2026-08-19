@@ -179,12 +179,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # throw synchronously. This flag changes the behavior so that async functions return
   # rejections instead of throwing.
 
-  r2PublicBetaApi @13 :Bool
+  obsolete13 @13 :Bool
       $compatEnableFlag("r2_public_beta_bindings")
       $compatDisableFlag("r2_internal_beta_bindings")
       $compatEnableAllDates;
-  # R2 public beta bindings are the default.
-  # R2 internal beta bindings is back-compat.
+  # Obsolete flag. Has no effect. The R2 bindings that `r2_internal_beta_bindings` used to select
+  # no longer exist, so all workers get the same R2 API regardless of this flag.
 
   obsolete14 @14 :Bool
       $compatEnableFlag("durable_object_alarms");
