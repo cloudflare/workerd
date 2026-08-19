@@ -764,12 +764,37 @@ void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   }));
 }
 
+JsReadableStream hydrateRpcReadableStream(
+    jsg::Lock& js, IoContext& ioctx, rpc::JsValue::External::ReadableStream::Reader reader) {
+  auto encoding = reader.getEncoding();
+
+  KJ_REQUIRE(
+      static_cast<uint>(encoding) < capnp::Schema::from<StreamEncoding>().getEnumerants().size(),
+      "unknown StreamEncoding received from peer");
+
+  kj::Own<kj::AsyncInputStream> in = ioctx.getExternalPusher()->unwrapStream(reader.getStream());
+
+  // JsReadableStream::create() dispatches on the typescript_implemented_streams compat flag,
+  // so the received stream is backed by whichever implementation this isolate runs.
+  return JsReadableStream::create(js, ioctx,
+      kj::heap<NoDeferredProxyReadableStream>(newSystemStream(kj::mv(in), encoding, ioctx), ioctx));
+}
+
 JsReadableStream ReadableStream::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  // No JavaScript may execute here: V8's deserializer forbids it for the duration of the value
+  // graph read. Everything JS-executing happened in hydrateRpcReadableStream() during
+  // RpcDeserializerExternalHandler::prepare(); this function only claims the result (or, when
+  // the rpc-externals-hydration autogate is off, constructs the legacy stream in place, which
+  // requires no JS).
   auto& handler = KJ_REQUIRE_NONNULL(
       deserializer.getExternalHandler(), "got ReadableStream on non-RPC serialized object?");
   auto externalHandler = dynamic_cast<RpcDeserializerExternalHandler*>(&handler);
   KJ_REQUIRE(externalHandler != nullptr, "got ReadableStream on non-RPC serialized object?");
+
+  KJ_IF_SOME(prebuilt, externalHandler->claimPrebuiltReadable()) {
+    return kj::mv(prebuilt);
+  }
 
   auto reader = externalHandler->read();
   KJ_REQUIRE(reader.isReadableStream(), "external table slot type doesn't match serialization tag");
@@ -785,10 +810,9 @@ JsReadableStream ReadableStream::deserialize(
 
   kj::Own<kj::AsyncInputStream> in = ioctx.getExternalPusher()->unwrapStream(rs.getStream());
 
-  // JsReadableStream::create() dispatches on the typescript_implemented_streams compat flag,
-  // so the received stream is backed by whichever implementation this isolate runs.
-  return JsReadableStream::create(js, ioctx,
-      kj::heap<NoDeferredProxyReadableStream>(newSystemStream(kj::mv(in), encoding, ioctx), ioctx));
+  return JsReadableStream(js.alloc<ReadableStream>(ioctx,
+      kj::heap<NoDeferredProxyReadableStream>(
+          newSystemStream(kj::mv(in), encoding, ioctx), ioctx)));
 }
 
 kj::StringPtr ReaderImpl::jsgGetMemoryName() const {

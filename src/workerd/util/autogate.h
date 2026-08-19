@@ -106,7 +106,15 @@ namespace workerd::util {
   /* Allow a Socket to be transferred over JS RPC. When disabled, serializing a Socket fails as    \
      though the type were not serializable at all, and an incoming transferred Socket is           \
      rejected. */                                                                                  \
-  V(SOCKET_RPC_TRANSFER)
+  V(SOCKET_RPC_TRANSFER)                                                                           \
+  /* Materialize stream and socket externals of an incoming RPC value BEFORE the V8 value graph    \
+     is deserialized (RpcDeserializerExternalHandler::prepare()), with deserialize() claiming the  \
+     prebuilt objects. V8's deserializer forbids JS execution during the graph read, so this is    \
+     the only phase in which TypeScript-implemented streams (whose construction runs JS) can be    \
+     built; the mechanism itself is implementation-agnostic and runs for legacy streams too. When  \
+     disabled, deserialization constructs legacy streams in place, exactly as before the gate      \
+     existed. */                                                                                   \
+  V(RPC_EXTERNALS_HYDRATION)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

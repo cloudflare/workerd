@@ -70,6 +70,55 @@ rpc::JsValue::External::Reader RpcDeserializerExternalHandler::read() {
   return externals[i++];
 }
 
+void RpcDeserializerExternalHandler::prepare(jsg::Lock& js, IoContext& ioctx) {
+  if (!util::Autogate::isEnabled(util::AutogateKey::RPC_EXTERNALS_HYDRATION)) return;
+  KJ_ASSERT(!prepared, "prepare() may only be called once");
+
+  slots.resize(externals.size());
+  for (uint index = 0; index < externals.size(); index++) {
+    auto external = externals[index];
+    switch (external.which()) {
+      case rpc::JsValue::External::READABLE_STREAM:
+        slots[index].value = hydrateRpcReadableStream(js, ioctx, external.getReadableStream());
+        break;
+      case rpc::JsValue::External::WRITABLE_STREAM:
+        slots[index].value = hydrateRpcWritableStream(js, ioctx, external.getWritableStream());
+        break;
+      default:
+        // Every other external type deserializes without executing JavaScript, directly under
+        // the graph read; no hydration needed.
+        break;
+    }
+  }
+  prepared = true;
+}
+
+template <typename T>
+kj::Maybe<T> RpcDeserializerExternalHandler::claimPrebuilt() {
+  if (!prepared) return kj::none;
+  KJ_ASSERT(i < slots.size());
+  auto& slot = slots[i];
+  auto& value =
+      KJ_REQUIRE_NONNULL(slot.value, "external table slot type doesn't match serialization tag");
+  KJ_REQUIRE(value.template is<T>(), "external table slot type doesn't match serialization tag");
+  T result = kj::mv(value.template get<T>());
+  slot.value = kj::none;
+  i += slot.span;
+  return kj::mv(result);
+}
+
+kj::Maybe<JsReadableStream> RpcDeserializerExternalHandler::claimPrebuiltReadable() {
+  return claimPrebuilt<JsReadableStream>();
+}
+
+kj::Maybe<JsWritableStream> RpcDeserializerExternalHandler::claimPrebuiltWritable() {
+  return claimPrebuilt<JsWritableStream>();
+}
+
+kj::Maybe<jsg::JsRef<jsg::JsObject>> RpcDeserializerExternalHandler::claimPrebuiltSocket() {
+  return claimPrebuilt<jsg::JsRef<jsg::JsObject>>();
+}
+
 namespace {
 
 // Call to construct an `rpc::JsValue` from a JS value.
@@ -124,6 +173,12 @@ DeserializeResult deserializeJsValue(jsg::Lock& js, rpc::JsValue::Reader reader)
   auto disposalGroup = kj::heap<RpcStubDisposalGroup>();
 
   RpcDeserializerExternalHandler externalHandler(reader.getExternals(), *disposalGroup);
+  if (reader.getExternals().size() > 0) {
+    // Materialize the externals that need JavaScript execution (streams, sockets) before
+    // readValue() begins the graph read, during which JS execution is forbidden. See
+    // RpcDeserializerExternalHandler::prepare().
+    externalHandler.prepare(js, IoContext::current());
+  }
 
   jsg::Deserializer deserializer(js, reader.getV8Serialized(), kj::none, kj::none,
       jsg::Deserializer::Options{

@@ -587,4 +587,14 @@ kj::Own<WritableStreamSink> newReadableStreamSerializeSink(jsg::Lock& js,
     StreamEncoding encoding,
     kj::Maybe<uint64_t> expectedLength);
 
+// Materializes a readable stream received over RPC from its external-table entry: adopts the
+// pushed ByteStream, wraps it as a system stream of the peer's declared encoding (with deferred
+// proxying suppressed, since the stream dies with the RPC session's IoContext), and constructs
+// the stream through JsReadableStream::create()'s implementation dispatch. Runs during
+// RpcDeserializerExternalHandler::prepare() -- before the V8 graph read -- because the
+// TypeScript arm of create() executes JavaScript, which the graph read forbids;
+// ReadableStream::deserialize() then claims the result.
+JsReadableStream hydrateRpcReadableStream(
+    jsg::Lock& js, IoContext& ioctx, rpc::JsValue::External::ReadableStream::Reader reader);
+
 }  // namespace workerd::api

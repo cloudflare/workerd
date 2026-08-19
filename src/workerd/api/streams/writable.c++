@@ -561,12 +561,38 @@ void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   }
 }
 
+JsWritableStream hydrateRpcWritableStream(
+    jsg::Lock& js, IoContext& ioctx, rpc::JsValue::External::WritableStream::Reader reader) {
+  auto encoding = reader.getEncoding();
+
+  KJ_REQUIRE(
+      static_cast<uint>(encoding) < capnp::Schema::from<StreamEncoding>().getEnumerants().size(),
+      "unknown StreamEncoding received from peer");
+
+  auto stream = ioctx.getByteStreamFactory().capnpToKjExplicitEnd(reader.getByteStream());
+  auto sink = newSystemStream(kj::mv(stream), encoding, ioctx);
+
+  // JsWritableStream::create() dispatches on the typescript_implemented_streams compat flag,
+  // so the received stream is backed by whichever implementation this isolate runs.
+  return JsWritableStream::create(
+      js, ioctx, kj::mv(sink), ioctx.getMetrics().tryCreateWritableByteStreamObserver());
+}
+
 JsWritableStream WritableStream::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  // No JavaScript may execute here: V8's deserializer forbids it for the duration of the value
+  // graph read. Everything JS-executing happened in hydrateRpcWritableStream() during
+  // RpcDeserializerExternalHandler::prepare(); this function only claims the result (or, when
+  // the rpc-externals-hydration autogate is off, constructs the legacy stream in place, which
+  // requires no JS).
   auto& handler = KJ_REQUIRE_NONNULL(
       deserializer.getExternalHandler(), "got WritableStream on non-RPC serialized object?");
   auto externalHandler = dynamic_cast<RpcDeserializerExternalHandler*>(&handler);
   KJ_REQUIRE(externalHandler != nullptr, "got WritableStream on non-RPC serialized object?");
+
+  KJ_IF_SOME(prebuilt, externalHandler->claimPrebuiltWritable()) {
+    return kj::mv(prebuilt);
+  }
 
   auto reader = externalHandler->read();
   KJ_REQUIRE(reader.isWritableStream(), "external table slot type doesn't match serialization tag");
@@ -582,10 +608,8 @@ JsWritableStream WritableStream::deserialize(
   auto stream = ioctx.getByteStreamFactory().capnpToKjExplicitEnd(ws.getByteStream());
   auto sink = newSystemStream(kj::mv(stream), encoding, ioctx);
 
-  // JsWritableStream::create() dispatches on the typescript_implemented_streams compat flag,
-  // so the received stream is backed by whichever implementation this isolate runs.
-  return JsWritableStream::create(
-      js, ioctx, kj::mv(sink), ioctx.getMetrics().tryCreateWritableByteStreamObserver());
+  return JsWritableStream(js.alloc<WritableStream>(
+      ioctx, kj::mv(sink), ioctx.getMetrics().tryCreateWritableByteStreamObserver()));
 }
 
 void WritableStreamDefaultWriter::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

@@ -244,4 +244,13 @@ struct WritableStreamRpcWrapper {
 // isolate to drive the TypeScript writer).
 WritableStreamRpcWrapper newWritableStreamRpcAdapter(kj::Own<WritableStreamSink> inner);
 
+// Materializes a writable stream received over RPC from its external-table entry: adopts the
+// peer's ByteStream, wraps it as a system sink of the declared encoding, and constructs the
+// stream through JsWritableStream::create()'s implementation dispatch. Runs during
+// RpcDeserializerExternalHandler::prepare() -- before the V8 graph read -- because the
+// TypeScript arm of create() executes JavaScript, which the graph read forbids;
+// WritableStream::deserialize() then claims the result.
+JsWritableStream hydrateRpcWritableStream(
+    jsg::Lock& js, IoContext& ioctx, rpc::JsValue::External::WritableStream::Reader reader);
+
 }  // namespace workerd::api
