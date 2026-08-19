@@ -156,8 +156,13 @@ const kNativeSource: symbol = utils.getApiSymbol('kNativeSource');
 // native sinks need no new backend machinery — the standard
 // WritableStream drives them via start/write/close/abort. The marker
 // exists for pipe dispatch (is the dest native?) and extraction (hand
-// the sink to C++ for the native+native fast path). The one extension:
-// pipeFrom(source, options), the hook for the native+native pipe.
+// the sink to C++ for the native+native fast path). Two extension hooks
+// beyond the standard sink surface:
+//   - pipeFrom(source, options): the native+native pipe fast path,
+//     called by the pipe dispatch when both ends are native-backed.
+//   - detach(): called by detachWritableStream just before it drops its
+//     reference, releasing the C++ sink immediately when the underlying
+//     connection is taken over (e.g. Socket startTls).
 const kNativeSink: symbol = utils.getApiSymbol('kNativeSink');
 
 // Extraction marker for native-backed WritableStream instances. Mirrors
