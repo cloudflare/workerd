@@ -239,6 +239,13 @@ let readableStreamPipeTo: <R>(
 let readableStreamTee: <R>(
   stream: ReadableStream<R>
 ) => [ReadableStream<R>, ReadableStream<R>];
+// The C++ bridge arm of JsReadableStream::detach(): takes over the stream's
+// internal state into a fresh stream, leaving the original a permanently
+// locked, disturbed husk. Assigned in ReadableStream's static block.
+let detachReadableStream: <R>(
+  stream: ReadableStream<R>,
+  ignoreDisturbed: boolean
+) => ReadableStream<R>;
 let readableStreamReaderGenericCancel: (
   reader: object,
   reason?: unknown
@@ -2755,8 +2762,8 @@ class ReadableStream<R> {
   #storedError?: unknown;
   // TODO(streams-ts): The sockets API needs to be able to tell its Readable
   // not to accept reads because it is pending closure. We don't yet fully
-  // implement this but we provide for the signal.
-  // @ts-expect-error
+  // implement this but we provide for the signal (detach carries it to the
+  // detached stream; nothing consults it yet).
   #pendingClosure: boolean = false;
 
   static {
@@ -3188,6 +3195,121 @@ class ReadableStream<R> {
       }
 
       return [branch1, branch2] as [ReadableStream<R>, ReadableStream<R>];
+    };
+
+    // The C++ bridge arm of JsReadableStream::detach(): take over the
+    // stream's internal state into a fresh stream, leaving the original a
+    // permanently locked, disturbed husk (the "create a proxy" step of the
+    // fetch spec, implemented as a state transfer instead of an identity
+    // pipe). The transfer mechanics follow tee's: state-copy shells for
+    // non-readable streams, cursor transfer on the shared queue for the
+    // queued backend, and the extraction machinery for the native backend
+    // (a fresh conduit is REQUIRED there -- the old conduit's stream hooks
+    // close over the original stream, so moving it would route source
+    // close/error to the husk).
+    detachReadableStream = <R>(
+      stream: ReadableStream<R>,
+      ignoreDisturbed: boolean
+    ): ReadableStream<R> => {
+      assertIsReadableStream(stream);
+      // Precondition order and error texts match the legacy
+      // ReadableStream::detach().
+      if (stream.#disturbed && !ignoreDisturbed) {
+        throw new TypeError('The ReadableStream has already been read.');
+      }
+      if (isReadableStreamLocked(stream)) {
+        throw new TypeError('The ReadableStream has been locked to a reader.');
+      }
+
+      // Neutralize the original: no consumer, disturbed, permanently locked
+      // via an internal reader (never exposed, never released) -- the same
+      // pattern extraction and tee use. Any tee-branch relationships now
+      // belong to the detached stream, so the husk's hooks are cleared: its
+      // transitions must not fire the tee wiring, and a (force-)cancel of
+      // the husk must not relay to a tee parent.
+      const neutralize = (): void => {
+        stream.#consumer = undefined;
+        stream.#disturbed = true;
+        stream.#onCancel = undefined;
+        stream.#onBranchSettled = undefined;
+        if (!isReadableStreamLocked(stream)) {
+          acquireReadableStreamDefaultReader(stream);
+        }
+      };
+
+      // Closed/errored: the detached stream is a state-copy shell (tee's
+      // non-readable precedent); the underlying source is not touched.
+      if (stream.#state !== 'readable') {
+        const shell = new ReadableStream<R>(kPrivateSymbol as never);
+        shell.#state = stream.#state;
+        shell.#storedError = stream.#storedError;
+        shell.#pendingClosure = stream.#pendingClosure;
+        neutralize();
+        return shell;
+      }
+
+      const controller = stream.#controller;
+      if (controller !== undefined && isNativeController(controller)) {
+        // Native-backed: extract the source and construct a fresh stream
+        // over it through ordinary native construction (fresh conduit,
+        // fresh stream hooks capturing the NEW stream; matches the legacy
+        // internal controller's detach, which builds a fresh controller
+        // over the removed source). expectedLength is re-read live from
+        // the source, so residual accounting -- including any stashed
+        // bytes -- stays exact.
+        const source = nativeControllerExtractSource(controller);
+        neutralize();
+        const detached = new ReadableStream<R>(source as UnderlyingSource<R>);
+        detached.#pendingClosure = stream.#pendingClosure;
+        return detached;
+      }
+
+      // Queued (JS-backed): tee's transfer recipe, moving rather than
+      // forking -- a fresh shell adopts the SHARED controller and a cursor
+      // at the original cursor's exact position (partial entry consumption
+      // survives the move).
+      const shell = new ReadableStream<R>(kPrivateSymbol as never);
+      shell.#controller = controller;
+      shell.#pendingClosure = stream.#pendingClosure;
+      // Tee-branch relationships (composite cancel, settle notification)
+      // move to the detached stream. The hooks close over the tee wiring's
+      // own state, not over the branch stream, so moving the functions is
+      // sufficient.
+      shell.#onCancel = stream.#onCancel;
+      shell.#onBranchSettled = stream.#onBranchSettled;
+
+      // QUEUED INVARIANT: this branch is queued-backend territory -- the
+      // consumer is necessarily a QueueCursor (position/byteOffset/queue
+      // are cursor-only concepts); sanctioned cast (tee precedent).
+      const cursor = stream.#consumer as QueueCursorType<R, R> | undefined;
+      if (cursor !== undefined) {
+        const queue = cursor.queue;
+        const isBytes =
+          controller !== undefined && isByteStreamController(controller);
+        const totalSize = cursor.remainingSize;
+        // ORDER MATTERS: attach the shell's cursor BEFORE removing the
+        // original -- removing the sole cursor first would fire the
+        // all-cursors-gone hook and cancel the underlying source
+        // mid-detach (tee precedent).
+        shell.#consumer = isBytes
+          ? new ByteStreamCursor(
+              queue,
+              shell,
+              cursor.position,
+              cursor.byteOffset,
+              totalSize
+            )
+          : new QueueCursor(
+              queue,
+              shell,
+              cursor.position,
+              cursor.byteOffset,
+              totalSize
+            );
+        queue.removeCursor(cursor);
+      }
+      neutralize();
+      return shell;
     };
 
     getReadableStreamGetState = <R>(stream: ReadableStream<R>) => {
@@ -3956,6 +4078,7 @@ const cppExports = ObjectFreeze({
   consumeReadableStreamAsJSON,
   consumeReadableStreamAsText,
   consumeReadableStreamAsUint8Array,
+  detachReadableStream,
   getReadableStreamExpectedLength,
   getReadableStreamIsDisturbed,
   getReadableStreamOnEof,

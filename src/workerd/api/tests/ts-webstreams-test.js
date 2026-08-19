@@ -297,6 +297,48 @@ export const iterableBodyErrorPropagates = {
   },
 };
 
+// ======================================================================================
+// new Request(existingRequest) proxies the body by detaching it: the original request's
+// stream is taken over (left permanently locked and disturbed) and the new request reads
+// the data. Under the flag this drives JsReadableStream::detach()'s TypeScript arm.
+
+export const requestBodyProxying = {
+  async test() {
+    const req1 = new Request('http://example.org/', {
+      method: 'POST',
+      body: 'hello world',
+    });
+    const req2 = new Request(req1);
+    ok(req2.body instanceof ReadableStream);
+    // The original's body has been taken over: disturbed (bodyUsed) and locked.
+    strictEqual(req1.bodyUsed, true);
+    ok(req1.body.locked);
+    strictEqual(await req2.text(), 'hello world');
+  },
+};
+
+export const requestStreamBodyProxying = {
+  async test() {
+    const encoder = new TextEncoder();
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue(encoder.encode('hello '));
+        c.enqueue(encoder.encode('world'));
+        c.close();
+      },
+    });
+    const req1 = new Request('http://example.org/', {
+      method: 'POST',
+      body: rs,
+    });
+    const req2 = new Request(req1);
+    // The adopted user stream is the one left as the locked husk...
+    ok(rs.locked);
+    // ...while the new request reads its (queued) data through the moved cursor.
+    strictEqual(await req2.text(), 'hello world');
+  },
+};
+
 // Serves the fetch handlers backing the pumpTo and unwrap tests below. `/plain` responds
 // with a buffer-backed body; `/proxy` forwards the fetched Response object UNMODIFIED, so
 // its body -- a C++-created, TypeScript-backed stream held internally -- gets pumped by

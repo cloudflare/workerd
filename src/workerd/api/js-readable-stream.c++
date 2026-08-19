@@ -1046,7 +1046,17 @@ JsReadableStream JsReadableStream::detach(jsg::Lock& js, IgnoreDisturbed ignoreD
       });
     }
     KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-      KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+      // The TypeScript-side detach performs the whole takeover atomically: precondition
+      // checks (legacy-exact error texts), internal-state transfer into a fresh stream,
+      // and neutralization of the original (permanently locked + disturbed).
+      auto detached = webstreams::dispatchCall(js, "detachReadableStream", obj.getHandle(js),
+          js.boolean(ignoreDisturbed == IgnoreDisturbed::YES));
+      auto detachedObj = KJ_REQUIRE_NONNULL(
+          JSG_TRY_CAST_OBJECT(detached), "detachReadableStream did not return a stream");
+      return JsReadableStream(Impl{
+        .stream = StreamImpl(detachedObj.addRef(js)),
+        .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); }),
+      });
     }
   }
   KJ_UNREACHABLE;
