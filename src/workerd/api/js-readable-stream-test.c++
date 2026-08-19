@@ -5,6 +5,7 @@
 #include <workerd/api/blob.h>
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-streams-bridge.h>
+#include <workerd/api/js-writable-stream.h>
 #include <workerd/io/per-isolate-bootstrap.h>
 #include <workerd/tests/test-fixture.h>
 
@@ -1929,6 +1930,124 @@ KJ_TEST("JsReadableStream onEof never fires for a queued TypeScript stream") {
     return env.context.awaitJs(js, kj::mv(promise));
   });
   KJ_EXPECT(!fired);
+}
+
+// =======================================================================================
+// setPendingClosure gates on TypeScript-backed streams (legacy internal-controller
+// parity: reader reads, draining reads/consumption, pipeTo, and tee fail fast once the
+// owning object's closure begins; cancel and the teardown operations stay open)
+
+KJ_TEST("JsReadableStream setPendingClosure gates reader reads") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    auto constructor =
+        KJ_ASSERT_NONNULL(exportsObj.get(js, "ReadableStream"_kj).tryCast<jsg::JsFunction>());
+
+    // Default reader read.
+    auto source1 =
+        js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    auto streamObj1 = constructor.newInstance(js, jsg::JsValue(handler.wrap(js, kj::mv(source1))));
+    auto stream1 = JsReadableStream(js, streamObj1.addRef(js));
+    stream1.setPendingClosure(js);
+    auto reader1 = KJ_ASSERT_NONNULL(
+        JSG_TRY_CAST_OBJECT(webstreams::invokeMethod(js, streamObj1, "getReader"_kj)));
+    auto read1 = js.toPromise(v8::Local<v8::Value>(
+        KJ_ASSERT_NONNULL(JSG_TRY_CAST_PROMISE(webstreams::invokeMethod(js, reader1, "read"_kj)))));
+
+    // BYOB reader read (native streams are byte-capable).
+    auto source2 =
+        js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    auto streamObj2 = constructor.newInstance(js, jsg::JsValue(handler.wrap(js, kj::mv(source2))));
+    auto stream2 = JsReadableStream(js, streamObj2.addRef(js));
+    stream2.setPendingClosure(js);
+    auto byobOptions = js.obj();
+    byobOptions.set(js, "mode"_kj, js.str("byob"_kj));
+    auto reader2 = KJ_ASSERT_NONNULL(JSG_TRY_CAST_OBJECT(
+        webstreams::invokeMethod(js, streamObj2, "getReader"_kj, jsg::JsValue(byobOptions))));
+    auto view = jsg::JsUint8Array::create(js, kj::heapArray<kj::byte>(16));
+    auto read2 = js.toPromise(v8::Local<v8::Value>(KJ_ASSERT_NONNULL(
+        JSG_TRY_CAST_PROMISE(webstreams::invokeMethod(js, reader2, "read"_kj, view)))));
+
+    auto expectGated = [](jsg::Lock& js, jsg::Value exception) -> void {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(
+          e.getDescription().contains("belongs to an object that is closing"), e.getDescription());
+    };
+    auto promise = read1
+                       .then(js,
+                           [](jsg::Lock& js, jsg::Value) -> void {
+      KJ_FAIL_REQUIRE("expected read() after setPendingClosure to reject");
+    }, expectGated)
+                       .then(js, [read2 = kj::mv(read2)](jsg::Lock& js) mutable {
+      return kj::mv(read2);
+    }).then(js, [](jsg::Lock& js, jsg::Value) -> void {
+      KJ_FAIL_REQUIRE("expected BYOB read() after setPendingClosure to reject");
+    }, expectGated);
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream setPendingClosure gates consumption and tee") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    stream.setPendingClosure(js);
+
+    // tee() throws synchronously with the legacy text.
+    JSG_TRY(js) {
+      auto tee KJ_UNUSED = stream.tee(js);
+      KJ_FAIL_REQUIRE("expected tee() after setPendingClosure to throw");
+    }
+    JSG_CATCH(exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(
+          e.getDescription().contains("belongs to an object that is closing"), e.getDescription());
+    };
+
+    // Consumption (the DrainingReader path) rejects with the legacy text.
+    auto promise = stream.text(js, kLimit).then(js, [](jsg::Lock& js, kj::String) -> void {
+      KJ_FAIL_REQUIRE("expected text() after setPendingClosure to reject");
+    }, [](jsg::Lock& js, jsg::Value exception) -> void {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(
+          e.getDescription().contains("belongs to an object that is closing"), e.getDescription());
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream setPendingClosure gates pipeTo but not cancel") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    stream.setPendingClosure(js);
+    auto destination = JsWritableStream::create(
+        js, env.context, kj::heap<CollectingSink>(collected, ended), kj::none);
+
+    auto promise = stream.pipeTo(js, destination)
+                       .then(js, [](jsg::Lock& js) -> void {
+      KJ_FAIL_REQUIRE("expected pipeTo() after setPendingClosure to reject");
+    }, [](jsg::Lock& js, jsg::Value exception) -> void {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(
+          e.getDescription().contains("belongs to an object that is closing"), e.getDescription());
+    }).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock & js) mutable {
+                         // cancel is deliberately NOT gated: the teardown itself cancels the readable.
+                         return stream.cancel(js, kj::none);
+                       }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
 }
 
 KJ_TEST("JsReadableStream detach of a tee branch carries the composite cancel hook") {

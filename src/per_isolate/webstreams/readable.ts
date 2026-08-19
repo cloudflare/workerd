@@ -348,6 +348,7 @@ let getControllerExpectedLength: (
 ) => bigint | undefined;
 
 let setReadableStreamPendingClosure: <R>(stream: ReadableStream<R>) => void;
+let isReadableStreamPendingClosure: <R>(stream: ReadableStream<R>) => boolean;
 let getReadableStreamOnEof: <R>(stream: ReadableStream<R>) => Promise<void>;
 let getReadableStreamExpectedLength: <R>(
   stream: ReadableStream<R>
@@ -675,10 +676,24 @@ class ReadableStreamReaderBase<R> {
 // BACKEND-BLIND: this function programs against StreamConsumer and must
 // never branch on the backend. (The autoAllocate check below is the ONE
 // sanctioned queued-byte-specific check — see the marker.)
+// The user-visible error for reads/pipes/tees attempted after the stream's
+// owning object initiated closure (see #pendingClosure). The text matches
+// the legacy internal controller's exactly.
+function pendingClosureError(): TypeError {
+  return new TypeError(
+    'This ReadableStream belongs to an object that is closing.'
+  );
+}
+
 function defaultReaderReadInternal<R>(
   reader: object,
   stream: ReadableStream<R>
 ): Promise<ReadableStreamReadResult<R>> {
+  if (isReadableStreamPendingClosure(stream)) {
+    return PromiseReject(pendingClosureError()) as Promise<
+      ReadableStreamReadResult<R>
+    >;
+  }
   setReadableStreamDisturbed(stream);
   const state = getReadableStreamGetState(stream);
   if (state === 'closed')
@@ -985,6 +1000,9 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     const stream = getReaderStream(this);
     if (stream === undefined) {
       throw new TypeError('This reader has been released');
+    }
+    if (isReadableStreamPendingClosure(stream)) {
+      throw pendingClosureError();
     }
     setReadableStreamDisturbed(stream);
     if (getReadableStreamGetState(stream) === 'errored') {
@@ -2249,6 +2267,9 @@ async function drainingReaderReadInternal<R>(
   stream: ReadableStream<R>,
   maxSize?: number
 ): Promise<DrainingReadResult<R>> {
+  if (isReadableStreamPendingClosure(stream)) {
+    throw pendingClosureError();
+  }
   setReadableStreamDisturbed(stream);
   const state = getReadableStreamGetState(stream);
   if (state === 'closed') return createDrainResult<R>([], true);
@@ -2767,10 +2788,12 @@ class ReadableStream<R> {
   #disturbed: boolean = false;
   #state: 'readable' | 'closed' | 'errored' = 'readable';
   #storedError?: unknown;
-  // TODO(streams-ts): The sockets API needs to be able to tell its Readable
-  // not to accept reads because it is pending closure. We don't yet fully
-  // implement this but we provide for the signal (detach carries it to the
-  // detached stream; nothing consults it yet).
+  // The pending-closure gate (JsReadableStream::setPendingClosure): set by
+  // the stream's owning object (a Socket) the moment its closure begins, so
+  // that new reads, pipes, and tees fail fast with a descriptive error
+  // instead of racing the teardown. Mirrors the legacy internal controller's
+  // isPendingClosure checks; cancel and the teardown's own operations are
+  // deliberately not gated. Carried by detach() to the detached stream.
   #pendingClosure: boolean = false;
   // The C++ bridge's EOF-signal resolver (JsReadableStream::onEof), armed by
   // getReadableStreamOnEof and fired by the native backend's source-driven
@@ -2792,6 +2815,10 @@ class ReadableStream<R> {
 
     setReadableStreamPendingClosure = <R>(stream: ReadableStream<R>) => {
       stream.#pendingClosure = true;
+    };
+
+    isReadableStreamPendingClosure = <R>(stream: ReadableStream<R>) => {
+      return stream.#pendingClosure;
     };
 
     getReadableStreamOnEof = <R>(stream: ReadableStream<R>) => {
@@ -2920,6 +2947,9 @@ class ReadableStream<R> {
         if (writableInternals.isWritableStreamLocked(destination)) {
           throw new TypeError('Cannot pipe to a locked writable stream');
         }
+        if (source.#pendingClosure) {
+          throw pendingClosureError();
+        }
         // WebIDL: null coerces to {} for optional dictionaries.
         if (options === null) options = {} as StreamPipeOptions;
         if (!isActualObject(options)) {
@@ -3042,6 +3072,9 @@ class ReadableStream<R> {
       // JsReadableStream::tee arm via cppExports, which calls this directly.
       if (isReadableStreamLocked(stream)) {
         throw new TypeError('Cannot tee a stream that is locked');
+      }
+      if (stream.#pendingClosure) {
+        throw pendingClosureError();
       }
       const controller = stream.#controller;
       if (isNativeController(controller)) {

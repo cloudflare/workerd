@@ -930,16 +930,45 @@ KJ_TEST("JsWritableStream addRef shares a TypeScript-backed stream") {
   KJ_EXPECT(state.ended);
 }
 
-KJ_TEST("JsWritableStream setPendingClosure TS arm is a no-op signal") {
+KJ_TEST("JsWritableStream setPendingClosure gates writes but not the teardown operations") {
   auto fixture = makeTsStreamsFixture();
   SinkState state;
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
     auto stream = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
     stream.setPendingClosure(js);
+    // Pending closure is separate state, not closed-or-closing.
     KJ_EXPECT(!stream.isClosedOrClosing(js));
+
+    // New writes fail fast with the legacy text (legacy internal-controller parity: only
+    // write() is gated)...
+    auto handle = KJ_ASSERT_NONNULL(stream.tryGetTs(js));
+    auto writer = KJ_ASSERT_NONNULL(
+        webstreams::invokeMethod(js, handle, "getWriter"_kj).tryCast<jsg::JsObject>());
+    auto writePromise = js.toPromise(v8::Local<v8::Value>(KJ_ASSERT_NONNULL(JSG_TRY_CAST_PROMISE(
+        webstreams::invokeMethod(js, writer, "write"_kj, js.str("data"_kj))))));
+
+    auto promise =
+        writePromise
+            .then(js, [](jsg::Lock& js, jsg::Value) -> void {
+      KJ_FAIL_REQUIRE("expected write() after setPendingClosure to reject");
+    }, [](jsg::Lock& js, jsg::Value exception) -> void {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(
+          e.getDescription().contains("This WritableStream belongs to an object that is closing"),
+          e.getDescription());
+    }).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock & js) mutable {
+              // ...while the teardown's own operations stay open: forceFlush and forceClose
+              // proceed (they bypass the writer lock and the pending-closure gate by design).
+              auto flushed = stream.forceFlush(js);
+              return flushed.then(js,
+                  JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream),
+                      (jsg::Lock & js) mutable { return stream.forceClose(js); }));
+            }));
+    return env.context.awaitJs(js, kj::mv(promise));
   });
+  KJ_EXPECT(state.ended);
 }
 
 KJ_TEST("JsWritableStream create TS arm honors the closure waitable") {
