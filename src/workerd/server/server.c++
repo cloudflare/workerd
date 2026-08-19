@@ -3916,7 +3916,7 @@ class Server::WorkerService final: public Service,
       }
     }
 
-    return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
+    return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName.clone(),
         kj::mv(props), kj::mv(actor),
         kj::attachRef(static_cast<LimitEnforcer&>(*this), kj::addRef(*this)),
         {},  // ioContextDependency
