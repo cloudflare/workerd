@@ -1,0 +1,89 @@
+patches/v8/0039-wasm-memory.discard-prototype-for-the-memory-control.patch
+  s_dad5d2fecd1c00::t_3c7697292932d1 393
+build/deps/gen/deps.MODULE.bazel
+  s_dad5d2fecd1c00::t_5e828f1e3b2887 130-131,133
+build/deps/v8.MODULE.bazel
+  s_dad5d2fecd1c00::t_9802ee6438b6c5 21,23
+patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch
+  s_dad5d2fecd1c00::t_1573e04491f5db 11,21,25,35
+patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch
+  s_dad5d2fecd1c00::t_164e553bdcedab 40,43,55,58
+patches/v8/0002-Allow-manually-setting-ValueSerializer-format-versio.patch
+  s_dad5d2fecd1c00::t_211608bb8c554b 26,29,41,89,92,104
+patches/v8/0003-Allow-Windows-builds-under-Bazel.patch
+  s_dad5d2fecd1c00::t_15bd6ac160579c 9,12,91
+patches/v8/0005-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch
+  s_dad5d2fecd1c00::t_a8090877fc20a5 13,24,53,62,109
+patches/v8/0006-Implement-Promise-Context-Tagging.patch
+  s_dad5d2fecd1c00::t_d8b1e470130769 61,64,91,104,121,154,190,193,208,250,253,262,270,312,315,331,344,353,356,370,373,457,460,516,519
+patches/v8/0007-Randomize-the-initial-ExecutionContextId-used-by-the.patch
+  s_dad5d2fecd1c00::t_1033605607b7d5 13
+patches/v8/0008-increase-visibility-of-virtual-method.patch
+  s_dad5d2fecd1c00::t_db3e2bec36a46c 12,15
+patches/v8/0009-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch
+  s_dad5d2fecd1c00::t_2d73ea432ede0a 33,36,48,84,87,103
+patches/v8/0010-Modify-where-to-look-for-fp16-dependency.-This-depen.patch
+  s_dad5d2fecd1c00::t_05ace626437ea2 11,14
+patches/v8/0011-Revert-heap-Add-masm-specific-unwinding-annotations-.patch
+  s_dad5d2fecd1c00::t_499c84b1fdf36c 17,20,30
+patches/v8/0012-Update-illegal-invocation-error-message-in-v8.patch
+  s_dad5d2fecd1c00::t_8478bf3be9efd7 9,26
+patches/v8/0013-Implement-cross-request-context-promise-resolve-hand.patch
+  s_dad5d2fecd1c00::t_7ca0be4287eac5 52,55,77,90,169,172,181,206,209,217,244,259,262,305,308,337,363,398,401,476,479
+patches/v8/0014-Add-another-slot-in-the-isolate-for-embedder.patch
+  s_dad5d2fecd1c00::t_ae324b2f735965 9,12
+patches/v8/0015-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch
+  s_dad5d2fecd1c00::t_4326be3dd0887b 33,36,48,86,89,105,115
+patches/v8/0017-Enable-V8-shared-linkage.patch
+  s_dad5d2fecd1c00::t_2352f09548c692 9,12,20,28,36,45,53,64,73
+patches/v8/0018-Modify-where-to-look-for-fast_float-and-simdutf.patch
+  s_dad5d2fecd1c00::t_f345c1f2e60c35 15,18,49
+patches/v8/0019-Remove-unneded-latomic-linker-flag.patch
+  s_dad5d2fecd1c00::t_6cf59cda505f7c 9
+patches/v8/0020-Add-methods-to-get-heap-and-external-memory-sizes-di.patch
+  s_dad5d2fecd1c00::t_de4c2e7c36a493 32,35
+patches/v8/0021-Port-concurrent-mksnapshot-support.patch
+  s_dad5d2fecd1c00::t_2984ad127cd570 9,24
+patches/v8/0022-Port-V8_USE_ZLIB-support.patch
+  s_dad5d2fecd1c00::t_d182d96964fe22 9,32
+patches/v8/0023-Modify-where-to-look-for-dragonbox.patch
+  s_dad5d2fecd1c00::t_c62e7db0e66fa2 8,11
+patches/v8/0024-Disable-slow-handle-check.patch
+  s_dad5d2fecd1c00::t_0ac118d01e417e 9,12
+patches/v8/0026-Implement-additional-Exception-construction-methods.patch
+  s_dad5d2fecd1c00::t_1b6c7dd2ec52ee 28,31,43
+patches/v8/0028-bind-icu-to-googlesource.patch
+  s_dad5d2fecd1c00::t_047985d7432ae5 8,11,20
+patches/v8/0029-Add-v8-String-IsFlat-API.patch
+  s_dad5d2fecd1c00::t_d0ba0c8999a366 27,30
+patches/v8/0031-Add-verify_write_barriers-flag-in-V8-s-bazel-config.patch
+  s_dad5d2fecd1c00::t_f48c9922a0a592 8
+patches/v8/0032-Change-lamba-signature-to-get-around-windows-build-f.patch
+  s_dad5d2fecd1c00::t_328b1434b0c459 8,11
+patches/v8/0033-Return-false-on-Object.hasOwnProperty-with-intercept.patch
+  s_dad5d2fecd1c00::t_2b175222549f23 8,11
+patches/v8/0035-Remove-libcxx-dep-from-defs.bzl-not-resolvable-via-h.patch
+  s_dad5d2fecd1c00::t_66128dada93b60 14
+patches/v8/0036-Fix-ExtendedMap-layout-on-Windows.patch
+  s_dad5d2fecd1c00::t_39c82f27e708f3 11-13,15-29,31,34,37-39,42,44,47,50-54,57,59,62
+patches/v8/0037-Fix-CFunction-MemorySpan-declarations-on-Windows.patch
+  s_dad5d2fecd1c00::t_a7756def135f8a 14
+patches/v8/0038-Properly-depend-on-llvm-libc.patch
+  s_dad5d2fecd1c00::t_8862d2addfd113 9,12,26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "607f0cd8fd5dbd1a8db92e7505599407cd4b2f81",
+  "prompts": {},
+  "sessions": {
+    "s_dad5d2fecd1c00": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fede7c76fffe9yZ4V13wrSsm61",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Felix Hanau <felix@cloudflare.com>"
+    }
+  }
+}
