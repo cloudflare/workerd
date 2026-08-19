@@ -765,6 +765,32 @@ kj::Maybe<uint64_t> JsReadableStream::tryGetLength(jsg::Lock& js, StreamEncoding
   return kj::none;
 }
 
+StreamEncoding JsReadableStream::getPreferredEncoding(jsg::Lock& js) {
+  KJ_IF_SOME(i, impl) {
+    KJ_SWITCH_ONEOF(i.stream) {
+      KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
+        return stream->getController().getPreferredEncoding();
+      }
+      KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+        // Only a native underlying source can prefer a non-identity encoding; queued
+        // (JS-sourced) streams produce identity bytes.
+        auto sourceValue =
+            webstreams::dispatchCall(js, "getReadableStreamNativeSource", obj.getHandle(js));
+        if (sourceValue.isUndefined()) {
+          return StreamEncoding::IDENTITY;
+        }
+        auto& handler =
+            KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+        auto source = KJ_REQUIRE_NONNULL(handler.tryUnwrap(js, sourceValue),
+            "getReadableStreamNativeSource did not return a ReadableStreamNativeSource");
+        return source->getPreferredEncoding();
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+  return StreamEncoding::IDENTITY;
+}
+
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> JsReadableStream::arrayBuffer(
     jsg::Lock& js, uint64_t limit) {
   KJ_IF_SOME(i, impl) {
@@ -1455,6 +1481,21 @@ kj::Maybe<uint64_t> ReadableStreamNativeSource::tryGetLength(StreamEncoding enco
   // "closed, hence zero" from "unknown" is the stream layer's business, not the
   // source's; report unknown.
   return kj::none;
+}
+
+StreamEncoding ReadableStreamNativeSource::getPreferredEncoding() {
+  KJ_IF_SOME(active, state) {
+    // Stashed bytes are identity bytes already drawn from the source: once any exist, the
+    // remaining content is not entirely in the source's preferred encoding, and only
+    // IDENTITY describes it.
+    if (!stash.empty()) {
+      return StreamEncoding::IDENTITY;
+    }
+    return active.source->getPreferredEncoding();
+  }
+  // EOF'd, canceled, or consumed: nothing more will be produced; IDENTITY trivially
+  // describes the empty remainder.
+  return StreamEncoding::IDENTITY;
 }
 
 kj::Own<ReadableStreamSource> ReadableStreamNativeSource::releaseForPump(jsg::Lock& js) {
