@@ -14,12 +14,13 @@ namespace workerd::api {
 
 namespace {
 
+// The web pair's codec policy over the shared ZlibStream core: spec-pinned TypeErrors and
+// the strict-mode checks driven by the strict_compression_checks compat flag. The format
+// has already been validated by the stream constructors, so the windowBits lookup here
+// cannot fail.
 class Context {
  public:
-  enum class Mode {
-    COMPRESS,
-    DECOMPRESS,
-  };
+  using Mode = ZlibStream::Mode;
 
   enum class ContextFlags {
     NONE,
@@ -36,84 +37,49 @@ class Context {
       ContextFlags flags,
       kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
       : allocator(kj::mv(externalMemoryTarget)),
-        mode(mode),
-        strictCompression(flags)
-
-  {
-    // Configure allocator before any stream operations.
-    ctx.zalloc = CompressionAllocator::AllocForZlib;
-    ctx.zfree = CompressionAllocator::FreeForZlib;
-    ctx.opaque = &allocator;
-
-    int result = Z_OK;
-    switch (mode) {
-      case Mode::COMPRESS:
-        result = deflateInit2(&ctx, Z_DEFAULT_COMPRESSION, Z_DEFLATED, getWindowBits(format),
-            8,  // memLevel = 8 is the default
-            Z_DEFAULT_STRATEGY);
-        break;
-      case Mode::DECOMPRESS:
-        result = inflateInit2(&ctx, getWindowBits(format));
-        break;
-      default:
-        KJ_UNREACHABLE;
-    }
-    JSG_REQUIRE(result == Z_OK, Error, "Failed to initialize compression context."_kj);
-  }
-
-  ~Context() noexcept(false) {
-    switch (mode) {
-      case Mode::COMPRESS:
-        deflateEnd(&ctx);
-        break;
-      case Mode::DECOMPRESS:
-        inflateEnd(&ctx);
-        break;
-    }
+        stream(allocator),
+        strictCompression(flags) {
+    auto windowBits = KJ_ASSERT_NONNULL(ZlibStream::windowBitsForWebFormat(format));
+    JSG_REQUIRE(stream.init(mode, ZlibStream::Options{.windowBits = windowBits}) == kj::none, Error,
+        "Failed to initialize compression context."_kj);
   }
 
   KJ_DISALLOW_COPY_AND_MOVE(Context);
 
   void setInput(const void* in, size_t size) {
-    ctx.next_in = const_cast<byte*>(reinterpret_cast<const byte*>(in));
-    ctx.avail_in = size;
+    stream.setInput(kj::arrayPtr(reinterpret_cast<const byte*>(in), size));
   }
 
   Result pumpOnce(int flush) {
-    ctx.next_out = buffer;
-    ctx.avail_out = sizeof(buffer);
+    stream.setOutput(kj::arrayPtr(buffer, sizeof(buffer)));
 
-    int result = Z_OK;
+    int result = stream.run(flush);
 
-    switch (mode) {
+    switch (stream.getMode()) {
       case Mode::COMPRESS:
-        result = deflate(&ctx, flush);
         JSG_REQUIRE(result == Z_OK || result == Z_BUF_ERROR || result == Z_STREAM_END, TypeError,
             "Compression failed.");
         break;
       case Mode::DECOMPRESS:
-        result = inflate(&ctx, flush);
         JSG_REQUIRE(result == Z_OK || result == Z_BUF_ERROR || result == Z_STREAM_END, TypeError,
             "Decompression failed.");
 
         if (strictCompression == ContextFlags::STRICT) {
           // The spec requires that a TypeError is produced if there is trailing data after the end
           // of the compression stream.
-          JSG_REQUIRE(!(result == Z_STREAM_END && ctx.avail_in > 0), TypeError,
+          JSG_REQUIRE(!(result == Z_STREAM_END && stream.availIn() > 0), TypeError,
               "Trailing bytes after end of compressed data");
           // Same applies to closing a stream before the complete decompressed data is available.
           JSG_REQUIRE(
-              !(flush == Z_FINISH && result == Z_BUF_ERROR && ctx.avail_out == sizeof(buffer)),
+              !(flush == Z_FINISH && result == Z_BUF_ERROR && stream.availOut() == sizeof(buffer)),
               TypeError, "Called close() on a decompression stream with incomplete data");
         }
         break;
-      default:
-        KJ_UNREACHABLE;
     }
 
     return Result{
       .success = result == Z_OK,
-      .buffer = kj::arrayPtr(buffer, sizeof(buffer) - ctx.avail_out),
+      .buffer = kj::arrayPtr(buffer, sizeof(buffer) - stream.availOut()),
     };
   }
 
@@ -121,27 +87,7 @@ class Context {
   CompressionAllocator allocator;
 
  private:
-  static int getWindowBits(kj::StringPtr format) {
-    // We use a windowBits value of 15 combined with the magic value
-    // for the compression format type. For gzip, the magic value is
-    // 16, so the value returned is 15 + 16. For deflate, the magic
-    // value is 15. For raw deflate (i.e. deflate without a zlib header)
-    // the negative windowBits value is used, so -15. See the comments for
-    // deflateInit2() in zlib.h for details.
-    static constexpr auto GZIP = 16;
-    static constexpr auto DEFLATE = 15;
-    static constexpr auto DEFLATE_RAW = -15;
-    if (format == "gzip")
-      return DEFLATE + GZIP;
-    else if (format == "deflate")
-      return DEFLATE;
-    else if (format == "deflate-raw")
-      return DEFLATE_RAW;
-    KJ_UNREACHABLE;
-  }
-
-  Mode mode;
-  z_stream ctx = {};
+  ZlibStream stream;
   kj::byte buffer[16384];
 
   // For the eponymous compatibility flag
