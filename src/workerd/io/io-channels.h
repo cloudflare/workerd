@@ -188,6 +188,14 @@ class IoChannelFactory: public virtual kj::Refcounted {
 
   virtual kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) = 0;
 
+  // Register an opaque handle whose lifetime should keep the current actor active. Runtimes that
+  // do not need explicit actor lifetime tracking return a null handle.
+  //
+  // Container port connections use this because deferred proxying can outlive the IoContext that
+  // created the connection. Attaching the returned handle to the proxied HTTP response, WebSocket,
+  // or TCP tunnel lets the embedding runtime keep the actor active until that resource closes.
+  virtual kj::Own<void> registerActorKeepalive();
+
   // Get a Cap'n Proto RPC capability. Various binding types are backed by capabilities.
   //
   // Note that some other channel types, like actor channels, may actually be wrappers around

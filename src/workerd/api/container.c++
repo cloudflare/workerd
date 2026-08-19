@@ -1332,9 +1332,11 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
  public:
   TcpPortWorkerInterface(kj::EntropySource& entropySource,
       const kj::HttpHeaderTable& headerTable,
+      kj::Own<IoChannelFactory> ioChannelFactory,
       kj::Rc<TcpPortState> portState)
       : entropySource(entropySource),
         headerTable(headerTable),
+        ioChannelFactory(kj::mv(ioChannelFactory)),
         portState(kj::mv(portState)) {}
 
   // Implements fetch(), i.e., HTTP requests. We form a TCP connection, then run HTTP over it
@@ -1362,17 +1364,21 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
     auto newHeaders = headers.cloneShallow();
     newHeaders.setPtr(kj::HttpHeaderId::HOST, parsedUrl.host);
     auto noHostUrl = parsedUrl.toString(kj::Url::Context::HTTP_REQUEST);
+    auto wrappedResponse = kj::heap<KeepaliveHttpResponse>(response, *ioChannelFactory);
+    auto keepalive = ioChannelFactory->registerActorKeepalive();
 
     KJ_IF_SOME(client, portState->getHttpClient()) {
       auto service = kj::newHttpService(client);
-      co_await service->request(method, noHostUrl, newHeaders, requestBody, response);
+      co_await service->request(method, noHostUrl, newHeaders, requestBody, *wrappedResponse)
+          .attach(kj::mv(wrappedResponse), kj::mv(keepalive));
       co_return;
     }
 
     auto connection = kj::newPromisedStream(portState->connect());
     auto client = kj::newHttpClient(headerTable, *connection, {.entropySource = entropySource});
     auto service = kj::newHttpService(*client);
-    co_await service->request(method, noHostUrl, newHeaders, requestBody, response);
+    co_await service->request(method, noHostUrl, newHeaders, requestBody, *wrappedResponse)
+        .attach(kj::mv(wrappedResponse), kj::mv(keepalive));
   }
 
   // Implements connect(), i.e., forms a raw socket.
@@ -1390,7 +1396,7 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
     kj::HttpHeaders responseHeaders(headerTable);
     response.accept(200, "OK", responseHeaders);
 
-    return promise;
+    return promise.attach(ioChannelFactory->registerActorKeepalive());
   }
 
   // The only `CustomEvent` that can happen through `Fetcher` is a JSRPC call. Maybe we will
@@ -1411,8 +1417,31 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
   }
 
  private:
+  class KeepaliveHttpResponse final: public kj::HttpService::Response {
+   public:
+    KeepaliveHttpResponse(kj::HttpService::Response& inner, IoChannelFactory& ioChannelFactory)
+        : inner(inner),
+          ioChannelFactory(ioChannelFactory) {}
+
+    kj::Own<kj::AsyncOutputStream> send(uint statusCode,
+        kj::StringPtr statusText,
+        const kj::HttpHeaders& headers,
+        kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
+      return inner.send(statusCode, statusText, headers, expectedBodySize);
+    }
+
+    kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
+      return inner.acceptWebSocket(headers).attach(ioChannelFactory.registerActorKeepalive());
+    }
+
+   private:
+    kj::HttpService::Response& inner;
+    IoChannelFactory& ioChannelFactory;
+  };
+
   kj::EntropySource& entropySource;
   const kj::HttpHeaderTable& headerTable;
+  kj::Own<IoChannelFactory> ioChannelFactory;
   kj::Rc<TcpPortState> portState;
 
   // Connect to the port and pump bytes to/from `connection`.
@@ -1451,7 +1480,8 @@ class Container::TcpPortOutgoingFactory final: public Fetcher::OutgoingFactory {
     // At present we have no use for `cfStr`.
     return IoContext::current().getSubrequestNoChecks(
         [&](auto& tracing, auto& channelFactory) -> kj::Own<WorkerInterface> {
-      return kj::heap<TcpPortWorkerInterface>(entropySource, headerTable, portState.addRef());
+      return kj::heap<TcpPortWorkerInterface>(
+          entropySource, headerTable, kj::addRef(channelFactory), portState.addRef());
     }, {.inHouse = false, .wrapMetrics = false});
   }
 

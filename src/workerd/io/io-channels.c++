@@ -23,6 +23,10 @@ IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(kj
   };
 }
 
+kj::Own<void> IoChannelFactory::registerActorKeepalive() {
+  return {};
+}
+
 kj::Promise<kj::Array<byte>> IoChannelFactory::TokenizableChannel::getToken(
     ChannelTokenUsage usage) {
   KJ_SWITCH_ONEOF(getTokenMaybeSync(usage)) {
