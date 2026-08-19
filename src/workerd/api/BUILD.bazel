@@ -274,15 +274,30 @@ wd_cc_library(
     ],
 )
 
+# Shared compression machinery (allocator, and the common codec core): the common home for
+# the primitives used by the web CompressionStream/DecompressionStream pair, node:zlib, and
+# the TypeScript streams implementation's codec handle.
+wd_cc_library(
+    name = "compression",
+    srcs = ["compression.c++"],
+    hdrs = ["compression.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
+        "@nbytes",
+    ],
+)
+
 wd_cc_library(
     name = "streams-compression",
     srcs = ["streams/compression.c++"],
     hdrs = ["streams/compression.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":compression",
         "//src/workerd/io",
         "//src/workerd/util:state-machine",
-        "@nbytes",
     ],
 )
 

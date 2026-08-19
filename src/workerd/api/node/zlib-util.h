@@ -4,7 +4,7 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 #pragma once
 
-#include <workerd/api/streams/compression.h>
+#include <workerd/api/compression.h>
 #include <workerd/jsg/jsg.h>
 
 #include <brotli/decode.h>

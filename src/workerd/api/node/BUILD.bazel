@@ -66,7 +66,7 @@ wd_cc_library(
         ":node-core",
         "//src/node",
         "//src/rust/api",
-        "//src/workerd/api:streams-compression",
+        "//src/workerd/api:compression",
         "//src/workerd/io",
         "//src/workerd/util:autogate",
         "//src/workerd/util:mimetype",
