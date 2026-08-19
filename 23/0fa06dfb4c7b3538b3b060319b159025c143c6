@@ -1,0 +1,43 @@
+src/workerd/io/worker.c++
+  s_0f868da28cf400::t_8394037cf522e3 4454
+  s_0f868da28cf400::t_3fd14041fe1f71 4409-4424,4430-4432
+  s_0f868da28cf400::t_3865c55d647cdd 4445-4453,4455
+src/workerd/io/worker.h
+  s_0f868da28cf400::t_d6d45a47a51235 1109-1115
+src/workerd/api/tests/do-pre-shutdown-test.js
+  s_0f868da28cf400::t_856202bd975585 97-109
+  s_0f868da28cf400::t_a29d77b7a25d6c 110-136
+  s_0f868da28cf400::t_632635f39488cf 254-265
+  s_0f868da28cf400::t_6be702b355a547 241
+  s_0f868da28cf400::t_88d5c7e0250ea8 242-253,266
+src/workerd/api/tests/do-pre-shutdown-test.wd-test
+  s_0f868da28cf400::t_d47c5584f65a1f 15
+  s_0f868da28cf400::t_82f795a1145773 36
+  s_0f868da28cf400::t_d53b2211bac35b 26
+  s_0f868da28cf400::t_00acc5f3d36b08 25
+  s_0f868da28cf400::t_9fdc774ce485d8 37
+src/workerd/server/server.c++
+  s_0f868da28cf400::t_842c70e3048755 850-857
+  s_0f868da28cf400::t_2953c82f5f9c07 1167-1172,1177-1180,1184,1186-1188
+  s_0f868da28cf400::t_92ded05836669f 1173-1176,1181-1183,1185,1189
+  s_0f868da28cf400::t_68c17aad014c74 1057-1068
+  s_0f868da28cf400::t_8e8101d1f1a850 1097-1100,1105-1110
+  s_0f868da28cf400::t_c0f7d130c54ed0 1056,1069-1073
+  s_0f868da28cf400::t_e0aa50aedcb6e6 1151-1160
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "230fa06dfb4c7b3538b3b060319b159025c143c6",
+  "prompts": {},
+  "sessions": {
+    "s_0f868da28cf400": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_012591357ffeA7cXF67TJsjeKU",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,37 @@
+src/cloudflare/internal/workflows-api.ts
+  s_98a259550c0665::t_31e57e1c968f70 30,116-121
+  s_d5aa128e6336c0::t_97dbde8ff1b12b 122-125
+src/cloudflare/internal/test/workflows/workflows-mock.js
+  s_98a259550c0665::t_6ee1ae3b2092af 52,95
+  s_d5aa128e6336c0::t_a2cd6381da94b5 96
+src/cloudflare/internal/test/workflows/workflows-api-rpc-test.js
+  s_98a259550c0665::t_601c69aff4abab 40,73
+src/cloudflare/internal/test/workflows/workflows-api-test.js
+  s_98a259550c0665::t_efebf1ee7fba5a 56-60
+  s_98a259550c0665::t_fd4e017046eaf7 79
+  s_98a259550c0665::t_f43ef88123afc9 55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "88d68949f9c1646fd652be78a840639b4ec8e46a",
+  "prompts": {},
+  "sessions": {
+    "s_98a259550c0665": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f671f-e536-7ecc-8fad-e740d54fa0bb",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "vaish <vaishnav@cloudflare.com>"
+    },
+    "s_d5aa128e6336c0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_1063fce36ffeUtfcePXDFn5kiw",
+        "model": "gpt-5.5"
+      },
+      "human_author": "vaish <vaishnav@cloudflare.com>"
+    }
+  }
+}

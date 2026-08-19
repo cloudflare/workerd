@@ -1,0 +1,19 @@
+src/workerd/server/log-schema.capnp
+  s_0dc09b26de0c9e::t_d846d1415ddf11 31-36,40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8e6eb20f7067c0a37900220cf18ee1e8338a2a30",
+  "prompts": {},
+  "sessions": {
+    "s_0dc09b26de0c9e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_feb7c3c16ffeoClbP35Udy8B2d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Pete Bacon Darwin <pbacondarwin@cloudflare.com>"
+    }
+  }
+}

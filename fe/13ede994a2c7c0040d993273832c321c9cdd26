@@ -1,0 +1,23 @@
+src/workerd/jsg/util.h
+  s_86e8800564c50e::t_38d22a0547239d 98-101
+src/workerd/io/worker-entrypoint.c++
+  s_86e8800564c50e::t_8858caf7407c61 569-573
+  s_86e8800564c50e::t_fea0362c6e95a5 574-575
+  s_86e8800564c50e::t_b6e1c45c19763b 726-732
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fe13ede994a2c7c0040d993273832c321c9cdd26",
+  "prompts": {},
+  "sessions": {
+    "s_86e8800564c50e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_02dc86e9dffe75Y7N5szoDEiNt",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    }
+  }
+}

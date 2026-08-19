@@ -1,0 +1,95 @@
+build/deps/gen/deps.MODULE.bazel
+  s_b5100e8818a1d4::t_31fc0d7f4f5242 30-31,33
+build/deps/deps.jsonc
+  s_b5100e8818a1d4::t_fb965561a9771c 39-41
+src/rust/cxx/kj-rs-io/async-io.h
+  s_ad98b07a2ebbe9::t_4b43cf28745bab 52-55,87-90,147-149,168-170,172,176
+src/rust/cxx/kj-rs-io/net.rs
+  s_ad98b07a2ebbe9::t_d52c93540a2876 57,61,124,136,155,402,406,442,447,453,457,461-462,468,472,476,480,507,528,560,598
+src/rust/cxx/kj-rs-io/peer-filter.c++
+  s_b5100e8818a1d4::t_cb79cc340c5903 76,162
+src/rust/cxx/kj-rs-tokio/tests/tokio-event-port-test.c++
+  s_ad98b07a2ebbe9::t_1736d2ff63998c 177,185,188-200,212,215,217,221-225,227,293-294
+src/rust/kj/tests/ffi-test.c++
+  s_ad98b07a2ebbe9::t_4568d8ea6b965a 51-52,55
+src/workerd/server/cli-io-backend.c++
+  s_b5100e8818a1d4::t_224cad6d9c9c2d 16-18,20
+src/rust/cxx/kj-rs-io/error.rs
+  s_0a3beda941d358::t_132e32e0ebdae4 12,17,26,34,39,120,122
+src/rust/cxx/kj-rs-io/ffi.rs
+  s_0a3beda941d358::t_5c3b2e127a8cfc 36-37,80-85,330,353,361,372,406,420,434,451,493,534,648,673,698,723,759,763,767-769,778-780,792-794,800-802
+src/rust/cxx/kj-rs-io/readiness.rs
+  s_0a3beda941d358::t_a38d563ed2f730 23
+src/rust/cxx/kj-rs-io/runtime.rs
+  s_0a3beda941d358::t_6bf9599da212fe 15,29,39
+src/rust/cxx/kj-rs-io/serve.rs
+  s_01e3820dc617e7::t_c2c28645a31f70 2-5,73-74,80-82,97,99-100,112,114-115,127,129-130,142,144-145,151,153-154,160,162-163,173,175-176,182,184-185,190-194,268-273,306,332-338
+src/rust/cxx/kj-rs-io/signal.rs
+  s_01e3820dc617e7::t_953a9db7a973d4 26
+src/rust/cxx/kj-rs-io/stream.rs
+  s_01e3820dc617e7::t_c09b2255a92aa7 22-25,41,49,368,372,380,388,392,396,400,404,408,412,448,465,482,523
+src/rust/cxx/kj-rs-io/tests/serve_helpers.rs
+  s_ad98b07a2ebbe9::t_e94d049357a0bf 67
+src/rust/cxx/kj-rs-tokio/ffi.rs
+  s_ad98b07a2ebbe9::t_92de6d05338c61 59,73,91,97,137,200
+src/rust/cxx/kj-rs-tokio/port.rs
+  s_ad98b07a2ebbe9::t_55659a1fda091f 159,229,233-234,300,341,567-572,588,590-591,594-595
+src/rust/cxx/kj-rs/ffi.rs
+  s_ad98b07a2ebbe9::t_9532fce07a7d56 22-25,71-76,98-108,114-121
+src/rust/cxx/kj-rs/future.rs
+  s_6aa69e7b17a914::t_0c28c08c886355 71,73
+src/rust/cxx/kj-rs/maybe.rs
+  s_6aa69e7b17a914::t_fa4020d51473d8 1-4
+src/rust/cxx/kj-rs/tests/lib.rs
+  s_6aa69e7b17a914::t_89400b1edab671 295,298
+src/workerd/util/setup-async-io-tokio.c++
+  s_ad98b07a2ebbe9::t_7c7839f57df344 40-42,44,49-90,93-101,134-137,145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ac4c4e3f79daac8c7508d0f72ff8a7f2dd3f3ff6",
+  "prompts": {},
+  "sessions": {
+    "s_01e3820dc617e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-af88e5de7f1732911",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_0a3beda941d358": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a8ff44d4513ea3191",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_6aa69e7b17a914": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a5e70feb3ba187ed2",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}
