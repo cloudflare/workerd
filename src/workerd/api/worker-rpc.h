@@ -96,6 +96,14 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
   void serializeProxy(
       jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Proxy> proxy) override;
 
+  // TypeScript-implemented ReadableStream/WritableStream instances (present when the
+  // typescript_implemented_streams compat flag is enabled) are plain JS class instances with
+  // no JSG wrapper, so the serializer cannot route them to the stream serialization functions
+  // the way it routes the legacy JSG-wrapped streams; instead they are recognized here by
+  // brand check and transferred through the same wire protocol.
+  bool trySerializeClassInstance(
+      jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Object> object) override;
+
  private:
   StubOwnership stubOwnership;
   rpc::JsValue::ExternalPusher::Client externalPusher;

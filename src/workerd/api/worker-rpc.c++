@@ -1984,6 +1984,26 @@ void RpcSerializerExternalHandler::serializeProxy(
   });
 }
 
+bool RpcSerializerExternalHandler::trySerializeClassInstance(
+    jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Object> object) {
+  // TypeScript-implemented streams are recognized by the implementation's private brand.
+  // tryUnwrapTs answers kj::none whenever the typescript_implemented_streams flag is off (the
+  // brand-check export does not exist then), so legacy isolates are unaffected. The serialized
+  // form is written with the same tag and wire protocol as the legacy JSG-wrapped streams, so
+  // the peer needs no knowledge of which implementation the sender runs.
+  KJ_IF_SOME(stream, JsReadableStream::tryUnwrapTs(js, object)) {
+    serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::READABLE_STREAM));
+    stream.serialize(js, serializer);
+    return true;
+  }
+  KJ_IF_SOME(stream, JsWritableStream::tryUnwrapTs(js, object)) {
+    serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::WRITABLE_STREAM));
+    stream.serialize(js, serializer);
+    return true;
+  }
+  return false;
+}
+
 // JsRpcTarget implementation specific to entrypoints. This is used to deliver the first, top-level
 // call of an RPC session.
 class EntrypointJsRpcTarget final: public JsRpcTargetBase {
