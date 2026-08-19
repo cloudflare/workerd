@@ -1715,6 +1715,61 @@ KJ_TEST("JsReadableStream detach of a closed TypeScript-backed stream yields a c
   KJ_EXPECT(ended);
 }
 
+// A ReadableStreamSource that reports a (pretend) pre-encoded gzip length in addition to
+// its identity length, mimicking system streams whose bytes are stored encoded and can be
+// passed through without a recompression round trip.
+class EncodedLengthSource final: public ReadableStreamSource {
+ public:
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return static_cast<size_t>(0);  // Immediate EOF; only the length reporting matters here.
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    if (encoding == StreamEncoding::IDENTITY) return kIdentityLength;
+    if (encoding == StreamEncoding::GZIP) return kGzipLength;
+    return kj::none;
+  }
+
+  static constexpr uint64_t kIdentityLength = 100;
+  static constexpr uint64_t kGzipLength = 42;
+};
+
+KJ_TEST("JsReadableStream tryGetLength forwards the encoding to a native TypeScript stream") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<EncodedLengthSource>());
+    KJ_EXPECT(KJ_ASSERT_NONNULL(stream.tryGetLength(js)) == EncodedLengthSource::kIdentityLength);
+    // Non-identity encodings are answered by the underlying source (legacy
+    // internal-controller parity): the pre-encoded gzip length, NOT the identity length.
+    KJ_EXPECT(KJ_ASSERT_NONNULL(stream.tryGetLength(js, StreamEncoding::GZIP)) ==
+        EncodedLengthSource::kGzipLength);
+  });
+}
+
+KJ_TEST("JsReadableStream tryGetLength answers none for encoded queries on non-native streams") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    // A queued byte stream declaring the (identity) expectedLength extension: the identity
+    // query reports it, but an encoded query must NOT (an identity byte count is never a
+    // valid encoded length).
+    auto underlying = js.obj();
+    underlying.set(js, "type"_kj, js.str("bytes"_kj));
+    underlying.set(js, "expectedLength"_kj, jsg::JsValue(js.num(11)));
+    auto queued = makeTsStream(js, jsg::JsValue(underlying));
+    KJ_EXPECT(KJ_ASSERT_NONNULL(queued.tryGetLength(js)) == 11);
+    KJ_EXPECT(queued.tryGetLength(js, StreamEncoding::GZIP) == kj::none);
+
+    // Buffer-backed streams sit on the in-memory source, which is identity-only.
+    JsReadableStream buffered(js, kj::str(kData));
+    KJ_EXPECT(KJ_ASSERT_NONNULL(buffered.tryGetLength(js)) == kData.size());
+    KJ_EXPECT(buffered.tryGetLength(js, StreamEncoding::GZIP) == kj::none);
+  });
+}
+
 KJ_TEST("JsReadableStream cancel of a locked TypeScript-backed stream rejects") {
   auto fixture = makeTsStreamsFixture();
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {

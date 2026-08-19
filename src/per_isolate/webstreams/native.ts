@@ -1192,6 +1192,14 @@ class NativePullConduit implements ByteStreamConsumerType {
     this.#byobRequestCache = null;
     return source;
   }
+
+  // Non-detaching source access for read-only queries from the C++ bridge
+  // (the encoding-aware tryGetLength arm). The conduit's own status is
+  // deliberately not consulted: the C++ source object answers from its own
+  // lifecycle (a completed or extracted source reports no length).
+  peekSource(): object {
+    return this.#source;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1345,6 +1353,12 @@ function nativeControllerExpectedLength(
   return getControllerConduit(controller).expectedLength;
 }
 
+function nativeControllerPeekSource(
+  controller: NativeReadableStreamController
+): object {
+  return getControllerConduit(controller).peekSource();
+}
+
 // Internal namespace, never re-exported to users (kNativeSource and
 // kExtractNativeSource excepted, TEMPORARILY, via streams.ts — see the
 // module header).
@@ -1364,6 +1378,7 @@ const nativeStreamInternals = {
   nativeControllerTeeSource,
   nativeControllerExtractSource,
   nativeControllerExpectedLength,
+  nativeControllerPeekSource,
 };
 
 // Type-only exports (fully erased at runtime — the loader sees only the

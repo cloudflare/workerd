@@ -374,6 +374,15 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // the exact-total accounting itself.
   jsg::Optional<jsg::JsBigInt> getExpectedLength(jsg::Lock& js);
 
+  // The number of bytes the source will produce in the given encoding, if known; kj::none
+  // otherwise (including once the source is done, canceled, or consumed). For IDENTITY this
+  // is getExpectedLength()'s value (source length plus stashed bytes); for other encodings
+  // it forwards to the underlying source, which can only answer while no identity bytes
+  // are stashed. C++-only (not part of the JSG surface): this is the encoding-aware
+  // tryGetLength arm of JsReadableStream, reached through the TypeScript side's
+  // non-detaching source accessor.
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
+
   JSG_RESOURCE_TYPE(ReadableStreamNativeSource) {
     JSG_PRIVATE_SYMBOL(kNativeSource);
     JSG_METHOD(pull);

@@ -722,7 +722,28 @@ kj::Maybe<uint64_t> JsReadableStream::tryGetLength(jsg::Lock& js, StreamEncoding
         return stream->tryGetLength(encoding);
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        return getReadableStreamExpectedLength(js, obj.getHandle(js));
+        auto handle = obj.getHandle(js);
+        if (encoding == StreamEncoding::IDENTITY) {
+          // The controller-level expected length is an identity byte count (declared by
+          // the source or the expectedLength extension), for both backends.
+          return getReadableStreamExpectedLength(js, handle);
+        }
+        // Non-identity encodings: only a native underlying source can answer (parity with
+        // the legacy internal controller, which forwards the encoding to its source).
+        // Queued streams answer kj::none -- their identity-byte expectedLength is never a
+        // valid encoded length. (The legacy JS controller ignores the encoding and reports
+        // its identity expectedLength anyway; that is a wire-protocol footgun -- a wrong
+        // Content-Length for an encoded body -- that this arm deliberately does not
+        // reproduce.)
+        auto sourceValue = webstreams::dispatchCall(js, "getReadableStreamNativeSource", handle);
+        if (sourceValue.isUndefined()) {
+          return kj::none;
+        }
+        auto& handler =
+            KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+        auto source = KJ_REQUIRE_NONNULL(handler.tryUnwrap(js, sourceValue),
+            "getReadableStreamNativeSource did not return a ReadableStreamNativeSource");
+        return source->tryGetLength(encoding);
       }
     }
     KJ_UNREACHABLE;
@@ -1390,16 +1411,35 @@ kj::Array<jsg::Ref<ReadableStreamNativeSource>> ReadableStreamNativeSource::tee(
 }
 
 jsg::Optional<jsg::JsBigInt> ReadableStreamNativeSource::getExpectedLength(jsg::Lock& js) {
-  KJ_IF_SOME(active, state) {
-    KJ_IF_SOME(length, active.source->tryGetLength(StreamEncoding::IDENTITY)) {
-      // Bytes retained in the stash (from an abandoned pull, or inherited from a tee
-      // parent) were already consumed from the underlying source but not yet delivered,
-      // so they count toward the total this source will produce. Getting this right
-      // matters for tee branches: the conduit reads expectedLength at construction and
-      // enforces it as an exact total.
-      return js.bigInt(length + stash.size());
-    }
+  KJ_IF_SOME(length, tryGetLength(StreamEncoding::IDENTITY)) {
+    return js.bigInt(length);
   }
+  return kj::none;
+}
+
+kj::Maybe<uint64_t> ReadableStreamNativeSource::tryGetLength(StreamEncoding encoding) {
+  KJ_IF_SOME(active, state) {
+    if (encoding == StreamEncoding::IDENTITY) {
+      KJ_IF_SOME(length, active.source->tryGetLength(StreamEncoding::IDENTITY)) {
+        // Bytes retained in the stash (from an abandoned pull, or inherited from a tee
+        // parent) were already consumed from the underlying source but not yet delivered,
+        // so they count toward the total this source will produce. Getting this right
+        // matters for tee branches: the conduit reads expectedLength at construction and
+        // enforces it as an exact total.
+        return length + stash.size();
+      }
+      return kj::none;
+    }
+    // Stashed bytes are identity bytes already drawn from the source: once any exist, an
+    // encoded length no longer describes what this source will deliver.
+    if (stash.size() > 0) {
+      return kj::none;
+    }
+    return active.source->tryGetLength(encoding);
+  }
+  // EOF'd, canceled, or consumed: nothing more will be produced, but distinguishing
+  // "closed, hence zero" from "unknown" is the stream layer's business, not the
+  // source's; report unknown.
   return kj::none;
 }
 

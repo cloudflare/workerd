@@ -122,6 +122,7 @@ const {
   nativeControllerTeeSource,
   nativeControllerExtractSource,
   nativeControllerExpectedLength,
+  nativeControllerPeekSource,
 } = nativeStreamInternals;
 
 // Normalizes the non-standard `expectedLength` extension property on
@@ -351,6 +352,12 @@ let getReadableStreamOnEof: <R>(stream: ReadableStream<R>) => Promise<void>;
 let getReadableStreamExpectedLength: <R>(
   stream: ReadableStream<R>
 ) => bigint | undefined;
+// Non-detaching access to a native-backed stream's underlying source object
+// for the C++ bridge's encoding-aware tryGetLength arm; undefined for
+// queued-backed streams. Assigned in ReadableStream's static block.
+let getReadableStreamNativeSource: <R>(
+  stream: ReadableStream<R>
+) => object | undefined;
 let getReadableStreamGetState: <R>(
   stream: ReadableStream<R>
 ) => 'readable' | 'closed' | 'errored';
@@ -2792,6 +2799,14 @@ class ReadableStream<R> {
       return getControllerExpectedLength(controller);
     };
 
+    getReadableStreamNativeSource = <R>(stream: ReadableStream<R>) => {
+      const controller = stream.#controller;
+      if (controller !== undefined && isNativeController(controller)) {
+        return nativeControllerPeekSource(controller);
+      }
+      return undefined;
+    };
+
     isReadableStreamLocked = <R>(stream: ReadableStream<R>) => {
       // The spec definition (a reader is attached) works unchanged for this
       // implementation: tee() keeps the parent locked permanently via a
@@ -4080,6 +4095,7 @@ const cppExports = ObjectFreeze({
   consumeReadableStreamAsUint8Array,
   detachReadableStream,
   getReadableStreamExpectedLength,
+  getReadableStreamNativeSource,
   getReadableStreamIsDisturbed,
   getReadableStreamOnEof,
   isReadableStream,
