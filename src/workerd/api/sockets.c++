@@ -874,8 +874,11 @@ jsg::Ref<Socket> Socket::deserialize(jsg::Lock& js,
         "hydrated socket slot did not hold a Socket");
   }
 
-  // Not hydrated (rpc-externals-hydration autogate off): construct in place. The explicit
-  // sequencing matters -- the externals must be consumed in Socket::serialize()'s order.
+  // Not hydrated: only reachable for legacy-streams isolates (the
+  // typescript_implemented_streams flag requires the hydration gate; see
+  // RpcDeserializerExternalHandler::prepare()), for which this in-place construction is
+  // scope-safe. The explicit sequencing matters -- the externals must be consumed in
+  // Socket::serialize()'s order.
   auto socketExternal = externalHandler->read();
   auto readableExternal = externalHandler->read();
   auto writableExternal = externalHandler->read();

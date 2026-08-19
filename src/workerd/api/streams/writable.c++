@@ -594,6 +594,10 @@ JsWritableStream WritableStream::deserialize(
     return kj::mv(prebuilt);
   }
 
+  // Not hydrated: only reachable for legacy-streams isolates (the
+  // typescript_implemented_streams flag requires the hydration gate; see
+  // RpcDeserializerExternalHandler::prepare()), so the in-place legacy construction -- which
+  // runs no JS -- is the only case here.
   auto reader = externalHandler->read();
   KJ_REQUIRE(reader.isWritableStream(), "external table slot type doesn't match serialization tag");
 

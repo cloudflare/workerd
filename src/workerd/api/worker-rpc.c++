@@ -72,7 +72,29 @@ rpc::JsValue::External::Reader RpcDeserializerExternalHandler::read() {
 }
 
 void RpcDeserializerExternalHandler::prepare(jsg::Lock& js, IoContext& ioctx) {
-  if (!util::Autogate::isEnabled(util::AutogateKey::RPC_EXTERNALS_HYDRATION)) return;
+  if (!util::Autogate::isEnabled(util::AutogateKey::RPC_EXTERNALS_HYDRATION)) {
+    // The TypeScript streams implementation cannot construct received streams during the
+    // graph read (JS execution is forbidden there), so the typescript_implemented_streams
+    // compat flag REQUIRES this autogate to receive streams. Reject only configurations
+    // that actually receive stream-bearing values: stream-free RPC (and the send side,
+    // which has no such scope) works without the gate.
+    if (FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+      for (auto external: externals) {
+        switch (external.which()) {
+          case rpc::JsValue::External::READABLE_STREAM:
+          case rpc::JsValue::External::WRITABLE_STREAM:
+          case rpc::JsValue::External::SOCKET:
+            JSG_FAIL_REQUIRE(Error,
+                "The typescript_implemented_streams compatibility flag requires the "
+                "workerd-autogate-rpc-externals-hydration autogate in order to receive "
+                "streams over RPC.");
+          default:
+            break;
+        }
+      }
+    }
+    return;
+  }
   KJ_ASSERT(!prepared, "prepare() may only be called once");
 
   slots.resize(externals.size());

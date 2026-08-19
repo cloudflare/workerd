@@ -113,7 +113,8 @@ namespace workerd::util {
      the only phase in which TypeScript-implemented streams (whose construction runs JS) can be    \
      built; the mechanism itself is implementation-agnostic and runs for legacy streams too. When  \
      disabled, deserialization constructs legacy streams in place, exactly as before the gate      \
-     existed. */                                                                                   \
+     existed; the typescript_implemented_streams compat flag requires this gate to receive         \
+     streams over RPC (that combination is rejected, not degraded). */                             \
   V(RPC_EXTERNALS_HYDRATION)
 // clang-format on
 // --------------------------------------------------------------------------------------

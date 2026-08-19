@@ -139,9 +139,12 @@ class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHa
   // reaches them.
   //
   // Must be called before the value is deserialized, at most once. Gated on the
-  // rpc-externals-hydration autogate: when the gate is off this is a no-op, the claims all
-  // return kj::none, and deserialization constructs legacy streams in place exactly as it did
-  // before the gate existed.
+  // rpc-externals-hydration autogate: when the gate is off, the claims all return kj::none
+  // and deserialization constructs legacy streams in place exactly as it did before the gate
+  // existed. The typescript_implemented_streams flag REQUIRES the gate (TypeScript stream
+  // construction cannot happen during the graph read), so with the gate off, stream-bearing
+  // values arriving at a TypeScript-streams isolate are rejected here with a configuration
+  // error rather than half-supported.
   void prepare(jsg::Lock& js, IoContext& ioctx);
 
   // Claim the prebuilt object for the next external, advancing past it (and, for sockets, past
