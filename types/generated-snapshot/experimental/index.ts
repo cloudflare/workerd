@@ -17138,6 +17138,20 @@ export type WorkflowDurationLabel =
 export type WorkflowSleepDuration =
   `${number} ${WorkflowDurationLabel}${"s" | ""}` | number;
 export type WorkflowRetentionDuration = WorkflowSleepDuration;
+/** Geographic regions supported when creating a Workflow instance.
+ * Location hints are best-effort placement preferences. */
+export type WorkflowInstanceLocationHint =
+  | "wnam"
+  | "enam"
+  | "sam"
+  | "weur"
+  | "eeur"
+  | "apac"
+  | "apac-ne"
+  | "apac-se"
+  | "oc"
+  | "afr"
+  | "me";
 export interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
    * An id for your Workflow instance. Must be unique within the Workflow.
@@ -17155,6 +17169,9 @@ export interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
     successRetention?: WorkflowRetentionDuration;
     errorRetention?: WorkflowRetentionDuration;
   };
+  /** A best-effort geographic placement preference for the Workflow instance.
+   * See `WorkflowInstanceLocationHint` for supported regions. */
+  locationHint?: WorkflowInstanceLocationHint;
 }
 export type InstanceStatus = {
   status:
