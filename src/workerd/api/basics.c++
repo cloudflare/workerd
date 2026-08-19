@@ -502,10 +502,28 @@ EventTarget::DispatchResult EventTarget::dispatchEventImpl(
   return DispatchResult{.result = result, .firstException = kj::mv(firstException)};
 }
 
+EventTarget::DispatchExceptionPolicy EventTarget::effectiveExceptionPolicy(
+    jsg::Lock& js, DispatchExceptionPolicy desired) {
+  if (desired == DispatchExceptionPolicy::REPORT) {
+    // Fall back to PROPAGATE when the compat flag is not set or when there is no active
+    // Worker context (e.g. in C++ unit tests that use the JSG test harness directly).
+    KJ_IF_SOME(flags, FeatureFlags::tryGet(js)) {
+      if (!flags.getSpecCompliantDispatchExceptions()) {
+        return DispatchExceptionPolicy::PROPAGATE;
+      }
+    } else {
+      return DispatchExceptionPolicy::PROPAGATE;
+    }
+  }
+  return desired;
+}
+
 bool EventTarget::dispatchEvent(jsg::Lock& js, jsg::Ref<Event> event) {
   // The JS-exposed dispatchEvent() is a spec surface: listener exceptions are reported and
   // do not interrupt the dispatch (nor propagate to the dispatchEvent() caller).
-  return dispatchEventImpl(js, kj::mv(event), DispatchExceptionPolicy::REPORT).result;
+  return dispatchEventImpl(
+      js, kj::mv(event), effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT))
+      .result;
 }
 
 // A wrapper for the AbortTrigger jsrpc client, that automatically sends a release() message once
@@ -1068,7 +1086,7 @@ void AbortSignal::runAbortSteps(jsg::Lock& js) {
   // Per spec, "signal abort" cannot throw: listener exceptions are reported, and the
   // remaining listeners (and, for a source signal, the dependents' abort steps) still run.
   dispatchEventImpl(js, js.alloc<Event>(kAbortEvent, Event::Init{}, Trusted::YES),
-      DispatchExceptionPolicy::REPORT);
+      effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT));
 }
 
 void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {

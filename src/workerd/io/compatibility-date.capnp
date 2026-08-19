@@ -1657,4 +1657,18 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental
       $pythonSnapshotRelease;
   # Enables Python Workers using Pyodide 314.0.5.
+
+  specCompliantDispatchExceptions @188 :Bool
+      $compatEnableFlag("spec_compliant_dispatch_exceptions")
+      $compatDisableFlag("no_spec_compliant_dispatch_exceptions")
+      $compatEnableDate("2026-09-01");
+  # Per the DOM spec, exceptions thrown by event listeners during dispatchEvent() should be
+  # reported (via the global 'error' event, then the console) but should not interrupt the
+  # dispatch or propagate to the dispatchEvent() caller. The original workerd implementation
+  # propagated the first listener exception and skipped remaining listeners for that event.
+  #
+  # When enabled, all event dispatch surfaces (the JS-visible dispatchEvent(), AbortSignal
+  # abort, and UA-fired events on WebSocket, EventSource, and MessagePort) use the spec's
+  # report-and-continue semantics. Internal runtime event delivery (fetch, scheduled, etc.)
+  # is not affected and always propagates.
 }
