@@ -311,6 +311,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::StringPtr addrStr);
 
   kj::Promise<void> listenDebugPort(kj::Own<kj::ConnectionReceiver> listener);
+  rpc::WorkerdDebugPort::Client makeWorkerdDebugPortClient();
 
   class InvalidConfigService;
   class InvalidConfigActorClass;
@@ -324,6 +325,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   class HttpListener;
   class TcpListener;
   class DebugPortListener;
+  class WorkerdDebugPortImpl;
 
   struct ErrorReporter;
   struct ConfigErrorReporter;

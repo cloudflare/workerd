@@ -7039,9 +7039,9 @@ KJ_TEST("Server: debug port RPC calls") {
   }
 }
 
-KJ_TEST("Server: workerdDebugPort binding loopback test") {
-  // This test verifies that a worker can use the workerdDebugPort binding to connect
-  // back to the same workerd instance's debug port and access other services.
+KJ_TEST("Server: workerdDebugPort binding current process test") {
+  // This test verifies that a worker can use the workerdDebugPort binding to access other services
+  // in the same process without opening a network connection.
   TestServer test(R"((
     services = [
       ( name = "target-service",
@@ -7073,8 +7073,7 @@ KJ_TEST("Server: workerdDebugPort binding loopback test") {
               esModule =
                 `export default {
                 `  async fetch(request, env, ctx) {
-                `    // Connect to the debug port
-                `    const client = await env.debugPort.connect("debug-addr");
+                 `    const client = env.debugPort.current();
                 `
                 `    // Test 1: Access the default entrypoint
                 `    const defaultFetcher = client.getEntrypoint("target-service");
@@ -7110,8 +7109,6 @@ KJ_TEST("Server: workerdDebugPort binding loopback test") {
     ]
   ))"_kj);
 
-  // Enable the debug port on a known address
-  test.server.enableDebugPort(kj::str("debug-addr"));
   test.server.allowExperimental();
 
   test.start();
