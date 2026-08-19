@@ -8,6 +8,12 @@
 namespace workerd::api::webstreams {
 
 jsg::JsFunction getCppExport(jsg::Lock& js, kj::StringPtr name) {
+  // Every bridge path that invokes the TypeScript implementation obtains its function here
+  // (including constructor invocations that don't go through dispatchCall), so this is the
+  // complete chokepoint for the no-JS-scope backstop: callers are about to execute JS, which
+  // is forbidden e.g. during RPC deserialization. See the fuller comment on dispatchCall().
+  KJ_ASSERT(!js.isJavascriptExecutionDisallowed(),
+      "attempted to call into the TypeScript streams implementation during a no-JS scope", name);
   auto cppExports = KJ_REQUIRE_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
   auto cppExportsObj = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_OBJECT(cppExports));
   return KJ_REQUIRE_NONNULL(JSG_TRY_CAST_FUNCTION(cppExportsObj.get(js, name)));

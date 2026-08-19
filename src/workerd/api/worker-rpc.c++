@@ -4,6 +4,7 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
+#include <workerd/api/sockets.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
 #include <workerd/io/stored-value.h>
@@ -84,6 +85,25 @@ void RpcDeserializerExternalHandler::prepare(jsg::Lock& js, IoContext& ioctx) {
       case rpc::JsValue::External::WRITABLE_STREAM:
         slots[index].value = hydrateRpcWritableStream(js, ioctx, external.getWritableStream());
         break;
+      case rpc::JsValue::External::SOCKET: {
+        // The socket transfer kill switch also gates hydration: with it off, the slots stay
+        // empty and Socket::deserialize() rejects the tag before attempting a claim.
+        if (!util::Autogate::isEnabled(util::AutogateKey::SOCKET_RPC_TRANSFER)) break;
+        KJ_REQUIRE(index + 2 < externals.size(),
+            "socket external is missing its stream externals, possible corruption");
+        auto socket =
+            hydrateRpcSocket(js, ioctx, external, externals[index + 1], externals[index + 2]);
+        auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<Socket>>());
+        slots[index].value = jsg::JsRef(js,
+            KJ_ASSERT_NONNULL(
+                jsg::JsValue(handler.wrap(js, kj::mv(socket))).tryCast<jsg::JsObject>()));
+        // The socket subsumed its two adjacent stream externals: record the span for the
+        // claim's index advance and skip them here so they are not hydrated again (the ++
+        // covers the second one).
+        slots[index].span = 3;
+        index += 2;
+        break;
+      }
       default:
         // Every other external type deserializes without executing JavaScript, directly under
         // the graph read; no hydration needed.
