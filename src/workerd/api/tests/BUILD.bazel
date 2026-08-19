@@ -611,6 +611,13 @@ wd_test(
 )
 
 wd_test(
+    src = "js-rpc-streams-ts-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-test.js"],
+    tags = ["resources:socket:1"],
+)
+
+wd_test(
     src = "js-rpc-params-ownership-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-params-ownership-test.js"],

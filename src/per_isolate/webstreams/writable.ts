@@ -152,6 +152,15 @@ let getWritableStreamController: <W>(
 // Boolean brand check for the C++ bridge (jsgTryUnwrap). The assertion form
 // (assertIsWritableStream) throws; this one answers.
 let isWritableStream: (value: unknown) => boolean;
+
+// C++-recognition brand (JsWritableStream::tryUnwrapTs): an own,
+// non-enumerable marker stamped on every instance by the constructor, so
+// the C++ bridge can recognize TypeScript streams via an own-property
+// probe, without executing JavaScript. That constraint is load-bearing:
+// unwrap runs during RPC deserialization, inside V8's no-JS-execution
+// scope. Proxies deliberately do not convey it (the C++ check rejects
+// proxies up front), matching the #-brand's no-tunneling behavior.
+const kWritableStreamBrand: symbol = utils.getApiSymbol('kWritableStreamBrand');
 let setWritableStreamPendingClosure: <W>(stream: WritableStream<W>) => void;
 let isWritableStreamPendingClosure: <W>(stream: WritableStream<W>) => boolean;
 // Permanently neutralizes a stream on behalf of the C++ bridge (e.g. a
@@ -634,6 +643,13 @@ class WritableStream<W = unknown> {
     underlyingSink: UnderlyingSink<W> = {},
     strategy: QueuingStrategy<W> = {}
   ) {
+    // The C++-recognition brand (see kWritableStreamBrand). Stamped first
+    // so every instance carries it regardless of construction path.
+    ObjectDefineProperty(this, kWritableStreamBrand, {
+      __proto__: null,
+      value: true,
+    } as PropertyDescriptor);
+
     // --- WebIDL strategy dictionary conversion (BEFORE sink reads) ---
     // Per WebIDL, dictionary-typed arguments are converted at the IDL
     // layer before the constructor body runs. strategy is QueuingStrategy

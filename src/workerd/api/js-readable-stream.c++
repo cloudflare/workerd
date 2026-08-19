@@ -34,10 +34,17 @@ bool getReadableStreamIsDisturbed(jsg::Lock& js, jsg::JsObject obj) {
 
 // The TypeScript implementation's private-brand check. True only for genuine
 // TypeScript-implemented ReadableStream instances (including subclasses); false for
-// everything else, including proxies wrapping a stream (private fields do not tunnel
-// through proxies, deliberately matching the TS-side behavior).
+// everything else, including proxies wrapping a stream: an own-property probe on a proxy
+// would invoke its traps, and private fields do not tunnel through proxies either, so
+// rejecting proxies up front matches the TS-side #-brand behavior. Runs no JavaScript --
+// recognition must work during RPC deserialization, inside V8's no-JS-execution scope -- so
+// it probes for the own api-symbol brand stamped by the TypeScript constructor rather than
+// asking the TS implementation.
 bool isTypeScriptReadableStream(jsg::Lock& js, jsg::JsObject obj) {
-  return webstreams::dispatchCall(js, "isReadableStream", obj).isTrue();
+  if (v8::Local<v8::Value>(obj)->IsProxy()) {
+    return false;
+  }
+  return obj.has(js, js.symbolInternal("kReadableStreamBrand"), jsg::JsObject::HasOption::OWN);
 }
 
 bool getReadableStreamIsLocked(jsg::Lock& js, jsg::JsObject obj) {
@@ -579,12 +586,6 @@ kj::Maybe<JsReadableStream> JsReadableStream::tryUnwrapTs(
     return kj::none;
   }
   KJ_IF_SOME(obj, JSG_TRY_CAST_OBJECT(jsg::JsValue(handle))) {
-    // PERF NOTE: this is a JS call per unwrap attempt on any object-typed value. Since
-    // JsReadableStream is typically the first alternative in consumer OneOfs (e.g.
-    // Body::Initializer), object bodies that are NOT streams (ArrayBuffer, Blob, FormData,
-    // ...) pay it before falling through. If this shows up in profiles, the alternative is
-    // an own api-symbol marker stamped by the conduit constructor (same machinery as
-    // kNativeSource) -- see the design doc's unwrap decision entry.
     if (isTypeScriptReadableStream(js, obj)) {
       return JsReadableStream(js, obj.addRef(js));
     }
@@ -634,6 +635,17 @@ bool JsReadableStream::isDisturbed(jsg::Lock& js) {
         return cachedIsDisturbed = stream->isDisturbed();
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+        if (js.isJavascriptExecutionDisallowed()) {
+          // Asking the TypeScript side would execute JS, which is forbidden here. The only
+          // no-JS scope in which TypeScript-backed streams are reachable is RPC
+          // deserialization (V8 forbids JS for the whole value-graph read; the legacy
+          // queue's drain scope never touches TS-backed streams), and every TS stream
+          // reachable there is hydration-fresh: it was just constructed by
+          // RpcDeserializerExternalHandler::prepare(), user code has never had it, and no
+          // transition mechanism exists inside the scope. Fresh streams are undisturbed by
+          // construction.
+          return false;
+        }
         return cachedIsDisturbed = getReadableStreamIsDisturbed(js, obj.getHandle(js));
       }
     }
@@ -649,6 +661,11 @@ bool JsReadableStream::isLocked(jsg::Lock& js) {
         return stream->isLocked();
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+        if (js.isJavascriptExecutionDisallowed()) {
+          // Hydration-fresh by the same reasoning as isDisturbed() above; fresh streams are
+          // unlocked by construction.
+          return false;
+        }
         return getReadableStreamIsLocked(js, obj.getHandle(js));
       }
     }

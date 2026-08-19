@@ -17,12 +17,18 @@ namespace workerd::api {
 
 namespace {
 
-// The TypeScript implementation's private-brand check. True only for genuine
-// TypeScript-implemented WritableStream instances (including subclasses); false for
-// everything else, including proxies wrapping a stream (private fields do not tunnel
-// through proxies, deliberately matching the TS-side behavior).
+// True only for genuine TypeScript-implemented WritableStream instances (including
+// subclasses); false for everything else, including proxies wrapping a stream: an
+// own-property probe on a proxy would invoke its traps, and private fields do not tunnel
+// through proxies either, so rejecting proxies up front matches the TS-side #-brand
+// behavior. Runs no JavaScript -- recognition must work during RPC deserialization, inside
+// V8's no-JS-execution scope -- so it probes for the own api-symbol brand stamped by the
+// TypeScript constructor rather than asking the TS implementation.
 bool isTypeScriptWritableStream(jsg::Lock& js, jsg::JsObject obj) {
-  return webstreams::dispatchCall(js, "isWritableStream", obj).isTrue();
+  if (v8::Local<v8::Value>(obj)->IsProxy()) {
+    return false;
+  }
+  return obj.has(js, js.symbolInternal("kWritableStreamBrand"), jsg::JsObject::HasOption::OWN);
 }
 
 bool getWritableStreamIsLocked(jsg::Lock& js, jsg::JsObject obj) {
@@ -324,6 +330,12 @@ bool JsWritableStream::isLocked(jsg::Lock& js) {
         return stream->isLocked();
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+        if (js.isJavascriptExecutionDisallowed()) {
+          // Asking the TypeScript side would execute JS, which is forbidden here. TS-backed
+          // streams reachable in a no-JS scope are hydration-fresh (see the fuller reasoning
+          // at JsReadableStream::isDisturbed()); fresh streams are unlocked by construction.
+          return false;
+        }
         return getWritableStreamIsLocked(js, obj.getHandle(js));
       }
     }
@@ -557,10 +569,6 @@ kj::Maybe<JsWritableStream> JsWritableStream::tryUnwrapTs(
     return kj::none;
   }
   KJ_IF_SOME(obj, JSG_TRY_CAST_OBJECT(jsg::JsValue(handle))) {
-    // PERF NOTE: this is a JS call per unwrap attempt on any object-typed value (same
-    // caveat as JsReadableStream::tryUnwrapTs; see the alternative sketched there). Today
-    // the only unwrap consumer is JsReadableWritablePair's dictionary tier, so the cost is
-    // confined to pair-shaped inputs.
     if (isTypeScriptWritableStream(js, obj)) {
       return JsWritableStream(js, obj.addRef(js));
     }
