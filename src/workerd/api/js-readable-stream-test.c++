@@ -2050,6 +2050,96 @@ KJ_TEST("JsReadableStream setPendingClosure gates pipeTo but not cancel") {
   });
 }
 
+KJ_TEST("JsReadableStream consumption helpers drain TypeScript-backed streams") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // One TypeScript-backed (buffer-backed) stream per helper; text() is covered by the
+    // buffer-backed tests above.
+    JsReadableStream forArrayBuffer(js, kj::str(kData));
+    JsReadableStream forBytes(js, kj::str(kData));
+    JsReadableStream forJson(js, kj::str("{\"hello\":\"world\"}"));
+    JsReadableStream forBlob(js, kj::str(kData));
+
+    auto promise =
+        forArrayBuffer.arrayBuffer(js, kLimit)
+            .then(js,
+                JSG_VISITABLE_LAMBDA((forBytes = kj::mv(forBytes)), (forBytes),
+                    (jsg::Lock & js, jsg::JsRef<jsg::JsArrayBuffer> buffer) mutable {
+                      KJ_EXPECT(buffer.getHandle(js).asArrayPtr() == kData.asBytes());
+                      return forBytes.bytes(js, kLimit);
+                    }))
+            .then(js,
+                JSG_VISITABLE_LAMBDA((forJson = kj::mv(forJson)), (forJson),
+                    (jsg::Lock & js, jsg::JsRef<jsg::JsUint8Array> bytes) mutable {
+                      KJ_EXPECT(bytes.getHandle(js).size() == kData.size());
+                      return forJson.json(js, kLimit);
+                    }))
+            .then(js,
+                JSG_VISITABLE_LAMBDA((forBlob = kj::mv(forBlob)), (forBlob),
+                    (jsg::Lock & js, jsg::JsRef<jsg::JsValue> value) mutable {
+                      auto obj = KJ_ASSERT_NONNULL(value.getHandle(js).tryCast<jsg::JsObject>());
+                      KJ_EXPECT(js.toString(obj.get(js, "hello"_kj)) == "world"_kj);
+                      return forBlob.blob(js, kLimit, kj::str("text/plain"));
+                    }))
+            .then(js, [](jsg::Lock& js, jsg::Ref<Blob> blob) {
+      KJ_EXPECT(blob->getSize() == kData.size());
+      KJ_EXPECT(blob->getType() == "text/plain"_kj);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream addRef shares a TypeScript-backed stream") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    auto ref = stream.addRef(js);
+    KJ_EXPECT(!ref.isDisturbed(js));
+
+    // Consuming through the addRef disturbs the original: both wrap the same stream.
+    auto promise = ref.text(js, kLimit).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock& js, kj::String text) {
+      KJ_EXPECT(text == kData);
+      KJ_EXPECT(stream.isDisturbed(js));
+    }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream pipeThrough pipes TypeScript-backed endpoints") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // A hand-assembled transform pair (independent TS endpoints): pipeThrough must lock
+    // and pump this stream into the pair's writable and hand back the pair's readable.
+    auto source = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    auto pairReadable =
+        JsReadableStream::create(js, env.context, kj::heap<ContentSource>("pair"_kj));
+    auto pairWritable = JsWritableStream::create(
+        js, env.context, kj::heap<CollectingSink>(collected, ended), kj::none);
+
+    auto result = source.pipeThrough(js,
+        JsReadableWritablePair{
+          .readable = kj::mv(pairReadable),
+          .writable = kj::mv(pairWritable),
+        });
+    // The returned stream is the pair's readable, usable immediately.
+    auto promise = result.text(js, kLimit).then(js, [](jsg::Lock& js, kj::String text) {
+      KJ_EXPECT(text == "pair"_kj);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  // The pipe (marked handled by pipeThrough) pumped this stream into the pair's writable.
+  KJ_EXPECT(collected.asPtr() == kData.asBytes());
+  KJ_EXPECT(ended);
+}
+
 KJ_TEST("JsReadableStream detach of a tee branch carries the composite cancel hook") {
   auto fixture = makeTsStreamsFixture();
   bool sourceCanceled = false;

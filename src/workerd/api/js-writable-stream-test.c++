@@ -1373,6 +1373,205 @@ KJ_TEST("JsReadableStream pipeTo into an errored destination rejects with the st
   KJ_EXPECT(!state.ended);
 }
 
+KJ_TEST("WritableStreamNativeSink abort during an in-flight write defers the release") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> written;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> gate;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // Drive the sink hooks directly: the TS machinery serializes write/abort, so the
+    // overlap is only reachable at the hook level (the pendingAbort path is defensive).
+    auto sink = js.alloc<WritableStreamNativeSink>(
+        env.context, kj::heap<GatedSink>(written, gate), kj::none, kj::none);
+
+    // The sink's write() is invoked synchronously inside the hook, so the gate is armed
+    // before the hook returns; the I/O is parked on it.
+    auto writePromise = sink->write(js, jsg::JsValue(jsg::JsUint8Array::create(js, "hi"_kjb)));
+    KJ_EXPECT(gate != kj::none);
+
+    // Abort with the write in flight: the release is deferred to the write's settlement.
+    auto abortPromise = sink->abort(js, jsg::JsValue(js.str("stop"_kj)));
+    KJ_ASSERT_NONNULL(gate)->fulfill();
+    gate = kj::none;
+
+    auto promise =
+        writePromise
+            .then(js, [abortPromise = kj::mv(abortPromise)](jsg::Lock& js) mutable {
+      return kj::mv(abortPromise);
+    }).then(js, JSG_VISITABLE_LAMBDA((sink = kj::mv(sink), &gate), (sink), (jsg::Lock & js) mutable {
+              // The deferred release completed at the write's settlement: a subsequent write
+              // resolves as a tolerated no-op without reaching the (released) sink.
+              return sink->write(js, jsg::JsValue(jsg::JsUint8Array::create(js, "xx"_kjb)))
+                  .then(js, [&gate](jsg::Lock& js) { KJ_EXPECT(gate == kj::none); });
+            }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(written.asPtr() == "hi"_kjb);
+}
+
+KJ_TEST("WritableStreamNativeSink write accepts SharedArrayBuffer chunks") {
+  auto fixture = makeTsStreamsFixture();
+  SinkState state;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto sink =
+        js.alloc<WritableStreamNativeSink>(env.context, state.makeSink(), kj::none, kj::none);
+    auto sab = v8::SharedArrayBuffer::New(js.v8Isolate, 2);
+    auto backing = static_cast<kj::byte*>(sab->Data());
+    backing[0] = 'h';
+    backing[1] = 'i';
+    auto promise = sink->write(js, jsg::JsValue(sab));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(state.written.asPtr() == "hi"_kjb);
+}
+
+KJ_TEST("JsWritableStream create with a highWaterMark applies byte-based sizing") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> written;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> gate;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // highWaterMark 8 with the byte-based strategy: a queued 6-byte chunk leaves
+    // desiredSize == 2. (The spec-default count-based strategy would report 7.)
+    auto stream = JsWritableStream::create(
+        js, env.context, kj::heap<GatedSink>(written, gate), kj::none, uint64_t(8));
+    auto handle = KJ_ASSERT_NONNULL(stream.tryGetTs(js));
+    auto writer = KJ_ASSERT_NONNULL(
+        webstreams::invokeMethod(js, handle, "getWriter"_kj).tryCast<jsg::JsObject>());
+    auto writeResult KJ_UNUSED = webstreams::invokeMethod(
+        js, writer, "write"_kj, jsg::JsValue(jsg::JsUint8Array::create(js, "sixsix"_kjb)));
+    // The chunk is queued (dispatch to the sink waits for the start algorithm's
+    // microtask), so the byte-based accounting is observable immediately.
+    KJ_EXPECT(js.toString(writer.get(js, "desiredSize"_kj)) == "2"_kj);
+
+    // Let the dispatch reach the (gated) sink, then release its I/O so teardown is clean.
+    auto promise = env.context.awaitIo(js, settleTurns(5)).then(js, [&gate](jsg::Lock& js) {
+      KJ_ASSERT_NONNULL(gate)->fulfill();
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(written.asPtr() == "sixsix"_kjb);
+}
+
+KJ_TEST("JsReadableStream pipeTo native+native aborts mid-pump when the signal fires") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> written;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> gate;
+  bool cancelled = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // The destination's first write parks on the gate, holding the pump mid-flight; the
+    // signal then fires, destroying the pump at its suspension point and running the
+    // option-gated shutdown (source cancel + sink abort).
+    auto source = JsReadableStream::create(
+        js, env.context, kj::heap<CancelRecordingSource>(kData, cancelled));
+    auto destination =
+        JsWritableStream::create(js, env.context, kj::heap<GatedSink>(written, gate), kj::none);
+    auto abortController = AbortController::constructor(js);
+
+    auto pipePromise =
+        source.pipeTo(js, destination, PipeToOptions{.signal = abortController->getSignal()});
+
+    auto promise = env.context.awaitIo(js, settleTurns(10))
+                       .then(js,
+                           JSG_VISITABLE_LAMBDA((abortController = kj::mv(abortController)),
+                               (abortController),
+                               (jsg::Lock & js) mutable {
+                                 // The pump is parked on the gated write now; fire the signal.
+                                 abortController->abort(js, kj::none);
+                               }))
+                       .then(js, [pipePromise = kj::mv(pipePromise)](jsg::Lock& js) mutable {
+      return kj::mv(pipePromise);
+    }).then(js, [](jsg::Lock& js) -> void {
+      KJ_FAIL_REQUIRE("expected pipeTo() to reject when the signal fires mid-pump");
+    }, [](jsg::Lock& js, jsg::Value exception) -> void {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("abort"), e.getDescription());
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  // The shutdown canceled the source (preventCancel was not set).
+  KJ_EXPECT(cancelled);
+  KJ_EXPECT(written.asPtr() == kData.asBytes());
+}
+
+// A stand-in for the JSG type wrapper accepted by JsReadableWritablePair::jsgTryUnwrap:
+// tier 1 (the C++ TransformStream brand) always misses, and the member unwraps delegate
+// to the abstractions' TypeScript brand checks -- mirroring the real wrapper's
+// fallthrough for TypeScript-implemented streams, which have no JSG wrapper.
+struct TsOnlyPairWrapper {
+  kj::Maybe<jsg::Ref<TransformStream>> tryUnwrap(jsg::Lock&,
+      v8::Local<v8::Context>,
+      v8::Local<v8::Value>,
+      jsg::Ref<TransformStream>*,
+      kj::Maybe<v8::Local<v8::Object>>) {
+    return kj::none;
+  }
+  kj::Maybe<JsReadableStream> tryUnwrap(jsg::Lock& js,
+      v8::Local<v8::Context>,
+      v8::Local<v8::Value> handle,
+      JsReadableStream*,
+      kj::Maybe<v8::Local<v8::Object>>) {
+    return JsReadableStream::tryUnwrapTs(js, handle);
+  }
+  kj::Maybe<JsWritableStream> tryUnwrap(jsg::Lock& js,
+      v8::Local<v8::Context>,
+      v8::Local<v8::Value> handle,
+      JsWritableStream*,
+      kj::Maybe<v8::Local<v8::Object>>) {
+    return JsWritableStream::tryUnwrapTs(js, handle);
+  }
+};
+
+KJ_TEST("JsReadableWritablePair unwraps a dictionary-shaped pair of TypeScript streams") {
+  auto fixture = makeTsStreamsFixture();
+  SinkState state;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    // A TS readable (queued, constructed through the bootstrap export so we hold its
+    // handle) and a TS writable (via create + tryGetTs).
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    auto constructor =
+        KJ_ASSERT_NONNULL(exportsObj.get(js, "ReadableStream"_kj).tryCast<jsg::JsFunction>());
+    auto readableObj = constructor.newInstance(js, jsg::JsValue(js.obj()));
+    auto writable = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
+    auto writableObj = KJ_ASSERT_NONNULL(writable.tryGetTs(js));
+
+    auto pairObj = js.obj();
+    pairObj.set(js, "readable"_kj, jsg::JsValue(readableObj));
+    pairObj.set(js, "writable"_kj, jsg::JsValue(writableObj));
+
+    // Tier 2 (dictionary-shaped fallback) adopts both TS members.
+    TsOnlyPairWrapper wrapper;
+    auto pair = KJ_ASSERT_NONNULL(JsReadableWritablePair::jsgTryUnwrap(
+        wrapper, js, js.v8Context(), jsg::JsValue(pairObj), kj::none));
+    KJ_EXPECT(!pair.readable.isNull());
+    KJ_EXPECT(!pair.writable.isNull());
+    // The unwrap ADOPTS (does not copy): state through the pair is the same stream.
+    KJ_EXPECT(!pair.writable.isLocked(js));
+    auto writer KJ_UNUSED = webstreams::invokeMethod(js, writableObj, "getWriter"_kj);
+    KJ_EXPECT(pair.writable.isLocked(js));
+
+    // Either member failing fails the whole unwrap: a pair whose writable is a plain
+    // object does not unwrap...
+    auto badPair = js.obj();
+    badPair.set(js, "readable"_kj, jsg::JsValue(readableObj));
+    badPair.set(js, "writable"_kj, jsg::JsValue(js.obj()));
+    KJ_EXPECT(JsReadableWritablePair::jsgTryUnwrap(
+                  wrapper, js, js.v8Context(), jsg::JsValue(badPair), kj::none) == kj::none);
+    // ...and a non-object never unwraps.
+    KJ_EXPECT(JsReadableWritablePair::jsgTryUnwrap(
+                  wrapper, js, js.v8Context(), js.str("pair"_kj), kj::none) == kj::none);
+  });
+}
+
 KJ_TEST("JsReadableStream pipeTo native+native with a pre-aborted signal shuts both ends down") {
   auto fixture = makeTsStreamsFixture();
   SinkState state;
