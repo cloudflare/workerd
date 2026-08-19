@@ -349,6 +349,12 @@ class EventTarget: public jsg::Object {
     kj::Maybe<jsg::JsRef<jsg::JsValue>> firstException;
   };
 
+  // Returns REPORT if the caller requested REPORT and the spec_compliant_dispatch_exceptions
+  // compat flag is enabled; falls back to PROPAGATE otherwise. PROPAGATE requests are
+  // returned as-is.
+  static DispatchExceptionPolicy effectiveExceptionPolicy(
+      jsg::Lock& js, DispatchExceptionPolicy desired);
+
   DispatchResult dispatchEventImpl(jsg::Lock& js,
       jsg::Ref<Event> event,
       DispatchExceptionPolicy exceptionPolicy = DispatchExceptionPolicy::PROPAGATE);

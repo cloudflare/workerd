@@ -3,6 +3,7 @@
 #include "blob.h"
 #include "events.h"
 
+#include <workerd/io/features.h>
 #include <workerd/jsg/ser.h>
 
 namespace workerd::api {
@@ -36,9 +37,9 @@ void MessagePort::listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t
 }
 
 void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
+  auto policy = effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT);
   auto result = dispatchEventImpl(js,
-      js.alloc<MessageEvent>(js, value, kj::String(), JSG_THIS, kj::none, Trusted::YES),
-      DispatchExceptionPolicy::REPORT);
+      js.alloc<MessageEvent>(js, value, kj::String(), JSG_THIS, kj::none, Trusted::YES), policy);
   KJ_IF_SOME(exception, result.firstException) {
     // A 'message' listener threw. Its exception was reported (and the remaining 'message'
     // listeners still ran); additionally surface it as a 'messageerror' event on this port,
@@ -47,7 +48,7 @@ void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
     dispatchEventImpl(js,
         js.alloc<MessageEvent>(js, kj::str("messageerror"), exception.addRef(js), kj::String(),
             JSG_THIS, kj::none, Trusted::YES),
-        DispatchExceptionPolicy::REPORT);
+        policy);
   }
 }
 

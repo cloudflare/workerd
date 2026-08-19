@@ -32,10 +32,12 @@ namespace {
 // Dispatches a UA-fired WebSocket event with spec semantics (listener exceptions are
 // reported and the remaining listeners still run), then rethrows the first listener
 // exception, if any, so the caller's fail-fast error path engages and errors out the
-// WebSocket.
+// WebSocket. When the compat flag is not set, falls back to PROPAGATE (the old behavior,
+// where the first throwing listener ends the dispatch and the exception propagates directly).
 void dispatchWithFailFast(jsg::Lock& js, WebSocket& shell, jsg::Ref<Event> event) {
-  auto result =
-      shell.dispatchEventImpl(js, kj::mv(event), EventTarget::DispatchExceptionPolicy::REPORT);
+  auto policy =
+      EventTarget::effectiveExceptionPolicy(js, EventTarget::DispatchExceptionPolicy::REPORT);
+  auto result = shell.dispatchEventImpl(js, kj::mv(event), policy);
   KJ_IF_SOME(exception, result.firstException) {
     js.throwException(exception.getHandle(js));
   }
@@ -1462,7 +1464,7 @@ void LegacyWebSocketAdapter::reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue>
     shell.dispatchEventImpl(js,
         js.alloc<ErrorEvent>(
             ErrorEvent::ErrorEventInit{.message = kj::mv(msg), .error = kj::mv(err)}),
-        EventTarget::DispatchExceptionPolicy::REPORT);
+        EventTarget::effectiveExceptionPolicy(js, EventTarget::DispatchExceptionPolicy::REPORT));
 
     // After an error we don't allow further send()s. If the receive loop has also ended then we
     // can destroy the connection. Note that we don't set closedOutgoing = true because that flag

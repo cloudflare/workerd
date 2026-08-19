@@ -1167,7 +1167,9 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
     .lineno = jsg::check(message->GetLineNumber(js.v8Context())),
     .colno = jsg::check(message->GetStartColumn(js.v8Context())),
     .error = jsg::JsRef(js, error)});
-  if (dispatchEventImpl(js, kj::mv(event), DispatchExceptionPolicy::REPORT).result) {
+  if (dispatchEventImpl(
+          js, kj::mv(event), effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT))
+          .result) {
     logError(error);
   }
 }

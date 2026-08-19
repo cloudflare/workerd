@@ -292,7 +292,8 @@ void EventSource::notifyError(
   // Dispatch the error event. Report-only: the EventSource is already errored out at this
   // point, so a throwing 'error' listener has its exception reported but triggers no
   // further fail-fast reaction.
-  dispatchEventImpl(js, js.alloc<ErrorEvent>(js, error), DispatchExceptionPolicy::REPORT);
+  dispatchEventImpl(js, js.alloc<ErrorEvent>(js, error),
+      effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT));
 
   if (alreadyReported == AlreadyReported::NO) {
     // Log the error as an uncaught exception for debugging purposes.
@@ -303,7 +304,8 @@ void EventSource::notifyError(
 void EventSource::notifyOpen(jsg::Lock& js) {
   if (readyState == State::CLOSED) return;
   readyState = State::OPEN;
-  auto result = dispatchEventImpl(js, js.alloc<OpenEvent>(), DispatchExceptionPolicy::REPORT);
+  auto result = dispatchEventImpl(
+      js, js.alloc<OpenEvent>(), effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT));
   KJ_IF_SOME(exception, result.firstException) {
     // An 'open' listener threw. Its exception was reported (and the remaining listeners
     // still ran); fail fast by erroring out the EventSource.
@@ -321,7 +323,7 @@ void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messag
         js.alloc<MessageEvent>(js, kj::mv(type), js.str(data), kj::mv(message.id),
             kj::none /** source **/, impl.map([](FetchImpl& i) -> jsg::Url& { return i.url; }),
             Trusted::YES),
-        DispatchExceptionPolicy::REPORT);
+        effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT));
     KJ_IF_SOME(exception, result.firstException) {
       // A listener threw. Its exception was reported (and the remaining listeners for this
       // event still ran); fail fast: error out the EventSource and drop the remaining
