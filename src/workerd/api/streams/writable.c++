@@ -4,6 +4,7 @@
 
 #include "writable.h"
 
+#include <workerd/api/js-writable-stream.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
@@ -560,7 +561,7 @@ void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   }
 }
 
-jsg::Ref<WritableStream> WritableStream::deserialize(
+JsWritableStream WritableStream::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
   auto& handler = KJ_REQUIRE_NONNULL(
       deserializer.getExternalHandler(), "got WritableStream on non-RPC serialized object?");
@@ -581,8 +582,10 @@ jsg::Ref<WritableStream> WritableStream::deserialize(
   auto stream = ioctx.getByteStreamFactory().capnpToKjExplicitEnd(ws.getByteStream());
   auto sink = newSystemStream(kj::mv(stream), encoding, ioctx);
 
-  return js.alloc<WritableStream>(
-      ioctx, kj::mv(sink), ioctx.getMetrics().tryCreateWritableByteStreamObserver());
+  // JsWritableStream::create() dispatches on the typescript_implemented_streams compat flag,
+  // so the received stream is backed by whichever implementation this isolate runs.
+  return JsWritableStream::create(
+      js, ioctx, kj::mv(sink), ioctx.getMetrics().tryCreateWritableByteStreamObserver());
 }
 
 void WritableStreamDefaultWriter::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

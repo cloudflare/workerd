@@ -15,6 +15,8 @@ class ExplicitEndOutputStream;
 
 namespace workerd::api {
 
+class JsWritableStream;
+
 class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamController::Writer {
  public:
   explicit WritableStreamDefaultWriter();
@@ -203,7 +205,13 @@ class WritableStream: public jsg::Object, public kj::PtrTarget {
   }
 
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
-  static jsg::Ref<WritableStream> deserialize(
+
+  // Deserializes to a JsWritableStream (rather than a jsg::Ref<WritableStream>) so that the
+  // received stream is backed by whichever stream implementation this isolate runs: under the
+  // typescript_implemented_streams compat flag the result wraps a TypeScript-implemented
+  // stream (and is an instance of the global WritableStream class), otherwise a legacy
+  // stream exactly as before. Wire-compatible with peers running either implementation.
+  static JsWritableStream deserialize(
       jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
 
   JSG_SERIALIZABLE(rpc::SerializationTag::WRITABLE_STREAM);

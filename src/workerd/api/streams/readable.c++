@@ -7,6 +7,7 @@
 #include "internal.h"
 #include "writable.h"
 
+#include <workerd/api/js-readable-stream.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
@@ -763,7 +764,7 @@ void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   }));
 }
 
-jsg::Ref<ReadableStream> ReadableStream::deserialize(
+JsReadableStream ReadableStream::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
   auto& handler = KJ_REQUIRE_NONNULL(
       deserializer.getExternalHandler(), "got ReadableStream on non-RPC serialized object?");
@@ -784,7 +785,9 @@ jsg::Ref<ReadableStream> ReadableStream::deserialize(
 
   kj::Own<kj::AsyncInputStream> in = ioctx.getExternalPusher()->unwrapStream(rs.getStream());
 
-  return js.alloc<ReadableStream>(ioctx,
+  // JsReadableStream::create() dispatches on the typescript_implemented_streams compat flag,
+  // so the received stream is backed by whichever implementation this isolate runs.
+  return JsReadableStream::create(js, ioctx,
       kj::heap<NoDeferredProxyReadableStream>(newSystemStream(kj::mv(in), encoding, ioctx), ioctx));
 }
 

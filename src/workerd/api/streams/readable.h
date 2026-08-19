@@ -13,6 +13,7 @@ namespace workerd::api {
 
 class ReadableStreamDefaultReader;
 class ReadableStreamBYOBReader;
+class JsReadableStream;
 
 class ReaderImpl final {
 public:
@@ -474,7 +475,13 @@ public:
   void signalEof(jsg::Lock& js);
 
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
-  static jsg::Ref<ReadableStream> deserialize(
+
+  // Deserializes to a JsReadableStream (rather than a jsg::Ref<ReadableStream>) so that the
+  // received stream is backed by whichever stream implementation this isolate runs: under the
+  // typescript_implemented_streams compat flag the result wraps a TypeScript-implemented
+  // stream (and is an instance of the global ReadableStream class), otherwise a legacy
+  // stream exactly as before. Wire-compatible with peers running either implementation.
+  static JsReadableStream deserialize(
       jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
 
   JSG_SERIALIZABLE(rpc::SerializationTag::READABLE_STREAM);
