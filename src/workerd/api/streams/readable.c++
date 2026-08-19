@@ -702,8 +702,11 @@ kj::Own<ReadableStreamSource> newNoDeferredProxyReadableStream(
   return kj::heap<NoDeferredProxyReadableStream>(kj::mv(inner), context);
 }
 
-void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
-  // Serialize by effectively creating a `JsRpcStub` around this object and serializing that.
+kj::Own<WritableStreamSink> newReadableStreamSerializeSink(jsg::Lock& js,
+    jsg::Serializer& serializer,
+    StreamEncoding encoding,
+    kj::Maybe<uint64_t> expectedLength) {
+  // Serialize by effectively creating a `JsRpcStub` around the stream and serializing that.
   // Except we don't actually want to do _exactly_ that, because we do not want to actually create
   // a `JsRpcStub` locally. So do the important parts of `JsRpcStub::constructor()` followed by
   // `JsRpcStub::serialize()`.
@@ -714,15 +717,7 @@ void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
       "ReadableStream can only be serialized for RPC.");
 
-  // NOTE: We're counting on `pumpTo()`, below, to check that the stream is not locked or disturbed
-  //   and other common checks. It's important that we don't modify the stream in any way before
-  //   that call.
-
   IoContext& ioctx = IoContext::current();
-
-  auto& controller = getController();
-  StreamEncoding encoding = controller.getPreferredEncoding();
-  auto expectedLength = controller.tryGetLength(encoding);
 
   capnp::ByteStream::Client streamCap = [&]() {
     auto req = externalHandler->getExternalPusher().pushByteStreamRequest(capnp::MessageSize{2, 0});
@@ -744,7 +739,21 @@ void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   kj::Own<capnp::ExplicitEndOutputStream> kjStream =
       ioctx.getByteStreamFactory().capnpToKjExplicitEnd(kj::mv(streamCap));
 
-  auto sink = newSystemStream(kj::mv(kjStream), encoding, ioctx);
+  return newSystemStream(kj::mv(kjStream), encoding, ioctx);
+}
+
+void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  // NOTE: We're counting on `pumpTo()`, below, to check that the stream is not locked or disturbed
+  //   and other common checks. It's important that we don't modify the stream in any way before
+  //   that call.
+
+  IoContext& ioctx = IoContext::current();
+
+  auto& controller = getController();
+  StreamEncoding encoding = controller.getPreferredEncoding();
+  auto expectedLength = controller.tryGetLength(encoding);
+
+  auto sink = newReadableStreamSerializeSink(js, serializer, encoding, expectedLength);
 
   ioctx.addTask(
       ioctx.waitForDeferredProxy(pumpTo(js, kj::mv(sink), true)).catch_([](kj::Exception&& e) {

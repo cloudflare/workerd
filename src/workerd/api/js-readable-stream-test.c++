@@ -1836,6 +1836,22 @@ class EncodedContentSource final: public ReadableStreamSource {
   size_t offset = 0;
 };
 
+KJ_TEST("JsReadableStream serialize of a TypeScript-backed stream requires an RPC serializer") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    // Parity with ReadableStream::serialize(): a serializer without an RPC external handler
+    // must be rejected with DOMDataCloneError before the stream is touched.
+    auto stream = makeTsStream(js, jsg::JsValue(js.obj()));
+    jsg::Serializer serializer(js);
+    KJ_EXPECT_THROW_MESSAGE(
+        "ReadableStream can only be serialized for RPC", stream.serialize(js, serializer));
+    KJ_EXPECT(!stream.isDisturbed(js));
+    KJ_EXPECT(!stream.isLocked(js));
+  });
+}
+
 KJ_TEST("ReadableStreamNativeSource stashed bytes force IDENTITY preferred encoding") {
   TestFixture testFixture;
   MockControllerState state;

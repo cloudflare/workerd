@@ -1142,7 +1142,22 @@ void JsReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       stream->serialize(js, serializer);
     }
     KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-      KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+      // Mirrors ReadableStream::serialize(): pumpTo() performs the lock/disturb validation,
+      // so the stream must not be modified before that call (the encoding/length queries are
+      // non-mutating reads).
+      IoContext& ioctx = IoContext::current();
+
+      auto encoding = getPreferredEncoding(js);
+      auto expectedLength = tryGetLength(js, encoding);
+
+      auto sink = newReadableStreamSerializeSink(js, serializer, encoding, expectedLength);
+
+      ioctx.addTask(ioctx.waitForDeferredProxy(pumpTo(js, kj::mv(sink), EndStream::YES))
+                        .catch_([](kj::Exception&& e) {
+        // Errors in pumpTo() are automatically propagated to the source and destination. We
+        // don't want to throw them from here since it'll cause an uncaught exception to be
+        // reported, even if the application actually does handle it!
+      }));
     }
   }
 }

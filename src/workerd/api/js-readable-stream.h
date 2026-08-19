@@ -103,10 +103,11 @@ class JsReadableStream final {
   // ReadableStream is used. Buffer-backed construction (the data constructors above)
   // dispatches the same way; see bufferBackedImpl().
   //
-  // TODO(streams-ts): serialize() is the one JsReadableStream operation still lacking a
-  // TypeScript arm (JS RPC transfer of TS-backed streams; planned as a later phase along
-  // with the deserialize receive path). Everything else -- pumpTo, unwrap, tee, detach,
-  // and the pipe dispatch cells -- has landed.
+  // TODO(streams-ts): every JsReadableStream operation (pumpTo, unwrap, tee, detach,
+  // serialize, and the pipe dispatch cells) now has a TypeScript arm; the remaining RPC
+  // gap is the receive path (ReadableStream::deserialize constructs legacy streams
+  // unconditionally) and serializer recognition of TS streams passed directly as RPC
+  // values.
   static JsReadableStream create(
       jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source);
 

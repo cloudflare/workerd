@@ -567,4 +567,17 @@ private:
 kj::Own<ReadableStreamSource> newNoDeferredProxyReadableStream(
     IoContext& context, kj::Own<ReadableStreamSource> inner);
 
+// Builds the wire plumbing for transferring a readable stream over RPC: requires `serializer`
+// to be RPC-backed (throws DOMDataCloneError otherwise), pushes a ByteStream to the peer,
+// writes the external-table entry describing it (encoding plus expected length, when known),
+// and returns the local sink the stream's remaining content must be pumped into (ending the
+// sink when the stream ends). Shared by ReadableStream::serialize() and JsReadableStream's
+// TypeScript arm, which differ only in how the encoding/length are obtained and how the pump
+// is driven. The encoding/length reads happen before the handler requirement is checked; both
+// are non-mutating, so the reordering relative to the thrown error is unobservable.
+kj::Own<WritableStreamSink> newReadableStreamSerializeSink(jsg::Lock& js,
+    jsg::Serializer& serializer,
+    StreamEncoding encoding,
+    kj::Maybe<uint64_t> expectedLength);
+
 }  // namespace workerd::api
