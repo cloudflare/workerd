@@ -1047,9 +1047,19 @@ class Isolate: public IsolateBase {
       if (instance.IsEmpty()) {
         return kj::none;
       } else {
-        return *reinterpret_cast<Object*>(
+        // Finding `type`'s template in the prototype chain says nothing about
+        // what the internal field points at (sandbox corruption defense in
+        // depth), so this establishes only that the pointer is *some*
+        // `Wrappable`. The caller, which knows the type statically, is
+        // responsible for the rest -- see JsObject::tryUnwrapAs().
+        auto& wrappable = *reinterpret_cast<Wrappable*>(
             instance->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
                 static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
+        Object* object = wrappable.jsgTryGetObject();
+        if (object == nullptr) {
+          reportWrapperTypeMismatch(type, typeid(wrappable));
+        }
+        return *object;
       }
     }
 

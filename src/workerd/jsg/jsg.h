@@ -1390,6 +1390,10 @@ class Object: private Wrappable {
   // to explicitly declare the default constructor.
   Object() = default;
 
+  inline Object* jsgTryGetObject() override {
+    return this;
+  }
+
   inline void jsgVisitForGc(GcVisitor& visitor) override {}
 
   // Subclasses should override these to provide appropriate information for
@@ -1454,6 +1458,16 @@ class Object: private Wrappable {
   template <typename>
   friend class WeakRef;
 };
+
+// Declared in wrappable.h; see there for why this check exists.
+template <typename T>
+T& downcastObject(Object& object) {
+  T* result = dynamic_cast<T*>(&object);
+  if (result == nullptr) {
+    reportWrapperTypeMismatch(typeid(T), typeid(object));
+  }
+  return *result;
+}
 
 // Ref<T> is a reference to a resource type (a type with a JSG_RESOURCE_TYPE block) living on
 // the V8 heap.
