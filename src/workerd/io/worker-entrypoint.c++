@@ -26,6 +26,11 @@
 namespace workerd {
 
 namespace {
+
+kj::Maybe<kj::StringPtr> asPtr(kj::Maybe<kj::String>& value) {
+  return value.map([](kj::String& text) -> kj::StringPtr { return text; });
+}
+
 // Wrapper around a Worker that handles receiving a new event from the outside. In particular,
 // this handles:
 // - Creating a IoContext and making it current.
@@ -49,7 +54,7 @@ class WorkerEntrypoint final: public WorkerInterface {
   // zone and non-zone workers.
   static kj::Own<WorkerInterface> construct(ThreadContext& threadContext,
       kj::Own<const Worker> worker,
-      kj::Maybe<kj::StringPtr> entrypointName,
+      kj::Maybe<kj::String> entrypointName,
       Frankenvalue props,
       kj::Maybe<kj::Own<Worker::Actor>> actor,
       kj::Own<LimitEnforcer> limitEnforcer,
@@ -95,7 +100,7 @@ class WorkerEntrypoint final: public WorkerInterface {
   kj::Maybe<kj::Own<IoContext::IncomingRequest>> incomingRequest;
   bool tunnelExceptions;
   bool isDynamicDispatch;
-  kj::Maybe<kj::StringPtr> entrypointName;
+  kj::Maybe<kj::String> entrypointName;
   Frankenvalue props;
   kj::Maybe<kj::String> cfBlobJson;
   kj::Maybe<Worker::VersionInfo> versionInfo;
@@ -146,7 +151,7 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Maybe<kj::Canceler&> canceler,
       bool tunnelExceptions,
       bool isDynamicDispatch,
-      kj::Maybe<kj::StringPtr> entrypointName,
+      kj::Maybe<kj::String> entrypointName,
       Frankenvalue props,
       kj::Maybe<kj::String> cfBlobJson,
       kj::Maybe<Worker::VersionInfo> versionInfo);
@@ -191,7 +196,7 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
 
 kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContext,
     kj::Own<const Worker> worker,
-    kj::Maybe<kj::StringPtr> entrypointName,
+    kj::Maybe<kj::String> entrypointName,
     Frankenvalue props,
     kj::Maybe<kj::Own<Worker::Actor>> actor,
     kj::Own<LimitEnforcer> limitEnforcer,
@@ -229,8 +234,8 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
   }
 
   auto obj = kj::heap<WorkerEntrypoint>(kj::Badge<WorkerEntrypoint>(), threadContext,
-      waitUntilTasks, canceler, tunnelExceptions, isDynamicDispatch, entrypointName, kj::mv(props),
-      kj::mv(cfBlobJson), kj::mv(versionInfo));
+      waitUntilTasks, canceler, tunnelExceptions, isDynamicDispatch, kj::mv(entrypointName),
+      kj::mv(props), kj::mv(cfBlobJson), kj::mv(versionInfo));
   obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer),
       kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo), kj::mv(selfTokenFactory));
@@ -244,7 +249,7 @@ WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
     kj::Maybe<kj::Canceler&> canceler,
     bool tunnelExceptions,
     bool isDynamicDispatch,
-    kj::Maybe<kj::StringPtr> entrypointName,
+    kj::Maybe<kj::String> entrypointName,
     Frankenvalue props,
     kj::Maybe<kj::String> cfBlobJson,
     kj::Maybe<Worker::VersionInfo> versionInfo)
@@ -253,7 +258,7 @@ WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
       canceler(canceler),
       tunnelExceptions(tunnelExceptions),
       isDynamicDispatch(isDynamicDispatch),
-      entrypointName(entrypointName),
+      entrypointName(kj::mv(entrypointName)),
       props(kj::mv(props)),
       cfBlobJson(kj::mv(cfBlobJson)),
       versionInfo(kj::mv(versionInfo)) {}
@@ -441,7 +446,8 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
       KJ_TRY {
         api::DeferredProxy<void> deferredProxy = co_await context.run(
             [this, method, url, &headers, &requestBody, &wrappedResponse = *wrappedResponse,
-                entrypointName = entrypointName](Worker::Lock& lock, IoContext& context) mutable {
+                entrypointName = entrypointName.clone()](
+                Worker::Lock& lock, IoContext& context) mutable {
           TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(&context));
           TRACE_EVENT(
               "workerd", "WorkerEntrypoint::request() run", PERFETTO_FLOW_FROM_POINTER(this));
@@ -463,7 +469,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
 
           return lock.getGlobalScope().request(method, url, headers, requestBody, wrappedResponse,
               cfBlobJson, lock,
-              lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
+              lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props),
                   context.getActor(), isDynamicDispatch),
               kj::mv(signal));
         });
@@ -674,14 +680,14 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
   return wrapWithCanceler(
       context
-          .run([this, &headers, &connection, &response, entrypointName = entrypointName,
+          .run([this, &headers, &connection, &response, entrypointName = entrypointName.clone(),
                    versionInfo = kj::mv(versionInfo),
                    host = kj::str(host)](Worker::Lock& lock, IoContext& context) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
     return lock.getGlobalScope().connect(kj::mv(host), headers, connection, response, lock,
-        lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
+        lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props),
             context.getActor(), isDynamicDispatch));
   })
           .then([&context, workerTracer]() {
@@ -803,17 +809,17 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
   incomingRequest->delivered();
 
   // Scheduled handlers run entirely in waitUntil() tasks.
-  context.addWaitUntil(context.run(
-      [scheduledTime, cron, entrypointName = entrypointName, versionInfo = kj::mv(versionInfo),
-          props = kj::mv(props), &metrics = incomingRequest->getMetrics()](
-          Worker::Lock& lock, IoContext& context) mutable {
+  context.addWaitUntil(context.run([scheduledTime, cron, entrypointName = entrypointName.clone(),
+                                       versionInfo = kj::mv(versionInfo), props = kj::mv(props),
+                                       &metrics = incomingRequest->getMetrics()](
+                                       Worker::Lock& lock, IoContext& context) mutable {
     TRACE_EVENT("workerd", "WorkerEntrypoint::runScheduled() run");
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
     lock.getGlobalScope().startScheduled(scheduledTime, cron, lock,
         lock.getExportedHandler(
-            entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor()));
+            asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor()));
   }));
 
   static auto constexpr waitForFinished = [](kj::Own<IoContext::IncomingRequest> request)
@@ -878,10 +884,10 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
       });
 
       try {
-        auto result =
-            co_await context.run([scheduledTime, retryCount, entrypointName = entrypointName,
-                                     versionInfo = kj::mv(versionInfo), props = kj::mv(props)](
-                                     Worker::Lock& lock, IoContext& context) mutable {
+        auto result = co_await context.run(
+            [scheduledTime, retryCount, entrypointName = entrypointName.clone(),
+                versionInfo = kj::mv(versionInfo),
+                props = kj::mv(props)](Worker::Lock& lock, IoContext& context) mutable {
           jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
           jsg::AsyncContextFrame::StorageScope userTraceScope =
               context.makeUserAsyncTraceScope(lock);
@@ -894,7 +900,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
           }
 
           auto handler = lock.getExportedHandler(
-              entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor());
+              asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor());
           return lock.getGlobalScope().runAlarm(scheduledTime, timeout, retryCount, lock, handler);
         });
 
@@ -976,7 +982,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
   incomingRequest->delivered();
 
   context.addWaitUntil(
-      context.run([entrypointName = entrypointName, versionInfo = kj::mv(versionInfo),
+      context.run([entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
                       props = kj::mv(props), &metrics = incomingRequest->getMetrics()](
                       Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::test() run");
@@ -986,7 +992,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
     return context.awaitJs(lock,
         lock.getGlobalScope().test(lock,
             lock.getExportedHandler(
-                entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor())));
+                asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor())));
   }));
 
   static auto constexpr waitForFinished =
@@ -1019,17 +1025,18 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
     t.setEventInfo(*incomingRequest, event->getEventInfo());
   }
 
-  return wrapWithCanceler(event
-                              ->run(kj::mv(incomingRequest), entrypointName, kj::mv(versionInfo),
-                                  kj::mv(props), waitUntilTasks, isDynamicDispatch)
-                              .attach(kj::mv(event)));
+  return wrapWithCanceler(
+      event
+          ->run(kj::mv(incomingRequest), asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props),
+              waitUntilTasks, isDynamicDispatch)
+          .attach(kj::mv(event)));
 }
 
 }  // namespace
 
 kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::Own<const Worker> worker,
-    kj::Maybe<kj::StringPtr> entrypointName,
+    kj::Maybe<kj::String> entrypointName,
     Frankenvalue props,
     kj::Maybe<kj::Own<Worker::Actor>> actor,
     kj::Own<LimitEnforcer> limitEnforcer,
