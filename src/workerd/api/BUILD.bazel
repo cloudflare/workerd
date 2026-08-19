@@ -647,6 +647,14 @@ kj_test(
 )
 
 kj_test(
+    src = "deferred-proxy-flow-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "system-streams-test.c++",
     deps = [
         "//src/workerd/io",
