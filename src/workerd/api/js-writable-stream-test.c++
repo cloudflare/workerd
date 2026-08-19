@@ -1438,7 +1438,7 @@ KJ_TEST("JsWritableStream create with a highWaterMark applies byte-based sizing"
     // highWaterMark 8 with the byte-based strategy: a queued 6-byte chunk leaves
     // desiredSize == 2. (The spec-default count-based strategy would report 7.)
     auto stream = JsWritableStream::create(
-        js, env.context, kj::heap<GatedSink>(written, gate), kj::none, uint64_t(8));
+        js, env.context, kj::heap<GatedSink>(written, gate), kj::none, static_cast<uint64_t>(8));
     auto handle = KJ_ASSERT_NONNULL(stream.tryGetTs(js));
     auto writer = KJ_ASSERT_NONNULL(
         webstreams::invokeMethod(js, handle, "getWriter"_kj).tryCast<jsg::JsObject>());

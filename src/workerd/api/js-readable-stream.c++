@@ -1444,7 +1444,7 @@ kj::Maybe<uint64_t> ReadableStreamNativeSource::tryGetLength(StreamEncoding enco
     }
     // Stashed bytes are identity bytes already drawn from the source: once any exist, an
     // encoded length no longer describes what this source will deliver.
-    if (stash.size() > 0) {
+    if (!stash.empty()) {
       return kj::none;
     }
     return active.source->tryGetLength(encoding);
