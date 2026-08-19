@@ -39,6 +39,8 @@ const moduleScopeChurnController = new AbortController();
 
 let globalAbortController;
 let globalWaitController;
+let heldRpcSignal;
+let heldRpcSignalObserved;
 export class RpcRemoteEnd extends WorkerEntrypoint {
   async echo(signal) {
     return signal;
@@ -148,6 +150,34 @@ export class RpcRemoteEnd extends WorkerEntrypoint {
 
   async abortChurnController() {
     moduleScopeChurnController.abort(new Error('churn-done'));
+  }
+
+  // Deserializes a signal and parks this request — the signal's RPC receiver context —
+  // without registering any abort observer itself. Resolved by the 'abort' listener that
+  // listenOnHeldSignal() registers from a different request. The long timer keeps this
+  // request pending (a bare parked promise would trip the hang detector) and bounds the
+  // failure mode to a clean timeout.
+  async holdReceivedSignal(signal) {
+    heldRpcSignal = signal;
+    const { promise, resolve } = Promise.withResolvers();
+    heldRpcSignalObserved = resolve;
+    return await Promise.race([
+      promise,
+      scheduler.wait(10_000).then(() => 'timed-out'),
+    ]);
+  }
+
+  // Runs in its own request: registers an 'abort' listener on the signal held by
+  // holdReceivedSignal()'s request. Arming the RPC abort subscription is routed into that
+  // request's context, which owns the underlying RPC promise.
+  async listenOnHeldSignal() {
+    while (heldRpcSignal === undefined) {
+      await scheduler.wait(10);
+    }
+    heldRpcSignal.addEventListener('abort', () => {
+      heldRpcSignalObserved(`aborted:${heldRpcSignal.reason.message}`);
+    });
+    return heldRpcSignal.aborted;
   }
 }
 
@@ -821,6 +851,21 @@ export const rpcCrossRequestSignal = {
     const res = await env.RpcRemoteEnd.tryUsingGlobalAbortController();
     strictEqual(res.aborted, true);
     strictEqual(res.reason, 'boom?');
+  },
+};
+
+export const rpcCrossRequestListener = {
+  async test(ctrl, env, ctx) {
+    // A signal deserialized by one request is observed via addEventListener() from a second
+    // request while the first is still running. Only the receiving request can await the
+    // underlying RPC promise, so the second request's registration must route the arming of
+    // the subscription into the first request's context — otherwise the abort would update
+    // the pending-reason box but never fire the listener.
+    const ac = new AbortController();
+    const held = env.RpcRemoteEnd.holdReceivedSignal(ac.signal);
+    strictEqual(await env.RpcRemoteEnd.listenOnHeldSignal(), false);
+    ac.abort(new Error('cross-request-listener'));
+    strictEqual(await held, 'aborted:cross-request-listener');
   },
 };
 

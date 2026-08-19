@@ -599,23 +599,17 @@ kj::Maybe<jsg::JsValue> AbortSignal::getOnAbort(jsg::Lock& js) {
 
 void AbortSignal::setOnAbort(
     jsg::Lock& js, jsg::Optional<kj::OneOf<EventTarget::HandlerFunction, jsg::JsValue>> handler) {
-  if (setEventHandlerAttribute(js, kAbortEvent, kj::mv(handler)) ==
-      EventHandlerAssignment::CALLABLE) {
-    subscribeToRpcAbort(js);
-  }
+  // The trampoline's activation registers a regular 'abort' listener, which arms the RPC
+  // abort subscription through listenerCountChanged().
+  setEventHandlerAttribute(js, kAbortEvent, kj::mv(handler));
 }
 
-void AbortSignal::addEventListener(jsg::Lock& js,
-    kj::String type,
-    jsg::Identified<Handler> handler,
-    jsg::Optional<AddEventListenerOpts> maybeOptions,
-    const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler) {
+void AbortSignal::listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) {
   // Only 'abort' listeners can observe an abort; registrations for other event types must
-  // not arm the RPC subscription (whose pending awaitIo blocks actor hibernation).
-  bool isAbortListener = type == kAbortEvent;
-  EventTarget::addEventListener(
-      js, kj::mv(type), kj::mv(handler), kj::mv(maybeOptions), eventTargetHandler);
-  if (isAbortListener) {
+  // not arm the RPC subscription (whose pending awaitIo blocks actor hibernation). A
+  // notification that leaves 'abort' listeners registered arms too — arming is idempotent,
+  // and any such notification means an abort could still be observed.
+  if (type == kAbortEvent && count > 0) {
     subscribeToRpcAbort(js);
   }
 }
@@ -1247,9 +1241,26 @@ void AbortSignal::subscribeToRpcAbort(jsg::Lock& js) {
   // we want to arrange to awaitIo() for the underlying RPC signal. If no one is actually listening,
   // though, we don't want to awaitIo() since it blocks hibernation in actors.
 
-  if (rpcAbortPromise != kj::none && !isRpcReceiverContextCurrent()) {
-    // The RPC subscription can only be armed by the request that deserialized this signal;
-    // it owns the underlying promise.
+  if (rpcAbortPromise == kj::none) {
+    // Not an RPC-received signal, or the subscription is already armed.
+    return;
+  }
+
+  if (!isRpcReceiverContextCurrent()) {
+    // Only the request that deserialized this signal can arm the subscription — it owns the
+    // underlying promise — but a signal retained across requests may see registrations from
+    // other contexts. Ask the receiving context to arm on its next turn. The queued action
+    // captures only a WeakRef, which is safe to destroy from any thread should that context
+    // be torn down without draining its queue. If the context is already gone, the request
+    // is dropped: no delivery is possible anymore, though the abort itself stays observable
+    // through the pending-reason box (see docs/reference/detail/abort-signal.md).
+    KJ_IF_SOME(executor, rpcReceiverContext) {
+      executor.tryExecute([weakSelf = JSG_THIS_WEAK(js)](jsg::Lock& js) {
+        KJ_IF_SOME(self, weakSelf.tryGet()) {
+          self.subscribeToRpcAbort(js);
+        }
+      });
+    }
     return;
   }
 

@@ -613,6 +613,61 @@ export const throwingGlobalErrorListener = {
   },
 };
 
+// The report-an-exception console fallback reads `error.stack`, which can run arbitrary
+// user code (a getter or proxy trap). A throwing stack getter must not escape any of the
+// no-throw report paths: reportError() itself, a REPORT dispatch, or the nested
+// (in-error-reporting-mode) report.
+export const throwingStackGetter = {
+  test() {
+    const makeEvil = (msg) => ({
+      get stack() {
+        throw new Error(`evil stack: ${msg}`);
+      },
+    });
+
+    // Via reportError() directly: must not throw.
+    reportError(makeEvil('direct'));
+
+    // Via a REPORT dispatch: the listener's thrown value has a throwing stack getter;
+    // dispatchEvent() must not throw and the remaining listeners still run.
+    const order = [];
+    const target = new EventTarget();
+    target.addEventListener('foo', () => {
+      order.push('l1');
+      throw makeEvil('listener');
+    });
+    target.addEventListener('foo', () => order.push('l2'));
+    target.dispatchEvent(new Event('foo'));
+    deepStrictEqual(order, ['l1', 'l2']);
+
+    // Via abort(), which the spec forbids from throwing.
+    const ac = new AbortController();
+    ac.signal.addEventListener('abort', () => {
+      order.push('abort1');
+      throw makeEvil('abort');
+    });
+    ac.signal.addEventListener('abort', () => order.push('abort2'));
+    ac.abort();
+    deepStrictEqual(order, ['l1', 'l2', 'abort1', 'abort2']);
+
+    // Via the nested report: a global 'error' listener throws a value whose stack getter
+    // throws. The nested report goes to the console and must neither propagate nor stop
+    // the original dispatch.
+    order.length = 0;
+    const globalHandler = () => {
+      order.push('global-error');
+      throw makeEvil('nested');
+    };
+    addEventListener('error', globalHandler);
+    try {
+      target.dispatchEvent(new Event('foo'));
+      deepStrictEqual(order, ['l1', 'global-error', 'l2']);
+    } finally {
+      removeEventListener('error', globalHandler);
+    }
+  },
+};
+
 // User code running during the mid-dispatch report can mutate the original listener list;
 // removals are honored for listeners that have not run yet.
 export const midReportListenerRemoval = {
