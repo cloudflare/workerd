@@ -31,10 +31,7 @@ interface ExceptionWithName {
 }
 
 type Exception =
-  | ExceptionWithCode
-  | ExceptionWithMessage
-  | ExceptionWithName
-  | string;
+  ExceptionWithCode | ExceptionWithMessage | ExceptionWithName | string;
 
 declare class Span {
   // Returns true if this span will be recorded to the tracing system. False when the

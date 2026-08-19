@@ -74,6 +74,7 @@ class SpanState: public kj::Refcounted {
       kj::Maybe<kj::String> stack) = 0;
   virtual void recordSpanDataLimitError(
       kj::StringPtr itemKind, kj::StringPtr name, size_t valueSize) {}
+
  private:
   size_t bytesUsed = 0;
 };

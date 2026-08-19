@@ -145,9 +145,9 @@ class UserSpanState final: public SpanState {
   }
 
   void recordExceptionImpl(kj::Maybe<tracing::Exception::Code> code,
-    kj::String name,
-    kj::String message,
-    kj::Maybe<kj::String> stack) override {
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) override {
     builder.recordException(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
   }
 
@@ -192,10 +192,9 @@ class NoopSpanState final: public SpanState {
 
   void recordAttribute(kj::String, TagValue) override {}
 
-  void recordExceptionImpl(kj::Maybe<tracing::Exception::Code>,
-      kj::String,
-      kj::String,
-      kj::Maybe<kj::String>) override {}
+  void recordExceptionImpl(
+      kj::Maybe<tracing::Exception::Code>, kj::String, kj::String, kj::Maybe<kj::String>) override {
+  }
 };
 
 // ======================================================================================
