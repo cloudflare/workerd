@@ -118,5 +118,11 @@ request's RPC machinery and readable from any context — so `getAborted()`/`get
 answer correctly even for signals that crossed request boundaries before the abort was
 processed. Actually *reacting* to the abort (running `triggerAbort`) requires the
 subscription armed via `subscribeToRpcAbort()`, which happens automatically when an `abort`
-listener, `onabort` handler, or any native registration is added — but only from the
-receiving request's context, since the underlying promise belongs to it.
+listener, `onabort` handler, or any native registration is added. Only the receiving
+request's context can arm it — the underlying promise belongs to that request — so arming
+requested from any other context is routed there through the signal's
+`IoCrossContextExecutor` and takes effect on the receiving request's next turn. If the
+receiving request is already gone, the routing is dropped: no delivery is possible anymore.
+Polling stays accurate regardless (if the peer could still abort, that request's teardown
+wrote an implicit connection-lost abort into the box), and registrations made after that
+point observe the abort through the already-aborted pre-checks instead.

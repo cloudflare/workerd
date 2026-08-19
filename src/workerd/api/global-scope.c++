@@ -1135,17 +1135,34 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
   // If that event is not prevented, we will log the error to the console. Note
   // that we do not throw the error at all.
   const auto logError = [&](const jsg::JsValue& error) {
-    // If the value is an object that has a stack property, log that so we get
-    // the stack trace if it is an exception.
-    KJ_IF_SOME(obj, error.tryCast<jsg::JsObject>()) {
-      auto stack = obj.get(js, "stack"_kj);
-      if (!stack.isUndefined()) {
-        js.reportError(stack);
-        return;
+    // This helper must not throw: it is reached from dispatch paths with a no-throw contract
+    // (a REPORT-policy dispatch, and the re-entrancy branch below). Reading `stack` can run
+    // arbitrary user code — a getter or proxy trap — so a failure there falls back to the
+    // generic logging, which is side-effect-free (ToDetailString; no user code).
+    JSG_TRY(js) {
+      // If the value is an object that has a stack property, log that so we get
+      // the stack trace if it is an exception.
+      KJ_IF_SOME(obj, error.tryCast<jsg::JsObject>()) {
+        auto stack = obj.get(js, "stack"_kj);
+        if (!stack.isUndefined()) {
+          js.reportError(stack);
+          return;
+        }
       }
+      // Otherwise just log the stringified value generically.
+      js.reportError(error);
     }
-    // Otherwise just log the stringified value generically.
-    js.reportError(error);
+    JSG_CATCH(exception KJ_UNUSED) {
+      // Getting the stack property can throw an error if the accessor is
+      // overridden by user code, etc. We don't want to propagate that error
+      // because it violates the no-throw contract of this function, but we
+      // don't want to just swallow it either. Let's log so we can at least
+      // have a record of it happening at all. We dont want to log every case
+      // or spam sentry, so let's log periodically with NOSENTRY.
+      LOG_PERIODICALLY(
+          WARNING, "NOSENTRY Error while reporting error to console", exception.getHandle(js));
+      js.reportError(error);
+    };
   };
 
   // Per HTML's "report an exception" re-entrancy guard (the global's "in error reporting
@@ -1161,6 +1178,9 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
   inErrorReportingMode = true;
   KJ_DEFER(inErrorReportingMode = false);
 
+  // Technically speaking, the jsg::checks below can also trigger a throw, but
+  // these aren't triggering user code so it's unlikely unless we're in a fatal
+  // state. Just allow the error to propagate in these cases.
   auto message = v8::Exception::CreateMessage(js.v8Isolate, error);
   auto event = js.alloc<ErrorEvent>(ErrorEvent::ErrorEventInit{.message = kj::str(message->Get()),
     .filename = kj::str(message->GetScriptResourceName()),

@@ -622,16 +622,15 @@ class AbortSignal final: public EventTarget {
   static jsg::Ref<AbortSignal> any(jsg::Lock& js, kj::Array<jsg::Ref<AbortSignal>> signals);
 
   // The onabort event handler IDL attribute (see EventTarget::setEventHandlerAttribute).
-  // Assigning a callable also subscribes RPC-backed signals to remote abort notifications.
   kj::Maybe<jsg::JsValue> getOnAbort(jsg::Lock& js);
   void setOnAbort(
       jsg::Lock& js, jsg::Optional<kj::OneOf<EventTarget::HandlerFunction, jsg::JsValue>> handler);
 
-  void addEventListener(jsg::Lock& js,
-      kj::String type,
-      jsg::Identified<Handler> handler,
-      jsg::Optional<AddEventListenerOpts> maybeOptions,
-      const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler);
+  // Arms the RPC abort subscription whenever an 'abort' listener is registered — via
+  // addEventListener() or the onabort trampoline's activation. Registrations for other
+  // event types must not arm it: the subscription's pending awaitIo blocks hibernation in
+  // actors.
+  void listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) override;
 
   JSG_RESOURCE_TYPE(AbortSignal, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
@@ -890,8 +889,9 @@ class AbortSignal final: public EventTarget {
   // RPC server functionality. Used if this signal was deserialized.
 
   // Identifies the IoContext that deserialized this signal, which owns rpcAbortPromise
-  // below. Only that context can arm the RPC subscription (subscribeToRpcAbort); attempts
-  // from other contexts are no-ops.
+  // below. Only that context can arm the RPC subscription (subscribeToRpcAbort); arming
+  // requested from any other context is routed here via tryExecute(), or dropped if the
+  // receiving context is already gone.
   kj::Maybe<IoCrossContextExecutor> rpcReceiverContext;
   bool isRpcReceiverContextCurrent();
 
