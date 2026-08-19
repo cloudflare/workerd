@@ -298,6 +298,9 @@ interface ServiceEntrypointStub {
     options?: ImageUploadOptions
   ): Promise<ImageMetadata>;
   list(options?: ImageListOptions): Promise<ImageList>;
+  createDirectUpload(
+    options?: ImageDirectUploadOptions
+  ): Promise<ImageDirectUploadResult>;
 }
 
 class HostedImagesBindingImpl implements HostedImagesBinding {
@@ -320,6 +323,12 @@ class HostedImagesBindingImpl implements HostedImagesBinding {
 
   async list(options?: ImageListOptions): Promise<ImageList> {
     return this.#fetcher.list(options);
+  }
+
+  async createDirectUpload(
+    options?: ImageDirectUploadOptions
+  ): Promise<ImageDirectUploadResult> {
+    return this.#fetcher.createDirectUpload(options);
   }
 }
 
