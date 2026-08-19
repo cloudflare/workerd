@@ -1044,6 +1044,13 @@ TestFixture makeTsStreamsFixture() {
   });
 }
 
+// Settles after n event loop turns.
+kj::Promise<void> settleTurns(int n) {
+  for (int i = 0; i < n; i++) {
+    co_await kj::evalLater([]() {});
+  }
+}
+
 // Constructs a TypeScript ReadableStream over the given underlying source object (via
 // the constructor exposed through the bootstrap's cpp_exports module) and adopts it as a
 // TypeScript-backed JsReadableStream.
@@ -2021,6 +2028,66 @@ KJ_TEST("JsReadableStream setPendingClosure gates consumption and tee") {
     });
     return env.context.awaitJs(js, kj::mv(promise));
   });
+}
+
+KJ_TEST("JsReadableStream setPendingClosure gates the JS pipeThrough entry point") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // The JS prototype's pipeThrough reaches the pipe machinery through
+    // readableStreamPipeThroughTo, NOT through readableStreamPipeTo's precondition
+    // block, so it carries its own pending-closure gate. Like the legacy controller's
+    // gate, it must fire BEFORE the pipe locks the endpoints or touches the transform:
+    // pipeThrough returns the transform's readable normally (hidden, handled rejection)
+    // and both endpoints stay unlocked.
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    auto constructor =
+        KJ_ASSERT_NONNULL(exportsObj.get(js, "ReadableStream"_kj).tryCast<jsg::JsFunction>());
+
+    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    auto streamObj = constructor.newInstance(js, jsg::JsValue(handler.wrap(js, kj::mv(source))));
+    auto stream = JsReadableStream(js, streamObj.addRef(js));
+    stream.setPendingClosure(js);
+
+    // A transform pair of independent TypeScript endpoints.
+    auto pairReadableObj = constructor.newInstance(js, jsg::JsValue(js.obj()));
+    auto pairWritable = JsWritableStream::create(
+        js, env.context, kj::heap<CollectingSink>(collected, ended), kj::none);
+    auto pairWritableObj = KJ_ASSERT_NONNULL(pairWritable.tryGetTs(js));
+    auto pairObj = js.obj();
+    pairObj.set(js, "readable"_kj, jsg::JsValue(pairReadableObj));
+    pairObj.set(js, "writable"_kj, jsg::JsValue(pairWritableObj));
+
+    auto result = webstreams::invokeMethod(js, streamObj, "pipeThrough"_kj, jsg::JsValue(pairObj));
+    // pipeThrough returns the pair's readable, without throwing.
+    KJ_EXPECT(result == jsg::JsValue(pairReadableObj));
+
+    // Let any (buggy) pipe startup settle, then verify the gate fired BEFORE the pipe
+    // machinery ran. Lock checks alone cannot discriminate -- an ungated pipe's first
+    // read hits the read-side pending-closure gate and the pump's finalize releases both
+    // locks again -- so the decisive probe is the transform's continued usability: an
+    // ungated pipe aborts (errors) the transform's writable, after which the write below
+    // would reject with the pending-closure error.
+    auto promise = env.context.awaitIo(js, settleTurns(10)).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream), pairWritable = kj::mv(pairWritable)), (stream, pairWritable), (jsg::Lock & js) mutable {
+      KJ_EXPECT(!stream.isLocked(js));
+      KJ_EXPECT(!pairWritable.isLocked(js));
+      auto written =
+          pairWritable.writeForTest(js, jsg::JsValue(jsg::JsUint8Array::create(js, "hi"_kjb)));
+      return written.then(js,
+          JSG_VISITABLE_LAMBDA((pairWritable = kj::mv(pairWritable)), (pairWritable),
+              (jsg::Lock & js) mutable { return pairWritable.forceClose(js); }));
+    }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  // The transform's sink received the probe write and a clean close: it was never
+  // touched by the gated pipe.
+  KJ_EXPECT(collected.asPtr() == "hi"_kjb);
+  KJ_EXPECT(ended);
 }
 
 KJ_TEST("JsReadableStream setPendingClosure gates pipeTo but not cancel") {

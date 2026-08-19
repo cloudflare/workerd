@@ -2936,6 +2936,21 @@ class ReadableStream<R> {
       destination: WritableStreamType<R>,
       options?: StreamPipeOptions
     ) => {
+      // The pending-closure gate (see #pendingClosure). The prototype
+      // pipeThrough reaches pipeToInternal through here WITHOUT passing
+      // readableStreamPipeTo's precondition block, so the gate applies
+      // again at this junction. Like the legacy controller's gate (which
+      // rejects before any locking), the rejection happens before
+      // pipeToInternal locks the endpoints or touches the transform; the
+      // prototype method marks the pipe promise handled, so this surfaces
+      // exactly like legacy -- endpoints untouched, hidden rejection. It
+      // is deliberately a rejection rather than a throw for the same
+      // reason. (The pipeTo route re-checks harmlessly; its own gate also
+      // guards the native+native fast path, which returns before reaching
+      // here.)
+      if (source.#pendingClosure) {
+        return PromiseReject(pendingClosureError()) as Promise<void>;
+      }
       return pipeToInternal(source, destination, options);
     };
 
