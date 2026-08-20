@@ -314,6 +314,69 @@ void CodecStage::pump(int flush) {
 }
 
 // =======================================================================================
+// CompressionCodecHandle
+
+// The refcounted box around the synchronous codec core, shared by the bootstrap handle's
+// method closures (see CompressionCodecHandle in the header). Fully defined only in this
+// translation unit; other TUs hold it strictly through the forward declaration + kj::Rc.
+class CompressionCodecStage final: public kj::Refcounted {
+ public:
+  explicit CompressionCodecStage(CodecStage::Mode mode,
+      kj::StringPtr format,
+      CodecStage::Flags flags,
+      kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+      : stage(mode, format, flags, kj::mv(externalMemoryTarget)) {}
+
+  CodecStage stage;
+};
+
+CompressionCodecHandle::CompressionCodecHandle(kj::Rc<CompressionCodecStage> stage)
+    : stage(kj::mv(stage)) {}
+CompressionCodecHandle::CompressionCodecHandle(CompressionCodecHandle&&) noexcept = default;
+CompressionCodecHandle::~CompressionCodecHandle() noexcept = default;
+
+jsg::Function<void(jsg::JsBufferSource)> CompressionCodecHandle::makePush() {
+  return jsg::Function<void(jsg::JsBufferSource)>(
+      [stage = stage.addRef()](jsg::Lock& js, jsg::JsBufferSource chunk) mutable {
+    // Synchronous, eager, and fully consuming: the caller's buffer is not retained (see
+    // CodecStage::push). Codec errors (including the strict-mode decompress checks) throw
+    // here, rejecting the write — the spec's transform-time error timing.
+    stage->stage.push(chunk.asArrayPtr());
+  });
+}
+
+jsg::Function<void()> CompressionCodecHandle::makeEnd() {
+  return jsg::Function<void()>([stage = stage.addRef()](jsg::Lock& js) mutable {
+    // Z_FINISH + strict end checks; throws reject the close.
+    stage->stage.end();
+  });
+}
+
+jsg::Function<uint32_t(jsg::JsBufferSource)> CompressionCodecHandle::makePullInto() {
+  return jsg::Function<uint32_t(jsg::JsBufferSource)>(
+      [stage = stage.addRef()](jsg::Lock& js, jsg::JsBufferSource view) mutable {
+    return static_cast<uint32_t>(stage->stage.pull(view.asArrayPtr()));
+  });
+}
+
+jsg::Function<double()> CompressionCodecHandle::makeAvailable() {
+  return jsg::Function<double()>([stage = stage.addRef()](jsg::Lock& js) mutable {
+    // double: a decompression stage buffer can in principle exceed uint32 range (the legacy
+    // implementation had the same unbounded buffering); JS numbers carry the full size
+    // exactly.
+    return static_cast<double>(stage->stage.available());
+  });
+}
+
+CompressionCodecHandle newCompressionCodecHandle(CodecStage::Mode mode,
+    kj::StringPtr format,
+    CodecStage::Flags flags,
+    kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget) {
+  return CompressionCodecHandle(
+      kj::rc<CompressionCodecStage>(mode, format, flags, kj::mv(externalMemoryTarget)));
+}
+
+// =======================================================================================
 // Brotli / Zstd contexts
 
 void BrotliContext::setBuffers(kj::ArrayPtr<kj::byte> input, kj::ArrayPtr<kj::byte> output) {
