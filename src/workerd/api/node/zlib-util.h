@@ -41,37 +41,8 @@ static constexpr auto Z_DEFAULT_WINDOWBITS = 15;
 static constexpr uint8_t GZIP_HEADER_ID1 = 0x1f;
 static constexpr uint8_t GZIP_HEADER_ID2 = 0x8b;
 
-using ZlibModeValue = uint8_t;
-enum class ZlibMode : ZlibModeValue {
-  NONE,
-  DEFLATE,
-  INFLATE,
-  GZIP,
-  GUNZIP,
-  DEFLATERAW,
-  INFLATERAW,
-  UNZIP,
-  BROTLI_DECODE,
-  BROTLI_ENCODE,
-  ZSTD_ENCODE,
-  ZSTD_DECODE
-};
-
 // When possible, we intentionally override chunkSize to a value that is likely to perform better
 static constexpr auto ZLIB_PERFORMANT_CHUNK_SIZE = 40 * 1024;
-
-struct CompressionError {
-  CompressionError(kj::StringPtr _message, kj::StringPtr _code, int _err)
-      : message(kj::str(_message)),
-        code(kj::str(_code)),
-        err(_err) {
-    JSG_REQUIRE(message.size() != 0, Error, "Compression error message should not be null");
-  }
-
-  kj::String message;
-  kj::String code;
-  int err;
-};
 
 class ZlibContext final {
  public:
@@ -206,171 +177,6 @@ class ZlibContext final {
 };
 
 using CompressionStreamErrorHandler = jsg::Function<void(int, kj::StringPtr, kj::StringPtr)>;
-
-class BrotliContext {
- public:
-  explicit BrotliContext(CompressionAllocator& allocator, ZlibMode _mode)
-      : allocator(allocator),
-        mode(_mode) {}
-  KJ_DISALLOW_COPY(BrotliContext);
-  void setBuffers(kj::ArrayPtr<kj::byte> input, kj::ArrayPtr<kj::byte> output);
-  void setInputBuffer(kj::ArrayPtr<const kj::byte> input);
-  void setOutputBuffer(kj::ArrayPtr<kj::byte> output);
-  void setFlush(int flush);
-  kj::uint getAvailOut() const;
-  void getAfterWriteResult(uint32_t* availIn, uint32_t* availOut) const;
-  void setMode(ZlibMode _mode) {
-    mode = _mode;
-  }
-
-  void clearBuffers() {
-    nextIn = nullptr;
-    nextOut = nullptr;
-    availIn = 0;
-    availOut = 0;
-  }
-
-  struct Options {
-    jsg::Optional<int> flush;
-    jsg::Optional<int> finishFlush;
-    jsg::Optional<kj::uint> chunkSize;
-    jsg::Optional<jsg::Dict<int>> params;
-    jsg::Optional<kj::uint> maxOutputLength;
-    JSG_STRUCT(flush, finishFlush, chunkSize, params, maxOutputLength);
-  };
-
- protected:
-  CompressionAllocator& allocator;
-  ZlibMode mode;
-  const uint8_t* nextIn = nullptr;
-  uint8_t* nextOut = nullptr;
-  size_t availIn = 0;
-  size_t availOut = 0;
-  BrotliEncoderOperation flush = BROTLI_OPERATION_PROCESS;
-};
-
-class BrotliEncoderContext final: public BrotliContext {
- public:
-  static const ZlibMode Mode = ZlibMode::BROTLI_ENCODE;
-  explicit BrotliEncoderContext(CompressionAllocator& allocator, ZlibMode _mode);
-
-  KJ_DISALLOW_COPY_AND_MOVE(BrotliEncoderContext);
-
-  // Equivalent to Node.js' `DoThreadPoolWork` implementation.
-  void work();
-  kj::Maybe<CompressionError> initialize();
-  kj::Maybe<CompressionError> resetStream();
-  kj::Maybe<CompressionError> setParams(int key, uint32_t value);
-  kj::Maybe<CompressionError> getError() const;
-  bool isStreamEnd() const;
-
- private:
-  bool lastResult = false;
-  bool streamEnd = false;
-  kj::Own<BrotliEncoderStateStruct> state;
-};
-
-class BrotliDecoderContext final: public BrotliContext {
- public:
-  static const ZlibMode Mode = ZlibMode::BROTLI_DECODE;
-  explicit BrotliDecoderContext(CompressionAllocator& allocator, ZlibMode _mode);
-
-  KJ_DISALLOW_COPY_AND_MOVE(BrotliDecoderContext);
-
-  // Equivalent to Node.js' `DoThreadPoolWork` implementation.
-  void work();
-  kj::Maybe<CompressionError> initialize();
-  kj::Maybe<CompressionError> resetStream();
-  kj::Maybe<CompressionError> setParams(int key, uint32_t value);
-  kj::Maybe<CompressionError> getError() const;
-  bool isStreamEnd() const;
-
- private:
-  BrotliDecoderResult lastResult = BROTLI_DECODER_RESULT_SUCCESS;
-  BrotliDecoderErrorCode error = BROTLI_DECODER_NO_ERROR;
-  kj::String errorString;
-  kj::Own<BrotliDecoderStateStruct> state;
-};
-
-class ZstdContext {
- public:
-  explicit ZstdContext(ZlibMode _mode): mode(_mode) {}
-  KJ_DISALLOW_COPY(ZstdContext);
-
-  void setBuffers(kj::ArrayPtr<kj::byte> input, kj::ArrayPtr<kj::byte> output);
-  void setInputBuffer(kj::ArrayPtr<const kj::byte> input);
-  void setOutputBuffer(kj::ArrayPtr<kj::byte> output);
-  void setFlush(int flush);
-  kj::uint getAvailOut() const;
-  void getAfterWriteResult(uint32_t* availIn, uint32_t* availOut) const;
-  void setMode(ZlibMode _mode) {
-    mode = _mode;
-  }
-
-  void clearBuffers() {
-    input_ = {nullptr, 0, 0};
-    output_ = {nullptr, 0, 0};
-  }
-
-  struct Options {
-    jsg::Optional<int> flush;
-    jsg::Optional<int> finishFlush;
-    jsg::Optional<kj::uint> chunkSize;
-    jsg::Optional<jsg::Dict<int>> params;
-    jsg::Optional<kj::uint> maxOutputLength;
-    jsg::Optional<uint64_t> pledgedSrcSize;
-    JSG_STRUCT(flush, finishFlush, chunkSize, params, maxOutputLength, pledgedSrcSize);
-  };
-
- protected:
-  ZlibMode mode;
-  ZSTD_inBuffer input_{nullptr, 0, 0};
-  ZSTD_outBuffer output_{nullptr, 0, 0};
-  ZSTD_EndDirective flush_ = ZSTD_e_continue;
-};
-
-class ZstdEncoderContext final: public ZstdContext {
- public:
-  static const ZlibMode Mode = ZlibMode::ZSTD_ENCODE;
-  explicit ZstdEncoderContext(ZlibMode _mode);
-  explicit ZstdEncoderContext(CompressionAllocator& _allocator, ZlibMode _mode)
-      : ZstdEncoderContext(_mode) {}
-  KJ_DISALLOW_COPY_AND_MOVE(ZstdEncoderContext);
-
-  void work();
-  kj::Maybe<CompressionError> initialize(uint64_t pledgedSrcSize);
-  kj::Maybe<CompressionError> resetStream();
-  kj::Maybe<CompressionError> setParams(int key, int value);
-  kj::Maybe<CompressionError> getError() const;
-  bool isStreamEnd() const;
-
- private:
-  size_t lastResult = 0;
-  kj::Own<ZSTD_CCtx> cctx_;
-  ZSTD_ErrorCode error_ = ZSTD_error_no_error;
-};
-
-class ZstdDecoderContext final: public ZstdContext {
- public:
-  static const ZlibMode Mode = ZlibMode::ZSTD_DECODE;
-  explicit ZstdDecoderContext(ZlibMode _mode);
-  explicit ZstdDecoderContext(CompressionAllocator& _allocator, ZlibMode _mode)
-      : ZstdDecoderContext(_mode) {}
-  KJ_DISALLOW_COPY_AND_MOVE(ZstdDecoderContext);
-
-  void work();
-  kj::Maybe<CompressionError> initialize();
-  kj::Maybe<CompressionError> resetStream();
-  kj::Maybe<CompressionError> setParams(int key, int value);
-  kj::Maybe<CompressionError> getError() const;
-  bool isStreamEnd() const;
-
- private:
-  size_t lastResult = 0;
-  kj::Own<ZSTD_DCtx> dctx_;
-  ZSTD_ErrorCode error_ = ZSTD_error_no_error;
-  bool frameInProgress_ = false;
-};
 
 // Implements utilities in support of the Node.js Zlib
 class ZlibUtil final: public jsg::Object {
@@ -839,21 +645,15 @@ class ZlibUtil final: public jsg::Object {
 
 #define EW_NODE_ZLIB_ISOLATE_TYPES                                                                 \
   api::node::ZlibUtil, api::node::ZlibUtil::ZlibStream,                                            \
-      api::node::ZlibUtil::BrotliCompressionStream<api::node::BrotliEncoderContext>,               \
-      api::node::ZlibUtil::BrotliCompressionStream<api::node::BrotliDecoderContext>,               \
-      api::node::ZlibUtil::ZstdCompressionStream<api::node::ZstdEncoderContext>,                   \
-      api::node::ZlibUtil::ZstdCompressionStream<api::node::ZstdDecoderContext>,                   \
+      api::node::ZlibUtil::BrotliCompressionStream<api::BrotliEncoderContext>,                     \
+      api::node::ZlibUtil::BrotliCompressionStream<api::BrotliDecoderContext>,                     \
+      api::node::ZlibUtil::ZstdCompressionStream<api::ZstdEncoderContext>,                         \
+      api::node::ZlibUtil::ZstdCompressionStream<api::ZstdDecoderContext>,                         \
       api::node::ZlibUtil::CompressionStream<api::node::ZlibContext>,                              \
-      api::node::ZlibUtil::CompressionStream<api::node::BrotliEncoderContext>,                     \
-      api::node::ZlibUtil::CompressionStream<api::node::BrotliDecoderContext>,                     \
-      api::node::ZlibUtil::CompressionStream<api::node::ZstdEncoderContext>,                       \
-      api::node::ZlibUtil::CompressionStream<api::node::ZstdDecoderContext>,                       \
-      api::node::ZlibContext::Options, api::node::BrotliContext::Options,                          \
-      api::node::ZstdContext::Options
+      api::node::ZlibUtil::CompressionStream<api::BrotliEncoderContext>,                           \
+      api::node::ZlibUtil::CompressionStream<api::BrotliDecoderContext>,                           \
+      api::node::ZlibUtil::CompressionStream<api::ZstdEncoderContext>,                             \
+      api::node::ZlibUtil::CompressionStream<api::ZstdDecoderContext>,                             \
+      api::node::ZlibContext::Options, api::BrotliContext::Options, api::ZstdContext::Options
 
 }  // namespace workerd::api::node
-
-KJ_DECLARE_NON_POLYMORPHIC(BrotliEncoderStateStruct)
-KJ_DECLARE_NON_POLYMORPHIC(BrotliDecoderStateStruct)
-KJ_DECLARE_NON_POLYMORPHIC(ZSTD_CCtx)
-KJ_DECLARE_NON_POLYMORPHIC(ZSTD_DCtx)
