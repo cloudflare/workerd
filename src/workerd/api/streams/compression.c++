@@ -309,25 +309,6 @@ class CompressionStreamAdapter final: public kj::Refcounted,
 
 }  // namespace
 
-CompressionCodecHandle CompressionStream::newCodec(
-    jsg::Lock& js, kj::String mode, kj::String format) {
-  JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
-      "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
-  CodecStage::Mode codecMode;
-  CodecStage::Flags codecFlags = CodecStage::Flags::NONE;
-  if (mode == "compress") {
-    codecMode = CodecStage::Mode::COMPRESS;
-  } else if (mode == "decompress") {
-    codecMode = CodecStage::Mode::DECOMPRESS;
-    if (FeatureFlags::get(js).getStrictCompression()) {
-      codecFlags = CodecStage::Flags::STRICT;
-    }
-  } else {
-    JSG_FAIL_REQUIRE(TypeError, "The codec mode must be either 'compress' or 'decompress'.");
-  }
-  return newCompressionCodecHandle(codecMode, format, codecFlags, js.getExternalMemoryTarget());
-}
-
 jsg::Ref<CompressionStream> CompressionStream::constructor(jsg::Lock& js, kj::String format) {
   JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
       "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");

@@ -4,6 +4,7 @@
 
 #include "per-isolate-bootstrap.h"
 
+#include <workerd/api/compression.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
@@ -167,7 +168,10 @@ v8::Local<v8::Value> getMethod(jsg::Lock& js, v8::FunctionCallback callback) {
 // Creates an object with methods for performing fast type checks on JS values.
 // Because we are not fully bootstrapped at this point, we don't want to rely
 // on jsg::Object and the type wrapper system, etc. Instead, just use a plain
-// object with some properties set.
+// object with some properties set. (Members implemented in the api layer, like
+// newCompressionCodec, keep their knowledge there and are wired here by name;
+// their callbacks may use the type wrapper at CALL time -- the isolate is fully
+// set up by then -- through jsg::Lock's type-handler lookup.)
 jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
   static constexpr std::string_view names[] = {
 #define V(Name) "is" #Name,
@@ -177,6 +181,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
         "isAnyArrayBuffer",
     "markPromiseHandled",
     "getApiSymbol",
+    "newCompressionCodec",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -186,6 +191,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
         getFastMethodNoSideEffect(js, IsAnyArrayBuffer, &fast_is_any_array_buffer_),
     getFastMethod(js, MarkPromiseHandled, &fast_mark_promise_handled_),
     getMethod(js, GetApiSymbol),
+    getMethod(js, api::newCompressionCodecCallback),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());

@@ -4,6 +4,9 @@
 
 #include "compression.h"
 
+#include <workerd/io/features.h>
+#include <workerd/jsg/util.h>
+
 #include <nbytes.h>
 
 namespace workerd::api {
@@ -314,66 +317,63 @@ void CodecStage::pump(int flush) {
 }
 
 // =======================================================================================
-// CompressionCodecHandle
+// CompressionCodec
 
-// The refcounted box around the synchronous codec core, shared by the bootstrap handle's
-// method closures (see CompressionCodecHandle in the header). Fully defined only in this
-// translation unit; other TUs hold it strictly through the forward declaration + kj::Rc.
-class CompressionCodecStage final: public kj::Refcounted {
- public:
-  explicit CompressionCodecStage(CodecStage::Mode mode,
-      kj::StringPtr format,
-      CodecStage::Flags flags,
-      kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
-      : stage(mode, format, flags, kj::mv(externalMemoryTarget)) {}
-
-  CodecStage stage;
-};
-
-CompressionCodecHandle::CompressionCodecHandle(kj::Rc<CompressionCodecStage> stage)
-    : stage(kj::mv(stage)) {}
-CompressionCodecHandle::CompressionCodecHandle(CompressionCodecHandle&&) noexcept = default;
-CompressionCodecHandle::~CompressionCodecHandle() noexcept = default;
-
-jsg::Function<void(jsg::JsBufferSource)> CompressionCodecHandle::makePush() {
-  return jsg::Function<void(jsg::JsBufferSource)>(
-      [stage = stage.addRef()](jsg::Lock& js, jsg::JsBufferSource chunk) mutable {
-    // Synchronous, eager, and fully consuming: the caller's buffer is not retained (see
-    // CodecStage::push). Codec errors (including the strict-mode decompress checks) throw
-    // here, rejecting the write — the spec's transform-time error timing.
-    stage->stage.push(chunk.asArrayPtr());
-  });
-}
-
-jsg::Function<void()> CompressionCodecHandle::makeEnd() {
-  return jsg::Function<void()>([stage = stage.addRef()](jsg::Lock& js) mutable {
-    // Z_FINISH + strict end checks; throws reject the close.
-    stage->stage.end();
-  });
-}
-
-jsg::Function<uint32_t(jsg::JsBufferSource)> CompressionCodecHandle::makePullInto() {
-  return jsg::Function<uint32_t(jsg::JsBufferSource)>(
-      [stage = stage.addRef()](jsg::Lock& js, jsg::JsBufferSource view) mutable {
-    return static_cast<uint32_t>(stage->stage.pull(view.asArrayPtr()));
-  });
-}
-
-jsg::Function<double()> CompressionCodecHandle::makeAvailable() {
-  return jsg::Function<double()>([stage = stage.addRef()](jsg::Lock& js) mutable {
-    // double: a decompression stage buffer can in principle exceed uint32 range (the legacy
-    // implementation had the same unbounded buffering); JS numbers carry the full size
-    // exactly.
-    return static_cast<double>(stage->stage.available());
-  });
-}
-
-CompressionCodecHandle newCompressionCodecHandle(CodecStage::Mode mode,
+CompressionCodec::CompressionCodec(CodecStage::Mode mode,
     kj::StringPtr format,
     CodecStage::Flags flags,
-    kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget) {
-  return CompressionCodecHandle(
-      kj::rc<CompressionCodecStage>(mode, format, flags, kj::mv(externalMemoryTarget)));
+    kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+    : stage(mode, format, flags, kj::mv(externalMemoryTarget)) {}
+
+void CompressionCodec::push(jsg::JsBufferSource chunk) {
+  stage.push(chunk.asArrayPtr());
+}
+
+void CompressionCodec::end() {
+  stage.end();
+}
+
+uint32_t CompressionCodec::pullInto(jsg::JsBufferSource view) {
+  return static_cast<uint32_t>(stage.pull(view.asArrayPtr()));
+}
+
+double CompressionCodec::available() {
+  return static_cast<double>(stage.available());
+}
+
+void newCompressionCodecCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  // liftKj converts thrown kj/jsg exceptions (e.g. the validation TypeErrors below) into JS
+  // exceptions (without it they would escape the raw callback and take down the process) and
+  // sets the returned value as the callback's return value.
+  jsg::liftKj(info, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(info.GetIsolate());
+
+    auto modeStr = JSG_REQUIRE_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsString>(), TypeError,
+        "newCompressionCodec() expects a string mode argument");
+    auto formatStr = JSG_REQUIRE_NONNULL(jsg::JsValue(info[1]).tryCast<jsg::JsString>(), TypeError,
+        "newCompressionCodec() expects a string format argument");
+    auto mode = modeStr.toString(js);
+    auto format = formatStr.toString(js);
+
+    JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
+        "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
+    CodecStage::Mode codecMode;
+    CodecStage::Flags codecFlags = CodecStage::Flags::NONE;
+    if (mode == "compress") {
+      codecMode = CodecStage::Mode::COMPRESS;
+    } else if (mode == "decompress") {
+      codecMode = CodecStage::Mode::DECOMPRESS;
+      if (FeatureFlags::get(js).getStrictCompression()) {
+        codecFlags = CodecStage::Flags::STRICT;
+      }
+    } else {
+      JSG_FAIL_REQUIRE(TypeError, "The codec mode must be either 'compress' or 'decompress'.");
+    }
+
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<CompressionCodec>>());
+    return handler.wrap(js,
+        js.alloc<CompressionCodec>(codecMode, format, codecFlags, js.getExternalMemoryTarget()));
+  });
 }
 
 // =======================================================================================
