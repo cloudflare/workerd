@@ -845,6 +845,9 @@ jsg::Promise<void> ReadableStreamInternalController::cancel(
 void ReadableStreamInternalController::doCancel(
     jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   auto exception = reasonToException(js, maybeReason);
+  KJ_IF_SOME(locked, readState.tryGetUnsafe<PipeLocked>()) {
+    locked.cancelPump(exception);
+  }
   KJ_IF_SOME(locked, readState.tryGetUnsafe<ReaderLocked>()) {
     KJ_IF_SOME(canceler, locked.getCanceler()) {
       canceler->cancel(exception.clone());
@@ -2507,7 +2510,10 @@ kj::Maybe<kj::Ptr<ReadableStreamController::PipeController>> ReadableStreamInter
   if (isLockedToReader()) {
     return kj::none;
   }
-  return readState.transitionTo<PipeLocked>(addPtrToThis()).getPtr();
+  return readState
+      .transitionTo<PipeLocked>(
+          addPtrToThis(), IoContext::current().addObject(kj::heap<kj::Canceler>()))
+      .getPtr();
 }
 
 bool ReadableStreamInternalController::PipeLocked::isClosed() {
@@ -2547,7 +2553,8 @@ kj::Maybe<kj::Promise<void>> ReadableStreamInternalController::PipeLocked::tryPu
   // This is safe because the caller should have already checked isClosed and tryGetErrored
   // and handled those before calling tryPumpTo.
   auto& readable = KJ_ASSERT_NONNULL(inner->state.tryGetUnsafe<Readable>());
-  return IoContext::current().waitForDeferredProxy(readable->pumpTo(kj::mv(sink), end));
+  return pumpCanceler->wrap(
+      IoContext::current().waitForDeferredProxy(readable->pumpTo(kj::mv(sink), end)));
 }
 
 jsg::Promise<ReadResult> ReadableStreamInternalController::PipeLocked::read(jsg::Lock& js) {
