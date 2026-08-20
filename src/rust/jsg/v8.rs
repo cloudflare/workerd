@@ -403,6 +403,12 @@ pub mod ffi {
         ) -> Result<Vec<Global>>;
 
         // Local<TypedArray>
+        pub unsafe fn uint8_array_from_buffer(
+            isolate: *mut Isolate,
+            buffer: &Local,
+            byte_offset: usize,
+            length: usize,
+        ) -> Local;
         pub unsafe fn local_typed_array_length(isolate: *mut Isolate, array: &Local) -> usize;
         pub unsafe fn local_typed_array_buffer_data(isolate: *mut Isolate, array: &Local) -> usize;
         pub unsafe fn local_typed_array_byte_offset(isolate: *mut Isolate, array: &Local) -> usize;
@@ -2314,6 +2320,47 @@ impl_typed_array!(BigInt64Array, i64, local_bigint64_array_get);
 impl_typed_array!(BigUint64Array, u64, local_biguint64_array_get);
 // Uint8ClampedArray has the same element type as Uint8Array; clamping is a write-side JS concern.
 impl_typed_array!(Uint8ClampedArray, u8, local_uint8clamped_array_get);
+
+impl Uint8Array {
+    /// Creates a `Uint8Array` viewing `length` bytes of `buffer`, starting at
+    /// `byte_offset`.
+    ///
+    /// Zero-copy, unlike [`Vec<u8>::to_js`](crate::ToJS), which allocates a fresh
+    /// backing store and copies into it. Producing a `Uint8Array` from bytes computed
+    /// in Rust therefore does not require an intermediate `Vec`: allocate the buffer
+    /// with [`ArrayBuffer::new_with_mode`], fill it through
+    /// [`Local::<ArrayBuffer>::as_mut_slice`], and wrap the written prefix here.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `byte_offset + length` exceeds `buffer`'s byte length. The
+    /// check is repeated in C++, but failing it here keeps the failure a Rust
+    /// panic rather than a `kj::Exception` thrown across the bridge, which
+    /// this function's signature cannot carry.
+    pub fn from_buffer<'a>(
+        lock: &mut crate::Lock,
+        buffer: &Local<'_, ArrayBuffer>,
+        byte_offset: usize,
+        length: usize,
+    ) -> Local<'a, Self> {
+        let byte_length = buffer.byte_length();
+        assert!(
+            byte_offset <= byte_length && length <= byte_length - byte_offset,
+            "Uint8Array view [{byte_offset}, {byte_offset}+{length}) is out of bounds \
+             of its {byte_length}-byte ArrayBuffer"
+        );
+        let isolate = lock.isolate();
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active;
+        // `buffer` is a live handle to an ArrayBuffer. The bounds precondition is
+        // checked on the C++ side.
+        unsafe {
+            Local::from_ffi(
+                isolate,
+                ffi::uint8_array_from_buffer(isolate.as_ffi(), &buffer.handle, byte_offset, length),
+            )
+        }
+    }
+}
 
 // =============================================================================
 // `String`-specific implementations

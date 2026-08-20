@@ -206,6 +206,13 @@ Local local_new_float32_array(Isolate* isolate, const float* data, size_t length
 Local local_new_float64_array(Isolate* isolate, const double* data, size_t length);
 Local local_new_bigint64_array(Isolate* isolate, const int64_t* data, size_t length);
 Local local_new_biguint64_array(Isolate* isolate, const uint64_t* data, size_t length);
+// Creates a Uint8Array view over an existing ArrayBuffer, without copying. Unlike
+// local_new_uint8_array, which allocates a backing store and memcpys into it, this
+// lets a caller allocate the buffer up front, write into it directly, and only then
+// wrap the written prefix in a view. `byte_offset + length` must be within
+// `buffer`'s byte length.
+Local uint8_array_from_buffer(
+    Isolate* isolate, const Local& buffer, size_t byte_offset, size_t length);
 size_t local_typed_array_length(Isolate* isolate, const Local& array);
 // Returns a raw pointer to the underlying ArrayBuffer's data (without byte offset).
 // Use local_typed_array_byte_offset to compute the start of this view's data.
