@@ -178,7 +178,7 @@ class ReplayOutgoingFactory final: public Fetcher::OutgoingFactory {
  public:
   ReplayOutgoingFactory(ReplayState& state): state(state) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String>) override {
+  Result newSingleUseClient(kj::Maybe<kj::String>, MakeUserSpanParent) override {
     KJ_FAIL_ASSERT("replay tests should always supply actor retry metadata");
   }
 
@@ -190,10 +190,11 @@ class ReplayOutgoingFactory final: public Fetcher::OutgoingFactory {
     ++state.retryCount;
   }
 
-  kj::Own<WorkerInterface> newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String>,
-      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) override {
+  Result newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String>,
+      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata,
+      MakeUserSpanParent) override {
     state.metadata.add(KJ_REQUIRE_NONNULL(actorRetryRequestMetadata));
-    return kj::heap<ReplayFetchTarget>(state);
+    return {.client = kj::heap<ReplayFetchTarget>(state), .spanParents = kj::none};
   }
 
  private:
@@ -318,7 +319,9 @@ class ReplayActorChannel final: public IoChannelFactory::ActorChannel {
   ReplayActorChannel(ReplayState& state): state(state) {}
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-    state.metadata.add(KJ_REQUIRE_NONNULL(metadata.actorRetryRequestMetadata));
+    KJ_IF_SOME(retryMetadata, metadata.actorRetryRequestMetadata) {
+      state.metadata.add(kj::mv(retryMetadata));
+    }
     return kj::heap<ReplayFetchTarget>(state);
   }
 
@@ -572,9 +575,10 @@ KJ_TEST("actor fetch stops when the retry budget expires") {
   KJ_EXPECT(state.retryCount == 1);
 }
 
-KJ_TEST("actor fetch replay counts each physical subrequest") {
+KJ_TEST("replica actor fetch does not retry a disconnected primary channel") {
   ReplayState state{.failures = kj::arr(ReplayFailure::NOT_DELIVERED)};
   uint checkedSubrequestCount = 0;
+  kj::Maybe<kj::Exception> failure;
   TestFixture fixture(TestFixture::SetupParams{
     .useRealTimers = true,
     .checkedSubrequestCount = checkedSubrequestCount,
@@ -589,15 +593,17 @@ KJ_TEST("actor fetch replay counts each physical subrequest") {
             kj::refcounted<ReplayActorChannel>(state), kj::str("actor-id"))),
         Fetcher::RequiresHostAndProtocol::YES);
     auto promise = fetcher->fetch(env.js, kj::str("http://example.com"), kj::none);
-    return env.context.awaitJs(env.js, kj::mv(promise)).ignoreResult().attach(kj::mv(fetcher));
+    return env.context.awaitJs(env.js, kj::mv(promise))
+        .ignoreResult()
+        .catch_([&](kj::Exception&& exception) {
+      failure.emplace(kj::mv(exception));
+    }).attach(kj::mv(fetcher));
   });
 
-  KJ_EXPECT(state.requestCount == 2);
-  KJ_ASSERT(state.metadata.size() == 2);
-  KJ_EXPECT(state.metadata[0].nonce != state.metadata[1].nonce);
-  KJ_EXPECT(state.metadata[0].isRetry == IsActorRetry::NO);
-  KJ_EXPECT(state.metadata[1].isRetry == IsActorRetry::NO);
-  KJ_EXPECT(checkedSubrequestCount == 2);
+  KJ_EXPECT(failure != kj::none);
+  KJ_EXPECT(state.requestCount == 1);
+  KJ_EXPECT(state.metadata.empty());
+  KJ_EXPECT(checkedSubrequestCount == 1);
 }
 
 KJ_TEST("GlobalActorOutgoingFactory forwards metadata and recreates channels for retries") {
@@ -656,52 +662,6 @@ KJ_TEST("GlobalActorOutgoingFactory forwards metadata and recreates channels for
     KJ_ASSERT(cohorts.size() == 2);
     KJ_EXPECT(cohorts[0] == "cohort");
     KJ_EXPECT(cohorts[1] == "cohort");
-  });
-}
-
-KJ_TEST("ReplicaActorOutgoingFactory forwards metadata and counts retry subrequests") {
-  kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> capturedMetadata;
-  uint checkedSubrequestCount = 0;
-  TestFixture fixture(TestFixture::SetupParams{
-    .useRealTimers = false,
-    .checkedSubrequestCount = checkedSubrequestCount,
-  });
-
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    ReplicaActorOutgoingFactory factory(
-        kj::refcounted<RecordingActorChannel>(capturedMetadata), kj::str("actor-id"));
-    KJ_EXPECT(factory.supportsActorFetchRetries());
-
-    auto client = factory.newSingleUseClientWithActorRetryMetadata(kj::none,
-        IoChannelFactory::ActorRetryRequestMetadata{
-          .nonce = 0x123456789abcdef0,
-          .createdAt = kj::UNIX_EPOCH + 123 * kj::MILLISECONDS,
-          .isRetry = IsActorRetry::YES,
-        },
-        [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
-
-    KJ_IF_SOME(metadata, capturedMetadata) {
-      KJ_EXPECT(metadata.nonce == 0x123456789abcdef0);
-      KJ_EXPECT(metadata.createdAt == kj::UNIX_EPOCH + 123 * kj::MILLISECONDS);
-      KJ_EXPECT(metadata.isRetry == IsActorRetry::YES);
-    } else {
-      KJ_FAIL_EXPECT("actor retry metadata was not forwarded to the actor channel");
-    }
-
-    factory.onActorFetchRetry();
-    auto retryClient = factory.newSingleUseClientWithActorRetryMetadata(kj::none,
-        IoChannelFactory::ActorRetryRequestMetadata{
-          .nonce = 0xfedcba9876543210,
-          .createdAt = kj::UNIX_EPOCH + 456 * kj::MILLISECONDS,
-          .isRetry = IsActorRetry::YES,
-        },
-        [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
-    KJ_EXPECT(checkedSubrequestCount == 2);
-    KJ_IF_SOME(metadata, capturedMetadata) {
-      KJ_EXPECT(metadata.nonce == 0xfedcba9876543210);
-    } else {
-      KJ_FAIL_EXPECT("actor retry metadata was not forwarded through the existing channel");
-    }
   });
 }
 
