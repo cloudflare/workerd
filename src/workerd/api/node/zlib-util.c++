@@ -178,7 +178,7 @@ kj::Maybe<CompressionError> ZlibContext::getError() const {
   switch (err) {
     case Z_OK:
     case Z_BUF_ERROR:
-      if (stream.avail_out != 0 && flush == Z_FINISH) {
+      if (core.availOut() != 0 && flush == Z_FINISH) {
         return constructError("unexpected end of file"_kj);
       }
       break;
@@ -209,10 +209,10 @@ kj::Maybe<CompressionError> ZlibContext::setDictionary() {
   switch (mode) {
     case ZlibMode::DEFLATE:
     case ZlibMode::DEFLATERAW:
-      err = deflateSetDictionary(&stream, dictionary.begin(), dictionary.size());
+      err = deflateSetDictionary(&core.raw(), dictionary.begin(), dictionary.size());
       break;
     case ZlibMode::INFLATERAW:
-      err = inflateSetDictionary(&stream, dictionary.begin(), dictionary.size());
+      err = inflateSetDictionary(&core.raw(), dictionary.begin(), dictionary.size());
       break;
     default:
       break;
@@ -226,40 +226,44 @@ kj::Maybe<CompressionError> ZlibContext::setDictionary() {
 }
 
 bool ZlibContext::initializeZlib() {
-  if (initialized) {
+  if (core.isInitialized()) {
     return false;
   }
 
-  // zlib's manual states: "The application must initialize zalloc, zfree and opaque before calling
-  // the init function."
-  stream.zalloc = CompressionAllocator::AllocForZlib;
-  stream.zfree = CompressionAllocator::FreeForZlib;
-  stream.opaque = &allocator;
+  // The shared core wired the allocator hooks at construction; here we only pick the
+  // compression direction and hand over the (mode-adjusted) parameters.
+  auto direction = [&]() {
+    switch (mode) {
+      case ZlibMode::DEFLATE:
+      case ZlibMode::GZIP:
+      case ZlibMode::DEFLATERAW:
+        return ZlibStream::Mode::COMPRESS;
+      case ZlibMode::INFLATE:
+      case ZlibMode::GUNZIP:
+      case ZlibMode::INFLATERAW:
+      case ZlibMode::UNZIP:
+        return ZlibStream::Mode::DECOMPRESS;
+      default:
+        KJ_UNREACHABLE;
+    }
+  }();
 
-  switch (mode) {
-    case ZlibMode::DEFLATE:
-    case ZlibMode::GZIP:
-    case ZlibMode::DEFLATERAW:
-      err = deflateInit2(&stream, level, Z_DEFLATED, windowBits, memLevel, strategy);
-      break;
-    case ZlibMode::INFLATE:
-    case ZlibMode::GUNZIP:
-    case ZlibMode::INFLATERAW:
-    case ZlibMode::UNZIP:
-      err = inflateInit2(&stream, windowBits);
-      break;
-    default:
-      KJ_UNREACHABLE;
-  }
-
-  if (err != Z_OK) {
+  err = Z_OK;
+  KJ_IF_SOME(code,
+      core.init(direction,
+          ZlibStream::Options{
+            .windowBits = windowBits,
+            .level = level,
+            .memLevel = memLevel,
+            .strategy = strategy,
+          })) {
+    err = code;
     dictionary.clear();
     mode = ZlibMode::NONE;
     return true;
   }
 
   setDictionary();
-  initialized = true;
   return true;
 }
 
@@ -273,12 +277,12 @@ kj::Maybe<CompressionError> ZlibContext::resetStream() {
     case ZlibMode::DEFLATE:
     case ZlibMode::DEFLATERAW:
     case ZlibMode::GZIP:
-      err = deflateReset(&stream);
-      break;
     case ZlibMode::INFLATE:
     case ZlibMode::INFLATERAW:
     case ZlibMode::GUNZIP:
-      err = inflateReset(&stream);
+      KJ_IF_SOME(code, core.reset()) {
+        err = code;
+      }
       break;
     default:
       break;
@@ -298,6 +302,7 @@ void ZlibContext::work() {
   }
 
   const Bytef* next_expected_header_byte = nullptr;
+  auto& stream = core.raw();
 
   // If the avail_out is left at 0, then it means that it ran out
   // of room.  If there was avail_out left over, then it means
@@ -306,7 +311,7 @@ void ZlibContext::work() {
     case ZlibMode::DEFLATE:
     case ZlibMode::GZIP:
     case ZlibMode::DEFLATERAW:
-      err = deflate(&stream, flush);
+      err = core.run(flush);
       break;
     case ZlibMode::UNZIP:
       if (stream.avail_in > 0) {
@@ -356,16 +361,16 @@ void ZlibContext::work() {
     case ZlibMode::INFLATE:
     case ZlibMode::GUNZIP:
     case ZlibMode::INFLATERAW:
-      err = inflate(&stream, flush);
+      err = core.run(flush);
 
       // If data was encoded with dictionary (INFLATERAW will have it set in
       // SetDictionary, don't repeat that here)
       if (mode != ZlibMode::INFLATERAW && err == Z_NEED_DICT && !dictionary.empty()) {
         // Load it
-        err = inflateSetDictionary(&stream, dictionary.begin(), dictionary.size());
+        err = inflateSetDictionary(&core.raw(), dictionary.begin(), dictionary.size());
         if (err == Z_OK) {
           // And try to decode again
-          err = inflate(&stream, flush);
+          err = core.run(flush);
         } else if (err == Z_DATA_ERROR) {
           // Both inflateSetDictionary() and inflate() return Z_DATA_ERROR.
           // Make it possible for After() to tell a bad dictionary from bad
@@ -382,7 +387,7 @@ void ZlibContext::work() {
         // used for padding.
 
         resetStream();
-        err = inflate(&stream, flush);
+        err = core.run(flush);
       }
       break;
     default:
@@ -400,7 +405,7 @@ kj::Maybe<CompressionError> ZlibContext::setParams(int _level, int _strategy) {
   switch (mode) {
     case ZlibMode::DEFLATE:
     case ZlibMode::DEFLATERAW:
-      err = deflateParams(&stream, _level, _strategy);
+      err = deflateParams(&core.raw(), _level, _strategy);
       break;
     default:
       break;
@@ -414,47 +419,30 @@ kj::Maybe<CompressionError> ZlibContext::setParams(int _level, int _strategy) {
 }
 
 ZlibContext::~ZlibContext() noexcept(false) {
-  if (!initialized) {
+  if (!core.isInitialized()) {
     return;
   }
 
-  auto status = Z_OK;
-  switch (mode) {
-    case ZlibMode::DEFLATE:
-    case ZlibMode::DEFLATERAW:
-    case ZlibMode::GZIP:
-      status = deflateEnd(&stream);
-      break;
-    case ZlibMode::INFLATE:
-    case ZlibMode::INFLATERAW:
-    case ZlibMode::GUNZIP:
-    case ZlibMode::UNZIP:
-      status = inflateEnd(&stream);
-      break;
-    default:
-      break;
-  }
+  // Modes that never initialized a stream had nothing to end; for the rest, the shared
+  // core's end() dispatches deflateEnd/inflateEnd by direction, matching the historical
+  // per-mode switch.
+  auto status = core.end();
 
   JSG_REQUIRE(
       status == Z_OK || status == Z_DATA_ERROR, Error, "Uncaught error on closing zlib stream");
 }
 
 void ZlibContext::setBuffers(kj::ArrayPtr<kj::byte> input, kj::ArrayPtr<kj::byte> output) {
-  stream.avail_in = input.size();
-  stream.next_in = input.begin();
-  stream.avail_out = output.size();
-  stream.next_out = output.begin();
+  core.setInput(input);
+  core.setOutput(output);
 }
 
 void ZlibContext::setInputBuffer(kj::ArrayPtr<const kj::byte> input) {
-  // The define Z_CONST is not set, so zlib always takes mutable pointers
-  stream.next_in = const_cast<kj::byte*>(input.begin());
-  stream.avail_in = input.size();
+  core.setInput(input);
 }
 
 void ZlibContext::setOutputBuffer(kj::ArrayPtr<kj::byte> output) {
-  stream.next_out = output.begin();
-  stream.avail_out = output.size();
+  core.setOutput(output);
 }
 
 template <typename CompressionContext>
