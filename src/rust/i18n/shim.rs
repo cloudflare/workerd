@@ -15,10 +15,13 @@ use crate::ffi;
 ///
 /// Wraps a `cxx::UniquePtr<ffi::Converter>`: the underlying `UConverter*` and
 /// its `ucnv_close()` teardown are owned entirely by the C++ shim, so the
-/// converter is torn down correctly even if Rust code holding it panics.
+/// converter is torn down correctly even if Rust code holding it panics --
+/// unlike a raw `UConverter*` smuggled across the FFI boundary, which a panic
+/// could leak.
 pub struct Converter(cxx::UniquePtr<ffi::Converter>);
 
-/// Returns the ICU converter name for a transcodable encoding.
+/// Returns the ICU converter name for a transcodable encoding, matching
+/// `getEncodingName()` in `i18n.c++`.
 ///
 /// The bridge `Encoding` enum is a `cxx` shared enum, which is a `u8` newtype
 /// rather than a real Rust enum, so a value outside the four declared variants
