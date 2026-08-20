@@ -93,13 +93,9 @@ export default {
       'data should be correctly decompressed even if input is detached partway',
     ],
   },
-  'idlharness.https.any.js': {
-    comment:
-      'Workers expose globals differently than browsers - readable/writable attribute tests still fail',
-    expectedFailures: [
-      'CompressionStream interface: existence and properties of interface prototype object',
-      'DecompressionStream interface: existence and properties of interface prototype object',
-    ],
-  },
+  // The interface-prototype subtests that fail against the legacy classes (see
+  // compression-test.ts) pass against the TypeScript pair: its prototype property
+  // attributes follow the IDL rules.
+  'idlharness.https.any.js': {},
   'third_party/pako/pako_inflate.min.js': {},
 } satisfies TestRunnerConfig;
