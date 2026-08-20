@@ -406,6 +406,14 @@ class WritableStreamNativeSink final: public jsg::Object {
   // close in flight).
   bool writeInFlight = false;
 
+  // True while closeImpl()'s end() is outstanding (including while parked on the actor
+  // output gate). Unlike writeInFlight this is not merely defensive: pipeFrom() extraction
+  // bypasses the sink-hook serialization (the TS pipe dispatch rejects close-queued
+  // destinations, but the sink's preconditions must not depend on that gate), and the
+  // in-flight end() references the sink, so moving it into a pump would be a
+  // use-after-free.
+  bool closeInFlight = false;
+
   // Set when abort() arrives while a write's I/O is in flight: the sink's release is
   // deferred to the write's settlement.
   bool pendingAbort = false;

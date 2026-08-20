@@ -21,7 +21,14 @@ const {
   TextDecoderStream,
 } = globalThis;
 
-import { doesNotMatch, ok, rejects, strictEqual, throws } from 'node:assert';
+import {
+  deepStrictEqual,
+  doesNotMatch,
+  ok,
+  rejects,
+  strictEqual,
+  throws,
+} from 'node:assert';
 
 export const existenceTest = {
   test() {
@@ -257,6 +264,59 @@ export const iterableBodyReaderRead = {
     strictEqual(new TextDecoder().decode(first.value), 'hello world');
     const eof = await reader.read();
     strictEqual(eof.done, true);
+  },
+};
+
+// Internal stream production (ReadableStream.from and the iterable-body path,
+// whose C++ arm drives the same queued controller) must not dispatch through
+// the user-patchable ReadableStreamDefaultController prototype: per WHATWG,
+// from() uses internal controller operations, so patched enqueue/close must
+// have no effect on either surface.
+export const controllerPrototypePollution = {
+  async test() {
+    const proto = ReadableStreamDefaultController.prototype;
+    const origEnqueue = proto.enqueue;
+    const origClose = proto.close;
+    const trapped = [];
+    proto.enqueue = function (...args) {
+      trapped.push('enqueue');
+      return origEnqueue.apply(this, args);
+    };
+    proto.close = function (...args) {
+      trapped.push('close');
+      return origClose.apply(this, args);
+    };
+    try {
+      // ReadableStream.from (TS-internal production).
+      {
+        const stream = ReadableStream.from(['pol', 'lution', '-proof']);
+        const reader = stream.getReader();
+        let text = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          text += value;
+        }
+        strictEqual(text, 'pollution-proof');
+      }
+
+      // Iterable body (the C++ from() arm driving the same controller).
+      {
+        async function* agen() {
+          yield new TextEncoder().encode('body intact');
+        }
+        strictEqual(await new Response(agen()).text(), 'body intact');
+      }
+
+      deepStrictEqual(
+        trapped,
+        [],
+        `internal production dispatched through patched prototype: ${trapped.join(', ')}`
+      );
+    } finally {
+      proto.enqueue = origEnqueue;
+      proto.close = origClose;
+    }
   },
 };
 

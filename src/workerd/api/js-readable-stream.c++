@@ -531,14 +531,16 @@ JsReadableStream JsReadableStream::from(jsg::Lock& js, jsg::AsyncGenerator<jsg::
         if (handle->IsPromise()) {
           return js.toPromise(handle.As<v8::Promise>())
               .then(js, [controller = kj::mv(controller)](jsg::Lock& js, jsg::Value val) mutable {
-            webstreams::invokeMethod(
-                js, controller.getHandle(js), "enqueue"_kj, jsg::JsValue(val.getHandle(js)));
+            webstreams::dispatchCall(js, "readableControllerEnqueue",
+                jsg::JsValue(controller.getHandle(js)), jsg::JsValue(val.getHandle(js)));
             return js.v8Ref<v8::Value>(js.v8Undefined());
           });
         }
-        webstreams::invokeMethod(js, controller.getHandle(js), "enqueue"_kj, jsg::JsValue(handle));
+        webstreams::dispatchCall(js, "readableControllerEnqueue",
+            jsg::JsValue(controller.getHandle(js)), jsg::JsValue(handle));
       } else {
-        webstreams::invokeMethod(js, controller.getHandle(js), "close"_kj);
+        webstreams::dispatchCall(
+            js, "readableControllerClose", jsg::JsValue(controller.getHandle(js)));
       }
       return js.resolvedPromise(js.v8Ref<v8::Value>(js.v8Undefined()));
     });

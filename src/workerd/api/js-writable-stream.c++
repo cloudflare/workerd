@@ -554,8 +554,10 @@ jsg::Promise<void> WritableStreamNativeSink::closeImpl(jsg::Lock& js) {
     auto& ioContext = IoContext::current();
     // Durable Object output gate: like the legacy controller's queued Close event, the
     // sink must not be ended while an output lock is pending. The sink reference stays
-    // valid across the wait: the TS machinery serializes sink operations, and abort()
-    // only releases the sink itself.
+    // valid across the wait: the TS machinery serializes sink operations, abort() only
+    // releases the sink itself, and pipeFrom() -- the one path that could move the sink
+    // out from under this wait -- rejects while closeInFlight is set.
+    closeInFlight = true;
     kj::Promise<void> endPromise = nullptr;
     KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
       endPromise = lock.then([&sink = *active.sink]() { return sink.end(); });
@@ -564,9 +566,11 @@ jsg::Promise<void> WritableStreamNativeSink::closeImpl(jsg::Lock& js) {
     }
     return ioContext
         .awaitIo(js, kj::mv(endPromise), [self = JSG_THIS](jsg::Lock& js) mutable {
+      self->closeInFlight = false;
       self->state = kj::none;
     }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
       // The end failed; the sink is no longer usable either way.
+      self->closeInFlight = false;
       self->state = kj::none;
       js.throwException(kj::mv(exception));
     });
@@ -620,6 +624,10 @@ jsg::Promise<void> WritableStreamNativeSink::pipeFrom(
   // aborted out from under the pipe.
   auto& active = JSG_REQUIRE_NONNULL(state, TypeError, "This WritableStream has been closed.");
   JSG_REQUIRE(!writeInFlight, TypeError, "pipeFrom() while a write is in flight.");
+  // The TS pipe dispatch rejects close-queued destinations before extracting, so this is
+  // unreachable through pipeTo; it keeps the sink's lifetime preconditions self-contained
+  // (the in-flight end() references the sink this call would move into the pump).
+  JSG_REQUIRE(!closeInFlight, TypeError, "pipeFrom() while a close() is in flight.");
 
   // The TS dispatch converted and validated the options BEFORE extraction (spec getter
   // order, spec error text), so these are side-effect-free reads of plain data

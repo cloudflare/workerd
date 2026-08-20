@@ -1041,6 +1041,118 @@ KJ_TEST("WritableStreamNativeSink close waits for the actor output gate") {
       kActorErrorsToIgnore);
 }
 
+KJ_TEST("JsReadableStream pipeTo native+native rejects a close-queued destination") {
+  auto fixture = makeTsStreamsFixture();
+  SinkState state;
+  bool cancelled = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = JsReadableStream::create(
+        js, env.context, kj::heap<CancelRecordingSource>(kData, cancelled));
+    auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
+
+    // Queue a close on the destination (writer close + releaseLock leaves the stream
+    // unlocked, state still 'writable', with the close queued/in flight).
+    auto handle = KJ_ASSERT_NONNULL(destination.tryGetTs(js));
+    auto writer = KJ_ASSERT_NONNULL(
+        webstreams::invokeMethod(js, handle, "getWriter"_kj).tryCast<jsg::JsObject>());
+    auto closeResult KJ_UNUSED = webstreams::invokeMethod(js, writer, "close"_kj);
+    auto releaseResult KJ_UNUSED = webstreams::invokeMethod(js, writer, "releaseLock"_kj);
+
+    // Spec (closing must be propagated backward) and legacy tryPipeFrom both reject a
+    // closing destination; the native+native fast path must not pump instead.
+    auto promise = source.pipeTo(js, destination).then(js, [](jsg::Lock& js) -> void {
+      KJ_FAIL_REQUIRE("expected pipeTo() to a close-queued destination to reject");
+    }, [](jsg::Lock& js, jsg::Value exception) -> void {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("Destination closed before the pipe completed"),
+          e.getDescription());
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  // Propagate-backward cancels the source; nothing may have been pumped.
+  KJ_EXPECT(cancelled);
+  KJ_EXPECT(state.written.size() == 0);
+}
+
+KJ_TEST("WritableStreamNativeSink pipeFrom rejects while a close is in flight") {
+  auto fixture = makeTsStreamsActorFixture("test-actor-ts-pipefrom-close");
+  SinkState state;
+  // Owned at test scope: continuations observe these after the body returns.
+  kj::Maybe<kj::Promise<void>> blocker;
+  fixture.runInIoContext(kj::Function<kj::Promise<void>(const TestFixture::Environment&)>(
+                             [&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+    auto& actor = env.context.getActorOrThrow();
+
+    // Park the close's end() on the output gate.
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    blocker = actor.getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
+    auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
+    auto handle = KJ_ASSERT_NONNULL(destination.tryGetTs(js));
+    auto writer = KJ_ASSERT_NONNULL(
+        webstreams::invokeMethod(js, handle, "getWriter"_kj).tryCast<jsg::JsObject>());
+    auto closeResult KJ_UNUSED = webstreams::invokeMethod(js, writer, "close"_kj);
+    auto releaseResult KJ_UNUSED = webstreams::invokeMethod(js, writer, "releaseLock"_kj);
+
+    auto sequence =
+        env.context
+            .awaitIo(js, settleTurns(10),
+                [&state](jsg::Lock& js) { KJ_EXPECT(!state.ended, "close must be parked"); })
+            .then(js,
+                JSG_VISITABLE_LAMBDA((destination = kj::mv(destination),
+                                         fulfiller = kj::mv(paf.fulfiller), &context = env.context),
+                    (destination),
+                    (jsg::Lock & js) mutable {
+                      // Extract the sink the way the pipe dispatch would (extraction checks
+                      // only the lock, which releaseLock cleared) and call pipeFrom
+                      // directly, bypassing the TS dispatch gate: the sink's own
+                      // close-in-flight precondition must reject -- the parked end() still
+                      // references the sink, so moving it into a pump would be a
+                      // use-after-free.
+                      auto handle = KJ_ASSERT_NONNULL(destination.tryGetTs(js));
+                      auto extractor =
+                          KJ_ASSERT_NONNULL(handle.get(js, js.symbolInternal("kExtractNativeSink"))
+                                                .tryCast<jsg::JsFunction>());
+                      auto sinkObj =
+                          KJ_ASSERT_NONNULL(extractor.call(js, handle).tryCast<jsg::JsObject>());
+                      auto& sinkHandler = KJ_ASSERT_NONNULL(
+                          js.tryGetTypeHandler<jsg::Ref<WritableStreamNativeSink>>());
+                      auto sink =
+                          KJ_ASSERT_NONNULL(sinkHandler.tryUnwrap(js, jsg::JsValue(sinkObj)));
+
+                      auto& sourceHandler = KJ_ASSERT_NONNULL(
+                          js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+                      auto sourceObj = KJ_ASSERT_NONNULL(
+                          jsg::JsValue(sourceHandler.wrap(js,
+                                           js.alloc<ReadableStreamNativeSource>(
+                                               context, kj::heap<ContentSource>("x"_kj))))
+                              .tryCast<jsg::JsObject>());
+
+                      bool threw = false;
+                      js.tryCatch([&]() {
+                        auto p KJ_UNUSED = sink->pipeFrom(js, sourceObj, js.obj());
+                      }, [&](jsg::Value exception) {
+                        threw = true;
+                        auto e = js.exceptionToKj(kj::mv(exception));
+                        KJ_EXPECT(e.getDescription().contains("close() is in flight"),
+                            e.getDescription());
+                      });
+                      KJ_EXPECT(threw, "expected pipeFrom() with a close in flight to throw");
+
+                      // Unpark; the close must complete cleanly against the still-owned
+                      // sink.
+                      fulfiller->fulfill();
+                    }))
+            .then(js, [&context = env.context](jsg::Lock& js) {
+      return context.awaitIo(js, settleTurns(10), [](jsg::Lock& js) {});
+    }).then(js, [&state](jsg::Lock& js) { KJ_EXPECT(state.ended); });
+    return env.context.awaitJs(js, kj::mv(sequence));
+  }),
+      kActorErrorsToIgnore);
+}
+
 KJ_TEST("WritableStreamNativeSink pipeFrom waits for the actor output gate") {
   auto fixture = makeTsStreamsActorFixture("test-actor-ts-pipe-gate");
   SinkState state;

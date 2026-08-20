@@ -678,14 +678,6 @@ class ReadableStreamReaderBase<R> {
   }
 }
 
-// The default-read core, shared by ReadableStreamDefaultReader.read() and
-// the async-iterator read path. Internal callers MUST use this rather than
-// the public read() — reader prototypes end up user-reachable, so internal
-// dispatch through them would be interceptable.
-//
-// BACKEND-BLIND: this function programs against StreamConsumer and must
-// never branch on the backend. (The autoAllocate check below is the ONE
-// sanctioned queued-byte-specific check — see the marker.)
 // The user-visible error for reads/pipes/tees attempted after the stream's
 // owning object initiated closure (see #pendingClosure). The text matches
 // the legacy internal controller's exactly.
@@ -695,6 +687,14 @@ function pendingClosureError(): TypeError {
   );
 }
 
+// The default-read core, shared by ReadableStreamDefaultReader.read() and
+// the async-iterator read path. Internal callers MUST use this rather than
+// the public read() — reader prototypes end up user-reachable, so internal
+// dispatch through them would be interceptable.
+//
+// BACKEND-BLIND: this function programs against StreamConsumer and must
+// never branch on the backend. (The autoAllocate check below is the ONE
+// sanctioned queued-byte-specific check — see the marker.)
 function defaultReaderReadInternal<R>(
   reader: object,
   stream: ReadableStream<R>
@@ -3056,7 +3056,11 @@ class ReadableStream<R> {
           !preventClose &&
           !source.#disturbed &&
           source.#state === 'readable' &&
-          writableInternals.getState(destination) === 'writable'
+          writableInternals.getState(destination) === 'writable' &&
+          // Closing must be propagated backward (and extraction would move
+          // the native sink out from under its in-flight end()): a
+          // close-queued destination takes the JS pump, which rejects it.
+          !writableInternals.closeQueuedOrInFlight(destination)
         ) {
           // Captured-call discipline: Function.prototype.call is patchable,
           // so re-bind both extractors and the hook through uncurryThis
@@ -3808,8 +3812,8 @@ class ReadableStream<R> {
       const chunk = iterable as unknown as R;
       return new ReadableStream<R>({
         pull(controller: ReadableStreamDefaultControllerType) {
-          controller.enqueue(chunk);
-          controller.close();
+          defaultControllerEnqueue(controller, chunk);
+          defaultControllerClose(controller);
         },
       });
     }
@@ -3841,9 +3845,9 @@ class ReadableStream<R> {
                 throw new TypeError('The result of next() must be an object');
               }
               if (next.done) {
-                return controller.close();
+                return defaultControllerClose(controller);
               }
-              controller.enqueue(next.value);
+              defaultControllerEnqueue(controller, next.value);
             },
             async cancel(reason?: unknown) {
               const returnMethod = asyncIterator.return;
@@ -3893,10 +3897,10 @@ class ReadableStream<R> {
               // awaits thenables (including Promises).
               const value = await next.value;
               if (next.done) {
-                controller.close();
+                defaultControllerClose(controller);
                 return;
               }
-              controller.enqueue(value as R);
+              defaultControllerEnqueue(controller, value as R);
             },
             async cancel(reason?: unknown) {
               const returnMethod = syncIterator.return;
@@ -4134,6 +4138,18 @@ ObjectDefineProperties(ReadableStreamDefaultController.prototype, {
     configurable: true,
   },
 });
+
+// Captured controller operations for INTERNAL stream production (from() and
+// the C++ iterable-body arm via the cppExports below). The prototype is
+// user-reachable once the class is installed as a global, so internal
+// production must not dispatch through it -- per WHATWG, from() uses
+// internal controller operations, unaffected by prototype patching.
+const defaultControllerEnqueue = uncurryThis(
+  ReadableStreamDefaultController.prototype.enqueue
+) as (controller: object, chunk: unknown) => void;
+const defaultControllerClose = uncurryThis(
+  ReadableStreamDefaultController.prototype.close
+) as (controller: object) => void;
 ObjectDefineProperties(ReadableByteStreamController.prototype, {
   __proto__: null,
   close: kEnumerable,
@@ -4177,6 +4193,13 @@ ObjectDefineProperties(ReadableByteStreamController.prototype.enqueue, {
 const cppExports = ObjectFreeze({
   ReadableStream,
   acquireReadableStreamDrainingReader,
+  // Internal controller operations for the C++ iterable-body arm
+  // (JsReadableStream::from): production must not dispatch through the
+  // user-patchable controller prototype. See defaultControllerEnqueue.
+  readableControllerEnqueue: (controller: object, chunk: unknown): void =>
+    defaultControllerEnqueue(controller, chunk),
+  readableControllerClose: (controller: object): void =>
+    defaultControllerClose(controller),
   consumeReadableStreamAsArrayBuffer,
   consumeReadableStreamAsJSON,
   consumeReadableStreamAsText,
