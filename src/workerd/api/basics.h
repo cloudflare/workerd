@@ -229,7 +229,7 @@ class Event: public jsg::Object {
   kj::Maybe<jsg::Ref<EventTarget>> target;
 
   struct Flags {
-    uint8_t trusted : 1 = 1;
+    uint8_t trusted : 1 = 0;
     uint8_t stopped : 1 = 0;
     uint8_t preventedDefault : 1 = 0;
     uint8_t isBeingDispatched : 1 = 0;
@@ -722,7 +722,9 @@ class AbortSignal final: public EventTarget {
   // Dropping the returned handle (safe from any thread) unregisters the callback: once the
   // handle is destroyed, the callback is guaranteed to never (again) be invoked, so it may
   // capture references whose validity the holder ties to the handle's lifetime (see
-  // Cancellation::registration).
+  // Cancellation::registration). Note that dropping the handle destroys the callback — and
+  // with it whatever the callback captured — on the dropping thread, so the captures
+  // themselves must be safe to destroy from any thread for the any-thread claim to hold.
   //
   // Requires an active IoContext. The caller is expected to have checked getAborted() first.
   kj::Own<void> addAbortAction(
@@ -779,6 +781,13 @@ class AbortSignal final: public EventTarget {
   kj::Maybe<kj::Exception> maybeAbortException;
 
   kj::Maybe<jsg::JsRef<jsg::JsValue>> reason;
+
+  // Set once triggerAbort() has committed to aborting. That happens before
+  // maybeAbortException can be assigned, because deriving it from a JS reason reads
+  // properties off that reason and so can run JS — including JS that calls abort() again.
+  // This latch is what makes such a nested call the no-op the spec requires. It is released
+  // only if the derivation throws, which leaves the signal unmodified and still abortable.
+  bool aborting = false;
 
   // One native abort action, shared between this signal and one consumer. The action is
   // invoked at most once, only ever in its owning IoContext (synchronously if the abort is
@@ -845,9 +854,10 @@ class AbortSignal final: public EventTarget {
   // sources, never itself, so dependency chains never form) and for severSources().
   kj::Vector<jsg::WeakRef<AbortSignal>> sourceSignals;
 
-  // Records the abort reason and exception (spec "signal abort" step 2, also applied to
-  // dependents in steps 3-4 before any abort steps run).
-  void setAbortState(jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> reason);
+  // Records the settled abort state (spec "signal abort" step 2, also applied to dependents
+  // in steps 3-4 before any abort steps run). triggerAbort() settles both values before it
+  // marks anything, so this runs no JS.
+  void setAbortState(jsg::Lock& js, jsg::JsRef<jsg::JsValue> reason, kj::Exception exception);
 
   // Spec "run the abort steps": abort algorithms, then workerd's native registrations (cells
   // and RPC clones), then the 'abort' event. Requires setAbortState() to have run.

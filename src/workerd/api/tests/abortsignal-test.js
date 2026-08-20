@@ -370,6 +370,176 @@ export const anyAbort4 = {
   },
 };
 
+export const anyAbortDependentAbortedDuringDerivation = {
+  test() {
+    // Settling a signal's abort state reads properties off the reason, so a getter runs user
+    // JS before any dependent has been marked. That JS can abort a second source of a
+    // dependent they share, which aborts the dependent and unlinks it from every remaining
+    // source — including the signal that is about to walk its own dependents.
+    const c1 = new AbortController();
+    const c2 = new AbortController();
+
+    const soleDependent = AbortSignal.any([c1.signal]);
+    const sharedDependent = AbortSignal.any([c1.signal, c2.signal]);
+
+    let sharedAborts = 0;
+    sharedDependent.addEventListener('abort', () => {
+      sharedAborts++;
+    });
+
+    let fired = false;
+    const reason = {};
+    // Non-enumerable so that only the abort machinery's own lookup reads it; serializing the
+    // reason walks enumerable properties and would call it a second time.
+    Object.defineProperty(reason, 'overloaded', {
+      enumerable: false,
+      get() {
+        if (!fired) {
+          fired = true;
+          c2.abort();
+        }
+        return false;
+      },
+    });
+
+    c1.abort(reason);
+
+    ok(fired);
+    strictEqual(soleDependent.reason, reason);
+
+    // The nested abort reached the shared dependent first, so it keeps c2's reason and is
+    // aborted exactly once — c1 must not re-abort a dependent that is already aborted.
+    ok(sharedDependent.aborted);
+    strictEqual(sharedDependent.reason.name, 'AbortError');
+    strictEqual(sharedAborts, 1);
+  },
+};
+
+export const abortReasonDerivedOnce = {
+  test() {
+    // The reason's native form is settled once for the whole abort and handed to every
+    // signal it marks, rather than re-derived per signal. Re-deriving would run the reason's
+    // getters once per dependent, letting them observe and interfere with the walk, and would
+    // let a getter that returns different values each call hand out divergent state.
+    const ac = new AbortController();
+    const dependents = [
+      AbortSignal.any([ac.signal]),
+      AbortSignal.any([ac.signal]),
+      AbortSignal.any([ac.signal]),
+    ];
+
+    let reads = 0;
+    const reason = {};
+    Object.defineProperty(reason, 'overloaded', {
+      enumerable: false,
+      get() {
+        reads++;
+        return false;
+      },
+    });
+
+    ac.abort(reason);
+
+    strictEqual(reads, 1);
+    strictEqual(ac.signal.reason, reason);
+    for (const dependent of dependents) {
+      strictEqual(dependent.reason, reason);
+    }
+  },
+};
+
+export const anyOfAbortedSignalAdoptsItsState = {
+  test() {
+    // any() over an already-aborted signal adopts that signal's settled abort state instead
+    // of building a fresh abort out of its reason. Re-deriving would run the reason's getters
+    // again — from a call that only inspects the signal — and would leave the result
+    // classified differently from the very signal it was copied from.
+    const ac = new AbortController();
+
+    let reads = 0;
+    const reason = {};
+    Object.defineProperty(reason, 'overloaded', {
+      enumerable: false,
+      get() {
+        reads++;
+        return false;
+      },
+    });
+
+    ac.abort(reason);
+    strictEqual(reads, 1);
+
+    const result = AbortSignal.any([ac.signal]);
+    strictEqual(reads, 1);
+    ok(result.aborted);
+    strictEqual(result.reason, reason);
+
+    // Per spec the early return happens before the result is marked dependent, so a signal
+    // built this way contributes itself — not any sources — to a later any().
+    const onward = AbortSignal.any([result]);
+    strictEqual(reads, 1);
+    ok(onward.aborted);
+    strictEqual(onward.reason, reason);
+  },
+};
+
+export const abortDuringReasonDerivationIsNoOp = {
+  test() {
+    // A getter on the reason runs after the signal has committed to aborting but before the
+    // state has been recorded. Per spec an abort() that arrives then is a no-op, so the outer
+    // call decides the reason and exactly one 'abort' event is dispatched.
+    const ac = new AbortController();
+    const seen = [];
+    ac.signal.addEventListener('abort', () => {
+      seen.push(ac.signal.reason);
+    });
+
+    const reason = {};
+    Object.defineProperty(reason, 'overloaded', {
+      enumerable: false,
+      get() {
+        ac.abort('nested');
+        return false;
+      },
+    });
+
+    ac.abort(reason);
+
+    strictEqual(seen.length, 1);
+    strictEqual(seen[0], reason);
+    strictEqual(ac.signal.reason, reason);
+  },
+};
+
+export const abortReasonGetterThrows = {
+  test() {
+    // A getter that throws propagates out of abort() before anything has been recorded, so
+    // the signal is left untouched and remains abortable.
+    const ac = new AbortController();
+    const boom = new Error('from getter');
+    const reason = {};
+    Object.defineProperty(reason, 'overloaded', {
+      enumerable: false,
+      get() {
+        throw boom;
+      },
+    });
+
+    let caught;
+    try {
+      ac.abort(reason);
+    } catch (err) {
+      caught = err;
+    }
+    strictEqual(caught, boom);
+    strictEqual(ac.signal.aborted, false);
+
+    ac.abort('later');
+    strictEqual(ac.signal.aborted, true);
+    strictEqual(ac.signal.reason, 'later');
+  },
+};
+
 export const onabortPrototypeProperty = {
   test() {
     const ac = new AbortController();

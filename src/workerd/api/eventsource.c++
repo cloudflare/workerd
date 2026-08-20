@@ -315,23 +315,30 @@ void EventSource::notifyOpen(jsg::Lock& js) {
 
 void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messages) {
   if (readyState == State::CLOSED) return;
-  for (auto& message: messages) {
-    auto data = kj::str(kj::delimited(kj::mv(message.data), "\n"_kjc));
-    if (data.size() == 0) continue;
-    kj::String type = kj::mv(message.event).orDefault([]() { return kj::str("message"); });
-    auto result = dispatchEventImpl(js,
-        js.alloc<MessageEvent>(js, kj::mv(type), js.str(data), kj::mv(message.id),
-            kj::none /** source **/, impl.map([](FetchImpl& i) -> jsg::Url& { return i.url; }),
-            Trusted::YES),
-        effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT));
-    KJ_IF_SOME(exception, result.firstException) {
-      // A listener threw. Its exception was reported (and the remaining listeners for this
-      // event still ran); fail fast: error out the EventSource and drop the remaining
-      // messages in this batch.
-      notifyError(js, exception.getHandle(js), false, AlreadyReported::YES);
-      return;
+  auto policy = effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT);
+  // Under PROPAGATE (spec_compliant_dispatch_exceptions disabled), the first throwing
+  // listener ends the dispatch and its exception lands in the catch handler below, which
+  // errors out the EventSource — rather than escaping into (and failing) the enclosing
+  // read-loop task with no 'error' event at all.
+  js.tryCatch([&] {
+    for (auto& message: messages) {
+      auto data = kj::str(kj::delimited(kj::mv(message.data), "\n"_kjc));
+      if (data.size() == 0) continue;
+      kj::String type = kj::mv(message.event).orDefault([]() { return kj::str("message"); });
+      auto result = dispatchEventImpl(js,
+          js.alloc<MessageEvent>(js, kj::mv(type), js.str(data), kj::mv(message.id),
+              kj::none /** source **/, impl.map([](FetchImpl& i) -> jsg::Url& { return i.url; }),
+              Trusted::YES),
+          policy);
+      KJ_IF_SOME(exception, result.firstException) {
+        // A listener threw under REPORT. Its exception was reported (and the remaining
+        // listeners for this event still ran); fail fast: error out the EventSource and
+        // drop the remaining messages in this batch.
+        notifyError(js, exception.getHandle(js), false, AlreadyReported::YES);
+        return;
+      }
     }
-  }
+  }, [&](jsg::Value exception) { notifyError(js, jsg::JsValue(exception.getHandle(js))); });
 }
 
 void EventSource::reconnect(jsg::Lock& js) {

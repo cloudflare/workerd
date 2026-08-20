@@ -532,6 +532,12 @@ wd_test(
 )
 
 wd_test(
+    src = "legacy-dispatch-exceptions-test.wd-test",
+    args = ["--experimental"],
+    data = ["legacy-dispatch-exceptions-test.js"],
+)
+
+wd_test(
     src = "form-data-legacy-test.wd-test",
     args = ["--experimental"],
     data = ["form-data-legacy-test.js"],

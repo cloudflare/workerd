@@ -698,10 +698,21 @@ jsg::Ref<AbortSignal> AbortSignal::any(jsg::Lock& js, kj::Array<jsg::Ref<AbortSi
   }
 
   // Spec step 2: if any of the signals is already aborted, return an already-aborted signal
-  // carrying its reason; nothing gets linked.
+  // carrying its reason; nothing gets linked. The spec sets the result's abort reason to the
+  // source's, so the result adopts the source's settled state rather than deriving a fresh one
+  // from the reason object. Deriving would run that object's getters again — from what is
+  // otherwise a pure query — and would reclassify the exception, leaving the result aborting
+  // differently from both its source and a dependent that had been linked to that source
+  // before it aborted.
   for (auto& sig: signals) {
     if (sig->getAborted(js)) {
-      return AbortSignal::abort(js, sig->getReason(js));
+      auto abortReason = sig->getReason(js);
+      KJ_IF_SOME(exception, sig->maybeAbortException) {
+        return js.alloc<AbortSignal>(exception.clone(), abortReason.addRef(js));
+      }
+      // The signal is aborted only by way of a reason that arrived over RPC and has not been
+      // applied yet, so there is no settled exception to adopt; derive one from the reason.
+      return AbortSignal::abort(js, abortReason);
     }
   }
 
@@ -914,20 +925,8 @@ AbortSignal::Cancellation AbortSignal::newCanceler(jsg::Lock& js) {
 }
 
 void AbortSignal::setAbortState(
-    jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> maybeReason) {
-  auto exception = AbortSignal::abortException(js, maybeReason);
-  KJ_IF_SOME(r, maybeReason) {
-    KJ_SWITCH_ONEOF(r) {
-      KJ_CASE_ONEOF(value, jsg::JsValue) {
-        reason = value.addRef(js);
-      }
-      KJ_CASE_ONEOF(ex, kj::Exception) {
-        reason = js.exceptionToJsValue(kj::mv(ex));
-      }
-    }
-  } else {
-    reason = js.exceptionToJsValue(exception.clone());
-  }
+    jsg::Lock& js, jsg::JsRef<jsg::JsValue> newReason, kj::Exception exception) {
+  reason = kj::mv(newReason);
   maybeAbortException = kj::mv(exception);
 }
 
@@ -952,35 +951,58 @@ void AbortSignal::severSources(jsg::Lock& js) {
 void AbortSignal::triggerAbort(
     jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> maybeReason) {
   KJ_ASSERT(flag != Flag::NEVER_ABORTS);
-  if (maybeAbortException != kj::none) {
+  if (maybeAbortException != kj::none || aborting) {
     return;
   }
 
-  // Spec "signal abort" steps 1-2: record the abort reason.
-  setAbortState(js, kj::mv(maybeReason));
+  // Spec "signal abort" steps 1-2: settle the abort state.
+  //
+  // Deriving the native form of a JS reason reads properties off it, so a getter or a Proxy
+  // trap can run arbitrary JS here — including JS that calls abort() again. The latch is
+  // armed before the derivation, not after, so that such a call finds an abort already under
+  // way and returns, leaving this one to decide the outcome. If the derivation throws,
+  // nothing has been recorded, so the latch is released and the signal stays abortable.
+  aborting = true;
+  KJ_ON_SCOPE_FAILURE(aborting = false);
 
-  // Spec steps 3-4: record the reason on every not-yet-aborted dependent signal NOW — before
-  // any abort steps or events run anywhere — and collect them; their own abort steps run
-  // only after ours complete (step 6). Collect with fresh strong addRef()s rather than by
-  // moving the stored refs: the stored refs are GC-traced, and a ref moved out of its
-  // visited home would leave the dependent's wrapper collectable by any GC that runs during
-  // the JS work below (reason derivation and event dispatch can both run arbitrary JS).
-  // Clearing the member also severs the links: an aborted signal has no further use for its
-  // dependents, and any() never links to an aborted source, so nothing new can arrive.
-  kj::Vector<jsg::Ref<AbortSignal>> dependentsToAbort;
-  if (!dependentSignals.empty()) {
-    for (auto& dep: dependentSignals) {
-      if (dep->maybeAbortException == kj::none) {
-        dependentsToAbort.add(dep.addRef());
+  auto exception = abortException(js, maybeReason);
+  auto reasonRef = [&]() -> jsg::JsRef<jsg::JsValue> {
+    KJ_IF_SOME(r, maybeReason) {
+      KJ_SWITCH_ONEOF(r) {
+        KJ_CASE_ONEOF(value, jsg::JsValue) {
+          return value.addRef(js);
+        }
+        KJ_CASE_ONEOF(ex, kj::Exception) {
+          return js.exceptionToJsValue(kj::mv(ex));
+        }
       }
     }
-    dependentSignals.clear();
+    return js.exceptionToJsValue(exception.clone());
+  }();
+  setAbortState(js, kj::mv(reasonRef), kj::mv(exception));
 
-    auto reasonHandle = KJ_ASSERT_NONNULL(reason).getHandle(js);
-    for (auto& dep: dependentsToAbort) {
-      dep->setAbortState(js, kj::OneOf<kj::Exception, jsg::JsValue>(reasonHandle));
+  // Spec steps 3-4: record the same state on every not-yet-aborted dependent NOW — before any
+  // abort steps or events run anywhere; their own abort steps run only after ours complete
+  // (step 6). Handing each dependent the state settled above keeps this loop free of JS, so
+  // nothing can abort a dependent or re-enter severSources() while it is walked, and every
+  // dependent reports the reason and rejects with the exception this signal did. A signal
+  // linked more than once (e.g. any([s, s])) fails the not-yet-aborted check on the second
+  // encounter and so is collected, and aborted, only once. Collect with fresh strong
+  // addRef()s rather than by moving the stored refs: the stored refs are GC-traced, and a ref
+  // moved out of its visited home would leave the dependent's wrapper collectable by any GC
+  // that runs during the abort steps below. Clearing the member also severs the links: an
+  // aborted signal has no further use for its dependents, and any() never links to an aborted
+  // source, so nothing new can arrive.
+  kj::Vector<jsg::Ref<AbortSignal>> dependentsToAbort;
+  auto reasonHandle = KJ_ASSERT_NONNULL(reason).getHandle(js);
+  auto& settled = KJ_ASSERT_NONNULL(maybeAbortException);
+  for (auto& dep: dependentSignals) {
+    if (dep->maybeAbortException == kj::none) {
+      dep->setAbortState(js, reasonHandle.addRef(js), settled.clone());
+      dependentsToAbort.add(dep.addRef());
     }
   }
+  dependentSignals.clear();
 
   // Spec step 5: run our own abort steps.
   runAbortSteps(js);

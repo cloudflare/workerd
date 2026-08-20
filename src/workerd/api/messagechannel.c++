@@ -38,6 +38,25 @@ void MessagePort::listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t
 
 void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
   auto policy = effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT);
+  if (policy == DispatchExceptionPolicy::PROPAGATE) {
+    // Compat path (spec_compliant_dispatch_exceptions disabled): the first throwing
+    // listener ends the dispatch; the exception is swallowed and re-dispatched as a second
+    // 'message' event carrying the exception as its data. (The spec path below uses a
+    // 'messageerror' event instead; the 'message' type here is retained for compatibility.)
+    // If that second dispatch throws, the exception propagates: the delivery microtask
+    // fails.
+    JSG_TRY(js) {
+      dispatchEventImpl(
+          js, js.alloc<MessageEvent>(js, value, kj::String(), JSG_THIS, kj::none, Trusted::YES));
+    }
+    JSG_CATCH(exception) {
+      dispatchEventImpl(js,
+          js.alloc<MessageEvent>(js, jsg::JsValue(exception.getHandle(js)), kj::String(), JSG_THIS,
+              kj::none, Trusted::YES));
+    }
+    return;
+  }
+
   auto result = dispatchEventImpl(js,
       js.alloc<MessageEvent>(js, value, kj::String(), JSG_THIS, kj::none, Trusted::YES), policy);
   KJ_IF_SOME(exception, result.firstException) {
@@ -48,7 +67,7 @@ void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
     dispatchEventImpl(js,
         js.alloc<MessageEvent>(js, kj::str("messageerror"), exception.addRef(js), kj::String(),
             JSG_THIS, kj::none, Trusted::YES),
-        policy);
+        DispatchExceptionPolicy::REPORT);
   }
 }
 

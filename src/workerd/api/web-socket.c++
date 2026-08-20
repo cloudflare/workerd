@@ -43,6 +43,17 @@ void dispatchWithFailFast(jsg::Lock& js, WebSocket& shell, jsg::Ref<Event> event
   }
 }
 
+// Dispatches a UA-fired WebSocket event report-only: listener exceptions are reported and
+// the dispatch continues, with no further reaction. Used for the 'close' and 'error'
+// events, which fire when the WebSocket is already closed or failed — erroring it out
+// again is useless, and rethrowing would only re-surface an already-reported exception
+// into terminal plumbing (and skip the cleanup that follows the dispatch). When the compat
+// flag is not set, falls back to PROPAGATE (the old behavior).
+void dispatchReportOnly(jsg::Lock& js, WebSocket& shell, jsg::Ref<Event> event) {
+  shell.dispatchEventImpl(js, kj::mv(event),
+      EventTarget::effectiveExceptionPolicy(js, EventTarget::DispatchExceptionPolicy::REPORT));
+}
+
 }  // namespace
 
 namespace {
@@ -386,7 +397,7 @@ void LegacyWebSocketAdapter::initConnection(jsg::Lock& js, kj::Promise<PackedWeb
     // Sets readyState to CLOSED.
     reportError(js, jsg::JsValue(e.getHandle(js)).addRef(js));
 
-    dispatchWithFailFast(js, shell,
+    dispatchReportOnly(js, shell,
         js.alloc<CloseEvent>(1006, kj::str("Failed to establish websocket connection"), false));
   });
   // Note that in this attach we pass a strong reference to the WebSocket. The reference will be
@@ -821,7 +832,7 @@ void LegacyWebSocketAdapter::startReadLoop(
     KJ_IF_SOME(e, maybeError) {
       if (!native.closedIncoming && e.getType() == kj::Exception::Type::DISCONNECTED) {
         // Report premature disconnect or cancel as a close event.
-        dispatchWithFailFast(js, shell,
+        dispatchReportOnly(js, shell,
             js.alloc<CloseEvent>(
                 1006, kj::str("WebSocket disconnected without sending Close frame."), false));
         native.closedIncoming = true;
@@ -1423,7 +1434,7 @@ kj::Promise<kj::Maybe<kj::Exception>> LegacyWebSocketAdapter::readLoop(
               autoResponseStatus.isClosed = true;
               ensurePumping(js);
             }
-            dispatchWithFailFast(
+            dispatchReportOnly(
                 js, shell, js.alloc<CloseEvent>(close.code, kj::mv(close.reason), true));
             // Native WebSocket no longer needed; release.
             tryReleaseNative(js);

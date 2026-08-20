@@ -1661,7 +1661,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   specCompliantDispatchExceptions @188 :Bool
       $compatEnableFlag("spec_compliant_dispatch_exceptions")
       $compatDisableFlag("no_spec_compliant_dispatch_exceptions")
-      $compatEnableDate("2026-09-01");
+      $compatEnableDate("2026-09-15");
   # Per the DOM spec, exceptions thrown by event listeners during dispatchEvent() should be
   # reported (via the global 'error' event, then the console) but should not interrupt the
   # dispatch or propagate to the dispatchEvent() caller. The original workerd implementation

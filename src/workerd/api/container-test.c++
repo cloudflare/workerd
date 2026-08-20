@@ -1139,6 +1139,41 @@ KJ_TEST("Container::exec resize() rejects out-of-range dimensions") {
   });
 }
 
+KJ_TEST("Container::exec process outlives the IoContext its abort action was registered in") {
+  // An ExecProcess is a jsg::Object, so GC or isolate teardown destroys it — potentially long
+  // after the IoContext that was current when exec() registered its kill-on-abort action on the
+  // signal. Releasing that registration therefore has to stay safe once that context is gone.
+  ExecObservations observations;
+  auto fixture = makeFixture();
+
+  kj::Maybe<jsg::Ref<ExecProcess>> survivor;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto container =
+        kj::rc<Container>(rpc::Container::Client(kj::heap<MockExecContainerServer>(
+                              env.context.getByteStreamFactory(), observations, kj::none)),
+            true);
+
+    ExecOptions options;
+    options.signal = env.js.alloc<AbortSignal>();
+
+    auto jsPromise = container->exec(env.js, kj::arr(kj::str("/bin/sh")), kj::mv(options))
+                         .then(env.js, [&survivor](jsg::Lock& js, jsg::Ref<ExecProcess> process) {
+      // Stands in for a Worker stashing the process somewhere that outlives the request.
+      survivor = kj::mv(process);
+    });
+
+    return env.context.awaitJs(env.js, kj::mv(jsPromise)).attach(kj::mv(container));
+  });
+
+  KJ_EXPECT(observations.execCalled);
+  KJ_EXPECT(survivor != kj::none);
+
+  // Drop the process from a later request's context, which is where a stashed one would
+  // ordinarily be collected.
+  fixture.runInIoContext([&](const TestFixture::Environment&) { survivor = kj::none; });
+}
+
 KJ_TEST("Container reuses a healthy HTTP tunnel") {
   runTunnelTest(ResponseMode::KEEP_ALIVE, 1);
 }
