@@ -23,6 +23,8 @@ permissions:
 
 jobs:
   benchmarks:
+    # Temporarily disabled until benchmark quality and accuracy can be improved.
+    if: false
     name: Run benchmarks
     runs-on: ubuntu-22.04-16core
     env:
