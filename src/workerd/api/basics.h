@@ -229,7 +229,7 @@ class Event: public jsg::Object {
   kj::Maybe<jsg::Ref<EventTarget>> target;
 
   struct Flags {
-    uint8_t trusted : 1 = 1;
+    uint8_t trusted : 1 = 0;
     uint8_t stopped : 1 = 0;
     uint8_t preventedDefault : 1 = 0;
     uint8_t isBeingDispatched : 1 = 0;
@@ -722,7 +722,9 @@ class AbortSignal final: public EventTarget {
   // Dropping the returned handle (safe from any thread) unregisters the callback: once the
   // handle is destroyed, the callback is guaranteed to never (again) be invoked, so it may
   // capture references whose validity the holder ties to the handle's lifetime (see
-  // Cancellation::registration).
+  // Cancellation::registration). Note that dropping the handle destroys the callback — and
+  // with it whatever the callback captured — on the dropping thread, so the captures
+  // themselves must be safe to destroy from any thread for the any-thread claim to hold.
   //
   // Requires an active IoContext. The caller is expected to have checked getAborted() first.
   kj::Own<void> addAbortAction(

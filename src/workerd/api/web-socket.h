@@ -185,11 +185,13 @@ class WebSocketPair: public jsg::Object {
 
 class WebSocketAdapter;
 
-// WebSocket's UA-fired events ('open', 'message', 'close', 'error') are dispatched with
-// spec semantics (DispatchExceptionPolicy::REPORT: listener exceptions are reported and the
-// remaining listeners still run), but a throwing listener additionally errors out the
-// WebSocket after the dispatch completes (fail-fast), via DispatchResult::firstException.
-// See dispatchWithFailFast() in web-socket.c++.
+// WebSocket's UA-fired events are dispatched with spec semantics
+// (DispatchExceptionPolicy::REPORT: listener exceptions are reported and the remaining
+// listeners still run). For 'open' and 'message', a throwing listener additionally errors
+// out the WebSocket after the dispatch completes (fail-fast), via
+// DispatchResult::firstException; 'close' and 'error' fire when the WebSocket is already
+// closed or failed and are report-only. See dispatchWithFailFast() and dispatchReportOnly()
+// in web-socket.c++.
 class WebSocket: public EventTarget {
  public:
   // WebSocket ready states.

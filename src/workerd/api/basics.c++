@@ -961,25 +961,25 @@ void AbortSignal::triggerAbort(
 
   // Spec steps 3-4: record the reason on every not-yet-aborted dependent signal NOW — before
   // any abort steps or events run anywhere — and collect them; their own abort steps run
-  // only after ours complete (step 6). Collect with fresh strong addRef()s rather than by
-  // moving the stored refs: the stored refs are GC-traced, and a ref moved out of its
-  // visited home would leave the dependent's wrapper collectable by any GC that runs during
-  // the JS work below (reason derivation and event dispatch can both run arbitrary JS).
-  // Clearing the member also severs the links: an aborted signal has no further use for its
-  // dependents, and any() never links to an aborted source, so nothing new can arrive.
+  // only after ours complete (step 6). Recording the state as part of collection means a
+  // signal linked more than once (e.g. any([s, s])) fails the not-yet-aborted check on the
+  // second encounter and is collected — and has its abort steps run — only once. Collect
+  // with fresh strong addRef()s rather than by moving the stored refs: the stored refs are
+  // GC-traced, and a ref moved out of its visited home would leave the dependent's wrapper
+  // collectable by any GC that runs during the JS work below (reason derivation and event
+  // dispatch can both run arbitrary JS). Clearing the member also severs the links: an
+  // aborted signal has no further use for its dependents, and any() never links to an
+  // aborted source, so nothing new can arrive.
   kj::Vector<jsg::Ref<AbortSignal>> dependentsToAbort;
   if (!dependentSignals.empty()) {
+    auto reasonHandle = KJ_ASSERT_NONNULL(reason).getHandle(js);
     for (auto& dep: dependentSignals) {
       if (dep->maybeAbortException == kj::none) {
+        dep->setAbortState(js, kj::OneOf<kj::Exception, jsg::JsValue>(reasonHandle));
         dependentsToAbort.add(dep.addRef());
       }
     }
     dependentSignals.clear();
-
-    auto reasonHandle = KJ_ASSERT_NONNULL(reason).getHandle(js);
-    for (auto& dep: dependentsToAbort) {
-      dep->setAbortState(js, kj::OneOf<kj::Exception, jsg::JsValue>(reasonHandle));
-    }
   }
 
   // Spec step 5: run our own abort steps.
