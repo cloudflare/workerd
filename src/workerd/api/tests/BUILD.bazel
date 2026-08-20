@@ -624,6 +624,12 @@ wd_test(
 )
 
 wd_test(
+    src = "js-rpc-streams-pollution-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-streams-pollution-test.js"],
+)
+
+wd_test(
     src = "js-rpc-params-ownership-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-params-ownership-test.js"],

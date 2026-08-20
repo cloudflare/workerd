@@ -173,7 +173,8 @@ class TsWriterSink final: public WritableStreamSink {
     return context.run([this, buffer](Worker::Lock& lock) mutable {
       jsg::Lock& js = lock;
       auto ab = jsg::JsArrayBuffer::create(js, buffer);
-      return context.awaitJs(lock, invokeWriter(js, "write"_kj, jsg::JsValue(ab)));
+      return context.awaitJs(
+          lock, invokeWriter(js, "writableStreamWriterWrite"_kj, jsg::JsValue(ab)));
     });
   }
 
@@ -197,7 +198,8 @@ class TsWriterSink final: public WritableStreamSink {
         if (piece.size() == 0) continue;
         ptr.write(piece);
       }
-      return context.awaitJs(lock, invokeWriter(js, "write"_kj, jsg::JsValue(ab)));
+      return context.awaitJs(
+          lock, invokeWriter(js, "writableStreamWriterWrite"_kj, jsg::JsValue(ab)));
     });
   }
 
@@ -208,7 +210,7 @@ class TsWriterSink final: public WritableStreamSink {
     ended = true;
     return context.run([this](Worker::Lock& lock) mutable {
       jsg::Lock& js = lock;
-      return context.awaitJs(lock, invokeWriter(js, "close"_kj));
+      return context.awaitJs(lock, invokeWriter(js, "writableStreamWriterClose"_kj));
     });
   }
 
@@ -228,13 +230,17 @@ class TsWriterSink final: public WritableStreamSink {
   bool ended = false;
 
   // Invoke a writer method under the isolate lock, returning its (required) promise result.
+  // Drive a writer operation through the frozen cppExports internals (never the public
+  // writer prototype methods, which are user-patchable: a replaced write/close must not be
+  // able to intercept or fake a stream's RPC transfer), returning its (required) promise
+  // result.
   jsg::Promise<void> invokeWriter(
-      jsg::Lock& js, kj::StringPtr method, kj::Maybe<jsg::JsValue> arg = kj::none) {
+      jsg::Lock& js, kj::StringPtr op, kj::Maybe<jsg::JsValue> arg = kj::none) {
     auto& w = KJ_UNWRAP_OR(writer, { kj::throwFatalException(disconnectedException()); });
-    auto result = webstreams::invokeMethod(
-        js, w.getHandle(js), method, arg.orDefault(jsg::JsValue(js.undefined())));
+    auto result = webstreams::dispatchCall(
+        js, op, jsg::JsValue(w.getHandle(js)), arg.orDefault(jsg::JsValue(js.undefined())));
     return js.toVoidPromise(KJ_REQUIRE_NONNULL(
-        JSG_TRY_CAST_PROMISE(result), "writer method did not return a promise", method));
+        JSG_TRY_CAST_PROMISE(result), "writer operation did not return a promise", op));
   }
 
   void scheduleAbort(jsg::JsRef<jsg::JsObject> writer, kj::Exception reason) {
@@ -242,10 +248,11 @@ class TsWriterSink final: public WritableStreamSink {
         context.run([writer = kj::mv(writer), reason = kj::mv(reason)](Worker::Lock& lock) mutable {
       jsg::Lock& js = lock;
       auto ex = js.exceptionToJsValue(kj::mv(reason));
-      auto result =
-          webstreams::invokeMethod(js, writer.getHandle(js), "abort"_kj, ex.getHandle(js));
-      auto promise = js.toVoidPromise(
-          KJ_REQUIRE_NONNULL(JSG_TRY_CAST_PROMISE(result), "abort() did not return a promise"));
+      // Same internal-dispatch requirement as invokeWriter above.
+      auto result = webstreams::dispatchCall(js, "writableStreamWriterAbort",
+          jsg::JsValue(writer.getHandle(js)), jsg::JsValue(ex.getHandle(js)));
+      auto promise = js.toVoidPromise(KJ_REQUIRE_NONNULL(
+          JSG_TRY_CAST_PROMISE(result), "writableStreamWriterAbort did not return a promise"));
       return IoContext::current().awaitJs(lock, kj::mv(promise));
     }));
   }
@@ -508,11 +515,16 @@ void JsWritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
       IoContext& ioctx = IoContext::current();
 
-      // NOTE: We're counting on getWriter() to check that the stream is not locked and other
-      // common checks. It's important we don't modify the WritableStream before this call.
-      auto writerValue = webstreams::invokeMethod(js, obj.getHandle(js), "getWriter"_kj);
+      // NOTE: We're counting on writer acquisition to check that the stream is not locked
+      // and other common checks. It's important we don't modify the WritableStream before
+      // this call. Acquisition goes through the frozen cppExports internals -- NOT the
+      // public getWriter, which is user-patchable and must not be able to fake the
+      // transfer -- with the public method's exact semantics (same constructor path,
+      // including the locked TypeError).
+      auto writerValue =
+          webstreams::dispatchCall(js, "acquireWritableStreamWriter", obj.getHandle(js));
       auto writerObj = KJ_REQUIRE_NONNULL(
-          JSG_TRY_CAST_OBJECT(writerValue), "getWriter() did not return an object");
+          JSG_TRY_CAST_OBJECT(writerValue), "acquireWritableStreamWriter did not return an object");
 
       auto wrapper =
           newWritableStreamRpcAdapter(kj::heap<TsWriterSink>(ioctx, jsg::JsRef(js, writerObj)));

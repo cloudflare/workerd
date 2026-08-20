@@ -232,6 +232,10 @@ let writerWriteInternal: <W>(
 let writerCloseInternal: <W>(
   writer: WritableStreamDefaultWriter<W>
 ) => Promise<void>;
+let writerAbortInternal: <W>(
+  writer: WritableStreamDefaultWriter<W>,
+  reason: unknown
+) => Promise<void>;
 let writerReleaseInternal: <W>(writer: WritableStreamDefaultWriter<W>) => void;
 let getWriterReadyPromiseInternal: <W>(
   writer: WritableStreamDefaultWriter<W>
@@ -1218,6 +1222,19 @@ class WritableStreamDefaultWriter<
       return promise;
     };
 
+    writerAbortInternal = <W>(
+      writer: WritableStreamDefaultWriter<W>,
+      reason: unknown
+    ) => {
+      const stream = writer.#stream;
+      if (stream === undefined) {
+        return PromiseReject(
+          new TypeError('This writer has been released')
+        ) as Promise<void>;
+      }
+      return writableStreamAbort(stream, reason);
+    };
+
     writerCloseInternal = <W>(writer: WritableStreamDefaultWriter<W>) => {
       const stream = writer.#stream;
       if (stream === undefined) {
@@ -1649,6 +1666,29 @@ const cppExports = ObjectFreeze({
   writableStreamAbort,
   writableStreamClose,
   writableStreamFlush,
+  // The RPC-transfer writer operations (JsWritableStream::serialize's
+  // TsWriterSink): acquisition and per-operation dispatch go through these
+  // internal algorithms rather than the public prototype methods, which are
+  // user-patchable — a replaced getWriter/write/close/abort must not be able
+  // to intercept or fake a stream's RPC transfer. Acquisition has the public
+  // getWriter's exact semantics (the locked TypeError comes from the same
+  // constructor path).
+  acquireWritableStreamWriter<W>(
+    stream: WritableStream<W>
+  ): WritableStreamDefaultWriter<W> {
+    return new WritableStreamDefaultWriter<W>(stream);
+  },
+  writableStreamWriterWrite: <W>(
+    writer: WritableStreamDefaultWriter<W>,
+    chunk: W
+  ): Promise<void> => writerWriteInternal(writer, chunk),
+  writableStreamWriterClose: <W>(
+    writer: WritableStreamDefaultWriter<W>
+  ): Promise<void> => writerCloseInternal(writer),
+  writableStreamWriterAbort: <W>(
+    writer: WritableStreamDefaultWriter<W>,
+    reason: unknown
+  ): Promise<void> => writerAbortInternal(writer, reason),
 });
 
 module.exports = {
