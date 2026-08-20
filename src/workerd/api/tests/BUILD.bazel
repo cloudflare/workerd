@@ -1304,6 +1304,16 @@ wd_test(
 )
 
 wd_test(
+    # Normally a second or two: the test stops as soon as its counter proves it reached the
+    # window. "large" is for the case where that never happens and it runs out its own 30s
+    # budget instead.
+    size = "large",
+    src = "messageport-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["messageport-gc-test.js"],
+)
+
+wd_test(
     src = "ts-identity-streams-test.wd-test",
     args = ["--experimental"],
     data = ["ts-identity-streams-test.js"],
