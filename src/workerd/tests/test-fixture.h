@@ -55,6 +55,8 @@ struct TestFixture {
     // no-op base RequestObserver. Lets tests observe metrics hooks (e.g. recording the values
     // passed to setNextSubrequestBodyRewindable()).
     kj::Maybe<kj::Function<kj::Own<RequestObserver>()>> requestObserverFactory;
+    // If set, incremented whenever the fixture's limit enforcer checks a new subrequest.
+    kj::Maybe<uint&> checkedSubrequestCount;
   };
 
   TestFixture(SetupParams&& params = {.useRealTimers = false});
@@ -271,6 +273,7 @@ struct TestFixture {
   kj::Own<kj::HttpHeaderTable> headerTable;
   kj::Maybe<kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
   kj::Maybe<kj::Function<kj::Own<RequestObserver>()>> requestObserverFactory;
+  kj::Maybe<uint&> checkedSubrequestCount;
 
   // Construct a fresh Worker::Actor with the given id, using the saved Loopback.
   kj::Own<Worker::Actor> makeActor(Worker::Actor::Id id);
