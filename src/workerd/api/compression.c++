@@ -172,4 +172,145 @@ kj::Maybe<int> ZlibStream::windowBitsForWebFormat(kj::StringPtr format) {
   return kj::none;
 }
 
+// =======================================================================================
+// CodecStage
+
+CodecStage::Context::Context(Mode mode,
+    kj::StringPtr format,
+    Flags flags,
+    kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+    : allocator(kj::mv(externalMemoryTarget)),
+      stream(allocator),
+      strictCompression(flags) {
+  auto windowBits = KJ_ASSERT_NONNULL(ZlibStream::windowBitsForWebFormat(format));
+  JSG_REQUIRE(stream.init(mode, ZlibStream::Options{.windowBits = windowBits}) == kj::none, Error,
+      "Failed to initialize compression context."_kj);
+}
+
+void CodecStage::Context::setInput(const void* in, size_t size) {
+  stream.setInput(kj::arrayPtr(reinterpret_cast<const kj::byte*>(in), size));
+}
+
+CodecStage::Context::Result CodecStage::Context::pumpOnce(int flush) {
+  stream.setOutput(kj::arrayPtr(buffer, sizeof(buffer)));
+
+  int result = stream.run(flush);
+
+  switch (stream.getMode()) {
+    case Mode::COMPRESS:
+      JSG_REQUIRE(result == Z_OK || result == Z_BUF_ERROR || result == Z_STREAM_END, TypeError,
+          "Compression failed.");
+      break;
+    case Mode::DECOMPRESS:
+      JSG_REQUIRE(result == Z_OK || result == Z_BUF_ERROR || result == Z_STREAM_END, TypeError,
+          "Decompression failed.");
+
+      if (strictCompression == Flags::STRICT) {
+        // The spec requires that a TypeError is produced if there is trailing data after the
+        // end of the compression stream.
+        JSG_REQUIRE(!(result == Z_STREAM_END && stream.availIn() > 0), TypeError,
+            "Trailing bytes after end of compressed data");
+        // Same applies to closing a stream before the complete decompressed data is
+        // available.
+        JSG_REQUIRE(
+            !(flush == Z_FINISH && result == Z_BUF_ERROR && stream.availOut() == sizeof(buffer)),
+            TypeError, "Called close() on a decompression stream with incomplete data");
+      }
+      break;
+  }
+
+  return Result{
+    .success = result == Z_OK,
+    .buffer = kj::arrayPtr(buffer, sizeof(buffer) - stream.availOut()),
+  };
+}
+
+kj::ArrayPtr<kj::byte> CodecStage::LazyBuffer::take(size_t readSize) {
+  KJ_ASSERT(readSize <= validSize);
+  kj::ArrayPtr<kj::byte> chunk = kj::arrayPtr(&output[output.size() - validSize], readSize);
+  validSize -= readSize;
+  return chunk;
+}
+
+void CodecStage::LazyBuffer::maybeShift() {
+  size_t unusedSpace = output.size() - validSize;
+  if (unusedSpace >= 1024 && unusedSpace >= (output.size() >> 3)) {
+    // Shifting buffer to erase data that has already been read. validSize remains the same.
+    memmove(output.begin(), output.begin() + unusedSpace, validSize);
+    output.truncate(validSize);
+  }
+}
+
+void CodecStage::LazyBuffer::write(kj::ArrayPtr<const kj::byte> chunk) {
+  output.addAll(chunk);
+  validSize += chunk.size();
+}
+
+void CodecStage::LazyBuffer::clear() {
+  output.clear();
+  validSize = 0;
+}
+
+size_t CodecStage::LazyBuffer::size() {
+  return validSize;
+}
+
+bool CodecStage::LazyBuffer::empty() {
+  return validSize == 0;
+}
+
+CodecStage::CodecStage(Mode mode,
+    kj::StringPtr format,
+    Flags flags,
+    kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+    : context(mode, format, flags, kj::mv(externalMemoryTarget)) {}
+
+void CodecStage::push(kj::ArrayPtr<const kj::byte> input) {
+  context.setInput(input.begin(), input.size());
+  pump(Z_NO_FLUSH);
+}
+
+void CodecStage::end() {
+  if (finished) return;
+  finished = true;
+  pump(Z_FINISH);
+}
+
+size_t CodecStage::pull(kj::ArrayPtr<kj::byte> dest) {
+  auto n = kj::min(dest.size(), output.size());
+  if (n == 0) return 0;
+  dest.first(n).copyFrom(output.take(n));
+  output.maybeShift();
+  return n;
+}
+
+size_t CodecStage::available() {
+  return output.size();
+}
+
+bool CodecStage::empty() {
+  return output.empty();
+}
+
+void CodecStage::clear() {
+  output.clear();
+}
+
+void CodecStage::pump(int flush) {
+  while (true) {
+    auto result = context.pumpOnce(flush);
+    if (result.buffer.size() == 0) {
+      if (result.success) {
+        // No output produced but input data has been processed based on the zlib return
+        // code; call pumpOnce again.
+        continue;
+      }
+      return;
+    }
+    // Output has been produced: buffer it and pump again.
+    output.write(result.buffer);
+  }
+  KJ_UNREACHABLE;
+}
+
 }  // namespace workerd::api

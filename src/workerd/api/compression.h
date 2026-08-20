@@ -126,4 +126,119 @@ class ZlibStream final {
   bool ended = false;
 };
 
+// The synchronous codec stage behind the web Compression Streams pairs (both the legacy C++
+// frontend in api/streams/compression.c++ and the TypeScript streams implementation's
+// frontend): the Compression Streams spec policy — spec-pinned TypeErrors and the
+// strict_compression_checks handling — over the shared ZlibStream core, plus the stage's own
+// output buffer. Frontends are orchestration shells around one of these; ALL asynchrony is
+// frontend-owned.
+//
+// PACING IS DELIBERATELY EAGER: push() runs the codec over the whole input chunk
+// synchronously, accumulating ALL produced output in the stage buffer. The spec runs the
+// codec inside the TransformStream transform()/flush() algorithms, so corrupt input MUST
+// reject the write (and a strict-mode incomplete stream MUST reject the close) — that error
+// timing is observable and WPT-pinned. Demand-paced production (pump only what a reader
+// asked for) is therefore NOT valid on any frontend where write settlement is observable; it
+// remains a possible future policy for fused native pipelines that own both ends.
+class CodecStage final {
+ public:
+  using Mode = ZlibStream::Mode;
+
+  enum class Flags {
+    NONE,
+    // The strict_compression_checks compat flag's decompression checks (trailing data after
+    // end of stream; close with incomplete data).
+    STRICT,
+  };
+
+  // `format` must be a valid web format ("gzip" | "deflate" | "deflate-raw"); the
+  // JS-visible format validation (with its spec-pinned TypeError) belongs to the frontends.
+  explicit CodecStage(Mode mode,
+      kj::StringPtr format,
+      Flags flags,
+      kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget);
+  KJ_DISALLOW_COPY_AND_MOVE(CodecStage);
+
+  // Runs the codec over one input chunk to exhaustion, synchronously. The input is fully
+  // consumed before this returns (zlib copies what it needs into its own window), so the
+  // caller's buffer is not retained. Produced output accumulates in the stage buffer.
+  // Throws on codec error — the caller owns its own state/teardown response.
+  void push(kj::ArrayPtr<const kj::byte> input);
+
+  // Finishes the codec (Z_FINISH), which also runs the strict-mode end checks for
+  // decompression (trailing data / incomplete stream). Idempotent: repeat calls are no-ops,
+  // preserving the historical allowance for multiple end() calls.
+  void end();
+
+  // Copies up to dest.size() buffered output bytes into dest, returning the count copied.
+  size_t pull(kj::ArrayPtr<kj::byte> dest);
+
+  size_t available();
+  bool empty();
+
+  // Teardown (frontend cancel/abort path): drops all buffered output.
+  void clear();
+
+ private:
+  // The per-pump policy layer: one deflate()/inflate() step into the scratch buffer, with
+  // the spec's TypeErrors and the strict-mode checks applied to the result.
+  class Context {
+   public:
+    struct Result {
+      bool success = false;
+      kj::ArrayPtr<const kj::byte> buffer;
+    };
+
+    explicit Context(Mode mode,
+        kj::StringPtr format,
+        Flags flags,
+        kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget);
+    KJ_DISALLOW_COPY_AND_MOVE(Context);
+
+    void setInput(const void* in, size_t size);
+    Result pumpOnce(int flush);
+
+   private:
+    CompressionAllocator allocator;
+    ZlibStream stream;
+    kj::byte buffer[16384];
+
+    // For the eponymous compatibility flag
+    Flags strictCompression;
+  };
+
+  // Buffer class based on kj::Vector that erases data that has been read from it lazily to
+  // avoid excessive copying when reading a larger amount of buffered data in small chunks.
+  // validSize is used to track the amount of data that has not been read back yet.
+  class LazyBuffer {
+   public:
+    // Return a chunk of data and mark it as invalid. The returned chunk remains valid until
+    // data is shifted, cleared or destructor is called. maybeShift() should be called after
+    // the returned data has been processed.
+    kj::ArrayPtr<kj::byte> take(size_t readSize);
+
+    // Shift the output only if doing so results in reducing vector size by at least 1 KiB
+    // and 1/8 of its size to avoid copying for small reads.
+    void maybeShift();
+
+    void write(kj::ArrayPtr<const kj::byte> chunk);
+    void clear();
+
+    // The size of the valid data that has not been read back yet. This may be smaller than
+    // the size of the internal vector, which is not relevant to consumers.
+    size_t size();
+    bool empty();
+
+   private:
+    kj::Vector<kj::byte> output;
+    size_t validSize = 0;
+  };
+
+  void pump(int flush);
+
+  Context context;
+  LazyBuffer output;
+  bool finished = false;
+};
+
 }  // namespace workerd::api
