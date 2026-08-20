@@ -23,27 +23,6 @@
 // https://github.com/nodejs/node/blob/main/src/node_zlib.cc
 namespace workerd::api::node {
 
-#ifndef ZLIB_ERROR_CODES
-#define ZLIB_ERROR_CODES(V)                                                                        \
-  V(Z_OK)                                                                                          \
-  V(Z_STREAM_END)                                                                                  \
-  V(Z_NEED_DICT)                                                                                   \
-  V(Z_ERRNO)                                                                                       \
-  V(Z_STREAM_ERROR)                                                                                \
-  V(Z_DATA_ERROR)                                                                                  \
-  V(Z_MEM_ERROR)                                                                                   \
-  V(Z_BUF_ERROR)                                                                                   \
-  V(Z_VERSION_ERROR)
-
-inline const char* ZlibStrerror(int err) {
-#define V(code)                                                                                    \
-  if (err == code) return #code;
-  ZLIB_ERROR_CODES(V)
-#undef V
-  return "Z_UNKNOWN_ERROR";
-}
-#endif  // ZLIB_ERROR_CODES
-
 // Certain zlib constants are defined by Node.js itself
 static constexpr auto Z_MIN_CHUNK = 64;
 static constexpr auto Z_MAX_CHUNK = 128 * 1024 * 1024;
@@ -97,7 +76,7 @@ struct CompressionError {
 class ZlibContext final {
  public:
   explicit ZlibContext(CompressionAllocator& allocator, ZlibMode _mode)
-      : allocator(allocator),
+      : core(allocator),
         mode(_mode) {}
   ~ZlibContext() noexcept(false);
 
@@ -117,6 +96,7 @@ class ZlibContext final {
   // when avail_out == 0, so we point next_out at a valid dummy byte instead.
   // With avail_out == 0, no data will actually be written to it.
   void clearBuffers() {
+    auto& stream = core.raw();
     stream.next_in = nullptr;
     stream.avail_in = 0;
     stream.next_out = &dummyByte;
@@ -132,8 +112,8 @@ class ZlibContext final {
   // Function signature is same as Node.js implementation.
   // Ref: https://github.com/nodejs/node/blob/9edf4a0856681a7665bd9dcf2ca7cac252784b98/src/node_zlib.cc#L880
   void getAfterWriteResult(uint32_t* availIn, uint32_t* availOut) const {
-    *availIn = stream.avail_in;
-    *availOut = stream.avail_out;
+    *availIn = core.availIn();
+    *availOut = core.availOut();
   }
   void setMode(ZlibMode value) {
     mode = value;
@@ -152,21 +132,17 @@ class ZlibContext final {
   }
 
   uint getAvailIn() const {
-    return stream.avail_in;
+    return core.availIn();
   };
   void setAvailIn(uint value) {
-    stream.avail_in = value;
+    core.raw().avail_in = value;
   };
   uint getAvailOut() const {
-    return stream.avail_out;
+    return core.availOut();
   }
   void setAvailOut(uint value) {
-    stream.avail_out = value;
+    core.raw().avail_out = value;
   };
-
-  z_stream* getStream() {
-    return &stream;
-  }
 
   // Zlib
   void initialize(int _level,
@@ -202,13 +178,18 @@ class ZlibContext final {
   kj::Maybe<CompressionError> setDictionary();
 
   CompressionError constructError(kj::StringPtr message) const {
-    if (stream.msg != nullptr) message = kj::StringPtr(stream.msg);
+    auto streamMsg = core.msg();
+    if (streamMsg != nullptr) message = streamMsg;
 
-    return {kj::str(message), kj::str(ZlibStrerror(err)), err};
+    return {kj::str(message), kj::str(ZlibStream::errorCodeName(err)), err};
   };
 
-  bool initialized = false;
-  CompressionAllocator& allocator;
+  // The shared z_stream core (api/compression.h) owns the stream structure and its
+  // lifecycle; the Node-specific machinery -- mode bookkeeping (including the UNZIP
+  // gzip-sniffing mode reassignment), dictionaries, deflateParams, and the Node-fidelity
+  // error surface -- lives here and reaches the structure through core.raw() where no
+  // core helper applies.
+  ZlibStream core;
   ZlibMode mode = ZlibMode::NONE;
   int flush = Z_NO_FLUSH;
   int windowBits = 0;
@@ -219,7 +200,6 @@ class ZlibContext final {
 
   int err = Z_OK;
   unsigned int gzip_id_bytes_read = 0;
-  z_stream stream{};
   // Dummy byte target for clearBuffers(). zlib's deflate() rejects
   // next_out == NULL even when avail_out == 0, so we need a valid address.
   Bytef dummyByte = 0;
