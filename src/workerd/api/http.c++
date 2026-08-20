@@ -1473,7 +1473,7 @@ constexpr auto MAX_REDIRECT_COUNT = 20;
 
 class ActorFetchRetryState {
  public:
-  static ActorFetchRetryState create();
+  static ActorFetchRetryState create(TimerChannel& timer);
 
   IoChannelFactory::ActorRetryRequestMetadata getMetadata() const {
     return metadata;
@@ -1486,39 +1486,23 @@ class ActorFetchRetryState {
   kj::Maybe<kj::Exception> checkDeadline();
   kj::OneOf<kj::Duration, kj::Exception> prepareRetry(kj::Exception exception);
 
-  template <typename T>
-  kj::Promise<T> applyDeadline(kj::Promise<T> promise) {
-    KJ_IF_SOME(deadlineValue, deadline) {
-      if (attemptCount > 1) {
-        auto originalDisconnect = KJ_ASSERT_NONNULL(this->originalDisconnect).clone();
-        auto now = kj::systemPreciseMonotonicClock().now();
-        if (now >= deadlineValue) {
-          return kj::mv(originalDisconnect);
-        }
-        return promise.exclusiveJoin(
-            IoContext::current().afterLimitTimeout(deadlineValue - now)
-                .then([exception = kj::mv(originalDisconnect)]() mutable -> kj::Promise<T> {
-          return kj::mv(exception);
-        }));
-      }
-    }
-    return kj::mv(promise);
-  }
-
  private:
   static constexpr uint MAX_ATTEMPTS = 5;
   static constexpr auto RETRY_BUDGET = 10 * kj::SECONDS;
   static constexpr auto INITIAL_BACKOFF = 50 * kj::MILLISECONDS;
 
   ActorFetchRetryState(IoChannelFactory::ActorRetryRequestMetadata metadata,
-      kj::Maybe<kj::TimePoint> deadline)
+      kj::Maybe<kj::TimePoint> deadline,
+      TimerChannel& timer)
       : metadata(kj::mv(metadata)),
-        deadline(kj::mv(deadline)) {}
+        deadline(kj::mv(deadline)),
+        timer(timer) {}
 
   kj::Duration retryDelay();
 
   IoChannelFactory::ActorRetryRequestMetadata metadata;
   kj::Maybe<kj::TimePoint> deadline;
+  TimerChannel& timer;
   kj::Maybe<kj::Exception> originalDisconnect;
   uint attemptCount = 1;
 };
@@ -1530,20 +1514,22 @@ struct ActorFetchFailure {
 template <typename T>
 using ActorFetchAttemptResult = kj::OneOf<T, ActorFetchFailure>;
 
-ActorFetchRetryState ActorFetchRetryState::create() {
+ActorFetchRetryState ActorFetchRetryState::create(TimerChannel& timer) {
   auto metadata = generateActorRetryRequestMetadata(kj::systemCoarseCalendarClock().now());
   kj::Maybe<kj::TimePoint> deadline;
+  // TODO(STOR-5489): Keep sender-side retries disabled until retry-claim enforcement is deployed to
+  // every receiver. A mixed fleet can otherwise execute both an ambiguous request and its retry.
   if (util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH) &&
       util::Autogate::isEnabled(
           util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS)) {
-    deadline = kj::systemPreciseMonotonicClock().now() + RETRY_BUDGET;
+    deadline = timer.nowForLimitTimeout() + RETRY_BUDGET;
   }
-  return ActorFetchRetryState(kj::mv(metadata), kj::mv(deadline));
+  return ActorFetchRetryState(kj::mv(metadata), kj::mv(deadline), timer);
 }
 
 kj::Maybe<kj::Exception> ActorFetchRetryState::checkDeadline() {
   KJ_IF_SOME(deadlineValue, deadline) {
-    if (attemptCount > 1 && kj::systemPreciseMonotonicClock().now() >= deadlineValue) {
+    if (attemptCount > 1 && timer.nowForLimitTimeout() >= deadlineValue) {
       return KJ_ASSERT_NONNULL(originalDisconnect).clone();
     }
   }
@@ -1570,7 +1556,11 @@ kj::OneOf<kj::Duration, kj::Exception> ActorFetchRetryState::prepareRetry(
     KJ_IF_SOME(original, originalDisconnect) {
       return kj::mv(original);
     }
-    return KJ_EXCEPTION(DISCONNECTED, "Durable Object fetch failed");
+    auto normalized = KJ_EXCEPTION(DISCONNECTED, "Durable Object fetch failed");
+    for (auto& detail: exception.getDetails()) {
+      normalized.setDetail(detail.id, kj::heapArray(detail.value.asPtr()));
+    }
+    return normalized;
   }
 
   if (exception.getType() != kj::Exception::Type::DISCONNECTED ||
@@ -1592,7 +1582,7 @@ kj::OneOf<kj::Duration, kj::Exception> ActorFetchRetryState::prepareRetry(
 
   auto delay = retryDelay();
   auto deadline = KJ_ASSERT_NONNULL(this->deadline);
-  if (kj::systemPreciseMonotonicClock().now() + delay >= deadline) {
+  if (timer.nowForLimitTimeout() + delay >= deadline) {
     return KJ_ASSERT_NONNULL(originalDisconnect).clone();
   }
   ++attemptCount;
@@ -1728,7 +1718,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
     kj::Vector<kj::Url> urlList) {
   kj::Maybe<ActorFetchRetryState> retryState;
   if (jsRequest->canRewindBody() && fetcher->supportsActorFetchRetries()) {
-    retryState = ActorFetchRetryState::create();
+    retryState = ActorFetchRetryState::create(IoContext::current().getIoChannelFactory().getTimer());
   }
 
   return fetchImplNoOutputLockAttempt(
@@ -1843,7 +1833,6 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
         AbortSignal::maybeCancelWrap(js, signal, client->openWebSocket(url, headers));
     KJ_IF_SOME(state, retryState) {
       if (state.isRetryEnabled()) {
-        webSocketResponse = state.applyDeadline(kj::mv(webSocketResponse));
         return ioContext.awaitIo(js, captureActorFetchAttempt(kj::mv(webSocketResponse)),
             [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest),
                 urlList = kj::mv(urlList), client = kj::mv(client), signal = kj::mv(signal),
@@ -1940,7 +1929,6 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
     });
     KJ_IF_SOME(state, retryState) {
       if (state.isRetryEnabled()) {
-        responsePromise = state.applyDeadline(kj::mv(responsePromise));
         auto resultPromise = captureActorFetchAttempt(kj::mv(responsePromise));
         return ioContext.awaitIo(js, kj::mv(resultPromise),
             [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest),

@@ -28,7 +28,6 @@ kj::Own<WorkerInterface> startActorSubrequest(IoContext& context, StartRequest& 
   auto options = IoContext::SubrequestOptions{.inHouse = true,
     .wrapMetrics = true,
     .operationName = kj::ConstString("durable_object_subrequest"_kjc)};
-  // TODO(someday): Do not count physical actor fetch retries as additional subrequests.
   auto client = context.getSubrequest(startRequest, kj::mv(options));
   return context.getMetrics().wrapActorSubrequestClient(kj::mv(client));
 }
@@ -57,8 +56,7 @@ Fetcher::OutgoingFactory::Result LocalActorOutgoingFactory::newSingleUseClient(
   auto& context = IoContext::current();
 
   kj::Maybe<TraceContextParent> spanParents;
-  auto client = context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
-      [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
+  auto startRequest = [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
     tracing.setTag("objectId"_kjc, actorId.asPtr());
     spanParents = tracing.getSpanParents();
     auto userSpanParent = tracing.getUserSpanParent();
@@ -70,10 +68,8 @@ Fetcher::OutgoingFactory::Result LocalActorOutgoingFactory::newSingleUseClient(
         .startRequest({.cfBlobJson = kj::mv(cfStr),
           .parentSpan = tracing.getInternalSpanParent(),
           .userSpanParent = kj::mv(userSpanParent)});
-  },
-      {.inHouse = true,
-        .wrapMetrics = true,
-        .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
+  };
+  auto client = startActorSubrequest(context, startRequest);
   return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
 }
 

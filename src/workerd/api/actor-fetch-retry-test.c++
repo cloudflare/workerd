@@ -93,7 +93,48 @@ enum class ReplayFailure {
   NOT_DELIVERED,
   DELIVERED,
   CLAIM_REJECTED,
-  HANG,
+  SLOW_RESPONSE,
+  RETRY_DELAY_EXCEEDS_BUDGET,
+};
+
+class DeterministicTimerChannel final: public TimerChannel {
+ public:
+  explicit DeterministicTimerChannel(kj::TimerImpl& timer): timer(timer) {}
+
+  void syncTime() override {}
+
+  kj::Date now(kj::Maybe<kj::Date>) override {
+    return kj::UNIX_EPOCH + (timer.now() - kj::origin<kj::TimePoint>());
+  }
+
+  kj::Promise<void> atTime(kj::Date when) override {
+    auto target = kj::origin<kj::TimePoint>() + (when - kj::UNIX_EPOCH);
+    if (target <= timer.now()) {
+      return kj::READY_NOW;
+    }
+    auto promise = timer.atTime(target);
+    timer.advanceTo(target);
+    return promise;
+  }
+
+  kj::Promise<void> afterLimitTimeout(kj::Duration delay) override {
+    auto promise = timer.afterDelay(delay);
+    timer.advanceTo(timer.now() + nextDelay.orDefault(delay));
+    nextDelay = kj::none;
+    return promise;
+  }
+
+  void delayNextTimeoutBy(kj::Duration delay) {
+    nextDelay = delay;
+  }
+
+  kj::TimePoint nowForLimitTimeout() override {
+    return timer.now();
+  }
+
+ private:
+  kj::TimerImpl& timer;
+  kj::Maybe<kj::Duration> nextDelay;
 };
 
 struct ReplayState {
@@ -105,6 +146,7 @@ struct ReplayState {
   uint requestCount = 0;
   uint webSocketRequestCount = 0;
   uint retryCount = 0;
+  kj::Maybe<DeterministicTimerChannel&> timerChannel;
 };
 
 class ReplayFetchTarget final: public WorkerInterface {
@@ -117,28 +159,38 @@ class ReplayFetchTarget final: public WorkerInterface {
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override {
     auto attempt = state.requestCount++;
+    kj::Maybe<kj::Promise<void>> slowResponseDelay;
+    if (attempt < state.failures.size() &&
+        state.failures[attempt] == ReplayFailure::SLOW_RESPONSE) {
+      slowResponseDelay = IoContext::current().afterLimitTimeout(11 * kj::SECONDS);
+    }
     if (headers.isWebSocket()) {
       ++state.webSocketRequestCount;
     }
     state.requestBodies.add(co_await requestBody.readAllBytes());
     if (attempt < state.failures.size()) {
       auto failure = state.failures[attempt];
-      if (failure == ReplayFailure::HANG) {
-        co_await kj::Promise<void>(kj::NEVER_DONE);
-        KJ_UNREACHABLE;
+      if (failure == ReplayFailure::SLOW_RESPONSE) {
+        co_await kj::mv(KJ_ASSERT_NONNULL(slowResponseDelay));
+      } else {
+        if (failure == ReplayFailure::RETRY_DELAY_EXCEEDS_BUDGET) {
+          KJ_REQUIRE_NONNULL(state.timerChannel).delayNextTimeoutBy(11 * kj::SECONDS);
+        }
+        auto exception = failure == ReplayFailure::CLAIM_REJECTED
+            ? KJ_EXCEPTION(FAILED, "actor retry claim rejected")
+            : KJ_EXCEPTION(DISCONNECTED, "actor fetch disconnected");
+        if (failure == ReplayFailure::NOT_DELIVERED) {
+          exception.setDetail(
+              jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+        } else if (failure == ReplayFailure::DELIVERED) {
+          exception.setDetail(
+              jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+        } else if (failure == ReplayFailure::CLAIM_REJECTED) {
+          exception.setDetail(
+              jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
+        }
+        kj::throwRecoverableException(kj::mv(exception));
       }
-      auto exception = failure == ReplayFailure::CLAIM_REJECTED
-          ? KJ_EXCEPTION(FAILED, "actor retry claim rejected")
-          : KJ_EXCEPTION(DISCONNECTED, "actor fetch disconnected");
-      if (failure == ReplayFailure::NOT_DELIVERED) {
-        exception.setDetail(
-            jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
-      } else if (failure == ReplayFailure::DELIVERED) {
-        exception.setDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
-      } else if (failure == ReplayFailure::CLAIM_REJECTED) {
-        exception.setDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
-      }
-      kj::throwRecoverableException(kj::mv(exception));
     }
 
     auto responseHeaders = headers.cloneShallow();
@@ -215,8 +267,15 @@ kj::Maybe<kj::Exception> runActorFetch(ReplayState& state,
     RetryEnforcement enforcement,
     kj::Maybe<kj::StringPtr> body,
     ActorFetchKind kind) {
+  kj::TimerImpl timer(kj::origin<kj::TimePoint>());
+  DeterministicTimerChannel timerChannel(timer);
+  state.timerChannel = timerChannel;
   TestFixture fixture(TestFixture::SetupParams{
-    .useRealTimers = enforcement == RetryEnforcement::ENABLED,
+    .useRealTimers = false,
+    .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
+        [&](TimerChannel&) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<TestFixture::DummyIoChannelFactory>(timerChannel);
+  }),
   });
   if (enforcement == RetryEnforcement::ENABLED) {
     util::Autogate::initAutogateNamesForTest(
@@ -564,14 +623,25 @@ KJ_TEST("actor fetch stops after five attempts") {
   KJ_EXPECT(state.retryCount == 4);
 }
 
-KJ_TEST("actor fetch stops when the retry budget expires") {
+KJ_TEST("actor fetch allows an in-flight retry to finish after the start budget") {
   ReplayState state{
-    .failures = kj::arr(ReplayFailure::AMBIGUOUS, ReplayFailure::HANG),
+    .failures = kj::arr(ReplayFailure::AMBIGUOUS, ReplayFailure::SLOW_RESPONSE),
+  };
+
+  KJ_EXPECT(
+      runActorFetch(state, RetryEnforcement::ENABLED, kj::none, ActorFetchKind::HTTP) == kj::none);
+  KJ_EXPECT(state.requestCount == 2);
+  KJ_EXPECT(state.retryCount == 1);
+}
+
+KJ_TEST("actor fetch does not start a retry after the start budget") {
+  ReplayState state{
+    .failures = kj::arr(ReplayFailure::RETRY_DELAY_EXCEEDS_BUDGET),
   };
 
   KJ_EXPECT(
       runActorFetch(state, RetryEnforcement::ENABLED, kj::none, ActorFetchKind::HTTP) != kj::none);
-  KJ_EXPECT(state.requestCount == 2);
+  KJ_EXPECT(state.requestCount == 1);
   KJ_EXPECT(state.retryCount == 1);
 }
 

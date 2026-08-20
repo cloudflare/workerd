@@ -129,7 +129,7 @@ class MockEntropySource final: public kj::EntropySource {
 };
 
 struct MockLimitEnforcer final: public LimitEnforcer {
-  MockLimitEnforcer(kj::Maybe<uint&> checkedSubrequestCount)
+  MockLimitEnforcer(kj::Maybe<uint&> checkedSubrequestCount = kj::none)
       : checkedSubrequestCount(checkedSubrequestCount) {}
 
   kj::Own<void> enterJs(jsg::Lock& lock, IoContext& context) override {
