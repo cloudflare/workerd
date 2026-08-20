@@ -38,6 +38,8 @@ inline workerd::EventOutcome fromImpl(kj_rs::Rust*, workerd::rust::worker::Event
       return workerd::EventOutcome::INTERNAL_ERROR;
     case workerd::rust::worker::EventOutcome::ExceededWallTime:
       return workerd::EventOutcome::EXCEEDED_WALL_TIME;
+    case workerd::rust::worker::EventOutcome::Aborted:
+      return workerd::EventOutcome::ABORTED;
   }
 }
 
