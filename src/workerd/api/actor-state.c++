@@ -1175,7 +1175,8 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectState::blockConcurrencyWhile
   return IoContext::current().blockConcurrencyWhile(js, kj::mv(callback));
 }
 
-void DurableObjectState::abort(jsg::Lock& js, jsg::Optional<kj::String> reason) {
+void DurableObjectState::abort(
+    jsg::Lock& js, jsg::Optional<kj::String> reason, jsg::Optional<AbortOptions> options) {
   kj::String description = kj::mv(reason)
                                .map([](kj::String&& text) {
     return kj::str("broken.outputGateBroken; jsg.Error: ", text);
@@ -1186,6 +1187,12 @@ void DurableObjectState::abort(jsg::Lock& js, jsg::Optional<kj::String> reason) 
 
   kj::Exception error(kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::mv(description));
   error.setDetail(jsg::EXCEPTION_IS_USER_ERROR, kj::heapArray<byte>(0));
+  error.setDetail(jsg::EXCEPTION_DURABLE_OBJECT_ABORT, kj::heapArray<byte>(0));
+  KJ_IF_SOME(o, options) {
+    if (!o.retryAlarm.orDefault(true)) {
+      error.setDetail(jsg::EXCEPTION_DURABLE_OBJECT_ABORT_NO_RETRY, kj::heapArray<byte>(0));
+    }
+  }
 
   KJ_IF_SOME(s, storage) {
     // Make sure we _synchronously_ break storage so that there's no chance our promise fulfilling
