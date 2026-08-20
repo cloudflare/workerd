@@ -3144,7 +3144,7 @@ impl<'a> FunctionCallbackInfo<'a> {
     }
 
     pub fn get(&self, index: usize) -> Local<'a, Value> {
-        debug_assert!(index <= self.len(), "index out of bounds");
+        debug_assert!(index < self.len(), "index out of bounds");
         // SAFETY: self.0 is a valid FunctionCallbackInfo pointer (guaranteed by constructor).
         unsafe { Local::from_ffi(self.isolate(), ffi::fci_get_arg(self.0, index)) }
     }
