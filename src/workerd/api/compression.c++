@@ -313,4 +313,357 @@ void CodecStage::pump(int flush) {
   KJ_UNREACHABLE;
 }
 
+// =======================================================================================
+// Brotli / Zstd contexts
+
+void BrotliContext::setBuffers(kj::ArrayPtr<kj::byte> input, kj::ArrayPtr<kj::byte> output) {
+  nextIn = reinterpret_cast<const uint8_t*>(input.begin());
+  nextOut = output.begin();
+  availIn = input.size();
+  availOut = output.size();
+}
+
+void BrotliContext::setInputBuffer(kj::ArrayPtr<const kj::byte> input) {
+  nextIn = input.begin();
+  availIn = input.size();
+}
+
+void BrotliContext::setOutputBuffer(kj::ArrayPtr<kj::byte> output) {
+  nextOut = output.begin();
+  availOut = output.size();
+}
+
+uint BrotliContext::getAvailOut() const {
+  return availOut;
+}
+
+void BrotliContext::setFlush(int _flush) {
+  flush = static_cast<BrotliEncoderOperation>(_flush);
+}
+
+void BrotliContext::getAfterWriteResult(uint32_t* _availIn, uint32_t* _availOut) const {
+  *_availIn = availIn;
+  *_availOut = availOut;
+}
+
+BrotliEncoderContext::BrotliEncoderContext(CompressionAllocator& allocator, ZlibMode _mode)
+    : BrotliContext(allocator, _mode) {
+  // NOTE: Ignores any returned errors.
+  // TODO(soon): It's possible that initialization doesn't need to happen until `initialize` is
+  //   called elsewhere. I'm keeping it like this to avoid changing the existing behaviour.
+  auto _ = initialize();
+}
+
+void BrotliEncoderContext::work() {
+  JSG_REQUIRE(mode == ZlibMode::BROTLI_ENCODE, Error, "Mode should be BROTLI_ENCODE"_kj);
+  JSG_REQUIRE_NONNULL(state.get(), Error, "State should not be empty"_kj);
+
+  const uint8_t* internalNext = nextIn;
+  lastResult = BrotliEncoderCompressStream(
+      state.get(), flush, &availIn, &internalNext, &availOut, &nextOut, nullptr);
+  nextIn += internalNext - nextIn;
+
+  streamEnd = lastResult && BrotliEncoderIsFinished(state.get());
+}
+
+kj::Maybe<CompressionError> BrotliEncoderContext::initialize() {
+  auto instance = BrotliEncoderCreateInstance(
+      CompressionAllocator::AllocForBrotli, CompressionAllocator::FreeForZlib, &allocator);
+  state = kj::disposeWith<BrotliEncoderDestroyInstance>(kj::mv(instance));
+
+  if (state.get() == nullptr) {
+    return CompressionError(
+        "Could not initialize Brotli instance"_kj, "ERR_ZLIB_INITIALIZATION_FAILED"_kj, -1);
+  }
+
+  return kj::none;
+}
+
+kj::Maybe<CompressionError> BrotliEncoderContext::resetStream() {
+  return initialize();
+}
+
+kj::Maybe<CompressionError> BrotliEncoderContext::setParams(int key, uint32_t value) {
+  if (!BrotliEncoderSetParameter(state.get(), static_cast<BrotliEncoderParameter>(key), value)) {
+    return CompressionError("Setting parameter failed", "ERR_BROTLI_PARAM_SET_FAILED", -1);
+  }
+
+  return kj::none;
+}
+
+kj::Maybe<CompressionError> BrotliEncoderContext::getError() const {
+  if (!lastResult) {
+    return CompressionError("Compression failed", "ERR_BROTLI_COMPRESSION_FAILED", -1);
+  }
+
+  return kj::none;
+}
+
+bool BrotliEncoderContext::isStreamEnd() const {
+  return streamEnd;
+}
+
+BrotliDecoderContext::BrotliDecoderContext(CompressionAllocator& allocator, ZlibMode _mode)
+    : BrotliContext(allocator, _mode) {
+  // NOTE: Ignores any returned errors.
+  // TODO(soon): It's possible that initialization doesn't need to happen until `initialize` is
+  //   called elsewhere. I'm keeping it like this to avoid changing the existing behaviour.
+  auto _ = initialize();
+}
+
+kj::Maybe<CompressionError> BrotliDecoderContext::initialize() {
+  auto instance = BrotliDecoderCreateInstance(
+      CompressionAllocator::AllocForBrotli, CompressionAllocator::FreeForZlib, &allocator);
+  state = kj::disposeWith<BrotliDecoderDestroyInstance>(kj::mv(instance));
+
+  if (state.get() == nullptr) {
+    return CompressionError(
+        "Could not initialize Brotli instance", "ERR_ZLIB_INITIALIZATION_FAILED", -1);
+  }
+
+  return kj::none;
+}
+
+void BrotliDecoderContext::work() {
+  JSG_REQUIRE(mode == ZlibMode::BROTLI_DECODE, Error, "Mode should have been BROTLI_DECODE"_kj);
+  JSG_REQUIRE_NONNULL(state.get(), Error, "State should not be empty"_kj);
+  const uint8_t* internalNext = nextIn;
+  lastResult = BrotliDecoderDecompressStream(
+      state.get(), &availIn, &internalNext, &availOut, &nextOut, nullptr);
+  nextIn += internalNext - nextIn;
+
+  if (lastResult == BROTLI_DECODER_RESULT_ERROR) {
+    error = BrotliDecoderGetErrorCode(state.get());
+    errorString = kj::str("ERR_", BrotliDecoderErrorString(error));
+  }
+}
+
+kj::Maybe<CompressionError> BrotliDecoderContext::resetStream() {
+  return initialize();
+}
+
+kj::Maybe<CompressionError> BrotliDecoderContext::setParams(int key, uint32_t value) {
+  if (!BrotliDecoderSetParameter(state.get(), static_cast<BrotliDecoderParameter>(key), value)) {
+    return CompressionError("Setting parameter failed", "ERR_BROTLI_PARAM_SET_FAILED", -1);
+  }
+
+  return kj::none;
+}
+
+kj::Maybe<CompressionError> BrotliDecoderContext::getError() const {
+  if (error != BROTLI_DECODER_NO_ERROR) {
+    return CompressionError("Compression failed", errorString, -1);
+  }
+
+  if (flush == BROTLI_OPERATION_FINISH && lastResult == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT) {
+    // Match zlib behavior, as brotli doesn't have its own code for this.
+    return CompressionError("Unexpected end of file", "Z_BUF_ERROR", Z_BUF_ERROR);
+  }
+
+  return kj::none;
+}
+
+bool BrotliDecoderContext::isStreamEnd() const {
+  return lastResult == BROTLI_DECODER_RESULT_SUCCESS;
+}
+
+// =======================================================================================
+// Zstd Implementation
+
+void ZstdContext::setBuffers(kj::ArrayPtr<kj::byte> input, kj::ArrayPtr<kj::byte> output) {
+  setInputBuffer(input);
+  setOutputBuffer(output);
+}
+
+void ZstdContext::setInputBuffer(kj::ArrayPtr<const kj::byte> input) {
+  input_.src = input.begin();
+  input_.size = input.size();
+  input_.pos = 0;
+}
+
+void ZstdContext::setOutputBuffer(kj::ArrayPtr<kj::byte> output) {
+  output_.dst = output.begin();
+  output_.size = output.size();
+  output_.pos = 0;
+}
+
+void ZstdContext::setFlush(int flush) {
+  KJ_DASSERT(flush >= ZSTD_e_continue && flush <= ZSTD_e_end,
+      "flush must be a valid ZSTD_EndDirective value");
+  flush_ = static_cast<ZSTD_EndDirective>(flush);
+}
+
+kj::uint ZstdContext::getAvailOut() const {
+  return output_.size - output_.pos;
+}
+
+void ZstdContext::getAfterWriteResult(uint32_t* availIn, uint32_t* availOut) const {
+  *availIn = input_.size - input_.pos;
+  *availOut = output_.size - output_.pos;
+}
+
+namespace {
+// Helper to check ZSTD errors and return a CompressionError if present.
+// Also sets the error code in the provided reference for later retrieval.
+kj::Maybe<CompressionError> zstdCheckError(
+    size_t result, ZSTD_ErrorCode& error, kj::StringPtr errorCode) {
+  if (ZSTD_isError(result)) {
+    error = ZSTD_getErrorCode(result);
+    return CompressionError(ZSTD_getErrorName(result), errorCode, -1);
+  }
+  return kj::none;
+}
+
+// Wrappers for ZSTD free functions that return void (for use with kj::disposeWith).
+void zstdFreeCCtx(ZSTD_CCtx* cctx) {
+  ZSTD_freeCCtx(cctx);
+}
+void zstdFreeDCtx(ZSTD_DCtx* dctx) {
+  ZSTD_freeDCtx(dctx);
+}
+}  // namespace
+
+ZstdEncoderContext::ZstdEncoderContext(ZlibMode _mode)
+    : ZstdContext(_mode),
+      cctx_(kj::disposeWith<zstdFreeCCtx>(ZSTD_createCCtx())) {}
+
+kj::Maybe<CompressionError> ZstdEncoderContext::initialize(uint64_t pledgedSrcSize) {
+  if (cctx_.get() == nullptr) {
+    return CompressionError(
+        "Could not initialize Zstd instance"_kj, "ERR_ZLIB_INITIALIZATION_FAILED"_kj, -1);
+  }
+
+  if (pledgedSrcSize != ZSTD_CONTENTSIZE_UNKNOWN) {
+    size_t result = ZSTD_CCtx_setPledgedSrcSize(cctx_.get(), pledgedSrcSize);
+    KJ_IF_SOME(err, zstdCheckError(result, error_, "ERR_ZSTD_COMPRESSION_FAILED"_kj)) {
+      return kj::mv(err);
+    }
+  }
+
+  return kj::none;
+}
+
+void ZstdEncoderContext::work() {
+  JSG_REQUIRE(mode == ZlibMode::ZSTD_ENCODE, Error, "Mode should be ZSTD_ENCODE"_kj);
+  JSG_REQUIRE(cctx_.get() != nullptr, Error, "Zstd context should not be null"_kj);
+
+  lastResult = ZSTD_compressStream2(cctx_.get(), &output_, &input_, flush_);
+
+  if (ZSTD_isError(lastResult)) {
+    error_ = ZSTD_getErrorCode(lastResult);
+  }
+}
+
+kj::Maybe<CompressionError> ZstdEncoderContext::resetStream() {
+  if (cctx_.get() != nullptr) {
+    size_t result = ZSTD_CCtx_reset(cctx_.get(), ZSTD_reset_session_only);
+    KJ_IF_SOME(err, zstdCheckError(result, error_, "ERR_ZSTD_COMPRESSION_FAILED"_kj)) {
+      return kj::mv(err);
+    }
+  }
+  return kj::none;
+}
+
+kj::Maybe<CompressionError> ZstdEncoderContext::setParams(int key, int value) {
+  KJ_DASSERT(key >= ZSTD_c_compressionLevel,
+      "key must be a valid ZSTD_cParameter (first valid value is ZSTD_c_compressionLevel)");
+  size_t result = ZSTD_CCtx_setParameter(cctx_.get(), static_cast<ZSTD_cParameter>(key), value);
+  if (ZSTD_isError(result)) {
+    return CompressionError(kj::str("Setting parameter failed: ", ZSTD_getErrorName(result)),
+        "ERR_ZSTD_PARAM_SET_FAILED"_kj, -1);
+  }
+  return kj::none;
+}
+
+kj::Maybe<CompressionError> ZstdEncoderContext::getError() const {
+  if (error_ != ZSTD_error_no_error) {
+    return CompressionError(kj::str("Zstd compression failed: ", ZSTD_getErrorString(error_)),
+        kj::str("ERR_ZSTD_COMPRESSION_FAILED"), -1);
+  }
+
+  if (flush_ == ZSTD_e_end && lastResult != 0) {
+    // lastResult > 0 means more output is needed, which shouldn't happen at end
+    return CompressionError("Unexpected end of file"_kj, "Z_BUF_ERROR"_kj, Z_BUF_ERROR);
+  }
+
+  return kj::none;
+}
+
+bool ZstdEncoderContext::isStreamEnd() const {
+  // ZSTD_compressStream2 returns 0 when flush_ == ZSTD_e_end and the frame is fully flushed.
+  return !ZSTD_isError(lastResult) && lastResult == 0;
+}
+
+ZstdDecoderContext::ZstdDecoderContext(ZlibMode _mode)
+    : ZstdContext(_mode),
+      dctx_(kj::disposeWith<zstdFreeDCtx>(ZSTD_createDCtx())) {}
+
+kj::Maybe<CompressionError> ZstdDecoderContext::initialize() {
+  // dctx_ is created in the constructor. It can only be nullptr if ZSTD_createDCtx()
+  // failed due to memory allocation failure.
+  if (dctx_.get() == nullptr) {
+    return CompressionError(
+        "Could not initialize Zstd instance"_kj, "ERR_ZLIB_INITIALIZATION_FAILED"_kj, -1);
+  }
+
+  return kj::none;
+}
+
+void ZstdDecoderContext::work() {
+  JSG_REQUIRE(mode == ZlibMode::ZSTD_DECODE, Error, "Mode should be ZSTD_DECODE"_kj);
+  JSG_REQUIRE(dctx_.get() != nullptr, Error, "Zstd context should not be null"_kj);
+
+  lastResult = ZSTD_decompressStream(dctx_.get(), &output_, &input_);
+
+  if (ZSTD_isError(lastResult)) {
+    error_ = ZSTD_getErrorCode(lastResult);
+  } else if (input_.size > 0) {
+    // Track whether we're mid-frame: lastResult > 0 means more data needed,
+    // lastResult == 0 means frame is complete.
+    frameInProgress_ = (lastResult > 0);
+  }
+}
+
+kj::Maybe<CompressionError> ZstdDecoderContext::resetStream() {
+  if (dctx_.get() != nullptr) {
+    size_t result = ZSTD_DCtx_reset(dctx_.get(), ZSTD_reset_session_only);
+    KJ_IF_SOME(err, zstdCheckError(result, error_, "ERR_ZSTD_DECOMPRESSION_FAILED"_kj)) {
+      return kj::mv(err);
+    }
+  }
+  frameInProgress_ = false;
+  return kj::none;
+}
+
+kj::Maybe<CompressionError> ZstdDecoderContext::setParams(int key, int value) {
+  KJ_DASSERT(dctx_.get() != nullptr, "Zstd decompression context should not be null");
+  size_t result = ZSTD_DCtx_setParameter(dctx_.get(), static_cast<ZSTD_dParameter>(key), value);
+  if (ZSTD_isError(result)) {
+    return CompressionError(kj::str("Setting parameter failed: ", ZSTD_getErrorName(result)),
+        "ERR_ZSTD_PARAM_SET_FAILED"_kj, -1);
+  }
+  return kj::none;
+}
+
+kj::Maybe<CompressionError> ZstdDecoderContext::getError() const {
+  if (error_ != ZSTD_error_no_error) {
+    return CompressionError(kj::str("Zstd decompression failed: ", ZSTD_getErrorString(error_)),
+        kj::str("ERR_ZSTD_DECOMPRESSION_FAILED"), -1);
+  }
+
+  // If this is the final flush, we're mid-frame (frame was started but never
+  // completed), and the output buffer is not full (decoder had space but
+  // couldn't produce more output), the input was truncated.
+  if (flush_ == ZSTD_e_end && frameInProgress_ && output_.pos < output_.size) {
+    return CompressionError("unexpected end of file"_kj, "ERR_ZSTD_DECOMPRESSION_FAILED"_kj, -1);
+  }
+
+  return kj::none;
+}
+
+bool ZstdDecoderContext::isStreamEnd() const {
+  // ZSTD_decompressStream returns 0 when a frame is completely decoded and fully flushed.
+  return !ZSTD_isError(lastResult) && lastResult == 0;
+}
+
 }  // namespace workerd::api

@@ -284,8 +284,10 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/jsg",
+        "@capnp-cpp//src/kj/compat:kj-brotli",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@nbytes",
+        "@zstd",
     ],
 )
 
