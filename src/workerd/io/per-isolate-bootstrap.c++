@@ -134,10 +134,14 @@ static void MarkPromiseHandledFastApi(v8::Local<v8::Value> unused, v8::Local<v8:
 }
 
 static void GetApiSymbol(const v8::FunctionCallbackInfo<v8::Value>& args) {
-  auto name = jsg::JsValue(args[0]);
-  auto str = JSG_REQUIRE_NONNULL(
-      name.tryCast<jsg::JsString>(), TypeError, "getApiSymbol() expects a string argument");
-  args.GetReturnValue().Set(v8::Symbol::ForApi(args.GetIsolate(), str));
+  // liftKj converts a thrown kj/jsg exception (the validation TypeError below) into a JS
+  // exception; without it the raw callback would let it escape and take down the process.
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto name = jsg::JsValue(args[0]);
+    auto str = JSG_REQUIRE_NONNULL(
+        name.tryCast<jsg::JsString>(), TypeError, "getApiSymbol() expects a string argument");
+    return v8::Symbol::ForApi(args.GetIsolate(), str);
+  });
 }
 
 static const v8::CFunction fast_mark_promise_handled_ =
