@@ -185,11 +185,15 @@ class CodecStage final {
 
  private:
   // The per-pump policy layer: one deflate()/inflate() step into the scratch buffer, with
-  // the spec's TypeErrors and the strict-mode checks applied to the result.
+  // the spec's TypeErrors applied to the result. The strict-mode checks are a separate step
+  // (enforceStrictChecks) so the stage can buffer an erroring iteration's output BEFORE the
+  // strict error throws — the final valid bytes are still deliverable, per the WPT-pinned
+  // output-then-error order.
   class Context {
    public:
     struct Result {
       bool success = false;
+      int result = Z_OK;
       kj::ArrayPtr<const kj::byte> buffer;
     };
 
@@ -201,6 +205,7 @@ class CodecStage final {
 
     void setInput(const void* in, size_t size);
     Result pumpOnce(int flush);
+    void enforceStrictChecks(int flush, const Result& result);
 
    private:
     CompressionAllocator allocator;

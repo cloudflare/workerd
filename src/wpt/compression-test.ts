@@ -84,7 +84,12 @@ export default {
     ],
   },
   'decompression-with-detach.any.js': {
-    comment: 'Detach test fails - needs investigation',
+    comment:
+      'Environmental, not a streams defect: compression-with-detach.any.js runs first in ' +
+      'the same isolate and installs its Object.prototype.then trap without configurable, ' +
+      'so this test\'s identical defineProperty throws "Cannot redefine property". Browsers ' +
+      'give each .any.js file a fresh global; the shared-isolate harness cannot (the ' +
+      'leftover is non-configurable, so it cannot even be deleted between files).',
     expectedFailures: [
       'data should be correctly decompressed even if input is detached partway',
     ],

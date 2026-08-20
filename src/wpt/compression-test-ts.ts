@@ -10,8 +10,8 @@ import { type TestRunnerConfig } from 'harness/harness';
 // (compression-test.ts): the pair is behavior-matching by design.
 export default {
   'compression-bad-chunks.any.js': {
-    comment: 'Test times out - needs investigation',
-    disabledTests: true,
+    comment: 'brotli compression is not supported',
+    expectedFailures: [/brotli/],
   },
   'compression-constructor-error.any.js': {},
   'compression-including-empty-chunk.any.js': {
@@ -68,14 +68,8 @@ export default {
     expectedFailures: [/.*brotli.*/],
   },
   'decompression-extra-input.any.js': {
-    comment:
-      'Extra padding tests fail - workerd handles trailing data differently',
-    expectedFailures: [
-      'decompressing deflate input with extra pad should still give the output',
-      'decompressing gzip input with extra pad should still give the output',
-      'decompressing deflate-raw input with extra pad should still give the output',
-      /brotli/,
-    ],
+    comment: 'brotli compression is not supported',
+    expectedFailures: [/brotli/],
   },
   'decompression-split-chunk.any.js': {
     comment: 'brotli compression is not supported',
@@ -88,7 +82,12 @@ export default {
     ],
   },
   'decompression-with-detach.any.js': {
-    comment: 'Detach test fails - needs investigation',
+    comment:
+      'Environmental, not a streams defect: compression-with-detach.any.js runs first in ' +
+      'the same isolate and installs its Object.prototype.then trap without configurable, ' +
+      'so this test\'s identical defineProperty throws "Cannot redefine property". Browsers ' +
+      'give each .any.js file a fresh global; the shared-isolate harness cannot (the ' +
+      'leftover is non-configurable, so it cannot even be deleted between files).',
     expectedFailures: [
       'data should be correctly decompressed even if input is detached partway',
     ],
