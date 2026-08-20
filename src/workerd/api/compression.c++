@@ -207,25 +207,30 @@ CodecStage::Context::Result CodecStage::Context::pumpOnce(int flush) {
     case Mode::DECOMPRESS:
       JSG_REQUIRE(result == Z_OK || result == Z_BUF_ERROR || result == Z_STREAM_END, TypeError,
           "Decompression failed.");
-
-      if (strictCompression == Flags::STRICT) {
-        // The spec requires that a TypeError is produced if there is trailing data after the
-        // end of the compression stream.
-        JSG_REQUIRE(!(result == Z_STREAM_END && stream.availIn() > 0), TypeError,
-            "Trailing bytes after end of compressed data");
-        // Same applies to closing a stream before the complete decompressed data is
-        // available.
-        JSG_REQUIRE(
-            !(flush == Z_FINISH && result == Z_BUF_ERROR && stream.availOut() == sizeof(buffer)),
-            TypeError, "Called close() on a decompression stream with incomplete data");
-      }
       break;
   }
 
   return Result{
     .success = result == Z_OK,
+    .result = result,
     .buffer = kj::arrayPtr(buffer, sizeof(buffer) - stream.availOut()),
   };
+}
+
+void CodecStage::Context::enforceStrictChecks(int flush, const Result& result) {
+  if (stream.getMode() != Mode::DECOMPRESS || strictCompression != Flags::STRICT) {
+    return;
+  }
+  // The spec requires that a TypeError is produced if there is trailing data after the end
+  // of the compression stream. Called AFTER the caller has buffered the iteration's output:
+  // the final valid bytes (produced by the very pump step that observed the trailing junk)
+  // are still delivered to any read that consumes them before the error lands, which is the
+  // WPT-pinned observable order.
+  JSG_REQUIRE(!(result.result == Z_STREAM_END && stream.availIn() > 0), TypeError,
+      "Trailing bytes after end of compressed data");
+  // Same applies to closing a stream before the complete decompressed data is available.
+  JSG_REQUIRE(!(flush == Z_FINISH && result.result == Z_BUF_ERROR && result.buffer.size() == 0),
+      TypeError, "Called close() on a decompression stream with incomplete data");
 }
 
 kj::ArrayPtr<kj::byte> CodecStage::LazyBuffer::take(size_t readSize) {
@@ -302,6 +307,13 @@ void CodecStage::clear() {
 void CodecStage::pump(int flush) {
   while (true) {
     auto result = context.pumpOnce(flush);
+    // Buffer any produced output BEFORE the strict checks run: an iteration can both produce
+    // the stream's final bytes and observe the strict-mode error condition (e.g. trailing
+    // junk after the end of the compressed data), and the bytes must remain deliverable.
+    if (result.buffer.size() > 0) {
+      output.write(result.buffer);
+    }
+    context.enforceStrictChecks(flush, result);
     if (result.buffer.size() == 0) {
       if (result.success) {
         // No output produced but input data has been processed based on the zlib return
@@ -310,8 +322,6 @@ void CodecStage::pump(int flush) {
       }
       return;
     }
-    // Output has been produced: buffer it and pump again.
-    output.write(result.buffer);
   }
   KJ_UNREACHABLE;
 }

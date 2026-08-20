@@ -34,14 +34,17 @@ import type {
 } from './types';
 
 const {
+  DataViewPrototypeGetBuffer,
   ObjectDefineProperties,
   SymbolToStringTag,
   TypeError,
+  TypedArrayPrototypeGetBuffer,
   Uint8Array,
   uncurryThis,
 } = primordials;
 
-const { isArrayBuffer, isArrayBufferView } = utils;
+const { isArrayBuffer, isArrayBufferView, isSharedArrayBuffer, isDataView } =
+  utils;
 
 // Captured for primordials discipline — ToString coercion per spec.
 const StringCoerce = String;
@@ -95,6 +98,20 @@ function isActualObject(value: unknown): boolean {
   return value != null && typeof value === 'object';
 }
 
+// True for BufferSource chunks the codec accepts: ArrayBuffers and views,
+// excluding anything SharedArrayBuffer-backed (per Web IDL, [AllowShared] is
+// not granted here; WPT pins the rejection). Captured getters are used for
+// the view's buffer — prototype accessors are user-patchable.
+function isValidChunk(chunk: unknown): boolean {
+  if (isArrayBuffer(chunk)) return true;
+  if (isSharedArrayBuffer(chunk)) return false;
+  if (!isArrayBufferView(chunk)) return false;
+  const buffer = isDataView(chunk)
+    ? DataViewPrototypeGetBuffer(chunk)
+    : TypedArrayPrototypeGetBuffer(chunk);
+  return !isSharedArrayBuffer(buffer);
+}
+
 interface CodecPair {
   readable: ReadableStreamType<Uint8Array>;
   writable: WritableStreamType<unknown>;
@@ -140,7 +157,7 @@ function createCodecPair(
       writableController = c;
     },
     write: (chunk: unknown): void => {
-      if (!isArrayBufferView(chunk) && !isArrayBuffer(chunk)) {
+      if (!isValidChunk(chunk)) {
         // An invalid chunk errors BOTH sides, matching the legacy
         // implementation (any write failure errored the whole pair) —
         // without this the readable side would hang on its pending
@@ -159,6 +176,10 @@ function createCodecPair(
       try {
         handle.push(chunk as ArrayBuffer | ArrayBufferView);
       } catch (e) {
+        // Deliver output the codec produced before the error point (e.g. the
+        // final valid bytes preceding trailing junk) to any pending read, then
+        // error. The WPT-pinned order: output first, error on later reads.
+        drainStage();
         failBoth(e);
         throw e;
       }
@@ -174,6 +195,7 @@ function createCodecPair(
       try {
         handle.end();
       } catch (e) {
+        drainStage();
         failBoth(e);
         throw e;
       }
