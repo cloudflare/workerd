@@ -97,17 +97,34 @@ class JsReadableStream final {
   // source. This is the canonical way for C++ code to mint a new ReadableStream to hand to
   // JavaScript.
   //
-  // This is the compatibility-flag dispatch point: when the typescript_implemented_streams
+  // This is a compatibility-flag dispatch point: when the typescript_implemented_streams
   // compat flag is enabled, the source is wrapped in a ReadableStreamNativeSource and the
   // stream is constructed by the TypeScript implementation; otherwise the legacy C++
-  // ReadableStream is used.
+  // ReadableStream is used. Buffer-backed construction (the data constructors above)
+  // dispatches the same way; see bufferBackedImpl().
   //
-  // TODO(streams-ts): detach() is the one JsReadableStream operation still lacking a
-  // TypeScript arm, so under the (experimental) flag, consumers exercising that path
-  // will fail until it is implemented. (pumpTo, unwrap, tee, and the pipe dispatch
-  // cells have landed.)
+  // TODO(streams-ts): serialize() is the one JsReadableStream operation still lacking a
+  // TypeScript arm (JS RPC transfer of TS-backed streams; planned as a later phase along
+  // with the deserialize receive path). Everything else -- pumpTo, unwrap, tee, detach,
+  // and the pipe dispatch cells -- has landed.
   static JsReadableStream create(
       jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source);
+
+  // Create a stream-backed JsReadableStream that reads the values produced by the given
+  // async generator, following the ReadableStream.from() algorithm: demand-driven pulls
+  // (highWaterMark 0), one generator.next() per pull with promise-typed values awaited
+  // before enqueue, close on generator completion, and cancel forwarding to the
+  // generator's return(). This backs the Iterable/AsyncIterable BodyInit extension
+  // (Body::extractBody's generator arm), whose generator arrives pre-consumed from the
+  // OneOf unwrap: the iterable's iterator method has already been invoked and the
+  // iterator's next/return captured, so this takes the generator rather than the original
+  // iterable object.
+  //
+  // Like create(), this is a compatibility-flag dispatch point: under
+  // typescript_implemented_streams the TypeScript stream is constructed over a
+  // C++-built JS underlying source driving the generator; otherwise this delegates to the
+  // legacy ReadableStream::from().
+  static JsReadableStream from(jsg::Lock& js, jsg::AsyncGenerator<jsg::Value> generator);
 
   // Returns a new JsReadableStream sharing this one's underlying stream (and retransmit
   // buffer, if any). Both instances observe the same underlying stream state (e.g. the stream
@@ -288,9 +305,11 @@ class JsReadableStream final {
  private:
   explicit JsReadableStream(Impl impl): impl(kj::mv(impl)) {}
 
-  // Build a buffer-backed Impl: wraps the buffer's bytes in an in-memory ReadableStream (which does
-  // NOT support deferred proxying, since the bytes may have V8 heap provenance) and retains the
-  // buffer for retransmission.
+  // Build a buffer-backed Impl: wraps the buffer's bytes in an in-memory source (which does not
+  // support deferred proxying) and retains the buffer for retransmission. The stream over the
+  // source is constructed through the same compatibility-flag dispatch as create(), so under the
+  // typescript_implemented_streams flag buffer-backed streams are TypeScript-backed like every
+  // other stream.
   static Impl bufferBackedImpl(jsg::Lock& js, kj::Rc<Buffer> buffer);
 
   kj::Maybe<Impl> impl;
@@ -354,6 +373,15 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // TypeScript side reads this once at stream construction, per the contract, and enforces
   // the exact-total accounting itself.
   jsg::Optional<jsg::JsBigInt> getExpectedLength(jsg::Lock& js);
+
+  // The number of bytes the source will produce in the given encoding, if known; kj::none
+  // otherwise (including once the source is done, canceled, or consumed). For IDENTITY this
+  // is getExpectedLength()'s value (source length plus stashed bytes); for other encodings
+  // it forwards to the underlying source, which can only answer while no identity bytes
+  // are stashed. C++-only (not part of the JSG surface): this is the encoding-aware
+  // tryGetLength arm of JsReadableStream, reached through the TypeScript side's
+  // non-detaching source accessor.
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
 
   JSG_RESOURCE_TYPE(ReadableStreamNativeSource) {
     JSG_PRIVATE_SYMBOL(kNativeSource);

@@ -10,6 +10,7 @@
 #include <workerd/api/url-standard.h>
 #include <workerd/api/url.h>
 #include <workerd/io/features.h>
+#include <workerd/jsg/iterator.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/strong-bool.h>
 
@@ -204,10 +205,6 @@ class NullSource final: public ReadableStreamSource {
 
 // Serves the given prefix bytes, then delegates to the inner source. Used for the rare
 // pump-with-stashed-bytes case (a tee-seeded branch extracted before being read).
-// Deliberately does NOT override pumpTo(): the generic pump loop is used, at the cost of
-// deferred proxying, which only this rare path pays.
-// TODO(streams-ts): Since the prefix is a kj::Array, this actually can implement
-// pumpTo and support deferred proxying.
 class PrefixedSource final: public ReadableStreamSource {
  public:
   PrefixedSource(kj::Array<kj::byte> prefix, kj::Own<ReadableStreamSource> inner)
@@ -241,6 +238,22 @@ class PrefixedSource final: public ReadableStreamSource {
       }
     }
     co_return co_await inner->tryRead(buffer, minBytes, maxBytes);
+  }
+
+  kj::Promise<DeferredProxy<void>> pumpTo(kj::Ptr<WritableStreamSink> output, bool end) override {
+    // Write the (kj-heap) prefix bytes in the pre-proxy phase, then delegate to the inner
+    // source's own pump so its deferred-proxy classification passes through: once the
+    // inner pump's outer promise resolves, this pump enters deferred proxying itself and
+    // rides the inner proxy task.
+    KJ_IF_SOME(prefix, maybePrefix) {
+      if (prefix.view != nullptr) {
+        co_await output->write(prefix.view);
+      }
+      maybePrefix = kj::none;
+    }
+    auto deferred = co_await inner->pumpTo(kj::mv(output), end);
+    KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING;
+    co_await deferred.proxyTask;
   }
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
@@ -414,17 +427,37 @@ JsReadableStream::Buffer::Buffer(kj::Array<const kj::byte> data): view(data), ow
 // branches alike.
 JsReadableStream::Buffer::Buffer(jsg::Ref<Blob> data): Buffer(kj::heapArray(data->getData())) {}
 
+namespace {
+
+// Constructs the stream backing a JsReadableStream over the given native data source. This
+// is the compatibility-flag dispatch point shared by create() and bufferBackedImpl(): when
+// the typescript_implemented_streams compat flag is enabled, the source is wrapped in a
+// ReadableStreamNativeSource -- whose instances are born carrying the kNativeSource marker
+// (JSG_PRIVATE_SYMBOL) that the TypeScript ReadableStream constructor detects -- and the
+// TypeScript stream is constructed over it via the constructor exposed through the
+// bootstrap's cpp_exports module. Otherwise the legacy C++ ReadableStream is used.
+JsReadableStream::StreamImpl newBackingStream(
+    jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source) {
+  if (FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+    auto sourceObj = jsg::JsValue(
+        handler.wrap(js, js.alloc<ReadableStreamNativeSource>(ioContext, kj::mv(source))));
+    auto constructor = webstreams::getCppExport(js, "ReadableStream");
+    return JsReadableStream::StreamImpl(constructor.newInstance(js, sourceObj).addRef(js));
+  }
+  return JsReadableStream::StreamImpl(js.alloc<ReadableStream>(ioContext, kj::mv(source)));
+}
+
+}  // namespace
+
 JsReadableStream::Impl JsReadableStream::bufferBackedImpl(jsg::Lock& js, kj::Rc<Buffer> buffer) {
   // Use newMemorySource() rather than newSystemStream() wrapping a memory input stream:
   // it reads the Buffer's bytes in place, so every stream derived from this Buffer -- rewinds
   // and tee branches alike -- shares the one allocation.
-  //
-  // TODO(streams-ts): Like create(), the stream construction here must dispatch on the
-  // worker's configuration once the TypeScript implementation lands.
   auto view = buffer->view;
   auto source = newMemorySource(view, buffer.addRef().toOwn());
   return Impl{
-    .stream = StreamImpl(js.alloc<ReadableStream>(IoContext::current(), kj::mv(source))),
+    .stream = newBackingStream(js, IoContext::current(), kj::mv(source)),
     .maybeOwnedBuffer = kj::mv(buffer),
   };
 }
@@ -461,19 +494,80 @@ JsReadableStream::JsReadableStream(
 
 JsReadableStream JsReadableStream::create(
     jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source) {
-  if (FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
-    // TypeScript-implemented streams: wrap the native source in a
-    // ReadableStreamNativeSource -- whose instances are born carrying the kNativeSource
-    // marker (JSG_PRIVATE_SYMBOL) that the TypeScript ReadableStream constructor detects
-    // -- and construct the TypeScript stream over it via the constructor exposed through
-    // the bootstrap's cpp_exports module.
-    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
-    auto sourceObj = jsg::JsValue(
-        handler.wrap(js, js.alloc<ReadableStreamNativeSource>(ioContext, kj::mv(source))));
-    auto constructor = webstreams::getCppExport(js, "ReadableStream");
-    return JsReadableStream(js, constructor.newInstance(js, sourceObj).addRef(js));
+  return JsReadableStream(Impl{.stream = newBackingStream(js, ioContext, kj::mv(source))});
+}
+
+JsReadableStream JsReadableStream::from(jsg::Lock& js, jsg::AsyncGenerator<jsg::Value> generator) {
+  if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+    return JsReadableStream(ReadableStream::from(js, kj::mv(generator)));
   }
-  return JsReadableStream(js.alloc<ReadableStream>(ioContext, kj::mv(source)));
+
+  // TypeScript arm: construct a TypeScript ReadableStream over a C++-built JS underlying
+  // source whose pull/cancel hooks drive the generator, following the same algorithm as
+  // the legacy ReadableStream::from(): one generator.next() per pull, promise-typed
+  // values awaited before enqueue (jsg's sync-iterator fallback does not apply
+  // async-from-sync value wrapping itself, so the pull compensates -- for async
+  // iterators this awaiting is technically beyond what the spec asks, matching the
+  // legacy arm), close on completion, cancel forwarding to the generator's return().
+  // Pull rejections (generator.next() failure or a rejected value promise) propagate to
+  // the standard machinery, which errors the stream with the same reason.
+  //
+  // The generator is shared by the pull and cancel closures via an Rc. Like the legacy
+  // arm's closures, these capture it without GC visitation: the captured references are
+  // strong, keeping the (JS-unreachable) generator state alive as long as the stream's
+  // source object is.
+  auto rcGenerator = kj::rc<jsg::AsyncGenerator<jsg::Value>>(kj::mv(generator));
+
+  auto pull = js.wrapPromiseReturningFunction(js.v8Context(),
+      [generator = rcGenerator.addRef()](
+          jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
+    auto controller =
+        jsg::JsRef(js, KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>()));
+    return generator->next(js).then(js,
+        [controller = kj::mv(controller)](
+            jsg::Lock& js, kj::Maybe<jsg::Value> value) mutable -> jsg::Promise<jsg::Value> {
+      KJ_IF_SOME(v, value) {
+        auto handle = v.getHandle(js);
+        if (handle->IsPromise()) {
+          return js.toPromise(handle.As<v8::Promise>())
+              .then(js, [controller = kj::mv(controller)](jsg::Lock& js, jsg::Value val) mutable {
+            webstreams::dispatchCall(js, "readableControllerEnqueue",
+                jsg::JsValue(controller.getHandle(js)), jsg::JsValue(val.getHandle(js)));
+            return js.v8Ref<v8::Value>(js.v8Undefined());
+          });
+        }
+        webstreams::dispatchCall(js, "readableControllerEnqueue",
+            jsg::JsValue(controller.getHandle(js)), jsg::JsValue(handle));
+      } else {
+        webstreams::dispatchCall(
+            js, "readableControllerClose", jsg::JsValue(controller.getHandle(js)));
+      }
+      return js.resolvedPromise(js.v8Ref<v8::Value>(js.v8Undefined()));
+    });
+  });
+
+  auto cancel = js.wrapPromiseReturningFunction(js.v8Context(),
+      [generator = rcGenerator.addRef()](
+          jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
+    return generator->return_(js, js.v8Ref<v8::Value>(v8::Local<v8::Value>(info[0])))
+        .then(js, [](jsg::Lock& js, kj::Maybe<jsg::Value>) {
+      // The generator might produce a value on return and might even want to continue,
+      // but the stream has been canceled at this point, so we stop here.
+      return js.v8Ref<v8::Value>(js.v8Undefined());
+    });
+  });
+
+  auto sourceObj = js.obj();
+  sourceObj.set(js, "pull"_kj, jsg::JsValue(pull));
+  sourceObj.set(js, "cancel"_kj, jsg::JsValue(cancel));
+  // Demand-driven pulls only, per the spec's ReadableStreamFromIterable (and the legacy
+  // arm's StreamQueuingStrategy{.highWaterMark = 0}).
+  auto strategyObj = js.obj();
+  strategyObj.set(js, "highWaterMark"_kj, jsg::JsValue(js.num(0)));
+
+  auto constructor = webstreams::getCppExport(js, "ReadableStream");
+  return JsReadableStream(js,
+      constructor.newInstance(js, jsg::JsValue(sourceObj), jsg::JsValue(strategyObj)).addRef(js));
 }
 
 kj::Maybe<JsReadableStream> JsReadableStream::tryUnwrapTs(
@@ -570,9 +664,17 @@ jsg::Promise<void> JsReadableStream::cancel(jsg::Lock& js, jsg::Optional<jsg::Js
         return stream->cancel(js, kj::mv(reason));
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        // TODO(streams-ts): This bypasses the locked check. We need a variant
-        // that rejects if the stream is locked.
-        return readableStreamCancel(js, obj.getHandle(js), reason);
+        // Reject-if-locked precondition (parity with ReadableStream::cancel, including the
+        // rejection text), then the lock-blind internal cancel; the check-then-act pair is
+        // atomic under the isolate lock. Composed here from cppExports operations rather
+        // than invoking the prototype method, which user code can patch. forceCancel() is
+        // the variant that skips the lock check.
+        auto handle = obj.getHandle(js);
+        if (getReadableStreamIsLocked(js, handle)) {
+          return js.rejectedPromise<void>(
+              js.typeError("This ReadableStream is currently locked to a reader."_kj));
+        }
+        return readableStreamCancel(js, handle, reason);
       }
     }
     KJ_UNREACHABLE;
@@ -634,7 +736,28 @@ kj::Maybe<uint64_t> JsReadableStream::tryGetLength(jsg::Lock& js, StreamEncoding
         return stream->tryGetLength(encoding);
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        return getReadableStreamExpectedLength(js, obj.getHandle(js));
+        auto handle = obj.getHandle(js);
+        if (encoding == StreamEncoding::IDENTITY) {
+          // The controller-level expected length is an identity byte count (declared by
+          // the source or the expectedLength extension), for both backends.
+          return getReadableStreamExpectedLength(js, handle);
+        }
+        // Non-identity encodings: only a native underlying source can answer (parity with
+        // the legacy internal controller, which forwards the encoding to its source).
+        // Queued streams answer kj::none -- their identity-byte expectedLength is never a
+        // valid encoded length. (The legacy JS controller ignores the encoding and reports
+        // its identity expectedLength anyway; that is a wire-protocol footgun -- a wrong
+        // Content-Length for an encoded body -- that this arm deliberately does not
+        // reproduce.)
+        auto sourceValue = webstreams::dispatchCall(js, "getReadableStreamNativeSource", handle);
+        if (sourceValue.isUndefined()) {
+          return kj::none;
+        }
+        auto& handler =
+            KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+        auto source = KJ_REQUIRE_NONNULL(handler.tryUnwrap(js, sourceValue),
+            "getReadableStreamNativeSource did not return a ReadableStreamNativeSource");
+        return source->tryGetLength(encoding);
       }
     }
     KJ_UNREACHABLE;
@@ -966,7 +1089,17 @@ JsReadableStream JsReadableStream::detach(jsg::Lock& js, IgnoreDisturbed ignoreD
       });
     }
     KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-      KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+      // The TypeScript-side detach performs the whole takeover atomically: precondition
+      // checks (legacy-exact error texts), internal-state transfer into a fresh stream,
+      // and neutralization of the original (permanently locked + disturbed).
+      auto detached = webstreams::dispatchCall(js, "detachReadableStream", obj.getHandle(js),
+          js.boolean(ignoreDisturbed == IgnoreDisturbed::YES));
+      auto detachedObj = KJ_REQUIRE_NONNULL(
+          JSG_TRY_CAST_OBJECT(detached), "detachReadableStream did not return a stream");
+      return JsReadableStream(Impl{
+        .stream = StreamImpl(detachedObj.addRef(js)),
+        .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); }),
+      });
     }
   }
   KJ_UNREACHABLE;
@@ -1292,16 +1425,35 @@ kj::Array<jsg::Ref<ReadableStreamNativeSource>> ReadableStreamNativeSource::tee(
 }
 
 jsg::Optional<jsg::JsBigInt> ReadableStreamNativeSource::getExpectedLength(jsg::Lock& js) {
-  KJ_IF_SOME(active, state) {
-    KJ_IF_SOME(length, active.source->tryGetLength(StreamEncoding::IDENTITY)) {
-      // Bytes retained in the stash (from an abandoned pull, or inherited from a tee
-      // parent) were already consumed from the underlying source but not yet delivered,
-      // so they count toward the total this source will produce. Getting this right
-      // matters for tee branches: the conduit reads expectedLength at construction and
-      // enforces it as an exact total.
-      return js.bigInt(length + stash.size());
-    }
+  KJ_IF_SOME(length, tryGetLength(StreamEncoding::IDENTITY)) {
+    return js.bigInt(length);
   }
+  return kj::none;
+}
+
+kj::Maybe<uint64_t> ReadableStreamNativeSource::tryGetLength(StreamEncoding encoding) {
+  KJ_IF_SOME(active, state) {
+    if (encoding == StreamEncoding::IDENTITY) {
+      KJ_IF_SOME(length, active.source->tryGetLength(StreamEncoding::IDENTITY)) {
+        // Bytes retained in the stash (from an abandoned pull, or inherited from a tee
+        // parent) were already consumed from the underlying source but not yet delivered,
+        // so they count toward the total this source will produce. Getting this right
+        // matters for tee branches: the conduit reads expectedLength at construction and
+        // enforces it as an exact total.
+        return length + stash.size();
+      }
+      return kj::none;
+    }
+    // Stashed bytes are identity bytes already drawn from the source: once any exist, an
+    // encoded length no longer describes what this source will deliver.
+    if (!stash.empty()) {
+      return kj::none;
+    }
+    return active.source->tryGetLength(encoding);
+  }
+  // EOF'd, canceled, or consumed: nothing more will be produced, but distinguishing
+  // "closed, hence zero" from "unknown" is the stream layer's business, not the
+  // source's; report unknown.
   return kj::none;
 }
 

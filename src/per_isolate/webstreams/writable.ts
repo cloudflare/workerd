@@ -153,6 +153,7 @@ let getWritableStreamController: <W>(
 // (assertIsWritableStream) throws; this one answers.
 let isWritableStream: (value: unknown) => boolean;
 let setWritableStreamPendingClosure: <W>(stream: WritableStream<W>) => void;
+let isWritableStreamPendingClosure: <W>(stream: WritableStream<W>) => boolean;
 // Permanently neutralizes a stream on behalf of the C++ bridge (e.g. a
 // Socket whose connection is being taken over). See the assignment in the
 // static block for the exact precondition/error contract.
@@ -256,11 +257,13 @@ class WritableStream<W = unknown> {
   // JS-backed streams). Kept for extraction — C++ unwraps the backing
   // class from the returned object.
   #nativeSink?: object | undefined;
-  // TODO(streams-ts): The sockets API needs to be able to tell its Writable
-  // that it is pending closure (the Socket is shutting down) before the
-  // closure has actually completed. We don't yet fully implement this but we
-  // provide for the signal. Mirrors ReadableStream's #pendingClosure.
-  // @ts-expect-error
+  // The pending-closure gate (JsWritableStream::setPendingClosure): set by
+  // the stream's owning object (a Socket) the moment its closure begins, so
+  // that new writes fail fast with a descriptive error instead of racing the
+  // teardown's flush-and-close sequence. Mirrors the legacy internal
+  // controller's isPendingClosure check, which gates write() and nothing
+  // else -- the teardown's own forceFlush/forceClose/abort stay open.
+  // Mirrors ReadableStream's #pendingClosure.
   #pendingClosure: boolean = false;
 
   static {
@@ -275,6 +278,10 @@ class WritableStream<W = unknown> {
 
     setWritableStreamPendingClosure = <W>(stream: WritableStream<W>) => {
       stream.#pendingClosure = true;
+    };
+
+    isWritableStreamPendingClosure = <W>(stream: WritableStream<W>) => {
+      return stream.#pendingClosure;
     };
     getWritableStreamState = (stream) => stream.#state;
     getWritableStreamStoredError = (stream) => stream.#storedError;
@@ -1136,6 +1143,17 @@ class WritableStreamDefaultWriter<
       if (stream === undefined) {
         return PromiseReject(
           new TypeError('This writer has been released')
+        ) as Promise<void>;
+      }
+      // The pending-closure gate (see #pendingClosure): checked before the
+      // size algorithm runs, so no user code executes for a write against a
+      // closing socket. The text matches the legacy internal controller's
+      // exactly.
+      if (isWritableStreamPendingClosure(stream)) {
+        return PromiseReject(
+          new TypeError(
+            'This WritableStream belongs to an object that is closing.'
+          )
         ) as Promise<void>;
       }
       const controller = getWritableStreamController(stream);
