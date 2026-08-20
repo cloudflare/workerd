@@ -67,7 +67,6 @@ PATCHES = [
     "0042-cppgc-Sweep-cppgc-eagerly-with-non-incremental-GC.patch",
     "0043-Allow-V8-release-archives-without-metagen-Clang-head.patch",
     "0044-Load-cc_library-in-BUILD.icu.patch",
-    "0040-Make-icuuc-bazel-target-publicly-visible.patch",
 ]
 
 http_archive(
