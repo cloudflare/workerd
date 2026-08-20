@@ -279,7 +279,7 @@ void CodecStage::end() {
 size_t CodecStage::pull(kj::ArrayPtr<kj::byte> dest) {
   auto n = kj::min(dest.size(), output.size());
   if (n == 0) return 0;
-  dest.first(n).copyFrom(output.take(n));
+  dest.write(output.take(n));
   output.maybeShift();
   return n;
 }
