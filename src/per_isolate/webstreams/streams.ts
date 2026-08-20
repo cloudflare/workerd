@@ -33,6 +33,11 @@ const {
 
 const { TextEncoderStream, TextDecoderStream } = require('webstreams/encoding');
 
+const {
+  CompressionStream,
+  DecompressionStream,
+} = require('webstreams/compression');
+
 module.exports = {
   ReadableStream,
   ReadableStreamDefaultReader,
@@ -51,6 +56,8 @@ module.exports = {
   FixedLengthStream,
   TextEncoderStream,
   TextDecoderStream,
+  CompressionStream,
+  DecompressionStream,
   // Internal-only reader (the C++ bridge's bulk-read surface). Installed on
   // globalThis by main.ts ONLY under the internal-testing
   // expose_draining_reader flag, for exercising expectedLength pass-through

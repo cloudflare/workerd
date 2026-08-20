@@ -80,4 +80,7 @@ declare const utils: {
   isAnyArrayBuffer(value: unknown): value is ArrayBuffer | SharedArrayBuffer;
   markPromiseHandled(promise: Promise): void;
   getApiSymbol(name: string): symbol;
+  // The C++ compression codec factory (api/compression.h:
+  // newCompressionCodecCallback), consumed by webstreams/compression.
+  newCompressionCodec(mode: string, format: string): unknown;
 };

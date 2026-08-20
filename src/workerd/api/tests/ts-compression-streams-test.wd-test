@@ -1,0 +1,22 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "ts-compression-streams-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "ts-compression-streams-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "strict_compression_checks",
+          "experimental",
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);
