@@ -1049,3 +1049,54 @@ export const test_images_create_direct_upload_with_options = {
     assert.equal(result.uploadURL.includes('custom-upload-id'), true);
   },
 };
+
+export const test_images_input_accepts_arraybuffer = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const buffer = new TextEncoder().encode('test image data').buffer;
+    const result = await env.images
+      .input(buffer)
+      .output({ format: 'image/avif' });
+
+    const response = await result.response();
+    assert.equal(response.status, 200);
+  },
+};
+
+export const test_images_input_accepts_uint8array = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const uint8 = new TextEncoder().encode('test image data');
+    const result = await env.images
+      .input(uint8)
+      .output({ format: 'image/avif' });
+
+    const response = await result.response();
+    assert.equal(response.status, 200);
+  },
+};
+
+export const test_images_draw_accepts_arraybuffer = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const imageBuffer = new TextEncoder().encode('base image').buffer;
+    const overlayBuffer = new TextEncoder().encode('overlay image').buffer;
+
+    const result = await env.images
+      .input(imageBuffer)
+      .draw(env.images.input(overlayBuffer))
+      .output({ format: 'image/png' });
+
+    const response = await result.response();
+    assert.equal(response.status, 200);
+  },
+};

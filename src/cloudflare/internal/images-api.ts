@@ -14,7 +14,12 @@ type Fetcher = {
 };
 
 function isTextSource(source: ImageSource): source is TextRasterize {
-  return !(source instanceof ReadableStream);
+  return (
+    typeof source === 'object' &&
+    source !== null &&
+    'content' in source &&
+    'options' in source
+  );
 }
 
 function serializeTextSource(source: TextRasterize): string {
@@ -153,7 +158,7 @@ class ImageTransformerImpl implements ImageTransformer {
         formData.append('text_input', serializeTextSource(this.#source));
       } else {
         span.setAttribute('cloudflare.images.canvas.type', 'image');
-        formData.append('image', this.#source as ReadableStream<Uint8Array>, {
+        formData.append('image', this.#source, {
           type: 'file',
         });
       }
@@ -221,7 +226,7 @@ class ImageTransformerImpl implements ImageTransformer {
         formData.append('draw_text', serializeTextSource(source));
       } else {
         overlayStats.image++;
-        formData.append('draw_image', source as ReadableStream<Uint8Array>, {
+        formData.append('draw_image', source, {
           type: 'file',
         });
       }
