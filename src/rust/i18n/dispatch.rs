@@ -14,11 +14,6 @@
 //! how many bytes it actually wrote, which is often fewer because the
 //! destination is sized for the worst case.
 //!
-//! Splitting sizing from writing is what lets [`crate::transcode`] allocate
-//! the destination as a V8 `ArrayBuffer` and convert straight into its backing
-//! store, with no intermediate `Vec` and no copy. Nothing in this module
-//! touches V8, so it stays unit-testable against a plain `Vec` destination.
-//!
 //! All sizing, validation, substitute-character setup, and length checking
 //! happens here; [`crate::shim`] only forwards to the underlying ICU and
 //! simdutf calls.
