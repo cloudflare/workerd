@@ -245,6 +245,65 @@ class CodecStage final {
   bool finished = false;
 };
 
+// The refcounted box around the synchronous codec core, shared by the bootstrap handle's
+// method closures (see CompressionCodecHandle below). Fully defined only in
+// compression.c++; other TUs hold it strictly through this forward declaration + kj::Rc.
+class CompressionCodecStage;
+
+// The bootstrap-facing handle around a CompressionCodecStage, produced by
+// CompressionStream::newCodec() for the TypeScript streams implementation. SelfConvertible
+// (see jsg/type-wrapper.h): wraps itself as a plain object whose members are jsg::Functions
+// sharing the stage — no isolate-type registration, no new global, GC lifetime via the
+// functions' captured kj::Rc. Never unwrapped (the handle only flows C++ → JS).
+struct CompressionCodecHandle {
+  kj::Rc<CompressionCodecStage> stage;
+
+  explicit CompressionCodecHandle(kj::Rc<CompressionCodecStage> stage);
+  CompressionCodecHandle(CompressionCodecHandle&&) noexcept;
+  ~CompressionCodecHandle() noexcept;
+
+  // RTTI: described to TypeScript generation as a plain object.
+  using JsgRttiDelegate = jsg::JsObject;
+
+  // Method factories, defined out-of-line where the stage type is complete. All methods are
+  // synchronous, IoContext-free, and safe to call from the per-isolate bootstrap and from
+  // user-triggered stream callbacks alike.
+  jsg::Function<void(jsg::JsBufferSource)> makePush();
+  jsg::Function<void()> makeEnd();
+  jsg::Function<uint32_t(jsg::JsBufferSource)> makePullInto();
+  jsg::Function<double()> makeAvailable();
+
+  static v8::Local<v8::Value> jsgWrap(auto& typeWrapper,
+      jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      CompressionCodecHandle self) {
+    auto obj = js.obj();
+    obj.set(js, "push", jsg::JsValue(typeWrapper.wrap(js, context, kj::none, self.makePush())));
+    obj.set(js, "end", jsg::JsValue(typeWrapper.wrap(js, context, kj::none, self.makeEnd())));
+    obj.set(
+        js, "pullInto", jsg::JsValue(typeWrapper.wrap(js, context, kj::none, self.makePullInto())));
+    obj.set(js, "available",
+        jsg::JsValue(typeWrapper.wrap(js, context, kj::none, self.makeAvailable())));
+    return obj;
+  }
+
+  static kj::Maybe<CompressionCodecHandle> jsgTryUnwrap(auto& typeWrapper,
+      jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    return kj::none;
+  }
+};
+
+// Builds a boxed codec stage and its handle. The JS-visible validation (format/mode
+// TypeErrors) belongs to the caller.
+CompressionCodecHandle newCompressionCodecHandle(CodecStage::Mode mode,
+    kj::StringPtr format,
+    CodecStage::Flags flags,
+    kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget);
+
 // =======================================================================================
 // Codec mode plumbing and the brotli/zstd context families.
 //

@@ -6,6 +6,7 @@
 
 #include <workerd/api/compression.h>
 #include <workerd/api/streams/transform.h>
+#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
 
 #include <zlib.h>
@@ -18,8 +19,20 @@ class CompressionStream: public TransformStream {
 
   static jsg::Ref<CompressionStream> constructor(jsg::Lock& js, kj::String format);
 
-  JSG_RESOURCE_TYPE(CompressionStream) {
+  // Internal factory for the TypeScript streams implementation: builds the synchronous
+  // codec handle (mode is "compress" or "decompress"; decompression picks up the
+  // strict_compression_checks flag exactly like the legacy constructor). Registered only
+  // under typescript_implemented_streams; the per-isolate bootstrap captures it at load and
+  // then REPLACES this global with the TypeScript class, so user code never observes the
+  // static.
+  static CompressionCodecHandle newCodec(jsg::Lock& js, kj::String mode, kj::String format);
+
+  JSG_RESOURCE_TYPE(CompressionStream, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(TransformStream);
+
+    if (flags.getTypeScriptImplementedStreams()) {
+      JSG_STATIC_METHOD(newCodec);
+    }
 
     JSG_TS_OVERRIDE(extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> { constructor(format
                                  : "gzip" | "deflate" | "deflate-raw");
