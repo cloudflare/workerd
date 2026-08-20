@@ -245,64 +245,61 @@ class CodecStage final {
   bool finished = false;
 };
 
-// The refcounted box around the synchronous codec core, shared by the bootstrap handle's
-// method closures (see CompressionCodecHandle below). Fully defined only in
-// compression.c++; other TUs hold it strictly through this forward declaration + kj::Rc.
-class CompressionCodecStage;
+// The synchronous codec handle for the TypeScript streams implementation's
+// CompressionStream/DecompressionStream pair (webstreams/compression.ts): a thin internal
+// JSG resource over CodecStage. Minted exclusively by the bootstrap's
+// utils.newCompressionCodec() (see newCompressionCodecCallback below and
+// per-isolate-bootstrap.c++); never registered as a global or nested type, so instances are
+// reachable only by the bootstrap module that created them — user code cannot obtain one,
+// and the type is kept out of the generated TypeScript types.
+//
+// All methods are synchronous and IoContext-free: compression is pure CPU, so the
+// TypeScript pair's waiting is entirely V8 promise machinery, and global-scope construction
+// is legal. External-memory accounting rides the stage's CompressionAllocator.
+class CompressionCodec final: public jsg::Object {
+ public:
+  CompressionCodec(CodecStage::Mode mode,
+      kj::StringPtr format,
+      CodecStage::Flags flags,
+      kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget);
 
-// The bootstrap-facing handle around a CompressionCodecStage, produced by
-// CompressionStream::newCodec() for the TypeScript streams implementation. SelfConvertible
-// (see jsg/type-wrapper.h): wraps itself as a plain object whose members are jsg::Functions
-// sharing the stage — no isolate-type registration, no new global, GC lifetime via the
-// functions' captured kj::Rc. Never unwrapped (the handle only flows C++ → JS).
-struct CompressionCodecHandle {
-  kj::Rc<CompressionCodecStage> stage;
+  // Runs the codec over the chunk to exhaustion, synchronously and eagerly; the chunk is
+  // fully consumed and not retained. Throws on codec error (rejecting the TS pair's write —
+  // the spec's transform-time error timing).
+  void push(jsg::JsBufferSource chunk);
 
-  explicit CompressionCodecHandle(kj::Rc<CompressionCodecStage> stage);
-  CompressionCodecHandle(CompressionCodecHandle&&) noexcept;
-  ~CompressionCodecHandle() noexcept;
+  // Z_FINISH plus the strict-mode end checks; throws reject the TS pair's close. Idempotent.
+  void end();
 
-  // RTTI: described to TypeScript generation as a plain object.
-  using JsgRttiDelegate = jsg::JsObject;
+  // Copies up to view.size() buffered output bytes into the view, returning the count.
+  uint32_t pullInto(jsg::JsBufferSource view);
 
-  // Method factories, defined out-of-line where the stage type is complete. All methods are
-  // synchronous, IoContext-free, and safe to call from the per-isolate bootstrap and from
-  // user-triggered stream callbacks alike.
-  jsg::Function<void(jsg::JsBufferSource)> makePush();
-  jsg::Function<void()> makeEnd();
-  jsg::Function<uint32_t(jsg::JsBufferSource)> makePullInto();
-  jsg::Function<double()> makeAvailable();
+  // double rather than uint32: a decompression stage buffer can in principle exceed uint32
+  // range (the legacy implementation had the same unbounded buffering); JS numbers carry
+  // the full size exactly.
+  double available();
 
-  static v8::Local<v8::Value> jsgWrap(auto& typeWrapper,
-      jsg::Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      CompressionCodecHandle self) {
-    auto obj = js.obj();
-    obj.set(js, "push", jsg::JsValue(typeWrapper.wrap(js, context, kj::none, self.makePush())));
-    obj.set(js, "end", jsg::JsValue(typeWrapper.wrap(js, context, kj::none, self.makeEnd())));
-    obj.set(
-        js, "pullInto", jsg::JsValue(typeWrapper.wrap(js, context, kj::none, self.makePullInto())));
-    obj.set(js, "available",
-        jsg::JsValue(typeWrapper.wrap(js, context, kj::none, self.makeAvailable())));
-    return obj;
+  JSG_RESOURCE_TYPE(CompressionCodec) {
+    JSG_METHOD(push);
+    JSG_METHOD(end);
+    JSG_METHOD(pullInto);
+    JSG_METHOD(available);
+
+    // Internal plumbing type: keep it out of the generated TypeScript types.
+    JSG_TS_OVERRIDE(type CompressionCodec = never);
   }
 
-  static kj::Maybe<CompressionCodecHandle> jsgTryUnwrap(auto& typeWrapper,
-      jsg::Lock& js,
-      v8::Local<v8::Context> context,
-      v8::Local<v8::Value> handle,
-      kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    return kj::none;
-  }
+ private:
+  CodecStage stage;
 };
 
-// Builds a boxed codec stage and its handle. The JS-visible validation (format/mode
-// TypeErrors) belongs to the caller.
-CompressionCodecHandle newCompressionCodecHandle(CodecStage::Mode mode,
-    kj::StringPtr format,
-    CodecStage::Flags flags,
-    kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget);
+// The raw v8 callback behind the bootstrap's utils.newCompressionCodec(mode, format):
+// validates the mode and format (with the spec TypeErrors the legacy constructors use),
+// applies the strict_compression_checks compat flag for decompression, and allocates a
+// CompressionCodec. Defined here (rather than in per-isolate-bootstrap.c++) so the
+// compression knowledge stays with the machinery; the bootstrap only wires the utils member
+// name to this callback.
+void newCompressionCodecCallback(const v8::FunctionCallbackInfo<v8::Value>& info);
 
 // =======================================================================================
 // Codec mode plumbing and the brotli/zstd context families.
