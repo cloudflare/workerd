@@ -74,13 +74,17 @@ int64_t convert_ex(const Converter& to,
 int64_t from_uchars(
     const Converter& to, ::rust::Slice<const uint8_t> source, ::rust::Slice<uint8_t> target);
 
-// simdutf wrappers. Buffers holding UTF-16LE code units are passed as raw
-// bytes and cast to `char16_t*` internally.
+// simdutf wrappers, mirroring the four `simdutf::*` calls in `i18n.c++`.
+// Buffers holding UTF-16LE code units are passed as raw bytes and cast to
+// `char16_t*` internally, exactly as the C++ path does via
+// `JsUint8Array::asArrayPtr<char16_t>()`.
 //
-// `target` must be aligned for `char16_t`. Callers satisfy this by passing a
-// JavaScript `ArrayBuffer`'s backing store, whose base address V8 aligns well
-// past two bytes. `source` carries no such guarantee: it is caller-supplied
-// buffer contents, which a `Uint8Array` can expose at an odd `byteOffset`.
+// Neither buffer is required to be `char16_t`-aligned. `target` always is in
+// practice, being a V8 backing store, but `source` is caller-supplied buffer
+// contents that a `Uint8Array` can expose at an odd `byteOffset`. simdutf
+// reads and writes through unaligned SIMD loads and stores, so this is
+// well-defined for the simdutf entry points below; `from_uchars` casts to
+// `UChar*` for ICU on the same basis as the C++ path.
 
 size_t convert_latin1_to_utf16(::rust::Slice<const uint8_t> source, ::rust::Slice<uint8_t> target);
 size_t utf16_length_from_utf8(::rust::Slice<const uint8_t> source);
