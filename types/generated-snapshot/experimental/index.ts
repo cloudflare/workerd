@@ -4090,10 +4090,15 @@ export interface ContainerDirectorySnapshotOptions {
   dir: string;
   name?: string;
 }
-export interface ContainerDirectorySnapshotRestoreParams {
-  snapshot: ContainerDirectorySnapshot;
-  mountPoint?: string;
-}
+export type ContainerDirectorySnapshotRestoreParams =
+  | {
+      snapshot: ContainerDirectorySnapshot;
+      mountPoint?: string;
+    }
+  | {
+      snapshot?: undefined;
+      mountPoint: string;
+    };
 export interface ContainerSnapshot {
   id: string;
   size: number;

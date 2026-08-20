@@ -4081,10 +4081,15 @@ interface ContainerDirectorySnapshotOptions {
   dir: string;
   name?: string;
 }
-interface ContainerDirectorySnapshotRestoreParams {
-  snapshot: ContainerDirectorySnapshot;
-  mountPoint?: string;
-}
+type ContainerDirectorySnapshotRestoreParams =
+  | {
+      snapshot: ContainerDirectorySnapshot;
+      mountPoint?: string;
+    }
+  | {
+      snapshot?: undefined;
+      mountPoint: string;
+    };
 interface ContainerSnapshot {
   id: string;
   size: number;

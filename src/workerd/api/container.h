@@ -215,10 +215,14 @@ class Container: public jsg::Object {
   };
 
   struct DirectorySnapshotRestoreParams {
-    DirectorySnapshot snapshot;
+    jsg::Optional<DirectorySnapshot> snapshot;
     jsg::Optional<kj::String> mountPoint;
 
     JSG_STRUCT(snapshot, mountPoint);
+    JSG_STRUCT_TS_OVERRIDE(type ContainerDirectorySnapshotRestoreParams =
+      | { snapshot: ContainerDirectorySnapshot; mountPoint?: string }
+      | { snapshot?: undefined; mountPoint: string }
+    );
   };
 
   struct Snapshot {
