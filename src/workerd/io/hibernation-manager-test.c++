@@ -1289,5 +1289,123 @@ KJ_TEST("HibernationManager: GC collects WebSocket with in-flight auto-response"
   fixture.drainAndDestroy(kj::mv(request));
 }
 
+KJ_TEST("HibernationManager: running pump retains socket after manager removal") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("pump-socket-lifetime")));
+  auto hm = makeTestHm(fixture);
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm, "socket"_kj);
+
+  auto paf = kj::newPromiseAndFulfiller<void>();
+  auto blocker = fixture.getActor().getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
+
+  // The pump borrows the native socket and suspends on the output gate.
+  sendFromDo(fixture, *request, *hm, "pending"_kj);
+
+  // Rejecting an inbound event makes the manager remove its socket entry.
+  stats.rejectCustomEvents = true;
+  end1->send("terminate"_kj).wait(fixture.getWaitScope());
+  fixture.pollEventLoop();
+
+  KJ_ASSERT(stats.customEventCalls == 2, stats.customEventCalls);
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    KJ_ASSERT(hm->getWebSockets(env.js, kj::none).size() == 0);
+    KJ_ASSERT(hm->getWebSockets(env.js, "socket"_kj).size() == 0);
+  });
+
+  // Without the ownership fix, this resumes into ws.send() using the
+  // manager's destroyed socket.
+  paf.fulfiller->fulfill();
+
+  auto message = end1->receive().wait(fixture.getWaitScope());
+  KJ_ASSERT(message.is<kj::String>());
+  KJ_ASSERT(message.get<kj::String>() == "pending"_kj);
+
+  blocker.wait(fixture.getWaitScope());
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST(
+    "HibernationManager: failed termination dispatch retains socket under a gate-blocked pump") {
+  // A failed event dispatch removes the manager entry while the API pump is blocked on the output
+  // gate. The adapter keeps the native socket alive until the queued operation completes.
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("failed-termination-gated-pump")));
+  auto hm = makeTestHm(fixture);
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm);
+
+  // Lock the output gate so the pump parks at its `co_await gatedMessage.outputLock`.
+  auto paf = kj::newPromiseAndFulfiller<void>();
+  auto blocker = fixture.getActor().getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
+
+  sendFromDo(fixture, *request, *hm, "gated"_kj);
+  auto receivePromise = end1->receive();
+  fixture.pollEventLoop();
+  KJ_ASSERT(!receivePromise.poll(fixture.getWaitScope()), "pump should be parked on the gate");
+
+  // The eyeball sends a message, but the DO is too overloaded to accept either it or the error
+  // event that follows, so the HibernationManager removes its entry.
+  stats.rejectCustomEvents = true;
+  end1->send("message"_kj).wait(fixture.getWaitScope());
+  fixture.pollEventLoop();
+  KJ_ASSERT(stats.customEventCalls == 2, stats.customEventCalls);
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    KJ_ASSERT(hm->getWebSockets(env.js, kj::none).size() == 0);
+  });
+
+  // The adapter still owns the socket, so the pump can deliver the queued message.
+  paf.fulfiller->fulfill();
+  auto message = receivePromise.wait(fixture.getWaitScope());
+  KJ_ASSERT(message.is<kj::String>());
+  KJ_ASSERT(message.get<kj::String>() == "gated"_kj);
+
+  blocker.wait(fixture.getWaitScope());
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST(
+    "HibernationManager: failed termination dispatch retains socket under a gate-blocked close") {
+  // Companion to the test above for the Close branch of the pump's send loop.
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("failed-termination-gated-close")));
+  auto hm = makeTestHm(fixture);
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm);
+
+  auto paf = kj::newPromiseAndFulfiller<void>();
+  auto blocker = fixture.getActor().getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
+
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto websockets = hm->getWebSockets(js, kj::none);
+    KJ_ASSERT(websockets.size() == 1);
+    websockets[0]->close(js, 1001, jsg::USVString(kj::str("gated-bye")));
+  });
+
+  auto receivePromise = end1->receive();
+  fixture.pollEventLoop();
+  KJ_ASSERT(!receivePromise.poll(fixture.getWaitScope()), "pump should be parked on the gate");
+
+  stats.rejectCustomEvents = true;
+  end1->send("message"_kj).wait(fixture.getWaitScope());
+  fixture.pollEventLoop();
+  KJ_ASSERT(stats.customEventCalls == 2, stats.customEventCalls);
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    KJ_ASSERT(hm->getWebSockets(env.js, kj::none).size() == 0);
+  });
+
+  // The adapter still owns the socket, so the pump can deliver the queued close.
+  paf.fulfiller->fulfill();
+  auto message = receivePromise.wait(fixture.getWaitScope());
+  KJ_ASSERT(message.is<kj::WebSocket::Close>());
+  auto& close = message.get<kj::WebSocket::Close>();
+  KJ_ASSERT(close.code == 1001, close.code);
+  KJ_ASSERT(close.reason == "gated-bye"_kj, close.reason);
+
+  blocker.wait(fixture.getWaitScope());
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
 }  // namespace
 }  // namespace workerd
