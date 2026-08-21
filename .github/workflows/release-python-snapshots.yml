@@ -9,6 +9,14 @@ on:
         default: false
         type: boolean
 
+# The "Check for open PR and commit changes" step uses gh + git push.
+# R2 uploads use their own R2_* secrets. The reusable _bazel.yml caller
+# declares its own permissions; this top-level block applies only to
+# the in-file jobs.
+permissions:
+  contents: write
+  pull-requests: read
+
 jobs:
   build-linux:
     uses: ./.github/workflows/_bazel.yml
