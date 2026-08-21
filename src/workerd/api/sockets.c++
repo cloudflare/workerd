@@ -321,6 +321,7 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     jsg::Optional<SocketOptions> options,
     kj::Own<kj::TlsStarterCallback> tlsStarter,
     SecureTransportKind secureTransport,
+    SocketProtocol protocol,
     kj::Maybe<kj::String> domain,
     bool isDefaultFetchPort,
     kj::Maybe<jsg::PromiseResolverPair<SocketInfo>> maybeOpenedPrPair) {
@@ -354,7 +355,7 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
   auto result = js.alloc<Socket>(js, ioContext, kj::mv(refcountedConnection), kj::mv(remoteAddress),
       kj::mv(localAddress), kj::mv(readable), kj::mv(writable), kj::mv(closedPrPair),
       kj::mv(watchForDisconnectTask), kj::mv(options), kj::mv(tlsStarter), secureTransport,
-      kj::mv(domain), isDefaultFetchPort, kj::mv(openedPrPair));
+      protocol, kj::mv(domain), isDefaultFetchPort, kj::mv(openedPrPair));
 
   result->wireClosedToDisconnect(js, kj::mv(disconnected));
   KJ_IF_SOME(p, eofPromise) {
@@ -467,7 +468,7 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
   request.connection = request.connection.attach(kj::mv(httpClient));
   auto result = setupSocket(js, kj::mv(request.connection), kj::mv(addressStr),
       kj::none /* localAddress */, kj::mv(options), kj::mv(tlsStarter), secureTransport,
-      kj::mv(domain), isDefaultFetchPort, kj::none /* maybeOpenedPrPair */);
+      SocketProtocol::TCP, kj::mv(domain), isDefaultFetchPort, kj::none /* maybeOpenedPrPair */);
   // `handleProxyStatus` needs an initialized refcount to use `JSG_THIS`, hence it cannot be
   // called in Socket's constructor. Also it's only necessary when creating a Socket as a result of
   // a `connect`.
@@ -628,7 +629,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   auto newTlsStarter = kj::heap<kj::TlsStarterCallback>();
   return setupSocket(js, kj::newPromisedStream(kj::mv(secureStreamPromise)),
       mapCopyString(remoteAddress), mapCopyString(localAddress), kj::mv(options),
-      kj::mv(newTlsStarter), SecureTransportKind::ON, kj::mv(domain), isDefaultFetchPort,
+      kj::mv(newTlsStarter), SecureTransportKind::ON, protocol, kj::mv(domain), isDefaultFetchPort,
       kj::mv(openedPrPair));
 }
 
@@ -813,6 +814,13 @@ void Socket::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   JSG_REQUIRE(
       externalHandler != nullptr, DOMDataCloneError, "Socket can only be serialized for RPC.");
 
+  // The RPC transfer mechanism below (readable/writable serialize()) pumps through byte-oriented
+  // capnp ByteStream plumbing that has no message-boundary concept, so it cannot preserve datagram
+  // boundaries. Rather than silently corrupting a UDP socket's semantics on the other end, reject
+  // the transfer outright.
+  JSG_REQUIRE(protocol == SocketProtocol::TCP, DOMDataCloneError,
+      "Transferring a UDP socket over RPC is not yet supported.");
+
   // serialize() is synchronous and cannot await `opened`, so we require the caller to have already
   // done so. This guarantees the connection is established and the SocketInfo (remote/local address)
   // written below is authoritative, and avoids transferring a socket whose connection failed.
@@ -989,10 +997,12 @@ jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
   // asserts rely on this reflecting the origin socket's setting.
   SocketOptions options{.allowHalfOpen = allowHalfOpen};
 
+  // Socket::serialize() rejects UDP sockets, so only TCP sockets ever reach here. The protocol is
+  // hardcoded rather than carried across the wire, since the RPC schema has no field for it.
   auto socket = js.alloc<Socket>(js, ioContext, kj::mv(refcountedConnection), kj::str(remoteAddr),
       kj::mv(localAddr), kj::mv(readable), kj::mv(writable), kj::mv(closedPrPair),
       kj::mv(watchForDisconnectTask), kj::mv(options), kj::mv(tlsStarter), secureTransport,
-      kj::none /* domain */, isDefaultFetchPort, kj::mv(openedPrPair));
+      SocketProtocol::TCP, kj::none /* domain */, isDefaultFetchPort, kj::mv(openedPrPair));
 
   // handleReadableEof() and wireClosedToDisconnect() both attach jsg `.then()` continuations,
   // which invoke V8 -- forbidden when this body runs as Socket::deserialize()'s in-place
