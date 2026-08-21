@@ -361,23 +361,12 @@ void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   // references in Wrappable::attachWrapper() for details.
   v8::HandleScope scope(isolate);
 
-  // V8 only hands this polymorphic callback one of our objects, but since it
-  // is polymorphic we can't use a tag check. Check that the wrappable points
-  // back at the object being dropped.
+  // V8 only hands this polymorphic callback one of our objects. Resolve it through the exact
+  // wrapper identity check all the same, like every other unwrap site.
   auto object = handle.As<v8::Object>().Get(isolate);
-  // unwrapFromShimAnyType() should never return null for a marked object.
-  Wrappable* wrappablePtr = Wrappable::unwrapFromShimAnyType(isolate, object);
-  if (wrappablePtr == nullptr) {
-    KJ_LOG(
-        FATAL, "wrapper type mismatch: dropped object's CppHeap handle resolves to no wrappable");
-    abort();
-  }
-  auto& wrappable = *wrappablePtr;
+  auto& wrappable =
+      *Wrappable::unwrapFromShimInRangeOrAbort(isolate, object, kJsgWrappableTagRange);
   auto& backReference = KJ_ASSERT_NONNULL(wrappable.wrapper);
-  if (backReference.Get(isolate) != object) {
-    KJ_LOG(FATAL, "wrapper type mismatch: dropped object's CppHeap handle names another wrappable");
-    abort();
-  }
 
   // V8 gets angry if we do not EXPLICITLY call `Reset()` on the wrapper. If we merely destroy it
   // (which is what `detachWrapper()` will do) it is not satisfied, and will come back and try to
