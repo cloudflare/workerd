@@ -6392,6 +6392,94 @@ KJ_TEST("Server: Durable Object facet limits") {
       "The maximum depth including the root Durable Object is 4.");
 }
 
+KJ_TEST("Server: Durable Object facets cannot set alarms") {
+  kj::StringPtr config = R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-04-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    let id = env.MY_ACTOR.idFromName("alarms");
+                `    let actor = env.MY_ACTOR.get(id);
+                `    return await actor.fetch(request);
+                `  }
+                `}
+                `export class MyActorClass extends DurableObject {
+                `  async fetch(request) {
+                `    if (request.url.endsWith("/root")) {
+                `      // The root object can set an alarm just fine.
+                `      let time = Date.now() + 3600000;
+                `      await this.ctx.storage.setAlarm(time);
+                `      return new Response(
+                `          "alarm set: " + ((await this.ctx.storage.getAlarm()) === time));
+                `    } else {
+                `      let facet = this.ctx.facets.get("child",
+                `          () => ({class: this.env.CHILD}));
+                `      try {
+                `        await facet.setAlarm();
+                `        return new Response("no error, unexpected");
+                `      } catch (e) {
+                `        return new Response(e.name + ": " + e.message);
+                `      }
+                `    }
+                `  }
+                `  async alarm() {}
+                `}
+                `export class ChildFacet extends DurableObject {
+                `  async setAlarm() {
+                `    await this.ctx.storage.setAlarm(Date.now() + 3600000);
+                `  }
+                `  async alarm() {}
+                `}
+            )
+          ],
+          bindings = [
+            (name = "MY_ACTOR", durableObjectNamespace = "MyActorClass"),
+            (name = "CHILD", durableObjectClass = (name = "hello", entrypoint = "ChildFacet"))
+          ],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (localDisk = "my-disk")
+        )
+      ),
+      ( name = "my-disk",
+        disk = (
+          path = "../../do-storage",
+          writable = true,
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj;
+
+  TestServer test(config);
+  test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+
+  // SQLite-backed Durable Objects do support alarms...
+  conn.httpGet200("/root", "alarm set: true");
+
+  // ... but facets don't. The attempt breaks the facet's output gate, so the error surfaces to the
+  // parent in place of the RPC response.
+  conn.httpGet200("/facet", "Error: Facets currently cannot set alarms.");
+}
+
 KJ_TEST("Server: Pass service stubs in ctx.props.") {
   TestServer test(R"((
     services = [

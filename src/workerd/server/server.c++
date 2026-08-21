@@ -1256,8 +1256,8 @@ class Server::ActorNamespace final {
                 sqliteHooks = fakeOwn(ActorSqlite::Hooks::getDefaultHooks());
               }
             } else {
-              // TODO(someday): Support alarms in facets, somehow.
-              sqliteHooks = fakeOwn(ActorSqlite::Hooks::getDefaultHooks());
+              // A non-null `parent` means this is a facet, which has no alarm scheduler.
+              sqliteHooks = kj::heap<FacetAlarmHooks>();
             }
 
             uint selfId = getFacetId();
@@ -1732,6 +1732,20 @@ class Server::ActorNamespace final {
    private:
     AlarmScheduler& alarmScheduler;
     kj::Own<ActorKey> actor;
+  };
+
+  // Hooks used by facets, which have their own storage but no way to schedule alarms: the alarm
+  // scheduler only knows how to deliver alarms to the root actor of a namespace.
+  //
+  // TODO(someday): Support alarms in facets, somehow.
+  class FacetAlarmHooks final: public ActorSqlite::Hooks {
+   public:
+    kj::Promise<void> scheduleRun(
+        kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) override {
+      // Keep this message in sync with the equivalent error produced in actor-storage-factory.c++
+      // in the internal codebase.
+      JSG_FAIL_REQUIRE(Error, "Facets currently cannot set alarms.");
+    }
   };
 };
 
