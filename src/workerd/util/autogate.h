@@ -106,7 +106,12 @@ namespace workerd::util {
   /* Allow a Socket to be transferred over JS RPC. When disabled, serializing a Socket fails as    \
      though the type were not serializable at all, and an incoming transferred Socket is           \
      rejected. */                                                                                  \
-  V(SOCKET_RPC_TRANSFER)
+  V(SOCKET_RPC_TRANSFER)                                                                           \
+  /* When enabled, the Node.js `i18n` transcode implementation (api::node                          \
+     i18n::transcode) is provided by the Rust implementation (src/rust/i18n)                       \
+     instead of the C++ implementation. The C++ implementation is retained                         \
+     for rollback.*/                                                                               \
+  V(NODEJS_I18N_RUST)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

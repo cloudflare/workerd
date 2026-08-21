@@ -3,6 +3,7 @@ use core::ffi::c_char;
 use core::mem;
 use core::ptr;
 
+use crate::c_char16;
 use crate::rust_string::RustString;
 use crate::rust_vec::RustVec;
 
@@ -78,5 +79,9 @@ rust_vec_shims_for_primitive!(f32);
 rust_vec_shims_for_primitive!(f64);
 
 rust_vec_shims!("char", c_char);
+// c_char16 is an alias for u16, so these duplicate the u16 shims above under a
+// second set of export names. The C++ side reaches them through
+// rust::Vec<char16_t>, which mangles to the char16_t segment.
+rust_vec_shims!("char16_t", c_char16);
 rust_vec_shims!("string", RustString);
 rust_vec_shims!("str", &str);

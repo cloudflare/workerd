@@ -1,0 +1,22 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_rust_crate(
+    name = "i18n",
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "@simdutf",
+        "@workerd-v8//:v8",
+        # Also depends on ICU for bindings, which are extracted from the v8 dep above
+    ],
+    cxx_bridge_src = "lib.rs",
+    link_deps = [
+        "@simdutf",
+        "@workerd-v8//:v8",
+    ],
+    test_deps = ["//src/rust/jsg-test"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/jsg",
+        "@crates_vendor//:thiserror",
+    ],
+)

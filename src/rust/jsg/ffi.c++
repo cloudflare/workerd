@@ -775,6 +775,15 @@ DEFINE_TYPED_ARRAY_UNWRAP(biguint64_array, BigUint64Array, uint64_t)
 }
 
 // Local<TypedArray>
+Local uint8_array_from_buffer(
+    Isolate* isolate, const Local& buffer, size_t byte_offset, size_t length) {
+  auto arrayBuffer = local_as_ref_from_ffi<v8::ArrayBuffer>(buffer);
+  KJ_REQUIRE(
+      byte_offset <= arrayBuffer->ByteLength() && length <= arrayBuffer->ByteLength() - byte_offset,
+      "Uint8Array view is out of bounds of its ArrayBuffer");
+  return to_ffi(v8::Uint8Array::New(arrayBuffer, byte_offset, length));
+}
+
 size_t local_typed_array_length(Isolate* isolate, const Local& array) {
   return local_as_ref_from_ffi<v8::TypedArray>(array)->Length();
 }
