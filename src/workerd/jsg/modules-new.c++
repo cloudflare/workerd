@@ -2050,10 +2050,11 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
   return *this;
 }
 
-ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addWasmModule(
-    kj::StringPtr name, kj::ArrayPtr<const kj::byte> data) {
+ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addWasmModule(kj::StringPtr name,
+    kj::ArrayPtr<const kj::byte> data,
+    kj::Maybe<v8::CompiledWasmModule> maybeCompiled) {
   const auto url = processModuleName(name, bundleBase);
-  auto callback = jsg::modules::Module::newWasmModuleHandler(data);
+  auto callback = jsg::modules::Module::newWasmModuleHandler(data, kj::mv(maybeCompiled));
   add(url,
       [url = url.clone(), callback = kj::mv(callback), type = type()](
           const ResolveContext& context) mutable
@@ -2495,11 +2496,16 @@ Module::EvaluateCallback Module::newJsonModuleHandler(kj::ArrayPtr<const char> d
   };
 }
 
-Module::EvaluateCallback Module::newWasmModuleHandler(kj::ArrayPtr<const kj::byte> data) {
+Module::EvaluateCallback Module::newWasmModuleHandler(
+    kj::ArrayPtr<const kj::byte> data, kj::Maybe<v8::CompiledWasmModule> maybeCompiled) {
   struct Cache final {
     kj::MutexGuarded<kj::Maybe<v8::CompiledWasmModule>> mutex;
   };
-  return [data, cache = kj::heap<Cache>()](Lock& js, const Url& id, const ModuleNamespace& ns,
+  auto cache = kj::heap<Cache>();
+  KJ_IF_SOME(compiled, maybeCompiled) {
+    *cache->mutex.lockExclusive() = kj::mv(compiled);
+  }
+  return [data, cache = kj::mv(cache)](Lock& js, const Url& id, const ModuleNamespace& ns,
              const CompilationObserver& observer) mutable -> bool {
     return js.tryCatch([&]() -> bool {
       // Wasm compilation requires code-generation permission. The scope

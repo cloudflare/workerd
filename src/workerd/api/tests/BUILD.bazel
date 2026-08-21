@@ -1151,6 +1151,17 @@ wd_test(
 )
 
 wd_test(
+    src = "worker-loader-wasm-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "test.wasm",
+        "worker-loader-wasm-test.js",
+    ],
+    # The test uses `import source` syntax, which eslint's parser does not yet support.
+    lint = False,
+)
+
+wd_test(
     size = "large",
     src = "worker-loader-limits-test.wd-test",
     args = ["--experimental"],

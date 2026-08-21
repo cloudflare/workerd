@@ -425,8 +425,10 @@ class Module {
   static EvaluateCallback newDataModuleHandler(
       kj::ArrayPtr<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
   static EvaluateCallback newJsonModuleHandler(kj::ArrayPtr<const char> data) KJ_WARN_UNUSED_RESULT;
-  static EvaluateCallback newWasmModuleHandler(
-      kj::ArrayPtr<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
+  // If `maybeCompiled` is given, it seeds the compilation cache so the module is never
+  // recompiled from `data`.
+  static EvaluateCallback newWasmModuleHandler(kj::ArrayPtr<const kj::byte> data,
+      kj::Maybe<v8::CompiledWasmModule> maybeCompiled = kj::none) KJ_WARN_UNUSED_RESULT;
 
   // An eval function is used for CommonJS style modules (including Node.js compat
   // modules. The expectation is that this method will be called when the CommonJS
@@ -576,8 +578,9 @@ class ModuleBundle {
         kj::Array<const char> code,
         Module::Flags flags = Module::Flags::ESM) KJ_LIFETIMEBOUND;
 
-    BundleBuilder& addWasmModule(
-        kj::StringPtr name, kj::ArrayPtr<const kj::byte> data) KJ_LIFETIMEBOUND;
+    BundleBuilder& addWasmModule(kj::StringPtr name,
+        kj::ArrayPtr<const kj::byte> data,
+        kj::Maybe<v8::CompiledWasmModule> maybeCompiled = kj::none) KJ_LIFETIMEBOUND;
 
     BundleBuilder& alias(kj::StringPtr alias, kj::StringPtr name) KJ_LIFETIMEBOUND;
 

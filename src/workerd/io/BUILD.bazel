@@ -220,6 +220,7 @@ wd_cc_library(
     deps = [
         "//src/rust/cxx-integration",
         "@capnp-cpp//src/capnp",
+        "@workerd-v8//:v8",
     ],
 )
 

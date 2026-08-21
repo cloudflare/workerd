@@ -4435,7 +4435,7 @@ interface WorkerLoaderModule {
   data?: ArrayBuffer;
   json?: any;
   py?: string;
-  wasm?: ArrayBuffer;
+  wasm?: ArrayBuffer | ArrayBufferView | WebAssembly.Module;
 }
 interface WorkerLoaderWorkerCode {
   compatibilityDate: string;
@@ -4443,7 +4443,7 @@ interface WorkerLoaderWorkerCode {
   allowExperimental?: boolean;
   limits?: workerdResourceLimits;
   mainModule: string;
-  modules: Record<string, WorkerLoaderModule | string>;
+  modules: Record<string, string | WebAssembly.Module | WorkerLoaderModule>;
   env?: any;
   globalOutbound?: Fetcher | null;
   tails?: Fetcher[];
