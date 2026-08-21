@@ -62,6 +62,39 @@ enum class ContextPointerSlot : int {
   MAX_POINTER_SLOT = BOOTSTRAP_STATE,
 };
 
+// V2 (Local<Data>) embedder data slots. Read/written via
+// SetEmbedderDataV2/GetEmbedderDataV2 — distinct API from the slots above.
+// Indices start past MAX_POINTER_SLOT so the two slot kinds never
+// collide in the underlying embedder-data array.
+// Unlike ContextPointerSlot, these slots hold V8 objects rather than external
+// pointers.
+enum class ContextDataSlot : int {
+  // One slot per decorated console method, holding that method's original v8 function directly.
+  // MUST stay consecutive and ordered to match the kConsoleMethods table in worker.c++.
+  CONSOLE_ORIGINAL_DEBUG = static_cast<int>(ContextPointerSlot::MAX_POINTER_SLOT) + 1,
+  CONSOLE_ORIGINAL_ERROR,
+  CONSOLE_ORIGINAL_INFO,
+  CONSOLE_ORIGINAL_LOG,
+  CONSOLE_ORIGINAL_WARN,
+};
+
+// Returns the slot holding the saved original of the i'th decorated console method, counting
+// in kConsoleMethods order from CONSOLE_ORIGINAL_DEBUG.
+constexpr ContextDataSlot consoleOriginalSlot(size_t i) {
+  return static_cast<ContextDataSlot>(
+      static_cast<int>(ContextDataSlot::CONSOLE_ORIGINAL_DEBUG) + static_cast<int>(i));
+}
+
+inline void setContextDataSlot(
+    v8::Local<v8::Context> context, ContextDataSlot slot, v8::Local<v8::Data> value) {
+  context->SetEmbedderDataV2(static_cast<int>(slot), value);
+}
+
+inline v8::Local<v8::Data> getContextDataSlot(
+    v8::Local<v8::Context> context, ContextDataSlot slot) {
+  return context->GetEmbedderDataV2(static_cast<int>(slot));
+}
+
 inline void setAlignedPointerInEmbedderData(
     v8::Local<v8::Context> context, ContextPointerSlot slot, void* ptr) {
   // The type tag is a small integer that should be different for every pointer
