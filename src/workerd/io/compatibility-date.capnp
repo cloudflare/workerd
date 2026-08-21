@@ -1679,4 +1679,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # When enabled, a Worker whose entrypoint is Python are automatically
   # considered as a Python Worker. This flag will be obsoleted once the feature
   # is stable.
+  r2BindingsJsrpc @190 :Bool
+      $compatEnableFlag("r2_bindings_jsrpc")
+      $experimental;
+  # When enabled, R2 bindings dispatch to the R2 gateway worker over JSRPC
+  # instead of synthesising an HTTP request and calling `fetch`. Without this
+  # flag, R2 bindings continue to use the HTTP transport.
+  #
+  # The JSRPC path is additionally gated on the R2_BINDINGS_JSRPC autogate, which
+  # is the fleet-wide kill switch; this flag controls which workers may opt in.
 }
