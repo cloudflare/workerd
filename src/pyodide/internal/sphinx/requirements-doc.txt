@@ -12,7 +12,7 @@ mdit-py-plugins==0.4.2
 mdurl==0.1.2
 myst-parser==4.0.0
 packaging==24.2
-Pygments==2.19.1
+Pygments==2.20.0
 PyYAML==6.0.2
 requests==2.32.5
 snowballstemmer==2.2.0
