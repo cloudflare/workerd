@@ -1,6 +1,6 @@
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
-load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
+load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO", "DEFAULT_PYTHON_TEST_FLAGS")
 load("//:build/wd_test.bzl", "wd_test")
 
 def _get_enable_flags(python_flag):
@@ -45,7 +45,7 @@ def _py_wd_test_helper(
 
         snapshot = version_info[use_snapshot + "_snapshot"]
         data = data + [":python_snapshots"]
-        load_snapshot = snapshot
+        load_snapshot = snapshot or None
 
     if load_snapshot and not make_snapshot:
         args += ["--python-load-snapshot", "load_snapshot.bin"]
@@ -151,7 +151,7 @@ def python_test_setup():
 
 def compute_python_flags(python_flags, skip_python_flags):
     if python_flags == "all":
-        python_flags = BUNDLE_VERSION_INFO.keys()
+        python_flags = DEFAULT_PYTHON_TEST_FLAGS
     python_flags = [flag for flag in python_flags if flag not in skip_python_flags and flag in BUNDLE_VERSION_INFO]
     return python_flags
 

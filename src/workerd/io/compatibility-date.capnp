@@ -1578,7 +1578,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonWorkers20260610 @179 :Bool
       $compatEnableFlag("python_workers_20260610")
       $compatDisableFlag("no_python_workers_20260610")
-      $impliedByAfterDate(name = "pythonWorkers", date = "2026-08-25")
       $pythonSnapshotRelease;
   # Enables Python Workers using Pyodide 314.0.4 (CPython 3.14.2, Emscripten 5.0.3).
 
@@ -1651,4 +1650,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # RangeError (JS API) or trap (wasm opcode).
   # WARNING: Do not remove the `$experimental` marker before
   # the v8 change becomes part of chrome's default config.
+
+  pythonWorkers20260817 @187 :Bool
+      $compatEnableFlag("python_workers_20260817")
+      $compatDisableFlag("no_python_workers_20260817")
+      $experimental
+      $pythonSnapshotRelease;
+  # Enables Python Workers using Pyodide 314.0.5.
 }

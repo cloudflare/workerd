@@ -24,6 +24,10 @@ PYODIDE_VERSIONS = [
         "version": "314.0.4",
         "sha256": "e775e35fe447beeceaf6f33ab2d2242454a8b6e5401d9769d118eca164d234db",
     },
+    {
+        "version": "314.0.5",
+        "sha256": "f528dccea95fa8ec54295fd65bf86dd61183d11f0e52563dc8eadda45e0f78d6",
+    },
 ]
 
 # The below is a list of package tags for the old builtin packages support.
@@ -171,6 +175,8 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
     },
     {
         "name": "314.0.4",
+        "released": True,
+        "test_by_default": False,
         "pyodide_version": "314.0.4",
         "pyodide_date": "2026-06-10",
         "backport": "15",
@@ -190,8 +196,29 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         ],
     },
     {
-        "real_pyodide_version": "314.0.4",
+        "name": "314.0.5",
+        "pyodide_version": "314.0.5",
+        "pyodide_date": "2026-08-17",
+        "backport": "1",
+        "integrity": "sha256-YARBm7WbY5eAuVR0xH0gNAVTFjYrc97VYMJnZPYET9s=",
+        "flag": "pythonWorkers20260817",
+        "enable_flag_name": "python_workers_20260817",
+        "emscripten_version": "5.0.3",
+        "python_version": "3.14.2",
+        "baseline_snapshot": "baseline-a980fc6e9.bin",
+        "baseline_snapshot_hash": "a980fc6e96fdb6c9d460be67f8039c2dd28858f31ceab5512422527ccfda1c5b",
+        "vendored_packages_for_tests": VENDORED_VERSION_INDEPENDENT + [
+            {
+                "name": "numpy",
+                "abi": "3.14",
+                "sha256": "28bea03aa0a18bbc1884ea4cebe8d93a9004455c497417e172c221f0a245b439",
+            },
+        ],
+    },
+    {
+        "real_pyodide_version": "314.0.5",
         "name": "development",
+        "test_by_default": True,
         "pyodide_version": "dev",
         "pyodide_date": "dev",
         "id": "dev",
@@ -199,3 +226,12 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "enable_flag_name": "python_workers_development",
     },
 ])
+
+# Version names from BUNDLE_VERSION_INFO that the test macros expand `python_flags = "all"` into.
+# An entry opts out with `"test_by_default": False`, which keeps it selectable by an explicit
+# `python_flags` list while removing it from default expansion.
+DEFAULT_PYTHON_TEST_FLAGS = [
+    name
+    for name, entry in BUNDLE_VERSION_INFO.items()
+    if entry.get("test_by_default") != False
+]
