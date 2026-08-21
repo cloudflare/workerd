@@ -52,6 +52,8 @@ if (compatFlags['typescript_implemented_streams']) {
     FixedLengthStream,
     TextEncoderStream,
     TextDecoderStream,
+    CompressionStream,
+    DecompressionStream,
     ReadableStreamDrainingReader,
   } = require('webstreams/streams');
 
@@ -174,6 +176,20 @@ if (compatFlags['typescript_implemented_streams']) {
       enumerable: false,
       writable: true,
       value: TextDecoderStream,
+    },
+    CompressionStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: CompressionStream,
+    },
+    DecompressionStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: DecompressionStream,
     },
   });
 

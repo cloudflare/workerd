@@ -116,6 +116,23 @@ wpt_test(
     wpt_directory = "@wpt//:streams@module",
 )
 
+# TODO(streams-ts): registration pending an investigation: the suite's large-file
+# fetches (/media/, ~400KB) fail with "Network connection lost" under the
+# typescript_implemented_streams flag -- a fetch/serving-path issue, not a codec one
+# (the same payload sizes round-trip in-worker in ts-compression-streams-test).
+wpt_test(
+    name = "compression-ts",
+    autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
+    compat_flags = ["typescript_implemented_streams"],
+    config = "compression-test-ts.ts",
+    start_server = True,
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    wpt_directory = "@wpt//:compression@module",
+)
+
 wpt_test(
     name = "streams-ts",
     size = "large",

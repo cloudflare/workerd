@@ -17,6 +17,7 @@ private-brand dispatch, no `instanceof`) apply here — see
 | `readable.ts` | Reader layer + queued controllers + the BACKEND-DISPATCH points (constructor, tee, chains, byte-capable gate, JS-to-C++ extraction) |
 | `writable.ts` / `transform.ts` / `strategies.ts` | WHATWG writable/transform/strategies                                     |
 | `identity.ts` | IdentityTransformStream and FixedLengthStream (byte-capable identity transforms)             |
+| `compression.ts` | CompressionStream/DecompressionStream over the C++ codec handle (utils.newCompressionCodec) |
 | `encoding.ts` | TextEncoderStream and TextDecoderStream (pure JS codec transforms)                           |
 | `streams.ts`  | Module aggregator (user-visible classes + the flag-gated DrainingReader)                     |
 | `types.d.ts`  | TypeScript type definitions for the streams API                                              |
