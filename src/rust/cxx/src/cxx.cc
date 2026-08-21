@@ -437,6 +437,14 @@ static_assert(sizeof(rust::isize) == sizeof(std::intptr_t),
 static_assert(alignof(rust::isize) == alignof(std::intptr_t),
               "unsupported ssize_t alignment");
 
+// The cxx crate spells char16_t as `c_char16`, an alias for u16. char16_t's
+// underlying type is uint_least16_t, which the standard permits to be wider
+// than 16 bits; on such a target the alias would misdescribe the C++ type.
+static_assert(sizeof(char16_t) == sizeof(std::uint16_t),
+              "unsupported char16_t size");
+static_assert(alignof(char16_t) == alignof(std::uint16_t),
+              "unsupported char16_t alignment");
+
 static_assert(std::is_trivially_copy_constructible<Str>::value,
               "trivial Str(const Str &)");
 static_assert(std::is_trivially_copy_assignable<Str>::value,
@@ -827,10 +835,14 @@ static_assert(sizeof(std::string) <= kMaxExpectedWordsInString * sizeof(void *),
   FOR_EACH_TRIVIAL_STD_VECTOR(MACRO)                                           \
   MACRO(string, std::string)
 
+// char16_t needs no _if_unique guard: [basic.fundamental] makes it a distinct
+// type from every other fundamental type, so rust::Vec<char16_t> can never
+// collide with another specialization.
 #define FOR_EACH_RUST_VEC(MACRO)                                               \
   FOR_EACH_NUMERIC(MACRO)                                                      \
   MACRO(bool, bool)                                                            \
   MACRO(char, rust::detail::char_if_unique)                                    \
+  MACRO(char16_t, char16_t)                                                    \
   MACRO(usize, rust::detail::usize_if_unique)                                  \
   MACRO(isize, rust::detail::isize_if_unique)                                  \
   MACRO(string, rust::String)                                                  \

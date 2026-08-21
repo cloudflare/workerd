@@ -117,6 +117,8 @@ If a C++ library already depends on your crate (C++ → Rust) and you also add a
 
 cxx also supports **reusing a binding type across bridges** ([docs](https://cxx.rs/extern-c++.html#reusing-existing-binding-types)): the `worker` crate's `error.rs` / `ok.rs` / `kill_switch.rs` bridges reuse `ffi.rs`'s types by depending on `:ffi.rs@cxx`. Still, keep a struct that only crosses FFI within one crate in that crate's bridge.
 
+**UTF-16 crosses the FFI as `c_char16`, not `u16`.** `u16` in a bridge means C++ `uint16_t`; `cxx::c_char16` means `char16_t`. The two are layout-identical but distinct C++ types, so only `c_char16` resolves to a `char16_t` overload or matches a `char16_t*` parameter. On the Rust side `c_char16` is an alias for `u16`, so `&[c_char16]` accepts a `&[u16]` from `str::encode_utf16` or `encoding_rs` with no cast. See the doc comment on `cxx::c_char16` for the container limits the alias implies.
+
 **V8 handles must always cross the FFI as the shared `jsg::v8::ffi` types, never as a bare `usize`.** When another crate's bridge passes a V8 `Local`/`Global`, reuse the jsg shared struct via a type alias (`type Local = jsg::v8::ffi::Local;`) plus `include!("workerd/rust/jsg/v8.rs.h")`, and depend on `//src/rust/jsg` (which supplies the generated header transitively). Do not smuggle the handle word through a `usize` — the shared type keeps both sides in one canonical, cxx-verified definition. See `node-exceptions/lib.rs`.
 
 ### Testing crates that cross the FFI
