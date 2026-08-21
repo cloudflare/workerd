@@ -4,6 +4,9 @@
 
 import * as assert from 'node:assert';
 
+const workflowsInstanceSubscribeEnabled =
+  !!Cloudflare.compatibilityFlags['workflows_instance_subscribe'];
+
 // Every test is its own export: `workerd test` runs the `test()` handler of each entrypoint, so
 // extra methods hung off a single exported object would silently never run.
 
@@ -11,6 +14,14 @@ import * as assert from 'node:assert';
 // ordinary service binding, so its RPC wildcard stays gated at this worker's compatibility date.
 async function getLastRestartBody(env, id) {
   const res = await env.mock.fetch('http://placeholder/last-restart', {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+  });
+  return (await res.json()).result;
+}
+
+async function getLastSubscribeOptions(env, id) {
+  const res = await env.mock.fetch('http://placeholder/last-subscribe', {
     method: 'POST',
     body: JSON.stringify({ id }),
   });
@@ -108,6 +119,7 @@ export const workflowsApi = {
         'delete',
         'status',
         'sendEvent',
+        'subscribe',
       ]) {
         assert.strictEqual(typeof fromGet[method], 'function');
       }
@@ -125,6 +137,71 @@ export const workflowsApi = {
         message: 'workflow instance not found',
       });
     }
+  },
+};
+
+export const subscribeNoOptions = {
+  async test(_, env) {
+    const instance = await env.workflow.get('subscribe-basic');
+    if (!workflowsInstanceSubscribeEnabled) {
+      await assert.rejects(instance.subscribe(), {
+        message:
+          'WorkflowInstance.subscribe() requires the workflows_instance_subscribe compatibility flag. Enable workflows_instance_subscribe before calling subscribe().',
+      });
+      return;
+    }
+
+    using subscription = await instance.subscribe();
+
+    assert.strictEqual(subscription[Symbol.asyncIterator](), subscription);
+
+    const events = [];
+    for await (const event of subscription) {
+      events.push(event);
+    }
+    assert.deepStrictEqual(events, [
+      {
+        instanceId: 'subscribe-basic',
+        eventId: 0,
+        timestamp: 0,
+        type: 'workflow_completed',
+        output: 'done',
+      },
+    ]);
+    assert.strictEqual(
+      await getLastSubscribeOptions(env, 'subscribe-basic'),
+      null
+    );
+  },
+};
+
+export const subscribeAllOptions = {
+  async test(_, env) {
+    const instance = await env.workflow.get('subscribe-full');
+    if (!workflowsInstanceSubscribeEnabled) {
+      await assert.rejects(
+        instance.subscribe({
+          cursor: 1,
+          filter: ['workflow_queued', 'workflow_completed'],
+        }),
+        {
+          message:
+            'WorkflowInstance.subscribe() requires the workflows_instance_subscribe compatibility flag. Enable workflows_instance_subscribe before calling subscribe().',
+        }
+      );
+      return;
+    }
+
+    using subscription = await instance.subscribe({
+      cursor: 1,
+      filter: ['workflow_queued', 'workflow_completed'],
+    });
+
+    assert.strictEqual(subscription[Symbol.asyncIterator](), subscription);
+    assert.deepStrictEqual(
+      await getLastSubscribeOptions(env, 'subscribe-full'),
+      { cursor: 1, filter: ['workflow_queued', 'workflow_completed'] }
+    );
   },
 };
 

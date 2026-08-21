@@ -1,0 +1,42 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The workflows_instance_subscribe flag enables WorkflowInstance.subscribe(). No `rpc` flag is set
+# so this also verifies that the wrapped binding's inner fetcher remains capable of making JSRPC
+# calls while `fetcher_rpc` is off.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "workflows-api-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "workflows-api-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "workflows_instance_subscribe"],
+        bindings = [
+        (
+          name = "workflow",
+          wrapped = (
+            moduleName = "cloudflare-internal:workflows-api",
+            innerBindings = [(
+              name = "fetcher",
+              service = "workflows-mock"
+            )],
+          )
+        ),
+        (
+          name = "mock",
+          service = "workflows-mock"
+        )
+        ],
+      )
+    ),
+    ( name = "workflows-mock",
+      worker = (
+        compatibilityFlags = ["nodejs_compat"],
+        modules = [
+          (name = "worker", esModule = embed "workflows-mock.js")
+        ],
+      )
+    )
+  ]
+);

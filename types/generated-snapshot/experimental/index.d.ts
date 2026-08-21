@@ -17473,6 +17473,157 @@ interface WorkflowInstanceRestartOptions {
     type?: "do" | "sleep" | "waitForEvent";
   };
 }
+/** An event emitted during the execution of the Workflow instance. */
+type WorkflowInstanceEvent = {
+  /** The ID of the Workflow instance that emitted the event. */
+  instanceId: string;
+  /** The event ID. */
+  eventId: number;
+  /** The event timestamp. */
+  timestamp: number;
+} & (
+  | {
+      type: "workflow_queued";
+    }
+  | {
+      type: "workflow_started";
+      params?: unknown;
+    }
+  | {
+      type: "workflow_completed";
+      output?: unknown;
+    }
+  | {
+      type: "workflow_failed";
+      error: {
+        name: string;
+        message: string;
+      };
+    }
+  | {
+      type: "workflow_terminated";
+    }
+  | {
+      type: "step_started";
+      stepName: string;
+    }
+  | {
+      type: "step_completed";
+      stepName: string;
+      output?: unknown;
+    }
+  | {
+      type: "step_failed";
+      stepName: string;
+    }
+  | {
+      type: "attempt_started";
+      stepName: string;
+      attempt: number;
+    }
+  | {
+      type: "attempt_completed";
+      stepName: string;
+      attempt: number;
+    }
+  | {
+      type: "attempt_failed";
+      stepName: string;
+      attempt: number;
+      retryDelayMs?: number;
+      error: {
+        name: string;
+        message: string;
+      };
+    }
+  | {
+      type: "sleep_started";
+      stepName: string;
+      durationMs: number;
+    }
+  | {
+      type: "sleep_completed";
+      stepName: string;
+    }
+  | {
+      type: "wait_started";
+      stepName: string;
+      eventType: string;
+    }
+  | {
+      type: "wait_completed";
+      stepName: string;
+    }
+  | {
+      type: "wait_timed_out";
+      stepName: string;
+    }
+  | {
+      type: "rollback_started";
+    }
+  | {
+      type: "rollback_step_started";
+      stepName: string;
+    }
+  | {
+      type: "rollback_step_completed";
+      stepName: string;
+    }
+  | {
+      type: "rollback_step_failed";
+      stepName: string;
+      error: {
+        name: string;
+        message: string;
+      };
+    }
+  | {
+      type: "rollback_attempt_started";
+      stepName: string;
+      attempt: number;
+    }
+  | {
+      type: "rollback_attempt_completed";
+      stepName: string;
+      attempt: number;
+    }
+  | {
+      type: "rollback_attempt_failed";
+      stepName: string;
+      attempt: number;
+      retryDelayMs?: number;
+      error: {
+        name: string;
+        message: string;
+      };
+    }
+  | {
+      type: "rollback_completed";
+    }
+  | {
+      type: "rollback_failed";
+    }
+);
+/** A Workflow event type accepted by a subscription filter. */
+type WorkflowInstanceEventType = WorkflowInstanceEvent["type"];
+/** Options controlling a Workflow instance event subscription. */
+type WorkflowInstanceSubscribeOptions = {
+  /** The event cursor from which to start the subscription from. */
+  cursor?: number;
+  /** Emit only events with one of these types. */
+  filter?: WorkflowInstanceEventType[];
+};
+/** A instance of a subscription to a specific workflow instance. */
+interface WorkflowInstanceSubscription extends Disposable {
+  next(): Promise<IteratorResult<WorkflowInstanceEvent, undefined>>;
+  return(
+    value?: unknown,
+  ): Promise<IteratorResult<WorkflowInstanceEvent, unknown>>;
+  throw(
+    error?: unknown,
+  ): Promise<IteratorResult<WorkflowInstanceEvent, unknown>>;
+  [Symbol.asyncIterator](): WorkflowInstanceSubscription;
+}
 declare abstract class WorkflowInstance {
   public id: string;
   /**
@@ -17512,4 +17663,11 @@ declare abstract class WorkflowInstance {
     type: string;
     payload: unknown;
   }): Promise<void>;
+  /**
+   * Subscribe to execution events from this Workflow instance.
+   * @param options Options controlling the starting cursor and event type filter.
+   */
+  public subscribe(
+    options?: WorkflowInstanceSubscribeOptions,
+  ): Promise<WorkflowInstanceSubscription>;
 }

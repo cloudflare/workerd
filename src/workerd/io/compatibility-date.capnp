@@ -1657,4 +1657,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental
       $pythonSnapshotRelease;
   # Enables Python Workers using Pyodide 314.0.5.
+
+  workflowsInstanceSubscribe @188 :Bool
+      $compatEnableFlag("workflows_instance_subscribe")
+      $experimental;
+  # Enables the experimental WorkflowInstance.subscribe() API.
 }

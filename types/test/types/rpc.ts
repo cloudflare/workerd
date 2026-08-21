@@ -1329,3 +1329,156 @@ expectTypeOf<WorkflowBatchDeleteResult['errors'][number]>().toEqualTypeOf<{
   code: number;
   message: string;
 }>();
+
+expectTypeOf(
+  workflowInstance.subscribe({
+    cursor: 1,
+    filter: ['workflow_queued', 'attempt_failed'],
+  })
+).toEqualTypeOf<Promise<WorkflowInstanceSubscription>>();
+
+declare const workflowSubscription: WorkflowInstanceSubscription;
+expectTypeOf(
+  workflowSubscription[Symbol.asyncIterator]()
+).toEqualTypeOf<WorkflowInstanceSubscription>();
+expectTypeOf(workflowSubscription.next()).toEqualTypeOf<
+  Promise<IteratorResult<WorkflowInstanceEvent, undefined>>
+>();
+expectTypeOf(workflowSubscription.return()).toEqualTypeOf<
+  Promise<IteratorResult<WorkflowInstanceEvent, unknown>>
+>();
+expectTypeOf(workflowSubscription.throw()).toEqualTypeOf<
+  Promise<IteratorResult<WorkflowInstanceEvent, unknown>>
+>();
+expectTypeOf(workflowSubscription[Symbol.dispose]()).toEqualTypeOf<void>();
+
+type WorkflowEventBase = {
+  instanceId: string;
+  eventId: number;
+  timestamp: number;
+};
+type WorkflowEventOfType<T extends WorkflowInstanceEventType> = Extract<
+  WorkflowInstanceEvent,
+  {type: T}
+>;
+type WorkflowEventError = {name: string; message: string};
+
+expectTypeOf<WorkflowEventOfType<'workflow_queued'>>().toEqualTypeOf<
+  WorkflowEventBase & {type: 'workflow_queued'}
+>();
+expectTypeOf<WorkflowEventOfType<'workflow_started'>>().toEqualTypeOf<
+  WorkflowEventBase & {type: 'workflow_started'; params?: unknown}
+>();
+expectTypeOf<WorkflowEventOfType<'workflow_completed'>>().toEqualTypeOf<
+  WorkflowEventBase & {type: 'workflow_completed'; output?: unknown}
+>();
+expectTypeOf<WorkflowEventOfType<'workflow_failed'>>().toEqualTypeOf<
+  WorkflowEventBase & {type: 'workflow_failed'; error: WorkflowEventError}
+>();
+expectTypeOf<WorkflowEventOfType<'workflow_terminated'>>().toEqualTypeOf<
+  WorkflowEventBase & {type: 'workflow_terminated'}
+>();
+expectTypeOf<WorkflowEventOfType<'step_started'>>().toEqualTypeOf<
+  WorkflowEventBase & {type: 'step_started'; stepName: string}
+>();
+expectTypeOf<WorkflowEventOfType<'step_completed'>>().toEqualTypeOf<
+  WorkflowEventBase & {
+    type: 'step_completed';
+    stepName: string;
+    output?: unknown;
+  }
+>();
+expectTypeOf<WorkflowEventOfType<'step_failed'>>().toEqualTypeOf<
+  WorkflowEventBase & {type: 'step_failed'; stepName: string}
+>();
+expectTypeOf<WorkflowEventOfType<'attempt_started'>>().toEqualTypeOf<
+  WorkflowEventBase & {
+    type: 'attempt_started';
+    stepName: string;
+    attempt: number;
+  }
+>();
+expectTypeOf<WorkflowEventOfType<'attempt_completed'>>().toEqualTypeOf<
+  WorkflowEventBase & {
+    type: 'attempt_completed';
+    stepName: string;
+    attempt: number;
+  }
+>();
+expectTypeOf<WorkflowEventOfType<'attempt_failed'>>().toEqualTypeOf<
+  WorkflowEventBase & {
+    type: 'attempt_failed';
+    stepName: string;
+    attempt: number;
+    retryDelayMs?: number;
+    error: WorkflowEventError;
+  }
+>();
+expectTypeOf<WorkflowEventOfType<'sleep_started'>>().toEqualTypeOf<
+  WorkflowEventBase & {
+    type: 'sleep_started';
+    stepName: string;
+    durationMs: number;
+  }
+>();
+expectTypeOf<WorkflowEventOfType<'sleep_completed'>>().toEqualTypeOf<
+  WorkflowEventBase & {type: 'sleep_completed'; stepName: string}
+>();
+expectTypeOf<WorkflowEventOfType<'wait_started'>>().toEqualTypeOf<
+  WorkflowEventBase & {
+    type: 'wait_started';
+    stepName: string;
+    eventType: string;
+  }
+>();
+expectTypeOf<WorkflowEventOfType<'wait_completed'>>().toEqualTypeOf<
+  WorkflowEventBase & {type: 'wait_completed'; stepName: string}
+>();
+expectTypeOf<WorkflowEventOfType<'wait_timed_out'>>().toEqualTypeOf<
+  WorkflowEventBase & {type: 'wait_timed_out'; stepName: string}
+>();
+expectTypeOf<WorkflowEventOfType<'rollback_started'>>().toEqualTypeOf<
+  WorkflowEventBase & {type: 'rollback_started'}
+>();
+expectTypeOf<WorkflowEventOfType<'rollback_step_started'>>().toEqualTypeOf<
+  WorkflowEventBase & {type: 'rollback_step_started'; stepName: string}
+>();
+expectTypeOf<WorkflowEventOfType<'rollback_step_completed'>>().toEqualTypeOf<
+  WorkflowEventBase & {type: 'rollback_step_completed'; stepName: string}
+>();
+expectTypeOf<WorkflowEventOfType<'rollback_step_failed'>>().toEqualTypeOf<
+  WorkflowEventBase & {
+    type: 'rollback_step_failed';
+    stepName: string;
+    error: WorkflowEventError;
+  }
+>();
+expectTypeOf<WorkflowEventOfType<'rollback_attempt_started'>>().toEqualTypeOf<
+  WorkflowEventBase & {
+    type: 'rollback_attempt_started';
+    stepName: string;
+    attempt: number;
+  }
+>();
+expectTypeOf<WorkflowEventOfType<'rollback_attempt_completed'>>().toEqualTypeOf<
+  WorkflowEventBase & {
+    type: 'rollback_attempt_completed';
+    stepName: string;
+    attempt: number;
+  }
+>();
+expectTypeOf<WorkflowEventOfType<'rollback_attempt_failed'>>().toEqualTypeOf<
+  WorkflowEventBase & {
+    type: 'rollback_attempt_failed';
+    stepName: string;
+    attempt: number;
+    retryDelayMs?: number;
+    error: WorkflowEventError;
+  }
+>();
+expectTypeOf<WorkflowEventOfType<'rollback_completed'>>().toEqualTypeOf<
+  WorkflowEventBase & {type: 'rollback_completed'}
+>();
+expectTypeOf<WorkflowEventOfType<'rollback_failed'>>().toEqualTypeOf<
+  WorkflowEventBase & {type: 'rollback_failed'}
+>();
