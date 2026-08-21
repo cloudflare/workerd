@@ -1707,7 +1707,7 @@ export interface ErrorEventErrorEventInit {
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent)
  */
 export declare class MessageEvent extends Event {
-  constructor(type: string, initializer: MessageEventInit);
+  constructor(type: string, initializer?: MessageEventInit);
   /**
    * The **`data`** read-only property of the MessageEvent interface represents the data sent by the message emitter.
    *
@@ -1719,7 +1719,7 @@ export declare class MessageEvent extends Event {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/origin)
    */
-  readonly origin: string | null;
+  readonly origin: string;
   /**
    * The **`lastEventId`** read-only property of the MessageEvent interface is a string representing a unique ID for the event.
    *
@@ -1740,7 +1740,13 @@ export declare class MessageEvent extends Event {
   readonly ports: MessagePort[];
 }
 export interface MessageEventInit {
-  data: ArrayBuffer | string;
+  data?: any;
+  origin?: string;
+  lastEventId?: string;
+  source?: MessagePort;
+  bubbles?: boolean;
+  cancelable?: boolean;
+  composed?: boolean;
 }
 /**
  * The **`PromiseRejectionEvent`** interface represents events which are sent to the global script context when JavaScript Promises are rejected. These events are particularly useful for telemetry and debugging purposes.

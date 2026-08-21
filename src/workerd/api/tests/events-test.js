@@ -434,6 +434,95 @@ export const customEvent = {
   },
 };
 
+export const messageEvent = {
+  test() {
+    // The MessageEvent constructor second argument is optional, and every member
+    // of MessageEventInit defaults per the spec.
+    const empty = new MessageEvent('foo');
+    strictEqual(empty.type, 'foo');
+    strictEqual(empty.data, null);
+    strictEqual(empty.lastEventId, '');
+    strictEqual(empty.origin, '');
+    strictEqual(empty.source, null);
+    deepStrictEqual(empty.ports, []);
+
+    // MessageEventInit's own members are all honored.
+    const event = new MessageEvent('foo', {
+      data: { a: 123 },
+      lastEventId: '123',
+      origin: 'https://example.org',
+    });
+    ok(event instanceof Event);
+    strictEqual(event.type, 'foo');
+    deepStrictEqual(event.data, { a: 123 });
+    strictEqual(event.lastEventId, '123');
+    strictEqual(event.origin, 'https://example.org');
+
+    // A MessageEvent's origin is "an origin, a string, or null", and the getter only
+    // serializes when it holds an actual origin. MessageEventInit's origin is a
+    // USVString, so it is returned exactly as given rather than parsed or normalized.
+    for (const origin of [
+      'https://example.org/some/path?a=b',
+      'HTTPS://EXAMPLE.ORG',
+      'https://example.org:443',
+      'not a url',
+      // "null" is the serialization of an opaque origin, so an event carrying one has
+      // to survive a round trip back through the constructor.
+      'null',
+      '',
+    ]) {
+      strictEqual(new MessageEvent('foo', { origin }).origin, origin);
+    }
+
+    // origin is a non-nullable USVString, so it is never null and a non-string is
+    // coerced rather than rejected. Only undefined counts as "not provided".
+    strictEqual(new MessageEvent('foo', { origin: undefined }).origin, '');
+    strictEqual(new MessageEvent('foo', { origin: null }).origin, 'null');
+    strictEqual(new MessageEvent('foo', { origin: 123 }).origin, '123');
+
+    // MessageEventInit inherits from EventInit, so those members are honored too.
+    const bubbling = new MessageEvent('foo', {
+      data: 'x',
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    });
+    strictEqual(bubbling.bubbles, true);
+    strictEqual(bubbling.cancelable, true);
+    strictEqual(bubbling.composed, true);
+
+    // lastEventId is stringified rather than requiring a string.
+    strictEqual(
+      new MessageEvent('foo', { lastEventId: 123 }).lastEventId,
+      '123'
+    );
+
+    // The members survive dispatch, and remain read only.
+    const target = new EventTarget();
+    let dispatchCount = 0;
+    target.addEventListener('foo', (dispatched) => {
+      strictEqual(dispatched.lastEventId, '123');
+      strictEqual(dispatched.origin, 'https://example.org');
+      dispatchCount++;
+    });
+    target.dispatchEvent(event);
+    strictEqual(dispatchCount, 1);
+
+    throws(() => (event.data = 'nope'));
+    throws(() => (event.lastEventId = 'nope'));
+    throws(() => (event.origin = 'nope'));
+
+    // A MessagePort may be used as the source. Anything else is rejected.
+    // MessageChannel is only exposed globally with a recent enough compatibility
+    // date, and this test runs under the oldest one too, so guard on it.
+    if (typeof MessageChannel === 'function') {
+      const { port1 } = new MessageChannel();
+      strictEqual(new MessageEvent('foo', { source: port1 }).source, port1);
+    }
+    throws(() => new MessageEvent('foo', { source: 'not a port' }));
+  },
+};
+
 export const closeEvent = {
   test() {
     // The CloseEvent constructor second argument is optional. Our implementation
