@@ -28,8 +28,18 @@ namespace workerd::api::webstreams {
 jsg::JsFunction getCppExport(jsg::Lock& js, kj::StringPtr name);
 
 // Calls the named webstreams/cpp_exports function with undefined as the receiver.
+//
+// The assert catches dispatch attempts inside a no-JS scope (most importantly V8's
+// deserializer, which forbids JS execution for the whole value-graph read) and turns what
+// would be an unsymbolizable V8 fatal ("Invoke in DisallowJavascriptExecutionScope") into a
+// named failure. Callers that can legitimately be reached inside such a scope must answer
+// without dispatching -- see e.g. the state-probe suppression in JsReadableStream::
+// isDisturbed()/isLocked(), which rely on streams in such scopes being hydration-fresh.
 template <jsg::IsJsValue... Args>
 jsg::JsValue dispatchCall(jsg::Lock& js, kj::StringPtr name, Args... args) {
+  KJ_ASSERT(!js.isJavascriptExecutionDisallowed(),
+      "attempted to dispatch into the TypeScript streams implementation during a no-JS scope",
+      name);
   auto func = getCppExport(js, name);
   return func.call(js, js.undefined(), kj::fwd<Args>(args)...);
 }
@@ -37,9 +47,12 @@ jsg::JsValue dispatchCall(jsg::Lock& js, kj::StringPtr name, Args... args) {
 // Calls the named method on the given object, with the object itself as the receiver.
 // Used to invoke the TypeScript conduit's controller facade methods (enqueue, close,
 // respond, ...). The facade objects are module-owned TypeScript code, not user objects,
-// so a missing method indicates an internal error.
+// so a missing method indicates an internal error. Carries the same no-JS-scope assert as
+// dispatchCall(), for the same reason.
 template <jsg::IsJsValue... Args>
 jsg::JsValue invokeMethod(jsg::Lock& js, jsg::JsObject obj, kj::StringPtr name, Args... args) {
+  KJ_ASSERT(!js.isJavascriptExecutionDisallowed(),
+      "attempted to invoke a TypeScript streams method during a no-JS scope", name);
   auto func =
       KJ_REQUIRE_NONNULL(JSG_TRY_CAST_FUNCTION(obj.get(js, name)), "method not found", name);
   return func.call(js, obj, args...);

@@ -1312,6 +1312,22 @@ KJ_TEST("JsReadableStream::tryUnwrapTs adopts TypeScript streams and rejects imp
     auto sourceObj = jsg::JsValue(handler.wrap(
         js, js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData))));
     KJ_EXPECT(JsReadableStream::tryUnwrapTs(js, sourceObj) == kj::none);
+
+    // The brand is recognition, not authentication: an api symbol stays reflection-visible,
+    // so an object carrying a copy of it unwraps. Recognition grants nothing on its own --
+    // the TypeScript internal algorithms re-check the real #-brand, so the first operation
+    // on the adopted impostor throws.
+    auto impostorObj = js.obj();
+    impostorObj.setNonEnumerable(js, js.symbolInternal("kReadableStreamBrand"), js.boolean(true));
+    auto impostor = KJ_ASSERT_NONNULL(JsReadableStream::tryUnwrapTs(js, jsg::JsValue(impostorObj)));
+    bool threw = false;
+    js.tryCatch(
+        [&]() { auto locked KJ_UNUSED = impostor.isLocked(js); }, [&](jsg::Value exception) {
+      threw = true;
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("TypeError"), e.getDescription());
+    });
+    KJ_EXPECT(threw, "expected the impostor to fail the TypeScript #-brand check");
   });
 }
 
@@ -1724,8 +1740,8 @@ KJ_TEST("JsReadableStream detach of a closed TypeScript-backed stream yields a c
 }
 
 // A ReadableStreamSource that reports a (pretend) pre-encoded gzip length in addition to
-// its identity length, mimicking system streams whose bytes are stored encoded and can be
-// passed through without a recompression round trip.
+// its identity length, and prefers GZIP delivery, mimicking system streams whose bytes are
+// stored encoded and can be passed through without a recompression round trip.
 class EncodedLengthSource final: public ReadableStreamSource {
  public:
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
@@ -1736,6 +1752,10 @@ class EncodedLengthSource final: public ReadableStreamSource {
     if (encoding == StreamEncoding::IDENTITY) return kIdentityLength;
     if (encoding == StreamEncoding::GZIP) return kGzipLength;
     return kj::none;
+  }
+
+  StreamEncoding getPreferredEncoding() override {
+    return StreamEncoding::GZIP;
   }
 
   static constexpr uint64_t kIdentityLength = 100;
@@ -1775,6 +1795,114 @@ KJ_TEST("JsReadableStream tryGetLength answers none for encoded queries on non-n
     JsReadableStream buffered(js, kj::str(kData));
     KJ_EXPECT(KJ_ASSERT_NONNULL(buffered.tryGetLength(js)) == kData.size());
     KJ_EXPECT(buffered.tryGetLength(js, StreamEncoding::GZIP) == kj::none);
+  });
+}
+
+KJ_TEST("JsReadableStream getPreferredEncoding forwards from the native source (both arms)") {
+  {
+    // TypeScript arm: reached through the non-detaching source accessor.
+    auto fixture = makeTsStreamsFixture();
+    fixture.runInIoContext([&](const TestFixture::Environment& env) {
+      auto& js = env.js;
+
+      auto native = JsReadableStream::create(js, env.context, kj::heap<EncodedLengthSource>());
+      KJ_EXPECT(native.getPreferredEncoding(js) == StreamEncoding::GZIP);
+
+      // JS-sourced (queued) streams produce identity bytes.
+      auto queued = makeTsStream(js, jsg::JsValue(js.obj()));
+      KJ_EXPECT(queued.getPreferredEncoding(js) == StreamEncoding::IDENTITY);
+
+      // Buffer-backed streams sit on the identity-only in-memory source.
+      JsReadableStream buffered(js, kj::str(kData));
+      KJ_EXPECT(buffered.getPreferredEncoding(js) == StreamEncoding::IDENTITY);
+    });
+  }
+
+  {
+    // Legacy arm: forwards through the controller.
+    TestFixture fixture;
+    fixture.runInIoContext([&](const TestFixture::Environment& env) {
+      auto& js = env.js;
+      auto legacy = JsReadableStream::create(js, env.context, kj::heap<EncodedLengthSource>());
+      KJ_EXPECT(legacy.getPreferredEncoding(js) == StreamEncoding::GZIP);
+    });
+  }
+}
+
+// A source with actual content that prefers GZIP delivery, for exercising the interaction
+// between the stash and the preferred-encoding report.
+class EncodedContentSource final: public ReadableStreamSource {
+ public:
+  EncodedContentSource(kj::StringPtr data): data(data) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    auto amount = kj::min(maxBytes, data.size() - offset);
+    kj::arrayPtr(static_cast<kj::byte*>(buffer), amount)
+        .copyFrom(data.slice(offset, offset + amount).asBytes());
+    offset += amount;
+    return amount;
+  }
+
+  StreamEncoding getPreferredEncoding() override {
+    return StreamEncoding::GZIP;
+  }
+
+ private:
+  kj::StringPtr data;
+  size_t offset = 0;
+};
+
+KJ_TEST("JsReadableStream serialize of a TypeScript-backed stream requires an RPC serializer") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    // Parity with ReadableStream::serialize(): a serializer without an RPC external handler
+    // must be rejected with DOMDataCloneError before the stream is touched.
+    auto stream = makeTsStream(js, jsg::JsValue(js.obj()));
+    jsg::Serializer serializer(js);
+    KJ_EXPECT_THROW_MESSAGE(
+        "ReadableStream can only be serialized for RPC", stream.serialize(js, serializer));
+    KJ_EXPECT(!stream.isDisturbed(js));
+    KJ_EXPECT(!stream.isLocked(js));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource stashed bytes force IDENTITY preferred encoding") {
+  TestFixture testFixture;
+  MockControllerState state;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source =
+        js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<EncodedContentSource>(kData));
+    auto controller = makeMockController(js, state, js.null());
+
+    // Untouched: the source's own preference passes through.
+    KJ_EXPECT(source->getPreferredEncoding() == StreamEncoding::GZIP);
+
+    // Abandon a pull so its bytes land in the stash: the stashed bytes are identity bytes
+    // already drawn from the source, so the remainder is no longer entirely GZIP.
+    auto abortController = AbortController::constructor(js);
+    auto pullPromise = source->pull(js, controller, abortController->getSignal());
+    abortController->abort(js, kj::none);
+
+    auto promise = pullPromise
+                       .then(js,
+                           [&state, source = source.addRef(), controller = controller.addRef(js)](
+                               jsg::Lock& js) mutable {
+      KJ_EXPECT(state.enqueued.size() == 0);
+      KJ_EXPECT(source->getPreferredEncoding() == StreamEncoding::IDENTITY);
+      // Redelivery drains the stash, restoring the source's own preference.
+      return source->pull(js, controller.getHandle(js), freshSignal(js))
+          .then(js, [source = kj::mv(source)](jsg::Lock& js) mutable {
+        KJ_EXPECT(source->getPreferredEncoding() == StreamEncoding::GZIP);
+      });
+    }).then(js, [&state](jsg::Lock& js) {
+      KJ_EXPECT(state.enqueued.size() == 1);
+      KJ_EXPECT(state.enqueued[0].asPtr() == kData.asBytes());
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
   });
 }
 

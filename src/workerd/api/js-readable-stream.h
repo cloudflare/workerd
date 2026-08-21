@@ -103,10 +103,6 @@ class JsReadableStream final {
   // ReadableStream is used. Buffer-backed construction (the data constructors above)
   // dispatches the same way; see bufferBackedImpl().
   //
-  // TODO(streams-ts): serialize() is the one JsReadableStream operation still lacking a
-  // TypeScript arm (JS RPC transfer of TS-backed streams; planned as a later phase along
-  // with the deserialize receive path). Everything else -- pumpTo, unwrap, tee, detach,
-  // and the pipe dispatch cells -- has landed.
   static JsReadableStream create(
       jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source);
 
@@ -157,6 +153,13 @@ class JsReadableStream final {
   // for the same reason as isDisturbed().
   kj::Maybe<uint64_t> tryGetLength(
       jsg::Lock& js, StreamEncoding encoding = StreamEncoding::IDENTITY);
+
+  // The encoding the stream's remaining content would prefer to be transferred in: forwarded
+  // from the underlying native source when there is one (in a state where its preference
+  // still describes the remainder), IDENTITY otherwise (JS-sourced streams produce identity
+  // bytes; a null stream has no content). Used by serialize() to preserve encoding
+  // passthrough (e.g. gzip) when transferring a stream over RPC.
+  StreamEncoding getPreferredEncoding(jsg::Lock& js);
 
   // Cancel the stream with the given reason, indicating a loss of interest in the data. The
   // stream is left disturbed and closed. Rejects if the stream is currently locked, matching
@@ -382,6 +385,14 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // tryGetLength arm of JsReadableStream, reached through the TypeScript side's
   // non-detaching source accessor.
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
+
+  // The encoding the underlying source would prefer to deliver its remaining content in
+  // (e.g. GZIP for a passthrough-compressed response body). IDENTITY once the source is
+  // done, canceled, or consumed, and whenever identity bytes are stashed (stashed bytes
+  // make a mixed-encoding remainder, which only IDENTITY describes). C++-only, reached the
+  // same way as the encoding-aware tryGetLength arm; JsReadableStream::serialize() uses it
+  // to preserve encoding passthrough over RPC transfer.
+  StreamEncoding getPreferredEncoding();
 
   JSG_RESOURCE_TYPE(ReadableStreamNativeSource) {
     JSG_PRIVATE_SYMBOL(kNativeSource);

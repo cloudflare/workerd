@@ -152,6 +152,15 @@ let getWritableStreamController: <W>(
 // Boolean brand check for the C++ bridge (jsgTryUnwrap). The assertion form
 // (assertIsWritableStream) throws; this one answers.
 let isWritableStream: (value: unknown) => boolean;
+
+// C++-recognition brand (JsWritableStream::tryUnwrapTs): an own,
+// non-enumerable marker stamped on every instance by the constructor, so
+// the C++ bridge can recognize TypeScript streams via an own-property
+// probe, without executing JavaScript. That constraint is load-bearing:
+// unwrap runs during RPC deserialization, inside V8's no-JS-execution
+// scope. Proxies deliberately do not convey it (the C++ check rejects
+// proxies up front), matching the #-brand's no-tunneling behavior.
+const kWritableStreamBrand: symbol = utils.getApiSymbol('kWritableStreamBrand');
 let setWritableStreamPendingClosure: <W>(stream: WritableStream<W>) => void;
 let isWritableStreamPendingClosure: <W>(stream: WritableStream<W>) => boolean;
 // Permanently neutralizes a stream on behalf of the C++ bridge (e.g. a
@@ -222,6 +231,10 @@ let writerWriteInternal: <W>(
 ) => Promise<void>;
 let writerCloseInternal: <W>(
   writer: WritableStreamDefaultWriter<W>
+) => Promise<void>;
+let writerAbortInternal: <W>(
+  writer: WritableStreamDefaultWriter<W>,
+  reason: unknown
 ) => Promise<void>;
 let writerReleaseInternal: <W>(writer: WritableStreamDefaultWriter<W>) => void;
 let getWriterReadyPromiseInternal: <W>(
@@ -634,6 +647,13 @@ class WritableStream<W = unknown> {
     underlyingSink: UnderlyingSink<W> = {},
     strategy: QueuingStrategy<W> = {}
   ) {
+    // The C++-recognition brand (see kWritableStreamBrand). Stamped first
+    // so every instance carries it regardless of construction path.
+    ObjectDefineProperty(this, kWritableStreamBrand, {
+      __proto__: null,
+      value: true,
+    } as PropertyDescriptor);
+
     // --- WebIDL strategy dictionary conversion (BEFORE sink reads) ---
     // Per WebIDL, dictionary-typed arguments are converted at the IDL
     // layer before the constructor body runs. strategy is QueuingStrategy
@@ -1202,6 +1222,19 @@ class WritableStreamDefaultWriter<
       return promise;
     };
 
+    writerAbortInternal = <W>(
+      writer: WritableStreamDefaultWriter<W>,
+      reason: unknown
+    ) => {
+      const stream = writer.#stream;
+      if (stream === undefined) {
+        return PromiseReject(
+          new TypeError('This writer has been released')
+        ) as Promise<void>;
+      }
+      return writableStreamAbort(stream, reason);
+    };
+
     writerCloseInternal = <W>(writer: WritableStreamDefaultWriter<W>) => {
       const stream = writer.#stream;
       if (stream === undefined) {
@@ -1633,6 +1666,29 @@ const cppExports = ObjectFreeze({
   writableStreamAbort,
   writableStreamClose,
   writableStreamFlush,
+  // The RPC-transfer writer operations (JsWritableStream::serialize's
+  // TsWriterSink): acquisition and per-operation dispatch go through these
+  // internal algorithms rather than the public prototype methods, which are
+  // user-patchable — a replaced getWriter/write/close/abort must not be able
+  // to intercept or fake a stream's RPC transfer. Acquisition has the public
+  // getWriter's exact semantics (the locked TypeError comes from the same
+  // constructor path).
+  acquireWritableStreamWriter<W>(
+    stream: WritableStream<W>
+  ): WritableStreamDefaultWriter<W> {
+    return new WritableStreamDefaultWriter<W>(stream);
+  },
+  writableStreamWriterWrite: <W>(
+    writer: WritableStreamDefaultWriter<W>,
+    chunk: W
+  ): Promise<void> => writerWriteInternal(writer, chunk),
+  writableStreamWriterClose: <W>(
+    writer: WritableStreamDefaultWriter<W>
+  ): Promise<void> => writerCloseInternal(writer),
+  writableStreamWriterAbort: <W>(
+    writer: WritableStreamDefaultWriter<W>,
+    reason: unknown
+  ): Promise<void> => writerAbortInternal(writer, reason),
 });
 
 module.exports = {

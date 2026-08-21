@@ -269,6 +269,15 @@ let readableStreamDefaultReaderRead: <R>(
 let isReadableStream: (value: unknown) => boolean;
 let isByteStreamController: (value: unknown) => boolean;
 
+// C++-recognition brand (JsReadableStream::tryUnwrapTs): an own,
+// non-enumerable marker stamped on every instance by the constructor, so
+// the C++ bridge can recognize TypeScript streams via an own-property
+// probe, without executing JavaScript. That constraint is load-bearing:
+// unwrap runs during RPC deserialization, inside V8's no-JS-execution
+// scope. Proxies deliberately do not convey it (the C++ check rejects
+// proxies up front), matching the #-brand's no-tunneling behavior.
+const kReadableStreamBrand: symbol = utils.getApiSymbol('kReadableStreamBrand');
+
 // BACKEND-DISPATCH: the byte-CAPABLE gate (one of the five sanctioned
 // dispatch points). True for any controller whose backend can satisfy
 // BYOB reads: the queued byte controller, or ANY native controller —
@@ -3566,6 +3575,14 @@ class ReadableStream<R> {
     underlyingSource: UnderlyingSource<R> = {},
     strategy: QueuingStrategy<R> = {}
   ) {
+    // The C++-recognition brand (see kReadableStreamBrand). Stamped before
+    // the early returns below so every instance carries it: internal
+    // shells and native-backed streams included.
+    ObjectDefineProperty(this, kReadableStreamBrand, {
+      __proto__: null,
+      value: true,
+    } as PropertyDescriptor);
+
     // Internal shell creation (tee branches): skip controller setup
     // entirely — the tee wiring attaches the SHARED controller and a
     // forked cursor afterwards. The private symbol is unreachable from

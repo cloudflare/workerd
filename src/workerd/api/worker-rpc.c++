@@ -4,6 +4,7 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
+#include <workerd/api/sockets.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
 #include <workerd/io/stored-value.h>
@@ -70,6 +71,96 @@ rpc::JsValue::External::Reader RpcDeserializerExternalHandler::read() {
   return externals[i++];
 }
 
+void RpcDeserializerExternalHandler::prepare(jsg::Lock& js, IoContext& ioctx) {
+  if (!util::Autogate::isEnabled(util::AutogateKey::RPC_EXTERNALS_HYDRATION)) {
+    // The TypeScript streams implementation cannot construct received streams during the
+    // graph read (JS execution is forbidden there), so the typescript_implemented_streams
+    // compat flag REQUIRES this autogate to receive streams. Reject only configurations
+    // that actually receive stream-bearing values: stream-free RPC (and the send side,
+    // which has no such scope) works without the gate.
+    if (FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+      for (auto external: externals) {
+        switch (external.which()) {
+          case rpc::JsValue::External::READABLE_STREAM:
+          case rpc::JsValue::External::WRITABLE_STREAM:
+          case rpc::JsValue::External::SOCKET:
+            JSG_FAIL_REQUIRE(Error,
+                "The typescript_implemented_streams compatibility flag requires the "
+                "workerd-autogate-rpc-externals-hydration autogate in order to receive "
+                "streams over RPC.");
+          default:
+            break;
+        }
+      }
+    }
+    return;
+  }
+  KJ_ASSERT(!prepared, "prepare() may only be called once");
+
+  slots.resize(externals.size());
+  for (uint index = 0; index < externals.size(); index++) {
+    auto external = externals[index];
+    switch (external.which()) {
+      case rpc::JsValue::External::READABLE_STREAM:
+        slots[index].value = hydrateRpcReadableStream(js, ioctx, external.getReadableStream());
+        break;
+      case rpc::JsValue::External::WRITABLE_STREAM:
+        slots[index].value = hydrateRpcWritableStream(js, ioctx, external.getWritableStream());
+        break;
+      case rpc::JsValue::External::SOCKET: {
+        // The socket transfer kill switch also gates hydration: with it off, the slots stay
+        // empty and Socket::deserialize() rejects the tag before attempting a claim.
+        if (!util::Autogate::isEnabled(util::AutogateKey::SOCKET_RPC_TRANSFER)) break;
+        KJ_REQUIRE(index + 2 < externals.size(),
+            "socket external is missing its stream externals, possible corruption");
+        auto socket =
+            hydrateRpcSocket(js, ioctx, external, externals[index + 1], externals[index + 2]);
+        auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<Socket>>());
+        slots[index].value = jsg::JsRef(js,
+            KJ_ASSERT_NONNULL(
+                jsg::JsValue(handler.wrap(js, kj::mv(socket))).tryCast<jsg::JsObject>()));
+        // The socket subsumed its two adjacent stream externals: record the span for the
+        // claim's index advance and skip them here so they are not hydrated again (the ++
+        // covers the second one).
+        slots[index].span = 3;
+        index += 2;
+        break;
+      }
+      default:
+        // Every other external type deserializes without executing JavaScript, directly under
+        // the graph read; no hydration needed.
+        break;
+    }
+  }
+  prepared = true;
+}
+
+template <typename T>
+kj::Maybe<T> RpcDeserializerExternalHandler::claimPrebuilt() {
+  if (!prepared) return kj::none;
+  KJ_ASSERT(i < slots.size());
+  auto& slot = slots[i];
+  auto& value =
+      KJ_REQUIRE_NONNULL(slot.value, "external table slot type doesn't match serialization tag");
+  KJ_REQUIRE(value.template is<T>(), "external table slot type doesn't match serialization tag");
+  T result = kj::mv(value.template get<T>());
+  slot.value = kj::none;
+  i += slot.span;
+  return kj::mv(result);
+}
+
+kj::Maybe<JsReadableStream> RpcDeserializerExternalHandler::claimPrebuiltReadable() {
+  return claimPrebuilt<JsReadableStream>();
+}
+
+kj::Maybe<JsWritableStream> RpcDeserializerExternalHandler::claimPrebuiltWritable() {
+  return claimPrebuilt<JsWritableStream>();
+}
+
+kj::Maybe<jsg::JsRef<jsg::JsObject>> RpcDeserializerExternalHandler::claimPrebuiltSocket() {
+  return claimPrebuilt<jsg::JsRef<jsg::JsObject>>();
+}
+
 namespace {
 
 // Call to construct an `rpc::JsValue` from a JS value.
@@ -124,6 +215,12 @@ DeserializeResult deserializeJsValue(jsg::Lock& js, rpc::JsValue::Reader reader)
   auto disposalGroup = kj::heap<RpcStubDisposalGroup>();
 
   RpcDeserializerExternalHandler externalHandler(reader.getExternals(), *disposalGroup);
+  if (reader.getExternals().size() > 0) {
+    // Materialize the externals that need JavaScript execution (streams, sockets) before
+    // readValue() begins the graph read, during which JS execution is forbidden. See
+    // RpcDeserializerExternalHandler::prepare().
+    externalHandler.prepare(js, IoContext::current());
+  }
 
   jsg::Deserializer deserializer(js, reader.getV8Serialized(), kj::none, kj::none,
       jsg::Deserializer::Options{
@@ -1982,6 +2079,26 @@ void RpcSerializerExternalHandler::serializeProxy(
   write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
     builder.initRpcTarget().setCap(kj::mv(cap));
   });
+}
+
+bool RpcSerializerExternalHandler::trySerializeClassInstance(
+    jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Object> object) {
+  // TypeScript-implemented streams are recognized by the implementation's private brand.
+  // tryUnwrapTs answers kj::none whenever the typescript_implemented_streams flag is off (the
+  // brand-check export does not exist then), so legacy isolates are unaffected. The serialized
+  // form is written with the same tag and wire protocol as the legacy JSG-wrapped streams, so
+  // the peer needs no knowledge of which implementation the sender runs.
+  KJ_IF_SOME(stream, JsReadableStream::tryUnwrapTs(js, object)) {
+    serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::READABLE_STREAM));
+    stream.serialize(js, serializer);
+    return true;
+  }
+  KJ_IF_SOME(stream, JsWritableStream::tryUnwrapTs(js, object)) {
+    serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::WRITABLE_STREAM));
+    stream.serialize(js, serializer);
+    return true;
+  }
+  return false;
 }
 
 // JsRpcTarget implementation specific to entrypoints. This is used to deliver the first, top-level

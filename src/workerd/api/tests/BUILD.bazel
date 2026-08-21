@@ -611,6 +611,25 @@ wd_test(
 )
 
 wd_test(
+    src = "js-rpc-streams-ts-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-test.js"],
+    tags = ["resources:socket:1"],
+)
+
+wd_test(
+    src = "js-rpc-streams-crossflag-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-streams-crossflag-test.js"],
+)
+
+wd_test(
+    src = "js-rpc-streams-pollution-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-streams-pollution-test.js"],
+)
+
+wd_test(
     src = "js-rpc-params-ownership-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-params-ownership-test.js"],
@@ -968,6 +987,16 @@ wd_test(
 
 wd_test(
     src = "js-rpc-socket-test.wd-test",
+    args = [
+        "--experimental",
+        "--no-verbose",
+    ],
+    data = ["js-rpc-test.js"],
+    tags = ["resources:socket:1"],
+)
+
+wd_test(
+    src = "js-rpc-socket-streams-ts-test.wd-test",
     args = [
         "--experimental",
         "--no-verbose",

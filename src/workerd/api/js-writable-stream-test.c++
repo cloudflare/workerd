@@ -1264,6 +1264,28 @@ KJ_TEST("JsWritableStream create TS arm: closure waitable rejection skips the si
   KJ_EXPECT(!state.aborted);
 }
 
+KJ_TEST("JsWritableStream serialize of a TypeScript-backed stream requires an RPC serializer") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    auto constructor =
+        KJ_ASSERT_NONNULL(exportsObj.get(js, "WritableStream"_kj).tryCast<jsg::JsFunction>());
+    auto streamObj = constructor.newInstance(js, jsg::JsValue(js.obj()));
+    auto stream = KJ_ASSERT_NONNULL(JsWritableStream::tryUnwrapTs(js, jsg::JsValue(streamObj)));
+
+    // Parity with WritableStream::serialize(): a serializer without an RPC external handler
+    // must be rejected with DOMDataCloneError before the stream is touched -- in particular,
+    // before getWriter() locks it.
+    jsg::Serializer serializer(js);
+    KJ_EXPECT_THROW_MESSAGE(
+        "WritableStream can only be serialized for RPC", stream.serialize(js, serializer));
+    KJ_EXPECT(!stream.isLocked(js));
+  });
+}
+
 KJ_TEST("JsWritableStream::tryUnwrapTs adopts TypeScript streams and rejects impostors") {
   auto fixture = makeTsStreamsFixture();
   SinkState state;
@@ -1297,6 +1319,22 @@ KJ_TEST("JsWritableStream::tryUnwrapTs adopts TypeScript streams and rejects imp
     auto sinkObj = jsg::JsValue(handler.wrap(
         js, js.alloc<WritableStreamNativeSink>(env.context, state.makeSink(), kj::none, kj::none)));
     KJ_EXPECT(JsWritableStream::tryUnwrapTs(js, sinkObj) == kj::none);
+
+    // The brand is recognition, not authentication: an api symbol stays reflection-visible,
+    // so an object carrying a copy of it unwraps. Recognition grants nothing on its own --
+    // the TypeScript internal algorithms re-check the real #-brand, so the first operation
+    // on the adopted impostor throws.
+    auto impostorObj = js.obj();
+    impostorObj.setNonEnumerable(js, js.symbolInternal("kWritableStreamBrand"), js.boolean(true));
+    auto impostor = KJ_ASSERT_NONNULL(JsWritableStream::tryUnwrapTs(js, jsg::JsValue(impostorObj)));
+    bool threw = false;
+    js.tryCatch(
+        [&]() { auto locked KJ_UNUSED = impostor.isLocked(js); }, [&](jsg::Value exception) {
+      threw = true;
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("TypeError"), e.getDescription());
+    });
+    KJ_EXPECT(threw, "expected the impostor to fail the TypeScript #-brand check");
   });
 }
 

@@ -32,12 +32,32 @@ bool getReadableStreamIsDisturbed(jsg::Lock& js, jsg::JsObject obj) {
   return webstreams::dispatchCall(js, "getReadableStreamIsDisturbed", obj).isTrue();
 }
 
-// The TypeScript implementation's private-brand check. True only for genuine
-// TypeScript-implemented ReadableStream instances (including subclasses); false for
-// everything else, including proxies wrapping a stream (private fields do not tunnel
-// through proxies, deliberately matching the TS-side behavior).
+// Recognizes the TypeScript implementation's ReadableStream (including subclasses) by the own
+// api-symbol brand its constructor stamps on every instance. Runs no JavaScript -- recognition
+// must work during RPC deserialization, inside V8's no-JS-execution scope -- so it probes for
+// the brand rather than asking the TS implementation. Proxies answer false: an own-property
+// probe on a proxy would invoke its traps, and the TS-side #-brand does not tunnel through
+// proxies either.
+//
+// This is recognition, not authentication. An api symbol stays visible to reflection
+// (Object.getOwnPropertySymbols) on every instance, so user code can read it off a real stream
+// and stamp it on an object of its own: a true answer means "route this as a TypeScript
+// stream", not "this is one". Genuine instances cannot lose the brand, which is stamped
+// non-writable and non-configurable. What protects the consumers is that recognition grants
+// nothing on its own -- every operation reached afterwards goes through the TS internal
+// algorithms, whose real #-brand checks throw a TypeError on an impostor, and on both RPC
+// serialize arms that rejection lands before anything is written to the wire.
+//
+// An impostor also cannot arrive over the wire, because V8's value serializer emits only own
+// enumerable string keys (dropping any symbol-keyed brand) and will not serialize an
+// unrecognized class instance at all. Every branded object reachable inside the no-JS
+// deserialization scope is therefore one this runtime just built -- the premise the state
+// probes in isDisturbed() and isLocked() rest on.
 bool isTypeScriptReadableStream(jsg::Lock& js, jsg::JsObject obj) {
-  return webstreams::dispatchCall(js, "isReadableStream", obj).isTrue();
+  if (v8::Local<v8::Value>(obj)->IsProxy()) {
+    return false;
+  }
+  return obj.has(js, js.symbolInternal("kReadableStreamBrand"), jsg::JsObject::HasOption::OWN);
 }
 
 bool getReadableStreamIsLocked(jsg::Lock& js, jsg::JsObject obj) {
@@ -579,12 +599,6 @@ kj::Maybe<JsReadableStream> JsReadableStream::tryUnwrapTs(
     return kj::none;
   }
   KJ_IF_SOME(obj, JSG_TRY_CAST_OBJECT(jsg::JsValue(handle))) {
-    // PERF NOTE: this is a JS call per unwrap attempt on any object-typed value. Since
-    // JsReadableStream is typically the first alternative in consumer OneOfs (e.g.
-    // Body::Initializer), object bodies that are NOT streams (ArrayBuffer, Blob, FormData,
-    // ...) pay it before falling through. If this shows up in profiles, the alternative is
-    // an own api-symbol marker stamped by the conduit constructor (same machinery as
-    // kNativeSource) -- see the design doc's unwrap decision entry.
     if (isTypeScriptReadableStream(js, obj)) {
       return JsReadableStream(js, obj.addRef(js));
     }
@@ -634,6 +648,17 @@ bool JsReadableStream::isDisturbed(jsg::Lock& js) {
         return cachedIsDisturbed = stream->isDisturbed();
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+        if (js.isJavascriptExecutionDisallowed()) {
+          // Asking the TypeScript side would execute JS, which is forbidden here. The only
+          // no-JS scope in which TypeScript-backed streams are reachable is RPC
+          // deserialization (V8 forbids JS for the whole value-graph read; the legacy
+          // queue's drain scope never touches TS-backed streams), and every TS stream
+          // reachable there is hydration-fresh: it was just constructed by
+          // RpcDeserializerExternalHandler::prepare(), user code has never had it, and no
+          // transition mechanism exists inside the scope. Fresh streams are undisturbed by
+          // construction.
+          return false;
+        }
         return cachedIsDisturbed = getReadableStreamIsDisturbed(js, obj.getHandle(js));
       }
     }
@@ -649,6 +674,11 @@ bool JsReadableStream::isLocked(jsg::Lock& js) {
         return stream->isLocked();
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+        if (js.isJavascriptExecutionDisallowed()) {
+          // Hydration-fresh by the same reasoning as isDisturbed() above; fresh streams are
+          // unlocked by construction.
+          return false;
+        }
         return getReadableStreamIsLocked(js, obj.getHandle(js));
       }
     }
@@ -763,6 +793,32 @@ kj::Maybe<uint64_t> JsReadableStream::tryGetLength(jsg::Lock& js, StreamEncoding
     KJ_UNREACHABLE;
   }
   return kj::none;
+}
+
+StreamEncoding JsReadableStream::getPreferredEncoding(jsg::Lock& js) {
+  KJ_IF_SOME(i, impl) {
+    KJ_SWITCH_ONEOF(i.stream) {
+      KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
+        return stream->getController().getPreferredEncoding();
+      }
+      KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+        // Only a native underlying source can prefer a non-identity encoding; queued
+        // (JS-sourced) streams produce identity bytes.
+        auto sourceValue =
+            webstreams::dispatchCall(js, "getReadableStreamNativeSource", obj.getHandle(js));
+        if (sourceValue.isUndefined()) {
+          return StreamEncoding::IDENTITY;
+        }
+        auto& handler =
+            KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+        auto source = KJ_REQUIRE_NONNULL(handler.tryUnwrap(js, sourceValue),
+            "getReadableStreamNativeSource did not return a ReadableStreamNativeSource");
+        return source->getPreferredEncoding();
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+  return StreamEncoding::IDENTITY;
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> JsReadableStream::arrayBuffer(
@@ -1116,7 +1172,24 @@ void JsReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       stream->serialize(js, serializer);
     }
     KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-      KJ_UNIMPLEMENTED("TypeScript-backed ReadableStream is not yet supported");
+      // Mirrors ReadableStream::serialize(): pumpTo() performs the lock/disturb validation,
+      // so the stream must not be modified before that call (the encoding/length queries are
+      // non-mutating reads).
+      auto& externalHandler = requireReadableStreamRpcSerializer(serializer);
+
+      IoContext& ioctx = IoContext::current();
+
+      auto encoding = getPreferredEncoding(js);
+      auto expectedLength = tryGetLength(js, encoding);
+
+      auto sink = newReadableStreamSerializeSink(externalHandler, encoding, expectedLength);
+
+      ioctx.addTask(ioctx.waitForDeferredProxy(pumpTo(js, kj::mv(sink), EndStream::YES))
+                        .catch_([](kj::Exception&& e) {
+        // Errors in pumpTo() are automatically propagated to the source and destination. We
+        // don't want to throw them from here since it'll cause an uncaught exception to be
+        // reported, even if the application actually does handle it!
+      }));
     }
   }
 }
@@ -1455,6 +1528,21 @@ kj::Maybe<uint64_t> ReadableStreamNativeSource::tryGetLength(StreamEncoding enco
   // "closed, hence zero" from "unknown" is the stream layer's business, not the
   // source's; report unknown.
   return kj::none;
+}
+
+StreamEncoding ReadableStreamNativeSource::getPreferredEncoding() {
+  KJ_IF_SOME(active, state) {
+    // Stashed bytes are identity bytes already drawn from the source: once any exist, the
+    // remaining content is not entirely in the source's preferred encoding, and only
+    // IDENTITY describes it.
+    if (!stash.empty()) {
+      return StreamEncoding::IDENTITY;
+    }
+    return active.source->getPreferredEncoding();
+  }
+  // EOF'd, canceled, or consumed: nothing more will be produced; IDENTITY trivially
+  // describes the empty remainder.
+  return StreamEncoding::IDENTITY;
 }
 
 kj::Own<ReadableStreamSource> ReadableStreamNativeSource::releaseForPump(jsg::Lock& js) {

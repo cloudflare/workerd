@@ -4,6 +4,7 @@
 
 #include "writable.h"
 
+#include <workerd/api/js-writable-stream.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
@@ -323,7 +324,7 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
   static kj::Exception cancellationException() {
     return JSG_KJ_EXCEPTION(DISCONNECTED, Error,
         "WritableStream received over RPC was disconnected because the remote execution context "
-        "has endeded.");
+        "has ended.");
   }
 };
 
@@ -493,11 +494,17 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
   static kj::Exception cancellationException() {
     return JSG_KJ_EXCEPTION(DISCONNECTED, Error,
         "WritableStream received over RPC was disconnected because the remote execution context "
-        "has endeded.");
+        "has ended.");
   }
 };
 
 }  // namespace
+
+WritableStreamRpcWrapper newWritableStreamRpcAdapter(kj::Own<WritableStreamSink> inner) {
+  auto wrapper = kj::heap<WritableStreamRpcAdapter>(kj::mv(inner));
+  auto completionOrRevoke = wrapper->waitForCompletionOrRevoke();
+  return WritableStreamRpcWrapper{kj::mv(wrapper), kj::mv(completionOrRevoke)};
+}
 
 void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // Serialize by effectively creating a `JsRpcStub` around this object and serializing that.
@@ -520,12 +527,12 @@ void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
     // NOTE: We're counting on `removeSink()`, to check that the stream is not locked and other
     //   common checks. It's important we don't modify the WritableStream before this call.
     auto encoding = sink->disownEncodingResponsibility();
-    auto wrapper = kj::heap<WritableStreamRpcAdapter>(kj::mv(sink));
+    auto wrapper = newWritableStreamRpcAdapter(kj::mv(sink));
 
     // Make sure this stream will be revoked if the IoContext ends.
-    ioctx.addTask(wrapper->waitForCompletionOrRevoke().attach(ioctx.registerPendingEvent()));
+    ioctx.addTask(wrapper.completionOrRevoke.attach(ioctx.registerPendingEvent()));
 
-    auto capnpStream = ioctx.getByteStreamFactory().kjToCapnp(kj::mv(wrapper));
+    auto capnpStream = ioctx.getByteStreamFactory().kjToCapnp(kj::mv(wrapper.stream));
 
     externalHandler->write([capnpStream = kj::mv(capnpStream), encoding](
                                rpc::JsValue::External::Builder builder) mutable {
@@ -554,13 +561,43 @@ void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   }
 }
 
-jsg::Ref<WritableStream> WritableStream::deserialize(
+JsWritableStream hydrateRpcWritableStream(
+    jsg::Lock& js, IoContext& ioctx, rpc::JsValue::External::WritableStream::Reader reader) {
+  auto encoding = reader.getEncoding();
+
+  KJ_REQUIRE(
+      static_cast<uint>(encoding) < capnp::Schema::from<StreamEncoding>().getEnumerants().size(),
+      "unknown StreamEncoding received from peer");
+
+  auto stream = ioctx.getByteStreamFactory().capnpToKjExplicitEnd(reader.getByteStream());
+  auto sink = newSystemStream(kj::mv(stream), encoding, ioctx);
+
+  // JsWritableStream::create() dispatches on the typescript_implemented_streams compat flag,
+  // so the received stream is backed by whichever implementation this isolate runs.
+  return JsWritableStream::create(
+      js, ioctx, kj::mv(sink), ioctx.getMetrics().tryCreateWritableByteStreamObserver());
+}
+
+JsWritableStream WritableStream::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  // No JavaScript may execute here: V8's deserializer forbids it for the duration of the value
+  // graph read. Everything JS-executing happened in hydrateRpcWritableStream() during
+  // RpcDeserializerExternalHandler::prepare(); this function only claims the result (or, when
+  // the rpc-externals-hydration autogate is off, constructs the legacy stream in place, which
+  // requires no JS).
   auto& handler = KJ_REQUIRE_NONNULL(
       deserializer.getExternalHandler(), "got WritableStream on non-RPC serialized object?");
   auto externalHandler = dynamic_cast<RpcDeserializerExternalHandler*>(&handler);
   KJ_REQUIRE(externalHandler != nullptr, "got WritableStream on non-RPC serialized object?");
 
+  KJ_IF_SOME(prebuilt, externalHandler->claimPrebuiltWritable()) {
+    return kj::mv(prebuilt);
+  }
+
+  // Not hydrated: only reachable for legacy-streams isolates (the
+  // typescript_implemented_streams flag requires the hydration gate; see
+  // RpcDeserializerExternalHandler::prepare()), so the in-place legacy construction -- which
+  // runs no JS -- is the only case here.
   auto reader = externalHandler->read();
   KJ_REQUIRE(reader.isWritableStream(), "external table slot type doesn't match serialization tag");
 
@@ -575,8 +612,8 @@ jsg::Ref<WritableStream> WritableStream::deserialize(
   auto stream = ioctx.getByteStreamFactory().capnpToKjExplicitEnd(ws.getByteStream());
   auto sink = newSystemStream(kj::mv(stream), encoding, ioctx);
 
-  return js.alloc<WritableStream>(
-      ioctx, kj::mv(sink), ioctx.getMetrics().tryCreateWritableByteStreamObserver());
+  return JsWritableStream(js.alloc<WritableStream>(
+      ioctx, kj::mv(sink), ioctx.getMetrics().tryCreateWritableByteStreamObserver()));
 }
 
 void WritableStreamDefaultWriter::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
