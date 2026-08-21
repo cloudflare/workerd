@@ -508,6 +508,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Like requireCurrent() but throws a JS error if this IoContext is not the current.
   void requireCurrentOrThrowJs();
 
+  // Returns an executor through which other IoContexts (or code running outside any
+  // IoContext) can later check whether this context is current, still alive, or defer work
+  // into it. Safe to retain beyond this context's lifetime.
+  IoCrossContextExecutor getCrossContextExecutor() {
+    return IoCrossContextExecutor(deleteQueue.queue.addRef());
+  }
+
   // A WeakRef is a weak reference to a IoContext. Note that because IoContext is not
   // itself ref-counted, we cannot follow the usual pattern of a weak reference that potentially
   // converts to a strong reference. Instead, intended usage looks like so:

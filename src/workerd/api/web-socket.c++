@@ -29,6 +29,35 @@ namespace workerd::api {
 
 namespace {
 
+// Dispatches a UA-fired WebSocket event with spec semantics (listener exceptions are
+// reported and the remaining listeners still run), then rethrows the first listener
+// exception, if any, so the caller's fail-fast error path engages and errors out the
+// WebSocket. When the compat flag is not set, falls back to PROPAGATE (the old behavior,
+// where the first throwing listener ends the dispatch and the exception propagates directly).
+void dispatchWithFailFast(jsg::Lock& js, WebSocket& shell, jsg::Ref<Event> event) {
+  auto policy =
+      EventTarget::effectiveExceptionPolicy(js, EventTarget::DispatchExceptionPolicy::REPORT);
+  auto result = shell.dispatchEventImpl(js, kj::mv(event), policy);
+  KJ_IF_SOME(exception, result.firstException) {
+    js.throwException(exception.getHandle(js));
+  }
+}
+
+// Dispatches a UA-fired WebSocket event report-only: listener exceptions are reported and
+// the dispatch continues, with no further reaction. Used for the 'close' and 'error'
+// events, which fire when the WebSocket is already closed or failed — erroring it out
+// again is useless, and rethrowing would only re-surface an already-reported exception
+// into terminal plumbing (and skip the cleanup that follows the dispatch). When the compat
+// flag is not set, falls back to PROPAGATE (the old behavior).
+void dispatchReportOnly(jsg::Lock& js, WebSocket& shell, jsg::Ref<Event> event) {
+  shell.dispatchEventImpl(js, kj::mv(event),
+      EventTarget::effectiveExceptionPolicy(js, EventTarget::DispatchExceptionPolicy::REPORT));
+}
+
+}  // namespace
+
+namespace {
+
 // Emits a perf-counter mark for a WebSocket event from the current in-scope point (the JS send()
 // call or the readLoop message dispatch). No-op when not in an IoContext. The IsolateLimitEnforcer
 // implementation captures the timestamp, so this side stays time-agnostic and works on every
@@ -361,8 +390,8 @@ void LegacyWebSocketAdapter::initConnection(jsg::Lock& js, kj::Promise<PackedWeb
     // Sets readyState to CLOSED.
     reportError(js, jsg::JsValue(e.getHandle(js)).addRef(js));
 
-    shell.dispatchEventImpl(
-        js, js.alloc<CloseEvent>(1006, kj::str("Failed to establish websocket connection"), false));
+    dispatchReportOnly(js, shell,
+        js.alloc<CloseEvent>(1006, kj::str("Failed to establish websocket connection"), false));
   });
   // Note that in this attach we pass a strong reference to the WebSocket. The reference will be
   // dropped when either the connection promise completes or the IoContext is torn down,
@@ -796,7 +825,7 @@ void LegacyWebSocketAdapter::startReadLoop(
     KJ_IF_SOME(e, maybeError) {
       if (!native.closedIncoming && e.getType() == kj::Exception::Type::DISCONNECTED) {
         // Report premature disconnect or cancel as a close event.
-        shell.dispatchEventImpl(js,
+        dispatchReportOnly(js, shell,
             js.alloc<CloseEvent>(
                 1006, kj::str("WebSocket disconnected without sending Close frame."), false));
         native.closedIncoming = true;
@@ -1058,7 +1087,7 @@ kj::Maybe<kj::Date> LegacyWebSocketAdapter::getAutoResponseTimestamp() {
 
 void LegacyWebSocketAdapter::dispatchOpen(jsg::Lock& js) {
   constexpr kj::StringPtr kOpenEvent = "open"_kj;
-  shell.dispatchEventImpl(js, js.alloc<Event>(kOpenEvent));
+  dispatchWithFailFast(js, shell, js.alloc<Event>(kOpenEvent, Event::Init{}, Trusted::YES));
 }
 
 void LegacyWebSocketAdapter::ensurePumping(jsg::Lock& js) {
@@ -1355,18 +1384,22 @@ kj::Promise<kj::Maybe<kj::Exception>> LegacyWebSocketAdapter::readLoop(
         markWebSocketPerfEvent("ws_received"_kjc);
         KJ_SWITCH_ONEOF(message) {
           KJ_CASE_ONEOF(text, kj::String) {
-            shell.dispatchEventImpl(js, js.alloc<MessageEvent>(js, js.str(text)));
+            dispatchWithFailFast(js, shell,
+                js.alloc<MessageEvent>(
+                    js, js.str(text), kj::String(), kj::none, kj::none, Trusted::YES));
           }
           KJ_CASE_ONEOF(data, kj::Array<byte>) {
             if (binaryType_ == BinaryType::BLOB) {
               // Per the WHATWG spec, deliver binary messages as Blob when binaryType is "blob".
               auto ab = jsg::JsArrayBuffer::create(js, data);
               auto blob = js.alloc<Blob>(js, jsg::JsBufferSource(ab), kj::str());
-              shell.dispatchEventImpl(
-                  js, js.alloc<MessageEvent>(js, kj::str("message"), kj::mv(blob)));
+              dispatchWithFailFast(js, shell,
+                  js.alloc<MessageEvent>(js, kj::str("message"), kj::mv(blob), kj::String(),
+                      kj::none, kj::none, Trusted::YES));
             } else {
               jsg::JsValue ab = jsg::JsArrayBuffer::create(js, data);
-              shell.dispatchEventImpl(js, js.alloc<MessageEvent>(js, ab));
+              dispatchWithFailFast(js, shell,
+                  js.alloc<MessageEvent>(js, ab, kj::String(), kj::none, kj::none, Trusted::YES));
             }
           }
           KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
@@ -1388,8 +1421,8 @@ kj::Promise<kj::Maybe<kj::Exception>> LegacyWebSocketAdapter::readLoop(
               closedOutgoingForHib = true;
               ensurePumping(js);
             }
-            shell.dispatchEventImpl(
-                js, js.alloc<CloseEvent>(close.code, kj::mv(close.reason), true));
+            dispatchReportOnly(
+                js, shell, js.alloc<CloseEvent>(close.code, kj::mv(close.reason), true));
             // Native WebSocket no longer needed; release.
             tryReleaseNative(js);
             return false;
@@ -1436,9 +1469,13 @@ void LegacyWebSocketAdapter::reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue>
     auto msg = kj::str(v8::Exception::CreateMessage(js.v8Isolate, err.getHandle(js))->Get());
     error = err.addRef(js);
 
+    // Report-only dispatch: the WebSocket is already errored out at this point, so a
+    // throwing 'error' listener has its exception reported but triggers no further
+    // fail-fast reaction.
     shell.dispatchEventImpl(js,
         js.alloc<ErrorEvent>(
-            ErrorEvent::ErrorEventInit{.message = kj::mv(msg), .error = kj::mv(err)}));
+            ErrorEvent::ErrorEventInit{.message = kj::mv(msg), .error = kj::mv(err)}),
+        EventTarget::effectiveExceptionPolicy(js, EventTarget::DispatchExceptionPolicy::REPORT));
 
     // After an error we don't allow further send()s. If the receive loop has also ended then we
     // can destroy the connection. Note that we don't set closedOutgoing = true because that flag

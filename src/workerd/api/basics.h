@@ -37,7 +37,8 @@ class Event: public jsg::Object {
     JSG_STRUCT(bubbles, cancelable, composed);
   };
 
-  inline explicit Event(kj::String ownType, Init init = {}, Trusted trusted = Trusted::YES)
+  // Only events constructed by the runtime itself may pass Trusted::YES.
+  inline explicit Event(kj::String ownType, Init init = {}, Trusted trusted = Trusted::NO)
       : ownType(kj::mv(ownType)),
         type(this->ownType) {
     flags.trusted = trusted == Trusted::YES;
@@ -46,7 +47,7 @@ class Event: public jsg::Object {
     flags.composed = init.composed.orDefault(false);
   }
 
-  inline explicit Event(kj::StringPtr type, Init init = {}, Trusted trusted = Trusted::YES)
+  inline explicit Event(kj::StringPtr type, Init init = {}, Trusted trusted = Trusted::NO)
       : type(type) {
     flags.trusted = trusted == Trusted::YES;
     flags.bubbles = init.bubbles.orDefault(false);
@@ -130,9 +131,9 @@ class Event: public jsg::Object {
     return 0.0;
   }
 
-  // What makes an Event trusted? It's pretty simple... any Event created
-  // by EW internally is Trusted, any Event created using new Event() in JS
-  // is not trusted.
+  // Per the spec, an event is trusted iff it was constructed and dispatched by the runtime
+  // itself. The Event constructor defaults to untrusted; runtime construction sites (and
+  // runtime-only subclass constructors) opt in by passing Trusted::YES explicitly.
   inline bool getIsTrusted() const {
     return flags.trusted;
   }
@@ -228,7 +229,7 @@ class Event: public jsg::Object {
   kj::Maybe<jsg::Ref<EventTarget>> target;
 
   struct Flags {
-    uint8_t trusted : 1 = 1;
+    uint8_t trusted : 1 = 0;
     uint8_t stopped : 1 = 0;
     uint8_t preventedDefault : 1 = 0;
     uint8_t isBeingDispatched : 1 = 0;
@@ -246,7 +247,8 @@ class Event: public jsg::Object {
 
 class ExtendableEvent: public Event {
  public:
-  using Event::Event;
+  // Runtime-only (the JS constructor is deleted); always trusted.
+  explicit ExtendableEvent(kj::StringPtr type): Event(type, {}, Trusted::YES) {}
 
   // While ExtendableEvent is defined by the spec to be constructable, there's really not a
   // lot of reason currently to do so, especially with the restriction that waitUntil can
@@ -313,26 +315,62 @@ class CustomEvent: public Event {
 // An implementation of the Web Platform Standard EventTarget API
 class EventTarget: public jsg::Object {
  public:
-  ~EventTarget() noexcept(false);
-
   size_t getHandlerCount(kj::StringPtr type) const;
 
   kj::Array<kj::StringPtr> getHandlerNames() const;
 
-  bool dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event);
+  // What to do when a listener throws during dispatch.
+  //
+  // PROPAGATE is the historical workerd behavior: the first throwing listener ends the
+  // dispatch and the exception flows out of dispatchEventImpl(). The runtime's own top-level
+  // event delivery (fetch/scheduled/etc.) relies on this for its failure semantics, so it
+  // remains the default for internal callers.
+  //
+  // REPORT is the behavior the spec requires of the JS-observable surfaces ("inner invoke"
+  // step 11: report the exception and continue with the next listener): the exception is
+  // delivered to the global scope's report-an-exception machinery (the global 'error'
+  // event, then console logging) and the dispatch continues. Used by the JS-exposed
+  // dispatchEvent(), by AbortSignal aborts (which the spec forbids from throwing), by the
+  // global scope's own reportError(), and by the UA-fired dispatches of WebSocket,
+  // EventSource, and MessagePort — the latter additionally apply a fail-fast reaction via
+  // DispatchResult::firstException.
+  enum class DispatchExceptionPolicy { PROPAGATE, REPORT };
+
+  // The result of a dispatchEventImpl() call.
+  struct DispatchResult {
+    // Per the spec's dispatch algorithm: false iff the event is cancelable and a listener
+    // called preventDefault().
+    bool result;
+
+    // Under DispatchExceptionPolicy::REPORT, the first listener exception, if any listener
+    // threw. It has already been reported; it is surfaced here for native callers that
+    // additionally apply a fail-fast reaction on top of the spec's report-and-continue
+    // dispatch (e.g. erroring out a WebSocket whose listener threw).
+    kj::Maybe<jsg::JsRef<jsg::JsValue>> firstException;
+  };
+
+  // Returns REPORT if the caller requested REPORT and the spec_compliant_dispatch_exceptions
+  // compat flag is enabled; falls back to PROPAGATE otherwise. PROPAGATE requests are
+  // returned as-is.
+  static DispatchExceptionPolicy effectiveExceptionPolicy(
+      jsg::Lock& js, DispatchExceptionPolicy desired);
+
+  DispatchResult dispatchEventImpl(jsg::Lock& js,
+      jsg::Ref<Event> event,
+      DispatchExceptionPolicy exceptionPolicy = DispatchExceptionPolicy::PROPAGATE);
 
   inline void removeAllHandlers() {
     typeMap.clear();
+    // Any activated event handler attribute trampolines were just dropped along with the
+    // listener list; clear their identities so a later assignment activates afresh.
+    for (auto& entry: eventHandlerAttributes) {
+      entry.value.listenerIdentity = kj::none;
+    }
   }
 
   inline void enableWarningOnSpecialEvents() {
     flags.warnOnSpecialEvents = true;
   }
-
-  // The EventListenerCallback, if given, is called whenever addEventListener
-  // or removeEventListener is invoked to report the number of registered
-  // handlers for the event.
-  using EventListenerCallback = jsg::Function<void(kj::StringPtr, size_t)>;
 
   // ---------------------------------------------------------------------------
   // JS API
@@ -350,12 +388,6 @@ class EventTarget: public jsg::Object {
     jsg::Optional<jsg::Ref<AbortSignal>> signal;
 
     JSG_STRUCT(capture, passive, once, signal);
-
-    // A following signal is used when the EventTarget is an AbortSignal
-    // that is being followed by another AbortSignal via the AbortSignal.any.
-    // This is used to keep the following signal alive until either the
-    // signal is triggered or this AbortSignal is destroyed.
-    jsg::Optional<jsg::Ref<AbortSignal>> followingSignal;
   };
 
   using AddEventListenerOpts = kj::OneOf<AddEventListenerOptions, bool>;
@@ -408,106 +440,63 @@ class EventTarget: public jsg::Object {
 
   static jsg::Ref<EventTarget> constructor(jsg::Lock& js);
 
-  // Registers a lambda that will be called when the given event type is emitted.
-  // The handler will be registered for as long as the returned kj::Own<void>
-  // handle is held. If the EventTarget is destroyed while the native handler handle
-  // is held, it will be automatically detached.
-  //
-  // The caller must not do anything with the returned Own<void> except drop it. This is why it
-  // is Own<void> and not Own<NativeHandler>.
-  kj::Own<void> newNativeHandler(
-      jsg::Lock& js, kj::String type, jsg::Function<void(jsg::Ref<Event>)> func, bool once = false);
-
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  protected:
-  void setEventListenerCallback(EventListenerCallback&& callback) {
-    maybeListenerCallback = kj::mv(callback);
-  }
+  // Invoked whenever the number of registered listeners for `type` changes: on
+  // addEventListener() and removeEventListener() — including once-listener removal during
+  // dispatch and {signal}-triggered removals — and on managed event handler attribute
+  // activation and deactivation, whose trampoline occupies a regular listener slot.
+  // removeAllHandlers() does not notify: it is only used for wholesale teardown.
+  virtual void listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) {}
+
+  // The result of a setEventHandlerAttribute() assignment: cleared, or activated with a
+  // non-callable object, or activated with a callable handler.
+  enum class EventHandlerAssignment { CLEARED, OBJECT, CALLABLE };
+
+  // Implement HTML's event handler IDL attribute semantics for an on<type> attribute (e.g.
+  // AbortSignal's onabort): assigning any object activates a trampoline listener that
+  // occupies a normal position in the listener list (kept across reassignment; a fresh
+  // position after deactivation), and assigning anything else deactivates it. Only callable
+  // values are ever invoked: the trampoline invokes whatever callable the attribute holds at
+  // dispatch time. Dispatch does not additionally consult the legacy on<type> property
+  // reflection for a managed type. The getter returns the exact value assigned.
+  kj::Maybe<jsg::JsValue> getEventHandlerAttribute(jsg::Lock& js, kj::StringPtr type);
+  EventHandlerAssignment setEventHandlerAttribute(jsg::Lock& js,
+      kj::StringPtr type,
+      jsg::Optional<kj::OneOf<HandlerFunction, jsg::JsValue>> handler);
+
+  // Registers an internal listener occupying a normal position in the listener list. The
+  // identity may later be passed to removeEventListener() to deactivate it.
+  void addEventHandlerListener(jsg::Lock& js,
+      kj::StringPtr type,
+      jsg::HashableV8Ref<v8::Object> identity,
+      HandlerFunction callback);
 
  private:
-  // RAII-style listener that can be attached to an EventTarget.
-  class NativeHandler {
-   public:
-    using Signature = void(jsg::Ref<Event>);
-    NativeHandler(jsg::Lock& js,
-        EventTarget& target,
-        kj::String type,
-        jsg::Function<Signature> func,
-        bool once = false);
-    ~NativeHandler() noexcept(false);
-    KJ_DISALLOW_COPY_AND_MOVE(NativeHandler);
-
-    void operator()(jsg::Lock& js, jsg::Ref<Event> event);
-
-    uint hashCode() const;
-
-    void visitForGc(jsg::GcVisitor& visitor);
-
-   private:
-    void detach();
-
-    kj::String type;
-    struct State {
-      // target's destructor will null out `state`, so this is OK to be a bare reference.
-      EventTarget& target;
-
-      jsg::Function<Signature> func;
-    };
-
-    kj::Maybe<State> state;
-    bool once;
-
-    friend class EventTarget;
-  };
-
-  void addNativeListener(jsg::Lock& js, NativeHandler& handler);
-  bool removeNativeListener(NativeHandler& handler);
-
   struct EventHandler {
-    struct JavaScriptHandler {
-      jsg::HashableV8Ref<v8::Object> identity;
-      HandlerFunction callback;
-
-      // If the event handler is registered with an AbortSignal, then the abortHandler points
-      // at the NativeHandler representing that registration, so that if this object is GC'ed before
-      // the AbortSignal is signalled, we unregister ourselves from listening on it. Note that
-      // this is Own<void> for the same reason newNativeHandler() returns Own<void>: We are not
-      // supposed to do anything with this except drop it.
-      kj::Maybe<kj::Own<void>> abortHandler;
-
-      void visitForGc(jsg::GcVisitor& visitor) {
-        visitor.visit(identity, callback);
-
-        // Note that we intentionally do NOT visit `abortHandler`. This is because the JS handles
-        // held by `abortHandler` are not ever accessed by this path. Instead, they are accessed
-        // by the AbortSignal, if and when it fires. So it is the AbortSignal's responsibility to
-        // visit the NativeHandler's content.
-      }
-
-      kj::StringPtr jsgGetMemoryName() const {
-        return "JavaScriptHandler"_kjc;
-      }
-      size_t jsgGetMemorySelfSize() const;
-      void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
-    };
-
-    struct NativeHandlerRef {
-      NativeHandler& handler;
-    };
-
-    // An EventHandler can be backed by either a JavaScript Handler (which is either a
-    // function or an object) or a native handler. The insertion order matters here so
-    // we maintain a single table.
-    using Handler = kj::OneOf<JavaScriptHandler, NativeHandlerRef>;
-
-    Handler handler;
+    // The listener's identity (the function or object passed to addEventListener, or a
+    // synthesized object for internally-registered listeners), used for removeEventListener
+    // matching.
+    jsg::HashableV8Ref<v8::Object> identity;
+    HandlerFunction callback;
 
     // When once is true, the handler will be removed after it is invoked one time.
     bool once = false;
 
-    EventHandler(Handler handler, bool once): handler(kj::mv(handler)), once(once) {}
-    KJ_DISALLOW_COPY_AND_MOVE(EventHandler);
+    // If the event handler is registered with an AbortSignal (the {signal} option), this
+    // holds the RAII registration for the signal's abort algorithm that removes this
+    // listener, so that if this entry goes away before the signal aborts, the algorithm is
+    // unregistered. The handle is opaque: the only thing to do with it is drop it.
+    kj::Maybe<kj::Own<void>> abortHandler;
+
+    void visitForGc(jsg::GcVisitor& visitor) {
+      visitor.visit(identity, callback);
+
+      // Note that we intentionally do NOT visit `abortHandler`. It holds no JS references
+      // of its own; the algorithm it registers is owned — and GC-visited — by the
+      // AbortSignal it was registered with.
+    }
 
     kj::StringPtr jsgGetMemoryName() const {
       return "EventHandler"_kjc;
@@ -517,16 +506,9 @@ class EventTarget: public jsg::Object {
   };
 
   struct EventHandlerHashCallbacks {
-    const EventHandler::Handler& keyForRow(const kj::Own<EventHandler>& row) const;
+    const jsg::HashableV8Ref<v8::Object>& keyForRow(const kj::Own<EventHandler>& row) const;
     bool matches(const kj::Own<EventHandler>& a, const jsg::HashableV8Ref<v8::Object>& b) const;
-    bool matches(const kj::Own<EventHandler>& a, const NativeHandler& b) const;
-    bool matches(const kj::Own<EventHandler>& a, const EventHandler::NativeHandlerRef& b) const;
-    bool matches(const kj::Own<EventHandler>& a, const EventHandler::Handler& b) const;
     uint hashCode(const jsg::HashableV8Ref<v8::Object>& obj) const;
-    uint hashCode(const NativeHandler& handler) const;
-    uint hashCode(const EventHandler::NativeHandlerRef& handler) const;
-    uint hashCode(const EventHandler::JavaScriptHandler& handler) const;
-    uint hashCode(const EventHandler::Handler& handler) const;
   };
 
   struct EventHandlerSet {
@@ -550,7 +532,35 @@ class EventTarget: public jsg::Object {
 
   kj::HashMap<kj::String, EventHandlerSet> typeMap;
 
-  kj::Maybe<EventListenerCallback> maybeListenerCallback;
+  // State for one managed on<type> event handler IDL attribute (HTML: an "event handler").
+  struct EventHandlerAttribute {
+    struct Handler {
+      // The exact value assigned, returned by the getter.
+      jsg::JsRef<jsg::JsValue> value;
+      // The invocable form, present iff the assigned value was callable. A non-callable
+      // object is retained as the attribute value but never invoked.
+      kj::Maybe<HandlerFunction> fn;
+    };
+    kj::Maybe<Handler> handler;
+
+    // While activated, the identity of the trampoline listener entry occupying the
+    // attribute's position in the listener list.
+    kj::Maybe<jsg::HashableV8Ref<v8::Object>> listenerIdentity;
+  };
+
+  // Keyed by event type. An entry's presence marks on<type> as managed: dispatch must not
+  // additionally consult the legacy on<type> property reflection for that type, which would
+  // fire the handler twice.
+  kj::HashMap<kj::String, EventHandlerAttribute> eventHandlerAttributes;
+
+  bool managesEventHandlerAttribute(kj::StringPtr type) const {
+    return eventHandlerAttributes.find(type) != kj::none;
+  }
+
+  // HTML "activate an event handler": registers the trampoline listener if it is not already
+  // registered (an already-active handler keeps its position across reassignment).
+  void activateEventHandlerAttribute(
+      jsg::Lock& js, kj::StringPtr type, EventHandlerAttribute& attribute);
 
   struct Flags {
     // When using module syntax, the "fetch", "scheduled", "trace", etc.
@@ -565,8 +575,6 @@ class EventTarget: public jsg::Object {
   Flags flags;
 
   void visitForGc(jsg::GcVisitor& visitor);
-
-  friend class NativeHandler;
 };
 
 // An implementation of the Web Platform Standard AbortSignal API
@@ -580,7 +588,7 @@ class AbortSignal final: public EventTarget {
       jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason = kj::none,
       Flag flag = Flag::NONE);
 
-  using PendingReason = ExternalPusherImpl::PendingAbortReason;
+  using PendingReason = ExternalPusherImpl::PendingAbortReasonBox;
 
   // The AbortSignal explicitly does not expose a constructor(). It is
   // illegal for user code to create an AbortSignal directly.
@@ -609,23 +617,20 @@ class AbortSignal final: public EventTarget {
   void triggerAbort(
       jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> maybeReason);
 
-  static jsg::Ref<AbortSignal> any(jsg::Lock& js,
-      kj::Array<jsg::Ref<AbortSignal>> signals,
-      const jsg::TypeHandler<EventTarget::HandlerFunction>& handler,
-      const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler);
+  // Implements the spec's "create a dependent abort signal": returns a signal that aborts
+  // when any of the given signals abort, carrying the first aborter's reason.
+  static jsg::Ref<AbortSignal> any(jsg::Lock& js, kj::Array<jsg::Ref<AbortSignal>> signals);
 
-  // While AbortSignal extends EventTarget, and our EventTarget implementation will
-  // automatically support onabort being set as an own property, the spec defines
-  // onabort as a prototype property on the AbortSignal prototype. Therefore, we
-  // need to explicitly set it as a prototype property here.
+  // The onabort event handler IDL attribute (see EventTarget::setEventHandlerAttribute).
   kj::Maybe<jsg::JsValue> getOnAbort(jsg::Lock& js);
-  void setOnAbort(jsg::Lock& js, jsg::Optional<jsg::JsValue> handler);
+  void setOnAbort(
+      jsg::Lock& js, jsg::Optional<kj::OneOf<EventTarget::HandlerFunction, jsg::JsValue>> handler);
 
-  void addEventListener(jsg::Lock& js,
-      kj::String type,
-      jsg::Identified<Handler> handler,
-      jsg::Optional<AddEventListenerOpts> maybeOptions,
-      const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler);
+  // Arms the RPC abort subscription whenever an 'abort' listener is registered — via
+  // addEventListener() or the onabort trampoline's activation. Registrations for other
+  // event types must not arm it: the subscription's pending awaitIo blocks hibernation in
+  // actors.
+  void listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) override;
 
   JSG_RESOURCE_TYPE(AbortSignal, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
@@ -644,17 +649,34 @@ class AbortSignal final: public EventTarget {
 
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(skipReleaseForTest);
-      JSG_TS_OVERRIDE({ skipReleaseForTest: never });
+      JSG_METHOD(getNativeRegistrationCountForTest);
+      JSG_TS_OVERRIDE({
+        skipReleaseForTest: never;
+        getNativeRegistrationCountForTest: never;
+      });
     }
   }
 
-  // Allows this AbortSignal to also serve as a kj::Canceler
+  // Allows this AbortSignal to also serve as a kj::Canceler: the returned promise is
+  // canceled (rejected with a kj::Exception derived from the abort reason) if this signal
+  // is aborted. If the signal is ALREADY aborted, the returned promise is immediately
+  // rejected the same way, indistinguishable from an abort arriving right after wrapping.
+  // The cancellation runs in the calling IoContext; if the abort is triggered from a
+  // different request (or outside any request), it is delivered to the calling context the
+  // next time it runs. Requires an active IoContext.
   template <typename T>
   kj::Promise<T> wrap(jsg::Lock& js, kj::Promise<T> promise) {
-    subscribeToRpcAbort(js);
+    if (getNeverAborts()) {
+      // This signal can never abort, so there is nothing to hook up.
+      return kj::mv(promise);
+    }
 
-    JSG_REQUIRE(!canceler->isCanceled(), TypeError, "The AbortSignal has already been triggered");
-    return canceler->wrap(kj::mv(promise));
+    // The wrapped promise carries the Cancellation — the (sole-owner) canceler and its
+    // registration, whose declaration order guarantees the registration unhooks before the
+    // canceler dies.
+    auto cancellation = newCanceler(js);
+    auto wrapped = cancellation.canceler->wrap(kj::mv(promise));
+    return wrapped.attach(kj::mv(cancellation));
   }
 
   template <typename T>
@@ -667,13 +689,65 @@ class AbortSignal final: public EventTarget {
     }
   }
 
-  RefcountedCanceler& getCanceler();
+  // A canceler hooked up to this signal, plus the RAII registration keeping the hook alive.
+  // Returned by newCanceler() for native consumers that need more than promise wrapping
+  // (e.g. ReleasingCanceler::Listener callbacks).
+  struct Cancellation {
+    // Sole owner of the canceler. The signal's registration reaches it only by reference.
+    kj::Own<ReleasingCanceler> canceler;
+
+    // Keeps the canceler hooked to the signal; dropping it (from any thread) unhooks.
+    //
+    // WARNING: The registration's reference to the canceler is valid only while this handle
+    // is registered, so the holder MUST destroy this handle before (or together with, but
+    // ordered before) the canceler — i.e. declare it after the canceler member — and must
+    // keep both on the creating request's thread, as consumer objects owned by the request
+    // naturally are.
+    kj::Own<void> registration;
+  };
+
+  // Creates a new canceler that is canceled — with a kj::Exception derived from the abort
+  // reason — when this signal aborts, following the same ownership and cross-request rules
+  // as wrap(). If the signal is already aborted (or can never abort), the returned canceler
+  // is pre-canceled (or inert) and no registration is made. Requires an active IoContext.
+  Cancellation newCanceler(jsg::Lock& js);
+
+  // Registers a native callback to be invoked with the abort exception if/when this signal
+  // aborts. The callback runs under the isolate lock in the IoContext that is current at
+  // registration time: synchronously when the abort is triggered within that context,
+  // otherwise delivered on that context's next turn, and dropped entirely (never invoked)
+  // once that context has been destroyed. If the signal can never abort, the callback is
+  // never invoked and no registration is made.
+  //
+  // Dropping the returned handle (safe from any thread) unregisters the callback: once the
+  // handle is destroyed, the callback is guaranteed to never (again) be invoked, so it may
+  // capture references whose validity the holder ties to the handle's lifetime (see
+  // Cancellation::registration). Note that dropping the handle destroys the callback — and
+  // with it whatever the callback captured — on the dropping thread, so the captures
+  // themselves must be safe to destroy from any thread for the any-thread claim to hold.
+  //
+  // Requires an active IoContext. The caller is expected to have checked getAborted() first.
+  kj::Own<void> addAbortAction(
+      jsg::Lock& js, kj::Function<void(jsg::Lock&, const kj::Exception&)> action);
+
+  // Implements the DOM spec's "add an algorithm to signal's abort algorithms": registers a
+  // JS-heap callback that runs under the isolate lock, in whichever context triggers the
+  // abort, before the 'abort' event is dispatched — exactly once. Unlike addAbortAction(),
+  // no IoContext is required or captured, so the algorithm must only touch JS-heap state.
+  // Algorithms never run for synthetic dispatchEvent('abort') calls; only a real abort runs
+  // them (and then empties the list, per spec).
+  //
+  // Dropping the returned handle unregisters the algorithm; the handle holds only a weak
+  // reference to this signal and must be dropped under the isolate lock (it is expected to
+  // be held by JS-heap objects). The caller is expected to have checked getAborted() first:
+  // algorithms are never invoked retroactively.
+  kj::Own<void> addAbortAlgorithm(jsg::Lock& js, jsg::Function<void()> algorithm);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     EventTarget::visitForMemoryInfo(tracker);
-    tracker.trackInlineFieldWithSize(
-        "IoOwn<RefcountedCanceler>", sizeof(IoOwn<RefcountedCanceler>));
     tracker.trackField("reason", reason);
+    tracker.trackFieldWithSize(
+        "nativeRegistrations", nativeRegistrations.size() * sizeof(kj::Arc<RegistrationCell>));
   }
 
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
@@ -681,6 +755,11 @@ class AbortSignal final: public EventTarget {
   // To test what happens if a capability is dropped before invoking release on the cloned abort
   // signal, this method will tell every rpcClient to skip this step before destruction.
   void skipReleaseForTest();
+
+  // Test-only introspection: the number of native registration cells (live or empty awaiting
+  // a sweep) plus RPC registrations currently held by this signal. Lets tests assert that
+  // completed registrations are reclaimed rather than accumulating on long-lived signals.
+  int getNativeRegistrationCountForTest();
 
   static jsg::Ref<AbortSignal> deserialize(
       jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
@@ -694,11 +773,91 @@ class AbortSignal final: public EventTarget {
   bool isIgnoredForSubrequests(jsg::Lock& js) const;
 
  private:
-  IoOwn<RefcountedCanceler> canceler;
   Flag flag;
 
+  // Set iff this signal has been aborted; the source of truth for getAborted(). Also the
+  // exception native cancellations reject with. Plain data, safe on the JS heap: no
+  // IoContext is required to create or read a signal's abort state.
+  kj::Maybe<kj::Exception> maybeAbortException;
+
   kj::Maybe<jsg::JsRef<jsg::JsValue>> reason;
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> onAbortHandler;
+
+  // One native abort action, shared between this signal and one consumer. The action is
+  // invoked at most once, only ever in its owning IoContext (synchronously if the abort is
+  // triggered there; otherwise on that context's next turn), always under the isolate lock,
+  // and never again after the consumer's RAII handle clears the slot. Because the handle is
+  // held by (or attached to) objects the owning request destroys, an IoContext teardown
+  // reclaims the action without ever touching the signal; the signal side retains only this
+  // trivial shell until swept.
+  //
+  // The action slot is taken under the mutex and invoked after unlocking. A cross-context
+  // abort does not take the slot; it schedules a task in the owning context that re-takes it
+  // on arrival — so a consumer that goes away in the meantime reliably turns the delivery
+  // into a no-op.
+  struct RegistrationCell final: public kj::AtomicRefcounted {
+    RegistrationCell(
+        IoCrossContextExecutor executor, kj::Function<void(jsg::Lock&, const kj::Exception&)> fn)
+        : executor(kj::mv(executor)) {
+      *action.lockExclusive() = kj::mv(fn);
+    }
+
+    // Routes the action into the owning IoContext and answers "is that context current /
+    // still alive?". Immutable, so it is also usable for sweeping after the slot is cleared.
+    const IoCrossContextExecutor executor;
+
+    kj::MutexGuarded<kj::Maybe<kj::Function<void(jsg::Lock&, const kj::Exception&)>>> action;
+  };
+
+  // Cells are appended on registration and taken wholesale when the signal aborts. Cells
+  // whose action has been cleared (consumer done, or its IoContext torn down) or whose
+  // owning context is gone are swept on the next registration; this bounds growth for
+  // long-lived signals used across many requests. Holds no JS heap references (weak refs at
+  // most), so no GC visitation is needed.
+  kj::Vector<kj::Arc<RegistrationCell>> nativeRegistrations;
+
+  // Registers an abort action that cancels `canceler` with the abort exception when this
+  // signal aborts. The reference remains valid because the returned RAII handle guarantees
+  // the action never runs after the handle is destroyed, and the holder destroys the handle
+  // before the canceler (see Cancellation::registration).
+  kj::Own<void> registerPendingCancellation(jsg::Lock& js, ReleasingCanceler& canceler);
+
+  // The spec's "abort algorithms": insertion-ordered, run and then emptied by triggerAbort()
+  // before the 'abort' event is dispatched. Unlike the native registration cells, these hold
+  // JS-heap references and are therefore GC-visited.
+  struct AbortAlgorithm {
+    uint64_t token;
+    jsg::Function<void()> fn;
+  };
+  kj::Vector<AbortAlgorithm> abortAlgorithms;
+  uint64_t nextAbortAlgorithmToken = 0;
+  void removeAbortAlgorithm(uint64_t token);
+
+  // Spec: "dependent" — true for signals created by AbortSignal.any().
+  bool dependent = false;
+
+  // Spec: "dependent signals" — signals created by AbortSignal.any() for which this signal
+  // is a source. Strong and GC-visited: a dependent must stay reachable as long as any of
+  // its sources could still abort it (V8 collects the cycle once neither side is otherwise
+  // reachable). Emptied when this signal aborts; a dependent that aborts first unlinks
+  // itself from its remaining sources via severSources().
+  kj::Vector<jsg::Ref<AbortSignal>> dependentSignals;
+
+  // Spec: "source signals" — the signals this dependent signal depends on. Weak: used only
+  // for AbortSignal.any()'s flattening rule (a dependent passed to any() contributes its
+  // sources, never itself, so dependency chains never form) and for severSources().
+  kj::Vector<jsg::WeakRef<AbortSignal>> sourceSignals;
+
+  // Records the abort reason and exception (spec "signal abort" step 2, also applied to
+  // dependents in steps 3-4 before any abort steps run).
+  void setAbortState(jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> reason);
+
+  // Spec "run the abort steps": abort algorithms, then workerd's native registrations (cells
+  // and RPC clones), then the 'abort' event. Requires setAbortState() to have run.
+  void runAbortSteps(jsg::Lock& js);
+
+  // Removes this (aborted) dependent signal from any remaining sources so they no longer
+  // keep it alive or attempt to re-abort it.
+  void severSources(jsg::Lock& js);
 
   static kj::Exception abortException(
       jsg::Lock& js, const jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>>& reason);
@@ -710,24 +869,43 @@ class AbortSignal final: public EventTarget {
   // -------------------------------------------------------------
   // RPC client functionality. Used if this signal was serialized.
 
-  // A collection of rpcClients, which will be notified if this signal is triggered and when this
-  // signal is destroyed.
-  kj::Vector<IoOwn<AbortTriggerRpcClient>> rpcClients;
+  // One serialized clone of this signal, to be notified when the signal is triggered. The
+  // client is owned by the IoContext in which the signal was serialized — a signal shared
+  // across requests may hold registrations from several — and abort delivery is routed into
+  // that context like a native registration, re-taking the slot on arrival. There is no
+  // consumer-side RAII handle: the slot is reclaimed when the signal aborts, when a sweep
+  // finds the owning context destroyed, or when the signal itself is destroyed (either way
+  // the client's own destructor tells the peer that no abort is coming).
+  struct RpcRegistration final: public kj::AtomicRefcounted {
+    RpcRegistration(IoCrossContextExecutor executor, IoOwn<AbortTriggerRpcClient> client)
+        : executor(kj::mv(executor)) {
+      *this->client.lockExclusive() = kj::mv(client);
+    }
 
-  // Trigger an abort on all associated clients
-  kj::Promise<void> sendToRpc(kj::Array<kj::byte>&& reason);
+    const IoCrossContextExecutor executor;
+    kj::MutexGuarded<kj::Maybe<IoOwn<AbortTriggerRpcClient>>> client;
+  };
+  kj::Vector<kj::Arc<RpcRegistration>> rpcRegistrations;
 
   // ---------------------------------------------------------------
   // RPC server functionality. Used if this signal was deserialized.
 
+  // Identifies the IoContext that deserialized this signal, which owns rpcAbortPromise
+  // below. Only that context can arm the RPC subscription (subscribeToRpcAbort); arming
+  // requested from any other context is routed here via tryExecute(), or dropped if the
+  // receiving context is already gone.
+  kj::Maybe<IoCrossContextExecutor> rpcReceiverContext;
+  bool isRpcReceiverContextCurrent();
+
   // A promise that is fulfilled if an abort() message is received over RPC.
   kj::Maybe<IoOwn<kj::Promise<void>>> rpcAbortPromise;
 
-  // A refcounted object used to receive a serialized abort reason.
-  // The abort reason is required in asynchronous event handlers as well as synchronous methods
-  // like getReason(). As a result, we can't pass the abort reason in the above promise, and both
-  // sync and async methods will need to check this value.
-  kj::Maybe<IoOwn<PendingReason>> pendingReason;
+  // The box through which a serialized abort reason arrives. The abort reason is required in
+  // asynchronous event handlers as well as synchronous methods like getReason(), so both sync
+  // and async paths check this value. It is written by the receiving request's RPC machinery
+  // but readable — under its mutex — from any context, so a deserialized signal that has
+  // crossed request boundaries still reports getAborted()/getReason() correctly everywhere.
+  kj::Maybe<kj::Arc<PendingReason>> pendingReason;
 
   // Synchronously check if an abort reason was sent over RPC
   bool hasPendingReason();

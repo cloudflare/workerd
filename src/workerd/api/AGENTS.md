@@ -18,6 +18,7 @@ tests/               # JS integration tests (238 entries); each test = .js + .wd
 | Task                           | Files                                                 |
 | ------------------------------ | ----------------------------------------------------- |
 | fetch / Request / Response     | `http.h`, `http.c++`                                  |
+| Event / EventTarget / AbortSignal | `basics.{h,c++}`; subclasses in `events.h`, per-API headers |
 | Headers                        | `headers.h`, `headers.c++`                            |
 | WebSocket                      | `web-socket.h`, `web-socket.c++`                      |
 | Hibernatable WS (DO)           | `hibernatable-web-socket.h`                           |
@@ -40,6 +41,7 @@ tests/               # JS integration tests (238 entries); each test = .js + .wd
 ## CONVENTIONS
 
 - `global-scope.h` forward-declares most API classes; `ServiceWorkerGlobalScope` registers all nested types
+- Event dispatch: `EventTarget::dispatchEventImpl` takes a `DispatchExceptionPolicy` (PROPAGATE for runtime top-level delivery, REPORT for spec surfaces); UA-fired WebSocket/EventSource/MessagePort dispatches use REPORT plus a fail-fast reaction via `DispatchResult::firstException`. Events are untrusted by default; runtime construction sites pass `Trusted::YES`. `on<type>` handler attributes go through `EventTarget::setEventHandlerAttribute` (positioned trampoline listeners)
 - Node.js compat: add C++ class + register in `NODEJS_MODULES(V)` macro in `node/node.h`; experimental modules go in `NODEJS_MODULES_EXPERIMENTAL(V)`
 - URL has dual impl: legacy (`url.h`) vs standard (`url-standard.h`); compat flag selects which
 - Streams has dual impl: internal (`streams/internal.h`) vs standard (`streams/standard.h`)

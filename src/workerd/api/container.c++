@@ -148,21 +148,15 @@ ExecProcess::ExecProcess(jsg::Lock& js,
   KJ_IF_SOME(signal, abortSignal) {
     constexpr int kSigKill = 9;
 
-    auto& canceler = signal->getCanceler();
-
     // exec() calls throwIfAborted() before sending the RPC, but the signal can still fire while the
     // RPC is in flight, i.e. before this constructor runs in the RPC's continuation. If that
-    // happened, kill the freshly-started process immediately; there's no point registering a
-    // listener.
-    if (canceler.isCanceled()) {
+    // happened, kill the freshly-started process immediately; there's no point registering an
+    // abort action.
+    if (signal->getAborted(js)) {
       sendKill(kSigKill);
     } else {
-      // Hold a strong reference to the canceler so it outlives the AbortSignal's own IoOwn, then register
-      // a listener that kills the process when the signal is later triggered.
-      auto own = kj::addRef(canceler);
-      auto& ref = *own;
-      abortCanceler = ioContext.addObject(kj::mv(own));
-      abortListener.emplace(ref, [self = JSG_THIS_WEAK(js)]() {
+      abortRegistration = signal->addAbortAction(
+          js, [self = JSG_THIS_WEAK(js)](jsg::Lock& js, const kj::Exception&) {
         KJ_IF_SOME(process, self.tryGet()) {
           process.sendKill(kSigKill);
         }

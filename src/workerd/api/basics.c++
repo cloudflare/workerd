@@ -34,128 +34,19 @@ constexpr bool isSpecialEventType(kj::StringPtr type) {
 }
 }  // namespace
 
-EventTarget::NativeHandler::NativeHandler(
-    jsg::Lock& js, EventTarget& target, kj::String type, jsg::Function<Signature> func, bool once)
-    : type(kj::mv(type)),
-      state(State{
-        .target = target,
-        .func = kj::mv(func),
-      }),
-      once(once) {
-  target.addNativeListener(js, *this);
-}
-
-EventTarget::NativeHandler::~NativeHandler() noexcept(false) {
-  detach();
-}
-
-void EventTarget::NativeHandler::operator()(jsg::Lock& js, jsg::Ref<Event> event) {
-  KJ_IF_SOME(s, state) {
-    if (once) {
-      auto fn = kj::mv(s.func);
-      detach();
-      fn(js, kj::mv(event));
-      // Note that the function may have detached itself and caused the NativeHandler
-      // to be destroyed. Let's be careful not to touch it after this point.
-    } else {
-      s.func(js, kj::mv(event));
-    }
-    return;
-  }
-}
-
-uint EventTarget::NativeHandler::hashCode() const {
-  return kj::hashCode(this);
-}
-
-void EventTarget::NativeHandler::visitForGc(jsg::GcVisitor& visitor) {
-  KJ_IF_SOME(s, state) {
-    visitor.visit(s.func);
-  }
-}
-
-void EventTarget::NativeHandler::detach() {
-  KJ_IF_SOME(s, state) {
-    s.target.removeNativeListener(*this);
-    state = kj::none;
-  }
-}
-
-kj::Own<void> EventTarget::newNativeHandler(
-    jsg::Lock& js, kj::String type, jsg::Function<void(jsg::Ref<Event>)> func, bool once) {
-  return kj::heap<EventTarget::NativeHandler>(js, *this, kj::mv(type), kj::mv(func), once);
-}
-
-const EventTarget::EventHandler::Handler& EventTarget::EventHandlerHashCallbacks::keyForRow(
+const jsg::HashableV8Ref<v8::Object>& EventTarget::EventHandlerHashCallbacks::keyForRow(
     const kj::Own<EventHandler>& row) const {
-  // The key for each EventHandler struct is the handler, which is a kj::OneOf
-  // of either a JavaScriptHandler or NativeHandler.
-  return row->handler;
+  return row->identity;
 }
 
 bool EventTarget::EventHandlerHashCallbacks::matches(
     const kj::Own<EventHandler>& a, const jsg::HashableV8Ref<v8::Object>& b) const {
-  KJ_IF_SOME(jsA, a->handler.tryGet<EventHandler::JavaScriptHandler>()) {
-    return jsA.identity == b;
-  }
-  return false;
-}
-
-bool EventTarget::EventHandlerHashCallbacks::matches(
-    const kj::Own<EventHandler>& a, const NativeHandler& b) const {
-  KJ_IF_SOME(ref, a->handler.tryGet<EventHandler::NativeHandlerRef>()) {
-    return &ref.handler == &b;
-  }
-  return false;
-}
-
-bool EventTarget::EventHandlerHashCallbacks::matches(
-    const kj::Own<EventHandler>& a, const EventHandler::NativeHandlerRef& b) const {
-  return matches(a, b.handler);
-}
-
-bool EventTarget::EventHandlerHashCallbacks::matches(
-    const kj::Own<EventHandler>& a, const EventHandler::Handler& b) const {
-  KJ_SWITCH_ONEOF(b) {
-    KJ_CASE_ONEOF(jsB, EventHandler::JavaScriptHandler) {
-      return matches(a, jsB.identity);
-    }
-    KJ_CASE_ONEOF(nativeB, EventHandler::NativeHandlerRef) {
-      return matches(a, nativeB);
-    }
-  }
-  KJ_UNREACHABLE;
+  return a->identity == b;
 }
 
 uint EventTarget::EventHandlerHashCallbacks::hashCode(
     const jsg::HashableV8Ref<v8::Object>& obj) const {
   return obj.hashCode();
-}
-
-uint EventTarget::EventHandlerHashCallbacks::hashCode(const NativeHandler& handler) const {
-  return handler.hashCode();
-}
-
-uint EventTarget::EventHandlerHashCallbacks::hashCode(
-    const EventHandler::NativeHandlerRef& handler) const {
-  return hashCode(handler.handler);
-}
-
-uint EventTarget::EventHandlerHashCallbacks::hashCode(
-    const EventHandler::JavaScriptHandler& handler) const {
-  return hashCode(handler.identity);
-}
-
-uint EventTarget::EventHandlerHashCallbacks::hashCode(const EventHandler::Handler& handler) const {
-  KJ_SWITCH_ONEOF(handler) {
-    KJ_CASE_ONEOF(js, EventHandler::JavaScriptHandler) {
-      return hashCode(js);
-    }
-    KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
-      return hashCode(native);
-    }
-  }
-  KJ_UNREACHABLE;
 }
 
 jsg::Ref<Event> Event::constructor(jsg::Lock& js, kj::String type, jsg::Optional<Init> init) {
@@ -196,19 +87,6 @@ void Event::beginDispatch(jsg::Ref<EventTarget> target) {
 
 jsg::Ref<EventTarget> EventTarget::constructor(jsg::Lock& js) {
   return js.alloc<EventTarget>();
-}
-
-EventTarget::~EventTarget() noexcept(false) {
-  for (auto& entry: typeMap) {
-    for (auto& handler: entry.value.handlers) {
-      KJ_IF_SOME(native, handler->handler.tryGet<EventHandler::NativeHandlerRef>()) {
-        // Note: Can't call `detach()` here because it would loop back and call
-        // `removeNativeListener()` on us, invalidating the `typeMap` iterator. We'll directly
-        // null out the state.
-        native.handler.state = kj::none;
-      }
-    }
-  }
 }
 
 size_t EventTarget::getHandlerCount(kj::StringPtr type) const {
@@ -259,7 +137,6 @@ void EventTarget::addEventListener(jsg::Lock& js,
 
       bool once = false;
       kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
-      kj::Maybe<jsg::Ref<AbortSignal>> maybeFollowingSignal;
       KJ_IF_SOME(value, maybeOptions) {
         KJ_SWITCH_ONEOF(value) {
           KJ_CASE_ONEOF(b, bool) {
@@ -272,7 +149,6 @@ void EventTarget::addEventListener(jsg::Lock& js,
                 "addEventListener(): options.passive must be false.");
             once = opts.once.orDefault(false);
             maybeSignal = kj::mv(opts.signal);
-            maybeFollowingSignal = kj::mv(opts.followingSignal);
           }
         }
       }
@@ -285,44 +161,40 @@ void EventTarget::addEventListener(jsg::Lock& js,
       }
 
       auto maybeAbortHandler = maybeSignal.map([&](jsg::Ref<AbortSignal>& signal) {
-        // The returned native handler captures a bare reference to signal and
-        // will be held by this EventTarget. The signal is the only thing that
-        // triggers it. If signal is gc'd the native handler created here could
-        // still be alive which means *technically* it will be holding a bare
-        // reference for something that is already destroyed. However, there's
-        // nothing else that would trigger it so it's generally safe-ish. That
-        // said, it's still a potential UAF so let's guard against it by attaching
-        // a strong reference to the signal to the event handler. This will mean
-        // likely keeping the signal in memory longer if it can otherwise be
-        // gc'd but that's ok, the impact should be minimal.
-        auto func =
-            JSG_VISITABLE_LAMBDA((this, type = type.clone(), handler = handler.identity.addRef(js),
-                                     signal = signal.addRef()),
-                (handler, signal), (jsg::Lock& js, jsg::Ref<Event>) {
-                  removeEventListener(js, kj::mv(type), kj::mv(handler), kj::none);
-                });
+        // Per the spec's "add an event listener", the {signal} option registers an abort
+        // algorithm — not an 'abort' listener — that removes this listener when the signal
+        // aborts. The algorithm lives on the signal, so it captures this EventTarget weakly:
+        // a strong ref would let a long-lived signal retain every dead target that ever
+        // registered a listener with it, and a bare `this` would rely on the registration
+        // handle below never outliving this target. If the target is gone by the time the
+        // signal aborts, there is nothing left to remove. (The handle is still held by the
+        // listener's own entry, so in the common case the algorithm is unregistered as soon
+        // as the listener goes away.)
+        auto func = JSG_VISITABLE_LAMBDA(
+            (self = JSG_THIS_WEAK(js), type = type.clone(), handler = handler.identity.addRef(js)),
+            (handler), (jsg::Lock& js) {
+              KJ_IF_SOME(target, self.tryGet()) {
+              target.removeEventListener(js, kj::mv(type), kj::mv(handler), kj::none);
+              } else {
+              }
+            });
 
-        return signal->newNativeHandler(js, kj::str(kAbortEvent), kj::mv(func), true);
+        return signal->addAbortAlgorithm(js, kj::mv(func));
       });
 
-      auto eventHandler = kj::heap<EventHandler>(
-          EventHandler::JavaScriptHandler{
-            .identity = kj::mv(handler.identity),
-            .callback = kj::mv(handlerFn),
-            .abortHandler = kj::mv(maybeAbortHandler),
-          },
-          once);
+      auto eventHandler = kj::heap<EventHandler>(EventHandler{
+        .identity = kj::mv(handler.identity),
+        .callback = kj::mv(handlerFn),
+        .once = once,
+        .abortHandler = kj::mv(maybeAbortHandler),
+      });
 
-      // If maybeFollowingSignal is set, we need to attach it to the event handler
-      // in order to keep it alive. This is used only for AbortSignal.any() where
-      // the followed signal (this) is being followed by another signal. We need
-      // to make sure the following signal stays alive until either the followed
-      // signal is triggered or destroyed.
-      KJ_IF_SOME(following, maybeFollowingSignal) {
-        eventHandler = eventHandler.attach(kj::mv(following));
+      auto& handlerSet = getOrCreate(type);
+      auto sizeBefore = handlerSet.handlers.size();
+      handlerSet.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
+      if (handlerSet.handlers.size() != sizeBefore) {
+        listenerCountChanged(js, type, handlerSet.handlers.size());
       }
-
-      getOrCreate(type).handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
     });
   }
 }
@@ -346,113 +218,207 @@ void EventTarget::removeEventListener(jsg::Lock& js,
   KJ_IF_SOME(handler, maybeHandler) {
     js.withinHandleScope([&] {
       KJ_IF_SOME(handlerSet, typeMap.find(type)) {
-        handlerSet.handlers.eraseMatch(handler);
+        if (handlerSet.handlers.eraseMatch(handler)) {
+          listenerCountChanged(js, type, handlerSet.handlers.size());
+        }
       }
     });
   }
-}
-
-void EventTarget::addNativeListener(jsg::Lock& js, NativeHandler& handler) {
-  auto& set = getOrCreate(handler.type);
-
-  auto eventHandler = kj::heap<EventHandler>(
-      EventHandler::NativeHandlerRef{
-        .handler = handler,
-      },
-      handler.once);
-
-  set.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
-}
-
-bool EventTarget::removeNativeListener(EventTarget::NativeHandler& handler) {
-  KJ_IF_SOME(handlerSet, typeMap.find(handler.type)) {
-    return handlerSet.handlers.eraseMatch(handler);
-  }
-  return false;
 }
 
 EventTarget::EventHandlerSet& EventTarget::getOrCreate(kj::StringPtr type) {
   return typeMap.upsert(kj::str(type), EventHandlerSet(), [&](auto&&...) {}).value;
 }
 
-bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
+void EventTarget::addEventHandlerListener(jsg::Lock& js,
+    kj::StringPtr type,
+    jsg::HashableV8Ref<v8::Object> identity,
+    HandlerFunction callback) {
+  auto eventHandler = kj::heap<EventHandler>(EventHandler{
+    .identity = kj::mv(identity),
+    .callback = kj::mv(callback),
+  });
+  auto& handlerSet = getOrCreate(type);
+  auto sizeBefore = handlerSet.handlers.size();
+  handlerSet.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
+  if (handlerSet.handlers.size() != sizeBefore) {
+    listenerCountChanged(js, type, handlerSet.handlers.size());
+  }
+}
+
+kj::Maybe<jsg::JsValue> EventTarget::getEventHandlerAttribute(jsg::Lock& js, kj::StringPtr type) {
+  KJ_IF_SOME(attribute, eventHandlerAttributes.find(type)) {
+    KJ_IF_SOME(handler, attribute.handler) {
+      return handler.value.getHandle(js);
+    }
+  }
+  return kj::none;
+}
+
+EventTarget::EventHandlerAssignment EventTarget::setEventHandlerAttribute(jsg::Lock& js,
+    kj::StringPtr type,
+    jsg::Optional<kj::OneOf<HandlerFunction, jsg::JsValue>> handler) {
+  const auto getOrCreateAttribute = [&]() -> EventHandlerAttribute& {
+    return eventHandlerAttributes.findOrCreate(
+        type, [&] { return decltype(eventHandlerAttributes)::Entry{kj::str(type), {}}; });
+  };
+
+  // Per HTML's event handler semantics: callables (unwrapped as HandlerFunction) become the
+  // active handler; non-callable objects are retained as the attribute value but are never
+  // invoked; anything else deactivates the handler (treated as null).
+  KJ_IF_SOME(h, handler) {
+    KJ_SWITCH_ONEOF(h) {
+      KJ_CASE_ONEOF(fn, HandlerFunction) {
+        auto value = jsg::JsValue(
+            KJ_ASSERT_NONNULL(fn.tryGetHandle(js.v8Isolate), "handler function has no wrapper"));
+        auto& attribute = getOrCreateAttribute();
+        attribute.handler = EventHandlerAttribute::Handler{
+          .value = jsg::JsRef(js, value),
+          .fn = kj::mv(fn),
+        };
+        activateEventHandlerAttribute(js, type, attribute);
+        return EventHandlerAssignment::CALLABLE;
+      }
+      KJ_CASE_ONEOF(value, jsg::JsValue) {
+        if (value.isObject()) {
+          auto& attribute = getOrCreateAttribute();
+          attribute.handler = EventHandlerAttribute::Handler{
+            .value = jsg::JsRef(js, value),
+            .fn = kj::none,
+          };
+          activateEventHandlerAttribute(js, type, attribute);
+          return EventHandlerAssignment::OBJECT;
+        }
+      }
+    }
+  }
+
+  // Deactivate: clear the value and remove the trampoline listener, so a later reassignment
+  // takes a fresh position in the listener list. The map entry is kept: its presence is what
+  // marks the type as managed.
+  KJ_IF_SOME(attribute, eventHandlerAttributes.find(type)) {
+    attribute.handler = kj::none;
+    KJ_IF_SOME(identity, attribute.listenerIdentity) {
+      removeEventListener(js, kj::str(type), identity.addRef(js), kj::none);
+    }
+    attribute.listenerIdentity = kj::none;
+  }
+  return EventHandlerAssignment::CLEARED;
+}
+
+void EventTarget::activateEventHandlerAttribute(
+    jsg::Lock& js, kj::StringPtr type, EventHandlerAttribute& attribute) {
+  // HTML "activate an event handler": if the trampoline listener already exists, the handler
+  // keeps its current position in the listener list.
+  if (attribute.listenerIdentity != kj::none) {
+    return;
+  }
+
+  auto identity = jsg::HashableV8Ref<v8::Object>(js.v8Isolate, v8::Object::New(js.v8Isolate));
+  attribute.listenerIdentity = identity.addRef(js);
+
+  // The trampoline is deliberately not the handler itself: it invokes whatever value the
+  // attribute holds at dispatch time, so reassignment need not (and must not) move it.
+  auto trampoline = JSG_VISITABLE_LAMBDA((self = JSG_THIS_WEAK(js), type = kj::str(type)), (),
+      (jsg::Lock & js, jsg::Ref<Event> event)->jsg::Optional<jsg::Value> {
+        KJ_IF_SOME(target, self.tryGet()) {
+        KJ_IF_SOME(attribute, target.eventHandlerAttributes.find(type)) {
+        KJ_IF_SOME(handler, attribute.handler) {
+        KJ_IF_SOME(fn, handler.fn) {
+        return fn(js, kj::mv(event));
+        } else {
+        }  // Empty elses to squash compiler warnings
+        } else {
+        }
+        } else {
+        }
+        } else {
+        }
+        return kj::none;
+      });
+
+  addEventHandlerListener(js, type, kj::mv(identity), kj::mv(trampoline));
+}
+
+namespace {
+
+// Implements the reporting half of the spec's "inner invoke" step 11 for listener exceptions
+// under DispatchExceptionPolicy::REPORT: deliver the exception to the global scope's
+// report-an-exception machinery (which fires the cancelable 'error' event, then falls back
+// to the console). Outside of a request (e.g. unit-test contexts without a
+// ServiceWorkerGlobalScope), fall back to plain console/inspector reporting.
+void reportListenerError(jsg::Lock& js, const jsg::JsValue& exception) {
+  if (IoContext::hasCurrent()) {
+    IoContext::current().getCurrentLock().getGlobalScope().reportError(js, exception);
+  } else {
+    js.reportError(exception);
+  }
+}
+
+}  // namespace
+
+EventTarget::DispatchResult EventTarget::dispatchEventImpl(
+    jsg::Lock& js, jsg::Ref<Event> event, DispatchExceptionPolicy exceptionPolicy) {
   event->beginDispatch(JSG_THIS);
   KJ_DEFER(event->endDispatch());
 
   event->clearPreventDefault();
 
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> firstException;
+
   // First, gather all the function handles that we plan to call. This is important to ensure that
   // the callback can add or remove listeners without affecting the current event's processing.
 
-  return js.withinHandleScope([&] {
+  bool result = js.withinHandleScope([&] {
     struct Callback {
-      EventHandler::Handler handler;
+      // The listener's identity, used to check whether it was removed by an earlier handler
+      // and to remove it when `once` is set. Old-style on<event> handlers (found via
+      // property reflection rather than the listener list) have none.
+      kj::Maybe<jsg::HashableV8Ref<v8::Object>> identity;
+      HandlerFunction callback;
       bool once = false;
-      bool oldStyle = false;
     };
 
     kj::Vector<Callback> callbacks;
 
     // Check if there is an `on<event>` property on this object. If so, we treat that as an event
-    // handler, in addition to the ones registered with addEventListener().
-    KJ_IF_SOME(onProp, onEvents.get(js, kj::str("on", event->getType()))) {
-      // If the on-event is not a function, we silently ignore it rather than raise an error.
-      KJ_IF_SOME(cb, onProp.tryGet<HandlerFunction>()) {
-        callbacks.add(Callback{
-          .handler =
-              EventHandler::JavaScriptHandler{
-                .identity = nullptr,  // won't be used below if oldStyle is true and once is false
-                .callback = kj::mv(cb),
-              },
-          .oldStyle = true,
-        });
+    // handler, in addition to the ones registered with addEventListener(). This is skipped
+    // for event types managed as event handler IDL attributes (see
+    // setEventHandlerAttribute(), e.g. AbortSignal's onabort), whose handlers occupy a
+    // positioned trampoline listener instead and would otherwise fire twice.
+    if (!managesEventHandlerAttribute(event->getType())) {
+      KJ_IF_SOME(onProp, onEvents.get(js, kj::str("on", event->getType()))) {
+        // If the on-event is not a function, we silently ignore it rather than raise an error.
+        KJ_IF_SOME(cb, onProp.tryGet<HandlerFunction>()) {
+          callbacks.add(Callback{
+            .identity = kj::none,
+            .callback = kj::mv(cb),
+          });
+        }
       }
     }
 
     KJ_IF_SOME(handlerSet, typeMap.find(event->getType())) {
       callbacks.reserve(handlerSet.handlers.size());
       for (auto& handler: handlerSet.handlers.ordered<kj::InsertionOrderIndex>()) {
-        KJ_SWITCH_ONEOF(handler->handler) {
-          KJ_CASE_ONEOF(jsh, EventHandler::JavaScriptHandler) {
-            callbacks.add(Callback{
-              .handler = EventHandler::JavaScriptHandler{.identity = jsh.identity.addRef(js),
-                .callback = jsh.callback.addRef(js)},
-              .once = handler->once,
-            });
-          }
-          KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
-            callbacks.add(Callback{
-              .handler =
-                  EventHandler::NativeHandlerRef{
-                    .handler = native.handler,
-                  },
-              .once = handler->once,
-            });
-          }
-        }
+        callbacks.add(Callback{
+          .identity = handler->identity.addRef(js),
+          .callback = handler->callback.addRef(js),
+          .once = handler->once,
+        });
       }
     }
 
-    const auto isRemoved = [&](auto& handler) {
+    const auto isRemoved = [&](jsg::HashableV8Ref<v8::Object>& identity) {
       // This is not the most efficient way to do this but it's what works right now.
       // Instead of capturing direct references to the handler structs, we copy those
       // into the Callbacks vector, which means we need to look up the actual handler
       // again to see if it still exists in the list. The entire way the storage of the
       // handlers is done here can be improved to make this more efficient.
-
       KJ_IF_SOME(handlerSet, typeMap.find(event->getType())) {
-        KJ_SWITCH_ONEOF(handler) {
-          KJ_CASE_ONEOF(js, EventHandler::JavaScriptHandler) {
-            return handlerSet.handlers.find(js.identity) == kj::none;
-          }
-          KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
-            return handlerSet.handlers.find(native.handler) == kj::none;
-          }
-        }
-      } else {
-        return true;
+        return handlerSet.handlers.find(identity) == kj::none;
       }
-      KJ_UNREACHABLE;
+      return true;
     };
 
     for (auto& callback: callbacks) {
@@ -461,77 +427,103 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
         break;
       }
 
-      // If the handler gets removed by an earlier run handler, then we need to
-      // make sure we don't run it. Skip over and continue.
-      if (!callback.oldStyle && isRemoved(callback.handler)) {
-        continue;
-      }
+      KJ_IF_SOME(identity, callback.identity) {
+        // If the handler was removed by an earlier-run handler, then we need to
+        // make sure we don't run it. Skip over and continue.
+        if (isRemoved(identity)) {
+          continue;
+        }
 
-      if (callback.once) {
-        KJ_SWITCH_ONEOF(callback.handler) {
-          KJ_CASE_ONEOF(jsh, EventHandler::JavaScriptHandler) {
-            removeEventListener(js, kj::str(event->getType()), jsh.identity.addRef(js), kj::none);
-          }
-          KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
-            // The native handler will handle detaching itself when invoked
-          }
+        // Per spec ("inner invoke" step 5), once-listeners are removed before invocation.
+        if (callback.once) {
+          removeEventListener(js, kj::str(event->getType()), identity.addRef(js), kj::none);
         }
       }
 
-      KJ_SWITCH_ONEOF(callback.handler) {
-        KJ_CASE_ONEOF(jsh, EventHandler::JavaScriptHandler) {
-          // Per the standard, the event listener is not supposed to return any value, and if it
-          // does, that value is ignored. That can be somewhat problematic if the user passes an
-          // async function as the event handler. Doing so counts as undefined behavior and can
-          // introduce subtle and difficult to diagnose bugs. Here, if the handler does return a
-          // value, we're going to emit a warning but otherwise ignore it. The warning will only
-          // be emitted at most once per EventEmitter instance.
-          auto ret = jsh.callback(js, event.addRef());
-          // Note: We used to run each handler in its own v8::TryCatch. However, due to a
-          //   misunderstanding of the V8 API, we incorrectly believed that TryCatch mishandled
-          //   termination (or maybe it actually did at the time), so we changed things such that
-          //   we don't catch exceptions so the first handler to throw an exception terminates the
-          //   loop, and the exception flows out of dispatchEvent(). In theory if multiple
-          //   handlers were registered then maybe we ought to be running all of them even if one
-          //   fails. This isn't entirely clear, though: in the case of 'fetch' handlers, in
-          //   fail-closed mode, an exception from any handler should make the whole request fail,
-          //   but then who cares if the remaining handlers run? Meanwhile, in fail-open mode, for
-          //   consistency, we should probably trigger fallback behavior if any handler throws, so
-          //   again it doesn't matter. For other types of handlers, e.g. WebSocket 'message', it's
-          //   not clear why one would ever register multiple handlers.
-          KJ_IF_SOME(r, ret) {
-            auto handle = r.getHandle(js);
-            // Returning true is the same as calling preventDefault() on the event.
-            if (handle->IsTrue()) {
-              event->preventDefault();
-            }
-            if (flags.warnOnHandlerReturn && !handle->IsBoolean()) {
-              flags.warnOnHandlerReturn = false;
-              // To help make debugging easier, let's tailor the warning a bit if it was a promise.
-              if (handle->IsPromise()) {
-                js.logWarning(kj::str(
-                    "An event handler returned a promise that will be ignored. Event handlers "
-                    "should not have a return value and should not be async functions."));
-              } else {
-                js.logWarning(kj::str("An event handler returned a value of type \"",
-                    handle->TypeOf(js.v8Isolate),
-                    "\" that will be ignored. Event handlers should not have a return value."));
-              }
+      const auto invoke = [&]() {
+        // Per the standard, the event listener is not supposed to return any value, and
+        // if it does, that value is ignored. That can be somewhat problematic if the user
+        // passes an async function as the event handler. Doing so counts as undefined
+        // behavior and can introduce subtle and difficult to diagnose bugs. Here, if the
+        // handler does return a value, we're going to emit a warning but otherwise ignore
+        // it. The warning will only be emitted at most once per EventTarget instance.
+        auto ret = callback.callback(js, event.addRef());
+        KJ_IF_SOME(r, ret) {
+          auto handle = r.getHandle(js);
+          // Returning true is the same as calling preventDefault() on the event.
+          if (handle->IsTrue()) {
+            event->preventDefault();
+          }
+          if (flags.warnOnHandlerReturn && !handle->IsBoolean()) {
+            flags.warnOnHandlerReturn = false;
+            // To help make debugging easier, let's tailor the warning a bit if it was a
+            // promise.
+            if (handle->IsPromise()) {
+              js.logWarning(kj::str(
+                  "An event handler returned a promise that will be ignored. Event handlers "
+                  "should not have a return value and should not be async functions."));
+            } else {
+              js.logWarning(kj::str("An event handler returned a value of type \"",
+                  handle->TypeOf(js.v8Isolate),
+                  "\" that will be ignored. Event handlers should not have a return value."));
             }
           }
         }
-        KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
-          native.handler(js, event.addRef());
-        }
+      };
+
+      switch (exceptionPolicy) {
+        case DispatchExceptionPolicy::PROPAGATE:
+          // The first handler to throw ends the dispatch and the exception flows out of
+          // dispatchEventImpl(). The runtime's top-level event delivery depends on this:
+          // for example, a throwing 'fetch' handler must fail the request (fail-closed)
+          // or trigger fallback (fail-open) rather than let other handlers respond.
+          invoke();
+          break;
+        case DispatchExceptionPolicy::REPORT:
+          // Spec "inner invoke" step 11: report the exception and continue with the next
+          // listener.
+          JSG_TRY(js) {
+            invoke();
+          }
+          JSG_CATCH(exception) {
+            auto handle = jsg::JsValue(exception.getHandle(js));
+            if (firstException == kj::none) {
+              firstException = jsg::JsRef(js, handle);
+            }
+            reportListenerError(js, handle);
+          }
+          break;
       }
     }
 
     return !event->isPreventDefault();
   });
+
+  return DispatchResult{.result = result, .firstException = kj::mv(firstException)};
+}
+
+EventTarget::DispatchExceptionPolicy EventTarget::effectiveExceptionPolicy(
+    jsg::Lock& js, DispatchExceptionPolicy desired) {
+  if (desired == DispatchExceptionPolicy::REPORT) {
+    // Fall back to PROPAGATE when the compat flag is not set or when there is no active
+    // Worker context (e.g. in C++ unit tests that use the JSG test harness directly).
+    KJ_IF_SOME(flags, FeatureFlags::tryGet(js)) {
+      if (!flags.getSpecCompliantDispatchExceptions()) {
+        return DispatchExceptionPolicy::PROPAGATE;
+      }
+    } else {
+      return DispatchExceptionPolicy::PROPAGATE;
+    }
+  }
+  return desired;
 }
 
 bool EventTarget::dispatchEvent(jsg::Lock& js, jsg::Ref<Event> event) {
-  return dispatchEventImpl(js, kj::mv(event));
+  // The JS-exposed dispatchEvent() is a spec surface: listener exceptions are reported and
+  // do not interrupt the dispatch (nor propagate to the dispatchEvent() caller).
+  return dispatchEventImpl(
+      js, kj::mv(event), effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT))
+      .result;
 }
 
 // A wrapper for the AbortTrigger jsrpc client, that automatically sends a release() message once
@@ -571,44 +563,59 @@ class AbortTriggerRpcClient final {
   rpc::AbortTrigger::Client client;
 };
 
+namespace {
+
+kj::Promise<void> abortRpcClientTask(
+    IoContext& ioContext, AbortTriggerRpcClient& client, kj::Array<kj::byte> reason) {
+  KJ_IF_SOME(outputLocks, ioContext.waitForOutputLocksIfNecessary()) {
+    co_await outputLocks;
+  }
+  co_await client.abort(reason);
+}
+
+// Sends the serialized abort reason to one RPC clone as a task on the current IoContext,
+// which must be the context that owns the client.
+void sendAbortToRpc(IoOwn<AbortTriggerRpcClient> client, kj::Array<kj::byte> reason) {
+  auto& ioContext = IoContext::current();
+  // Dereference the IoOwn here, while the owning context is known to be current; the task
+  // keeps the client alive by holding the IoOwn as an attachment.
+  auto& clientRef = *client;
+  ioContext.addTask(
+      abortRpcClientTask(ioContext, clientRef, kj::mv(reason)).attach(kj::mv(client)));
+}
+
+}  // namespace
+
 AbortSignal::AbortSignal(kj::Maybe<kj::Exception> exception,
     jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason,
     Flag flag)
-    : canceler(IoContext::current().addObject(kj::refcounted<RefcountedCanceler>(
-          exception.map([](const kj::Exception& e) { return e.clone(); })))),
-      flag(flag),
+    : flag(flag),
+      maybeAbortException(kj::mv(exception)),
       reason(kj::mv(maybeReason)) {}
 
 kj::Maybe<jsg::JsValue> AbortSignal::getOnAbort(jsg::Lock& js) {
-  return onAbortHandler.map(
-      [&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue { return ref.getHandle(js); });
+  return getEventHandlerAttribute(js, kAbortEvent);
 }
 
-void AbortSignal::setOnAbort(jsg::Lock& js, jsg::Optional<jsg::JsValue> handler) {
-  // We only want to accept the handler if it's a valid handler... For anything
-  // else, set it to null.
-  KJ_IF_SOME(h, handler) {
-    if (h.isFunction() || h.isObject()) {
-      onAbortHandler = jsg::JsRef(js, h);
-      subscribeToRpcAbort(js);
-      return;
-    }
+void AbortSignal::setOnAbort(
+    jsg::Lock& js, jsg::Optional<kj::OneOf<EventTarget::HandlerFunction, jsg::JsValue>> handler) {
+  // The trampoline's activation registers a regular 'abort' listener, which arms the RPC
+  // abort subscription through listenerCountChanged().
+  setEventHandlerAttribute(js, kAbortEvent, kj::mv(handler));
+}
+
+void AbortSignal::listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) {
+  // Only 'abort' listeners can observe an abort; registrations for other event types must
+  // not arm the RPC subscription (whose pending awaitIo blocks actor hibernation). A
+  // notification that leaves 'abort' listeners registered arms too — arming is idempotent,
+  // and any such notification means an abort could still be observed.
+  if (type == kAbortEvent && count > 0) {
+    subscribeToRpcAbort(js);
   }
-  onAbortHandler = kj::none;
-}
-
-void AbortSignal::addEventListener(jsg::Lock& js,
-    kj::String type,
-    jsg::Identified<Handler> handler,
-    jsg::Optional<AddEventListenerOpts> maybeOptions,
-    const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler) {
-  EventTarget::addEventListener(
-      js, kj::mv(type), kj::mv(handler), kj::mv(maybeOptions), eventTargetHandler);
-  subscribeToRpcAbort(js);
 }
 
 bool AbortSignal::getAborted(jsg::Lock& js) {
-  return canceler->isCanceled() || hasPendingReason();
+  return maybeAbortException != kj::none || hasPendingReason();
 }
 
 jsg::JsValue AbortSignal::getReason(jsg::Lock& js) {
@@ -648,7 +655,7 @@ jsg::Ref<AbortSignal> AbortSignal::abort(jsg::Lock& js, jsg::Optional<jsg::JsVal
 }
 
 void AbortSignal::throwIfAborted(jsg::Lock& js) {
-  if (canceler->isCanceled()) {
+  if (maybeAbortException != kj::none) {
     KJ_IF_SOME(r, reason) {
       js.throwException(r.getHandle(js));
     } else {
@@ -682,67 +689,232 @@ jsg::Ref<AbortSignal> AbortSignal::timeout(jsg::Lock& js, double delay) {
   return kj::mv(signal);
 }
 
-jsg::Ref<AbortSignal> AbortSignal::any(jsg::Lock& js,
-    kj::Array<jsg::Ref<AbortSignal>> signals,
-    const jsg::TypeHandler<EventTarget::HandlerFunction>& handler,
-    const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler) {
+jsg::Ref<AbortSignal> AbortSignal::any(jsg::Lock& js, kj::Array<jsg::Ref<AbortSignal>> signals) {
+  // Implements the spec's "create a dependent abort signal".
+
   // If nothing was passed in, we can just return a signal that never aborts.
   if (signals.size() == 0) {
     return js.alloc<AbortSignal>(kj::none, kj::none, AbortSignal::Flag::NEVER_ABORTS);
   }
 
-  // Let's check to see if any of the signals are already aborted. If it is, we can
-  // optimize here by skipping the event handler registration.
+  // Spec step 2: if any of the signals is already aborted, return an already-aborted signal
+  // carrying its reason; nothing gets linked.
   for (auto& sig: signals) {
     if (sig->getAborted(js)) {
       return AbortSignal::abort(js, sig->getReason(js));
     }
   }
 
-  // Otherwise we need to create a new signal and register event handlers on all
-  // of the signals that were passed in.
-  auto signal = js.alloc<AbortSignal>();
-  for (auto& sig: signals) {
-    // This is a bit of a hack. We want to call addEventListener, but that requires a
-    // jsg::Identified<EventTarget::Handler>, which we can't create directly yet.
-    // So we create a jsg::Function, wrap that in a v8::Function, then convert that into
-    // the jsg::Identified<EventTarget::Handler>, and voila, we have what we need.
-    auto fn = js.wrapSimpleFunction(js.v8Context(),
-        [signal = signal.addRef(), self = sig.getWeakRef(js)](jsg::Lock& js, auto&) mutable {
-      // Keep the returned signal alive while this listener is running. EventTarget removes
-      // once-handlers before invocation, which otherwise drops `followingSignal` before nested
-      // JS/V8 work in triggerAbort() can run GC.
-      signal->triggerAbort(js, self->getReason(js));
-    });
-    jsg::Identified<EventTarget::Handler> identified = {.identity = {js.v8Isolate, fn},
-      .unwrapped = JSG_REQUIRE_NONNULL(handler.tryUnwrap(js, fn.As<v8::Value>()), TypeError,
-          "Unable to create AbortSignal.any handler")};
+  auto resultSignal = js.alloc<AbortSignal>();
+  resultSignal->dependent = true;
 
-    sig->addEventListener(js, kj::str(kAbortEvent), kj::mv(identified),
-        AddEventListenerOptions{// Once the abort is triggered, this handler should remove itself.
-          .once = true,
-          // Each of the followed signals will maintain a strong reference to this new
-          // one that's been created.
-          .followingSignal = signal.addRef()},
-        eventTargetHandler);
+  // Links resultSignal as a dependent of the given (never itself dependent) source.
+  // Duplicate links are harmless: a dependent is only aborted once, so extra entries are
+  // skipped at trigger time — matching the spec's set semantics observably.
+  const auto linkToSource = [&](AbortSignal& source) {
+    source.dependentSignals.add(resultSignal.addRef());
+    resultSignal->sourceSignals.add(source.getWeakRefToThis<AbortSignal>(js));
+
+    // A dependent must observe aborts that arrive for the source over RPC, just like any
+    // other abort observer.
+    source.subscribeToRpcAbort(js);
+  };
+
+  // Spec step 4, including the flattening rule: a source that is itself dependent
+  // contributes its own sources rather than itself, so dependency chains never form. (A
+  // dead flattened source can never abort and so contributes nothing.)
+  for (auto& sig: signals) {
+    if (!sig->dependent) {
+      linkToSource(*sig);
+    } else {
+      for (auto& weakSource: sig->sourceSignals) {
+        KJ_IF_SOME(source, weakSource.tryGet()) {
+          linkToSource(source);
+        }
+      }
+    }
   }
-  return signal;
+
+  return resultSignal;
 }
 
 void AbortSignal::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(reason, onAbortHandler);
-}
-
-RefcountedCanceler& AbortSignal::getCanceler() {
-  return *canceler;
-}
-
-void AbortSignal::triggerAbort(
-    jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> maybeReason) {
-  KJ_ASSERT(flag != Flag::NEVER_ABORTS);
-  if (canceler->isCanceled()) {
-    return;
+  visitor.visit(reason);
+  for (auto& algorithm: abortAlgorithms) {
+    visitor.visit(algorithm.fn);
   }
+  for (auto& dep: dependentSignals) {
+    visitor.visit(dep);
+  }
+}
+
+namespace {
+
+// Takes a cell's slot content, leaving the slot empty. Callers must use the taken value
+// only after this returns, i.e. after the cell's mutex has been released.
+template <typename T>
+kj::Maybe<T> take(const kj::MutexGuarded<kj::Maybe<T>>& slot) {
+  auto lock = slot.lockExclusive();
+  auto value = kj::mv(*lock);
+  *lock = kj::none;
+  return value;
+}
+
+// Reclaims registration cells whose consumer is gone (slot already cleared) or whose owning
+// IoContext has been destroyed (the slot content could never be used anyway; clearing it
+// here is safe from any thread because dropping an IoOwn on a defunct context is a no-op and
+// abort actions capture nothing needing the owner). Called on registration paths so that
+// growth on a long-lived signal is bounded by its live registrations. `slotOf` maps a cell
+// to its guarded slot.
+template <typename T, typename SlotOf>
+void sweepCells(kj::Vector<kj::Arc<T>>& cells, SlotOf slotOf) {
+  size_t dst = 0;
+  for (size_t i = 0; i < cells.size(); i++) {
+    bool dead = [&]() {
+      auto lock = slotOf(*cells[i]).lockExclusive();
+      if (*lock == kj::none) {
+        return true;
+      }
+      if (cells[i]->executor.isTargetDestroyed()) {
+        *lock = kj::none;
+        return true;
+      }
+      return false;
+    }();
+    if (!dead) {
+      if (dst != i) {
+        cells[dst] = kj::mv(cells[i]);
+      }
+      ++dst;
+    }
+  }
+  cells.truncate(dst);
+}
+
+}  // namespace
+
+kj::Own<void> AbortSignal::addAbortAction(
+    jsg::Lock& js, kj::Function<void(jsg::Lock&, const kj::Exception&)> action) {
+  // The RAII registration handle. Clearing the cell's slot is the only thing it does, which
+  // makes it safe to drop from any thread; the emptied cell itself is removed from the
+  // signal by a later sweep under the isolate lock.
+  class Registration final {
+   public:
+    Registration(kj::Arc<RegistrationCell> cell): cell(kj::mv(cell)) {}
+    ~Registration() noexcept(false) {
+      *cell->action.lockExclusive() = kj::none;
+    }
+    KJ_DISALLOW_COPY_AND_MOVE(Registration);
+
+   private:
+    kj::Arc<RegistrationCell> cell;
+  };
+
+  if (getNeverAborts()) {
+    return kj::Own<void>();
+  }
+
+  // Abort actions observe aborts, including ones arriving over RPC for a deserialized
+  // signal; this is the single arming point for every native registration path (wrap(),
+  // newCanceler(), and direct callers alike).
+  subscribeToRpcAbort(js);
+
+  auto& ioContext = IoContext::current();
+
+  sweepCells(nativeRegistrations, [](auto& cell) -> auto& { return cell.action; });
+
+  auto cell = kj::arc<RegistrationCell>(ioContext.getCrossContextExecutor(), kj::mv(action));
+  nativeRegistrations.add(cell.addRef());
+  return kj::heap<Registration>(kj::mv(cell));
+}
+
+kj::Own<void> AbortSignal::addAbortAlgorithm(jsg::Lock& js, jsg::Function<void()> algorithm) {
+  // The RAII registration handle. It holds only a weak reference: if the signal is already
+  // gone (or aborted, which empties the algorithm list), unregistration is a no-op.
+  class Registration final {
+   public:
+    Registration(jsg::WeakRef<AbortSignal> signal, uint64_t token)
+        : signal(kj::mv(signal)),
+          token(token) {}
+    ~Registration() noexcept(false) {
+      KJ_IF_SOME(s, signal.tryGet()) {
+        s.removeAbortAlgorithm(token);
+      }
+    }
+    KJ_DISALLOW_COPY_AND_MOVE(Registration);
+
+   private:
+    jsg::WeakRef<AbortSignal> signal;
+    uint64_t token;
+  };
+
+  if (getNeverAborts()) {
+    return kj::Own<void>();
+  }
+
+  subscribeToRpcAbort(js);
+
+  auto token = nextAbortAlgorithmToken++;
+  abortAlgorithms.add(AbortAlgorithm{.token = token, .fn = kj::mv(algorithm)});
+  return kj::heap<Registration>(JSG_THIS_WEAK(js), token);
+}
+
+void AbortSignal::removeAbortAlgorithm(uint64_t token) {
+  // Linear scan-and-shift: the list is short and the remaining entries' order must be
+  // preserved (algorithms run in registration order).
+  for (size_t i = 0; i < abortAlgorithms.size(); i++) {
+    if (abortAlgorithms[i].token == token) {
+      for (size_t j = i; j + 1 < abortAlgorithms.size(); j++) {
+        abortAlgorithms[j] = kj::mv(abortAlgorithms[j + 1]);
+      }
+      abortAlgorithms.removeLast();
+      return;
+    }
+  }
+}
+
+kj::Own<void> AbortSignal::registerPendingCancellation(jsg::Lock& js, ReleasingCanceler& canceler) {
+  // Capturing by reference is safe: the returned handle guarantees the action never runs
+  // once the handle has been destroyed, and holders destroy the handle before the canceler.
+  return addAbortAction(js,
+      [&canceler](jsg::Lock& js, const kj::Exception& exception) { canceler.cancel(exception); });
+}
+
+AbortSignal::Cancellation AbortSignal::newCanceler(jsg::Lock& js) {
+  if (getNeverAborts()) {
+    return {
+      .canceler = kj::heap<ReleasingCanceler>(),
+      .registration = kj::Own<void>(),
+    };
+  }
+
+  if (getAborted(js)) {
+    // Already aborted: hand back a pre-canceled canceler; there is no future abort to hook.
+    auto exception = [&]() -> kj::Exception {
+      KJ_IF_SOME(e, maybeAbortException) {
+        return e.clone();
+      }
+      KJ_IF_SOME(r, deserializePendingReason(js)) {
+        return js.exceptionToKj(r);
+      }
+      KJ_UNREACHABLE;
+    }();
+    return {
+      .canceler = kj::heap<ReleasingCanceler>(kj::mv(exception)),
+      .registration = kj::Own<void>(),
+    };
+  }
+
+  auto canceler = kj::heap<ReleasingCanceler>();
+  auto registration = registerPendingCancellation(js, *canceler);
+  return {
+    .canceler = kj::mv(canceler),
+    .registration = kj::mv(registration),
+  };
+}
+
+void AbortSignal::setAbortState(
+    jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> maybeReason) {
   auto exception = AbortSignal::abortException(js, maybeReason);
   KJ_IF_SOME(r, maybeReason) {
     KJ_SWITCH_ONEOF(r) {
@@ -756,22 +928,146 @@ void AbortSignal::triggerAbort(
   } else {
     reason = js.exceptionToJsValue(exception.clone());
   }
+  maybeAbortException = kj::mv(exception);
+}
 
-  canceler->cancel(kj::mv(exception));
+void AbortSignal::severSources(jsg::Lock& js) {
+  auto sources = kj::mv(sourceSignals);
+  for (auto& weakSource: sources) {
+    KJ_IF_SOME(source, weakSource.tryGet()) {
+      auto& deps = source.dependentSignals;
+      for (size_t i = 0; i < deps.size(); i++) {
+        if (deps[i].get() == this) {
+          for (size_t j = i; j + 1 < deps.size(); j++) {
+            deps[j] = kj::mv(deps[j + 1]);
+          }
+          deps.removeLast();
+          break;
+        }
+      }
+    }
+  }
+}
 
-  // 1. Dispatch to RPC clients
-  if (!rpcClients.empty()) {
-    IoContext& ioContext = IoContext::current();
+void AbortSignal::triggerAbort(
+    jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> maybeReason) {
+  KJ_ASSERT(flag != Flag::NEVER_ABORTS);
+  if (maybeAbortException != kj::none) {
+    return;
+  }
+
+  // Spec "signal abort" steps 1-2: record the abort reason.
+  setAbortState(js, kj::mv(maybeReason));
+
+  // Spec steps 3-4: record the reason on every not-yet-aborted dependent signal NOW — before
+  // any abort steps or events run anywhere — and collect them; their own abort steps run
+  // only after ours complete (step 6). Recording the state as part of collection means a
+  // signal linked more than once (e.g. any([s, s])) fails the not-yet-aborted check on the
+  // second encounter and is collected — and has its abort steps run — only once. Collect
+  // with fresh strong addRef()s rather than by moving the stored refs: the stored refs are
+  // GC-traced, and a ref moved out of its visited home would leave the dependent's wrapper
+  // collectable by any GC that runs during the JS work below (reason derivation and event
+  // dispatch can both run arbitrary JS). Clearing the member also severs the links: an
+  // aborted signal has no further use for its dependents, and any() never links to an
+  // aborted source, so nothing new can arrive.
+  kj::Vector<jsg::Ref<AbortSignal>> dependentsToAbort;
+  if (!dependentSignals.empty()) {
+    auto reasonHandle = KJ_ASSERT_NONNULL(reason).getHandle(js);
+    for (auto& dep: dependentSignals) {
+      if (dep->maybeAbortException == kj::none) {
+        dep->setAbortState(js, kj::OneOf<kj::Exception, jsg::JsValue>(reasonHandle));
+        dependentsToAbort.add(dep.addRef());
+      }
+    }
+    dependentSignals.clear();
+  }
+
+  // Spec step 5: run our own abort steps.
+  runAbortSteps(js);
+
+  // Spec step 6: run each collected dependent's abort steps, unlinking each from any other
+  // sources it still has (those can no longer abort it, nor need they keep it alive).
+  for (auto& dep: dependentsToAbort) {
+    dep->severSources(js);
+    dep->runAbortSteps(js);
+  }
+}
+
+void AbortSignal::runAbortSteps(jsg::Lock& js) {
+  auto& exception = KJ_ASSERT_NONNULL(maybeAbortException);
+
+  // 1. Abort algorithms (spec "run the abort steps", steps 1-2): run each algorithm in
+  //    registration order, then empty the list. The functions are copied out with fresh
+  //    strong addRef()s (same pattern as dispatchEventImpl): the stored ones are GC-traced,
+  //    and an algorithm may itself run JS — and therefore GC — while later entries await
+  //    their turn. Emptying the list first also makes the loop safe against re-entrant
+  //    mutation (e.g. an algorithm's effects dropping another algorithm's registration).
+  if (!abortAlgorithms.empty()) {
+    kj::Vector<jsg::Function<void()>> algorithms;
+    algorithms.reserve(abortAlgorithms.size());
+    for (auto& algorithm: abortAlgorithms) {
+      algorithms.add(algorithm.fn.addRef(js));
+    }
+    abortAlgorithms.clear();
+    for (auto& algorithm: algorithms) {
+      algorithm(js);
+    }
+  }
+
+  // 2. Native cancellations (canceler-wrapped promises and abort actions). Each registration
+  //    runs in the IoContext that created it: synchronously if that context is the current
+  //    one, otherwise delivered on that context's next turn — or dropped, if that context is
+  //    already gone (in which case everything it wanted to cancel died with it). Taking the
+  //    vector up front makes this safe against re-entrant registration.
+  //
+  //    A deferred delivery does not take the action with it: it re-takes the cell's slot on
+  //    arrival in the owning context, so that a consumer (and the references its action
+  //    captures) that went away in the meantime reliably turns the delivery into a no-op.
+  auto cells = kj::mv(nativeRegistrations);
+  for (auto& cell: cells) {
+    if (cell->executor.isCurrent()) {
+      KJ_IF_SOME(action, take(cell->action)) {
+        action(js, exception);
+      }
+    } else {
+      cell->executor.tryExecute(
+          [cell = cell.addRef(), ex = exception.clone()](jsg::Lock& js) mutable {
+        KJ_IF_SOME(action, take(cell->action)) {
+          action(js, ex);
+        }
+      });
+    }
+  }
+
+  // 3. Dispatch to RPC clients, with the same per-registration routing and re-take.
+  if (!rpcRegistrations.empty()) {
+    auto regs = kj::mv(rpcRegistrations);
+
+    // Serialize the reason once; each clone gets its own copy of the bytes.
     jsg::Serializer ser(js);
     KJ_IF_SOME(r, reason) {
       ser.write(js, r.getHandle(js));
     }
-
     auto released = ser.release();
-    ioContext.addTask(sendToRpc(kj::mv(released.data)));
+
+    for (auto& reg: regs) {
+      auto bytes = kj::heapArray<kj::byte>(released.data);
+      if (reg->executor.isCurrent()) {
+        KJ_IF_SOME(client, take(reg->client)) {
+          sendAbortToRpc(kj::mv(client), kj::mv(bytes));
+        }
+      } else {
+        reg->executor.tryExecute(
+            [reg = reg.addRef(), bytes = kj::mv(bytes)](jsg::Lock& js) mutable {
+          KJ_IF_SOME(client, take(reg->client)) {
+            sendAbortToRpc(kj::mv(client), kj::mv(bytes));
+          }
+        });
+      }
+    }
   }
 
-  // 2. Dispatch to local listeners
+  // 4. Dispatch to local listeners
 
   // This is questionable only because it goes against the spec but it does help prevent
   // memory leaks. Once the abort signal has been triggered, there's really nothing else
@@ -781,7 +1077,10 @@ void AbortSignal::triggerAbort(
   // of the spec here should be just fine.
   KJ_DEFER(removeAllHandlers());
 
-  dispatchEventImpl(js, js.alloc<Event>(kAbortEvent));
+  // Per spec, "signal abort" cannot throw: listener exceptions are reported, and the
+  // remaining listeners (and, for a source signal, the dependents' abort steps) still run.
+  dispatchEventImpl(js, js.alloc<Event>(kAbortEvent, Event::Init{}, Trusted::YES),
+      effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT));
 }
 
 void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
@@ -795,13 +1094,12 @@ void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   JSG_REQUIRE(
       externalHandler != nullptr, DOMDataCloneError, "AbortSignal can only be serialized for RPC.");
 
-  serializer.writeRawUint32(static_cast<uint>(canceler->isCanceled()));
+  serializer.writeRawUint32(static_cast<uint>(getAborted(js)));
   serializer.writeRawUint32(static_cast<uint>(flag));
-  KJ_IF_SOME(r, reason) {
-    serializer.write(js, r.getHandle(js));
-  } else {
-    serializer.write(js, js.undefined());
-  }
+  // getReason() falls back to a pending (RPC-received but not yet triggered) reason, so a
+  // deserialized signal re-serialized before its receiving request processed the abort still
+  // carries the reason along; it returns undefined when there is none.
+  serializer.write(js, getReason(js));
 
   if (getAborted(js) || getNeverAborts()) {
     // This AbortSignal cannot be triggered in the future. No stream is needed.
@@ -822,9 +1120,13 @@ void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   }();
 
   auto& ioContext = IoContext::current();
+
+  sweepCells(rpcRegistrations, [](auto& cell) -> auto& { return cell.client; });
+
   // Keep track of every AbortSignal cloned from this one.
-  // If this->triggerAbort(...) is called, each rpcClient will be informed.
-  rpcClients.add(ioContext.addObject(kj::heap<AbortTriggerRpcClient>(kj::mv(triggerCap))));
+  // If this->triggerAbort(...) is called, each clone will be informed.
+  rpcRegistrations.add(kj::arc<RpcRegistration>(ioContext.getCrossContextExecutor(),
+      ioContext.addObject(kj::heap<AbortTriggerRpcClient>(kj::mv(triggerCap)))));
 }
 
 jsg::Ref<AbortSignal> AbortSignal::deserialize(
@@ -859,38 +1161,37 @@ jsg::Ref<AbortSignal> AbortSignal::deserialize(
 
   auto resolvedSignal = ioctx.getExternalPusher()->unwrapAbortSignal(reader.getAbortSignal());
 
+  signal->rpcReceiverContext = ioctx.getCrossContextExecutor();
   signal->rpcAbortPromise = ioctx.addObject(kj::heap(kj::mv(resolvedSignal.signal)));
-  signal->pendingReason = ioctx.addObject(kj::mv(resolvedSignal.reason));
+  signal->pendingReason = kj::mv(resolvedSignal.reason);
 
   return signal;
 }
 
-void AbortSignal::skipReleaseForTest() {
-  for (auto& cap: rpcClients) {
-    cap->skipReleaseForTest = true;
-  }
-
-  rpcClients.clear();
+int AbortSignal::getNativeRegistrationCountForTest() {
+  return static_cast<int>(nativeRegistrations.size() + rpcRegistrations.size());
 }
 
-kj::Promise<void> AbortSignal::sendToRpc(kj::Array<kj::byte>&& reason) {
-  auto& ioContext = IoContext::current();
-
-  KJ_IF_SOME(outputLocks, ioContext.waitForOutputLocksIfNecessary()) {
-    co_await outputLocks;
+void AbortSignal::skipReleaseForTest() {
+  for (auto& reg: rpcRegistrations) {
+    KJ_IF_SOME(client, take(reg->client)) {
+      client->skipReleaseForTest = true;
+    }
   }
 
-  kj::Vector<kj::Promise<void>> promises;
-  for (auto& cap: rpcClients) {
-    promises.add(cap->abort(reason));
-  }
+  rpcRegistrations.clear();
+}
 
-  co_await kj::joinPromises(promises.releaseAsArray());
+bool AbortSignal::isRpcReceiverContextCurrent() {
+  KJ_IF_SOME(executor, rpcReceiverContext) {
+    return executor.isCurrent();
+  }
+  return false;
 }
 
 bool AbortSignal::hasPendingReason() {
   KJ_IF_SOME(pr, pendingReason) {
-    return *pr != nullptr;
+    return *pr->value.lockShared() != nullptr;
   }
 
   return false;
@@ -898,20 +1199,37 @@ bool AbortSignal::hasPendingReason() {
 
 kj::Maybe<jsg::JsValue> AbortSignal::deserializePendingReason(jsg::Lock& js) {
   KJ_IF_SOME(pr, pendingReason) {
-    if (*pr == nullptr) {
-      // pendingReason not initialized. This means abort wasn't yet triggered
-      return kj::none;
-    }
-
-    KJ_SWITCH_ONEOF(*pr) {
-      KJ_CASE_ONEOF(v8Serialized, kj::Array<kj::byte>) {
-        jsg::Deserializer des(js, v8Serialized);
-        return kj::some(des.readValue(js));
+    // Copy the pending state out under the mutex; the JS work below then runs without
+    // holding it. (The box is written at most once, by the receiving request; it may be read
+    // from any context.)
+    auto pending = [&]() -> kj::Maybe<ExternalPusherImpl::PendingAbortReason> {
+      auto lock = pr->value.lockShared();
+      if (*lock == nullptr) {
+        // pendingReason not initialized. This means abort wasn't yet triggered.
+        return kj::none;
       }
-
-      KJ_CASE_ONEOF(exception, kj::Exception) {
-        return kj::some(js.exceptionToJsValue(exception.clone()).getHandle(js));
+      KJ_SWITCH_ONEOF(*lock) {
+        KJ_CASE_ONEOF(v8Serialized, kj::Array<kj::byte>) {
+          return ExternalPusherImpl::PendingAbortReason(kj::heapArray<kj::byte>(v8Serialized));
+        }
+        KJ_CASE_ONEOF(exception, kj::Exception) {
+          return ExternalPusherImpl::PendingAbortReason(exception.clone());
+        }
       }
+      KJ_UNREACHABLE;
+    }();
+
+    KJ_IF_SOME(p, pending) {
+      KJ_SWITCH_ONEOF(p) {
+        KJ_CASE_ONEOF(v8Serialized, kj::Array<kj::byte>) {
+          jsg::Deserializer des(js, v8Serialized);
+          return kj::some(des.readValue(js));
+        }
+        KJ_CASE_ONEOF(exception, kj::Exception) {
+          return kj::some(js.exceptionToJsValue(kj::mv(exception)).getHandle(js));
+        }
+      }
+      KJ_UNREACHABLE;
     }
   }
 
@@ -922,6 +1240,29 @@ void AbortSignal::subscribeToRpcAbort(jsg::Lock& js) {
   // For an AbortSignal received over RPC, the first time someone registers an event on the signal,
   // we want to arrange to awaitIo() for the underlying RPC signal. If no one is actually listening,
   // though, we don't want to awaitIo() since it blocks hibernation in actors.
+
+  if (rpcAbortPromise == kj::none) {
+    // Not an RPC-received signal, or the subscription is already armed.
+    return;
+  }
+
+  if (!isRpcReceiverContextCurrent()) {
+    // Only the request that deserialized this signal can arm the subscription — it owns the
+    // underlying promise — but a signal retained across requests may see registrations from
+    // other contexts. Ask the receiving context to arm on its next turn. The queued action
+    // captures only a WeakRef, which is safe to destroy from any thread should that context
+    // be torn down without draining its queue. If the context is already gone, the request
+    // is dropped: no delivery is possible anymore, though the abort itself stays observable
+    // through the pending-reason box (see docs/reference/detail/abort-signal.md).
+    KJ_IF_SOME(executor, rpcReceiverContext) {
+      executor.tryExecute([weakSelf = JSG_THIS_WEAK(js)](jsg::Lock& js) {
+        KJ_IF_SOME(self, weakSelf.tryGet()) {
+          self.subscribeToRpcAbort(js);
+        }
+      });
+    }
+    return;
+  }
 
   KJ_IF_SOME(promise, rpcAbortPromise) {
     IoContext::current().awaitIo(js, kj::mv(*promise), [self = JSG_THIS](jsg::Lock& js) mutable {
@@ -949,35 +1290,20 @@ void AbortController::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReas
 }
 
 void EventTarget::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(maybeListenerCallback);
   for (auto& entry: typeMap) {
     for (auto& handler: entry.value.handlers) {
-      KJ_SWITCH_ONEOF(handler->handler) {
-        KJ_CASE_ONEOF(js, EventHandler::JavaScriptHandler) {
-          visitor.visit(js);
-        }
-        KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
-          // Note that even though `native.handler` is a non-owned reference, we still need to
-          // visit it. This is because we are the ones that will invoke the handles contained
-          // in the native handler if it ever fires. The actual owner of the C++ NativeHandler
-          // object doesn't ever access the JS objects it contains; the ownership relationship
-          // exists only for RAII reasons, so that the NativeHandler is automatically unregistered
-          // if the owner is destroyed.
-          //
-          // You might say: "Well, it's fine if the owner is responsible for visiting it, because
-          // if the owner is no longer reachable then it will be destroyed and it will unregister
-          // itself from here!" That doesn't quite work: V8's GC doesn't necessarily destroy
-          // objects immediately when they become unreachable. However, it is no longer safe to
-          // access an object once it is unreachable. Therefore, if we left it to the
-          // NativeHandler's owner to visit the object, it's possible that the object becomes
-          // poison some time before it is actually unregistered.
-          //
-          // Put another way, this is a very weird case where the C++ ownership and the JavaScript
-          // ownership are different. We need GC visitation to follow the JavaScript ownership
-          // graph.
-          visitor.visit(native.handler);
-        }
+      visitor.visit(*handler);
+    }
+  }
+  for (auto& entry: eventHandlerAttributes) {
+    KJ_IF_SOME(handler, entry.value.handler) {
+      visitor.visit(handler.value);
+      KJ_IF_SOME(fn, handler.fn) {
+        visitor.visit(fn);
       }
+    }
+    KJ_IF_SOME(identity, entry.value.listenerIdentity) {
+      visitor.visit(identity);
     }
   }
 }
@@ -1058,32 +1384,15 @@ CustomEvent::CustomEventInit::operator Event::Init() {
   };
 }
 
-size_t EventTarget::EventHandler::JavaScriptHandler::jsgGetMemorySelfSize() const {
-  return sizeof(JavaScriptHandler);
-}
-
-void EventTarget::EventHandler::JavaScriptHandler::jsgGetMemoryInfo(
-    jsg::MemoryTracker& tracker) const {
-  tracker.trackField("identity", identity);
-  tracker.trackField("callback", callback);
-  if (abortHandler != kj::none) {
-    tracker.trackFieldWithSize(
-        "abortHandler", sizeof(kj::Own<NativeHandler>) + sizeof(NativeHandler));
-  }
-}
-
 size_t EventTarget::EventHandler::jsgGetMemorySelfSize() const {
   return sizeof(EventHandler);
 }
 
 void EventTarget::EventHandler::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  KJ_SWITCH_ONEOF(handler) {
-    KJ_CASE_ONEOF(js, JavaScriptHandler) {
-      tracker.trackField("js", js);
-    }
-    KJ_CASE_ONEOF(native, NativeHandlerRef) {
-      tracker.trackFieldWithSize("native", sizeof(NativeHandlerRef));
-    }
+  tracker.trackField("identity", identity);
+  tracker.trackField("callback", callback);
+  if (abortHandler != kj::none) {
+    tracker.trackFieldWithSize("abortHandler", sizeof(kj::Own<void>));
   }
 }
 
@@ -1099,6 +1408,8 @@ void EventTarget::EventHandlerSet::jsgGetMemoryInfo(jsg::MemoryTracker& tracker)
 
 void EventTarget::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("typeMap", typeMap);
+  tracker.trackFieldWithSize("eventHandlerAttributes",
+      eventHandlerAttributes.size() * sizeof(decltype(eventHandlerAttributes)::Entry));
 }
 
 }  // namespace workerd::api

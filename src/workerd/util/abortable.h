@@ -12,8 +12,14 @@ namespace workerd {
 template <typename T>
 class AbortableImpl final {
  public:
-  AbortableImpl(kj::Own<T> inner, RefcountedCanceler& canceler)
-      : canceler(kj::addRef(canceler)),
+  // In addition to the canceler itself, the caller may pass an opaque registration handle
+  // that keeps the canceler hooked up to whatever triggers it (e.g. an AbortSignal); it is
+  // held only so that it is dropped when this object is destroyed.
+  AbortableImpl(kj::Own<T> inner,
+      kj::Own<ReleasingCanceler> canceler,
+      kj::Own<void> cancelerRegistration = kj::Own<void>())
+      : canceler(kj::mv(canceler)),
+        cancelerRegistration(kj::mv(cancelerRegistration)),
         inner(kj::mv(inner)),
         onCancel(*(this->canceler), [this]() { this->inner = kj::none; }) {}
 
@@ -42,23 +48,28 @@ class AbortableImpl final {
   }
 
  private:
-  kj::Own<RefcountedCanceler> canceler;
+  kj::Own<ReleasingCanceler> canceler;
+  kj::Own<void> cancelerRegistration;
   kj::Maybe<kj::Own<T>> inner;
-  RefcountedCanceler::Listener onCancel;
+  // Must be declared after `canceler` so that the listener unregisters itself while the
+  // canceler is still alive.
+  ReleasingCanceler::Listener onCancel;
 };
 
-// An InputStream that can be disconnected in response to RefcountedCanceler.
+// An InputStream that can be disconnected in response to ReleasingCanceler.
 // This is similar to NeuterableInputStream in global-scope.c++ but uses an
 // external kj::Canceler to trigger the disconnect.
 // This is currently only used in fetch() requests that use an AbortSignal.
-// The AbortableInputStream is created using a RefcountedCanceler,
+// The AbortableInputStream is created using a ReleasingCanceler,
 // which will be triggered when the AbortSignal is triggered.
 // TODO(later): It would be good to see if both this and NeuterableInputStream
 // could be combined into a single utility.
 class AbortableInputStream final: public kj::AsyncInputStream, public kj::Refcounted {
  public:
-  AbortableInputStream(kj::Own<kj::AsyncInputStream> inner, RefcountedCanceler& canceler)
-      : impl(kj::mv(inner), canceler) {}
+  AbortableInputStream(kj::Own<kj::AsyncInputStream> inner,
+      kj::Own<ReleasingCanceler> canceler,
+      kj::Own<void> cancelerRegistration = kj::Own<void>())
+      : impl(kj::mv(inner), kj::mv(canceler), kj::mv(cancelerRegistration)) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     kj::Promise<size_t> (kj::AsyncInputStream::*tryRead)(void*, size_t, size_t) =
@@ -78,14 +89,16 @@ class AbortableInputStream final: public kj::AsyncInputStream, public kj::Refcou
   AbortableImpl<kj::AsyncInputStream> impl;
 };
 
-// A WebSocket wrapper that can be disconnected in response to a RefcountedCanceler.
+// A WebSocket wrapper that can be disconnected in response to a ReleasingCanceler.
 // This is currently only used when opening a WebSocket with a fetch() request that
 // is using an AbortSignal. The AbortableWebSocket is created using the AbortSignal's
-// RefcountedCanceler, which will be triggered when the AbortSignal is triggered.
+// ReleasingCanceler, which will be triggered when the AbortSignal is triggered.
 class AbortableWebSocket final: public kj::WebSocket, public kj::Refcounted {
  public:
-  AbortableWebSocket(kj::Own<kj::WebSocket> inner, RefcountedCanceler& canceler)
-      : impl(kj::mv(inner), canceler) {}
+  AbortableWebSocket(kj::Own<kj::WebSocket> inner,
+      kj::Own<ReleasingCanceler> canceler,
+      kj::Own<void> cancelerRegistration = kj::Own<void>())
+      : impl(kj::mv(inner), kj::mv(canceler), kj::mv(cancelerRegistration)) {}
 
   kj::Promise<void> send(kj::ArrayPtr<const kj::byte> message) override {
     return impl.wrap(

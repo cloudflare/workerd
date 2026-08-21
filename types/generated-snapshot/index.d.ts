@@ -1666,6 +1666,9 @@ declare class ErrorEvent extends Event {
   get error(): any;
 }
 interface ErrorEventErrorEventInit {
+  bubbles?: boolean;
+  cancelable?: boolean;
+  composed?: boolean;
   message?: string;
   filename?: string;
   lineno?: number;
@@ -1678,7 +1681,7 @@ interface ErrorEventErrorEventInit {
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent)
  */
 declare class MessageEvent extends Event {
-  constructor(type: string, initializer: MessageEventInit);
+  constructor(type: string, initializer?: MessageEventInit);
   /**
    * The **`data`** read-only property of the MessageEvent interface represents the data sent by the message emitter.
    *
@@ -1711,7 +1714,14 @@ declare class MessageEvent extends Event {
   readonly ports: MessagePort[];
 }
 interface MessageEventInit {
-  data: ArrayBuffer | string;
+  bubbles?: boolean;
+  cancelable?: boolean;
+  composed?: boolean;
+  data?: any;
+  origin?: string;
+  lastEventId?: string;
+  source?: MessagePort;
+  ports?: MessagePort[];
 }
 /**
  * The **`PromiseRejectionEvent`** interface represents events which are sent to the global script context when JavaScript Promises are rejected. These events are particularly useful for telemetry and debugging purposes.
@@ -3728,6 +3738,9 @@ declare class CloseEvent extends Event {
   readonly wasClean: boolean;
 }
 interface CloseEventInit {
+  bubbles?: boolean;
+  cancelable?: boolean;
+  composed?: boolean;
   code?: number;
   reason?: string;
   wasClean?: boolean;
