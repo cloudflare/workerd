@@ -145,8 +145,40 @@ struct ReplayState {
   uint requestCount = 0;
   uint webSocketRequestCount = 0;
   uint retryCount = 0;
+  uint observedRetryCount = 0;
+  uint observedOutcomeCounts[static_cast<size_t>(ActorRetryOutcome::COUNT)] = {};
   kj::Maybe<DeterministicTimerChannel&> timerChannel;
 };
+
+class RetryRecordingObserver final: public RequestObserver {
+ public:
+  explicit RetryRecordingObserver(ReplayState& state): state(state) {}
+
+  void recordActorRetry(ActorRetryCallType callType) override {
+    KJ_EXPECT(callType == ActorRetryCallType::FETCH);
+    ++state.observedRetryCount;
+  }
+
+  void recordActorRetryOutcome(ActorRetryCallType callType, ActorRetryOutcome outcome) override {
+    KJ_EXPECT(callType == ActorRetryCallType::FETCH);
+    ++state.observedOutcomeCounts[static_cast<size_t>(outcome)];
+  }
+
+ private:
+  ReplayState& state;
+};
+
+uint outcomeCount(const ReplayState& state, ActorRetryOutcome outcome) {
+  return state.observedOutcomeCounts[static_cast<size_t>(outcome)];
+}
+
+uint totalOutcomeCount(const ReplayState& state) {
+  uint result = 0;
+  for (auto count: state.observedOutcomeCounts) {
+    result += count;
+  }
+  return result;
+}
 
 class ReplayFetchTarget final: public WorkerInterface {
  public:
@@ -230,7 +262,7 @@ class ReplayOutgoingFactory final: public Fetcher::OutgoingFactory {
   ReplayOutgoingFactory(ReplayState& state): state(state) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String>) override {
-    KJ_FAIL_ASSERT("replay tests should always supply actor retry metadata");
+    return kj::heap<ReplayFetchTarget>(state);
   }
 
   bool supportsActorFetchRetries() const override {
@@ -261,10 +293,16 @@ enum class ActorFetchKind {
   WEB_SOCKET,
 };
 
+enum class UseStreamingBody {
+  NO,
+  YES,
+};
+
 kj::Maybe<kj::Exception> runActorFetch(ReplayState& state,
     RetryEnforcement enforcement,
     kj::Maybe<kj::StringPtr> body,
-    ActorFetchKind kind) {
+    ActorFetchKind kind,
+    UseStreamingBody streamingBody = UseStreamingBody::NO) {
   kj::TimerImpl timer(kj::origin<kj::TimePoint>());
   DeterministicTimerChannel timerChannel(timer);
   state.timerChannel = timerChannel;
@@ -274,6 +312,8 @@ kj::Maybe<kj::Exception> runActorFetch(ReplayState& state,
         [&](TimerChannel&) -> kj::Rc<IoChannelFactory> {
     return kj::rc<TestFixture::DummyIoChannelFactory>(timerChannel);
   }),
+    .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
+        [&]() -> kj::Own<RequestObserver> { return kj::refcounted<RetryRecordingObserver>(state); }),
   });
   if (enforcement == RetryEnforcement::ENABLED) {
     util::Autogate::initAutogateNamesForTest(
@@ -293,6 +333,11 @@ kj::Maybe<kj::Exception> runActorFetch(ReplayState& state,
     KJ_IF_SOME(value, body) {
       init.method = kj::str("POST");
       init.body = kj::Maybe<Body::Initializer>(kj::str(value));
+    }
+    if (streamingBody == UseStreamingBody::YES) {
+      init.method = kj::str("POST");
+      init.body = kj::Maybe<Body::Initializer>(
+          JsReadableStream::create(env.js, env.context, kj::heap<TestStreamSource>()));
     }
     if (kind == ActorFetchKind::WEB_SOCKET) {
       jsg::Dict<kj::String, kj::String> headers;
@@ -509,6 +554,9 @@ KJ_TEST("actor fetch updates retry metadata and rewinds the body") {
   KJ_ASSERT(state.metadata.size() == 4);
   KJ_EXPECT(state.requestCount == 4);
   KJ_EXPECT(state.retryCount == 3);
+  KJ_EXPECT(state.observedRetryCount == 3);
+  KJ_EXPECT(outcomeCount(state, ActorRetryOutcome::RECOVERED) == 1);
+  KJ_EXPECT(totalOutcomeCount(state) == 1);
   KJ_EXPECT(state.metadata[0].nonce != state.metadata[1].nonce);
   KJ_EXPECT(state.metadata[1].nonce == state.metadata[2].nonce);
   KJ_EXPECT(state.metadata[1].nonce == state.metadata[3].nonce);
@@ -529,6 +577,33 @@ KJ_TEST("actor fetch does not retry when enforcement is disabled") {
       runActorFetch(state, RetryEnforcement::DISABLED, kj::none, ActorFetchKind::HTTP) != kj::none);
   KJ_EXPECT(state.requestCount == 1);
   KJ_EXPECT(state.retryCount == 0);
+  KJ_EXPECT(state.observedRetryCount == 0);
+  KJ_EXPECT(outcomeCount(state, ActorRetryOutcome::UNABLE_TO_RETRY) == 1);
+  KJ_EXPECT(totalOutcomeCount(state) == 1);
+}
+
+KJ_TEST("actor fetch records a claim rejection when enforcement is disabled") {
+  ReplayState state{.failures = kj::arr(ReplayFailure::CLAIM_REJECTED)};
+
+  KJ_EXPECT_LOG(ERROR, "actor retry claim rejected");
+  KJ_EXPECT(
+      runActorFetch(state, RetryEnforcement::DISABLED, kj::none, ActorFetchKind::HTTP) != kj::none);
+  KJ_EXPECT(state.requestCount == 1);
+  KJ_EXPECT(state.observedRetryCount == 0);
+  KJ_EXPECT(outcomeCount(state, ActorRetryOutcome::UNABLE_TO_RETRY) == 1);
+  KJ_EXPECT(totalOutcomeCount(state) == 1);
+}
+
+KJ_TEST("actor fetch records a non-rewindable disconnect as unable to retry") {
+  ReplayState state{.failures = kj::arr(ReplayFailure::AMBIGUOUS)};
+
+  KJ_EXPECT(runActorFetch(state, RetryEnforcement::ENABLED, kj::none, ActorFetchKind::HTTP,
+                UseStreamingBody::YES) != kj::none);
+  KJ_EXPECT(state.requestCount == 1);
+  KJ_EXPECT(state.metadata.empty());
+  KJ_EXPECT(state.observedRetryCount == 0);
+  KJ_EXPECT(outcomeCount(state, ActorRetryOutcome::UNABLE_TO_RETRY) == 1);
+  KJ_EXPECT(totalOutcomeCount(state) == 1);
 }
 
 KJ_TEST("actor fetch does not retry a delivered disconnect") {
@@ -538,6 +613,7 @@ KJ_TEST("actor fetch does not retry a delivered disconnect") {
       runActorFetch(state, RetryEnforcement::ENABLED, kj::none, ActorFetchKind::HTTP) != kj::none);
   KJ_EXPECT(state.requestCount == 1);
   KJ_EXPECT(state.retryCount == 0);
+  KJ_EXPECT(outcomeCount(state, ActorRetryOutcome::UNABLE_TO_RETRY) == 1);
 }
 
 KJ_TEST("actor fetch stops after a retry claim rejection") {
@@ -551,6 +627,9 @@ KJ_TEST("actor fetch stops after a retry claim rejection") {
   KJ_EXPECT(!failure.getDescription().contains("claim rejected"), failure);
   KJ_EXPECT(state.requestCount == 2);
   KJ_EXPECT(state.retryCount == 1);
+  KJ_EXPECT(state.observedRetryCount == 1);
+  KJ_EXPECT(outcomeCount(state, ActorRetryOutcome::UNABLE_TO_RETRY) == 1);
+  KJ_EXPECT(totalOutcomeCount(state) == 1);
 }
 
 KJ_TEST("actor fetch normalizes an initial retry claim rejection") {
@@ -562,6 +641,7 @@ KJ_TEST("actor fetch normalizes an initial retry claim rejection") {
   KJ_EXPECT(!failure.getDescription().contains("claim rejected"), failure);
   KJ_EXPECT(state.requestCount == 1);
   KJ_EXPECT(state.retryCount == 0);
+  KJ_EXPECT(outcomeCount(state, ActorRetryOutcome::UNABLE_TO_RETRY) == 1);
 }
 
 KJ_TEST("actor WebSocket fetch retries a disconnected handshake") {
@@ -575,6 +655,8 @@ KJ_TEST("actor WebSocket fetch retries a disconnected handshake") {
   KJ_EXPECT(state.requestCount == 2);
   KJ_EXPECT(state.webSocketRequestCount == 2);
   KJ_EXPECT(state.retryCount == 1);
+  KJ_EXPECT(state.observedRetryCount == 1);
+  KJ_EXPECT(outcomeCount(state, ActorRetryOutcome::RECOVERED) == 1);
   KJ_EXPECT(state.acceptedWebSocket != kj::none);
 }
 
@@ -585,6 +667,8 @@ KJ_TEST("actor fetch honors an abort before retrying") {
     .autogates = kj::arr<kj::StringPtr>(
         "durable-object-retries-fetch"_kj, "durable-object-retries-fetch-retry-requests"_kj),
     .useRealTimers = true,
+    .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
+        [&]() -> kj::Own<RequestObserver> { return kj::refcounted<RetryRecordingObserver>(state); }),
   });
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
@@ -607,6 +691,9 @@ KJ_TEST("actor fetch honors an abort before retrying") {
   KJ_EXPECT(exception.getDescription().contains("The operation was aborted"), exception);
   KJ_EXPECT(state.requestCount == 1);
   KJ_EXPECT(state.retryCount == 0);
+  KJ_EXPECT(state.observedRetryCount == 0);
+  KJ_EXPECT(outcomeCount(state, ActorRetryOutcome::OTHER) == 1);
+  KJ_EXPECT(totalOutcomeCount(state) == 1);
 }
 
 KJ_TEST("actor fetch stops after five attempts") {
@@ -619,6 +706,9 @@ KJ_TEST("actor fetch stops after five attempts") {
       runActorFetch(state, RetryEnforcement::ENABLED, kj::none, ActorFetchKind::HTTP) != kj::none);
   KJ_EXPECT(state.requestCount == 5);
   KJ_EXPECT(state.retryCount == 4);
+  KJ_EXPECT(state.observedRetryCount == 4);
+  KJ_EXPECT(outcomeCount(state, ActorRetryOutcome::RETRIES_EXHAUSTED) == 1);
+  KJ_EXPECT(totalOutcomeCount(state) == 1);
 }
 
 KJ_TEST("actor fetch allows an in-flight retry to finish after the start budget") {
@@ -630,6 +720,8 @@ KJ_TEST("actor fetch allows an in-flight retry to finish after the start budget"
       runActorFetch(state, RetryEnforcement::ENABLED, kj::none, ActorFetchKind::HTTP) == kj::none);
   KJ_EXPECT(state.requestCount == 2);
   KJ_EXPECT(state.retryCount == 1);
+  KJ_EXPECT(state.observedRetryCount == 1);
+  KJ_EXPECT(outcomeCount(state, ActorRetryOutcome::RECOVERED) == 1);
 }
 
 KJ_TEST("actor fetch does not start a retry after the start budget") {
@@ -641,6 +733,9 @@ KJ_TEST("actor fetch does not start a retry after the start budget") {
       runActorFetch(state, RetryEnforcement::ENABLED, kj::none, ActorFetchKind::HTTP) != kj::none);
   KJ_EXPECT(state.requestCount == 1);
   KJ_EXPECT(state.retryCount == 1);
+  KJ_EXPECT(state.observedRetryCount == 0);
+  KJ_EXPECT(outcomeCount(state, ActorRetryOutcome::RETRIES_EXHAUSTED) == 1);
+  KJ_EXPECT(totalOutcomeCount(state) == 1);
 }
 
 KJ_TEST("replica actor fetch does not retry a disconnected primary channel") {
