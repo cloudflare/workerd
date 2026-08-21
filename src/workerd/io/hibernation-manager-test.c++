@@ -1222,5 +1222,40 @@ KJ_TEST("HibernationManager: hibernated auto-response copies buffer before suspe
   fixture.drainAndDestroy(kj::mv(request));
 }
 
+KJ_TEST("HibernationManager: GC collects WebSocket with in-flight auto-response") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("gc-in-flight-autoresp")));
+  auto hm = makeTestHm(fixture, "ping"_kj, "pong"_kj);
+  auto request = fixture.newIncomingRequest();
+
+  // The shared helper intentionally leaks a ref. This test instead creates the V8 wrapper that
+  // js.alloc() omits so GC owns the last reference after hibernation.
+  kj::Own<kj::WebSocket> end1;
+  jsg::WeakRef<api::WebSocket> weakApiWs = nullptr;
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto pipe = kj::newWebSocketPipe();
+    end1 = kj::mv(pipe.ends[0]);
+    auto apiWs = env.js.alloc<api::WebSocket>(env.js, kj::mv(pipe.ends[1]));
+    weakApiWs = apiWs.getWeakRef(env.js);
+    auto& handler = KJ_ASSERT_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<api::WebSocket>>());
+    auto wrapper KJ_UNUSED = handler.wrap(env.js, apiWs.addRef());
+    hm->acceptWebSocket(kj::mv(apiWs), nullptr);
+  });
+
+  end1->send("ping"_kj).wait(fixture.getWaitScope());
+  fixture.pollEventLoop();
+  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
+  KJ_ASSERT(weakApiWs.isAlive());
+
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    env.isolate->LowMemoryNotification();
+    KJ_ASSERT(!weakApiWs.isAlive());
+  });
+
+  end1 = nullptr;
+  fixture.pollEventLoop();
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
 }  // namespace
 }  // namespace workerd
