@@ -1,0 +1,19 @@
+patches/v8/0036-Fix-ExtendedMap-layout-on-Windows.patch
+  s_aa398df27f89dc::t_b9490aefdf4db3 19-26,81,84,99-116,132,152-169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4afe8900b493bd4a271addc73b0e3ed0ff2a53d9",
+  "prompts": {},
+  "sessions": {
+    "s_aa398df27f89dc": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fea68303dffegojDfCHrub7G9V",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Felix Hanau <felix@cloudflare.com>"
+    }
+  }
+}

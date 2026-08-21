@@ -36,11 +36,27 @@ src/workerd/api/global-scope.c++
   "base_commit_sha": "c621d139ae90f3075f0fae2ad2f6a01db04ca3ea",
   "prompts": {},
   "sessions": {
+    "s_68959d5fe8e08d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ff07ec157ffeC7x2Y13Ir1AaVS",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
     "s_9496b046a1a364": {
       "agent_id": {
         "tool": "opencode",
         "id": "ses_0046a268affe2zLQ3xwXN6au9J",
         "model": "@cf/moonshotai/kimi-k2.6"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_ea3b91cafb67a9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe6b74983ffe3TTRPQnP5WRUxK",
+        "model": "gpt-5.6-sol"
       },
       "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
     }
