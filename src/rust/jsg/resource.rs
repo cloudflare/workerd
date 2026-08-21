@@ -176,11 +176,11 @@ impl<R: Resource + 'static> FromJS for Rc<R> {
         let type_name = value.type_of();
 
         let mut wrappable = v8::WrappableRc::from_js(lock.isolate(), value).ok_or_else(|| {
-            Error::new_type_error(format!("expected {}, got {type_name}", R::class_name()))
+            Error::new_type_mismatch_error(format!("expected {}, got {type_name}", R::class_name()))
         })?;
 
         let resource_ptr = wrappable.resolve_resource::<R>().ok_or_else(|| {
-            Error::new_type_error(format!("expected {}, got {type_name}", R::class_name()))
+            Error::new_type_mismatch_error(format!("expected {}, got {type_name}", R::class_name()))
         })?;
 
         // SAFETY: The pointer came from std::rc::Rc::into_raw in Rc::new(), and the
