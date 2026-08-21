@@ -1,36 +1,22 @@
-load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
-# C++ shim exposing the ICU `ucnv_*` primitives and the simdutf conversion
-# functions that `workerd::api::node::i18n::transcode` uses, so the Rust
-# implementation of `transcode` (in `lib.rs` and friends) calls the exact same
-# codecs as the C++ path in `src/workerd/api/node/i18n.c++` instead of
-# reimplementing them. ICU comes from `@workerd-v8//:v8`, the seam every other
-# workerd target uses for it; depending on the ICU repository directly breaks
-# builds that substitute their own V8/ICU for that module.
-wd_cc_library(
-    name = "shim",
-    srcs = ["shim.c++"],
-    hdrs = ["shim.h"],
-    implementation_deps = [
-        "@simdutf",
-        "@workerd-v8//:v8",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//src/rust/cxx:core",
-        "@capnp-cpp//src/kj",
-    ],
-)
-
+# The bridge in `lib.rs` binds ICU's `ucnv_*` and simdutf's conversion
+# functions directly, so the crate needs their headers to generate the bridge
+# and their symbols at link time. ICU comes from `@workerd-v8//:v8`, the seam
+# every other workerd target uses for it; depending on the ICU repository
+# directly breaks builds that substitute their own V8/ICU for that module.
 wd_rust_crate(
     name = "i18n",
     cxx_bridge_deps = [
-        ":shim",
         "//src/rust/jsg",
+        "@simdutf",
+        "@workerd-v8//:v8",
     ],
     cxx_bridge_src = "lib.rs",
-    link_deps = [":shim"],
+    link_deps = [
+        "@simdutf",
+        "@workerd-v8//:v8",
+    ],
     test_deps = ["//src/rust/jsg-test"],
     visibility = ["//visibility:public"],
     deps = [

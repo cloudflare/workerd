@@ -7,16 +7,25 @@
 //! `transcode()`. Selected at runtime by the `NODEJS_I18N_RUST` autogate; when
 //! the gate is off, the C++ implementation is used instead. The two paths are
 //! byte-for-byte and error-message identical by construction: [`dispatch`]
-//! ports the C++ dispatch/sizing/truncation logic to Rust, while [`shim`]
-//! calls the exact same ICU and simdutf primitives the C++ path uses, through
-//! the C++ shim in `shim.h` / `shim.c++`.
+//! ports the C++ dispatch/sizing/truncation logic to Rust, while [`codecs`]
+//! calls the exact same ICU and simdutf primitives the C++ path uses.
+//!
+//! Those primitives are bound directly by the [`ffi`] bridge, with no C++ of
+//! their own in between. Matching the C++ path's behaviour is a matter of
+//! calling the same codecs the same way, not of sharing code with it.
+
+// `ffi::ucnv_convertEx` takes thirteen parameters. The signature is ICU's, and
+// a binding that did not mirror it exactly would not be a binding. The allow
+// sits at crate level because `cxx::bridge` rejects lint attributes both on the
+// bridge module and on the extern blocks inside it.
+#![allow(clippy::too_many_arguments)]
 
 use jsg::Lock;
 use jsg::v8;
 
+mod codecs;
 mod dispatch;
 mod error;
-mod shim;
 
 use crate::dispatch::Transcoder;
 use crate::error::TranscodeError;
@@ -38,24 +47,87 @@ mod ffi {
         Utf16Le,
     }
 
+    // ICU
+    //
+    // The same `ucnv_*` entry points `i18n.c++` calls. ICU renames every public
+    // symbol with its major version (`ucnv_open` -> `ucnv_open_78`) via
+    // `urename.h`; the generated bridge source is an ordinary translation unit
+    // that includes `<unicode/ucnv.h>`, so the rename applies there and no
+    // version appears in Rust.
+    //
+    // `UChar` is `char16_t`, so UTF-16 buffers use `c_char16` rather than
+    // `u16`: `uint16_t` would not match these declarations.
+    #[namespace = ""]
     unsafe extern "C++" {
-        include!("workerd/rust/i18n/shim.h");
+        include!("unicode/ucnv.h");
 
-        type Converter;
+        type UConverter;
+        type UErrorCode = crate::codecs::UErrorCode;
 
-        fn open_converter(name: &str) -> UniquePtr<Converter>;
-        fn max_char_size(self: &Converter) -> usize;
-        fn min_char_size(self: &Converter) -> usize;
-        fn set_subst_chars(self: &Converter, substitute: &str) -> bool;
+        unsafe fn ucnv_open(name: *const c_char, err: *mut UErrorCode) -> *mut UConverter;
+        unsafe fn ucnv_close(cnv: *mut UConverter);
+        unsafe fn ucnv_getMaxCharSize(cnv: *const UConverter) -> i8;
+        unsafe fn ucnv_getMinCharSize(cnv: *const UConverter) -> i8;
+        unsafe fn ucnv_setSubstChars(
+            cnv: *mut UConverter,
+            s: *const c_char,
+            length: i8,
+            err: *mut UErrorCode,
+        );
 
-        fn convert_ex(to: &Converter, from: &Converter, source: &[u8], target: &mut [u8]) -> i64;
-        fn from_uchars(to: &Converter, source: &[u8], target: &mut [u8]) -> i64;
+        unsafe fn ucnv_convertEx(
+            target_cnv: *mut UConverter,
+            source_cnv: *mut UConverter,
+            target: *mut *mut c_char,
+            target_limit: *const c_char,
+            source: *mut *const c_char,
+            source_limit: *const c_char,
+            pivot_start: *mut c_char16,
+            pivot_source: *mut *mut c_char16,
+            pivot_target: *mut *mut c_char16,
+            pivot_limit: *const c_char16,
+            reset: i8,
+            flush: i8,
+            err: *mut UErrorCode,
+        );
 
-        fn convert_latin1_to_utf16(source: &[u8], target: &mut [u8]) -> usize;
-        fn utf16_length_from_utf8(source: &[u8]) -> usize;
-        fn convert_utf8_to_utf16le(source: &[u8], target: &mut [u8]) -> usize;
-        fn utf8_length_from_utf16le(source: &[u8]) -> usize;
-        fn convert_utf16le_to_utf8(source: &[u8], target: &mut [u8]) -> usize;
+        unsafe fn ucnv_fromUChars(
+            cnv: *mut UConverter,
+            dest: *mut c_char,
+            dest_capacity: i32,
+            src: *const c_char16,
+            src_length: i32,
+            err: *mut UErrorCode,
+        ) -> i32;
+    }
+
+    // simdutf
+    //
+    // Each of these names is an overload set: a raw-pointer overload plus
+    // `std::span` and constrained-template overloads. cxx binds a C++ function
+    // by initializing an exactly-typed function pointer with its address, which
+    // picks the raw-pointer overload by exact match.
+    #[namespace = "simdutf"]
+    unsafe extern "C++" {
+        include!("simdutf.h");
+
+        unsafe fn convert_latin1_to_utf16(
+            input: *const c_char,
+            length: usize,
+            utf16_output: *mut c_char16,
+        ) -> usize;
+        unsafe fn utf16_length_from_utf8(input: *const c_char, length: usize) -> usize;
+        unsafe fn convert_utf8_to_utf16le(
+            input: *const c_char,
+            length: usize,
+            utf16_output: *mut c_char16,
+        ) -> usize;
+        unsafe fn utf8_length_from_utf16le(input: *const c_char16, length: usize) -> usize;
+        unsafe fn convert_utf16le_to_utf8(
+            input: *const c_char16,
+            length: usize,
+            utf8_output: *mut c_char,
+        ) -> usize;
     }
 
     #[namespace = "workerd::rust::jsg"]
