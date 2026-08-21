@@ -756,14 +756,8 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   struct AutoResponse {
     using OwnedAutoResponsePromise =
         kj::OneOf<IoOwn<kj::Promise<void>>, kj::Own<kj::Promise<void>>>;
-    struct Pending {
-      kj::String message;
-      // Queued auto-responses are historically fire-and-forget. Completion means the pump no
-      // longer owns this item, not necessarily that the send succeeded.
-      kj::Own<kj::PromiseFulfiller<void>> fulfiller;
-    };
     kj::Maybe<OwnedAutoResponsePromise> ongoingAutoResponse;
-    workerd::util::Queue<Pending> pendingAutoResponseDeque;
+    workerd::util::Queue<kj::String> pendingAutoResponseDeque;
     size_t queuedAutoResponses = 0;
     bool isPumping = false;
     bool isClosed = false;
@@ -771,7 +765,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
     JSG_MEMORY_INFO(AutoResponse) {
       tracker.trackFieldWithSize("ongoingAutoResponse", sizeof(kj::Promise<void>));
       pendingAutoResponseDeque.forEach(
-          [&](const Pending& pending) { tracker.trackField(nullptr, pending.message); });
+          [&](const kj::String& message) { tracker.trackField(nullptr, message); });
     }
   };
 

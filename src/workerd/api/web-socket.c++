@@ -940,7 +940,6 @@ void LegacyWebSocketAdapter::close(
 
   native.closedOutgoing = true;
   closedOutgoingForHib = true;
-  autoResponseStatus.isClosed = true;
   ensurePumping(js);
 }
 
@@ -1133,15 +1132,18 @@ void LegacyWebSocketAdapter::ensurePumping(jsg::Lock& js) {
 }
 
 kj::Promise<void> LegacyWebSocketAdapter::sendAutoResponse(kj::String message, kj::WebSocket& ws) {
-  if (autoResponseStatus.isClosed) {
-    return kj::READY_NOW;
-  } else if (autoResponseStatus.isPumping) {
-    auto completion = kj::newPromiseAndFulfiller<void>();
-    autoResponseStatus.pendingAutoResponseDeque.push(
-        AutoResponse::Pending{kj::mv(message), kj::mv(completion.fulfiller)});
-    return kj::mv(completion.promise);
-  } else {
-    return ws.send(message).attach(kj::mv(message));
+  if (autoResponseStatus.isPumping) {
+    autoResponseStatus.pendingAutoResponseDeque.push(kj::mv(message));
+  } else if (!autoResponseStatus.isClosed) {
+    auto p = ws.send(message).fork();
+    KJ_IF_SOME(context, IoContext::tryCurrent()) {
+      autoResponseStatus.ongoingAutoResponse.emplace(context.addObject(kj::heap(p.addBranch())));
+    } else {
+      // Called outside an IoContext (e.g. from the hibernation manager's readLoop).
+      autoResponseStatus.ongoingAutoResponse.emplace(kj::heap(p.addBranch()));
+    }
+    co_await p;
+    autoResponseStatus.ongoingAutoResponse = kj::none;
   }
 }
 
@@ -1194,12 +1196,7 @@ kj::Promise<void> LegacyWebSocketAdapter::pump(IoContext& context,
 
     autoResponse.isPumping = false;
 
-    // Preserve the existing behavior of silently dropping queued auto-responses when the pump
-    // exits before sending them.
-    while (!autoResponse.pendingAutoResponseDeque.empty()) {
-      auto pending = KJ_ASSERT_NONNULL(autoResponse.pendingAutoResponseDeque.pop());
-      pending.fulfiller->fulfill();
-    }
+    autoResponse.pendingAutoResponseDeque.clear();
 
     if (!completed) {
       // We didn't make it to `completed = true` at the end of this function, so either an
@@ -1250,11 +1247,10 @@ kj::Promise<void> LegacyWebSocketAdapter::pump(IoContext& context,
       auto size = countBytesFromMessage(gatedMessage.message);
 
       while (gatedMessage.pendingAutoResponses > 0) {
-        auto pending = KJ_ASSERT_NONNULL(autoResponse.pendingAutoResponseDeque.pop());
-        KJ_DEFER(pending.fulfiller->fulfill());
+        auto message = KJ_ASSERT_NONNULL(autoResponse.pendingAutoResponseDeque.pop());
         gatedMessage.pendingAutoResponses--;
         autoResponse.queuedAutoResponses--;
-        co_await ws.send(pending.message);
+        co_await ws.send(message);
       }
 
       KJ_SWITCH_ONEOF(gatedMessage.message) {
@@ -1285,9 +1281,8 @@ kj::Promise<void> LegacyWebSocketAdapter::pump(IoContext& context,
     // If there are any auto-responses left to process, we should do it now.
     // We should also check if the last sent message was a close. Shouldn't happen.
     while (!autoResponse.pendingAutoResponseDeque.empty() && !autoResponse.isClosed) {
-      auto pending = KJ_ASSERT_NONNULL(autoResponse.pendingAutoResponseDeque.pop());
-      KJ_DEFER(pending.fulfiller->fulfill());
-      co_await ws.send(pending.message);
+      auto message = KJ_ASSERT_NONNULL(autoResponse.pendingAutoResponseDeque.pop());
+      co_await ws.send(message);
     }
 
     // While we were `co_await`ing the auto-response send, more messages could have been queued
@@ -1391,7 +1386,6 @@ kj::Promise<kj::Maybe<kj::Exception>> LegacyWebSocketAdapter::readLoop(
 
               native.closedOutgoing = true;
               closedOutgoingForHib = true;
-              autoResponseStatus.isClosed = true;
               ensurePumping(js);
             }
             shell.dispatchEventImpl(

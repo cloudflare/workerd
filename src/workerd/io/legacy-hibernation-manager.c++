@@ -67,16 +67,13 @@ jsg::Ref<api::WebSocket> LegacyHibernationManagerImpl::HibernatableWebSocket::
     package.maybeTags = getTags();
 
     // Now that we unhibernated the WebSocket, we can set the last received autoResponse timestamp
-    // that was stored in the corresponding HibernatableWebSocket. Share an autoResponsePromise
-    // branch with api::websocket while retaining the fork in case the socket hibernates again.
-    kj::Promise<void> autoResponsePromise = kj::READY_NOW;
-    KJ_IF_SOME(promise, this->maybeAutoResponsePromise) {
-      autoResponsePromise = promise.addBranch();
-    }
+    // that was stored in the corresponding HibernatableWebSocket. We also move autoResponsePromise
+    // from the hibernation manager to api::websocket to prevent possible ws.send races.
     activeOrPackage
         .init<jsg::Ref<api::WebSocket>>(
             api::WebSocket::hibernatableFromNative(js, *KJ_REQUIRE_NONNULL(ws), kj::mv(package)))
         ->setAutoResponseStatus(autoResponseTimestamp, kj::mv(autoResponsePromise));
+    autoResponsePromise = kj::READY_NOW;
   }
   return activeOrPackage.get<jsg::Ref<api::WebSocket>>().addRef();
 }
@@ -349,15 +346,13 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
             auto responseCopy = kj::str(KJ_REQUIRE_NONNULL(autoResponsePair->response));
             KJ_SWITCH_ONEOF(hib.activeOrPackage) {
               KJ_CASE_ONEOF(apiWs, jsg::Ref<api::WebSocket>) {
+                // If the actor is not hibernated/If the WebSocket is active, we need to update
+                // autoResponseTimestamp on the active websocket.
+                apiWs->setAutoResponseStatus(hib.autoResponseTimestamp, kj::READY_NOW);
                 // Since we had a request set, we must have and response that's sent back using the
                 // same websocket here. The sending of response is managed in web-socket to avoid
                 // possible racing problems with regular websocket messages.
-                hib.maybeAutoResponsePromise =
-                    apiWs->sendAutoResponse(kj::mv(responseCopy), ws).fork();
-                auto& promise = KJ_ASSERT_NONNULL(hib.maybeAutoResponsePromise);
-                apiWs->setAutoResponseStatus(hib.autoResponseTimestamp, promise.addBranch());
-                KJ_DEFER(hib.maybeAutoResponsePromise = kj::none);
-                co_await promise;
+                co_await apiWs->sendAutoResponse(kj::mv(responseCopy), ws);
               }
               KJ_CASE_ONEOF(package, api::WebSocket::HibernationPackage) {
                 if (!package.closedOutgoingConnection) {
@@ -365,10 +360,10 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
                   // If we do that, we have to provide it with the promise to avoid races. This can
                   // happen if we have a websocket hibernating, that unhibernates and sends a
                   // message while ws.send() for auto-response is also sending.
-                  hib.maybeAutoResponsePromise =
-                      ws.send(responseCopy.asArray()).attach(kj::mv(responseCopy)).fork();
-                  KJ_DEFER(hib.maybeAutoResponsePromise = kj::none);
-                  co_await KJ_ASSERT_NONNULL(hib.maybeAutoResponsePromise);
+                  auto p = ws.send(responseCopy.asArray()).fork();
+                  hib.autoResponsePromise = p.addBranch();
+                  co_await p;
+                  hib.autoResponsePromise = kj::READY_NOW;
                 }
               }
             }

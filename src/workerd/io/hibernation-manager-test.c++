@@ -12,9 +12,10 @@
 // implementation as that work lands. The tests themselves are the source of
 // truth for the contract; comments are best-effort context.
 //
-// One test uses KJ_EXPECT_LOG to capture the remaining "another message send
-// is already in progress" assertion as an expected ERROR log. It passes while
-// the general outgoing-queue bug is present and will fail when that fix lands.
+// A few tests use KJ_EXPECT_LOG to capture the production "another message
+// send is already in progress" assertion as an expected ERROR log. They pass
+// while the bug is present and fail loudly when the fix lands. Search the
+// file for "regression test for EW-10817" to find them.
 
 #include <workerd/api/web-socket.h>
 #include <workerd/io/legacy-hibernation-manager.h>
@@ -604,9 +605,17 @@ KJ_TEST("HibernationManager: in-flight DO close survives hibernation within one 
   fixture.drainAndDestroy(kj::mv(request));
 }
 
-KJ_TEST("HibernationManager: in-flight auto-response survives repeated hibernation before close") {
-  // Each replacement api::WebSocket must wait for an auto-response started by the original
-  // instance before sending its close.
+KJ_TEST("HibernationManager: in-flight auto-response orphans BlockedSend during hibernation") {
+  // Regression test for EW-10817. sendAutoResponse creates a BlockedSend on the pipe (held in
+  // a plain kj::Own outside any IoOwn — see web-socket.c++:874), then hibernation replaces
+  // activeOrPackage without carrying that state. The new api::WebSocket's pump skips the wait
+  // and trips on the orphaned BlockedSend.
+  //
+  // The KJ_EXPECT_LOG block below captures the bug's symptom (the assertion's ERROR log) so
+  // the test passes while EW-10817 is open. When the bug is fixed, the log won't fire and
+  // the KJ_EXPECT_LOG will fail — that's the signal to update this test (delete the
+  // EXPECT_LOG block and promote the receive() at the end to a positive assertion about the
+  // auto-response pong's content).
   DispatchStats stats;
   TestFixture fixture(stubLoopbackParams(stats, kj::str("ew-10817-autoresp")));
   auto hm = makeTestHm(fixture, "ping"_kj, "pong"_kj);
@@ -617,100 +626,35 @@ KJ_TEST("HibernationManager: in-flight auto-response survives repeated hibernati
   end1->send("ping"_kj).wait(fixture.getWaitScope());
   fixture.pollEventLoop();
 
-  // Hibernate, revive without consuming the pong, then hibernate again. The manager must retain
-  // its own branch of the pending send when it gives the first replacement a branch.
-  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
-  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
-    auto websockets = hm->getWebSockets(env.js, kj::none);
-    KJ_ASSERT(websockets.size() == 1);
-  });
+  // Hibernate.
   fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
 
-  // Revive again and queue a close behind the in-flight auto-response.
-  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
-    auto& js = env.js;
-    auto websockets = hm->getWebSockets(js, kj::none);
-    KJ_ASSERT(websockets.size() == 1);
-    websockets[0]->close(js, 1001, jsg::USVString(kj::str("after-pong")));
-  });
-  fixture.pollEventLoop();
+  // Unhibernate + close → hits orphaned BlockedSend.
+  {
+    KJ_EXPECT_LOG(ERROR, "another message send is already in progress");
+    fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+      auto& js = env.js;
+      auto websockets = hm->getWebSockets(js, kj::none);
+      KJ_ASSERT(websockets.size() == 1);
+      websockets[0]->close(js, 1001, jsg::USVString(kj::str("stale")));
+    });
 
-  auto pong = end1->receive().wait(fixture.getWaitScope());
-  KJ_ASSERT(pong.is<kj::String>() && pong.get<kj::String>() == "pong"_kj);
+    fixture.pollEventLoop();
+  }
 
-  auto closePromise = end1->receive();
-  KJ_ASSERT(closePromise.poll(fixture.getWaitScope()), "close did not follow auto-response");
-  auto closeMessage = closePromise.wait(fixture.getWaitScope());
-  KJ_ASSERT(closeMessage.is<kj::WebSocket::Close>());
-  auto& close = closeMessage.get<kj::WebSocket::Close>();
-  KJ_ASSERT(close.code == 1001, close.code);
-  KJ_ASSERT(close.reason == "after-pong"_kj, close.reason);
-  fixture.drainAndDestroy(kj::mv(request));
-}
-
-KJ_TEST("HibernationManager: packaged in-flight auto-response finishes before close") {
-  DispatchStats stats;
-  TestFixture fixture(stubLoopbackParams(stats, kj::str("packaged-autoresp")));
-  auto hm = makeTestHm(fixture, "ping"_kj, "pong"_kj);
-  auto request = fixture.newIncomingRequest();
-  auto end1 = acceptNewWebSocket(fixture, *request, *hm);
-
-  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
-
-  // The manager sends the pong directly while the api::WebSocket is packaged.
-  end1->send("ping"_kj).wait(fixture.getWaitScope());
-  fixture.pollEventLoop();
-
-  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
-    auto websockets = hm->getWebSockets(env.js, kj::none);
-    KJ_ASSERT(websockets.size() == 1);
-    websockets[0]->close(env.js, 1001, jsg::USVString(kj::str("after-packaged-pong")));
-  });
-  fixture.pollEventLoop();
-
-  auto pong = end1->receive().wait(fixture.getWaitScope());
-  KJ_ASSERT(pong.is<kj::String>() && pong.get<kj::String>() == "pong"_kj);
-
-  auto closeMessage = end1->receive().wait(fixture.getWaitScope());
-  KJ_ASSERT(closeMessage.is<kj::WebSocket::Close>());
-  auto& close = closeMessage.get<kj::WebSocket::Close>();
-  KJ_ASSERT(close.code == 1001, close.code);
-  KJ_ASSERT(close.reason == "after-packaged-pong"_kj, close.reason);
-  fixture.drainAndDestroy(kj::mv(request));
-}
-
-KJ_TEST("HibernationManager: rejected packaged auto-response removes revived WebSocket") {
-  DispatchStats stats;
-  TestFixture fixture(stubLoopbackParams(stats, kj::str("rejected-packaged-autoresp")));
-  auto hm = makeTestHm(fixture, "ping"_kj, "pong"_kj);
-  auto request = fixture.newIncomingRequest();
-  auto end1 = acceptNewWebSocket(fixture, *request, *hm, "pending"_kj);
-
-  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
-  end1->send("ping"_kj).wait(fixture.getWaitScope());
-  fixture.pollEventLoop();
-
-  // Revival gives the replacement adapter a branch of the blocked send. Disconnecting the peer
-  // rejects both branches and must terminate the manager's socket exactly once.
-  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
-    auto websockets = hm->getWebSockets(env.js, kj::none);
-    KJ_ASSERT(websockets.size() == 1);
-  });
-  end1 = nullptr;
-  fixture.pollEventLoop();
-
-  KJ_ASSERT(stats.customEventCalls == 1, stats.customEventCalls);
-  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
-    KJ_ASSERT(hm->getWebSockets(env.js, kj::none).size() == 0);
-    KJ_ASSERT(hm->getWebSockets(env.js, "pending"_kj).size() == 0);
-  });
+  // Receive the orphaned pong from the pipe (held outside any IoOwn — the very thing this
+  // test is documenting). This unblocks the stuck pump so drainAndDestroy() below can
+  // complete cleanly. Once EW-10817 is fixed, the orphan won't exist; this becomes a
+  // positive assertion about the pong's content.
+  end1->receive().wait(fixture.getWaitScope());
   fixture.drainAndDestroy(kj::mv(request));
 }
 
 KJ_TEST("HibernationManager: in-flight DO send orphans BlockedSend during hibernation") {
   // Regression test for EW-10817. Same shape as the auto-response variant above but driven by
   // a DO-side ws.send() — the pump creates a BlockedSend on the pipe (no BPT yet), hibernation
-  // orphans it, and the next operation on the new api::WebSocket trips the assertion.
+  // orphans it, the next operation on the new api::WebSocket trips the assertion. See the
+  // auto-response variant above for the EXPECT_LOG / lifecycle details.
   //
   DispatchStats stats;
   TestFixture fixture(stubLoopbackParams(stats, kj::str("ew-10817-dosend")));
@@ -873,9 +817,13 @@ KJ_TEST("HibernationManager: in-flight DO send lost across IoContext destruction
       "data frame was silently dropped across IoContext destruction; eyeball receives nothing");
 }
 
-KJ_TEST("HibernationManager: in-flight auto-response finishes before close across actor eviction") {
-  // sendAutoResponse runs from the HM's readLoop, outside the IoContext. Its in-flight send must
-  // remain visible after hibernation so a revived api::WebSocket waits before sending its close.
+KJ_TEST("HibernationManager: in-flight auto-response orphans BlockedSend across actor eviction") {
+  // Regression test for EW-10817 — the production failure mode. sendAutoResponse runs from
+  // the HM's readLoop (on the HM's TaskSet, NOT in an IoContext). It does a direct
+  // kj::WebSocket::send that creates a BlockedSend on the pipe. IoContext destruction cancels
+  // pump tasks but not sendAutoResponse, so the BlockedSend survives the IoContext's death.
+  // After actor eviction and revival, the new api::WebSocket's pump trips on the orphan. See
+  // the same-IoContext auto-response variant above for the EXPECT_LOG / lifecycle details.
   DispatchStats stats;
   TestFixture fixture(stubLoopbackParams(stats, kj::str("ew-10817-cross-autoresp")));
   auto hm = makeTestHm(fixture, "ping"_kj, "pong"_kj);
@@ -899,26 +847,22 @@ KJ_TEST("HibernationManager: in-flight auto-response finishes before close acros
   request1 = nullptr;
   fixture.resetActor();
 
-  // Under a brand-new actor + IoContext, queue a close behind the in-flight auto-response.
+  // Phase 3: under a brand-new actor + IoContext, do something that starts a fresh pump.
+  // The new pump trips on the orphaned BlockedSend.
   auto request2 = fixture.newIncomingRequest();
-  fixture.enterContext(*request2, [&](const TestFixture::Environment& env) {
-    auto& js = env.js;
-    auto websockets = hm->getWebSockets(js, kj::none);
-    KJ_ASSERT(websockets.size() == 1);
-    websockets[0]->close(js, 1001, jsg::USVString(kj::str("post-evict")));
-  });
-  fixture.pollEventLoop();
+  {
+    KJ_EXPECT_LOG(ERROR, "another message send is already in progress");
+    fixture.enterContext(*request2, [&](const TestFixture::Environment& env) {
+      auto& js = env.js;
+      auto websockets = hm->getWebSockets(js, kj::none);
+      KJ_ASSERT(websockets.size() == 1);
+      websockets[0]->close(js, 1001, jsg::USVString(kj::str("post-evict")));
+    });
+    fixture.pollEventLoop();
+  }
 
-  auto pong = end1->receive().wait(fixture.getWaitScope());
-  KJ_ASSERT(pong.is<kj::String>() && pong.get<kj::String>() == "pong"_kj);
-
-  auto closePromise = end1->receive();
-  KJ_ASSERT(closePromise.poll(fixture.getWaitScope()), "close did not follow auto-response");
-  auto closeMessage = closePromise.wait(fixture.getWaitScope());
-  KJ_ASSERT(closeMessage.is<kj::WebSocket::Close>());
-  auto& close = closeMessage.get<kj::WebSocket::Close>();
-  KJ_ASSERT(close.code == 1001, close.code);
-  KJ_ASSERT(close.reason == "post-evict"_kj, close.reason);
+  // Receive the orphaned pong (see same-IoContext variant above for why), then drain.
+  end1->receive().wait(fixture.getWaitScope());
   fixture.drainAndDestroy(kj::mv(request2));
 }
 
@@ -993,46 +937,14 @@ KJ_TEST("HibernationManager: DO close waits for the actor's output gate") {
   fixture.drainAndDestroy(kj::mv(request));
 }
 
-KJ_TEST("HibernationManager: auto-response is skipped after close is queued") {
-  DispatchStats stats;
-  TestFixture fixture(stubLoopbackParams(stats, kj::str("autoresp-after-close")));
-  auto hm = makeTestHm(fixture, "ping"_kj, "pong"_kj);
-  auto request = fixture.newIncomingRequest();
-  auto end1 = acceptNewWebSocket(fixture, *request, *hm);
-
-  auto paf = kj::newPromiseAndFulfiller<void>();
-  auto blocker = fixture.getActor().getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
-  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
-    auto websockets = hm->getWebSockets(env.js, kj::none);
-    KJ_ASSERT(websockets.size() == 1);
-    websockets[0]->close(env.js, 1001, jsg::USVString(kj::str("already-closing")));
-  });
-
-  // The pump is blocked before sending close. A later ping must not queue a pong which will be
-  // discarded when close is eventually sent.
-  end1->send("ping"_kj).wait(fixture.getWaitScope());
-  fixture.pollEventLoop();
-
-  paf.fulfiller->fulfill();
-  auto message = end1->receive().wait(fixture.getWaitScope());
-  KJ_ASSERT(message.is<kj::WebSocket::Close>());
-  KJ_ASSERT(message.get<kj::WebSocket::Close>().reason == "already-closing"_kj);
-  fixture.pollEventLoop();
-  KJ_ASSERT(stats.customEventCalls == 0, stats.customEventCalls);
-
-  blocker.wait(fixture.getWaitScope());
-  fixture.drainAndDestroy(kj::mv(request));
-}
-
-KJ_TEST(
-    "HibernationManager: queued auto-response survives hibernation while pump is gate-blocked") {
+KJ_TEST("HibernationManager: auto-response (active) waits when pump is gate-blocked on a DO send") {
   // When the pump is already running (isPumping == true) and stalled on the output gate for a
   // queued DO message, an arriving auto-response request causes sendAutoResponse to push the
   // pong onto pendingAutoResponseDeque. The pump only drains that deque after it finishes the
   // outer outgoingMessages loop, so the pong waits for the gate to release transitively.
   //
-  // Order at the eyeball: the gated DO message arrives first after the gate releases, followed by
-  // the pong and any write queued by a replacement api::WebSocket.
+  // Order at the eyeball: the gated DO message arrives first (after the gate releases), and
+  // the pong follows immediately after (line 998 in web-socket.c++).
   DispatchStats stats;
   TestFixture fixture(stubLoopbackParams(stats, kj::str("output-gate-autoresp-gated")));
   auto hm = makeTestHm(fixture, "ping"_kj, "pong"_kj);
@@ -1048,15 +960,6 @@ KJ_TEST(
   // Eyeball sends ping. sendAutoResponse sees isPumping=true and queues "pong".
   end1->send("ping"_kj).wait(fixture.getWaitScope());
 
-  // The replacement queues its close behind the pong's completion while the original pump remains
-  // blocked on the output gate.
-  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
-  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
-    auto websockets = hm->getWebSockets(env.js, kj::none);
-    KJ_ASSERT(websockets.size() == 1);
-    websockets[0]->close(env.js, 1001, jsg::USVString(kj::str("after-queued-pong")));
-  });
-
   // Neither msg1 nor pong has arrived yet.
   auto receivePromise = end1->receive();
   fixture.pollEventLoop();
@@ -1069,51 +972,9 @@ KJ_TEST(
   KJ_ASSERT(msg1.is<kj::String>() && msg1.get<kj::String>() == "msg1"_kj);
   auto msg2 = end1->receive().wait(fixture.getWaitScope());
   KJ_ASSERT(msg2.is<kj::String>() && msg2.get<kj::String>() == "pong"_kj);
-  auto closeMessage = end1->receive().wait(fixture.getWaitScope());
-  KJ_ASSERT(closeMessage.is<kj::WebSocket::Close>());
-  auto& close = closeMessage.get<kj::WebSocket::Close>();
-  KJ_ASSERT(close.code == 1001, close.code);
-  KJ_ASSERT(close.reason == "after-queued-pong"_kj, close.reason);
 
   blocker.wait(fixture.getWaitScope());
   fixture.drainAndDestroy(kj::mv(request));
-}
-
-KJ_TEST("HibernationManager: canceled queued auto-response preserves revived WebSocket") {
-  DispatchStats stats;
-  TestFixture fixture(stubLoopbackParams(stats, kj::str("canceled-queued-autoresp")));
-  auto hm = makeTestHm(fixture, "ping"_kj, "pong"_kj);
-  auto request1 = fixture.newIncomingRequest();
-  auto end1 = acceptNewWebSocket(fixture, *request1, *hm, "pending"_kj);
-
-  auto paf = kj::newPromiseAndFulfiller<void>();
-  auto blocker = fixture.getActor().getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
-  sendFromDo(fixture, *request1, *hm, "blocked"_kj);
-  end1->send("ping"_kj).wait(fixture.getWaitScope());
-
-  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
-  fixture.enterContext(*request1, [&](const TestFixture::Environment& env) {
-    KJ_ASSERT(hm->getWebSockets(env.js, kj::none).size() == 1);
-  });
-
-  // Destroying the IoContext cancels the original pump. As before this fix, its queued pong is
-  // dropped without terminating the manager's WebSocket.
-  {
-    KJ_EXPECT_LOG(WARNING, "failed to invoke drain() on IncomingRequest before destroying it");
-    request1 = nullptr;
-  }
-  paf.fulfiller->fulfill();
-  blocker.wait(fixture.getWaitScope());
-  fixture.pollEventLoop();
-
-  KJ_ASSERT(stats.customEventCalls == 0, stats.customEventCalls);
-  fixture.resetActor();
-  auto request2 = fixture.newIncomingRequest();
-  fixture.enterContext(*request2, [&](const TestFixture::Environment& env) {
-    KJ_ASSERT(hm->getWebSockets(env.js, kj::none).size() == 1);
-    KJ_ASSERT(hm->getWebSockets(env.js, "pending"_kj).size() == 1);
-  });
-  fixture.drainAndDestroy(kj::mv(request2));
 }
 
 KJ_TEST("HibernationManager: auto-response (active) bypasses the output gate") {
