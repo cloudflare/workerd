@@ -308,6 +308,38 @@ KJ_TEST("HibernationManager: failed event dispatches remove WebSocket") {
   fixture.drainAndDestroy(kj::mv(request));
 }
 
+KJ_TEST("HibernationManager: retained native WebSocket tags outlive manager teardown") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("retained-tags")));
+  auto hm = makeTestHm(fixture);
+  auto request = fixture.newIncomingRequest();
+  constexpr kj::StringPtr tag =
+      "a-long-hibernatable-websocket-tag-that-must-remain-valid-after-manager-teardown"_kj;
+  auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm, tag);
+
+  kj::Maybe<jsg::Ref<api::WebSocket>> retained;
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto websockets = hm->getWebSockets(env.js, tag);
+    KJ_ASSERT(websockets.size() == 1);
+    auto tags = websockets[0]->getHibernatableTags();
+    KJ_ASSERT(tags.size() == 1);
+    KJ_ASSERT(tags[0] == tag, tags[0]);
+    retained = websockets[0].addRef();
+  });
+
+  // The native WebSocket can be retained independently of the manager. Its tags must remain
+  // readable after the manager removes the final socket and destroys the corresponding bucket.
+  fixture.enterContext(*request, [&](const TestFixture::Environment&) {
+    hm = nullptr;
+
+    auto tags = KJ_REQUIRE_NONNULL(retained)->getHibernatableTags();
+    KJ_ASSERT(tags.size() == 1);
+    KJ_ASSERT(tags[0] == tag, tags[0]);
+  });
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
 KJ_TEST("HibernationManager: DO sends binary message to eyeball") {
   DispatchStats stats;
   TestFixture fixture(stubLoopbackParams(stats, kj::str("do-send-bin")));

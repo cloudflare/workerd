@@ -44,15 +44,7 @@ LegacyHibernationManagerImpl::HibernatableWebSocket::~HibernatableWebSocket() no
   }
 }
 
-kj::Array<kj::StringPtr> LegacyHibernationManagerImpl::HibernatableWebSocket::getTags() {
-  auto tags = kj::heapArray<kj::StringPtr>(tagItems.size());
-  for (auto i: kj::indices(tagItems)) {
-    tags[i] = tagItems[i].tag;
-  }
-  return tags;
-}
-
-kj::Array<kj::String> LegacyHibernationManagerImpl::HibernatableWebSocket::cloneTags() {
+kj::Array<kj::String> LegacyHibernationManagerImpl::HibernatableWebSocket::getTags() {
   auto tags = kj::heapArray<kj::String>(tagItems.size());
   for (auto i: kj::indices(tagItems)) {
     tags[i] = kj::str(tagItems[i].tag);
