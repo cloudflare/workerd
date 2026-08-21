@@ -41,7 +41,7 @@ HibernatableWebSocketEvent::ItemsForRelease HibernatableWebSocketEvent::prepareF
   // the HibernatableWebSocket (it removes it from `webSocketsForEventHandler`).
   auto websocketRef = hibernatableWebSocket.value->getActiveOrUnhibernate(lock);
   auto ownedWebSocket = kj::mv(KJ_REQUIRE_NONNULL(hibernatableWebSocket.value->ws));
-  auto tags = hibernatableWebSocket.value->cloneTags();
+  auto tags = hibernatableWebSocket.value->getTags();
 
   // Now that we've obtained the websocket for the event, let's free up the slots we had allocated.
   manager.webSocketsForEventHandler.erase(hibernatableWebSocket);

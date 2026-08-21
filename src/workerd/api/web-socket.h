@@ -196,7 +196,7 @@ class WebSocket: public EventTarget {
     // `maybeTags` is only non-empty when we're recreating the api::WebSocket.
     // We don't need to populate it when hibernating because the tags are already
     // stored in the HibernationManager.
-    kj::Maybe<kj::Array<kj::StringPtr>> maybeTags;
+    kj::Maybe<kj::Array<kj::String>> maybeTags;
 
     // True forever once the JS WebSocket calls `close()`.
     bool closedOutgoingConnection = false;
@@ -241,7 +241,7 @@ class WebSocket: public EventTarget {
 
   // Extract the kj::WebSocket from this api::WebSocket (if applicable). The kj::WebSocket will be
   // owned elsewhere, but the api::WebSocket will retain a reference.
-  kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::StringPtr> tags);
+  kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags);
 
   // Accesses the tags of the hibernatable websocket.
   kj::Array<kj::StringPtr> getHibernatableTags();
@@ -505,7 +505,7 @@ class WebSocketAdapter {
 
   // Hibernation transitions: extracts the kj::WebSocket so the HibernationManager can
   // assume ownership; the adapter retains a bare reference for sends.
-  virtual kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::StringPtr> tags) = 0;
+  virtual kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags) = 0;
 
   // HibernationManager coordination: signals that the underlying connection is winding
   // down and the adapter should arrange to deliver its terminal close/error event.
@@ -603,7 +603,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   bool isHibernatable() override;
   void setObserver(kj::Own<WebSocketObserver> observer) override;
 
-  kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::StringPtr> tags) override;
+  kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags) override;
   void initiateHibernatableRelease(jsg::Lock& js,
       kj::Own<kj::WebSocket> ws,
       kj::Array<kj::String> tags,
@@ -668,12 +668,8 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
       // Close.
       WebSocket::HibernatableReleaseState releaseState = WebSocket::HibernatableReleaseState::NONE;
 
-      // There are two possible states for tagsRef:
-      //   1. kj::Array<kj::StringPtr> — tags owned by the HibernationManager; we just
-      //      reference them to save memory.
-      //   2. kj::Array<kj::String> — we're going to be dispatching a Close or an Error event
-      //      and the HibernatableWebSocket is free to go away mid-dispatch; copy locally.
-      kj::OneOf<kj::Array<kj::StringPtr>, kj::Array<kj::String>> tagsRef;
+      // The native state can outlive the HibernationManager, so it owns its tag strings.
+      kj::Array<kj::String> tags;
     };
 
     explicit Accepted(kj::Own<kj::WebSocket> ws, Native& native, IoContext& context);
@@ -781,10 +777,8 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
 
   // Creates a fresh `Native` set up in the Accepted-Hibernatable state. Used by the
   // hibernation-revival constructor.
-  IoOwn<Native> initNative(IoContext& ioContext,
-      kj::WebSocket& ws,
-      kj::Array<kj::StringPtr> tags,
-      bool closedOutgoingConn);
+  IoOwn<Native> initNative(
+      IoContext& ioContext, kj::WebSocket& ws, kj::Array<kj::String> tags, bool closedOutgoingConn);
 
   void dispatchOpen(jsg::Lock& js);
   void ensurePumping(jsg::Lock& js);

@@ -173,7 +173,7 @@ void WebSocket::setObserver(kj::Own<WebSocketObserver> observer) {
   impl->setObserver(kj::mv(observer));
 }
 
-kj::Own<kj::WebSocket> WebSocket::acceptAsHibernatable(kj::Array<kj::StringPtr> tags) {
+kj::Own<kj::WebSocket> WebSocket::acceptAsHibernatable(kj::Array<kj::String> tags) {
   // TODO(EW-10817): When the HibernatableWebSocketAdapter path is functional, re-enable the
   // autogate-driven swap below — extract the kj::WebSocket from the legacy adapter (via
   // `LegacyWebSocketAdapter::extractForHibernatableTransition`, also commented out today)
@@ -248,13 +248,11 @@ void WebSocket::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
 // LegacyWebSocketAdapter — operational implementation.
 // =============================================================================
 
-IoOwn<LegacyWebSocketAdapter::Native> LegacyWebSocketAdapter::initNative(IoContext& ioContext,
-    kj::WebSocket& ws,
-    kj::Array<kj::StringPtr> tags,
-    bool closedOutgoingConn) {
+IoOwn<LegacyWebSocketAdapter::Native> LegacyWebSocketAdapter::initNative(
+    IoContext& ioContext, kj::WebSocket& ws, kj::Array<kj::String> tags, bool closedOutgoingConn) {
   auto nativeObj = kj::heap<Native>();
   nativeObj->state.init<Accepted>(
-      Accepted::Hibernatable{.ws = ws, .tagsRef = kj::mv(tags)}, *nativeObj, ioContext);
+      Accepted::Hibernatable{.ws = ws, .tags = kj::mv(tags)}, *nativeObj, ioContext);
   // We might have called `close()` when this WebSocket was previously active.
   // If so, we want to prevent any future calls to `send()`.
   nativeObj->closedOutgoing = closedOutgoingConn;
@@ -1470,14 +1468,14 @@ void LegacyWebSocketAdapter::setPeer(jsg::WeakRef<WebSocket> other) {
   peer = kj::mv(other);
 }
 
-kj::Own<kj::WebSocket> LegacyWebSocketAdapter::acceptAsHibernatable(kj::Array<kj::StringPtr> tags) {
+kj::Own<kj::WebSocket> LegacyWebSocketAdapter::acceptAsHibernatable(kj::Array<kj::String> tags) {
   KJ_IF_SOME(hibernatable, farNative->state.tryGet<AwaitingAcceptanceOrCoupling>()) {
     // We can only request hibernation if we have not called accept.
     auto ws = kj::mv(hibernatable.ws);
     // We pass a reference to the kj::WebSocket for the api::WebSocket to refer to when calling
     // `send()` or `close()`.
-    farNative->state.init<Accepted>(Accepted::Hibernatable{.ws = *ws, .tagsRef = kj::mv(tags)},
-        *farNative, IoContext::current());
+    farNative->state.init<Accepted>(
+        Accepted::Hibernatable{.ws = *ws, .tags = kj::mv(tags)}, *farNative, IoContext::current());
     return kj::mv(ws);
   }
   JSG_FAIL_REQUIRE(TypeError,
@@ -1597,21 +1595,12 @@ kj::Maybe<LegacyWebSocketAdapter::Accepted::Hibernatable&> LegacyWebSocketAdapte
 }
 
 kj::Array<kj::StringPtr> LegacyWebSocketAdapter::Accepted::WrappedWebSocket::getHibernatableTags() {
-  KJ_SWITCH_ONEOF(KJ_REQUIRE_NONNULL(inner.tryGet<Hibernatable>()).tagsRef) {
-    KJ_CASE_ONEOF(ref, kj::Array<kj::StringPtr>) {
-      // Tags are still owned by the HibernationManager
-      return kj::heapArray<kj::StringPtr>(ref);
-    }
-    KJ_CASE_ONEOF(arr, kj::Array<kj::String>) {
-      // We have the array already, let's copy it and return.
-      auto cpy = kj::heapArray<kj::StringPtr>(arr.size());
-      for (auto& i: kj::indices(arr)) {
-        cpy[i] = arr[i].asPtr();
-      }
-      return cpy;
-    }
+  auto& tags = KJ_REQUIRE_NONNULL(inner.tryGet<Hibernatable>()).tags;
+  auto result = kj::heapArray<kj::StringPtr>(tags.size());
+  for (auto i: kj::indices(tags)) {
+    result[i] = tags[i];
   }
-  KJ_UNREACHABLE;
+  return result;
 }
 
 void LegacyWebSocketAdapter::Accepted::WrappedWebSocket::initiateHibernatableRelease(jsg::Lock& js,
@@ -1622,7 +1611,7 @@ void LegacyWebSocketAdapter::Accepted::WrappedWebSocket::initiateHibernatableRel
   hibernatable.releaseState = state;
   // Note that we move the owned kj::WebSocket here.
   hibernatable.attachedForClose = kj::mv(ws);
-  hibernatable.tagsRef.init<kj::Array<kj::String>>(kj::mv(tags));
+  hibernatable.tags = kj::mv(tags);
 }
 
 bool LegacyWebSocketAdapter::Accepted::WrappedWebSocket::isAwaitingRelease() {
