@@ -7090,9 +7090,8 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
   // Start sockets
   TRACE_EVENT("workerd", "listenOnSockets");
   for (auto sock: config.getSockets()) {
-    kj::StringPtr name = sock.getName();
-    kj::StringPtr addrStr = nullptr;
-    kj::String ownAddrStr;
+    kj::String name = kj::str(sock.getName());
+    kj::String addrStr;
     kj::Maybe<kj::Own<kj::ConnectionReceiver>> listenerOverride;
 
     kj::Own<Service> service = lookupService(sock.getService(), kj::str("Socket \"", name, "\""));
@@ -7100,7 +7099,7 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
     KJ_IF_SOME(override, socketOverrides.findEntry(name)) {
       KJ_SWITCH_ONEOF(override.value) {
         KJ_CASE_ONEOF(str, kj::String) {
-          addrStr = ownAddrStr = kj::mv(str);
+          addrStr = kj::mv(str);
           break;
         }
         KJ_CASE_ONEOF(l, kj::Own<kj::ConnectionReceiver>) {
@@ -7110,7 +7109,7 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       }
       socketOverrides.erase(override);
     } else if (sock.hasAddress()) {
-      addrStr = sock.getAddress();
+      addrStr = kj::str(sock.getAddress());
     } else {
       reportConfigError(kj::str("Socket \"", name,
           "\" has no address in the config, so must be specified on the "
@@ -7147,8 +7146,8 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
 
     auto handle = kj::coCapture(
         [this, service = kj::mv(service), rewriter = kj::mv(rewriter),
-            physicalProtocol = socketConfig.physicalProtocol, name,
-            isHttp = sock.which() != config::Socket::TCP, addrStr](
+            physicalProtocol = socketConfig.physicalProtocol, name = kj::mv(name),
+            isHttp = sock.which() != config::Socket::TCP, addrStr = kj::mv(addrStr)](
             kj::Promise<kj::Own<kj::ConnectionReceiver>> promise) mutable -> kj::Promise<void> {
       if (isHttp) {
         TRACE_EVENT("workerd", "setup listenHttp");
