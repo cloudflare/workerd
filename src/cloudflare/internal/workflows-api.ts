@@ -39,6 +39,10 @@ interface Fetcher {
     id: string,
     event: { type: string; payload: unknown }
   ): Promise<void>;
+  subscribe(
+    id: string,
+    options?: WorkflowInstanceSubscribeOptions
+  ): Promise<WorkflowInstanceSubscription>;
 }
 
 class InstanceImpl implements WorkflowInstance {
@@ -84,6 +88,12 @@ class InstanceImpl implements WorkflowInstance {
     payload: unknown;
   }): Promise<void> {
     await this.#fetcher.sendEvent(this.id, { type, payload });
+  }
+
+  async subscribe(
+    options?: WorkflowInstanceSubscribeOptions
+  ): Promise<WorkflowInstanceSubscription> {
+    return await this.#fetcher.subscribe(this.id, options);
   }
 }
 
