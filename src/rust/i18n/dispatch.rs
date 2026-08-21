@@ -15,13 +15,13 @@
 //! destination is sized for the worst case.
 //!
 //! All sizing, validation, substitute-character setup, and length checking
-//! happens here; [`crate::shim`] only forwards to the underlying ICU and
+//! happens here; [`crate::codecs`] only forwards to the underlying ICU and
 //! simdutf calls.
 
+use crate::codecs;
+use crate::codecs::Converter;
 use crate::error::TranscodeError;
 use crate::ffi::Encoding;
-use crate::shim;
-use crate::shim::Converter;
 
 /// An isolate has a 128MB memory limit, and thus so does any single
 /// destination buffer. Mirrors `ISOLATE_LIMIT` in `i18n.c++`.
@@ -103,10 +103,10 @@ impl<'a> Transcoder<'a> {
         let source = self.source;
         match &self.conversion {
             Conversion::ConvertEx { to, from } => {
-                shim::convert_ex(to, from, source, dest).ok_or(TranscodeError::UnableToTranscode)
+                codecs::convert_ex(to, from, source, dest).ok_or(TranscodeError::UnableToTranscode)
             }
             Conversion::Latin1ToUtf16 => {
-                let units = shim::convert_latin1_to_utf16(source, dest);
+                let units = codecs::convert_latin1_to_utf16(source, dest);
                 // simdutf returns 0 for invalid input.
                 if units == 0 {
                     return Err(TranscodeError::UnableToTranscode);
@@ -116,12 +116,12 @@ impl<'a> Transcoder<'a> {
                 Ok(units * 2)
             }
             Conversion::FromUtf16 { to } => {
-                shim::from_uchars(to, source, dest).ok_or(TranscodeError::UnableToTranscode)
+                codecs::from_uchars(to, source, dest).ok_or(TranscodeError::UnableToTranscode)
             }
             Conversion::Utf16FromUtf8 => {
                 // `dest` was sized as two bytes per estimated code unit.
                 let expected_units = dest.len() / 2;
-                let units = shim::convert_utf8_to_utf16le(source, dest);
+                let units = codecs::convert_utf8_to_utf16le(source, dest);
                 // simdutf returns 0 for invalid UTF-8 input.
                 if units == 0 {
                     return Err(TranscodeError::UnableToTranscode);
@@ -133,7 +133,7 @@ impl<'a> Transcoder<'a> {
             }
             Conversion::Utf8FromUtf16 => {
                 let expected_bytes = dest.len();
-                let written = shim::convert_utf16le_to_utf8(source, dest);
+                let written = codecs::convert_utf16le_to_utf8(source, dest);
                 // simdutf returns 0 for invalid input, which fails this check
                 // because `expected_bytes` is nonzero here. The C++
                 // `TranscodeUTF8FromUTF16` checks for 0 only *after* requiring
@@ -226,7 +226,7 @@ impl<'a> Transcoder<'a> {
     /// but UTF-8 continuation bytes, for instance -- which yields an empty
     /// result rather than an error.
     fn utf16_from_utf8(source: &'a [u8]) -> Result<Self, TranscodeError> {
-        let expected_units = shim::utf16_length_from_utf8(source);
+        let expected_units = codecs::utf16_length_from_utf8(source);
         if expected_units > ISOLATE_LIMIT {
             return Err(TranscodeError::ExpectedUtf16LengthTooLarge);
         }
@@ -248,7 +248,7 @@ impl<'a> Transcoder<'a> {
             return Err(TranscodeError::OddUtf16leInput);
         }
 
-        let dest_len = shim::utf8_length_from_utf16le(source);
+        let dest_len = codecs::utf8_length_from_utf16le(source);
         if dest_len > ISOLATE_LIMIT {
             return Err(TranscodeError::ExpectedUtf8LengthTooLarge);
         }

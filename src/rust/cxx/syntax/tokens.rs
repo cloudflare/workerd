@@ -36,6 +36,11 @@ impl ToTokens for Type {
                 if ident.rust == Char {
                     let span = ident.rust.span();
                     tokens.extend(quote_spanned!(span=> ::cxx::core::ffi::));
+                } else if ident.rust == Char16 {
+                    // Unlike c_char, there is no core::ffi equivalent of
+                    // char16_t; the cxx crate defines c_char16 itself.
+                    let span = ident.rust.span();
+                    tokens.extend(quote_spanned!(span=> ::cxx::));
                 } else if ident.rust == CxxString {
                     let span = ident.rust.span();
                     tokens.extend(quote_spanned!(span=> ::cxx::));

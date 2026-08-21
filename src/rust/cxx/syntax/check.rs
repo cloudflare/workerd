@@ -163,8 +163,8 @@ fn check_type_rust_vec(cx: &mut Check, ty: &Ty1) {
             match Atom::from(&ident.rust) {
                 None
                 | Some(
-                    Bool | Char | U8 | U16 | U32 | U64 | Usize | I8 | I16 | I32 | I64 | Isize | F32
-                    | F64 | RustString,
+                    Bool | Char | Char16 | U8 | U16 | U32 | U64 | Usize | I8 | I16 | I32 | I64
+                    | Isize | F32 | F64 | RustString,
                 ) => return,
                 Some(CxxString) => {}
             }
@@ -266,7 +266,7 @@ fn check_type_shared_ptr(cx: &mut Check, ptr: &Ty1) {
                 Bool | U8 | U16 | U32 | U64 | Usize | I8 | I16 | I32 | I64 | Isize | F32 | F64
                 | CxxString,
             ) => return,
-            Some(Char | RustString) => {}
+            Some(Char | Char16 | RustString) => {}
         }
     } else if let Type::CxxVector(_) = &ptr.inner {
         cx.error(ptr, "std::shared_ptr<std::vector> is not supported yet");
@@ -289,7 +289,7 @@ fn check_type_weak_ptr(cx: &mut Check, ptr: &Ty1) {
                 Bool | U8 | U16 | U32 | U64 | Usize | I8 | I16 | I32 | I64 | Isize | F32 | F64
                 | CxxString,
             ) => return,
-            Some(Char | RustString) => {}
+            Some(Char | Char16 | RustString) => {}
         }
     } else if let Type::CxxVector(_) = &ptr.inner {
         cx.error(ptr, "std::weak_ptr<std::vector> is not supported yet");
@@ -363,7 +363,7 @@ fn check_type_cxx_vector(cx: &mut Check, ptr: &Ty1) {
             | Some(
                 U8 | U16 | U32 | U64 | Usize | I8 | I16 | I32 | I64 | Isize | F32 | F64 | CxxString,
             ) => return,
-            Some(Char) => { /* todo */ }
+            Some(Char | Char16) => { /* todo */ }
             Some(Bool | RustString) => {}
         }
     }
@@ -900,6 +900,8 @@ fn describe(cx: &mut Check, ty: &Type) -> String {
                 "C++ string".to_owned()
             } else if Atom::from(&ident.rust) == Some(Char) {
                 "C char".to_owned()
+            } else if Atom::from(&ident.rust) == Some(Char16) {
+                "C++ char16_t".to_owned()
             } else {
                 ident.rust.to_string()
             }
