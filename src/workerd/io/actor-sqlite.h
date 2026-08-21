@@ -30,6 +30,14 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     // wait on prior to scheduling the new request, as of this writing, this would be the
     // alarmLaterInFlight promise, which tracks any in-flight request to move the alarm "later"
     // than is currently set.
+    //
+    // The default implementation throws, since there is no alarm manager to talk to. An embedder
+    // that constructs an ActorSqlite which can never schedule alarms should override this to
+    // throw a JSG error explaining why alarms aren't available in that context, since the default
+    // exception is an internal error, not something the application can act on.
+    //
+    // This may throw synchronously; the caller relies on that to roll back the write that
+    // requested the alarm. Don't return a rejected promise instead.
     virtual kj::Promise<void> scheduleRun(
         kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask);
 
