@@ -510,6 +510,132 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
   });
 }
 
+jsg::Ref<JsRpcProperty> R2Bucket::getRpcMethod(jsg::Lock& js, kj::StringPtr methodName) {
+  auto fetcher = [&]() -> jsg::Ref<Fetcher> {
+    KJ_SWITCH_ONEOF(clientChannel) {
+      KJ_CASE_ONEOF(channel, uint) {
+        return js.alloc<Fetcher>(
+            channel, Fetcher::RequiresHostAndProtocol::NO, true /* isInHouse */);
+      }
+      KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
+        return js.alloc<Fetcher>(IoContext::current().addObject(kj::addRef(*channel)),
+            Fetcher::RequiresHostAndProtocol::NO, true /* isInHouse */);
+      }
+    }
+    KJ_UNREACHABLE;
+  }();
+
+  // getRpcMethodInternal skips the `rpc` compatibility gate, which matters because R2 bindings must
+  // keep working on compat dates older than that flag. The lookup is lazy and never fails for a
+  // real method name -- whether the entrypoint actually implements it is only discovered when the
+  // call reaches the far side.
+  return KJ_ASSERT_NONNULL(fetcher->getRpcMethodInternal(js, kj::str(methodName)));
+}
+
+namespace {
+// Turn the JsRpcPromise a JSRPC call returns into an ordinary jsg::Promise.
+//
+// JsRpcPromise is a custom thenable whose `then()` takes raw v8 functions and deliberately hides
+// the inner promise from JSG, so it cannot be chained from C++ directly. Resolving a fresh promise
+// with it makes V8 adopt it, which also keeps this independent of the unwrap_custom_thenables
+// compatibility flag.
+jsg::Promise<jsg::Value> normalizeRpcPromise(jsg::Lock& js, jsg::Value rpcPromise) {
+  auto paf = js.newPromiseAndResolver<jsg::Value>();
+  paf.resolver.resolve(js, kj::mv(rpcPromise));
+  return kj::mv(paf.promise);
+}
+}  // namespace
+
+jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::headRpc(jsg::Lock& js,
+    kj::String key,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropType,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String)>>& fnType,
+    const jsg::TypeHandler<kj::Maybe<HeadResultRpc>>& resultType) {
+  return js.evalNow([&] {
+    auto& context = IoContext::current();
+    TraceContext traceContext = context.makeUserTraceSpan("r2_head"_kjc);
+
+    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
+    KJ_IF_SOME(b, this->bindingName()) {
+      traceContext.setTag("cloudflare.binding.name"_kjc, b);
+    }
+    traceContext.setTag("cloudflare.r2.operation"_kjc, "HeadObject"_kjc);
+    KJ_IF_SOME(b, this->bucketName()) {
+      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
+    }
+    traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
+
+    auto rpcProp = getRpcMethod(js, "head"_kj);
+    auto fn = JSG_REQUIRE_NONNULL(fnType.tryUnwrap(js, rpcPropType.wrap(js, kj::mv(rpcProp))),
+        Error, "R2 binding entrypoint's head method is not callable");
+
+    return normalizeRpcPromise(js, fn(js, kj::mv(key)))
+        .then(js,
+            [&resultType, traceContext = kj::mv(traceContext)](
+                jsg::Lock& js, jsg::Value value) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
+      // A missing object is null, not an error: the gateway maps the 404 that
+      // R2Result::objectNotFound() used to represent onto a null return.
+      auto parsed = JSG_REQUIRE_NONNULL(resultType.tryUnwrap(js, value.getHandle(js)), Error,
+          "R2 binding entrypoint returned an unrecognized head result");
+
+      KJ_IF_SOME(rpc, parsed) {
+        auto result = js.alloc<HeadResult>(kj::mv(rpc.key), kj::mv(rpc.version), rpc.size,
+            kj::mv(rpc.etag),
+            js.alloc<Checksums>(kj::mv(rpc.checksums.md5), kj::mv(rpc.checksums.sha1),
+                kj::mv(rpc.checksums.sha256), kj::mv(rpc.checksums.sha384),
+                kj::mv(rpc.checksums.sha512)),
+            rpc.uploaded,
+            // head always reports http and custom metadata, so an absent field means "none set"
+            // rather than "not requested". parseObjectMetadata synthesises empty values in the same
+            // situation; GetResult later hard-asserts both are present.
+            kj::mv(rpc.httpMetadata).orDefault(HttpMetadata{}),
+            kj::mv(rpc.customMetadata).orDefault(jsg::Dict<kj::String>{}), kj::mv(rpc.range),
+            kj::mv(rpc.storageClass), kj::mv(rpc.ssecKeyMd5));
+        addHeadResultSpanTags(js, traceContext, *result.get());
+        return kj::mv(result);
+      }
+      return kj::none;
+    });
+  });
+}
+
+jsg::Promise<void> R2Bucket::deleteRpc(jsg::Lock& js,
+    kj::OneOf<kj::String, kj::Array<kj::String>> keys,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropType,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(kj::OneOf<kj::String, kj::Array<kj::String>>)>>&
+        fnType) {
+  return js.evalNow([&] {
+    auto& context = IoContext::current();
+    TraceContext traceContext = context.makeUserTraceSpan("r2_delete"_kjc);
+
+    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
+    KJ_IF_SOME(b, this->bindingName()) {
+      traceContext.setTag("cloudflare.binding.name"_kjc, b);
+    }
+    traceContext.setTag("cloudflare.r2.operation"_kjc, "DeleteObject"_kjc);
+    KJ_IF_SOME(b, this->bucketName()) {
+      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
+    }
+    KJ_SWITCH_ONEOF(keys) {
+      KJ_CASE_ONEOF(ks, kj::Array<kj::String>) {
+        traceContext.setTag("cloudflare.r2.request.keys"_kjc, kj::str(ks));
+      }
+      KJ_CASE_ONEOF(k, kj::String) {
+        traceContext.setTag("cloudflare.r2.request.keys"_kjc, kj::str(k));
+      }
+    }
+
+    auto rpcProp = getRpcMethod(js, "delete"_kj);
+    auto fn = JSG_REQUIRE_NONNULL(fnType.tryUnwrap(js, rpcPropType.wrap(js, kj::mv(rpcProp))),
+        Error, "R2 binding entrypoint's delete method is not callable");
+
+    // The result is discarded, matching delete_: a missing key is success, and per-key failures in
+    // a batch delete are reported in a body the binding has never read.
+    return normalizeRpcPromise(js, fn(js, kj::mv(keys)))
+        .then(js, [traceContext = kj::mv(traceContext)](jsg::Lock&, jsg::Value) mutable {});
+  });
+}
+
 R2Bucket::FeatureFlags::FeatureFlags(CompatibilityFlags::Reader featureFlags)
     : listHonorsIncludes(featureFlags.getR2ListHonorIncludeFields()) {}
 
