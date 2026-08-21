@@ -23,6 +23,13 @@ enum class SecureTransportKind {
   ON,
 };
 
+enum class SocketProtocol {
+  // A byte-stream socket (TCP).
+  TCP,
+  // A datagram socket (UDP).
+  UDP,
+};
+
 struct SocketAddress {
   kj::String hostname;
   uint16_t port;
@@ -76,6 +83,7 @@ class Socket: public jsg::Object {
       jsg::Optional<SocketOptions> options,
       kj::Own<kj::TlsStarterCallback> tlsStarter,
       SecureTransportKind secureTransport,
+      SocketProtocol protocol,
       kj::Maybe<kj::String> domain,
       bool isDefaultFetchPort,
       jsg::PromiseResolverPair<SocketInfo> openedPrPair)
@@ -90,6 +98,7 @@ class Socket: public jsg::Object {
         remoteAddress(kj::mv(remoteAddress)),
         localAddress(kj::mv(localAddress)),
         secureTransport(secureTransport),
+        protocol(protocol),
         domain(kj::mv(domain)),
         isDefaultFetchPort(isDefaultFetchPort),
         openedResolver(kj::mv(openedPrPair.resolver)),
@@ -122,6 +131,16 @@ class Socket: public jsg::Object {
       case SecureTransportKind::ON:
         return "on"_kj;
     }
+  }
+
+  kj::StringPtr getProtocol() const {
+    switch (protocol) {
+      case SocketProtocol::TCP:
+        return "tcp"_kj;
+      case SocketProtocol::UDP:
+        return "udp"_kj;
+    }
+    KJ_UNREACHABLE;
   }
 
   // Takes ownership of the underlying connection stream, detaching the readable and writable streams.
@@ -185,11 +204,14 @@ class Socket: public jsg::Object {
     JSG_READONLY_PROTOTYPE_PROPERTY(opened, getOpened);
     JSG_READONLY_PROTOTYPE_PROPERTY(upgraded, getUpgraded);
     JSG_READONLY_PROTOTYPE_PROPERTY(secureTransport, getSecureTransport);
+    // non-standard extension, not part of the proposed sockets spec
+    JSG_READONLY_PROTOTYPE_PROPERTY(protocol, getProtocol);
     JSG_METHOD(close);
     JSG_METHOD(startTls);
 
     JSG_TS_OVERRIDE({
       get secureTransport(): 'on' | 'off' | 'starttls';
+      get protocol(): 'tcp' | 'udp';
     });
   }
 
@@ -239,6 +261,7 @@ class Socket: public jsg::Object {
   // Set to true when the socket is upgraded to a secure one.
   bool upgraded = false;
   SecureTransportKind secureTransport;
+  SocketProtocol protocol;
   // The domain/ip this socket is connected to. Used for startTls.
   kj::Maybe<kj::String> domain;
   // Whether the port this socket connected to is 80/443. Used for nicer errors.
@@ -298,6 +321,18 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     jsg::Optional<SocketOptions> options,
     kj::Own<kj::TlsStarterCallback> tlsStarter,
     SecureTransportKind secureTransport,
+    kj::Maybe<kj::String> domain,
+    bool isDefaultFetchPort,
+    kj::Maybe<jsg::PromiseResolverPair<SocketInfo>> maybeOpenedPrPair);
+
+jsg::Ref<Socket> setupSocket(jsg::Lock& js,
+    kj::Own<kj::AsyncIoStream> connection,
+    kj::Maybe<kj::String> remoteAddress,
+    kj::Maybe<kj::String> localAddress,
+    jsg::Optional<SocketOptions> options,
+    kj::Own<kj::TlsStarterCallback> tlsStarter,
+    SecureTransportKind secureTransport,
+    SocketProtocol protocol,
     kj::Maybe<kj::String> domain,
     bool isDefaultFetchPort,
     kj::Maybe<jsg::PromiseResolverPair<SocketInfo>> maybeOpenedPrPair);

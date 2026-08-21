@@ -3889,6 +3889,7 @@ export interface Socket {
   get opened(): Promise<SocketInfo>;
   get upgraded(): boolean;
   get secureTransport(): "on" | "off" | "starttls";
+  get protocol(): "tcp" | "udp";
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
 }
