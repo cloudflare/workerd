@@ -101,6 +101,19 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
     co_return total;
   }
 
+  // Note: tryReadSync()/tryWriteSync() are deliberately not implemented for this class (the
+  // inherited defaults always decline). This stream is a read/write rendezvous, so serving one
+  // side synchronously completes the other side's pending operation as a side effect. The
+  // counterpart's controller-level completion bookkeeping (write promise resolution and
+  // highWaterMark accounting in WritableStreamInternalController) runs as a continuation on
+  // that operation's promise, ordered by the event loop ahead of the delivery of an
+  // asynchronous result -- but a synchronous result would be observable to JavaScript before
+  // that continuation runs, inverting the ordering the asynchronous path guarantees (see
+  // identitytransformstream-backpressure-test.js). Supporting the fast path here would require
+  // deferring delivery of the synchronous result through the event loop so it stays ordered
+  // after the counterpart's completion, which forfeits most of the benefit of the synchronous
+  // path, so we simply don't implement it.
+
   kj::Promise<size_t> tryReadInternal(void* buffer, size_t maxBytes) {
     auto promise = readHelper(kj::arrayPtr(static_cast<kj::byte*>(buffer), maxBytes));
 
@@ -180,6 +193,8 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
     // TODO(soon): This will be called by TeeBranch::pumpTo(). We disallow that anyway, since we
     //   disallow inter-TransformStream pumping.
   }
+
+  // Note: tryWriteSync() is deliberately not implemented; see the note above tryReadInternal().
 
   kj::Promise<void> end() override {
     // If we're already closed, there's nothing else we need to do here.

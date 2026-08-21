@@ -66,6 +66,14 @@ class AbortableInputStream final: public kj::AsyncInputStream, public kj::Refcou
     return impl.wrap(tryRead, buffer, minBytes, maxBytes);
   }
 
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    KJ_IF_SOME(inner, impl.tryGetInner()) {
+      return inner.tryReadSync(buffer, minBytes);
+    }
+    // Aborted; let the async path surface the exception.
+    return kj::none;
+  }
+
   kj::Maybe<uint64_t> tryGetLength() override {
     return impl.getInner().tryGetLength();
   }
