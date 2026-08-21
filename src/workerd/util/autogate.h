@@ -134,7 +134,11 @@ namespace workerd::util {
      never enters JavaScript and byte-budgets its un-yielded work, while pumpToImpl() still        \
      suspends through the event loop on every iteration (only the write suspension is elided),     \
      leaving the JS-visible pull() ordering unchanged. */                                          \
-  V(STREAM_CONTROLLER_SYNC_FAST_PATHS)
+  V(STREAM_CONTROLLER_SYNC_FAST_PATHS)                                                             \
+  /* Fleet-wide kill switch for the R2 bindings JSRPC transport. The JSRPC method table is only    \
+     selected when this is enabled AND the worker carries the r2_bindings_jsrpc compatibility      \
+     flag, which is what restricts it to allowlisted accounts. */                                  \
+  V(R2_BINDINGS_JSRPC)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

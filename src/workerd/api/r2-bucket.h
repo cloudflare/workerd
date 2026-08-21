@@ -242,6 +242,56 @@ class R2Bucket: public jsg::Object {
     JSG_STRUCT_TS_OVERRIDE(R2MultipartOptions);
   };
 
+  // Object metadata as it crosses the JSRPC boundary, mirroring the shape the R2
+  // gateway worker returns. Distinct from `HeadResult`, which is a resource type
+  // carrying methods and lazy accessors that RPC cannot serialize; these plain
+  // structs are unwrapped from the RPC result and used to build one.
+  //
+  // Not part of the public API: these are internal to the JSRPC transport and are
+  // never handed to user code, so they carry no TS overrides.
+  struct ChecksumsRpc {
+    jsg::Optional<kj::Array<kj::byte>> md5;
+    jsg::Optional<kj::Array<kj::byte>> sha1;
+    jsg::Optional<kj::Array<kj::byte>> sha256;
+    jsg::Optional<kj::Array<kj::byte>> sha384;
+    jsg::Optional<kj::Array<kj::byte>> sha512;
+
+    JSG_STRUCT(md5, sha1, sha256, sha384, sha512);
+  };
+
+  // Field names match the gateway's R2ObjectRpc, not HeadResult's members: the
+  // key arrives as `key` where HeadResult stores it as `name`.
+  //
+  // `kj::Maybe` rather than `jsg::Optional` throughout, because jsg::Optional
+  // accepts `undefined` but not `null`, and only kj::Maybe tolerates both. The
+  // gateway omits absent fields today, but that is an unenforced cross-repo
+  // invariant and a null would otherwise be a hard unwrap failure.
+  struct HeadResultRpc {
+    kj::String key;
+    kj::String version;
+    double size;
+    kj::String etag;
+    kj::Date uploaded;
+    kj::String storageClass;
+    ChecksumsRpc checksums;
+    kj::Maybe<HttpMetadata> httpMetadata;
+    kj::Maybe<jsg::Dict<kj::String>> customMetadata;
+    kj::Maybe<Range> range;
+    kj::Maybe<kj::String> ssecKeyMd5;
+
+    JSG_STRUCT(key,
+        version,
+        size,
+        etag,
+        uploaded,
+        storageClass,
+        checksums,
+        httpMetadata,
+        customMetadata,
+        range,
+        ssecKeyMd5);
+  };
+
   class HeadResult: public jsg::Object {
    public:
     HeadResult(kj::String name,
