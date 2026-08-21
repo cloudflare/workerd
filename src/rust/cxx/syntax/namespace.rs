@@ -33,6 +33,11 @@ impl Namespace {
         self.segments.iter()
     }
 
+    /// True for the global namespace.
+    pub fn is_empty(&self) -> bool {
+        self.segments.is_empty()
+    }
+
     pub fn parse_bridge_attr_namespace(input: ParseStream) -> Result<Self> {
         if input.is_empty() {
             return Ok(Self::ROOT);

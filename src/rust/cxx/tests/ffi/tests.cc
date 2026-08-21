@@ -24,6 +24,7 @@ extern "C" bool cxx_test_suite_r_is_correct(const tests::R *) noexcept;
 namespace tests {
 
 static constexpr char SLICE_DATA[] = "2020";
+static constexpr char16_t SLICE_DATA16[] = u"2020";
 
 static_assert(sizeof(SharedWithKjOwn) == sizeof(kj::Own<C>));
 static_assert(alignof(SharedWithKjOwn) == alignof(kj::Own<C>));
@@ -151,6 +152,21 @@ rust::Str c_return_str(const Shared &shared) {
 rust::Slice<const char> c_return_slice_char(const Shared &shared) {
   (void)shared;
   return rust::Slice<const char>(SLICE_DATA, sizeof(SLICE_DATA));
+}
+
+rust::Slice<const char16_t> c_return_slice_char16(const Shared &shared) {
+  (void)shared;
+  // Excludes the trailing NUL, unlike c_return_slice_char, so the Rust side can
+  // compare against "2020" directly.
+  return rust::Slice<const char16_t>(SLICE_DATA16, 4);
+}
+
+rust::Vec<char16_t> c_return_rust_vec_char16() {
+  rust::Vec<char16_t> vec;
+  for (char16_t c : rust::Slice<const char16_t>(SLICE_DATA16, 4)) {
+    vec.push_back(c);
+  }
+  return vec;
 }
 
 rust::Slice<uint8_t> c_return_mutsliceu8(rust::Slice<uint8_t> slice) {
@@ -513,6 +529,18 @@ void c_take_str(rust::Str s) {
 
 void c_take_slice_char(rust::Slice<const char> s) {
   if (std::string(s.data(), s.size()) == "2020") {
+    cxx_test_suite_set_correct();
+  }
+}
+
+void c_take_slice_char16(rust::Slice<const char16_t> s) {
+  if (std::u16string(s.data(), s.size()) == u"2020") {
+    cxx_test_suite_set_correct();
+  }
+}
+
+void c_take_rust_vec_char16(rust::Vec<char16_t> v) {
+  if (std::u16string(v.data(), v.size()) == u"2020") {
     cxx_test_suite_set_correct();
   }
 }
@@ -1090,6 +1118,8 @@ extern "C" const char *cxx_run_test() noexcept {
   r_take_ref_c(C{2020});
   r_take_str(rust::Str("2020"));
   r_take_slice_char(rust::Slice<const char>(SLICE_DATA, sizeof(SLICE_DATA)));
+  r_take_slice_char16(rust::Slice<const char16_t>(SLICE_DATA16, 4));
+  ASSERT(std::u16string(r_return_rust_vec_char16().data(), 4) == u"2020");
   r_take_rust_string(rust::String("2020"));
   r_take_unique_ptr_string(
       std::unique_ptr<std::string>(new std::string("2020")));
