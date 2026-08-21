@@ -466,7 +466,7 @@ void Container::startMonitor() {
   }).fork();
 
   currentMonitor =
-      IoContext::current().addObject(kj::heap<Monitor>(kj::mv(monitor), ++nextMonitorGeneration));
+      IoContext::current().createObject<Monitor>(kj::mv(monitor), ++nextMonitorGeneration);
 }
 
 jsg::Promise<void> Container::setLabels(jsg::Lock& js, jsg::Dict<kj::String> labels) {
@@ -1487,7 +1487,7 @@ jsg::Ref<Fetcher> Container::getTcpPort(jsg::Lock& js, int port) {
   auto portState = [&]() -> kj::Rc<TcpPortState> {
     if (util::Autogate::isEnabled(util::AutogateKey::CONTAINER_TUNNEL_REUSE)) {
       if (tcpPortStates == kj::none) {
-        tcpPortStates = ioctx.addObject(kj::heap<kj::HashMap<int, kj::Rc<TcpPortState>>>());
+        tcpPortStates = ioctx.createObject<kj::HashMap<int, kj::Rc<TcpPortState>>>();
       }
       auto& states = *KJ_ASSERT_NONNULL(tcpPortStates);
 

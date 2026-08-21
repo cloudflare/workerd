@@ -824,7 +824,7 @@ void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   auto& ioContext = IoContext::current();
   // Keep track of every AbortSignal cloned from this one.
   // If this->triggerAbort(...) is called, each rpcClient will be informed.
-  rpcClients.add(ioContext.addObject(kj::heap<AbortTriggerRpcClient>(kj::mv(triggerCap))));
+  rpcClients.add(ioContext.createObject<AbortTriggerRpcClient>(kj::mv(triggerCap)));
 }
 
 jsg::Ref<AbortSignal> AbortSignal::deserialize(

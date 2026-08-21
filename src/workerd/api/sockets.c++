@@ -983,7 +983,7 @@ jsg::Ref<Socket> Socket::deserialize(
   // socket is being torn down, so there is nothing to wire up). The wiring runs JS that can throw
   // with no user code on the stack, so each body is wrapped in JSG_TRY/JSG_CATCH and reports via
   // js.reportError() (matching the queueMicrotask() pattern in global-scope.c++).
-  auto disconnectedOwn = ioContext.addObject(kj::heap<kj::Promise<bool>>(kj::mv(disconnected)));
+  auto disconnectedOwn = ioContext.createObject<kj::Promise<bool>>(kj::mv(disconnected));
   js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate,
       js.wrapSimpleFunction(js.v8Context(),
           JSG_VISITABLE_LAMBDA((self = socket.addRef(), disconnected = kj::mv(disconnectedOwn)),
