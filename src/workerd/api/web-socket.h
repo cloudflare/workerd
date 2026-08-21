@@ -886,7 +886,10 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   // the map without locking the isolate.
   IoOwn<OutgoingMessagesMap> outgoingMessages;
 
-  AutoResponse autoResponseStatus;
+  // Auto-responses can run without a current IoContext, so they access the state directly while
+  // the IoOwn ensures it is destroyed by the owning IoContext.
+  IoOwn<AutoResponse> autoResponseStatusOwner;
+  AutoResponse& autoResponseStatus;
 
   kj::Maybe<kj::Own<WebSocketObserver>> observer;
 
