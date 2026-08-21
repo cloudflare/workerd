@@ -24,6 +24,14 @@ struct CryptoContext: public jsg::Object, public jsg::ContextGlobal {
 };
 JSG_DECLARE_ISOLATE_TYPE(CryptoIsolate, CryptoContext);
 
+KJ_TEST("OpenSSL input size guard rejects oversized buffers") {
+  KJ_EXPECT(isOpenSslInputSizeValid(0));
+  KJ_EXPECT(isOpenSslInputSizeValid(INT_MAX));
+  KJ_EXPECT(isOpenSslInputSizeValid(INT_MAX - 1, 1));
+  KJ_EXPECT(!isOpenSslInputSizeValid(static_cast<size_t>(INT_MAX) + 1));
+  KJ_EXPECT(!isOpenSslInputSizeValid(INT_MAX, 1));
+}
+
 KJ_TEST("AES-KW key wrap") {
   // Basic test that I wrote when I was seeing heap corruption. Found it easier to iterate on with
   // ASAN/valgrind than using our conformance tests with test-runner.
