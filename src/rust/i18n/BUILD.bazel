@@ -1,16 +1,12 @@
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
-# The bridge in `lib.rs` binds ICU's `ucnv_*` and simdutf's conversion
-# functions directly, so the crate needs their headers to generate the bridge
-# and their symbols at link time. ICU comes from `@workerd-v8//:v8`, the seam
-# every other workerd target uses for it; depending on the ICU repository
-# directly breaks builds that substitute their own V8/ICU for that module.
 wd_rust_crate(
     name = "i18n",
     cxx_bridge_deps = [
         "//src/rust/jsg",
         "@simdutf",
         "@workerd-v8//:v8",
+        # Also depends on ICU for bindings, which are extracted from the v8 dep above
     ],
     cxx_bridge_src = "lib.rs",
     link_deps = [
