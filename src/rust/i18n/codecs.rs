@@ -12,6 +12,7 @@
 //! substitute-character setup, truncation -- lives in [`crate::dispatch`].
 
 use std::ffi::CStr;
+use std::ffi::c_char;
 
 use crate::error::TranscodeError;
 use crate::ffi;
@@ -142,9 +143,9 @@ pub fn convert_ex(
     source: &[u8],
     target: &mut [u8],
 ) -> Option<usize> {
-    let target_start: *mut i8 = target.as_mut_ptr().cast();
+    let target_start: *mut c_char = target.as_mut_ptr().cast();
     let mut target_cursor = target_start;
-    let mut source_cursor: *const i8 = source.as_ptr().cast();
+    let mut source_cursor: *const c_char = source.as_ptr().cast();
     let mut err = UErrorCode::default();
 
     // SAFETY: both cursors start at the base of a live slice and are bounded
