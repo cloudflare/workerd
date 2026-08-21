@@ -7,7 +7,9 @@
 #include "r2-rpc.h"
 
 #include <workerd/api/streams/readable.h>
+#include <workerd/api/worker-rpc.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 
 namespace workerd::api {
 class Headers;
@@ -540,18 +542,56 @@ class R2Bucket: public jsg::Object {
   jsg::Promise<void> delete_(jsg::Lock& js,
       kj::OneOf<kj::String, kj::Array<kj::String>> keys,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+
+  // JSRPC equivalents of the above, selected by JSG_RESOURCE_TYPE when the
+  // R2_BINDINGS_JSRPC autogate and the r2_bindings_jsrpc compatibility flag are
+  // both on. They dispatch to the gateway's R2BindingEntrypoint instead of
+  // synthesising an HTTP request, then rebuild the public result types from the
+  // plain data JSRPC delivers.
+  //
+  // These keep ordinary typed signatures rather than taking a raw
+  // v8::FunctionCallbackInfo the way KvNamespace::deleteBulk does. A raw-args
+  // passthrough cannot work here: it returns the JsRpcPromise directly, so the
+  // caller receives the gateway's plain data and R2Object's methods and sync
+  // accessors are gone. Reconstruction needs the resolved value, which needs a
+  // real promise, which needs a typed return, which needs an injected
+  // TypeHandler -- and TypeHandlers are only injected into typed signatures.
+  jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> headRpc(jsg::Lock& js,
+      kj::String key,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropType,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String)>>& fnType,
+      const jsg::TypeHandler<kj::Maybe<HeadResultRpc>>& resultType);
+  jsg::Promise<void> deleteRpc(jsg::Lock& js,
+      kj::OneOf<kj::String, kj::Array<kj::String>> keys,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropType,
+      const jsg::TypeHandler<
+          jsg::Function<jsg::Value(kj::OneOf<kj::String, kj::Array<kj::String>>)>>& fnType);
   jsg::Promise<ListResult> list(jsg::Lock& js,
       jsg::Optional<ListOptions> options,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
       CompatibilityFlags::Reader flags);
 
   JSG_RESOURCE_TYPE(R2Bucket, CompatibilityFlags::Reader flags) {
-    JSG_METHOD(head);
+    // Two gates, and they do different jobs. The autogate is the fleet-wide kill switch, flipped
+    // per metal via Release Manager; it cannot distinguish accounts. The compatibility flag is what
+    // restricts the new transport to allowlisted workers, because it is marked $experimental and
+    // EWC decides who may opt in. Neither alone is sufficient.
+    //
+    // Only head and delete are migrated so far; the rest stay on the HTTP transport, including all
+    // of R2MultipartUpload, whose methods would additionally need the upload's key and uploadId
+    // threaded into the call.
+    if (util::Autogate::isEnabled(util::AutogateKey::R2_BINDINGS_JSRPC) &&
+        flags.getR2BindingsJsrpc()) {
+      JSG_METHOD_NAMED(head, headRpc);
+      JSG_METHOD_NAMED(delete, deleteRpc);
+    } else {
+      JSG_METHOD(head);
+      JSG_METHOD_NAMED(delete, delete_);
+    }
     JSG_METHOD(get);
     JSG_METHOD(put);
     JSG_METHOD(createMultipartUpload);
     JSG_METHOD(resumeMultipartUpload);
-    JSG_METHOD_NAMED(delete, delete_);
     JSG_METHOD(list);
 
     JSG_TS_ROOT();
@@ -649,6 +689,11 @@ class R2Bucket: public jsg::Object {
   kj::Maybe<kj::String> jwt;
 
   kj::Own<kj::HttpClient> getHttpClient(IoContext& context, TraceContext& traceContext);
+
+  // Look up a method on the gateway's entrypoint over this binding's subrequest
+  // channel. Which entrypoint that resolves to is decided by the channel's
+  // configuration, not here -- a JSRPC call carries no entrypoint name.
+  jsg::Ref<JsRpcProperty> getRpcMethod(jsg::Lock& js, kj::StringPtr methodName);
 
   friend class R2MultipartUpload;
 };

@@ -1,0 +1,31 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The JSRPC transport for R2 bindings. r2-test.wd-test covers the HTTP transport and stays as it
+# is -- both paths ship simultaneously, selected by the gate below, so both need coverage.
+#
+# Reaching the JSRPC method table needs three things to line up:
+#   - the R2_BINDINGS_JSRPC autogate (the fleet-wide kill switch)
+#   - the r2_bindings_jsrpc compatibility flag, which is $experimental and so also needs
+#     "experimental" in the flag list here
+#   - a binding that targets the named entrypoint the gateway exposes
+#
+# The `entrypoint` below is the point of this file. A bare-string designator would target the
+# default export and would not exercise named-entrypoint dispatch, which is the production shape.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "r2-jsrpc-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "r2-jsrpc-test.js" )
+        ],
+        bindings = [
+          ( name = "BUCKET",
+            r2Bucket = (name = "r2-jsrpc-test", entrypoint = "R2BindingEntrypoint") ),
+        ],
+        compatibilityFlags = ["experimental", "nodejs_compat", "r2_bindings_jsrpc",
+                              "disable_fast_jsg_struct"],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-r2-bindings-jsrpc"],
+);
