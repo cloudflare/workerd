@@ -851,12 +851,14 @@ class ExternString: public Type {
   // IN THE SOFTWARE.
 
  public:
+  using Backing = kj::OneOf<kj::ArrayPtr<const Data>, kj::Arc<kj::Array<const Data>>>;
+
   inline const Data* data() const override {
-    return buf.begin();
+    return getBuffer().begin();
   }
 
   inline size_t length() const override {
-    return buf.size();
+    return getBuffer().size();
   }
 
   inline uint64_t byteLength() const {
@@ -871,9 +873,8 @@ class ExternString: public Type {
     allocator.deallocate(this);
   }
 
-  static v8::MaybeLocal<v8::String> createExtern(
-      v8::Isolate* isolate, kj::ArrayPtr<const Data>& buf) {
-    if (buf.size() == 0) {
+  static v8::MaybeLocal<v8::String> createExtern(v8::Isolate* isolate, Backing backing) {
+    if (getBuffer(backing).size() == 0) {
       return v8::String::Empty(isolate);
     }
 
@@ -890,7 +891,7 @@ class ExternString: public Type {
       return v8::MaybeLocal<v8::String>();
     }
 
-    auto resource = new (mem) ExternString<Type, Data>(isolate, buf);
+    auto resource = new (mem) ExternString<Type, Data>(isolate, kj::mv(backing));
 
     v8::MaybeLocal<v8::String> str;
     if constexpr (kj::isSameType<Type, v8::String::ExternalOneByteStringResource>()) {
@@ -913,11 +914,22 @@ class ExternString: public Type {
 
  private:
   v8::Isolate* isolate;
-  kj::ArrayPtr<const Data> buf;
+  Backing backing;
 
-  inline ExternString(v8::Isolate* isolate, kj::ArrayPtr<const Data>& buf)
+  static kj::ArrayPtr<const Data> getBuffer(const Backing& backing) {
+    if (backing.template is<kj::ArrayPtr<const Data>>()) {
+      return backing.template get<kj::ArrayPtr<const Data>>();
+    }
+    return backing.template get<kj::Arc<kj::Array<const Data>>>()->asPtr();
+  }
+
+  kj::ArrayPtr<const Data> getBuffer() const {
+    return getBuffer(backing);
+  }
+
+  inline ExternString(v8::Isolate* isolate, Backing backing)
       : isolate(isolate),
-        buf(buf) {}
+        backing(kj::mv(backing)) {}
 };
 
 using ExternOneByteString = ExternString<v8::String::ExternalOneByteStringResource, char>;
@@ -927,8 +939,16 @@ v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char
   return check(ExternOneByteString::createExtern(js.v8Isolate, buf));
 }
 
+v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::Arc<OwnedAscii> buf) {
+  return check(ExternOneByteString::createExtern(js.v8Isolate, kj::mv(buf)));
+}
+
 v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf) {
   return check(ExternTwoByteString::createExtern(js.v8Isolate, buf));
+}
+
+v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::Arc<OwnedUtf16> buf) {
+  return check(ExternTwoByteString::createExtern(js.v8Isolate, kj::mv(buf)));
 }
 
 // ======================================================================================

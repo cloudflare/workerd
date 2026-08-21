@@ -1067,7 +1067,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
                         jsg::modules::Module::newEsm(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
-                            kj::heapArray<const char>(content.body)));
+                            kj::arc<jsg::OwnedAscii>(kj::heapArray<const char>(content.body))));
                   }
                   KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
                     auto ownedData = kj::str(content.body);
