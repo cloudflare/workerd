@@ -30,7 +30,7 @@ jobs:
     needs: [test]
     uses: ./.github/workflows/_wpt.yml
     with:
-        image: ubuntu-22.04
+        image: ubuntu-26.04
         logs_artifact: 'test-logs-linux-X64.zip'
         report_artifact: 'wpt-report.json'
 
