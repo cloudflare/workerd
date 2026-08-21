@@ -4,6 +4,9 @@
 
 import wrappedBinding from 'cloudflare-internal:wrapped-binding';
 
+const workflowsInstanceSubscribeEnabled =
+  !!Cloudflare.compatibilityFlags['workflows_instance_subscribe'];
+
 export class NonRetryableError extends Error {
   constructor(message: string, name = 'NonRetryableError') {
     super(message);
@@ -39,6 +42,10 @@ interface Fetcher {
     id: string,
     event: { type: string; payload: unknown }
   ): Promise<void>;
+  subscribe(
+    id: string,
+    options?: WorkflowInstanceSubscribeOptions
+  ): Promise<WorkflowInstanceSubscription>;
 }
 
 class InstanceImpl implements WorkflowInstance {
@@ -84,6 +91,22 @@ class InstanceImpl implements WorkflowInstance {
     payload: unknown;
   }): Promise<void> {
     await this.#fetcher.sendEvent(this.id, { type, payload });
+  }
+
+  async subscribe(
+    options?: WorkflowInstanceSubscribeOptions
+  ): Promise<WorkflowInstanceSubscription> {
+    if (!workflowsInstanceSubscribeEnabled) {
+      throw new Error(
+        'WorkflowInstance.subscribe() requires the workflows_instance_subscribe compatibility flag. Enable workflows_instance_subscribe before calling subscribe().'
+      );
+    }
+
+    const subscription = await this.#fetcher.subscribe(this.id, options);
+    Object.defineProperty(subscription, Symbol.asyncIterator, {
+      value: () => subscription,
+    });
+    return subscription;
   }
 }
 
