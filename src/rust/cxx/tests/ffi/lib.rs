@@ -29,6 +29,7 @@ use cxx::KjError;
 use cxx::KjExceptionType;
 use cxx::SharedPtr;
 use cxx::UniquePtr;
+use cxx::c_char16;
 use cxx::type_id;
 // The bridge parser accepts the unqualified smart-pointer name, while expansion
 // fully qualifies the emitted Rust field type.
@@ -153,6 +154,8 @@ pub mod ffi {
         unsafe fn c_return_mut<'a>(shared: &'a mut Shared) -> &'a mut usize;
         unsafe fn c_return_str<'a>(shared: &'a Shared) -> &'a str;
         unsafe fn c_return_slice_char<'a>(shared: &'a Shared) -> &'a [c_char];
+        unsafe fn c_return_slice_char16<'a>(shared: &'a Shared) -> &'a [c_char16];
+        fn c_return_rust_vec_char16() -> Vec<c_char16>;
         unsafe fn c_return_mutsliceu8<'a>(slice: &'a mut [u8]) -> &'a mut [u8];
         unsafe fn c_return_ref<'a>(shared: &'a Shared) -> &'a usize;
         fn c_return_rust_string() -> String;
@@ -245,6 +248,8 @@ pub mod ffi {
         fn c_take_ref_c(c: &C);
         fn c_take_str(s: &str);
         fn c_take_slice_char(s: &[c_char]);
+        fn c_take_slice_char16(s: &[c_char16]);
+        fn c_take_rust_vec_char16(v: Vec<c_char16>);
         fn c_take_slice_shared(s: &[Shared]);
         fn c_take_slice_shared_sort(s: &mut [Shared]);
         fn c_take_slice_r(s: &[R]);
@@ -430,6 +435,8 @@ pub mod ffi {
         fn r_take_ref_c(c: &C);
         fn r_take_str(s: &str);
         fn r_take_slice_char(s: &[c_char]);
+        fn r_take_slice_char16(s: &[c_char16]);
+        fn r_return_rust_vec_char16() -> Vec<c_char16>;
         fn r_take_rust_string(s: String);
         fn r_take_unique_ptr_string(s: UniquePtr<CxxString>);
         fn r_take_ref_vector(v: &CxxVector<u8>);
@@ -756,6 +763,16 @@ fn r_take_slice_char(s: &[c_char]) {
     assert_eq!(s.len(), 5);
     let s = cast::c_char_to_unsigned(s);
     assert_eq!(std::str::from_utf8(s), Ok("2020\0"));
+}
+
+// c_char16 is an alias for u16, so a &[c_char16] is a &[u16] and UTF-16 from
+// the standard library needs no conversion to cross the bridge.
+fn r_take_slice_char16(s: &[c_char16]) {
+    assert_eq!(String::from_utf16_lossy(s), "2020");
+}
+
+fn r_return_rust_vec_char16() -> Vec<c_char16> {
+    "2020".encode_utf16().collect()
 }
 
 fn r_take_unique_ptr_string(s: UniquePtr<CxxString>) {

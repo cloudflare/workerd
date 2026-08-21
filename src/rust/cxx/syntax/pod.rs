@@ -12,8 +12,8 @@ impl Types<'_> {
                 let ident = &ident.rust;
                 if let Some(atom) = Atom::from(ident) {
                     match atom {
-                        Bool | Char | U8 | U16 | U32 | U64 | Usize | I8 | I16 | I32 | I64
-                        | Isize | F32 | F64 => true,
+                        Bool | Char | Char16 | U8 | U16 | U32 | U64 | Usize | I8 | I16 | I32
+                        | I64 | Isize | F32 | F64 => true,
                         CxxString | RustString => false,
                     }
                 } else if let Some(strct) = self.structs.get(ident) {

@@ -9,6 +9,10 @@ use crate::Type;
 pub enum Atom {
     Bool,
     Char, // C char, not Rust char
+    // C++ char16_t. Layout-identical to u16 but a distinct C++ type, so it is a
+    // distinct atom: it exists to make overload resolution and name mangling on
+    // the C++ side pick char16_t rather than uint16_t.
+    Char16,
     U8,
     U16,
     U32,
@@ -35,6 +39,7 @@ impl Atom {
         match s {
             "bool" => Some(Bool),
             "c_char" => Some(Char),
+            "c_char16" => Some(Char16),
             "u8" => Some(U8),
             "u16" => Some(U16),
             "u32" => Some(U32),
@@ -66,6 +71,7 @@ impl AsRef<str> for Atom {
         match self {
             Bool => "bool",
             Char => "c_char",
+            Char16 => "c_char16",
             U8 => "u8",
             U16 => "u16",
             U32 => "u32",
