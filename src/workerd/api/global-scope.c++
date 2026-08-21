@@ -255,7 +255,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // closes it or returns.
     jsg::Ref<Socket> jsSocket = setupSocket(js, ownConnection.addRef().toOwn(),
         kj::mv(clientAddress), kj::mv(host), SocketOptions{.allowHalfOpen = true},
-        kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::none, false, kj::none);
+        kj::mv(nullTlsStarter), SecureTransportKind::OFF, SocketProtocol::TCP, kj::none, false, kj::none);
     // handleProxyStatus() is required to indicate that the socket was opened properly. Since the
     // connection is already open at this point, exception handling is not required.
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
