@@ -17,6 +17,14 @@ async function getLastRestartBody(env, id) {
   return (await res.json()).result;
 }
 
+async function getLastSubscribeOptions(env, id) {
+  const res = await env.mock.fetch('http://placeholder/last-subscribe', {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+  });
+  return (await res.json()).result;
+}
+
 export const workflowsApi = {
   async test(_, env) {
     {
@@ -108,6 +116,7 @@ export const workflowsApi = {
         'delete',
         'status',
         'sendEvent',
+        'subscribe',
       ]) {
         assert.strictEqual(typeof fromGet[method], 'function');
       }
@@ -125,6 +134,46 @@ export const workflowsApi = {
         message: 'workflow instance not found',
       });
     }
+  },
+};
+
+export const subscribeNoOptions = {
+  async test(_, env) {
+    const instance = await env.workflow.get('subscribe-basic');
+    using subscription = await instance.subscribe();
+
+    assert.deepStrictEqual(await subscription.next(), {
+      done: false,
+      value: {
+        instanceId: 'subscribe-basic',
+        eventId: 0,
+        timestamp: 0,
+        type: 'workflow_completed',
+        output: 'done',
+      },
+    });
+    assert.deepStrictEqual(await subscription.next(), {
+      done: true,
+      value: undefined,
+    });
+    assert.strictEqual(
+      await getLastSubscribeOptions(env, 'subscribe-basic'),
+      null
+    );
+  },
+};
+
+export const subscribeAllOptions = {
+  async test(_, env) {
+    const instance = await env.workflow.get('subscribe-full');
+    using _subscription = await instance.subscribe({
+      cursor: 1,
+      filter: ['workflow_queued', 'workflow_completed'],
+    });
+    assert.deepStrictEqual(
+      await getLastSubscribeOptions(env, 'subscribe-full'),
+      { cursor: 1, filter: ['workflow_queued', 'workflow_completed'] }
+    );
   },
 };
 
