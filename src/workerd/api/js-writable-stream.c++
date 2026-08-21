@@ -17,13 +17,13 @@ namespace workerd::api {
 
 namespace {
 
-// True only for genuine TypeScript-implemented WritableStream instances (including
-// subclasses); false for everything else, including proxies wrapping a stream: an
-// own-property probe on a proxy would invoke its traps, and private fields do not tunnel
-// through proxies either, so rejecting proxies up front matches the TS-side #-brand
-// behavior. Runs no JavaScript -- recognition must work during RPC deserialization, inside
-// V8's no-JS-execution scope -- so it probes for the own api-symbol brand stamped by the
-// TypeScript constructor rather than asking the TS implementation.
+// Recognizes the TypeScript implementation's WritableStream (including subclasses) by the own
+// api-symbol brand its constructor stamps on every instance; the writable counterpart of
+// isTypeScriptReadableStream(), where the reasoning is spelled out. Runs no JavaScript, answers
+// false for proxies, and is recognition rather than authentication: user code can stamp the
+// reflection-visible brand on an object of its own, so consumers re-validate against the real
+// #-brand -- here, the writer acquisition that JsWritableStream::serialize() performs before it
+// writes anything to the wire.
 bool isTypeScriptWritableStream(jsg::Lock& js, jsg::JsObject obj) {
   if (v8::Local<v8::Value>(obj)->IsProxy()) {
     return false;
@@ -229,7 +229,6 @@ class TsWriterSink final: public WritableStreamSink {
   kj::Maybe<jsg::JsRef<jsg::JsObject>> writer;
   bool ended = false;
 
-  // Invoke a writer method under the isolate lock, returning its (required) promise result.
   // Drive a writer operation through the frozen cppExports internals (never the public
   // writer prototype methods, which are user-patchable: a replaced write/close must not be
   // able to intercept or fake a stream's RPC transfer), returning its (required) promise
@@ -260,7 +259,7 @@ class TsWriterSink final: public WritableStreamSink {
   static kj::Exception disconnectedException() {
     return JSG_KJ_EXCEPTION(DISCONNECTED, Error,
         "WritableStream received over RPC was disconnected because the remote execution context "
-        "has endeded.");
+        "has ended.");
   }
 };
 

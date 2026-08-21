@@ -32,14 +32,27 @@ bool getReadableStreamIsDisturbed(jsg::Lock& js, jsg::JsObject obj) {
   return webstreams::dispatchCall(js, "getReadableStreamIsDisturbed", obj).isTrue();
 }
 
-// The TypeScript implementation's private-brand check. True only for genuine
-// TypeScript-implemented ReadableStream instances (including subclasses); false for
-// everything else, including proxies wrapping a stream: an own-property probe on a proxy
-// would invoke its traps, and private fields do not tunnel through proxies either, so
-// rejecting proxies up front matches the TS-side #-brand behavior. Runs no JavaScript --
-// recognition must work during RPC deserialization, inside V8's no-JS-execution scope -- so
-// it probes for the own api-symbol brand stamped by the TypeScript constructor rather than
-// asking the TS implementation.
+// Recognizes the TypeScript implementation's ReadableStream (including subclasses) by the own
+// api-symbol brand its constructor stamps on every instance. Runs no JavaScript -- recognition
+// must work during RPC deserialization, inside V8's no-JS-execution scope -- so it probes for
+// the brand rather than asking the TS implementation. Proxies answer false: an own-property
+// probe on a proxy would invoke its traps, and the TS-side #-brand does not tunnel through
+// proxies either.
+//
+// This is recognition, not authentication. An api symbol stays visible to reflection
+// (Object.getOwnPropertySymbols) on every instance, so user code can read it off a real stream
+// and stamp it on an object of its own: a true answer means "route this as a TypeScript
+// stream", not "this is one". Genuine instances cannot lose the brand, which is stamped
+// non-writable and non-configurable. What protects the consumers is that recognition grants
+// nothing on its own -- every operation reached afterwards goes through the TS internal
+// algorithms, whose real #-brand checks throw a TypeError on an impostor, and on both RPC
+// serialize arms that rejection lands before anything is written to the wire.
+//
+// An impostor also cannot arrive over the wire, because V8's value serializer emits only own
+// enumerable string keys (dropping any symbol-keyed brand) and will not serialize an
+// unrecognized class instance at all. Every branded object reachable inside the no-JS
+// deserialization scope is therefore one this runtime just built -- the premise the state
+// probes in isDisturbed() and isLocked() rest on.
 bool isTypeScriptReadableStream(jsg::Lock& js, jsg::JsObject obj) {
   if (v8::Local<v8::Value>(obj)->IsProxy()) {
     return false;
@@ -1162,12 +1175,14 @@ void JsReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       // Mirrors ReadableStream::serialize(): pumpTo() performs the lock/disturb validation,
       // so the stream must not be modified before that call (the encoding/length queries are
       // non-mutating reads).
+      auto& externalHandler = requireReadableStreamRpcSerializer(serializer);
+
       IoContext& ioctx = IoContext::current();
 
       auto encoding = getPreferredEncoding(js);
       auto expectedLength = tryGetLength(js, encoding);
 
-      auto sink = newReadableStreamSerializeSink(js, serializer, encoding, expectedLength);
+      auto sink = newReadableStreamSerializeSink(externalHandler, encoding, expectedLength);
 
       ioctx.addTask(ioctx.waitForDeferredProxy(pumpTo(js, kj::mv(sink), EndStream::YES))
                         .catch_([](kj::Exception&& e) {

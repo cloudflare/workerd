@@ -1319,6 +1319,22 @@ KJ_TEST("JsWritableStream::tryUnwrapTs adopts TypeScript streams and rejects imp
     auto sinkObj = jsg::JsValue(handler.wrap(
         js, js.alloc<WritableStreamNativeSink>(env.context, state.makeSink(), kj::none, kj::none)));
     KJ_EXPECT(JsWritableStream::tryUnwrapTs(js, sinkObj) == kj::none);
+
+    // The brand is recognition, not authentication: an api symbol stays reflection-visible,
+    // so an object carrying a copy of it unwraps. Recognition grants nothing on its own --
+    // the TypeScript internal algorithms re-check the real #-brand, so the first operation
+    // on the adopted impostor throws.
+    auto impostorObj = js.obj();
+    impostorObj.setNonEnumerable(js, js.symbolInternal("kWritableStreamBrand"), js.boolean(true));
+    auto impostor = KJ_ASSERT_NONNULL(JsWritableStream::tryUnwrapTs(js, jsg::JsValue(impostorObj)));
+    bool threw = false;
+    js.tryCatch(
+        [&]() { auto locked KJ_UNUSED = impostor.isLocked(js); }, [&](jsg::Value exception) {
+      threw = true;
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("TypeError"), e.getDescription());
+    });
+    KJ_EXPECT(threw, "expected the impostor to fail the TypeScript #-brand check");
   });
 }
 

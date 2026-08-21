@@ -703,8 +703,17 @@ kj::Own<ReadableStreamSource> newNoDeferredProxyReadableStream(
   return kj::heap<NoDeferredProxyReadableStream>(kj::mv(inner), context);
 }
 
-kj::Own<WritableStreamSink> newReadableStreamSerializeSink(jsg::Lock& js,
-    jsg::Serializer& serializer,
+RpcSerializerExternalHandler& requireReadableStreamRpcSerializer(jsg::Serializer& serializer) {
+  auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
+      "ReadableStream can only be serialized for RPC.");
+  auto externalHandler = dynamic_cast<RpcSerializerExternalHandler*>(&handler);
+  JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
+      "ReadableStream can only be serialized for RPC.");
+  return *externalHandler;
+}
+
+kj::Own<WritableStreamSink> newReadableStreamSerializeSink(
+    RpcSerializerExternalHandler& externalHandler,
     StreamEncoding encoding,
     kj::Maybe<uint64_t> expectedLength) {
   // Serialize by effectively creating a `JsRpcStub` around the stream and serializing that.
@@ -712,23 +721,17 @@ kj::Own<WritableStreamSink> newReadableStreamSerializeSink(jsg::Lock& js,
   // a `JsRpcStub` locally. So do the important parts of `JsRpcStub::constructor()` followed by
   // `JsRpcStub::serialize()`.
 
-  auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
-      "ReadableStream can only be serialized for RPC.");
-  auto externalHandler = dynamic_cast<RpcSerializerExternalHandler*>(&handler);
-  JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
-      "ReadableStream can only be serialized for RPC.");
-
   IoContext& ioctx = IoContext::current();
 
   capnp::ByteStream::Client streamCap = [&]() {
-    auto req = externalHandler->getExternalPusher().pushByteStreamRequest(capnp::MessageSize{2, 0});
+    auto req = externalHandler.getExternalPusher().pushByteStreamRequest(capnp::MessageSize{2, 0});
     KJ_IF_SOME(el, expectedLength) {
       req.setLengthPlusOne(el + 1);
     }
     auto pipeline = req.sendForPipeline();
 
-    externalHandler->write([encoding, expectedLength, source = pipeline.getSource()](
-                               rpc::JsValue::External::Builder builder) mutable {
+    externalHandler.write([encoding, expectedLength, source = pipeline.getSource()](
+                              rpc::JsValue::External::Builder builder) mutable {
       auto rs = builder.initReadableStream();
       rs.setStream(kj::mv(source));
       rs.setEncoding(encoding);
@@ -748,13 +751,15 @@ void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   //   and other common checks. It's important that we don't modify the stream in any way before
   //   that call.
 
+  auto& externalHandler = requireReadableStreamRpcSerializer(serializer);
+
   IoContext& ioctx = IoContext::current();
 
   auto& controller = getController();
   StreamEncoding encoding = controller.getPreferredEncoding();
   auto expectedLength = controller.tryGetLength(encoding);
 
-  auto sink = newReadableStreamSerializeSink(js, serializer, encoding, expectedLength);
+  auto sink = newReadableStreamSerializeSink(externalHandler, encoding, expectedLength);
 
   ioctx.addTask(
       ioctx.waitForDeferredProxy(pumpTo(js, kj::mv(sink), true)).catch_([](kj::Exception&& e) {

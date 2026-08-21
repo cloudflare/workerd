@@ -1616,7 +1616,7 @@ export let streams = {
       assert.strictEqual(
         reason.message,
         'WritableStream received over RPC was disconnected because the remote execution ' +
-          'context has endeded.'
+          'context has ended.'
       );
     }
 

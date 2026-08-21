@@ -324,7 +324,7 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
   static kj::Exception cancellationException() {
     return JSG_KJ_EXCEPTION(DISCONNECTED, Error,
         "WritableStream received over RPC was disconnected because the remote execution context "
-        "has endeded.");
+        "has ended.");
   }
 };
 
@@ -494,7 +494,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
   static kj::Exception cancellationException() {
     return JSG_KJ_EXCEPTION(DISCONNECTED, Error,
         "WritableStream received over RPC was disconnected because the remote execution context "
-        "has endeded.");
+        "has ended.");
   }
 };
 
