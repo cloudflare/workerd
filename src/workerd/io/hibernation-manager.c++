@@ -42,8 +42,32 @@ kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> HibernationManagerImpl::
       "HibernationManagerImpl::getWebSocketAutoResponse not yet implemented (EW-10817)");
 }
 
+void HibernationManagerImpl::setLoopback(kj::Own<Worker::Actor::Loopback> loopback) {
+  KJ_UNIMPLEMENTED("HibernationManagerImpl::setLoopback not yet implemented (EW-10817)");
+}
+
+void HibernationManagerImpl::beginLoopbackHandoff() {
+  KJ_UNIMPLEMENTED("HibernationManagerImpl::beginLoopbackHandoff not yet implemented (EW-10817)");
+}
+
+void HibernationManagerImpl::cancelLoopbackHandoff() {
+  KJ_UNIMPLEMENTED("HibernationManagerImpl::cancelLoopbackHandoff not yet implemented (EW-10817)");
+}
+
 void HibernationManagerImpl::setTimerChannel(TimerChannel& timerChannel) {
   KJ_UNIMPLEMENTED("HibernationManagerImpl::setTimerChannel not yet implemented (EW-10817)");
+}
+
+void HibernationManagerImpl::setOwningActor(Worker::Actor& actor) {
+  KJ_UNIMPLEMENTED("HibernationManagerImpl::setOwningActor not yet implemented (EW-10817)");
+}
+
+kj::Maybe<Worker::Actor&> HibernationManagerImpl::getOwningActor() {
+  KJ_UNIMPLEMENTED("HibernationManagerImpl::getOwningActor not yet implemented (EW-10817)");
+}
+
+kj::Maybe<const Worker::Actor::Id&> HibernationManagerImpl::getOwningActorId() {
+  KJ_UNIMPLEMENTED("HibernationManagerImpl::getOwningActorId not yet implemented (EW-10817)");
 }
 
 kj::Own<Worker::Actor::HibernationManager> HibernationManagerImpl::addRef() {

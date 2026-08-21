@@ -234,6 +234,11 @@ struct TestFixture {
   // outlives the actor by virtue of the test holding it.
   void resetActor();
 
+  // Same, but the replacement actor answers to `id` instead of the outgoing actor's. Lets a test
+  // stand up an actor that is a different Durable Object rather than a new generation of the same
+  // one, which is the distinction identity checks on an orphaned HibernationManager turn on.
+  void resetActor(Worker::Actor::Id id);
+
  private:
   kj::Maybe<kj::WaitScope&> waitScope;
   capnp::MallocMessageBuilder configArena;

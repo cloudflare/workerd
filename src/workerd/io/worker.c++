@@ -3906,6 +3906,13 @@ Worker::Actor::Actor(const Worker& worker,
   } else {
     impl->classInstance = Impl::NoClass();
   }
+
+  // Attach the manager only once this actor is fully built: attaching releases hibernatable
+  // WebSocket events queued while the previous generation went away, and delivering one reaches
+  // straight back into `impl` and `impl->classInstance`.
+  KJ_IF_SOME(m, impl->hibernationManager) {
+    attachHibernationManager(*m);
+  }
 }
 
 void Worker::Actor::ensureConstructed(IoContext& context) {
@@ -4008,6 +4015,8 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
 Worker::Actor::~Actor() noexcept(false) {
   // Note: We do not need an isolate lock to destroy the actor impl. Everything in it is specific
   // to our thread, or is a handle that can be dropped outside of the lock.
+
+  selfRef->invalidate();
 }
 
 void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error) {
@@ -4387,16 +4396,37 @@ kj::Maybe<Worker::Actor::HibernationManager&> Worker::Actor::getHibernationManag
       [](kj::Own<HibernationManager>& hib) -> HibernationManager& { return *hib; });
 }
 
-void Worker::Actor::setHibernationManager(kj::Own<HibernationManager> hib) {
-  KJ_REQUIRE(impl->hibernationManager == kj::none);
-  hib->setTimerChannel(impl->timerChannel);
+void Worker::Actor::attachHibernationManager(HibernationManager& manager) {
   // Not the cleanest way to provide hibernation manager with a timer channel reference, but
   // where HibernationManager is constructed (actor-state), we don't have a timer channel ref.
+  manager.setTimerChannel(impl->timerChannel);
+
+  manager.setOwningActor(*this);
+
+  // The loopback goes last. Supplying it releases any events the manager queued while it had no
+  // actor, and those are dispatched against the owning actor set just above.
+  manager.setLoopback(impl->loopback->addRef());
+}
+
+void Worker::Actor::setHibernationManager(kj::Own<HibernationManager> hib) {
+  KJ_REQUIRE(impl->hibernationManager == kj::none);
+
+  // Point the manager at this actor, as the constructor does for a manager supplied there. A
+  // manager built by acceptWebSocket() already points here, but an adopted one carries the loopback
+  // and owning actor of the actor that created it -- an actor that is, by the time anything adopts
+  // its manager, on its way out. Leaving those in place would send the manager's events to a dead
+  // generation, or leave them queued for a replacement loopback that nothing will ever supply.
+  attachHibernationManager(*hib);
+
   impl->hibernationManager = kj::mv(hib);
 }
 
 kj::Maybe<uint16_t> Worker::Actor::getHibernationEventType() {
   return impl->hibernationEventType;
+}
+
+kj::Own<Worker::Actor::WeakRef> Worker::Actor::getWeakRef() {
+  return kj::addRef(*selfRef);
 }
 
 kj::Own<Worker::Actor> Worker::Actor::addRef() {

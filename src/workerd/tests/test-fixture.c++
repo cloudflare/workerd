@@ -428,7 +428,10 @@ kj::Own<Worker::Actor> TestFixture::makeActor(Worker::Actor::Id id) {
 }
 
 void TestFixture::resetActor() {
-  auto id = KJ_ASSERT_NONNULL(actor)->cloneId();
+  resetActor(KJ_ASSERT_NONNULL(actor)->cloneId());
+}
+
+void TestFixture::resetActor(Worker::Actor::Id id) {
   actor = kj::none;  // Drop the old Actor (and its OutputGate / InputGate / ActorCache).
   actor = makeActor(kj::mv(id));
 }

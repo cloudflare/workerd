@@ -892,7 +892,28 @@ class Worker::Actor final: public kj::Refcounted {
         kj::Maybe<kj::StringPtr> request, kj::Maybe<kj::StringPtr> response) = 0;
     virtual kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse(
         jsg::Lock& js) = 0;
+    // A loopback is how the manager reaches its actor to deliver an event. A code update replaces
+    // the actor that supplied one, so beginLoopbackHandoff() parks it: events arriving while it is
+    // parked wait for a loopback instead of being delivered to the outgoing generation. The handoff
+    // ends when the replacement actor calls setLoopback(), or when whoever began it calls
+    // cancelLoopbackHandoff() to put the parked loopback back.
+    virtual void beginLoopbackHandoff() = 0;
+    virtual void cancelLoopbackHandoff() = 0;
+    virtual void setLoopback(kj::Own<Loopback> loopback) = 0;
     virtual void setTimerChannel(TimerChannel& timerChannel) = 0;
+
+    // Points the manager at the actor that owns it. The manager holds only a weak reference, so it
+    // can tell whether that actor is still alive.
+    virtual void setOwningActor(Actor& actor) = 0;
+
+    // The actor that owns this manager, or kj::none if no live actor does.
+    virtual kj::Maybe<Actor&> getOwningActor() = 0;
+
+    // The ID of the actor that owns this manager, or kj::none if no actor has ever owned it. The
+    // manager keeps its own copy, so unlike getOwningActor() this still names the owner after a
+    // code update has destroyed it -- which is when identity most needs checking, since that is
+    // the point at which a replacement adopts the manager.
+    virtual kj::Maybe<const Id&> getOwningActorId() = 0;
     virtual kj::Own<HibernationManager> addRef() = 0;
     virtual void setEventTimeout(kj::Maybe<uint32_t> timeoutMs) = 0;
     virtual kj::Maybe<uint32_t> getEventTimeout() = 0;
@@ -1063,13 +1084,24 @@ class Worker::Actor final: public kj::Refcounted {
 
   kj::Own<Worker::Actor> addRef();
 
+  using WeakRef = workerd::WeakRef<Actor>;
+
+  // A reference that goes invalid when this actor is destroyed.
+  kj::Own<WeakRef> getWeakRef();
+
  private:
   kj::Promise<WorkerInterface::ScheduleAlarmResult> handleAlarm(kj::Date scheduledTime);
+
+  // Point a manager at this actor. Both the constructor and setHibernationManager() go through
+  // here, so an adopted manager ends up in the same state as one supplied at construction.
+  void attachHibernationManager(HibernationManager& manager);
 
   kj::Own<const Worker> worker;
   kj::Maybe<kj::Own<RequestTracker>> tracker;
   struct Impl;
   kj::Own<Impl> impl;
+
+  kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<Actor>(), *this);
 
   kj::Maybe<api::ExportedHandler&> getHandler();
   friend class Worker;
