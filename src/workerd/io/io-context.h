@@ -1209,6 +1209,17 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::Maybe<InputGate::Lock> inputLock,
       Runnable::Exceptional exceptional);
 
+  // Runs the actions another IoContext queued on our delete queue. Settling a promise this context
+  // owns can run arbitrary JavaScript, so this is called from runImpl(), where a current
+  // IncomingRequest supplies the metrics, tracing, timer, and IoChannelFactory that JavaScript may
+  // reach for.
+  void drainCrossContextActions(Worker::Lock& workerLock);
+
+  // Starts a run() whose only purpose is to let runImpl() drain queued cross-context actions,
+  // returning kj::none if no IncomingRequest can currently own that run. The run is registered as
+  // a wait-until task so the request stays alive until it completes.
+  kj::Maybe<kj::Promise<void>> scheduleCrossContextActionDrain();
+
   // Detect whether a callback accepts IoContext& as a second argument.
   // Used by run() and blockConcurrencyWhile() to optionally pass *this.
   template <typename Func>

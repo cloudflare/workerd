@@ -1330,6 +1330,46 @@ void IoContext::runInContextScope(Worker::LockType lockType,
   });
 }
 
+void IoContext::drainCrossContextActions(Worker::Lock& workerLock) {
+  // Take the actions out of the queue before running any of them: an action is free to schedule
+  // another action, which would deadlock against the queue's lock.
+  auto actions = deleteQueue.queue->takeActions();
+  if (actions.size() == 0) return;
+
+  jsg::Lock& js = workerLock;
+  for (auto& action: actions) {
+    action(js);
+  }
+
+  // An action only enqueues the promise's reactions; runImpl() drains the microtask queue before
+  // it releases the isolate lock, so they still run before we return to the event loop.
+}
+
+kj::Maybe<kj::Promise<void>> IoContext::scheduleCrossContextActionDrain() {
+  if (incomingRequests.empty()) {
+    // Nothing can own a run right now. For actors the actions stay queued until the next event
+    // arrives; for a context whose request is already gone they are dropped along with the context.
+    return kj::none;
+  }
+
+  auto& request = incomingRequests.front();
+  if (request.waitedForWaitUntil && waitUntilTasks.isEmpty()) {
+    // drain() has already computed waitUntilTasks.onEmpty() and found the set empty, so it is
+    // committed to destroying this request; registering a task now would not be observed. Leave the
+    // actions queued rather than starting a run that could lose its request mid-flight.
+    return kj::none;
+  }
+
+  auto forked = run([](Worker::Lock&) {}).fork();
+
+  // Hold the request open until the run completes. drain() either has not looked at the task set
+  // yet, or is still waiting on it, so this addition is guaranteed to be observed. Errors reach the
+  // caller through the branch returned below; this branch only provides the keepalive.
+  addWaitUntil(forked.addBranch().catch_([](kj::Exception&&) {}));
+
+  return forked.addBranch();
+}
+
 void IoContext::runImpl(Runnable& runnable,
     Worker::LockType lockType,
     kj::Maybe<InputGate::Lock> inputLock,
@@ -1446,6 +1486,12 @@ void IoContext::runImpl(Runnable& runnable,
 
     v8::TryCatch tryCatch(workerLock.getIsolate());
     try {
+      if (!exceptional) {
+        // Settle anything another context resolved on our behalf before delivering this event. The
+        // exceptional path is only logging an already-failed event, so it is not a good place to
+        // start running application JavaScript.
+        drainCrossContextActions(workerLock);
+      }
       runnable.run(workerLock);
     } catch (const jsg::JsExceptionThrown&) {
       if (tryCatch.HasTerminated()) {
@@ -1652,22 +1698,25 @@ jsg::JsObject IoContext::getPromiseContextTag(jsg::Lock& js) {
 kj::Promise<void> IoContext::startDeleteQueueSignalTask(IoContext* context) {
   // The promise that is returned is held by the IoContext itself, so when the
   // IoContext is destroyed, the promise will be canceled and the loop will
-  // end. On each iteration of the loop we want to reset the cross thread
-  // signal in the delete queue, then wait on the promise. Once the promise
-  // is fulfilled, we will run an empty task to prompt the IoContext to drain
-  // the DeleteQueue.
+  // end. On each iteration of the loop we wait for the delete queue's cross
+  // thread signal, then prompt the IoContext to drain the queue.
   try {
+    auto& queue = *context->deleteQueue.queue;
+    auto signal = queue.resetCrossThreadSignal();
     for (;;) {
-      co_await context->deleteQueue.queue->resetCrossThreadSignal();
-      co_await context->run([](auto& lock) {
-        auto& context = IoContext::current();
-        auto l = context.deleteQueue.queue->crossThreadDeleteQueue.lockExclusive();
-        auto& state = KJ_ASSERT_NONNULL(*l);
-        for (auto& action: state.actions) {
-          action(lock);
-        }
-        state.actions.clear();
-      });
+      co_await signal;
+
+      // Re-arm before draining, so that an action scheduled while the drain below is in progress
+      // fulfills this fresh signal instead of the one we just consumed.
+      signal = queue.resetCrossThreadSignal();
+
+      // The actions run application JavaScript, which needs a current IncomingRequest to supply
+      // metrics, tracing, timers, and an IoChannelFactory. An actor's IoContext outlives its
+      // requests, so there may be no request to run under; in that case the actions stay queued and
+      // the actor's next event drains them from runImpl().
+      KJ_IF_SOME(drained, context->scheduleCrossContextActionDrain()) {
+        co_await drained;
+      }
     }
   } catch (...) {
     context->abort(kj::getCaughtExceptionAsKj());
