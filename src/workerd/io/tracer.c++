@@ -37,6 +37,43 @@ tracing::Attribute::Value cloneAttributeValue(const tracing::Attribute::Value& v
   }
   KJ_UNREACHABLE;
 }
+
+void reportExceptionToTailStream(tracing::TailStreamWriter& writer,
+    const tracing::InvocationSpanContext& context,
+    kj::Date timestamp,
+    kj::Maybe<tracing::Exception::Code> code,
+    kj::StringPtr name,
+    kj::StringPtr message,
+    kj::Maybe<kj::StringPtr> stack) {
+  kj::Maybe<tracing::Exception::Code> truncatedCode;
+  size_t codeSize = 0;
+  KJ_IF_SOME(c, code) {
+    KJ_SWITCH_ONEOF(c) {
+      KJ_CASE_ONEOF(text, kj::String) {
+        codeSize = kj::min(text.size(), MAX_TRACE_BYTES);
+        truncatedCode = kj::str(text.first(codeSize));
+      }
+      KJ_CASE_ONEOF(number, double) {
+        codeSize = sizeof(double);
+        truncatedCode = number;
+      }
+    }
+  }
+  auto truncatedName = name.first(kj::min(name.size(), MAX_TRACE_BYTES - codeSize));
+  auto truncatedMessage =
+      message.first(kj::min(message.size(), MAX_TRACE_BYTES - codeSize - truncatedName.size()));
+  kj::Maybe<kj::String> truncatedStack;
+  size_t truncatedStackSize = 0;
+  KJ_IF_SOME(s, stack) {
+    truncatedStackSize = kj::min(
+        s.size(), MAX_TRACE_BYTES - codeSize - truncatedName.size() - truncatedMessage.size());
+    truncatedStack = kj::heapString(s.first(truncatedStackSize));
+  }
+  writer.report(context,
+      {tracing::Exception(timestamp, kj::str(truncatedName), kj::str(truncatedMessage),
+          kj::mv(truncatedStack), kj::mv(truncatedCode))},
+      timestamp, codeSize + truncatedName.size() + truncatedMessage.size() + truncatedStackSize);
+}
 }  // namespace
 
 kj::Promise<kj::Own<Trace>> WorkerTracer::onComplete() {
@@ -255,21 +292,11 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
     messageSize += s.size();
   }
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    auto maybeTruncatedName = name.first(kj::min(name.size(), MAX_TRACE_BYTES));
-    auto maybeTruncatedMessage =
-        message.first(kj::min(message.size(), MAX_TRACE_BYTES - maybeTruncatedName.size()));
-    kj::Maybe<kj::String> maybeTruncatedStack;
-    auto maybeTruncatedStackSize = 0;
+    kj::Maybe<kj::StringPtr> stackPtr;
     KJ_IF_SOME(s, stack) {
-      maybeTruncatedStackSize = kj::min(
-          s.size(), MAX_TRACE_BYTES - maybeTruncatedName.size() - maybeTruncatedMessage.size());
-      maybeTruncatedStack = kj::heapString(s.first(maybeTruncatedStackSize));
+      stackPtr = s;
     }
-    writer->report(context,
-        {tracing::Exception(timestamp, kj::str(maybeTruncatedName), kj::str(maybeTruncatedMessage),
-            kj::mv(maybeTruncatedStack))},
-        timestamp,
-        maybeTruncatedName.size() + maybeTruncatedMessage.size() + maybeTruncatedStackSize);
+    reportExceptionToTailStream(*writer, context, timestamp, kj::none, name, message, stackPtr);
   }
 
   if (trace->exceededExceptionLimit) {
@@ -285,6 +312,28 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
     trace->bytesUsed += messageSize;
     trace->exceptions.add(timestamp, kj::mv(name), kj::mv(message), kj::mv(stack));
   }
+}
+
+void WorkerTracer::addSpanException(tracing::SpanId spanId,
+    kj::Date timestamp,
+    kj::Maybe<tracing::Exception::Code> code,
+    kj::String name,
+    kj::String message,
+    kj::Maybe<kj::String> stack) {
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    return;
+  }
+
+  auto& writer = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
+  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+  auto context = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
+      topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
+
+  kj::Maybe<kj::StringPtr> stackPtr;
+  KJ_IF_SOME(s, stack) {
+    stackPtr = s;
+  }
+  reportExceptionToTailStream(*writer, context, timestamp, kj::mv(code), name, message, stackPtr);
 }
 
 void WorkerTracer::addDiagnosticChannelEvent(const tracing::InvocationSpanContext& context,
@@ -618,6 +667,17 @@ void UserSpanObserver::onOpen(kj::ConstString operationName, kj::Date startTime)
         submitter->submitUserSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
   } else {
     wasAccepted = submitter->submitSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+  }
+}
+
+void UserSpanObserver::onException(kj::Date timestamp,
+    kj::Maybe<tracing::Exception::Code> code,
+    kj::String name,
+    kj::String message,
+    kj::Maybe<kj::String> stack) {
+  if (wasAccepted) {
+    submitter->submitSpanException(
+        spanId, timestamp, kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
   }
 }
 

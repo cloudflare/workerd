@@ -9,6 +9,30 @@ interface SpanAttributes {
   [key: string]: SpanValue | undefined;
 }
 
+interface ExceptionWithCode {
+  code: string | number;
+  name?: string;
+  message?: string;
+  stack?: string;
+}
+
+interface ExceptionWithMessage {
+  code?: string | number;
+  message: string;
+  name?: string;
+  stack?: string;
+}
+
+interface ExceptionWithName {
+  code?: string | number;
+  message?: string;
+  name: string;
+  stack?: string;
+}
+
+type Exception =
+  ExceptionWithCode | ExceptionWithMessage | ExceptionWithName | string;
+
 declare class Span {
   // Returns true if this span will be recorded to the tracing system. False when the
   // current async context is not being traced, or when the span has already been submitted.
@@ -20,6 +44,9 @@ declare class Span {
 
   // Sets multiple attributes on the span. Attributes with undefined values are ignored.
   setAttributes(attributes: SpanAttributes): this;
+
+  // Records an exception event on the span. Calls after the span has ended are ignored.
+  recordException(exception: Exception): void;
 
   // Ends the span and submits its attributes to the tracing system. Idempotent.
   end(): void;
@@ -64,4 +91,4 @@ export default tracing;
 // Re-export `Span` as a named type export for callers that prefer `import type { Span }`
 // over `InstanceType<typeof tracing.Span>`. The runtime module does not have a named
 // `Span` export - this is purely a type-level convenience.
-export type { Span };
+export type { Exception, Span };
