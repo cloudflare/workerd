@@ -12,6 +12,8 @@
 #include <workerd/util/ring-buffer.h>
 #include <workerd/util/state-machine.h>
 
+#include <zlib.h>
+
 namespace workerd::api {
 CompressionAllocator::CompressionAllocator(
     kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)

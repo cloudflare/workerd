@@ -6,8 +6,6 @@
 
 #include <workerd/rust/worker/ffi.rs.h>
 
-#include <kj-rs/kj-rs.h>
-
 namespace workerd::rust::worker {
 
 inline workerd::EventOutcome fromImpl(kj_rs::Rust*, workerd::rust::worker::EventOutcome outcome) {

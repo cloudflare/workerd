@@ -5,7 +5,6 @@
 
 #include <kj/debug.h>
 
-#include <concepts>
 #include <cstdint>
 
 namespace kj_rs {

@@ -7,7 +7,6 @@
 #include <workerd/io/outcome.capnp.h>
 #include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
-#include <workerd/util/http-util.h>
 
 #include <capnp/compat/http-over-capnp.h>
 #include <kj/compat/http.h>

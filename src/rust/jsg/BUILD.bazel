@@ -26,7 +26,6 @@ wd_cc_library(
     srcs = [],
     hdrs = ["jsg.h"],
     local_defines = ["JSG_IMPLEMENTATION"],
-    tags = ["no-clang-tidy"],
     visibility = ["//visibility:public"],
     deps = [":jsg"],
 )
@@ -38,7 +37,6 @@ wd_cc_library(
         "ffi.h",
     ],
     local_defines = ["JSG_IMPLEMENTATION"],
-    tags = ["no-clang-tidy"],
     textual_hdrs = [
         "ffi-inl.h",
     ],

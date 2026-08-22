@@ -4,7 +4,6 @@
 
 #pragma once
 #include "basics.h"
-#include "events.h"
 #include "http.h"
 
 #include <workerd/jsg/jsg.h>

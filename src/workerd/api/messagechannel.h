@@ -1,10 +1,8 @@
 #pragma once
 
 #include <workerd/api/basics.h>
-#include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
-#include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
 
 namespace workerd::api {

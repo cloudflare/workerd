@@ -466,7 +466,7 @@ kj::String JsDate::toISOString(jsg::Lock& js) const {
 }
 
 JsDate::operator kj::Date() const {
-  return kj::UNIX_EPOCH + (int64_t(inner->ValueOf()) * kj::MILLISECONDS);
+  return kj::UNIX_EPOCH + (static_cast<int64_t>(inner->ValueOf()) * kj::MILLISECONDS);
 }
 
 JsRegExp Lock::regexp(kj::StringPtr str, RegExpFlags flags, kj::Maybe<uint32_t> backtrackLimit) {
@@ -743,7 +743,7 @@ kj::ArrayPtr<const kj::byte> JsArrayBuffer::asArrayPtr() const {
 JsArrayBuffer JsArrayBuffer::slice(Lock& js, size_t newLength) const {
   JSG_REQUIRE(newLength <= size(), RangeError, "New length exceeds buffer length");
   auto dest = create(js, newLength);
-  dest.asArrayPtr().copyFrom(asArrayPtr().slice(0, newLength));
+  dest.asArrayPtr().copyFrom(asArrayPtr().first(newLength));
   return dest;
 }
 
@@ -933,7 +933,7 @@ kj::ArrayPtr<const kj::byte> JsSharedArrayBuffer::asArrayPtr() const {
 JsSharedArrayBuffer JsSharedArrayBuffer::slice(Lock& js, size_t newLength) const {
   JSG_REQUIRE(newLength <= size(), RangeError, "New length exceeds buffer length");
   auto dest = create(js, newLength);
-  dest.asArrayPtr().copyFrom(asArrayPtr().slice(0, newLength));
+  dest.asArrayPtr().copyFrom(asArrayPtr().first(newLength));
   return dest;
 }
 

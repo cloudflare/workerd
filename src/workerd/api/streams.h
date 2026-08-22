@@ -7,6 +7,9 @@
 //
 // This is the most over-engineered spec...
 
+// This header is intentionally used to include the entire streams API – include it only when
+// strictly necessary
+// NOLINTBEGIN(misc-include-cleaner)
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-writable-stream.h>
 #include <workerd/api/streams/compression.h>
@@ -16,6 +19,7 @@
 #include <workerd/api/streams/standard.h>
 #include <workerd/api/streams/transform.h>
 #include <workerd/api/streams/writable.h>
+// NOLINTEND(misc-include-cleaner)
 
 namespace workerd::api {
 

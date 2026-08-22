@@ -4,6 +4,7 @@
 
 #include <workerd/util/strings.h>
 
+#include <kj/debug.h>
 #include <kj/vector.h>
 
 namespace workerd::api {

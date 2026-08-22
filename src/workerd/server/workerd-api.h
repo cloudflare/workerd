@@ -5,7 +5,6 @@
 #pragma once
 
 #include <workerd/api/pyodide/pyodide.h>
-#include <workerd/io/worker-fs.h>
 #include <workerd/io/worker.h>
 #include <workerd/server/workerd.capnp.h>
 

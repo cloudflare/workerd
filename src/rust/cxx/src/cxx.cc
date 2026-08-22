@@ -5,6 +5,7 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <vector>
 
 extern "C" {
 void cxxbridge1$cxx_string$init(std::string *s, const std::uint8_t *ptr,

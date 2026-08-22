@@ -6,7 +6,7 @@
 
 #include "r2-rpc.h"
 
-#include <workerd/api/streams/readable.h>
+#include <workerd/api/js-readable-stream.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api {

@@ -18,7 +18,6 @@
 #include <kj/time.h>
 #include <kj/vector.h>
 
-#include <concepts>
 #include <initializer_list>
 
 namespace kj {

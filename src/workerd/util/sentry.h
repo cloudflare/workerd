@@ -12,8 +12,6 @@
 #include <kj/string.h>
 #include <kj/time.h>
 
-#include <cstdint>
-
 namespace workerd {
 
 // For internal errors, we generate an ID to include when rendering user-facing "internal error"

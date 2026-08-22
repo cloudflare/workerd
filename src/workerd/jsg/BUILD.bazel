@@ -116,7 +116,7 @@ wd_cc_library(
         "@ssl",
     ],
     local_defines = ["JSG_IMPLEMENTATION"],
-    tags = ["no-clang-tidy"],
+    tags = ["no-clang-tidy-headers"],
     visibility = [
         "//src/rust/jsg:__pkg__",
         "//src/rust/jsg-test:__pkg__",

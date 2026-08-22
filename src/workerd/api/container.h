@@ -8,7 +8,7 @@
 #include <workerd/api/basics.h>
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-writable-stream.h>
-#include <workerd/io/compatibility-date.h>
+#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/io-own.h>
 #include <workerd/jsg/jsg.h>

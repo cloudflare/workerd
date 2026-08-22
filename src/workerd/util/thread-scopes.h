@@ -22,7 +22,7 @@
 #define WORKERD_ASAN 1
 #endif
 
-#include <cinttypes>
+#include <cstdint>
 
 namespace workerd {
 

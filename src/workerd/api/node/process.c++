@@ -3,6 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "process.h"
 
+#include "node-version.h"
+
 #include <workerd/api/filesystem.h>
 #include <workerd/api/node/exceptions.h>
 #include <workerd/io/features.h>

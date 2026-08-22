@@ -6,7 +6,7 @@
 
 #include "jsg.h"
 
-#include <v8-isolate.h>
+#include <v8-platform.h>
 
 namespace workerd::jsg {
 

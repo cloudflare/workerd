@@ -4,8 +4,8 @@
 
 #include "eventsource.h"
 
+#include "events.h"
 #include "http.h"
-#include "messagechannel.h"
 #include "streams/common.h"
 
 #include <workerd/io/features.h>
