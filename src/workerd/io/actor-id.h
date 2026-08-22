@@ -26,6 +26,12 @@ enum class ActorRoutingMode {
 // Version information for an actor. Used to specify cohort.
 struct ActorVersion {
   kj::Maybe<kj::String> cohort;
+
+  ActorVersion clone() const {
+    return {
+      .cohort = cohort.map([](const kj::String& value) { return kj::str(value); }),
+    };
+  }
 };
 
 // An abstract class that implements generation of global actor IDs in a particular namespace.
