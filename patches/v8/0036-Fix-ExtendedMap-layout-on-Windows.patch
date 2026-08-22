@@ -3,56 +3,172 @@ From: Mikhail Aizatsky <maizatskyi@cloudflare.com>
 Date: Tue, 16 Jun 2026 22:00:00 +0000
 Subject: Fix ExtendedMap layout on Windows
 
-MSVC's C++ object layout can place derived-class members into base-class
-tail padding. ExtendedMap intentionally leaves kTaggedSize - 1 bytes after
-bit_field_ex_ for subclasses, but Torque expects ExtendedMap itself to be
-rounded up before JSInterceptorMap fields start.
+For a class marked @cppObjectLayoutDefinition, Torque emits the first field
+offset of a subclass as the literal expression sizeof(Parent) and asserts it
+against offsetof of the C++ member. MSVC rounds sizeof(ExtendedMap) up to
+alignof(ExtendedMap) yet still places a subclass's members in the resulting
+tail padding, so the two disagree: with pointer compression Torque computes
+JSInterceptorMap::kFlagsOffset as 44 while offsetof puts flags_ at 41, and
+every following field and the class size are off by the same amount.
 
-Make the padding explicit in ExtendedMap's Torque and C++ layouts, and let
-JSInterceptorMap start directly with its tagged fields. This keeps the C++
-layout and generated Torque offsets consistent on Windows.
+Spell ExtendedMap's trailing bytes out as an explicit array so its declared
+fields exactly fill kTaggedSize. There is then no tail padding for any ABI to
+reuse, so sizeof(ExtendedMap) equals the subclass's first field offset
+everywhere.
 
+The same tail padding also decides where the GC starts scanning. Map::
+BodyDescriptor derives the extended fields' range from
+kStartOfStrongExtendedFieldsOffset, which is RoundUp(sizeof(ExtendedMap),
+kTaggedSize), not from the subclass's first tagged member. Any ABI that
+disagrees about the padding therefore makes the GC scan JSInterceptorMap's
+scalar flags word as a tagged pointer, which corrupts the heap rather than
+failing to build. Assert both ends of that range so a mismatch is a
+compile error instead.
+diff --git a/src/codegen/code-stub-assembler.cc b/src/codegen/code-stub-assembler.cc
+index 50551c7..42f2a72 100644
+--- a/src/codegen/code-stub-assembler.cc
++++ b/src/codegen/code-stub-assembler.cc
+@@ -1564,9 +1564,10 @@ void CodeStubAssembler::BranchIfFastIterableToListInterceptor(
+ 
+   CSA_DCHECK(this, IsJSInterceptorMap(map));
+ 
+-  // Check if the interceptor supports fast iterable to list conversion.
+-  TNode<Uint8T> flags =
+-      LoadObjectField<Uint8T>(map, offsetof(JSInterceptorMap, flags_));
++  // Check if the interceptor supports fast iterable to list conversion. The
++  // flags byte lives in ExtendedMap's scalar storage; see ExtendedMap in map.h.
++  TNode<Uint8T> flags = LoadObjectField<Uint8T>(
++      map, offsetof(ExtendedMap, extended_padding_));
+   TNode<BoolT> supports_fast =
+       IsSetWord32<JSInterceptorMap::SupportsFastIterableToListBit>(flags);
+   GotoIfNot(supports_fast, if_false);
+@@ -1609,8 +1610,8 @@ void CodeStubAssembler::BranchIfFastIterableToListInterceptor(
+         UpdateWord32<JSInterceptorMap::SupportsFastIterableToListBit>(
+             flags, Uint32Constant(0)));
+ 
+-    StoreObjectFieldNoWriteBarrier(map, offsetof(JSInterceptorMap, flags_),
+-                                   cleared_flags);
++    StoreObjectFieldNoWriteBarrier(
++        map, offsetof(ExtendedMap, extended_padding_), cleared_flags);
+     Goto(if_false);
+   }
+ }
+diff --git a/src/objects/js-interceptor-map-inl.h b/src/objects/js-interceptor-map-inl.h
+index e10726e..41b718a 100644
+--- a/src/objects/js-interceptor-map-inl.h
++++ b/src/objects/js-interceptor-map-inl.h
+@@ -44,14 +44,16 @@ void JSInterceptorMap::set_fast_case_validity_cell(Tagged<Cell> cell,
+ }
+ 
+ bool JSInterceptorMap::supports_fast_iterable_to_list() const {
+-  return SupportsFastIterableToListBit::decode(flags_);
++  return SupportsFastIterableToListBit::decode(flags());
+ }
+ void JSInterceptorMap::set_supports_fast_iterable_to_list(bool value) {
+-  flags_ = SupportsFastIterableToListBit::update(flags_, value);
++  flags() = SupportsFastIterableToListBit::update(flags(), value);
+ }
+ 
++uint8_t& JSInterceptorMap::flags() { return extended_padding_[0]; }
++uint8_t JSInterceptorMap::flags() const { return extended_padding_[0]; }
++
+ void JSInterceptorMap::init_flags_and_clear_extended_padding() {
+-  flags_ = 0;
+   memset(extended_padding_, 0, sizeof(extended_padding_));
+ }
+ 
 diff --git a/src/objects/js-interceptor-map.h b/src/objects/js-interceptor-map.h
-index 546a15e1bc6ba44e528ba66e5a45a0f002a81cce..976b022ad9d3e2e1fcc3bcdc4c6b8bfc47c10d12 100644
+index 1bf7735..6d7ee21 100644
 --- a/src/objects/js-interceptor-map.h
 +++ b/src/objects/js-interceptor-map.h
-@@ -31,7 +31,6 @@ V8_OBJECT class JSInterceptorMap : public ExtendedMap {
-   inline void clear_extended_padding();
+@@ -39,14 +39,30 @@ V8_OBJECT class JSInterceptorMap : public ExtendedMap {
  
+   inline void init_flags_and_clear_extended_padding();
+ 
++ private:
++  // The flags byte lives in ExtendedMap's scalar storage; see map.h.
++  inline uint8_t& flags();
++  inline uint8_t flags() const;
++
   public:
--  uint8_t extended_padding_[kTaggedSize - 1];
+-  uint8_t flags_;
+-  uint8_t extended_padding_[kTaggedSize - 2];
    TaggedMember<InterceptorInfo> named_interceptor_;
    TaggedMember<InterceptorInfo> indexed_interceptor_;
+   TaggedMember<Cell> fast_case_validity_cell_;
  } V8_OBJECT_END;
+ 
++// See the corresponding assert on ExtendedMap in map.h: the GC derives the
++// start of this class's tagged fields from ExtendedMap's size rather than from
++// named_interceptor_, so the two have to agree.
++static_assert(offsetof(JSInterceptorMap, named_interceptor_) ==
++                  ExtendedMap::kStartOfStrongExtendedFieldsOffset,
++              "JSInterceptorMap's first tagged field must start where "
++              "Map::BodyDescriptor begins scanning extended map fields");
++static_assert(offsetof(JSInterceptorMap, fast_case_validity_cell_) +
++                      kTaggedSize ==
++                  sizeof(JSInterceptorMap),
++              "JSInterceptorMap must have no tail padding, so that the range "
++              "Map::BodyDescriptor scans ends on its last tagged field");
++
+ }  // namespace v8::internal
+ 
+ #include "src/objects/object-macros-undef.h"
 diff --git a/src/objects/js-interceptor-map.tq b/src/objects/js-interceptor-map.tq
-index 7a0838bb84d985467fd495e5b5fd10764bf82bf0..25f1d670094ec2f43739c992314fc474ebfd6d3c 100644
+index f351cb0..9795025 100644
 --- a/src/objects/js-interceptor-map.tq
 +++ b/src/objects/js-interceptor-map.tq
-@@ -8,8 +8,6 @@
+@@ -8,9 +8,6 @@
  @hasSameInstanceTypeAsParent
  @doNotGenerateCast
  extern class JSInterceptorMap extends ExtendedMap {
--  @ifnot(TAGGED_SIZE_8_BYTES) extended_padding[3]: uint8;
--  @if(TAGGED_SIZE_8_BYTES) extended_padding[7]: uint8;
+-  flags: uint8;
+-  @ifnot(TAGGED_SIZE_8_BYTES) extended_padding[2]: uint8;
+-  @if(TAGGED_SIZE_8_BYTES) extended_padding[6]: uint8;
    named_interceptor: InterceptorInfo;
    indexed_interceptor: InterceptorInfo;
- }
+   // This prototype validity cell guards modifications of the interceptor's
 diff --git a/src/objects/map.h b/src/objects/map.h
-index b907c3ddc112618f40480e06b314213587b90e1c..9eb229400c8d29e84e1b599c14ffa6224aaa7b40 100644
+index 594d4c7..1f20233 100644
 --- a/src/objects/map.h
 +++ b/src/objects/map.h
-@@ -1290,7 +1290,8 @@ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
+@@ -1288,7 +1288,15 @@ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
    static const int kStartOfStrongExtendedFieldsOffset;
  
    std::atomic<uint8_t> bit_field_ex_;
 -  // Leaves kTaggedSize-1 unused bytes, they will be used by subclasses.
-+  // Pads ExtendedMap to kTaggedSize so subclasses start at tagged alignment.
++  // Scalar storage for subclasses, which must not declare scalar members of
++  // their own: Torque derives a subclass's first field offset from
++  // sizeof(ExtendedMap), and MSVC rounds that up to alignof(ExtendedMap) while
++  // still placing subclass members in the resulting tail padding. Spelling the
++  // padding out keeps sizeof(ExtendedMap) equal to the subclass's first field
++  // offset on every ABI, and keeps that offset equal to
++  // kStartOfStrongExtendedFieldsOffset so the GC scans exactly the tagged
++  // fields.
 +  uint8_t extended_padding_[kTaggedSize - 1];
  } V8_OBJECT_END;
  
  constexpr int ExtendedMapSizeForKind(ExtendedMapKind kind);
+@@ -1300,6 +1308,17 @@ inline constexpr int ExtendedMap::kMinimumSize =
+ inline constexpr int ExtendedMap::kStartOfStrongExtendedFieldsOffset =
+     kMinimumSize;
+ 
++// Map::BodyDescriptor scans a subclass's tagged fields as the half-open range
++// [kStartOfStrongExtendedFieldsOffset, AllocatedSize()), so a subclass's first
++// tagged field has to start exactly at kStartOfStrongExtendedFieldsOffset. If
++// sizeof(ExtendedMap) were rounded up past its declared fields, an ABI that
++// reuses base-class tail padding would place that field earlier and the GC
++// would either scan a scalar word as a tagged pointer or skip a live one.
++static_assert(sizeof(ExtendedMap) ==
++                  ExtendedMap::kStartOfStrongExtendedFieldsOffset,
++              "ExtendedMap's declared fields must exactly fill it, so that "
++              "subclasses start at kStartOfStrongExtendedFieldsOffset");
++
+ 
+ 
+ // The cache for maps used by normalized (dictionary mode) objects.
 diff --git a/src/objects/map.tq b/src/objects/map.tq
-index cb85e7788e6a38116fc690341ca51f6288869247..687c95966d88c31b48ff3cb045c452762b2af237 100644
+index cb85e77..c28d8d1 100644
 --- a/src/objects/map.tq
 +++ b/src/objects/map.tq
 @@ -116,7 +116,9 @@ bitfield struct ExtendedMapBitFields extends uint8 {
@@ -60,7 +176,7 @@ index cb85e7788e6a38116fc690341ca51f6288869247..687c95966d88c31b48ff3cb045c45276
  extern class ExtendedMap extends Map {
    bit_field_ex: ExtendedMapBitFields;
 -  // Leaves kTaggedSize-1 unused bytes, they will be used by subclasses.
-+  // Pads ExtendedMap to kTaggedSize so subclasses start at tagged alignment.
++  // Scalar storage for subclasses; see ExtendedMap in map.h.
 +  @ifnot(TAGGED_SIZE_8_BYTES) extended_padding[3]: uint8;
 +  @if(TAGGED_SIZE_8_BYTES) extended_padding[7]: uint8;
  }

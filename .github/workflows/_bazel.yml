@@ -206,7 +206,7 @@ jobs:
           echo "$(Get-SizeMB $env:GITHUB_WORKSPACE)`t$env:GITHUB_WORKSPACE"
 
       - name: Upload binary
-        if: inputs.upload_binary
+        if: always() && runner.os == 'Windows' && inputs.upload_binary
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.os_name }}-${{ inputs.arch_name }}${{ inputs.suffix }}-binary

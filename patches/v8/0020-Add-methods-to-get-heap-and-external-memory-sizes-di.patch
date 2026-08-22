@@ -29,10 +29,10 @@ index 7d25bc6c25faac2b36441a63f186085e416eaccb..66d7dec9d5a5decb6dd3f7d2e377eceb
     * Returns heap profiler for this isolate. Will return NULL until the isolate
     * is initialized.
 diff --git a/src/api/api.cc b/src/api/api.cc
-index f89a85739d66cfcb3b4a6692228bb4acacb36dbc..fc27f5939e758b1d9515f38b0969d6bf11f8a82c 100644
+index 83bd6df6f32d36ce92c3d4293cc9dd74494e44e6..ea66124b040b5aa674bab78f4bb59cc87b93b0ed 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -10560,6 +10560,14 @@ void Isolate::GetHeapStatistics(HeapStatistics* heap_statistics) {
+@@ -10629,6 +10629,14 @@ void Isolate::GetHeapStatistics(HeapStatistics* heap_statistics) {
  #endif  // V8_ENABLE_WEBASSEMBLY
  }
  

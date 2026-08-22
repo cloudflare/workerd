@@ -72,6 +72,8 @@ jobs:
     uses: ./.github/workflows/_bazel.yml
     with:
       image: ${{ matrix.os.image }}
+      # TODO: Drop before merge
+      upload_binary: true
       os_name: ${{ matrix.os.name }}
       arch_name: ${{ matrix.os.arch }}
       suffix: ${{ matrix.config.suffix }}
