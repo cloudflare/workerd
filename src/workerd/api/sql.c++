@@ -25,7 +25,7 @@ static constexpr uint SQL_STATEMENT_CACHE_MAX_SIZE = 1024 * 1024;
 
 SqlStorage::SqlStorage(jsg::Ref<DurableObjectStorage> storage)
     : storage(kj::mv(storage)),
-      statementCache(IoContext::current().addObject(kj::heap<StatementCache>())) {}
+      statementCache(IoContext::current().createObject<StatementCache>()) {}
 
 SqlStorage::~SqlStorage() {}
 
