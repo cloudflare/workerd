@@ -14,7 +14,7 @@ static constexpr kj::StringPtr kDefaultBotManagementValue = R"DATA({
   "verifiedBot": false,
   "jsDetection": { "passed": false },
   "staticResource": false,
-  "detectionIds": {},
+  "detectionIds": [],
   "score": 99
 })DATA"_kjc;
 
