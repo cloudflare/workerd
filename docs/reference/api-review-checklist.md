@@ -27,10 +27,9 @@ End-to-end, real-world performance is the priority over micro-optimizations.
 - **Always** check for proper use of compatibility flags (`compatibility-date.capnp`) and
   autogates (`util/autogate.h/c++`). Use the `compat-date-at` tool to look up flag details.
   Use the `next-capnp-ordinal` tool when adding new flags.
-- Use the `cross-reference` tool to look up JSG registration, type groups, and test
-  coverage for API classes under review.
-- Use the `jsg-interface` tool to extract the full structured JS API (methods,
-  properties, constants, nested types, inheritance) for a class under review.
+- For an API class under review, check its JSG registration, isolate type group, and
+  test coverage. Read the `JSG_RESOURCE_TYPE` block for the full JS surface it exposes:
+  methods, properties, constants, nested types, and inheritance.
 - **Always** identify breaking changes that need feature flags or autogates
 - **Error type changes are generally not breaking.** Changing the type of error thrown (e.g., from a
   generic `kj::Exception` to a JS `TypeError`, or between JS error types) is not normally considered
@@ -44,6 +43,7 @@ End-to-end, real-world performance is the priority over micro-optimizations.
 - **Never** recommend or approve changing/inverting the meaning of an existing compatibility flag.
 - **Never** suggest the compatibility flag checks are "dead code" that can be removed. Compatibility flags are permanent and must be maintained indefinitely, even if there is nothing apparently depending on them.
 - **Always** review consistency with existing API patterns
+- **Always** prefer KJ_TRY/KJ_CATCH over raw try/catch and JSG_TRY/JSG_CATCH over jsg::Lock::tryCatch (e.g. `js.tryCatch(fn)`)
 
 ### Security Vulnerabilities
 
@@ -71,4 +71,3 @@ End-to-end, real-world performance is the priority over micro-optimizations.
 ### Runtime-Specific Notes
 
 - **KJ event loop**: workerd uses kj's single-threaded event loop, not Node.js-style libuv.
-
