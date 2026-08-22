@@ -9,9 +9,9 @@ This command produces reference documentation, structured like a `man` page. Be 
 
 ## Research steps
 
-1. **Locate the target.** If the argument is a file path, read it. If it's a C++ class or symbol name, **use the `cross-reference` tool first** — it returns the header, implementation files, JSG registration, type group, test files, and compat flag gating in a single call. If the target is a Rust symbol or `.rs` file (under `src/rust/`), skip the `cross-reference` tool and search manually — it is C++-specific.
+1. **Locate the target.** If the argument is a file path, read it. If it's a C++ class or symbol name, search the headers for its declaration, then find the implementation files, the `JSG_RESOURCE_TYPE` registration and type group if it has one, the test files, and any compat flag gating. If the target is a Rust symbol or `.rs` file (under `src/rust/`), search `.rs` files instead.
 
-2. **Read the definition.** Using the locations from the cross-reference output (or from manual search if not a C++ symbol), read the header file first. For functions, read the declaration and implementation. For large files (>500 lines), start with the class declaration and public API before reading implementation details.
+2. **Read the definition.** Using the locations found above, read the header file first. For functions, read the declaration and implementation. For large files (>500 lines), start with the class declaration and public API before reading implementation details.
 
    **For Rust code:** Read the relevant `lib.rs` or module file. Look for `#[jsg_resource]`, `#[jsg_method]`, `#[jsg_struct]`, and `#[jsg_oneof]` proc macro annotations to understand the JS-visible API surface. Check `#[cxx::bridge]` blocks to understand the FFI boundary with C++. Also check the CXX bridge companion files (`ffi.c++`/`ffi.h`) and the C++ code that calls into or is called from Rust. Consult the crate's `README.md` (if present) and `src/rust/AGENTS.md` for crate-level context. If the type uses proc macros, the `<crate>@expand` Bazel target can be used to inspect macro expansion.
 
@@ -20,7 +20,7 @@ This command produces reference documentation, structured like a `man` page. Be 
    - A `README.md` in the same directory
    - Doc comments on the symbol itself
 
-4. **Get the full API surface.** For JSG-registered types, **use the `jsg-interface` tool** to get the complete structured JS API (methods, properties, constants, nested types, inheritance, TypeScript overrides). For header files, identify all public members. For config schemas (`.capnp`), list all fields.
+4. **Get the full API surface.** For JSG-registered types, read the `JSG_RESOURCE_TYPE` block to enumerate the methods, properties, constants, nested types, and inheritance it registers, along with any `JSG_TS_OVERRIDE`. For header files, identify all public members. For config schemas (`.capnp`), list all fields.
 
 5. **Find build and test targets.** Check the `BUILD.bazel` in the same directory for the relevant Bazel target. Note how to build and test it (e.g., `just test //src/workerd/api/tests:some-test@`).
 
@@ -41,7 +41,7 @@ Structure the output using these sections. Omit any section that doesn't apply t
 - **CONFIGURATION** — Compat flags, autogates, or config fields that control this code's behavior.
 - **EXAMPLES** — 2-3 short code snippets from the actual codebase showing how this symbol is used. Include the source file path for each.
 - **CAVEATS** — Anti-patterns, thread safety issues, known limitations, or things that will surprise you.
-- **SEE ALSO** — Related symbols (as `/explain <target>` suggestions), plus `/trace` or `/deps` pointers where relevant.
+- **SEE ALSO** — Related symbols (as `/explain <target>` suggestions).
 - **HISTORY** — Recent git changes, if any. Brief note on what they were about.
 
 ## Notes
