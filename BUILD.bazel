@@ -140,6 +140,7 @@ selects.config_setting_group(
         ":fast_build",
         ":opt_build",
     ],
+    visibility = ["//visibility:public"],
 )
 
 selects.config_setting_group(
