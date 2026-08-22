@@ -556,6 +556,12 @@ wd_test(
 )
 
 wd_test(
+    src = "eventsource-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["eventsource-gc-test.js"],
+)
+
+wd_test(
     src = "eventsource-test.wd-test",
     args = ["--experimental"],
     data = ["eventsource-test.js"],

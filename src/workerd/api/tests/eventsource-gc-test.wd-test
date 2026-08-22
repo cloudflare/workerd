@@ -1,0 +1,28 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
+  services = [
+    (name = "eventsource-gc-test", worker = .testWorker),
+  ],
+);
+
+const testWorker :Workerd.Worker = (
+  compatibilityFlags = [
+    "enable_weak_ref",
+    "experimental",
+    "nodejs_compat",
+    "streams_enable_constructors",
+  ],
+  modules = [
+    (name = "worker", esModule = embed "eventsource-gc-test.js"),
+  ],
+  durableObjectNamespaces = [
+    (className = "EventSourceGcDo", uniqueKey = "c9f59b7c629443cd973bd29cb3a5d5e9"),
+  ],
+  durableObjectStorage = (inMemory = void),
+  bindings = [
+    (name = "backend", service = "eventsource-gc-test"),
+    (name = "ns", durableObjectNamespace = "EventSourceGcDo"),
+  ],
+);
