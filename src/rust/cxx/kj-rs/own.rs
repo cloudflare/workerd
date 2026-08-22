@@ -1,4 +1,8 @@
 //! The `workerd-cxx` module containing the [`Own<T>`] type, which is bindings to the `kj::Own<T>` C++ type
+//!
+//! FFI island (see crate-root `#![deny(unsafe_code)]`): `KjOwn` mirrors `kj::Own` — raw-pointer
+//! deref and `extern "C"` disposer/refcount calls. A genuine unsafe seam.
+#![allow(unsafe_code)]
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -21,18 +25,16 @@ impl<T> NonNullExceptMaybe<T> {
     }
 
     pub unsafe fn as_ref(&self) -> &T {
-        // Safety:
-        //     This value will only be null when in a [`Maybe<T>`], which does niche value optimization
-        //     for a null pointer, so the inner [`Own<T>`] can never be accessed if it is null
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+        // SAFETY: `self.0` is null only when this `NonNullExceptMaybe` lives inside a
+        // `Maybe<T>` (which niche-optimizes the null pointer and never dereferences the inner
+        // `Own`), so here — reached only through the non-null `Own<T>` API — it is a valid,
+        // live pointer. The caller's `unsafe` obligation is that `self` outlives the borrow.
         unsafe { &*self.0 }
     }
 
     pub unsafe fn as_mut(&mut self) -> &mut T {
-        // Safety:
-        //     This value will only be null when in a [`Maybe<T>`], which does niche value optimization
-        //     for a null pointer, so the inner [`Own<T>`] can never be accessed if it is null
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+        // SAFETY: as in `as_ref`, `self.0` is non-null and live when reached through the
+        // `Own<T>` API; `&mut self` gives exclusive access, so the mutable reborrow is unique.
         unsafe { &mut *self.0 }
     }
 }
@@ -119,11 +121,19 @@ pub mod repr {
         }
     }
 
-    // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-    unsafe impl<T> Send for KjOwn<T> where T: Send {}
-
-    // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-    unsafe impl<T> Sync for KjOwn<T> where T: Sync {}
+    // NO `Send`/`Sync` impls, deliberately.
+    //
+    // A `KjOwn<T>` carries a type-erased `kj::Disposer*` alongside the object pointer, and
+    // dropping the `KjOwn` runs that disposer on whichever thread the drop happens on. A
+    // bound on `T` alone (e.g. `T: Send`) says nothing about the disposer: `kj::Own`s minted
+    // from `kj::Rc::toOwn()`/`kj::refcounted` (non-atomic refcount decrement), arena-backed
+    // objects, or any other custom disposer are NOT safe to destroy from another thread, and
+    // nothing at the bridge boundary guarantees disposer thread-safety.
+    //
+    // All current consumers keep `KjOwn`s on the KJ event-loop thread that created them, so
+    // no impls are needed. If a genuine cross-thread use case appears, it must come with an
+    // explicit opt-in mechanism that asserts the *disposer* is thread-safe (not just `T`);
+    // do not re-add blanket impls here.
 
     impl<T> Deref for KjOwn<T> {
         type Target = T;
@@ -207,7 +217,8 @@ pub mod repr {
             }
 
             let this = std::ptr::from_mut::<Self>(self).cast::<c_void>();
-            // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+            // SAFETY: `this` points to this live `KjOwn` being dropped exactly once; the C++
+            // `own$drop` shim invokes the type-erased `kj::Disposer` stored alongside `ptr`.
             unsafe {
                 __drop(this);
             }
