@@ -77,20 +77,46 @@ static v8::Local<v8::String> makeInternedStr(v8::Isolate* isolate, const Name& n
       v8::String::NewFromUtf8(isolate, name.data(), v8::NewStringType::kInternalized, name.size()));
 }
 
+// Description prefix for isolate termination surfaced across the FFI. Rust's
+// `jsg::Error::from_kj_description` recognizes it and marks the error as
+// termination, which `Lock::throw_exception` re-raises by re-arming
+// TerminateExecution() instead of scheduling a JS throw. The `jsg-internal.`
+// tunneling namespace makes it unforgeable from guest JS: user exceptions
+// tunnel with the plain `jsg.` prefix.
+static constexpr kj::StringPtr TERMINATED_DESCRIPTION =
+    "jsg-internal.Terminated: JavaScript execution terminated"_kj;
+
 // Runs `fn` (returning a v8::MaybeLocal<T>) and, on failure, converts the pending
 // JS exception into a `jsg.<Type>:`-prefixed kj::Exception and throws it, so
 // workerd-cxx's Result::run catches it in C++ and hands Rust a catchable error
-// instead of aborting. Termination exceptions are re-thrown unchanged. The
-// TryCatch and termination handling are delegated to jsg::Lock::tryCatch.
+// instead of aborting.
+//
+// Isolate termination (which jsg::Lock::tryCatch re-throws as JsExceptionThrown,
+// expecting C++ callers to keep unwinding) cannot unwind across the nounwind FFI
+// frame either, so it is converted to a TERMINATED_DESCRIPTION kj::Exception.
+// The termination flag remains pending on the isolate regardless, so even a Rust
+// caller that swallows the error cannot resume JS execution.
 template <typename T, typename Func>
 static v8::Local<T> checkTunneled(v8::Isolate* isolate, Func&& fn) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
-  JSG_TRY(js) {
-    return ::workerd::jsg::check(fn());
+  try {
+    JSG_TRY(js) {
+      return ::workerd::jsg::check(fn());
+    }
+    JSG_CATCH(error) {
+      kj::throwFatalException(
+          ::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
+    };
+  } catch (::workerd::jsg::JsExceptionThrown&) {
+    // Lock::tryCatch also re-throws JsExceptionThrown when no exception was
+    // actually scheduled (e.g. V8 already cleared the termination flag after
+    // unwinding all JS frames); it conflates that case with termination, and so
+    // do we.
+    // Constructed directly (not via KJ_EXCEPTION) so the description is exactly
+    // TERMINATED_DESCRIPTION, which Rust matches on.
+    kj::throwFatalException(kj::Exception(
+        kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::str(TERMINATED_DESCRIPTION)));
   }
-  JSG_CATCH(error) {
-    kj::throwFatalException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
-  };
 }
 
 // Wrappable implementation - calls into Rust via CXX bridge

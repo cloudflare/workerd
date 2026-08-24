@@ -262,6 +262,21 @@ fn typed_function_with_receiver() {
     });
 }
 
+/// Isolate termination surfaces as an `Error` with `is_termination()` set —
+/// distinguishable from a JS throw, and not process-fatal.
+#[test]
+fn call_after_terminate_returns_termination_error() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let value = ctx.eval_raw("(() => 1)").unwrap();
+        let func: Function<(), Number> = Function::from_js(lock, value)?;
+        lock.terminate_execution();
+        let err = func.call(lock, ()).unwrap_err();
+        assert!(err.is_termination());
+        Ok(())
+    });
+}
+
 /// A clone remains callable after the original is dropped (independent
 /// persistent handles).
 #[test]

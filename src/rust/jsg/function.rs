@@ -21,11 +21,12 @@ use crate::v8;
 /// `Args` is a tuple of [`ToJS`] argument types (use `()` for none, `(T,)` for
 /// one); `R` is the [`FromJS`] return type (`()` discards the result).
 ///
-/// Obtained via [`FromJS`], e.g. as a `#[jsg_method]` parameter or a
-/// `#[jsg_struct]` field. The handle is persistent — safe to store in a
-/// resource and call later — but must be traced for GC; `#[jsg_resource]`
-/// fields get this automatically via the [`Traced`] impl. Like all V8 handles
-/// it is bound to its isolate's thread (`!Send + !Sync`).
+/// Obtained via [`FromJS`], e.g. as a `#[jsg_method]` parameter, a
+/// `#[jsg_struct]` field, or a `#[jsg_resource]` field. The handle is
+/// persistent — safe to store in a resource and call later — but must be
+/// traced for GC; resource fields get this automatically via the [`Traced`]
+/// impl. Like all V8 handles it is bound to its isolate's thread
+/// (`!Send + !Sync`).
 ///
 /// # Example
 ///
@@ -67,7 +68,9 @@ impl<Args: FunctionArgs, R: FromJS> Function<Args, R> {
     /// arguments via [`ToJS`] and the result via [`FromJS`].
     ///
     /// If the callee throws, the exception is returned as an [`Error`]
-    /// preserving the JS error type and message.
+    /// preserving the JS error type and message. Isolate termination during the
+    /// call is returned as an [`Error`] with [`Error::is_termination`] set —
+    /// stop calling into JS when you see it (see the accessor's docs).
     pub fn call(&self, lock: &mut Lock, args: Args) -> Result<R::ResultType, Error> {
         self.call_with_receiver(lock, None::<v8::Local<'_, v8::Value>>, args)
     }
@@ -127,6 +130,13 @@ impl<Args, R> ToJS for Function<Args, R> {
     where
         'b: 'a,
     {
+        self.handle.as_local(lock).into()
+    }
+}
+
+/// By-ref conversion, used by `#[jsg_struct]` field wrapping.
+impl<Args, R> v8::ToLocalValue for Function<Args, R> {
+    fn to_local<'a>(&self, lock: &mut Lock) -> v8::Local<'a, v8::Value> {
         self.handle.as_local(lock).into()
     }
 }

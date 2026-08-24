@@ -159,7 +159,7 @@ if let Some(cb) = self.callback.take() {
 }
 ```
 
-A JS exception thrown by the callee is returned as a `jsg::Error` preserving the JS error type and message. Use `call_with_receiver` to pass an explicit `this`.
+A JS exception thrown by the callee is returned as a `jsg::Error` preserving the JS error type and message. Isolate termination during the call is returned as a `jsg::Error` with `is_termination()` set; stop calling into JS when you see it — throwing it via `Lock::throw_exception()` re-arms termination rather than scheduling a catchable JS exception. Use `call_with_receiver` to pass an explicit `this`.
 
 ## Union Types
 
