@@ -219,7 +219,7 @@ fn typed_function_unit_signature() {
     });
 }
 
-/// `jsg::Function::from_js` rejects non-function values with a TypeError.
+/// `jsg::Function::from_js` rejects non-function values with a `TypeError`.
 #[test]
 fn typed_function_rejects_non_function() {
     let harness = crate::Harness::new();
