@@ -2644,8 +2644,8 @@ class ExternalMemoryAdjustment final {
   void maybeDeferAdjustment(ssize_t amount);
 };
 
-// If memory protection keys are enabled, provides the ability to run a function
-// within the scope of a particular protection key associated with the isolate lock.
+// If the V8 isolate and host expose memory protection keys, provides the ability to run a
+// function within the scope of the protection key associated with the isolate lock.
 // This class is designed to be movable.
 class MemoryProtectionKeyScope final {
  public:
@@ -2655,25 +2655,37 @@ class MemoryProtectionKeyScope final {
 
   auto runWithKey(auto func) {
 #ifdef V8_ENABLE_SANDBOX
-    PkeyScope scope(pkey);
+    KJ_IF_SOME(api, pkeyApi) {
+      PkeyScope scope(api);
+      return func();
+    }
 #endif
     return func();
   }
 
  private:
 #ifdef V8_ENABLE_SANDBOX
-  int pkey;
+  struct PkeyApi {
+    int key;
+    int (*getPermissions)(int);
+    int (*setPermissions)(int, int);
+  };
+
+  kj::Maybe<PkeyApi> pkeyApi;
   MemoryProtectionKeyScope(Lock&);
 
   struct PkeyScope {
-    int key;
+    PkeyApi api;
     int saved;
-    PkeyScope(int pkey);
+    PkeyScope(PkeyApi api);
     ~PkeyScope();
   };
+
+  template <typename Isolate, typename Key = int>
+  static kj::Maybe<PkeyApi> tryGetPkeyApi(Isolate& isolate);
 #else
   MemoryProtectionKeyScope(Lock&) {
-    // No-op if sandboxing is not enabled.
+    // No-op if sandboxing is disabled.
   }
 #endif
 

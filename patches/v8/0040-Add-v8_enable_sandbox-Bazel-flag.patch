@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Guy Bedford <guybedford@gmail.com>
+Date: Fri, 21 Aug 2026 12:00:00 +0000
+Subject: [bazel] Add v8_enable_sandbox build flag
+
+Expose the V8 sandbox as a Bazel build setting and propagate its public
+compile definition through define_flags. Restrict it to the configurations
+supported by workerd and fail during analysis if pointer compression, its
+shared cage, or external code space are unavailable.
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -68,7 +68,6 @@
+ # v8_verify_torque_generation_invariance
+ # v8_enable_snapshot_compression
+ # v8_control_flow_integrity
+-# v8_enable_sandbox
+ # cppgc_enable_caged_heap
+ # cppgc_enable_api_checks
+ # cppgc_enable_check_assignments_in_prefinalizers
+@@ -424,3 +423,28 @@ selects.config_setting_group(
++v8_flag(
++    name = "v8_enable_sandbox",
++    default = False,
++)
++
++selects.config_setting_group(
++    name = "sandbox_supported_arch",
++    match_any = [
++        "@v8//bazel/config:v8_target_x64",
++        "@v8//bazel/config:v8_target_arm64",
++    ],
++)
++
++selects.config_setting_group(
++    name = "enable_sandbox",
++    match_all = [
++        ":is_v8_enable_sandbox",
++        ":sandbox_supported_arch",
++        "@v8//bazel/config:is_linux",
++        ":is_v8_enable_pointer_compression",
++        ":enable_pointer_compression_shared_cage",
++        ":enable_external_code_space",
++    ],
++)
++
+ # We use a string flag to create a 3 value-logic.
+ # If no explicit value for v8_enable_short_builtin_calls, we set it to 'none'.
+ v8_string(
+@@ -651,6 +675,11 @@ v8_config(
+         ],
+         "//conditions:default": [],
+     }) + select({
++        ":is_not_v8_enable_sandbox": [],
++        ":enable_sandbox": [
++            "V8_ENABLE_SANDBOX",
++        ],
++    }, no_match_error = "v8_enable_sandbox requires Linux x64 or arm64 with pointer compression, a shared pointer-compression cage, and external code space") + select({
+         ":enable_static_roots": [
+             "V8_STATIC_ROOTS",
+         ],

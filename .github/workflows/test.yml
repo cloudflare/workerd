@@ -99,6 +99,29 @@ jobs:
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
       GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
 
+  test-v8-sandbox:
+    strategy:
+      matrix:
+        os:
+          [
+            { name: linux, arch: X64, image: ubuntu-22.04-16core },
+            { name: linux-arm, arch: ARM64, image: ubuntu-22.04-arm-16core },
+          ]
+    name: test-v8-sandbox (${{ matrix.os.name }}, ${{ matrix.os.image }})
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ${{ matrix.os.image }}
+      os_name: ${{ matrix.os.name }}
+      arch_name: ${{ matrix.os.arch }}
+      suffix: '-v8-sandbox'
+      extra_bazel_args: '--config=ci-test --config=ci-${{ matrix.os.name }} --config=v8-sandbox'
+      build_target: '//src/workerd/jsg/... //src/rust/jsg-test:jsg-test_test'
+      test_target: '//src/workerd/jsg/... //src/rust/jsg-test:jsg-test_test'
+    secrets:
+      BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
+      WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
+      GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
+
   lint:
     uses: ./.github/workflows/_bazel.yml
     with:

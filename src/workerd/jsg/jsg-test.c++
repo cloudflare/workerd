@@ -567,12 +567,8 @@ struct MpkContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(MpkIsolate, MpkContext);
 KJ_TEST("MemoryProtectionKeyScope") {
-  // In workerd, since V8_ENABLE_SANDBOX is not defined, this test is largely
-  // a non-op, however, when v8 is built with V8_ENABLE_SANDBOX enabled and
-  // the isolate has a memory protection key, this test will (eventually)
-  // verify that the array buffer allocation is writable within the scope.
-  // Essentially once backing stores are protected, and mpk's are enabled,
-  // this shouldn't crash.
+  // This is a no-op unless the V8 isolate and host expose memory protection keys. When backing
+  // stores are protected, writing within the scope should not crash.
   MpkIsolate isolate(v8System, kj::heap<IsolateObserver>());
   std::shared_ptr<v8::BackingStore> store;
   auto mpkScope = isolate.runInLockScope([&](MpkIsolate::Lock& lock) {

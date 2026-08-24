@@ -12,7 +12,7 @@
 #include <workerd/jsg/util.h>
 #include <workerd/util/thread-scopes.h>
 
-#ifdef V8_ENABLE_SANDBOX
+#if defined(V8_ENABLE_SANDBOX) && __has_include(<sys/mman.h>)
 #include <sys/mman.h>
 #endif
 
@@ -675,20 +675,43 @@ void ContextGlobal::setSchemaLoader(const capnp::SchemaLoader& schemaLoader) {
 }
 
 #ifdef V8_ENABLE_SANDBOX
-// These are disabled by default in workerd. We do not build workerd with
-// the V8_ENABLED_SANDBOX flag. If we do decide to enable it, we will need
-// additional setup to ensure that these are handled correctly on all platforms.
-// For now, keeping it simple. This bit will only be used in the internal
-// project.
 static constexpr int kPkeyNoRestrictions = 0;
-MemoryProtectionKeyScope::MemoryProtectionKeyScope(Lock& js)
-    : pkey(js.v8Isolate->GetMemoryProtectionKey()) {}
 
-MemoryProtectionKeyScope::PkeyScope::PkeyScope(int pkey): key(pkey), saved(pkey_get(key)) {
-  pkey_set(pkey, kPkeyNoRestrictions);
+template <typename Key>
+int getPkeyPermissions(Key key) {
+  return pkey_get(key);
+}
+
+template <typename Key>
+int setPkeyPermissions(Key key, int permissions) {
+  return pkey_set(key, permissions);
+}
+
+template <typename Isolate, typename Key>
+kj::Maybe<MemoryProtectionKeyScope::PkeyApi> MemoryProtectionKeyScope::tryGetPkeyApi(
+    Isolate& isolate) {
+  if constexpr (requires(Isolate& candidate, Key key) {
+                  candidate.GetMemoryProtectionKey();
+                  pkey_get(key);
+                  pkey_set(key, kPkeyNoRestrictions);
+                }) {
+    return PkeyApi{
+      isolate.GetMemoryProtectionKey(), &getPkeyPermissions<Key>, &setPkeyPermissions<Key>};
+  } else {
+    return kj::none;
+  }
+}
+
+MemoryProtectionKeyScope::MemoryProtectionKeyScope(Lock& js)
+    : pkeyApi(tryGetPkeyApi(*js.v8Isolate)) {}
+
+MemoryProtectionKeyScope::PkeyScope::PkeyScope(PkeyApi api)
+    : api(api),
+      saved(api.getPermissions(api.key)) {
+  api.setPermissions(api.key, kPkeyNoRestrictions);
 }
 MemoryProtectionKeyScope::PkeyScope::~PkeyScope() {
-  pkey_set(key, saved);
+  api.setPermissions(api.key, saved);
 }
 #endif
 

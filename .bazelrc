@@ -104,6 +104,14 @@ build:v8-codegen-opt --per_file_copt=external/+http+simdutf@-O3
 build:v8-codegen-opt --per_file_copt=external/.*com_googlesource_chromium_icu@-O3
 build:v8-codegen-opt --per_file_copt=external/perfetto@-O3
 
+# Build V8 and its embedders with the V8 sandbox ABI.
+build:v8-sandbox --@v8//:v8_enable_sandbox=True
+build:v8-sandbox --@v8//:v8_enable_pointer_compression=True
+build:v8-sandbox --@v8//:v8_enable_pointer_compression_shared_cage=True
+build:v8-sandbox --@v8//:v8_enable_external_code_space=True
+build:v8-sandbox --cxxopt=-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_FAST
+build:v8-sandbox --host_cxxopt=-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_FAST
+
 build:v8-codegen-opt-windows --per_file_copt=v8/src@/O2,/clang:-O3
 build:v8-codegen-opt-windows --per_file_copt=external/abseil-cpp@/O2,/clang:-O3
 build:v8-codegen-opt-windows --per_file_copt=external/zlib@/O2,/clang:-O3
