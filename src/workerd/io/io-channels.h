@@ -35,6 +35,9 @@ WD_STRONG_BOOL(Persistent);
 // Whether an actor request is a retry of an earlier attempt.
 WD_STRONG_BOOL(IsActorRetry);
 
+// Whether the sender's enforce gate is enabled for this logical call.
+WD_STRONG_BOOL(ActorRetryGateEnabled);
+
 // Interface for talking to the Cache API. Needs to be declared here so that IoContext can
 // contain it.
 class CacheClient {
@@ -138,6 +141,7 @@ class IoChannelFactory: public virtual kj::Refcounted {
     uint64_t nonce;
     kj::Date createdAt;
     IsActorRetry isRetry;
+    ActorRetryGateEnabled retryGateEnabled;
   };
 
   // Contains metadata attached to an outgoing subrequest from a worker, independent of the type
@@ -657,6 +661,7 @@ kj::Own<IoChannelFactory::RpcChannel> newPromisedChannel<IoChannelFactory::RpcCh
     kj::Promise<kj::Own<IoChannelFactory::RpcChannel>> promise);
 
 // Creates caller-owned metadata for the first attempt of a retry-eligible actor invocation.
-IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(kj::Date createdAt);
+IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(
+    kj::Date createdAt, ActorRetryGateEnabled retryGateEnabled);
 
 }  // namespace workerd

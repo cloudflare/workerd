@@ -1515,13 +1515,13 @@ template <typename T>
 using ActorFetchAttemptResult = kj::OneOf<T, ActorFetchFailure>;
 
 ActorFetchRetryState ActorFetchRetryState::create(TimerChannel& timer) {
-  auto metadata = generateActorRetryRequestMetadata(kj::systemCoarseCalendarClock().now());
+  bool retryGateEnabled = util::Autogate::isEnabled(
+      util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS);
+  auto metadata = generateActorRetryRequestMetadata(kj::systemCoarseCalendarClock().now(),
+      ActorRetryGateEnabled(retryGateEnabled));
   kj::Maybe<kj::TimePoint> deadline;
-  // TODO(STOR-5489): Keep sender-side retries disabled until retry-claim enforcement is deployed to
-  // every receiver. A mixed fleet can otherwise execute both an ambiguous request and its retry.
   if (util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH) &&
-      util::Autogate::isEnabled(
-          util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS)) {
+      retryGateEnabled) {
     deadline = timer.nowForLimitTimeout() + RETRY_BUDGET;
   }
   return ActorFetchRetryState(kj::mv(metadata), kj::mv(deadline), timer);
@@ -1577,7 +1577,8 @@ kj::OneOf<kj::Duration, kj::Exception> ActorFetchRetryState::prepareRetry(
   if (exception.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none) {
     metadata.isRetry = IsActorRetry::YES;
   } else if (metadata.isRetry == IsActorRetry::NO) {
-    metadata = generateActorRetryRequestMetadata(kj::systemCoarseCalendarClock().now());
+    metadata = generateActorRetryRequestMetadata(
+        kj::systemCoarseCalendarClock().now(), metadata.retryGateEnabled);
   }
 
   auto delay = retryDelay();
