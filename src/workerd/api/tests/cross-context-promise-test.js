@@ -6,6 +6,18 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { inspect } from 'util';
 import { mock } from 'node:test';
 
+// Returns a probe function that is bound to the calling request's IoContext: invoking it
+// succeeds in that context and throws "Cannot perform I/O on behalf of a different request"
+// from any other. Several tests below use this to prove which IoContext a cross-request
+// promise continuation runs in. An accepted WebSocket has the property we need because its
+// native state is owned by the request that created it; its peer is never accepted, so sent
+// probe messages just buffer.
+function newIoContextProbe() {
+  const pair = new WebSocketPair();
+  pair[0].accept();
+  return () => pair[0].send('probe');
+}
+
 export const crossContextResolveWorks = {
   async test(_, env) {
     // We're going to send two simultaneous requests to the same endpoint.
@@ -194,19 +206,18 @@ async function resolveTest(req, env, ctx) {
     setupWaiter(ctx);
     const { promise, resolve } = Promise.withResolvers();
     globalThis.request1 = { promise, resolve };
-    const ab = AbortSignal.abort();
-    strictEqual(ab.aborted, true);
+    const probe = newIoContextProbe();
+    probe();
     await als.run(123, async () => {
       await promise;
       strictEqual(als.getStore(), 123);
     });
     // This part is the main test. It will not run until after the promise
-    // is resolved in the second request.
-    // We use an AbortSignal because it is bound to the IoContext and will
-    // throw an error if ab.aborted is checked from the wrong IoContext.
-    // If this line runes, it is proof that the promise continuation is
-    // running in the correct IoContext.
-    strictEqual(ab.aborted, true);
+    // is resolved in the second request. The probe is bound to this request's
+    // IoContext and throws if invoked from any other, so running without
+    // throwing here is proof that the promise continuation is running in the
+    // correct IoContext.
+    probe();
     return new Response('ok');
   }
 
@@ -239,19 +250,19 @@ async function rejectTest(req, env, ctx) {
     setupWaiter(ctx);
     const { promise, reject } = Promise.withResolvers();
     globalThis.request2 = { reject };
-    const ab = AbortSignal.abort();
-    strictEqual(ab.aborted, true);
+    const probe = newIoContextProbe();
+    probe();
     try {
       // The promise will be rejected from the other request.
       await promise;
       throw new Error('should not get here');
     } catch (err) {
       // The reason provided by the other request should be carried
-      // through here. If the ab.aborted check throws, then the continuation
-      // is running in the wrong IoContext, which is the main thing we are
-      // testing for here.
+      // through here. If the probe throws, then the continuation is running
+      // in the wrong IoContext, which is the main thing we are testing for
+      // here.
       strictEqual(err, reason);
-      strictEqual(ab.aborted, true);
+      probe();
     }
     return new Response('ok');
   }
@@ -277,10 +288,10 @@ async function crossRequestStream(req, env, ctx) {
     });
     globalThis.stream = { controller };
     const reader = readable.getReader();
-    const ab = AbortSignal.abort();
-    strictEqual(ab.aborted, true);
+    const probe = newIoContextProbe();
+    probe();
     const _read = await reader.read();
-    strictEqual(ab.aborted, true);
+    probe();
     return new Response('ok');
   }
 
@@ -300,31 +311,30 @@ async function customThenable(req, env, ctx) {
     setupWaiter(ctx);
     const { promise, resolve } = Promise.withResolvers();
     globalThis.thenable = { resolve };
-    const ab = AbortSignal.abort();
-    strictEqual(ab.aborted, true);
+    const probe = newIoContextProbe();
+    probe();
 
     // We check to make sure the value provided by the custom thenable is
     // property passed through to the promise resolution.
 
     strictEqual(await promise, 1);
     // This part is the main test. It will not run until after the promise
-    // is resolved in the second request.
-    // We use an AbortSignal because it is bound to the IoContext and will
-    // throw an error if ab.aborted is checked from the wrong IoContext.
-    // If this line runes, it is proof that the promise continuation is
-    // running in the correct IoContext.
-    strictEqual(ab.aborted, true);
+    // is resolved in the second request. The probe is bound to this request's
+    // IoContext and throws if invoked from any other, so running without
+    // throwing here is proof that the promise continuation is running in the
+    // correct IoContext.
+    probe();
     return new Response('ok');
   }
 
   // This is our second request. Here, all we do is resolve the promise.
-  const ab = AbortSignal.abort();
-  strictEqual(ab.aborted, true);
+  const probe = newIoContextProbe();
+  probe();
 
   const then = mock.fn((resolve) => {
     // The thenable should be invoked in the second request's IoContext.
-    // If it is not, then the ab.aborted check below will fail.
-    strictEqual(ab.aborted, true);
+    // If it is not, then this probe will throw.
+    probe();
     resolve(1);
   });
 
@@ -346,8 +356,8 @@ async function unhandledRejection(req, env, ctx) {
     setupWaiter(ctx);
     const { reject } = Promise.withResolvers();
     globalThis.unhandled = { reject };
-    const ab = AbortSignal.abort();
-    strictEqual(ab.aborted, true);
+    const probe = newIoContextProbe();
+    probe();
 
     const rejectPromise = Promise.withResolvers();
     globalThis.addEventListener(
@@ -355,9 +365,9 @@ async function unhandledRejection(req, env, ctx) {
       (event) => {
         // With deferred cross-context settlement, the rejection (and therefore
         // the unhandledrejection event) is dispatched in the owning IoContext,
-        // not the rejecting request's context. This means ab.aborted should
-        // work correctly here — we are in the right IoContext.
-        strictEqual(ab.aborted, true);
+        // not the rejecting request's context. The probe throwing here would
+        // mean we are in the wrong IoContext.
+        probe();
         strictEqual(event.reason, reason);
         rejectPromise.resolve();
       },
@@ -402,20 +412,20 @@ async function expiredContext(req, env, ctx) {
   return new Response('ok');
 }
 
-async function* gen(ab) {
+async function* gen(probe) {
   let c = 0;
   for (;;) {
     await scheduler.wait(10);
-    strictEqual(ab.aborted, true);
+    probe();
     yield c++;
   }
 }
 
 async function asyncIterator(req, env, ctx) {
   if (globalThis.asynciter === undefined) {
-    const ab = AbortSignal.abort();
-    globalThis.asynciter = gen(ab);
-    globalThis.asyncIter2 = gen(ab);
+    const probe = newIoContextProbe();
+    globalThis.asynciter = gen(probe);
+    globalThis.asyncIter2 = gen(probe);
     return new Response('ok');
   }
 
@@ -451,8 +461,8 @@ async function cyclicPromise(req, env, ctx) {
     setupWaiter(ctx);
     const { promise, resolve } = Promise.withResolvers();
     globalThis.cyclic = { promise, resolve };
-    const ab = AbortSignal.abort();
-    strictEqual(ab.aborted, true);
+    const probe = newIoContextProbe();
+    probe();
     await promise;
     throw new Error('should never get here');
   }
@@ -493,8 +503,8 @@ async function resolveViaSubrequest(req, env, ctx) {
   // or ctx.waitUntil() to keep the request alive explicitly.
   const { promise, resolve } = Promise.withResolvers();
   globalThis.resolveViaSubrequest = { resolve };
-  const ab = AbortSignal.abort();
-  strictEqual(ab.aborted, true);
+  const probe = newIoContextProbe();
+  probe();
 
   const res = await env.subrequest.fetch(
     'http://example.org/resolve-via-subrequest-helper'
@@ -502,7 +512,7 @@ async function resolveViaSubrequest(req, env, ctx) {
   strictEqual(res.status, 200);
 
   const result = await promise;
-  strictEqual(ab.aborted, true);
+  probe();
   strictEqual(result, 'resolved-by-subrequest');
   return new Response('ok');
 }

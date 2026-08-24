@@ -1178,6 +1178,11 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   jsg::UnhandledRejectionHandler unhandledRejections;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> processValue;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> bufferValue;
+
+  // HTML's "in error reporting mode" flag: set while reportError() is dispatching the
+  // 'error' event, so that a nested report (e.g. from a throwing 'error' listener) logs
+  // directly instead of recursing.
+  bool inErrorReportingMode = false;
   kj::Maybe<jsg::Ref<Fetcher>> defaultFetcher;
   kj::HashMap<kj::String, ConnectFn> connectOverrides;
   kj::HashMap<kj::String, kj::String> dnsOverrides;

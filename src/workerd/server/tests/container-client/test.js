@@ -400,6 +400,38 @@ export class DurableObjectExample extends DurableObject {
     assert.strictEqual(container.running, false);
   }
 
+  // Runs a long-lived process wired to an AbortSignal that this Durable Object received over
+  // RPC (from the test driver) and returns the process exit code. This exercises exec()'s
+  // abort registration against a *deserialized* signal: the registration itself must arm the
+  // signal's RPC abort subscription, or the remote abort would never be delivered here.
+  async execWithReceivedSignal(signal) {
+    const container = this.ctx.container;
+    if (!container.running) {
+      container.start();
+    }
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    const proc = await container.exec(['sh', '-lc', 'sleep 60'], {
+      signal,
+      stdout: 'ignore',
+    });
+    this.#receivedSignalExecStarted = true;
+    const exitCode = await proc.exitCode;
+
+    await container.destroy();
+    await monitor;
+    return exitCode;
+  }
+
+  // Polled by the test driver so it only aborts once the exec is actually running (aborting
+  // earlier would make exec() itself fail fast instead of killing the process).
+  async receivedSignalExecStarted() {
+    return this.#receivedSignalExecStarted;
+  }
+
+  #receivedSignalExecStarted = false;
+
   async testSetInactivityTimeout(timeout) {
     const container = this.ctx.container;
     if (container.running) {
@@ -2894,6 +2926,27 @@ export const testExec = {
     );
     const stub = env.MY_CONTAINER.get(id);
     await stub.testExec();
+  },
+};
+
+// An AbortSignal passed into the Durable Object over RPC kills an exec()'d process when
+// aborted from the caller's context.
+export const testExecRemoteAbortSignal = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testExecRemoteAbortSignal')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+
+    const ac = new AbortController();
+    const pending = stub.execWithReceivedSignal(ac.signal);
+    while (!(await stub.receivedSignalExecStarted())) {
+      await scheduler.wait(100);
+    }
+    ac.abort(new Error('remote-abort'));
+
+    // A process killed by SIGKILL (9) reports exit code 128 + 9 = 137.
+    assert.strictEqual(await pending, 137);
   },
 };
 

@@ -5,6 +5,17 @@ import { strictEqual, ok, deepStrictEqual, rejects, throws } from 'node:assert';
 
 const enc = new TextEncoder();
 
+// A standard WritableStream allocates an AbortSignal for its controller, which must not
+// require an active IoContext: constructing one at module scope works.
+const moduleScopeWritable = new WritableStream();
+
+export const globalScopeWritableStream = {
+  test() {
+    ok(moduleScopeWritable instanceof WritableStream);
+    strictEqual(moduleScopeWritable.locked, false);
+  },
+};
+
 export const rs = {
   async test(ctrl, env) {
     const resp = await env.subrequest.fetch('http://example.org', {
