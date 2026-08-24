@@ -28,7 +28,7 @@ class EvalContext {
  public:
   EvalContext(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
-  EvalResult eval(::rust::Str code) const;
+  EvalResult eval(::rust::Str code, kj::Maybe<::rust::Str> resourceName) const;
   void set_global(::rust::Str name, ::workerd::rust::jsg::Local value) const;
 
   v8::Isolate* v8Isolate;
