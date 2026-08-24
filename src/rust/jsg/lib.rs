@@ -7,6 +7,7 @@ use std::num::ParseIntError;
 use std::ops::Deref;
 
 pub mod feature_flags;
+pub mod function;
 pub mod macros;
 pub mod modules;
 pub mod nullable;
@@ -15,6 +16,8 @@ pub mod v8;
 mod wrappable;
 
 pub use feature_flags::FeatureFlags;
+pub use function::Function;
+pub use function::FunctionArgs;
 pub use nullable::Nullable;
 pub use resource::Rc;
 pub use resource::Resource;
