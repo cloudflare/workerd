@@ -826,6 +826,30 @@ export const kMaxZstdDParam = Math.max(
 );
 export const zstdInitDParamsArray = new Int32Array(kMaxZstdDParam + 1);
 
+// Node accepts a zstd `dictionary` as an ArrayBufferView or an ArrayBuffer, and quietly
+// ignores any other type rather than throwing (lib/zlib.js, class Zstd). Normalize here so
+// that both the stream path and the convenience functions' fast path behave the same way.
+export function normalizeZstdDictionary(
+  dictionary: ZstdOptions['dictionary']
+): ArrayBufferView | undefined {
+  if (dictionary === undefined || isArrayBufferView(dictionary)) {
+    return dictionary;
+  }
+  if (isAnyArrayBuffer(dictionary)) {
+    return new Uint8Array(dictionary);
+  }
+  return undefined;
+}
+
+// Returns `options` unchanged unless its dictionary needed normalizing, so the common case
+// allocates nothing.
+export function normalizeZstdOptions(options: ZstdOptions): ZstdOptions {
+  const dictionary = normalizeZstdDictionary(options.dictionary);
+  return dictionary === options.dictionary
+    ? options
+    : { ...options, dictionary };
+}
+
 const zstdDefaultOptions: ZlibDefaultOptions = {
   flush: CONST_ZSTD_e_continue,
   finishFlush: CONST_ZSTD_e_end,
@@ -883,7 +907,8 @@ export class Zstd extends ZlibBase {
         () => {
           queueMicrotask(processCallback.bind(handle));
         },
-        pledgedSrcSize
+        pledgedSrcSize,
+        normalizeZstdDictionary(options?.dictionary)
       )
     ) {
       throw new ERR_ZLIB_INITIALIZATION_FAILED();
