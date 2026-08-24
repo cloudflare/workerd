@@ -74,6 +74,25 @@ class WrappableFunctionImpl<Ret(Args...), Impl>: public WrappableFunction<Ret(Ar
   Impl func;
 };
 
+// Given the wrapper object that a native jsg::Function stashed as its callback data, recover the
+// WrappableFunction it wraps, aborting if it is not one of the expected signature.
+template <typename Signature>
+WrappableFunction<Signature>& unwrapWrappableFunction(
+    v8::Isolate* isolate, v8::Local<v8::Object> object) {
+  // WrappableFunction<Sig> for every Sig shares kNonResourceWrappableTag, so the tag range check
+  // only proves "some non-resource wrappable". The concrete signature -- which determines how
+  // operator() is called -- must be verified separately, and must not depend on the belt-and-braces
+  // dynamic_cast in downcastWrappable (which we may remove once tags are trusted).
+  Wrappable* wrappable =
+      Wrappable::unwrapFromShimInRangeOrAbort(isolate, object, kNonResourceWrappableTagRange);
+  auto* function = dynamic_cast<WrappableFunction<Signature>*>(wrappable);
+  if (function == nullptr) {
+    KJ_LOG(FATAL, "wrapper type mismatch: object is not the expected native function signature");
+    abort();
+  }
+  return *function;
+}
+
 template <typename TypeWrapper, typename Signature, typename = ArgumentIndexes<Signature>>
 struct FunctorCallback;
 
@@ -85,8 +104,7 @@ struct FunctorCallback<TypeWrapper, Ret(Args...), kj::_::Indexes<indexes...>> {
       auto context = isolate->GetCurrentContext();
       auto& js = Lock::from(isolate);
       auto& wrapper = TypeWrapper::from(isolate);
-      auto& func = extractInternalPointer<WrappableFunction<Ret(Args...)>, false>(
-          isolate, context, args.Data().As<v8::Object>(), kNonResourceWrappableTagRange);
+      auto& func = unwrapWrappableFunction<Ret(Args...)>(isolate, args.Data().As<v8::Object>());
 
       auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
           []<size_t i>() { return TypeErrorContext::callbackArgument(i); });
@@ -113,9 +131,9 @@ struct FunctorCallback<TypeWrapper,
       auto context = isolate->GetCurrentContext();
       auto& wrapper = TypeWrapper::from(isolate);
       auto& js = Lock::from(isolate);
-      auto& func = extractInternalPointer<
-          WrappableFunction<Ret(const v8::FunctionCallbackInfo<v8::Value>&, Args...)>, false>(
-          isolate, context, args.Data().As<v8::Object>(), kNonResourceWrappableTagRange);
+      auto& func =
+          unwrapWrappableFunction<Ret(const v8::FunctionCallbackInfo<v8::Value>&, Args...)>(
+              isolate, args.Data().As<v8::Object>());
 
       auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
           []<size_t i>() { return TypeErrorContext::callbackArgument(i); });
