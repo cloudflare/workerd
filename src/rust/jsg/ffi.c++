@@ -238,6 +238,10 @@ bool local_is_uint8clamped_array(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsUint8ClampedArray();
 }
 
+bool local_is_typed_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsTypedArray();
+}
+
 bool local_is_array_buffer(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsArrayBuffer();
 }
