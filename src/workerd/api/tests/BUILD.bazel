@@ -702,6 +702,12 @@ wd_test(
 )
 
 wd_test(
+    src = "ts-compression-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["ts-compression-streams-test.js"],
+)
+
+wd_test(
     src = "compression-streams-test.wd-test",
     args = ["--experimental"],
     data = ["compression-streams-test.js"],

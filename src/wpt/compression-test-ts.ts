@@ -4,10 +4,14 @@
 
 import { type TestRunnerConfig } from 'harness/harness';
 
+// The compression WPT suite against the TypeScript streams implementation's
+// CompressionStream/DecompressionStream pair (webstreams/compression.ts over
+// the shared C++ CodecStage). Expectations match the legacy configuration
+// (compression-test.ts): the pair is behavior-matching by design.
 export default {
   'compression-bad-chunks.any.js': {
-    comment: 'Test times out - needs investigation',
-    disabledTests: true,
+    comment: 'brotli compression is not supported',
+    expectedFailures: [/brotli/],
   },
   'compression-constructor-error.any.js': {},
   'compression-including-empty-chunk.any.js': {
@@ -64,14 +68,8 @@ export default {
     expectedFailures: [/.*brotli.*/],
   },
   'decompression-extra-input.any.js': {
-    comment:
-      'Extra padding tests fail - workerd handles trailing data differently',
-    expectedFailures: [
-      'decompressing deflate input with extra pad should still give the output',
-      'decompressing gzip input with extra pad should still give the output',
-      'decompressing deflate-raw input with extra pad should still give the output',
-      /brotli/,
-    ],
+    comment: 'brotli compression is not supported',
+    expectedFailures: [/brotli/],
   },
   'decompression-split-chunk.any.js': {
     comment: 'brotli compression is not supported',
@@ -94,13 +92,9 @@ export default {
       'data should be correctly decompressed even if input is detached partway',
     ],
   },
-  'idlharness.https.any.js': {
-    comment:
-      'Workers expose globals differently than browsers - readable/writable attribute tests still fail',
-    expectedFailures: [
-      'CompressionStream interface: existence and properties of interface prototype object',
-      'DecompressionStream interface: existence and properties of interface prototype object',
-    ],
-  },
+  // The interface-prototype subtests that fail against the legacy classes (see
+  // compression-test.ts) pass against the TypeScript pair: its prototype property
+  // attributes follow the IDL rules.
+  'idlharness.https.any.js': {},
   'third_party/pako/pako_inflate.min.js': {},
 } satisfies TestRunnerConfig;
