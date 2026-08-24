@@ -141,20 +141,12 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           if (def.name == source.mainModule) {
             flags = flags | jsg::modules::Module::Flags::MAIN;
           }
-          if (content.ownBody != kj::none) {
-            // When the source is owned (e.g. transpiled TypeScript), we must
-            // copy it into the module registry since the owning rust::String
-            // may not outlive the registry.
-            bundleBuilder.addEsmModule(def.name, kj::heapArray<const char>(content.body), flags);
-          } else {
-            // The content.body points into memory that outlives the module
-            // registry. In workerd this is a process-lifetime capnp message
-            // buffer; in edgeworker, it is the disowned script-fetcher response
-            // owned by the VirtualFileSystem (which is a sibling of the registry
-            // in Worker::Script::Impl). In edgeworker, the copy is ensured by
-            // shouldCopyScriptFetcherResponse() including the NMR flag.
-            bundleBuilder.addEsmModule(def.name, content.body, flags);
-          }
+          // Worker bundle storage is not necessarily static: transpiled source
+          // can be backed by a temporary rust::String, and edgeworker source is
+          // backed by a script-fetcher response. Copy it once into shared storage
+          // so V8 external strings can safely outlive the registry.
+          bundleBuilder.addEsmModule(
+              def.name, kj::arc<jsg::OwnedAscii>(kj::heapArray<const char>(content.body)), flags);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::TextModule) {

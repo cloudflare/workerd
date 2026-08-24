@@ -3151,7 +3151,9 @@ class Lock {
   JsString str(kj::ArrayPtr<const kj::byte>) KJ_WARN_UNUSED_RESULT;
   JsString strIntern(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
   JsString strExtern(kj::ArrayPtr<const char>) KJ_WARN_UNUSED_RESULT;
+  JsString strExtern(kj::Arc<OwnedAscii>) KJ_WARN_UNUSED_RESULT;
   JsString strExtern(kj::ArrayPtr<const uint16_t>) KJ_WARN_UNUSED_RESULT;
+  JsString strExtern(kj::Arc<OwnedUtf16>) KJ_WARN_UNUSED_RESULT;
   JsSymbol symbol(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
   JsSymbol symbolShared(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
   JsSymbol symbolInternal(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
