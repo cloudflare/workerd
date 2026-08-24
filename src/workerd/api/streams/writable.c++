@@ -366,12 +366,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
     // hopefully improve the situation here.
     if (!ended) {
       KJ_IF_SOME(writer, this->writer) {
-        context.addTask(context.run([writer = kj::mv(writer), exception = cancellationException()](
-                                        Worker::Lock& lock) mutable {
-          jsg::Lock& js = lock;
-          auto ex = js.exceptionToJsValue(kj::mv(exception));
-          return IoContext::current().awaitJs(lock, writer->abort(lock, ex.getHandle(js)));
-        }));
+        scheduleAbort(kj::mv(writer));
       }
     }
   }
@@ -390,13 +385,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
         }
         auto w = kj::mv(obj.writer);
         KJ_IF_SOME(writer, w) {
-          obj.context.addTask(
-              obj.context.run([writer = kj::mv(writer), exception = cancellationException()](
-                                  Worker::Lock& lock) mutable {
-            jsg::Lock& js = lock;
-            auto ex = js.exceptionToJsValue(kj::mv(exception));
-            return IoContext::current().awaitJs(lock, writer->abort(lock, ex.getHandle(js)));
-          }));
+          obj.scheduleAbort(kj::mv(writer));
         }
       }
     }));
@@ -489,6 +478,21 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
       return *inner;
     }
     kj::throwFatalException(cancellationException());
+  }
+
+  // Runs the writer's abort algorithm on the isolate thread, reporting the generic cancellation
+  // reason (the peer's actual reason cannot be conveyed; see the destructor).
+  void scheduleAbort(jsg::Ref<WritableStreamDefaultWriter> writer) {
+    // Once the last IncomingRequest is gone the IoContext can no longer usefully run JavaScript:
+    // the task would be queued onto a task set that is already being torn down, so the abort
+    // algorithm would never observe it. Drop the writer rather than queue unrunnable work.
+    if (!context.hasCurrentIncomingRequest()) return;
+    context.addTask(context.run(
+        [writer = kj::mv(writer), exception = cancellationException()](Worker::Lock& lock) mutable {
+      jsg::Lock& js = lock;
+      auto ex = js.exceptionToJsValue(kj::mv(exception));
+      return IoContext::current().awaitJs(lock, writer->abort(lock, ex.getHandle(js)));
+    }));
   }
 
   static kj::Exception cancellationException() {

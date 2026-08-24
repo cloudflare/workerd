@@ -630,6 +630,18 @@ wd_test(
 )
 
 wd_test(
+    src = "js-rpc-writable-teardown-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-writable-teardown-test.js"],
+)
+
+wd_test(
+    src = "js-rpc-writable-teardown-ts-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-writable-teardown-test.js"],
+)
+
+wd_test(
     src = "js-rpc-params-ownership-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-params-ownership-test.js"],
