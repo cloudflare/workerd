@@ -416,6 +416,16 @@ class ReplicaActorOutgoingFactory final: public Fetcher::OutgoingFactory {
 
   Result newSingleUseClient(
       kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override;
+  bool supportsActorFetchRetries() const override {
+    return true;
+  }
+  void onActorFetchRetry() override {
+    // Keep the pre-resolved primary channel. Reconnecting a broken channel requires routing state
+    // that this factory does not own, but request-level disconnects can still succeed on retry.
+  }
+  Result newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
+      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata,
+      MakeUserSpanParent makeUserSpanParent) override;
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
 
  private:
