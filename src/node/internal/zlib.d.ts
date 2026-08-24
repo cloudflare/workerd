@@ -291,6 +291,10 @@ export interface ZstdOptions {
     | undefined;
   maxOutputLength?: number | undefined;
   pledgedSrcSize?: number | undefined;
+  // Declared as a view, like ZlibOptions above, though an ArrayBuffer is also accepted at
+  // runtime and any other type is ignored. See normalizeZstdDictionary() in
+  // internal_zlib_base.ts.
+  dictionary?: ArrayBufferView | undefined;
   // Not specified in NodeJS docs but the tests expect it
   info?: boolean | undefined;
 }
@@ -370,7 +374,8 @@ export class ZstdDecoder extends CompressionStream {
     params: Int32Array,
     writeResult: Uint32Array,
     writeCallback: () => void,
-    pledgedSrcSize?: number
+    pledgedSrcSize?: number,
+    dictionary?: ArrayBufferView
   ): boolean;
   params(): void;
 }
@@ -380,7 +385,8 @@ export class ZstdEncoder extends CompressionStream {
     params: Int32Array,
     writeResult: Uint32Array,
     writeCallback: () => void,
-    pledgedSrcSize?: number
+    pledgedSrcSize?: number,
+    dictionary?: ArrayBufferView
   ): boolean;
   params(): void;
 }
