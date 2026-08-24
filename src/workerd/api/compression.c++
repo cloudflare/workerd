@@ -235,6 +235,9 @@ void CodecStage::Context::enforceStrictChecks(int flush, const Result& result) {
 
 kj::ArrayPtr<kj::byte> CodecStage::LazyBuffer::take(size_t readSize) {
   KJ_ASSERT(readSize <= validSize);
+  // An empty read must not index the vector: the read offset is output.size() - validSize,
+  // which is one past the end whenever the valid region is empty.
+  if (readSize == 0) return nullptr;
   kj::ArrayPtr<kj::byte> chunk = kj::arrayPtr(&output[output.size() - validSize], readSize);
   validSize -= readSize;
   return chunk;
