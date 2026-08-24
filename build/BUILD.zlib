@@ -236,11 +236,13 @@ cc_library(
             "ADLER32_SIMD_SSSE3",
             "CRC32_SIMD_SSE42_PCLMUL",
             "DEFLATE_SLIDE_HASH_SSE2",
+            "DEFLATE_CHUNK_WRITE_64LE",
         ],
         "@platforms//cpu:aarch64": [
             "ADLER32_SIMD_NEON",
             "CRC32_ARMV8_CRC32",
             "DEFLATE_SLIDE_HASH_NEON",
+            "DEFLATE_CHUNK_WRITE_64LE",
         ],
     }) + select({
         ":x86_linux": ["X86_NOT_WINDOWS"],
