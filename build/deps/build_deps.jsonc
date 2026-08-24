@@ -73,6 +73,63 @@
       "name": "rules_rust",
       "type": "bazel_dep"
     },
+    // wasi-sdk + binaryen: host toolchain for building Wasm library modules
+    // (currently zstd). Platforms without assets here (e.g. Windows) skip the
+    // Wasm module builds.
+    {
+      "name": "wasi_sdk_linux_x64",
+      "type": "github_release",
+      "owner": "WebAssembly",
+      "repo": "wasi-sdk",
+      "freeze_version": "wasi-sdk-33",
+      "file_regex": "^wasi-sdk-.*-x86_64-linux\\.tar\\.gz$",
+      "build_file_content": "exports_files([\"bin/clang\"])\nfilegroup(name = \"sdk\", srcs = glob([\"**\"]), visibility = [\"//visibility:public\"])"
+    },
+    {
+      "name": "wasi_sdk_linux_arm64",
+      "type": "github_release",
+      "owner": "WebAssembly",
+      "repo": "wasi-sdk",
+      "freeze_version": "wasi-sdk-33",
+      "file_regex": "^wasi-sdk-.*-arm64-linux\\.tar\\.gz$",
+      "build_file_content": "exports_files([\"bin/clang\"])\nfilegroup(name = \"sdk\", srcs = glob([\"**\"]), visibility = [\"//visibility:public\"])"
+    },
+    {
+      "name": "wasi_sdk_macos_arm64",
+      "type": "github_release",
+      "owner": "WebAssembly",
+      "repo": "wasi-sdk",
+      "freeze_version": "wasi-sdk-33",
+      "file_regex": "^wasi-sdk-.*-arm64-macos\\.tar\\.gz$",
+      "build_file_content": "exports_files([\"bin/clang\"])\nfilegroup(name = \"sdk\", srcs = glob([\"**\"]), visibility = [\"//visibility:public\"])"
+    },
+    {
+      "name": "binaryen_linux_x64",
+      "type": "github_release",
+      "owner": "WebAssembly",
+      "repo": "binaryen",
+      "freeze_version": "version_132",
+      "file_regex": "^binaryen-.*-x86_64-linux\\.tar\\.gz$",
+      "build_file_content": "exports_files([\"bin/wasm-opt\"])"
+    },
+    {
+      "name": "binaryen_linux_arm64",
+      "type": "github_release",
+      "owner": "WebAssembly",
+      "repo": "binaryen",
+      "freeze_version": "version_132",
+      "file_regex": "^binaryen-.*-aarch64-linux\\.tar\\.gz$",
+      "build_file_content": "exports_files([\"bin/wasm-opt\"])"
+    },
+    {
+      "name": "binaryen_macos_arm64",
+      "type": "github_release",
+      "owner": "WebAssembly",
+      "repo": "binaryen",
+      "freeze_version": "version_132",
+      "file_regex": "^binaryen-.*-arm64-macos\\.tar\\.gz$",
+      "build_file_content": "exports_files([\"bin/wasm-opt\"])"
+    },
     // wasm-tools
     {
       "name": "wasm_tools_linux_x64",

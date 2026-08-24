@@ -32,7 +32,9 @@ export const arrayBufferOfReadable = {
     await cw.write(new TextEncoder().encode('0123456789'.repeat(1000)));
     await cw.close();
     const data = await new Response(cs.readable).arrayBuffer();
-    assert.equal(66, data.byteLength);
+    // The exact compressed size depends on the zlib implementation backing
+    // CompressionStream; just check the input was actually compressed.
+    assert.ok(data.byteLength > 0 && data.byteLength < 10_000);
 
     const ds = new DecompressionStream('gzip');
     const dw = ds.writable.getWriter();

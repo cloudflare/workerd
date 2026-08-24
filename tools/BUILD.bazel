@@ -70,3 +70,44 @@ native_binary(
     tags = ["manual"],
     visibility = ["//visibility:public"],
 )
+
+# Host toolchain for building Wasm library modules (currently zstd). Platforms
+# not listed here skip the Wasm module builds.
+alias(
+    name = "wasi-clang",
+    actual = select(
+        {
+            "@bazel_tools//src/conditions:linux_x86_64": "@wasi_sdk_linux_x64//:bin/clang",
+            "@bazel_tools//src/conditions:linux_aarch64": "@wasi_sdk_linux_arm64//:bin/clang",
+            "@bazel_tools//src/conditions:darwin_arm64": "@wasi_sdk_macos_arm64//:bin/clang",
+            "//conditions:default": "@wasi_sdk_linux_x64//:bin/clang",
+        },
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "wasi-sdk-files",
+    srcs = select(
+        {
+            "@bazel_tools//src/conditions:linux_x86_64": ["@wasi_sdk_linux_x64//:sdk"],
+            "@bazel_tools//src/conditions:linux_aarch64": ["@wasi_sdk_linux_arm64//:sdk"],
+            "@bazel_tools//src/conditions:darwin_arm64": ["@wasi_sdk_macos_arm64//:sdk"],
+            "//conditions:default": ["@wasi_sdk_linux_x64//:sdk"],
+        },
+    ),
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "wasm-opt",
+    actual = select(
+        {
+            "@bazel_tools//src/conditions:linux_x86_64": "@binaryen_linux_x64//:bin/wasm-opt",
+            "@bazel_tools//src/conditions:linux_aarch64": "@binaryen_linux_arm64//:bin/wasm-opt",
+            "@bazel_tools//src/conditions:darwin_arm64": "@binaryen_macos_arm64//:bin/wasm-opt",
+            "//conditions:default": "@binaryen_linux_x64//:bin/wasm-opt",
+        },
+    ),
+    visibility = ["//visibility:public"],
+)
