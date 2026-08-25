@@ -658,8 +658,8 @@ class DigestContext {
 };
 
 // Creates a digest context for the named algorithm. The CRC names ("crc32",
-// "crc32c", "crc64nvme") match exactly; everything else is looked up as an
-// OpenSSL digest, which is case-insensitive and throws a DOMNotSupportedError
+// "crc32c", "crc64nvme") are matched case-insensitively, as are the OpenSSL
+// digests that every other name is looked up as. Throws a DOMNotSupportedError
 // for unrecognized names.
 kj::Own<DigestContext> newDigestContext(kj::StringPtr algorithm);
 

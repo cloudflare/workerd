@@ -352,23 +352,6 @@ export const allAlgorithms = {
   },
 };
 
-// Algorithm names go to the same lookup as the C++ version, which is
-// case-insensitive for OpenSSL digests but exact for the CRCs.
-export const algorithmNameCasing = {
-  async test() {
-    // OpenSSL lookup tolerates case.
-    for (const name of ['md5', 'MD5', 'sha-256', 'SHA-256']) {
-      const stream = new crypto.DigestStream(name);
-      stream[Symbol.dispose]();
-    }
-    // CRC names are matched exactly, so the uppercase forms fall through to the
-    // OpenSSL lookup and fail.
-    throws(() => new crypto.DigestStream('CRC32'));
-    throws(() => new crypto.DigestStream('CRC32C'));
-    throws(() => new crypto.DigestStream('CRC64NVME'));
-  },
-};
-
 export const writeAfterCloseRejects = {
   async test() {
     const stream = new crypto.DigestStream('md5');

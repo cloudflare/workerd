@@ -240,6 +240,58 @@ export const defaultEncodingIsPerChunk = {
   },
 };
 
+// Algorithm names are matched case-insensitively, for the CRCs as well as for
+// the OpenSSL digests. Every casing of a name must select the same algorithm,
+// so the digests are compared rather than merely checked for not throwing.
+export const algorithmNamesAreCaseInsensitive = {
+  async test() {
+    const variants = {
+      crc32: ['crc32', 'CRC32', 'Crc32', 'cRc32'],
+      crc32c: ['crc32c', 'CRC32C', 'Crc32c', 'crc32C', 'cRc32C'],
+      crc64nvme: ['crc64nvme', 'CRC64NVME', 'Crc64Nvme', 'crc64NVME'],
+      md5: ['md5', 'MD5', 'Md5'],
+      'sha-256': ['sha-256', 'SHA-256', 'Sha-256'],
+    };
+
+    for (const [canonical, names] of Object.entries(variants)) {
+      const expected = await digestOf(canonical, 'hello');
+      for (const name of names) {
+        deepStrictEqual(
+          await digestOf(name, 'hello'),
+          expected,
+          `${name} should select the same algorithm as ${canonical}`
+        );
+      }
+    }
+  },
+};
+
+// Case-insensitivity must not turn a nonsense name into a match: the comparison
+// is over the whole name, so a CRC name with anything extra still fails.
+export const crcNamesStillRequireAnExactSpelling = {
+  test() {
+    for (const name of [
+      'crc',
+      'crc3',
+      'crc322',
+      'crc32d',
+      ' crc32',
+      'crc32 ',
+      'crc-32',
+      'crc64',
+      'crc64nvm',
+      'crc64nvmex',
+      'nvme',
+    ]) {
+      throws(
+        () => new crypto.DigestStream(name),
+        { name: 'NotSupportedError' },
+        `${JSON.stringify(name)} should not be a valid algorithm`
+      );
+    }
+  },
+};
+
 // The option bag follows Web IDL dictionary rules: undefined and null are an
 // empty bag, any object is read for its fields, and a primitive is a TypeError.
 // Arrays and functions count as objects, so they are accepted and simply carry

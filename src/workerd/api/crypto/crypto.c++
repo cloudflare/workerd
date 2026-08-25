@@ -877,11 +877,16 @@ DigestStringEncoding readDigestEncoding(jsg::Optional<DigestStream::Options>& op
 }  // namespace
 
 kj::Own<DigestContext> newDigestContext(kj::StringPtr algorithm) {
-  if (algorithm == "crc32") {
+  // Case-insensitive, matching the OpenSSL lookup in the final branch, which
+  // accepts any casing of its own digest names.
+  auto named = [&algorithm](
+                   kj::StringPtr name) { return strcasecmp(algorithm.cStr(), name.cStr()) == 0; };
+
+  if (named("crc32"_kj)) {
     return kj::heap<CRC32DigestContext>();
-  } else if (algorithm == "crc32c") {
+  } else if (named("crc32c"_kj)) {
     return kj::heap<CRC32CDigestContext>();
-  } else if (algorithm == "crc64nvme") {
+  } else if (named("crc64nvme"_kj)) {
     return kj::heap<CRC64NVMEDigestContext>();
   } else {
     return kj::heap<OpenSSLDigestContext>(algorithm);
