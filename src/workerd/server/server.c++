@@ -7249,9 +7249,17 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
 
     // Sockets that failed to bind have already reported a config error.
     kj::Own<kj::ConnectionReceiver> listener;
+    kj::Own<kj::DatagramPort> datagramPort;
     kj::String addrStr;
     KJ_IF_SOME(bound, boundSockets[i]) {
-      listener = kj::mv(bound.listener);
+      KJ_SWITCH_ONEOF(bound.port) {
+        KJ_CASE_ONEOF(l, kj::Own<kj::ConnectionReceiver>) {
+          listener = kj::mv(l);
+        }
+        KJ_CASE_ONEOF(p, kj::Own<kj::DatagramPort>) {
+          datagramPort = kj::mv(p);
+        }
+      }
       addrStr = kj::mv(bound.addrStr);
       boundSockets[i] = kj::none;
     } else {

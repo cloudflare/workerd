@@ -172,7 +172,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   // the config's socket list (names may repeat); none for a socket that failed to bind. Consumed
   // by listenOnSockets().
   struct BoundSocket {
-    kj::Own<kj::ConnectionReceiver> listener;
+    kj::OneOf<kj::Own<kj::ConnectionReceiver>, kj::Own<kj::DatagramPort>> port;
     kj::String addrStr;
   };
   kj::Vector<kj::Maybe<BoundSocket>> boundSockets;
