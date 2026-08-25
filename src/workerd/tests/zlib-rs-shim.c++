@@ -5,8 +5,7 @@
 namespace workerd::zrs {
 namespace {
 
-// Standard zlib z_stream ABI, as implemented by libz-rs-sys. Declared locally
-// because workerd's <zlib.h> is the chromium fork with Cr_z_ symbol mangling.
+// Standard zlib z_stream ABI, as implemented by libz-rs-sys.
 extern "C" {
 
 struct ZStream {
@@ -26,8 +25,7 @@ struct ZStream {
   unsigned long reserved;
 };
 
-// zlib-rs C API (unprefixed; the chromium zlib elsewhere in the binary uses
-// Cr_z_-mangled names, so these resolve uniquely to libz-rs-sys).
+// zlib-rs C API.
 extern const char* zlibVersion(void);
 extern int deflateInit2_(ZStream* strm,
     int level,

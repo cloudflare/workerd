@@ -1,8 +1,6 @@
 #include "zlib-rs-bridge.h"
 
-// The zlib-rs C ABI, standard (unprefixed) names, declared at global scope.
-// The chromium zlib linked elsewhere in workerd uses Cr_z_-mangled symbols,
-// so these resolve uniquely to libz-rs-sys (linked via //src/rust/zlib-rs).
+// The zlib-rs C ABI, declared at global scope.
 extern "C" {
 const char* zlibVersion(void);
 int deflateInit2_(void* strm,

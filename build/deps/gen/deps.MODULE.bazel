@@ -27,10 +27,6 @@ bazel_dep(name = "brotli", version = "1.2.0.bcr.1")
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
-    patch_strip = 1,
-    patches = [
-        "//:patches/capnp/0001-Use-workerd-zlib-rs.patch",
-    ],
     sha256 = "b7b6ec882c84cc513b271acb20ef7df70228f94d6b32679ec639706f886aee59",
     strip_prefix = "capnproto-capnproto-59cc025/c++",
     type = "tgz",

@@ -1,11 +1,8 @@
 #pragma once
 
 // Bridge to zlib-rs (libz-rs-sys), the memory-safe Rust implementation of the
-// zlib C API. The functions take the z_stream as void* because the bridge
-// implementation must be compiled in a translation unit that does not include
-// workerd's <zlib.h>: the chromium zlib fork renames all zlib identifiers
-// (chromeconf.h Cr_z_ mangling), while zlib-rs exports the standard names.
-// The z_stream ABI is identical between the two implementations.
+// zlib C API. The functions take z_stream as void* to keep zlib types out of
+// this interface.
 
 #include <cstdint>
 

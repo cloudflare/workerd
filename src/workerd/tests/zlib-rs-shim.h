@@ -1,8 +1,5 @@
 // Minimal streaming wrapper over the zlib-rs (libz-rs-sys) C API for
-// benchmarking. Lives in its own translation unit because the chromium zlib
-// headers rename the standard zlib identifiers (chromeconf.h Cr_z_ mangling),
-// so the unprefixed zlib-rs symbols must be declared in a TU that does not
-// include <zlib.h>.
+// benchmarking.
 
 #pragma once
 
