@@ -5,15 +5,20 @@
 #include "sockets.h"
 
 #include "global-scope.h"
+#include "streams/readable.h"
 #include "streams/standard.h"
 #include "system-streams.h"
 #include "worker-rpc.h"
 
 #include <workerd/io/io-context.h>
+#include <workerd/io/trace.h>
+#include <workerd/io/tracer.h>
 #include <workerd/io/worker-interface.h>
+#include <workerd/jsg/async-context.h>
 #include <workerd/jsg/exception.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/uncaught-exception-source.h>
 
 #include <capnp/compat/byte-stream.h>
 
@@ -309,6 +314,76 @@ DisconnectWatcher watchForDisconnect(kj::AsyncIoStream& connection) {
   return DisconnectWatcher{.disconnected = kj::mv(paf.promise), .watchTask = kj::mv(watchTask)};
 }
 
+// A WritableStreamSink that sends each JS write() call as exactly one outbound datagram. Unlike a
+// byte-stream sink, there is no buffering: one write() call is one DatagramChannel::send() call,
+// so the caller's chunk boundaries are preserved rather than being merged or split.
+class DatagramWritableSink final: public WritableStreamSink {
+ public:
+  explicit DatagramWritableSink(kj::Rc<DatagramChannel> channel): channel(kj::mv(channel)) {}
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    return channel->send(buffer);
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    // Ordinary JS writer.write(chunk) calls only ever reach the single-buffer overload above; this
+    // one is used by pumpTo()'s draining-read optimization (see DrainingReadResult), which batches
+    // however many separate chunks were synchronously available into one vectored call purely for
+    // efficiency -- each piece is still a distinct write, so each must become its own datagram.
+    for (auto& piece: pieces) {
+      co_await channel->send(piece);
+    }
+  }
+
+  kj::Promise<void> end() override {
+    return kj::READY_NOW;
+  }
+
+  void abort(kj::Exception reason) override {
+    // Nothing to tear down eagerly: there is no underlying connection, just a reference to the
+    // flow's session, which is torn down independently when the flow ends.
+  }
+
+ private:
+  kj::Rc<DatagramChannel> channel;
+};
+
+// Builds a value-mode ReadableStream (a default, not byte, controller) whose pull() performs
+// exactly one DatagramChannel::receive() call and enqueues exactly what came back as one
+// Uint8Array chunk. This deliberately bypasses JsReadableStream::create()'s byte-oriented
+// machinery (auto-allocated chunk sizes, BYOB reads), which is free to split or coalesce reads and
+// would not preserve datagram boundaries.
+//
+// This also bypasses the compatibility-flag gate on the public `new ReadableStream()` constructor
+// (ReadableStream::constructor): that gate exists to control end-user access to the JS-driven
+// ReadableStream constructor, not the underlying mechanism, which is safe to use internally
+// regardless of the flag.
+jsg::Ref<ReadableStream> newDatagramReadableStream(jsg::Lock& js, kj::Rc<DatagramChannel> channel) {
+  auto controller = newReadableStreamJsController();
+  auto stream = js.allocAccounted<ReadableStream>(
+      sizeof(ReadableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
+
+  UnderlyingSource underlyingSource;
+  underlyingSource.pull = [channel = kj::mv(channel)](jsg::Lock& js,
+                              UnderlyingSource::Controller c) mutable -> jsg::Promise<void> {
+    auto defaultController =
+        KJ_ASSERT_NONNULL(c.tryGet<jsg::Ref<ReadableStreamDefaultController>>()).addRef();
+    auto& ioContext = IoContext::current();
+    return ioContext.awaitIo(js, channel->receive(),
+        [defaultController = kj::mv(defaultController)](
+            jsg::Lock& js, kj::Maybe<kj::Array<kj::byte>> datagram) mutable {
+      KJ_IF_SOME(bytes, datagram) {
+        defaultController->enqueue(js, jsg::JsValue(jsg::JsUint8Array::create(js, bytes.asPtr())));
+      } else {
+        defaultController->close(js);
+      }
+    });
+  };
+
+  stream->getController().setup(js, kj::mv(underlyingSource), kj::none);
+  return kj::mv(stream);
+}
+
 }  // namespace
 
 // Forward declarations
@@ -363,6 +438,87 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
   }
   result->trackOpenedState(js);
   return result;
+}
+
+jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
+    kj::Own<DatagramChannel> channelOwn,
+    kj::Maybe<kj::String> remoteAddress,
+    kj::Maybe<kj::String> localAddress) {
+  auto& ioContext = IoContext::current();
+
+  kj::Rc<DatagramChannel> channel(kj::mv(channelOwn));
+
+  auto closedPrPair = js.newPromiseAndResolver<void>();
+  closedPrPair.promise.markAsHandled(js);
+
+  JsReadableStream readable(newDatagramReadableStream(js, channel.addRef()));
+  // UDP sockets have no allowHalfOpen option: `closed` always resolves from read-EOF once the
+  // flow ends, mirroring the allowHalfOpen == false behavior for TCP sockets below.
+  auto eofPromise = readable.onEof(js);
+
+  auto openedPrPair = js.newPromiseAndResolver<SocketInfo>();
+  openedPrPair.promise.markAsHandled(js);
+  auto writable = JsWritableStream::create(
+      js, ioContext, kj::heap<DatagramWritableSink>(channel.addRef()), kj::none /* observer */);
+
+  auto result = js.alloc<Socket>(js, ioContext, kj::mv(channel), kj::mv(remoteAddress),
+      kj::mv(localAddress), kj::mv(readable), kj::mv(writable), kj::mv(closedPrPair),
+      kj::NEVER_DONE /* watchForDisconnectTask: UDP has no peer-disconnect signal; `closed`
+                        resolves from read-EOF (wired below) instead. */
+      ,
+      kj::none /* options */, kj::heap<kj::TlsStarterCallback>() /* no TLS for UDP */,
+      SecureTransportKind::OFF, SocketProtocol::UDP, kj::none /* domain */,
+      false /* isDefaultFetchPort */, kj::mv(openedPrPair));
+
+  result->handleReadableEof(js, kj::mv(eofPromise));
+  // The flow already exists by the time a Socket is minted for it, so `opened` resolves
+  // immediately, mirroring the inbound TCP connect() handler path.
+  result->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
+  result->trackOpenedState(js);
+  return result;
+}
+
+kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::run(
+    kj::Own<IoContext_IncomingRequest> incomingRequest,
+    kj::Maybe<kj::StringPtr> entrypointName,
+    kj::Maybe<Worker_VersionInfo> versionInfo,
+    Frankenvalue props,
+    kj::TaskSet& waitUntilTasks,
+    bool isDynamicDispatch) {
+  auto& context = incomingRequest->getContext();
+
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    t.setEventInfo(*incomingRequest, tracing::ConnectEventInfo());
+  }
+  incomingRequest->delivered();
+
+  auto outcome = EventOutcome::OK;
+  KJ_TRY {
+    co_await context.run([this, entrypointName, versionInfo = kj::mv(versionInfo),
+                             props = kj::mv(props), isDynamicDispatch](
+                             Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
+      jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+      jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
+
+      return lock.getGlobalScope().connectUdp(kj::mv(host), channel, lock,
+          lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
+              context.getActor(), isDynamicDispatch));
+    });
+  }
+  KJ_CATCH(e) {
+    context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER, kj::mv(e));
+    outcome = EventOutcome::EXCEPTION;
+  }
+
+  // Same reasoning as WorkerEntrypoint::connect(): we're obliged to drain() once delivered() has
+  // been called, to let any waitUntil() tasks the handler scheduled keep running in the
+  // background.
+  incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
+  co_return Result{.outcome = outcome};
+}
+
+tracing::EventInfo UdpConnectCustomEvent::getEventInfo() const {
+  return tracing::ConnectEventInfo();
 }
 
 jsg::Ref<Socket> connectImpl(jsg::Lock& js,
@@ -614,8 +770,13 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
                 }));
 
                 // Move the stream out of the plain text socket, to ensure the stream is properly
-                // destroyed when the socket is closed.
-                kj::Own<kj::AsyncIoStream> stream = connData->connectionStream.addRef().toOwn();
+                // destroyed when the socket is closed. startTls() is only reachable for TCP
+                // sockets (UDP sockets always have secureTransport == OFF), so the connection is
+                // guaranteed to be a stream here.
+                kj::Own<kj::AsyncIoStream> stream = KJ_ASSERT_NONNULL(
+                    connData->connectionStream.tryGet<kj::Rc<kj::AsyncIoStream>>())
+                                                        .addRef()
+                                                        .toOwn();
                 self->connectionData = kj::none;
 
                 auto secureStream = forkedPromise.addBranch().then(
@@ -1078,9 +1239,11 @@ kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
   // caller is done with it.
   auto& dataConn = JSG_REQUIRE_NONNULL(
       connectionData, TypeError, "The socket connection is closed or was already taken.");
+  auto& stream = JSG_REQUIRE_NONNULL(dataConn->connectionStream.tryGet<kj::Rc<kj::AsyncIoStream>>(),
+      TypeError, "takeConnectionStream() is not supported for datagram sockets.");
   // Attach tlsStarter to the wrapper so it survives as long as the connection stream
   // and is destroyed before the stream itself.
-  auto wrapper = dataConn->connectionStream.addRef().toOwn().attach(kj::mv(dataConn->tlsStarter));
+  auto wrapper = stream.addRef().toOwn().attach(kj::mv(dataConn->tlsStarter));
   connectionData = kj::none;
   closedResolver.resolve(js);
   return wrapper;
@@ -1201,3 +1364,54 @@ jsg::Promise<jsg::Ref<Fetcher>> SocketsModule::internalNewHttpClient(
       }));
 }
 }  // namespace workerd::api
+
+namespace workerd {
+
+namespace {
+
+// Mirrors NeuterableIoStreamImpl (src/workerd/util/stream-utils.c++).
+class NeuterableDatagramChannelImpl final: public NeuterableDatagramChannel {
+ public:
+  NeuterableDatagramChannelImpl(DatagramChannel& inner): inner(&inner) {}
+
+  void neuter(kj::Exception reason) override {
+    if (inner.is<DatagramChannel*>()) {
+      inner = reason.clone();
+      if (!canceler.isEmpty()) {
+        canceler.cancel(kj::mv(reason));
+      }
+    }
+  }
+
+  kj::Promise<kj::Maybe<kj::Array<kj::byte>>> receive() override {
+    return canceler.wrap(getChannel().receive());
+  }
+
+  kj::Promise<void> send(kj::ArrayPtr<const kj::byte> datagram) override {
+    return canceler.wrap(getChannel().send(datagram));
+  }
+
+ private:
+  kj::OneOf<DatagramChannel*, kj::Exception> inner;
+  kj::Canceler canceler;
+
+  DatagramChannel& getChannel() {
+    KJ_SWITCH_ONEOF(inner) {
+      KJ_CASE_ONEOF(channel, DatagramChannel*) {
+        return *channel;
+      }
+      KJ_CASE_ONEOF(exception, kj::Exception) {
+        kj::throwFatalException(exception.clone());
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+};
+
+}  // namespace
+
+kj::Rc<NeuterableDatagramChannel> newNeuterableDatagramChannel(DatagramChannel& inner) {
+  return kj::rc<NeuterableDatagramChannelImpl>(inner);
+}
+
+}  // namespace workerd

@@ -6,9 +6,47 @@
 
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-writable-stream.h>
+#include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
+
+#include <kj/refcount.h>
+
+namespace workerd {
+
+// A single logical UDP flow between a peer and this side, used to deliver datagram-shaped
+// connections to a Worker's connect() handler. Unlike kj::AsyncIoStream, this interface has no
+// byte-stream semantics: each receive() resolves to exactly one datagram (or none, once the flow
+// has ended), and each send() transmits exactly one, so callers cannot accidentally merge or split
+// datagrams the way partial tryRead()/write() calls would allow.
+class DatagramChannel {
+ public:
+  virtual ~DatagramChannel() noexcept(false) = default;
+
+  // Resolves with the next inbound datagram, or kj::none once the flow has ended (e.g. an idle
+  // timeout). Must not be called again after resolving kj::none, and must not have more than one
+  // outstanding call at a time.
+  virtual kj::Promise<kj::Maybe<kj::Array<kj::byte>>> receive() = 0;
+
+  // Sends one outbound datagram to the peer.
+  virtual kj::Promise<void> send(kj::ArrayPtr<const kj::byte> datagram) = 0;
+};
+
+// A DatagramChannel wrapper that can be disconnected, mirroring
+// workerd::NeuterableIoStream (src/workerd/util/stream-utils.h). Used when a DatagramChannel is
+// borrowed by reference for the duration of a single dispatch (see
+// ServiceWorkerGlobalScope::connectUdp()): the wrapper forwards to the real channel until
+// neuter()'d, at which point further calls fail cleanly instead of touching a reference that may
+// no longer be meaningful to use (e.g. after the dispatch's own promise has settled).
+class NeuterableDatagramChannel: public DatagramChannel, public kj::Refcounted {
+ public:
+  virtual void neuter(kj::Exception ex) = 0;
+};
+
+kj::Rc<NeuterableDatagramChannel> newNeuterableDatagramChannel(DatagramChannel&);
+
+}  // namespace workerd
 
 namespace workerd::api {
 
@@ -69,7 +107,7 @@ class Socket: public jsg::Object {
  public:
   Socket(jsg::Lock& js,
       IoContext& context,
-      kj::Rc<kj::AsyncIoStream> connectionStream,
+      kj::OneOf<kj::Rc<kj::AsyncIoStream>, kj::Rc<DatagramChannel>> connectionStream,
       kj::Maybe<kj::String> remoteAddress,
       kj::Maybe<kj::String> localAddress,
       JsReadableStream readableParam,
@@ -227,15 +265,18 @@ class Socket: public jsg::Object {
 
  private:
   struct ConnectionData {
-    kj::Rc<kj::AsyncIoStream> connectionStream;
+    // A TCP socket's underlying stream, or a UDP socket's underlying datagram channel. UDP
+    // sockets have no AsyncIoStream: DatagramChannel::receive()/send() replace tryRead()/write()
+    // so that datagram boundaries can never be merged or split.
+    kj::OneOf<kj::Rc<kj::AsyncIoStream>, kj::Rc<DatagramChannel>> connectionStream;
     kj::Maybe<kj::Promise<void>> watchForDisconnectTask;
-    // tlsStarter must be declared after connectionStream so that it is destroyed first,
-    // since it holds a reference that keeps the connection alive.
+    // tlsStarter must be declared after connectionStream so that it is destroyed first, since it
+    // holds a reference that keeps the connection alive.
     kj::Own<kj::TlsStarterCallback> tlsStarter;
     ConnectionData(kj::Own<kj::TlsStarterCallback> tlsStarter,
-        kj::Rc<kj::AsyncIoStream> connStream,
+        kj::OneOf<kj::Rc<kj::AsyncIoStream>, kj::Rc<DatagramChannel>> connectionStream,
         kj::Promise<void> disconnectTask)
-        : connectionStream(kj::mv(connStream)),
+        : connectionStream(kj::mv(connectionStream)),
           watchForDisconnectTask(kj::mv(disconnectTask)),
           tlsStarter(kj::mv(tlsStarter)) {}
   };
@@ -319,6 +360,70 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     kj::Maybe<kj::String> domain,
     bool isDefaultFetchPort,
     kj::Maybe<jsg::PromiseResolverPair<SocketInfo>> maybeOpenedPrPair);
+
+// Builds a datagram (UDP) Socket around `channel`. Unlike setupSocket(), the readable and
+// writable streams are value-mode: each chunk read or written corresponds to exactly one
+// datagram, since kj::AsyncIoStream's byte-stream semantics cannot preserve datagram boundaries.
+// There is no secureTransport/startTls surface (always SecureTransportKind::OFF) and no
+// allowHalfOpen option: `closed` resolves once the readable side reaches EOF (the channel's flow
+// has ended) and the writable side has been closed in response.
+jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
+    kj::Own<DatagramChannel> channel,
+    kj::Maybe<kj::String> remoteAddress,
+    kj::Maybe<kj::String> localAddress);
+
+// A WorkerInterface::CustomEvent that delivers a single UDP flow to a worker's exported
+// `connect(socket)` handler. Unlike TCP ingress, this bypasses kj::HttpService::connect()
+// entirely (there is no CONNECT tunnel, no headers, and no ConnectResponse to accept/reject): the
+// listener that owns `channel` constructs this event directly and calls
+// WorkerInterface::customEvent() with it, exactly as Queue/Alarm/Scheduled events do for their own
+// non-HTTP-shaped triggers.
+//
+// This event cannot be forwarded over RPC: a DatagramChannel is a live, in-process-only object,
+// so sendRpc() is unimplemented. It is only ever dispatched by a listener running in the same
+// process as the worker.
+//
+// `channel` is borrowed, not owned: the listener that constructs this event attaches the
+// underlying flow's ownership to the same task that dispatches this event (see
+// Server::UdpListener::dispatch()), so it is guaranteed to outlive every call made through this
+// event, exactly as kj::HttpService::connect()'s `connection` reference outlives its dispatch.
+class UdpConnectCustomEvent final: public WorkerInterface::CustomEvent {
+ public:
+  UdpConnectCustomEvent(kj::String host, DatagramChannel& channel)
+      : host(kj::mv(host)),
+        channel(channel) {}
+
+  kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
+      kj::Maybe<kj::StringPtr> entrypointName,
+      kj::Maybe<Worker_VersionInfo> versionInfo,
+      Frankenvalue props,
+      kj::TaskSet& waitUntilTasks,
+      bool isDynamicDispatch) override;
+
+  kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+      capnp::ByteStreamFactory& byteStreamFactory,
+      FrankenvalueHandler& frankenvalueHandler,
+      rpc::EventDispatcher::Client dispatcher) override {
+    KJ_UNIMPLEMENTED(
+        "a UDP connect event cannot be forwarded over RPC; it is only ever dispatched in-process "
+        "by the listener that owns the underlying datagram flow");
+  }
+
+  kj::Promise<Result> notSupported() override {
+    KJ_UNIMPLEMENTED("udp connect event not supported");
+  }
+
+  static constexpr uint16_t EVENT_TYPE = 14;
+  uint16_t getType() override {
+    return EVENT_TYPE;
+  }
+
+  tracing::EventInfo getEventInfo() const override;
+
+ private:
+  kj::String host;
+  DatagramChannel& channel;
+};
 
 jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,
