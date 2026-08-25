@@ -539,16 +539,19 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       auto oneCall = parent.getClientForOneCall(js, path);
       auto client = kj::mv(oneCall.client);
 
-      // Per-call dispatch span, captured into the awaitIo callback below so it stays
-      // open until the response settles.
-      auto operation = maybeArgs != kj::none ? JsRpcOperation::CALL : JsRpcOperation::GET_PROPERTY;
       TraceContext jsRpcCallSpan;
-      KJ_IF_SOME(span, oneCall.callSpan) {
-        jsRpcCallSpan = kj::mv(span);
-        setJsRpcCallSpanTags(jsRpcCallSpan, parent, name, path.asPtr(), operation);
-      } else {
-        jsRpcCallSpan = makeJsRpcCallSpan(
-            ioContext, parent, name, path.asPtr(), kj::mv(oneCall.callSpanParents), operation);
+      if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
+        // Per-call dispatch span, captured into the awaitIo callback below so it stays open until
+        // the response settles.
+        auto operation =
+            maybeArgs != kj::none ? JsRpcOperation::CALL : JsRpcOperation::GET_PROPERTY;
+        KJ_IF_SOME(span, oneCall.callSpan) {
+          jsRpcCallSpan = kj::mv(span);
+          setJsRpcCallSpanTags(jsRpcCallSpan, parent, name, path.asPtr(), operation);
+        } else {
+          jsRpcCallSpan = makeJsRpcCallSpan(
+              ioContext, parent, name, path.asPtr(), kj::mv(oneCall.callSpanParents), operation);
+        }
       }
 
       KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
@@ -1345,22 +1348,24 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       }
     }
 
-    // Server-side jsRpcCall, attached to the dispatch promise below so it stays
-    // open through JS invocation and result serialization.
-    auto jsRpcCallSpan = ctx.makeUserTraceSpan("jsRpcCall"_kjc);
-    jsRpcCallSpan.setTag("jsrpc.method"_kjc, methodNameForTrace.asPtr());
-    jsRpcCallSpan.setTag("jsrpc.target_kind"_kjc, getTargetKind());
-    jsRpcCallSpan.setTag("jsrpc.operation"_kjc,
-        params.getOperation().isGetProperty() ? "getProperty"_kjc : "call"_kjc);
+    TraceContext jsRpcCallSpan;
+    if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
+      // Server-side jsRpcCall, attached to the dispatch promise below so it stays open through JS
+      // invocation and result serialization.
+      jsRpcCallSpan = ctx.makeUserTraceSpan("jsRpcCall"_kjc);
+      jsRpcCallSpan.setTag("jsrpc.method"_kjc, methodNameForTrace.asPtr());
+      jsRpcCallSpan.setTag("jsrpc.target_kind"_kjc, getTargetKind());
+      jsRpcCallSpan.setTag("jsrpc.operation"_kjc,
+          params.getOperation().isGetProperty() ? "getProperty"_kjc : "call"_kjc);
 
-    // Link this dispatch to the caller's per-call span. This span stays a child of its own
-    // invocation root, so that a consumer reading this invocation's tail stream can always resolve
-    // the parent. The link is what attributes the work to an individual call: one session (and so
-    // one invocation) carries many calls, e.g. calls pipelined on a returned stub.
-    if (jsRpcCallSpan.isObserved() && params.hasCallerSpanContext()) {
-      auto callerContext = tracing::SpanContext::fromCapnp(params.getCallerSpanContext());
-      KJ_IF_SOME(callerSpanId, callerContext.getSpanId()) {
-        jsRpcCallSpan.setTag("jsrpc.caller_span_id"_kjc, callerSpanId.toGoString());
+      // Link this dispatch to the caller's per-call span. This span stays a child of its own
+      // invocation root, so that a consumer reading this invocation's tail stream can always
+      // resolve the parent.
+      if (jsRpcCallSpan.isObserved() && params.hasCallerSpanContext()) {
+        auto callerContext = tracing::SpanContext::fromCapnp(params.getCallerSpanContext());
+        KJ_IF_SOME(callerSpanId, callerContext.getSpanId()) {
+          jsRpcCallSpan.setTag("jsrpc.caller_span_id"_kjc, callerSpanId.toGoString());
+        }
       }
     }
 
@@ -2410,10 +2415,12 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
   });
 
-  // No server-side user span: the jsrpc-typed onset already represents the session
-  // (delivered() to outcome). The internal span is still emitted for the legacy
-  // buffered tail.
-  auto jsRpcSessionInternalSpan = ioctx.makeTraceSpan("jsRpcSession"_kjc);
+  SpanBuilder jsRpcSessionInternalSpan(nullptr);
+  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
+    // No server-side user span: the jsrpc-typed onset already represents the session. The internal
+    // span is still emitted for the legacy buffered tail.
+    jsRpcSessionInternalSpan = ioctx.makeTraceSpan("jsRpcSession"_kjc);
+  }
 
   EntrypointJsRpcTarget target(ioctx, entrypointName, kj::mv(versionInfo), kj::mv(props),
       kj::mv(wrapperModule), mapAddRef(incomingRequest->getWorkerTracer()), isDynamicDispatch);

@@ -13,6 +13,7 @@
 // argument stub recorded the correct originating call.
 
 import * as assert from 'node:assert';
+import unsafe from 'workerd:unsafe';
 
 // Per-invocation span data: invocationId -> { onset, rootSpanId, spans: Map(spanId -> span) }.
 // Each span records its name, its parent span ID (from the spanOpen's spanContext), and any
@@ -30,6 +31,7 @@ export default {
       },
       rootSpanId,
       spans: new Map(),
+      complete: false,
     };
     invocations.set(invocationId, data);
 
@@ -48,6 +50,8 @@ export default {
             span.attrs[name] = value;
           }
         }
+      } else if (type === 'outcome') {
+        data.complete = true;
       }
     };
   },
@@ -85,10 +89,16 @@ function findCallbackSpans() {
 
 export const test = {
   async test() {
+    const tracingEnabled = unsafe.isTestAutogateEnabled();
     // Poll until the invocation and both spans have arrived rather than relying on a fixed delay.
     const deadline = Date.now() + 5000;
     let found = findCallbackSpans();
-    while (!(found.methodSpan && found.callbackSpan) && Date.now() < deadline) {
+    while (
+      !(tracingEnabled
+        ? found.methodSpan && found.callbackSpan
+        : found.target?.complete) &&
+      Date.now() < deadline
+    ) {
       await scheduler.wait(10);
       found = findCallbackSpans();
     }
@@ -98,6 +108,16 @@ export const test = {
       target,
       'Could not find the CallbackService JSRPC invocation in tail events'
     );
+    if (!tracingEnabled) {
+      assert.ok(target.complete, 'CallbackService invocation did not complete');
+      assert.strictEqual(
+        [...target.spans.values()].filter((span) => span.name === 'jsRpcCall')
+          .length,
+        0,
+        'jsRpcCall spans must not be emitted while the autogate is disabled'
+      );
+      return;
+    }
     assert.ok(methodSpan, 'Missing jsRpcCall span for invokeCallback');
     assert.ok(
       callbackSpan,

@@ -6,6 +6,7 @@ using Workerd = import "/workerd/workerd.capnp";
 # Asserted in the tail worker's test() handler.
 
 const unitTests :Workerd.Config = (
+  autogates = ["workerd-autogate-jsrpc-tracing"],
   services = [
     (name = "jsrpc-pipelined-trace-test", worker = .mainWorker),
     (name = "tail", worker = .tailWorker),

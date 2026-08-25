@@ -5,6 +5,8 @@ using Workerd = import "/workerd/workerd.capnp";
 # The nesting is asserted in the tail worker's test() handler.
 
 const unitTests :Workerd.Config = (
+  # The default variant verifies that tracing remains disabled. The @all-autogates variant verifies
+  # the span hierarchy.
   services = [
     (name = "jsrpc-callback-trace-test", worker = .mainWorker),
     (name = "tail", worker = .tailWorker),
@@ -26,5 +28,5 @@ const tailWorker :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "jsrpc-callback-trace-test-tail.js")
   ],
-  compatibilityFlags = ["experimental", "nodejs_compat"],
+  compatibilityFlags = ["experimental", "nodejs_compat", "unsafe_module"],
 );

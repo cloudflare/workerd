@@ -19,6 +19,7 @@
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/abortable.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/entropy.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
@@ -2129,17 +2130,25 @@ JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(
     jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
   auto& ioContext = IoContext::current();
 
-  // The "jsRpcSession" trace context is attached to the customEvent task below so it covers the
-  // whole session. The first jsRpcCall span is opened before the session client so its user span
-  // can also become the callee invocation's parent.
   kj::Maybe<TraceContext> callSpan;
-  auto clientWithTracing = buildClient(ioContext, kj::none, "jsRpcSession"_kjc,
-      [&](TraceContext& sessionSpan) -> kj::Maybe<SpanParent> {
-    callSpan = sessionSpan.getSpanParents().newChild("jsRpcCall"_kjc);
-    return KJ_ASSERT_NONNULL(callSpan).getUserSpanParent();
-  });
-  kj::Maybe<TraceContextParent> callSpanParents = clientWithTracing.traceContext.map(
-      [](TraceContext& tc) { return tc.getSpanParents(); });
+  kj::Maybe<TraceContextParent> callSpanParents;
+  ClientWithTracing clientWithTracing;
+  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
+    // The "jsRpcSession" trace context is attached to the customEvent task below so it covers the
+    // whole session. The first jsRpcCall span is opened before the session client so its user span
+    // can also become the callee invocation's parent.
+    clientWithTracing = buildClient(ioContext, kj::none, "jsRpcSession"_kjc,
+        [&](TraceContext& sessionSpan) -> kj::Maybe<SpanParent> {
+      callSpan = sessionSpan.getSpanParents().newChild("jsRpcCall"_kjc);
+      return KJ_ASSERT_NONNULL(callSpan).getUserSpanParent();
+    });
+    callSpanParents = clientWithTracing.traceContext.map(
+        [](TraceContext& tc) { return tc.getSpanParents(); });
+  } else {
+    clientWithTracing = ClientWithTracing{
+      .client = getClient(ioContext, kj::none, "jsRpcSession"_kjc),
+    };
+  }
   auto worker = kj::mv(clientWithTracing.client);
   auto event = kj::heap<api::JsRpcSessionCustomEvent>(JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
 
@@ -2520,6 +2529,11 @@ Fetcher::ClientWithTracing Fetcher::getClientWithTracing(IoContext& ioContext,
         "actor retry metadata supplied to an unsupported Fetcher");
     KJ_REQUIRE(outgoingFactory->supportsActorRetryMetadata(),
         "actor retry metadata supplied to an unsupported Fetcher");
+    if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
+      auto result = outgoingFactory->newSingleUseClientWithActorRetryMetadata(kj::mv(cfStr),
+          kj::mv(metadata), [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
+      return ClientWithTracing{kj::mv(result.client), kj::none};
+    }
     kj::Maybe<TraceContext> traceContext;
     auto result = outgoingFactory->newSingleUseClientWithActorRetryMetadata(kj::mv(cfStr),
         kj::mv(metadata), [&](TraceContext& outerTraceContext) -> kj::Maybe<SpanParent> {
@@ -2535,6 +2549,9 @@ Fetcher::ClientWithTracing Fetcher::getClientWithTracing(IoContext& ioContext,
 
 Fetcher::ClientWithTracing Fetcher::wrapWithInnerSpan(
     OutgoingFactory::Result result, kj::ConstString operationName) {
+  if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
+    return ClientWithTracing{kj::mv(result.client), kj::none};
+  }
   KJ_IF_SOME(parents, result.spanParents) {
     // Factories populate `spanParents` unconditionally. Only build the inner span when tracing is
     // actually observed; otherwise returning a (non-recording) TraceContext would still force the
