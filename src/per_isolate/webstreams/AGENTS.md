@@ -17,8 +17,9 @@ private-brand dispatch, no `instanceof`) apply here — see
 | `readable.ts` | Reader layer + queued controllers + the BACKEND-DISPATCH points (constructor, tee, chains, byte-capable gate, JS-to-C++ extraction) |
 | `writable.ts` / `transform.ts` / `strategies.ts` | WHATWG writable/transform/strategies                                     |
 | `identity.ts` | IdentityTransformStream and FixedLengthStream (byte-capable identity transforms)             |
+| `compression.ts` | CompressionStream/DecompressionStream over the C++ codec handle (utils.newCompressionCodec) |
 | `encoding.ts` | TextEncoderStream and TextDecoderStream (pure JS codec transforms)                           |
-| `streams.ts`  | Module aggregator and temporary native-source exports                                        |
+| `streams.ts`  | Module aggregator (user-visible classes + the flag-gated DrainingReader)                     |
 | `types.d.ts`  | TypeScript type definitions for the streams API                                              |
 
 ## KEY RULES
@@ -39,14 +40,31 @@ private-brand dispatch, no `instanceof`) apply here — see
   argument — the source checks `signal.aborted` before delivery and stashes
   bytes for redelivery if aborted (race buffering lives source-side; the JS
   conduit is uniformly bufferless).
-- `kNativeSource` is TEMPORARILY re-exported via `streams.ts` for tests;
-  the real C++ handshake has landed, so this removal is now due
-  (follow-up; requires migrating the JS-mock tests off it).
+- `nativeStreamInternals` (markers, extraction symbols, conduit
+  construction) is module-private, consumed only by readable.ts/writable.ts
+  and the C++ bridge via the API-symbol registry. The C++ mocks in
+  `js-readable-stream-test.c++` construct real `ReadableStreamNativeSource`
+  objects; no JS-visible marker export exists.
+- Every stream instance carries an own, non-enumerable api-symbol brand
+  (`kReadableStreamBrand` / `kWritableStreamBrand`), stamped at the very
+  top of the constructor (before any early return). The C++ bridge's
+  `tryUnwrapTs` recognizes streams by probing it — an own-data-property
+  read that executes no JS. That constraint is load-bearing: recognition
+  runs during RPC deserialization, inside V8's no-JS-execution scope. Any
+  new construction path MUST go through the constructors (or stamp the
+  brand itself).
+- The C++ bridge MUST NOT dispatch into the TypeScript implementation
+  while JS execution is disallowed (`js.isJavascriptExecutionDisallowed()`,
+  set during RPC value deserialization): `getCppExport`/`dispatchCall`/
+  `invokeMethod` assert this. Bridge operations reachable in that scope
+  either answer from C++-side knowledge (state probes return the
+  hydration-fresh answers; see `JsReadableStream::isDisturbed`) or happen
+  before the scope entirely (stream construction via
+  `RpcDeserializerExternalHandler::prepare()`'s externals hydration).
 
 ## ANTI-PATTERNS
 
-- **NEVER** expose internals on user-visible exports (the temporary
-  `kNativeSource` exception is tracked for removal).
-- **NEVER** rely on `readable-source-adapter.h` as a reference for the
-  native streams contract — it belongs to the original (non-enabled)
-  implementation; `native.ts` is authoritative.
+- **NEVER** expose internals on user-visible exports. `streams.ts` exports
+  exactly the user-visible classes plus `ReadableStreamDrainingReader`,
+  which `main.ts` installs only under the internal-testing
+  `expose_draining_reader` flag.

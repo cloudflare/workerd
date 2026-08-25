@@ -97,17 +97,30 @@ class JsReadableStream final {
   // source. This is the canonical way for C++ code to mint a new ReadableStream to hand to
   // JavaScript.
   //
-  // This is the compatibility-flag dispatch point: when the typescript_implemented_streams
+  // This is a compatibility-flag dispatch point: when the typescript_implemented_streams
   // compat flag is enabled, the source is wrapped in a ReadableStreamNativeSource and the
   // stream is constructed by the TypeScript implementation; otherwise the legacy C++
-  // ReadableStream is used.
+  // ReadableStream is used. Buffer-backed construction (the data constructors above)
+  // dispatches the same way; see bufferBackedImpl().
   //
-  // TODO(streams-ts): A few JsReadableStream operations still have unimplemented
-  // TypeScript arms (detach, pipe dispatch cells), so under the (experimental) flag,
-  // consumers exercising those paths will fail until the remaining arms are
-  // implemented. (pumpTo, unwrap, and tee have landed.)
   static JsReadableStream create(
       jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source);
+
+  // Create a stream-backed JsReadableStream that reads the values produced by the given
+  // async generator, following the ReadableStream.from() algorithm: demand-driven pulls
+  // (highWaterMark 0), one generator.next() per pull with promise-typed values awaited
+  // before enqueue, close on generator completion, and cancel forwarding to the
+  // generator's return(). This backs the Iterable/AsyncIterable BodyInit extension
+  // (Body::extractBody's generator arm), whose generator arrives pre-consumed from the
+  // OneOf unwrap: the iterable's iterator method has already been invoked and the
+  // iterator's next/return captured, so this takes the generator rather than the original
+  // iterable object.
+  //
+  // Like create(), this is a compatibility-flag dispatch point: under
+  // typescript_implemented_streams the TypeScript stream is constructed over a
+  // C++-built JS underlying source driving the generator; otherwise this delegates to the
+  // legacy ReadableStream::from().
+  static JsReadableStream from(jsg::Lock& js, jsg::AsyncGenerator<jsg::Value> generator);
 
   // Returns a new JsReadableStream sharing this one's underlying stream (and retransmit
   // buffer, if any). Both instances observe the same underlying stream state (e.g. the stream
@@ -140,6 +153,13 @@ class JsReadableStream final {
   // for the same reason as isDisturbed().
   kj::Maybe<uint64_t> tryGetLength(
       jsg::Lock& js, StreamEncoding encoding = StreamEncoding::IDENTITY);
+
+  // The encoding the stream's remaining content would prefer to be transferred in: forwarded
+  // from the underlying native source when there is one (in a state where its preference
+  // still describes the remainder), IDENTITY otherwise (JS-sourced streams produce identity
+  // bytes; a null stream has no content). Used by serialize() to preserve encoding
+  // passthrough (e.g. gzip) when transferring a stream over RPC.
+  StreamEncoding getPreferredEncoding(jsg::Lock& js);
 
   // Cancel the stream with the given reason, indicating a loss of interest in the data. The
   // stream is left disturbed and closed. Rejects if the stream is currently locked, matching
@@ -288,9 +308,11 @@ class JsReadableStream final {
  private:
   explicit JsReadableStream(Impl impl): impl(kj::mv(impl)) {}
 
-  // Build a buffer-backed Impl: wraps the buffer's bytes in an in-memory ReadableStream (which does
-  // NOT support deferred proxying, since the bytes may have V8 heap provenance) and retains the
-  // buffer for retransmission.
+  // Build a buffer-backed Impl: wraps the buffer's bytes in an in-memory source (which does not
+  // support deferred proxying) and retains the buffer for retransmission. The stream over the
+  // source is constructed through the same compatibility-flag dispatch as create(), so under the
+  // typescript_implemented_streams flag buffer-backed streams are TypeScript-backed like every
+  // other stream.
   static Impl bufferBackedImpl(jsg::Lock& js, kj::Rc<Buffer> buffer);
 
   kj::Maybe<Impl> impl;
@@ -355,6 +377,23 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // the exact-total accounting itself.
   jsg::Optional<jsg::JsBigInt> getExpectedLength(jsg::Lock& js);
 
+  // The number of bytes the source will produce in the given encoding, if known; kj::none
+  // otherwise (including once the source is done, canceled, or consumed). For IDENTITY this
+  // is getExpectedLength()'s value (source length plus stashed bytes); for other encodings
+  // it forwards to the underlying source, which can only answer while no identity bytes
+  // are stashed. C++-only (not part of the JSG surface): this is the encoding-aware
+  // tryGetLength arm of JsReadableStream, reached through the TypeScript side's
+  // non-detaching source accessor.
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
+
+  // The encoding the underlying source would prefer to deliver its remaining content in
+  // (e.g. GZIP for a passthrough-compressed response body). IDENTITY once the source is
+  // done, canceled, or consumed, and whenever identity bytes are stashed (stashed bytes
+  // make a mixed-encoding remainder, which only IDENTITY describes). C++-only, reached the
+  // same way as the encoding-aware tryGetLength arm; JsReadableStream::serialize() uses it
+  // to preserve encoding passthrough over RPC transfer.
+  StreamEncoding getPreferredEncoding();
+
   JSG_RESOURCE_TYPE(ReadableStreamNativeSource) {
     JSG_PRIVATE_SYMBOL(kNativeSource);
     JSG_METHOD(pull);
@@ -381,22 +420,16 @@ class ReadableStreamNativeSource final: public jsg::Object {
       jsg::Ref<AbortSignal> signal,
       Active& active);
 
-  struct Released {
-    kj::Own<ReadableStreamSource> source;
-
-    // Bytes already consumed from the source but never delivered (the stash), which the
-    // pump must emit before anything the source produces. Only reachable when a
-    // tee-seeded branch is extracted before being read.
-    kj::Array<kj::byte> prefix;
-  };
-
-  // Releases the underlying source (plus any stashed bytes) for a C++-driven pump.
-  // Called by JsReadableStream::pumpTo()'s TypeScript arm after the TypeScript-side
-  // extractor (kExtractNativeSource) has already detached the stream, validated it
-  // unlocked/undisturbed, and returned this object. If the source already completed (EOF
-  // or cancel released it), returns an always-EOF source: extraction of closed streams is
-  // legal per the contract, and the pump simply finishes.
-  Released releaseForPump(jsg::Lock& js);
+  // Releases the underlying source for a C++-driven pump. Any bytes already consumed from
+  // the source but never delivered (the stash -- only reachable when a tee-seeded branch is
+  // extracted before being read) are folded in ahead of it as a prefix, so the returned
+  // source produces exactly the stream's remaining content. Called by
+  // JsReadableStream::pumpTo()'s TypeScript arm and WritableStreamNativeSink::pipeFrom()
+  // after the TypeScript-side extractor (kExtractNativeSource) has already detached the
+  // stream, validated it unlocked/undisturbed, and returned this object. If the source
+  // already completed (EOF or cancel released it), returns an always-EOF source: extraction
+  // of closed streams is legal per the contract, and the pump simply finishes.
+  kj::Own<ReadableStreamSource> releaseForPump(jsg::Lock& js);
 
   // Ensure the scratch buffer can hold at least `capacity` bytes. Only called at the start
   // of a pull, when the scratch buffer holds no live data, so growing may discard previous
@@ -430,8 +463,11 @@ class ReadableStreamNativeSource final: public jsg::Object {
 
   static constexpr size_t kScratchSize = 32 * 1024;
 
-  // JsReadableStream::pumpTo()'s TypeScript arm extracts the source for C++-driven pumps.
+  // JsReadableStream::pumpTo()'s TypeScript arm extracts the source for C++-driven pumps,
+  // and WritableStreamNativeSink::pipeFrom() (the native+native pipe fast path) does the
+  // same on behalf of the TS pipeTo.
   friend class JsReadableStream;
+  friend class WritableStreamNativeSink;
 };
 
 }  // namespace workerd::api

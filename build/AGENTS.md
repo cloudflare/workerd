@@ -68,8 +68,7 @@ Usage:
   plugin via `--load=`.
 - Suppress an intentional non-visit with `// NOLINT(jsg-visit-for-gc)` plus a
   comment explaining why the field is safe to skip (see `src/workerd/api/streams/queue.h`
-  for `ByteQueue::Entry::store` and `src/workerd/api/node/diagnostics-channel.h`
-  for `Channel::name`).
+  for `ByteQueue::Entry::store`).
 
 ### Incremental check rollout
 

@@ -4,7 +4,6 @@
 
 #include "blob.h"
 
-#include <workerd/api/streams/readable-source.h>
 #include <workerd/api/streams/readable.h>
 #include <workerd/io/features.h>
 #include <workerd/io/observer.h>
@@ -280,7 +279,7 @@ JsReadableStream Blob::stream(jsg::Lock& js) {
   // Pass no backing so that newMemorySource copies: our data is a V8 ArrayBuffer, and the
   // stream is read from the kj event loop where the isolate's MPK-protected sandbox pages
   // are unreadable.
-  return JsReadableStream::create(js, IoContext::current(), streams::newMemorySource(data));
+  return JsReadableStream::create(js, IoContext::current(), newMemorySource(data));
 }
 
 // =======================================================================================

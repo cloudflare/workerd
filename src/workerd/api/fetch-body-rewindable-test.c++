@@ -310,12 +310,12 @@ KJ_TEST("Fetcher dispatches actor retry metadata through the metadata-aware fact
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    Fetcher fetcher(
+    auto fetcher = env.js.alloc<Fetcher>(
         env.context.addObject<Fetcher::OutgoingFactory>(
             kj::heap<RetryMetadataOutgoingFactory>(ordinaryDispatchCalled, capturedMetadata)),
         Fetcher::RequiresHostAndProtocol::YES);
 
-    auto client = fetcher.getClientWithTracing(env.context, kj::none, "fetch"_kjc,
+    auto client = fetcher->getClientWithTracing(env.context, kj::none, "fetch"_kjc,
         IoChannelFactory::ActorRetryRequestMetadata{
           .nonce = 0x123456789abcdef0,
           .createdAt = kj::UNIX_EPOCH + 123 * kj::MILLISECONDS,
@@ -339,12 +339,12 @@ KJ_TEST("Fetcher rejects actor retry metadata instead of using ordinary factory 
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    Fetcher fetcher(env.context.addObject<Fetcher::OutgoingFactory>(
-                        kj::heap<UnsupportedOutgoingFactory>(called)),
+    auto fetcher = env.js.alloc<Fetcher>(env.context.addObject<Fetcher::OutgoingFactory>(
+                                             kj::heap<UnsupportedOutgoingFactory>(called)),
         Fetcher::RequiresHostAndProtocol::YES);
 
     KJ_EXPECT_THROW_MESSAGE("actor retry metadata supplied to an unsupported Fetcher",
-        fetcher.getClientWithTracing(env.context, kj::none, "fetch"_kjc,
+        fetcher->getClientWithTracing(env.context, kj::none, "fetch"_kjc,
             IoChannelFactory::ActorRetryRequestMetadata{
               .nonce = 1,
               .createdAt = kj::UNIX_EPOCH,
@@ -360,10 +360,11 @@ KJ_TEST("Fetcher rejects actor retry metadata before numeric subrequest-channel 
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    Fetcher fetcher(static_cast<uint>(1), Fetcher::RequiresHostAndProtocol::YES);
+    auto fetcher =
+        env.js.alloc<Fetcher>(static_cast<uint>(1), Fetcher::RequiresHostAndProtocol::YES);
 
     KJ_EXPECT_THROW_MESSAGE("actor retry metadata supplied to an unsupported Fetcher",
-        fetcher.getClientWithTracing(env.context, kj::none, "fetch"_kjc,
+        fetcher->getClientWithTracing(env.context, kj::none, "fetch"_kjc,
             IoChannelFactory::ActorRetryRequestMetadata{
               .nonce = 1,
               .createdAt = kj::UNIX_EPOCH,

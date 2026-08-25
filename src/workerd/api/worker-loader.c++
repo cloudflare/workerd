@@ -234,6 +234,19 @@ DynamicWorkerSource WorkerLoader::toDynamicWorkerSource(jsg::Lock& js,
     .ownContentIsRpcResponse = false};
 }
 
+// Builds WASM module content from an already-compiled `WebAssembly.Module`, sharing the compiled
+// code with the loaded worker rather than recompiling. `body` points at the module's wire bytes,
+// which are owned by the compiled module itself.
+static Worker::Script::ModuleContent extractWasmModuleContent(
+    jsg::Lock& js, jsg::V8Ref<v8::WasmModuleObject>& wasmModule) {
+  auto compiled = wasmModule.getHandle(js)->GetCompiledModule();
+  auto wireBytes = compiled.GetWireBytesRef();
+  return Worker::Script::WasmModule{
+    .body = kj::arrayPtr(wireBytes.data(), wireBytes.size()),
+    .compiledModule = kj::mv(compiled),
+  };
+}
+
 Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& code) {
   JSG_REQUIRE(code.modules.fields.size() > 0, TypeError,
       "Dynamic Worker code must contain at least one module.");
@@ -277,6 +290,13 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
             "Module name must end with '.js' or '.py' (or the content must be an object ",
             "indicating the type explicitly). Got: ", entry.name);
       }
+      KJ_CASE_ONEOF(wasmModule, jsg::V8Ref<v8::WasmModuleObject>) {
+        // An already-compiled `WebAssembly.Module` (e.g. from a source phase import).
+        return {
+          .name = entry.name,
+          .content = extractWasmModuleContent(js, wasmModule),
+        };
+      }
       KJ_CASE_ONEOF(module, Module) {
         uint fieldCount = (module.js != kj::none) + (module.cjs != kj::none) +
             (module.text != kj::none) + (module.data != kj::none) + (module.json != kj::none) +
@@ -312,9 +332,19 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
           } else KJ_IF_SOME(py, module.py) {
             return Worker::Script::PythonModule{.body = py};
           } else KJ_IF_SOME(wasm, module.wasm) {
-            // Same as `data` above: copy out of the V8 BackingStore before going async.
-            wasm = kj::heapArray<const kj::byte>(wasm.asPtr());
-            return Worker::Script::WasmModule{.body = wasm};
+            KJ_SWITCH_ONEOF(wasm) {
+              KJ_CASE_ONEOF(bytes, kj::Array<const byte>) {
+                // Same as `data` above: copy out of the V8 BackingStore before going async.
+                bytes = kj::heapArray<const kj::byte>(bytes.asPtr());
+                return Worker::Script::WasmModule{.body = bytes};
+              }
+              KJ_CASE_ONEOF(wasmModule, jsg::V8Ref<v8::WasmModuleObject>) {
+                // No copy needed here: the wire bytes are owned by the compiled module itself,
+                // not the V8 heap.
+                return extractWasmModuleContent(js, wasmModule);
+              }
+            }
+            KJ_UNREACHABLE;
           } else {
             KJ_UNREACHABLE;
           }

@@ -15,6 +15,7 @@
 
 #include <kj/debug.h>
 #include <kj/exception.h>
+#include <kj/refcount.h>
 #include <kj/string.h>
 
 #include <typeinfo>
@@ -544,6 +545,9 @@ class ExternalStringAllocator {
 // Returns a singleton DefaultExternalStringAllocator.
 kj::Own<ExternalStringAllocator> defaultExternalStringAllocator();
 
+using OwnedAscii = kj::Array<const char>;
+using OwnedUtf16 = kj::Array<const uint16_t>;
+
 // Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
 // take ownership of the buf. The buf *must* point to a static constant with infinite
 // lifetime.
@@ -558,6 +562,10 @@ kj::Own<ExternalStringAllocator> defaultExternalStringAllocator();
 // that are not owned by the v8 heap.
 v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf);
 
+// Creates a V8 external string whose resource shares ownership of `buf`. The backing
+// allocation remains alive until both the caller and all V8 strings release their Arcs.
+v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::Arc<OwnedAscii> buf);
+
 // Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
 // take ownership of the buf. The buf *must* point to a static constant with infinite
 // lifetime.
@@ -571,6 +579,9 @@ v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char
 // string methods because it needs to be absolutely clear that these use external buffers
 // that are not owned by the v8 heap.
 v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf);
+
+// Two-byte counterpart to the owning one-byte overload above.
+v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::Arc<OwnedUtf16> buf);
 
 // Use this type to mark APIs that are not implemented. Attempts to use the API will throw an
 // exception.

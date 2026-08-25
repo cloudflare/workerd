@@ -32,9 +32,10 @@ namespace workerd::api {
       api::IdentityTransformStream::QueuingStrategy, api::ReadableStream::ValuesOptions,           \
       api::ReadableStream::ReadableStreamAsyncIterator,                                            \
       api::ReadableStream::ReadableStreamAsyncIterator::Next, api::CompressionStream,              \
-      api::DecompressionStream, api::TextEncoderStream, api::TextDecoderStream,                    \
-      api::TextDecoderStream::TextDecoderStreamInit, api::ByteLengthQueuingStrategy,               \
-      api::CountQueuingStrategy, api::QueuingStrategyInit, api::ReadableStreamNativeSource
+      api::DecompressionStream, api::CompressionCodec, api::TextEncoderStream,                     \
+      api::TextDecoderStream, api::TextDecoderStream::TextDecoderStreamInit,                       \
+      api::ByteLengthQueuingStrategy, api::CountQueuingStrategy, api::QueuingStrategyInit,         \
+      api::ReadableStreamNativeSource, api::WritableStreamNativeSink
 // The list of streams.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

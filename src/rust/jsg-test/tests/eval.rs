@@ -87,6 +87,27 @@ fn eval_null() {
 }
 
 #[test]
+fn eval_undefined() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let result: jsg::Nullable<bool> = ctx.eval(lock, "undefined").unwrap();
+        assert!(result.is_undefined());
+        Ok(())
+    });
+}
+
+#[test]
+fn eval_some() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let result: jsg::Nullable<bool> = ctx.eval(lock, "true").unwrap();
+        assert!(result.is_some());
+        assert!(result.unwrap());
+        Ok(())
+    });
+}
+
+#[test]
 fn eval_throws_on_error() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {

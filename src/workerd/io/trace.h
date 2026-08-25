@@ -309,6 +309,9 @@ class InvocationSpanContext final {
   kj::Maybe<TraceFlags> traceFlags;
 };
 
+// Format a W3C traceparent ("{version}-{trace-id}-{parent-id}-{flags}").
+kj::String formatW3CTraceparent(const TraceId& traceId, SpanId spanId, TraceFlags traceFlags);
+
 // SpanContext as used for streaming tail worker tail events. spanId is always set except for Onset
 // events that don't inherit context from another invocation.
 struct SpanContext {
@@ -349,6 +352,9 @@ struct SpanContext {
   // Parse a W3C traceparent string into a SpanContext.
   // Format: "{version}-{trace-id}-{parent-id}-{flags}"
   static kj::Maybe<SpanContext> tryFromTraceparent(kj::StringPtr traceparent);
+
+  // Serialize to a W3C traceparent.
+  kj::Maybe<kj::String> toTraceparent() const;
 
  private:
   TraceId traceId;

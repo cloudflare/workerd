@@ -148,21 +148,15 @@ ExecProcess::ExecProcess(jsg::Lock& js,
   KJ_IF_SOME(signal, abortSignal) {
     constexpr int kSigKill = 9;
 
-    auto& canceler = signal->getCanceler();
-
     // exec() calls throwIfAborted() before sending the RPC, but the signal can still fire while the
     // RPC is in flight, i.e. before this constructor runs in the RPC's continuation. If that
-    // happened, kill the freshly-started process immediately; there's no point registering a
-    // listener.
-    if (canceler.isCanceled()) {
+    // happened, kill the freshly-started process immediately; there's no point registering an
+    // abort action.
+    if (signal->getAborted(js)) {
       sendKill(kSigKill);
     } else {
-      // Hold a strong reference to the canceler so it outlives the AbortSignal's own IoOwn, then register
-      // a listener that kills the process when the signal is later triggered.
-      auto own = kj::addRef(canceler);
-      auto& ref = *own;
-      abortCanceler = ioContext.addObject(kj::mv(own));
-      abortListener.emplace(ref, [self = JSG_THIS_WEAK(js)]() {
+      abortRegistration = signal->addAbortAction(
+          js, [self = JSG_THIS_WEAK(js)](jsg::Lock& js, const kj::Exception&) {
         KJ_IF_SOME(process, self.tryGet()) {
           process.sendKill(kSigKill);
         }
@@ -365,42 +359,42 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
     }
   }
 
+  JSG_REQUIRE(options.image == kj::none || options.containerSnapshot == kj::none, TypeError,
+      "`image` and `containerSnapshot` are mutually exclusive.");
   if (flags.getWorkerdExperimental()) {
-    JSG_REQUIRE(options.image == kj::none || options.containerSnapshot == kj::none, TypeError,
-        "`image` and `containerSnapshot` are mutually exclusive.");
     KJ_IF_SOME(hardTimeoutMs, options.hardTimeout) {
       JSG_REQUIRE(hardTimeoutMs > 0, RangeError, "Hard timeout must be greater than 0");
       req.setHardTimeoutMs(hardTimeoutMs);
     }
-    KJ_IF_SOME(image, options.image) {
-      JSG_REQUIRE(image.size() <= MAX_IMAGE_REFERENCE_SIZE, TypeError,
-          "Container image reference cannot exceed ", MAX_IMAGE_REFERENCE_SIZE, " bytes.");
-      for (auto c: image) {
-        auto byte = static_cast<kj::byte>(c);
-        JSG_REQUIRE(byte > 0x20 && byte < 0x7f, TypeError,
-            "Container image reference must contain only non-space printable ASCII characters.");
-      }
-      req.getSource().setImage(image);
+  }
+  KJ_IF_SOME(image, options.image) {
+    JSG_REQUIRE(image.size() <= MAX_IMAGE_REFERENCE_SIZE, TypeError,
+        "Container image reference cannot exceed ", MAX_IMAGE_REFERENCE_SIZE, " bytes.");
+    for (auto c: image) {
+      auto byte = static_cast<kj::byte>(c);
+      JSG_REQUIRE(byte > 0x20 && byte < 0x7f, TypeError,
+          "Container image reference must contain only non-space printable ASCII characters.");
     }
-    KJ_IF_SOME(instance, options.instance) {
-      auto instanceBuilder = req.initInstance();
-      KJ_SWITCH_ONEOF(instance) {
-        KJ_CASE_ONEOF(named, kj::String) {
-          JSG_REQUIRE(
-              kj::arrayPtr(VALID_CONTAINER_INSTANCE_TYPES).findFirst(named.asPtr()) != kj::none,
-              TypeError, "Invalid container instance type.");
-          instanceBuilder.setNamed(named);
-        }
-        KJ_CASE_ONEOF(custom, StartResources) {
-          JSG_REQUIRE(std::isfinite(custom.vcpu) && custom.vcpu > 0, RangeError,
-              "Container resource vcpu must be a finite number greater than 0.");
-          auto memoryMib = requireResourceAmount(custom.memoryMib, "memoryMib"_kj);
-          auto diskMb = requireResourceAmount(custom.diskMb, "diskMb"_kj);
-          auto resources = instanceBuilder.initCustom();
-          resources.setVcpu(custom.vcpu);
-          resources.setMemoryMib(memoryMib);
-          resources.setDiskMb(diskMb);
-        }
+    req.getSource().setImage(image);
+  }
+  KJ_IF_SOME(instance, options.instance) {
+    auto instanceBuilder = req.initInstance();
+    KJ_SWITCH_ONEOF(instance) {
+      KJ_CASE_ONEOF(named, kj::String) {
+        JSG_REQUIRE(
+            kj::arrayPtr(VALID_CONTAINER_INSTANCE_TYPES).findFirst(named.asPtr()) != kj::none,
+            TypeError, "Invalid container instance type.");
+        instanceBuilder.setNamed(named);
+      }
+      KJ_CASE_ONEOF(custom, StartResources) {
+        JSG_REQUIRE(std::isfinite(custom.vcpu) && custom.vcpu > 0, RangeError,
+            "Container resource vcpu must be a finite number greater than 0.");
+        auto memoryMib = requireResourceAmount(custom.memoryMib, "memoryMib"_kj);
+        auto diskMb = requireResourceAmount(custom.diskMb, "diskMb"_kj);
+        auto resources = instanceBuilder.initCustom();
+        resources.setVcpu(custom.vcpu);
+        resources.setMemoryMib(memoryMib);
+        resources.setDiskMb(diskMb);
       }
     }
   }
@@ -420,17 +414,25 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
     for (auto i: kj::indices(directorySnapshots)) {
       auto entry = list[i];
       auto& restore = directorySnapshots[i];
-      auto& snap = restore.snapshot;
-      auto effectiveRestorePath = snap.dir.asPtr();
+
+      kj::Maybe<kj::StringPtr> effectiveRestorePath;
+      KJ_IF_SOME(snap, restore.snapshot) {
+        effectiveRestorePath = snap.dir.asPtr();
+      }
       KJ_IF_SOME(mp, restore.mountPoint) {
         effectiveRestorePath = mp.asPtr();
       }
 
-      JSG_REQUIRE_NONNULL(parseRestorePath(effectiveRestorePath), Error,
+      auto restorePath = JSG_REQUIRE_NONNULL(effectiveRestorePath, Error,
+          "Directory snapshot restore requires a mountPoint when no snapshot is given.");
+
+      JSG_REQUIRE_NONNULL(parseRestorePath(restorePath), Error,
           "Directory snapshot cannot be restored to root directory.");
 
-      entry.setSnapshotId(snap.id);
-      entry.setRestorePath(effectiveRestorePath);
+      KJ_IF_SOME(snap, restore.snapshot) {
+        entry.setSnapshotId(snap.id);
+      }
+      entry.setRestorePath(restorePath);
     }
   }
 
@@ -458,7 +460,7 @@ void Container::startMonitor() {
   }).fork();
 
   currentMonitor =
-      IoContext::current().addObject(kj::heap<Monitor>(kj::mv(monitor), ++nextMonitorGeneration));
+      IoContext::current().createObject<Monitor>(kj::mv(monitor), ++nextMonitorGeneration);
 }
 
 jsg::Promise<void> Container::setLabels(jsg::Lock& js, jsg::Dict<kj::String> labels) {
@@ -1479,7 +1481,7 @@ jsg::Ref<Fetcher> Container::getTcpPort(jsg::Lock& js, int port) {
   auto portState = [&]() -> kj::Rc<TcpPortState> {
     if (util::Autogate::isEnabled(util::AutogateKey::CONTAINER_TUNNEL_REUSE)) {
       if (tcpPortStates == kj::none) {
-        tcpPortStates = ioctx.addObject(kj::heap<kj::HashMap<int, kj::Rc<TcpPortState>>>());
+        tcpPortStates = ioctx.createObject<kj::HashMap<int, kj::Rc<TcpPortState>>>();
       }
       auto& states = *KJ_ASSERT_NONNULL(tcpPortStates);
 

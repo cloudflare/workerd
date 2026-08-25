@@ -10,6 +10,9 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = [
           "nodejs_compat",
           "typescript_implemented_streams",
+          # The iterable-body tests need the Iterable/AsyncIterable BodyInit extension in
+          # every variant, including the oldest-compat-date default variant.
+          "fetch_iterable_type_support",
           "experimental",
         ],
         bindings = [

@@ -31,30 +31,39 @@ struct DeferredProxy;
 
 class CloseEvent: public Event {
  public:
+  // Runtime-only (the JS constructor uses the (type, ...) overload); always trusted.
   CloseEvent(uint code, kj::String reason, bool clean)
-      : Event("close"),
+      : Event("close", {}, Trusted::YES),
         code(code),
         reason(kj::mv(reason)),
         clean(clean) {}
-  CloseEvent(kj::String type, int code, kj::String reason, bool clean)
-      : Event(kj::mv(type)),
+  CloseEvent(kj::String type, int code, kj::String reason, bool clean, Init init = {})
+      : Event(kj::mv(type), kj::mv(init)),
         code(code),
         reason(kj::mv(reason)),
         clean(clean) {}
 
   struct Initializer {
+    jsg::Optional<bool> bubbles;
+    jsg::Optional<bool> cancelable;
+    jsg::Optional<bool> composed;
     jsg::Optional<int> code;
     jsg::Optional<jsg::USVString> reason;
     jsg::Optional<bool> wasClean;
 
-    JSG_STRUCT(code, reason, wasClean);
+    JSG_STRUCT(bubbles, cancelable, composed, code, reason, wasClean);
     JSG_STRUCT_TS_OVERRIDE(CloseEventInit);
   };
   static jsg::Ref<CloseEvent> constructor(
       jsg::Lock& js, kj::String type, jsg::Optional<Initializer> initializer) {
     Initializer init = kj::mv(initializer).orDefault({});
     return js.alloc<CloseEvent>(kj::mv(type), init.code.orDefault(0),
-        kj::mv(init.reason).orDefault(jsg::USVString(kj::str())), init.wasClean.orDefault(false));
+        kj::mv(init.reason).orDefault(jsg::USVString(kj::str())), init.wasClean.orDefault(false),
+        Event::Init{
+          .bubbles = init.bubbles,
+          .cancelable = init.cancelable,
+          .composed = init.composed,
+        });
   }
 
   int getCode() {
@@ -176,6 +185,13 @@ class WebSocketPair: public jsg::Object {
 
 class WebSocketAdapter;
 
+// WebSocket's UA-fired events are dispatched with spec semantics
+// (DispatchExceptionPolicy::REPORT: listener exceptions are reported and the remaining
+// listeners still run). For 'open' and 'message', a throwing listener additionally errors
+// out the WebSocket after the dispatch completes (fail-fast), via
+// DispatchResult::firstException; 'close' and 'error' fire when the WebSocket is already
+// closed or failed and are report-only. See dispatchWithFailFast() and dispatchReportOnly()
+// in web-socket.c++.
 class WebSocket: public EventTarget {
  public:
   // WebSocket ready states.
@@ -196,7 +212,7 @@ class WebSocket: public EventTarget {
     // `maybeTags` is only non-empty when we're recreating the api::WebSocket.
     // We don't need to populate it when hibernating because the tags are already
     // stored in the HibernationManager.
-    kj::Maybe<kj::Array<kj::StringPtr>> maybeTags;
+    kj::Maybe<kj::Array<kj::String>> maybeTags;
 
     // True forever once the JS WebSocket calls `close()`.
     bool closedOutgoingConnection = false;
@@ -241,7 +257,7 @@ class WebSocket: public EventTarget {
 
   // Extract the kj::WebSocket from this api::WebSocket (if applicable). The kj::WebSocket will be
   // owned elsewhere, but the api::WebSocket will retain a reference.
-  kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::StringPtr> tags);
+  kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags);
 
   // Accesses the tags of the hibernatable websocket.
   kj::Array<kj::StringPtr> getHibernatableTags();
@@ -505,7 +521,7 @@ class WebSocketAdapter {
 
   // Hibernation transitions: extracts the kj::WebSocket so the HibernationManager can
   // assume ownership; the adapter retains a bare reference for sends.
-  virtual kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::StringPtr> tags) = 0;
+  virtual kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags) = 0;
 
   // HibernationManager coordination: signals that the underlying connection is winding
   // down and the adapter should arrange to deliver its terminal close/error event.
@@ -603,7 +619,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   bool isHibernatable() override;
   void setObserver(kj::Own<WebSocketObserver> observer) override;
 
-  kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::StringPtr> tags) override;
+  kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags) override;
   void initiateHibernatableRelease(jsg::Lock& js,
       kj::Own<kj::WebSocket> ws,
       kj::Array<kj::String> tags,
@@ -668,12 +684,8 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
       // Close.
       WebSocket::HibernatableReleaseState releaseState = WebSocket::HibernatableReleaseState::NONE;
 
-      // There are two possible states for tagsRef:
-      //   1. kj::Array<kj::StringPtr> — tags owned by the HibernationManager; we just
-      //      reference them to save memory.
-      //   2. kj::Array<kj::String> — we're going to be dispatching a Close or an Error event
-      //      and the HibernatableWebSocket is free to go away mid-dispatch; copy locally.
-      kj::OneOf<kj::Array<kj::StringPtr>, kj::Array<kj::String>> tagsRef;
+      // The native state can outlive the HibernationManager, so it owns its tag strings.
+      kj::Array<kj::String> tags;
     };
 
     explicit Accepted(kj::Own<kj::WebSocket> ws, Native& native, IoContext& context);
@@ -756,8 +768,14 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   struct AutoResponse {
     using OwnedAutoResponsePromise =
         kj::OneOf<IoOwn<kj::Promise<void>>, kj::Own<kj::Promise<void>>>;
+    struct Pending {
+      kj::String message;
+      // Queued auto-responses are historically fire-and-forget. Completion means the pump no
+      // longer owns this item, not necessarily that the send succeeded.
+      kj::Own<kj::PromiseFulfiller<void>> fulfiller;
+    };
     kj::Maybe<OwnedAutoResponsePromise> ongoingAutoResponse;
-    workerd::util::Queue<kj::String> pendingAutoResponseDeque;
+    workerd::util::Queue<Pending> pendingAutoResponseDeque;
     size_t queuedAutoResponses = 0;
     bool isPumping = false;
     bool isClosed = false;
@@ -765,7 +783,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
     JSG_MEMORY_INFO(AutoResponse) {
       tracker.trackFieldWithSize("ongoingAutoResponse", sizeof(kj::Promise<void>));
       pendingAutoResponseDeque.forEach(
-          [&](const kj::String& message) { tracker.trackField(nullptr, message); });
+          [&](const Pending& pending) { tracker.trackField(nullptr, pending.message); });
     }
   };
 
@@ -781,10 +799,8 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
 
   // Creates a fresh `Native` set up in the Accepted-Hibernatable state. Used by the
   // hibernation-revival constructor.
-  IoOwn<Native> initNative(IoContext& ioContext,
-      kj::WebSocket& ws,
-      kj::Array<kj::StringPtr> tags,
-      bool closedOutgoingConn);
+  IoOwn<Native> initNative(
+      IoContext& ioContext, kj::WebSocket& ws, kj::Array<kj::String> tags, bool closedOutgoingConn);
 
   void dispatchOpen(jsg::Lock& js);
   void ensurePumping(jsg::Lock& js);
@@ -880,7 +896,10 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   // the map without locking the isolate.
   IoOwn<OutgoingMessagesMap> outgoingMessages;
 
-  AutoResponse autoResponseStatus;
+  // Auto-responses can run without a current IoContext, so they access the state directly while
+  // the IoOwn ensures it is destroyed by the owning IoContext.
+  IoOwn<AutoResponse> autoResponseStatusOwner;
+  AutoResponse& autoResponseStatus;
 
   kj::Maybe<kj::Own<WebSocketObserver>> observer;
 

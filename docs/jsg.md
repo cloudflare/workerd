@@ -1841,6 +1841,16 @@ v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char
 v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf);
 ```
 
+For dynamically allocated buffers, use the ownership-carrying overloads:
+
+```cpp
+using OwnedAscii = kj::Array<const char>;
+using OwnedUtf16 = kj::Array<const uint16_t>;
+
+v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::Arc<OwnedAscii> buf);
+v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::Arc<OwnedUtf16> buf);
+```
+
 **Important:** The `OneByteString` variant interprets the buffer as Latin-1, not UTF-8.
 
 ---
@@ -2484,7 +2494,7 @@ bundles, import.meta support, import attributes.
 
 ```cpp
 auto esmModule = Module::newEsm("file:///bundle/worker.js"_url,
-    Module::Type::BUNDLE, kj::mv(code),
+    Module::Type::BUNDLE, kj::arc<OwnedAscii>(kj::mv(code)),
     Module::Flags::MAIN | Module::Flags::ESM);
 
 auto syntheticModule = Module::newSynthetic("workerd:my-module"_url,
@@ -2514,14 +2524,16 @@ auto wasmHandler = Module::newWasmModuleHandler(wasmBytes);
 Url bundleBase = "file:///bundle"_url;
 ModuleBundle::BundleBuilder bundleBuilder(bundleBase);
 bundleBuilder
-    .addEsmModule("worker.js", workerSource, Module::Flags::MAIN | Module::Flags::ESM)
-    .addEsmModule("utils.js", utilsSource)
+    .addEsmModule("worker.js", kj::arc<OwnedAscii>(kj::mv(workerSource)),
+        Module::Flags::MAIN | Module::Flags::ESM)
+    .addEsmModule("utils.js", kj::arc<OwnedAscii>(kj::mv(utilsSource)))
     .alias("./lib", "./utils.js");
 auto workerBundle = bundleBuilder.finish();
 
 // Builtin bundle
 ModuleBundle::BuiltinBuilder builtinBuilder(ModuleBundle::BuiltinBuilder::Type::BUILTIN);
 builtinBuilder
+    // Builtin ESM source must have static process lifetime.
     .addEsm("node:buffer"_url, bufferSource)
     .addSynthetic("cloudflare:sockets"_url, socketsHandler)
     .addObject<MyApiClass, MyTypeWrapper>("workerd:my-api"_url);
@@ -2543,7 +2555,7 @@ auto fallbackBundle = ModuleBundle::newFallbackBundle(
         -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
       KJ_IF_SOME(code, fetchModule(context.normalizedSpecifier)) {
         return Module::newEsm(context.normalizedSpecifier.clone(),
-                              Module::Type::FALLBACK, kj::mv(code));
+                              Module::Type::FALLBACK, kj::arc<OwnedAscii>(kj::mv(code)));
       }
       if (shouldRedirect(context.normalizedSpecifier)) {
         return kj::str("node:buffer");  // Redirect

@@ -8,7 +8,6 @@
 #include "headers.h"
 #include "queue.h"
 #include "sockets.h"
-#include "streams/readable-source.h"
 #include "system-streams.h"
 #include "util.h"
 #include "worker-rpc.h"
@@ -95,7 +94,7 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       return ExtractedBody(js, kj::mv(stream));
     }
     KJ_CASE_ONEOF(gen, jsg::AsyncGeneratorIgnoringStrings<jsg::Value>) {
-      return ExtractedBody(js, ReadableStream::from(js, gen.release()));
+      return ExtractedBody(js, JsReadableStream::from(js, gen.release()));
     }
     KJ_CASE_ONEOF(text, kj::String) {
       auto contentType = kj::str(MimeType::PLAINTEXT_STRING);
@@ -1604,7 +1603,9 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
             if (s->getAborted(js)) {
               return js.rejectedPromise<jsg::Ref<Response>>(s->getReason(js));
             }
-            webSocket = kj::refcounted<AbortableWebSocket>(kj::mv(webSocket), s->getCanceler());
+            auto cancellation = s->newCanceler(js);
+            webSocket = kj::refcounted<AbortableWebSocket>(kj::mv(webSocket),
+                kj::mv(cancellation.canceler), kj::mv(cancellation.registration));
           }
           return js.resolvedPromise(makeHttpResponse(js, jsRequest->getMethodEnum(),
               kj::mv(urlList), response.statusCode, response.statusText, *response.headers,
@@ -1731,7 +1732,9 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
     if (s->getAborted(js)) {
       return js.rejectedPromise<jsg::Ref<Response>>(s->getReason(js));
     }
-    response.body = kj::refcounted<AbortableInputStream>(kj::mv(response.body), s->getCanceler());
+    auto cancellation = s->newCanceler(js);
+    response.body = kj::refcounted<AbortableInputStream>(
+        kj::mv(response.body), kj::mv(cancellation.canceler), kj::mv(cancellation.registration));
   }
 
   if (isRedirectStatusCode(response.statusCode) &&
@@ -1991,7 +1994,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       // and the Fetch spec doesn't allow users to create Requests with CONNECT methods.
       if (jsRequest->getMethodEnum() == kj::HttpMethod::GET) {
         auto view = dataUrl.getData();
-        auto rs = streams::newMemorySource(view, kj::heap(kj::mv(dataUrl)));
+        auto rs = newMemorySource(view, kj::heap(kj::mv(dataUrl)));
         maybeResponseBody.emplace(
             JsReadableStream::create(js, IoContext::current(), kj::mv(rs)));
       }

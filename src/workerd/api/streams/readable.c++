@@ -7,6 +7,7 @@
 #include "internal.h"
 #include "writable.h"
 
+#include <workerd/api/js-readable-stream.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
@@ -702,37 +703,35 @@ kj::Own<ReadableStreamSource> newNoDeferredProxyReadableStream(
   return kj::heap<NoDeferredProxyReadableStream>(kj::mv(inner), context);
 }
 
-void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
-  // Serialize by effectively creating a `JsRpcStub` around this object and serializing that.
-  // Except we don't actually want to do _exactly_ that, because we do not want to actually create
-  // a `JsRpcStub` locally. So do the important parts of `JsRpcStub::constructor()` followed by
-  // `JsRpcStub::serialize()`.
-
+RpcSerializerExternalHandler& requireReadableStreamRpcSerializer(jsg::Serializer& serializer) {
   auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
       "ReadableStream can only be serialized for RPC.");
   auto externalHandler = dynamic_cast<RpcSerializerExternalHandler*>(&handler);
   JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
       "ReadableStream can only be serialized for RPC.");
+  return *externalHandler;
+}
 
-  // NOTE: We're counting on `pumpTo()`, below, to check that the stream is not locked or disturbed
-  //   and other common checks. It's important that we don't modify the stream in any way before
-  //   that call.
+kj::Own<WritableStreamSink> newReadableStreamSerializeSink(
+    RpcSerializerExternalHandler& externalHandler,
+    StreamEncoding encoding,
+    kj::Maybe<uint64_t> expectedLength) {
+  // Serialize by effectively creating a `JsRpcStub` around the stream and serializing that.
+  // Except we don't actually want to do _exactly_ that, because we do not want to actually create
+  // a `JsRpcStub` locally. So do the important parts of `JsRpcStub::constructor()` followed by
+  // `JsRpcStub::serialize()`.
 
   IoContext& ioctx = IoContext::current();
 
-  auto& controller = getController();
-  StreamEncoding encoding = controller.getPreferredEncoding();
-  auto expectedLength = controller.tryGetLength(encoding);
-
   capnp::ByteStream::Client streamCap = [&]() {
-    auto req = externalHandler->getExternalPusher().pushByteStreamRequest(capnp::MessageSize{2, 0});
+    auto req = externalHandler.getExternalPusher().pushByteStreamRequest(capnp::MessageSize{2, 0});
     KJ_IF_SOME(el, expectedLength) {
       req.setLengthPlusOne(el + 1);
     }
     auto pipeline = req.sendForPipeline();
 
-    externalHandler->write([encoding, expectedLength, source = pipeline.getSource()](
-                               rpc::JsValue::External::Builder builder) mutable {
+    externalHandler.write([encoding, expectedLength, source = pipeline.getSource()](
+                              rpc::JsValue::External::Builder builder) mutable {
       auto rs = builder.initReadableStream();
       rs.setStream(kj::mv(source));
       rs.setEncoding(encoding);
@@ -744,7 +743,23 @@ void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   kj::Own<capnp::ExplicitEndOutputStream> kjStream =
       ioctx.getByteStreamFactory().capnpToKjExplicitEnd(kj::mv(streamCap));
 
-  auto sink = newSystemStream(kj::mv(kjStream), encoding, ioctx);
+  return newSystemStream(kj::mv(kjStream), encoding, ioctx);
+}
+
+void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  // NOTE: We're counting on `pumpTo()`, below, to check that the stream is not locked or disturbed
+  //   and other common checks. It's important that we don't modify the stream in any way before
+  //   that call.
+
+  auto& externalHandler = requireReadableStreamRpcSerializer(serializer);
+
+  IoContext& ioctx = IoContext::current();
+
+  auto& controller = getController();
+  StreamEncoding encoding = controller.getPreferredEncoding();
+  auto expectedLength = controller.tryGetLength(encoding);
+
+  auto sink = newReadableStreamSerializeSink(externalHandler, encoding, expectedLength);
 
   ioctx.addTask(
       ioctx.waitForDeferredProxy(pumpTo(js, kj::mv(sink), true)).catch_([](kj::Exception&& e) {
@@ -754,13 +769,42 @@ void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   }));
 }
 
-jsg::Ref<ReadableStream> ReadableStream::deserialize(
+JsReadableStream hydrateRpcReadableStream(
+    jsg::Lock& js, IoContext& ioctx, rpc::JsValue::External::ReadableStream::Reader reader) {
+  auto encoding = reader.getEncoding();
+
+  KJ_REQUIRE(
+      static_cast<uint>(encoding) < capnp::Schema::from<StreamEncoding>().getEnumerants().size(),
+      "unknown StreamEncoding received from peer");
+
+  kj::Own<kj::AsyncInputStream> in = ioctx.getExternalPusher()->unwrapStream(reader.getStream());
+
+  // JsReadableStream::create() dispatches on the typescript_implemented_streams compat flag,
+  // so the received stream is backed by whichever implementation this isolate runs.
+  return JsReadableStream::create(js, ioctx,
+      kj::heap<NoDeferredProxyReadableStream>(newSystemStream(kj::mv(in), encoding, ioctx), ioctx));
+}
+
+JsReadableStream ReadableStream::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  // No JavaScript may execute here: V8's deserializer forbids it for the duration of the value
+  // graph read. Everything JS-executing happened in hydrateRpcReadableStream() during
+  // RpcDeserializerExternalHandler::prepare(); this function only claims the result (or, when
+  // the rpc-externals-hydration autogate is off, constructs the legacy stream in place, which
+  // requires no JS).
   auto& handler = KJ_REQUIRE_NONNULL(
       deserializer.getExternalHandler(), "got ReadableStream on non-RPC serialized object?");
   auto externalHandler = dynamic_cast<RpcDeserializerExternalHandler*>(&handler);
   KJ_REQUIRE(externalHandler != nullptr, "got ReadableStream on non-RPC serialized object?");
 
+  KJ_IF_SOME(prebuilt, externalHandler->claimPrebuiltReadable()) {
+    return kj::mv(prebuilt);
+  }
+
+  // Not hydrated: the rpc-externals-hydration autogate is off, which
+  // RpcDeserializerExternalHandler::prepare() only permits for legacy-streams isolates (the
+  // typescript_implemented_streams flag requires the gate), so constructing the legacy
+  // stream in place -- which runs no JS -- is the only case here.
   auto reader = externalHandler->read();
   KJ_REQUIRE(reader.isReadableStream(), "external table slot type doesn't match serialization tag");
 
@@ -775,8 +819,9 @@ jsg::Ref<ReadableStream> ReadableStream::deserialize(
 
   kj::Own<kj::AsyncInputStream> in = ioctx.getExternalPusher()->unwrapStream(rs.getStream());
 
-  return js.alloc<ReadableStream>(ioctx,
-      kj::heap<NoDeferredProxyReadableStream>(newSystemStream(kj::mv(in), encoding, ioctx), ioctx));
+  return JsReadableStream(js.alloc<ReadableStream>(ioctx,
+      kj::heap<NoDeferredProxyReadableStream>(
+          newSystemStream(kj::mv(in), encoding, ioctx), ioctx)));
 }
 
 kj::StringPtr ReaderImpl::jsgGetMemoryName() const {

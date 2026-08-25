@@ -1239,6 +1239,11 @@ namespace {
 using MaybeFsNode = kj::Maybe<
     kj::OneOf<kj::Rc<workerd::Directory>, kj::Rc<workerd::File>, kj::Rc<workerd::SymbolicLink>>>;
 
+struct CopyEntry final {
+  kj::String name;
+  workerd::Directory::Item item;
+};
+
 MaybeFsNode getNodeOrError(jsg::Lock& js,
     const workerd::VirtualFileSystem& vfs,
     const jsg::Url& url,
@@ -1422,11 +1427,32 @@ void handleCpDir(jsg::Lock& js,
     node::THROW_ERR_UV_EINVAL(js, "cp"_kj, "Source and destination directories are the same"_kj);
   }
 
+  // entries store the reference to the node and the name of the entry
+  // of all the entries in the source directory, to ensure they remain valid
+  // even if the source directory is mutated during copying.
+  // this can happen when the destination directory contains a
+  // symbolic link that points to the source directory.
+  kj::Vector<CopyEntry> entries;
+  entries.reserve(src->count(js));
+  for (auto& entry: *src) {
+    KJ_SWITCH_ONEOF(entry.value) {
+      KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+        entries.add(CopyEntry{.name = kj::str(entry.key), .item = file.addRef()});
+      }
+      KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+        entries.add(CopyEntry{.name = kj::str(entry.key), .item = dir.addRef()});
+      }
+      KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+        entries.add(CopyEntry{.name = kj::str(entry.key), .item = link.addRef()});
+      }
+    }
+  }
+
   // Here, we iterate through each of the entries in the source directory,
   // recursively copying them to the destination directory.
-  for (auto& entry: *src) {
-    kj::StringPtr name = entry.key;
-    KJ_SWITCH_ONEOF(entry.value) {
+  for (auto& entry: entries) {
+    kj::StringPtr name = entry.name;
+    KJ_SWITCH_ONEOF(entry.item) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         // We have a file, we will copy it to the destination directory
         // unless errorOnExist is true, force is false, and the destination already exists.

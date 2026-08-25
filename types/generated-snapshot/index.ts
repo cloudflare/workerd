@@ -709,7 +709,7 @@ export interface DurableObjectState<Props = unknown> {
   setHibernatableWebSocketEventTimeout(timeoutMs?: number): void;
   getHibernatableWebSocketEventTimeout(): number | null;
   getTags(ws: WebSocket): string[];
-  abort(reason?: string): void;
+  abort(reason?: string, options?: DurableObjectAbortOptions): void;
 }
 export interface DurableObjectTransaction {
   get<T = unknown>(
@@ -782,6 +782,9 @@ export interface DurableObjectStorage {
   getCurrentBookmark(): Promise<string>;
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
   onNextSessionRestoreBookmark(bookmark: string): Promise<string>;
+}
+export interface DurableObjectAbortOptions {
+  retryAlarm?: boolean;
 }
 export interface DurableObjectListOptions {
   start?: string;
@@ -1667,6 +1670,9 @@ export declare class ErrorEvent extends Event {
   get error(): any;
 }
 export interface ErrorEventErrorEventInit {
+  bubbles?: boolean;
+  cancelable?: boolean;
+  composed?: boolean;
   message?: string;
   filename?: string;
   lineno?: number;
@@ -1679,7 +1685,7 @@ export interface ErrorEventErrorEventInit {
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent)
  */
 export declare class MessageEvent extends Event {
-  constructor(type: string, initializer: MessageEventInit);
+  constructor(type: string, initializer?: MessageEventInit);
   /**
    * The **`data`** read-only property of the MessageEvent interface represents the data sent by the message emitter.
    *
@@ -1712,7 +1718,14 @@ export declare class MessageEvent extends Event {
   readonly ports: MessagePort[];
 }
 export interface MessageEventInit {
-  data: ArrayBuffer | string;
+  bubbles?: boolean;
+  cancelable?: boolean;
+  composed?: boolean;
+  data?: any;
+  origin?: string;
+  lastEventId?: string;
+  source?: MessagePort;
+  ports?: MessagePort[];
 }
 /**
  * The **`PromiseRejectionEvent`** interface represents events which are sent to the global script context when JavaScript Promises are rejected. These events are particularly useful for telemetry and debugging purposes.
@@ -3734,6 +3747,9 @@ export declare class CloseEvent extends Event {
   readonly wasClean: boolean;
 }
 export interface CloseEventInit {
+  bubbles?: boolean;
+  cancelable?: boolean;
+  composed?: boolean;
   code?: number;
   reason?: string;
   wasClean?: boolean;
@@ -3997,10 +4013,15 @@ export interface ContainerDirectorySnapshotOptions {
   dir: string;
   name?: string;
 }
-export interface ContainerDirectorySnapshotRestoreParams {
-  snapshot: ContainerDirectorySnapshot;
-  mountPoint?: string;
-}
+export type ContainerDirectorySnapshotRestoreParams =
+  | {
+      snapshot: ContainerDirectorySnapshot;
+      mountPoint?: string;
+    }
+  | {
+      snapshot?: undefined;
+      mountPoint: string;
+    };
 export interface ContainerSnapshot {
   id: string;
   size: number;
@@ -4012,14 +4033,29 @@ export interface ContainerSnapshotRestoreParams {
 export interface ContainerSnapshotOptions {
   name?: string;
 }
-export interface ContainerStartupOptions {
+export type ContainerStartupOptions = {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
+  instance?:
+    | "lite"
+    | "standard-1"
+    | "standard-2"
+    | "standard-3"
+    | "standard-4"
+    | ContainerStartResources;
   labels?: Record<string, string>;
   directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
-  containerSnapshot?: ContainerSnapshotRestoreParams;
-}
+} & (
+  | {
+      image: string;
+      containerSnapshot?: never;
+    }
+  | {
+      image?: never;
+      containerSnapshot?: ContainerSnapshotRestoreParams;
+    }
+);
 export interface ContainerStartResources {
   vcpu: number;
   memoryMib: number;
@@ -4146,7 +4182,7 @@ export interface WorkerLoaderModule {
   data?: ArrayBuffer;
   json?: any;
   py?: string;
-  wasm?: ArrayBuffer;
+  wasm?: ArrayBuffer | ArrayBufferView | WebAssembly.Module;
 }
 export interface WorkerLoaderWorkerCode {
   compatibilityDate: string;
@@ -4154,7 +4190,7 @@ export interface WorkerLoaderWorkerCode {
   allowExperimental?: boolean;
   limits?: workerdResourceLimits;
   mainModule: string;
-  modules: Record<string, WorkerLoaderModule | string>;
+  modules: Record<string, string | WebAssembly.Module | WorkerLoaderModule>;
   env?: any;
   globalOutbound?: Fetcher | null;
   tails?: Fetcher[];
@@ -12434,9 +12470,29 @@ export type BrowserRunLinksOptions = BrowserRunCommonOptions & {
   /** When true, exclude links pointing to external domains. @default false */
   excludeExternalLinks?: boolean;
 };
+export type BrowserRunSnapshotFormat =
+  "content" | "screenshot" | "markdown" | "accessibilityTree";
 export type BrowserRunSnapshotOptions = BrowserRunCommonOptions & {
+  /** Which representations of the page to return. At least two distinct formats
+   * are required; request a single format from its dedicated action instead.
+   * @default ["content","screenshot"]
+   */
+  formats?: BrowserRunSnapshotFormat[];
   /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
   screenshotOptions?: Omit<BrowserRunPuppeteerScreenshotOptions, "encoding">;
+};
+/** Options for the `accessibilityTree` quick action. */
+export type BrowserRunAccessibilityTreeOptions = BrowserRunCommonOptions & {
+  /** When true, prune nodes that carry no semantic meaning, such as generic
+   * containers. Defaults to true, or to false when `root` is set so that the
+   * requested subtree is returned as-is.
+   */
+  interestingOnly?: boolean;
+  /** CSS selector limiting the tree to the matching element's subtree.
+   * A selector that matches nothing yields `accessibilityTree: null` with
+   * HTTP 200; a malformed selector is an error.
+   */
+  root?: string;
 };
 export interface BrowserRunJsonBaseOptions {
   /** Custom AI models to try in order. Max 3. Falls back to next on error. */
@@ -12489,6 +12545,58 @@ export type BrowserRunResponseMeta = {
   /** HTTP redirects followed to reach `finalUrl`, oldest first. Omitted for direct navigation and for client-side redirects such as meta refresh. An empty array means redirects occurred but their intermediate responses could not be read. */
   redirectChain?: BrowserRunRedirectHop[];
 };
+/**
+ * A node in the page's accessibility tree, as exposed to assistive technology.
+ * `role` is the only field always present; the rest are populated when the
+ * underlying element defines them.
+ * @see https://pptr.dev/api/puppeteer.serializedaxnode
+ */
+export interface BrowserRunSerializedAXNode {
+  /** The ARIA role, e.g. `"button"`, `"heading"`, `"RootWebArea"`. */
+  role: string;
+  /** The `aria-autocomplete` value. */
+  autocomplete?: string;
+  /** Checked state of a checkbox, radio, or menu item. */
+  checked?: boolean | "mixed";
+  /** Accessible description, typically from `aria-describedby` or `title`. */
+  description?: string;
+  disabled?: boolean;
+  expanded?: boolean;
+  /** Whether the element currently holds keyboard focus. */
+  focused?: boolean;
+  /** The kind of popup the element triggers, e.g. `"menu"`, `"dialog"`. */
+  haspopup?: string;
+  /** The `aria-invalid` value. */
+  invalid?: string;
+  /** Keyboard shortcuts bound to the element, from `aria-keyshortcuts`. */
+  keyshortcuts?: string;
+  /** Hierarchical level, e.g. the heading level of an `<h2>`. */
+  level?: number;
+  /** Whether the element is a modal dialog. */
+  modal?: boolean;
+  /** Whether a text input accepts multiple lines. */
+  multiline?: boolean;
+  /** Whether more than one option can be selected. */
+  multiselectable?: boolean;
+  /** Accessible name, e.g. a button's label or an image's alt text. */
+  name?: string;
+  orientation?: string;
+  /** Pressed state of a toggle button. */
+  pressed?: boolean | "mixed";
+  readonly?: boolean;
+  required?: boolean;
+  /** Author-supplied role description, from `aria-roledescription`. */
+  roledescription?: string;
+  selected?: boolean;
+  /** Current value of an input or range element. */
+  value?: string | number;
+  valuemax?: number;
+  valuemin?: number;
+  /** Human-readable form of `value`, from `aria-valuetext`. */
+  valuetext?: string;
+  /** Child nodes. Absent for leaf nodes. */
+  children?: BrowserRunSerializedAXNode[];
+}
 /** Success response for `content` action. */
 export type BrowserRunContentSuccessResponse = {
   success: true;
@@ -12534,14 +12642,31 @@ export type BrowserRunScrapeSuccessResponse = {
   }>;
   meta: BrowserRunResponseMeta;
 };
-/** Success response for `snapshot` action. */
+/** Success response for `snapshot` action. Each field is present only when the
+ * corresponding entry was requested in `formats`.
+ */
 export type BrowserRunSnapshotSuccessResponse = {
   success: true;
   result: {
     /** HTML content of the page. */
-    content: string;
+    content?: string;
     /** Base64-encoded screenshot image. */
-    screenshot: string;
+    screenshot?: string;
+    /** Markdown content. Prefixed with YAML frontmatter (e.g. `title`) when the
+     * page provides that metadata.
+     */
+    markdown?: string;
+    /** Root of the page's accessibility tree. */
+    accessibilityTree?: BrowserRunSerializedAXNode;
+  };
+  meta: BrowserRunResponseMeta;
+};
+/** Success response for `accessibilityTree` action. */
+export type BrowserRunAccessibilityTreeSuccessResponse = {
+  success: true;
+  result: {
+    /** Root of the accessibility tree, or `null` when `root` matched no element. */
+    accessibilityTree: BrowserRunSerializedAXNode | null;
   };
   meta: BrowserRunResponseMeta;
 };
@@ -12679,9 +12804,10 @@ export declare abstract class BrowserRun {
     options: BrowserRunLinksOptions,
   ): Promise<Response>;
   /**
-   * Get both the HTML content and a base64-encoded screenshot of a web page.
+   * Get several representations of a web page in one request.
    * @param action - Must be `'snapshot'`.
-   * @param options - Snapshot options including screenshot settings (encoding is always base64).
+   * @param options - Snapshot options including the `formats` to return and
+   * screenshot settings (encoding is always base64).
    * @returns A `Response` containing one of:
    *
    * **Success (HTTP 200):**
@@ -12737,6 +12863,29 @@ export declare abstract class BrowserRun {
   quickAction(
     action: "markdown",
     options: BrowserRunMarkdownOptions,
+  ): Promise<Response>;
+  /**
+   * Get the accessibility tree of a web page.
+   * @param action - Must be `'accessibilityTree'`.
+   * @param options - Options to scope the tree to a subtree and to control
+   * whether semantically uninteresting nodes are pruned.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunAccessibilityTreeSuccessResponse` JSON with `Content-Type: application/json`
+   * - `result.accessibilityTree` is `null` when `root` matched no element
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   * - HTTP 422 for a malformed `root` selector
+   * - HTTP 500 with code `2017` or `2018` when the tree could not be built
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(
+    action: "accessibilityTree",
+    options: BrowserRunAccessibilityTreeOptions,
   ): Promise<Response>;
 }
 /**
@@ -14412,6 +14561,27 @@ export type ImageInfoResponse =
       width: number;
       height: number;
     };
+/**
+ * Parameters for rasterizing text into an image.
+ */
+export type TextRasterize = {
+  /** The text content to render */
+  content: string;
+  /** rasterization options for the text **/
+  options: TextOptions;
+};
+export type TextOptions = {
+  /** Font configuration */
+  font: {
+    /** URL to a font file in TrueType (.ttf), OpenType (.otf), WOFF (.woff), or WOFF2 (.woff2) format */
+    url: string;
+  };
+  /** Font size in points (pt) */
+  size?: number;
+  /** Text color in CSS format: hex (#RRGGBB or #RRGGBBAA), rgb(r,g,b), rgba(r,g,b,a), or named colors */
+  color?: string;
+};
+export type ImageSource = ReadableStream<Uint8Array> | TextRasterize;
 export type ImageTransform = {
   width?: number;
   height?: number;
@@ -14523,6 +14693,9 @@ export interface ImageUploadOptions {
   requireSignedURLs?: boolean;
   metadata?: Record<string, unknown>;
   creator?: string;
+  /**
+   * If 'base64', the input data will be decoded from base64 before processing
+   */
   encoding?: "base64";
 }
 export interface ImageUpdateOptions {
@@ -14530,11 +14703,41 @@ export interface ImageUpdateOptions {
   metadata?: Record<string, unknown>;
   creator?: string;
 }
+export type ImageMetadataFilterOperators = {
+  eq?: string | number | boolean;
+  in?: string[] | number[];
+  gt?: number;
+  gte?: number;
+  lt?: number;
+  lte?: number;
+};
+export type ImageMetadataFilterValue =
+  string | number | boolean | ImageMetadataFilterOperators;
+export interface ImageListFilter {
+  metadata?: Record<string, ImageMetadataFilterValue>;
+}
 export interface ImageListOptions {
   limit?: number;
   cursor?: string;
   sortOrder?: "asc" | "desc";
   creator?: string;
+  filter?: ImageListFilter;
+}
+export interface ImageSignedUrlOptions {
+  variant: string;
+  expiresIn?: number;
+  keyName?: string;
+}
+export interface ImageDirectUploadOptions {
+  id?: string;
+  requireSignedURLs?: boolean;
+  metadata?: Record<string, unknown>;
+  creator?: string;
+  expiresIn?: number;
+}
+export interface ImageDirectUploadResult {
+  id: string;
+  uploadURL: string;
 }
 export interface ImageList {
   images: ImageMetadata[];
@@ -14552,6 +14755,13 @@ export interface ImageHandle {
    * @returns ReadableStream of image bytes, or null if not found
    */
   bytes(): Promise<ReadableStream<Uint8Array> | null>;
+  /**
+   * Generate a signed delivery URL for this hosted image.
+   * @param options Signing configuration
+   * @returns A signed image delivery URL
+   * @throws {@link ImagesError} if signing fails
+   */
+  signedUrl(options: ImageSignedUrlOptions): Promise<string>;
   /**
    * Update hosted image metadata
    * @param options Properties to update
@@ -14590,6 +14800,16 @@ export interface HostedImagesBinding {
    * @throws {@link ImagesError} if list fails
    */
   list(options?: ImageListOptions): Promise<ImageList>;
+  /**
+   * Create a Direct Creator Upload link, letting an end user upload an
+   * image straight to Cloudflare without exposing an API token
+   * @param options Upload link configuration
+   * @returns The new image ID and the upload URL to hand to the end user
+   * @throws {@link ImagesError} if creation fails
+   */
+  createDirectUpload(
+    options?: ImageDirectUploadOptions,
+  ): Promise<ImageDirectUploadResult>;
 }
 export interface ImagesBinding {
   /**
@@ -14610,6 +14830,13 @@ export interface ImagesBinding {
     stream: ReadableStream<Uint8Array>,
     options?: ImageInputOptions,
   ): ImageTransformer;
+  /**
+   * Begin applying a series of transformations to text
+   * @param content string to be rendered
+   * @param options font, optional color and size to use in rendering text
+   * @returns A transform handle
+   */
+  text(content: string, options: TextOptions): ImageTransformer;
   /**
    * Access hosted images CRUD operations
    */
@@ -14642,11 +14869,15 @@ export interface ImageTransformer {
 export type ImageTransformationOutputOptions = {
   encoding?: "base64";
 };
+export type ImageTransformationResponseOptions = {
+  headers?: HeadersInit;
+};
 export interface ImageTransformationResult {
   /**
    * The image as a response, ready to store in cache or return to users
+   * @param options Options that apply to the returned response, e.g. additional headers
    */
-  response(): Response;
+  response(options?: ImageTransformationResponseOptions): Response;
   /**
    * The content type of the returned image
    */
@@ -16235,7 +16466,8 @@ export declare namespace TailStream {
     | "responseStreamDisconnected"
     | "scriptNotFound"
     | "internalError"
-    | "exceededWallTime";
+    | "exceededWallTime"
+    | "aborted";
   interface ScriptVersion {
     readonly id: string;
     readonly tag?: string;
@@ -16862,6 +17094,20 @@ export type WorkflowDurationLabel =
 export type WorkflowSleepDuration =
   `${number} ${WorkflowDurationLabel}${"s" | ""}` | number;
 export type WorkflowRetentionDuration = WorkflowSleepDuration;
+/** Geographic regions supported when creating a Workflow instance.
+ * Location hints are best-effort placement preferences. */
+export type WorkflowInstanceLocationHint =
+  | "wnam"
+  | "enam"
+  | "sam"
+  | "weur"
+  | "eeur"
+  | "apac"
+  | "apac-ne"
+  | "apac-se"
+  | "oc"
+  | "afr"
+  | "me";
 export interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
    * An id for your Workflow instance. Must be unique within the Workflow.
@@ -16879,6 +17125,9 @@ export interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
     successRetention?: WorkflowRetentionDuration;
     errorRetention?: WorkflowRetentionDuration;
   };
+  /** A best-effort geographic placement preference for the Workflow instance.
+   * See `WorkflowInstanceLocationHint` for supported regions. */
+  locationHint?: WorkflowInstanceLocationHint;
 }
 export type InstanceStatus = {
   status:

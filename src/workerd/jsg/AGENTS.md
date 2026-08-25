@@ -62,6 +62,14 @@ class MyType: public jsg::Object {
 - `TypeHandler<T>&` as trailing param gives manual conversion access
 - Compat flags param on `JSG_RESOURCE_TYPE` gates members conditionally
 
+## Errors
+
+Use `JSG_TRY(js) { ... } JSG_CATCH(exception) { ... }` to catch JS exceptions in
+C++ code. The `js` is a `jsg::Lock&` parameter. The `exception` is a `jsg::Value`
+containing the JS exception that was thrown.
+
+The legacy `js.tryCatch(fn)` is deprecated and will be eventually removed.
+
 ## ANTI-PATTERNS
 
 - **NEVER** opaque-wrap `V8Ref<T>` — use handle directly
@@ -78,8 +86,8 @@ class MyType: public jsg::Object {
 These rules MUST be followed when writing or modifying JSG code:
 
 1. **MUST implement `visitForGc()`** on any Resource Type holding `Ref<T>`, `V8Ref<T>`,
-   `JsRef<T>`, `Function<T>`, `Promise<T>`, `Promise<T>::Resolver`, or
-   `Name` — see `README.md` §GC-Visitable Types for the complete list
+   `JsRef<T>`, `Function<T>`, `Promise<T>`, or `Promise<T>::Resolver` — see
+   `README.md` §GC-Visitable Types for the complete list
 2. **MUST visit ALL GC-visitable fields** — missing one causes GC corruption
 3. **MUST NOT store `v8::Local<T>` or `JsValue` types as class members** — use `V8Ref<T>`
    or `JsRef<T>` for persistence

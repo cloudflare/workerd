@@ -311,6 +311,14 @@ class TraceItem::FetchEventInfo::Request final: public jsg::Object {
     tracker.trackField("detail", detail);
   }
 
+  // getCf() hands out the same mutable cf object, so user code can make it
+  // reference this Request's wrapper; without tracing, that cycle would be
+  // uncollectable. Detail is shared only between Request instances, all of
+  // which visit it here, so the handle is re-traced on every GC cycle.
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(detail->cf);
+  }
+
  private:
   bool redacted = true;
   kj::Own<Detail> detail;

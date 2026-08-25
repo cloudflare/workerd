@@ -122,6 +122,7 @@ const {
   nativeControllerTeeSource,
   nativeControllerExtractSource,
   nativeControllerExpectedLength,
+  nativeControllerPeekSource,
 } = nativeStreamInternals;
 
 // Normalizes the non-standard `expectedLength` extension property on
@@ -198,6 +199,16 @@ function isActualObject(value: unknown) {
   return value != null && typeof value === 'object';
 }
 
+// The spec's "Type(x) is Object", which INCLUDES callables -- used for the iterator
+// protocol's object checks in from() (GetIterator/IteratorNext accept function-valued
+// iterators and results). Distinct from isActualObject, which deliberately excludes
+// functions for option-bag validation.
+function isObjectLike(value: unknown) {
+  return (
+    value !== null && (typeof value === 'object' || typeof value === 'function')
+  );
+}
+
 function assertPrivateSymbol(symbol: symbol) {
   if (symbol !== kPrivateSymbol) {
     throw new TypeError('Illegal constructor');
@@ -231,9 +242,21 @@ let readableStreamPipeThroughTo: <R>(
   destination: WritableStreamType<R>,
   options?: StreamPipeOptions
 ) => Promise<void>;
+let readableStreamPipeTo: <R>(
+  source: ReadableStream<R>,
+  destination: WritableStreamType<R>,
+  options?: StreamPipeOptions
+) => Promise<void>;
 let readableStreamTee: <R>(
   stream: ReadableStream<R>
 ) => [ReadableStream<R>, ReadableStream<R>];
+// The C++ bridge arm of JsReadableStream::detach(): takes over the stream's
+// internal state into a fresh stream, leaving the original a permanently
+// locked, disturbed husk. Assigned in ReadableStream's static block.
+let detachReadableStream: <R>(
+  stream: ReadableStream<R>,
+  ignoreDisturbed: boolean
+) => ReadableStream<R>;
 let readableStreamReaderGenericCancel: (
   reader: object,
   reason?: unknown
@@ -245,6 +268,15 @@ let readableStreamDefaultReaderRead: <R>(
 ) => void;
 let isReadableStream: (value: unknown) => boolean;
 let isByteStreamController: (value: unknown) => boolean;
+
+// C++-recognition brand (JsReadableStream::tryUnwrapTs): an own,
+// non-enumerable marker stamped on every instance by the constructor, so
+// the C++ bridge can recognize TypeScript streams via an own-property
+// probe, without executing JavaScript. That constraint is load-bearing:
+// unwrap runs during RPC deserialization, inside V8's no-JS-execution
+// scope. Proxies deliberately do not convey it (the C++ check rejects
+// proxies up front), matching the #-brand's no-tunneling behavior.
+const kReadableStreamBrand: symbol = utils.getApiSymbol('kReadableStreamBrand');
 
 // BACKEND-DISPATCH: the byte-CAPABLE gate (one of the five sanctioned
 // dispatch points). True for any controller whose backend can satisfy
@@ -335,10 +367,17 @@ let getControllerExpectedLength: (
 ) => bigint | undefined;
 
 let setReadableStreamPendingClosure: <R>(stream: ReadableStream<R>) => void;
+let isReadableStreamPendingClosure: <R>(stream: ReadableStream<R>) => boolean;
 let getReadableStreamOnEof: <R>(stream: ReadableStream<R>) => Promise<void>;
 let getReadableStreamExpectedLength: <R>(
   stream: ReadableStream<R>
 ) => bigint | undefined;
+// Non-detaching access to a native-backed stream's underlying source object
+// for the C++ bridge's encoding-aware tryGetLength arm; undefined for
+// queued-backed streams. Assigned in ReadableStream's static block.
+let getReadableStreamNativeSource: <R>(
+  stream: ReadableStream<R>
+) => object | undefined;
 let getReadableStreamGetState: <R>(
   stream: ReadableStream<R>
 ) => 'readable' | 'closed' | 'errored';
@@ -648,6 +687,15 @@ class ReadableStreamReaderBase<R> {
   }
 }
 
+// The user-visible error for reads/pipes/tees attempted after the stream's
+// owning object initiated closure (see #pendingClosure). The text matches
+// the legacy internal controller's exactly.
+function pendingClosureError(): TypeError {
+  return new TypeError(
+    'This ReadableStream belongs to an object that is closing.'
+  );
+}
+
 // The default-read core, shared by ReadableStreamDefaultReader.read() and
 // the async-iterator read path. Internal callers MUST use this rather than
 // the public read() — reader prototypes end up user-reachable, so internal
@@ -660,6 +708,11 @@ function defaultReaderReadInternal<R>(
   reader: object,
   stream: ReadableStream<R>
 ): Promise<ReadableStreamReadResult<R>> {
+  if (isReadableStreamPendingClosure(stream)) {
+    return PromiseReject(pendingClosureError()) as Promise<
+      ReadableStreamReadResult<R>
+    >;
+  }
   setReadableStreamDisturbed(stream);
   const state = getReadableStreamGetState(stream);
   if (state === 'closed')
@@ -966,6 +1019,9 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     const stream = getReaderStream(this);
     if (stream === undefined) {
       throw new TypeError('This reader has been released');
+    }
+    if (isReadableStreamPendingClosure(stream)) {
+      throw pendingClosureError();
     }
     setReadableStreamDisturbed(stream);
     if (getReadableStreamGetState(stream) === 'errored') {
@@ -2230,6 +2286,9 @@ async function drainingReaderReadInternal<R>(
   stream: ReadableStream<R>,
   maxSize?: number
 ): Promise<DrainingReadResult<R>> {
+  if (isReadableStreamPendingClosure(stream)) {
+    throw pendingClosureError();
+  }
   setReadableStreamDisturbed(stream);
   const state = getReadableStreamGetState(stream);
   if (state === 'closed') return createDrainResult<R>([], true);
@@ -2377,10 +2436,18 @@ function pipeToInternal<R>(
   const preventClose = !!options.preventClose;
   const signal = options.signal;
   if (signal !== undefined) {
-    // Brand check: the captured getter throws for non-AbortSignal objects.
+    // Brand check. Under the modern JSG layout the captured `aborted` getter
+    // throws for non-AbortSignal receivers; under the instance-property
+    // layout (old compat dates) the capture is a plain read that cannot
+    // brand-check, so additionally require the boolean a genuine signal's
+    // own data property carries.
+    let aborted: unknown;
     try {
-      AbortSignalAbortedGet(signal);
+      aborted = AbortSignalAbortedGet(signal);
     } catch {
+      throw new TypeError('options.signal must be an AbortSignal');
+    }
+    if (typeof aborted !== 'boolean') {
       throw new TypeError('options.signal must be an AbortSignal');
     }
   }
@@ -2740,11 +2807,21 @@ class ReadableStream<R> {
   #disturbed: boolean = false;
   #state: 'readable' | 'closed' | 'errored' = 'readable';
   #storedError?: unknown;
-  // TODO(streams-ts): The sockets API needs to be able to tell its Readable
-  // not to accept reads because it is pending closure. We don't yet fully
-  // implement this but we provide for the signal.
-  // @ts-expect-error
+  // The pending-closure gate (JsReadableStream::setPendingClosure): set by
+  // the stream's owning object (a Socket) the moment its closure begins, so
+  // that new reads, pipes, and tees fail fast with a descriptive error
+  // instead of racing the teardown. Mirrors the legacy internal controller's
+  // isPendingClosure checks; cancel and the teardown's own operations are
+  // deliberately not gated. Carried by detach() to the detached stream.
   #pendingClosure: boolean = false;
+  // The C++ bridge's EOF-signal resolver (JsReadableStream::onEof), armed by
+  // getReadableStreamOnEof and fired by the native backend's source-driven
+  // close hook (see the closeStream wiring in the constructor's native
+  // branch). Only native-backed streams ever fire it: the legacy JS
+  // controller never signals EOF, and the queued backend matches that.
+  // Not carried by detach(): the husk's subscription stays dormant, like the
+  // legacy eofResolverPair, which remains with the husk after a detach.
+  #onEofResolver?: (() => void) | undefined;
 
   static {
     isReadableStream = (value: unknown) => {
@@ -2759,10 +2836,22 @@ class ReadableStream<R> {
       stream.#pendingClosure = true;
     };
 
-    getReadableStreamOnEof = <R>(_stream: ReadableStream<R>) => {
-      // TODO(streams-ts): implement this for the sockets API. For now, just return a non-resolving promise
-      const { promise } =
+    isReadableStreamPendingClosure = <R>(stream: ReadableStream<R>) => {
+      return stream.#pendingClosure;
+    };
+
+    getReadableStreamOnEof = <R>(stream: ReadableStream<R>) => {
+      // The EOF signal for the sockets API (allowHalfOpen: false teardown):
+      // resolves when a native source's EOF is observed through the conduit
+      // (see the closeStream hook wiring in the constructor's native
+      // branch). At most one subscription per stream (the C++ caller's
+      // precondition); arming after the stream already closed never
+      // resolves, matching the legacy signalEof/eofResolverPair behavior.
+      // Queued streams never fire it (the legacy JS controller never
+      // signals EOF).
+      const { promise, resolve } =
         PromiseWithResolvers() as PromiseWithResolversType<void>;
+      stream.#onEofResolver = resolve;
       return promise;
     };
 
@@ -2770,6 +2859,14 @@ class ReadableStream<R> {
       const controller = stream.#controller;
       if (controller === undefined) return undefined;
       return getControllerExpectedLength(controller);
+    };
+
+    getReadableStreamNativeSource = <R>(stream: ReadableStream<R>) => {
+      const controller = stream.#controller;
+      if (controller !== undefined && isNativeController(controller)) {
+        return nativeControllerPeekSource(controller);
+      }
+      return undefined;
     };
 
     isReadableStreamLocked = <R>(stream: ReadableStream<R>) => {
@@ -2848,7 +2945,154 @@ class ReadableStream<R> {
       destination: WritableStreamType<R>,
       options?: StreamPipeOptions
     ) => {
+      // The pending-closure gate (see #pendingClosure). The prototype
+      // pipeThrough reaches pipeToInternal through here WITHOUT passing
+      // readableStreamPipeTo's precondition block, so the gate applies
+      // again at this junction. Like the legacy controller's gate (which
+      // rejects before any locking), the rejection happens before
+      // pipeToInternal locks the endpoints or touches the transform; the
+      // prototype method marks the pipe promise handled, so this surfaces
+      // exactly like legacy -- endpoints untouched, hidden rejection. It
+      // is deliberately a rejection rather than a throw for the same
+      // reason. (The pipeTo route re-checks harmlessly; its own gate also
+      // guards the native+native fast path, which returns before reaching
+      // here.)
+      if (source.#pendingClosure) {
+        return PromiseReject(pendingClosureError()) as Promise<void>;
+      }
       return pipeToInternal(source, destination, options);
+    };
+
+    // The shared pipeTo implementation, used by both the prototype method
+    // and the C++ bridge entry point (JsReadableStream::pipeTo dispatches
+    // here via cppExports rather than through the user-patchable pipeTo
+    // property -- the same captured-call discipline as cancel/tee). The
+    // brand assert lives in the prototype method; the C++ arm passes
+    // genuine handles by construction.
+    readableStreamPipeTo = <R>(
+      source: ReadableStream<R>,
+      destination: WritableStreamType<R>,
+      options: StreamPipeOptions = {}
+    ): Promise<void> => {
+      try {
+        if (isReadableStreamLocked(source)) {
+          throw new TypeError('Cannot pipe a stream that is locked');
+        }
+        if (writableInternals.isWritableStreamLocked(destination)) {
+          throw new TypeError('Cannot pipe to a locked writable stream');
+        }
+        if (source.#pendingClosure) {
+          throw pendingClosureError();
+        }
+        // WebIDL: null coerces to {} for optional dictionaries.
+        if (options === null) options = {} as StreamPipeOptions;
+        if (!isActualObject(options)) {
+          throw new TypeError('Pipe options must be an object');
+        }
+        // Convert the options ONCE, before any extraction: the fast path
+        // below permanently consumes both endpoints, so validation (and
+        // the user-observable getter side effects, in the spec-mandated
+        // §4.9.1 order) must happen while both streams are still
+        // untouched. Both paths below receive the converted values as
+        // plain data properties; neither re-reads the user's options
+        // object.
+        const preventAbort = !!options.preventAbort;
+        const preventCancel = !!options.preventCancel;
+        const preventClose = !!options.preventClose;
+        const signal = options.signal;
+        if (signal !== undefined) {
+          // Brand check (same check and error text as the JS pump). Under
+          // the modern JSG layout the captured `aborted` getter throws for
+          // non-AbortSignal receivers; under the instance-property layout
+          // (old compat dates) the capture is a plain read that cannot
+          // brand-check, so additionally require the boolean a genuine
+          // signal's own data property carries. (A deliberately forged
+          // {aborted: boolean} object can slip through under old dates
+          // only; the fast path's C++ typed unwrap still rejects it.)
+          let aborted: unknown;
+          try {
+            aborted = AbortSignalAbortedGet(signal);
+          } catch {
+            throw new TypeError('options.signal must be an AbortSignal');
+          }
+          if (typeof aborted !== 'boolean') {
+            throw new TypeError('options.signal must be an AbortSignal');
+          }
+        }
+        const converted = {
+          preventAbort,
+          preventCancel,
+          preventClose,
+          signal,
+        } as StreamPipeOptions;
+
+        // PIPE DISPATCH: if both source and dest are native-backed, take
+        // the fast path -- extract both and let the sink's pipeFrom hook
+        // arrange the pipe entirely at the C++ layer. Both markers are
+        // own-property reads (non-destructive); extraction happens only
+        // after both are confirmed. If both are native, pipeFrom MUST
+        // exist (invariant -- its absence is a contract violation, not a
+        // fallback trigger).
+        //
+        // Because extraction permanently consumes both endpoints, the fast
+        // path is additionally gated on (a) no prevent* option -- the
+        // legacy internal pipe leaves the un-prevented endpoint unlocked
+        // and usable after the pipe settles (e.g. the socket-concatenation
+        // pattern: body1.pipeTo(sock.writable, {preventClose: true})
+        // followed by body2.pipeTo(sock.writable)), which extraction
+        // cannot honor -- and (b) both endpoints in their normal flowing
+        // states, so pipes involving closed/errored endpoints reject with
+        // the spec-mandated stored errors. The JS pump handles all of
+        // those cases (it releases both locks in its finalize).
+        // TODO(streams-ts): revisit extending the fast path to the
+        // prevent* options (e.g. reversible extraction) so those pipes can
+        // also run entirely at the C++ layer.
+        // Brand-check the destination before probing for native markers so
+        // a Proxy's getOwnPropertyDescriptor trap cannot observe the symbol.
+        const sourceExtractor = ObjectGetOwnPropertyDescriptor(
+          source,
+          kExtractNativeSource
+        )?.value as ((this: ReadableStream<R>) => object) | undefined;
+        const sinkExtractor = writableInternals.isWritableStream(destination)
+          ? (ObjectGetOwnPropertyDescriptor(destination, kExtractNativeSink)
+              ?.value as ((this: object) => object) | undefined)
+          : undefined;
+        if (
+          sourceExtractor !== undefined &&
+          sinkExtractor !== undefined &&
+          !preventAbort &&
+          !preventCancel &&
+          !preventClose &&
+          !source.#disturbed &&
+          source.#state === 'readable' &&
+          writableInternals.getState(destination) === 'writable' &&
+          // Closing must be propagated backward (and extraction would move
+          // the native sink out from under its in-flight end()): a
+          // close-queued destination takes the JS pump, which rejects it.
+          !writableInternals.closeQueuedOrInFlight(destination)
+        ) {
+          // Captured-call discipline: Function.prototype.call is patchable,
+          // so re-bind both extractors and the hook through uncurryThis
+          // (captured Reflect machinery) instead of .call().
+          const nativeSource = uncurryThis(sourceExtractor)(source);
+          const nativeSink = uncurryThis(sinkExtractor)(destination) as Record<
+            string,
+            unknown
+          >;
+          const pipeFrom = nativeSink.pipeFrom as
+            | ((source: object, opts: StreamPipeOptions) => Promise<void>)
+            | undefined;
+          if (pipeFrom === undefined) {
+            throw new TypeError(
+              'Native sink is missing the required pipeFrom hook'
+            );
+          }
+          return uncurryThis(pipeFrom)(nativeSink, nativeSource, converted);
+        }
+        return readableStreamPipeThroughTo(source, destination, converted);
+      } catch (e) {
+        return PromiseReject(e) as Promise<void>;
+      }
     };
 
     // BACKEND-DISPATCH: tee is one of the five sanctioned dispatch points
@@ -2866,6 +3110,9 @@ class ReadableStream<R> {
       // JsReadableStream::tee arm via cppExports, which calls this directly.
       if (isReadableStreamLocked(stream)) {
         throw new TypeError('Cannot tee a stream that is locked');
+      }
+      if (stream.#pendingClosure) {
+        throw pendingClosureError();
       }
       const controller = stream.#controller;
       if (isNativeController(controller)) {
@@ -3052,6 +3299,121 @@ class ReadableStream<R> {
       return [branch1, branch2] as [ReadableStream<R>, ReadableStream<R>];
     };
 
+    // The C++ bridge arm of JsReadableStream::detach(): take over the
+    // stream's internal state into a fresh stream, leaving the original a
+    // permanently locked, disturbed husk (the "create a proxy" step of the
+    // fetch spec, implemented as a state transfer instead of an identity
+    // pipe). The transfer mechanics follow tee's: state-copy shells for
+    // non-readable streams, cursor transfer on the shared queue for the
+    // queued backend, and the extraction machinery for the native backend
+    // (a fresh conduit is REQUIRED there -- the old conduit's stream hooks
+    // close over the original stream, so moving it would route source
+    // close/error to the husk).
+    detachReadableStream = <R>(
+      stream: ReadableStream<R>,
+      ignoreDisturbed: boolean
+    ): ReadableStream<R> => {
+      assertIsReadableStream(stream);
+      // Precondition order and error texts match the legacy
+      // ReadableStream::detach().
+      if (stream.#disturbed && !ignoreDisturbed) {
+        throw new TypeError('The ReadableStream has already been read.');
+      }
+      if (isReadableStreamLocked(stream)) {
+        throw new TypeError('The ReadableStream has been locked to a reader.');
+      }
+
+      // Neutralize the original: no consumer, disturbed, permanently locked
+      // via an internal reader (never exposed, never released) -- the same
+      // pattern extraction and tee use. Any tee-branch relationships now
+      // belong to the detached stream, so the husk's hooks are cleared: its
+      // transitions must not fire the tee wiring, and a (force-)cancel of
+      // the husk must not relay to a tee parent.
+      const neutralize = (): void => {
+        stream.#consumer = undefined;
+        stream.#disturbed = true;
+        stream.#onCancel = undefined;
+        stream.#onBranchSettled = undefined;
+        if (!isReadableStreamLocked(stream)) {
+          acquireReadableStreamDefaultReader(stream);
+        }
+      };
+
+      // Closed/errored: the detached stream is a state-copy shell (tee's
+      // non-readable precedent); the underlying source is not touched.
+      if (stream.#state !== 'readable') {
+        const shell = new ReadableStream<R>(kPrivateSymbol as never);
+        shell.#state = stream.#state;
+        shell.#storedError = stream.#storedError;
+        shell.#pendingClosure = stream.#pendingClosure;
+        neutralize();
+        return shell;
+      }
+
+      const controller = stream.#controller;
+      if (controller !== undefined && isNativeController(controller)) {
+        // Native-backed: extract the source and construct a fresh stream
+        // over it through ordinary native construction (fresh conduit,
+        // fresh stream hooks capturing the NEW stream; matches the legacy
+        // internal controller's detach, which builds a fresh controller
+        // over the removed source). expectedLength is re-read live from
+        // the source, so residual accounting -- including any stashed
+        // bytes -- stays exact.
+        const source = nativeControllerExtractSource(controller);
+        neutralize();
+        const detached = new ReadableStream<R>(source as UnderlyingSource<R>);
+        detached.#pendingClosure = stream.#pendingClosure;
+        return detached;
+      }
+
+      // Queued (JS-backed): tee's transfer recipe, moving rather than
+      // forking -- a fresh shell adopts the SHARED controller and a cursor
+      // at the original cursor's exact position (partial entry consumption
+      // survives the move).
+      const shell = new ReadableStream<R>(kPrivateSymbol as never);
+      shell.#controller = controller;
+      shell.#pendingClosure = stream.#pendingClosure;
+      // Tee-branch relationships (composite cancel, settle notification)
+      // move to the detached stream. The hooks close over the tee wiring's
+      // own state, not over the branch stream, so moving the functions is
+      // sufficient.
+      shell.#onCancel = stream.#onCancel;
+      shell.#onBranchSettled = stream.#onBranchSettled;
+
+      // QUEUED INVARIANT: this branch is queued-backend territory -- the
+      // consumer is necessarily a QueueCursor (position/byteOffset/queue
+      // are cursor-only concepts); sanctioned cast (tee precedent).
+      const cursor = stream.#consumer as QueueCursorType<R, R> | undefined;
+      if (cursor !== undefined) {
+        const queue = cursor.queue;
+        const isBytes =
+          controller !== undefined && isByteStreamController(controller);
+        const totalSize = cursor.remainingSize;
+        // ORDER MATTERS: attach the shell's cursor BEFORE removing the
+        // original -- removing the sole cursor first would fire the
+        // all-cursors-gone hook and cancel the underlying source
+        // mid-detach (tee precedent).
+        shell.#consumer = isBytes
+          ? new ByteStreamCursor(
+              queue,
+              shell,
+              cursor.position,
+              cursor.byteOffset,
+              totalSize
+            )
+          : new QueueCursor(
+              queue,
+              shell,
+              cursor.position,
+              cursor.byteOffset,
+              totalSize
+            );
+        queue.removeCursor(cursor);
+      }
+      neutralize();
+      return shell;
+    };
+
     getReadableStreamGetState = <R>(stream: ReadableStream<R>) => {
       return stream.#state;
     };
@@ -3213,6 +3575,14 @@ class ReadableStream<R> {
     underlyingSource: UnderlyingSource<R> = {},
     strategy: QueuingStrategy<R> = {}
   ) {
+    // The C++-recognition brand (see kReadableStreamBrand). Stamped before
+    // the early returns below so every instance carries it: internal
+    // shells and native-backed streams included.
+    ObjectDefineProperty(this, kReadableStreamBrand, {
+      __proto__: null,
+      value: true,
+    } as PropertyDescriptor);
+
     // Internal shell creation (tee branches): skip controller setup
     // entirely — the tee wiring attaches the SHARED controller and a
     // forked cursor afterwards. The private symbol is unreachable from
@@ -3238,7 +3608,21 @@ class ReadableStream<R> {
           // fence. Both helpers are state-guarded, so redundant calls
           // (e.g. the reader layer's done-result close racing the
           // conduit's hook) are harmless.
-          closeStream: () => readableStreamClose(this),
+          closeStream: () => {
+            readableStreamClose(this);
+            // The C++ bridge's EOF signal (JsReadableStream::onEof): the
+            // conduit calls this hook only for SOURCE-driven closes, i.e.
+            // whenever the native source's EOF is observed through the
+            // conduit -- reader reads, async iteration, and DrainingReader
+            // consumption alike. Cancel and error take other paths, and
+            // extraction-based pumps detach the source before its EOF could
+            // be observed here, so none of those fire the signal.
+            const resolveEof = this.#onEofResolver;
+            if (resolveEof !== undefined) {
+              this.#onEofResolver = undefined;
+              resolveEof();
+            }
+          },
           errorStream: (reason: unknown) => readableStreamError(this, reason),
         }
       );
@@ -3410,55 +3794,12 @@ class ReadableStream<R> {
   ): Promise<void> {
     try {
       assertIsReadableStream(this);
-      if (isReadableStreamLocked(this)) {
-        throw new TypeError('Cannot pipe a stream that is locked');
-      }
-      if (destination.locked) {
-        throw new TypeError('Cannot pipe to a locked writable stream');
-      }
-      // WebIDL: null coerces to {} for optional dictionaries.
-      if (options === null) options = {} as StreamPipeOptions;
-      if (!isActualObject(options)) {
-        throw new TypeError('Pipe options must be an object');
-      }
-      // PIPE DISPATCH: if both source and dest are native-backed, take
-      // the fast path — extract both and let the sink's pipeFrom hook
-      // arrange the pipe entirely at the C++ layer. Both markers are
-      // own-property reads (non-destructive); extraction happens only
-      // after both are confirmed. If both are native, pipeFrom MUST
-      // exist (invariant — its absence is a contract violation, not a
-      // fallback trigger).
-      const sourceExtractor = ObjectGetOwnPropertyDescriptor(
-        this,
-        kExtractNativeSource
-      )?.value as ((this: ReadableStream<R>) => object) | undefined;
-      const sinkExtractor = ObjectGetOwnPropertyDescriptor(
-        destination,
-        kExtractNativeSink
-      )?.value as ((this: object) => object) | undefined;
-      if (sourceExtractor !== undefined && sinkExtractor !== undefined) {
-        // Captured-call discipline: Function.prototype.call is patchable,
-        // so re-bind both extractors and the hook through uncurryThis
-        // (captured Reflect machinery) instead of .call().
-        const nativeSource = uncurryThis(sourceExtractor)(this);
-        const nativeSink = uncurryThis(sinkExtractor)(destination) as Record<
-          string,
-          unknown
-        >;
-        const pipeFrom = nativeSink.pipeFrom as
-          | ((source: object, opts: StreamPipeOptions) => Promise<void>)
-          | undefined;
-        if (pipeFrom === undefined) {
-          throw new TypeError(
-            'Native sink is missing the required pipeFrom hook'
-          );
-        }
-        return uncurryThis(pipeFrom)(nativeSink, nativeSource, options);
-      }
-      return readableStreamPipeThroughTo(this, destination, options);
     } catch (e) {
       return PromiseReject(e) as Promise<void>;
     }
+    // The shared implementation (also the C++ bridge entry point) carries
+    // the locked/options preconditions and the pipe dispatch.
+    return readableStreamPipeTo(this, destination, options);
   }
 
   tee(): [ReadableStream<R>, ReadableStream<R>] {
@@ -3488,8 +3829,8 @@ class ReadableStream<R> {
       const chunk = iterable as unknown as R;
       return new ReadableStream<R>({
         pull(controller: ReadableStreamDefaultControllerType) {
-          controller.enqueue(chunk);
-          controller.close();
+          defaultControllerEnqueue(controller, chunk);
+          defaultControllerClose(controller);
         },
       });
     }
@@ -3506,7 +3847,7 @@ class ReadableStream<R> {
       if (asyncMethod != null) {
         const asyncIterator: AsyncIterator<R> =
           uncurryThis(asyncMethod)(iterable);
-        if (!isActualObject(asyncIterator)) {
+        if (!isObjectLike(asyncIterator)) {
           throw new TypeError('The iterator method must return an object');
         }
         // HWM 0: the iterator's next() must only be called in response
@@ -3517,13 +3858,13 @@ class ReadableStream<R> {
             async pull(controller: ReadableStreamDefaultControllerType) {
               // If the pull method throws, the stream will error.
               const next = await asyncIterator.next();
-              if (!isActualObject(next)) {
+              if (!isObjectLike(next)) {
                 throw new TypeError('The result of next() must be an object');
               }
               if (next.done) {
-                return controller.close();
+                return defaultControllerClose(controller);
               }
-              controller.enqueue(next.value);
+              defaultControllerEnqueue(controller, next.value);
             },
             async cancel(reason?: unknown) {
               const returnMethod = asyncIterator.return;
@@ -3538,7 +3879,7 @@ class ReadableStream<R> {
                 asyncIterator,
                 reason
               );
-              if (!isActualObject(ret)) {
+              if (!isObjectLike(ret)) {
                 throw new TypeError('The return method must return an object');
               }
             },
@@ -3550,7 +3891,7 @@ class ReadableStream<R> {
       if (SymbolIterator in iterable) {
         const method = (iterable as Iterable<R>)[primordials.SymbolIterator];
         const syncIterator: Iterator<R> = uncurryThis(method)(iterable);
-        if (!isActualObject(syncIterator)) {
+        if (!isObjectLike(syncIterator)) {
           throw new TypeError('The iterator method must return an object');
         }
         // HWM 0: same rationale as the async path above — next() must
@@ -3565,7 +3906,7 @@ class ReadableStream<R> {
             async pull(controller: ReadableStreamDefaultControllerType) {
               // If the pull method throws, the stream will error.
               const next = syncIterator.next();
-              if (!isActualObject(next)) {
+              if (!isObjectLike(next)) {
                 throw new TypeError('The result of next() must be an object');
               }
               // Await the value: the async-from-sync iterator wrapper
@@ -3573,10 +3914,10 @@ class ReadableStream<R> {
               // awaits thenables (including Promises).
               const value = await next.value;
               if (next.done) {
-                controller.close();
+                defaultControllerClose(controller);
                 return;
               }
-              controller.enqueue(value as R);
+              defaultControllerEnqueue(controller, value as R);
             },
             async cancel(reason?: unknown) {
               const returnMethod = syncIterator.return;
@@ -3585,7 +3926,7 @@ class ReadableStream<R> {
                 throw new TypeError('Iterator return() is not a function');
               }
               const ret = uncurryThis(returnMethod)(syncIterator, reason);
-              if (!isActualObject(ret)) {
+              if (!isObjectLike(ret)) {
                 throw new TypeError('The return method must return an object');
               }
             },
@@ -3814,6 +4155,18 @@ ObjectDefineProperties(ReadableStreamDefaultController.prototype, {
     configurable: true,
   },
 });
+
+// Captured controller operations for INTERNAL stream production (from() and
+// the C++ iterable-body arm via the cppExports below). The prototype is
+// user-reachable once the class is installed as a global, so internal
+// production must not dispatch through it -- per WHATWG, from() uses
+// internal controller operations, unaffected by prototype patching.
+const defaultControllerEnqueue = uncurryThis(
+  ReadableStreamDefaultController.prototype.enqueue
+) as (controller: object, chunk: unknown) => void;
+const defaultControllerClose = uncurryThis(
+  ReadableStreamDefaultController.prototype.close
+) as (controller: object) => void;
 ObjectDefineProperties(ReadableByteStreamController.prototype, {
   __proto__: null,
   close: kEnumerable,
@@ -3857,16 +4210,26 @@ ObjectDefineProperties(ReadableByteStreamController.prototype.enqueue, {
 const cppExports = ObjectFreeze({
   ReadableStream,
   acquireReadableStreamDrainingReader,
+  // Internal controller operations for the C++ iterable-body arm
+  // (JsReadableStream::from): production must not dispatch through the
+  // user-patchable controller prototype. See defaultControllerEnqueue.
+  readableControllerEnqueue: (controller: object, chunk: unknown): void =>
+    defaultControllerEnqueue(controller, chunk),
+  readableControllerClose: (controller: object): void =>
+    defaultControllerClose(controller),
   consumeReadableStreamAsArrayBuffer,
   consumeReadableStreamAsJSON,
   consumeReadableStreamAsText,
   consumeReadableStreamAsUint8Array,
+  detachReadableStream,
   getReadableStreamExpectedLength,
+  getReadableStreamNativeSource,
   getReadableStreamIsDisturbed,
   getReadableStreamOnEof,
   isReadableStream,
   isReadableStreamLocked,
   readableStreamCancel,
+  readableStreamPipeTo,
   readableStreamTee,
   setReadableStreamPendingClosure,
 });

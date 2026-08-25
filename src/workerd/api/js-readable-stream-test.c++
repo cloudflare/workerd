@@ -4,6 +4,8 @@
 
 #include <workerd/api/blob.h>
 #include <workerd/api/js-readable-stream.h>
+#include <workerd/api/js-streams-bridge.h>
+#include <workerd/api/js-writable-stream.h>
 #include <workerd/io/per-isolate-bootstrap.h>
 #include <workerd/tests/test-fixture.h>
 
@@ -389,7 +391,7 @@ KJ_TEST("JsReadableStream forceCancel cancels even when the stream is locked") {
       KJ_FAIL_REQUIRE("expected cancel() of a locked stream to reject");
     }, [](jsg::Lock& js, jsg::Value exception) {
       auto e = js.exceptionToKj(kj::mv(exception));
-      KJ_EXPECT(e.getDescription().contains("currently locked to a reader"), e.getDescription());
+      KJ_EXPECT(e.getDescription().contains("locked to a reader"), e.getDescription());
     }).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock& js) {
                          // forceCancel() tears the stream down regardless.
                          return stream.forceCancel(js, kj::none);
@@ -1042,6 +1044,13 @@ TestFixture makeTsStreamsFixture() {
   });
 }
 
+// Settles after n event loop turns.
+kj::Promise<void> settleTurns(int n) {
+  for (int i = 0; i < n; i++) {
+    co_await kj::evalLater([]() {});
+  }
+}
+
 // Constructs a TypeScript ReadableStream over the given underlying source object (via
 // the constructor exposed through the bootstrap's cpp_exports module) and adopts it as a
 // TypeScript-backed JsReadableStream.
@@ -1303,6 +1312,22 @@ KJ_TEST("JsReadableStream::tryUnwrapTs adopts TypeScript streams and rejects imp
     auto sourceObj = jsg::JsValue(handler.wrap(
         js, js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData))));
     KJ_EXPECT(JsReadableStream::tryUnwrapTs(js, sourceObj) == kj::none);
+
+    // The brand is recognition, not authentication: an api symbol stays reflection-visible,
+    // so an object carrying a copy of it unwraps. Recognition grants nothing on its own --
+    // the TypeScript internal algorithms re-check the real #-brand, so the first operation
+    // on the adopted impostor throws.
+    auto impostorObj = js.obj();
+    impostorObj.setNonEnumerable(js, js.symbolInternal("kReadableStreamBrand"), js.boolean(true));
+    auto impostor = KJ_ASSERT_NONNULL(JsReadableStream::tryUnwrapTs(js, jsg::JsValue(impostorObj)));
+    bool threw = false;
+    js.tryCatch(
+        [&]() { auto locked KJ_UNUSED = impostor.isLocked(js); }, [&](jsg::Value exception) {
+      threw = true;
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("TypeError"), e.getDescription());
+    });
+    KJ_EXPECT(threw, "expected the impostor to fail the TypeScript #-brand check");
   });
 }
 
@@ -1406,6 +1431,941 @@ KJ_TEST("JsReadableStream::tee of a locked TypeScript-backed stream throws") {
     KJ_EXPECT(!stream.isNull());
     KJ_EXPECT(stream.isLocked(js));
   });
+}
+
+// =======================================================================================
+// buffer-backed streams under the TypeScript implementation
+
+// A stand-in for the JSG type wrapper accepted by JsReadableStream::jsgWrap. Wrapping a
+// TypeScript-backed stream never consults the wrapper (the TS object IS the handle), so
+// reaching the legacy arm -- the only jsgWrap path that calls wrap() -- means the stream
+// was legacy-backed: fail loudly.
+struct RequireTsBackedWrapper {
+  v8::Local<v8::Value> wrap(jsg::Lock&,
+      v8::Local<v8::Context>,
+      kj::Maybe<v8::Local<v8::Object>>,
+      jsg::Ref<ReadableStream>) {
+    KJ_FAIL_ASSERT("expected a TypeScript-backed stream, got a legacy-backed one");
+  }
+};
+
+KJ_TEST("JsReadableStream buffer-backed streams are TypeScript-backed under the flag") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    JsReadableStream stream(js, kj::str(kData));
+    KJ_EXPECT(stream.isBufferBacked());
+    KJ_EXPECT(KJ_ASSERT_NONNULL(stream.tryGetLength(js)) == kData.size());
+
+    // The constructed stream is the TypeScript implementation's object: wrapping yields
+    // the TS handle without consulting the type wrapper, and the handle carries the TS
+    // private brand (tryUnwrapTs adopts it).
+    RequireTsBackedWrapper wrapper;
+    auto handle =
+        JsReadableStream::jsgWrap(wrapper, js, js.v8Context(), kj::none, stream.addRef(js));
+    KJ_EXPECT(JsReadableStream::tryUnwrapTs(js, handle) != kj::none);
+
+    // Consumption drains the buffer contents through the TS conduit.
+    auto promise = stream.text(js, kLimit).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock& js, kj::String text) {
+      KJ_EXPECT(text == kData);
+      KJ_EXPECT(stream.isDisturbed(js));
+      // Consumption leaves the wrapper buffer-backed and therefore
+      // rewindable.
+      KJ_EXPECT(stream.isBufferBacked());
+    }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream tryClone rewinds a TypeScript-backed buffer stream") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    JsReadableStream stream(js, kj::str(kData));
+    auto promise = stream.text(js, kLimit)
+                       .then(js,
+                           JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream),
+                               (jsg::Lock& js, kj::String) {
+                                 KJ_EXPECT(stream.isDisturbed(js));
+                                 // The clone is a fresh, independent, rewindable TypeScript-backed stream
+                                 // over the same bytes, even though the original has been consumed. This
+                                 // is the property fetch() redirect handling relies upon.
+                                 auto clone = KJ_ASSERT_NONNULL(stream.tryClone(js));
+                                 KJ_EXPECT(clone.isBufferBacked());
+                                 KJ_EXPECT(!clone.isDisturbed(js));
+                                 return clone.text(js, kLimit);
+                               }))
+                       .then(js, [](jsg::Lock& js, kj::String text) { KJ_EXPECT(text == kData); });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream tee of a TypeScript-backed buffer stream carries the buffer") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    JsReadableStream stream(js, kj::str(kData));
+    auto tee = stream.tee(js);
+    KJ_EXPECT(stream.isNull());
+    KJ_EXPECT(tee.branch1.isBufferBacked());
+    KJ_EXPECT(tee.branch2.isBufferBacked());
+
+    auto promise = tee.branch1.text(js, kLimit)
+                       .then(js,
+                           JSG_VISITABLE_LAMBDA((branch2 = kj::mv(tee.branch2)), (branch2),
+                               (jsg::Lock& js, kj::String text) {
+                                 KJ_EXPECT(text == kData);
+                                 return branch2.text(js, kLimit);
+                               }))
+                       .then(js, [](jsg::Lock& js, kj::String text) { KJ_EXPECT(text == kData); });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream pumpTo drains a TypeScript-backed buffer stream") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // Buffer-backed streams under the flag are native-backed TypeScript streams over the
+    // shared in-memory source: pumpTo extracts the source and pumps at the C++ layer.
+    JsReadableStream stream(js, kj::str(kData));
+    return stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
+        .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+  });
+  KJ_EXPECT(collected.asPtr() == kData.asBytes());
+  KJ_EXPECT(ended);
+}
+
+// =======================================================================================
+// detach of TypeScript-backed streams
+
+KJ_TEST("JsReadableStream detach takes over a TypeScript-backed native stream") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    auto detached = stream.detach(js);
+    // The original still holds the (now locked and disturbed) husk...
+    KJ_EXPECT(!stream.isNull());
+    KJ_EXPECT(stream.isDisturbed(js));
+    KJ_EXPECT(stream.isLocked(js));
+    // ...while the detached stream took over the source, starting fresh.
+    KJ_EXPECT(!detached.isDisturbed(js));
+    KJ_EXPECT(!detached.isLocked(js));
+
+    return detached.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
+        .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+  });
+  KJ_EXPECT(collected.asPtr() == kData.asBytes());
+  KJ_EXPECT(ended);
+}
+
+KJ_TEST("JsReadableStream detach of a TypeScript-backed buffer stream stays rewindable") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    JsReadableStream stream(js, kj::str(kData));
+    auto detached = stream.detach(js);
+    KJ_EXPECT(stream.isDisturbed(js));
+    KJ_EXPECT(stream.isLocked(js));
+    // The detached stream carries the retransmit buffer forward: it is itself
+    // buffer-backed (rewindable), like the legacy arm.
+    KJ_EXPECT(detached.isBufferBacked());
+    KJ_EXPECT(!detached.isDisturbed(js));
+
+    auto promise = detached.text(js, kLimit).then(js, [](jsg::Lock& js, kj::String text) {
+      KJ_EXPECT(text == kData);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream detach transfers a queued TypeScript stream's cursor") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // A queued (plain JS underlying source) stream: detach must move the cursor to the
+    // detached stream on the shared queue.
+    auto stream = makeTsStream(js, makeQueuedByteSource(js));
+    auto detached = stream.detach(js);
+    KJ_EXPECT(stream.isDisturbed(js));
+    KJ_EXPECT(stream.isLocked(js));
+    KJ_EXPECT(!detached.isDisturbed(js));
+
+    return detached.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
+        .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+  });
+  KJ_EXPECT(collected.asPtr() == kData.asBytes());
+  KJ_EXPECT(ended);
+}
+
+KJ_TEST("JsReadableStream detach of a partially-read queued TypeScript stream") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // Two chunks; the first is consumed through a real reader before the detach, so the
+    // moved cursor must resume at the second chunk.
+    auto underlying = js.obj();
+    underlying.set(js, "start"_kj,
+        jsg::JsValue(js.wrapSimpleFunction(
+            js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
+      auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
+      enqueue.call(js, controller, jsg::JsUint8Array::create(js, "hello "_kj.asBytes()));
+      enqueue.call(js, controller, jsg::JsUint8Array::create(js, "world"_kj.asBytes()));
+      auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
+      close.call(js, controller);
+    })));
+
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    auto constructor =
+        KJ_ASSERT_NONNULL(exportsObj.get(js, "ReadableStream"_kj).tryCast<jsg::JsFunction>());
+    auto streamObj = constructor.newInstance(js, jsg::JsValue(underlying));
+    auto stream = JsReadableStream(js, streamObj.addRef(js));
+
+    // Read the first chunk through the real JS reader machinery.
+    auto reader = KJ_ASSERT_NONNULL(
+        JSG_TRY_CAST_OBJECT(webstreams::invokeMethod(js, streamObj, "getReader"_kj)));
+    auto readPromise = js.toPromise(v8::Local<v8::Value>(
+        KJ_ASSERT_NONNULL(JSG_TRY_CAST_PROMISE(webstreams::invokeMethod(js, reader, "read"_kj)))));
+
+    auto promise = readPromise.then(js,
+        JSG_VISITABLE_LAMBDA(
+            (stream = kj::mv(stream), reader = jsg::JsRef(js, reader), &collected, &ended),
+            (stream, reader), (jsg::Lock & js, jsg::Value result) mutable {
+              // Release the reader: the stream is left unlocked but disturbed.
+              webstreams::invokeMethod(js, reader.getHandle(js), "releaseLock"_kj);
+              KJ_EXPECT(stream.isDisturbed(js));
+              KJ_EXPECT(!stream.isLocked(js));
+
+              // Disturbed without IgnoreDisturbed: rejected with the legacy text.
+              JSG_TRY(js) {
+              auto detached KJ_UNUSED = stream.detach(js);
+              KJ_FAIL_REQUIRE("expected detach() of a disturbed stream to throw");
+              }
+              JSG_CATCH(exception) {
+              auto e = js.exceptionToKj(kj::mv(exception));
+              KJ_EXPECT(e.getDescription().contains("already been read"), e.getDescription());
+              };
+
+              // With IgnoreDisturbed::YES the takeover succeeds, resuming at the second chunk.
+              auto detached = stream.detach(js, IgnoreDisturbed::YES);
+              KJ_EXPECT(stream.isLocked(js));
+              KJ_EXPECT(stream.isDisturbed(js));
+              auto pump =
+                  detached.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
+                      .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+              return IoContext::current().awaitIo(js, kj::mv(pump));
+            }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(collected.asPtr() == "world"_kj.asBytes());
+  KJ_EXPECT(ended);
+}
+
+KJ_TEST("JsReadableStream detach of a locked TypeScript-backed stream throws") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    auto constructor =
+        KJ_ASSERT_NONNULL(exportsObj.get(js, "ReadableStream"_kj).tryCast<jsg::JsFunction>());
+    auto streamObj = constructor.newInstance(js, jsg::JsValue(js.obj()));
+    auto stream = JsReadableStream(js, streamObj.addRef(js));
+
+    auto reader KJ_UNUSED = webstreams::invokeMethod(js, streamObj, "getReader"_kj);
+    KJ_EXPECT(stream.isLocked(js));
+
+    JSG_TRY(js) {
+      auto detached KJ_UNUSED = stream.detach(js);
+      KJ_FAIL_REQUIRE("expected detach() of a locked stream to throw");
+    }
+    JSG_CATCH(exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("locked to a reader"), e.getDescription());
+    };
+    // The precondition throw leaves the original intact (and still locked).
+    KJ_EXPECT(!stream.isNull());
+    KJ_EXPECT(stream.isLocked(js));
+  });
+}
+
+KJ_TEST("JsReadableStream detach of a closed TypeScript-backed stream yields a closed stream") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // A queued source that closes immediately without enqueuing: the stream is closed but
+    // undisturbed, so detach() succeeds and produces a closed (state-copy) stream.
+    auto underlying = js.obj();
+    underlying.set(js, "start"_kj,
+        jsg::JsValue(js.wrapSimpleFunction(
+            js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
+      auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
+      close.call(js, controller);
+    })));
+    auto stream = makeTsStream(js, jsg::JsValue(underlying));
+    auto detached = stream.detach(js);
+    KJ_EXPECT(stream.isDisturbed(js));
+    KJ_EXPECT(stream.isLocked(js));
+
+    // The detached stream reads as immediately-EOF.
+    return detached.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
+        .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+  });
+  KJ_EXPECT(collected.size() == 0);
+  KJ_EXPECT(ended);
+}
+
+// A ReadableStreamSource that reports a (pretend) pre-encoded gzip length in addition to
+// its identity length, and prefers GZIP delivery, mimicking system streams whose bytes are
+// stored encoded and can be passed through without a recompression round trip.
+class EncodedLengthSource final: public ReadableStreamSource {
+ public:
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return static_cast<size_t>(0);  // Immediate EOF; only the length reporting matters here.
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    if (encoding == StreamEncoding::IDENTITY) return kIdentityLength;
+    if (encoding == StreamEncoding::GZIP) return kGzipLength;
+    return kj::none;
+  }
+
+  StreamEncoding getPreferredEncoding() override {
+    return StreamEncoding::GZIP;
+  }
+
+  static constexpr uint64_t kIdentityLength = 100;
+  static constexpr uint64_t kGzipLength = 42;
+};
+
+KJ_TEST("JsReadableStream tryGetLength forwards the encoding to a native TypeScript stream") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<EncodedLengthSource>());
+    KJ_EXPECT(KJ_ASSERT_NONNULL(stream.tryGetLength(js)) == EncodedLengthSource::kIdentityLength);
+    // Non-identity encodings are answered by the underlying source (legacy
+    // internal-controller parity): the pre-encoded gzip length, NOT the identity length.
+    KJ_EXPECT(KJ_ASSERT_NONNULL(stream.tryGetLength(js, StreamEncoding::GZIP)) ==
+        EncodedLengthSource::kGzipLength);
+  });
+}
+
+KJ_TEST("JsReadableStream tryGetLength answers none for encoded queries on non-native streams") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    // A queued byte stream declaring the (identity) expectedLength extension: the identity
+    // query reports it, but an encoded query must NOT (an identity byte count is never a
+    // valid encoded length).
+    auto underlying = js.obj();
+    underlying.set(js, "type"_kj, js.str("bytes"_kj));
+    underlying.set(js, "expectedLength"_kj, jsg::JsValue(js.num(11)));
+    auto queued = makeTsStream(js, jsg::JsValue(underlying));
+    KJ_EXPECT(KJ_ASSERT_NONNULL(queued.tryGetLength(js)) == 11);
+    KJ_EXPECT(queued.tryGetLength(js, StreamEncoding::GZIP) == kj::none);
+
+    // Buffer-backed streams sit on the in-memory source, which is identity-only.
+    JsReadableStream buffered(js, kj::str(kData));
+    KJ_EXPECT(KJ_ASSERT_NONNULL(buffered.tryGetLength(js)) == kData.size());
+    KJ_EXPECT(buffered.tryGetLength(js, StreamEncoding::GZIP) == kj::none);
+  });
+}
+
+KJ_TEST("JsReadableStream getPreferredEncoding forwards from the native source (both arms)") {
+  {
+    // TypeScript arm: reached through the non-detaching source accessor.
+    auto fixture = makeTsStreamsFixture();
+    fixture.runInIoContext([&](const TestFixture::Environment& env) {
+      auto& js = env.js;
+
+      auto native = JsReadableStream::create(js, env.context, kj::heap<EncodedLengthSource>());
+      KJ_EXPECT(native.getPreferredEncoding(js) == StreamEncoding::GZIP);
+
+      // JS-sourced (queued) streams produce identity bytes.
+      auto queued = makeTsStream(js, jsg::JsValue(js.obj()));
+      KJ_EXPECT(queued.getPreferredEncoding(js) == StreamEncoding::IDENTITY);
+
+      // Buffer-backed streams sit on the identity-only in-memory source.
+      JsReadableStream buffered(js, kj::str(kData));
+      KJ_EXPECT(buffered.getPreferredEncoding(js) == StreamEncoding::IDENTITY);
+    });
+  }
+
+  {
+    // Legacy arm: forwards through the controller.
+    TestFixture fixture;
+    fixture.runInIoContext([&](const TestFixture::Environment& env) {
+      auto& js = env.js;
+      auto legacy = JsReadableStream::create(js, env.context, kj::heap<EncodedLengthSource>());
+      KJ_EXPECT(legacy.getPreferredEncoding(js) == StreamEncoding::GZIP);
+    });
+  }
+}
+
+// A source with actual content that prefers GZIP delivery, for exercising the interaction
+// between the stash and the preferred-encoding report.
+class EncodedContentSource final: public ReadableStreamSource {
+ public:
+  EncodedContentSource(kj::StringPtr data): data(data) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    auto amount = kj::min(maxBytes, data.size() - offset);
+    kj::arrayPtr(static_cast<kj::byte*>(buffer), amount)
+        .copyFrom(data.slice(offset, offset + amount).asBytes());
+    offset += amount;
+    return amount;
+  }
+
+  StreamEncoding getPreferredEncoding() override {
+    return StreamEncoding::GZIP;
+  }
+
+ private:
+  kj::StringPtr data;
+  size_t offset = 0;
+};
+
+KJ_TEST("JsReadableStream serialize of a TypeScript-backed stream requires an RPC serializer") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    // Parity with ReadableStream::serialize(): a serializer without an RPC external handler
+    // must be rejected with DOMDataCloneError before the stream is touched.
+    auto stream = makeTsStream(js, jsg::JsValue(js.obj()));
+    jsg::Serializer serializer(js);
+    KJ_EXPECT_THROW_MESSAGE(
+        "ReadableStream can only be serialized for RPC", stream.serialize(js, serializer));
+    KJ_EXPECT(!stream.isDisturbed(js));
+    KJ_EXPECT(!stream.isLocked(js));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource stashed bytes force IDENTITY preferred encoding") {
+  TestFixture testFixture;
+  MockControllerState state;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source =
+        js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<EncodedContentSource>(kData));
+    auto controller = makeMockController(js, state, js.null());
+
+    // Untouched: the source's own preference passes through.
+    KJ_EXPECT(source->getPreferredEncoding() == StreamEncoding::GZIP);
+
+    // Abandon a pull so its bytes land in the stash: the stashed bytes are identity bytes
+    // already drawn from the source, so the remainder is no longer entirely GZIP.
+    auto abortController = AbortController::constructor(js);
+    auto pullPromise = source->pull(js, controller, abortController->getSignal());
+    abortController->abort(js, kj::none);
+
+    auto promise = pullPromise
+                       .then(js,
+                           [&state, source = source.addRef(), controller = controller.addRef(js)](
+                               jsg::Lock& js) mutable {
+      KJ_EXPECT(state.enqueued.size() == 0);
+      KJ_EXPECT(source->getPreferredEncoding() == StreamEncoding::IDENTITY);
+      // Redelivery drains the stash, restoring the source's own preference.
+      return source->pull(js, controller.getHandle(js), freshSignal(js))
+          .then(js, [source = kj::mv(source)](jsg::Lock& js) mutable {
+        KJ_EXPECT(source->getPreferredEncoding() == StreamEncoding::GZIP);
+      });
+    }).then(js, [&state](jsg::Lock& js) {
+      KJ_EXPECT(state.enqueued.size() == 1);
+      KJ_EXPECT(state.enqueued[0].asPtr() == kData.asBytes());
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream cancel of a locked TypeScript-backed stream rejects") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    auto constructor =
+        KJ_ASSERT_NONNULL(exportsObj.get(js, "ReadableStream"_kj).tryCast<jsg::JsFunction>());
+    auto streamObj = constructor.newInstance(js, jsg::JsValue(js.obj()));
+    auto stream = JsReadableStream(js, streamObj.addRef(js));
+
+    auto reader KJ_UNUSED = webstreams::invokeMethod(js, streamObj, "getReader"_kj);
+    KJ_EXPECT(stream.isLocked(js));
+
+    auto promise = stream.cancel(js, kj::none)
+                       .then(js, [](jsg::Lock& js) -> void {
+      KJ_FAIL_REQUIRE("expected cancel() of a locked stream to reject");
+    }, [](jsg::Lock& js, jsg::Value exception) -> void {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().contains("currently locked to a reader"), e.getDescription());
+    }).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock & js) mutable {
+                         // forceCancel bypasses the lock check (forcible teardown semantics) and leaves the
+                         // stream disturbed.
+                         auto forced = stream.forceCancel(js, kj::none);
+                         KJ_EXPECT(stream.isDisturbed(js));
+                         return kj::mv(forced);
+                       }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream cancel of an unlocked TypeScript-backed stream disturbs it") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    KJ_EXPECT(!stream.isDisturbed(js));
+    auto promise = stream.cancel(js, jsg::JsValue(js.str("no longer interested"_kj))).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock& js) {
+      KJ_EXPECT(stream.isDisturbed(js));
+    }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+// =======================================================================================
+// onEof of TypeScript-backed streams (S1 semantics: fires when the native source's EOF is
+// observed through the conduit; never on cancel, error, extraction, or queued streams)
+
+KJ_TEST("JsReadableStream onEof fires when a native TypeScript stream is read to EOF") {
+  auto fixture = makeTsStreamsFixture();
+  bool fired = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    auto constructor =
+        KJ_ASSERT_NONNULL(exportsObj.get(js, "ReadableStream"_kj).tryCast<jsg::JsFunction>());
+    auto streamObj = constructor.newInstance(js, jsg::JsValue(handler.wrap(js, kj::mv(source))));
+    auto stream = JsReadableStream(js, streamObj.addRef(js));
+
+    stream.onEof(js).then(js, [&fired](jsg::Lock&) { fired = true; }).markAsHandled(js);
+
+    // Drive reader-driven reads through the real JS reader machinery: the first read
+    // delivers the content, the second observes EOF.
+    auto reader = KJ_ASSERT_NONNULL(
+        JSG_TRY_CAST_OBJECT(webstreams::invokeMethod(js, streamObj, "getReader"_kj)));
+    auto read1 = js.toPromise(v8::Local<v8::Value>(
+        KJ_ASSERT_NONNULL(JSG_TRY_CAST_PROMISE(webstreams::invokeMethod(js, reader, "read"_kj)))));
+    auto promise =
+        read1
+            .then(js,
+                JSG_VISITABLE_LAMBDA((reader = jsg::JsRef(js, reader)), (reader),
+                    (jsg::Lock & js, jsg::Value) mutable {
+                      return js.toPromise(
+                          v8::Local<v8::Value>(KJ_ASSERT_NONNULL(JSG_TRY_CAST_PROMISE(
+                              webstreams::invokeMethod(js, reader.getHandle(js), "read"_kj)))));
+                    }))
+            .then(js, [](jsg::Lock& js, jsg::Value) {});
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(fired);
+}
+
+KJ_TEST("JsReadableStream onEof fires for DrainingReader consumption of a native stream") {
+  auto fixture = makeTsStreamsFixture();
+  bool fired = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // S1 semantics: C++ consumption reads through the conduit rather than detaching the
+    // source, so the EOF signal fires. (Deliberate divergence from the legacy arm, whose
+    // readAllBytes detaches the source before EOF; see the plan's decision log.)
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    stream.onEof(js).then(js, [&fired](jsg::Lock&) { fired = true; }).markAsHandled(js);
+
+    auto promise = stream.text(js, kLimit).then(js, [](jsg::Lock& js, kj::String text) {
+      KJ_EXPECT(text == kData);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(fired);
+}
+
+KJ_TEST("JsReadableStream onEof does not fire on cancel") {
+  auto fixture = makeTsStreamsFixture();
+  bool fired = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    stream.onEof(js).then(js, [&fired](jsg::Lock&) { fired = true; }).markAsHandled(js);
+
+    return env.context.awaitJs(js, stream.cancel(js, kj::none));
+  });
+  KJ_EXPECT(!fired);
+}
+
+KJ_TEST("JsReadableStream onEof does not fire for an extraction-based pump") {
+  auto fixture = makeTsStreamsFixture();
+  bool fired = false;
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // pumpTo extracts the source out of the conduit; its EOF happens at the KJ layer,
+    // beyond the conduit's observation (legacy pumpTo parity).
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    stream.onEof(js).then(js, [&fired](jsg::Lock&) { fired = true; }).markAsHandled(js);
+
+    return stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
+        .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+  });
+  KJ_EXPECT(collected.asPtr() == kData.asBytes());
+  KJ_EXPECT(!fired);
+}
+
+KJ_TEST("JsReadableStream onEof never fires for a queued TypeScript stream") {
+  auto fixture = makeTsStreamsFixture();
+  bool fired = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // Legacy parity: the JS controller never signals EOF, so queued (JS-backed) streams
+    // never resolve onEof, even when read all the way to EOF.
+    auto stream = makeTsStream(js, makeQueuedByteSource(js));
+    stream.onEof(js).then(js, [&fired](jsg::Lock&) { fired = true; }).markAsHandled(js);
+
+    auto promise = stream.text(js, kLimit).then(js, [](jsg::Lock& js, kj::String text) {
+      KJ_EXPECT(text == kData);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(!fired);
+}
+
+// =======================================================================================
+// setPendingClosure gates on TypeScript-backed streams (legacy internal-controller
+// parity: reader reads, draining reads/consumption, pipeTo, and tee fail fast once the
+// owning object's closure begins; cancel and the teardown operations stay open)
+
+KJ_TEST("JsReadableStream setPendingClosure gates reader reads") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    auto constructor =
+        KJ_ASSERT_NONNULL(exportsObj.get(js, "ReadableStream"_kj).tryCast<jsg::JsFunction>());
+
+    // Default reader read.
+    auto source1 =
+        js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    auto streamObj1 = constructor.newInstance(js, jsg::JsValue(handler.wrap(js, kj::mv(source1))));
+    auto stream1 = JsReadableStream(js, streamObj1.addRef(js));
+    stream1.setPendingClosure(js);
+    auto reader1 = KJ_ASSERT_NONNULL(
+        JSG_TRY_CAST_OBJECT(webstreams::invokeMethod(js, streamObj1, "getReader"_kj)));
+    auto read1 = js.toPromise(v8::Local<v8::Value>(
+        KJ_ASSERT_NONNULL(JSG_TRY_CAST_PROMISE(webstreams::invokeMethod(js, reader1, "read"_kj)))));
+
+    // BYOB reader read (native streams are byte-capable).
+    auto source2 =
+        js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    auto streamObj2 = constructor.newInstance(js, jsg::JsValue(handler.wrap(js, kj::mv(source2))));
+    auto stream2 = JsReadableStream(js, streamObj2.addRef(js));
+    stream2.setPendingClosure(js);
+    auto byobOptions = js.obj();
+    byobOptions.set(js, "mode"_kj, js.str("byob"_kj));
+    auto reader2 = KJ_ASSERT_NONNULL(JSG_TRY_CAST_OBJECT(
+        webstreams::invokeMethod(js, streamObj2, "getReader"_kj, jsg::JsValue(byobOptions))));
+    auto view = jsg::JsUint8Array::create(js, kj::heapArray<kj::byte>(16));
+    auto read2 = js.toPromise(v8::Local<v8::Value>(KJ_ASSERT_NONNULL(
+        JSG_TRY_CAST_PROMISE(webstreams::invokeMethod(js, reader2, "read"_kj, view)))));
+
+    auto expectGated = [](jsg::Lock& js, jsg::Value exception) -> void {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(
+          e.getDescription().contains("belongs to an object that is closing"), e.getDescription());
+    };
+    auto promise = read1
+                       .then(js,
+                           [](jsg::Lock& js, jsg::Value) -> void {
+      KJ_FAIL_REQUIRE("expected read() after setPendingClosure to reject");
+    }, expectGated)
+                       .then(js, [read2 = kj::mv(read2)](jsg::Lock& js) mutable {
+      return kj::mv(read2);
+    }).then(js, [](jsg::Lock& js, jsg::Value) -> void {
+      KJ_FAIL_REQUIRE("expected BYOB read() after setPendingClosure to reject");
+    }, expectGated);
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream setPendingClosure gates consumption and tee") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    stream.setPendingClosure(js);
+
+    // tee() throws synchronously with the legacy text.
+    JSG_TRY(js) {
+      auto tee KJ_UNUSED = stream.tee(js);
+      KJ_FAIL_REQUIRE("expected tee() after setPendingClosure to throw");
+    }
+    JSG_CATCH(exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(
+          e.getDescription().contains("belongs to an object that is closing"), e.getDescription());
+    };
+
+    // Consumption (the DrainingReader path) rejects with the legacy text.
+    auto promise = stream.text(js, kLimit).then(js, [](jsg::Lock& js, kj::String) -> void {
+      KJ_FAIL_REQUIRE("expected text() after setPendingClosure to reject");
+    }, [](jsg::Lock& js, jsg::Value exception) -> void {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(
+          e.getDescription().contains("belongs to an object that is closing"), e.getDescription());
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream setPendingClosure gates the JS pipeThrough entry point") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // The JS prototype's pipeThrough reaches the pipe machinery through
+    // readableStreamPipeThroughTo, NOT through readableStreamPipeTo's precondition
+    // block, so it carries its own pending-closure gate. Like the legacy controller's
+    // gate, it must fire BEFORE the pipe locks the endpoints or touches the transform:
+    // pipeThrough returns the transform's readable normally (hidden, handled rejection)
+    // and both endpoints stay unlocked.
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    auto constructor =
+        KJ_ASSERT_NONNULL(exportsObj.get(js, "ReadableStream"_kj).tryCast<jsg::JsFunction>());
+
+    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    auto streamObj = constructor.newInstance(js, jsg::JsValue(handler.wrap(js, kj::mv(source))));
+    auto stream = JsReadableStream(js, streamObj.addRef(js));
+    stream.setPendingClosure(js);
+
+    // A transform pair of independent TypeScript endpoints.
+    auto pairReadableObj = constructor.newInstance(js, jsg::JsValue(js.obj()));
+    auto pairWritable = JsWritableStream::create(
+        js, env.context, kj::heap<CollectingSink>(collected, ended), kj::none);
+    auto pairWritableObj = KJ_ASSERT_NONNULL(pairWritable.tryGetTs(js));
+    auto pairObj = js.obj();
+    pairObj.set(js, "readable"_kj, jsg::JsValue(pairReadableObj));
+    pairObj.set(js, "writable"_kj, jsg::JsValue(pairWritableObj));
+
+    auto result = webstreams::invokeMethod(js, streamObj, "pipeThrough"_kj, jsg::JsValue(pairObj));
+    // pipeThrough returns the pair's readable, without throwing.
+    KJ_EXPECT(result == jsg::JsValue(pairReadableObj));
+
+    // Let any (buggy) pipe startup settle, then verify the gate fired BEFORE the pipe
+    // machinery ran. Lock checks alone cannot discriminate -- an ungated pipe's first
+    // read hits the read-side pending-closure gate and the pump's finalize releases both
+    // locks again -- so the decisive probe is the transform's continued usability: an
+    // ungated pipe aborts (errors) the transform's writable, after which the write below
+    // would reject with the pending-closure error.
+    auto promise = env.context.awaitIo(js, settleTurns(10)).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream), pairWritable = kj::mv(pairWritable)), (stream, pairWritable), (jsg::Lock & js) mutable {
+      KJ_EXPECT(!stream.isLocked(js));
+      KJ_EXPECT(!pairWritable.isLocked(js));
+      auto written =
+          pairWritable.writeForTest(js, jsg::JsValue(jsg::JsUint8Array::create(js, "hi"_kjb)));
+      return written.then(js,
+          JSG_VISITABLE_LAMBDA((pairWritable = kj::mv(pairWritable)), (pairWritable),
+              (jsg::Lock & js) mutable { return pairWritable.forceClose(js); }));
+    }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  // The transform's sink received the probe write and a clean close: it was never
+  // touched by the gated pipe.
+  KJ_EXPECT(collected.asPtr() == "hi"_kjb);
+  KJ_EXPECT(ended);
+}
+
+KJ_TEST("JsReadableStream setPendingClosure gates pipeTo but not cancel") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    stream.setPendingClosure(js);
+    auto destination = JsWritableStream::create(
+        js, env.context, kj::heap<CollectingSink>(collected, ended), kj::none);
+
+    auto promise = stream.pipeTo(js, destination)
+                       .then(js, [](jsg::Lock& js) -> void {
+      KJ_FAIL_REQUIRE("expected pipeTo() after setPendingClosure to reject");
+    }, [](jsg::Lock& js, jsg::Value exception) -> void {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(
+          e.getDescription().contains("belongs to an object that is closing"), e.getDescription());
+    }).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock & js) mutable {
+                         // cancel is deliberately NOT gated: the teardown itself cancels the readable.
+                         return stream.cancel(js, kj::none);
+                       }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream consumption helpers drain TypeScript-backed streams") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // One TypeScript-backed (buffer-backed) stream per helper; text() is covered by the
+    // buffer-backed tests above.
+    JsReadableStream forArrayBuffer(js, kj::str(kData));
+    JsReadableStream forBytes(js, kj::str(kData));
+    JsReadableStream forJson(js, kj::str("{\"hello\":\"world\"}"));
+    JsReadableStream forBlob(js, kj::str(kData));
+
+    auto promise =
+        forArrayBuffer.arrayBuffer(js, kLimit)
+            .then(js,
+                JSG_VISITABLE_LAMBDA((forBytes = kj::mv(forBytes)), (forBytes),
+                    (jsg::Lock & js, jsg::JsRef<jsg::JsArrayBuffer> buffer) mutable {
+                      KJ_EXPECT(buffer.getHandle(js).asArrayPtr() == kData.asBytes());
+                      return forBytes.bytes(js, kLimit);
+                    }))
+            .then(js,
+                JSG_VISITABLE_LAMBDA((forJson = kj::mv(forJson)), (forJson),
+                    (jsg::Lock & js, jsg::JsRef<jsg::JsUint8Array> bytes) mutable {
+                      KJ_EXPECT(bytes.getHandle(js).size() == kData.size());
+                      return forJson.json(js, kLimit);
+                    }))
+            .then(js,
+                JSG_VISITABLE_LAMBDA((forBlob = kj::mv(forBlob)), (forBlob),
+                    (jsg::Lock & js, jsg::JsRef<jsg::JsValue> value) mutable {
+                      auto obj = KJ_ASSERT_NONNULL(value.getHandle(js).tryCast<jsg::JsObject>());
+                      KJ_EXPECT(js.toString(obj.get(js, "hello"_kj)) == "world"_kj);
+                      return forBlob.blob(js, kLimit, kj::str("text/plain"));
+                    }))
+            .then(js, [](jsg::Lock& js, jsg::Ref<Blob> blob) {
+      KJ_EXPECT(blob->getSize() == kData.size());
+      KJ_EXPECT(blob->getType() == "text/plain"_kj);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream addRef shares a TypeScript-backed stream") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    auto ref = stream.addRef(js);
+    KJ_EXPECT(!ref.isDisturbed(js));
+
+    // Consuming through the addRef disturbs the original: both wrap the same stream.
+    auto promise = ref.text(js, kLimit).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock& js, kj::String text) {
+      KJ_EXPECT(text == kData);
+      KJ_EXPECT(stream.isDisturbed(js));
+    }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("JsReadableStream pipeThrough pipes TypeScript-backed endpoints") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // A hand-assembled transform pair (independent TS endpoints): pipeThrough must lock
+    // and pump this stream into the pair's writable and hand back the pair's readable.
+    auto source = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
+    auto pairReadable =
+        JsReadableStream::create(js, env.context, kj::heap<ContentSource>("pair"_kj));
+    auto pairWritable = JsWritableStream::create(
+        js, env.context, kj::heap<CollectingSink>(collected, ended), kj::none);
+
+    auto result = source.pipeThrough(js,
+        JsReadableWritablePair{
+          .readable = kj::mv(pairReadable),
+          .writable = kj::mv(pairWritable),
+        });
+    // The returned stream is the pair's readable, usable immediately.
+    auto promise = result.text(js, kLimit).then(js, [](jsg::Lock& js, kj::String text) {
+      KJ_EXPECT(text == "pair"_kj);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  // The pipe (marked handled by pipeThrough) pumped this stream into the pair's writable.
+  KJ_EXPECT(collected.asPtr() == kData.asBytes());
+  KJ_EXPECT(ended);
+}
+
+KJ_TEST("JsReadableStream detach of a tee branch carries the composite cancel hook") {
+  auto fixture = makeTsStreamsFixture();
+  bool sourceCanceled = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // A queued source whose cancel hook records that it ran. Tee composes branch cancels:
+    // the source is canceled only once BOTH branches have canceled.
+    auto underlying = js.obj();
+    underlying.set(js, "cancel"_kj,
+        jsg::JsValue(js.wrapSimpleFunction(js.v8Context(),
+            [&sourceCanceled](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+      sourceCanceled = true;
+    })));
+    auto stream = makeTsStream(js, jsg::JsValue(underlying));
+    auto tee = stream.tee(js);
+
+    // Detach branch1: the composite-cancel hook must move to the detached stream.
+    auto detached = tee.branch1.detach(js);
+
+    auto p1 = detached.cancel(js, jsg::JsValue(js.str("one"_kj)));
+    // Only one branch has canceled: the composite has not fired yet.
+    KJ_EXPECT(!sourceCanceled);
+    auto p2 = tee.branch2.cancel(js, jsg::JsValue(js.str("two"_kj)));
+    // Both branches canceled: the composite fires the source cancel synchronously.
+    KJ_EXPECT(sourceCanceled);
+
+    auto joined = p1.then(js, [p2 = kj::mv(p2)](jsg::Lock& js) mutable { return kj::mv(p2); });
+    return env.context.awaitJs(js, kj::mv(joined));
+  });
+  KJ_EXPECT(sourceCanceled);
 }
 
 }  // namespace

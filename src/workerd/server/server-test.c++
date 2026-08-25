@@ -343,6 +343,14 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
               } else {
                 KJ_FAIL_EXPECT(error, expectedErrors);
               }
+            },
+            [this](kj::String warning) {
+              if (expectedWarnings.startsWith(warning) &&
+                  expectedWarnings[warning.size()] == '\n') {
+                expectedWarnings = expectedWarnings.slice(warning.size() + 1);
+              } else {
+                KJ_FAIL_EXPECT(warning, expectedWarnings);
+              }
             }),
         fakeDate(kj::UNIX_EPOCH),
         mockNetwork(*this, {}, {}) {}
@@ -360,6 +368,13 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
     }
   }
 
+  // Declare the warnings the config is expected to produce, one per line. Unlike errors, warnings
+  // don't stop the server, so call this before `start()` or `expectErrors()`, which check that
+  // every declared warning was actually reported.
+  void expectWarnings(kj::StringPtr expected) {
+    expectedWarnings = expected;
+  }
+
   // Start the server. Call before connect().
   void start(kj::Promise<void> drainWhen = kj::NEVER_DONE) {
     KJ_REQUIRE(runTask == kj::none);
@@ -368,6 +383,7 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
       KJ_FAIL_EXPECT(e);
     });
     KJ_EXPECT(!task.poll(ws));
+    KJ_EXPECT(expectedWarnings == nullptr, "some expected warnings weren't seen");
     runTask = kj::mv(task);
   }
 
@@ -377,6 +393,7 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
     expectedErrors = expected;
     server.run(v8System, *config).poll(ws);
     KJ_EXPECT(expectedErrors == nullptr, "some expected errors weren't seen");
+    KJ_EXPECT(expectedWarnings == nullptr, "some expected warnings weren't seen");
   }
 
   // Connect to the server on the given address. The string just has to match what is in the
@@ -442,6 +459,7 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
 
   kj::Maybe<kj::Promise<void>> runTask;
   kj::StringPtr expectedErrors;
+  kj::StringPtr expectedWarnings;
 
   kj::Date fakeDate;
 
@@ -986,6 +1004,32 @@ KJ_TEST("Server: compatibility dates are required") {
   test.expectErrors(R"(
     service hello: Worker must specify compatibilityDate.
   )"_blockquote);
+}
+
+KJ_TEST("Server: naming a flag the compatibility date already enables only warns") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    compatibilityFlags = ["global_navigator"],
+    modules = [
+      ( name = "main.js",
+        esModule =
+            `export default {
+            `  async fetch(request) {
+            `    return new Response(!!self.navigator);
+            `  }
+            `}
+      )
+    ]
+  ))"_kj));
+
+  test.expectWarnings(
+      "service hello: The compatibility flag global_navigator became the default as of "
+      "2022-03-21 so does not need to be specified anymore.\n"_kj);
+
+  // The Worker starts anyway, and the flag is on either way.
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "true");
 }
 
 KJ_TEST("Server: value bindings") {
@@ -6348,6 +6392,94 @@ KJ_TEST("Server: Durable Object facet limits") {
       "The maximum depth including the root Durable Object is 4.");
 }
 
+KJ_TEST("Server: Durable Object facets cannot set alarms") {
+  kj::StringPtr config = R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-04-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    let id = env.MY_ACTOR.idFromName("alarms");
+                `    let actor = env.MY_ACTOR.get(id);
+                `    return await actor.fetch(request);
+                `  }
+                `}
+                `export class MyActorClass extends DurableObject {
+                `  async fetch(request) {
+                `    if (request.url.endsWith("/root")) {
+                `      // The root object can set an alarm just fine.
+                `      let time = Date.now() + 3600000;
+                `      await this.ctx.storage.setAlarm(time);
+                `      return new Response(
+                `          "alarm set: " + ((await this.ctx.storage.getAlarm()) === time));
+                `    } else {
+                `      let facet = this.ctx.facets.get("child",
+                `          () => ({class: this.env.CHILD}));
+                `      try {
+                `        await facet.setAlarm();
+                `        return new Response("no error, unexpected");
+                `      } catch (e) {
+                `        return new Response(e.name + ": " + e.message);
+                `      }
+                `    }
+                `  }
+                `  async alarm() {}
+                `}
+                `export class ChildFacet extends DurableObject {
+                `  async setAlarm() {
+                `    await this.ctx.storage.setAlarm(Date.now() + 3600000);
+                `  }
+                `  async alarm() {}
+                `}
+            )
+          ],
+          bindings = [
+            (name = "MY_ACTOR", durableObjectNamespace = "MyActorClass"),
+            (name = "CHILD", durableObjectClass = (name = "hello", entrypoint = "ChildFacet"))
+          ],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (localDisk = "my-disk")
+        )
+      ),
+      ( name = "my-disk",
+        disk = (
+          path = "../../do-storage",
+          writable = true,
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj;
+
+  TestServer test(config);
+  test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+
+  // SQLite-backed Durable Objects do support alarms...
+  conn.httpGet200("/root", "alarm set: true");
+
+  // ... but facets don't. The attempt breaks the facet's output gate, so the error surfaces to the
+  // parent in place of the RPC response.
+  conn.httpGet200("/facet", "Error: Facets currently cannot set alarms.");
+}
+
 KJ_TEST("Server: Pass service stubs in ctx.props.") {
   TestServer test(R"((
     services = [
@@ -6995,9 +7127,9 @@ KJ_TEST("Server: debug port RPC calls") {
   }
 }
 
-KJ_TEST("Server: workerdDebugPort binding loopback test") {
-  // This test verifies that a worker can use the workerdDebugPort binding to connect
-  // back to the same workerd instance's debug port and access other services.
+KJ_TEST("Server: workerdDebugPort binding current process test") {
+  // This test verifies that a worker can use the workerdDebugPort binding to access other services
+  // in the same process without opening a network connection.
   TestServer test(R"((
     services = [
       ( name = "target-service",
@@ -7029,8 +7161,7 @@ KJ_TEST("Server: workerdDebugPort binding loopback test") {
               esModule =
                 `export default {
                 `  async fetch(request, env, ctx) {
-                `    // Connect to the debug port
-                `    const client = await env.debugPort.connect("debug-addr");
+                 `    const client = env.debugPort.current();
                 `
                 `    // Test 1: Access the default entrypoint
                 `    const defaultFetcher = client.getEntrypoint("target-service");
@@ -7066,8 +7197,6 @@ KJ_TEST("Server: workerdDebugPort binding loopback test") {
     ]
   ))"_kj);
 
-  // Enable the debug port on a known address
-  test.server.enableDebugPort(kj::str("debug-addr"));
   test.server.allowExperimental();
 
   test.start();

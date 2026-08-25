@@ -508,6 +508,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Like requireCurrent() but throws a JS error if this IoContext is not the current.
   void requireCurrentOrThrowJs();
 
+  // Returns an executor through which other IoContexts (or code running outside any
+  // IoContext) can later check whether this context is current, still alive, or defer work
+  // into it. Safe to retain beyond this context's lifetime.
+  IoCrossContextExecutor getCrossContextExecutor() {
+    return IoCrossContextExecutor(deleteQueue.queue.addRef());
+  }
+
   // A WeakRef is a weak reference to a IoContext. Note that because IoContext is not
   // itself ref-counted, we cannot follow the usual pattern of a weak reference that potentially
   // converts to a strong reference. Instead, intended usage looks like so:
@@ -756,6 +763,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // 3. Invalidates itself when the request ends (such that dereferencing throws).
   template <typename T>
   IoOwn<T> addObject(kj::Rc<T> obj);
+
+  // Shortcut for addObject(kj::heap(...)) to avoid having to write kj::heap() in every call site.
+  template <typename T, typename... Params>
+  IoOwn<T> createObject(Params&&... params) {
+    return addObject(kj::heap<T>(kj::fwd<Params>(params)...));
+  }
 
   // Like addObject() but takes a functor, returning a functor which holds the original functor
   // under an `IoOwn`, and so will stop working if the IoContext is no longer valid. This is
@@ -1076,15 +1089,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // available in internal tracing.
   [[nodiscard]] TraceContext makeUserTraceSpan(kj::ConstString operationName);
 
-  // Implement per-IoContext rate limiting for Cache.put(). Pass the body of a Cache API PUT
-  // request and get a possibly wrapped stream back.
-  //
-  // If the stream has an unknown length, you will get a wrapped stream back that is used to
-  // serialize PUT requests.
-  jsg::Promise<IoOwn<kj::AsyncInputStream>> makeCachePutStream(
-      jsg::Lock& js, kj::Own<kj::AsyncInputStream> stream);
-  // TODO(cleanup): Factor this into getCacheClient() somehow so it's not opt-in.
-
   // Gets a CapabilityServerSet representing the capnp capabilities hosted by this request or
   // actor context. This allows us to implement the CapnpCapability::unwrap() method on
   // capabilities which allows the application to get at the underlying server object, when the
@@ -1161,11 +1165,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   OwnedObjectList ownedObjects;
 
   kj::Maybe<kj::Rc<ExternalPusherImpl>> externalPusher;
-
-  // Implementation detail of makeCachePutStream().
-
-  // TODO: Used for Cache PUT serialization.
-  kj::Promise<void> cachePutSerializer;
 
   // The timeout manager needs to live below `deleteQueue` because the promises may refer to
   // objects in the queue.

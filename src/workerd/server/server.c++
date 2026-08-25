@@ -227,13 +227,15 @@ Server::Server(kj::Filesystem& fs,
     kj::Network& network,
     kj::EntropySource& entropySource,
     Worker::LoggingOptions loggingOptions,
-    kj::Function<void(kj::String)> reportConfigError)
+    kj::Function<void(kj::String)> reportConfigError,
+    kj::Function<void(kj::String)> reportConfigWarning)
     : fs(fs),
       timer(timer),
       monotonicClock(monotonicClock),
       network(network),
       entropySource(entropySource),
       reportConfigError(kj::mv(reportConfigError)),
+      reportConfigWarning(kj::mv(reportConfigWarning)),
       loggingOptions(loggingOptions),
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(timer)),
       channelTokenHandler(*this),
@@ -1254,8 +1256,8 @@ class Server::ActorNamespace final {
                 sqliteHooks = fakeOwn(ActorSqlite::Hooks::getDefaultHooks());
               }
             } else {
-              // TODO(someday): Support alarms in facets, somehow.
-              sqliteHooks = fakeOwn(ActorSqlite::Hooks::getDefaultHooks());
+              // A non-null `parent` means this is a facet, which has no alarm scheduler.
+              sqliteHooks = kj::heap<FacetAlarmHooks>();
             }
 
             uint selfId = getFacetId();
@@ -1730,6 +1732,20 @@ class Server::ActorNamespace final {
    private:
     AlarmScheduler& alarmScheduler;
     kj::Own<ActorKey> actor;
+  };
+
+  // Hooks used by facets, which have their own storage but no way to schedule alarms: the alarm
+  // scheduler only knows how to deliver alarms to the root actor of a namespace.
+  //
+  // TODO(someday): Support alarms in facets, somehow.
+  class FacetAlarmHooks final: public ActorSqlite::Hooks {
+   public:
+    kj::Promise<void> scheduleRun(
+        kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) override {
+      // Keep this message in sync with the equivalent error produced in actor-storage-factory.c++
+      // in the internal codebase.
+      JSG_FAIL_REQUIRE(Error, "Facets currently cannot set alarms.");
+    }
   };
 };
 
@@ -3351,6 +3367,10 @@ struct Server::ConfigErrorReporter final: public ErrorReporter {
   void addError(kj::String error) override {
     server.handleReportConfigError(kj::str("service ", name, ": ", error));
   }
+
+  void addWarning(kj::String warning) override {
+    server.handleReportConfigWarning(kj::str("service ", name, ": ", warning));
+  }
 };
 
 // Implementation of ErrorReporter for dynamically-loaded Workers. We'll collect the errors and
@@ -3387,6 +3407,7 @@ class Server::WorkerService final: public Service,
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTails;
     kj::Array<kj::Rc<WorkerLoaderNamespace>> workerLoaders;
     kj::Maybe<kj::Network&> workerdDebugPortNetwork;
+    kj::Maybe<Server&> workerdDebugPortServer;
   };
   using LinkCallback =
       kj::Function<LinkedIoChannels(WorkerService&, Worker::ValidationErrorReporter&)>;
@@ -3909,7 +3930,7 @@ class Server::WorkerService final: public Service,
       }
     }
 
-    return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
+    return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName.clone(),
         kj::mv(props), kj::mv(actor),
         kj::attachRef(static_cast<LimitEnforcer&>(*this), kj::addRef(*this)),
         {},  // ioContextDependency
@@ -4459,6 +4480,14 @@ class Server::WorkerService final: public Service,
         KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
     return KJ_REQUIRE_NONNULL(channels.workerdDebugPortNetwork,
         "workerdDebugPort binding is not enabled for this worker");
+  }
+
+  rpc::WorkerdDebugPort::Client getWorkerdDebugPort() override {
+    auto& channels =
+        KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
+    return KJ_REQUIRE_NONNULL(
+        channels.workerdDebugPortServer, "workerdDebugPort binding is not enabled for this worker")
+        .makeWorkerdDebugPortClient();
   }
 
   kj::Own<SubrequestChannel> subrequestChannelFromToken(
@@ -5998,6 +6027,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
 
     if (def.hasWorkerdDebugPortBinding) {
       result.workerdDebugPortNetwork = network;
+      result.workerdDebugPortServer = *this;
     }
 
     return result;
@@ -6633,135 +6663,134 @@ kj::Promise<void> Server::listenTcp(
 // =======================================================================================
 // Debug port for exposing all services via RPC
 
-class Server::DebugPortListener {
+class Server::WorkerdDebugPortImpl final: public rpc::WorkerdDebugPort::Server {
  public:
-  DebugPortListener(Server& owner,
-      kj::Own<kj::ConnectionReceiver> listener,
-      capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
-      : owner(owner),
-        listener(kj::mv(listener)),
+  WorkerdDebugPortImpl(
+      workerd::server::Server& srv, capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
+      : srv(srv),
         httpOverCapnpFactory(httpOverCapnpFactory) {}
 
+  kj::Promise<void> getEntrypoint(GetEntrypointContext context) override {
+    auto params = context.getParams();
+    auto serviceName = params.getService();
+    auto propsReader = params.getProps();
+
+    // Look up the service.
+    auto& serviceEntry = KJ_ASSERT_NONNULL(srv.services.find(serviceName),
+        kj::str("jsg.Error: Worker \"", serviceName, "\" not found"));
+    auto service = serviceEntry->service();
+
+    // Convert props from Frankenvalue if provided
+    Frankenvalue props;
+    if (params.hasProps()) {
+      props = Frankenvalue::fromCapnp(propsReader);
+    }
+
+    kj::Own<Service> targetService;
+
+    // Try to cast to WorkerService to support entrypoints and props
+    KJ_IF_SOME(workerService, kj::tryDowncast<WorkerService>(*service)) {
+      // This is a WorkerService, use getEntrypoint which supports both entrypoints and props
+      kj::Maybe<kj::StringPtr> maybeEntrypoint;
+      if (params.hasEntrypoint()) {
+        maybeEntrypoint = params.getEntrypoint();
+      }
+
+      targetService = KJ_ASSERT_NONNULL(workerService.getEntrypoint(maybeEntrypoint, kj::mv(props)),
+          kj::str("jsg.Error: Worker does not export an entrypoint named \"",
+              maybeEntrypoint.orDefault("(default)"), "\""));
+    } else {
+      // Not a WorkerService
+      KJ_ASSERT(!params.hasEntrypoint(), "jsg.Error: Worker does not support named entrypoints");
+
+      // Try to apply props if the service supports it
+      if (params.hasProps()) {
+        targetService = service->forProps(kj::mv(props), Persistent::NO);
+      } else {
+        // No props, just use the service as-is
+        targetService = kj::addRef(*service);
+      }
+    }
+
+    // Return a WorkerdBootstrap that wraps this service using the generic implementation.
+    context.initResults(capnp::MessageSize{4, 1})
+        .setEntrypoint(kj::heap<WorkerdBootstrapImpl>(kj::mv(targetService), httpOverCapnpFactory));
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> getActor(GetActorContext context) override {
+    auto params = context.getParams();
+    auto serviceName = params.getService();
+    auto entrypointName = params.getEntrypoint();
+    auto actorIdStr = params.getActorId();
+
+    // Look up the service
+    auto& serviceEntry = KJ_ASSERT_NONNULL(srv.services.find(serviceName),
+        kj::str("jsg.Error: Worker \"", serviceName, "\" not found"));
+    auto service = serviceEntry->service();
+
+    // Try to cast to WorkerService
+    auto& workerService = KJ_REQUIRE_NONNULL(kj::tryDowncast<WorkerService>(*service),
+        "jsg.Error: Worker does not support Durable Objects");
+
+    // Look up the actor namespace
+    auto& actorNamespace = KJ_ASSERT_NONNULL(workerService.getActorNamespace(entrypointName),
+        kj::str("jsg.Error: Worker does not export a Durable Object class named \"", entrypointName,
+            "\""));
+
+    // Create an actor ID - use the namespace config to determine if it's durable or ephemeral
+    Worker::Actor::Id actorId;
+    KJ_SWITCH_ONEOF(actorNamespace.getConfig()) {
+      KJ_CASE_ONEOF(c, Durable) {
+        // Durable Object ID (hex-encoded SHA256 hash)
+        auto decoded = kj::decodeHex(actorIdStr);
+        KJ_REQUIRE(decoded.size() == SHA256_DIGEST_LENGTH,
+            "Invalid Durable Object ID: expected 64 hex characters (32 bytes)", decoded.size());
+        kj::Own<ActorIdFactory::ActorId> id =
+            kj::heap<ActorIdFactoryImpl::ActorIdImpl>(decoded.begin(), kj::none);
+        actorId = kj::mv(id);
+      }
+      KJ_CASE_ONEOF(c, Ephemeral) {
+        // Ephemeral actor ID (plain string)
+        actorId = kj::str(actorIdStr);
+      }
+    }
+
+    // Wrap the actor channel using the generic WorkerdBootstrap implementation.
+    context.initResults(capnp::MessageSize{4, 1})
+        .setActor(kj::heap<WorkerdBootstrapImpl>(
+            actorNamespace.getActorChannel(kj::mv(actorId)), httpOverCapnpFactory));
+    return kj::READY_NOW;
+  }
+
+ private:
+  workerd::server::Server& srv;
+  capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+};
+
+class Server::DebugPortListener {
+ public:
+  DebugPortListener(Server& owner, kj::Own<kj::ConnectionReceiver> listener)
+      : owner(owner),
+        listener(kj::mv(listener)) {}
+
   kj::Promise<void> run() {
-    capnp::TwoPartyServer server(kj::heap<WorkerdDebugPortImpl>(&owner, httpOverCapnpFactory));
+    capnp::TwoPartyServer server(owner.makeWorkerdDebugPortClient());
     co_return co_await server.listen(*listener);
   }
 
  private:
   Server& owner;
   kj::Own<kj::ConnectionReceiver> listener;
-  capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
-
-  class WorkerdDebugPortImpl final: public rpc::WorkerdDebugPort::Server {
-   public:
-    WorkerdDebugPortImpl(
-        workerd::server::Server* srvPtr, capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
-        : srv(*srvPtr),
-          httpOverCapnpFactory(httpOverCapnpFactory) {}
-
-    kj::Promise<void> getEntrypoint(GetEntrypointContext context) override {
-      auto params = context.getParams();
-      auto serviceName = params.getService();
-      auto propsReader = params.getProps();
-
-      // Look up the service.
-      auto& serviceEntry = KJ_ASSERT_NONNULL(srv.services.find(serviceName),
-          kj::str("jsg.Error: Worker \"", serviceName, "\" not found"));
-      auto service = serviceEntry->service();
-
-      // Convert props from Frankenvalue if provided
-      Frankenvalue props;
-      if (params.hasProps()) {
-        props = Frankenvalue::fromCapnp(propsReader);
-      }
-
-      kj::Own<Service> targetService;
-
-      // Try to cast to WorkerService to support entrypoints and props
-      KJ_IF_SOME(workerService, kj::tryDowncast<WorkerService>(*service)) {
-        // This is a WorkerService, use getEntrypoint which supports both entrypoints and props
-        kj::Maybe<kj::StringPtr> maybeEntrypoint;
-        if (params.hasEntrypoint()) {
-          maybeEntrypoint = params.getEntrypoint();
-        }
-
-        targetService =
-            KJ_ASSERT_NONNULL(workerService.getEntrypoint(maybeEntrypoint, kj::mv(props)),
-                kj::str("jsg.Error: Worker does not export an entrypoint named \"",
-                    maybeEntrypoint.orDefault("(default)"), "\""));
-      } else {
-        // Not a WorkerService
-        KJ_ASSERT(!params.hasEntrypoint(), "jsg.Error: Worker does not support named entrypoints");
-
-        // Try to apply props if the service supports it
-        if (params.hasProps()) {
-          targetService = service->forProps(kj::mv(props), Persistent::NO);
-        } else {
-          // No props, just use the service as-is
-          targetService = kj::addRef(*service);
-        }
-      }
-
-      // Return a WorkerdBootstrap that wraps this service using the generic implementation.
-      context.initResults(capnp::MessageSize{4, 1})
-          .setEntrypoint(
-              kj::heap<WorkerdBootstrapImpl>(kj::mv(targetService), httpOverCapnpFactory));
-      return kj::READY_NOW;
-    }
-
-    kj::Promise<void> getActor(GetActorContext context) override {
-      auto params = context.getParams();
-      auto serviceName = params.getService();
-      auto entrypointName = params.getEntrypoint();
-      auto actorIdStr = params.getActorId();
-
-      // Look up the service
-      auto& serviceEntry = KJ_ASSERT_NONNULL(srv.services.find(serviceName),
-          kj::str("jsg.Error: Worker \"", serviceName, "\" not found"));
-      auto service = serviceEntry->service();
-
-      // Try to cast to WorkerService
-      auto& workerService = KJ_REQUIRE_NONNULL(kj::tryDowncast<WorkerService>(*service),
-          "jsg.Error: Worker does not support Durable Objects");
-
-      // Look up the actor namespace
-      auto& actorNamespace = KJ_ASSERT_NONNULL(workerService.getActorNamespace(entrypointName),
-          kj::str("jsg.Error: Worker does not export a Durable Object class named \"",
-              entrypointName, "\""));
-
-      // Create an actor ID - use the namespace config to determine if it's durable or ephemeral
-      Worker::Actor::Id actorId;
-      KJ_SWITCH_ONEOF(actorNamespace.getConfig()) {
-        KJ_CASE_ONEOF(c, Durable) {
-          // Durable Object ID (hex-encoded SHA256 hash)
-          auto decoded = kj::decodeHex(actorIdStr);
-          KJ_REQUIRE(decoded.size() == SHA256_DIGEST_LENGTH,
-              "Invalid Durable Object ID: expected 64 hex characters (32 bytes)", decoded.size());
-          kj::Own<ActorIdFactory::ActorId> id =
-              kj::heap<ActorIdFactoryImpl::ActorIdImpl>(decoded.begin(), kj::none);
-          actorId = kj::mv(id);
-        }
-        KJ_CASE_ONEOF(c, Ephemeral) {
-          // Ephemeral actor ID (plain string)
-          actorId = kj::str(actorIdStr);
-        }
-      }
-
-      // Wrap the actor channel using the generic WorkerdBootstrap implementation.
-      context.initResults(capnp::MessageSize{4, 1})
-          .setActor(kj::heap<WorkerdBootstrapImpl>(
-              actorNamespace.getActorChannel(kj::mv(actorId)), httpOverCapnpFactory));
-      return kj::READY_NOW;
-    }
-
-   private:
-    workerd::server::Server& srv;
-    capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
-  };
 };
 
+rpc::WorkerdDebugPort::Client Server::makeWorkerdDebugPortClient() {
+  return rpc::WorkerdDebugPort::Client(
+      kj::heap<WorkerdDebugPortImpl>(*this, globalContext->httpOverCapnpFactory));
+}
+
 kj::Promise<void> Server::listenDebugPort(kj::Own<kj::ConnectionReceiver> listener) {
-  DebugPortListener obj(*this, kj::mv(listener), globalContext->httpOverCapnpFactory);
+  DebugPortListener obj(*this, kj::mv(listener));
   co_return co_await obj.run();
 }
 
@@ -7061,9 +7090,8 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
   // Start sockets
   TRACE_EVENT("workerd", "listenOnSockets");
   for (auto sock: config.getSockets()) {
-    kj::StringPtr name = sock.getName();
-    kj::StringPtr addrStr = nullptr;
-    kj::String ownAddrStr;
+    kj::String name = kj::str(sock.getName());
+    kj::String addrStr;
     kj::Maybe<kj::Own<kj::ConnectionReceiver>> listenerOverride;
 
     kj::Own<Service> service = lookupService(sock.getService(), kj::str("Socket \"", name, "\""));
@@ -7071,7 +7099,7 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
     KJ_IF_SOME(override, socketOverrides.findEntry(name)) {
       KJ_SWITCH_ONEOF(override.value) {
         KJ_CASE_ONEOF(str, kj::String) {
-          addrStr = ownAddrStr = kj::mv(str);
+          addrStr = kj::mv(str);
           break;
         }
         KJ_CASE_ONEOF(l, kj::Own<kj::ConnectionReceiver>) {
@@ -7081,7 +7109,7 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       }
       socketOverrides.erase(override);
     } else if (sock.hasAddress()) {
-      addrStr = sock.getAddress();
+      addrStr = kj::str(sock.getAddress());
     } else {
       reportConfigError(kj::str("Socket \"", name,
           "\" has no address in the config, so must be specified on the "
@@ -7118,8 +7146,8 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
 
     auto handle = kj::coCapture(
         [this, service = kj::mv(service), rewriter = kj::mv(rewriter),
-            physicalProtocol = socketConfig.physicalProtocol, name,
-            isHttp = sock.which() != config::Socket::TCP, addrStr](
+            physicalProtocol = socketConfig.physicalProtocol, name = kj::mv(name),
+            isHttp = sock.which() != config::Socket::TCP, addrStr = kj::mv(addrStr)](
             kj::Promise<kj::Own<kj::ConnectionReceiver>> promise) mutable -> kj::Promise<void> {
       if (isHttp) {
         TRACE_EVENT("workerd", "setup listenHttp");

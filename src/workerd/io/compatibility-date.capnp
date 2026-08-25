@@ -513,8 +513,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   newModuleRegistry @52 :Bool
       $compatEnableFlag("new_module_registry")
-      $compatDisableFlag("legacy_module_registry")
-      $experimental;
+      $compatDisableFlag("legacy_module_registry");
   # Enables the new module registry implementation, which handles module
   # specifiers as URLs, implements import.meta (url/main/resolve), supports
   # import attributes, and allows a registry to be shared across isolate
@@ -1579,7 +1578,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonWorkers20260610 @179 :Bool
       $compatEnableFlag("python_workers_20260610")
       $compatDisableFlag("no_python_workers_20260610")
-      $impliedByAfterDate(name = "pythonWorkers", date = "2026-08-25")
       $pythonSnapshotRelease;
   # Enables Python Workers using Pyodide 314.0.4 (CPython 3.14.2, Emscripten 5.0.3).
 
@@ -1616,10 +1614,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   workflowsBindingsRpc @182 :Bool
     $compatEnableFlag("workflows_bindings_rpc")
     $experimental;
-  # When enabled, the `env.WORKFLOW` binding (cloudflare-internal:workflows-api)
-  # dispatches its methods as JSRPC calls on the inner fetcher instead of HTTP
-  # requests against the binding-shim worker. Without the flag the legacy HTTP
-  # transport is used.
+  # Obsolete flag. Has no effect: the `env.WORKFLOW` binding always dispatches its methods as
+  # JSRPC calls on the inner fetcher. Still accepted so configs which set it keep validating.
 
   typeScriptImplementedStreams @183 :Bool
       $compatEnableFlag("typescript_implemented_streams")
@@ -1642,4 +1638,37 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2026-08-11");
   # Enables fast Workflow engine creation by generating instance IDs with the Durable Object
   # namespace's `newUniqueId()` method instead of UUIDs.
+
+  wasmMemoryDiscard @186 :Bool
+      $compatEnableFlag("wasm_memory_discard")
+      $experimental;
+  # Enables the experimental WebAssembly memory.discard proposal, exposing
+  # `WebAssembly.Memory.prototype.discard(byteOffset, byteLength)` and the
+  # `memory.discard` opcode. Both zero the given wasm-page-aligned region and
+  # release its physical pages back to the operating system. Shared memories
+  # are not supported, and unaligned or out-of-bounds ranges throw a
+  # RangeError (JS API) or trap (wasm opcode).
+  # WARNING: Do not remove the `$experimental` marker before
+  # the v8 change becomes part of chrome's default config.
+
+  pythonWorkers20260817 @187 :Bool
+      $compatEnableFlag("python_workers_20260817")
+      $compatDisableFlag("no_python_workers_20260817")
+      $experimental
+      $pythonSnapshotRelease;
+  # Enables Python Workers using Pyodide 314.0.5.
+
+  specCompliantDispatchExceptions @188 :Bool
+      $compatEnableFlag("spec_compliant_dispatch_exceptions")
+      $compatDisableFlag("no_spec_compliant_dispatch_exceptions")
+      $compatEnableDate("2026-09-15");
+  # Per the DOM spec, exceptions thrown by event listeners during dispatchEvent() should be
+  # reported (via the global 'error' event, then the console) but should not interrupt the
+  # dispatch or propagate to the dispatchEvent() caller. The original workerd implementation
+  # propagated the first listener exception and skipped remaining listeners for that event.
+  #
+  # When enabled, all event dispatch surfaces (the JS-visible dispatchEvent(), AbortSignal
+  # abort, and UA-fired events on WebSocket, EventSource, and MessagePort) use the spec's
+  # report-and-continue semantics. Internal runtime event delivery (fetch, scheduled, etc.)
+  # is not affected and always propagates.
 }

@@ -16,6 +16,16 @@ class ValidationErrorReporter {
  public:
   virtual void addError(kj::String error) = 0;
 
+  // Report a problem with the Worker's configuration that the developer ought to clean up but
+  // which does not prevent the Worker from running.
+  //
+  // The default implementation ignores the warning, so only report a problem here if it is
+  // acceptable for nobody to hear about it. Reporters override this when they have somewhere useful
+  // to put the message, such as a developer's terminal. Deploy-time validation deliberately does
+  // not: it distinguishes only valid configurations from invalid ones, and a warning must not fail
+  // a deployment.
+  virtual void addWarning(kj::String warning) {}
+
   // Report that the Worker implements a stateless entrypoint (e.g. WorkerEntrypoint or plain
   // object export) with the given export name and methods.
   virtual void addEntrypoint(

@@ -146,7 +146,7 @@ namespace {
 class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
  public:
   AbortTriggerRpcServer(kj::Own<kj::PromiseFulfiller<void>> fulfiller,
-      kj::Rc<ExternalPusherImpl::PendingAbortReason> pendingReason)
+      kj::Arc<ExternalPusherImpl::PendingAbortReasonBox> pendingReason)
       : fulfiller(kj::mv(fulfiller)),
         pendingReason(kj::mv(pendingReason)) {}
 
@@ -154,7 +154,7 @@ class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
     auto params = abortCtx.getParams();
     auto reason = params.getReason().getV8Serialized();
 
-    *pendingReason = kj::heapArray(reason.asBytes());
+    *pendingReason->value.lockExclusive() = kj::heapArray(reason.asBytes());
     fulfiller->fulfill();
     return kj::READY_NOW;
   }
@@ -165,15 +165,18 @@ class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
   }
 
   ~AbortTriggerRpcServer() noexcept(false) {
-    if (*pendingReason != nullptr) {
-      // Already triggered
-      return;
-    }
+    {
+      auto lock = pendingReason->value.lockExclusive();
+      if (*lock != nullptr) {
+        // Already triggered
+        return;
+      }
 
-    if (!released) {
-      *pendingReason = JSG_KJ_EXCEPTION(FAILED, DOMAbortError,
-          "An AbortSignal received over RPC was implicitly aborted because the connection back to "
-          "its trigger was lost.");
+      if (!released) {
+        *lock = JSG_KJ_EXCEPTION(FAILED, DOMAbortError,
+            "An AbortSignal received over RPC was implicitly aborted because the connection back "
+            "to its trigger was lost.");
+      }
     }
 
     // Always fulfill the promise in case the AbortSignal was waiting
@@ -182,7 +185,7 @@ class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
 
  private:
   kj::Own<kj::PromiseFulfiller<void>> fulfiller;
-  kj::Rc<ExternalPusherImpl::PendingAbortReason> pendingReason;
+  kj::Arc<ExternalPusherImpl::PendingAbortReasonBox> pendingReason;
   bool released = false;
 };
 
@@ -217,7 +220,7 @@ ExternalPusherImpl::AbortSignal ExternalPusherImpl::unwrapAbortSignal(
   // pushAbortSignal() might not have been received yet. So, we have to allocate the box here, so
   // we can return it. Then we can try to wire it up to the right trigger later, in
   // unwrapAbortSignalImpl().
-  auto pendingReason = kj::rc<PendingAbortReason>();
+  auto pendingReason = kj::arc<PendingAbortReasonBox>();
   auto promise = unwrapAbortSignalImpl(kj::mv(cap), pendingReason.addRef());
 
   return {
@@ -227,7 +230,7 @@ ExternalPusherImpl::AbortSignal ExternalPusherImpl::unwrapAbortSignal(
 }
 
 kj::Promise<void> ExternalPusherImpl::unwrapAbortSignalImpl(
-    ExternalPusher::AbortSignal::Client cap, kj::Rc<PendingAbortReason> pendingReason) {
+    ExternalPusher::AbortSignal::Client cap, kj::Arc<PendingAbortReasonBox> pendingReason) {
   auto paf = kj::newPromiseAndFulfiller<void>();
 
   {

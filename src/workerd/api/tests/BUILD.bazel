@@ -33,6 +33,16 @@ wd_test(
 )
 
 wd_test(
+    src = "wasm-memory-discard-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "wasm-memory-discard.wasm",
+        "wasm-memory-discard-disabled-test.js",
+        "wasm-memory-discard-test.js",
+    ],
+)
+
+wd_test(
     src = "urlpattern-regex-search-oob-test.wd-test",
     args = ["--experimental"],
     data = ["urlpattern-regex-search-oob-test.js"],
@@ -215,6 +225,11 @@ wd_test(
 )
 
 wd_test(
+    src = "tail-cf-gc-test.wd-test",
+    data = ["tail-cf-gc-test.js"],
+)
+
+wd_test(
     src = "errorinfo-stw-test.wd-test",
     args = ["--experimental"],
     data = ["errorinfo-stw-test.js"],
@@ -261,6 +276,14 @@ wd_test(
         "cache-mock.js",
         "cache-operations-test.js",
         "instrumentation-tail-worker.js",
+    ],
+)
+
+wd_test(
+    src = "cache-put-stream-test.wd-test",
+    data = [
+        "cache-mock.js",
+        "cache-put-stream-test.js",
     ],
 )
 
@@ -509,6 +532,12 @@ wd_test(
 )
 
 wd_test(
+    src = "legacy-dispatch-exceptions-test.wd-test",
+    args = ["--experimental"],
+    data = ["legacy-dispatch-exceptions-test.js"],
+)
+
+wd_test(
     src = "form-data-legacy-test.wd-test",
     args = ["--experimental"],
     data = ["form-data-legacy-test.js"],
@@ -588,6 +617,25 @@ wd_test(
 )
 
 wd_test(
+    src = "js-rpc-streams-ts-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-test.js"],
+    tags = ["resources:socket:1"],
+)
+
+wd_test(
+    src = "js-rpc-streams-crossflag-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-streams-crossflag-test.js"],
+)
+
+wd_test(
+    src = "js-rpc-streams-pollution-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-streams-pollution-test.js"],
+)
+
+wd_test(
     src = "js-rpc-params-ownership-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-params-ownership-test.js"],
@@ -657,6 +705,12 @@ wd_test(
     src = "persistent-stubs-test.wd-test",
     args = ["--experimental"],
     data = ["persistent-stubs-test.js"],
+)
+
+wd_test(
+    src = "ts-compression-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["ts-compression-streams-test.js"],
 )
 
 wd_test(
@@ -954,6 +1008,16 @@ wd_test(
 )
 
 wd_test(
+    src = "js-rpc-socket-streams-ts-test.wd-test",
+    args = [
+        "--experimental",
+        "--no-verbose",
+    ],
+    data = ["js-rpc-test.js"],
+    tags = ["resources:socket:1"],
+)
+
+wd_test(
     src = "outbound-interceptor-socket-test.wd-test",
     args = ["--experimental"],
     data = ["outbound-interceptor-socket-test.js"],
@@ -1128,6 +1192,17 @@ wd_test(
 )
 
 wd_test(
+    src = "worker-loader-wasm-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "test.wasm",
+        "worker-loader-wasm-test.js",
+    ],
+    # The test uses `import source` syntax, which eslint's parser does not yet support.
+    lint = False,
+)
+
+wd_test(
     size = "large",
     src = "worker-loader-limits-test.wd-test",
     args = ["--experimental"],
@@ -1278,6 +1353,16 @@ wd_test(
     src = "ts-webstreams-test.wd-test",
     args = ["--experimental"],
     data = ["ts-webstreams-test.js"],
+)
+
+wd_test(
+    # Normally a second or two: the test stops as soon as its counter proves it reached the
+    # window. "large" is for the case where that never happens and it runs out its own 30s
+    # budget instead.
+    size = "large",
+    src = "messageport-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["messageport-gc-test.js"],
 )
 
 wd_test(

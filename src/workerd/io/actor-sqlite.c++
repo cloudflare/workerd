@@ -1213,7 +1213,7 @@ const ActorSqlite::Hooks ActorSqlite::Hooks::DEFAULT = ActorSqlite::Hooks{};
 
 kj::Promise<void> ActorSqlite::Hooks::scheduleRun(
     kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) {
-  JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");
+  JSG_FAIL_REQUIRE(Error, "Alarms have not been configured for this Durable Object.");
 }
 
 kj::OneOf<kj::Maybe<ActorCacheOps::Value>, kj::Promise<kj::Maybe<ActorCacheOps::Value>>>

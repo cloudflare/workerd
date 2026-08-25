@@ -276,7 +276,8 @@ EventSource::EventSource(jsg::Lock& js)
       abortController(js.alloc<AbortController>(js)),
       readyState(State::CONNECTING) {}
 
-void EventSource::notifyError(jsg::Lock& js, const jsg::JsValue& error, bool reconnecting) {
+void EventSource::notifyError(
+    jsg::Lock& js, const jsg::JsValue& error, bool reconnecting, AlreadyReported alreadyReported) {
   if (readyState == State::CLOSED) return;
 
   // Abort the connection if it hasn't already been. This will be a non-op if the
@@ -288,35 +289,56 @@ void EventSource::notifyError(jsg::Lock& js, const jsg::JsValue& error, bool rec
   else
     readyState = State::CONNECTING;
 
-  // Dispatch the error event.
-  dispatchEventImpl(js, js.alloc<ErrorEvent>(js, error));
+  // Dispatch the error event. Report-only: the EventSource is already errored out at this
+  // point, so a throwing 'error' listener has its exception reported but triggers no
+  // further fail-fast reaction.
+  dispatchEventImpl(js, js.alloc<ErrorEvent>(js, error),
+      effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT));
 
-  // Log the error as an uncaught exception for debugging purposes.
-  IoContext::current().logUncaughtException(UncaughtExceptionSource::ASYNC_TASK, error);
+  if (alreadyReported == AlreadyReported::NO) {
+    // Log the error as an uncaught exception for debugging purposes.
+    IoContext::current().logUncaughtException(UncaughtExceptionSource::ASYNC_TASK, error);
+  }
 }
 
 void EventSource::notifyOpen(jsg::Lock& js) {
   if (readyState == State::CLOSED) return;
   readyState = State::OPEN;
-  dispatchEventImpl(js, js.alloc<OpenEvent>());
+  auto result = dispatchEventImpl(
+      js, js.alloc<OpenEvent>(), effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT));
+  KJ_IF_SOME(exception, result.firstException) {
+    // An 'open' listener threw. Its exception was reported (and the remaining listeners
+    // still ran); fail fast by erroring out the EventSource.
+    notifyError(js, exception.getHandle(js), false, AlreadyReported::YES);
+  }
 }
 
 void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messages) {
   if (readyState == State::CLOSED) return;
+  auto policy = effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT);
+  // Under PROPAGATE (spec_compliant_dispatch_exceptions disabled), the first throwing
+  // listener ends the dispatch and its exception lands in the catch handler below, which
+  // errors out the EventSource — rather than escaping into (and failing) the enclosing
+  // read-loop task with no 'error' event at all.
   js.tryCatch([&] {
     for (auto& message: messages) {
       auto data = kj::str(kj::delimited(kj::mv(message.data), "\n"_kjc));
       if (data.size() == 0) continue;
       kj::String type = kj::mv(message.event).orDefault([]() { return kj::str("message"); });
-      dispatchEventImpl(js,
+      auto result = dispatchEventImpl(js,
           js.alloc<MessageEvent>(js, kj::mv(type), js.str(data), kj::mv(message.id),
-              kj::none /** source **/, impl.map([](FetchImpl& i) -> jsg::Url& { return i.url; })));
+              kj::none /** source **/, impl.map([](FetchImpl& i) -> jsg::Url& { return i.url; }),
+              Trusted::YES),
+          policy);
+      KJ_IF_SOME(exception, result.firstException) {
+        // A listener threw under REPORT. Its exception was reported (and the remaining
+        // listeners for this event still ran); fail fast: error out the EventSource and
+        // drop the remaining messages in this batch.
+        notifyError(js, exception.getHandle(js), false, AlreadyReported::YES);
+        return;
+      }
     }
-  }, [&](jsg::Value exception) {
-    // If we end up with an exception being thrown in one of the event handlers, we will
-    // stop trying to process the messages and instead just error the EventSource.
-    notifyError(js, jsg::JsValue(exception.getHandle(js)));
-  });
+  }, [&](jsg::Value exception) { notifyError(js, jsg::JsValue(exception.getHandle(js))); });
 }
 
 void EventSource::reconnect(jsg::Lock& js) {
@@ -511,7 +533,7 @@ void EventSource::visitForGc(jsg::GcVisitor& visitor) {
   KJ_IF_SOME(i, impl) {
     visitor.visit(i.options.fetcher);
   }
-  visitor.visit(abortController, onopenValue, onmessageValue, onerrorValue);
+  visitor.visit(abortController);
 }
 
 void EventSource::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -521,9 +543,6 @@ void EventSource::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   }
   tracker.trackField("abortController", abortController);
   tracker.trackField("lastEventId", lastEventId);
-  tracker.trackField("onopen", onopenValue);
-  tracker.trackField("onmessage", onmessageValue);
-  tracker.trackField("onerror", onerrorValue);
 }
 
 }  // namespace workerd::api

@@ -24,8 +24,8 @@ importers:
         specifier: ^25.9.5
         version: 25.9.5
       capnp-es:
-        specifier: 0.0.14
-        version: 0.0.14(typescript@6.0.3)
+        specifier: 0.0.16
+        version: 0.0.16(typescript@6.0.3)
       chrome-remote-interface:
         specifier: ^0.34.0
         version: 0.34.0
@@ -1668,11 +1668,11 @@ packages:
   caniuse-lite@1.0.30001809:
     resolution: {integrity: sha512-xxWVywk6a6Arlk+hymeycyn/VgqEfLDxupvhH/xiY5SJ/18kmi9o6MiO320DCUzypORHLtvh0I4i04tUhCNHNQ==}
 
-  capnp-es@0.0.14:
-    resolution: {integrity: sha512-8lWj4GJISiqRSlAJGkWpI4Azib7QY5UDIkqxeHcI7aAnXVk9SFuWxl1Fme+2HhzNANV0WTJqwUZvvXvloc3sBA==}
+  capnp-es@0.0.16:
+    resolution: {integrity: sha512-pqhhnRqGfDdgHa+rz4JVO9j1jnkyqsHRYrD4RBtIwxCknYSRG7Mjs+x3IRfd20u+ZGS0IhW2L7cDv9ZcIkCYhQ==}
     hasBin: true
     peerDependencies:
-      typescript: ^5.7.3
+      typescript: ^5.7.3 || ^6.0.0
     peerDependenciesMeta:
       typescript:
         optional: true
@@ -4286,7 +4286,7 @@ snapshots:
 
   caniuse-lite@1.0.30001809: {}
 
-  capnp-es@0.0.14(typescript@6.0.3):
+  capnp-es@0.0.16(typescript@6.0.3):
     optionalDependencies:
       typescript: 6.0.3
 

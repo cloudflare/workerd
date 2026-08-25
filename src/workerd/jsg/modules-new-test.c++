@@ -1608,21 +1608,22 @@ KJ_TEST("Module source is decoded as UTF-8 across all encoding tiers") {
 // ======================================================================================
 
 KJ_TEST("Owned ESM source outlives its release points across encoding tiers") {
-  // The kj::Array-taking addEsmModule overload hands ownership of the UTF-8
-  // source buffer to the module. Non-ASCII sources are transcoded to an owned
+  // The Arc<OwnedAscii> addEsmModule overload shares ownership of the UTF-8 source
+  // buffer with the module. Non-ASCII sources are transcoded to an owned
   // V8-compatible representation on first compile, after which the UTF-8
-  // original is released; pure-ASCII owned sources must be retained because
-  // the raw buffer directly backs the external one-byte string. This test
-  // asserts correctness across repeated resolution; a buffer released too
-  // early (or read after release) is observed by ASAN builds.
+  // original is released; pure-ASCII owned sources become the shared encoded
+  // representation. V8 external strings retain shared ownership independently
+  // of the module. This test asserts correctness across repeated resolution; a
+  // buffer released too early (or read after release) is observed by ASAN builds.
   PREAMBLE([&](Lock& js) {
     CompilationObserver compilationObserver;
 
     ModuleBundle::BundleBuilder bundleBuilder(BASE);
-    bundleBuilder.addEsmModule(
-        "latin1-owned", kj::heapArray<const char>("export default 'caf\xc3\xa9';"_kj.asArray()));
-    bundleBuilder.addEsmModule(
-        "ascii-owned", kj::heapArray<const char>("export default 'plain';"_kj.asArray()));
+    bundleBuilder.addEsmModule("latin1-owned",
+        kj::arc<OwnedAscii>(
+            kj::heapArray<const char>("export default 'caf\xc3\xa9';"_kj.asArray())));
+    bundleBuilder.addEsmModule("ascii-owned",
+        kj::arc<OwnedAscii>(kj::heapArray<const char>("export default 'plain';"_kj.asArray())));
 
     auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
     auto attached = registry->attachToIsolate(js, compilationObserver);
@@ -1637,6 +1638,51 @@ KJ_TEST("Owned ESM source outlives its release points across encoding tiers") {
       // buffer.
       KJ_ASSERT(kj::str(ModuleRegistry::resolve(js, "file:///latin1-owned")) == "caf\xc3\xa9");
       KJ_ASSERT(kj::str(ModuleRegistry::resolve(js, "file:///ascii-owned")) == "plain");
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("Compiled ESM functions outlive owned source across encoding tiers") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+    kj::Vector<JsRef<JsFunction>> functions;
+
+    JSG_TRY(js) {
+      {
+        ModuleBundle::BundleBuilder bundleBuilder(BASE);
+        bundleBuilder.addEsmModule("ascii-lifetime",
+            kj::arc<OwnedAscii>(kj::heapArray<const char>(
+                "export default function deferred() { return 'plain'; }"_kj.asArray())));
+        bundleBuilder.addEsmModule("latin1-lifetime",
+            kj::arc<OwnedAscii>(kj::heapArray<const char>(
+                "export default function deferred() { return 'caf\xc3\xa9'; }"_kj.asArray())));
+        bundleBuilder.addEsmModule("utf16-lifetime",
+            kj::arc<OwnedAscii>(kj::heapArray<const char>(
+                "export default function deferred() { return '\xe9\x83\xa8\xe5\x93\x81 \xf0\x9f\x8e\x89'; }"_kj
+                    .asArray())));
+
+        auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+        auto attached = registry->attachToIsolate(js, compilationObserver);
+
+        for (auto specifier: {"file:///ascii-lifetime"_kj, "file:///latin1-lifetime"_kj,
+               "file:///utf16-lifetime"_kj}) {
+          auto value = ModuleRegistry::resolve(js, specifier);
+          auto function = KJ_ASSERT_NONNULL(value.tryCast<JsFunction>());
+          functions.add(JsRef<JsFunction>(js, function));
+        }
+      }
+
+      // The exported functions remain live in V8 after the registry, bundles,
+      // and their owned source buffers have been destroyed.
+      KJ_ASSERT(kj::str(functions[0].getHandle(js).call(js, js.null())) == "plain");
+      KJ_ASSERT(kj::str(functions[1].getHandle(js).call(js, js.null())) == "caf\xc3\xa9");
+      KJ_ASSERT(kj::str(functions[2].getHandle(js).call(js, js.null())) ==
+          "\xe9\x83\xa8\xe5\x93\x81 \xf0\x9f\x8e\x89");
     }
     JSG_CATCH(exception) {
       js.throwException(kj::mv(exception));
@@ -2161,8 +2207,9 @@ KJ_TEST("UNWRAP_DEFAULT honors module.exports, marker order, and builtin fallbac
         [](const ResolveContext& context) -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
       auto source = kj::heapArray<const char>(
           "export default 'fb-default'; export const named = 'fb';"_kj.asArray());
-      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(Module::newEsm(
-          context.normalizedSpecifier.clone(), Module::Type::FALLBACK, kj::mv(source)));
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(
+          Module::newEsm(context.normalizedSpecifier.clone(), Module::Type::FALLBACK,
+              kj::arc<OwnedAscii>(kj::mv(source))));
     });
 
     auto registry = ModuleRegistry::Builder(BASE, ModuleRegistry::Builder::Options::ALLOW_FALLBACK)
@@ -3472,6 +3519,76 @@ KJ_TEST("Fallback receives REQUIRE source through require() resolution") {
   });
 
   KJ_ASSERT(fallbackCalled);
+}
+
+// ======================================================================================
+
+KJ_TEST("Dynamic import from a redirected fallback module works") {
+  // Reproduces the bug where a module loaded via a fallback redirect fails to
+  // perform a dynamic import because V8's script origin (the module's canonical
+  // URL) does not match the import specifier stored in the registry's
+  // instantiation table.
+  //
+  // The fallback simulates a bare-specifier redirect:
+  //   file:///pkg  -->  301 to file:///canonical/pkg/index.mjs
+  //   file:///canonical/pkg/index.mjs  -->  ESM with `import("./dep.mjs")`
+  //   file:///canonical/pkg/dep.mjs    -->  ESM exporting a value
+  //
+  // Without the fix, the dynamic import fails with "Referring module not found
+  // in the registry: file:///canonical/pkg/index.mjs".
+
+  const auto pkg = "file:///pkg"_url;
+  const auto canonical = "file:///canonical/pkg/index.mjs"_url;
+  const auto dep = "file:///canonical/pkg/dep.mjs"_url;
+
+  // Source strings must outlive the Module objects that reference them
+  // (the ArrayPtr<const char> overload of newEsm does not take ownership).
+  auto pkgSource = kj::str("export async function load() { return await import('./dep.mjs'); }");
+  auto depSource = kj::str("export const value = 'ok';");
+
+  auto fallback = ModuleBundle::newFallbackBundle(
+      [&](const ResolveContext& context) -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+    if (context.normalizedSpecifier == pkg) {
+      // Redirect bare specifier to canonical URL.
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::str(canonical.getHref()));
+    }
+    if (context.normalizedSpecifier == canonical) {
+      // The package entry point: dynamically imports a sibling module.
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(
+          Module::newEsm(canonical.clone(), Module::Type::FALLBACK, pkgSource.asPtr()));
+    }
+    if (context.normalizedSpecifier == dep) {
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(
+          Module::newEsm(dep.clone(), Module::Type::FALLBACK, depSource.asPtr()));
+    }
+    return kj::none;
+  });
+
+  CompilationObserver compilationObserver;
+
+  // An entry module that imports the bare specifier and calls load().
+  ModuleBundle::BundleBuilder bundleBuilder(BASE);
+  auto entry = kj::str("import { load } from 'pkg';\n"
+                       "const m = await load();\n"
+                       "export default m.value;\n");
+  bundleBuilder.addEsmModule("entry", entry);
+
+  auto registry = ModuleRegistry::Builder(BASE, ModuleRegistry::Builder::Options::ALLOW_FALLBACK)
+                      .add(bundleBuilder.finish())
+                      .add(kj::mv(fallback))
+                      .finish();
+
+  PREAMBLE([&](Lock& js) {
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    JSG_TRY(js) {
+      auto value = ModuleRegistry::resolve(js, "file:///entry", "default"_kjc);
+      KJ_ASSERT(kj::str(value) == "ok");
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
+  });
 }
 
 }  // namespace

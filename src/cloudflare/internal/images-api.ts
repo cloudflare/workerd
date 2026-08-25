@@ -13,6 +13,27 @@ type Fetcher = {
   fetch: typeof fetch;
 };
 
+function isTextSource(source: ImageSource): source is TextRasterize {
+  return !(source instanceof ReadableStream);
+}
+
+function serializeTextSource(source: TextRasterize): string {
+  const obj: Record<string, string | number | { url: string }> = {
+    text: source.content,
+    font: source.options.font,
+  };
+
+  if (source.options.size !== undefined) {
+    obj.size = source.options.size;
+  }
+
+  if (source.options.color !== undefined) {
+    obj.color = source.options.color;
+  }
+
+  return JSON.stringify(obj);
+}
+
 type TargetedTransform = ImageTransform & {
   imageIndex: number;
 };
@@ -61,12 +82,11 @@ class TransformationResultImpl implements ImageTransformationResult {
       : stream;
   }
 
-  response(): Response {
-    return new Response(this.image(), {
-      headers: {
-        'content-type': this.contentType(),
-      },
-    });
+  response(options?: ImageTransformationResponseOptions): Response {
+    const headers = new Headers(options?.headers);
+    headers.set('content-type', this.contentType());
+
+    return new Response(this.image(), { headers });
   }
 }
 
@@ -81,14 +101,14 @@ class DrawTransformer {
 
 class ImageTransformerImpl implements ImageTransformer {
   readonly #fetcher: Fetcher;
-  readonly #stream: ReadableStream<Uint8Array>;
+  readonly #source: ImageSource;
 
   #transforms: (ImageTransform | DrawTransformer)[];
   #consumed: boolean;
 
-  constructor(fetcher: Fetcher, stream: ReadableStream<Uint8Array>) {
+  constructor(fetcher: Fetcher, source: ImageSource) {
     this.#fetcher = fetcher;
-    this.#stream = stream;
+    this.#source = source;
     this.#transforms = [];
     this.#consumed = false;
   }
@@ -128,7 +148,15 @@ class ImageTransformerImpl implements ImageTransformer {
       const formData = new StreamableFormData();
 
       this.#consume();
-      formData.append('image', this.#stream, { type: 'file' });
+      if (isTextSource(this.#source)) {
+        span.setAttribute('cloudflare.images.canvas.type', 'text');
+        formData.append('text_input', serializeTextSource(this.#source));
+      } else {
+        span.setAttribute('cloudflare.images.canvas.type', 'image');
+        formData.append('image', this.#source as ReadableStream<Uint8Array>, {
+          type: 'file',
+        });
+      }
 
       this.#serializeTransforms(formData, span);
 
@@ -183,11 +211,20 @@ class ImageTransformerImpl implements ImageTransformer {
 
   #serializeTransforms(formData: StreamableFormData, span: Span): void {
     const transforms: (TargetedTransform | DrawCommand)[] = [];
+    const overlayStats = { text: 0, image: 0 };
 
     // image 0 is the canvas, so the first draw_image has index 1
     let drawImageIndex = 1;
-    function appendDrawImage(stream: ReadableStream): number {
-      formData.append('draw_image', stream, { type: 'file' });
+    function appendDrawImage(source: ImageSource): number {
+      if (isTextSource(source)) {
+        overlayStats.text++;
+        formData.append('draw_text', serializeTextSource(source));
+      } else {
+        overlayStats.image++;
+        formData.append('draw_image', source as ReadableStream<Uint8Array>, {
+          type: 'file',
+        });
+      }
       return drawImageIndex++;
     }
 
@@ -206,7 +243,7 @@ class ImageTransformerImpl implements ImageTransformer {
         } else {
           // Drawn child image
           // Set the input for the drawn image on the form
-          const drawImageIndex = appendDrawImage(transform.child.#stream);
+          const drawImageIndex = appendDrawImage(transform.child.#source);
 
           // Tell the backend to run any transforms (possibly involving more draws)
           // required to build this child
@@ -233,6 +270,15 @@ class ImageTransformerImpl implements ImageTransformer {
         JSON.stringify(transforms)
       );
     }
+
+    // Track overlay statistics for observability
+    if (overlayStats.text > 0) {
+      span.setAttribute('cloudflare.images.overlays.text', overlayStats.text);
+    }
+    if (overlayStats.image > 0) {
+      span.setAttribute('cloudflare.images.overlays.image', overlayStats.image);
+    }
+
     formData.append('transforms', JSON.stringify(transforms));
   }
 }
@@ -252,6 +298,9 @@ interface ServiceEntrypointStub {
     options?: ImageUploadOptions
   ): Promise<ImageMetadata>;
   list(options?: ImageListOptions): Promise<ImageList>;
+  createDirectUpload(
+    options?: ImageDirectUploadOptions
+  ): Promise<ImageDirectUploadResult>;
 }
 
 class HostedImagesBindingImpl implements HostedImagesBinding {
@@ -274,6 +323,12 @@ class HostedImagesBindingImpl implements HostedImagesBinding {
 
   async list(options?: ImageListOptions): Promise<ImageList> {
     return this.#fetcher.list(options);
+  }
+
+  async createDirectUpload(
+    options?: ImageDirectUploadOptions
+  ): Promise<ImageDirectUploadResult> {
+    return this.#fetcher.createDirectUpload(options);
   }
 }
 
@@ -357,6 +412,10 @@ class ImagesBindingImpl
         : stream;
 
     return new ImageTransformerImpl(this.#fetcher, decodedStream);
+  }
+
+  text(content: string, options: TextOptions): ImageTransformer {
+    return new ImageTransformerImpl(this.#fetcher, { content, options });
   }
 }
 
