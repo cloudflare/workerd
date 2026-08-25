@@ -5,6 +5,7 @@
 #include "sockets.h"
 
 #include "global-scope.h"
+#include "streams/readable.h"
 #include "streams/standard.h"
 #include "system-streams.h"
 #include "worker-rpc.h"
@@ -309,6 +310,41 @@ DisconnectWatcher watchForDisconnect(kj::AsyncIoStream& connection) {
   return DisconnectWatcher{.disconnected = kj::mv(paf.promise), .watchTask = kj::mv(watchTask)};
 }
 
+// Builds a value-mode ReadableStream whose pull() performs exactly one DatagramChannel::receive()
+// call and enqueues exactly what came back as one Datagram chunk. Uses
+// JsReadableStream::fromPull() rather than create(), since create() requires a byte-oriented
+// ReadableStreamSource.
+JsReadableStream newDatagramReadableStream(jsg::Lock& js, kj::Rc<DatagramChannel> channel) {
+  return JsReadableStream::fromPull(js,
+      [channel = kj::mv(channel)](jsg::Lock& js) mutable -> jsg::Promise<kj::Maybe<jsg::Value>> {
+    auto& ioContext = IoContext::current();
+    return ioContext.awaitIo(js, channel->receive(),
+        [](jsg::Lock& js, kj::Maybe<kj::Array<kj::byte>> datagram) -> kj::Maybe<jsg::Value> {
+      KJ_IF_SOME(bytes, datagram) {
+        auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<Datagram>>());
+        auto data = jsg::JsUint8Array::create(js, bytes.asPtr());
+        return js.v8Ref<v8::Value>(handler.wrap(js, js.alloc<Datagram>(js, data)));
+      }
+      return kj::none;
+    });
+  });
+}
+
+// Builds a value-mode WritableStream whose write() sends exactly one outbound datagram per call.
+// Unlike a byte-stream sink, chunks are never merged or split: each write() call becomes exactly
+// one DatagramChannel::send() call. Only Datagram instances are accepted -- writing a raw
+// Uint8Array or any other value is a TypeError, since UDP's chunk boundaries are packet
+// boundaries, unlike a byte stream's.
+JsWritableStream newDatagramWritableStream(jsg::Lock& js, kj::Rc<DatagramChannel> channel) {
+  return JsWritableStream::fromWrite(js,
+      [channel = kj::mv(channel)](jsg::Lock& js, jsg::JsValue chunk) mutable -> jsg::Promise<void> {
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<Datagram>>());
+    auto datagram = JSG_REQUIRE_NONNULL(handler.tryUnwrap(js, chunk), TypeError,
+        "This socket's writable stream only accepts Datagram instances.");
+    return IoContext::current().awaitIo(js, channel->send(datagram->getData(js).asArrayPtr()));
+  });
+}
+
 }  // namespace
 
 // Forward declarations
@@ -378,6 +414,43 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
   return setupSocket(js, kj::mv(connection), kj::mv(remoteAddress), kj::mv(localAddress),
       kj::mv(options), kj::mv(tlsStarter), secureTransport, SocketProtocol::TCP, kj::mv(domain),
       isDefaultFetchPort, kj::mv(maybeOpenedPrPair));
+}
+
+jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
+    kj::Own<DatagramChannel> channelOwn,
+    kj::Maybe<kj::String> remoteAddress,
+    kj::Maybe<kj::String> localAddress) {
+  auto& ioContext = IoContext::current();
+
+  kj::Rc<DatagramChannel> channel(kj::mv(channelOwn));
+
+  auto closedPrPair = js.newPromiseAndResolver<void>();
+  closedPrPair.promise.markAsHandled(js);
+
+  JsReadableStream readable(newDatagramReadableStream(js, channel.addRef()));
+  // UDP sockets have no allowHalfOpen option: `closed` always resolves from read-EOF once the
+  // flow ends, mirroring the allowHalfOpen == false behavior for TCP sockets below.
+  auto eofPromise = readable.onEof(js);
+
+  auto openedPrPair = js.newPromiseAndResolver<SocketInfo>();
+  openedPrPair.promise.markAsHandled(js);
+  auto writable = newDatagramWritableStream(js, channel.addRef());
+
+  auto result = js.alloc<Socket>(js, ioContext, kj::mv(channel), kj::mv(remoteAddress),
+      kj::mv(localAddress), kj::mv(readable), kj::mv(writable), kj::mv(closedPrPair),
+      kj::NEVER_DONE /* watchForDisconnectTask: UDP has no peer-disconnect signal; `closed`
+                        resolves from read-EOF (wired below) instead. */
+      ,
+      kj::none /* options */, kj::heap<kj::TlsStarterCallback>() /* no TLS for UDP */,
+      SecureTransportKind::OFF, SocketProtocol::UDP, kj::none /* domain */,
+      false /* isDefaultFetchPort */, kj::mv(openedPrPair));
+
+  result->handleReadableEof(js, kj::mv(eofPromise));
+  // The flow already exists by the time a Socket is minted for it, so `opened` resolves
+  // immediately, mirroring the inbound TCP connect() handler path.
+  result->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
+  result->trackOpenedState(js);
+  return result;
 }
 
 jsg::Ref<Socket> connectImpl(jsg::Lock& js,

@@ -406,6 +406,17 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     bool isDefaultFetchPort,
     kj::Maybe<jsg::PromiseResolverPair<SocketInfo>> maybeOpenedPrPair);
 
+// Builds a datagram (UDP) Socket around `channel`. Unlike setupSocket(), the readable and
+// writable streams are value-mode: each chunk read or written corresponds to exactly one
+// datagram, since kj::AsyncIoStream's byte-stream semantics cannot preserve datagram boundaries.
+// There is no secureTransport/startTls surface (always SecureTransportKind::OFF) and no
+// allowHalfOpen option: `closed` resolves once the readable side reaches EOF (the channel's flow
+// has ended) and the writable side has been closed in response.
+jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
+    kj::Own<DatagramChannel> channel,
+    kj::Maybe<kj::String> remoteAddress,
+    kj::Maybe<kj::String> localAddress);
+
 jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,
     AnySocketAddress address,
