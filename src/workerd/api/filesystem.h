@@ -334,7 +334,8 @@ class FileSystemFileHandle final: public FileSystemHandle {
   }
 
  private:
-  mutable size_t writableCount = 0;
+  // Grants FileSystemWritableFileStream (and its State) access to the protected
+  // getLocator()/getVfs() inherited from FileSystemHandle.
   friend class FileSystemWritableFileStream;
 };
 
