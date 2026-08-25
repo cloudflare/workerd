@@ -707,11 +707,14 @@ kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value) {
           const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG)) {
     return kj::none;
   }
-  auto* ptr = static_cast<Wrappable*>(
+  auto* base =
       reinterpret_cast<::workerd::jsg::Wrappable*>(v8_obj->GetAlignedPointerFromInternalField(
           ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
           static_cast<v8::EmbedderDataTypeTag>(
-              ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX))));
+              ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
+  if (base == nullptr) return kj::none;
+  auto* ptr = dynamic_cast<Wrappable*>(base);
+  if (ptr == nullptr) return kj::none;
   return ptr->toRc();
 }
 

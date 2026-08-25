@@ -32,6 +32,7 @@ namespace workerd {
 struct TestContext: public jsg::Object, public jsg::ContextGlobal {
   JSG_RESOURCE_TYPE(TestContext) {}
 };
+struct TestRustTaggedWrappable final: public jsg::Wrappable {};
 JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext);
 
 namespace rust::jsg_test {
@@ -149,6 +150,19 @@ void request_gc(Isolate* isolate, GcType gc_type) {
       static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
 
   return ::workerd::rust::jsg::to_ffi(v8::Local<v8::Value>::Cast(obj));
+}
+
+::workerd::rust::jsg::Local create_cpp_rust_tagged_object(Isolate* isolate) {
+  auto tmpl = v8::ObjectTemplate::New(isolate);
+  tmpl->SetInternalFieldCount(::workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT);
+  auto object = ::workerd::jsg::check(tmpl->NewInstance(isolate->GetCurrentContext()));
+  auto wrappable = kj::refcounted<TestRustTaggedWrappable>();
+  wrappable->attachWrapper(isolate, object, false);
+  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
+  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
+      tagAddress,
+      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
+  return ::workerd::rust::jsg::to_ffi(v8::Local<v8::Value>::Cast(object));
 }
 
 }  // namespace rust::jsg_test

@@ -184,3 +184,21 @@ fn unwrap_resource_rejects_plain_js_object() {
         Ok(())
     });
 }
+
+#[test]
+fn unwrap_resource_rejects_rust_tagged_cpp_wrappable() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let object = crate::Harness::create_cpp_rust_tagged_object(lock);
+
+        let result: Option<kj_rs::KjRc<jsg::v8::ffi::Wrappable>> =
+            // SAFETY: isolate is valid and locked, value is a valid Local.
+            unsafe { jsg::v8::ffi::unwrap_resource(lock.isolate().as_ffi(), object.into_ffi()) }
+                .into();
+        assert!(
+            result.is_none(),
+            "Rust unwrap accepted a non-Rust native object"
+        );
+        Ok(())
+    });
+}

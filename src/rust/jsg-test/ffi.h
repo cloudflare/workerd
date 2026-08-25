@@ -63,6 +63,7 @@ void request_gc(Isolate* isolate, GcType gc_type);
 // Creates a V8 object with the C++ WORKERD_WRAPPABLE_TAG set in its internal fields.
 // Used to test that Rust unwrap correctly rejects non-Rust wrappable objects.
 ::workerd::rust::jsg::Local create_cpp_tagged_object(Isolate* isolate);
+::workerd::rust::jsg::Local create_cpp_rust_tagged_object(Isolate* isolate);
 
 }  // namespace rust::jsg_test
 

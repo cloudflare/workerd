@@ -61,6 +61,8 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn create_cpp_tagged_object(isolate: *mut Isolate) -> Local;
 
+        pub unsafe fn create_cpp_rust_tagged_object(isolate: *mut Isolate) -> Local;
+
     }
 }
 
@@ -231,6 +233,14 @@ impl Harness {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe {
             let local = ffi::create_cpp_tagged_object(lock.isolate().as_ffi());
+            v8::Local::from_ffi(lock.isolate(), local)
+        }
+    }
+
+    pub fn create_cpp_rust_tagged_object<'a>(lock: &mut jsg::Lock) -> v8::Local<'a, v8::Value> {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe {
+            let local = ffi::create_cpp_rust_tagged_object(lock.isolate().as_ffi());
             v8::Local::from_ffi(lock.isolate(), local)
         }
     }
