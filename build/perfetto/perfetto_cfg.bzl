@@ -49,7 +49,7 @@ PERFETTO_CONFIG = struct(
         # Target exposing platform-specific functionality for base. This is
         # overridden in Google internal builds.
         base_platform = ["//:perfetto_base_default_platform"],
-        zlib = ["@workerd//src/workerd/util:zlib"],
+        zlib = ["@zlib//:zlib"],
         re2 = [],
         expat = ["@perfetto_dep_expat//:expat"],
         jsoncpp = ["@perfetto_dep_jsoncpp//:jsoncpp"],

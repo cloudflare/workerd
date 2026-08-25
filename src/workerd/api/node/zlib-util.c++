@@ -209,10 +209,12 @@ kj::Maybe<CompressionError> ZlibContext::setDictionary() {
   switch (mode) {
     case ZlibMode::DEFLATE:
     case ZlibMode::DEFLATERAW:
-      err = deflateSetDictionary(&core.raw(), dictionary.begin(), dictionary.size());
+      err = core.getZlibBackend().setDeflateDictionary(
+          &core.raw(), dictionary.begin(), dictionary.size());
       break;
     case ZlibMode::INFLATERAW:
-      err = inflateSetDictionary(&core.raw(), dictionary.begin(), dictionary.size());
+      err = core.getZlibBackend().setInflateDictionary(
+          &core.raw(), dictionary.begin(), dictionary.size());
       break;
     default:
       break;
@@ -367,7 +369,8 @@ void ZlibContext::work() {
       // SetDictionary, don't repeat that here)
       if (mode != ZlibMode::INFLATERAW && err == Z_NEED_DICT && !dictionary.empty()) {
         // Load it
-        err = inflateSetDictionary(&core.raw(), dictionary.begin(), dictionary.size());
+        err = core.getZlibBackend().setInflateDictionary(
+            &core.raw(), dictionary.begin(), dictionary.size());
         if (err == Z_OK) {
           // And try to decode again
           err = core.run(flush);
@@ -405,7 +408,7 @@ kj::Maybe<CompressionError> ZlibContext::setParams(int _level, int _strategy) {
   switch (mode) {
     case ZlibMode::DEFLATE:
     case ZlibMode::DEFLATERAW:
-      err = deflateParams(&core.raw(), _level, _strategy);
+      err = core.getZlibBackend().setDeflateParams(&core.raw(), _level, _strategy);
       break;
     default:
       break;

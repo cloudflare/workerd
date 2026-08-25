@@ -271,7 +271,6 @@ cc_library(
     name = "compression_utils_portable",
     srcs = ["google/compression_utils_portable.cc"],
     hdrs = ["google/compression_utils_portable.h"],
-    local_defines = ["CHROMIUM_ZLIB_NO_CHROMECONF"],
     visibility = ["//visibility:public"],
-    deps = [":zlib_common_headers"],
+    deps = [":zlib"],
 )

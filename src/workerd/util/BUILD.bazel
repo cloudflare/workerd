@@ -24,7 +24,6 @@ selects.config_setting_group(
 wd_cc_library(
     name = "zlib",
     hdrs = ["zlib.h"],
-    defines = ["CHROMIUM_ZLIB_NO_CHROMECONF"],
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/zlib-rs",

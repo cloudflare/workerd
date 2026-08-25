@@ -115,7 +115,11 @@ namespace workerd::util {
      disabled, deserialization constructs legacy streams in place, exactly as before the gate      \
      existed; the typescript_implemented_streams compat flag requires this gate to receive         \
      streams over RPC (that combination is rejected, not degraded). */                             \
-  V(RPC_EXTERNALS_HYDRATION)
+  V(RPC_EXTERNALS_HYDRATION)                                                                       \
+  /* Back compression streams with memory-safe Rust implementations instead of the native C      \
+     libraries. Currently covers zlib (zlib-rs) for node:zlib and web CompressionStream; the     \
+     native implementations remain the default. */                                               \
+  V(COMPRESSION_RS)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
