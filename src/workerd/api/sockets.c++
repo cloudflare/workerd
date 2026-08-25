@@ -1242,3 +1242,54 @@ jsg::Promise<jsg::Ref<Fetcher>> SocketsModule::internalNewHttpClient(
       }));
 }
 }  // namespace workerd::api
+
+namespace workerd {
+
+namespace {
+
+// Mirrors NeuterableIoStreamImpl (src/workerd/util/stream-utils.c++).
+class NeuterableDatagramChannelImpl final: public NeuterableDatagramChannel {
+ public:
+  NeuterableDatagramChannelImpl(DatagramChannel& inner): inner(&inner) {}
+
+  void neuter(kj::Exception reason) override {
+    if (inner.is<DatagramChannel*>()) {
+      inner = reason.clone();
+      if (!canceler.isEmpty()) {
+        canceler.cancel(kj::mv(reason));
+      }
+    }
+  }
+
+  kj::Promise<kj::Maybe<kj::Array<kj::byte>>> receive() override {
+    return canceler.wrap(getChannel().receive());
+  }
+
+  kj::Promise<void> send(kj::ArrayPtr<const kj::byte> datagram) override {
+    return canceler.wrap(getChannel().send(datagram));
+  }
+
+ private:
+  kj::OneOf<DatagramChannel*, kj::Exception> inner;
+  kj::Canceler canceler;
+
+  DatagramChannel& getChannel() {
+    KJ_SWITCH_ONEOF(inner) {
+      KJ_CASE_ONEOF(channel, DatagramChannel*) {
+        return *channel;
+      }
+      KJ_CASE_ONEOF(exception, kj::Exception) {
+        kj::throwFatalException(exception.clone());
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+};
+
+}  // namespace
+
+kj::Rc<NeuterableDatagramChannel> newNeuterableDatagramChannel(DatagramChannel& inner) {
+  return kj::rc<NeuterableDatagramChannelImpl>(inner);
+}
+
+}  // namespace workerd

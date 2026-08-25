@@ -10,6 +10,43 @@
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
 
+#include <kj/refcount.h>
+
+namespace workerd {
+
+// A single logical UDP flow between a peer and this side, used to deliver datagram-shaped
+// connections to a Worker's connect() handler. Unlike kj::AsyncIoStream, this interface has no
+// byte-stream semantics: each receive() resolves to exactly one datagram (or none, once the flow
+// has ended), and each send() transmits exactly one, so callers cannot accidentally merge or split
+// datagrams the way partial tryRead()/write() calls would allow.
+class DatagramChannel {
+ public:
+  virtual ~DatagramChannel() noexcept(false) = default;
+
+  // Resolves with the next inbound datagram, or kj::none once the flow has ended (e.g. an idle
+  // timeout). Must not be called again after resolving kj::none, and must not have more than one
+  // outstanding call at a time.
+  virtual kj::Promise<kj::Maybe<kj::Array<kj::byte>>> receive() = 0;
+
+  // Sends one outbound datagram to the peer.
+  virtual kj::Promise<void> send(kj::ArrayPtr<const kj::byte> datagram) = 0;
+};
+
+// A DatagramChannel wrapper that can be disconnected, mirroring
+// workerd::NeuterableIoStream (src/workerd/util/stream-utils.h). Used when a DatagramChannel is
+// borrowed by reference for the duration of a single dispatch (see
+// ServiceWorkerGlobalScope::connectUdp()): the wrapper forwards to the real channel until
+// neuter()'d, at which point further calls fail cleanly instead of touching a reference that may
+// no longer be meaningful to use (e.g. after the dispatch's own promise has settled).
+class NeuterableDatagramChannel: public DatagramChannel, public kj::Refcounted {
+ public:
+  virtual void neuter(kj::Exception ex) = 0;
+};
+
+kj::Rc<NeuterableDatagramChannel> newNeuterableDatagramChannel(DatagramChannel&);
+
+}  // namespace workerd
+
 namespace workerd::api {
 
 class Fetcher;
