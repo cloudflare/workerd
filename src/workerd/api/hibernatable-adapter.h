@@ -35,7 +35,7 @@ class HibernatableWebSocketAdapter final: public WebSocketAdapter {
   // available (`HibernationManager::acceptWebSocket` does not currently plumb one through).
   // When the implementation actually needs JS state, it can grab the lock from the ambient
   // IoContext.
-  HibernatableWebSocketAdapter(WebSocket& shell, kj::WebSocket& ws, kj::Array<kj::StringPtr> tags);
+  HibernatableWebSocketAdapter(WebSocket& shell, kj::WebSocket& ws, kj::Array<kj::String> tags);
 
   ~HibernatableWebSocketAdapter() noexcept(false);
 
@@ -67,7 +67,7 @@ class HibernatableWebSocketAdapter final: public WebSocketAdapter {
   bool isHibernatable() override;
   void setObserver(kj::Own<WebSocketObserver> observer) override;
 
-  kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::StringPtr> tags) override;
+  kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags) override;
   void initiateHibernatableRelease(jsg::Lock& js,
       kj::Own<kj::WebSocket> ws,
       kj::Array<kj::String> tags,
