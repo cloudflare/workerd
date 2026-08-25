@@ -1,5 +1,7 @@
 src/workerd/io/tracer.c++
   s_313a31aedf23dd::t_b300d64e591d4c 8,483,489-501
+src/workerd/io/incoming-request-test.c++
+  s_ab4e43acd62623::t_3ba9de6662a95e 26-85,150-176,178-179,181-201,207-208
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -12,6 +14,14 @@ src/workerd/io/tracer.c++
         "tool": "opencode",
         "id": "ses_fcbe3c50fffe2n0SS9S2tgJDBh",
         "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_ab4e43acd62623": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0dd95e56cffeOLXlCNwX9ixaK3",
+        "model": "claude-opus-4-8"
       },
       "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
     }
