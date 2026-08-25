@@ -7337,6 +7337,8 @@ uint defaultPortFor(config::Socket::Reader sock) {
       return 443;
     case config::Socket::TCP:
       return 0;
+    case config::Socket::UDP:
+      return 0;
   }
   return 0;
 }
@@ -7370,6 +7372,12 @@ kj::Maybe<Server::SocketTypeConfig> Server::parseSocketType(
       }
       return kj::mv(result);
     }
+    case config::Socket::UDP: {
+      // listenOnSockets() handles UDP sockets in its own branch, before parseSocketType() is
+      // called, since UDP binds a DatagramPort rather than listening for connections. This case
+      // should be unreachable.
+      KJ_UNREACHABLE;
+    }
   }
   reportConfigError(kj::str("Encountered unknown socket type in \"", name,
       "\". Was the config compiled with a newer version of the schema?"));
@@ -7402,6 +7410,20 @@ kj::Promise<void> Server::bindSockets(config::Config::Reader config) {
           "\" has no address in the config, so must be specified on the "
           "command line with `--socket-addr`."));
       boundSockets.add(kj::none);
+      continue;
+    }
+
+    if (sock.which() == config::Socket::UDP) {
+      if (listenerOverride != kj::none) {
+        reportConfigError(kj::str("Socket \"", name,
+            "\" is a UDP socket; --socket-fd overrides (which pass a listening "
+            "connection-oriented socket) are not supported for it."));
+        boundSockets.add(kj::none);
+        continue;
+      }
+
+      auto parsed = co_await network.parseAddress(addrStr, defaultPortFor(sock));
+      boundSockets.add(BoundSocket{parsed->bindDatagramPort(), kj::mv(addrStr)});
       continue;
     }
 
@@ -7464,6 +7486,30 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
     }
 
     kj::Own<Service> service = lookupService(sock.getService(), kj::str("Socket \"", name, "\""));
+
+    if (sock.which() == config::Socket::UDP) {
+      auto idleTimeout = sock.getUdp().getIdleTimeoutMs() * kj::MILLISECONDS;
+
+      // Server owns and cancels its listener tasks before teardown, so `this` cannot outlive it.
+      auto handle = kj::coCapture(
+          [this, service = kj::mv(service), name = kj::mv(name), addrStr = kj::mv(addrStr),
+              idleTimeout](kj::Own<kj::DatagramPort> port) mutable -> kj::Promise<void> {
+        TRACE_EVENT("workerd", "setup listenUdp");
+        KJ_IF_SOME(stream, controlOverride) {
+          auto message = kj::str(
+              "{\"event\":\"listen\",\"socket\":\"", name, "\",\"port\":", port->getPort(), "}\n");
+          try {
+            stream->write(message.asBytes());
+          } catch (kj::Exception& e) {
+            KJ_LOG(ERROR, e);
+          }
+        }
+
+        co_await listenUdp(kj::mv(port), kj::mv(service), addrStr, idleTimeout);
+      });
+      tasks.add(handle(kj::mv(datagramPort)).exclusiveJoin(forkedDrainWhen.addBranch()));
+      continue;
+    }
 
     auto maybeSocketConfig = parseSocketType(sock, name);
     if (maybeSocketConfig == kj::none) continue;
