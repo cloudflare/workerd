@@ -15,10 +15,7 @@ type Fetcher = {
 
 function isTextSource(source: ImageSource): source is TextRasterize {
   return (
-    typeof source === 'object' &&
-    source !== null &&
-    'content' in source &&
-    'options' in source
+    typeof source === 'object' && 'content' in source && 'options' in source
   );
 }
 

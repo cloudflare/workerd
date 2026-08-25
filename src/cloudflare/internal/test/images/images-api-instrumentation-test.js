@@ -19,7 +19,6 @@ export const test = {
     // Use the helper with mapFn to normalize dynamic multipart boundaries
     await runInstrumentationTest(state, expectedSpans, {
       testName: 'Images instrumentation',
-
       mapFn: (span) => {
         const contentType = span['http.request.header.content-type'];
         if (contentType?.startsWith('multipart/form-data; boundary=')) {
@@ -34,8 +33,6 @@ export const test = {
     });
   },
 };
-
-// spans emitted by images-api-test.js in execution order
 
 // spans emitted by images-api-test.js in execution order
 const expectedSpans = [
