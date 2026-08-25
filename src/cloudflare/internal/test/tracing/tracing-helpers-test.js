@@ -4,13 +4,72 @@
 
 import assert from 'node:assert';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { tracing as publicTracing } from 'cloudflare:workers';
+import { DurableObject, tracing as publicTracing } from 'cloudflare:workers';
 
 assert.strictEqual(publicTracing.getActiveSpan(), undefined);
 const getActiveSpanOutsideInvocationContext = AsyncLocalStorage.bind(() => [
   publicTracing.getActiveSpan(),
   publicTracing.getActiveSpan(),
 ]);
+
+export class OverlappingRequestsObject extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.firstCanResume = new Promise((resolve) => {
+      this.resumeFirst = resolve;
+    });
+    this.firstAttributed = new Promise((resolve) => {
+      this.resolveFirstAttributed = resolve;
+    });
+  }
+
+  async fetch(request) {
+    const requestName = new URL(request.url).pathname.slice(1);
+
+    if (requestName === 'a') {
+      this.firstIsWaiting = true;
+      return new Response(
+        new ReadableStream({
+          pull: async (controller) => {
+            controller.enqueue(new TextEncoder().encode('ready'));
+            await this.firstCanResume;
+            const span = publicTracing.getActiveSpan();
+            assert(span);
+            assert.strictEqual(span.isTraced, true);
+            span.setAttribute('overlapping.request', 'a');
+            this.resolveFirstAttributed();
+            controller.close();
+          },
+        })
+      );
+    }
+
+    assert.strictEqual(this.firstIsWaiting, true);
+    const span = publicTracing.getActiveSpan();
+    assert(span);
+    assert.strictEqual(span.isTraced, true);
+    span.setAttribute('overlapping.request', 'b');
+    this.resumeFirst();
+    await this.firstAttributed;
+    return new Response('b');
+  }
+}
+
+export const overlappingDurableObjectRequests = {
+  async test(ctrl, env) {
+    const id = env.overlappingRequests.idFromName('test');
+    const stub = env.overlappingRequests.get(id);
+    const first = await stub.fetch('https://example.com/a');
+    const firstReader = first.body.getReader();
+    const ready = await firstReader.read();
+    assert.strictEqual(ready.done, false);
+    assert.strictEqual(new TextDecoder().decode(ready.value), 'ready');
+    const second = await stub.fetch('https://example.com/b');
+    const [firstEnd] = await Promise.all([firstReader.read(), second.text()]);
+    assert.strictEqual(firstEnd.done, true);
+    assert.deepStrictEqual([first.status, second.status], [200, 200]);
+  },
+};
 
 export const syncFunction = {
   async test(ctrl, env, ctx) {

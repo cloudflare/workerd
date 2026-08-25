@@ -11,11 +11,34 @@ import {
 // Create the collector and export it for the tail worker
 const collector = createTailStreamCollector();
 const rootAttributes = [];
+const overlappingRequests = new Map();
 export default {
   ...collector,
   tailStream(onset, env, ctx) {
     const handleEvent = collector.tailStream(onset, env, ctx);
+    const isOverlappingRequest =
+      onset.event.executionModel === 'durableObject' &&
+      onset.event.entrypoint === 'OverlappingRequestsObject';
+    const overlappingRequest = isOverlappingRequest
+      ? { rootSpanId: onset.event.spanId, attributes: [] }
+      : undefined;
+    if (overlappingRequest) {
+      overlappingRequests.set(
+        new URL(onset.event.info.url).pathname.slice(1),
+        overlappingRequest
+      );
+    }
     return (event) => {
+      if (event.event.type === 'attributes' && overlappingRequest) {
+        for (const attribute of event.event.info) {
+          if (attribute.name === 'overlapping.request') {
+            overlappingRequest.attributes.push({
+              spanId: event.spanContext.spanId,
+              value: attribute.value,
+            });
+          }
+        }
+      }
       if (
         event.event.type === 'attributes' &&
         event.spanContext.spanId === onset.event.spanId
@@ -141,6 +164,19 @@ export const validateSpans = {
       rootAttributes.find(({ name }) => name === 'test'),
       { name: 'test', value: 'getActiveSpanInvocation' }
     );
+
+    for (const requestName of ['a', 'b']) {
+      const request = overlappingRequests.get(requestName);
+      assert(
+        request,
+        `Missing tail trace for overlapping request ${requestName}`
+      );
+      assert.deepStrictEqual(
+        request.attributes,
+        [{ spanId: request.rootSpanId, value: requestName }],
+        JSON.stringify([...overlappingRequests])
+      );
+    }
 
     // setAttributes should record each supported value and ignore undefined values.
     {
