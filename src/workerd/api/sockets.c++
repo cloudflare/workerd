@@ -632,8 +632,13 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
                 }));
 
                 // Move the stream out of the plain text socket, to ensure the stream is properly
-                // destroyed when the socket is closed.
-                kj::Own<kj::AsyncIoStream> stream = connData->connectionStream.addRef().toOwn();
+                // destroyed when the socket is closed. startTls() is only reachable for TCP
+                // sockets (UDP sockets always have secureTransport == OFF), so the connection is
+                // guaranteed to be a stream here.
+                kj::Own<kj::AsyncIoStream> stream = KJ_ASSERT_NONNULL(
+                    connData->connectionStream.tryGet<kj::Rc<kj::AsyncIoStream>>())
+                                                        .addRef()
+                                                        .toOwn();
                 self->connectionData = kj::none;
 
                 auto secureStream = forkedPromise.addBranch().then(
@@ -1119,9 +1124,11 @@ kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
   // caller is done with it.
   auto& dataConn = JSG_REQUIRE_NONNULL(
       connectionData, TypeError, "The socket connection is closed or was already taken.");
+  auto& stream = JSG_REQUIRE_NONNULL(dataConn->connectionStream.tryGet<kj::Rc<kj::AsyncIoStream>>(),
+      TypeError, "takeConnectionStream() is not supported for datagram sockets.");
   // Attach tlsStarter to the wrapper so it survives as long as the connection stream
   // and is destroyed before the stream itself.
-  auto wrapper = dataConn->connectionStream.addRef().toOwn().attach(kj::mv(dataConn->tlsStarter));
+  auto wrapper = stream.addRef().toOwn().attach(kj::mv(dataConn->tlsStarter));
   connectionData = kj::none;
   closedResolver.resolve(js);
   return wrapper;

@@ -139,7 +139,7 @@ class Socket: public jsg::Object {
  public:
   Socket(jsg::Lock& js,
       IoContext& context,
-      kj::Rc<kj::AsyncIoStream> connectionStream,
+      kj::OneOf<kj::Rc<kj::AsyncIoStream>, kj::Rc<DatagramChannel>> connectionStream,
       kj::Maybe<kj::String> remoteAddress,
       kj::Maybe<kj::String> localAddress,
       JsReadableStream readableParam,
@@ -299,15 +299,18 @@ class Socket: public jsg::Object {
 
  private:
   struct ConnectionData {
-    kj::Rc<kj::AsyncIoStream> connectionStream;
+    // A TCP socket's underlying stream, or a UDP socket's underlying datagram channel. UDP
+    // sockets have no AsyncIoStream: DatagramChannel::receive()/send() replace tryRead()/write()
+    // so that datagram boundaries can never be merged or split.
+    kj::OneOf<kj::Rc<kj::AsyncIoStream>, kj::Rc<DatagramChannel>> connectionStream;
     kj::Maybe<kj::Promise<void>> watchForDisconnectTask;
-    // tlsStarter must be declared after connectionStream so that it is destroyed first,
-    // since it holds a reference that keeps the connection alive.
+    // tlsStarter must be declared after connectionStream so that it is destroyed first, since it
+    // holds a reference that keeps the connection alive.
     kj::Own<kj::TlsStarterCallback> tlsStarter;
     ConnectionData(kj::Own<kj::TlsStarterCallback> tlsStarter,
-        kj::Rc<kj::AsyncIoStream> connStream,
+        kj::OneOf<kj::Rc<kj::AsyncIoStream>, kj::Rc<DatagramChannel>> connectionStream,
         kj::Promise<void> disconnectTask)
-        : connectionStream(kj::mv(connStream)),
+        : connectionStream(kj::mv(connectionStream)),
           watchForDisconnectTask(kj::mv(disconnectTask)),
           tlsStarter(kj::mv(tlsStarter)) {}
   };
