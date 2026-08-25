@@ -106,8 +106,7 @@ class Span: public jsg::Object {
   void recordException(
       jsg::Lock& js, jsg::Value exception, const jsg::TypeHandler<ExceptionData>& exceptionHandler);
 
-  // Ends the span and submits its content to the tracing system. Idempotent. This is a no-op for
-  // the invocation span returned by getActiveSpan(), whose lifecycle is owned by the runtime.
+  // Ends the span and submits its content to the tracing system. Idempotent.
   void end();
 
   JSG_RESOURCE_TYPE(Span) {

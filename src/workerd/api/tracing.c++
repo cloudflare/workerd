@@ -182,6 +182,8 @@ class InvocationSpanState final: public SpanState {
         tracer(kj::mv(tracer)),
         context(kj::mv(context)) {}
 
+  // We should treat span.end() as a no-op for the invocation span because
+  // this lifecycle is controlled by the runtime.
   void end() override {}
 
   bool getIsTraced() override {

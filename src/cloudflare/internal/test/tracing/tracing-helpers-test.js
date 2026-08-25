@@ -11,6 +11,9 @@ const getActiveSpanOutsideInvocationContext = AsyncLocalStorage.bind(() =>
   publicTracing.getActiveSpan()
 );
 
+// Overlapping Durable Object requests share an IoContext, but each async continuation must retain
+// its originating request's tracing state. This verifies that request A resuming while request B is
+// current cannot write A's invocation-span attributes into B's tail trace.
 export class OverlappingRequestsObject extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -320,10 +323,12 @@ export const getActiveSpan = {
   async test(ctrl, env, ctx) {
     const invocationSpan = publicTracing.getActiveSpan();
     assert.ok(invocationSpan);
+    // All the ways to get the active span should return the same reference
     assert.strictEqual(publicTracing.getActiveSpan(), invocationSpan);
     assert.strictEqual(ctx.tracing.getActiveSpan(), invocationSpan);
     assert.strictEqual(getActiveSpanOutsideInvocationContext(), undefined);
     assert.strictEqual(invocationSpan.isTraced, true);
+    // This is ignored since we control the lifecycle
     invocationSpan.end();
     assert.strictEqual(invocationSpan.isTraced, true);
     invocationSpan.setAttribute('test', 'getActiveSpanInvocation');
