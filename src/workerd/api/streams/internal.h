@@ -210,7 +210,7 @@ class WritableStreamInternalController: public WritableStreamController {
       kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
       kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none)
       : state(State::create<IoOwn<Writable>>(
-            IoContext::current().addObject(kj::heap<Writable>(kj::mv(writable))))),
+            IoContext::current().createObject<Writable>(kj::mv(writable)))),
         observer(kj::mv(observer)),
         maybeHighWaterMark(maybeHighWaterMark),
         maybeClosureWaitable(kj::mv(maybeClosureWaitable)) {}

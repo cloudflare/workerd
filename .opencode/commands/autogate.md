@@ -7,11 +7,12 @@ Look up autogate: $ARGUMENTS
 
 All autogates are defined as `V(KEY)` entries in the `WORKERD_AUTOGATES(V)` macro in
 `src/workerd/util/autogate.h`. The `AutogateKey` enum, the config string, and the
-iteration list (`getAutogateKeys()`) are all generated from that single macro, so they
-cannot get out of sync. The config string is derived automatically from the enum name:
-`SCREAMING_SNAKE_CASE` becomes kebab-case (lowercase, `_` becomes `-`), prefixed with
-`workerd-autogate-`. For example, `AutogateKey::MY_NEW_FEATURE` becomes
-`workerd-autogate-my-new-feature`.
+iteration list (`getAutogateKeys()`) are generated from that macro. They cannot get
+out of sync.
+
+The config string is derived automatically from the enum name: `SCREAMING_SNAKE_CASE`
+becomes kebab-case (lowercase, `_` becomes `-`), prefixed with `workerd-autogate-`.
+For example, `AutogateKey::MY_NEW_FEATURE` becomes `workerd-autogate-my-new-feature`.
 
 **If no argument is provided (empty or blank), list all autogates:**
 

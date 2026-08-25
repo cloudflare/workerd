@@ -18,7 +18,7 @@ HibernatableWebSocketAdapter::HibernatableWebSocketAdapter(jsg::Lock& js,
 }
 
 HibernatableWebSocketAdapter::HibernatableWebSocketAdapter(
-    WebSocket& shellParam, kj::WebSocket& ws, kj::Array<kj::StringPtr> tags)
+    WebSocket& shellParam, kj::WebSocket& ws, kj::Array<kj::String> tags)
     : shell(shellParam) {
   KJ_UNIMPLEMENTED("EW-10817: HibernatableWebSocketAdapter transition ctor not yet implemented");
 }
@@ -109,8 +109,7 @@ bool HibernatableWebSocketAdapter::isAwaitingCoupling() {
   return false;
 }
 
-kj::Own<kj::WebSocket> HibernatableWebSocketAdapter::acceptAsHibernatable(
-    kj::Array<kj::StringPtr>) {
+kj::Own<kj::WebSocket> HibernatableWebSocketAdapter::acceptAsHibernatable(kj::Array<kj::String>) {
   unimplemented();
 }
 

@@ -764,6 +764,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <typename T>
   IoOwn<T> addObject(kj::Rc<T> obj);
 
+  // Shortcut for addObject(kj::heap(...)) to avoid having to write kj::heap() in every call site.
+  template <typename T, typename... Params>
+  IoOwn<T> createObject(Params&&... params) {
+    return addObject(kj::heap<T>(kj::fwd<Params>(params)...));
+  }
+
   // Like addObject() but takes a functor, returning a functor which holds the original functor
   // under an `IoOwn`, and so will stop working if the IoContext is no longer valid. This is
   // particularly useful for passing to `jsg::Promise::then()` when you need the continuation to
