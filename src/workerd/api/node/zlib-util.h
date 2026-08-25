@@ -6,10 +6,10 @@
 
 #include <workerd/api/compression.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/zlib.h>
 
 #include <brotli/decode.h>
 #include <brotli/encode.h>
+#include <zlib.h>
 #include <zstd.h>
 #include <zstd_errors.h>
 

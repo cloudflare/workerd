@@ -7,7 +7,8 @@
 #include <workerd/api/compression.h>
 #include <workerd/api/streams/transform.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/zlib.h>
+
+#include <zlib.h>
 
 namespace workerd::api {
 
