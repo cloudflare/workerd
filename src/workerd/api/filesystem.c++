@@ -2804,7 +2804,10 @@ jsg::Promise<void> FileSystemWritableFileStream::writeImpl(jsg::Lock& js,
           KJ_IF_SOME(pos, params.position) {
             auto stat = inner->stat(js);
             if (pos > stat.size) {
-              KJ_IF_SOME(err, inner->resize(js, offset)) {
+              // Grow to the requested position so the write below lands: writing past
+              // the end is implementation-defined (File::write may resize or throw).
+              // Growing zero-fills, which is what the spec requires for a gap.
+              KJ_IF_SOME(err, inner->resize(js, pos)) {
                 return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
               }
             }
