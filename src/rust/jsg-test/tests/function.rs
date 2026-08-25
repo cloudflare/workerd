@@ -273,6 +273,7 @@ fn call_after_terminate_returns_termination_error() {
         lock.terminate_execution();
         let err = func.call(lock, ()).unwrap_err();
         assert!(err.is_termination());
+        crate::Harness::cancel_termination(lock);
         Ok(())
     });
 }

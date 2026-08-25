@@ -58,6 +58,7 @@ kj::Own<TestHarness> create_test_harness();
 enum class GcType : uint8_t;
 
 // Triggers garbage collection for testing purposes.
+void cancel_termination(Isolate* isolate);
 void request_gc(Isolate* isolate, GcType gc_type);
 
 // Creates a V8 object with the C++ WORKERD_WRAPPABLE_TAG set in its internal fields.
