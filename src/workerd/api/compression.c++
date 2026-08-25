@@ -4,11 +4,8 @@
 
 #include "compression.h"
 
-#include "zlib-rs-bridge.h"
-
 #include <workerd/io/features.h>
 #include <workerd/jsg/util.h>
-#include <workerd/util/autogate.h>
 
 #include <nbytes.h>
 
@@ -45,93 +42,6 @@ void CompressionAllocator::FreeForZlib(void* opaque, void* pointer) {
 }
 
 // =======================================================================================
-// ZlibDispatch
-
-namespace {
-
-// Wrappers over the native (chromium) zlib. deflateInit2/inflateInit2 are
-// macros injecting ZLIB_VERSION and sizeof(z_stream), hence the indirection.
-int nativeDeflateInit2(z_stream* strm, int level, int windowBits, int memLevel, int strategy) {
-  return deflateInit2(strm, level, Z_DEFLATED, windowBits, memLevel, strategy);
-}
-int nativeInflateInit2(z_stream* strm, int windowBits) {
-  return inflateInit2(strm, windowBits);
-}
-
-constexpr ZlibDispatch NATIVE_ZLIB = {
-  .initDeflate = &nativeDeflateInit2,
-  .initInflate = &nativeInflateInit2,
-  .runDeflate = &deflate,
-  .runInflate = &inflate,
-  .endDeflate = &deflateEnd,
-  .endInflate = &inflateEnd,
-  .resetDeflate = &deflateReset,
-  .resetInflate = &inflateReset,
-  .setDeflateParams = &deflateParams,
-  .setDeflateDictionary = &deflateSetDictionary,
-  .setInflateDictionary = &inflateSetDictionary,
-};
-
-// Wrappers over zlib-rs; the bridge takes void* because its translation unit
-// cannot see the chromium zlib types (see zlib-rs-bridge.h).
-int rsDeflateInit2(z_stream* strm, int level, int windowBits, int memLevel, int strategy) {
-  return zlibrs::initDeflate(strm, level, windowBits, memLevel, strategy);
-}
-int rsInflateInit2(z_stream* strm, int windowBits) {
-  return zlibrs::initInflate(strm, windowBits);
-}
-int rsDeflate(z_stream* strm, int flush) {
-  return zlibrs::runDeflate(strm, flush);
-}
-int rsInflate(z_stream* strm, int flush) {
-  return zlibrs::runInflate(strm, flush);
-}
-int rsDeflateEnd(z_stream* strm) {
-  return zlibrs::endDeflate(strm);
-}
-int rsInflateEnd(z_stream* strm) {
-  return zlibrs::endInflate(strm);
-}
-int rsDeflateReset(z_stream* strm) {
-  return zlibrs::resetDeflate(strm);
-}
-int rsInflateReset(z_stream* strm) {
-  return zlibrs::resetInflate(strm);
-}
-int rsDeflateParams(z_stream* strm, int level, int strategy) {
-  return zlibrs::setDeflateParams(strm, level, strategy);
-}
-int rsDeflateSetDictionary(z_stream* strm, const kj::byte* dictionary, uint32_t dictLength) {
-  return zlibrs::setDeflateDictionary(strm, dictionary, dictLength);
-}
-int rsInflateSetDictionary(z_stream* strm, const kj::byte* dictionary, uint32_t dictLength) {
-  return zlibrs::setInflateDictionary(strm, dictionary, dictLength);
-}
-
-constexpr ZlibDispatch ZLIB_RS = {
-  .initDeflate = &rsDeflateInit2,
-  .initInflate = &rsInflateInit2,
-  .runDeflate = &rsDeflate,
-  .runInflate = &rsInflate,
-  .endDeflate = &rsDeflateEnd,
-  .endInflate = &rsInflateEnd,
-  .resetDeflate = &rsDeflateReset,
-  .resetInflate = &rsInflateReset,
-  .setDeflateParams = &rsDeflateParams,
-  .setDeflateDictionary = &rsDeflateSetDictionary,
-  .setInflateDictionary = &rsInflateSetDictionary,
-};
-
-}  // namespace
-
-const ZlibDispatch& getZlibDispatch() {
-  if (util::Autogate::isEnabled(util::AutogateKey::COMPRESSION_RS)) {
-    return ZLIB_RS;
-  }
-  return NATIVE_ZLIB;
-}
-
-// =======================================================================================
 // ZlibStream
 
 ZlibStream::ZlibStream(CompressionAllocator& allocator) {
@@ -150,10 +60,10 @@ kj::Maybe<int> ZlibStream::init(Mode mode, Options options) {
   int result = [&]() {
     switch (mode) {
       case Mode::COMPRESS:
-        return zlib.initDeflate(
-            &stream, options.level, options.windowBits, options.memLevel, options.strategy);
+        return deflateInit2(&stream, options.level, Z_DEFLATED, options.windowBits,
+            options.memLevel, options.strategy);
       case Mode::DECOMPRESS:
-        return zlib.initInflate(&stream, options.windowBits);
+        return inflateInit2(&stream, options.windowBits);
     }
     KJ_UNREACHABLE;
   }();
@@ -169,9 +79,9 @@ kj::Maybe<int> ZlibStream::reset() {
   int result = [&]() {
     switch (mode) {
       case Mode::COMPRESS:
-        return zlib.resetDeflate(&stream);
+        return deflateReset(&stream);
       case Mode::DECOMPRESS:
-        return zlib.resetInflate(&stream);
+        return inflateReset(&stream);
     }
     KJ_UNREACHABLE;
   }();
@@ -188,9 +98,9 @@ int ZlibStream::end() {
   ended = true;
   switch (mode) {
     case Mode::COMPRESS:
-      return zlib.endDeflate(&stream);
+      return deflateEnd(&stream);
     case Mode::DECOMPRESS:
-      return zlib.endInflate(&stream);
+      return inflateEnd(&stream);
   }
   KJ_UNREACHABLE;
 }
@@ -199,9 +109,9 @@ int ZlibStream::run(int flush) {
   KJ_ASSERT(initialized && !ended, "ZlibStream::run() requires a live stream");
   switch (mode) {
     case Mode::COMPRESS:
-      return zlib.runDeflate(&stream, flush);
+      return deflate(&stream, flush);
     case Mode::DECOMPRESS:
-      return zlib.runInflate(&stream, flush);
+      return inflate(&stream, flush);
   }
   KJ_UNREACHABLE;
 }

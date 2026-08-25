@@ -77,6 +77,7 @@ cc_library(
     # For zlib to be found using <zlib.h> before system zlib, use this flag for the include to also be added using isystem.
     includes = ["."],
     local_defines = ["ZLIB_IMPLEMENTATION"],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
@@ -270,6 +271,7 @@ cc_library(
     name = "compression_utils_portable",
     srcs = ["google/compression_utils_portable.cc"],
     hdrs = ["google/compression_utils_portable.h"],
+    local_defines = ["CHROMIUM_ZLIB_NO_CHROMECONF"],
     visibility = ["//visibility:public"],
-    deps = [":zlib"],
+    deps = [":zlib_common_headers"],
 )

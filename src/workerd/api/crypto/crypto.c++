@@ -14,10 +14,10 @@
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/uuid.h>
+#include <workerd/util/zlib.h>
 
 #include <openssl/digest.h>
 #include <openssl/mem.h>
-#include <zlib.h>
 
 #include <algorithm>
 #include <array>
