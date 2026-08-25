@@ -75,8 +75,8 @@ class Socket: public jsg::Object {
       kj::Maybe<kj::String> domain,
       bool isDefaultFetchPort,
       jsg::PromiseResolverPair<SocketInfo> openedPrPair)
-      : connectionData(context.addObject(kj::heap<ConnectionData>(
-            kj::mv(tlsStarter), kj::mv(connectionStream), kj::mv(watchForDisconnectTask)))),
+      : connectionData(context.createObject<ConnectionData>(
+            kj::mv(tlsStarter), kj::mv(connectionStream), kj::mv(watchForDisconnectTask))),
         readable(kj::mv(readableParam)),
         writable(kj::mv(writable)),
         closedResolver(kj::mv(closedPrPair.resolver)),

@@ -307,11 +307,12 @@ LegacyWebSocketAdapter::LegacyWebSocketAdapter(jsg::Lock& js,
           ws,
           kj::mv(KJ_REQUIRE_NONNULL(package.maybeTags)),
           package.closedOutgoingConnection)),
-      outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())),
-      autoResponseStatusOwner(ioContext.addObject(kj::heap<AutoResponse>())),
+      outgoingMessages(ioContext.createObject<OutgoingMessagesMap>()),
+      autoResponseStatusOwner(ioContext.createObject<AutoResponse>()),
       autoResponseStatus(*autoResponseStatusOwner) {
   autoResponseStatus.isClosed = farNative->closedOutgoing;
 }
+
 // This constructor is used when reinstantiating a websocket that had been hibernating, which is
 // why we can go straight to the Accepted state. However, note that we are actually in the
 // `Hibernatable` "sub-state"!
@@ -324,8 +325,8 @@ LegacyWebSocketAdapter::LegacyWebSocketAdapter(
                                                                         : BinaryType::ARRAYBUFFER),
       allowHalfOpen(!FeatureFlags::get(js).getWebSocketAutoReplyToClose()),
       farNative(nullptr),
-      outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())),
-      autoResponseStatusOwner(IoContext::current().addObject(kj::heap<AutoResponse>())),
+      outgoingMessages(IoContext::current().createObject<OutgoingMessagesMap>()),
+      autoResponseStatusOwner(IoContext::current().createObject<AutoResponse>()),
       autoResponseStatus(*autoResponseStatusOwner) {
   auto nativeObj = kj::heap<Native>();
   nativeObj->state.init<AwaitingAcceptanceOrCoupling>(kj::mv(native));
@@ -339,8 +340,8 @@ LegacyWebSocketAdapter::LegacyWebSocketAdapter(jsg::Lock& js, WebSocket& shell, 
                                                                         : BinaryType::ARRAYBUFFER),
       allowHalfOpen(!FeatureFlags::get(js).getWebSocketAutoReplyToClose()),
       farNative(nullptr),
-      outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())),
-      autoResponseStatusOwner(IoContext::current().addObject(kj::heap<AutoResponse>())),
+      outgoingMessages(IoContext::current().createObject<OutgoingMessagesMap>()),
+      autoResponseStatusOwner(IoContext::current().createObject<AutoResponse>()),
       autoResponseStatus(*autoResponseStatusOwner) {
   auto nativeObj = kj::heap<Native>();
   nativeObj->state.init<AwaitingConnection>();
