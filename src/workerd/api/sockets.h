@@ -6,6 +6,7 @@
 
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-writable-stream.h>
+#include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
@@ -416,6 +417,59 @@ jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
     kj::Own<DatagramChannel> channel,
     kj::Maybe<kj::String> remoteAddress,
     kj::Maybe<kj::String> localAddress);
+
+// A WorkerInterface::CustomEvent that delivers a single UDP flow to a worker's exported
+// `connect(socket)` handler. Unlike TCP ingress, this bypasses kj::HttpService::connect()
+// entirely (there is no CONNECT tunnel, no headers, and no ConnectResponse to accept/reject): the
+// listener that owns `channel` constructs this event directly and calls
+// WorkerInterface::customEvent() with it, exactly as Queue/Alarm/Scheduled events do for their own
+// non-HTTP-shaped triggers.
+//
+// This event cannot be forwarded over RPC: a DatagramChannel is a live, in-process-only object,
+// so sendRpc() is unimplemented. It is only ever dispatched by a listener running in the same
+// process as the worker.
+//
+// `channel` is borrowed, not owned: the listener that constructs this event attaches the
+// underlying flow's ownership to the same task that dispatches this event (see
+// Server::UdpListener::dispatch()), so it is guaranteed to outlive every call made through this
+// event, exactly as kj::HttpService::connect()'s `connection` reference outlives its dispatch.
+class UdpConnectCustomEvent final: public WorkerInterface::CustomEvent {
+ public:
+  UdpConnectCustomEvent(kj::String host, DatagramChannel& channel)
+      : host(kj::mv(host)),
+        channel(channel) {}
+
+  kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
+      kj::Maybe<kj::StringPtr> entrypointName,
+      kj::Maybe<Worker_VersionInfo> versionInfo,
+      Frankenvalue props,
+      kj::TaskSet& waitUntilTasks,
+      bool isDynamicDispatch) override;
+
+  kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+      capnp::ByteStreamFactory& byteStreamFactory,
+      FrankenvalueHandler& frankenvalueHandler,
+      rpc::EventDispatcher::Client dispatcher) override {
+    KJ_UNIMPLEMENTED(
+        "a UDP connect event cannot be forwarded over RPC; it is only ever dispatched in-process "
+        "by the listener that owns the underlying datagram flow");
+  }
+
+  kj::Promise<Result> notSupported() override {
+    KJ_UNIMPLEMENTED("udp connect event not supported");
+  }
+
+  static constexpr uint16_t EVENT_TYPE = 14;
+  uint16_t getType() override {
+    return EVENT_TYPE;
+  }
+
+  tracing::EventInfo getEventInfo() const override;
+
+ private:
+  kj::String host;
+  DatagramChannel& channel;
+};
 
 jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,

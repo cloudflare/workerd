@@ -11,10 +11,14 @@
 #include "worker-rpc.h"
 
 #include <workerd/io/io-context.h>
+#include <workerd/io/trace.h>
+#include <workerd/io/tracer.h>
 #include <workerd/io/worker-interface.h>
+#include <workerd/jsg/async-context.h>
 #include <workerd/jsg/exception.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/uncaught-exception-source.h>
 
 #include <capnp/compat/byte-stream.h>
 
@@ -453,6 +457,49 @@ jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
   result->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
   result->trackOpenedState(js);
   return result;
+}
+
+kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::run(
+    kj::Own<IoContext_IncomingRequest> incomingRequest,
+    kj::Maybe<kj::StringPtr> entrypointName,
+    kj::Maybe<Worker_VersionInfo> versionInfo,
+    Frankenvalue props,
+    kj::TaskSet& waitUntilTasks,
+    bool isDynamicDispatch) {
+  auto& context = incomingRequest->getContext();
+
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    t.setEventInfo(*incomingRequest, tracing::ConnectEventInfo());
+  }
+  incomingRequest->delivered();
+
+  auto outcome = EventOutcome::OK;
+  KJ_TRY {
+    co_await context.run([this, entrypointName, versionInfo = kj::mv(versionInfo),
+                             props = kj::mv(props), isDynamicDispatch](
+                             Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
+      jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+      jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
+
+      return lock.getGlobalScope().connectUdp(kj::mv(host), channel, lock,
+          lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
+              context.getActor(), isDynamicDispatch));
+    });
+  }
+  KJ_CATCH(e) {
+    context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER, kj::mv(e));
+    outcome = EventOutcome::EXCEPTION;
+  }
+
+  // Same reasoning as WorkerEntrypoint::connect(): we're obliged to drain() once delivered() has
+  // been called, to let any waitUntil() tasks the handler scheduled keep running in the
+  // background.
+  incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
+  co_return Result{.outcome = outcome};
+}
+
+tracing::EventInfo UdpConnectCustomEvent::getEventInfo() const {
+  return tracing::ConnectEventInfo();
 }
 
 jsg::Ref<Socket> connectImpl(jsg::Lock& js,
