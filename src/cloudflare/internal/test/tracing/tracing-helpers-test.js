@@ -7,10 +7,9 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { DurableObject, tracing as publicTracing } from 'cloudflare:workers';
 
 assert.strictEqual(publicTracing.getActiveSpan(), undefined);
-const getActiveSpanOutsideInvocationContext = AsyncLocalStorage.bind(() => [
-  publicTracing.getActiveSpan(),
-  publicTracing.getActiveSpan(),
-]);
+const getActiveSpanOutsideInvocationContext = AsyncLocalStorage.bind(() =>
+  publicTracing.getActiveSpan()
+);
 
 export class OverlappingRequestsObject extends DurableObject {
   constructor(ctx, env) {
@@ -323,10 +322,7 @@ export const getActiveSpan = {
     assert.ok(invocationSpan);
     assert.strictEqual(publicTracing.getActiveSpan(), invocationSpan);
     assert.strictEqual(ctx.tracing.getActiveSpan(), invocationSpan);
-    assert.deepStrictEqual(getActiveSpanOutsideInvocationContext(), [
-      undefined,
-      undefined,
-    ]);
+    assert.strictEqual(getActiveSpanOutsideInvocationContext(), undefined);
     assert.strictEqual(invocationSpan.isTraced, true);
     invocationSpan.end();
     assert.strictEqual(invocationSpan.isTraced, true);
