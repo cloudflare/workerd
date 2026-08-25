@@ -1272,7 +1272,6 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
   } else {
     userSpan = getRootUserTraceSpan();
   }
-
   kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
   if (userSpan.isObserved()) {
     auto& baseContext = getCurrentIncomingRequest().getInvocationSpanContext();
