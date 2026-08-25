@@ -84,19 +84,28 @@ declare const utils: {
   // The C++ compression codec factory (api/compression.h:
   // newCompressionCodecCallback), consumed by webstreams/compression.
   newCompressionCodec(mode: string, format: string): unknown;
-  createDigestContext(algorithm: string): DigestContext;
+  createDigestContext(algorithm: string, toWellFormed: boolean): DigestContext;
 };
 
 // Native incremental digest, backing the TypeScript DigestStream. Obtained only
 // from utils.createDigestContext(); it has no JS-reachable constructor.
 //
-// Strings are passed through rather than encoded on this side so that both
-// DigestStream implementations hash them identically — see DigestContextHandle
-// in src/workerd/api/crypto/crypto.h.
+// Strings are passed through rather than encoded on this side because the
+// default WTF-8 encoding is not expressible in JavaScript — TextEncoder always
+// substitutes U+FFFD. The string encoding is fixed when the context is created;
+// see DigestContextHandle in src/workerd/api/crypto/crypto.h.
 declare interface DigestContext {
   // Returns the number of bytes consumed, which for a string is its UTF-8
-  // length. Throws once digest() has been called.
+  // length. Under toWellFormed this can be 0 for a non-empty chunk, when the
+  // chunk ended with the lead half of a surrogate pair and the encoder is
+  // waiting to see whether the next chunk completes it. Throws once digest()
+  // has been called.
   update(chunk: ArrayBuffer | ArrayBufferView | string): number;
+  // Consumes any bytes still owed at end of stream and returns how many there
+  // were: 3 for a lead surrogate that was held back and never paired, else 0.
+  // digest() does this too, so calling it is only needed to keep a byte count
+  // accurate. Must precede digest().
+  flush(): number;
   // Finalizes the digest. Throws if called more than once.
   digest(): ArrayBuffer;
 }

@@ -10,21 +10,20 @@ import {
 } from 'node:assert';
 import { Buffer } from 'node:buffer';
 
-async function digestOf(algorithm, chunk) {
-  const stream = new crypto.DigestStream(algorithm);
+async function digestOf(algorithm, chunk, options) {
+  const stream = new crypto.DigestStream(algorithm, options);
   const writer = stream.getWriter();
   await writer.write(chunk);
   await writer.close();
   return new Uint8Array(await stream.digest);
 }
 
-// String chunks are converted to bytes by the runtime rather than by
-// TextEncoder, and the two disagree on unpaired surrogates: the runtime emits
-// WTF-8 (ED A0 80) where TextEncoder substitutes U+FFFD (EF BF BD). This test
-// pins that difference for BOTH implementations, so it fails loudly if either
-// one changes independently — the string-encoding behavior is expected to be
-// revisited, and when it is, this is the tripwire that says so.
-export const stringChunksAreNotTextEncoded = {
+// A lone surrogate has no UTF-8 encoding, so string chunks have two possible
+// byte sequences. By default the runtime emits WTF-8 (ED A0 80); TextEncoder
+// substitutes U+FFFD (EF BF BD). The default must stay WTF-8 for backwards
+// compatibility, which is what this pins — for BOTH implementations, so it
+// fails loudly if either drifts.
+export const stringChunksAreNotTextEncodedByDefault = {
   async test() {
     const viaString = await digestOf('md5', '\uD800');
     const viaEncoder = await digestOf(
@@ -34,7 +33,7 @@ export const stringChunksAreNotTextEncoded = {
     notDeepStrictEqual(
       viaString,
       viaEncoder,
-      'string chunks must not be TextEncoder-encoded'
+      'string chunks must not be TextEncoder-encoded by default'
     );
 
     // Well-formed strings agree with TextEncoder, so only the lone-surrogate
@@ -43,6 +42,261 @@ export const stringChunksAreNotTextEncoded = {
       await digestOf('md5', 'h\u00e9llo\u{1F600}'),
       await digestOf('md5', new TextEncoder().encode('h\u00e9llo\u{1F600}'))
     );
+  },
+};
+
+// toWellFormed: true opts into the substitution, making string chunks agree
+// with TextEncoder — and therefore with every other UTF-8 producer.
+export const toWellFormedMatchesTextEncoder = {
+  async test() {
+    const opts = { toWellFormed: true };
+    for (const input of [
+      '\uD800', // lone high surrogate
+      '\uDFFF', // lone low surrogate
+      'a\uD800b', // surrogate between well-formed text
+      '\uD800\uD800', // two lone high surrogates
+      '\uDC00\uD800', // reversed pair: both are lone
+    ]) {
+      deepStrictEqual(
+        await digestOf('md5', input, opts),
+        await digestOf('md5', new TextEncoder().encode(input)),
+        `toWellFormed should match TextEncoder for ${JSON.stringify(input)}`
+      );
+    }
+
+    // A valid surrogate pair is not a lone surrogate, so the option changes
+    // nothing for it.
+    const pair = '\uD83D\uDE00';
+    deepStrictEqual(
+      await digestOf('md5', pair, opts),
+      await digestOf('md5', pair)
+    );
+  },
+};
+
+// The option only affects strings, and only strings containing lone
+// surrogates. Everything else must hash identically either way, or the option
+// would be a silent breaking change for existing callers who set it.
+export const toWellFormedIsInertForValidInput = {
+  async test() {
+    const enc = new TextEncoder();
+    for (const input of ['', 'hello', 'h\u00e9llo\u{1F600}\u{10FFFF}']) {
+      deepStrictEqual(
+        await digestOf('md5', input, { toWellFormed: true }),
+        await digestOf('md5', input, { toWellFormed: false }),
+        `well-formed input must be unaffected: ${JSON.stringify(input)}`
+      );
+    }
+    // Byte chunks are already bytes; the option cannot apply to them even when
+    // they hold an invalid UTF-8 sequence.
+    for (const bytes of [
+      enc.encode('hello'),
+      new Uint8Array([0xed, 0xa0, 0x80]), // WTF-8 lone surrogate
+      new Uint8Array([0xff, 0xfe]), // not UTF-8 at all
+    ]) {
+      deepStrictEqual(
+        await digestOf('md5', bytes, { toWellFormed: true }),
+        await digestOf('md5', bytes, { toWellFormed: false })
+      );
+    }
+  },
+};
+
+// The two encodings agree on byte count: a lone surrogate is three bytes in
+// WTF-8, and U+FFFD is three bytes too. So bytesWritten is unaffected.
+export const toWellFormedDoesNotChangeBytesWritten = {
+  async test() {
+    for (const options of [
+      undefined,
+      { toWellFormed: false },
+      { toWellFormed: true },
+    ]) {
+      const stream = new crypto.DigestStream('md5', options);
+      const writer = stream.getWriter();
+      await writer.write('a\uD800b');
+      await writer.close();
+      await stream.digest;
+      strictEqual(stream.bytesWritten, 5n);
+    }
+  },
+};
+
+// Every spelling of "not requested" must give the historical WTF-8 behavior,
+// since anything else would break existing callers.
+export const toWellFormedDefaultsToFalse = {
+  async test() {
+    const expected = await digestOf('md5', '\uD800');
+    for (const options of [
+      undefined,
+      {},
+      { toWellFormed: undefined },
+      { toWellFormed: false },
+      { toWellFormed: 0 },
+      { toWellFormed: '' },
+      { toWellFormed: null },
+      { somethingElse: true },
+    ]) {
+      deepStrictEqual(
+        await digestOf('md5', '\uD800', options),
+        expected,
+        `should default to WTF-8: ${JSON.stringify(options)}`
+      );
+    }
+  },
+};
+
+async function digestOfChunks(algorithm, chunks, options) {
+  const stream = new crypto.DigestStream(algorithm, options);
+  const writer = stream.getWriter();
+  for (const chunk of chunks) {
+    await writer.write(chunk);
+  }
+  await writer.close();
+  return {
+    digest: new Uint8Array(await stream.digest),
+    bytesWritten: stream.bytesWritten,
+  };
+}
+
+// toWellFormed asks for the input to be treated as text, so a surrogate pair
+// split across two writes is one code point that happens to arrive in two
+// pieces — not two unpaired surrogates. The encoder therefore holds a trailing
+// lead surrogate back until the next chunk, exactly as TextEncoderStream does.
+export const toWellFormedJoinsSurrogatePairsAcrossChunks = {
+  async test() {
+    const opts = { toWellFormed: true };
+    const enc = new TextEncoder();
+
+    for (const [chunks, whole] of [
+      [['ab\uD800', '\uDC00c'], 'ab\uD800\uDC00c'],
+      // The pair is the entire input, split at the boundary.
+      [['\uD800', '\uDC00'], '\uD800\uDC00'],
+      // Lead ends a chunk that is otherwise empty of text.
+      [['a', '\uD83D', '\uDE00', 'b'], 'a\uD83D\uDE00b'],
+      // Several pairs, each split.
+      [['\uD83D', '\uDE00\uD83D', '\uDE01'], '\uD83D\uDE00\uD83D\uDE01'],
+      // A pair split with the second half followed by more text.
+      [['x\uD83D', '\uDE00yz'], 'x\uD83D\uDE00yz'],
+    ]) {
+      const split = await digestOfChunks('md5', chunks, opts);
+      deepStrictEqual(
+        split.digest,
+        await digestOf('md5', whole, opts),
+        `split ${JSON.stringify(chunks)} should match whole ${JSON.stringify(whole)}`
+      );
+      // And since the joined input is well-formed, it must also match what any
+      // other UTF-8 encoder would produce.
+      deepStrictEqual(split.digest, await digestOf('md5', enc.encode(whole)));
+      strictEqual(
+        split.bytesWritten,
+        BigInt(enc.encode(whole).byteLength),
+        `bytesWritten for ${JSON.stringify(chunks)}`
+      );
+    }
+  },
+};
+
+// A lead surrogate held back from the final chunk is never paired, so it is an
+// unpaired surrogate and must be flushed as U+FFFD when the stream closes.
+export const toWellFormedFlushesDanglingLeadSurrogate = {
+  async test() {
+    const opts = { toWellFormed: true };
+    const enc = new TextEncoder();
+
+    for (const [chunks, whole] of [
+      [['ab\uD800'], 'ab\uD800'],
+      [['ab', '\uD800'], 'ab\uD800'],
+      // Lead followed by a chunk that cannot pair with it: the lead resolves to
+      // U+FFFD and the next chunk is encoded normally.
+      [['a\uD800', 'b'], 'a\uD800b'],
+      [['a\uD800', '\uD800b'], 'a\uD800\uD800b'],
+      // A trail surrogate with nothing pending is unpaired on its own.
+      [['a', '\uDC00b'], 'a\uDC00b'],
+      [['\uDC00\uD800'], '\uDC00\uD800'],
+    ]) {
+      const split = await digestOfChunks('md5', chunks, opts);
+      deepStrictEqual(
+        split.digest,
+        await digestOf('md5', enc.encode(whole)),
+        `${JSON.stringify(chunks)} should encode as ${JSON.stringify(whole)}`
+      );
+      strictEqual(split.bytesWritten, BigInt(enc.encode(whole).byteLength));
+    }
+  },
+};
+
+// The default encoding is deliberately NOT a streaming text encoder: each chunk
+// is encoded exactly as V8 holds it, so a pair split across writes becomes two
+// separately-encoded lone surrogates rather than one code point. This differs
+// from the whole-string digest, and that difference is the historical behavior —
+// changing it would silently alter existing callers' digests.
+export const defaultEncodingIsPerChunk = {
+  async test() {
+    const split = await digestOfChunks('md5', ['ab\uD800', '\uDC00c']);
+    const whole = await digestOf('md5', 'ab\uD800\uDC00c');
+    notDeepStrictEqual(split.digest, whole);
+    // Two lone surrogates at 3 bytes each, rather than one 4-byte code point.
+    strictEqual(split.bytesWritten, 3n + 3n + 3n);
+  },
+};
+
+// The option bag follows Web IDL dictionary rules: undefined and null are an
+// empty bag, any object is read for its fields, and a primitive is a TypeError.
+// Arrays and functions count as objects, so they are accepted and simply carry
+// no field.
+export const optionBagAcceptsObjectsAndRejectsPrimitives = {
+  test() {
+    for (const options of [undefined, null, {}, [], () => {}, new Date()]) {
+      const stream = new crypto.DigestStream('md5', options);
+      stream[Symbol.dispose]();
+    }
+
+    for (const options of [0, 1, '', 'x', true, false, 1n, Symbol.iterator]) {
+      throws(
+        () => new crypto.DigestStream('md5', options),
+        {
+          name: 'TypeError',
+          message:
+            "Failed to construct 'DigestStream': constructor parameter 2 is " +
+            "not of type 'Options'.",
+        },
+        `should reject primitive option bag: ${String(options)}`
+      );
+    }
+  },
+};
+
+// Argument type-checking happens before the algorithm name is looked up, so a
+// bad option bag is reported ahead of an unrecognized algorithm. 'foo' is a
+// perfectly good string — it only fails later, when the digest is created.
+export const argumentTypesAreCheckedBeforeAlgorithmLookup = {
+  test() {
+    throws(() => new crypto.DigestStream('foo', 0), {
+      name: 'TypeError',
+      message:
+        "Failed to construct 'DigestStream': constructor parameter 2 is not " +
+        "of type 'Options'.",
+    });
+    // With a well-typed option bag, the algorithm lookup is reached and fails.
+    throws(() => new crypto.DigestStream('foo', { toWellFormed: true }), {
+      name: 'NotSupportedError',
+    });
+  },
+};
+
+// The field is coerced with ToBoolean rather than type-checked, so any truthy
+// value opts in. Pinned for both implementations because the C++ side gets
+// this from JSG and the TypeScript side has to match it by hand.
+export const toWellFormedIsCoerced = {
+  async test() {
+    const expected = await digestOf('md5', '\uD800', { toWellFormed: true });
+    for (const value of [true, 1, 'false', [], {}, Symbol.iterator]) {
+      deepStrictEqual(
+        await digestOf('md5', '\uD800', { toWellFormed: value }),
+        expected,
+        `truthy ${String(value)} should opt in`
+      );
+    }
   },
 };
 

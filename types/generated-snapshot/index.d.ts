@@ -1571,9 +1571,15 @@ interface CryptoKeyArbitraryKeyAlgorithm {
 declare class DigestStream extends WritableStream<
   ArrayBuffer | ArrayBufferView
 > {
-  constructor(algorithm: string | SubtleCryptoHashAlgorithm);
+  constructor(
+    algorithm: string | SubtleCryptoHashAlgorithm,
+    options?: DigestStreamOptions,
+  );
   readonly digest: Promise<ArrayBuffer>;
   get bytesWritten(): number | bigint;
+}
+interface DigestStreamOptions {
+  toWellFormed?: boolean;
 }
 /**
  * The **`TextDecoder`** interface represents a decoder for a specific text encoding, such as UTF-8, ISO-8859-2, or GBK. A decoder takes an array of bytes as input and returns a JavaScript string.

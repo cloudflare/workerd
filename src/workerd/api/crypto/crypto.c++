@@ -5,6 +5,7 @@
 #include "crypto.h"
 
 #include "impl.h"
+#include "simdutf.h"
 
 #include <workerd/api/crypto/crc-impl.h>
 #include <workerd/api/crypto/endianness.h>
@@ -790,6 +791,91 @@ class OpenSSLDigestContext final: public DigestContext {
   kj::Own<EVP_MD_CTX> context;
 };
 
+namespace {
+// U+FFFD, the encoding of any surrogate that turns out to be unpaired.
+constexpr char REPLACEMENT_UTF8[] = "\xEF\xBF\xBD";
+constexpr size_t REPLACEMENT_UTF8_LEN = 3;
+
+// True for a UTF-16 lead (high) surrogate, U+D800..U+DBFF — the first half of a
+// pair encoding a non-BMP code point, and so the only unit whose encoding can
+// depend on what comes after it.
+constexpr bool isLeadSurrogate(char16_t unit) {
+  return (unit & 0xFC00) == 0xD800;
+}
+
+// Packages UTF-16 as the UTF-8 bytes to hash, substituting U+FFFD for unpaired
+// surrogates. kj::String is the carrier because that is what the callers already
+// pass to DigestContext::write(); the bytes are not text and may contain NULs.
+kj::String wellFormedUtf8(kj::ArrayPtr<const char16_t> utf16) {
+  if (utf16.size() == 0) return kj::String();
+
+  auto sized = simdutf::utf8_length_from_utf16_with_replacement(utf16.begin(), utf16.size());
+  auto buf = kj::heapArray<char>(sized.count + 1);
+
+  // to_well_formed_utf16 rewrites in place, so only take a copy when there is
+  // actually an unpaired surrogate to replace.
+  size_t written;
+  if (sized.error == simdutf::error_code::SURROGATE) {
+    auto fixed = kj::heapArray<char16_t>(utf16.size());
+    simdutf::to_well_formed_utf16(utf16.begin(), utf16.size(), fixed.begin());
+    written = simdutf::convert_utf16_to_utf8(fixed.begin(), fixed.size(), buf.begin());
+  } else {
+    written = simdutf::convert_utf16_to_utf8(utf16.begin(), utf16.size(), buf.begin());
+  }
+
+  KJ_DASSERT(written == sized.count);
+  buf[written] = '\0';
+  return kj::String(kj::mv(buf));
+}
+}  // namespace
+
+kj::String DigestStringEncoder::encode(jsg::Lock& js, jsg::JsString str) {
+  if (encoding == DigestStringEncoding::WTF8) {
+    // WriteUtf8V2 without kReplaceInvalidUtf8, so lone surrogates survive as the
+    // three bytes V8 holds them in.
+    return str.toString(js);
+  }
+
+  // Read the chunk into UTF-16, reserving room to re-attach a lead surrogate
+  // carried over from the previous chunk so a pair split across the boundary is
+  // seen here as the single code point it is.
+  size_t prefix = pendingLead == kj::none ? 0 : 1;
+  size_t end = prefix + str.length(js);
+  if (end == 0) return kj::String();
+
+  auto utf16 = kj::heapArray<char16_t>(end);
+  KJ_IF_SOME(lead, pendingLead) {
+    utf16[0] = lead;
+    pendingLead = kj::none;
+  }
+  auto dest = utf16.slice(prefix);
+  str.writeInto(js, kj::arrayPtr(reinterpret_cast<uint16_t*>(dest.begin()), dest.size()));
+
+  // A lead surrogate at the very end may pair with whatever comes next, so it
+  // cannot be encoded until the next chunk (or flush()) settles the question.
+  if (isLeadSurrogate(utf16[end - 1])) {
+    pendingLead = utf16[--end];
+  }
+
+  return wellFormedUtf8(utf16.first(end));
+}
+
+kj::Maybe<kj::String> DigestStringEncoder::flush() {
+  // Nothing followed the lead surrogate, so it was unpaired after all.
+  if (pendingLead == kj::none) return kj::none;
+  pendingLead = kj::none;
+  return kj::str(kj::ArrayPtr<const char>(REPLACEMENT_UTF8, REPLACEMENT_UTF8_LEN));
+}
+
+namespace {
+DigestStringEncoding readDigestEncoding(jsg::Optional<DigestStream::Options>& options) {
+  KJ_IF_SOME(o, options) {
+    if (o.toWellFormed.orDefault(false)) return DigestStringEncoding::WELL_FORMED;
+  }
+  return DigestStringEncoding::WTF8;
+}
+}  // namespace
+
 kj::Own<DigestContext> newDigestContext(kj::StringPtr algorithm) {
   if (algorithm == "crc32") {
     return kj::heap<CRC32DigestContext>();
@@ -807,7 +893,7 @@ DigestStream::DigestContextPtr DigestStream::initContext(SubtleCrypto::HashAlgor
 }
 
 uint32_t DigestContextHandle::update(
-    jsg::Lock& js, kj::OneOf<jsg::JsBufferSource, kj::String> chunk) {
+    jsg::Lock& js, kj::OneOf<jsg::JsBufferSource, jsg::JsString> chunk) {
   auto& ctx =
       *JSG_REQUIRE_NONNULL(context, TypeError, "The digest context has already been finalized.");
 
@@ -818,8 +904,11 @@ uint32_t DigestContextHandle::update(
       ctx.write(bytes);
       return bytes.size();
     }
-    KJ_CASE_ONEOF(str, kj::String) {
-      auto bytes = str.asBytes();
+    KJ_CASE_ONEOF(str, jsg::JsString) {
+      // May be empty even for a non-empty chunk, when the whole chunk was a lead
+      // surrogate that the encoder is holding back for the next one.
+      auto converted = encoder.encode(js, str);
+      auto bytes = converted.asBytes();
       if (bytes.size() == 0) return 0;
       ctx.write(bytes);
       return bytes.size();
@@ -828,9 +917,26 @@ uint32_t DigestContextHandle::update(
   KJ_UNREACHABLE;
 }
 
+uint32_t DigestContextHandle::flush() {
+  auto& ctx =
+      *JSG_REQUIRE_NONNULL(context, TypeError, "The digest context has already been finalized.");
+  KJ_IF_SOME(owed, encoder.flush()) {
+    auto bytes = owed.asBytes();
+    ctx.write(bytes);
+    return bytes.size();
+  }
+  return 0;
+}
+
 jsg::JsArrayBuffer DigestContextHandle::digest(jsg::Lock& js) {
   auto ctx = kj::mv(
       JSG_REQUIRE_NONNULL(context, TypeError, "The digest context has already been finalized."));
+  // Whatever the encoder still owes belongs in the digest even if the caller did
+  // not ask for the byte count. flush() is idempotent, so having already called
+  // it is fine.
+  KJ_IF_SOME(owed, encoder.flush()) {
+    ctx->write(owed.asBytes());
+  }
   context = kj::none;
   return ctx->close(js);
 }
@@ -838,10 +944,12 @@ jsg::JsArrayBuffer DigestContextHandle::digest(jsg::Lock& js) {
 DigestStream::DigestStream(kj::Own<WritableStreamController> controller,
     SubtleCrypto::HashAlgorithm algorithm,
     jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>>::Resolver resolver,
-    jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> promise)
+    jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> promise,
+    DigestStringEncoding encoding)
     : WritableStream(kj::mv(controller)),
       promise(kj::mv(promise)),
-      state(Ready(kj::mv(algorithm), kj::mv(resolver))) {}
+      state(Ready(kj::mv(algorithm), kj::mv(resolver))),
+      encoder(encoding) {}
 
 void DigestStream::dispose(jsg::Lock& js) {
   JSG_TRY(js) {
@@ -895,6 +1003,13 @@ kj::Maybe<StreamStates::Errored> DigestStream::close(jsg::Lock& js) {
       return errored.addRef(js);
     }
     KJ_CASE_ONEOF(ready, Ready) {
+      // A lead surrogate the encoder is still holding is unpaired now that no
+      // further chunk can complete it.
+      KJ_IF_SOME(owed, encoder.flush()) {
+        auto bytes = owed.asBytes();
+        ready.context->write(bytes);
+        bytesWritten += bytes.size();
+      }
       ready.resolver.resolve(js, ready.context->close(js).addRef(js));
       state.init<StreamStates::Closed>();
       return kj::none;
@@ -911,11 +1026,13 @@ void DigestStream::abort(jsg::Lock& js, jsg::JsValue reason) {
   }
 }
 
-jsg::Ref<DigestStream> DigestStream::constructor(jsg::Lock& js, Algorithm algorithm) {
+jsg::Ref<DigestStream> DigestStream::constructor(
+    jsg::Lock& js, Algorithm algorithm, jsg::Optional<Options> options) {
   auto paf = js.newPromiseAndResolver<jsg::JsRef<jsg::JsArrayBuffer>>();
 
   auto stream = js.alloc<DigestStream>(newWritableStreamJsController(),
-      interpretAlgorithmParam(kj::mv(algorithm)), kj::mv(paf.resolver), kj::mv(paf.promise));
+      interpretAlgorithmParam(kj::mv(algorithm)), kj::mv(paf.resolver), kj::mv(paf.promise),
+      readDigestEncoding(options));
 
   // clang-format off
   stream->getController().setup(js, UnderlyingSink{
@@ -933,8 +1050,11 @@ jsg::Ref<DigestStream> DigestStream::constructor(jsg::Lock& js, Algorithm algori
           stream.bytesWritten += source.size();
           return js.resolvedPromise();
         } else if (chunk->IsString()) {
-          // If we receive a string, we'll convert that to UTF-8 bytes and digest that.
-          auto str = js.toString(chunk);
+          // Lone surrogates become WTF-8, or U+FFFD when the stream was constructed
+          // with toWellFormed. Shared with the TypeScript implementation so both
+          // hash a given string identically. Empty under toWellFormed when the
+          // chunk ended mid-surrogate-pair, whose lead is held for the next one.
+          auto str = stream.encoder.encode(js, jsg::JsString(chunk.As<v8::String>()));
           if (str.size() == 0) return js.resolvedPromise();
           KJ_IF_SOME(error, stream.write(js, str.asBytes())) {
             return js.rejectedPromise<void>(kj::mv(error));

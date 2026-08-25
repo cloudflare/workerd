@@ -40,10 +40,16 @@
 // STRINGS
 //
 // String chunks are forwarded to the native context rather than encoded here.
-// jsg::Lock::toString() produces WTF-8, which differs from TextEncoder for
-// unpaired surrogates; routing both implementations through the same conversion
-// keeps their digests byte-identical. This is also why update() returns a byte
-// count — a string's UTF-8 length is not observable from JavaScript.
+// A lone surrogate has no UTF-8 encoding, and the default is to hash it as
+// WTF-8 (U+D800 becomes ED A0 80) — which TextEncoder cannot produce, since it
+// always substitutes U+FFFD. Callers who want the substitution opt in with
+// `{toWellFormed: true}`, and the choice is fixed when the native context is
+// created. Routing both implementations through the same native conversion is
+// what keeps their digests byte-identical under either setting.
+//
+// This is also why update() returns a byte count — a string's UTF-8 length is
+// not observable from JavaScript. Both encodings happen to agree on it, since a
+// lone surrogate and U+FFFD are both three bytes.
 
 import type {
   UnderlyingSink,
@@ -126,8 +132,29 @@ function normalizeAlgorithmName(algorithm: unknown): string {
   return `${algorithm as { toString(): string }}`;
 }
 
-function createDigestState(algorithm: unknown): DigestState {
-  const context = createDigestContext(normalizeAlgorithmName(algorithm));
+// Mirrors how JSG unwraps `jsg::Optional<DigestStream::Options>`: undefined and
+// null give an empty bag, any object has its field read with ToBoolean, and a
+// primitive is a TypeError. Arrays and functions are objects here, as they are
+// to v8::Value::IsObject(), so they are accepted and simply have no field. The
+// message reproduces the one JSG generates so both implementations report the
+// same thing for the same mistake.
+function readToWellFormed(options: unknown): boolean {
+  if (options === undefined || options === null) return false;
+  if (typeof options !== 'object' && typeof options !== 'function') {
+    throw new TypeError(
+      "Failed to construct 'DigestStream': constructor parameter 2 is not of " +
+        "type 'Options'."
+    );
+  }
+  // A user-provided bag, so ordinary property access and ToBoolean are correct.
+  return !!(options as { toWellFormed?: unknown }).toWellFormed;
+}
+
+function createDigestState(algorithm: unknown, options: unknown): DigestState {
+  // JSG unwraps constructor arguments left to right, so a bad algorithm must be
+  // reported before a bad option bag.
+  const name = normalizeAlgorithmName(algorithm);
+  const context = createDigestContext(name, readToWellFormed(options));
   const { promise, resolve, reject } = PromiseWithResolvers() as {
     promise: Promise<ArrayBuffer>;
     resolve: (value: ArrayBuffer) => void;
@@ -189,6 +216,10 @@ function digestClose(state: DigestState): void {
   if (context === undefined) {
     throw new TypeError('The digest context has already been finalized.');
   }
+  // Nothing further can arrive, so anything the encoder held back is now final.
+  // digest() would fold this in regardless; calling flush() first is what makes
+  // those bytes show up in bytesWritten.
+  state.bytesWritten += context.flush();
   state.context = undefined;
   state.state = 'closed';
   state.resolve(context.digest());
@@ -206,12 +237,15 @@ function digestError(state: DigestState, reason: unknown): void {
 class DigestStream extends WritableStream<ArrayBuffer | ArrayBufferView> {
   #state: DigestState;
 
-  constructor(algorithm: string | { name: string }) {
+  constructor(
+    algorithm: string | { name: string },
+    options?: { toWellFormed?: boolean }
+  ) {
     // The state is built before super() because the sink closures below capture
     // it — they cannot reference `this`, which is in its temporal dead zone
     // until super() returns. An unrecognized algorithm therefore also throws
     // before any stream exists, as in C++.
-    const state = createDigestState(algorithm);
+    const state = createDigestState(algorithm, options);
     const sink: UnderlyingSink<ArrayBuffer | ArrayBufferView> = {
       write(chunk: ArrayBuffer | ArrayBufferView): void {
         digestWrite(state, chunk);

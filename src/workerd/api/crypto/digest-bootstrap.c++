@@ -8,7 +8,8 @@
 
 namespace workerd::api {
 
-jsg::JsValue createDigestContext(jsg::Lock& js, kj::StringPtr algorithm) {
+jsg::JsValue createDigestContext(
+    jsg::Lock& js, kj::StringPtr algorithm, ToWellFormed toWellFormed) {
   // newDigestContext() validates the algorithm name and throws for unrecognized
   // ones, so this must run before the handle is allocated.
   auto context = newDigestContext(algorithm);
@@ -19,7 +20,8 @@ jsg::JsValue createDigestContext(jsg::Lock& js, kj::StringPtr algorithm) {
   auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<DigestContextHandle>>(),
       "DigestContextHandle is missing from the isolate type list");
 
-  return jsg::JsValue(handler.wrap(js, js.alloc<DigestContextHandle>(kj::mv(context))));
+  auto encoding = toWellFormed ? DigestStringEncoding::WELL_FORMED : DigestStringEncoding::WTF8;
+  return jsg::JsValue(handler.wrap(js, js.alloc<DigestContextHandle>(kj::mv(context), encoding)));
 }
 
 }  // namespace workerd::api

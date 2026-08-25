@@ -35,11 +35,30 @@ declaration in `src/workerd/api/crypto/digest-bootstrap.h`.
 Two parts of that contract are easy to break:
 
 - **`update()` takes strings, and returns a byte count.** Strings are NOT
-  encoded on the TypeScript side. `jsg::Lock::toString()` emits WTF-8, which
-  differs from `TextEncoder` for unpaired surrogates, and both DigestStream
-  implementations must agree. The return value exists because a string's UTF-8
-  length is not observable from JavaScript. `crypto-streams-test.js`
-  (`stringChunksAreNotTextEncoded`) pins this for both implementations.
+  encoded on the TypeScript side, because the default encoding is not
+  expressible in JavaScript: a lone surrogate is hashed as WTF-8 (`ED A0 80`),
+  and `TextEncoder` can only produce the U+FFFD substitution. The return value
+  exists because a string's UTF-8 length is not observable from JavaScript.
+- **The string encoding is fixed at context creation**, by
+  `createDigestContext(name, toWellFormed)`. `toWellFormed: true` opts into the
+  U+FFFD substitution; the default is WTF-8 and must stay that way for
+  backwards compatibility. `crypto-streams-test.js` pins both directions for
+  both implementations — `stringChunksAreNotTextEncodedByDefault` catches a
+  changed default, `toWellFormedMatchesTextEncoder` catches an ignored option.
+- **`toWellFormed` is a streaming encoder, so it is stateful.** A surrogate pair
+  can be split across two writes, so a lead surrogate ending a chunk is held
+  back until the next chunk decides whether it pairs. Consequences for the
+  contract: `update()` can return 0 for a non-empty chunk, and **`flush()` must
+  be called before `digest()`** to account for a lead that was never paired
+  (3 bytes, U+FFFD). `digest()` flushes internally too, so forgetting
+  `flush()` costs an accurate `bytesWritten`, never a correct digest. The
+  default WTF-8 encoding is stateless and joins nothing — that is the historical
+  behavior, so the two encodings can disagree on `bytesWritten` across chunks
+  (4 bytes for a joined pair vs 3+3 for two lone surrogates).
+- **The option bag is coerced, not type-checked.** JSG unwraps
+  `jsg::Optional<bool>` with ToBoolean, so `{toWellFormed: 'false'}` opts *in*.
+  The TypeScript side reproduces this with `!!`, and
+  `toWellFormedIsCoerced`/`toWellFormedDefaultsToFalse` hold the two together.
 - **Chunks are not copied.** The digest consumes bytes synchronously inside
   `update()`, so a copy would be pure overhead — unlike
   `webstreams/identity.ts`, which copies because it enqueues. The consequence

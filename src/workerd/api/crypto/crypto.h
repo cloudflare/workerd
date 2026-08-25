@@ -663,30 +663,93 @@ class DigestContext {
 // for unrecognized names.
 kj::Own<DigestContext> newDigestContext(kj::StringPtr algorithm);
 
+// Selects how a string chunk is turned into the bytes a digest consumes.
+//
+// A lone surrogate has no UTF-8 encoding, so the two answers differ: WTF-8
+// encodes it literally (U+D800 becomes ED A0 80), while WELL_FORMED substitutes
+// U+FFFD (EF BF BD). Both are three bytes, so for a chunk considered on its own
+// the choice changes only the digest, not bytesWritten.
+//
+// The counts can differ across chunks, though, because only WELL_FORMED joins a
+// surrogate pair split over two of them: it encodes the pair as one 4-byte code
+// point where WTF-8 encodes two lone surrogates as 3 bytes each.
+//
+// WTF-8 is the default because it is what DigestStream has always done. Callers
+// opt into WELL_FORMED with `new DigestStream(algorithm, {toWellFormed: true})`.
+enum class DigestStringEncoding {
+  WTF8,
+  WELL_FORMED,
+};
+
+// Converts the string chunks of one digest to the bytes to hash. Both
+// DigestStream implementations route their string chunks through here, which is
+// what keeps their digests byte-identical under either encoding.
+//
+// WELL_FORMED is a streaming text encoder, so it is stateful: a surrogate pair
+// may be split across two chunks, and the halves only mean anything together.
+// encode() therefore holds a lead surrogate at the end of a chunk back until the
+// next one arrives, and flush() reports whatever is left at end of stream — at
+// which point a still-unpaired lead surrogate really is unpaired. This mirrors
+// TextEncoderStream (api/streams/encoding.c++).
+//
+// WTF8 is stateless: each chunk is encoded exactly as V8 holds it. A pair split
+// across chunks therefore hashes as two lone surrogates rather than as the code
+// point they form. That is the historical DigestStream behavior; joining them
+// would change the digests of existing callers.
+class DigestStringEncoder {
+ public:
+  explicit DigestStringEncoder(DigestStringEncoding encoding): encoding(encoding) {}
+
+  // The bytes this chunk contributes. Under WELL_FORMED this may omit a trailing
+  // lead surrogate, and may begin with one omitted from the previous chunk.
+  kj::String encode(jsg::Lock& js, jsg::JsString str);
+
+  // The bytes owed at end of stream: U+FFFD for a lead surrogate that was held
+  // back and never paired, or none when nothing is outstanding. Idempotent.
+  kj::Maybe<kj::String> flush();
+
+ private:
+  DigestStringEncoding encoding;
+
+  // WELL_FORMED only: a lead surrogate that ended the previous chunk. Its
+  // encoding is not yet decided, because a trail surrogate opening the next
+  // chunk would pair with it.
+  kj::Maybe<char16_t> pendingLead;
+};
+
 // A JS-visible handle around a DigestContext. This is the native backing for the
 // TypeScript DigestStream; it is not registered on the global scope and is
 // excluded from the generated types. Instances reach the per-isolate bootstrap
 // through createDigestContext() (digest-bootstrap.h).
 //
-// Strings are converted to bytes here rather than in TypeScript so that both
-// DigestStream implementations hash them identically: jsg::Lock::toString()
-// emits WTF-8 for unpaired surrogates, whereas TextEncoder would substitute
-// U+FFFD. Sharing this conversion keeps the two implementations byte-identical,
-// and means a future change to the conversion applies to both at once.
+// Strings are converted to bytes here rather than in TypeScript because the
+// conversion is not expressible in JavaScript: TextEncoder always substitutes
+// U+FFFD, so it cannot produce the default WTF-8 encoding. Sharing
+// DigestStringEncoder with the C++ DigestStream keeps the two byte-identical.
 class DigestContextHandle final: public jsg::Object {
  public:
-  DigestContextHandle(kj::Own<DigestContext> context): context(kj::mv(context)) {}
+  DigestContextHandle(kj::Own<DigestContext> context, DigestStringEncoding encoding)
+      : context(kj::mv(context)),
+        encoder(encoding) {}
 
   // Feeds a chunk into the digest and returns the number of bytes consumed. The
   // return value is what lets the caller track a byte count for strings, whose
   // UTF-8 length is not observable from JavaScript.
-  uint32_t update(jsg::Lock& js, kj::OneOf<jsg::JsBufferSource, kj::String> chunk);
+  uint32_t update(jsg::Lock& js, kj::OneOf<jsg::JsBufferSource, jsg::JsString> chunk);
+
+  // Feeds in any bytes owed at end of stream and returns how many there were,
+  // so the caller can finish its byte count. See DigestStringEncoder::flush();
+  // this is only ever nonzero for a toWellFormed stream whose last chunk ended
+  // mid-surrogate-pair. Idempotent, and digest() does it too, so skipping this
+  // costs an accurate byte count but never a wrong digest.
+  uint32_t flush();
 
   // Finalizes the digest. Throws if called more than once.
   jsg::JsArrayBuffer digest(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(DigestContextHandle) {
     JSG_METHOD(update);
+    JSG_METHOD(flush);
     JSG_METHOD(digest);
 
     // Internal plumbing type: keep it out of the generated TypeScript types.
@@ -696,6 +759,7 @@ class DigestContextHandle final: public jsg::Object {
  private:
   // Cleared by digest(); kj::none marks the handle as already finalized.
   kj::Maybe<kj::Own<DigestContext>> context;
+  DigestStringEncoder encoder;
 };
 
 class DigestStream: public WritableStream {
@@ -703,12 +767,26 @@ class DigestStream: public WritableStream {
   using DigestContextPtr = kj::Own<DigestContext>;
   using Algorithm = kj::OneOf<kj::String, SubtleCrypto::HashAlgorithm>;
 
+  struct Options {
+    // When true, lone surrogates in string chunks are replaced with U+FFFD so
+    // that the bytes hashed are well-formed UTF-8. Defaults to false, which
+    // hashes them as WTF-8 — the behavior DigestStream has always had.
+    //
+    // Only string chunks are affected; ArrayBuffer and ArrayBufferView chunks
+    // are already bytes.
+    jsg::Optional<bool> toWellFormed;
+
+    JSG_STRUCT(toWellFormed);
+  };
+
   explicit DigestStream(kj::Own<WritableStreamController> controller,
       SubtleCrypto::HashAlgorithm algorithm,
       jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>>::Resolver resolver,
-      jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> promise);
+      jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> promise,
+      DigestStringEncoding encoding);
 
-  static jsg::Ref<DigestStream> constructor(jsg::Lock& js, Algorithm algorithm);
+  static jsg::Ref<DigestStream> constructor(
+      jsg::Lock& js, Algorithm algorithm, jsg::Optional<Options> options);
 
   jsg::MemoizedIdentity<jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>>>& getDigest() {
     return promise;
@@ -751,6 +829,9 @@ class DigestStream: public WritableStream {
   jsg::MemoizedIdentity<jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>>> promise;
   kj::OneOf<Ready, StreamStates::Closed, StreamStates::Errored> state;
   uint64_t bytesWritten = 0;
+  // Only the sink's string path feeds this, but close() must flush it: under
+  // toWellFormed it can be holding back the lead half of a surrogate pair.
+  DigestStringEncoder encoder;
 
   kj::Maybe<StreamStates::Errored> write(jsg::Lock& js, kj::ArrayPtr<kj::byte> buffer);
   kj::Maybe<StreamStates::Errored> close(jsg::Lock& js);
@@ -823,7 +904,8 @@ class Crypto: public jsg::Object {
       api::CryptoKey::KeyAlgorithm, api::CryptoKey::AesKeyAlgorithm,                               \
       api::CryptoKey::HmacKeyAlgorithm, api::CryptoKey::RsaKeyAlgorithm,                           \
       api::CryptoKey::EllipticKeyAlgorithm, api::CryptoKey::ArbitraryKeyAlgorithm,                 \
-      api::CryptoKey::AsymmetricKeyDetails, api::DigestStream, api::DigestContextHandle
+      api::CryptoKey::AsymmetricKeyDetails, api::DigestStream, api::DigestStream::Options,         \
+      api::DigestContextHandle
 
 }  // namespace workerd::api
 

@@ -157,8 +157,11 @@ static void CreateDigestContext(const v8::FunctionCallbackInfo<v8::Value>& args)
       auto name = jsg::JsValue(args[0]);
       auto str = JSG_REQUIRE_NONNULL(name.tryCast<jsg::JsString>(), TypeError,
           "createDigestContext() expects a string argument");
+      // The caller has already reduced the option bag to a boolean, so this is
+      // ToBoolean on an actual boolean and cannot run user code.
+      auto toWellFormed = api::ToWellFormed(args[1]->BooleanValue(args.GetIsolate()));
       args.GetReturnValue().Set(
-          v8::Local<v8::Value>(api::createDigestContext(js, str.toString(js))));
+          v8::Local<v8::Value>(api::createDigestContext(js, str.toString(js), toWellFormed)));
     });
   });
 }
