@@ -790,16 +790,49 @@ class OpenSSLDigestContext final: public DigestContext {
   kj::Own<EVP_MD_CTX> context;
 };
 
-DigestStream::DigestContextPtr DigestStream::initContext(SubtleCrypto::HashAlgorithm& algorithm) {
-  if (algorithm.name == "crc32") {
+kj::Own<DigestContext> newDigestContext(kj::StringPtr algorithm) {
+  if (algorithm == "crc32") {
     return kj::heap<CRC32DigestContext>();
-  } else if (algorithm.name == "crc32c") {
+  } else if (algorithm == "crc32c") {
     return kj::heap<CRC32CDigestContext>();
-  } else if (algorithm.name == "crc64nvme") {
+  } else if (algorithm == "crc64nvme") {
     return kj::heap<CRC64NVMEDigestContext>();
   } else {
-    return kj::heap<OpenSSLDigestContext>(algorithm.name);
+    return kj::heap<OpenSSLDigestContext>(algorithm);
   }
+}
+
+DigestStream::DigestContextPtr DigestStream::initContext(SubtleCrypto::HashAlgorithm& algorithm) {
+  return newDigestContext(algorithm.name);
+}
+
+uint32_t DigestContextHandle::update(
+    jsg::Lock& js, kj::OneOf<jsg::JsBufferSource, kj::String> chunk) {
+  auto& ctx =
+      *JSG_REQUIRE_NONNULL(context, TypeError, "The digest context has already been finalized.");
+
+  KJ_SWITCH_ONEOF(chunk) {
+    KJ_CASE_ONEOF(source, jsg::JsBufferSource) {
+      auto bytes = source.asArrayPtr();
+      if (bytes.size() == 0) return 0;
+      ctx.write(bytes);
+      return bytes.size();
+    }
+    KJ_CASE_ONEOF(str, kj::String) {
+      auto bytes = str.asBytes();
+      if (bytes.size() == 0) return 0;
+      ctx.write(bytes);
+      return bytes.size();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+jsg::JsArrayBuffer DigestContextHandle::digest(jsg::Lock& js) {
+  auto ctx = kj::mv(
+      JSG_REQUIRE_NONNULL(context, TypeError, "The digest context has already been finalized."));
+  context = kj::none;
+  return ctx->close(js);
 }
 
 DigestStream::DigestStream(kj::Own<WritableStreamController> controller,

@@ -56,6 +56,7 @@ declare const primordials: {
   readonly SymbolIterator: typeof Symbol.iterator;
   readonly SymbolAsyncIterator: typeof Symbol.asyncIterator;
   readonly SymbolToStringTag: typeof Symbol.toStringTag;
+  readonly SymbolDispose: typeof Symbol.dispose;
 
   // uncurryThis accepts Function (the typeof-narrowed type) in addition to
   // properly typed callables, so callers don't need to cast after a
@@ -83,4 +84,19 @@ declare const utils: {
   // The C++ compression codec factory (api/compression.h:
   // newCompressionCodecCallback), consumed by webstreams/compression.
   newCompressionCodec(mode: string, format: string): unknown;
+  createDigestContext(algorithm: string): DigestContext;
 };
+
+// Native incremental digest, backing the TypeScript DigestStream. Obtained only
+// from utils.createDigestContext(); it has no JS-reachable constructor.
+//
+// Strings are passed through rather than encoded on this side so that both
+// DigestStream implementations hash them identically — see DigestContextHandle
+// in src/workerd/api/crypto/crypto.h.
+declare interface DigestContext {
+  // Returns the number of bytes consumed, which for a string is its UTF-8
+  // length. Throws once digest() has been called.
+  update(chunk: ArrayBuffer | ArrayBufferView | string): number;
+  // Finalizes the digest. Throws if called more than once.
+  digest(): ArrayBuffer;
+}

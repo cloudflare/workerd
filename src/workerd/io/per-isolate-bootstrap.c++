@@ -5,6 +5,7 @@
 #include "per-isolate-bootstrap.h"
 
 #include <workerd/api/compression.h>
+#include <workerd/api/crypto/digest-bootstrap.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
@@ -144,6 +145,24 @@ static void GetApiSymbol(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// Creates the native digest object backing the TypeScript DigestStream. Unlike
+// its neighbors this allocates and can throw (an unrecognized algorithm name
+// raises a DOMNotSupportedError), so it is registered as a plain method rather
+// than a fast-API call, and needs liftKj to turn a thrown kj::Exception into a
+// JS exception.
+static void CreateDigestContext(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      auto name = jsg::JsValue(args[0]);
+      auto str = JSG_REQUIRE_NONNULL(name.tryCast<jsg::JsString>(), TypeError,
+          "createDigestContext() expects a string argument");
+      args.GetReturnValue().Set(
+          v8::Local<v8::Value>(api::createDigestContext(js, str.toString(js))));
+    });
+  });
+}
+
 static const v8::CFunction fast_mark_promise_handled_ =
     v8::CFunction::Make(MarkPromiseHandledFastApi);
 
@@ -186,6 +205,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "markPromiseHandled",
     "getApiSymbol",
     "newCompressionCodec",
+    "createDigestContext",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -196,6 +216,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getFastMethod(js, MarkPromiseHandled, &fast_mark_promise_handled_),
     getMethod(js, GetApiSymbol),
     getMethod(js, api::newCompressionCodecCallback),
+    getMethod(js, CreateDigestContext),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());

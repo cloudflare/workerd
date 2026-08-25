@@ -657,6 +657,47 @@ class DigestContext {
   virtual jsg::JsArrayBuffer close(jsg::Lock& js) = 0;
 };
 
+// Creates a digest context for the named algorithm. The CRC names ("crc32",
+// "crc32c", "crc64nvme") match exactly; everything else is looked up as an
+// OpenSSL digest, which is case-insensitive and throws a DOMNotSupportedError
+// for unrecognized names.
+kj::Own<DigestContext> newDigestContext(kj::StringPtr algorithm);
+
+// A JS-visible handle around a DigestContext. This is the native backing for the
+// TypeScript DigestStream; it is not registered on the global scope and is
+// excluded from the generated types. Instances reach the per-isolate bootstrap
+// through createDigestContext() (digest-bootstrap.h).
+//
+// Strings are converted to bytes here rather than in TypeScript so that both
+// DigestStream implementations hash them identically: jsg::Lock::toString()
+// emits WTF-8 for unpaired surrogates, whereas TextEncoder would substitute
+// U+FFFD. Sharing this conversion keeps the two implementations byte-identical,
+// and means a future change to the conversion applies to both at once.
+class DigestContextHandle final: public jsg::Object {
+ public:
+  DigestContextHandle(kj::Own<DigestContext> context): context(kj::mv(context)) {}
+
+  // Feeds a chunk into the digest and returns the number of bytes consumed. The
+  // return value is what lets the caller track a byte count for strings, whose
+  // UTF-8 length is not observable from JavaScript.
+  uint32_t update(jsg::Lock& js, kj::OneOf<jsg::JsBufferSource, kj::String> chunk);
+
+  // Finalizes the digest. Throws if called more than once.
+  jsg::JsArrayBuffer digest(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(DigestContextHandle) {
+    JSG_METHOD(update);
+    JSG_METHOD(digest);
+
+    // Internal plumbing type: keep it out of the generated TypeScript types.
+    JSG_TS_OVERRIDE(type DigestContextHandle = never);
+  }
+
+ private:
+  // Cleared by digest(); kj::none marks the handle as already finalized.
+  kj::Maybe<kj::Own<DigestContext>> context;
+};
+
 class DigestStream: public WritableStream {
  public:
   using DigestContextPtr = kj::Own<DigestContext>;
@@ -782,7 +823,7 @@ class Crypto: public jsg::Object {
       api::CryptoKey::KeyAlgorithm, api::CryptoKey::AesKeyAlgorithm,                               \
       api::CryptoKey::HmacKeyAlgorithm, api::CryptoKey::RsaKeyAlgorithm,                           \
       api::CryptoKey::EllipticKeyAlgorithm, api::CryptoKey::ArbitraryKeyAlgorithm,                 \
-      api::CryptoKey::AsymmetricKeyDetails, api::DigestStream
+      api::CryptoKey::AsymmetricKeyDetails, api::DigestStream, api::DigestContextHandle
 
 }  // namespace workerd::api
 

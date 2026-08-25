@@ -1,8 +1,50 @@
 // Copyright (c) 2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { strictEqual, deepStrictEqual, rejects, throws } from 'node:assert';
+import {
+  strictEqual,
+  deepStrictEqual,
+  notDeepStrictEqual,
+  rejects,
+  throws,
+} from 'node:assert';
 import { Buffer } from 'node:buffer';
+
+async function digestOf(algorithm, chunk) {
+  const stream = new crypto.DigestStream(algorithm);
+  const writer = stream.getWriter();
+  await writer.write(chunk);
+  await writer.close();
+  return new Uint8Array(await stream.digest);
+}
+
+// String chunks are converted to bytes by the runtime rather than by
+// TextEncoder, and the two disagree on unpaired surrogates: the runtime emits
+// WTF-8 (ED A0 80) where TextEncoder substitutes U+FFFD (EF BF BD). This test
+// pins that difference for BOTH implementations, so it fails loudly if either
+// one changes independently — the string-encoding behavior is expected to be
+// revisited, and when it is, this is the tripwire that says so.
+export const stringChunksAreNotTextEncoded = {
+  async test() {
+    const viaString = await digestOf('md5', '\uD800');
+    const viaEncoder = await digestOf(
+      'md5',
+      new TextEncoder().encode('\uD800')
+    );
+    notDeepStrictEqual(
+      viaString,
+      viaEncoder,
+      'string chunks must not be TextEncoder-encoded'
+    );
+
+    // Well-formed strings agree with TextEncoder, so only the lone-surrogate
+    // case is special.
+    deepStrictEqual(
+      await digestOf('md5', 'h\u00e9llo\u{1F600}'),
+      await digestOf('md5', new TextEncoder().encode('h\u00e9llo\u{1F600}'))
+    );
+  },
+};
 
 export const digeststream = {
   async test() {
