@@ -143,6 +143,7 @@ wd_cc_library(
         ":compatibility-date_capnp",
         ":maximum-compatibility-date",
         ":release-version",
+        "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/capnp",
         "@capnp-cpp//src/kj",
     ],

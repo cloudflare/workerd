@@ -105,7 +105,8 @@ static void compileCompatibilityFlags(kj::StringPtr compatDate,
     ValidationErrorReporter& errorReporter,
     bool allowExperimentalFeatures,
     CompatibilityDateValidation dateValidation,
-    kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags) {
+    kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags,
+    MainModuleIsPython mainModuleIsPython) {
   auto parsedCompatDate = CompatDate::parse(compatDate, errorReporter);
 
   switch (dateValidation) {
@@ -261,6 +262,13 @@ static void compileCompatibilityFlags(kj::StringPtr compatDate,
     dynamicOutput.set(field, enableByFlag || (enableByDate && !disableByFlag));
   }
 
+  // Inject python_workers compat flag if the main entrypoint is Python.
+  // The order is important, as there are other compat flags derived from python_workers compat flag.
+  // So python_workers compat flag should be set before implying other compat flags.
+  if (mainModuleIsPython.toBool() && output.getAutoInjectPythonWorkers()) {
+    output.setPythonWorkers(true);
+  }
+
   for (auto& implied: impliedByList) {
     if (capnp::toDynamic(output).get(implied.other).as<bool>()) {
       dynamicOutput.set(implied.field, true);
@@ -278,7 +286,8 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
     ValidationErrorReporter& errorReporter,
     bool allowExperimentalFeatures,
     CompatibilityDateValidation dateValidation,
-    kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags) {
+    kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags,
+    MainModuleIsPython mainModuleIsPython) {
   kj::HashSet<kj::String> flagSet;
   flagSet.reserve(compatFlags.size());
   for (auto flag: compatFlags) {
@@ -288,7 +297,7 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
   }
 
   return compileCompatibilityFlags(compatDate, kj::mv(flagSet), output, errorReporter,
-      allowExperimentalFeatures, dateValidation, allowedExperimentalFlags);
+      allowExperimentalFeatures, dateValidation, allowedExperimentalFlags, mainModuleIsPython);
 }
 
 void compileCompatibilityFlags(kj::StringPtr compatDate,
@@ -297,7 +306,8 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
     ValidationErrorReporter& errorReporter,
     bool allowExperimentalFeatures,
     CompatibilityDateValidation dateValidation,
-    kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags) {
+    kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags,
+    MainModuleIsPython mainModuleIsPython) {
   kj::HashSet<kj::String> flagSet;
   flagSet.reserve(compatFlags.size());
   for (auto& flag: compatFlags) {
@@ -307,7 +317,7 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
   }
 
   return compileCompatibilityFlags(compatDate, kj::mv(flagSet), output, errorReporter,
-      allowExperimentalFeatures, dateValidation, allowedExperimentalFlags);
+      allowExperimentalFeatures, dateValidation, allowedExperimentalFlags, mainModuleIsPython);
 }
 
 namespace {
