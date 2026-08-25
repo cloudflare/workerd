@@ -174,6 +174,11 @@ class WorkerTracer final: public BaseTracer {
   void addSpanAttribute(const tracing::InvocationSpanContext& context,
       kj::ConstString key,
       tracing::Attribute::Value value) override;
+  // Variant for RPC-based tracing, where the caller supplies the timestamp from its IoContext.
+  void addSpanAttributeInternal(const tracing::InvocationSpanContext& context,
+      kj::ConstString key,
+      tracing::Attribute::Value value,
+      kj::Date timestamp);
   void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       kj::String name,

@@ -606,6 +606,16 @@ void WorkerTracer::setWorkerAttribute(kj::ConstString key, Span::TagValue value)
 void WorkerTracer::addSpanAttribute(const tracing::InvocationSpanContext& context,
     kj::ConstString key,
     tracing::Attribute::Value value) {
+  if (pipelineLogLevel == PipelineLogLevel::NONE || maybeTailStreamWriter == kj::none) {
+    return;
+  }
+  addSpanAttributeInternal(context, kj::mv(key), kj::mv(value), getTime());
+}
+
+void WorkerTracer::addSpanAttributeInternal(const tracing::InvocationSpanContext& context,
+    kj::ConstString key,
+    tracing::Attribute::Value value,
+    kj::Date timestamp) {
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
@@ -625,7 +635,7 @@ void WorkerTracer::addSpanAttribute(const tracing::InvocationSpanContext& contex
   }
 
   tracing::CustomInfo attributes = kj::arr(tracing::Attribute(kj::mv(key), kj::mv(value)));
-  tailStreamWriter->report(context, kj::mv(attributes), getTime(), size);
+  tailStreamWriter->report(context, kj::mv(attributes), timestamp, size);
 }
 
 SpanParent BaseTracer::makeUserRequestSpan(
