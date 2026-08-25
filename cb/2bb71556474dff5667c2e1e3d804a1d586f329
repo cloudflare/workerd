@@ -1,0 +1,19 @@
+src/workerd/io/tracer.c++
+  s_313a31aedf23dd::t_b300d64e591d4c 8,483,489-501
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cb2bb71556474dff5667c2e1e3d804a1d586f329",
+  "prompts": {},
+  "sessions": {
+    "s_313a31aedf23dd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fcbe3c50fffe2n0SS9S2tgJDBh",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
