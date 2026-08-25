@@ -621,6 +621,7 @@ class IsolateBase {
   static void jitCodeEvent(const v8::JitCodeEvent* event) noexcept;
 
   friend kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);
+  friend class V8System;
 
   HeapTracer heapTracer;
   kj::Own<IsolateObserver> observer;
