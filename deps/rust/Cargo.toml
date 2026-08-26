@@ -38,10 +38,10 @@ capnp-rpc = "0"
 clang-ast = "0"
 encoding_rs = "0"
 flate2 = "1"
-# Memory-safe Rust implementation of the zlib C API, evaluated as a
-# replacement backend for compression streams. rust-allocator only:
+# Memory-safe Rust implementation of the zlib C API, exposed to C++ under
+# zlib_rs_-prefixed symbols by src/rust/zlib-rs. rust-allocator only:
 # zalloc/zfree left NULL use Rust's global allocator.
-libz-rs-sys = { version = "0.6", default-features = false, features = ["std", "rust-allocator", "export-symbols"] }
+libz-rs-sys = { version = "0.6", default-features = false, features = ["std", "rust-allocator"] }
 futures = "0"
 libc = "0"
 lol_html_c_api = { git = "https://github.com/cloudflare/lol-html" }
