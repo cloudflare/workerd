@@ -229,17 +229,16 @@ function byteSize(chunk: unknown): number {
       new Uint8Array(chunk as unknown as ArrayBuffer)
     ) as number;
   }
-  if (isArrayBufferView(chunk)) {
-    const isDataView =
-      TypedArrayPrototypeGetSymbolToStringTag(chunk) === undefined;
-    return (
-      isDataView
-        ? DataViewPrototypeGetByteLength(chunk)
-        : TypedArrayPrototypeGetByteLength(chunk)
-    ) as number;
-  }
-  // Invalid chunk type — validateAndCopyChunk will throw TypeError.
-  return 1;
+  // byteSize runs only on chunks validateAndCopyChunk has already
+  // accepted (sizeAndSnapshot validates before sizing), so anything that
+  // is not a string or (Shared)ArrayBuffer is an ArrayBufferView.
+  const isDataView =
+    TypedArrayPrototypeGetSymbolToStringTag(chunk) === undefined;
+  return (
+    isDataView
+      ? DataViewPrototypeGetByteLength(chunk)
+      : TypedArrayPrototypeGetByteLength(chunk)
+  ) as number;
 }
 
 let assertIsIdentityTransformStream: (self: IdentityTransformStream) => void;
