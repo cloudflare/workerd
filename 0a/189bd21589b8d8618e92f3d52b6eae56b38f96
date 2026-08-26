@@ -53,6 +53,7 @@ src/workerd/api/worker-rpc.c++
   s_0f868da28cf400::t_12e36b514600a6 1315
   s_0f868da28cf400::t_3e094263934785 2096,2113-2120
   s_0f868da28cf400::t_8ca02c29ba8166 1101-1103
+  s_ab4e43acd62623::t_8f9e20d587b116 294-299,301-302,304-306,1104,1274,2122-2123
 src/workerd/api/tests/do-pre-shutdown-rpc-test.wd-test
   s_0f868da28cf400::t_73f6e3bd0f4a8c 1-34
 types/test/types/rpc.ts
@@ -97,6 +98,19 @@ src/workerd/io/limit-enforcer.h
   s_0f868da28cf400::t_389de9b5bb0afb 177-179,187-190
 src/workerd/api/tests/do-pre-shutdown-flag-off.js
   s_0f868da28cf400::t_1e88bda3bc6351 1-20
+src/workerd/api/http.c++
+  s_ab4e43acd62623::t_8f9e20d587b116 2464,2471
+  s_ab4e43acd62623::t_22182b26b0e061 2516
+  s_ab4e43acd62623::t_f9a8efce58bae2 2520
+  s_ab4e43acd62623::t_0be4d69c446bfd 2517-2519
+src/workerd/api/http.h
+  s_ab4e43acd62623::t_8f9e20d587b116 301
+src/workerd/api/tests/tail-worker-test.js
+  s_ab4e43acd62623::t_4ed7ddc8c3e040 371
+src/workerd/api/actor.c++
+  s_ab4e43acd62623::t_8f9e20d587b116 57,113
+src/workerd/io/hibernation-manager-test.c++
+  s_d3698f92a97eab::t_f0a03d7b76126f 630-631,641,644,863
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -104,6 +118,14 @@ src/workerd/api/tests/do-pre-shutdown-flag-off.js
   "base_commit_sha": "0a189bd21589b8d8618e92f3d52b6eae56b38f96",
   "prompts": {},
   "sessions": {
+    "s_0d3499d6e9689a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fff8840b2ffeODxe4Hp6pv34Ke",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
     "s_0f868da28cf400": {
       "agent_id": {
         "tool": "opencode",
@@ -112,6 +134,62 @@ src/workerd/api/tests/do-pre-shutdown-flag-off.js
       },
       "human_author": "Alex Robinson <arobinson@cloudflare.com>"
     },
+    "s_2192e8a6d105f9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0949d7839ffe3PH73618sV9aBi",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_68959d5fe8e08d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ff07ec157ffeC7x2Y13Ir1AaVS",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_9496b046a1a364": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0046a268affe2zLQ3xwXN6au9J",
+        "model": "@cf/moonshotai/kimi-k2.6"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_9aacb5d2b3f842": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe58e4b20ffehuwmysAirk7QdL",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_ab4e43acd62623": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0dd95e56cffeOLXlCNwX9ixaK3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_acade4cac5b71c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_009d455cfffeSCh04tz2YSMi4d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    },
     "s_bd300c870eb4a1": {
       "agent_id": {
         "tool": "opencode",
@@ -119,6 +197,22 @@ src/workerd/api/tests/do-pre-shutdown-flag-off.js
         "model": "claude-fable-5"
       },
       "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    },
+    "s_c1a7662859f799": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_037f52e35ffehXUiJ6v9H8O9VK",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_d3698f92a97eab": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ff13c571bffeW4Fir1apASoaT5",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
     }
   }
 }

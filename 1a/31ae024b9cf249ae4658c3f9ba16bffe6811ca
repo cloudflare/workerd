@@ -1,8 +1,13 @@
 src/workerd/server/server.c++
   s_0f868da28cf400::t_775afd6dfa2710 1131-1143
+  s_907c34cfcb44ef::t_d1a208875fcc29 1082,1092-1093
+  s_907c34cfcb44ef::t_5a52acab3550d8 616,626
+  s_907c34cfcb44ef::t_21eeaf93a668aa 1149
+  s_907c34cfcb44ef::t_1f80979f9533f4 1182
 src/workerd/api/tests/do-pre-shutdown-test.js
   s_0f868da28cf400::t_1de66abdd0d0ab 171-193
   s_0f868da28cf400::t_ff7ac80f8e3a34 74-96
+  s_907c34cfcb44ef::t_21042990e3ca8b 192-193
 src/workerd/api/global-scope.h
   s_0f868da28cf400::t_256dfffad72bbf 538-540,542
 types/generated-snapshot/index.d.ts
@@ -33,6 +38,14 @@ types/generated-snapshot/index.ts
       "agent_id": {
         "tool": "opencode",
         "id": "ses_012591357ffeA7cXF67TJsjeKU",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    },
+    "s_907c34cfcb44ef": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd31f0c87ffeX9dy4yYTDmj71c",
         "model": "claude-fable-5"
       },
       "human_author": "Alex Robinson <arobinson@cloudflare.com>"
