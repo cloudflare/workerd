@@ -15,11 +15,10 @@ rust.toolchain(
     allocator_library = "@rules_rust//ffi/rs:empty",
     edition = "2024",
     extra_rustc_flags_triples = {
-        # Enable ISA extensions matching the ones used for C++. The clmul feature is not included as
-        # it is still "unstable" as of 1.86.0.
-        "x86_64-unknown-linux-gnu": ["-Ctarget-feature=+sse4.2"],
-        "x86_64-apple-darwin": ["-Ctarget-feature=+sse4.2"],
-        "x86_64-pc-windows-msvc": ["-Ctarget-feature=+sse4.2"],
+        # Enable ISA extensions matching the ones used for C++.
+        "x86_64-unknown-linux-gnu": ["-Ctarget-feature=+sse4.2,+pclmulqdq"],
+        "x86_64-apple-darwin": ["-Ctarget-feature=+sse4.2,+pclmulqdq"],
+        "x86_64-pc-windows-msvc": ["-Ctarget-feature=+sse4.2,+pclmulqdq"],
         "aarch64-unknown-linux-gnu": ["-Ctarget-feature=+crc"],
         # No options needed for aarch64-apple-darwin: CRC feature is enabled by default.
     },

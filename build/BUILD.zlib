@@ -77,6 +77,7 @@ cc_library(
     # For zlib to be found using <zlib.h> before system zlib, use this flag for the include to also be added using isystem.
     includes = ["."],
     local_defines = ["ZLIB_IMPLEMENTATION"],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
@@ -226,42 +227,12 @@ filegroup(
 
 cc_library(
     name = "zlib",
-    srcs = [":zlib_files"],
-    copts = zlib_warnings,
-    features = ["-parse_headers"],
-    # Duplicate definitions here since we want to avoid non-local defines, some of them are needed
-    # here. This excludes INFLATE_CHUNK_* which is only needed in zlib_inflate_chunk_simd.
-    local_defines = ["ZLIB_IMPLEMENTATION"] + select({
-        "@platforms//cpu:x86_64": [
-            "ADLER32_SIMD_SSSE3",
-            "CRC32_SIMD_SSE42_PCLMUL",
-            "DEFLATE_SLIDE_HASH_SSE2",
-            "DEFLATE_CHUNK_WRITE_64LE",
-        ],
-        "@platforms//cpu:aarch64": [
-            "ADLER32_SIMD_NEON",
-            "CRC32_ARMV8_CRC32",
-            "DEFLATE_SLIDE_HASH_NEON",
-            "DEFLATE_CHUNK_WRITE_64LE",
-        ],
-    }) + select({
-        ":x86_linux": ["X86_NOT_WINDOWS"],
-        ":x86_macos": ["X86_NOT_WINDOWS"],
-        ":x86_windows": ["X86_WINDOWS"],
-        ":arm64_linux": ["ARMV8_OS_LINUX"],
-        "arm64_macos": ["ARMV8_OS_MACOS"],
-        "arm64_windows": ["ARMV8_OS_WINDOWS"],
-        "//conditions:default": [],
-    }),
+    defines = ["CHROMIUM_ZLIB_NO_CHROMECONF"],
     visibility = ["//visibility:public"],
     deps = [
-        ":zlib_adler32_simd",
-        ":zlib_inflate_chunk_simd",
-        ":zlib_slide_hash_simd",
-    ] + select({
-        "@platforms//cpu:x86_64": [":zlib_crc32_simd"],
-        "@platforms//cpu:aarch64": [":zlib_arm_crc32"],
-    }),
+        ":zlib_common_headers",
+        "@@//src/rust/zlib-rs",
+    ],
 )
 
 # Chromium zlib includes some custom compression utils that are not present in mainline zlib but

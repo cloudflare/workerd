@@ -97,6 +97,19 @@ wd_cc_benchmark(
 )
 
 wd_cc_benchmark(
+    name = "bench-zlib",
+    srcs = [
+        "bench-zlib.c++",
+        "zlib-rs-shim.c++",
+        "zlib-rs-shim.h",
+    ],
+    deps = [
+        "//src/rust/zlib-rs",
+        "@zlib",
+    ],
+)
+
+wd_cc_benchmark(
     name = "bench-util",
     srcs = ["bench-util.c++"],
     deps = [

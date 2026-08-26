@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the unmodified crypto-streams-test.js against the TypeScript DigestStream.
+# Sharing the test file with crypto-streams-test.wd-test is the point: any
+# behavioral drift between the two implementations fails one config or the other.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "crypto-streams-ts-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-streams-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "experimental",
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);

@@ -279,15 +279,24 @@ wd_cc_library(
 # the TypeScript streams implementation's codec handle.
 wd_cc_library(
     name = "compression",
-    srcs = ["compression.c++"],
-    hdrs = ["compression.h"],
+    srcs = [
+        "compression.c++",
+        "zlib-rs-bridge.c++",
+    ],
+    hdrs = [
+        "compression.h",
+        "zlib-rs-bridge.h",
+    ],
     visibility = ["//visibility:public"],
     deps = [
+        "//src/rust/zlib-rs",
         "//src/workerd/io:features",
         "//src/workerd/jsg",
+        "//src/workerd/util:autogate",
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@nbytes",
+        "@zlib",
         "@zstd",
     ],
 )

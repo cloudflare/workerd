@@ -496,6 +496,12 @@ wd_test(
 )
 
 wd_test(
+    src = "crypto-streams-ts-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto-streams-test.js"],
+)
+
+wd_test(
     src = "data-url-fetch-test.wd-test",
     args = ["--experimental"],
     data = ["data-url-fetch-test.js"],
@@ -1347,6 +1353,12 @@ wd_test(
 wd_test(
     src = "htmlrewriter-transform-cancel-test.wd-test",
     data = ["htmlrewriter-transform-cancel-test.js"],
+)
+
+wd_test(
+    src = "ts-digest-stream-test.wd-test",
+    args = ["--experimental"],
+    data = ["ts-digest-stream-test.js"],
 )
 
 wd_test(
