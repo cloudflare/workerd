@@ -121,7 +121,7 @@
       "repo": "workerd-tools",
       "file_regex": "llvm-.*-linux-amd64-clang-tidy$",
       "file_type": "executable",
-      "freeze_version": "clang-tidy-22.1.5"
+      "freeze_version": "clang-tidy-23.1.0"
     },
     {
       "name": "clang_tidy_linux_arm64",
@@ -130,7 +130,7 @@
       "repo": "workerd-tools",
       "file_regex": "llvm-.*-linux-arm64-clang-tidy$",
       "file_type": "executable",
-      "freeze_version": "clang-tidy-22.1.5"
+      "freeze_version": "clang-tidy-23.1.0"
     },
     {
       "name": "clang_tidy_darwin_arm64",
@@ -139,7 +139,7 @@
       "repo": "workerd-tools",
       "file_regex": "llvm-.*-darwin-arm64-clang-tidy$",
       "file_type": "executable",
-      "freeze_version": "clang-tidy-22.1.5"
+      "freeze_version": "clang-tidy-23.1.0"
     },
     {
       // Clang/LLVM headers needed to build the workerd-lint clang-tidy
@@ -153,7 +153,7 @@
       "repo": "workerd-tools",
       "file_regex": "llvm-.*-linux-amd64-clang-tidy-dev\\.tar\\.xz$",
       "build_file": "@workerd//tools/clang-tidy:BUILD.headers",
-      "freeze_version": "clang-tidy-22.1.5"
+      "freeze_version": "clang-tidy-23.1.0"
     }
   ]
 }

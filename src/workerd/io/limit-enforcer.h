@@ -188,7 +188,7 @@ class LimitEnforcer {
   virtual kj::Promise<void> onLimitsExceeded() = 0;
   // Sets a callback to call when the cpu limit is nearly exceeded. The callback must be signal safe
   // and cannot take the isolate lock.
-  virtual void setCpuLimitNearlyExceededCallback(kj::Function<void(void)>) = 0;
+  virtual void setCpuLimitNearlyExceededCallback(kj::Function<void()>) = 0;
 
   // Throws an exception if a limit has already been exceeded which prevents further JavaScript
   // execution, such as the CPU or memory limit.
