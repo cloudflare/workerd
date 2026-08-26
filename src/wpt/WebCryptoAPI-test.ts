@@ -125,6 +125,14 @@ export default {
   'generateKey/failures_ECDSA.https.any.js': {},
   'generateKey/failures_Ed25519.https.any.js': {},
   'generateKey/failures_HMAC.https.any.js': {},
+  'generateKey/failures_ML-DSA.tentative.https.any.js': {
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
+  },
+  'generateKey/failures_ML-KEM.tentative.https.any.js': {
+    comment: 'Wrong type of error returned + ML-KEM-512 is not supported',
+    expectedFailures: [/^(Empty|Bad) algorithm:/, /ML-KEM-512/i],
+  },
   'generateKey/failures_RSA-OAEP.https.any.js': {},
   'generateKey/failures_RSA-PSS.https.any.js': {},
   'generateKey/failures_RSASSA-PKCS1-v1_5.https.any.js': {},
@@ -195,6 +203,34 @@ export default {
       'Window interface: attribute crypto',
     ],
   },
+  'idlharness.tentative.https.any.js': {
+    comment:
+      'IDL tests fail because Workers exposes globals differently than browsers (not as own properties of self). Modern-algos operations not yet fully exposed.',
+    expectedFailures: [
+      'CryptoKey interface: attribute type',
+      'CryptoKey interface: attribute extractable',
+      'CryptoKey interface: attribute algorithm',
+      'CryptoKey interface: attribute usages',
+      'SubtleCrypto interface: operation encrypt(AlgorithmIdentifier, CryptoKey, BufferSource)',
+      'SubtleCrypto interface: operation decrypt(AlgorithmIdentifier, CryptoKey, BufferSource)',
+      'SubtleCrypto interface: operation sign(AlgorithmIdentifier, CryptoKey, BufferSource)',
+      'SubtleCrypto interface: operation verify(AlgorithmIdentifier, CryptoKey, BufferSource, BufferSource)',
+      'SubtleCrypto interface: operation digest(AlgorithmIdentifier, BufferSource)',
+      'SubtleCrypto interface: operation generateKey(AlgorithmIdentifier, boolean, sequence<KeyUsage>)',
+      'SubtleCrypto interface: operation deriveKey(AlgorithmIdentifier, CryptoKey, AlgorithmIdentifier, boolean, sequence<KeyUsage>)',
+      'SubtleCrypto interface: operation deriveBits(AlgorithmIdentifier, CryptoKey, optional unsigned long?)',
+      'SubtleCrypto interface: operation importKey(KeyFormat, (BufferSource or JsonWebKey), AlgorithmIdentifier, boolean, sequence<KeyUsage>)',
+      'SubtleCrypto interface: operation exportKey(KeyFormat, CryptoKey)',
+      'SubtleCrypto interface: operation wrapKey(KeyFormat, CryptoKey, CryptoKey, AlgorithmIdentifier)',
+      'SubtleCrypto interface: operation unwrapKey(KeyFormat, BufferSource, CryptoKey, AlgorithmIdentifier, AlgorithmIdentifier, boolean, sequence<KeyUsage>)',
+      'SubtleCrypto interface: operation encapsulateKey(AlgorithmIdentifier, CryptoKey, AlgorithmIdentifier, boolean, sequence<KeyUsage>)',
+      'SubtleCrypto interface: operation encapsulateBits(AlgorithmIdentifier, CryptoKey)',
+      'SubtleCrypto interface: operation decapsulateKey(AlgorithmIdentifier, CryptoKey, BufferSource, AlgorithmIdentifier, boolean, sequence<KeyUsage>)',
+      'SubtleCrypto interface: operation decapsulateBits(AlgorithmIdentifier, CryptoKey, BufferSource)',
+      'SubtleCrypto interface: operation getPublicKey(CryptoKey, sequence<KeyUsage>)',
+      'Window interface: attribute crypto',
+    ],
+  },
   'import_export/AES-OCB_importKey.tentative.https.any.js':
     unsupported('AES-OCB'),
   'import_export/Argon2_importKey.tentative.https.any.js':
@@ -237,11 +273,7 @@ export default {
   },
   'import_export/ec_importKey_failures_fixtures.js': {},
   'import_export/importKey_failures.js': {},
-  'import_export/ml_importKey.js': {
-    comment:
-      'Shared by ML-DSA and ML-KEM import/export tests; both post-quantum algorithms are not supported',
-    omittedTests: true,
-  },
+  'import_export/ml_importKey.js': supportFile,
   'import_export/okp_importKey.js': {},
   'import_export/okp_importKey_Ed25519.https.any.js': {
     comment: 'Investigate this',
@@ -403,20 +435,16 @@ export default {
     omittedTests: true,
   },
   'sign_verify/mac.js': {},
-  'sign_verify/mldsa.js': {
-    comment: 'ML-DSA (post-quantum signature algorithm) is not supported',
-    omittedTests: true,
-  },
-  'sign_verify/mldsa_vectors.js': {
-    comment: 'ML-DSA (post-quantum signature algorithm) is not supported',
-    omittedTests: true,
-  },
+  'sign_verify/mldsa.js': supportFile,
+  'sign_verify/mldsa.tentative.https.any.js': {},
+  'sign_verify/mldsa_vectors.js': supportFile,
   'sign_verify/rsa.js': {},
   'sign_verify/rsa_pkcs.https.any.js': {},
   'sign_verify/rsa_pkcs_vectors.js': supportFile,
   'sign_verify/rsa_pss.https.any.js': {},
   'sign_verify/rsa_pss_vectors.js': {},
   'sign_verify/signature.js': {},
+  'supports.tentative.https.any.js': {},
 
   'util/ec_key_fixtures.js': {},
   'util/helpers.js': {},
