@@ -115,7 +115,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHkdf(jsg::Lock& js,
       CryptoKeyUsageSet::Context::importSecret, keyUsages, CryptoKeyUsageSet::derivationKeyMask());
 
   JSG_REQUIRE(!extractable, DOMSyntaxError, "HKDF key cannot be extractable.");
-  JSG_REQUIRE(format == "raw", DOMNotSupportedError,
+  JSG_REQUIRE(format == "raw" || format == "raw-secret", DOMNotSupportedError,
       "HKDF key must be imported "
       "in \"raw\" format (requested \"",
       format, "\")");

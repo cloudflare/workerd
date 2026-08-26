@@ -1671,4 +1671,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # abort, and UA-fired events on WebSocket, EventSource, and MessagePort) use the spec's
   # report-and-continue semantics. Internal runtime event delivery (fetch, scheduled, etc.)
   # is not affected and always propagates.
+
+  webCryptoModernAlgorithms @189 :Bool
+      $compatEnableFlag("webcrypto_modern_algorithms");
+  # Enables opt-in WebCrypto modern algorithm support. This currently exposes the subset of
+  # the evolving WICG Modern Algorithms draft implemented by workerd: ML-KEM, ML-DSA, related
+  # key encapsulation helpers, getPublicKey(), SubtleCrypto.supports(), and AKP JWK support. It is
+  # explicitly gated because the draft is still changing and workerd does not implement the full
+  # proposal. The API may change as the draft evolves.
 }

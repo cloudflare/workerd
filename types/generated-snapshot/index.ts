@@ -1497,6 +1497,8 @@ export interface JsonWebKey {
   qi?: string;
   oth?: RsaOtherPrimesInfo[];
   k?: string;
+  pub?: string;
+  priv?: string;
 }
 export interface RsaOtherPrimesInfo {
   r?: string;
@@ -1543,6 +1545,7 @@ export interface SubtleCryptoSignAlgorithm {
   hash?: string | SubtleCryptoHashAlgorithm;
   dataLength?: number;
   saltLength?: number;
+  context?: ArrayBuffer | ArrayBufferView;
 }
 export interface CryptoKeyKeyAlgorithm {
   name: string;

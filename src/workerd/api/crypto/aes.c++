@@ -47,22 +47,6 @@ auto lookupAesGcmType(uint bitLength) {
   }
 }
 
-// Ensure the tagLength passed to the AES-GCM algorithm is one of the allowed bit lengths.
-void validateAesGcmTagLength(int tagLength) {
-  switch (tagLength) {
-    case 32:
-    case 64:
-    case 96:
-    case 104:
-    case 112:
-    case 120:
-    case 128:
-      break;
-    default:
-      JSG_FAIL_REQUIRE(DOMOperationError, "Invalid AES-GCM tag length ", tagLength, ".");
-  }
-}
-
 int decryptFinalHelper(kj::StringPtr algorithm,
     size_t inputLength,
     size_t outputLength,
@@ -151,8 +135,9 @@ class AesKeyBase: public CryptoKey::Impl {
   }
 
   SubtleCrypto::ExportKeyData exportKey(jsg::Lock& js, kj::StringPtr format) const override final {
-    JSG_REQUIRE(format == "raw" || format == "jwk", DOMNotSupportedError, getAlgorithmName(),
-        " key only supports exporting \"raw\" & \"jwk\", not \"", format, "\".");
+    JSG_REQUIRE(format == "raw" || format == "raw-secret" || format == "jwk", DOMNotSupportedError,
+        getAlgorithmName(),
+        " key only supports exporting \"raw\", \"raw-secret\" & \"jwk\", not \"", format, "\".");
 
     if (format == "jwk") {
       auto lengthInBytes = keyData.size();
@@ -786,7 +771,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importAes(jsg::Lock& js,
 
   kj::Array<kj::byte> keyDataArray;
 
-  if (format == "raw") {
+  if (format == "raw" || format == "raw-secret") {
     // NOTE: Checked in SubtleCrypto::importKey().
     auto& source = keyData.get<jsg::JsRef<jsg::JsBufferSource>>();
     auto handle = source.getHandle(js);

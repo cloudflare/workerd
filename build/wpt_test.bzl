@@ -22,7 +22,7 @@ PORT_BINDINGS = [
 ### (Invokes wpt_js_test_gen, wpt_wd_test_gen and wd_test to assemble a complete test suite.)
 ### -----------------------------------------------------------------------------------------
 
-def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, **kwargs):
+def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, include_tentative = False, **kwargs):
     """
     Main entry point.
 
@@ -51,6 +51,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         wpt_directory = wpt_directory,
         test_config = test_config_as_js,
         wpt_tsproject = wpt_tsproject,
+        include_tentative = include_tentative,
     )
 
     wd_test_gen_rule = "{}@_wpt_wd_test_gen".format(name)
@@ -153,7 +154,7 @@ def _wpt_js_test_gen_impl(ctx):
     base = ctx.attr.wpt_directory[WPTModuleInfo].base
 
     files = ctx.attr.wpt_directory.files.to_list()
-    test_files = [file for file in files if is_test_file(file)]
+    test_files = [file for file in files if is_test_file(file, ctx.attr.include_tentative)]
 
     ctx.actions.write(
         output = src,
@@ -180,6 +181,8 @@ _wpt_js_test_gen = rule(
         "test_config": attr.label(allow_single_file = True),
         # Dependency: The ts_project rule that compiles the tests to JS
         "wpt_tsproject": attr.label(),
+        # Whether to include tentative test files
+        "include_tentative": attr.bool(default = False),
     },
 )
 
@@ -196,7 +199,7 @@ const {{ run, printResults }} = createRunner(config, '{test_name}', allTestFiles
 export const zzz_results = printResults();
 """
 
-def is_test_file(file):
+def is_test_file(file, include_tentative = False):
     if not file.path.endswith(".js"):
         # Not JS code, not a test
         return False
@@ -207,7 +210,7 @@ def is_test_file(file):
         # into the main directory, and would need to manually be marked as skipAllTests
         return False
 
-    if ".tentative." in file.path or "/tentative/" in file.path:
+    if not include_tentative and (".tentative." in file.path or "/tentative/" in file.path):
         # Tentative tests are for proposed features that are not yet standardized.
         # We skip these to avoid noise from unstable specifications.
         return False
