@@ -222,7 +222,7 @@ pattern; a change to either side fails its cell.
 | --- | --- |
 | `api-surface.js` | toStringTag branding; `FixedLengthStream` subclassing; `readable`/`writable` are `ReadableStream`/`WritableStream` instances, stable, enumerable prototype accessors (placement per ledger #5); constructor source text (native code under C++, not under TS); accessor brand checks |
 | `construction.js` | valid lengths (0, 5, −0.0, `MAX_SAFE_INTEGER`, bigints, with strategy); coerced length observable via HWM cap; invalid lengths throw (types per ledger #1–3); inheritance (ledger #4) |
-| `chunk-types.js` | accepted: `Uint8Array`, `ArrayBuffer`, `DataView` subrange, string→UTF-8, subarray offsets; rejected: numbers, plain objects (`TypeError`; aftermath per ledger #6) |
+| `chunk-types.js` | accepted: `Uint8Array`, `ArrayBuffer`, `DataView` subrange, string→UTF-8, subarray offsets; rejected: numbers, plain objects (`TypeError`; aftermath per ledger #6); an invalid chunk queued behind valid writes surfaces its error in FIFO order — the earlier writes still deliver in both implementations |
 | `zero-length-writes.js` | empty view / buffer / string are non-closing no-ops |
 | `copy-semantics.js` | delivered chunk never aliases the source; source mutation after delivery is invisible; source is not detached |
 | `buffer-lifecycle.js` | write-time snapshot survives later resize/detach in both implementations; degenerate write-time inputs (already-detached per ledger #12, out-of-bounds views); shadowing/throwing metadata getters never consulted |

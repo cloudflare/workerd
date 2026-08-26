@@ -116,6 +116,38 @@ export const rejectsNumberChunk = {
   },
 };
 
+export const invalidChunkAfterQueuedValidWrites = {
+  async test() {
+    // An invalid chunk queued BEHIND valid writes must not cost them their
+    // delivery: validation errors surface in FIFO order, after everything
+    // written earlier has been consumed. Only the aftermath diverges
+    // (ledger #6): TypeScript errors the stream once the bad chunk's turn
+    // arrives; C++ leaves the stream usable.
+    const { readable, writable } = new IdentityTransformStream();
+    const writer = writable.getWriter();
+    const reader = readable.getReader();
+    const dec = new TextDecoder();
+    const enc = new TextEncoder();
+    const w1 = writer.write(enc.encode('a'));
+    const w2 = writer.write(enc.encode('b'));
+    const wBad = writer.write(42);
+    const [r1] = await Promise.all([reader.read(), w1]);
+    strictEqual(dec.decode(r1.value), 'a');
+    const [r2] = await Promise.all([reader.read(), w2]);
+    strictEqual(dec.decode(r2.value), 'b');
+    await rejects(wBad, TypeError);
+    if (usingTsImpl) {
+      await rejects(writer.closed, TypeError);
+    } else {
+      // The stream survives; later traffic still flows.
+      const w4 = writer.write(enc.encode('c'));
+      const [r4] = await Promise.all([reader.read(), w4]);
+      strictEqual(dec.decode(r4.value), 'c');
+      await writer.close();
+    }
+  },
+};
+
 export const rejectsObjectChunk = {
   async test() {
     const { writable } = new IdentityTransformStream();

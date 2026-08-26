@@ -33,6 +33,7 @@ export {
   acceptsStringAsUtf8,
   respectsViewOffsets,
   rejectsNumberChunk,
+  invalidChunkAfterQueuedValidWrites,
   rejectsObjectChunk,
 } from 'chunk-types';
 

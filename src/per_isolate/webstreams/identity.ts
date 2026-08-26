@@ -335,18 +335,30 @@ class IdentityTransformStream {
     // accepted ones in the same order. A write rejected AFTER size() ran
     // (stream already erroring or closing) leaves its snapshot behind,
     // but those states accept no further writes, so stale entries sit
-    // harmlessly at the tail and are never consumed. An invalid chunk
-    // makes validateAndCopyChunk throw out of size(), which errors the
-    // stream and rejects the write (the spec GetChunkSize error path) —
-    // the same observable outcome as validating in sinkWrite, one
-    // microtask earlier.
+    // harmlessly at the tail and are never consumed.
+    //
+    // An INVALID chunk must not throw out of size(): the spec's
+    // GetChunkSize error path errors the stream immediately, which would
+    // reject earlier valid writes still sitting in the queue instead of
+    // letting them deliver. The validation error is recorded in the FIFO
+    // instead and thrown when its entry's turn reaches sinkWrite — so
+    // errors surface in write order, exactly as when validation lived in
+    // sinkWrite itself, and everything written before the bad chunk still
+    // flows. (The error entry transiently counts one unit of queue size.)
     //
     // When highWaterMark is explicitly provided, the returned size is the
     // byte length so that desiredSize tracks bytes rather than chunk
     // count, matching the C++ WritableStreamInternalController which uses
     // adjustWriteBufferSize with actual byte lengths. Without an explicit
     // highWaterMark the returned size stays 1 per chunk.
-    const snapshots: (Uint8Array | undefined)[] = [];
+    //
+    // Entries are tagged with an own `ok` data property rather than
+    // discriminated with an `in` check so that a polluted Object.prototype
+    // cannot forge or mask the discriminant.
+    type SnapshotEntry =
+      | { ok: true; copied: Uint8Array | undefined }
+      | { ok: false; error: unknown };
+    const snapshots: SnapshotEntry[] = [];
     // A user-supplied highWaterMark of -0 is normalized to +0 so it cannot
     // surface as a negative-zero desiredSize; the C++ implementation's
     // uint64 coercion normalizes it the same way. For a number, adding 0
@@ -359,8 +371,17 @@ class IdentityTransformStream {
       explicitHighWaterMark += 0;
     }
     const sizeAndSnapshot = (chunk: unknown): number => {
-      ArrayPrototypePush(snapshots, validateAndCopyChunk(chunk));
-      return explicitHighWaterMark !== undefined ? byteSize(chunk) : 1;
+      try {
+        const copied = validateAndCopyChunk(chunk);
+        // Size is computed before the push: if it ever threw, nothing
+        // would have been queued and the FIFO could not desync.
+        const size = explicitHighWaterMark !== undefined ? byteSize(chunk) : 1;
+        ArrayPrototypePush(snapshots, { ok: true, copied });
+        return size;
+      } catch (error) {
+        ArrayPrototypePush(snapshots, { ok: false, error });
+        return 1;
+      }
     };
     writableStrategy =
       explicitHighWaterMark !== undefined
@@ -382,7 +403,12 @@ class IdentityTransformStream {
           'IdentityTransformStream internal error: snapshot queue desync'
         );
       }
-      const copied = ArrayPrototypeShift(snapshots) as Uint8Array | undefined;
+      const entry = ArrayPrototypeShift(snapshots) as SnapshotEntry;
+      // A recorded validation error surfaces here, at its FIFO turn: this
+      // write rejects and the stream errors, but everything written before
+      // it has already been delivered.
+      if (!entry.ok) throw entry.error;
+      const copied = entry.copied;
       if (copied === undefined) return; // zero-length no-op
 
       // FixedLengthStream overwrite enforcement (matches C++
