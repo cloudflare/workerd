@@ -985,6 +985,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Own<WorkerInterface> getSubrequestChannel(
       uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext);
 
+  kj::Own<WorkerInterface> getSubrequestChannel(uint channel,
+      bool isInHouse,
+      kj::Maybe<kj::String> cfBlobJson,
+      TraceContext& traceContext,
+      SpanParent userSpanParent);
+
   // Like getSubrequestChannel() but doesn't enforce limits. Use for trusted paths only.
   kj::Own<WorkerInterface> getSubrequestChannelNoChecks(uint channel,
       bool isInHouse,
@@ -1197,7 +1203,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
       TraceContext& tracing,
-      IoChannelFactory& channelFactory);
+      IoChannelFactory& channelFactory,
+      kj::Maybe<SpanParent> userSpanParent = kj::none);
 
   friend class IoContext_IncomingRequest;
   template <typename T>

@@ -119,7 +119,9 @@ namespace workerd::util {
   /* Back compression streams with memory-safe Rust implementations instead of the native C      \
      libraries. Currently covers zlib (zlib-rs) for node:zlib and web CompressionStream; the     \
      native implementations remain the default. */                                               \
-  V(COMPRESSION_RS)
+  V(COMPRESSION_RS)                                                                                 \
+  /* Enables per-call JSRPC tracing, trace-context propagation, and related Fetcher spans. */       \
+  V(JSRPC_TRACING)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
