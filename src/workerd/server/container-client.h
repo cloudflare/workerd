@@ -72,7 +72,7 @@ void configureContainerPrivileges(
     const ContainerPrivileges& privileges);
 
 // Docker-based implementation that implements the rpc::Container::Server interface
-// so it can be used as a rpc::Container::Client via kj::heap<ContainerClient>().
+// so it can be used as a rpc::Container::Client via kj::refcounted<ContainerClient>().
 // This allows the Container JSG class to use Docker directly without knowing
 // it's talking to Docker instead of a real RPC service.
 //

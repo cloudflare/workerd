@@ -1009,7 +1009,7 @@ jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
   // socket is being torn down, so there is nothing to wire up). The wiring runs JS that can throw
   // with no user code on the stack, so each body is wrapped in JSG_TRY/JSG_CATCH and reports via
   // js.reportError() (matching the queueMicrotask() pattern in global-scope.c++).
-  auto disconnectedOwn = ioContext.addObject(kj::heap<kj::Promise<bool>>(kj::mv(disconnected)));
+  auto disconnectedOwn = ioContext.createObject<kj::Promise<bool>>(kj::mv(disconnected));
   js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate,
       js.wrapSimpleFunction(js.v8Context(),
           JSG_VISITABLE_LAMBDA((self = socket.addRef(), disconnected = kj::mv(disconnectedOwn)),
@@ -1086,7 +1086,8 @@ class StreamOutgoingFactory final: public Fetcher::OutgoingFactory, public kj::R
         httpClient(
             kj::newHttpClient(headerTable, *this->stream, {.entropySource = entropySource})) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
+  Result newSingleUseClient(
+      kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override;
 
  private:
   kj::Own<kj::AsyncIoStream> stream;
@@ -1151,14 +1152,19 @@ class StreamWorkerInterface final: public WorkerInterface {
   kj::Own<StreamOutgoingFactory> factory;
 };
 
-kj::Own<WorkerInterface> StreamOutgoingFactory::newSingleUseClient(kj::Maybe<kj::String> cfStr) {
+Fetcher::OutgoingFactory::Result StreamOutgoingFactory::newSingleUseClient(
+    kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) {
+  // This factory creates no operation span.
   JSG_ASSERT(stream.get() != nullptr, Error,
       "Fetcher created from internalNewHttpClient can only be used once");
   // Create a WorkerInterface that wraps the stream, routing through getSubrequestNoChecks to apply
   // external memory adjustment for GC pressure.
-  return IoContext::current().getSubrequestNoChecks([&](auto& tracing, auto& channelFactory) {
+  auto client = IoContext::current().getSubrequestNoChecks(
+      [&](auto& tracing, auto& channelFactory) -> kj::Own<WorkerInterface> {
+    makeUserSpanParent(tracing);
     return kj::heap<StreamWorkerInterface>(kj::addRef(*this));
   }, {.inHouse = false, .wrapMetrics = false});
+  return {.client = kj::mv(client), .spanParents = kj::none};
 }
 
 jsg::Promise<jsg::Ref<Fetcher>> SocketsModule::internalNewHttpClient(

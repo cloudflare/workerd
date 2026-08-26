@@ -75,6 +75,7 @@ wd_cc_library(
         "//src/workerd/util:string-buffer",
         "//src/workerd/util:strings",
         "//src/workerd/util:uuid",
+        "//src/workerd/util:zlib",
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@nbytes",
@@ -604,6 +605,14 @@ kj_test(
     src = "worker-getexportedhandler-test.c++",
     deps = [
         ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "worker-entrypoint-test.c++",
+    deps = [
+        ":worker-entrypoint",
         "//src/workerd/tests:test-fixture",
     ],
 )

@@ -1651,12 +1651,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # WARNING: Do not remove the `$experimental` marker before
   # the v8 change becomes part of chrome's default config.
 
-  pythonWorkers20260817 @187 :Bool
-      $compatEnableFlag("python_workers_20260817")
-      $compatDisableFlag("no_python_workers_20260817")
-      $experimental
+  pythonWorkers314 @187 :Bool
+      $compatEnableFlag("python_workers_314")
+      $compatDisableFlag("no_python_workers_314")
+      $compatEnableDate("2026-09-08")
       $pythonSnapshotRelease;
-  # Enables Python Workers using Pyodide 314.0.5.
+  # Enables Python Workers using Pyodide 314.0.6.
 
   specCompliantDispatchExceptions @188 :Bool
       $compatEnableFlag("spec_compliant_dispatch_exceptions")

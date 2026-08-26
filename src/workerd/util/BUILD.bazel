@@ -22,6 +22,16 @@ selects.config_setting_group(
 )
 
 wd_cc_library(
+    name = "zlib",
+    hdrs = ["zlib.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/zlib-rs",
+        "@zlib//:zlib_common_headers",
+    ],
+)
+
+wd_cc_library(
     name = "perfetto",
     srcs = ["perfetto-tracing.c++"],
     hdrs = [

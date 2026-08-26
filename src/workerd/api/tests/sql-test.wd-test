@@ -1,6 +1,7 @@
 using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
+  autogates = ["workerd-autogate-jsrpc-tracing"],
   services = [
     (name = "main", worker = .mainWorker),
     (name = "TEST_TMPDIR", disk = (writable = true)),

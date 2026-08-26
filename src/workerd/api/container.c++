@@ -460,7 +460,7 @@ void Container::startMonitor() {
   }).fork();
 
   currentMonitor =
-      IoContext::current().addObject(kj::heap<Monitor>(kj::mv(monitor), ++nextMonitorGeneration));
+      IoContext::current().createObject<Monitor>(kj::mv(monitor), ++nextMonitorGeneration);
 }
 
 jsg::Promise<void> Container::setLabels(jsg::Lock& js, jsg::Dict<kj::String> labels) {
@@ -1449,12 +1449,15 @@ class Container::TcpPortOutgoingFactory final: public Fetcher::OutgoingFactory {
         headerTable(headerTable),
         portState(kj::mv(portState)) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
-    // At present we have no use for `cfStr`.
-    return IoContext::current().getSubrequestNoChecks(
+  Result newSingleUseClient(
+      kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override {
+    // At present we have no use for `cfStr`. This factory creates no operation span.
+    auto client = IoContext::current().getSubrequestNoChecks(
         [&](auto& tracing, auto& channelFactory) -> kj::Own<WorkerInterface> {
+      makeUserSpanParent(tracing);
       return kj::heap<TcpPortWorkerInterface>(entropySource, headerTable, portState.addRef());
     }, {.inHouse = false, .wrapMetrics = false});
+    return {.client = kj::mv(client), .spanParents = kj::none};
   }
 
  private:
@@ -1481,7 +1484,7 @@ jsg::Ref<Fetcher> Container::getTcpPort(jsg::Lock& js, int port) {
   auto portState = [&]() -> kj::Rc<TcpPortState> {
     if (util::Autogate::isEnabled(util::AutogateKey::CONTAINER_TUNNEL_REUSE)) {
       if (tcpPortStates == kj::none) {
-        tcpPortStates = ioctx.addObject(kj::heap<kj::HashMap<int, kj::Rc<TcpPortState>>>());
+        tcpPortStates = ioctx.createObject<kj::HashMap<int, kj::Rc<TcpPortState>>>();
       }
       auto& states = *KJ_ASSERT_NONNULL(tcpPortStates);
 

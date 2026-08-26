@@ -80,19 +80,20 @@ class RetryMetadataOutgoingFactory final: public Fetcher::OutgoingFactory {
       : ordinaryDispatchCalled(ordinaryDispatchCalled),
         capturedMetadata(capturedMetadata) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String>) override {
+  Result newSingleUseClient(kj::Maybe<kj::String>, MakeUserSpanParent makeUserSpanParent) override {
     ordinaryDispatchCalled = true;
-    return kj::heap<MockFetchTarget>();
+    return {.client = kj::heap<MockFetchTarget>(), .spanParents = kj::none};
   }
 
   bool supportsActorRetryMetadata() const override {
     return true;
   }
 
-  kj::Own<WorkerInterface> newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String>,
-      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) override {
+  Result newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String>,
+      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata,
+      MakeUserSpanParent makeUserSpanParent) override {
     capturedMetadata = kj::mv(actorRetryRequestMetadata);
-    return kj::heap<MockFetchTarget>();
+    return {.client = kj::heap<MockFetchTarget>(), .spanParents = kj::none};
   }
 
  private:
@@ -104,9 +105,9 @@ class UnsupportedOutgoingFactory final: public Fetcher::OutgoingFactory {
  public:
   UnsupportedOutgoingFactory(bool& called): called(called) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String>) override {
+  Result newSingleUseClient(kj::Maybe<kj::String>, MakeUserSpanParent makeUserSpanParent) override {
     called = true;
-    return kj::heap<MockFetchTarget>();
+    return {.client = kj::heap<MockFetchTarget>(), .spanParents = kj::none};
   }
 
  private:
@@ -397,7 +398,8 @@ KJ_TEST("GlobalActorOutgoingFactory places actor retry metadata on the actor sub
           .nonce = 0x123456789abcdef0,
           .createdAt = kj::UNIX_EPOCH + 123 * kj::MILLISECONDS,
           .isRetry = IsActorRetry::YES,
-        });
+        },
+        [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
 
     KJ_IF_SOME(metadata, capturedMetadata) {
       KJ_EXPECT(metadata.nonce == 0x123456789abcdef0);
@@ -423,7 +425,8 @@ KJ_TEST("ReplicaActorOutgoingFactory places actor retry metadata on the actor su
           .nonce = 0x123456789abcdef0,
           .createdAt = kj::UNIX_EPOCH + 123 * kj::MILLISECONDS,
           .isRetry = IsActorRetry::YES,
-        });
+        },
+        [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
 
     KJ_IF_SOME(metadata, capturedMetadata) {
       KJ_EXPECT(metadata.nonce == 0x123456789abcdef0);

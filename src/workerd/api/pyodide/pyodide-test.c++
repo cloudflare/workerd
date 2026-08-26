@@ -55,21 +55,21 @@ KJ_TEST("getPythonSnapshotRelease") {
     KJ_ASSERT(res.getFlagName() == "pythonWorkers20260610");
   }
 
-  featureFlags.setPythonWorkers20260817(true);
+  featureFlags.setPythonWorkers314(true);
   {
     auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-    KJ_ASSERT(res.getPyodide() == "314.0.5");
-    KJ_ASSERT(res.getFlagName() == "pythonWorkers20260817");
+    KJ_ASSERT(res.getPyodide() == "314.0.6");
+    KJ_ASSERT(res.getFlagName() == "pythonWorkers314");
   }
 
   featureFlags.setPythonWorkersDevPyodide(false);
   {
     auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-    KJ_ASSERT(res.getPyodide() == "314.0.5");
-    KJ_ASSERT(res.getFlagName() == "pythonWorkers20260817");
+    KJ_ASSERT(res.getPyodide() == "314.0.6");
+    KJ_ASSERT(res.getFlagName() == "pythonWorkers314");
   }
 
-  featureFlags.setPythonWorkers20260817(false);
+  featureFlags.setPythonWorkers314(false);
   {
     auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
     KJ_ASSERT(res.getPyodide() == "314.0.4");

@@ -116,6 +116,9 @@ struct TestFixture {
   // Performs HTTP request on the default module handler, and waits for full response.
   Response runRequest(kj::HttpMethod method, kj::StringPtr url, kj::StringPtr body);
 
+  // Constructs the same WorkerEntrypoint wrapper used in production.
+  kj::Own<WorkerInterface> makeWorkerEntrypoint();
+
   // Create a new IoContext, owned by the caller. Use this when you need an IoContext that
   // outlives a single IncomingRequest, e.g. to model an actor receiving multiple requests.
   kj::Own<IoContext> newIoContext();

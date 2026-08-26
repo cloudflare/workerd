@@ -197,6 +197,30 @@ wd_test(
     tags = ["no-coverage"],
 )
 
+# Regression test: a callback passed as an RPC argument, when invoked by the callee, must
+# produce a jsRpcCall span nested under the method's server-side jsRpcCall span.
+wd_test(
+    src = "jsrpc-callback-trace-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "jsrpc-callback-trace-test.js",
+        "jsrpc-callback-trace-test-tail.js",
+    ],
+    tags = ["no-coverage"],
+)
+
+# Test: a callee invocation is parented to the first caller jsRpcCall, and each dispatch links to
+# its corresponding caller span.
+wd_test(
+    src = "jsrpc-pipelined-trace-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "jsrpc-pipelined-trace-test.js",
+        "jsrpc-pipelined-trace-test-tail.js",
+    ],
+    tags = ["no-coverage"],
+)
+
 # Regression test: jsrpc onset.info emitted into a streaming tail worker must remain
 # serializable when forwarded over service-binding RPC, just like fetch onset.info.
 wd_test(
@@ -491,6 +515,12 @@ wd_test(
 
 wd_test(
     src = "crypto-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto-streams-test.js"],
+)
+
+wd_test(
+    src = "crypto-streams-ts-test.wd-test",
     args = ["--experimental"],
     data = ["crypto-streams-test.js"],
 )
@@ -1347,6 +1377,12 @@ wd_test(
 wd_test(
     src = "htmlrewriter-transform-cancel-test.wd-test",
     data = ["htmlrewriter-transform-cancel-test.js"],
+)
+
+wd_test(
+    src = "ts-digest-stream-test.wd-test",
+    args = ["--experimental"],
+    data = ["ts-digest-stream-test.js"],
 )
 
 wd_test(

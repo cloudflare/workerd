@@ -41,10 +41,7 @@ rust_test(
     name = "kj-rs_test",
     crate = "kj-rs",
     edition = "2024",
-    experimental_use_cc_common_link = select({
-        "@platforms//os:windows": 0,
-        "//conditions:default": 1,
-    }),
+    experimental_use_cc_common_link = 1,
     malloc = "//src/workerd/server:malloc",
     target_compatible_with = select({
         "@//build/config:no_build": ["@platforms//:incompatible"],

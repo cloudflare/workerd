@@ -1596,9 +1596,15 @@ interface CryptoKeyArbitraryKeyAlgorithm {
 declare class DigestStream extends WritableStream<
   ArrayBuffer | ArrayBufferView
 > {
-  constructor(algorithm: string | SubtleCryptoHashAlgorithm);
+  constructor(
+    algorithm: string | SubtleCryptoHashAlgorithm,
+    options?: DigestStreamOptions,
+  );
   readonly digest: Promise<ArrayBuffer>;
   get bytesWritten(): number | bigint;
+}
+interface DigestStreamOptions {
+  toWellFormed?: boolean;
 }
 /**
  * The **`TextDecoder`** interface represents a decoder for a specific text encoding, such as UTF-8, ISO-8859-2, or GBK. A decoder takes an array of bytes as input and returns a JavaScript string.
@@ -12786,11 +12792,25 @@ type BrowserRunJsonOptions = BrowserRunCommonOptions &
   );
 type BrowserRunContentOptions = BrowserRunCommonOptions;
 type BrowserRunMarkdownOptions = BrowserRunCommonOptions;
+type BrowserRunRedirectHop = {
+  /** URL that returned the redirect. */
+  url: string;
+  /** HTTP status of the redirect. */
+  status: number;
+  /** Redirect response headers, including `location`. */
+  headers: Record<string, string>;
+};
 type BrowserRunResponseMeta = {
   /** HTTP status code of the rendered page */
   status: number;
   /** Page title */
   title: string;
+  /** Origin response headers, lowercased. Repeated headers are joined with a newline. Credential and transport-only headers that do not survive rendering are omitted. */
+  headers?: Record<string, string>;
+  /** URL that served the response, after any redirects the browser followed. */
+  finalUrl?: string;
+  /** HTTP redirects followed to reach `finalUrl`, oldest first. Omitted for direct navigation and for client-side redirects such as meta refresh. An empty array means redirects occurred but their intermediate responses could not be read. */
+  redirectChain?: BrowserRunRedirectHop[];
 };
 /**
  * A node in the page's accessibility tree, as exposed to assistive technology.
@@ -12856,6 +12876,7 @@ type BrowserRunLinksSuccessResponse = {
   success: true;
   /** Extracted links */
   result: string[];
+  meta: BrowserRunResponseMeta;
 };
 /** Success response for `scrape` action. */
 type BrowserRunScrapeSuccessResponse = {
@@ -12886,6 +12907,7 @@ type BrowserRunScrapeSuccessResponse = {
       }>;
     }>;
   }>;
+  meta: BrowserRunResponseMeta;
 };
 /** Success response for `snapshot` action. Each field is present only when the
  * corresponding entry was requested in `formats`.
@@ -12920,12 +12942,14 @@ type BrowserRunJsonSuccessResponse = {
   success: true;
   /** JSON data extracted from the page using an AI model */
   result: Record<string, unknown>;
+  meta: BrowserRunResponseMeta;
 };
 /** Success response for `markdown` action. */
 type BrowserRunMarkdownSuccessResponse = {
   success: true;
   /** Extracted markdown content */
   result: string;
+  meta: BrowserRunResponseMeta;
 };
 /** Error response for BrowserRun actions. */
 type BrowserRunErrorResponse = {

@@ -36,6 +36,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io",
+        "//src/workerd/io:worker-entrypoint",
         "//src/workerd/jsg",
         "//src/workerd/server:workerd-api",
         "//src/workerd/util:autogate",
@@ -93,6 +94,19 @@ wd_cc_benchmark(
     deps = [
         ":test-fixture",
         "//src/workerd/util",
+    ],
+)
+
+wd_cc_benchmark(
+    name = "bench-zlib",
+    srcs = [
+        "bench-zlib.c++",
+        "zlib-rs-shim.c++",
+        "zlib-rs-shim.h",
+    ],
+    deps = [
+        "//src/rust/zlib-rs",
+        "@zlib",
     ],
 )
 

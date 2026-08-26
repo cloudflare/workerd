@@ -2653,8 +2653,6 @@ KJ_TEST("Wasm compile cache is reused across isolates") {
 
 KJ_TEST("Using a registry from multiple threads works") {
 
-  kj::AsyncIoContext io = kj::setupAsyncIo();
-
   ModuleBundle::BundleBuilder bundleBuilder(BASE);
   // The non-ASCII literal forces the shared UTF-8 -> Latin-1 source transcode,
   // so this test also exercises its cross-thread once-init: all five isolates
@@ -2667,83 +2665,30 @@ KJ_TEST("Using a registry from multiple threads works") {
   auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
   CountingCompilationObserver compilationObserver;
 
-  struct ErrorHandler final: public kj::TaskSet::ErrorHandler {
-    void taskFailed(kj::Exception&& exception) override {
-      if (error == kj::none) {
-        error = kj::mv(exception);
-      }
-    }
-
-    kj::Maybe<kj::Exception> error;
-  };
-  ErrorHandler errorHandler;
-
-  kj::TaskSet tasks(errorHandler);
   kj::MutexGuarded<uint> successfulResolutions(0);
 
   static const auto makeRunnable = [](kj::Arc<workerd::jsg::modules::ModuleRegistry> registry,
                                        const CountingCompilationObserver& compilationObserver,
-                                       kj::MutexGuarded<uint>& successfulResolutions,
-                                       kj::Own<kj::PromiseFulfiller<void>> fulfiller) {
-    return [registry = kj::mv(registry), &compilationObserver, &successfulResolutions,
-               fulfiller = kj::mv(fulfiller)]() mutable {
-      KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
-        PREAMBLE([&](Lock& js) {
-          auto attached = registry->attachToIsolate(js, compilationObserver);
-          js.tryCatch([&] {
-            auto val = ModuleRegistry::resolve(js, "file:///foo");
-            KJ_ASSERT(val.isNumber());
-          }, [&](Value exception) { js.throwException(kj::mv(exception)); });
-        });
-        auto count = successfulResolutions.lockExclusive();
-        ++*count;
-      })) {
-        fulfiller->reject(kj::mv(exception));
-        return;
-      }
-      fulfiller->fulfill();
+                                       kj::MutexGuarded<uint>& successfulResolutions) {
+    return [registry = kj::mv(registry), &compilationObserver, &successfulResolutions]() mutable {
+      PREAMBLE([&](Lock& js) {
+        auto attached = registry->attachToIsolate(js, compilationObserver);
+        js.tryCatch([&] {
+          auto val = ModuleRegistry::resolve(js, "file:///foo");
+          KJ_ASSERT(val.isNumber());
+        }, [&](Value exception) { js.throwException(kj::mv(exception)); });
+      });
+      auto count = successfulResolutions.lockExclusive();
+      ++*count;
     };
   };
 
-  struct RunnableAndPromise {
-    kj::Promise<void> promise;
-    kj::Function<void()> runnable;
-  };
-
-  static const auto makeRunnableAndPromise =
-      [](kj::Arc<workerd::jsg::modules::ModuleRegistry> registry,
-          const CountingCompilationObserver& compilationObserver,
-          kj::MutexGuarded<uint>& successfulResolutions) -> RunnableAndPromise {
-    auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
-    return {kj::mv(paf.promise),
-      makeRunnable(
-          kj::mv(registry), compilationObserver, successfulResolutions, kj::mv(paf.fulfiller))};
-  };
-
-  auto [paf1, task1] =
-      makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
-  kj::Thread(kj::mv(task1)).detach();
-  auto [paf2, task2] =
-      makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
-  kj::Thread(kj::mv(task2)).detach();
-  auto [paf3, task3] =
-      makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
-  kj::Thread(kj::mv(task3)).detach();
-  auto [paf4, task4] =
-      makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
-  kj::Thread(kj::mv(task4)).detach();
-  auto [paf5, task5] =
-      makeRunnableAndPromise(registry.addRef(), compilationObserver, successfulResolutions);
-  kj::Thread(kj::mv(task5)).detach();
-
-  tasks.add(kj::mv(paf1));
-  tasks.add(kj::mv(paf2));
-  tasks.add(kj::mv(paf3));
-  tasks.add(kj::mv(paf4));
-  tasks.add(kj::mv(paf5));
-  tasks.onEmpty().wait(io.waitScope);
-  KJ_IF_SOME(exception, errorHandler.error) {
-    kj::throwRecoverableException(kj::mv(exception));
+  {
+    kj::Thread thread1(makeRunnable(registry.addRef(), compilationObserver, successfulResolutions));
+    kj::Thread thread2(makeRunnable(registry.addRef(), compilationObserver, successfulResolutions));
+    kj::Thread thread3(makeRunnable(registry.addRef(), compilationObserver, successfulResolutions));
+    kj::Thread thread4(makeRunnable(registry.addRef(), compilationObserver, successfulResolutions));
+    kj::Thread thread5(makeRunnable(registry.addRef(), compilationObserver, successfulResolutions));
   }
 
   KJ_ASSERT(*successfulResolutions.lockShared() == 5);

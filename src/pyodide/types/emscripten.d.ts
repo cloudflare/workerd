@@ -37,7 +37,7 @@ interface API {
     stdout?: (a: string) => void,
     stderr?: (a: string) => void
   ) => void;
-  version: '0.26.0a2' | '0.28.2' | '314.0.4' | '314.0.5';
+  version: '0.26.0a2' | '0.28.2' | '314.0.4' | '314.0.6';
   pyodide_base: {
     pyimport_impl: PyCallable;
   };

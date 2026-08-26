@@ -196,6 +196,31 @@ if (compatFlags['typescript_implemented_streams']) {
   // Bootstrap the cpp exports module
   require('webstreams/cpp_exports');
 
+  // DigestStream subclasses WritableStream, so the C++ one would inherit from
+  // the C++ WritableStream that the assignments above just replaced. Swap in
+  // the TypeScript implementation so the hierarchy is consistent.
+  //
+  // JSG installs nested types on the prototype rather than the instance, so
+  // this reaches every `crypto.DigestStream` — including the lazily created
+  // `globalThis.crypto` singleton, which is deliberately not touched here.
+  // The attributes match what JSG_NESTED_TYPE installs (ObjectTemplate::Set
+  // with no attributes, i.e. all three true), so the swap is invisible to
+  // property introspection.
+  const { DigestStream } = require('crypto/digest-stream');
+  const { Crypto } = globalThis as unknown as {
+    Crypto: { prototype: object };
+  };
+  ObjectDefineProperties(Crypto.prototype, {
+    __proto__: null,
+    DigestStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: DigestStream,
+    },
+  });
+
   // Internal-only: expose the DrainingReader for testing expectedLength
   // pass-through (Content-Length integration). Gated by a separate
   // experimental flag that may never lose its experimental annotation.
