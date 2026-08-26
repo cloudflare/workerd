@@ -794,7 +794,7 @@ KJ_TEST("Container::start restores a directory snapshot using the snapshot's own
   auto fixture = makeFixture();
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
-    auto container = kj::heap<Container>(
+    auto container = kj::rc<Container>(
         rpc::Container::Client(kj::heap<DirectorySnapshotStartServer>(captured)), false);
 
     auto snapshots = kj::heapArrayBuilder<Container::DirectorySnapshotRestoreParams>(1);
@@ -824,7 +824,7 @@ KJ_TEST("Container::start lets mountPoint override the snapshot's dir as the res
   auto fixture = makeFixture();
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
-    auto container = kj::heap<Container>(
+    auto container = kj::rc<Container>(
         rpc::Container::Client(kj::heap<DirectorySnapshotStartServer>(captured)), false);
 
     auto snapshots = kj::heapArrayBuilder<Container::DirectorySnapshotRestoreParams>(1);
@@ -853,7 +853,7 @@ KJ_TEST("Container::start restores to mountPoint when no snapshot is given") {
   auto fixture = makeFixture();
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
-    auto container = kj::heap<Container>(
+    auto container = kj::rc<Container>(
         rpc::Container::Client(kj::heap<DirectorySnapshotStartServer>(captured)), false);
 
     auto snapshots = kj::heapArrayBuilder<Container::DirectorySnapshotRestoreParams>(1);
@@ -882,7 +882,7 @@ KJ_TEST("Container::start requires mountPoint when no snapshot is given") {
   auto fixture = makeFixture();
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
-    auto container = kj::heap<Container>(
+    auto container = kj::rc<Container>(
         rpc::Container::Client(kj::heap<DirectorySnapshotStartServer>(captured)), false);
 
     auto snapshots = kj::heapArrayBuilder<Container::DirectorySnapshotRestoreParams>(1);
