@@ -532,11 +532,6 @@ class FileSystemDirectoryHandle final: public FileSystemHandle {
 // are not implemented twice and cannot drift. It is not registered on the global
 // scope, has no JS-reachable constructor, and is excluded from the generated
 // types.
-//
-// Ownership is a chain -- stream -> context -> file handle -- and needs to stay
-// one. A jsg::Ref carries a single tracing-parent slot, mutated in place by
-// GcVisitor::visit (jsg.h), so state holding a jsg::Ref can have only one
-// jsg::Object owner.
 class FileSystemWriteContextHandle final: public jsg::Object {
  public:
   FileSystemWriteContextHandle(jsg::Lock& js,
@@ -593,11 +588,8 @@ class FileSystemWriteContextHandle final: public jsg::Object {
   // is what makes a subsequent write/seek/truncate fail.
   kj::Maybe<kj::Rc<workerd::File>> temp;
 
-  // The file handle we are writing to. Deliberately not visited: an unvisited Ref
-  // stays strong, so this keeps the handle alive for the context's lifetime, and a
-  // FileSystemFileHandle holds nothing that can lead back here, so there is no
-  // cycle for the collector to break.
-  jsg::Ref<FileSystemFileHandle> file;  // NOLINT(jsg-visit-for-gc)
+  // The file handle we are writing to.
+  jsg::Ref<FileSystemFileHandle> file;
 
   kj::Maybe<kj::Own<void>> lock;
 
@@ -610,6 +602,10 @@ class FileSystemWriteContextHandle final: public jsg::Object {
   uint32_t position = 0;
 
   void clear();
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(file);
+  }
 };
 
 class FileSystemWritableFileStream final: public WritableStream {

@@ -13,10 +13,10 @@ class, a C++ subclass of the *C++* `WritableStream` no longer passes the
 brand checks used by `pipeTo`, and `instanceof WritableStream` becomes false.
 Reimplementing the subclass in TypeScript is what restores the hierarchy.
 
-The other subclass, `FileSystemWritableFileStream`
-(`src/workerd/api/filesystem.h`), has the same problem but is not addressed
-here: it is constructed from C++ rather than by user code, so it needs a
-native source/sink bridge instead of a straight port.
+The other subclass, `FileSystemWritableFileStream`, is fixed the same way in
+`src/per_isolate/webfs/`. Its construction runs the other direction — instances
+come from `FileSystemFileHandle.createWritable()` rather than a user-callable
+constructor — so that method is replaced on the prototype as well.
 
 ## FILE MAP
 

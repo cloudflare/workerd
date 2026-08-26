@@ -2981,6 +2981,6 @@ jsg::Promise<void> FileSystemWriteContextHandle::truncate(
     return js.resolvedPromise();
   }
 
-  return js.rejectedPromise<void>(js.typeError("seek() after closed"));
+  return js.rejectedPromise<void>(js.typeError("truncate() after closed"));
 }
 }  // namespace workerd::api

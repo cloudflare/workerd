@@ -1203,6 +1203,18 @@ wd_test(
 )
 
 wd_test(
+    src = "webfs-ts-test.wd-test",
+    args = ["--experimental"],
+    data = ["webfs-test.js"],
+)
+
+wd_test(
+    src = "ts-webfs-writable-test.wd-test",
+    args = ["--experimental"],
+    data = ["ts-webfs-writable-test.js"],
+)
+
+wd_test(
     src = "worker-test.wd-test",
     args = ["--experimental"],
     data = ["worker-test.js"],
