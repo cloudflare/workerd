@@ -11,12 +11,13 @@ sense for one implementation's internals belongs elsewhere.
 
 ```
 identity/
+  identity-modules.capnp # THE module list, defined once (see below)
   identity-cpp.wd-test   # runs the modules against the C++ implementation
   identity-ts.wd-test    # runs the *same* modules against the TS implementation
   main.js                # entry point: explicit re-exports of every test
   which-impl.js          # exports usingTsImpl (see Divergences)
   <behavior>.js          # one file per behavior, small and single-purpose
-  BUILD.bazel            # two wd_test() targets over glob(["*.js"])
+  BUILD.bazel            # wd_test() targets over glob(["*.js"]) + the .capnp
 ```
 
 - **One file, one behavior.** Decompose aggressively; the filename names the
@@ -25,9 +26,16 @@ identity/
 - **`main.js` uses explicit named re-exports, never `export *`.** A name
   collision between two modules must be a load-time SyntaxError, not a
   silently dropped test.
-- Both `.wd-test` configs embed the identical module list. Sharing the test
-  modules is the point: behavioral drift between the implementations fails
-  one config or the other.
+- **The module list is defined exactly once**, as a
+  `List(Workerd.Worker.Module)` constant in `<name>-modules.capnp`, which
+  both main configs import and reference (`modules =
+  IdentityModules.modules`). Sharing the test modules is the point:
+  behavioral drift between the implementations fails one config or the
+  other, and a single source of truth makes it impossible for the two cells
+  to embed different code. A new test module is added in two places only:
+  the `.capnp` constant and `main.js`. (`embed` paths resolve relative to
+  the `.capnp` file; the legacy cell's deliberately different, smaller list
+  stays inline in its own config.)
 
 ## Compatibility flags, not dates
 

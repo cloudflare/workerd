@@ -5,7 +5,7 @@ load("//:build/wd_test.bzl", "wd_test")
 # the TypeScript implementation. A test that cannot pass under both belongs
 # in an implementation-specific suite, not here.
 
-identity_suite_srcs = glob(["*.js"])
+identity_suite_srcs = glob(["*.js"]) + ["identity-modules.capnp"]
 
 wd_test(
     src = "identity-cpp.wd-test",
