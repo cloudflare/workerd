@@ -16,6 +16,7 @@ archive_override(
         "//:patches/sqlite/0002-macOS-missing-PATH-fix.patch",
         "//:patches/sqlite/0003-sqlite-complete-early-exit.patch",
         "//:patches/sqlite/0004-authorizer-rename-to-destination-name.patch",
+        "//:patches/sqlite/0005-restrict-internal-functions-to-nested-parse.patch",
     ],
     remote_file_integrity = {
         "MODULE.bazel": "sha256-y8b6x7BNbvOuFQxzh1vbyJ/1F/RP67Ho3gJUJU3wZeE=",

@@ -1808,6 +1808,17 @@ KJ_TEST("SQLite Regulator blocks RENAME TO reserved name") {
   KJ_EXPECT(db.prepare(reg, "SELECT value FROM other_data").run().getBlob(0).size() == 4);
 }
 
+KJ_TEST("SQLite restrict internal functions to nested parse") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  db.run(
+      "CREATE TABLE users (name TEXT DEFAULT (sqlite_drop_column(0, 'CREATE TABLE target(a, b)', 0)))");
+  KJ_EXPECT_THROW_MESSAGE("unknown function: sqlite_drop_column(): SQLITE_ERROR",
+      db.run("INSERT INTO users DEFAULT VALUES;"));
+}
+
 KJ_TEST("SQLite R*Tree extension is enabled") {
   // Regression test to ensure that the SQLite R*Tree extension is enabled and usable.
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
