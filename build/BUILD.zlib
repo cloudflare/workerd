@@ -231,7 +231,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":zlib_common_headers",
-        "@workerd//src/rust/zlib-rs",
+        "@@//src/rust/zlib-rs",
     ],
 )
 
