@@ -36,6 +36,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io",
+        "//src/workerd/io:worker-entrypoint",
         "//src/workerd/jsg",
         "//src/workerd/server:workerd-api",
         "//src/workerd/util:autogate",

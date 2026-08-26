@@ -13,6 +13,7 @@
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/observer.h>
 #include <workerd/io/tracer.h>
+#include <workerd/io/worker-entrypoint.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/server/workerd-api.h>
@@ -515,6 +516,31 @@ TestFixture::Response TestFixture::runRequest(
   });
 
   return {.statusCode = response.statusCode, .body = response.body->str()};
+}
+
+kj::Own<WorkerInterface> TestFixture::makeWorkerEntrypoint() {
+  kj::Rc<IoChannelFactory> channelFactory;
+  KJ_IF_SOME(factory, ioChannelFactory) {
+    channelFactory = factory(*timerChannel);
+  } else {
+    channelFactory = kj::rc<DummyIoChannelFactory>(*timerChannel);
+  }
+
+  kj::Own<RequestObserver> observer;
+  KJ_IF_SOME(factory, requestObserverFactory) {
+    observer = factory();
+  } else {
+    observer = kj::refcounted<RequestObserver>();
+  }
+
+  kj::Maybe<kj::Own<Worker::Actor>> actorRef;
+  KJ_IF_SOME(a, actor) {
+    actorRef = kj::addRef(*a);
+  }
+
+  return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), kj::none, Frankenvalue(),
+      kj::mv(actorRef), kj::heap<MockLimitEnforcer>(), kj::Own<void>(), kj::mv(channelFactory),
+      kj::mv(observer), waitUntilTasks, false, kj::none, kj::none, kj::none);
 }
 
 }  // namespace workerd
