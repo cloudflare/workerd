@@ -54,6 +54,27 @@ class CompressionAllocator final {
 // translates to its spec-pinned TypeErrors; node:zlib to Node-fidelity CompressionError
 // codes), and node-specific zlib features (dictionaries, deflateParams) reach the structure
 // through raw() until they grow shared consumers.
+// Backend table over the zlib C API. Two implementations back it: native
+// (chromium) zlib and zlib-rs (memory-safe Rust, see zlib-rs-bridge.h). The
+// backend is chosen per stream by the compression-rs autogate at construction.
+// The z_stream ABI is identical between the two.
+struct ZlibBackend {
+  int (*initDeflate)(z_stream* strm, int level, int windowBits, int memLevel, int strategy);
+  int (*initInflate)(z_stream* strm, int windowBits);
+  int (*runDeflate)(z_stream* strm, int flush);
+  int (*runInflate)(z_stream* strm, int flush);
+  int (*endDeflate)(z_stream* strm);
+  int (*endInflate)(z_stream* strm);
+  int (*resetDeflate)(z_stream* strm);
+  int (*resetInflate)(z_stream* strm);
+  int (*setDeflateParams)(z_stream* strm, int level, int strategy);
+  int (*setDeflateDictionary)(z_stream* strm, const kj::byte* dictionary, uint32_t dictLength);
+  int (*setInflateDictionary)(z_stream* strm, const kj::byte* dictionary, uint32_t dictLength);
+};
+
+// Selects the backing zlib implementation via the compression-rs autogate.
+const ZlibBackend& selectZlibBackend();
+
 class ZlibStream final {
  public:
   enum class Mode { COMPRESS, DECOMPRESS };
@@ -115,6 +136,12 @@ class ZlibStream final {
     return stream;
   }
 
+  // The zlib implementation backing this stream, for consumer-specific calls
+  // made through raw().
+  const ZlibBackend& getZlibBackend() const {
+    return backend;
+  }
+
   // The canonical name for a zlib return code (e.g. "Z_DATA_ERROR"); "Z_UNKNOWN_ERROR" for
   // unrecognized codes.
   static kj::StringPtr errorCodeName(int code);
@@ -124,6 +151,7 @@ class ZlibStream final {
   static kj::Maybe<int> windowBitsForWebFormat(kj::StringPtr format);
 
  private:
+  const ZlibBackend& backend = selectZlibBackend();
   z_stream stream = {};
   Mode mode = Mode::COMPRESS;
   bool initialized = false;
