@@ -10,9 +10,14 @@
 //   - The writable side only accepts BYTES (ArrayBuffer, ArrayBufferView,
 //     SharedArrayBuffer) and STRINGS (→ UTF-8 via TextEncoder).
 //     Everything else: TypeError.
-//   - All writes COPY the data (never transfer/detach the input buffer).
-//     SAB input forces this anyway; uniform copy avoids a behavioral
-//     split and matches legacy parity with the old C++ ITS.
+//   - All writes COPY the data (never transfer/detach the input buffer),
+//     and the copy is taken SYNCHRONOUSLY inside writer.write() — via the
+//     strategy size callback, the one hook the writable machinery runs
+//     before control returns to the caller — so resizing or detaching the
+//     buffer after write() cannot change or destroy what gets delivered.
+//     SAB input forces copying anyway; uniform copy avoids a behavioral
+//     split and matches legacy parity with the old C++ ITS (whose
+//     processChunk copies inside write() for exactly these hazards).
 //   - Zero-length writes are accepted as NO-OPS: the write resolves
 //     immediately without touching the readable queue (no zero-length
 //     chunk enqueued, no backpressure interaction, no pull).
@@ -60,6 +65,8 @@ import type {
 const {
   ArrayBuffer,
   ArrayBufferPrototypeByteLengthGet,
+  ArrayPrototypePush,
+  ArrayPrototypeShift,
   BigInt,
   DataViewPrototypeGetBuffer,
   DataViewPrototypeGetByteLength,
@@ -190,8 +197,9 @@ function validateAndCopyChunk(chunk: unknown): Uint8Array | undefined {
 }
 
 // Compute the byte size of a chunk for WritableStream queue tracking.
-// Used ONLY as the `size` strategy callback when highWaterMark is
-// specified, feeding queueTotalSize which drives desiredSize and
+// Used by the always-installed size callback (sizeAndSnapshot in the
+// constructor) when an explicit highWaterMark selects byte accounting,
+// feeding queueTotalSize which drives desiredSize and
 // writer.ready — purely advisory backpressure signaling. It does NOT
 // affect data correctness, the FLS byte budget (#remaining uses actual
 // byte lengths from the copied chunk), or Content-Length.
@@ -318,16 +326,46 @@ class IdentityTransformStream {
           : BigInt(expectedLength);
     }
 
-    // When highWaterMark is explicitly provided, switch to byte-length
-    // sizing so that desiredSize tracks bytes rather than chunk count,
-    // matching the C++ WritableStreamInternalController which uses
-    // adjustWriteBufferSize with actual byte lengths.
-    if (writableStrategy.highWaterMark !== undefined) {
-      writableStrategy = {
-        highWaterMark: writableStrategy.highWaterMark,
-        size: byteSize,
-      };
+    // The strategy size callback is the one hook the writable machinery
+    // runs SYNCHRONOUSLY inside writer.write(), so the chunk snapshot is
+    // taken here — before control returns to the caller, and therefore
+    // before the caller can resize or detach the buffer. sinkWrite
+    // consumes the snapshots in FIFO order: the machinery calls size()
+    // exactly once per write and runs the sink write algorithm for the
+    // accepted ones in the same order. A write rejected AFTER size() ran
+    // (stream already erroring or closing) leaves its snapshot behind,
+    // but those states accept no further writes, so stale entries sit
+    // harmlessly at the tail and are never consumed. An invalid chunk
+    // makes validateAndCopyChunk throw out of size(), which errors the
+    // stream and rejects the write (the spec GetChunkSize error path) —
+    // the same observable outcome as validating in sinkWrite, one
+    // microtask earlier.
+    //
+    // When highWaterMark is explicitly provided, the returned size is the
+    // byte length so that desiredSize tracks bytes rather than chunk
+    // count, matching the C++ WritableStreamInternalController which uses
+    // adjustWriteBufferSize with actual byte lengths. Without an explicit
+    // highWaterMark the returned size stays 1 per chunk.
+    const snapshots: (Uint8Array | undefined)[] = [];
+    // A user-supplied highWaterMark of -0 is normalized to +0 so it cannot
+    // surface as a negative-zero desiredSize; the C++ implementation's
+    // uint64 coercion normalizes it the same way. For a number, adding 0
+    // changes nothing else; non-number values pass through untouched to
+    // the writable machinery's own conversion. This also covers
+    // FixedLengthStream, whose capped strategy flows through super() into
+    // this read.
+    let explicitHighWaterMark = writableStrategy.highWaterMark;
+    if (typeof explicitHighWaterMark === 'number') {
+      explicitHighWaterMark += 0;
     }
+    const sizeAndSnapshot = (chunk: unknown): number => {
+      ArrayPrototypePush(snapshots, validateAndCopyChunk(chunk));
+      return explicitHighWaterMark !== undefined ? byteSize(chunk) : 1;
+    };
+    writableStrategy =
+      explicitHighWaterMark !== undefined
+        ? { highWaterMark: explicitHighWaterMark, size: sizeAndSnapshot }
+        : { size: sizeAndSnapshot };
 
     const initialBackpressureChange =
       PromiseWithResolvers() as PromiseWithResolversType<void>;
@@ -335,8 +373,16 @@ class IdentityTransformStream {
     this.#backpressureChange = initialBackpressureChange;
 
     // --- Writable side (byte-only ingress) ---
-    const sinkWrite = async (chunk: unknown): Promise<void> => {
-      const copied = validateAndCopyChunk(chunk);
+    const sinkWrite = async (_chunk: unknown): Promise<void> => {
+      // The snapshot was taken in sizeAndSnapshot when this write was
+      // accepted; the raw chunk argument is deliberately unused (its
+      // buffer may have been resized or detached since).
+      if (snapshots.length === 0) {
+        throw new TypeError(
+          'IdentityTransformStream internal error: snapshot queue desync'
+        );
+      }
+      const copied = ArrayPrototypeShift(snapshots) as Uint8Array | undefined;
       if (copied === undefined) return; // zero-length no-op
 
       // FixedLengthStream overwrite enforcement (matches C++
@@ -482,10 +528,12 @@ class FixedLengthStream extends IdentityTransformStream {
       writableStrategy !== undefined &&
       writableStrategy.highWaterMark !== undefined
     ) {
-      const numExpected =
-        typeof expectedLength === 'bigint'
-          ? Number(expectedLength)
-          : expectedLength;
+      // Derive the cap from the COERCED length, not the raw input: BigInt
+      // conversion normalizes a -0.0 input to 0n, so Number(bigLen) is
+      // always +0-or-positive and a negative zero cannot leak through the
+      // min() below into the highWaterMark (and from there into the
+      // writer's desiredSize).
+      const numExpected = Number(bigLen);
       const hwm = writableStrategy.highWaterMark;
       writableStrategy = {
         highWaterMark: hwm < numExpected ? hwm : numExpected,

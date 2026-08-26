@@ -80,13 +80,11 @@ export const fixedLengthValidLengths = {
     // The received length is observable via the highWaterMark cap.
     strictEqual(coercedLength(5), 5);
     strictEqual(coercedLength(100n), 100);
-
-    // TODO(streams-ts): Divergence (likely unintentional in TypeScript):
-    // for a -0.0 expectedLength, C++ normalizes to +0 during uint64 coercion,
-    // while TypeScript leaks negative zero through its min(expectedLength,
-    // highWaterMark) computation, making desiredSize -0. strictEqual is
-    // SameValue, which distinguishes the two.
-    strictEqual(coercedLength(-0.0), usingTsImpl ? -0 : 0);
+    // A -0.0 expectedLength is normalized to +0 in both implementations
+    // (C++ during uint64 coercion; TypeScript by deriving the
+    // highWaterMark cap from the BigInt-coerced length). strictEqual is
+    // SameValue, so a leaked negative zero would fail here.
+    strictEqual(coercedLength(-0.0), 0);
   },
 };
 

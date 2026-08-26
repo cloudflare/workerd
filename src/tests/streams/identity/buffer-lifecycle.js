@@ -2,31 +2,19 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Buffer lifecycle hazards around write(): what the reader observes when the
-// caller resizes or detaches the buffer after write() returns.
-//
-// The two implementations currently diverge on WHEN the chunk's bytes are
-// captured, and both sides are pinned below:
-// - C++ snapshots synchronously inside write() (processChunk in
-//   internal.c++ copies "because ArrayBuffers might not be detached by the
-//   Writer, or might be detached after being written, or might be resizable
-//   and resized after being written").
-// - TypeScript copies in the sink write algorithm, which the WHATWG
-//   writable machinery runs a microtask later (after the start promise, and
-//   after prior in-flight writes). A caller that synchronously resizes or
-//   detaches the buffer after write() therefore changes — or destroys — what
-//   gets delivered: shrunk/grown buffers deliver their post-mutation bytes,
-//   and chunks whose buffer was detached (or shrunk to zero) are silently
-//   dropped or fail the write late.
-//
-// TODO(streams-ts): the TypeScript implementation should snapshot at
-// write() time like C++ (its own header in identity.ts declares "All writes
-// COPY the data"). When it does, delete the usingTsImpl branches below and
-// assert the pre-mutation snapshot in both implementations.
+// Buffer lifecycle hazards around write(): the bytes delivered to the reader
+// are a snapshot taken synchronously inside write(), unaffected by the
+// caller resizing, detaching, or otherwise mutating the buffer afterward.
+// Both implementations document and honor this: internal.c++ copies in
+// processChunk "because ArrayBuffers might not be detached by the Writer,
+// or might be detached after being written, or might be resizable and
+// resized after being written", and identity.ts snapshots in its strategy
+// size callback — the one hook the writable machinery runs synchronously
+// inside write() — for the same reasons.
 //
 // Degenerate inputs that are already unusable at write() time (detached
-// buffer, view made out-of-bounds by a shrink) are a separate matter; see
-// the individual tests at the bottom.
+// buffer, view made out-of-bounds by a shrink) are a separate matter and
+// partly diverge; see the individual tests at the bottom.
 
 import { strictEqual, deepStrictEqual, rejects } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -51,53 +39,23 @@ async function expectDelivery(chunk, mutate, expectedBytes) {
   await closePromise;
 }
 
-// Writes chunk, synchronously runs mutate, and asserts the chunk is
-// silently dropped: the write and close resolve, and the reader sees EOF
-// without ever receiving bytes.
-async function expectDropped(chunk, mutate) {
-  const { readable, writable } = new IdentityTransformStream();
-  const writer = writable.getWriter();
-  const reader = readable.getReader();
-  const writePromise = writer.write(chunk);
-  mutate();
-  const closePromise = writer.close();
-  strictEqual((await reader.read()).done, true);
-  await writePromise;
-  await closePromise;
-}
-
 export const resizableShrinkAfterWrite = {
   async test() {
     const rab = new ArrayBuffer(8, { maxByteLength: 16 });
     const view = new Uint8Array(rab);
     view.set([1, 2, 3, 4, 5, 6, 7, 8]);
-    if (usingTsImpl) {
-      // TODO(streams-ts): late materialization observes the post-shrink
-      // buffer; only the surviving bytes are delivered.
-      await expectDelivery(view, () => rab.resize(2), [1, 2]);
-    } else {
-      await expectDelivery(view, () => rab.resize(2), [1, 2, 3, 4, 5, 6, 7, 8]);
-    }
+    await expectDelivery(view, () => rab.resize(2), [1, 2, 3, 4, 5, 6, 7, 8]);
   },
 };
 
 export const resizableGrowAfterWrite = {
   async test() {
-    // The view is length-tracking, so after the grow it spans 16 bytes.
+    // The view is length-tracking, so after the grow it spans 16 bytes; the
+    // delivered chunk is still the 4 bytes captured at write().
     const rab = new ArrayBuffer(4, { maxByteLength: 16 });
     const view = new Uint8Array(rab);
     view.set([1, 2, 3, 4]);
-    if (usingTsImpl) {
-      // TODO(streams-ts): late materialization observes the post-grow
-      // buffer, delivering the zero-filled tail as well.
-      await expectDelivery(
-        view,
-        () => rab.resize(16),
-        [1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-      );
-    } else {
-      await expectDelivery(view, () => rab.resize(16), [1, 2, 3, 4]);
-    }
+    await expectDelivery(view, () => rab.resize(16), [1, 2, 3, 4]);
   },
 };
 
@@ -106,13 +64,7 @@ export const resizableBufferShrinkToZeroAfterWrite = {
     // The ArrayBuffer itself as the chunk, shrunk to nothing after write.
     const rab = new ArrayBuffer(4, { maxByteLength: 8 });
     new Uint8Array(rab).set([9, 8, 7, 6]);
-    if (usingTsImpl) {
-      // TODO(streams-ts): by materialization time the buffer is empty, so
-      // the chunk is silently dropped.
-      await expectDropped(rab, () => rab.resize(0));
-    } else {
-      await expectDelivery(rab, () => rab.resize(0), [9, 8, 7, 6]);
-    }
+    await expectDelivery(rab, () => rab.resize(0), [9, 8, 7, 6]);
   },
 };
 
@@ -121,13 +73,7 @@ export const viewDetachedAfterWrite = {
     const ab = new ArrayBuffer(4);
     const view = new Uint8Array(ab);
     view.set([1, 2, 3, 4]);
-    if (usingTsImpl) {
-      // TODO(streams-ts): by materialization time the view is over a
-      // detached buffer (byteLength 0), so the chunk is silently dropped.
-      await expectDropped(view, () => ab.transfer());
-    } else {
-      await expectDelivery(view, () => ab.transfer(), [1, 2, 3, 4]);
-    }
+    await expectDelivery(view, () => ab.transfer(), [1, 2, 3, 4]);
   },
 };
 
@@ -135,22 +81,7 @@ export const bufferDetachedAfterWrite = {
   async test() {
     const ab = new ArrayBuffer(4);
     new Uint8Array(ab).set([5, 6, 7, 8]);
-    if (usingTsImpl) {
-      // TODO(streams-ts): materialization constructs a view over the now
-      // detached buffer, so the write itself fails — late, and only for the
-      // ArrayBuffer-as-chunk shape (a detached VIEW is dropped instead; see
-      // viewDetachedAfterWrite).
-      const { writable } = new IdentityTransformStream();
-      const writer = writable.getWriter();
-      const writePromise = writer.write(ab);
-      ab.transfer();
-      await rejects(writePromise, (err) => {
-        strictEqual(err.constructor, TypeError);
-        return /detached/i.test(err.message);
-      });
-    } else {
-      await expectDelivery(ab, () => ab.transfer(), [5, 6, 7, 8]);
-    }
+    await expectDelivery(ab, () => ab.transfer(), [5, 6, 7, 8]);
   },
 };
 

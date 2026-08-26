@@ -70,6 +70,21 @@ export const explicitHighWaterMarkIsInitialDesiredSize = {
   test() {
     const { writable } = new IdentityTransformStream({ highWaterMark: 10 });
     strictEqual(writable.getWriter().desiredSize, 10);
+
+    // A negative-zero highWaterMark is normalized to +0 in both
+    // implementations (C++ via uint64 coercion, TypeScript explicitly), so
+    // it cannot surface as a negative-zero desiredSize. strictEqual is
+    // SameValue and would catch a leaked -0.
+    strictEqual(
+      new IdentityTransformStream({ highWaterMark: -0 }).writable.getWriter()
+        .desiredSize,
+      0
+    );
+    strictEqual(
+      new FixedLengthStream(5, { highWaterMark: -0 }).writable.getWriter()
+        .desiredSize,
+      0
+    );
   },
 };
 

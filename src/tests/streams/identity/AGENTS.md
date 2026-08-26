@@ -88,8 +88,9 @@ readable's queue, before any read occurs.)
   they resolve without delivering a chunk and without closing the stream.
 - Writes **copy** their bytes; the delivered chunk never aliases the
   caller's buffer, and the caller's buffer is never detached by a write.
-  *When* the copy is taken currently diverges (see the divergence ledger:
-  buffer lifecycle).
+  The copy is taken synchronously inside `write()` in both
+  implementations, so resizing or detaching the buffer after `write()`
+  returns cannot change — or destroy — what gets delivered.
 - Buffer metadata must be read from internal slots only — shadowing own
   properties (`byteLength`, `byteOffset`, `buffer`, `constructor`) are never
   consulted, whether installed before or after the write.
@@ -184,44 +185,38 @@ pattern; a change to either side fails its cell.
 | 1 | FLS invalid-length error type | `TypeError` for every invalid length | `RangeError` (range/non-integer), `TypeError` (wrong type) | `fixedLengthInvalidLengths` |
 | 2 | FLS length coercion | truncates non-integers (`0.5`→0, `2.9`→2), converts numeric strings (`'10'`→10) | rejects both | `fixedLengthCoercionDivergence` |
 | 3 | FLS length range | rejects > 2^53−1 (`TypeError`) | accepts full uint64 | `fixedLengthLengthsAboveMaxSafeInteger` |
-| 4 | `desiredSize` for `FLS(-0.0)` | `+0` | `-0` (leaks through `min()`; likely unintentional) | `fixedLengthValidLengths` |
-| 5 | `TransformStream` inheritance | `its instanceof TransformStream` is true | false (deliberate) | `identityBrandChecks` |
-| 6 | Accessor placement | inherited from `TransformStream.prototype` | own on `IdentityTransformStream.prototype` | `propertyPlacement` |
-| 7 | Invalid chunk aftermath | stream unaffected, remains usable | stream errors; `closed` rejects, later writes reject | `rejectsNumberChunk` |
-| 8 | String `desiredSize` accounting | exact UTF-8 byte count | `length × 3` upper-bound estimate | `stringWriteDesiredSizeAccounting` |
-| 9 | Abort/cancel reason identity | re-created `Error`, same message (crosses kj); exception: `writer.closed` under abort gets the original instance | original instance everywhere | `abort-propagation.js`, `cancel-propagation.js` |
-| 10 | Writes after abort | `TypeError` "This WritableStream has been closed." | original abort reason | `abortRejectsSubsequentWrites` |
-| 11 | Writes after cancel with close in flight | closed `TypeError` | original cancel reason | `cancelRejectsPendingWriteAndClose` |
-| 12 | FLS enforcement | read-side `TypeError`; the offending write/close succeeds | eager write-side `RangeError`; readable errors too | `fixed-length-errors.js` |
-| 13 | Buffer lifecycle after write | snapshot at `write()` — later resize/detach cannot affect delivery | materializes at delivery: post-mutation bytes, silent drops, or late `TypeError` — `TODO(streams-ts)` to converge on snapshot-at-write | `buffer-lifecycle.js` |
-| 14 | Already-detached `ArrayBuffer` chunk | zero-length no-op | rejects `TypeError`, errors the stream | `alreadyDetachedBufferAtWrite` |
-| 15 | Single tee-branch cancel promise | resolves immediately | WHATWG semantics: shared promise, settles when both branches cancel | `cancelOneBranchKeepsWriterFlowing` |
-| 16 | Write after both tee branches cancel | parks forever (composite cancel not propagated to the writable) | rejects `AggregateError` "All readable stream tee branches were canceled" | `writeAfterBothBranchesCancel` |
-
-Entries 4 and 13 are pinned as *suspected-unintentional* — see the comments
-at their assertion sites; fixing the TypeScript side collapses them into
-shared assertions.
+| 4 | `TransformStream` inheritance | `its instanceof TransformStream` is true | false (deliberate) | `identityBrandChecks` |
+| 5 | Accessor placement | inherited from `TransformStream.prototype` | own on `IdentityTransformStream.prototype` | `propertyPlacement` |
+| 6 | Invalid chunk aftermath | stream unaffected, remains usable | stream errors; `closed` rejects, later writes reject | `rejectsNumberChunk` |
+| 7 | String `desiredSize` accounting | exact UTF-8 byte count | `length × 3` upper-bound estimate | `stringWriteDesiredSizeAccounting` |
+| 8 | Abort/cancel reason identity | re-created `Error`, same message (crosses kj); exception: `writer.closed` under abort gets the original instance | original instance everywhere | `abort-propagation.js`, `cancel-propagation.js` |
+| 9 | Writes after abort | `TypeError` "This WritableStream has been closed." | original abort reason | `abortRejectsSubsequentWrites` |
+| 10 | Writes after cancel with close in flight | closed `TypeError` | original cancel reason | `cancelRejectsPendingWriteAndClose` |
+| 11 | FLS enforcement | read-side `TypeError`; the offending write/close succeeds | eager write-side `RangeError`; readable errors too | `fixed-length-errors.js` |
+| 12 | Already-detached `ArrayBuffer` chunk | zero-length no-op | rejects `TypeError`, errors the stream | `alreadyDetachedBufferAtWrite` |
+| 13 | Single tee-branch cancel promise | resolves immediately | WHATWG semantics: shared promise, settles when both branches cancel | `cancelOneBranchKeepsWriterFlowing` |
+| 14 | Write after both tee branches cancel | parks forever (composite cancel not propagated to the writable) | rejects `AggregateError` "All readable stream tee branches were canceled" | `writeAfterBothBranchesCancel` |
 
 ## Assertion catalogue
 
 | Module | Asserts |
 | --- | --- |
-| `api-surface.js` | toStringTag branding; `FixedLengthStream` subclassing; `readable`/`writable` are `ReadableStream`/`WritableStream` instances, stable, enumerable prototype accessors (placement per ledger #6); accessor brand checks |
-| `construction.js` | valid lengths (0, 5, −0.0, `MAX_SAFE_INTEGER`, bigints, with strategy); coerced length observable via HWM cap; invalid lengths throw (types per ledger #1–3); inheritance (ledger #5) |
-| `chunk-types.js` | accepted: `Uint8Array`, `ArrayBuffer`, `DataView` subrange, string→UTF-8, subarray offsets; rejected: numbers, plain objects (`TypeError`; aftermath per ledger #7) |
+| `api-surface.js` | toStringTag branding; `FixedLengthStream` subclassing; `readable`/`writable` are `ReadableStream`/`WritableStream` instances, stable, enumerable prototype accessors (placement per ledger #5); accessor brand checks |
+| `construction.js` | valid lengths (0, 5, −0.0, `MAX_SAFE_INTEGER`, bigints, with strategy); coerced length observable via HWM cap; invalid lengths throw (types per ledger #1–3); inheritance (ledger #4) |
+| `chunk-types.js` | accepted: `Uint8Array`, `ArrayBuffer`, `DataView` subrange, string→UTF-8, subarray offsets; rejected: numbers, plain objects (`TypeError`; aftermath per ledger #6) |
 | `zero-length-writes.js` | empty view / buffer / string are non-closing no-ops |
 | `copy-semantics.js` | delivered chunk never aliases the source; source mutation after delivery is invisible; source is not detached |
-| `buffer-lifecycle.js` | resize/detach after write (ledger #13); degenerate write-time inputs (already-detached, out-of-bounds views); shadowing/throwing metadata getters never consulted |
+| `buffer-lifecycle.js` | write-time snapshot survives later resize/detach in both implementations; degenerate write-time inputs (already-detached per ledger #12, out-of-bounds views); shadowing/throwing metadata getters never consulted |
 | `ordering.js` | 1:1 write/read correspondence in both interleavings; multi-chunk aggregate integrity; clean EOF tails |
 | `byob.js` | BYOB reader support; partial fills across reads with write completion on full consumption; lying destination extents (at call and after enqueue) with sentinel overwrite guards; EOF zero-length view with preserved buffer |
-| `backpressure.js` | writes and close queue unboundedly with settlement on consumption; advisory overfill (negative `desiredSize`); default HWM 1; explicit HWM as initial `desiredSize`; byte-level tracking incl. in-flight bytes; string accounting (ledger #8); `ready` replacement and recovery |
+| `backpressure.js` | writes and close queue unboundedly with settlement on consumption; advisory overfill (negative `desiredSize`); default HWM 1; explicit HWM as initial `desiredSize` (negative-zero HWM normalized to +0); byte-level tracking incl. in-flight bytes; string accounting (ledger #7); `ready` replacement and recovery |
 | `close-propagation.js` | pending read resolves done; post-close reads done; buffered data drains before done; `closed` promises settle |
-| `abort-propagation.js` | pending/subsequent reads and both `closed` promises reject (identity per ledger #9); later writes (ledger #10) |
-| `cancel-propagation.js` | pending write/close reject (ledger #9, #11); canceling reader's reads resolve done |
+| `abort-propagation.js` | pending/subsequent reads and both `closed` promises reject (identity per ledger #8); later writes (ledger #9) |
+| `cancel-propagation.js` | pending write/close reject (ledger #8, #10); canceling reader's reads resolve done |
 | `fixed-length.js` | exact-length delivery (one and two chunks); `FLS(0)`; HWM capping incl. bigint; capped-HWM data flow |
-| `fixed-length-errors.js` | over/underwrite and close-without-write error the stream with the documented messages (types/surfacing per ledger #12); abort skips the underwrite check |
+| `fixed-length-errors.js` | over/underwrite and close-without-write error the stream with the documented messages (types/surfacing per ledger #11); abort skips the underwrite check |
 | `tee.js` | both branches observe full content (ITS and FLS); single-branch read does not hang |
-| `tee-backpressure.js` | tee creates no demand; one branch drives the writer; sibling copy uncounted; cancel semantics (ledger #15, #16) |
+| `tee-backpressure.js` | tee creates no demand; one branch drives the writer; sibling copy uncounted; cancel semantics (ledger #13, #14) |
 | `tee-nested.js` | nested tee delivers to all leaves in order; single-leaf read does not hang |
 | `draining-reader.js` | TS only (C++ cell asserts the global's absence): `expectedLength` pass-through (bigint for FLS, undefined for ITS, undefined after release); a single read drains every synchronously buffered chunk plus the close sentinel in one batch (tee-sibling backlog), while a rendezvous stream yields one chunk per read via the always-makes-progress fallback; write/close settlement through the conduit; lock exclusivity and release |
 | `propagation-helpers.js`, `which-impl.js` | shared machinery: reason-identity policy, implementation detection |
