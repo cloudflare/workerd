@@ -16,6 +16,7 @@
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/per-isolate-bootstrap.h>
 #include <workerd/io/tracer.h>
+#include <workerd/io/validation.h>
 #include <workerd/io/wasm-instantiate-shim.embed.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/async-context.h>
@@ -145,6 +146,23 @@ kj::Own<capnp::JsonCodec> makeCdpJsonCodec() {
 const capnp::JsonCodec& getCdpJsonCodec() {
   static const kj::Own<capnp::JsonCodec> codec = makeCdpJsonCodec();
   return *codec;
+}
+
+void maybePerIsolateBootstrap(CompatibilityFlags::Reader& featureFlags,
+    jsg::Lock& lock,
+    v8::Local<v8::Context> context,
+    kj::Maybe<ValidationErrorReporter&> errorReporter) {
+  if (util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)) {
+    JSG_WITHIN_CONTEXT_SCOPE(
+        lock, context, [&](jsg::Lock& js) { runPerIsolateBootstrap(js, featureFlags); });
+  } else if (featureFlags.getTypeScriptImplementedStreams()) {
+    auto err = kj::str("A worker cannot use typescript implemented streams without "
+                       "per-isolate JavaScript bootstrap enabled");
+    KJ_IF_SOME(reporter, errorReporter) {
+      reporter.addError(kj::str(err));
+    }
+    KJ_FAIL_ASSERT(err);
+  }
 }
 
 }  // namespace
@@ -1427,12 +1445,8 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         context = mContext.getHandle(lock);
         recordedLock.setupContext(context);
 
-        if (util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)) {
-          // Run per-isolate bootstrap scripts before any user code.
-          JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
-            runPerIsolateBootstrap(js, isolate->getApi().getFeatureFlags());
-          });
-        }
+        auto featureFlags = isolate->getApi().getFeatureFlags();
+        maybePerIsolateBootstrap(featureFlags, lock, context, errorReporter);
       } else {
         // Although we're going to compile a script independent of context, V8 requires that
         // there be an active context, otherwise it will segfault, I guess. So we create a
@@ -1919,11 +1933,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
       // Run per-isolate bootstrap for freshly created service worker contexts.
       // (Modular worker contexts already ran bootstrap in the Script constructor.)
-      if (freshContext &&
-          util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)) {
-        JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
-          runPerIsolateBootstrap(js, script->isolate->getApi().getFeatureFlags());
-        });
+      if (freshContext) {
+        auto featureFlags = script->isolate->getApi().getFeatureFlags();
+        maybePerIsolateBootstrap(featureFlags, lock, context, errorReporter);
       }
 
       // Install the virtual file system on the context. Keep in mind that for service
