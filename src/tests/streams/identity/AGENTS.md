@@ -211,6 +211,7 @@ pattern; a change to either side fails its cell.
 | 13 | Single tee-branch cancel promise | resolves immediately | WHATWG semantics: shared promise, settles when both branches cancel | `cancelOneBranchKeepsWriterFlowing` |
 | 14 | Write after both tee branches cancel | parks forever (composite cancel not propagated to the writable) | rejects `AggregateError` "All readable stream tee branches were canceled" | `writeAfterBothBranchesCancel` |
 | 15 | Piping between identity streams | not implemented: `pipeTo()` takes both locks then rejects `TypeError` ("Inter-TransformStream ReadableStream.pipeTo() is not implemented."); `pipeThrough()` throws it synchronously | fully functional: delivery, completion, and error propagation in both directions with original reason instances; circular `pipeThrough(its)` currently succeeds and locks both sides — `TODO(streams-ts)`: it should fail | `pipe-integration.js` |
+| 16 | Second concurrent default read | rejected at `read()` time: `TypeError` "This ReadableStream only supports a single pending read request at a time." | parked and served in order | `closeFromReadContinuationWithSecondReadParked` |
 
 ## Assertion catalogue
 
@@ -237,6 +238,7 @@ pattern; a change to either side fails its cell.
 | `body-integration.js` | Response/Request with identity-stream bodies: `text()` drives the rendezvous; `resp.body` is the same stream object (unwrapped, unconsumed, unlocked); FLS happy path and underwrite through body consumption (types per ledger #11); multi-megabyte patterned bodies verified byte-for-byte through `arrayBuffer()` (ITS and FLS Response, Request) |
 | `pipe-integration.js` | `pipeTo`/`pipeThrough` between identity streams (ledger #15): TS delivery (small and multi-megabyte patterned bodies), completion, and both error-propagation directions with original reasons; C++ not-implemented wall (rejection for pipeTo, synchronous throw for pipeThrough); circular `pipeThrough(its)` with the `TODO(streams-ts)` pin |
 | `payload-helpers.js` | shared machinery: continuous prime-modulus byte pattern for large-body generation and byte-exact verification |
+| `reentrancy.js` | user code re-entering mid-processing: `Object.prototype.then` interception during read resolution (consulted once per read in C++, twice in TS) incl. a re-entrant `writer.close()` from inside the getter; close/write/sibling-cancel from read continuations; second-concurrent-read divergence (ledger #16) |
 | `propagation-helpers.js`, `which-impl.js` | shared machinery: reason-identity policy, implementation detection |
 
 ## Legacy (unflagged) behaviors

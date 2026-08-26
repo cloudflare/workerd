@@ -161,3 +161,11 @@ export {
   pipeThroughIdentityStream,
   circularPipeThrough,
 } from 'pipe-integration';
+
+export {
+  thenInterceptionDuringReadResolution,
+  closeWriterFromThenInterceptorDuringRead,
+  closeFromReadContinuationWithSecondReadParked,
+  writeFromReadContinuation,
+  cancelSiblingFromReadContinuation,
+} from 'reentrancy';

@@ -45,6 +45,7 @@ const unitTests :Workerd.Config = (
           (name = "payload-helpers", esModule = embed "payload-helpers.js"),
           (name = "body-integration", esModule = embed "body-integration.js"),
           (name = "pipe-integration", esModule = embed "pipe-integration.js"),
+          (name = "reentrancy", esModule = embed "reentrancy.js"),
         ],
         compatibilityFlags = [
           "nodejs_compat",
