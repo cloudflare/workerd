@@ -12,6 +12,11 @@
 
 import { ok, strictEqual, deepStrictEqual } from 'node:assert';
 
+// The mid-read destination-mutation tests below exist because the
+// non-detached buffer remains in the caller's hands while the read is
+// parked; they guard against V8 asserts and out-of-bounds writes, not just
+// data correctness.
+
 export const legacyByobFillsInPlace = {
   async test() {
     const { readable, writable } = new IdentityTransformStream();
@@ -42,6 +47,76 @@ export const legacyByobFillsInPlace = {
     deepStrictEqual([...rest.value], [4, 5]);
     await writePromise;
     await writer.close();
+  },
+};
+
+export const legacyByobDestinationTransferredMidRead = {
+  async test() {
+    // With the buffer not detached at read() time, the caller can still
+    // transfer it while the read is parked. The read must not write into
+    // the transferred backing store: it resolves with a zero-length view
+    // over a fresh empty buffer, and the data that would have filled it is
+    // lost.
+    const ts = new IdentityTransformStream();
+    const reader = ts.readable.getReader({ mode: 'byob' });
+    const writer = ts.writable.getWriter();
+    const buffer = new ArrayBuffer(4096);
+    const readPromise = reader.read(new Uint8Array(buffer));
+    buffer.transferToFixedLength(64);
+    await writer.write(new Uint8Array(1337));
+    const result = await readPromise;
+    strictEqual(result.done, false);
+    strictEqual(result.value.byteLength, 0);
+    strictEqual(result.value.buffer.byteLength, 0);
+  },
+};
+
+export const legacyByobDestinationShrunkMidRead = {
+  async test() {
+    // Shrinking a resizable destination while the read is parked truncates
+    // the delivery to the buffer's size at completion time.
+    const ts = new IdentityTransformStream();
+    const reader = ts.readable.getReader({ mode: 'byob' });
+    const writer = ts.writable.getWriter();
+    const buffer = new ArrayBuffer(4096, { maxByteLength: 8192 });
+    const readPromise = reader.read(new Uint8Array(buffer));
+    buffer.resize(64);
+    const writeData = new Uint8Array(1337);
+    for (let i = 0; i < writeData.length; i++) writeData[i] = i % 256;
+    await writer.write(writeData);
+    const result = await readPromise;
+    strictEqual(result.done, false);
+    strictEqual(result.value.byteLength, 64);
+    strictEqual(result.value.buffer.byteLength, 64);
+    deepStrictEqual(
+      Array.from(result.value),
+      Array.from(writeData.slice(0, 64))
+    );
+  },
+};
+
+export const legacyByobDestinationGrownMidRead = {
+  async test() {
+    // Growing a resizable destination while the read is parked delivers
+    // normally into the grown buffer, with the tail untouched (zeroed).
+    const ts = new IdentityTransformStream();
+    const reader = ts.readable.getReader({ mode: 'byob' });
+    const writer = ts.writable.getWriter();
+    const buffer = new ArrayBuffer(4096, { maxByteLength: 8192 });
+    const readPromise = reader.read(new Uint8Array(buffer));
+    buffer.resize(8192);
+    const writeData = new Uint8Array(100);
+    for (let i = 0; i < writeData.length; i++) writeData[i] = i;
+    await writer.write(writeData);
+    const result = await readPromise;
+    strictEqual(result.done, false);
+    strictEqual(result.value.byteLength, 100);
+    strictEqual(result.value.buffer.byteLength, 8192);
+    deepStrictEqual(Array.from(result.value), Array.from(writeData));
+    const fullBuffer = new Uint8Array(result.value.buffer);
+    for (let i = 100; i < fullBuffer.byteLength; i++) {
+      strictEqual(fullBuffer[i], 0, `byte ${i} must be untouched`);
+    }
   },
 };
 

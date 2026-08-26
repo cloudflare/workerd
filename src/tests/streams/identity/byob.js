@@ -9,7 +9,7 @@
 // streams_byob_reader_detaches_buffer and internal_stream_byob_return_view
 // compatibility flags, which both test configs set explicitly.
 
-import { ok, strictEqual, deepStrictEqual } from 'node:assert';
+import { ok, strictEqual, deepStrictEqual, rejects } from 'node:assert';
 
 export const supportsByobReader = {
   async test() {
@@ -155,15 +155,72 @@ export const eofReturnsZeroLengthView = {
   async test() {
     // After close, a BYOB read resolves done with a zero-length view whose
     // buffer is the (transferred) buffer that was passed in, preserving its
-    // byteLength so callers can reuse it.
+    // byteLength so callers can reuse it — and it does so on every
+    // subsequent EOF read, not just the first.
     const { readable, writable } = new IdentityTransformStream();
     const writer = writable.getWriter();
     await writer.close();
     const reader = readable.getReader({ mode: 'byob' });
-    const result = await reader.read(new Uint8Array(10));
-    strictEqual(result.done, true);
-    ok(result.value instanceof Uint8Array);
-    strictEqual(result.value.byteLength, 0);
-    strictEqual(result.value.buffer.byteLength, 10);
+    for (let i = 0; i < 2; i++) {
+      const result = await reader.read(new Uint8Array(10));
+      strictEqual(result.done, true);
+      ok(result.value instanceof Uint8Array);
+      strictEqual(result.value.byteLength, 0);
+      strictEqual(result.value.buffer.byteLength, 10);
+    }
+  },
+};
+
+export const byobReadCallValidation = {
+  async test() {
+    // read() on a BYOB reader validates its argument: a zero-length view,
+    // a bare ArrayBuffer, and a missing argument all reject with TypeError
+    // in both implementations (message wording differs).
+    const its = new IdentityTransformStream();
+    const reader = its.readable.getReader({ mode: 'byob' });
+    await rejects(async () => reader.read(new Uint8Array(0)), TypeError);
+    await rejects(async () => reader.read(new ArrayBuffer(32)), TypeError);
+    await rejects(async () => reader.read(), TypeError);
+  },
+};
+
+export const byobInputBufferDetachedOnRead = {
+  async test() {
+    // Under streams_byob_reader_detaches_buffer, read(view) detaches the
+    // caller's buffer: after the read completes, the input view and its
+    // buffer report zero length and the result is a view over a different
+    // (transferred) buffer. Reusing the detached view rejects, as do
+    // destinations whose buffers cannot be detached at all (WebAssembly
+    // shared memory, SharedArrayBuffer) — both reject TypeError, though the
+    // TypeScript message is the incidental primordial-getter brand error.
+    const its = new IdentityTransformStream();
+    const writer = its.writable.getWriter();
+    const reader = its.readable.getReader({ mode: 'byob' });
+    const view = new Uint8Array(10);
+    const originalBuffer = view.buffer;
+    const [, result] = await Promise.all([
+      writer.write(new Uint8Array(10)),
+      reader.read(view),
+    ]);
+    strictEqual(view.byteLength, 0);
+    strictEqual(view.buffer.byteLength, 0);
+    ok(result.value.buffer instanceof ArrayBuffer);
+    ok(result.value.buffer !== originalBuffer);
+
+    await rejects(async () => reader.read(view), TypeError);
+
+    const memory = new WebAssembly.Memory({
+      initial: 1,
+      maximum: 1,
+      shared: true,
+    });
+    await rejects(
+      async () => reader.read(new Uint8Array(memory.buffer)),
+      TypeError
+    );
+    await rejects(
+      async () => reader.read(new Uint8Array(new SharedArrayBuffer(10))),
+      TypeError
+    );
   },
 };

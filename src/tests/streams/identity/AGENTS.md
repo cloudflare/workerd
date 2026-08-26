@@ -213,6 +213,8 @@ pattern; a change to either side fails its cell.
 | 15 | Piping between identity streams | not implemented: `pipeTo()` takes both locks then rejects `TypeError` ("Inter-TransformStream ReadableStream.pipeTo() is not implemented."); `pipeThrough()` throws it synchronously | fully functional: delivery, completion, and error propagation in both directions with original reason instances; circular `pipeThrough(its)` currently succeeds and locks both sides — `TODO(streams-ts)`: it should fail | `pipe-integration.js` |
 | 16 | Second concurrent default read | rejected at `read()` time: `TypeError` "This ReadableStream only supports a single pending read request at a time." | parked and served in order | `closeFromReadContinuationWithSecondReadParked` |
 | 17 | Default-HWM accounting | inert: `desiredSize` stays 1 regardless of buffered writes; `ready` never replaced | one unit per buffered chunk against the default HWM of 1: `desiredSize` goes negative, `ready` replaced until drained | `defaultHighWaterMarkAccounting` |
+| 18 | `readAtLeast` validation | `TypeError` always: negative minimums visibly sign-extend to 18446744073709551615 before the element-count check rejects them; values ≥ 2^31 rejected at the jsg int boundary; in-range minimums exceeding the buffer rejected on the element count | `TypeError` for a negative minimum, `RangeError` for any minimum exceeding the view | `readAtLeastValidation` |
+| 19 | Non-Error cancel reasons | always surfaces an Error: strings become the message, `undefined` becomes "Stream was cancelled.", standard error types preserved, custom subclass names preserved via the pinned `enhanced_error_serialization` | the original reason VALUE, untouched — same instance, same string, even `undefined` itself | `cancelReasonTypeSurfacing` |
 
 ## Assertion catalogue
 
@@ -225,7 +227,7 @@ pattern; a change to either side fails its cell.
 | `copy-semantics.js` | delivered chunk never aliases the source; source mutation after delivery is invisible; source is not detached |
 | `buffer-lifecycle.js` | write-time snapshot survives later resize/detach in both implementations; degenerate write-time inputs (already-detached per ledger #12, out-of-bounds views); shadowing/throwing metadata getters never consulted |
 | `ordering.js` | 1:1 write/read correspondence in both interleavings; multi-chunk aggregate integrity; clean EOF tails |
-| `byob.js` | BYOB reader support; partial fills across reads with write completion on full consumption; lying destination extents (at call and after enqueue) with sentinel overwrite guards; EOF zero-length view with preserved buffer |
+| `byob.js` | BYOB reader support; partial fills across reads with write completion on full consumption; lying destination extents (at call and after enqueue) with sentinel overwrite guards; read-call validation (zero-length view, non-view, missing argument); input buffer detached by read with non-detachable (SAB-backed) destinations rejected; repeated EOF zero-length views with preserved buffers |
 | `backpressure.js` | writes and close queue unboundedly with settlement on consumption; advisory overfill (negative `desiredSize`); default HWM 1 with divergent accounting (ledger #17); explicit HWM as initial `desiredSize` (negative-zero HWM normalized to +0); byte-level tracking incl. in-flight bytes; string accounting (ledger #7); `ready` replacement and recovery |
 | `close-propagation.js` | pending read resolves done; post-close reads done; buffered data drains before done; `closed` promises settle |
 | `abort-propagation.js` | pending/subsequent reads and both `closed` promises reject (identity per ledger #8); modern abort clears a pending write, rejecting it with the abort reason (undefined or original instance); later writes (ledger #9) |
@@ -241,6 +243,10 @@ pattern; a change to either side fails its cell.
 | `payload-helpers.js` | shared machinery: continuous prime-modulus byte pattern for large-body generation and byte-exact verification |
 | `reentrancy.js` | user code re-entering mid-processing: `Object.prototype.then` interception during read resolution (consulted once per read in C++, twice in TS) incl. a re-entrant `writer.close()` from inside the getter; close/write/sibling-cancel from read continuations; second-concurrent-read divergence (ledger #16) |
 | `lock-release.js` | `releaseLock()` rejects the released handle's `closed` promise with TypeError ("has been released"); the stream returns to a lockable state |
+| `read-at-least.js` | `readAtLeast(min, view)` parks until min bytes accumulate across writes, EOF yields a zero-length view, unavailable on default readers; argument validation per ledger #18 |
+| `reader-writer-acquisition.js` | `WritableStreamDefaultWriter`/`ReadableStreamDefaultReader`/`ReadableStreamBYOBReader` are directly constructible (no streams_enable_constructors needed) and lock the stream; `getReader({mode})` validates and a failed acquisition leaves the stream unlocked |
+| `cancel-reason-types.js` | the cancel-reason type matrix of ledger #19, asserted on both the pending write and the pending close |
+| `gc-interplay.js` | a writer keeps its collected stream wrapper's underlying stream alive and operable (`--expose-gc`) |
 | `propagation-helpers.js`, `which-impl.js` | shared machinery: reason-identity policy, implementation detection |
 
 ## Legacy (unflagged) behaviors
@@ -251,6 +257,9 @@ implementation does not implement the pre-flag behaviors):
 | Behavior | Asserted by |
 | --- | --- |
 | BYOB fills happen in place: result aliases the caller's non-detached buffer, input view remains usable, fill stays inside the view's region | `legacyByobFillsInPlace` |
+| A destination transferred while the read is parked is not written into: zero-length result, data lost | `legacyByobDestinationTransferredMidRead` |
+| A destination shrunk while the read is parked truncates delivery to the completion-time size | `legacyByobDestinationShrunkMidRead` |
+| A destination grown while the read is parked delivers normally with the tail untouched | `legacyByobDestinationGrownMidRead` |
 | BYOB read at EOF resolves `value === undefined` | `legacyByobEofReturnsUndefined` |
 | `abort()` waits for an in-flight write: both park until a read drains the write, then both settle | `legacyAbortWaitsForPendingWrite` |
 | Abort with only a pending read behaves like the modern one | `legacyAbortWithPendingReadResolves` |

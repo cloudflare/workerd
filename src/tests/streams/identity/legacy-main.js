@@ -15,6 +15,9 @@ export { legacyInvalidChunkThrowsSynchronously } from 'legacy-invalid-chunks';
 
 export {
   legacyByobFillsInPlace,
+  legacyByobDestinationTransferredMidRead,
+  legacyByobDestinationShrunkMidRead,
+  legacyByobDestinationGrownMidRead,
   legacyByobEofReturnsUndefined,
 } from 'legacy-byob';
 

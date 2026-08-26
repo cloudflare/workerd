@@ -67,6 +67,8 @@ export {
   partialFillAcrossReads,
   byobViewLyingAboutLength,
   byobViewLyingAfterEnqueue,
+  byobReadCallValidation,
+  byobInputBufferDetachedOnRead,
   eofReturnsZeroLengthView,
 } from 'byob';
 
@@ -96,6 +98,7 @@ export {
 export {
   cancelRejectsPendingWriteAndClose,
   cancelRejectsSubsequentWrites,
+  cancelResolvesReaderClosedPromise,
   cancelledReaderReadsResolveDone,
 } from 'cancel-propagation';
 
@@ -153,6 +156,7 @@ export {
   largeResponseBody,
   largeRequestBody,
   largeFixedLengthResponseBody,
+  cancelledBodyRejectsConsumption,
   fixedLengthUnderwriteRejectsBodyRead,
 } from 'body-integration';
 
@@ -166,6 +170,21 @@ export {
 } from 'pipe-integration';
 
 export { releaseLockRejectsClosedPromises } from 'lock-release';
+
+export {
+  readAtLeastWaitsForMinimum,
+  readAtLeastValidation,
+  readAtLeastUnavailableOnDefaultReader,
+} from 'read-at-least';
+
+export {
+  readerWriterDirectConstructors,
+  getReaderInvalidModeThrows,
+} from 'reader-writer-acquisition';
+
+export { cancelReasonTypeSurfacing } from 'cancel-reason-types';
+
+export { abortWriterAfterGc } from 'gc-interplay';
 
 export {
   thenInterceptionDuringReadResolution,

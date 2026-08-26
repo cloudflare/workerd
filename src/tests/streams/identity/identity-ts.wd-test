@@ -47,6 +47,10 @@ const unitTests :Workerd.Config = (
           (name = "pipe-integration", esModule = embed "pipe-integration.js"),
           (name = "reentrancy", esModule = embed "reentrancy.js"),
           (name = "lock-release", esModule = embed "lock-release.js"),
+          (name = "read-at-least", esModule = embed "read-at-least.js"),
+          (name = "reader-writer-acquisition", esModule = embed "reader-writer-acquisition.js"),
+          (name = "cancel-reason-types", esModule = embed "cancel-reason-types.js"),
+          (name = "gc-interplay", esModule = embed "gc-interplay.js"),
         ],
         compatibilityFlags = [
           "nodejs_compat",
@@ -60,4 +64,6 @@ const unitTests :Workerd.Config = (
   autogates = [
     "workerd-autogate-per-isolate-javascript-bootstrap",
   ],
+  # For gc-interplay.js.
+  v8Flags = ["--expose-gc"],
 );

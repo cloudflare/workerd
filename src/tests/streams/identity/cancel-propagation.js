@@ -59,6 +59,17 @@ export const cancelRejectsSubsequentWrites = {
   },
 };
 
+export const cancelResolvesReaderClosedPromise = {
+  async test() {
+    // The canceling reader's own closed promise resolves (with undefined),
+    // it does not reject.
+    const { readable } = new IdentityTransformStream();
+    const reader = readable.getReader();
+    await reader.cancel();
+    strictEqual(await reader.closed, undefined);
+  },
+};
+
 export const cancelledReaderReadsResolveDone = {
   async test() {
     // After cancel, the canceling reader's own reads resolve done rather

@@ -38,9 +38,9 @@ behavior a test depends on is pinned by naming its flag in **both** configs.
 The pinned set currently includes `streams_byob_reader_detaches_buffer`,
 `internal_stream_byob_return_view`,
 `internal_writable_stream_abort_clears_queue`,
-`workers_api_getters_setters_on_prototype`, `capture_async_api_throws`, and
-`set_tostring_tag` — see the comment in `identity-cpp.wd-test` for what each
-pins. The TypeScript implementation hard-codes these modern behaviors, so
+`workers_api_getters_setters_on_prototype`, `capture_async_api_throws`,
+`set_tostring_tag`, and `enhanced_error_serialization` — see the comment in
+`identity-cpp.wd-test` for what each pins. The TypeScript implementation hard-codes these modern behaviors, so
 pinning them also keeps the two cells comparable at the oldest date.
 
 If a test fails only under `@all-compat-flags`, a date-gated flag changes the

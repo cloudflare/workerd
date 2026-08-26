@@ -120,6 +120,17 @@ export const largeFixedLengthResponseBody = {
   },
 };
 
+export const cancelledBodyRejectsConsumption = {
+  async test() {
+    // Cancelling the body stream disturbs it; a subsequent consume fails
+    // with TypeError in both implementations.
+    const its = new IdentityTransformStream();
+    const resp = new Response(its.readable);
+    await resp.body.cancel(new Error('a good reason'));
+    await rejects(resp.text(), TypeError);
+  },
+};
+
 export const fixedLengthUnderwriteRejectsBodyRead = {
   async test() {
     // Underwrite enforcement surfaces through body consumption, with the
