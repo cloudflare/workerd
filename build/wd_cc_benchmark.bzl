@@ -4,7 +4,6 @@ load("@rules_cc//cc:cc_test.bzl", "cc_test")
 
 def wd_cc_benchmark(
         name,
-        linkopts = [],
         deps = [],
         tags = [],
         visibility = None,
@@ -21,18 +20,18 @@ def wd_cc_benchmark(
             "@platforms//os:linux": 0,
             "//conditions:default": 1,
         }),
-        linkopts = linkopts + select({
-            "@//:use_dead_strip": ["-Wl,-dead_strip", "-Wl,-no_exported_symbols"],
-            "//conditions:default": [""],
-        }),
         visibility = visibility,
         deps = deps + [
             "@google_benchmark//:benchmark_main",
             "//src/workerd/tests:bench-tools",
+            # Use same linker flags as with test binaries – wd_cc_benchmark is used with
+            # microbenchmarks, which will produce relatively accurate results without thinLTO.
+            "//build/deps:linkopts_default",
         ],
         # use the same malloc we use for server
         malloc = "//src/workerd/server:malloc",
-        tags = ["workerd-benchmark", "google_benchmark"] + tags,
+        # Tag with cpu:4 since this target depends on linkopts_default.
+        tags = ["workerd-benchmark", "google_benchmark", "cpu:4"] + tags,
         size = "large",
         **kwargs
     )

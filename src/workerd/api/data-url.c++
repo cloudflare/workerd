@@ -1,11 +1,51 @@
 #include "data-url.h"
 
-#include <workerd/api/encoding.h>
+#include "simdutf.h"
+
 #include <workerd/util/strings.h>
 
-#include <kj/encoding.h>
+#include <kj/vector.h>
 
 namespace workerd::api {
+namespace {
+
+kj::Array<kj::byte> decodeDataUrlBase64(kj::ArrayPtr<const kj::byte> input) {
+  kj::Vector<char> filtered(input.size());
+
+  // DataUrl historically ignored kj::decodeBase64().hadErrors. That decoder skips bytes outside
+  // the base64 alphabet, including padding, and decodes the remaining characters. Preserve that
+  // permissive behavior before passing the input to simdutf's stricter decoder.
+  for (kj::byte c: input) {
+    if (isAlpha(c) || isDigit(c) || c == '+' || c == '/') {
+      filtered.add(static_cast<char>(c));
+    }
+  }
+
+  auto base64 = filtered.asPtr();
+  // KJ drops a final lone base64 character because it cannot produce a complete byte. simdutf
+  // rejects inputs whose length is 1 modulo 4, so trim that character to preserve KJ's result.
+  if (base64.size() % 4 == 1) {
+    base64 = base64.first(base64.size() - 1);
+  }
+
+  if (base64.size() == 0) {
+    return nullptr;
+  }
+
+  auto size = simdutf::maximal_binary_length_from_base64(base64.begin(), base64.size());
+  auto decoded = kj::heapArray<kj::byte>(size);
+  // The default loose tail handling preserves KJ's acceptance of unpadded two- and three-character
+  // tails and non-zero unused bits.
+  auto result = simdutf::base64_to_binary(
+      base64.begin(), base64.size(), decoded.asChars().begin(), simdutf::base64_default);
+  if (result.error != simdutf::SUCCESS || result.count == 0) {
+    return nullptr;
+  }
+  KJ_ASSERT(result.count <= size);
+  return decoded.first(result.count).attach(kj::mv(decoded));
+}
+
+}  // namespace
 
 kj::Maybe<DataUrl> DataUrl::tryParse(kj::StringPtr url) {
   KJ_IF_SOME(url, jsg::Url::tryParse(url)) {
@@ -53,8 +93,7 @@ kj::Maybe<DataUrl> DataUrl::from(const jsg::Url& url) {
     kj::Array<kj::byte> decoded = nullptr;
     if (isBase64(unparsed)) {
       unparsed = unparsed.first(KJ_ASSERT_NONNULL(unparsed.findLast(';')));
-      decoded =
-          kj::decodeBase64(stripInnerWhitespace(jsg::Url::percentDecode(data.asBytes())).asChars());
+      decoded = decodeDataUrlBase64(jsg::Url::percentDecode(data.asBytes()));
     } else {
       decoded = jsg::Url::percentDecode(data.asBytes());
     }

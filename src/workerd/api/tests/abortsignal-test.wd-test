@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "abortsignal-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "enable_abortsignal_rpc", "experimental"],
+        compatibilityFlags = ["nodejs_compat", "enable_abortsignal_rpc", "experimental", "spec_compliant_dispatch_exceptions"],
         bindings = [
           (name = "RpcRemoteEnd", service = (name = "abortsignal-test", entrypoint = "RpcRemoteEnd")),
         ]

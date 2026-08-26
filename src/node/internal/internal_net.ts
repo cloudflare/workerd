@@ -141,8 +141,7 @@ export type SocketOptions = {
   emitClose?: boolean;
   signal?: AbortSignal;
   onread?:
-    | ({ callback?: () => Uint8Array; buffer?: Uint8Array } & OnReadOpts)
-    | null;
+    ({ callback?: () => Uint8Array; buffer?: Uint8Array } & OnReadOpts) | null;
 };
 
 export function Server(): void {
@@ -173,9 +172,7 @@ export declare class Socket extends _Socket {
   [kTimeout]: Socket | null | undefined;
   [kBuffer]: null | boolean | Uint8Array;
   [kBufferCb]:
-    | null
-    | undefined
-    | ((len?: number, buf?: Buffer) => boolean | Uint8Array);
+    null | undefined | ((len?: number, buf?: Buffer) => boolean | Uint8Array);
   [kBufferGen]: null | (() => undefined | Uint8Array);
   [kSocketInfo]: null | {
     address?: string;
@@ -371,6 +368,7 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
       this[kBuffer] = onread.buffer;
       this[kBufferGen] = (): Uint8Array | undefined => onread.buffer;
     }
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     this[kBufferCb] = onread.callback;
   } else {
     this[kBuffer] = true;
@@ -1521,8 +1519,7 @@ export function _normalizeArgs(args: unknown[]): NormalizedArgs {
     // ([port][, host][...][, cb])
     options.port = arg0 as number;
     if (args.length > 1 && typeof args[1] === 'string') {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-      options.host = args[1] as string;
+      options.host = args[1];
     }
   }
 

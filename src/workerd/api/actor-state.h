@@ -637,9 +637,18 @@ class DurableObjectState: public jsg::Object {
   jsg::Promise<jsg::JsRef<jsg::JsValue>> blockConcurrencyWhile(
       jsg::Lock& js, jsg::Function<jsg::Promise<jsg::JsRef<jsg::JsValue>>()> callback);
 
+  struct AbortOptions {
+    // When false, an abort during an alarm handler prevents that alarm from being retried.
+    // Defaults to true and has no effect outside an alarm handler.
+    jsg::Optional<bool> retryAlarm;
+
+    JSG_STRUCT(retryAlarm);
+    JSG_STRUCT_TS_OVERRIDE(DurableObjectAbortOptions { retryAlarm?: boolean; });
+  };
+
   // Reset the object, including breaking the output gate and canceling any writes that haven't
   // been committed yet.
-  void abort(jsg::Lock& js, jsg::Optional<kj::String> reason);
+  void abort(jsg::Lock& js, jsg::Optional<kj::String> reason, jsg::Optional<AbortOptions> options);
 
   // Sets and returns a new hibernation manager in an actor if there's none or returns the existing.
   Worker::Actor::HibernationManager& maybeInitHibernationManager(Worker::Actor& actor);
@@ -809,7 +818,8 @@ class DurableObjectState: public jsg::Object {
 
 #define EW_ACTOR_STATE_ISOLATE_TYPES                                                               \
   api::ActorState, api::DurableObjectState, api::DurableObjectTransaction,                         \
-      api::DurableObjectStorage, api::DurableObjectState::ReadReplicationOptions,                  \
+      api::DurableObjectStorage, api::DurableObjectState::AbortOptions,                            \
+      api::DurableObjectState::ReadReplicationOptions,                                             \
       api::DurableObjectStorage::TransactionOptions,                                               \
       api::DurableObjectStorageOperations::ListOptions,                                            \
       api::DurableObjectStorageOperations::GetOptions,                                             \

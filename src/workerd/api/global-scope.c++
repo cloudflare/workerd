@@ -14,6 +14,7 @@
 #include <workerd/api/fuzzilli.h>
 #endif
 #include <workerd/api/hibernatable-web-socket.h>
+#include <workerd/api/http.h>
 #include <workerd/api/restore.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/sockets.h>
@@ -35,6 +36,8 @@
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/uncaught-exception-source.h>
 #include <workerd/util/use-perfetto-categories.h>
+
+#include <v8-microtask-queue.h>
 
 #include <kj/encoding.h>
 
@@ -106,20 +109,40 @@ kj::StringPtr AccessContext::getAud() {
   return info->getAudience();
 }
 
-jsg::Promise<jsg::Optional<jsg::JsValue>> AccessContext::getIdentity(jsg::Lock& js) {
-  auto& ioctx = IoContext::current();
-  return ioctx.awaitIo(js, info->getIdentity(),
-      [](jsg::Lock& js, kj::Maybe<kj::String> json) -> jsg::Optional<jsg::JsValue> {
-    KJ_IF_SOME(j, json) {
-      return jsg::JsValue(js.parseJson(j).getHandle(js));
-    }
-    return kj::none;
-  });
+jsg::Promise<jsg::Value> AccessContext::getIdentity(jsg::Lock& js,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value()>>& getIdentityFnHandler) {
+  // Dispatch `getIdentity` JS-RPC on the Access binding worker's subrequest channel.
+  // Per-request props are injected by the IoChannelFactory at dispatch time.
+  // Resolves to `undefined` when no identity service channel is configured.
+  auto& context = IoContext::current();
+  auto span = context.makeTraceSpan("access_get_identity"_kjc);
+
+  KJ_IF_SOME(channel, info->getIdentityServiceChannel()) {
+    span.setTag("access.has_identity_service"_kjc, true);
+    auto fetcher =
+        js.alloc<Fetcher>(channel, Fetcher::RequiresHostAndProtocol::NO, true /* isInHouse */);
+
+    auto rpcProp = JSG_REQUIRE_NONNULL(fetcher->getRpcMethodInternal(js, kj::str("getIdentity")),
+        Error, "Access binding worker is missing the getIdentity method");
+
+    auto getIdentityFn = JSG_REQUIRE_NONNULL(
+        getIdentityFnHandler.tryUnwrap(js, rpcPropHandler.wrap(js, kj::mv(rpcProp))), Error,
+        "Access binding worker getIdentity is not callable");
+
+    // The RPC method returns a `JsRpcPromise` (custom thenable). Normalize it into a real promise
+    // via a resolver so we're independent of the `unwrapCustomThenables` compat flag.
+    auto paf = js.newPromiseAndResolver<jsg::Value>();
+    paf.resolver.resolve(js, getIdentityFn(js));
+    return context.attachSpans(js, kj::mv(paf.promise), kj::mv(span));
+  }
+
+  span.setTag("access.has_identity_service"_kjc, false);
+  return js.resolvedPromise(jsg::Value(js.v8Isolate, v8::Undefined(js.v8Isolate)));
 }
 
 jsg::Optional<jsg::Ref<AccessContext>> ExecutionContext::getAccess(jsg::Lock& js) {
-  // Pull the per-request AccessInfo (if any) off the current IncomingRequest. Standalone workerd
-  // never supplies one; production embedders construct one before calling newWorkerEntrypoint().
+  // Pull the per-request AccessInfo (if any) off the current IncomingRequest.
   if (!IoContext::hasCurrent()) return kj::none;
   auto& ioctx = IoContext::current();
   KJ_IF_SOME(info, ioctx.getAccessInfo()) {
@@ -127,6 +150,18 @@ jsg::Optional<jsg::Ref<AccessContext>> ExecutionContext::getAccess(jsg::Lock& js
   }
   return kj::none;
 }
+
+kj::String ExecutionContext::mapVirtualHost(
+    jsg::Lock& js, jsg::Ref<Fetcher> fetcher, uint16_t port) {
+  // Set up override, or return existing magic hostname if override already exists. Overrides
+  // created using mapVirtualHost() should never use the legacy hyperdrive hostname, so the only way
+  // for that hostname to be used is if an override was already registered earlier using
+  // ExtendedFetcher.
+  fetcher->registerOverride(js, IsHyperdrive::NO, port);
+  return kj::str(KJ_ASSERT_NONNULL(fetcher->getHostInternal()), ":",
+      KJ_ASSERT_NONNULL(fetcher->getPortInternal()));
+}
+
 void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {
   KJ_IF_SOME(r, reason) {
     IoContext::current().abort(js.exceptionToKj(kj::mv(r)));
@@ -190,8 +225,6 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     kj::Maybe<ExportedHandler&> exportedHandler) {
   ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
       "Connect ingress is not currently supported with Service Workers syntax.");
-  KJ_REQUIRE(FeatureFlags::get(lock).getWorkerdExperimental(),
-      "connect handling requires the experimental flag.");
 
   KJ_IF_SOME(handler, eh.connect) {
     // Has a connect handler!
@@ -261,7 +294,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   CfProperty cf(cfBlobJson);
 
   // We only create the body stream if there is a body to read.
-  kj::Maybe<jsg::Ref<ReadableStream>> maybeJsStream = kj::none;
+  kj::Maybe<JsReadableStream> maybeJsStream = kj::none;
 
   // If the request has "no body", we want `request.body` to be null. But, this is not the same
   // thing as the request having a body that happens to be empty. Unfortunately, KJ HTTP gives us
@@ -290,8 +323,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     // We do not automatically decode gzipped request bodies because the fetch() standard doesn't
     // specify any automatic encoding of requests. https://github.com/whatwg/fetch/issues/589
     auto b = newSystemStream(kj::addRef(*ownRequestBody), StreamEncoding::IDENTITY);
-    auto jsStream = js.alloc<ReadableStream>(ioContext, kj::mv(b));
-    body = Body::ExtractedBody(jsStream.addRef());
+    auto jsStream = JsReadableStream::create(js, ioContext, kj::mv(b));
+    body = Body::ExtractedBody(js, jsStream.addRef(js));
     maybeJsStream = kj::mv(jsStream);
   }
 
@@ -361,7 +394,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     }
   } else {
     // Fire off the handlers.
-    useDefaultHandling = dispatchEventImpl(lock, event.addRef());
+    useDefaultHandling = dispatchEventImpl(lock, event.addRef()).result;
   }
 
   if (useDefaultHandling) {
@@ -379,7 +412,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     }
 
     KJ_IF_SOME(jsStream, maybeJsStream) {
-      if (jsStream->isDisturbed()) {
+      if (jsStream.isDisturbed(js)) {
         lock.logUncaughtException(
             "Script consumed request body but didn't call respondWith(). Can't forward request.");
         return addNoopDeferredProxy(
@@ -411,12 +444,11 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
                 ioContext.addFunctor(
                     [&response, allowWebSocket = headers.isWebSocket(),
                         canceled = canceled.addRef(), &headers, span = kj::mv(span)](
-                        jsg::Lock& js, jsg::Ref<Response> innerResponse) mutable
+                        jsg::Lock& js, IoContext& context, jsg::Ref<Response> innerResponse) mutable
                     -> IoOwn<kj::Promise<DeferredProxy<void>>> {
       JSG_REQUIRE(innerResponse->getType() != "error"_kj, TypeError,
           "Return value from serve handler must not be an error response (like Response.error())");
 
-      auto& context = IoContext::current();
       // Drop our fetch_handler span now that the promise has resolved.
       span = kj::none;
       if (*canceled) {
@@ -548,6 +580,28 @@ bool isAlarmFailureUserError(kj::StringPtr description, bool hasUserErrorDetail)
   auto tunneled = jsg::tunneledErrorType(description);
   return tunneled.isJsgError && !tunneled.isInternal && !tunneled.isDurableObjectReset;
 }
+
+struct AlarmExceptionInfo {
+  bool isAbort;
+  bool retry;
+};
+
+AlarmExceptionInfo inspectAlarmException(const kj::Exception& exception, IoContext& context) {
+  // `exception` is the immediate promise rejection, which may differ from the original context
+  // abort reason after V8 termination or an output-gate failure. Details may survive on only one
+  // of these exceptions, so inspect both.
+  AlarmExceptionInfo result{
+    .isAbort = exception.getDetail(jsg::EXCEPTION_DURABLE_OBJECT_ABORT) != kj::none,
+    .retry = exception.getDetail(jsg::EXCEPTION_DURABLE_OBJECT_ABORT_NO_RETRY) == kj::none,
+  };
+  KJ_IF_SOME(abortReason, context.getAbortReason()) {
+    result.isAbort =
+        result.isAbort || abortReason.getDetail(jsg::EXCEPTION_DURABLE_OBJECT_ABORT) != kj::none;
+    result.retry = result.retry &&
+        abortReason.getDetail(jsg::EXCEPTION_DURABLE_OBJECT_ABORT_NO_RETRY) == kj::none;
+  }
+  return result;
+}
 }  // namespace
 
 kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj::Date scheduledTime,
@@ -586,9 +640,9 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
       auto& alarm = KJ_ASSERT_NONNULL(handler.alarm);
 
       return context
-          .run([exportedHandler, &context, timeout, retryCount, scheduledTime, &alarm,
-                   maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)](
-                   Worker::Lock& lock) mutable -> kj::Promise<WorkerInterface::AlarmResult> {
+          .run([exportedHandler, timeout, retryCount, scheduledTime, &alarm,
+                   maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)](Worker::Lock& lock,
+                   IoContext& context) mutable -> kj::Promise<WorkerInterface::AlarmResult> {
         jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
         // We want to limit alarm handler walltime to 15 minutes at most. If the timeout promise
         // completes we want to cancel the alarm handler. If the alarm handler promise completes
@@ -637,14 +691,18 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
         auto description = kj::str(e.getDescription());  // because e is moved before this is used
         auto log = !jsg::isTunneledException(description) && !jsg::isDoNotLogException(description);
         auto isUserError = e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none;
+        auto alarmException = inspectAlarmException(e, context);
 
         // This will include the error in inspector/tracers and log to syslog if internal.
         context.logUncaughtExceptionAsync(UncaughtExceptionSource::ALARM_HANDLER, kj::mv(e));
 
         auto limitsExceeded = context.getLimitEnforcer().getLimitsExceeded();
-        EventOutcome outcome = EventOutcome::EXCEPTION;
-        KJ_IF_SOME(status, limitsExceeded) {
-          outcome = status;
+        EventOutcome outcome = EventOutcome::ABORTED;
+        if (!alarmException.isAbort) {
+          outcome = EventOutcome::EXCEPTION;
+          KJ_IF_SOME(status, limitsExceeded) {
+            outcome = status;
+          }
         }
 
         kj::String actorId;
@@ -677,7 +735,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
               "output lock broke during alarm execution without an interesting error description",
               actorId, description, shouldRetryCountsAgainstLimits);
         }
-        return WorkerInterface::AlarmResult{.retry = true,
+        return WorkerInterface::AlarmResult{.retry = alarmException.retry,
           .retryCountsAgainstLimit = shouldRetryCountsAgainstLimits,
           .outcome = outcome,
           .errorDescription = kj::str(description)};
@@ -697,6 +755,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
               actorId = kj::str(s);
             }
           }
+          context.getMetrics().reportFailure(e);
           auto isUserGeneratedError = isAlarmFailureUserError(
               e.getDescription(), e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none);
           auto shouldRetryCountsAgainstLimits = alarmRetryCountsAgainstLimit({
@@ -722,9 +781,10 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
                 "output lock broke after executing alarm with tunneled non-user error", actorId,
                 e.getDescription());
           }
-          return WorkerInterface::AlarmResult{.retry = true,
+          auto alarmException = inspectAlarmException(e, context);
+          return WorkerInterface::AlarmResult{.retry = alarmException.retry,
             .retryCountsAgainstLimit = shouldRetryCountsAgainstLimits,
-            .outcome = EventOutcome::EXCEPTION,
+            .outcome = alarmException.isAbort ? EventOutcome::ABORTED : EventOutcome::EXCEPTION,
             .errorDescription = kj::str(e.getDescription())};
         });
       });
@@ -906,6 +966,14 @@ kj::Maybe<ServiceWorkerGlobalScope::ConnectFn&> ServiceWorkerGlobalScope::getCon
   return connectOverrides.find(networkAddress);
 }
 
+void ServiceWorkerGlobalScope::setDnsOverride(kj::String hostname, kj::String ip) {
+  dnsOverrides.upsert(kj::mv(hostname), kj::mv(ip));
+}
+
+kj::Maybe<kj::StringPtr> ServiceWorkerGlobalScope::getDnsOverride(kj::StringPtr hostname) {
+  return dnsOverrides.find(hostname).map([](kj::String& ip) -> kj::StringPtr { return ip; });
+}
+
 jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsString str) {
   // We could implement btoa() by accepting a kj::String, but then we'd have to check that it
   // doesn't have any multibyte code points. Easier to perform that test using v8::String's
@@ -928,17 +996,21 @@ void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value
 #endif
 
 jsg::JsString ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String data) {
-  auto decoded = kj::decodeBase64(data.asArray());
+  auto size = simdutf::maximal_binary_length_from_base64(data.begin(), data.size());
+  auto decoded = kj::heapArray<kj::byte>(size);
+  auto result = simdutf::base64_to_binary(
+      data.begin(), data.size(), decoded.asChars().begin(), simdutf::base64_default);
 
-  JSG_REQUIRE(!decoded.hadErrors, DOMInvalidCharacterError,
+  JSG_REQUIRE(result.error == simdutf::SUCCESS, DOMInvalidCharacterError,
       "atob() called with invalid base64-encoded data. (Only whitespace, '+', '/', alphanumeric "
       "ASCII, and up to two terminal '=' signs when the input data length is divisible by 4 are "
       "allowed.)");
 
   // Similar to btoa() taking a v8::Value, we return a v8::String directly, as this allows us to
-  // construct a string from the non-nul-terminated array returned from decodeBase64(). This avoids
+  // construct a string from the non-nul-terminated array returned from base64_to_binary(). This avoids
   // making a copy purely to append a nul byte.
-  return js.str(decoded.asBytes());
+  KJ_ASSERT(result.count <= size);
+  return js.str(decoded.first(result.count));
 }
 
 void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, jsg::Function<void()> task) {
@@ -975,7 +1047,7 @@ void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, jsg::Function<void(
             });
           }));
 
-  js.v8Isolate->EnqueueMicrotask(fn);
+  js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate, fn);
 }
 
 jsg::JsValue ServiceWorkerGlobalScope::structuredClone(
@@ -1062,24 +1134,63 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
   // Per the spec, we are going to first emit an error event on the global object.
   // If that event is not prevented, we will log the error to the console. Note
   // that we do not throw the error at all.
+  const auto logError = [&](const jsg::JsValue& error) {
+    // This helper must not throw: it is reached from dispatch paths with a no-throw contract
+    // (a REPORT-policy dispatch, and the re-entrancy branch below). Reading `stack` can run
+    // arbitrary user code — a getter or proxy trap — so a failure there falls back to the
+    // generic logging, which is side-effect-free (ToDetailString; no user code).
+    JSG_TRY(js) {
+      // If the value is an object that has a stack property, log that so we get
+      // the stack trace if it is an exception.
+      KJ_IF_SOME(obj, error.tryCast<jsg::JsObject>()) {
+        auto stack = obj.get(js, "stack"_kj);
+        if (!stack.isUndefined()) {
+          js.reportError(stack);
+          return;
+        }
+      }
+      // Otherwise just log the stringified value generically.
+      js.reportError(error);
+    }
+    JSG_CATCH(exception KJ_UNUSED) {
+      // Getting the stack property can throw an error if the accessor is
+      // overridden by user code, etc. We don't want to propagate that error
+      // because it violates the no-throw contract of this function, but we
+      // don't want to just swallow it either. Let's log so we can at least
+      // have a record of it happening at all. We dont want to log every case
+      // or spam sentry, so let's log periodically with NOSENTRY.
+      LOG_PERIODICALLY(
+          WARNING, "NOSENTRY Error while reporting error to console", exception.getHandle(js));
+      js.reportError(error);
+    };
+  };
+
+  // Per HTML's "report an exception" re-entrancy guard (the global's "in error reporting
+  // mode" flag): an exception reported while the 'error' event is being dispatched — e.g.
+  // an 'error' listener that itself throws, which the REPORT dispatch policy routes right
+  // back here — skips the event and goes straight to the console. Without this, a throwing
+  // 'error' listener would either propagate out of whatever REPORT dispatch triggered the
+  // report (violating its no-throw contract) or recurse indefinitely.
+  if (inErrorReportingMode) {
+    logError(error);
+    return;
+  }
+  inErrorReportingMode = true;
+  KJ_DEFER(inErrorReportingMode = false);
+
+  // Technically speaking, the jsg::checks below can also trigger a throw, but
+  // these aren't triggering user code so it's unlikely unless we're in a fatal
+  // state. Just allow the error to propagate in these cases.
   auto message = v8::Exception::CreateMessage(js.v8Isolate, error);
   auto event = js.alloc<ErrorEvent>(ErrorEvent::ErrorEventInit{.message = kj::str(message->Get()),
     .filename = kj::str(message->GetScriptResourceName()),
     .lineno = jsg::check(message->GetLineNumber(js.v8Context())),
     .colno = jsg::check(message->GetStartColumn(js.v8Context())),
     .error = jsg::JsRef(js, error)});
-  if (dispatchEventImpl(js, kj::mv(event))) {
-    // If the value is an object that has a stack property, log that so we get
-    // the stack trace if it is an exception.
-    KJ_IF_SOME(obj, error.tryCast<jsg::JsObject>()) {
-      auto stack = obj.get(js, "stack"_kj);
-      if (!stack.isUndefined()) {
-        js.reportError(stack);
-        return;
-      }
-    }
-    // Otherwise just log the stringified value generically.
-    js.reportError(error);
+  if (dispatchEventImpl(
+          js, kj::mv(event), effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT))
+          .result) {
+    logError(error);
   }
 }
 

@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+import wrappedBinding from 'cloudflare-internal:wrapped-binding';
+
 export class NonRetryableError extends Error {
   constructor(message: string, name = 'NonRetryableError') {
     super(message);
@@ -9,77 +11,69 @@ export class NonRetryableError extends Error {
   }
 }
 
+type WorkflowBatchDeleteResult = {
+  deleted: { id: string }[];
+  errors: { id: string; code: number; message: string }[];
+};
+
 interface Fetcher {
-  fetch: typeof fetch;
-}
+  getInstance(id: string): Promise<{ id: string }>;
+  deleteInstance(id: string): Promise<void>;
+  create(options?: WorkflowInstanceCreateOptions): Promise<{ id: string }>;
+  createBatch(
+    options: WorkflowInstanceCreateOptions[]
+  ): Promise<{ id: string }[]>;
+  deleteBatch(options: {
+    instances: string[];
+  }): Promise<WorkflowBatchDeleteResult>;
 
-async function callFetcher<T>(
-  fetcher: Fetcher,
-  path: string,
-  body: object
-): Promise<T> {
-  const res = await fetcher.fetch(`http://workflow-binding.local${path}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Version': '1',
-    },
-    body: JSON.stringify(body),
-  });
-
-  const response = (await res.json()) as {
-    result: T;
-    error?: WorkflowError;
-  };
-
-  if (res.ok) {
-    return response.result;
-  } else {
-    throw new Error(response.error?.message);
-  }
+  pause(id: string): Promise<void>;
+  resume(id: string): Promise<void>;
+  terminate(
+    id: string,
+    options?: WorkflowInstanceTerminateOptions
+  ): Promise<void>;
+  restart(id: string, options?: WorkflowInstanceRestartOptions): Promise<void>;
+  status(id: string): Promise<InstanceStatus>;
+  sendEvent(
+    id: string,
+    event: { type: string; payload: unknown }
+  ): Promise<void>;
 }
 
 class InstanceImpl implements WorkflowInstance {
-  // TODO(soon): Can we use the # syntax here?
-  // eslint-disable-next-line no-restricted-syntax
-  private readonly fetcher: Fetcher;
+  readonly #fetcher: Fetcher;
   readonly id: string;
 
   constructor(id: string, fetcher: Fetcher) {
     this.id = id;
-    this.fetcher = fetcher;
+    this.#fetcher = fetcher;
   }
 
   async pause(): Promise<void> {
-    await callFetcher(this.fetcher, '/pause', {
-      id: this.id,
-    });
+    await this.#fetcher.pause(this.id);
   }
+
   async resume(): Promise<void> {
-    await callFetcher(this.fetcher, '/resume', {
-      id: this.id,
-    });
+    await this.#fetcher.resume(this.id);
   }
 
   async terminate(options?: WorkflowInstanceTerminateOptions): Promise<void> {
-    await callFetcher(this.fetcher, '/terminate', {
-      id: this.id,
-      ...(options?.rollback === true ? { rollback: true } : {}),
-    });
+    await this.#fetcher.terminate(this.id, options);
   }
 
   async restart(options?: WorkflowInstanceRestartOptions): Promise<void> {
-    await callFetcher(this.fetcher, '/restart', {
-      ...options,
-      id: this.id,
-    });
+    await this.#fetcher.restart(this.id, options);
+  }
+
+  async delete(): Promise<void> {
+    // deleteInstance, not delete: avoids colliding with the built-in Fetcher.delete(url), which
+    // is still present on compatibility dates before `fetcher_no_get_put_delete`.
+    await this.#fetcher.deleteInstance(this.id);
   }
 
   async status(): Promise<InstanceStatus> {
-    const result = await callFetcher<InstanceStatus>(this.fetcher, '/status', {
-      id: this.id,
-    });
-    return result;
+    return await this.#fetcher.status(this.id);
   }
 
   async sendEvent({
@@ -89,51 +83,44 @@ class InstanceImpl implements WorkflowInstance {
     type: string;
     payload: unknown;
   }): Promise<void> {
-    await callFetcher(this.fetcher, '/send-event', {
-      type,
-      payload,
-      id: this.id,
-    });
+    await this.#fetcher.sendEvent(this.id, { type, payload });
   }
 }
 
-class WorkflowImpl {
-  // TODO(soon): Can we use the # syntax here?
-  // eslint-disable-next-line no-restricted-syntax
-  private readonly fetcher: Fetcher;
+class WorkflowImpl extends wrappedBinding.WrappedBinding {
+  readonly #fetcher: Fetcher;
 
   constructor(fetcher: Fetcher) {
-    this.fetcher = fetcher;
+    super(fetcher);
+    this.#fetcher = fetcher;
   }
 
   async get(id: string): Promise<WorkflowInstance> {
-    const result = await callFetcher<{
-      id: string;
-    }>(this.fetcher, '/get', { id });
+    // getInstance, not get: avoids colliding with the built-in Fetcher.get(url), which is still
+    // present on compatibility dates before `fetcher_no_get_put_delete`.
+    const result = await this.#fetcher.getInstance(id);
 
-    return new InstanceImpl(result.id, this.fetcher);
+    return new InstanceImpl(result.id, this.#fetcher);
   }
 
   async create(
     options?: WorkflowInstanceCreateOptions
   ): Promise<WorkflowInstance> {
-    const result = await callFetcher<{
-      id: string;
-    }>(this.fetcher, '/create', options ?? {});
+    const result = await this.#fetcher.create(options);
 
-    return new InstanceImpl(result.id, this.fetcher);
+    return new InstanceImpl(result.id, this.#fetcher);
   }
 
   async createBatch(
     options: WorkflowInstanceCreateOptions[]
   ): Promise<WorkflowInstance[]> {
-    const results = await callFetcher<
-      {
-        id: string;
-      }[]
-    >(this.fetcher, '/createBatch', options);
+    const results = await this.#fetcher.createBatch(options);
 
-    return results.map((result) => new InstanceImpl(result.id, this.fetcher));
+    return results.map((result) => new InstanceImpl(result.id, this.#fetcher));
+  }
+
+  async deleteBatch(instanceIds: string[]): Promise<WorkflowBatchDeleteResult> {
+    return await this.#fetcher.deleteBatch({ instances: instanceIds });
   }
 }
 

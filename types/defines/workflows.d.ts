@@ -34,7 +34,25 @@ declare abstract class Workflow<PARAMS = unknown> {
   public createBatch(
     batch: WorkflowInstanceCreateOptions<PARAMS>[]
   ): Promise<WorkflowInstance[]>;
+
+  /**
+   * Delete a batch of Workflow instances and their stored state.
+   * `deleteBatch` is limited to 100 instances at a time. Duplicate IDs are deleted once.
+   * The result contains one entry for each input position; IDs that do not exist are returned as per-instance errors.
+   * @param instanceIds IDs of the Workflow instances to delete
+   * @returns A promise that resolves with the successfully deleted instances and any per-instance errors.
+   */
+  public deleteBatch(instanceIds: string[]): Promise<WorkflowBatchDeleteResult>;
 }
+
+type WorkflowBatchDeleteResult = {
+  deleted: { id: string }[];
+  errors: {
+    id: string;
+    code: number;
+    message: string;
+  }[];
+};
 
 type WorkflowDurationLabel =
   | 'second'
@@ -50,6 +68,21 @@ type WorkflowSleepDuration =
   | number;
 
 type WorkflowRetentionDuration = WorkflowSleepDuration;
+
+/** Geographic regions supported when creating a Workflow instance.
+ * Location hints are best-effort placement preferences. */
+type WorkflowInstanceLocationHint =
+  | 'wnam'
+  | 'enam'
+  | 'sam'
+  | 'weur'
+  | 'eeur'
+  | 'apac'
+  | 'apac-ne'
+  | 'apac-se'
+  | 'oc'
+  | 'afr'
+  | 'me';
 
 interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
@@ -68,6 +101,9 @@ interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
     successRetention?: WorkflowRetentionDuration,
     errorRetention?: WorkflowRetentionDuration,
   };
+  /** A best-effort geographic placement preference for the Workflow instance.
+   * See `WorkflowInstanceLocationHint` for supported regions. */
+  locationHint?: WorkflowInstanceLocationHint;
 }
 
 type InstanceStatus = {
@@ -148,6 +184,11 @@ declare abstract class WorkflowInstance {
    * @param options Options for the restart, including an optional step to restart from.
    */
   public restart(options?: WorkflowInstanceRestartOptions): Promise<void>;
+
+  /**
+   * Delete the instance and its stored state.
+   */
+  public delete(): Promise<void>;
 
   /**
    * Returns the current status of the instance.

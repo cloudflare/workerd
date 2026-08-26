@@ -51,19 +51,27 @@ declare abstract class Workflow<PARAMS = unknown> {
 }
 
 type WorkflowDurationLabel =
-  | 'second'
-  | 'minute'
-  | 'hour'
-  | 'day'
-  | 'week'
-  | 'month'
-  | 'year';
+  'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year';
 
 type WorkflowSleepDuration =
-  | `${number} ${WorkflowDurationLabel}${'s' | ''}`
-  | number;
+  `${number} ${WorkflowDurationLabel}${'s' | ''}` | number;
 
 type WorkflowRetentionDuration = WorkflowSleepDuration;
+
+/** Geographic regions supported when creating a Workflow instance.
+ * Location hints are best-effort placement preferences. */
+type WorkflowInstanceLocationHint =
+  | 'wnam'
+  | 'enam'
+  | 'sam'
+  | 'weur'
+  | 'eeur'
+  | 'apac'
+  | 'apac-ne'
+  | 'apac-se'
+  | 'oc'
+  | 'afr'
+  | 'me';
 
 interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
@@ -83,6 +91,9 @@ interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
     successRetention?: WorkflowRetentionDuration;
     errorRetention?: WorkflowRetentionDuration;
   };
+  /** A best-effort geographic placement preference for the Workflow instance.
+   * See `WorkflowInstanceLocationHint` for supported regions. */
+  locationHint?: WorkflowInstanceLocationHint;
 }
 
 type InstanceStatus = {

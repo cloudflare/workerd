@@ -334,7 +334,11 @@ Local function_template_get_function(Isolate* isolate, const Global& tmpl);
 Realm* realm_from_isolate(Isolate* isolate);
 
 // Errors
-Local exception_create(Isolate* isolate, ExceptionType exception_type, ::rust::Str message);
+// Builds an exception whose message is raw bytes interpreted as UTF-8. Invalid
+// UTF-8 sequences are replaced with U+FFFD by v8::String::NewFromUtf8 rather
+// than rejected, so this accepts arbitrary byte input (e.g. filesystem paths).
+Local exception_create_from_bytes(
+    Isolate* isolate, ExceptionType exception_type, const uint8_t* data, int32_t length);
 
 // Isolate
 void isolate_throw_exception(Isolate* isolate, Local exception);

@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "errorinfo-stw", worker = .errorinfoStwWorker),
+  ],
+);
+
+const errorinfoStwWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "errorinfo-stw-test.js")
+  ],
+  bindings = [
+    (name = "SERVICE", service = "errorinfo-stw"),
+  ],
+  compatibilityFlags = ["nodejs_compat", "experimental"],
+  # Self-streaming-tail: the worker streams its own events into its own
+  # `tailStream` handler, so we can drive producer + consumer from one module.
+  streamingTails = ["errorinfo-stw"],
+);

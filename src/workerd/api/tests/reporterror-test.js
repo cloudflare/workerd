@@ -6,18 +6,26 @@ import { strictEqual, throws } from 'node:assert';
 
 const boom = new Error('boom');
 
+// ErrorEvent.filename reflects the script origin, which the two module
+// registries name differently: the bare module name under the original
+// registry, the module's canonical URL under the new one.
+const expectedFilename = Cloudflare.compatibilityFlags.new_module_registry
+  ? 'file:///bundle/worker'
+  : 'worker';
+
 const handler = mock.fn((event) => {
+  strictEqual(event.isTrusted, true);
   if (event.error instanceof Error) {
     strictEqual(event.message, 'Uncaught Error: boom');
     strictEqual(event.colno, 13);
     strictEqual(event.lineno, 7);
-    strictEqual(event.filename, 'worker');
+    strictEqual(event.filename, expectedFilename);
     strictEqual(event.error, boom);
   } else {
     strictEqual(event.message, 'Uncaught boom');
     strictEqual(event.colno, 0);
-    strictEqual(event.lineno, 28);
-    strictEqual(event.filename, 'worker');
+    strictEqual(event.lineno, 36);
+    strictEqual(event.filename, expectedFilename);
     strictEqual(event.error, 'boom');
   }
   return true;
@@ -30,7 +38,7 @@ reportError('boom');
 throws(() => reportError(), {
   message:
     "Failed to execute 'reportError' on 'ServiceWorkerGlobalScope': " +
-    "parameter 1 is not of type 'JsValue'.",
+    "parameter 1 is not of type 'Value'.",
 });
 
 export const reportErrorTest = {

@@ -2,8 +2,26 @@
 
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
+#include <workerd/util/entropy.h>
+
+#include <random>
 
 namespace workerd {
+
+IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(kj::Date createdAt) {
+  static thread_local auto generator = [] {
+    uint64_t seed;
+    getEntropy(kj::asBytes(seed));
+    return std::mt19937_64(seed);
+  }();
+  std::uniform_int_distribution<uint64_t> distribution(0, UINT64_MAX);
+
+  return IoChannelFactory::ActorRetryRequestMetadata{
+    .nonce = distribution(generator),
+    .createdAt = createdAt,
+    .isRetry = IsActorRetry::NO,
+  };
+}
 
 kj::Promise<kj::Array<byte>> IoChannelFactory::TokenizableChannel::getToken(
     ChannelTokenUsage usage) {
@@ -187,9 +205,9 @@ kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::getSubrequestChan
   KJ_IF_SOME(p, props) {
     KJ_IF_SOME(promise, p.resolveCaps(resolveCap)) {
       return kj::refcounted<PromisedSubrequestChannel>(
-          promise.then([this, self = addRef(), channel, props = kj::mv(p),
+          promise.then([self = addRefToThis(), channel, props = kj::mv(p),
                            versionRequest = kj::mv(versionRequest), persistent]() mutable {
-        return getSubrequestChannelResolved(
+        return self->getSubrequestChannelResolved(
             channel, kj::mv(props), kj::mv(versionRequest), persistent);
       }));
     }
@@ -202,8 +220,8 @@ kj::Own<IoChannelFactory::ActorClassChannel> IoChannelFactory::getActorClass(
   KJ_IF_SOME(p, props) {
     KJ_IF_SOME(promise, p.resolveCaps(resolveCap)) {
       return kj::refcounted<PromisedActorClassChannel>(
-          promise.then([this, self = addRef(), channel, props = kj::mv(p), persistent]() mutable {
-        return getActorClassResolved(channel, kj::mv(props), persistent);
+          promise.then([self = addRefToThis(), channel, props = kj::mv(p), persistent]() mutable {
+        return self->getActorClassResolved(channel, kj::mv(props), persistent);
       }));
     }
   }
@@ -221,9 +239,9 @@ kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::makeRestoredSubre
 
   KJ_IF_SOME(promise, restoreParams.resolveCaps(resolveCap)) {
     return kj::refcounted<PromisedSubrequestChannel>(promise.then(
-        [this, self = addRef(), selfTokenFactory = kj::mv(selfTokenFactory),
+        [self = addRefToThis(), selfTokenFactory = kj::mv(selfTokenFactory),
             restoreParams = kj::mv(restoreParams), inner = kj::mv(inner), persistent]() mutable {
-      return makeRestoredSubrequestChannelResolved(
+      return self->makeRestoredSubrequestChannelResolved(
           kj::mv(selfTokenFactory), kj::mv(restoreParams), kj::mv(inner), persistent);
     }));
   }
@@ -236,9 +254,9 @@ kj::Own<IoChannelFactory::RpcChannel> IoChannelFactory::makeRestoredRpcChannel(
     kj::Own<SelfTokenFactory> selfTokenFactory, Frankenvalue restoreParams, Persistent persistent) {
   KJ_IF_SOME(promise, restoreParams.resolveCaps(resolveCap)) {
     return kj::refcounted<PromisedRpcChannel>(
-        promise.then([this, self = addRef(), selfTokenFactory = kj::mv(selfTokenFactory),
+        promise.then([self = addRefToThis(), selfTokenFactory = kj::mv(selfTokenFactory),
                          restoreParams = kj::mv(restoreParams), persistent]() mutable {
-      return makeRestoredRpcChannelResolved(
+      return self->makeRestoredRpcChannelResolved(
           kj::mv(selfTokenFactory), kj::mv(restoreParams), persistent);
     }));
   }
@@ -275,21 +293,26 @@ kj::Own<IoChannelFactory::ActorClassChannel> WorkerStubChannel::getActorClass(
 
 kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::subrequestChannelFromToken(
     ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token) {
-  return kj::refcounted<PromisedSubrequestChannel>(token.then([this, usage](kj::Array<byte> token) {
-    return subrequestChannelFromToken(usage, token.asPtr());
+  return kj::refcounted<PromisedSubrequestChannel>(
+      token.then([self = addRefToThis(), usage](kj::Array<byte> token) mutable {
+    return self->subrequestChannelFromToken(usage, token.asPtr());
   }));
 }
 
 kj::Own<IoChannelFactory::ActorClassChannel> IoChannelFactory::actorClassFromToken(
     ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token) {
-  return kj::refcounted<PromisedActorClassChannel>(token.then(
-      [this, usage](kj::Array<byte> token) { return actorClassFromToken(usage, token.asPtr()); }));
+  return kj::refcounted<PromisedActorClassChannel>(
+      token.then([self = addRefToThis(), usage](kj::Array<byte> token) mutable {
+    return self->actorClassFromToken(usage, token.asPtr());
+  }));
 }
 
 kj::Own<IoChannelFactory::RpcChannel> IoChannelFactory::rpcChannelFromToken(
     ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token) {
-  return kj::refcounted<PromisedRpcChannel>(token.then(
-      [this, usage](kj::Array<byte> token) { return rpcChannelFromToken(usage, token.asPtr()); }));
+  return kj::refcounted<PromisedRpcChannel>(
+      token.then([self = addRefToThis(), usage](kj::Array<byte> token) mutable {
+    return self->rpcChannelFromToken(usage, token.asPtr());
+  }));
 }
 
 kj::Promise<void> DynamicWorkerSource::ensureAllResolved() {

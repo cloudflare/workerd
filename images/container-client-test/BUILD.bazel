@@ -14,6 +14,12 @@ js_image_layer(
     name = "layers",
     binary = ":app",
     root = "/",
+    # js_image_layer does not resolve runfiles symlinks properly on Windows, which makes this action
+    # fail. Since this target is only used for the Linux-only image target below, we can also
+    # constrain it to just Linux to address this.
+    target_compatible_with = [
+        "@platforms//os:linux",
+    ],
 )
 
 oci_image(
@@ -36,7 +42,12 @@ oci_image(
 oci_load(
     name = "load",
     image = ":image",
-    repo_tags = ["cloudflare/workerd/container-client-test:latest"],
+    repo_tags = [
+        "cloudflare/workerd/container-client-test:latest",
+        # Re-tag the image so we can use it in image override tests without
+        # building a separate image.
+        "cloudflare/workerd/container-client-test:override",
+    ],
     visibility = ["//visibility:public"],
 )
 

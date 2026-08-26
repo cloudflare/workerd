@@ -216,7 +216,7 @@ Flow:
 9. On not-found: retry with absolute path for `node:`/`cloudflare:` prefixed specifiers.
 10. Final fallback: throw `"No such module"` error.
 
-Errors are handled via `js.tryCatch`: exceptions are caught, and
+Errors are handled via `JSG_TRY/JSG_CATCH`: exceptions are caught, and
 `js.v8Isolate->ThrowException()` is called to schedule them on the isolate
 (V8 requires exceptions to be scheduled, not thrown as C++ exceptions, during
 resolve callbacks).
@@ -275,9 +275,14 @@ Flow:
 ## Module Instantiation — `instantiateModule`
 
 ```cpp
-void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module,
-    InstantiateModuleOptions options);
+kj::Maybe<v8::Local<v8::Promise>> instantiateModule(jsg::Lock& js,
+    v8::Local<v8::Module>& module, InstantiateModuleOptions options);
 ```
+
+The return value is `kj::none` when evaluation is fully settled. It is the still-pending
+evaluation promise only when called with `InstantiateModuleOptions::ALLOW_PENDING_EVALUATION`
+from inside another module's evaluation, so that the dynamic import path can chain the module
+namespace onto it instead of draining the microtask queue while nested (see #9).
 
 This is workerd's wrapper around V8's `InstantiateModule` + `Evaluate`:
 
@@ -550,9 +555,20 @@ from the source text).
    `ModuleInfo` on first access.
 
 9. **Top-level await handling.** After V8's `Evaluate` returns, `instantiateModule`
-   runs microtasks and checks the promise state. If the promise is still pending,
-   it throws — workerd does not support long-lived TLA during module loading (the
-   worker must be fully initialized before serving requests).
+   checks the promise state, and whether it may first run microtasks depends on the
+   evaluation depth tracked by `Lock::ModuleEvaluationScope`:
+
+   - At depth 0 microtasks are drained unconditionally, so promises scheduled during
+     top-level evaluation settle even if nothing awaited them (worker code relies on
+     this, e.g. a bare `import(...).catch(...)` in the entrypoint). A still-pending
+     promise then throws — workerd does not support long-lived TLA during module
+     loading (the worker must be fully initialized before serving requests).
+   - When nested inside another module's evaluation, microtasks are **not** drained:
+     doing so can run an async module's fulfillment callback while an ancestor is
+     still `kEvaluating` and trip a fatal V8 CHECK (`status() >= kEvaluatingAsync`).
+     A synchronous graph has already settled during `Evaluate` and is unaffected. A
+     pending promise is reported as an unsettled top-level await, except under
+     `ALLOW_PENDING_EVALUATION` where it is returned for the caller to chain on.
 
 10. **require() is module evaluation + namespace extraction.** The `requireImpl`
     function calls the same `instantiateModule` path as ESM imports, then extracts

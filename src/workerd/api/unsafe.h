@@ -133,12 +133,19 @@ class UnsafeModule: public jsg::Object {
   // This is used to verify that the all-autogates test variant is working correctly.
   bool isTestAutogateEnabled();
 
+  // Test-only: how many times jsg::WeakRef::tryAddRef() has refused to promote a target whose
+  // wrapper was zapped by a major GC before the deferred cppgc sweep released it. Lets a
+  // regression test assert that it actually reached that window rather than merely failing to
+  // crash. See jsg::HeapTracer::getCondemnedWrapperCount().
+  double getCondemnedWrapperCount(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(UnsafeModule) {
     JSG_METHOD(abortAllDurableObjects);
     JSG_METHOD(deleteAllDurableObjects);
     JSG_METHOD(evict);
     JSG_METHOD(evictAllDurableObjects);
     JSG_METHOD(isTestAutogateEnabled);
+    JSG_METHOD(getCondemnedWrapperCount);
   }
 };
 
@@ -210,13 +217,24 @@ kj::Own<jsg::modules::ModuleBundle> getExternalUnsafeModuleBundle(auto featureFl
   static const auto kUnsafeSpecifier = "workerd:unsafe"_url;
   builder.addObject<UnsafeModule, TypeWrapper>(kUnsafeSpecifier);
 
+  return builder.finish();
+}
+
 #ifdef WORKERD_FUZZILLI
-  {
-    static const auto kStdinSpecifier = "workerd:stdin"_url;
-    builder.addSynthetic(kStdinSpecifier,
-        jsg::modules::Module::newJsgObjectModuleHandler<Stdin, TypeWrapper>(
-            [](jsg::Lock& js) { return js.alloc<Stdin>(); }));
-  }
+// Returns a bundle containing the fuzzer support modules, which are importable
+// by user code in fuzzilli builds. This bundle is registered unconditionally
+// (not gated on the unsafe_module flag), matching the legacy registry's
+// registerUnsafeModules(): workerd:stdin is always available, while
+// workerd:fuzzilli additionally requires the workerd experimental flag.
+template <typename TypeWrapper>
+kj::Own<jsg::modules::ModuleBundle> getExternalFuzzilliModuleBundle(auto featureFlags) {
+  jsg::modules::ModuleBundle::BuiltinBuilder builder(
+      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
+
+  static const auto kStdinSpecifier = "workerd:stdin"_url;
+  builder.addSynthetic(kStdinSpecifier,
+      jsg::modules::Module::newJsgObjectModuleHandler<Stdin, TypeWrapper>(
+          [](jsg::Lock& js) { return js.alloc<Stdin>(); }));
 
   if (featureFlags.getWorkerdExperimental()) {
     static const auto kFuzzilliSpecifier = "workerd:fuzzilli"_url;
@@ -224,8 +242,8 @@ kj::Own<jsg::modules::ModuleBundle> getExternalUnsafeModuleBundle(auto featureFl
         jsg::modules::Module::newJsgObjectModuleHandler<Fuzzilli, TypeWrapper>(
             [](jsg::Lock& js) { return js.alloc<Fuzzilli>(); }));
   }
-#endif
 
   return builder.finish();
 }
+#endif
 }  // namespace workerd::api

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <workerd/util/weak-refs.h>
-
 #include <kj/async.h>
 #include <kj/common.h>
 #include <kj/function.h>
@@ -17,6 +15,26 @@ class Lock;
 }
 
 class IoContext;
+
+// Tracks whether ReverseIoOwn instances can access their objects.
+class ReverseIoOwnValidity final: public kj::AtomicRefcounted {
+ public:
+  bool isValid() const {
+    return valid;
+  }
+
+  void checkValid() const;
+
+ private:
+  void invalidate() const {
+    valid = false;
+  }
+
+  // ReverseIoOwn instances may outlive their IoContext, but only on its thread.
+  mutable bool valid = true;
+
+  friend class IoContext;
+};
 
 template <typename T>
 class IoOwn;
@@ -73,7 +91,24 @@ class DeleteQueue: public kj::AtomicRefcounted {
   DeleteQueue(): crossThreadDeleteQueue(State{kj::Vector<OwnedObject*>()}) {}
 
   void scheduleDeletion(OwnedObject* object) const;
+
+  // Schedules the given action to run in the IoContext that owns this queue, the next time
+  // that context drains its queue (in its own thread, under the isolate lock). If the owning
+  // IoContext has already been destroyed, the action is dropped and a warning about
+  // cross-request promise resolution is logged to the current context, if any.
   void scheduleAction(jsg::Lock& js, kj::Function<void(jsg::Lock&)>&& action) const;
+
+  // Like scheduleAction(), but for callers where a destroyed target context is an expected,
+  // benign outcome: returns true if the action was queued, or false — dropping the action
+  // silently — if the owning IoContext has already been destroyed.
+  bool tryScheduleAction(kj::Function<void(jsg::Lock&)>&& action) const;
+
+  // True if the IoContext that owns this queue is the calling thread's current IoContext.
+  bool isCurrentIoContext() const;
+
+  // True if the IoContext that owns this queue has been destroyed, meaning scheduled actions
+  // and deletions are dropped. Useful for reclaiming registrations that target this queue.
+  bool isDefunct() const;
 
   struct State {
     kj::Vector<OwnedObject*> queue;
@@ -101,12 +136,10 @@ class DeleteQueue: public kj::AtomicRefcounted {
   IoOwn<T> addObject(kj::Own<T> obj, OwnedObjectList& ownedObjects) const;
 
   template <typename T>
-  ReverseIoOwn<T> addObjectReverse(kj::Own<workerd::WeakRef<IoContext>> weakRef,
-      kj::Own<T> obj,
-      OwnedObjectList& ownedObjects) const;
+  ReverseIoOwn<T> addObjectReverse(
+      kj::Arc<ReverseIoOwnValidity> validity, kj::Own<T> obj, OwnedObjectList& ownedObjects) const;
 
   static void checkFarGet(const DeleteQueue& deleteQueue, const std::type_info& type);
-  static void checkWeakGet(workerd::WeakRef<IoContext>& weak);
 
  private:
   template <typename T>
@@ -128,6 +161,19 @@ class IoCrossContextExecutor {
   // Tries to execute the specified action to the owning IoContext.
   // The target IoContext will be signaled to run the action as soon as it is able.
   void execute(jsg::Lock& js, kj::Function<void(jsg::Lock&)>&& action);
+
+  // True if the IoContext this executor targets is the calling thread's current IoContext —
+  // i.e. the caller could run the work synchronously instead of deferring through
+  // tryExecute().
+  bool isCurrent() const;
+
+  // Like execute(), but for callers where a destroyed target context is an expected, benign
+  // outcome: returns true if the action was queued, or false — dropping the action silently —
+  // if the target IoContext has already been destroyed.
+  bool tryExecute(kj::Function<void(jsg::Lock&)>&& action) const;
+
+  // True if the target IoContext has been destroyed, i.e. tryExecute() would drop the action.
+  bool isTargetDestroyed() const;
 
  private:
   friend class IoContext;
@@ -162,10 +208,9 @@ inline IoOwn<T> DeleteQueue::addObject(kj::Own<T> obj, OwnedObjectList& ownedObj
 }
 
 template <typename T>
-inline ReverseIoOwn<T> DeleteQueue::addObjectReverse(kj::Own<workerd::WeakRef<IoContext>> weakRef,
-    kj::Own<T> obj,
-    OwnedObjectList& ownedObjects) const {
-  return ReverseIoOwn<T>(kj::mv(weakRef), addObjectImpl(kj::mv(obj), ownedObjects));
+inline ReverseIoOwn<T> DeleteQueue::addObjectReverse(
+    kj::Arc<ReverseIoOwnValidity> validity, kj::Own<T> obj, OwnedObjectList& ownedObjects) const {
+  return ReverseIoOwn<T>(kj::mv(validity), addObjectImpl(kj::mv(obj), ownedObjects));
 }
 
 // When the IoContext is destroyed, we need to null out the DeleteQueue. Complicating
@@ -277,7 +322,7 @@ template <typename T>
 class ReverseIoOwn {
  public:
   ReverseIoOwn(ReverseIoOwn&& other) noexcept;
-  ReverseIoOwn(decltype(nullptr)): item(nullptr) {}
+  ReverseIoOwn(decltype(nullptr)): validity(nullptr), item(nullptr) {}
   ~ReverseIoOwn() noexcept(false);
   KJ_DISALLOW_COPY(ReverseIoOwn);
 
@@ -293,7 +338,7 @@ class ReverseIoOwn {
   // Returns kj::none if the IoContext has been destroyed or if this is null.
   // This is a safe alternative to operator->() that won't throw or crash.
   kj::Maybe<T&> tryGet() {
-    if (item != nullptr && weakRef->isValid()) {
+    if (item != nullptr && validity != nullptr && validity->isValid()) {
       return *item->ptr.get();
     }
     return kj::none;
@@ -303,11 +348,11 @@ class ReverseIoOwn {
   friend class IoContext;
   friend class DeleteQueue;
 
-  kj::Own<workerd::WeakRef<IoContext>> weakRef;
+  kj::Arc<ReverseIoOwnValidity> validity;
   SpecificOwnedObject<T>* item;
 
-  ReverseIoOwn(kj::Own<workerd::WeakRef<IoContext>> weakRef, SpecificOwnedObject<T>* item)
-      : weakRef(kj::mv(weakRef)),
+  ReverseIoOwn(kj::Arc<ReverseIoOwnValidity> validity, SpecificOwnedObject<T>* item)
+      : validity(kj::mv(validity)),
         item(item) {}
 };
 
@@ -384,24 +429,24 @@ inline T* IoPtr<T>::operator->() {
 
 template <typename T>
 ReverseIoOwn<T>::ReverseIoOwn(ReverseIoOwn&& other) noexcept
-    : weakRef(kj::mv(other.weakRef)),
+    : validity(kj::mv(other.validity)),
       item(other.item) {
   other.item = nullptr;
 }
 
 template <typename T>
 ReverseIoOwn<T>::~ReverseIoOwn() noexcept(false) {
-  if (item != nullptr && weakRef->isValid()) {
+  if (item != nullptr && validity->isValid()) {
     OwnedObjectList::unlink(*item);
   }
 }
 
 template <typename T>
 ReverseIoOwn<T>& ReverseIoOwn<T>::operator=(ReverseIoOwn<T>&& other) {
-  if (item != nullptr) {
+  if (item != nullptr && validity->isValid()) {
     OwnedObjectList::unlink(*item);
   }
-  weakRef = kj::mv(other.weakRef);
+  validity = kj::mv(other.validity);
   item = other.item;
   other.item = nullptr;
   return *this;
@@ -409,27 +454,27 @@ ReverseIoOwn<T>& ReverseIoOwn<T>::operator=(ReverseIoOwn<T>&& other) {
 
 template <typename T>
 ReverseIoOwn<T>& ReverseIoOwn<T>::operator=(decltype(nullptr)) {
-  if (item != nullptr) {
+  if (item != nullptr && validity->isValid()) {
     OwnedObjectList::unlink(*item);
   }
-  weakRef = nullptr;
+  validity = nullptr;
   item = nullptr;
   return *this;
 }
 
 template <typename T>
 inline T* ReverseIoOwn<T>::operator->() {
-  DeleteQueue::checkWeakGet(*weakRef);
+  validity->checkValid();
   return item->ptr;
 }
 
 template <typename T>
 inline ReverseIoOwn<T>::operator kj::Own<T>() && {
-  DeleteQueue::checkWeakGet(*weakRef);
+  validity->checkValid();
   auto result = kj::mv(item->ptr);
   OwnedObjectList::unlink(*item);
   item = nullptr;
-  weakRef = nullptr;  // not needed anymore, might as well drop the refcount
+  validity = nullptr;  // not needed anymore, might as well drop the refcount
   return result;
 }
 

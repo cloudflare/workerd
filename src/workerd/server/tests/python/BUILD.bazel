@@ -1,3 +1,4 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test", "python_test_setup")
 load("//src/workerd/server/tests/python/vendor_pkg_tests:vendor_test.bzl", "vendored_py_wd_test")
@@ -58,6 +59,16 @@ py_wd_test(
 
 py_wd_test("python-rpc")
 
+py_wd_test(
+    "stack-switching-state",
+    # This is fixed in Pyodide 314.0.5
+    skip_python_flags = [
+        "0.26.0a2",
+        "0.28.2",
+        "314.0.4",
+    ],
+)
+
 py_wd_test("workflow-entrypoint")
 
 py_wd_test("vendor_dir_compat_flag")
@@ -66,9 +77,34 @@ py_wd_test("default-class-with-legacy-global-handlers")
 
 py_wd_test("python-compat-flag")
 
+py_wd_test("nodejs-compat")
+
 py_wd_test("pth-file")
 
 py_wd_test("metadata-read-overflow")
+
+js_binary(
+    name = "socket-server",
+    entry_point = "sockets/socket-server.js",
+)
+
+py_wd_test(
+    "sockets",
+    # sidecar and python_snapshot_test currently cannot be used together
+    make_snapshot = False,
+    sidecar = ":socket-server",
+    sidecar_port_bindings = [
+        "PYTHON_SOCKET_SERVER_PORT",
+        "PYTHON_HOSTNAME_SOCKET_SERVER_PORT",
+        "PYTHON_STARTTLS_SOCKET_SERVER_PORT",
+        "PYTHON_TLS_SOCKET_SERVER_PORT",
+    ],
+    skip_python_flags = [
+        # Older versions does not support sockets
+        "0.26.0a2",
+        "0.28.2",
+    ],
+)
 
 # Shell-driven test for aborting the isolate on a Python fatal error. The Python worker
 # triggers a fatal error which calls abortIsolate(), terminating the workerd process. The shell

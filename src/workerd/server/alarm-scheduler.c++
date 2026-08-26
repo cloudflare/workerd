@@ -176,14 +176,6 @@ bool AlarmScheduler::deleteAlarm(ActorKey actor) {
   return query.changeCount() > 0;
 }
 
-kj::Promise<AlarmScheduler::RetryInfo> AlarmScheduler::runAlarm(
-    const ActorKey& actor, kj::Date scheduledTime, uint32_t retryCount) {
-  auto result = co_await getActor(actor)->runAlarm(scheduledTime, retryCount);
-
-  co_return RetryInfo{.retry = result.outcome != EventOutcome::OK && result.retry,
-    .retryCountsAgainstLimit = result.retryCountsAgainstLimit};
-}
-
 AlarmScheduler::ScheduledAlarm AlarmScheduler::scheduleAlarm(
     kj::Date now, kj::Own<ActorKey> actor, kj::Date scheduledTime) {
   auto task = makeAlarmTask(scheduledTime - now, *actor, scheduledTime);
@@ -215,19 +207,23 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
     retryCount = entry.value.countedRetry;
   }
 
-  auto retryInfo = co_await ([&]() -> kj::Promise<RetryInfo> {
+  auto alarmOutcome = co_await ([&]() -> kj::Promise<WorkerInterface::AlarmOutcome> {
     try {
-      co_return co_await runAlarm(actorRef, scheduledTime, retryCount);
+      auto result = co_await getActor(actorRef)->runAlarm(scheduledTime, retryCount);
+      auto outcome = result.asOutcome();
+      outcome.retry = outcome.outcome != EventOutcome::OK && outcome.retry;
+      co_return outcome;
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       KJ_LOG(WARNING, exception);
-      co_return RetryInfo{.retry = true,
+      co_return WorkerInterface::AlarmOutcome{.retry = true,
 
         // An exception here is "weird", they should normally
         // be turned into AlarmResult statuses in the sandbox
         // for any user-caused error. Let's not count this
         // retry attempt against the limit.
-        .retryCountsAgainstLimit = false};
+        .retryCountsAgainstLimit = false,
+        .outcome = EventOutcome::EXCEPTION};
     }
   })();
 
@@ -253,7 +249,7 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
     // again.
     entry.value.status = AlarmStatus::FINISHED;
 
-    if (retryInfo.retry) {
+    if (alarmOutcome.retry) {
       // recreate the task, running after a delay determined using the retry factor
       if (entry.value.countedRetry >= AlarmScheduler::RETRY_MAX_TRIES) {
         // Notify the actor to clear its in-memory alarm state so getAlarm() reflects the
@@ -261,18 +257,10 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
         // already has visibility into the actor's alarm state via its SQLite hooks.
         // If the notification fails, we keep the alarm in the scheduler so it is not silently
         // lost.
-        try {
-          co_await getActor(actorRef)->abandonAlarm(scheduledTime);
-        } catch (...) {
-          auto exception = kj::getCaughtExceptionAsKj();
-          KJ_LOG(
-              WARNING, "abandonAlarm notification failed, keeping alarm in scheduler", exception);
-          co_return;
-        }
-        deleteAlarm(*entry.value.actor);
+        entry.value.task = abandonAlarm(actorRef.clone(), scheduledTime);
         co_return;
       }
-      if (retryInfo.retryCountsAgainstLimit) {
+      if (alarmOutcome.retryCountsAgainstLimit) {
         entry.value.countedRetry++;
 
         if (!entry.value.previousRetryCountedAgainstLimit) {
@@ -285,7 +273,7 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
           entry.value.backoff = 0;
         }
       }
-      entry.value.previousRetryCountedAgainstLimit = retryInfo.retryCountsAgainstLimit;
+      entry.value.previousRetryCountedAgainstLimit = alarmOutcome.retryCountsAgainstLimit;
 
       entry.value.backoff = kj::min(AlarmScheduler::RETRY_BACKOFF_MAX, entry.value.backoff);
       auto delay = (AlarmScheduler::RETRY_START_SECONDS << entry.value.backoff) * kj::SECONDS;
@@ -299,11 +287,40 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
       entry.value.task = makeAlarmTask(delay, actorRef, scheduledTime);
     } else {
       KJ_ASSERT(entry.value.queuedAlarm == kj::none);
+      if (alarmOutcome.outcome == EventOutcome::ABORTED) {
+        entry.value.task = abandonAlarm(actorRef.clone(), scheduledTime);
+        co_return;
+      }
       deleteAlarm(actorRef);
     }
   } catch (...) {
     auto exception = kj::getCaughtExceptionAsKj();
     KJ_LOG(ERROR, "Failed to run alarm and was unable to schedule a retry", exception);
+  }
+}
+
+kj::Promise<void> AlarmScheduler::abandonAlarm(kj::Own<ActorKey> actor, kj::Date scheduledTime) {
+  try {
+    co_await getActor(*actor)->abandonAlarm(scheduledTime);
+  } catch (...) {
+    auto exception = kj::getCaughtExceptionAsKj();
+    KJ_LOG(WARNING, "abandonAlarm notification failed, keeping alarm in scheduler", exception);
+    co_return;
+  }
+
+  KJ_IF_SOME(entry, alarms.findEntry(*actor)) {
+    if (entry.value.status != AlarmStatus::FINISHED || entry.value.scheduledTime != scheduledTime) {
+      co_return;
+    }
+
+    // This task cannot remove or replace the promise that owns it until it has been moved out of
+    // the alarm entry.
+    tasks.add(kj::mv(entry.value.task));
+    KJ_IF_SOME(replacement, entry.value.queuedAlarm) {
+      entry.value = scheduleAlarm(clock.now(), kj::mv(entry.value.actor), replacement);
+    } else {
+      deleteAlarm(*actor);
+    }
   }
 }
 

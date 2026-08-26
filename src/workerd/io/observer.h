@@ -156,8 +156,6 @@ class RequestObserver: public kj::Refcounted {
     return nullptr;
   }
 
-  virtual void setOutcome(EventOutcome outcome) {}
-
   virtual kj::Own<void> addedContextTask() {
     return kj::Own<void>();
   }
@@ -321,6 +319,10 @@ class ActorObserver: public kj::Refcounted, public SqliteObserver {
 
   virtual void startRequest() {}
   virtual void endRequest() {}
+
+  // Called when the actor's JavaScript class constructor has run to completion successfully.
+  // Not called for actors that have no class, nor when the constructor throws.
+  virtual void constructorCompleted() {}
 
   virtual void webSocketAccepted() {}
   virtual void webSocketClosed() {}

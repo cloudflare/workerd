@@ -1061,9 +1061,18 @@ struct DeserializeInvoker<TypeWrapper,
     Ret(Lock&, Tag, Deserializer&, const TypeHandler<Types>&...)> {
   static v8::Local<v8::Object> call(
       TypeWrapper& wrapper, Lock& js, Tag tag, Deserializer& deserializer) {
-    return wrapper.wrap(js, js.v8Context(), kj::none,
+    auto wrapped = wrapper.wrap(js, js.v8Context(), kj::none,
         T::deserialize(
             js, tag, deserializer, TypeWrapper::template TYPE_HANDLER_INSTANCE<Types>...));
+    if constexpr (kj::isSameType<decltype(wrapped), v8::Local<v8::Object>>()) {
+      return wrapped;
+    } else {
+      // deserialize() may return a type whose wrap produces a generic v8::Local<v8::Value>
+      // (e.g. custom-wrapped types like JsReadableStream, whose jsgWrap can yield a plain JS
+      // object). Host-object deserialization must nonetheless produce an object.
+      KJ_ASSERT(wrapped->IsObject(), "deserialized host object did not wrap to an object");
+      return wrapped.template As<v8::Object>();
+    }
   }
 };
 
@@ -1490,6 +1499,19 @@ struct ResourceTypeBuilder {
     instance->Set(v8Name, v8Value, v8::PropertyAttribute::ReadOnly);
   }
 
+  template <const char* name>
+  inline void registerPrivateSymbol() {
+    // The symbol is acquired from the per-isolate API symbol registry, so C++ code (and
+    // runtime-provided JavaScript handed the symbol via the same registry) can re-acquire
+    // the identical symbol by name at any time. Both the property key and its value are
+    // the symbol itself, supporting own-property marker checks of the form
+    // `getOwnPropertyDescriptor(obj, sym)?.value === sym`.
+    auto symbol = v8::Symbol::ForApi(isolate, v8StrIntern(isolate, name));
+    instance->Set(symbol, symbol,
+        static_cast<v8::PropertyAttribute>(v8::PropertyAttribute::ReadOnly |
+            v8::PropertyAttribute::DontEnum | v8::PropertyAttribute::DontDelete));
+  }
+
   template <const char* name, typename Getter, Getter getter>
   inline void registerReadonlyPrototypeProperty() {
     auto v8Name = v8StrIntern(isolate, name);
@@ -1706,6 +1728,9 @@ struct JsSetup {
   template <typename T>
   inline void registerReadonlyInstanceProperty(kj::StringPtr name, T value) {}
 
+  template <const char* name>
+  inline void registerPrivateSymbol() {}
+
   template <const char* name, typename Getter, Getter getter>
   inline void registerReadonlyPrototypeProperty() {}
 
@@ -1763,6 +1788,9 @@ struct NewContextOptions {
   // Used by the per-isolate bootstrap, which needs to capture these constructors
   // (runPerIsolateBootstrap performs the deferred deletion).
   bool deferWeakRefDeletion = false;
+
+  // Install the experimental WebAssembly memory.discard proposal on the new context.
+  bool installWasmMemoryDiscard = false;
 };
 
 void deleteWeakRefGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context);

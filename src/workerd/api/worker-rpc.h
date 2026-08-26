@@ -14,6 +14,8 @@
 //
 // See worker-interface.capnp for the underlying protocol.
 
+#include <workerd/api/js-readable-stream.h>
+#include <workerd/api/js-writable-stream.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
@@ -96,6 +98,14 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
   void serializeProxy(
       jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Proxy> proxy) override;
 
+  // TypeScript-implemented ReadableStream/WritableStream instances (present when the
+  // typescript_implemented_streams compat flag is enabled) are plain JS class instances with
+  // no JSG wrapper, so the serializer cannot route them to the stream serialization functions
+  // the way it routes the legacy JSG-wrapped streams; instead they are recognized here by
+  // brand check and transferred through the same wire protocol.
+  bool trySerializeClassInstance(
+      jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Object> object) override;
+
  private:
   StubOwnership stubOwnership;
   rpc::JsValue::ExternalPusher::Client externalPusher;
@@ -119,6 +129,35 @@ class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHa
   // Read and return the next external.
   rpc::JsValue::External::Reader read();
 
+  // Materialize the externals that require JavaScript execution to deserialize -- streams and
+  // sockets -- BEFORE the V8 value graph is read. V8's deserializer forbids JS execution for the
+  // duration of the graph read (v8::internal::DisallowJavascriptExecution in
+  // ValueDeserializer::ReadObject), so anything JS-executing -- in particular constructing
+  // TypeScript-implemented streams -- must happen in this earlier phase, where JS is legal. The
+  // prebuilt objects are parked in per-external slots, and the corresponding deserialize
+  // functions claim them (JS-free) via the claimPrebuilt*() methods below as the graph read
+  // reaches them.
+  //
+  // Must be called before the value is deserialized, at most once. Gated on the
+  // rpc-externals-hydration autogate: when the gate is off, the claims all return kj::none
+  // and deserialization constructs legacy streams in place exactly as it did before the gate
+  // existed. The typescript_implemented_streams flag REQUIRES the gate (TypeScript stream
+  // construction cannot happen during the graph read), so with the gate off, stream-bearing
+  // values arriving at a TypeScript-streams isolate are rejected here with a configuration
+  // error rather than half-supported.
+  void prepare(jsg::Lock& js, IoContext& ioctx);
+
+  // Claim the prebuilt object for the next external, advancing past it (and, for sockets, past
+  // the stream externals the socket subsumes). Returns kj::none if prepare() did not run (the
+  // autogate is off); the caller then falls back to constructing in place. If prepare() ran but
+  // the next external is not of the claimed type, the message is malformed (the V8 tag stream
+  // disagrees with the external table) and this throws. The socket slot holds the WRAPPED
+  // socket (Socket is incomplete here); Socket::deserialize() unwraps it through its
+  // TypeHandler, which reads internal fields only -- no JS.
+  kj::Maybe<JsReadableStream> claimPrebuiltReadable();
+  kj::Maybe<JsWritableStream> claimPrebuiltWritable();
+  kj::Maybe<jsg::JsRef<jsg::JsObject>> claimPrebuiltSocket();
+
   // All stubs deserialized as part of a particular parameter or result set are placed in a
   // common disposal group so that they can be disposed together.
   RpcStubDisposalGroup& getDisposalGroup() {
@@ -128,6 +167,20 @@ class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHa
  private:
   capnp::List<rpc::JsValue::External>::Reader externals;
   uint i = 0;
+
+  // Prebuilt values from prepare(), indexed to match `externals`. `span` records how many
+  // externals the value subsumes (1 for streams; 3 for sockets, which consume their two
+  // adjacent stream externals), so claiming advances `i` correctly. Slots for externals that
+  // need no hydration hold kj::none.
+  struct Slot {
+    kj::Maybe<kj::OneOf<JsReadableStream, JsWritableStream, jsg::JsRef<jsg::JsObject>>> value;
+    uint span = 1;
+  };
+  kj::Vector<Slot> slots;
+  bool prepared = false;
+
+  template <typename T>
+  kj::Maybe<T> claimPrebuilt();
 
   kj::UnwindDetector unwindDetector;
   RpcStubDisposalGroup& disposalGroup;
@@ -270,8 +323,7 @@ class JsRpcProperty: public JsRpcClientProvider {
   // Maximum depth of pipelined property chains. Prevents stack overflow when a chain of
   // JsRpcProperty objects is destructed recursively. 64 is beyond any legitimate RPC pipelining
   // depth.
-  static constexpr uint MAX_PROPERTY_DEPTH = 5120;
-  static constexpr uint MAX_PROPERTY_WARNING_DEPTH = 64;
+  static constexpr uint MAX_PROPERTY_DEPTH = 64;
 
   JsRpcProperty(jsg::Ref<JsRpcClientProvider> parent, kj::String name, uint depth = 0)
       : parent(kj::mv(parent)),

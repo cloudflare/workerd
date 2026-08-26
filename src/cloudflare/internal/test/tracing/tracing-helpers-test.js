@@ -135,6 +135,27 @@ export const setAttributeUndefined = {
   },
 };
 
+// Verify the attribute setters return the span for chaining and setAttributes handles all
+// currently-supported value types while ignoring undefined values.
+export const setAttributes = {
+  async test(ctrl, env, ctx) {
+    const { withSpan } = env.tracingTest;
+
+    withSpan('set-attributes-op', (span) => {
+      assert.strictEqual(span.setAttribute('test', 'setAttributes'), span);
+      assert.strictEqual(
+        span.setAttributes({
+          stringValue: 'value',
+          numberValue: 42,
+          booleanValue: true,
+          skipped: undefined,
+        }),
+        span
+      );
+    });
+  },
+};
+
 // Verify that nested withSpan calls produce correctly nested spans. This exercises the
 // AsyncContextFrame push path in enterSpan: the inner span should be parented on the
 // outer span.
@@ -216,6 +237,17 @@ export const publicImportStartActiveSpan = {
     capturedSpan.setAttribute('ended.explicitly', true);
     capturedSpan.end();
     assert.strictEqual(capturedSpan.isTraced, false);
+  },
+};
+
+export const publicImportStartSpan = {
+  async test(ctrl, env, ctx) {
+    const span = publicTracing.startSpan('public-start-span-op');
+    span.setAttribute('test', 'publicImportStartSpan');
+    span.setAttribute('path', 'import-from-cloudflare-workers');
+    assert.strictEqual(span.isTraced, true);
+    span.end();
+    assert.strictEqual(span.isTraced, false);
   },
 };
 

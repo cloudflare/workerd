@@ -1,0 +1,23 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Exercises workerd:-scheme built-in modules under the new module registry:
+# static and dynamic import of workerd:unsafe-eval, workerd:unsafe, and
+# workerd:rtti, including per-context instance identity across the two import
+# forms.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "new-module-registry-workerd-modules-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "new-module-registry-workerd-modules-test.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat_v2",
+          "new_module_registry",
+          "unsafe_module",
+          "rtti_api",
+        ],
+      )
+    ),
+  ],
+);

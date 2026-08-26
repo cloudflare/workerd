@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/api/http.h>
-#include <workerd/api/streams/readable-source.h>
 #include <workerd/tests/bench-tools.h>
 #include <workerd/tests/test-fixture.h>
 
@@ -79,9 +78,9 @@ BENCHMARK_F(Response, arrayBufferBody)(benchmark::State& state) {
       auto bytes = kj::heapArray<byte>(11);
       memcpy(bytes.begin(), "Hello World", 11);
       auto view = bytes.asPtr();
-      auto rs = api::streams::newMemorySource(view, kj::heap(kj::mv(bytes)));
+      auto rs = api::newMemorySource(view, kj::heap(kj::mv(bytes)));
       auto body =
-          api::Body::Initializer(env.js.alloc<api::ReadableStream>(env.context, kj::mv(rs)));
+          api::Body::Initializer(api::JsReadableStream::create(js, env.context, kj::mv(rs)));
       benchmark::DoNotOptimize(api::Response::constructor(js, kj::mv(body), kj::none));
     }
   });

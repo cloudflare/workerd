@@ -16,6 +16,7 @@ namespace workerd::tracing {
 namespace {
 
 #define STRS(V)                                                                                    \
+  V(ABORTED, "aborted")                                                                            \
   V(ALARM, "alarm")                                                                                \
   V(ATTRIBUTES, "attributes")                                                                      \
   V(BATCHSIZE, "batchSize")                                                                        \
@@ -40,6 +41,7 @@ namespace {
   V(EMAIL, "email")                                                                                \
   V(ENTRYPOINT, "entrypoint")                                                                      \
   V(ERROR, "error")                                                                                \
+  V(ERRORINFO, "errorInfo")                                                                        \
   V(EVENT, "event")                                                                                \
   V(EXCEEDEDCPU, "exceededCpu")                                                                    \
   V(EXCEEDEDMEMORY, "exceededMemory")                                                              \
@@ -94,6 +96,7 @@ namespace {
   V(TRACEID, "traceId")                                                                            \
   V(TRACE, "trace")                                                                                \
   V(TRACES, "traces")                                                                              \
+  V(TRUNCATED, "truncated")                                                                        \
   V(TYPE, "type")                                                                                  \
   V(UNKNOWN, "unknown")                                                                            \
   V(URL, "url")                                                                                    \
@@ -341,6 +344,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const EventOutcome& outcome, StringCache& cache
       return cache.get(js, INTERNALERROR_STR);
     case EventOutcome::EXCEEDED_WALL_TIME:
       return cache.get(js, EXCEEDEDWALLTIME_STR);
+    case EventOutcome::ABORTED:
+      return cache.get(js, ABORTED_STR);
     case EventOutcome::UNKNOWN:
       return cache.get(js, UNKNOWN_STR);
   }
@@ -520,8 +525,33 @@ jsg::JsValue ToJs(jsg::Lock& js, const Log& log, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, LOG_STR));
   obj.set(js, LEVEL_STR, ToJs(js, log.logLevel, cache));
-  // TODO(o11y): Check that we are always returning an object here
-  obj.set(js, MESSAGE_STR, jsg::JsValue(js.parseJson(log.message).getHandle(js)));
+  if (log.truncated) {
+    // Expose truncated JSON to the receiver as a raw string. Emitted only when true; absence
+    // means not truncated.
+    obj.set(js, MESSAGE_STR, js.str(log.message));
+    obj.set(js, TRUNCATED_STR, js.boolean(true));
+  } else {
+    // TODO(o11y): Check that we are always returning an object here
+    obj.set(js, MESSAGE_STR, jsg::JsValue(js.parseJson(log.message).getHandle(js)));
+  }
+  KJ_IF_SOME(slots, log.errorInfo) {
+    // Emit as a positional JS array: each slot is either { name, message, stack? }
+    // for arguments that were native Errors, or `null` for non-Error arguments.
+    auto arr = js.arr(
+        slots.asPtr(), [&cache](jsg::Lock& js, const kj::Maybe<ErrorInfo>& slot) -> jsg::JsValue {
+      KJ_IF_SOME(info, slot) {
+        auto errObj = js.obj();
+        errObj.set(js, NAME_STR, cache.get(js, info.name));
+        errObj.set(js, MESSAGE_STR, js.str(info.message));
+        KJ_IF_SOME(stack, info.stack) {
+          errObj.set(js, STACK_STR, js.str(stack));
+        }
+        return errObj;
+      }
+      return js.null();
+    });
+    obj.set(js, ERRORINFO_STR, arr);
+  }
   return obj;
 }
 
@@ -684,9 +714,10 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     // exception handler.
     auto sharedResults = kj::rc<SharedResults>(reportContext.initResults());
 
-    auto promise = ioContext.run([this, &ioContext, sharedResults = sharedResults.addRef(),
-                                     reportContext, ownReportContext = ownReportContext->addRef()](
-                                     Worker::Lock& lock) mutable -> kj::Promise<void> {
+    auto promise =
+        ioContext.run([this, sharedResults = sharedResults.addRef(), reportContext,
+                          ownReportContext = ownReportContext->addRef()](
+                          Worker::Lock& lock, IoContext& ioContext) mutable -> kj::Promise<void> {
       auto params = reportContext.getParams();
       KJ_ASSERT(params.hasEvents(), "Events are required.");
       auto eventReaders = params.getEvents();
@@ -824,8 +855,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // handling...
       return ioContext.awaitJs(js,
           js.toPromise(result).then(js,
-              ioContext.addFunctor([this, results = results.addRef(), &ioContext](
-                                       jsg::Lock& js, jsg::Value value) mutable {
+              ioContext.addFunctor([this, results = results.addRef()](jsg::Lock& js,
+                                       IoContext& ioContext, jsg::Value value) mutable {
         // The value here can be one of a function, an object, or undefined.
         // Any value other than these will result in a warning but will otherwise
         // be treated like undefined.
@@ -1025,16 +1056,13 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::run(
 
   auto eventOutcome = co_await donePromise.exclusiveJoin(ioContext.onAbort()).then([&]() {
     return ioContext.waitUntilStatus();
-  }, [&incomingRequest](kj::Exception&& e) {
-    // If we have a JSG exception, just set the appropriate return code – this will already have
-    // been logged and we do not need to treat it like a KJ exception. Otherwise, re-throw the
-    // exception.
-    if (jsg::isTunneledException(e.getDescription())) {
-      incomingRequest->getMetrics().reportFailure(e);
-      return EventOutcome::EXCEPTION;
-    }
-    kj::throwRecoverableException(kj::mv(e));
-    KJ_UNREACHABLE;
+  }, [&ioContext, &incomingRequest](kj::Exception&& e) {
+    // If we get an exception, report it for metrics, add a log to the trace and return an exception
+    // outcome. There is no need to re-throw it as for tail workers we're not interested in
+    // propagating the exception via jsRpc.
+    incomingRequest->getMetrics().reportFailure(e);
+    ioContext.logUncaughtExceptionAsync(UncaughtExceptionSource::TRACE_HANDLER, kj::mv(e));
+    return EventOutcome::EXCEPTION;
   });
   KJ_IF_SOME(t, ioContext.getWorkerTracer()) {
     t.setReturn(ioContext.now());

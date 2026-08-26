@@ -4,11 +4,14 @@
 
 #include "compatibility-date.h"
 
+#include <workerd/io/features.h>
 #include <workerd/io/maximum-compatibility-date.embed.h>
+#include <workerd/io/worker.h>
 
 #include <capnp/message.h>
 #include <capnp/serialize-text.h>
 #include <kj/debug.h>
+#include <kj/map.h>
 #include <kj/test.h>
 
 #include <chrono>
@@ -72,7 +75,8 @@ KJ_TEST("compatibility flag parsing") {
           kj::StringPtr expectedOutput, kj::ArrayPtr<const kj::StringPtr> expectedErrors = nullptr,
           CompatibilityDateValidation dateValidation = CompatibilityDateValidation::FUTURE_FOR_TEST,
           bool r2InternalBetaApiSet = false, bool experimental = false,
-          kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags = nullptr) {
+          kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags = nullptr,
+          kj::ArrayPtr<const kj::StringPtr> expectedWarnings = nullptr) {
     capnp::MallocMessageBuilder message;
     auto orphanage = message.getOrphanage();
 
@@ -103,6 +107,7 @@ KJ_TEST("compatibility flag parsing") {
       KJ_EXPECT(kj::str(output) == kj::str(parsedExpectedOutput.getReader()));
     }
     KJ_EXPECT(kj::strArray(errorReporter.errors, "\n") == kj::strArray(expectedErrors, "\n"));
+    KJ_EXPECT(kj::strArray(errorReporter.warnings, "\n") == kj::strArray(expectedWarnings, "\n"));
   };
 
   expectCompileCompatibilityFlags("2021-05-17", {}, "()");
@@ -135,13 +140,33 @@ KJ_TEST("compatibility flag parsing") {
       "(formDataParserSupportsFiles = true)",
       {"Compatibility flags are mutually contradictory: "
        "formdata_parser_supports_files vs formdata_parser_converts_files_to_strings"});
-  expectCompileCompatibilityFlags("2021-11-04", {"formdata_parser_supports_files"_kj},
-      "(formDataParserSupportsFiles = true)",
-      {"The compatibility flag formdata_parser_supports_files became the default as of "
-       "2021-11-03 so does not need to be specified anymore."},
-      CompatibilityDateValidation::CURRENT_DATE_FOR_CLOUDFLARE);
   expectCompileCompatibilityFlags(
       "2021-05-17", {"unknown_feature"_kj}, "()", {"No such compatibility flag: unknown_feature"});
+
+  // Naming a flag the compatibility date already enables is only a warning, and the flag set is
+  // compiled as if the flag had not been named at all.
+  expectCompileCompatibilityFlags("2021-11-04", {"formdata_parser_supports_files"_kj},
+      "(formDataParserSupportsFiles = true)", {},
+      CompatibilityDateValidation::CURRENT_DATE_FOR_CLOUDFLARE, false, false, {},
+      {"The compatibility flag formdata_parser_supports_files became the default as of "
+       "2021-11-03 so does not need to be specified anymore."});
+  expectCompileCompatibilityFlags("2021-11-04", {"formdata_parser_supports_files"_kj},
+      "(formDataParserSupportsFiles = true)", {}, CompatibilityDateValidation::CODE_VERSION, false,
+      false, {},
+      {"The compatibility flag formdata_parser_supports_files became the default as of "
+       "2021-11-03 so does not need to be specified anymore."});
+
+  // A flag enabled for all dates has no date to name in the warning.
+  expectCompileCompatibilityFlags("2021-05-17", {"r2_public_beta_bindings"_kj}, "()", {},
+      CompatibilityDateValidation::CODE_VERSION, false, false, {},
+      {"The compatibility flag r2_public_beta_bindings is the default, so does not need to be "
+       "specified anymore."});
+
+  // FUTURE_FOR_TEST stays silent about redundant flags. Tests name flags explicitly so that they
+  // run against the oldest compatibility date, and the same test also runs against the newest
+  // date, where every flag is on by default.
+  expectCompileCompatibilityFlags("2021-11-04", {"formdata_parser_supports_files"_kj},
+      "(formDataParserSupportsFiles = true)", {}, CompatibilityDateValidation::FUTURE_FOR_TEST);
 
   expectCompileCompatibilityFlags("2252-04-01", {}, "()",
       {"Can't set compatibility date in the future: 2252-04-01"},
@@ -335,6 +360,43 @@ KJ_TEST("compatibility flag parsing") {
       {}, CompatibilityDateValidation::FUTURE_FOR_TEST, false, false);
 }
 
+KJ_TEST("a reporter that ignores warnings accepts a redundant compatibility flag") {
+  // A reporter that leaves `addWarning()` at its default -- as deploy-time validation does, since
+  // it distinguishes only valid configurations from invalid ones -- must not see a redundant flag
+  // as an error. The configuration compiles to exactly the same flag set either way.
+  struct ErrorOnlyReporter final: public ValidationErrorReporter {
+    kj::Vector<kj::String> errors;
+
+    void addError(kj::String error) override {
+      errors.add(kj::mv(error));
+    }
+    void addEntrypoint(
+        kj::Maybe<kj::StringPtr> exportName, kj::Array<kj::String> methods) override {
+      KJ_UNREACHABLE;
+    }
+    void addActorClass(kj::StringPtr exportName) override {
+      KJ_UNREACHABLE;
+    }
+    void addWorkflowClass(kj::StringPtr exportName, kj::Array<kj::String> methods) override {
+      KJ_UNREACHABLE;
+    }
+  };
+
+  auto flags = kj::heapArrayBuilder<kj::String>(1);
+  flags.add(kj::str("formdata_parser_supports_files"));
+  auto flagArray = flags.finish();
+
+  capnp::MallocMessageBuilder message;
+  auto output = message.initRoot<CompatibilityFlags>();
+
+  ErrorOnlyReporter errorReporter;
+  compileCompatibilityFlags("2021-11-04", flagArray.asPtr(), output, errorReporter, false,
+      CompatibilityDateValidation::CODE_VERSION, nullptr);
+
+  KJ_EXPECT(errorReporter.errors.empty(), kj::strArray(errorReporter.errors, "\n"));
+  KJ_EXPECT(output.getFormDataParserSupportsFiles());
+}
+
 KJ_TEST("encode to flag list for FL") {
   capnp::MallocMessageBuilder message;
   auto orphanage = message.getOrphanage();
@@ -395,6 +457,71 @@ KJ_TEST("encode to flag list for FL") {
     auto strings = decompileCompatibilityFlagsForFl(featureFlags);
     KJ_EXPECT(strings.size() == 1);
     KJ_EXPECT(strings[0] == "minimal_subrequests"_kj);
+  }
+}
+
+KJ_TEST("encode to full flag list") {
+  // Same setup as "encode to flag list for FL", but exercises decompileCompatibilityFlags -- which
+  // must return EVERY set flag, not just the $neededByFl subset.
+
+  capnp::MallocMessageBuilder message;
+  auto orphanage = message.getOrphanage();
+
+  auto compileOwnFeatureFlags = [&](kj::StringPtr compatDate,
+                                    kj::ArrayPtr<const kj::StringPtr> featureFlags) {
+    auto flagListOrphan = orphanage.newOrphan<capnp::List<capnp::Text>>(featureFlags.size());
+    auto flagList = flagListOrphan.get();
+    for (auto i: kj::indices(featureFlags)) {
+      flagList.set(i, featureFlags.begin()[i]);
+    }
+
+    auto outputOrphan = orphanage.newOrphan<CompatibilityFlags>();
+    auto output = outputOrphan.get();
+
+    SimpleWorkerErrorReporter errorReporter;
+    compileCompatibilityFlags(compatDate, flagList.asReader(), output, errorReporter,
+        /*allowExperimentalFeatures=*/false, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr);
+    KJ_ASSERT(errorReporter.errors.empty());
+
+    return kj::mv(outputOrphan);
+  };
+
+  auto contains = [](kj::ArrayPtr<const kj::StringPtr> flags, kj::StringPtr needle) {
+    for (auto& f: flags) {
+      if (f == needle) return true;
+    }
+    return false;
+  };
+
+  {
+    // At 2021-11-10, several non-$neededByFl flags are enabled by date. The full variant returns
+    // them; -ForFl returns none. Note that the full variant may return additional flags that lack
+    // a $compatEnableDate but are on by default -- test explicit membership rather than size.
+    auto featureFlagsOrphan = compileOwnFeatureFlags("2021-11-10", {});
+    auto featureFlags = featureFlagsOrphan.get();
+    auto forFl = decompileCompatibilityFlagsForFl(featureFlags);
+    auto full = decompileCompatibilityFlags(featureFlags);
+    KJ_EXPECT(forFl.size() == 0);
+    KJ_EXPECT(contains(full, "formdata_parser_supports_files"_kj));
+    KJ_EXPECT(contains(full, "fetch_refuses_unknown_protocols"_kj));
+    // A flag whose $compatEnableDate is after this compat date is NOT set.
+    KJ_EXPECT(!contains(full, "minimal_subrequests"_kj));
+  }
+
+  {
+    // Explicit enable-flag on a date that would otherwise leave it off.
+    auto featureFlagsOrphan = compileOwnFeatureFlags("2021-05-17", {"minimal_subrequests"_kj});
+    auto strings = decompileCompatibilityFlags(featureFlagsOrphan.get());
+    KJ_EXPECT(contains(strings, "minimal_subrequests"_kj));
+  }
+
+  {
+    // Explicit disable-flag suppresses a date-enabled flag in the full variant too.
+    auto featureFlagsOrphan = compileOwnFeatureFlags("2022-07-01", {"cots_on_external_fetch"});
+    auto strings = decompileCompatibilityFlags(featureFlagsOrphan.get());
+    KJ_EXPECT(!contains(strings, "no_cots_on_external_fetch"_kj));
+    // But other date-enabled flags still appear.
+    KJ_EXPECT(contains(strings, "minimal_subrequests"_kj));
   }
 }
 
@@ -560,6 +687,24 @@ KJ_TEST("compatibility dates must be Tuesday, Wednesday, or Thursday") {
   if (!violations.empty()) {
     KJ_FAIL_ASSERT("Compatibility date violations found:\n", kj::strArray(violations, "\n"));
   }
+}
+
+KJ_TEST("isNewModuleRegistryEnabled ignores the flag for Python workers") {
+  const auto check = [](bool newModuleRegistry, bool pythonWorkers) {
+    capnp::MallocMessageBuilder message;
+    auto flags = message.initRoot<CompatibilityFlags>();
+    flags.setNewModuleRegistry(newModuleRegistry);
+    flags.setPythonWorkers(pythonWorkers);
+    return isNewModuleRegistryEnabled(flags.asReader());
+  };
+
+  KJ_EXPECT(!check(false, false));
+  KJ_EXPECT(check(true, false));
+  // Python workers always use the original module registry: the
+  // new_module_registry flag is ignored for them, whether set explicitly or
+  // (once the flag has a default-on date) implied by the compatibility date.
+  KJ_EXPECT(!check(true, true));
+  KJ_EXPECT(!check(false, true));
 }
 
 }  // namespace

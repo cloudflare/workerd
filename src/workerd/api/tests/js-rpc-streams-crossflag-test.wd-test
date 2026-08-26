@@ -1,0 +1,41 @@
+# Cross-implementation stream transfer: the runner has typescript_implemented_streams, the
+# peer does not, so every stream RPC in the test crosses stream implementations (in both
+# serialization directions). See the header comment in the JS file.
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "js-rpc-streams-crossflag-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+          "streams_enable_constructors",
+          "typescript_implemented_streams",
+        ],
+        bindings = [
+          (name = "PEER", service = (name = "peer", entrypoint = "Peer")),
+        ],
+      )
+    ),
+    ( name = "peer",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "js-rpc-streams-crossflag-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+          "streams_enable_constructors",
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+    "workerd-autogate-rpc-externals-hydration",
+  ],
+);

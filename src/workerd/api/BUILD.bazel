@@ -1,5 +1,6 @@
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
+load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_test.bzl", "wd_test")
 
@@ -13,7 +14,6 @@ filegroup(
         "basics.c++",
         "blob.c++",
         "cache.c++",
-        "cf-property.c++",
         "container.c++",
         "events.c++",
         "eventsource.c++",
@@ -25,6 +25,9 @@ filegroup(
         "hibernatable-adapter.c++",
         "hibernatable-web-socket.c++",
         "http.c++",
+        "js-readable-stream.c++",
+        "js-streams-bridge.c++",
+        "js-writable-stream.c++",
         "messagechannel.c++",
         "performance.c++",
         "queue.c++",
@@ -40,6 +43,7 @@ filegroup(
         "url-standard.c++",
         "web-socket.c++",
         "worker-rpc.c++",
+        "wrapped-binding.c++",
     ] + glob(
         [
             "crypto/*.c++",
@@ -63,7 +67,6 @@ filegroup(
         "basics.h",
         "blob.h",
         "cache.h",
-        "cf-property.h",
         "container.h",
         "events.h",
         "eventsource.h",
@@ -75,6 +78,9 @@ filegroup(
         "hibernatable-adapter.h",
         "hibernatable-web-socket.h",
         "http.h",
+        "js-readable-stream.h",
+        "js-streams-bridge.h",
+        "js-writable-stream.h",
         "messagechannel.h",
         "performance.h",
         "queue.h",
@@ -90,6 +96,7 @@ filegroup(
         "url-standard.h",
         "web-socket.h",
         "worker-rpc.h",
+        "wrapped-binding.h",
     ] + glob(
         [
             "crypto/*.h",
@@ -177,6 +184,20 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "cf-property",
+    srcs = ["cf-property.c++"],
+    hdrs = ["cf-property.h"],
+    implementation_deps = [
+        "//src/workerd/io:features",
+        "//src/workerd/util:own-util",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
+    ],
+)
+
+wd_cc_library(
     name = "commonjs",
     srcs = [
         "commonjs.c++",
@@ -235,6 +256,13 @@ wd_cc_library(
 
 # for using EW_STREAMS_ISOLATE_TYPES with workerd-api etc. To use the different streams APIs,
 # include the headers you need directly.
+#
+# Note: JsReadableStream and JsWritableStream live in js-readable-stream.{h,c++} and
+# js-writable-stream.{h,c++}, which are folded into //src/workerd/io (via the :srcs/:hdrs
+# filegroups) because io-target headers (http.h, sockets.h, container.h) depend on them. This
+# target re-exports them via streams.h. Their shared TypeScript-bridge plumbing lives in
+# js-streams-bridge.{h,c++} (same filegroup folding); it is internal and deliberately NOT
+# re-exported via streams.h.
 wd_cc_library(
     name = "streams",
     hdrs = ["streams.h"],
@@ -246,15 +274,42 @@ wd_cc_library(
     ],
 )
 
+# Shared compression machinery (allocator, and the common codec core): the common home for
+# the primitives used by the web CompressionStream/DecompressionStream pair, node:zlib, and
+# the TypeScript streams implementation's codec handle.
+wd_cc_library(
+    name = "compression",
+    srcs = [
+        "compression.c++",
+        "zlib-rs-bridge.c++",
+    ],
+    hdrs = [
+        "compression.h",
+        "zlib-rs-bridge.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/zlib-rs",
+        "//src/workerd/io:features",
+        "//src/workerd/jsg",
+        "//src/workerd/util:autogate",
+        "@capnp-cpp//src/kj/compat:kj-brotli",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
+        "@nbytes",
+        "@zlib",
+        "@zstd",
+    ],
+)
+
 wd_cc_library(
     name = "streams-compression",
     srcs = ["streams/compression.c++"],
     hdrs = ["streams/compression.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":compression",
         "//src/workerd/io",
         "//src/workerd/util:state-machine",
-        "@nbytes",
     ],
 )
 
@@ -396,7 +451,6 @@ wd_cc_library(
         "@capnp-cpp//src/kj:kj-async",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-http",
-        "@capnp-cpp//src/kj/compat:kj-tls",
         "@ssl",
     ],
 )
@@ -440,13 +494,13 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":util",
+        "//src/rust/cxx/kj-rs",
         "//src/rust/encoding",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/io:features",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
         "@simdutf",
-        "@workerd-cxx//kj-rs",
     ],
 )
 
@@ -455,7 +509,6 @@ wd_cc_library(
     srcs = ["data-url.c++"],
     hdrs = ["data-url.h"],
     implementation_deps = [
-        ":encoding",
         "//src/workerd/util:strings",
     ],
     visibility = ["//visibility:public"],
@@ -463,6 +516,7 @@ wd_cc_library(
         "//src/workerd/jsg:url",
         "//src/workerd/util:mimetype",
         "@capnp-cpp//src/kj",
+        "@simdutf",
     ],
 )
 
@@ -604,6 +658,30 @@ kj_test(
 )
 
 kj_test(
+    src = "js-readable-stream-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "js-writable-stream-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "deferred-proxy-flow-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "system-streams-test.c++",
     deps = [
         "//src/workerd/io",
@@ -620,6 +698,27 @@ kj_test(
 )
 
 kj_test(
+    src = "container-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+        "//src/workerd/util:autogate",
+    ],
+)
+
+# Micro-benchmark for the managed-container ingress data path.
+wd_cc_benchmark(
+    name = "bench-container-ingress",
+    srcs = ["bench-container-ingress.c++"],
+    tags = ["manual"],
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+        "//src/workerd/util:autogate",
+    ],
+)
+
+kj_test(
     src = "sql-toarray-oom-test.c++",
     deps = [
         "//src/workerd/io",
@@ -629,6 +728,15 @@ kj_test(
 
 kj_test(
     src = "sockets-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/io:worker-interface",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "output-gate-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/io:worker-interface",
@@ -688,42 +796,6 @@ kj_test(
     src = "fetch-retry-claim-hook-test.c++",
     deps = [
         "//src/workerd/io",
-        "//src/workerd/tests:test-fixture",
-    ],
-)
-
-kj_test(
-    src = "streams/writable-sink-test.c++",
-    deps = [
-        "//src/workerd/io",
-        "//src/workerd/jsg",
-        "//src/workerd/tests:test-fixture",
-    ],
-)
-
-kj_test(
-    src = "streams/readable-source-test.c++",
-    deps = [
-        "//src/workerd/io",
-        "//src/workerd/jsg",
-        "//src/workerd/tests:test-fixture",
-    ],
-)
-
-kj_test(
-    src = "streams/writable-sink-adapter-test.c++",
-    deps = [
-        "//src/workerd/io",
-        "//src/workerd/jsg",
-        "//src/workerd/tests:test-fixture",
-    ],
-)
-
-kj_test(
-    src = "streams/readable-source-adapter-test.c++",
-    deps = [
-        "//src/workerd/io",
-        "//src/workerd/jsg",
         "//src/workerd/tests:test-fixture",
     ],
 )

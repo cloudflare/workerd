@@ -219,9 +219,34 @@ type BrowserRunLinksOptions = BrowserRunCommonOptions & {
   excludeExternalLinks?: boolean;
 };
 
+type BrowserRunSnapshotFormat =
+  | 'content'
+  | 'screenshot'
+  | 'markdown'
+  | 'accessibilityTree';
+
 type BrowserRunSnapshotOptions = BrowserRunCommonOptions & {
+  /** Which representations of the page to return. At least two distinct formats
+   * are required; request a single format from its dedicated action instead.
+   * @default ["content","screenshot"]
+   */
+  formats?: BrowserRunSnapshotFormat[];
   /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
   screenshotOptions?: Omit<BrowserRunPuppeteerScreenshotOptions, 'encoding'>;
+};
+
+/** Options for the `accessibilityTree` quick action. */
+type BrowserRunAccessibilityTreeOptions = BrowserRunCommonOptions & {
+  /** When true, prune nodes that carry no semantic meaning, such as generic
+   * containers. Defaults to true, or to false when `root` is set so that the
+   * requested subtree is returned as-is.
+   */
+  interestingOnly?: boolean;
+  /** CSS selector limiting the tree to the matching element's subtree.
+   * A selector that matches nothing yields `accessibilityTree: null` with
+   * HTTP 200; a malformed selector is an error.
+   */
+  root?: string;
 };
 
 interface BrowserRunJsonBaseOptions {
@@ -258,12 +283,80 @@ type BrowserRunJsonOptions = BrowserRunCommonOptions &
 type BrowserRunContentOptions = BrowserRunCommonOptions;
 type BrowserRunMarkdownOptions = BrowserRunCommonOptions;
 
+type BrowserRunRedirectHop = {
+  /** URL that returned the redirect. */
+  url: string;
+  /** HTTP status of the redirect. */
+  status: number;
+  /** Redirect response headers, including `location`. */
+  headers: Record<string, string>;
+};
+
 type BrowserRunResponseMeta = {
   /** HTTP status code of the rendered page */
   status: number;
   /** Page title */
   title: string;
+  /** Origin response headers, lowercased. Repeated headers are joined with a newline. Credential and transport-only headers that do not survive rendering are omitted. */
+  headers?: Record<string, string>;
+  /** URL that served the response, after any redirects the browser followed. */
+  finalUrl?: string;
+  /** HTTP redirects followed to reach `finalUrl`, oldest first. Omitted for direct navigation and for client-side redirects such as meta refresh. An empty array means redirects occurred but their intermediate responses could not be read. */
+  redirectChain?: BrowserRunRedirectHop[];
 };
+
+/**
+ * A node in the page's accessibility tree, as exposed to assistive technology.
+ * `role` is the only field always present; the rest are populated when the
+ * underlying element defines them.
+ * @see https://pptr.dev/api/puppeteer.serializedaxnode
+ */
+interface BrowserRunSerializedAXNode {
+  /** The ARIA role, e.g. `"button"`, `"heading"`, `"RootWebArea"`. */
+  role: string;
+  /** The `aria-autocomplete` value. */
+  autocomplete?: string;
+  /** Checked state of a checkbox, radio, or menu item. */
+  checked?: boolean | 'mixed';
+  /** Accessible description, typically from `aria-describedby` or `title`. */
+  description?: string;
+  disabled?: boolean;
+  expanded?: boolean;
+  /** Whether the element currently holds keyboard focus. */
+  focused?: boolean;
+  /** The kind of popup the element triggers, e.g. `"menu"`, `"dialog"`. */
+  haspopup?: string;
+  /** The `aria-invalid` value. */
+  invalid?: string;
+  /** Keyboard shortcuts bound to the element, from `aria-keyshortcuts`. */
+  keyshortcuts?: string;
+  /** Hierarchical level, e.g. the heading level of an `<h2>`. */
+  level?: number;
+  /** Whether the element is a modal dialog. */
+  modal?: boolean;
+  /** Whether a text input accepts multiple lines. */
+  multiline?: boolean;
+  /** Whether more than one option can be selected. */
+  multiselectable?: boolean;
+  /** Accessible name, e.g. a button's label or an image's alt text. */
+  name?: string;
+  orientation?: string;
+  /** Pressed state of a toggle button. */
+  pressed?: boolean | 'mixed';
+  readonly?: boolean;
+  required?: boolean;
+  /** Author-supplied role description, from `aria-roledescription`. */
+  roledescription?: string;
+  selected?: boolean;
+  /** Current value of an input or range element. */
+  value?: string | number;
+  valuemax?: number;
+  valuemin?: number;
+  /** Human-readable form of `value`, from `aria-valuetext`. */
+  valuetext?: string;
+  /** Child nodes. Absent for leaf nodes. */
+  children?: BrowserRunSerializedAXNode[];
+}
 
 /** Success response for `content` action. */
 type BrowserRunContentSuccessResponse = {
@@ -278,6 +371,7 @@ type BrowserRunLinksSuccessResponse = {
   success: true;
   /** Extracted links */
   result: string[];
+  meta: BrowserRunResponseMeta;
 };
 
 /** Success response for `scrape` action. */
@@ -309,16 +403,35 @@ type BrowserRunScrapeSuccessResponse = {
       }>;
     }>;
   }>;
+  meta: BrowserRunResponseMeta;
 };
 
-/** Success response for `snapshot` action. */
+/** Success response for `snapshot` action. Each field is present only when the
+ * corresponding entry was requested in `formats`.
+ */
 type BrowserRunSnapshotSuccessResponse = {
   success: true;
   result: {
     /** HTML content of the page. */
-    content: string;
+    content?: string;
     /** Base64-encoded screenshot image. */
-    screenshot: string;
+    screenshot?: string;
+    /** Markdown content. Prefixed with YAML frontmatter (e.g. `title`) when the
+     * page provides that metadata.
+     */
+    markdown?: string;
+    /** Root of the page's accessibility tree. */
+    accessibilityTree?: BrowserRunSerializedAXNode;
+  };
+  meta: BrowserRunResponseMeta;
+};
+
+/** Success response for `accessibilityTree` action. */
+type BrowserRunAccessibilityTreeSuccessResponse = {
+  success: true;
+  result: {
+    /** Root of the accessibility tree, or `null` when `root` matched no element. */
+    accessibilityTree: BrowserRunSerializedAXNode | null;
   };
   meta: BrowserRunResponseMeta;
 };
@@ -328,6 +441,7 @@ type BrowserRunJsonSuccessResponse = {
   success: true;
   /** JSON data extracted from the page using an AI model */
   result: Record<string, unknown>;
+  meta: BrowserRunResponseMeta;
 };
 
 /** Success response for `markdown` action. */
@@ -335,6 +449,7 @@ type BrowserRunMarkdownSuccessResponse = {
   success: true;
   /** Extracted markdown content */
   result: string;
+  meta: BrowserRunResponseMeta;
 };
 
 /** Error response for BrowserRun actions. */
@@ -460,9 +575,10 @@ declare abstract class BrowserRun {
   ): Promise<Response>;
 
   /**
-   * Get both the HTML content and a base64-encoded screenshot of a web page.
+   * Get several representations of a web page in one request.
    * @param action - Must be `'snapshot'`.
-   * @param options - Snapshot options including screenshot settings (encoding is always base64).
+   * @param options - Snapshot options including the `formats` to return and
+   * screenshot settings (encoding is always base64).
    * @returns A `Response` containing one of:
    *
    * **Success (HTTP 200):**
@@ -520,5 +636,29 @@ declare abstract class BrowserRun {
   quickAction(
     action: 'markdown',
     options: BrowserRunMarkdownOptions
+  ): Promise<Response>;
+
+  /**
+   * Get the accessibility tree of a web page.
+   * @param action - Must be `'accessibilityTree'`.
+   * @param options - Options to scope the tree to a subtree and to control
+   * whether semantically uninteresting nodes are pruned.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunAccessibilityTreeSuccessResponse` JSON with `Content-Type: application/json`
+   * - `result.accessibilityTree` is `null` when `root` matched no element
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   * - HTTP 422 for a malformed `root` selector
+   * - HTTP 500 with code `2017` or `2018` when the tree could not be built
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(
+    action: 'accessibilityTree',
+    options: BrowserRunAccessibilityTreeOptions
   ): Promise<Response>;
 }

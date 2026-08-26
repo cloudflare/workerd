@@ -21,16 +21,11 @@ function getRandomDurableObjectName(name) {
 // When writing a test, don't forget to call waitUntilContainerIsHealthy
 // before testing the behaviour with your container.
 //
-// Don't forget to call monitor() after calling start(), as there
-// is an issue with not calling monitor() in Durable Objects where
-// we might lose track of the container lifetime.
-//
-
 export class DurableObjectExample extends DurableObject {
   async testExitCode() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -42,7 +37,7 @@ export class DurableObjectExample extends DurableObject {
         entrypoint: ['node', 'nonexistant.js'],
       });
 
-      let exitCode = undefined;
+      let exitCode;
       await container.monitor().catch((err) => {
         exitCode = err.exitCode;
       });
@@ -57,7 +52,7 @@ export class DurableObjectExample extends DurableObject {
 
       await scheduler.wait(500);
 
-      let exitCode = undefined;
+      let exitCode;
       const monitor = container.monitor().catch((err) => {
         exitCode = err.exitCode;
       });
@@ -69,10 +64,43 @@ export class DurableObjectExample extends DurableObject {
     }
   }
 
+  async testRunningAfterImmediateExit() {
+    const container = this.ctx.container;
+    if (container.running) {
+      const monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    container.start({ entrypoint: ['/bin/sh', '-c', 'exit 0'] });
+
+    for (let i = 0; i < 100 && container.running; ++i) {
+      await scheduler.wait(100);
+    }
+
+    assert.strictEqual(container.running, false);
+  }
+
+  async testRestartAfterDestroy() {
+    const container = this.ctx.container;
+    if (container.running) {
+      await container.destroy();
+    }
+
+    container.start();
+    await this.waitUntilContainerIsHealthy();
+    await container.destroy(new Error('first lifecycle'));
+    assert.strictEqual(container.running, false);
+
+    container.start({ entrypoint: ['/bin/sh', '-c', 'exit 0'] });
+    await container.monitor();
+    assert.strictEqual(container.running, false);
+  }
+
   async testBasics() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
 
       await container.destroy();
       await monitor;
@@ -293,16 +321,78 @@ export class DurableObjectExample extends DurableObject {
     {
       const proc = await container.exec(['echo', 'hello']);
       await proc.stdout.getReader().read();
-      assert.rejects(() => proc.output(), {
-        name: 'TypeError',
-        message:
-          'Cannot call output() after stdout has started being consumed.',
-      });
+      await assert.rejects(
+        Promise.try(() => proc.output()),
+        {
+          name: 'TypeError',
+          message:
+            'Cannot call output() after stdout has started being consumed.',
+        }
+      );
     }
 
     // 12. Make sure Stdin EOF's by default if not set
+    await container.exec(['cat']).then((p) => p.output());
+
+    // 13. An already-aborted signal causes exec() to fail fast.
     {
-      await container.exec(['cat']).then((p) => p.output());
+      const ac = new AbortController();
+      ac.abort();
+      await assert.rejects(
+        Promise.try(() =>
+          container.exec(['echo', 'hello'], { signal: ac.signal })
+        ),
+        {
+          name: 'AbortError',
+        }
+      );
+    }
+
+    // 14. Aborting the signal while the process is running kills it (SIGKILL).
+    {
+      const ac = new AbortController();
+      const proc = await container.exec(['sh', '-lc', 'sleep 60'], {
+        signal: ac.signal,
+        stdout: 'ignore',
+      });
+      ac.abort();
+      // A process killed by SIGKILL (9) reports exit code 128 + 9 = 137.
+      assert.strictEqual(await proc.exitCode, 137);
+    }
+
+    // 15. Allocate a PTY via the boolean shorthand: stdout is a single combined raw terminal
+    // stream, isPty is true, and resize() is accepted without throwing.
+    {
+      const proc = await container.exec(
+        ['sh', '-lc', 'tty; test -t 1 && echo IS_TTY'],
+        {
+          pty: true,
+        }
+      );
+      assert.ok(proc.isPty);
+      // Resizing a PTY process should not throw.
+      proc.resize(100, 40);
+      const output = await proc.output();
+      const stdout = decode(output.stdout);
+      // A PTY makes stdout a terminal, so `tty` prints a device path and `test -t 1` succeeds.
+      assert.ok(
+        stdout.includes('/dev/'),
+        `expected a tty device path in: ${stdout}`
+      );
+      assert.ok(stdout.includes('IS_TTY'), `expected IS_TTY in: ${stdout}`);
+      assert.strictEqual(output.exitCode, 0);
+    }
+
+    // 16. Allocate a PTY with explicit initial dimensions: the terminal starts at the requested
+    // size, so `stty size` reports "rows cols".
+    {
+      const proc = await container.exec(['stty', 'size'], {
+        pty: { cols: 100, rows: 40 },
+      });
+      assert.ok(proc.isPty);
+      const output = await proc.output();
+      assert.strictEqual(decode(output.stdout).trim(), '40 100');
+      assert.strictEqual(output.exitCode, 0);
     }
 
     await container.destroy();
@@ -310,10 +400,42 @@ export class DurableObjectExample extends DurableObject {
     assert.strictEqual(container.running, false);
   }
 
+  // Runs a long-lived process wired to an AbortSignal that this Durable Object received over
+  // RPC (from the test driver) and returns the process exit code. This exercises exec()'s
+  // abort registration against a *deserialized* signal: the registration itself must arm the
+  // signal's RPC abort subscription, or the remote abort would never be delivered here.
+  async execWithReceivedSignal(signal) {
+    const container = this.ctx.container;
+    if (!container.running) {
+      container.start();
+    }
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    const proc = await container.exec(['sh', '-lc', 'sleep 60'], {
+      signal,
+      stdout: 'ignore',
+    });
+    this.#receivedSignalExecStarted = true;
+    const exitCode = await proc.exitCode;
+
+    await container.destroy();
+    await monitor;
+    return exitCode;
+  }
+
+  // Polled by the test driver so it only aborts once the exec is actually running (aborting
+  // earlier would make exec() itself fail fast instead of killing the process).
+  async receivedSignalExecStarted() {
+    return this.#receivedSignalExecStarted;
+  }
+
+  #receivedSignalExecStarted = false;
+
   async testSetInactivityTimeout(timeout) {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -546,13 +668,15 @@ export class DurableObjectExample extends DurableObject {
   async testLabels() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
 
     assert.strictEqual(container.running, false);
 
+    const maxName = 'n'.repeat(16);
+    const maxValue = 'v'.repeat(64);
     const labels = {
       team: 'workers',
       environment: 'testing',
@@ -560,6 +684,8 @@ export class DurableObjectExample extends DurableObject {
       'workerd-foo': 'bar',
       kv: 'a=b=c',
       emoji: '🧪',
+      [maxName]: 'max-name',
+      maxvalue: maxValue,
     };
     container.start({ enableInternet: true, labels });
 
@@ -578,10 +704,99 @@ export class DurableObjectExample extends DurableObject {
     assert.strictEqual(container.running, false);
   }
 
+  async testImageValidation() {
+    const container = this.ctx.container;
+
+    for (const image of ['bad\nimage', 'bad image', 'bad\u0080image']) {
+      assert.throws(() => container.start({ image }), {
+        message:
+          /Container image reference must contain only non-space printable ASCII characters/,
+      });
+    }
+    assert.throws(() => container.start({ image: 'x'.repeat(4097) }), {
+      message: /Container image reference cannot exceed 4096 bytes/,
+    });
+  }
+
+  async testImageOverride() {
+    const container = this.ctx.container;
+    const image = 'cloudflare/workerd/container-client-test:override';
+
+    container.start({ enableInternet: true, image });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    const info = await container.inspect();
+    assert.match(info.image, /container-client-test:override$/);
+
+    const snapshot = await container.snapshotContainer({});
+    await container.destroy();
+    await monitor;
+
+    assert.throws(
+      () => container.start({ image, containerSnapshot: snapshot }),
+      {
+        message: /`image` and `containerSnapshot` are mutually exclusive/,
+      }
+    );
+
+    container.start({ enableInternet: true, containerSnapshot: snapshot });
+    const restoreMonitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+    await container.destroy();
+    await restoreMonitor;
+  }
+
+  async testInstanceTypeValidation() {
+    const container = this.ctx.container;
+
+    assert.throws(() => container.start({ instance: 'invalid' }), {
+      message: /Invalid container instance type/,
+    });
+
+    const custom = { vcpu: 1, memoryMib: 4096, diskMb: 20000 };
+
+    for (const vcpu of [0, -1, Infinity, NaN]) {
+      assert.throws(() => container.start({ instance: { ...custom, vcpu } }), {
+        message:
+          /Container resource vcpu must be a finite number greater than 0/,
+      });
+    }
+
+    for (const field of ['memoryMib', 'diskMb']) {
+      for (const value of [0, -1, Infinity, NaN]) {
+        assert.throws(
+          () => container.start({ instance: { ...custom, [field]: value } }),
+          {
+            message: new RegExp(
+              `Container resource ${field} must be a finite number greater than 0`
+            ),
+          }
+        );
+      }
+
+      assert.throws(
+        () => container.start({ instance: { ...custom, [field]: 0.5 } }),
+        {
+          message: new RegExp(`Container resource ${field} must be an integer`),
+        }
+      );
+
+      assert.throws(
+        () => container.start({ instance: { ...custom, [field]: 2 ** 53 } }),
+        {
+          message: new RegExp(
+            `Container resource ${field} exceeds Number.MAX_SAFE_INTEGER`
+          ),
+        }
+      );
+    }
+  }
+
   async testInspectBeforeStart() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -595,7 +810,7 @@ export class DurableObjectExample extends DurableObject {
   async testInspectEmptyLabels() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -616,7 +831,7 @@ export class DurableObjectExample extends DurableObject {
   async testInspectAfterDestroy() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -639,7 +854,7 @@ export class DurableObjectExample extends DurableObject {
   async testLabelValidation() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -649,6 +864,28 @@ export class DurableObjectExample extends DurableObject {
     // Empty label name
     assert.throws(() => container.start({ labels: { '': 'value' } }), {
       message: /Label names cannot be empty/,
+    });
+
+    // Too many labels
+    assert.throws(
+      () =>
+        container.start({
+          labels: Object.fromEntries(
+            Array.from({ length: 11 }, (_, i) => [`l${i}`, 'v'])
+          ),
+        }),
+      { message: /Cannot specify more than 10 container labels/ }
+    );
+
+    // Label name over 16 bytes
+    assert.throws(
+      () => container.start({ labels: { ['n'.repeat(17)]: 'value' } }),
+      { message: /Label names cannot exceed 16 bytes \(index 0\)/ }
+    );
+
+    // Label value over 64 bytes
+    assert.throws(() => container.start({ labels: { name: 'v'.repeat(65) } }), {
+      message: /Label values cannot exceed 64 bytes \(index 0\)/,
     });
 
     // Label name with control character
@@ -663,10 +900,247 @@ export class DurableObjectExample extends DurableObject {
     });
   }
 
-  async testPidNamespace() {
+  async testSetLabels() {
     const container = this.ctx.container;
     if (container.running) {
       let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    container.start({ enableInternet: true });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    const newLabels = { customer: 'figma', tier: 'enterprise' };
+    await container.setLabels(newLabels);
+
+    const info = await container.inspect();
+    assert.deepStrictEqual(info.labels, newLabels);
+
+    await container.destroy();
+    await monitor;
+  }
+
+  async testSetLabelsReplaces() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    container.start({ enableInternet: true, labels: { a: '1', b: '2' } });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    await container.setLabels({ c: '3' });
+
+    const info = await container.inspect();
+    assert.deepStrictEqual(info.labels, { c: '3' });
+
+    await container.destroy();
+    await monitor;
+  }
+
+  async testSetLabelsClearsAll() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    container.start({ enableInternet: true, labels: { a: '1' } });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    await container.setLabels({});
+
+    const info = await container.inspect();
+    assert.deepStrictEqual(info.labels, {});
+
+    await container.destroy();
+    await monitor;
+  }
+
+  async testSetLabelsBeforeStart() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ k: 'v' })),
+      {
+        message:
+          /setLabels\(\) cannot be called on a container that is not running/,
+      }
+    );
+  }
+
+  async testSetLabelsAfterDestroy() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    container.start({ enableInternet: true });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+    await container.destroy();
+    await monitor;
+
+    assert.strictEqual(container.running, false);
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ k: 'v' })),
+      {
+        message:
+          /setLabels\(\) cannot be called on a container that is not running/,
+      }
+    );
+  }
+
+  async testSetLabelsAfterDestroyWithoutMonitor() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    container.start({ enableInternet: true, labels: { a: '1' } });
+    await this.waitUntilContainerIsHealthy();
+
+    await container.destroy();
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ k: 'v' })),
+      {
+        message:
+          /setLabels\(\) cannot be called on a container that is not running/,
+      }
+    );
+    assert.strictEqual(container.running, false);
+  }
+
+  async testSetLabelsValidation() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    container.start({ enableInternet: true });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    // Empty label name
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ '': 'value' })),
+      {
+        message: /Label names cannot be empty/,
+      }
+    );
+
+    // Too many labels
+    await assert.rejects(
+      Promise.try(() =>
+        container.setLabels(
+          Object.fromEntries(
+            Array.from({ length: 11 }, (_, i) => [`l${i}`, 'v'])
+          )
+        )
+      ),
+      { message: /Cannot specify more than 10 container labels/ }
+    );
+
+    // Label name over 16 bytes
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ ['n'.repeat(17)]: 'value' })),
+      {
+        message: /Label names cannot exceed 16 bytes \(index 0\)/,
+      }
+    );
+
+    // Label value over 64 bytes
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ name: 'v'.repeat(65) })),
+      {
+        message: /Label values cannot exceed 64 bytes \(index 0\)/,
+      }
+    );
+
+    // Label name with control character
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ 'bad\x01name': 'value' })),
+      {
+        message: /Label names cannot contain control characters \(index 0\)/,
+      }
+    );
+
+    // Label value with control character
+    await assert.rejects(
+      Promise.try(() => container.setLabels({ name: 'bad\x01value' })),
+      {
+        message: /Label values cannot contain control characters \(index 0\)/,
+      }
+    );
+
+    await container.destroy();
+    await monitor;
+  }
+
+  async testSetLabelsSerialized() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    container.start({ enableInternet: true });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    // Issue two concurrent setLabels calls without awaiting between them. The server-side
+    // RpcTurn mechanism serializes them in FIFO order, so the final inspect() must reflect
+    // the second call.
+    const first = container.setLabels({ a: '1' });
+    const second = container.setLabels({ b: '2' });
+    await Promise.all([first, second]);
+
+    const info = await container.inspect();
+    assert.deepStrictEqual(info.labels, { b: '2' });
+
+    await container.destroy();
+    await monitor;
+  }
+
+  async testPidNamespace() {
+    const container = this.ctx.container;
+    if (container.running) {
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -699,7 +1173,7 @@ export class DurableObjectExample extends DurableObject {
   async testSetEgressHttpWithInternet() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
+      const monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -2385,9 +2859,7 @@ export class TestService extends WorkerEntrypoint {
     }
 
     // Regular HTTP request
-    return new Response(
-      'hello binding: ' + this.ctx.props.id + ' ' + request.url
-    );
+    return new Response(`hello binding: ${this.ctx.props.id} ${request.url}`);
   }
 
   // Handle raw TCP connections forwarded by interceptOutboundTcp.
@@ -2457,6 +2929,27 @@ export const testExec = {
   },
 };
 
+// An AbortSignal passed into the Durable Object over RPC kills an exec()'d process when
+// aborted from the caller's context.
+export const testExecRemoteAbortSignal = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testExecRemoteAbortSignal')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+
+    const ac = new AbortController();
+    const pending = stub.execWithReceivedSignal(ac.signal);
+    while (!(await stub.receivedSignalExecStarted())) {
+      await scheduler.wait(100);
+    }
+    ac.abort(new Error('remote-abort'));
+
+    // A process killed by SIGKILL (9) reports exit code 128 + 9 = 137.
+    assert.strictEqual(await pending, 137);
+  },
+};
+
 // Test exit code monitor functionality
 export const testExitCode = {
   async test(_ctrl, env) {
@@ -2465,6 +2958,26 @@ export const testExitCode = {
     );
     const stub = env.MY_CONTAINER.get(id);
     await stub.testExitCode();
+  },
+};
+
+export const testRunningAfterImmediateExit = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testRunningAfterImmediateExit')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testRunningAfterImmediateExit();
+  },
+};
+
+export const testRestartAfterDestroy = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testRestartAfterDestroy')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testRestartAfterDestroy();
   },
 };
 
@@ -2597,13 +3110,12 @@ export const testSetInactivityTimeout = {
   },
 };
 
-// Test that custom labels are passed through to the container
+// Test that custom labels round-trip through the JS API's in-memory label store.
 export const testLabels = {
   async test(_ctrl, env) {
-    const id = env.MY_CONTAINER.idFromName(
+    const stub = env.MY_CONTAINER.getByName(
       getRandomDurableObjectName('testLabels')
     );
-    const stub = env.MY_CONTAINER.get(id);
     await stub.testLabels();
   },
 };
@@ -2611,11 +3123,40 @@ export const testLabels = {
 // Test that invalid labels are rejected with clear error messages
 export const testLabelValidation = {
   async test(_ctrl, env) {
-    const id = env.MY_CONTAINER.idFromName(
+    const stub = env.MY_CONTAINER.getByName(
       getRandomDurableObjectName('testLabelValidation')
     );
-    const stub = env.MY_CONTAINER.get(id);
     await stub.testLabelValidation();
+  },
+};
+
+export const testImageValidation = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testImageValidation')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testImageValidation();
+  },
+};
+
+export const testImageOverride = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testImageOverride')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testImageOverride();
+  },
+};
+
+export const testInstanceTypeValidation = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testInstanceTypeValidation')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testInstanceTypeValidation();
   },
 };
 
@@ -2631,21 +3172,100 @@ export const testInspectBeforeStart = {
 
 export const testInspectEmptyLabels = {
   async test(_ctrl, env) {
-    const id = env.MY_CONTAINER.idFromName(
+    const stub = env.MY_CONTAINER.getByName(
       getRandomDurableObjectName('testInspectEmptyLabels')
     );
-    const stub = env.MY_CONTAINER.get(id);
     await stub.testInspectEmptyLabels();
   },
 };
 
 export const testInspectAfterDestroy = {
   async test(_ctrl, env) {
-    const id = env.MY_CONTAINER.idFromName(
+    const stub = env.MY_CONTAINER.getByName(
       getRandomDurableObjectName('testInspectAfterDestroy')
     );
-    const stub = env.MY_CONTAINER.get(id);
     await stub.testInspectAfterDestroy();
+  },
+};
+
+// Test that setLabels() updates labels on a running container and that subsequent
+// inspect() calls see the new set.
+export const testSetLabels = {
+  async test(_ctrl, env) {
+    const stub = env.MY_CONTAINER.getByName(
+      getRandomDurableObjectName('testSetLabels')
+    );
+    await stub.testSetLabels();
+  },
+};
+
+// Test that setLabels() fully replaces (not merges) the label set.
+export const testSetLabelsReplaces = {
+  async test(_ctrl, env) {
+    const stub = env.MY_CONTAINER.getByName(
+      getRandomDurableObjectName('testSetLabelsReplaces')
+    );
+    await stub.testSetLabelsReplaces();
+  },
+};
+
+// Test that setLabels({}) clears all labels.
+export const testSetLabelsClearsAll = {
+  async test(_ctrl, env) {
+    const stub = env.MY_CONTAINER.getByName(
+      getRandomDurableObjectName('testSetLabelsClearsAll')
+    );
+    await stub.testSetLabelsClearsAll();
+  },
+};
+
+// Test that setLabels() throws when the container has not been started.
+export const testSetLabelsBeforeStart = {
+  async test(_ctrl, env) {
+    const stub = env.MY_CONTAINER.getByName(
+      getRandomDurableObjectName('testSetLabelsBeforeStart')
+    );
+    await stub.testSetLabelsBeforeStart();
+  },
+};
+
+// Test that setLabels() throws after the container has been destroyed.
+export const testSetLabelsAfterDestroy = {
+  async test(_ctrl, env) {
+    const stub = env.MY_CONTAINER.getByName(
+      getRandomDurableObjectName('testSetLabelsAfterDestroy')
+    );
+    await stub.testSetLabelsAfterDestroy();
+  },
+};
+
+// Test that destroy() immediately clears server-side running state even before monitor() resolves.
+export const testSetLabelsAfterDestroyWithoutMonitor = {
+  async test(_ctrl, env) {
+    const stub = env.MY_CONTAINER.getByName(
+      getRandomDurableObjectName('testSetLabelsAfterDestroyWithoutMonitor')
+    );
+    await stub.testSetLabelsAfterDestroyWithoutMonitor();
+  },
+};
+
+// Test that setLabels() rejects invalid label names and values with the same rules as start().
+export const testSetLabelsValidation = {
+  async test(_ctrl, env) {
+    const stub = env.MY_CONTAINER.getByName(
+      getRandomDurableObjectName('testSetLabelsValidation')
+    );
+    await stub.testSetLabelsValidation();
+  },
+};
+
+// Test that concurrent setLabels() calls are serialized and the last-completed call wins.
+export const testSetLabelsSerialized = {
+  async test(_ctrl, env) {
+    const stub = env.MY_CONTAINER.getByName(
+      getRandomDurableObjectName('testSetLabelsSerialized')
+    );
+    await stub.testSetLabelsSerialized();
   },
 };
 
@@ -2678,7 +3298,7 @@ export const testSetEgressHttpWithInternet = {
     const id = env.MY_CONTAINER.idFromName(
       getRandomDurableObjectName('testSetEgressHttpWithInternet')
     );
-    let stub = env.MY_CONTAINER.get(id);
+    const stub = env.MY_CONTAINER.get(id);
     await stub.testSetEgressHttpWithInternet();
   },
 };
@@ -2689,7 +3309,7 @@ export const testSetEgressHttpNoInternet = {
     const id = env.MY_CONTAINER.idFromName(
       getRandomDurableObjectName('testSetEgressHttpNoInternet')
     );
-    let stub = env.MY_CONTAINER.get(id);
+    const stub = env.MY_CONTAINER.get(id);
     await stub.testSetEgressHttpNoInternet();
   },
 };

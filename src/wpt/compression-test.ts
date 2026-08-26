@@ -38,7 +38,7 @@ export default {
       /brotli .* data should be reinflated back to its origin/,
     ],
   },
-  'compression-with-detach.window.js': {},
+  'compression-with-detach.any.js': {},
   'decompression-bad-chunks.any.js': {
     comment: 'brotli compression is not supported',
     expectedFailures: [/brotli/],
@@ -83,8 +83,13 @@ export default {
       'decompressing brotli output should give Uint8Array chunks',
     ],
   },
-  'decompression-with-detach.window.js': {
-    comment: 'Detach test fails - needs investigation',
+  'decompression-with-detach.any.js': {
+    comment:
+      'Environmental, not a streams defect: compression-with-detach.any.js runs first in ' +
+      'the same isolate and installs its Object.prototype.then trap without configurable, ' +
+      'so this test\'s identical defineProperty throws "Cannot redefine property". Browsers ' +
+      'give each .any.js file a fresh global; the shared-isolate harness cannot (the ' +
+      'leftover is non-configurable, so it cannot even be deleted between files).',
     expectedFailures: [
       'data should be correctly decompressed even if input is detached partway',
     ],

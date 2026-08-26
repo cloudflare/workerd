@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 """
 Usage: update-deps.py [dep_name]
 """
@@ -16,6 +16,8 @@ import tarfile
 import urllib.request
 import zipfile
 from pathlib import Path
+
+import jsonc
 
 TARGET_FILTER = None if len(sys.argv) < 2 else sys.argv[1]
 
@@ -195,6 +197,8 @@ def repo_attributes(repo):
         "downloaded_file_path",
         "build_file_content",
         "patches",
+        "patch_cmds",
+        "patch_cmds_win",
     ):
         if option in repo:
             repo_attrs[option] = repo[option]
@@ -591,14 +595,6 @@ def split_bzl_file(file: Path) -> dict[str, str]:
     return deps
 
 
-def strip_comments(text):
-    # capture string literals first, comments send
-    regex = re.compile(r"(\".*\")|(//.*$)", re.MULTILINE)
-    return regex.sub(
-        lambda match: "" if match.group(2) is not None else match.group(1), text
-    )
-
-
 def read_access_token():
     if not sys.stdin.isatty():
         return ""
@@ -651,13 +647,12 @@ def process_config(deps_file):
 
     try:
         with deps_path.open() as fp:
-            json_text = strip_comments(fp.read())
-            process_deps(json.loads(json_text), current_deps, bzl_path)
+            process_deps(jsonc.load(fp).data, current_deps, bzl_path)
     except FileNotFoundError:
         pass
 
 
-def run():
+def main():
     global GITHUB_ACCESS_TOKEN
     GITHUB_ACCESS_TOKEN = read_access_token()
 
@@ -670,4 +665,5 @@ def run():
         process_config(deps)
 
 
-run()
+if __name__ == "__main__":
+    main()

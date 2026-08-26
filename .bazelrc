@@ -54,6 +54,9 @@ build:unix --features=external_include_paths --host_features=external_include_pa
 # Disable deprecated cfg = "host" Bazel rule setting. Blocked on perfetto.
 # common --incompatible_disable_starlark_host_transitions
 
+# Globally disable the "diabolic behavior" of implicit __init__.py creation (https://github.com/bazel-contrib/rules_python/issues/2945)
+common --incompatible_default_to_explicit_init_py
+
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them.
 build --per_file_copt='external@-Wno-error'
 build --per_file_copt='external@-Wno-suggest-override'
@@ -282,10 +285,15 @@ build:unix --cxxopt='-Wsuggest-override'
 build:linux --config=unix
 build:macos --config=unix
 
+# Disable the deprecated rules_cc macOS toolchain – no need to configure this since we always use
+# the apple_support one, this will be removed in the future. See https://github.com/bazelbuild/rules_cc/issues/754
+# for context.
+build:macos --repo_env=BAZEL_USE_LEGACY_MACOS_TOOLCHAIN=0
+
 # Support macOS 13 as the minimum version. There should be at least a warning when backward
-# compatibility is broken as -Wunguarded-availability-new is enabled by default. Only enable for
-# target configuration as host configuration tools are only used during the build process.
+# compatibility is broken as -Wunguarded-availability-new is enabled by default.
 build:macos --macos_minimum_os=13.5
+build:macos --host_macos_minimum_os=13.5
 
 # Avoid emitting duplicate unwind info where compact unwind info can be used. This reduces the
 # object size by ~5% on average, improving disk space usage and link times. The final binary size
@@ -333,6 +341,9 @@ build:linux --copt="-fdata-sections" --host_copt="-fdata-sections"
 
 # On Linux, use clang lld.
 build:linux --linkopt="-fuse-ld=lld"
+# Improve link performance by limiting the link stage to 8 threads – LLD link times see little if
+# any improvement beyond 8 threads (see https://reviews.llvm.org/D147493).
+build:linux --linkopt="-Wl,--threads=8"
 
 #
 # Windows

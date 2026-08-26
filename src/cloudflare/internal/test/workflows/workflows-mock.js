@@ -2,70 +2,75 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+import { WorkerEntrypoint } from 'cloudflare:workers';
+
 const restartBodies = new Map();
 
-export default {
-  async fetch(request, env, ctx) {
+const THROW_ID = 'throw';
+const MISSING_DELETE_ID = 'missing-delete';
+
+export default class WorkflowsMock extends WorkerEntrypoint {
+  async getInstance(id) {
+    if (id === THROW_ID) {
+      throw new Error('workflow instance not found');
+    }
+    return { id };
+  }
+
+  async create(options) {
+    return { id: options?.id };
+  }
+
+  async createBatch(options) {
+    return options.map((val) => ({ id: val.id }));
+  }
+
+  async deleteBatch(options) {
+    return {
+      deleted: options.instances
+        .filter((id) => id !== MISSING_DELETE_ID)
+        .map((id) => ({ id })),
+      errors: options.instances
+        .filter((id) => id === MISSING_DELETE_ID)
+        .map((id) => ({
+          id,
+          code: 10400,
+          message: 'workflows.api.error.instance.not_found',
+        })),
+    };
+  }
+
+  async deleteInstance(_id) {}
+
+  async pause(_id) {}
+
+  async resume(_id) {}
+
+  async terminate(_id) {}
+
+  async restart(id, options) {
+    restartBodies.set(id, { ...options, id });
+  }
+
+  async status(id) {
+    return { status: 'running', output: id };
+  }
+
+  async sendEvent(_id, _event) {}
+
+  // Introspection only. The binding itself never uses fetch(), but the test worker's own compat
+  // date leaves RPC gated on `env.mock`, so it reaches these records over HTTP instead.
+  async fetch(request) {
     const data = await request.json();
-    const reqUrl = new URL(request.url);
+    const pathname = new URL(request.url).pathname;
 
-    if (reqUrl.pathname === '/get' && request.method === 'POST') {
-      return Response.json(
-        {
-          result: {
-            id: data.id,
-          },
-        },
-        {
-          status: 200,
-          headers: {
-            'content-type': 'application/json',
-          },
-        }
-      );
+    switch (pathname) {
+      case '/last-restart':
+        return Response.json({ result: restartBodies.get(data.id) ?? null });
+      default:
+        throw new Error(
+          `unexpected HTTP request to the workflows mock: ${pathname}`
+        );
     }
-
-    if (reqUrl.pathname === '/create' && request.method === 'POST') {
-      return Response.json(
-        {
-          result: {
-            id: data.id,
-          },
-        },
-        {
-          status: 201,
-          headers: {
-            'content-type': 'application/json',
-          },
-        }
-      );
-    }
-
-    if (reqUrl.pathname === '/createBatch' && request.method === 'POST') {
-      return Response.json(
-        {
-          result: data.map((val) => ({ id: val.id })),
-        },
-        {
-          status: 201,
-          headers: {
-            'content-type': 'application/json',
-          },
-        }
-      );
-    }
-
-    if (reqUrl.pathname === '/restart' && request.method === 'POST') {
-      restartBodies.set(data.id, data);
-      return Response.json({}, { status: 200 });
-    }
-
-    // Test-only: returns the body from the last /restart call for a given id
-    if (reqUrl.pathname === '/last-restart' && request.method === 'POST') {
-      return Response.json(
-        { result: restartBodies.get(data.id) ?? null },
-        { status: 200 }
-      );
-    }
-  },
-};
+  }
+}

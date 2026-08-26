@@ -44,15 +44,7 @@ LegacyHibernationManagerImpl::HibernatableWebSocket::~HibernatableWebSocket() no
   }
 }
 
-kj::Array<kj::StringPtr> LegacyHibernationManagerImpl::HibernatableWebSocket::getTags() {
-  auto tags = kj::heapArray<kj::StringPtr>(tagItems.size());
-  for (auto i: kj::indices(tagItems)) {
-    tags[i] = tagItems[i].tag;
-  }
-  return tags;
-}
-
-kj::Array<kj::String> LegacyHibernationManagerImpl::HibernatableWebSocket::cloneTags() {
+kj::Array<kj::String> LegacyHibernationManagerImpl::HibernatableWebSocket::getTags() {
   auto tags = kj::heapArray<kj::String>(tagItems.size());
   for (auto i: kj::indices(tagItems)) {
     tags[i] = kj::str(tagItems[i].tag);
@@ -67,13 +59,16 @@ jsg::Ref<api::WebSocket> LegacyHibernationManagerImpl::HibernatableWebSocket::
     package.maybeTags = getTags();
 
     // Now that we unhibernated the WebSocket, we can set the last received autoResponse timestamp
-    // that was stored in the corresponding HibernatableWebSocket. We also move autoResponsePromise
-    // from the hibernation manager to api::websocket to prevent possible ws.send races.
+    // that was stored in the corresponding HibernatableWebSocket. Share an autoResponsePromise
+    // branch with api::websocket while retaining the fork in case the socket hibernates again.
+    kj::Promise<void> autoResponsePromise = kj::READY_NOW;
+    KJ_IF_SOME(promise, this->maybeAutoResponsePromise) {
+      autoResponsePromise = promise.addBranch();
+    }
     activeOrPackage
         .init<jsg::Ref<api::WebSocket>>(
             api::WebSocket::hibernatableFromNative(js, *KJ_REQUIRE_NONNULL(ws), kj::mv(package)))
         ->setAutoResponseStatus(autoResponseTimestamp, kj::mv(autoResponsePromise));
-    autoResponsePromise = kj::READY_NOW;
   }
   return activeOrPackage.get<jsg::Ref<api::WebSocket>>().addRef();
 }
@@ -257,9 +252,19 @@ inline void LegacyHibernationManagerImpl::removeFromAllWs(HibernatableWebSocket&
 
 kj::Promise<void> LegacyHibernationManagerImpl::handleSocketTermination(
     HibernatableWebSocket& hib, kj::Maybe<kj::Exception>& maybeError) {
+  // A failed termination event must not leave a disconnected socket in either registry.
+  kj::String eventWebSocketId;
+  KJ_DEFER({
+    if (eventWebSocketId.size() > 0) {
+      webSocketsForEventHandler.erase(eventWebSocketId);
+    }
+    dropHibernatableWebSocket(hib);
+  });
+
   kj::Maybe<kj::Promise<void>> event;
   KJ_IF_SOME(error, maybeError) {
     auto websocketId = randomUUID(kj::none);
+    eventWebSocketId = kj::str(websocketId);
     webSocketsForEventHandler.insert(kj::str(websocketId), &hib);
     kj::Maybe<api::HibernatableSocketParams> params;
     if (!hib.hasDispatchedClose && (error.getType() == kj::Exception::Type::DISCONNECTED)) {
@@ -283,8 +288,9 @@ kj::Promise<void> LegacyHibernationManagerImpl::handleSocketTermination(
       .userSpanParent = kj::mv(userSpanParent),
     });
     event = workerInterface
-                ->customEvent(kj::heap<api::HibernatableWebSocketCustomEvent>(
-                    hibernationEventType, kj::mv(KJ_REQUIRE_NONNULL(params)), *this))
+                ->customEvent(kj::rc<api::HibernatableWebSocketCustomEvent>(
+                    hibernationEventType, kj::mv(KJ_REQUIRE_NONNULL(params)), *this)
+                                  .toOwn())
                 .ignoreResult()
                 .attach(kj::mv(workerInterface));
   }
@@ -294,8 +300,6 @@ kj::Promise<void> LegacyHibernationManagerImpl::handleSocketTermination(
   KJ_IF_SOME(promise, event) {
     co_await promise;
   }
-
-  dropHibernatableWebSocket(hib);
 }
 
 kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
@@ -337,13 +341,15 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
             auto responseCopy = kj::str(KJ_REQUIRE_NONNULL(autoResponsePair->response));
             KJ_SWITCH_ONEOF(hib.activeOrPackage) {
               KJ_CASE_ONEOF(apiWs, jsg::Ref<api::WebSocket>) {
-                // If the actor is not hibernated/If the WebSocket is active, we need to update
-                // autoResponseTimestamp on the active websocket.
-                apiWs->setAutoResponseStatus(hib.autoResponseTimestamp, kj::READY_NOW);
                 // Since we had a request set, we must have and response that's sent back using the
                 // same websocket here. The sending of response is managed in web-socket to avoid
                 // possible racing problems with regular websocket messages.
-                co_await apiWs->sendAutoResponse(kj::mv(responseCopy), ws);
+                hib.maybeAutoResponsePromise =
+                    apiWs->sendAutoResponse(kj::mv(responseCopy), ws).fork();
+                auto& promise = KJ_ASSERT_NONNULL(hib.maybeAutoResponsePromise);
+                apiWs->setAutoResponseStatus(hib.autoResponseTimestamp, promise.addBranch());
+                KJ_DEFER(hib.maybeAutoResponsePromise = kj::none);
+                co_await promise;
               }
               KJ_CASE_ONEOF(package, api::WebSocket::HibernationPackage) {
                 if (!package.closedOutgoingConnection) {
@@ -351,10 +357,10 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
                   // If we do that, we have to provide it with the promise to avoid races. This can
                   // happen if we have a websocket hibernating, that unhibernates and sends a
                   // message while ws.send() for auto-response is also sending.
-                  auto p = ws.send(responseCopy.asArray()).fork();
-                  hib.autoResponsePromise = p.addBranch();
-                  co_await p;
-                  hib.autoResponsePromise = kj::READY_NOW;
+                  hib.maybeAutoResponsePromise =
+                      ws.send(responseCopy.asArray()).attach(kj::mv(responseCopy)).fork();
+                  KJ_DEFER(hib.maybeAutoResponsePromise = kj::none);
+                  co_await KJ_ASSERT_NONNULL(hib.maybeAutoResponsePromise);
                 }
               }
             }
@@ -372,7 +378,9 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
     }
 
     auto websocketId = randomUUID(kj::none);
+    auto eventWebSocketId = kj::str(websocketId);
     webSocketsForEventHandler.insert(kj::str(websocketId), &hib);
+    KJ_DEFER(webSocketsForEventHandler.erase(eventWebSocketId));
 
     // Build the event params depending on what type of message we got.
     kj::Maybe<api::HibernatableSocketParams> maybeParams;
@@ -402,8 +410,9 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
     auto workerInterface = loopback->getWorker({
       .userSpanParent = kj::mv(userSpanParent),
     });
-    co_await workerInterface->customEvent(kj::heap<api::HibernatableWebSocketCustomEvent>(
-        hibernationEventType, kj::mv(params), *this));
+    co_await workerInterface->customEvent(
+        kj::rc<api::HibernatableWebSocketCustomEvent>(hibernationEventType, kj::mv(params), *this)
+            .toOwn());
     if (isClose) {
       co_return;
     }

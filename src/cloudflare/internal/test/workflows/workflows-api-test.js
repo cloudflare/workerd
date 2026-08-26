@@ -4,6 +4,11 @@
 
 import * as assert from 'node:assert';
 
+// Every test is its own export: `workerd test` runs the `test()` handler of each entrypoint, so
+// extra methods hung off a single exported object would silently never run.
+
+// Introspection goes over `env.mock.fetch()` rather than JSRPC on purpose: `env.mock` is an
+// ordinary service binding, so its RPC wildcard stays gated at this worker's compatibility date.
 async function getLastRestartBody(env, id) {
   const res = await env.mock.fetch('http://placeholder/last-restart', {
     method: 'POST',
@@ -12,7 +17,7 @@ async function getLastRestartBody(env, id) {
   return (await res.json()).result;
 }
 
-export const tests = {
+export const workflowsApi = {
   async test(_, env) {
     {
       // Test create instance
@@ -44,9 +49,87 @@ export const tests = {
       assert.deepStrictEqual(instances[0].id, 'foo');
       assert.deepStrictEqual(instances[1].id, 'bar');
     }
-  },
 
-  async testRestartNoOptions(_, env) {
+    {
+      const result = await env.workflow.deleteBatch([
+        'delete-1',
+        'missing-delete',
+        'delete-1',
+      ]);
+      assert.deepStrictEqual(result, {
+        deleted: [{ id: 'delete-1' }, { id: 'delete-1' }],
+        errors: [
+          {
+            id: 'missing-delete',
+            code: 10400,
+            message: 'workflows.api.error.instance.not_found',
+          },
+        ],
+      });
+    }
+
+    {
+      const instance = await env.workflow.get('inst');
+      await instance.pause();
+      await instance.resume();
+      await instance.terminate();
+      await instance.delete();
+      await instance.sendEvent({
+        type: 'my-event',
+        payload: { hello: 'world' },
+      });
+    }
+
+    {
+      const instance = await env.workflow.get('status-1');
+      const status = await instance.status();
+      assert.deepStrictEqual(status.status, 'running');
+      assert.strictEqual(status.output, 'status-1');
+    }
+
+    {
+      for (const method of ['get', 'create', 'createBatch', 'deleteBatch']) {
+        assert.strictEqual(typeof env.workflow[method], 'function');
+      }
+
+      const fromGet = await env.workflow.get('a');
+      const fromCreate = await env.workflow.create({ id: 'b' });
+      const [fromBatch] = await env.workflow.createBatch([{ id: 'c' }]);
+
+      const proto = Object.getPrototypeOf(fromGet);
+      assert.strictEqual(Object.getPrototypeOf(fromCreate), proto);
+      assert.strictEqual(Object.getPrototypeOf(fromBatch), proto);
+
+      for (const method of [
+        'pause',
+        'resume',
+        'terminate',
+        'restart',
+        'delete',
+        'status',
+        'sendEvent',
+      ]) {
+        assert.strictEqual(typeof fromGet[method], 'function');
+      }
+    }
+
+    {
+      // The binding keeps its ungated inner fetcher inaccessible to user code.
+      // Instances returned by the binding omit the fetcher too.
+      assert.strictEqual(env.workflow.fetcher, undefined);
+      assert.strictEqual((await env.workflow.get('d')).fetcher, undefined);
+    }
+
+    {
+      await assert.rejects(env.workflow.get('throw'), {
+        message: 'workflow instance not found',
+      });
+    }
+  },
+};
+
+export const restartNoOptions = {
+  async test(_, env) {
     const instance = await env.workflow.get('restart-basic');
     await instance.restart();
 
@@ -54,8 +137,10 @@ export const tests = {
     assert.deepStrictEqual(body.id, 'restart-basic');
     assert.strictEqual(body.from, undefined);
   },
+};
 
-  async testRestartFromStepNameOnly(_, env) {
+export const restartFromStepNameOnly = {
+  async test(_, env) {
     const instance = await env.workflow.get('restart-step');
     await instance.restart({ from: { name: 'fetch data' } });
 
@@ -63,8 +148,10 @@ export const tests = {
     assert.deepStrictEqual(body.id, 'restart-step');
     assert.deepStrictEqual(body.from, { name: 'fetch data' });
   },
+};
 
-  async testRestartFromStepAllOptions(_, env) {
+export const restartFromStepAllOptions = {
+  async test(_, env) {
     const instance = await env.workflow.get('restart-full');
     await instance.restart({
       from: { name: 'process item', count: 3, type: 'do' },

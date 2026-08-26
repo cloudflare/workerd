@@ -45,11 +45,20 @@ export default {
     comment: 'DOMException.prototype not in Error.prototype chain',
     expectedFailures: [''],
   },
-  'ecmascript-binding/global-immutable-prototype.any.js': {
-    comment: 'globalThis prototype is unconfigurable in workerd',
-    expectedFailures: true,
+  'ecmascript-binding/es-exceptions/DOMException-stack-accessor.any.js': {
+    comment:
+      'V8 exposes `stack` as an own data property on the error instance rather than as an ' +
+      'accessor on Error.prototype, so the accessor-based tests do not apply. The two tests ' +
+      'that only check for a string-valued `stack` still pass.',
+    expectedFailures: [
+      'DOMException instance does not have an own stack property',
+      'Error.prototype.stack is an accessor property with correct attributes',
+      'Error.prototype.stack getter works on DOMException instances',
+      'Error.prototype.stack setter installs own data property on DOMException instances',
+      'Error.prototype.stack setter ignores Error.prototype itself',
+    ],
   },
-  'ecmascript-binding/global-mutable-prototype.any.js': {
+  'ecmascript-binding/global-immutable-prototype.any.js': {
     comment: 'globalThis prototype is unconfigurable in workerd',
     expectedFailures: true,
   },

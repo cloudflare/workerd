@@ -1,0 +1,244 @@
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test", "rust_unpretty")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
+
+# https://bazel.build/configure/windows#clang
+platform(
+    name = "x64_windows-clang-cl",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+        "@bazel_tools//tools/cpp:clang-cl",
+    ],
+)
+
+rust_library(
+    name = "tests",
+    srcs = glob(["*.rs"]),
+    edition = "2024",
+    link_deps = [
+        ":bridge",
+        ":test-date",
+        ":test-maybe",
+        ":test-promises",
+    ],
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        # TODO(cleanup): Why isn't :cxx transitive?
+        "//src/rust/cxx",
+        "//src/rust/cxx/kj-rs",
+    ],
+)
+
+rust_unpretty(
+    name = "expand-rust_test",
+    testonly = True,
+    tags = [
+        "manual",
+        "off-by-default",
+    ],
+    deps = [
+        ":rust_tests",
+    ],
+)
+
+rust_test(
+    name = "rust_tests",
+    crate = "tests",
+    experimental_use_cc_common_link = 1,
+    malloc = "//src/workerd/server:malloc",
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+rust_cxx_bridge(
+    name = "bridge",
+    src = "lib.rs",
+    hdrs = [
+        "shared.h",
+        "test-maybe.h",
+        "test-own.h",
+        "test-promises.h",
+        "test-refcount.h",
+    ],
+    include_prefix = "kj-rs-demo",
+    deps = [
+        "//src/rust/cxx/kj-rs",
+    ],
+)
+
+wd_cc_library(
+    name = "test-promises",
+    srcs = [
+        "test-own.c++",
+        "test-promises.c++",
+        "test-refcount.c++",
+    ],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":bridge",
+    ],
+)
+
+wd_cc_library(
+    name = "test-maybe",
+    srcs = [
+        "test-maybe.c++",
+    ],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":bridge",
+    ],
+)
+
+rust_cxx_bridge(
+    name = "test-date-bridge",
+    src = "test_date.rs",
+    hdrs = [
+        "test-date.h",
+    ],
+    include_prefix = "kj-rs-demo",
+    deps = [
+        "//src/rust/cxx/kj-rs",
+    ],
+)
+
+wd_cc_library(
+    name = "test-date",
+    srcs = [
+        "test-date.c++",
+    ],
+    hdrs = [
+        "test-date.h",
+    ],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":test-date-bridge",
+    ],
+)
+
+cc_test(
+    name = "linked-group-test",
+    size = "small",
+    srcs = [
+        "linked-group-test.c++",
+    ],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        "//src/rust/cxx/kj-rs",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/kj:kj-test",
+    ],
+)
+
+cc_test(
+    name = "awaitables-cc-test",
+    size = "medium",
+    srcs = [
+        "awaitables-cc-test.c++",
+    ],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":bridge",
+        ":tests",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/kj:kj-test",
+    ],
+)
+
+cc_test(
+    name = "convert-test",
+    size = "small",
+    srcs = [
+        "convert-test.c++",
+    ],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        "//src/rust/cxx/kj-rs",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/kj:kj-test",
+    ],
+)
+
+cc_test(
+    name = "date-test",
+    size = "small",
+    srcs = [
+        "date-test.c++",
+    ],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":tests",
+        "//src/rust/cxx/kj-rs",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/kj:kj-test",
+    ],
+)
+
+cc_test(
+    name = "maybe-test",
+    size = "medium",
+    srcs = [
+        "maybe-test.c++",
+    ],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":bridge",
+        ":tests",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/kj:kj-test",
+    ],
+)

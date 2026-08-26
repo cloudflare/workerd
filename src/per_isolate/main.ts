@@ -1,3 +1,4 @@
+'use strict';
 // Per-isolate bootstrap entry point.
 // This script runs synchronously at context creation time,
 // before any user code.
@@ -30,3 +31,208 @@
 // const foo = require('./foo');
 // (globalThis as any).Foo = foo.bootstrapFoo(compatFlags);
 //
+const { ObjectDefineProperties } = primordials;
+
+if (compatFlags['typescript_implemented_streams']) {
+  const {
+    ReadableStream,
+    ReadableStreamDefaultReader,
+    ReadableStreamBYOBReader,
+    ReadableStreamDefaultController,
+    ReadableByteStreamController,
+    ReadableStreamBYOBRequest,
+    ByteLengthQueuingStrategy,
+    CountQueuingStrategy,
+    WritableStream,
+    WritableStreamDefaultWriter,
+    WritableStreamDefaultController,
+    TransformStream,
+    TransformStreamDefaultController,
+    IdentityTransformStream,
+    FixedLengthStream,
+    TextEncoderStream,
+    TextDecoderStream,
+    CompressionStream,
+    DecompressionStream,
+    ReadableStreamDrainingReader,
+  } = require('webstreams/streams');
+
+  ObjectDefineProperties(globalThis, {
+    ReadableStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: ReadableStream,
+    },
+    ReadableStreamDefaultReader: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: ReadableStreamDefaultReader,
+    },
+    ReadableStreamBYOBReader: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: ReadableStreamBYOBReader,
+    },
+    ReadableStreamDefaultController: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: ReadableStreamDefaultController,
+    },
+    ReadableByteStreamController: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: ReadableByteStreamController,
+    },
+    ReadableStreamBYOBRequest: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: ReadableStreamBYOBRequest,
+    },
+    ByteLengthQueuingStrategy: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: ByteLengthQueuingStrategy,
+    },
+    CountQueuingStrategy: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: CountQueuingStrategy,
+    },
+    WritableStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: WritableStream,
+    },
+    WritableStreamDefaultWriter: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: WritableStreamDefaultWriter,
+    },
+    WritableStreamDefaultController: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: WritableStreamDefaultController,
+    },
+    TransformStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: TransformStream,
+    },
+    TransformStreamDefaultController: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: TransformStreamDefaultController,
+    },
+    IdentityTransformStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: IdentityTransformStream,
+    },
+    FixedLengthStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: FixedLengthStream,
+    },
+    TextEncoderStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: TextEncoderStream,
+    },
+    TextDecoderStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: TextDecoderStream,
+    },
+    CompressionStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: CompressionStream,
+    },
+    DecompressionStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: DecompressionStream,
+    },
+  });
+
+  // Bootstrap the cpp exports module
+  require('webstreams/cpp_exports');
+
+  // DigestStream subclasses WritableStream, so the C++ one would inherit from
+  // the C++ WritableStream that the assignments above just replaced. Swap in
+  // the TypeScript implementation so the hierarchy is consistent.
+  //
+  // JSG installs nested types on the prototype rather than the instance, so
+  // this reaches every `crypto.DigestStream` — including the lazily created
+  // `globalThis.crypto` singleton, which is deliberately not touched here.
+  // The attributes match what JSG_NESTED_TYPE installs (ObjectTemplate::Set
+  // with no attributes, i.e. all three true), so the swap is invisible to
+  // property introspection.
+  const { DigestStream } = require('crypto/digest-stream');
+  const { Crypto } = globalThis as unknown as {
+    Crypto: { prototype: object };
+  };
+  ObjectDefineProperties(Crypto.prototype, {
+    __proto__: null,
+    DigestStream: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: DigestStream,
+    },
+  });
+
+  // Internal-only: expose the DrainingReader for testing expectedLength
+  // pass-through (Content-Length integration). Gated by a separate
+  // experimental flag that may never lose its experimental annotation.
+  if (compatFlags['expose_draining_reader']) {
+    ObjectDefineProperties(globalThis, {
+      ReadableStreamDrainingReader: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: ReadableStreamDrainingReader,
+      },
+    });
+  }
+}

@@ -16,21 +16,15 @@ def kj_test(
         srcs = [src],
         deps = [
             "@capnp-cpp//src/kj:kj-test",
+            "//build/deps:linkopts_default",
         ] + deps,
         linkstatic = select({
             "@platforms//os:linux": 0,
             "//conditions:default": 1,
         }),
-        # For test binaries, reduce thinLTO optimizations and inlining to speed up linking. This
-        # only has an effect if thinLTO is enabled. Also apply dead_strip on macOS to manage binary
-        # sizes.
-        linkopts = select({
-            "@platforms//os:linux": ["-Wl,--lto-O1", "-Wl,-mllvm,-import-instr-limit=5"],
-            "@//:use_dead_strip": ["-Wl,-dead_strip", "-Wl,-no_exported_symbols"],
-            "//conditions:default": [""],
-        }),
         data = data,
-        tags = tags,
+        # Tag with cpu:4 since this target depends on linkopts_default.
+        tags = tags + ["cpu:4"],
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],

@@ -33,6 +33,16 @@ wd_test(
 )
 
 wd_test(
+    src = "wasm-memory-discard-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "wasm-memory-discard.wasm",
+        "wasm-memory-discard-disabled-test.js",
+        "wasm-memory-discard-test.js",
+    ],
+)
+
+wd_test(
     src = "urlpattern-regex-search-oob-test.wd-test",
     args = ["--experimental"],
     data = ["urlpattern-regex-search-oob-test.js"],
@@ -156,11 +166,22 @@ wd_test(
         "tail-worker-test-invalid.js",
         "tail-worker-test-no-op.js",
         "tail-worker-test-jsrpc.js",
+        "tail-worker-test-throw.js",
         "websocket-hibernation.js",
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
+        "stw-large-log-subject.js",
     ],
     tags = ["resources:socket:1"],
+)
+
+wd_test(
+    src = "rpc-stub-gc-warning-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "rpc-stub-gc-warning-test.js",
+        "tail-worker-test-no-op.js",
+    ],
 )
 
 # Test to validate timing semantics for JSRPC streaming responses.
@@ -194,6 +215,24 @@ wd_test(
     data = [
         "self-logger-test.js",
     ],
+)
+
+# Tests for WO-1390: structured errorInfo on TraceLog entries from console.*(Error, ...).
+# Covers both batched tail (`tail(events)`) and streaming tail (`tailStream`) surfaces.
+wd_test(
+    src = "errorinfo-tail-test.wd-test",
+    data = ["errorinfo-tail-test.js"],
+)
+
+wd_test(
+    src = "tail-cf-gc-test.wd-test",
+    data = ["tail-cf-gc-test.js"],
+)
+
+wd_test(
+    src = "errorinfo-stw-test.wd-test",
+    args = ["--experimental"],
+    data = ["errorinfo-stw-test.js"],
 )
 
 wd_test(
@@ -237,6 +276,14 @@ wd_test(
         "cache-mock.js",
         "cache-operations-test.js",
         "instrumentation-tail-worker.js",
+    ],
+)
+
+wd_test(
+    src = "cache-put-stream-test.wd-test",
+    data = [
+        "cache-mock.js",
+        "cache-put-stream-test.js",
     ],
 )
 
@@ -454,6 +501,12 @@ wd_test(
 )
 
 wd_test(
+    src = "crypto-streams-ts-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto-streams-test.js"],
+)
+
+wd_test(
     src = "data-url-fetch-test.wd-test",
     args = ["--experimental"],
     data = ["data-url-fetch-test.js"],
@@ -472,6 +525,12 @@ wd_test(
 )
 
 wd_test(
+    src = "autovuln-63-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-63-test.js"],
+)
+
+wd_test(
     src = "events-test.wd-test",
     args = ["--experimental"],
     data = ["events-test.js"],
@@ -481,6 +540,12 @@ wd_test(
     src = "eventsource-test.wd-test",
     args = ["--experimental"],
     data = ["eventsource-test.js"],
+)
+
+wd_test(
+    src = "legacy-dispatch-exceptions-test.wd-test",
+    args = ["--experimental"],
+    data = ["legacy-dispatch-exceptions-test.js"],
 )
 
 wd_test(
@@ -507,6 +572,15 @@ wd_test(
     data = [
         "warnings-tail.js",
         "warnings-test.js",
+    ],
+)
+
+wd_test(
+    src = "diagnostics-channel-tail-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "diagnostics-channel-tail.js",
+        "diagnostics-channel-tail-trigger.js",
     ],
 )
 
@@ -554,6 +628,25 @@ wd_test(
 )
 
 wd_test(
+    src = "js-rpc-streams-ts-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-test.js"],
+    tags = ["resources:socket:1"],
+)
+
+wd_test(
+    src = "js-rpc-streams-crossflag-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-streams-crossflag-test.js"],
+)
+
+wd_test(
+    src = "js-rpc-streams-pollution-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-streams-pollution-test.js"],
+)
+
+wd_test(
     src = "js-rpc-params-ownership-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-params-ownership-test.js"],
@@ -569,6 +662,12 @@ wd_test(
     src = "module-test.wd-test",
     args = ["--experimental"],
     data = ["module-test.js"],
+)
+
+wd_test(
+    src = "module-tla-nested-require-test.wd-test",
+    args = ["--experimental"],
+    data = ["module-tla-nested-require-test.js"],
 )
 
 wd_test(
@@ -620,6 +719,12 @@ wd_test(
 )
 
 wd_test(
+    src = "ts-compression-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["ts-compression-streams-test.js"],
+)
+
+wd_test(
     src = "compression-streams-test.wd-test",
     args = ["--experimental"],
     data = ["compression-streams-test.js"],
@@ -666,15 +771,45 @@ wd_test(
 )
 
 wd_test(
+    src = "pipe-source-error-uaf-test.wd-test",
+    args = ["--experimental"],
+    data = ["pipe-source-error-uaf-test.js"],
+)
+
+wd_test(
+    src = "autovuln-132-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-132-test.js"],
+)
+
+wd_test(
+    src = "autovuln-37-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-37-test.js"],
+)
+
+wd_test(
     src = "streams-r2-patterns-test.wd-test",
     args = ["--experimental"],
     data = ["streams-r2-patterns-test.js"],
 )
 
 wd_test(
+    src = "autovuln-88-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-88-test.js"],
+)
+
+wd_test(
     src = "streams-respond-test.wd-test",
     args = ["--experimental"],
     data = ["streams-respond-test.js"],
+)
+
+wd_test(
+    src = "autovuln-131-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-131-test.js"],
 )
 
 wd_test(
@@ -687,6 +822,12 @@ wd_test(
     src = "streams-js-test.wd-test",
     args = ["--experimental"],
     data = ["streams-js-test.js"],
+)
+
+wd_test(
+    src = "autovuln-60-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-60-test.js"],
 )
 
 wd_test(
@@ -714,6 +855,12 @@ wd_test(
 )
 
 wd_test(
+    src = "autovuln-148-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-148-test.js"],
+)
+
+wd_test(
     src = "streams-byob-concurrent-readatleast-test.wd-test",
     args = ["--experimental"],
     data = ["streams-byob-concurrent-readatleast-test.js"],
@@ -729,6 +876,21 @@ wd_test(
     src = "streams-async-iterator-test.wd-test",
     args = ["--experimental"],
     data = ["streams-async-iterator-test.js"],
+)
+
+wd_test(
+    src = "autovuln-319-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-319-test.js"],
+)
+
+wd_test(
+    src = "autovuln-187-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "autovuln-187-echo.js",
+        "autovuln-187-test.js",
+    ],
 )
 
 wd_test(
@@ -857,6 +1019,22 @@ wd_test(
 )
 
 wd_test(
+    src = "js-rpc-socket-streams-ts-test.wd-test",
+    args = [
+        "--experimental",
+        "--no-verbose",
+    ],
+    data = ["js-rpc-test.js"],
+    tags = ["resources:socket:1"],
+)
+
+wd_test(
+    src = "outbound-interceptor-socket-test.wd-test",
+    args = ["--experimental"],
+    data = ["outbound-interceptor-socket-test.js"],
+)
+
+wd_test(
     src = "http-test-ts.ts-wd-test",
     args = ["--experimental"],
     data = ["http-test-ts.ts"],
@@ -871,6 +1049,39 @@ wd_test(
         "test.wasm",
     ],
     lint = False,
+)
+
+wd_test(
+    src = "new-module-registry-do-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "new-module-registry-do-test.js",
+    ],
+)
+
+wd_test(
+    src = "new-module-registry-stack-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "new-module-registry-stack-test.js",
+    ],
+)
+
+wd_test(
+    src = "new-module-registry-startup-eval-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "new-module-registry-startup-eval-test.js",
+        "test.wasm",
+    ],
+)
+
+wd_test(
+    src = "new-module-registry-workerd-modules-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "new-module-registry-workerd-modules-test.js",
+    ],
 )
 
 wd_test(
@@ -989,6 +1200,17 @@ wd_test(
     args = ["--experimental"],
     data = ["worker-loader-test.js"],
     tags = ["requires-network"],
+)
+
+wd_test(
+    src = "worker-loader-wasm-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "test.wasm",
+        "worker-loader-wasm-test.js",
+    ],
+    # The test uses `import source` syntax, which eslint's parser does not yet support.
+    lint = False,
 )
 
 wd_test(
@@ -1136,6 +1358,34 @@ wd_test(
 wd_test(
     src = "htmlrewriter-transform-cancel-test.wd-test",
     data = ["htmlrewriter-transform-cancel-test.js"],
+)
+
+wd_test(
+    src = "ts-digest-stream-test.wd-test",
+    args = ["--experimental"],
+    data = ["ts-digest-stream-test.js"],
+)
+
+wd_test(
+    src = "ts-webstreams-test.wd-test",
+    args = ["--experimental"],
+    data = ["ts-webstreams-test.js"],
+)
+
+wd_test(
+    # Normally a second or two: the test stops as soon as its counter proves it reached the
+    # window. "large" is for the case where that never happens and it runs out its own 30s
+    # budget instead.
+    size = "large",
+    src = "messageport-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["messageport-gc-test.js"],
+)
+
+wd_test(
+    src = "ts-identity-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["ts-identity-streams-test.js"],
 )
 
 sh_test(

@@ -15,6 +15,7 @@
 
 #include <kj/debug.h>
 #include <kj/exception.h>
+#include <kj/refcount.h>
 #include <kj/string.h>
 
 #include <typeinfo>
@@ -95,12 +96,40 @@ constexpr kj::Exception::DetailTypeId TUNNELED_EXCEPTION_DETAIL_ID = 0xe80272921
 // Detail type for JavaScript exception metadata (error type and stack trace)
 constexpr kj::Exception::DetailTypeId JS_EXCEPTION_METADATA_DETAIL_ID = 0xa9ae63464030fcefull;
 
+// Set on a DISCONNECTED actor-call failure that is known to have occurred BEFORE the call reached
+// the actor (i.e. user code definitely never ran). Such failures are safe to retry as a fresh
+// attempt. Set by edgeworker's pre-delivery routing/getActor failure paths; read by the caller-side
+// actor-call classifier. The payload is a zero-length array (marker only).
+constexpr kj::Exception::DetailTypeId REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID =
+    0x1a07d0b6559baea6ull;
+
+// Set on a failure that is known to have occurred AFTER the call reached the actor (user code may
+// have run). Must not be retried as a delivery failure. Set at the receiving entrypoint's actor
+// catch so it survives the internal-exception description rewrite and serializes back across the RPC
+// boundary. The payload is a zero-length array (marker only).
+constexpr kj::Exception::DetailTypeId REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID = 0x7f6e0bece261e8eeull;
+
+// Set when an actor invocation is rejected before user code because its retry token could not be
+// claimed. This distinguishes a claim rejection from other delivery failures so a caller can avoid
+// retrying it. The payload is a zero-length array (marker only).
+constexpr kj::Exception::DetailTypeId ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID = 0x6fb3a97323600af2ull;
+
+// Detail type for Durable Object metadata on exceptions propagated out of actor execution.
+constexpr kj::Exception::DetailTypeId DURABLE_OBJECT_EXCEPTION_METADATA_DETAIL_ID =
+    0xb6e3c4156a4f9d22ull;
+
 // Add a serialized copy of the exception value to the KJ exception, as a "detail".
 void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle);
 
 // Extract and add JavaScript exception metadata (error type and stack trace) to the KJ exception.
 // Serializes using Cap'n Proto schema defined in exception-metadata.capnp.
 void addJsExceptionMetadata(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle);
+
+// Attach the Durable Object id that produced an exception before it is propagated over RPC.
+void addDurableObjectId(kj::Exception& exception, kj::StringPtr durableObjectId);
+
+// Read Durable Object id metadata attached by addDurableObjectId(), if present.
+kj::Maybe<kj::String> getDurableObjectId(const kj::Exception& exception);
 
 struct TypeErrorContext {
   enum Kind : uint8_t {
@@ -516,6 +545,9 @@ class ExternalStringAllocator {
 // Returns a singleton DefaultExternalStringAllocator.
 kj::Own<ExternalStringAllocator> defaultExternalStringAllocator();
 
+using OwnedAscii = kj::Array<const char>;
+using OwnedUtf16 = kj::Array<const uint16_t>;
+
 // Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
 // take ownership of the buf. The buf *must* point to a static constant with infinite
 // lifetime.
@@ -530,6 +562,10 @@ kj::Own<ExternalStringAllocator> defaultExternalStringAllocator();
 // that are not owned by the v8 heap.
 v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf);
 
+// Creates a V8 external string whose resource shares ownership of `buf`. The backing
+// allocation remains alive until both the caller and all V8 strings release their Arcs.
+v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::Arc<OwnedAscii> buf);
+
 // Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
 // take ownership of the buf. The buf *must* point to a static constant with infinite
 // lifetime.
@@ -543,6 +579,9 @@ v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char
 // string methods because it needs to be absolutely clear that these use external buffers
 // that are not owned by the v8 heap.
 v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf);
+
+// Two-byte counterpart to the owning one-byte overload above.
+v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::Arc<OwnedUtf16> buf);
 
 // Use this type to mark APIs that are not implemented. Attempts to use the API will throw an
 // exception.

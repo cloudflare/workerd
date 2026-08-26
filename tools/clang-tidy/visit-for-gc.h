@@ -14,12 +14,23 @@ namespace clang_tidy {
 
 // Clang-tidy check that validates JSG resource types correctly visit their
 // GC roots. Flags fields of visitable types (jsg::Ref, jsg::V8Ref, jsg::JsRef,
-// jsg::Function, jsg::Promise, jsg::BufferSource, jsg::Value, etc., plus
-// kj::Maybe/Array/Vector/OneOf and jsg::Optional wrappers thereof) that are
-// not visited in the class's visitForGc() method.
+// jsg::Function, jsg::Promise, jsg::Promise<T>::Resolver, jsg::Generator,
+// jsg::Value, etc., plus kj::Maybe/Array/Vector/OneOf, jsg::Optional, and
+// jsg::Sequence wrappers thereof) that are not visited in the class's
+// visitForGc() method.
 //
-// This check helps prevent GC-related bugs where JavaScript objects are
-// prematurely collected because the C++ side failed to mark them as reachable.
+// Model: an unvisited handle is a strong root — bounded retention, never
+// use-after-free. Visiting enables JS<->C++ cycle collection but is only safe
+// when the holder is re-traversed every GC cycle from a live wrapper, a
+// traversal property this per-record check cannot decide. It therefore only
+// demands visits where the framework guarantees traversal, and never forbids
+// one. Never fix a diagnostic by blindly adding a visit; deliberate strong
+// roots get NOLINT(jsg-visit-for-gc) plus a reason.
+//
+// Deliberate limitations: any mention of a field in the body counts as a
+// visit (accepts the KJ_IF_SOME/KJ_SWITCH_ONEOF binding idiom); templated
+// bodies are only checked where instantiated; plain holders without
+// visitForGc are only diagnosed when a visible body reaches into them.
 class VisitForGcCheck : public clang::tidy::ClangTidyCheck {
  public:
   VisitForGcCheck(clang::StringRef Name, clang::tidy::ClangTidyContext *Context)

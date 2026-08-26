@@ -52,7 +52,6 @@ For file map and coding invariants, see [AGENTS.md](AGENTS.md).
 | `jsg::Function<Ret(Args...)>` | `Function`                  | Bidirectional: JS↔C++ callable                              |
 | `jsg::Promise<T>`             | `Promise`                   | Full `.then()`/`.catch_()` API                              |
 | `jsg::Name`                   | `string` or `Symbol`        | Property name wrapper                                       |
-| `jsg::BufferSource`           | `ArrayBuffer`/`TypedArray`  | Type-preserving; supports detach                            |
 | `jsg::V8Ref<T>`               | Any V8 type                 | Persistent strong reference                                 |
 | `jsg::Value`                  | Any                         | Alias for `V8Ref<v8::Value>`                                |
 | `jsg::Ref<T>`                 | Resource wrapper            | Strong ref to JSG Resource Type                             |
@@ -64,7 +63,7 @@ For file map and coding invariants, see [AGENTS.md](AGENTS.md).
 | `jsg::Identified<T>`          | Any                         | Captures JS object identity + unwrapped value               |
 | `jsg::NonCoercible<T>`        | Exact type                  | No automatic coercion; `T` = `kj::String`, `bool`, `double` |
 | `jsg::LenientOptional<T>`     | Optional                    | Silently ignores type errors → `undefined`                  |
-| `SelfConvertible` types       | Custom                      | Types defining static `jsgWrap()`/`jsgTryUnwrap()`; no registration needed |
+| `SelfConvertible` types       | Custom                      | Types defining static `jsgWrap()`/`jsgTryUnwrap()`; no registration needed. Declare `using JsgRttiDelegate = ...` to describe the type to RTTI (TypeScript generation) as an existing type |
 
 ## JsValue Type Mapping
 
@@ -93,6 +92,23 @@ For file map and coding invariants, see [AGENTS.md](AGENTS.md).
 
 Key rules: stack-only allocation (enforced in debug); implicit conversion to `v8::Local<T>`;
 use `JsRef<T>` to persist beyond current scope.
+
+## TypeHandler Acquisition
+
+`jsg::TypeHandler<T>` converts between C++ values and V8 handles (`wrap`/`tryUnwrap`).
+Two ways to obtain one:
+
+| Mechanism                                    | Where it works                       | Types supported                                                            |
+| -------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------- |
+| Trailing `const TypeHandler<T>&` parameter   | JSG-called functions/methods only    | Any wrappable `T` (instantiated on demand)                                  |
+| `js.tryGetTypeHandler<T>()`                  | Anywhere a `jsg::Lock` is available  | Resource types only, as `TypeHandler<jsg::Ref<T>>`; returns `kj::Maybe`     |
+
+`Lock::tryGetTypeHandler` is backed by a per-isolate registry populated at isolate
+construction (see `TypeWrapper::forEachTypeHandler`). It lets C++-initiated code wrap a
+fresh resource object into its JavaScript wrapper (or unwrap one) without a JS→C++ call.
+Value types (JSG_STRUCTs) are deliberately not registered — eager handler instantiation
+requires both conversion directions to compile, and some structs are one-directional —
+so they remain injection-only.
 
 ## JSG Macro Catalog
 
@@ -124,6 +140,16 @@ use `JsRef<T>` to persist beyond current scope.
 | `JSG_LAZY_READONLY_INSTANCE_PROPERTY(name, getter)` | Instance  | No               | No                      |
 | `JSG_LAZY_INSTANCE_PROPERTY(name, getter)`          | Instance  | Yes (after eval) | No                      |
 | `JSG_STATIC_CONSTANT(name)`                         | Class     | No               | N/A                     |
+| `JSG_PRIVATE_SYMBOL(name)`                          | Instance  | No               | No                      |
+
+`JSG_PRIVATE_SYMBOL(kName)` marks every instance with an own, read-only, non-enumerable,
+non-configurable property keyed by the `v8::Symbol::ForApi(isolate, "kName")` API-registry
+symbol, with the symbol itself as the value. C++ (and runtime-provided JS handed the symbol,
+e.g. via the per-isolate bootstrap's `utils.getApiSymbol()`) can re-acquire the identical
+symbol by name at any time; user code cannot mint it (the API registry is distinct from
+`Symbol.for()`'s). Useful as a tamper-resistant instance brand/marker recognizable from both
+sides of the boundary; note it is visible to `Object.getOwnPropertySymbols`, so it is a
+brand, not a secret. Not represented in RTTI/generated types.
 
 ### Type Relationships
 
@@ -209,14 +235,11 @@ All types that must be visited in `visitForGc()` if held as Resource Type member
 | `jsg::JsRef<T>`             | Persistent ref to JsValue type   |
 | `jsg::Optional<T>`          | When `T` is GC-visitable         |
 | `jsg::LenientOptional<T>`   | When `T` is GC-visitable         |
-| `jsg::Name`                 | Property name (string or symbol) |
 | `jsg::Function<Sig>`        | Wrapped JS/C++ function          |
 | `jsg::Promise<T>`           | JS promise wrapper               |
 | `jsg::Promise<T>::Resolver` | Promise resolver                 |
-| `jsg::BufferSource`         | Buffer with JS handle            |
-| `jsg::Sequence<T>`          | Iterable sequence                |
+| `jsg::Sequence<T>`          | When `T` is GC-visitable (use `visitor.visitAll`) |
 | `jsg::Generator<T>`         | Sync generator                   |
-| `jsg::AsyncGenerator<T>`    | Async generator                  |
 | `kj::Maybe<T>`              | When `T` is GC-visitable         |
 
 **Not GC-visitable** (compile error if visited):
@@ -224,6 +247,12 @@ All types that must be visited in `visitForGc()` if held as Resource Type member
 This is intentionally weak and does NOT keep its target alive during GC.
 Attempting to `visitor.visit()` a weak ref field is a compile error — the correct
 signal that weak references should not be traced. Do not include them in `visitForGc()`.
+
+`jsg::Name` is also not visitable (private `visitForGc`): its symbol handle is
+a strong root, and a `v8::Symbol` cannot form a JS↔C++ cycle.
+
+`jsg::AsyncGenerator<T>` is likewise not visitable (no `visitForGc`); holders
+keep its handles as strong roots.
 
 ## Weak References
 
@@ -438,7 +467,7 @@ Both may take additional `TypeHandler<T>&` trailing parameters.
 | String            | `StringType`           | `kj::String`, `USVString`, `DOMString`, `JsString` |
 | Object            | `ObjectType`           | `v8::Local<v8::Object>`, `v8::Global<v8::Object>`  |
 | Symbol            | `SymbolType`           | (not yet implemented)                              |
-| Interface-like    | `InterfaceLikeType`    | `JSG_RESOURCE` types, `BufferSource`               |
+| Interface-like    | `InterfaceLikeType`    | `JSG_RESOURCE` types                               |
 | Callback function | `CallbackFunctionType` | `kj::Function<T>`, `Constructor<T>`                |
 | Dictionary-like   | `DictionaryLikeType`   | `JSG_STRUCT` types, `Dict<V, K>`                   |
 | Sequence-like     | `SequenceLikeType`     | `kj::Array<T>`, `Sequence<T>`                      |

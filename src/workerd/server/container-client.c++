@@ -11,8 +11,10 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/url.h>
 #include <workerd/server/docker-api.capnp.h>
+#include <workerd/util/sentry.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/strings.h>
+#include <workerd/util/strong-bool.h>
 #include <workerd/util/uuid.h>
 
 #include <stdio.h>
@@ -32,6 +34,13 @@
 
 namespace workerd::server {
 
+// Whether an exec's stderr is merged into its stdout stream.
+WD_STRONG_BOOL(CombinedOutput);
+
+// Whether an exec was started with a PTY (raw single-stream output) rather than Docker's
+// multiplexed frame protocol.
+WD_STRONG_BOOL(Pty);
+
 namespace {
 
 constexpr uint16_t SIDECAR_INGRESS_PORT = 39001;
@@ -48,11 +57,8 @@ constexpr kj::StringPtr SNAPSHOT_VOLUME_PREFIX = "workerd-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_CLONE_VOLUME_PREFIX = "workerd-snap-clone-"_kj;
 constexpr kj::StringPtr CONTAINER_SNAPSHOT_IMAGE_PREFIX = "workerd-container-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_VOLUME_CREATED_AT_LABEL = "dev.workerd.snapshot-created-at"_kj;
+constexpr size_t MAX_SNAPSHOT_IMAGE_ANCESTRY_DEPTH = 128;
 
-// Prefix applied to user-supplied labels when writing them to the Docker container, and
-// stripped back out when reading them via inspect(). Lets us distinguish labels the worker
-// set via start() from labels that came from the image (via Dockerfile LABEL) or engine.
-constexpr kj::StringPtr WORKERD_LABEL_PREFIX = "workerd-"_kj;
 constexpr auto SNAPSHOT_STALE_AGE = 30 * kj::DAYS;
 
 // Maximum size of a snapshot tar archive held in memory during snapshot create/restore.
@@ -735,7 +741,7 @@ void detachEnd(kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> stream) {
 kj::Promise<void> demuxDockerExecOutput(kj::AsyncInputStream& input,
     kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> stdoutWriter,
     kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> stderrWriter,
-    bool combinedOutput) {
+    CombinedOutput combinedOutput) {
   kj::Vector<kj::byte> buffer;
   size_t offset = 0;
 
@@ -810,6 +816,34 @@ kj::Promise<void> demuxDockerExecOutput(kj::AsyncInputStream& input,
     }
     KJ_IF_SOME(err, stderrWriter) {
       err->abortWrite(exception.clone());
+    }
+    kj::throwFatalException(kj::mv(exception));
+  }
+}
+
+// Copies a raw (unframed) Docker exec stream straight through to stdout. This is
+// used for PTY execs, where Docker hijacks the connection as a single raw stream that merges
+// stdout and stderr rather than the 8-byte multiplexed framing used for non-TTY execs.
+kj::Promise<void> copyRawExecOutput(
+    kj::AsyncInputStream& input, kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> stdoutWriter) {
+  kj::byte scratch[16384];
+  KJ_TRY {
+    for (;;) {
+      auto amount = co_await input.tryRead(scratch, 1, sizeof(scratch));
+      if (amount == 0) {
+        break;
+      }
+      KJ_IF_SOME(out, stdoutWriter) {
+        co_await out->write(kj::ArrayPtr<kj::byte>(scratch, amount));
+      }
+    }
+
+    // Detach from end() since the user might've decided not to read the output altogether.
+    detachEnd(kj::mv(stdoutWriter));
+  }
+  KJ_CATCH(exception) {
+    KJ_IF_SOME(out, stdoutWriter) {
+      out->abortWrite(exception.clone());
     }
     kj::throwFatalException(kj::mv(exception));
   }
@@ -910,7 +944,47 @@ kj::Maybe<uint16_t> tryParsePublishedHostPort(capnp::json::Value::Reader portMap
   KJ_FAIL_REQUIRE("Malformed ContainerInspect port binding response: missing HostPort");
 }
 
+// Path, inside the container, of the file where an exec's wrapper shell records its own
+// container-namespaced PID. Keyed by a per-exec random token so concurrent execs don't collide.
+kj::String killTokenPidFile(kj::StringPtr killToken) {
+  return kj::str("/tmp/.workerd-exec-", killToken, ".pid");
+}
+
 }  // namespace
+
+void configureContainerPrivileges(
+    docker_api::Docker::ContainerCreateRequest::HostConfig::Builder hostConfig,
+    const ContainerPrivileges& privileges) {
+  if (privileges.isEmpty()) {
+    return;
+  }
+
+  // The init*() calls below overwrite these HostConfig lists rather than appending. This function
+  // must remain the sole writer of CapAdd/Devices/SecurityOpt for the main container; otherwise,
+  // earlier values will be silently truncated.
+  if (privileges.capabilities.size() > 0) {
+    auto capAdd = hostConfig.initCapAdd(privileges.capabilities.size());
+    for (auto i: kj::indices(privileges.capabilities)) {
+      capAdd.set(i, privileges.capabilities[i]);
+    }
+  }
+  if (privileges.devices.size() > 0) {
+    auto devices = hostConfig.initDevices(privileges.devices.size());
+    for (auto i: kj::indices(privileges.devices)) {
+      auto output = devices[i];
+      auto& input = privileges.devices[i];
+      output.setPathOnHost(input.pathOnHost);
+      output.setPathInContainer(input.pathInContainer);
+      output.setCgroupPermissions(input.cgroupPermissions);
+    }
+  }
+  if (privileges.securityOpt.size() > 0) {
+    auto securityOpt = hostConfig.initSecurityOpt(privileges.securityOpt.size());
+    for (auto i: kj::indices(privileges.securityOpt)) {
+      securityOpt.set(i, privileges.securityOpt[i]);
+    }
+  }
+}
 
 // Represents a parsed egress mapping. IP/CIDR mappings match destination IPs,
 // while hostnameGlob mappings match either HTTP hostnames or TLS SNI depending on protocol.
@@ -939,7 +1013,8 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::TaskSet& waitUntilTasks,
     kj::Promise<void> pendingCleanup,
     kj::Function<void(kj::Promise<void>)> cleanupCallback,
-    ChannelTokenHandler& channelTokenHandler)
+    ChannelTokenHandler& channelTokenHandler,
+    ContainerPrivileges privileges)
     : byteStreamFactory(byteStreamFactory),
       timer(timer),
       network(network),
@@ -948,6 +1023,7 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       sidecarContainerName(kj::encodeUriComponent(kj::str(containerName, "-proxy"))),
       imageName(kj::mv(imageName)),
       containerEgressInterceptorImage(kj::mv(containerEgressInterceptorImage)),
+      privileges(kj::mv(privileges)),
       waitUntilTasks(waitUntilTasks),
       pendingCleanup(kj::mv(pendingCleanup).fork()),
       cleanupCallback(kj::mv(cleanupCallback)),
@@ -987,12 +1063,14 @@ ContainerClient::~ContainerClient() noexcept(false) {
 
 // Docker-specific Port implementation that implements rpc::Container::Port::Server
 // It does a HTTP CONNECT to the proxy-everything sidecar port.
-class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
+class ContainerClient::DockerPort final: public rpc::Container::Port::Server,
+                                         private kj::TaskSet::ErrorHandler {
  public:
   DockerPort(ContainerClient& containerClient, kj::String containerHost, uint16_t containerPort)
       : containerClient(containerClient),
         containerHost(kj::mv(containerHost)),
-        containerPort(containerPort) {}
+        containerPort(containerPort),
+        pumpTasks(*this) {}
 
   kj::Promise<void> connect(ConnectContext context) override {
     auto mappedPort = JSG_REQUIRE_NONNULL(containerClient.sidecarIngressHostPort, Error,
@@ -1035,11 +1113,20 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
     auto upEnd = kj::mv(upPipe.in);
     auto results = context.getResults();
     results.setUp(containerClient.byteStreamFactory.kjToCapnp(kj::mv(upPipe.out)));
-    auto downEnd = containerClient.byteStreamFactory.capnpToKj(context.getParams().getDown());
+    auto downEnd =
+        containerClient.byteStreamFactory.capnpToKjExplicitEnd(context.getParams().getDown());
 
-    pumpTask =
-        kj::joinPromisesFailFast(kj::arr(upEnd->pumpTo(*connection), connection->pumpTo(*downEnd)))
-            .attach(kj::mv(httpClient), kj::mv(upEnd), kj::mv(connection), kj::mv(downEnd));
+    auto& connectionRef = *connection;
+    auto& downEndRef = *downEnd;
+    auto upPump = upEnd->pumpTo(connectionRef).then([&connectionRef](uint64_t) {
+      connectionRef.shutdownWrite();
+    });
+    auto downPump =
+        connectionRef.pumpTo(downEndRef).then([&downEndRef](uint64_t) { return downEndRef.end(); });
+
+    pumpTasks.add(
+        kj::joinPromisesFailFast(kj::arr(kj::mv(upPump), kj::mv(downPump)))
+            .attach(kj::mv(httpClient), kj::mv(upEnd), kj::mv(connection), kj::mv(downEnd)));
     co_return;
   }
 
@@ -1048,25 +1135,48 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
   ContainerClient& containerClient;
   kj::String containerHost;
   uint16_t containerPort;
-  kj::Maybe<kj::Promise<kj::Array<uint64_t>>> pumpTask;
+  kj::TaskSet pumpTasks;
+
+  void taskFailed(kj::Exception&& exception) override {
+    // Tunnel disconnects are expected during normal teardown and are reported to the peer through
+    // the ByteStreams, so ignore them (and other uninteresting errors such as OVERLOADED). Log
+    // anything unexpected so that genuine failures are not silently swallowed.
+    if (isInterestingException(exception)) {
+      KJ_LOG(ERROR, "container tunnel pump task failed", exception);
+    }
+  }
 };
 
 class ContainerClient::DockerProcessHandle final: public rpc::Container::ProcessHandle::Server {
  public:
   DockerProcessHandle(ContainerClient& containerClient,
       kj::String execId,
+      kj::String killToken,
       kj::Own<kj::AsyncIoStream> connection,
       kj::Maybe<capnp::ByteStream::Client> stdoutWriter,
       kj::Maybe<capnp::ByteStream::Client> stderrWriter,
-      bool combinedOutput)
+      CombinedOutput combinedOutput,
+      Pty pty)
       : containerClient(containerClient.addRef()),
         execId(kj::mv(execId)),
+        killToken(kj::mv(killToken)),
+        pty(pty),
         sharedConnection(kj::refcounted<SharedExecConnection>(kj::mv(connection))) {
     kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> stdoutStream = kj::none;
     KJ_IF_SOME(out, stdoutWriter) {
       stdoutStream = this->containerClient->byteStreamFactory.capnpToKjExplicitEnd(out);
     } else {
       stdoutStream = capnp::ExplicitEndOutputStream::wrap(newNullOutputStream(), []() {});
+    }
+
+    if (pty) {
+      // A PTY hijacks the connection as a single raw stream that merges stdout and stderr, so copy
+      // it straight through to stdout instead of demultiplexing Docker's frame protocol. stderr is
+      // always combined into stdout when a PTY is active, so there is no separate stderr stream.
+      auto task = copyRawExecOutput(*sharedConnection->connection, kj::mv(stdoutStream))
+                      .attach(this->containerClient->addRef(), kj::addRef(*sharedConnection));
+      streamClosedTask = kj::mv(task).fork();
+      return;
     }
 
     kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> stderrStream = kj::none;
@@ -1122,18 +1232,28 @@ class ContainerClient::DockerProcessHandle final: public rpc::Container::Process
   }
 
   kj::Promise<void> kill(KillContext context) override {
-    auto inspect = co_await containerClient->inspectExec(execId);
-    JSG_REQUIRE(inspect.pid > 0, Error, "Exec process does not have a visible pid to signal.");
-
-    auto signal = kj::str("-", signalToString(context.getParams().getSigno()));
-    auto pid = kj::str(inspect.pid);
-    auto cmd = kj::arr(kj::str("kill"), kj::mv(signal), kj::mv(pid));
+    // The exec's wrapper shell records its container-namespaced PID to a file keyed by killToken
+    // (see createExec). Read that PID inside the container and signal it. This works regardless of
+    // whether the container shares the host PID namespace, unlike signalling by the host PID that
+    // Docker's exec-inspect reports.
+    auto pidFile = killTokenPidFile(killToken);
+    auto killCmd = kj::str("kill -", context.getParams().getSigno(), " \"$(cat ", pidFile, ")\"");
+    auto cmd = kj::arr(kj::str("/bin/sh"), kj::str("-c"), kj::mv(killCmd));
     co_await containerClient->runSimpleExec(cmd.asPtr());
+  }
+
+  kj::Promise<void> resize(ResizeContext context) override {
+    JSG_REQUIRE(pty.toBool(), Error,
+        "resize() can only be called on a process that was started with a PTY.");
+    auto params = context.getParams();
+    co_await containerClient->resizeExec(execId, params.getCols(), params.getRows());
   }
 
  private:
   kj::Own<ContainerClient> containerClient;
   kj::String execId;
+  kj::String killToken;
+  Pty pty;
   kj::Own<SharedExecConnection> sharedConnection;
   bool waitStarted = false;
   kj::Maybe<kj::ForkedPromise<void>> streamClosedTask;
@@ -1543,23 +1663,6 @@ kj::Promise<kj::Maybe<ContainerClient::InspectResponse>> ContainerClient::inspec
   // so that start() correctly refuses to start a duplicate and destroy() can clean it up.
   bool running = status == "running" || status == "restarting";
 
-  kj::Vector<Label> labels;
-  if (jsonRoot.hasConfig() && jsonRoot.getConfig().hasLabels()) {
-    auto labelsJson = jsonRoot.getConfig().getLabels();
-    if (labelsJson.isObject()) {
-      for (auto field: labelsJson.getObject()) {
-        kj::StringPtr name = field.getName();
-        if (!name.startsWith(WORKERD_LABEL_PREFIX)) continue;
-        auto value = field.getValue();
-        JSG_REQUIRE(value.isString(), Error, "Malformed ContainerInspect label value");
-        labels.add(Label{
-          .name = kj::str(name.slice(WORKERD_LABEL_PREFIX.size())),
-          .value = kj::str(value.getString()),
-        });
-      }
-    }
-  }
-
   kj::String image;
   if (jsonRoot.hasConfig() && jsonRoot.getConfig().hasImage()) {
     image = kj::str(jsonRoot.getConfig().getImage());
@@ -1567,7 +1670,6 @@ kj::Promise<kj::Maybe<ContainerClient::InspectResponse>> ContainerClient::inspec
 
   co_return InspectResponse{
     .isRunning = running,
-    .labels = labels.releaseAsArray(),
     .image = kj::mv(image),
   };
 }
@@ -1694,17 +1796,6 @@ kj::Promise<void> ContainerClient::createContainer(kj::StringPtr effectiveImage,
     jsonEnv.set(envSize + i, defaultEnv[i]);
   }
 
-  // Pass user-supplied labels as Docker object labels, prefixed so we can distinguish
-  // them from image/engine labels when reading back via inspect().
-  if (params.hasLabels()) {
-    auto lbls = params.getLabels();
-    auto labelsObj = jsonRoot.initLabels().initObject(lbls.size());
-    for (auto i: kj::zeroTo(lbls.size())) {
-      labelsObj[i].setName(kj::str(WORKERD_LABEL_PREFIX, lbls[i].getName()));
-      labelsObj[i].initValue().setString(lbls[i].getValue());
-    }
-  }
-
   auto hostConfig = jsonRoot.initHostConfig();
   // We need to set a restart policy to avoid having ambiguous states
   // where the container we're managing is stuck at "exited" state.
@@ -1729,6 +1820,20 @@ kj::Promise<void> ContainerClient::createContainer(kj::StringPtr effectiveImage,
       mount.initVolumeOptions().setNoCopy(true);
     }
   }
+
+  if (!privileges.isEmpty()) {
+    auto deviceBuilder = kj::heapArrayBuilder<kj::String>(privileges.devices.size());
+    for (const auto& device: privileges.devices) {
+      deviceBuilder.add(kj::str("{ pathOnHost = ", device.pathOnHost, ", pathInContainer = ",
+          device.pathInContainer, ", cgroupPermissions = ", device.cgroupPermissions, " }"));
+    }
+    auto devices = deviceBuilder.finish();
+    KJ_LOG(WARNING,
+        "Creating a container with explicitly configured Docker privileges. Capabilities, devices, "
+        "and security options may grant host-level access.",
+        containerName, privileges.capabilities, devices, privileges.securityOpt);
+  }
+  configureContainerPrivileges(hostConfig, privileges);
 
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/containers/create?name=", containerName), codec.encode(jsonRoot));
@@ -1759,7 +1864,8 @@ kj::Promise<void> ContainerClient::createContainer(kj::StringPtr effectiveImage,
 kj::Promise<kj::String> ContainerClient::createExec(capnp::List<capnp::Text>::Reader cmd,
     rpc::Container::ExecOptions::Reader params,
     bool attachStdout,
-    bool attachStderr) {
+    bool attachStderr,
+    kj::StringPtr killToken) {
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ExecCreateRequest>();
 
@@ -1768,11 +1874,25 @@ kj::Promise<kj::String> ContainerClient::createExec(capnp::List<capnp::Text>::Re
   request.setAttachStdin(true);
   request.setAttachStdout(attachStdout);
   request.setAttachStderr(attachStderr);
-  request.setTty(false);
+  request.setTty(params.hasPty());
 
-  auto jsonCmd = request.initCmd(cmd.size());
+  // Wrap the user command in a small shell prologue that records the process's own
+  // container-namespaced PID before exec'ing the real command. Docker's exec-inspect only reports
+  // the process PID in the daemon's (host) PID namespace, which is not addressable from inside the
+  // container when it runs in its own PID namespace, so kill() reads this recorded PID instead.
+  // The `exec "$@"` replaces the shell in place, so the recorded PID ($$) is exactly the PID the
+  // user command runs as, and argv is preserved unchanged.
+  auto pidFile = killTokenPidFile(killToken);
+  auto prologue = kj::str("echo $$ > ", pidFile, "; exec \"$@\"");
+
+  auto jsonCmd = request.initCmd(cmd.size() + 4);
+  jsonCmd.set(0, "/bin/sh"_kj);
+  jsonCmd.set(1, "-c"_kj);
+  jsonCmd.set(2, prologue);
+  // A conventional argv[0] for the wrapper shell; "$@" starts at the next argument.
+  jsonCmd.set(3, "sh"_kj);
   for (auto i: kj::zeroTo(cmd.size())) {
-    jsonCmd.set(i, cmd[i]);
+    jsonCmd.set(i + 4, cmd[i]);
   }
 
   if (params.hasEnv()) {
@@ -1800,14 +1920,23 @@ kj::Promise<kj::String> ContainerClient::createExec(capnp::List<capnp::Text>::Re
   co_return kj::str(parsed->getRoot<docker_api::Docker::ExecCreateResponse>().getId());
 }
 
-kj::Promise<kj::Own<kj::AsyncIoStream>> ContainerClient::startExec(kj::String execId) {
+kj::Promise<kj::Own<kj::AsyncIoStream>> ContainerClient::startExec(
+    kj::String execId, bool tty, uint16_t cols, uint16_t rows) {
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ExecStartRequest>();
 
   capnp::MallocMessageBuilder message;
   auto requestBody = message.initRoot<docker_api::Docker::ExecStartRequest>();
   requestBody.setDetach(false);
-  requestBody.setTty(false);
+  requestBody.setTty(tty);
+  // Set the initial TTY dimensions when at least one was explicitly provided. A 0 dimension
+  // means "use Docker's default", so partial specs (e.g. only cols) still work — the unset
+  // dimension passes through as 0. Docker expects [height, width].
+  if (tty && (cols != 0 || rows != 0)) {
+    auto consoleSize = requestBody.initConsoleSize(2);
+    consoleSize.set(0, rows);
+    consoleSize.set(1, cols);
+  }
   auto encodedBody = codec.encode(requestBody);
 
   // Exec attach uses HTTP connection hijacking. A plain POST can succeed with 200 OK but then not
@@ -1832,6 +1961,14 @@ kj::Promise<kj::Own<kj::AsyncIoStream>> ContainerClient::startExec(kj::String ex
   }
 
   co_return kj::mv(response.connection);
+}
+
+kj::Promise<void> ContainerClient::resizeExec(kj::StringPtr execId, uint16_t cols, uint16_t rows) {
+  KJ_REQUIRE(cols > 0 && rows > 0, "PTY resize dimensions must be non-zero.");
+  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+      kj::str("/exec/", execId, "/resize?h=", rows, "&w=", cols));
+  JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 201, Error,
+      "Resizing Docker exec failed with [", response.statusCode, "] ", response.body);
 }
 
 kj::Promise<ContainerClient::ExecInspectResponse> ContainerClient::inspectExec(
@@ -2067,7 +2204,7 @@ kj::Promise<ContainerClient::ImageInspectResponse> ContainerClient::inspectImage
 
   auto message = decodeJsonResponse<docker_api::Docker::ImageInspectResponse>(response.body);
   auto root = message->getRoot<docker_api::Docker::ImageInspectResponse>();
-  co_return ImageInspectResponse{kj::str(root.getId()), root.getSize()};
+  co_return ImageInspectResponse{kj::str(root.getId()), root.getSize(), kj::str(root.getParent())};
 }
 
 kj::Promise<void> ContainerClient::deleteImage(kj::String imageRef) {
@@ -2200,6 +2337,9 @@ kj::Promise<void> ContainerClient::status(StatusContext context) {
     isRunning = info.isRunning;
   }
   containerStarted.store(isRunning, std::memory_order_release);
+  if (!isRunning) {
+    labels.clear();
+  }
   containerSidecarStarted.store(false, std::memory_order_release);
   this->sidecarIngressHostPort = kj::none;
 
@@ -2219,16 +2359,41 @@ kj::Promise<void> ContainerClient::status(StatusContext context) {
   context.getResults().setRunning(isRunning);
 }
 
+kj::Promise<void> ContainerClient::setLabels(SetLabelsContext context) {
+  auto [ready, done] = getRpcTurn();
+  co_await ready;
+  KJ_DEFER(done->fulfill());
+
+  JSG_REQUIRE(containerStarted.load(std::memory_order_acquire), Error,
+      "setLabels() requires a running container.");
+
+  auto params = context.getParams();
+  auto newLabels = params.getLabels();
+  labels.clear();
+  labels.reserve(newLabels.size());
+  for (auto i: kj::zeroTo(newLabels.size())) {
+    labels.insert(kj::str(newLabels[i].getName()), kj::str(newLabels[i].getValue()));
+  }
+
+  co_return;
+}
+
 kj::Promise<void> ContainerClient::inspect(InspectContext context) {
+  auto [ready, done] = getRpcTurn();
+  co_await ready;
+  KJ_DEFER(done->fulfill());
+
   auto maybeResp = co_await inspectContainer();
   auto info = context.getResults().initInfo();
   KJ_IF_SOME(resp, maybeResp) {
     if (resp.isRunning) {
       auto started = info.initStarted();
-      auto list = started.initLabels(resp.labels.size());
-      for (auto i: kj::indices(resp.labels)) {
-        list[i].setName(resp.labels[i].name);
-        list[i].setValue(resp.labels[i].value);
+      auto list = started.initLabels(labels.size());
+      uint i = 0;
+      for (auto& entry: labels) {
+        list[i].setName(entry.key);
+        list[i].setValue(entry.value);
+        ++i;
       }
       started.setImage(resp.image);
       co_return;
@@ -2258,11 +2423,40 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
 
   internetEnabled = params.getEnableInternet();
 
-  kj::String effectiveImage = kj::str(imageName);
-  if (params.hasContainerSnapshotId()) {
-    auto snapshotId = parseSnapshotId(params.getContainerSnapshotId());
-    effectiveImage = kj::str(CONTAINER_SNAPSHOT_IMAGE_PREFIX, snapshotId);
-    co_await inspectImage(effectiveImage);
+  labels.clear();
+  if (params.hasLabels()) {
+    auto lbls = params.getLabels();
+    labels.reserve(lbls.size());
+    for (auto i: kj::zeroTo(lbls.size())) {
+      labels.insert(kj::str(lbls[i].getName()), kj::str(lbls[i].getValue()));
+    }
+  }
+
+  kj::String snapshotImageRef;
+  kj::StringPtr effectiveImage = imageName;
+  auto source = params.getSource();
+  switch (source.which()) {
+    case rpc::Container::StartParams::Source::IMAGE:
+      effectiveImage = source.getImage();
+      break;
+    case rpc::Container::StartParams::Source::CONTAINER_SNAPSHOT_ID: {
+      if (!source.hasContainerSnapshotId()) break;
+
+      auto selectedImage = co_await inspectImage(effectiveImage);
+      auto snapshotId = parseSnapshotId(source.getContainerSnapshotId());
+      snapshotImageRef = kj::str(CONTAINER_SNAPSHOT_IMAGE_PREFIX, snapshotId);
+      auto snapshotImage = co_await inspectImage(snapshotImageRef);
+      for (size_t depth = 0;
+           snapshotImage.id != selectedImage.id && snapshotImage.parent.size() > 0; ++depth) {
+        JSG_REQUIRE(depth < MAX_SNAPSHOT_IMAGE_ANCESTRY_DEPTH, Error,
+            "Container snapshot image ancestry is too deep");
+        snapshotImage = co_await inspectImage(snapshotImage.parent);
+      }
+      JSG_REQUIRE(snapshotImage.id == selectedImage.id, Error,
+          "Container snapshot does not match the requested image");
+      effectiveImage = snapshotImageRef;
+      break;
+    }
   }
 
   // If startup fails after we clone any snapshot volumes, tear down the app container first and
@@ -2339,18 +2533,39 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
   JSG_REQUIRE(containerStarted.load(std::memory_order_acquire), Error, "Container failed to start");
 
   auto results = context.getResults();
-  KJ_DEFER(containerStarted.store(false, std::memory_order_release));
 
-  auto endpoint = kj::str("/containers/", containerName, "/wait");
-  auto response = co_await dockerApiRequest(
-      network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint));
+  kj::Maybe<int32_t> maybeExitCode;
+  kj::Maybe<kj::Exception> maybeError;
 
-  JSG_REQUIRE(response.statusCode == 200, Error,
-      "Monitoring container failed with: ", response.statusCode, " ", response.body);
+  try {
+    auto endpoint = kj::str("/containers/", containerName, "/wait");
+    auto response = co_await dockerApiRequest(
+        network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint));
 
-  auto message = decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(response.body);
-  auto jsonRoot = message->getRoot<docker_api::Docker::ContainerMonitorResponse>();
-  results.setExitCode(jsonRoot.getStatusCode());
+    JSG_REQUIRE(response.statusCode == 200, Error,
+        "Monitoring container failed with: ", response.statusCode, " ", response.body);
+
+    auto message = decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(response.body);
+    auto jsonRoot = message->getRoot<docker_api::Docker::ContainerMonitorResponse>();
+    maybeExitCode = jsonRoot.getStatusCode();
+  } catch (...) {
+    maybeError = kj::getCaughtExceptionAsKj();
+  }
+
+  {
+    auto [ready, done] = getRpcTurn();
+    co_await ready;
+    KJ_DEFER(done->fulfill());
+
+    containerStarted.store(false, std::memory_order_release);
+    labels.clear();
+  }
+
+  KJ_IF_SOME(exception, maybeError) {
+    kj::throwFatalException(kj::mv(exception));
+  }
+
+  results.setExitCode(KJ_REQUIRE_NONNULL(maybeExitCode));
 }
 
 kj::Promise<void> ContainerClient::destroy(DestroyContext context) {
@@ -2368,6 +2583,8 @@ kj::Promise<void> ContainerClient::destroy(DestroyContext context) {
   // in the destructor), or on the next start() if state is inconsistent (e.g. workerd
   // restart left an orphaned sidecar; status() recovery handles that case).
   co_await destroyContainer();
+  containerStarted.store(false, std::memory_order_release);
+  labels.clear();
 }
 
 kj::Promise<void> ContainerClient::signal(SignalContext context) {
@@ -2394,8 +2611,21 @@ kj::Promise<void> ContainerClient::exec(ExecContext context) {
   bool attachStdout = true;
   bool attachStderr = true;
 
-  auto execId = co_await createExec(request.getCmd(), execParams, attachStdout, attachStderr);
-  kj::Own<kj::AsyncIoStream> execConnection = co_await startExec(kj::str(execId));
+  bool pty = execParams.hasPty();
+  uint16_t ptyCols = 0;
+  uint16_t ptyRows = 0;
+  if (pty) {
+    ptyCols = execParams.getPty().getCols();
+    ptyRows = execParams.getPty().getRows();
+  }
+
+  // A per-exec random token names the file in which the wrapper shell records the process's
+  // container-namespaced PID, so that kill() can signal it (see createExec / kill).
+  auto killToken = randomUUID(kj::none);
+  auto execId =
+      co_await createExec(request.getCmd(), execParams, attachStdout, attachStderr, killToken);
+  kj::Own<kj::AsyncIoStream> execConnection =
+      co_await startExec(kj::str(execId), pty, ptyCols, ptyRows);
   kj::Maybe<capnp::ByteStream::Client> stdoutWriter = kj::none;
   if (request.hasStdoutWriter()) {
     stdoutWriter = request.getStdoutWriter();
@@ -2421,8 +2651,9 @@ kj::Promise<void> ContainerClient::exec(ExecContext context) {
 
   auto process = context.getResults().initProcess();
   process.setPid(static_cast<int32_t>(inspect.pid));
-  process.setHandle(kj::heap<DockerProcessHandle>(*this, kj::mv(execId), kj::mv(execConnection),
-      kj::mv(stdoutWriter), kj::mv(stderrWriter), execParams.getCombinedOutput()));
+  process.setHandle(kj::heap<DockerProcessHandle>(*this, kj::mv(execId), kj::mv(killToken),
+      kj::mv(execConnection), kj::mv(stdoutWriter), kj::mv(stderrWriter),
+      CombinedOutput(execParams.getCombinedOutput()), Pty(pty)));
 }
 
 kj::Promise<void> ContainerClient::setInactivityTimeout(SetInactivityTimeoutContext context) {

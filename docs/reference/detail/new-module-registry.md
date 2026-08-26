@@ -86,16 +86,36 @@ ModuleRegistry (kj::AtomicRefcounted)
 IsolateModuleRegistry
   |-- inner: const ModuleRegistry&         (back-reference to shared registry)
   |-- observer: const CompilationObserver& (compilation metrics)
-  +-- lookupCache: kj::Table<Entry>        (triple-indexed)
-        Each Entry:
-          |-- key: HashableV8Ref<v8::Module>   (V8 module handle)
-          |-- context: SpecifierContext         (type + URL)
-          +-- module: const Module&            (back-ref to definition)
-        Indices:
-          |-- HashIndex<EntryCallbacks>    -- lookup by v8::Module identity
-          |-- HashIndex<ContextCallbacks>  -- lookup by (type, URL)
-          +-- HashIndex<UrlCallbacks>      -- lookup by URL alone
+  |-- instantiations: kj::Table<Entry>     (one row per live v8::Module)
+  |     Each Entry:
+  |       |-- key: HashableV8Ref<v8::Module>  (V8 module handle)
+  |       |-- id: Url                         (specifier incl. query/fragment;
+  |       |                                    this is the instance's import.meta.url)
+  |       +-- module: const Module&           (back-ref to definition)
+  |     Indices:
+  |       |-- HashIndex<EntryCallbacks>     -- by v8::Module identity
+  |       +-- HashIndex<InstanceCallbacks>  -- by (specifier URL, definition)
+  +-- resolutions: HashMap<SpecifierContext, const Module*>
+        maps (context type, specifier URL) -> the definition it resolves to
 ```
+
+The two-level split encodes the module-identity rules the registry guarantees:
+
+- **Query/fragment-distinct specifiers produce distinct instances**, each with
+  its own `import.meta.url` (`import('./foo?a') !== import('./foo?b')`), per the
+  HTML module-map model.
+- **The same specifier resolved through different context types shares one
+  instance when it resolves to the same definition** — e.g.
+  `process.getBuiltinModule('cloudflare:sockets')` is reference-equal to the
+  namespace obtained via `import()`, and a builtin imported by both user code
+  and other builtins remains a per-isolate singleton (module-level state is
+  never duplicated).
+- **The same specifier resolved to different definitions yields distinct
+  instances** — a worker-bundle module shadowing a builtin name coexists with
+  the real builtin, and `PUBLIC_BUILTIN` resolution never observes the shadow.
+
+There is deliberately no index keyed by URL alone: with shadowing, one URL can
+map to multiple rows, so a unique URL index would collide.
 
 ## Module Types
 
@@ -140,14 +160,35 @@ module construction time.
 
 ```
 EsModule extends Module {
-  source:     kj::ArrayPtr<const char>                      // Raw source text
-  cachedData: MutexGuarded<Maybe<Own<CachedData>>>          // Cross-isolate compile cache
+  source:        kj::OneOf<kj::ArrayPtr<const char>, kj::Arc<OwnedAscii>> // UTF-8
+  encodedSource: kj::Lazy<EncodedSource>                         // V8-compatible encoding (shared)
+  cachedData:    MutexGuarded<Maybe<Own<CachedData>>>            // Cross-isolate compile cache
 }
 ```
 
-- `getDescriptor()`: Compiles the source via `v8::ScriptCompiler::CompileModule`.
-  Checks the `cachedData` shared cache first (shared lock for reading, exclusive
-  lock for writing). On cache miss, generates and stores bytecode after compilation.
+- `getDescriptor()`: Encodes the source (see below), then compiles it via
+  `v8::ScriptCompiler::CompileModule`. Checks the `cachedData` shared cache first
+  (shared lock for reading, exclusive lock for writing). On cache miss, generates
+  and stores bytecode after compilation.
+
+#### Source Encoding (`EncodedSource`)
+
+V8 has no internal UTF-8 string representation — external source strings must be
+one-byte (Latin-1) or two-byte (UTF-16). Worker bundle sources arrive as UTF-8
+bytes, so each module's source is encoded once, lazily, on first compile
+(`kj::Lazy` handles cross-thread once-init) and the result is shared by every
+isolate that compiles the module:
+
+| Source content                     | Representation                                   |
+| ---------------------------------- | ------------------------------------------------ |
+| Pure ASCII (the common case)       | Zero-copy one-byte external over static or Arc-owned storage |
+| Non-ASCII, all code points ≤ U+00FF | One-time UTF-8→Latin-1 transcode into Arc-owned storage       |
+| Anything else (CJK, emoji, ...)    | One-time UTF-8→UTF-16 transcode into Arc-owned storage        |
+
+Invalid UTF-8 sequences are replaced with U+FFFD (via `kj::encodeUtf16`),
+matching `v8::String::NewFromUtf8`'s tolerance and the legacy registry. The
+encoding choice is a pure function of the source bytes, so all replicas agree
+and the shared compile cache stays consistent.
 - `evaluate()`: Calls `v8::Module::Evaluate()`. For modules with `Flags::EVAL`,
   delegates to the `Evaluator` to run evaluation outside the IoContext.
 - Always has `Flags::ESM | Flags::EVAL` set.
@@ -233,11 +274,16 @@ to the `bundleBase` URL (typically `file:///bundle/`):
 
 ```cpp
 BundleBuilder builder(bundleBase);
-builder.addEsmModule("index.js", source, Flags::ESM | Flags::MAIN);
+builder.addEsmModule(
+    "index.js", kj::arc<OwnedAscii>(kj::mv(source)), Flags::ESM | Flags::MAIN);
 builder.addSyntheticModule("data.json", Module::newJsonModuleHandler(jsonData));
 builder.addWasmModule("module.wasm", wasmBytes);
 auto bundle = builder.finish();
 ```
+
+The `kj::Arc<OwnedAscii>` overload must be used for ordinary worker source. The
+`ArrayPtr` overload is reserved for compiled-in strings with static process
+lifetime because V8 can retain an external source string after compilation.
 
 Name normalization (`normalizeModuleName`):
 
@@ -293,16 +339,21 @@ User code: import { foo } from './bar.js'
 4. Build ResolveContext { type, source=STATIC_IMPORT, normalizedSpecifier, referrer }
 
 5. IsolateModuleRegistry::resolve(js, context)
-   a. Check lookupCache by (type, URL) -> cache hit? Return v8::Module handle
+   a. findResolved(context): resolutions map hit by (type, URL) ->
+      instantiations row by (URL, definition) -> return v8::Module handle
    b. Cache miss -> call resolveWithCaching(js, context)
       i.   Strip query params and fragments from specifier
       ii.  Call inner.lookup(innerContext)  [acquires MutexGuarded exclusive lock]
       iii. ModuleRegistry::lookupImpl searches bundles in priority order
       iv.  Each bundle's lookup() checks aliases, cache, then resolve callbacks
-      v.   If redirect (alias): recurse once with new specifier (max depth 1)
-      vi.  If Module found: call module.getDescriptor(js, observer) -> v8::Module
-      vii. Insert Entry{v8Module, context, module} into lookupCache
-   c. Return v8::Module handle from the new Entry
+      v.   If redirect (alias): restart with the new specifier (chains followed
+           to any depth, cycles detected via a visited-specifier set)
+      vi.  Record (type, URL) -> definition in the resolutions map
+      vii. If an instantiation already exists for (URL, definition) — e.g. the
+           same builtin resolved through another context type — reuse its
+           v8::Module; otherwise call module.getDescriptor(js, observer) and
+           insert a new Entry{v8Module, id, module}
+   c. Return v8::Module handle from the Entry
 
 6. V8 receives the v8::Module and continues PrepareInstantiate
 ```
@@ -314,20 +365,36 @@ User code: const mod = await import('./bar.js')
 
 1. V8 calls dynamicImport(context, host_options, resource_name, specifier, attrs)
 
-2. Reject any import attributes (not yet supported)
+2. Parse import attributes (throws for unrecognized keys; `type` validated
+   against the resolved module's ContentType)
 
-3. Parse referrer from resource_name (or fall back to bundleBase)
+3. Parse referrer from resource_name. Modules created by this registry always
+   use their canonical URL as the ScriptOrigin name (including CJS-style eval
+   functions), so this parse succeeds for them. Scripts with non-URL origin
+   names (service-worker mains, eval'd code) fall back to bundleBase, and the
+   referrer lookup below then fails with a clear "Referring module not found"
+   TypeError.
 
 4. Normalize specifier (same as static: node: prefix, process redirect, URL resolve)
 
 5. IsolateModuleRegistry::dynamicResolve(js, normalizedSpec, referrer, rawSpec, sourcePhase)
-   a. Look up referrer in lookupCache -> get referrer's module type
-   b. Build ResolveContext { type from referrer, source=DYNAMIC_IMPORT, ... }
-   c. Check lookupCache or call resolveWithCaching (same as static)
+   a. Identify the referrer: probe the resolutions map for the referrer URL
+      across context types in resolution-priority order (BUNDLE first). V8
+      supplies only the URL string, and with shadowing one URL can have entries
+      under multiple types, so referrer typing is a policy choice favoring the
+      bundle module.
+   b. Build ResolveContext { type from referrer's module, source=DYNAMIC_IMPORT, ... }
+   c. findResolved or resolveWithCaching (same as static)
    d. Call module.evaluate(js, v8Module, observer, maybeEvaluate) -> Promise
    e. Chain: .then(namespace -> resolve Promise with module namespace)
 
 6. Return Promise to V8
+
+Note: a dynamically imported module whose top-level await never settles leaves
+the import() promise pending indefinitely (standard ESM semantics, subject to
+normal request hang detection). The legacy registry instead throws an eager
+"Top-level await in module is unsettled." error, a deviation tied to its
+evaluate-within-one-drain model.
 ```
 
 ### `require()` Flow
@@ -336,6 +403,12 @@ User code: const mod = await import('./bar.js')
 CJS code: const foo = require('./bar.js')
 
 1. IsolateModuleRegistry::require(js, context, option)
+   Options: RETURN_EMPTY (kj::none instead of throw on not-found),
+   NO_TOP_LEVEL_AWAIT (always set for Source::REQUIRE, per Node's
+   require(esm)), UNWRAP_DEFAULT (see "require() return value semantics"),
+   REQUIRE_ESM (entry-point resolution: rejects non-ESM modules with the
+   legacy-identical "Main module must be an ES module." TypeError before
+   evaluation)
 
 2. Check for node:process redirect
 
@@ -347,7 +420,11 @@ CJS code: const foo = require('./bar.js')
    c. If status == kEvaluated or kEvaluating -> return namespace directly
       (allows CJS circular deps with incomplete exports, same as Node.js)
    d. Otherwise: call module.evaluate() -> Promise
-   e. Run microtasks
+      (wrapped in Lock::ModuleEvaluationScope, which tracks evaluation depth)
+   e. If nested inside another module's evaluation (js.isEvaluatingModule()), do
+      not drain microtasks -- doing so could trip a fatal V8 CHECK
+      (status() >= kEvaluatingAsync). Otherwise (evaluation depth 0) run
+      microtasks.
    f. Check promise state:
       - kFulfilled -> return module namespace
       - kRejected -> throw rejection reason
@@ -407,9 +484,11 @@ The `importMeta` callback is registered on the isolate during
    - `import.meta.main` — `true` if `Module::Flags::MAIN` is set
    - `import.meta.url` — the module's URL (e.g. `"file:///bundle/index.js"`)
    - `import.meta.resolve(specifier)` — resolves `specifier` relative to
-     `import.meta.url` using WHATWG URL resolution. Returns the resolved URL
-     string, or `null` if unparseable. Does **not** check if the resolved URL
-     matches a module in the registry.
+     `import.meta.url` using WHATWG URL resolution (with `node:` bare-specifier
+     handling when Node.js compat is enabled). Returns the resolved URL string,
+     or throws a `TypeError` if the specifier cannot be resolved (matching
+     Node.js and the HTML spec). Does **not** check if the resolved URL matches
+     a module in the registry.
 
 ## The `ModuleNamespace` Helper
 
@@ -452,6 +531,10 @@ handler for CommonJS-style modules:
 1. Allocates a JSG resource object of type `T` (e.g. `CommonJsModuleContext`).
 2. Compiles the source as a function via `ScriptCompiler::CompileFunction` with
    the JSG object as extension object (providing `module`, `exports`, `require`).
+   The module's canonical URL is used as the compiled script's origin name: V8
+   reports the origin as the referrer for dynamic `import()` performed by the
+   script, which is how the dynamic import callback identifies the referring
+   module. This also makes CJS stack-trace filenames consistent with ESM ones.
 3. Calls the compiled function.
 4. Extracts `exports` from the JSG object and sets them on the module namespace.
 
@@ -500,22 +583,24 @@ V8 isolate. It is stored in context embedder data at
 `ContextPointerSlot::MODULE_REGISTRY` and retrieved via
 `IsolateModuleRegistry::from(isolate)`.
 
-### Lookup Cache
+### Two-Level Cache
 
-The cache is a `kj::Table<Entry>` with **three hash indices**:
+The per-isolate cache is split into two structures (see the architecture
+diagram above for the identity rules this encodes):
 
-| Index              | Key type                      | Used by                                 |
-| ------------------ | ----------------------------- | --------------------------------------- |
-| `EntryCallbacks`   | `HashableV8Ref<v8::Module>`   | Reverse lookup (V8 handle to Entry)     |
-| `ContextCallbacks` | `SpecifierContext` (type+URL) | Primary resolution (specifier to Entry) |
-| `UrlCallbacks`     | `Url`                         | Referrer lookup for dynamic imports     |
+| Structure        | Shape                                                     | Used by                                        |
+| ---------------- | --------------------------------------------------------- | ---------------------------------------------- |
+| `instantiations` | `kj::Table<Entry>` indexed by v8 handle and by (URL, def) | Reverse lookup (importMeta, resolve callbacks) |
+| `resolutions`    | `HashMap<SpecifierContext, const Module*>`                | Primary resolution and referrer probing        |
 
-This triple-indexing means:
+Lookup properties:
 
-- **Resolving by specifier** is O(1) hash lookup (vs legacy's O(n) scan for some paths).
-- **Reverse lookup** (v8::Module to Module definition) is O(1) hash lookup
-  (vs legacy's O(n) linear scan over all entries).
-- **Referrer lookup** (by URL alone, ignoring type) is O(1).
+- **Resolving by specifier** is two O(1) hash lookups: (type, URL) → definition,
+  then (URL, definition) → Entry.
+- **Reverse lookup** (v8::Module to Entry) is O(1) hash lookup (vs legacy's O(n)
+  linear scan over all entries).
+- **Referrer lookup** probes the resolutions map once per context type in
+  resolution-priority order (at most four O(1) lookups).
 
 ### Cache Population
 
@@ -523,8 +608,10 @@ On first resolution of a specifier:
 
 1. `resolveWithCaching` strips query params and fragments from the specifier.
 2. Calls `inner.lookup()` on the shared `ModuleRegistry` (acquires exclusive lock).
-3. If found, calls `module.getDescriptor(js, observer)` to create the v8::Module.
-4. Inserts a new `Entry` into the `lookupCache`.
+3. If found, records (type, URL) → definition in `resolutions`.
+4. Reuses the existing instantiation for (URL, definition) if one exists;
+   otherwise calls `module.getDescriptor(js, observer)` to create the
+   v8::Module and inserts a new `Entry`.
 5. Subsequent lookups for the same specifier hit the cache directly.
 
 ## V8 Callback Registration
@@ -580,7 +667,9 @@ newWorkerModuleRegistry<TypeWrapper>(resolveObserver, maybeSource, flags, bundle
   |     |-- Load capnp schemas into SchemaLoader
   |     |-- Create BundleBuilder(bundleBase)
   |     |-- For each module in source:
-  |     |     |-- EsModule -> addEsmModule (first gets MAIN flag)
+  |     |     |-- EsModule -> addEsmModule (the configured mainModule gets the
+  |     |     |     MAIN flag; entry points must be ESM, enforced at resolution
+  |     |     |     via RequireOption::REQUIRE_ESM)
   |     |     |-- TextModule -> addSyntheticModule(newTextModuleHandler)
   |     |     |-- DataModule -> addSyntheticModule(newDataModuleHandler)
   |     |     |-- WasmModule -> addWasmModule
@@ -622,6 +711,16 @@ if (isolate.isUsingNewModuleRegistry()) {
 }
 ```
 
+The isolate-level bit is set at isolate construction from
+`isNewModuleRegistryEnabled(flags)` (`io/features.h`), which returns false for
+Python workers regardless of the `new_module_registry` flag. All other
+flag-check sites (`server.c++` registry creation, `worker.c++` compile paths and
+the nodejs_compat_v2 process/buffer warm-up, and the api-level require paths)
+route through the same function, so a worker can never be split across the two
+registries. Note that `Cloudflare.compatibilityFlags.new_module_registry` as
+observed by user code still reflects the configured flag value; the function
+describes the resulting behavior.
+
 ## Resolution Priority and Isolation Rules
 
 ### Referrer-Based Context Determination
@@ -647,12 +746,14 @@ This means:
 
 ### Alias Handling
 
-Aliases are single-level redirects. When a bundle lookup returns a string
-(redirect) instead of a `Module`:
+Aliases are redirects. When a bundle lookup returns a string (redirect)
+instead of a `Module`:
 
 1. The string is parsed as a URL (relative to `bundleBase` if needed).
-2. `lookupImpl` recurses with the new specifier, but with a `recursed=true`
-   flag that prevents further recursion. Only one level of aliasing is supported.
+2. `lookupImpl` recurses with the new specifier. Chains of aliases are
+   followed to any depth; each resolution tracks the specifiers it has
+   visited, and a redirect to an already-visited specifier (a cycle) resolves
+   to "module not found".
 
 ### Error Propagation for Errored Dependencies
 
@@ -743,23 +844,41 @@ returning a rejected promise with the cached exception.
 
 8. **`require()` return value semantics (UNWRAP_DEFAULT).** When callers use the
    `UNWRAP_DEFAULT` require option (used by `createRequire` and
-   `CommonJsModuleContext::require`), the return value depends on the module type:
-   - **User bundle ESM**: returns the module namespace (matching Node.js
-     `require(esm)` behavior), unless the module exports `__cjsUnwrapDefault`
-     as truthy (a convention used by bundlers like esbuild when transpiling CJS
-     to ESM), in which case the `default` export is returned.
+   `CommonJsModuleContext::require`), the checks run in this order:
+   - **Any ESM with a truthy `__cjsUnwrapDefault` export** (an ecosystem bundler
+     convention that predates Node's require(esm) support, checked first to
+     match the legacy registry's order): returns the `default` export.
+   - **Any ESM defining the string-named export `'module.exports'`** (Node.js'
+     official mechanism for an ES module to control its require() result):
+     returns that export's value.
+   - **User ESM (worker bundle and fallback modules)**: returns the module
+     namespace, matching Node.js `require(esm)` behavior.
    - **Builtin ESM** (`node:assert`, `node:buffer`, etc.): returns the `default`
      export, because workerd implements builtins as ESM that wrap CJS-style APIs
-     in a default export.
+     in a default export. Falls back to the namespace if a builtin defines no
+     default export — require() never yields `undefined` for a resolvable module.
    - **Synthetic modules** (CJS, JSON, Text, Data, WASM): returns the `default`
      export, which is where the module's value lives (`module.exports` for CJS,
      parsed value for JSON, etc.).
      Without `UNWRAP_DEFAULT`, `require()` always returns the full module namespace.
+     The `export_commonjs_default` and `require_returns_default_export` compat
+     flags describe legacy-registry behavior only and are not consulted.
 
-9. **Python modules are not yet supported.** The new registry currently throws
-   `KJ_FAIL_ASSERT` for `PythonModule` content. Python support remains on the
-   legacy registry path.
+9. **Python workers do not use the new registry.** When `python_workers` is
+   enabled, the `new_module_registry` flag is ignored entirely:
+   `isNewModuleRegistryEnabled()` (in `io/features.h`) returns false and the
+   worker uses the legacy registry. Every decision about which registry to use
+   must go through that function rather than reading the flag directly. The
+   `KJ_FAIL_ASSERT` for `PythonModule` content in `worker-modules.h` remains as
+   defense-in-depth.
 
-10. **Top-level await handling.** Same as legacy: after `Evaluate`, microtasks
-    are drained. If the returned Promise is still pending, a "top-level await"
-    error is thrown. Workers must fully initialize synchronously.
+10. **Top-level await handling.** After `Evaluate`, microtasks are drained unless
+    the evaluation is nested inside another module's evaluation (evaluation depth
+    tracked by `Lock::ModuleEvaluationScope`, queried via
+    `js.isEvaluatingModule()`). Draining while an ancestor module is still
+    `kEvaluating` could fire an async module's fulfillment callback early and trip
+    a fatal V8 CHECK (`status() >= kEvaluatingAsync`). If the returned Promise is
+    still pending, a "top-level await" error is thrown. Workers must fully
+    initialize synchronously.
+
+    The legacy registry (`modules.c++`) follows the same rules.

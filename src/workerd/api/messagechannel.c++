@@ -1,54 +1,73 @@
 #include "messagechannel.h"
 
+#include "blob.h"
 #include "events.h"
 
+#include <workerd/io/features.h>
 #include <workerd/jsg/ser.h>
 
 namespace workerd::api {
-MessagePort::MessagePort(): state(Pending()) {
-  // We set a callback on the underlying EventTarget to be notified when
-  // a listener for the message event is added or removed. When there
-  // are no listeners, we move back to the Pending state, otherwise we
-  // will switch to the Started state if necessary.
-  setEventListenerCallback([&](jsg::Lock& js, kj::StringPtr name, size_t count) {
-    if (name == "message"_kj) {
-      KJ_SWITCH_ONEOF(state) {
-        KJ_CASE_ONEOF(pending, Pending) {
-          // If we are in the pending state, start the port if we have listeners.
-          // This is technically not spec compliant, but it is what Node.js
-          // supports. Specifically, adding a new message listener using the
-          // addEventListener method is *technically* not supposed to start
-          // the port but we're going to do what Node.js does.
-          if (count > 0 || onmessageValue != kj::none) {
-            start(js);
-          }
-        }
-        KJ_CASE_ONEOF(started, Started) {
-          // If we are in the started state, stop the port if there are no listeners.
-          if (count == 0 && onmessageValue == kj::none) {
-            state = Pending();
-          }
-        }
-        KJ_CASE_ONEOF(_, Closed) {
-          // Nothing to do. We're already closed so we don't care.
-        }
+MessagePort::MessagePort(): state(Pending()) {}
+
+// Tracks 'message' listener registrations — both addEventListener() listeners and the
+// onmessage attribute's trampoline — to transition the port between states: the first
+// listener starts the port (delivering any queued messages), and removing the last one
+// returns it to pending (queueing messages again). Counting every listener is technically
+// not spec compliant (per spec only assigning onmessage enables the message queue), but it
+// is what Node.js does.
+void MessagePort::listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) {
+  if (type != "message"_kj) {
+    return;
+  }
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(pending, Pending) {
+      if (count > 0) {
+        start(js);
       }
     }
-  });
+    KJ_CASE_ONEOF(started, Started) {
+      if (count == 0) {
+        state = Pending();
+      }
+    }
+    KJ_CASE_ONEOF(_, Closed) {
+      // Closed is terminal: listener changes never restart the port.
+    }
+  }
 }
 
 void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
-  JSG_TRY(js) {
-    auto message = js.alloc<MessageEvent>(js, kj::str("message"), value, kj::String(), JSG_THIS);
-    dispatchEventImpl(js, kj::mv(message));
+  auto policy = effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT);
+  if (policy == DispatchExceptionPolicy::PROPAGATE) {
+    // Compat path (spec_compliant_dispatch_exceptions disabled): the first throwing
+    // listener ends the dispatch; the exception is swallowed and re-dispatched as a second
+    // 'message' event carrying the exception as its data. (The spec path below uses a
+    // 'messageerror' event instead; the 'message' type here is retained for compatibility.)
+    // If that second dispatch throws, the exception propagates: the delivery microtask
+    // fails.
+    JSG_TRY(js) {
+      dispatchEventImpl(
+          js, js.alloc<MessageEvent>(js, value, kj::String(), JSG_THIS, kj::none, Trusted::YES));
+    }
+    JSG_CATCH(exception) {
+      dispatchEventImpl(js,
+          js.alloc<MessageEvent>(js, jsg::JsValue(exception.getHandle(js)), kj::String(), JSG_THIS,
+              kj::none, Trusted::YES));
+    }
+    return;
   }
-  JSG_CATCH(exception) {
-    // There was an error dispatching the message event.
-    // We will dispatch a messageerror event instead.
-    auto message = js.alloc<MessageEvent>(
-        js, kj::str("message"), jsg::JsValue(exception.getHandle(js)), kj::String(), JSG_THIS);
-    dispatchEventImpl(js, kj::mv(message));
-    // Now, if this dispatchEventImpl throws, we just blow up. Don't try to catch it.
+
+  auto result = dispatchEventImpl(js,
+      js.alloc<MessageEvent>(js, value, kj::String(), JSG_THIS, kj::none, Trusted::YES), policy);
+  KJ_IF_SOME(exception, result.firstException) {
+    // A 'message' listener threw. Its exception was reported (and the remaining 'message'
+    // listeners still ran); additionally surface it as a 'messageerror' event on this port,
+    // carrying the exception as the event's data. The 'messageerror' dispatch itself is
+    // report-only: a throwing 'messageerror' listener triggers no further reaction.
+    dispatchEventImpl(js,
+        js.alloc<MessageEvent>(js, kj::str("messageerror"), exception.addRef(js), kj::String(),
+            JSG_THIS, kj::none, Trusted::YES),
+        DispatchExceptionPolicy::REPORT);
   }
 }
 
@@ -154,6 +173,7 @@ void MessagePort::closeImpl() {
 }
 
 void MessagePort::close(jsg::Lock& js) {
+  static constexpr kj::StringPtr name = "close"_kj;
   if (state.is<Closed>()) return;
   state = Closed{};
   KJ_IF_SOME(o, other) {
@@ -162,7 +182,7 @@ void MessagePort::close(jsg::Lock& js) {
     }
     other = kj::none;
   }
-  auto closeEvent = js.alloc<Event>(kj::str("close"), Event::Init{}, true);
+  auto closeEvent = js.alloc<Event>(name, Event::Init{}, Trusted::YES);
   dispatchEventImpl(js, kj::mv(closeEvent));
 }
 
@@ -191,23 +211,14 @@ void MessagePort::start(jsg::Lock& js) {
 }
 
 kj::Maybe<jsg::JsValue> MessagePort::getOnMessage(jsg::Lock& js) {
-  return onmessageValue.map(
-      [&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue { return ref.getHandle(js); });
+  return getEventHandlerAttribute(js, "message"_kj);
 }
 
-void MessagePort::setOnMessage(jsg::Lock& js, jsg::JsValue value) {
-  if (!value.isObject() && !value.isFunction()) {
-    onmessageValue = kj::none;
-    // If we have no handlers and no onmessage ...
-    if (getHandlerCount("message"_kj) == 0 && onmessageValue == kj::none) {
-      // ...Put the port back into a pending state where messages
-      // will be enqueued until another listener is attached.
-      state = Pending();
-    }
-  } else {
-    onmessageValue = jsg::JsRef<jsg::JsValue>(js, value);
-    start(js);
-  }
+void MessagePort::setOnMessage(
+    jsg::Lock& js, jsg::Optional<kj::OneOf<EventTarget::HandlerFunction, jsg::JsValue>> handler) {
+  // The attribute's trampoline registration and removal flow through
+  // listenerCountChanged(), which starts and stops the port; nothing else to do here.
+  setEventHandlerAttribute(js, "message"_kj, kj::mv(handler));
 }
 
 jsg::Ref<MessageChannel> MessageChannel::constructor(jsg::Lock& js) {

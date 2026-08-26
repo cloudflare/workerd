@@ -240,7 +240,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   nodeJsCompat @21 :Bool
       $compatEnableFlag("nodejs_compat")
-      $compatDisableFlag("no_nodejs_compat");
+      $compatDisableFlag("no_nodejs_compat")
+      $compatEnableDate("2026-08-04");
   # Enables nodejs compat imports in the application.
 
   obsolete22 @22 :Bool
@@ -465,7 +466,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   nodeJsCompatV2 @50 :Bool
       $compatEnableFlag("nodejs_compat_v2")
       $compatDisableFlag("no_nodejs_compat_v2")
-      $impliedByAfterDate(name = "nodeJsCompat", date = "2024-09-23");
+      $impliedByAfterDate(name = "nodeJsCompat", date = "2024-09-23")
+      $compatEnableDate("2026-08-04");
   # Implies nodeJSCompat with the following additional modifications:
   # * Node.js Compat built-ins may be imported/required with or without the node: prefix
   # * Node.js Compat the globals Buffer and process are available everywhere
@@ -511,9 +513,15 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   newModuleRegistry @52 :Bool
       $compatEnableFlag("new_module_registry")
-      $compatDisableFlag("legacy_module_registry")
-      $experimental;
-  # Enables of the new module registry implementation.
+      $compatDisableFlag("legacy_module_registry");
+  # Enables the new module registry implementation, which handles module
+  # specifiers as URLs, implements import.meta (url/main/resolve), supports
+  # import attributes, and allows a registry to be shared across isolate
+  # replicas. Behavioral differences from the original registry are documented
+  # with the flag's public documentation. Several flags describe
+  # legacy-registry behavior only and are not consulted by the new registry:
+  # exportCommonJsDefaultNamespace, requireReturnsDefaultExport,
+  # throwOnUnrecognizedImportAssertion, and noTopLevelAwaitInRequire.
 
   cacheOptionEnabled @53 :Bool
     $compatEnableFlag("cache_option_enabled")
@@ -1570,9 +1578,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonWorkers20260610 @179 :Bool
       $compatEnableFlag("python_workers_20260610")
       $compatDisableFlag("no_python_workers_20260610")
-      $pythonSnapshotRelease
-      $experimental;
-  # Enables Python Workers using Pyodide 314.0.0 (CPython 3.14.2, Emscripten 5.0.3).
+      $pythonSnapshotRelease;
+  # Enables Python Workers using Pyodide 314.0.4 (CPython 3.14.2, Emscripten 5.0.3).
 
   enableNodeJsInspectorLocalDev @180 :Bool
       $compatEnableFlag("enable_nodejs_inspector_local_dev")
@@ -1597,7 +1604,75 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # the production environment as much as possible, this flag is meant to be used by test
   # frameworks when running tests that require the inspector to be functional, and not by end users.
 
-  webCryptoModernAlgorithms @181 :Bool
+  d1BindingJsrpc @181 :Bool
+      $compatEnableFlag("d1_binding_jsrpc")
+      $experimental;
+  # When enabled, D1 bindings use the internal JSRPC binding API for queries
+  # instead of issuing `fetch` calls to the D1 binding service. Without this
+  # flag, D1 bindings continue to use the `fetch` method of the Fetcher.
+
+  workflowsBindingsRpc @182 :Bool
+    $compatEnableFlag("workflows_bindings_rpc")
+    $experimental;
+  # Obsolete flag. Has no effect: the `env.WORKFLOW` binding always dispatches its methods as
+  # JSRPC calls on the inner fetcher. Still accepted so configs which set it keep validating.
+
+  typeScriptImplementedStreams @183 :Bool
+      $compatEnableFlag("typescript_implemented_streams")
+      $experimental;
+  # When enabled, the workers runtime uses the new typescript Web Streams
+  # implementation.
+
+  exposeDrainingReader @184 :Bool
+      $compatEnableFlag("expose_draining_reader")
+      $experimental;
+  # Exposes the internal ReadableStreamDrainingReader class on globalThis.
+  # The DrainingReader provides the expectedLength pass-through for the
+  # C++ bridge (Content-Length integration for FixedLengthStream). This
+  # flag is intended for internal testing only and may never have its
+  # experimental annotation removed.
+
+  workflowsEnableFastEngineCreation @185 :Bool
+      $compatEnableFlag("workflows_enable_fast_engine_creation")
+      $compatDisableFlag("workflows_disable_fast_engine_creation")
+      $compatEnableDate("2026-08-11");
+  # Enables fast Workflow engine creation by generating instance IDs with the Durable Object
+  # namespace's `newUniqueId()` method instead of UUIDs.
+
+  wasmMemoryDiscard @186 :Bool
+      $compatEnableFlag("wasm_memory_discard")
+      $experimental;
+  # Enables the experimental WebAssembly memory.discard proposal, exposing
+  # `WebAssembly.Memory.prototype.discard(byteOffset, byteLength)` and the
+  # `memory.discard` opcode. Both zero the given wasm-page-aligned region and
+  # release its physical pages back to the operating system. Shared memories
+  # are not supported, and unaligned or out-of-bounds ranges throw a
+  # RangeError (JS API) or trap (wasm opcode).
+  # WARNING: Do not remove the `$experimental` marker before
+  # the v8 change becomes part of chrome's default config.
+
+  pythonWorkers20260817 @187 :Bool
+      $compatEnableFlag("python_workers_20260817")
+      $compatDisableFlag("no_python_workers_20260817")
+      $experimental
+      $pythonSnapshotRelease;
+  # Enables Python Workers using Pyodide 314.0.5.
+
+  specCompliantDispatchExceptions @188 :Bool
+      $compatEnableFlag("spec_compliant_dispatch_exceptions")
+      $compatDisableFlag("no_spec_compliant_dispatch_exceptions")
+      $compatEnableDate("2026-09-15");
+  # Per the DOM spec, exceptions thrown by event listeners during dispatchEvent() should be
+  # reported (via the global 'error' event, then the console) but should not interrupt the
+  # dispatch or propagate to the dispatchEvent() caller. The original workerd implementation
+  # propagated the first listener exception and skipped remaining listeners for that event.
+  #
+  # When enabled, all event dispatch surfaces (the JS-visible dispatchEvent(), AbortSignal
+  # abort, and UA-fired events on WebSocket, EventSource, and MessagePort) use the spec's
+  # report-and-continue semantics. Internal runtime event delivery (fetch, scheduled, etc.)
+  # is not affected and always propagates.
+
+  webCryptoModernAlgorithms @189 :Bool
       $compatEnableFlag("webcrypto_modern_algorithms");
   # Enables opt-in WebCrypto modern algorithm support. This currently exposes the subset of
   # the evolving WICG Modern Algorithms draft implemented by workerd: ML-KEM, ML-DSA, related

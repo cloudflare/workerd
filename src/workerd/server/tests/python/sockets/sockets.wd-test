@@ -1,0 +1,33 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "python-sockets",
+      worker = (
+        modules = [
+          (name = "worker.py", pythonModule = embed "worker.py")
+        ],
+        compatibilityFlags = [
+          %PYTHON_FEATURE_FLAGS,
+        ],
+        bindings = [
+          (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+          (name = "PYTHON_SOCKET_SERVER_PORT", fromEnvironment = "PYTHON_SOCKET_SERVER_PORT"),
+          (name = "PYTHON_HOSTNAME_SOCKET_SERVER_PORT", fromEnvironment = "PYTHON_HOSTNAME_SOCKET_SERVER_PORT"),
+          (name = "PYTHON_STARTTLS_SOCKET_SERVER_PORT", fromEnvironment = "PYTHON_STARTTLS_SOCKET_SERVER_PORT"),
+          (name = "PYTHON_TLS_SOCKET_SERVER_PORT", fromEnvironment = "PYTHON_TLS_SOCKET_SERVER_PORT"),
+        ],
+      )
+    ),
+    ( name = "internet",
+      network = (
+        allow = ["private"],
+        tlsOptions = (
+          trustedCertificates = [
+            embed "starttls-server.pem",
+          ],
+        ),
+      )
+    ),
+  ],
+);

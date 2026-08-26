@@ -21,14 +21,25 @@ template <typename T>
 class Promise;
 
 enum class InstantiateModuleOptions {
-  // Allows pending top-level await in the module when evaluated. Will cause
-  // the microtask queue to be drained once in an attempt to resolve those.
+  // Allows pending top-level await in the module when evaluated. Will cause the microtask
+  // queue to be drained once in an attempt to resolve those, but only when not nested inside
+  // another module's evaluation; when nested, a pending evaluation is reported as an
+  // unsettled top-level await instead.
   DEFAULT,
   // Throws if the module evaluation results in a pending promise.
   NO_TOP_LEVEL_AWAIT,
+  // Like DEFAULT, but when nested inside another module's evaluation and the evaluation is
+  // still pending, returns that promise instead of throwing, so the caller can chain on it.
+  // Only usable by callers that can return a promise to their own caller. Used by dynamic
+  // import: V8 runs HostImportModuleDynamically while the importing module is still
+  // kEvaluating, and with no active IoContext the requested module is instantiated
+  // synchronously right there, so it cannot settle until we unwind to depth 0.
+  ALLOW_PENDING_EVALUATION,
 };
 
-void instantiateModule(jsg::Lock& js,
+// Returns the still-pending evaluation promise when called with DYNAMIC_IMPORT from inside
+// another module's evaluation; kj::none means evaluation is fully settled.
+kj::Maybe<v8::Local<v8::Promise>> instantiateModule(jsg::Lock& js,
     v8::Local<v8::Module>& module,
     InstantiateModuleOptions options = InstantiateModuleOptions::DEFAULT);
 
@@ -283,6 +294,14 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   }
 
   void add(kj::Path& specifier, ModuleInfo&& info) {
+    // Report duplicates as a JS-visible error rather than letting the table
+    // insert below throw: a raw table exception surfaces to the user as an
+    // opaque "internal error" while this is a worker configuration mistake.
+    // (This matches the error the new module registry reports for the same
+    // mistake, which phrases the specifier as a URL rather than a path.)
+    using Key = Entry::Key;
+    JSG_REQUIRE(entries.find(Key(specifier, Type::BUNDLE)) == kj::none, Error, "Module \"",
+        specifier.toString(false), "\" already added to bundle");
     entries.insert(kj::heap<Entry>(specifier, Type::BUNDLE, kj::fwd<ModuleInfo>(info)));
   }
 
@@ -296,8 +315,11 @@ class ModuleRegistryImpl final: public ModuleRegistry {
           // src/workerd/server/workerd-api.c++.
           addBuiltinModule(specifier,
               [specifier, module, this](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
-            lock.setAllowEval(true);
-            KJ_DEFER(lock.setAllowEval(false));
+            // Wasm compilation requires code-generation permission. The scope
+            // restores the prior setting on exit: builtin modules resolve
+            // lazily, potentially inside a window where eval is already
+            // permitted, and that permission must survive the compilation.
+            Lock::AllowEvalScope allowEvalScope(lock, true);
 
             // Allow Wasm compilation to spawn a background thread for tier-up, i.e.
             // recompiling Wasm with optimizations in the background. Otherwise Wasm startup
@@ -515,7 +537,16 @@ class ModuleRegistryImpl final: public ModuleRegistry {
         auto handler = [&info, isolate = js.v8Isolate]() -> Value {
           auto& js = Lock::from(isolate);
           auto module = info.module.getHandle(js);
-          instantiateModule(js, module);
+          KJ_IF_SOME(pending,
+              instantiateModule(js, module, InstantiateModuleOptions::ALLOW_PENDING_EVALUATION)) {
+            // Evaluation is suspended on a top-level await and we are nested inside another
+            // module's evaluation, so we must not drain the microtask queue here. Hand back a
+            // promise for the namespace instead; it settles once we unwind to depth 0 and the
+            // outer instantiation drains.
+            auto ns = js.v8Ref<v8::Value>(module->GetModuleNamespace());
+            return js.v8Ref<v8::Value>(js.wrapSimplePromise(js.toPromise(pending).then(
+                js, [ns = kj::mv(ns)](Lock& js, Value) mutable { return kj::mv(ns); })));
+          }
           return js.v8Ref(module->GetModuleNamespace());
         };
         return func(js, kj::mv(handler));

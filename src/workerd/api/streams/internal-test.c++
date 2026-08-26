@@ -754,8 +754,7 @@ KJ_TEST("ReadableStreamBYOBReader rejects read with zero-sized buffer") {
     auto rs = makeByteStream(env.js);
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
 
-    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 0);
-    auto view = v8::Uint8Array::New(buffer, 0, 0);
+    auto view = jsg::JsArrayBufferView(jsg::JsUint8Array::create(env.js, 0));
 
     bool rejected = false;
     reader->read(env.js, view, kj::none)
@@ -778,8 +777,7 @@ KJ_TEST("ReadableStreamBYOBReader rejects read with atLeast=0") {
     auto rs = makeByteStream(env.js);
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
 
-    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 10);
-    auto view = v8::Uint8Array::New(buffer, 0, 10);
+    auto view = jsg::JsArrayBufferView(jsg::JsUint8Array::create(env.js, 10));
 
     bool rejected = false;
     reader->readAtLeast(env.js, 0, view)
@@ -802,8 +800,7 @@ KJ_TEST("ReadableStreamBYOBReader rejects read when atLeast exceeds buffer size"
     auto rs = makeByteStream(env.js);
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
 
-    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 10);
-    auto view = v8::Uint8Array::New(buffer, 0, 10);
+    auto view = jsg::JsArrayBufferView(jsg::JsUint8Array::create(env.js, 10));
 
     bool rejected = false;
     reader->readAtLeast(env.js, 20, view)
@@ -830,7 +827,7 @@ KJ_TEST("ReadableStreamBYOBReader readAtLeast with element count within capacity
 
     // Uint32Array: element size 4, byteLength 40, length 10
     auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 40);
-    auto view = v8::Uint32Array::New(buffer, 0, 10);
+    auto view = jsg::JsArrayBufferView(v8::Uint32Array::New(buffer, 0, 10));
 
     bool rejected = false;
     reader->readAtLeast(env.js, 10, view)
@@ -857,7 +854,7 @@ KJ_TEST("ReadableStreamBYOBReader readAtLeast rejects when element count exceeds
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
 
     auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 40);
-    auto view = v8::Uint32Array::New(buffer, 0, 10);
+    auto view = jsg::JsArrayBufferView(v8::Uint32Array::New(buffer, 0, 10));
 
     bool rejected = false;
     reader->readAtLeast(env.js, 11, view)
@@ -881,7 +878,7 @@ KJ_TEST("ReadableStreamBYOBReader readAtLeast rejects byteLength as element coun
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
 
     auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 4096);
-    auto view = v8::Uint32Array::New(buffer, 0, 1024);
+    auto view = jsg::JsArrayBufferView(v8::Uint32Array::New(buffer, 0, 1024));
 
     bool rejected = false;
     reader->readAtLeast(env.js, 4096, view)
@@ -907,7 +904,7 @@ KJ_TEST("ReadableStreamBYOBReader read() with min exceeding element capacity rej
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
 
     auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 40);
-    auto view = v8::Uint32Array::New(buffer, 0, 10);
+    auto view = jsg::JsArrayBufferView(v8::Uint32Array::New(buffer, 0, 10));
 
     ReadableStreamBYOBReader::ReadableStreamBYOBReaderReadOptions opts;
     opts.min = 11;
@@ -931,8 +928,7 @@ KJ_TEST("ReadableStreamBYOBReader rejects read after releaseLock") {
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
     reader->releaseLock(env.js);
 
-    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 10);
-    auto view = v8::Uint8Array::New(buffer, 0, 10);
+    auto view = jsg::JsArrayBufferView(jsg::JsUint8Array::create(env.js, 10));
 
     bool rejected = false;
     reader->read(env.js, view, kj::none)
@@ -944,6 +940,81 @@ KJ_TEST("ReadableStreamBYOBReader rejects read after releaseLock") {
     });
     env.js.runMicrotasks();
     KJ_ASSERT(rejected, "Expected read() to reject after releaseLock");
+  });
+}
+
+// ======================================================================================
+// BYOB read destination placement
+//
+// ReadableStreamInternalController::read() derives the tryRead() destination from the
+// live view's byteOffset/byteLength at the time the read is issued; there is no separately
+// cached copy of those values that could disagree with the view. Out-of-bounds destinations
+// therefore cannot be produced through any API; the controller's check against the
+// BackingStore's out-of-cage length exists purely as sandbox hardening against corrupted
+// in-cage view metadata, and jsg::JsArrayBufferView::asArrayPtr() independently validates
+// the same bounds when the destination pointer is derived.
+
+// Fills the entire destination it is handed with a recognizable pattern, so a test can
+// verify exactly where read data lands in the caller's buffer.
+class PatternSource final: public ReadableStreamSource {
+ public:
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    auto bytes = kj::arrayPtr(static_cast<kj::byte*>(buffer), maxBytes);
+    for (auto i: kj::indices(bytes)) {
+      bytes[i] = static_cast<kj::byte>('A' + (i % 26));
+    }
+    return maxBytes;
+  }
+};
+
+KJ_TEST("BYOB read into an offset view fills only the view's region, returns a Uint8Array") {
+  static constexpr size_t kBufferSize = 64;
+  static constexpr size_t kViewOffset = 16;
+  static constexpr size_t kViewLength = 32;
+
+  auto fixture = makeStreamTestFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+    auto rs = js.alloc<ReadableStream>(env.context, kj::heap<PatternSource>());
+
+    auto buffer = jsg::JsArrayBuffer::create(js, kBufferSize);
+    // A non-Uint8Array view type verifies that the result type does not depend on the
+    // view type passed in.
+    auto view =
+        jsg::JsArrayBufferView(buffer.newUint32View(kViewOffset, kViewLength / sizeof(uint32_t)));
+
+    auto options = ReadableStreamController::ByobOptions{
+      .bufferView = view.addRef(js),
+      .atLeast = 1,
+      .detachBuffer = false,
+    };
+
+    auto maybePromise = rs->getController().read(js, kj::mv(options));
+    auto promise = kj::mv(KJ_ASSERT_NONNULL(maybePromise));
+
+    return env.context.awaitJs(js, kj::mv(promise).then(js, JSG_VISITABLE_LAMBDA((bufferRef = buffer.addRef(js), rs = rs.addRef()), (bufferRef, rs), (jsg::Lock& js, ReadResult result) {
+      KJ_ASSERT(!result.done);
+      auto& value = KJ_REQUIRE_NONNULL(result.value);
+      auto handle = value.getHandle(js);
+
+      // The result is a Uint8Array over the same buffer, covering the view's region.
+      v8::Local<v8::Uint8Array> u8 = KJ_ASSERT_NONNULL(handle.tryCast<jsg::JsUint8Array>());
+      auto buffer = bufferRef.getHandle(js);
+      KJ_ASSERT(u8->Buffer() == static_cast<v8::Local<v8::ArrayBuffer>>(buffer));
+      KJ_ASSERT(u8->ByteOffset() == kViewOffset);
+      KJ_ASSERT(u8->ByteLength() == kViewLength);
+
+      // The data landed exactly in [kViewOffset, kViewOffset + kViewLength); the rest of
+      // the buffer is untouched (v8::ArrayBuffer allocations are zero-initialized).
+      auto data = buffer.asArrayPtr();
+      for (size_t i: kj::zeroTo(kBufferSize)) {
+      if (i >= kViewOffset && i < kViewOffset + kViewLength) {
+      KJ_ASSERT(data[i] == static_cast<kj::byte>('A' + ((i - kViewOffset) % 26)), i);
+      } else {
+      KJ_ASSERT(data[i] == 0, i);
+      }
+      }
+    })));
   });
 }
 

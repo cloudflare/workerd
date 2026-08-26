@@ -40,11 +40,11 @@ def wd_rust_binary(
             # Not applying visibility here – if you import the cxxbridge header, you will likely
             # also need the rust library itself to avoid linker errors.
             deps = cxx_bridge_deps + [
-                "@workerd-cxx//:core",
+                "//src/rust/cxx:core",
             ],
         )
 
-        deps.append("@workerd-cxx//:cxx")
+        deps.append("//src/rust/cxx:cxx")
         link_deps = link_deps + [name + "@cxx"]
 
     rust_binary(
@@ -53,19 +53,18 @@ def wd_rust_binary(
         srcs = srcs,
         rustc_env = rustc_env,
         deps = deps,
-        link_deps = link_deps,
+        # wd_rust_binary is not used for the workerd production binary so far – apply default
+        # optimization instead of linkopts_tool
+        link_deps = link_deps + ["//build/deps:linkopts_default", "@@//deps:rust_runtime"],
         visibility = visibility,
         data = data,
+        experimental_use_cc_common_link = 1,
         proc_macro_deps = proc_macro_deps,
+        # Tag with cpu:4 since this target depends on linkopts_default.
+        tags = tags + ["cpu:4"],
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
-        }),
-        # Optionally link via cc_common.link so embedder-selected cc link settings
-        # (e.g. --custom_malloc) take effect. Off standalone (see //build/config).
-        experimental_use_cc_common_link = select({
-            "@//build/config:rust_cc_common_link": 1,
-            "//conditions:default": -1,
         }),
     )
 
@@ -83,12 +82,9 @@ def wd_rust_binary(
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
         }),
+        experimental_use_cc_common_link = 1,
+        link_deps = ["//build/deps:linkopts_default", "@@//deps:rust_runtime"],
         size = test_size,
-        tags = ["no-coverage"],
-        # Optionally link via cc_common.link so embedder-selected cc link settings
-        # (e.g. --custom_malloc) take effect. Off standalone (see //build/config).
-        experimental_use_cc_common_link = select({
-            "@//build/config:rust_cc_common_link": 1,
-            "//conditions:default": -1,
-        }),
+        # Tag with cpu:4 since this target depends on linkopts_default.
+        tags = ["no-coverage", "cpu:4"],
     )

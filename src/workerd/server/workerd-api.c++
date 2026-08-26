@@ -45,7 +45,9 @@
 #include <workerd/api/worker-loader.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/api/workers-module.h>
+#include <workerd/api/wrapped-binding.h>
 #include <workerd/io/compatibility-date.h>
+#include <workerd/io/features.h>
 #include <workerd/io/promise-wrapper.h>
 #include <workerd/io/worker-modules.h>
 #include <workerd/jsg/jsg.h>
@@ -60,6 +62,7 @@
 #include <workerd/server/fallback-service.h>
 #include <workerd/server/workerd-debug-port-client.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/strong-bool.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/use-perfetto-categories.h>
 
@@ -142,6 +145,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_PERFORMANCE_ISOLATE_TYPES,
     EW_TRACING_ISOLATE_TYPES,
     EW_WORKERD_DEBUG_PORT_CLIENT_ISOLATE_TYPES,
+    EW_WRAPPED_BINDING_ISOLATE_TYPES,
     workerd::api::EnvModule,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
@@ -264,7 +268,7 @@ struct WorkerdApi::Impl final {
         memoryCacheProvider(memoryCacheProvider),
         pythonConfig(pythonConfig) {
     jsgIsolate.runInLockScope([&](JsgWorkerdIsolate::Lock& lock) {
-      if (featuresParam.getNewModuleRegistry()) {
+      if (isNewModuleRegistryEnabled(featuresParam)) {
         jsgIsolate.setUsingNewModuleRegistry();
       }
 
@@ -311,6 +315,7 @@ jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(
     .schemaLoader = options.schemaLoader,
     .enableWeakRef = getFeatureFlags().getJsWeakRef(),
     .deferWeakRefDeletion = deferWeakRefDeletion,
+    .installWasmMemoryDiscard = getFeatureFlags().getWasmMemoryDiscard(),
   };
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).newContext<api::ServiceWorkerGlobalScope>(
       kj::mv(opts));
@@ -548,11 +553,16 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
   });
 }
 
+// Whether the binding being constructed is an inner binding of a wrapped binding. Those are
+// placed on the private `env` of a `cloudflare-internal:` module, not on the worker's own `env`.
+WD_STRONG_BOOL(IsInternalBinding);
+
 static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     const WorkerdApi::Global& global,
     CompatibilityFlags::Reader featureFlags,
     uint32_t ownerId,
-    api::MemoryCacheProvider& memoryCacheProvider) {
+    api::MemoryCacheProvider& memoryCacheProvider,
+    IsInternalBinding isInternal) {
   TRACE_EVENT("workerd", "WorkerdApi::createBindingValue()");
   using Global = WorkerdApi::Global;
   auto context = lock.v8Context();
@@ -583,7 +593,7 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
           lock.alloc<api::Fetcher>(pipeline.channel,
               pipeline.requiresHost ? api::Fetcher::RequiresHostAndProtocol::YES
                                     : api::Fetcher::RequiresHostAndProtocol::NO,
-              pipeline.isInHouse));
+              pipeline.isInHouse, api::RpcCompatGateBypassed(isInternal.toBool())));
     }
 
     KJ_CASE_ONEOF(loopback, Global::LoopbackServiceStub) {
@@ -626,7 +636,7 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
           lock.unwrap<kj::OneOf<kj::String, api::SubtleCrypto::ImportKeyAlgorithm>>(context, algo);
 
       jsg::Ref<api::CryptoKey> importedKey =
-          api::SubtleCrypto().importKeySync(lock, key.format, kj::mv(keyData),
+          api::SubtleCrypto::importKeySync(lock, key.format, kj::mv(keyData),
               api::interpretAlgorithmParam(kj::mv(importKeyAlgo)), key.extractable, key.usages);
 
       value = lock.wrap(context, kj::mv(importedKey));
@@ -680,35 +690,34 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     }
 
     KJ_CASE_ONEOF(wrapped, Global::Wrapped) {
-      auto moduleRegistry = jsg::ModuleRegistry::from(lock);
-      auto moduleName = kj::Path::parse(wrapped.moduleName);
-
       // wrapped bindings can be produced by internal modules only
-      KJ_IF_SOME(moduleInfo,
-          moduleRegistry->resolve(
-              lock, moduleName, kj::none, jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY)) {
-        // obtain the module
-        auto module = moduleInfo.module.getHandle(lock);
-        jsg::instantiateModule(lock, module);
-
+      KJ_IF_SOME(moduleNs, lock.resolveInternalModule(wrapped.moduleName)) {
         // build env object with inner bindings
         auto env = v8::Object::New(lock.v8Isolate);
         for (const auto& innerBinding: wrapped.innerBindings) {
           lock.v8Set(env, innerBinding.name,
-              createBindingValue(lock, innerBinding, featureFlags, ownerId, memoryCacheProvider));
+              createBindingValue(lock, innerBinding, featureFlags, ownerId, memoryCacheProvider,
+                  IsInternalBinding::YES));
         }
 
         // obtain exported function to call
-        auto moduleNs = jsg::check(module->GetModuleNamespace()->ToObject(context));
         auto fn = lock.v8Get(moduleNs, wrapped.entrypoint);
         KJ_ASSERT(fn->IsFunction(), "Entrypoint is not a function", wrapped.entrypoint);
 
         // invoke the function, its result will be binding value
         v8::Local<v8::Value> arg = env.As<v8::Value>();
         value = jsg::check(v8::Function::Cast(*fn)->Call(context, context->Global(), 1, &arg));
+        if (wrapped.entrypoint == "default"_kj && wrapped.innerBindings.size() == 1 &&
+            wrapped.innerBindings[0].name == api::WRAPPED_BINDING_INNER_NAME &&
+            wrapped.innerBindings[0].value.is<Global::Fetcher>()) {
+          KJ_IF_SOME(binding,
+              lock.getTypeHandler<jsg::Ref<api::WrappedBinding>>().tryUnwrap(lock, value)) {
+            binding->setWrapperModule(kj::str(wrapped.moduleName));
+          }
+        }
       } else {
         KJ_FAIL_REQUIRE(
-            "wrapped binding module can't be resolved (internal modules only)", moduleName);
+            "wrapped binding module can't be resolved (internal modules only)", wrapped.moduleName);
       }
     }
     KJ_CASE_ONEOF(hyperdrive, Global::Hyperdrive) {
@@ -754,8 +763,8 @@ void WorkerdApi::compileGlobals(jsg::Lock& lockParam,
     for (auto& global: globals) {
       lockParam.withinHandleScope([&] {
         // Don't use String's usual TypeHandler here because we want to intern the string.
-        auto value =
-            createBindingValue(lock, global, featureFlags, ownerId, impl->memoryCacheProvider);
+        auto value = createBindingValue(
+            lock, global, featureFlags, ownerId, impl->memoryCacheProvider, IsInternalBinding::NO);
         KJ_ASSERT(!value.IsEmpty(), "global did not produce v8::Value");
         lockParam.v8Set(target, global.name, value);
       });
@@ -864,7 +873,6 @@ const WorkerdApi& WorkerdApi::from(const Worker::Api& api) {
 // }  // namespace
 
 kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
-    const jsg::ResolveObserver& observer,
     kj::Maybe<const Worker::Script::ModulesSource&> maybeSource,
     const CompatibilityFlags::Reader& featureFlags,
     const PythonConfig& pythonConfig,
@@ -873,7 +881,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
     kj::Maybe<kj::String> maybeFallbackService,
     kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) {
 
-  return newWorkerModuleRegistry<JsgWorkerdIsolate_TypeWrapper>(observer, maybeSource, featureFlags,
+  return newWorkerModuleRegistry<JsgWorkerdIsolate_TypeWrapper>(maybeSource, featureFlags,
       bundleBase,
       [&](jsg::modules::ModuleRegistry::Builder& builder, IsPythonWorker isPythonWorker) {
     // TODO(later): The new module registry should eventually support python workers
@@ -982,7 +990,15 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
             publicExtensionsBuilder.addEsm(url, module.getEsModule().asArray());
           }
         } else {
-          KJ_LOG(WARNING, "Ignoring extension module with invalid name", module.getName());
+          // The new module registry identifies extension modules by URL, so
+          // the name must parse as an absolute URL (the legacy registry
+          // accepts any path-like name). Silently dropping the module would
+          // surface later as a confusing "Module not found" error at import
+          // time, so fail registry construction with an actionable error
+          // instead; makeWorkerImpl() reports it as a worker config error.
+          KJ_FAIL_REQUIRE(kj::str("Invalid extension module name \"", module.getName(),
+              "\": when the new_module_registry compatibility flag is enabled, extension "
+              "module names must be fully-qualified URLs (e.g. \"my-extension:module\")."));
         }
       }
     }
@@ -998,6 +1014,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
     KJ_IF_SOME(fallbackService, maybeFallbackService) {
       auto fallbackClient =
           kj::heap<workerd::fallback::FallbackServiceClient>(kj::str(fallbackService));
+      auto ownedFeatureFlags = capnp::clone(featureFlags);
 
       // Map from the module resolution source to the fallback service import type.
       constexpr auto sourceToImportType = [](jsg::modules::ResolveContext::Source source) {
@@ -1014,15 +1031,22 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
       };
 
       builder.add(jsg::modules::ModuleBundle::newFallbackBundle(
-          [client = kj::mv(fallbackClient), featureFlags, sourceToImportType](
-              const jsg::modules::ResolveContext& context) mutable
+          [client = kj::mv(fallbackClient), featureFlags = kj::mv(ownedFeatureFlags),
+              sourceToImportType](const jsg::modules::ResolveContext& context) mutable
           -> kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>> {
         auto normalizedSpecifier = kj::str(context.normalizedSpecifier.getHref());
         auto referrer = kj::str(context.referrerNormalizedSpecifier.getHref());
+        // The V2 fallback service protocol transmits import attributes as a map.
+        // Reconstruct it from the canonical importType value; "type" is the only
+        // attribute key that can survive import attribute parsing.
+        kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
+        KJ_IF_SOME(type, context.importType) {
+          attributes.insert("type"_kj, type);
+        }
         KJ_IF_SOME(resolved,
             client->tryResolve(workerd::fallback::Version::V2, sourceToImportType(context.source),
                 normalizedSpecifier, context.rawSpecifier.orDefault(nullptr), referrer,
-                context.attributes)) {
+                attributes)) {
           KJ_SWITCH_ONEOF(resolved) {
             KJ_CASE_ONEOF(str, kj::String) {
               // The fallback service returned an alternative specifier.
@@ -1032,7 +1056,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
             KJ_CASE_ONEOF(def, kj::Own<server::config::Worker::Module::Reader>) {
               // The fallback service returned a module definition.
               // We need to convert that into a Module instance.
-              auto mod = readModuleConf(*def, featureFlags, kj::none);
+              auto mod = readModuleConf(*def, *featureFlags, kj::none);
               KJ_IF_SOME(id, jsg::Url::tryParse(mod.name)) {
                 // Note that unlike the regular case, the module content returned
                 // by the fallback service is not guaranteed to be memory-resident.
@@ -1043,7 +1067,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
                         jsg::modules::Module::newEsm(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
-                            kj::heapArray<const char>(content.body)));
+                            kj::arc<jsg::OwnedAscii>(kj::heapArray<const char>(content.body))));
                   }
                   KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
                     auto ownedData = kj::str(content.body);
@@ -1051,7 +1075,9 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
                         jsg::modules::Module::newSynthetic(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
-                            jsg::modules::Module::newTextModuleHandler(ptr))
+                            jsg::modules::Module::newTextModuleHandler(ptr), nullptr,
+                            jsg::modules::Module::Flags::NONE,
+                            jsg::modules::Module::ContentType::TEXT)
                             .attach(kj::mv(ownedData)));
                   }
                   KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
@@ -1060,7 +1086,9 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
                         jsg::modules::Module::newSynthetic(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
-                            jsg::modules::Module::newDataModuleHandler(ptr))
+                            jsg::modules::Module::newDataModuleHandler(ptr), nullptr,
+                            jsg::modules::Module::Flags::NONE,
+                            jsg::modules::Module::ContentType::DATA)
                             .attach(kj::mv(ownedData)));
                   }
                   KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
@@ -1069,7 +1097,9 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
                         jsg::modules::Module::newSynthetic(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
-                            jsg::modules::Module::newWasmModuleHandler(ptr))
+                            jsg::modules::Module::newWasmModuleHandler(ptr), nullptr,
+                            jsg::modules::Module::Flags::WASM,
+                            jsg::modules::Module::ContentType::WASM)
                             .attach(kj::mv(ownedData)));
                   }
                   KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
@@ -1078,7 +1108,9 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
                         jsg::modules::Module::newSynthetic(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
-                            jsg::modules::Module::newJsonModuleHandler(ptr))
+                            jsg::modules::Module::newJsonModuleHandler(ptr), nullptr,
+                            jsg::modules::Module::Flags::NONE,
+                            jsg::modules::Module::ContentType::JSON)
                             .attach(kj::mv(ownedData)));
                   }
                   KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
@@ -1092,8 +1124,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                         jsg::modules::Module::newSynthetic(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
                             jsg::modules::Module::newCjsStyleModuleHandler<
-                                api::CommonJsModuleContext, JsgWorkerdIsolate_TypeWrapper>(
-                                ptr, mod.name),
+                                api::CommonJsModuleContext, JsgWorkerdIsolate_TypeWrapper>(ptr),
               KJ_MAP(name, named) {
                       return kj::str(name);
                     }).attach(kj::mv(ownedData)));

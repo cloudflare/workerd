@@ -10,6 +10,7 @@
 #include <capnp/schema.h>
 #include <kj/compat/http.h>
 #include <kj/debug.h>
+#include <kj/encoding.h>
 #include <kj/time.h>
 
 #include <atomic>
@@ -376,6 +377,21 @@ kj::Maybe<SpanContext> SpanContext::tryFromTraceparent(kj::StringPtr tp) {
   return SpanContext(TraceId(traceLow, traceHigh), SpanId(parentId), TraceFlags(flags));
 }
 
+kj::String formatW3CTraceparent(const TraceId& traceId, SpanId spanId, TraceFlags traceFlags) {
+  // encodeHex over the single flags byte pads to the two digits the format requires; kj::hex
+  // would drop a leading zero.
+  kj::byte flags = traceFlags;
+  return kj::str("00-", traceId.toW3C(), "-", spanId, "-", kj::encodeHex(kj::arrayPtr(flags)));
+}
+
+kj::Maybe<kj::String> SpanContext::toTraceparent() const {
+  auto sid = KJ_UNWRAP_OR_RETURN(spanId, kj::none);
+  auto flags = KJ_UNWRAP_OR_RETURN(traceFlags, kj::none);
+  // A zero trace id or a zero span id is invalid; tryFromTraceparent() rejects both.
+  if (traceId == nullptr || sid == nullptr) return kj::none;
+  return formatW3CTraceparent(traceId, sid, flags);
+}
+
 kj::String KJ_STRINGIFY(const SpanContext& context) {
   return kj::str(context.getTraceId(), "-", context.getSpanId());
 }
@@ -397,6 +413,10 @@ void ConnectEventInfo::copyTo(rpc::Trace::ConnectEventInfo::Builder builder) con
 
 ConnectEventInfo ConnectEventInfo::clone() const {
   return ConnectEventInfo();
+}
+
+kj::String ConnectEventInfo::toString() const {
+  return kj::str("ConnectEventInfo");
 }
 
 FetchEventInfo::FetchEventInfo(
@@ -432,9 +452,15 @@ FetchEventInfo FetchEventInfo::clone() const {
 }
 
 kj::String FetchEventInfo::toString() const {
-  return kj::str("FetchEventInfo: ",
-      kj::delimited(
-          kj::arr(kj::str(method), kj::str(url), kj::str(cfJson), kj::str(headers)), ", "_kjc));
+  // Only stringify cfJson and headers in predictable mode, these should not be logged in prod
+  if (isPredictableModeForTest()) {
+    return kj::str("FetchEventInfo: ",
+        kj::delimited(
+            kj::arr(kj::str(method), kj::str(url), kj::str(cfJson), kj::str(headers)), ", "_kjc));
+  } else {
+    return kj::str(
+        "FetchEventInfo: ", kj::delimited(kj::arr(kj::str(method), kj::str(url)), ", "_kjc));
+  }
 }
 
 FetchEventInfo::Header::Header(kj::String name, kj::String value)
@@ -492,6 +518,10 @@ ScheduledEventInfo ScheduledEventInfo::clone() const {
   return ScheduledEventInfo(scheduledTime, kj::str(cron));
 }
 
+kj::String ScheduledEventInfo::toString() const {
+  return kj::str("ScheduledEventInfo");
+}
+
 AlarmEventInfo::AlarmEventInfo(kj::Date scheduledTime): scheduledTime(scheduledTime) {}
 
 AlarmEventInfo::AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader)
@@ -503,6 +533,10 @@ void AlarmEventInfo::copyTo(rpc::Trace::AlarmEventInfo::Builder builder) const {
 
 AlarmEventInfo AlarmEventInfo::clone() const {
   return AlarmEventInfo(scheduledTime);
+}
+
+kj::String AlarmEventInfo::toString() const {
+  return kj::str("AlarmEventInfo");
 }
 
 QueueEventInfo::QueueEventInfo(kj::String queueName, uint32_t batchSize)
@@ -520,6 +554,10 @@ void QueueEventInfo::copyTo(rpc::Trace::QueueEventInfo::Builder builder) const {
 
 QueueEventInfo QueueEventInfo::clone() const {
   return QueueEventInfo(kj::str(queueName), batchSize);
+}
+
+kj::String QueueEventInfo::toString() const {
+  return kj::str("QueueEventInfo");
 }
 
 EmailEventInfo::EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize)
@@ -540,6 +578,10 @@ void EmailEventInfo::copyTo(rpc::Trace::EmailEventInfo::Builder builder) const {
 
 EmailEventInfo EmailEventInfo::clone() const {
   return EmailEventInfo(kj::str(mailFrom), kj::str(rcptTo), rawSize);
+}
+
+kj::String EmailEventInfo::toString() const {
+  return kj::str("EmailEventInfo");
 }
 
 namespace {
@@ -569,6 +611,10 @@ void TraceEventInfo::copyTo(rpc::Trace::TraceEventInfo::Builder builder) const {
 
 TraceEventInfo TraceEventInfo::clone() const {
   return TraceEventInfo(KJ_MAP(item, traces) { return item.clone(); });
+}
+
+kj::String TraceEventInfo::toString() const {
+  return kj::str("TraceEventInfo");
 }
 
 TracePreview::TracePreview(kj::String id, kj::String slug, kj::String name)
@@ -720,6 +766,14 @@ HibernatableWebSocketEventInfo::Type HibernatableWebSocketEventInfo::readFrom(
   KJ_UNREACHABLE;
 }
 
+kj::String HibernatableWebSocketEventInfo::toString() const {
+  return kj::str("HibernatableWebSocketEventInfo");
+}
+
+kj::String CustomEventInfo::toString() const {
+  return kj::str("CustomEventInfo");
+}
+
 FetchResponseInfo::FetchResponseInfo(uint16_t statusCode): statusCode(statusCode) {}
 
 FetchResponseInfo::FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader)
@@ -733,19 +787,79 @@ FetchResponseInfo FetchResponseInfo::clone() const {
   return FetchResponseInfo(statusCode);
 }
 
-Log::Log(kj::Date timestamp, LogLevel logLevel, kj::String message)
+ErrorInfo::ErrorInfo(kj::String name, kj::String message, kj::Maybe<kj::String> stack)
+    : name(kj::mv(name)),
+      message(kj::mv(message)),
+      stack(kj::mv(stack)) {}
+
+ErrorInfo::ErrorInfo(rpc::Trace::ErrorInfo::Reader reader)
+    : name(kj::str(reader.getName())),
+      message(kj::str(reader.getMessage())) {
+  if (reader.hasStack()) {
+    stack = kj::str(reader.getStack());
+  }
+}
+
+void ErrorInfo::copyTo(rpc::Trace::ErrorInfo::Builder builder) const {
+  builder.setName(name);
+  builder.setMessage(message);
+  KJ_IF_SOME(s, stack) {
+    builder.setStack(s);
+  }
+}
+
+ErrorInfo ErrorInfo::clone() const {
+  return ErrorInfo(
+      kj::str(name), kj::str(message), stack.map([](const kj::String& s) { return kj::str(s); }));
+}
+
+LogErrorInfo cloneLogErrorInfo(const LogErrorInfo& src) {
+  KJ_IF_SOME(slots, src) {
+    // Each slot starts out kj::none (default-constructed by heapArray); we only
+    // populate slots that hold an Error in the source.
+    auto out = kj::heapArray<kj::Maybe<ErrorInfo>>(slots.size());
+    for (auto i: kj::zeroTo(slots.size())) {
+      KJ_IF_SOME(info, slots[i]) {
+        out[i] = info.clone();
+      }
+    }
+    return out;
+  }
+  return kj::none;
+}
+
+Log::Log(kj::Date timestamp,
+    LogLevel logLevel,
+    kj::String message,
+    LogErrorInfo errorInfo,
+    LogTruncated truncated)
     : timestamp(timestamp),
       logLevel(logLevel),
-      message(kj::mv(message)) {}
+      message(kj::mv(message)),
+      truncated(truncated.toBool()),
+      errorInfo(kj::mv(errorInfo)) {}
 
 void Log::copyTo(rpc::Trace::Log::Builder builder) const {
   builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setLogLevel(logLevel);
   builder.setMessage(message);
+  builder.setTruncated(truncated);
+  KJ_IF_SOME(slots, errorInfo) {
+    auto listBuilder = builder.initErrorInfo(slots.size());
+    for (auto i: kj::zeroTo(slots.size())) {
+      auto slotBuilder = listBuilder[i];
+      KJ_IF_SOME(info, slots[i]) {
+        info.copyTo(slotBuilder.initInfo());
+      } else {
+        slotBuilder.setNone();
+      }
+    }
+  }
 }
 
 Log Log::clone() const {
-  return Log(timestamp, logLevel, kj::str(message));
+  return Log(
+      timestamp, logLevel, kj::str(message), cloneLogErrorInfo(errorInfo), LogTruncated(truncated));
 }
 
 Exception::Exception(
@@ -758,7 +872,25 @@ Exception::Exception(
 Log::Log(rpc::Trace::Log::Reader reader)
     : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
       logLevel(reader.getLogLevel()),
-      message(kj::str(reader.getMessage())) {}
+      message(kj::str(reader.getMessage())),
+      truncated(reader.getTruncated()) {
+  if (reader.hasErrorInfo()) {
+    auto listReader = reader.getErrorInfo();
+    auto slots = kj::heapArray<kj::Maybe<ErrorInfo>>(listReader.size());
+    for (auto i: kj::zeroTo(listReader.size())) {
+      auto slotReader = listReader[i];
+      switch (slotReader.which()) {
+        case rpc::Trace::ErrorInfoSlot::INFO:
+          slots[i] = tracing::ErrorInfo(slotReader.getInfo());
+          break;
+        case rpc::Trace::ErrorInfoSlot::NONE:
+          // slot stays kj::none
+          break;
+      }
+    }
+    errorInfo = kj::mv(slots);
+  }
+}
 
 Exception::Exception(rpc::Trace::Exception::Reader reader)
     : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
@@ -1724,7 +1856,7 @@ void SpanBuilder::setOperationName(kj::ConstString operationName) {
   }
 }
 
-void SpanBuilder::setTag(kj::ConstString key, TagInitValue value) {
+void SpanBuilder::setTag(kj::ConstString key, TagInitValue value, IsCustomTag isCustom) {
   KJ_IF_SOME(s, span) {
     // We allow passing a LiteralStringConst or StringPtr so that we don't have to allocate memory
     // if we're not being observed.
@@ -1756,18 +1888,23 @@ void SpanBuilder::setTag(kj::ConstString key, TagInitValue value) {
     }(kj::mv(value));
 
     auto keyPtr = key.asPtr();
-    s.tags.upsert(kj::mv(key), kj::mv(v), [keyPtr](TagValue& existingValue, TagValue&& newValue) {
+    s.tags.upsert(
+        kj::mv(key), kj::mv(v), [keyPtr, isCustom](TagValue& existingValue, TagValue&& newValue) {
       // This is a programming error, but not a serious one. We could alternatively just emit
       // duplicate tags and leave the Jaeger UI in charge of warning about them.
-      [[maybe_unused]] static auto logged = [keyPtr]() {
-        if (isPredictableModeForTest()) {
-          // Logging in ERROR level to have this fail loudly during testing.
-          KJ_LOG(ERROR, "overwriting previous tag", keyPtr);
-        } else {
-          KJ_LOG(WARNING, "overwriting previous tag", keyPtr);
-        }
-        return true;
-      }();
+      // Do not log for custom tags set using the worker binding so that misconfigured workers do
+      // not result in internal warnings.
+      if (isCustom == IsCustomTag::NO) {
+        [[maybe_unused]] static auto logged = [keyPtr]() {
+          if (isPredictableModeForTest()) {
+            // Logging in ERROR level to have this fail loudly during testing.
+            KJ_LOG(ERROR, "overwriting previous tag", keyPtr);
+          } else {
+            KJ_LOG(WARNING, "overwriting previous tag", keyPtr);
+          }
+          return true;
+        }();
+      }
       existingValue = kj::mv(newValue);
     });
   }

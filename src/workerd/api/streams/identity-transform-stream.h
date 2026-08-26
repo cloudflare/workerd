@@ -58,6 +58,6 @@ struct OneWayPipe {
 
 OneWayPipe newIdentityPipe(kj::Maybe<uint64_t> expectedLength = kj::none);
 
-bool isIdentityTransformStream(WritableStreamSink& sink);
+bool isIdentityTransformStream(kj::Ptr<WritableStreamSink> sink);
 
 }  // namespace workerd::api

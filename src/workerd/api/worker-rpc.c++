@@ -4,6 +4,7 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
+#include <workerd/api/sockets.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
 #include <workerd/io/stored-value.h>
@@ -15,6 +16,39 @@
 #include <capnp/membrane.h>
 
 namespace workerd::api {
+
+namespace {
+
+kj::Maybe<kj::String> getCurrentDurableObjectId() {
+  KJ_IF_SOME(context, IoContext::tryCurrent()) {
+    KJ_IF_SOME(actor, context.getActor()) {
+      KJ_IF_SOME(id, actor.getId().tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
+        return id->toString();
+      }
+    }
+  }
+  return kj::none;
+}
+
+void maybeAddDurableObjectId(kj::Exception& exception, kj::Maybe<kj::StringPtr> durableObjectId) {
+  if (jsg::isExceptionFromInputGateBroken(exception.getDescription())) return;
+  KJ_IF_SOME(id, durableObjectId) {
+    jsg::addDurableObjectId(exception, id);
+  }
+}
+
+// callPipeline rejects from the JS error path before js.exceptionToKj() creates a KJ exception,
+// so this overload annotates the live Error object directly.
+void maybeAddDurableObjectId(
+    jsg::Lock& js, jsg::Value& error, kj::Maybe<kj::StringPtr> durableObjectId) {
+  if (!error.getHandle(js)->IsObject()) return;
+  KJ_IF_SOME(id, durableObjectId) {
+    jsg::check(error.getHandle(js).As<v8::Object>()->Set(js.v8Context(),
+        jsg::v8StrIntern(js.v8Isolate, "durableObjectId"_kj), jsg::v8Str(js.v8Isolate, id)));
+  }
+}
+
+}  // namespace
 
 capnp::Orphan<capnp::List<rpc::JsValue::External>> RpcSerializerExternalHandler::build(
     capnp::Orphanage orphanage) {
@@ -35,6 +69,96 @@ RpcDeserializerExternalHandler::~RpcDeserializerExternalHandler() noexcept(false
 rpc::JsValue::External::Reader RpcDeserializerExternalHandler::read() {
   KJ_ASSERT(i < externals.size());
   return externals[i++];
+}
+
+void RpcDeserializerExternalHandler::prepare(jsg::Lock& js, IoContext& ioctx) {
+  if (!util::Autogate::isEnabled(util::AutogateKey::RPC_EXTERNALS_HYDRATION)) {
+    // The TypeScript streams implementation cannot construct received streams during the
+    // graph read (JS execution is forbidden there), so the typescript_implemented_streams
+    // compat flag REQUIRES this autogate to receive streams. Reject only configurations
+    // that actually receive stream-bearing values: stream-free RPC (and the send side,
+    // which has no such scope) works without the gate.
+    if (FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+      for (auto external: externals) {
+        switch (external.which()) {
+          case rpc::JsValue::External::READABLE_STREAM:
+          case rpc::JsValue::External::WRITABLE_STREAM:
+          case rpc::JsValue::External::SOCKET:
+            JSG_FAIL_REQUIRE(Error,
+                "The typescript_implemented_streams compatibility flag requires the "
+                "workerd-autogate-rpc-externals-hydration autogate in order to receive "
+                "streams over RPC.");
+          default:
+            break;
+        }
+      }
+    }
+    return;
+  }
+  KJ_ASSERT(!prepared, "prepare() may only be called once");
+
+  slots.resize(externals.size());
+  for (uint index = 0; index < externals.size(); index++) {
+    auto external = externals[index];
+    switch (external.which()) {
+      case rpc::JsValue::External::READABLE_STREAM:
+        slots[index].value = hydrateRpcReadableStream(js, ioctx, external.getReadableStream());
+        break;
+      case rpc::JsValue::External::WRITABLE_STREAM:
+        slots[index].value = hydrateRpcWritableStream(js, ioctx, external.getWritableStream());
+        break;
+      case rpc::JsValue::External::SOCKET: {
+        // The socket transfer kill switch also gates hydration: with it off, the slots stay
+        // empty and Socket::deserialize() rejects the tag before attempting a claim.
+        if (!util::Autogate::isEnabled(util::AutogateKey::SOCKET_RPC_TRANSFER)) break;
+        KJ_REQUIRE(index + 2 < externals.size(),
+            "socket external is missing its stream externals, possible corruption");
+        auto socket =
+            hydrateRpcSocket(js, ioctx, external, externals[index + 1], externals[index + 2]);
+        auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<Socket>>());
+        slots[index].value = jsg::JsRef(js,
+            KJ_ASSERT_NONNULL(
+                jsg::JsValue(handler.wrap(js, kj::mv(socket))).tryCast<jsg::JsObject>()));
+        // The socket subsumed its two adjacent stream externals: record the span for the
+        // claim's index advance and skip them here so they are not hydrated again (the ++
+        // covers the second one).
+        slots[index].span = 3;
+        index += 2;
+        break;
+      }
+      default:
+        // Every other external type deserializes without executing JavaScript, directly under
+        // the graph read; no hydration needed.
+        break;
+    }
+  }
+  prepared = true;
+}
+
+template <typename T>
+kj::Maybe<T> RpcDeserializerExternalHandler::claimPrebuilt() {
+  if (!prepared) return kj::none;
+  KJ_ASSERT(i < slots.size());
+  auto& slot = slots[i];
+  auto& value =
+      KJ_REQUIRE_NONNULL(slot.value, "external table slot type doesn't match serialization tag");
+  KJ_REQUIRE(value.template is<T>(), "external table slot type doesn't match serialization tag");
+  T result = kj::mv(value.template get<T>());
+  slot.value = kj::none;
+  i += slot.span;
+  return kj::mv(result);
+}
+
+kj::Maybe<JsReadableStream> RpcDeserializerExternalHandler::claimPrebuiltReadable() {
+  return claimPrebuilt<JsReadableStream>();
+}
+
+kj::Maybe<JsWritableStream> RpcDeserializerExternalHandler::claimPrebuiltWritable() {
+  return claimPrebuilt<JsWritableStream>();
+}
+
+kj::Maybe<jsg::JsRef<jsg::JsObject>> RpcDeserializerExternalHandler::claimPrebuiltSocket() {
+  return claimPrebuilt<jsg::JsRef<jsg::JsObject>>();
 }
 
 namespace {
@@ -91,6 +215,12 @@ DeserializeResult deserializeJsValue(jsg::Lock& js, rpc::JsValue::Reader reader)
   auto disposalGroup = kj::heap<RpcStubDisposalGroup>();
 
   RpcDeserializerExternalHandler externalHandler(reader.getExternals(), *disposalGroup);
+  if (reader.getExternals().size() > 0) {
+    // Materialize the externals that need JavaScript execution (streams, sockets) before
+    // readValue() begins the graph read, during which JS execution is forbidden. See
+    // RpcDeserializerExternalHandler::prepare().
+    externalHandler.prepare(js, IoContext::current());
+  }
 
   jsg::Deserializer deserializer(js, reader.getV8Serialized(), kj::none, kj::none,
       jsg::Deserializer::Options{
@@ -541,9 +671,6 @@ jsg::JsValue JsRpcPromise::finally(jsg::Lock& js, v8::Local<v8::Function> onFina
 }
 
 kj::Maybe<jsg::Ref<JsRpcProperty>> JsRpcProperty::getProperty(jsg::Lock& js, kj::String name) {
-  if (depth >= MAX_PROPERTY_WARNING_DEPTH) {
-    LOG_PERIODICALLY(WARNING, "NOSENTRY VULN-136589 exceeded RPC property warning depth", depth);
-  }
   JSG_REQUIRE(depth < MAX_PROPERTY_DEPTH, TypeError,
       "RPC pipelined property path is too deep (max ", MAX_PROPERTY_DEPTH, ").");
   return js.alloc<JsRpcProperty>(JSG_THIS, kj::mv(name), depth + 1);
@@ -979,8 +1106,9 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   // makeReentryCallback() to guard against the possibility that the IoContext is canceled before
   // or during a call.
   JsRpcTargetBase(IoContext& ctx, MayOutliveIncomingRequest)
-      : enterIsolateAndCall(ctx.makeReentryCallback<IoContext::TOP_UP>(
-            [this, &ctx](Worker::Lock& lock, CallContext callContext) {
+      : durableObjectId(getCurrentDurableObjectId()),
+        enterIsolateAndCall(ctx.makeReentryCallback<IoContext::TOP_UP>(
+            [this](Worker::Lock& lock, IoContext& ctx, CallContext callContext) {
               return callImpl(lock, ctx, callContext);
             })),
         externalPusher(ctx.getExternalPusher()) {}
@@ -988,10 +1116,11 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   // Constructor use by EntrypointJsRpcTarget, which is revoked and destroyed before the IoContext
   // can possibly be canceled. It can just use ctx.run().
   JsRpcTargetBase(IoContext& ctx, CantOutliveIncomingRequest)
-      : enterIsolateAndCall([this, &ctx](CallContext callContext) {
+      : durableObjectId(getCurrentDurableObjectId()),
+        enterIsolateAndCall([this, &ctx](CallContext callContext) {
           // Note: No need to topUpActor() since this is the start of a top-level request, so the
           // actor will already have been topped up by IncomingRequest::delivered().
-          return ctx.run([this, &ctx, callContext](Worker::Lock& lock) mutable {
+          return ctx.run([this, callContext](Worker::Lock& lock, IoContext& ctx) mutable {
             return callImpl(lock, ctx, callContext);
           });
         }),
@@ -1022,7 +1151,9 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
     co_await kj::yield();
 
     // Try to execute the requested method.
-    co_return co_await enterIsolateAndCall(callContext).catch_([](kj::Exception&& e) {
+    co_return co_await enterIsolateAndCall(callContext).catch_([this](kj::Exception&& e) {
+      maybeAddDurableObjectId(
+          e, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
       if (jsg::isTunneledException(e.getDescription())) {
         // Annotate exceptions in RPC worker calls as remote exceptions.
         auto description = jsg::stripRemoteExceptionPrefix(e.getDescription());
@@ -1055,6 +1186,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
  private:
   virtual void maybeSetJsRpcInfo(IoContext& ctx, const kj::ConstString& methodNameForTrace) = 0;
+
+  kj::Maybe<kj::String> durableObjectId;
 
   // Function which enters the isolate lock and IoContext and then invokes callImpl(). Created
   // using IoContext::makeReentryCallback().
@@ -1194,7 +1327,11 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
         // as a result of the promise being rejected). This will implicitly dispose the param
         // stubs.
       }),
-                  ctx.addFunctor([callPipelineFulfillerRef](jsg::Lock& js, jsg::Value&& error) {
+                  ctx.addFunctor(
+                      [callPipelineFulfillerRef, durableObjectId = getCurrentDurableObjectId()](
+                          jsg::Lock& js, jsg::Value&& error) {
+        maybeAddDurableObjectId(
+            js, error, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
         // If we set up a `callPipeline` early, we have to make sure it propagates the error.
         // (Otherwise we get a PromiseFulfiller error instead, which is pretty useless...)
         KJ_IF_SOME(cpf, callPipelineFulfillerRef) {
@@ -1944,6 +2081,26 @@ void RpcSerializerExternalHandler::serializeProxy(
   });
 }
 
+bool RpcSerializerExternalHandler::trySerializeClassInstance(
+    jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Object> object) {
+  // TypeScript-implemented streams are recognized by the implementation's private brand.
+  // tryUnwrapTs answers kj::none whenever the typescript_implemented_streams flag is off (the
+  // brand-check export does not exist then), so legacy isolates are unaffected. The serialized
+  // form is written with the same tag and wire protocol as the legacy JSG-wrapped streams, so
+  // the peer needs no knowledge of which implementation the sender runs.
+  KJ_IF_SOME(stream, JsReadableStream::tryUnwrapTs(js, object)) {
+    serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::READABLE_STREAM));
+    stream.serialize(js, serializer);
+    return true;
+  }
+  KJ_IF_SOME(stream, JsWritableStream::tryUnwrapTs(js, object)) {
+    serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::WRITABLE_STREAM));
+    stream.serialize(js, serializer);
+    return true;
+  }
+  return false;
+}
+
 // JsRpcTarget implementation specific to entrypoints. This is used to deliver the first, top-level
 // call of an RPC session.
 class EntrypointJsRpcTarget final: public JsRpcTargetBase {
@@ -2127,6 +2284,15 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     // Make sure the top-level capability is revoked with the same exception that `run()` is
     // throwing, rather than some generic revocation exception.
     auto e = kj::getCaughtExceptionAsKj();
+    // These are exceptions for a top-level jsRpc call and will cause the jsRpc customEvent to have
+    // an exception outcome – log the exception to avoid reporting an exception outcome without the
+    // actual exception.
+    KJ_IF_SOME(exc, kj::runCatchingExceptions([&]() {
+      incomingRequest->getContext().logUncaughtExceptionAsync(
+          UncaughtExceptionSource::ASYNC_TASK, e.clone());
+    })) {
+      KJ_LOG(ERROR, "logUncaughtExceptionAsync() threw an exception?", exc);
+    }
     revocableTarget.revoke(e.clone());
     kj::throwFatalException(kj::mv(e));
   }
