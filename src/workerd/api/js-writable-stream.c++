@@ -243,6 +243,10 @@ class TsWriterSink final: public WritableStreamSink {
   }
 
   void scheduleAbort(jsg::JsRef<jsg::JsObject> writer, kj::Exception reason) {
+    // Once the last IncomingRequest is gone the IoContext can no longer usefully run JavaScript:
+    // the task would be queued onto a task set that is already being torn down, so the app's
+    // abort algorithm would never observe it. Drop the writer rather than queue unrunnable work.
+    if (!context.hasCurrentIncomingRequest()) return;
     context.addTask(
         context.run([writer = kj::mv(writer), reason = kj::mv(reason)](Worker::Lock& lock) mutable {
       jsg::Lock& js = lock;
