@@ -424,12 +424,6 @@ wd_test(
 )
 
 wd_test(
-    src = "abort-internal-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["abort-internal-streams-test.js"],
-)
-
-wd_test(
     src = "abortable-fetch-test.wd-test",
     args = ["--experimental"],
     data = ["abortable-fetch-test.js"],
@@ -1349,12 +1343,6 @@ wd_test(
 )
 
 wd_test(
-    src = "identity-transform-stream-state-machine-test.wd-test",
-    args = ["--experimental"],
-    data = ["identity-transform-stream-state-machine-test.js"],
-)
-
-wd_test(
     src = "identity-transform-stream-uaf-test.wd-test",
     args = ["--experimental"],
     data = ["identity-transform-stream-uaf-test.js"],
@@ -1411,12 +1399,6 @@ wd_test(
     src = "messageport-gc-test.wd-test",
     args = ["--experimental"],
     data = ["messageport-gc-test.js"],
-)
-
-wd_test(
-    src = "ts-identity-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["ts-identity-streams-test.js"],
 )
 
 sh_test(

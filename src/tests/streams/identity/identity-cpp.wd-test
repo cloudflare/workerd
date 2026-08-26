@@ -53,6 +53,7 @@ const unitTests :Workerd.Config = (
           (name = "body-integration", esModule = embed "body-integration.js"),
           (name = "pipe-integration", esModule = embed "pipe-integration.js"),
           (name = "reentrancy", esModule = embed "reentrancy.js"),
+          (name = "lock-release", esModule = embed "lock-release.js"),
         ],
         compatibilityFlags = [
           "nodejs_compat",

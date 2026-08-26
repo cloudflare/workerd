@@ -212,12 +212,13 @@ pattern; a change to either side fails its cell.
 | 14 | Write after both tee branches cancel | parks forever (composite cancel not propagated to the writable) | rejects `AggregateError` "All readable stream tee branches were canceled" | `writeAfterBothBranchesCancel` |
 | 15 | Piping between identity streams | not implemented: `pipeTo()` takes both locks then rejects `TypeError` ("Inter-TransformStream ReadableStream.pipeTo() is not implemented."); `pipeThrough()` throws it synchronously | fully functional: delivery, completion, and error propagation in both directions with original reason instances; circular `pipeThrough(its)` currently succeeds and locks both sides — `TODO(streams-ts)`: it should fail | `pipe-integration.js` |
 | 16 | Second concurrent default read | rejected at `read()` time: `TypeError` "This ReadableStream only supports a single pending read request at a time." | parked and served in order | `closeFromReadContinuationWithSecondReadParked` |
+| 17 | Default-HWM accounting | inert: `desiredSize` stays 1 regardless of buffered writes; `ready` never replaced | one unit per buffered chunk against the default HWM of 1: `desiredSize` goes negative, `ready` replaced until drained | `defaultHighWaterMarkAccounting` |
 
 ## Assertion catalogue
 
 | Module | Asserts |
 | --- | --- |
-| `api-surface.js` | toStringTag branding; `FixedLengthStream` subclassing; `readable`/`writable` are `ReadableStream`/`WritableStream` instances, stable, enumerable prototype accessors (placement per ledger #5); accessor brand checks |
+| `api-surface.js` | toStringTag branding; `FixedLengthStream` subclassing; `readable`/`writable` are `ReadableStream`/`WritableStream` instances, stable, enumerable prototype accessors (placement per ledger #5); constructor source text (native code under C++, not under TS); accessor brand checks |
 | `construction.js` | valid lengths (0, 5, −0.0, `MAX_SAFE_INTEGER`, bigints, with strategy); coerced length observable via HWM cap; invalid lengths throw (types per ledger #1–3); inheritance (ledger #4) |
 | `chunk-types.js` | accepted: `Uint8Array`, `ArrayBuffer`, `DataView` subrange, string→UTF-8, subarray offsets; rejected: numbers, plain objects (`TypeError`; aftermath per ledger #6) |
 | `zero-length-writes.js` | empty view / buffer / string are non-closing no-ops |
@@ -225,9 +226,9 @@ pattern; a change to either side fails its cell.
 | `buffer-lifecycle.js` | write-time snapshot survives later resize/detach in both implementations; degenerate write-time inputs (already-detached per ledger #12, out-of-bounds views); shadowing/throwing metadata getters never consulted |
 | `ordering.js` | 1:1 write/read correspondence in both interleavings; multi-chunk aggregate integrity; clean EOF tails |
 | `byob.js` | BYOB reader support; partial fills across reads with write completion on full consumption; lying destination extents (at call and after enqueue) with sentinel overwrite guards; EOF zero-length view with preserved buffer |
-| `backpressure.js` | writes and close queue unboundedly with settlement on consumption; advisory overfill (negative `desiredSize`); default HWM 1; explicit HWM as initial `desiredSize` (negative-zero HWM normalized to +0); byte-level tracking incl. in-flight bytes; string accounting (ledger #7); `ready` replacement and recovery |
+| `backpressure.js` | writes and close queue unboundedly with settlement on consumption; advisory overfill (negative `desiredSize`); default HWM 1 with divergent accounting (ledger #17); explicit HWM as initial `desiredSize` (negative-zero HWM normalized to +0); byte-level tracking incl. in-flight bytes; string accounting (ledger #7); `ready` replacement and recovery |
 | `close-propagation.js` | pending read resolves done; post-close reads done; buffered data drains before done; `closed` promises settle |
-| `abort-propagation.js` | pending/subsequent reads and both `closed` promises reject (identity per ledger #8); later writes (ledger #9) |
+| `abort-propagation.js` | pending/subsequent reads and both `closed` promises reject (identity per ledger #8); modern abort clears a pending write, rejecting it with the abort reason (undefined or original instance); later writes (ledger #9) |
 | `cancel-propagation.js` | pending write/close reject (ledger #8, #10); canceling reader's reads resolve done |
 | `fixed-length.js` | exact-length delivery (one and two chunks); `FLS(0)`; HWM capping incl. bigint; capped-HWM data flow |
 | `fixed-length-errors.js` | over/underwrite and close-without-write error the stream with the documented messages (types/surfacing per ledger #11); abort skips the underwrite check |
@@ -239,6 +240,7 @@ pattern; a change to either side fails its cell.
 | `pipe-integration.js` | `pipeTo`/`pipeThrough` between identity streams (ledger #15): TS delivery (small and multi-megabyte patterned bodies), completion, and both error-propagation directions with original reasons; C++ not-implemented wall (rejection for pipeTo, synchronous throw for pipeThrough); circular `pipeThrough(its)` with the `TODO(streams-ts)` pin |
 | `payload-helpers.js` | shared machinery: continuous prime-modulus byte pattern for large-body generation and byte-exact verification |
 | `reentrancy.js` | user code re-entering mid-processing: `Object.prototype.then` interception during read resolution (consulted once per read in C++, twice in TS) incl. a re-entrant `writer.close()` from inside the getter; close/write/sibling-cancel from read continuations; second-concurrent-read divergence (ledger #16) |
+| `lock-release.js` | `releaseLock()` rejects the released handle's `closed` promise with TypeError ("has been released"); the stream returns to a lockable state |
 | `propagation-helpers.js`, `which-impl.js` | shared machinery: reason-identity policy, implementation detection |
 
 ## Legacy (unflagged) behaviors

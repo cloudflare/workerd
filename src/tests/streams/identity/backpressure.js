@@ -66,6 +66,41 @@ export const defaultHighWaterMarkIsOne = {
   },
 };
 
+export const defaultHighWaterMarkAccounting = {
+  async test() {
+    // Without an explicit highWaterMark the implementations account
+    // differently (ledger #17):
+    // - C++ installs no accounting at all: desiredSize stays 1 no matter
+    //   how many writes are buffered, and ready is never replaced.
+    // - TypeScript counts one unit per buffered chunk against the default
+    //   highWaterMark of 1, so desiredSize dips negative and ready is
+    //   replaced until reads drain the queue.
+    // Both converge again once everything is consumed.
+    const its = new IdentityTransformStream();
+    const writer = its.writable.getWriter();
+    const reader = its.readable.getReader();
+    strictEqual(writer.desiredSize, 1);
+    const firstReady = writer.ready;
+    await writer.ready;
+    const w1 = writer.write(new Uint8Array(1));
+    strictEqual(writer.desiredSize, usingTsImpl ? 0 : 1);
+    const w2 = writer.write(new Uint8Array(9));
+    strictEqual(writer.desiredSize, usingTsImpl ? -1 : 1);
+    if (usingTsImpl) {
+      notStrictEqual(firstReady, writer.ready);
+    } else {
+      strictEqual(firstReady, writer.ready);
+    }
+    await reader.read();
+    strictEqual(writer.desiredSize, usingTsImpl ? 0 : 1);
+    await reader.read();
+    strictEqual(writer.desiredSize, 1);
+    await writer.ready;
+    await Promise.all([w1, w2]);
+    await writer.close();
+  },
+};
+
 export const explicitHighWaterMarkIsInitialDesiredSize = {
   test() {
     const { writable } = new IdentityTransformStream({ highWaterMark: 10 });

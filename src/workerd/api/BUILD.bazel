@@ -810,12 +810,6 @@ kj_test(
 )
 
 wd_test(
-    src = "streams/identitytransformstream-backpressure-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams/identitytransformstream-backpressure-test.js"],
-)
-
-wd_test(
     src = "streams/identitytransformstream-byob-test.wd-test",
     args = ["--experimental"],
     data = ["streams/identitytransformstream-byob-test.js"],

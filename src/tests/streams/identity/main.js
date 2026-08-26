@@ -13,6 +13,7 @@ export {
   sidesAreStreamInstances,
   readableWritableAreStable,
   propertyPlacement,
+  constructorSourceText,
   prototypeAccessorBrandChecks,
 } from 'api-surface';
 
@@ -72,6 +73,7 @@ export {
 export {
   queuedWritesAndCloseBufferUntilRead,
   defaultHighWaterMarkIsOne,
+  defaultHighWaterMarkAccounting,
   explicitHighWaterMarkIsInitialDesiredSize,
   desiredSizeTracksBytes,
   stringWriteDesiredSizeAccounting,
@@ -87,6 +89,7 @@ export {
 export {
   abortRejectsPendingRead,
   abortRejectsSubsequentReads,
+  abortClearsPendingWrite,
   abortRejectsSubsequentWrites,
 } from 'abort-propagation';
 
@@ -161,6 +164,8 @@ export {
   pipeThroughIdentityStream,
   circularPipeThrough,
 } from 'pipe-integration';
+
+export { releaseLockRejectsClosedPromises } from 'lock-release';
 
 export {
   thenInterceptionDuringReadResolution,

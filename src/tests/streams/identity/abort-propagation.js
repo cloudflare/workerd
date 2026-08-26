@@ -49,6 +49,33 @@ export const abortRejectsSubsequentReads = {
   },
 };
 
+export const abortClearsPendingWrite = {
+  async test() {
+    // Modern semantics (internal_writable_stream_abort_clears_queue pinned
+    // in the C++ cell; TypeScript hard-codes it): abort() with an
+    // unconsumed write clears it proactively — no reader ever required —
+    // and the pending write rejects with the abort reason itself:
+    // undefined when none is given, the original instance when one is
+    // (the abort-side identity exception applies in both implementations
+    // here). The legacy counterpart is legacyAbortWaitsForPendingWrite.
+    {
+      const { writable } = new IdentityTransformStream();
+      const writer = writable.getWriter();
+      const writePromise = writer.write(new Uint8Array(10));
+      await writer.abort();
+      strictEqual(await captureRejection(writePromise), undefined);
+    }
+    {
+      const { writable } = new IdentityTransformStream();
+      const writer = writable.getWriter();
+      const reason = new Error('modern abort');
+      const writePromise = writer.write(new Uint8Array(10));
+      await writer.abort(reason);
+      strictEqual(await captureRejection(writePromise), reason);
+    }
+  },
+};
+
 export const abortRejectsSubsequentWrites = {
   async test() {
     const reason = new Error('boom');

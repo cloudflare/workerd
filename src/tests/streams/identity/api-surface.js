@@ -15,7 +15,7 @@
 //   inheritance divergence pinned by identityBrandChecks in construction.js:
 //   only the C++ IdentityTransformStream is a TransformStream subclass.
 
-import { ok, strictEqual, throws } from 'node:assert';
+import { ok, strictEqual, throws, match, doesNotMatch } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 // Walks the prototype chain and returns the first descriptor found for key,
@@ -89,6 +89,24 @@ export const propertyPlacement = {
           ? IdentityTransformStream.prototype
           : TransformStream.prototype
       );
+    }
+  },
+};
+
+export const constructorSourceText = {
+  test() {
+    // Which implementation is serving the classes is visible in their
+    // source text: JSG-bound C++ constructors stringify as native code,
+    // the TypeScript bootstrap's do not.
+    for (const src of [
+      String(IdentityTransformStream),
+      String(FixedLengthStream),
+    ]) {
+      if (usingTsImpl) {
+        doesNotMatch(src, /native code/);
+      } else {
+        match(src, /native code/);
+      }
     }
   },
 };
