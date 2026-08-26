@@ -1,0 +1,58 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the identity streams suite against the TypeScript implementation
+# (typescript_implemented_streams + the per-isolate bootstrap autogate).
+# The embedded modules are byte-for-byte the same ones identity-cpp.wd-test
+# runs against the legacy C++ implementation.
+#
+# The semantic flags pinned in identity-cpp.wd-test are deliberately absent
+# here: the TypeScript implementation hard-codes the modern behaviors they
+# select, and this cell verifies that indifference — the `@` variant runs
+# with all of them OFF (a pre-flag compat date opting into TS streams still
+# gets modern semantics), and `@all-compat-flags` runs with all of them ON.
+#
+# expose_draining_reader IS consulted by the TS bootstrap: it installs the
+# internal ReadableStreamDrainingReader global (the C++ bridge's bulk-drain
+# conduit) so draining-reader.js can exercise it. No such global exists
+# under the C++ implementation regardless of flags.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-identity-ts",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "main.js"),
+          (name = "which-impl", esModule = embed "which-impl.js"),
+          (name = "propagation-helpers", esModule = embed "propagation-helpers.js"),
+          (name = "api-surface", esModule = embed "api-surface.js"),
+          (name = "construction", esModule = embed "construction.js"),
+          (name = "chunk-types", esModule = embed "chunk-types.js"),
+          (name = "zero-length-writes", esModule = embed "zero-length-writes.js"),
+          (name = "copy-semantics", esModule = embed "copy-semantics.js"),
+          (name = "buffer-lifecycle", esModule = embed "buffer-lifecycle.js"),
+          (name = "ordering", esModule = embed "ordering.js"),
+          (name = "byob", esModule = embed "byob.js"),
+          (name = "backpressure", esModule = embed "backpressure.js"),
+          (name = "close-propagation", esModule = embed "close-propagation.js"),
+          (name = "abort-propagation", esModule = embed "abort-propagation.js"),
+          (name = "cancel-propagation", esModule = embed "cancel-propagation.js"),
+          (name = "fixed-length", esModule = embed "fixed-length.js"),
+          (name = "fixed-length-errors", esModule = embed "fixed-length-errors.js"),
+          (name = "tee", esModule = embed "tee.js"),
+          (name = "tee-backpressure", esModule = embed "tee-backpressure.js"),
+          (name = "tee-nested", esModule = embed "tee-nested.js"),
+          (name = "draining-reader", esModule = embed "draining-reader.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "expose_draining_reader",
+          "experimental",
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);

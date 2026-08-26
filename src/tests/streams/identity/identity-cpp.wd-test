@@ -1,0 +1,65 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the identity streams suite against the legacy C++ implementation.
+# identity-ts.wd-test runs the identical modules against the TypeScript
+# implementation; sharing the test modules is the point — behavioral drift
+# between the two implementations fails one config or the other.
+#
+# No compatibilityDate is set: the wd_test variants supply the date axis
+# (2000-01-01 for `@`, 2999-12-31 for `@all-compat-flags`), and the tests
+# must hold at both extremes. The semantics the tests depend on are pinned
+# by naming the specific flags instead:
+# - streams_byob_reader_detaches_buffer: modern BYOB semantics (the passed
+#   buffer is detached; the result view is over the transferred buffer).
+# - internal_stream_byob_return_view: a BYOB read at EOF returns a
+#   zero-length view rather than undefined.
+# - internal_writable_stream_abort_clears_queue: modern abort semantics.
+# - workers_api_getters_setters_on_prototype: readable/writable are
+#   prototype accessors rather than per-instance own properties.
+# - capture_async_api_throws: async APIs return rejected promises rather
+#   than throwing synchronously (e.g. writing an invalid chunk type).
+# - set_tostring_tag: classes install Symbol.toStringTag, so instances
+#   stringify as e.g. [object IdentityTransformStream].
+# The TypeScript implementation hard-codes these modern behaviors, so the
+# flags also keep the two cells comparable at the oldest compat date.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-identity-cpp",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "main.js"),
+          (name = "which-impl", esModule = embed "which-impl.js"),
+          (name = "propagation-helpers", esModule = embed "propagation-helpers.js"),
+          (name = "api-surface", esModule = embed "api-surface.js"),
+          (name = "construction", esModule = embed "construction.js"),
+          (name = "chunk-types", esModule = embed "chunk-types.js"),
+          (name = "zero-length-writes", esModule = embed "zero-length-writes.js"),
+          (name = "copy-semantics", esModule = embed "copy-semantics.js"),
+          (name = "buffer-lifecycle", esModule = embed "buffer-lifecycle.js"),
+          (name = "ordering", esModule = embed "ordering.js"),
+          (name = "byob", esModule = embed "byob.js"),
+          (name = "backpressure", esModule = embed "backpressure.js"),
+          (name = "close-propagation", esModule = embed "close-propagation.js"),
+          (name = "abort-propagation", esModule = embed "abort-propagation.js"),
+          (name = "cancel-propagation", esModule = embed "cancel-propagation.js"),
+          (name = "fixed-length", esModule = embed "fixed-length.js"),
+          (name = "fixed-length-errors", esModule = embed "fixed-length-errors.js"),
+          (name = "tee", esModule = embed "tee.js"),
+          (name = "tee-backpressure", esModule = embed "tee-backpressure.js"),
+          (name = "tee-nested", esModule = embed "tee-nested.js"),
+          (name = "draining-reader", esModule = embed "draining-reader.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_byob_reader_detaches_buffer",
+          "internal_stream_byob_return_view",
+          "internal_writable_stream_abort_clears_queue",
+          "workers_api_getters_setters_on_prototype",
+          "capture_async_api_throws",
+          "set_tostring_tag",
+        ],
+      )
+    ),
+  ],
+);

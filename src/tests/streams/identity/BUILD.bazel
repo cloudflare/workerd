@@ -1,0 +1,29 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The identity streams suite runs the same test modules under two configs:
+# identity-cpp against the legacy C++ implementation, identity-ts against
+# the TypeScript implementation. A test that cannot pass under both belongs
+# in an implementation-specific suite, not here.
+
+identity_suite_srcs = glob(["*.js"])
+
+wd_test(
+    src = "identity-cpp.wd-test",
+    data = identity_suite_srcs,
+)
+
+wd_test(
+    src = "identity-ts.wd-test",
+    args = ["--experimental"],
+    data = identity_suite_srcs,
+)
+
+# Legacy (unflagged) regression guard, C++ implementation only. The
+# @all-compat-flags variant is disabled: at the 2999-12-31 date the semantic
+# flags this config deliberately omits would all turn on, contradicting its
+# purpose of asserting the pre-flag behaviors.
+wd_test(
+    src = "identity-cpp-legacy.wd-test",
+    data = identity_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)

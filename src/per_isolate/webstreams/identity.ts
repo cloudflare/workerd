@@ -17,6 +17,9 @@
 //     immediately without touching the readable queue (no zero-length
 //     chunk enqueued, no backpressure interaction, no pull).
 //
+// See /src/tests/streams/identity/AGENTS.md for the IdentityTransformStream
+// and FixedLengthStream specification.
+//
 // RENDEZVOUS BACKPRESSURE MODEL
 //
 // This implementation uses a rendezvous pattern matching the original
