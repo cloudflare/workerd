@@ -753,7 +753,7 @@ class SqliteDatabase::Query final: private ResetListener {
     }
 
     void setQueryId(kj::Maybe<SqliteQueryId> queryId) {
-      this->queryId = queryId;
+      this->queryId = kj::mv(queryId);
     }
 
    private:
