@@ -1334,9 +1334,11 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
  public:
   TcpPortWorkerInterface(kj::EntropySource& entropySource,
       const kj::HttpHeaderTable& headerTable,
+      kj::Maybe<kj::Own<Worker::Actor>> actorPin,
       kj::Rc<TcpPortState> portState)
       : entropySource(entropySource),
         headerTable(headerTable),
+        actorPin(kj::mv(actorPin)),
         portState(kj::mv(portState)) {}
 
   // Implements fetch(), i.e., HTTP requests. We form a TCP connection, then run HTTP over it
@@ -1346,6 +1348,11 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override {
+    // Held for the whole exchange, then released at co_return. kj's HttpService-over-HttpClient
+    // adapter keeps this promise outstanding until the response body has been pumped, and for an
+    // upgrade until the WebSocket pump ends, so this covers the full session either way.
+    auto pin = kj::mv(actorPin);
+
     // URLs should have been validated earlier in the stack, so parsing the URL should succeed.
     auto parsedUrl = KJ_REQUIRE_NONNULL(kj::Url::tryParse(url, kj::Url::Context::HTTP_PROXY_REQUEST,
                                             {.percentDecode = false, .allowEmpty = true}),
@@ -1387,7 +1394,8 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
         "Connecting to a container using TLS is not currently supported. It is unnecessary "
         "anyway, as the connection is already secure by default.");
 
-    auto promise = connectImpl(kj::Own<kj::AsyncIoStream>(&connection, kj::NullDisposer::instance));
+    auto promise = connectImpl(
+        kj::Own<kj::AsyncIoStream>(&connection, kj::NullDisposer::instance), kj::mv(actorPin));
 
     kj::HttpHeaders responseHeaders(headerTable);
     response.accept(200, "OK", responseHeaders);
@@ -1415,26 +1423,41 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
  private:
   kj::EntropySource& entropySource;
   const kj::HttpHeaderTable& headerTable;
+
+  // Keeps the owning actor alive for the connection's duration; null when there is no actor or the
+  // pin is gated off. Deferred proxying releases the IncomingRequest once the response headers are
+  // through, so without this the actor can hibernate while a connection is still open -- which the
+  // tunnel does not survive, because the Fetcher getTcpPort() returns and the state behind it are
+  // IoOwn'd to the actor's IoContext. This Own carries a RequestTracker::ActiveRequest, the same
+  // handle an inbound request holds via WorkerEntrypoint.
+  //
+  // request() and connect() move it into a coroutine local, so release follows the connection
+  // ending rather than this object's destruction -- on the connect() path this interface is owned
+  // by the JS Socket, so tying release here would wait for GC.
+  kj::Maybe<kj::Own<Worker::Actor>> actorPin;
+
   kj::Rc<TcpPortState> portState;
 
   // Connect to the port and pump bytes to/from `connection`.
-  kj::Promise<void> connectImpl(kj::Own<kj::AsyncIoStream> connection) {
+  //
+  // `pinParam` becomes a local because coroutine parameters live until the frame is destroyed,
+  // while locals are destroyed at co_return -- and the frame outlives the pump here.
+  kj::Promise<void> connectImpl(
+      kj::Own<kj::AsyncIoStream> connection, kj::Maybe<kj::Own<Worker::Actor>> pinParam) {
+    auto pin = kj::mv(pinParam);
+
     auto portConnection = portState->connectForRawSocket();
     auto& portStream = *portConnection;
 
-    auto downPumpTask =
-        portConnection->pumpTo(*connection).then([&connection](uint64_t) -> kj::Promise<void> {
+    auto downPumpTask = portConnection->pumpTo(*connection).then([&connection](uint64_t) {
       connection->shutdownWrite();
-      return kj::NEVER_DONE;
     });
-    auto upPumpTask = connection->pumpTo(*portConnection)
-                          .then([&portStream](uint64_t) {
+    auto upPumpTask = connection->pumpTo(*portConnection).then([&portStream](uint64_t) {
       return portStream.endWrite();
-    }).then([]() -> kj::Promise<void> { return kj::NEVER_DONE; });
-    auto disconnected = portStream.rejectWhenDisconnected();
+    });
 
-    co_await kj::joinPromisesFailFast(
-        kj::arr(kj::mv(upPumpTask), kj::mv(downPumpTask), kj::mv(disconnected)));
+    auto cleanClose = kj::joinPromisesFailFast(kj::arr(kj::mv(upPumpTask), kj::mv(downPumpTask)));
+    co_await cleanClose.exclusiveJoin(portStream.rejectWhenDisconnected());
   }
 };
 
@@ -1451,11 +1474,20 @@ class Container::TcpPortOutgoingFactory final: public Fetcher::OutgoingFactory {
 
   Result newSingleUseClient(
       kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override {
+    // Take the actor reference here, where an IoContext is definitely current. request() and
+    // connect() can be invoked from KJ continuations that are no longer inside a context, so they
+    // must not reach for IoContext::current() themselves.
+    kj::Maybe<kj::Own<Worker::Actor>> actorPin;
+    if (util::Autogate::isEnabled(util::AutogateKey::CONTAINER_PORT_ACTOR_PIN)) {
+      actorPin = IoContext::current().getActor().map([](Worker::Actor& a) { return a.addRef(); });
+    }
+
     // At present we have no use for `cfStr`. This factory creates no operation span.
     auto client = IoContext::current().getSubrequestNoChecks(
         [&](auto& tracing, auto& channelFactory) -> kj::Own<WorkerInterface> {
       makeUserSpanParent(tracing);
-      return kj::heap<TcpPortWorkerInterface>(entropySource, headerTable, portState.addRef());
+      return kj::heap<TcpPortWorkerInterface>(
+          entropySource, headerTable, kj::mv(actorPin), portState.addRef());
     }, {.inHouse = false, .wrapMetrics = false});
     return {.client = kj::mv(client), .spanParents = kj::none};
   }

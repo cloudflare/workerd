@@ -397,6 +397,7 @@ TestFixture::TestFixture(SetupParams&& params)
     } else {
       savedActorLoopback = kj::refcounted<MockActorLoopback>();
     }
+    actorRequestTracker = params.actorRequestTracker;
     actor = makeActor(kj::mv(id));
   }
 }
@@ -422,7 +423,7 @@ jsg::Ref<api::DurableObjectStorage> storageFactory(
 
 kj::Own<Worker::Actor> TestFixture::makeActor(Worker::Actor::Id id) {
   auto& loopback = KJ_ASSERT_NONNULL(savedActorLoopback);
-  return kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
+  return kj::refcounted<Worker::Actor>(*worker, actorRequestTracker, kj::mv(id),
       /*hasTransient=*/false, actorCacheFactory, /*classname=*/kj::none,
       /*props=*/Frankenvalue(), storageFactory, loopback->addRef(), *timerChannel,
       kj::refcounted<ActorObserver>(), kj::none, kj::none);

@@ -51,6 +51,11 @@ struct TestFixture {
     // to it) via actor.getLoopback(). This way the actor and the HibernationManager share a
     // single Loopback, mirroring production.
     kj::Maybe<kj::Own<Worker::Actor::Loopback>> actorLoopback;
+    // If set, the actor is created with this RequestTracker (only meaningful when actorId is set).
+    // Lets tests observe the active()/inactive() transitions that drive hibernation. Without one,
+    // Worker::Actor::addRef() returns a bare reference that carries no ActiveRequest, so those
+    // transitions never fire. The tracker must outlive the fixture.
+    kj::Maybe<RequestTracker&> actorRequestTracker;
     // If set, called to create the RequestObserver for each IncomingRequest instead of the default
     // no-op base RequestObserver. Lets tests observe metrics hooks (e.g. recording the values
     // passed to setNextSubrequestBodyRewindable()).
@@ -251,6 +256,8 @@ struct TestFixture {
   // where the namespace's Loopback outlives any single actor instance). Held via addRef so we
   // can hand fresh refs to actors as we reconstruct them.
   kj::Maybe<kj::Own<Worker::Actor::Loopback>> savedActorLoopback;
+  // Saved so resetActor() reconstructs the actor with the same tracker. Owned by the caller.
+  kj::Maybe<RequestTracker&> actorRequestTracker;
   capnp::ByteStreamFactory byteStreamFactory;
   kj::HttpHeaderTable::Builder headerTableBuilder;
   ThreadContext::HeaderIdBundle threadContextHeaderBundle;
