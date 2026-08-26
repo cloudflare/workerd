@@ -139,6 +139,20 @@ The readable side supports `getReader({ mode: 'byob' })` (unlike a standard
   time nor later when a parked request is fulfilled; the extent is captured
   internally at enqueue.
 
+### Bodies and piping (typical usage)
+
+- `new Response(its.readable)` / `new Request(url, { method, body:
+  its.readable })` neither wrap, consume, nor lock the stream: `resp.body`
+  is the very same `ReadableStream` object, and `text()` (or a body reader)
+  drives the rendezvous exactly like a direct reader. FixedLengthStream
+  enforcement surfaces through body consumption with the ledger #11
+  error-type divergence.
+- Piping between identity streams diverges wholesale (ledger #15): the C++
+  implementation does not implement inter-transform pumping — `pipeTo()`
+  rejects and `pipeThrough()` throws "Inter-TransformStream
+  ReadableStream.pipeTo() is not implemented" — while TypeScript implements
+  the full pipe with error propagation in both directions.
+
 ### tee()
 
 - Both branches observe the full content, including through nested tees
@@ -196,6 +210,7 @@ pattern; a change to either side fails its cell.
 | 12 | Already-detached `ArrayBuffer` chunk | zero-length no-op | rejects `TypeError`, errors the stream | `alreadyDetachedBufferAtWrite` |
 | 13 | Single tee-branch cancel promise | resolves immediately | WHATWG semantics: shared promise, settles when both branches cancel | `cancelOneBranchKeepsWriterFlowing` |
 | 14 | Write after both tee branches cancel | parks forever (composite cancel not propagated to the writable) | rejects `AggregateError` "All readable stream tee branches were canceled" | `writeAfterBothBranchesCancel` |
+| 15 | Piping between identity streams | not implemented: `pipeTo()` takes both locks then rejects `TypeError` ("Inter-TransformStream ReadableStream.pipeTo() is not implemented."); `pipeThrough()` throws it synchronously | fully functional: delivery, completion, and error propagation in both directions with original reason instances; circular `pipeThrough(its)` currently succeeds and locks both sides — `TODO(streams-ts)`: it should fail | `pipe-integration.js` |
 
 ## Assertion catalogue
 
@@ -219,6 +234,9 @@ pattern; a change to either side fails its cell.
 | `tee-backpressure.js` | tee creates no demand; one branch drives the writer; sibling copy uncounted; cancel semantics (ledger #13, #14) |
 | `tee-nested.js` | nested tee delivers to all leaves in order; single-leaf read does not hang |
 | `draining-reader.js` | TS only (C++ cell asserts the global's absence): `expectedLength` pass-through (bigint for FLS, undefined for ITS, undefined after release); a single read drains every synchronously buffered chunk plus the close sentinel in one batch (tee-sibling backlog), while a rendezvous stream yields one chunk per read via the always-makes-progress fallback; write/close settlement through the conduit; lock exclusivity and release |
+| `body-integration.js` | Response/Request with identity-stream bodies: `text()` drives the rendezvous; `resp.body` is the same stream object (unwrapped, unconsumed, unlocked); FLS happy path and underwrite through body consumption (types per ledger #11); multi-megabyte patterned bodies verified byte-for-byte through `arrayBuffer()` (ITS and FLS Response, Request) |
+| `pipe-integration.js` | `pipeTo`/`pipeThrough` between identity streams (ledger #15): TS delivery (small and multi-megabyte patterned bodies), completion, and both error-propagation directions with original reasons; C++ not-implemented wall (rejection for pipeTo, synchronous throw for pipeThrough); circular `pipeThrough(its)` with the `TODO(streams-ts)` pin |
+| `payload-helpers.js` | shared machinery: continuous prime-modulus byte pattern for large-body generation and byte-exact verification |
 | `propagation-helpers.js`, `which-impl.js` | shared machinery: reason-identity policy, implementation detection |
 
 ## Legacy (unflagged) behaviors

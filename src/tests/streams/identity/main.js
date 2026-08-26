@@ -141,3 +141,23 @@ export {
   drainingReaderDrainsFixedLengthStream,
   drainingReaderLocking,
 } from 'draining-reader';
+
+export {
+  responseTextReadsIdentityBody,
+  responseBodyIsTheSameStream,
+  requestWithIdentityBody,
+  fixedLengthResponseText,
+  largeResponseBody,
+  largeRequestBody,
+  largeFixedLengthResponseBody,
+  fixedLengthUnderwriteRejectsBodyRead,
+} from 'body-integration';
+
+export {
+  pipeToBetweenIdentityStreams,
+  pipeToDeliversLargeBody,
+  pipeToPropagatesSourceError,
+  pipeToPropagatesDestinationError,
+  pipeThroughIdentityStream,
+  circularPipeThrough,
+} from 'pipe-integration';
