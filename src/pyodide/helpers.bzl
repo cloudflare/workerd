@@ -282,7 +282,7 @@ _REPLACEMENTS = {
     "0.26.0a2": _REPLACEMENTS_COMMON + _REPLACEMENTS_COMMON_0_26_0_28,
     "0.28.2": _REPLACEMENTS_COMMON + _REPLACEMENTS_COMMON_0_26_0_28,
     "314.0.4": _REPLACEMENTS_COMMON + _REPLACEMENTS_COMMON_314,
-    "314.0.5": _REPLACEMENTS_COMMON + _REPLACEMENTS_COMMON_314,
+    "314.0.6": _REPLACEMENTS_COMMON + _REPLACEMENTS_COMMON_314,
 }
 
 def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, python_stdlib_zip = None, emscripten_setup_override = None):
