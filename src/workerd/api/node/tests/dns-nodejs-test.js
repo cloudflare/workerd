@@ -5,6 +5,7 @@
 import dns from 'node:dns';
 import dnsPromises from 'node:dns/promises';
 import { strictEqual, ok, deepStrictEqual, throws } from 'node:assert';
+import { isIP } from 'node:net';
 import { inspect } from 'node:util';
 
 // Taken from Node.js
@@ -43,6 +44,8 @@ const addresses = {
   CAA_HOST: 'google.com',
   // A host with CNAME records registered
   CNAME_HOST: 'blog.nodejs.org',
+  // A host whose A and AAAA responses begin with a CNAME record
+  CNAME_CHAIN_HOST: 'writings.hongminhee.org',
   // A host with NS records registered
   NS_HOST: 'nodejs.org',
   // A host with TXT records registered
@@ -439,6 +442,37 @@ export const lookupDefaultFamilyResolvesIPv4 = {
       resolve();
     });
     await promise;
+  },
+};
+
+// Regression: dns.lookup() must not expose CNAME records as IP addresses.
+export const lookupCnameChainReturnsOnlyIpAddresses = {
+  async test() {
+    const results = await Promise.all([
+      dnsPromises.lookup(addresses.CNAME_CHAIN_HOST, {
+        all: true,
+        family: 0,
+      }),
+      dnsPromises.lookup(addresses.CNAME_CHAIN_HOST, { family: 0 }),
+      dnsPromises.lookup(addresses.CNAME_CHAIN_HOST, {
+        all: true,
+        family: 4,
+      }),
+      dnsPromises.lookup(addresses.CNAME_CHAIN_HOST, { family: 6 }),
+    ]);
+
+    for (const result of results) {
+      const entries = Array.isArray(result) ? result : [result];
+      ok(entries.length > 0, 'expected at least one address');
+
+      for (const entry of entries) {
+        strictEqual(
+          isIP(entry.address),
+          entry.family,
+          `${entry.address} is not an IPv${entry.family} address`
+        );
+      }
+    }
   },
 };
 
