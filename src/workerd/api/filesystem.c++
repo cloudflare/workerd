@@ -2621,59 +2621,16 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
     const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler,
     const jsg::TypeHandler<FileSystemWritableData>& dataHandler) {
 
-  // Per the spec, the writable stream we create here is expected to write into
-  // a temporary space until the stream is closed. When closed, the original file
-  // contents are replaced with the new contents. If the stream is aborted or
-  // errored, the temporary file data is discarded.
   auto opts = options.orDefault(FileSystemCreateWritableOptions{});
-
-  // If keepExistingData is true, the temporary file is created with a copy of
-  // the original file data. Otherwise, the temporary file is created empty,
-  // which means that if we create a writable stream and close it without writing
-  // anything, the original file data is lost.
   bool keepExistingData = opts.keepExistingData.orDefault(false);
 
-  kj::Maybe<kj::Rc<workerd::File>> fileData;
-  KJ_IF_SOME(existing, getVfs().resolve(js, getLocator(), {})) {
-    if (keepExistingData) {
-      KJ_SWITCH_ONEOF(existing) {
-        KJ_CASE_ONEOF(err, workerd::FsError) {
-          return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(
-              deHandler.wrap(js, fsErrorToDomException(js, err)));
-        }
-        KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-          KJ_SWITCH_ONEOF(file->clone(js)) {
-            KJ_CASE_ONEOF(err, workerd::FsError) {
-              return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(
-                  deHandler.wrap(js, fsErrorToDomException(js, err)));
-            }
-            KJ_CASE_ONEOF(cloned, kj::Rc<workerd::File>) {
-              fileData = kj::mv(cloned);
-            }
-          }
-        }
-        KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-          auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Is a directory"));
-          return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(
-              deHandler.wrap(js, kj::mv(ex)));
-        }
-        KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
-          auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Is a symbolic link"));
-          return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(
-              deHandler.wrap(js, kj::mv(ex)));
-        }
-      }
-    } else {
-      fileData = workerd::File::newWritable(js);
-    }
-  } else {
-    auto ex = js.domException(kj::str("NotFoundError"), kj::str("File not found"));
+  auto opened = FileSystemWriteContextHandle::open(js, JSG_THIS, keepExistingData);
+  KJ_IF_SOME(ex, opened.tryGet<jsg::Ref<jsg::DOMException>>()) {
     return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(
         deHandler.wrap(js, kj::mv(ex)));
   }
+  auto context = kj::mv(opened.get<jsg::Ref<FileSystemWriteContextHandle>>());
 
-  auto context = js.alloc<FileSystemWriteContextHandle>(
-      js, getVfs(), JSG_THIS, KJ_ASSERT_NONNULL(kj::mv(fileData)));
   auto stream =
       js.alloc<FileSystemWritableFileStream>(newWritableStreamJsController(), context.addRef());
 
@@ -2716,6 +2673,50 @@ FileSystemWriteContextHandle::FileSystemWriteContextHandle(jsg::Lock& js,
       temp(kj::mv(temp)),
       file(kj::mv(file)),
       lock(vfs.lock(js, this->file->getLocator())) {}
+
+kj::OneOf<jsg::Ref<FileSystemWriteContextHandle>, jsg::Ref<jsg::DOMException>>
+FileSystemWriteContextHandle::open(
+    jsg::Lock& js, jsg::Ref<FileSystemFileHandle> file, bool keepExistingData) {
+  auto& vfs = file->getVfs();
+
+  // An empty temporary means that creating a writable and closing it without
+  // writing anything replaces the file with nothing, losing the original data.
+  // keepExistingData seeds the temporary with a copy instead, so a commit that
+  // wrote nothing is a no-op.
+  kj::Maybe<kj::Rc<workerd::File>> fileData;
+  KJ_IF_SOME(existing, vfs.resolve(js, file->getLocator(), {})) {
+    if (keepExistingData) {
+      KJ_SWITCH_ONEOF(existing) {
+        KJ_CASE_ONEOF(err, workerd::FsError) {
+          return fsErrorToDomException(js, err);
+        }
+        KJ_CASE_ONEOF(existingFile, kj::Rc<workerd::File>) {
+          KJ_SWITCH_ONEOF(existingFile->clone(js)) {
+            KJ_CASE_ONEOF(err, workerd::FsError) {
+              return fsErrorToDomException(js, err);
+            }
+            KJ_CASE_ONEOF(cloned, kj::Rc<workerd::File>) {
+              fileData = kj::mv(cloned);
+            }
+          }
+        }
+        KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+          return js.domException(kj::str("TypeMismatchError"), kj::str("Is a directory"));
+        }
+        KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+          return js.domException(kj::str("TypeMismatchError"), kj::str("Is a symbolic link"));
+        }
+      }
+    } else {
+      fileData = workerd::File::newWritable(js);
+    }
+  } else {
+    return js.domException(kj::str("NotFoundError"), kj::str("File not found"));
+  }
+
+  return js.alloc<FileSystemWriteContextHandle>(
+      js, vfs, kj::mv(file), KJ_ASSERT_NONNULL(kj::mv(fileData)));
+}
 
 void FileSystemWriteContextHandle::clear() {
   temp = kj::none;

@@ -546,6 +546,17 @@ class FileSystemWriteContextHandle final: public jsg::Object {
 
   static jsg::Ref<FileSystemWriteContextHandle> constructor() = delete;
 
+  // Opens a write context on `file`, seeding the temporary with the file's current
+  // contents when keepExistingData is set. Acquires the VFS lock, which is then
+  // held until commit() or discard().
+  //
+  // Returns the DOMException that createWritable() fails with rather than throwing
+  // it, because the two callers need it in different forms: the C++
+  // createWritable() wraps it in a rejected promise, while the bootstrap factory
+  // backing the TypeScript implementation throws it.
+  static kj::OneOf<jsg::Ref<FileSystemWriteContextHandle>, jsg::Ref<jsg::DOMException>> open(
+      jsg::Lock& js, jsg::Ref<FileSystemFileHandle> file, bool keepExistingData);
+
   jsg::Promise<void> write(jsg::Lock& js,
       FileSystemWritableData data,
       const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
