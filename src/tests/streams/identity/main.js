@@ -24,6 +24,7 @@ export {
   fixedLengthInvalidLengths,
   fixedLengthCoercionDivergence,
   fixedLengthLengthsAboveMaxSafeInteger,
+  userStrategySizeNeverInvoked,
 } from 'construction';
 
 export {

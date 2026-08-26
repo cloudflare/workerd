@@ -45,6 +45,16 @@ export const cancelReasonTypeSurfacing = {
         cppString: 'RangeError: Problems!',
         cppType: RangeError,
       },
+      {
+        reason: new SyntaxError('The semicolons are bad'),
+        cppString: 'SyntaxError: The semicolons are bad',
+        cppType: SyntaxError,
+      },
+      {
+        reason: new ReferenceError("Didn't find it"),
+        cppString: "ReferenceError: Didn't find it",
+        cppType: ReferenceError,
+      },
       { reason: undefined, cppString: 'Error: Stream was cancelled.' },
       {
         reason: new ExampleError('foo bar'),

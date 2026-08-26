@@ -16,7 +16,7 @@
 // - Range: C++ rejects lengths above 2^53-1; TypeScript accepts the full
 //   uint64 range.
 
-import { ok, strictEqual, throws } from 'node:assert';
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 // FixedLengthStream does not expose expectedLength directly, but the coerced
@@ -134,5 +134,33 @@ export const fixedLengthLengthsAboveMaxSafeInteger = {
       throws(() => new FixedLengthStream(2 ** 53), TypeError);
       throws(() => new FixedLengthStream(0xffff_ffff_ffff_ffffn), TypeError);
     }
+  },
+};
+
+export const userStrategySizeNeverInvoked = {
+  async test() {
+    // Both implementations consult only `highWaterMark` on the queuing
+    // strategy; a user-supplied `size` callback is never invoked — with or
+    // without an explicit highWaterMark — and plays no part in chunk
+    // accounting. (C++ reads highWaterMark alone off the strategy bag; the
+    // TypeScript implementation replaces the strategy with its own internal
+    // size callback.)
+    let calls = 0;
+    for (const strategy of [
+      { size: () => ++calls },
+      { highWaterMark: 4, size: () => ++calls },
+    ]) {
+      for (const stream of [
+        new IdentityTransformStream(strategy),
+        new FixedLengthStream(3, strategy),
+      ]) {
+        const writer = stream.writable.getWriter();
+        const reader = stream.readable.getReader();
+        const write = writer.write(new Uint8Array([1, 2, 3]));
+        deepStrictEqual([...(await reader.read()).value], [1, 2, 3]);
+        await write;
+      }
+    }
+    strictEqual(calls, 0);
   },
 };
