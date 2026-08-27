@@ -63,6 +63,7 @@ export {
   abortReasonIdentity,
   writeAfterAbortDiverges,
   nonErrorAbortReasonSurfacing,
+  writesAfterQueuedCloseReject,
   cancelReadableWritableAftermath,
 } from 'propagation';
 

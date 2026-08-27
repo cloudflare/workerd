@@ -115,6 +115,48 @@ export const nonErrorAbortReasonSurfacing = {
   },
 };
 
+export const writesAfterQueuedCloseReject = {
+  async test() {
+    // Writes issued after close() has been queued (same synchronous turn,
+    // before the sink processes the close) all reject without disturbing
+    // the close or the already-written output.
+    const cs = new CompressionStream('gzip');
+    const ds = new DecompressionStream('gzip');
+    const writer = cs.writable.getWriter();
+    await writer.write(new TextEncoder().encode('kept'));
+    const closePromise = writer.close();
+    const expectedMsg = usingTsImpl
+      ? 'Cannot write to a stream that is closing or closed'
+      : 'This WritableStream has been closed.';
+    const rejections = [];
+    for (let i = 0; i < 3; i++) {
+      rejections.push(
+        rejects(writer.write(new Uint8Array(65536)), (err) => {
+          strictEqual(err.constructor, TypeError);
+          strictEqual(err.message, expectedMsg);
+          return true;
+        })
+      );
+    }
+    await Promise.all(rejections);
+    await closePromise;
+    // The output round-trips to exactly the accepted bytes.
+    const dw = ds.writable.getWriter();
+    const collected = [];
+    const drained = (async () => {
+      for await (const chunk of ds.readable) {
+        collected.push(...chunk);
+      }
+    })();
+    for await (const chunk of cs.readable) {
+      await dw.write(chunk);
+    }
+    await dw.close();
+    await drained;
+    strictEqual(new TextDecoder().decode(new Uint8Array(collected)), 'kept');
+  },
+};
+
 export const cancelReadableWritableAftermath = {
   async test() {
     const cs = new CompressionStream('gzip');

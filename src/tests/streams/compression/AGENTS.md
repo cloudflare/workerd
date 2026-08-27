@@ -154,7 +154,7 @@ timing), and the internal-testing `expose_draining_reader`.
 | `buffer-lifecycle.js` | snapshot-at-write: post-write mutation/detach/shrink invisible; already-detached no-op; lying metadata getters never consulted |
 | `byob.js` | BYOB reader fills a 2-byte destination with the gzip magic |
 | `backpressure.js` | eager write settlement without reads; desiredSize accounting (#8) |
-| `propagation.js` | abort rejects pending read (reason per #9), errors both sides; cancel settles parked read (#12); write-after-abort (#10); non-Error reasons (#11); cancel→writable aftermath (#13) |
+| `propagation.js` | abort rejects pending read (reason per #9), errors both sides; cancel settles parked read (#12); write-after-abort (#10); non-Error reasons (#11); writes after a queued close reject (message per impl) without disturbing the close or output; cancel→writable aftermath (#13) |
 | `reentrancy.js` | thenable-check counts (#15); second concurrent read (#14); close from a read continuation with round-trip integrity; sibling tee cancel from a continuation |
 | `tee.js` | branches byte-identical; single-branch cancel (identity ledger #13 semantics) with survivor draining |
 | `draining-reader.js` | TS only (C++ asserts absence): expectedLength undefined; a closed stream's buffered backlog swept in ONE read with done; lock/release |
