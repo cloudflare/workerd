@@ -40,6 +40,7 @@
 //! caches or abandoned work alive.
 
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::hash_map::RandomState;
@@ -184,14 +185,6 @@ impl Limits {
             .min(self.max_total_value_size.try_into().unwrap_or(u32::MAX));
         self
     }
-
-    fn component_max(self, other: Self) -> Self {
-        Self {
-            max_keys: self.max_keys.max(other.max_keys),
-            max_value_size: self.max_value_size.max(other.max_value_size),
-            max_total_value_size: self.max_total_value_size.max(other.max_total_value_size),
-        }
-    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -252,9 +245,81 @@ struct CacheState {
     expirations: BTreeSet<ExpirationRecord>,
     total_value_size: usize,
     bindings: HashMap<u64, Limits>,
+    limit_contributions: LimitContributions,
     next_binding_id: u64,
     effective_limits: Limits,
     in_flight_fallbacks: HashMap<Arc<[u8]>, Weak<InFlightFallback>>,
+}
+
+/// Counts the normalized limit values contributed by live bindings.
+///
+/// Each map key is a limit and its value is the number of bindings contributing that limit.
+/// Ordered keys keep each component's maximum available without scanning all bindings.
+#[derive(Default)]
+struct LimitContributions {
+    keys: BTreeMap<u32, usize>,
+    value_size: BTreeMap<u32, usize>,
+    total_value_size: BTreeMap<u64, usize>,
+}
+
+impl LimitContributions {
+    fn from_bindings(bindings: &HashMap<u64, Limits>) -> Self {
+        let mut contributions = Self::default();
+        for &limits in bindings.values() {
+            contributions.insert(limits);
+        }
+        contributions
+    }
+
+    fn insert(&mut self, limits: Limits) {
+        increment_count(&mut self.keys, limits.max_keys);
+        increment_count(&mut self.value_size, limits.max_value_size);
+        increment_count(&mut self.total_value_size, limits.max_total_value_size);
+    }
+
+    fn remove(&mut self, limits: Limits) -> bool {
+        if !has_count(&self.keys, &limits.max_keys)
+            || !has_count(&self.value_size, &limits.max_value_size)
+            || !has_count(&self.total_value_size, &limits.max_total_value_size)
+        {
+            return false;
+        }
+        decrement_count(&mut self.keys, limits.max_keys);
+        decrement_count(&mut self.value_size, limits.max_value_size);
+        decrement_count(&mut self.total_value_size, limits.max_total_value_size);
+        true
+    }
+
+    fn component_max(&self) -> Limits {
+        Limits {
+            max_keys: self.keys.last_key_value().map_or(0, |(&value, _)| value),
+            max_value_size: self
+                .value_size
+                .last_key_value()
+                .map_or(0, |(&value, _)| value),
+            max_total_value_size: self
+                .total_value_size
+                .last_key_value()
+                .map_or(0, |(&value, _)| value),
+        }
+    }
+}
+
+fn increment_count<T: Ord>(counts: &mut BTreeMap<T, usize>, value: T) {
+    let count = counts.entry(value).or_default();
+    *count = count.saturating_add(1);
+}
+
+fn has_count<T: Ord>(counts: &BTreeMap<T, usize>, value: &T) -> bool {
+    counts.get(value).is_some_and(|&count| count > 0)
+}
+
+fn decrement_count<T: Copy + Ord>(counts: &mut BTreeMap<T, usize>, value: T) {
+    if counts.get(&value).is_some_and(|&count| count <= 1) {
+        counts.remove(&value);
+    } else if let Some(count) = counts.get_mut(&value) {
+        *count -= 1;
+    }
 }
 
 /// A cached value and its optional absolute expiration time.
@@ -662,8 +727,19 @@ impl Binding {
             return;
         };
         let mut state = lock(&self.cache.state);
-        let removed = state.bindings.remove(&id);
-        debug_assert!(removed.is_some());
+        let limits = state.bindings.remove(&id);
+        debug_assert!(limits.is_some(), "memory cache binding was not registered");
+        let needs_rebuild = limits.is_none_or(|limits| {
+            let removed = state.limit_contributions.remove(limits);
+            debug_assert!(
+                removed,
+                "memory cache limit contribution was not registered"
+            );
+            !removed
+        });
+        if needs_rebuild {
+            state.limit_contributions = LimitContributions::from_bindings(&state.bindings);
+        }
         if recompute_limits(&mut state, &self.namespace) {
             state.resize(now_ms);
         }
@@ -679,11 +755,7 @@ impl Drop for Binding {
 }
 
 fn recompute_limits(state: &mut CacheState, namespace: &NamespaceInner) -> bool {
-    let limits = state
-        .bindings
-        .values()
-        .copied()
-        .fold(Limits::default(), Limits::component_max);
+    let limits = state.limit_contributions.component_max();
     let effective_limits = namespace.apply_policy(limits);
     if state.effective_limits == effective_limits {
         false
@@ -733,7 +805,9 @@ impl Namespace {
         let mut state = lock(&cache.state);
         let binding_id = state.allocate_binding_id()?;
         state.bindings.reserve(1);
-        state.bindings.insert(binding_id, limits.normalize());
+        let limits = limits.normalize();
+        state.limit_contributions.insert(limits);
+        state.bindings.insert(binding_id, limits);
         recompute_limits(&mut state, &self.inner);
         drop(state);
         Ok(Binding {
@@ -1161,6 +1235,7 @@ mod tests {
                 .max_total_value_size
                 .max(limits.max_total_value_size);
         }
+        assert_eq!(state.limit_contributions.component_max(), expected_limits);
         if let Some(cap) = binding.namespace.max_total_value_size {
             expected_limits.max_total_value_size = expected_limits.max_total_value_size.min(cap);
         }
@@ -1204,6 +1279,66 @@ mod tests {
                 },
             )
             .unwrap();
+    }
+
+    #[test]
+    fn limit_contributions_track_component_maxima_and_duplicates() {
+        let mut contributions = LimitContributions::default();
+        let first = limits(2, 100, 1000);
+        let second = limits(4, 50, 2000);
+
+        contributions.insert(first);
+        contributions.insert(second);
+        contributions.insert(second);
+        assert_eq!(contributions.component_max(), limits(4, 100, 2000));
+
+        assert!(contributions.remove(second));
+        assert_eq!(contributions.component_max(), limits(4, 100, 2000));
+        assert!(contributions.remove(second));
+        assert_eq!(contributions.component_max(), first);
+        assert!(contributions.remove(first));
+        assert_eq!(contributions.component_max(), Limits::default());
+        assert!(!contributions.remove(first));
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn binding_release_recovers_from_inconsistent_limit_indexes() {
+        let namespace = test_namespace(None);
+        let mut large = binding(&namespace, "shared", limits(4, 100, 1000));
+        let small = binding(&namespace, "shared", limits(2, 50, 500));
+        lock(&large.cache.state).limit_contributions.keys.clear();
+
+        release(&mut large, 1.0);
+        assert_eq!(stats(&small).limits, limits(2, 50, 500));
+
+        let mut missing = binding(&namespace, "missing", limits(4, 100, 1000));
+        let id = missing.id.unwrap();
+        lock(&missing.cache.state).bindings.remove(&id);
+
+        release(&mut missing, 1.0);
+        assert_eq!(stats(&missing).limits, Limits::default());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "memory cache limit contribution was not registered")]
+    fn binding_release_detects_missing_limit_contribution() {
+        let namespace = test_namespace(None);
+        let mut binding = binding(&namespace, "shared", limits(4, 100, 1000));
+        lock(&binding.cache.state).limit_contributions.keys.clear();
+        release(&mut binding, 1.0);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "memory cache binding was not registered")]
+    fn binding_release_detects_missing_binding() {
+        let namespace = test_namespace(None);
+        let mut binding = binding(&namespace, "shared", limits(4, 100, 1000));
+        let id = binding.id.unwrap();
+        lock(&binding.cache.state).bindings.remove(&id);
+        release(&mut binding, 1.0);
     }
 
     #[test]
