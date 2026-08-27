@@ -87,6 +87,129 @@ KJ_TEST("trace onset synchronizes an idle actor's clock before reading it") {
   fixture.drainAndDestroy(kj::mv(request));
 }
 
+KJ_TEST(
+    "request owning the final IoContext reference cancels tasks before it stops being current") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  auto& context = request->getContext();
+
+  bool taskWasCanceledWhileRequestWasCurrent = false;
+  context.addTask(kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() {
+    taskWasCanceledWhileRequestWasCurrent = context.hasCurrentIncomingRequest();
+  })));
+
+  fixture.drainAndDestroy(kj::mv(request));
+
+  KJ_EXPECT(taskWasCanceledWhileRequestWasCurrent);
+}
+
+KJ_TEST(
+    "request owning the final IoContext reference cancels reentry before it stops being current") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  auto& context = request->getContext();
+  auto& waitScope = fixture.getWaitScope();
+
+  bool callbackWasCanceledWhileRequestWasCurrent = false;
+  kj::Function<kj::Promise<void>()> callback;
+  context
+      .run([&](Worker::Lock&, IoContext& context) {
+    callback = context.makeReentryCallback([&](Worker::Lock&, IoContext& context) {
+      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() {
+        callbackWasCanceledWhileRequestWasCurrent = context.hasCurrentIncomingRequest();
+      }));
+    });
+  }).wait(waitScope);
+  auto pendingTask = callback();
+  KJ_EXPECT(!pendingTask.poll(waitScope));
+
+  fixture.drainAndDestroy(kj::mv(request));
+
+  KJ_EXPECT(callbackWasCanceledWhileRequestWasCurrent);
+  KJ_EXPECT_THROW_MESSAGE(
+      "The execution context responding to this call was canceled", pendingTask.wait(waitScope));
+}
+
+KJ_TEST("request owning the final IoContext reference preserves its abort reason") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  auto& context = request->getContext();
+  auto& waitScope = fixture.getWaitScope();
+
+  kj::Function<kj::Promise<void>()> callback;
+  context
+      .run([&callback](Worker::Lock&, IoContext& context) {
+    callback = context.makeReentryCallback(
+        [](Worker::Lock&, IoContext&) { return kj::Promise<void>(kj::NEVER_DONE); });
+  }).wait(waitScope);
+  auto pendingTask = callback();
+  KJ_EXPECT(!pendingTask.poll(waitScope));
+  context.abort(KJ_EXCEPTION(FAILED, "jsg.Error: test abort reason"));
+
+  fixture.drainAndDestroy(kj::mv(request));
+
+  KJ_EXPECT_THROW_MESSAGE("test abort reason", pendingTask.wait(waitScope));
+}
+
+KJ_TEST("final request cancels wait-until tasks before it stops being current") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  auto& context = request->getContext();
+
+  bool waitUntilWasCanceledWhileRequestWasCurrent = false;
+  context.addWaitUntil(kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() {
+    waitUntilWasCanceledWhileRequestWasCurrent = context.hasCurrentIncomingRequest();
+  })));
+  context.abort(KJ_EXCEPTION(FAILED, "test abort reason"));
+
+  fixture.drainAndDestroy(kj::mv(request));
+
+  KJ_EXPECT(waitUntilWasCanceledWhileRequestWasCurrent);
+}
+
+KJ_TEST("final request completes cleanup after cancellation throws") {
+  class ThrowOnDestruction: private kj::UnwindDetector {
+   public:
+    ~ThrowOnDestruction() noexcept(false) {
+      catchExceptionsIfUnwinding([]() { KJ_FAIL_REQUIRE("test cancellation failure"); });
+    }
+  };
+
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  auto& context = request->getContext();
+  auto& waitScope = fixture.getWaitScope();
+
+  bool callbackWasCanceledWhileRequestWasCurrent = false;
+  bool taskWasCanceledWhileRequestWasCurrent = false;
+  kj::Function<kj::Promise<void>()> callback;
+  kj::Function<kj::Promise<void>()> throwingCallback;
+  context
+      .run([&](Worker::Lock&, IoContext& context) {
+    callback = context.makeReentryCallback([&](Worker::Lock&, IoContext& context) {
+      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() {
+        callbackWasCanceledWhileRequestWasCurrent = context.hasCurrentIncomingRequest();
+      }));
+    });
+    throwingCallback = context.makeReentryCallback([](Worker::Lock&, IoContext&) {
+      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::heap<ThrowOnDestruction>());
+    });
+  }).wait(waitScope);
+  auto pendingTask = callback();
+  auto throwingPendingTask = throwingCallback();
+  KJ_EXPECT(!pendingTask.poll(waitScope));
+  KJ_EXPECT(!throwingPendingTask.poll(waitScope));
+
+  context.addTask(kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() {
+    taskWasCanceledWhileRequestWasCurrent = context.hasCurrentIncomingRequest();
+  })));
+
+  KJ_EXPECT_THROW_MESSAGE("test cancellation failure", [&]() { request = nullptr; }());
+
+  KJ_EXPECT(callbackWasCanceledWhileRequestWasCurrent);
+  KJ_EXPECT(taskWasCanceledWhileRequestWasCurrent);
+}
+
 // Regression test: two IncomingRequests share a single actor IoContext, as happens when a Durable
 // Object receives overlapping requests. Draining the older, superseded request hits drain()'s
 // "a newer request has taken over" early return.
