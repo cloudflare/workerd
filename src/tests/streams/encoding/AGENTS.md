@@ -84,6 +84,11 @@ HWM 1 (count-based) and readable HWM 0 under
   the stream: `closed`, pending reads, and later writes all reject with the
   same error. An already-detached `ArrayBuffer` decodes as zero bytes (a
   no-op).
+- There is **no write-time snapshot** (contrast the identity streams): the
+  chunk is held by reference and the transform reads the buffer's CURRENT
+  bytes when it runs. Mutating or shrinking after `write()` changes what
+  decodes; detaching while queued makes the chunk contribute nothing.
+  Shadowing metadata getters are never consulted (internal slots only).
 - Decode state spans chunks (`stream: true`); `close()` runs a final flush
   decode that emits U+FFFD for an incomplete trailing sequence (or throws
   in fatal mode, rejecting the close and erroring the readable). A BOM
@@ -120,6 +125,22 @@ HWM 1 (count-based) and readable HWM 0 under
   error: each `Uint8Array` chunk is ToString-coerced (`"120,121"`) and that
   text is encoded.
 
+### Re-entrancy and GC
+
+- Two user hooks run mid-processing: the thenable check against read
+  results (a patched `Object.prototype.then` getter fires per read —
+  counts per ledger #6) and the encoder's ToString coercion (a user
+  `toString()` runs inside the transform). Re-entering the stream from
+  either — closing the writer, issuing further writes — is safe: the
+  re-entrant write queues behind the chunk being processed and everything
+  settles in order.
+- These are standard readables in both implementations: a second
+  concurrent default read parks and is served in order (contrast identity
+  ledger #16).
+- Reader/writer handles keep a collected stream wrapper's machinery —
+  including the C++ decoder ref — alive and operable (`--expose-gc` in
+  both configs).
+
 ## Compatibility flags
 
 The C++ cell pins every date-gated flag the implementation is subject to;
@@ -138,6 +159,12 @@ primitive) and proves streams-flag indifference via its variants.
 spec-compliant; production workers never get it, so the main cell asserts
 the quirk (ledger #1).
 
+`encoding-ts.wd-test` additionally sets the internal-testing
+`expose_draining_reader` flag, installing the `ReadableStreamDrainingReader`
+global — the bulk-drain conduit the C++ bridge drives to consume TypeScript
+streams. No such global exists under the C++ implementation;
+`draining-reader.js` asserts both sides.
+
 ## Divergence ledger (C++ vs TypeScript)
 
 Every entry is asserted on both sides via the `which-impl` pattern.
@@ -149,6 +176,7 @@ Every entry is asserted on both sides via the `which-impl` pattern.
 | 3 | `readable`/`writable` placement | inherited from `TransformStream.prototype` | own enumerable accessors on the class prototype | `accessorPlacement` |
 | 4 | Invalid TDS chunk `TypeError` message | "This TransformStream is being used as a byte stream, but received a value that is not a BufferSource." | "TextDecoderStream: chunk must be a BufferSource" | `decoderRejectsNonBufferSource` |
 | 5 | Constructor source text | native code | not | `constructorSurface` |
+| 6 | Thenable check during read resolution | `Object.prototype.then` getter consulted once per read | twice | `thenInterceptionDuringReadResolution` |
 
 ## Assertion catalogue
 
@@ -168,6 +196,10 @@ Every entry is asserted on both sides via the `which-impl` pattern.
 | `pipe-integration.js` | encoder → decoder → encoder `pipeThrough` chain |
 | `tee.js` | both branches observe content; single-branch demand drives the writer; EOF on both |
 | `body-integration.js` | Response/Request with the encoder's readable as body (same object, unlocked; `text()` incl. a large surrogate-split payload); the decoder's string-yielding readable as body rejects with "This ReadableStream did not return bytes." (writer side settles); `response.body.pipeThrough(tds)` decodes; byte body piped into the encoder ToString-coerces the chunks |
+| `buffer-lifecycle.js` | no write-time snapshot: mutation after `write()` is visible (with and without a parked read); a shrunk length-tracking view decodes its remaining bytes; detach-while-queued contributes nothing; shadowing/throwing metadata getters never consulted |
+| `reentrancy.js` | thenable-check interception counts (ledger #6); re-entrant `writer.close()` from the interceptor mid-delivery; the encoder's `toString()` hook re-entering with write+close (delivery order preserved, clean EOF); write from a read continuation; second concurrent read parks and is served in order (parity — contrast identity #16); sibling tee-branch cancel from a read continuation |
+| `draining-reader.js` | TS only (C++ cell asserts the global's absence): `expectedLength` undefined for both streams; encoder drains as one `Uint8Array` chunk per read (HWM 0 — nothing synchronously buffered) with EOF as a separate empty batch; a tee-sibling backlog IS swept in one batched read; decoder chunks pass through the conduit as raw strings (byte validation happens at consumption) |
+| `gc-interplay.js` | a writer keeps its collected encoder wrapper operable (abort); reader+writer keep a collected decoder wrapper decoding through close (`--expose-gc`) |
 | `which-impl.js` | implementation detection |
 
 ## Legacy (pre-flag) behaviors

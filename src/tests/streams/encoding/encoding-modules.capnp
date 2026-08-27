@@ -21,6 +21,10 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "propagation", esModule = embed "propagation.js"),
   (name = "tee", esModule = embed "tee.js"),
   (name = "body-integration", esModule = embed "body-integration.js"),
+  (name = "buffer-lifecycle", esModule = embed "buffer-lifecycle.js"),
+  (name = "reentrancy", esModule = embed "reentrancy.js"),
+  (name = "draining-reader", esModule = embed "draining-reader.js"),
+  (name = "gc-interplay", esModule = embed "gc-interplay.js"),
   (name = "decode-non-utf8", esModule = embed "decode-non-utf8.js"),
   (name = "pipe-integration", esModule = embed "pipe-integration.js"),
 ];

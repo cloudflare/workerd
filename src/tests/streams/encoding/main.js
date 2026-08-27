@@ -78,6 +78,33 @@ export {
   largeEncodedResponseBody,
 } from 'body-integration';
 
+export {
+  mutationAfterWriteIsVisible,
+  shrinkAfterWriteDecodesRemainingBytes,
+  detachWhileQueuedContributesNothing,
+  lyingMetadataNeverConsulted,
+} from 'buffer-lifecycle';
+
+export {
+  thenInterceptionDuringReadResolution,
+  closeWriterFromThenInterceptorDuringRead,
+  encoderChunkToStringReentersStream,
+  writeFromReadContinuation,
+  secondConcurrentReadParked,
+  cancelSiblingFromReadContinuation,
+} from 'reentrancy';
+
+export {
+  drainingReaderOverEncoder,
+  drainingReaderBatchesEncoderBacklog,
+  drainingReaderOverDecoderYieldsRawStrings,
+} from 'draining-reader';
+
+export {
+  abortEncoderWriterAfterGc,
+  decodeAfterStreamWrapperGc,
+} from 'gc-interplay';
+
 export { big5StreamingDecode } from 'decode-non-utf8';
 
 export { encoderDecoderPipeline } from 'pipe-integration';
