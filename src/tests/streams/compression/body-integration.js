@@ -58,6 +58,35 @@ export async function handleFetch(request, env) {
   return new Response('Not found', { status: 404 });
 }
 
+export const compressedResponseBody = {
+  async test() {
+    // The compressed readable used directly as a Response body: not
+    // wrapped, consumed, or locked by construction; local arrayBuffer()
+    // consumption round-trips byte-exactly.
+    const original = enc.encode('0123456789'.repeat(1000));
+    const cs = new CompressionStream('gzip');
+    const resp = new Response(cs.readable);
+    strictEqual(resp.body, cs.readable);
+    strictEqual(cs.readable.locked, false);
+    const writer = cs.writable.getWriter();
+    await writer.write(original);
+    await writer.close();
+    const compressed = await resp.arrayBuffer();
+    strictEqual(compressed.byteLength > 0, true);
+    strictEqual(compressed.byteLength < original.byteLength, true);
+
+    const ds = new DecompressionStream('gzip');
+    const dw = ds.writable.getWriter();
+    await dw.write(compressed);
+    await dw.close();
+    const restored = new Uint8Array(
+      await new Response(ds.readable).arrayBuffer()
+    );
+    strictEqual(restored.byteLength, original.byteLength);
+    strictEqual(dec.decode(restored), dec.decode(original));
+  },
+};
+
 export const responseBodyThroughDecompression = {
   async test(_ctrl, env) {
     const response = await env.SELF.fetch('http://test/compressed');

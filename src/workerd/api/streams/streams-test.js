@@ -25,27 +25,6 @@ export const partiallyReadStream = {
   },
 };
 
-export const arrayBufferOfReadable = {
-  async test() {
-    const cs = new CompressionStream('gzip');
-    const cw = cs.writable.getWriter();
-    await cw.write(new TextEncoder().encode('0123456789'.repeat(1000)));
-    await cw.close();
-    const data = await new Response(cs.readable).arrayBuffer();
-    // The exact compressed size depends on the zlib implementation backing
-    // CompressionStream; just check the input was actually compressed.
-    assert.ok(data.byteLength > 0 && data.byteLength < 10_000);
-
-    const ds = new DecompressionStream('gzip');
-    const dw = ds.writable.getWriter();
-    await dw.write(data);
-    await dw.close();
-
-    const read = await new Response(ds.readable).arrayBuffer();
-    assert.equal(10_000, read.byteLength);
-  },
-};
-
 export const inspect = {
   async test() {
     const inspectOpts = { breakLength: Infinity };

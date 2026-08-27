@@ -142,7 +142,7 @@ timing), and the internal-testing `expose_draining_reader`.
 
 | Module | Asserts |
 | --- | --- |
-| `api-surface.js` | toStringTag branding; codec factory not exposed; side stability; inheritance/placement (#5); ctor name/length/source (#6); accessor brand checks |
+| `api-surface.js` | toStringTag branding; codec factory not exposed; side stability; inheritance/placement (#5); ctor name/length/source (#6); `node:stream/web` re-exports are the same classes; accessor brand checks |
 | `construction.js` | valid formats; invalid format exact message (case-sensitive); one-shot ToString coercion; non-string formats (#7) |
 | `round-trip.js` | all-formats round trips (compression verified smaller); parked-read service with pinned deflate bytes; shared pump/concat/readAll helpers |
 | `chunk-boundaries.js` | byte-at-a-time compression; 2-byte split decompression; all formats with 5-byte write chunks |
@@ -160,7 +160,7 @@ timing), and the internal-testing `expose_draining_reader`.
 | `draining-reader.js` | TS only (C++ asserts absence): expectedLength undefined; a closed stream's buffered backlog swept in ONE read with done; lock/release |
 | `gc-interplay.js` | writer abort after wrapper GC; decompression through collected wrapper (codec handle liveness) |
 | `pipe-integration.js` | compress→decompress chains from user and TransformStream sources; through IdentityTransformStream; bad-data propagation through both transform kinds |
-| `body-integration.js` | SELF-loopback HTTP: response-body decompression, multi-transform chain with completing pipeTo, compression/decompression pipelines into internal response bodies |
+| `body-integration.js` | direct `Response(cs.readable)` body (same object, unlocked; byte-exact local arrayBuffer round trip); SELF-loopback HTTP: response-body decompression, multi-transform chain with completing pipeTo, compression/decompression pipelines into internal response bodies |
 | `unhandled-rejection.js` | #6061: no spurious unhandledrejection with Array.fromAsync |
 | `which-impl.js` | implementation detection |
 
