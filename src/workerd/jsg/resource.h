@@ -2106,6 +2106,16 @@ class ResourceWrapper {
 
   kj::Maybe<v8::NamedPropertyHandlerConfiguration> wildcardHandler;
 
+  // Enumerate this type's two constructor-template slots (empty or not) for startup-snapshot
+  // handling. Slots are visited in a fixed compile-time order (parameter-pack order of the
+  // TypeWrapper, memoizedConstructor then contextConstructor per type), so the
+  // PREPARE_SNAPSHOT and START_FROM_SNAPSHOT passes can pair slots by position alone.
+  template <typename Cb>
+  void iterateResourceTypeTemplates(Cb& cb) {
+    cb(memoizedConstructor);
+    cb(contextConstructor);
+  }
+
  private:
   Configuration configuration;
   v8::Global<v8::FunctionTemplate> memoizedConstructor;

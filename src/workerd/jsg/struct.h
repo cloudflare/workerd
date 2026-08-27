@@ -156,6 +156,10 @@ class FieldWrapper {
         js, context, jsValue, TypeErrorContext::structField(typeid(Struct), exportedName), in);
   }
 
+  void visitHandle(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitor) {
+    if (!nameHandle.IsEmpty()) visitor(nameHandle);
+  }
+
  private:
   v8::Global<v8::Name> nameHandle;
 };
@@ -280,6 +284,14 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
 
   void newContext() = delete;
   void getTemplate() = delete;
+
+  void visitPersistentHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
+      kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitTmpl) {
+    if (!templateHandle.IsEmpty()) visitTmpl(templateHandle);
+    KJ_IF_SOME(fields, lazyFields) {
+      (kj::get<indices>(fields).visitHandle(visitName), ...);
+    }
+  }
 
  private:
   v8::Global<v8::DictionaryTemplate> templateHandle;

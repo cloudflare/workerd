@@ -1807,11 +1807,17 @@ void Worker::setupContext(
 }
 
 void Worker::setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context> context) {
-  // Set WebAssembly.Module @@HasInstance
-  setWebAssemblyModuleHasInstance(lock, context);
+  // For isolates created by SnapshotCreator V8's bootstrapper skips InstallSpecialObjects,
+  // so the `WebAssembly` global does not exist and these shims would fail.
+  // That's fine: wasm modules aren't captured in the snapshot anyway, and this runs again
+  // in normal mode on the context restored from the snapshot, installing the shims then.
+  if (!lock.isPreparingSnapshot()) {
+    // Set WebAssembly.Module @@HasInstance
+    setWebAssemblyModuleHasInstance(lock, context);
 
-  // Shim WebAssembly.instantiate to detect modules exporting "__instance_signal".
-  shimWebAssemblyInstantiate(lock, context);
+    // Shim WebAssembly.instantiate to detect modules exporting "__instance_signal".
+    shimWebAssemblyInstantiate(lock, context);
+  }
 }
 // =======================================================================================
 
@@ -2027,6 +2033,17 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               KJ_CASE_ONEOF(mainModule, kj::Path) {
                 KJ_IF_SOME(ns,
                     tryResolveMainModule(lock, mainModule, *jsContext, *script, limitErrorOrTime)) {
+                  // To avoid resetting Worker-level C++ handles before snapshotting, we simply do not
+                  // create them eagerly. This is safe because the top-level code has already executed,
+                  // and the zygote worker will not handle any requests.
+                  // We also do not lose any JavaScript values during garbage collection, because the
+                  // handles below refer to values that are already retained elsewhere. For example:
+                  //     impl->env == IsolateBase::workerEnvObj,
+                  //     impl->ctxExports == IsolateBase::workerExportsObj.
+                  // A real Worker repopulates these handles in START_FROM_SNAPSHOT mode.
+                  if (lock.isPreparingSnapshot()) {
+                    break;
+                  }
                   impl->env = lock.v8Ref(bindingsScope.As<v8::Value>());
                   impl->ctxExports = lock.v8Ref(ctxExports.As<v8::Value>());
 
@@ -2108,6 +2125,19 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       // Ref: https://github.com/cloudflare/workerd/issues/5332
       if (script->isolate->impl->inspector == kj::none) {
         lock.v8Isolate->SetCaptureStackTraceForUncaughtExceptions(false);
+      }
+
+      if (auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
+          isolateBase.isPreparingSnapshot()) {
+        // Context Global is consumed by prepareSnapshot() even when it throws,
+        // so we clean it here to prevent double free.
+        KJ_DEFER({
+          const_cast<Script&>(*script).impl->moduleContext = kj::none;
+          impl->context = kj::none;
+        });
+        isolateBase.prepareSnapshot(jsContext->extractContextGlobalForSnapshot());
+        KJ_DASSERT(jsContext->getHandle(lock).IsEmpty(),
+            "zygote context handle must be consumed by prepareSnapshot");
       }
     });
   });
