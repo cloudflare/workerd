@@ -273,7 +273,9 @@ class SqliteCallScope {
 // associated with an open DB connection.
 #define SQLITE_CALL_NODB(code, ...)                                                                \
   do {                                                                                             \
+    SqliteCallScope sqliteCallScope;                                                               \
     int _ec = code;                                                                                \
+    if (_ec != SQLITE_OK) sqliteCallScope.rethrowVfsError();                                       \
     if (_ec != SQLITE_OK) {                                                                        \
       throwSentryException(                                                                        \
           KJ_EXCEPTION(                                                                            \
@@ -2344,7 +2346,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
 #define WRAP_METHOD(errorCode, block)                                                              \
   auto& self KJ_UNUSED = *static_cast<const SqliteDatabase::Vfs*>(vfs->pAppData);                  \
   try block catch (kj::Exception& e) {                                                             \
-    KJ_LOG(ERROR, "SQLite VFS I/O error", e);                                                      \
+    reportVfsErrorCaught(kj::mv(e));                                                               \
     return errorCode;                                                                              \
   }
 
