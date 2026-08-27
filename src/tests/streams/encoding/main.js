@@ -10,6 +10,13 @@ export { encoderEncoding, decoderOptionsReflection } from 'api-surface';
 
 export { encoderCoercesChunksToString } from 'encode-coercion';
 
+export {
+  decoderAcceptsBufferSources,
+  decoderDetachedBufferIsNoop,
+  decoderRejectsNonBufferSource,
+  encoderSymbolChunkErrorsStream,
+} from 'chunk-types';
+
 export { big5StreamingDecode } from 'decode-non-utf8';
 
 export { encoderDecoderPipeline } from 'pipe-integration';

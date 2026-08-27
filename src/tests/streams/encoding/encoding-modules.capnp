@@ -11,6 +11,7 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "which-impl", esModule = embed "which-impl.js"),
   (name = "api-surface", esModule = embed "api-surface.js"),
   (name = "encode-coercion", esModule = embed "encode-coercion.js"),
+  (name = "chunk-types", esModule = embed "chunk-types.js"),
   (name = "decode-non-utf8", esModule = embed "decode-non-utf8.js"),
   (name = "pipe-integration", esModule = embed "pipe-integration.js"),
 ];
