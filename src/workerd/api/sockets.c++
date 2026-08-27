@@ -348,40 +348,22 @@ class DatagramWritableSink final: public WritableStreamSink {
   kj::Rc<DatagramChannel> channel;
 };
 
-// Builds a value-mode ReadableStream (a default, not byte, controller) whose pull() performs
-// exactly one DatagramChannel::receive() call and enqueues exactly what came back as one
-// Uint8Array chunk. This deliberately bypasses JsReadableStream::create()'s byte-oriented
-// machinery (auto-allocated chunk sizes, BYOB reads), which is free to split or coalesce reads and
-// would not preserve datagram boundaries.
-//
-// This also bypasses the compatibility-flag gate on the public `new ReadableStream()` constructor
-// (ReadableStream::constructor): that gate exists to control end-user access to the JS-driven
-// ReadableStream constructor, not the underlying mechanism, which is safe to use internally
-// regardless of the flag.
-jsg::Ref<ReadableStream> newDatagramReadableStream(jsg::Lock& js, kj::Rc<DatagramChannel> channel) {
-  auto controller = newReadableStreamJsController();
-  auto stream = js.allocAccounted<ReadableStream>(
-      sizeof(ReadableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
-
-  UnderlyingSource underlyingSource;
-  underlyingSource.pull = [channel = kj::mv(channel)](jsg::Lock& js,
-                              UnderlyingSource::Controller c) mutable -> jsg::Promise<void> {
-    auto defaultController =
-        KJ_ASSERT_NONNULL(c.tryGet<jsg::Ref<ReadableStreamDefaultController>>()).addRef();
+// Builds a value-mode ReadableStream whose pull() performs exactly one DatagramChannel::receive()
+// call and enqueues exactly what came back as one Uint8Array chunk. Uses
+// JsReadableStream::fromPull() rather than create(), since create() requires a byte-oriented
+// ReadableStreamSource.
+JsReadableStream newDatagramReadableStream(jsg::Lock& js, kj::Rc<DatagramChannel> channel) {
+  return JsReadableStream::fromPull(js,
+      [channel = kj::mv(channel)](jsg::Lock& js) mutable -> jsg::Promise<kj::Maybe<jsg::Value>> {
     auto& ioContext = IoContext::current();
     return ioContext.awaitIo(js, channel->receive(),
-        [defaultController = kj::mv(defaultController)](
-            jsg::Lock& js, kj::Maybe<kj::Array<kj::byte>> datagram) mutable {
+        [](jsg::Lock& js, kj::Maybe<kj::Array<kj::byte>> datagram) -> kj::Maybe<jsg::Value> {
       KJ_IF_SOME(bytes, datagram) {
-        defaultController->enqueue(js, jsg::JsValue(jsg::JsUint8Array::create(js, bytes.asPtr())));
-      } else {
-        defaultController->close(js);
+        return js.v8Ref<v8::Value>(jsg::JsUint8Array::create(js, bytes.asPtr()));
       }
+      return kj::none;
     });
-  };
-
-  stream->getController().setup(js, kj::mv(underlyingSource), kj::none);
-  return kj::mv(stream);
+  });
 }
 
 }  // namespace
