@@ -526,6 +526,27 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
     (TypeWrapperBase<Self, T>::initTypeWrapper(), ...);
   }
 
+  // Enumerate every resource type's constructor-template slots for startup-snapshot handling.
+  // Fans out over each RESOURCE wrapper; see ResourceWrapper::iterateResourceTypeTemplates.
+  template <typename Cb>
+  void iterateResourceTypeTemplates(Cb&& cb) {
+    ([&] {
+      if constexpr (T::JSG_KIND == JsgKind::RESOURCE) {
+        static_cast<ResourceWrapper<Self, T>*>(this)->iterateResourceTypeTemplates(cb);
+      }
+    }(), ...);
+  }
+
+  void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
+      kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictionaryTemplate) {
+    ([&] {
+      if constexpr (T::JSG_KIND == JsgKind::STRUCT) {
+        using SW = StructWrapper<Self, T, typename T::template JsgFieldWrappers<Self, T>>;
+        static_cast<SW*>(this)->visitPersistentHandles(visitName, visitDictionaryTemplate);
+      }
+    }(), ...);
+  }
+
   static Self& from(v8::Isolate* isolate) {
     // Return a reference typed as the most-derived `Self` (e.g. `Foo_TypeWrapper`) rather than the
     // `TypeWrapper<Self, ...>` base. Both refer to the same object -- the `TypeWrapper` base is at
