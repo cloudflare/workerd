@@ -129,9 +129,14 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     // Stores the last received autoResponseRequest timestamp.
     kj::Maybe<kj::Date> autoResponseTimestamp;
 
-    // Keeps track of the currently ongoing websocket auto-response send promise. A revived
-    // api::WebSocket receives a branch so the manager can retain this across repeated hibernation.
-    kj::Maybe<kj::ForkedPromise<void>> maybeAutoResponsePromise;
+    // Serializes writes against the previous adapter's pump or the latest auto-response send.
+    // A revived api::WebSocket receives a branch while the manager retains the barrier. We keep
+    // the latest barrier after it settles because a completion callback could otherwise clear a
+    // newer replacement; retention is bounded to one barrier per WebSocket.
+    kj::Maybe<kj::ForkedPromise<void>> maybeWriteBarrier;
+
+    // Cancels promises that borrow `ws`. Declared after `ws` so it is destroyed first.
+    kj::Canceler writeCanceler;
 
     friend LegacyHibernationManagerImpl;
   };

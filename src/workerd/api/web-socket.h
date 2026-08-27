@@ -220,6 +220,9 @@ class WebSocket: public EventTarget {
 
     // Whether the WebSocket allows half-open close state.
     AllowHalfOpen allowHalfOpen = AllowHalfOpen::YES;
+
+    // Resolves when a pump that was active at hibernation settles. This does not own the pump.
+    kj::Maybe<kj::ForkedPromise<void>> maybePumpCompletion;
   };
 
   ~WebSocket() noexcept(false) = default;
@@ -330,7 +333,8 @@ class WebSocket: public EventTarget {
   // These methods are c++ only and are not exposed to our js interface.
   kj::Maybe<kj::Date> getAutoResponseTimestamp();
 
-  kj::Promise<void> sendAutoResponse(kj::String message, kj::WebSocket& ws);
+  kj::Promise<void> sendAutoResponse(
+      kj::String message, kj::WebSocket& ws, kj::Promise<void> writeBarrier);
 
   int getReadyState();
 
@@ -541,7 +545,8 @@ class WebSocketAdapter {
   virtual void setAutoResponseStatus(
       kj::Maybe<kj::Date> time, kj::Promise<void> autoResponsePromise) = 0;
   virtual kj::Maybe<kj::Date> getAutoResponseTimestamp() = 0;
-  virtual kj::Promise<void> sendAutoResponse(kj::String message, kj::WebSocket& ws) = 0;
+  virtual kj::Promise<void> sendAutoResponse(
+      kj::String message, kj::WebSocket& ws, kj::Promise<void> writeBarrier) = 0;
 
   // -------------------------------------------------------------------------
   // Peer tracking (the other end of a WebSocketPair).
@@ -631,7 +636,8 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   void setAutoResponseStatus(
       kj::Maybe<kj::Date> time, kj::Promise<void> autoResponsePromise) override;
   kj::Maybe<kj::Date> getAutoResponseTimestamp() override;
-  kj::Promise<void> sendAutoResponse(kj::String message, kj::WebSocket& ws) override;
+  kj::Promise<void> sendAutoResponse(
+      kj::String message, kj::WebSocket& ws, kj::Promise<void> writeBarrier) override;
 
   void setPeer(jsg::WeakRef<WebSocket> peer) override;
   bool peerIsAwaitingCoupling(jsg::Lock& js) override;
@@ -765,6 +771,8 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
       kj::Own<kj::PromiseFulfiller<void>> fulfiller;
     };
     kj::Maybe<OwnedAutoResponsePromise> ongoingAutoResponse;
+    // Allows a replacement adapter to wait for this adapter's pump without keeping it alive.
+    kj::Maybe<kj::ForkedPromise<void>> maybePumpCompletion;
     workerd::util::Queue<Pending> pendingAutoResponseDeque;
     size_t queuedAutoResponses = 0;
     bool isPumping = false;
@@ -772,6 +780,9 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
 
     JSG_MEMORY_INFO(AutoResponse) {
       tracker.trackFieldWithSize("ongoingAutoResponse", sizeof(kj::Promise<void>));
+      if (maybePumpCompletion != kj::none) {
+        tracker.trackFieldWithSize("maybePumpCompletion", sizeof(kj::ForkedPromise<void>));
+      }
       pendingAutoResponseDeque.forEach(
           [&](const Pending& pending) { tracker.trackField(nullptr, pending.message); });
     }
@@ -818,7 +829,8 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
       kj::WebSocket& ws,
       Native& native,
       AutoResponse& autoResponse,
-      kj::Maybe<kj::Own<WebSocketObserver>>& observer);
+      kj::Maybe<kj::Own<WebSocketObserver>>& observer,
+      kj::Own<kj::PromiseFulfiller<void>> pumpCompletion);
 
   kj::Promise<kj::Maybe<kj::Exception>> readLoop(
       kj::Maybe<kj::Own<InputGate::CriticalSection>> cs, size_t maxMessageSize);
@@ -831,8 +843,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   void tryReleaseNative(jsg::Lock& js);
 
   // ---------------------------------------------------------------------------
-  // Members. The pre-EW-10817 `api::WebSocket` layout, with the addition of `shell` (the
-  // back-reference for event dispatch / JSG_THIS).
+  // Members retained by the legacy adapter while the EW-10817 refactor is incomplete.
   // ---------------------------------------------------------------------------
 
   // Back-reference to the JSG-visible shell. Used to dispatch events
