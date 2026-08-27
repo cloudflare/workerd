@@ -315,8 +315,8 @@ DisconnectWatcher watchForDisconnect(kj::AsyncIoStream& connection) {
 }
 
 // A WritableStreamSink that sends each JS write() call as exactly one outbound datagram. Unlike a
-// byte-stream sink, there is no buffering: one write() call is one DatagramChannel::send() call,
-// so the caller's chunk boundaries are preserved rather than being merged or split.
+// byte-stream sink, chunks are never merged or split: each write() call becomes exactly one
+// DatagramChannel::send() call, so the caller's chunk boundaries are preserved rather than being merged or split.
 class DatagramWritableSink final: public WritableStreamSink {
  public:
   explicit DatagramWritableSink(kj::Rc<DatagramChannel> channel): channel(kj::mv(channel)) {}
