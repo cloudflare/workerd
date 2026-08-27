@@ -1,0 +1,53 @@
+using Workerd = import "/workerd/workerd.capnp";
+using CompressionModules = import "compression-modules.capnp";
+
+# Runs the compression streams suite (CompressionStream/DecompressionStream)
+# against the C++ implementation; compression-ts.wd-test runs the identical
+# modules against the TypeScript implementation.
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes. Date-gated semantics are pinned by flag:
+# - strict_compression_checks: DecompressionStream trailing-data and
+#   incomplete-close errors.
+# - unhandled_rejection_after_microtask_checkpoint: rejection-event timing
+#   the unhandled-rejection regression depends on.
+# - streams_enable_constructors + transformstream_enable_standard_constructor:
+#   pipe tests build `new TransformStream({transform})` sources.
+# The C++ classes are built on internal streams, so the internal-stream
+# flags apply:
+# - streams_byob_reader_detaches_buffer + internal_stream_byob_return_view:
+#   modern BYOB read semantics on the readable side.
+# - internal_writable_stream_abort_clears_queue: modern abort semantics.
+# - capture_async_api_throws: async errors reject instead of throwing.
+# - workers_api_getters_setters_on_prototype: prototype accessors.
+# - set_tostring_tag: Symbol.toStringTag branding.
+#
+# The SELF binding loops back to this worker: body-integration tests drive
+# compression through real HTTP request/response serialization.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-compression-cpp",
+      worker = (
+        modules = CompressionModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "strict_compression_checks",
+          "unhandled_rejection_after_microtask_checkpoint",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+          "streams_byob_reader_detaches_buffer",
+          "internal_stream_byob_return_view",
+          "internal_writable_stream_abort_clears_queue",
+          "capture_async_api_throws",
+          "workers_api_getters_setters_on_prototype",
+          "set_tostring_tag",
+        ],
+        bindings = [
+          ( name = "SELF", service = "streams-compression-cpp" ),
+        ],
+      )
+    ),
+  ],
+  v8Flags = ["--expose-gc"],
+);

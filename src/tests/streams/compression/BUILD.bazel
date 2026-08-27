@@ -1,0 +1,20 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The compression streams suite runs the same test modules under two
+# configs: compression-cpp against the C++ implementation, compression-ts
+# against the TypeScript implementation.
+
+compression_suite_srcs = glob(["*.js"]) + ["compression-modules.capnp"]
+
+wd_test(
+    size = "large",
+    src = "compression-cpp.wd-test",
+    data = compression_suite_srcs,
+)
+
+wd_test(
+    size = "large",
+    src = "compression-ts.wd-test",
+    args = ["--experimental"],
+    data = compression_suite_srcs,
+)
