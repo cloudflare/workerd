@@ -482,6 +482,47 @@ export const nativeBackedStreamIntoFetchBody = {
   },
 };
 
+// Body consumption accepts any BufferSource chunk shape, matching the C++ pump:
+// ArrayBuffer, DataView, and non-Uint8Array views contribute their bytes, detached
+// buffers are empty, and a non-BufferSource chunk fails with the C++ error text.
+export const bodyConsumptionNormalizesBufferSourceChunks = {
+  async test() {
+    const enc = new TextEncoder();
+    const bodyOf = (chunks) =>
+      new ReadableStream({
+        start(c) {
+          for (const chunk of chunks) c.enqueue(chunk);
+          c.close();
+        },
+      });
+    strictEqual(
+      await new Response(bodyOf([enc.encode('ab').buffer])).text(),
+      'ab'
+    );
+    strictEqual(
+      await new Response(
+        bodyOf([new DataView(enc.encode('_cd').buffer, 1)])
+      ).text(),
+      'cd'
+    );
+    strictEqual(
+      (await new Response(bodyOf([new Float64Array(1)])).arrayBuffer())
+        .byteLength,
+      8
+    );
+    const detached = new ArrayBuffer(4);
+    detached.transfer();
+    strictEqual(
+      await new Response(bodyOf([detached, enc.encode('x')])).text(),
+      'x'
+    );
+    await rejects(new Response(bodyOf(['not bytes'])).text(), {
+      name: 'TypeError',
+      message: 'This ReadableStream did not return bytes.',
+    });
+  },
+};
+
 // Body preconditions still apply after unwrap: a disturbed stream is rejected by the
 // Body constructor itself (unwrap deliberately performs no such checks). This throw did
 // NOT happen before the unwrap arm landed (the async-iterable fallback wrapped the

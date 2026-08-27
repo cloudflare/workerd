@@ -88,7 +88,8 @@ const {
 // is needed for the race's internal .then() calls on its arguments.
 const SafePromiseRace = SafePromise.race;
 
-const { isArrayBufferView, isPromise, markPromiseHandled } = utils;
+const { isArrayBuffer, isArrayBufferView, isPromise, markPromiseHandled } =
+  utils;
 
 const {
   StreamQueue,
@@ -4009,16 +4010,29 @@ async function collectChunks<R>(
   const chunks: Uint8Array[] = [];
   while (true) {
     const result = await reader.read();
-    for (const chunk of result.chunks as Uint8Array[]) {
-      const length = TypedArrayPrototypeGetByteLength(chunk);
-      if (length === 0) continue;
-      amountRead += BigInt(length);
+    for (const chunk of result.chunks as unknown[]) {
+      // Drained chunks are untrusted values: accept any BufferSource,
+      // normalized to a Uint8Array over its region; anything else fails
+      // with the same TypeError the C++ bridge pump uses. Detached inputs
+      // report byteLength 0 and are skipped with the other empties.
+      let view: Uint8Array;
+      if (isArrayBufferView(chunk)) {
+        const { buffer, byteOffset, byteLength } = getViewInfo(chunk);
+        if (byteLength === 0) continue;
+        view = new Uint8Array(buffer, byteOffset, byteLength);
+      } else if (isArrayBuffer(chunk)) {
+        if (ArrayBufferPrototypeByteLengthGet(chunk) === 0) continue;
+        view = new Uint8Array(chunk);
+      } else {
+        throw new TypeError('This ReadableStream did not return bytes.');
+      }
+      amountRead += BigInt(TypedArrayPrototypeGetByteLength(view) as number);
       if (amountRead > limit) {
         throw new RangeError(
           `Stream exceeded the maximum allowed limit of ${Number(limit)} bytes`
         );
       }
-      ArrayPrototypePush(chunks, chunk);
+      ArrayPrototypePush(chunks, view);
     }
     if (result.done) break;
   }

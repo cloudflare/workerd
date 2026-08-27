@@ -105,6 +105,21 @@ HWM 1 (count-based) and readable HWM 0 under
 - `pipeThrough` chains compose; `tee()` on the decoder's readable delivers
   to both branches with single-branch demand driving the writer.
 
+### Bodies
+
+- The encoder's readable is a byte source: `new Response(tes.readable)` /
+  `new Request(url, {method, body: tes.readable})` neither wrap, consume,
+  nor lock it (`resp.body` is the same object), and `text()` drives the
+  transform — including large payloads chunked at surrogate-splitting
+  boundaries.
+- The decoder's readable yields **strings**: consuming it as a body rejects
+  with `TypeError` "This ReadableStream did not return bytes." while the
+  writer side settles normally. `response.body.pipeThrough(tds)` is the
+  working direction.
+- Piping a byte body **into** the encoder's writable is a footgun, not an
+  error: each `Uint8Array` chunk is ToString-coerced (`"120,121"`) and that
+  text is encoded.
+
 ## Compatibility flags
 
 The C++ cell pins every date-gated flag the implementation is subject to;
@@ -152,6 +167,7 @@ Every entry is asserted on both sides via the `which-impl` pattern.
 | `propagation.js` | close resolves pending read + `closed` promises; cancel/abort reasons cross as the original instance, incl. later writes |
 | `pipe-integration.js` | encoder → decoder → encoder `pipeThrough` chain |
 | `tee.js` | both branches observe content; single-branch demand drives the writer; EOF on both |
+| `body-integration.js` | Response/Request with the encoder's readable as body (same object, unlocked; `text()` incl. a large surrogate-split payload); the decoder's string-yielding readable as body rejects with "This ReadableStream did not return bytes." (writer side settles); `response.body.pipeThrough(tds)` decodes; byte body piped into the encoder ToString-coerces the chunks |
 | `which-impl.js` | implementation detection |
 
 ## Legacy (pre-flag) behaviors
