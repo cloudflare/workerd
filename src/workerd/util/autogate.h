@@ -123,7 +123,10 @@ namespace workerd::util {
      compression utils. Chromium zlib remains the default. */                                    \
   V(COMPRESSION_RS)                                                                                 \
   /* Enables per-call JSRPC tracing, trace-context propagation, and related Fetcher spans. */       \
-  V(JSRPC_TRACING)
+  V(JSRPC_TRACING)                                                                                  \
+  /* Enables the V8 startup-snapshot pipeline: a throwaway zygote Worker is built to produce a      \
+     startup snapshot, and the real Worker's isolate is then created from it. */                    \
+  V(STARTUP_SNAPSHOT)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
