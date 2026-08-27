@@ -21,12 +21,14 @@
 #include <v8-locker.h>
 #include <v8-profiler.h>
 #include <v8-regexp.h>
+#include <v8-snapshot.h>
 
 #include <capnp/schema-loader.h>
 #include <kj/debug.h>
 #include <kj/exception.h>
 #include <kj/function.h>
 #include <kj/one-of.h>
+#include <kj/refcount.h>
 #include <kj/string.h>
 #include <kj/time.h>
 
@@ -53,6 +55,34 @@ kj::String KJ_STRINGIFY(v8::Local<T> value) {
 }  // namespace v8
 
 namespace workerd::jsg {
+
+// Everything needed to create a new isolate from a V8 startup snapshot:
+// * `blob` is the serialized snapshot data, allocated with `new[]` by v8::SnapshotCreator.
+struct SnapshotArtifact: public kj::AtomicRefcounted {
+  v8::StartupData blob{nullptr, 0};
+
+  ~SnapshotArtifact() noexcept(false) {
+    // v8::SnapshotCreator::CreateBlob() allocates the data with `new[]` and hands over ownership.
+    delete[] blob.data;
+  }
+
+  kj::Arc<SnapshotArtifact> addRef() const {
+    return addRefToThis();
+  }
+};
+
+// Different views for snapshot artifacts:
+// * MutableSnapshot: a zygote isolate built via v8::SnapshotCreator; holds an owning ref to
+//   the artifact and fills it during IsolateBase::prepareSnapshot().
+// * ReadonlySharedSnapshot: an isolate that boots from a previously produced blob; the Arc
+//   keeps the artifact alive for the isolate's entire life.
+struct MutableSnapshot {
+  kj::Own<SnapshotArtifact> artifact;
+};
+struct ReadonlySharedSnapshot {
+  kj::Arc<SnapshotArtifact> artifact;
+};
+using SnapshotConfig = kj::OneOf<MutableSnapshot, ReadonlySharedSnapshot>;
 
 // =======================================================================================
 // Macros for declaring type glue.
@@ -3245,6 +3275,10 @@ class Lock {
    private:
     Lock& js;
   };
+
+  // True when the underlying isolate was created in the corresponding snapshot mode.
+  bool isPreparingSnapshot() const;
+  bool isStartingFromSnapshot() const;
 
   // Sets the terminate-execution flag on the isolate so that the next time code tries to run, it
   // will be terminated. (But note that V8 only checks the flag at certain times, so it's possible
