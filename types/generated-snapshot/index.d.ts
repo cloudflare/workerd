@@ -11514,6 +11514,163 @@ declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT {
   inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
 }
+declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_7_Code {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_2 {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+interface Ai_Cf_Moondream_Moondream3_1_9B_A2B_Input {
+  /**
+   * Which Moondream skill to run.
+   */
+  task?: "query" | "caption" | "point" | "detect";
+  /**
+   * Input image as a public HTTPS URL or base64 data URI. Optional for `query`; required for `caption`, `point`, and `detect`.
+   */
+  image?: string;
+  /**
+   * Question for the `query` task.
+   */
+  question?: string;
+  /**
+   * Caption length for the `caption` task.
+   */
+  caption_length?: "short" | "normal" | "long";
+  /**
+   * Object phrase to locate for `point` and `detect` tasks (e.g. 'person wearing a red shirt').
+   */
+  target?: string;
+  /**
+   * Enable reasoning trace for the `query` task.
+   */
+  reasoning?: boolean;
+  /**
+   * Sampling temperature.
+   */
+  temperature?: number;
+  /**
+   * Top-p (nucleus) sampling.
+   */
+  top_p?: number;
+  /**
+   * Max tokens to generate for `query` and `caption`.
+   */
+  max_tokens?: number;
+  /**
+   * Max objects to return for `point` and `detect`.
+   */
+  max_objects?: number;
+  /**
+   * Return incremental tokens for `query` and `caption`. `point` and `detect` do not support streaming.
+   */
+  stream?: boolean;
+}
+interface Ai_Cf_Moondream_Moondream3_1_9B_A2B_Output {
+  /**
+   * Reason the generation finished.
+   */
+  finish_reason: string;
+  metrics: {
+    /**
+     * Number of input tokens consumed.
+     */
+    input_tokens: number;
+    /**
+     * Number of output tokens generated.
+     */
+    output_tokens: number;
+    /**
+     * Prefill time in milliseconds.
+     */
+    prefill_time_ms: number;
+    /**
+     * Decode time in milliseconds.
+     */
+    decode_time_ms: number;
+    /**
+     * Time to first token in milliseconds.
+     */
+    ttft_ms: number;
+  };
+  /**
+   * Answer text for the `query` task. Null for other tasks.
+   */
+  answer?: string;
+  /**
+   * Caption text for the `caption` task. Null for other tasks.
+   */
+  caption?: string;
+  /**
+   * Located points for the `point` task. Null for other tasks.
+   */
+  points?: {
+    /**
+     * X coordinate.
+     */
+    x: number;
+    /**
+     * Y coordinate.
+     */
+    y: number;
+  }[];
+  /**
+   * Detected bounding boxes for the `detect` task. Null for other tasks.
+   */
+  objects?: {
+    /**
+     * Minimum X coordinate.
+     */
+    x_min: number;
+    /**
+     * Minimum Y coordinate.
+     */
+    y_min: number;
+    /**
+     * Maximum X coordinate.
+     */
+    x_max: number;
+    /**
+     * Maximum Y coordinate.
+     */
+    y_max: number;
+  }[];
+  /**
+   * Reasoning trace for the `query` task when reasoning=true. Null otherwise.
+   */
+  reasoning?: {
+    /**
+     * Reasoning text.
+     */
+    text: string;
+    /**
+     * Grounding information.
+     */
+    grounding?: {}[];
+  };
+}
+declare abstract class Base_Ai_Cf_Moondream_Moondream3_1_9B_A2B {
+  inputs: Ai_Cf_Moondream_Moondream3_1_9B_A2B_Input;
+  postProcessedOutputs: Ai_Cf_Moondream_Moondream3_1_9B_A2B_Output;
+}
+declare abstract class Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Flash_0731 {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+declare abstract class Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Pro_0813 {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+declare abstract class Base_Ai_Cf_Qwen_Qwen3_8_27B {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_3_Flash {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
 interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
@@ -11606,6 +11763,13 @@ interface AiModels {
   "@cf/moonshotai/kimi-k2.6": Base_Ai_Cf_Moonshotai_Kimi_K2_6;
   "@cf/nvidia/nemotron-3-120b-a12b": Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B;
   "@cf/google/gemma-4-26b-a4b-it": Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT;
+  "@cf/moonshotai/kimi-k2.7-code": Base_Ai_Cf_Moonshotai_Kimi_K2_7_Code;
+  "@cf/zai-org/glm-5.2": Base_Ai_Cf_Zai_Org_Glm_5_2;
+  "@cf/moondream/moondream3.1-9B-A2B": Base_Ai_Cf_Moondream_Moondream3_1_9B_A2B;
+  "@cf/deepseek-ai/deepseek-v4-flash-0731": Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Flash_0731;
+  "@cf/deepseek-ai/deepseek-v4-pro-0813": Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Pro_0813;
+  "@cf/qwen/qwen3.8-27b": Base_Ai_Cf_Qwen_Qwen3_8_27B;
+  "@cf/zai-org/glm-5.3-flash": Base_Ai_Cf_Zai_Org_Glm_5_3_Flash;
 }
 type AiOptions = {
   /**
