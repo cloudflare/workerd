@@ -8,6 +8,10 @@
 // standalone (own accessors, length 1, non-native source).
 
 import { strictEqual, ok, throws } from 'node:assert';
+import {
+  CompressionStream as NodeCS,
+  DecompressionStream as NodeDS,
+} from 'node:stream/web';
 import { usingTsImpl } from 'which-impl';
 
 export const toStringTagBranding = {
@@ -88,6 +92,14 @@ export const constructorSurface = {
       String(CompressionStream).includes('native code'),
       !usingTsImpl
     );
+  },
+};
+
+export const nodeStreamWebAliases = {
+  test() {
+    // node:stream/web re-exports the very same classes.
+    strictEqual(NodeCS, CompressionStream);
+    strictEqual(NodeDS, DecompressionStream);
   },
 };
 

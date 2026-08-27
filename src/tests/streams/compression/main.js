@@ -17,6 +17,7 @@ export {
   sidesAreStableStreamInstances,
   transformStreamInheritance,
   constructorSurface,
+  nodeStreamWebAliases,
   accessorBrandChecks,
 } from 'api-surface';
 
@@ -73,6 +74,7 @@ export {
 } from 'pipe-integration';
 
 export {
+  compressedResponseBody,
   responseBodyThroughDecompression,
   decompressThroughTransformsToIdentity,
   compressionPipeline,
