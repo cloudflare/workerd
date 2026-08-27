@@ -34,6 +34,20 @@ wd_cc_library(
     ],
 )
 
+# The routing layer owning the unprefixed brotli symbol names; @brotli//:brotlienc and
+# @brotli//:brotlidec depend on this, so every brotli consumer links it. Deliberately
+# kj/capnp-free (see brotli-router.c++).
+wd_cc_library(
+    name = "brotli-router",
+    srcs = ["brotli-router.c++"],
+    hdrs = ["brotli-router.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/brotli-rs",
+        "@brotli//:brotli_impl",
+    ],
+)
+
 wd_cc_library(
     name = "perfetto",
     srcs = ["perfetto-tracing.c++"],
@@ -301,6 +315,7 @@ wd_cc_library(
     copts = ["-Werror=switch"],
     visibility = ["//visibility:public"],
     deps = [
+        ":brotli-router",
         ":sentry",
         ":strong-bool",
         ":zlib-router",
@@ -463,6 +478,15 @@ kj_test(
     deps = [
         ":autogate",
         "@zlib",
+    ],
+)
+
+kj_test(
+    src = "brotli-router-test.c++",
+    deps = [
+        ":autogate",
+        "@brotli//:brotlidec",
+        "@brotli//:brotlienc",
     ],
 )
 

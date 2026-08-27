@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Guy Bedford <gbedford@cloudflare.com>
+Date: Wed, 26 Aug 2026 12:00:00 -0700
+Subject: Add dummy MODULE.bazel
+
+
+diff --git a/MODULE.bazel b/MODULE.bazel
+new file mode 100644
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000001
+--- /dev/null
++++ b/MODULE.bazel
+@@ -0,0 +1,8 @@
++# dummy file used to support bzlmod
++module(
++    name = "brotli",
++    version = "1.2.0",
++    compatibility_level = 1,
++)
++
++bazel_dep(name = "rules_cc", version = "0.1.1")
