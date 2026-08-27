@@ -6,7 +6,22 @@
 // `export *`) so a name collision between modules is a load-time
 // SyntaxError instead of a silently dropped test.
 
-export { encoderEncoding, decoderOptionsReflection } from 'api-surface';
+export {
+  encoderEncoding,
+  toStringTagBranding,
+  transformStreamInheritance,
+  accessorPlacement,
+  sidesAreStableStreamInstances,
+  prototypeAccessorBrandChecks,
+  constructorSurface,
+} from 'api-surface';
+
+export {
+  decoderOptionsReflection,
+  fatalDefaults,
+  invalidLabelThrows,
+  labelNormalization,
+} from 'construction';
 
 export { encoderCoercesChunksToString } from 'encode-coercion';
 
