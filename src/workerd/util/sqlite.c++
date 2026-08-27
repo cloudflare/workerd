@@ -190,6 +190,17 @@ kj::String dbErrorMessage(int errorCode, sqlite3* db) {
 // exceptions through SQLite.
 static thread_local kj::Maybe<kj::Exception>* vfsErrorListener = nullptr;
 
+void tagDoSentry(kj::Exception& e) {
+  if (e.getDetail(SENTRY_TAG_DETAIL_ID) == kj::none) {
+    e.setDetail(SENTRY_TAG_DETAIL_ID, kj::heapArray("SENTRY_DO"_kj.asBytes()));
+  }
+}
+
+[[noreturn]] void throwDoSentryException(kj::Exception&& e) {
+  tagDoSentry(e);
+  kj::throwFatalException(kj::mv(e));
+}
+
 // Report that in a sqlite VFS callback, an exception was caught, and SQLITE_IOERROR is being
 // returned to SQLite.
 //
@@ -198,6 +209,7 @@ static thread_local kj::Maybe<kj::Exception>* vfsErrorListener = nullptr;
 // only the frames between the throw and the catch. We actually want to retain the full trace
 // through SQLite.
 void reportVfsErrorCaught(kj::Exception&& e) {
+  tagDoSentry(e);
   if (vfsErrorListener != nullptr) {
     // Only capture the first error; assume subsequent errors are side effects.
     if (*vfsErrorListener == kj::none) {
@@ -258,8 +270,10 @@ class SqliteCallScope {
 #define SQLITE_CALL_NODB(code, ...)                                                                \
   do {                                                                                             \
     int _ec = code;                                                                                \
-    KJ_ASSERT(                                                                                     \
-        _ec == SQLITE_OK, kj::str(sqlite3_errstr(_ec), ": ", namedErrorCode(_ec)), ##__VA_ARGS__); \
+    if (_ec != SQLITE_OK) {                                                                        \
+      throwDoSentryException(KJ_EXCEPTION(                                                         \
+          FAILED, kj::str(sqlite3_errstr(_ec), ": ", namedErrorCode(_ec)), ##__VA_ARGS__));        \
+    }                                                                                              \
   } while (false)
 
 // This version requires the scope to contain a variable named `db` which is of type sqlite3*, or
