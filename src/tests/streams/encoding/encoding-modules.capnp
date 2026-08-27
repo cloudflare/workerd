@@ -13,6 +13,10 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "construction", esModule = embed "construction.js"),
   (name = "encode-coercion", esModule = embed "encode-coercion.js"),
   (name = "chunk-types", esModule = embed "chunk-types.js"),
+  (name = "zero-length-writes", esModule = embed "zero-length-writes.js"),
+  (name = "encode-surrogates", esModule = embed "encode-surrogates.js"),
+  (name = "decode-splits", esModule = embed "decode-splits.js"),
+  (name = "fatal-mode", esModule = embed "fatal-mode.js"),
   (name = "decode-non-utf8", esModule = embed "decode-non-utf8.js"),
   (name = "pipe-integration", esModule = embed "pipe-integration.js"),
 ];

@@ -32,6 +32,29 @@ export {
   encoderSymbolChunkErrorsStream,
 } from 'chunk-types';
 
+export {
+  encoderEmptyStringIsNoop,
+  decoderEmptyChunksAreNoops,
+} from 'zero-length-writes';
+
+export {
+  surrogatePairSplitAcrossWrites,
+  loneHighBeforeBmpBecomesReplacement,
+  loneLowSurrogateBecomesReplacement,
+  pendingHighAtCloseFlushesReplacement,
+} from 'encode-surrogates';
+
+export {
+  bomSplitAcrossWritesIsStripped,
+  bomPreservedWithIgnoreBOM,
+  incompleteSequenceReplacedAtClose,
+} from 'decode-splits';
+
+export {
+  fatalInvalidBytesErrorStream,
+  fatalIncompleteAtCloseRejects,
+} from 'fatal-mode';
+
 export { big5StreamingDecode } from 'decode-non-utf8';
 
 export { encoderDecoderPipeline } from 'pipe-integration';
