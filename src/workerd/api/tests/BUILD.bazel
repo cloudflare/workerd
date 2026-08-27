@@ -538,12 +538,6 @@ wd_test(
 )
 
 wd_test(
-    src = "encoding-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["encoding-streams-test.js"],
-)
-
-wd_test(
     src = "autovuln-63-test.wd-test",
     args = ["--experimental"],
     data = ["autovuln-63-test.js"],

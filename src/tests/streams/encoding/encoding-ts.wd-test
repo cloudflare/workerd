@@ -1,0 +1,31 @@
+using Workerd = import "/workerd/workerd.capnp";
+using EncodingModules = import "encoding-modules.capnp";
+
+# Runs the encoding streams suite against the TypeScript implementation,
+# with byte-for-byte the same modules as encoding-cpp.wd-test.
+#
+# The streams-semantic flags pinned in encoding-cpp.wd-test are deliberately
+# absent: the TypeScript implementation hard-codes the modern behaviors, and
+# the `@` / `@all-compat-flags` variants verify that indifference with the
+# flags all off and all on. text_decoder_cjk_decoder IS pinned — it selects
+# the shared C++ TextDecoder codec primitive both implementations wrap, not
+# a streams behavior.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-encoding-ts",
+      worker = (
+        modules = EncodingModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "text_decoder_cjk_decoder",
+          "experimental",
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);

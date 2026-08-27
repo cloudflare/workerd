@@ -1,0 +1,16 @@
+# Single source of truth for the encoding streams suite's module set; both
+# main cells reference this constant so the two implementations run exactly
+# the same embedded code. embed paths resolve relative to THIS file.
+
+@0xb5f47130b8e48ee2;
+
+using Workerd = import "/workerd/workerd.capnp";
+
+const modules :List(Workerd.Worker.Module) = [
+  (name = "main", esModule = embed "main.js"),
+  (name = "which-impl", esModule = embed "which-impl.js"),
+  (name = "api-surface", esModule = embed "api-surface.js"),
+  (name = "encode-coercion", esModule = embed "encode-coercion.js"),
+  (name = "decode-non-utf8", esModule = embed "decode-non-utf8.js"),
+  (name = "pipe-integration", esModule = embed "pipe-integration.js"),
+];

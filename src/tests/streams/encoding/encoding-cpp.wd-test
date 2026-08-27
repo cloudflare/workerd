@@ -1,0 +1,38 @@
+using Workerd = import "/workerd/workerd.capnp";
+using EncodingModules = import "encoding-modules.capnp";
+
+# Runs the encoding streams suite (TextEncoderStream/TextDecoderStream)
+# against the C++ implementation; encoding-ts.wd-test runs the identical
+# modules against the TypeScript implementation.
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes. Date-gated semantics are pinned by flag:
+# - streams_enable_constructors + transformstream_enable_standard_constructor:
+#   the standard TransformStream machinery these classes are built on
+#   (without them the constructor falls back to an identity stream and the
+#   codec algorithms are dropped).
+# - fixup-transform-stream-backpressure: fixed TransformStream backpressure.
+# - encoder_stream_spec_compliant_backpressure: readable-side HWM 0 per spec.
+# - text_decoder_cjk_decoder: dedicated CJK decoder for non-UTF-8 labels.
+# - workers_api_getters_setters_on_prototype: prototype accessors.
+# - set_tostring_tag: Symbol.toStringTag branding.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-encoding-cpp",
+      worker = (
+        modules = EncodingModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+          "fixup-transform-stream-backpressure",
+          "encoder_stream_spec_compliant_backpressure",
+          "text_decoder_cjk_decoder",
+          "workers_api_getters_setters_on_prototype",
+          "set_tostring_tag",
+        ],
+      )
+    ),
+  ],
+);
