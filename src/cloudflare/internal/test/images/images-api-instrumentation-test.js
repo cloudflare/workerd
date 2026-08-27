@@ -331,6 +331,28 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
+    'cloudflare.images.options.transforms':
+      '[{"drawImageIndex":1,"targetImageIndex":0}]',
+    'cloudflare.images.overlays.image': 1,
+    'cloudflare.images.options.format': 'image/png',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 138n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.binding.type': 'Images',
     'cloudflare.images.canvas.type': 'text',
     'cloudflare.images.options.transforms':
       '[{"drawImageIndex":1,"targetImageIndex":0,"top":10,"left":10}]',
@@ -475,6 +497,44 @@ const expectedSpans = [
       'multipart/form-data; boundary=<dynamic>',
     'http.response.status_code': 200n,
     'http.response.body.size': 26n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 72n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.binding.type': 'Images',
+    'cloudflare.images.canvas.type': 'image',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 72n,
     closed: true,
   },
   {
