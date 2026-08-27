@@ -17,6 +17,9 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "encode-surrogates", esModule = embed "encode-surrogates.js"),
   (name = "decode-splits", esModule = embed "decode-splits.js"),
   (name = "fatal-mode", esModule = embed "fatal-mode.js"),
+  (name = "backpressure", esModule = embed "backpressure.js"),
+  (name = "propagation", esModule = embed "propagation.js"),
+  (name = "tee", esModule = embed "tee.js"),
   (name = "decode-non-utf8", esModule = embed "decode-non-utf8.js"),
   (name = "pipe-integration", esModule = embed "pipe-integration.js"),
 ];
