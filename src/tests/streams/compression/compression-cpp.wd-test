@@ -19,6 +19,8 @@ using CompressionModules = import "compression-modules.capnp";
 #   modern BYOB read semantics on the readable side.
 # - internal_writable_stream_abort_clears_queue: modern abort semantics.
 # - capture_async_api_throws: async errors reject instead of throwing.
+# - enhanced_error_serialization: abort/cancel reasons keep their error type
+#   when re-created across the kj boundary.
 # - workers_api_getters_setters_on_prototype: prototype accessors.
 # - set_tostring_tag: Symbol.toStringTag branding.
 #
@@ -40,6 +42,7 @@ const unitTests :Workerd.Config = (
           "internal_stream_byob_return_view",
           "internal_writable_stream_abort_clears_queue",
           "capture_async_api_throws",
+          "enhanced_error_serialization",
           "workers_api_getters_setters_on_prototype",
           "set_tostring_tag",
         ],

@@ -15,12 +15,15 @@ export {
   toStringTagBranding,
   codecFactoryNotExposed,
   sidesAreStableStreamInstances,
+  transformStreamInheritance,
+  constructorSurface,
   accessorBrandChecks,
 } from 'api-surface';
 
 export {
   validFormatsConstruct,
   invalidFormatThrows,
+  formatToStringCoercedOnce,
   nonStringFormatThrows,
 } from 'construction';
 
@@ -50,12 +53,15 @@ export {
 
 export { byobReadSupported } from 'byob';
 
-export { writesSettleWithoutReads } from 'backpressure';
+export { desiredSizeAccounting, writesSettleWithoutReads } from 'backpressure';
 
 export {
   abortRejectsPendingRead,
   cancelSettlesPendingRead,
   abortErrorsBothSides,
+  abortReasonIdentity,
+  writeAfterAbortDiverges,
+  nonErrorAbortReasonSurfacing,
   cancelReadableWritableAftermath,
 } from 'propagation';
 
@@ -82,3 +88,29 @@ export {
   alreadyDetachedChunkIsNoop,
   lyingMetadataNeverConsulted,
 } from 'buffer-lifecycle';
+
+export {
+  bufferSourceChunksAccepted,
+  stringChunkDiverges,
+  sharedArrayBufferChunkDiverges,
+  invalidChunkAftermathDiverges,
+} from 'chunk-types';
+
+export {
+  thenInterceptionDuringReadResolution,
+  secondConcurrentRead,
+  writeFromReadContinuation,
+  cancelSiblingFromReadContinuation,
+} from 'reentrancy';
+
+export { teeBothBranchesIdentical, cancelOneBranchSurvivorDrains } from 'tee';
+
+export {
+  drainingReaderSweepsBufferedBacklog,
+  drainingReaderLocksReadable,
+} from 'draining-reader';
+
+export {
+  abortCompressionWriterAfterGc,
+  decompressAfterStreamWrapperGc,
+} from 'gc-interplay';

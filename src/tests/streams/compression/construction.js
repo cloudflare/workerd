@@ -7,7 +7,7 @@
 // ToString-coerces the argument and fails format validation, while the C++
 // jsg layer rejects non-strings at the type boundary before validation.
 
-import { strictEqual, ok, throws } from 'node:assert';
+import { ok, strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 const formatMessage =
@@ -33,6 +33,22 @@ export const invalidFormatThrows = {
       throws(() => new Ctor('br'), check);
       throws(() => new Ctor('GZIP'), check); // case-sensitive
     }
+  },
+};
+
+export const formatToStringCoercedOnce = {
+  test() {
+    // An object format is ToString-coerced exactly once in both
+    // implementations; a valid result constructs normally.
+    let called = 0;
+    const format = {
+      toString() {
+        called++;
+        return 'gzip';
+      },
+    };
+    ok(new CompressionStream(format));
+    strictEqual(called, 1);
   },
 };
 

@@ -24,4 +24,9 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "body-integration", esModule = embed "body-integration.js"),
   (name = "unhandled-rejection", esModule = embed "unhandled-rejection.js"),
   (name = "buffer-lifecycle", esModule = embed "buffer-lifecycle.js"),
+  (name = "chunk-types", esModule = embed "chunk-types.js"),
+  (name = "reentrancy", esModule = embed "reentrancy.js"),
+  (name = "tee", esModule = embed "tee.js"),
+  (name = "draining-reader", esModule = embed "draining-reader.js"),
+  (name = "gc-interplay", esModule = embed "gc-interplay.js"),
 ];
