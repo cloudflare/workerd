@@ -69,6 +69,15 @@ export {
 
 export { decoderTeeBothBranches } from 'tee';
 
+export {
+  encoderResponseBody,
+  encoderRequestBody,
+  decoderReadableAsBodyRejectsText,
+  responseBodyThroughDecoder,
+  byteBodyIntoEncoderCoercesChunks,
+  largeEncodedResponseBody,
+} from 'body-integration';
+
 export { big5StreamingDecode } from 'decode-non-utf8';
 
 export { encoderDecoderPipeline } from 'pipe-integration';

@@ -119,11 +119,14 @@ export const prototypeAccessorBrandChecks = {
         : key === 'readable' || key === 'writable'
           ? TransformStream.prototype
           : proto;
-      throws(() => Reflect.get(target, key, {}), (err) => {
-        strictEqual(err.constructor, TypeError);
-        ok(err.message.startsWith('Illegal invocation'));
-        return true;
-      });
+      throws(
+        () => Reflect.get(target, key, {}),
+        (err) => {
+          strictEqual(err.constructor, TypeError);
+          ok(err.message.startsWith('Illegal invocation'));
+          return true;
+        }
+      );
     }
   },
 };

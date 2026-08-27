@@ -52,11 +52,14 @@ export const fatalDefaults = {
 
 export const invalidLabelThrows = {
   test() {
-    throws(() => new TextDecoderStream('bogus'), (err) => {
-      strictEqual(err.constructor, RangeError);
-      strictEqual(err.message, '"bogus" is not a valid encoding.');
-      return true;
-    });
+    throws(
+      () => new TextDecoderStream('bogus'),
+      (err) => {
+        strictEqual(err.constructor, RangeError);
+        strictEqual(err.message, '"bogus" is not a valid encoding.');
+        return true;
+      }
+    );
   },
 };
 

@@ -81,16 +81,19 @@ export const legacyDecoderInvalidChunkThrowsSynchronously = {
     const tds = new TextDecoderStream();
     const writer = tds.writable.getWriter();
     const reader = tds.readable.getReader();
-    throws(() => writer.write(42), (err) => {
-      strictEqual(err.constructor, TypeError);
-      strictEqual(
-        err.message,
-        'This TransformStream is being used as a byte stream, but received ' +
-          'an object of non-ArrayBuffer/ArrayBufferView type on its ' +
-          'writable side.'
-      );
-      return true;
-    });
+    throws(
+      () => writer.write(42),
+      (err) => {
+        strictEqual(err.constructor, TypeError);
+        strictEqual(
+          err.message,
+          'This TransformStream is being used as a byte stream, but received ' +
+            'an object of non-ArrayBuffer/ArrayBufferView type on its ' +
+            'writable side.'
+        );
+        return true;
+      }
+    );
     // The stream survives: later traffic still flows.
     const readPromise = reader.read();
     const writePromise = writer.write(Uint8Array.of(0x6f, 0x6b));
