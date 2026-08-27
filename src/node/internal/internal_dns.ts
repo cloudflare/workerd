@@ -22,7 +22,6 @@ import {
   type SOA,
   type SRV,
   type TTLResponse,
-  type Answer,
 } from 'node-internal:internal_dns_client';
 import {
   DnsError,
@@ -43,9 +42,6 @@ import inner from 'cloudflare-internal:sockets';
 import type dns from 'node:dns';
 
 type DnsOrder = 'verbatim' | 'ipv4first' | 'ipv6first';
-
-const DNS_RECORD_TYPE_A = 1;
-const DNS_RECORD_TYPE_AAAA = 28;
 
 export const validFamilies = [0, 4, 6];
 export const validDnsOrders: DnsOrder[] = [
@@ -73,13 +69,6 @@ function getMagicHostOverride(hostname: string): string | undefined {
 // normalizes back to the IPv4 override key, so no separate registration is needed.
 function toMappedIpv6(ipv4: string): string {
   return `::ffff:${ipv4}`;
-}
-
-function filterAnswersByType(
-  answers: Answer[] | undefined,
-  type: number
-): Answer[] {
-  return answers?.filter((answer) => answer.type === type) ?? [];
 }
 
 export function getServers(): ReturnType<(typeof dns)['getServers']> {
@@ -198,19 +187,15 @@ export function lookup(
     ])
       .then(([ipv4Response, ipv6Response]): void => {
         const ipv4Addresses: { address: string; family: 4 }[] =
-          filterAnswersByType(ipv4Response.Answer, DNS_RECORD_TYPE_A).map(
-            (answer) => ({
-              address: answer.data,
-              family: 4,
-            })
-          );
+          ipv4Response.Answer?.map((answer) => ({
+            address: answer.data,
+            family: 4,
+          })) ?? [];
         const ipv6Addresses: { address: string; family: 6 }[] =
-          filterAnswersByType(ipv6Response.Answer, DNS_RECORD_TYPE_AAAA).map(
-            (answer) => ({
-              address: answer.data,
-              family: 6,
-            })
-          );
+          ipv6Response.Answer?.map((answer) => ({
+            address: answer.data,
+            family: 6,
+          })) ?? [];
 
         // No addresses found
         if (ipv4Addresses.length === 0 && ipv6Addresses.length === 0) {
@@ -237,14 +222,8 @@ export function lookup(
       sendDnsRequest(hostname, 'AAAA').catch(() => ({ Answer: [] })),
     ])
       .then(([ipv4Response, ipv6Response]): void => {
-        const ipv4 = filterAnswersByType(
-          ipv4Response.Answer,
-          DNS_RECORD_TYPE_A
-        ).at(0)?.data;
-        const ipv6 = filterAnswersByType(
-          ipv6Response.Answer,
-          DNS_RECORD_TYPE_AAAA
-        ).at(0)?.data;
+        const ipv4 = ipv4Response.Answer?.at(0)?.data;
+        const ipv6 = ipv6Response.Answer?.at(0)?.data;
 
         if (ipv4 == null && ipv6 == null) {
           callback(new DnsError(hostname, errorCodes.NOTFOUND, 'queryA'));
@@ -275,28 +254,20 @@ export function lookup(
     // Single request when family is specified (with or without all=true)
     sendDnsRequest(hostname, requestType)
       .then((json): void => {
-        const answers = filterAnswersByType(
-          json.Answer,
-          family === 4 ? DNS_RECORD_TYPE_A : DNS_RECORD_TYPE_AAAA
-        );
-        validateAnswer(
-          answers.length > 0 ? answers : undefined,
-          hostname,
-          `query${requestType}`
-        );
+        validateAnswer(json.Answer, hostname, `query${requestType}`);
 
         if (all) {
           // Return all addresses with the specified family
           callback(
             null,
-            answers.map((answer) => ({
+            json.Answer.map((answer) => ({
               address: answer.data,
               family,
             }))
           );
         } else {
           // Return just the first address
-          callback(null, answers.at(0)?.data as string, family);
+          callback(null, json.Answer.at(0)?.data as string, family);
         }
       })
       .catch((error: unknown): void => {

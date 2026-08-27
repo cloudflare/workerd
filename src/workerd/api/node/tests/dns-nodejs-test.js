@@ -45,7 +45,7 @@ const addresses = {
   // A host with CNAME records registered
   CNAME_HOST: 'blog.nodejs.org',
   // A host whose A and AAAA responses begin with a CNAME record
-  CNAME_CHAIN_HOST: 'writings.hongminhee.org',
+  CNAME_CHAIN_HOST: 'www.iana.org',
   // A host with NS records registered
   NS_HOST: 'nodejs.org',
   // A host with TXT records registered
@@ -445,10 +445,10 @@ export const lookupDefaultFamilyResolvesIPv4 = {
   },
 };
 
-// Regression: dns.lookup() must not expose CNAME records as IP addresses.
-export const lookupCnameChainReturnsOnlyIpAddresses = {
+// Regression: address resolvers must not expose CNAME records as IP addresses.
+export const cnameChainReturnsOnlyIpAddresses = {
   async test() {
-    const results = await Promise.all([
+    const lookupResults = await Promise.all([
       dnsPromises.lookup(addresses.CNAME_CHAIN_HOST, {
         all: true,
         family: 0,
@@ -461,7 +461,7 @@ export const lookupCnameChainReturnsOnlyIpAddresses = {
       dnsPromises.lookup(addresses.CNAME_CHAIN_HOST, { family: 6 }),
     ]);
 
-    for (const result of results) {
+    for (const result of lookupResults) {
       const entries = Array.isArray(result) ? result : [result];
       ok(entries.length > 0, 'expected at least one address');
 
@@ -472,6 +472,18 @@ export const lookupCnameChainReturnsOnlyIpAddresses = {
           `${entry.address} is not an IPv${entry.family} address`
         );
       }
+    }
+
+    const [ipv4Addresses, ipv6Addresses] = await Promise.all([
+      dnsPromises.resolve4(addresses.CNAME_CHAIN_HOST),
+      dnsPromises.resolve6(addresses.CNAME_CHAIN_HOST),
+    ]);
+
+    for (const address of ipv4Addresses) {
+      strictEqual(isIP(address), 4, `${address} is not an IPv4 address`);
+    }
+    for (const address of ipv6Addresses) {
+      strictEqual(isIP(address), 6, `${address} is not an IPv6 address`);
     }
   },
 };
