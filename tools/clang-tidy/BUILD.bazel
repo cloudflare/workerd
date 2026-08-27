@@ -151,3 +151,22 @@ sh_test(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
 )
+
+sh_test(
+    name = "coroutine-hostile-raii-test",
+    srcs = ["coroutine-hostile-raii-test.sh"],
+    data = [
+        ":coroutine-hostile-raii-negative-test.c++",
+        ":coroutine-hostile-raii-positive-test.c++",
+        "//:merged_clang_tidy_config",
+        "//tools:clang-tidy",
+    ],
+    tags = ["no-asan"],
+    # workerd-tools publishes clang-tidy for macOS arm64 only.
+    target_compatible_with = select({
+        "@bazel_tools//src/conditions:darwin_x86_64": ["@platforms//:incompatible"],
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
