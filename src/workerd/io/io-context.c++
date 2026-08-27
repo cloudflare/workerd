@@ -1036,7 +1036,8 @@ kj::Rc<ExternalPusherImpl> IoContext::getExternalPusher() {
 
 kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
     kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
-    SubrequestOptions options) {
+    SubrequestOptions options,
+    CountSubrequest countSubrequest) {
   TraceContext tracing;
   KJ_IF_SOME(n, options.operationName) {
     tracing = makeUserTraceSpan(n.clone());
@@ -1051,7 +1052,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
 
   if (options.wrapMetrics) {
     auto& metrics = getMetrics();
-    ret = metrics.wrapSubrequestClient(kj::mv(ret));
+    ret = metrics.wrapSubrequestClient(kj::mv(ret), countSubrequest);
     ret = worker->getIsolate().wrapSubrequestClient(
         kj::mv(ret), getHeaderIds().contentEncoding, metrics);
   }
@@ -1077,7 +1078,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequest(
     kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
     SubrequestOptions options) {
   limitEnforcer->newSubrequest(options.inHouse);
-  return getSubrequestNoChecks(kj::mv(func), kj::mv(options));
+  return getSubrequestNoChecks(kj::mv(func), kj::mv(options), CountSubrequest::YES);
 }
 
 kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
@@ -1138,7 +1139,8 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelNoChecks(uint channel,
         .inHouse = isInHouse,
         .wrapMetrics = !isInHouse,
         .operationName = kj::mv(operationName),
-      });
+      },
+      CountSubrequest::YES);
 }
 
 kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,

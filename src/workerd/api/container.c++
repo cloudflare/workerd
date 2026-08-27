@@ -1456,7 +1456,7 @@ class Container::TcpPortOutgoingFactory final: public Fetcher::OutgoingFactory {
         [&](auto& tracing, auto& channelFactory) -> kj::Own<WorkerInterface> {
       makeUserSpanParent(tracing);
       return kj::heap<TcpPortWorkerInterface>(entropySource, headerTable, portState.addRef());
-    }, {.inHouse = false, .wrapMetrics = false});
+    }, {.inHouse = false, .wrapMetrics = false}, CountSubrequest::YES);
     return {.client = kj::mv(client), .spanParents = kj::none};
   }
 

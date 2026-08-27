@@ -935,7 +935,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // should route through this function or getSubrequest().
   kj::Own<WorkerInterface> getSubrequestNoChecks(
       kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
-      SubrequestOptions options);
+      SubrequestOptions options,
+      CountSubrequest countSubrequest);
 
   // If creating a new subrequest is permitted, calls the given factory function synchronously to
   // create one.

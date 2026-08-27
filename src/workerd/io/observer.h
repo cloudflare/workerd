@@ -23,6 +23,8 @@ class IoContext;
 // Whether an outgoing subrequest's request body can be rewound (e.g. a buffered or null body), and
 // so the request could be re-sent. See RequestObserver::setNextSubrequestBodyRewindable().
 WD_STRONG_BOOL(SubrequestBodyRewindable);
+// Whether an outgoing request contributes to the logical subrequest count.
+WD_STRONG_BOOL(CountSubrequest);
 class WorkerInterface;
 class LimitEnforcer;
 class TimerChannel;
@@ -121,8 +123,10 @@ class RequestObserver: public kj::Refcounted {
     return worker;
   }
 
-  // Wrap an HttpClient so that its usage is counted in the request's subrequest stats.
-  virtual kj::Own<WorkerInterface> wrapSubrequestClient(kj::Own<WorkerInterface> client) {
+  // Wrap an HttpClient to observe its request and response activity. `countSubrequest` controls
+  // whether its usage contributes to the request's logical subrequest count.
+  virtual kj::Own<WorkerInterface> wrapSubrequestClient(
+      kj::Own<WorkerInterface> client, CountSubrequest countSubrequest) {
     return kj::mv(client);
   }
 
