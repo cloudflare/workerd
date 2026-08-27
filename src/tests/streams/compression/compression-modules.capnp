@@ -23,4 +23,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "pipe-integration", esModule = embed "pipe-integration.js"),
   (name = "body-integration", esModule = embed "body-integration.js"),
   (name = "unhandled-rejection", esModule = embed "unhandled-rejection.js"),
+  (name = "buffer-lifecycle", esModule = embed "buffer-lifecycle.js"),
 ];

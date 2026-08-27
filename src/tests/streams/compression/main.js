@@ -74,3 +74,11 @@ export {
 } from 'body-integration';
 
 export { decompressionStreamUnhandledRejection } from 'unhandled-rejection';
+
+export {
+  mutationAfterWriteIsInvisible,
+  detachAfterWriteStillDelivers,
+  resizableShrinkAfterWriteStillDelivers,
+  alreadyDetachedChunkIsNoop,
+  lyingMetadataNeverConsulted,
+} from 'buffer-lifecycle';
