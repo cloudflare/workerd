@@ -14,6 +14,7 @@
 #include <kj/async.h>
 #include <kj/table.h>
 
+#pragma clang attribute push(__attribute__((no_sanitize("cfi"), noinline)), apply_to=function)
 namespace workerd::jsg {
 
 // =======================================================================================
@@ -827,3 +828,4 @@ class UnhandledRejectionHandler {
 };
 
 }  // namespace workerd::jsg
+#pragma clang attribute pop

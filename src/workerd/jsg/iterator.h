@@ -11,6 +11,8 @@
 
 #include <list>
 
+#pragma clang attribute push(__attribute__((no_sanitize("cfi"), noinline)), apply_to=function)
+
 namespace workerd::jsg {
 
 // -----------------------------------------------------------------------------
@@ -1150,3 +1152,4 @@ class AsyncIteratorBase: public Object {
   jsg::Ref<Name> Label(jsg::Lock&, jsg::Optional<Options>);
 
 }  // namespace workerd::jsg
+#pragma clang attribute pop

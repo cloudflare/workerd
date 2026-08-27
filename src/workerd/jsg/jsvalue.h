@@ -7,6 +7,7 @@
 #include <v8-external.h>
 #include <v8-proxy.h>
 
+#pragma clang attribute push(__attribute__((no_sanitize("cfi"), noinline)), apply_to=function)
 namespace workerd::jsg {
 
 constexpr uint64_t MAX_SAFE_INTEGER = (1ull << 53) - 1;
@@ -1510,3 +1511,5 @@ void MemoryTracker::trackField(
 #define JSG_TRY_CAST_PROMISE(val) JSG_TRY_CAST(val, JsPromise)
 #define JSG_TRY_CAST_ARRAYBUFFER(val) JSG_TRY_CAST(val, JsArrayBuffer)
 #define JSG_TRY_CAST_UINT8ARRAY(val) JSG_TRY_CAST(val, JsUint8Array)
+
+#pragma clang attribute pop

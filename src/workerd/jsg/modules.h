@@ -15,6 +15,8 @@
 #include <kj/filesystem.h>
 #include <kj/map.h>
 
+#pragma clang attribute push(__attribute__((no_sanitize("cfi"), noinline)), apply_to=function)
+
 namespace workerd::jsg {
 
 template <typename T>
@@ -810,3 +812,4 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
 ModuleRegistry* getModulesForResolveCallback(v8::Isolate* isolate);
 
 }  // namespace workerd::jsg
+#pragma clang attribute pop

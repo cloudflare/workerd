@@ -22,6 +22,7 @@
 
 #include <typeindex>
 
+#pragma clang attribute push(__attribute__((no_sanitize("cfi"), noinline)), apply_to=function)
 namespace workerd::jsg {
 
 class Deserializer;
@@ -1175,3 +1176,4 @@ void WeakRef<T>::destroy() {
 }
 
 }  // namespace workerd::jsg
+#pragma clang attribute pop

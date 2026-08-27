@@ -8,6 +8,7 @@
 #include <concepts>
 #include <cstdint>
 
+#pragma clang attribute push(__attribute__((no_sanitize("cfi"), noinline)), apply_to=function)
 namespace kj_rs {
 
 // Tri-state returned from `box_future_poll()`, indicating the state of its output parameter.
@@ -122,3 +123,4 @@ static_assert(sizeof(RustFuture) == 4 * sizeof(std::uintptr_t), "incorrect RustF
 }  // namespace repr
 
 }  // namespace kj_rs
+#pragma clang attribute pop

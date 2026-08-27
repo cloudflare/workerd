@@ -19,6 +19,7 @@
 #include <string_view>
 #include <type_traits>
 
+#pragma clang attribute push(__attribute__((no_sanitize("cfi"), noinline)), apply_to=function)
 namespace workerd::jsg {
 
 template <typename T>
@@ -336,3 +337,4 @@ class StructWrapper<Self, T, StructFields<fields...>, kj::_::Indexes<indices...>
 };
 
 }  // namespace workerd::jsg
+#pragma clang attribute pop

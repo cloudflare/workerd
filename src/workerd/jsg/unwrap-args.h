@@ -4,6 +4,7 @@
 
 #pragma once
 
+#pragma clang attribute push(__attribute__((no_sanitize("cfi"), noinline)), apply_to=function)
 // INTERNAL IMPLEMENTATION FILE
 //
 // Deterministic left-to-right argument unwrapping for JSG-generated V8
@@ -155,3 +156,4 @@ auto unwrapArgs(TypeWrapper& wrapper,
 }
 
 }  // namespace workerd::jsg::_
+#pragma clang attribute pop

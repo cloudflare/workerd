@@ -30,6 +30,7 @@
 #include <type_traits>
 #include <typeindex>
 
+#pragma clang attribute push(__attribute__((no_sanitize("cfi"), noinline)), apply_to=function)
 namespace std {
 inline auto KJ_HASHCODE(const std::type_index& idx) {
   // Make std::type_index (which points to std::type_info) usable as a kj::HashMap key.
@@ -2173,3 +2174,4 @@ class ObjectWrapper {
 };
 
 }  // namespace workerd::jsg
+#pragma clang attribute pop

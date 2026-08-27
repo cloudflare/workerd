@@ -20,6 +20,7 @@
 #include <kj/one-of.h>
 #include <kj/time.h>
 
+#pragma clang attribute push(__attribute__((no_sanitize("cfi"), noinline)), apply_to=function)
 namespace workerd::jsg {
 
 // =======================================================================================
@@ -1485,3 +1486,4 @@ class ExceptionWrapper {
 };
 
 }  // namespace workerd::jsg
+#pragma clang attribute pop
