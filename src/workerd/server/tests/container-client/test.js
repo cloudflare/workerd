@@ -22,6 +22,10 @@ function getRandomDurableObjectName(name) {
 // before testing the behaviour with your container.
 //
 export class DurableObjectExample extends DurableObject {
+  testImages(expected) {
+    assert.deepStrictEqual(this.ctx.container.images, expected);
+  }
+
   async testExitCode() {
     const container = this.ctx.container;
     if (container.running) {
@@ -2893,6 +2897,31 @@ export class TestService extends WorkerEntrypoint {
 }
 
 export class DurableObjectExample2 extends DurableObjectExample {}
+
+export const testImages = {
+  async test(_ctrl, env) {
+    const cases = [
+      [
+        env.MY_CONTAINER,
+        {
+          api: 'registry.example.com/api@sha256:' + '1'.repeat(64),
+          worker: 'registry.example.com/worker@sha256:' + '2'.repeat(64),
+        },
+      ],
+      [
+        env.MY_DUPLICATE_CONTAINER,
+        {
+          tools: 'registry.example.com/tools@sha256:' + '3'.repeat(64),
+        },
+      ],
+    ];
+
+    for (const [namespace, expected] of cases) {
+      const id = namespace.idFromName(getRandomDurableObjectName('testImages'));
+      await namespace.get(id).testImages(expected);
+    }
+  },
+};
 
 // Test basic container status
 export const testStatus = {
