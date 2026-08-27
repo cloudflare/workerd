@@ -243,6 +243,9 @@ class ModuleRegistry {
 
   virtual void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) = 0;
 
+  // Visit all v8::Global handles owned by instantiated module entries.
+  virtual void visitHandlesForSnapshot(kj::FunctionParam<void(v8::Global<v8::Data>&)> fn) = 0;
+
   enum class RequireImplOptions {
     // Require returns the module namespace.
     DEFAULT,
@@ -512,6 +515,56 @@ class ModuleRegistryImpl final: public ModuleRegistry {
 
   size_t size() const {
     return entries.size();
+  }
+
+  void visitHandlesForSnapshot(kj::FunctionParam<void(v8::Global<v8::Data>&)> fn) override {
+    visitHandlesForSnapshotImpl(fn);
+  }
+
+  // Visit all v8::Global handles owned by instantiated ModuleInfo entries for V8 snapshot
+  // creation. Also resets tracedHandle on each jsg::Data (via visitHandle()) so V8's snapshot
+  // creator does not report dangling TracedReferences.
+  template <typename Fn>
+  void visitHandlesForSnapshotImpl(Fn&& fn) {
+    for (auto& entry: entries) {
+      KJ_IF_SOME(info, entry->info.template tryGet<ModuleInfo>()) {
+        const_cast<ModuleInfo&>(info).module.visitHandle(fn);
+        KJ_IF_SOME(src, const_cast<ModuleInfo&>(info).maybeModuleSourceObject) {
+          src.visitHandle(fn);
+        }
+        KJ_IF_SOME(exp, const_cast<ModuleInfo&>(info).maybeMutableExports) {
+          exp.visitHandle(fn);
+        }
+        KJ_IF_SOME(synth, const_cast<ModuleInfo&>(info).maybeSynthetic) {
+          KJ_SWITCH_ONEOF(synth) {
+            KJ_CASE_ONEOF(cjs, CommonJsModuleInfo) {
+              cjs.evalFunc.visitHandlesForSnapshot(fn);
+            }
+            KJ_CASE_ONEOF(v, DataModuleInfo) {
+              v.value.visitHandle(fn);
+            }
+            KJ_CASE_ONEOF(v, TextModuleInfo) {
+              v.value.visitHandle(fn);
+            }
+            KJ_CASE_ONEOF(v, WasmModuleInfo) {
+              v.value.visitHandle(fn);
+            }
+            KJ_CASE_ONEOF(v, JsonModuleInfo) {
+              v.value.visitHandle(fn);
+            }
+            KJ_CASE_ONEOF(v, ObjectModuleInfo) {
+              v.value.visitHandle(fn);
+            }
+            KJ_CASE_ONEOF(v, CapnpModuleInfo) {
+              const_cast<CapnpModuleInfo&>(v).fileScope.visitHandle(fn);
+              for (auto& entry: const_cast<CapnpModuleInfo&>(v).topLevelDecls) {
+                entry.value.visitHandle(fn);
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   Promise<Value> resolveDynamicImport(jsg::Lock& js,

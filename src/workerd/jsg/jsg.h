@@ -21,12 +21,14 @@
 #include <v8-locker.h>
 #include <v8-profiler.h>
 #include <v8-regexp.h>
+#include <v8-snapshot.h>
 
 #include <capnp/schema-loader.h>
 #include <kj/debug.h>
 #include <kj/exception.h>
 #include <kj/function.h>
 #include <kj/one-of.h>
+#include <kj/refcount.h>
 #include <kj/string.h>
 #include <kj/time.h>
 
@@ -53,6 +55,34 @@ kj::String KJ_STRINGIFY(v8::Local<T> value) {
 }  // namespace v8
 
 namespace workerd::jsg {
+
+// Everything needed to create a new isolate from a V8 startup snapshot:
+// * `blob` is the serialized snapshot data, allocated with `new[]` by v8::SnapshotCreator.
+struct SnapshotArtifact: public kj::AtomicRefcounted {
+  v8::StartupData blob{nullptr, 0};
+
+  ~SnapshotArtifact() noexcept(false) {
+    // v8::SnapshotCreator::CreateBlob() allocates the data with `new[]` and hands over ownership.
+    delete[] blob.data;
+  }
+
+  kj::Arc<SnapshotArtifact> addRef() const {
+    return addRefToThis();
+  }
+};
+
+// Different views for snapshot artifacts:
+// * MutableSnapshot: a zygote isolate built via v8::SnapshotCreator; holds an owning ref to
+//   the artifact and fills it during IsolateBase::prepareSnapshot().
+// * ReadonlySharedSnapshot: an isolate that boots from a previously produced blob; the Arc
+//   keeps the artifact alive for the isolate's entire life.
+struct MutableSnapshot {
+  kj::Own<SnapshotArtifact> artifact;
+};
+struct ReadonlySharedSnapshot {
+  kj::Arc<SnapshotArtifact> artifact;
+};
+using SnapshotConfig = kj::OneOf<MutableSnapshot, ReadonlySharedSnapshot>;
 
 // =======================================================================================
 // Macros for declaring type glue.
@@ -934,6 +964,15 @@ class Data {
   }
   Data addRef(Lock& js);
 
+  // Call fn with the underlying v8::Global<v8::Data> handle.
+  // Also resets tracedHandle, which V8 would otherwise report as an unserialized eternal handle
+  // during snapshot creation (TracedReferences are stored alongside eternal handles internally).
+  template <typename Fn>
+  void visitHandle(Fn&& fn) {
+    fn(handle);
+    tracedHandle = kj::none;
+  }
+
   inline bool operator==(const Data& other) const {
     return handle == other.handle;
   }
@@ -1041,6 +1080,8 @@ class V8Ref: private Data {
 
   template <typename U>
   V8Ref<U> cast(jsg::Lock& js);
+
+  using Data::visitHandle;
 
   // Create a weak reference to the held V8 value. The weak reference does not prevent the
   // value from being garbage collected and is not traced by GC.
@@ -2133,6 +2174,13 @@ class JsContext {
     return handle.Get(isolate);
   }
   v8::Local<v8::Context> getHandle(Lock& js) const;
+
+  // Moves out the underlying Global<Context> handle so snapshot preparation can reset it
+  // ahead of CreateBlob. Leaves this JsContext with an empty handle, so this is only valid
+  // in PREPARE_SNAPSHOT mode, where the context is never used again.
+  v8::Global<v8::Context> extractContextGlobalForSnapshot() {
+    return kj::mv(handle);
+  }
 
  private:
   v8::Global<v8::Context> handle;
@@ -3245,6 +3293,10 @@ class Lock {
    private:
     Lock& js;
   };
+
+  // True when the underlying isolate was created in the corresponding snapshot mode.
+  bool isPreparingSnapshot() const;
+  bool isStartingFromSnapshot() const;
 
   // Sets the terminate-execution flag on the isolate so that the next time code tries to run, it
   // will be terminated. (But note that V8 only checks the flag at certain times, so it's possible
