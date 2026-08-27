@@ -51,6 +51,70 @@ export const abortErrorsBothSides = {
   },
 };
 
+export const abortReasonIdentity = {
+  async test() {
+    // The reason reaching a pending READ diverges: C++ re-creates the
+    // error across the kj boundary (same type and message under the pinned
+    // enhanced_error_serialization, different instance); TypeScript
+    // delivers the original instance. writer.closed receives the ORIGINAL
+    // instance in both.
+    const cs = new CompressionStream('gzip');
+    const writer = cs.writable.getWriter();
+    const reader = cs.readable.getReader();
+    const reason = new RangeError('boom');
+    const readPromise = reader.read();
+    const closedExpectation = rejects(writer.closed, (err) => err === reason);
+    await writer.abort(reason);
+    await rejects(readPromise, (err) => {
+      strictEqual(err.constructor, RangeError);
+      strictEqual(err.message, 'boom');
+      strictEqual(err === reason, usingTsImpl);
+      return true;
+    });
+    await closedExpectation;
+  },
+};
+
+export const writeAfterAbortDiverges = {
+  async test() {
+    const cs = new CompressionStream('gzip');
+    const writer = cs.writable.getWriter();
+    const reason = new RangeError('gone');
+    await writer.abort(reason);
+    await rejects(writer.write(new Uint8Array(1)), (err) => {
+      if (usingTsImpl) {
+        strictEqual(err, reason);
+      } else {
+        strictEqual(err.constructor, TypeError);
+        strictEqual(err.message, 'This WritableStream has been closed.');
+      }
+      return true;
+    });
+  },
+};
+
+export const nonErrorAbortReasonSurfacing = {
+  async test() {
+    // A string abort reason reaches a pending read as an Error whose
+    // message is the string under C++ (kj re-creation); TypeScript
+    // delivers the original string value itself.
+    const cs = new CompressionStream('gzip');
+    const writer = cs.writable.getWriter();
+    const reader = cs.readable.getReader();
+    const readPromise = reader.read();
+    await writer.abort('just a string');
+    await rejects(readPromise, (err) => {
+      if (usingTsImpl) {
+        strictEqual(err, 'just a string');
+      } else {
+        strictEqual(err.constructor, Error);
+        strictEqual(err.message, 'just a string');
+      }
+      return true;
+    });
+  },
+};
+
 export const cancelReadableWritableAftermath = {
   async test() {
     const cs = new CompressionStream('gzip');

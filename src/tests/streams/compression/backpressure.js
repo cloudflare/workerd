@@ -8,6 +8,27 @@
 // streams' HWM-0 demand-driven transform.)
 
 import { strictEqual } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
+
+export const desiredSizeAccounting = {
+  async test() {
+    // Divergence: the C++ writer's desiredSize is inert (always 1,
+    // regardless of in-flight writes — the identity streams' default-HWM
+    // behavior); TypeScript counts the in-flight chunk against the default
+    // HWM of 1 and recovers once the eager push completes.
+    const cs = new CompressionStream('gzip');
+    const writer = cs.writable.getWriter();
+    strictEqual(writer.desiredSize, 1);
+    const writePromise = writer.write(new Uint8Array(100_000));
+    strictEqual(writer.desiredSize, usingTsImpl ? 0 : 1);
+    await writePromise;
+    strictEqual(writer.desiredSize, 1);
+    // ready is settled either way — eager settlement means no sustained
+    // backpressure signal.
+    await writer.ready;
+    await writer.close();
+  },
+};
 
 export const writesSettleWithoutReads = {
   async test() {
