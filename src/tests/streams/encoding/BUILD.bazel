@@ -16,3 +16,24 @@ wd_test(
     args = ["--experimental"],
     data = encoding_suite_srcs,
 )
+
+# Legacy (pre-flag) regression guards, C++ implementation only, one cell per
+# flag window. The @all-compat-flags variant is disabled: at the 2999-12-31
+# date the flags each cell deliberately omits would all turn on.
+wd_test(
+    src = "encoding-cpp-legacy.wd-test",
+    data = encoding_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)
+
+wd_test(
+    src = "encoding-cpp-legacy-bp.wd-test",
+    data = encoding_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)
+
+wd_test(
+    src = "encoding-cpp-legacy-hwm.wd-test",
+    data = encoding_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)
