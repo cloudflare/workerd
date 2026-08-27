@@ -2903,16 +2903,19 @@ kj::Maybe<kj::Own<workerd::IoChannelFactory::SubrequestChannel>> ContainerClient
   return kj::none;
 }
 
-kj::Promise<void> ContainerClient::ensureSidecarStarted() {
+kj::Promise<void> ContainerClient::ensureSidecarStarted(kj::CoUnwindAware) {
   if (containerSidecarStarted.exchange(true, std::memory_order_acquire)) {
     co_return;
   }
 
+  auto invocation = KJ_CO_MAGIC kj::CURRENT_INVOCATION;
+  KJ_DEFER(if (invocation.scopeOutcome() != kj::CoScopeOutcome::SUCCESS) {
+    containerSidecarStarted.store(false, std::memory_order_release);
+  });
+
   // We need to call destroy here, it's mandatory that this is a fresh sidecar
   // start. Maybe we lost track of it on a previous workerd restart.
   co_await destroySidecarContainer();
-
-  KJ_ON_SCOPE_FAILURE(containerSidecarStarted.store(false, std::memory_order_release));
 
   auto ipamConfig = co_await getDockerBridgeIPAMConfig();
   co_await createSidecarContainer(egressListenerPort, kj::mv(ipamConfig.subnet));
@@ -2944,12 +2947,15 @@ kj::Promise<void> ContainerClient::ensureSidecarStarted() {
   co_await readCACert();
 }
 
-kj::Promise<void> ContainerClient::ensureEgressListenerStarted(uint16_t port) {
+kj::Promise<void> ContainerClient::ensureEgressListenerStarted(uint16_t port, kj::CoUnwindAware) {
   if (egressListenerStarted.exchange(true, std::memory_order_acquire)) {
     co_return;
   }
 
-  KJ_ON_SCOPE_FAILURE(egressListenerStarted.store(false, std::memory_order_release));
+  auto invocation = KJ_CO_MAGIC kj::CURRENT_INVOCATION;
+  KJ_DEFER(if (invocation.scopeOutcome() != kj::CoScopeOutcome::SUCCESS) {
+    egressListenerStarted.store(false, std::memory_order_release);
+  });
 
   // Determine the listen address: on Linux, use the Docker bridge gateway IP
   // and fall back to loopback (Docker Desktop

@@ -314,10 +314,11 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   // Ensure the egress listener is started exactly once.
   // Uses egressListenerStarted as a guard. Called from setEgressHttp() and status().
   // If port is non-zero, binds to that specific port (for reconnecting to an existing sidecar).
-  kj::Promise<void> ensureEgressListenerStarted(uint16_t port = 0);
+  kj::Promise<void> ensureEgressListenerStarted(
+      uint16_t port = 0, kj::CoUnwindAware unwindAware = {});
   // Ensure the egress listener and sidecar container are started exactly once.
   // Uses containerSidecarStarted as a guard. Called from both start() and setEgressHttp().
-  kj::Promise<void> ensureSidecarStarted();
+  kj::Promise<void> ensureSidecarStarted(kj::CoUnwindAware unwindAware = {});
 };
 
 }  // namespace workerd::server
