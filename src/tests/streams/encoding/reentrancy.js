@@ -17,7 +17,7 @@
 // readables in both implementations: a second concurrent read parks and is
 // served in order — no divergence.
 
-import { ok, strictEqual, deepStrictEqual } from 'node:assert';
+import { ok, strictEqual, deepStrictEqual, rejects } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 // Installs an Object.prototype.then accessor for the duration of fn(). The
@@ -125,6 +125,44 @@ export const encoderChunkToStringReentersStream = {
     await drained;
     deepStrictEqual(got, ['evil', 'reentrant']);
     await closePromise;
+  },
+};
+
+export const cancelReadableFromChunkToString = {
+  async test() {
+    // Cancelling the readable from inside the chunk's toString() — the
+    // AUTOVULN-63 trigger shape (the C++ use-after-free regression itself
+    // lives in api/tests/autovuln-63-test.js). The canceling reader's read
+    // resolves done and writer.closed rejects with the ORIGINAL reason in
+    // both implementations; the in-flight write rejects with a TypeError
+    // whose message diverges (ledger #7).
+    const tes = new TextEncoderStream();
+    const writer = tes.writable.getWriter();
+    const reader = tes.readable.getReader();
+    const reason = new Error('boom');
+    const readPromise = reader.read();
+    const closedExpectation = rejects(writer.closed, (err) => err === reason);
+    let toStringCalled = false;
+    const expectedMsg = usingTsImpl
+      ? 'Cannot enqueue a chunk into a stream that is closed or has been errored'
+      : 'The readable side of this TransformStream is no longer readable.';
+    await rejects(
+      writer.write({
+        toString() {
+          toStringCalled = true;
+          reader.cancel(reason);
+          return 'after cancel';
+        },
+      }),
+      (err) => {
+        strictEqual(err.constructor, TypeError);
+        strictEqual(err.message, expectedMsg);
+        return true;
+      }
+    );
+    ok(toStringCalled);
+    strictEqual((await readPromise).done, true);
+    await closedExpectation;
   },
 };
 

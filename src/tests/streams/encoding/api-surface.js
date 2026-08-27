@@ -8,6 +8,10 @@
 // accessors. The codec-facing surface (encoding/fatal/ignoreBOM) matches.
 
 import { strictEqual, ok, throws } from 'node:assert';
+import {
+  TextEncoderStream as NodeTES,
+  TextDecoderStream as NodeTDS,
+} from 'node:stream/web';
 import { usingTsImpl } from 'which-impl';
 
 export const encoderEncoding = {
@@ -128,6 +132,14 @@ export const prototypeAccessorBrandChecks = {
         }
       );
     }
+  },
+};
+
+export const nodeStreamWebAliases = {
+  test() {
+    // node:stream/web re-exports the very same classes.
+    strictEqual(NodeTES, TextEncoderStream);
+    strictEqual(NodeTDS, TextDecoderStream);
   },
 };
 

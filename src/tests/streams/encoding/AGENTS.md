@@ -177,12 +177,13 @@ Every entry is asserted on both sides via the `which-impl` pattern.
 | 4 | Invalid TDS chunk `TypeError` message | "This TransformStream is being used as a byte stream, but received a value that is not a BufferSource." | "TextDecoderStream: chunk must be a BufferSource" | `decoderRejectsNonBufferSource` |
 | 5 | Constructor source text | native code | not | `constructorSurface` |
 | 6 | Thenable check during read resolution | `Object.prototype.then` getter consulted once per read | twice | `thenInterceptionDuringReadResolution` |
+| 7 | In-flight write rejection when the readable is cancelled mid-transform | `TypeError` "The readable side of this TransformStream is no longer readable." | `TypeError` "Cannot enqueue a chunk into a stream that is closed or has been errored" | `cancelReadableFromChunkToString` |
 
 ## Assertion catalogue
 
 | Module | Asserts |
 | --- | --- |
-| `api-surface.js` | encoding getter; toStringTag branding; inheritance (ledger #2); accessor placement (ledger #3); side stability + no own instance props; getter brand checks; constructor name/length/source (ledger #5) |
+| `api-surface.js` | encoding getter; toStringTag branding; inheritance (ledger #2); accessor placement (ledger #3); side stability + no own instance props; getter brand checks; `node:stream/web` re-exports are the same classes; constructor name/length/source (ledger #5) |
 | `construction.js` | option reflection + `utf-16` alias; fatal defaults (ledger #1) incl. explicit values and ignoreBOM default; invalid label `RangeError` with exact message; label whitespace/case/alias normalization |
 | `chunk-types.js` | TDS BufferSource acceptance across view types with offsets; detached-buffer no-op; non-BufferSource rejection (ledger #4) with errored-stream aftermath; TES symbol chunk `TypeError` errors the stream |
 | `encode-coercion.js` | ToString coercion of undefined/number/object chunks |
@@ -197,7 +198,7 @@ Every entry is asserted on both sides via the `which-impl` pattern.
 | `tee.js` | both branches observe content; single-branch demand drives the writer; EOF on both |
 | `body-integration.js` | Response/Request with the encoder's readable as body (same object, unlocked; `text()` incl. a large surrogate-split payload); the decoder's string-yielding readable as body rejects with "This ReadableStream did not return bytes." (writer side settles); `response.body.pipeThrough(tds)` decodes; byte body piped into the encoder ToString-coerces the chunks |
 | `buffer-lifecycle.js` | no write-time snapshot: mutation after `write()` is visible (with and without a parked read); a shrunk length-tracking view decodes its remaining bytes; detach-while-queued contributes nothing; shadowing/throwing metadata getters never consulted |
-| `reentrancy.js` | thenable-check interception counts (ledger #6); re-entrant `writer.close()` from the interceptor mid-delivery; the encoder's `toString()` hook re-entering with write+close (delivery order preserved, clean EOF); write from a read continuation; second concurrent read parks and is served in order (parity — contrast identity #16); sibling tee-branch cancel from a read continuation |
+| `reentrancy.js` | thenable-check interception counts (ledger #6); re-entrant `writer.close()` from the interceptor mid-delivery; the encoder's `toString()` hook re-entering with write+close (delivery order preserved, clean EOF); `readable.cancel()` from the hook (the AUTOVULN-63 trigger shape — ledger #7; the C++ use-after-free regression lives in api/tests/autovuln-63-test.js); write from a read continuation; second concurrent read parks and is served in order (parity — contrast identity #16); sibling tee-branch cancel from a read continuation |
 | `draining-reader.js` | TS only (C++ cell asserts the global's absence): `expectedLength` undefined for both streams; encoder drains as one `Uint8Array` chunk per read (HWM 0 — nothing synchronously buffered) with EOF as a separate empty batch; a tee-sibling backlog IS swept in one batched read; decoder chunks pass through the conduit as raw strings (byte validation happens at consumption) |
 | `gc-interplay.js` | a writer keeps its collected encoder wrapper operable (abort); reader+writer keep a collected decoder wrapper decoding through close (`--expose-gc`) |
 | `which-impl.js` | implementation detection |

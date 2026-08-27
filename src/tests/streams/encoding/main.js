@@ -13,6 +13,7 @@ export {
   accessorPlacement,
   sidesAreStableStreamInstances,
   prototypeAccessorBrandChecks,
+  nodeStreamWebAliases,
   constructorSurface,
 } from 'api-surface';
 
@@ -89,6 +90,7 @@ export {
   thenInterceptionDuringReadResolution,
   closeWriterFromThenInterceptorDuringRead,
   encoderChunkToStringReentersStream,
+  cancelReadableFromChunkToString,
   writeFromReadContinuation,
   secondConcurrentReadParked,
   cancelSiblingFromReadContinuation,
