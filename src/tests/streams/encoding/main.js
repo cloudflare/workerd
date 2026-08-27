@@ -55,6 +55,20 @@ export {
   fatalIncompleteAtCloseRejects,
 } from 'fatal-mode';
 
+export {
+  desiredSizeCountsQueuedChunks,
+  writesParkWithoutReadDemand,
+  readyReflectsBackpressure,
+} from 'backpressure';
+
+export {
+  closeResolvesPendingRead,
+  cancelReasonReachesWriter,
+  abortReasonReachesReader,
+} from 'propagation';
+
+export { decoderTeeBothBranches } from 'tee';
+
 export { big5StreamingDecode } from 'decode-non-utf8';
 
 export { encoderDecoderPipeline } from 'pipe-integration';
