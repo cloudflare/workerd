@@ -1104,12 +1104,16 @@ void LegacyWebSocketAdapter::ensurePumping(jsg::Lock& js) {
   if (!native.isPumping) {
     auto& context = IoContext::current();
     auto& accepted = KJ_ASSERT_NONNULL(native.state.tryGet<Accepted>());
-    auto completion = kj::newPromiseAndFulfiller<void>();
-    autoResponseStatus.maybePumpCompletion =
-        completion.promise.catch_([](kj::Exception&&) {}).fork();
-    auto promise = kj::evalNow([&, fulfiller = kj::mv(completion.fulfiller)]() mutable {
+    kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> pumpCompletion;
+    if (accepted.isHibernatable()) {
+      auto completion = kj::newPromiseAndFulfiller<void>();
+      autoResponseStatus.maybePumpCompletion =
+          completion.promise.catch_([](kj::Exception&&) {}).fork();
+      pumpCompletion = kj::mv(completion.fulfiller);
+    }
+    auto promise = kj::evalNow([&, pumpCompletion = kj::mv(pumpCompletion)]() mutable {
       return accepted.canceler.wrap(pump(context, *outgoingMessages, *accepted.ws, native,
-          autoResponseStatus, observer, kj::mv(fulfiller)));
+          autoResponseStatus, observer, kj::mv(pumpCompletion)));
     });
 
     // TODO(cleanup): We use awaitIoLegacy() here because we don't want this to count as a pending
@@ -1221,7 +1225,7 @@ kj::Promise<void> LegacyWebSocketAdapter::pump(IoContext& context,
     Native& native,
     AutoResponse& autoResponse,
     kj::Maybe<kj::Own<WebSocketObserver>>& observer,
-    kj::Own<kj::PromiseFulfiller<void>> pumpCompletion) {
+    kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> pumpCompletion) {
   KJ_ASSERT(!native.isPumping);
   native.isPumping = true;
   autoResponse.isPumping = true;
@@ -1253,8 +1257,11 @@ kj::Promise<void> LegacyWebSocketAdapter::pump(IoContext& context,
       native.outgoingAborted = true;
     }
 
-    pumpCompletion->fulfill();
-    autoResponse.maybePumpCompletion = kj::none;
+    if (pumpCompletion != kj::none) {
+      auto completion = kj::mv(KJ_ASSERT_NONNULL(pumpCompletion));
+      completion->fulfill();
+      autoResponse.maybePumpCompletion = kj::none;
+    }
   });
 
   // If we have a ongoingAutoResponse, we must co_await it here because there's a ws.send()

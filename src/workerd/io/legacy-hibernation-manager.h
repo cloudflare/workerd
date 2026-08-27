@@ -88,6 +88,9 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     // Returns an owned copy of the tags associated with this HibernatableWebSocket.
     kj::Array<kj::String> getTags();
 
+    // Returns a branch of the latest write barrier, or an already-completed promise if none exists.
+    kj::Promise<void> branchWriteBarrier();
+
     // Returns a reference to the active websocket. If the websocket is currently hibernating,
     // we have to unhibernate it first. The process moves values from the HibernatableWebSocket
     // to the api::WebSocket.

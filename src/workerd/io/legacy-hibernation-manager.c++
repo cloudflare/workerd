@@ -52,6 +52,13 @@ kj::Array<kj::String> LegacyHibernationManagerImpl::HibernatableWebSocket::getTa
   return tags;
 }
 
+kj::Promise<void> LegacyHibernationManagerImpl::HibernatableWebSocket::branchWriteBarrier() {
+  KJ_IF_SOME(promise, maybeWriteBarrier) {
+    return promise.addBranch();
+  }
+  return kj::READY_NOW;
+}
+
 jsg::Ref<api::WebSocket> LegacyHibernationManagerImpl::HibernatableWebSocket::
     getActiveOrUnhibernate(jsg::Lock& js) {
   KJ_IF_SOME(package, activeOrPackage.tryGet<api::WebSocket::HibernationPackage>()) {
@@ -60,14 +67,10 @@ jsg::Ref<api::WebSocket> LegacyHibernationManagerImpl::HibernatableWebSocket::
 
     // Share the previous send with api::WebSocket while retaining the fork in case the socket
     // hibernates again before it settles.
-    kj::Promise<void> writeBarrier = kj::READY_NOW;
-    KJ_IF_SOME(promise, this->maybeWriteBarrier) {
-      writeBarrier = promise.addBranch();
-    }
     activeOrPackage
         .init<jsg::Ref<api::WebSocket>>(api::WebSocket::hibernatableFromNative(
             js, KJ_REQUIRE_NONNULL(ws).addRef(), kj::mv(package)))
-        ->setAutoResponseStatus(autoResponseTimestamp, kj::mv(writeBarrier));
+        ->setAutoResponseStatus(autoResponseTimestamp, branchWriteBarrier());
   }
   return activeOrPackage.get<jsg::Ref<api::WebSocket>>().addRef();
 }
@@ -348,14 +351,10 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
                 // Since we had a request set, we must have and response that's sent back using the
                 // same websocket here. The sending of response is managed in web-socket to avoid
                 // possible racing problems with regular websocket messages.
-                kj::Promise<void> previous = kj::READY_NOW;
-                KJ_IF_SOME(promise, hib.maybeWriteBarrier) {
-                  previous = promise.addBranch();
-                }
-                hib.maybeWriteBarrier =
-                    hib.writeCanceler
-                        .wrap(apiWs->sendAutoResponse(kj::mv(responseCopy), ws, kj::mv(previous)))
-                        .fork();
+                hib.maybeWriteBarrier = hib.writeCanceler
+                                            .wrap(apiWs->sendAutoResponse(
+                                                kj::mv(responseCopy), ws, hib.branchWriteBarrier()))
+                                            .fork();
                 auto& promise = KJ_ASSERT_NONNULL(hib.maybeWriteBarrier);
                 apiWs->setAutoResponseStatus(hib.autoResponseTimestamp, promise.addBranch());
                 co_await promise;
@@ -366,12 +365,8 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
                   // If we do that, we have to provide it with the promise to avoid races. This can
                   // happen if we have a websocket hibernating, that unhibernates and sends a
                   // message while ws.send() for auto-response is also sending.
-                  kj::Promise<void> previous = kj::READY_NOW;
-                  KJ_IF_SOME(promise, hib.maybeWriteBarrier) {
-                    previous = promise.addBranch();
-                  }
-                  auto response =
-                      previous.then([&ws, responseCopy = kj::mv(responseCopy)]() mutable {
+                  auto response = hib.branchWriteBarrier().then(
+                      [&ws, responseCopy = kj::mv(responseCopy)]() mutable {
                     return ws.send(responseCopy.asArray()).attach(kj::mv(responseCopy));
                   });
                   hib.maybeWriteBarrier = hib.writeCanceler.wrap(kj::mv(response)).fork();

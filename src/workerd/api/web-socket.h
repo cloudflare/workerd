@@ -830,7 +830,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
       Native& native,
       AutoResponse& autoResponse,
       kj::Maybe<kj::Own<WebSocketObserver>>& observer,
-      kj::Own<kj::PromiseFulfiller<void>> pumpCompletion);
+      kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> pumpCompletion);
 
   kj::Promise<kj::Maybe<kj::Exception>> readLoop(
       kj::Maybe<kj::Own<InputGate::CriticalSection>> cs, size_t maxMessageSize);

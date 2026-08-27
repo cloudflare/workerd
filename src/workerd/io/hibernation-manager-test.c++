@@ -11,10 +11,6 @@
 // in-progress refactor work. They may go stale relative to the current
 // implementation as that work lands. The tests themselves are the source of
 // truth for the contract; comments are best-effort context.
-//
-// One test uses KJ_EXPECT_LOG to capture the remaining "another message send
-// is already in progress" assertion as an expected ERROR log. It passes while
-// the general outgoing-queue bug is present and will fail when that fix lands.
 
 #include <workerd/api/web-socket.h>
 #include <workerd/io/legacy-hibernation-manager.h>
