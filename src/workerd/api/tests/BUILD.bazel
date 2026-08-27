@@ -619,13 +619,6 @@ wd_test(
 
 wd_test(
     size = "large",
-    src = "decompression-stream-unhandled-rejection-test.wd-test",
-    args = ["--experimental"],
-    data = ["decompression-stream-unhandled-rejection-test.js"],
-)
-
-wd_test(
-    size = "large",
     src = "htmlrewriter-test.wd-test",
     args = ["--experimental"],
     data = ["htmlrewriter-test.js"],
@@ -748,18 +741,6 @@ wd_test(
     src = "persistent-stubs-test.wd-test",
     args = ["--experimental"],
     data = ["persistent-stubs-test.js"],
-)
-
-wd_test(
-    src = "ts-compression-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["ts-compression-streams-test.js"],
-)
-
-wd_test(
-    src = "compression-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["compression-streams-test.js"],
 )
 
 wd_test(

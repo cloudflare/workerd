@@ -1,0 +1,41 @@
+using Workerd = import "/workerd/workerd.capnp";
+using CompressionModules = import "compression-modules.capnp";
+
+# Runs the compression streams suite against the TypeScript implementation,
+# with byte-for-byte the same modules as compression-cpp.wd-test.
+#
+# The internal-stream flags pinned in compression-cpp.wd-test are
+# deliberately absent: the TypeScript implementation hard-codes the modern
+# behaviors, and the `@` / `@all-compat-flags` variants verify that
+# indifference with the flags all off and all on. strict_compression_checks
+# IS pinned — it configures the shared C++ codec primitive both
+# implementations wrap, not a streams behavior — as is the rejection-event
+# timing flag the unhandled-rejection regression depends on.
+# expose_draining_reader installs the internal-testing
+# ReadableStreamDrainingReader global (see draining-reader.js, added by the
+# expansion phases).
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-compression-ts",
+      worker = (
+        modules = CompressionModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "strict_compression_checks",
+          "unhandled_rejection_after_microtask_checkpoint",
+          "expose_draining_reader",
+          "experimental",
+        ],
+        bindings = [
+          ( name = "SELF", service = "streams-compression-ts" ),
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+  v8Flags = ["--expose-gc"],
+);
