@@ -378,6 +378,10 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   }
   void clearWrappers();
 
+  // Detach the V8 wrapper from every live Wrappable, returning their kj::Owns so the caller
+  // can keep them alive.
+  [[nodiscard]] kj::Vector<kj::Own<Wrappable>> resetLiveWrappableInstances();
+
   void addToFreelist(Wrappable::CppgcShim& shim);
   Wrappable::CppgcShim* allocateShim(Wrappable& wrappable);
   void clearFreelistedShims();

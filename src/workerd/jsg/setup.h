@@ -391,6 +391,58 @@ class IsolateBase {
     return ptr;
   }
 
+  bool isPreparingSnapshot() const {
+    KJ_IF_SOME(c, snapshotConfig) {
+      return c.is<MutableSnapshot>();
+    }
+    return false;
+  }
+
+  bool isStartingFromSnapshot() const {
+    KJ_IF_SOME(c, snapshotConfig) {
+      return c.is<ReadonlySharedSnapshot>();
+    }
+    return false;
+  }
+
+  SnapshotArtifact& mutableSnapshotArtifact() {
+    return *KJ_REQUIRE_NONNULL(snapshotConfig).get<MutableSnapshot>().artifact;
+  }
+
+  const SnapshotArtifact& readonlySnapshotArtifact() const {
+    return *KJ_REQUIRE_NONNULL(snapshotConfig).get<ReadonlySharedSnapshot>().artifact;
+  }
+
+  kj::Own<SnapshotArtifact> extractSnapshotArtifact() {
+    return kj::mv(KJ_REQUIRE_NONNULL(snapshotConfig).get<MutableSnapshot>().artifact);
+  }
+
+  // When preparing a snapshot: serialize the isolate with `defaultContextHandle` as the default
+  // context and fill the SnapshotArtifact slot passed at isolate creation. No-op otherwise.
+  void prepareSnapshot(v8::Global<v8::Context> defaultContextHandle);
+
+  void registerExternalReference(intptr_t addr) {
+    if (!isPreparingSnapshot()) return;
+    auto& artifact = mutableSnapshotArtifact();
+    auto& refs = artifact.externalReferences;
+    // The final slot must remain 0: V8 reads the table up to the 0 terminator.
+    KJ_REQUIRE(artifact.externalReferenceCursor < refs.size() - 1,
+        "external_references table is full; bump kExternalReferencesCapacity");
+    refs[artifact.externalReferenceCursor++] = addr;
+  }
+
+  // Enumerates every resource type's constructor-template slots (memoizedConstructor and
+  // contextConstructor, empty or not) for startup-snapshot handling, in a fixed compile-time
+  // order that PREPARE_SNAPSHOT and START_FROM_SNAPSHOT passes rely on to pair slots by
+  // position (see SnapshotArtifact::constructorTemplateIndices). Overridden by
+  // Isolate<TypeWrapper> to fan out over its type wrapper; the base implementation is a no-op.
+  virtual void iterateResourceTypeTemplates(
+      kj::FunctionParam<void(v8::Global<v8::FunctionTemplate>&)> cb) {}
+
+  // Visits every struct type's persistent handles (dictionary template + field-name handles).
+  virtual void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
+      kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictTmpl) {}
+
  private:
   template <typename TypeWrapper>
   friend class Isolate;
@@ -437,7 +489,16 @@ class IsolateBase {
   // TODO(cleanup): After v8 13.4 is fully released we can inline this into `newIsolate`
   //                and remove this member.
   std::unique_ptr<class v8::CppHeap> cppHeap;
+
+  kj::Maybe<kj::Own<v8::SnapshotCreator>> snapshotCreator;
+
   v8::Isolate* ptr;
+  // Determines how the isolate was created:
+  //  * kj::none: plain `v8::Isolate::New(params)`, no SnapshotCreator. The default.
+  //  * MutableSnapshot: an isolate constructed via `v8::SnapshotCreator`, which is used later
+  //    to serialize a startup snapshot.
+  //  * ReadonlySharedSnapshot: an isolate initialized from a previously-produced snapshot blob.
+  kj::Maybe<SnapshotConfig> snapshotConfig;
   // When true, evalAllowed is true and switching it to false is a no-op.
   bool alwaysAllowEval = false;
   bool evalAllowed = false;
@@ -592,7 +653,8 @@ class IsolateBase {
       v8::Isolate::CreateParams&& createParams,
       kj::Own<IsolateObserver> observer,
       kj::Own<ExternalStringAllocator> externalStringAllocator,
-      v8::IsolateGroup group);
+      v8::IsolateGroup group,
+      kj::Maybe<SnapshotConfig> snapshotConfig);
   ~IsolateBase() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(IsolateBase);
 
@@ -647,6 +709,13 @@ class IsolateBase {
   // this template.
   static v8::Local<v8::FunctionTemplate> getOpaqueTemplate(v8::Isolate* isolate);
 };
+
+// Free-function form of IsolateBase::registerExternalReference() for call sites that only have a
+// v8::Isolate* and cannot include setup.h (e.g. ResourceTypeBuilder in resource.h, which
+// forward-declares this function).
+inline void isolateRegisterExternalReference(v8::Isolate* isolate, intptr_t addr) {
+  IsolateBase::from(isolate).registerExternalReference(addr);
+}
 
 // If JavaScript frames are currently on the stack, returns a string representing a stack trace
 // through it. The trace is built inside `scratch` without performing any allocation. This is
@@ -723,12 +792,14 @@ class Isolate: public IsolateBase {
       kj::Own<IsolateObserver> observer,
       kj::Own<ExternalStringAllocator> externalStringAllocator = defaultExternalStringAllocator(),
       v8::Isolate::CreateParams createParams = {},
-      bool instantiateTypeWrapper = true)
+      bool instantiateTypeWrapper = true,
+      kj::Maybe<SnapshotConfig> snapshotConfig = kj::none)
       : IsolateBase(system,
             kj::mv(createParams),
             kj::mv(observer),
             kj::mv(externalStringAllocator),
-            group) {
+            group,
+            kj::mv(snapshotConfig)) {
     wrappers.resize(1);
     registerTypeHandlers();
     if (instantiateTypeWrapper) {
@@ -743,12 +814,14 @@ class Isolate: public IsolateBase {
       MetaConfiguration&& configuration,
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {},
-      bool instantiateTypeWrapper = true)
+      bool instantiateTypeWrapper = true,
+      kj::Maybe<SnapshotConfig> snapshotConfig = kj::none)
       : IsolateBase(system,
             kj::mv(createParams),
             kj::mv(observer),
             defaultExternalStringAllocator(),
-            v8::IsolateGroup::Create()) {
+            v8::IsolateGroup::Create(),
+            kj::mv(snapshotConfig)) {
     wrappers.resize(1);
     registerTypeHandlers();
     if (instantiateTypeWrapper) {
@@ -787,6 +860,24 @@ class Isolate: public IsolateBase {
 
   ~Isolate() noexcept(false) {
     dropWrappers([this]() { wrappers.clear(); });
+  }
+
+  void iterateResourceTypeTemplates(
+      kj::FunctionParam<void(v8::Global<v8::FunctionTemplate>&)> cb) override {
+    if (!hasExtraWrappers) {
+      wrappers[0]->iterateResourceTypeTemplates(cb);
+    } else {
+      KJ_FAIL_ASSERT("Not yet implemented");
+    }
+  }
+
+  void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
+      kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictTmpl) override {
+    if (!hasExtraWrappers) {
+      wrappers[0]->visitStructTypeHandles(visitName, visitDictTmpl);
+    } else {
+      KJ_FAIL_ASSERT("Not yet implemented");
+    }
   }
 
   kj::Exception unwrapException(

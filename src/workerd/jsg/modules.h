@@ -43,6 +43,11 @@ kj::Maybe<v8::Local<v8::Promise>> instantiateModule(jsg::Lock& js,
     v8::Local<v8::Module>& module,
     InstantiateModuleOptions options = InstantiateModuleOptions::DEFAULT);
 
+// Returns the address of the synthetic-module SyntheticModuleEvaluationSteps callback so it can
+// be registered in the V8 external_references array for snapshot SAVE/LOAD. The callback itself
+// lives in an anonymous namespace in modules.c++, hence this accessor.
+intptr_t getSyntheticModuleEvalRef();
+
 enum class ModuleInfoCompileOption {
   // The BUNDLE options tells the compile operation to treat the content as coming
   // from a worker bundle.
@@ -242,6 +247,9 @@ class ModuleRegistry {
   using DynamicImportCallback = Promise<Value>(jsg::Lock& js, kj::Function<Value()> handler);
 
   virtual void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) = 0;
+
+  // Visit all v8::Global handles owned by instantiated module entries.
+  virtual void visitHandlesForSnapshot(kj::FunctionParam<void(v8::Global<v8::Data>&)> fn) = 0;
 
   enum class RequireImplOptions {
     // Require returns the module namespace.
@@ -512,6 +520,56 @@ class ModuleRegistryImpl final: public ModuleRegistry {
 
   size_t size() const {
     return entries.size();
+  }
+
+  void visitHandlesForSnapshot(kj::FunctionParam<void(v8::Global<v8::Data>&)> fn) override {
+    visitHandlesForSnapshotImpl(fn);
+  }
+
+  // Visit all v8::Global handles owned by instantiated ModuleInfo entries for V8 snapshot
+  // creation. Also resets tracedHandle on each jsg::Data (via visitHandle()) so V8's snapshot
+  // creator does not report dangling TracedReferences.
+  template <typename Fn>
+  void visitHandlesForSnapshotImpl(Fn&& fn) {
+    for (auto& entry: entries) {
+      KJ_IF_SOME(info, entry->info.template tryGet<ModuleInfo>()) {
+        const_cast<ModuleInfo&>(info).module.visitHandle(fn);
+        KJ_IF_SOME(src, const_cast<ModuleInfo&>(info).maybeModuleSourceObject) {
+          src.visitHandle(fn);
+        }
+        KJ_IF_SOME(exp, const_cast<ModuleInfo&>(info).maybeMutableExports) {
+          exp.visitHandle(fn);
+        }
+        KJ_IF_SOME(synth, const_cast<ModuleInfo&>(info).maybeSynthetic) {
+          KJ_SWITCH_ONEOF(synth) {
+            KJ_CASE_ONEOF(cjs, CommonJsModuleInfo) {
+              cjs.evalFunc.visitHandlesForSnapshot(fn);
+            }
+            KJ_CASE_ONEOF(v, DataModuleInfo) {
+              v.value.visitHandle(fn);
+            }
+            KJ_CASE_ONEOF(v, TextModuleInfo) {
+              v.value.visitHandle(fn);
+            }
+            KJ_CASE_ONEOF(v, WasmModuleInfo) {
+              v.value.visitHandle(fn);
+            }
+            KJ_CASE_ONEOF(v, JsonModuleInfo) {
+              v.value.visitHandle(fn);
+            }
+            KJ_CASE_ONEOF(v, ObjectModuleInfo) {
+              v.value.visitHandle(fn);
+            }
+            KJ_CASE_ONEOF(v, CapnpModuleInfo) {
+              const_cast<CapnpModuleInfo&>(v).fileScope.visitHandle(fn);
+              for (auto& entry: const_cast<CapnpModuleInfo&>(v).topLevelDecls) {
+                entry.value.visitHandle(fn);
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   Promise<Value> resolveDynamicImport(jsg::Lock& js,

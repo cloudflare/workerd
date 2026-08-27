@@ -397,6 +397,14 @@ Lock::ModuleEvaluationScope::~ModuleEvaluationScope() noexcept(false) {
   IsolateBase::from(js.v8Isolate).leaveModuleEvaluation({});
 }
 
+bool Lock::isPreparingSnapshot() const {
+  return IsolateBase::from(v8Isolate).isPreparingSnapshot();
+}
+
+bool Lock::isStartingFromSnapshot() const {
+  return IsolateBase::from(v8Isolate).isStartingFromSnapshot();
+}
+
 void Lock::terminateNextExecution() {
   v8Isolate->TerminateExecution();
 }
