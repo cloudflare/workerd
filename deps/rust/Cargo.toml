@@ -49,6 +49,9 @@ lol_html_c_api = { git = "https://github.com/cloudflare/lol-html" }
 hashlink = "0"
 nix = "0"
 pico-args = "0"
+# Pure-Rust zstd decoder, exposed to C++ under zstd_rs_-prefixed symbols by
+# src/rust/zstd-rs. hash enables content checksum verification.
+ruzstd = { version = "0.9", default-features = false, features = ["std", "hash"] }
 ruff_python_ast = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1" }
 ruff_python_parser = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1" }
 # param_extractor depends on unbounded_depth feature

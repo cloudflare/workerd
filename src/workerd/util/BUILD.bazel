@@ -34,6 +34,19 @@ wd_cc_library(
     ],
 )
 
+# The routing layer owning the unprefixed ZSTD_* symbol names; @zstd//:zstd depends on this, so
+# every zstd consumer links it. Deliberately kj/capnp-free (see zstd-router.c++).
+wd_cc_library(
+    name = "zstd-router",
+    srcs = ["zstd-router.c++"],
+    hdrs = ["zstd-router.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/zstd-rs",
+        "@zstd//:zstd_impl",
+    ],
+)
+
 wd_cc_library(
     name = "perfetto",
     srcs = ["perfetto-tracing.c++"],
@@ -304,6 +317,7 @@ wd_cc_library(
         ":sentry",
         ":strong-bool",
         ":zlib-router",
+        ":zstd-router",
         "@capnp-cpp//src/capnp",
         "@capnp-cpp//src/kj",
     ],
@@ -463,6 +477,14 @@ kj_test(
     deps = [
         ":autogate",
         "@zlib",
+    ],
+)
+
+kj_test(
+    src = "zstd-router-test.c++",
+    deps = [
+        ":autogate",
+        "@zstd",
     ],
 )
 

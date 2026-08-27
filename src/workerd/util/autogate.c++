@@ -5,6 +5,7 @@
 
 #include <workerd/util/sentry.h>
 #include <workerd/util/zlib-router.h>
+#include <workerd/util/zstd-router.h>
 
 #include <stdlib.h>
 
@@ -19,14 +20,16 @@ kj::Maybe<Autogate> globalAutogate;
 namespace {
 constexpr auto WORKERD_PREFIX = "workerd-autogate-"_kj;
 
-// Propagates the COMPRESSION_RS gate to the zlib routing layer, which cannot depend on autogate
-// itself. Called whenever the global gate state changes; also run at static init so that
+// Propagates the COMPRESSION_RS gate to the zlib and zstd routing layers, which cannot depend on
+// autogate itself. Called whenever the global gate state changes; also run at static init so that
 // processes that never call initAutogate() (e.g. kj_test binaries under WORKERD_ALL_AUTOGATES)
 // still route accordingly.
-void syncZlibRouter() {
-  workerd_zlib_router_set_rs(Autogate::isEnabled(AutogateKey::COMPRESSION_RS));
+void syncCompressionRouters() {
+  bool enable = Autogate::isEnabled(AutogateKey::COMPRESSION_RS);
+  workerd_zlib_router_set_rs(enable);
+  workerd_zstd_router_set_rs(enable);
 }
-[[maybe_unused]] const bool zlibRouterInitialSync = (syncZlibRouter(), true);
+[[maybe_unused]] const bool compressionRoutersInitialSync = (syncCompressionRouters(), true);
 
 // Converts a SCREAMING_SNAKE_CASE string to kebab-case at compile time.
 template <size_t N>
@@ -114,12 +117,12 @@ void Autogate::initAutogate(
     return initAllAutogates();
   }
   globalAutogate = Autogate(gates);
-  syncZlibRouter();
+  syncCompressionRouters();
 }
 
 void Autogate::deinitAutogate() {
   globalAutogate = kj::none;
-  syncZlibRouter();
+  syncCompressionRouters();
 }
 
 void Autogate::initAllAutogates() {
@@ -128,7 +131,7 @@ void Autogate::initAllAutogates() {
     autogate.gates[autogateToIndex(key)] = true;
   }
   globalAutogate = kj::mv(autogate);
-  syncZlibRouter();
+  syncCompressionRouters();
 }
 
 void Autogate::initAutogateNamesForTest(
@@ -159,7 +162,7 @@ void Autogate::initAutogateForTest(std::initializer_list<AutogateKey> keys) {
     autogate.gates[autogateToIndex(key)] = true;
   }
   globalAutogate = kj::mv(autogate);
-  syncZlibRouter();
+  syncCompressionRouters();
 }
 
 }  // namespace workerd::util

@@ -25,7 +25,10 @@
     },
     {
       "name": "zstd",
-      "type": "bazel_dep"
+      "type": "bazel_dep",
+      "patches": [
+        "//:patches/zstd/0001-Split-zstd-into-a-prefixed-impl-and-a-routed-consumer.patch"
+      ]
     },
     {
       "name": "tcmalloc",
