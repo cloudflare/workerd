@@ -1,0 +1,21 @@
+src/workerd/api/web-socket.c++
+  s_d3698f92a97eab::t_b3ce6baa394084 1138,1145,1147
+src/workerd/io/hibernation-manager-test.c++
+  s_d3698f92a97eab::t_f0a03d7b76126f 15-17,607-609,620-626,629-636,638-639,641-647,654,817-819,843,845-851,853-862
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "01c1c27bef058c4c3fa9821393ea3f3c7a7c6f45",
+  "prompts": {},
+  "sessions": {
+    "s_d3698f92a97eab": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ff13c571bffeW4Fir1apASoaT5",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

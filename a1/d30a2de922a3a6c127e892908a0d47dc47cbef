@@ -1,0 +1,21 @@
+src/workerd/api/container.c++
+  s_13e891532db7a9::t_7085434a1ee194 67-70,72-73,77-80
+src/workerd/server/tests/container-client/test.js
+  s_13e891532db7a9::t_0d9ded4dc2f201 615-616,624-625,717-738,903-922
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a1d30a2de922a3a6c127e892908a0d47dc47cbef",
+  "prompts": {},
+  "sessions": {
+    "s_13e891532db7a9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_03500fc5dffex6BUwHzilgfy4N",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Andrew Martinez <amartinez@cloudflare.com>"
+    }
+  }
+}

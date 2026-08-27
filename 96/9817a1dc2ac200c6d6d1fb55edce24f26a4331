@@ -1,0 +1,35 @@
+src/workerd/api/global-scope.c++
+  s_9496b046a1a364::t_e9875fae819d24 584-591,681,722,768
+src/workerd/server/alarm-scheduler.c++
+  s_9496b046a1a364::t_e9875fae819d24 184-185,231-232,304-314
+src/workerd/jsg/exception.h
+  s_9496b046a1a364::t_e9875fae819d24 162-164
+src/workerd/server/alarm-scheduler.h
+  s_9496b046a1a364::t_e9875fae819d24 121
+src/workerd/server/alarm-scheduler-test.c++
+  s_9496b046a1a364::t_692974dfba0d4a 50-51
+  s_9496b046a1a364::t_b978dbb3e48c2b 46-49,52-54,58-65,94-95,233-268
+  s_9496b046a1a364::t_c619030d732527 269-270
+src/workerd/api/actor-state.h
+  s_9496b046a1a364::t_692974dfba0d4a 649
+  s_9496b046a1a364::t_e9875fae819d24 640-646,819-820
+src/workerd/api/actor-state.c++
+  s_9496b046a1a364::t_e9875fae819d24 1190-1194
+  s_9496b046a1a364::t_692974dfba0d4a 1178-1179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "969817a1dc2ac200c6d6d1fb55edce24f26a4331",
+  "prompts": {},
+  "sessions": {
+    "s_9496b046a1a364": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0046a268affe2zLQ3xwXN6au9J",
+        "model": "@cf/moonshotai/kimi-k2.6"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

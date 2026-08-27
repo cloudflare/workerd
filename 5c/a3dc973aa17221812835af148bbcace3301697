@@ -1,0 +1,19 @@
+src/workerd/server/server-test.c++
+  s_33f783c6810b62::t_2cefcbdd5694f4 3960-4073
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5ca3dc973aa17221812835af148bbcace3301697",
+  "prompts": {},
+  "sessions": {
+    "s_33f783c6810b62": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_02e50f771ffe7ImBWdtQsmjXOR",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Pete Bacon Darwin <pbacondarwin@cloudflare.com>"
+    }
+  }
+}

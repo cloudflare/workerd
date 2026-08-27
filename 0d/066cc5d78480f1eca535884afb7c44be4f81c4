@@ -1,0 +1,41 @@
+types/generated-snapshot/index.d.ts
+  s_0f868da28cf400::t_0a122e4e28fb01 591
+src/workerd/api/global-scope.h
+  s_0f868da28cf400::t_256dfffad72bbf 538-540,542
+src/workerd/api/global-scope.c++
+  s_0f868da28cf400::t_367c3d092e572d 813-817
+types/generated-snapshot/experimental/index.ts
+  s_0f868da28cf400::t_357406a441c6c7 594
+types/test/types/rpc.ts
+  s_0f868da28cf400::t_3cb249dd7bd085 396-400
+types/generated-snapshot/index.ts
+  s_0f868da28cf400::t_0a122e4e28fb01 593
+src/workerd/server/server.c++
+  s_0f868da28cf400::t_775afd6dfa2710 1131-1143
+types/generated-snapshot/experimental/index.d.ts
+  s_0f868da28cf400::t_357406a441c6c7 592
+src/workerd/api/tests/do-pre-shutdown-test.wd-test
+  s_0f868da28cf400::t_f578bb084e2434 22
+  s_0f868da28cf400::t_a6f1dbfcd954f0 31
+src/workerd/api/tests/do-pre-shutdown-test.js
+  s_0f868da28cf400::t_1de66abdd0d0ab 171-193
+  s_0f868da28cf400::t_ff7ac80f8e3a34 74-96
+src/workerd/io/limit-enforcer.h
+  s_0f868da28cf400::t_3a2aa1e589ebf8 180-186
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0d066cc5d78480f1eca535884afb7c44be4f81c4",
+  "prompts": {},
+  "sessions": {
+    "s_0f868da28cf400": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_012591357ffeA7cXF67TJsjeKU",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    }
+  }
+}
