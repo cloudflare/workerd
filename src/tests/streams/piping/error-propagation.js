@@ -153,3 +153,45 @@ export const destStartsErroredPreventCancel = {
     strictEqual(rs.locked, false);
   },
 };
+
+// Custom error types survive the pipe intact — the very instance, with
+// subclass name and extra properties (migrated from
+// streams-error-edge-cases-test.js, strengthened to identity asserts).
+class CustomStreamError extends Error {
+  constructor(message, code) {
+    super(message);
+    this.name = 'CustomStreamError';
+    this.code = code;
+  }
+}
+
+export const errorTypePreservationPipeTo = {
+  async test() {
+    const customError = new CustomStreamError('Custom error', 'ERR_CUSTOM');
+    const rs = new ReadableStream({
+      start(controller) {
+        controller.error(customError);
+      },
+    });
+    const ws = new WritableStream({ write() {} });
+    const reason = await rejectionOf(rs.pipeTo(ws));
+    strictEqual(reason, customError);
+    strictEqual(reason.name, 'CustomStreamError');
+    strictEqual(reason.code, 'ERR_CUSTOM');
+  },
+};
+
+export const errorTypePreservationPipeThrough = {
+  async test() {
+    const customError = new CustomStreamError('Pipe through error', 'ERR_PIPE');
+    const rs = new ReadableStream({
+      pull(controller) {
+        controller.error(customError);
+      },
+    });
+    const reader = rs.pipeThrough(new TransformStream()).getReader();
+    const reason = await rejectionOf(reader.read());
+    strictEqual(reason, customError);
+    strictEqual(reason.code, 'ERR_PIPE');
+  },
+};
