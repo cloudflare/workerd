@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
+import { WorkerEntrypoint } from 'cloudflare:workers';
 
 const key = 'basicKey';
 const body = 'content';
@@ -114,6 +115,7 @@ function buildGetResponse({ head, body, isList } = {}) {
     },
   });
 }
+
 async function compareResponse(res, { head, body } = {}, bytes) {
   // Destructuring syntax looks ugly, but gets around needing to construct HeadResponse objects(somehow?)
   const { ...obj } = await res;
@@ -136,7 +138,7 @@ async function compareResponse(res, { head, body } = {}, bytes) {
   }
 }
 
-export default {
+const testWorker = {
   // Handler for HTTP request binding makes to R2
   async fetch(request, env, ctx) {
     // We only expect PUT/Get
@@ -620,7 +622,10 @@ export default {
       // GetObject(.bytes())
       await compareResponse(env.BUCKET.get(key), { body }, true);
       // HeadObject
-      await compareResponse(env.BUCKET.head(key));
+      const headObject = await env.BUCKET.head(key);
+      await compareResponse(headObject);
+      assert.strictEqual(typeof headObject.writeHttpMetadata, 'function');
+      assert.strictEqual(typeof headObject.checksums.toJSON, 'function');
       // MultipartUploads
       {
         // CreateMultipartUpload
@@ -662,8 +667,11 @@ export default {
       }
       // DeleteObject
       {
-        await env.BUCKET.delete(key);
-        await env.BUCKET.delete([key, 'basicKey2']);
+        assert.strictEqual(await env.BUCKET.delete(key), undefined);
+        assert.strictEqual(
+          await env.BUCKET.delete([key, 'basicKey2']),
+          undefined
+        );
       }
     }
     // Ranged Reads
@@ -952,7 +960,119 @@ export default {
 
       // Also test HEAD operation to verify checksum tags
       const headResp = await env.BUCKET.head('multipleChecksums');
-      assert.ok(headResp);
+      assert.deepStrictEqual(new Uint8Array(headResp.checksums.md5), md5Buffer);
+      assert.deepStrictEqual(
+        new Uint8Array(headResp.checksums.sha1),
+        sha1Buffer
+      );
+      assert.deepStrictEqual(
+        new Uint8Array(headResp.checksums.sha256),
+        sha256Buffer
+      );
+      assert.deepStrictEqual(headResp.checksums.toJSON(), {
+        md5: '9a0364b9e99bb480dd25e1f0284c8555',
+        sha1: '2a0364b9e99bb480dd25e1f0284c855511223344',
+        sha256:
+          '3a0364b9e99bb480dd25e1f0284c8555112233445566778899aabbccddeeff00',
+      });
     }
   },
 };
+
+// The production gateway supports HTTP and named RPC on the same entrypoint. Keeping both here is
+// also necessary while operations are migrated incrementally: methods without an RPC implementation
+// continue to use fetch() even when the JSRPC compatibility flag is enabled.
+export class R2BindingEntrypoint extends WorkerEntrypoint {
+  fetch(request) {
+    return testWorker.fetch(request, this.env, this.ctx);
+  }
+
+  head(requestKey) {
+    if (requestKey === 'missing') {
+      return null;
+    }
+    if (requestKey === 'boom') {
+      throw new Error('head: no such bucket (10006)');
+    }
+
+    const result = {
+      key,
+      version: objResponse.version,
+      size: Number(objResponse.size),
+      etag: objResponse.etag,
+      uploaded: new Date(Number(objResponse.uploaded)),
+      storageClass: objResponse.storageClass,
+      checksums: {},
+      httpMetadata: {},
+      customMetadata: {},
+    };
+
+    switch (requestKey) {
+      case 'httpMetadata':
+        result.httpMetadata = httpMetaObj;
+        break;
+      case 'customMetadata':
+        result.customMetadata = customMetadata;
+        break;
+      case 'classInfrequentAccess':
+        result.storageClass = 'InfrequentAccess';
+        break;
+      case 'ssec':
+        result.ssecKeyMd5 = keyMd5;
+        break;
+      case 'multipleChecksums':
+        result.checksums = {
+          md5: md5Buffer.buffer,
+          sha1: sha1Buffer.buffer,
+          sha256: sha256Buffer.buffer,
+        };
+        break;
+      case 'ranged':
+        result.range = { offset: 10, length: 20 };
+        break;
+    }
+
+    return result;
+  }
+
+  delete(keys) {
+    if (keys === 'boom') {
+      throw new Error('delete: bad keys (10021)');
+    }
+    if (Array.isArray(keys)) {
+      assert.deepEqual(keys, [key, key + '2']);
+    } else {
+      assert.strictEqual(keys, key);
+    }
+  }
+}
+
+// These cases cover RPC boundary behavior that the HTTP-oriented fake cannot observe directly.
+// The canonical API suite remains identical for both transport configurations.
+export const jsrpcTransportTests = {
+  async test(ctrl, env, ctx) {
+    if (env.R2_TRANSPORT !== 'jsrpc') {
+      return;
+    }
+
+    assert.strictEqual(await env.BUCKET.head('missing'), null);
+
+    const ranged = await env.BUCKET.head('ranged');
+    assert.deepStrictEqual(ranged.range, { offset: 10, length: 20 });
+
+    await assert.rejects(env.BUCKET.head('boom'), (err) => {
+      assert.strictEqual(err.message, 'head: no such bucket (10006)');
+      assert.strictEqual(err.code, undefined);
+      return true;
+    });
+
+    await assert.rejects(env.BUCKET.delete('boom'), {
+      message: 'delete: bad keys (10021)',
+    });
+
+    const coerced = await env.BUCKET.head(12345);
+    assert.strictEqual(coerced.key, key);
+  },
+};
+
+export default testWorker;

@@ -1,7 +1,7 @@
 using Workerd = import "/workerd/workerd.capnp";
 
-# The JSRPC transport for R2 bindings. r2-test.wd-test covers the HTTP transport and stays as it
-# is -- both paths ship simultaneously, selected by the gate below, so both need coverage.
+# Runs the canonical R2 binding suite (r2-test.js) with the JSRPC transport enabled. The named entrypoint also
+# implements fetch because operations which have not yet migrated to JSRPC continue to use HTTP.
 #
 # Reaching the JSRPC method table needs three things to line up:
 #   - the R2_BINDINGS_JSRPC autogate (the fleet-wide kill switch)
@@ -16,14 +16,16 @@ const unitTests :Workerd.Config = (
     ( name = "r2-jsrpc-test",
       worker = (
         modules = [
-          ( name = "worker", esModule = embed "r2-jsrpc-test.js" )
+          ( name = "worker", esModule = embed "r2-test.js" )
         ],
         bindings = [
           ( name = "BUCKET",
             r2Bucket = (name = "r2-jsrpc-test", entrypoint = "R2BindingEntrypoint") ),
+          ( name = "R2_TRANSPORT", text = "jsrpc" ),
         ],
-        compatibilityFlags = ["experimental", "nodejs_compat", "r2_bindings_jsrpc",
-                              "disable_fast_jsg_struct"],
+        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
+                              "streams_enable_constructors", "r2_list_honor_include",
+                              "r2_bindings_jsrpc", "disable_fast_jsg_struct"],
       )
     ),
   ],
