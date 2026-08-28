@@ -111,3 +111,25 @@ export const sizeNotCalledForDoomedWrite = {
     strictEqual(sizeCalls, 0);
   },
 };
+
+// The user size() function is invoked with an undefined receiver and
+// exactly one argument (the chunk) in both implementations.
+export const sizeReceiverAndArity = {
+  async test() {
+    let receiver = 'unset';
+    let argCount = -1;
+    const strategy = {
+      size(...args) {
+        receiver = this === undefined ? 'undefined' : 'other';
+        argCount = args.length;
+        return 1;
+      },
+      highWaterMark: 5,
+    };
+    const ws = new WritableStream({}, strategy);
+    const writer = ws.getWriter();
+    await writer.write('x');
+    strictEqual(receiver, 'undefined');
+    strictEqual(argCount, 1);
+  },
+};

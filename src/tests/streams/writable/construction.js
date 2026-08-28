@@ -27,6 +27,15 @@ export const highWaterMarkValidated = {
     // effect on accounting is pinned in backpressure.js and, for the
     // strategy classes, the strategies suite).
     new WritableStream(undefined, { highWaterMark: 0.5 });
+    // Coercing objects go through ToNumber in both implementations.
+    const ws = new WritableStream(undefined, {
+      highWaterMark: {
+        valueOf() {
+          return 2;
+        },
+      },
+    });
+    strictEqual(ws.getWriter().desiredSize, 2);
   },
 };
 

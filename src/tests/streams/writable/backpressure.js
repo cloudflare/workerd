@@ -126,6 +126,7 @@ export const backpressureWritableSlowSink = {
     const writer = ws.getWriter();
 
     strictEqual(writer.desiredSize, 2);
+    const initialReady = writer.ready;
 
     const w1 = writer.write('a');
     strictEqual(writer.desiredSize, 1);
@@ -133,19 +134,13 @@ export const backpressureWritableSlowSink = {
     const w2 = writer.write('b');
     strictEqual(writer.desiredSize, 0);
 
-    const initialReady = writer.ready;
+    // Backpressure engaged at desiredSize 0: ready has already been
+    // replaced with a pending promise in both implementations.
+    ok(writer.ready !== initialReady, 'ready replaced at capacity');
 
     const w3 = writer.write('c');
     strictEqual(writer.desiredSize, -1);
-
-    // Backpressure can be signaled in two ways depending on implementation:
-    // 1. writer.ready returns a new pending promise (ready !== initialReady)
-    // 2. desiredSize drops to 0 or below, indicating the queue is full
-    // We accept either signal as valid backpressure indication.
-    ok(
-      writer.ready !== initialReady || writer.desiredSize <= 0,
-      'backpressure signal'
-    );
+    ok(writer.ready !== initialReady, 'ready still replaced over capacity');
 
     const results = await Promise.allSettled([w1, w2, w3]);
     strictEqual(results[0].status, 'fulfilled', 'first write should succeed');

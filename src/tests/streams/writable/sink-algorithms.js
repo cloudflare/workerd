@@ -452,3 +452,92 @@ export const writableStreamSizeAlgorithm = {
     }
   },
 };
+
+// The sink dictionary is converted once at construction: hook property
+// getters are read exactly once regardless of how many times the hooks
+// later run (parity).
+export const sinkHooksCapturedAtConstruction = {
+  async test() {
+    let writeGets = 0;
+    let closeGets = 0;
+    const sink = {};
+    Object.defineProperty(sink, 'write', {
+      get() {
+        writeGets++;
+        return () => {};
+      },
+    });
+    Object.defineProperty(sink, 'close', {
+      get() {
+        closeGets++;
+        return () => {};
+      },
+    });
+    const ws = new WritableStream(sink);
+    const writer = ws.getWriter();
+    await writer.write('a');
+    await writer.write('b');
+    await writer.close();
+    strictEqual(writeGets, 1);
+    strictEqual(closeGets, 1);
+  },
+};
+
+// A sink write() returning a rejected promise on a later write errors the
+// stream: that write, a replaced ready, and closed all reject with the
+// sink's error (parity; the WPT bad-underlying-sinks "second write"
+// case).
+export const secondWriteRejectionErrorsStream = {
+  async test() {
+    let count = 0;
+    const ws = new WritableStream({
+      write() {
+        count++;
+        if (count === 2) return Promise.reject(new Error('bad2'));
+        return Promise.resolve();
+      },
+    });
+    const writer = ws.getWriter();
+    await writer.write('one');
+    const readyBefore = writer.ready;
+    await rejects(writer.write('two'), { message: 'bad2' });
+    ok(readyBefore !== writer.ready, 'ready must be replaced');
+    await rejects(writer.ready, { message: 'bad2' });
+    await rejects(writer.closed, { message: 'bad2' });
+  },
+};
+
+// After start() throws, the sink's write/close hooks are never invoked in
+// either implementation, no matter how the failure surfaced (constructor
+// throw vs deferred rejection; the WPT start.any case).
+export const sinkHooksNotCalledAfterStartThrow = {
+  async test() {
+    let writeCalled = false;
+    let closeCalled = false;
+    let ws;
+    try {
+      ws = new WritableStream({
+        start() {
+          throw new Error('boom');
+        },
+        write() {
+          writeCalled = true;
+        },
+        close() {
+          closeCalled = true;
+        },
+      });
+      ok(!usingTsImpl, 'only the C++ constructor captures the throw');
+    } catch {
+      ok(usingTsImpl, 'only the TypeScript constructor rethrows');
+    }
+    if (ws) {
+      const writer = ws.getWriter();
+      await writer.write('x').catch(() => {});
+      await writer.close().catch(() => {});
+      await writer.closed.catch(() => {});
+    }
+    strictEqual(writeCalled, false);
+    strictEqual(closeCalled, false);
+  },
+};
