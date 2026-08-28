@@ -14,7 +14,7 @@
       "owner": "google",
       "repo": "boringssl",
       "repo_name": "ssl",
-      "freeze_version": "0.20251002.0",
+      "freeze_version": "0.20260813.0",
       "patches": [
         "//:patches/boringssl/0001-Expose-libdecrepit-so-NodeJS-can-use-it-for-ncrypto.patch"
       ]
