@@ -33,6 +33,7 @@ behavior-parity (messages aside).
 | 16 | invalidated byobRequest message | 'This ReadableStreamBYOBRequest has been invalidated.' | 'This BYOB request has been invalidated' | `readableStreamByteRespond` |
 | 17 | default-read delivery of a multi-chunk queue | COALESCES all queued chunks into one read | chunk-by-chunk (spec) | `byteDesiredSizeAccounting` |
 | 18 | buffer-hazard messages (read detached view, respond after view detach, respondWithNewView foreign buffer, WASM Memory) | own texts | own texts (behavior parity everywhere) | `buffer-lifecycle.js` |
+| 19 | close() with a pending UNFILLED BYOB read | read resolves done with an empty view | read PENDS FOREVER while close() succeeds (bounded; the #12 defect family without any min) — drain loops must close WITH the last enqueue, never against a parked empty read | `closeWithPendingUnfilledByobRead` |
 
 Parity worth noting (probed, pinned): byte hwm defaults to 0 with NO
 automatic pull; pull-throw and error-then-throw identity; enqueue
@@ -50,6 +51,13 @@ ends (enqueue detaches → resize throws); WebAssembly.Memory rejected
 everywhere; the BYOB view-type matrix (byob-reader.js, migrated); GC
 liveness of pending BYOB reads and byobRequests; SELF round-trips with
 BYOB consumption, readAtLeast on echoed bodies, Response.bytes().
+
+The ts cell additionally sets the internal-testing
+`expose_draining_reader` flag, installing the
+`ReadableStreamDrainingReader` global — the bulk-drain conduit the C++
+bridge drives to consume TypeScript streams (conduit basics in the
+identity suite's draining-reader.js). No such global exists under the
+C++ implementation; `draining-reader.js` asserts both sides.
 
 ## Compatibility flags
 
@@ -80,6 +88,8 @@ BYOB consumption, readAtLeast on echoed bodies, Response.bytes().
 | `js-compat.js` | ledger #17; byte halves of the mixed streams-js-test tests (closed promise, cancel reads, locked ops, globals) |
 | `flag-no-auto-allocate.js` | the flag cell (migrated streams-no-auto-allocate-test) |
 | `legacy-constructors.js` / `legacy-nodetach.js` | the flags table's legacy windows |
+| `draining-reader.js` | TS only (C++ cell asserts the global's absence): a queued byte backlog plus the close sentinel swept in one batched read with chunks INTACT (no coalescing); the conduit drives pull with byobRequest null (ledger #5/#6 shape); expectedLength undefined; error/cancel propagation |
+| `data-volumes.js` | byte-transfer volumes 64 B / 64 KiB / 1 MiB / 8 MiB via default and BYOB readers (incl. mismatched view/enqueue granularity), continuous prime-modulus pattern verified byte-exact; the source closes WITH its last enqueue (see ledger #19) |
 
 Consumed sources (deleted): streams-js-test.js (value halves were
 already covered by the readable suite), streams-tee-edge-cases-test.js,

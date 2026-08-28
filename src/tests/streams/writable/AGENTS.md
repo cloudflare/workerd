@@ -97,4 +97,5 @@ promises (they resolve with undefined).
 | `gc.js` | pending write survives gc() with all user refs dropped (--expose-gc) |
 | `legacy-ctor-gate.js` | fully-unflagged: ctor Error + absent controller global |
 | `legacy-writer.js` | pre-flag writer semantics (see Compatibility flags) |
+| `data-volumes.js` | write-side volumes: 4096 × 16 B writes, single 1 MiB write, 1 MiB / 8 MiB chunked with writer.ready honored; the sink verifies the continuous prime-modulus pattern as chunks arrive |
 | `which-impl.js` | implementation + pedantic detection |

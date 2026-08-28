@@ -51,6 +51,13 @@ identity. controller.error() after a transformer hook throw is a no-op
 on both sides (identity preserved). Only the ops in #10-#12 genuinely
 diverge.
 
+The ts cell additionally sets the internal-testing
+`expose_draining_reader` flag, installing the
+`ReadableStreamDrainingReader` global — the bulk-drain conduit the C++
+bridge drives to consume TypeScript streams (conduit basics in the
+identity suite's draining-reader.js). No such global exists under the
+C++ implementation; `draining-reader.js` asserts both sides.
+
 ## Compatibility flags
 
 | Flag (enable date) | Pinned in main cells | Unflagged side guarded by |
@@ -77,4 +84,6 @@ diverge.
 | `roundtrip.js` | JS transform → ITS pipe does not hang (regression) |
 | `gc.js` | write→read handoff survives gc() with the stream dropped (--expose-gc) |
 | `legacy-identity-fallback.js` / `legacy-backpressure.js` | see Compatibility flags |
+| `draining-reader.js` | TS only (C++ cell asserts the global's absence): writes flow through the transformer into conduit reads; a readable-side backlog plus close sentinel swept in one batch; flush() output rides the final batch; expectedLength undefined; transformer errors propagate |
+| `data-volumes.js` | volumes through JS transformers with concurrent producer/consumer: 1 MiB passthrough, 8 MiB XOR (proves every byte passed through the transformer), 4096-chunk value mapping |
 | `which-impl.js` / `helpers.js` | implementation detection; consume helpers |
