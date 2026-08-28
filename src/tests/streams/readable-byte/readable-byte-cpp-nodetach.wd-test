@@ -1,0 +1,24 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The pre-2021-11-10 compatibility window (the default test variant's
+# 2000-01-01 date) with constructors enabled but the
+# streams_byob_reader_detaches_buffer and internal_stream_byob_return_
+# view flags off: those flags govern native streams only, so JS-backed
+# byte streams detach unconditionally while native-body reads keep the
+# caller's buffer and resolve done with undefined. The BUILD rule
+# disables the @all-compat-flags variant, which would turn both flags
+# back on.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-readable-byte-cpp-nodetach",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-nodetach-main.js"),
+          (name = "legacy-nodetach", esModule = embed "legacy-nodetach.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+      )
+    ),
+  ],
+);

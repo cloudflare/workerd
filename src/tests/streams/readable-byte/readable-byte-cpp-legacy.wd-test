@@ -1,0 +1,21 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Fully-unflagged legacy cell (C++ only): byte-stream construction is
+# gated behind streams_enable_constructors, and native-body BYOB reads
+# keep the pre-flag semantics (no caller-buffer detach; done reads
+# resolve undefined). The BUILD rule disables the @all-compat-flags
+# variant, which would turn the omitted flags back on.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-readable-byte-cpp-legacy",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-main.js"),
+          (name = "legacy-constructors", esModule = embed "legacy-constructors.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);

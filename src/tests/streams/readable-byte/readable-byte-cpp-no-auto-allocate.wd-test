@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The experimental streams_no_default_auto_allocate_chunk_size flag on
+# the C++ implementation: default reads no longer synthesize an
+# auto-allocated byobRequest (the spec behavior, and what the TypeScript
+# implementation always does).
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-readable-byte-cpp-no-auto-allocate",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "flag-no-auto-allocate-main.js"),
+          (name = "flag-no-auto-allocate", esModule = embed "flag-no-auto-allocate.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "streams_no_default_auto_allocate_chunk_size",
+          "experimental",
+        ],
+      )
+    ),
+  ],
+);
