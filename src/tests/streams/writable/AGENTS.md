@@ -40,7 +40,7 @@ the abort reason).
 | 5 | sync start() throw | captured; stream errored, writes reject | escapes the constructor (spec) | `newWritableStreamStartError` |
 | 6 | abort() on an errored stream | rejects with the stored error | fulfills with undefined (spec) | `newWritableStreamAbortError` |
 | 6b | concurrent aborts | a fresh promise per abort() call | the same promise for both (spec); both fulfill undefined | `concurrentAbortPromiseIdentity` |
-| 7 | startedness (see above) | sync write→abort: sink runs, write fulfills; a same-turn chunk mutation after write() is NOT seen by the sink | write still queued: rejected with abort reason; the mutation IS seen | `writableStreamAbortWhileWriting`, `writableStreamAbortWriteClosePending`, `writableStreamPromisesResolvedInOrder`, `writableStreamCloseThrowRejectsPromises`, `chunkMutationVisibility` |
+| 7 | startedness (see above) | sync write→abort: sink runs, write fulfills; a same-turn mutation/detach/resize of the chunk's buffer after write() is NOT observed by the sink | write still queued: rejected with abort reason; the buffer change IS observed | `writableStreamAbortWhileWriting`, `writableStreamAbortWriteClosePending`, `writableStreamPromisesResolvedInOrder`, `writableStreamCloseThrowRejectsPromises`, buffer-lifecycle.js (`chunkMutationVisibility`, `detachAfterWriteTiming`, `resizableGrowAfterWrite`, `resizableShrinkOutOfBounds`) |
 | 8 | close hook racing an immediate abort | close hook runs; close+abort reject with its error | close still queued: hook never runs, close rejects with abort reason, abort fulfills | `writableStreamCloseThrowRejectsPromises` |
 | 9 | queue totals | size() → uint64 (fractions truncate; NaN/negative/±Infinity → TypeError); desiredSize narrowed through `int` (wraps past 2^31) | double arithmetic per spec; invalid size → RangeError "Invalid chunk size" | `floatingPointQueueTotals`, `fractionalSizeTruncation`, `invalidSizeReturnRejects` |
 | 10 | signal.reason for reasonless abort() | undefined (pedantic_wpt: AbortError DOMException) | AbortError DOMException (spec) | `abortSignalReason` |
@@ -86,7 +86,8 @@ promises (they resolve with undefined).
 | `api-surface.js` | writable globals exist; controller not constructable; bare ctor works (full IDL shape is WPT's) |
 | `construction.js` | ledger #1–#5, #12; fractional and ToNumber-coerced hwm accepted |
 | `sink-algorithms.js` | which sink hooks run with what arguments/controller; sync+async hook errors surface on writer promises (#5, #6); size() consulted per write; hook getters read once; second-write rejection fan-out; hooks silent after start throw |
-| `write-semantics.js` | chunk identity (subarrays, any JS value via Object.is, detached ArrayBuffers); mutation visibility (#7); multiple pending writes; settlement ordering incl. under abort (#7) |
+| `write-semantics.js` | chunk identity (subarrays, any JS value via Object.is); multiple pending writes; settlement ordering incl. under abort (#7) |
+| `buffer-lifecycle.js` | chunks never copied/validated: already-detached AB accepted (byteLength 0); post-write() mutation, detach, resizable grow, and shrink-out-of-bounds all observed per the startedness model (#7); size() runs inside write() so queue totals are immune to later detach |
 | `close-semantics.js` | close-throw promise fan-out vs abort (#7, #8); double close rejects TypeError |
 | `abort-semantics.js` | migrated abort lifecycle: reason propagation, signal event, persistent errored state, in-flight sequencing, terminal-state interactions (#7) |
 | `abort-matrix.js` | probed parity matrix (see above) + signal reason (#10) + concurrent-abort identity (#6b) |

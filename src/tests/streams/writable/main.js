@@ -38,9 +38,16 @@ export {
   writableStreamWriteSubarray,
   writableStreamWriteAny,
   writableStreamPromisesResolvedInOrder,
+} from 'write-semantics';
+
+export {
   chunkMutationVisibility,
   detachedBufferChunkPassesThrough,
-} from 'write-semantics';
+  detachAfterWriteTiming,
+  resizableGrowAfterWrite,
+  resizableShrinkOutOfBounds,
+  sizeRecordedBeforeDetach,
+} from 'buffer-lifecycle';
 
 export {
   writableStreamCloseThrowRejectsPromises,
