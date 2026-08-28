@@ -160,8 +160,12 @@ pub unsafe extern "C" fn brotli_rs_BrotliEncoderCompressStream(
         if !total_out.is_null() {
             *total_out = to.unwrap_or(0);
         }
-        *next_in = (*next_in).add(input_offset);
-        *next_out = (*next_out).add(output_offset);
+        if input_offset != 0 {
+            *next_in = (*next_in).add(input_offset);
+        }
+        if output_offset != 0 {
+            *next_out = (*next_out).add(output_offset);
+        }
         c_int::from(result)
     }
 }
@@ -303,8 +307,12 @@ pub unsafe extern "C" fn brotli_rs_BrotliDecoderDecompressStream(
             total_out,
             &mut *state,
         );
-        *next_in = (*next_in).add(input_offset);
-        *next_out = (*next_out).add(output_offset);
+        if input_offset != 0 {
+            *next_in = (*next_in).add(input_offset);
+        }
+        if output_offset != 0 {
+            *next_out = (*next_out).add(output_offset);
+        }
         decoder_result(&result)
     }
 }

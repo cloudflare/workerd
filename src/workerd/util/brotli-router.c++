@@ -19,8 +19,8 @@
 
 extern "C" {
 
-typedef void* (*brotli_alloc_func)(void* opaque, size_t size);
-typedef void (*brotli_free_func)(void* opaque, void* address);
+using brotli_alloc_func = void* (*)(void* opaque, size_t size);
+using brotli_free_func = void (*)(void* opaque, void* address);
 
 #define BROTLI_ROUTER_API(V)                                                                       \
   V(void*, BrotliEncoderCreateInstance,                                                            \
