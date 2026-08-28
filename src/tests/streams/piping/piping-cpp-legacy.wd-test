@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Fully-unflagged legacy cell (C++ only): the JS-backed pipe endpoints
+# are gated behind streams_enable_constructors, while native→native
+# piping works. The BUILD rule disables the @all-compat-flags variant,
+# which would turn the omitted flags back on.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-piping-cpp-legacy",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-main.js"),
+          (name = "legacy-pipes", esModule = embed "legacy-pipes.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);

@@ -14,15 +14,6 @@
 
 import { strictEqual, ok, rejects, deepStrictEqual } from 'node:assert';
 
-// Custom error class for testing error type preservation
-class CustomStreamError extends Error {
-  constructor(message, code) {
-    super(message);
-    this.name = 'CustomStreamError';
-    this.code = code;
-  }
-}
-
 // Test error thrown after partial consumption of stream
 // Inspired by: Bun test/js/bun/spawn/spawn-stdin-readable-stream-edge-cases.test.ts (exception in pull)
 export const errorDuringPartialConsumption = {
@@ -54,57 +45,6 @@ export const errorDuringPartialConsumption = {
     await rejects(reader.read(), { message: 'Error after 3 chunks' });
 
     await rejects(reader.read(), { message: 'Error after 3 chunks' });
-  },
-};
-
-// Test that custom error types are preserved through pipeTo
-// Inspired by: Deno tests/unit/streams_test.ts (cancel propagation with "resource closed" reason)
-export const errorTypePreservationPipeTo = {
-  async test() {
-    const customError = new CustomStreamError('Custom error', 'ERR_CUSTOM');
-
-    const rs = new ReadableStream({
-      start(controller) {
-        controller.error(customError);
-      },
-    });
-
-    const ws = new WritableStream({
-      write() {},
-    });
-
-    await rejects(
-      async () => {
-        await rs.pipeTo(ws);
-      },
-      { message: 'Custom error' }
-    );
-  },
-};
-
-// Test that custom error types are preserved through pipeThrough
-// Inspired by: Deno tests/unit/streams_test.ts (error propagation tests)
-export const errorTypePreservationPipeThrough = {
-  async test() {
-    const customError = new CustomStreamError('Pipe through error', 'ERR_PIPE');
-
-    const rs = new ReadableStream({
-      pull(controller) {
-        controller.error(customError);
-      },
-    });
-
-    const transform = new TransformStream();
-    const result = rs.pipeThrough(transform);
-
-    const reader = result.getReader();
-
-    await rejects(
-      async () => {
-        await reader.read();
-      },
-      { message: 'Pipe through error' }
-    );
   },
 };
 

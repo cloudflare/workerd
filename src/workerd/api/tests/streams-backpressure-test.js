@@ -135,57 +135,6 @@ export const backpressureReadableHwmLarge = {
   },
 };
 
-// Test backpressure propagation through pipe chain
-// Inspired by: Bun test/js/web/streams/streams.test.js (pipeTo/pipeThrough tests)
-export const backpressurePipeChain = {
-  async test() {
-    let sourcePullCount = 0;
-    const MAX_CHUNKS = 5;
-
-    const source = new ReadableStream(
-      {
-        pull(c) {
-          sourcePullCount++;
-          if (sourcePullCount <= MAX_CHUNKS) {
-            c.enqueue(sourcePullCount);
-          } else {
-            c.close();
-          }
-        },
-      },
-      { highWaterMark: 2 }
-    );
-
-    const transform = new TransformStream(
-      {
-        transform(chunk, controller) {
-          controller.enqueue(chunk * 2);
-        },
-      },
-      { highWaterMark: 1 },
-      { highWaterMark: 1 }
-    );
-
-    const chunks = [];
-    const dest = new WritableStream(
-      {
-        async write(chunk) {
-          chunks.push(chunk);
-          // Slow consumer
-          await scheduler.wait(5);
-        },
-      },
-      { highWaterMark: 1 }
-    );
-
-    await source.pipeThrough(transform).pipeTo(dest);
-
-    strictEqual(chunks.length, MAX_CHUNKS, 'all chunks received');
-    strictEqual(chunks[0], 2, 'first chunk transformed');
-    strictEqual(chunks[4], 10, 'last chunk transformed');
-  },
-};
-
 // Test byte stream highWaterMark is measured in bytes, not chunks
 // Inspired by: Bun test/js/node/test/parallel/test-whatwg-readablebytestream.js
 export const backpressureByteStreamHwm = {
