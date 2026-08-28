@@ -544,7 +544,7 @@ class R2Bucket: public jsg::Object {
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
 
   // JSRPC equivalents of the above, selected by JSG_RESOURCE_TYPE when the
-  // R2_BINDINGS_JSRPC autogate and the r2_bindings_jsrpc compatibility flag are
+  // R2_BINDINGS_JSRPC autogate and the r2_binding_jsrpc compatibility flag are
   // both on. They dispatch to the gateway's R2BindingEntrypoint instead of
   // synthesising an HTTP request, then rebuild the public result types from the
   // plain data JSRPC delivers.
@@ -558,14 +558,15 @@ class R2Bucket: public jsg::Object {
   // TypeHandler -- and TypeHandlers are only injected into typed signatures.
   jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> headRpc(jsg::Lock& js,
       kj::String key,
-      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropType,
-      const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String)>>& fnType,
-      const jsg::TypeHandler<kj::Maybe<HeadResultRpc>>& resultType);
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String)>>& headFnHandler,
+      const jsg::TypeHandler<jsg::Promise<kj::Maybe<HeadResultRpc>>>& headResultHandler);
   jsg::Promise<void> deleteRpc(jsg::Lock& js,
       kj::OneOf<kj::String, kj::Array<kj::String>> keys,
-      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropType,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
       const jsg::TypeHandler<
-          jsg::Function<jsg::Value(kj::OneOf<kj::String, kj::Array<kj::String>>)>>& fnType);
+          jsg::Function<jsg::Value(kj::OneOf<kj::String, kj::Array<kj::String>>)>>& deleteFnHandler,
+      const jsg::TypeHandler<jsg::Promise<void>>& deleteResultHandler);
   jsg::Promise<ListResult> list(jsg::Lock& js,
       jsg::Optional<ListOptions> options,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
@@ -691,9 +692,16 @@ class R2Bucket: public jsg::Object {
   kj::Own<kj::HttpClient> getHttpClient(IoContext& context, TraceContext& traceContext);
 
   // Look up a method on the gateway's entrypoint over this binding's subrequest
-  // channel. Which entrypoint that resolves to is decided by the channel's
-  // configuration, not here -- a JSRPC call carries no entrypoint name.
+  // channel.
   jsg::Ref<JsRpcProperty> getRpcMethod(jsg::Lock& js, kj::StringPtr methodName);
+
+  template <typename Result, typename... Args>
+  jsg::Promise<Result> callRpcMethod(jsg::Lock& js,
+      kj::StringPtr methodName,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(Args...)>>& fnHandler,
+      const jsg::TypeHandler<jsg::Promise<Result>>& resultPromiseHandler,
+      Args... args);
 
   friend class R2MultipartUpload;
 };

@@ -5,7 +5,7 @@ using Workerd = import "/workerd/workerd.capnp";
 #
 # Reaching the JSRPC method table needs three things to line up:
 #   - the R2_BINDINGS_JSRPC autogate (the fleet-wide kill switch)
-#   - the r2_bindings_jsrpc compatibility flag, which is $experimental and so also needs
+#   - the r2_binding_jsrpc compatibility flag, which is $experimental and so also needs
 #     "experimental" in the flag list here
 #   - a binding that targets the named entrypoint the gateway exposes
 #
@@ -25,7 +25,7 @@ const unitTests :Workerd.Config = (
         ],
         compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
                               "streams_enable_constructors", "r2_list_honor_include",
-                              "r2_bindings_jsrpc", "disable_fast_jsg_struct"],
+                              "r2_binding_jsrpc", "disable_fast_jsg_struct"],
       )
     ),
   ],

@@ -136,7 +136,7 @@ namespace workerd::util {
      leaving the JS-visible pull() ordering unchanged. */                                          \
   V(STREAM_CONTROLLER_SYNC_FAST_PATHS)                                                             \
   /* Fleet-wide kill switch for the R2 bindings JSRPC transport. The JSRPC method table is only    \
-     selected when this is enabled AND the worker carries the r2_bindings_jsrpc compatibility      \
+     selected when this is enabled AND the worker carries the r2_binding_jsrpc compatibility       \
      flag, which is what restricts it to allowlisted accounts. */                                  \
   V(R2_BINDINGS_JSRPC)
 // clang-format on

@@ -546,11 +546,27 @@ jsg::Promise<jsg::Value> normalizeRpcPromise(jsg::Lock& js, jsg::Value rpcPromis
 }
 }  // namespace
 
+template <typename Result, typename... Args>
+jsg::Promise<Result> R2Bucket::callRpcMethod(jsg::Lock& js,
+    kj::StringPtr methodName,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(Args...)>>& fnHandler,
+    const jsg::TypeHandler<jsg::Promise<Result>>& resultPromiseHandler,
+    Args... args) {
+  auto rpcProp = getRpcMethod(js, methodName);
+  auto wrappedProp = rpcPropHandler.wrap(js, kj::mv(rpcProp));
+  auto fn = KJ_ASSERT_NONNULL(fnHandler.tryUnwrap(js, wrappedProp));
+
+  auto rpcPromise = fn(js, kj::mv(args)...);
+  auto normalizedPromise = normalizeRpcPromise(js, kj::mv(rpcPromise));
+  return KJ_ASSERT_NONNULL(resultPromiseHandler.tryUnwrap(js, normalizedPromise.consumeHandle(js)));
+}
+
 jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::headRpc(jsg::Lock& js,
     kj::String key,
-    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropType,
-    const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String)>>& fnType,
-    const jsg::TypeHandler<kj::Maybe<HeadResultRpc>>& resultType) {
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String)>>& headFnHandler,
+    const jsg::TypeHandler<jsg::Promise<kj::Maybe<HeadResultRpc>>>& headResultHandler) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
     TraceContext traceContext = context.makeUserTraceSpan("r2_head"_kjc);
@@ -565,19 +581,13 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::headRpc(jsg::L
     }
     traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
 
-    auto rpcProp = getRpcMethod(js, "head"_kj);
-    auto fn = JSG_REQUIRE_NONNULL(fnType.tryUnwrap(js, rpcPropType.wrap(js, kj::mv(rpcProp))),
-        Error, "R2 binding entrypoint's head method is not callable");
-
-    return normalizeRpcPromise(js, fn(js, kj::mv(key)))
+    return callRpcMethod<kj::Maybe<HeadResultRpc>>(
+        js, "head"_kj, rpcPropHandler, headFnHandler, headResultHandler, kj::mv(key))
         .then(js,
-            [&resultType, traceContext = kj::mv(traceContext)](
-                jsg::Lock& js, jsg::Value value) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
+            [traceContext = kj::mv(traceContext)](jsg::Lock& js,
+                kj::Maybe<HeadResultRpc> parsed) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
       // A missing object is null, not an error: the gateway maps the 404 that
       // R2Result::objectNotFound() used to represent onto a null return.
-      auto parsed = JSG_REQUIRE_NONNULL(resultType.tryUnwrap(js, value.getHandle(js)), Error,
-          "R2 binding entrypoint returned an unrecognized head result");
-
       KJ_IF_SOME(rpc, parsed) {
         auto result = js.alloc<HeadResult>(kj::mv(rpc.key), kj::mv(rpc.version), rpc.size,
             kj::mv(rpc.etag),
@@ -601,9 +611,10 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::headRpc(jsg::L
 
 jsg::Promise<void> R2Bucket::deleteRpc(jsg::Lock& js,
     kj::OneOf<kj::String, kj::Array<kj::String>> keys,
-    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropType,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
     const jsg::TypeHandler<jsg::Function<jsg::Value(kj::OneOf<kj::String, kj::Array<kj::String>>)>>&
-        fnType) {
+        deleteFnHandler,
+    const jsg::TypeHandler<jsg::Promise<void>>& deleteResultHandler) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
     TraceContext traceContext = context.makeUserTraceSpan("r2_delete"_kjc);
@@ -625,14 +636,11 @@ jsg::Promise<void> R2Bucket::deleteRpc(jsg::Lock& js,
       }
     }
 
-    auto rpcProp = getRpcMethod(js, "delete"_kj);
-    auto fn = JSG_REQUIRE_NONNULL(fnType.tryUnwrap(js, rpcPropType.wrap(js, kj::mv(rpcProp))),
-        Error, "R2 binding entrypoint's delete method is not callable");
-
     // The result is discarded, matching delete_: a missing key is success, and per-key failures in
     // a batch delete are reported in a body the binding has never read.
-    return normalizeRpcPromise(js, fn(js, kj::mv(keys)))
-        .then(js, [traceContext = kj::mv(traceContext)](jsg::Lock&, jsg::Value) mutable {});
+    auto promise = callRpcMethod<void>(
+        js, "delete"_kj, rpcPropHandler, deleteFnHandler, deleteResultHandler, kj::mv(keys));
+    return context.attachSpans(js, kj::mv(promise), kj::mv(traceContext));
   });
 }
 
