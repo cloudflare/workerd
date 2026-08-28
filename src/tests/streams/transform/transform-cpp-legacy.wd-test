@@ -1,0 +1,22 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Fully-unflagged legacy cell (C++ only): without
+# transformstream_enable_standard_constructor the TransformStream
+# constructor ignores its arguments (logging a one-time warning when any
+# are given) and returns the internal identity pipe. See
+# legacy-identity-fallback.js. The BUILD rule disables the
+# @all-compat-flags variant, which would turn the omitted flags back on.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-transform-cpp-legacy",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-main.js"),
+          (name = "legacy-identity-fallback", esModule = embed "legacy-identity-fallback.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);
