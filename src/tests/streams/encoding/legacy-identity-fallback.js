@@ -76,6 +76,22 @@ export const legacyDecoderDoesNotDecode = {
   },
 };
 
+export const legacyFatalDefaultsTrueWithOptionsBag = {
+  test() {
+    // Without pedantic_wpt, an options bag lacking `fatal` defaults it to
+    // TRUE (the spec says false); with no bag at all the default is false.
+    // The option mapping runs in the TextDecoderStream constructor
+    // regardless of the identity-stream fallback.
+    strictEqual(new TextDecoderStream().fatal, false);
+    strictEqual(new TextDecoderStream('utf-8', {}).fatal, true);
+    strictEqual(
+      new TextDecoderStream('utf-8', { ignoreBOM: true }).fatal,
+      true
+    );
+    strictEqual(new TextDecoderStream('utf-8', { fatal: false }).fatal, false);
+  },
+};
+
 export const legacyDecoderInvalidChunkThrowsSynchronously = {
   async test() {
     const tds = new TextDecoderStream();
