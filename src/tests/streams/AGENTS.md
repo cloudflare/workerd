@@ -139,8 +139,6 @@ configs' flag lists).
 - `src/workerd/api/tests/ts-webstreams-test.js` — TypeScript-impl
   internals (native/buffer/iterable bodies ARE ts streams, pumpTo);
   single-implementation by nature.
-- `src/workerd/api/tests/pipe-write-special-buffer-test.js` —
-  SharedArrayBuffer/resizable-buffer pipe writes (special env).
 - Security regression singles in `src/workerd/api/tests/`
   (streams-byob-close-reentry, streams-byob-concurrent-readatleast,
   streams-byte-cancel-uaf, streams-byte-handlePush-uaf,
