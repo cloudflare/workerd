@@ -237,3 +237,115 @@ export const errorTypePreservationPipeThrough = {
     strictEqual(reason.code, 'ERR_PIPE');
   },
 };
+
+// The WPT 'starts errored … abort promise' residue: the destination's
+// abort() hook returns a PROMISE. Fulfilled: consumed silently, the
+// pipe still rejects with the SOURCE error. Rejected: per spec the
+// shutdown action's failure REPLACES the rejection reason.
+export const destAbortPromiseStates = {
+  async test() {
+    // Fulfilled abort promise.
+    {
+      const err = new Error('src-err');
+      let abortCalled = false;
+      const rs = new ReadableStream({
+        start(c) {
+          c.error(err);
+        },
+      });
+      const ws = new WritableStream({
+        abort() {
+          abortCalled = true;
+          return Promise.resolve('ignored');
+        },
+      });
+      strictEqual(await rejectionOf(rs.pipeTo(ws)), err);
+      strictEqual(abortCalled, true);
+    }
+    // Rejected abort promise.
+    {
+      const err = new Error('src-err');
+      const abortErr = new Error('abort-failed');
+      const rs = new ReadableStream({
+        start(c) {
+          c.error(err);
+        },
+      });
+      const ws = new WritableStream({
+        abort() {
+          return Promise.reject(abortErr);
+        },
+      });
+      const reason = await rejectionOf(rs.pipeTo(ws));
+      strictEqual(reason, abortErr);
+    }
+  },
+};
+
+// preventAbort AND preventCancel together on a starts-errored source:
+// both suppressions hold and both ends stay un-shut-down.
+export const preventAbortAndCancelCombo = {
+  async test() {
+    const err = new Error('src-err');
+    let abortCalled = false;
+    const rs = new ReadableStream({
+      start(c) {
+        c.error(err);
+      },
+    });
+    const ws = new WritableStream({
+      abort() {
+        abortCalled = true;
+      },
+    });
+    strictEqual(
+      await rejectionOf(
+        rs.pipeTo(ws, {
+          preventAbort: true,
+          preventCancel: true,
+          preventClose: true,
+        })
+      ),
+      err
+    );
+    strictEqual(abortCalled, false);
+    ws.getWriter(); // dest untouched and re-lockable
+  },
+};
+
+// The WPT 'shutdown must not occur until the final write completes'
+// shape: the source errors while a write is IN FLIGHT — the
+// destination's abort must not run until that write settles.
+export const shutdownWaitsForInFlightWrite = {
+  async test() {
+    const err = new Error('src-err');
+    const events = [];
+    let releaseWrite;
+    const parked = new Promise((resolve) => (releaseWrite = resolve));
+    let controller;
+    const rs = new ReadableStream({
+      start(c) {
+        controller = c;
+      },
+    });
+    const ws = new WritableStream({
+      write() {
+        events.push('write-start');
+        return parked;
+      },
+      abort(reason) {
+        events.push(`abort:${reason.message}`);
+      },
+    });
+    const pipeP = rs.pipeTo(ws);
+    controller.enqueue('chunk');
+    await scheduler.wait(10);
+    controller.error(err);
+    await scheduler.wait(20);
+    // The write is still parked: abort must not have run yet.
+    strictEqual(events.join(','), 'write-start');
+    releaseWrite();
+    strictEqual(await rejectionOf(pipeP), err);
+    strictEqual(events.join(','), 'write-start,abort:src-err');
+  },
+};

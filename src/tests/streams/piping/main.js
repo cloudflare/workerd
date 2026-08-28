@@ -59,6 +59,9 @@ export {
   destStartsErroredPreventCancel,
   errorTypePreservationPipeTo,
   errorTypePreservationPipeThrough,
+  destAbortPromiseStates,
+  preventAbortAndCancelCombo,
+  shutdownWaitsForInFlightWrite,
 } from 'error-propagation';
 
 export {
