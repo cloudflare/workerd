@@ -1,0 +1,25 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The piping suite runs the same test modules under two configs:
+# piping-cpp against the C++ implementation, piping-ts against the
+# TypeScript implementation.
+
+piping_suite_srcs = glob(["*.js"]) + ["piping-modules.capnp"]
+
+wd_test(
+    src = "piping-cpp.wd-test",
+    data = piping_suite_srcs,
+)
+
+wd_test(
+    src = "piping-ts.wd-test",
+    args = ["--experimental"],
+    data = piping_suite_srcs,
+)
+
+# The main C++ cell plus the dateless opt-in pedantic_wpt flag; probed
+# to produce no observable deltas, so the shared modules run unbranched.
+wd_test(
+    src = "piping-cpp-pedantic.wd-test",
+    data = piping_suite_srcs,
+)

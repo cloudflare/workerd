@@ -1,0 +1,24 @@
+using Workerd = import "/workerd/workerd.capnp";
+using PipingModules = import "piping-modules.capnp";
+
+# Runs the SAME modules against the TypeScript streams implementation.
+# The TypeScript implementation hard-codes the modern behaviors, so the
+# C++ cell's semantic flags are deliberately omitted: their absence
+# asserts the TS implementation does not consult them.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-piping-ts",
+      worker = (
+        modules = PipingModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "experimental",
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);
