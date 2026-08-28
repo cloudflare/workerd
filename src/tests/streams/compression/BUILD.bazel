@@ -19,6 +19,14 @@ wd_test(
     data = compression_suite_srcs,
 )
 
+# The main C++ cell plus the dateless opt-in pedantic_wpt flag, enforcing
+# that pedantic mode changes nothing on this suite's surface.
+wd_test(
+    size = "large",
+    src = "compression-cpp-pedantic.wd-test",
+    data = compression_suite_srcs,
+)
+
 # Legacy (pre-flag) regression guard, C++ implementation only. The
 # @all-compat-flags variant is disabled: at the 2999-12-31 date the flags
 # the cell deliberately omits would all turn on.
