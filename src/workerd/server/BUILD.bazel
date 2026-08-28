@@ -174,8 +174,6 @@ wd_cc_library(
         ":set_use_transpiler": ["WORKERD_USE_TRANSPILER"],
         "//conditions:default": [],
     }),
-    # TODO(soon): This is temporarily disabled because it takes a lifetime to complete.
-    tags = ["no-clang-tidy"],
     visibility = ["//visibility:public"],
     deps = [
         ":actor-id-impl",
