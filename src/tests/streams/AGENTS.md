@@ -2,7 +2,8 @@
 
 Streams test suite, organized WPT-style: one subdirectory per functional area
 (`identity/`, `encoding/`, `compression/`, `digest/`, `strategies/`,
-eventually `readable/`, `writable/`, `piping/`, ...). Every
+`readable/`, `readable-byte/`, `writable/`, `transform/`, `piping/`,
+`inspect/`, `r2-patterns/`, `iocontext/`). Every
 test here runs against **both** streams implementations — the legacy C++ one
 (`src/workerd/api/streams/`) and the TypeScript one
 (`src/per_isolate/webstreams/`) — to prove parity. A test that only makes
