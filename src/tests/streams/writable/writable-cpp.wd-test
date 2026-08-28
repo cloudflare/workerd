@@ -1,0 +1,38 @@
+using Workerd = import "/workerd/workerd.capnp";
+using WritableModules = import "writable-modules.capnp";
+
+# Runs the writable streams suite against the C++ implementation;
+# writable-ts.wd-test runs the identical modules against the TypeScript
+# implementation.
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes. Date-gated semantics are pinned by flag:
+# - streams_enable_constructors: the suite's subject is the JS-backed
+#   `new WritableStream()` (throws without the flag; see the legacy cell).
+# - capture_async_api_throws: writer/stream async methods return rejected
+#   promises rather than throwing synchronously (see the legacy-throws
+#   cell for the unflagged side).
+# - workers_api_getters_setters_on_prototype: accessors live on prototypes.
+# - set_tostring_tag: Symbol.toStringTag branding.
+# internal_writable_stream_abort_clears_queue is deliberately NOT pinned:
+# it only affects the internal (non-JS-backed) WritableStream
+# implementation, which this suite never constructs.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-writable-cpp",
+      worker = (
+        modules = WritableModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "capture_async_api_throws",
+          "workers_api_getters_setters_on_prototype",
+          "set_tostring_tag",
+        ],
+      )
+    ),
+  ],
+  # For gc.js.
+  v8Flags = ["--expose-gc"],
+);

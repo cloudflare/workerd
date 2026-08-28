@@ -1,0 +1,18 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The writable streams suite runs the same test modules under two configs:
+# writable-cpp against the C++ implementation, writable-ts against the
+# TypeScript implementation.
+
+writable_suite_srcs = glob(["*.js"]) + ["writable-modules.capnp"]
+
+wd_test(
+    src = "writable-cpp.wd-test",
+    data = writable_suite_srcs,
+)
+
+wd_test(
+    src = "writable-ts.wd-test",
+    args = ["--experimental"],
+    data = writable_suite_srcs,
+)
