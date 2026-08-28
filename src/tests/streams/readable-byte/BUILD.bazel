@@ -24,3 +24,26 @@ wd_test(
     src = "readable-byte-cpp-pedantic.wd-test",
     data = readable_byte_suite_srcs,
 )
+
+# The experimental no-auto-allocate flag cell (C++ only; TypeScript has
+# the behavior unconditionally).
+wd_test(
+    src = "readable-byte-cpp-no-auto-allocate.wd-test",
+    args = ["--experimental"],
+    data = readable_byte_suite_srcs,
+)
+
+# Legacy (pre-flag) regression guards, C++ implementation only. The
+# @all-compat-flags variants are disabled: at the 2999-12-31 date the
+# flags these cells deliberately omit would all turn on.
+wd_test(
+    src = "readable-byte-cpp-legacy.wd-test",
+    data = readable_byte_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)
+
+wd_test(
+    src = "readable-byte-cpp-nodetach.wd-test",
+    data = readable_byte_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)
