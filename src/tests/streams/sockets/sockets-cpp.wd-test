@@ -1,0 +1,32 @@
+using Workerd = import "/workerd/workerd.capnp";
+using SocketsModules = import "sockets-modules.capnp";
+
+# connect() socket streams against the C++ implementation. The sidecar
+# provides the echo and greet TCP servers; their ports arrive through
+# fromEnvironment bindings.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-sockets-cpp",
+      worker = (
+        modules = SocketsModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+        ],
+        bindings = [
+          (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+          (name = "STREAMS_ECHO_PORT", fromEnvironment = "STREAMS_ECHO_PORT"),
+          (name = "STREAMS_GREET_PORT", fromEnvironment = "STREAMS_GREET_PORT"),
+        ],
+      )
+    ),
+    ( name = "internet",
+      network = (
+        allow = ["private"],
+      )
+    ),
+  ],
+);
