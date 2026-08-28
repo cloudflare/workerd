@@ -83,3 +83,10 @@ export {
 } from 'buffer-lifecycle';
 
 export { transformStreamGc } from 'gc';
+
+export {
+  drainingReaderThroughTransform,
+  drainingReaderSweepsTransformBacklog,
+  drainingReaderSeesFlushOutput,
+  drainingReaderTransformErrorPropagation,
+} from 'draining-reader';

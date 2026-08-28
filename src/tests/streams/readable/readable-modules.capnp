@@ -26,4 +26,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "integration-locked-disturbed", esModule = embed "integration-locked-disturbed.js"),
   (name = "gc", esModule = embed "gc.js"),
   (name = "then-interceptors", esModule = embed "then-interceptors.js"),
+  (name = "draining-reader", esModule = embed "draining-reader.js"),
 ];

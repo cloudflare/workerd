@@ -161,3 +161,10 @@ export {
   byteDesiredSizeAccounting,
   byteGlobalsExist,
 } from 'js-compat';
+
+export {
+  drainingReaderSweepsByteBacklog,
+  drainingReaderDrivesBytePull,
+  drainingReaderByteErrorPropagation,
+  drainingReaderByteCancelReachesSource,
+} from 'draining-reader';

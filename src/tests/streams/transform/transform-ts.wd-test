@@ -15,6 +15,7 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = [
           "nodejs_compat",
           "typescript_implemented_streams",
+          "expose_draining_reader",
           "experimental",
         ],
       )

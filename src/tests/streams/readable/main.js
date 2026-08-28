@@ -170,3 +170,11 @@ export {
 export { pendingReadSurvivesGc, asyncIterationSurvivesGc } from 'gc';
 
 export { thenGetterFireCountOnRead } from 'then-interceptors';
+
+export {
+  drainingReaderSweepsQueuedBacklog,
+  drainingReaderPullDriven,
+  drainingReaderErrorPropagation,
+  drainingReaderCancelReachesSource,
+  drainingReaderLockExclusivity,
+} from 'draining-reader';
