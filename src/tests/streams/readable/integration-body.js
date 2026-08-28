@@ -60,6 +60,45 @@ export const readAllTextRequestBig = {
   },
 };
 
+// Response.text() over small and multi-page stream chunks (migrated).
+export const readAllTextResponseSmall = {
+  async test() {
+    const rs = new ReadableStream({
+      pull(c) {
+        c.enqueue(enc.encode('hello '));
+        c.enqueue(enc.encode('world!'));
+        c.close();
+      },
+    });
+    strictEqual(await new Response(rs).text(), 'hello world!');
+  },
+};
+
+export const readAllTextResponseBig = {
+  async test() {
+    const chunks = [
+      'a'.repeat(4097),
+      'b'.repeat(4097 * 2),
+      'c'.repeat(4097 * 4),
+    ];
+    let check = '';
+    const rs = new ReadableStream({
+      async pull(c) {
+        await scheduler.wait(5);
+        if (chunks.length === 0) {
+          c.close();
+          return;
+        }
+        const chunk = chunks.shift();
+        check += chunk;
+        c.enqueue(enc.encode(chunk));
+      },
+    });
+    const text = await new Response(rs).text();
+    strictEqual(text, check);
+  },
+};
+
 // A pull() that throws mid-consumption rejects the consumer (migrated).
 export const readAllTextFailedPull = {
   async test() {
@@ -130,9 +169,12 @@ export const readAllTextLargeBody = {
 
 // Body consumption normalizes BufferSource chunks: bare ArrayBuffers,
 // non-zero-offset DataViews, and typed arrays all contribute their
-// bytes; a detached buffer contributes nothing; a non-BufferSource chunk
-// rejects with the SAME TypeError message on both sides (parity; the
-// parity-parked ts-webstreams test, now shared).
+// bytes; detached buffers AND detached views contribute nothing (the
+// DataView case matters: its byteLength getter throws for a detached
+// buffer, so detachment must be probed through the buffer); a
+// non-BufferSource chunk rejects with the SAME TypeError message on
+// both sides (parity; the parity-parked ts-webstreams test, now
+// shared).
 export const bodyConsumptionNormalizesBufferSourceChunks = {
   async test() {
     const bodyOf = (chunks) =>
@@ -163,10 +205,46 @@ export const bodyConsumptionNormalizesBufferSourceChunks = {
       await new Response(bodyOf([detached, enc.encode('x')])).text(),
       'x'
     );
+    const detachedViewBuffer = new ArrayBuffer(4);
+    const detachedView = new DataView(detachedViewBuffer);
+    detachedViewBuffer.transfer();
+    strictEqual(
+      await new Response(bodyOf([detachedView, enc.encode('y')])).text(),
+      'y'
+    );
     await rejects(new Response(bodyOf(['not bytes'])).text(), {
       name: 'TypeError',
       message: 'This ReadableStream did not return bytes.',
     });
+  },
+};
+
+// A resizable ArrayBuffer chunk is captured at its extent at collection
+// time: user code growing the buffer after the chunk is collected (but
+// before the parts are assembled) must not desync the copy from the
+// accounted length (parity; regression for the TS drain loop, where a
+// bare length-tracking view over the chunk would make assembly throw
+// RangeError).
+export const bodyConsumptionPinsResizableArrayBufferExtent = {
+  async test() {
+    const rab = new ArrayBuffer(2, { maxByteLength: 8 });
+    new Uint8Array(rab).set([120, 121]); // 'xy'
+    let ctrl;
+    const rs = new ReadableStream({
+      start(c) {
+        ctrl = c;
+      },
+    });
+    const bodyPromise = new Response(rs).arrayBuffer();
+    ctrl.enqueue(rab);
+    // A macrotask boundary: the consumer collects the chunk (pinning its
+    // extent) before the resize below, and only then sees end-of-stream.
+    await scheduler.wait(0);
+    rab.resize(8);
+    ctrl.close();
+    const buf = await bodyPromise;
+    strictEqual(buf.byteLength, 2);
+    strictEqual(new TextDecoder().decode(buf), 'xy');
   },
 };
 

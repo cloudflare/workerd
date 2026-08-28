@@ -874,12 +874,6 @@ wd_test(
 )
 
 wd_test(
-    src = "streams-async-iterator-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-async-iterator-test.js"],
-)
-
-wd_test(
     src = "autovuln-319-test.wd-test",
     args = ["--experimental"],
     data = ["autovuln-319-test.js"],

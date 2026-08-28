@@ -24,3 +24,12 @@ wd_test(
     src = "readable-cpp-pedantic.wd-test",
     data = readable_suite_srcs,
 )
+
+# Legacy (pre-flag) regression guard, C++ implementation only. The
+# @all-compat-flags variant is disabled: at the 2999-12-31 date the flags
+# the cell deliberately omits would all turn on.
+wd_test(
+    src = "readable-cpp-legacy.wd-test",
+    data = readable_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)
