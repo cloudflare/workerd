@@ -2602,6 +2602,7 @@ KJ_TEST("sync() throws after critical error in explicit transaction") {
     KJ_FAIL_ASSERT("Query should have failed with SQLITE_NOMEM");
   } catch (kj::Exception& e) {
     // Expected: out of memory error. We catch and ignore this to continue the test.
+    KJ_ASSERT(e.getDescription().contains("SENTRY_DO"));
     KJ_ASSERT(e.getDescription().contains("out of memory"));
   }
 
