@@ -507,3 +507,34 @@ export const byobreaderRegression = {
     ok(done);
   },
 };
+
+// A BYOB read consumes part of an enqueued chunk; a later DEFAULT read
+// picks up the remainder (WPT 'enqueue(), read(view) partially, then
+// read()'). PARITY: [1,2] to the view, then Uint8Array [3] to the
+// default reader.
+export const partialViewThenDefaultRead = {
+  async test() {
+    const rs = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        c.enqueue(new Uint8Array([1, 2, 3]));
+      },
+    });
+    const byob = rs.getReader({ mode: 'byob' });
+    const first = await byob.read(new Uint8Array(2));
+    byob.releaseLock();
+    const dflt = rs.getReader();
+    const second = await Promise.race([
+      dflt
+        .read()
+        .then(
+          (r) =>
+            `second:done=${r.done},type=${r.value?.constructor?.name},bytes=[${r.value ? Array.from(r.value) : ''}]`
+        ),
+      scheduler.wait(200).then(() => 'second:pending'),
+    ]);
+    strictEqual(first.done, false);
+    strictEqual(Array.from(first.value).join(','), '1,2');
+    strictEqual(second, 'second:done=false,type=Uint8Array,bytes=[3]');
+  },
+};

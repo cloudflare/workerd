@@ -51,6 +51,8 @@ export {
   readAfterCloseReturnsEmptyView,
   readDetachesCallerBuffer,
   closeWithPendingUnfilledByobRead,
+  cancelWithPartiallyFilledPull,
+  readViewThenCancelOrdering,
 } from 'controller';
 
 export {
@@ -68,6 +70,7 @@ export {
   readableStreamBytesEnqueueSubarray,
   readableStreamMultiplePendingReads,
   byobreaderRegression,
+  partialViewThenDefaultRead,
 } from 'byob-reader';
 
 export {
