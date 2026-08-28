@@ -130,3 +130,24 @@ and `@all-autogates` variants, plus `@gc-stress` (off-by-default; run with
 `--test_tag_filters=`). `workerd test` requires an exported `test()` handler
 per case; assertions come from `node:assert` (`nodejs_compat` is in both
 configs' flag lists).
+
+## Streams tests that live elsewhere (by design)
+
+- `src/workerd/api/tests/js-rpc-streams-*` — stream serialization over
+  JS RPC (including ts-impl cells); owned by the worker-rpc domain.
+- `src/workerd/api/tests/ts-webstreams-test.js` — TypeScript-impl
+  internals (native/buffer/iterable bodies ARE ts streams, pumpTo);
+  single-implementation by nature.
+- `src/workerd/api/tests/pipe-write-special-buffer-test.js` —
+  SharedArrayBuffer/resizable-buffer pipe writes (special env).
+- Security regression singles in `src/workerd/api/tests/`
+  (streams-byob-close-reentry, streams-byob-concurrent-readatleast,
+  streams-byte-cancel-uaf, streams-byte-handlePush-uaf,
+  streams-circ-ref-regression, streams-consumer-reentry-gc,
+  streams-internal-read-buffer-gc, autovuln-*) — authoritative
+  crash/UAF repros, deliberately not merged into suites.
+- `src/workerd/api/streams/streams-test.js` — `partiallyReadStream`
+  (needs a KV binding).
+
+The full coverage picture, including gap tracking, lives in
+`~/docs/streams-coverage-audit.md`.
