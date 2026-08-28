@@ -15,6 +15,9 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "write-semantics", esModule = embed "write-semantics.js"),
   (name = "close-semantics", esModule = embed "close-semantics.js"),
   (name = "abort-semantics", esModule = embed "abort-semantics.js"),
+  (name = "abort-matrix", esModule = embed "abort-matrix.js"),
   (name = "backpressure", esModule = embed "backpressure.js"),
+  (name = "reentrancy", esModule = embed "reentrancy.js"),
+  (name = "then-interceptors", esModule = embed "then-interceptors.js"),
   (name = "gc", esModule = embed "gc.js"),
 ];
