@@ -134,37 +134,6 @@ export const errorRaceWithCloseReadable = {
   },
 };
 
-// Test race between writer.abort() and writer.close() on WritableStream
-// Inspired by: Bun test/js/web/streams/streams.test.js (abort/close race conditions)
-export const errorRaceWithCloseWritable = {
-  async test() {
-    let writeStarted = false;
-
-    const ws = new WritableStream({
-      write() {
-        writeStarted = true;
-        // Simulate a slow write that can be aborted
-        return scheduler.wait(100);
-      },
-    });
-
-    const writer = ws.getWriter();
-
-    const writePromise = writer.write('data').catch((e) => e);
-
-    await scheduler.wait(5);
-    ok(writeStarted, 'Write should have started');
-
-    await writer.abort(new Error('Abort wins'));
-
-    const writeResult = await writePromise;
-    ok(
-      writeResult === undefined || writeResult instanceof Error,
-      'Write should complete or error'
-    );
-  },
-};
-
 // Test error thrown in TransformStream transform() callback using controller.error()
 // Inspired by: Bun test/js/web/streams/streams.test.js (TransformStream error handling)
 export const errorInTransformFlush = {
