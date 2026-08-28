@@ -106,3 +106,10 @@ export {
 export { thenGetterDoesNotFireOnWriterPromises } from 'then-interceptors';
 
 export { writableStreamGc } from 'gc';
+
+export {
+  manySmallWrites,
+  largeSingleWrite,
+  largeChunkedWrites,
+  veryLargeChunkedWrites,
+} from 'data-volumes';

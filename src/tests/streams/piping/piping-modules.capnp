@@ -12,4 +12,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "close-propagation", esModule = embed "close-propagation.js"),
   (name = "flow-control", esModule = embed "flow-control.js"),
   (name = "interop", esModule = embed "interop.js"),
+  (name = "data-volumes", esModule = embed "data-volumes.js"),
 ];
