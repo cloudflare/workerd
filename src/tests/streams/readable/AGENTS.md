@@ -51,6 +51,13 @@ clone-both-read, cancel-body-then-consume 'Body has already been used',
 readAll small/big/failed paths, SELF fetch round-trips (fetch body +
 Request body, the workerd#5113 shapes).
 
+The ts cell additionally sets the internal-testing
+`expose_draining_reader` flag, installing the
+`ReadableStreamDrainingReader` global — the bulk-drain conduit the C++
+bridge drives to consume TypeScript streams (conduit basics in the
+identity suite's draining-reader.js). No such global exists under the
+C++ implementation; `draining-reader.js` asserts both sides.
+
 ## Compatibility flags
 
 | Flag | Pinned in main cells | Unflagged side |
@@ -83,6 +90,8 @@ Request body, the workerd#5113 shapes).
 | `gc.js` | pending read + async iteration survive gc() |
 | `then-interceptors.js` | ledger #16 |
 | `legacy-constructors.js` | the unflagged cell (see flags table) |
+| `draining-reader.js` | TS only (C++ cell asserts the global's absence): a queued backlog plus the close sentinel swept in ONE batched read; value chunks pass through UNTOUCHED (object identity); pull-driven yields per read with EOF as a separate empty batch; expectedLength undefined; error/cancel propagation; lock exclusivity and release |
+| `data-volumes.js` | value-stream volume axes: 4096-chunk counts, a 1 MiB single string chunk, 8 MiB aggregate (128 × 64 KiB), and 1 MiB through tee on both branches — every chunk index-encoded |
 
 Consumed sources: streams-async-iterator-test.js (deleted),
 streams-tee-edge-cases-test.js (value half), streams-test.js (from/

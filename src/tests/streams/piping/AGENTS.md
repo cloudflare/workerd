@@ -71,6 +71,7 @@ the source FIRST, then releasing the write (`pipeStopsPullingWhenDestStalls`).
 | `flow-control.js` | backpressure chain (migrated from streams-backpressure-test.js), stalled-dest read-ahead bound |
 | `interop.js` | cancel propagation ×2 (migrated from api/streams/streams-test.js), FixedLengthStream (ledger #9), pre-settled pairings (ledger #10) |
 | `legacy-pipes.js` | the unflagged cell (flags table) |
+| `data-volumes.js` | end-to-end pipe volumes: 1 MiB pipeTo JS→JS, 8 MiB pipeThrough chain, 1 MiB JS→identity with body readback, 1 MiB identity→JS with a concurrent writer — all byte-exact |
 
 Consumed sources (deleted or shrunk): pipe-streams-test.js (deleted),
 streams-error-edge-cases-test.js (−2), streams-backpressure-test.js
