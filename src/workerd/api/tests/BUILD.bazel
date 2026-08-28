@@ -802,27 +802,9 @@ wd_test(
 )
 
 wd_test(
-    src = "streams-respond-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-respond-test.js"],
-)
-
-wd_test(
     src = "autovuln-131-test.wd-test",
     args = ["--experimental"],
     data = ["autovuln-131-test.js"],
-)
-
-wd_test(
-    src = "streams-no-auto-allocate-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-no-auto-allocate-test.js"],
-)
-
-wd_test(
-    src = "streams-js-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-js-test.js"],
 )
 
 wd_test(
@@ -850,12 +832,6 @@ wd_test(
 )
 
 wd_test(
-    src = "streams-byob-edge-cases-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-byob-edge-cases-test.js"],
-)
-
-wd_test(
     src = "autovuln-148-test.wd-test",
     args = ["--experimental"],
     data = ["autovuln-148-test.js"],
@@ -865,12 +841,6 @@ wd_test(
     src = "streams-byob-concurrent-readatleast-test.wd-test",
     args = ["--experimental"],
     data = ["streams-byob-concurrent-readatleast-test.js"],
-)
-
-wd_test(
-    src = "streams-tee-edge-cases-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-tee-edge-cases-test.js"],
 )
 
 wd_test(

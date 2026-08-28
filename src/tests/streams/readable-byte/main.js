@@ -159,4 +159,5 @@ export {
   cancelPendingReadsByteReaders,
   lockedByteStreamOpsThrow,
   byteDesiredSizeAccounting,
+  byteGlobalsExist,
 } from 'js-compat';
