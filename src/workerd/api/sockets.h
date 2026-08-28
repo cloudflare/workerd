@@ -237,6 +237,7 @@ class Socket: public jsg::Object {
     JSG_READONLY_PROTOTYPE_PROPERTY(opened, getOpened);
     JSG_READONLY_PROTOTYPE_PROPERTY(upgraded, getUpgraded);
     JSG_READONLY_PROTOTYPE_PROPERTY(secureTransport, getSecureTransport);
+    // non-standard extension, not part of the proposed sockets spec
     JSG_READONLY_PROTOTYPE_PROPERTY(protocol, getProtocol);
     JSG_METHOD(close);
     JSG_METHOD(startTls);
