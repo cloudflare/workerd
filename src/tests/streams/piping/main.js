@@ -41,3 +41,19 @@ export {
   pipeToJsToJsCloseQueuedDestination,
   pipeToJsToJsCloseQueuedDestinationPreventCancel,
 } from 'pipe-matrix';
+
+export {
+  optionGetterReadOrder,
+  throwingOptionGetter,
+  invalidSignalRejected,
+  brandChecks,
+  pipeThroughLockedEndpoints,
+} from 'api-surface';
+
+export {
+  sourceStartsErrored,
+  sourceStartsErroredPreventAbort,
+  sourceErroredAfterChunkHwmZero,
+  destStartsErrored,
+  destStartsErroredPreventCancel,
+} from 'error-propagation';
