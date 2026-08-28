@@ -16,4 +16,10 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "backpressure", esModule = embed "backpressure.js"),
   (name = "reentrancy", esModule = embed "reentrancy.js"),
   (name = "roundtrip", esModule = embed "roundtrip.js"),
+  (name = "construction", esModule = embed "construction.js"),
+  (name = "cancel-matrix", esModule = embed "cancel-matrix.js"),
+  (name = "terminate", esModule = embed "terminate.js"),
+  (name = "then-interceptors", esModule = embed "then-interceptors.js"),
+  (name = "buffer-lifecycle", esModule = embed "buffer-lifecycle.js"),
+  (name = "gc", esModule = embed "gc.js"),
 ];

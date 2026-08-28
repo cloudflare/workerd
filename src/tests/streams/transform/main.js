@@ -17,7 +17,26 @@ export {
   simpleTransform,
   delayTransform,
   differentTypesTransform,
+  hookInvocationShape,
+  prototypeChainTransformer,
 } from 'transformer-algorithms';
+
+export {
+  readableWritableTypeValidation,
+  highWaterMarkValidated,
+} from 'construction';
+
+export {
+  readableCancelRunsCancelHook,
+  writableAbortRunsCancelHook,
+  cancelHookErrorFanOut,
+  cancelHookRunsOnce,
+} from 'cancel-matrix';
+
+export {
+  terminateClosesReadableErrorsWritable,
+  errorAfterTerminateWithQueuedChunk,
+} from 'terminate';
 
 export {
   syncErrorDuringStart,
@@ -32,6 +51,8 @@ export {
 export {
   writeBackpressure,
   backpressureTransformBothStrategies,
+  defaultReadableHwmZero,
+  backpressureAppliedAtReadableHwm,
 } from 'backpressure';
 
 export {
@@ -41,3 +62,12 @@ export {
 } from 'reentrancy';
 
 export { transformRoundtrip } from 'roundtrip';
+
+export { thenGetterFireCount } from 'then-interceptors';
+
+export {
+  chunkIdentityThroughTransform,
+  detachWhileQueuedObservedByReader,
+} from 'buffer-lifecycle';
+
+export { transformStreamGc } from 'gc';
