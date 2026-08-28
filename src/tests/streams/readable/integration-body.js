@@ -60,6 +60,45 @@ export const readAllTextRequestBig = {
   },
 };
 
+// Response.text() over small and multi-page stream chunks (migrated).
+export const readAllTextResponseSmall = {
+  async test() {
+    const rs = new ReadableStream({
+      pull(c) {
+        c.enqueue(enc.encode('hello '));
+        c.enqueue(enc.encode('world!'));
+        c.close();
+      },
+    });
+    strictEqual(await new Response(rs).text(), 'hello world!');
+  },
+};
+
+export const readAllTextResponseBig = {
+  async test() {
+    const chunks = [
+      'a'.repeat(4097),
+      'b'.repeat(4097 * 2),
+      'c'.repeat(4097 * 4),
+    ];
+    let check = '';
+    const rs = new ReadableStream({
+      async pull(c) {
+        await scheduler.wait(5);
+        if (chunks.length === 0) {
+          c.close();
+          return;
+        }
+        const chunk = chunks.shift();
+        check += chunk;
+        c.enqueue(enc.encode(chunk));
+      },
+    });
+    const text = await new Response(rs).text();
+    strictEqual(text, check);
+  },
+};
+
 // A pull() that throws mid-consumption rejects the consumer (migrated).
 export const readAllTextFailedPull = {
   async test() {

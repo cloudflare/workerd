@@ -146,6 +146,8 @@ export {
 export {
   readAllTextRequestSmall,
   readAllTextRequestBig,
+  readAllTextResponseSmall,
+  readAllTextResponseBig,
   readAllTextFailedPull,
   readAllTextFailedStart,
   readAllTextControllerError,

@@ -482,95 +482,11 @@ export const nativeBackedStreamIntoFetchBody = {
   },
 };
 
-// Body consumption accepts any BufferSource chunk shape, matching the C++ pump:
-// ArrayBuffer, DataView, and non-Uint8Array views contribute their bytes, detached
-// buffers are empty, and a non-BufferSource chunk fails with the C++ error text.
-export const bodyConsumptionNormalizesBufferSourceChunks = {
-  async test() {
-    const enc = new TextEncoder();
-    const bodyOf = (chunks) =>
-      new ReadableStream({
-        start(c) {
-          for (const chunk of chunks) c.enqueue(chunk);
-          c.close();
-        },
-      });
-    strictEqual(
-      await new Response(bodyOf([enc.encode('ab').buffer])).text(),
-      'ab'
-    );
-    strictEqual(
-      await new Response(
-        bodyOf([new DataView(enc.encode('_cd').buffer, 1)])
-      ).text(),
-      'cd'
-    );
-    strictEqual(
-      (await new Response(bodyOf([new Float64Array(1)])).arrayBuffer())
-        .byteLength,
-      8
-    );
-    const detached = new ArrayBuffer(4);
-    detached.transfer();
-    strictEqual(
-      await new Response(bodyOf([detached, enc.encode('x')])).text(),
-      'x'
-    );
-    await rejects(new Response(bodyOf(['not bytes'])).text(), {
-      name: 'TypeError',
-      message: 'This ReadableStream did not return bytes.',
-    });
-  },
-};
-
-// Body preconditions still apply after unwrap: a disturbed stream is rejected by the
-// Body constructor itself (unwrap deliberately performs no such checks). This throw did
-// NOT happen before the unwrap arm landed (the async-iterable fallback wrapped the
-// stream in a fresh, undisturbed one), so this is a legacy-parity regression test.
-export const disturbedTsStreamIntoResponse = {
-  async test() {
-    const rs = new ReadableStream({
-      start(c) {
-        c.enqueue(new TextEncoder().encode('x'));
-        c.close();
-      },
-    });
-    const reader = rs.getReader();
-    await reader.read();
-    reader.releaseLock();
-    throws(() => new Response(rs), {
-      name: 'TypeError',
-      message: /disturbed/,
-    });
-  },
-};
-
 // Non-stream objects keep their non-stream Body semantics: the brand check rejects them,
 // the OneOf falls through, and a plain object stringifies per spec.
 export const plainObjectBodyStillStringifies = {
   async test() {
     strictEqual(await new Response({}).text(), '[object Object]');
-  },
-};
-
-// Response.clone() with a TypeScript-backed (queued) body: clone happens at the C++
-// layer (Body::clone -> JsReadableStream::tee's TS arm -> the TS tee machinery), and
-// both bodies read the full content independently.
-export const tsStreamBodyClone = {
-  async test() {
-    const encoder = new TextEncoder();
-    const rs = new ReadableStream({
-      start(c) {
-        c.enqueue(encoder.encode('clone'));
-        c.enqueue(encoder.encode(' me'));
-        c.close();
-      },
-    });
-    const response = new Response(rs);
-    const clone = response.clone();
-    const [a, b] = await Promise.all([response.text(), clone.text()]);
-    strictEqual(a, 'clone me');
-    strictEqual(b, 'clone me');
   },
 };
 

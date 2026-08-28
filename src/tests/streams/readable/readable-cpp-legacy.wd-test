@@ -1,0 +1,21 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Fully-unflagged legacy cell (C++ only): without
+# streams_enable_constructors the ReadableStream constructor and .from()
+# throw, while native-backed streams keep working. The BUILD rule
+# disables the @all-compat-flags variant, which would turn the omitted
+# flags back on.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-readable-cpp-legacy",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-main.js"),
+          (name = "legacy-constructors", esModule = embed "legacy-constructors.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);
