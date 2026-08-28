@@ -23,7 +23,7 @@ async function decodeAll(readable) {
 }
 
 // Loopback fetch handler; main.js exports this as the default handler.
-export async function handleFetch(request, env) {
+export async function handleFetch(request, env, ctx) {
   const url = request.url;
   if (url.includes('/compressed')) {
     const { readable, writable } = new CompressionStream('gzip');
@@ -40,10 +40,13 @@ export async function handleFetch(request, env) {
   if (url.includes('/compressionPipeline')) {
     // TransformStream → CompressionStream → Response body (internal
     // writable): exercises close-signal propagation from a JS-backed
-    // stream through the compressor into HTTP serialization.
+    // stream through the compressor into HTTP serialization. The pipe
+    // completes as the returned body is consumed; waitUntil tracks it so
+    // a pipe failure is charged to this request instead of floating (the
+    // driving test still observes it as an errored body).
     const response = await env.SELF.fetch('http://test/stream');
     const { readable, writable } = new TransformStream();
-    response.body.pipeTo(writable);
+    ctx.waitUntil(response.body.pipeTo(writable));
     const compressed = readable.pipeThrough(new CompressionStream('gzip'));
     return new Response(compressed, { encodeBody: 'manual' });
   }

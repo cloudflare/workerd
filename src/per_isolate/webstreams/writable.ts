@@ -1720,6 +1720,16 @@ module.exports = {
       getWritableStreamStoredError(stream),
     closeQueuedOrInFlight: <W>(stream: WritableStream<W>) =>
       writableStreamCloseQueuedOrInFlight(stream),
+    // Whether a writer.write() issued NOW would be accepted (enqueued for a
+    // sink step) rather than rejected by the state checks. The writer
+    // machinery runs the strategy size() callback BEFORE those checks, so
+    // sinks that snapshot chunks in size() (identity, compression) consult
+    // this to skip copying for doomed writes — the FIFO stays aligned
+    // because everything between size() and the checks is synchronous, so
+    // the answer cannot change before the machinery re-asks.
+    willAcceptWrite: <W>(stream: WritableStream<W>): boolean =>
+      getWritableStreamState(stream) === 'writable' &&
+      !writableStreamCloseQueuedOrInFlight(stream),
     getWriterReadyPromise: <W>(writer: WritableStreamDefaultWriter<W>) =>
       getWriterReadyPromiseInternal(writer),
     getWriterClosedPromise: <W>(writer: WritableStreamDefaultWriter<W>) =>
