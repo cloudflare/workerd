@@ -44,10 +44,10 @@ index 9800d10d03a138ca8bf016517332471551c57877..2bb82aa6f2cdabc4588415256c72c9a4
    CppHeap() = default;
  
 diff --git a/src/heap/cppgc-js/cpp-heap.cc b/src/heap/cppgc-js/cpp-heap.cc
-index 9dc25e15d4c10f73f2a5cb9e26a343aac0212af3..120bcce5a11b636bba9559eb5a79b6b74c176145 100644
+index 9364e823440bb613f670a48240daa703d991d0b8..9199812a5a3888e3c8ab35a81aacca0b71d434b6 100644
 --- a/src/heap/cppgc-js/cpp-heap.cc
 +++ b/src/heap/cppgc-js/cpp-heap.cc
-@@ -146,6 +146,15 @@ void CppHeap::CollectGarbageInYoungGenerationForTesting(
+@@ -145,6 +145,15 @@ void CppHeap::CollectGarbageInYoungGenerationForTesting(
        internal::CppHeap::CollectionType::kMinor, stack_state);
  }
  
@@ -63,7 +63,7 @@ index 9dc25e15d4c10f73f2a5cb9e26a343aac0212af3..120bcce5a11b636bba9559eb5a79b6b7
  namespace internal {
  
  namespace {
-@@ -737,7 +746,15 @@ CppHeap::MarkingType CppHeap::SelectMarkingType() const {
+@@ -736,7 +745,15 @@ CppHeap::MarkingType CppHeap::SelectMarkingType() const {
  }
  
  CppHeap::SweepingType CppHeap::SelectSweepingType() const {
