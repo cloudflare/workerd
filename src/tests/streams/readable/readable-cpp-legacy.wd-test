@@ -14,7 +14,7 @@ const unitTests :Workerd.Config = (
           (name = "main", esModule = embed "legacy-main.js"),
           (name = "legacy-constructors", esModule = embed "legacy-constructors.js"),
         ],
-        compatibilityFlags = ["nodejs_compat"],
+        compatibilityFlags = ["nodejs_compat", "enable_weak_ref"],
       )
     ),
   ],

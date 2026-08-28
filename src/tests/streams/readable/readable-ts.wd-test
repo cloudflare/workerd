@@ -15,6 +15,7 @@ const unitTests :Workerd.Config = (
           "typescript_implemented_streams",
           "expose_draining_reader",
           "experimental",
+          "enable_weak_ref",
         ],
         bindings = [
           ( name = "SELF", service = "streams-readable-ts" ),

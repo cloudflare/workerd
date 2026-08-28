@@ -7,6 +7,7 @@
 // from transform-streams-test.js.
 
 import { strictEqual } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
 
 export const transformRoundtrip = {
   async test(ctrl, env, ctx) {
@@ -70,5 +71,58 @@ export const transformRoundtrip = {
       )
     );
     strictEqual(output, testData);
+  },
+};
+
+// The workerd TransformStream({ expectedLength }) extension: posting
+// the readable as a fetch body. DIVERGENCE: C++ surfaces the declared
+// length as a concrete Content-Length on the subrequest; the
+// TypeScript implementation does not consult expectedLength — the
+// subrequest goes out chunked (Content-Length null). The body arrives
+// intact either way.
+export const transformExpectedLengthFetchBody = {
+  async test(ctrl, env) {
+    const enc = new TextEncoder();
+    const { readable, writable } = new TransformStream({
+      expectedLength: 10,
+    });
+    const writer = writable.getWriter();
+    writer.write(enc.encode('hellohello'));
+    writer.close();
+    const resp = await env.SELF.fetch('http://example.org', {
+      method: 'POST',
+      body: readable,
+    });
+    strictEqual(
+      resp.headers.get('observed-content-length'),
+      usingTsImpl ? 'null' : '10'
+    );
+    strictEqual(await resp.text(), 'hellohello');
+  },
+};
+
+// The same through a pre-built Request object (regression for
+// https://github.com/cloudflare/workerd/issues/5113: the length was
+// lost on the C++ Request path).
+export const transformExpectedLengthRequestBody = {
+  async test(ctrl, env) {
+    const enc = new TextEncoder();
+    const { readable, writable } = new TransformStream({
+      expectedLength: 10,
+    });
+    const writer = writable.getWriter();
+    writer.write(enc.encode('hellohello'));
+    writer.close();
+    const resp = await env.SELF.fetch(
+      new Request('http://example.org', {
+        method: 'POST',
+        body: readable,
+      })
+    );
+    strictEqual(
+      resp.headers.get('observed-content-length'),
+      usingTsImpl ? 'null' : '10'
+    );
+    strictEqual(await resp.text(), 'hellohello');
   },
 };

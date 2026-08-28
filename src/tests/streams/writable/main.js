@@ -39,6 +39,7 @@ export {
   writableStreamWriteSubarray,
   writableStreamWriteAny,
   writableStreamPromisesResolvedInOrder,
+  cancelWriteOnReleaseLock,
 } from 'write-semantics';
 
 export {
@@ -105,7 +106,7 @@ export {
 
 export { thenGetterDoesNotFireOnWriterPromises } from 'then-interceptors';
 
-export { writableStreamGc } from 'gc';
+export { writableStreamGc, writableStreamGcTraceFinishes } from 'gc';
 
 export {
   manySmallWrites,

@@ -150,3 +150,41 @@ export const writableStreamPromisesResolvedInOrder = {
     }
   },
 };
+
+// releaseLock() with a write QUEUED behind an in-flight one.
+// DIVERGENCE: C++ rejects the queued write with the released-writer
+// error; under TypeScript the queued write stays PENDING FOREVER
+// (bounded observation) — the release orphans it. The release itself
+// succeeds and the stream is re-lockable in both (migrated from
+// streams-test.js).
+export const cancelWriteOnReleaseLock = {
+  async test() {
+    const ws = new WritableStream({
+      write() {
+        return new Promise(() => {});
+      },
+    });
+    const writer = ws.getWriter();
+    // The first write is in flight forever; the second is queued.
+    writer.write('ignored').catch(() => {});
+    const queued = writer.write('hello');
+    writer.releaseLock();
+    const outcome = await Promise.race([
+      queued.then(
+        () => ({ state: 'fulfilled' }),
+        (e) => ({ state: 'rejected', message: e.message })
+      ),
+      scheduler.wait(250).then(() => ({ state: 'pending' })),
+    ]);
+    if (usingTsImpl) {
+      strictEqual(outcome.state, 'pending');
+    } else {
+      strictEqual(outcome.state, 'rejected');
+      strictEqual(
+        outcome.message,
+        'This WritableStream writer has been released.'
+      );
+    }
+    ws.getWriter(); // re-lockable
+  },
+};

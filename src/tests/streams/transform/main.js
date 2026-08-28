@@ -32,6 +32,7 @@ export {
   writableAbortRunsCancelHook,
   cancelHookErrorFanOut,
   cancelHookRunsOnce,
+  asyncCancelHookAwaitedAndThrowPropagates,
 } from 'cancel-matrix';
 
 export {
@@ -96,3 +97,23 @@ export {
   veryLargeXorTransform,
   mediumChunkCountThroughTransform,
 } from 'data-volumes';
+
+export {
+  transformExpectedLengthFetchBody,
+  transformExpectedLengthRequestBody,
+} from 'roundtrip';
+
+// Echo handler for the expectedLength fetch-body tests: reports the
+// Content-Length the subrequest actually carried (the implementations
+// diverge) and echoes the body.
+export default {
+  async fetch(request) {
+    return new Response(request.body, {
+      headers: {
+        'observed-content-length': String(
+          request.headers.get('content-length')
+        ),
+      },
+    });
+  },
+};

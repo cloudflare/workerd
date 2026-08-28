@@ -41,6 +41,7 @@ export {
   pullCountShape,
   pullThrowErrorsStream,
   pullThrowIgnoredIfErrored,
+  backpressureByteStreamHwm,
 } from 'pull-timing';
 
 export {

@@ -64,3 +64,52 @@ export const asyncIterationSurvivesGc = {
     strictEqual((await it.next()).done, true);
   },
 };
+
+async function createPendingReadableStreamFromRefs() {
+  const refs = [];
+  for (let i = 0; i < 8; i++) {
+    let nextCalled = false;
+    const { promise: pending, resolve } = Promise.withResolvers();
+    const iterator = {
+      resolve,
+      next() {
+        nextCalled = true;
+        return pending;
+      },
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    };
+    const stream = ReadableStream.from(iterator);
+    refs.push(new WeakRef(iterator), new WeakRef(stream));
+
+    const reader = stream.getReader();
+    reader.read().catch(() => {});
+    await scheduler.wait(0);
+    ok(nextCalled, 'the unresolved pull was not started');
+    reader.releaseLock();
+  }
+  return refs;
+}
+
+export const readableStreamFromPendingPromiseCollects = {
+  async test() {
+    const refs = await createPendingReadableStreamFromRefs();
+    strictEqual(refs.length, 16);
+
+    for (let i = 0; i < 4; i++) {
+      await scheduler.wait(0);
+      gc();
+    }
+
+    let alive = 0;
+    for (const ref of refs) {
+      if (ref.deref() !== undefined) alive++;
+    }
+    ok(
+      alive <= 2,
+      `expected pending ReadableStream.from cycles to be collected, ` +
+        `${alive} of ${refs.length} objects still alive`
+    );
+  },
+};

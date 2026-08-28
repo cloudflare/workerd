@@ -167,7 +167,11 @@ export {
   bodyIdentityAndLockCoupling,
 } from 'integration-locked-disturbed';
 
-export { pendingReadSurvivesGc, asyncIterationSurvivesGc } from 'gc';
+export {
+  pendingReadSurvivesGc,
+  asyncIterationSurvivesGc,
+  readableStreamFromPendingPromiseCollects,
+} from 'gc';
 
 export { thenGetterFireCountOnRead } from 'then-interceptors';
 
@@ -185,3 +189,9 @@ export {
   veryLargeAggregateTransfer,
   largeTransferThroughTee,
 } from 'data-volumes';
+
+export {
+  backpressureReadableHwmZero,
+  backpressureReadableHwmOne,
+  backpressureReadableHwmLarge,
+} from 'backpressure';
