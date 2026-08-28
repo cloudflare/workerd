@@ -18,4 +18,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "buffer-lifecycle", esModule = embed "buffer-lifecycle.js"),
   (name = "gc", esModule = embed "gc.js"),
   (name = "integration", esModule = embed "integration.js"),
+  (name = "js-compat", esModule = embed "js-compat.js"),
 ];

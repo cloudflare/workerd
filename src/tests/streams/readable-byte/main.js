@@ -101,6 +101,10 @@ export {
   jsByteSourceLargeData,
   jsByteSourceLargeDataEnqueue,
   bodyPumpByobRequestPresence,
+  readableStreamByteRespond,
+  readableStreamByteRespondWithNewView,
+  readableStreamByteRespondWithNewViewUsesNewElementSize,
+  readableStreamAutoAllocateChunkSize,
 } from 'respond';
 
 export {
@@ -148,3 +152,11 @@ export {
   readAtLeastOnEchoedBody,
   bytesMethodOnByteSource,
 } from 'integration';
+
+export {
+  defaultStreamNoByobReader,
+  closedPromiseByteReaders,
+  cancelPendingReadsByteReaders,
+  lockedByteStreamOpsThrow,
+  byteDesiredSizeAccounting,
+} from 'js-compat';
