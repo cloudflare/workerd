@@ -1,0 +1,93 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+# The brotli C API functions our consumers call. The C implementation below is compiled with
+# these renamed to brotli_c_*; the standard names are owned by the routing layer
+# (src/workerd/util/brotli-router.c++), which forwards each call to either the C implementation
+# or rust-brotli (brotli_rs_*), selected at process level by the compression-rs autogate.
+ROUTED_FUNCTIONS = [
+    "BrotliEncoderCreateInstance",
+    "BrotliEncoderDestroyInstance",
+    "BrotliEncoderSetParameter",
+    "BrotliEncoderCompressStream",
+    "BrotliEncoderIsFinished",
+    "BrotliEncoderHasMoreOutput",
+    "BrotliEncoderCompress",
+    "BrotliEncoderMaxCompressedSize",
+    "BrotliDecoderCreateInstance",
+    "BrotliDecoderDestroyInstance",
+    "BrotliDecoderSetParameter",
+    "BrotliDecoderDecompressStream",
+    "BrotliDecoderHasMoreOutput",
+    "BrotliDecoderGetErrorCode",
+    "BrotliDecoderErrorString",
+    "BrotliDecoderDecompress",
+]
+
+config_setting(
+    name = "clang-cl",
+    flag_values = {
+        "@bazel_tools//tools/cpp:compiler": "clang-cl",
+    },
+)
+
+config_setting(
+    name = "msvc",
+    flag_values = {
+        "@bazel_tools//tools/cpp:compiler": "msvc-cl",
+    },
+)
+
+cc_library(
+    name = "brotli_inc",
+    hdrs = glob(["c/include/brotli/*.h"]),
+    strip_include_prefix = "c/include",
+    visibility = ["//visibility:public"],
+)
+
+# The C brotli implementation, compiled with the routed entry points renamed to brotli_c_*.
+# Consumers never link this directly; they go through the unprefixed routing layer.
+cc_library(
+    name = "brotli_impl",
+    srcs = glob([
+        "c/common/*.c",
+        "c/common/*.h",
+        "c/dec/*.c",
+        "c/dec/*.h",
+        "c/enc/*.c",
+        "c/enc/*.h",
+    ]),
+    linkopts = select({
+        ":clang-cl": [],
+        ":msvc": [],
+        "//conditions:default": ["-lm"],
+    }),
+    local_defines = ["%s=brotli_c_%s" % (f, f) for f in ROUTED_FUNCTIONS],
+    visibility = ["//visibility:public"],
+    deps = [":brotli_inc"],
+)
+
+# The brotli consumed by everything in the build: the public headers declare the standard
+# unprefixed symbol names, which are defined by the routing layer.
+cc_library(
+    name = "brotlicommon",
+    visibility = ["//visibility:public"],
+    deps = [":brotli_inc"],
+)
+
+cc_library(
+    name = "brotlidec",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":brotli_inc",
+        "@@//src/workerd/util:brotli-router",
+    ],
+)
+
+cc_library(
+    name = "brotlienc",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":brotli_inc",
+        "@@//src/workerd/util:brotli-router",
+    ],
+)

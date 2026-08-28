@@ -1,0 +1,10 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_rust_crate(
+    name = "brotli-rs",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@crates_vendor//:brotli",
+        "@crates_vendor//:brotli-decompressor",
+    ],
+)

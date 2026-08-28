@@ -22,7 +22,19 @@ archive_override(
 )
 
 # brotli
-bazel_dep(name = "brotli", version = "1.2.0.bcr.1")
+bazel_dep(name = "brotli")
+archive_override(
+    module_name = "brotli",
+    build_file = "//:build/BUILD.brotli",
+    patch_strip = 1,
+    patches = [
+        "//:patches/brotli/0001-Add-dummy-MODULE.bazel.patch",
+    ],
+    sha256 = "eb5f7dadf215d0670665fd81566e1fe2dfdc154d983f09142de7299df4c182e6",
+    strip_prefix = "google-brotli-028fb5a",
+    type = "tgz",
+    url = "https://api.github.com/repos/google/brotli/tarball/v1.2.0",
+)
 
 # capnp-cpp
 http.archive(

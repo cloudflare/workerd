@@ -32,6 +32,11 @@ syn = { version = "2", features = ["full"] }
 ada-url = { version = "4", default-features = false, features = ["std"] }
 anyhow = "1"
 async-trait = { version = "0", default-features = false }
+# Memory-safe Rust implementation of brotli, exposed to C++ under brotli_rs_-prefixed
+# symbols by src/rust/brotli-rs. The ffi-api feature stays off: it would export the
+# standard unprefixed C symbols, which are owned by the routing layer.
+brotli = { version = "8", default-features = false, features = ["std"] }
+brotli-decompressor = { version = "5", default-features = false, features = ["std"] }
 bytes = { version = "1", default-features = false }
 capnp = "0"
 capnpc = "0"

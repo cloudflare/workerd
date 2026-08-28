@@ -19,9 +19,20 @@
         "//:patches/boringssl/0001-Expose-libdecrepit-so-NodeJS-can-use-it-for-ncrypto.patch"
       ]
     },
+    // Built from our own build file (rather than the upstream BUILD) so the C implementation can
+    // be compiled under prefixed symbol names, with the standard names owned by the routing layer
+    // in src/workerd/util/brotli-router.c++.
     {
       "name": "brotli",
-      "type": "bazel_dep"
+      "type": "github_release",
+      "use_bazel_dep": true,
+      "owner": "google",
+      "repo": "brotli",
+      "freeze_version": "v1.2.0",
+      "build_file": "//:build/BUILD.brotli",
+      "patches": [
+        "//:patches/brotli/0001-Add-dummy-MODULE.bazel.patch"
+      ]
     },
     {
       "name": "zstd",

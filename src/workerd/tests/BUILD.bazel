@@ -111,6 +111,16 @@ wd_cc_benchmark(
 )
 
 wd_cc_benchmark(
+    name = "bench-brotli",
+    srcs = ["bench-brotli.c++"],
+    deps = [
+        "//src/rust/brotli-rs",
+        "@brotli//:brotlidec",
+        "@brotli//:brotlienc",
+    ],
+)
+
+wd_cc_benchmark(
     name = "bench-util",
     srcs = ["bench-util.c++"],
     deps = [
