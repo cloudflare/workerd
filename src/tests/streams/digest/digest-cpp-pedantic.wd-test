@@ -1,0 +1,30 @@
+using Workerd = import "/workerd/workerd.capnp";
+using DigestModules = import "digest-modules.capnp";
+
+# Runs the full suite against the C++ implementation with the dateless
+# opt-in pedantic_wpt flag added to digest-cpp.wd-test's pinned set,
+# pinning the ABSENCE of pedantic effects: the DigestStream implementation
+# consults the flag nowhere, and although the pedantic-gated
+# standard-streams machinery is reachable from this suite's surface (the
+# pipe tests build standard sources), every shared assertion holds
+# unchanged.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-digest-cpp-pedantic",
+      worker = (
+        modules = DigestModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "workers_api_getters_setters_on_prototype",
+          "capture_async_api_throws",
+          "set_tostring_tag",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+          "pedantic_wpt",
+        ],
+      )
+    ),
+  ],
+  v8Flags = ["--expose-gc"],
+);
