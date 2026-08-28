@@ -3,10 +3,10 @@ using Workerd = import "/workerd/workerd.capnp";
 const unitTests :Workerd.Config = (
   v8Flags = ["--expose-gc"],
   services = [
-    ( name = "transform-streams-test",
+    ( name = "globals-iteration-test",
       worker = (
         modules = [
-          (name = "worker", esModule = embed "transform-streams-test.js")
+          (name = "worker", esModule = embed "globals-iteration-test.js")
         ],
         compatibilityFlags = [
           "nodejs_compat",

@@ -732,9 +732,9 @@ wd_test(
 )
 
 wd_test(
-    src = "transform-streams-test.wd-test",
+    src = "globals-iteration-test.wd-test",
     args = ["--experimental"],
-    data = ["transform-streams-test.js"],
+    data = ["globals-iteration-test.js"],
 )
 
 wd_test(

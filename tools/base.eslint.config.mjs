@@ -48,6 +48,7 @@ const workerdGlobals = {
   TextEncoder: 'readonly',
   TextEncoderStream: 'readonly',
   TransformStream: 'readonly',
+  TransformStreamDefaultController: 'readonly',
   URL: 'readonly',
   URLPattern: 'readonly',
   URLSearchParams: 'readonly',
