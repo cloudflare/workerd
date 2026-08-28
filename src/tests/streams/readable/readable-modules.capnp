@@ -29,4 +29,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "draining-reader", esModule = embed "draining-reader.js"),
   (name = "data-volumes", esModule = embed "data-volumes.js"),
   (name = "backpressure", esModule = embed "backpressure.js"),
+  (name = "transfer", esModule = embed "transfer.js"),
 ];

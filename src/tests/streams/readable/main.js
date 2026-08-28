@@ -190,3 +190,5 @@ export {
   backpressureReadableHwmOne,
   backpressureReadableHwmLarge,
 } from 'backpressure';
+
+export { structuredCloneReadable } from 'transfer';

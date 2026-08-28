@@ -43,4 +43,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "reader-writer-acquisition", esModule = embed "reader-writer-acquisition.js"),
   (name = "cancel-reason-types", esModule = embed "cancel-reason-types.js"),
   (name = "gc-interplay", esModule = embed "gc-interplay.js"),
+  (name = "transfer", esModule = embed "transfer.js"),
 ];
