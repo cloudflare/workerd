@@ -118,6 +118,7 @@ wpt_test(
 
 wpt_test(
     name = "compression-ts",
+    size = "large",
     autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
     compat_flags = ["typescript_implemented_streams"],
     config = "compression-test-ts.ts",
