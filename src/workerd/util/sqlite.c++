@@ -599,6 +599,12 @@ void SqliteDatabase::init(kj::Maybe<kj::WriteMode> maybeMode) {
 
   auto memoryScope = enterMemoryScope();
 
+  // sqlite3_close_v2 is expected to be called even when sqlite3_open_v2 returns an error. It is
+  // expected that sqlite3_close_v2 sets up a database in need of close, or sets nullptr.
+  // sqlite3_close_v2 is safe to call on nullptr, so we should simply call this always, thus
+  // cleaning up a partial db even when SQLITE_CALL_NODB throws.
+  KJ_ON_SCOPE_FAILURE(sqlite3_close_v2(db));
+
   KJ_IF_SOME(mode, maybeMode) {
     int flags = SQLITE_OPEN_READWRITE;
     if (kj::has(mode, kj::WriteMode::CREATE)) {
@@ -632,8 +638,6 @@ void SqliteDatabase::init(kj::Maybe<kj::WriteMode> maybeMode) {
           sqlite3_open_v2(path.toString().cStr(), &db, SQLITE_OPEN_READONLY, vfs.getName().cStr()));
     }
   }
-
-  KJ_ON_SCOPE_FAILURE(sqlite3_close_v2(db));
 
   setupSecurity(db);
 
