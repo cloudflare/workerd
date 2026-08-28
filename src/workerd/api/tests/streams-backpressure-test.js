@@ -135,46 +135,6 @@ export const backpressureReadableHwmLarge = {
   },
 };
 
-// Test TransformStream with both readable and writable strategies
-// Inspired by: Bun test/js/web/streams/streams.test.js (TransformStream tests)
-export const backpressureTransformBothStrategies = {
-  async test() {
-    const ts = new TransformStream(
-      {
-        transform(chunk, controller) {
-          controller.enqueue(chunk);
-        },
-      },
-      { highWaterMark: 2 },
-      { highWaterMark: 4 }
-    );
-
-    const writer = ts.writable.getWriter();
-    const reader = ts.readable.getReader();
-
-    strictEqual(writer.desiredSize, 2, 'writable desiredSize');
-
-    writer.write(1);
-    writer.write(2);
-    writer.write(3);
-    writer.write(4);
-
-    const results = [];
-    for (let i = 0; i < 4; i++) {
-      const { value } = await reader.read();
-      results.push(value);
-    }
-
-    strictEqual(results.length, 4);
-    strictEqual(results[0], 1);
-    strictEqual(results[3], 4);
-
-    await writer.close();
-    const final = await reader.read();
-    ok(final.done);
-  },
-};
-
 // Test backpressure propagation through pipe chain
 // Inspired by: Bun test/js/web/streams/streams.test.js (pipeTo/pipeThrough tests)
 export const backpressurePipeChain = {

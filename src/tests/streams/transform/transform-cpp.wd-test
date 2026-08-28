@@ -1,0 +1,44 @@
+using Workerd = import "/workerd/workerd.capnp";
+using TransformModules = import "transform-modules.capnp";
+
+# Runs the transform streams suite against the C++ implementation;
+# transform-ts.wd-test runs the identical modules against the TypeScript
+# implementation.
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes. Date-gated semantics are pinned by flag:
+# - streams_enable_constructors + transformstream_enable_standard_constructor:
+#   the suite's subject is the JS-backed `new TransformStream(transformer)`
+#   (without the latter the constructor falls back to an
+#   IdentityTransformStream; see the legacy cell).
+# - fixup-transform-stream-backpressure (hyphenated, unusually):
+#   readable-side backpressure is
+#   actually applied when an enqueue crosses the high-water mark (see the
+#   legacy-backpressure cell for the original buggy behavior).
+# - capture_async_api_throws: async methods return rejected promises.
+# - writable_stream_spec_compliant_writer: spec-compliant writer
+#   lock/release semantics on the writable side (cf. the writable suite).
+# - workers_api_getters_setters_on_prototype: accessors live on prototypes.
+# - set_tostring_tag: Symbol.toStringTag branding.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-transform-cpp",
+      worker = (
+        modules = TransformModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+          "fixup-transform-stream-backpressure",
+          "capture_async_api_throws",
+          "workers_api_getters_setters_on_prototype",
+          "set_tostring_tag",
+          "writable_stream_spec_compliant_writer",
+        ],
+      )
+    ),
+  ],
+  # For gc.js (added with the expansion pass).
+  v8Flags = ["--expose-gc"],
+);

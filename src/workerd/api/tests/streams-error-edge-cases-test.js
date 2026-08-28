@@ -134,34 +134,6 @@ export const errorRaceWithCloseReadable = {
   },
 };
 
-// Test error thrown in TransformStream transform() callback using controller.error()
-// Inspired by: Bun test/js/web/streams/streams.test.js (TransformStream error handling)
-export const errorInTransformFlush = {
-  async test() {
-    let transformController;
-
-    const ts = new TransformStream({
-      start(controller) {
-        transformController = controller;
-      },
-      transform(chunk, controller) {
-        controller.enqueue(chunk);
-      },
-    });
-
-    const reader = ts.readable.getReader();
-
-    transformController.error(new Error('Transform error'));
-
-    await rejects(
-      async () => {
-        await reader.read();
-      },
-      { message: 'Transform error' }
-    );
-  },
-};
-
 // Test error propagation through nested tee branches
 // Inspired by: Bun test/js/web/streams/streams.test.js (tee error handling)
 export const errorPropagationTeeMultiBranch = {
