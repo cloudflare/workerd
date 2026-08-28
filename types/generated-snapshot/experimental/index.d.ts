@@ -14976,6 +14976,78 @@ interface Hyperdrive {
    */
   readonly database: string;
 }
+/**
+ * A handle to a dynamically-provisioned Hyperdrive connection, returned by
+ * `HyperdriveApi.get()`.
+ */
+interface HyperdriveDynamic extends Disposable {
+  /**
+   * The database name to use when connecting through this Hyperdrive.
+   */
+  readonly database: Promise<string>;
+  /*
+   * The randomly generated user to use when authenticating to your
+   * database via Hyperdrive.
+   */
+  readonly user: Promise<string>;
+  /*
+   * The randomly generated password to use when authenticating to your
+   * database via Hyperdrive.
+   */
+  readonly password: Promise<string>;
+  /**
+   * Open a TCP socket to the target database through this Hyperdrive.
+   *
+   */
+  connect(): Promise<Socket>;
+}
+/**
+ * Binding that provisions Hyperdrive connections at request time, rather than
+ * from static configuration.
+ */
+interface HyperdriveDynamicApi {
+  /**
+   * Provision a connection for the database described by `args`.
+   *
+   */
+  get(args: HyperdriveDynamicConfig): Promise<HyperdriveDynamic>;
+  /**
+   * Get a pre-generated connection string used for connecting to dynamic Hyperdrive.
+   */
+  getHyperdriveConnectionString(connectionString: string): Promise<string>;
+}
+/**
+ * Parameters identifying the database that a dynamically-provisioned
+ * Hyperdrive connection should target.
+ */
+interface HyperdriveDynamicConfig {
+  /**
+   * Generated connection string to pass into the dynamic worker.
+   *
+   */
+  dynamicHyperdriveConnectionString: string;
+  /**
+   * Connection string for the origin database Hyperdrive should connect to.
+   * Contains credentials, so treat it as a secret.
+   *
+   * The scheme selects the database engine. PostgreSQL origins are supported.
+   */
+  connectionString: string;
+  /**
+   * Region in which to place the connection pool. See the Hyperdrive
+   * documentation for the set of supported regions.
+   */
+  targetRegion: string;
+  /**
+   * Whether Hyperdrive should cache query results for this connection.
+   */
+  cachingEnabled?: boolean;
+  /**
+   * Maximum number of connections the pool may open to the origin database.
+   * Defaults to 60.
+   */
+  maxConnections?: number;
+}
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
