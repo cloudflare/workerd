@@ -13,4 +13,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "construction", esModule = embed "construction.js"),
   (name = "size-semantics", esModule = embed "size-semantics.js"),
   (name = "integration", esModule = embed "integration.js"),
+  (name = "reentrancy", esModule = embed "reentrancy.js"),
 ];
