@@ -1,0 +1,34 @@
+using Workerd = import "/workerd/workerd.capnp";
+using ReadableByteModules = import "readable-byte-modules.capnp";
+
+# The main C++ cell plus the dateless opt-in pedantic_wpt flag. Probed to
+# produce no observable deltas on this suite's surface so far; the shared
+# modules run unbranched (which-impl exports pedanticWpt should a delta
+# ever appear).
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-readable-byte-cpp-pedantic",
+      worker = (
+        modules = ReadableByteModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "streams_byob_reader_detaches_buffer",
+          "internal_stream_byob_return_view",
+          "transformstream_enable_standard_constructor",
+          "fixup-transform-stream-backpressure",
+          "capture_async_api_throws",
+          "workers_api_getters_setters_on_prototype",
+          "set_tostring_tag",
+          "writable_stream_spec_compliant_writer",
+          "pedantic_wpt",
+        ],
+        bindings = [
+          ( name = "SELF", service = "streams-readable-byte-cpp-pedantic" ),
+        ],
+      )
+    ),
+  ],
+  # For gc.js.
+  v8Flags = ["--expose-gc"],
+);
