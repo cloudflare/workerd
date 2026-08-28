@@ -130,3 +130,40 @@ export {
   nextThenReturnNoAwait,
   iteratorPrototypeShape,
 } from 'async-iteration';
+
+export {
+  enqueueInsideSize,
+  closeInsideSize,
+  cancelInsideSize,
+  readInsideSize,
+} from 'reentrancy';
+
+export {
+  chunkHeldByReference,
+  detachWhileQueuedObserved,
+} from 'buffer-lifecycle';
+
+export {
+  readAllTextRequestSmall,
+  readAllTextRequestBig,
+  readAllTextFailedPull,
+  readAllTextFailedStart,
+  readAllTextControllerError,
+  readAllTextLargeBody,
+  bodyConsumptionNormalizesBufferSourceChunks,
+  cloneWithStreamBody,
+  cancelBodyThenConsume,
+  fetchBodyRoundtrip,
+  fetchRequestBodyRoundtrip,
+  echoedBodyIsConsumable,
+} from 'integration-body';
+
+export {
+  disturbedStreamIntoResponse,
+  lockedStreamIntoResponse,
+  bodyIdentityAndLockCoupling,
+} from 'integration-locked-disturbed';
+
+export { pendingReadSurvivesGc, asyncIterationSurvivesGc } from 'gc';
+
+export { thenGetterFireCountOnRead } from 'then-interceptors';

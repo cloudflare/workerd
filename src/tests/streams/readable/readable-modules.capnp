@@ -20,4 +20,10 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "tee-reentrancy", esModule = embed "tee-reentrancy.js"),
   (name = "from", esModule = embed "from.js"),
   (name = "async-iteration", esModule = embed "async-iteration.js"),
+  (name = "reentrancy", esModule = embed "reentrancy.js"),
+  (name = "buffer-lifecycle", esModule = embed "buffer-lifecycle.js"),
+  (name = "integration-body", esModule = embed "integration-body.js"),
+  (name = "integration-locked-disturbed", esModule = embed "integration-locked-disturbed.js"),
+  (name = "gc", esModule = embed "gc.js"),
+  (name = "then-interceptors", esModule = embed "then-interceptors.js"),
 ];
