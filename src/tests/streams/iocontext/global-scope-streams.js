@@ -1,10 +1,15 @@
-// Copyright (c) 2025 Cloudflare, Inc.
+// Copyright (c) 2026 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-//
-// Ported from edgeworker streams-iocontext.ew-test
+
+// Streams created at GLOBAL SCOPE — module evaluation runs outside any
+// IoContext, so stream construction (and even module-scope consumption)
+// must not require one. Requests then use the module-scope streams via
+// SELF round-trips (migrated wholesale from streams-iocontext-test.js,
+// itself ported from the edgeworker streams-iocontext.ew-test).
 
 import { strictEqual } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
 
 // global-scope-readablestream
 const enc1 = new TextEncoder();
@@ -161,6 +166,54 @@ export const globalScopeReadablestream8 = {
   },
 };
 
+// A standard WritableStream allocates an AbortSignal for its
+// controller, which must not require an active IoContext (migrated
+// from streams-test.js).
+const moduleScopeWritable = new WritableStream();
+
+export const globalScopeWritablestream = {
+  test() {
+    strictEqual(moduleScopeWritable instanceof WritableStream, true);
+    strictEqual(moduleScopeWritable.locked, false);
+  },
+};
+
+// A byte stream constructed at module scope serves BYOB reads inside a
+// request in both implementations.
+const enc9 = new TextEncoder();
+const rs9 = new ReadableStream({
+  type: 'bytes',
+  start(c) {
+    c.enqueue(enc9.encode('ok'));
+    c.close();
+  },
+});
+
+export const globalScopeByteReadable = {
+  async test(ctrl, env) {
+    strictEqual(rs9 instanceof ReadableStream, true);
+    const response = await env.self.fetch('http://test/9');
+    strictEqual(await response.text(), 'ok');
+  },
+};
+
+// A TransformStream constructed at module scope. C++ CRASH BUG: the
+// mere EXISTENCE of a module-scope `new TransformStream()` SEGFAULTS
+// the C++ implementation when the first request enters the worker —
+// even if the stream is never touched again. The TypeScript
+// implementation constructs it and pipes through it inside a request
+// normally, so construction itself is guarded by implementation here.
+// TODO(bug): unguard once the crash is fixed.
+const ts10 = usingTsImpl ? new TransformStream() : null;
+
+export const globalScopeTransformStream = {
+  async test(ctrl, env) {
+    if (!usingTsImpl) return; // module-scope construction segfaults C++
+    const response = await env.self.fetch('http://test/10');
+    strictEqual(await response.text(), 'ok');
+  },
+};
+
 export default {
   async fetch(req) {
     const url = new URL(req.url);
@@ -247,6 +300,22 @@ export default {
         text += dec.decode(chunk);
       }
       return new Response(text);
+    }
+
+    // global-scope-byte-readable
+    if (url.pathname === '/9') {
+      const reader = rs9.getReader({ mode: 'byob' });
+      const { value } = await reader.read(new Uint8Array(8));
+      return new Response(value);
+    }
+
+    // global-scope-transform-stream
+    if (url.pathname === '/10') {
+      const enc = new TextEncoder();
+      const writer = ts10.writable.getWriter();
+      void writer.write(enc.encode('ok'));
+      void writer.close();
+      return new Response(ts10.readable);
     }
 
     throw new Error('boom');

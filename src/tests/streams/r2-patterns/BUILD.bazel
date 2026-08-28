@@ -1,0 +1,18 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The r2-patterns suite runs the same test modules under two configs:
+# r2-patterns-cpp against the C++ implementation, r2-patterns-ts against
+# the TypeScript implementation.
+
+r2_patterns_suite_srcs = glob(["*.js"]) + ["r2-patterns-modules.capnp"]
+
+wd_test(
+    src = "r2-patterns-cpp.wd-test",
+    data = r2_patterns_suite_srcs,
+)
+
+wd_test(
+    src = "r2-patterns-ts.wd-test",
+    args = ["--experimental"],
+    data = r2_patterns_suite_srcs,
+)

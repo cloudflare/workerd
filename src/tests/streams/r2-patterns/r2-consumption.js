@@ -1,6 +1,12 @@
-// Copyright (c) 2025 Cloudflare, Inc.
+// Copyright (c) 2026 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
+
+// R2-SDK-style consumption patterns, migrated wholesale from
+// streams-r2-patterns-test.js: readAtLeast-driven reads over JS byte
+// streams, identity and FixedLength streams, BYOB reads over tee
+// branches, Request clone consumption, and TextDecoderStream over a
+// Request body.
 
 import { strictEqual, ok } from 'node:assert';
 
