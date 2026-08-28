@@ -39,7 +39,8 @@ the abort reason).
 | 4 | ready at construction (no backpressure) | pending after a microtask, fulfills on a later turn | fulfilled within a microtask (spec) | `readyFulfillTiming` |
 | 5 | sync start() throw | captured; stream errored, writes reject | escapes the constructor (spec) | `newWritableStreamStartError` |
 | 6 | abort() on an errored stream | rejects with the stored error | fulfills with undefined (spec) | `newWritableStreamAbortError` |
-| 7 | startedness (see above) | sync write→abort: sink runs, write fulfills | write still queued: rejected with abort reason | `writableStreamAbortWhileWriting`, `writableStreamAbortWriteClosePending`, `writableStreamPromisesResolvedInOrder`, `writableStreamCloseThrowRejectsPromises` |
+| 6b | concurrent aborts | a fresh promise per abort() call | the same promise for both (spec); both fulfill undefined | `concurrentAbortPromiseIdentity` |
+| 7 | startedness (see above) | sync write→abort: sink runs, write fulfills; a same-turn chunk mutation after write() is NOT seen by the sink | write still queued: rejected with abort reason; the mutation IS seen | `writableStreamAbortWhileWriting`, `writableStreamAbortWriteClosePending`, `writableStreamPromisesResolvedInOrder`, `writableStreamCloseThrowRejectsPromises`, `chunkMutationVisibility` |
 | 8 | close hook racing an immediate abort | close hook runs; close+abort reject with its error | close still queued: hook never runs, close rejects with abort reason, abort fulfills | `writableStreamCloseThrowRejectsPromises` |
 | 9 | queue totals | size() → uint64 (fractions truncate; NaN/negative/±Infinity → TypeError); desiredSize narrowed through `int` (wraps past 2^31) | double arithmetic per spec; invalid size → RangeError "Invalid chunk size" | `floatingPointQueueTotals`, `fractionalSizeTruncation`, `invalidSizeReturnRejects` |
 | 10 | signal.reason for reasonless abort() | undefined (pedantic_wpt: AbortError DOMException) | AbortError DOMException (spec) | `abortSignalReason` |
@@ -50,13 +51,22 @@ Parity worth noting (probed, pinned): the whole in-flight abort matrix —
 abort-before-start reason identity on ready/closed, errored-state reason
 identity, sink abort suppressed after a bad-strategy error or a
 pre-existing controller error, in-flight write finishing with rejection
-during abort, both orders of `abort()`×`controller.error()` during an
+during abort, an abort during a slow in-flight write leaving the write to
+FULFILL, both orders of `abort()`×`controller.error()` during an
 in-flight write, sink abort waiting for in-flight start/write/close
-(`abort-matrix.js`, `writableStreamAbortTiming`); reentrant
-`writer.write()` from size() enqueues the inner chunk first; size() is
-never consulted for doomed writes (the TS sinks' `willAcceptWrite`
-invariant); a patched `Object.prototype.then` getter never fires while
-settling writer promises (they resolve with undefined).
+(`abort-matrix.js`, `writableStreamAbortTiming`,
+`errorRaceWithCloseWritable`); sink hook getters read exactly once at
+construction; a later sink write returning a rejected promise rejects
+that write, a REPLACED ready, and closed with the sink's error; sink
+write/close never run after a start() throw, however the failure
+surfaced; ready is replaced as soon as desiredSize reaches 0; a detached
+ArrayBuffer is an acceptable chunk (byteLength 0); a coercing
+`{valueOf}` highWaterMark is accepted via ToNumber; the user size() runs
+with an undefined receiver and one argument; reentrant `writer.write()`
+from size() enqueues the inner chunk first; size() is never consulted
+for doomed writes (the TS sinks' `willAcceptWrite` invariant); a patched
+`Object.prototype.then` getter never fires while settling writer
+promises (they resolve with undefined).
 
 ## Compatibility flags
 
@@ -74,14 +84,14 @@ settling writer promises (they resolve with undefined).
 | Module | Asserts |
 | --- | --- |
 | `api-surface.js` | writable globals exist; controller not constructable; bare ctor works (full IDL shape is WPT's) |
-| `construction.js` | ledger #1–#5, #12; fractional hwm accepted |
-| `sink-algorithms.js` | which sink hooks run with what arguments/controller; sync+async hook errors surface on writer promises (#5, #6); size() consulted per write |
-| `write-semantics.js` | chunk identity (subarrays, any JS value via Object.is); multiple pending writes; settlement ordering incl. under abort (#7) |
+| `construction.js` | ledger #1–#5, #12; fractional and ToNumber-coerced hwm accepted |
+| `sink-algorithms.js` | which sink hooks run with what arguments/controller; sync+async hook errors surface on writer promises (#5, #6); size() consulted per write; hook getters read once; second-write rejection fan-out; hooks silent after start throw |
+| `write-semantics.js` | chunk identity (subarrays, any JS value via Object.is, detached ArrayBuffers); mutation visibility (#7); multiple pending writes; settlement ordering incl. under abort (#7) |
 | `close-semantics.js` | close-throw promise fan-out vs abort (#7, #8); double close rejects TypeError |
 | `abort-semantics.js` | migrated abort lifecycle: reason propagation, signal event, persistent errored state, in-flight sequencing, terminal-state interactions (#7) |
-| `abort-matrix.js` | probed parity matrix (see above) + signal reason (#10) |
-| `backpressure.js` | desiredSize accounting/recovery; ready replacement; WPT floating-point scenarios (#9); erroring desiredSize (#11) |
-| `reentrancy.js` | size()-reentrant write ordering; releaseLock inside size (#12; flag-gated, cf. legacy-writer); controller.error inside write hook; doomed-write size skip |
+| `abort-matrix.js` | probed parity matrix (see above) + signal reason (#10) + concurrent-abort identity (#6b) |
+| `backpressure.js` | desiredSize accounting/recovery; ready replaced at capacity; WPT floating-point scenarios (#9); erroring desiredSize (#11) |
+| `reentrancy.js` | size()-reentrant write ordering; releaseLock inside size (#12; flag-gated, cf. legacy-writer); controller.error inside write hook; doomed-write size skip; size receiver/arity |
 | `then-interceptors.js` | then-getter never fires on writer promise settlement |
 | `gc.js` | pending write survives gc() with all user refs dropped (--expose-gc) |
 | `legacy-ctor-gate.js` | fully-unflagged: ctor Error + absent controller global |

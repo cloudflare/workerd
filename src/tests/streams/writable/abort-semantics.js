@@ -389,8 +389,10 @@ export const writableStreamWriterWithPendingAbort = {
   },
 };
 
-// writer.abort() during a slow in-flight write: the write settles rather
-// than hanging. Migrated from streams-error-edge-cases-test.js.
+// writer.abort() during a slow in-flight write: the abort waits for the
+// sink write, and since the sink write ultimately succeeds, the write
+// promise FULFILLS (parity). Migrated from
+// streams-error-edge-cases-test.js and tightened to the exact outcome.
 export const errorRaceWithCloseWritable = {
   async test() {
     let writeStarted = false;
@@ -405,17 +407,12 @@ export const errorRaceWithCloseWritable = {
 
     const writer = ws.getWriter();
 
-    const writePromise = writer.write('data').catch((e) => e);
+    const writePromise = writer.write('data');
 
     await scheduler.wait(5);
     ok(writeStarted, 'Write should have started');
 
-    await writer.abort(new Error('Abort wins'));
-
-    const writeResult = await writePromise;
-    ok(
-      writeResult === undefined || writeResult instanceof Error,
-      'Write should complete or error'
-    );
+    strictEqual(await writer.abort(new Error('Abort wins')), undefined);
+    strictEqual(await writePromise, undefined);
   },
 };

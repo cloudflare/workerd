@@ -191,3 +191,23 @@ export const abortSignalReason = {
     }
   },
 };
+
+// DIVERGENCE: two aborts issued while the first is still pending. The
+// spec returns the SAME promise for both (TypeScript); C++ mints a new
+// promise per call (the WPT aborting.any "multiple writer.abort()s"
+// case). Both fulfill with undefined.
+export const concurrentAbortPromiseIdentity = {
+  async test() {
+    const ws = new WritableStream({
+      async abort() {
+        await scheduler.wait(5);
+      },
+    });
+    const writer = ws.getWriter();
+    const a1 = writer.abort('x');
+    const a2 = writer.abort('y');
+    strictEqual(a1 === a2, usingTsImpl);
+    strictEqual(await a1, undefined);
+    strictEqual(await a2, undefined);
+  },
+};

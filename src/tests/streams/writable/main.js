@@ -28,6 +28,9 @@ export {
   newWritableStreamAbortError,
   newWritableStreamCloseError,
   writableStreamSizeAlgorithm,
+  sinkHooksCapturedAtConstruction,
+  secondWriteRejectionErrorsStream,
+  sinkHooksNotCalledAfterStartThrow,
 } from 'sink-algorithms';
 
 export {
@@ -35,6 +38,8 @@ export {
   writableStreamWriteSubarray,
   writableStreamWriteAny,
   writableStreamPromisesResolvedInOrder,
+  chunkMutationVisibility,
+  detachedBufferChunkPassesThrough,
 } from 'write-semantics';
 
 export {
@@ -69,6 +74,7 @@ export {
   abortThenControllerErrorInFlight,
   controllerErrorThenAbortInFlight,
   abortSignalReason,
+  concurrentAbortPromiseIdentity,
 } from 'abort-matrix';
 
 export {
@@ -86,6 +92,7 @@ export {
   releaseLockInsideSize,
   controllerErrorInsideWriteHook,
   sizeNotCalledForDoomedWrite,
+  sizeReceiverAndArity,
 } from 'reentrancy';
 
 export { thenGetterDoesNotFireOnWriterPromises } from 'then-interceptors';
