@@ -9,7 +9,7 @@
 // enqueue(), and erroring the transform from there used to drop the last
 // controller reference while its frame was still on the stack.
 
-import { strictEqual, ok } from 'node:assert';
+import { strictEqual, ok, deepStrictEqual } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 // DIVERGENCE (both UAF tests): with a read already PENDING, the
@@ -150,5 +150,330 @@ export const sizeCallbackErrorSequential = {
     strictEqual(results[0].reason.message, 'errored from size');
     strictEqual(results[1].status, 'rejected');
     strictEqual(results[1].reason.message, 'errored from size');
+  },
+};
+
+// --- Reentrant operations inside the readable-side size() ---
+//
+// These mirror WPT transform-streams/reentrant-strategies.any.js. Most of
+// that file's C++ expectedFailures are NOT reentrancy bugs: the WPT tests
+// use readableStrategy { highWaterMark: Infinity }, which the C++
+// constructor rejects outright (see hwmInfinityRejected in
+// construction.js), so the scenarios never run. Re-probed with a finite
+// high-water mark, the enqueue/terminate/cancel/write/sync-write/error
+// reentrancy semantics are PARITY, including error-object identity.
+// The genuinely divergent ops are read(), writer.close(), and
+// writable.abort() inside size() — pinned further below.
+
+async function drainToArray(readable) {
+  const reader = readable.getReader();
+  const items = [];
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return items;
+    items.push(value);
+  }
+}
+
+// controller.enqueue() inside size() (parity): the nested enqueue lands
+// first, so the chunks come out reversed.
+export const enqueueInsideSize = {
+  async test() {
+    let controller;
+    let calls = 0;
+    const ts = new TransformStream(
+      {
+        start(c) {
+          controller = c;
+        },
+      },
+      undefined,
+      {
+        size() {
+          if (++calls < 2) controller.enqueue('b');
+          return 1;
+        },
+        highWaterMark: 10,
+      }
+    );
+    const writer = ts.writable.getWriter();
+    await Promise.all([writer.write('a'), writer.close()]);
+    strictEqual(calls, 2);
+    deepStrictEqual(await drainToArray(ts.readable), ['b', 'a']);
+  },
+};
+
+// controller.terminate() inside size() (parity): the readable closes
+// before the chunk becomes readable, so the chunk is unreadable and the
+// stream drains empty; the write still succeeds.
+export const terminateInsideSize = {
+  async test() {
+    let controller;
+    const ts = new TransformStream(
+      {
+        start(c) {
+          controller = c;
+        },
+      },
+      undefined,
+      {
+        size() {
+          controller.terminate();
+          return 1;
+        },
+        highWaterMark: 10,
+      }
+    );
+    const writer = ts.writable.getWriter();
+    await writer.write('a');
+    deepStrictEqual(await drainToArray(ts.readable), []);
+  },
+};
+
+// readable.cancel() inside size() (parity): the write succeeds, the
+// cancel promise fulfills, and the writer's closed rejects with the
+// cancel reason — the very object, not a copy.
+export const readableCancelInsideSize = {
+  async test() {
+    const reason = new Error('cancel-reason');
+    let cancelPromise;
+    const ts = new TransformStream({}, undefined, {
+      size() {
+        cancelPromise = ts.readable.cancel(reason);
+        return 1;
+      },
+      highWaterMark: 10,
+    });
+    const writer = ts.writable.getWriter();
+    await writer.write('a');
+    let closedErr;
+    await writer.closed.catch((e) => (closedErr = e));
+    strictEqual(closedErr, reason);
+    strictEqual(await cancelPromise, undefined);
+  },
+};
+
+// writer.write() inside size() (parity): the outer write's size() issues
+// a nested write whose own size() call is suppressed by the calls guard;
+// the nested chunk is enqueued after the outer one.
+export const writerWriteInsideSize = {
+  async test() {
+    let writer;
+    let writePromise1;
+    let calls = 0;
+    const ts = new TransformStream({}, undefined, {
+      size() {
+        if (++calls < 2) writePromise1 = writer.write('a');
+        return 1;
+      },
+      highWaterMark: 10,
+    });
+    writer = ts.writable.getWriter();
+    await scheduler.wait(10);
+    const writePromise2 = writer.write('b');
+    strictEqual(calls, 1);
+    await Promise.all([writePromise1, writePromise2, writer.close()]);
+    strictEqual(calls, 2);
+    deepStrictEqual(await drainToArray(ts.readable), ['b', 'a']);
+  },
+};
+
+// writer.write() inside a size() triggered by controller.enqueue()
+// (parity): the nested enqueue completes first, so the chunks come out
+// in the opposite order, and both size() calls happen synchronously
+// within the enqueue.
+export const syncWriterWriteInsideSize = {
+  async test() {
+    let controller;
+    let writer;
+    let writePromise;
+    let calls = 0;
+    const ts = new TransformStream(
+      {
+        start(c) {
+          controller = c;
+        },
+      },
+      undefined,
+      {
+        size() {
+          if (++calls < 2) writePromise = writer.write('a');
+          return 1;
+        },
+        highWaterMark: 10,
+      }
+    );
+    writer = ts.writable.getWriter();
+    await scheduler.wait(10);
+    controller.enqueue('b');
+    strictEqual(calls, 2);
+    await Promise.all([writePromise, writer.close()]);
+    deepStrictEqual(await drainToArray(ts.readable), ['a', 'b']);
+  },
+};
+
+// controller.error() from size() rejects the read with the SAME error
+// object on both sides (parity; identity is what WPT's
+// promise_rejects_exactly checks — the message-level shape is pinned by
+// sizeCallbackErrorSequential above).
+export const sizeCallbackErrorIdentity = {
+  async test() {
+    const err = new Error('identity-check');
+    let controller;
+    const ts = new TransformStream(
+      {
+        start(c) {
+          controller = c;
+        },
+      },
+      undefined,
+      {
+        size() {
+          controller.error(err);
+          return 1;
+        },
+        highWaterMark: 10,
+      }
+    );
+    const writer = ts.writable.getWriter();
+    await writer.write('a');
+    let readErr;
+    await ts.readable
+      .getReader()
+      .read()
+      .catch((e) => (readErr = e));
+    strictEqual(readErr, err);
+  },
+};
+
+// reader.read() inside size() at highWaterMark 0. Parity: the enqueue
+// that triggers size() sees the reentrant read; that read is fulfilled
+// by the PENDING WRITE's chunk (not the enqueued one — see
+// whatwg/streams#794), the write completes, and size() is not called
+// again for the handed-off chunk. DIVERGENCE in the total size() count:
+// C++ consults size() once more when the enqueued chunk is later pulled,
+// TypeScript never does.
+export const readInsideSize = {
+  async test() {
+    let controller;
+    let readPromise;
+    let calls = 0;
+    let reader;
+    const ts = new TransformStream(
+      {
+        start(c) {
+          controller = c;
+        },
+      },
+      undefined,
+      {
+        size() {
+          readPromise = reader.read();
+          ++calls;
+          return 1;
+        },
+        highWaterMark: 0,
+      }
+    );
+    reader = ts.readable.getReader();
+    const writer = ts.writable.getWriter();
+    let writeResolved = false;
+    const writePromise = writer.write('b').then(() => {
+      writeResolved = true;
+    });
+    await scheduler.wait(10);
+    strictEqual(writeResolved, false);
+    controller.enqueue('a');
+    strictEqual(calls, 1);
+    await scheduler.wait(10);
+    strictEqual(writeResolved, true);
+    const { value, done } = await readPromise;
+    strictEqual(done, false);
+    strictEqual(value, 'b');
+    await writePromise;
+    strictEqual(calls, usingTsImpl ? 1 : 2);
+  },
+};
+
+// DIVERGENCE: writer.close() inside the size() triggered by
+// controller.enqueue() (highWaterMark 1). TypeScript (spec): the
+// enqueued chunk is still delivered, then the stream reads done. C++:
+// the reentrant close wins immediately — the queued chunk is dropped and
+// the first read is already done. The close promise fulfills either way.
+export const writerCloseInsideSize = {
+  async test() {
+    let writer;
+    let closePromise;
+    let controller;
+    const ts = new TransformStream(
+      {
+        start(c) {
+          controller = c;
+        },
+      },
+      undefined,
+      {
+        size() {
+          closePromise = writer.close();
+          return 1;
+        },
+        highWaterMark: 1,
+      }
+    );
+    writer = ts.writable.getWriter();
+    const reader = ts.readable.getReader();
+    await scheduler.wait(10);
+    controller.enqueue('a');
+    const r1 = await reader.read();
+    if (usingTsImpl) {
+      strictEqual(r1.done, false);
+      strictEqual(r1.value, 'a');
+      const r2 = await reader.read();
+      strictEqual(r2.done, true);
+    } else {
+      strictEqual(r1.done, true);
+    }
+    strictEqual(await closePromise, undefined);
+  },
+};
+
+// DIVERGENCE: writable.abort() inside the size() triggered by
+// controller.enqueue() (highWaterMark 1). TypeScript (spec): the queued
+// chunk is still delivered, then reads reject with the abort reason.
+// C++: the reentrant abort wins immediately — the first read already
+// rejects. The reason keeps identity and the abort promise fulfills on
+// both sides.
+export const writableAbortInsideSize = {
+  async test() {
+    const reason = new Error('abort-reason');
+    let abortPromise;
+    let controller;
+    const ts = new TransformStream(
+      {
+        start(c) {
+          controller = c;
+        },
+      },
+      undefined,
+      {
+        size() {
+          abortPromise = ts.writable.abort(reason);
+          return 1;
+        },
+        highWaterMark: 1,
+      }
+    );
+    const reader = ts.readable.getReader();
+    await scheduler.wait(10);
+    controller.enqueue('a');
+    if (usingTsImpl) {
+      const r1 = await reader.read();
+      strictEqual(r1.done, false);
+      strictEqual(r1.value, 'a');
+    }
+    let readErr;
+    await reader.read().catch((e) => (readErr = e));
+    strictEqual(readErr, reason);
+    strictEqual(await abortPromise, undefined);
   },
 };

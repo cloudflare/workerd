@@ -46,3 +46,33 @@ export const highWaterMarkValidated = {
     }
   },
 };
+
+// DIVERGENCE, and the root cause of most WPT reentrant-strategies (and
+// several errors.any/strategies.any) C++ expectedFailures: a readable
+// strategy with highWaterMark: Infinity is ACCEPTED by TypeScript (the
+// spec allows any non-negative number) but REJECTED by the C++
+// constructor's integer conversion. The WPT scenarios built on
+// { highWaterMark: Infinity } therefore never construct the stream under
+// C++ — re-probed with finite high-water marks, most of those behaviors
+// are parity (see reentrancy.js).
+export const hwmInfinityRejected = {
+  test() {
+    if (usingTsImpl) {
+      new TransformStream(undefined, undefined, {
+        highWaterMark: Infinity,
+      });
+      new TransformStream(undefined, { highWaterMark: Infinity }, undefined);
+    } else {
+      for (const args of [
+        [undefined, undefined, { highWaterMark: Infinity }],
+        [undefined, { highWaterMark: Infinity }, undefined],
+      ]) {
+        throws(() => new TransformStream(...args), {
+          name: 'TypeError',
+          message:
+            'The value cannot be converted because it is not an integer.',
+        });
+      }
+    }
+  },
+};

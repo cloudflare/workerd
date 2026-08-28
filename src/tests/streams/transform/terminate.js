@@ -68,3 +68,41 @@ export const errorAfterTerminateWithQueuedChunk = {
     }
   },
 };
+
+// DIVERGENCE: terminate() immediately after readable.cancel() (the WPT
+// general.any seed). Both sides fulfill the cancel promise and let
+// terminate() return without throwing, but the writable's fate differs:
+// C++ keeps the CANCEL reason — closed/write reject with the very reason
+// object; TypeScript lets the terminate win — closed/write reject with
+// the terminate TypeError.
+export const terminateAfterReadableCancel = {
+  async test() {
+    const reason = new Error('cancel-reason');
+    let ctrl;
+    const ts = new TransformStream({
+      start(c) {
+        ctrl = c;
+      },
+    });
+    const writer = ts.writable.getWriter();
+    const cancelPromise = ts.readable.cancel(reason);
+    ctrl.terminate();
+    strictEqual(await cancelPromise, undefined);
+
+    if (usingTsImpl) {
+      const expected = {
+        name: 'TypeError',
+        message: 'The transform stream has been terminated',
+      };
+      await rejects(writer.closed, expected);
+      await rejects(writer.write('x'), expected);
+    } else {
+      let closedErr;
+      await writer.closed.catch((e) => (closedErr = e));
+      strictEqual(closedErr, reason);
+      let writeErr;
+      await writer.write('x').catch((e) => (writeErr = e));
+      strictEqual(writeErr, reason);
+    }
+  },
+};

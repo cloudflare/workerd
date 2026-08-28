@@ -23,6 +23,7 @@ export {
 export {
   readableWritableTypeValidation,
   highWaterMarkValidated,
+  hwmInfinityRejected,
 } from 'construction';
 
 export {
@@ -35,6 +36,7 @@ export {
 export {
   terminateClosesReadableErrorsWritable,
   errorAfterTerminateWithQueuedChunk,
+  terminateAfterReadableCancel,
 } from 'terminate';
 
 export {
@@ -45,6 +47,7 @@ export {
   syncErrorDuringFlush,
   asyncErrorDuringFlush,
   errorInTransformFlush,
+  errorNoopAfterTransformThrow,
 } from 'error-propagation';
 
 export {
@@ -58,6 +61,15 @@ export {
   sizeCallbackErrorDoesNotUAF,
   sizeCallbackErrorAndThrowDoesNotUAF,
   sizeCallbackErrorSequential,
+  enqueueInsideSize,
+  terminateInsideSize,
+  readableCancelInsideSize,
+  writerWriteInsideSize,
+  syncWriterWriteInsideSize,
+  sizeCallbackErrorIdentity,
+  readInsideSize,
+  writerCloseInsideSize,
+  writableAbortInsideSize,
 } from 'reentrancy';
 
 export { transformRoundtrip } from 'roundtrip';
