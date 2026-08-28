@@ -250,3 +250,47 @@ export const errorInTransformFlush = {
     );
   },
 };
+
+// controller.error() is a no-op after a transformer hook has thrown
+// (parity, including error identity): the write, subsequent reads, and
+// both closed promises stay rejected with the ORIGINAL thrown error.
+// The readable strategy pins highWaterMark 1 so the first write is not
+// held by default-hwm-0 backpressure (in which case transform would
+// never run; that latch shape is pinned in backpressure.js).
+export const errorNoopAfterTransformThrow = {
+  async test() {
+    const thrown = new Error('thrown-from-transform');
+    const late = new Error('late-error');
+    let controller;
+    const ts = new TransformStream(
+      {
+        start(c) {
+          controller = c;
+        },
+        transform() {
+          throw thrown;
+        },
+      },
+      undefined,
+      { highWaterMark: 1 }
+    );
+    const writer = ts.writable.getWriter();
+
+    let writeErr;
+    await writer.write('a').catch((e) => (writeErr = e));
+    strictEqual(writeErr, thrown);
+
+    // A later error() must not replace the error (and must not throw).
+    controller.error(late);
+
+    let readErr;
+    await ts.readable
+      .getReader()
+      .read()
+      .catch((e) => (readErr = e));
+    strictEqual(readErr, thrown);
+    let closedErr;
+    await writer.closed.catch((e) => (closedErr = e));
+    strictEqual(closedErr, thrown);
+  },
+};

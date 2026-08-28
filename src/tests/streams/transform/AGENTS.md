@@ -25,6 +25,11 @@ basics) are parity under direct observation and are pinned as such.
 | 6 | invalid highWaterMark (either strategy) | TypeError (jsg uint64 boundary) | RangeError "Invalid highWaterMark" | `highWaterMarkValidated` |
 | 7 | then-getter fires settling a write→read cycle | 2 (harness context) | 3 | `thenGetterFireCount` |
 | 8 | backpressure RELEASE at readable HWM | RACY: the pending write either completes or latches forever — the reason WPT backpressure.any is disabled for C++ ("A hanging Promise was canceled"); only the race-independent prefix is asserted | deterministic spec flow: drain releases the write | `backpressureAppliedAtReadableHwm` |
+| 9 | readable strategy `highWaterMark: Infinity` | TypeError at construction (integer conversion) — the ROOT CAUSE of most WPT reentrant-strategies/errors.any C++ expectedFailures, whose scenarios never construct | accepted (spec) | `hwmInfinityRejected` |
+| 10 | writer.close() inside size() (enqueue-triggered, hwm 1) | reentrant close wins: queued chunk dropped, first read done | chunk delivered, then done (spec) | `writerCloseInsideSize` |
+| 11 | writable.abort() inside size() (enqueue-triggered, hwm 1) | reentrant abort wins: first read rejects the reason | chunk delivered, then reads reject (spec) | `writableAbortInsideSize` |
+| 12 | read() inside size() at hwm 0 — total size() calls | 2 (size consulted again when the enqueued chunk is pulled) | 1 (spec) — the handoff/read-value shape is parity | `readInsideSize` |
+| 13 | terminate() immediately after readable.cancel() | cancel reason wins: closed/write reject the reason object | terminate wins: closed/write reject the terminate TypeError | `terminateAfterReadableCancel` |
 
 Parity worth noting (probed, pinned): cancel hook runs (not flush) with
 the reason for both readable.cancel() and writable.abort(), exactly once
@@ -36,6 +41,15 @@ sides (only the release diverges, #8); default readable strategy is
 hwm 0; chunk identity through the transform; a buffer detached while its
 view is queued is observed detached by the reader; queue totals recorded
 at write time.
+
+Reentrancy parity (probed at FINITE hwm, where the WPT originals use the
+C++-rejected Infinity, #9): enqueue/terminate/readable.cancel/
+writer.write/sync writer.write inside the readable-side size() all match
+the WPT spec expectations on both sides — nested-enqueue chunk reversal
+included — and controller.error() from size() preserves error-object
+identity. controller.error() after a transformer hook throw is a no-op
+on both sides (identity preserved). Only the ops in #10-#12 genuinely
+diverge.
 
 ## Compatibility flags
 
@@ -51,13 +65,13 @@ at write time.
 | Module | Asserts |
 | --- | --- |
 | `api-surface.js` | transform globals; controller not constructable; bare ctor is standard pass-through, not ITS |
-| `construction.js` | ledger #5, #6 |
+| `construction.js` | ledger #5, #6, #9 |
 | `transformer-algorithms.js` | start/transform/flush ordering, async hooks, chunk-type freedom; hook shape + prototype-chain (parity) |
-| `error-propagation.js` | sync/async start/transform/flush error fan-out across writes/close/readable (#1); controller.error() rejects reads |
+| `error-propagation.js` | sync/async start/transform/flush error fan-out across writes/close/readable (#1); controller.error() rejects reads; error() no-op after hook throw (parity, identity) |
 | `backpressure.js` | writable desiredSize through the transform; dual strategies; default readable hwm 0; latch + racy release (#8) |
 | `cancel-matrix.js` | cancel-hook reason/identity/once (parity) + fan-out (#3) |
-| `terminate.js` | terminate fates (parity) + late error (#4) |
-| `reentrancy.js` | size()-error UAF regressions (#2, no-crash guarantee) + sequential parity shape |
+| `terminate.js` | terminate fates (parity) + late error (#4) + terminate-after-cancel (#13) |
+| `reentrancy.js` | size()-error UAF regressions (#2) + sequential/identity shapes; all 9 WPT reentrant-in-size() ops: 6 parity at finite hwm, #10-#12 divergences |
 | `buffer-lifecycle.js` | chunk identity; detach-while-queued observed by reader (parity) |
 | `then-interceptors.js` | ledger #7 |
 | `roundtrip.js` | JS transform → ITS pipe does not hang (regression) |
