@@ -19,4 +19,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "gc", esModule = embed "gc.js"),
   (name = "integration", esModule = embed "integration.js"),
   (name = "js-compat", esModule = embed "js-compat.js"),
+  (name = "draining-reader", esModule = embed "draining-reader.js"),
 ];

@@ -22,4 +22,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "then-interceptors", esModule = embed "then-interceptors.js"),
   (name = "buffer-lifecycle", esModule = embed "buffer-lifecycle.js"),
   (name = "gc", esModule = embed "gc.js"),
+  (name = "draining-reader", esModule = embed "draining-reader.js"),
 ];
