@@ -122,7 +122,8 @@ class EventSource: public EventTarget {
 
   // Called by the internal implementation to notify the EventSource about messages
   // received from the server.
-  void enqueueMessages(kj::Array<PendingMessage> messages);
+  void enqueueMessages(
+      kj::Array<PendingMessage> messages, kj::Rc<jsg::WeakRef<EventSource>> weakSelf);
 
   // Called by the internal implementation to notify the EventSource that the server
   // has provided a new reconnection time.

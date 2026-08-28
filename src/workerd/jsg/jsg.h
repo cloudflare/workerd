@@ -59,7 +59,7 @@ namespace workerd::jsg {
 
 #define JSG_RESOURCE_TYPE(Type, ...)                                                               \
   static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = ::workerd::jsg::JsgKind::RESOURCE; \
-  using jsgSuper = jsgThis;                                                                        \
+  using jsgSuper = typename Type::jsgThis;                                                         \
   using jsgThis = Type;                                                                            \
   inline kj::StringPtr jsgGetMemoryName() const override {                                         \
     return #Type##_kjc;                                                                            \
@@ -1390,6 +1390,10 @@ class Object: private Wrappable {
   // to explicitly declare the default constructor.
   Object() = default;
 
+  inline Object* jsgTryGetObject() override {
+    return this;
+  }
+
   inline void jsgVisitForGc(GcVisitor& visitor) override {}
 
   // Subclasses should override these to provide appropriate information for
@@ -1454,6 +1458,16 @@ class Object: private Wrappable {
   template <typename>
   friend class WeakRef;
 };
+
+// Declared in wrappable.h; see there for why this check exists.
+template <typename T>
+T& downcastObject(Object& object) {
+  T* result = dynamic_cast<T*>(&object);
+  if (result == nullptr) {
+    reportWrapperTypeMismatch(typeid(T), typeid(object));
+  }
+  return *result;
+}
 
 // Ref<T> is a reference to a resource type (a type with a JSG_RESOURCE_TYPE block) living on
 // the V8 heap.
@@ -1560,8 +1574,12 @@ class Ref {
   //
   // It is an error to attach a wrapper when another wrapper is already attached. Hence,
   // typically this should only be called on a newly-allocated object.
-  void attachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object) {
-    inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>());
+  // `tag` is the per-type CppHeapPointerTag for T, computed by the caller via
+  // TypeWrapper::wrappableTag<T>() (the caller has the TypeWrapper and thus the full type list
+  // needed to number T; Ref<T> does not).
+  void attachWrapper(
+      v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTag tag) {
+    inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>(), tag);
   }
 
   // Obtain a weak reference to the referenced object. The weak reference does not keep the

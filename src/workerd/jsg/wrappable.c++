@@ -15,6 +15,8 @@
 
 #include <kj/async.h>
 #include <kj/debug.h>
+
+#include <cstdlib>
 #if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
 #include <sanitizer/asan_interface.h>
 #endif
@@ -85,7 +87,9 @@ using JSGWrappable = workerd::jsg::Wrappable;
 // condemned after that point and will be deleted shortly thereafter.
 class Wrappable::CppgcShim final: public v8::Object::Wrappable {
  public:
-  CppgcShim(JSGWrappable& wrappable): state(Active{kj::addRef(wrappable)}) {
+  CppgcShim(JSGWrappable& wrappable, v8::CppHeapPointerTag tag)
+      : tag(tag),
+        state(Active{kj::addRef(wrappable)}) {
     KJ_DASSERT(wrappable.cppgcShim == kj::none);
     wrappable.cppgcShim = *this;
   }
@@ -164,30 +168,49 @@ class Wrappable::CppgcShim final: public v8::Object::Wrappable {
     return false;
   }
 
+  // The per-type CppHeapPointerTag this shim was Wrapped with. A shim is only ever reused for the
+  // same tag (see HeapTracer::freelistedShimsByTag), so this value is fixed for the shim's whole
+  // lifetime and identifies which freelist bucket it belongs to.
+  v8::CppHeapPointerTag tag;
+
   mutable kj::OneOf<Active, Freelisted, Dead> state;
   // This is `mutable` because `Trace()` is const. We configure V8 to perform traces atomically in
   // the main thread so concurrency is not a concern.
 };
 
+kj::Maybe<JSGWrappable::CppgcShim&>& HeapTracer::freelistHeadFor(v8::CppHeapPointerTag tag) {
+  auto index = wrappableTagBucketIndex(static_cast<uint16_t>(tag));
+  // Guaranteed in range by the static_assert in TypeWrapper::wrappableTag<T>() at every wrap site;
+  // this is a defensive backstop for the non-resource catch-all and any future direct callers.
+  KJ_ASSERT(index < kMaxWrappableTags);
+  return freelistedShimsByTag[index];
+}
+
 void HeapTracer::addToFreelist(JSGWrappable::CppgcShim& shim) {
+  auto& head = freelistHeadFor(shim.tag);
   auto& freelisted = shim.state.init<JSGWrappable::CppgcShim::Freelisted>();
-  freelisted.next = freelistedShims;
+  freelisted.next = head;
   KJ_IF_SOME(next, freelisted.next) {
     next.state.get<JSGWrappable::CppgcShim::Freelisted>().prev = &freelisted.next;
   }
-  freelisted.prev = &freelistedShims;
-  freelistedShims = shim;
+  freelisted.prev = &head;
+  head = shim;
 }
 
-JSGWrappable::CppgcShim* HeapTracer::allocateShim(JSGWrappable& wrappable) {
+JSGWrappable::CppgcShim* HeapTracer::allocateShim(
+    JSGWrappable& wrappable, v8::CppHeapPointerTag tag) {
   // Under gc-stress (either turn-boundary or alloc mode), skip freelist reuse so each freed shim
   // keeps a unique address and ASAN poisoning sticks, giving cleaner use-after-free reports.
   if (!isGcStressModeForTest() && !isAllocGcStressModeForTest()) {
-    KJ_IF_SOME(shim, freelistedShims) {
-      freelistedShims = shim.state.get<JSGWrappable::CppgcShim::Freelisted>().next;
-      KJ_IF_SOME(next, freelistedShims) {
-        next.state.get<JSGWrappable::CppgcShim::Freelisted>().prev = &freelistedShims;
+    // Only reuse a shim from the bucket for this exact tag, so a recycled shim's table-entry tag
+    // never changes and a stale wrapper handle can't be confused across types.
+    auto& head = freelistHeadFor(tag);
+    KJ_IF_SOME(shim, head) {
+      head = shim.state.get<JSGWrappable::CppgcShim::Freelisted>().next;
+      KJ_IF_SOME(next, head) {
+        next.state.get<JSGWrappable::CppgcShim::Freelisted>().prev = &head;
       }
+      KJ_DASSERT(shim.tag == tag);
       shim.state = JSGWrappable::CppgcShim::Active{kj::addRef(wrappable)};
       KJ_DASSERT(wrappable.cppgcShim == kj::none);
       wrappable.cppgcShim = shim;
@@ -195,17 +218,20 @@ JSGWrappable::CppgcShim* HeapTracer::allocateShim(JSGWrappable& wrappable) {
     }
   }
   auto& cppgcAllocHandle = isolate->GetCppHeap()->GetAllocationHandle();
-  auto* shim = cppgc::MakeGarbageCollected<JSGWrappable::CppgcShim>(cppgcAllocHandle, wrappable);
+  auto* shim =
+      cppgc::MakeGarbageCollected<JSGWrappable::CppgcShim>(cppgcAllocHandle, wrappable, tag);
   return shim;
 }
 
 void HeapTracer::clearFreelistedShims() {
-  for (;;) {
-    KJ_IF_SOME(shim, freelistedShims) {
-      freelistedShims = shim.state.get<JSGWrappable::CppgcShim::Freelisted>().next;
-      shim.state = JSGWrappable::CppgcShim::Dead{};
-    } else {
-      break;
+  for (auto& head: freelistedShimsByTag) {
+    for (;;) {
+      KJ_IF_SOME(shim, head) {
+        head = shim.state.get<JSGWrappable::CppgcShim::Freelisted>().next;
+        shim.state = JSGWrappable::CppgcShim::Dead{};
+      } else {
+        break;
+      }
     }
   }
 }
@@ -215,6 +241,54 @@ void HeapTracer::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("wrapper", wrapper);
   }
   // TODO(soon): Track the other fields here?
+}
+
+Wrappable* Wrappable::unwrapFromShim(
+    v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange) {
+  // Read the CppgcShim out of V8's CppHeap pointer table, requiring the stored tag to fall within
+  // `tagRange`. If the object was never wrapped, or its tag is outside the range (a type-confused
+  // or forged handle), Unwrap returns nullptr.
+  auto* shim =
+      static_cast<CppgcShim*>(v8::Object::Unwrap<v8::Object::Wrappable>(isolate, object, tagRange));
+  if (shim == nullptr) {
+    return nullptr;
+  }
+
+  // Dispatch through the shim's owning reference, which is the lifetime-correct pointer: it is a
+  // kj::Own<Wrappable> that keeps the object alive for as long as the shim is Active. A minor-GC'd
+  // (Freelisted) or dead shim can never be reached here, because its table entry is only ever
+  // populated while Active (attachWrapper/allocateShim write it) and per-type freelisting keeps a
+  // recycled shim's tag constant, so a stale handle either misses the range or resolves to a live
+  // object of the same type.
+  KJ_IF_SOME(active, shim->state.tryGet<CppgcShim::Active>()) {
+    return active.wrappable.get();
+  }
+  return nullptr;
+}
+
+Wrappable* Wrappable::unwrapFromShimAnyType(v8::Isolate* isolate, v8::Local<v8::Object> object) {
+  return unwrapFromShim(isolate, object, v8::kObjectWrappableTagRange);
+}
+
+Wrappable* Wrappable::unwrapFromShimInRangeOrAbort(
+    v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange) {
+  // Unwrap with the wide wrappable range so Object::Unwrap never faults, then range-check the shim's
+  // own tag ourselves. See the header for why the check can't be delegated to Object::Unwrap, and
+  // why an out-of-range tag here is a memory-safety violation that must abort.
+  auto* shim = static_cast<CppgcShim*>(
+      v8::Object::Unwrap<v8::Object::Wrappable>(isolate, object, v8::kObjectWrappableTagRange));
+  if (shim != nullptr) {
+    auto tag = static_cast<uint16_t>(shim->tag);
+    if (tag >= static_cast<uint16_t>(tagRange.first) &&
+        tag <= static_cast<uint16_t>(tagRange.last)) {
+      KJ_IF_SOME(active, shim->state.tryGet<CppgcShim::Active>()) {
+        return active.wrappable.get();
+      }
+    }
+  }
+
+  KJ_LOG(FATAL, "wrapper type mismatch: object's tag is outside the expected range");
+  abort();
 }
 
 kj::Own<JSGWrappable> JSGWrappable::detachWrapper(bool shouldFreelistShim) {
@@ -339,8 +413,10 @@ void Wrappable::traceFromV8(cppgc::Visitor& cppgcVisitor) {
   jsgVisitForGc(visitor);
 }
 
-void Wrappable::attachWrapper(
-    v8::Isolate* isolate, v8::Local<v8::Object> object, bool needsGcTracing) {
+void Wrappable::attachWrapper(v8::Isolate* isolate,
+    v8::Local<v8::Object> object,
+    bool needsGcTracing,
+    v8::CppHeapPointerTag tag) {
   auto& tracer = HeapTracer::getTracer(isolate);
 
   KJ_REQUIRE(wrapper == kj::none);
@@ -389,17 +465,19 @@ void Wrappable::attachWrapper(
 
   // Set up internal fields for a newly-allocated object.
   KJ_REQUIRE(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
-  // The third argument is the type tag, a small integer that should be
-  // different for every pointer type to avoid type confusion attacks.  We just
-  // use the slot index for now, since we have a different pointer type for
-  // each slot.
+  // Internal field 0 holds a marker identifying this as a workerd API object; see
+  // isWorkerdApiObject(). The marker's address is a small integer type-tagged by slot index.
   auto tagAddress = const_cast<uint16_t*>(&WORKERD_WRAPPABLE_TAG);
   object->SetAlignedPointerInInternalField(WRAPPABLE_TAG_FIELD_INDEX, tagAddress,
       static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX));
-  object->SetAlignedPointerInInternalField(WRAPPED_OBJECT_FIELD_INDEX, this,
-      static_cast<v8::EmbedderDataTypeTag>(WRAPPED_OBJECT_FIELD_INDEX));
 
-  v8::Object::Wrap<WRAPPABLE_TAG>(isolate, object, tracer.allocateShim(*this));
+  // The C++ object is reached only through the CppgcShim, stored in V8's CppHeap pointer table
+  // with a per-type tag. There is deliberately no second, independently-corruptible pointer to
+  // the object in an internal field: a single tagged handle means dispatch and GC lifetime can
+  // never be driven by different pointers, closing the wrapper type-confusion / use-after-free
+  // class of bugs. The shim carries the same tag so it lands in the matching freelist bucket.
+  auto* shim = tracer.allocateShim(*this, tag);
+  v8::Object::Wrap(isolate, object, shim, tag);
 
   if (strongRefcount > 0) {
     strongWrapper.Reset(isolate, object);
@@ -425,7 +503,8 @@ v8::Local<v8::Object> Wrappable::attachOpaqueWrapper(
   // Null prototype: opaque wrappers flow through v8::Promise::Resolver::Resolve(), whose thenable
   // check does Get(value, "then"). A null prototype keeps that lookup off Object.prototype.
   jsg::check(object->SetPrototype(context, v8::Null(isolate)));
-  attachWrapper(isolate, object, needsGcTracing);
+  attachWrapper(isolate, object, needsGcTracing,
+      static_cast<v8::CppHeapPointerTag>(kNonResourceWrappableTag));
   return object;
 }
 
@@ -436,13 +515,25 @@ kj::Maybe<Wrappable&> Wrappable::tryUnwrapOpaque(
         v8::Local<v8::Object>::Cast(handle)->FindInstanceInPrototypeChain(
             IsolateBase::getOpaqueTemplate(isolate));
     if (!instance.IsEmpty()) {
-      return *reinterpret_cast<Wrappable*>(
-          instance->GetAlignedPointerFromInternalField(WRAPPED_OBJECT_FIELD_INDEX,
-              static_cast<v8::EmbedderDataTypeTag>(WRAPPED_OBJECT_FIELD_INDEX)));
+      // The prototype-chain check above accepts exactly our opaque wrappers, which all carry
+      // kNonResourceWrappableTag. A tag outside that range therefore means the object's CppHeap
+      // handle was redirected to an unrelated type while its prototype chain was left intact -- an
+      // in-sandbox memory-safety violation, which aborts (matching the resource unwrap sites)
+      // rather than returning a mistyped pointer for a downstream dynamic_cast to catch.
+      return *unwrapFromShimInRangeOrAbort(isolate, instance, kNonResourceWrappableTagRange);
     }
   }
 
   return kj::none;
+}
+
+void reportWrapperTypeMismatch(const std::type_info& expected, const std::type_info& actual) {
+  // Only reachable if the wrapper's internal field has been made to point at an object of the
+  // wrong type, which means memory outside this process's control has already been corrupted.
+  // Abort: edgeworker's crash handler turns this into an abrupt shutdown of the isolate.
+  KJ_LOG(FATAL, "JS wrapper's C++ object is not of the expected type", typeName(expected),
+      typeName(actual));
+  abort();
 }
 
 void Wrappable::jsgVisitForGc(GcVisitor& visitor) {

@@ -880,12 +880,12 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketClose(IoContext& context
 
   // Even if no handler is exported, we need to claim the websocket so it's removed from the map.
   //
-  // We won't be dispatching any further events because we've received a close, so we return the
-  // owned websocket back to the api::WebSocket.
+  // We won't be dispatching any further events because we've received a close, so copy the
+  // websocket's tags before the manager drops them.
   auto releasePackage = event->prepareForRelease(lock, websocketId);
   auto websocket = kj::mv(releasePackage.webSocketRef);
-  websocket->initiateHibernatableRelease(lock, kj::mv(releasePackage.ownedWebSocket),
-      kj::mv(releasePackage.tags), api::WebSocket::HibernatableReleaseState::CLOSE);
+  websocket->initiateHibernatableRelease(
+      lock, kj::mv(releasePackage.tags), api::WebSocket::HibernatableReleaseState::CLOSE);
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(handler, h.webSocketClose) {
       event->waitUntil(setHibernatableEventTimeout(
@@ -912,12 +912,12 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketError(IoContext& context
 
   // Even if no handler is exported, we need to claim the websocket so it's removed from the map.
   //
-  // We won't be dispatching any further events because we've encountered an error, so we return
-  // the owned websocket back to the api::WebSocket.
+  // We won't be dispatching any further events because we've encountered an error, so copy the
+  // websocket's tags before the manager drops them.
   auto releasePackage = event->prepareForRelease(lock, websocketId);
   auto& websocket = releasePackage.webSocketRef;
-  websocket->initiateHibernatableRelease(lock, kj::mv(releasePackage.ownedWebSocket),
-      kj::mv(releasePackage.tags), WebSocket::HibernatableReleaseState::ERROR);
+  websocket->initiateHibernatableRelease(
+      lock, kj::mv(releasePackage.tags), WebSocket::HibernatableReleaseState::ERROR);
 
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(handler, h.webSocketError) {
@@ -1272,8 +1272,8 @@ jsg::Ref<StorageManager> Navigator::getStorage(jsg::Lock& js) {
 bool Navigator::sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body) {
   KJ_IF_SOME(context, IoContext::tryCurrent()) {
     auto v8Context = js.v8Context();
-    auto& global =
-        jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(v8Context, v8Context->Global());
+    auto& global = jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
+        js.v8Isolate, v8Context, v8Context->Global(), jsg::kNonResourceWrappableTagRange);
     auto promise = global.fetch(js, kj::mv(url),
         Request::InitializerDict{
           .method = kj::str("POST"),

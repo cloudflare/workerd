@@ -17,7 +17,9 @@ namespace workerd::api {
 namespace {
 class EventSourceSink final: public WritableStreamSink {
  public:
-  EventSourceSink(EventSource& eventSource): eventSource(eventSource) {}
+  EventSourceSink(EventSource& eventSource, kj::Rc<jsg::WeakRef<EventSource>> weakEventSource)
+      : eventSource(eventSource),
+        weakEventSource(kj::mv(weakEventSource)) {}
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
     // The event stream is a new-line delimited format where each line represents an event.
@@ -86,6 +88,7 @@ class EventSourceSink final: public WritableStreamSink {
 
  private:
   kj::Maybe<EventSource&> eventSource;
+  kj::Rc<jsg::WeakRef<EventSource>> weakEventSource;
 
   // Retained bytes to be processed in the next write.
   kj::Vector<char> kept;
@@ -181,7 +184,7 @@ class EventSourceSink final: public WritableStreamSink {
     auto pending = pendingMessages.releaseAsArray();
     // If the event source is gone, just drop the messages on the floor.
     KJ_IF_SOME(es, eventSource) {
-      es.enqueueMessages(kj::mv(pending));
+      es.enqueueMessages(kj::mv(pending), weakEventSource.addRef());
     }
   }
 
@@ -497,8 +500,11 @@ void EventSource::run(jsg::Lock& js,
   // or errored.
   context
       .awaitIo(js,
-          processBody(
-              context, readable.pumpTo(js, kj::heap<EventSourceSink>(*this), EndStream::YES)))
+          processBody(context,
+              readable.pumpTo(js,
+                  kj::heap<EventSourceSink>(
+                      *this, kj::rc<jsg::WeakRef<EventSource>>(JSG_THIS_WEAK(js))),
+                  EndStream::YES)))
       .then(js, kj::mv(onSuccess), kj::mv(onFailed));
 }
 
@@ -509,9 +515,14 @@ void EventSource::close(jsg::Lock& js) {
   readyState = State::CLOSED;
 }
 
-void EventSource::enqueueMessages(kj::Array<PendingMessage> messages) {
-  context.addTask(context.run([this, messages = kj::mv(messages)](
-                                  auto& lock) mutable { notifyMessages(lock, kj::mv(messages)); }));
+void EventSource::enqueueMessages(
+    kj::Array<PendingMessage> messages, kj::Rc<jsg::WeakRef<EventSource>> weakSelf) {
+  context.addTask(
+      context.run([weakSelf = kj::mv(weakSelf), messages = kj::mv(messages)](auto& lock) mutable {
+    KJ_IF_SOME(self, weakSelf->tryAddRef(lock)) {
+      self->notifyMessages(lock, kj::mv(messages));
+    }
+  }));
 }
 
 void EventSource::setReconnectionTime(uint32_t time) {

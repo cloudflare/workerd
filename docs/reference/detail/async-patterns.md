@@ -45,6 +45,43 @@ return kj::evalNow([&]() {
 
 ---
 
+### In-Flight I/O Buffers
+
+An async I/O operation writes into a buffer it does not own — `tryRead()` takes a bare
+`void*`. The owner must outlive the operation, and cancellation must tear the operation down
+*before* freeing the buffer. Only the KJ side of the boundary does that: `.attach()`, kj
+`.then()` captures, coroutine frame locals, and 3-arg `IoContext::awaitIo(js, promise, func)`
+all drop the dependency first.
+
+A continuation passed to `jsg::Promise::then()` — including via `IoContext::addFunctor()` —
+does not. It lives in an opaque `Wrappable` on the V8 heap, so GC can reclaim it while the
+operation is still writing, with no chance to cancel. `awaitIoLegacy()` doesn't help; it
+passes an identity function, so nothing of yours ends up on the KJ side.
+
+Keep the buffer on the KJ side and hand the continuation a value:
+
+```cpp
+// Wrong: the buffer's only owner is a JS heap object.
+auto buffer = kj::heapArray<kj::byte>(size);
+auto promise = stream->tryRead(buffer.begin(), atLeast, buffer.size());
+return context.awaitIoLegacy(js, kj::mv(promise))
+    .then(js, context.addFunctor([buffer = kj::mv(buffer)](jsg::Lock&, size_t amount) { ... }));
+
+// Right: the kj chain owns the buffer; the continuation gets only the bytes read.
+auto promise = kj::evalNow([&]() -> kj::Promise<kj::Array<kj::byte>> {
+  auto buffer = kj::heapArray<kj::byte>(size);
+  auto bytes = buffer.asPtr();
+  return stream->tryRead(bytes.begin(), atLeast, bytes.size())
+      .then([buffer = kj::mv(buffer)](size_t amount) mutable {
+    return buffer.first(amount).attach(kj::mv(buffer));
+  });
+});
+```
+
+If the continuation must share the buffer with the in-flight operation, refcount it
+(`kj::Arc`) and attach one reference to the promise. The same rule covers anything an
+operation borrows, not just read destinations.
+
 ### Continuation Captures
 
 `workerd-unsafe-continuation-capture` flags lambdas passed to async sinks

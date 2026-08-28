@@ -105,11 +105,9 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     // the websocket's properties in a HibernationPackage until it's time to wake up.
     kj::OneOf<jsg::Ref<api::WebSocket>, api::WebSocket::HibernationPackage> activeOrPackage;
 
-    // This is an owned websocket that we extract from the api::WebSocket after accepting as
-    // hibernatable. It becomes null once we dispatch a close or error event because we want its
-    // lifetime to be managed by IoContext's DeleteQueue. This helps prevent a situation where the
-    // HibernationManager drops the websocket before all queued messages have sent.
-    kj::Maybe<kj::Own<kj::WebSocket>> ws;
+    // This is the manager's strong reference to the websocket shared with api::WebSocket after
+    // accepting as hibernatable.
+    kj::Maybe<kj::Rc<kj::WebSocket>> ws;
 
     LegacyHibernationManagerImpl& manager;
     // TODO(someday): We (currently) only use the LegacyHibernationManagerImpl reference to refer to

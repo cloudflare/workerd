@@ -11,14 +11,14 @@ namespace workerd::api {
 HibernatableWebSocketAdapter::HibernatableWebSocketAdapter(jsg::Lock& js,
     WebSocket& shellParam,
     IoContext& ioContext,
-    kj::WebSocket& ws,
+    kj::Rc<kj::WebSocket> ws,
     WebSocket::HibernationPackage package)
     : shell(shellParam) {
   KJ_UNIMPLEMENTED("EW-10817: HibernatableWebSocketAdapter revival ctor not yet implemented");
 }
 
 HibernatableWebSocketAdapter::HibernatableWebSocketAdapter(
-    WebSocket& shellParam, kj::WebSocket& ws, kj::Array<kj::String> tags)
+    WebSocket& shellParam, kj::Rc<kj::WebSocket> ws, kj::Array<kj::String> tags)
     : shell(shellParam) {
   KJ_UNIMPLEMENTED("EW-10817: HibernatableWebSocketAdapter transition ctor not yet implemented");
 }
@@ -109,14 +109,12 @@ bool HibernatableWebSocketAdapter::isAwaitingCoupling() {
   return false;
 }
 
-kj::Own<kj::WebSocket> HibernatableWebSocketAdapter::acceptAsHibernatable(kj::Array<kj::String>) {
+kj::Rc<kj::WebSocket> HibernatableWebSocketAdapter::acceptAsHibernatable(kj::Array<kj::String>) {
   unimplemented();
 }
 
-void HibernatableWebSocketAdapter::initiateHibernatableRelease(jsg::Lock&,
-    kj::Own<kj::WebSocket>,
-    kj::Array<kj::String>,
-    WebSocket::HibernatableReleaseState) {
+void HibernatableWebSocketAdapter::initiateHibernatableRelease(
+    jsg::Lock&, kj::Array<kj::String>, WebSocket::HibernatableReleaseState) {
   unimplemented();
 }
 
