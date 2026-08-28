@@ -11,4 +11,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "pull-timing", esModule = embed "pull-timing.js"),
   (name = "controller", esModule = embed "controller.js"),
   (name = "byob-reader", esModule = embed "byob-reader.js"),
+  (name = "respond", esModule = embed "respond.js"),
 ];
