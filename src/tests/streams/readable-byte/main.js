@@ -8,6 +8,22 @@
 
 export default {
   async fetch(request) {
+    const url = new URL(request.url);
+    // Chunked byte-source endpoint for the readAtLeast tests.
+    if (url.pathname === '/chunked') {
+      const enc = new TextEncoder();
+      const rs = new ReadableStream({
+        type: 'bytes',
+        async pull(controller) {
+          for (const chunk of ['foo', 'bar', 'b', 'a', 'z']) {
+            controller.enqueue(enc.encode(chunk));
+            await scheduler.wait(1);
+          }
+          controller.close();
+        },
+      });
+      return new Response(rs);
+    }
     return new Response(request.body, {
       headers: { 'content-type': 'application/octet-stream' },
     });
@@ -86,3 +102,23 @@ export {
   jsByteSourceLargeDataEnqueue,
   bodyPumpByobRequestPresence,
 } from 'respond';
+
+export {
+  relockRespondRoutesToSecondReader,
+  relockUint16RespondAcrossResponds,
+  relockRespondWithNewView,
+  relockAutoAllocateRespond,
+  relockAutoAllocateEnqueue,
+  relockRespondOverflowSecondView,
+} from 'release-relock';
+
+export {
+  byobMin,
+  readMinStagedFulfillment,
+  readMinValidation,
+  closeBelowMin,
+  minMetThenClose,
+  readAtLeastDefaultReaderThrows,
+  byobReaderConstraints,
+  readAtLeastByobReader,
+} from 'read-min';
