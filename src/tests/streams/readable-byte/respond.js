@@ -7,7 +7,7 @@
 // consumption driving JS byte sources, multi-chunk fills, reentrant
 // respond, cancel races, transform pumps, and UAF regressions).
 
-import { strictEqual, rejects, throws } from 'node:assert';
+import { strictEqual, rejects, throws, ok } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 // Test Response body methods with JS-backed BYOB ReadableStream
@@ -874,5 +874,264 @@ export const bodyPumpByobRequestPresence = {
     });
     strictEqual(await new Response(rs).text(), 'x');
     strictEqual(seen, usingTsImpl ? 'null' : 'view(4096)');
+  },
+};
+
+// --- Migrated from streams-js-test.js (byte respond family) ---
+
+export const readableStreamByteRespond = {
+  async test() {
+    // Basic respond
+    {
+      const rs = new ReadableStream({
+        type: 'bytes',
+        pull(c) {
+          if (c.byobRequest) {
+            const req = c.byobRequest;
+            req.view[0] = 1;
+            req.view[1] = 2;
+            req.view[2] = 3;
+
+            throws(() => req.respond(10), RangeError);
+            throws(() => req.respond(0), TypeError);
+
+            req.respond(3);
+
+            // This will error the stream but won't be immediately
+            // apparent until the next read operation.
+            req.respond(3);
+          }
+        },
+      });
+
+      const reader = rs.getReader({ mode: 'byob' });
+      const u8 = new Uint8Array(3);
+      const read = reader.read(u8);
+      strictEqual(u8.byteLength, 0);
+
+      const { value } = await read;
+      strictEqual(value.byteLength, 3);
+
+      await rejects(reader.read(new Uint8Array(3)), {
+        message: usingTsImpl
+          ? 'This BYOB request has been invalidated'
+          : 'This ReadableStreamBYOBRequest has been invalidated.',
+      });
+    }
+
+    // Respond with close
+    {
+      const rs = new ReadableStream({
+        type: 'bytes',
+        pull(c) {
+          if (c.byobRequest) {
+            c.close();
+            c.byobRequest.respond(0);
+          }
+        },
+      });
+
+      const reader = rs.getReader({ mode: 'byob' });
+
+      const u8 = new Uint8Array([1, 2, 3]);
+
+      const { done, value } = await reader.read(u8);
+
+      ok(done);
+      ok(value instanceof Uint8Array);
+      strictEqual(value.byteLength, 0);
+      strictEqual(value.buffer.byteLength, 3);
+      const u82 = new Uint8Array(value.buffer, 0, 3);
+      strictEqual(u82[0], 1);
+      strictEqual(u82[1], 2);
+      strictEqual(u82[2], 3);
+    }
+  },
+};
+
+export const readableStreamByteRespondWithNewView = {
+  async test() {
+    // Basic respondWithNewView
+    {
+      const rs = new ReadableStream({
+        type: 'bytes',
+        pull(c) {
+          if (c.byobRequest) {
+            const req = c.byobRequest;
+            const u8 = new Uint8Array(req.view.buffer);
+
+            u8[0] = 1;
+            u8[1] = 2;
+            u8[2] = 3;
+
+            // Can't respond with zero if we're not closed.
+            throws(() => req.respondWithNewView(new Uint8Array(0)), TypeError);
+
+            // Underlying buffer is too big.
+            throws(
+              () => req.respondWithNewView(new Uint8Array(10)),
+              RangeError
+            );
+
+            // Can't respond with a non-detachable ArrayBuffer.
+            throws(
+              () =>
+                req.respondWithNewView(
+                  new Uint8Array(new SharedArrayBuffer(10))
+                ),
+              TypeError
+            );
+
+            // New view has an invalid byte offset.
+            throws(
+              () => req.respondWithNewView(new Uint8Array(req.view.buffer, 1)),
+              RangeError
+            );
+
+            req.respondWithNewView(u8);
+
+            strictEqual(u8.byteLength, 0);
+
+            // This will error the stream but won't be immediately
+            // apparent until the next read operation.
+            req.respond(3);
+          }
+        },
+      });
+
+      const reader = rs.getReader({ mode: 'byob' });
+      const u8 = new Uint8Array(3);
+      const read = reader.read(u8);
+      strictEqual(u8.byteLength, 0);
+
+      const { value } = await read;
+      strictEqual(value.byteLength, 3);
+      strictEqual(value[0], 1);
+      strictEqual(value[1], 2);
+      strictEqual(value[2], 3);
+
+      await rejects(reader.read(new Uint8Array(3)), {
+        message: usingTsImpl
+          ? 'This BYOB request has been invalidated'
+          : 'This ReadableStreamBYOBRequest has been invalidated.',
+      });
+    }
+
+    // RespondWithNewView with close
+    {
+      const rs = new ReadableStream({
+        type: 'bytes',
+        pull(c) {
+          if (c.byobRequest) {
+            c.close();
+            c.byobRequest.respondWithNewView(
+              new Uint8Array(c.byobRequest.view.buffer, 0, 0)
+            );
+          }
+        },
+      });
+
+      const reader = rs.getReader({ mode: 'byob' });
+
+      const { done, value } = await reader.read(new Uint8Array(3));
+
+      ok(done);
+      ok(value instanceof Uint8Array);
+      strictEqual(value.byteLength, 0);
+      strictEqual(value.buffer.byteLength, 3);
+    }
+  },
+};
+
+export const readableStreamByteRespondWithNewViewUsesNewElementSize = {
+  async test() {
+    const rs = new ReadableStream({
+      type: 'bytes',
+      pull(controller) {
+        const request = controller.byobRequest;
+        const replacement = new Uint16Array(
+          request.view.buffer,
+          request.view.byteOffset,
+          3
+        );
+
+        new Uint8Array(
+          replacement.buffer,
+          replacement.byteOffset,
+          replacement.byteLength
+        ).set([1, 2, 3, 4, 5, 6]);
+
+        request.respondWithNewView(replacement);
+        controller.close();
+      },
+    });
+
+    const reader = rs.getReader({ mode: 'byob' });
+    const { value, done } = await reader.read(new Uint32Array(2));
+
+    // DIVERGENCE: C++ adopts the replacement view's element size, so
+    // the read fulfills with all 6 bytes at once; TypeScript keeps the
+    // ORIGINAL read view's element size (Uint32 → 4-byte multiples),
+    // fulfilling with 4 bytes and queuing the remaining 2.
+    ok(!done);
+    strictEqual(value.byteLength, usingTsImpl ? 4 : 6);
+    const bytes = new Uint8Array(
+      value.buffer,
+      value.byteOffset,
+      value.byteLength
+    );
+    for (let i = 0; i < bytes.length; i++) {
+      strictEqual(bytes[i], i + 1);
+    }
+    if (usingTsImpl) {
+      const rest = await reader.read(new Uint8Array(4));
+      strictEqual(rest.done, false);
+      strictEqual(rest.value.byteLength, 2);
+      strictEqual(rest.value[0], 5);
+      strictEqual(rest.value[1], 6);
+    }
+    // Ensure no further bytes remain queued.
+    const end = await reader.read(new Uint8Array(1));
+    ok(end.done);
+  },
+};
+
+export const readableStreamAutoAllocateChunkSize = {
+  async test() {
+    throws(() => {
+      new ReadableStream({
+        type: 'bytes',
+        autoAllocateChunkSize: 0,
+      });
+    }, TypeError);
+
+    throws(() => {
+      new ReadableStream({
+        type: 'bytes',
+        autoAllocateChunkSize: -1,
+      });
+    }, TypeError);
+
+    throws(() => {
+      new ReadableStream({
+        type: 'bytes',
+        autoAllocateChunkSize: 'a',
+      });
+    }, TypeError);
+
+    let pulled = false;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      autoAllocateChunkSize: 10,
+      pull(c) {
+        pulled = true;
+        if (c.byobRequest) {
+          strictEqual(c.byobRequest.view.byteLength, 10);
+          c.byobRequest.respond(10);
+        }
+      },
+    });
+    await rs.getReader().read();
+    ok(pulled);
   },
 };
