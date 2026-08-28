@@ -22,4 +22,6 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "pipe-integration", esModule = embed "pipe-integration.js"),
   (name = "large-payload", esModule = embed "large-payload.js"),
   (name = "gc-interplay", esModule = embed "gc-interplay.js"),
+  (name = "reentrancy", esModule = embed "reentrancy.js"),
+  (name = "backpressure", esModule = embed "backpressure.js"),
 ];
