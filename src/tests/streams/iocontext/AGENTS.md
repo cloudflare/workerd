@@ -26,7 +26,7 @@ module's evaluation performs them.
 | module-scope start() parked on a promise resolved by a later request | `globalScopeReadablestream8` |
 | module-scope WritableStream (controller AbortSignal allocation needs no IoContext) | `globalScopeWritablestream` |
 | module-scope BYTE stream, BYOB-read inside a request | `globalScopeByteReadable` |
-| module-scope TransformStream | `globalScopeTransformStream` — **C++ CRASH BUG**: the mere existence of a module-scope `new TransformStream()` SEGFAULTS the C++ implementation when the first request enters the worker, even if never touched again; construction is which-impl-guarded and the TS side pins construction + a request-time pipe. TODO(bug): unguard once fixed |
+| module-scope TransformStream, piped inside a request | `globalScopeTransformStream` — regression guard: the C++ implementation historically SEGFAULTED at first request entry when a module-scope `new TransformStream()` existed (a GC trace through the transform's visitable algorithm lambdas reached freed controller state); the algorithms now capture the controller with plain (non-visited, strong) lambda captures, so this test's module-scope construction alone is the repro |
 
 Cross-request state (tests 6-8) uses `ctx`-less module globals on
 purpose: the point is that the stream machinery itself must not capture

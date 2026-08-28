@@ -9,7 +9,6 @@
 // itself ported from the edgeworker streams-iocontext.ew-test).
 
 import { strictEqual } from 'node:assert';
-import { usingTsImpl } from 'which-impl';
 
 // global-scope-readablestream
 const enc1 = new TextEncoder();
@@ -197,18 +196,16 @@ export const globalScopeByteReadable = {
   },
 };
 
-// A TransformStream constructed at module scope. C++ CRASH BUG: the
-// mere EXISTENCE of a module-scope `new TransformStream()` SEGFAULTS
-// the C++ implementation when the first request enters the worker —
-// even if the stream is never touched again. The TypeScript
-// implementation constructs it and pipes through it inside a request
-// normally, so construction itself is guarded by implementation here.
-// TODO(bug): unguard once the crash is fixed.
-const ts10 = usingTsImpl ? new TransformStream() : null;
+// A TransformStream constructed at module scope pipes inside a
+// request. Historically the C++ implementation SEGFAULTED at the first
+// request entry when a module-scope TransformStream existed — a GC
+// trace through the transform's algorithm lambdas reached freed
+// controller state — so this test is the regression guard: its
+// construction alone reproduced the crash.
+const ts10 = new TransformStream();
 
 export const globalScopeTransformStream = {
   async test(ctrl, env) {
-    if (!usingTsImpl) return; // module-scope construction segfaults C++
     const response = await env.self.fetch('http://test/10');
     strictEqual(await response.text(), 'ok');
   },

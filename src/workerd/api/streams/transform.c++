@@ -59,14 +59,14 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
           .type = kj::none,
           .autoAllocateChunkSize = kj::none,
           .start = maybeAddFunctor<UnderlyingSource::StartAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js, auto c) mutable { return controller->getStartPromise(js); })),
+              [controller = controller.addRef()](
+                  jsg::Lock& js, auto c) mutable { return controller->getStartPromise(js); }),
           .pull = maybeAddFunctor<UnderlyingSource::PullAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js, auto c) mutable { return controller->pull(js); })),
-          .cancel = maybeAddFunctor<UnderlyingSource::CancelAlgorithm>( JSG_VISITABLE_LAMBDA(
-              (controller = controller.addRef()), (controller),
-              (jsg::Lock & js, auto reason) mutable { return controller->cancel(js, reason); })),
+              [controller = controller.addRef()](
+                  jsg::Lock& js, auto c) mutable { return controller->pull(js); }),
+          .cancel = maybeAddFunctor<UnderlyingSource::CancelAlgorithm>(
+              [controller = controller.addRef()](
+                  jsg::Lock& js, auto reason) mutable { return controller->cancel(js, reason); }),
           .expectedLength = transformer.expectedLength.map(
               [](uint64_t expectedLength) { return expectedLength; }),
         },
@@ -76,19 +76,18 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
         UnderlyingSink{
           .type = kj::none,
           .start = maybeAddFunctor<UnderlyingSink::StartAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js, auto c) mutable { return controller->getStartPromise(js); })),
+              [controller = controller.addRef()](
+                  jsg::Lock& js, auto c) mutable { return controller->getStartPromise(js); }),
           .write = maybeAddFunctor<UnderlyingSink::WriteAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js, auto chunk, auto c) mutable {
-                    return controller->write(js, chunk);
-                  })),
+              [controller = controller.addRef()](jsg::Lock& js, auto chunk, auto c) mutable {
+      return controller->write(js, chunk);
+    }),
           .abort = maybeAddFunctor<UnderlyingSink::AbortAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js, auto reason) mutable { return controller->abort(js, reason); })),
+              [controller = controller.addRef()](
+                  jsg::Lock& js, auto reason) mutable { return controller->abort(js, reason); }),
           .close = maybeAddFunctor<UnderlyingSink::CloseAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js) mutable { return controller->close(js); })),
+              [controller = controller.addRef()](
+                  jsg::Lock& js) mutable { return controller->close(js); }),
         },
         kj::mv(maybeWritableStrategy));
 
