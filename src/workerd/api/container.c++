@@ -148,21 +148,15 @@ ExecProcess::ExecProcess(jsg::Lock& js,
   KJ_IF_SOME(signal, abortSignal) {
     constexpr int kSigKill = 9;
 
-    auto& canceler = signal->getCanceler();
-
     // exec() calls throwIfAborted() before sending the RPC, but the signal can still fire while the
     // RPC is in flight, i.e. before this constructor runs in the RPC's continuation. If that
-    // happened, kill the freshly-started process immediately; there's no point registering a
-    // listener.
-    if (canceler.isCanceled()) {
+    // happened, kill the freshly-started process immediately; there's no point registering an
+    // abort action.
+    if (signal->getAborted(js)) {
       sendKill(kSigKill);
     } else {
-      // Hold a strong reference to the canceler so it outlives the AbortSignal's own IoOwn, then register
-      // a listener that kills the process when the signal is later triggered.
-      auto own = kj::addRef(canceler);
-      auto& ref = *own;
-      abortCanceler = ioContext.addObject(kj::mv(own));
-      abortListener.emplace(ref, [self = JSG_THIS_WEAK(js)]() {
+      abortRegistration = signal->addAbortAction(
+          js, [self = JSG_THIS_WEAK(js)](jsg::Lock& js, const kj::Exception&) {
         KJ_IF_SOME(process, self.tryGet()) {
           process.sendKill(kSigKill);
         }
@@ -420,17 +414,25 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
     for (auto i: kj::indices(directorySnapshots)) {
       auto entry = list[i];
       auto& restore = directorySnapshots[i];
-      auto& snap = restore.snapshot;
-      auto effectiveRestorePath = snap.dir.asPtr();
+
+      kj::Maybe<kj::StringPtr> effectiveRestorePath;
+      KJ_IF_SOME(snap, restore.snapshot) {
+        effectiveRestorePath = snap.dir.asPtr();
+      }
       KJ_IF_SOME(mp, restore.mountPoint) {
         effectiveRestorePath = mp.asPtr();
       }
 
-      JSG_REQUIRE_NONNULL(parseRestorePath(effectiveRestorePath), Error,
+      auto restorePath = JSG_REQUIRE_NONNULL(effectiveRestorePath, Error,
+          "Directory snapshot restore requires a mountPoint when no snapshot is given.");
+
+      JSG_REQUIRE_NONNULL(parseRestorePath(restorePath), Error,
           "Directory snapshot cannot be restored to root directory.");
 
-      entry.setSnapshotId(snap.id);
-      entry.setRestorePath(effectiveRestorePath);
+      KJ_IF_SOME(snap, restore.snapshot) {
+        entry.setSnapshotId(snap.id);
+      }
+      entry.setRestorePath(restorePath);
     }
   }
 
@@ -458,7 +460,7 @@ void Container::startMonitor() {
   }).fork();
 
   currentMonitor =
-      IoContext::current().addObject(kj::heap<Monitor>(kj::mv(monitor), ++nextMonitorGeneration));
+      IoContext::current().createObject<Monitor>(kj::mv(monitor), ++nextMonitorGeneration);
 }
 
 jsg::Promise<void> Container::setLabels(jsg::Lock& js, jsg::Dict<kj::String> labels) {
@@ -1447,12 +1449,15 @@ class Container::TcpPortOutgoingFactory final: public Fetcher::OutgoingFactory {
         headerTable(headerTable),
         portState(kj::mv(portState)) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
-    // At present we have no use for `cfStr`.
-    return IoContext::current().getSubrequestNoChecks(
+  Result newSingleUseClient(
+      kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override {
+    // At present we have no use for `cfStr`. This factory creates no operation span.
+    auto client = IoContext::current().getSubrequestNoChecks(
         [&](auto& tracing, auto& channelFactory) -> kj::Own<WorkerInterface> {
+      makeUserSpanParent(tracing);
       return kj::heap<TcpPortWorkerInterface>(entropySource, headerTable, portState.addRef());
     }, {.inHouse = false, .wrapMetrics = false});
+    return {.client = kj::mv(client), .spanParents = kj::none};
   }
 
  private:
@@ -1479,7 +1484,7 @@ jsg::Ref<Fetcher> Container::getTcpPort(jsg::Lock& js, int port) {
   auto portState = [&]() -> kj::Rc<TcpPortState> {
     if (util::Autogate::isEnabled(util::AutogateKey::CONTAINER_TUNNEL_REUSE)) {
       if (tcpPortStates == kj::none) {
-        tcpPortStates = ioctx.addObject(kj::heap<kj::HashMap<int, kj::Rc<TcpPortState>>>());
+        tcpPortStates = ioctx.createObject<kj::HashMap<int, kj::Rc<TcpPortState>>>();
       }
       auto& states = *KJ_ASSERT_NONNULL(tcpPortStates);
 

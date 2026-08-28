@@ -85,16 +85,8 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     ~HibernatableWebSocket() noexcept(false);
     KJ_DISALLOW_COPY_AND_MOVE(HibernatableWebSocket);
 
-    // Returns the tags associated with this HibernatableWebSocket.
-    kj::Array<kj::StringPtr> getTags();
-
-    // Returns the tags associated with this HibernatableWebSocket.
-    // Note that this returns an array of Strings, unlike `getTags()`.
-    // Copying the strings each time tags are requested would be expensive,
-    // so we only do it when we're delivering a close/error event because
-    // we will be destroying the HibernatableWebSocket object,
-    // which the tags need to outlive.
-    kj::Array<kj::String> cloneTags();
+    // Returns an owned copy of the tags associated with this HibernatableWebSocket.
+    kj::Array<kj::String> getTags();
 
     // Returns a reference to the active websocket. If the websocket is currently hibernating,
     // we have to unhibernate it first. The process moves values from the HibernatableWebSocket
@@ -113,11 +105,9 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     // the websocket's properties in a HibernationPackage until it's time to wake up.
     kj::OneOf<jsg::Ref<api::WebSocket>, api::WebSocket::HibernationPackage> activeOrPackage;
 
-    // This is an owned websocket that we extract from the api::WebSocket after accepting as
-    // hibernatable. It becomes null once we dispatch a close or error event because we want its
-    // lifetime to be managed by IoContext's DeleteQueue. This helps prevent a situation where the
-    // HibernationManager drops the websocket before all queued messages have sent.
-    kj::Maybe<kj::Own<kj::WebSocket>> ws;
+    // This is the manager's strong reference to the websocket shared with api::WebSocket after
+    // accepting as hibernatable.
+    kj::Maybe<kj::Rc<kj::WebSocket>> ws;
 
     LegacyHibernationManagerImpl& manager;
     // TODO(someday): We (currently) only use the LegacyHibernationManagerImpl reference to refer to
@@ -139,9 +129,9 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     // Stores the last received autoResponseRequest timestamp.
     kj::Maybe<kj::Date> autoResponseTimestamp;
 
-    // Keeps track of the currently ongoing websocket auto-response send promise. This promise may
-    // be moved to api::websocket if an hibernating websocket unhibernates.
-    kj::Promise<void> autoResponsePromise = kj::READY_NOW;
+    // Keeps track of the currently ongoing websocket auto-response send promise. A revived
+    // api::WebSocket receives a branch so the manager can retain this across repeated hibernation.
+    kj::Maybe<kj::ForkedPromise<void>> maybeAutoResponsePromise;
 
     friend LegacyHibernationManagerImpl;
   };

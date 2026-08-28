@@ -217,16 +217,18 @@ static void compileCompatibilityFlags(kj::StringPtr compatDate,
       errorReporter.addError(kj::str("Compatibility flags are mutually contradictory: ",
           enableFlagName, " vs ", disableFlagName));
     }
+    // Naming a flag that the compatibility date already enables is redundant but harmless, so it
+    // is only worth a warning: the compiled flag set is the same either way.
     if (enableByFlag && enableByDate &&
         dateValidation != CompatibilityDateValidation::FUTURE_FOR_TEST) {
-      // Skip this error for FUTURE_FOR_TEST since tests may need to explicitly specify flags
-      // for the default variant (which uses an old compat date) while the all-compat-flags
-      // variant enables all flags by date.
+      // Stay quiet under FUTURE_FOR_TEST, since tests may need to explicitly specify flags for
+      // the default variant (which uses an old compat date) while the all-compat-flags variant
+      // enables all flags by date. Warning there would fire for nearly every test.
       KJ_IF_SOME(d, enableDate) {
-        errorReporter.addError(kj::str("The compatibility flag ", enableFlagName,
+        errorReporter.addWarning(kj::str("The compatibility flag ", enableFlagName,
             " became the default as of ", d, " so does not need to be specified anymore."));
       } else {
-        errorReporter.addError(kj::str("The compatibility flag ", enableFlagName,
+        errorReporter.addWarning(kj::str("The compatibility flag ", enableFlagName,
             " is the default, so does not need to be specified anymore."));
       }
     }

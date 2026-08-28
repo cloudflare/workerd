@@ -32,7 +32,7 @@ class InvocationSpanContext;
 // - Finish waitUntil() tasks.
 kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::Own<const Worker> worker,
-    kj::Maybe<kj::StringPtr> entrypointName,
+    kj::Maybe<kj::String> entrypointName,
     Frankenvalue props,
     kj::Maybe<kj::Own<Worker::Actor>> actor,
     kj::Own<LimitEnforcer> limitEnforcer,

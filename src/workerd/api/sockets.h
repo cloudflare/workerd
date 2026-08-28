@@ -75,8 +75,8 @@ class Socket: public jsg::Object {
       kj::Maybe<kj::String> domain,
       bool isDefaultFetchPort,
       jsg::PromiseResolverPair<SocketInfo> openedPrPair)
-      : connectionData(context.addObject(kj::heap<ConnectionData>(
-            kj::mv(tlsStarter), kj::mv(connectionStream), kj::mv(watchForDisconnectTask)))),
+      : connectionData(context.createObject<ConnectionData>(
+            kj::mv(tlsStarter), kj::mv(connectionStream), kj::mv(watchForDisconnectTask))),
         readable(kj::mv(readableParam)),
         writable(kj::mv(writable)),
         closedResolver(kj::mv(closedPrPair.resolver)),
@@ -164,8 +164,15 @@ class Socket: public jsg::Object {
 
   // RPC serialization support
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
-  static jsg::Ref<Socket> deserialize(
-      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  // Claims the socket prebuilt by RpcDeserializerExternalHandler::prepare() (see
+  // hydrateRpcSocket below), or, when the rpc-externals-hydration autogate is off, constructs
+  // it in place. The TypeHandler unwraps the prebuilt slot's wrapped socket -- an
+  // internal-field read, safe under the deserializer's no-JS scope.
+  static jsg::Ref<Socket> deserialize(jsg::Lock& js,
+      rpc::SerializationTag tag,
+      jsg::Deserializer& deserializer,
+      const jsg::TypeHandler<jsg::Ref<Socket>>& socketHandler);
 
   JSG_RESOURCE_TYPE(Socket) {
     JSG_READONLY_PROTOTYPE_PROPERTY(readable, getReadable);
@@ -246,6 +253,13 @@ class Socket: public jsg::Object {
   enum class OpenedState : uint8_t { PENDING, OPENED, FAILED };
   OpenedState openedState = OpenedState::PENDING;
 
+  // Materializes transferred sockets (including marking them OPENED); see its declaration below.
+  friend jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
+      IoContext& ioContext,
+      rpc::JsValue::External::Reader socketExternal,
+      rpc::JsValue::External::Reader readableExternal,
+      rpc::JsValue::External::Reader writableExternal);
+
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
   jsg::Promise<void> maybeCloseWriteSide(jsg::Lock& js);
   jsg::Promise<void> closeImplOld(jsg::Lock& js);
@@ -288,6 +302,20 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,
     AnySocketAddress address,
     jsg::Optional<SocketOptions> options);
+
+// Materializes a socket received over RPC from its three external-table entries (socket
+// metadata, then the readable and writable stream halves, in Socket::serialize()'s order),
+// validating the entry types. Runs during RpcDeserializerExternalHandler::prepare() -- before
+// the V8 graph read -- because stream construction executes JavaScript under the TypeScript
+// streams implementation, which the graph read forbids; Socket::deserialize() then claims the
+// result. Also serves as Socket::deserialize()'s in-place fallback when the
+// rpc-externals-hydration autogate is off (that path predates the gate and remains scope-safe
+// only for legacy streams).
+jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
+    IoContext& ioContext,
+    rpc::JsValue::External::Reader socketExternal,
+    rpc::JsValue::External::Reader readableExternal,
+    rpc::JsValue::External::Reader writableExternal);
 
 class SocketsModule final: public jsg::Object {
  public:

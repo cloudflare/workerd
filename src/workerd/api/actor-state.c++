@@ -986,20 +986,28 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
         name(kj::mv(name)),
         getStartInfo(kj::mv(getStartInfo)) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
+  Result newSingleUseClient(
+      kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override {
     auto& context = IoContext::current();
 
-    return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
+    kj::Maybe<TraceContextParent> spanParents;
+    auto client = context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
         [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
       tracing.setTag("facet_name"_kjc, name.asPtr());
+      spanParents = tracing.getSpanParents();
+      auto userSpanParent = tracing.getUserSpanParent();
+      KJ_IF_SOME(parent, makeUserSpanParent(tracing)) {
+        userSpanParent = kj::mv(parent);
+      }
 
       return getOrCreateActorChannel().startRequest({.cfBlobJson = kj::mv(cfStr),
         .parentSpan = tracing.getInternalSpanParent(),
-        .userSpanParent = tracing.getUserSpanParent()});
+        .userSpanParent = kj::mv(userSpanParent)});
     },
         {.inHouse = true,
           .wrapMetrics = true,
           .operationName = kj::ConstString("facet_subrequest"_kjc)}));
+    return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
   }
 
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override {
@@ -1175,7 +1183,8 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectState::blockConcurrencyWhile
   return IoContext::current().blockConcurrencyWhile(js, kj::mv(callback));
 }
 
-void DurableObjectState::abort(jsg::Lock& js, jsg::Optional<kj::String> reason) {
+void DurableObjectState::abort(
+    jsg::Lock& js, jsg::Optional<kj::String> reason, jsg::Optional<AbortOptions> options) {
   kj::String description = kj::mv(reason)
                                .map([](kj::String&& text) {
     return kj::str("broken.outputGateBroken; jsg.Error: ", text);
@@ -1186,6 +1195,12 @@ void DurableObjectState::abort(jsg::Lock& js, jsg::Optional<kj::String> reason) 
 
   kj::Exception error(kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::mv(description));
   error.setDetail(jsg::EXCEPTION_IS_USER_ERROR, kj::heapArray<byte>(0));
+  error.setDetail(jsg::EXCEPTION_DURABLE_OBJECT_ABORT, kj::heapArray<byte>(0));
+  KJ_IF_SOME(o, options) {
+    if (!o.retryAlarm.orDefault(true)) {
+      error.setDetail(jsg::EXCEPTION_DURABLE_OBJECT_ABORT_NO_RETRY, kj::heapArray<byte>(0));
+    }
+  }
 
   KJ_IF_SOME(s, storage) {
     // Make sure we _synchronously_ break storage so that there's no chance our promise fulfilling

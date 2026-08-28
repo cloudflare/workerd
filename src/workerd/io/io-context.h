@@ -424,6 +424,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // The callback can accept either (Worker::Lock&) or (Worker::Lock&, IoContext&). When the
   // two-argument form is used, *this is passed as the second argument. Existing single-argument
   // call sites are unaffected.
+  //
+  // Requires a current IncomingRequest: the setup work reaches for per-request state (the
+  // IoChannelFactory's timer, the request's metrics) before the callback runs. An IoContext can
+  // outlive its last IncomingRequest, so callers reachable from teardown -- destructors and
+  // kj::defer cleanups in particular -- must check hasCurrentIncomingRequest() first and skip
+  // the work rather than call this and fault.
   template <typename Func>
   auto run(Func&& func, kj::Maybe<InputGate::Lock> inputLock = kj::none) KJ_WARN_UNUSED_RESULT {
     if constexpr (runFuncAcceptsIoContext<Func>) {
@@ -507,6 +513,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // Like requireCurrent() but throws a JS error if this IoContext is not the current.
   void requireCurrentOrThrowJs();
+
+  // Returns an executor through which other IoContexts (or code running outside any
+  // IoContext) can later check whether this context is current, still alive, or defer work
+  // into it. Safe to retain beyond this context's lifetime.
+  IoCrossContextExecutor getCrossContextExecutor() {
+    return IoCrossContextExecutor(deleteQueue.queue.addRef());
+  }
 
   // A WeakRef is a weak reference to a IoContext. Note that because IoContext is not
   // itself ref-counted, we cannot follow the usual pattern of a weak reference that potentially
@@ -757,6 +770,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <typename T>
   IoOwn<T> addObject(kj::Rc<T> obj);
 
+  // Shortcut for addObject(kj::heap(...)) to avoid having to write kj::heap() in every call site.
+  template <typename T, typename... Params>
+  IoOwn<T> createObject(Params&&... params) {
+    return addObject(kj::heap<T>(kj::fwd<Params>(params)...));
+  }
+
   // Like addObject() but takes a functor, returning a functor which holds the original functor
   // under an `IoOwn`, and so will stop working if the IoContext is no longer valid. This is
   // particularly useful for passing to `jsg::Promise::then()` when you need the continuation to
@@ -972,6 +991,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Own<WorkerInterface> getSubrequestChannel(
       uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext);
 
+  kj::Own<WorkerInterface> getSubrequestChannel(uint channel,
+      bool isInHouse,
+      kj::Maybe<kj::String> cfBlobJson,
+      TraceContext& traceContext,
+      SpanParent userSpanParent);
+
   // Like getSubrequestChannel() but doesn't enforce limits. Use for trusted paths only.
   kj::Own<WorkerInterface> getSubrequestChannelNoChecks(uint channel,
       bool isInHouse,
@@ -1184,7 +1209,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
       TraceContext& tracing,
-      IoChannelFactory& channelFactory);
+      IoChannelFactory& channelFactory,
+      kj::Maybe<SpanParent> userSpanParent = kj::none);
 
   friend class IoContext_IncomingRequest;
   template <typename T>

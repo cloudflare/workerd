@@ -59,7 +59,7 @@ namespace workerd::jsg {
 
 #define JSG_RESOURCE_TYPE(Type, ...)                                                               \
   static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = ::workerd::jsg::JsgKind::RESOURCE; \
-  using jsgSuper = jsgThis;                                                                        \
+  using jsgSuper = typename Type::jsgThis;                                                         \
   using jsgThis = Type;                                                                            \
   inline kj::StringPtr jsgGetMemoryName() const override {                                         \
     return #Type##_kjc;                                                                            \
@@ -1390,6 +1390,10 @@ class Object: private Wrappable {
   // to explicitly declare the default constructor.
   Object() = default;
 
+  inline Object* jsgTryGetObject() override {
+    return this;
+  }
+
   inline void jsgVisitForGc(GcVisitor& visitor) override {}
 
   // Subclasses should override these to provide appropriate information for
@@ -1451,7 +1455,19 @@ class Object: private Wrappable {
   template <typename>
   friend class SelfPropertyReader;
   friend class MemoryTracker;
+  template <typename>
+  friend class WeakRef;
 };
+
+// Declared in wrappable.h; see there for why this check exists.
+template <typename T>
+T& downcastObject(Object& object) {
+  T* result = dynamic_cast<T*>(&object);
+  if (result == nullptr) {
+    reportWrapperTypeMismatch(typeid(T), typeid(object));
+  }
+  return *result;
+}
 
 // Ref<T> is a reference to a resource type (a type with a JSG_RESOURCE_TYPE block) living on
 // the V8 heap.
@@ -1558,8 +1574,12 @@ class Ref {
   //
   // It is an error to attach a wrapper when another wrapper is already attached. Hence,
   // typically this should only be called on a newly-allocated object.
-  void attachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object) {
-    inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>());
+  // `tag` is the per-type CppHeapPointerTag for T, computed by the caller via
+  // TypeWrapper::wrappableTag<T>() (the caller has the TypeWrapper and thus the full type list
+  // needed to number T; Ref<T> does not).
+  void attachWrapper(
+      v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTag tag) {
+    inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>(), tag);
   }
 
   // Obtain a weak reference to the referenced object. The weak reference does not keep the
@@ -1633,9 +1653,23 @@ Ref<T> _jsgThis(T* obj) {
 // wrapper is collected), the WeakRef automatically becomes invalid — no manual invalidation
 // is required.
 //
+// The accessors answer two different questions:
+//
+// - tryGet() and operator->() answer "is the C++ object still alive?". They require no
+//   isolate lock, and the result is valid for pure C++/KJ access ONLY. The target may be
+//   *condemned*: its JS wrapper died in a major GC whose deferred cleanup has not yet
+//   destroyed the object, in which case its V8-facing state (the wrapper TracedReference,
+//   V8Ref/JsRef members, promise resolvers) is already zapped. Taking a Ref, calling
+//   getHandle(), dispatching events, or touching any V8 handle through the result can be a
+//   use-after-free.
+//
+// - tryAddRef(js) answers "is the object still usable from JS?". It requires the isolate
+//   lock and returns kj::none for condemned objects (see Wrappable::wasTracedInLastGc()).
+//   Any JS-facing work through a WeakRef must go through tryAddRef().
+//
 // Use operator->() for convenient single-expression access that asserts liveness:
 //
-//     weakFoo->doSomething();  // throws kj::Exception if dead
+//     weakFoo->doPureCppThing();  // throws kj::Exception if dead
 //
 // Use tryGet() or tryAddRef() when the target might legitimately be dead:
 //
@@ -1696,6 +1730,9 @@ class WeakRef {
 
   // Dereference. Asserts if the target has been destroyed.
   // Safe for single-expression use: weakFoo->doSomething()
+  //
+  // Valid for pure C++/KJ access only — the target may be condemned (see the class comment).
+  // Use tryAddRef() for anything that touches V8 state.
   T* operator->() const KJ_LIFETIMEBOUND {
     auto& i = KJ_ASSERT_NONNULL(impl, "attempt to access destroyed jsg::WeakRef target");
     KJ_ASSERT(i.anchor->isAlive(), "attempt to access invalidated jsg::WeakRef target");
@@ -1717,6 +1754,9 @@ class WeakRef {
   // Use of tryGet is discouraged because it does return a raw reference that can
   // dangle. Use it only for single-expression access, essentially as a non-asserting
   // version of operator->().
+  //
+  // Valid for pure C++/KJ access only — the target may be condemned (see the class comment).
+  // Use tryAddRef() for anything that touches V8 state.
   kj::Maybe<T&> tryGet() const KJ_LIFETIMEBOUND {
     KJ_IF_SOME(i, impl) {
       if (i.anchor->isAlive()) {
@@ -1726,10 +1766,12 @@ class WeakRef {
     return kj::none;
   }
 
-  // Try to promote to a strong Ref<T>. Returns kj::none if the target has been destroyed.
-  kj::Maybe<Ref<T>> tryAddRef(Lock&) const {
-    return tryGet().map([](T& t) { return Ref<T>(kj::addRef(t)); });
-  }
+  // Try to promote to a strong Ref<T>. Returns kj::none if the target has been destroyed,
+  // or if the target's V8 wrapper died in a major GC whose deferred cleanup has not yet
+  // released the target (detected via the GC epoch check in Wrappable::wasTracedInLastGc();
+  // see the implementation in setup.h). In the latter case the target is condemned and this
+  // WeakRef is permanently invalidated.
+  kj::Maybe<Ref<T>> tryAddRef(Lock&) const;
 
   // Create another weak ref to the same target.
   WeakRef addRef(jsg::Lock& js) &;
@@ -3127,7 +3169,9 @@ class Lock {
   JsString str(kj::ArrayPtr<const kj::byte>) KJ_WARN_UNUSED_RESULT;
   JsString strIntern(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
   JsString strExtern(kj::ArrayPtr<const char>) KJ_WARN_UNUSED_RESULT;
+  JsString strExtern(kj::Arc<OwnedAscii>) KJ_WARN_UNUSED_RESULT;
   JsString strExtern(kj::ArrayPtr<const uint16_t>) KJ_WARN_UNUSED_RESULT;
+  JsString strExtern(kj::Arc<OwnedUtf16>) KJ_WARN_UNUSED_RESULT;
   JsSymbol symbol(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
   JsSymbol symbolShared(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
   JsSymbol symbolInternal(kj::StringPtr) KJ_WARN_UNUSED_RESULT;

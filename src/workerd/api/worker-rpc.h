@@ -14,6 +14,8 @@
 //
 // See worker-interface.capnp for the underlying protocol.
 
+#include <workerd/api/js-readable-stream.h>
+#include <workerd/api/js-writable-stream.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
@@ -96,6 +98,14 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
   void serializeProxy(
       jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Proxy> proxy) override;
 
+  // TypeScript-implemented ReadableStream/WritableStream instances (present when the
+  // typescript_implemented_streams compat flag is enabled) are plain JS class instances with
+  // no JSG wrapper, so the serializer cannot route them to the stream serialization functions
+  // the way it routes the legacy JSG-wrapped streams; instead they are recognized here by
+  // brand check and transferred through the same wire protocol.
+  bool trySerializeClassInstance(
+      jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Object> object) override;
+
  private:
   StubOwnership stubOwnership;
   rpc::JsValue::ExternalPusher::Client externalPusher;
@@ -110,14 +120,47 @@ class RpcStubDisposalGroup;
 // handle RPC specially should use this.
 class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHandler {
  public:
-  RpcDeserializerExternalHandler(
-      capnp::List<rpc::JsValue::External>::Reader externals, RpcStubDisposalGroup& disposalGroup)
+  // `originatingCall`, when present, is recorded on any stubs deserialized so that
+  // follow-up calls on those stubs nest under the call that returned them.
+  RpcDeserializerExternalHandler(capnp::List<rpc::JsValue::External>::Reader externals,
+      RpcStubDisposalGroup& disposalGroup,
+      kj::Maybe<TraceContextParent> originatingCall)
       : externals(externals),
-        disposalGroup(disposalGroup) {}
+        disposalGroup(disposalGroup),
+        originatingCall(kj::mv(originatingCall)) {}
   ~RpcDeserializerExternalHandler() noexcept(false);
 
   // Read and return the next external.
   rpc::JsValue::External::Reader read();
+
+  // Materialize the externals that require JavaScript execution to deserialize -- streams and
+  // sockets -- BEFORE the V8 value graph is read. V8's deserializer forbids JS execution for the
+  // duration of the graph read (v8::internal::DisallowJavascriptExecution in
+  // ValueDeserializer::ReadObject), so anything JS-executing -- in particular constructing
+  // TypeScript-implemented streams -- must happen in this earlier phase, where JS is legal. The
+  // prebuilt objects are parked in per-external slots, and the corresponding deserialize
+  // functions claim them (JS-free) via the claimPrebuilt*() methods below as the graph read
+  // reaches them.
+  //
+  // Must be called before the value is deserialized, at most once. Gated on the
+  // rpc-externals-hydration autogate: when the gate is off, the claims all return kj::none
+  // and deserialization constructs legacy streams in place exactly as it did before the gate
+  // existed. The typescript_implemented_streams flag REQUIRES the gate (TypeScript stream
+  // construction cannot happen during the graph read), so with the gate off, stream-bearing
+  // values arriving at a TypeScript-streams isolate are rejected here with a configuration
+  // error rather than half-supported.
+  void prepare(jsg::Lock& js, IoContext& ioctx);
+
+  // Claim the prebuilt object for the next external, advancing past it (and, for sockets, past
+  // the stream externals the socket subsumes). Returns kj::none if prepare() did not run (the
+  // autogate is off); the caller then falls back to constructing in place. If prepare() ran but
+  // the next external is not of the claimed type, the message is malformed (the V8 tag stream
+  // disagrees with the external table) and this throws. The socket slot holds the WRAPPED
+  // socket (Socket is incomplete here); Socket::deserialize() unwraps it through its
+  // TypeHandler, which reads internal fields only -- no JS.
+  kj::Maybe<JsReadableStream> claimPrebuiltReadable();
+  kj::Maybe<JsWritableStream> claimPrebuiltWritable();
+  kj::Maybe<jsg::JsRef<jsg::JsObject>> claimPrebuiltSocket();
 
   // All stubs deserialized as part of a particular parameter or result set are placed in a
   // common disposal group so that they can be disposed together.
@@ -125,12 +168,31 @@ class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHa
     return disposalGroup;
   }
 
+  kj::Maybe<TraceContextParent> getOriginatingCall() {
+    return originatingCall.map([](TraceContextParent& p) { return p.addRef(); });
+  }
+
  private:
   capnp::List<rpc::JsValue::External>::Reader externals;
   uint i = 0;
 
+  // Prebuilt values from prepare(), indexed to match `externals`. `span` records how many
+  // externals the value subsumes (1 for streams; 3 for sockets, which consume their two
+  // adjacent stream externals), so claiming advances `i` correctly. Slots for externals that
+  // need no hydration hold kj::none.
+  struct Slot {
+    kj::Maybe<kj::OneOf<JsReadableStream, JsWritableStream, jsg::JsRef<jsg::JsObject>>> value;
+    uint span = 1;
+  };
+  kj::Vector<Slot> slots;
+  bool prepared = false;
+
+  template <typename T>
+  kj::Maybe<T> claimPrebuilt();
+
   kj::UnwindDetector unwindDetector;
   RpcStubDisposalGroup& disposalGroup;
+  kj::Maybe<TraceContextParent> originatingCall;
 };
 
 // Base class for objects which can be sent over RPC, but doing so actually sends a stub which
@@ -155,12 +217,28 @@ class JsRpcTarget: public jsg::Object {
 // it's only a C++ class used to abstract how to get a capnp client out of the object.
 class JsRpcClientProvider: public jsg::Object {
  public:
+  // Result of resolving a stub for one call's worth of dispatch.
+  struct ClientForOneCall {
+    rpc::JsRpcTarget::Client client;
+    // Spans to parent the per-call jsRpcCall under. Root Fetchers use the newly-opened
+    // jsRpcSession as the parent; follow-up calls on returned stubs/promises use the call that
+    // produced them.
+    kj::Maybe<TraceContextParent> callSpanParents;
+
+    // The per-call span may be opened while resolving a root Fetcher so its user span can be
+    // propagated as the callee invocation's parent before the session client is constructed.
+    kj::Maybe<TraceContext> callSpan;
+  };
+
   // Get a capnp client that can be used to dispatch one call.
   //
   // If this isn't the root object (i.e. this is a JsRpcProperty), the property path starting from
   // the root object will be appended to `path`.
-  virtual rpc::JsRpcTarget::Client getClientForOneCall(
-      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) = 0;
+  virtual ClientForOneCall getClientForOneCall(jsg::Lock& js, kj::Vector<kj::StringPtr>& path) = 0;
+
+  // Tracing tag value for jsrpc.target_kind on the client-side per-call span
+  // (see JsRpcTargetBase::getTargetKind for the server-side equivalent).
+  virtual kj::LiteralStringConst getRpcTargetKind() = 0;
 };
 
 class JsRpcProperty;
@@ -186,14 +264,18 @@ class JsRpcPromise: public JsRpcClientProvider {
 
   JsRpcPromise(jsg::JsRef<jsg::JsPromise> inner,
       kj::Own<WeakRef> weakRef,
-      IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline);
+      IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline,
+      kj::Maybe<TraceContextParent> originatingCall);
   ~JsRpcPromise() noexcept(false);
 
   void resolve(jsg::Lock& js, jsg::JsValue result);
   void dispose(jsg::Lock& js);
 
-  rpc::JsRpcTarget::Client getClientForOneCall(
-      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+  ClientForOneCall getClientForOneCall(jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+
+  kj::LiteralStringConst getRpcTargetKind() override {
+    return "promise"_kjc;
+  }
 
   // Expect that the call is itself going to return a function... and call that.
   jsg::Ref<JsRpcPromise> call(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -232,6 +314,10 @@ class JsRpcPromise: public JsRpcClientProvider {
  private:
   jsg::JsRef<jsg::JsPromise> inner;
   kj::Own<WeakRef> weakRef;
+
+  // The jsRpcCall of the call that produced this promise, used to parent follow-up calls
+  // pipelined on the promise under it (mirrors JsRpcStub::originatingCall). Only set when traced.
+  kj::Maybe<IoOwn<TraceContextParent>> originatingCall;
 
   struct Pending {
     IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline;
@@ -277,8 +363,13 @@ class JsRpcProperty: public JsRpcClientProvider {
         name(kj::mv(name)),
         depth(depth) {}
 
-  rpc::JsRpcTarget::Client getClientForOneCall(
-      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+  ClientForOneCall getClientForOneCall(jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+
+  // Forward to parent: a property chain dispatches to the root's target, and
+  // the property path itself is captured separately by jsrpc.method.
+  kj::LiteralStringConst getRpcTargetKind() override {
+    return parent->getRpcTargetKind();
+  }
 
   // Call the property as a method.
   jsg::Ref<JsRpcPromise> call(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -359,11 +450,13 @@ class JsRpcStub: public JsRpcClientProvider {
   JsRpcStub(IoOwn<IoChannelFactory::RpcChannel> rpcChannel): rpcChannel(kj::mv(rpcChannel)) {}
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
       RpcStubDisposalGroup& disposalGroup,
-      jsg::ExternalMemoryAdjustment externalMemoryAdjustment);
+      jsg::ExternalMemoryAdjustment externalMemoryAdjustment,
+      kj::Maybe<TraceContextParent> originatingCall);
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
       IoOwn<IoChannelFactory::RpcChannel> rpcChannel,
       RpcStubDisposalGroup& disposalGroup,
-      jsg::ExternalMemoryAdjustment externalMemoryAdjustment);
+      jsg::ExternalMemoryAdjustment externalMemoryAdjustment,
+      kj::Maybe<TraceContextParent> originatingCall);
   explicit JsRpcStub(uint channelNumber): channelNumber(channelNumber) {}
   ~JsRpcStub() noexcept(false);
 
@@ -372,8 +465,11 @@ class JsRpcStub: public JsRpcClientProvider {
   // If the stub is backed by a persistable RpcChannel, return it.
   kj::Maybe<kj::Own<IoChannelFactory::RpcChannel>> getRpcChannel(IoContext& ioctx);
 
-  rpc::JsRpcTarget::Client getClientForOneCall(
-      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+  ClientForOneCall getClientForOneCall(jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+
+  kj::LiteralStringConst getRpcTargetKind() override {
+    return "stub"_kjc;
+  }
 
   jsg::Ref<JsRpcStub> dup(jsg::Lock& js);
   void dispose();
@@ -426,6 +522,19 @@ class JsRpcStub: public JsRpcClientProvider {
   kj::Maybe<RpcStubDisposalGroup&> disposalGroup;
   kj::ListLink<JsRpcStub> disposalGroupLink;
   kj::Maybe<jsg::ExternalMemoryAdjustment> externalMemoryAdjustment;
+
+  // The jsRpcCall of the call that returned this stub (set on stubs received via
+  // deserialization), used to parent follow-up calls on the stub under it. Only set when the
+  // originating call was traced; kj::none otherwise, so untraced stubs retain no span state. When
+  // set, it holds a refcount on the originating SpanObserver through the request's IoContext.
+  //
+  // Note: the originating jsRpcCall span is normally already closed by the time we open
+  // a child here (the originating SpanBuilder is destroyed when the awaitIo callback that
+  // produced this stub returns). That's OK: SpanParent holds a refcount on the underlying
+  // refcounted SpanObserver, so the parent identity remains valid for newChild() even after
+  // the parent has been reported closed. Observers must tolerate children opening after
+  // their parent's onClose().
+  kj::Maybe<IoOwn<TraceContextParent>> originatingCall;
 
   friend class RpcStubDisposalGroup;
 };

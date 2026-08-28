@@ -9,106 +9,35 @@ const restartBodies = new Map();
 const THROW_ID = 'throw';
 const MISSING_DELETE_ID = 'missing-delete';
 
-function getInstance(id) {
-  if (id === THROW_ID) {
-    throw new Error('workflow instance not found');
-  }
-  return { id };
-}
-
-function createInstance(options) {
-  return { id: options?.id };
-}
-
-function createBatchInstances(options) {
-  return options.map((val) => ({ id: val.id }));
-}
-
-function deleteBatchInstances(options) {
-  return {
-    deleted: options.instances
-      .filter((id) => id !== MISSING_DELETE_ID)
-      .map((id) => ({ id })),
-    errors: options.instances
-      .filter((id) => id === MISSING_DELETE_ID)
-      .map((id) => ({
-        id,
-        code: 10400,
-        message: 'workflows.api.error.instance.not_found',
-      })),
-  };
-}
-
-function instanceStatus(id, transport) {
-  return { status: 'running', output: id, transport };
-}
-
-async function handleHttp(request) {
-  const data = await request.json();
-  const reqUrl = new URL(request.url);
-
-  if (request.method !== 'POST') {
-    return Response.json({ success: false }, { status: 500 });
-  }
-
-  try {
-    switch (reqUrl.pathname) {
-      case '/get':
-        return Response.json({ result: getInstance(data.id) }, { status: 200 });
-      case '/create':
-        return Response.json({ result: createInstance(data) }, { status: 201 });
-      case '/createBatch':
-        return Response.json(
-          { result: createBatchInstances(data) },
-          { status: 201 }
-        );
-      case '/deleteBatch':
-        return Response.json(
-          { result: deleteBatchInstances(data) },
-          { status: 200 }
-        );
-      case '/pause':
-      case '/resume':
-      case '/terminate':
-      case '/delete':
-      case '/send-event':
-        return Response.json({ result: null }, { status: 200 });
-      case '/restart':
-        restartBodies.set(data.id, data);
-        return Response.json({ result: null }, { status: 200 });
-      case '/status':
-        return Response.json(
-          { result: instanceStatus(data.id, 'http') },
-          { status: 200 }
-        );
-      case '/last-restart':
-        return Response.json(
-          { result: restartBodies.get(data.id) ?? null },
-          { status: 200 }
-        );
-      default:
-        return Response.json({ success: false }, { status: 404 });
-    }
-  } catch (err) {
-    return Response.json({ error: { message: err.message } }, { status: 500 });
-  }
-}
-
 export default class WorkflowsMock extends WorkerEntrypoint {
   async getInstance(id) {
-    return getInstance(id);
+    if (id === THROW_ID) {
+      throw new Error('workflow instance not found');
+    }
+    return { id };
   }
 
   async create(options) {
-    return createInstance(options);
+    return { id: options?.id };
   }
 
   async createBatch(options) {
-    return createBatchInstances(options);
+    return options.map((val) => ({ id: val.id }));
   }
 
   async deleteBatch(options) {
-    return deleteBatchInstances(options);
+    return {
+      deleted: options.instances
+        .filter((id) => id !== MISSING_DELETE_ID)
+        .map((id) => ({ id })),
+      errors: options.instances
+        .filter((id) => id === MISSING_DELETE_ID)
+        .map((id) => ({
+          id,
+          code: 10400,
+          message: 'workflows.api.error.instance.not_found',
+        })),
+    };
   }
 
   async deleteInstance(_id) {}
@@ -124,16 +53,24 @@ export default class WorkflowsMock extends WorkerEntrypoint {
   }
 
   async status(id) {
-    return instanceStatus(id, 'rpc');
+    return { status: 'running', output: id };
   }
 
   async sendEvent(_id, _event) {}
 
-  async lastRestart(id) {
-    return restartBodies.get(id) ?? null;
-  }
-
+  // Introspection only. The binding itself never uses fetch(), but the test worker's own compat
+  // date leaves RPC gated on `env.mock`, so it reaches these records over HTTP instead.
   async fetch(request) {
-    return handleHttp(request);
+    const data = await request.json();
+    const pathname = new URL(request.url).pathname;
+
+    switch (pathname) {
+      case '/last-restart':
+        return Response.json({ result: restartBodies.get(data.id) ?? null });
+      default:
+        throw new Error(
+          `unexpected HTTP request to the workflows mock: ${pathname}`
+        );
+    }
   }
 }

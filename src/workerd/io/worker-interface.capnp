@@ -808,6 +808,14 @@ interface JsRpcTarget extends(JsValue.ExternalPusher) $Cxx.allowCancellation {
       # ExternalPusher object which will push into the caller's isolate. Use this to push externals
       # that will be included in the results.
     }
+
+    callerSpanContext @6 :SpanContext;
+    # Identity of the caller's per-call `jsRpcCall` span. The callee records this as a link on its
+    # own per-call span. This is needed because a single session carries many calls (e.g. calls
+    # pipelined on a returned stub or promise), while the context propagated when the session was
+    # opened identifies only the first call.
+    #
+    # Absent when the caller is not being traced.
   }
 
   struct CallResults {

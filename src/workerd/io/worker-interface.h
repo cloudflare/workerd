@@ -20,6 +20,17 @@ class FrankenvalueHandler;
 class IoContext_IncomingRequest;
 struct Worker_VersionInfo;
 
+// Identifies exceptions propagated after `IncomingRequest::delivered()`. This detail survives RPC,
+// allowing consumers to distinguish runtime failures from startup failures. Any path that calls
+// `delivered()` must add it before propagating an exception.
+constexpr kj::Exception::DetailTypeId WORKER_REQUEST_DELIVERED_DETAIL_ID = 0x9d3c7f2e6b1a8450ull;
+
+inline void markExceptionAsDelivered(kj::Exception& exception) {
+  if (exception.getDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID) == kj::none) {
+    exception.setDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  }
+}
+
 // An interface representing the services made available by a worker/pipeline to handle a
 // request.
 class WorkerInterface: public kj::HttpService {
@@ -140,8 +151,8 @@ class WorkerInterface: public kj::HttpService {
       EventOutcome outcome;
     };
 
-    // Deliver the event to an isolate in this process. `incomingRequest` has been newly-allocated
-    // for this event.
+    // Deliver the event to an isolate in this process. `incomingRequest` is new for this event;
+    // implementations must call `delivered()` before starting work.
     virtual kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
         kj::Maybe<kj::StringPtr> entrypointName,
         kj::Maybe<Worker_VersionInfo> versionInfo,

@@ -520,7 +520,17 @@ void IoContext::addTask(kj::Promise<void> promise) {
     return;
   }
 
-  if (actor == kj::none) {
+  if (incomingRequests.empty()) {
+    // A task can be scheduled after the last IncomingRequest has been unlinked (see
+    // ~IoContext_IncomingRequest) while the IoContext itself is still alive -- an RPC stream
+    // adapter dropped during teardown, for instance, schedules the stream's abort algorithm from
+    // its destructor. There is no request to attribute the task to, so the metric below is
+    // skipped; the task is still queued, and runs if the IoContext gets far enough to run it.
+    // This is a state worth knowing about, hence the log, but it is recoverable and must not be
+    // treated as a precondition violation.
+    DEBUG_FATAL_RELEASE_LOG(WARNING, "Adding task to IoContext with no current IncomingRequest",
+        lastDeliveredLocation, kj::getStackTrace());
+  } else if (actor == kj::none) {
     // This metric won't work correctly in actors since it's being tracked per-request, but tasks
     // are not tied to requests in actors. So we just skip it in actors. (Actually this code path
     // is not even executed in the actor case but I'm leaving the check in just in case that ever
@@ -535,18 +545,18 @@ void IoContext::addTask(kj::Promise<void> promise) {
 }
 
 void IoContext::addWaitUntil(kj::Promise<void> promise) {
-  if (actor == kj::none) {
+  // The empty check comes first: getMetrics() requires a current IncomingRequest, so consulting
+  // it before checking would turn the recoverable no-request case into a fatal one. See addTask().
+  if (incomingRequests.empty()) {
+    DEBUG_FATAL_RELEASE_LOG(WARNING, "Adding task to IoContext with no current IncomingRequest",
+        lastDeliveredLocation, kj::getStackTrace());
+  } else if (actor == kj::none) {
     // This metric won't work correctly in actors since it's being tracked per-request, but tasks
     // are not tied to requests in actors. So we just skip it in actors.
     auto& metrics = getMetrics();
     if (metrics.getSpan().isObserved()) {
       promise = promise.attach(metrics.addedWaitUntilTask());
     }
-  }
-
-  if (incomingRequests.empty()) {
-    DEBUG_FATAL_RELEASE_LOG(WARNING, "Adding task to IoContext with no current IncomingRequest",
-        lastDeliveredLocation, kj::getStackTrace());
   }
 
   waitUntilTasks.add(kj::mv(promise));
@@ -1098,6 +1108,23 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
       });
 }
 
+kj::Own<WorkerInterface> IoContext::getSubrequestChannel(uint channel,
+    bool isInHouse,
+    kj::Maybe<kj::String> cfBlobJson,
+    TraceContext& traceContext,
+    SpanParent userSpanParent) {
+  return getSubrequest(
+      [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
+    return getSubrequestChannelImpl(
+        channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory, kj::mv(userSpanParent));
+  },
+      SubrequestOptions{
+        .inHouse = isInHouse,
+        .wrapMetrics = !isInHouse,
+        .existingTraceContext = traceContext,
+      });
+}
+
 kj::Own<WorkerInterface> IoContext::getSubrequestChannelNoChecks(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
@@ -1118,11 +1145,16 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
     TraceContext& tracing,
-    IoChannelFactory& channelFactory) {
+    IoChannelFactory& channelFactory,
+    kj::Maybe<SpanParent> userSpanParent) {
+  auto propagatedUserSpanParent = tracing.getUserSpanParent();
+  KJ_IF_SOME(parent, userSpanParent) {
+    propagatedUserSpanParent = kj::mv(parent);
+  }
   IoChannelFactory::SubrequestMetadata metadata{
     .cfBlobJson = kj::mv(cfBlobJson),
     .parentSpan = tracing.getInternalSpanParent(),
-    .userSpanParent = tracing.getUserSpanParent(),
+    .userSpanParent = kj::mv(propagatedUserSpanParent),
     .featureFlagsForFl = mapCopyString(worker->getIsolate().getFeatureFlagsForFl()),
   };
 

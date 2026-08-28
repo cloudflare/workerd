@@ -294,6 +294,9 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
         } else if (object->IsFunction()) {
           eh.serializeFunction(js, *this, object.As<v8::Function>());
           return v8::Just(true);
+        } else if (eh.trySerializeClassInstance(js, *this, object)) {
+          // The handler recognized this class instance (e.g. by brand check) and serialized it.
+          return v8::Just(true);
         }
       }
 
@@ -305,18 +308,23 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
       throwDataCloneErrorForObject(js, object);
     }
 
-    Wrappable* wrappable = reinterpret_cast<Wrappable*>(
-        object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
-            static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
+    // The InternalFieldCount + isWorkerdApiObject() checks above established that this is one of
+    // our wrapped objects; the serializer is then selected by the object's dynamic type, so we
+    // only need the pointer here.
+    Wrappable* wrappable = Wrappable::unwrapFromShimAnyType(js.v8Isolate, object);
+    if (wrappable == nullptr) {
+      // The object carries our marker (isWorkerdApiObject() passed) yet its CppHeap handle resolves
+      // to no live wrappable. That is an in-sandbox corruption signal.
+      KJ_LOG(
+          FATAL, "wrapper type mismatch: marked object's CppHeap handle resolves to no wrappable");
+      abort();
+    }
 
-    // HACK: Although we don't technically know yet that `wrappable` is an `Object`, we know that
-    //   only subclasses of `Object` register serializers. So *if* a serializer is found, then this
-    //   cast is valid, and the pointer won't be accessed otherwise. We can't do a dynamic_cast
-    //   here since `Wrappable` is privately inherited by `Object` and anyway we don't want the
-    //   overhead of dynamic_cast.
-    // TODO(cleanup): Probably `Wrappable` should contain a bool indicating if it is an `Object`
-    //   or not?
-    Object* obj = reinterpret_cast<jsg::Object*>(wrappable);
+    // Only subclasses of `Object` register serializers, so anything else is not serializable.
+    Object* obj = wrappable->jsgTryGetObject();
+    if (obj == nullptr) {
+      throwDataCloneErrorForObject(js, object);
+    }
 
     if (!IsolateBase::from(isolate).serialize(
             Lock::from(isolate), typeid(*wrappable), *obj, *this)) {

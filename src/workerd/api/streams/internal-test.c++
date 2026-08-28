@@ -1041,5 +1041,70 @@ KJ_TEST("Writing SharedArrayBuffer works") {
   });
 }
 
+KJ_TEST("internal pipe force-cancel drops pending read before destroying source") {
+  class PendingReadSource final: public ReadableStreamSource {
+   public:
+    PendingReadSource(kj::Promise<size_t> readPromise, kj::Vector<kj::String>& events)
+        : readPromise(kj::mv(readPromise)),
+          events(events) {}
+
+    ~PendingReadSource() noexcept(false) {
+      events.add(kj::str("source destroyed"));
+    }
+
+    kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+      KJ_ASSERT(minBytes <= 1);
+      KJ_ASSERT(maxBytes >= 1);
+
+      static_cast<kj::byte*>(buffer)[0] = 1;
+      events.add(kj::str("read started"));
+
+      return kj::mv(readPromise).attach(kj::defer([&events = events] {
+        events.add(kj::str("read promise dropped"));
+      }));
+    }
+
+    void cancel(kj::Exception reason) override {
+      events.add(kj::str("source canceled"));
+    }
+
+   private:
+    kj::Promise<size_t> readPromise;
+    kj::Vector<kj::String>& events;
+  };
+
+  auto fixture = makeStreamTestFixture();
+  kj::Vector<kj::String> events;
+  bool pipeRejected = false;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto read = kj::newPromiseAndFulfiller<size_t>();
+
+    auto source = env.js.alloc<ReadableStream>(
+        env.context, kj::heap<PendingReadSource>(kj::mv(read.promise), events));
+    auto destination = env.js.alloc<WritableStream>(env.context, kj::heap<NoopSink>(), kj::none);
+
+    auto pipe = source->pipeTo(env.js, destination.addRef(), PipeToOptions{})
+                    .catch_(env.js, [&](jsg::Lock&, jsg::Value) { pipeRejected = true; });
+
+    KJ_ASSERT(events.size() == 1);
+    KJ_ASSERT(events[0] == "read started");
+
+    // Bypass the pipe lock like JsReadableStream::forceCancel().
+    source->getController().cancel(env.js, kj::none);
+
+    // The fix must synchronously cancel the pending read before freeing its source.
+    KJ_ASSERT(events.size() == 4);
+    KJ_ASSERT(events[1] == "read promise dropped");
+    KJ_ASSERT(events[2] == "source canceled");
+    KJ_ASSERT(events[3] == "source destroyed");
+
+    // Without the fix, this resumes pumpTo() with a dangling source pointer.
+    read.fulfiller->fulfill(1);
+
+    return env.context.awaitJs(env.js, kj::mv(pipe)).then([&] { KJ_ASSERT(pipeRejected); });
+  });
+}
+
 }  // namespace
 }  // namespace workerd::api

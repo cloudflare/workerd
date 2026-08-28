@@ -48,7 +48,7 @@ gclient sync
 
 ```sh
 git checkout -b workerd-patches
-git am <path_to_workerd>/patches/v8/*
+git am --keep-non-patch <path_to_workerd>/patches/v8/*
 ```
 
 There are multiple patches in `patches/v8/`. These include workerd-specific customizations:

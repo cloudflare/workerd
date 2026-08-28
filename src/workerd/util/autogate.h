@@ -106,7 +106,27 @@ namespace workerd::util {
   /* Allow a Socket to be transferred over JS RPC. When disabled, serializing a Socket fails as    \
      though the type were not serializable at all, and an incoming transferred Socket is           \
      rejected. */                                                                                  \
-  V(SOCKET_RPC_TRANSFER)
+  V(SOCKET_RPC_TRANSFER)                                                                           \
+  /* Materialize stream and socket externals of an incoming RPC value BEFORE the V8 value graph    \
+     is deserialized (RpcDeserializerExternalHandler::prepare()), with deserialize() claiming the  \
+     prebuilt objects. V8's deserializer forbids JS execution during the graph read, so this is    \
+     the only phase in which TypeScript-implemented streams (whose construction runs JS) can be    \
+     built; the mechanism itself is implementation-agnostic and runs for legacy streams too. When  \
+     disabled, deserialization constructs legacy streams in place, exactly as before the gate      \
+     existed; the typescript_implemented_streams compat flag requires this gate to receive         \
+     streams over RPC (that combination is rejected, not degraded). */                             \
+  V(RPC_EXTERNALS_HYDRATION)                                                                       \
+  /* Route all zlib usage in the process to zlib-rs (libz-rs-sys), the memory-safe Rust          \
+     implementation, instead of chromium zlib. The unprefixed zlib symbols are owned by the      \
+     routing layer in util/zlib-router.c++, so this covers every consumer: node:zlib, web        \
+     CompressionStream, crypto crc32, kj-gzip/http (fetch and WebSocket compression), and V8's   \
+     compression utils. Chromium zlib remains the default. */                                    \
+  V(COMPRESSION_RS)                                                                                 \
+  /* Enables per-call JSRPC tracing, trace-context propagation, and related Fetcher spans. */       \
+  V(JSRPC_TRACING)                                                                                  \
+  /* Selects the redesigned memory cache implementation. The legacy implementation remains         \
+     available for rollback while this gate is rolled out. */                                      \
+  V(MEMORY_CACHE_V2)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

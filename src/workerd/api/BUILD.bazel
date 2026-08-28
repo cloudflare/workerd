@@ -274,15 +274,33 @@ wd_cc_library(
     ],
 )
 
+# Shared compression machinery (allocator, and the common codec core): the common home for
+# the primitives used by the web CompressionStream/DecompressionStream pair, node:zlib, and
+# the TypeScript streams implementation's codec handle.
+wd_cc_library(
+    name = "compression",
+    srcs = ["compression.c++"],
+    hdrs = ["compression.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io:features",
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj/compat:kj-brotli",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
+        "@nbytes",
+        "@zstd",
+    ],
+)
+
 wd_cc_library(
     name = "streams-compression",
     srcs = ["streams/compression.c++"],
     hdrs = ["streams/compression.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":compression",
         "//src/workerd/io",
         "//src/workerd/util:state-machine",
-        "@nbytes",
     ],
 )
 
@@ -320,18 +338,33 @@ wd_cc_library(
 
 wd_cc_library(
     name = "memory-cache",
-    srcs = ["memory-cache.c++"],
-    hdrs = ["memory-cache.h"],
+    srcs = [
+        "memory-cache.c++",
+        "memory-cache-v2.c++",
+        "memory-cache-v2-test.h",
+    ],
+    hdrs = [
+        "memory-cache.h",
+    ],
     implementation_deps = [
+        "//src/rust/memory-cache/ffi:memory-cache-ffi",
         "//src/workerd/io",
+        "//src/workerd/util:autogate",
+        "//src/workerd/util:thread-scopes",
     ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "//src/workerd/util:checked-queue",
-        "//src/workerd/util:uuid",
     ],
+)
+
+wd_cc_library(
+    name = "memory-cache-test-support",
+    testonly = True,
+    hdrs = ["memory-cache-v2-test.h"],
+    deps = [":memory-cache"],
 )
 
 wd_cc_library(
@@ -609,8 +642,11 @@ kj_test(
     src = "memory-cache-test.c++",
     deps = [
         ":memory-cache",
+        ":memory-cache-test-support",
         "//src/workerd/io",
         "//src/workerd/io:trace",
+        "//src/workerd/tests:test-fixture",
+        "//src/workerd/util:autogate",
     ],
 )
 
@@ -640,6 +676,14 @@ kj_test(
 
 kj_test(
     src = "js-writable-stream-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "deferred-proxy-flow-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
@@ -763,18 +807,6 @@ kj_test(
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
     ],
-)
-
-wd_test(
-    src = "streams/identitytransformstream-backpressure-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams/identitytransformstream-backpressure-test.js"],
-)
-
-wd_test(
-    src = "streams/identitytransformstream-byob-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams/identitytransformstream-byob-test.js"],
 )
 
 wd_test(

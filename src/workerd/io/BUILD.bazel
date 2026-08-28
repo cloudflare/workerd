@@ -65,6 +65,7 @@ wd_cc_library(
     implementation_deps = [
         "//src/per_isolate",
         "//src/rust/jsg",
+        "//src/workerd/api:compression",
         "//src/workerd/api:crypto-crc-impl",
         "//src/workerd/api:data-url",
         "//src/workerd/api/node:exceptions",
@@ -220,6 +221,7 @@ wd_cc_library(
     deps = [
         "//src/rust/cxx-integration",
         "@capnp-cpp//src/capnp",
+        "@workerd-v8//:v8",
     ],
 )
 
@@ -602,6 +604,14 @@ kj_test(
     src = "worker-getexportedhandler-test.c++",
     deps = [
         ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "worker-entrypoint-test.c++",
+    deps = [
+        ":worker-entrypoint",
         "//src/workerd/tests:test-fixture",
     ],
 )

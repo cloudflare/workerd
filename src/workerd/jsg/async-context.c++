@@ -57,8 +57,11 @@ kj::Maybe<AsyncContextFrame&> AsyncContextFrame::current(Lock& js) {
 }
 
 kj::Maybe<Ref<AsyncContextFrame>> AsyncContextFrame::currentRef(Lock& js) {
-  return jsg::AsyncContextFrame::current(js).map(
-      [](jsg::AsyncContextFrame& frame) { return frame.addRef(); });
+  return currentRef(js.v8Isolate);
+}
+
+kj::Maybe<Ref<AsyncContextFrame>> AsyncContextFrame::currentRef(v8::Isolate* isolate) {
+  return current(isolate).map([](AsyncContextFrame& frame) { return frame.addRef(); });
 }
 
 kj::Maybe<AsyncContextFrame&> AsyncContextFrame::current(v8::Isolate* isolate) {
@@ -158,7 +161,7 @@ AsyncContextFrame::Scope::Scope(Lock& js, kj::Maybe<AsyncContextFrame&> resource
 
 AsyncContextFrame::Scope::Scope(v8::Isolate* ptr, kj::Maybe<AsyncContextFrame&> maybeFrame)
     : isolate(ptr),
-      prior(AsyncContextFrame::current(ptr)) {
+      prior(AsyncContextFrame::currentRef(ptr)) {
   maybeSetV8ContinuationContext(isolate, maybeFrame);
 }
 
@@ -168,7 +171,8 @@ AsyncContextFrame::Scope::Scope(Lock& js, kj::Maybe<Ref<AsyncContextFrame>>& res
       })) {}
 
 AsyncContextFrame::Scope::~Scope() noexcept(false) {
-  maybeSetV8ContinuationContext(isolate, prior);
+  maybeSetV8ContinuationContext(isolate,
+      prior.map([](Ref<AsyncContextFrame>& frame) -> AsyncContextFrame& { return *frame; }));
 }
 
 AsyncContextFrame::StorageScope::StorageScope(Lock& js, kj::Arc<StorageKey> key, Value store)

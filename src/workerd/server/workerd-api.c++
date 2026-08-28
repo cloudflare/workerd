@@ -644,13 +644,12 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
 
     KJ_CASE_ONEOF(cache, Global::MemoryCache) {
       value = lock.wrap(context,
-          lock.alloc<api::MemoryCache>(
-              api::SharedMemoryCache::Use(memoryCacheProvider.getInstance(cache.cacheId),
-                  {
-                    .maxKeys = cache.maxKeys,
-                    .maxValueSize = cache.maxValueSize,
-                    .maxTotalValueSize = cache.maxTotalValueSize,
-                  })));
+          lock.alloc<api::MemoryCache>(memoryCacheProvider.getUse(cache.cacheId,
+              {
+                .maxKeys = cache.maxKeys,
+                .maxValueSize = cache.maxValueSize,
+                .maxTotalValueSize = cache.maxTotalValueSize,
+              })));
     }
 
     KJ_CASE_ONEOF(ns, Global::EphemeralActorNamespace) {
@@ -1067,7 +1066,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
                         jsg::modules::Module::newEsm(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
-                            kj::heapArray<const char>(content.body)));
+                            kj::arc<jsg::OwnedAscii>(kj::heapArray<const char>(content.body))));
                   }
                   KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
                     auto ownedData = kj::str(content.body);

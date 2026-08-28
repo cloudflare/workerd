@@ -12,7 +12,6 @@
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/io-own.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/canceler.h>
 #include <workerd/util/strong-bool.h>
 
 namespace workerd::api {
@@ -182,8 +181,9 @@ class ExecProcess: public jsg::Object {
   kj::Maybe<int> resolvedExitCode;
   bool outputCalled = false;
 
-  kj::Maybe<IoOwn<RefcountedCanceler>> abortCanceler;
-  kj::Maybe<RefcountedCanceler::Listener> abortListener;
+  // Keeps the kill-on-abort action registered with the exec() options' AbortSignal for as
+  // long as this process object is alive.
+  kj::Maybe<kj::Own<void>> abortRegistration;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(stdinStream, stdoutStream, stderrStream, exitCodePromise, exitCodePromiseCopy);
@@ -215,10 +215,14 @@ class Container: public jsg::Object {
   };
 
   struct DirectorySnapshotRestoreParams {
-    DirectorySnapshot snapshot;
+    jsg::Optional<DirectorySnapshot> snapshot;
     jsg::Optional<kj::String> mountPoint;
 
     JSG_STRUCT(snapshot, mountPoint);
+    JSG_STRUCT_TS_OVERRIDE(type ContainerDirectorySnapshotRestoreParams =
+      | { snapshot: ContainerDirectorySnapshot; mountPoint?: string }
+      | { snapshot?: undefined; mountPoint: string }
+    );
   };
 
   struct Snapshot {

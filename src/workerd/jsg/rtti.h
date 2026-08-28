@@ -219,6 +219,14 @@ struct BuildRtti<Configuration, jsg::JsSymbol> {
   }
 };
 
+template <typename Configuration>
+struct BuildRtti<Configuration, v8::WasmModuleObject> {
+  // Renders as `unknown`; use a TS override to name it `WebAssembly.Module` where exposed.
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    builder.setUnknown();
+  }
+};
+
 // Numbers
 
 #define DECLARE_NUMBER_TYPE(T)                                                                     \

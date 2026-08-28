@@ -4,6 +4,8 @@
 
 #include "per-isolate-bootstrap.h"
 
+#include <workerd/api/compression.h>
+#include <workerd/api/crypto/digest-bootstrap.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
@@ -133,10 +135,35 @@ static void MarkPromiseHandledFastApi(v8::Local<v8::Value> unused, v8::Local<v8:
 }
 
 static void GetApiSymbol(const v8::FunctionCallbackInfo<v8::Value>& args) {
-  auto name = jsg::JsValue(args[0]);
-  auto str = JSG_REQUIRE_NONNULL(
-      name.tryCast<jsg::JsString>(), TypeError, "getApiSymbol() expects a string argument");
-  args.GetReturnValue().Set(v8::Symbol::ForApi(args.GetIsolate(), str));
+  // liftKj converts a thrown kj/jsg exception (the validation TypeError below) into a JS
+  // exception; without it the raw callback would let it escape and take down the process.
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto name = jsg::JsValue(args[0]);
+    auto str = JSG_REQUIRE_NONNULL(
+        name.tryCast<jsg::JsString>(), TypeError, "getApiSymbol() expects a string argument");
+    return v8::Symbol::ForApi(args.GetIsolate(), str);
+  });
+}
+
+// Creates the native digest object backing the TypeScript DigestStream. Unlike
+// its neighbors this allocates and can throw (an unrecognized algorithm name
+// raises a DOMNotSupportedError), so it is registered as a plain method rather
+// than a fast-API call, and needs liftKj to turn a thrown kj::Exception into a
+// JS exception.
+static void CreateDigestContext(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      auto name = jsg::JsValue(args[0]);
+      auto str = JSG_REQUIRE_NONNULL(name.tryCast<jsg::JsString>(), TypeError,
+          "createDigestContext() expects a string argument");
+      // The caller has already reduced the option bag to a boolean, so this is
+      // ToBoolean on an actual boolean and cannot run user code.
+      auto toWellFormed = api::ToWellFormed(args[1]->BooleanValue(args.GetIsolate()));
+      args.GetReturnValue().Set(
+          v8::Local<v8::Value>(api::createDigestContext(js, str.toString(js), toWellFormed)));
+    });
+  });
 }
 
 static const v8::CFunction fast_mark_promise_handled_ =
@@ -167,7 +194,10 @@ v8::Local<v8::Value> getMethod(jsg::Lock& js, v8::FunctionCallback callback) {
 // Creates an object with methods for performing fast type checks on JS values.
 // Because we are not fully bootstrapped at this point, we don't want to rely
 // on jsg::Object and the type wrapper system, etc. Instead, just use a plain
-// object with some properties set.
+// object with some properties set. (Members implemented in the api layer, like
+// newCompressionCodec, keep their knowledge there and are wired here by name;
+// their callbacks may use the type wrapper at CALL time -- the isolate is fully
+// set up by then -- through jsg::Lock's type-handler lookup.)
 jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
   static constexpr std::string_view names[] = {
 #define V(Name) "is" #Name,
@@ -177,6 +207,8 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
         "isAnyArrayBuffer",
     "markPromiseHandled",
     "getApiSymbol",
+    "newCompressionCodec",
+    "createDigestContext",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -186,6 +218,8 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
         getFastMethodNoSideEffect(js, IsAnyArrayBuffer, &fast_is_any_array_buffer_),
     getFastMethod(js, MarkPromiseHandled, &fast_mark_promise_handled_),
     getMethod(js, GetApiSymbol),
+    getMethod(js, api::newCompressionCodecCallback),
+    getMethod(js, CreateDigestContext),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());

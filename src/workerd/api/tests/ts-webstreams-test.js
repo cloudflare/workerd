@@ -21,7 +21,14 @@ const {
   TextDecoderStream,
 } = globalThis;
 
-import { doesNotMatch, ok, strictEqual, throws } from 'node:assert';
+import {
+  deepStrictEqual,
+  doesNotMatch,
+  ok,
+  rejects,
+  strictEqual,
+  throws,
+} from 'node:assert';
 
 export const existenceTest = {
   test() {
@@ -126,6 +133,269 @@ export const nativeBackedCancel = {
     // Cancellation closes the stream; further reads observe EOF.
     const { done } = await stream.getReader().read();
     strictEqual(done, true);
+  },
+};
+
+// ======================================================================================
+// Buffer-backed bodies (Body::extractBody's in-memory arms: strings, ArrayBuffers,
+// typed arrays, Blobs, URLSearchParams) construct their streams through the same
+// compat-flag dispatch as every other C++-minted stream, so under the flag
+// request/response bodies are TypeScript-implemented streams over the shared in-memory
+// buffer.
+
+export const bufferBackedBodiesAreTsStreams = {
+  async test() {
+    const bodies = [
+      'hello world',
+      new TextEncoder().encode('hello world'),
+      new TextEncoder().encode('hello world').buffer,
+      new Blob(['hello world']),
+    ];
+    for (const body of bodies) {
+      const response = new Response(body);
+      // The body stream is an instance of the TypeScript-implemented class (a legacy
+      // C++ stream would fail this brand check)...
+      ok(response.body instanceof ReadableStream);
+      // ...and the C++ consumption helpers drain it through the TS conduit.
+      strictEqual(await response.text(), 'hello world');
+    }
+  },
+};
+
+export const bufferBackedRequestBody = {
+  async test() {
+    const request = new Request('http://example.org/', {
+      method: 'POST',
+      body: 'hello world',
+    });
+    ok(request.body instanceof ReadableStream);
+    strictEqual(await request.text(), 'hello world');
+  },
+};
+
+export const bufferBackedBodyReaderRead = {
+  async test() {
+    // Reading a buffer-backed body from JavaScript drives the TS reader machinery over
+    // the native in-memory source.
+    const response = new Response('hello world');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    strictEqual(text, 'hello world');
+  },
+};
+
+export const bufferBackedUrlSearchParamsBody = {
+  async test() {
+    const response = new Response(new URLSearchParams({ a: '1', b: '2' }));
+    ok(response.body instanceof ReadableStream);
+    strictEqual(await response.text(), 'a=1&b=2');
+  },
+};
+
+export const bufferBackedEmptyBody = {
+  async test() {
+    // An empty buffer-backed body closes immediately (expectedLength 0).
+    const response = new Response('');
+    ok(response.body instanceof ReadableStream);
+    strictEqual(await response.text(), '');
+  },
+};
+
+// ======================================================================================
+// Iterable/AsyncIterable bodies (the fetch_iterable_type_support BodyInit extension) go
+// through JsReadableStream::from(), which under the flag constructs a TypeScript stream
+// over a C++-built underlying source driving the (already-unwrapped) generator with
+// ReadableStream.from() semantics: demand-driven pulls, promise-typed values awaited,
+// close on completion, cancel forwarded to the iterator's return().
+
+export const iterableBodiesAreTsStreams = {
+  async test() {
+    const encoder = new TextEncoder();
+
+    // Async generator.
+    async function* agen() {
+      yield encoder.encode('hello ');
+      yield encoder.encode('world');
+    }
+    let response = new Response(agen());
+    ok(response.body instanceof ReadableStream);
+    strictEqual(await response.text(), 'hello world');
+
+    // Sync iterable object.
+    response = new Response({
+      *[Symbol.iterator]() {
+        yield encoder.encode('hello ');
+        yield encoder.encode('world');
+      },
+    });
+    ok(response.body instanceof ReadableStream);
+    strictEqual(await response.text(), 'hello world');
+
+    // Promise-typed values are awaited before being enqueued (async-from-sync
+    // semantics, matching the legacy implementation).
+    response = new Response({
+      *[Symbol.iterator]() {
+        yield Promise.resolve(encoder.encode('hello '));
+        yield Promise.resolve(encoder.encode('world'));
+      },
+    });
+    strictEqual(await response.text(), 'hello world');
+  },
+};
+
+export const iterableBodyReaderRead = {
+  async test() {
+    // Reading the iterable-backed body from JavaScript drives the TS reader machinery:
+    // one generator value per read, EOF after completion.
+    async function* agen() {
+      yield new TextEncoder().encode('hello world');
+    }
+    const response = new Response(agen());
+    const reader = response.body.getReader();
+    const first = await reader.read();
+    strictEqual(first.done, false);
+    strictEqual(new TextDecoder().decode(first.value), 'hello world');
+    const eof = await reader.read();
+    strictEqual(eof.done, true);
+  },
+};
+
+// Internal stream production (ReadableStream.from and the iterable-body path,
+// whose C++ arm drives the same queued controller) must not dispatch through
+// the user-patchable ReadableStreamDefaultController prototype: per WHATWG,
+// from() uses internal controller operations, so patched enqueue/close must
+// have no effect on either surface.
+export const controllerPrototypePollution = {
+  async test() {
+    const proto = ReadableStreamDefaultController.prototype;
+    const origEnqueue = proto.enqueue;
+    const origClose = proto.close;
+    const trapped = [];
+    proto.enqueue = function (...args) {
+      trapped.push('enqueue');
+      return origEnqueue.apply(this, args);
+    };
+    proto.close = function (...args) {
+      trapped.push('close');
+      return origClose.apply(this, args);
+    };
+    try {
+      // ReadableStream.from (TS-internal production).
+      {
+        const stream = ReadableStream.from(['pol', 'lution', '-proof']);
+        const reader = stream.getReader();
+        let text = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          text += value;
+        }
+        strictEqual(text, 'pollution-proof');
+      }
+
+      // Iterable body (the C++ from() arm driving the same controller).
+      {
+        async function* agen() {
+          yield new TextEncoder().encode('body intact');
+        }
+        strictEqual(await new Response(agen()).text(), 'body intact');
+      }
+
+      deepStrictEqual(
+        trapped,
+        [],
+        `internal production dispatched through patched prototype: ${trapped.join(', ')}`
+      );
+    } finally {
+      proto.enqueue = origEnqueue;
+      proto.close = origClose;
+    }
+  },
+};
+
+export const iterableBodyCancelCallsReturn = {
+  async test() {
+    // Canceling the body forwards to the iterator's return() hook.
+    let returned = false;
+    const response = new Response({
+      [Symbol.asyncIterator]() {
+        return {
+          next() {
+            return Promise.resolve({
+              value: new TextEncoder().encode('x'),
+              done: false,
+            });
+          },
+          return() {
+            returned = true;
+            return Promise.resolve({ done: true });
+          },
+        };
+      },
+    });
+    await response.body.cancel('no longer interested');
+    ok(returned);
+  },
+};
+
+export const iterableBodyErrorPropagates = {
+  async test() {
+    // A generator throw rejects the pull, which errors the stream and the consumption.
+    async function* agen() {
+      yield new TextEncoder().encode('x');
+      throw new Error('boom');
+    }
+    const response = new Response(agen());
+    await rejects(response.text(), /boom/);
+  },
+};
+
+// ======================================================================================
+// new Request(existingRequest) proxies the body by detaching it: the original request's
+// stream is taken over (left permanently locked and disturbed) and the new request reads
+// the data. Under the flag this drives JsReadableStream::detach()'s TypeScript arm.
+
+export const requestBodyProxying = {
+  async test() {
+    const req1 = new Request('http://example.org/', {
+      method: 'POST',
+      body: 'hello world',
+    });
+    const req2 = new Request(req1);
+    ok(req2.body instanceof ReadableStream);
+    // The original's body has been taken over: disturbed (bodyUsed) and locked.
+    strictEqual(req1.bodyUsed, true);
+    ok(req1.body.locked);
+    strictEqual(await req2.text(), 'hello world');
+  },
+};
+
+export const requestStreamBodyProxying = {
+  async test() {
+    const encoder = new TextEncoder();
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue(encoder.encode('hello '));
+        c.enqueue(encoder.encode('world'));
+        c.close();
+      },
+    });
+    const req1 = new Request('http://example.org/', {
+      method: 'POST',
+      body: rs,
+    });
+    const req2 = new Request(req1);
+    // The adopted user stream is the one left as the locked husk...
+    ok(rs.locked);
+    // ...while the new request reads its (queued) data through the moved cursor.
+    strictEqual(await req2.text(), 'hello world');
   },
 };
 

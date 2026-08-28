@@ -9,7 +9,13 @@
 #include <workerd/util/state-machine.h>
 #include <workerd/util/weak-refs.h>
 
+namespace capnp {
+class ExplicitEndOutputStream;
+}
+
 namespace workerd::api {
+
+class JsWritableStream;
 
 class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamController::Writer {
  public:
@@ -199,7 +205,13 @@ class WritableStream: public jsg::Object, public kj::PtrTarget {
   }
 
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
-  static jsg::Ref<WritableStream> deserialize(
+
+  // Deserializes to a JsWritableStream (rather than a jsg::Ref<WritableStream>) so that the
+  // received stream is backed by whichever stream implementation this isolate runs: under the
+  // typescript_implemented_streams compat flag the result wraps a TypeScript-implemented
+  // stream (and is an instance of the global WritableStream class), otherwise a legacy
+  // stream exactly as before. Wire-compatible with peers running either implementation.
+  static JsWritableStream deserialize(
       jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
 
   JSG_SERIALIZABLE(rpc::SerializationTag::WRITABLE_STREAM);
@@ -215,5 +227,30 @@ class WritableStream: public jsg::Object, public kj::PtrTarget {
   template <typename T>
   friend class WritableImpl;
 };
+
+// The pieces of a WritableStreamSink wrapped for transfer over capnp RPC (the sending side of
+// a WritableStream serialization): `stream` is the capnp-compatible wrapper to hand to the
+// ByteStreamFactory, and `completionOrRevoke` must be added as a task on the IoContext (with a
+// pending event registered). The promise resolves when the peer drops the stream; if it is
+// canceled first (the IoContext ends), the wrapped stream is revoked: pending operations are
+// canceled and the sink is dropped.
+struct WritableStreamRpcWrapper {
+  kj::Own<capnp::ExplicitEndOutputStream> stream;
+  kj::Promise<void> completionOrRevoke;
+};
+
+// Wrap the given sink for transfer over capnp RPC. Shared by WritableStream::serialize()'s
+// native-sink arm and JsWritableStream's TypeScript arm (whose sink dispatches into the
+// isolate to drive the TypeScript writer).
+WritableStreamRpcWrapper newWritableStreamRpcAdapter(kj::Own<WritableStreamSink> inner);
+
+// Materializes a writable stream received over RPC from its external-table entry: adopts the
+// peer's ByteStream, wraps it as a system sink of the declared encoding, and constructs the
+// stream through JsWritableStream::create()'s implementation dispatch. Runs during
+// RpcDeserializerExternalHandler::prepare() -- before the V8 graph read -- because the
+// TypeScript arm of create() executes JavaScript, which the graph read forbids;
+// WritableStream::deserialize() then claims the result.
+JsWritableStream hydrateRpcWritableStream(
+    jsg::Lock& js, IoContext& ioctx, rpc::JsValue::External::WritableStream::Reader reader);
 
 }  // namespace workerd::api

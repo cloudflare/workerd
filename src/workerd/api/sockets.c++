@@ -753,12 +753,12 @@ void Socket::wireClosedToDisconnect(jsg::Lock& js, kj::Promise<bool> disconnecte
     // Silently ignore the canceled case (the Socket was GC'd before disconnect) without resolving
     // anything.
     if (canceled) return;
-    KJ_IF_SOME(socket, self.tryGet()) {
-      socket.closedResolver.resolve(js);
+    KJ_IF_SOME(socket, self.tryAddRef(js)) {
+      socket->closedResolver.resolve(js);
     }
   }, [self = JSG_THIS_WEAK(js)](jsg::Lock& js, jsg::Value exception) mutable {
-    KJ_IF_SOME(socket, self.tryGet()) {
-      socket.closedResolver.reject(js, exception.getHandle(js));
+    KJ_IF_SOME(socket, self.tryAddRef(js)) {
+      socket->closedResolver.reject(js, exception.getHandle(js));
     }
   }).markAsHandled(js);
 }
@@ -850,10 +850,14 @@ void Socket::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   writable.serialize(js, serializer);
 }
 
-jsg::Ref<Socket> Socket::deserialize(
-    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+jsg::Ref<Socket> Socket::deserialize(jsg::Lock& js,
+    rpc::SerializationTag tag,
+    jsg::Deserializer& deserializer,
+    const jsg::TypeHandler<jsg::Ref<Socket>>& socketHandler) {
   // Only a peer with the gate on can produce this tag. Reject rather than accept it, so that
-  // turning the gate off is a complete kill switch.
+  // turning the gate off is a complete kill switch. (The same gate check keeps
+  // RpcDeserializerExternalHandler::prepare() from hydrating socket externals, so the claim
+  // below stays empty and this rejection is reached.)
   JSG_REQUIRE(util::Autogate::isEnabled(util::AutogateKey::SOCKET_RPC_TRANSFER), DOMDataCloneError,
       "Transferring a Socket over RPC is not supported.");
 
@@ -863,15 +867,36 @@ jsg::Ref<Socket> Socket::deserialize(
   JSG_REQUIRE(
       externalHandler != nullptr, DOMDataCloneError, "Socket can only be deserialized from RPC.");
 
-  auto& ioContext = IoContext::current();
+  KJ_IF_SOME(prebuilt, externalHandler->claimPrebuiltSocket()) {
+    // Hydrated before the graph read; unwrapping reads internal fields only, so no JS
+    // executes here (forbidden under the deserializer's no-JS scope).
+    return KJ_ASSERT_NONNULL(socketHandler.tryUnwrap(js, prebuilt.getHandle(js)),
+        "hydrated socket slot did not hold a Socket");
+  }
 
-  // Read the externals in the same order Socket::serialize() wrote them: (1) socket metadata,
+  // Not hydrated: only reachable for legacy-streams isolates (the
+  // typescript_implemented_streams flag requires the hydration gate; see
+  // RpcDeserializerExternalHandler::prepare()), for which this in-place construction is
+  // scope-safe. The explicit sequencing matters -- the externals must be consumed in
+  // Socket::serialize()'s order.
+  auto socketExternal = externalHandler->read();
+  auto readableExternal = externalHandler->read();
+  auto writableExternal = externalHandler->read();
+  return hydrateRpcSocket(
+      js, IoContext::current(), socketExternal, readableExternal, writableExternal);
+}
+
+jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
+    IoContext& ioContext,
+    rpc::JsValue::External::Reader socketExternal,
+    rpc::JsValue::External::Reader readableExternal,
+    rpc::JsValue::External::Reader writableExternal) {
+  // The externals arrive in the order Socket::serialize() wrote them: (1) socket metadata,
   // (2) the readable stream, (3) the writable stream. The stream externals are consumed here
   // directly (rather than via ReadableStream/WritableStream::deserialize) so that we recover the
   // raw kj half-streams and can rebuild a real AsyncIoStream backing the Socket.
 
   // (1) Socket metadata.
-  auto socketExternal = externalHandler->read();
   JSG_REQUIRE(socketExternal.isSocket(), DOMDataCloneError,
       "external table slot type doesn't match serialization tag");
   auto socketData = socketExternal.getSocket();
@@ -888,8 +913,7 @@ jsg::Ref<Socket> Socket::deserialize(
   }
 
   // (2) Readable side: recover the raw input stream from the pushed ByteStream (mirrors
-  // ReadableStream::deserialize).
-  auto readableExternal = externalHandler->read();
+  // the readable stream's own hydration).
   JSG_REQUIRE(readableExternal.isReadableStream(), DOMDataCloneError,
       "external table slot type doesn't match serialization tag");
   auto rs = readableExternal.getReadableStream();
@@ -899,8 +923,7 @@ jsg::Ref<Socket> Socket::deserialize(
   kj::Own<kj::AsyncInputStream> input = ioContext.getExternalPusher()->unwrapStream(rs.getStream());
 
   // (3) Writable side: recover the raw output stream from the peer's ByteStream (mirrors
-  // WritableStream::deserialize).
-  auto writableExternal = externalHandler->read();
+  // the writable stream's own hydration).
   JSG_REQUIRE(writableExternal.isWritableStream(), DOMDataCloneError,
       "external table slot type doesn't match serialization tag");
   auto ws = writableExternal.getWritableStream();
@@ -971,19 +994,22 @@ jsg::Ref<Socket> Socket::deserialize(
       kj::mv(watchForDisconnectTask), kj::mv(options), kj::mv(tlsStarter), secureTransport,
       kj::none /* domain */, isDefaultFetchPort, kj::mv(openedPrPair));
 
-  // handleReadableEof() and wireClosedToDisconnect() both attach jsg `.then()` continuations, which
-  // invoke V8 and are thus forbidden inside the deserialize scope (JS execution is disallowed here).
-  // Defer them to microtasks that run once readValue() returns and JS is permitted again; wrapping
-  // and enqueuing don't themselves invoke JS. (The jsg promise deferral primitives can't be used:
-  // they construct a jsg promise synchronously, invoking V8 and aborting under the disallow scope.)
-  // The kj-side signals were already set up, so no event can be missed while the microtasks pend.
+  // handleReadableEof() and wireClosedToDisconnect() both attach jsg `.then()` continuations,
+  // which invoke V8 -- forbidden when this body runs as Socket::deserialize()'s in-place
+  // fallback inside the deserialize scope (JS execution is disallowed there). Defer them to
+  // microtasks that run once readValue() returns and JS is permitted again; wrapping and
+  // enqueuing don't themselves invoke JS. (The jsg promise deferral primitives can't be used:
+  // they construct a jsg promise synchronously, invoking V8 and aborting under the disallow
+  // scope.) The hydration path runs with JS allowed and shares this body; the deferral is
+  // equally correct there. The kj-side signals were already set up, so no event can be missed
+  // while the microtasks pend.
   //
   // The bodies touch IoContext-bound state, but the isolate's microtask queue can in principle be
   // drained with no active IoContext, so both bail out early if there is no current context (the
   // socket is being torn down, so there is nothing to wire up). The wiring runs JS that can throw
   // with no user code on the stack, so each body is wrapped in JSG_TRY/JSG_CATCH and reports via
   // js.reportError() (matching the queueMicrotask() pattern in global-scope.c++).
-  auto disconnectedOwn = ioContext.addObject(kj::heap<kj::Promise<bool>>(kj::mv(disconnected)));
+  auto disconnectedOwn = ioContext.createObject<kj::Promise<bool>>(kj::mv(disconnected));
   js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate,
       js.wrapSimpleFunction(js.v8Context(),
           JSG_VISITABLE_LAMBDA((self = socket.addRef(), disconnected = kj::mv(disconnectedOwn)),
@@ -1013,7 +1039,7 @@ jsg::Ref<Socket> Socket::deserialize(
 
   // `opened` was resolved synchronously above, so the transferred socket is immediately in the
   // OPENED state and can itself be re-serialized for a further RPC hop.
-  socket.get()->openedState = OpenedState::OPENED;
+  socket.get()->openedState = Socket::OpenedState::OPENED;
   return socket;
 }
 
@@ -1060,7 +1086,8 @@ class StreamOutgoingFactory final: public Fetcher::OutgoingFactory, public kj::R
         httpClient(
             kj::newHttpClient(headerTable, *this->stream, {.entropySource = entropySource})) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
+  Result newSingleUseClient(
+      kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override;
 
  private:
   kj::Own<kj::AsyncIoStream> stream;
@@ -1125,14 +1152,19 @@ class StreamWorkerInterface final: public WorkerInterface {
   kj::Own<StreamOutgoingFactory> factory;
 };
 
-kj::Own<WorkerInterface> StreamOutgoingFactory::newSingleUseClient(kj::Maybe<kj::String> cfStr) {
+Fetcher::OutgoingFactory::Result StreamOutgoingFactory::newSingleUseClient(
+    kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) {
+  // This factory creates no operation span.
   JSG_ASSERT(stream.get() != nullptr, Error,
       "Fetcher created from internalNewHttpClient can only be used once");
   // Create a WorkerInterface that wraps the stream, routing through getSubrequestNoChecks to apply
   // external memory adjustment for GC pressure.
-  return IoContext::current().getSubrequestNoChecks([&](auto& tracing, auto& channelFactory) {
+  auto client = IoContext::current().getSubrequestNoChecks(
+      [&](auto& tracing, auto& channelFactory) -> kj::Own<WorkerInterface> {
+    makeUserSpanParent(tracing);
     return kj::heap<StreamWorkerInterface>(kj::addRef(*this));
   }, {.inHouse = false, .wrapMetrics = false});
+  return {.client = kj::mv(client), .spanParents = kj::none};
 }
 
 jsg::Promise<jsg::Ref<Fetcher>> SocketsModule::internalNewHttpClient(

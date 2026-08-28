@@ -22,20 +22,20 @@ class HibernatableWebSocketAdapter final: public WebSocketAdapter {
   HibernatableWebSocketAdapter(jsg::Lock& js,
       WebSocket& shell,
       IoContext& ioContext,
-      kj::WebSocket& ws,
+      kj::Rc<kj::WebSocket> ws,
       WebSocket::HibernationPackage package);
 
   // Transition constructor — invoked from `WebSocket::acceptAsHibernatable` when the
   // autogate is on, after the kj::WebSocket has been extracted from the legacy adapter.
-  // Receives the surviving identity from the legacy adapter together with a reference to
-  // the kj::WebSocket (which is being transferred to the HibernationManager and lives there
-  // for the rest of the connection).
+  // Receives the surviving identity from the legacy adapter together with shared ownership
+  // of the kj::WebSocket.
   //
   // Does not take a `jsg::Lock&` because the call site in the shell does not have one
   // available (`HibernationManager::acceptWebSocket` does not currently plumb one through).
   // When the implementation actually needs JS state, it can grab the lock from the ambient
   // IoContext.
-  HibernatableWebSocketAdapter(WebSocket& shell, kj::WebSocket& ws, kj::Array<kj::StringPtr> tags);
+  HibernatableWebSocketAdapter(
+      WebSocket& shell, kj::Rc<kj::WebSocket> ws, kj::Array<kj::String> tags);
 
   ~HibernatableWebSocketAdapter() noexcept(false);
 
@@ -67,9 +67,8 @@ class HibernatableWebSocketAdapter final: public WebSocketAdapter {
   bool isHibernatable() override;
   void setObserver(kj::Own<WebSocketObserver> observer) override;
 
-  kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::StringPtr> tags) override;
+  kj::Rc<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags) override;
   void initiateHibernatableRelease(jsg::Lock& js,
-      kj::Own<kj::WebSocket> ws,
       kj::Array<kj::String> tags,
       WebSocket::HibernatableReleaseState releaseState) override;
   bool awaitingHibernatableError() override;

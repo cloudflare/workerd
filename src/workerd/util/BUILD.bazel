@@ -21,6 +21,19 @@ selects.config_setting_group(
     ],
 )
 
+# The routing layer owning the unprefixed zlib symbol names; @zlib//:zlib depends on this, so
+# every zlib consumer links it. Deliberately kj/capnp-free (see zlib-router.c++).
+wd_cc_library(
+    name = "zlib-router",
+    srcs = ["zlib-router.c++"],
+    hdrs = ["zlib-router.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/zlib-rs",
+        "@zlib//:zlib_impl",
+    ],
+)
+
 wd_cc_library(
     name = "perfetto",
     srcs = ["perfetto-tracing.c++"],
@@ -65,6 +78,7 @@ wd_cc_library(
 wd_cc_library(
     name = "util",
     srcs = [
+        "canceler.c++",
         "stream-utils.c++",
         "wait-list.c++",
     ],
@@ -289,6 +303,7 @@ wd_cc_library(
     deps = [
         ":sentry",
         ":strong-bool",
+        ":zlib-router",
         "@capnp-cpp//src/capnp",
         "@capnp-cpp//src/kj",
     ],
@@ -384,6 +399,13 @@ kj_test(
 )
 
 kj_test(
+    src = "canceler-test.c++",
+    deps = [
+        ":util",
+    ],
+)
+
+kj_test(
     src = "mimetype-test.c++",
     deps = [
         ":mimetype",
@@ -433,6 +455,14 @@ kj_test(
     src = "uuid-test.c++",
     deps = [
         ":uuid",
+    ],
+)
+
+kj_test(
+    src = "zlib-router-test.c++",
+    deps = [
+        ":autogate",
+        "@zlib",
     ],
 )
 

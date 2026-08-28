@@ -706,7 +706,7 @@ interface DurableObjectState<Props = unknown> {
   setHibernatableWebSocketEventTimeout(timeoutMs?: number): void;
   getHibernatableWebSocketEventTimeout(): number | null;
   getTags(ws: WebSocket): string[];
-  abort(reason?: string): void;
+  abort(reason?: string, options?: DurableObjectAbortOptions): void;
 }
 interface DurableObjectTransaction {
   get<T = unknown>(
@@ -779,6 +779,9 @@ interface DurableObjectStorage {
   getCurrentBookmark(): Promise<string>;
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
   onNextSessionRestoreBookmark(bookmark: string): Promise<string>;
+}
+interface DurableObjectAbortOptions {
+  retryAlarm?: boolean;
 }
 interface DurableObjectListOptions {
   start?: string;
@@ -1568,9 +1571,15 @@ interface CryptoKeyArbitraryKeyAlgorithm {
 declare class DigestStream extends WritableStream<
   ArrayBuffer | ArrayBufferView
 > {
-  constructor(algorithm: string | SubtleCryptoHashAlgorithm);
+  constructor(
+    algorithm: string | SubtleCryptoHashAlgorithm,
+    options?: DigestStreamOptions,
+  );
   readonly digest: Promise<ArrayBuffer>;
   get bytesWritten(): number | bigint;
+}
+interface DigestStreamOptions {
+  toWellFormed?: boolean;
 }
 /**
  * The **`TextDecoder`** interface represents a decoder for a specific text encoding, such as UTF-8, ISO-8859-2, or GBK. A decoder takes an array of bytes as input and returns a JavaScript string.
@@ -1663,6 +1672,9 @@ declare class ErrorEvent extends Event {
   get error(): any;
 }
 interface ErrorEventErrorEventInit {
+  bubbles?: boolean;
+  cancelable?: boolean;
+  composed?: boolean;
   message?: string;
   filename?: string;
   lineno?: number;
@@ -1675,7 +1687,7 @@ interface ErrorEventErrorEventInit {
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent)
  */
 declare class MessageEvent extends Event {
-  constructor(type: string, initializer: MessageEventInit);
+  constructor(type: string, initializer?: MessageEventInit);
   /**
    * The **`data`** read-only property of the MessageEvent interface represents the data sent by the message emitter.
    *
@@ -1708,7 +1720,14 @@ declare class MessageEvent extends Event {
   readonly ports: MessagePort[];
 }
 interface MessageEventInit {
-  data: ArrayBuffer | string;
+  bubbles?: boolean;
+  cancelable?: boolean;
+  composed?: boolean;
+  data?: any;
+  origin?: string;
+  lastEventId?: string;
+  source?: MessagePort;
+  ports?: MessagePort[];
 }
 /**
  * The **`PromiseRejectionEvent`** interface represents events which are sent to the global script context when JavaScript Promises are rejected. These events are particularly useful for telemetry and debugging purposes.
@@ -3725,6 +3744,9 @@ declare class CloseEvent extends Event {
   readonly wasClean: boolean;
 }
 interface CloseEventInit {
+  bubbles?: boolean;
+  cancelable?: boolean;
+  composed?: boolean;
   code?: number;
   reason?: string;
   wasClean?: boolean;
@@ -3988,10 +4010,15 @@ interface ContainerDirectorySnapshotOptions {
   dir: string;
   name?: string;
 }
-interface ContainerDirectorySnapshotRestoreParams {
-  snapshot: ContainerDirectorySnapshot;
-  mountPoint?: string;
-}
+type ContainerDirectorySnapshotRestoreParams =
+  | {
+      snapshot: ContainerDirectorySnapshot;
+      mountPoint?: string;
+    }
+  | {
+      snapshot?: undefined;
+      mountPoint: string;
+    };
 interface ContainerSnapshot {
   id: string;
   size: number;
@@ -4152,7 +4179,7 @@ interface WorkerLoaderModule {
   data?: ArrayBuffer;
   json?: any;
   py?: string;
-  wasm?: ArrayBuffer;
+  wasm?: ArrayBuffer | ArrayBufferView | WebAssembly.Module;
 }
 interface WorkerLoaderWorkerCode {
   compatibilityDate: string;
@@ -4160,7 +4187,7 @@ interface WorkerLoaderWorkerCode {
   allowExperimental?: boolean;
   limits?: workerdResourceLimits;
   mainModule: string;
-  modules: Record<string, WorkerLoaderModule | string>;
+  modules: Record<string, string | WebAssembly.Module | WorkerLoaderModule>;
   env?: any;
   globalOutbound?: Fetcher | null;
   tails?: Fetcher[];
@@ -11487,6 +11514,163 @@ declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT {
   inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
 }
+declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_7_Code {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_2 {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+interface Ai_Cf_Moondream_Moondream3_1_9B_A2B_Input {
+  /**
+   * Which Moondream skill to run.
+   */
+  task?: "query" | "caption" | "point" | "detect";
+  /**
+   * Input image as a public HTTPS URL or base64 data URI. Optional for `query`; required for `caption`, `point`, and `detect`.
+   */
+  image?: string;
+  /**
+   * Question for the `query` task.
+   */
+  question?: string;
+  /**
+   * Caption length for the `caption` task.
+   */
+  caption_length?: "short" | "normal" | "long";
+  /**
+   * Object phrase to locate for `point` and `detect` tasks (e.g. 'person wearing a red shirt').
+   */
+  target?: string;
+  /**
+   * Enable reasoning trace for the `query` task.
+   */
+  reasoning?: boolean;
+  /**
+   * Sampling temperature.
+   */
+  temperature?: number;
+  /**
+   * Top-p (nucleus) sampling.
+   */
+  top_p?: number;
+  /**
+   * Max tokens to generate for `query` and `caption`.
+   */
+  max_tokens?: number;
+  /**
+   * Max objects to return for `point` and `detect`.
+   */
+  max_objects?: number;
+  /**
+   * Return incremental tokens for `query` and `caption`. `point` and `detect` do not support streaming.
+   */
+  stream?: boolean;
+}
+interface Ai_Cf_Moondream_Moondream3_1_9B_A2B_Output {
+  /**
+   * Reason the generation finished.
+   */
+  finish_reason: string;
+  metrics: {
+    /**
+     * Number of input tokens consumed.
+     */
+    input_tokens: number;
+    /**
+     * Number of output tokens generated.
+     */
+    output_tokens: number;
+    /**
+     * Prefill time in milliseconds.
+     */
+    prefill_time_ms: number;
+    /**
+     * Decode time in milliseconds.
+     */
+    decode_time_ms: number;
+    /**
+     * Time to first token in milliseconds.
+     */
+    ttft_ms: number;
+  };
+  /**
+   * Answer text for the `query` task. Null for other tasks.
+   */
+  answer?: string;
+  /**
+   * Caption text for the `caption` task. Null for other tasks.
+   */
+  caption?: string;
+  /**
+   * Located points for the `point` task. Null for other tasks.
+   */
+  points?: {
+    /**
+     * X coordinate.
+     */
+    x: number;
+    /**
+     * Y coordinate.
+     */
+    y: number;
+  }[];
+  /**
+   * Detected bounding boxes for the `detect` task. Null for other tasks.
+   */
+  objects?: {
+    /**
+     * Minimum X coordinate.
+     */
+    x_min: number;
+    /**
+     * Minimum Y coordinate.
+     */
+    y_min: number;
+    /**
+     * Maximum X coordinate.
+     */
+    x_max: number;
+    /**
+     * Maximum Y coordinate.
+     */
+    y_max: number;
+  }[];
+  /**
+   * Reasoning trace for the `query` task when reasoning=true. Null otherwise.
+   */
+  reasoning?: {
+    /**
+     * Reasoning text.
+     */
+    text: string;
+    /**
+     * Grounding information.
+     */
+    grounding?: {}[];
+  };
+}
+declare abstract class Base_Ai_Cf_Moondream_Moondream3_1_9B_A2B {
+  inputs: Ai_Cf_Moondream_Moondream3_1_9B_A2B_Input;
+  postProcessedOutputs: Ai_Cf_Moondream_Moondream3_1_9B_A2B_Output;
+}
+declare abstract class Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Flash_0731 {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+declare abstract class Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Pro_0813 {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+declare abstract class Base_Ai_Cf_Qwen_Qwen3_8_27B {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_3_Flash {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
 interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
@@ -11579,6 +11763,13 @@ interface AiModels {
   "@cf/moonshotai/kimi-k2.6": Base_Ai_Cf_Moonshotai_Kimi_K2_6;
   "@cf/nvidia/nemotron-3-120b-a12b": Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B;
   "@cf/google/gemma-4-26b-a4b-it": Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT;
+  "@cf/moonshotai/kimi-k2.7-code": Base_Ai_Cf_Moonshotai_Kimi_K2_7_Code;
+  "@cf/zai-org/glm-5.2": Base_Ai_Cf_Zai_Org_Glm_5_2;
+  "@cf/moondream/moondream3.1-9B-A2B": Base_Ai_Cf_Moondream_Moondream3_1_9B_A2B;
+  "@cf/deepseek-ai/deepseek-v4-flash-0731": Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Flash_0731;
+  "@cf/deepseek-ai/deepseek-v4-pro-0813": Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Pro_0813;
+  "@cf/qwen/qwen3.8-27b": Base_Ai_Cf_Qwen_Qwen3_8_27B;
+  "@cf/zai-org/glm-5.3-flash": Base_Ai_Cf_Zai_Org_Glm_5_3_Flash;
 }
 type AiOptions = {
   /**
@@ -12435,9 +12626,29 @@ type BrowserRunLinksOptions = BrowserRunCommonOptions & {
   /** When true, exclude links pointing to external domains. @default false */
   excludeExternalLinks?: boolean;
 };
+type BrowserRunSnapshotFormat =
+  "content" | "screenshot" | "markdown" | "accessibilityTree";
 type BrowserRunSnapshotOptions = BrowserRunCommonOptions & {
+  /** Which representations of the page to return. At least two distinct formats
+   * are required; request a single format from its dedicated action instead.
+   * @default ["content","screenshot"]
+   */
+  formats?: BrowserRunSnapshotFormat[];
   /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
   screenshotOptions?: Omit<BrowserRunPuppeteerScreenshotOptions, "encoding">;
+};
+/** Options for the `accessibilityTree` quick action. */
+type BrowserRunAccessibilityTreeOptions = BrowserRunCommonOptions & {
+  /** When true, prune nodes that carry no semantic meaning, such as generic
+   * containers. Defaults to true, or to false when `root` is set so that the
+   * requested subtree is returned as-is.
+   */
+  interestingOnly?: boolean;
+  /** CSS selector limiting the tree to the matching element's subtree.
+   * A selector that matches nothing yields `accessibilityTree: null` with
+   * HTTP 200; a malformed selector is an error.
+   */
+  root?: string;
 };
 interface BrowserRunJsonBaseOptions {
   /** Custom AI models to try in order. Max 3. Falls back to next on error. */
@@ -12470,12 +12681,78 @@ type BrowserRunJsonOptions = BrowserRunCommonOptions &
   );
 type BrowserRunContentOptions = BrowserRunCommonOptions;
 type BrowserRunMarkdownOptions = BrowserRunCommonOptions;
+type BrowserRunRedirectHop = {
+  /** URL that returned the redirect. */
+  url: string;
+  /** HTTP status of the redirect. */
+  status: number;
+  /** Redirect response headers, including `location`. */
+  headers: Record<string, string>;
+};
 type BrowserRunResponseMeta = {
   /** HTTP status code of the rendered page */
   status: number;
   /** Page title */
   title: string;
+  /** Origin response headers, lowercased. Repeated headers are joined with a newline. Credential and transport-only headers that do not survive rendering are omitted. */
+  headers?: Record<string, string>;
+  /** URL that served the response, after any redirects the browser followed. */
+  finalUrl?: string;
+  /** HTTP redirects followed to reach `finalUrl`, oldest first. Omitted for direct navigation and for client-side redirects such as meta refresh. An empty array means redirects occurred but their intermediate responses could not be read. */
+  redirectChain?: BrowserRunRedirectHop[];
 };
+/**
+ * A node in the page's accessibility tree, as exposed to assistive technology.
+ * `role` is the only field always present; the rest are populated when the
+ * underlying element defines them.
+ * @see https://pptr.dev/api/puppeteer.serializedaxnode
+ */
+interface BrowserRunSerializedAXNode {
+  /** The ARIA role, e.g. `"button"`, `"heading"`, `"RootWebArea"`. */
+  role: string;
+  /** The `aria-autocomplete` value. */
+  autocomplete?: string;
+  /** Checked state of a checkbox, radio, or menu item. */
+  checked?: boolean | "mixed";
+  /** Accessible description, typically from `aria-describedby` or `title`. */
+  description?: string;
+  disabled?: boolean;
+  expanded?: boolean;
+  /** Whether the element currently holds keyboard focus. */
+  focused?: boolean;
+  /** The kind of popup the element triggers, e.g. `"menu"`, `"dialog"`. */
+  haspopup?: string;
+  /** The `aria-invalid` value. */
+  invalid?: string;
+  /** Keyboard shortcuts bound to the element, from `aria-keyshortcuts`. */
+  keyshortcuts?: string;
+  /** Hierarchical level, e.g. the heading level of an `<h2>`. */
+  level?: number;
+  /** Whether the element is a modal dialog. */
+  modal?: boolean;
+  /** Whether a text input accepts multiple lines. */
+  multiline?: boolean;
+  /** Whether more than one option can be selected. */
+  multiselectable?: boolean;
+  /** Accessible name, e.g. a button's label or an image's alt text. */
+  name?: string;
+  orientation?: string;
+  /** Pressed state of a toggle button. */
+  pressed?: boolean | "mixed";
+  readonly?: boolean;
+  required?: boolean;
+  /** Author-supplied role description, from `aria-roledescription`. */
+  roledescription?: string;
+  selected?: boolean;
+  /** Current value of an input or range element. */
+  value?: string | number;
+  valuemax?: number;
+  valuemin?: number;
+  /** Human-readable form of `value`, from `aria-valuetext`. */
+  valuetext?: string;
+  /** Child nodes. Absent for leaf nodes. */
+  children?: BrowserRunSerializedAXNode[];
+}
 /** Success response for `content` action. */
 type BrowserRunContentSuccessResponse = {
   success: true;
@@ -12488,6 +12765,7 @@ type BrowserRunLinksSuccessResponse = {
   success: true;
   /** Extracted links */
   result: string[];
+  meta: BrowserRunResponseMeta;
 };
 /** Success response for `scrape` action. */
 type BrowserRunScrapeSuccessResponse = {
@@ -12518,15 +12796,33 @@ type BrowserRunScrapeSuccessResponse = {
       }>;
     }>;
   }>;
+  meta: BrowserRunResponseMeta;
 };
-/** Success response for `snapshot` action. */
+/** Success response for `snapshot` action. Each field is present only when the
+ * corresponding entry was requested in `formats`.
+ */
 type BrowserRunSnapshotSuccessResponse = {
   success: true;
   result: {
     /** HTML content of the page. */
-    content: string;
+    content?: string;
     /** Base64-encoded screenshot image. */
-    screenshot: string;
+    screenshot?: string;
+    /** Markdown content. Prefixed with YAML frontmatter (e.g. `title`) when the
+     * page provides that metadata.
+     */
+    markdown?: string;
+    /** Root of the page's accessibility tree. */
+    accessibilityTree?: BrowserRunSerializedAXNode;
+  };
+  meta: BrowserRunResponseMeta;
+};
+/** Success response for `accessibilityTree` action. */
+type BrowserRunAccessibilityTreeSuccessResponse = {
+  success: true;
+  result: {
+    /** Root of the accessibility tree, or `null` when `root` matched no element. */
+    accessibilityTree: BrowserRunSerializedAXNode | null;
   };
   meta: BrowserRunResponseMeta;
 };
@@ -12535,12 +12831,14 @@ type BrowserRunJsonSuccessResponse = {
   success: true;
   /** JSON data extracted from the page using an AI model */
   result: Record<string, unknown>;
+  meta: BrowserRunResponseMeta;
 };
 /** Success response for `markdown` action. */
 type BrowserRunMarkdownSuccessResponse = {
   success: true;
   /** Extracted markdown content */
   result: string;
+  meta: BrowserRunResponseMeta;
 };
 /** Error response for BrowserRun actions. */
 type BrowserRunErrorResponse = {
@@ -12662,9 +12960,10 @@ declare abstract class BrowserRun {
     options: BrowserRunLinksOptions,
   ): Promise<Response>;
   /**
-   * Get both the HTML content and a base64-encoded screenshot of a web page.
+   * Get several representations of a web page in one request.
    * @param action - Must be `'snapshot'`.
-   * @param options - Snapshot options including screenshot settings (encoding is always base64).
+   * @param options - Snapshot options including the `formats` to return and
+   * screenshot settings (encoding is always base64).
    * @returns A `Response` containing one of:
    *
    * **Success (HTTP 200):**
@@ -12720,6 +13019,29 @@ declare abstract class BrowserRun {
   quickAction(
     action: "markdown",
     options: BrowserRunMarkdownOptions,
+  ): Promise<Response>;
+  /**
+   * Get the accessibility tree of a web page.
+   * @param action - Must be `'accessibilityTree'`.
+   * @param options - Options to scope the tree to a subtree and to control
+   * whether semantically uninteresting nodes are pruned.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunAccessibilityTreeSuccessResponse` JSON with `Content-Type: application/json`
+   * - `result.accessibilityTree` is `null` when `root` matched no element
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   * - HTTP 422 for a malformed `root` selector
+   * - HTTP 500 with code `2017` or `2018` when the tree could not be built
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(
+    action: "accessibilityTree",
+    options: BrowserRunAccessibilityTreeOptions,
   ): Promise<Response>;
 }
 /**
@@ -14379,6 +14701,78 @@ interface Hyperdrive {
    */
   readonly database: string;
 }
+/**
+ * A handle to a dynamically-provisioned Hyperdrive connection, returned by
+ * `HyperdriveApi.get()`.
+ */
+interface HyperdriveDynamic extends Disposable {
+  /**
+   * The database name to use when connecting through this Hyperdrive.
+   */
+  readonly database: Promise<string>;
+  /*
+   * The randomly generated user to use when authenticating to your
+   * database via Hyperdrive.
+   */
+  readonly user: Promise<string>;
+  /*
+   * The randomly generated password to use when authenticating to your
+   * database via Hyperdrive.
+   */
+  readonly password: Promise<string>;
+  /**
+   * Open a TCP socket to the target database through this Hyperdrive.
+   *
+   */
+  connect(): Promise<Socket>;
+}
+/**
+ * Binding that provisions Hyperdrive connections at request time, rather than
+ * from static configuration.
+ */
+interface HyperdriveDynamicApi {
+  /**
+   * Provision a connection for the database described by `args`.
+   *
+   */
+  get(args: HyperdriveDynamicConfig): Promise<HyperdriveDynamic>;
+  /**
+   * Get a pre-generated connection string used for connecting to dynamic Hyperdrive.
+   */
+  getHyperdriveConnectionString(connectionString: string): Promise<string>;
+}
+/**
+ * Parameters identifying the database that a dynamically-provisioned
+ * Hyperdrive connection should target.
+ */
+interface HyperdriveDynamicConfig {
+  /**
+   * Generated connection string to pass into the dynamic worker.
+   *
+   */
+  dynamicHyperdriveConnectionString: string;
+  /**
+   * Connection string for the origin database Hyperdrive should connect to.
+   * Contains credentials, so treat it as a secret.
+   *
+   * The scheme selects the database engine. PostgreSQL origins are supported.
+   */
+  connectionString: string;
+  /**
+   * Region in which to place the connection pool. See the Hyperdrive
+   * documentation for the set of supported regions.
+   */
+  targetRegion: string;
+  /**
+   * Whether Hyperdrive should cache query results for this connection.
+   */
+  cachingEnabled?: boolean;
+  /**
+   * Maximum number of connections the pool may open to the origin database.
+   * Defaults to 60.
+   */
+  maxConnections?: number;
+}
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
@@ -14392,6 +14786,27 @@ type ImageInfoResponse =
       width: number;
       height: number;
     };
+/**
+ * Parameters for rasterizing text into an image.
+ */
+type TextRasterize = {
+  /** The text content to render */
+  content: string;
+  /** rasterization options for the text **/
+  options: TextOptions;
+};
+type TextOptions = {
+  /** Font configuration */
+  font: {
+    /** URL to a font file in TrueType (.ttf), OpenType (.otf), WOFF (.woff), or WOFF2 (.woff2) format */
+    url: string;
+  };
+  /** Font size in points (pt) */
+  size?: number;
+  /** Text color in CSS format: hex (#RRGGBB or #RRGGBBAA), rgb(r,g,b), rgba(r,g,b,a), or named colors */
+  color?: string;
+};
+type ImageSource = ReadableStream<Uint8Array> | TextRasterize;
 type ImageTransform = {
   width?: number;
   height?: number;
@@ -14503,6 +14918,9 @@ interface ImageUploadOptions {
   requireSignedURLs?: boolean;
   metadata?: Record<string, unknown>;
   creator?: string;
+  /**
+   * If 'base64', the input data will be decoded from base64 before processing
+   */
   encoding?: "base64";
 }
 interface ImageUpdateOptions {
@@ -14510,11 +14928,41 @@ interface ImageUpdateOptions {
   metadata?: Record<string, unknown>;
   creator?: string;
 }
+type ImageMetadataFilterOperators = {
+  eq?: string | number | boolean;
+  in?: string[] | number[];
+  gt?: number;
+  gte?: number;
+  lt?: number;
+  lte?: number;
+};
+type ImageMetadataFilterValue =
+  string | number | boolean | ImageMetadataFilterOperators;
+interface ImageListFilter {
+  metadata?: Record<string, ImageMetadataFilterValue>;
+}
 interface ImageListOptions {
   limit?: number;
   cursor?: string;
   sortOrder?: "asc" | "desc";
   creator?: string;
+  filter?: ImageListFilter;
+}
+interface ImageSignedUrlOptions {
+  variant: string;
+  expiresIn?: number;
+  keyName?: string;
+}
+interface ImageDirectUploadOptions {
+  id?: string;
+  requireSignedURLs?: boolean;
+  metadata?: Record<string, unknown>;
+  creator?: string;
+  expiresIn?: number;
+}
+interface ImageDirectUploadResult {
+  id: string;
+  uploadURL: string;
 }
 interface ImageList {
   images: ImageMetadata[];
@@ -14532,6 +14980,13 @@ interface ImageHandle {
    * @returns ReadableStream of image bytes, or null if not found
    */
   bytes(): Promise<ReadableStream<Uint8Array> | null>;
+  /**
+   * Generate a signed delivery URL for this hosted image.
+   * @param options Signing configuration
+   * @returns A signed image delivery URL
+   * @throws {@link ImagesError} if signing fails
+   */
+  signedUrl(options: ImageSignedUrlOptions): Promise<string>;
   /**
    * Update hosted image metadata
    * @param options Properties to update
@@ -14570,6 +15025,16 @@ interface HostedImagesBinding {
    * @throws {@link ImagesError} if list fails
    */
   list(options?: ImageListOptions): Promise<ImageList>;
+  /**
+   * Create a Direct Creator Upload link, letting an end user upload an
+   * image straight to Cloudflare without exposing an API token
+   * @param options Upload link configuration
+   * @returns The new image ID and the upload URL to hand to the end user
+   * @throws {@link ImagesError} if creation fails
+   */
+  createDirectUpload(
+    options?: ImageDirectUploadOptions,
+  ): Promise<ImageDirectUploadResult>;
 }
 interface ImagesBinding {
   /**
@@ -14590,6 +15055,13 @@ interface ImagesBinding {
     stream: ReadableStream<Uint8Array>,
     options?: ImageInputOptions,
   ): ImageTransformer;
+  /**
+   * Begin applying a series of transformations to text
+   * @param content string to be rendered
+   * @param options font, optional color and size to use in rendering text
+   * @returns A transform handle
+   */
+  text(content: string, options: TextOptions): ImageTransformer;
   /**
    * Access hosted images CRUD operations
    */
@@ -16278,7 +16750,8 @@ declare namespace TailStream {
     | "responseStreamDisconnected"
     | "scriptNotFound"
     | "internalError"
-    | "exceededWallTime";
+    | "exceededWallTime"
+    | "aborted";
   interface ScriptVersion {
     readonly id: string;
     readonly tag?: string;
@@ -16914,6 +17387,20 @@ type WorkflowDurationLabel =
 type WorkflowSleepDuration =
   `${number} ${WorkflowDurationLabel}${"s" | ""}` | number;
 type WorkflowRetentionDuration = WorkflowSleepDuration;
+/** Geographic regions supported when creating a Workflow instance.
+ * Location hints are best-effort placement preferences. */
+type WorkflowInstanceLocationHint =
+  | "wnam"
+  | "enam"
+  | "sam"
+  | "weur"
+  | "eeur"
+  | "apac"
+  | "apac-ne"
+  | "apac-se"
+  | "oc"
+  | "afr"
+  | "me";
 interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
    * An id for your Workflow instance. Must be unique within the Workflow.
@@ -16931,6 +17418,9 @@ interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
     successRetention?: WorkflowRetentionDuration;
     errorRetention?: WorkflowRetentionDuration;
   };
+  /** A best-effort geographic placement preference for the Workflow instance.
+   * See `WorkflowInstanceLocationHint` for supported regions. */
+  locationHint?: WorkflowInstanceLocationHint;
 }
 type InstanceStatus = {
   status:

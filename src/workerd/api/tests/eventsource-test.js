@@ -1,7 +1,7 @@
 // Copyright (c) 2017-2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { strictEqual, ok, throws } from 'node:assert';
+import { deepStrictEqual, strictEqual, ok, throws } from 'node:assert';
 
 export const acceptEventStreamTest = {
   async test(ctrl, env) {
@@ -609,5 +609,90 @@ export default {
       throw new Error('Not found');
     }
     return await handler(request);
+  },
+};
+
+// The onmessage handler occupies a normal position in the listener list based on when it
+// was first assigned, per HTML's event handler semantics. The same machinery backs onopen
+// and onerror.
+export const onmessagePositionalOrdering = {
+  async test() {
+    const enc = new TextEncoder();
+    const rs = new ReadableStream({
+      pull(c) {
+        c.enqueue(enc.encode('data: hello\n\n'));
+        c.close();
+      },
+    });
+    const order = [];
+    const { promise, resolve } = Promise.withResolvers();
+    const eventsource = EventSource.from(rs);
+
+    eventsource.addEventListener('message', () => order.push('a'));
+    const b1 = () => order.push('b1');
+    eventsource.onmessage = b1;
+    strictEqual(eventsource.onmessage, b1);
+    eventsource.addEventListener('message', () => order.push('c'));
+
+    // Reassignment keeps the original position; clearing and reassigning would take a
+    // fresh position at the end.
+    eventsource.onmessage = () => order.push('b2');
+
+    eventsource.addEventListener('message', () => {
+      eventsource.close();
+      resolve();
+    });
+    await promise;
+    deepStrictEqual(order, ['a', 'b2', 'c']);
+  },
+};
+
+// A throwing 'message' listener has its exception reported (and the remaining listeners
+// for that event still run), then the EventSource is errored out (fail-fast): the 'error'
+// event fires, the stream closes, and the remaining messages in the batch are dropped.
+export const throwingMessageListener = {
+  async test() {
+    const order = [];
+    const boom = new Error('es boom');
+    const globalHandler = () => order.push('global-error');
+    addEventListener('error', globalHandler);
+    try {
+      const enc = new TextEncoder();
+      const rs = new ReadableStream({
+        pull(c) {
+          // Both messages arrive in a single batch.
+          c.enqueue(enc.encode('data: first\n\ndata: second\n\n'));
+          c.close();
+        },
+      });
+      const eventsource = EventSource.from(rs);
+      const errorPromise = new Promise((resolve) => {
+        eventsource.addEventListener('error', (event) => {
+          order.push('es-error');
+          resolve(event.error);
+        });
+      });
+      eventsource.addEventListener('message', (event) => {
+        order.push(`l1:${event.data}`);
+        throw boom;
+      });
+      eventsource.addEventListener('message', (event) => {
+        // The fail-fast error happens strictly after the dispatch completes: this listener
+        // still observes an open EventSource even though the previous listener threw.
+        order.push(`l2:${event.data}:readyState=${eventsource.readyState}`);
+      });
+
+      strictEqual(await errorPromise, boom);
+      strictEqual(eventsource.readyState, EventSource.CLOSED);
+      // 'second' was dropped along with the rest of the batch.
+      deepStrictEqual(order, [
+        'l1:first',
+        'global-error',
+        `l2:first:readyState=${EventSource.OPEN}`,
+        'es-error',
+      ]);
+    } finally {
+      removeEventListener('error', globalHandler);
+    }
   },
 };

@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 import { strictEqual } from 'node:assert';
+import unsafe from 'workerd:unsafe';
 
 export const basic = {
   async test(ctrl, env) {
@@ -17,6 +18,35 @@ export const basic = {
     strictEqual(value, 'bar');
     strictEqual(value, value2);
     strictEqual(fallbackCalled, 1);
+  },
+};
+
+export const loneSurrogateKey = {
+  async test(ctrl, env) {
+    const key = '\ud800';
+    const replacement = '\ufffd';
+    strictEqual(
+      await env.CACHE.read(key, async () => ({ value: 'surrogate value' })),
+      'surrogate value'
+    );
+    strictEqual(
+      await env.CACHE.read(replacement, async () => ({
+        value: 'replacement value',
+      })),
+      'replacement value'
+    );
+    strictEqual(await env.CACHE.read(key), 'surrogate value');
+    strictEqual(await env.CACHE.read(replacement), 'replacement value');
+    env.CACHE.delete(key);
+    strictEqual(await env.CACHE.read(key), undefined);
+    strictEqual(await env.CACHE.read(replacement), 'replacement value');
+
+    await env.CACHE.read(key, async () => ({ value: 'surrogate value' }));
+    await env.CACHE.read(replacement);
+    await env.CACHE.read('eviction trigger', async () => ({
+      value: 'trigger value',
+    }));
+    strictEqual(await env.CACHE.read(key), undefined);
   },
 };
 
@@ -223,6 +253,63 @@ export const fallbackChainingOnError = {
     strictEqual(results[0].reason.message, 'foo');
     // The second one succeeded.
     strictEqual(results[1].value, 'bar');
+  },
+};
+
+export const fallbackChainingOnErrorManyWaiters = {
+  async test(ctrl, env) {
+    if (!unsafe.isTestAutogateEnabled()) return;
+
+    const waiters = 64;
+    const promises = [];
+    for (let i = 0; i < waiters - 1; i++) {
+      promises.push(
+        env.CACHE.read('manyWaiters', () => {
+          throw new Error(`fallback ${i} failed`);
+        })
+      );
+    }
+    promises.push(
+      env.CACHE.read('manyWaiters', () => {
+        return { value: 'last' };
+      })
+    );
+
+    const results = await Promise.allSettled(promises);
+    strictEqual(results.length, waiters);
+    for (let i = 0; i < waiters - 1; i++) {
+      strictEqual(results[i].status, 'rejected');
+      strictEqual(results[i].reason.message, `fallback ${i} failed`);
+    }
+    strictEqual(results[waiters - 1].status, 'fulfilled');
+    strictEqual(results[waiters - 1].value, 'last');
+    strictEqual(await env.CACHE.read('manyWaiters'), 'last');
+  },
+};
+
+export const fallbackChainingAllWaitersFail = {
+  async test(ctrl, env) {
+    if (!unsafe.isTestAutogateEnabled()) return;
+
+    const waiters = 32;
+    const promises = [];
+    for (let i = 0; i < waiters; i++) {
+      promises.push(
+        env.CACHE.read('allFail', () => {
+          throw new Error(`nope ${i}`);
+        })
+      );
+    }
+    const results = await Promise.allSettled(promises);
+    for (let i = 0; i < waiters; i++) {
+      strictEqual(results[i].status, 'rejected');
+      strictEqual(results[i].reason.message, `nope ${i}`);
+    }
+    strictEqual(await env.CACHE.read('allFail'), undefined);
+    strictEqual(
+      await env.CACHE.read('allFail', () => ({ value: 'recovered' })),
+      'recovered'
+    );
   },
 };
 

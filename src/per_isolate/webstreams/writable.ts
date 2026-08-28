@@ -152,7 +152,17 @@ let getWritableStreamController: <W>(
 // Boolean brand check for the C++ bridge (jsgTryUnwrap). The assertion form
 // (assertIsWritableStream) throws; this one answers.
 let isWritableStream: (value: unknown) => boolean;
+
+// C++-recognition brand (JsWritableStream::tryUnwrapTs): an own,
+// non-enumerable marker stamped on every instance by the constructor, so
+// the C++ bridge can recognize TypeScript streams via an own-property
+// probe, without executing JavaScript. That constraint is load-bearing:
+// unwrap runs during RPC deserialization, inside V8's no-JS-execution
+// scope. Proxies deliberately do not convey it (the C++ check rejects
+// proxies up front), matching the #-brand's no-tunneling behavior.
+const kWritableStreamBrand: symbol = utils.getApiSymbol('kWritableStreamBrand');
 let setWritableStreamPendingClosure: <W>(stream: WritableStream<W>) => void;
+let isWritableStreamPendingClosure: <W>(stream: WritableStream<W>) => boolean;
 // Permanently neutralizes a stream on behalf of the C++ bridge (e.g. a
 // Socket whose connection is being taken over). See the assignment in the
 // static block for the exact precondition/error contract.
@@ -222,6 +232,10 @@ let writerWriteInternal: <W>(
 let writerCloseInternal: <W>(
   writer: WritableStreamDefaultWriter<W>
 ) => Promise<void>;
+let writerAbortInternal: <W>(
+  writer: WritableStreamDefaultWriter<W>,
+  reason: unknown
+) => Promise<void>;
 let writerReleaseInternal: <W>(writer: WritableStreamDefaultWriter<W>) => void;
 let getWriterReadyPromiseInternal: <W>(
   writer: WritableStreamDefaultWriter<W>
@@ -256,11 +270,13 @@ class WritableStream<W = unknown> {
   // JS-backed streams). Kept for extraction — C++ unwraps the backing
   // class from the returned object.
   #nativeSink?: object | undefined;
-  // TODO(streams-ts): The sockets API needs to be able to tell its Writable
-  // that it is pending closure (the Socket is shutting down) before the
-  // closure has actually completed. We don't yet fully implement this but we
-  // provide for the signal. Mirrors ReadableStream's #pendingClosure.
-  // @ts-expect-error
+  // The pending-closure gate (JsWritableStream::setPendingClosure): set by
+  // the stream's owning object (a Socket) the moment its closure begins, so
+  // that new writes fail fast with a descriptive error instead of racing the
+  // teardown's flush-and-close sequence. Mirrors the legacy internal
+  // controller's isPendingClosure check, which gates write() and nothing
+  // else -- the teardown's own forceFlush/forceClose/abort stay open.
+  // Mirrors ReadableStream's #pendingClosure.
   #pendingClosure: boolean = false;
 
   static {
@@ -275,6 +291,10 @@ class WritableStream<W = unknown> {
 
     setWritableStreamPendingClosure = <W>(stream: WritableStream<W>) => {
       stream.#pendingClosure = true;
+    };
+
+    isWritableStreamPendingClosure = <W>(stream: WritableStream<W>) => {
+      return stream.#pendingClosure;
     };
     getWritableStreamState = (stream) => stream.#state;
     getWritableStreamStoredError = (stream) => stream.#storedError;
@@ -627,6 +647,13 @@ class WritableStream<W = unknown> {
     underlyingSink: UnderlyingSink<W> = {},
     strategy: QueuingStrategy<W> = {}
   ) {
+    // The C++-recognition brand (see kWritableStreamBrand). Stamped first
+    // so every instance carries it regardless of construction path.
+    ObjectDefineProperty(this, kWritableStreamBrand, {
+      __proto__: null,
+      value: true,
+    } as PropertyDescriptor);
+
     // --- WebIDL strategy dictionary conversion (BEFORE sink reads) ---
     // Per WebIDL, dictionary-typed arguments are converted at the IDL
     // layer before the constructor body runs. strategy is QueuingStrategy
@@ -1138,6 +1165,17 @@ class WritableStreamDefaultWriter<
           new TypeError('This writer has been released')
         ) as Promise<void>;
       }
+      // The pending-closure gate (see #pendingClosure): checked before the
+      // size algorithm runs, so no user code executes for a write against a
+      // closing socket. The text matches the legacy internal controller's
+      // exactly.
+      if (isWritableStreamPendingClosure(stream)) {
+        return PromiseReject(
+          new TypeError(
+            'This WritableStream belongs to an object that is closing.'
+          )
+        ) as Promise<void>;
+      }
       const controller = getWritableStreamController(stream);
 
       // Step 4: GetChunkSize — runs size() which may re-entrantly mutate
@@ -1182,6 +1220,19 @@ class WritableStreamDefaultWriter<
         controllerWrite(controller, chunk, chunkSize);
       }
       return promise;
+    };
+
+    writerAbortInternal = <W>(
+      writer: WritableStreamDefaultWriter<W>,
+      reason: unknown
+    ) => {
+      const stream = writer.#stream;
+      if (stream === undefined) {
+        return PromiseReject(
+          new TypeError('This writer has been released')
+        ) as Promise<void>;
+      }
+      return writableStreamAbort(stream, reason);
     };
 
     writerCloseInternal = <W>(writer: WritableStreamDefaultWriter<W>) => {
@@ -1615,6 +1666,29 @@ const cppExports = ObjectFreeze({
   writableStreamAbort,
   writableStreamClose,
   writableStreamFlush,
+  // The RPC-transfer writer operations (JsWritableStream::serialize's
+  // TsWriterSink): acquisition and per-operation dispatch go through these
+  // internal algorithms rather than the public prototype methods, which are
+  // user-patchable — a replaced getWriter/write/close/abort must not be able
+  // to intercept or fake a stream's RPC transfer. Acquisition has the public
+  // getWriter's exact semantics (the locked TypeError comes from the same
+  // constructor path).
+  acquireWritableStreamWriter<W>(
+    stream: WritableStream<W>
+  ): WritableStreamDefaultWriter<W> {
+    return new WritableStreamDefaultWriter<W>(stream);
+  },
+  writableStreamWriterWrite: <W>(
+    writer: WritableStreamDefaultWriter<W>,
+    chunk: W
+  ): Promise<void> => writerWriteInternal(writer, chunk),
+  writableStreamWriterClose: <W>(
+    writer: WritableStreamDefaultWriter<W>
+  ): Promise<void> => writerCloseInternal(writer),
+  writableStreamWriterAbort: <W>(
+    writer: WritableStreamDefaultWriter<W>,
+    reason: unknown
+  ): Promise<void> => writerAbortInternal(writer, reason),
 });
 
 module.exports = {

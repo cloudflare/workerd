@@ -99,9 +99,7 @@
 //     settles without delivering, closing, or erroring while requests
 //     are still pending errors the stream. Aborted pulls are exempt.
 //
-// Nothing in this module is ever exposed to user code, with one TEMPORARY
-// exception: streams.ts re-exports kNativeSource so mock native sources
-// can be constructed from tests before the real C++ integration exists.
+// Nothing in this module is ever exposed to user code.
 
 import type {
   ByteStreamConsumer as ByteStreamConsumerType,
@@ -158,8 +156,13 @@ const kNativeSource: symbol = utils.getApiSymbol('kNativeSource');
 // native sinks need no new backend machinery — the standard
 // WritableStream drives them via start/write/close/abort. The marker
 // exists for pipe dispatch (is the dest native?) and extraction (hand
-// the sink to C++ for the native+native fast path). The one extension:
-// pipeFrom(source, options), the hook for the native+native pipe.
+// the sink to C++ for the native+native fast path). Two extension hooks
+// beyond the standard sink surface:
+//   - pipeFrom(source, options): the native+native pipe fast path,
+//     called by the pipe dispatch when both ends are native-backed.
+//   - detach(): called by detachWritableStream just before it drops its
+//     reference, releasing the C++ sink immediately when the underlying
+//     connection is taken over (e.g. Socket startTls).
 const kNativeSink: symbol = utils.getApiSymbol('kNativeSink');
 
 // Extraction marker for native-backed WritableStream instances. Mirrors
@@ -186,9 +189,9 @@ function isNativeUnderlyingSink(sink: object): boolean {
 // stream: present -> extract the native source for a pure C++ data
 // path; absent -> acquire a DrainingReader instead. The marker is KEPT
 // after extraction (presence means "native-backed", not "extractable");
-// the extractor's locked/disturbed preconditions make it one-shot.
-// Bootstrap phase: regular symbol (temporarily exposed via streams.ts).
-// Final implementation: runtime-provided private API symbol.
+// the extractor's locked/disturbed preconditions make it one-shot. The
+// symbol comes from the runtime's API-symbol registry, unreachable from
+// user code.
 const kExtractNativeSource: symbol = utils.getApiSymbol('kExtractNativeSource');
 
 function isActualObject(value: unknown): value is object {
@@ -200,10 +203,10 @@ function isActualObject(value: unknown): value is object {
 // present at all, this is a contract violation on the native/mock side,
 // never a user-input condition.
 //
-// Hardening: OWN-property read via descriptor — a (temporarily exposed)
-// symbol planted on Object.prototype must not convert every plain source
-// into a native one, and a hostile accessor at the marker is never
-// invoked (we read desc.value; accessor-defined markers are ignored).
+// Hardening: OWN-property read via descriptor — a marker symbol planted
+// on Object.prototype must not convert every plain source into a native
+// one, and a hostile accessor at the marker is never invoked (we read
+// desc.value; accessor-defined markers are ignored).
 function isNativeUnderlyingSource(source: object): boolean {
   const desc = ObjectGetOwnPropertyDescriptor(source, kNativeSource) as
     PropertyDescriptor | undefined;
@@ -1192,6 +1195,14 @@ class NativePullConduit implements ByteStreamConsumerType {
     this.#byobRequestCache = null;
     return source;
   }
+
+  // Non-detaching source access for read-only queries from the C++ bridge
+  // (the encoding-aware tryGetLength arm). The conduit's own status is
+  // deliberately not consulted: the C++ source object answers from its own
+  // lifecycle (a completed or extracted source reports no length).
+  peekSource(): object {
+    return this.#source;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1345,9 +1356,13 @@ function nativeControllerExpectedLength(
   return getControllerConduit(controller).expectedLength;
 }
 
-// Internal namespace, never re-exported to users (kNativeSource and
-// kExtractNativeSource excepted, TEMPORARILY, via streams.ts — see the
-// module header).
+function nativeControllerPeekSource(
+  controller: NativeReadableStreamController
+): object {
+  return getControllerConduit(controller).peekSource();
+}
+
+// Internal namespace, never re-exported to users.
 const nativeStreamInternals = {
   kNativeSource,
   kExtractNativeSource,
@@ -1364,6 +1379,7 @@ const nativeStreamInternals = {
   nativeControllerTeeSource,
   nativeControllerExtractSource,
   nativeControllerExpectedLength,
+  nativeControllerPeekSource,
 };
 
 // Type-only exports (fully erased at runtime — the loader sees only the

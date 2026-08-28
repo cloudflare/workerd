@@ -135,6 +135,7 @@ class AsyncContextFrame final: public Wrappable {
   // Convenience variation on current() that returns the result wrapped in a Ref for when we
   // need to make sure the frame stays alive.
   static kj::Maybe<Ref<AsyncContextFrame>> currentRef(Lock& js);
+  static kj::Maybe<Ref<AsyncContextFrame>> currentRef(v8::Isolate* isolate);
 
   // Create a new AsyncContextFrame. The new frame inherits the storage context of the current
   // frame (if any) and the given StorageEntry is added.
@@ -172,7 +173,7 @@ class AsyncContextFrame final: public Wrappable {
   // stack until the scope is destroyed.
   struct Scope {
     v8::Isolate* isolate;
-    kj::Maybe<AsyncContextFrame&> prior;
+    kj::Maybe<Ref<AsyncContextFrame>> prior;
     // If frame is nullptr, the root frame is assumed.
     Scope(Lock& js, kj::Maybe<AsyncContextFrame&> frame = kj::none);
     // If frame is nullptr, the root frame is assumed.
