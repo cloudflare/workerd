@@ -5,13 +5,13 @@
 // TextDecoderStream construction: label handling and option defaults.
 //
 // Divergence: when an options bag is present but omits `fatal`, C++
-// defaults it to TRUE (spec says false; C++ is spec-compliant only under
-// the dateless opt-in pedantic_wpt flag, so production workers get true).
-// TypeScript always uses the spec default. With no options bag at all,
-// both default to false.
+// defaults it to TRUE unless pedantic_wpt is set (spec says false; the
+// encoding-cpp-pedantic cell pins the spec-aligned side, the legacy cell
+// pins the quirk). TypeScript always uses the spec default. With no
+// options bag at all, everything defaults to false.
 
 import { strictEqual, throws } from 'node:assert';
-import { usingTsImpl } from 'which-impl';
+import { usingTsImpl, pedanticWpt } from 'which-impl';
 
 export const decoderOptionsReflection = {
   test() {
@@ -32,8 +32,9 @@ export const fatalDefaults = {
     strictEqual(new TextDecoderStream().fatal, false);
     strictEqual(new TextDecoderStream('utf-8').fatal, false);
 
-    // Options bag without `fatal`: the C++ quirk kicks in.
-    const bagDefault = usingTsImpl ? false : true;
+    // Options bag without `fatal`: the C++ quirk kicks in unless
+    // pedantic_wpt aligns it with the spec.
+    const bagDefault = usingTsImpl || pedanticWpt ? false : true;
     strictEqual(new TextDecoderStream('utf-8', {}).fatal, bagDefault);
     strictEqual(
       new TextDecoderStream('utf-8', { ignoreBOM: true }).fatal,

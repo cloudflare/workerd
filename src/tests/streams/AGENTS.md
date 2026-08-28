@@ -48,7 +48,10 @@ Each suite's `<name>-cpp.wd-test` documents its pinned set with a one-line
 reason per flag, and the suite's AGENTS.md tables the flags against the
 legacy tests that guard their unflagged sides. The TypeScript implementation
 hard-codes the modern behaviors, so pinning them also keeps the two cells
-comparable at the oldest date.
+comparable at the oldest date. Dateless opt-in flags that gate behaviors on
+a suite's surface (e.g. `pedantic_wpt`) get a dedicated cell running the
+full shared module set with the flag added, with the flag-off side pinned
+in the legacy cells.
 
 If a test fails only under `@all-compat-flags`, a date-gated flag changes the
 behavior: identify it (`compatibility-date.capnp`) and pin it, don't pin a

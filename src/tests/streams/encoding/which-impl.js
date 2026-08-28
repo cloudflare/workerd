@@ -6,3 +6,8 @@
 // tests can pin each side of a deliberate divergence exactly.
 export const usingTsImpl =
   globalThis.Cloudflare.compatibilityFlags['typescript_implemented_streams'];
+
+// True in the encoding-cpp-pedantic cell: the dateless opt-in pedantic_wpt
+// flag aligns C++ behaviors with the spec where the default deviates.
+export const pedanticWpt =
+  globalThis.Cloudflare.compatibilityFlags['pedantic_wpt'];

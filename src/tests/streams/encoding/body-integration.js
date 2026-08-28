@@ -7,6 +7,7 @@
 // readable yields STRINGS, so consuming it as a body fails.
 
 import { strictEqual, ok, rejects } from 'node:assert';
+import { usingTsImpl, pedanticWpt } from 'which-impl';
 
 export const encoderResponseBody = {
   async test() {
@@ -46,24 +47,33 @@ export const encoderRequestBody = {
 export const decoderReadableAsBodyRejectsText = {
   async test() {
     // The decoder's readable delivers strings; body consumption requires
-    // bytes and rejects, while the writer side settles normally (the
-    // consumer drained the chunk before failing on its type).
+    // bytes and rejects. The write settles normally (the consumer drained
+    // the chunk before failing on its type); the close diverges: under
+    // pedantic_wpt the C++ failing consumer cancels the readable with its
+    // error, which propagates to the writable and rejects close()/closed
+    // with the same TypeError — otherwise the close resolves.
     const tds = new TextDecoderStream();
     const resp = new Response(tds.readable);
     const writer = tds.writable.getWriter();
-    // All three promises are created (and handled) up front: the failing
-    // consumer may cancel the readable, settling the writer-side promises
-    // with it.
-    const textExpectation = rejects(resp.text(), (err) => {
+    const check = (err) => {
       strictEqual(err.constructor, TypeError);
       strictEqual(err.message, 'This ReadableStream did not return bytes.');
       return true;
-    });
+    };
+    // All promises are created (and handled) up front: settlement order
+    // varies by mode and unhandled rejections fail the harness.
+    const textExpectation = rejects(resp.text(), check);
     const writePromise = writer.write(new TextEncoder().encode('abc'));
-    const closePromise = writer.close();
+    const closeExpectation =
+      !usingTsImpl && pedanticWpt
+        ? Promise.all([
+            rejects(writer.close(), check),
+            rejects(writer.closed, check),
+          ])
+        : writer.close();
     await textExpectation;
     await writePromise;
-    await closePromise;
+    await closeExpectation;
   },
 };
 

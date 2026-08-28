@@ -119,8 +119,9 @@ HWM 1 (count-based) and readable HWM 0 under
   boundaries.
 - The decoder's readable yields **strings**: consuming it as a body rejects
   with `TypeError` "This ReadableStream did not return bytes." while the
-  writer side settles normally. `response.body.pipeThrough(tds)` is the
-  working direction.
+  write settles normally; under `pedantic_wpt` the C++ failing consumer's
+  cancel propagates to the writable and `close()`/`closed` reject with the
+  same error. `response.body.pipeThrough(tds)` is the working direction.
 - Piping a byte body **into** the encoder's writable is a footgun, not an
   error: each `Uint8Array` chunk is ToString-coerced (`"120,121"`) and that
   text is encoded.
@@ -155,9 +156,22 @@ primitive) and proves streams-flag indifference via its variants.
 | `text_decoder_cjk_decoder` (2026-03-03) | dedicated CJK decoder for non-UTF-8 labels (codec primitive, both cells) | — |
 | `workers_api_getters_setters_on_prototype` (2022-01-31), `set_tostring_tag` (2024-09-26) | prototype accessors / branding (pinned; generic JSG behaviors, unflagged sides guarded by the identity suite's legacy cell) | — |
 
-`pedantic_wpt` (opt-in only, no date) makes the C++ fatal default
-spec-compliant; production workers never get it, so the main cell asserts
-the quirk (ledger #1).
+`pedantic_wpt` (opt-in only, no date) aligns C++ behaviors with the spec
+where the production default deviates, and is consulted throughout the
+standard-streams machinery these classes are built on.
+`encoding-cpp-pedantic.wd-test` runs the FULL shared module set with it
+added to the main cell's pinned flags; on this suite's surface it changes
+exactly two things, both pinned:
+
+- the TDS fatal default with an options bag lacking `fatal` becomes the
+  spec's `false` (ledger #1; `fatalDefaults` asserts per mode, the
+  unflagged side is also pinned by `legacyFatalDefaultsTrueWithOptionsBag`)
+- a failing body consumer's cancel propagates to the writable, so
+  `close()`/`closed` reject with the consumer's TypeError instead of
+  resolving (`decoderReadableAsBodyRejectsText`)
+
+Production workers never get `pedantic_wpt`, so the main cell continues to
+assert the defaults.
 
 `encoding-ts.wd-test` additionally sets the internal-testing
 `expose_draining_reader` flag, installing the `ReadableStreamDrainingReader`
@@ -171,7 +185,7 @@ Every entry is asserted on both sides via the `which-impl` pattern.
 
 | # | Area | C++ | TypeScript | Pinned in |
 | --- | --- | --- | --- | --- |
-| 1 | TDS `fatal` default with an options bag lacking `fatal` | `true` (spec's `false` only under `pedantic_wpt`) | `false` (spec) | `fatalDefaults` |
+| 1 | TDS `fatal` default with an options bag lacking `fatal` | `true` (spec's `false` only under `pedantic_wpt`) | `false` (spec) | `fatalDefaults` (per mode), `legacyFatalDefaultsTrueWithOptionsBag` |
 | 2 | `TransformStream` inheritance | subclass; `instanceof` true | standalone | `transformStreamInheritance` |
 | 3 | `readable`/`writable` placement | inherited from `TransformStream.prototype` | own enumerable accessors on the class prototype | `accessorPlacement` |
 | 4 | Invalid TDS chunk `TypeError` message | "This TransformStream is being used as a byte stream, but received a value that is not a BufferSource." | "TextDecoderStream: chunk must be a BufferSource" | `decoderRejectsNonBufferSource` |
@@ -210,7 +224,7 @@ C++ only; one cell per flag window, each with
 
 | Cell | Window | Behavior | Asserted by |
 | --- | --- | --- | --- |
-| `encoding-cpp-legacy.wd-test` | pre-2022-11-30 (fully unflagged) | the codec transformer is dropped: both classes are identity streams. TES still UTF-8-encodes strings (identity encodes string writes) but with no cross-chunk surrogate pairing, and its readable supports BYOB; TDS passes bytes through undecoded; invalid chunks throw synchronously (no `capture_async_api_throws`) and the stream survives; option getters still reflect the real decoder | `legacy-identity-fallback.js` |
+| `encoding-cpp-legacy.wd-test` | pre-2022-11-30 (fully unflagged) | the codec transformer is dropped: both classes are identity streams. TES still UTF-8-encodes strings (identity encodes string writes) but with no cross-chunk surrogate pairing, and its readable supports BYOB; TDS passes bytes through undecoded; invalid chunks throw synchronously (no `capture_async_api_throws`) and the stream survives; option getters still reflect the real decoder, including the non-pedantic fatal quirk (options bag lacking `fatal` → `true`) | `legacy-identity-fallback.js` |
 | `encoding-cpp-legacy-bp.wd-test` | 2022-11-30..2024-12-16 | real codec, but no effective TransformStream backpressure: every write settles without read demand | `legacyAllWritesSettleWithoutDemand` |
 | `encoding-cpp-legacy-hwm.wd-test` | 2024-12-16..2026-03-24 | fixed backpressure with readable HWM 1: the first write settles without demand, later writes park | `legacyFirstWriteSettlesEagerly` |
 

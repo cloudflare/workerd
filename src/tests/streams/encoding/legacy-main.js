@@ -9,5 +9,6 @@ export {
   legacyEncoderNoSurrogatePairing,
   legacyEncoderReadableSupportsByob,
   legacyDecoderDoesNotDecode,
+  legacyFatalDefaultsTrueWithOptionsBag,
   legacyDecoderInvalidChunkThrowsSynchronously,
 } from 'legacy-identity-fallback';
