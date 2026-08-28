@@ -27,7 +27,6 @@ import {
   ok,
   rejects,
   strictEqual,
-  throws,
 } from 'node:assert';
 
 export const existenceTest = {
