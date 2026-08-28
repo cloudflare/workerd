@@ -1,0 +1,58 @@
+src/workerd/server/server.c++
+  s_907c34cfcb44ef::t_5f545973d6c8e0 860-868,870-879
+  s_907c34cfcb44ef::t_50b3c30a03c0a3 331
+  s_907c34cfcb44ef::t_d1a208875fcc29 1085-1091,1097-1103,1123-1124,1131-1138,1145-1152,1155,1158-1159
+  s_907c34cfcb44ef::t_5a52acab3550d8 607-619,622-627,629-636,641-642
+  s_907c34cfcb44ef::t_77f3bd3a928912 2141,4056,4260,5600
+  s_907c34cfcb44ef::t_21eeaf93a668aa 1216-1219,1228,1231-1233,1235,1239-1247
+  s_907c34cfcb44ef::t_1f80979f9533f4 1178-1182,1185,1192-1197,1213-1215,1220,1227,1229-1230,1248-1250,1254-1257
+  s_907c34cfcb44ef::t_81654c11f67dbd 4054-4055,4058-4061
+types/generated-snapshot/experimental/index.ts
+  s_907c34cfcb44ef::t_6555e9821f03a5 594
+src/workerd/io/worker.c++
+  s_907c34cfcb44ef::t_a9d0d2b4981b94 4425,4434-4436,4439-4444,4446-4447,4458-4459,4461,4466,4471,4480-4482
+src/workerd/api/actor.h
+  s_907c34cfcb44ef::t_50cc39920c997f 110-111
+types/generated-snapshot/index.d.ts
+  s_907c34cfcb44ef::t_6555e9821f03a5 591
+src/workerd/io/observer.h
+  s_907c34cfcb44ef::t_405ab8612a1079 329-331
+  s_907c34cfcb44ef::t_8c75d6e32d1cab 10
+src/workerd/api/global-scope.c++
+  s_907c34cfcb44ef::t_e1efb15012c9a5 776,783,786-787,791,798,807-811,813,817-818,820,829,834,836
+src/workerd/io/BUILD.bazel
+  s_907c34cfcb44ef::t_86addc7baefeb8 302
+src/workerd/api/global-scope.h
+  s_907c34cfcb44ef::t_1ca50eccf9a4f5 780
+  s_907c34cfcb44ef::t_c4c7ade4ce3d2d 500-502
+  s_907c34cfcb44ef::t_609833837df2b0 517-518,530
+src/workerd/io/io-context.c++
+  s_907c34cfcb44ef::t_4de63131d1624b 375-377,382-383,385-388
+src/workerd/io/incoming-request-test.c++
+  s_907c34cfcb44ef::t_75ed5cca714388 129-130
+src/workerd/io/worker.h
+  s_907c34cfcb44ef::t_bf9238b64cd547 885-887,892
+  s_907c34cfcb44ef::t_54f92253e8c8ec 1087-1089,1098,1103-1106
+src/workerd/api/tests/do-pre-shutdown-test.js
+  s_907c34cfcb44ef::t_f3f9e783b045ac 204-206,215-217,219
+types/generated-snapshot/experimental/index.d.ts
+  s_907c34cfcb44ef::t_6555e9821f03a5 592
+types/generated-snapshot/index.ts
+  s_907c34cfcb44ef::t_6555e9821f03a5 593
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e9221585cb1ad8a3d9d75fd7726ad3c04992bd7f",
+  "prompts": {},
+  "sessions": {
+    "s_907c34cfcb44ef": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd31f0c87ffeX9dy4yYTDmj71c",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    }
+  }
+}

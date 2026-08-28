@@ -1,0 +1,31 @@
+src/workerd/api/tests/do-pre-shutdown-test.js
+  s_907c34cfcb44ef::t_21042990e3ca8b 246-258
+  s_907c34cfcb44ef::t_d51be24da4236f 103-126
+src/workerd/io/io-context.c++
+  s_907c34cfcb44ef::t_2de5e7bd66bbeb 372-378,388-393
+  s_907c34cfcb44ef::t_2c6eb7df9e0692 380-386
+src/workerd/io/incoming-request-test.c++
+  s_907c34cfcb44ef::t_cf387c09a0fc9d 128-132,155
+  s_907c34cfcb44ef::t_7cae97d15c1fd5 138-144,148-149,154,156-159,163-166
+src/workerd/io/worker.c++
+  s_907c34cfcb44ef::t_2cce3f0f91f013 4490-4494
+src/workerd/api/tests/do-pre-shutdown-test.wd-test
+  s_907c34cfcb44ef::t_46bff41fbd95dd 26
+  s_907c34cfcb44ef::t_f0bb0573ea1034 38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7819f778bd04dd51dd8bed613e3d97ac3c1bc8e7",
+  "prompts": {},
+  "sessions": {
+    "s_907c34cfcb44ef": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd31f0c87ffeX9dy4yYTDmj71c",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    }
+  }
+}
