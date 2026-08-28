@@ -56,4 +56,29 @@ export {
   sourceErroredAfterChunkHwmZero,
   destStartsErrored,
   destStartsErroredPreventCancel,
+  errorTypePreservationPipeTo,
+  errorTypePreservationPipeThrough,
 } from 'error-propagation';
+
+export {
+  externalCloseOnPipedDestRejects,
+  externalAbortOnPipedDestRejects,
+  destWriteThrowsMidPipe,
+  destWriteThrowsMidPipePreventCancel,
+  destControllerErrorsMidPipe,
+} from 'close-propagation';
+
+export {
+  backpressurePipeChain,
+  pipeStopsPullingWhenDestStalls,
+} from 'flow-control';
+
+export {
+  cancelPropagationThroughIdentity,
+  cancelPropagationThroughJsTransform,
+  fixedLengthStreamPipeExact,
+  fixedLengthStreamPipeOverflow,
+  fixedLengthStreamPipeUnderflow,
+  closedSourceToClosedDest,
+  closedSourceToLiveDest,
+} from 'interop';
