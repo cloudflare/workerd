@@ -14,4 +14,8 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "respond", esModule = embed "respond.js"),
   (name = "release-relock", esModule = embed "release-relock.js"),
   (name = "read-min", esModule = embed "read-min.js"),
+  (name = "tee", esModule = embed "tee.js"),
+  (name = "buffer-lifecycle", esModule = embed "buffer-lifecycle.js"),
+  (name = "gc", esModule = embed "gc.js"),
+  (name = "integration", esModule = embed "integration.js"),
 ];

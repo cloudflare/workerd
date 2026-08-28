@@ -122,3 +122,29 @@ export {
   byobReaderConstraints,
   readAtLeastByobReader,
 } from 'read-min';
+
+export {
+  teeClonesChunksPerBranch,
+  teeByteStreamDefaultReaders,
+  teeByteStreamMixedReaders,
+  teeCancelComposite,
+  teeErrorPropagatesToBothBranches,
+} from 'tee';
+
+export {
+  enqueueDetachedBuffer,
+  readDetachedView,
+  respondAfterViewDetached,
+  respondWithNewViewForeignBuffer,
+  enqueueResizableBuffer,
+  readResizableView,
+  nonDetachableBuffersRejected,
+} from 'buffer-lifecycle';
+
+export { pendingByobReadSurvivesGc, byobRequestSurvivesGc } from 'gc';
+
+export {
+  byobRoundtrip,
+  readAtLeastOnEchoedBody,
+  bytesMethodOnByteSource,
+} from 'integration';
