@@ -1,0 +1,37 @@
+using Workerd = import "/workerd/workerd.capnp";
+using DigestModules = import "digest-modules.capnp";
+
+# Runs the digest streams suite (crypto.DigestStream) against the C++
+# implementation; digest-ts.wd-test runs the identical modules against the
+# TypeScript implementation. Both drive the same native digest context, so
+# hashing and string encoding are shared; the suite pins the stream wrapper
+# and digest-promise plumbing.
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes. Date-gated semantics are pinned by flag:
+# - workers_api_getters_setters_on_prototype: the digest accessor lives on
+#   the prototype rather than as a per-instance own property.
+# - capture_async_api_throws: invalid chunk writes reject instead of
+#   throwing synchronously.
+# - set_tostring_tag: [object DigestStream] branding.
+# - streams_enable_constructors + transformstream_enable_standard_constructor:
+#   pipe tests build `new ReadableStream`/`new TransformStream` sources.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-digest-cpp",
+      worker = (
+        modules = DigestModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "workers_api_getters_setters_on_prototype",
+          "capture_async_api_throws",
+          "set_tostring_tag",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+        ],
+      )
+    ),
+  ],
+  v8Flags = ["--expose-gc"],
+);
