@@ -26,6 +26,9 @@ const unitTests :Workerd.Config = (
     ( name = "streams-transform-cpp",
       worker = (
         modules = TransformModules.modules,
+        bindings = [
+          ( name = "SELF", service = "streams-transform-cpp" ),
+        ],
         compatibilityFlags = [
           "nodejs_compat",
           "streams_enable_constructors",

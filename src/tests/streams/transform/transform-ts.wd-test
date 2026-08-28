@@ -12,6 +12,9 @@ const unitTests :Workerd.Config = (
     ( name = "streams-transform-ts",
       worker = (
         modules = TransformModules.modules,
+        bindings = [
+          ( name = "SELF", service = "streams-transform-ts" ),
+        ],
         compatibilityFlags = [
           "nodejs_compat",
           "typescript_implemented_streams",

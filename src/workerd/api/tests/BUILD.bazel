@@ -713,12 +713,6 @@ wd_test(
 )
 
 wd_test(
-    src = "streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-test.js"],
-)
-
-wd_test(
     src = "stub-storage-test.wd-test",
     args = ["--experimental"],
     data = ["stub-storage-test.js"],
@@ -810,12 +804,6 @@ wd_test(
     src = "streams-iocontext-test.wd-test",
     args = ["--experimental"],
     data = ["streams-iocontext-test.js"],
-)
-
-wd_test(
-    src = "streams-backpressure-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-backpressure-test.js"],
 )
 
 wd_test(

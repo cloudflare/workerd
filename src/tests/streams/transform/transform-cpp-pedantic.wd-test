@@ -15,6 +15,9 @@ const unitTests :Workerd.Config = (
     ( name = "streams-transform-cpp-pedantic",
       worker = (
         modules = TransformModules.modules,
+        bindings = [
+          ( name = "SELF", service = "streams-transform-cpp-pedantic" ),
+        ],
         compatibilityFlags = [
           "nodejs_compat",
           "streams_enable_constructors",

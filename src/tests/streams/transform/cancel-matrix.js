@@ -8,7 +8,7 @@
 // expectedFailures narrow to the fan-out divergence pinned in
 // cancelHookErrorFanOut (probed; pedantic_wpt does not change it).
 
-import { strictEqual, rejects } from 'node:assert';
+import { strictEqual, ok, rejects } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 // readable.cancel(reason): the cancel hook (not flush) runs with the
@@ -103,5 +103,47 @@ export const cancelHookRunsOnce = {
     await ts.writable.abort('two').catch(() => {});
     await scheduler.wait(5);
     strictEqual(calls, 1);
+  },
+};
+
+// An ASYNC cancel hook is awaited by both readable.cancel() and
+// writable.abort(), and a throwing cancel hook rejects the abort with
+// its error (migrated from streams-test.js tsCancel).
+export const asyncCancelHookAwaitedAndThrowPropagates = {
+  async test() {
+    {
+      let cancelCalled = false;
+      const { readable } = new TransformStream({
+        async cancel(reason) {
+          strictEqual(reason, 'boom');
+          await scheduler.wait(10);
+          cancelCalled = true;
+        },
+      });
+      ok(!cancelCalled);
+      await readable.cancel('boom');
+      ok(cancelCalled);
+    }
+    {
+      let cancelCalled = false;
+      const { writable } = new TransformStream({
+        async cancel(reason) {
+          strictEqual(reason, 'boom');
+          await scheduler.wait(10);
+          cancelCalled = true;
+        },
+      });
+      ok(!cancelCalled);
+      await writable.abort('boom');
+      ok(cancelCalled);
+    }
+    {
+      const { writable } = new TransformStream({
+        async cancel() {
+          throw new Error('boomy');
+        },
+      });
+      await rejects(writable.abort('boom'), { message: 'boomy' });
+    }
   },
 };

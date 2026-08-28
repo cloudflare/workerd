@@ -69,3 +69,37 @@ export const pullThrowIgnoredIfErrored = {
     strictEqual(await rejectionOf(rs.getReader().read()), err);
   },
 };
+
+// Byte-stream highWaterMark is measured in BYTES: a hwm of 10 with 3-byte
+// enqueues pulls until desiredSize crosses zero (4 pulls, 12 bytes,
+// desiredSize -2). Delivery of the buffered bytes then diverges per the
+// suite's coalescing finding (ledger #17): C++ hands all 12 bytes to the
+// first read, TypeScript delivers the first 3-byte chunk (migrated from
+// streams-backpressure-test.js, strengthened to exact counts).
+export const backpressureByteStreamHwm = {
+  async test() {
+    let controller;
+    let pullCount = 0;
+    const rs = new ReadableStream(
+      {
+        type: 'bytes',
+        start(c) {
+          controller = c;
+          strictEqual(c.desiredSize, 10);
+        },
+        pull(c) {
+          pullCount++;
+          c.enqueue(new Uint8Array([1, 2, 3]));
+        },
+      },
+      { highWaterMark: 10 }
+    );
+    await scheduler.wait(20);
+    strictEqual(pullCount, 4);
+    strictEqual(controller.desiredSize, -2);
+    const reader = rs.getReader();
+    const { value } = await reader.read();
+    strictEqual(value.byteLength, usingTsImpl ? 3 : 12);
+    reader.releaseLock();
+  },
+};
