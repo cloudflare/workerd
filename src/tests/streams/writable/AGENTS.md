@@ -99,3 +99,13 @@ promises (they resolve with undefined).
 | `legacy-writer.js` | pre-flag writer semantics (see Compatibility flags) |
 | `data-volumes.js` | write-side volumes: 4096 × 16 B writes, single 1 MiB write, 1 MiB / 8 MiB chunked with writer.ready honored; the sink verifies the continuous prime-modulus pattern as chunks arrive |
 | `which-impl.js` | implementation + pedantic detection |
+
+## IDL shape (deliberately not pinned here)
+
+WebIDL function metadata — operation `.length` values (optional
+arguments do not count), and promise-typed attributes/operations
+REJECTING rather than throwing on a broken `this` — is enumerated
+per-implementation by WPT's `idlharness.any.js`: the C++ implementation
+carries the known deviations as expectedFailures in
+`src/wpt/streams-test.ts`; the TypeScript implementation matches spec.
+The suites do not duplicate that enumeration.
