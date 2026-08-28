@@ -387,11 +387,8 @@ v8::Local<v8::Value> exceptionToJs(
           .internalErrorId = shouldLogWithInternalId ? tunneledException.internalErrorId : kj::none,
         });
     if (shouldLogWithInternalId) {
-      // LOG_EXCEPTION("jsgInternalError", ...), but with internal error ID:
-      auto& e = exception;
-      constexpr auto sentryErrorContext = "jsgInternalError";
       auto& wdErrId = KJ_ASSERT_NONNULL(tunneledException.internalErrorId);
-      KJ_LOG(ERROR, e, sentryErrorContext, wdErrId);
+      LOG_EXCEPTION_WITH_ID("jsgInternalError", exception, wdErrId);
     } else {
       KJ_LOG(INFO, exception);  // Run with --verbose to see exception logs.
     }
