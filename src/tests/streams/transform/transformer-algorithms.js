@@ -109,3 +109,68 @@ export const differentTypesTransform = {
     strictEqual(res[3].value, '<HELLOTHERE>');
   },
 };
+
+// Hook invocation shape: start/transform/flush receive 1/2/1 arguments
+// with the transformer itself as the receiver — including when the hooks
+// live on the prototype chain (parity; WPT properties.any's C++
+// expectedFailures do not reproduce under direct observation).
+export const hookInvocationShape = {
+  async test() {
+    const counts = {};
+    const recv = {};
+    const transformer = {
+      start(...a) {
+        counts.start = a.length;
+        recv.start = this === transformer;
+      },
+      transform(...a) {
+        counts.transform = a.length;
+        recv.transform = this === transformer;
+        a[1].enqueue(a[0]);
+      },
+      flush(...a) {
+        counts.flush = a.length;
+        recv.flush = this === transformer;
+      },
+    };
+    const ts = new TransformStream(transformer);
+    const writer = ts.writable.getWriter();
+    const reader = ts.readable.getReader();
+    await Promise.allSettled([writer.write('x'), reader.read()]);
+    await writer.close();
+
+    strictEqual(counts.start, 1);
+    strictEqual(counts.transform, 2);
+    strictEqual(counts.flush, 1);
+    strictEqual(recv.start, true);
+    strictEqual(recv.transform, true);
+    strictEqual(recv.flush, true);
+  },
+};
+
+// Hooks found on the transformer's prototype chain are used (parity).
+export const prototypeChainTransformer = {
+  async test() {
+    const seen = [];
+    const proto = {
+      start() {
+        seen.push('start');
+      },
+      transform(chunk, controller) {
+        seen.push('transform');
+        controller.enqueue(chunk);
+      },
+      flush() {
+        seen.push('flush');
+      },
+    };
+    const transformer = Object.create(proto);
+    const ts = new TransformStream(transformer);
+    const writer = ts.writable.getWriter();
+    const reader = ts.readable.getReader();
+    const [, r] = await Promise.all([writer.write('x'), reader.read()]);
+    strictEqual(r.value, 'x');
+    await writer.close();
+    strictEqual(seen.join(','), 'start,transform,flush');
+  },
+};
