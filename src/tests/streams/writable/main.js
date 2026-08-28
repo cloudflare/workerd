@@ -114,3 +114,5 @@ export {
   largeChunkedWrites,
   veryLargeChunkedWrites,
 } from 'data-volumes';
+
+export { structuredCloneWritable } from 'transfer';
