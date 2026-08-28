@@ -1,0 +1,34 @@
+using Workerd = import "/workerd/workerd.capnp";
+using SocketsModules = import "sockets-modules.capnp";
+
+# The SAME modules against the TypeScript implementation: socket
+# readable/writable pairs are internal streams, so this cell exercises
+# the TS wrapping of native socket streams end to end.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-sockets-ts",
+      worker = (
+        modules = SocketsModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+          "typescript_implemented_streams",
+        ],
+        bindings = [
+          (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+          (name = "STREAMS_ECHO_PORT", fromEnvironment = "STREAMS_ECHO_PORT"),
+          (name = "STREAMS_GREET_PORT", fromEnvironment = "STREAMS_GREET_PORT"),
+        ],
+      )
+    ),
+    ( name = "internet",
+      network = (
+        allow = ["private"],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);
