@@ -34,3 +34,10 @@ export {
   classSizeUsableInPlainStrategyBag,
   fractionalAndZeroHighWaterMarks,
 } from 'integration';
+
+export {
+  chunkGetterThrowPropagates,
+  chunkGetterReentersSize,
+  sizeIsReceiverAgnostic,
+  initGetterReentersConstructor,
+} from 'reentrancy';

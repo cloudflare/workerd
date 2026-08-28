@@ -50,4 +50,5 @@ with `pedantic_wpt` added, pinning the absence of pedantic effects.
 | `construction.js` | init required with per-impl message (#4); missing highWaterMark (#5); unrestricted-double storage + ToNumber coercion |
 | `size-semantics.js` | CQS constant 1; BLQS on views/buffers/DataViews with offsets, detached (0), length-tracking resizable views; plain-object byteLength reads; nullish handling (#6); shadowing getter (#6) |
 | `integration.js` | strategies drive RS/WS desiredSize; detached class size fn in a plain bag; fractional HWM stream truncation (#7); zero HWM |
+| `reentrancy.js` | plain-chunk byteLength getter runs inside the class size fn: throws propagate, re-entrant size calls work; size fns are receiver-agnostic; init-bag highWaterMark getter re-entering the constructor is safe (all parity). In-stream user-size-callback reentrancy is readable/writable-suite territory |
 | `which-impl.js` | implementation detection |
