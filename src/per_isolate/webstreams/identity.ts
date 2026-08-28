@@ -333,10 +333,10 @@ class IdentityTransformStream {
     // exactly once per write and runs the sink write algorithm for the
     // accepted ones in the same order. The machinery runs size() BEFORE
     // its own state checks, so a write against a closing/errored stream
-    // is detected here (synchronously — the answer cannot change before
-    // the machinery re-asks) and skipped without copying, keeping doomed
-    // writes from growing the FIFO; terminal transitions clear entries
-    // whose queued writes the machinery discards.
+    // is detected and skipped without copying (see willAcceptWrite in
+    // writable.ts), keeping doomed writes from growing the FIFO; terminal
+    // transitions clear entries whose queued writes the machinery
+    // discards.
     //
     // An INVALID chunk must not throw out of size(): the spec's
     // GetChunkSize error path errors the stream immediately, which would
@@ -372,11 +372,9 @@ class IdentityTransformStream {
       explicitHighWaterMark += 0;
     }
     const sizeAndSnapshot = (chunk: unknown): number => {
-      const state = writableInternals.getState(this.#writable);
-      if (
-        state !== 'writable' ||
-        writableInternals.closeQueuedOrInFlight(this.#writable)
-      ) {
+      // Doomed writes are skipped without copying (see willAcceptWrite in
+      // writable.ts for the size()-before-state-checks coupling).
+      if (!writableInternals.willAcceptWrite(this.#writable)) {
         return 1;
       }
       try {

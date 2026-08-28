@@ -216,19 +216,19 @@ function createCodecPair(
   //
   // The writer machinery runs size() BEFORE its state checks, so a write
   // against a closing/errored stream would copy and then reject without a
-  // sink step to shift the entry. Doomed writes are therefore detected
-  // here (the checks are synchronous with no interleaving, so the answer
-  // cannot change before the machinery re-asks) and skipped without
-  // copying; terminal transitions clear any entries whose queued writes
-  // the machinery discards.
+  // sink step to shift the entry. Doomed writes are skipped without
+  // copying (see willAcceptWrite in writable.ts for the coupling
+  // invariant); terminal transitions clear any entries whose queued
+  // writes the machinery discards.
   const snapshots: SnapshotEntry[] = [];
   let writableRef: object | undefined;
-  const writeWillBeAccepted = (): boolean =>
-    writableRef !== undefined &&
-    writableInternals.getState(writableRef) === 'writable' &&
-    !writableInternals.closeQueuedOrInFlight(writableRef);
   const sizeAndSnapshot = (chunk: unknown): number => {
-    if (!writeWillBeAccepted()) return 1;
+    if (
+      writableRef === undefined ||
+      !writableInternals.willAcceptWrite(writableRef)
+    ) {
+      return 1;
+    }
     try {
       ArrayPrototypePush(snapshots, { ok: true, copied: snapshotChunk(chunk) });
     } catch (error) {
