@@ -148,6 +148,3 @@ configs' flag lists).
   crash/UAF repros, deliberately not merged into suites.
 - `src/workerd/api/streams/streams-test.js` — `partiallyReadStream`
   (needs a KV binding).
-
-The full coverage picture, including gap tracking, lives in
-`~/docs/streams-coverage-audit.md`.
