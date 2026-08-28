@@ -14,6 +14,10 @@ using WritableModules = import "writable-modules.capnp";
 #   cell for the unflagged side).
 # - workers_api_getters_setters_on_prototype: accessors live on prototypes.
 # - set_tostring_tag: Symbol.toStringTag branding.
+# - writable_stream_spec_compliant_writer: spec-compliant writer
+#   lock/release semantics (e.g. a releaseLock() from inside strategy
+#   size() dooms the in-progress write; see reentrancy.js and the
+#   legacy-writer cell for the unflagged side).
 # internal_writable_stream_abort_clears_queue is deliberately NOT pinned:
 # it only affects the internal (non-JS-backed) WritableStream
 # implementation, which this suite never constructs.
@@ -29,6 +33,7 @@ const unitTests :Workerd.Config = (
           "capture_async_api_throws",
           "workers_api_getters_setters_on_prototype",
           "set_tostring_tag",
+          "writable_stream_spec_compliant_writer",
         ],
       )
     ),

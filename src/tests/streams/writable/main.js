@@ -12,7 +12,13 @@ export {
   newWritableStream,
 } from 'api-surface';
 
-export { highWaterMarkValidated } from 'construction';
+export {
+  highWaterMarkValidated,
+  sinkTypeValidation,
+  argumentConversionOrder,
+  readyFulfillTiming,
+  nonCallableSizeThrows,
+} from 'construction';
 
 export {
   newWritableStreamWithSink,
@@ -56,9 +62,32 @@ export {
 } from 'abort-semantics';
 
 export {
+  abortBeforeStartReasonIdentity,
+  erroredStateReasonIdentity,
+  sinkAbortSkippedAfterBadStrategyError,
+  inFlightWriteRejectionDuringAbort,
+  abortThenControllerErrorInFlight,
+  controllerErrorThenAbortInFlight,
+  abortSignalReason,
+} from 'abort-matrix';
+
+export {
   writableStreamDesiredSize,
   backpressureWritableDesiredSize,
   backpressureWritableSlowSink,
+  floatingPointQueueTotals,
+  fractionalSizeTruncation,
+  invalidSizeReturnRejects,
+  desiredSizeWhileErroring,
 } from 'backpressure';
+
+export {
+  reentrantWriteFromSize,
+  releaseLockInsideSize,
+  controllerErrorInsideWriteHook,
+  sizeNotCalledForDoomedWrite,
+} from 'reentrancy';
+
+export { thenGetterDoesNotFireOnWriterPromises } from 'then-interceptors';
 
 export { writableStreamGc } from 'gc';
