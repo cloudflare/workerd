@@ -151,3 +151,20 @@ export const byteDesiredSizeAccounting = {
     strictEqual(end.done, true);
   },
 };
+
+// The byte-stream globals exist and are not directly constructable
+// where the spec forbids it (byte halves of userStreamsGlobalsExist /
+// jsStreamsObjectsNotConstructable).
+export const byteGlobalsExist = {
+  test() {
+    strictEqual(typeof ReadableStreamBYOBReader, 'function');
+    strictEqual(typeof ReadableByteStreamController, 'function');
+    strictEqual(typeof ReadableStreamBYOBRequest, 'function');
+    throws(() => new ReadableByteStreamController(), TypeError);
+    throws(() => new ReadableStreamBYOBRequest(), TypeError);
+    // ReadableStreamBYOBReader IS constructable around a byte stream.
+    const rs = new ReadableStream({ type: 'bytes' });
+    const reader = new ReadableStreamBYOBReader(rs);
+    reader.releaseLock();
+  },
+};
