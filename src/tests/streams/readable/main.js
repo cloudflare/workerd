@@ -83,3 +83,50 @@ export {
   queueMathNearZeroClamped,
   queueMathNearZeroEndsZero,
 } from 'queue-math';
+
+export {
+  teeConsumeOneBranchFully,
+  teeDifferentReadRates,
+  teeCancelSlowBranch,
+  teeLargeChunkCount,
+  teeAfterPartialRead,
+  teeErrorPropagatesBothBranches,
+  teeCancelReasonComposite,
+  teeCancelReverseOrder,
+  teePullPerRead,
+} from 'tee';
+
+export {
+  transformTeeReentrancySynchronousCancel,
+  transformStreamTeeReentrancy,
+  teeWithCancelMidStream,
+} from 'tee-reentrancy';
+
+export {
+  readableStreamFromAsyncGenerator,
+  readableStreamFromSyncGenerator,
+  readableStreamFromSyncGenerator2,
+  readableStreamFromAsyncCanceled,
+  readableStreamFromThrowingAsyncGen,
+  readableStreamFromNoopAsyncGen,
+  readableStreamFromCancelRejectsWhenReturnRejects,
+  readableStreamFromCancelRejectsWhenReturnThrows,
+  readableStreamFromCancelRejectsWhenReturnNotMethod,
+  readableStreamFromCancelRejectsWhenReturnNonObject,
+  readableStreamFromCancelResolvesWhenReturnMissing,
+  fromString,
+  fromReturnValidationMessages,
+} from 'from';
+
+export {
+  asyncIteratorBreakCancels,
+  asyncIteratorReturnMethod,
+  asyncIteratorReturnThenNext,
+  asyncIteratorPreventCancel,
+  asyncIteratorOnClosedStream,
+  asyncIteratorOnErroredStream,
+  asyncIteratorLocksStream,
+  returnThenNextNoAwait,
+  nextThenReturnNoAwait,
+  iteratorPrototypeShape,
+} from 'async-iteration';

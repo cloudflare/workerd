@@ -16,4 +16,8 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "cancel", esModule = embed "cancel.js"),
   (name = "bad-strategies", esModule = embed "bad-strategies.js"),
   (name = "queue-math", esModule = embed "queue-math.js"),
+  (name = "tee", esModule = embed "tee.js"),
+  (name = "tee-reentrancy", esModule = embed "tee-reentrancy.js"),
+  (name = "from", esModule = embed "from.js"),
+  (name = "async-iteration", esModule = embed "async-iteration.js"),
 ];
