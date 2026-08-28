@@ -109,6 +109,48 @@ export const sourceErroredAfterChunkHwmZero = {
   },
 };
 
+// The WPT 'becomes errored after one chunk; dest never desires chunks;
+// preventAbort=true' residue: same hwm-0 shape as above but the abort
+// suppression must hold even though the destination never desired the
+// chunk. The write-anyway divergence (C++) carries over unchanged.
+export const sourceErroredAfterChunkHwmZeroPreventAbort = {
+  async test() {
+    const err = new Error('src-err');
+    let abortCalled = false;
+    const wrote = [];
+    let controller;
+    const rs = new ReadableStream({
+      start(c) {
+        controller = c;
+      },
+    });
+    const ws = new WritableStream(
+      {
+        write(chunk) {
+          wrote.push(chunk);
+        },
+        abort() {
+          abortCalled = true;
+        },
+      },
+      new CountQueuingStrategy({ highWaterMark: 0 })
+    );
+    const pipeP = rs.pipeTo(ws, { preventAbort: true });
+    await scheduler.wait(5);
+    controller.enqueue('a');
+    await scheduler.wait(5);
+    controller.error(err);
+    strictEqual(await rejectionOf(pipeP), err);
+    strictEqual(abortCalled, false);
+    if (usingTsImpl) {
+      strictEqual(wrote.length, 0);
+    } else {
+      strictEqual(wrote.length, 1);
+    }
+    ws.getWriter(); // dest still usable under preventAbort
+  },
+};
+
 // A destination that starts errored: the pipe rejects with the dest
 // error and the source's cancel hook receives it; preventCancel
 // suppresses the cancel and releases the lock.

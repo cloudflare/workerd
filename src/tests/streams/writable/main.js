@@ -93,6 +93,7 @@ export {
   fractionalSizeTruncation,
   invalidSizeReturnRejects,
   desiredSizeWhileErroring,
+  writableFloatQueueTotal,
 } from 'backpressure';
 
 export {

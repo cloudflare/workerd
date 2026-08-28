@@ -19,6 +19,8 @@ export {
   globalScopeWritablestream,
   globalScopeByteReadable,
   globalScopeTransformStream,
+  concurrentRequestsDrainDistinctStreams,
+  crossRequestStaleParkedRead,
 } from 'global-scope-streams';
 
 export { default } from 'global-scope-streams';

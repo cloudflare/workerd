@@ -54,6 +54,7 @@ export {
   sourceStartsErrored,
   sourceStartsErroredPreventAbort,
   sourceErroredAfterChunkHwmZero,
+  sourceErroredAfterChunkHwmZeroPreventAbort,
   destStartsErrored,
   destStartsErroredPreventCancel,
   errorTypePreservationPipeTo,
