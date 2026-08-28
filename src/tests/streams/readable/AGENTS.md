@@ -101,3 +101,13 @@ ResponseTextLargeBody), ts-webstreams-test.js (three parity body tests;
 its TS-identity assertions remain). streams-js-test.js is deliberately
 untouched: its tests interleave value and byte sections, so its value
 halves move when the readable-byte suite consumes the byte halves.
+
+## IDL shape (deliberately not pinned here)
+
+WebIDL function metadata — operation `.length` values (optional
+arguments do not count), and promise-typed attributes/operations
+REJECTING rather than throwing on a broken `this` — is enumerated
+per-implementation by WPT's `idlharness.any.js`: the C++ implementation
+carries the known deviations as expectedFailures in
+`src/wpt/streams-test.ts`; the TypeScript implementation matches spec.
+The suites do not duplicate that enumeration.

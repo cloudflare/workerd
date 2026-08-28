@@ -87,3 +87,13 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `draining-reader.js` | TS only (C++ cell asserts the global's absence): writes flow through the transformer into conduit reads; a readable-side backlog plus close sentinel swept in one batch; flush() output rides the final batch; expectedLength undefined; transformer errors propagate |
 | `data-volumes.js` | volumes through JS transformers with concurrent producer/consumer: 1 MiB passthrough, 8 MiB XOR (proves every byte passed through the transformer), 4096-chunk value mapping |
 | `which-impl.js` / `helpers.js` | implementation detection; consume helpers |
+
+## IDL shape (deliberately not pinned here)
+
+WebIDL function metadata — operation `.length` values (optional
+arguments do not count), and promise-typed attributes/operations
+REJECTING rather than throwing on a broken `this` — is enumerated
+per-implementation by WPT's `idlharness.any.js`: the C++ implementation
+carries the known deviations as expectedFailures in
+`src/wpt/streams-test.ts`; the TypeScript implementation matches spec.
+The suites do not duplicate that enumeration.
