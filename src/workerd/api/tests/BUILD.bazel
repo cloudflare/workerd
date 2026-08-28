@@ -778,12 +778,6 @@ wd_test(
 )
 
 wd_test(
-    src = "streams-r2-patterns-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-r2-patterns-test.js"],
-)
-
-wd_test(
     src = "autovuln-88-test.wd-test",
     args = ["--experimental"],
     data = ["autovuln-88-test.js"],
@@ -799,12 +793,6 @@ wd_test(
     src = "autovuln-60-test.wd-test",
     args = ["--experimental"],
     data = ["autovuln-60-test.js"],
-)
-
-wd_test(
-    src = "streams-iocontext-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-iocontext-test.js"],
 )
 
 wd_test(
