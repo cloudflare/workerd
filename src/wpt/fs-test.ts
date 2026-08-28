@@ -203,6 +203,10 @@ export default {
     comment: 'Not relevant to workers',
     disabledTests: true,
   },
+  'opfs-shared-worker-coep.https.window.js': {
+    comment: 'SharedWorker tests are not applicable to workerd',
+    omittedTests: true,
+  },
   'root-name.https.any.js': {
     comment:
       'Our test harness does not actually expose the root directory to the tests',
