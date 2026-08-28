@@ -23,3 +23,12 @@ wd_test(
     src = "piping-cpp-pedantic.wd-test",
     data = piping_suite_srcs,
 )
+
+# Legacy (pre-flag) regression guard, C++ implementation only. The
+# @all-compat-flags variant is disabled: at the 2999-12-31 date the
+# flags this cell deliberately omits would all turn on.
+wd_test(
+    src = "piping-cpp-legacy.wd-test",
+    data = piping_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)

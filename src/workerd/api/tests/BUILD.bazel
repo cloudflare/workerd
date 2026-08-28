@@ -766,12 +766,6 @@ wd_test(
 )
 
 wd_test(
-    src = "pipe-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["pipe-streams-test.js"],
-)
-
-wd_test(
     src = "pipe-source-error-uaf-test.wd-test",
     args = ["--experimental"],
     data = ["pipe-source-error-uaf-test.js"],
