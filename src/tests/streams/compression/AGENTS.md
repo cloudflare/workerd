@@ -111,6 +111,15 @@ The C++ cell pins every date-gated flag the implementation is subject to
 `unhandled_rejection_after_microtask_checkpoint` (isolate-level event
 timing), and the internal-testing `expose_draining_reader`.
 
+`compression-cpp-pedantic.wd-test` runs the full shared module set with the
+dateless opt-in `pedantic_wpt` flag added to the main C++ cell's pinned
+set, pinning the ABSENCE of pedantic effects: the compression classes'
+internal-stream implementation consults the flag nowhere, and although the
+pedantic-gated standard-streams machinery IS reachable from this suite's
+surface (the pipe tests build real `TransformStream` sources), every
+shared assertion holds unchanged — an enforced invariant against future
+pedantic branches shifting anything the suite pins.
+
 | Flag (enable date) | Selects | Unflagged behavior tested by |
 | --- | --- | --- |
 | `strict_compression_checks` (2023-08-01) | DS trailing-data + incomplete-close errors | `legacy-nonstrict.js` |
