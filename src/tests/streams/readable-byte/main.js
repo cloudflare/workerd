@@ -49,6 +49,7 @@ export {
   closeWithPartiallyFilledView,
   readAfterCloseReturnsEmptyView,
   readDetachesCallerBuffer,
+  closeWithPendingUnfilledByobRead,
 } from 'controller';
 
 export {
@@ -168,3 +169,12 @@ export {
   drainingReaderByteErrorPropagation,
   drainingReaderByteCancelReachesSource,
 } from 'draining-reader';
+
+export {
+  smallByteTransfer,
+  mediumByteTransfer,
+  largeByteTransferDefaultReader,
+  largeByteTransferByobReader,
+  veryLargeByteTransfer,
+  veryLargeByteTransferMismatchedViews,
+} from 'data-volumes';

@@ -177,3 +177,10 @@ export {
   drainingReaderCancelReachesSource,
   drainingReaderLockExclusivity,
 } from 'draining-reader';
+
+export {
+  mediumChunkCountTransfer,
+  largeSingleStringChunk,
+  veryLargeAggregateTransfer,
+  largeTransferThroughTee,
+} from 'data-volumes';

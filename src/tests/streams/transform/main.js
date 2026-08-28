@@ -89,3 +89,9 @@ export {
   drainingReaderSeesFlushOutput,
   drainingReaderTransformErrorPropagation,
 } from 'draining-reader';
+
+export {
+  largeBytePassthrough,
+  veryLargeXorTransform,
+  mediumChunkCountThroughTransform,
+} from 'data-volumes';

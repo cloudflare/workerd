@@ -82,3 +82,10 @@ export {
   closedSourceToClosedDest,
   closedSourceToLiveDest,
 } from 'interop';
+
+export {
+  largePipeJsToJs,
+  veryLargePipeChain,
+  largePipeJsToIdentity,
+  largePipeIdentityToJs,
+} from 'data-volumes';
