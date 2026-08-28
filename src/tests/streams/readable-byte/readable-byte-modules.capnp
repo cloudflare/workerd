@@ -12,4 +12,6 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "controller", esModule = embed "controller.js"),
   (name = "byob-reader", esModule = embed "byob-reader.js"),
   (name = "respond", esModule = embed "respond.js"),
+  (name = "release-relock", esModule = embed "release-relock.js"),
+  (name = "read-min", esModule = embed "read-min.js"),
 ];
