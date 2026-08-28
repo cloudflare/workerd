@@ -73,6 +73,12 @@ dictionary DigestStreamOptions { boolean toWellFormed = false; };
   both.
 - **Pipes:** a valid pipeTo destination from user streams, transforms, and
   Response bodies (brand checks pass in both implementations).
+- **Writer accounting:** desiredSize counts the in-flight chunk against the
+  default HWM of 1 and recovers on settlement in BOTH implementations
+  (contrast the compression suite's inert C++ desiredSize); ready stays
+  settled. Write resolutions carry undefined (no thenable check); the
+  digest ArrayBuffer gets exactly one thenable check per ledger #3. The
+  constructor's options-bag getter may re-enter the API safely.
 
 ## Compatibility flags
 
@@ -94,6 +100,7 @@ standard-streams machinery changes nothing the suite pins).
 | --- | --- | --- | --- | --- |
 | 1 | Constructor static inheritance | `getPrototypeOf(crypto.DigestStream) !== WritableStream` | `=== WritableStream` | `isRealWritableStreamSubclass` |
 | 2 | Abandoned digest rejection reporting | reported | marked handled, not reported | `abandonedDigestReporting` |
+| 3 | Thenable-check stage for the digest ArrayBuffer (fires exactly once in both) | when the digest promise is awaited | inside close(), as the deferred resolves | `thenInterceptionDuringDigestResolution` |
 
 ## Assertion catalogue
 
@@ -112,5 +119,7 @@ standard-streams machinery changes nothing the suite pins).
 | `pipe-integration.js` | pipeTo from user streams; TransformStream chain; Response body |
 | `large-payload.js` | 1MB+ chunk digesting |
 | `gc-interplay.js` | GC never settles an abandoned digest; writer keeps a collected wrapper operable |
+| `reentrancy.js` | staged thenable-check matrix (ledger #3); write issued from a write continuation preserves accumulation order; options-bag getter re-entering the constructor is safe and its value is honored |
+| `backpressure.js` | desiredSize counts and recovers (parity); ready settled |
 | `legacy-shape.js` | unflagged era: `[object Object]`; digest as own instance property (no prototype accessor); bytesWritten stays a bigint prototype accessor; flow unchanged |
 | `which-impl.js` | implementation detection |

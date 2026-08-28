@@ -91,3 +91,11 @@ export {
   abandonedDigestNotSettledByGc,
   writerKeepsCollectedStreamOperable,
 } from 'gc-interplay';
+
+export {
+  thenInterceptionDuringDigestResolution,
+  writeFromWriteContinuation,
+  optionGetterReentersConstructor,
+} from 'reentrancy';
+
+export { desiredSizeCountsAndRecovers } from 'backpressure';
