@@ -147,12 +147,16 @@ export const relockAutoAllocateEnqueue = {
   },
 };
 
-// DIVERGENCE: respond(3) when the released 4-byte descriptor heads the
-// queue but the second reader's read wants only 2 bytes. C++ throws
-// RangeError from respond() and the second read stays pending
-// (bounded); TypeScript accepts the respond, committing the bytes to
-// the released descriptor, and fulfills the second read with its
-// 2-byte view UNTOUCHED (zeros).
+// DIVERGENCE — C++ deviates from the spec: respond(3) when the released
+// 4-byte descriptor heads the queue but the second reader's read wants
+// only 2 bytes. The spec bounds-checks respond() against the HEAD
+// descriptor (the released 4-byte one — 3 fits), fills it, enqueues the
+// filled bytes ('none' reader type), and services the second read from
+// the queue: 2 of the 3 responded bytes delivered done=false, the third
+// queued for the next read. TypeScript implements exactly that (data
+// flow asserted below). C++ instead validates against the SECOND read's
+// 2-byte view and throws RangeError, leaving the second read pending
+// (bounded).
 export const relockRespondOverflowSecondView = {
   async test() {
     const { rs, controller } = byteStream();
@@ -165,12 +169,20 @@ export const relockRespondOverflowSecondView = {
     const read2 = r2.read(new Uint8Array(2));
     const req = controller().byobRequest;
     if (usingTsImpl) {
+      req.view[0] = 7;
+      req.view[1] = 8;
+      req.view[2] = 9;
       req.respond(3);
       const { value, done } = await read2;
       strictEqual(done, false);
       strictEqual(value.byteLength, 2);
-      strictEqual(value[0], 0);
-      strictEqual(value[1], 0);
+      strictEqual(value[0], 7);
+      strictEqual(value[1], 8);
+      // The remainder byte stays queued for the next read.
+      const read3 = await r2.read(new Uint8Array(2));
+      strictEqual(read3.done, false);
+      strictEqual(read3.value.byteLength, 1);
+      strictEqual(read3.value[0], 9);
     } else {
       let caught;
       try {
