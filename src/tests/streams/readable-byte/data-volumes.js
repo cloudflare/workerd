@@ -31,12 +31,11 @@ function assertPatternedBytes(bytes, total) {
 }
 
 // A byte ReadableStream producing `total` patterned bytes in
-// `chunkLength`-sized enqueues.
-// Closes in the SAME pull as the final enqueue: a close() with a
-// pending unfilled BYOB read pends forever under the TypeScript
-// implementation (pinned in controller.js
-// closeWithPendingUnfilledByobRead), so a drain loop must never park a
-// fresh read against an empty, about-to-close source.
+// `chunkLength`-sized enqueues, closing in the SAME pull as the final
+// enqueue. (A read parked against an empty, about-to-close source also
+// works — close() settles pending BYOB reads done with an empty view,
+// pinned in controller.js closeWithPendingUnfilledByobRead — but
+// closing with the last enqueue keeps the volume loops single-shape.)
 function patternedByteSource(total, chunkLength) {
   let offset = 0;
   return new ReadableStream({

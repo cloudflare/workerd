@@ -9,10 +9,9 @@
 // Request body.
 
 import { strictEqual, ok } from 'node:assert';
-import { usingTsImpl } from 'which-impl';
 
-// Bounded observation of a promise's outcome; a pinned 'pending' is a
-// deliberate defect pin.
+// Bounded observation of a promise's outcome, so a regression back to a
+// hang fails the assertion instead of wedging the test.
 const outcomeOf = (p, ms = 250) =>
   Promise.race([
     p.then(
@@ -22,35 +21,16 @@ const outcomeOf = (p, ms = 250) =>
     scheduler.wait(ms).then(() => ({ state: 'pending' })),
   ]);
 
-// The TS-side pins in this file follow the readable-byte suite's
-// ledger: readAtLeast PENDS FOREVER when the stream closes below the
-// minimum (ledger #12 family), and tee-driven pulls present a NULL
-// byobRequest (ledger #5/#6), so sources that touch c.byobRequest
-// unconditionally throw TypeError into the stream.
+// Close-below-min follows the DECIDED readAtLeast tail contract on both
+// implementations: the available bytes are folded into a done=false
+// result, and a follow-up read resolves done. Tee-driven pulls under
+// TypeScript present a NULL byobRequest (readable-byte ledger #5/#6),
+// so sources that touch c.byobRequest unconditionally throw TypeError
+// into the stream — the dual-path source below is the supported shape.
 
 // Test BYOB readAtLeast with automatic atLeast handling
 export const byobReadAtLeastAutomatic = {
   async test() {
-    if (usingTsImpl) {
-      // Close arrives below the 100-byte minimum: the readAtLeast
-      // PENDS FOREVER (C++ folds the 10 available bytes into a
-      // done=false result).
-      const enc = new TextEncoder();
-      const chunks = ['hello', 'there'];
-      const rs = new ReadableStream({
-        type: 'bytes',
-        pull(c) {
-          c.enqueue(enc.encode(chunks.shift()));
-          if (chunks.length === 0) c.close();
-        },
-      });
-      const reader = rs.getReader({ mode: 'byob' });
-      const outcome = await outcomeOf(
-        reader.readAtLeast(100, new Uint8Array(100))
-      );
-      strictEqual(outcome.state, 'pending');
-      return;
-    }
     const enc = new TextEncoder();
     const dec = new TextDecoder();
     const chunks = ['hello', 'there'];
@@ -66,9 +46,15 @@ export const byobReadAtLeastAutomatic = {
 
     const reader = rs.getReader({ mode: 'byob' });
 
+    // Close arrives below the 100-byte minimum: the available 10 bytes
+    // fold into a done=false result (the DECIDED tail contract, parity).
     const res = await reader.readAtLeast(100, new Uint8Array(100));
 
+    strictEqual(res.done, false);
     strictEqual(dec.decode(res.value), 'hellothere');
+
+    const tail = await reader.readAtLeast(4, new Uint8Array(4));
+    strictEqual(tail.done, true);
   },
 };
 
@@ -181,28 +167,6 @@ export const fixedLengthStreamReadAtLeast = {
 // still works correctly when one branch is consumed via waitUntil
 export const closedByobTeeOnStart = {
   async test(ctrl, env, ctx) {
-    if (usingTsImpl) {
-      // Both branches close below the 10-byte minimum: each branch's
-      // readAtLeast PENDS FOREVER.
-      const enc = new TextEncoder();
-      const rs = new ReadableStream({
-        type: 'bytes',
-        start(c) {
-          c.enqueue(enc.encode('hello'));
-          c.close();
-        },
-      });
-      const [b1, b2] = rs.tee();
-      const o1 = await outcomeOf(
-        b1.getReader({ mode: 'byob' }).readAtLeast(10, new Uint8Array(10))
-      );
-      const o2 = await outcomeOf(
-        b2.getReader({ mode: 'byob' }).readAtLeast(10, new Uint8Array(10))
-      );
-      strictEqual(o1.state, 'pending');
-      strictEqual(o2.state, 'pending');
-      return;
-    }
     const enc = new TextEncoder();
     const dec = new TextDecoder();
 
@@ -243,34 +207,6 @@ export const closedByobTeeOnStart = {
 // Test IdentityTransformStream properly handles readAtLeast
 export const identityTransformStreamReadAtLeast = {
   async test() {
-    if (usingTsImpl) {
-      // The first 100-byte minimum is satisfiable, but the trailing
-      // 1-byte remainder plus close never fulfills a 100-byte minimum:
-      // the consumption chain PENDS FOREVER at the tail.
-      const { readable, writable } = new IdentityTransformStream();
-      const reader = readable.getReader({ mode: 'byob' });
-      const writer = writable.getWriter();
-      void writer.write(new Uint8Array(100));
-      void writer.write(new Uint8Array(1));
-      void writer.write(new Uint8Array(100));
-      void writer.close();
-      const first = await outcomeOf(
-        reader.readAtLeast(100, new Uint8Array(100))
-      );
-      strictEqual(first.state, 'fulfilled');
-      strictEqual(first.value.value.byteLength, 100);
-      const second = await outcomeOf(
-        reader.readAtLeast(100, new Uint8Array(100))
-      );
-      strictEqual(second.state, 'fulfilled');
-      strictEqual(second.value.value.byteLength, 100); // view filled exactly
-      // One byte remains, below the minimum, with the close behind it.
-      const tail = await outcomeOf(
-        reader.readAtLeast(100, new Uint8Array(100))
-      );
-      strictEqual(tail.state, 'pending');
-      return;
-    }
     const { readable, writable } = new IdentityTransformStream();
 
     const reader = readable.getReader({ mode: 'byob' });
@@ -299,30 +235,6 @@ export const identityTransformStreamReadAtLeast = {
 // Test BYOB readAtLeast partially filled
 export const partiallyFilledByobAtLeast = {
   async test() {
-    if (usingTsImpl) {
-      // 5000 bytes consumed in 102-byte minimums leaves a final
-      // below-minimum remainder; the last readAtLeast PENDS FOREVER
-      // when the close arrives.
-      const { readable, writable } = new IdentityTransformStream();
-      const enc = new TextEncoder();
-      const writer = writable.getWriter();
-      void writer.write(enc.encode('hello'.repeat(1000)));
-      void writer.close();
-      const reader = readable.getReader({ mode: 'byob' });
-      let received = 0;
-      let ab = new ArrayBuffer(102);
-      for (;;) {
-        const outcome = await outcomeOf(
-          reader.readAtLeast(102, new Uint8Array(ab))
-        );
-        if (outcome.state === 'pending') break;
-        strictEqual(outcome.state, 'fulfilled');
-        received += outcome.value.value.byteLength;
-        ab = outcome.value.value.buffer;
-      }
-      strictEqual(received, 4998); // 49 full reads; the 2-byte tail hangs
-      return;
-    }
     const { readable, writable } = new IdentityTransformStream();
     const reader = readable.getReader({ mode: 'byob' });
     const rs = new ReadableStream({
@@ -457,12 +369,11 @@ export const byobReadAtLeastTeeComplex1 = {
     strictEqual(r2.state, 'fulfilled');
     strictEqual(dec.decode(r2.value.value), 'hellothere');
     strictEqual(r2.value.done, false);
-    // The below-min tail at close: C++ delivers done=false (a separate
-    // zero-length done read follows); TypeScript folds done=true into
-    // the final bytes — the DECIDED contract is C++'s (ts backlog #24).
+    // The below-min tail at close is delivered done=false (a separate
+    // zero-length done read follows) — the DECIDED contract, parity.
     strictEqual(r3.state, 'fulfilled');
     strictEqual(dec.decode(r3.value.value), 'ere');
-    strictEqual(r3.value.done, usingTsImpl);
+    strictEqual(r3.value.done, false);
     strictEqual(r4.state, 'fulfilled');
     strictEqual(dec.decode(r4.value.value), 'hellothere');
     strictEqual(r4.value.done, false);
@@ -501,12 +412,11 @@ export const byobReadAtLeastTeeComplex2 = {
     strictEqual(r2.state, 'fulfilled');
     strictEqual(dec.decode(r2.value.value), 'hellothere');
     strictEqual(r2.value.done, false);
-    // The below-min tail at close: C++ delivers done=false (a separate
-    // zero-length done read follows); TypeScript folds done=true into
-    // the final bytes — the DECIDED contract is C++'s (ts backlog #24).
+    // The below-min tail at close is delivered done=false (a separate
+    // zero-length done read follows) — the DECIDED contract, parity.
     strictEqual(r3.state, 'fulfilled');
     strictEqual(dec.decode(r3.value.value), 'ere');
-    strictEqual(r3.value.done, usingTsImpl);
+    strictEqual(r3.value.done, false);
     strictEqual(r4.state, 'fulfilled');
     strictEqual(dec.decode(r4.value.value), 'hellothere');
     strictEqual(r4.value.done, false);
