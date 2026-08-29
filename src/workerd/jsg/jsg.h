@@ -1462,9 +1462,13 @@ class Object: private Wrappable {
 // Declared in wrappable.h; see there for why this check exists.
 template <typename T>
 T& downcastObject(Object& object) {
+  const auto& actualType = typeid(object);
+  if (&actualType == &typeid(T) || actualType == typeid(T)) {
+    return static_cast<T&>(object);
+  }
   T* result = dynamic_cast<T*>(&object);
   if (result == nullptr) {
-    reportWrapperTypeMismatch(typeid(T), typeid(object));
+    reportWrapperTypeMismatch(typeid(T), actualType);
   }
   return *result;
 }

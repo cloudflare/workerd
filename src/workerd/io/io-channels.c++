@@ -184,9 +184,10 @@ resolveCap(kj::Own<Frankenvalue::CapTableEntry> cap) {
         return kj::implicitCast<kj::Own<Frankenvalue::CapTableEntry>>(kj::mv(channel));
       }
       KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::TokenizableChannel>>) {
-        return promise.then([](kj::Own<IoChannelFactory::TokenizableChannel> channel) {
+        return promise
+            .then([](kj::Own<IoChannelFactory::TokenizableChannel> channel) {
           return kj::implicitCast<kj::Own<Frankenvalue::CapTableEntry>>(kj::mv(channel));
-        });
+        }).attach(kj::mv(cap));
       }
     }
     KJ_UNREACHABLE;
