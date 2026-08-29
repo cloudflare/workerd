@@ -20,7 +20,7 @@ behavior-parity (messages aside).
 | 3 | pull counts (hwm 1, enqueue-in-pull) | 1,1,3 (readable ledger #4 mirror) | 1,2,3 (spec) | `pullCountShape` |
 | 4 | sync start() throw | captured; stream errored (readable #6 mirror) | escapes constructor (spec) | `syncStartThrow`, `jsSourceError` |
 | 5 | byobRequest on DEFAULT read, no autoAllocate | auto-allocates anyway: view(4096), or view(16384) under the UPDATED_AUTO_ALLOCATE_CHUNK_SIZE autogate (@all-autogates) | null (spec) — the subject of the streams_no_default_auto_allocate_chunk_size flag cell | `byobRequestOnDefaultRead` |
-| 6 | Body-pump reads | pump fills byobRequest (BYOB reads) | pump pulls with byobRequest NULL even WITH autoAllocateChunkSize (direct default reads DO synthesize it) — respond-driven sources need dual paths | `bodyPumpByobRequestPresence` |
+| 6 | Body-pump reads | pump fills byobRequest (BYOB reads) | WITH autoAllocateChunkSize: same — the draining conduit's wait-read synthesizes the auto-allocate descriptor, so pump pulls carry a byobRequest (parity, pinned). WITHOUT it: pump pulls present byobRequest null (ledger #5's spec side) while C++ auto-allocates anyway — sources without autoAllocateChunkSize stay dual-path | `bodyPumpByobRequestPresence` |
 | 7 | close() with partially-filled read(view) | close succeeds; read resolves EMPTY view done=FALSE; closed fulfills | TypeError 'Insufficient bytes to fill elements in the given view' from close(), read, and closed (spec) | `closeWithPartiallyFilledView` |
 | 8 | enqueue of detached/zero-length chunk | TypeError 'Cannot enqueue a zero-length ArrayBuffer.' | TypeError 'chunk must have a non-zero byteLength' | `enqueueDetachedBuffer`, `enqueueChunkMultipleTimesBytes` |
 | 9 | released pending read's rejection | 'This ReadableStream reader has been released.' | 'This reader has been released' | `relockRespondRoutesToSecondReader` |
@@ -113,7 +113,7 @@ named suite test pins directly, differing only in incidental asserts.
 | `js-compat.js` | ledger #17; byte halves of the mixed streams-js-test tests (closed promise, cancel reads, locked ops, globals) |
 | `flag-no-auto-allocate.js` | the flag cell (migrated streams-no-auto-allocate-test) |
 | `legacy-constructors.js` / `legacy-nodetach.js` | the flags table's legacy windows |
-| `draining-reader.js` | TS only (C++ cell asserts the global's absence): a queued byte backlog plus the close sentinel swept in one batched read with chunks INTACT (no coalescing); the conduit drives pull with byobRequest null (ledger #5/#6 shape); expectedLength undefined; error/cancel propagation |
+| `draining-reader.js` | TS only (C++ cell asserts the global's absence): a queued byte backlog plus the close sentinel swept in one batched read with chunks INTACT (no coalescing); with autoAllocateChunkSize the conduit's wait-read synthesizes the descriptor so pull carries a byobRequest (ledger #6); expectedLength undefined; error/cancel propagation |
 | `data-volumes.js` | byte-transfer volumes 64 B / 64 KiB / 1 MiB / 8 MiB via default and BYOB readers (incl. mismatched view/enqueue granularity), continuous prime-modulus pattern verified byte-exact; the source closes WITH its last enqueue (single-shape loops; parked-read close settlement is ledger #19's) |
 
 Consumed sources (deleted): streams-js-test.js (value halves were

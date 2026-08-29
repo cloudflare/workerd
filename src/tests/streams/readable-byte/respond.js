@@ -16,19 +16,17 @@ export const responseBodyMethodsJsByob = {
     const enc = new TextEncoder();
     const dec = new TextDecoder();
 
+    // With autoAllocateChunkSize set, the body pump's pulls carry a
+    // byobRequest on both implementations (bodyPumpByobRequestPresence
+    // pins the presence), so a respond()-only source works as a body.
     {
       const rs = new ReadableStream({
         type: 'bytes',
         autoAllocateChunkSize: 4096,
         async pull(c) {
-          if (c.byobRequest) {
-            enc.encodeInto('hello', c.byobRequest.view);
-            c.byobRequest.respond(5);
-            c.close();
-          } else {
-            c.enqueue(enc.encode('hello'));
-            c.close();
-          }
+          enc.encodeInto('hello', c.byobRequest.view);
+          c.byobRequest.respond(5);
+          c.close();
         },
       });
 
@@ -42,14 +40,9 @@ export const responseBodyMethodsJsByob = {
         type: 'bytes',
         autoAllocateChunkSize: 4096,
         async pull(c) {
-          if (c.byobRequest) {
-            enc.encodeInto('hello', c.byobRequest.view);
-            c.byobRequest.respond(5);
-            c.close();
-          } else {
-            c.enqueue(enc.encode('hello'));
-            c.close();
-          }
+          enc.encodeInto('hello', c.byobRequest.view);
+          c.byobRequest.respond(5);
+          c.close();
         },
       });
 
@@ -116,7 +109,9 @@ export const jsSourceAsyncPull = {
   },
 };
 
-// Test BYOB ReadableStream as Response body
+// Test BYOB ReadableStream as Response body. The body pump's pull
+// carries a byobRequest under both implementations when
+// autoAllocateChunkSize is set (see bodyPumpByobRequestPresence).
 export const jsByteSource = {
   async test() {
     const enc = new TextEncoder();
@@ -125,16 +120,9 @@ export const jsByteSource = {
       autoAllocateChunkSize: 4096,
       pull(c) {
         const request = c.byobRequest;
-        if (request != null) {
-          enc.encodeInto('hello', request.view);
-          request.respond(5);
-          c.close();
-        } else {
-          // The TypeScript Body pump reads without a BYOB request even
-          // with autoAllocateChunkSize (see bodyPumpByobRequestPresence).
-          c.enqueue(enc.encode('hello'));
-          c.close();
-        }
+        enc.encodeInto('hello', request.view);
+        request.respond(5);
+        c.close();
       },
     });
 
@@ -143,7 +131,9 @@ export const jsByteSource = {
   },
 };
 
-// Test BYOB ReadableStream with multiple chunks
+// Test BYOB ReadableStream with multiple chunks. No autoAllocateChunkSize
+// here, so the pump's byobRequest presence differs per implementation
+// (ledger #5/#6): the source stays dual-path.
 export const jsByteSourceMultipleChunks = {
   async test() {
     const enc = new TextEncoder();
@@ -873,7 +863,11 @@ export const bodyPumpByobRequestPresence = {
       },
     });
     strictEqual(await new Response(rs).text(), 'x');
-    strictEqual(seen, usingTsImpl ? 'null' : 'view(4096)');
+    // With autoAllocateChunkSize set, the body pump's pull carries a
+    // byobRequest over the auto-allocated buffer on both implementations
+    // (the TypeScript draining conduit synthesizes the descriptor for its
+    // wait-read). Without it, direct-read behavior is ledger #5's.
+    strictEqual(seen, 'view(4096)');
   },
 };
 
