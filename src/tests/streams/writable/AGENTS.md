@@ -46,6 +46,7 @@ the abort reason).
 | 10 | signal.reason for reasonless abort() | undefined (pedantic_wpt: AbortError DOMException) | AbortError DOMException (spec) | `abortSignalReason` |
 | 11 | desiredSize while erroring | queue accounting value (pedantic_wpt: null) | null (spec) | `desiredSizeWhileErroring` |
 | 12 | non-callable size / released-writer messages | jsg dictionary / "This WritableStream writer has been released." | TS validator / "This writer has been released" | `nonCallableSizeThrows`, `releaseLockInsideSize` |
+| 13 | releaseLock() with writes still queued | cancels them: queued writes reject with the released-writer error and their chunks are dropped (a C++ deviation — the source of its WPT piping/flow-control release-then-pipe expectedFailures) | spec: release rejects only ready/closed; queued writes stay in [[writeRequests]] and drain on the sink's schedule (a new writer can relock and they still complete — WPT flow-control pins that; behind a never-settling in-flight write they wait forever on backpressure) | `cancelWriteOnReleaseLock` |
 
 Parity worth noting (probed, pinned): the whole in-flight abort matrix —
 abort-before-start reason identity on ready/closed, errored-state reason
@@ -86,7 +87,7 @@ promises (they resolve with undefined).
 | `api-surface.js` | writable globals exist; controller not constructable; bare ctor works (full IDL shape is WPT's) |
 | `construction.js` | ledger #1–#5, #12; fractional and ToNumber-coerced hwm accepted |
 | `sink-algorithms.js` | which sink hooks run with what arguments/controller; sync+async hook errors surface on writer promises (#5, #6); size() consulted per write; hook getters read once; second-write rejection fan-out; hooks silent after start throw |
-| `write-semantics.js` | chunk identity (subarrays, any JS value via Object.is); multiple pending writes; settlement ordering incl. under abort (#7) |
+| `write-semantics.js` | chunk identity (subarrays, any JS value via Object.is); multiple pending writes; settlement ordering incl. under abort (#7); queued-write fate at releaseLock (#13) |
 | `buffer-lifecycle.js` | chunks never copied/validated: already-detached AB accepted (byteLength 0); post-write() mutation, detach, resizable grow, and shrink-out-of-bounds all observed per the startedness model (#7); size() runs inside write() so queue totals are immune to later detach |
 | `close-semantics.js` | close-throw promise fan-out vs abort (#7, #8); double close rejects TypeError |
 | `abort-semantics.js` | migrated abort lifecycle: reason propagation, signal event, persistent errored state, in-flight sequencing, terminal-state interactions (#7) |
