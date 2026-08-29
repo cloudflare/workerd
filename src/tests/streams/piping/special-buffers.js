@@ -8,8 +8,7 @@
 // pipe-write-special-buffer-test.js, strengthened from length checks
 // to content verification).
 
-import { strictEqual, ok, rejects } from 'node:assert';
-import { usingTsImpl } from 'which-impl';
+import { strictEqual, ok } from 'node:assert';
 
 function filledSabView(length, byte) {
   const sab = new SharedArrayBuffer(length);
@@ -56,33 +55,21 @@ function assertAllBytes(bytes, expectedLength, expectedByte) {
   }
 }
 
-// A SAB-backed view piped through CompressionStream. DIVERGENCE: C++
-// copies the shared bytes and round-trips them; the TypeScript
-// CompressionStream write path REJECTS SharedArrayBuffer-backed views
-// ('The provided value is not of type (ArrayBuffer or
-// ArrayBufferView)') even though its identity stream accepts them (see
-// the next test). The shared buffer is untouched either way.
+// A SAB-backed view piped through CompressionStream: the shared bytes
+// are copied and round-trip on both implementations (the DECIDED
+// SAB-acceptance contract, matching the identity streams — see the
+// compression suite's sharedArrayBufferChunkAccepted). The shared
+// buffer is untouched either way.
 export const sabViewThroughCompressionRoundTrip = {
   async test() {
     const view = filledSabView(100, 0x41);
     const compressed = streamOf(view).pipeThrough(
       new CompressionStream('gzip')
     );
-    if (usingTsImpl) {
-      await rejects(
-        drainToBytes(compressed.pipeThrough(new DecompressionStream('gzip'))),
-        {
-          name: 'TypeError',
-          message:
-            'The provided value is not of type (ArrayBuffer or ArrayBufferView)',
-        }
-      );
-    } else {
-      const restored = await drainToBytes(
-        compressed.pipeThrough(new DecompressionStream('gzip'))
-      );
-      assertAllBytes(restored, 100, 0x41);
-    }
+    const restored = await drainToBytes(
+      compressed.pipeThrough(new DecompressionStream('gzip'))
+    );
+    assertAllBytes(restored, 100, 0x41);
     // The shared buffer itself must be untouched (it cannot be
     // detached).
     assertAllBytes(view, 100, 0x41);

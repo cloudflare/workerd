@@ -20,20 +20,20 @@ behavior-parity (messages aside).
 | 3 | pull counts (hwm 1, enqueue-in-pull) | 1,1,3 (readable ledger #4 mirror) | 1,2,3 (spec) | `pullCountShape` |
 | 4 | sync start() throw | captured; stream errored (readable #6 mirror) | escapes constructor (spec) | `syncStartThrow`, `jsSourceError` |
 | 5 | byobRequest on DEFAULT read, no autoAllocate | auto-allocates anyway: view(4096), or view(16384) under the UPDATED_AUTO_ALLOCATE_CHUNK_SIZE autogate (@all-autogates) | null (spec) — the subject of the streams_no_default_auto_allocate_chunk_size flag cell | `byobRequestOnDefaultRead` |
-| 6 | Body-pump reads | pump fills byobRequest (BYOB reads) | pump pulls with byobRequest NULL even WITH autoAllocateChunkSize (direct default reads DO synthesize it) — respond-driven sources need dual paths | `bodyPumpByobRequestPresence` |
+| 6 | Body-pump reads | pump fills byobRequest (BYOB reads) | WITH autoAllocateChunkSize: same — the draining conduit's wait-read synthesizes the auto-allocate descriptor, so pump pulls carry a byobRequest (parity, pinned). WITHOUT it: pump pulls present byobRequest null (ledger #5's spec side) while C++ auto-allocates anyway — sources without autoAllocateChunkSize stay dual-path | `bodyPumpByobRequestPresence` |
 | 7 | close() with partially-filled read(view) | close succeeds; read resolves EMPTY view done=FALSE; closed fulfills | TypeError 'Insufficient bytes to fill elements in the given view' from close(), read, and closed (spec) | `closeWithPartiallyFilledView` |
 | 8 | enqueue of detached/zero-length chunk | TypeError 'Cannot enqueue a zero-length ArrayBuffer.' | TypeError 'chunk must have a non-zero byteLength' | `enqueueDetachedBuffer`, `enqueueChunkMultipleTimesBytes` |
 | 9 | released pending read's rejection | 'This ReadableStream reader has been released.' | 'This reader has been released' | `relockRespondRoutesToSecondReader` |
-| 10 | respond(N) overflowing the current read's smaller view | RangeError 'Too many bytes [N]...'; second read stays pending | accepted; commits to the released descriptor; second read fulfills its view UNTOUCHED (zeros) | `relockRespondOverflowSecondView` |
+| 10 | respond(N) exceeding the second reader's smaller view (released 4-byte descriptor at head) | RangeError 'Too many bytes [N]...' validated against the SECOND read's view (a C++ deviation); second read stays pending | spec: the bounds check is against the HEAD descriptor — the respond is accepted, the released descriptor's bytes are enqueued, and the second read is served from the queue (2 of 3 bytes delivered, the third queued) | `relockRespondOverflowSecondView` |
 | 11 | read min validation | min=0 TypeError; min>view TypeError | min=0 TypeError (other msg); min>view RANGEError | `readMinValidation` |
-| 12 | close() below min with partial bytes (WPT read-min disable root) | read fulfills partial, done=false | read PENDS FOREVER while closed fulfills — BOTH nonconforming (spec: TypeError) | `closeBelowMin` |
-| 13 | readAtLeast/min at native end-of-stream | below-min tail delivered done=false, then an extra read resolves done + empty view | done=true folded into the final below-min bytes | `readAtLeastByobReader` |
+| 12 | close() below min with partial bytes | read fulfills the partial bytes done=false; a subsequent read resolves done + empty view (the DECIDED tail contract; the spec's TypeError shape is implemented by neither side) | same — the parked read settles via the deferred end-of-data commit, one microtask after close() | `closeBelowMin` |
+| 13 | readAtLeast/min at native end-of-stream | below-min tail delivered done=false, then an extra read resolves done + empty view | same (the conduit's under-delivery commit; decided contract) | `readAtLeastByobReader` |
 | 14 | tee cancel composite | pair-completing branch's reason only (readable #11 mirror) | AggregateError[r1, r2]; lone-branch cancel PENDS — never await it | `teeCancelComposite` |
 | 15 | respondWithNewView with a different element size | adopts the NEW view's element size (6 bytes at once) | keeps the ORIGINAL read view's element size (4-byte multiple), queues the remainder | `readableStreamByteRespondWithNewViewUsesNewElementSize` |
 | 16 | invalidated byobRequest message | 'This ReadableStreamBYOBRequest has been invalidated.' | 'This BYOB request has been invalidated' | `readableStreamByteRespond` |
 | 17 | default-read delivery of a multi-chunk queue | COALESCES all queued chunks into one read | chunk-by-chunk (spec) | `byteDesiredSizeAccounting` |
 | 18 | buffer-hazard messages (read detached view, respond after view detach, respondWithNewView foreign buffer, WASM Memory) | own texts | own texts (behavior parity everywhere) | `buffer-lifecycle.js` |
-| 19 | close() with a pending UNFILLED BYOB read | read resolves done with an empty view | read PENDS FOREVER while close() succeeds (bounded; the #12 defect family without any min) — drain loops must close WITH the last enqueue, never against a parked empty read | `closeWithPendingUnfilledByobRead` |
+| 19 | close() with a pending UNFILLED BYOB read | read resolves done with an empty view | same — via the deferred end-of-data commit (a same-turn respond(0) claims the spec's committed shape first) | `closeWithPendingUnfilledByobRead` |
 
 Parity worth noting (probed, pinned): byte hwm defaults to 0 with NO
 automatic pull; pull-throw and error-then-throw identity; enqueue
@@ -113,8 +113,8 @@ named suite test pins directly, differing only in incidental asserts.
 | `js-compat.js` | ledger #17; byte halves of the mixed streams-js-test tests (closed promise, cancel reads, locked ops, globals) |
 | `flag-no-auto-allocate.js` | the flag cell (migrated streams-no-auto-allocate-test) |
 | `legacy-constructors.js` / `legacy-nodetach.js` | the flags table's legacy windows |
-| `draining-reader.js` | TS only (C++ cell asserts the global's absence): a queued byte backlog plus the close sentinel swept in one batched read with chunks INTACT (no coalescing); the conduit drives pull with byobRequest null (ledger #5/#6 shape); expectedLength undefined; error/cancel propagation |
-| `data-volumes.js` | byte-transfer volumes 64 B / 64 KiB / 1 MiB / 8 MiB via default and BYOB readers (incl. mismatched view/enqueue granularity), continuous prime-modulus pattern verified byte-exact; the source closes WITH its last enqueue (see ledger #19) |
+| `draining-reader.js` | TS only (C++ cell asserts the global's absence): a queued byte backlog plus the close sentinel swept in one batched read with chunks INTACT (no coalescing); with autoAllocateChunkSize the conduit's wait-read synthesizes the descriptor so pull carries a byobRequest (ledger #6); expectedLength undefined; error/cancel propagation |
+| `data-volumes.js` | byte-transfer volumes 64 B / 64 KiB / 1 MiB / 8 MiB via default and BYOB readers (incl. mismatched view/enqueue granularity), continuous prime-modulus pattern verified byte-exact; the source closes WITH its last enqueue (single-shape loops; parked-read close settlement is ledger #19's) |
 
 Consumed sources (deleted): streams-js-test.js (value halves were
 already covered by the readable suite), streams-tee-edge-cases-test.js,

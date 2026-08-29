@@ -139,10 +139,14 @@ export const fixedLengthStreamPipeUnderflow = {
 };
 
 // An already-closed source piped into an already-closed destination
-// (the WPT multiple-propagation seed). DIVERGENCE: C++ rejects
-// TypeError (per spec, the destination's closed state must reject the
-// pipe); TypeScript treats it as a trivially complete pipe and
-// FULFILLS.
+// (the WPT multiple-propagation seed). DIVERGENCE — C++ deviates from
+// the spec: the spec's shutdown conditions apply IN ORDER, so
+// closing-forward (source closed → close dest, trivially resolved on an
+// already-closed dest) wins over closing-backward (dest closed →
+// TypeError), and the pipe FULFILLS — WPT multiple-propagation 'Piping
+// from a closed readable stream to a closed writable stream' pins the
+// fulfillment, and TypeScript conforms. C++ applies the dest-closed
+// TypeError instead.
 export const closedSourceToClosedDest = {
   async test() {
     const rs = new ReadableStream({

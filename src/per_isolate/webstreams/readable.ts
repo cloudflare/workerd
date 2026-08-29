@@ -358,14 +358,20 @@ let extractNativeSource: <R>(this: ReadableStream<R>) => object;
 
 // The non-standard expectedLength pass-through for the DrainingReader
 // (and the C++ bridge). Chained like the other controller helpers:
-// default → undefined; queued byte → cached construction value; native →
-// cached construction value (joined in ReadableStream's static block).
+// default → the value installed by the TransformStream expectedLength
+// extension (undefined otherwise); queued byte → cached construction
+// value; native → cached construction value (joined in ReadableStream's
+// static block).
 let getControllerExpectedLength: (
   controller:
     | ReadableStreamDefaultControllerType
     | ReadableByteStreamControllerType
     | NativeReadableStreamControllerType
 ) => bigint | undefined;
+let setDefaultControllerExpectedLength: <R>(
+  controller: ReadableStreamDefaultController<R>,
+  length: bigint | undefined
+) => void;
 
 let setReadableStreamPendingClosure: <R>(stream: ReadableStream<R>) => void;
 let isReadableStreamPendingClosure: <R>(stream: ReadableStream<R>) => boolean;
@@ -781,6 +787,38 @@ function defaultReaderReadInternal<R>(
   );
 }
 
+// Submit a default-style read through the BYOB machinery via a synthetic
+// auto-allocate pull-into descriptor (spec ReadableByteStreamController
+// PullSteps step 3, [[autoAllocateChunkSize]] present): the source's pull
+// then observes a byobRequest over the auto-allocated buffer. Shared by
+// the default reader's read path and the draining reader's
+// empty-fallback wait-read (the body/pipe pump).
+function readViaAutoAllocateDescriptor(
+  consumer: ByteStreamConsumerType,
+  autoAllocateChunkSize: number,
+  reader: object
+): Promise<ReadableStreamReadResult<ArrayBufferView>> {
+  const withResolvers = PromiseWithResolvers() as PromiseWithResolversType<
+    ReadableStreamReadResult<ArrayBufferView>
+  >;
+  const descriptor: PullIntoDescriptor = {
+    buffer: new ArrayBuffer(autoAllocateChunkSize),
+    bufferByteLength: autoAllocateChunkSize,
+    byteOffset: 0,
+    byteLength: autoAllocateChunkSize,
+    bytesFilled: 0,
+    minimumFill: 1,
+    elementSize: 1,
+    viewCtor: Uint8Array,
+    readerType: 'default',
+    promise: withResolvers.promise,
+    resolve: withResolvers.resolve,
+    reject: withResolvers.reject,
+    reader,
+  };
+  return consumer.readBYOB(descriptor);
+}
+
 // Async continuation of defaultReaderReadInternal for cases where
 // the data is not synchronously available.
 async function defaultReaderReadInternalAsync<R>(
@@ -800,26 +838,11 @@ async function defaultReaderReadInternalAsync<R>(
     const autoAllocateChunkSize = getByteControllerAutoAllocateChunkSize(
       controller as ReadableByteStreamController
     );
-    const withResolvers = PromiseWithResolvers() as PromiseWithResolversType<
-      ReadableStreamReadResult<ArrayBufferView>
-    >;
-    const descriptor: PullIntoDescriptor = {
-      buffer: new ArrayBuffer(autoAllocateChunkSize as number),
-      bufferByteLength: autoAllocateChunkSize as number,
-      byteOffset: 0,
-      byteLength: autoAllocateChunkSize as number,
-      bytesFilled: 0,
-      minimumFill: 1,
-      elementSize: 1,
-      viewCtor: Uint8Array,
-      readerType: 'default',
-      promise: withResolvers.promise,
-      resolve: withResolvers.resolve,
-      reject: withResolvers.reject,
-      reader,
-    };
-    const byteConsumer = consumer as unknown as ByteStreamConsumerType;
-    promise = byteConsumer.readBYOB(descriptor);
+    promise = readViaAutoAllocateDescriptor(
+      consumer as unknown as ByteStreamConsumerType,
+      autoAllocateChunkSize as number,
+      reader
+    );
   } else {
     promise = consumer.read(reader);
   }
@@ -1201,6 +1224,12 @@ class ReadableStreamDefaultController<
 > implements ReadableStreamDefaultControllerType<R> {
   #stream: ReadableStream<R>;
   #queue: StreamQueueType<R, R>;
+  // The non-standard expectedLength pass-through (undefined = unknown).
+  // Default controllers never read it from an underlying source — it is
+  // set ONLY through the internal setter, by the TransformStream
+  // constructor's workerd `expectedLength` extension, so the C++ bridge
+  // can derive Content-Length for bodies built from such transforms.
+  #expectedLength: bigint | undefined = undefined;
   // Algorithms are cleared (closures dropped) on close-complete, error, and
   // cancel, per spec ClearAlgorithms.
   #sizeAlgorithm: ((chunk: R) => number) | undefined;
@@ -1235,10 +1264,17 @@ class ReadableStreamDefaultController<
       // The byte controller wires its own branch in the byte pass.
     };
 
-    // expectedLength is byte-stream-only: the default controller never
-    // reads it from the source (silently ignored if declared) and always
-    // reports undefined.
-    getControllerExpectedLength = () => undefined;
+    // Default controllers never read expectedLength from an underlying
+    // source (silently ignored if declared); it is populated only via the
+    // internal setter (the TransformStream `expectedLength` extension).
+    // The byte and native arms of this chain report their own cached
+    // values.
+    getControllerExpectedLength = (controller) =>
+      (controller as ReadableStreamDefaultController).#expectedLength;
+
+    setDefaultControllerExpectedLength = (controller, length) => {
+      controller.#expectedLength = length;
+    };
 
     controllerCancelSteps = (controller, reason) => {
       if (#queue in controller) {
@@ -2305,7 +2341,28 @@ async function drainingReaderReadInternal<R>(
   if (result.chunks.length === 0 && !result.done) {
     // Nothing buffered — wait for one chunk through the normal pending-read
     // machinery (FIFO with everything else), then sweep the rest.
-    const promise = consumer.read(reader);
+    //
+    // QUEUED-BYTE-SPECIFIC (sanctioned, mirrors defaultReaderReadInternal):
+    // with autoAllocateChunkSize set, the wait-read goes through the BYOB
+    // machinery so the source's pull observes a byobRequest over the
+    // auto-allocated buffer — the body and pipe pumps drive
+    // respond()-oriented sources exactly like C++'s BYOB pump.
+    let promise: Promise<ReadableStreamReadResult<unknown>> | undefined;
+    if (controller !== undefined && isByteStreamController(controller)) {
+      const autoAllocateChunkSize = getByteControllerAutoAllocateChunkSize(
+        controller as ReadableByteStreamController
+      );
+      if (autoAllocateChunkSize !== undefined) {
+        promise = readViaAutoAllocateDescriptor(
+          consumer as unknown as ByteStreamConsumerType,
+          autoAllocateChunkSize,
+          reader
+        );
+      }
+    }
+    if (promise === undefined) {
+      promise = consumer.read(reader);
+    }
     if (controller !== undefined) controllerPullIfNeeded(controller);
     const single = await promise;
     if (single.done) {
@@ -2485,6 +2542,13 @@ function pipeToInternal<R>(
     undefined
   ) as Promise<void>;
 
+  // Set when a write rejects NON-FATALLY (dest still writable — the
+  // internal transforms' invalid-chunk contract) while a clean shutdown
+  // is already waiting for write acknowledgment; runAction upgrades the
+  // clean close into a pipe failure with this reason. See
+  // onWriteRejectedNonFatally.
+  let pendingNonFatalWriteFailure: { reason: unknown } | undefined;
+
   const shutdownWithAction = (
     action: (() => Promise<unknown>) | undefined,
     error?: { reason: unknown }
@@ -2493,6 +2557,25 @@ function pipeToInternal<R>(
     shuttingDown = true;
 
     const runAction = (): void => {
+      // A non-fatal tail-write rejection recorded during the
+      // acknowledgment wait upgrades a CLEAN shutdown into a failure
+      // (the C++ pipe, which awaits each write, can never reach its
+      // close step past a failed write). Shutdowns that already carry
+      // an error keep it — first cause wins.
+      if (error === undefined && pendingNonFatalWriteFailure !== undefined) {
+        const reason = pendingNonFatalWriteFailure.reason;
+        const failureActions = nonFatalWriteFailureActions(reason);
+        if (failureActions.length === 0) {
+          finalize({ reason });
+          return;
+        }
+        PromisePrototypeThen(
+          combineShutdownActions(failureActions),
+          () => finalize({ reason }),
+          (actionError: unknown) => finalize({ reason: actionError })
+        );
+        return;
+      }
       if (action === undefined) {
         finalize(error);
         return;
@@ -2550,6 +2633,78 @@ function pipeToInternal<R>(
     );
   };
 
+  // Runs `actions` in parallel and settles when all have settled,
+  // rejecting with the first failure (spec: shutdown actions run in
+  // parallel). Shared by the abort-signal algorithm and the non-fatal
+  // write-rejection path.
+  const combineShutdownActions = (
+    actions: (() => Promise<unknown>)[]
+  ): Promise<void> => {
+    let remaining = actions.length;
+    let failed: { reason: unknown } | undefined;
+    const all = PromiseWithResolvers() as PromiseWithResolversType<void>;
+    for (let i = 0; i < actions.length; i++) {
+      const action = actions[i] as () => Promise<unknown>;
+      PromisePrototypeThen(
+        action(),
+        () => {
+          if (--remaining === 0) {
+            if (failed !== undefined) {
+              all.reject(failed.reason);
+            } else {
+              all.resolve();
+            }
+          }
+        },
+        (e: unknown) => {
+          failed ??= { reason: e };
+          if (--remaining === 0) all.reject(failed.reason);
+        }
+      );
+    }
+    return all.promise;
+  };
+
+  // The failure actions for a non-fatal write rejection: abort the
+  // destination (unless preventAbort) and cancel the source (unless
+  // preventCancel), both with the write's reason — the C++ pipe outcome
+  // for a rejected write.
+  const nonFatalWriteFailureActions = (
+    e: unknown
+  ): (() => Promise<unknown>)[] => {
+    const actions: (() => Promise<unknown>)[] = [];
+    if (!preventAbort) {
+      ArrayPrototypePush(actions, () =>
+        writableInternals.getState(destination) === 'writable'
+          ? writableInternals.writableStreamAbort(destination, e)
+          : (PromiseResolve(undefined) as Promise<void>)
+      );
+    }
+    if (!preventCancel) {
+      ArrayPrototypePush(actions, () =>
+        getReadableStreamGetState(source) === 'readable'
+          ? readableStreamCancel(source, e)
+          : (PromiseResolve(undefined) as Promise<void>)
+      );
+    }
+    return actions;
+  };
+
+  // Workerd extension: the internal transforms (identity, compression)
+  // reject an invalid chunk's write NON-FATALLY, leaving the destination
+  // writable — a state unreachable under pure WHATWG semantics, where any
+  // sink rejection errors the destination (and the closed-promise
+  // observer handles it). Without this, the failed chunk would be
+  // silently dropped and the pipe would complete. Match the C++ pipe
+  // outcome instead: treat the rejection as a pipe failure.
+  const onWriteRejectedNonFatally = (e: unknown): void => {
+    const actions = nonFatalWriteFailureActions(e);
+    shutdownWithAction(
+      actions.length === 0 ? undefined : () => combineShutdownActions(actions),
+      { reason: e }
+    );
+  };
+
   if (signal !== undefined) {
     abortAlgorithm = () => {
       const abortReason = AbortSignalReasonGet(signal);
@@ -2573,34 +2728,7 @@ function pipeToInternal<R>(
       shutdownWithAction(
         actions.length === 0
           ? undefined
-          : () => {
-              // Settle when all actions settle; reject with the first
-              // failure (spec: shutdown actions run in parallel).
-              let remaining = actions.length;
-              let failed: { reason: unknown } | undefined;
-              const all =
-                PromiseWithResolvers() as PromiseWithResolversType<void>;
-              for (let i = 0; i < actions.length; i++) {
-                const action = actions[i] as () => Promise<unknown>;
-                PromisePrototypeThen(
-                  action(),
-                  () => {
-                    if (--remaining === 0) {
-                      if (failed !== undefined) {
-                        all.reject(failed.reason);
-                      } else {
-                        all.resolve();
-                      }
-                    }
-                  },
-                  (e: unknown) => {
-                    failed ??= { reason: e };
-                    if (--remaining === 0) all.reject(failed.reason);
-                  }
-                );
-              }
-              return all.promise;
-            },
+          : () => combineShutdownActions(actions),
         { reason: abortReason }
       );
     };
@@ -2757,6 +2885,22 @@ function pipeToInternal<R>(
           chunks[i] as R
         );
         markPromiseHandled(writePromise);
+        // A rejection that leaves the destination WRITABLE is the
+        // internal transforms' non-fatal invalid-chunk rejection — fail
+        // the pipe with it (see onWriteRejectedNonFatally). Fatal
+        // rejections error the destination and are handled by the
+        // closed-promise observer instead. When a clean shutdown is
+        // already waiting for acknowledgment, record the failure for
+        // runAction's upgrade path.
+        PromisePrototypeThen(writePromise, undefined, (e: unknown) => {
+          if (writableInternals.getState(destination) !== 'writable') return;
+          if (shuttingDown) {
+            pendingNonFatalWriteFailure ??= { reason: e };
+            return;
+          }
+          onWriteRejectedNonFatally(e);
+          poke();
+        });
         // Track the last write so shutdownWithAction can wait for it.
         // The writable serializes writes, so when this settles all
         // preceding writes have already settled.
@@ -4260,12 +4404,22 @@ module.exports = {
   // possible future public exposure.
   ReadableStreamDrainingReader,
   // Internal operations consumed by the TransformStream cancel/flush
-  // coordination (finishPromise guard). Unreachable from user code.
+  // coordination (finishPromise guard) and the workerd expectedLength
+  // extension. Unreachable from user code.
   internalsForTransform: ObjectFreeze({
     getState: <R>(stream: ReadableStream<R>) =>
       getReadableStreamGetState(stream),
     getStoredError: <R>(stream: ReadableStream<R>) =>
       getReadableStreamStoredError(stream),
+    normalizeExpectedLength,
+    setControllerExpectedLength: <R>(
+      controller: object,
+      length: bigint | undefined
+    ) =>
+      setDefaultControllerExpectedLength(
+        controller as ReadableStreamDefaultController<R>,
+        length
+      ),
   }),
 
   // Part of the internal implementation. Do not re-export to user code

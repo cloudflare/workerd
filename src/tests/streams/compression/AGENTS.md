@@ -61,11 +61,12 @@ interface DecompressionStream {
   already-detached chunk is a zero-byte no-op; shadowing metadata getters
   are never consulted.
 - **Chunks:** ArrayBuffer, any view (offsets honored), empty and detached
-  inputs are accepted by both. Strings (#1) and SharedArrayBuffers incl.
-  SAB-backed views (#2) are accepted and encoded/copied by C++ but rejected
-  by TypeScript per spec. Everything else rejects with TypeError (#3
-  message) — after which the C++ stream SURVIVES (later writes flow, clean
-  close) while TypeScript errors both sides (#4).
+  inputs are accepted by both, and so are SharedArrayBuffers incl.
+  SAB-backed views — copied out on both sides (#2, DECIDED 2026-08-28).
+  Strings are UTF-8 encoded by C++ but rejected by TypeScript (#1).
+  Everything else rejects with TypeError (#3 message) — a PER-WRITE
+  rejection on both sides: the stream survives, later writes flow, and
+  close is clean (#4).
 - **Corrupt input** (DecompressionStream): the WRITE rejects (TypeError
   "Decompression failed.") and both sides error, in both implementations;
   the failure propagates through downstream pipes to consumers.
@@ -131,10 +132,10 @@ pedantic branches shifting anything the suite pins.
 
 | # | Area | C++ | TypeScript | Pinned in |
 | --- | --- | --- | --- | --- |
-| 1 | String chunks | accepted, UTF-8 encoded (the WPT compression-bad-chunks expected failure) | rejected TypeError | `stringChunkDiverges` |
-| 2 | SharedArrayBuffer / SAB-backed view chunks | accepted (copied out) | rejected TypeError | `sharedArrayBufferChunkDiverges` |
-| 3 | Invalid-chunk TypeError message | "This TransformStream is being used as a byte stream, but received an object of non-ArrayBuffer/ArrayBufferView type on its writable side." | "The provided value is not of type (ArrayBuffer or ArrayBufferView)" | `invalidChunkAftermathDiverges` |
-| 4 | Invalid-chunk aftermath | stream survives | both sides error | `invalidChunkAftermathDiverges` |
+| 1 | String chunks | accepted, UTF-8 encoded | rejected TypeError (per-write; the stream survives) | `stringChunkDiverges` |
+| 2 | SharedArrayBuffer / SAB-backed view chunks | accepted (copied out) | same (DECIDED 2026-08-28; the reason the WPT bad-chunks files are disabled for both impls) | `sharedArrayBufferChunkAccepted` |
+| 3 | Invalid-chunk TypeError message | "This TransformStream is being used as a byte stream, but received an object of non-ArrayBuffer/ArrayBufferView type on its writable side." | "The provided value is not of type (ArrayBuffer or ArrayBufferView)" | `invalidChunkRejectsWriteOnly` |
+| 4 | Invalid-chunk aftermath | stream survives | same — non-fatal write rejection (the DECIDED per-write contract) | `invalidChunkRejectsWriteOnly` |
 | 5 | `TransformStream` inheritance + accessor placement | subclass; readable/writable inherited | standalone; own accessors | `transformStreamInheritance` |
 | 6 | `constructor.length` | 0 | 1 | `constructorSurface` |
 | 7 | Missing/undefined format | jsg type-boundary TypeError ("not of type 'string'") | ToString-coerced into format validation | `nonStringFormatThrows` |
@@ -159,7 +160,7 @@ pedantic branches shifting anything the suite pins.
 | `empty-stream.js` | close-with-no-writes emits a valid empty member; decompressing it yields EOF |
 | `corrupt-input.js` | write-time rejection with "Decompression failed."; both-sides error; iteration rejection; bad magic bytes |
 | `strict-checks.js` | trailing-data write rejection; close-with-no-data rejection; truncated-member close rejection |
-| `chunk-types.js` | BufferSource acceptance incl. offsets; string (#1), SAB (#2), invalid-chunk message+aftermath (#3, #4) |
+| `chunk-types.js` | BufferSource acceptance incl. offsets and SAB-backed inputs by copy (#2); string (#1); invalid-chunk message+per-write aftermath (#3, #4) |
 | `buffer-lifecycle.js` | snapshot-at-write: post-write mutation/detach/shrink invisible; already-detached no-op; lying metadata getters never consulted |
 | `byob.js` | BYOB reader fills a 2-byte destination with the gzip magic |
 | `backpressure.js` | eager write settlement without reads; desiredSize accounting (#8) |

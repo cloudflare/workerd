@@ -18,8 +18,8 @@ a deliberate defect pin, not a hole).
 
 | # | Area | C++ | TypeScript | Pinned in |
 | --- | --- | --- | --- | --- |
-| 1 | non-byte chunks piped into native identity | pipe rejects 'This WritableStream only supports writing byte types.' | STRINGS are UTF-8 ENCODED and pass through; a NUMBER chunk stalls the pipe silently — the next read pends forever (bounded defect pin) | `pipeThroughJsToInternal` |
-| 2 | writable lock after a completed pipeThrough | stays locked; getWriter throws | getWriter() SUCCEEDS; `.locked` is transient/racy (observed both values) — only getWriter pinned | `pipeThroughJsToInternalCloses` |
+| 1 | non-byte chunks piped into native identity | strings are UTF-8 encoded and pass through on both; the NUMBER chunk fails the pipe — C++ rejects 'This WritableStream only supports writing byte types.'; TypeScript surfaces the identity validation TypeError through the non-fatal write-rejection pipe path (dest aborted, downstream reads reject) | `pipeThroughJsToInternal` |
+| 2 | writable lock after a completed pipeThrough | stays locked; getWriter throws | spec finalize: both locks release when the pipe settles — one macrotask after the output's done, `.locked` is deterministically false and getWriter() succeeds (the release cascade is not synchronized with the output's done delivery, so loop-exit-instant reads are unspecified; `.locked` and getWriter share one predicate and never disagree at an instant) | `pipeThroughJsToInternalCloses` |
 | 3 | write-after-close rejection message | 'This WritableStream has been closed.' | 'Cannot write to a stream that is closing or closed' (`CLOSED_WRITE_MSG` helper) | `pipeToInternalToJsSimple`, `pipeToInternalToJsClose` |
 | 4 | ws.close() queued BEFORE pipeTo | pipe locks both ends, waits, cancels source with 'This destination writable stream is closed.', then RESOLVES (see the TODO(conform) in the test) | pipe REJECTS IMMEDIATELY 'Destination closed before the pipe completed', cancels source with the same error (preventCancel suppresses), locks never observed held | `pipeToJsToJsCloseQueuedDestination`(+`PreventCancel`) |
 | 5 | pipeTo brand check on a broken `this` | THROWS synchronously (before the capture_async_api_throws wrapper; the WPT general.any seed); a real stream with a bad destination REJECTS | both reject (spec) | `brandChecks` |
@@ -27,8 +27,8 @@ a deliberate defect pin, not a hole).
 | 7 | source queue after a preventCancel'd failing pipe | the not-yet-written chunk remains readable | read-ahead already consumed it; a fresh read PENDS (bounded) | `destWriteThrowsMidPipePreventCancel` |
 | 8 | dest controller error()s while the pipe waits on a read | HALF-PROPAGATES: cancels the source with the error but FULFILLS the pipe promise | rejects the pipe and cancels the source with the error (spec) | `destControllerErrorsMidPipe` |
 | 9 | FixedLengthStream length violations via pipe | overflow: pipe NEVER SETTLES (bounded); underflow: never settles | overflow: rejects RangeError; underflow: never settles (parity of nonconformance) | `fixedLengthStreamPipeOverflow`/`Underflow` |
-| 10 | already-closed source → already-closed dest | rejects TypeError (spec; the WPT multiple-propagation seed) | FULFILLS as a trivially complete pipe | `closedSourceToClosedDest` |
-| 11 | SharedArrayBuffer-backed views into CompressionStream | copies the shared bytes; round-trips | write path REJECTS TypeError 'The provided value is not of type (ArrayBuffer or ArrayBufferView)' — while its identity stream ACCEPTS the same views | `sabViewThroughCompressionRoundTrip` |
+| 10 | already-closed source → already-closed dest | rejects TypeError (a C++ deviation: the spec's ordered shutdown conditions give closing-forward priority) | FULFILLS (spec; WPT multiple-propagation 'closed readable to closed writable' pins the fulfillment) | `closedSourceToClosedDest` |
+| 11 | SharedArrayBuffer-backed views into CompressionStream | copies the shared bytes; round-trips | same (DECIDED 2026-08-28) | `sabViewThroughCompressionRoundTrip` |
 
 Parity worth noting (probed, pinned): the whole error-propagation-
 forward core matrix (starts-errored rejection/hook IDENTITY on both

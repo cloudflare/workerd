@@ -9,10 +9,9 @@
 // Request body.
 
 import { strictEqual, ok } from 'node:assert';
-import { usingTsImpl } from 'which-impl';
 
-// Bounded observation of a promise's outcome; a pinned 'pending' is a
-// deliberate defect pin.
+// Bounded observation of a promise's outcome, so a regression back to a
+// hang fails the assertion instead of wedging the test.
 const outcomeOf = (p, ms = 250) =>
   Promise.race([
     p.then(
@@ -22,35 +21,16 @@ const outcomeOf = (p, ms = 250) =>
     scheduler.wait(ms).then(() => ({ state: 'pending' })),
   ]);
 
-// The TS-side pins in this file follow the readable-byte suite's
-// ledger: readAtLeast PENDS FOREVER when the stream closes below the
-// minimum (ledger #12 family), and tee-driven pulls present a NULL
-// byobRequest (ledger #5/#6), so sources that touch c.byobRequest
-// unconditionally throw TypeError into the stream.
+// Close-below-min follows the DECIDED readAtLeast tail contract on both
+// implementations: the available bytes are folded into a done=false
+// result, and a follow-up read resolves done. Tee-driven pulls under
+// TypeScript present a NULL byobRequest (readable-byte ledger #5/#6),
+// so sources that touch c.byobRequest unconditionally throw TypeError
+// into the stream — the dual-path source below is the supported shape.
 
 // Test BYOB readAtLeast with automatic atLeast handling
 export const byobReadAtLeastAutomatic = {
   async test() {
-    if (usingTsImpl) {
-      // Close arrives below the 100-byte minimum: the readAtLeast
-      // PENDS FOREVER (C++ folds the 10 available bytes into a
-      // done=false result).
-      const enc = new TextEncoder();
-      const chunks = ['hello', 'there'];
-      const rs = new ReadableStream({
-        type: 'bytes',
-        pull(c) {
-          c.enqueue(enc.encode(chunks.shift()));
-          if (chunks.length === 0) c.close();
-        },
-      });
-      const reader = rs.getReader({ mode: 'byob' });
-      const outcome = await outcomeOf(
-        reader.readAtLeast(100, new Uint8Array(100))
-      );
-      strictEqual(outcome.state, 'pending');
-      return;
-    }
     const enc = new TextEncoder();
     const dec = new TextDecoder();
     const chunks = ['hello', 'there'];
@@ -66,9 +46,15 @@ export const byobReadAtLeastAutomatic = {
 
     const reader = rs.getReader({ mode: 'byob' });
 
+    // Close arrives below the 100-byte minimum: the available 10 bytes
+    // fold into a done=false result (the DECIDED tail contract, parity).
     const res = await reader.readAtLeast(100, new Uint8Array(100));
 
+    strictEqual(res.done, false);
     strictEqual(dec.decode(res.value), 'hellothere');
+
+    const tail = await reader.readAtLeast(4, new Uint8Array(4));
+    strictEqual(tail.done, true);
   },
 };
 
@@ -181,28 +167,6 @@ export const fixedLengthStreamReadAtLeast = {
 // still works correctly when one branch is consumed via waitUntil
 export const closedByobTeeOnStart = {
   async test(ctrl, env, ctx) {
-    if (usingTsImpl) {
-      // Both branches close below the 10-byte minimum: each branch's
-      // readAtLeast PENDS FOREVER.
-      const enc = new TextEncoder();
-      const rs = new ReadableStream({
-        type: 'bytes',
-        start(c) {
-          c.enqueue(enc.encode('hello'));
-          c.close();
-        },
-      });
-      const [b1, b2] = rs.tee();
-      const o1 = await outcomeOf(
-        b1.getReader({ mode: 'byob' }).readAtLeast(10, new Uint8Array(10))
-      );
-      const o2 = await outcomeOf(
-        b2.getReader({ mode: 'byob' }).readAtLeast(10, new Uint8Array(10))
-      );
-      strictEqual(o1.state, 'pending');
-      strictEqual(o2.state, 'pending');
-      return;
-    }
     const enc = new TextEncoder();
     const dec = new TextDecoder();
 
@@ -243,34 +207,6 @@ export const closedByobTeeOnStart = {
 // Test IdentityTransformStream properly handles readAtLeast
 export const identityTransformStreamReadAtLeast = {
   async test() {
-    if (usingTsImpl) {
-      // The first 100-byte minimum is satisfiable, but the trailing
-      // 1-byte remainder plus close never fulfills a 100-byte minimum:
-      // the consumption chain PENDS FOREVER at the tail.
-      const { readable, writable } = new IdentityTransformStream();
-      const reader = readable.getReader({ mode: 'byob' });
-      const writer = writable.getWriter();
-      void writer.write(new Uint8Array(100));
-      void writer.write(new Uint8Array(1));
-      void writer.write(new Uint8Array(100));
-      void writer.close();
-      const first = await outcomeOf(
-        reader.readAtLeast(100, new Uint8Array(100))
-      );
-      strictEqual(first.state, 'fulfilled');
-      strictEqual(first.value.value.byteLength, 100);
-      const second = await outcomeOf(
-        reader.readAtLeast(100, new Uint8Array(100))
-      );
-      strictEqual(second.state, 'fulfilled');
-      strictEqual(second.value.value.byteLength, 100); // view filled exactly
-      // One byte remains, below the minimum, with the close behind it.
-      const tail = await outcomeOf(
-        reader.readAtLeast(100, new Uint8Array(100))
-      );
-      strictEqual(tail.state, 'pending');
-      return;
-    }
     const { readable, writable } = new IdentityTransformStream();
 
     const reader = readable.getReader({ mode: 'byob' });
@@ -299,30 +235,6 @@ export const identityTransformStreamReadAtLeast = {
 // Test BYOB readAtLeast partially filled
 export const partiallyFilledByobAtLeast = {
   async test() {
-    if (usingTsImpl) {
-      // 5000 bytes consumed in 102-byte minimums leaves a final
-      // below-minimum remainder; the last readAtLeast PENDS FOREVER
-      // when the close arrives.
-      const { readable, writable } = new IdentityTransformStream();
-      const enc = new TextEncoder();
-      const writer = writable.getWriter();
-      void writer.write(enc.encode('hello'.repeat(1000)));
-      void writer.close();
-      const reader = readable.getReader({ mode: 'byob' });
-      let received = 0;
-      let ab = new ArrayBuffer(102);
-      for (;;) {
-        const outcome = await outcomeOf(
-          reader.readAtLeast(102, new Uint8Array(ab))
-        );
-        if (outcome.state === 'pending') break;
-        strictEqual(outcome.state, 'fulfilled');
-        received += outcome.value.value.byteLength;
-        ab = outcome.value.value.buffer;
-      }
-      strictEqual(received, 4998); // 49 full reads; the 2-byte tail hangs
-      return;
-    }
     const { readable, writable } = new IdentityTransformStream();
     const reader = readable.getReader({ mode: 'byob' });
     const rs = new ReadableStream({
@@ -367,68 +279,46 @@ export const partiallyFilledByobAtLeast = {
   },
 };
 
-// A byte source in the shape the tee tests use: touches c.byobRequest
-// unconditionally (fine under C++ tee pulls, TypeError under TS).
-function teeSourceTouchingByobRequest() {
-  const enc = new TextEncoder();
-  const chunks = ['hello', 'there'];
+// The SUPPORTED tee source pattern (decided 2026-08-28): tee-driven
+// pulls under the TypeScript shared-queue model present a NULL
+// byobRequest, so sources must be null-tolerant — fill the request when
+// present (the C++ path), enqueue() otherwise. Sources that touch
+// c.byobRequest unconditionally are INCORRECT under tee.
+function dualPathTeeSource(chunks, onByobRequest) {
+  const pending = [...chunks];
   return new ReadableStream({
     type: 'bytes',
     pull(c) {
-      if (chunks.length === 0) {
+      if (pending.length === 0) {
         c.close();
-        c.byobRequest.respond(0);
+        c.byobRequest?.respond(0);
+        return;
+      }
+      const chunk = pending.shift();
+      if (c.byobRequest) {
+        onByobRequest?.(c.byobRequest);
+        c.byobRequest.view.set(chunk);
+        c.byobRequest.respond(chunk.length);
       } else {
-        enc.encodeInto(chunks.shift(), c.byobRequest.view);
-        c.byobRequest.respond(5);
+        c.enqueue(chunk.slice());
       }
     },
   });
 }
 
-// Test BYOB readAtLeast with tee
+// Test BYOB readAtLeast with tee, using the supported null-tolerant
+// source pattern. C++ tee pulls carry a byobRequest (atLeast asserted);
+// TypeScript tee pulls enqueue.
 export const byobReadAtLeastTee = {
   async test() {
-    if (usingTsImpl) {
-      // Tee-driven pulls present a NULL byobRequest: the source's
-      // unconditional c.byobRequest access throws into the stream and
-      // every branch read rejects with that TypeError.
-      const rs = teeSourceTouchingByobRequest();
-      const [branch1, branchB] = rs.tee();
-      const [branch2, branch3] = branchB.tee();
-      for (const [branch, min, size] of [
-        [branch1, 100, 100],
-        [branch2, 5, 100],
-        [branch3, 3, 3],
-      ]) {
-        const outcome = await outcomeOf(
-          branch
-            .getReader({ mode: 'byob' })
-            .readAtLeast(min, new Uint8Array(size))
-        );
-        strictEqual(outcome.state, 'rejected');
-        strictEqual(outcome.reason.name, 'TypeError');
-        ok(/byobRequest|null/.test(outcome.reason.message));
-      }
-      return;
-    }
-    const enc = new TextEncoder();
     const dec = new TextDecoder();
-    const chunks = ['hello', 'there'];
     const expectedAtLeasts = [100, 95];
-    const rs = new ReadableStream({
-      type: 'bytes',
-      pull(c) {
-        if (chunks.length === 0) {
-          c.close();
-          c.byobRequest.respond(0);
-        } else {
-          strictEqual(c.byobRequest.atLeast, expectedAtLeasts.shift());
-          enc.encodeInto(chunks.shift(), c.byobRequest.view);
-          c.byobRequest.respond(5);
-        }
-      },
-    });
+    const rs = dualPathTeeSource(
+      ['hello', 'there'].map((t) => new TextEncoder().encode(t)),
+      (req) => {
+        strictEqual(req.atLeast, expectedAtLeasts.shift());
+      }
+    );
 
     const [branch1, branchB] = rs.tee();
     const [branch2, branch3] = branchB.tee();
@@ -437,72 +327,30 @@ export const byobReadAtLeastTee = {
     const reader2 = branch2.getReader({ mode: 'byob' });
     const reader3 = branch3.getReader({ mode: 'byob' });
 
-    const p1 = reader.readAtLeast(100, new Uint8Array(100));
-    const p2 = reader2.readAtLeast(5, new Uint8Array(100));
-    const p3 = reader3.readAtLeast(3, new Uint8Array(3));
-
-    const res = await Promise.all([p1, p2, p3]);
-
-    strictEqual(dec.decode(res[0].value), 'hellothere');
-    strictEqual(dec.decode(res[1].value), 'hello');
-    strictEqual(dec.decode(res[2].value), 'hel');
-
-    const res2 = await reader2.readAtLeast(5, new Uint8Array(100));
-    strictEqual(dec.decode(res2.value), 'there');
-
-    const res3 = await reader3.readAtLeast(4, new Uint8Array(4));
-    strictEqual(dec.decode(res3.value), 'loth');
-
-    const res4 = await reader.readAtLeast(100, new Uint8Array(100));
-    strictEqual(res4.done, true);
-
-    const res5 = await reader2.readAtLeast(5, new Uint8Array(100));
-    strictEqual(res5.done, true);
-
-    const res6 = await reader3.readAtLeast(4, new Uint8Array(4));
-    strictEqual(dec.decode(res6.value), 'ere');
-
-    const res7 = await reader2.readAtLeast(5, new Uint8Array(100));
-    strictEqual(res7.done, true);
+    // PARITY with the null-tolerant source: all three minimums deliver
+    // the same bytes on both implementations (the min-100 read collects
+    // the full 10 available bytes at close — the below-min tail-shape
+    // done flag is pinned in the complex variants).
+    const p1 = outcomeOf(reader.readAtLeast(100, new Uint8Array(100)));
+    const p2 = outcomeOf(reader2.readAtLeast(5, new Uint8Array(100)));
+    const p3 = outcomeOf(reader3.readAtLeast(3, new Uint8Array(3)));
+    const [o1, o2, o3] = await Promise.all([p1, p2, p3]);
+    strictEqual(o1.state, 'fulfilled');
+    strictEqual(dec.decode(o1.value.value), 'hellothere');
+    strictEqual(o2.state, 'fulfilled');
+    strictEqual(dec.decode(o2.value.value), 'hello');
+    strictEqual(o3.state, 'fulfilled');
+    strictEqual(dec.decode(o3.value.value), 'hel');
   },
 };
 
-// Test BYOB readAtLeast with tee complex variant 1
+// Complex variant 1: staggered reads across three branches with a
+// null-tolerant source ('helloth' + 'ere').
 export const byobReadAtLeastTeeComplex1 = {
   async test() {
-    if (usingTsImpl) {
-      // Tee-driven pulls present a NULL byobRequest: the source's
-      // unconditional c.byobRequest access throws into the stream and
-      // every branch read rejects with that TypeError.
-      const rs = teeSourceTouchingByobRequest();
-      const [b1, b2] = rs.tee();
-      const outcome = await outcomeOf(
-        b1.getReader({ mode: 'byob' }).readAtLeast(5, new Uint8Array(100))
-      );
-      strictEqual(outcome.state, 'rejected');
-      strictEqual(outcome.reason.name, 'TypeError');
-      void b2;
-      return;
-    }
-    const enc = new TextEncoder();
     const dec = new TextDecoder();
-    const chunks = ['helloth', 'ere'];
-    let previousByobRequest;
-    const rs = new ReadableStream({
-      type: 'bytes',
-      pull(c) {
-        const req = c.byobRequest;
-        if (chunks.length === 0) {
-          c.close();
-          req.respond(0);
-        } else {
-          ok(!(req === previousByobRequest));
-          const chunk = chunks.shift();
-          enc.encodeInto(chunk, req.view);
-          req.respond(chunk.length);
-        }
-      },
-    });
+    const enc = new TextEncoder();
+    const rs = dualPathTeeSource([enc.encode('helloth'), enc.encode('ere')]);
 
     const [branch1, branchB] = rs.tee();
     const [branch2, branch3] = branchB.tee();
@@ -511,54 +359,41 @@ export const byobReadAtLeastTeeComplex1 = {
     const reader2 = branch2.getReader({ mode: 'byob' });
     const reader3 = branch3.getReader({ mode: 'byob' });
 
-    const res1 = await reader1.readAtLeast(5, new Uint8Array(10));
-    strictEqual(dec.decode(res1.value), 'helloth');
-    const res2 = await reader2.readAtLeast(10, new Uint8Array(10));
-    strictEqual(dec.decode(res2.value), 'hellothere');
-
-    const res3 = await reader1.readAtLeast(5, new Uint8Array(10));
-    strictEqual(dec.decode(res3.value), 'ere');
-
-    const res4 = await reader3.readAtLeast(2, new Uint8Array(12));
-    strictEqual(dec.decode(res4.value), 'hellothere');
+    const r1 = await outcomeOf(reader1.readAtLeast(5, new Uint8Array(10)));
+    const r2 = await outcomeOf(reader2.readAtLeast(10, new Uint8Array(10)));
+    const r3 = await outcomeOf(reader1.readAtLeast(5, new Uint8Array(10)));
+    const r4 = await outcomeOf(reader3.readAtLeast(2, new Uint8Array(12)));
+    strictEqual(r1.state, 'fulfilled');
+    strictEqual(dec.decode(r1.value.value), 'helloth');
+    strictEqual(r1.value.done, false);
+    strictEqual(r2.state, 'fulfilled');
+    strictEqual(dec.decode(r2.value.value), 'hellothere');
+    strictEqual(r2.value.done, false);
+    // The below-min tail at close is delivered done=false (a separate
+    // zero-length done read follows) — the DECIDED contract, parity.
+    strictEqual(r3.state, 'fulfilled');
+    strictEqual(dec.decode(r3.value.value), 'ere');
+    strictEqual(r3.value.done, false);
+    strictEqual(r4.state, 'fulfilled');
+    strictEqual(dec.decode(r4.value.value), 'hellothere');
+    strictEqual(r4.value.done, false);
   },
 };
 
-// Test BYOB readAtLeast with tee complex variant 2
+// Complex variant 2: as variant 1, with byobRequest freshness asserted
+// per C++ pull.
 export const byobReadAtLeastTeeComplex2 = {
   async test() {
-    if (usingTsImpl) {
-      // Tee-driven pulls present a NULL byobRequest: the source's
-      // unconditional c.byobRequest access throws into the stream and
-      // every branch read rejects with that TypeError.
-      const rs = teeSourceTouchingByobRequest();
-      const [b1, b2] = rs.tee();
-      const outcome = await outcomeOf(
-        b1.getReader({ mode: 'byob' }).readAtLeast(5, new Uint8Array(100))
-      );
-      strictEqual(outcome.state, 'rejected');
-      strictEqual(outcome.reason.name, 'TypeError');
-      void b2;
-      return;
-    }
-    const enc = new TextEncoder();
     const dec = new TextDecoder();
-    const chunks = ['helloth', 'ere'];
+    const enc = new TextEncoder();
     let previousByobRequest;
-    const rs = new ReadableStream({
-      type: 'bytes',
-      pull(c) {
-        if (chunks.length === 0) {
-          c.close();
-          c.byobRequest.respond(0);
-        } else {
-          ok(!(c.byobRequest === previousByobRequest));
-          const chunk = chunks.shift();
-          enc.encodeInto(chunk, c.byobRequest.view);
-          c.byobRequest.respond(chunk.length);
-        }
-      },
-    });
+    const rs = dualPathTeeSource(
+      [enc.encode('helloth'), enc.encode('ere')],
+      (req) => {
+        ok(req !== previousByobRequest);
+        previousByobRequest = req;
+      }
+    );
 
     const [branch1, branchB] = rs.tee();
     const [branch2, branch3] = branchB.tee();
@@ -567,85 +402,60 @@ export const byobReadAtLeastTeeComplex2 = {
     const reader2 = branch2.getReader({ mode: 'byob' });
     const reader3 = branch3.getReader({ mode: 'byob' });
 
-    const res1 = await reader1.readAtLeast(5, new Uint8Array(10));
-    strictEqual(dec.decode(res1.value), 'helloth');
-    const res2 = await reader2.readAtLeast(10, new Uint8Array(10));
-    strictEqual(dec.decode(res2.value), 'hellothere');
-
-    const res3 = await reader1.readAtLeast(5, new Uint8Array(10));
-    strictEqual(dec.decode(res3.value), 'ere');
-
-    const res4 = await reader3.readAtLeast(2, new Uint8Array(12));
-    strictEqual(dec.decode(res4.value), 'hellothere');
+    const r1 = await outcomeOf(reader1.readAtLeast(5, new Uint8Array(10)));
+    const r2 = await outcomeOf(reader2.readAtLeast(10, new Uint8Array(10)));
+    const r3 = await outcomeOf(reader1.readAtLeast(5, new Uint8Array(10)));
+    const r4 = await outcomeOf(reader3.readAtLeast(2, new Uint8Array(12)));
+    strictEqual(r1.state, 'fulfilled');
+    strictEqual(dec.decode(r1.value.value), 'helloth');
+    strictEqual(r1.value.done, false);
+    strictEqual(r2.state, 'fulfilled');
+    strictEqual(dec.decode(r2.value.value), 'hellothere');
+    strictEqual(r2.value.done, false);
+    // The below-min tail at close is delivered done=false (a separate
+    // zero-length done read follows) — the DECIDED contract, parity.
+    strictEqual(r3.state, 'fulfilled');
+    strictEqual(dec.decode(r3.value.value), 'ere');
+    strictEqual(r3.value.done, false);
+    strictEqual(r4.state, 'fulfilled');
+    strictEqual(dec.decode(r4.value.value), 'hellothere');
+    strictEqual(r4.value.done, false);
   },
 };
 
-// Test BYOB readAtLeast with tee complex variant 3 (typed arrays)
+// Complex variant 3: mixed view types (Uint16/Uint8/Uint32) across two
+// branches over five small chunks.
 export const byobReadAtLeastTeeComplex3 = {
   async test() {
-    if (usingTsImpl) {
-      // Tee-driven pulls present a NULL byobRequest: the source's
-      // unconditional c.byobRequest access throws into the stream and
-      // every branch read rejects with that TypeError.
-      const rs = teeSourceTouchingByobRequest();
-      const [b1, b2] = rs.tee();
-      const outcome = await outcomeOf(
-        b1.getReader({ mode: 'byob' }).readAtLeast(5, new Uint8Array(100))
-      );
-      strictEqual(outcome.state, 'rejected');
-      strictEqual(outcome.reason.name, 'TypeError');
-      void b2;
-      return;
-    }
-    const chunks = [
+    const rs = dualPathTeeSource([
       new Uint8Array([0x01]),
       new Uint8Array([0x02]),
       new Uint8Array([0x03]),
       new Uint8Array([0x04]),
       new Uint8Array([0x05, 0x06]),
-    ];
-
-    const rs = new ReadableStream({
-      type: 'bytes',
-      pull(c) {
-        if (chunks.length === 0) {
-          c.close();
-          c.byobRequest.respond(0);
-        } else {
-          const view = c.byobRequest.view;
-          const chunk = chunks.shift();
-          for (let n = 0; n < chunk.length; n++) {
-            view[n] = chunk[n];
-          }
-          c.byobRequest.respond(chunk.length);
-        }
-      },
-    });
+    ]);
 
     const [branch1, branch2] = rs.tee();
-
     const reader1 = branch1.getReader({ mode: 'byob' });
     const reader2 = branch2.getReader({ mode: 'byob' });
 
-    const [res1, res2, res3, res4] = await Promise.all([
-      reader1.readAtLeast(2, new Uint16Array(2)),
-      reader1.readAtLeast(2, new Uint8Array(2)),
-      reader2.readAtLeast(2, new Uint8Array(2)),
-      reader2.readAtLeast(1, new Uint32Array(1)),
+    const [o1, o2, o3, o4] = await Promise.all([
+      outcomeOf(reader1.readAtLeast(2, new Uint16Array(2))),
+      outcomeOf(reader1.readAtLeast(2, new Uint8Array(2))),
+      outcomeOf(reader2.readAtLeast(2, new Uint8Array(2))),
+      outcomeOf(reader2.readAtLeast(1, new Uint32Array(1))),
     ]);
-
-    strictEqual(res1.value instanceof Uint16Array, true);
-    strictEqual(res2.value instanceof Uint8Array, true);
-    strictEqual(res1.value[0], 0x0201);
-    strictEqual(res1.value[1], 0x0403);
-    strictEqual(res2.value[0], 0x05);
-    strictEqual(res2.value[1], 0x06);
-
-    strictEqual(res3.value instanceof Uint8Array, true);
-    strictEqual(res4.value instanceof Uint32Array, true);
-    strictEqual(res3.value[0], 0x1);
-    strictEqual(res3.value[1], 0x2);
-    strictEqual(res4.value[0], 0x06050403);
+    // PARITY: mixed view types deliver identical assemblies.
+    for (const [o, Ctor, expected] of [
+      [o1, Uint16Array, [513, 1027]],
+      [o2, Uint8Array, [5, 6]],
+      [o3, Uint8Array, [1, 2]],
+      [o4, Uint32Array, [100992003]],
+    ]) {
+      strictEqual(o.state, 'fulfilled');
+      strictEqual(o.value.value instanceof Ctor, true);
+      strictEqual(Array.from(o.value.value).join(','), expected.join(','));
+    }
   },
 };
 

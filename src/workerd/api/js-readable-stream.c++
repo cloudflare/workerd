@@ -1352,7 +1352,8 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
   // source performs its own internal accumulation toward minBytes (KJ tryRead semantics),
   // so this single read is the source's complete answer for the read: delivering fewer
   // than the minimum in total implicitly signals EOF (the conduit commits the partial fill
-  // fused as {done: true, value: partialView} and closes the stream).
+  // as {done: false, value: partialView} and closes the stream; the next read observes
+  // EOF — the C++-parity readAtLeast tail shape).
   size_t stashed = stash.size();
   size_t minBytes = atLeast - stashed;
   ensureScratch(kj::max(kScratchSize, minBytes));
@@ -1413,10 +1414,10 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
     webstreams::invokeMethod(
         js, byobRequest.getHandle(js), "respond"_kj, js.num(static_cast<double>(total)));
     if (eof) {
-      // Fused close-commit: deliver the partial bytes, then explicitly signal EOF in the
-      // same pull turn. (The under-delivered respond() above already implies closure to
-      // the conduit, which tolerates this close as a no-op; the explicit close keeps the
-      // EOF signal unambiguous rather than relying on that inference.)
+      // Deliver the partial bytes, then explicitly signal EOF in the same pull turn.
+      // (The under-delivered respond() above already implies closure to the conduit,
+      // which tolerates this close as a no-op; the explicit close keeps the EOF signal
+      // unambiguous rather than relying on that inference.)
       webstreams::invokeMethod(js, controller.getHandle(js), "close"_kj);
     }
   }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {

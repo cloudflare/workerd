@@ -11,10 +11,10 @@
 //
 // Byte-stream facts pinned here: a queued byte backlog plus the close
 // sentinel is swept in one batched read with each enqueued chunk kept
-// INTACT (no coalescing, no re-slicing); the conduit drives pull like a
-// default reader — under the TS implementation byobRequest is null even
-// with autoAllocateChunkSize set (the suite's ledger #5/#6 shape); byte
-// streams never declare an expectedLength.
+// INTACT (no coalescing, no re-slicing); with autoAllocateChunkSize set
+// the conduit's wait-read synthesizes the auto-allocate descriptor, so
+// pull observes a byobRequest (without it, pull sees null — ledger #5);
+// byte streams never declare an expectedLength.
 
 /* global ReadableStreamDrainingReader */
 
@@ -53,9 +53,11 @@ export const drainingReaderDrivesBytePull = {
       strictEqual(typeof ReadableStreamDrainingReader, 'undefined');
       return;
     }
-    // The conduit's demand drives pull() like a default reader's: the
-    // TS implementation presents byobRequest null even with
-    // autoAllocateChunkSize set, so the source must enqueue.
+    // The conduit's demand drives pull() like a default reader's: with
+    // autoAllocateChunkSize set, each wait-read synthesizes the
+    // auto-allocate descriptor, so every pull observes a byobRequest.
+    // The source may still enqueue() — the enqueued chunk fulfills the
+    // read directly and the auto-allocated buffer is discarded.
     const byobRequests = [];
     let pulls = 0;
     const rs = new ReadableStream({
@@ -76,7 +78,7 @@ export const drainingReaderDrivesBytePull = {
       if (done) break;
     }
     deepStrictEqual(seen, [1, 2]);
-    deepStrictEqual(byobRequests, ['null', 'null', 'null']);
+    deepStrictEqual(byobRequests, ['present', 'present', 'present']);
   },
 };
 
