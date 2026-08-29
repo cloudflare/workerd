@@ -644,13 +644,12 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
 
     KJ_CASE_ONEOF(cache, Global::MemoryCache) {
       value = lock.wrap(context,
-          lock.alloc<api::MemoryCache>(
-              api::SharedMemoryCache::Use(memoryCacheProvider.getInstance(cache.cacheId),
-                  {
-                    .maxKeys = cache.maxKeys,
-                    .maxValueSize = cache.maxValueSize,
-                    .maxTotalValueSize = cache.maxTotalValueSize,
-                  })));
+          lock.alloc<api::MemoryCache>(memoryCacheProvider.getUse(cache.cacheId,
+              {
+                .maxKeys = cache.maxKeys,
+                .maxValueSize = cache.maxValueSize,
+                .maxTotalValueSize = cache.maxTotalValueSize,
+              })));
     }
 
     KJ_CASE_ONEOF(ns, Global::EphemeralActorNamespace) {

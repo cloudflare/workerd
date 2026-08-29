@@ -308,6 +308,17 @@ export default {
   },
   'constants.sub.js': {},
   'constructor.any.js': {},
+  'constructor/option-bag.any.js': {
+    comment: 'WebSocket constructor option bags are not supported',
+    expectedFailures: [
+      'Empty option bag should be accepted',
+      'Option bag with protocols array should be accepted',
+    ],
+  },
+  'constructor/target-address-space.any.js': {
+    comment: 'Local Network Access checks are browser-specific',
+    omittedTests: true,
+  },
   'cookies/support/websocket-cookies-helper.sub.js': {
     comment: 'Cookie support helper, not an actual test',
     omittedTests: true,

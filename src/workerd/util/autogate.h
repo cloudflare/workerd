@@ -116,10 +116,17 @@ namespace workerd::util {
      existed; the typescript_implemented_streams compat flag requires this gate to receive         \
      streams over RPC (that combination is rejected, not degraded). */                             \
   V(RPC_EXTERNALS_HYDRATION)                                                                       \
-  /* Back compression streams with memory-safe Rust implementations instead of the native C      \
-     libraries. Currently covers zlib (zlib-rs) for node:zlib and web CompressionStream; the     \
-     native implementations remain the default. */                                               \
-  V(COMPRESSION_RS)
+  /* Route all zlib usage in the process to zlib-rs (libz-rs-sys), the memory-safe Rust          \
+     implementation, instead of chromium zlib. The unprefixed zlib symbols are owned by the      \
+     routing layer in util/zlib-router.c++, so this covers every consumer: node:zlib, web        \
+     CompressionStream, crypto crc32, kj-gzip/http (fetch and WebSocket compression), and V8's   \
+     compression utils. Chromium zlib remains the default. */                                    \
+  V(COMPRESSION_RS)                                                                                 \
+  /* Enables per-call JSRPC tracing, trace-context propagation, and related Fetcher spans. */       \
+  V(JSRPC_TRACING)                                                                                  \
+  /* Selects the redesigned memory cache implementation. The legacy implementation remains         \
+     available for rollback while this gate is rolled out. */                                      \
+  V(MEMORY_CACHE_V2)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

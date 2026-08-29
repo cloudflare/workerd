@@ -34,7 +34,13 @@ export default {
   'derive_bits_keys/derive.js': {},
   'derive_bits_keys/derive_key_and_encrypt.https.any.js': {},
   'derive_bits_keys/derive_key_and_encrypt.js': {},
-  'derive_bits_keys/derived_bits_length.https.any.js': {},
+  'derive_bits_keys/derived_bits_length.https.any.js': {
+    comment:
+      'deriveBits converts non-finite lengths to zero instead of enforcing [EnforceRange]',
+    expectedFailures: [
+      /^(HKDF|PBKDF2|ECDH|X25519) derivation with (NaN|Infinity) as 'length' parameter$/,
+    ],
+  },
   'derive_bits_keys/derived_bits_length.js': {},
   'derive_bits_keys/derived_bits_length_testcases.js': {
     comment:

@@ -1449,12 +1449,15 @@ class Container::TcpPortOutgoingFactory final: public Fetcher::OutgoingFactory {
         headerTable(headerTable),
         portState(kj::mv(portState)) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
-    // At present we have no use for `cfStr`.
-    return IoContext::current().getSubrequestNoChecks(
+  Result newSingleUseClient(
+      kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override {
+    // At present we have no use for `cfStr`. This factory creates no operation span.
+    auto client = IoContext::current().getSubrequestNoChecks(
         [&](auto& tracing, auto& channelFactory) -> kj::Own<WorkerInterface> {
+      makeUserSpanParent(tracing);
       return kj::heap<TcpPortWorkerInterface>(entropySource, headerTable, portState.addRef());
     }, {.inHouse = false, .wrapMetrics = false});
+    return {.client = kj::mv(client), .spanParents = kj::none};
   }
 
  private:

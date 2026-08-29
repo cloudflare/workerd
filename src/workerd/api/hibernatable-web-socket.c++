@@ -40,13 +40,12 @@ HibernatableWebSocketEvent::ItemsForRelease HibernatableWebSocketEvent::prepareF
   // Note that we don't call `claimWebSocket()` to get this, since we would lose our reference to
   // the HibernatableWebSocket (it removes it from `webSocketsForEventHandler`).
   auto websocketRef = hibernatableWebSocket.value->getActiveOrUnhibernate(lock);
-  auto ownedWebSocket = kj::mv(KJ_REQUIRE_NONNULL(hibernatableWebSocket.value->ws));
   auto tags = hibernatableWebSocket.value->getTags();
 
   // Now that we've obtained the websocket for the event, let's free up the slots we had allocated.
   manager.webSocketsForEventHandler.erase(hibernatableWebSocket);
 
-  return ItemsForRelease(kj::mv(websocketRef), kj::mv(ownedWebSocket), kj::mv(tags));
+  return ItemsForRelease(kj::mv(websocketRef), kj::mv(tags));
 }
 
 jsg::Ref<WebSocket> HibernatableWebSocketEvent::claimWebSocket(
@@ -192,9 +191,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
 }
 
 HibernatableWebSocketEvent::ItemsForRelease::ItemsForRelease(
-    jsg::Ref<WebSocket> ref, kj::Own<kj::WebSocket> owned, kj::Array<kj::String> tags)
+    jsg::Ref<WebSocket> ref, kj::Array<kj::String> tags)
     : webSocketRef(kj::mv(ref)),
-      ownedWebSocket(kj::mv(owned)),
       tags(kj::mv(tags)) {}
 
 HibernatableWebSocketCustomEvent::HibernatableWebSocketCustomEvent(uint16_t typeId,

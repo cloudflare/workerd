@@ -94,12 +94,13 @@ kj::StringPtr KJ_STRINGIFY(const LegacyWebSocketAdapter::NativeState& state) {
 // kj::Own<WebSocketAdapter> makeAdapterForHibernationRevival(jsg::Lock& js,
 //     WebSocket& shell,
 //     IoContext& ioContext,
-//     kj::WebSocket& ws,
+//     kj::Rc<kj::WebSocket> ws,
 //     WebSocket::HibernationPackage package) {
 //   if (util::Autogate::isEnabled(util::AutogateKey::HIBERNATABLE_WEBSOCKET_REFACTOR)) {
-//     return kj::heap<HibernatableWebSocketAdapter>(js, shell, ioContext, ws, kj::mv(package));
+//     return kj::heap<HibernatableWebSocketAdapter>(
+//         js, shell, ioContext, kj::mv(ws), kj::mv(package));
 //   }
-//   return kj::heap<LegacyWebSocketAdapter>(js, shell, ioContext, ws, kj::mv(package));
+//   return kj::heap<LegacyWebSocketAdapter>(js, shell, ioContext, kj::mv(ws), kj::mv(package));
 // }
 //
 // }  // namespace
@@ -110,12 +111,12 @@ kj::StringPtr KJ_STRINGIFY(const LegacyWebSocketAdapter::NativeState& state) {
 // =============================================================================
 
 WebSocket::WebSocket(
-    jsg::Lock& js, IoContext& ioContext, kj::WebSocket& ws, HibernationPackage package)
-    : impl(kj::heap<LegacyWebSocketAdapter>(js, *this, ioContext, ws, kj::mv(package))) {}
+    jsg::Lock& js, IoContext& ioContext, kj::Rc<kj::WebSocket> ws, HibernationPackage package)
+    : impl(kj::heap<LegacyWebSocketAdapter>(js, *this, ioContext, kj::mv(ws), kj::mv(package))) {}
 
 jsg::Ref<WebSocket> WebSocket::hibernatableFromNative(
-    jsg::Lock& js, kj::WebSocket& ws, HibernationPackage package) {
-  return js.alloc<WebSocket>(js, IoContext::current(), ws, kj::mv(package));
+    jsg::Lock& js, kj::Rc<kj::WebSocket> ws, HibernationPackage package) {
+  return js.alloc<WebSocket>(js, IoContext::current(), kj::mv(ws), kj::mv(package));
 }
 
 WebSocket::WebSocket(jsg::Lock& js, kj::Own<kj::WebSocket> native)
@@ -202,26 +203,24 @@ void WebSocket::setObserver(kj::Own<WebSocketObserver> observer) {
   impl->setObserver(kj::mv(observer));
 }
 
-kj::Own<kj::WebSocket> WebSocket::acceptAsHibernatable(kj::Array<kj::String> tags) {
+kj::Rc<kj::WebSocket> WebSocket::acceptAsHibernatable(kj::Array<kj::String> tags) {
   // TODO(EW-10817): When the HibernatableWebSocketAdapter path is functional, re-enable the
   // autogate-driven swap below — extract the kj::WebSocket from the legacy adapter (via
   // `LegacyWebSocketAdapter::extractForHibernatableTransition`, also commented out today)
   // and atomically replace `impl` with a fresh `HibernatableWebSocketAdapter`.
   //
   // if (util::Autogate::isEnabled(util::AutogateKey::HIBERNATABLE_WEBSOCKET_REFACTOR)) {
-  //   auto& legacy = kj::downcast<LegacyWebSocketAdapter>(*impl);
-  //   auto ws = legacy.extractForHibernatableTransition();
-  //   impl = kj::heap<HibernatableWebSocketAdapter>(*this, *ws, kj::mv(tags));
-  //   return kj::mv(ws);
+  //   auto ws = kj::Rc<kj::WebSocket>(
+  //       kj::downcast<LegacyWebSocketAdapter>(*impl).extractForHibernatableTransition());
+  //   impl = kj::heap<HibernatableWebSocketAdapter>(*this, ws.addRef(), kj::mv(tags));
+  //   return ws;
   // }
   return impl->acceptAsHibernatable(kj::mv(tags));
 }
 
-void WebSocket::initiateHibernatableRelease(jsg::Lock& js,
-    kj::Own<kj::WebSocket> ws,
-    kj::Array<kj::String> tags,
-    WebSocket::HibernatableReleaseState releaseState) {
-  impl->initiateHibernatableRelease(js, kj::mv(ws), kj::mv(tags), releaseState);
+void WebSocket::initiateHibernatableRelease(
+    jsg::Lock& js, kj::Array<kj::String> tags, WebSocket::HibernatableReleaseState releaseState) {
+  impl->initiateHibernatableRelease(js, kj::mv(tags), releaseState);
 }
 
 bool WebSocket::awaitingHibernatableError() {
@@ -277,11 +276,13 @@ void WebSocket::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
 // LegacyWebSocketAdapter — operational implementation.
 // =============================================================================
 
-IoOwn<LegacyWebSocketAdapter::Native> LegacyWebSocketAdapter::initNative(
-    IoContext& ioContext, kj::WebSocket& ws, kj::Array<kj::String> tags, bool closedOutgoingConn) {
+IoOwn<LegacyWebSocketAdapter::Native> LegacyWebSocketAdapter::initNative(IoContext& ioContext,
+    kj::Rc<kj::WebSocket> ws,
+    kj::Array<kj::String> tags,
+    bool closedOutgoingConn) {
   auto nativeObj = kj::heap<Native>();
   nativeObj->state.init<Accepted>(
-      Accepted::Hibernatable{.ws = ws, .tags = kj::mv(tags)}, *nativeObj, ioContext);
+      Accepted::Hibernatable{.ws = kj::mv(ws), .tags = kj::mv(tags)}, *nativeObj, ioContext);
   // We might have called `close()` when this WebSocket was previously active.
   // If so, we want to prevent any future calls to `send()`.
   nativeObj->closedOutgoing = closedOutgoingConn;
@@ -291,7 +292,7 @@ IoOwn<LegacyWebSocketAdapter::Native> LegacyWebSocketAdapter::initNative(
 LegacyWebSocketAdapter::LegacyWebSocketAdapter(jsg::Lock& js,
     WebSocket& shell,
     IoContext& ioContext,
-    kj::WebSocket& ws,
+    kj::Rc<kj::WebSocket> ws,
     WebSocket::HibernationPackage package)
     : shell(shell),
       url(kj::mv(package.url)),
@@ -302,7 +303,7 @@ LegacyWebSocketAdapter::LegacyWebSocketAdapter(jsg::Lock& js,
       serializedAttachment(kj::mv(package.serializedAttachment)),
       allowHalfOpen(package.allowHalfOpen),
       farNative(initNative(ioContext,
-          ws,
+          kj::mv(ws),
           kj::mv(KJ_REQUIRE_NONNULL(package.maybeTags)),
           package.closedOutgoingConnection)),
       outgoingMessages(ioContext.createObject<OutgoingMessagesMap>()),
@@ -1266,18 +1267,9 @@ kj::Promise<void> LegacyWebSocketAdapter::pump(IoContext& context,
         co_await promise;
       }
 
-      // If a DO constructor throws after sending data to a websocket, the `kj::WebSocket& ws` may already
-      // have been freed by the hibernation manager, so we must stop the pump loop and not touch `ws`.
-      //
-      // A constructor failure aborts the IoContext, so we use that as an early-return condition.
-      // Message sent from constructor always wait for an output gate, so by the time that await
-      // returns, this is the first line that runs after the constructor completes, regardless of its
-      // outcome.
-      //
-      // Note that `ws` can be freed during the pump loop only when the constructor throws. In all other
-      // cases the coroutine is canceled normally — for example, when we call send from
-      // `blockConcurrencyWhile()` inside the constructor, which then throws, or when the DO waits on
-      // `ws.send()` to deliver the data while another event handler calls `ctx.abort()`.
+      // A constructor failure aborts the IoContext. Messages sent from a constructor always wait
+      // for an output gate, so this is the first line that runs after the constructor completes.
+      // Do not send its queued messages after it fails.
       if (context.getAbortReason() != kj::none) {
         co_return;
       }
@@ -1519,15 +1511,13 @@ void LegacyWebSocketAdapter::setPeer(jsg::WeakRef<WebSocket> other) {
   peer = kj::mv(other);
 }
 
-kj::Own<kj::WebSocket> LegacyWebSocketAdapter::acceptAsHibernatable(kj::Array<kj::String> tags) {
+kj::Rc<kj::WebSocket> LegacyWebSocketAdapter::acceptAsHibernatable(kj::Array<kj::String> tags) {
   KJ_IF_SOME(hibernatable, farNative->state.tryGet<AwaitingAcceptanceOrCoupling>()) {
     // We can only request hibernation if we have not called accept.
-    auto ws = kj::mv(hibernatable.ws);
-    // We pass a reference to the kj::WebSocket for the api::WebSocket to refer to when calling
-    // `send()` or `close()`.
-    farNative->state.init<Accepted>(
-        Accepted::Hibernatable{.ws = *ws, .tags = kj::mv(tags)}, *farNative, IoContext::current());
-    return kj::mv(ws);
+    auto ws = kj::Rc<kj::WebSocket>(kj::mv(hibernatable.ws));
+    farNative->state.init<Accepted>(Accepted::Hibernatable{.ws = ws.addRef(), .tags = kj::mv(tags)},
+        *farNative, IoContext::current());
+    return ws;
   }
   JSG_FAIL_REQUIRE(TypeError,
       "Tried to make an api::WebSocket hibernatable when it was in an incompatible state.");
@@ -1547,16 +1537,14 @@ kj::Own<kj::WebSocket> LegacyWebSocketAdapter::acceptAsHibernatable(kj::Array<kj
 //       "Tried to make an api::WebSocket hibernatable when it was in an incompatible state.");
 // }
 
-void LegacyWebSocketAdapter::initiateHibernatableRelease(jsg::Lock& js,
-    kj::Own<kj::WebSocket> ws,
-    kj::Array<kj::String> tags,
-    WebSocket::HibernatableReleaseState releaseState) {
+void LegacyWebSocketAdapter::initiateHibernatableRelease(
+    jsg::Lock& js, kj::Array<kj::String> tags, WebSocket::HibernatableReleaseState releaseState) {
   // TODO(soon): We probably want this to be an assert, since this is meant to be called once
   // at the end of a websocket connection>
   KJ_IF_SOME(state, farNative->state.tryGet<Accepted>()) {
     KJ_REQUIRE(state.isHibernatable(),
         "tried to initiate hibernatable release but websocket wasn't hibernatable");
-    state.ws.initiateHibernatableRelease(js, kj::mv(ws), kj::mv(tags), releaseState);
+    state.ws.initiateHibernatableRelease(js, kj::mv(tags), releaseState);
     farNative->closedIncoming = true;
   } else {
     KJ_LOG(WARNING, "Unexpected Hibernatable WebSocket state on release", farNative->state);
@@ -1614,7 +1602,7 @@ kj::WebSocket* LegacyWebSocketAdapter::Accepted::WrappedWebSocket::operator->() 
       return owned.get();
     }
     KJ_CASE_ONEOF(hibernatable, Hibernatable) {
-      return &hibernatable.ws;
+      return hibernatable.ws.get();
     }
   }
   KJ_UNREACHABLE;
@@ -1626,7 +1614,7 @@ kj::WebSocket& LegacyWebSocketAdapter::Accepted::WrappedWebSocket::operator*() {
       return *owned;
     }
     KJ_CASE_ONEOF(hibernatable, Hibernatable) {
-      return hibernatable.ws;
+      return *hibernatable.ws;
     }
   }
   KJ_UNREACHABLE;
@@ -1654,14 +1642,10 @@ kj::Array<kj::StringPtr> LegacyWebSocketAdapter::Accepted::WrappedWebSocket::get
   return result;
 }
 
-void LegacyWebSocketAdapter::Accepted::WrappedWebSocket::initiateHibernatableRelease(jsg::Lock& js,
-    kj::Own<kj::WebSocket> ws,
-    kj::Array<kj::String> tags,
-    WebSocket::HibernatableReleaseState state) {
+void LegacyWebSocketAdapter::Accepted::WrappedWebSocket::initiateHibernatableRelease(
+    jsg::Lock& js, kj::Array<kj::String> tags, WebSocket::HibernatableReleaseState state) {
   auto& hibernatable = KJ_REQUIRE_NONNULL(getIfHibernatable());
   hibernatable.releaseState = state;
-  // Note that we move the owned kj::WebSocket here.
-  hibernatable.attachedForClose = kj::mv(ws);
   hibernatable.tags = kj::mv(tags);
 }
 

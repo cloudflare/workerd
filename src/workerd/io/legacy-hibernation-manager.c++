@@ -18,8 +18,8 @@ LegacyHibernationManagerImpl::HibernatableWebSocket::HibernatableWebSocket(
     : tagItems(kj::heapArray<TagListItem>(tags.size())),
       activeOrPackage(kj::mv(websocket)),
       // The `ws` starts off empty because we need to set up our tagging infrastructure before
-      // calling api::WebSocket::acceptAsHibernatable(). We will transfer ownership of the
-      // kj::WebSocket prior to starting the readLoop.
+      // calling api::WebSocket::acceptAsHibernatable(). We will share ownership of the
+      // kj::WebSocket before starting the readLoop.
       ws(kj::none),
       manager(manager) {}
 
@@ -66,8 +66,8 @@ jsg::Ref<api::WebSocket> LegacyHibernationManagerImpl::HibernatableWebSocket::
       autoResponsePromise = promise.addBranch();
     }
     activeOrPackage
-        .init<jsg::Ref<api::WebSocket>>(
-            api::WebSocket::hibernatableFromNative(js, *KJ_REQUIRE_NONNULL(ws), kj::mv(package)))
+        .init<jsg::Ref<api::WebSocket>>(api::WebSocket::hibernatableFromNative(
+            js, KJ_REQUIRE_NONNULL(ws).addRef(), kj::mv(package)))
         ->setAutoResponseStatus(autoResponseTimestamp, kj::mv(autoResponsePromise));
   }
   return activeOrPackage.get<jsg::Ref<api::WebSocket>>().addRef();
@@ -145,8 +145,8 @@ void LegacyHibernationManagerImpl::acceptWebSocket(
     tagListItem.list = *list.get();
   }
 
-  // Before starting the readLoop, we need to move the kj::Own<kj::WebSocket> from the
-  // api::WebSocket into the HibernatableWebSocket and accept the api::WebSocket as "hibernatable".
+  // Before starting the readLoop, share ownership of the kj::WebSocket with the
+  // HibernatableWebSocket and accept the api::WebSocket as hibernatable.
   refToHibernatable.ws =
       refToHibernatable.activeOrPackage.get<jsg::Ref<api::WebSocket>>()->acceptAsHibernatable(
           refToHibernatable.getTags());

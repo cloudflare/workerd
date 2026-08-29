@@ -14,6 +14,7 @@
 #include <workerd/util/strong-bool.h>
 
 #include <kj/compat/http.h>
+#include <kj/refcount.h>
 
 #include <cstdlib>
 #include <list>
@@ -226,12 +227,13 @@ class WebSocket: public EventTarget {
   // This WebSocket constructor is only used when WebSockets wake up from hibernation.
   // It will immediately set the `state` to `Accepted`, but it limits the behavior by specifying it
   // as `Hibernatable` -- thereby making most api::WebSocket methods inaccessible.
-  WebSocket(jsg::Lock& js, IoContext& ioContext, kj::WebSocket& ws, HibernationPackage package);
+  WebSocket(
+      jsg::Lock& js, IoContext& ioContext, kj::Rc<kj::WebSocket> ws, HibernationPackage package);
 
   // Similar to how the JS `constructor()` creates a WebSocket, when waking from hibernation
   // we want to be able to recreate WebSockets from C++ that will be delivered to JS code.
   static jsg::Ref<WebSocket> hibernatableFromNative(
-      jsg::Lock& js, kj::WebSocket& ws, HibernationPackage package);
+      jsg::Lock& js, kj::Rc<kj::WebSocket> ws, HibernationPackage package);
 
   // The JS WebSocket constructor needs to initiate a connection, but we need to return the
   // WebSocket object to the caller in Javascript immediately. We will defer the connection logic
@@ -255,9 +257,9 @@ class WebSocket: public EventTarget {
   kj::Promise<DeferredProxy<void>> couple(
       jsg::Lock& js, kj::Own<kj::WebSocket> other, RequestObserver& request);
 
-  // Extract the kj::WebSocket from this api::WebSocket (if applicable). The kj::WebSocket will be
-  // owned elsewhere, but the api::WebSocket will retain a reference.
-  kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags);
+  // The kj::WebSocket is shared with the HibernationManager so both it and this api::WebSocket
+  // retain ownership.
+  kj::Rc<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags);
 
   // Accesses the tags of the hibernatable websocket.
   kj::Array<kj::StringPtr> getHibernatableTags();
@@ -272,10 +274,8 @@ class WebSocket: public EventTarget {
 
   // Called when a Hibernatable WebSocket wants to dispatch a close/error event, this modifies
   // our `Accepted` state to prepare the state to transition to `Released`.
-  void initiateHibernatableRelease(jsg::Lock& js,
-      kj::Own<kj::WebSocket> ws,
-      kj::Array<kj::String> tags,
-      HibernatableReleaseState releaseState);
+  void initiateHibernatableRelease(
+      jsg::Lock& js, kj::Array<kj::String> tags, HibernatableReleaseState releaseState);
 
   bool awaitingHibernatableError();
 
@@ -519,14 +519,12 @@ class WebSocketAdapter {
   // peer end when the local end is terminating in this worker.
   virtual void setObserver(kj::Own<WebSocketObserver> observer) = 0;
 
-  // Hibernation transitions: extracts the kj::WebSocket so the HibernationManager can
-  // assume ownership; the adapter retains a bare reference for sends.
-  virtual kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags) = 0;
+  // Hibernation transitions: shares ownership of the kj::WebSocket with the HibernationManager.
+  virtual kj::Rc<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags) = 0;
 
   // HibernationManager coordination: signals that the underlying connection is winding
   // down and the adapter should arrange to deliver its terminal close/error event.
   virtual void initiateHibernatableRelease(jsg::Lock& js,
-      kj::Own<kj::WebSocket> ws,
       kj::Array<kj::String> tags,
       WebSocket::HibernatableReleaseState releaseState) = 0;
   virtual bool awaitingHibernatableError() = 0;
@@ -589,7 +587,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   LegacyWebSocketAdapter(jsg::Lock& js,
       WebSocket& shell,
       IoContext& ioContext,
-      kj::WebSocket& ws,
+      kj::Rc<kj::WebSocket> ws,
       WebSocket::HibernationPackage package);
 
   // ---------------------------------------------------------------------------
@@ -619,9 +617,8 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   bool isHibernatable() override;
   void setObserver(kj::Own<WebSocketObserver> observer) override;
 
-  kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags) override;
+  kj::Rc<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags) override;
   void initiateHibernatableRelease(jsg::Lock& js,
-      kj::Own<kj::WebSocket> ws,
       kj::Array<kj::String> tags,
       WebSocket::HibernatableReleaseState releaseState) override;
   bool awaitingHibernatableError() override;
@@ -670,12 +667,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
     // A `Hibernatable` WebSocket shares a sub-set of behavior that's already implemented for
     // an `Accepted` WebSocket, so we can think of it a sub-state.
     struct Hibernatable {
-      kj::WebSocket& ws;
-      // If we have initiated a hibernatable error/close event, we need to take back ownership
-      // of the kj::WebSocket so any final queued messages will deliver. We store this owned
-      // websocket in `attachedForClose`. Since the `ws` reference is still valid, we prevent
-      // usage of `attachedForClose` directly in favor of using `ws` directly.
-      kj::Maybe<kj::Own<void>> attachedForClose;
+      kj::Rc<kj::WebSocket> ws;
 
       // We can't move the state to Released after the Hibernatable Close/Error event runs,
       // since we don't have a request on the thread by the time the event completes. If we
@@ -708,10 +700,8 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
 
       // Transitions our Hibernatable websocket to a "Releasing" state. The websocket will
       // transition to `Released` when convenient.
-      void initiateHibernatableRelease(jsg::Lock& js,
-          kj::Own<kj::WebSocket> ws,
-          kj::Array<kj::String> tags,
-          WebSocket::HibernatableReleaseState state);
+      void initiateHibernatableRelease(
+          jsg::Lock& js, kj::Array<kj::String> tags, WebSocket::HibernatableReleaseState state);
 
       bool isAwaitingRelease();
       bool isAwaitingError();
@@ -799,8 +789,10 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
 
   // Creates a fresh `Native` set up in the Accepted-Hibernatable state. Used by the
   // hibernation-revival constructor.
-  IoOwn<Native> initNative(
-      IoContext& ioContext, kj::WebSocket& ws, kj::Array<kj::String> tags, bool closedOutgoingConn);
+  IoOwn<Native> initNative(IoContext& ioContext,
+      kj::Rc<kj::WebSocket> ws,
+      kj::Array<kj::String> tags,
+      bool closedOutgoingConn);
 
   void dispatchOpen(jsg::Lock& js);
   void ensurePumping(jsg::Lock& js);

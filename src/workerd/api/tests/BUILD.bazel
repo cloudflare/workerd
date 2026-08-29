@@ -67,6 +67,12 @@ wd_test(
 )
 
 wd_test(
+    src = "streams-internal-read-buffer-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-internal-read-buffer-gc-test.js"],
+)
+
+wd_test(
     src = "error-deser-prototype-setter-test.wd-test",
     args = ["--experimental"],
     data = ["error-deser-prototype-setter-test.js"],
@@ -193,6 +199,30 @@ wd_test(
     data = [
         "jsrpc-timing-test.js",
         "jsrpc-timing-test-tail.js",
+    ],
+    tags = ["no-coverage"],
+)
+
+# Regression test: a callback passed as an RPC argument, when invoked by the callee, must
+# produce a jsRpcCall span nested under the method's server-side jsRpcCall span.
+wd_test(
+    src = "jsrpc-callback-trace-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "jsrpc-callback-trace-test.js",
+        "jsrpc-callback-trace-test-tail.js",
+    ],
+    tags = ["no-coverage"],
+)
+
+# Test: a callee invocation is parented to the first caller jsRpcCall, and each dispatch links to
+# its corresponding caller span.
+wd_test(
+    src = "jsrpc-pipelined-trace-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "jsrpc-pipelined-trace-test.js",
+        "jsrpc-pipelined-trace-test-tail.js",
     ],
     tags = ["no-coverage"],
 )
@@ -400,12 +430,6 @@ wd_test(
 )
 
 wd_test(
-    src = "abort-internal-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["abort-internal-streams-test.js"],
-)
-
-wd_test(
     src = "abortable-fetch-test.wd-test",
     args = ["--experimental"],
     data = ["abortable-fetch-test.js"],
@@ -532,6 +556,12 @@ wd_test(
 )
 
 wd_test(
+    src = "eventsource-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["eventsource-gc-test.js"],
+)
+
+wd_test(
     src = "eventsource-test.wd-test",
     args = ["--experimental"],
     data = ["eventsource-test.js"],
@@ -642,6 +672,18 @@ wd_test(
 )
 
 wd_test(
+    src = "js-rpc-writable-teardown-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-writable-teardown-test.js"],
+)
+
+wd_test(
+    src = "js-rpc-writable-teardown-ts-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-writable-teardown-test.js"],
+)
+
+wd_test(
     src = "js-rpc-params-ownership-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-params-ownership-test.js"],
@@ -690,6 +732,7 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
     src = "scheduler-test.wd-test",
     args = ["--experimental"],
     data = ["scheduler-test.js"],
@@ -1190,7 +1233,7 @@ wd_test(
 )
 
 wd_test(
-    size = "large",
+    size = "enormous",
     src = "worker-loader-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-test.js"],
@@ -1313,12 +1356,6 @@ wd_test(
 )
 
 wd_test(
-    src = "identity-transform-stream-state-machine-test.wd-test",
-    args = ["--experimental"],
-    data = ["identity-transform-stream-state-machine-test.js"],
-)
-
-wd_test(
     src = "identity-transform-stream-uaf-test.wd-test",
     args = ["--experimental"],
     data = ["identity-transform-stream-uaf-test.js"],
@@ -1375,12 +1412,6 @@ wd_test(
     src = "messageport-gc-test.wd-test",
     args = ["--experimental"],
     data = ["messageport-gc-test.js"],
-)
-
-wd_test(
-    src = "ts-identity-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["ts-identity-streams-test.js"],
 )
 
 sh_test(

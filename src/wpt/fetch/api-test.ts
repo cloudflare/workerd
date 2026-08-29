@@ -268,6 +268,10 @@ export default {
     comment: 'CORS is not implemented',
     omittedTests: true,
   },
+  'cors/cors-preflight-cache-tainted.any.js': {
+    comment: 'CORS is not implemented',
+    omittedTests: true,
+  },
   'cors/cors-preflight-cache.any.js': {
     comment: 'CORS is not implemented',
     omittedTests: true,
