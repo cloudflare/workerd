@@ -149,10 +149,11 @@ export const readDetachesCallerBuffer = {
   },
 };
 
-// close() while an UNFILLED BYOB read is pending. DIVERGENCE: C++
-// resolves the read done with an empty view; the TypeScript read PENDS
-// FOREVER while close() itself succeeds (bounded observation — the
-// close-below-min defect family, without any min involved).
+// close() while an UNFILLED BYOB read is pending: the read resolves done
+// with an empty view over the transferred buffer (parity; under
+// TypeScript the parked read settles via the deferred end-of-data
+// commit, one microtask after close() — a same-turn respond(0) would
+// win with the spec's committed shape instead).
 export const closeWithPendingUnfilledByobRead = {
   async test() {
     let controller;
@@ -172,13 +173,9 @@ export const closeWithPendingUnfilledByobRead = {
       ),
       scheduler.wait(250).then(() => ({ state: 'pending' })),
     ]);
-    if (usingTsImpl) {
-      strictEqual(outcome.state, 'pending');
-    } else {
-      strictEqual(outcome.state, 'fulfilled');
-      strictEqual(outcome.r.done, true);
-      strictEqual(outcome.r.value.byteLength, 0);
-    }
+    strictEqual(outcome.state, 'fulfilled');
+    strictEqual(outcome.r.done, true);
+    strictEqual(outcome.r.value.byteLength, 0);
     await reader.closed;
   },
 };

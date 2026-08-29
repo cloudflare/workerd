@@ -26,8 +26,8 @@ behavior-parity (messages aside).
 | 9 | released pending read's rejection | 'This ReadableStream reader has been released.' | 'This reader has been released' | `relockRespondRoutesToSecondReader` |
 | 10 | respond(N) overflowing the current read's smaller view | RangeError 'Too many bytes [N]...'; second read stays pending | accepted; commits to the released descriptor; second read fulfills its view UNTOUCHED (zeros) | `relockRespondOverflowSecondView` |
 | 11 | read min validation | min=0 TypeError; min>view TypeError | min=0 TypeError (other msg); min>view RANGEError | `readMinValidation` |
-| 12 | close() below min with partial bytes (WPT read-min disable root) | read fulfills partial, done=false | read PENDS FOREVER while closed fulfills — BOTH nonconforming (spec: TypeError) | `closeBelowMin` |
-| 13 | readAtLeast/min at native end-of-stream | below-min tail delivered done=false, then an extra read resolves done + empty view | done=true folded into the final below-min bytes | `readAtLeastByobReader` |
+| 12 | close() below min with partial bytes | read fulfills the partial bytes done=false; a subsequent read resolves done + empty view (the DECIDED tail contract; the spec's TypeError shape is implemented by neither side) | same — the parked read settles via the deferred end-of-data commit, one microtask after close() | `closeBelowMin` |
+| 13 | readAtLeast/min at native end-of-stream | below-min tail delivered done=false, then an extra read resolves done + empty view | same (the conduit's under-delivery commit; decided contract) | `readAtLeastByobReader` |
 | 14 | tee cancel composite | pair-completing branch's reason only (readable #11 mirror) | AggregateError[r1, r2]; lone-branch cancel PENDS — never await it | `teeCancelComposite` |
 | 15 | respondWithNewView with a different element size | adopts the NEW view's element size (6 bytes at once) | keeps the ORIGINAL read view's element size (4-byte multiple), queues the remainder | `readableStreamByteRespondWithNewViewUsesNewElementSize` |
 | 16 | invalidated byobRequest message | 'This ReadableStreamBYOBRequest has been invalidated.' | 'This BYOB request has been invalidated' | `readableStreamByteRespond` |
@@ -118,7 +118,7 @@ named suite test pins directly, differing only in incidental asserts.
 | `flag-no-auto-allocate.js` | the flag cell (migrated streams-no-auto-allocate-test) |
 | `legacy-constructors.js` / `legacy-nodetach.js` | the flags table's legacy windows |
 | `draining-reader.js` | TS only (C++ cell asserts the global's absence): a queued byte backlog plus the close sentinel swept in one batched read with chunks INTACT (no coalescing); the conduit drives pull with byobRequest null (ledger #5/#6 shape); expectedLength undefined; error/cancel propagation |
-| `data-volumes.js` | byte-transfer volumes 64 B / 64 KiB / 1 MiB / 8 MiB via default and BYOB readers (incl. mismatched view/enqueue granularity), continuous prime-modulus pattern verified byte-exact; the source closes WITH its last enqueue (see ledger #19) |
+| `data-volumes.js` | byte-transfer volumes 64 B / 64 KiB / 1 MiB / 8 MiB via default and BYOB readers (incl. mismatched view/enqueue granularity), continuous prime-modulus pattern verified byte-exact; the source closes WITH its last enqueue (single-shape loops; parked-read close settlement is ledger #19's) |
 
 Consumed sources (deleted): streams-js-test.js (value halves were
 already covered by the readable suite), streams-tee-edge-cases-test.js,

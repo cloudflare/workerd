@@ -4,8 +4,11 @@
 
 // The read-minimum machinery: the standard read(view, {min}) option and
 // the workerd readAtLeast(min, view) extension (implemented by BOTH
-// sides). The WPT read-min.any suite is disabled for hangs; the
-// close-below-min divergence pinned here is the underlying reason.
+// sides). Close-below-min follows the DECIDED tail contract (matching
+// C++, diverging from the spec's TypeError): the below-min bytes are
+// delivered done=false and a subsequent read resolves done with an
+// empty view. The WPT read-min.any suite stays disabled on the C++
+// side for its own hangs; the TypeScript side runs it.
 
 import { strictEqual, ok, throws, rejects } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -102,11 +105,12 @@ export const readMinValidation = {
   },
 };
 
-// DIVERGENCE (the WPT read-min disable root): close() while a min-read
-// holds SOME bytes (2 of 3). C++ fulfills the read with the partial
-// bytes and done=false; TypeScript leaves the read PENDING FOREVER
-// while reader.closed fulfills (bounded observation). The spec calls
-// for a TypeError — neither side conforms.
+// close() while a min-read holds SOME bytes (2 of 3): the read fulfills
+// with the partial bytes, done=false, and a subsequent read resolves
+// done with an empty view — the DECIDED readAtLeast tail contract,
+// parity on both implementations. (The spec's TypeError-on-close shape
+// is implemented by neither side; TypeScript settles the parked read
+// via a deferred end-of-data commit one microtask after close().)
 export const closeBelowMin = {
   async test() {
     const { rs, controller } = byteStream();
@@ -117,19 +121,15 @@ export const closeBelowMin = {
     await scheduler.wait(5);
     controller().close();
     strictEqual(await reader.closed, undefined);
-    if (usingTsImpl) {
-      const outcome = await Promise.race([
-        read.then(() => 'settled'),
-        scheduler.wait(100).then(() => 'pending'),
-      ]);
-      strictEqual(outcome, 'pending');
-    } else {
-      const { value, done } = await read;
-      strictEqual(done, false);
-      strictEqual(value.byteLength, 2);
-      strictEqual(value[0], 1);
-      strictEqual(value[1], 2);
-    }
+    const { value, done } = await read;
+    strictEqual(done, false);
+    strictEqual(value.byteLength, 2);
+    strictEqual(value[0], 1);
+    strictEqual(value[1], 2);
+    const tail = await reader.read(new Uint8Array(4));
+    strictEqual(tail.done, true);
+    ok(tail.value instanceof Uint8Array);
+    strictEqual(tail.value.byteLength, 0);
   },
 };
 
@@ -209,17 +209,14 @@ export const readAtLeastByobReader = {
     result = await reader.readAtLeast(4, new Uint8Array(20));
     value = new TextDecoder().decode(result.value);
     strictEqual(value, 'az');
-    // DIVERGENCE in the end-of-stream shape: TypeScript reports done
-    // together with the final below-min bytes; C++ returns them
-    // done=false and requires one more read, which resolves done with
-    // an empty view (the pinned internal_stream_byob_return_view
+    // End-of-stream tail shape (the DECIDED contract, parity): the
+    // below-min tail is delivered done=false; one more read resolves
+    // done with an empty view (the pinned internal_stream_byob_return_view
     // behavior).
-    strictEqual(result.done, usingTsImpl);
-    if (!usingTsImpl) {
-      result = await reader.readAtLeast(4, new Uint8Array(20));
-      strictEqual(result.done, true);
-      ok(result.value instanceof Uint8Array);
-      strictEqual(result.value.byteLength, 0);
-    }
+    strictEqual(result.done, false);
+    result = await reader.readAtLeast(4, new Uint8Array(20));
+    strictEqual(result.done, true);
+    ok(result.value instanceof Uint8Array);
+    strictEqual(result.value.byteLength, 0);
   },
 };

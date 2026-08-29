@@ -49,17 +49,16 @@
 //     accumulation toward `atLeast` happens inside the native source;
 //     the conduit never re-pulls an unsatisfied read. Responding with
 //     fewer bytes than `atLeast` IMPLICITLY SIGNALS CLOSURE: the partial
-//     fill commits fused as { done: true, value: partialView }, the
-//     stream closes, and every subsequent read returns EOF. This result
-//     is deliberately INDISTINGUISHABLE from the standard's one fused
-//     corner — a pending min read committed in the closed state via
-//     close() + respond(0) (RespondInClosedState →
-//     CommitPullIntoDescriptor, which fulfills the read-into request
-//     with the partial view and done: true). The signaling MECHANISM
-//     differs (a queued JS source is pulled again and must close()
-//     explicitly; for a native source the under-delivery itself is the
-//     signal), but consumers observe the same result shapes on both
-//     backends.
+//     fill commits as { done: false, value: partialView }, the stream
+//     closes, and every subsequent read returns EOF (BYOB reads get a
+//     zero-length view over their transferred buffer). This is the
+//     decided C++-parity readAtLeast tail shape — the below-minimum
+//     tail is never fused with the done flag — and it matches the
+//     queued backend's deferred end-of-data commit, so consumers
+//     observe the same tail on both backends. (Only an explicit
+//     same-turn respond(0)-after-close on the QUEUED backend produces
+//     the spec's fused { done: true, value: partial } fold; the native
+//     conduit has no respond(0) — close() is the EOF verb.)
 //   - Close is otherwise a fused close-commit: controller.close() may
 //     follow a respond() in the same pull turn — deliberately divergent
 //     from the queued backend's drain-then-sentinel model.
@@ -979,16 +978,17 @@ class NativePullConduit implements ByteStreamConsumerType {
     }
     // MIN-READ CONTRACT: the respond is the source's COMPLETE answer for
     // this read. Delivering fewer bytes than the requested minimum
-    // (atLeast) signals end-of-stream: the partial fill commits FUSED
-    // with done: true, the stream closes, and every subsequent read
-    // returns EOF. The conduit never re-pulls an unsatisfied read — any
+    // (atLeast) signals end-of-stream: the partial fill commits
+    // { done: false, value: partialView }, the stream closes, and every
+    // subsequent read returns EOF — the decided C++-parity readAtLeast
+    // tail shape. The conduit never re-pulls an unsatisfied read — any
     // accumulation toward the minimum happens inside the native source
     // (tryRead-style). State transitions before promise resolutions.
     //
     // EXPECTED-LENGTH: under-delivery is a close signal, so the
     // exact-total contract applies — landing short of expectedLength is
     // underflow and errors the stream instead of closing it. (Landing
-    // exactly on it is a legitimate fused close.)
+    // exactly on it is a legitimate close-with-delivery.)
     if (
       this.#expectedLength !== undefined &&
       this.#bytesDelivered < this.#expectedLength
@@ -1005,7 +1005,7 @@ class NativePullConduit implements ByteStreamConsumerType {
       return;
     }
     this.#status = 'closed';
-    desc.resolve({ done: true, value });
+    desc.resolve({ done: false, value });
     this.#settleRemainingAsEof();
     this.#hooks.closeStream();
   }
@@ -1075,11 +1075,11 @@ class NativePullConduit implements ByteStreamConsumerType {
     this.#byobRequestCache = null;
 
     // DEFENSIVE, currently unreachable: under the min-read contract every
-    // respond commits (satisfied → done: false; under-delivered → fused
-    // EOF), so a partially-filled descriptor cannot persist to close().
-    // Retained because the contract describes close() fusing with a
-    // partial fill, should a future revision reintroduce partial
-    // responds.
+    // respond commits (satisfied → done: false; under-delivered → the
+    // done: false tail followed by EOF), so a partially-filled descriptor
+    // cannot persist to close(). Retained should a future revision
+    // reintroduce partial responds; the shape mirrors the under-delivery
+    // tail (partial done: false, then #settleRemainingAsEof).
     const head = this.#requests[0];
     if (
       head !== undefined &&
@@ -1101,7 +1101,7 @@ class NativePullConduit implements ByteStreamConsumerType {
       }
       ArrayPrototypeSplice(this.#requests, 0, 1);
       desc.resolve({
-        done: true,
+        done: false,
         value: new desc.viewCtor(
           desc.buffer,
           desc.byteOffset,
