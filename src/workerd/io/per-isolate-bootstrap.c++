@@ -334,16 +334,7 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
       // properties available as variables in the function scope without
       // putting them on globalThis.
       auto source = script.getSrc();
-#if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
-      // Under LSAN, use a copied string to avoid false-positive leak reports.
-      // The ExternString resource is properly owned by V8 (freed via Dispose()
-      // on GC), but LSAN can't trace through V8's heap to see it.
       auto sourceStr = js.str(source);
-#else
-      // Use strExtern to avoid copying — the source data lives in the static
-      // capnp bundle for the lifetime of the process.
-      auto sourceStr = js.strExtern(source.asChars());
-#endif
       auto originName = kj::str("workerd:per-isolate/", normalized);
       v8::ScriptOrigin origin(js.strIntern(originName));
 

@@ -259,12 +259,8 @@ struct WorkerdApi::Impl final {
       : features(capnp::clone(featuresParam)),
         extensions(extensionsParam),
         observer(kj::atomicAddRef(*observerParam)),
-        jsgIsolate(v8System,
-            group,
-            Configuration(*this),
-            kj::mv(observerParam),
-            jsg::defaultExternalStringAllocator(),
-            kj::mv(createParams)),
+        jsgIsolate(
+            v8System, group, Configuration(*this), kj::mv(observerParam), kj::mv(createParams)),
         memoryCacheProvider(memoryCacheProvider),
         pythonConfig(pythonConfig) {
     jsgIsolate.runInLockScope([&](JsgWorkerdIsolate::Lock& lock) {

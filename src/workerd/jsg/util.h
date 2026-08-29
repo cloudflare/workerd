@@ -533,55 +533,7 @@ concept StrictlyBool = kj::isSameType<T, bool>();
 
 class Lock;
 
-// Interface for allocating backing stores for v8 external string.
-class ExternalStringAllocator {
- public:
-  virtual ~ExternalStringAllocator() = default;
-
-  virtual void* allocate(size_t size) = 0;
-  virtual void deallocate(void* ptr) = 0;
-};
-
-// Returns a singleton DefaultExternalStringAllocator.
-kj::Own<ExternalStringAllocator> defaultExternalStringAllocator();
-
 using OwnedAscii = kj::Array<const char>;
-using OwnedUtf16 = kj::Array<const uint16_t>;
-
-// Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
-// take ownership of the buf. The buf *must* point to a static constant with infinite
-// lifetime.
-//
-// It is important to understand that the OneByteString variant will interpret buf as
-// latin-1 rather than UTF-8, which is how KJ normally represents text. There is no
-// variation of external strings that support UTF-8 encoded bytes. To represent any
-// text outside of the Latin1 range, the two-byte (uint16_t) variant must be used.
-//
-// Note that these intentionally do not use the v8Str naming convention like the other
-// string methods because it needs to be absolutely clear that these use external buffers
-// that are not owned by the v8 heap.
-v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf);
-
-// Creates a V8 external string whose resource shares ownership of `buf`. The backing
-// allocation remains alive until both the caller and all V8 strings release their Arcs.
-v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::Arc<OwnedAscii> buf);
-
-// Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
-// take ownership of the buf. The buf *must* point to a static constant with infinite
-// lifetime.
-//
-// It is important to understand that the OneByteString variant will interpret buf as
-// latin-1 rather than UTF-8, which is how KJ normally represents text. There is no
-// variation of external strings that support UTF-8 encoded bytes. To represent any
-// text outside of the Latin1 range, the two-byte (uint16_t) variant must be used.
-//
-// Note that these intentionally do not use the v8Str naming convention like the other
-// string methods because it needs to be absolutely clear that these use external buffers
-// that are not owned by the v8 heap.
-v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf);
-
-// Two-byte counterpart to the owning one-byte overload above.
-v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::Arc<OwnedUtf16> buf);
 
 // Use this type to mark APIs that are not implemented. Attempts to use the API will throw an
 // exception.

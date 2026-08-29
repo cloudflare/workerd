@@ -436,7 +436,6 @@ static v8::Isolate* newIsolate(
 IsolateBase::IsolateBase(V8System& system,
     v8::Isolate::CreateParams&& createParams,
     kj::Own<IsolateObserver> observer,
-    kj::Own<ExternalStringAllocator> externalStringAllocator,
     v8::IsolateGroup group)
     : v8System(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(system.platformWrapper.get()))),
@@ -445,8 +444,7 @@ IsolateBase::IsolateBase(V8System& system,
       envAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
       exportsAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
-      observer(kj::mv(observer)),
-      externalStringAllocator(kj::mv(externalStringAllocator)) {
+      observer(kj::mv(observer)) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     ptr->SetEmbedderRootsHandler(&heapTracer);
 

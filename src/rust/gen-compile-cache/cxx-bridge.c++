@@ -38,11 +38,11 @@ constexpr v8::ScriptCompiler::CompileOptions compileOptions = v8::ScriptCompiler
     return JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
         isolateLock.newContext<CompilerCacheContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
       return js.tryCatch([&]() {
-        auto resourceName = jsg::newExternalOneByteString(js, kj::from<Rust>(path));
+        auto resourceName = js.str(kj::from<Rust>(path));
         v8::ScriptOrigin origin(resourceName, resourceLineOffset, resourceColumnOffset,
             resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, isModule);
 
-        auto contentStr = jsg::newExternalOneByteString(js, kj::from<Rust>(source));
+        auto contentStr = js.str(kj::from<Rust>(source));
         auto source = v8::ScriptCompiler::Source(contentStr, origin, nullptr);
         auto module =
             jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, compileOptions));

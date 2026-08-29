@@ -397,16 +397,8 @@ v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
   constexpr bool isModule = true;
   v8::ScriptOrigin origin(v8StrIntern(js.v8Isolate, name), resourceLineOffset, resourceColumnOffset,
       resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, isModule);
-  v8::Local<v8::String> contentStr;
-
-  if (option == ModuleInfoCompileOption::BUILTIN) {
-    // TODO(later): Use of newExternalOneByteString here limits our built-in source
-    // modules (for which this path is used) to only the latin1 character set. We
-    // may need to revisit that to import built-ins as UTF-16 (two-byte).
-    contentStr = jsg::newExternalOneByteString(js, content);
-  } else {
-    contentStr = jsg::v8Str(js.v8Isolate, content);
-  }
+  auto contentStr = js.str(content);
+  observer.onEsmCompilationSource(js.v8Isolate, contentStr);
 
   if (compileCache.size() > 0 && compileCache.begin() != nullptr) {
     auto cached =

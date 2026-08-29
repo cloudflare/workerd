@@ -1374,22 +1374,6 @@ inline JsString Lock::strIntern(kj::StringPtr str) {
       v8Isolate, str.begin(), v8::NewStringType::kInternalized, str.size())));
 }
 
-inline JsString Lock::strExtern(kj::ArrayPtr<const char> str) {
-  return JsString(newExternalOneByteString(*this, str));
-}
-
-inline JsString Lock::strExtern(kj::Arc<OwnedAscii> str) {
-  return JsString(newExternalOneByteString(*this, kj::mv(str)));
-}
-
-inline JsString Lock::strExtern(kj::ArrayPtr<const uint16_t> str) {
-  return JsString(newExternalTwoByteString(*this, str));
-}
-
-inline JsString Lock::strExtern(kj::Arc<OwnedUtf16> str) {
-  return JsString(newExternalTwoByteString(*this, kj::mv(str)));
-}
-
 inline JsObject Lock::obj() {
   return JsObject(v8::Object::New(v8Isolate));
 }

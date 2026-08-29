@@ -110,6 +110,9 @@ struct CompilationObserver {
     return kj::Own<void>();
   }
 
+  // Called with the source string that will be passed to V8 for compilation.
+  virtual void onEsmCompilationSource(v8::Isolate* isolate, v8::Local<v8::String> source) const {}
+
   // Called at the start of Script (e.g. non-ESM) compilation.
   // Returned value will be destroyed when module compilation finishes.
   // It is guaranteed that isolate lock is held during invocation.

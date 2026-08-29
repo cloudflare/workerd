@@ -155,6 +155,16 @@ struct CountingCompilationObserver final: public CompilationObserver {
   mutable kj::MutexGuarded<Counts> counts;
 };
 
+struct SourceCompilationObserver final: public CompilationObserver {
+  mutable uint count = 0;
+  mutable uint externalCount = 0;
+
+  void onEsmCompilationSource(v8::Isolate*, v8::Local<v8::String> source) const override {
+    ++count;
+    if (source->IsExternal()) ++externalCount;
+  }
+};
+
 struct TestType: public jsg::Object {
   bool barCalled = false;
   kj::Maybe<JsRef<JsObject>> exports;
@@ -216,6 +226,29 @@ JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext, TestType);
     JSG_WITHIN_CONTEXT_SCOPE(lock, lock.template newContext<TestContext>().getHandle(lock),        \
         [&](jsg::Lock& js) { fn(lock); });                                                         \
   });
+
+// ======================================================================================
+
+KJ_TEST("ESM compilers copy source into V8") {
+  PREAMBLE([&](Lock& js) {
+    SourceCompilationObserver observer;
+    auto source = "export default 'source';"_kjc;
+
+    jsg::ModuleRegistry::ModuleInfo legacy(
+        js, "test:legacy", source, nullptr, ModuleInfoCompileOption::BUILTIN, observer);
+
+    ModuleBundle::BuiltinBuilder builder;
+    static const auto id = "test:new-registry-source"_url;
+    builder.addEsm(id, source.asArray());
+    auto registry = ModuleRegistry::Builder(BASE).add(builder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, observer);
+    ModuleRegistry::resolve(
+        js, "test:new-registry-source", "default"_kjc, ResolveContext::Type::BUILTIN);
+
+    KJ_ASSERT(observer.count == 2);
+    KJ_ASSERT(observer.externalCount == 0, observer.externalCount);
+  });
+}
 
 // ======================================================================================
 
@@ -1555,25 +1588,23 @@ KJ_TEST("Throwing an exception inside a CJS-style eval module works as expected"
 
 // ======================================================================================
 
-KJ_TEST("Module source is decoded as UTF-8 across all encoding tiers") {
+KJ_TEST("Module source is decoded as UTF-8") {
   PREAMBLE([&](Lock& js) {
     CompilationObserver compilationObserver;
 
     ModuleBundle::BundleBuilder bundleBuilder(BASE);
 
-    // Tier 1: pure-ASCII source (zero-copy external one-byte string).
     auto ascii = kj::str("export default 'plain';");
     bundleBuilder.addEsmModule("ascii", ascii);
 
-    // Tier 2: non-ASCII source whose code points all fit in Latin-1. The
-    // identifier and the literal both contain é (U+00E9, UTF-8 c3 a9); under a
+    // The identifier and the literal both contain é (U+00E9, UTF-8 c3 a9); under a
     // Latin-1 misread the identifier would be a SyntaxError (a UTF-8
     // continuation byte is not a valid identifier char) and the literal would
     // be mojibake.
     auto latin1 = kj::str("const caf\xc3\xa9 = 'caf\xc3\xa9'; export default caf\xc3\xa9;");
     bundleBuilder.addEsmModule("latin1", latin1);
 
-    // Tier 3: source requiring UTF-16 (CJK + non-BMP emoji).
+    // Source containing CJK and a non-BMP emoji.
     auto utf16 = kj::str("export default '\xe9\x83\xa8\xe5\x93\x81 \xf0\x9f\x8e\x89';");
     bundleBuilder.addEsmModule("utf16", utf16);
 
@@ -1607,14 +1638,10 @@ KJ_TEST("Module source is decoded as UTF-8 across all encoding tiers") {
 
 // ======================================================================================
 
-KJ_TEST("Owned ESM source outlives its release points across encoding tiers") {
+KJ_TEST("Owned ESM source outlives its release points") {
   // The Arc<OwnedAscii> addEsmModule overload shares ownership of the UTF-8 source
-  // buffer with the module. Non-ASCII sources are transcoded to an owned
-  // V8-compatible representation on first compile, after which the UTF-8
-  // original is released; pure-ASCII owned sources become the shared encoded
-  // representation. V8 external strings retain shared ownership independently
-  // of the module. This test asserts correctness across repeated resolution; a
-  // buffer released too early (or read after release) is observed by ASAN builds.
+  // buffer with the module. This test asserts correctness across repeated
+  // resolution; a buffer released too early is observed by ASAN builds.
   PREAMBLE([&](Lock& js) {
     CompilationObserver compilationObserver;
 
@@ -1629,10 +1656,7 @@ KJ_TEST("Owned ESM source outlives its release points across encoding tiers") {
     auto attached = registry->attachToIsolate(js, compilationObserver);
 
     JSG_TRY(js) {
-      // First compile transcodes and releases the owned UTF-8 for the
-      // non-ASCII module.
       KJ_ASSERT(kj::str(ModuleRegistry::resolve(js, "file:///latin1-owned")) == "caf\xc3\xa9");
-      // ASCII stays on the zero-copy path over the owned buffer.
       KJ_ASSERT(kj::str(ModuleRegistry::resolve(js, "file:///ascii-owned")) == "plain");
       // Re-resolution works from the caches; nothing re-reads the released
       // buffer.
@@ -1647,7 +1671,7 @@ KJ_TEST("Owned ESM source outlives its release points across encoding tiers") {
 
 // ======================================================================================
 
-KJ_TEST("Compiled ESM functions outlive owned source across encoding tiers") {
+KJ_TEST("Compiled ESM functions outlive owned source") {
   PREAMBLE([&](Lock& js) {
     CompilationObserver compilationObserver;
     kj::Vector<JsRef<JsFunction>> functions;
@@ -2654,10 +2678,7 @@ KJ_TEST("Wasm compile cache is reused across isolates") {
 KJ_TEST("Using a registry from multiple threads works") {
 
   ModuleBundle::BundleBuilder bundleBuilder(BASE);
-  // The non-ASCII literal forces the shared UTF-8 -> Latin-1 source transcode,
-  // so this test also exercises its cross-thread once-init: all five isolates
-  // race on the same kj::Lazy encoding and the same compile cache
-  // (cacheGenerated == 1 below).
+  // All five isolates race on the same compile cache (cacheGenerated == 1 below).
   static const auto foo =
       "export default 123; const s = 'caf\xc3\xa9'; for (let n = 0; n < 100000; n++) {}"_kjc;
   bundleBuilder.addEsmModule("foo", foo);

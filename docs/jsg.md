@@ -1832,29 +1832,6 @@ v8::Local<v8::String> v8StrIntern(v8::Isolate* isolate, kj::StringPtr str);
 
 **Note:** New code should prefer `js.str()` and `js.strIntern()` instead.
 
-### External Strings
-
-For static constant strings that will never be deallocated:
-
-```cpp
-v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf);
-v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf);
-```
-
-For dynamically allocated buffers, use the ownership-carrying overloads:
-
-```cpp
-using OwnedAscii = kj::Array<const char>;
-using OwnedUtf16 = kj::Array<const uint16_t>;
-
-v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::Arc<OwnedAscii> buf);
-v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::Arc<OwnedUtf16> buf);
-```
-
-**Important:** The `OneByteString` variant interprets the buffer as Latin-1, not UTF-8.
-
----
-
 ## 12. V8 Fast API
 
 V8 Fast API allows V8 to compile JavaScript code that calls native functions by generating

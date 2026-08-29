@@ -8,9 +8,6 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/util.h>
 
-#include <simdutf.h>
-
-#include <kj/encoding.h>
 #include <kj/mutex.h>
 #include <kj/table.h>
 
@@ -104,81 +101,6 @@ kj::Array<kj::String> normalizeNamedExports(kj::Array<kj::String> namedExports) 
   return normalized.releaseAsArray();
 }
 
-// The source text of an ES module in the representation handed to V8 for
-// compilation. V8 has no internal UTF-8 string representation — strings are
-// either one-byte (Latin-1) or two-byte (UTF-16). Worker bundle sources arrive
-// as UTF-8 bytes, so each module's source is encoded once, lazily, on first
-// compile, and the result is shared by every isolate that compiles the module:
-//
-//  * Pure-ASCII source (the overwhelmingly common case — bundlers typically
-//    escape non-ASCII): the original buffer directly backs a one-byte external
-//    string. Zero copies.
-//  * Non-ASCII source whose code points all fit in Latin-1: transcoded once to
-//    a one-byte buffer, matching the representation V8 itself would choose for
-//    the same text.
-//  * Anything else (CJK, emoji, ...): transcoded once to UTF-16.
-//
-// Invalid UTF-8 sequences are replaced with U+FFFD, matching the tolerance of
-// v8::String::NewFromUtf8, which the legacy module registry uses for bundle
-// sources. Since the encoding choice is a pure function of the source bytes,
-// every isolate replica sharing the registry agrees on it, keeping the shared
-// compile cache consistent.
-struct EncodedSource {
-  kj::OneOf<kj::ArrayPtr<const char>,  // borrowed process-lifetime ASCII
-      kj::Arc<OwnedAscii>,             // owned ASCII or Latin-1
-      kj::Arc<OwnedUtf16>>             // owned UTF-16
-      repr;
-};
-
-// Transcodes non-ASCII UTF-8 source into the one-byte or two-byte representation
-// V8 requires. The returned EncodedSource owns its backing allocation, so it does
-// not retain or borrow `source`. Invalid UTF-8 is decoded leniently below.
-EncodedSource transcodeSource(kj::ArrayPtr<const char> source) {
-  if (simdutf::validate_utf8(source.begin(), source.size())) {
-    // Valid UTF-8. Prefer the half-size Latin-1 representation when every code
-    // point permits it. The buffer is sized exactly, so with already-validated
-    // input a zero return can only mean some code point exceeds U+00FF.
-    auto latin1 =
-        kj::heapArray<char>(simdutf::latin1_length_from_utf8(source.begin(), source.size()));
-    if (simdutf::convert_utf8_to_latin1(source.begin(), source.size(), latin1.begin()) != 0) {
-      return {.repr = kj::arc<OwnedAscii>(kj::mv(latin1))};
-    }
-
-    auto utf16 =
-        kj::heapArray<uint16_t>(simdutf::utf16_length_from_utf8(source.begin(), source.size()));
-    // simdutf writes char16_t; uint16_t is layout-identical and is the element
-    // type the two-byte string API accepts.
-    size_t written = simdutf::convert_utf8_to_utf16le(
-        source.begin(), source.size(), reinterpret_cast<char16_t*>(utf16.begin()));
-    KJ_ASSERT(written == utf16.size());
-    return {.repr = kj::arc<OwnedUtf16>(kj::mv(utf16))};
-  }
-
-  // Invalid UTF-8: take the (rare) lenient path, which substitutes U+FFFD for
-  // malformed sequences. U+FFFD itself is outside Latin-1, so the result is
-  // always UTF-16.
-  auto utf16 = kj::encodeUtf16(source);
-  auto owned = kj::heapArray<uint16_t>(utf16.size());
-  memcpy(owned.begin(), utf16.begin(), utf16.size() * sizeof(uint16_t));
-  return {.repr = kj::arc<OwnedUtf16>(kj::mv(owned))};
-}
-
-EncodedSource encodeSource(kj::ArrayPtr<const char>&& source) {
-  if (simdutf::validate_ascii(source.begin(), source.size())) {
-    // Borrowed input is known to have process lifetime.
-    return {.repr = kj::mv(source)};
-  }
-  return transcodeSource(source);
-}
-
-EncodedSource encodeSource(kj::Arc<OwnedAscii>&& source) {
-  auto sourcePtr = source->asPtr();
-  if (simdutf::validate_ascii(sourcePtr.begin(), sourcePtr.size())) {
-    return {.repr = kj::mv(source)};
-  }
-  return transcodeSource(sourcePtr);
-}
-
 using UnencodedSource = kj::OneOf<kj::ArrayPtr<const char>, kj::Arc<OwnedAscii>>;
 
 // The implementation of Module for ESM.
@@ -251,32 +173,16 @@ class EsModule final: public Module {
         }
       }
 
-      // Encode the UTF-8 source into a V8-compatible external representation,
-      // once, shared across all isolates compiling this module. See
-      // EncodedSource for the tiering. kj::Lazy handles cross-thread once-init.
-      const auto& encoded = encodedSource.get([this](kj::SpaceFor<EncodedSource>& space) {
-        KJ_SWITCH_ONEOF(source) {
-          KJ_CASE_ONEOF(borrowed, kj::ArrayPtr<const char>) {
-            return space.construct(encodeSource(kj::mv(borrowed)));
-          }
-          KJ_CASE_ONEOF(owned, kj::Arc<OwnedAscii>) {
-            return space.construct(encodeSource(kj::mv(owned)));
-          }
-        }
-        KJ_UNREACHABLE;
-      });
       v8::Local<v8::String> contentStr;
-      KJ_SWITCH_ONEOF(encoded.repr) {
-        KJ_CASE_ONEOF(ascii, kj::ArrayPtr<const char>) {
-          contentStr = js.strExtern(ascii);
+      KJ_SWITCH_ONEOF(source) {
+        KJ_CASE_ONEOF(borrowed, kj::ArrayPtr<const char>) {
+          contentStr = js.str(borrowed);
         }
-        KJ_CASE_ONEOF(oneByte, kj::Arc<OwnedAscii>) {
-          contentStr = js.strExtern(oneByte.addRef());
-        }
-        KJ_CASE_ONEOF(utf16, kj::Arc<OwnedUtf16>) {
-          contentStr = js.strExtern(utf16.addRef());
+        KJ_CASE_ONEOF(owned, kj::Arc<OwnedAscii>) {
+          contentStr = js.str(owned->asPtr());
         }
       }
+      observer.onEsmCompilationSource(js.v8Isolate, contentStr);
 
       // Note that the Source takes ownership of the CachedData pointer that we pass in.
       // (but not the actual buffer it holds). Do not use data after this point.
@@ -373,15 +279,7 @@ class EsModule final: public Module {
     return actuallyEvaluate(js, module, observer);
   }
 
-  // The UTF-8 source text, either borrowed from process-lifetime storage or
-  // held through shared ownership. The encoding initializer moves this into
-  // EncodedSource; its only reader is the initializer itself.
-  mutable UnencodedSource source;
-
-  // The source encoded into a V8-compatible external-string representation
-  // (see EncodedSource). Computed on first compile and shared across isolates;
-  // each V8 string retains an Arc to owned backing storage.
-  kj::Lazy<EncodedSource> encodedSource;
+  UnencodedSource source;
 
   // The cachedData holds the cached compilation data for this module, if any. It is
   // generated on-demand the first time the module is compiled, if possible.
