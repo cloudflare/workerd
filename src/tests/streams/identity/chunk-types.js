@@ -16,7 +16,6 @@
 //   promise rejects and subsequent writes reject.
 
 import { strictEqual, deepStrictEqual, rejects } from 'node:assert';
-import { usingTsImpl } from 'which-impl';
 
 export const acceptsUint8Array = {
   async test() {
@@ -94,25 +93,23 @@ export const respectsViewOffsets = {
   },
 };
 
+// An invalid chunk rejects ITS OWN write only; the stream stays usable
+// (parity — the DECIDED contract for the internal transforms, matching
+// the C++ internal controllers; under TypeScript the sink signals the
+// rejection through the non-fatal write-rejection channel).
 export const rejectsNumberChunk = {
   async test() {
     const { readable, writable } = new IdentityTransformStream();
     const writer = writable.getWriter();
     await rejects(writer.write(42), TypeError);
-    if (usingTsImpl) {
-      // The invalid chunk errored the stream.
-      await rejects(writer.closed, TypeError);
-      await rejects(writer.write(new Uint8Array([1])), TypeError);
-    } else {
-      // The stream is unaffected: a subsequent valid write still flows.
-      const reader = readable.getReader();
-      const writePromise = writer.write(new Uint8Array([1]));
-      const { value, done } = await reader.read();
-      strictEqual(done, false);
-      strictEqual(value[0], 1);
-      await writePromise;
-      await writer.close();
-    }
+    // The stream is unaffected: a subsequent valid write still flows.
+    const reader = readable.getReader();
+    const writePromise = writer.write(new Uint8Array([1]));
+    const { value, done } = await reader.read();
+    strictEqual(done, false);
+    strictEqual(value[0], 1);
+    await writePromise;
+    await writer.close();
   },
 };
 
@@ -120,9 +117,8 @@ export const invalidChunkAfterQueuedValidWrites = {
   async test() {
     // An invalid chunk queued BEHIND valid writes must not cost them their
     // delivery: validation errors surface in FIFO order, after everything
-    // written earlier has been consumed. Only the aftermath diverges
-    // (ledger #6): TypeScript errors the stream once the bad chunk's turn
-    // arrives; C++ leaves the stream usable.
+    // written earlier has been consumed, and the stream survives the
+    // rejection (parity — the DECIDED per-write-rejection contract).
     const { readable, writable } = new IdentityTransformStream();
     const writer = writable.getWriter();
     const reader = readable.getReader();
@@ -136,15 +132,11 @@ export const invalidChunkAfterQueuedValidWrites = {
     const [r2] = await Promise.all([reader.read(), w2]);
     strictEqual(dec.decode(r2.value), 'b');
     await rejects(wBad, TypeError);
-    if (usingTsImpl) {
-      await rejects(writer.closed, TypeError);
-    } else {
-      // The stream survives; later traffic still flows.
-      const w4 = writer.write(enc.encode('c'));
-      const [r4] = await Promise.all([reader.read(), w4]);
-      strictEqual(dec.decode(r4.value), 'c');
-      await writer.close();
-    }
+    // The stream survives; later traffic still flows.
+    const w4 = writer.write(enc.encode('c'));
+    const [r4] = await Promise.all([reader.read(), w4]);
+    strictEqual(dec.decode(r4.value), 'c');
+    await writer.close();
   },
 };
 

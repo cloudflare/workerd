@@ -2523,6 +2523,13 @@ function pipeToInternal<R>(
     undefined
   ) as Promise<void>;
 
+  // Set when a write rejects NON-FATALLY (dest still writable — the
+  // internal transforms' invalid-chunk contract) while a clean shutdown
+  // is already waiting for write acknowledgment; runAction upgrades the
+  // clean close into a pipe failure with this reason. See
+  // onWriteRejectedNonFatally.
+  let pendingNonFatalWriteFailure: { reason: unknown } | undefined;
+
   const shutdownWithAction = (
     action: (() => Promise<unknown>) | undefined,
     error?: { reason: unknown }
@@ -2531,6 +2538,25 @@ function pipeToInternal<R>(
     shuttingDown = true;
 
     const runAction = (): void => {
+      // A non-fatal tail-write rejection recorded during the
+      // acknowledgment wait upgrades a CLEAN shutdown into a failure
+      // (the C++ pipe, which awaits each write, can never reach its
+      // close step past a failed write). Shutdowns that already carry
+      // an error keep it — first cause wins.
+      if (error === undefined && pendingNonFatalWriteFailure !== undefined) {
+        const reason = pendingNonFatalWriteFailure.reason;
+        const failureActions = nonFatalWriteFailureActions(reason);
+        if (failureActions.length === 0) {
+          finalize({ reason });
+          return;
+        }
+        PromisePrototypeThen(
+          combineShutdownActions(failureActions),
+          () => finalize({ reason }),
+          (actionError: unknown) => finalize({ reason: actionError })
+        );
+        return;
+      }
       if (action === undefined) {
         finalize(error);
         return;
@@ -2588,6 +2614,78 @@ function pipeToInternal<R>(
     );
   };
 
+  // Runs `actions` in parallel and settles when all have settled,
+  // rejecting with the first failure (spec: shutdown actions run in
+  // parallel). Shared by the abort-signal algorithm and the non-fatal
+  // write-rejection path.
+  const combineShutdownActions = (
+    actions: (() => Promise<unknown>)[]
+  ): Promise<void> => {
+    let remaining = actions.length;
+    let failed: { reason: unknown } | undefined;
+    const all = PromiseWithResolvers() as PromiseWithResolversType<void>;
+    for (let i = 0; i < actions.length; i++) {
+      const action = actions[i] as () => Promise<unknown>;
+      PromisePrototypeThen(
+        action(),
+        () => {
+          if (--remaining === 0) {
+            if (failed !== undefined) {
+              all.reject(failed.reason);
+            } else {
+              all.resolve();
+            }
+          }
+        },
+        (e: unknown) => {
+          failed ??= { reason: e };
+          if (--remaining === 0) all.reject(failed.reason);
+        }
+      );
+    }
+    return all.promise;
+  };
+
+  // The failure actions for a non-fatal write rejection: abort the
+  // destination (unless preventAbort) and cancel the source (unless
+  // preventCancel), both with the write's reason — the C++ pipe outcome
+  // for a rejected write.
+  const nonFatalWriteFailureActions = (
+    e: unknown
+  ): (() => Promise<unknown>)[] => {
+    const actions: (() => Promise<unknown>)[] = [];
+    if (!preventAbort) {
+      ArrayPrototypePush(actions, () =>
+        writableInternals.getState(destination) === 'writable'
+          ? writableInternals.writableStreamAbort(destination, e)
+          : (PromiseResolve(undefined) as Promise<void>)
+      );
+    }
+    if (!preventCancel) {
+      ArrayPrototypePush(actions, () =>
+        getReadableStreamGetState(source) === 'readable'
+          ? readableStreamCancel(source, e)
+          : (PromiseResolve(undefined) as Promise<void>)
+      );
+    }
+    return actions;
+  };
+
+  // Workerd extension: the internal transforms (identity, compression)
+  // reject an invalid chunk's write NON-FATALLY, leaving the destination
+  // writable — a state unreachable under pure WHATWG semantics, where any
+  // sink rejection errors the destination (and the closed-promise
+  // observer handles it). Without this, the failed chunk would be
+  // silently dropped and the pipe would complete. Match the C++ pipe
+  // outcome instead: treat the rejection as a pipe failure.
+  const onWriteRejectedNonFatally = (e: unknown): void => {
+    const actions = nonFatalWriteFailureActions(e);
+    shutdownWithAction(
+      actions.length === 0 ? undefined : () => combineShutdownActions(actions),
+      { reason: e }
+    );
+  };
+
   if (signal !== undefined) {
     abortAlgorithm = () => {
       const abortReason = AbortSignalReasonGet(signal);
@@ -2611,34 +2709,7 @@ function pipeToInternal<R>(
       shutdownWithAction(
         actions.length === 0
           ? undefined
-          : () => {
-              // Settle when all actions settle; reject with the first
-              // failure (spec: shutdown actions run in parallel).
-              let remaining = actions.length;
-              let failed: { reason: unknown } | undefined;
-              const all =
-                PromiseWithResolvers() as PromiseWithResolversType<void>;
-              for (let i = 0; i < actions.length; i++) {
-                const action = actions[i] as () => Promise<unknown>;
-                PromisePrototypeThen(
-                  action(),
-                  () => {
-                    if (--remaining === 0) {
-                      if (failed !== undefined) {
-                        all.reject(failed.reason);
-                      } else {
-                        all.resolve();
-                      }
-                    }
-                  },
-                  (e: unknown) => {
-                    failed ??= { reason: e };
-                    if (--remaining === 0) all.reject(failed.reason);
-                  }
-                );
-              }
-              return all.promise;
-            },
+          : () => combineShutdownActions(actions),
         { reason: abortReason }
       );
     };
@@ -2795,6 +2866,22 @@ function pipeToInternal<R>(
           chunks[i] as R
         );
         markPromiseHandled(writePromise);
+        // A rejection that leaves the destination WRITABLE is the
+        // internal transforms' non-fatal invalid-chunk rejection — fail
+        // the pipe with it (see onWriteRejectedNonFatally). Fatal
+        // rejections error the destination and are handled by the
+        // closed-promise observer instead. When a clean shutdown is
+        // already waiting for acknowledgment, record the failure for
+        // runAction's upgrade path.
+        PromisePrototypeThen(writePromise, undefined, (e: unknown) => {
+          if (writableInternals.getState(destination) !== 'writable') return;
+          if (shuttingDown) {
+            pendingNonFatalWriteFailure ??= { reason: e };
+            return;
+          }
+          onWriteRejectedNonFatally(e);
+          poke();
+        });
         // Track the last write so shutdownWithAction can wait for it.
         // The writable serializes writes, so when this settles all
         // preceding writes have already settled.

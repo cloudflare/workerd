@@ -10,8 +10,15 @@ import { type TestRunnerConfig } from 'harness/harness';
 // (compression-test.ts): the pair is behavior-matching by design.
 export default {
   'compression-bad-chunks.any.js': {
-    comment: 'brotli compression is not supported',
-    expectedFailures: [/brotli/],
+    comment:
+      'INTENTIONAL SPEC DIVERGENCE (decided 2026-08-28, matching the C++ ' +
+      'implementation and the identity streams): SharedArrayBuffer-backed ' +
+      'chunks are accepted by copying, and invalid chunks reject only ' +
+      "their own write, leaving the stream usable — so the file's " +
+      '"read should reject" assertions hang (the read legitimately stays ' +
+      'pending on a usable stream) and the whole file must be disabled, ' +
+      'mirroring the C++ configuration.',
+    disabledTests: true,
   },
   'compression-constructor-error.any.js': {},
   'compression-including-empty-chunk.any.js': {
@@ -44,8 +51,12 @@ export default {
   },
   'compression-with-detach.any.js': {},
   'decompression-bad-chunks.any.js': {
-    comment: 'brotli compression is not supported',
-    expectedFailures: [/brotli/],
+    comment:
+      'INTENTIONAL SPEC DIVERGENCE: same invalid-chunk contract as ' +
+      'compression-bad-chunks.any.js above (per-write rejection on a ' +
+      'usable stream hangs the "read should reject" assertions; SAB ' +
+      'chunks are accepted by copying).',
+    disabledTests: true,
   },
   'decompression-buffersource.any.js': {
     comment: 'brotli compression is not supported',

@@ -18,7 +18,7 @@ a deliberate defect pin, not a hole).
 
 | # | Area | C++ | TypeScript | Pinned in |
 | --- | --- | --- | --- | --- |
-| 1 | non-byte chunks piped into native identity | pipe rejects 'This WritableStream only supports writing byte types.' | STRINGS are UTF-8 ENCODED and pass through; a NUMBER chunk stalls the pipe silently — the next read pends forever (bounded defect pin) | `pipeThroughJsToInternal` |
+| 1 | non-byte chunks piped into native identity | strings are UTF-8 encoded and pass through on both; the NUMBER chunk fails the pipe — C++ rejects 'This WritableStream only supports writing byte types.'; TypeScript surfaces the identity validation TypeError through the non-fatal write-rejection pipe path (dest aborted, downstream reads reject) | `pipeThroughJsToInternal` |
 | 2 | writable lock after a completed pipeThrough | stays locked; getWriter throws | getWriter() SUCCEEDS; `.locked` is transient/racy (observed both values) — only getWriter pinned | `pipeThroughJsToInternalCloses` |
 | 3 | write-after-close rejection message | 'This WritableStream has been closed.' | 'Cannot write to a stream that is closing or closed' (`CLOSED_WRITE_MSG` helper) | `pipeToInternalToJsSimple`, `pipeToInternalToJsClose` |
 | 4 | ws.close() queued BEFORE pipeTo | pipe locks both ends, waits, cancels source with 'This destination writable stream is closed.', then RESOLVES (see the TODO(conform) in the test) | pipe REJECTS IMMEDIATELY 'Destination closed before the pipe completed', cancels source with the same error (preventCancel suppresses), locks never observed held | `pipeToJsToJsCloseQueuedDestination`(+`PreventCancel`) |
@@ -28,7 +28,7 @@ a deliberate defect pin, not a hole).
 | 8 | dest controller error()s while the pipe waits on a read | HALF-PROPAGATES: cancels the source with the error but FULFILLS the pipe promise | rejects the pipe and cancels the source with the error (spec) | `destControllerErrorsMidPipe` |
 | 9 | FixedLengthStream length violations via pipe | overflow: pipe NEVER SETTLES (bounded); underflow: never settles | overflow: rejects RangeError; underflow: never settles (parity of nonconformance) | `fixedLengthStreamPipeOverflow`/`Underflow` |
 | 10 | already-closed source → already-closed dest | rejects TypeError (a C++ deviation: the spec's ordered shutdown conditions give closing-forward priority) | FULFILLS (spec; WPT multiple-propagation 'closed readable to closed writable' pins the fulfillment) | `closedSourceToClosedDest` |
-| 11 | SharedArrayBuffer-backed views into CompressionStream | copies the shared bytes; round-trips | write path REJECTS TypeError 'The provided value is not of type (ArrayBuffer or ArrayBufferView)' — while its identity stream ACCEPTS the same views | `sabViewThroughCompressionRoundTrip` |
+| 11 | SharedArrayBuffer-backed views into CompressionStream | copies the shared bytes; round-trips | same (DECIDED 2026-08-28) | `sabViewThroughCompressionRoundTrip` |
 
 Parity worth noting (probed, pinned): the whole error-propagation-
 forward core matrix (starts-errored rejection/hook IDENTITY on both
