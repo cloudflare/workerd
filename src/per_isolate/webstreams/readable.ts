@@ -781,6 +781,38 @@ function defaultReaderReadInternal<R>(
   );
 }
 
+// Submit a default-style read through the BYOB machinery via a synthetic
+// auto-allocate pull-into descriptor (spec ReadableByteStreamController
+// PullSteps step 3, [[autoAllocateChunkSize]] present): the source's pull
+// then observes a byobRequest over the auto-allocated buffer. Shared by
+// the default reader's read path and the draining reader's
+// empty-fallback wait-read (the body/pipe pump).
+function readViaAutoAllocateDescriptor(
+  consumer: ByteStreamConsumerType,
+  autoAllocateChunkSize: number,
+  reader: object
+): Promise<ReadableStreamReadResult<ArrayBufferView>> {
+  const withResolvers = PromiseWithResolvers() as PromiseWithResolversType<
+    ReadableStreamReadResult<ArrayBufferView>
+  >;
+  const descriptor: PullIntoDescriptor = {
+    buffer: new ArrayBuffer(autoAllocateChunkSize),
+    bufferByteLength: autoAllocateChunkSize,
+    byteOffset: 0,
+    byteLength: autoAllocateChunkSize,
+    bytesFilled: 0,
+    minimumFill: 1,
+    elementSize: 1,
+    viewCtor: Uint8Array,
+    readerType: 'default',
+    promise: withResolvers.promise,
+    resolve: withResolvers.resolve,
+    reject: withResolvers.reject,
+    reader,
+  };
+  return consumer.readBYOB(descriptor);
+}
+
 // Async continuation of defaultReaderReadInternal for cases where
 // the data is not synchronously available.
 async function defaultReaderReadInternalAsync<R>(
@@ -800,26 +832,11 @@ async function defaultReaderReadInternalAsync<R>(
     const autoAllocateChunkSize = getByteControllerAutoAllocateChunkSize(
       controller as ReadableByteStreamController
     );
-    const withResolvers = PromiseWithResolvers() as PromiseWithResolversType<
-      ReadableStreamReadResult<ArrayBufferView>
-    >;
-    const descriptor: PullIntoDescriptor = {
-      buffer: new ArrayBuffer(autoAllocateChunkSize as number),
-      bufferByteLength: autoAllocateChunkSize as number,
-      byteOffset: 0,
-      byteLength: autoAllocateChunkSize as number,
-      bytesFilled: 0,
-      minimumFill: 1,
-      elementSize: 1,
-      viewCtor: Uint8Array,
-      readerType: 'default',
-      promise: withResolvers.promise,
-      resolve: withResolvers.resolve,
-      reject: withResolvers.reject,
-      reader,
-    };
-    const byteConsumer = consumer as unknown as ByteStreamConsumerType;
-    promise = byteConsumer.readBYOB(descriptor);
+    promise = readViaAutoAllocateDescriptor(
+      consumer as unknown as ByteStreamConsumerType,
+      autoAllocateChunkSize as number,
+      reader
+    );
   } else {
     promise = consumer.read(reader);
   }
@@ -2305,7 +2322,28 @@ async function drainingReaderReadInternal<R>(
   if (result.chunks.length === 0 && !result.done) {
     // Nothing buffered — wait for one chunk through the normal pending-read
     // machinery (FIFO with everything else), then sweep the rest.
-    const promise = consumer.read(reader);
+    //
+    // QUEUED-BYTE-SPECIFIC (sanctioned, mirrors defaultReaderReadInternal):
+    // with autoAllocateChunkSize set, the wait-read goes through the BYOB
+    // machinery so the source's pull observes a byobRequest over the
+    // auto-allocated buffer — the body and pipe pumps drive
+    // respond()-oriented sources exactly like C++'s BYOB pump.
+    let promise: Promise<ReadableStreamReadResult<unknown>> | undefined;
+    if (controller !== undefined && isByteStreamController(controller)) {
+      const autoAllocateChunkSize = getByteControllerAutoAllocateChunkSize(
+        controller as ReadableByteStreamController
+      );
+      if (autoAllocateChunkSize !== undefined) {
+        promise = readViaAutoAllocateDescriptor(
+          consumer as unknown as ByteStreamConsumerType,
+          autoAllocateChunkSize,
+          reader
+        );
+      }
+    }
+    if (promise === undefined) {
+      promise = consumer.read(reader);
+    }
     if (controller !== undefined) controllerPullIfNeeded(controller);
     const single = await promise;
     if (single.done) {
