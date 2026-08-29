@@ -27,7 +27,7 @@ a deliberate defect pin, not a hole).
 | 7 | source queue after a preventCancel'd failing pipe | the not-yet-written chunk remains readable | read-ahead already consumed it; a fresh read PENDS (bounded) | `destWriteThrowsMidPipePreventCancel` |
 | 8 | dest controller error()s while the pipe waits on a read | HALF-PROPAGATES: cancels the source with the error but FULFILLS the pipe promise | rejects the pipe and cancels the source with the error (spec) | `destControllerErrorsMidPipe` |
 | 9 | FixedLengthStream length violations via pipe | overflow: pipe NEVER SETTLES (bounded); underflow: never settles | overflow: rejects RangeError; underflow: never settles (parity of nonconformance) | `fixedLengthStreamPipeOverflow`/`Underflow` |
-| 10 | already-closed source → already-closed dest | rejects TypeError (spec; the WPT multiple-propagation seed) | FULFILLS as a trivially complete pipe | `closedSourceToClosedDest` |
+| 10 | already-closed source → already-closed dest | rejects TypeError (a C++ deviation: the spec's ordered shutdown conditions give closing-forward priority) | FULFILLS (spec; WPT multiple-propagation 'closed readable to closed writable' pins the fulfillment) | `closedSourceToClosedDest` |
 | 11 | SharedArrayBuffer-backed views into CompressionStream | copies the shared bytes; round-trips | write path REJECTS TypeError 'The provided value is not of type (ArrayBuffer or ArrayBufferView)' — while its identity stream ACCEPTS the same views | `sabViewThroughCompressionRoundTrip` |
 
 Parity worth noting (probed, pinned): the whole error-propagation-
