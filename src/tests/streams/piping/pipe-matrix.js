@@ -283,11 +283,17 @@ export const pipeThroughJsToInternalCloses = {
     }
 
     // DIVERGENCE: after the pipe completes, C++ keeps the writable
-    // locked (getWriter throws). Under TypeScript getWriter() SUCCEEDS;
-    // the .locked getter's value at this point is transient (observed
-    // both true and false across runs), so only the deterministic
-    // getWriter behavior is pinned.
+    // locked forever (getWriter throws). TypeScript follows the spec's
+    // pipe finalize: both locks release when the pipe settles. The
+    // release cascades through microtasks that are not synchronized
+    // with the OUTPUT's done delivery (pipeThrough discards the pipe
+    // promise), so .locked must not be read at the loop-exit instant;
+    // one macrotask later the state is deterministically settled —
+    // unlocked, getWriter succeeds. (.locked and getWriter() share one
+    // predicate and can never disagree at a single instant.)
     if (usingTsImpl) {
+      await scheduler.wait(0);
+      strictEqual(transform.writable.locked, false);
       transform.writable.getWriter();
     } else {
       strictEqual(transform.writable.locked, true);
