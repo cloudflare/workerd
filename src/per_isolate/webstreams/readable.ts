@@ -358,14 +358,20 @@ let extractNativeSource: <R>(this: ReadableStream<R>) => object;
 
 // The non-standard expectedLength pass-through for the DrainingReader
 // (and the C++ bridge). Chained like the other controller helpers:
-// default → undefined; queued byte → cached construction value; native →
-// cached construction value (joined in ReadableStream's static block).
+// default → the value installed by the TransformStream expectedLength
+// extension (undefined otherwise); queued byte → cached construction
+// value; native → cached construction value (joined in ReadableStream's
+// static block).
 let getControllerExpectedLength: (
   controller:
     | ReadableStreamDefaultControllerType
     | ReadableByteStreamControllerType
     | NativeReadableStreamControllerType
 ) => bigint | undefined;
+let setDefaultControllerExpectedLength: <R>(
+  controller: ReadableStreamDefaultController<R>,
+  length: bigint | undefined
+) => void;
 
 let setReadableStreamPendingClosure: <R>(stream: ReadableStream<R>) => void;
 let isReadableStreamPendingClosure: <R>(stream: ReadableStream<R>) => boolean;
@@ -1218,6 +1224,12 @@ class ReadableStreamDefaultController<
 > implements ReadableStreamDefaultControllerType<R> {
   #stream: ReadableStream<R>;
   #queue: StreamQueueType<R, R>;
+  // The non-standard expectedLength pass-through (undefined = unknown).
+  // Default controllers never read it from an underlying source — it is
+  // set ONLY through the internal setter, by the TransformStream
+  // constructor's workerd `expectedLength` extension, so the C++ bridge
+  // can derive Content-Length for bodies built from such transforms.
+  #expectedLength: bigint | undefined = undefined;
   // Algorithms are cleared (closures dropped) on close-complete, error, and
   // cancel, per spec ClearAlgorithms.
   #sizeAlgorithm: ((chunk: R) => number) | undefined;
@@ -1252,10 +1264,17 @@ class ReadableStreamDefaultController<
       // The byte controller wires its own branch in the byte pass.
     };
 
-    // expectedLength is byte-stream-only: the default controller never
-    // reads it from the source (silently ignored if declared) and always
-    // reports undefined.
-    getControllerExpectedLength = () => undefined;
+    // Default controllers never read expectedLength from an underlying
+    // source (silently ignored if declared); it is populated only via the
+    // internal setter (the TransformStream `expectedLength` extension).
+    // The byte and native arms of this chain report their own cached
+    // values.
+    getControllerExpectedLength = (controller) =>
+      (controller as ReadableStreamDefaultController).#expectedLength;
+
+    setDefaultControllerExpectedLength = (controller, length) => {
+      controller.#expectedLength = length;
+    };
 
     controllerCancelSteps = (controller, reason) => {
       if (#queue in controller) {
@@ -4385,12 +4404,22 @@ module.exports = {
   // possible future public exposure.
   ReadableStreamDrainingReader,
   // Internal operations consumed by the TransformStream cancel/flush
-  // coordination (finishPromise guard). Unreachable from user code.
+  // coordination (finishPromise guard) and the workerd expectedLength
+  // extension. Unreachable from user code.
   internalsForTransform: ObjectFreeze({
     getState: <R>(stream: ReadableStream<R>) =>
       getReadableStreamGetState(stream),
     getStoredError: <R>(stream: ReadableStream<R>) =>
       getReadableStreamStoredError(stream),
+    normalizeExpectedLength,
+    setControllerExpectedLength: <R>(
+      controller: object,
+      length: bigint | undefined
+    ) =>
+      setDefaultControllerExpectedLength(
+        controller as ReadableStreamDefaultController<R>,
+        length
+      ),
   }),
 
   // Part of the internal implementation. Do not re-export to user code

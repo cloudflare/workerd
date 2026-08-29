@@ -7,7 +7,6 @@
 // from transform-streams-test.js.
 
 import { strictEqual } from 'node:assert';
-import { usingTsImpl } from 'which-impl';
 
 export const transformRoundtrip = {
   async test(ctrl, env, ctx) {
@@ -75,11 +74,10 @@ export const transformRoundtrip = {
 };
 
 // The workerd TransformStream({ expectedLength }) extension: posting
-// the readable as a fetch body. DIVERGENCE: C++ surfaces the declared
-// length as a concrete Content-Length on the subrequest; the
-// TypeScript implementation does not consult expectedLength — the
-// subrequest goes out chunked (Content-Length null). The body arrives
-// intact either way.
+// the readable as a fetch body surfaces the declared length as a
+// concrete Content-Length on the subrequest (parity — the TypeScript
+// transform advertises it through its readable's controller and the
+// C++ bridge derives the header from the draining reader).
 export const transformExpectedLengthFetchBody = {
   async test(ctrl, env) {
     const enc = new TextEncoder();
@@ -93,10 +91,7 @@ export const transformExpectedLengthFetchBody = {
       method: 'POST',
       body: readable,
     });
-    strictEqual(
-      resp.headers.get('observed-content-length'),
-      usingTsImpl ? 'null' : '10'
-    );
+    strictEqual(resp.headers.get('observed-content-length'), '10');
     strictEqual(await resp.text(), 'hellohello');
   },
 };
@@ -119,10 +114,7 @@ export const transformExpectedLengthRequestBody = {
         body: readable,
       })
     );
-    strictEqual(
-      resp.headers.get('observed-content-length'),
-      usingTsImpl ? 'null' : '10'
-    );
+    strictEqual(resp.headers.get('observed-content-length'), '10');
     strictEqual(await resp.text(), 'hellohello');
   },
 };

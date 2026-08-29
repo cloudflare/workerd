@@ -312,6 +312,13 @@ class TransformStream<I = unknown, O = unknown> {
     if (cancelFn !== undefined && typeof cancelFn !== 'function') {
       throw new TypeError('transformer.cancel must be a function');
     }
+    // Non-standard workerd extension: the TOTAL bytes the readable side
+    // will produce (undefined = unknown). Advertised through the
+    // readable's controller so the C++ bridge derives a Content-Length
+    // for bodies built from this transform; not enforced here.
+    const expectedLength = readableInternals.normalizeExpectedLength(
+      (transformer as { expectedLength?: unknown }).expectedLength
+    );
     const flushFn = transformer.flush;
     if (flushFn !== undefined && typeof flushFn !== 'function') {
       throw new TypeError('transformer.flush must be a function');
@@ -411,6 +418,12 @@ class TransformStream<I = unknown, O = unknown> {
         },
         { highWaterMark: readableHWM, size: readableStrategy.size }
       );
+      if (expectedLength !== undefined) {
+        readableInternals.setControllerExpectedLength(
+          this.#readableController as object,
+          expectedLength
+        );
+      }
     } else {
       // ---- STANDARD PATH (transformer has algorithms) ----
 
@@ -675,6 +688,12 @@ class TransformStream<I = unknown, O = unknown> {
         },
         { highWaterMark: readableHWM, size: readableStrategy.size }
       );
+      if (expectedLength !== undefined) {
+        readableInternals.setControllerExpectedLength(
+          this.#readableController as object,
+          expectedLength
+        );
+      }
 
       // --- Start the transformer ---
       const startResult: unknown =
