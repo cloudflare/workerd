@@ -111,6 +111,15 @@ wd_cc_benchmark(
 )
 
 wd_cc_benchmark(
+    name = "bench-zstd",
+    srcs = ["bench-zstd.c++"],
+    deps = [
+        "//src/rust/zstd-rs",
+        "@zstd",
+    ],
+)
+
+wd_cc_benchmark(
     name = "bench-util",
     srcs = ["bench-util.c++"],
     deps = [

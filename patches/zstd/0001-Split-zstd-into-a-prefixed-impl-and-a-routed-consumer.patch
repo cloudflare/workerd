@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Guy Bedford <gbedford@cloudflare.com>
+Date: Wed, 26 Aug 2026 00:00:00 -0700
+Subject: Split zstd into a prefixed zstd_c_ impl and a routed consumer target
+
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 21da376..457d865 100755
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -39,8 +39,14 @@ filegroup(
+     ]),
+ )
+ 
++# The C zstd implementation, compiled with every routed ZSTD_* entry point renamed to its
++# zstd_c_-prefixed spelling. ZSTD_isError cannot be renamed on the command line (zstd_internal.h
++# redefines and zstd_common.c undefs it), so its definition site is renamed via the dedicated
++# ZSTD_ISERROR_RENAME hook in zstd_common.c; internal callers inline ERR_isError and emit no
++# reference to the symbol. Consumers never link this directly; they go through the unprefixed
++# routing layer below.
+ cc_library(
+-    name = "zstd",
++    name = "zstd_impl",
+     srcs = [
+         ":common_sources",
+         ":compress_sources",
+@@ -63,12 +69,41 @@ cc_library(
+         "ZSTD_MULTITHREAD",
+         "ZSTD_BUILD_SHARED=OFF",
+         "ZSTD_BUILD_STATIC=ON",
++        "ZSTD_createCCtx=zstd_c_ZSTD_createCCtx",
++        "ZSTD_freeCCtx=zstd_c_ZSTD_freeCCtx",
++        "ZSTD_CCtx_reset=zstd_c_ZSTD_CCtx_reset",
++        "ZSTD_CCtx_setParameter=zstd_c_ZSTD_CCtx_setParameter",
++        "ZSTD_CCtx_setPledgedSrcSize=zstd_c_ZSTD_CCtx_setPledgedSrcSize",
++        "ZSTD_compressStream2=zstd_c_ZSTD_compressStream2",
++        "ZSTD_createDCtx=zstd_c_ZSTD_createDCtx",
++        "ZSTD_freeDCtx=zstd_c_ZSTD_freeDCtx",
++        "ZSTD_DCtx_reset=zstd_c_ZSTD_DCtx_reset",
++        "ZSTD_DCtx_setParameter=zstd_c_ZSTD_DCtx_setParameter",
++        "ZSTD_decompressStream=zstd_c_ZSTD_decompressStream",
++        "ZSTD_ISERROR_RENAME=zstd_c_ZSTD_isError",
++        "ZSTD_getErrorCode=zstd_c_ZSTD_getErrorCode",
++        "ZSTD_getErrorName=zstd_c_ZSTD_getErrorName",
++        "ZSTD_getErrorString=zstd_c_ZSTD_getErrorString",
+     ] + select({
+         "@platforms//os:windows": ["ZSTD_DISABLE_ASM"],
+         "//conditions:default": [],
+     }),
+ )
+ 
++# The zstd consumed by everything in the build: the standard headers over the routing layer,
++# which forwards each routed call to the C implementation (zstd_c_*, above) or the Rust one
++# (zstd_rs_*), selected at process level by the compression-rs autogate.
++cc_library(
++    name = "zstd",
++    hdrs = [
++        "lib/zdict.h",
++        "lib/zstd.h",
++        "lib/zstd_errors.h",
++    ],
++    includes = ["lib"],
++    deps = ["@@//src/workerd/util:zstd-router"],
++)
++
+ cc_binary(
+     name = "zstd_cli",
+     srcs = glob(
+diff --git a/lib/common/zstd_common.c b/lib/common/zstd_common.c
+index 3f04c22..dec6b03 100644
+--- a/lib/common/zstd_common.c
++++ b/lib/common/zstd_common.c
+@@ -30,6 +30,9 @@ const char* ZSTD_versionString(void) { return ZSTD_VERSION_STRING; }
+ *  ZSTD Error Management
+ ******************************************/
+ #undef ZSTD_isError   /* defined within zstd_internal.h */
++#ifdef ZSTD_ISERROR_RENAME
++#define ZSTD_isError ZSTD_ISERROR_RENAME
++#endif
+ /*! ZSTD_isError() :
+  *  tells if a return value is an error code
+  *  symbol is required for external callers */
