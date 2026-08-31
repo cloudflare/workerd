@@ -82,7 +82,7 @@ bazel_dep(name = "rules_oci", version = "2.3.0")
 bazel_dep(name = "rules_python", version = "2.3.2")
 
 # rules_rust
-bazel_dep(name = "rules_rust", version = "0.73.0")
+bazel_dep(name = "rules_rust", version = "0.74.0")
 
 # rules_shell
 bazel_dep(name = "rules_shell", version = "0.8.0")
