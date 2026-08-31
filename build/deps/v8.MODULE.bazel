@@ -63,6 +63,7 @@ PATCHES = [
     "0038-Properly-depend-on-llvm-libc.patch",
     "0039-Fix-TSan-build-without-the-V8-sandbox.patch",
     "0040-Enable-Perfetto-support-in-the-V8-Bazel-build.patch",
+    "0041-Disable-preserve-most-on-Windows-x64-before-Clang-22.patch",
 ]
 
 http_archive(
