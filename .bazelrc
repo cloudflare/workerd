@@ -376,7 +376,6 @@ build:windows_no_dbg -c opt
 build:windows_no_dbg --copt='/Od'
 build:windows_no_dbg --linkopt='/INCREMENTAL:NO'
 build:windows_no_dbg --features=-smaller_binary
-build:windows_no_dbg --copt=/Z7 --linkopt=/DEBUG
 
 # Mitigate the large size impact of Windows debug binaries somewhat by applying string merging and
 # linker garbage collection.
