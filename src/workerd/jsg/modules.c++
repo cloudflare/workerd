@@ -379,7 +379,7 @@ static CompilationObserver::Option convertOption(ModuleInfoCompileOption option)
 
 v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
     kj::StringPtr name,
-    kj::ArrayPtr<const char> content,
+    StaticExternalStringSource content,
     kj::ArrayPtr<const kj::byte> compileCache,
     ModuleInfoCompileOption option,
     const CompilationObserver& observer) {
@@ -400,12 +400,25 @@ v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
   v8::Local<v8::String> contentStr;
 
   if (option == ModuleInfoCompileOption::BUILTIN) {
-    // TODO(later): Use of newExternalOneByteString here limits our built-in source
-    // modules (for which this path is used) to only the latin1 character set. We
-    // may need to revisit that to import built-ins as UTF-16 (two-byte).
-    contentStr = jsg::newExternalOneByteString(js, content);
+    KJ_SWITCH_ONEOF(content) {
+      KJ_CASE_ONEOF(oneByte, kj::ArrayPtr<const char>) {
+        contentStr = jsg::newExternalOneByteString(js, oneByte);
+      }
+      KJ_CASE_ONEOF(twoByte, kj::ArrayPtr<const uint16_t>) {
+        contentStr = jsg::newExternalTwoByteString(js, twoByte);
+      }
+    }
   } else {
-    contentStr = jsg::v8Str(js.v8Isolate, content);
+    KJ_SWITCH_ONEOF(content) {
+      KJ_CASE_ONEOF(utf8, kj::ArrayPtr<const char>) {
+        contentStr = jsg::v8Str(js.v8Isolate, utf8);
+      }
+      KJ_CASE_ONEOF(utf16, kj::ArrayPtr<const uint16_t>) {
+        KJ_REQUIRE(utf16.size() <= v8::String::kMaxLength, "String is too long for a V8 string");
+        contentStr = jsg::check(v8::String::NewFromTwoByte(
+            js.v8Isolate, utf16.begin(), v8::NewStringType::kNormal, utf16.size()));
+      }
+    }
   }
 
   if (compileCache.size() > 0 && compileCache.begin() != nullptr) {
@@ -447,7 +460,15 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::ArrayPtr<const kj::byte> compileCache,
     ModuleInfoCompileOption flags,
     const CompilationObserver& observer)
-    : ModuleInfo(js, compileEsmModule(js, name, content, compileCache, flags, observer)) {}
+    : ModuleInfo(js, name, StaticExternalStringSource(content), compileCache, flags, observer) {}
+
+ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
+    kj::StringPtr name,
+    StaticExternalStringSource content,
+    kj::ArrayPtr<const kj::byte> compileCache,
+    ModuleInfoCompileOption flags,
+    const CompilationObserver& observer)
+    : ModuleInfo(js, compileEsmModule(js, name, kj::mv(content), compileCache, flags, observer)) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::StringPtr name,
