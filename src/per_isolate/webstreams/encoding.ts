@@ -184,6 +184,7 @@ class TextDecoderStream {
           );
         }
         const decoded = TextDecoderDecode(decoder, chunk as BufferSource, {
+          __proto__: null,
           stream: true,
         });
         if (decoded.length > 0) {

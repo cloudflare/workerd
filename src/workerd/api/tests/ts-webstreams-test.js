@@ -484,7 +484,9 @@ export const nativeBackedStreamIntoFetchBody = {
 
 // Body consumption accepts any BufferSource chunk shape, matching the C++ pump:
 // ArrayBuffer, DataView, and non-Uint8Array views contribute their bytes, detached
-// buffers are empty, and a non-BufferSource chunk fails with the C++ error text.
+// buffers AND detached views are empty (including DataViews, whose byteLength
+// getter throws for detached buffers), and a non-BufferSource chunk fails with
+// the C++ error text.
 export const bodyConsumptionNormalizesBufferSourceChunks = {
   async test() {
     const enc = new TextEncoder();
@@ -516,10 +518,44 @@ export const bodyConsumptionNormalizesBufferSourceChunks = {
       await new Response(bodyOf([detached, enc.encode('x')])).text(),
       'x'
     );
+    const detachedViewBuffer = new ArrayBuffer(4);
+    const detachedView = new DataView(detachedViewBuffer);
+    detachedViewBuffer.transfer();
+    strictEqual(
+      await new Response(bodyOf([detachedView, enc.encode('y')])).text(),
+      'y'
+    );
     await rejects(new Response(bodyOf(['not bytes'])).text(), {
       name: 'TypeError',
       message: 'This ReadableStream did not return bytes.',
     });
+  },
+};
+
+// A resizable ArrayBuffer chunk is captured at its drained extent: user code
+// growing the buffer after the chunk is collected (but before the parts are
+// assembled) must not desync the copy from the accounted length — a bare
+// length-tracking view over the chunk would make assembly throw RangeError.
+export const bodyConsumptionPinsResizableArrayBufferExtent = {
+  async test() {
+    const rab = new ArrayBuffer(2, { maxByteLength: 8 });
+    new Uint8Array(rab).set([120, 121]); // 'xy'
+    let ctrl;
+    const rs = new ReadableStream({
+      start(c) {
+        ctrl = c;
+      },
+    });
+    const bodyPromise = new Response(rs).arrayBuffer();
+    ctrl.enqueue(rab);
+    // A macrotask boundary: the drain loop collects the chunk (pinning its
+    // extent) before the resize below, and only then sees end-of-stream.
+    await scheduler.wait(0);
+    rab.resize(8);
+    ctrl.close();
+    const buf = await bodyPromise;
+    strictEqual(buf.byteLength, 2);
+    strictEqual(new TextDecoder().decode(buf), 'xy');
   },
 };
 
