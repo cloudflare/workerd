@@ -1819,6 +1819,17 @@ KJ_TEST("SQLite restrict internal functions to nested parse") {
       db.run("INSERT INTO users DEFAULT VALUES;"));
 }
 
+KJ_TEST("SQLite authorizer is called in default column expressions") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  auto& regulator = DEFAULT_REGULATOR_FOR_TEST;
+  db.run("CREATE TABLE users (name TEXT DEFAULT (sqlite_version()))");
+  KJ_EXPECT_THROW_MESSAGE(
+      "not authorized", db.run({.regulator = regulator}, "INSERT INTO users DEFAULT VALUES;"));
+}
+
 KJ_TEST("SQLite R*Tree extension is enabled") {
   // Regression test to ensure that the SQLite R*Tree extension is enabled and usable.
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
