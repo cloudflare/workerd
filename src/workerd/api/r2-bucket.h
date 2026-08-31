@@ -567,6 +567,19 @@ class R2Bucket: public jsg::Object {
       const jsg::TypeHandler<
           jsg::Function<jsg::Value(kj::OneOf<kj::String, kj::Array<kj::String>>)>>& deleteFnHandler,
       const jsg::TypeHandler<jsg::Promise<void>>& deleteResultHandler);
+  jsg::Promise<jsg::Ref<R2MultipartUpload>> createMultipartUploadRpc(jsg::Lock& js,
+      kj::String key,
+      jsg::Optional<MultipartOptions> options,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<
+          jsg::Function<jsg::Value(kj::String, jsg::Optional<MultipartOptions>)>>& createFnHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value()>>& getUploadIdFnHandler,
+      const jsg::TypeHandler<jsg::Promise<kj::String>>& uploadIdResultHandler);
+  jsg::Ref<R2MultipartUpload> resumeMultipartUploadRpc(jsg::Lock& js,
+      kj::String key,
+      kj::String uploadId,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, kj::String)>>& resumeFnHandler);
   jsg::Promise<ListResult> list(jsg::Lock& js,
       jsg::Optional<ListOptions> options,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
@@ -578,21 +591,20 @@ class R2Bucket: public jsg::Object {
     // restricts the new transport to allowlisted workers, because it is marked $experimental and
     // EWC decides who may opt in. Neither alone is sufficient.
     //
-    // Only head and delete are migrated so far; the rest stay on the HTTP transport, including all
-    // of R2MultipartUpload, whose methods would additionally need the upload's key and uploadId
-    // threaded into the call.
     if (util::Autogate::isEnabled(util::AutogateKey::R2_BINDINGS_JSRPC) &&
         flags.getR2BindingsJsrpc()) {
       JSG_METHOD_NAMED(head, headRpc);
       JSG_METHOD_NAMED(delete, deleteRpc);
+      JSG_METHOD_NAMED(createMultipartUpload, createMultipartUploadRpc);
+      JSG_METHOD_NAMED(resumeMultipartUpload, resumeMultipartUploadRpc);
     } else {
       JSG_METHOD(head);
       JSG_METHOD_NAMED(delete, delete_);
+      JSG_METHOD(createMultipartUpload);
+      JSG_METHOD(resumeMultipartUpload);
     }
     JSG_METHOD(get);
     JSG_METHOD(put);
-    JSG_METHOD(createMultipartUpload);
-    JSG_METHOD(resumeMultipartUpload);
     JSG_METHOD(list);
 
     JSG_TS_ROOT();
@@ -695,16 +707,10 @@ class R2Bucket: public jsg::Object {
   // channel.
   jsg::Ref<JsRpcProperty> getRpcMethod(jsg::Lock& js, kj::StringPtr methodName);
 
-  template <typename Result, typename... Args>
-  jsg::Promise<Result> callRpcMethod(jsg::Lock& js,
-      kj::StringPtr methodName,
-      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
-      const jsg::TypeHandler<jsg::Function<jsg::Value(Args...)>>& fnHandler,
-      const jsg::TypeHandler<jsg::Promise<Result>>& resultPromiseHandler,
-      Args... args);
-
   friend class R2MultipartUpload;
 };
+
+jsg::Ref<R2Bucket::HeadResult> headResultFromRpc(jsg::Lock& js, R2Bucket::HeadResultRpc rpc);
 
 // Non-generic wrapper avoid moving the parseObjectMetadata implementation into this header file
 // by making use of dynamic dispatch.
