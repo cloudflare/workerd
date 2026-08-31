@@ -309,7 +309,7 @@ export class Ai extends wrappedBinding.WrappedBinding {
     const aiEndpoint = new URL(`${this.#endpointURL}/run`);
     
     // AI Gateway models expect inputs as query params, not version/body
-    if (isHandledByAiGateway(model)) {
+    if (isHandledByAiGateway(model) || options.gateway) {
       aiEndpoint.searchParams.set('model', model);
       
       // Add all inputs as query parameters
