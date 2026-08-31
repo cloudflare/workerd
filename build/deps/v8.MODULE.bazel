@@ -63,6 +63,7 @@ PATCHES = [
     "0038-Properly-depend-on-llvm-libc.patch",
     "0039-wasm-memory.discard-prototype-for-the-memory-control.patch",
     "0040-cppgc-Add-two-API-calls-for-testing.patch",
+    "0041-Disable-preserve-most-on-Windows-x64-before-Clang-22.patch",
 ]
 
 http_archive(
