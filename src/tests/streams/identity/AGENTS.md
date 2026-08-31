@@ -193,6 +193,15 @@ bridge drives to consume TypeScript streams and to read a
 such global exists under the C++ implementation; `draining-reader.js`
 asserts both sides.
 
+`identity-cpp-pedantic.wd-test` runs the full shared module set with the
+dateless opt-in `pedantic_wpt` flag added to the main C++ cell's pinned
+set. Unlike the encoding suite's pedantic cell, it pins the ABSENCE of
+pedantic effects: the internal-stream implementation consults the flag
+nowhere and the pedantic-gated standard-streams machinery is unreachable
+from this suite's surface, so every shared assertion holds unchanged — an
+enforced invariant against future pedantic branches reaching these
+classes.
+
 ## Divergence ledger (C++ vs TypeScript)
 
 Every entry is asserted on both sides via the `which-impl` conditional
