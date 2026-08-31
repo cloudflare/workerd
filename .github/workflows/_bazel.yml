@@ -143,6 +143,11 @@ jobs:
         if: inputs.run_tests
         run: |
           bazel test --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
+      - name: Run symbolized Windows repro
+        if: failure() && runner.os == 'Windows' && inputs.upload_binary
+        continue-on-error: true
+        run: |
+          bazel run --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} --features=generate_pdb_file --copt=/Z7 --linkopt=/DEBUG //src/workerd/jsg:resource-test_binary
       - name: Bazel coverage
         if: inputs.run_coverage
         run: |
@@ -210,7 +215,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.os_name }}-${{ inputs.arch_name }}${{ inputs.suffix }}-binary
-          path: bazel-bin/src/workerd/server/workerd${{ runner.os == 'Windows' && '.exe' || '' }}
+          path: |
+            bazel-bin/src/workerd/server/workerd.exe
+            bazel-bin/src/workerd/jsg/resource-test_binary.exe
+            bazel-bin/src/workerd/jsg/resource-test_binary*.pdb
           if-no-files-found: error
       - name: Upload build statistics
         if: always() && inputs.run_tests
