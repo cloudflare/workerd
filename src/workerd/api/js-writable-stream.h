@@ -83,6 +83,19 @@ class JsWritableStream final {
       kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
       kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none);
 
+  // Create a JsWritableStream whose write() calls are driven directly by the given C++
+  // `write` function: each chunk passed to writer.write() is handed to `write` as-is, with
+  // no byte-level coalescing or splitting. This is for sinks that consume whole JS values
+  // per write() call rather than bytes (e.g. UDP's Datagram objects, where each write() call
+  // must map to exactly one outbound packet).
+  //
+  // This is a compatibility-flag dispatch point: under
+  // typescript_implemented_streams, `write` is wrapped as a real JS function and the
+  // TypeScript stream is constructed over a plain (non-native-marked) underlying sink;
+  // otherwise this builds the legacy C++ WritableStream directly.
+  static JsWritableStream fromWrite(
+      jsg::Lock& js, kj::Function<jsg::Promise<void>(jsg::Lock&, jsg::JsValue)> write);
+
   // Returns a new JsWritableStream sharing this one's underlying stream. Both instances observe
   // the same underlying stream state (e.g. the stream closing through one is visible through the
   // other), and passing either through the type wrapper yields the same JavaScript object. This

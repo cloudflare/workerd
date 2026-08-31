@@ -103,6 +103,35 @@ struct TlsOptions {
   JSG_STRUCT(expectedServerHostname);
 };
 
+// A non-standard extension: not part of the proposed sockets spec
+// (https://sockets-api.proposal.wintertc.org/), which only covers TCP.
+//
+// The value-mode chunk type carried by a UDP Socket's readable/writable streams. Deliberately
+// not a Uint8Array to avoid consumers treating a UDP stream as a byte stream.
+class Datagram: public jsg::Object {
+ public:
+  Datagram(jsg::Lock& js, jsg::JsUint8Array data): data(js, data) {}
+
+  jsg::JsUint8Array getData(jsg::Lock& js) const {
+    return data.getHandle(js);
+  }
+
+  static jsg::Ref<Datagram> constructor(jsg::Lock& js, jsg::JsUint8Array data) {
+    return js.alloc<Datagram>(js, data);
+  }
+
+  JSG_RESOURCE_TYPE(Datagram) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(data, getData);
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(data);
+  }
+
+ private:
+  jsg::JsRef<jsg::JsUint8Array> data;
+};
+
 class Socket: public jsg::Object {
  public:
   Socket(jsg::Lock& js,
@@ -486,7 +515,7 @@ kj::Own<jsg::modules::ModuleBundle> getInternalSocketModuleBundle(auto featureFl
 
 #define EW_SOCKETS_ISOLATE_TYPES                                                                   \
   api::Socket, api::SocketOptions, api::SocketAddress, api::TlsOptions, api::SocketsModule,        \
-      api::SocketInfo
+      api::SocketInfo, api::Datagram
 
 // The list of sockets.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

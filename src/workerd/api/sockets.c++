@@ -314,42 +314,8 @@ DisconnectWatcher watchForDisconnect(kj::AsyncIoStream& connection) {
   return DisconnectWatcher{.disconnected = kj::mv(paf.promise), .watchTask = kj::mv(watchTask)};
 }
 
-// A WritableStreamSink that sends each JS write() call as exactly one outbound datagram. Unlike a
-// byte-stream sink, chunks are never merged or split: each write() call becomes exactly one
-// DatagramChannel::send() call, so the caller's chunk boundaries are preserved rather than being merged or split.
-class DatagramWritableSink final: public WritableStreamSink {
- public:
-  explicit DatagramWritableSink(kj::Rc<DatagramChannel> channel): channel(kj::mv(channel)) {}
-
-  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
-    return channel->send(buffer);
-  }
-
-  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
-    // Ordinary JS writer.write(chunk) calls only ever reach the single-buffer overload above; this
-    // one is used by pumpTo()'s draining-read optimization (see DrainingReadResult), which batches
-    // however many separate chunks were synchronously available into one vectored call purely for
-    // efficiency -- each piece is still a distinct write, so each must become its own datagram.
-    for (auto& piece: pieces) {
-      co_await channel->send(piece);
-    }
-  }
-
-  kj::Promise<void> end() override {
-    return kj::READY_NOW;
-  }
-
-  void abort(kj::Exception reason) override {
-    // Nothing to tear down eagerly: there is no underlying connection, just a reference to the
-    // flow's session, which is torn down independently when the flow ends.
-  }
-
- private:
-  kj::Rc<DatagramChannel> channel;
-};
-
 // Builds a value-mode ReadableStream whose pull() performs exactly one DatagramChannel::receive()
-// call and enqueues exactly what came back as one Uint8Array chunk. Uses
+// call and enqueues exactly what came back as one Datagram chunk. Uses
 // JsReadableStream::fromPull() rather than create(), since create() requires a byte-oriented
 // ReadableStreamSource.
 JsReadableStream newDatagramReadableStream(jsg::Lock& js, kj::Rc<DatagramChannel> channel) {
@@ -359,10 +325,27 @@ JsReadableStream newDatagramReadableStream(jsg::Lock& js, kj::Rc<DatagramChannel
     return ioContext.awaitIo(js, channel->receive(),
         [](jsg::Lock& js, kj::Maybe<kj::Array<kj::byte>> datagram) -> kj::Maybe<jsg::Value> {
       KJ_IF_SOME(bytes, datagram) {
-        return js.v8Ref<v8::Value>(jsg::JsUint8Array::create(js, bytes.asPtr()));
+        auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<Datagram>>());
+        auto data = jsg::JsUint8Array::create(js, bytes.asPtr());
+        return js.v8Ref<v8::Value>(handler.wrap(js, js.alloc<Datagram>(js, data)));
       }
       return kj::none;
     });
+  });
+}
+
+// Builds a value-mode WritableStream whose write() sends exactly one outbound datagram per call.
+// Unlike a byte-stream sink, chunks are never merged or split: each write() call becomes exactly
+// one DatagramChannel::send() call. Only Datagram instances are accepted -- writing a raw
+// Uint8Array or any other value is a TypeError, since UDP's chunk boundaries are packet
+// boundaries, unlike a byte stream's.
+JsWritableStream newDatagramWritableStream(jsg::Lock& js, kj::Rc<DatagramChannel> channel) {
+  return JsWritableStream::fromWrite(js,
+      [channel = kj::mv(channel)](jsg::Lock& js, jsg::JsValue chunk) mutable -> jsg::Promise<void> {
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<Datagram>>());
+    auto datagram = JSG_REQUIRE_NONNULL(handler.tryUnwrap(js, chunk), TypeError,
+        "This socket's writable stream only accepts Datagram instances.");
+    return IoContext::current().awaitIo(js, channel->send(datagram->getData(js).asArrayPtr()));
   });
 }
 
@@ -440,8 +423,7 @@ jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
 
   auto openedPrPair = js.newPromiseAndResolver<SocketInfo>();
   openedPrPair.promise.markAsHandled(js);
-  auto writable = JsWritableStream::create(
-      js, ioContext, kj::heap<DatagramWritableSink>(channel.addRef()), kj::none /* observer */);
+  auto writable = newDatagramWritableStream(js, channel.addRef());
 
   auto result = js.alloc<Socket>(js, ioContext, kj::mv(channel), kj::mv(remoteAddress),
       kj::mv(localAddress), kj::mv(readable), kj::mv(writable), kj::mv(closedPrPair),
