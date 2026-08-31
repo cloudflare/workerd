@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
-import { WorkerEntrypoint } from 'cloudflare:workers';
+import { RpcTarget, WorkerEntrypoint } from 'cloudflare:workers';
 
 const key = 'basicKey';
 const body = 'content';
@@ -85,6 +85,55 @@ const HeadObject = {
   version: 'objectVersion',
   key,
 };
+
+function buildRpcHead(requestKey, multipartOptions) {
+  const result = {
+    key,
+    version: objResponse.version,
+    size: Number(objResponse.size),
+    etag: objResponse.etag,
+    uploaded: new Date(Number(objResponse.uploaded)),
+    storageClass: multipartOptions?.storageClass ?? objResponse.storageClass,
+    checksums: {},
+    httpMetadata: {},
+    customMetadata: multipartOptions?.customMetadata ?? {},
+  };
+
+  if (multipartOptions?.httpMetadata !== undefined) {
+    result.httpMetadata =
+      multipartOptions.httpMetadata instanceof Headers
+        ? httpMetaObj
+        : multipartOptions.httpMetadata;
+  }
+
+  switch (requestKey) {
+    case 'httpMetadata':
+      result.httpMetadata = httpMetaObj;
+      break;
+    case 'customMetadata':
+      result.customMetadata = customMetadata;
+      break;
+    case 'classInfrequentAccess':
+      result.storageClass = 'InfrequentAccess';
+      break;
+    case 'ssec':
+    case 'ssecMultipart':
+      result.ssecKeyMd5 = keyMd5;
+      break;
+    case 'multipleChecksums':
+      result.checksums = {
+        md5: md5Buffer.buffer,
+        sha1: sha1Buffer.buffer,
+        sha256: sha256Buffer.buffer,
+      };
+      break;
+    case 'ranged':
+      result.range = { offset: 10, length: 20 };
+      break;
+  }
+
+  return result;
+}
 
 function buildGetResponse({ head, body, isList } = {}) {
   const encoder = new TextEncoder();
@@ -995,44 +1044,7 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
       throw new Error('head: no such bucket (10006)');
     }
 
-    const result = {
-      key,
-      version: objResponse.version,
-      size: Number(objResponse.size),
-      etag: objResponse.etag,
-      uploaded: new Date(Number(objResponse.uploaded)),
-      storageClass: objResponse.storageClass,
-      checksums: {},
-      httpMetadata: {},
-      customMetadata: {},
-    };
-
-    switch (requestKey) {
-      case 'httpMetadata':
-        result.httpMetadata = httpMetaObj;
-        break;
-      case 'customMetadata':
-        result.customMetadata = customMetadata;
-        break;
-      case 'classInfrequentAccess':
-        result.storageClass = 'InfrequentAccess';
-        break;
-      case 'ssec':
-        result.ssecKeyMd5 = keyMd5;
-        break;
-      case 'multipleChecksums':
-        result.checksums = {
-          md5: md5Buffer.buffer,
-          sha1: sha1Buffer.buffer,
-          sha256: sha256Buffer.buffer,
-        };
-        break;
-      case 'ranged':
-        result.range = { offset: 10, length: 20 };
-        break;
-    }
-
-    return result;
+    return buildRpcHead(requestKey);
   }
 
   delete(keys) {
@@ -1044,6 +1056,69 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
     } else {
       assert.strictEqual(keys, key);
     }
+  }
+
+  createMultipartUpload(requestKey, options) {
+    assert.strictEqual(typeof requestKey, 'string');
+    return new MultipartUploadTarget(requestKey, 'multipartId', options);
+  }
+
+  resumeMultipartUpload(requestKey, uploadId) {
+    assert.strictEqual(typeof requestKey, 'string');
+    assert.strictEqual(typeof uploadId, 'string');
+    return new MultipartUploadTarget(requestKey, uploadId);
+  }
+}
+
+class MultipartUploadTarget extends RpcTarget {
+  #key;
+  #uploadId;
+  #options;
+  #aborted = false;
+
+  constructor(requestKey, uploadId, options) {
+    super();
+    this.#key = requestKey;
+    this.#uploadId = uploadId;
+    this.#options = options;
+  }
+
+  getUploadId() {
+    return this.#uploadId;
+  }
+
+  async uploadPart(partNumber, value, options) {
+    assert(partNumber >= 1 && partNumber <= 10000);
+    assert.strictEqual(
+      await new Response(value).text(),
+      this.#key === 'ssecMultipart' ? 'hey' : body
+    );
+    if (this.#key === 'ssecMultipart') {
+      assert.notStrictEqual(options?.ssecKey, undefined);
+    }
+    return {
+      partNumber,
+      etag: this.#uploadId === 'resumedId' ? 'resumedRpcPartEtag' : 'partEtag',
+    };
+  }
+
+  abort() {
+    this.#aborted = true;
+  }
+
+  complete(uploadedParts) {
+    if (this.#uploadId === 'resumedId') {
+      assert.strictEqual(this.#aborted, true);
+    }
+    for (const part of uploadedParts) {
+      assert(part.partNumber >= 1 && part.partNumber <= 10000);
+      assert.strictEqual(typeof part.etag, 'string');
+    }
+    const result = buildRpcHead(this.#key, this.#options);
+    if (this.#uploadId === 'resumedId') {
+      result.version = 'resumedRpcObjectVersion';
+    }
+    return result;
   }
 }
 
@@ -1072,6 +1147,29 @@ export const jsrpcTransportTests = {
 
     const coerced = await env.BUCKET.head(12345);
     assert.strictEqual(coerced.key, key);
+
+    const resumed = env.BUCKET.resumeMultipartUpload(key, 'resumedId');
+    assert.strictEqual(resumed.key, key);
+    assert.strictEqual(resumed.uploadId, 'resumedId');
+    const resumedPart = await resumed.uploadPart(1, body);
+    assert.deepStrictEqual(resumedPart, {
+      partNumber: 1,
+      etag: 'resumedRpcPartEtag',
+    });
+    await resumed.abort();
+    const resumedObject = await resumed.complete([resumedPart]);
+    assert.strictEqual(resumedObject.key, key);
+    assert.strictEqual(resumedObject.version, 'resumedRpcObjectVersion');
+    assert.strictEqual(resumedObject.etag, objResponse.etag);
+    assert.strictEqual(resumedObject.httpEtag, `"${objResponse.etag}"`);
+    assert.strictEqual(resumedObject.size, Number(objResponse.size));
+    assert(resumedObject.uploaded instanceof Date);
+    assert.strictEqual(resumedObject.storageClass, objResponse.storageClass);
+    const resumedHeaders = new Headers();
+    resumedObject.writeHttpMetadata(resumedHeaders);
+    assert.deepStrictEqual([...resumedHeaders], []);
+    assert.strictEqual(typeof resumedObject.checksums.toJSON, 'function');
+    assert.deepStrictEqual(resumedObject.checksums.toJSON(), {});
   },
 };
 

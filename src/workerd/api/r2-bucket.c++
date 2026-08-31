@@ -532,34 +532,16 @@ jsg::Ref<JsRpcProperty> R2Bucket::getRpcMethod(jsg::Lock& js, kj::StringPtr meth
   return KJ_ASSERT_NONNULL(fetcher->getRpcMethodInternal(js, kj::str(methodName)));
 }
 
-namespace {
-// Turn the JsRpcPromise a JSRPC call returns into an ordinary jsg::Promise.
-//
-// JsRpcPromise is a custom thenable whose `then()` takes raw v8 functions and deliberately hides
-// the inner promise from JSG, so it cannot be chained from C++ directly. Resolving a fresh promise
-// with it makes V8 adopt it, which also keeps this independent of the unwrap_custom_thenables
-// compatibility flag.
-jsg::Promise<jsg::Value> normalizeRpcPromise(jsg::Lock& js, jsg::Value rpcPromise) {
-  auto paf = js.newPromiseAndResolver<jsg::Value>();
-  paf.resolver.resolve(js, kj::mv(rpcPromise));
-  return kj::mv(paf.promise);
-}
-}  // namespace
-
-template <typename Result, typename... Args>
-jsg::Promise<Result> R2Bucket::callRpcMethod(jsg::Lock& js,
-    kj::StringPtr methodName,
-    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
-    const jsg::TypeHandler<jsg::Function<jsg::Value(Args...)>>& fnHandler,
-    const jsg::TypeHandler<jsg::Promise<Result>>& resultPromiseHandler,
-    Args... args) {
-  auto rpcProp = getRpcMethod(js, methodName);
-  auto wrappedProp = rpcPropHandler.wrap(js, kj::mv(rpcProp));
-  auto fn = KJ_ASSERT_NONNULL(fnHandler.tryUnwrap(js, wrappedProp));
-
-  auto rpcPromise = fn(js, kj::mv(args)...);
-  auto normalizedPromise = normalizeRpcPromise(js, kj::mv(rpcPromise));
-  return KJ_ASSERT_NONNULL(resultPromiseHandler.tryUnwrap(js, normalizedPromise.consumeHandle(js)));
+jsg::Ref<R2Bucket::HeadResult> headResultFromRpc(jsg::Lock& js, R2Bucket::HeadResultRpc rpc) {
+  return js.alloc<R2Bucket::HeadResult>(kj::mv(rpc.key), kj::mv(rpc.version), rpc.size,
+      kj::mv(rpc.etag),
+      js.alloc<R2Bucket::Checksums>(kj::mv(rpc.checksums.md5), kj::mv(rpc.checksums.sha1),
+          kj::mv(rpc.checksums.sha256), kj::mv(rpc.checksums.sha384), kj::mv(rpc.checksums.sha512)),
+      rpc.uploaded,
+      // Head-shaped RPC results always report metadata, so absence means that none was set.
+      kj::mv(rpc.httpMetadata).orDefault(R2Bucket::HttpMetadata{}),
+      kj::mv(rpc.customMetadata).orDefault(jsg::Dict<kj::String>{}), kj::mv(rpc.range),
+      kj::mv(rpc.storageClass), kj::mv(rpc.ssecKeyMd5));
 }
 
 jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::headRpc(jsg::Lock& js,
@@ -581,26 +563,15 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::headRpc(jsg::L
     }
     traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
 
-    return callRpcMethod<kj::Maybe<HeadResultRpc>>(
-        js, "head"_kj, rpcPropHandler, headFnHandler, headResultHandler, kj::mv(key))
+    return callR2RpcMethod<kj::Maybe<HeadResultRpc>>(js, getRpcMethod(js, "head"_kj),
+        rpcPropHandler, headFnHandler, headResultHandler, kj::mv(key))
         .then(js,
             [traceContext = kj::mv(traceContext)](jsg::Lock& js,
                 kj::Maybe<HeadResultRpc> parsed) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
       // A missing object is null, not an error: the gateway maps the 404 that
       // R2Result::objectNotFound() used to represent onto a null return.
       KJ_IF_SOME(rpc, parsed) {
-        auto result = js.alloc<HeadResult>(kj::mv(rpc.key), kj::mv(rpc.version), rpc.size,
-            kj::mv(rpc.etag),
-            js.alloc<Checksums>(kj::mv(rpc.checksums.md5), kj::mv(rpc.checksums.sha1),
-                kj::mv(rpc.checksums.sha256), kj::mv(rpc.checksums.sha384),
-                kj::mv(rpc.checksums.sha512)),
-            rpc.uploaded,
-            // head always reports http and custom metadata, so an absent field means "none set"
-            // rather than "not requested". parseObjectMetadata synthesises empty values in the same
-            // situation; GetResult later hard-asserts both are present.
-            kj::mv(rpc.httpMetadata).orDefault(HttpMetadata{}),
-            kj::mv(rpc.customMetadata).orDefault(jsg::Dict<kj::String>{}), kj::mv(rpc.range),
-            kj::mv(rpc.storageClass), kj::mv(rpc.ssecKeyMd5));
+        auto result = headResultFromRpc(js, kj::mv(rpc));
         addHeadResultSpanTags(js, traceContext, *result.get());
         return kj::mv(result);
       }
@@ -638,10 +609,59 @@ jsg::Promise<void> R2Bucket::deleteRpc(jsg::Lock& js,
 
     // The result is discarded, matching delete_: a missing key is success, and per-key failures in
     // a batch delete are reported in a body the binding has never read.
-    auto promise = callRpcMethod<void>(
-        js, "delete"_kj, rpcPropHandler, deleteFnHandler, deleteResultHandler, kj::mv(keys));
+    auto promise = callR2RpcMethod<void>(js, getRpcMethod(js, "delete"_kj), rpcPropHandler,
+        deleteFnHandler, deleteResultHandler, kj::mv(keys));
     return context.attachSpans(js, kj::mv(promise), kj::mv(traceContext));
   });
+}
+
+jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUploadRpc(jsg::Lock& js,
+    kj::String key,
+    jsg::Optional<MultipartOptions> options,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, jsg::Optional<MultipartOptions>)>>&
+        createFnHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value()>>& getUploadIdFnHandler,
+    const jsg::TypeHandler<jsg::Promise<kj::String>>& uploadIdResultHandler) {
+  return js.evalNow([&] {
+    auto& context = IoContext::current();
+    TraceContext traceContext = context.makeUserTraceSpan("r2_createMultipartUpload"_kjc);
+
+    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
+    KJ_IF_SOME(b, this->bindingName()) {
+      traceContext.setTag("cloudflare.binding.name"_kjc, b);
+    }
+    traceContext.setTag("cloudflare.r2.operation"_kjc, "CreateMultipartUpload"_kjc);
+    KJ_IF_SOME(b, this->bucketName()) {
+      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
+    }
+    traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
+
+    auto createPromise = callR2RpcMethod(js, getRpcMethod(js, "createMultipartUpload"_kj),
+        rpcPropHandler, createFnHandler, kj::str(key), kj::mv(options));
+    auto target = R2RpcClient::fromCallResult(js, createPromise);
+    auto uploadIdPromise = target.call(js, "getUploadId"_kj, rpcPropHandler, getUploadIdFnHandler);
+
+    return unwrapR2RpcPromise<kj::String>(js, kj::mv(uploadIdPromise), uploadIdResultHandler)
+        .then(js,
+            [bucket = JSG_THIS, key = kj::mv(key), target = kj::mv(target),
+                traceContext = kj::mv(traceContext)](jsg::Lock& js, kj::String uploadId) mutable {
+      traceContext.setTag("cloudflare.r2.response.upload_id"_kjc, uploadId.asPtr());
+      return js.alloc<R2MultipartUpload>(
+          kj::mv(key), kj::mv(uploadId), kj::mv(bucket), kj::mv(target));
+    });
+  });
+}
+
+jsg::Ref<R2MultipartUpload> R2Bucket::resumeMultipartUploadRpc(jsg::Lock& js,
+    kj::String key,
+    kj::String uploadId,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, kj::String)>>& resumeFnHandler) {
+  auto resumePromise = callR2RpcMethod(js, getRpcMethod(js, "resumeMultipartUpload"_kj),
+      rpcPropHandler, resumeFnHandler, kj::str(key), kj::str(uploadId));
+  auto target = R2RpcClient::fromCallResult(js, resumePromise);
+  return js.alloc<R2MultipartUpload>(kj::mv(key), kj::mv(uploadId), JSG_THIS, kj::mv(target));
 }
 
 R2Bucket::FeatureFlags::FeatureFlags(CompatibilityFlags::Reader featureFlags)
