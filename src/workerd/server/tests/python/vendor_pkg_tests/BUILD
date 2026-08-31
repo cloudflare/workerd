@@ -39,7 +39,6 @@ vendored_py_wd_test(
 
 vendored_py_wd_test(
     "shapely",
-    feature_flags = ["python_dedicated_snapshot"],
     make_snapshot = True,
     python_flags = ["0.28.2"],
     use_snapshot = "baseline",
