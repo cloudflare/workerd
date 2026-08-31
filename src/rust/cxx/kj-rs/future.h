@@ -72,6 +72,10 @@ using PollCallback = kj_rs::FuturePollStatus (*)(
 // ::kj_rs::repr::DropCallback
 using DropCallback = void (*)(void /* RustFuture::fut */* fut);
 
+// Rust is compiled without CFI as of writing, so we need to disable cfi-icall checks here as Rust-
+// defined function are being called indirectly here.
+#pragma clang attribute push(__attribute__((no_sanitize("cfi-icall"))), apply_to = function)
+
 // ::kj_rs::repr::RustFuture & ::kj_rs::promise::RustInfallibleFuture since they both have the
 // same layout.
 //
@@ -117,6 +121,7 @@ struct RustFuture {
   PollCallback poll;
   DropCallback drop;
 };
+#pragma clang attribute pop
 
 static_assert(sizeof(RustFuture) == 4 * sizeof(std::uintptr_t), "incorrect RustFuture layout");
 }  // namespace repr
