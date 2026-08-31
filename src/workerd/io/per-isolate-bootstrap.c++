@@ -6,6 +6,7 @@
 
 #include <workerd/api/compression.h>
 #include <workerd/api/crypto/digest-bootstrap.h>
+#include <workerd/api/filesystem-bootstrap.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
@@ -166,6 +167,24 @@ static void CreateDigestContext(const v8::FunctionCallbackInfo<v8::Value>& args)
   });
 }
 
+// Creates the native write context backing the TypeScript
+// FileSystemWritableFileStream. Like CreateDigestContext this allocates and can
+// throw -- a DOMException when the file cannot be opened, a TypeError when the
+// receiver is not a FileSystemFileHandle -- so it is a plain method rather than a
+// fast-API call, and needs liftKj.
+static void CreateFileSystemWriteContext(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      // The caller has already reduced the option bag to a boolean, so this is
+      // ToBoolean on an actual boolean and cannot run user code.
+      auto keepExistingData = api::KeepExistingData(args[1]->BooleanValue(args.GetIsolate()));
+      args.GetReturnValue().Set(v8::Local<v8::Value>(
+          api::createFileSystemWriteContext(js, jsg::JsValue(args[0]), keepExistingData)));
+    });
+  });
+}
+
 static const v8::CFunction fast_mark_promise_handled_ =
     v8::CFunction::Make(MarkPromiseHandledFastApi);
 
@@ -209,6 +228,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "getApiSymbol",
     "newCompressionCodec",
     "createDigestContext",
+    "createFileSystemWriteContext",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -220,6 +240,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, GetApiSymbol),
     getMethod(js, api::newCompressionCodecCallback),
     getMethod(js, CreateDigestContext),
+    getMethod(js, CreateFileSystemWriteContext),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());

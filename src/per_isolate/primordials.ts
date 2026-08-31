@@ -634,6 +634,7 @@ const EventTargetRemoveEventListener = uncurryThis(
 
 const TextDecoderCtor = globalThis.TextDecoder;
 const TextEncoderCtor = globalThis.TextEncoder;
+const DOMException = globalThis.DOMException;
 
 const TextEncoderEncode = uncurryThis(TextEncoderCtor.prototype.encode) as (
   encoder: TextEncoder,
@@ -733,6 +734,9 @@ module.exports = ObjectFreeze({
   ArrayPrototypeShift,
   ArrayPrototypeSlice,
   ArrayPrototypeSplice,
+
+  // DOMException
+  DOMException,
 
   // Map
   MapPrototypeGet,

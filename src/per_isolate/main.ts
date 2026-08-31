@@ -221,6 +221,48 @@ if (compatFlags['typescript_implemented_streams']) {
     },
   });
 
+  // FileSystemWritableFileStream is the other WritableStream subclass, and has
+  // the same problem DigestStream does. Its instances come from
+  // FileSystemFileHandle.createWritable() rather than a constructor, so both the
+  // global and that method have to be replaced for the swap to take effect.
+  //
+  // The web file system is opt-in, so these globals only exist under
+  // enable_web_file_system; without it there is nothing to replace.
+  const { FileSystemFileHandle, FileSystemWritableFileStream: NativeStream } =
+    globalThis as unknown as {
+      FileSystemFileHandle?: { prototype: object };
+      FileSystemWritableFileStream?: unknown;
+    };
+  if (FileSystemFileHandle !== undefined && NativeStream !== undefined) {
+    const {
+      FileSystemWritableFileStream,
+      createWritable,
+    } = require('webfs/writable-file-stream');
+
+    ObjectDefineProperties(globalThis, {
+      FileSystemWritableFileStream: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: FileSystemWritableFileStream,
+      },
+    });
+
+    // The attributes match what JSG_METHOD installs, so the swap is invisible to
+    // property introspection.
+    ObjectDefineProperties(FileSystemFileHandle.prototype, {
+      __proto__: null,
+      createWritable: {
+        __proto__: null,
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: createWritable,
+      },
+    });
+  }
+
   // Internal-only: expose the DrainingReader for testing expectedLength
   // pass-through (Content-Length integration). Gated by a separate
   // experimental flag that may never lose its experimental annotation.

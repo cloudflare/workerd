@@ -1,0 +1,28 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the unmodified webfs-test.js against the TypeScript
+# FileSystemWritableFileStream. Sharing the test file with webfs-test.wd-test is
+# the point: any behavioral drift between the two implementations fails one
+# config or the other.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "webfs-ts-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "webfs-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "enable_web_file_system",
+          "typescript_implemented_streams",
+          "experimental",
+          "global_navigator",
+        ]
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);
