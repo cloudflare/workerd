@@ -103,6 +103,11 @@ namespace workerd::util {
   V(NODEJS_EXCEPTIONS_RUST)                                                                        \
   /* Reuse HTTP/1.1 tunnels opened by Container.getTcpPort().fetch(). */                           \
   V(CONTAINER_TUNNEL_REUSE)                                                                        \
+  /* Keep the owning Durable Object actor active for as long as a Container.getTcpPort()           \
+     connection is open, so that hibernation cannot destroy the tunnel mid-stream. Gated because   \
+     it makes actors stay resident (and therefore billable) for the life of a container            \
+     connection. When disabled, such a connection could break silently mid-stream. */              \
+  V(CONTAINER_PORT_ACTOR_PIN)                                                                      \
   /* Allow a Socket to be transferred over JS RPC. When disabled, serializing a Socket fails as    \
      though the type were not serializable at all, and an incoming transferred Socket is           \
      rejected. */                                                                                  \
