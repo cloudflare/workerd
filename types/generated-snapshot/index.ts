@@ -4008,6 +4008,7 @@ export interface Container {
   ): Promise<ContainerSnapshot>;
   interceptOutboundHttps(addr: string, binding: Fetcher): Promise<void>;
   exec(cmd: string[], options?: ContainerExecOptions): Promise<ExecProcess>;
+  inspect(): Promise<ContainerInfo | null>;
 }
 export interface ContainerDirectorySnapshot {
   id: string;
@@ -4062,6 +4063,10 @@ export type ContainerStartupOptions = {
       containerSnapshot?: ContainerSnapshotRestoreParams;
     }
 );
+export interface ContainerInfo {
+  labels: Record<string, string>;
+  image: string;
+}
 export interface ContainerStartResources {
   vcpu: number;
   memoryMib: number;

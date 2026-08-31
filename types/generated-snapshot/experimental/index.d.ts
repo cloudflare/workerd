@@ -4086,8 +4086,8 @@ interface Container {
   ): Promise<ContainerSnapshot>;
   interceptOutboundHttps(addr: string, binding: Fetcher): Promise<void>;
   exec(cmd: string[], options?: ContainerExecOptions): Promise<ExecProcess>;
-  interceptOutboundTcp(addr: string, binding: Fetcher): Promise<void>;
   inspect(): Promise<ContainerInfo | null>;
+  interceptOutboundTcp(addr: string, binding: Fetcher): Promise<void>;
   setLabels(labels: Record<string, string>): Promise<void>;
 }
 interface ContainerDirectorySnapshot {
