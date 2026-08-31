@@ -18,19 +18,20 @@ export default {
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
+      const bytes = value.data;
       if (first) {
         first = false;
         const prefix = encoder.encode(`first:${socket.protocol}:`);
-        const combined = new Uint8Array(prefix.length + value.length);
+        const combined = new Uint8Array(prefix.length + bytes.length);
         combined.set(prefix, 0);
-        combined.set(value, prefix.length);
-        await writer.write(combined);
+        combined.set(bytes, prefix.length);
+        await writer.write(new Datagram(combined));
       } else {
         const prefix = encoder.encode('echo:');
-        const combined = new Uint8Array(prefix.length + value.length);
+        const combined = new Uint8Array(prefix.length + bytes.length);
         combined.set(prefix, 0);
-        combined.set(value, prefix.length);
-        await writer.write(combined);
+        combined.set(bytes, prefix.length);
+        await writer.write(new Datagram(combined));
       }
     }
   },
