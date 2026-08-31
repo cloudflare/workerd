@@ -70,6 +70,7 @@ class TextDecoderStream;
 class Blob;
 class File;
 class FormData;
+class Datagram;
 
 class URLPattern;
 namespace urlpattern {
@@ -1033,6 +1034,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(FixedLengthStream);
     JSG_NESTED_TYPE(IdentityTransformStream);
     JSG_NESTED_TYPE(HTMLRewriter);
+    JSG_NESTED_TYPE(Datagram);
 
     // Performance API
     if (flags.getEnableGlobalPerformanceClasses() || flags.getEnableNodeJsPerfHooksModule()) {
