@@ -6,6 +6,7 @@
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/validation.h>
+#include <workerd/util/strong-bool.h>
 
 namespace workerd {
 
@@ -31,20 +32,26 @@ enum class CompatibilityDateValidation {
   FUTURE_FOR_TEST
 };
 
+// Whether the Worker's main module is declared as a Python module.
+// This value is used to derive and inject compat flags related to Python Workers.
+WD_STRONG_BOOL(MainModuleIsPython);
+
 void compileCompatibilityFlags(kj::StringPtr compatDate,
     capnp::List<capnp::Text>::Reader compatFlags,
     CompatibilityFlags::Builder output,
     ValidationErrorReporter& errorReporter,
     bool allowExperimentalFeatures,
     CompatibilityDateValidation dateValidation,
-    kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags);
+    kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags,
+    MainModuleIsPython mainModuleIsPython = MainModuleIsPython::NO);
 void compileCompatibilityFlags(kj::StringPtr compatDate,
     kj::ArrayPtr<const kj::String> compatFlags,
     CompatibilityFlags::Builder output,
     ValidationErrorReporter& errorReporter,
     bool allowExperimentalFeatures,
     CompatibilityDateValidation dateValidation,
-    kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags);
+    kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags,
+    MainModuleIsPython mainModuleIsPython = MainModuleIsPython::NO);
 
 // Return an array of compatibility enable-flags which express the given FeatureFlags. The returned
 // StringPtrs point to FeatureFlags annotation parameters, which live in static storage.
