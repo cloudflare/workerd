@@ -240,6 +240,7 @@ All types that must be visited in `visitForGc()` if held as Resource Type member
 | `jsg::Promise<T>::Resolver` | Promise resolver                 |
 | `jsg::Sequence<T>`          | When `T` is GC-visitable (use `visitor.visitAll`) |
 | `jsg::Generator<T>`         | Sync generator                   |
+| `jsg::AsyncGenerator<T>`    | Async generator                  |
 | `kj::Maybe<T>`              | When `T` is GC-visitable         |
 
 **Not GC-visitable** (compile error if visited):
@@ -250,9 +251,6 @@ signal that weak references should not be traced. Do not include them in `visitF
 
 `jsg::Name` is also not visitable (private `visitForGc`): its symbol handle is
 a strong root, and a `v8::Symbol` cannot form a JS↔C++ cycle.
-
-`jsg::AsyncGenerator<T>` is likewise not visitable (no `visitForGc`); holders
-keep its handles as strong roots.
 
 ## Weak References
 

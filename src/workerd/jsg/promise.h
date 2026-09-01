@@ -146,8 +146,16 @@ template <typename ThenFunc, typename CatchFunc>
 struct ThenCatchPair {
   ThenFunc thenFunc;
   CatchFunc catchFunc;
-};
 
+  void visitForGc(GcVisitor& visitor) {
+    if constexpr (requires { visitor.visit(thenFunc); }) {
+      visitor.visit(thenFunc);
+    }
+    if constexpr (requires { visitor.visit(catchFunc); }) {
+      visitor.visit(catchFunc);
+    }
+  }
+};
 // FunctionCallback implementing a C++ .then() continuation on a JS promise.
 //
 // We expect the input is already an opaque-wrapped value, args.Data() is an opaque-wrapped C++

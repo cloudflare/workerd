@@ -7,9 +7,23 @@
 namespace workerd::jsg::test {
 namespace {
 
-V8System v8System;
+V8System v8System({"--expose-gc"_kj});
 
 struct GeneratorContext: public Object, public ContextGlobal {
+  WeakJsRef<JsObject> trackedAsyncGenerator = nullptr;
+
+  void trackAsyncGenerator(Lock& js, JsObject generator) {
+    trackedAsyncGenerator = generator.getWeakRef(js);
+  }
+
+  void startPendingAsyncGenerator(Lock& js, JsObject object, AsyncGenerator<kj::String> generator) {
+    trackedAsyncGenerator = object.getWeakRef(js);
+    generator.next(js);
+  }
+
+  bool trackedAsyncGeneratorIsAlive() {
+    return trackedAsyncGenerator.isAlive();
+  }
 
   kj::Array<kj::String> generatorTest(Lock& js, Generator<kj::String> generator) {
     kj::Vector<kj::String> items;
@@ -134,6 +148,31 @@ struct GeneratorContext: public Object, public ContextGlobal {
     KJ_ASSERT(calls == 3);
   }
 
+  void manualAsyncGeneratorOutOfOrderTest(
+      Lock& js, AsyncGenerator<kj::String> generator, Function<void()> settle) {
+    uint settled = 0;
+    generator.next(js).then(js, [&settled](auto& js, auto value) {
+      KJ_ASSERT(KJ_ASSERT_NONNULL(value) == "a");
+      ++settled;
+    });
+    generator.next(js).then(js, [&settled](auto& js, auto value) {
+      KJ_ASSERT(value == kj::none);
+      ++settled;
+    });
+
+    settle(js);
+    js.runMicrotasks();
+    KJ_ASSERT(settled == 2);
+
+    bool completed = false;
+    generator.next(js).then(js, [&completed](auto& js, auto value) {
+      KJ_ASSERT(value == kj::none);
+      completed = true;
+    });
+    js.runMicrotasks();
+    KJ_ASSERT(completed);
+  }
+
   void manualAsyncGeneratorTestEarlyReturn(Lock& js, AsyncGenerator<kj::String> generator) {
     uint calls = 0;
     generator.next(js).then(js, [&calls](auto& js, auto value) {
@@ -212,6 +251,9 @@ struct GeneratorContext: public Object, public ContextGlobal {
   }
 
   JSG_RESOURCE_TYPE(GeneratorContext) {
+    JSG_METHOD(trackAsyncGenerator);
+    JSG_METHOD(startPendingAsyncGenerator);
+    JSG_METHOD(trackedAsyncGeneratorIsAlive);
     JSG_METHOD(generatorTest);
     JSG_METHOD(generatorErrorTest);
     JSG_METHOD(sequenceOfSequenceTest);
@@ -220,6 +262,7 @@ struct GeneratorContext: public Object, public ContextGlobal {
     JSG_METHOD(asyncGeneratorTest);
     JSG_METHOD(asyncGeneratorErrorTest);
     JSG_METHOD(manualAsyncGeneratorTest);
+    JSG_METHOD(manualAsyncGeneratorOutOfOrderTest);
     JSG_METHOD(manualAsyncGeneratorTestEarlyReturn);
     JSG_METHOD(manualAsyncGeneratorTestThrow);
     JSG_METHOD(asyncGeneratorReturnNotCallable);
@@ -268,6 +311,28 @@ KJ_TEST("AsyncGenerator works") {
   e.expectEval("manualAsyncGeneratorTest(async function* foo() { yield 'a'; yield 'b'; }())",
       "undefined", "undefined");
 
+  e.expectEval(R"(
+    let calls = 0;
+    let resolveFirst;
+    let resolveSecond;
+    const iterator = {
+      [Symbol.asyncIterator]() { return this; },
+      next() {
+        switch (++calls) {
+          case 1: return new Promise((resolve) => { resolveFirst = resolve; });
+          case 2: return new Promise((resolve) => { resolveSecond = resolve; });
+          default: return Promise.resolve({ value: 'unexpected', done: false });
+        }
+      },
+    };
+    manualAsyncGeneratorOutOfOrderTest(iterator, () => {
+      resolveSecond({ done: true });
+      resolveFirst({ value: 'a', done: false });
+    });
+    calls;
+  )",
+      "number", "2");
+
   e.expectEval("manualAsyncGeneratorTestEarlyReturn(async function* foo() "
                "{ yield 'a'; yield 'b'; }())",
       "undefined", "undefined");
@@ -282,6 +347,38 @@ KJ_TEST("AsyncGenerator works") {
                "return: 42 }; "
                "asyncGeneratorReturnNotCallable(iter)",
       "undefined", "undefined");
+}
+
+KJ_TEST("pending AsyncGenerator does not retain an unreachable iterator") {
+  Evaluator<GeneratorContext, GeneratorIsolate> e(v8System);
+
+  e.expectEval(R"(
+    let controlCollected;
+    (() => {
+      let iterator = (async function*() {
+        await new Promise(() => {});
+      })();
+      trackAsyncGenerator(iterator);
+      iterator.next();
+      iterator = null;
+    })();
+    gc();
+    gc();
+    controlCollected = !trackedAsyncGeneratorIsAlive();
+
+    (() => {
+      let iterator = (async function*() {
+        await new Promise(() => {});
+      })();
+      startPendingAsyncGenerator(iterator, iterator);
+      iterator = null;
+    })();
+    gc();
+    gc();
+
+    [controlCollected, !trackedAsyncGeneratorIsAlive()];
+  )",
+      "object", "true,true");
 }
 
 }  // namespace
