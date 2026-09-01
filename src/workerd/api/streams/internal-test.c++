@@ -373,7 +373,8 @@ KJ_TEST("WritableStreamInternalController operations reject when piped to") {
     auto expectReject = [&](jsg::Promise<void> promise, bool& flag) {
       promise.catch_(env.js, [&](jsg::Lock& js, jsg::Value value) {
         flag = true;
-        KJ_ASSERT(js.exceptionToKj(kj::mv(value)).getDescription() == expectedError);
+        auto exception = js.exceptionToKj(kj::mv(value));
+        KJ_ASSERT(exception.getDescription() == expectedError);
       });
     };
 

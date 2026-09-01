@@ -1456,9 +1456,15 @@ SqliteDatabase::StatementAndEffect& SqliteDatabase::Statement::prepareForExecuti
     // Database was reset. Recompile the statement against the new database. (This could throw,
     // of course, if the statement depends on tables that haven't been recreated yet.)
     //
+    // Move the SQL out of `stmt` before parsing it. This ensures that the StringPtrs used by
+    // prepareSql() don't point into the OneOf alternative when that alternative is replaced, and
+    // allows a failed preparation to restore the SQL for the next attempt.
+    auto sqlCodeToPrepare = kj::mv(sqlCode);
+    KJ_ON_SCOPE_FAILURE(stmt = kj::mv(sqlCodeToPrepare));
+
     // We use the MULTI flag here in case this Statement was created by prepareMulti(). If multiple
     // statements are parsed, they'll be added to our `prelude`, and also executed immediately.
-    stmt = db.prepareSql(regulator, sqlCode, SQLITE_PREPARE_PERSISTENT, MULTI, prelude);
+    stmt = db.prepareSql(regulator, sqlCodeToPrepare, SQLITE_PREPARE_PERSISTENT, MULTI, prelude);
   }
 
   return KJ_ASSERT_NONNULL(stmt.tryGet<StatementAndEffect>());
