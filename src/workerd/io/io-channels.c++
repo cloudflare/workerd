@@ -8,7 +8,8 @@
 
 namespace workerd {
 
-IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(kj::Date createdAt) {
+IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(
+    kj::Date createdAt, ActorRetryGateEnabled retryGateEnabled) {
   static thread_local auto generator = [] {
     uint64_t seed;
     getEntropy(kj::asBytes(seed));
@@ -20,6 +21,7 @@ IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(kj
     .nonce = distribution(generator),
     .createdAt = createdAt,
     .isRetry = IsActorRetry::NO,
+    .retryGateEnabled = retryGateEnabled,
   };
 }
 

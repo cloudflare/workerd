@@ -89,8 +89,9 @@ namespace workerd::util {
   /* Gate for the Durable Object fetch-retries feature, scoped to DO `fetch()`. Enables            \
     observe-only retry-token claim machinery. */                                                   \
   V(DURABLE_OBJECT_RETRIES_FETCH)                                                                  \
-  /* Enables Durable Object fetch retry requests and fail-closed receiver enforcement. The         \
-     observe-only DURABLE_OBJECT_RETRIES_FETCH gate is a prerequisite. */                          \
+  /* Enables Durable Object fetch retry requests. Enabled senders require receiver-side claim     \
+     enforcement on each request. The observe-only DURABLE_OBJECT_RETRIES_FETCH gate is a         \
+     prerequisite. */                                                                              \
   V(DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS)                                                   \
   /* When enabled, the native `node-internal:url` module is provided by the Rust                   \
      implementation (api::node UrlUtil ported to src/rust/api) instead of the                      \
