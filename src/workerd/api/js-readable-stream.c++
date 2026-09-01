@@ -609,7 +609,8 @@ JsReadableStream JsReadableStream::fromPull(
         }
       });
     };
-    return JsReadableStream(ReadableStream::constructor(js, kj::mv(underlyingSource), kj::none));
+    return JsReadableStream(ReadableStream::constructor(
+        js, kj::mv(underlyingSource), StreamQueuingStrategy{.highWaterMark = 0}));
   }
 
   // TypeScript arm: same idea as from()'s TypeScript arm, but driving `pull` directly rather
