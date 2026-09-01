@@ -281,9 +281,7 @@ class AsyncGenerator final {
   }
 
   void visitForGc(GcVisitor& visitor) {
-    if (State* ptr = state.get()) {
-      visitor.visit(*ptr);
-    }
+    visitor.visit(*state);
   }
 
  private:
