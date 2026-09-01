@@ -6772,6 +6772,8 @@ class Server::UdpListener final: public kj::Refcounted {
       if (ended) {
         return kj::Maybe<kj::Array<kj::byte>>(kj::none);
       }
+      KJ_REQUIRE(
+          waitingReceiver == kj::none, "DatagramChannel::receive() already has a pending call");
       auto paf = kj::newPromiseAndFulfiller<kj::Maybe<kj::Array<kj::byte>>>();
       waitingReceiver = kj::mv(paf.fulfiller);
       return kj::mv(paf.promise);
