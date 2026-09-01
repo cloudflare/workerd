@@ -44,8 +44,8 @@ namespace {
 class MemoryInputStream final: public ReadableStreamSource {
  public:
   MemoryInputStream(kj::ArrayPtr<const kj::byte> bytes, kj::Maybe<kj::Own<void>> backing)
-      : unread(bytes),
-        backing(kj::mv(backing)) {}
+      : backing(kj::mv(backing)),
+        unread(bytes) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     size_t amount = kj::min(maxBytes, unread.size());
@@ -84,8 +84,8 @@ class MemoryInputStream final: public ReadableStreamSource {
   }
 
  private:
-  kj::ArrayPtr<const kj::byte> unread;
   kj::Maybe<kj::Own<void>> backing;
+  kj::ArrayPtr<const kj::byte> unread;
 };
 
 // An AsyncInputStream wrapper that translates tee-related kj::Exceptions from read

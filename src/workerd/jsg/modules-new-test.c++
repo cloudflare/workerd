@@ -1006,16 +1006,14 @@ KJ_TEST("Basic types of modules work (text, data, json, wasm)") {
     CompilationObserver compilationObserver;
     ModuleRegistry::Builder registryBuilder(BASE);
 
-    ModuleBundle::BundleBuilder bundleBuilder(BASE);
     auto abcSource = kj::str("hello");
     auto xyzData = kj::heapArray<kj::byte>({1, 2, 3});
+    auto json = kj::str("{\"foo\":123}");
+    auto wasm = makeTestWasm();
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
     bundleBuilder.addSyntheticModule("abc", Module::newTextModuleHandler(abcSource));
     bundleBuilder.addSyntheticModule("xyz", Module::newDataModuleHandler(xyzData));
-
-    auto json = kj::str("{\"foo\":123}");
     bundleBuilder.addSyntheticModule("json", Module::newJsonModuleHandler(json.first(json.size())));
-
-    auto wasm = makeTestWasm();
     bundleBuilder.addSyntheticModule("wasm", Module::newWasmModuleHandler(wasm));
 
     auto mainSource2 = kj::str("export { default as abc } from 'abc';"
@@ -1771,8 +1769,8 @@ KJ_TEST("Invalid JSON syntax module throws exception as expected") {
     ResolveObserverImpl observer;
     CompilationObserver compilationObserver;
 
-    ModuleBundle::BundleBuilder bundleBuilder(BASE);
     auto json = kj::str("not valid json");
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
     bundleBuilder.addSyntheticModule("foo", Module::newJsonModuleHandler(json.first(json.size())));
 
     auto esm = kj::str("import foo from 'foo'");
@@ -2096,6 +2094,8 @@ KJ_TEST("UNWRAP_DEFAULT returns namespace for bundle ESM, default for others") {
     ResolveObserverImpl observer;
     CompilationObserver compilationObserver;
 
+    auto json = kj::str("{\"key\": \"value\"}");
+    auto text = kj::str("hello world");
     ModuleBundle::BundleBuilder bundleBuilder(BASE);
 
     // Bundle ESM with named exports (no __cjsUnwrapDefault)
@@ -2107,12 +2107,10 @@ KJ_TEST("UNWRAP_DEFAULT returns namespace for bundle ESM, default for others") {
     bundleBuilder.addEsmModule("esm-cjs", esmCjs);
 
     // JSON synthetic module
-    auto json = kj::str("{\"key\": \"value\"}");
     bundleBuilder.addSyntheticModule(
         "data.json", Module::newJsonModuleHandler(json.first(json.size())));
 
     // Text synthetic module
-    auto text = kj::str("hello world");
     bundleBuilder.addSyntheticModule(
         "data.txt", Module::newTextModuleHandler(text.first(text.size())));
 
@@ -2340,12 +2338,12 @@ KJ_TEST("REQUIRE_ESM rejects non-ESM entry points before evaluation") {
   PREAMBLE([&](Lock& js) {
     CompilationObserver compilationObserver;
 
+    auto json = kj::str("{\"key\": \"value\"}");
     ModuleBundle::BundleBuilder bundleBuilder(BASE);
 
     auto esm = kj::str("export default 42;");
     bundleBuilder.addEsmModule("main", esm);
 
-    auto json = kj::str("{\"key\": \"value\"}");
     bundleBuilder.addSyntheticModule(
         "data.json", Module::newJsonModuleHandler(json.first(json.size())));
 

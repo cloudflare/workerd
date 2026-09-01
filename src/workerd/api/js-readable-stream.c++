@@ -483,7 +483,9 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
 // ownership of that heap buffer without changing its address, so view remains valid.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdangling-field"
-JsReadableStream::Buffer::Buffer(kj::Array<const kj::byte> data): view(data), owned(kj::mv(data)) {}
+JsReadableStream::Buffer::Buffer(kj::Array<const kj::byte> data)
+    : owned(kj::mv(data)),
+      view(owned) {}
 #pragma clang diagnostic pop
 
 // Blob contents live in a V8 ArrayBuffer.  The streams built from this Buffer are read on the
