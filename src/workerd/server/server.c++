@@ -6671,12 +6671,14 @@ class Server::UdpListener final: public kj::Refcounted {
       kj::Own<kj::DatagramPort> port,
       kj::Own<Service> service,
       kj::StringPtr addrStr,
-      kj::Duration idleTimeout)
+      kj::Duration idleTimeout,
+      size_t maxPendingBytes)
       : owner(owner),
         port(kj::mv(port)),
         service(kj::mv(service)),
         addrStr(addrStr),
-        idleTimeout(idleTimeout) {}
+        idleTimeout(idleTimeout),
+        maxPendingBytes(maxPendingBytes) {}
 
   kj::Promise<void> run() {
     TRACE_EVENT("workerd", "UdpListener::run");
@@ -6698,8 +6700,8 @@ class Server::UdpListener final: public kj::Refcounted {
       KJ_IF_SOME(existing, flows.find(key)) {
         flow = existing;
       } else {
-        auto newFlow =
-            kj::heap<Flow>(*this, kj::str(key), receiver->getSource().clone(), idleTimeout);
+        auto newFlow = kj::heap<Flow>(
+            *this, kj::str(key), receiver->getSource().clone(), idleTimeout, maxPendingBytes);
         flow = newFlow.get();
         flows.insert(kj::str(key), flow);
         dispatch(kj::mv(newFlow));
@@ -6723,12 +6725,14 @@ class Server::UdpListener final: public kj::Refcounted {
     Flow(UdpListener& listener,
         kj::String key,
         kj::Own<kj::NetworkAddress> peerAddr,
-        kj::Duration idleTimeout)
+        kj::Duration idleTimeout,
+        size_t maxPendingBytes)
         : listener(listener),
           key(kj::mv(key)),
           peerAddr(kj::mv(peerAddr)),
           port(listener.port.addRef()),
-          idleTimeout(idleTimeout) {
+          idleTimeout(idleTimeout),
+          maxPendingBytes(maxPendingBytes) {
       resetIdleTimer();
     }
 
@@ -6738,22 +6742,31 @@ class Server::UdpListener final: public kj::Refcounted {
       listener.flows.erase(key);
     }
 
-    // Called by UdpListener::run() when a new datagram arrives for this flow.
+    // Called by UdpListener::run() when a new datagram arrives for this flow. The listener keeps
+    // draining the kernel socket regardless of whether this flow's queue has room, so one slow
+    // flow does not block delivery to other peers sharing the same socket.
+    // Once `maxPendingBytes` worth of datagrams are queued, further arrivals for this flow are
+    // dropped rather than buffered.
     void deliver(kj::Array<kj::byte> datagram) {
       if (ended) return;
       resetIdleTimer();
       KJ_IF_SOME(fulfiller, waitingReceiver) {
         fulfiller->fulfill(kj::mv(datagram));
         waitingReceiver = kj::none;
-      } else {
-        pending.push_back(kj::mv(datagram));
+        return;
       }
+      if (pendingBytes + datagram.size() > maxPendingBytes) {
+        return;
+      }
+      pendingBytes += datagram.size();
+      pending.push_back(kj::mv(datagram));
     }
 
     kj::Promise<kj::Maybe<kj::Array<kj::byte>>> receive() override {
       if (!pending.empty()) {
         auto result = kj::mv(pending.front());
         pending.pop_front();
+        pendingBytes -= result.size();
         return kj::Maybe<kj::Array<kj::byte>>(kj::mv(result));
       }
       if (ended) {
@@ -6774,8 +6787,10 @@ class Server::UdpListener final: public kj::Refcounted {
     kj::Own<kj::NetworkAddress> peerAddr;
     kj::Rc<kj::DatagramPort> port;
     kj::Duration idleTimeout;
+    size_t maxPendingBytes;
 
     workerd::RingBuffer<kj::Array<kj::byte>> pending;
+    size_t pendingBytes = 0;
     kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Maybe<kj::Array<kj::byte>>>>> waitingReceiver;
     bool ended = false;
     kj::Promise<void> idleTask = kj::READY_NOW;
@@ -6810,6 +6825,7 @@ class Server::UdpListener final: public kj::Refcounted {
   kj::Own<Service> service;
   kj::StringPtr addrStr;
   kj::Duration idleTimeout;
+  size_t maxPendingBytes;
 
   // Flows keyed by the peer's address (as text): a non-owning lookup table used only to route a
   // later datagram from the same peer to the Flow already dispatched for it. See Flow's class
@@ -6834,9 +6850,10 @@ class Server::UdpListener final: public kj::Refcounted {
 kj::Promise<void> Server::listenUdp(kj::Own<kj::DatagramPort> port,
     kj::Own<Service> service,
     kj::StringPtr addrStr,
-    kj::Duration idleTimeout) {
-  auto obj =
-      kj::refcounted<UdpListener>(*this, kj::mv(port), kj::mv(service), addrStr, idleTimeout);
+    kj::Duration idleTimeout,
+    size_t maxPendingBytes) {
+  auto obj = kj::refcounted<UdpListener>(
+      *this, kj::mv(port), kj::mv(service), addrStr, idleTimeout, maxPendingBytes);
   co_return co_await obj->run();
 }
 
@@ -7315,11 +7332,12 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       }
 
       auto idleTimeout = sock.getUdp().getIdleTimeoutMs() * kj::MILLISECONDS;
+      size_t maxPendingBytes = sock.getUdp().getMaxPendingBytes();
       auto addrPromise = network.parseAddress(addrStr, 0);
 
       auto handle = kj::coCapture(
           [this, service = kj::mv(service), name = kj::mv(name), addrStr = kj::mv(addrStr),
-              idleTimeout](
+              idleTimeout, maxPendingBytes](
               kj::Promise<kj::Own<kj::NetworkAddress>> addrPromise) mutable -> kj::Promise<void> {
         TRACE_EVENT("workerd", "setup listenUdp");
         auto addr = co_await addrPromise;
@@ -7334,7 +7352,7 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
           }
         }
 
-        co_await listenUdp(kj::mv(port), kj::mv(service), addrStr, idleTimeout);
+        co_await listenUdp(kj::mv(port), kj::mv(service), addrStr, idleTimeout, maxPendingBytes);
       });
       tasks.add(handle(kj::mv(addrPromise)).exclusiveJoin(forkedDrainWhen.addBranch()));
       continue;

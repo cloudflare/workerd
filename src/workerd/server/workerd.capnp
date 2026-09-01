@@ -157,6 +157,14 @@ struct Socket {
       # `connect()` call, until no datagram has been seen from that peer for `idleTimeoutMs`.
 
       idleTimeoutMs @7 :UInt32 = 30000;
+
+      # Bound, in bytes, on datagrams queued for one flow waiting to be consumed by
+      # `DatagramChannel::receive()`. The listener keeps
+      # draining the kernel socket regardless of whether this flow's queue has room, so one slow
+      # flow does not block delivery to other peers sharing the same socket.
+      # Once `maxPendingBytes` worth of datagrams are queued, further arrivals for this flow are
+      # dropped rather than buffered.
+      maxPendingBytes @8 :UInt32 = 262144;
     }
 
     # TODO(someday): TCP proxy, SMTP, Cap'n Proto, ...
