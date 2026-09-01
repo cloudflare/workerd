@@ -42,8 +42,11 @@ LegacyHibernationManagerImpl::HibernatableWebSocket::~HibernatableWebSocket() no
       // TagListItem in the list, which we will now remove.
       list.remove(item);
       if (list.empty()) {
-        // Remove the bucket in tagToWs if the tag has no more websockets.
-        manager.tagToWs.erase(kj::mv(item.tag));
+        // Remove the bucket in tagToWs if the tag has no more websockets. Release this item's
+        // non-owning view before erasing the collection that owns the tag.
+        auto tag = kj::str(item.tag);
+        item.tag = nullptr;
+        manager.tagToWs.erase(tag);
       }
     }
     item.hibWS = kj::none;
@@ -188,7 +191,7 @@ void LegacyHibernationManagerImpl::acceptWebSocket(
     auto& tagCollection = tagToWs.findOrCreate(*tag, [&tag]() {
       auto item = kj::heap<TagCollection>(
           kj::mv(*tag), kj::heap<kj::List<TagListItem, &TagListItem::link>>());
-      return decltype(tagToWs)::Entry{item->tag, kj::mv(item)};
+      return decltype(tagToWs)::Entry{kj::str(item->tag), kj::mv(item)};
     });
     // This TagListItem sits in the HibernatableWebSocket's tagItems array.
     auto& tagListItem = refToHibernatable.tagItems[position];
