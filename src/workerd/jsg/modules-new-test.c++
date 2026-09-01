@@ -857,7 +857,8 @@ KJ_TEST("A worker bundle module can shadow node:process") {
     js.tryCatch([&] {
       auto val = ModuleRegistry::resolve(js, "node:process");
       KJ_ASSERT(val.isString());
-      KJ_ASSERT(kj::str(val) == "shadowed-process"_kjc);
+      auto value = kj::str(val);
+      KJ_ASSERT(value == "shadowed-process"_kjc);
     }, [&](Value exception) { js.throwException(kj::mv(exception)); });
   });
 }
@@ -904,7 +905,8 @@ KJ_TEST("A worker bundle module can shadow node:process via dynamic import") {
     js.tryCatch([&] {
       auto val = ModuleRegistry::resolve(js, "file:///main", "default"_kjc);
       KJ_ASSERT(val.isString());
-      KJ_ASSERT(kj::str(val) == "shadowed-process"_kjc);
+      auto value = kj::str(val);
+      KJ_ASSERT(value == "shadowed-process"_kjc);
     }, [&](Value exception) { js.throwException(kj::mv(exception)); });
   });
 }
@@ -1587,17 +1589,17 @@ KJ_TEST("Module source is decoded as UTF-8 across all encoding tiers") {
     auto attached = registry->attachToIsolate(js, compilationObserver);
 
     JSG_TRY(js) {
-      auto plain = ModuleRegistry::resolve(js, "file:///ascii");
-      KJ_ASSERT(kj::str(plain) == "plain");
+      auto plain = kj::str(ModuleRegistry::resolve(js, "file:///ascii"));
+      KJ_ASSERT(plain == "plain");
 
-      auto cafe = ModuleRegistry::resolve(js, "file:///latin1");
-      KJ_ASSERT(kj::str(cafe) == "caf\xc3\xa9", kj::str(cafe));
+      auto cafe = kj::str(ModuleRegistry::resolve(js, "file:///latin1"));
+      KJ_ASSERT(cafe == "caf\xc3\xa9", cafe);
 
-      auto cjk = ModuleRegistry::resolve(js, "file:///utf16");
-      KJ_ASSERT(kj::str(cjk) == "\xe9\x83\xa8\xe5\x93\x81 \xf0\x9f\x8e\x89", kj::str(cjk));
+      auto tokyo = kj::str(ModuleRegistry::resolve(js, "file:///utf16"));
+      KJ_ASSERT(tokyo == "\xe9\x83\xa8\xe5\x93\x81 \xf0\x9f\x8e\x89", tokyo);
 
-      auto replaced = ModuleRegistry::resolve(js, "file:///invalid");
-      KJ_ASSERT(kj::str(replaced) == "caf\xef\xbf\xbd", kj::str(replaced));
+      auto korean = kj::str(ModuleRegistry::resolve(js, "file:///invalid"));
+      KJ_ASSERT(korean == "caf\xef\xbf\xbd", korean);
     }
     JSG_CATCH(exception) {
       js.throwException(kj::mv(exception));

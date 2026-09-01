@@ -3151,7 +3151,8 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
     jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {
   auto underlyingSource = kj::mv(maybeUnderlyingSource).orDefault({});
   auto queuingStrategy = kj::mv(maybeQueuingStrategy).orDefault({});
-  auto type = underlyingSource.type.map([](kj::StringPtr s) { return s; }).orDefault(""_kj);
+  auto type =
+      kj::str(underlyingSource.type.map([](kj::StringPtr s) { return s; }).orDefault(""_kj));
 
   expectedLength = underlyingSource.expectedLength;
 

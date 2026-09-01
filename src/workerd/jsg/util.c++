@@ -85,14 +85,16 @@ kj::String typeName(const std::type_info& type) {
 
   // Strip namespace, if any.
   KJ_IF_SOME(pos, result.findLast(':')) {
-    result = kj::str(result.slice(pos + 1));
+    auto unqualified = kj::str(result.slice(pos + 1));
+    result = kj::mv(unqualified);
   }
 
   // Strip template args, if any.
   //
   // TODO(someday): Maybe just strip namespaces from each arg?
   KJ_IF_SOME(pos, result.findFirst('<')) {
-    result = kj::str(result.first(pos));
+    auto withoutTemplateArgs = kj::str(result.first(pos));
+    result = kj::mv(withoutTemplateArgs);
   }
 
   return kj::mv(result);

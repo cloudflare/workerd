@@ -348,11 +348,17 @@ kj::Exception exceptionToPropagate(bool isInternalException, kj::Exception&& exc
     // TODO(someday) We also do this stripping when making the tunneled exception for
     // `jsg::isTunneledException(...)`. It would be lovely if we could simply store some type
     // instead of `loggedExceptionEarlier`. It would save use some work.
-    auto description = jsg::stripRemoteExceptionPrefix(exception.getDescription());
-    if (!description.startsWith("remote.")) {
-      // If we already were annotated as remote from some other worker entrypoint, no point
-      // adding an additional prefix.
-      exception.setDescription(kj::str("remote.", description));
+    kj::Maybe<kj::String> newDescription;
+    {
+      auto description = jsg::stripRemoteExceptionPrefix(exception.getDescription());
+      if (!description.startsWith("remote.")) {
+        // If we already were annotated as remote from some other worker entrypoint, no point
+        // adding an additional prefix.
+        newDescription = kj::str("remote.", description);
+      }
+    }
+    KJ_IF_SOME(description, newDescription) {
+      exception.setDescription(kj::mv(description));
     }
     return kj::mv(exception);
   }
