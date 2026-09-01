@@ -6716,10 +6716,8 @@ class Server::UdpListener final: public kj::Refcounted {
   // `pending`, blocking on `waitingReceiver` if empty; send() writes back to the peer via the
   // listener's shared DatagramPort.
   //
-  // Ownership: exactly one owner at a time, the dispatch task created for it in dispatch() (see
-  // there), mirroring how TcpListener::run() attaches a connection's ownership to the same task
-  // that dispatches connect() for it. `flows` below holds only a non-owning lookup pointer, used
-  // to route later datagrams from the same peer to this same Flow.
+  // Ownership: the dispatch task owns Flow (see dispatch()), same as TcpListener::run() owning
+  // per-connection state. `flows` below is a non-owning lookup pointer for routing datagrams.
   class Flow final: public workerd::DatagramChannel {
    public:
     Flow(UdpListener& listener,
@@ -6727,7 +6725,7 @@ class Server::UdpListener final: public kj::Refcounted {
         kj::Own<kj::NetworkAddress> peerAddr,
         kj::Duration idleTimeout,
         size_t maxPendingBytes)
-        : listener(listener),
+        : listener(kj::addRef(listener)),
           key(kj::mv(key)),
           peerAddr(kj::mv(peerAddr)),
           port(listener.port.addRef()),
@@ -6739,7 +6737,7 @@ class Server::UdpListener final: public kj::Refcounted {
     ~Flow() noexcept(false) {
       // Stop routing further datagrams here if the dispatch task is ending before an idle timeout
       // removed us already (e.g. the connect() handler returned without reading until EOF).
-      listener.flows.erase(key);
+      listener->flows.erase(key);
     }
 
     // Called by UdpListener::run() when a new datagram arrives for this flow. The listener keeps
@@ -6784,7 +6782,7 @@ class Server::UdpListener final: public kj::Refcounted {
     }
 
    private:
-    UdpListener& listener;
+    kj::Own<UdpListener> listener;
     kj::String key;
     kj::Own<kj::NetworkAddress> peerAddr;
     kj::Rc<kj::DatagramPort> port;
@@ -6803,7 +6801,7 @@ class Server::UdpListener final: public kj::Refcounted {
       // kj::Promise sitting in a member variable is never polled by the event loop unless
       // something is actively waiting on it (a coroutine co_await, a TaskSet, or eager
       // evaluation) -- without it this timer would simply never fire.
-      idleTask = listener.owner.timer.afterDelay(idleTimeout).then([this]() {
+      idleTask = listener->owner.timer.afterDelay(idleTimeout).then([this]() {
         onIdleTimeout();
       }).eagerlyEvaluate(nullptr);
     }
@@ -6818,7 +6816,7 @@ class Server::UdpListener final: public kj::Refcounted {
       // (it's owned by its dispatch task, not by `flows`), just no longer reachable for future
       // deliver() calls. It's destroyed once that task's promise chain -- the connect() handler,
       // plus connectUdp()'s own neutering -- completes.
-      listener.flows.erase(key);
+      listener->flows.erase(key);
     }
   };
 
