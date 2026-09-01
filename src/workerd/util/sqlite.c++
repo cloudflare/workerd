@@ -4,6 +4,8 @@
 
 #include "sqlite.h"
 
+#include "strings.h"
+
 #include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
@@ -29,11 +31,6 @@
 #include <kj/vector.h>
 
 #include <atomic>
-
-#if _WIN32
-#define strncasecmp _strnicmp
-#define strcasecmp _stricmp
-#endif
 
 namespace workerd {
 
@@ -742,7 +739,7 @@ void SqliteDatabase::applyChange(const StateChange& change) {
           KJ_ASSERT(!savepoints.empty(), "released a savepoint that didn't exist?");
           auto sp = kj::mv(savepoints.back());
           savepoints.removeLast();
-          if (sp.name == name) break;
+          if (sqlite3_stricmp(sp.name.cStr(), name.cStr()) == 0) break;
         }
       } else {
         KJ_ASSERT(inTransaction, "COMMIT TRANSACTION without BEGIN TRANSACTION?");
@@ -764,7 +761,7 @@ void SqliteDatabase::applyChange(const StateChange& change) {
       KJ_IF_SOME(name, rollback.savepointName) {
         for (;;) {
           KJ_ASSERT(!savepoints.empty(), "released a savepoint that didn't exist?");
-          if (savepoints.back().name == name) {
+          if (sqlite3_stricmp(savepoints.back().name.cStr(), name.cStr()) == 0) {
             // Found the savepoint.
             // Call all rollback callbacks later than the savepoint.
             size_t index = savepoints.back().rollbackCallbackIndex;
@@ -1075,9 +1072,9 @@ bool SqliteDatabase::isAuthorized(int actionCode,
   }
 
   KJ_IF_SOME(d, dbName) {
-    if (d == "temp"_kj) {
+    if (sqlite3_stricmp(d.cStr(), "temp") == 0) {
       return isAuthorizedTemp(actionCode, param1, param2, regulator);
-    } else if (d != "main"_kj) {
+    } else if (sqlite3_stricmp(d.cStr(), "main") != 0) {
       // We don't allow opening multiple databases (except for 'main' and the 'temp'
       // temporary database), as our storage engine is not designed to track multiple
       // files on-disk.
@@ -1161,11 +1158,11 @@ bool SqliteDatabase::isAuthorized(int actionCode,
 
       kj::StringPtr op = KJ_ASSERT_NONNULL(param1);
       StateChange change;
-      if (op == "BEGIN") {
+      if (sqlite3_stricmp(op.cStr(), "BEGIN") == 0) {
         change = BeginTxn{kj::none};
-      } else if (op == "COMMIT") {
+      } else if (sqlite3_stricmp(op.cStr(), "COMMIT") == 0) {
         change = CommitTxn{kj::none};
-      } else if (op == "ROLLBACK") {
+      } else if (sqlite3_stricmp(op.cStr(), "ROLLBACK") == 0) {
         change = RollbackTxn{kj::none};
       } else {
         KJ_FAIL_ASSERT("unknown SQLITE_TRANSACTION op", op);
@@ -1187,11 +1184,11 @@ bool SqliteDatabase::isAuthorized(int actionCode,
 
       kj::StringPtr op = KJ_ASSERT_NONNULL(param1);
       StateChange change;
-      if (op == "BEGIN") {
+      if (sqlite3_stricmp(op.cStr(), "BEGIN") == 0) {
         change = BeginTxn{kj::mv(name)};
-      } else if (op == "RELEASE") {
+      } else if (sqlite3_stricmp(op.cStr(), "RELEASE") == 0) {
         change = CommitTxn{kj::mv(name)};
-      } else if (op == "ROLLBACK") {
+      } else if (sqlite3_stricmp(op.cStr(), "ROLLBACK") == 0) {
         change = RollbackTxn{kj::mv(name)};
       } else {
         KJ_FAIL_ASSERT("unknown SQLITE_TRANSACTION op", op);
@@ -1208,14 +1205,15 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       {
         kj::StringPtr pragma = KJ_ASSERT_NONNULL(param1);
 
-        if (pragma == "table_list") {
+        if (sqlite3_stricmp(pragma.cStr(), "table_list") == 0) {
           // Annoyingly, this will list internal tables. However, the existence of these tables
           // isn't really a secret, we just don't want people to access them.
           return true;
           // TODO function_list & pragma_list should be authorized but return
           // ALLOWED_SQLITE_FUNCTIONS & ALLOWED_[READ|WRITE]_PRAGMAS
           // respectively
-        } else if (pragma == "table_info" || pragma == "table_xinfo") {
+        } else if (sqlite3_stricmp(pragma.cStr(), "table_info") == 0 ||
+            sqlite3_stricmp(pragma.cStr(), "table_xinfo") == 0) {
           // Allow if the specific named table is not protected.
           KJ_IF_SOME(name, param2) {
             return regulator->isAllowedName(name);
@@ -1224,15 +1222,15 @@ bool SqliteDatabase::isAuthorized(int actionCode,
           }
         }
 
-        static const kj::HashMap<kj::StringPtr, PragmaSignature> allowedPragmas = []() {
-          kj::HashMap<kj::StringPtr, PragmaSignature> result;
-          for (auto& [name, signature]: ALLOWED_PRAGMAS) {
-            result.insert(name, signature);
+        kj::Maybe<PragmaSignature> maybeSignature;
+        for (auto& [name, signature]: ALLOWED_PRAGMAS) {
+          if (sqlite3_stricmp(pragma.cStr(), name.cStr()) == 0) {
+            maybeSignature = signature;
+            break;
           }
-          return result;
-        }();
+        }
 
-        PragmaSignature sig = KJ_UNWRAP_OR(allowedPragmas.find(pragma), return false);
+        PragmaSignature sig = KJ_UNWRAP_OR(maybeSignature, return false);
         switch (sig) {
           case PragmaSignature::NO_ARG:
             return param2 == kj::none;
@@ -1249,11 +1247,14 @@ bool SqliteDatabase::isAuthorized(int actionCode,
             }
 
             // Compare against every possible representation. Case-insensitive!
-            return strncasecmp(val.begin(), "true", 4) == 0 ||
-                strncasecmp(val.begin(), "false", 5) == 0 ||
-                strncasecmp(val.begin(), "yes", 3) == 0 || strncasecmp(val.begin(), "no", 2) == 0 ||
-                strncasecmp(val.begin(), "on", 2) == 0 || strncasecmp(val.begin(), "off", 3) == 0 ||
-                strncasecmp(val.begin(), "1", 1) == 0 || strncasecmp(val.begin(), "0", 1) == 0;
+            return sqlite3_strnicmp(val.begin(), "true", 4) == 0 ||
+                sqlite3_strnicmp(val.begin(), "false", 5) == 0 ||
+                sqlite3_strnicmp(val.begin(), "yes", 3) == 0 ||
+                sqlite3_strnicmp(val.begin(), "no", 2) == 0 ||
+                sqlite3_strnicmp(val.begin(), "on", 2) == 0 ||
+                sqlite3_strnicmp(val.begin(), "off", 3) == 0 ||
+                sqlite3_strnicmp(val.begin(), "1", 1) == 0 ||
+                sqlite3_strnicmp(val.begin(), "0", 1) == 0;
           }
           case PragmaSignature::OBJECT_NAME: {
             // Argument is required.
@@ -1286,6 +1287,10 @@ bool SqliteDatabase::isAuthorized(int actionCode,
 
     case SQLITE_FUNCTION: /* NULL            Function Name   */
     {
+      // SQLite specifies that sqlite3_stricmp() should be used when comparing
+      // identifiers, but because doing so here would require scanning the
+      // function allowlist once per-prepared statement, we instead compare
+      // lower case strings.
       static const kj::HashSet<kj::StringPtr> allowSet = []() {
         kj::HashSet<kj::StringPtr> result;
         for (const kj::StringPtr& func: ALLOWED_SQLITE_FUNCTIONS) {
@@ -1293,7 +1298,8 @@ bool SqliteDatabase::isAuthorized(int actionCode,
         }
         return result;
       }();
-      return allowSet.contains(KJ_ASSERT_NONNULL(param2));
+
+      return allowSet.contains(toLower(KJ_ASSERT_NONNULL(param2)));
     }
 
       // ---------------------------------------------------------------
@@ -1309,10 +1315,10 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       //   (Which also includes rtree_i32, the 32-bit-integer-coordinate variant)
       {
         KJ_IF_SOME(moduleName, param2) {
-          if (strcasecmp(moduleName.begin(), "fts5") == 0 ||
-              strcasecmp(moduleName.begin(), "fts5vocab") == 0 ||
-              strcasecmp(moduleName.begin(), "rtree") == 0 ||
-              strcasecmp(moduleName.begin(), "rtree_i32") == 0) {
+          if (sqlite3_stricmp(moduleName.cStr(), "fts5") == 0 ||
+              sqlite3_stricmp(moduleName.cStr(), "fts5vocab") == 0 ||
+              sqlite3_stricmp(moduleName.cStr(), "rtree") == 0 ||
+              sqlite3_stricmp(moduleName.cStr(), "rtree_i32") == 0) {
             return regulator->isAllowedName(KJ_ASSERT_NONNULL(param1));
           }
         }
