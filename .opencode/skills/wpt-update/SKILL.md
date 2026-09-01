@@ -32,9 +32,6 @@ expands the scope.
 2. Inspect the worktree and preserve unrelated changes.
 3. Load `ts-style` before editing TypeScript config files.
 
-Never stash, reset, revert, commit, amend, push, or create a pull request
-without explicit user permission.
-
 ## Bumping WPT
 
 From the workerd root, run:
