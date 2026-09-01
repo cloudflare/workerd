@@ -274,13 +274,12 @@ KJ_TEST("SQLite-KV multi-put rollback on error") {
     kj::ArrayPtr<const byte> value;
   };
 
-  // Create a multi-put that will fail due to a key being too large
+  // Create a multi-put that will fail due to a key being too large. The string must outlive the
+  // non-owning pointer stored in pairs.
+  kj::String tooBigString = kj::heapString(4 * 1024 * 1024 + 1);
   kj::Vector<KeyValue> pairs;
   pairs.add(KeyValue{"key1"_kj, "value1"_kj.asBytes()});
   pairs.add(KeyValue{"key2"_kj, "value2"_kj.asBytes()});
-
-  // Add a key that exceeds the limit (4 MiB actual limit)
-  kj::String tooBigString = kj::heapString(4 * 1024 * 1024 + 1);
   pairs.add(KeyValue{tooBigString, "value3"_kj.asBytes()});
 
   // The multi-put should throw
