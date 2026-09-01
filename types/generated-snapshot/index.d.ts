@@ -3999,6 +3999,7 @@ interface Container {
   ): Promise<ContainerSnapshot>;
   interceptOutboundHttps(addr: string, binding: Fetcher): Promise<void>;
   exec(cmd: string[], options?: ContainerExecOptions): Promise<ExecProcess>;
+  inspect(): Promise<ContainerInfo | null>;
 }
 interface ContainerDirectorySnapshot {
   id: string;
@@ -4053,6 +4054,10 @@ type ContainerStartupOptions = {
       containerSnapshot?: ContainerSnapshotRestoreParams;
     }
 );
+interface ContainerInfo {
+  labels: Record<string, string>;
+  image: string;
+}
 interface ContainerStartResources {
   vcpu: number;
   memoryMib: number;
