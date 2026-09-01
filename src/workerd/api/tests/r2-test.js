@@ -7,6 +7,7 @@ import { RpcTarget, WorkerEntrypoint } from 'cloudflare:workers';
 
 const key = 'basicKey';
 const body = 'content';
+const rpcStreamBody = 'café';
 const httpMetaObj = {
   contentType: 'text/plain',
   contentLanguage: 'en-US',
@@ -1058,6 +1059,17 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
     }
   }
 
+  async put(requestKey, value, options, valueSize) {
+    const uploaded = await new Response(value).text();
+    const expected = requestKey === 'rpcStream' ? rpcStreamBody : body;
+    assert.strictEqual(uploaded, expected);
+    assert.strictEqual(
+      valueSize,
+      new TextEncoder().encode(expected).byteLength
+    );
+    return buildRpcHead(requestKey, options);
+  }
+
   createMultipartUpload(requestKey, options) {
     assert.strictEqual(typeof requestKey, 'string');
     return new MultipartUploadTarget(requestKey, 'multipartId', options);
@@ -1087,11 +1099,19 @@ class MultipartUploadTarget extends RpcTarget {
     return this.#uploadId;
   }
 
-  async uploadPart(partNumber, value, options) {
+  async uploadPart(partNumber, value, options, valueSize) {
     assert(partNumber >= 1 && partNumber <= 10000);
+    const uploaded = await new Response(value).text();
+    const expected =
+      this.#key === 'ssecMultipart'
+        ? 'hey'
+        : this.#key === 'rpcStream'
+          ? rpcStreamBody
+          : body;
+    assert.strictEqual(uploaded, expected);
     assert.strictEqual(
-      await new Response(value).text(),
-      this.#key === 'ssecMultipart' ? 'hey' : body
+      valueSize,
+      new TextEncoder().encode(expected).byteLength
     );
     if (this.#key === 'ssecMultipart') {
       assert.notStrictEqual(options?.ssecKey, undefined);
@@ -1148,6 +1168,36 @@ export const jsrpcTransportTests = {
     const coerced = await env.BUCKET.head(12345);
     assert.strictEqual(coerced.key, key);
 
+    const encodedStreamBody = new TextEncoder().encode(rpcStreamBody);
+    {
+      const { readable, writable } = new FixedLengthStream(
+        encodedStreamBody.byteLength
+      );
+      const writer = writable.getWriter();
+      const writing = writer
+        .write(encodedStreamBody)
+        .then(() => writer.close());
+      const result = await env.BUCKET.put('rpcStream', readable);
+      await writing;
+      assert.strictEqual(result.size, Number(objResponse.size));
+    }
+
+    await assert.rejects(
+      env.BUCKET.put(
+        'unknownLengthStream',
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(encodedStreamBody);
+            controller.close();
+          },
+        })
+      ),
+      {
+        message:
+          'Provided readable stream must have a known length (request/response body or readable half of FixedLengthStream)',
+      }
+    );
+
     const resumed = env.BUCKET.resumeMultipartUpload(key, 'resumedId');
     assert.strictEqual(resumed.key, key);
     assert.strictEqual(resumed.uploadId, 'resumedId');
@@ -1170,6 +1220,22 @@ export const jsrpcTransportTests = {
     assert.deepStrictEqual([...resumedHeaders], []);
     assert.strictEqual(typeof resumedObject.checksums.toJSON, 'function');
     assert.deepStrictEqual(resumedObject.checksums.toJSON(), {});
+
+    const streamedUpload = env.BUCKET.resumeMultipartUpload(
+      'rpcStream',
+      'streamedId'
+    );
+    const { readable, writable } = new FixedLengthStream(
+      encodedStreamBody.byteLength
+    );
+    const writer = writable.getWriter();
+    const writing = writer.write(encodedStreamBody).then(() => writer.close());
+    const streamedPart = await streamedUpload.uploadPart(2, readable);
+    await writing;
+    assert.deepStrictEqual(streamedPart, {
+      partNumber: 2,
+      etag: 'partEtag',
+    });
   },
 };
 

@@ -145,7 +145,7 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPartRpc(j
     jsg::Optional<UploadPartOptions> options,
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
     const jsg::TypeHandler<jsg::Function<jsg::Value(
-        int, R2PutValueRpc, jsg::Optional<UploadPartOptions>)>>& uploadPartFnHandler,
+        int, R2PutValueRpc, jsg::Optional<UploadPartOptions>, double)>>& uploadPartFnHandler,
     const jsg::TypeHandler<jsg::Promise<UploadedPart>>& uploadPartResultHandler) {
   return js.evalNow([&] {
     JSG_REQUIRE(partNumber >= 1 && partNumber <= 10000, TypeError,
@@ -164,27 +164,12 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPartRpc(j
     traceContext.setTag("cloudflare.r2.request.part_number"_kjc, static_cast<int64_t>(partNumber));
     traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
 
-    auto rpcValue = [&]() -> R2PutValueRpc {
-      KJ_SWITCH_ONEOF(value) {
-        KJ_CASE_ONEOF(stream, JsReadableStream) {
-          return kj::mv(stream);
-        }
-        KJ_CASE_ONEOF(data, kj::Array<byte>) {
-          return kj::mv(data);
-        }
-        KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
-          return kj::mv(text.value);
-        }
-        KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-          return kj::mv(blob);
-        }
-      }
-      KJ_UNREACHABLE;
-    }();
+    auto prepared = prepareR2RpcBody(js, kj::mv(value));
+    traceContext.setTag("cloudflare.r2.request.size"_kjc, prepared.size);
 
     auto promise = callR2RpcMethod<UploadedPart>(js, KJ_ASSERT_NONNULL(rpcClient), "uploadPart"_kj,
-        rpcPropHandler, uploadPartFnHandler, uploadPartResultHandler, partNumber, kj::mv(rpcValue),
-        kj::mv(options));
+        rpcPropHandler, uploadPartFnHandler, uploadPartResultHandler, partNumber,
+        kj::mv(prepared.value), kj::mv(options), prepared.size);
     return promise.then(js,
         [traceContext = kj::mv(traceContext)](jsg::Lock& js, UploadedPart uploadedPart) mutable {
       traceContext.setTag("cloudflare.r2.response.etag"_kjc, uploadedPart.etag.asPtr());
