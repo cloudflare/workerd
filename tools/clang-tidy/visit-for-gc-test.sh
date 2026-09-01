@@ -44,10 +44,12 @@ expect_diag "field 'stateful' of visitable type" "P5: unvisited kj::OneOf altern
 expect_diag "field 'resolver' of visitable type" "P6: unvisited Promise<T>::Resolver"
 expect_diag "field 'maybeResolver' of visitable type" "P7: unvisited Maybe<Resolver>"
 expect_diag "field 'gen' of visitable type" "P8: unvisited jsg::Generator"
-expect_diag "field 'seq' of visitable type" "P9: unvisited jsg::Sequence of visitable elements"
+expect_diag "field 'gen' of visitable type 'jsg::AsyncGenerator<int>'" \
+  "P9: unvisited jsg::AsyncGenerator"
+expect_diag "field 'seq' of visitable type" "P10: unvisited jsg::Sequence of visitable elements"
 
 # Exact-count lock: one diagnostic per positive case, no more, no fewer.
-expected_count=8
+expected_count=9
 actual_count=$(grep -c "\[jsg-visit-for-gc" <<<"${positive_output}" || true)
 if [[ "${actual_count}" -ne "${expected_count}" ]]; then
   printf 'Expected exactly %s jsg-visit-for-gc diagnostics, got %s\n' \
