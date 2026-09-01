@@ -53,7 +53,7 @@ kj::LiteralStringConst spanWarningTypeName(SpanWarningType type) {
 // ======================================================================================
 // SpanImpl
 
-SpanImpl::SpanImpl(kj::Own<workerd::SpanObserver> observer, kj::ConstString operationName)
+SpanImpl::SpanImpl(kj::Rc<workerd::SpanObserver> observer, kj::ConstString operationName)
     : builder(kj::mv(observer), kj::mv(operationName)) {}
 
 SpanImpl::SpanImpl(decltype(nullptr)): builder(nullptr) {}

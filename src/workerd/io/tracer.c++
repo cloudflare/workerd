@@ -586,12 +586,12 @@ void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
   }
 }
 
-kj::Own<SpanObserver> UserSpanObserver::newChild() {
-  return kj::refcounted<UserSpanObserver>(kj::addRef(*submitter), spanId, traceId, traceFlags);
+kj::Rc<SpanObserver> UserSpanObserver::newChild() {
+  return kj::rc<UserSpanObserver>(kj::addRef(*submitter), spanId, traceId, traceFlags);
 }
 
-kj::Own<SpanObserver> UserSpanObserver::newChildFromUserCode() {
-  return kj::refcounted<UserSpanObserver>(
+kj::Rc<SpanObserver> UserSpanObserver::newChildFromUserCode() {
+  return kj::rc<UserSpanObserver>(
       kj::addRef(*submitter), spanId, traceId, traceFlags, /*fromUserCode=*/true);
 }
 
