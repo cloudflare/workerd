@@ -194,6 +194,23 @@ KJ_TEST("C++ can receive asynchronous wakes after poll()") {
   promise.wait(waitScope);
 }
 
+KJ_TEST("retained Rust waker is harmless after future cancellation") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto promise = new_retained_waker_future_void();
+  KJ_EXPECT(!promise.poll(waitScope));
+  KJ_DEFER(clear_retained_waker());
+
+  // Destroy the FuturePollEvent while Rust still retains its waker.
+  { auto dropped = kj::mv(promise); }
+
+  // Preserve the retained waker while waking a clone, ensuring the underlying
+  // cross-thread notification remains queued until the event loop polls.
+  wake_retained_waker_from_background_thread();
+  waitScope.poll();
+}
+
 KJ_TEST("Work before poll") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
