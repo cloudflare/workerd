@@ -331,10 +331,12 @@ class IdentityTransformStream {
     // before the caller can resize or detach the buffer. sinkWrite
     // consumes the snapshots in FIFO order: the machinery calls size()
     // exactly once per write and runs the sink write algorithm for the
-    // accepted ones in the same order. A write rejected AFTER size() ran
-    // (stream already erroring or closing) leaves its snapshot behind,
-    // but those states accept no further writes, so stale entries sit
-    // harmlessly at the tail and are never consumed.
+    // accepted ones in the same order. The machinery runs size() BEFORE
+    // its own state checks, so a write against a closing/errored stream
+    // is detected and skipped without copying (see willAcceptWrite in
+    // writable.ts), keeping doomed writes from growing the FIFO; terminal
+    // transitions clear entries whose queued writes the machinery
+    // discards.
     //
     // An INVALID chunk must not throw out of size(): the spec's
     // GetChunkSize error path errors the stream immediately, which would
@@ -370,6 +372,11 @@ class IdentityTransformStream {
       explicitHighWaterMark += 0;
     }
     const sizeAndSnapshot = (chunk: unknown): number => {
+      // Doomed writes are skipped without copying (see willAcceptWrite in
+      // writable.ts for the size()-before-state-checks coupling).
+      if (!writableInternals.willAcceptWrite(this.#writable)) {
+        return 1;
+      }
       try {
         const copied = validateAndCopyChunk(chunk);
         // Size is computed before the push: if it ever threw, nothing
@@ -405,8 +412,12 @@ class IdentityTransformStream {
       const entry = ArrayPrototypeShift(snapshots) as SnapshotEntry;
       // A recorded validation error surfaces here, at its FIFO turn: this
       // write rejects and the stream errors, but everything written before
-      // it has already been delivered.
-      if (!entry.ok) throw entry.error;
+      // it has already been delivered. Queued writes are discarded by the
+      // erroring writable without sink steps; their snapshots go with them.
+      if (!entry.ok) {
+        snapshots.length = 0;
+        throw entry.error;
+      }
       const copied = entry.copied;
       if (copied === undefined) return; // zero-length no-op
 
@@ -418,6 +429,7 @@ class IdentityTransformStream {
           const err = new RangeError(
             'Attempt to write too many bytes through a FixedLengthStream.'
           );
+          snapshots.length = 0;
           const rc = this.#readableController;
           if (rc !== undefined) byteControllerError(rc, err);
           throw err;
@@ -451,6 +463,7 @@ class IdentityTransformStream {
         const err = new RangeError(
           'FixedLengthStream did not see all expected bytes before close().'
         );
+        snapshots.length = 0;
         const rc = this.#readableController;
         if (rc !== undefined) byteControllerError(rc, err);
         throw err;
@@ -459,6 +472,7 @@ class IdentityTransformStream {
       if (rc !== undefined) byteControllerClose(rc);
     };
     const sinkAbort = (reason: unknown): void => {
+      snapshots.length = 0;
       const rc = this.#readableController;
       if (rc !== undefined) byteControllerError(rc, reason);
     };
@@ -483,6 +497,7 @@ class IdentityTransformStream {
       return this.#backpressureChange.promise;
     };
     const sourceCancel = (reason: unknown): void => {
+      snapshots.length = 0;
       this.#errorWritableAndUnblockWrite(reason);
     };
 

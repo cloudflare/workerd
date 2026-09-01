@@ -34,11 +34,19 @@ import type {
 } from './types';
 
 const {
+  ArrayBufferPrototypeByteLengthGet,
+  ArrayPrototypePush,
+  ArrayPrototypeShift,
   DataViewPrototypeGetBuffer,
+  DataViewPrototypeGetByteLength,
+  DataViewPrototypeGetByteOffset,
   ObjectDefineProperties,
   SymbolToStringTag,
   TypeError,
   TypedArrayPrototypeGetBuffer,
+  TypedArrayPrototypeGetByteLength,
+  TypedArrayPrototypeGetByteOffset,
+  TypedArrayPrototypeSet,
   Uint8Array,
   uncurryThis,
 } = primordials;
@@ -56,6 +64,7 @@ const {
 const {
   WritableStream,
   WritableStreamDefaultController,
+  internalsForPipe: writableInternals,
 } = require('webstreams/writable');
 
 // --- Bootstrap captures ---------------------------------------------------
@@ -112,6 +121,50 @@ function isValidChunk(chunk: unknown): boolean {
   return !isSharedArrayBuffer(buffer);
 }
 
+// Validates a chunk and copies its CURRENT bytes. Runs synchronously
+// inside writer.write() (via the strategy size callback), so resizing,
+// detaching, or mutating the buffer after write() returns cannot change
+// what the codec consumes — matching the C++ implementation, whose adapter
+// copies inside write() for exactly these hazards. Detached or
+// out-of-bounds inputs report zero length through the captured getters and
+// copy as empty (a codec no-op).
+function snapshotChunk(chunk: unknown): Uint8Array {
+  if (!isValidChunk(chunk)) {
+    throw new TypeError(
+      'The provided value is not of type (ArrayBuffer or ArrayBufferView)'
+    );
+  }
+  let buffer: ArrayBuffer;
+  let byteOffset: number;
+  let byteLength: number;
+  if (isArrayBuffer(chunk)) {
+    buffer = chunk as ArrayBuffer;
+    byteOffset = 0;
+    byteLength = ArrayBufferPrototypeByteLengthGet(chunk) as number;
+  } else if (isDataView(chunk)) {
+    buffer = DataViewPrototypeGetBuffer(chunk) as ArrayBuffer;
+    byteOffset = DataViewPrototypeGetByteOffset(chunk) as number;
+    byteLength = DataViewPrototypeGetByteLength(chunk) as number;
+  } else {
+    const view = chunk as ArrayBufferView;
+    buffer = TypedArrayPrototypeGetBuffer(view) as ArrayBuffer;
+    byteOffset = TypedArrayPrototypeGetByteOffset(view) as number;
+    byteLength = TypedArrayPrototypeGetByteLength(view) as number;
+  }
+  const copy = new Uint8Array(byteLength);
+  if (byteLength > 0) {
+    TypedArrayPrototypeSet(
+      copy,
+      new Uint8Array(buffer, byteOffset, byteLength),
+      0
+    );
+  }
+  return copy;
+}
+
+type SnapshotEntry =
+  { ok: true; copied: Uint8Array } | { ok: false; error: unknown };
+
 interface CodecPair {
   readable: ReadableStreamType<Uint8Array>;
   writable: WritableStreamType<unknown>;
@@ -136,6 +189,9 @@ function createCodecPair(
   // rejected pending reads and errored the state machine on any codec
   // exception.
   const failBoth = (reason: unknown): void => {
+    // Queued writes are discarded by the erroring writable without sink
+    // steps; drop their snapshots with them.
+    snapshots.length = 0;
     byteControllerError(readableController, reason);
   };
 
@@ -152,63 +208,102 @@ function createCodecPair(
     byteControllerEnqueue(readableController, out);
   };
 
-  const writable = new WritableStream({
-    start: (c: object): void => {
-      writableController = c;
-    },
-    write: (chunk: unknown): void => {
-      if (!isValidChunk(chunk)) {
-        // An invalid chunk errors BOTH sides, matching the legacy
-        // implementation (any write failure errored the whole pair) —
-        // without this the readable side would hang on its pending
-        // pull.
-        const err = new TypeError(
-          'The provided value is not of type (ArrayBuffer or ArrayBufferView)'
-        );
-        failBoth(err);
-        throw err;
-      }
-      // EAGER: the codec consumes the chunk synchronously (the caller's
-      // buffer is never retained); a codec error throws HERE, rejecting
-      // the write — the spec's transform-time error timing. The throw
-      // errors the writable via the sink machinery; the readable is
-      // errored explicitly, mirroring the legacy cancelInternal path.
-      try {
-        handle.push(chunk as ArrayBuffer | ArrayBufferView);
-      } catch (e) {
-        // Deliver output the codec produced before the error point (e.g. the
-        // final valid bytes preceding trailing junk) to any pending read, then
-        // error. The WPT-pinned order: output first, error on later reads.
+  // Chunk snapshots taken synchronously inside writer.write() by the
+  // strategy size callback; the sink consumes them in FIFO order. A
+  // validation failure is recorded rather than thrown so that earlier
+  // queued valid writes still deliver before the error surfaces at its
+  // turn.
+  //
+  // The writer machinery runs size() BEFORE its state checks, so a write
+  // against a closing/errored stream would copy and then reject without a
+  // sink step to shift the entry. Doomed writes are skipped without
+  // copying (see willAcceptWrite in writable.ts for the coupling
+  // invariant); terminal transitions clear any entries whose queued
+  // writes the machinery discards.
+  const snapshots: SnapshotEntry[] = [];
+  let writableRef: object | undefined;
+  const sizeAndSnapshot = (chunk: unknown): number => {
+    if (
+      writableRef === undefined ||
+      !writableInternals.willAcceptWrite(writableRef)
+    ) {
+      return 1;
+    }
+    try {
+      ArrayPrototypePush(snapshots, { ok: true, copied: snapshotChunk(chunk) });
+    } catch (error) {
+      ArrayPrototypePush(snapshots, { ok: false, error });
+    }
+    return 1;
+  };
+
+  const writable = new WritableStream(
+    {
+      start: (c: object): void => {
+        writableController = c;
+      },
+      write: (): void => {
+        const entry = ArrayPrototypeShift(snapshots) as
+          SnapshotEntry | undefined;
+        if (entry === undefined) {
+          throw new TypeError(
+            'Compression streams internal error: snapshot queue desync'
+          );
+        }
+        if (!entry.ok) {
+          // An invalid chunk errors BOTH sides, matching the legacy
+          // implementation (any write failure errored the whole pair) —
+          // without this the readable side would hang on its pending
+          // pull.
+          failBoth(entry.error);
+          throw entry.error;
+        }
+        // EAGER: the codec consumes the snapshot; a codec error throws
+        // HERE, rejecting the write — the spec's transform-time error
+        // timing. The throw errors the writable via the sink machinery;
+        // the readable is errored explicitly, mirroring the legacy
+        // cancelInternal path.
+        try {
+          handle.push(entry.copied);
+        } catch (e) {
+          // Deliver output the codec produced before the error point (e.g.
+          // the final valid bytes preceding trailing junk) to any pending
+          // read, then error. The WPT-pinned order: output first, error on
+          // later reads.
+          drainStage();
+          failBoth(e);
+          throw e;
+        }
+        // Move any produced output to the readable immediately (writes
+        // never wait for reads — legacy-parity settlement; the queue
+        // buffers).
         drainStage();
-        failBoth(e);
-        throw e;
-      }
-      // Move any produced output to the readable immediately (writes
-      // never wait for reads — legacy-parity settlement; the queue
-      // buffers).
-      drainStage();
-    },
-    close: (): void => {
-      // Z_FINISH plus the strict-mode end checks; a throw rejects the
-      // close (the spec's flush-time error timing) with the same
-      // both-sides error propagation as write above.
-      try {
-        handle.end();
-      } catch (e) {
+      },
+      close: (): void => {
+        // Z_FINISH plus the strict-mode end checks; a throw rejects the
+        // close (the spec's flush-time error timing) with the same
+        // both-sides error propagation as write above.
+        try {
+          handle.end();
+        } catch (e) {
+          drainStage();
+          failBoth(e);
+          throw e;
+        }
+        // Deliver the flush tail, then close (buffered bytes are served
+        // to remaining reads before the close lands — queued byte-stream
+        // semantics).
         drainStage();
-        failBoth(e);
-        throw e;
-      }
-      // Deliver the flush tail, then close (buffered bytes are served
-      // to remaining reads before the close lands — queued byte-stream
-      // semantics).
-      drainStage();
-      byteControllerClose(readableController);
+        byteControllerClose(readableController);
+      },
+      abort: (reason: unknown): void => {
+        snapshots.length = 0;
+        byteControllerError(readableController, reason);
+      },
     },
-    abort: (reason: unknown): void => {
-      byteControllerError(readableController, reason);
-    },
-  });
+    { size: sizeAndSnapshot }
+  );
+  writableRef = writable;
 
   // The readable half: a queued byte stream (BYOB-capable) whose queue
   // the sink drains into. highWaterMark 0 documents that production is
@@ -225,6 +320,7 @@ function createCodecPair(
         // legacy adapter's cancel → abortWrite path. Erroring a
         // closed/errored writable is a spec no-op, so no state check is
         // needed.
+        snapshots.length = 0;
         if (writableController !== undefined) {
           writableControllerError(writableController, reason);
         }

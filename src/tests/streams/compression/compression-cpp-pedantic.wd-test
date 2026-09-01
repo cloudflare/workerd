@@ -1,0 +1,41 @@
+using Workerd = import "/workerd/workerd.capnp";
+using CompressionModules = import "compression-modules.capnp";
+
+# Runs the full suite against the C++ implementation with the dateless
+# opt-in pedantic_wpt flag added to compression-cpp.wd-test's pinned set.
+# Like the identity suite's pedantic cell, this one pins the ABSENCE of
+# pedantic effects: the compression classes' internal-stream implementation
+# consults pedantic_wpt nowhere. Unlike identity, the pedantic-gated
+# standard-streams machinery IS reachable from this suite's surface (the
+# pipe tests build real TransformStream sources), so every shared test
+# running unchanged here is a meaningful enforced invariant, not a
+# vacuous one.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-compression-cpp-pedantic",
+      worker = (
+        modules = CompressionModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "strict_compression_checks",
+          "unhandled_rejection_after_microtask_checkpoint",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+          "streams_byob_reader_detaches_buffer",
+          "internal_stream_byob_return_view",
+          "internal_writable_stream_abort_clears_queue",
+          "capture_async_api_throws",
+          "enhanced_error_serialization",
+          "workers_api_getters_setters_on_prototype",
+          "set_tostring_tag",
+          "pedantic_wpt",
+        ],
+        bindings = [
+          ( name = "SELF", service = "streams-compression-cpp-pedantic" ),
+        ],
+      )
+    ),
+  ],
+  v8Flags = ["--expose-gc"],
+);
