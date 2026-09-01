@@ -247,7 +247,7 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
   // We use a kj::List so we can quickly remove websockets that have disconnected.
   // Also note that we box the keys and values such that in the event of a hashmap resizing we don't
   // move the underlying data (thereby keeping any references intact).
-  kj::HashMap<kj::StringPtr, kj::Own<TagCollection>> tagToWs;
+  kj::HashMap<kj::String, kj::Own<TagCollection>> tagToWs;
 
   // We store all of our HibernatableWebSockets in a doubly linked-list.
   std::list<kj::Own<HibernatableWebSocket>> allWs;
