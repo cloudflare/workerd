@@ -129,11 +129,18 @@ class MockEntropySource final: public kj::EntropySource {
 };
 
 struct MockLimitEnforcer final: public LimitEnforcer {
+  MockLimitEnforcer(kj::Maybe<uint&> checkedSubrequestCount = kj::none)
+      : checkedSubrequestCount(checkedSubrequestCount) {}
+
   kj::Own<void> enterJs(jsg::Lock& lock, IoContext& context) override {
     return {};
   }
   void topUpActor() override {}
-  void newSubrequest(bool isInHouse) override {}
+  void newSubrequest(bool isInHouse) override {
+    KJ_IF_SOME(count, checkedSubrequestCount) {
+      ++count;
+    }
+  }
   void newKvRequest(KvOpType op) override {}
   void newAnalyticsEngineRequest() override {}
   kj::Promise<void> limitDrain() override {
@@ -163,6 +170,8 @@ struct MockLimitEnforcer final: public LimitEnforcer {
   size_t getSqliteMemoryUsage() const override {
     return 0;
   }
+
+  kj::Maybe<uint&> checkedSubrequestCount;
 };
 
 struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
@@ -390,7 +399,8 @@ TestFixture::TestFixture(SetupParams&& params)
       waitUntilTasks(*errorHandler),
       headerTable(headerTableBuilder.build()),
       ioChannelFactory(kj::mv(params.ioChannelFactory)),
-      requestObserverFactory(kj::mv(params.requestObserverFactory)) {
+      requestObserverFactory(kj::mv(params.requestObserverFactory)),
+      checkedSubrequestCount(params.checkedSubrequestCount) {
   KJ_IF_SOME(id, params.actorId) {
     KJ_IF_SOME(provided, params.actorLoopback) {
       savedActorLoopback = kj::mv(provided);
@@ -466,8 +476,8 @@ void TestFixture::runInIoContext(kj::Function<kj::Promise<void>(const Environmen
 }
 
 kj::Own<IoContext> TestFixture::newIoContext() {
-  return kj::refcounted<IoContext>(
-      threadContext, kj::atomicAddRef(*worker), actor, kj::heap<MockLimitEnforcer>());
+  return kj::refcounted<IoContext>(threadContext, kj::atomicAddRef(*worker), actor,
+      kj::heap<MockLimitEnforcer>(checkedSubrequestCount));
 }
 
 kj::Own<IoContext::IncomingRequest> TestFixture::newIncomingRequest() {

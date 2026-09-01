@@ -79,6 +79,11 @@ class TimerChannel {
   // time limits on some sort of operation, not for implementing application-driven timing, as it does
   // not implement any Spectre mitigations.
   virtual kj::Promise<void> afterLimitTimeout(kj::Duration t) = 0;
+
+  // Returns the precise monotonic time used to calculate deadlines for afterLimitTimeout().
+  virtual kj::TimePoint nowForLimitTimeout() {
+    return kj::systemPreciseMonotonicClock().now();
+  }
 };
 
 class WorkerStubChannel;

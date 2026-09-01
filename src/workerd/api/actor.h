@@ -348,9 +348,10 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
 
   Result newSingleUseClient(
       kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override;
-  bool supportsActorRetryMetadata() const override {
+  bool supportsActorFetchRetries() const override {
     return true;
   }
+  void onActorFetchRetry() override;
   Result newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
       kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata,
       MakeUserSpanParent makeUserSpanParent) override;
@@ -415,12 +416,6 @@ class ReplicaActorOutgoingFactory final: public Fetcher::OutgoingFactory {
 
   Result newSingleUseClient(
       kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override;
-  bool supportsActorRetryMetadata() const override {
-    return true;
-  }
-  Result newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
-      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata,
-      MakeUserSpanParent makeUserSpanParent) override;
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
 
  private:

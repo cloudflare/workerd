@@ -4548,6 +4548,10 @@ class Server::WorkerService final: public Service,
     return threadContext.getUnsafeTimer().afterDelay(t);
   }
 
+  kj::TimePoint nowForLimitTimeout() override {
+    return monotonicClock.now();
+  }
+
   // ---------------------------------------------------------------------------
   // implements LimitEnforcer
   //
