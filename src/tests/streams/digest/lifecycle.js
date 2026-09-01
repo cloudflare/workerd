@@ -32,9 +32,12 @@ export const abortAfterWritesRejectsDigest = {
     const stream = new crypto.DigestStream('md5');
     const writer = stream.getWriter();
     const enc = new TextEncoder();
-    writer.write(enc.encode('hello'));
-    writer.write(enc.encode('there'));
-    writer.abort(new Error('boom'));
+    const writesSettled = Promise.allSettled([
+      writer.write(enc.encode('hello')),
+      writer.write(enc.encode('there')),
+    ]);
+    await writer.abort(new Error('boom'));
+    await writesSettled;
     await rejects(stream.digest);
   },
 };

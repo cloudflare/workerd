@@ -7,11 +7,6 @@
 // set_tostring_tag instances stringify as [object Object]. bytesWritten
 // remains a prototype accessor returning a bigint in every era, and the
 // digest flow itself is unchanged.
-//
-// The pre-capture_async_api_throws invalid-chunk behavior is deliberately
-// NOT pinned here: the write returns a rejected promise that the runtime
-// ALSO reports as an uncaught exception even when the caller handles it,
-// which the test harness necessarily treats as a failure.
 
 import { strictEqual, deepStrictEqual } from 'node:assert';
 

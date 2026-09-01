@@ -25,7 +25,7 @@ export const abandonedDigestNotSettledByGc = {
   },
 };
 
-export const writerKeepsCollectedStreamOperable = {
+export const writerRemainsOperableAcrossGc = {
   async test() {
     const { writer, digestPromise } = (() => {
       const stream = new crypto.DigestStream('md5');

@@ -86,8 +86,11 @@ dictionary DigestStreamOptions { boolean toWellFormed = false; };
 | --- | --- | --- |
 | `workers_api_getters_setters_on_prototype` (2022-01-31) | `digest` as prototype accessor | `legacyDigestIsOwnInstanceProperty` |
 | `set_tostring_tag` (2024-09-26) | `[object DigestStream]` branding | `legacyToStringTag` |
-| `capture_async_api_throws` (2022-10-31) | pinned; the pre-flag invalid-chunk behavior (rejected promise ALSO reported as an uncaught exception even when handled) cannot be pinned in the harness — see legacy-shape.js | — |
 | `streams_enable_constructors` + `transformstream_enable_standard_constructor` (2022-11-30) | pipe tests build standard sources | — |
+
+Unlike identity/compression, DigestStream's sink converts exceptions to
+rejected promises directly, so `capture_async_api_throws` has no effect and
+is not pinned.
 
 `digest-cpp-pedantic.wd-test` runs the full module set with the dateless
 opt-in `pedantic_wpt` added, pinning the ABSENCE of pedantic effects
@@ -118,7 +121,7 @@ standard-streams machinery changes nothing the suite pins).
 | `buffer-lifecycle.js` | consume-at-write: post-write mutation/detach invisible; lying metadata getters never consulted |
 | `pipe-integration.js` | pipeTo from user streams; TransformStream chain; Response body |
 | `large-payload.js` | 1MB+ chunk digesting |
-| `gc-interplay.js` | GC never settles an abandoned digest; writer keeps a collected wrapper operable |
+| `gc-interplay.js` | GC never settles an abandoned digest; writer remains operable across GC |
 | `reentrancy.js` | staged thenable-check matrix (ledger #3); write issued from a write continuation preserves accumulation order; options-bag getter re-entering the constructor is safe and its value is honored |
 | `backpressure.js` | desiredSize counts and recovers (parity); ready settled |
 | `legacy-shape.js` | unflagged era: `[object Object]`; digest as own instance property (no prototype accessor); bytesWritten stays a bigint prototype accessor; flow unchanged |

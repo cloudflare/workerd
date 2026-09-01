@@ -17,7 +17,6 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = [
           "nodejs_compat",
           "workers_api_getters_setters_on_prototype",
-          "capture_async_api_throws",
           "set_tostring_tag",
           "streams_enable_constructors",
           "transformstream_enable_standard_constructor",
