@@ -3914,7 +3914,7 @@ class Server::WorkerService final: public Service,
       w->setMakeUserRequestSpanFunc(
           [&w = *w, &entropySource = threadContext.getEntropySource()](
               tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
-        return SpanParent(kj::refcounted<UserSpanObserver>(
+        return SpanParent(kj::rc<UserSpanObserver>(
             kj::refcounted<SequentialSpanSubmitter>(w.getWeakRef(), entropySource), kj::mv(traceId),
             traceFlags));
       });

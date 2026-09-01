@@ -272,8 +272,8 @@ class UserSpanObserver final: public SpanObserver {
         fromUserCode(fromUserCode) {}
   KJ_DISALLOW_COPY(UserSpanObserver);
 
-  kj::Own<SpanObserver> newChild() override;
-  kj::Own<SpanObserver> newChildFromUserCode() override;
+  kj::Rc<SpanObserver> newChild() override;
+  kj::Rc<SpanObserver> newChildFromUserCode() override;
   void onOpen(kj::ConstString operationName, kj::Date startTime) override;
   void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) override;
   kj::Date getTime() override;

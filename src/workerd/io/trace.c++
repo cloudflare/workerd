@@ -1810,17 +1810,16 @@ void SpanEndData::copyTo(rpc::SpanEndData::Builder builder) const {
 
 // ======================================================================================
 
-SpanBuilder::SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
-    kj::ConstString operationName,
-    kj::Maybe<kj::Date> startTime) {
-  KJ_IF_SOME(obs, observer) {
+SpanBuilder::SpanBuilder(
+    kj::Rc<SpanObserver> observer, kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
+  if (observer != nullptr) {
     // TODO(o11y): Once we report the user tracing spanOpen event as soon as a span is created, we
     // should be able to fold this virtual call and just get the timestamp directly.
-    kj::Date time = startTime.orDefault([&]() { return obs->getTime(); });
+    kj::Date time = startTime.orDefault([&]() { return observer->getTime(); });
     // Report spanOpen event for user tracing spans
-    obs->onOpen(operationName.clone(), time);
+    observer->onOpen(operationName.clone(), time);
     span.emplace(kj::mv(operationName), time);
-    this->observer = kj::mv(obs);
+    this->observer = kj::mv(observer);
   }
 }
 
@@ -1836,12 +1835,12 @@ SpanBuilder::~SpanBuilder() noexcept(false) {
 }
 
 void SpanBuilder::end() {
-  KJ_IF_SOME(o, observer) {
+  if (observer != nullptr) {
     KJ_IF_SOME(s, span) {
       // TODO(performance): Fold this timer call if we are using I/O time, where we will look up
       // I/O time later.
       s.endTime = kj::systemPreciseCalendarClock().now();
-      o->onClose(s.endTime, kj::mv(s.tags), kj::mv(s.logs));
+      observer->onClose(s.endTime, kj::mv(s.tags), kj::mv(s.logs));
       span = kj::none;
     }
   }
@@ -1849,8 +1848,8 @@ void SpanBuilder::end() {
 
 void SpanBuilder::setOperationName(kj::ConstString operationName) {
   KJ_IF_SOME(s, span) {
-    KJ_IF_SOME(o, observer) {
-      o->onUpdateName(operationName.clone());
+    if (observer != nullptr) {
+      observer->onUpdateName(operationName.clone());
     }
     s.operationName = kj::mv(operationName);
   }
