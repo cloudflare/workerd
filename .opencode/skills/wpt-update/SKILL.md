@@ -139,6 +139,9 @@ A suite is a discovered WPT JavaScript file. Its config key is the exact,
 case-sensitive path relative to the `wpt_directory` declared in
 `src/wpt/BUILD.bazel`.
 
+Discovery excludes non-JavaScript files and JavaScript files whose paths
+contain `.tentative.` or `/tentative/`.
+
 Config keys MUST remain in ascending order as enforced by ESLint's `sort-keys`
 rule. Compare the complete raw key: punctuation affects ordering, so `-` sorts
 before `.`. Do not place a new key based only on visual grouping.
@@ -251,7 +254,7 @@ git diff --check
 Re-read the SKILL.md file. If there are any details that weren't clear or that
 you had to look up separately, edit the file to include them. Information that
 concerns how the WPT test framework works within workerd is valuable, but
-but refrain from adding info about specific situations you encountered during a
+refrain from adding info about specific situations you encountered during a
 WPT update, as this is transient and not likely to be relevant to future WPT
 updates.
 
