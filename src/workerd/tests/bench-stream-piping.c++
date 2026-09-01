@@ -57,6 +57,20 @@ struct DiscardingSink final: public kj::AsyncOutputStream {
     co_return;
   }
 
+  bool tryWriteSync(kj::ArrayPtr<const byte> buffer) override {
+    writeCount++;
+    bytesWritten += buffer.size();
+    return true;
+  }
+
+  bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+    writeCount++;
+    for (auto piece: pieces) {
+      bytesWritten += piece.size();
+    }
+    return true;
+  }
+
   kj::Promise<void> whenWriteDisconnected() override {
     return kj::NEVER_DONE;
   }
@@ -100,6 +114,10 @@ struct LatencySink final: public kj::AsyncOutputStream {
     co_return;
   }
 
+  // Intentionally does not implement tryWriteSync() to simulate a sink that
+  // cannot write synchronously (otherwise we defeat the purpose of the
+  // latency simulation).
+
   kj::Promise<void> whenWriteDisconnected() override {
     return kj::NEVER_DONE;
   }
@@ -123,9 +141,10 @@ jsg::Ref<ReadableStream> createValueStream(
         KJ_ASSERT_NONNULL(controller.template tryGet<jsg::Ref<ReadableStreamDefaultController>>());
 
     if ((*counter)++ < numChunks) {
-      auto buffer = jsg::JsUint8Array::create(js, chunkSize);
+      auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, chunkSize);
+      jsg::BufferSource buffer(js, kj::mv(backing));
       buffer.asArrayPtr().fill(0xAB);
-      c->enqueue(js, buffer);
+      c->enqueue(js, jsg::JsValue(buffer.getHandle(js)));
     }
     if (*counter == numChunks) {
       c->close(js);
@@ -155,9 +174,10 @@ jsg::Ref<ReadableStream> createByteStream(jsg::Lock& js,
         KJ_ASSERT_NONNULL(controller.template tryGet<jsg::Ref<ReadableByteStreamController>>());
 
     if ((*counter)++ < numChunks) {
-      auto buffer = jsg::JsUint8Array::create(js, chunkSize);
+      auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, chunkSize);
+      jsg::BufferSource buffer(js, kj::mv(backing));
       buffer.asArrayPtr().fill(0xAB);
-      c->enqueue(js, jsg::JsBufferSource(buffer));
+      c->enqueue(js, kj::mv(buffer));
     }
     if (*counter == numChunks) {
       c->close(js);
@@ -203,9 +223,10 @@ jsg::Ref<ReadableStream> createSlowValueStream(
         JSG_VISITABLE_LAMBDA(
             (cRef = kj::mv(cRef), chunkSize, numChunks, counter), (cRef), (jsg::Lock & js) mutable {
               if ((*counter)++ < numChunks) {
-              auto buffer = jsg::JsUint8Array::create(js, chunkSize);
+              auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, chunkSize);
+              jsg::BufferSource buffer(js, kj::mv(backing));
               buffer.asArrayPtr().fill(0xAB);
-              cRef->enqueue(js, buffer);
+              cRef->enqueue(js, jsg::JsValue(buffer.getHandle(js)));
               }
               if (*counter == numChunks) {
               cRef->close(js);
@@ -250,9 +271,10 @@ jsg::Ref<ReadableStream> createIoLatencyValueStream(
         JSG_VISITABLE_LAMBDA(
             (cRef = kj::mv(cRef), chunkSize, numChunks, counter), (cRef), (jsg::Lock & js) mutable {
               if ((*counter)++ < numChunks) {
-              auto buffer = jsg::JsUint8Array::create(js, chunkSize);
+              auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, chunkSize);
+              jsg::BufferSource buffer(js, kj::mv(backing));
               buffer.asArrayPtr().fill(0xAB);
-              cRef->enqueue(js, buffer);
+              cRef->enqueue(js, jsg::JsValue(buffer.getHandle(js)));
               }
               if (*counter == numChunks) {
               cRef->close(js);
@@ -289,9 +311,10 @@ jsg::Ref<ReadableStream> createIoLatencyByteStream(
         JSG_VISITABLE_LAMBDA(
             (cRef = kj::mv(cRef), chunkSize, numChunks, counter), (cRef), (jsg::Lock & js) mutable {
               if ((*counter)++ < numChunks) {
-              auto buffer = jsg::JsUint8Array::create(js, chunkSize);
+              auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, chunkSize);
+              jsg::BufferSource buffer(js, kj::mv(backing));
               buffer.asArrayPtr().fill(0xAB);
-              cRef->enqueue(js, jsg::JsBufferSource(buffer));
+              cRef->enqueue(js, kj::mv(buffer));
               }
               if (*counter == numChunks) {
               cRef->close(js);
@@ -338,9 +361,10 @@ jsg::Ref<ReadableStream> createTimedValueStream(jsg::Lock& js,
         JSG_VISITABLE_LAMBDA(
             (cRef = kj::mv(cRef), chunkSize, numChunks, counter), (cRef), (jsg::Lock & js) mutable {
               if ((*counter)++ < numChunks) {
-              auto buffer = jsg::JsUint8Array::create(js, chunkSize);
+              auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, chunkSize);
+              jsg::BufferSource buffer(js, kj::mv(backing));
               buffer.asArrayPtr().fill(0xAB);
-              cRef->enqueue(js, buffer);
+              cRef->enqueue(js, jsg::JsValue(buffer.getHandle(js)));
               }
               if (*counter == numChunks) {
               cRef->close(js);

@@ -413,6 +413,13 @@ kj_test(
 )
 
 kj_test(
+    src = "stream-utils-test.c++",
+    deps = [
+        ":util",
+    ],
+)
+
+kj_test(
     size = "large",
     src = "sqlite-test.c++",
     deps = [

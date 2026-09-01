@@ -8,6 +8,7 @@
 #include <workerd/api/js-writable-stream.h>
 #include <workerd/io/per-isolate-bootstrap.h>
 #include <workerd/tests/test-fixture.h>
+#include <workerd/util/autogate.h>
 
 #include <capnp/message.h>
 #include <kj/test.h>
@@ -32,7 +33,7 @@ class ContentSource final: public ReadableStreamSource {
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     auto amount = kj::min(maxBytes, data.size() - offset);
     kj::arrayPtr(static_cast<kj::byte*>(buffer), amount)
-        .copyFrom(data.slice(offset, offset + amount).asBytes());
+        .write(data.slice(offset, offset + amount).asBytes());
     offset += amount;
     return amount;
   }
@@ -47,6 +48,65 @@ class ContentSource final: public ReadableStreamSource {
  private:
   kj::StringPtr data;
   size_t offset = 0;
+};
+
+// A ContentSource variant that additionally serves reads synchronously via tryReadSync(),
+// recording how each read was served so tests can assert which path ran.
+class SyncContentSource final: public ReadableStreamSource {
+ public:
+  struct Counters {
+    size_t syncReads = 0;
+    size_t asyncReads = 0;
+  };
+
+  SyncContentSource(kj::StringPtr data, Counters& counters): data(data), counters(counters) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    ++counters.asyncReads;
+    return serve(kj::arrayPtr(static_cast<kj::byte*>(buffer), maxBytes));
+  }
+
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    ++counters.syncReads;
+    return serve(buffer);
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    if (encoding == StreamEncoding::IDENTITY) {
+      return data.size() - offset;
+    }
+    return kj::none;
+  }
+
+ private:
+  kj::StringPtr data;
+  Counters& counters;
+  size_t offset = 0;
+
+  size_t serve(kj::ArrayPtr<kj::byte> dest) {
+    auto amount = kj::min(dest.size(), data.size() - offset);
+    dest.write(data.slice(offset, offset + amount).asBytes());
+    offset += amount;
+    return amount;
+  }
+};
+
+// A source whose synchronous read path throws while the asynchronous path reports EOF:
+// exercises the pull fast path's error handling in the gated variant without affecting
+// the ungated one.
+class SyncThrowingSource final: public ReadableStreamSource {
+ public:
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return static_cast<size_t>(0);
+  }
+
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    kj::throwFatalException(KJ_EXCEPTION(FAILED, "jsg.Error: sync read failed"));
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    return kj::none;
+  }
 };
 
 // A WritableStreamSink accumulating written bytes into externally-owned state.
@@ -493,7 +553,7 @@ class CancelableContentSource final: public ReadableStreamSource {
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     auto amount = kj::min(maxBytes, data.size() - offset);
     kj::arrayPtr(static_cast<kj::byte*>(buffer), amount)
-        .copyFrom(data.slice(offset, offset + amount).asBytes());
+        .write(data.slice(offset, offset + amount).asBytes());
     offset += amount;
     return amount;
   }
@@ -535,7 +595,7 @@ class TeeableContentSource final: public ReadableStreamSource {
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     auto amount = kj::min(maxBytes, data.size() - offset);
     kj::arrayPtr(static_cast<kj::byte*>(buffer), amount)
-        .copyFrom(data.slice(offset, offset + amount).asBytes());
+        .write(data.slice(offset, offset + amount).asBytes());
     offset += amount;
     return amount;
   }
@@ -858,6 +918,127 @@ KJ_TEST("ReadableStreamNativeSource read failure rejects the pull") {
     }, [&state](jsg::Lock& js, jsg::Value exception) {
       auto e = js.exceptionToKj(kj::mv(exception));
       KJ_EXPECT(e.getDescription().contains("test read failure"), e.getDescription());
+      KJ_EXPECT(state.enqueued.size() == 0);
+      KJ_EXPECT(!state.closed);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource default pull fast path serves synchronously when gated on") {
+  TestFixture testFixture;
+  MockControllerState state;
+  SyncContentSource::Counters counters;
+  const bool gateOn =
+      util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS);
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = js.alloc<ReadableStreamNativeSource>(
+        env.context, kj::heap<SyncContentSource>(kData, counters));
+    auto controller = makeMockController(js, state, js.null());
+
+    auto pullPromise = source->pull(js, controller, freshSignal(js));
+    if (gateOn) {
+      // The pull settled synchronously: the chunk was enqueued before pull() returned,
+      // without an event-loop round trip.
+      KJ_EXPECT(counters.syncReads == 1);
+      KJ_EXPECT(counters.asyncReads == 0);
+      KJ_EXPECT(state.enqueued.size() == 1);
+    } else {
+      // Ungated, the read must take the asynchronous path.
+      KJ_EXPECT(counters.syncReads == 0);
+      KJ_EXPECT(state.enqueued.size() == 0);
+    }
+
+    auto promise = pullPromise
+                       .then(js,
+                           [&state, gateOn, source = source.addRef(),
+                               controller = controller.addRef(js)](jsg::Lock& js) mutable {
+      KJ_EXPECT(state.enqueued.size() == 1);
+      KJ_EXPECT(state.enqueued[0].asPtr() == kData.asBytes());
+      KJ_EXPECT(!state.closed);
+      // The next pull observes EOF; when gated on, the close is likewise synchronous.
+      auto next = source->pull(js, controller.getHandle(js), freshSignal(js));
+      if (gateOn) {
+        KJ_EXPECT(state.closed);
+      }
+      return next;
+    }).then(js, [&state](jsg::Lock& js) { KJ_EXPECT(state.closed); });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource BYOB pull fast path fills the view and fuses the EOF close") {
+  TestFixture testFixture;
+  MockControllerState state;
+  SyncContentSource::Counters counters;
+  const bool gateOn =
+      util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS);
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = js.alloc<ReadableStreamNativeSource>(
+        env.context, kj::heap<SyncContentSource>(kData, counters));
+    auto view = jsg::JsUint8Array::create(js, static_cast<size_t>(64));
+    // atLeast exceeds the source's total content, so the single read under-delivers:
+    // EOF, committed as a partial fill fused with the close.
+    auto byobRequest = makeMockByobRequest(js, state, view, 16);
+    auto controller = makeMockController(js, state, byobRequest);
+
+    auto pullPromise = source->pull(js, controller, freshSignal(js));
+    if (gateOn) {
+      // Under-delivery (11 < 16) signals EOF: the fast path responds and fuses the
+      // close, all before pull() returns.
+      KJ_EXPECT(counters.syncReads == 1);
+      KJ_EXPECT(KJ_ASSERT_NONNULL(state.responded) == kData.size());
+      KJ_EXPECT(state.closed);
+      KJ_EXPECT(view.asArrayPtr().first(kData.size()) == kData.asBytes());
+    } else {
+      KJ_EXPECT(state.responded == kj::none);
+    }
+
+    auto promise = pullPromise.then(js, [&state, view = view.addRef(js)](jsg::Lock& js) mutable {
+      KJ_EXPECT(KJ_ASSERT_NONNULL(state.responded) == kData.size());
+      KJ_EXPECT(state.closed);
+      KJ_EXPECT(view.getHandle(js).asArrayPtr().first(kData.size()) == kData.asBytes());
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource pull fast path failure rejects and releases the source") {
+  TestFixture testFixture;
+  MockControllerState state;
+  const bool gateOn =
+      util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS);
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<SyncThrowingSource>());
+    auto controller = makeMockController(js, state, js.null());
+
+    if (!gateOn) {
+      // Ungated, the synchronous path never runs; the source EOFs via the async path.
+      auto promise =
+          source->pull(js, controller, freshSignal(js)).then(js, [&state](jsg::Lock& js) {
+        KJ_EXPECT(state.closed);
+      });
+      return env.context.awaitJs(js, kj::mv(promise));
+    }
+    auto promise = source->pull(js, controller, freshSignal(js))
+                       .then(js,
+                           [](jsg::Lock& js) -> jsg::Promise<void> {
+      KJ_FAIL_ASSERT("pull should have rejected");
+    },
+                           [&state, source = source.addRef(), controller = controller.addRef(js)](
+                               jsg::Lock& js, jsg::Value exception) mutable {
+      KJ_EXPECT(state.enqueued.size() == 0);
+      KJ_EXPECT(!state.closed);
+      // The source was released: a subsequent pull resolves defensively without
+      // enqueuing or closing.
+      return source->pull(js, controller.getHandle(js), freshSignal(js));
+    }).then(js, [&state](jsg::Lock& js) {
       KJ_EXPECT(state.enqueued.size() == 0);
       KJ_EXPECT(!state.closed);
     });
@@ -1838,7 +2019,7 @@ class EncodedContentSource final: public ReadableStreamSource {
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     auto amount = kj::min(maxBytes, data.size() - offset);
     kj::arrayPtr(static_cast<kj::byte*>(buffer), amount)
-        .copyFrom(data.slice(offset, offset + amount).asBytes());
+        .write(data.slice(offset, offset + amount).asBytes());
     offset += amount;
     return amount;
   }

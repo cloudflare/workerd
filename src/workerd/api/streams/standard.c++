@@ -3566,11 +3566,15 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
       DrainingReadResult result = co_await prp.promise;
 
       // Write all the chunks we received using vectored write for efficiency.
+      // Fast path: hand chunks to the sink synchronously via tryWriteSync() when it can
+      // accept data immediately, avoiding a round-trip through the KJ event loop.
       if (result.chunks.size() > 0) {
         KJ_ON_SCOPE_FAILURE(writeFailed = true);
         auto pieces =
             KJ_MAP(chunk, result.chunks) -> kj::ArrayPtr<const kj::byte> { return chunk.asPtr(); };
-        co_await sink->write(pieces);
+        if (!sink->tryWriteSync(pieces)) {
+          co_await sink->write(pieces);
+        }
       }
 
       // If the stream is done, end the output if needed and exit.
