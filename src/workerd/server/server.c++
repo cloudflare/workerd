@@ -1804,7 +1804,7 @@ validVersion:
     options.cipherList = conf.getCipherList();
   }
 
-  return kj::heap<kj::TlsContext>(kj::mv(options));
+  return kj::heap<kj::TlsContext>(kj::mv(options)).attach(kj::mv(attachments));
 }
 
 kj::Promise<kj::Own<kj::NetworkAddress>> Server::makeTlsNetworkAddress(
