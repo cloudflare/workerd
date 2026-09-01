@@ -1684,7 +1684,7 @@ void ActorCache::markGapsEmpty(
     }
   }
 
-  kj::Vector<KeyPtr> keysToErase;
+  kj::Vector<Key> keysToErase;
   auto beginIter = map.seek(beginKey);
   auto mapEnd = map.ordered().end();
   for (auto iter = beginIter; iter != mapEnd; ++iter) {
@@ -1728,7 +1728,7 @@ void ActorCache::markGapsEmpty(
       if (prevGapIsEmpty) {
         // Unfortunately erasing from the map will invalidate our iterator, so we need to make
         // a second pass to erase, below.
-        keysToErase.add(entry.key);
+        keysToErase.add(cloneKey(entry.key));
       }
     }
 
