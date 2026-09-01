@@ -159,11 +159,6 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   // more flags.)
   v8::V8::SetFlagsFromString("--noincremental-marking");
 
-  // These features are completed and enabled by default in Chrome, but not
-  // in V8. Follows Node.js: https://github.com/nodejs/node/pull/58154
-  v8::V8::SetFlagsFromString("--js-explicit-resource-management");
-  v8::V8::SetFlagsFromString("--js-float16array");
-
   // Enable source phase imports for WebAssembly modules
   v8::V8::SetFlagsFromString("--js-source-phase-imports");
 
