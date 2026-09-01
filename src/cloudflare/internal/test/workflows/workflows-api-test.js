@@ -59,6 +59,34 @@ export const workflowsApi = {
     }
 
     {
+      const result = await env.workflow.createBatch({
+        count: 2,
+        params: { bar: 'baz' },
+      });
+      assert.deepStrictEqual(
+        result.created.map(({ id }) => id),
+        ['generated-0', 'generated-1']
+      );
+      assert.deepStrictEqual(result.errors, []);
+    }
+
+    {
+      const result = await env.workflow.createBatch({
+        instances: [{ id: 'batch-ok' }, { id: 'batch-error' }],
+      });
+      assert.deepStrictEqual(result.created[0].id, 'batch-ok');
+      assert.strictEqual(typeof result.created[0].status, 'function');
+      assert.deepStrictEqual(result.errors, [
+        {
+          index: 1,
+          id: 'batch-error',
+          code: 10405,
+          message: 'Provided instance ID already exists',
+        },
+      ]);
+    }
+
+    {
       const result = await env.workflow.deleteBatch([
         'delete-1',
         'missing-delete',

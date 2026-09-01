@@ -40,15 +40,52 @@ declare abstract class Workflow<PARAMS = unknown> {
   ): Promise<WorkflowInstance>;
 
   /**
-   * Create a batch of instances and return handle for all of them. If a provided id exists, an error will be thrown.
+   * Create a batch of instances and return handles for the created instances and any per-instance errors.
    * `createBatch` is limited at 100 instances at a time or when the RPC limit (1MiB) is reached.
-   * @param batch List of Options when creating an instance including name and params
-   * @returns A promise that resolves with a list of handles for the created instances.
+   * @param options Options for creating instances by count or from a list of instance options
+   * @returns A promise that resolves with the created instance handles and any per-instance errors.
+   */
+  createBatch(
+    options: WorkflowBatchCreateOptions<PARAMS>
+  ): Promise<WorkflowBatchCreateResult>;
+
+  /**
+   * Create a batch of instances and return handles for all of them.
+   * @deprecated Use the object form `createBatch({ instances: batch })` instead.
    */
   createBatch(
     batch: WorkflowInstanceCreateOptions<PARAMS>[]
   ): Promise<WorkflowInstance[]>;
 }
+
+type WorkflowBatchCreateOptions<PARAMS = unknown> =
+  | {
+      count: number;
+      params?: PARAMS;
+      retention?: {
+        successRetention?: WorkflowRetentionDuration;
+        errorRetention?: WorkflowRetentionDuration;
+      };
+      locationHint?: WorkflowInstanceLocationHint;
+      instances?: never;
+    }
+  | {
+      instances: WorkflowInstanceCreateOptions<PARAMS>[];
+      count?: never;
+      params?: never;
+      retention?: never;
+      locationHint?: never;
+    };
+
+type WorkflowBatchCreateResult = {
+  created: WorkflowInstance[];
+  errors: {
+    index: number;
+    id?: string;
+    code: number;
+    message: string;
+  }[];
+};
 
 type WorkflowDurationLabel =
   'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year';
