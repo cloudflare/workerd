@@ -234,6 +234,40 @@ class R2Bucket: public jsg::Object {
     JSG_STRUCT_TS_OVERRIDE(R2PutOptions);
   };
 
+  struct ConditionalRpc {
+    jsg::Optional<kj::String> etagMatches;
+    jsg::Optional<kj::String> etagDoesNotMatch;
+    jsg::Optional<kj::Date> uploadedBefore;
+    jsg::Optional<kj::Date> uploadedAfter;
+    jsg::Optional<bool> secondsGranularity;
+
+    JSG_STRUCT(etagMatches, etagDoesNotMatch, uploadedBefore, uploadedAfter, secondsGranularity);
+  };
+
+  struct PutOptionsRpc {
+    jsg::Optional<kj::OneOf<ConditionalRpc, jsg::Ref<Headers>>> onlyIf;
+    jsg::Optional<kj::OneOf<HttpMetadata, jsg::Ref<Headers>>> httpMetadata;
+    jsg::Optional<jsg::Dict<kj::String>> customMetadata;
+    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> md5;
+    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> sha1;
+    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> sha256;
+    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> sha384;
+    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> sha512;
+    jsg::Optional<kj::String> storageClass;
+    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> ssecKey;
+
+    JSG_STRUCT(onlyIf,
+        httpMetadata,
+        customMetadata,
+        md5,
+        sha1,
+        sha256,
+        sha384,
+        sha512,
+        storageClass,
+        ssecKey);
+  };
+
   struct MultipartOptions {
     jsg::Optional<kj::OneOf<HttpMetadata, jsg::Ref<Headers>>> httpMetadata;
     jsg::Optional<jsg::Dict<kj::String>> customMetadata;
@@ -567,6 +601,15 @@ class R2Bucket: public jsg::Object {
       const jsg::TypeHandler<
           jsg::Function<jsg::Value(kj::OneOf<kj::String, kj::Array<kj::String>>)>>& deleteFnHandler,
       const jsg::TypeHandler<jsg::Promise<void>>& deleteResultHandler);
+  jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> putRpc(jsg::Lock& js,
+      kj::String key,
+      kj::Maybe<R2PutValue> value,
+      jsg::Optional<PutOptions> options,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(
+          kj::String, kj::Maybe<R2PutValueRpc>, jsg::Optional<PutOptionsRpc>, double)>>&
+          putFnHandler,
+      const jsg::TypeHandler<jsg::Promise<kj::Maybe<HeadResultRpc>>>& putResultHandler);
   jsg::Promise<jsg::Ref<R2MultipartUpload>> createMultipartUploadRpc(jsg::Lock& js,
       kj::String key,
       jsg::Optional<MultipartOptions> options,
@@ -595,16 +638,17 @@ class R2Bucket: public jsg::Object {
         flags.getR2BindingsJsrpc()) {
       JSG_METHOD_NAMED(head, headRpc);
       JSG_METHOD_NAMED(delete, deleteRpc);
+      JSG_METHOD_NAMED(put, putRpc);
       JSG_METHOD_NAMED(createMultipartUpload, createMultipartUploadRpc);
       JSG_METHOD_NAMED(resumeMultipartUpload, resumeMultipartUploadRpc);
     } else {
       JSG_METHOD(head);
       JSG_METHOD_NAMED(delete, delete_);
+      JSG_METHOD(put);
       JSG_METHOD(createMultipartUpload);
       JSG_METHOD(resumeMultipartUpload);
     }
     JSG_METHOD(get);
-    JSG_METHOD(put);
     JSG_METHOD(list);
 
     JSG_TS_ROOT();

@@ -615,6 +615,105 @@ jsg::Promise<void> R2Bucket::deleteRpc(jsg::Lock& js,
   });
 }
 
+jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::putRpc(jsg::Lock& js,
+    kj::String key,
+    kj::Maybe<R2PutValue> value,
+    jsg::Optional<PutOptions> options,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(
+        kj::String, kj::Maybe<R2PutValueRpc>, jsg::Optional<PutOptionsRpc>, double)>>& putFnHandler,
+    const jsg::TypeHandler<jsg::Promise<kj::Maybe<HeadResultRpc>>>& putResultHandler) {
+  return js.evalNow([&] {
+    TraceContext traceContext = IoContext::current().makeUserTraceSpan("r2_put"_kjc);
+    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
+    KJ_IF_SOME(b, this->bindingName()) {
+      traceContext.setTag("cloudflare.binding.name"_kjc, b);
+    }
+    traceContext.setTag("cloudflare.r2.operation"_kjc, "PutObject"_kjc);
+    KJ_IF_SOME(b, this->bucketName()) {
+      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
+    }
+    traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
+
+    kj::Maybe<R2PutValueRpc> rpcValue;
+    double valueSize = 0;
+    KJ_IF_SOME(v, value) {
+      auto prepared = prepareR2RpcBody(js, kj::mv(v));
+      rpcValue = kj::mv(prepared.value);
+      valueSize = prepared.size;
+    }
+    traceContext.setTag("cloudflare.r2.request.size"_kjc, valueSize);
+
+    const auto prepareChecksum =
+        [&](auto checksum) -> jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> {
+      KJ_IF_SOME(c, checksum) {
+        KJ_SWITCH_ONEOF(c) {
+          KJ_CASE_ONEOF(buffer, jsg::JsRef<jsg::JsBufferSource>) {
+            return kj::heapArray<byte>(buffer.getHandle(js).asArrayPtr());
+          }
+          KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
+            return kj::mv(text.value);
+          }
+        }
+      }
+      return kj::none;
+    };
+
+    jsg::Optional<PutOptionsRpc> rpcOptions;
+    KJ_IF_SOME(o, options) {
+      jsg::Optional<kj::OneOf<ConditionalRpc, jsg::Ref<Headers>>> onlyIf;
+      KJ_IF_SOME(condition, o.onlyIf) {
+        KJ_SWITCH_ONEOF(condition) {
+          KJ_CASE_ONEOF(c, Conditional) {
+            ConditionalRpc rpcConditional{
+              .uploadedBefore = kj::mv(c.uploadedBefore),
+              .uploadedAfter = kj::mv(c.uploadedAfter),
+              .secondsGranularity = c.secondsGranularity,
+            };
+            KJ_IF_SOME(etag, c.etagMatches) {
+              rpcConditional.etagMatches = kj::mv(etag.value);
+            }
+            KJ_IF_SOME(etag, c.etagDoesNotMatch) {
+              rpcConditional.etagDoesNotMatch = kj::mv(etag.value);
+            }
+            onlyIf = kj::mv(rpcConditional);
+          }
+          KJ_CASE_ONEOF(headers, jsg::Ref<Headers>) {
+            onlyIf = kj::mv(headers);
+          }
+        }
+      }
+
+      rpcOptions = PutOptionsRpc{
+        .onlyIf = kj::mv(onlyIf),
+        .httpMetadata = kj::mv(o.httpMetadata),
+        .customMetadata = kj::mv(o.customMetadata),
+        .md5 = prepareChecksum(kj::mv(o.md5)),
+        .sha1 = prepareChecksum(kj::mv(o.sha1)),
+        .sha256 = prepareChecksum(kj::mv(o.sha256)),
+        .sha384 = prepareChecksum(kj::mv(o.sha384)),
+        .sha512 = prepareChecksum(kj::mv(o.sha512)),
+        .storageClass = kj::mv(o.storageClass),
+        .ssecKey = kj::mv(o.ssecKey),
+      };
+    }
+
+    return callR2RpcMethod<kj::Maybe<HeadResultRpc>>(js, getRpcMethod(js, "put"_kj), rpcPropHandler,
+        putFnHandler, putResultHandler, kj::mv(key), kj::mv(rpcValue), kj::mv(rpcOptions),
+        valueSize)
+        .then(js,
+            [traceContext = kj::mv(traceContext)](jsg::Lock& js,
+                kj::Maybe<HeadResultRpc> parsed) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
+      KJ_IF_SOME(rpc, parsed) {
+        auto result = headResultFromRpc(js, kj::mv(rpc));
+        addHeadResultSpanTags(js, traceContext, *result.get());
+        return kj::mv(result);
+      }
+      return kj::none;
+    });
+  });
+}
+
 jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUploadRpc(jsg::Lock& js,
     kj::String key,
     jsg::Optional<MultipartOptions> options,
