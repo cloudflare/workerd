@@ -12,7 +12,9 @@
 // implementation as that work lands. The tests themselves are the source of
 // truth for the contract; comments are best-effort context.
 
+#include <workerd/api/hibernatable-web-socket.h>
 #include <workerd/api/web-socket.h>
+#include <workerd/io/frankenvalue.h>
 #include <workerd/io/legacy-hibernation-manager.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
@@ -27,6 +29,88 @@
 
 namespace workerd {
 
+struct LegacyHibernationManagerTestAccess {
+  static void registerOnlyWebSocketForEvent(
+      LegacyHibernationManagerImpl& manager, kj::String websocketId) {
+    manager.registerEventWebSocket(kj::mv(websocketId), getOnlyWebSocket(manager));
+  }
+
+  static void registerWebSocketForEvent(
+      LegacyHibernationManagerImpl& manager, kj::String websocketId, size_t acceptIndex) {
+    manager.registerEventWebSocket(
+        kj::mv(websocketId), getWebSocketByAcceptOrder(manager, acceptIndex));
+  }
+
+  static bool findManagerForEventMatches(
+      kj::StringPtr websocketId, LegacyHibernationManagerImpl& expectedManager) {
+    KJ_IF_SOME(manager, LegacyHibernationManagerImpl::findManagerForEvent(websocketId)) {
+      return &kj::downcast<LegacyHibernationManagerImpl>(manager) == &expectedManager;
+    }
+    return false;
+  }
+
+  static void cancelEvent(LegacyHibernationManagerImpl& manager, kj::StringPtr websocketId) {
+    manager.cancelEvent(websocketId);
+  }
+
+  static kj::Own<WorkerInterface> getWorkerForOnlyWebSocket(LegacyHibernationManagerImpl& manager) {
+    return manager.getWorkerForEvent(getOnlyWebSocket(manager));
+  }
+
+  static size_t registeredEventCount(LegacyHibernationManagerImpl& manager) {
+    return manager.registeredEventCount;
+  }
+
+  static size_t loopbackWaiterCount(LegacyHibernationManagerImpl& manager) {
+    return manager.loopbackWaiters.size();
+  }
+
+  static bool takeWebSocketForEventMatches(
+      kj::StringPtr websocketId, LegacyHibernationManagerImpl& expectedManager) {
+    auto& webSocket = LegacyHibernationManagerImpl::takeWebSocketForEvent(websocketId);
+    return &webSocket == &getOnlyWebSocket(expectedManager);
+  }
+
+  static bool takeWebSocketForEventMatches(kj::StringPtr websocketId,
+      LegacyHibernationManagerImpl& expectedManager,
+      size_t acceptIndex) {
+    auto& webSocket = LegacyHibernationManagerImpl::takeWebSocketForEvent(websocketId);
+    return &webSocket == &getWebSocketByAcceptOrder(expectedManager, acceptIndex);
+  }
+
+  // Whether the event is registered at all, without naming a manager. Lets a test outlive the
+  // manager it registered and still observe the registry.
+  static bool hasEventRegistration(kj::StringPtr websocketId) {
+    return LegacyHibernationManagerImpl::findManagerForEvent(websocketId) != kj::none;
+  }
+
+ private:
+  static LegacyHibernationManagerImpl::HibernatableWebSocket& getOnlyWebSocket(
+      LegacyHibernationManagerImpl& manager) {
+    KJ_ASSERT(manager.allWs.size() == 1);
+    return getWebSocketByAcceptOrder(manager, 0);
+  }
+
+  // `acceptIndex` counts in the order the WebSockets were accepted. `allWs` is push_front-ordered,
+  // so the first one accepted sits at the back.
+  static LegacyHibernationManagerImpl::HibernatableWebSocket& getWebSocketByAcceptOrder(
+      LegacyHibernationManagerImpl& manager, size_t acceptIndex) {
+    KJ_ASSERT(acceptIndex < manager.allWs.size());
+    auto it = manager.allWs.rbegin();
+    for (size_t i = 0; i < acceptIndex; ++i) ++it;
+    return **it;
+  }
+};
+
+namespace api {
+struct HibernatableWebSocketCustomEventTestAccess {
+  static void ensureHibernationManagerForEvent(
+      HibernatableWebSocketCustomEvent& event, Worker::Actor& actor, kj::StringPtr websocketId) {
+    event.ensureHibernationManagerForEvent(actor, websocketId);
+  }
+};
+}  // namespace api
+
 namespace {
 
 // ============================================================================
@@ -39,6 +123,13 @@ struct DispatchStats {
   uint getWorkerCalls = 0;
   uint customEventCalls = 0;
   bool rejectCustomEvents = false;
+
+  // When set, customEvent() holds the event and never settles, standing in for a peer that stops
+  // responding mid-dispatch.
+  bool hangCustomEvents = false;
+
+  // What the most recent getWorker() call asked for. Null until the first call.
+  kj::Maybe<ReresolveActorPipeline> lastReresolveActorPipeline;
 };
 
 // Minimal WorkerInterface for tests. Returns success on customEvent (so the HM's
@@ -52,6 +143,10 @@ class StubWorkerInterface final: public WorkerInterface {
   kj::Promise<WorkerInterface::CustomEvent::Result> customEvent(
       kj::Own<WorkerInterface::CustomEvent> event) override {
     ++stats.customEventCalls;
+    if (stats.hangCustomEvents) {
+      return kj::Promise<WorkerInterface::CustomEvent::Result>(kj::NEVER_DONE)
+          .attach(kj::mv(event));
+    }
     if (stats.rejectCustomEvents) {
       return kj::Promise<WorkerInterface::CustomEvent::Result>(KJ_EXCEPTION(
           OVERLOADED, "jsg.Error: Durable Object is overloaded. Too many requests queued."));
@@ -92,8 +187,9 @@ class StubLoopback final: public Worker::Actor::Loopback, public kj::Refcounted 
  public:
   explicit StubLoopback(DispatchStats& stats): stats(stats) {}
 
-  kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata) override {
+  kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) override {
     ++stats.getWorkerCalls;
+    stats.lastReresolveActorPipeline = metadata.reresolveActorPipeline;
     return kj::heap<StubWorkerInterface>(stats);
   }
 
@@ -105,20 +201,72 @@ class StubLoopback final: public Worker::Actor::Loopback, public kj::Refcounted 
   DispatchStats& stats;
 };
 
+class ControlledHibernatableEventDispatcher final
+    : public rpc::HibernatableWebSocketEventDispatcher::Server {
+ public:
+  ControlledHibernatableEventDispatcher(
+      kj::Promise<void> completion, kj::String& receivedWebsocketId, bool& called)
+      : completion(kj::mv(completion)),
+        receivedWebsocketId(receivedWebsocketId),
+        called(called) {}
+
+  kj::Promise<void> hibernatableWebSocketEvent(HibernatableWebSocketEventContext context) override {
+    called = true;
+    receivedWebsocketId = kj::str(context.getParams().getMessage().getWebsocketId());
+    return kj::mv(completion);
+  }
+
+ private:
+  kj::Promise<void> completion;
+  kj::String& receivedWebsocketId;
+  bool& called;
+};
+
 // Helpers below are intentionally split so the HibernationManager can outlive any single
 // IncomingRequest, which matters for tests that span multiple IRs. makeTestHm() needs no
 // IoContext; acceptNewWebSocket() and sendFromDo() do (the api::WebSocket constructor stores
 // IoOwn members, and ws.send() is delivered through the IoContext's pump).
 
+// A TimerChannel whose afterLimitTimeout() fires only when the test asks it to, so a test can reach
+// a timeout measured in seconds without spending them. Install with setTimerChannel().
+struct ManualTimerChannel final: public TimerChannel {
+  void syncTime() override {}
+
+  kj::Date now(kj::Maybe<kj::Date>) override {
+    return kj::systemPreciseCalendarClock().now();
+  }
+
+  kj::Promise<void> atTime(kj::Date when) override {
+    return kj::NEVER_DONE;
+  }
+
+  kj::Promise<void> afterLimitTimeout(kj::Duration t) override {
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    fulfillers.add(kj::mv(paf.fulfiller));
+    return kj::mv(paf.promise);
+  }
+
+  void fireAll() {
+    for (auto& fulfiller: fulfillers) {
+      fulfiller->fulfill();
+    }
+    fulfillers.clear();
+  }
+
+  kj::Vector<kj::Own<kj::PromiseFulfiller<void>>> fulfillers;
+};
+
 // SetupParams builder that installs a StubLoopback on the actor referencing `stats`. The
 // caller MUST keep `stats` alive for the lifetime of the resulting TestFixture (declare it
 // before the fixture). The same StubLoopback is later retrieved via actor.getLoopback() and
 // handed to the HM, so actor and HM share a single Loopback (mirroring production).
-TestFixture::SetupParams stubLoopbackParams(DispatchStats& stats, kj::String actorId) {
+TestFixture::SetupParams stubLoopbackParams(
+    DispatchStats& stats, kj::String actorId, kj::Maybe<uint64_t> holderToken = kj::none) {
   return {
     .actorId = Worker::Actor::Id(kj::mv(actorId)),
     .useRealTimers = true,
     .actorLoopback = kj::refcounted<StubLoopback>(stats),
+    .holderToken = holderToken,
   };
 }
 
@@ -187,6 +335,862 @@ void sendFromDo(TestFixture& fixture,
         websockets.size() == 1, "expected exactly one WebSocket for tag", tag, websockets.size());
     websockets[0]->send(js, kj::OneOf<kj::Array<kj::byte>, kj::String>(kj::str(msg)));
   });
+}
+
+KJ_TEST("HibernationManager: event delivery resolves the manager that registered the event") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("event-routing-local")));
+  auto hm = makeTestHm(fixture);
+  auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
+  auto request = fixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm);
+  fixture.getActor().setHibernationManager(hm->addRef());
+
+  constexpr kj::StringPtr websocketId = "local-event"_kj;
+  LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(legacyHm, kj::str(websocketId));
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::findManagerForEventMatches(websocketId, legacyHm));
+
+  fixture.enterContext(*request, [&](const TestFixture::Environment&) {
+    KJ_ASSERT(
+        LegacyHibernationManagerTestAccess::takeWebSocketForEventMatches(websocketId, legacyHm));
+  });
+
+  // Claiming deregisters the event, and every delivery path claims unconditionally.
+  KJ_ASSERT(!LegacyHibernationManagerTestAccess::hasEventRegistration(websocketId));
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::registeredEventCount(legacyHm) == 0);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: a dispatch that never settles does not keep the manager alive") {
+  DispatchStats stats;
+  stats.hangCustomEvents = true;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("never-settling-dispatch")));
+  auto request = fixture.newIncomingRequest();
+
+  {
+    auto hm = makeTestHm(fixture);
+    auto end1 = acceptNewWebSocket(fixture, *request, *hm);
+
+    // Start a dispatch and leave it pending. The manager owns the task waiting on it, so anything
+    // the dispatch holds that leads back to the manager would make it immortal.
+    end1->send("hello"_kj).wait(fixture.getWaitScope());
+    fixture.pollEventLoop();
+    KJ_ASSERT(stats.customEventCalls == 1, stats.customEventCalls);
+
+    // `hm` is deliberately never handed to the actor, so it holds the manager's only reference, and
+    // a dispatch that led back to the manager would show up here as a second one. The native
+    // WebSocket outlives the manager while a dispatch is in flight, so whether the eyeball end
+    // closes says nothing about the manager's lifetime.
+    KJ_ASSERT(!hm->isShared(), "a pending dispatch holds a reference back to the manager");
+  }
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: events wait for the replacement loopback during handoff") {
+  DispatchStats oldStats;
+  DispatchStats replacementStats;
+  TestFixture fixture(stubLoopbackParams(oldStats, kj::str("loopback-handoff")));
+  auto hm = makeTestHm(fixture);
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm);
+
+  auto handoff = hm->beginLoopbackHandoff();
+  end1->send("during handoff"_kj).wait(fixture.getWaitScope());
+  fixture.pollEventLoop();
+
+  // The message found no loopback to dispatch through. Only `oldStats` is worth asserting on:
+  // nothing references `replacementStats` until its StubLoopback exists, below.
+  KJ_ASSERT(oldStats.getWorkerCalls == 0, oldStats.getWorkerCalls);
+
+  hm->setLoopback(kj::refcounted<StubLoopback>(replacementStats));
+  fixture.pollEventLoop();
+
+  KJ_ASSERT(replacementStats.getWorkerCalls == 1, replacementStats.getWorkerCalls);
+  KJ_ASSERT(replacementStats.customEventCalls == 1, replacementStats.customEventCalls);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: dropping the handoff handle restores the previous loopback") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("loopback-handoff-drop")));
+  auto hm = makeTestHm(fixture);
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm);
+
+  {
+    auto handoff = hm->beginLoopbackHandoff();
+    end1->send("during handoff"_kj).wait(fixture.getWaitScope());
+    fixture.pollEventLoop();
+
+    // No replacement actor has attached, so the event has nothing to dispatch through.
+    KJ_ASSERT(stats.getWorkerCalls == 0, stats.getWorkerCalls);
+  }
+
+  // Dropping the handle puts the outgoing generation's loopback back, so the event that was
+  // waiting is served by the actor that supplied it.
+  fixture.pollEventLoop();
+  KJ_ASSERT(stats.getWorkerCalls == 1, stats.getWorkerCalls);
+  KJ_ASSERT(stats.customEventCalls == 1, stats.customEventCalls);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: a stale handoff handle leaves a later handoff alone") {
+  DispatchStats firstStats;
+  DispatchStats secondStats;
+  DispatchStats thirdStats;
+  TestFixture fixture(stubLoopbackParams(firstStats, kj::str("loopback-handoff-stale")));
+  auto hm = makeTestHm(fixture);
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm);
+
+  // One code update completes, so the handle it began no longer owns the handoff in progress.
+  auto staleHandoff = hm->beginLoopbackHandoff();
+  hm->setLoopback(kj::refcounted<StubLoopback>(secondStats));
+
+  // A second code update parks the loopback the first one installed.
+  auto liveHandoff = hm->beginLoopbackHandoff();
+  { auto drop = kj::mv(staleHandoff); }
+
+  end1->send("during second handoff"_kj).wait(fixture.getWaitScope());
+  fixture.pollEventLoop();
+
+  // Dropping the stale handle did not end the second handoff, so the event is still waiting rather
+  // than dispatched through the loopback that handoff parked.
+  KJ_ASSERT(secondStats.getWorkerCalls == 0, secondStats.getWorkerCalls);
+  KJ_ASSERT(firstStats.getWorkerCalls == 0, firstStats.getWorkerCalls);
+
+  hm->setLoopback(kj::refcounted<StubLoopback>(thirdStats));
+  fixture.pollEventLoop();
+
+  KJ_ASSERT(thirdStats.getWorkerCalls == 1, thirdStats.getWorkerCalls);
+  KJ_ASSERT(thirdStats.customEventCalls == 1, thirdStats.customEventCalls);
+  KJ_ASSERT(secondStats.getWorkerCalls == 0, secondStats.getWorkerCalls);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: waiting for a replacement loopback is bounded") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("loopback-handoff-timeout")));
+  auto hm = makeTestHm(fixture);
+  auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
+  ManualTimerChannel manualTimer;
+  hm->setTimerChannel(manualTimer);
+  auto request = fixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm);
+
+  // Once the loopback has been handed off, an event has nothing to dispatch through, so it is given
+  // a WorkerInterface that waits for the replacement to arrive.
+  auto handoff = hm->beginLoopbackHandoff();
+  auto worker = LegacyHibernationManagerTestAccess::getWorkerForOnlyWebSocket(legacyHm);
+  auto promise = worker->prewarm(""_kj);
+  KJ_ASSERT(!promise.poll(fixture.getWaitScope()));
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::loopbackWaiterCount(legacyHm) == 1);
+
+  // Nothing supplies a replacement loopback and nothing cancels the handoff. The wait must still
+  // end: an unbounded one parks this event, and the read loop behind it, for the manager's
+  // lifetime.
+  manualTimer.fireAll();
+  KJ_ASSERT(promise.poll(fixture.getWaitScope()));
+  KJ_EXPECT_THROW_MESSAGE(
+      "gave up waiting for the replacement actor's loopback", promise.wait(fixture.getWaitScope()));
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::loopbackWaiterCount(legacyHm) == 0);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: event naming another actor's manager is rejected") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("event-routing-other-manager")));
+  auto actorHm = makeTestHm(fixture);
+  auto eventHm = makeTestHm(fixture);
+  auto& eventLegacyHm = kj::downcast<LegacyHibernationManagerImpl>(*eventHm);
+  auto request = fixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *eventHm);
+
+  // The event ID resolves to a manager, but not the one this actor is using. The ID is the only
+  // part of an event not derived from the receiving actor, so this is the shape a misrouted event
+  // takes.
+  fixture.getActor().setHibernationManager(actorHm->addRef());
+
+  constexpr kj::StringPtr websocketId = "other-manager-event"_kj;
+  LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(
+      eventLegacyHm, kj::str(websocketId));
+  KJ_ASSERT(
+      LegacyHibernationManagerTestAccess::findManagerForEventMatches(websocketId, eventLegacyHm));
+
+  capnp::MallocMessageBuilder message;
+  auto params =
+      message
+          .initRoot<rpc::HibernatableWebSocketEventDispatcher::HibernatableWebSocketEventParams>();
+  auto eventMessage = params.initMessage();
+  eventMessage.initPayload().setText("hello"_kj);
+  eventMessage.setWebsocketId(websocketId);
+  auto event = kj::refcounted<api::HibernatableWebSocketCustomEvent>(
+      0, kj::heap<api::HibernationReader>(params.asReader()));
+
+  auto exception = kj::runCatchingExceptions([&]() {
+    api::HibernatableWebSocketCustomEventTestAccess::ensureHibernationManagerForEvent(
+        *event, fixture.getActor(), websocketId);
+  });
+  auto& e = KJ_ASSERT_NONNULL(exception, "expected a foreign manager's event ID to be rejected");
+  KJ_ASSERT(e.getDescription().endsWith(
+                "hibernatable WebSocket event ID names a different hibernation manager than the "
+                "receiving actor's"_kj),
+      e);
+
+  // The rejected event leaves the registration alone: it belongs to the manager that made it, which
+  // is still holding the socket for whoever legitimately claims it.
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::hasEventRegistration(websocketId));
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::registeredEventCount(eventLegacyHm) == 1);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: claiming a socket owned by another live actor is rejected") {
+  // Two actors sharing one event loop, and so one event registry, in which a claim resolves by ID
+  // alone.
+  DispatchStats ownerStats;
+  TestFixture ownerFixture(stubLoopbackParams(ownerStats, kj::str("claim-owner")));
+
+  DispatchStats otherStats;
+  TestFixture otherFixture({
+    .waitScope = ownerFixture.getWaitScope(),
+    .actorId = Worker::Actor::Id(kj::str("claim-other")),
+    .actorLoopback = kj::refcounted<StubLoopback>(otherStats),
+  });
+
+  auto hm = makeTestHm(ownerFixture);
+  auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
+  auto ownerRequest = ownerFixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(ownerFixture, *ownerRequest, *hm);
+  ownerFixture.getActor().setHibernationManager(hm->addRef());
+
+  constexpr kj::StringPtr websocketId = "cross-actor-claim"_kj;
+  LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(legacyHm, kj::str(websocketId));
+
+  // Nothing in an ID says whose socket it names, so the other actor can reach the registration.
+  // Claiming it would hand this actor a jsg::Ref belonging to the owner's isolate.
+  auto otherRequest = otherFixture.newIncomingRequest();
+  kj::Maybe<kj::Exception> exception;
+  otherFixture.enterContext(*otherRequest, [&](const TestFixture::Environment&) {
+    exception = kj::runCatchingExceptions([&]() {
+      LegacyHibernationManagerTestAccess::takeWebSocketForEventMatches(websocketId, legacyHm);
+    });
+  });
+  auto& e = KJ_ASSERT_NONNULL(exception, "expected a cross-actor claim to be rejected");
+  KJ_ASSERT(e.getDescription().endsWith(
+                "hibernatable WebSocket event ID names a socket owned by a different actor"_kj),
+      e);
+
+  // The rejected claim leaves the registration for the actor that does own it.
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::hasEventRegistration(websocketId));
+
+  otherFixture.drainAndDestroy(kj::mv(otherRequest));
+  ownerFixture.drainAndDestroy(kj::mv(ownerRequest));
+}
+
+KJ_TEST("HibernationManager: claiming a socket owned by a live actor sharing its ID is rejected") {
+  // Both actors carry the same ID, so the ID comparison admits the claim and only the instance
+  // check stands between the claimant and a jsg::Ref minted in the owner's isolate.
+  constexpr kj::StringPtr sharedId = "claim-shared-id"_kj;
+  DispatchStats ownerStats;
+  TestFixture ownerFixture(stubLoopbackParams(ownerStats, kj::str(sharedId)));
+
+  DispatchStats otherStats;
+  TestFixture otherFixture({
+    .waitScope = ownerFixture.getWaitScope(),
+    .actorId = Worker::Actor::Id(kj::str(sharedId)),
+    .actorLoopback = kj::refcounted<StubLoopback>(otherStats),
+  });
+
+  auto hm = makeTestHm(ownerFixture);
+  auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
+  auto ownerRequest = ownerFixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(ownerFixture, *ownerRequest, *hm);
+  ownerFixture.getActor().setHibernationManager(hm->addRef());
+
+  constexpr kj::StringPtr websocketId = "same-id-claim"_kj;
+  LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(legacyHm, kj::str(websocketId));
+
+  auto otherRequest = otherFixture.newIncomingRequest();
+  kj::Maybe<kj::Exception> exception;
+  otherFixture.enterContext(*otherRequest, [&](const TestFixture::Environment&) {
+    exception = kj::runCatchingExceptions([&]() {
+      LegacyHibernationManagerTestAccess::takeWebSocketForEventMatches(websocketId, legacyHm);
+    });
+  });
+  auto& e = KJ_ASSERT_NONNULL(exception, "expected a same-ID claim to be rejected");
+  KJ_ASSERT(
+      e.getDescription().endsWith(
+          "hibernatable WebSocket event ID names a socket owned by a different live actor"_kj),
+      e);
+
+  // The rejected claim leaves the registration for the actor that does own it.
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::hasEventRegistration(websocketId));
+
+  otherFixture.drainAndDestroy(kj::mv(otherRequest));
+  ownerFixture.drainAndDestroy(kj::mv(ownerRequest));
+}
+
+KJ_TEST("HibernationManager: an actor handed a running actor's manager does not take it") {
+  // Whatever holds a manager across generations does not necessarily hold one per actor, so a
+  // manager can be supplied to an actor the sockets do not belong to: a facet constructed while
+  // the actor that accepted them is still running, for instance.
+  DispatchStats ownerStats;
+  TestFixture ownerFixture(stubLoopbackParams(ownerStats, kj::str("adopt-owner")));
+  auto hm = makeTestHm(ownerFixture);
+  auto ownerRequest = ownerFixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(ownerFixture, *ownerRequest, *hm);
+  ownerFixture.getActor().setHibernationManager(hm->addRef());
+
+  DispatchStats otherStats;
+  TestFixture otherFixture({
+    .waitScope = ownerFixture.getWaitScope(),
+    .actorId = Worker::Actor::Id(kj::str("adopt-other")),
+    .actorLoopback = kj::refcounted<StubLoopback>(otherStats),
+    .hibernationManager = hm->addRef(),
+  });
+
+  // The manager stayed with the actor it belongs to, and the other actor kept nothing.
+  KJ_ASSERT(otherFixture.getActor().getHibernationManager() == kj::none);
+  KJ_ASSERT(&KJ_ASSERT_NONNULL(hm->getOwningActor()) == &ownerFixture.getActor());
+
+  // So a message on the socket still reaches the actor that accepted it.
+  end1->send("still the owner's"_kj).wait(ownerFixture.getWaitScope());
+  ownerFixture.pollEventLoop();
+  KJ_ASSERT(ownerStats.getWorkerCalls == 1, ownerStats.getWorkerCalls);
+  KJ_ASSERT(otherStats.getWorkerCalls == 0, otherStats.getWorkerCalls);
+
+  ownerFixture.drainAndDestroy(kj::mv(ownerRequest));
+}
+
+KJ_TEST("HibernationManager: a manager-less actor adopts the event's manager") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("event-routing-adopt-manager")));
+  auto eventHm = makeTestHm(fixture);
+  auto& eventLegacyHm = kj::downcast<LegacyHibernationManagerImpl>(*eventHm);
+  auto request = fixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *eventHm);
+
+  // The actor a code-update wake creates has no manager of its own yet, and must take on the one
+  // that has been holding its sockets rather than building a second one.
+  KJ_ASSERT(fixture.getActor().getHibernationManager() == kj::none);
+
+  constexpr kj::StringPtr websocketId = "adopt-manager-event"_kj;
+  LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(
+      eventLegacyHm, kj::str(websocketId));
+
+  capnp::MallocMessageBuilder message;
+  auto params =
+      message
+          .initRoot<rpc::HibernatableWebSocketEventDispatcher::HibernatableWebSocketEventParams>();
+  auto eventMessage = params.initMessage();
+  eventMessage.initPayload().setText("hello"_kj);
+  eventMessage.setWebsocketId(websocketId);
+  auto event = kj::refcounted<api::HibernatableWebSocketCustomEvent>(
+      0, kj::heap<api::HibernationReader>(params.asReader()));
+
+  api::HibernatableWebSocketCustomEventTestAccess::ensureHibernationManagerForEvent(
+      *event, fixture.getActor(), websocketId);
+
+  auto& adopted = KJ_ASSERT_NONNULL(fixture.getActor().getHibernationManager());
+  KJ_ASSERT(&adopted == eventHm.get());
+
+  // Having adopted it, the actor now passes the same check the delivery path applies, so the event
+  // that follows can claim its socket.
+  api::HibernatableWebSocketCustomEventTestAccess::ensureHibernationManagerForEvent(
+      *event, fixture.getActor(), websocketId);
+  fixture.enterContext(*request, [&](const TestFixture::Environment&) {
+    KJ_ASSERT(LegacyHibernationManagerTestAccess::takeWebSocketForEventMatches(
+        websocketId, eventLegacyHm));
+  });
+  KJ_ASSERT(!LegacyHibernationManagerTestAccess::hasEventRegistration(websocketId));
+
+  // Adoption is what gives the manager an owner: afterwards it names this actor, and an event
+  // reaching a different actor is rejected rather than handing it these sockets.
+  auto& owner = KJ_ASSERT_NONNULL(eventHm->getOwningActor());
+  KJ_ASSERT(&owner == &fixture.getActor());
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: a sibling holder sharing the actor ID does not take an orphan") {
+  // Facets use their parent's actor ID by default, so an ID match does not mean the claimant is a
+  // later actor of the holder the sockets belong to.
+  DispatchStats ownerStats;
+  TestFixture ownerFixture(stubLoopbackParams(ownerStats, kj::str("sibling-shared-id"), 1));
+  auto hm = makeTestHm(ownerFixture);
+  auto ownerRequest = ownerFixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(ownerFixture, *ownerRequest, *hm);
+  ownerFixture.getActor().setHibernationManager(hm->addRef());
+
+  // Orphan the manager, as hibernating the owning actor does.
+  ownerFixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
+  ownerFixture.drainAndDestroy(kj::mv(ownerRequest));
+  ownerFixture.resetActor();
+  KJ_ASSERT(hm->getOwningActor() == kj::none);
+  KJ_ASSERT(hm->getOwningActorId() != kj::none);
+
+  DispatchStats siblingStats;
+  TestFixture siblingFixture({
+    .waitScope = ownerFixture.getWaitScope(),
+    .actorId = Worker::Actor::Id(kj::str("sibling-shared-id")),
+    .actorLoopback = kj::refcounted<StubLoopback>(siblingStats),
+    .hibernationManager = hm->addRef(),
+    .holderToken = 2,
+  });
+
+  // The IDs match, so only the differing holder token stands between the sibling and the sockets.
+  KJ_ASSERT(siblingFixture.getActor().getHibernationManager() == kj::none);
+  KJ_ASSERT(hm->getOwningActor() == kj::none);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(hm->getOwningHolderToken()) == 1);
+}
+
+KJ_TEST("HibernationManager: an event does not hand a sibling holder an orphan") {
+  // An event resolves its manager from a registry shared by the whole event loop, so it reaches an
+  // actor that was never offered the manager at construction. The holder token has to be checked
+  // here too, and it is the last chance to check it: adopting stamps the manager with the adopting
+  // actor, which is what every check downstream reads.
+  DispatchStats ownerStats;
+  TestFixture ownerFixture(stubLoopbackParams(ownerStats, kj::str("sibling-event-shared-id"), 1));
+  auto hm = makeTestHm(ownerFixture);
+  auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
+  auto ownerRequest = ownerFixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(ownerFixture, *ownerRequest, *hm);
+  ownerFixture.getActor().setHibernationManager(hm->addRef());
+
+  // Orphan the manager, as hibernating the owning actor does.
+  ownerFixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
+  ownerFixture.drainAndDestroy(kj::mv(ownerRequest));
+  ownerFixture.resetActor();
+  KJ_ASSERT(hm->getOwningActor() == kj::none);
+
+  constexpr kj::StringPtr websocketId = "sibling-holder-event"_kj;
+  LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(legacyHm, kj::str(websocketId));
+
+  // A sibling facet, which shares the owner's ID and so passes every check the ID supports. It is
+  // built without the manager, so it reaches the adopt path with nothing of its own to compare.
+  DispatchStats siblingStats;
+  TestFixture siblingFixture({
+    .waitScope = ownerFixture.getWaitScope(),
+    .actorId = Worker::Actor::Id(kj::str("sibling-event-shared-id")),
+    .actorLoopback = kj::refcounted<StubLoopback>(siblingStats),
+    .holderToken = 2,
+  });
+  KJ_ASSERT(siblingFixture.getActor().getHibernationManager() == kj::none);
+
+  capnp::MallocMessageBuilder message;
+  auto params =
+      message
+          .initRoot<rpc::HibernatableWebSocketEventDispatcher::HibernatableWebSocketEventParams>();
+  auto eventMessage = params.initMessage();
+  eventMessage.initPayload().setText("hello"_kj);
+  eventMessage.setWebsocketId(websocketId);
+  auto event = kj::refcounted<api::HibernatableWebSocketCustomEvent>(
+      0, kj::heap<api::HibernationReader>(params.asReader()));
+
+  auto exception = kj::runCatchingExceptions([&]() {
+    api::HibernatableWebSocketCustomEventTestAccess::ensureHibernationManagerForEvent(
+        *event, siblingFixture.getActor(), websocketId);
+  });
+  auto& e = KJ_ASSERT_NONNULL(exception, "expected a sibling holder's event to be rejected");
+  KJ_ASSERT(e.getDescription().endsWith(
+                "hibernatable WebSocket event names a hibernation manager owned by a different "
+                "holder"_kj),
+      e);
+
+  // Refusing leaves the manager named by the holder it belongs to, so that holder's own next
+  // generation still adopts it, and leaves the registration for that generation to claim.
+  KJ_ASSERT(siblingFixture.getActor().getHibernationManager() == kj::none);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(hm->getOwningHolderToken()) == 1);
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::hasEventRegistration(websocketId));
+}
+
+KJ_TEST("HibernationManager: a manager that forgot its holder is adopted by another") {
+  // Handing a manager to a replacement generation cannot name the holder that will adopt it, since
+  // that holder does not exist yet. Forgetting the token leaves the ID as the identity to check.
+  DispatchStats ownerStats;
+  TestFixture ownerFixture(stubLoopbackParams(ownerStats, kj::str("forgotten-holder"), 1));
+  auto hm = makeTestHm(ownerFixture);
+  auto ownerRequest = ownerFixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(ownerFixture, *ownerRequest, *hm);
+  ownerFixture.getActor().setHibernationManager(hm->addRef());
+
+  // Orphan the manager, as hibernating the owning actor does.
+  ownerFixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
+  ownerFixture.drainAndDestroy(kj::mv(ownerRequest));
+  ownerFixture.resetActor();
+  KJ_ASSERT(KJ_ASSERT_NONNULL(hm->getOwningHolderToken()) == 1);
+
+  hm->forgetOwningHolder();
+  KJ_ASSERT(hm->getOwningHolderToken() == kj::none);
+
+  DispatchStats replacementStats;
+  TestFixture replacementFixture({
+    .waitScope = ownerFixture.getWaitScope(),
+    .actorId = Worker::Actor::Id(kj::str("forgotten-holder")),
+    .actorLoopback = kj::refcounted<StubLoopback>(replacementStats),
+    .hibernationManager = hm->addRef(),
+    .holderToken = 2,
+  });
+
+  // The token a sibling was refused for is gone, so this holder takes the sockets.
+  auto& adopted = KJ_ASSERT_NONNULL(replacementFixture.getActor().getHibernationManager());
+  KJ_ASSERT(&adopted == hm.get());
+
+  // Adopting names the holder now running, so the next sibling is refused again.
+  auto& newOwner = KJ_ASSERT_NONNULL(hm->getOwningActor());
+  KJ_ASSERT(&newOwner == &replacementFixture.getActor());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(hm->getOwningHolderToken()) == 2);
+}
+
+KJ_TEST("HibernationManager: a new generation of the owning actor adopts its manager") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("adopt-same-actor-id")));
+  auto hm = makeTestHm(fixture);
+  auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
+  auto request1 = fixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request1, *hm);
+  fixture.getActor().setHibernationManager(hm->addRef());
+
+  // Hibernate and replace the actor, as a code update does. The manager outlives the actor that
+  // owned it, leaving the copied ID as the only identity it can still be checked against.
+  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
+  fixture.drainAndDestroy(kj::mv(request1));
+  fixture.resetActor();
+  KJ_ASSERT(hm->getOwningActor() == kj::none);
+  KJ_ASSERT(hm->getOwningActorId() != kj::none);
+
+  constexpr kj::StringPtr websocketId = "adopt-same-actor-id-event"_kj;
+  LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(legacyHm, kj::str(websocketId));
+
+  capnp::MallocMessageBuilder message;
+  auto params =
+      message
+          .initRoot<rpc::HibernatableWebSocketEventDispatcher::HibernatableWebSocketEventParams>();
+  auto eventMessage = params.initMessage();
+  eventMessage.initPayload().setText("hello"_kj);
+  eventMessage.setWebsocketId(websocketId);
+  auto event = kj::refcounted<api::HibernatableWebSocketCustomEvent>(
+      0, kj::heap<api::HibernationReader>(params.asReader()));
+
+  // Same Durable Object, so this generation is entitled to the sockets the last one left behind.
+  api::HibernatableWebSocketCustomEventTestAccess::ensureHibernationManagerForEvent(
+      *event, fixture.getActor(), websocketId);
+
+  auto& adopted = KJ_ASSERT_NONNULL(fixture.getActor().getHibernationManager());
+  KJ_ASSERT(&adopted == hm.get());
+
+  // Adopting re-points the manager at the generation now running.
+  auto& newOwner = KJ_ASSERT_NONNULL(hm->getOwningActor());
+  KJ_ASSERT(&newOwner == &fixture.getActor());
+}
+
+KJ_TEST("HibernationManager: a different Durable Object cannot adopt an orphaned manager") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("adopt-owner-id")));
+  auto hm = makeTestHm(fixture);
+  auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
+  auto request1 = fixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request1, *hm);
+  fixture.getActor().setHibernationManager(hm->addRef());
+
+  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
+  fixture.drainAndDestroy(kj::mv(request1));
+
+  // A different Durable Object, not a new generation of the same one. The owner is gone, so the
+  // instance check has nothing to compare and the copied ID is all that stands in the way.
+  fixture.resetActor(Worker::Actor::Id(kj::str("adopt-interloper-id")));
+  KJ_ASSERT(hm->getOwningActor() == kj::none);
+
+  constexpr kj::StringPtr websocketId = "adopt-different-actor-id-event"_kj;
+  LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(legacyHm, kj::str(websocketId));
+
+  capnp::MallocMessageBuilder message;
+  auto params =
+      message
+          .initRoot<rpc::HibernatableWebSocketEventDispatcher::HibernatableWebSocketEventParams>();
+  auto eventMessage = params.initMessage();
+  eventMessage.initPayload().setText("hello"_kj);
+  eventMessage.setWebsocketId(websocketId);
+  auto event = kj::refcounted<api::HibernatableWebSocketCustomEvent>(
+      0, kj::heap<api::HibernationReader>(params.asReader()));
+
+  auto exception = kj::runCatchingExceptions([&]() {
+    api::HibernatableWebSocketCustomEventTestAccess::ensureHibernationManagerForEvent(
+        *event, fixture.getActor(), websocketId);
+  });
+  auto& e =
+      KJ_ASSERT_NONNULL(exception, "expected an adoption by a different Durable Object to fail");
+  KJ_ASSERT(e.getDescription().endsWith(
+                "hibernatable WebSocket event names a hibernation manager owned by a "
+                "different actor"_kj),
+      e);
+
+  // The rejected actor is left with no manager at all, rather than holding the owner's sockets.
+  KJ_ASSERT(fixture.getActor().getHibernationManager() == kj::none);
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::hasEventRegistration(websocketId));
+}
+
+KJ_TEST("HibernationManager: an event re-resolves the pipeline only when no actor owns it") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("force-fresh-unowned")));
+  auto hm = makeTestHm(fixture);
+  auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
+  auto request = fixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm);
+
+  // No actor has claimed this manager, as when the actor holding it goes away. The loopback it
+  // holds can name a version that is no longer current, so the pipeline is re-resolved from its
+  // script ID.
+  KJ_ASSERT(hm->getOwningActor() == kj::none);
+  auto worker1 KJ_UNUSED = LegacyHibernationManagerTestAccess::getWorkerForOnlyWebSocket(legacyHm);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(stats.lastReresolveActorPipeline) == ReresolveActorPipeline::YES);
+
+  // A live owning actor holds a current pipeline, so reusing its loopback's is correct.
+  fixture.getActor().setHibernationManager(hm->addRef());
+  auto worker2 KJ_UNUSED = LegacyHibernationManagerTestAccess::getWorkerForOnlyWebSocket(legacyHm);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(stats.lastReresolveActorPipeline) == ReresolveActorPipeline::NO);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: a hibernated socket on a running actor reuses the pipeline") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("force-fresh-packaged")));
+  auto hm = makeTestHm(fixture);
+  auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
+  auto request = fixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm);
+  fixture.getActor().setHibernationManager(hm->addRef());
+
+  // Package the sockets away, as an idle actor does. Packaging is not the signal: un-packaging is
+  // per-socket, so keying on it would re-resolve the pipeline for every socket a woken actor has
+  // not yet un-packaged.
+  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
+
+  auto worker KJ_UNUSED = LegacyHibernationManagerTestAccess::getWorkerForOnlyWebSocket(legacyHm);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(stats.lastReresolveActorPipeline) == ReresolveActorPipeline::NO);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: delivering one event leaves other hibernated WebSockets registered") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("event-routing-multi-socket")));
+  auto hm = makeTestHm(fixture);
+  auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
+  auto request = fixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm, "first"_kj);
+  auto end2 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm, "second"_kj);
+  fixture.getActor().setHibernationManager(hm->addRef());
+
+  constexpr kj::StringPtr firstId = "multi-socket-event-first"_kj;
+  constexpr kj::StringPtr secondId = "multi-socket-event-second"_kj;
+  LegacyHibernationManagerTestAccess::registerWebSocketForEvent(legacyHm, kj::str(firstId), 0);
+  LegacyHibernationManagerTestAccess::registerWebSocketForEvent(legacyHm, kj::str(secondId), 1);
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::registeredEventCount(legacyHm) == 2);
+
+  // Deliver only the first event. An actor holds many hibernated WebSockets at once, so waking one
+  // of them must leave the rest routable.
+  fixture.enterContext(*request, [&](const TestFixture::Environment&) {
+    KJ_ASSERT(
+        LegacyHibernationManagerTestAccess::takeWebSocketForEventMatches(firstId, legacyHm, 0));
+  });
+
+  KJ_ASSERT(!LegacyHibernationManagerTestAccess::hasEventRegistration(firstId));
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::findManagerForEventMatches(secondId, legacyHm));
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::registeredEventCount(legacyHm) == 1);
+
+  fixture.enterContext(*request, [&](const TestFixture::Environment&) {
+    KJ_ASSERT(
+        LegacyHibernationManagerTestAccess::takeWebSocketForEventMatches(secondId, legacyHm, 1));
+  });
+  KJ_ASSERT(!LegacyHibernationManagerTestAccess::hasEventRegistration(secondId));
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::registeredEventCount(legacyHm) == 0);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: destroying a manager removes its event registrations") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("event-routing-destroyed-manager")));
+  auto request = fixture.newIncomingRequest();
+
+  constexpr kj::StringPtr websocketId = "destroyed-manager-event"_kj;
+  kj::Own<kj::WebSocket> end1;
+  {
+    auto hm = makeTestHm(fixture);
+    auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
+    end1 = acceptNewWebSocket(fixture, *request, *hm);
+
+    LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(
+        legacyHm, kj::str(websocketId));
+    KJ_ASSERT(LegacyHibernationManagerTestAccess::hasEventRegistration(websocketId));
+
+    // Deliberately not handed to the actor, so `hm` holds the only reference and the manager is
+    // destroyed with the event still registered.
+  }
+
+  // The registry doesn't own the manager, so the manager can go away while an event is registered.
+  // Its destructor must take the registration with it, or the next event with this ID would be
+  // routed into freed memory.
+  KJ_ASSERT(!LegacyHibernationManagerTestAccess::hasEventRegistration(websocketId));
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: cancelling an event deregisters it") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("event-routing-cancel")));
+  auto hm = makeTestHm(fixture);
+  auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
+  auto request = fixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm);
+  fixture.getActor().setHibernationManager(hm->addRef());
+
+  constexpr kj::StringPtr websocketId = "cancel-event"_kj;
+  LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(legacyHm, kj::str(websocketId));
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::hasEventRegistration(websocketId));
+
+  LegacyHibernationManagerTestAccess::cancelEvent(legacyHm, websocketId);
+
+  KJ_ASSERT(!LegacyHibernationManagerTestAccess::hasEventRegistration(websocketId));
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::registeredEventCount(legacyHm) == 0);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: cancelling an already-claimed event is a no-op") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("event-routing-cancel-claimed")));
+  auto hm = makeTestHm(fixture);
+  auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
+  auto request = fixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm);
+  fixture.getActor().setHibernationManager(hm->addRef());
+
+  constexpr kj::StringPtr websocketId = "cancel-claimed-event"_kj;
+  LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(legacyHm, kj::str(websocketId));
+
+  // Cleanup after a dispatch runs unconditionally, and normally has nothing left to do because the
+  // handler already claimed the WebSocket.
+  fixture.enterContext(*request, [&](const TestFixture::Environment&) {
+    KJ_ASSERT(
+        LegacyHibernationManagerTestAccess::takeWebSocketForEventMatches(websocketId, legacyHm));
+  });
+  KJ_ASSERT(!LegacyHibernationManagerTestAccess::hasEventRegistration(websocketId));
+
+  LegacyHibernationManagerTestAccess::cancelEvent(legacyHm, websocketId);
+
+  KJ_ASSERT(!LegacyHibernationManagerTestAccess::hasEventRegistration(websocketId));
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::registeredEventCount(legacyHm) == 0);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: unresolvable event ID fails to claim a WebSocket") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("event-routing-unresolvable")));
+  auto hm = makeTestHm(fixture);
+  auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
+  auto request = fixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm);
+  fixture.getActor().setHibernationManager(hm->addRef());
+
+  constexpr kj::StringPtr websocketId = "unresolvable-event"_kj;
+
+  kj::Maybe<kj::Exception> exception;
+  fixture.enterContext(*request, [&](const TestFixture::Environment&) {
+    exception = kj::runCatchingExceptions([&]() {
+      LegacyHibernationManagerTestAccess::takeWebSocketForEventMatches(websocketId, legacyHm);
+    });
+  });
+  KJ_ASSERT(exception != kj::none, "expected the unresolvable event ID to fail");
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: rejected RPC dispatch leaves the event registration to its owner") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("event-routing-rpc-rejected")));
+  auto hm = makeTestHm(fixture);
+  auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
+  auto request = fixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm);
+  fixture.getActor().setHibernationManager(hm->addRef());
+
+  constexpr kj::StringPtr websocketId = "rejected-rpc-event"_kj;
+  LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(legacyHm, kj::str(websocketId));
+
+  capnp::ByteStreamFactory byteStreamFactory;
+  kj::HttpHeaderTable::Builder headerTableBuilder;
+  capnp::HttpOverCapnpFactory httpOverCapnpFactory(byteStreamFactory,
+      capnp::HttpOverCapnpFactory::HeaderIdBundle(headerTableBuilder),
+      capnp::HttpOverCapnpFactory::LEVEL_2);
+
+  auto paf = kj::newPromiseAndFulfiller<void>();
+  kj::String receivedWebsocketId;
+  bool dispatcherCalled = false;
+  auto dispatcher = rpc::HibernatableWebSocketEventDispatcher::Client(
+      kj::heap<ControlledHibernatableEventDispatcher>(
+          kj::mv(paf.promise), receivedWebsocketId, dispatcherCalled))
+                        .castAs<rpc::EventDispatcher>();
+
+  auto event = kj::refcounted<api::HibernatableWebSocketCustomEvent>(
+      0, api::HibernatableSocketParams(kj::str("hello"), kj::str(websocketId)));
+  auto rpcPromise = event->sendRpc(httpOverCapnpFactory, byteStreamFactory,
+      getUnsupportedFrankenvalueHandler(), kj::mv(dispatcher));
+
+  fixture.pollEventLoop();
+  KJ_ASSERT(dispatcherCalled);
+  KJ_ASSERT(receivedWebsocketId == websocketId);
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::findManagerForEventMatches(websocketId, legacyHm));
+
+  paf.fulfiller->reject(KJ_EXCEPTION(FAILED, "test RPC rejection before claim"));
+  auto exception = kj::runCatchingExceptions([&]() { rpcPromise.wait(fixture.getWaitScope()); });
+  KJ_ASSERT(exception != kj::none, "expected RPC rejection");
+
+  // The dispatch attempt does not own the registration, so a rejection leaves it for the task that
+  // registered it to clean up. Deregistering here would race that task's cleanup.
+  KJ_ASSERT(LegacyHibernationManagerTestAccess::findManagerForEventMatches(websocketId, legacyHm));
+
+  LegacyHibernationManagerTestAccess::cancelEvent(legacyHm, websocketId);
+  KJ_ASSERT(!LegacyHibernationManagerTestAccess::hasEventRegistration(websocketId));
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: event without a registered manager returns exception") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("event-routing-missing-manager")));
+
+  capnp::MallocMessageBuilder message;
+  auto params =
+      message
+          .initRoot<rpc::HibernatableWebSocketEventDispatcher::HibernatableWebSocketEventParams>();
+  auto eventMessage = params.initMessage();
+  auto payload = eventMessage.initPayload();
+  payload.setText("hello"_kj);
+  eventMessage.setWebsocketId("missing-manager-event"_kj);
+
+  auto event = kj::refcounted<api::HibernatableWebSocketCustomEvent>(
+      0, kj::heap<api::HibernationReader>(params.asReader()));
+
+  auto exception = kj::runCatchingExceptions([&]() {
+    api::HibernatableWebSocketCustomEventTestAccess::ensureHibernationManagerForEvent(
+        *event, fixture.getActor(), "missing-manager-event"_kj);
+  });
+  auto& e = KJ_ASSERT_NONNULL(exception, "expected missing manager to throw");
+  KJ_ASSERT(e.getType() == kj::Exception::Type::FAILED, e);
+  KJ_ASSERT(e.getDescription().endsWith(
+                "hibernatable WebSocket event manager was not found for this event ID"_kj),
+      e);
 }
 
 KJ_TEST("HibernationManager: smoke (create, accept, query)") {

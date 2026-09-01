@@ -407,6 +407,8 @@ TestFixture::TestFixture(SetupParams&& params)
     } else {
       savedActorLoopback = kj::refcounted<MockActorLoopback>();
     }
+    savedHibernationManager = kj::mv(params.hibernationManager);
+    savedHolderToken = params.holderToken;
     actor = makeActor(kj::mv(id));
   }
 }
@@ -435,11 +437,18 @@ kj::Own<Worker::Actor> TestFixture::makeActor(Worker::Actor::Id id) {
   return kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
       /*hasTransient=*/false, actorCacheFactory, /*classname=*/kj::none,
       /*props=*/Frankenvalue(), storageFactory, loopback->addRef(), *timerChannel,
-      kj::refcounted<ActorObserver>(), kj::none, kj::none);
+      kj::refcounted<ActorObserver>(),
+      savedHibernationManager.map(
+          [](kj::Own<Worker::Actor::HibernationManager>& m) { return m->addRef(); }),
+      /*hibernationEventType=*/kj::none, /*container=*/kj::none, /*facetManager=*/kj::none,
+      /*version=*/kj::none, savedHolderToken);
 }
 
 void TestFixture::resetActor() {
-  auto id = KJ_ASSERT_NONNULL(actor)->cloneId();
+  resetActor(KJ_ASSERT_NONNULL(actor)->cloneId());
+}
+
+void TestFixture::resetActor(Worker::Actor::Id id) {
   actor = kj::none;  // Drop the old Actor (and its OutputGate / InputGate / ActorCache).
   actor = makeActor(kj::mv(id));
 }

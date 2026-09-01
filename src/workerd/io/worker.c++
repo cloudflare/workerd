@@ -3673,6 +3673,10 @@ struct Worker::Actor::Impl {
   kj::Maybe<FacetManager&> facetManager;
   kj::Maybe<ActorVersion> version;
 
+  // Names the holder this actor belongs to, where the embedder supplies one. Actors of one holder
+  // share it; sibling facets do not.
+  kj::Maybe<uint64_t> holderToken;
+
   struct NoClass {};
   struct Initializing {};
 
@@ -3898,13 +3902,15 @@ Worker::Actor::Actor(const Worker& worker,
     kj::Maybe<uint16_t> hibernationEventType,
     kj::Maybe<rpc::Container::Client> container,
     kj::Maybe<FacetManager&> facetManager,
-    kj::Maybe<ActorVersion> version)
+    kj::Maybe<ActorVersion> version,
+    kj::Maybe<uint64_t> holderToken)
     : worker(kj::atomicAddRef(worker)),
       tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
   impl = kj::heap<Impl>(*this, kj::mv(actorId), hasTransient, kj::mv(makeActorCache), kj::mv(props),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
       hibernationEventType, kj::mv(container), facetManager);
   impl->version = kj::mv(version);
+  impl->holderToken = holderToken;
 
   KJ_IF_SOME(c, className) {
     KJ_IF_SOME(cls, worker.impl->actorClasses.find(c)) {
@@ -3917,6 +3923,18 @@ Worker::Actor::Actor(const Worker& worker,
     }
   } else {
     impl->classInstance = Impl::NoClass();
+  }
+
+  // Attach only once this actor is fully built: attaching releases events queued while the previous
+  // generation went away, and delivering one reaches straight back into `impl`.
+  KJ_IF_SOME(m, impl->hibernationManager) {
+    if (ownsHibernatedSockets(*m)) {
+      attachHibernationManager(*m);
+    } else {
+      // Another actor's sockets. Letting go leaves them with the actor they belong to, and lets
+      // this actor build its own manager if it accepts a hibernatable WebSocket.
+      impl->hibernationManager = kj::none;
+    }
   }
 }
 
@@ -4018,6 +4036,8 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
 Worker::Actor::~Actor() noexcept(false) {
   // Note: We do not need an isolate lock to destroy the actor impl. Everything in it is specific
   // to our thread, or is a handle that can be dropped outside of the lock.
+
+  selfRef->invalidate();
 }
 
 void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error) {
@@ -4397,16 +4417,65 @@ kj::Maybe<Worker::Actor::HibernationManager&> Worker::Actor::getHibernationManag
       [](kj::Own<HibernationManager>& hib) -> HibernationManager& { return *hib; });
 }
 
-void Worker::Actor::setHibernationManager(kj::Own<HibernationManager> hib) {
-  KJ_REQUIRE(impl->hibernationManager == kj::none);
-  hib->setTimerChannel(impl->timerChannel);
+kj::Maybe<uint64_t> Worker::Actor::getHolderToken() {
+  return impl->holderToken;
+}
+
+bool Worker::Actor::ownsHibernatedSockets(HibernationManager& manager) {
+  KJ_IF_SOME(owner, manager.getOwningActor()) {
+    // The owner is still running, so nothing was handed over. Another actor taking the manager
+    // would redirect the owner's events to itself.
+    return &owner == this;
+  }
+
+  // The owner is gone, which is what a code update or an eviction leaves behind. Its sockets pass
+  // to the next actor of the same holder, and to nothing else.
+  KJ_IF_SOME(ownerToken, manager.getOwningHolderToken()) {
+    KJ_IF_SOME(token, getHolderToken()) {
+      return token == ownerToken;
+    }
+    return false;
+  }
+
+  // No token to compare, so fall back to the ID. That admits a sibling facet, which uses its
+  // parent's ID by default, so embedders running facets are expected to supply a token.
+  KJ_IF_SOME(ownerId, manager.getOwningActorId()) {
+    return idsEqual(ownerId, getId());
+  }
+
+  // Never owned, so there is nothing to inherit and nothing to disturb.
+  return true;
+}
+
+void Worker::Actor::attachHibernationManager(HibernationManager& manager) {
   // Not the cleanest way to provide hibernation manager with a timer channel reference, but
   // where HibernationManager is constructed (actor-state), we don't have a timer channel ref.
+  manager.setTimerChannel(impl->timerChannel);
+
+  manager.setOwningActor(*this);
+
+  // The loopback goes last: supplying it releases events the manager queued while it had no actor,
+  // and those dispatch against the owning actor set just above.
+  manager.setLoopback(impl->loopback->addRef());
+}
+
+void Worker::Actor::setHibernationManager(kj::Own<HibernationManager> hib) {
+  KJ_REQUIRE(impl->hibernationManager == kj::none);
+
+  // A manager built by acceptWebSocket() already points here, but an adopted one still carries the
+  // loopback and owning actor of the outgoing generation. Leaving those in place would send its
+  // events to a dead generation, or queue them for a loopback nothing will supply.
+  attachHibernationManager(*hib);
+
   impl->hibernationManager = kj::mv(hib);
 }
 
 kj::Maybe<uint16_t> Worker::Actor::getHibernationEventType() {
   return impl->hibernationEventType;
+}
+
+kj::Own<Worker::Actor::WeakRef> Worker::Actor::getWeakRef() {
+  return kj::addRef(*selfRef);
 }
 
 kj::Own<Worker::Actor> Worker::Actor::addRef() {
