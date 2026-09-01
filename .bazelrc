@@ -234,6 +234,8 @@ build:sanitizer-common --copt="-Og"
 build:sanitizer-common --copt="-g" --strip=never
 build:sanitizer-common --copt="-fno-optimize-sibling-calls"
 build:sanitizer-common --copt="-fno-omit-frame-pointer" --copt="-mno-omit-leaf-frame-pointer"
+# Rust's sanitizer support requires nightly
+build:sanitizer-common --@rules_rust//rust/toolchain/channel:channel=nightly
 
 # address sanitizer (https://github.com/google/sanitizers/wiki/AddressSanitizer)
 build:asan --config=sanitizer-common
@@ -261,6 +263,9 @@ build:tsan --test_timeout=30,150,600,2400
 # not currently derive these defines from the compiler's sanitizer flags.
 build:tsan --copt="-DV8_IS_TSAN"
 build:tsan --per_file_copt='external/.*v8@-DTHREAD_SANITIZER'
+build:tsan --extra_toolchains=//build/rust:tsan_toolchain
+build:tsan --@rules_rust//:extra_rustc_flag=-Zsanitizer=thread
+build:tsan --@rules_rust//:extra_rustc_flag=-Zexternal-clangrt
 
 # fuzzilli (https://github.com/googleprojectzero/fuzzilli/)
 build:fuzzilli --config=asan
