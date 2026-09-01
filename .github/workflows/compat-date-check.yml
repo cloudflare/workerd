@@ -1,0 +1,81 @@
+name: Compatibility Date Check
+
+on:
+  pull_request:
+    paths:
+      - 'src/workerd/io/compatibility-date.capnp'
+    types: [opened, synchronize, labeled, unlabeled]
+  workflow_dispatch:
+    inputs:
+      min_days:
+        description: 'Minimum days in the future for new flag dates'
+        required: false
+        default: 7
+        type: number
+
+concurrency:
+  group: compat-date-check-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check-compat-dates:
+    runs-on: ubuntu-latest
+    # Skip if PR has the bypass label
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'urgent-compat-flag') }}
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          show-progress: false
+
+      - name: Setup Runner
+        uses: ./.github/actions/setup-runner
+
+      - name: Build flag dumper (PR branch)
+        run: |
+          bazel build //src/workerd/tools:compatibility-date-dump
+
+      - name: Get PR flags
+        run: |
+          bazel-bin/src/workerd/tools/compatibility-date-dump > pr-flags.json
+
+      - name: Checkout base branch
+        run: |
+          git checkout ${{ github.event.pull_request.base.sha }}
+
+      - name: Build flag dumper (base branch)
+        run: |
+          bazel build //src/workerd/tools:compatibility-date-dump
+
+      - name: Get baseline flags
+        run: |
+          bazel-bin/src/workerd/tools/compatibility-date-dump > baseline-flags.json
+
+      - name: Validate new flag dates
+        id: validate
+        run: |
+          python3 src/workerd/tools/compare-compat-dates.py \
+            pr-flags.json \
+            baseline-flags.json \
+            --min-days ${{ inputs.min_days || '7' }}
+
+      - name: Post comment on failure
+        if: failure() && steps.validate.outputs.has_violations == 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          path: violation-report.md
+
+      - name: Remove comment on success
+        if: success()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          only_update: true
+          message: |
+            ✅ Compatibility date validation passed. All new flags have dates sufficiently far in the future.
