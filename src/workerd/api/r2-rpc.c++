@@ -41,6 +41,34 @@ jsg::Promise<jsg::Value> normalizeR2RpcPromise(jsg::Lock& js, jsg::Value rpcProm
   return kj::mv(paf.promise);
 }
 
+PreparedR2RpcBody prepareR2RpcBody(jsg::Lock& js, R2PutValue value) {
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(stream, JsReadableStream) {
+      auto size = stream.tryGetLength(js, StreamEncoding::IDENTITY);
+      JSG_REQUIRE(size != kj::none, TypeError,
+          "Provided readable stream must have a known length (request/response body or readable "
+          "half of FixedLengthStream)");
+      auto exactSize = KJ_ASSERT_NONNULL(size);
+      JSG_REQUIRE(exactSize <= 9007199254740991ull, RangeError,
+          "Provided readable stream is too large to represent its length exactly");
+      return {.value = kj::mv(stream), .size = static_cast<double>(exactSize)};
+    }
+    KJ_CASE_ONEOF(data, kj::Array<byte>) {
+      auto size = data.size();
+      return {.value = kj::mv(data), .size = static_cast<double>(size)};
+    }
+    KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
+      auto size = text.value.size();
+      return {.value = kj::mv(text.value), .size = static_cast<double>(size)};
+    }
+    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+      auto size = blob->getSize();
+      return {.value = kj::mv(blob), .size = static_cast<double>(size)};
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 static kj::Own<R2Error> toError(uint statusCode, kj::StringPtr responseBody) {
   capnp::JsonCodec json;
   json.handleByAnnotation<public_beta::R2ErrorResponse>();
