@@ -755,21 +755,13 @@ class JsObject final: public JsBase<v8::Object, JsObject> {
  public:
   template <typename T>
   bool isInstanceOf(Lock& js) {
-    KJ_IF_SOME(instance, js.getInstance(inner, typeid(T))) {
-      // getInstance() checks the prototype chain, but the wrapper may be
-      // pointing at the wrong object after a V8 sandbox corruption, so defense
-      // in depth means we need to confirm the type before answering yes.
-      downcastObject<T>(instance);
-      return true;
-    } else {
-      return false;
-    }
+    return js.getInstance(inner, typeid(T)) != kj::none;
   }
 
   template <typename T>
   kj::Maybe<jsg::Ref<T>> tryUnwrapAs(Lock& js) {
-    KJ_IF_SOME(instance, js.getInstance(inner, typeid(T))) {
-      return _jsgThis(&downcastObject<T>(instance));
+    KJ_IF_SOME(ins, js.getInstance(inner, typeid(T))) {
+      return _jsgThis(static_cast<T*>(&ins));
     } else {
       return kj::none;
     }

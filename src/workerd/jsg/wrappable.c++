@@ -610,15 +610,6 @@ kj::Maybe<Wrappable&> Wrappable::tryUnwrapOpaque(
   return kj::none;
 }
 
-void reportWrapperTypeMismatch(const std::type_info& expected, const std::type_info& actual) {
-  // Only reachable if the wrapper's internal field has been made to point at an object of the
-  // wrong type, which means memory outside this process's control has already been corrupted.
-  // Abort: edgeworker's crash handler turns this into an abrupt shutdown of the isolate.
-  KJ_LOG(FATAL, "JS wrapper's C++ object is not of the expected type", typeName(expected),
-      typeName(actual));
-  abort();
-}
-
 void reportWrapperIdentityMismatch() {
   KJ_LOG(FATAL, "JS wrapper's CppHeap shim does not own the dispatch receiver");
   abort();

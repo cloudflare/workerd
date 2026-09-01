@@ -2027,7 +2027,10 @@ class ResourceWrapper {
         // prototype-chain check, not here, and yields the kj::none below.)
         Wrappable* wrappable = Wrappable::unwrapFromShimInRangeOrAbort(
             js.v8Isolate, instance, TypeWrapper::template wrappableTagRange<T>());
-        return downcastWrappable<T>(*wrappable);
+        // TODO: Would need something more substantial here, do we need to maintain
+        // downcastWrappable after the rebase?
+        // return downcastWrappable<T>(*wrappable);
+        return *reinterpret_cast<T*>(wrappable);
       }
     }
 

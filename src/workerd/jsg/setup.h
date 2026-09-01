@@ -1054,14 +1054,7 @@ class Isolate: public IsolateBase {
         // its prototype chain was left intact -- an in-sandbox memory-safety violation, which aborts.
         Wrappable* wrappable =
             Wrappable::unwrapFromShimInRangeOrAbort(v8Isolate, instance, info.tagRange);
-        // Even after checking the tags we use the vtable check to confirm the type
-        // matches our expectations. This should never fail unless we have an attacker
-        // that has somehow got around the tag check.
-        Object* object = wrappable->jsgTryGetObject();
-        if (object == nullptr) {
-          reportWrapperTypeMismatch(type, typeid(*wrappable));
-        }
-        return *object;
+        return KJ_ASSERT_NONNULL(wrappable->jsgTryGetObject());
       }
     }
 

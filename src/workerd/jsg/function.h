@@ -81,12 +81,12 @@ WrappableFunction<Signature>& unwrapWrappableFunction(
     v8::Isolate* isolate, v8::Local<v8::Object> object) {
   // WrappableFunction<Sig> for every Sig shares kNonResourceWrappableTag, so the tag range check
   // only proves "some non-resource wrappable". The concrete signature -- which determines how
-  // operator() is called -- must be verified separately, and must not depend on the belt-and-braces
-  // dynamic_cast in downcastWrappable (which we may remove once tags are trusted).
+  // operator() is called -- must be verified separately.
   Wrappable* wrappable =
       Wrappable::unwrapFromShimInRangeOrAbort(isolate, object, kNonResourceWrappableTagRange);
   auto* function = dynamic_cast<WrappableFunction<Signature>*>(wrappable);
   if (function == nullptr) {
+    // TODO: Should still report the expected and actual types here?
     KJ_LOG(FATAL, "wrapper type mismatch: object is not the expected native function signature");
     abort();
   }

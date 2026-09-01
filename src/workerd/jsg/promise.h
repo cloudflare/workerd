@@ -97,7 +97,7 @@ T unwrapOpaque(v8::Isolate* isolate, v8::Local<v8::Value> handle) {
   Wrappable& wrappable = KJ_ASSERT_NONNULL(Wrappable::tryUnwrapOpaque(isolate, handle));
   OpaqueWrappable<T>* holder = dynamic_cast<OpaqueWrappable<T>*>(&wrappable);
   if (holder == nullptr) {
-    KJ_LOG(FATAL, "wrapper type mismatch: object is not the expected native function signature");
+    KJ_LOG(FATAL, "wrapper type mismatch: object is not the expected opaque type");
     abort();
   }
   KJ_ASSERT(!holder->movedAway);
@@ -116,7 +116,7 @@ T& unwrapOpaqueRef(v8::Isolate* isolate, v8::Local<v8::Value> handle) {
   Wrappable& wrappable = KJ_ASSERT_NONNULL(Wrappable::tryUnwrapOpaque(isolate, handle));
   OpaqueWrappable<T>* holder = dynamic_cast<OpaqueWrappable<T>*>(&wrappable);
   if (holder == nullptr) {
-    KJ_LOG(FATAL, "wrapper type mismatch: object is not the expected native function signature");
+    KJ_LOG(FATAL, "wrapper type mismatch: object is not the expected opaque type");
     abort();
   }
   KJ_ASSERT(!holder->movedAway);
