@@ -708,10 +708,12 @@ jsg::Promise<void> WritableStreamNativeSink::write(
       kj::Promise<void> promise = nullptr;
       KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
         promise = lock.then([&sink = *active.sink, data = kj::mv(data)]() mutable {
-          return sink.write(data.asPtr()).attach(kj::mv(data));
+          auto bytes = data.asPtr().attach(kj::mv(data));
+          return sink.write(bytes).attach(kj::mv(bytes));
         });
       } else {
-        promise = active.sink->write(data.asPtr()).attach(kj::mv(data));
+        auto bytes = data.asPtr().attach(kj::mv(data));
+        promise = active.sink->write(bytes).attach(kj::mv(bytes));
       }
       return ioContext
           .awaitIo(js, kj::mv(promise), [self = JSG_THIS, len](jsg::Lock& js) mutable {

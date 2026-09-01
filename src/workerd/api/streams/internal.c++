@@ -1976,6 +1976,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
               [&](IoOwn<Writable>& writable) { return writable->sink->tryWriteSync(ptr); }));
         }
         KJ_CATCH(exception) {
+          ptr = nullptr;
           // tryWriteSync() may throw when a synchronous write is possible but fails. Handle
           // this exactly like the async write-error functor below: balance the buffer
           // accounting, reject and pop the current write, then check for a pending abort()
@@ -1998,6 +1999,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
           }
           return js.resolvedPromise();
         }
+        ptr = nullptr;
 
         if (syncSuccess) {
           maybeResolvePromise(js, request.promise);
@@ -2014,9 +2016,12 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       }
 
       auto check = makeChecker(*this);
-      auto promise = KJ_ASSERT_NONNULL(state.whenActive([&request](IoOwn<Writable>& writable) {
-        return writable->canceler.wrap(
-            writable->sink->write(request.bytes).attach(kj::mv(request.ownBytes)));
+      auto bytes = request.bytes.attach(kj::mv(request.ownBytes));
+      request.bytes = nullptr;
+      auto promise = KJ_ASSERT_NONNULL(
+          state.whenActive([bytes = kj::mv(bytes)](IoOwn<Writable>& writable) mutable {
+        auto writePromise = writable->sink->write(bytes).attach(kj::mv(bytes));
+        return writable->canceler.wrap(kj::mv(writePromise));
       }));
 
       // TODO(soon): We use awaitIoLegacy() here because if the stream terminates in JavaScript in
@@ -2434,7 +2439,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::write(
     auto& ioContext = IoContext::current();
     return KJ_ASSERT_NONNULL(parent.state.whenActive([&](IoOwn<Writable>& writable) {
       return ioContext.awaitIo(js,
-          writable->canceler.wrap(writable->sink->write(data).attach(kj::mv(data))),
+          writable->canceler.wrap(writable->sink->write(data.attach(kj::mv(data)))),
           [](jsg::Lock&) {});
     }));
   };
