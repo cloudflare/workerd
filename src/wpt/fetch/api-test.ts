@@ -300,6 +300,10 @@ export default {
     comment: 'CORS is not implemented',
     omittedTests: true,
   },
+  'cors/cors-preflight-unterminated-body.any.js': {
+    comment: 'CORS preflights are not implemented in workerd',
+    omittedTests: true,
+  },
   'cors/cors-preflight.any.js': {
     comment: 'CORS is not implemented',
     omittedTests: true,
