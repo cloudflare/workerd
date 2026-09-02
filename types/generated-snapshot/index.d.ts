@@ -18168,8 +18168,9 @@ declare abstract class Workflow<PARAMS = unknown> {
     options: WorkflowBatchCreateOptions<PARAMS>,
   ): Promise<WorkflowBatchCreateResult>;
   /**
-   * Create a batch of instances and return handles for all of them.
-   * @deprecated Use the object form `createBatch({ instances: batch })` instead.
+   * Create a batch of instances and return handles for the ones that were created.
+   * Instances that could not be created, for example because their ID already exists, are omitted from the result without an error.
+   * @deprecated Use the object form of `createBatch` instead of the array form.
    */
   public createBatch(
     batch: WorkflowInstanceCreateOptions<PARAMS>[],
