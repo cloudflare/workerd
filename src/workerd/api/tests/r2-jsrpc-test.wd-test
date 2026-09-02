@@ -3,8 +3,7 @@ using Workerd = import "/workerd/workerd.capnp";
 # Runs the canonical R2 binding suite (r2-test.js) with the JSRPC transport enabled. The named entrypoint also
 # implements fetch because operations which have not yet migrated to JSRPC continue to use HTTP.
 #
-# Reaching the JSRPC method table needs three things to line up:
-#   - the R2_BINDINGS_JSRPC autogate (the fleet-wide kill switch)
+# Reaching the JSRPC method table needs two things to line up:
 #   - the r2_binding_jsrpc compatibility flag, which is $experimental and so also needs
 #     "experimental" in the flag list here
 #   - a binding that targets the named entrypoint the gateway exposes

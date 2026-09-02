@@ -616,10 +616,9 @@ class R2Bucket: public jsg::Object {
       kj::OneOf<kj::String, kj::Array<kj::String>> keys,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
 
-  // JSRPC equivalents of the above, selected by JSG_RESOURCE_TYPE when the
-  // R2_BINDINGS_JSRPC autogate and the r2_binding_jsrpc compatibility flag are
-  // both on. They dispatch to the gateway's R2BindingEntrypoint instead of
-  // synthesising an HTTP request, then rebuild the public result types from the
+  // JSRPC equivalents of the above, selected by JSG_RESOURCE_TYPE when the r2_binding_jsrpc compatibility flag is
+  // on. It dispatches to the gateway's R2BindingEntrypoint instead of
+  // synthesising an HTTP request, then rebuilds the public result types from the
   // plain data JSRPC delivers.
   //
   // These keep ordinary typed signatures rather than taking a raw
@@ -683,13 +682,10 @@ class R2Bucket: public jsg::Object {
       CompatibilityFlags::Reader flags);
 
   JSG_RESOURCE_TYPE(R2Bucket, CompatibilityFlags::Reader flags) {
-    // Two gates, and they do different jobs. The autogate is the fleet-wide kill switch, flipped
-    // per metal via Release Manager; it cannot distinguish accounts. The compatibility flag is what
+    // The compatibility flag
     // restricts the new transport to allowlisted workers, because it is marked $experimental and
-    // EWC decides who may opt in. Neither alone is sufficient.
-    //
-    if (util::Autogate::isEnabled(util::AutogateKey::R2_BINDINGS_JSRPC) &&
-        flags.getR2BindingsJsrpc()) {
+    // EWC decides who may opt in.
+    if (flags.getR2BindingsJsrpc()) {
       JSG_METHOD_NAMED(head, headRpc);
       JSG_METHOD_NAMED(get, getRpc);
       JSG_METHOD_NAMED(delete, deleteRpc);
