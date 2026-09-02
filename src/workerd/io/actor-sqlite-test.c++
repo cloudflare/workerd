@@ -206,7 +206,7 @@ KJ_TEST("check put multiple wraps operations in a transaction") {
   ActorSqliteTest test;
 
   kj::Vector<ActorCache::KeyValuePair> putKVs;
-  putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray(kj::str("bar").asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray("bar"_kj.asBytes())});
 
   // NoTxn test
   {
@@ -216,18 +216,18 @@ KJ_TEST("check put multiple wraps operations in a transaction") {
     // During write, all NoTxn operations are wrapped in an ImplicitTxn.
     auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
     commitFulfiller->fulfill();
-    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
   }
 
   // ExplicitTxn test
   {
-    putKVs.add(ActorCache::KeyValuePair{kj::str("foo2"), kj::heapArray(kj::str("bar2").asBytes())});
+    putKVs.add(ActorCache::KeyValuePair{kj::str("foo2"), kj::heapArray("bar2"_kj.asBytes())});
     KJ_ASSERT(!test.actor.isCommitScheduled());
     // Similar to the previous putMultiple, but wrapped in a transactionSync (ExplicitTxn)
     test.putMultipleExplicitTxn(putKVs.releaseAsArray());
     auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
     commitFulfiller->fulfill();
-    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo2"))) == kj::str("bar2").asBytes());
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo2"))) == "bar2"_kj.asBytes());
   }
 
   // ImplicitTxn test
@@ -238,12 +238,12 @@ KJ_TEST("check put multiple wraps operations in a transaction") {
 
     // By now, we should check there's a commit scheduled in a ImplicitTxn.
     KJ_ASSERT(test.actor.isCommitScheduled());
-    putKVs.add(ActorCache::KeyValuePair{kj::str("foo3"), kj::heapArray(kj::str("bar3").asBytes())});
+    putKVs.add(ActorCache::KeyValuePair{kj::str("foo3"), kj::heapArray("bar3"_kj.asBytes())});
     test.putMultiple(putKVs.releaseAsArray());
 
     auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
-    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("bat").asBytes());
-    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo3"))) == kj::str("bar3").asBytes());
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == "bat"_kj.asBytes());
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo3"))) == "bar3"_kj.asBytes());
     commitFulfiller->fulfill();
   }
 }
@@ -252,7 +252,7 @@ KJ_TEST("check put multiple wraps operations in a transaction") {
   ActorSqliteTest test;
 
   kj::Vector<ActorCache::KeyValuePair> putKVs;
-  putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray(kj::str("bar").asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray("bar"_kj.asBytes())});
 
   // NoTxn test
   {
@@ -262,18 +262,18 @@ KJ_TEST("check put multiple wraps operations in a transaction") {
     // During write, all NoTxn operations are wrapped in an ImplicitTxn.
     auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
     commitFulfiller->fulfill();
-    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
   }
 
   // ExplicitTxn test
   {
-    putKVs.add(ActorCache::KeyValuePair{kj::str("foo2"), kj::heapArray(kj::str("bar2").asBytes())});
+    putKVs.add(ActorCache::KeyValuePair{kj::str("foo2"), kj::heapArray("bar2"_kj.asBytes())});
     KJ_ASSERT(!test.actor.isCommitScheduled());
     // Similar to the previous putMultiple, but wrapped in a transactionSync (ExplicitTxn)
     test.putMultipleExplicitTxn(putKVs.releaseAsArray());
     auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
     commitFulfiller->fulfill();
-    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo2"))) == kj::str("bar2").asBytes());
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo2"))) == "bar2"_kj.asBytes());
   }
 
   // ImplicitTxn test
@@ -284,12 +284,12 @@ KJ_TEST("check put multiple wraps operations in a transaction") {
 
     // By now, we should check there's a commit scheduled in a ImplicitTxn.
     KJ_ASSERT(test.actor.isCommitScheduled());
-    putKVs.add(ActorCache::KeyValuePair{kj::str("foo3"), kj::heapArray(kj::str("bar3").asBytes())});
+    putKVs.add(ActorCache::KeyValuePair{kj::str("foo3"), kj::heapArray("bar3"_kj.asBytes())});
     test.putMultiple(putKVs.releaseAsArray());
 
     auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
-    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("bat").asBytes());
-    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo3"))) == kj::str("bar3").asBytes());
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == "bat"_kj.asBytes());
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo3"))) == "bar3"_kj.asBytes());
     commitFulfiller->fulfill();
   }
 }
@@ -302,16 +302,15 @@ KJ_TEST("check put multiple wraps operations in a transaction and rollback on er
   kj::Vector<ActorCache::KeyValuePair> putKVs;
 
   // Add some regular key-value pairs that we know are supported
-  putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray(kj::str("bar").asBytes())});
-  putKVs.add(ActorCache::KeyValuePair{kj::str("foo2"), kj::heapArray(kj::str("bar2").asBytes())});
-  putKVs.add(ActorCache::KeyValuePair{kj::str("foo3"), kj::heapArray(kj::str("bar3").asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray("bar"_kj.asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("foo2"), kj::heapArray("bar2"_kj.asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("foo3"), kj::heapArray("bar3"_kj.asBytes())});
 
   // Now create a key that's too large. Should fail with  string or blob too big: SQLITE_TOOBIG
   auto tooLongKey = kj::heapString(4 * 1024 * 1024 + 1);
   tooLongKey.asArray().fill('a');
   // Add it to our KV array
-  putKVs.add(
-      ActorCache::KeyValuePair{kj::str(tooLongKey), kj::heapArray(kj::str("bar").asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str(tooLongKey), kj::heapArray("bar"_kj.asBytes())});
 
   // NoTxn test
   {
@@ -362,7 +361,7 @@ KJ_TEST("check put multiple wraps operations in a transaction and rollback on er
 
     auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
     // The single put succeeded, but the putMultiple did not.
-    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("bat").asBytes());
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == "bat"_kj.asBytes());
     KJ_ASSERT(expectSync(test.get(kj::str("foo"))) == nullptr);
     KJ_ASSERT(expectSync(test.get(kj::str("foo2"))) == nullptr);
     KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == nullptr);
@@ -379,7 +378,7 @@ KJ_TEST("alarm write happens transactionally with storage ops") {
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
 
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
 }
 
 KJ_TEST("storage op without alarm change does not wait on scheduler") {
@@ -388,7 +387,7 @@ KJ_TEST("storage op without alarm change does not wait on scheduler") {
   test.put("foo", "bar");
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
 
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 }
 
@@ -1917,7 +1916,7 @@ KJ_TEST("allowUnconfirmed put does not block output gate") {
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Verify data was written
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
 }
 
 KJ_TEST("confirmed put blocks output gate") {
@@ -1939,7 +1938,7 @@ KJ_TEST("confirmed put blocks output gate") {
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Verify data was written
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
 }
 
 KJ_TEST("mixed confirmed and unconfirmed writes in same transaction use output gate") {
@@ -1962,8 +1961,8 @@ KJ_TEST("mixed confirmed and unconfirmed writes in same transaction use output g
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Both writes should be committed
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("quux").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == "quux"_kj.asBytes());
 }
 
 KJ_TEST("allowUnconfirmed delete does not block output gate") {
@@ -2000,9 +1999,9 @@ KJ_TEST("allowUnconfirmed putMultiple does not block output gate") {
 
   // Create multiple key-value pairs for the test
   kj::Vector<ActorCache::KeyValuePair> putKVs;
-  putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray(kj::str("bar").asBytes())});
-  putKVs.add(ActorCache::KeyValuePair{kj::str("baz"), kj::heapArray(kj::str("qux").asBytes())});
-  putKVs.add(ActorCache::KeyValuePair{kj::str("key3"), kj::heapArray(kj::str("value3").asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray("bar"_kj.asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("baz"), kj::heapArray("qux"_kj.asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("key3"), kj::heapArray("value3"_kj.asBytes())});
 
   // Perform an unconfirmed putMultiple within the implicit transaction
   test.putMultiple(putKVs.releaseAsArray(), {.allowUnconfirmed = true});
@@ -2017,9 +2016,9 @@ KJ_TEST("allowUnconfirmed putMultiple does not block output gate") {
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Verify all data was written correctly
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("qux").asBytes());
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("key3"))) == kj::str("value3").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == "qux"_kj.asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("key3"))) == "value3"_kj.asBytes());
 }
 
 KJ_TEST("allowUnconfirmed deleteMultiple does not block output gate") {
@@ -2027,9 +2026,9 @@ KJ_TEST("allowUnconfirmed deleteMultiple does not block output gate") {
 
   // First set up some data
   kj::Vector<ActorCache::KeyValuePair> putKVs;
-  putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray(kj::str("bar").asBytes())});
-  putKVs.add(ActorCache::KeyValuePair{kj::str("baz"), kj::heapArray(kj::str("qux").asBytes())});
-  putKVs.add(ActorCache::KeyValuePair{kj::str("key3"), kj::heapArray(kj::str("value3").asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray("bar"_kj.asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("baz"), kj::heapArray("qux"_kj.asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("key3"), kj::heapArray("value3"_kj.asBytes())});
 
   test.putMultiple(putKVs.releaseAsArray());
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
@@ -2133,7 +2132,7 @@ KJ_TEST("An unconfirmed put followed by a direct SQL queries requires the output
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Make sure that the write actually succeeded.
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
   {
     auto query = db.run("SELECT * FROM myTable");
     KJ_ASSERT(!query.isDone());
@@ -2176,7 +2175,7 @@ KJ_TEST("sync() waits for confirmed writes to complete") {
   syncPromise.wait(test.ws);
 
   // Verify data was written
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
 }
 
 KJ_TEST("sync() waits for unconfirmed writes to complete") {
@@ -2202,7 +2201,7 @@ KJ_TEST("sync() waits for unconfirmed writes to complete") {
   syncPromise.wait(test.ws);
 
   // Verify data was written
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
 }
 
 KJ_TEST("sync() waits for multiple unconfirmed writes in a row") {
@@ -2229,9 +2228,9 @@ KJ_TEST("sync() waits for multiple unconfirmed writes in a row") {
   syncPromise.wait(test.ws);
 
   // Verify all writes were committed
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("qux").asBytes());
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("key3"))) == kj::str("value3").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == "qux"_kj.asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("key3"))) == "value3"_kj.asBytes());
 }
 
 KJ_TEST("sync() only waits for writes before it was called") {
@@ -2323,8 +2322,8 @@ KJ_TEST("sync() with mixed confirmed and unconfirmed writes") {
   syncPromise.wait(test.ws);
 
   // Both writes should be committed
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("qux").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == "qux"_kj.asBytes());
 }
 
 KJ_TEST("multiple sync() calls for same commit") {
@@ -2432,7 +2431,7 @@ KJ_TEST("allowUnconfirmed setAlarm then confirmed put uses output gate") {
 
   // Both operations should be committed
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
 }
 
 KJ_TEST("allowUnconfirmed setAlarm with storage ops") {
@@ -2457,7 +2456,7 @@ KJ_TEST("allowUnconfirmed setAlarm with storage ops") {
 
   // Verify both alarm and storage writes committed
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
 }
 
 KJ_TEST("allowUnconfirmed setAlarm updating existing alarm") {
@@ -2583,7 +2582,7 @@ KJ_TEST("sync() throws after critical error in explicit transaction") {
   auto txn = test.startTransaction();
 
   // Do a write within the transaction
-  txn->put(kj::str("foo"), kj::heapArray(kj::str("bar").asBytes()), {}, nullptr);
+  txn->put(kj::str("foo"), kj::heapArray("bar"_kj.asBytes()), {}, nullptr);
 
   // Trigger a critical error using SQLITE_NOMEM by setting a very low heap limit
   // and then trying to insert a large value.
@@ -2627,8 +2626,7 @@ KJ_TEST("allowUnconfirmed put in explicit transaction does not block output gate
   auto txn = test.startTransaction();
 
   // Do an unconfirmed put within the transaction
-  txn->put(
-      kj::str("foo"), kj::heapArray(kj::str("bar").asBytes()), {.allowUnconfirmed = true}, nullptr);
+  txn->put(kj::str("foo"), kj::heapArray("bar"_kj.asBytes()), {.allowUnconfirmed = true}, nullptr);
 
   // Gate still isn't blocked during the transaction, because we set `allowUnconfirmed`.
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
@@ -2646,7 +2644,7 @@ KJ_TEST("allowUnconfirmed put in explicit transaction does not block output gate
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Verify data was written
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
 }
 
 KJ_TEST("confirmed put in explicit transaction blocks output gate on commit") {
@@ -2659,8 +2657,7 @@ KJ_TEST("confirmed put in explicit transaction blocks output gate on commit") {
   auto txn = test.startTransaction();
 
   // Do a confirmed put (default behavior)
-  txn->put(kj::str("foo"), kj::heapArray(kj::str("bar").asBytes()), {.allowUnconfirmed = false},
-      nullptr);
+  txn->put(kj::str("foo"), kj::heapArray("bar"_kj.asBytes()), {.allowUnconfirmed = false}, nullptr);
 
   // Gate should still not be blocked during the transaction - explicit txns only lock on commit
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
@@ -2678,7 +2675,7 @@ KJ_TEST("confirmed put in explicit transaction blocks output gate on commit") {
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Verify data was written
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
 }
 
 KJ_TEST("mixed confirmed and unconfirmed puts in explicit transaction use output gate") {
@@ -2691,10 +2688,9 @@ KJ_TEST("mixed confirmed and unconfirmed puts in explicit transaction use output
   auto txn = test.startTransaction();
 
   // Do an unconfirmed put followed by a confirmed put
+  txn->put(kj::str("foo"), kj::heapArray("bar"_kj.asBytes()), {.allowUnconfirmed = true}, nullptr);
   txn->put(
-      kj::str("foo"), kj::heapArray(kj::str("bar").asBytes()), {.allowUnconfirmed = true}, nullptr);
-  txn->put(kj::str("baz"), kj::heapArray(kj::str("quux").asBytes()), {.allowUnconfirmed = false},
-      nullptr);
+      kj::str("baz"), kj::heapArray("quux"_kj.asBytes()), {.allowUnconfirmed = false}, nullptr);
 
   // Gate should still not be blocked during the transaction
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
@@ -2712,8 +2708,8 @@ KJ_TEST("mixed confirmed and unconfirmed puts in explicit transaction use output
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Both writes should be committed
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("quux").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == "quux"_kj.asBytes());
 }
 
 KJ_TEST("allowUnconfirmed delete in explicit transaction does not block output gate") {
@@ -2762,8 +2758,8 @@ KJ_TEST("allowUnconfirmed putMultiple in explicit transaction does not block out
 
   // Do an unconfirmed putMultiple
   auto pairs = kj::heapArrayBuilder<ActorCacheOps::KeyValuePair>(2);
-  pairs.add(ActorCacheOps::KeyValuePair{kj::str("foo"), kj::heapArray(kj::str("bar").asBytes())});
-  pairs.add(ActorCacheOps::KeyValuePair{kj::str("baz"), kj::heapArray(kj::str("quux").asBytes())});
+  pairs.add(ActorCacheOps::KeyValuePair{kj::str("foo"), kj::heapArray("bar"_kj.asBytes())});
+  pairs.add(ActorCacheOps::KeyValuePair{kj::str("baz"), kj::heapArray("quux"_kj.asBytes())});
   txn->put(pairs.finish(), {.allowUnconfirmed = true}, nullptr);
 
   // Gate still isn't blocked during the transaction
@@ -2782,8 +2778,8 @@ KJ_TEST("allowUnconfirmed putMultiple in explicit transaction does not block out
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Verify data was written
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("quux").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == "bar"_kj.asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == "quux"_kj.asBytes());
 }
 
 KJ_TEST("allowUnconfirmed deleteMultiple in explicit transaction does not block output gate") {
@@ -2868,16 +2864,16 @@ KJ_TEST("nested transaction: unconfirmed child commit does not block output gate
   auto parentTxn = test.startTransaction();
 
   // Do an unconfirmed put in the parent
-  parentTxn->put(kj::str("parent"), kj::heapArray(kj::str("data").asBytes()),
-      {.allowUnconfirmed = true}, nullptr);
+  parentTxn->put(
+      kj::str("parent"), kj::heapArray("data"_kj.asBytes()), {.allowUnconfirmed = true}, nullptr);
 
   {
     // Start a nested child transaction
     auto childTxn = test.startTransaction();
 
     // Do an unconfirmed put in the child
-    childTxn->put(kj::str("child"), kj::heapArray(kj::str("data").asBytes()),
-        {.allowUnconfirmed = true}, nullptr);
+    childTxn->put(
+        kj::str("child"), kj::heapArray("data"_kj.asBytes()), {.allowUnconfirmed = true}, nullptr);
 
     // Gate still isn't blocked
     KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
@@ -2902,8 +2898,8 @@ KJ_TEST("nested transaction: unconfirmed child commit does not block output gate
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Verify both writes were committed
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("parent"))) == kj::str("data").asBytes());
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("child"))) == kj::str("data").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("parent"))) == "data"_kj.asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("child"))) == "data"_kj.asBytes());
 }
 
 KJ_TEST("nested transaction: confirmed child propagates to parent commit") {
@@ -2914,16 +2910,16 @@ KJ_TEST("nested transaction: confirmed child propagates to parent commit") {
 
   // Start a parent transaction with unconfirmed write
   auto parentTxn = test.startTransaction();
-  parentTxn->put(kj::str("parent"), kj::heapArray(kj::str("data").asBytes()),
-      {.allowUnconfirmed = true}, nullptr);
+  parentTxn->put(
+      kj::str("parent"), kj::heapArray("data"_kj.asBytes()), {.allowUnconfirmed = true}, nullptr);
 
   {
     // Start a nested child transaction
     auto childTxn = test.startTransaction();
 
     // Do a confirmed put in the child
-    childTxn->put(kj::str("child"), kj::heapArray(kj::str("data").asBytes()),
-        {.allowUnconfirmed = false}, nullptr);
+    childTxn->put(
+        kj::str("child"), kj::heapArray("data"_kj.asBytes()), {.allowUnconfirmed = false}, nullptr);
 
     // Gate still isn't blocked during the transaction
     KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
@@ -2948,8 +2944,8 @@ KJ_TEST("nested transaction: confirmed child propagates to parent commit") {
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Verify both writes were committed
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("parent"))) == kj::str("data").asBytes());
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("child"))) == kj::str("data").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("parent"))) == "data"_kj.asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("child"))) == "data"_kj.asBytes());
 }
 
 KJ_TEST("nested transaction: confirmed parent with unconfirmed child blocks output gate") {
@@ -2960,16 +2956,16 @@ KJ_TEST("nested transaction: confirmed parent with unconfirmed child blocks outp
 
   // Start a parent transaction with confirmed write
   auto parentTxn = test.startTransaction();
-  parentTxn->put(kj::str("parent"), kj::heapArray(kj::str("data").asBytes()),
-      {.allowUnconfirmed = false}, nullptr);
+  parentTxn->put(
+      kj::str("parent"), kj::heapArray("data"_kj.asBytes()), {.allowUnconfirmed = false}, nullptr);
 
   {
     // Start a nested child transaction
     auto childTxn = test.startTransaction();
 
     // Do an unconfirmed put in the child
-    childTxn->put(kj::str("child"), kj::heapArray(kj::str("data").asBytes()),
-        {.allowUnconfirmed = true}, nullptr);
+    childTxn->put(
+        kj::str("child"), kj::heapArray("data"_kj.asBytes()), {.allowUnconfirmed = true}, nullptr);
 
     // Gate still isn't blocked during the transaction
     KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
@@ -2994,8 +2990,8 @@ KJ_TEST("nested transaction: confirmed parent with unconfirmed child blocks outp
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Verify both writes were committed
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("parent"))) == kj::str("data").asBytes());
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("child"))) == kj::str("data").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("parent"))) == "data"_kj.asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("child"))) == "data"_kj.asBytes());
 }
 
 KJ_TEST("nested transaction: deeply nested confirmed write propagates to root") {
@@ -3006,20 +3002,20 @@ KJ_TEST("nested transaction: deeply nested confirmed write propagates to root") 
 
   // Start a parent transaction with unconfirmed write
   auto txn1 = test.startTransaction();
-  txn1->put(kj::str("level1"), kj::heapArray(kj::str("data").asBytes()), {.allowUnconfirmed = true},
-      nullptr);
+  txn1->put(
+      kj::str("level1"), kj::heapArray("data"_kj.asBytes()), {.allowUnconfirmed = true}, nullptr);
 
   {
     // Start a second level nested transaction with unconfirmed write
     auto txn2 = test.startTransaction();
-    txn2->put(kj::str("level2"), kj::heapArray(kj::str("data").asBytes()),
-        {.allowUnconfirmed = true}, nullptr);
+    txn2->put(
+        kj::str("level2"), kj::heapArray("data"_kj.asBytes()), {.allowUnconfirmed = true}, nullptr);
 
     {
       // Start a third level nested transaction with confirmed write
       auto txn3 = test.startTransaction();
-      txn3->put(kj::str("level3"), kj::heapArray(kj::str("data").asBytes()),
-          {.allowUnconfirmed = false}, nullptr);
+      txn3->put(kj::str("level3"), kj::heapArray("data"_kj.asBytes()), {.allowUnconfirmed = false},
+          nullptr);
 
       // Gate still isn't blocked during the transaction
       KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
@@ -3049,9 +3045,9 @@ KJ_TEST("nested transaction: deeply nested confirmed write propagates to root") 
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Verify all writes were committed
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("level1"))) == kj::str("data").asBytes());
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("level2"))) == kj::str("data").asBytes());
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("level3"))) == kj::str("data").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("level1"))) == "data"_kj.asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("level2"))) == "data"_kj.asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("level3"))) == "data"_kj.asBytes());
 }
 
 KJ_TEST("nested transaction: rollback resets someWriteConfirmed flag") {
@@ -3062,16 +3058,16 @@ KJ_TEST("nested transaction: rollback resets someWriteConfirmed flag") {
 
   // Start a parent transaction with unconfirmed write
   auto parentTxn = test.startTransaction();
-  parentTxn->put(kj::str("parent"), kj::heapArray(kj::str("data").asBytes()),
-      {.allowUnconfirmed = true}, nullptr);
+  parentTxn->put(
+      kj::str("parent"), kj::heapArray("data"_kj.asBytes()), {.allowUnconfirmed = true}, nullptr);
 
   {
     // Start a nested child transaction
     auto childTxn = test.startTransaction();
 
     // Do a confirmed put in the child
-    childTxn->put(kj::str("child"), kj::heapArray(kj::str("data").asBytes()),
-        {.allowUnconfirmed = false}, nullptr);
+    childTxn->put(
+        kj::str("child"), kj::heapArray("data"_kj.asBytes()), {.allowUnconfirmed = false}, nullptr);
 
     // Gate still isn't blocked during the transaction
     KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
@@ -3096,7 +3092,7 @@ KJ_TEST("nested transaction: rollback resets someWriteConfirmed flag") {
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Verify only parent write was committed
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("parent"))) == kj::str("data").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("parent"))) == "data"_kj.asBytes());
   KJ_ASSERT(expectSync(test.get("child")) == kj::none);
 }
 
@@ -3112,8 +3108,7 @@ KJ_TEST("explicit transaction: commit failure breaks output gate even for unconf
   auto txn = test.startTransaction();
 
   // Do an unconfirmed put
-  txn->put(
-      kj::str("foo"), kj::heapArray(kj::str("bar").asBytes()), {.allowUnconfirmed = true}, nullptr);
+  txn->put(kj::str("foo"), kj::heapArray("bar"_kj.asBytes()), {.allowUnconfirmed = true}, nullptr);
 
   // Commit the transaction
   txn->commit();
