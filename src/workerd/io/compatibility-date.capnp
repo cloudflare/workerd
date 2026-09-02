@@ -1654,7 +1654,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonWorkers314 @187 :Bool
       $compatEnableFlag("python_workers_314")
       $compatDisableFlag("no_python_workers_314")
-      $compatEnableDate("2026-09-08")
+      $impliedByAfterDate(name = "pythonWorkers", date = "2026-09-08")
       $pythonSnapshotRelease;
   # Enables Python Workers using Pyodide 314.0.6.
 
