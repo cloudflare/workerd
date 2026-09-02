@@ -594,6 +594,12 @@ wd_test(
 )
 
 wd_test(
+    src = "unhandled-rejection-reentry-test.wd-test",
+    args = ["--experimental"],
+    data = ["unhandled-rejection-reentry-test.js"],
+)
+
+wd_test(
     size = "large",
     src = "htmlrewriter-test.wd-test",
     args = ["--experimental"],
