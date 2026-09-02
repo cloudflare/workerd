@@ -1,0 +1,41 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The writable streams suite runs the same test modules under two configs:
+# writable-cpp against the C++ implementation, writable-ts against the
+# TypeScript implementation.
+
+writable_suite_srcs = glob(["*.js"]) + ["writable-modules.capnp"]
+
+wd_test(
+    src = "writable-cpp.wd-test",
+    data = writable_suite_srcs,
+)
+
+wd_test(
+    src = "writable-ts.wd-test",
+    args = ["--experimental"],
+    data = writable_suite_srcs,
+)
+
+# The main C++ cell plus the dateless opt-in pedantic_wpt flag; the shared
+# modules pin its deltas (sink.type validation, abort signal reason,
+# desiredSize while erroring) via the pedanticWpt branch in which-impl.
+wd_test(
+    src = "writable-cpp-pedantic.wd-test",
+    data = writable_suite_srcs,
+)
+
+# Legacy (pre-flag) regression guards, C++ implementation only. The
+# @all-compat-flags variants are disabled: at the 2999-12-31 date the
+# flags the cells deliberately omit would all turn on.
+wd_test(
+    src = "writable-cpp-legacy.wd-test",
+    data = writable_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)
+
+wd_test(
+    src = "writable-cpp-legacy-writer.wd-test",
+    data = writable_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)
