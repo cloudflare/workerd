@@ -5737,9 +5737,12 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   }
 
   auto isolateGroup = v8::IsolateGroup::GetDefault();
-  auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
-      limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver), *memoryCacheProvider,
-      pythonConfig);
+  auto api = [&]() {
+    TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Create V8 isolate", "name", name.cStr());
+    return kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
+        limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver), *memoryCacheProvider,
+        pythonConfig);
+  }();
 
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {

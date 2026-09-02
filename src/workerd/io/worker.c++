@@ -88,6 +88,18 @@ constexpr kj::StringPtr logLevelToString(LogLevel level) {
   }
 }
 
+constexpr kj::StringPtr startTypeToString(IsolateObserver::StartType startType) {
+  switch (startType) {
+    case IsolateObserver::StartType::COLD:
+      return "cold";
+    case IsolateObserver::StartType::PREWARM:
+      return "prewarm";
+    case IsolateObserver::StartType::PRELOAD:
+      return "preload";
+  }
+  KJ_UNREACHABLE;
+}
+
 void headersToCDP(const kj::HttpHeaders& in, capnp::JsonValue::Builder out) {
   std::map<kj::StringPtr, kj::Vector<kj::StringPtr>> inMap;
   in.forEach([&](kj::StringPtr name, kj::StringPtr value) {
@@ -1130,6 +1142,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       weakIsolateRef(WeakIsolateRef::wrap(this)),
       traceAsyncContextKey(kj::arc<jsg::AsyncContextFrame::StorageKey>()),
       userTraceAsyncContextKey(kj::arc<jsg::AsyncContextFrame::StorageKey>()) {
+  TRACE_EVENT(
+      WORKERD_TRACE_CATEGORY("startup"), "Initialize worker isolate", "isolate", this->id.cStr());
   api->setIsolateObserver(*metrics);
   metrics->created();
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
@@ -1396,6 +1410,9 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       impl(kj::heap<Impl>(kj::mv(vfs), kj::mv(maybeNewModuleRegistry))),
       dynamicEnvBuilder(source.dynamicEnvBuilder.map(
           [](const auto& inst) -> kj::Arc<DynamicEnvBuilder> { return inst.addRef(); })) {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Compile worker script", "script", this->id.cStr(),
+      "syntax", modular ? "modules" : "service-worker", "start_type",
+      startTypeToString(startType).cStr());
   // The caller must pass a module registry instance if and only if the
   // worker's configuration enables the new module registry: which registry a
   // worker uses is decided by isNewModuleRegistryEnabled() (io/features.h),
@@ -1437,6 +1454,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
 
       v8::Local<v8::Context> context;
       if (modular) {
+        TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Create worker module context");
         // Modules can't be compiled for multiple contexts. We need to create the real context now.
         auto& mContext = impl->moduleContext.emplace(isolate->getApi().newContext(lock,
             {
@@ -1450,6 +1468,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         auto featureFlags = isolate->getApi().getFeatureFlags();
         maybePerIsolateBootstrap(featureFlags, lock, context, errorReporter);
       } else {
+        TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Create worker compiler context");
         // Although we're going to compile a script independent of context, V8 requires that
         // there be an active context, otherwise it will segfault, I guess. So we create a
         // dummy context. (Undocumented, as usual.)
@@ -1515,10 +1534,14 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   }
                 }
 
-                impl->globals =
-                    isolate->getApi().compileServiceWorkerGlobals(lock, script, *isolate);
+                {
+                  TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Compile service-worker globals");
+                  impl->globals =
+                      isolate->getApi().compileServiceWorkerGlobals(lock, script, *isolate);
+                }
 
                 {
+                  TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Compile service-worker script");
                   // It's unclear to me if CompileUnboundScript() can get trapped in any
                   // infinite loops or excessively-expensive computation requiring a time
                   // limit. We'll go ahead and apply a time limit just to be safe. Don't
@@ -1542,6 +1565,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                 }
 
                 if (!isNewModuleRegistryEnabled(isolate->getApi().getFeatureFlags())) {
+                  TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Compile worker modules");
                   kj::Own<void> limitScope;
                   if (modulesSource.isPython) {
                     limitScope =
@@ -1882,6 +1906,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
     : script(kj::mv(scriptParam)),
       metrics(kj::mv(metricsParam)),
       impl(kj::heap<Impl>()) {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Instantiate worker", "script", script->id.cStr(),
+      "syntax", script->modular ? "modules" : "service-worker", "start_type",
+      startTypeToString(startType).cStr());
   // Enter/lock isolate.
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     Isolate::Impl::Lock recordedLock(*script->isolate, lockType, stackScope);
@@ -1922,6 +1949,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         jsContext = const_cast<jsg::JsContext<api::ServiceWorkerGlobalScope>*>(&c);
         currentSpan.setTag("module_context"_kjc, true);
       } else {
+        TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Create worker context");
         // Create a new context.
         jsContext = &this->impl->context.emplace(script->isolate->getApi().newContext(lock,
             {
@@ -1991,10 +2019,14 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
             v8::Local<v8::Object> ctxExports = v8::Object::New(lock.v8Isolate);
 
-            compileBindings(lock, script->isolate->getApi(), bindingsScope, ctxExports);
+            {
+              TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Compile worker bindings");
+              compileBindings(lock, script->isolate->getApi(), bindingsScope, ctxExports);
+            }
 
             // Execute script.
             currentSpan = maybeMakeSpan("lw:top_level_execution"_kjc);
+            TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Evaluate worker top level");
 
             // Ensure that our worker top-level bootstrap has a temporary directory
             // storage scope. This is used to store temporary files created within
