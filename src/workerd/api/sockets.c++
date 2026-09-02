@@ -1163,7 +1163,7 @@ Fetcher::OutgoingFactory::Result StreamOutgoingFactory::newSingleUseClient(
       [&](auto& tracing, auto& channelFactory) -> kj::Own<WorkerInterface> {
     makeUserSpanParent(tracing);
     return kj::heap<StreamWorkerInterface>(kj::addRef(*this));
-  }, {.inHouse = false, .wrapMetrics = false});
+  }, {.inHouse = false, .wrapMetrics = false}, CountSubrequest::YES);
   return {.client = kj::mv(client), .spanParents = kj::none};
 }
 

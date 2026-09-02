@@ -24,11 +24,15 @@ namespace {
 constexpr size_t ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL = 32768;
 
 template <typename StartRequest>
-kj::Own<WorkerInterface> startActorSubrequest(IoContext& context, StartRequest& startRequest) {
+kj::Own<WorkerInterface> startActorSubrequest(
+    IoContext& context, StartRequest& startRequest, CountSubrequest countSubrequest) {
   auto options = IoContext::SubrequestOptions{.inHouse = true,
     .wrapMetrics = true,
     .operationName = kj::ConstString("durable_object_subrequest"_kjc)};
-  auto client = context.getSubrequest(startRequest, kj::mv(options));
+  // Retries reuse the logical fetch's initial admission, bypassing its limit check and count.
+  auto client = countSubrequest
+      ? context.getSubrequest(startRequest, kj::mv(options))
+      : context.getSubrequestNoChecks(startRequest, kj::mv(options), CountSubrequest::NO);
   return context.getMetrics().wrapActorSubrequestClient(kj::mv(client));
 }
 
@@ -69,7 +73,7 @@ Fetcher::OutgoingFactory::Result LocalActorOutgoingFactory::newSingleUseClient(
           .parentSpan = tracing.getInternalSpanParent(),
           .userSpanParent = kj::mv(userSpanParent)});
   };
-  auto client = startActorSubrequest(context, startRequest);
+  auto client = startActorSubrequest(context, startRequest, CountSubrequest::YES);
   return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
 }
 
@@ -115,17 +119,19 @@ void GlobalActorOutgoingFactory::onActorFetchRetry() {
 
 Fetcher::OutgoingFactory::Result GlobalActorOutgoingFactory::newSingleUseClient(
     kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) {
-  return newSingleUseClientWithActorRetryMetadata(kj::mv(cfStr), kj::none, makeUserSpanParent);
+  return newSingleUseClientWithActorRetryMetadata(
+      kj::mv(cfStr), kj::none, CountSubrequest::YES, kj::mv(makeUserSpanParent));
 }
 
 Fetcher::OutgoingFactory::Result GlobalActorOutgoingFactory::
     newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
         kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata,
+        CountSubrequest countSubrequest,
         MakeUserSpanParent makeUserSpanParent) {
   auto& context = IoContext::current();
 
   kj::Maybe<TraceContextParent> spanParents;
-  auto startRequest = [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
+  auto makeClient = [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
     tracing.setTag("objectId"_kjc, id->toString());
     spanParents = tracing.getSpanParents();
     auto userSpanParent = tracing.getUserSpanParent();
@@ -139,7 +145,7 @@ Fetcher::OutgoingFactory::Result GlobalActorOutgoingFactory::
           .userSpanParent = kj::mv(userSpanParent),
           .actorRetryRequestMetadata = kj::mv(actorRetryRequestMetadata)});
   };
-  auto client = startActorSubrequest(context, startRequest);
+  auto client = startActorSubrequest(context, makeClient, countSubrequest);
   return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
 }
 
@@ -151,12 +157,13 @@ kj::Own<IoChannelFactory::SubrequestChannel> GlobalActorOutgoingFactory::getSubr
 Fetcher::OutgoingFactory::Result ReplicaActorOutgoingFactory::newSingleUseClient(
     kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) {
   return newSingleUseClientWithActorRetryMetadata(
-      kj::mv(cfStr), kj::none, kj::mv(makeUserSpanParent));
+      kj::mv(cfStr), kj::none, CountSubrequest::YES, kj::mv(makeUserSpanParent));
 }
 
 Fetcher::OutgoingFactory::Result ReplicaActorOutgoingFactory::
     newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
         kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata,
+        CountSubrequest countSubrequest,
         MakeUserSpanParent makeUserSpanParent) {
   auto& context = IoContext::current();
 
@@ -176,7 +183,7 @@ Fetcher::OutgoingFactory::Result ReplicaActorOutgoingFactory::
       .userSpanParent = kj::mv(userSpanParent),
       .actorRetryRequestMetadata = kj::mv(actorRetryRequestMetadata)});
   };
-  auto client = startActorSubrequest(context, startRequest);
+  auto client = startActorSubrequest(context, startRequest, countSubrequest);
   return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
 }
 
