@@ -15,11 +15,13 @@ PERFETTO_DEFINE_CATEGORIES_IN_NAMESPACE(workerd::traces,
     perfetto::Category("workerd.gc"),
     perfetto::Category("workerd.io"),
     perfetto::Category("workerd.request"),
+    perfetto::Category("workerd.scheduler"),
     perfetto::Category("workerd.startup"),
     perfetto::Category::Group(WORKERD_TRACE_CATEGORY("event")),
     perfetto::Category::Group(WORKERD_TRACE_CATEGORY("gc")),
     perfetto::Category::Group(WORKERD_TRACE_CATEGORY("io")),
     perfetto::Category::Group(WORKERD_TRACE_CATEGORY("request")),
+    perfetto::Category::Group(WORKERD_TRACE_CATEGORY("scheduler")),
     perfetto::Category::Group(WORKERD_TRACE_CATEGORY("startup")));
 
 namespace kj {

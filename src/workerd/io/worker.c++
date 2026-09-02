@@ -2792,11 +2792,15 @@ class AsyncLockHooks final: public AsyncLockQueue<Worker::Isolate>::Hooks {
   explicit AsyncLockHooks(IsolateObserver::LockTiming& lockTiming): lockTiming(lockTiming) {}
 
   void waitingForOtherResource(kj::StringPtr id) override {
+    TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("scheduler"), "Blocked by another isolate lock",
+        "blockingIsolate", id.cStr());
     lockTiming.waitingForOtherIsolate(id);
   }
 
   void reportAsyncInfo(
       uint currentLoad, bool coalesced, uint blockedByOtherResourceCount) override {
+    TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("scheduler"), "Queue isolate lock", "queueDepth",
+        currentLoad, "coalesced", coalesced, "blockingIsolates", blockedByOtherResourceCount);
     lockTiming.reportAsyncInfo(currentLoad, coalesced, blockedByOtherResourceCount);
   }
 
@@ -2827,6 +2831,8 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLock(RequestObserver& r
 
 kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
     kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("scheduler"), "Wait for isolate lock", "isolate",
+      getId().cStr(), "queueDepth", asyncLockQueue.getCurrentLoad());
   // Held on the coroutine frame so it outlives the wait below.
   kj::Maybe<AsyncLockHooks> hooks;
   kj::Maybe<AsyncLockQueue<Isolate>::Hooks&> hooksRef;
@@ -2835,6 +2841,7 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
   }
 
   auto lock = co_await asyncLockQueue.lock(kj::atomicAddRef(*this), hooksRef);
+  TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("scheduler"), "Isolate lock acquired");
   co_return AsyncLock(kj::mv(lock), kj::mv(lockTiming));
 }
 
@@ -3700,15 +3707,33 @@ struct Worker::Actor::Impl {
           metrics(metrics) {}
 
     void inputGateLocked() override {
+      TRACE_COUNTER(WORKERD_TRACE_CATEGORY("scheduler"),
+          perfetto::CounterTrack(
+              "Input gate locks", perfetto::NamedTrack::FromPointer("Durable Object gates", this)),
+          1);
       metrics.inputGateLocked();
     }
     void inputGateReleased() override {
+      TRACE_COUNTER(WORKERD_TRACE_CATEGORY("scheduler"),
+          perfetto::CounterTrack(
+              "Input gate locks", perfetto::NamedTrack::FromPointer("Durable Object gates", this)),
+          0);
       metrics.inputGateReleased();
     }
     void inputGateWaiterAdded() override {
+      ++inputGateWaiters;
+      TRACE_COUNTER(WORKERD_TRACE_CATEGORY("scheduler"),
+          perfetto::CounterTrack("Input gate waiters",
+              perfetto::NamedTrack::FromPointer("Durable Object gates", this)),
+          inputGateWaiters);
       metrics.inputGateWaiterAdded();
     }
     void inputGateWaiterRemoved() override {
+      --inputGateWaiters;
+      TRACE_COUNTER(WORKERD_TRACE_CATEGORY("scheduler"),
+          perfetto::CounterTrack("Input gate waiters",
+              perfetto::NamedTrack::FromPointer("Durable Object gates", this)),
+          inputGateWaiters);
       metrics.inputGateWaiterRemoved();
     }
     // Implements InputGate::Hooks.
@@ -3730,15 +3755,35 @@ struct Worker::Actor::Impl {
     // Implements OutputGate::Hooks.
 
     void outputGateLocked() override {
+      ++outputGateLocks;
+      TRACE_COUNTER(WORKERD_TRACE_CATEGORY("scheduler"),
+          perfetto::CounterTrack(
+              "Output gate locks", perfetto::NamedTrack::FromPointer("Durable Object gates", this)),
+          outputGateLocks);
       metrics.outputGateLocked();
     }
     void outputGateReleased() override {
+      --outputGateLocks;
+      TRACE_COUNTER(WORKERD_TRACE_CATEGORY("scheduler"),
+          perfetto::CounterTrack(
+              "Output gate locks", perfetto::NamedTrack::FromPointer("Durable Object gates", this)),
+          outputGateLocks);
       metrics.outputGateReleased();
     }
     void outputGateWaiterAdded() override {
+      ++outputGateWaiters;
+      TRACE_COUNTER(WORKERD_TRACE_CATEGORY("scheduler"),
+          perfetto::CounterTrack("Output gate waiters",
+              perfetto::NamedTrack::FromPointer("Durable Object gates", this)),
+          outputGateWaiters);
       metrics.outputGateWaiterAdded();
     }
     void outputGateWaiterRemoved() override {
+      --outputGateWaiters;
+      TRACE_COUNTER(WORKERD_TRACE_CATEGORY("scheduler"),
+          perfetto::CounterTrack("Output gate waiters",
+              perfetto::NamedTrack::FromPointer("Durable Object gates", this)),
+          outputGateWaiters);
       metrics.outputGateWaiterRemoved();
     }
 
@@ -3756,6 +3801,10 @@ struct Worker::Actor::Impl {
     kj::Own<Loopback> loopback;  // only for updateAlarmInMemory()
     TimerChannel& timerChannel;  // only for afterLimitTimeout() and updateAlarmInMemory()
     ActorObserver& metrics;
+
+    uint inputGateWaiters = 0;
+    uint outputGateLocks = 0;
+    uint outputGateWaiters = 0;
 
     kj::Maybe<kj::Promise<void>> maybeAlarmPreviewTask;
   };
