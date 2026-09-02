@@ -51,8 +51,9 @@ class EnvModule final: public jsg::Object {
 };
 
 template <class Registry>
-void registerModules(Registry& registry, auto featureFlags) {
-  node::registerNodeJsCompatModules(registry, featureFlags);
+void registerModules(
+    Registry& registry, auto featureFlags, const node::ModuleSource* nodeModuleSource = nullptr) {
+  node::registerNodeJsCompatModules(registry, featureFlags, nodeModuleSource);
   registerUnsafeModules(registry, featureFlags);
   if (featureFlags.getRttiApi()) {
     registerRTTIModule(registry);
@@ -74,9 +75,12 @@ void registerModules(Registry& registry, auto featureFlags) {
 }
 
 template <class TypeWrapper>
-void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto featureFlags) {
-  builder.add(node::getInternalNodeJsCompatModuleBundle<TypeWrapper>(featureFlags));
-  builder.add(node::getExternalNodeJsCompatModuleBundle(featureFlags));
+void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder,
+    auto featureFlags,
+    const node::ModuleSource* nodeModuleSource = nullptr) {
+  builder.add(
+      node::getInternalNodeJsCompatModuleBundle<TypeWrapper>(featureFlags, nodeModuleSource));
+  builder.add(node::getExternalNodeJsCompatModuleBundle(featureFlags, nodeModuleSource));
   builder.add(getInternalSocketModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalBase64ModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalMessageChannelModuleBundle<TypeWrapper>(featureFlags));

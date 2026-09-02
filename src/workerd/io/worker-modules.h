@@ -89,7 +89,8 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
     const jsg::Url& bundleBase,
     auto setupForApi,
     jsg::modules::ModuleRegistry::Builder::Options options =
-        jsg::modules::ModuleRegistry::Builder::Options::NONE) {
+        jsg::modules::ModuleRegistry::Builder::Options::NONE,
+    const api::node::ModuleSource* nodeModuleSource = nullptr) {
   jsg::modules::ModuleRegistry::Builder builder(bundleBase, options);
 
   // This callback is used when a module is being loaded to arrange evaluating the
@@ -111,7 +112,7 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
   });
 
   // Add the module bundles that are built into the runtime.
-  api::registerBuiltinModules<TypeWrapper>(builder, featureFlags);
+  api::registerBuiltinModules<TypeWrapper>(builder, featureFlags, nodeModuleSource);
 
   bool hasPythonModules = false;
 

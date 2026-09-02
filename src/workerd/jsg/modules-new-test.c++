@@ -1607,6 +1607,34 @@ KJ_TEST("Module source is decoded as UTF-8 across all encoding tiers") {
 
 // ======================================================================================
 
+KJ_TEST("Built-in source distinguishes UTF-8 from pre-encoded Latin-1") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+    ModuleBundle::BuiltinBuilder builtinBuilder;
+    static constexpr char utf8Source[] = "export default 'caf\xc3\xa9';";
+    static constexpr char latin1Source[] = "export default 'caf\xe9';";
+    builtinBuilder.addEsm("test:utf8"_url, kj::arrayPtr(utf8Source, sizeof(utf8Source) - 1));
+    builtinBuilder.addEsm("test:latin1"_url,
+        StaticExternalStringSource(kj::arrayPtr(latin1Source, sizeof(latin1Source) - 1)));
+
+    auto registry = ModuleRegistry::Builder(BASE).add(builtinBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    JSG_TRY(js) {
+      for (auto specifier: {"test:utf8"_kjc, "test:latin1"_kjc}) {
+        auto value =
+            ModuleRegistry::resolve(js, specifier, "default"_kjc, ResolveContext::Type::BUILTIN);
+        KJ_ASSERT(kj::str(value) == "caf\xc3\xa9", kj::str(value));
+      }
+    }
+    JSG_CATCH(exception) {
+      js.throwException(kj::mv(exception));
+    }
+  });
+}
+
+// ======================================================================================
+
 KJ_TEST("Owned ESM source outlives its release points across encoding tiers") {
   // The Arc<OwnedAscii> addEsmModule overload shares ownership of the UTF-8 source
   // buffer with the module. Non-ASCII sources are transcoded to an owned

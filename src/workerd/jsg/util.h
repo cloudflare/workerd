@@ -15,6 +15,7 @@
 
 #include <kj/debug.h>
 #include <kj/exception.h>
+#include <kj/one-of.h>
 #include <kj/refcount.h>
 #include <kj/string.h>
 
@@ -533,7 +534,7 @@ concept StrictlyBool = kj::isSameType<T, bool>();
 
 class Lock;
 
-// Interface for allocating backing stores for v8 external string.
+// Interface for allocating V8 external string character buffers.
 class ExternalStringAllocator {
  public:
   virtual ~ExternalStringAllocator() = default;
@@ -547,6 +548,8 @@ kj::Own<ExternalStringAllocator> defaultExternalStringAllocator();
 
 using OwnedAscii = kj::Array<const char>;
 using OwnedUtf16 = kj::Array<const uint16_t>;
+using StaticExternalStringSource =
+    kj::OneOf<kj::ArrayPtr<const char>, kj::ArrayPtr<const uint16_t>>;
 
 // Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
 // take ownership of the buf. The buf *must* point to a static constant with infinite

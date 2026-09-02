@@ -7,6 +7,7 @@
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/observer.h>
+#include <workerd/jsg/util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 
@@ -174,6 +175,13 @@ class ModuleRegistry {
     ModuleInfo(jsg::Lock& js,
         kj::StringPtr name,
         kj::ArrayPtr<const char> content,
+        kj::ArrayPtr<const kj::byte> compileCache,
+        ModuleInfoCompileOption flags,
+        const CompilationObserver& observer);
+
+    ModuleInfo(jsg::Lock& js,
+        kj::StringPtr name,
+        StaticExternalStringSource content,
         kj::ArrayPtr<const kj::byte> compileCache,
         ModuleInfoCompileOption flags,
         const CompilationObserver& observer);
@@ -370,9 +378,15 @@ class ModuleRegistryImpl final: public ModuleRegistry {
 
   template <typename Func>
   void addBuiltinBundleFiltered(Bundle::Reader bundle, Func filter) {
+    addBuiltinBundleFiltered(
+        bundle, kj::mv(filter), [&](Module::Reader module) { addBuiltinModule(module); });
+  }
+
+  template <typename Filter, typename AddModule>
+  void addBuiltinBundleFiltered(Bundle::Reader bundle, Filter filter, AddModule addModule) {
     for (auto module: bundle.getModules()) {
       if (filter(module)) {
-        addBuiltinModule(module);
+        addModule(module);
       }
     }
   }
@@ -390,6 +404,15 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     KJ_ASSERT(type != Type::BUNDLE);
     auto path = kj::Path::parse(specifier);
     entries.insert(kj::heap<Entry>(path, type, sourceCode, compileCache));
+  }
+
+  void addBuiltinModule(kj::StringPtr specifier,
+      StaticExternalStringSource sourceCode,
+      Type type = Type::BUILTIN,
+      kj::ArrayPtr<const kj::byte> compileCache = {}) {
+    KJ_ASSERT(type != Type::BUNDLE);
+    auto path = kj::Path::parse(specifier);
+    entries.insert(kj::heap<Entry>(path, type, kj::mv(sourceCode), compileCache));
   }
 
   void addBuiltinModule(
@@ -585,7 +608,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   // we need to be able to search it by path (filename) as well as search for a specific module
   // object by identity. We use a kj::Table!
   struct Entry {
-    using Info = kj::OneOf<ModuleInfo, kj::ArrayPtr<const char>, ModuleCallback>;
+    using Info = kj::OneOf<ModuleInfo, StaticExternalStringSource, ModuleCallback>;
 
     struct Key {
       const kj::Path& specifier;
@@ -622,7 +645,16 @@ class ModuleRegistryImpl final: public ModuleRegistry {
         kj::ArrayPtr<const kj::byte> compileCache)
         : specifier(specifier.clone()),
           type(type),
-          info(src),
+          info(StaticExternalStringSource(src)),
+          compileCache(compileCache) {}
+
+    Entry(const kj::Path& specifier,
+        Type type,
+        StaticExternalStringSource src,
+        kj::ArrayPtr<const kj::byte> compileCache)
+        : specifier(specifier.clone()),
+          type(type),
+          info(kj::mv(src)),
           compileCache(compileCache) {}
 
     Entry(const kj::Path& specifier, Type type, ModuleCallback factory)
@@ -642,7 +674,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
         KJ_CASE_ONEOF(moduleInfo, ModuleInfo) {
           return kj::Maybe<ModuleInfo&>(moduleInfo);
         }
-        KJ_CASE_ONEOF(src, kj::ArrayPtr<const char>) {
+        KJ_CASE_ONEOF(src, StaticExternalStringSource) {
           info = ModuleInfo(js, specifier.toString(), src, compileCache,
               ModuleInfoCompileOption::BUILTIN, observer);
           return info.tryGet<ModuleInfo>();

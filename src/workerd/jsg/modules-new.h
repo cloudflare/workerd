@@ -415,6 +415,8 @@ class Module {
   // This variation of newEsm does not take Flags as none of the existing
   // Flags are relevant other than the ESM flag which will be set automatically.
   static kj::Own<Module> newEsm(Url id, Type type, kj::ArrayPtr<const char> code);
+  // The source is already encoded as Latin-1 or UTF-16 for V8.
+  static kj::Own<Module> newEsm(Url id, Type type, StaticExternalStringSource code);
 
   // The following methods are used to create the evaluation callbacks for various
   // kinds of common simple synthetic module types. The module registry is not
@@ -604,6 +606,8 @@ class ModuleBundle {
 
     // The source must be backed by static process-lifetime storage.
     BuiltinBuilder& addEsm(const Url& id, kj::ArrayPtr<const char> source) KJ_LIFETIMEBOUND;
+    // The source is already encoded as Latin-1 or UTF-16 for V8.
+    BuiltinBuilder& addEsm(const Url& id, StaticExternalStringSource source) KJ_LIFETIMEBOUND;
 
     // Adds a module that is implemented in C++ as a jsg::Object
     template <typename T, typename TypeWrapper>
@@ -638,6 +642,11 @@ class ModuleBundle {
   static void getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
       Bundle::Reader bundle,
       kj::Function<bool(::workerd::jsg::Module::Reader)> filter);
+
+  static void getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
+      Bundle::Reader bundle,
+      kj::Function<bool(::workerd::jsg::Module::Reader)> filter,
+      kj::FunctionParam<StaticExternalStringSource(::workerd::jsg::Module::Reader)> getSource);
 
   KJ_DISALLOW_COPY_AND_MOVE(ModuleBundle);
 
