@@ -268,6 +268,14 @@ class R2Bucket: public jsg::Object {
         ssecKey);
   };
 
+  struct GetOptionsRpc {
+    jsg::Optional<ConditionalRpc> onlyIf;
+    jsg::Optional<kj::OneOf<Range, kj::String>> range;
+    jsg::Optional<kj::String> ssecKey;
+
+    JSG_STRUCT(onlyIf, range, ssecKey);
+  };
+
   struct MultipartOptions {
     jsg::Optional<kj::OneOf<HttpMetadata, jsg::Ref<Headers>>> httpMetadata;
     jsg::Optional<jsg::Dict<kj::String>> customMetadata;
@@ -326,6 +334,34 @@ class R2Bucket: public jsg::Object {
         customMetadata,
         range,
         ssecKeyMd5);
+  };
+
+  struct ListOptionsRpc {
+    jsg::Optional<int> limit;
+    jsg::Optional<kj::String> prefix;
+    jsg::Optional<kj::String> cursor;
+    jsg::Optional<kj::String> delimiter;
+    jsg::Optional<kj::String> startAfter;
+    kj::Array<kj::String> include;
+
+    JSG_STRUCT(limit, prefix, cursor, delimiter, startAfter, include);
+  };
+
+  struct ListResultRpc {
+    kj::Array<HeadResultRpc> objects;
+    bool truncated;
+    kj::Maybe<kj::String> cursor;
+    kj::Maybe<kj::Array<kj::String>> delimitedPrefixes;
+
+    JSG_STRUCT(objects, truncated, cursor, delimitedPrefixes);
+  };
+
+  struct GetResultRpc {
+    kj::String kind;
+    HeadResultRpc object;
+    kj::Maybe<JsReadableStream> body;
+
+    JSG_STRUCT(kind, object, body);
   };
 
   class HeadResult: public jsg::Object {
@@ -595,6 +631,14 @@ class R2Bucket: public jsg::Object {
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
       const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String)>>& headFnHandler,
       const jsg::TypeHandler<jsg::Promise<kj::Maybe<HeadResultRpc>>>& headResultHandler);
+  jsg::Promise<kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>>> getRpc(
+      jsg::Lock& js,
+      kj::String key,
+      jsg::Optional<GetOptions> options,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, jsg::Optional<GetOptionsRpc>)>>&
+          getFnHandler,
+      const jsg::TypeHandler<jsg::Promise<kj::Maybe<GetResultRpc>>>& getResultHandler);
   jsg::Promise<void> deleteRpc(jsg::Lock& js,
       kj::OneOf<kj::String, kj::Array<kj::String>> keys,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
@@ -623,6 +667,13 @@ class R2Bucket: public jsg::Object {
       kj::String uploadId,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
       const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, kj::String)>>& resumeFnHandler);
+  jsg::Promise<ListResult> listRpc(jsg::Lock& js,
+      jsg::Optional<ListOptions> options,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(jsg::Optional<ListOptionsRpc>)>>&
+          listFnHandler,
+      const jsg::TypeHandler<jsg::Promise<ListResultRpc>>& listResultHandler,
+      CompatibilityFlags::Reader flags);
   jsg::Promise<ListResult> list(jsg::Lock& js,
       jsg::Optional<ListOptions> options,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
@@ -637,20 +688,21 @@ class R2Bucket: public jsg::Object {
     if (util::Autogate::isEnabled(util::AutogateKey::R2_BINDINGS_JSRPC) &&
         flags.getR2BindingsJsrpc()) {
       JSG_METHOD_NAMED(head, headRpc);
+      JSG_METHOD_NAMED(get, getRpc);
       JSG_METHOD_NAMED(delete, deleteRpc);
       JSG_METHOD_NAMED(put, putRpc);
       JSG_METHOD_NAMED(createMultipartUpload, createMultipartUploadRpc);
       JSG_METHOD_NAMED(resumeMultipartUpload, resumeMultipartUploadRpc);
+      JSG_METHOD_NAMED(list, listRpc);
     } else {
       JSG_METHOD(head);
+      JSG_METHOD(get);
       JSG_METHOD_NAMED(delete, delete_);
       JSG_METHOD(put);
       JSG_METHOD(createMultipartUpload);
       JSG_METHOD(resumeMultipartUpload);
+      JSG_METHOD(list);
     }
-    JSG_METHOD(get);
-    JSG_METHOD(list);
-
     JSG_TS_ROOT();
     JSG_TS_OVERRIDE({
       // The order of these matters, since typescript tries to match function signatures in order
@@ -754,7 +806,14 @@ class R2Bucket: public jsg::Object {
   friend class R2MultipartUpload;
 };
 
-jsg::Ref<R2Bucket::HeadResult> headResultFromRpc(jsg::Lock& js, R2Bucket::HeadResultRpc rpc);
+enum class MissingMetadataPolicy {
+  EMPTY,
+  ABSENT,
+};
+
+jsg::Ref<R2Bucket::HeadResult> headResultFromRpc(jsg::Lock& js,
+    R2Bucket::HeadResultRpc rpc,
+    MissingMetadataPolicy policy = MissingMetadataPolicy::EMPTY);
 
 // Non-generic wrapper avoid moving the parseObjectMetadata implementation into this header file
 // by making use of dynamic dispatch.

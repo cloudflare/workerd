@@ -532,15 +532,30 @@ jsg::Ref<JsRpcProperty> R2Bucket::getRpcMethod(jsg::Lock& js, kj::StringPtr meth
   return KJ_ASSERT_NONNULL(fetcher->getRpcMethodInternal(js, kj::str(methodName)));
 }
 
-jsg::Ref<R2Bucket::HeadResult> headResultFromRpc(jsg::Lock& js, R2Bucket::HeadResultRpc rpc) {
+jsg::Ref<R2Bucket::HeadResult> headResultFromRpc(
+    jsg::Lock& js, R2Bucket::HeadResultRpc rpc, MissingMetadataPolicy policy) {
+  jsg::Optional<R2Bucket::HttpMetadata> httpMetadata;
+  jsg::Optional<jsg::Dict<kj::String>> customMetadata;
+  switch (policy) {
+    case MissingMetadataPolicy::EMPTY:
+      httpMetadata = kj::mv(rpc.httpMetadata).orDefault(R2Bucket::HttpMetadata{});
+      customMetadata = kj::mv(rpc.customMetadata).orDefault(jsg::Dict<kj::String>{});
+      break;
+    case MissingMetadataPolicy::ABSENT:
+      KJ_IF_SOME(metadata, rpc.httpMetadata) {
+        httpMetadata = kj::mv(metadata);
+      }
+      KJ_IF_SOME(metadata, rpc.customMetadata) {
+        customMetadata = kj::mv(metadata);
+      }
+      break;
+  }
+
   return js.alloc<R2Bucket::HeadResult>(kj::mv(rpc.key), kj::mv(rpc.version), rpc.size,
       kj::mv(rpc.etag),
       js.alloc<R2Bucket::Checksums>(kj::mv(rpc.checksums.md5), kj::mv(rpc.checksums.sha1),
           kj::mv(rpc.checksums.sha256), kj::mv(rpc.checksums.sha384), kj::mv(rpc.checksums.sha512)),
-      rpc.uploaded,
-      // Head-shaped RPC results always report metadata, so absence means that none was set.
-      kj::mv(rpc.httpMetadata).orDefault(R2Bucket::HttpMetadata{}),
-      kj::mv(rpc.customMetadata).orDefault(jsg::Dict<kj::String>{}), kj::mv(rpc.range),
+      rpc.uploaded, kj::mv(httpMetadata), kj::mv(customMetadata), kj::mv(rpc.range),
       kj::mv(rpc.storageClass), kj::mv(rpc.ssecKeyMd5));
 }
 
@@ -576,6 +591,157 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::headRpc(jsg::L
         return kj::mv(result);
       }
       return kj::none;
+    });
+  });
+}
+
+jsg::Promise<kj::OneOf<kj::Maybe<jsg::Ref<R2Bucket::GetResult>>, jsg::Ref<R2Bucket::HeadResult>>>
+R2Bucket::getRpc(jsg::Lock& js,
+    kj::String key,
+    jsg::Optional<GetOptions> options,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, jsg::Optional<GetOptionsRpc>)>>&
+        getFnHandler,
+    const jsg::TypeHandler<jsg::Promise<kj::Maybe<GetResultRpc>>>& getResultHandler) {
+  return js.evalNow([&] {
+    TraceContext traceContext = IoContext::current().makeUserTraceSpan("r2_get"_kjc);
+
+    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
+    KJ_IF_SOME(b, this->bindingName()) {
+      traceContext.setTag("cloudflare.binding.name"_kjc, b);
+    }
+    traceContext.setTag("cloudflare.r2.operation"_kjc, "GetObject"_kjc);
+    KJ_IF_SOME(b, this->bucketName()) {
+      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
+    }
+    traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
+
+    jsg::Optional<GetOptionsRpc> rpcOptions;
+    KJ_IF_SOME(o, options) {
+      GetOptionsRpc normalized;
+
+      KJ_IF_SOME(i, o.onlyIf) {
+        UnwrappedConditional conditional = [&] {
+          KJ_SWITCH_ONEOF(i) {
+            KJ_CASE_ONEOF(value, Conditional) {
+              return UnwrappedConditional(value);
+            }
+            KJ_CASE_ONEOF(headers, jsg::Ref<Headers>) {
+              return UnwrappedConditional(js, *headers);
+            }
+          }
+          KJ_UNREACHABLE;
+        }();
+
+        ConditionalRpc rpcConditional{.secondsGranularity = conditional.secondsGranularity};
+        KJ_IF_SOME(etags, conditional.etagMatches) {
+          auto value = buildEtagsString(etags);
+          traceContext.setTag("cloudflare.r2.request.only_if.etag_matches"_kjc, value.asPtr());
+          rpcConditional.etagMatches = kj::mv(value);
+        }
+        KJ_IF_SOME(etags, conditional.etagDoesNotMatch) {
+          auto value = buildEtagsString(etags);
+          traceContext.setTag(
+              "cloudflare.r2.request.only_if.etag_does_not_match"_kjc, value.asPtr());
+          rpcConditional.etagDoesNotMatch = kj::mv(value);
+        }
+        KJ_IF_SOME(date, conditional.uploadedBefore) {
+          traceContext.setTag(
+              "cloudflare.r2.request.only_if.uploaded_before"_kjc, toISOString(js, date));
+          rpcConditional.uploadedBefore = date;
+        }
+        KJ_IF_SOME(date, conditional.uploadedAfter) {
+          traceContext.setTag(
+              "cloudflare.r2.request.only_if.uploaded_after"_kjc, toISOString(js, date));
+          rpcConditional.uploadedAfter = date;
+        }
+        normalized.onlyIf = kj::mv(rpcConditional);
+      }
+
+      KJ_IF_SOME(range, o.range) {
+        KJ_SWITCH_ONEOF(range) {
+          KJ_CASE_ONEOF(value, Range) {
+            KJ_IF_SOME(offset, value.offset) {
+              JSG_REQUIRE(offset >= 0, RangeError, "Invalid range. Starting offset (", offset,
+                  ") must be greater than or equal to 0.");
+              JSG_REQUIRE(isWholeNumber(offset), RangeError, "Invalid range. Starting offset (",
+                  offset, ") must be an integer, not floating point.");
+              traceContext.setTag(
+                  "cloudflare.r2.request.range.offset"_kjc, static_cast<int64_t>(offset));
+            }
+            KJ_IF_SOME(length, value.length) {
+              JSG_REQUIRE(length >= 0, RangeError, "Invalid range. Length (", length,
+                  ") must be greater than or equal to 0.");
+              JSG_REQUIRE(isWholeNumber(length), RangeError, "Invalid range. Length (", length,
+                  ") must be an integer, not floating point.");
+              traceContext.setTag(
+                  "cloudflare.r2.request.range.length"_kjc, static_cast<int64_t>(length));
+            }
+            KJ_IF_SOME(suffix, value.suffix) {
+              JSG_REQUIRE(
+                  value.offset == kj::none, TypeError, "Suffix is incompatible with offset.");
+              JSG_REQUIRE(
+                  value.length == kj::none, TypeError, "Suffix is incompatible with length.");
+              JSG_REQUIRE(suffix >= 0, RangeError, "Invalid suffix. Suffix (", suffix,
+                  ") must be greater than or equal to 0.");
+              JSG_REQUIRE(isWholeNumber(suffix), RangeError, "Invalid range. Suffix (", suffix,
+                  ") must be an integer, not floating point.");
+              traceContext.setTag(
+                  "cloudflare.r2.request.range.suffix"_kjc, static_cast<int64_t>(suffix));
+            }
+            normalized.range = kj::mv(value);
+          }
+          KJ_CASE_ONEOF(headers, jsg::Ref<Headers>) {
+            KJ_IF_SOME(value, headers->getCommon(js, capnp::CommonHeaderName::RANGE)) {
+              traceContext.setTag("cloudflare.r2.request.range"_kjc, value.asPtr());
+              normalized.range = kj::mv(value);
+            }
+          }
+        }
+      }
+
+      KJ_IF_SOME(ssecKey, buildSsecKey(kj::mv(o.ssecKey))) {
+        traceContext.setTag("cloudflare.r2.request.ssec_key"_kjc, true);
+        normalized.ssecKey = kj::mv(ssecKey);
+      }
+      rpcOptions = kj::mv(normalized);
+    }
+
+    return callR2RpcMethod<kj::Maybe<GetResultRpc>>(js, getRpcMethod(js, "get"_kj), rpcPropHandler,
+        getFnHandler, getResultHandler, kj::mv(key), kj::mv(rpcOptions))
+        .then(js,
+            [traceContext = kj::mv(traceContext)](
+                jsg::Lock& js, kj::Maybe<GetResultRpc> parsed) mutable
+            -> kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> {
+      KJ_IF_SOME(rpc, parsed) {
+        if (rpc.kind == "metadata") {
+          KJ_IF_SOME(body, rpc.body) {
+            body.forceCancel(
+                js, js.error("Malformed R2 get RPC result: metadata result had a body."));
+            JSG_FAIL_REQUIRE(Error, "Malformed R2 get RPC result: metadata result had a body.");
+          }
+          auto result = headResultFromRpc(js, kj::mv(rpc.object), MissingMetadataPolicy::EMPTY);
+          addHeadResultSpanTags(js, traceContext, *result.get());
+          return kj::mv(result);
+        }
+        if (rpc.kind == "body") {
+          auto body = JSG_REQUIRE_NONNULL(kj::mv(rpc.body), Error,
+              "Malformed R2 get RPC result: body result did not have a body.");
+          auto object = headResultFromRpc(js, kj::mv(rpc.object), MissingMetadataPolicy::EMPTY);
+          auto result = js.alloc<GetResult>(kj::mv(object->name), kj::mv(object->version),
+              object->size, kj::mv(object->etag), kj::mv(object->checksums), object->uploaded,
+              kj::mv(object->httpMetadata), kj::mv(object->customMetadata), kj::mv(object->range),
+              kj::mv(object->storageClass), kj::mv(object->ssecKeyMd5), kj::mv(body));
+          addHeadResultSpanTags(js, traceContext, *result.get());
+          return kj::Maybe<jsg::Ref<GetResult>>(kj::mv(result));
+        }
+
+        KJ_IF_SOME(body, rpc.body) {
+          body.forceCancel(js, js.error("Malformed R2 get RPC result: unknown result kind."));
+        }
+        JSG_FAIL_REQUIRE(Error, "Malformed R2 get RPC result: unknown result kind ", rpc.kind, ".");
+      }
+      return kj::Maybe<jsg::Ref<GetResult>>(kj::none);
     });
   });
 }
@@ -1334,6 +1500,102 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
       }
 
       r2Result.throwIfError("delete", errorType);
+    });
+  });
+}
+
+jsg::Promise<R2Bucket::ListResult> R2Bucket::listRpc(jsg::Lock& js,
+    jsg::Optional<ListOptions> options,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(jsg::Optional<ListOptionsRpc>)>>& listFnHandler,
+    const jsg::TypeHandler<jsg::Promise<ListResultRpc>>& listResultHandler,
+    CompatibilityFlags::Reader flags) {
+  return js.evalNow([&] {
+    TraceContext traceContext = IoContext::current().makeUserTraceSpan("r2_list"_kjc);
+
+    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
+    KJ_IF_SOME(b, this->bindingName()) {
+      traceContext.setTag("cloudflare.binding.name"_kjc, b);
+    }
+    traceContext.setTag("cloudflare.r2.operation"_kjc, "ListObjects"_kjc);
+    KJ_IF_SOME(b, this->bucketName()) {
+      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
+    }
+
+    const bool honorsIncludes = flags.getR2ListHonorIncludeFields();
+    jsg::Optional<ListOptionsRpc> rpcOptions;
+    if (options != kj::none || !honorsIncludes) {
+      ListOptionsRpc normalized;
+      kj::Vector<kj::String> includes;
+
+      KJ_IF_SOME(o, options) {
+        KJ_IF_SOME(limit, o.limit) {
+          normalized.limit = limit;
+          traceContext.setTag("cloudflare.r2.request.limit"_kjc, static_cast<int64_t>(limit));
+        }
+        KJ_IF_SOME(prefix, o.prefix) {
+          traceContext.setTag("cloudflare.r2.request.prefix"_kjc, prefix.value.asPtr());
+          normalized.prefix = kj::mv(prefix.value);
+        }
+        KJ_IF_SOME(cursor, o.cursor) {
+          traceContext.setTag("cloudflare.r2.request.cursor"_kjc, cursor.value.asPtr());
+          normalized.cursor = kj::mv(cursor.value);
+        }
+        KJ_IF_SOME(delimiter, o.delimiter) {
+          traceContext.setTag("cloudflare.r2.request.delimiter"_kjc, delimiter.value.asPtr());
+          normalized.delimiter = kj::mv(delimiter.value);
+        }
+        KJ_IF_SOME(startAfter, o.startAfter) {
+          traceContext.setTag("cloudflare.r2.request.start_after"_kjc, startAfter.value.asPtr());
+          normalized.startAfter = kj::mv(startAfter.value);
+        }
+        KJ_IF_SOME(requestedIncludes, o.include) {
+          for (auto& requested: requestedIncludes) {
+            if (requested.value == "httpMetadata") {
+              traceContext.setTag("cloudflare.r2.request.include.http_metadata"_kjc, true);
+            } else if (requested.value == "customMetadata") {
+              traceContext.setTag("cloudflare.r2.request.include.custom_metadata"_kjc, true);
+            } else {
+              JSG_FAIL_REQUIRE(RangeError, "Unsupported include value ", requested.value);
+            }
+            if (honorsIncludes) {
+              includes.add(kj::mv(requested.value));
+            }
+          }
+        }
+      }
+
+      if (!honorsIncludes) {
+        includes.add(kj::str("httpMetadata"));
+        includes.add(kj::str("customMetadata"));
+      }
+      normalized.include = includes.releaseAsArray();
+      rpcOptions = kj::mv(normalized);
+    }
+
+    return callR2RpcMethod<ListResultRpc>(js, getRpcMethod(js, "list"_kj), rpcPropHandler,
+        listFnHandler, listResultHandler, kj::mv(rpcOptions))
+        .then(js,
+            [traceContext = kj::mv(traceContext)](
+                jsg::Lock& js, ListResultRpc rpc) mutable -> ListResult {
+      ListResult result;
+      result.objects = KJ_MAP(object, rpc.objects) {
+        return headResultFromRpc(js, kj::mv(object), MissingMetadataPolicy::ABSENT);
+      };
+      result.truncated = rpc.truncated;
+      KJ_IF_SOME(cursor, rpc.cursor) {
+        traceContext.setTag("cloudflare.r2.response.cursor"_kjc, cursor.asPtr());
+        result.cursor = kj::mv(cursor);
+      }
+      result.delimitedPrefixes =
+          kj::mv(rpc.delimitedPrefixes).orDefault(kj::heapArray<kj::String>(0));
+
+      traceContext.setTag("cloudflare.r2.response.returned_objects"_kjc,
+          static_cast<int64_t>(result.objects.size()));
+      traceContext.setTag("cloudflare.r2.response.delimited_prefixes"_kjc,
+          static_cast<int64_t>(result.delimitedPrefixes.size()));
+      traceContext.setTag("cloudflare.r2.response.truncated"_kjc, result.truncated);
+      return kj::mv(result);
     });
   });
 }
