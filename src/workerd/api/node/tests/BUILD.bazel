@@ -629,6 +629,12 @@ wd_test(
 )
 
 wd_test(
+    src = "async-resource-request-context-test.wd-test",
+    args = ["--experimental"],
+    data = ["async-resource-request-context-test.js"],
+)
+
+wd_test(
     src = "fs-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["fs-nodejs-test.js"],

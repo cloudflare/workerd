@@ -9,33 +9,38 @@
 namespace workerd::api::node {
 
 namespace {
-// If there is a current IoContext, then it is possible/likely that the
-// current AsyncContextFrame is storing values that are bound to that
-// IoContext. In that case, we want to protect against the case where
-// the returned snapshot function is called from a different IoContext.
+// If there is a current IoContext, then it is possible/likely that the current
+// AsyncContextFrame is storing values that are bound to that IoContext. In
+// that case, we protect against entering the frame from a different IoContext.
 // To do this we capture the current IoContext's unique id and compare it
-// against the current IoContext where the snapshot function is invoked.
+// against the current IoContext where the frame is entered.
 // Capturing the id (rather than a weak reference) is cheaper and avoids
 // keeping any state tied to the IoContext alive after it is destroyed:
 // because ids are never reused, a stale id can never match a later context.
-jsg::Function<void()> getValidator(jsg::Lock& js) {
-  kj::Maybe<IoContext::Id> maybeIoContextId;
+kj::Maybe<IoContext::Id> getIoContextId(jsg::Lock& js) {
   if (FeatureFlags::get(js).getBindAsyncLocalStorageSnapshot() && IoContext::hasCurrent()) {
-    maybeIoContextId = IoContext::current().getId();
+    return IoContext::current().getId();
   }
+  return kj::none;
+}
 
+void validateIoContext(jsg::Lock&, kj::Maybe<IoContext::Id> maybeIoContextId) {
   static constexpr auto kErrorMessage =
       "Cannot call this AsyncLocalStorage bound function outside of the "
       "request in which it was created."_kj;
 
-  return [maybeIoContextId](jsg::Lock&) {
-    KJ_IF_SOME(originIoContextId, maybeIoContextId) {
-      // We had an IoContext when we created the snapshot function. If it is not the current
-      // IoContext (because there is none, or it is a different one than when the snapshot was
-      // created), we throw an error.
-      JSG_REQUIRE(originIoContextId.isCurrent(), Error, kErrorMessage);
-    }
-  };
+  KJ_IF_SOME(originIoContextId, maybeIoContextId) {
+    JSG_REQUIRE(originIoContextId.isCurrent(), Error, kErrorMessage);
+  }
+}
+
+jsg::Function<void()> getValidator(jsg::Lock& js) {
+  return [maybeIoContextId = getIoContextId(js)](
+             jsg::Lock& js) { validateIoContext(js, maybeIoContextId); };
+}
+
+jsg::Function<void()> getValidator(kj::Maybe<IoContext::Id> maybeIoContextId) {
+  return [maybeIoContextId](jsg::Lock& js) { validateIoContext(js, maybeIoContextId); };
 }
 
 }  // namespace
@@ -108,7 +113,11 @@ kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> tryGetFrameRef(jsg::Lock& js) {
 }
 }  // namespace
 
-AsyncResource::AsyncResource(jsg::Lock& js): frame(tryGetFrameRef(js)) {}
+AsyncResource::AsyncResource(jsg::Lock& js): frame(tryGetFrameRef(js)) {
+  if (frame != kj::none) {
+    originIoContextId = getIoContextId(js);
+  }
+}
 
 jsg::Ref<AsyncResource> AsyncResource::constructor(
     jsg::Lock& js, jsg::Optional<kj::String> type, jsg::Optional<Options> options) {
@@ -140,7 +149,7 @@ v8::Local<v8::Function> AsyncResource::bind(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Ref<AsyncResource>>& handler) {
   v8::Local<v8::Function> bound;
   KJ_IF_SOME(frame, getFrame()) {
-    bound = frame.wrap(js, fn, getValidator(js), thisArg);
+    bound = frame.wrap(js, fn, getValidator(originIoContextId), thisArg);
   } else {
     bound = jsg::AsyncContextFrame::wrapRoot(js, fn, thisArg);
   }
@@ -161,6 +170,7 @@ v8::Local<v8::Value> AsyncResource::runInAsyncScope(jsg::Lock& js,
     receiver = arg;
   }
   fn.setReceiver(js.v8Ref<v8::Value>(receiver));
+  validateIoContext(js, originIoContextId);
   jsg::AsyncContextFrame::Scope scope(js, getFrame());
   return fn(js, kj::mv(args));
 }

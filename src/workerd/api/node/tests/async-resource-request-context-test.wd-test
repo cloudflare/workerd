@@ -1,0 +1,21 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "async-resource-request-context-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "async-resource-request-context-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "nodejs_compat_v2",
+          "bind_asynclocalstorage_snapshot_to_request",
+        ],
+        bindings = [
+          (name = "subrequest", service = "async-resource-request-context-test"),
+        ]
+      )
+    ),
+  ],
+);
