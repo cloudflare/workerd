@@ -87,6 +87,26 @@ bazel_dep(name = "rules_rust", version = "0.74.0")
 # rules_shell
 bazel_dep(name = "rules_shell", version = "0.8.0")
 
+# rust_nightly
+RUST_NIGHTLY_VERSION = "nightly/2026-07-16"
+
+http.archive(
+    name = "rust_nightly_src",
+    build_file_content = """
+filegroup(
+    name = "rust_src",
+    srcs = glob(["library/**"]),
+    visibility = ["//visibility:public"],
+)
+exports_files(["library/Cargo.toml"])
+""",
+    sha256 = "b8bb98533e65cb2468548b20b3575518d01b44e7738045a12de2dbb71a0d6cc2",
+    strip_prefix = "rust-src-nightly/rust-src/lib/rustlib/src/rust",
+    type = "tar.xz",
+    url = "https://static.rust-lang.org/dist/2026-07-16/rust-src-nightly.tar.xz",
+)
+use_repo(http, "rust_nightly_src")
+
 # wasm_tools_linux_arm64
 http.archive(
     name = "wasm_tools_linux_arm64",

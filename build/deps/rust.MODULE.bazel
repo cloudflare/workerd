@@ -37,23 +37,6 @@ use_repo(
 
 register_toolchains("@rust_toolchains//:all")
 
-http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-
-http_archive(
-    name = "rust_nightly_src",
-    build_file_content = """
-filegroup(
-    name = "rust_src",
-    srcs = glob(["library/**"]),
-    visibility = ["//visibility:public"],
-)
-exports_files(["library/Cargo.toml"])
-""",
-    sha256 = "b8bb98533e65cb2468548b20b3575518d01b44e7738045a12de2dbb71a0d6cc2",
-    strip_prefix = "rust-src-nightly/rust-src/lib/rustlib/src/rust",
-    urls = ["https://static.rust-lang.org/dist/2026-07-16/rust-src-nightly.tar.xz"],
-)
-
 # rust-based lolhtml dependency, including the API header.
 # Presented as a separate repository to allow overrides.
 new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")

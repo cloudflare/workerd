@@ -1,4 +1,5 @@
 load("@rules_rust//rust:toolchain.bzl", "rust_toolchain")
+load("//build/deps:gen/build_deps.bzl", "RUST_NIGHTLY_DATE", "RUST_NIGHTLY_VERSION")
 load(":build_std.bzl", "compiler_runtime_files", "instrumented_rust_std")
 
 exports_files(["build_std.sh"])
@@ -42,7 +43,7 @@ rust_toolchain(
     exec_triple = _TARGET_TRIPLE,
     extra_exec_rustc_flags = [],
     extra_rustc_flags = ["-Ctarget-feature=+sse4.2,+pclmulqdq"],
-    iso_date = "2026-07-16",
+    iso_date = RUST_NIGHTLY_DATE,
     linker = _RUST_TOOLS + "//:rust-lld",
     linker_type = "direct",
     llvm_cov = _RUST_TOOLS + "//:llvm_cov_bin",
@@ -62,7 +63,7 @@ rust_toolchain(
     tags = ["manual"],
     target_compatible_with = ["//build/platforms:sanitizer_thread"],
     target_triple = _TARGET_TRIPLE,
-    version = "1.99.0",
+    version = RUST_NIGHTLY_VERSION,
 )
 
 toolchain(
