@@ -15,6 +15,16 @@ def _get_enable_flags(python_flag):
             flags.append("no_" + value["enable_flag_name"])
     return flags
 
+def _get_compatibility_date_flag(python_flag):
+    version_info = BUNDLE_VERSION_INFO[python_flag]
+    if python_flag != "development":
+        return version_info["flag"]
+
+    for name, info in BUNDLE_VERSION_INFO.items():
+        if name != "development" and info["pyodide_version"] == version_info["real_pyodide_version"]:
+            return info["flag"]
+    fail("No released Python bundle matches the development bundle")
+
 def _py_wd_test_helper(
         name,
         src,
@@ -29,6 +39,16 @@ def _py_wd_test_helper(
     name_flag = name + "_" + python_flag
     templated_src = name_flag.replace("/", "-") + "@template"
     templated_src = "/".join(src.split("/")[:-1] + [templated_src])
+    compatibility_dates_src = name_flag.replace("/", "-") + "@compatibility-dates.capnp"
+    compatibility_dates_src = "/".join(src.split("/")[:-1] + [compatibility_dates_src])
+
+    compatibility_dates_rule = name_flag + "@compatibility-dates"
+    copy_file(
+        name = compatibility_dates_rule,
+        src = "//src/workerd/server/tests/python:python-compatibility-dates",
+        out = compatibility_dates_src,
+    )
+    data = data + [":" + compatibility_dates_rule]
 
     pyodide_version = BUNDLE_VERSION_INFO[python_flag]["real_pyodide_version"]
 
@@ -49,6 +69,9 @@ def _py_wd_test_helper(
     if make_snapshot and pyodide_version != "0.26.0a2":
         feature_flags = feature_flags + ["python_dedicated_snapshot"]
 
+    if "enable_python_external_sdk" not in feature_flags and "disable_python_external_sdk" not in feature_flags:
+        feature_flags = feature_flags + ["disable_python_external_sdk"]
+
     if load_snapshot and not make_snapshot:
         args += ["--python-load-snapshot", "load_snapshot.bin"]
 
@@ -57,12 +80,17 @@ def _py_wd_test_helper(
     # deduplicate flag list because passing the same flag multiple times fails with "Compatibility flag specified multiple times"
     flags = list({flag: 1 for flag in flags})
     feature_flags_txt = ",".join(['"{}"'.format(flag) for flag in flags])
+    compatibility_date_flag = _get_compatibility_date_flag(python_flag)
 
     expand_template(
         name = name_flag + "@rule",
         out = templated_src,
         template = src,
-        substitutions = {"%PYTHON_FEATURE_FLAGS": feature_flags_txt},
+        substitutions = {
+            "%PYTHON_COMPAT_DATES_IMPORT": 'using PythonCompatibilityDates = import "%s"' % compatibility_dates_src.rsplit("/", 1)[-1],
+            "%COMPAT_DATE": "compatibilityDate = PythonCompatibilityDates.%s" % compatibility_date_flag,
+            "%PYTHON_FEATURE_FLAGS": feature_flags_txt,
+        },
     )
 
     # Since we bumped the development flag to point to 0.28.2, it doesn't work on windows CI.
@@ -80,6 +108,7 @@ def _py_wd_test_helper(
         python_snapshot_test = make_snapshot,
         data = data,
         load_snapshot = load_snapshot,
+        no_default_compat_date = True,
         # TODO(soon): at the time of disabling these they all passed but because of how slow python
         #             tests are we disabled them for now. We should re-enable them when we have
         #             a better way to run them.
@@ -197,6 +226,7 @@ def py_wd_test(
         "--pyodide-bundle-disk-cache-dir",
         "$(location //src/workerd/server/tests/python:pyodide_dev.capnp.bin@rule)/..",
         "--experimental",
+        "--allow-future-compatibility-date",
         "--python-snapshot-dir",
         ".",
     ]

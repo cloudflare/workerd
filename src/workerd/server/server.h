@@ -97,6 +97,9 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   void setTestCompatibilityDateOverride(kj::String date) {
     testCompatibilityDateOverride = kj::mv(date);
   }
+  void allowFutureCompatibilityDateForTest() {
+    allowFutureCompatibilityDate = true;
+  }
 
   // Runs the server using the given config.
   kj::Promise<void> run(jsg::V8System& v8System,
@@ -157,6 +160,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   // When set, overrides compatibilityDate for all workers and enforces that workers don't
   // specify their own compatibilityDate.
   kj::Maybe<kj::String> testCompatibilityDateOverride;
+  bool allowFutureCompatibilityDate = false;
 
   Worker::LoggingOptions loggingOptions;
 

@@ -955,6 +955,11 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
             "Set the compatibility date for all workers. When specified, workers must NOT "
             "specify compatibilityDate in the config. Use '0000-00-00' for oldest behavior "
             "or '9999-12-31' for newest behavior.")
+        .addOption({"allow-future-compatibility-date"},
+            [this]() {
+      allowFutureCompatibilityDate = true;
+      return true;
+    }, "Allow worker compatibility dates later than today. For testing only.")
         .expectOptionalArg("<filter>", CLI_METHOD(setTestFilter))
         .callAfterParsing(CLI_METHOD(test))
         .build();
@@ -1493,6 +1498,9 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     KJ_IF_SOME(compatDate, testCompatDate) {
       server->setTestCompatibilityDateOverride(kj::str(compatDate));
     }
+    if (allowFutureCompatibilityDate) {
+      server->allowFutureCompatibilityDateForTest();
+    }
 
     // Enable loopback sockets in tests only.
     network.enableLoopback();
@@ -1563,6 +1571,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   bool predictable = false;
   bool gcStress = false;
   bool allAutogates = false;
+  bool allowFutureCompatibilityDate = false;
   kj::Maybe<kj::String> testCompatDate;
   kj::Maybe<FileWatcher> watcher;
 
