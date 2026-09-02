@@ -8,7 +8,7 @@ const unitTests :Workerd.Config = (
           (name = "worker.py", pythonModule = embed "worker.py"),
           (name = "payload.dat", data = "payload.dat")
         ],
-        compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "disable_python_no_global_handlers"],
       )
     ),
   ],

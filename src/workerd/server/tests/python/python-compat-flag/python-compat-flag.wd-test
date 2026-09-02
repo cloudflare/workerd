@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker.py", pythonModule = embed "worker.py"),
         ],
-        compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows"],
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows", "disable_python_no_global_handlers"],
       )
     ),
   ],

@@ -12,6 +12,7 @@ const unitTests :Workerd.Config = (
           "nodejs_compat",
           "nodejs_compat_v2",
           "enable_nodejs_process_v2",
+          "disable_python_no_global_handlers",
         ],
       )
     ),
