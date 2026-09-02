@@ -151,10 +151,6 @@ namespace workerd::util {
      cancel algorithm with the receiver's reason). When disabled, neither side participates and    \
      the origin learns of the loss only when its next write fails. */                             \
   V(JSRPC_READABLE_CANCEL_PROPAGATION)
-  /* Fleet-wide kill switch for the R2 bindings JSRPC transport. The JSRPC method table is only    \
-     selected when this is enabled AND the worker carries the r2_binding_jsrpc compatibility       \
-     flag, which is what restricts it to allowlisted accounts. */                                  \
-  V(R2_BINDINGS_JSRPC)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
