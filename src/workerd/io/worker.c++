@@ -154,7 +154,7 @@ void maybePerIsolateBootstrap(CompatibilityFlags::Reader& featureFlags,
     v8::Local<v8::Context> context,
     kj::Maybe<ValidationErrorReporter&> errorReporter) {
   if (util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)) {
-    TRACE_EVENT("workerd", "Worker::perIsolateBootstrap");
+    TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Worker::perIsolateBootstrap");
     JSG_WITHIN_CONTEXT_SCOPE(
         lock, context, [&](jsg::Lock& js) { runPerIsolateBootstrap(js, featureFlags); });
   } else if (featureFlags.getTypeScriptImplementedStreams()) {

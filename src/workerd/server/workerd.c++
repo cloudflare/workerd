@@ -1425,7 +1425,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
             PerfettoSession(dest, kj::mv(perfettoTraceCategories).orDefault(kj::String()));
       }
 #endif
-      TRACE_EVENT("workerd", "serveImpl()");
+      TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "serveImpl()");
       auto config = getConfig();
 
       // Configure structured logging in the process context

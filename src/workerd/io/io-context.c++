@@ -567,7 +567,7 @@ namespace {
 #ifdef KJ_DEBUG
 
 void requestGc(const Worker& worker) {
-  TRACE_EVENT("workerd", "Debug: requestGc()");
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("gc"), "Debug: requestGc()");
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     auto& isolate = worker.getIsolate();
     auto lock = isolate.getApi().lock(stackScope);
@@ -577,7 +577,7 @@ void requestGc(const Worker& worker) {
 
 template <typename T>
 kj::Promise<T> addGcPassForTest(IoContext& context, kj::Promise<T> promise) {
-  TRACE_EVENT("workerd", "Debug: addGcPassForTest");
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("gc"), "Debug: addGcPassForTest");
   auto worker = kj::atomicAddRef(context.getWorker());
   if constexpr (kj::isSameType<T, void>()) {
     co_await promise;
