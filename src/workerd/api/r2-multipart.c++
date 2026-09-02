@@ -164,16 +164,24 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPartRpc(j
     traceContext.setTag("cloudflare.r2.request.part_number"_kjc, static_cast<int64_t>(partNumber));
     traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
 
-    auto prepared = prepareR2RpcBody(js, kj::mv(value));
+    KJ_IF_SOME(o, options) {
+      KJ_IF_SOME(ssecKey, buildSsecKey(kj::mv(o.ssecKey))) {
+        traceContext.setTag("cloudflare.r2.request.ssec_key"_kjc, true);
+        o.ssecKey = kj::mv(ssecKey);
+      }
+    }
+
+    auto prepared = prepareR2RpcBody(js, value);
     traceContext.setTag("cloudflare.r2.request.size"_kjc, prepared.size);
 
     auto promise = callR2RpcMethod<UploadedPart>(js, KJ_ASSERT_NONNULL(rpcClient), "uploadPart"_kj,
         rpcPropHandler, uploadPartFnHandler, uploadPartResultHandler, partNumber,
         kj::mv(prepared.value), kj::mv(options), prepared.size);
     return promise.then(js,
-        [traceContext = kj::mv(traceContext)](jsg::Lock& js, UploadedPart uploadedPart) mutable {
+        [partNumber, traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, UploadedPart uploadedPart) mutable {
       traceContext.setTag("cloudflare.r2.response.etag"_kjc, uploadedPart.etag.asPtr());
-      return kj::mv(uploadedPart);
+      return UploadedPart{.partNumber = partNumber, .etag = kj::mv(uploadedPart.etag)};
     });
   });
 }
