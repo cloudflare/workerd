@@ -6568,7 +6568,7 @@ class Server::HttpListener final: public kj::Refcounted {
         const kj::HttpHeaders& headers,
         kj::AsyncInputStream& requestBody,
         kj::HttpService::Response& response) override {
-      TRACE_EVENT(WORKERD_TRACE_CATEGORY("request"), "Connection:request()");
+      TRACE_EVENT(WORKERD_TRACE_CATEGORY("request"), "HTTP request", "url", url.cStr());
       IoChannelFactory::SubrequestMetadata metadata;
       metadata.cfBlobJson = mapCopyString(cfBlobJson);
 

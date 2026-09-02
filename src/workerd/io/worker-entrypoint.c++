@@ -161,7 +161,9 @@ class WorkerEntrypoint final: public WorkerInterface {
 // already.
 class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Response {
  public:
-  ResponseSentTracker(kj::HttpService::Response& inner): inner(inner) {}
+  ResponseSentTracker(kj::HttpService::Response& inner, const void* requestTrackKey)
+      : inner(inner),
+        requestTrackKey(requestTrackKey) {}
   KJ_DISALLOW_COPY_AND_MOVE(ResponseSentTracker);
 
   bool isSent() const {
@@ -175,16 +177,16 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
       kj::StringPtr statusText,
       const kj::HttpHeaders& headers,
       kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
-    TRACE_EVENT(WORKERD_TRACE_CATEGORY("request"), "WorkerEntrypoint::ResponseSentTracker::send()",
-        "statusCode", statusCode);
+    TRACE_EVENT(WORKERD_TRACE_CATEGORY("request"), "Send response headers",
+        PERFETTO_TRACK_FROM_POINTER(requestTrackKey), "statusCode", statusCode);
     sent = true;
     httpResponseStatus = statusCode;
     return inner.send(statusCode, statusText, headers, expectedBodySize);
   }
 
   kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
-    TRACE_EVENT(WORKERD_TRACE_CATEGORY("request"),
-        "WorkerEntrypoint::ResponseSentTracker::acceptWebSocket()");
+    TRACE_EVENT(WORKERD_TRACE_CATEGORY("request"), "Accept WebSocket",
+        PERFETTO_TRACK_FROM_POINTER(requestTrackKey));
     sent = true;
     return inner.acceptWebSocket(headers);
   }
@@ -192,6 +194,8 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
  private:
   uint httpResponseStatus = 0;
   kj::HttpService::Response& inner;
+  // This is an opaque Perfetto track identifier and is never dereferenced.
+  [[maybe_unused]] const void* requestTrackKey;
   bool sent = false;
 };
 
@@ -378,17 +382,22 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
     const kj::HttpHeaders& headers,
     kj::AsyncInputStream& requestBody,
     Response& response) {
-  TRACE_EVENT(WORKERD_TRACE_CATEGORY("request"), "WorkerEntrypoint::request()", "url", url.cStr(),
-      PERFETTO_FLOW_FROM_POINTER(this));
-
   // ----- Stage 1: Set up per-request state. -----
 
   auto incomingRequest =
       kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest, "request() can only be called once"));
   this->incomingRequest = kj::none;
   auto& context = incomingRequest->getContext();
-  auto wrappedResponse = kj::heap<ResponseSentTracker>(response);
+  auto wrappedResponse = kj::heap<ResponseSentTracker>(response, this);
   bool isActor = context.getActor() != kj::none;
+
+  TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("request"), "Worker request",
+      PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this), "url", url.cStr(),
+      "actor", isActor);
+  KJ_DEFER({
+    TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("request"), PERFETTO_TRACK_FROM_POINTER(this),
+        PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
+  });
 
   // HACK: Capture workerTracer directly, it's unclear how to acquire the right tracer from context
   // when we need it (for DOs, IoContext may point to a different WorkerTracer by the time we use
@@ -405,9 +414,8 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
   auto metricsForProxyTask = kj::addRef(incomingRequest->getMetrics());
 
-  TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("request"),
-      "WorkerEntrypoint::request() waiting on context", PERFETTO_TRACK_FROM_POINTER(&context),
-      PERFETTO_FLOW_FROM_POINTER(this));
+  TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("request"), "Wait for worker context",
+      PERFETTO_TRACK_FROM_POINTER(&context), PERFETTO_FLOW_FROM_POINTER(this));
 
   KJ_TRY {
     // Cancel any in-flight deferred-proxy task on the way out, including on cancellation of this
@@ -457,8 +465,8 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
                 entrypointName = entrypointName.clone()](
                 Worker::Lock& lock, IoContext& context) mutable {
           TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("request"), PERFETTO_TRACK_FROM_POINTER(&context));
-          TRACE_EVENT(WORKERD_TRACE_CATEGORY("request"), "WorkerEntrypoint::request() run",
-              PERFETTO_FLOW_FROM_POINTER(this));
+          TRACE_EVENT(WORKERD_TRACE_CATEGORY("request"), "Run JavaScript handler",
+              PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this));
           jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
           jsg::AsyncContextFrame::StorageScope userTraceScope =
               context.makeUserAsyncTraceScope(lock);
@@ -483,8 +491,8 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         });
 
         // Record the proxy task and the tracer return time on the success path.
-        TRACE_EVENT(WORKERD_TRACE_CATEGORY("request"),
-            "WorkerEntrypoint::request() deferred proxy step", PERFETTO_FLOW_FROM_POINTER(this));
+        TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("request"), "Handler returned",
+            PERFETTO_TRACK_FROM_POINTER(this));
         proxyTask = kj::mv(deferredProxy.proxyTask);
         KJ_IF_SOME(t, workerTracer) {
           auto httpResponseStatus = wrappedResponse->getHttpResponseStatus();
@@ -496,8 +504,8 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         }
       }
       KJ_CATCH(exception) {
-        TRACE_EVENT(WORKERD_TRACE_CATEGORY("request"), "WorkerEntrypoint::request() catch",
-            PERFETTO_FLOW_FROM_POINTER(this));
+        TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("request"), "Handler exception",
+            PERFETTO_TRACK_FROM_POINTER(this));
         // Log JS exceptions to the JS console, if inspector is attached. This also has the effect
         // of logging internal errors to syslog.
         loggedExceptionEarlier = true;
@@ -524,9 +532,8 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         KJ_CATCH(e) {
           outputGateException.emplace(kj::mv(e));
         }
-        TRACE_EVENT(WORKERD_TRACE_CATEGORY("request"),
-            "WorkerEntrypoint::request() after output lock wait",
-            PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
+        TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("request"), "Output gate released",
+            PERFETTO_TRACK_FROM_POINTER(this));
         // Yield to give a pending cancellation (e.g., the caller dropping our promise because
         // the upstream WebSocket was torn down) a chance to take effect before propagating to
         // the final catch. The original `.then()` chain had an implicit yield point here where
@@ -545,8 +552,8 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
     // ----- Stage 3: Wait for the deferred-proxy task (if any). -----
 
     KJ_IF_SOME(p, proxyTask) {
-      TRACE_EVENT(WORKERD_TRACE_CATEGORY("request"), "WorkerEntrypoint::request() finish proxying",
-          PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
+      TRACE_EVENT(
+          WORKERD_TRACE_CATEGORY("request"), "Proxy response", PERFETTO_TRACK_FROM_POINTER(this));
       // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
       // without pinning it or the isolate into memory.
       KJ_TRY {
@@ -566,8 +573,8 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
   KJ_CATCH(exception) {
     // ----- Stage 4: Handle whatever exception escaped the stages above. -----
 
-    TRACE_EVENT(WORKERD_TRACE_CATEGORY("request"), "WorkerEntrypoint::request() exception",
-        PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
+    TRACE_EVENT_INSTANT(
+        WORKERD_TRACE_CATEGORY("request"), "Request exception", PERFETTO_TRACK_FROM_POINTER(this));
 
     // Stage 1 called `delivered()`, so exceptions reaching this catch are post-delivery failures.
     markExceptionAsDelivered(exception);
@@ -631,6 +638,8 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
     }
 
     KJ_IF_SOME(service, failOpenService) {
+      TRACE_EVENT(WORKERD_TRACE_CATEGORY("request"), "Fail-open fallback",
+          PERFETTO_TRACK_FROM_POINTER(this));
       // We're catching the exception, but metrics should still indicate an exception.
       metricsForCatch->reportFailure(exception);
 
