@@ -88,6 +88,7 @@ export {
   closeResolvesPendingRead,
   closeThenReadIsDone,
   bufferedDataDrainsBeforeDone,
+  writesAfterQueuedCloseReject,
 } from 'close-propagation';
 
 export {

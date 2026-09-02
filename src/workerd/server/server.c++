@@ -1804,7 +1804,7 @@ validVersion:
     options.cipherList = conf.getCipherList();
   }
 
-  return kj::heap<kj::TlsContext>(kj::mv(options));
+  return kj::heap<kj::TlsContext>(kj::mv(options)).attach(kj::mv(attachments));
 }
 
 kj::Promise<kj::Own<kj::NetworkAddress>> Server::makeTlsNetworkAddress(
@@ -3914,7 +3914,7 @@ class Server::WorkerService final: public Service,
       w->setMakeUserRequestSpanFunc(
           [&w = *w, &entropySource = threadContext.getEntropySource()](
               tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
-        return SpanParent(kj::refcounted<UserSpanObserver>(
+        return SpanParent(kj::rc<UserSpanObserver>(
             kj::refcounted<SequentialSpanSubmitter>(w.getWeakRef(), entropySource), kj::mv(traceId),
             traceFlags));
       });
@@ -4546,6 +4546,10 @@ class Server::WorkerService final: public Service,
 
   kj::Promise<void> afterLimitTimeout(kj::Duration t) override {
     return threadContext.getUnsafeTimer().afterDelay(t);
+  }
+
+  kj::TimePoint nowForLimitTimeout() override {
+    return monotonicClock.now();
   }
 
   // ---------------------------------------------------------------------------
@@ -5512,6 +5516,20 @@ kj::Own<WorkerStubChannel> Server::WorkerService::loadIsolate(uint loaderChannel
   return channels.workerLoaders[loaderChannel]->loadIsolate(kj::mv(name), kj::mv(fetchSource));
 }
 
+static MainModuleIsPython isPythonMainModule(config::Worker::Reader conf) {
+  if (!conf.isModules()) {
+    // Service workers syntax has no main module.
+    return MainModuleIsPython::NO;
+  }
+  auto modules = conf.getModules();
+  if (modules.size() == 0) {
+    // An empty module list is a config error, reported elsewhere.
+    return MainModuleIsPython::NO;
+  }
+  // The first module is the main module.
+  return modules[0].isPythonModule() ? MainModuleIsPython::YES : MainModuleIsPython::NO;
+}
+
 kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
     config::Worker::Reader conf,
     capnp::List<config::Extension>::Reader extensions) {
@@ -5535,11 +5553,12 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
     // Use FUTURE_FOR_TEST to allow any valid date (including far future like 2999-12-31)
     // without validation against CODE_VERSION or current date.
     compileCompatibilityFlags(overrideDate, conf.getCompatibilityFlags(), featureFlags,
-        errorReporter, experimental, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr);
+        errorReporter, experimental, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr,
+        isPythonMainModule(conf));
   } else if (conf.hasCompatibilityDate()) {
     compileCompatibilityFlags(conf.getCompatibilityDate(), conf.getCompatibilityFlags(),
         featureFlags, errorReporter, experimental, CompatibilityDateValidation::CODE_VERSION,
-        nullptr);
+        nullptr, isPythonMainModule(conf));
   } else {
     errorReporter.addError(kj::str("Worker must specify compatibilityDate."));
   }

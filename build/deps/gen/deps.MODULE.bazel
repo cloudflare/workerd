@@ -27,10 +27,10 @@ bazel_dep(name = "brotli", version = "1.2.0.bcr.3")
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
-    sha256 = "4f23e7e1b816b2b1039164934d77b20e8f901d59e5c933e23c117cdc51582569",
-    strip_prefix = "capnproto-capnproto-1cde2d1/c++",
+    sha256 = "d968608e08b40b3a8df43ff44d641ca6db3f9b9547b6decff2ddff4d19e9dae3",
+    strip_prefix = "capnproto-capnproto-f984ac8/c++",
     type = "tgz",
-    url = "https://github.com/capnproto/capnproto/tarball/1cde2d11a11a2ee58ac9fcd7d5f35cab05ef18d6",
+    url = "https://github.com/capnproto/capnproto/tarball/f984ac8096a488fb0053b717e646ee2542b66480",
 )
 use_repo(http, "capnp-cpp")
 
@@ -152,7 +152,7 @@ bazel_dep(name = "zlib")
 git_override(
     module_name = "zlib",
     build_file = "//:build/BUILD.zlib",
-    commit = "5eb4d7ed380f214e7a0a23c18f629048d3ba9e00",
+    commit = "285e94b8fa95ad3b7d16b80798ec8dce6febb8c8",
     patch_strip = 1,
     patches = [
         "//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch",

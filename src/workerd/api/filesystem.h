@@ -334,8 +334,9 @@ class FileSystemFileHandle final: public FileSystemHandle {
   }
 
  private:
-  mutable size_t writableCount = 0;
-  friend class FileSystemWritableFileStream;
+  // Grants the write context access to the protected getLocator()/getVfs()
+  // inherited from FileSystemHandle.
+  friend class FileSystemWriteContextHandle;
 };
 
 class FileSystemDirectoryHandle final: public FileSystemHandle {
@@ -515,51 +516,102 @@ class FileSystemDirectoryHandle final: public FileSystemHandle {
   }
 };
 
+// Owns the transactional write state behind a FileSystemWritableFileStream, and
+// implements every operation on it.
+//
+// FileSystemWritableFileStream is transactional in nature. All writes are done to
+// a temporary file. When the stream is closed without an error, the original file
+// data is replaced with the data in the temporary buffer (commit()). If the stream
+// is aborted, the temporary file is dropped and the original contents are left
+// intact (discard()). The temporary file is not visible to the user and is not
+// included in any directory; it only holds the data until the stream is closed.
+//
+// This is the sole owner of that state, which is what makes it a jsg::Object: the
+// same operations back both the C++ FileSystemWritableFileStream and, under the
+// typescript_implemented_streams flag, the TypeScript one, so the file semantics
+// are not implemented twice and cannot drift. It is not registered on the global
+// scope, has no JS-reachable constructor, and is excluded from the generated
+// types.
+class FileSystemWriteContextHandle final: public jsg::Object {
+ public:
+  FileSystemWriteContextHandle(jsg::Lock& js,
+      const workerd::VirtualFileSystem& vfs,
+      jsg::Ref<FileSystemFileHandle> file,
+      kj::Rc<workerd::File> temp);
+
+  static jsg::Ref<FileSystemWriteContextHandle> constructor() = delete;
+
+  // Opens a write context on `file`, seeding the temporary with the file's current
+  // contents when keepExistingData is set. Acquires the VFS lock, which is then
+  // held until commit() or discard().
+  //
+  // Returns the DOMException that createWritable() fails with rather than throwing
+  // it, because the two callers need it in different forms: the C++
+  // createWritable() wraps it in a rejected promise, while the bootstrap factory
+  // backing the TypeScript implementation throws it.
+  static kj::OneOf<jsg::Ref<FileSystemWriteContextHandle>, jsg::Ref<jsg::DOMException>> open(
+      jsg::Lock& js, jsg::Ref<FileSystemFileHandle> file, bool keepExistingData);
+
+  jsg::Promise<void> write(jsg::Lock& js,
+      FileSystemWritableData data,
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+  jsg::Promise<void> seek(jsg::Lock& js,
+      uint32_t newPosition,
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+  jsg::Promise<void> truncate(
+      jsg::Lock& js, uint32_t size, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+
+  // The underlying sink's close algorithm: replaces the original file's contents
+  // with the temporary's, then releases the state.
+  jsg::Promise<void> commit(
+      jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+
+  // The underlying sink's abort algorithm: drops the written data, leaving the
+  // original file intact.
+  void discard(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(FileSystemWriteContextHandle) {
+    JSG_METHOD(write);
+    JSG_METHOD(seek);
+    JSG_METHOD(truncate);
+    JSG_METHOD(commit);
+    JSG_METHOD(discard);
+
+    // Internal plumbing type: keep it out of the generated TypeScript types.
+    JSG_TS_OVERRIDE(type FileSystemWriteContextHandle = never);
+  }
+
+ private:
+  const workerd::VirtualFileSystem& vfs;
+
+  // Cleared by commit() and discard(). kj::none marks the stream as finished, which
+  // is what makes a subsequent write/seek/truncate fail.
+  kj::Maybe<kj::Rc<workerd::File>> temp;
+
+  // The file handle we are writing to.
+  jsg::Ref<FileSystemFileHandle> file;
+
+  kj::Maybe<kj::Own<void>> lock;
+
+  // A note on file position and sizes. In the spec, file sizes and positions
+  // are defined in terms of unsigned long long, or 64-bits. We are using
+  // unsigned long (uint32_t) for these instead. This is largely because
+  // the underlying implementation is holding the file in memory and 4 GB
+  // is WAY more than our isolate heap limit. A uint32_t is more than enough
+  // for our purposes.
+  uint32_t position = 0;
+
+  void clear();
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(file);
+  }
+};
+
 class FileSystemWritableFileStream final: public WritableStream {
  public:
-  struct State final: public kj::Refcounted {
-    const workerd::VirtualFileSystem& vfs;
-
-    // The FileSystemWritableFileStream is a bit transactional in nature.
-    // All writes are done to a temporary file. When the stream is closed
-    // without an error, the original file data is replaced with the data
-    // in the temporary buffer. If the stream is aborted, the temporary file
-    // is deleted and the original contents are left intact.
-    // The temporary file is not visible to the user and is not included in
-    // any directory. It is only used to hold the data until the stream
-    // is closed.
-    kj::Maybe<kj::Rc<workerd::File>> temp;
-
-    // The file handle we are writing to
-    jsg::Ref<FileSystemFileHandle> file;
-
-    kj::Maybe<kj::Own<void>> lock;
-
-    // A note on file position and sizes. In the spec, file sizes and positions
-    // are defined in terms of unsigned long long, or 64-bits. We are using
-    // unsigned long (uint32_t) for these instead. This is largely because
-    // the underlying implementation is holding the file in memory and 4 GB
-    // is WAY more than our isolate heap limit. A uint32_t is more than enough
-    // for our purposes.
-    uint32_t position = 0;
-    State(jsg::Lock& js,
-        const workerd::VirtualFileSystem& vfs,
-        jsg::Ref<FileSystemFileHandle> file,
-        kj::Rc<workerd::File> temp)
-        : vfs(vfs),
-          temp(kj::mv(temp)),
-          file(kj::mv(file)),
-          lock(vfs.lock(js, this->file->getLocator())) {}
-
-    void clear() {
-      temp = kj::none;
-      position = 0;
-      lock = kj::none;
-    }
-  };
-
-  FileSystemWritableFileStream(
-      kj::Own<WritableStreamController> controller, kj::Rc<State> sharedState);
+  FileSystemWritableFileStream(kj::Own<WritableStreamController> controller,
+      jsg::Ref<FileSystemWriteContextHandle> context);
 
   static jsg::Ref<FileSystemWritableFileStream> constructor() = delete;
 
@@ -581,15 +633,11 @@ class FileSystemWritableFileStream final: public WritableStream {
     JSG_METHOD(truncate);
   }
 
-  static jsg::Promise<void> writeImpl(jsg::Lock& js,
-      FileSystemWritableData data, State& state,
-      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
-
  private:
-  kj::Rc<State> sharedState;
+  jsg::Ref<FileSystemWriteContextHandle> context;
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(sharedState->file);
+    visitor.visit(context);
   }
 };
 
@@ -606,7 +654,7 @@ class StorageManager final: public jsg::Object {
 #define EW_WEB_FILESYSTEM_ISOLATE_TYPE                                                             \
   workerd::api::FileSystemHandle, workerd::api::FileSystemFileHandle,                              \
       workerd::api::FileSystemDirectoryHandle, workerd::api::FileSystemWritableFileStream,         \
-      workerd::api::StorageManager,                                                                \
+      workerd::api::FileSystemWriteContextHandle, workerd::api::StorageManager,                    \
       workerd::api::FileSystemFileHandle::FileSystemCreateWritableOptions,                         \
       workerd::api::FileSystemDirectoryHandle::FileSystemGetFileOptions,                           \
       workerd::api::FileSystemDirectoryHandle::FileSystemGetDirectoryOptions,                      \

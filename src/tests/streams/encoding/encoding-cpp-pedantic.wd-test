@@ -1,0 +1,33 @@
+using Workerd = import "/workerd/workerd.capnp";
+using EncodingModules = import "encoding-modules.capnp";
+
+# Runs the full suite against the C++ implementation with the dateless
+# opt-in pedantic_wpt flag added to encoding-cpp.wd-test's pinned set.
+# pedantic_wpt aligns C++ behaviors with the spec where the production
+# default deviates — on this suite's surface, the TextDecoderStream fatal
+# default with an options bag lacking `fatal` (see fatalDefaults) — and is
+# consulted throughout the standard-streams machinery these classes are
+# built on, so the whole module set runs here to prove nothing else the
+# suite pins shifts under it.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-encoding-cpp-pedantic",
+      worker = (
+        modules = EncodingModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+          "fixup-transform-stream-backpressure",
+          "encoder_stream_spec_compliant_backpressure",
+          "text_decoder_cjk_decoder",
+          "workers_api_getters_setters_on_prototype",
+          "set_tostring_tag",
+          "pedantic_wpt",
+        ],
+      )
+    ),
+  ],
+  v8Flags = ["--expose-gc"],
+);

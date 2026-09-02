@@ -129,11 +129,18 @@ class MockEntropySource final: public kj::EntropySource {
 };
 
 struct MockLimitEnforcer final: public LimitEnforcer {
+  MockLimitEnforcer(kj::Maybe<uint&> checkedSubrequestCount = kj::none)
+      : checkedSubrequestCount(checkedSubrequestCount) {}
+
   kj::Own<void> enterJs(jsg::Lock& lock, IoContext& context) override {
     return {};
   }
   void topUpActor() override {}
-  void newSubrequest(bool isInHouse) override {}
+  void newSubrequest(bool isInHouse) override {
+    KJ_IF_SOME(count, checkedSubrequestCount) {
+      ++count;
+    }
+  }
   void newKvRequest(KvOpType op) override {}
   void newAnalyticsEngineRequest() override {}
   kj::Promise<void> limitDrain() override {
@@ -163,6 +170,8 @@ struct MockLimitEnforcer final: public LimitEnforcer {
   size_t getSqliteMemoryUsage() const override {
     return 0;
   }
+
+  kj::Maybe<uint&> checkedSubrequestCount;
 };
 
 struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
@@ -390,13 +399,16 @@ TestFixture::TestFixture(SetupParams&& params)
       waitUntilTasks(*errorHandler),
       headerTable(headerTableBuilder.build()),
       ioChannelFactory(kj::mv(params.ioChannelFactory)),
-      requestObserverFactory(kj::mv(params.requestObserverFactory)) {
+      requestObserverFactory(kj::mv(params.requestObserverFactory)),
+      checkedSubrequestCount(params.checkedSubrequestCount) {
   KJ_IF_SOME(id, params.actorId) {
     KJ_IF_SOME(provided, params.actorLoopback) {
       savedActorLoopback = kj::mv(provided);
     } else {
       savedActorLoopback = kj::refcounted<MockActorLoopback>();
     }
+    savedHibernationManager = kj::mv(params.hibernationManager);
+    savedHolderToken = params.holderToken;
     actor = makeActor(kj::mv(id));
   }
 }
@@ -425,11 +437,18 @@ kj::Own<Worker::Actor> TestFixture::makeActor(Worker::Actor::Id id) {
   return kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
       /*hasTransient=*/false, actorCacheFactory, /*classname=*/kj::none,
       /*props=*/Frankenvalue(), storageFactory, loopback->addRef(), *timerChannel,
-      kj::refcounted<ActorObserver>(), kj::none, kj::none);
+      kj::refcounted<ActorObserver>(),
+      savedHibernationManager.map(
+          [](kj::Own<Worker::Actor::HibernationManager>& m) { return m->addRef(); }),
+      /*hibernationEventType=*/kj::none, /*container=*/kj::none, /*facetManager=*/kj::none,
+      /*version=*/kj::none, savedHolderToken);
 }
 
 void TestFixture::resetActor() {
-  auto id = KJ_ASSERT_NONNULL(actor)->cloneId();
+  resetActor(KJ_ASSERT_NONNULL(actor)->cloneId());
+}
+
+void TestFixture::resetActor(Worker::Actor::Id id) {
   actor = kj::none;  // Drop the old Actor (and its OutputGate / InputGate / ActorCache).
   actor = makeActor(kj::mv(id));
 }
@@ -466,8 +485,8 @@ void TestFixture::runInIoContext(kj::Function<kj::Promise<void>(const Environmen
 }
 
 kj::Own<IoContext> TestFixture::newIoContext() {
-  return kj::refcounted<IoContext>(
-      threadContext, kj::atomicAddRef(*worker), actor, kj::heap<MockLimitEnforcer>());
+  return kj::refcounted<IoContext>(threadContext, kj::atomicAddRef(*worker), actor,
+      kj::heap<MockLimitEnforcer>(checkedSubrequestCount));
 }
 
 kj::Own<IoContext::IncomingRequest> TestFixture::newIncomingRequest() {

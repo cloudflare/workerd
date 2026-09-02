@@ -1654,7 +1654,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonWorkers314 @187 :Bool
       $compatEnableFlag("python_workers_314")
       $compatDisableFlag("no_python_workers_314")
-      $compatEnableDate("2026-09-08")
+      $impliedByAfterDate(name = "pythonWorkers", date = "2026-09-08")
       $pythonSnapshotRelease;
   # Enables Python Workers using Pyodide 314.0.6.
 
@@ -1671,4 +1671,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # abort, and UA-fired events on WebSocket, EventSource, and MessagePort) use the spec's
   # report-and-continue semantics. Internal runtime event delivery (fetch, scheduled, etc.)
   # is not affected and always propagates.
+
+  autoInjectPythonWorkers @189 :Bool
+      $compatEnableFlag("auto_inject_python_workers")
+      $compatDisableFlag("no_auto_inject_python_workers")
+      $experimental;
+  # When enabled, a Worker whose entrypoint is Python are automatically
+  # considered as a Python Worker. This flag will be obsoleted once the feature
+  # is stable.
 }

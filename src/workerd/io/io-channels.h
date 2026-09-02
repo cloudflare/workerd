@@ -31,9 +31,13 @@ class WorkerInterface;
 // bindings of a flag-enabled worker are `Persistent::YES`; everything else is `Persistent::NO`.
 // A `Persistent::YES` channel/token may be stored in long-term storage; `Persistent::NO` may not.
 WD_STRONG_BOOL(Persistent);
+WD_STRONG_BOOL(ReresolveActorPipeline);
 
 // Whether an actor request is a retry of an earlier attempt.
 WD_STRONG_BOOL(IsActorRetry);
+
+// Whether the sender's enforce gate is enabled for this logical call.
+WD_STRONG_BOOL(ActorRetryGateEnabled);
 
 // Interface for talking to the Cache API. Needs to be declared here so that IoContext can
 // contain it.
@@ -79,6 +83,11 @@ class TimerChannel {
   // time limits on some sort of operation, not for implementing application-driven timing, as it does
   // not implement any Spectre mitigations.
   virtual kj::Promise<void> afterLimitTimeout(kj::Duration t) = 0;
+
+  // Returns the precise monotonic time used to calculate deadlines for afterLimitTimeout().
+  virtual kj::TimePoint nowForLimitTimeout() {
+    return kj::systemPreciseMonotonicClock().now();
+  }
 };
 
 class WorkerStubChannel;
@@ -133,6 +142,7 @@ class IoChannelFactory: public virtual kj::Refcounted {
     uint64_t nonce;
     kj::Date createdAt;
     IsActorRetry isRetry;
+    ActorRetryGateEnabled retryGateEnabled;
   };
 
   // Contains metadata attached to an outgoing subrequest from a worker, independent of the type
@@ -166,6 +176,11 @@ class IoChannelFactory: public virtual kj::Refcounted {
     // Present when the caller classified this as a retry-eligible actor request and selected its
     // logical-call token.
     kj::Maybe<ActorRetryRequestMetadata> actorRetryRequestMetadata;
+
+    // A hibernatable WebSocket event wakes an actor over a loopback that outlives it. With no live
+    // actor owning the manager, the pipeline that loopback holds can name a version that is no
+    // longer current, so runtimes with mutable actor code should re-resolve it from its script ID.
+    ReresolveActorPipeline reresolveActorPipeline = ReresolveActorPipeline::NO;
 
     // True if this request was started on a channel that was reconstructed from a stored
     // ("persistent") stub. The target worker re-verifies that it still has the
@@ -652,6 +667,7 @@ kj::Own<IoChannelFactory::RpcChannel> newPromisedChannel<IoChannelFactory::RpcCh
     kj::Promise<kj::Own<IoChannelFactory::RpcChannel>> promise);
 
 // Creates caller-owned metadata for the first attempt of a retry-eligible actor invocation.
-IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(kj::Date createdAt);
+IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(
+    kj::Date createdAt, ActorRetryGateEnabled retryGateEnabled);
 
 }  // namespace workerd

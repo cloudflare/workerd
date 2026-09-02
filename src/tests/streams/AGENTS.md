@@ -1,7 +1,8 @@
 # src/tests/streams/
 
 Streams test suite, organized WPT-style: one subdirectory per functional area
-(`identity/`, eventually `readable/`, `writable/`, `piping/`, ...). Every
+(`identity/`, `encoding/`, `compression/`, `digest/`, `strategies/`,
+eventually `readable/`, `writable/`, `piping/`, ...). Every
 test here runs against **both** streams implementations — the legacy C++ one
 (`src/workerd/api/streams/`) and the TypeScript one
 (`src/per_isolate/webstreams/`) — to prove parity. A test that only makes
@@ -43,13 +44,14 @@ Configs do **not** set `compatibilityDate`. The `wd_test` variant machinery
 owns the date axis (`@` runs at 2000-01-01, `@all-compat-flags` at
 2999-12-31) and the tests must pass at both extremes. Every date-gated
 behavior a test depends on is pinned by naming its flag in **both** configs.
-The pinned set currently includes `streams_byob_reader_detaches_buffer`,
-`internal_stream_byob_return_view`,
-`internal_writable_stream_abort_clears_queue`,
-`workers_api_getters_setters_on_prototype`, `capture_async_api_throws`,
-`set_tostring_tag`, and `enhanced_error_serialization` — see the comment in
-`identity-cpp.wd-test` for what each pins. The TypeScript implementation hard-codes these modern behaviors, so
-pinning them also keeps the two cells comparable at the oldest date.
+Each suite's `<name>-cpp.wd-test` documents its pinned set with a one-line
+reason per flag, and the suite's AGENTS.md tables the flags against the
+legacy tests that guard their unflagged sides. The TypeScript implementation
+hard-codes the modern behaviors, so pinning them also keeps the two cells
+comparable at the oldest date. Dateless opt-in flags that gate behaviors on
+a suite's surface (e.g. `pedantic_wpt`) get a dedicated cell running the
+full shared module set with the flag added, with the flag-off side pinned
+in the legacy cells.
 
 If a test fails only under `@all-compat-flags`, a date-gated flag changes the
 behavior: identify it (`compatibility-date.capnp`) and pin it, don't pin a

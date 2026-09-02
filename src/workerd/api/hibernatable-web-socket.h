@@ -18,6 +18,7 @@ namespace workerd::api {
 
 using HibernationReader =
     rpc::HibernatableWebSocketEventDispatcher::HibernatableWebSocketEventParams::Reader;
+struct HibernatableWebSocketCustomEventTestAccess;
 class HibernatableWebSocketEvent final: public ExtendableEvent {
  public:
   explicit HibernatableWebSocketEvent();
@@ -42,19 +43,16 @@ class HibernatableWebSocketEvent final: public ExtendableEvent {
   JSG_RESOURCE_TYPE(HibernatableWebSocketEvent) {
     JSG_INHERIT(ExtendableEvent);
   }
-
- private:
-  Worker::Actor::HibernationManager& getHibernationManager(jsg::Lock& lock);
 };
 
 class HibernatableWebSocketCustomEvent final: public WorkerInterface::CustomEvent,
                                               public kj::Refcounted {
  public:
-  HibernatableWebSocketCustomEvent(uint16_t typeId,
-      kj::Own<HibernationReader> params,
-      kj::Maybe<Worker::Actor::HibernationManager&> manager = kj::none);
-  HibernatableWebSocketCustomEvent(
-      uint16_t typeId, HibernatableSocketParams params, Worker::Actor::HibernationManager& manager);
+  // The event carries no manager reference: the manager owning the socket is found from the event's
+  // WebSocket ID when the event runs. An RPC-delivered event could not carry a C++ reference, and a
+  // local one cannot know whether the actor it reaches still uses the same manager.
+  HibernatableWebSocketCustomEvent(uint16_t typeId, kj::Own<HibernationReader> params);
+  HibernatableWebSocketCustomEvent(uint16_t typeId, HibernatableSocketParams params);
 
   kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
@@ -79,9 +77,16 @@ class HibernatableWebSocketCustomEvent final: public WorkerInterface::CustomEven
   }
 
  private:
+  friend struct HibernatableWebSocketCustomEventTestAccess;
+
   // Returns `params`, but if we have a HibernationReader we convert it to a
   // HibernatableSocketParams first.
   HibernatableSocketParams consumeParams();
+
+  // Resolves the manager owning `websocketId` and installs it on the actor if the actor has none,
+  // as the actor created by a code-update wake has not. Throws if the actor already holds a
+  // different manager, which means the event reached an actor that does not own the socket.
+  void ensureHibernationManagerForEvent(Worker::Actor& actor, kj::StringPtr websocketId);
 
   // Peeks at params to extract the event type for tracing, without consuming them.
   tracing::HibernatableWebSocketEventInfo::Type getEventType() const;
@@ -89,7 +94,6 @@ class HibernatableWebSocketCustomEvent final: public WorkerInterface::CustomEven
   uint16_t typeId;
   kj::OneOf<HibernatableSocketParams, kj::Own<HibernationReader>> params;
   kj::Maybe<uint32_t> timeoutMs;
-  kj::Maybe<Worker::Actor::HibernationManager&> manager;
 };
 
 #define EW_WEB_SOCKET_MESSAGE_ISOLATE_TYPES                                                        \

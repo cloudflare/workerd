@@ -193,6 +193,15 @@ bridge drives to consume TypeScript streams and to read a
 such global exists under the C++ implementation; `draining-reader.js`
 asserts both sides.
 
+`identity-cpp-pedantic.wd-test` runs the full shared module set with the
+dateless opt-in `pedantic_wpt` flag added to the main C++ cell's pinned
+set. Unlike the encoding suite's pedantic cell, it pins the ABSENCE of
+pedantic effects: the internal-stream implementation consults the flag
+nowhere and the pedantic-gated standard-streams machinery is unreachable
+from this suite's surface, so every shared assertion holds unchanged — an
+enforced invariant against future pedantic branches reaching these
+classes.
+
 ## Divergence ledger (C++ vs TypeScript)
 
 Every entry is asserted on both sides via the `which-impl` conditional
@@ -233,7 +242,7 @@ pattern; a change to either side fails its cell.
 | `ordering.js` | 1:1 write/read correspondence in both interleavings; multi-chunk aggregate integrity; clean EOF tails |
 | `byob.js` | BYOB reader support; partial fills across reads with write completion on full consumption; lying destination extents (at call and after enqueue) with sentinel overwrite guards; read-call validation (zero-length view, non-view, missing argument); input buffer detached by read with non-detachable (SAB-backed) destinations rejected; repeated EOF zero-length views with preserved buffers |
 | `backpressure.js` | writes and close queue unboundedly with settlement on consumption; advisory overfill (negative `desiredSize`); default HWM 1 with divergent accounting (ledger #17); explicit HWM as initial `desiredSize` (negative-zero HWM normalized to +0); byte-level tracking incl. in-flight bytes; string accounting (ledger #7); `ready` replacement and recovery |
-| `close-propagation.js` | pending read resolves done; post-close reads done; buffered data drains before done; `closed` promises settle |
+| `close-propagation.js` | pending read resolves done; post-close reads done; buffered data drains before done; `closed` promises settle; writes after a queued close reject (message per impl) without disturbing the close or delivered bytes |
 | `abort-propagation.js` | pending/subsequent reads and both `closed` promises reject (identity per ledger #8); modern abort clears a pending write, rejecting it with the abort reason (undefined or original instance); later writes (ledger #9) |
 | `cancel-propagation.js` | pending write/close reject (ledger #8, #10); canceling reader's reads resolve done |
 | `fixed-length.js` | exact-length delivery (one and two chunks); `FLS(0)`; HWM capping incl. bigint; capped-HWM data flow |

@@ -1127,7 +1127,7 @@ class SpanParent {
   // Make a SpanParent that causes children not to be reported anywhere.
   SpanParent(decltype(nullptr)) {}
 
-  SpanParent(kj::Maybe<kj::Own<SpanObserver>> observer): observer(kj::mv(observer)) {}
+  SpanParent(kj::Rc<SpanObserver> observer): observer(kj::mv(observer)) {}
 
   SpanParent(SpanParent&& other) = default;
   SpanParent& operator=(SpanParent&& other) = default;
@@ -1143,7 +1143,7 @@ class SpanParent {
 
   // Useful to skip unnecessary code when not observed.
   bool isObserved() {
-    return observer != kj::none;
+    return observer != nullptr;
   }
 
   // Get the underlying SpanObserver representing the parent span.
@@ -1152,7 +1152,8 @@ class SpanParent {
   // trace IDs in a way that is specific to the trace back-end being used. The caller must downcast
   // the `SpanObserver` to the expected observer type in order to extract the trace ID.
   kj::Maybe<SpanObserver&> getObserver() {
-    return observer;
+    if (observer != nullptr) return *observer;
+    return kj::none;
   }
 
   // Return the serializable identity of this span for cross-boundary propagation.
@@ -1166,7 +1167,7 @@ class SpanParent {
   static SpanParent fromSpanContext(tracing::SpanContext context);
 
  private:
-  kj::Maybe<kj::Own<SpanObserver>> observer;
+  kj::Rc<SpanObserver> observer;
 };
 
 // Whether the span tag is a custom tag added using the user tracing binding, we do not log for
@@ -1188,7 +1189,7 @@ class SpanBuilder {
   //
   // `operationName` should be a string literal with infinite lifetime, or somehow otherwise be
   // attached to the observer observing this span.
-  explicit SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
+  explicit SpanBuilder(kj::Rc<SpanObserver> observer,
       kj::ConstString operationName,
       kj::Maybe<kj::Date> startTime = kj::none);
 
@@ -1208,7 +1209,7 @@ class SpanBuilder {
 
   // Useful to skip unnecessary code when not observed.
   bool isObserved() {
-    return observer != kj::none;
+    return observer != nullptr;
   }
 
   // Get the underlying SpanObserver representing the span.
@@ -1217,7 +1218,8 @@ class SpanBuilder {
   // trace IDs in a way that is specific to the trace back-end being used. The caller must downcast
   // the `SpanObserver` to the expected observer type in order to extract the trace ID.
   kj::Maybe<SpanObserver&> getObserver() {
-    return observer;
+    if (observer != nullptr) return *observer;
+    return kj::none;
   }
 
   // Create a new child span.
@@ -1255,7 +1257,7 @@ class SpanBuilder {
   void addLog(kj::Date timestamp, kj::ConstString key, TagValue value);
 
  private:
-  kj::Maybe<kj::Own<SpanObserver>> observer;
+  kj::Rc<SpanObserver> observer;
   // The under-construction span, or null if the span has ended.
   kj::Maybe<Span> span;
 
@@ -1274,12 +1276,12 @@ class SpanObserver: public kj::Refcounted {
   // Allocate a new child span.
   //
   // Note that children can be created long after a span has completed.
-  [[nodiscard]] virtual kj::Own<SpanObserver> newChild() = 0;
+  [[nodiscard]] virtual kj::Rc<SpanObserver> newChild() = 0;
 
   // Allocate a child for a span initiated directly by user JavaScript (via
   // `ctx.tracing.enterSpan`). Allows implementations to apply different policies than for
   // runtime-issued spans (notably, edgeworker bypasses its operation-name allowlist here).
-  [[nodiscard]] virtual kj::Own<SpanObserver> newChildFromUserCode() {
+  [[nodiscard]] virtual kj::Rc<SpanObserver> newChildFromUserCode() {
     return newChild();
   }
 
@@ -1325,7 +1327,7 @@ class NonRecordingSpanObserver final: public SpanObserver {
  public:
   explicit NonRecordingSpanObserver(tracing::SpanContext context): context(kj::mv(context)) {}
 
-  kj::Own<SpanObserver> newChild() override {
+  kj::Rc<SpanObserver> newChild() override {
     return {};
   }
   void onOpen(kj::ConstString, kj::Date) override {}
@@ -1339,39 +1341,35 @@ class NonRecordingSpanObserver final: public SpanObserver {
 };
 
 inline kj::Maybe<tracing::SpanContext> SpanParent::toSpanContext() {
-  KJ_IF_SOME(obs, observer) {
-    return obs->toSpanContext();
-  }
+  if (observer != nullptr) return observer->toSpanContext();
   return kj::none;
 }
 
 inline tracing::SpanId SpanParent::getSpanId() {
-  KJ_IF_SOME(obs, observer) {
-    return obs->getSpanId();
-  }
+  if (observer != nullptr) return observer->getSpanId();
   return tracing::SpanId::nullId;
 }
 
 inline SpanParent SpanParent::fromSpanContext(tracing::SpanContext context) {
-  return SpanParent(kj::refcounted<NonRecordingSpanObserver>(kj::mv(context)));
+  return SpanParent(kj::rc<NonRecordingSpanObserver>(kj::mv(context)));
 }
 
-inline SpanParent::SpanParent(SpanBuilder& builder): observer(mapAddRef(builder.observer)) {}
+inline SpanParent::SpanParent(SpanBuilder& builder): observer(builder.observer.addRef()) {}
 
 inline SpanParent SpanParent::addRef() {
-  return SpanParent(mapAddRef(observer));
+  return SpanParent(observer.addRef());
 }
 
 inline SpanBuilder SpanParent::newChild(
     kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
-  return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
-      kj::mv(operationName), startTime);
+  if (observer == nullptr) return nullptr;
+  return SpanBuilder(observer->newChild(), kj::mv(operationName), startTime);
 }
 
 inline SpanBuilder SpanBuilder::newChild(
     kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
-  return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
-      kj::mv(operationName), startTime);
+  if (observer == nullptr) return nullptr;
+  return SpanBuilder(observer->newChild(), kj::mv(operationName), startTime);
 }
 
 class TraceContext;

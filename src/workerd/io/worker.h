@@ -892,7 +892,35 @@ class Worker::Actor final: public kj::Refcounted {
         kj::Maybe<kj::StringPtr> request, kj::Maybe<kj::StringPtr> response) = 0;
     virtual kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse(
         jsg::Lock& js) = 0;
+    // A loopback is how the manager reaches its actor to deliver an event. A code update replaces
+    // the actor that supplied one, so this parks it and events arriving meanwhile wait for a
+    // loopback rather than reaching the outgoing generation. The handoff ends when the replacement
+    // actor calls setLoopback(), or when the returned handle is dropped, which puts the parked
+    // loopback back.
+    virtual kj::Own<void> beginLoopbackHandoff() KJ_WARN_UNUSED_RESULT = 0;
+    virtual void setLoopback(kj::Own<Loopback> loopback) = 0;
     virtual void setTimerChannel(TimerChannel& timerChannel) = 0;
+
+    // Points the manager at the actor that owns it. The manager holds only a weak reference, so it
+    // can tell whether that actor is still alive.
+    virtual void setOwningActor(Actor& actor) = 0;
+
+    // The actor that owns this manager, or kj::none if no live actor does.
+    virtual kj::Maybe<Actor&> getOwningActor() = 0;
+
+    // The ID of the actor that owns this manager, or kj::none if none ever has. Kept as the
+    // manager's own copy, so unlike getOwningActor() it still names the owner after a code update
+    // destroyed it, which is exactly when a replacement adopts the manager.
+    virtual kj::Maybe<const Id&> getOwningActorId() = 0;
+
+    // The holder token of the owning actor, or kj::none if it had none. Unlike the ID, this
+    // distinguishes sibling facets, which share their parent's ID by default.
+    virtual kj::Maybe<uint64_t> getOwningHolderToken() = 0;
+
+    // Drops the owning holder token, leaving the actor ID as the manager's identity. Called when
+    // the manager leaves its holder for a holder that cannot be named yet, which is what handing it
+    // to a replacement generation in another cart does. The adopting actor sets a new token.
+    virtual void forgetOwningHolder() = 0;
     virtual kj::Own<HibernationManager> addRef() = 0;
     virtual void setEventTimeout(kj::Maybe<uint32_t> timeoutMs) = 0;
     virtual kj::Maybe<uint32_t> getEventTimeout() = 0;
@@ -947,7 +975,8 @@ class Worker::Actor final: public kj::Refcounted {
       kj::Maybe<uint16_t> hibernationEventType,
       kj::Maybe<rpc::Container::Client> container = kj::none,
       kj::Maybe<FacetManager&> facetManager = kj::none,
-      kj::Maybe<ActorVersion> version = kj::none);
+      kj::Maybe<ActorVersion> version = kj::none,
+      kj::Maybe<uint64_t> holderToken = kj::none);
 
   ~Actor() noexcept(false);
 
@@ -1035,6 +1064,14 @@ class Worker::Actor final: public kj::Refcounted {
   // setHibernationManager() hasn't been called yet.
   kj::Maybe<HibernationManager&> getHibernationManager();
 
+  // Names the holder this actor belongs to, or null if the embedder supplies no such name.
+  kj::Maybe<uint64_t> getHolderToken();
+
+  // Whether the sockets `manager` holds belong to this actor. Whatever holds a manager across
+  // generations does not necessarily hold one per actor, so a manager offered to this actor can
+  // still be in use by a live actor, or belong to a sibling facet that shares this actor's ID.
+  bool ownsHibernatedSockets(HibernationManager& manager);
+
   // Set the HibernationManager for this actor. This is called once, on the first call to
   // `acceptWebSocket`.
   void setHibernationManager(kj::Own<HibernationManager> manager);
@@ -1063,13 +1100,24 @@ class Worker::Actor final: public kj::Refcounted {
 
   kj::Own<Worker::Actor> addRef();
 
+  using WeakRef = workerd::WeakRef<Actor>;
+
+  // A reference that goes invalid when this actor is destroyed.
+  kj::Own<WeakRef> getWeakRef();
+
  private:
   kj::Promise<WorkerInterface::ScheduleAlarmResult> handleAlarm(kj::Date scheduledTime);
+
+  // Points a manager at this actor. Both the constructor and setHibernationManager() go through
+  // here, so an adopted manager ends up in the same state as one supplied at construction.
+  void attachHibernationManager(HibernationManager& manager);
 
   kj::Own<const Worker> worker;
   kj::Maybe<kj::Own<RequestTracker>> tracker;
   struct Impl;
   kj::Own<Impl> impl;
+
+  kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<Actor>(), *this);
 
   kj::Maybe<api::ExportedHandler&> getHandler();
   friend class Worker;

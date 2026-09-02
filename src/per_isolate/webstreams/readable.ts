@@ -88,7 +88,8 @@ const {
 // is needed for the race's internal .then() calls on its arguments.
 const SafePromiseRace = SafePromise.race;
 
-const { isArrayBufferView, isPromise, markPromiseHandled } = utils;
+const { isArrayBuffer, isArrayBufferView, isPromise, markPromiseHandled } =
+  utils;
 
 const {
   StreamQueue,
@@ -4009,16 +4010,44 @@ async function collectChunks<R>(
   const chunks: Uint8Array[] = [];
   while (true) {
     const result = await reader.read();
-    for (const chunk of result.chunks as Uint8Array[]) {
-      const length = TypedArrayPrototypeGetByteLength(chunk);
-      if (length === 0) continue;
-      amountRead += BigInt(length);
+    for (const chunk of result.chunks as unknown[]) {
+      // Drained chunks are untrusted values: accept any BufferSource,
+      // normalized to a Uint8Array over its region with the extent pinned
+      // at drain time; anything else fails with the same TypeError the
+      // C++ bridge pump uses. Detached inputs are skipped with the other
+      // empties.
+      let view: Uint8Array;
+      let byteLength: number;
+      if (isArrayBufferView(chunk)) {
+        // Probe detachment through the buffer before getViewInfo: a
+        // detached DataView's byteLength getter throws (typed arrays and
+        // raw buffers just report 0).
+        const buffer =
+          TypedArrayPrototypeGetSymbolToStringTag(chunk) !== undefined
+            ? TypedArrayPrototypeGetBuffer(chunk)
+            : DataViewPrototypeGetBuffer(chunk as DataView);
+        if (ArrayBufferPrototypeDetachedGet(buffer)) continue;
+        const info = getViewInfo(chunk);
+        byteLength = info.byteLength;
+        if (byteLength === 0) continue;
+        view = new Uint8Array(buffer, info.byteOffset, byteLength);
+      } else if (isArrayBuffer(chunk)) {
+        byteLength = ArrayBufferPrototypeByteLengthGet(chunk);
+        if (byteLength === 0) continue;
+        // The explicit extent matters: on a resizable buffer a bare
+        // `new Uint8Array(chunk)` would be length-tracking, and a resize
+        // from user code at a later await would desync it from amountRead.
+        view = new Uint8Array(chunk, 0, byteLength);
+      } else {
+        throw new TypeError('This ReadableStream did not return bytes.');
+      }
+      amountRead += BigInt(byteLength);
       if (amountRead > limit) {
         throw new RangeError(
           `Stream exceeded the maximum allowed limit of ${Number(limit)} bytes`
         );
       }
-      ArrayPrototypePush(chunks, chunk);
+      ArrayPrototypePush(chunks, view);
     }
     if (result.done) break;
   }

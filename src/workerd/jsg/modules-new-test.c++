@@ -857,7 +857,8 @@ KJ_TEST("A worker bundle module can shadow node:process") {
     js.tryCatch([&] {
       auto val = ModuleRegistry::resolve(js, "node:process");
       KJ_ASSERT(val.isString());
-      KJ_ASSERT(kj::str(val) == "shadowed-process"_kjc);
+      auto value = kj::str(val);
+      KJ_ASSERT(value == "shadowed-process"_kjc);
     }, [&](Value exception) { js.throwException(kj::mv(exception)); });
   });
 }
@@ -904,7 +905,8 @@ KJ_TEST("A worker bundle module can shadow node:process via dynamic import") {
     js.tryCatch([&] {
       auto val = ModuleRegistry::resolve(js, "file:///main", "default"_kjc);
       KJ_ASSERT(val.isString());
-      KJ_ASSERT(kj::str(val) == "shadowed-process"_kjc);
+      auto value = kj::str(val);
+      KJ_ASSERT(value == "shadowed-process"_kjc);
     }, [&](Value exception) { js.throwException(kj::mv(exception)); });
   });
 }
@@ -1006,16 +1008,14 @@ KJ_TEST("Basic types of modules work (text, data, json, wasm)") {
     CompilationObserver compilationObserver;
     ModuleRegistry::Builder registryBuilder(BASE);
 
-    ModuleBundle::BundleBuilder bundleBuilder(BASE);
     auto abcSource = kj::str("hello");
     auto xyzData = kj::heapArray<kj::byte>({1, 2, 3});
+    auto json = kj::str("{\"foo\":123}");
+    auto wasm = makeTestWasm();
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
     bundleBuilder.addSyntheticModule("abc", Module::newTextModuleHandler(abcSource));
     bundleBuilder.addSyntheticModule("xyz", Module::newDataModuleHandler(xyzData));
-
-    auto json = kj::str("{\"foo\":123}");
     bundleBuilder.addSyntheticModule("json", Module::newJsonModuleHandler(json.first(json.size())));
-
-    auto wasm = makeTestWasm();
     bundleBuilder.addSyntheticModule("wasm", Module::newWasmModuleHandler(wasm));
 
     auto mainSource2 = kj::str("export { default as abc } from 'abc';"
@@ -1587,17 +1587,17 @@ KJ_TEST("Module source is decoded as UTF-8 across all encoding tiers") {
     auto attached = registry->attachToIsolate(js, compilationObserver);
 
     JSG_TRY(js) {
-      auto plain = ModuleRegistry::resolve(js, "file:///ascii");
-      KJ_ASSERT(kj::str(plain) == "plain");
+      auto plain = kj::str(ModuleRegistry::resolve(js, "file:///ascii"));
+      KJ_ASSERT(plain == "plain");
 
-      auto cafe = ModuleRegistry::resolve(js, "file:///latin1");
-      KJ_ASSERT(kj::str(cafe) == "caf\xc3\xa9", kj::str(cafe));
+      auto cafe = kj::str(ModuleRegistry::resolve(js, "file:///latin1"));
+      KJ_ASSERT(cafe == "caf\xc3\xa9", cafe);
 
-      auto cjk = ModuleRegistry::resolve(js, "file:///utf16");
-      KJ_ASSERT(kj::str(cjk) == "\xe9\x83\xa8\xe5\x93\x81 \xf0\x9f\x8e\x89", kj::str(cjk));
+      auto tokyo = kj::str(ModuleRegistry::resolve(js, "file:///utf16"));
+      KJ_ASSERT(tokyo == "\xe9\x83\xa8\xe5\x93\x81 \xf0\x9f\x8e\x89", tokyo);
 
-      auto replaced = ModuleRegistry::resolve(js, "file:///invalid");
-      KJ_ASSERT(kj::str(replaced) == "caf\xef\xbf\xbd", kj::str(replaced));
+      auto korean = kj::str(ModuleRegistry::resolve(js, "file:///invalid"));
+      KJ_ASSERT(korean == "caf\xef\xbf\xbd", korean);
     }
     JSG_CATCH(exception) {
       js.throwException(kj::mv(exception));
@@ -1771,8 +1771,8 @@ KJ_TEST("Invalid JSON syntax module throws exception as expected") {
     ResolveObserverImpl observer;
     CompilationObserver compilationObserver;
 
-    ModuleBundle::BundleBuilder bundleBuilder(BASE);
     auto json = kj::str("not valid json");
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
     bundleBuilder.addSyntheticModule("foo", Module::newJsonModuleHandler(json.first(json.size())));
 
     auto esm = kj::str("import foo from 'foo'");
@@ -2096,6 +2096,8 @@ KJ_TEST("UNWRAP_DEFAULT returns namespace for bundle ESM, default for others") {
     ResolveObserverImpl observer;
     CompilationObserver compilationObserver;
 
+    auto json = kj::str("{\"key\": \"value\"}");
+    auto text = kj::str("hello world");
     ModuleBundle::BundleBuilder bundleBuilder(BASE);
 
     // Bundle ESM with named exports (no __cjsUnwrapDefault)
@@ -2107,12 +2109,10 @@ KJ_TEST("UNWRAP_DEFAULT returns namespace for bundle ESM, default for others") {
     bundleBuilder.addEsmModule("esm-cjs", esmCjs);
 
     // JSON synthetic module
-    auto json = kj::str("{\"key\": \"value\"}");
     bundleBuilder.addSyntheticModule(
         "data.json", Module::newJsonModuleHandler(json.first(json.size())));
 
     // Text synthetic module
-    auto text = kj::str("hello world");
     bundleBuilder.addSyntheticModule(
         "data.txt", Module::newTextModuleHandler(text.first(text.size())));
 
@@ -2340,12 +2340,12 @@ KJ_TEST("REQUIRE_ESM rejects non-ESM entry points before evaluation") {
   PREAMBLE([&](Lock& js) {
     CompilationObserver compilationObserver;
 
+    auto json = kj::str("{\"key\": \"value\"}");
     ModuleBundle::BundleBuilder bundleBuilder(BASE);
 
     auto esm = kj::str("export default 42;");
     bundleBuilder.addEsmModule("main", esm);
 
-    auto json = kj::str("{\"key\": \"value\"}");
     bundleBuilder.addSyntheticModule(
         "data.json", Module::newJsonModuleHandler(json.first(json.size())));
 

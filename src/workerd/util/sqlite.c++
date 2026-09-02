@@ -599,6 +599,12 @@ void SqliteDatabase::init(kj::Maybe<kj::WriteMode> maybeMode) {
 
   auto memoryScope = enterMemoryScope();
 
+  // sqlite3_close_v2 is expected to be called even when sqlite3_open_v2 returns an error. It is
+  // expected that sqlite3_close_v2 sets up a database in need of close, or sets nullptr.
+  // sqlite3_close_v2 is safe to call on nullptr, so we should simply call this always, thus
+  // cleaning up a partial db even when SQLITE_CALL_NODB throws.
+  KJ_ON_SCOPE_FAILURE(sqlite3_close_v2(db));
+
   KJ_IF_SOME(mode, maybeMode) {
     int flags = SQLITE_OPEN_READWRITE;
     if (kj::has(mode, kj::WriteMode::CREATE)) {
@@ -632,8 +638,6 @@ void SqliteDatabase::init(kj::Maybe<kj::WriteMode> maybeMode) {
           sqlite3_open_v2(path.toString().cStr(), &db, SQLITE_OPEN_READONLY, vfs.getName().cStr()));
     }
   }
-
-  KJ_ON_SCOPE_FAILURE(sqlite3_close_v2(db));
 
   setupSecurity(db);
 
@@ -1452,9 +1456,15 @@ SqliteDatabase::StatementAndEffect& SqliteDatabase::Statement::prepareForExecuti
     // Database was reset. Recompile the statement against the new database. (This could throw,
     // of course, if the statement depends on tables that haven't been recreated yet.)
     //
+    // Move the SQL out of `stmt` before parsing it. This ensures that the StringPtrs used by
+    // prepareSql() don't point into the OneOf alternative when that alternative is replaced, and
+    // allows a failed preparation to restore the SQL for the next attempt.
+    auto sqlCodeToPrepare = kj::mv(sqlCode);
+    KJ_ON_SCOPE_FAILURE(stmt = kj::mv(sqlCodeToPrepare));
+
     // We use the MULTI flag here in case this Statement was created by prepareMulti(). If multiple
     // statements are parsed, they'll be added to our `prelude`, and also executed immediately.
-    stmt = db.prepareSql(regulator, sqlCode, SQLITE_PREPARE_PERSISTENT, MULTI, prelude);
+    stmt = db.prepareSql(regulator, sqlCodeToPrepare, SQLITE_PREPARE_PERSISTENT, MULTI, prelude);
   }
 
   return KJ_ASSERT_NONNULL(stmt.tryGet<StatementAndEffect>());

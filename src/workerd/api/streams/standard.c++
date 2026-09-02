@@ -3151,7 +3151,8 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
     jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {
   auto underlyingSource = kj::mv(maybeUnderlyingSource).orDefault({});
   auto queuingStrategy = kj::mv(maybeQueuingStrategy).orDefault({});
-  auto type = underlyingSource.type.map([](kj::StringPtr s) { return s; }).orDefault(""_kj);
+  auto type =
+      kj::str(underlyingSource.type.map([](kj::StringPtr s) { return s; }).orDefault(""_kj));
 
   expectedLength = underlyingSource.expectedLength;
 
@@ -3566,11 +3567,15 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
       DrainingReadResult result = co_await prp.promise;
 
       // Write all the chunks we received using vectored write for efficiency.
+      // Fast path: hand chunks to the sink synchronously via tryWriteSync() when it can
+      // accept data immediately, avoiding a round-trip through the KJ event loop.
       if (result.chunks.size() > 0) {
         KJ_ON_SCOPE_FAILURE(writeFailed = true);
         auto pieces =
             KJ_MAP(chunk, result.chunks) -> kj::ArrayPtr<const kj::byte> { return chunk.asPtr(); };
-        co_await sink->write(pieces);
+        if (!sink->tryWriteSync(pieces)) {
+          co_await sink->write(pieces);
+        }
       }
 
       // If the stream is done, end the output if needed and exit.

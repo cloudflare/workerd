@@ -514,18 +514,6 @@ wd_test(
 )
 
 wd_test(
-    src = "crypto-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["crypto-streams-test.js"],
-)
-
-wd_test(
-    src = "crypto-streams-ts-test.wd-test",
-    args = ["--experimental"],
-    data = ["crypto-streams-test.js"],
-)
-
-wd_test(
     src = "data-url-fetch-test.wd-test",
     args = ["--experimental"],
     data = ["data-url-fetch-test.js"],
@@ -535,12 +523,6 @@ wd_test(
     src = "encoding-test.wd-test",
     args = ["--experimental"],
     data = ["encoding-test.js"],
-)
-
-wd_test(
-    src = "encoding-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["encoding-streams-test.js"],
 )
 
 wd_test(
@@ -621,13 +603,6 @@ wd_test(
     src = "unhandled-rejection-test.wd-test",
     args = ["--experimental"],
     data = ["unhandled-rejection-test.js"],
-)
-
-wd_test(
-    size = "large",
-    src = "decompression-stream-unhandled-rejection-test.wd-test",
-    args = ["--experimental"],
-    data = ["decompression-stream-unhandled-rejection-test.js"],
 )
 
 wd_test(
@@ -732,6 +707,7 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
     src = "scheduler-test.wd-test",
     args = ["--experimental"],
     data = ["scheduler-test.js"],
@@ -753,18 +729,6 @@ wd_test(
     src = "persistent-stubs-test.wd-test",
     args = ["--experimental"],
     data = ["persistent-stubs-test.js"],
-)
-
-wd_test(
-    src = "ts-compression-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["ts-compression-streams-test.js"],
-)
-
-wd_test(
-    src = "compression-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["compression-streams-test.js"],
 )
 
 wd_test(
@@ -1202,6 +1166,18 @@ wd_test(
 )
 
 wd_test(
+    src = "webfs-ts-test.wd-test",
+    args = ["--experimental"],
+    data = ["webfs-test.js"],
+)
+
+wd_test(
+    src = "ts-webfs-writable-test.wd-test",
+    args = ["--experimental"],
+    data = ["ts-webfs-writable-test.js"],
+)
+
+wd_test(
     src = "worker-test.wd-test",
     args = ["--experimental"],
     data = ["worker-test.js"],
@@ -1232,7 +1208,7 @@ wd_test(
 )
 
 wd_test(
-    size = "large",
+    size = "enormous",
     src = "worker-loader-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-test.js"],
@@ -1389,12 +1365,6 @@ wd_test(
 wd_test(
     src = "htmlrewriter-transform-cancel-test.wd-test",
     data = ["htmlrewriter-transform-cancel-test.js"],
-)
-
-wd_test(
-    src = "ts-digest-stream-test.wd-test",
-    args = ["--experimental"],
-    data = ["ts-digest-stream-test.js"],
 )
 
 wd_test(

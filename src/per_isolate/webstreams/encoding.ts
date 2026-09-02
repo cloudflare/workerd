@@ -35,9 +35,6 @@ const {
 
 const { isArrayBuffer, isArrayBufferView } = utils;
 
-// Captured for primordials discipline — ToString coercion per spec.
-const StringCoerce = String;
-
 const { TransformStream } = require('webstreams/transform');
 
 function isActualObject(value: unknown) {
@@ -95,7 +92,9 @@ class TextEncoderStream {
         controller: { enqueue: (c: Uint8Array) => void }
       ) {
         // Spec: "encode and enqueue a chunk" ToString-coerces the input.
-        const str = typeof chunk === 'string' ? chunk : StringCoerce(chunk);
+        // Template literal = ToString exactly: user toString honored for
+        // objects, TypeError for symbols (String() would stringify them).
+        const str = typeof chunk === 'string' ? chunk : `${chunk}`;
         const text = self.#pendingHighSurrogate + str;
         const len = text.length;
         if (len === 0) return;
@@ -185,6 +184,7 @@ class TextDecoderStream {
           );
         }
         const decoded = TextDecoderDecode(decoder, chunk as BufferSource, {
+          __proto__: null,
           stream: true,
         });
         if (decoded.length > 0) {

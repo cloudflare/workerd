@@ -268,6 +268,10 @@ export default {
     comment: 'CORS is not implemented',
     omittedTests: true,
   },
+  'cors/cors-preflight-cache-tainted.any.js': {
+    comment: 'CORS is not implemented',
+    omittedTests: true,
+  },
   'cors/cors-preflight-cache.any.js': {
     comment: 'CORS is not implemented',
     omittedTests: true,
@@ -294,6 +298,10 @@ export default {
   },
   'cors/cors-preflight-status.any.js': {
     comment: 'CORS is not implemented',
+    omittedTests: true,
+  },
+  'cors/cors-preflight-unterminated-body.any.js': {
+    comment: 'CORS preflights are not implemented in workerd',
     omittedTests: true,
   },
   'cors/cors-preflight.any.js': {

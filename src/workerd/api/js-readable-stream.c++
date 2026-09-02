@@ -12,6 +12,7 @@
 #include <workerd/io/features.h>
 #include <workerd/jsg/iterator.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/strong-bool.h>
 
 #include <kj/common.h>
@@ -187,6 +188,11 @@ class TeeBranchSource final: public ReadableStreamSource {
     return inner->tryRead(buffer, minBytes, maxBytes);
   }
 
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    // kj::newTee's branches serve already-buffered data synchronously.
+    return inner->tryReadSync(buffer, minBytes);
+  }
+
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
     if (encoding == StreamEncoding::IDENTITY) {
       return inner->tryGetLength();
@@ -211,6 +217,11 @@ class TeeBranchSource final: public ReadableStreamSource {
 class NullSource final: public ReadableStreamSource {
  public:
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return static_cast<size_t>(0);
+  }
+
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    // Always at EOF, which is a valid synchronous answer.
     return static_cast<size_t>(0);
   }
 
@@ -258,6 +269,40 @@ class PrefixedSource final: public ReadableStreamSource {
       }
     }
     co_return co_await inner->tryRead(buffer, minBytes, maxBytes);
+  }
+
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    KJ_REQUIRE(minBytes <= buffer.size());
+    KJ_IF_SOME(prefix, maybePrefix) {
+      if (prefix.view != nullptr) {
+        size_t amount = kj::min(buffer.size(), prefix.view.size());
+        if (amount >= minBytes) {
+          // The prefix alone satisfies the read: serve it synchronously. (buffer is a
+          // by-value view; write() advancing it does not affect the caller.)
+          buffer.write(prefix.view.first(amount));
+          prefix.view = prefix.view.slice(amount);
+          if (prefix.view == nullptr) {
+            maybePrefix = kj::none;
+          }
+          return amount;
+        }
+        // The prefix alone cannot satisfy minBytes, so the remainder must come from the
+        // inner source. Probe the inner source into the tail of the buffer FIRST: a
+        // declined synchronous read must have no side effects, so the prefix may only be
+        // consumed once the combined read is known to complete. Note that amount <
+        // minBytes <= buffer.size() implies amount == prefix.view.size(), so completing
+        // consumes the entire prefix.
+        KJ_IF_SOME(n, inner->tryReadSync(buffer.slice(amount, buffer.size()), minBytes - amount)) {
+          buffer.write(prefix.view.first(amount));
+          maybePrefix = kj::none;
+          return amount + n;
+        }
+        return kj::none;
+      }
+      // An empty prefix behaves identically to no prefix. Leave the normalization to the
+      // asynchronous paths: a declined synchronous read must have no side effects.
+    }
+    return inner->tryReadSync(buffer, minBytes);
   }
 
   kj::Promise<DeferredProxy<void>> pumpTo(kj::Ptr<WritableStreamSink> output, bool end) override {
@@ -438,7 +483,9 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
 // ownership of that heap buffer without changing its address, so view remains valid.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdangling-field"
-JsReadableStream::Buffer::Buffer(kj::Array<const kj::byte> data): view(data), owned(kj::mv(data)) {}
+JsReadableStream::Buffer::Buffer(kj::Array<const kj::byte> data)
+    : owned(kj::mv(data)),
+      view(owned) {}
 #pragma clang diagnostic pop
 
 // Blob contents live in a V8 ArrayBuffer.  The streams built from this Buffer are read on the
@@ -1271,6 +1318,39 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
 
   ensureScratch(kScratchSize);
 
+  // Fast path: complete the read synchronously when data is already available (e.g.
+  // buffered tee or decompressed data), settling the pull without an event-loop round
+  // trip. Skipped when the read has already been abandoned: the asynchronous path's
+  // settlement is inert in that case (the bytes are stashed for redelivery), and there
+  // is no reason to hurry it.
+  if (!signal->getAborted(js) &&
+      util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+    kj::Maybe<size_t> maybeSyncAmount;
+    KJ_TRY {
+      maybeSyncAmount = active.source->tryReadSync(scratch.asPtr(), 1);
+    }
+    KJ_CATCH(exception) {
+      // tryReadSync() may throw when a synchronous read is possible but fails. Handle it
+      // exactly like the asynchronous catch_ below: the source is no longer usable.
+      state = kj::none;
+      return js.rejectedPromise<void>(
+          jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js)));
+    }
+    KJ_IF_SOME(amount, maybeSyncAmount) {
+      // Mirrors the asynchronous continuation below, minus the in-flight-only concerns:
+      // no cancel() or abandonment can have interleaved within this synchronous frame.
+      if (amount == 0) {
+        // EOF. Settle our own state before notifying, in case the close call re-enters.
+        state = kj::none;
+        webstreams::invokeMethod(js, controller, "close"_kj);
+        return js.resolvedPromise();
+      }
+      webstreams::invokeMethod(
+          js, controller, "enqueue"_kj, jsg::JsUint8Array::create(js, scratch.first(amount)));
+      return js.resolvedPromise();
+    }
+  }
+
   auto& ioContext = IoContext::current();
   pullInFlight = true;
   return ioContext
@@ -1357,6 +1437,60 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
   size_t minBytes = atLeast - stashed;
   ensureScratch(kj::max(kScratchSize, minBytes));
   size_t maxBytes = kj::min(dest.size() - stashed, scratch.size());
+
+  // Fast path: complete the read synchronously when the data is already available,
+  // settling the pull without an event-loop round trip. Skipped when the read has
+  // already been abandoned (matching pullDefault's fast path). Unlike the asynchronous
+  // read, no JS runs between the view extraction above and the delivery below, so the
+  // view cannot have been detached in between.
+  if (!signal->getAborted(js) &&
+      util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+    kj::Maybe<size_t> maybeSyncAmount;
+    KJ_TRY {
+      maybeSyncAmount = active.source->tryReadSync(scratch.first(maxBytes), minBytes);
+    }
+    KJ_CATCH(exception) {
+      // Handle a synchronous failure exactly like the asynchronous catch_ below.
+      state = kj::none;
+      return js.rejectedPromise<void>(
+          jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js)));
+    }
+    KJ_IF_SOME(amount, maybeSyncAmount) {
+      // Mirrors the asynchronous continuation below, minus the in-flight-only concerns:
+      // no cancel(), abandonment, or view detachment can have interleaved within this
+      // synchronous frame.
+      size_t total = stashed + amount;
+      if (total == 0) {
+        // EOF with nothing to deliver: respond(0) is forbidden; close() is the EOF
+        // signal.
+        state = kj::none;
+        webstreams::invokeMethod(js, controller, "close"_kj);
+        return js.resolvedPromise();
+      }
+      KJ_ASSERT(total <= dest.size());
+      if (stashed > 0) {
+        // write() advances dest past the copied prefix, so the fresh bytes below land
+        // immediately after the redelivered stash.
+        dest.write(stash.asPtr());
+        stash.clear();
+      }
+      if (amount > 0) {
+        dest.write(scratch.first(amount));
+      }
+      bool eof = amount < minBytes;
+      if (eof) {
+        // The source delivered fewer than minBytes: EOF (KJ semantics). Settle our own
+        // state before making the JS calls below.
+        state = kj::none;
+      }
+      webstreams::invokeMethod(js, byobRequest, "respond"_kj, js.num(static_cast<double>(total)));
+      if (eof) {
+        // Fused close-commit, as in the asynchronous continuation below.
+        webstreams::invokeMethod(js, controller, "close"_kj);
+      }
+      return js.resolvedPromise();
+    }
+  }
 
   auto& ioContext = IoContext::current();
   pullInFlight = true;

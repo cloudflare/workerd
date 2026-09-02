@@ -34,7 +34,7 @@ using TagValue = kj::OneOf<bool, double, kj::String>;
 class SpanImpl final: public kj::Refcounted {
  public:
   // Construct an observed span. The builder drives the observer's onOpen immediately.
-  SpanImpl(kj::Own<workerd::SpanObserver> observer, kj::ConstString operationName);
+  SpanImpl(kj::Rc<workerd::SpanObserver> observer, kj::ConstString operationName);
 
   // Construct a no-op span (not recording). Used when there is no current user trace span
   // (e.g., running outside a traced request) or when we are in a context where we cannot

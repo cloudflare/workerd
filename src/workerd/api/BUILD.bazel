@@ -19,6 +19,7 @@ filegroup(
         "eventsource.c++",
         "export-loopback.c++",
         "filesystem.c++",
+        "filesystem-bootstrap.c++",
         "form-data.c++",
         "global-scope.c++",
         "headers.c++",
@@ -72,6 +73,7 @@ filegroup(
         "eventsource.h",
         "export-loopback.h",
         "filesystem.h",
+        "filesystem-bootstrap.h",
         "form-data.h",
         "global-scope.h",
         "headers.h",
@@ -790,6 +792,15 @@ kj_test(
 kj_test(
     src = "cf-property-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
+)
+
+kj_test(
+    src = "actor-fetch-retry-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/io:worker-interface",
+        "//src/workerd/tests:test-fixture",
+    ],
 )
 
 kj_test(
