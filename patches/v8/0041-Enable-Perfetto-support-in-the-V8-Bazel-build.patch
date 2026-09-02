@@ -1,0 +1,104 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James M Snell <jsnell@cloudflare.com>
+Date: Wed, 2 Sep 2026 12:00:00 +0000
+Subject: Enable Perfetto support in the V8 Bazel build
+
+Mirror the non-SDK v8_use_perfetto configuration from BUILD.gn. V8's
+Bazel build does not currently expose this configuration, despite the
+implementation being present in the source tree.
+
+Use workerd's existing effective Perfetto build setting so V8 and its
+embedder always agree on the public header ABI controlled by
+V8_USE_PERFETTO.
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 3a4f48806cd0018a70cfa9cda0c192c2e55ffaa1..1111111111111111111111111111111111111111 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -555,6 +555,9 @@ v8_config(
+         "V8_ENABLE_EXTENSIBLE_RO_SNAPSHOT",
+         "V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA",
+         "V8_TLS_USED_IN_LIBRARY",
++    ] + select({
++        "@workerd//src/workerd/util:really_use_perfetto": ["V8_USE_PERFETTO"],
++        "//conditions:default": [],
+-    ] + select({
++    }) + select({
+         "@v8//bazel/config:is_debug": [
+             "DEBUG",
+@@ -1070,17 +1073,23 @@ filegroup(
+         "src/libplatform/delayed-task-queue.h",
+         "src/libplatform/task-queue.cc",
+         "src/libplatform/task-queue.h",
+         "src/libplatform/tracing/recorder.h",
+-        "src/libplatform/tracing/trace-buffer.cc",
+-        "src/libplatform/tracing/trace-buffer.h",
+         "src/libplatform/tracing/trace-config.cc",
+-        "src/libplatform/tracing/trace-object.cc",
+-        "src/libplatform/tracing/trace-writer.cc",
+-        "src/libplatform/tracing/trace-writer.h",
+         "src/libplatform/tracing/tracing-controller.cc",
+         "src/libplatform/worker-thread.cc",
+         "src/libplatform/worker-thread.h",
+-    ],
++    ] + select({
++        "@workerd//src/workerd/util:really_use_perfetto": [
++            "src/libplatform/tracing/trace-event-listener.h",
++        ],
++        "//conditions:default": [
++            "src/libplatform/tracing/trace-buffer.cc",
++            "src/libplatform/tracing/trace-buffer.h",
++            "src/libplatform/tracing/trace-object.cc",
++            "src/libplatform/tracing/trace-writer.cc",
++            "src/libplatform/tracing/trace-writer.h",
++        ],
++    }),
+ )
+ 
+ filegroup(
+@@ -2722,7 +2731,6 @@ filegroup(
+         "src/tracing/perfetto-sdk.h",
+         "src/tracing/trace-event.cc",
+         "src/tracing/trace-event.h",
+-        "src/tracing/trace-event-no-perfetto.h",
+         "src/tracing/trace-id.h",
+         "src/tracing/traced-value.cc",
+         "src/tracing/traced-value.h",
+@@ -2785,6 +2793,22 @@ filegroup(
+         ":generated_bytecode_builtins_list",
+         ":v8_bigint",
+         ":v8_heap_base_files",
++    ] + select({
++        "@workerd//src/workerd/util:really_use_perfetto": [
++            "include/v8-trace-categories.h",
++            "src/tracing/code-data-source.cc",
++            "src/tracing/code-data-source.h",
++            "src/tracing/code-trace-context.h",
++            "src/tracing/perfetto-logger.cc",
++            "src/tracing/perfetto-logger.h",
++            "src/tracing/perfetto-utils.cc",
++            "src/tracing/perfetto-utils.h",
++            "src/tracing/trace-categories.cc",
++            "src/tracing/trace-categories.h",
++        ],
++        "//conditions:default": [
++            "src/tracing/trace-event-no-perfetto.h",
++        ],
+-    ] + select({
++    }) + select({
+         "@v8//bazel/config:v8_target_ia32": [
+             "src/baseline/ia32/baseline-assembler-ia32-inl.h",
+@@ -4726,7 +4748,10 @@ v8_library(
+         "@simdutf",
+         "@zlib",
+         "@zlib//:compression_utils_portable",
+-    ],
++    ] + select({
++        "@workerd//src/workerd/util:really_use_perfetto": ["@perfetto//:libperfetto_client_experimental"],
++        "//conditions:default": [],
++    }),
+ )
+ 
+ v8_library(
+-- 
+2.39.5

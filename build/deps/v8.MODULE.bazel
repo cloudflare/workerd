@@ -63,6 +63,7 @@ PATCHES = [
     "0038-Properly-depend-on-llvm-libc.patch",
     "0039-wasm-memory.discard-prototype-for-the-memory-control.patch",
     "0040-cppgc-Add-two-API-calls-for-testing.patch",
+    "0041-Enable-Perfetto-support-in-the-V8-Bazel-build.patch",
 ]
 
 http_archive(
@@ -97,9 +98,6 @@ bazel_dep(name = "workerd-v8")
 # This is overridden in the internal non-OSS repo.
 #
 # TODO(cleanup): There must be a better way to do this?
-# TODO(soon): Figure out how to build v8 with perfetto enabled. It does not appear
-#             as if the v8 bazel build currently includes support for building with
-#             perfetto enabled as an option.
 local_path_override(
     module_name = "workerd-v8",
     path = "build/workerd-v8",

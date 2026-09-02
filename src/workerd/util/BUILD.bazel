@@ -19,6 +19,7 @@ selects.config_setting_group(
         ":set_use_perfetto",
         "//:is_unix",
     ],
+    visibility = ["//visibility:public"],
 )
 
 # The routing layer owning the unprefixed zlib symbol names; @zlib//:zlib depends on this, so
