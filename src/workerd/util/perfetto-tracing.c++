@@ -39,8 +39,13 @@ std::unique_ptr<perfetto::TracingSession> createTracingSession(int fd, kj::Strin
 
   // The categories is a comma-separated list
   auto cats = PerfettoSession::parseCategories(categories);
+  bool enableV8CodeDataSource = false;
   for (auto category: cats) {
     auto view = std::string(category.begin(), category.size());
+    if (view == "dev.v8.code") {
+      enableV8CodeDataSource = true;
+      continue;
+    }
     track_event_cfg.add_enabled_categories(view);
   }
 
@@ -49,6 +54,9 @@ std::unique_ptr<perfetto::TracingSession> createTracingSession(int fd, kj::Strin
   auto* ds_cfg = cfg.add_data_sources()->mutable_config();
   ds_cfg->set_name("track_event");
   ds_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
+  if (enableV8CodeDataSource) {
+    cfg.add_data_sources()->mutable_config()->set_name("dev.v8.code");
+  }
   std::unique_ptr<perfetto::TracingSession> tracing_session(perfetto::Tracing::NewTrace());
   tracing_session->Setup(cfg, fd);
   return kj::mv(tracing_session);
