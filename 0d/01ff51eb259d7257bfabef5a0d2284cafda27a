@@ -1,9 +1,9 @@
 src/rust/cxx/kj-rs/awaiter.h
-  s_ad98b07a2ebbe9::t_7632a22286cd01 4,8,15-17,50-55,60,88-92,99-110,132-136,154-157,162-164,166-167,178-186,188-211,213-220,230,283,285
+  s_ad98b07a2ebbe9::t_7632a22286cd01 4,8,15-17,50-55,60,88-92,99-110,104-110,132-136,154-157,162-164,166-167,178-186,178-183,187-211,188-211,213-220,230,283,285
 src/rust/cxx/kj-rs/executor-guarded.h
   s_ad98b07a2ebbe9::t_0da3c25bf9bfa8 7-8,13-20,31-34,44,53,64-72
 src/rust/cxx/kj-rs/promise.rs
-  s_ad98b07a2ebbe9::t_cbc066d8ae3409 1-5,28-32,144-146,148-149,154-176
+  s_ad98b07a2ebbe9::t_cbc066d8ae3409 1-5,1-3,4-5,28-32,144-146,148-149,154-176
 src/rust/cxx/kj-rs/tests/neutralize-waker-test.c++
   s_ad98b07a2ebbe9::t_a05315afc86efc 1,3-6,8-10,12-13,15-18,20-21,23,25-28,30,32-33,35-37,40-44,46,49,51-59,62-63,66-67,69-73,76-80,83-84,87-92,95-143
 src/rust/cxx/kj-rs/tests/shared-event-test.c++
@@ -17,7 +17,7 @@ src/rust/cxx/kj-rs/tests/BUILD.bazel
 src/rust/kj/tests/ffi-test.c++
   s_ad98b07a2ebbe9::t_bc3757a9b92df8 51-52,55
 src/rust/cxx/kj-rs/executor-guarded.c++
-  s_ad98b07a2ebbe9::t_a8e44b4f7f8c3f 7-24,26,33-37
+  s_ad98b07a2ebbe9::t_a8e44b4f7f8c3f 7-24,7-8,9-24,26,33-37
 src/rust/cxx/kj-rs/tests/awaitables-cc-test.c++
   s_ad98b07a2ebbe9::t_1f265da977503e 11-20,181-231,252,254-256,260-308,314-320,324-376,378,391-392,396-400
 src/rust/cxx/kj-rs/future.rs
@@ -50,13 +50,13 @@ src/rust/cxx/kj-rs/awaiter.c++
   s_ad98b07a2ebbe9::t_1871c7afbf5e40 3,31-34,38-53,61,64,87,101,104,113,115,124-157,177-184,187-203,205-218,220-222,224-226,238,240
 src/rust/cxx/kj-rs/waker.h
   s_ad98b07a2ebbe9::t_ae1363431186fd 3,11,13-19,21-22,24-50,52-56,58-68,71-94,96-102,104-109,111-116,118-124,126-144,148,150-152,154-162,164-169,171-172,174-176,178-180,183-186
-  s_ad98b07a2ebbe9::t_bd2e1deacdf951 187-191
+  s_ad98b07a2ebbe9::t_bd2e1deacdf951 187-191,187
 src/rust/cxx/kj-rs/waker.rs
   s_ad98b07a2ebbe9::t_a302e6b895e673 1-7,12-14,16-24,26-35,37-40,44-107,111-113,117-123,127,130-136,140-149,153-160,164-168,171-180,182
 src/rust/cxx/kj-rs/tests/test_futures.rs
   s_ad98b07a2ebbe9::t_0cf382931b9549 28-75,115-123,162-171,174-175,178-181,184,187,190-195,197-205,207-259,264-309,384-403,448-484
 src/rust/cxx/kj-rs/waker.c++
-  s_ad98b07a2ebbe9::t_afee0357432318 3,7-9,12-15,17-24,27,29-35,38-41,44-46,48
+  s_ad98b07a2ebbe9::t_afee0357432318 3,7-9,12-15,17-24,17-18,20-24,27,29-35,29-34,38-41,38-40,44-46,48
 ---
 {
   "schema_version": "authorship/3.0.0",
