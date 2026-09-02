@@ -146,6 +146,12 @@ wd_test(
 )
 
 wd_test(
+    src = "actor-alarms-in-memory-test.wd-test",
+    args = ["--experimental"],
+    data = ["actor-alarms-in-memory-test.js"],
+)
+
+wd_test(
     src = "actor-alarms-name-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-name-test.js"],

@@ -4263,7 +4263,8 @@ void Worker::Actor::assertCanSetAlarm() {
 
 void Worker::Actor::Impl::HooksImpl::updateAlarmInMemory(kj::Maybe<kj::Date> newTime) {
   if (newTime == kj::none) {
-    maybeAlarmPreviewTask = kj::none;
+    auto task = kj::mv(maybeAlarmPreviewTask);
+    maybeAlarmPreviewTask = kj::evalLater([task = kj::mv(task)]() mutable { task = kj::none; });
     return;
   }
 
