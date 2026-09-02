@@ -59,6 +59,7 @@ import {
 } from 'node-internal:internal_types';
 
 import {
+  ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS,
   ERR_INCOMPATIBLE_OPTION_PAIR,
   ERR_INVALID_ARG_TYPE,
   ERR_METHOD_NOT_IMPLEMENTED,
@@ -109,7 +110,8 @@ function isStringOrBuffer(val: unknown): val is string | Buffer {
 function validateExportOptions(
   options: ExportOptions,
   type: KeyObjectType,
-  name = 'options'
+  name = 'options',
+  asymmetricKeyType?: AsymmetricKeyType
 ): asserts options is ExportOptions {
   validateObject(options, name);
   // Yes, converting to any is a bit of a cheat, but it allows us to check
@@ -125,9 +127,41 @@ function validateExportOptions(
     validateString(opts.type, `${name}.type`);
   }
   if (type === 'private') {
+    if (
+      'type' in opts &&
+      opts.type === 'pkcs1' &&
+      asymmetricKeyType !== undefined &&
+      asymmetricKeyType !== 'rsa'
+    ) {
+      throw new ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS(
+        opts.type,
+        'can only be used for RSA keys'
+      );
+    }
+    if (
+      'type' in opts &&
+      opts.type === 'sec1' &&
+      asymmetricKeyType !== undefined &&
+      asymmetricKeyType !== 'ec' &&
+      (asymmetricKeyType as string) !== 'ecdh'
+    ) {
+      throw new ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS(
+        opts.type,
+        'can only be used for EC keys'
+      );
+    }
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if ('cipher' in opts && opts.cipher !== undefined) {
       validateString(opts.cipher, `${name}.cipher`);
+      if (
+        opts.format === 'der' &&
+        (opts.type === 'pkcs1' || opts.type === 'sec1')
+      ) {
+        throw new ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS(
+          opts.type,
+          'does not support encryption'
+        );
+      }
       if (typeof opts.passphrase === 'string') {
         opts.passphrase = Buffer.from(opts.passphrase, opts.encoding);
       }
@@ -187,7 +221,11 @@ export abstract class KeyObject {
   export(options: ExportOptions = {}): KeyExportResult {
     validateObject(options, 'options');
 
-    validateExportOptions(options, this.type);
+    const asymmetricKeyType =
+      this.type === 'secret'
+        ? undefined
+        : cryptoImpl.getAsymmetricKeyType(this[kHandle]);
+    validateExportOptions(options, this.type, 'options', asymmetricKeyType);
 
     const ret = cryptoImpl.exportKey(
       this[kHandle],
@@ -720,7 +758,8 @@ export function generateKeyPairSync(
     validateExportOptions(
       privateKeyEncoding as ExportOptions,
       'private',
-      'options.privateKeyEncoding'
+      'options.privateKeyEncoding',
+      type
     );
   }
 

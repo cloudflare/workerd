@@ -125,6 +125,12 @@ wd_test(
 )
 
 wd_test(
+    src = "crypto_private-key-der-encryption-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto_private-key-der-encryption-test.js"],
+)
+
+wd_test(
     src = "crypto_random-test.wd-test",
     args = ["--experimental"],
     data = ["crypto_random-test.js"],
