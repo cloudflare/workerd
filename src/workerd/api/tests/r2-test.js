@@ -8,6 +8,8 @@ import { RpcTarget, WorkerEntrypoint } from 'cloudflare:workers';
 const key = 'basicKey';
 const body = 'content';
 const rpcStreamBody = 'café';
+const rpcInlineBodyLimit = 16 << 20;
+const largeRpcBodySize = rpcInlineBodyLimit + 2;
 const httpMetaObj = {
   contentType: 'text/plain',
   contentLanguage: 'en-US',
@@ -134,6 +136,34 @@ function buildRpcHead(requestKey, multipartOptions) {
   }
 
   return result;
+}
+
+async function assertLargeRpcBody(requestKey, value, valueSize) {
+  assert(value instanceof ReadableStream);
+  assert.strictEqual(valueSize, largeRpcBodySize);
+  const uploaded = new Uint8Array(await new Response(value).arrayBuffer());
+  assert.strictEqual(uploaded.byteLength, largeRpcBodySize);
+
+  switch (requestKey) {
+    case 'largeBuffer':
+      assert.strictEqual(uploaded[0], 0x11);
+      assert.strictEqual(uploaded[1], 0x41);
+      assert.strictEqual(uploaded.at(-2), 0x41);
+      assert.strictEqual(uploaded.at(-1), 0x22);
+      break;
+    case 'largeString':
+      assert.strictEqual(uploaded[0], 0xc3);
+      assert.strictEqual(uploaded[1], 0xa9);
+      assert.strictEqual(uploaded.at(-2), 0xc3);
+      assert.strictEqual(uploaded.at(-1), 0xa9);
+      break;
+    case 'largeBlob':
+      assert.strictEqual(uploaded[0], 0x5a);
+      assert.strictEqual(uploaded.at(-1), 0x5a);
+      break;
+    default:
+      assert.fail(`unexpected large RPC body key: ${requestKey}`);
+  }
 }
 
 function buildGetResponse({ head, body, isList } = {}) {
@@ -1060,6 +1090,10 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
   }
 
   async put(requestKey, value, options, valueSize) {
+    if (requestKey.startsWith('large')) {
+      await assertLargeRpcBody(requestKey, value, valueSize);
+      return buildRpcHead(requestKey, options);
+    }
     const uploaded = await new Response(value).text();
     const expected = requestKey === 'rpcStream' ? rpcStreamBody : body;
     assert.strictEqual(uploaded, expected);
@@ -1101,6 +1135,10 @@ class MultipartUploadTarget extends RpcTarget {
 
   async uploadPart(partNumber, value, options, valueSize) {
     assert(partNumber >= 1 && partNumber <= 10000);
+    if (this.#key === 'largeBuffer') {
+      await assertLargeRpcBody(this.#key, value, valueSize);
+      return { partNumber, etag: 'partEtag' };
+    }
     const uploaded = await new Response(value).text();
     const expected =
       this.#key === 'ssecMultipart'
@@ -1198,6 +1236,20 @@ export const jsrpcTransportTests = {
       }
     );
 
+    const largeBufferBacking = new Uint8Array(largeRpcBodySize + 2);
+    largeBufferBacking.fill(0x41);
+    const largeBuffer = largeBufferBacking.subarray(1, -1);
+    largeBuffer[0] = 0x11;
+    largeBuffer[largeBuffer.length - 1] = 0x22;
+    await env.BUCKET.put('largeBuffer', largeBuffer);
+
+    const largeString = 'é'.repeat(largeRpcBodySize / 2);
+    await env.BUCKET.put('largeString', largeString);
+
+    const largeBlobBytes = new Uint8Array(largeRpcBodySize);
+    largeBlobBytes.fill(0x5a);
+    await env.BUCKET.put('largeBlob', new Blob([largeBlobBytes]));
+
     const resumed = env.BUCKET.resumeMultipartUpload(key, 'resumedId');
     assert.strictEqual(resumed.key, key);
     assert.strictEqual(resumed.uploadId, 'resumedId');
@@ -1234,6 +1286,15 @@ export const jsrpcTransportTests = {
     await writing;
     assert.deepStrictEqual(streamedPart, {
       partNumber: 2,
+      etag: 'partEtag',
+    });
+
+    const largeUpload = env.BUCKET.resumeMultipartUpload(
+      'largeBuffer',
+      'largeUploadId'
+    );
+    assert.deepStrictEqual(await largeUpload.uploadPart(1, largeBuffer), {
+      partNumber: 1,
       etag: 'partEtag',
     });
   },
