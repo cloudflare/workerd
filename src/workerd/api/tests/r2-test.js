@@ -877,9 +877,16 @@ const testWorker = {
           });
           list.objects[0] = { ...list.objects[0] };
           list.objects[0].checksums = { ...list.objects[0].checksums };
+          const expected = { ...HeadObject, ...head };
+          if (
+            env.R2_TRANSPORT === 'jsrpc' &&
+            env.R2_LIST_HONOR_INCLUDE === 'true'
+          ) {
+            expected.customMetadata = undefined;
+          }
           assert.deepEqual(list, {
             delimitedPrefixes: [],
-            objects: [{ ...HeadObject, ...head }],
+            objects: [expected],
             truncated: false,
           });
         }
@@ -922,9 +929,16 @@ const testWorker = {
           });
           list.objects[0] = { ...list.objects[0] };
           list.objects[0].checksums = { ...list.objects[0].checksums };
+          const expected = { ...HeadObject, ...head };
+          if (
+            env.R2_TRANSPORT === 'jsrpc' &&
+            env.R2_LIST_HONOR_INCLUDE === 'true'
+          ) {
+            expected.httpMetadata = undefined;
+          }
           assert.deepEqual(list, {
             delimitedPrefixes: [],
-            objects: [{ ...HeadObject, ...head }],
+            objects: [expected],
             truncated: false,
           });
         }
@@ -1064,6 +1078,13 @@ const testWorker = {
 // continue to use fetch() even when the JSRPC compatibility flag is enabled.
 export class R2BindingEntrypoint extends WorkerEntrypoint {
   fetch(request) {
+    const encodedRequest = request.headers.get('cf-r2-request');
+    if (
+      encodedRequest !== null &&
+      ['get', 'list'].includes(JSON.parse(encodedRequest).method)
+    ) {
+      throw new Error('get and list must use JSRPC');
+    }
     return testWorker.fetch(request, this.env, this.ctx);
   }
 
@@ -1076,6 +1097,87 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
     }
 
     return buildRpcHead(requestKey);
+  }
+
+  get(requestKey, options) {
+    if (requestKey === 'missing') {
+      return null;
+    }
+    if (requestKey === 'rpc-get-boom') {
+      throw new Error('get: no such bucket (10006)');
+    }
+    if (requestKey === 'rpc-malformed-kind') {
+      return { kind: 'other', object: buildRpcHead(requestKey) };
+    }
+    if (requestKey === 'rpc-malformed-metadata-body') {
+      return {
+        kind: 'metadata',
+        object: buildRpcHead(requestKey),
+        body: new ReadableStream(),
+      };
+    }
+    if (requestKey === 'rpc-malformed-missing-body') {
+      return { kind: 'body', object: buildRpcHead(requestKey) };
+    }
+    if (requestKey === 'rpc-options') {
+      assert.deepStrictEqual(options, {
+        onlyIf: {
+          etagMatches: 'strongEtag',
+          uploadedBefore: new Date(0),
+          secondsGranularity: false,
+        },
+        range: { offset: 1, length: 3 },
+        ssecKey: hexKey,
+      });
+    }
+    if (requestKey === 'rpc-header-options') {
+      assert.deepStrictEqual(options, {
+        onlyIf: {
+          etagMatches: 'strongEtag',
+          uploadedAfter: new Date(0),
+          secondsGranularity: true,
+        },
+        range: 'bytes=1-3',
+      });
+    }
+    if (requestKey === 'rpc-must-not-call') {
+      throw new Error('get RPC method must not be called');
+    }
+
+    const object = buildRpcHead(requestKey);
+    if (requestKey === 'rangeOffLen') {
+      assert.deepStrictEqual(options, { range: { offset: 1, length: 3 } });
+      object.range = { offset: 1, length: 3 };
+    } else if (requestKey === 'rangeSuff') {
+      assert.deepStrictEqual(options, { range: { suffix: 2 } });
+      object.range = { offset: 6, length: 2 };
+    }
+
+    if (requestKey === 'rpc-conditional-metadata') {
+      return { kind: 'metadata', object };
+    }
+
+    const responseBody =
+      requestKey === 'rangeOffLen'
+        ? 'ont'
+        : requestKey === 'rangeSuff'
+          ? 'nt'
+          : requestKey === 'rpc-json'
+            ? JSON.stringify({ ok: true })
+            : body;
+    let sent = false;
+    return {
+      kind: 'body',
+      object,
+      body: new ReadableStream({
+        pull(controller) {
+          assert.strictEqual(sent, false);
+          sent = true;
+          controller.enqueue(new TextEncoder().encode(responseBody));
+          controller.close();
+        },
+      }),
+    };
   }
 
   delete(keys) {
@@ -1104,6 +1206,78 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
     return buildRpcHead(requestKey, options);
   }
 
+  list(options) {
+    const honorsIncludes = this.env.R2_LIST_HONOR_INCLUDE === 'true';
+    const effectiveIncludes = honorsIncludes
+      ? (options?.include ?? [])
+      : ['httpMetadata', 'customMetadata'];
+
+    if (options?.prefix === 'rpc-boom') {
+      throw new Error('list: no such bucket (10006)');
+    }
+    if (options?.prefix === 'rpc-malformed') {
+      return { objects: [{}], truncated: false };
+    }
+    if (options?.prefix === 'rpc-options') {
+      assert.deepStrictEqual(options, {
+        limit: 2,
+        prefix: 'rpc-options',
+        cursor: 'cursor-in',
+        delimiter: '/',
+        startAfter: 'after',
+        include: effectiveIncludes,
+      });
+      return {
+        objects: [],
+        truncated: true,
+        cursor: 'cursor-out',
+        delimitedPrefixes: ['rpc-options/'],
+      };
+    }
+
+    if (options?.prefix === 'basic') {
+      assert.deepStrictEqual(options, {
+        limit: 1,
+        prefix: 'basic',
+        cursor: 'ai',
+        delimiter: '/',
+        include: effectiveIncludes,
+      });
+      return {
+        objects: [listRpcHead('basic', effectiveIncludes)],
+        truncated: true,
+        cursor: 'ai',
+      };
+    }
+    if (options?.prefix === 'httpMeta') {
+      return {
+        objects: [listRpcHead('httpMetadata', effectiveIncludes)],
+        truncated: false,
+      };
+    }
+    if (options?.prefix === 'customMeta') {
+      return {
+        objects: [listRpcHead('customMetadata', effectiveIncludes)],
+        truncated: false,
+      };
+    }
+    if (options?.prefix === 'rpc-metadata') {
+      return {
+        objects: [listRpcHead('basic', effectiveIncludes)],
+        truncated: false,
+      };
+    }
+
+    if (honorsIncludes) {
+      assert.strictEqual(options, undefined);
+    } else {
+      assert.deepStrictEqual(options, {
+        include: ['httpMetadata', 'customMetadata'],
+      });
+    }
+    return { objects: [], truncated: false };
+  }
+
   createMultipartUpload(requestKey, options) {
     assert.strictEqual(typeof requestKey, 'string');
     return new MultipartUploadTarget(requestKey, 'multipartId', options);
@@ -1114,6 +1288,17 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
     assert.strictEqual(typeof uploadId, 'string');
     return new MultipartUploadTarget(requestKey, uploadId);
   }
+}
+
+function listRpcHead(requestKey, includes) {
+  const result = buildRpcHead(requestKey);
+  if (!includes.includes('httpMetadata')) {
+    delete result.httpMetadata;
+  }
+  if (!includes.includes('customMetadata')) {
+    delete result.customMetadata;
+  }
+  return result;
 }
 
 class MultipartUploadTarget extends RpcTarget {
@@ -1205,6 +1390,149 @@ export const jsrpcTransportTests = {
 
     const coerced = await env.BUCKET.head(12345);
     assert.strictEqual(coerced.key, key);
+
+    assert.strictEqual(await env.BUCKET.get('missing'), null);
+
+    const conditional = await env.BUCKET.get('rpc-conditional-metadata', {
+      onlyIf: { etagMatches: 'objectEtag' },
+    });
+    assert.strictEqual(conditional.body, undefined);
+    assert.deepStrictEqual(conditional.httpMetadata, {});
+    assert.deepStrictEqual(conditional.customMetadata, {});
+    assert.strictEqual(typeof conditional.writeHttpMetadata, 'function');
+
+    const lazyBody = await env.BUCKET.get('rpc-lazy-body');
+    assert.strictEqual(lazyBody.bodyUsed, false);
+    assert(lazyBody.body instanceof ReadableStream);
+    assert.strictEqual(await lazyBody.text(), body);
+    assert.strictEqual(lazyBody.bodyUsed, true);
+
+    const bytesResult = await env.BUCKET.get('rpc-bytes');
+    assert.deepStrictEqual(
+      await bytesResult.bytes(),
+      new TextEncoder().encode(body)
+    );
+    assert.strictEqual(bytesResult.bodyUsed, true);
+    const bufferResult = await env.BUCKET.get('rpc-array-buffer');
+    assert.deepStrictEqual(
+      new Uint8Array(await bufferResult.arrayBuffer()),
+      new TextEncoder().encode(body)
+    );
+    const jsonResult = await env.BUCKET.get('rpc-json');
+    assert.deepStrictEqual(await jsonResult.json(), { ok: true });
+    const blobResult = await env.BUCKET.get('rpc-blob');
+    assert.strictEqual(await (await blobResult.blob()).text(), body);
+
+    await env.BUCKET.get('rpc-options', {
+      onlyIf: {
+        etagMatches: 'strongEtag',
+        uploadedBefore: new Date(0),
+      },
+      range: { offset: 1, length: 3 },
+      ssecKey: bufferKey,
+    });
+    await env.BUCKET.get('rpc-header-options', {
+      onlyIf: new Headers({
+        'if-match': '"strongEtag"',
+        'if-modified-since': new Date(0).toUTCString(),
+      }),
+      range: new Headers({ range: 'bytes=1-3' }),
+    });
+
+    await assert.rejects(
+      env.BUCKET.get('rpc-must-not-call', { range: { offset: -1 } }),
+      {
+        message:
+          'Invalid range. Starting offset (-1) must be greater than or equal to 0.',
+      }
+    );
+    await assert.rejects(
+      env.BUCKET.get('rpc-must-not-call', { range: { suffix: 1, length: 1 } }),
+      { message: 'Suffix is incompatible with length.' }
+    );
+    await assert.rejects(
+      env.BUCKET.get('rpc-must-not-call', { ssecKey: 'bad' }),
+      { message: 'SSE-C Key must be 32 bytes in length' }
+    );
+    await assert.rejects(
+      env.BUCKET.get('rpc-must-not-call', {
+        onlyIf: { etagMatches: '"quoted"' },
+      }),
+      {
+        message: 'Conditional ETag should not be wrapped in quotes ("quoted").',
+      }
+    );
+
+    await assert.rejects(env.BUCKET.get('rpc-malformed-kind'), {
+      message: 'Malformed R2 get RPC result: unknown result kind other.',
+    });
+    await assert.rejects(env.BUCKET.get('rpc-malformed-metadata-body'), {
+      message: 'Malformed R2 get RPC result: metadata result had a body.',
+    });
+    await assert.rejects(env.BUCKET.get('rpc-malformed-missing-body'), {
+      message: 'Malformed R2 get RPC result: body result did not have a body.',
+    });
+    await assert.rejects(env.BUCKET.get('rpc-get-boom'), {
+      message: 'get: no such bucket (10006)',
+    });
+
+    const emptyList = await env.BUCKET.list();
+    assert.deepStrictEqual(emptyList, {
+      objects: [],
+      truncated: false,
+      delimitedPrefixes: [],
+    });
+
+    const optionList = await env.BUCKET.list({
+      limit: 2,
+      prefix: 'rpc-options',
+      cursor: 'cursor-in',
+      delimiter: '/',
+      startAfter: 'after',
+      include: [],
+    });
+    assert.deepStrictEqual(optionList, {
+      objects: [],
+      truncated: true,
+      cursor: 'cursor-out',
+      delimitedPrefixes: ['rpc-options/'],
+    });
+
+    if (env.R2_LIST_HONOR_INCLUDE === 'true') {
+      for (const include of [
+        [],
+        ['httpMetadata'],
+        ['customMetadata'],
+        ['httpMetadata', 'customMetadata'],
+      ]) {
+        const listed = await env.BUCKET.list({
+          prefix: 'rpc-metadata',
+          include,
+        });
+        const object = listed.objects[0];
+        assert.strictEqual(typeof object.writeHttpMetadata, 'function');
+        assert.strictEqual(typeof object.checksums.toJSON, 'function');
+        assert.strictEqual(
+          object.httpMetadata === undefined,
+          !include.includes('httpMetadata')
+        );
+        assert.strictEqual(
+          object.customMetadata === undefined,
+          !include.includes('customMetadata')
+        );
+        if (include.includes('httpMetadata')) {
+          assert.deepStrictEqual(object.httpMetadata, {});
+        }
+        if (include.includes('customMetadata')) {
+          assert.deepStrictEqual(object.customMetadata, {});
+        }
+      }
+    }
+
+    await assert.rejects(env.BUCKET.list({ prefix: 'rpc-boom' }), {
+      message: 'list: no such bucket (10006)',
+    });
+    await assert.rejects(env.BUCKET.list({ prefix: 'rpc-malformed' }));
 
     const encodedStreamBody = new TextEncoder().encode(rpcStreamBody);
     {
