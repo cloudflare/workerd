@@ -5,6 +5,7 @@
 #include "sqlite.h"
 
 #include <fcntl.h>
+#include <sqlite3.h>
 
 #include <kj/refcount.h>
 #include <kj/test.h>
@@ -107,7 +108,7 @@ void checkSql(SqliteDatabase& db) {
 class DefaultRegulatorForTest: public SqliteDatabase::Regulator {
  public:
   bool isAllowedName(kj::StringPtr name) const override {
-    return !name.startsWith("_cf_");
+    return name.size() < 4 || sqlite3_strnicmp(name.begin(), "_cf_", 4) != 0;
   }
 };
 static constexpr DefaultRegulatorForTest DEFAULT_REGULATOR_FOR_TEST;
@@ -426,7 +427,7 @@ KJ_TEST("SQLite Regulator") {
 
     bool isAllowedName(kj::StringPtr name) const override {
       if (alwaysFail) return false;
-      return name != blocked;
+      return sqlite3_stricmp(name.cStr(), blocked.cStr()) != 0;
     }
 
     bool alwaysFail = false;
@@ -1143,7 +1144,7 @@ KJ_TEST("SQLite onRollback") {
     db.onRollback(cb.create());
     KJ_EXPECT(cb.isStillLive());
 
-    db.run("RELEASE SAVEPOINT foo");
+    db.run("RELEASE SAVEPOINT FOO");
 
     KJ_EXPECT(cb.wasCommitted());
   }
@@ -1817,6 +1818,30 @@ KJ_TEST("SQLite restrict internal functions to nested parse") {
       "CREATE TABLE users (name TEXT DEFAULT (sqlite_drop_column(0, 'CREATE TABLE target(a, b)', 0)))");
   KJ_EXPECT_THROW_MESSAGE("unknown function: sqlite_drop_column(): SQLITE_ERROR",
       db.run("INSERT INTO users DEFAULT VALUES;"));
+}
+
+KJ_TEST("SQLite authorizer is called in default column expressions") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  auto& regulator = DEFAULT_REGULATOR_FOR_TEST;
+  db.run("CREATE TABLE users (name TEXT DEFAULT (sqlite_version()))");
+  KJ_EXPECT_THROW_MESSAGE(
+      "not authorized", db.run({.regulator = regulator}, "INSERT INTO users DEFAULT VALUES;"));
+}
+
+KJ_TEST("SQLite authorizer matches default function names case-insensitively") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  auto& regulator = DEFAULT_REGULATOR_FOR_TEST;
+  db.run("CREATE TABLE users (created TEXT DEFAULT CURRENT_TIMESTAMP)");
+  db.run({.regulator = regulator}, "INSERT INTO users DEFAULT VALUES");
+
+  auto query = db.run({.regulator = regulator}, "SELECT created FROM users");
+  KJ_EXPECT(query.getText(0).size() > 0);
 }
 
 KJ_TEST("SQLite R*Tree extension is enabled") {
