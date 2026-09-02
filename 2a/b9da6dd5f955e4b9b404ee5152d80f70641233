@@ -1,0 +1,71 @@
+src/rust/cxx/kj-rs/waker.c++
+  s_ad98b07a2ebbe9::t_afee0357432318 3,7-9,12-15,17-24,27,29-35,38-41,44-46,48
+src/rust/cxx/kj-rs/tests/BUILD.bazel
+  s_ad98b07a2ebbe9::t_e5c86418cdc221 34
+src/rust/cxx/kj-rs/promise.h
+  s_ad98b07a2ebbe9::t_f57b116635068c 13
+src/rust/cxx/kj-rs/awaiter.h
+  s_ad98b07a2ebbe9::t_7632a22286cd01 4,8,15-17,50-55,60,88-92,99-120,142-146,164-167,172-174,176-177,188-218,220-227,237,290,292
+src/rust/kj/tests/ffi-test.c++
+  s_ad98b07a2ebbe9::t_bc3757a9b92df8 51-52,55
+src/rust/cxx/kj-rs/future.rs
+  s_ad98b07a2ebbe9::t_c7827c039a0484 1-5,41-89,91,93,127-138,141,144-145,147-148,150-156,160-161,170-172,176-186,188-189,191,193,195-197,202-208,211,214-215,217,219-225,229-231,235-239,241-242,244,246,248-253,261-262,273-274
+src/rust/cxx/kj-rs/waker.rs
+  s_ad98b07a2ebbe9::t_a302e6b895e673 1-7,12-14,16-24,26-35,37-40,44-107,111-113,117-123,127,130-136,140-149,153-160,164-168,171-180,182
+src/rust/cxx/kj-rs/awaiter.c++
+  s_ad98b07a2ebbe9::t_1871c7afbf5e40 3,31-34,38-53,61,64,87,101,104,113,115,124-157,177-184,187-203,205-218,220-222,224-226,238,240
+src/rust/cxx/kj-rs/tests/test_own.rs
+  s_ad98b07a2ebbe9::t_5acc009ba157a2 204-207
+src/rust/cxx/kj-rs/executor-guarded.h
+  s_ad98b07a2ebbe9::t_0da3c25bf9bfa8 7-8,13-20,31-34,44,53,64-72
+src/rust/cxx/kj-rs/ffi.rs
+  s_ad98b07a2ebbe9::t_58c604e48f5c08 1-151
+src/rust/cxx/kj-rs/lib.rs
+  s_ad98b07a2ebbe9::t_52454f8bdfd620 1-35,50-51,55
+src/rust/cxx/kj-rs/waker.h
+  s_ad98b07a2ebbe9::t_ae1363431186fd 3,11,13-19,21-22,24-50,52-56,58-68,71-94,96-102,104-109,111-116,118-124,126-144,148,150-152,154-162,164-169,171-172,174-176,178-180,183-186
+  s_ad98b07a2ebbe9::t_bd2e1deacdf951 187-188
+  s_ad98b07a2ebbe9::t_d10f9e29512972 189-192
+src/rust/cxx/kj-rs/maybe.rs
+  s_ad98b07a2ebbe9::t_feed3c63b296b1 1-6,40-41,44-45,55,58,68,71-72,83,86,122-123,135-137,174-176,214-215,250-252,279-281,408-410,431-434
+src/rust/cxx/kj-rs/own.rs
+  s_ad98b07a2ebbe9::t_d505ae5e2effa6 2-5,28-31,36-37,124-136,220-221
+src/rust/cxx/kj-rs/BUILD.bazel
+  s_ad98b07a2ebbe9::t_f46b7640c266f3 14-17,60,67-71
+src/rust/cxx/kj-rs/refcount.rs
+  s_ad98b07a2ebbe9::t_0de1de3c1db6b1 2-5,37-56,66-67,97-98,113-114,166-167,186-187,205-206
+src/rust/cxx/kj-rs/promise.rs
+  s_ad98b07a2ebbe9::t_cbc066d8ae3409 1-45,68-72,184-186,188-189,194-216
+src/rust/cxx/kj-rs/future.h
+  s_ad98b07a2ebbe9::t_9f6c2ac00964a8 70,82-96,99-106,126,128
+src/rust/cxx/kj-rs/tests/awaitables-cc-test.c++
+  s_ad98b07a2ebbe9::t_1f265da977503e 11-20,181-231,252,254-256,260-308,314-320,324-376,378,391-392,396-400
+src/rust/cxx/AGENTS.md
+  s_ad98b07a2ebbe9::t_ac69211ccd63f2 39-53
+src/rust/cxx/kj-rs/awaiter.rs
+  s_ad98b07a2ebbe9::t_25bfea6fb7a9c0 1-5,15,25-34,45,64-69,89,106-115,122-124
+src/rust/cxx/kj-rs/promise.c++
+  s_ad98b07a2ebbe9::t_184ebb9d4c0284 14-15
+src/rust/cxx/kj-rs/tests/test_futures.rs
+  s_ad98b07a2ebbe9::t_0cf382931b9549 28-75,115-123,162-171,174-175,178-181,184,187,190-195,197-205,207-259,264-309,384-403,448-484
+src/rust/cxx/kj-rs/executor-guarded.c++
+  s_ad98b07a2ebbe9::t_a8e44b4f7f8c3f 7-27,29,36-40
+src/rust/cxx/kj-rs/tests/lib.rs
+  s_ad98b07a2ebbe9::t_f1abe1be484897 16-17,24,26-28,34,40,42-43,273-285,293-298,307-317,356-369,413-439
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2ab9da6dd5f955e4b9b404ee5152d80f70641233",
+  "prompts": {},
+  "sessions": {
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
