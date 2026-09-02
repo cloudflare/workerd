@@ -359,7 +359,13 @@ function preloadDynamicLibs026(Module: Module): void {
  * pointers that point into the dylib symbols work correctly.
  * Load the dynamic libraries in loadOrder. Mostly logic dealing with paths.
  */
-function preloadDynamicLibsMain(Module: Module, loadOrder: string[]): void {
+function preloadDynamicLibsMain(
+  Module: Module,
+  loadOrder: string[] | undefined
+): void {
+  if (!loadOrder) {
+    return;
+  }
   const sitePackages = Module.FS.sessionSitePackages + '/';
   const sitePackagesRoot = VIRTUALIZED_DIR.getSitePackagesRoot();
   const dynlibRoot = VIRTUALIZED_DIR.getDynlibRoot();
@@ -392,17 +398,16 @@ function preloadDynamicLibsMain(Module: Module, loadOrder: string[]): void {
   }
 }
 
-function preloadDynamicLibs(Module: Module): void {
-  if (Module.API.version === PyodideVersion.V0_26_0a2) {
-    // In 0.26.0a2 we need to preload dynamic libraries even if we aren't restoring a snapshot.
-    preloadDynamicLibs026(Module);
-    return;
-  }
-  //
-  const loadOrder = LOADED_SNAPSHOT_META?.loadOrder;
-  if (!loadOrder) {
-    // In newer versions we only need to do the preloading if there is a snapshot to restore.
-    return;
+function maybeReserveTrampolinePointer(Module: Module): Disposable {
+  // This is only needed for Python 3.13 (Pyodide 0.28.2). For Python 314.0.4
+  // and 314.0.6 it isn't needed but getting rid of it would break snapshot
+  // stability so we have to keep it. In all newer versions do nothing.
+  if (
+    Module.API.version !== PyodideVersion.V0_28_2 &&
+    Module.API.version !== PyodideVersion.V314_0_4 &&
+    Module.API.version !== PyodideVersion.V314_0_6
+  ) {
+    return { [Symbol.dispose](): void {} };
   }
   // In Pyodide 0.28 we switched from using top level EM_JS to initialize the CountArgs function
   // pointer to using an initializer to work around a regression in Emscripten 4.0.3 and 4.0.4. We
@@ -415,8 +420,21 @@ function preloadDynamicLibs(Module: Module): void {
   // CountArgsPointer and after loading dynamic libraries, we put it in the free list so it will be
   // used at the right moment.
   const PyEMCountArgsPtr = Module.getEmptyTableSlot();
-  preloadDynamicLibsMain(Module, loadOrder);
-  Module.freeTableIndexes.push(PyEMCountArgsPtr);
+  return {
+    [Symbol.dispose](): void {
+      Module.freeTableIndexes.push(PyEMCountArgsPtr);
+    },
+  };
+}
+
+function preloadDynamicLibs(Module: Module): void {
+  if (Module.API.version === PyodideVersion.V0_26_0a2) {
+    // In 0.26.0a2 we need to preload dynamic libraries even if we aren't restoring a snapshot.
+    preloadDynamicLibs026(Module);
+    return;
+  }
+  using _reserved = maybeReserveTrampolinePointer(Module);
+  preloadDynamicLibsMain(Module, LOADED_SNAPSHOT_META?.loadOrder);
 }
 
 /**

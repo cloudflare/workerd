@@ -70,6 +70,7 @@ def install_packages(package_names: list[str], python: PyVer, work_dir: Path) ->
     venv_path = work_dir / "pyodide-venv"
     interp_name = get_interp_name(python)
     pyodide_index = get_pyodide_index(python)
+    site_packages = venv_path / "lib" / f"python{python}" / "site-packages"
 
     print(f"Creating Pyodide venv with {interp_name}...")
     run_uv(["venv", str(venv_path), "--python", interp_name])
@@ -81,6 +82,10 @@ def install_packages(package_names: list[str], python: PyVer, work_dir: Path) ->
         [
             "pip",
             "install",
+            "--python",
+            venv_path / "bin" / "python",
+            "--target",
+            site_packages,
             "--extra-index-url",
             pyodide_index,
             "--index-strategy",
@@ -91,8 +96,6 @@ def install_packages(package_names: list[str], python: PyVer, work_dir: Path) ->
         env=env,
     )
 
-    major_minor = python
-    site_packages = venv_path / "lib" / f"python{major_minor}" / "site-packages"
     if not site_packages.exists():
         print(f"Error: site-packages not found at {site_packages}")
         sys.exit(1)
