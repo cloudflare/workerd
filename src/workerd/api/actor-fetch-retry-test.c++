@@ -648,12 +648,18 @@ KJ_TEST("actor fetch does not start a retry after the start budget") {
   KJ_EXPECT(state.retryCount == 1);
 }
 
-KJ_TEST("replica actor fetch does not retry a disconnected primary channel") {
-  ReplayState state{.failures = kj::arr(ReplayFailure::NOT_DELIVERED)};
+KJ_TEST("replica actor fetch retries a request-level disconnect on its primary channel") {
+  ReplayState state{.failures = kj::arr(ReplayFailure::AMBIGUOUS)};
+  kj::TimerImpl timer(kj::origin<kj::TimePoint>());
+  DeterministicTimerChannel timerChannel(timer);
+  state.timerChannel = timerChannel;
   uint checkedSubrequestCount = 0;
-  kj::Maybe<kj::Exception> failure;
   TestFixture fixture(TestFixture::SetupParams{
-    .useRealTimers = true,
+    .useRealTimers = false,
+    .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
+        [&](TimerChannel&) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<TestFixture::DummyIoChannelFactory>(timerChannel);
+  }),
     .checkedSubrequestCount = checkedSubrequestCount,
   });
   util::Autogate::initAutogateNamesForTest(
@@ -666,17 +672,15 @@ KJ_TEST("replica actor fetch does not retry a disconnected primary channel") {
             kj::refcounted<ReplayActorChannel>(state), kj::str("actor-id"))),
         Fetcher::RequiresHostAndProtocol::YES);
     auto promise = fetcher->fetch(env.js, kj::str("http://example.com"), kj::none);
-    return env.context.awaitJs(env.js, kj::mv(promise))
-        .ignoreResult()
-        .catch_([&](kj::Exception&& exception) {
-      failure.emplace(kj::mv(exception));
-    }).attach(kj::mv(fetcher));
+    return env.context.awaitJs(env.js, kj::mv(promise)).ignoreResult().attach(kj::mv(fetcher));
   });
 
-  KJ_EXPECT(failure != kj::none);
-  KJ_EXPECT(state.requestCount == 1);
-  KJ_EXPECT(state.metadata.empty());
-  KJ_EXPECT(checkedSubrequestCount == 1);
+  KJ_EXPECT(state.requestCount == 2);
+  KJ_ASSERT(state.metadata.size() == 2);
+  KJ_EXPECT(state.metadata[0].nonce == state.metadata[1].nonce);
+  KJ_EXPECT(state.metadata[0].isRetry == IsActorRetry::NO);
+  KJ_EXPECT(state.metadata[1].isRetry == IsActorRetry::YES);
+  KJ_EXPECT(checkedSubrequestCount == 2);
 }
 
 KJ_TEST("GlobalActorOutgoingFactory forwards metadata and recreates channels for retries") {
