@@ -33,6 +33,12 @@ wd_test(
 )
 
 wd_test(
+    src = "wasm-memory-discard-test.wd-test",
+    args = ["--experimental"],
+    data = ["wasm-memory-discard-disabled-test.js"],
+)
+
+wd_test(
     src = "urlpattern-regex-search-oob-test.wd-test",
     args = ["--experimental"],
     data = ["urlpattern-regex-search-oob-test.js"],

@@ -1638,6 +1638,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2026-08-11");
   # Enables fast Workflow engine creation by generating instance IDs with the Durable Object
   # namespace's `newUniqueId()` method instead of UUIDs.
+
+  wasmMemoryDiscard @186 :Bool
+      $compatEnableFlag("wasm_memory_discard")
+      $experimental;
+  # Obsolete flag. Has no effect. Still accepted so configs which set it keep validating.
+
   pythonWorkers314 @187 :Bool
       $compatEnableFlag("python_workers_314")
       $compatDisableFlag("no_python_workers_314")
